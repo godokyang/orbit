@@ -1,0 +1,11 @@
+schema_version: orbit-loop-state-v1
+project: ""
+current_task: null
+phase: idle
+owner_role: null
+status: idle
+updated_at: null
+history: []
+budget: {}
+quality_outcome_ref: null
+artifacts: {}

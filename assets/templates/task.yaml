@@ -1,0 +1,74 @@
+schema_version: orbit-task-v1
+project: example
+target_role: reviewer
+task_type: slice_review
+gates: []
+source_documents: []
+source_contract:
+  required_outcomes: []
+  out_of_scope: []
+  cleanup_plan: []
+traceability: []
+quality_rules: []
+plan: docs/open/example/implementation-plan.md
+slice: S1
+scope:
+  include: []
+  exclude: []
+quality_outcome:
+  user_problem: ""
+  desired_property: ""
+  measurable_thresholds: []
+  invalid_completions: []
+acceptance: []
+review_strategy:
+  entrypoints: []
+  suggested_checks: []
+  runtime_checks: []
+  required_capabilities: []
+  failure_modes: []
+evidence_requirements: []
+worktree_safety:
+  require_status_check: true
+  before_public_action:
+    - git status --short --branch -uall
+    - git rev-parse HEAD
+release_surface:
+  required_when_applicable:
+    - version_fields
+    - generated_artifacts
+    - package_or_archive_contents
+    - release_assets_or_registry_state
+supply_chain:
+  third_party_tools: []
+tool_requirements:
+  service_controlled:
+    - "通过 evidence manifest 提交 review/test verdict。"
+    - "通过 lead 或受控工具推进 loop state。"
+  agent_discoverable: []
+must_answer:
+  - "quality outcome 是否已经满足？"
+  - "每个 acceptance 项是否都有 evidence？"
+  - "required capabilities 是否已满足，或已明确 blocked？"
+  - "failure modes 是否已经被 evidence 排除？"
+  - "是否存在 High 或 Medium findings？"
+final_audit:
+  required: true
+  checks:
+    - "source contract 和 traceability 是否逐条有证据。"
+    - "旧路径、旧 fallback、旧 writer 是否关闭。"
+    - "真实 E2E / dogfood 是否已跑；未跑时 residual risk 是否明确。"
+stop_policy:
+  done_when:
+    - quality_outcome_satisfied
+    - reviewer_no_high_or_medium
+    - required_tests_passed_or_waived
+  escalate_when:
+    - role_conflict
+    - missing_operating_model_for_reviewer_or_tester
+    - same_failure_repeated_3_times
+    - budget_exceeded
+  default_fail_if:
+    - no_evidence_manifest
+    - no_quality_outcome_for_improvement_task
+    - review_or_test_verdict_unclear

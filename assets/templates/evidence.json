@@ -1,0 +1,60 @@
+{
+  "schema_version": "orbit-evidence-v1",
+  "project": "example",
+  "role": "reviewer",
+  "role_resolution": {
+    "resolved_role": "reviewer",
+    "resolver": "orbit whoami --json",
+    "whoami_result_file": "",
+    "role_sources": {},
+    "role_source_mode": "persistent_identity_confirmed",
+    "conflict": null
+  },
+  "task_type": "slice_review",
+  "task_file": "",
+  "result_file": "",
+  "transport": {
+    "type": "",
+    "workspace_id": "",
+    "tab_label": "",
+    "pane_id": "",
+    "managed_by": ""
+  },
+  "started_at": "",
+  "completed_at": "",
+  "records": [],
+  "verdict": {
+    "status": "pass",
+    "high": 0,
+    "medium": 0,
+    "low": 0
+  },
+  "worktree_safety": {
+    "status": "not_applicable",
+    "reason": "",
+    "status_before": "",
+    "head_before": "",
+    "status_after": "",
+    "head_after": "",
+    "unexpected_changes": []
+  },
+  "regression_guard": {
+    "status": "not_applicable",
+    "evidence": ""
+  },
+  "release_surface": {
+    "status": "not_applicable",
+    "checked": [],
+    "gaps": []
+  },
+  "rule_resolution": {
+    "resolver": "orbit rules resolve --json",
+    "file": "",
+    "valid": null,
+    "resolved_role": "",
+    "conflict_count": null,
+    "missing_project_rule_files": []
+  },
+  "tool_calls": [],
+  "residual_risk": []
+}

@@ -1,0 +1,296 @@
+# frozen_string_literal: true
+
+require "fileutils"
+require "json"
+require "open3"
+require "time"
+require "yaml"
+
+VERSION = "0.1.0"
+SCRIPT_PATH = defined?(ORBIT_SCRIPT_PATH) ? ORBIT_SCRIPT_PATH : File.expand_path($PROGRAM_NAME)
+SKILL_ROOT = defined?(ORBIT_ROOT) ? ORBIT_ROOT : File.expand_path("..", File.dirname(SCRIPT_PATH))
+TEMPLATE_ROOT = File.join(SKILL_ROOT, "assets", "templates")
+
+DEFAULT_RULE_REFERENCES = {
+  "common" => [
+    {
+      "path" => "SKILL.md",
+      "load_policy" => "required",
+      "reason" => "Orbit skill trigger boundary, runtime workflow, role behavior, and reporting contract."
+    },
+    {
+      "path" => "references/runtime/guide.md",
+      "load_policy" => "required",
+      "reason" => "Runtime operating rules for task, evidence, gate, audit, and handoff."
+    },
+    {
+      "path" => "references/runtime/core-operating-model.md",
+      "load_policy" => "conditional",
+      "reason" => "Protocol field details; read when task, evidence, state, or identity semantics are unclear."
+    }
+  ],
+  "lead" => [
+    {
+      "path" => "references/runtime/coding-guideline.md",
+      "load_policy" => "required",
+      "reason" => "Lead/coder implementation closure and coding evidence rules."
+    }
+  ],
+  "coder" => [
+    {
+      "path" => "references/runtime/coding-guideline.md",
+      "load_policy" => "required",
+      "reason" => "Implementation closure and coding evidence rules."
+    }
+  ],
+  "reviewer" => [
+    {
+      "path" => "references/runtime/quality-outcome-and-review.md",
+      "load_policy" => "required",
+      "reason" => "Independent review and quality outcome judgment rules."
+    }
+  ],
+  "tester" => [
+    {
+      "path" => "references/runtime/testing-guideline.md",
+      "load_policy" => "required",
+      "reason" => "Real behavior testing, coverage, and test evidence rules."
+    }
+  ],
+  "handoff_receiver" => []
+}.freeze
+
+HELP = <<~HELP
+  orbit #{VERSION}
+
+  Usage:
+    orbit --help
+    orbit version
+    orbit audit --task PATH --state PATH --evidence PATH --json
+    orbit init [--force]
+    orbit evidence init --output PATH
+    orbit evidence add --file PATH --kind KIND --status STATUS --summary SUMMARY
+    orbit evidence from-report --file PATH --report PATH [--kind KIND] [--status STATUS] [--summary SUMMARY]
+    orbit evidence attach-rule --file PATH --rule-resolution PATH
+    orbit evidence show --file PATH --json
+    orbit handoff --task PATH --state PATH --evidence PATH [--transport NAME] [--output PATH] [--record-state] --json
+    orbit dispatch --task PATH --to INSTANCE [--transport generic|herdr] [--pane PANE] [--dry-run] --json
+    orbit rules resolve --json [--task PATH] [--role ROLE] [--instance NAME] [--output PATH]
+    orbit rules print-context --json [--task PATH] [--role ROLE] [--instance NAME] [--output PATH]
+    orbit start INSTANCE [--transport local|herdr] [--cwd PATH] [--dry-run] [--json]
+    orbit state progress --message TEXT [--evidence PATH] [--state PATH]
+    orbit state start --task PATH [--owner-role ROLE] [--state PATH]
+    orbit state transition --to PHASE [--evidence PATH] [--reason TEXT] [--state PATH]
+    orbit state show --json [--state PATH]
+    orbit tools detect --json
+    orbit tools doctor --json
+    orbit wait-gate --task PATH --evidence PATH --json
+    orbit whoami --json [--task PATH]
+    orbit new-task --target-role ROLE --task-type TYPE --output PATH
+    orbit validate [--task PATH] [--evidence PATH] [--state PATH] [--json]
+
+  Commands:
+    audit       审计 task、evidence 和 loop state 的一致性。
+    dispatch    生成或投递 task 给指定 agent instance。
+    evidence    初始化、追加、挂载规则解析和读取 evidence manifest。
+    handoff     输出机器可读的 handoff packet。
+    init         初始化 .orbit 项目配置。
+    new-task    根据模板创建 task contract。
+    rules       解析本轮默认规则、项目规则、task 规则和 rule packs。
+    start        根据 instances.yaml 启动或预览 agent instance。
+    state        读取或管理 Orbit loop state。
+    tools        检测当前环境可用的 transport 和执行工具。
+    validate    校验 Orbit config、task、evidence 和 state 文件。
+    wait-gate   检查 task required gates 当前是否满足。
+    whoami      解析运行时 role identity。
+    version      输出 CLI 版本。
+
+  Subcommand help:
+    orbit audit --help
+    orbit dispatch --help
+    orbit handoff --help
+    orbit rules print-context --help
+    orbit rules resolve --help
+    orbit validate --help
+    orbit wait-gate --help
+HELP
+
+COMMAND_HELP = {
+  "audit" => <<~HELP,
+    Usage:
+      orbit audit --task PATH --state PATH --evidence PATH --json
+
+    Audits task, loop state, and evidence consistency before done/handoff.
+
+    Required:
+      --task PATH      Structured orbit-task-v1 YAML file.
+      --state PATH     orbit-loop-state-v1 YAML file.
+      --evidence PATH  orbit-evidence-v1 JSON/YAML manifest file.
+      --json           Emit machine-readable audit result.
+
+    Notes:
+      --evidence expects a manifest file, not an evidence directory.
+      Create one with: orbit evidence init --output .orbit/evidence.json
+  HELP
+  "dispatch" => <<~HELP,
+    Usage:
+      orbit dispatch --task PATH --to INSTANCE [--transport generic|herdr] [--pane PANE] [--dry-run] --json
+
+    Builds a machine-readable task dispatch packet for an agent instance.
+
+    Required:
+      --task PATH       Orbit task contract to send.
+      --to INSTANCE     Target instance from .orbit/instances.yaml.
+      --json            Emit the dispatch packet/result as JSON.
+
+    Options:
+      --transport NAME  generic or herdr. Defaults to generic.
+      --pane PANE       Herdr pane id for --transport herdr.
+      --dry-run         Print the dispatch plan without sending.
+
+    Notes:
+      generic transport produces a payload for manual or external delivery.
+      herdr transport sends text to an existing agent pane and presses Enter.
+  HELP
+  "handoff" => <<~HELP,
+    Usage:
+      orbit handoff --task PATH --state PATH --evidence PATH [--transport NAME] [--output PATH] [--record-state] --json
+
+    Builds a machine-readable handoff packet from task, state, evidence, audit,
+    tool discovery, and rule-pack context.
+
+    Required:
+      --task PATH      Structured orbit-task-v1 YAML file.
+      --state PATH     orbit-loop-state-v1 YAML file.
+      --evidence PATH  orbit-evidence-v1 JSON/YAML manifest file.
+      --json           Emit machine-readable handoff packet.
+
+    Options:
+      --transport NAME  Transport profile to use. Defaults to generic/fallback.
+      --output PATH     Write the handoff packet to PATH.
+      --record-state    Record --output path into loop state artifacts.
+
+    Notes:
+      --evidence expects a manifest file, not an evidence directory.
+      Create one with: orbit evidence init --output .orbit/evidence.json
+  HELP
+  "rules resolve" => <<~HELP,
+    Usage:
+      orbit rules resolve --json [--task PATH] [--role ROLE] [--instance NAME] [--output PATH]
+
+    Resolves the rule inputs a role must load for the current Orbit task.
+    This is deterministic code, not an LLM merge.
+
+    Required:
+      --json           Emit machine-readable rule resolution.
+
+    Options:
+      --task PATH      Structured orbit-task-v1 YAML file.
+      --role ROLE      Resolve as ROLE when ORBIT_INSTANCE is not set.
+      --instance NAME  Resolve as configured instance NAME.
+      --output PATH    Write the JSON resolution artifact to PATH.
+
+    Notes:
+      Orbit default rules are always included. Project rules from
+      .orbit/roles.yaml only add project-specific rules and never replace
+      the default Orbit runtime rules.
+  HELP
+  "rules print-context" => <<~HELP,
+    Usage:
+      orbit rules print-context --json [--task PATH] [--role ROLE] [--instance NAME] [--output PATH]
+
+    Prints the ordered rule context an agent should load for this turn.
+    This is deterministic code, not an LLM merge.
+
+    Required:
+      --json           Emit machine-readable context instructions.
+
+    Options:
+      --task PATH      Structured orbit-task-v1 YAML file.
+      --role ROLE      Resolve as ROLE when ORBIT_INSTANCE is not set.
+      --instance NAME  Resolve as configured instance NAME.
+      --output PATH    Write the JSON context artifact to PATH.
+
+    Notes:
+      Orbit default rules, project rules, task rules, and configured rule
+      packs are all listed separately. Project rules are additive and never
+      suppress the default Orbit runtime rules.
+  HELP
+  "start" => <<~HELP,
+    Usage:
+      orbit start INSTANCE [--transport local|herdr] [--cwd PATH] [--dry-run] [--json]
+
+    Starts or previews an agent instance from .orbit/instances.yaml.
+
+    Required:
+      INSTANCE         Instance name from .orbit/instances.yaml.
+
+    Options:
+      --transport NAME  local or herdr. Defaults to local.
+      --cwd PATH        Working directory for the agent. Defaults to current directory.
+      --dry-run         Print the command/env/cwd plan without starting the agent.
+      --json            Emit the launch plan or launch result as JSON.
+
+    Notes:
+      command is executed as argv, not through a shell string.
+      Dry-run is the recommended way to audit instance command/env wiring.
+  HELP
+  "validate" => <<~HELP,
+    Usage:
+      orbit validate [--task PATH] [--evidence PATH] [--state PATH] [--json]
+
+    Validates project config plus optional structured task, evidence manifest,
+    and loop-state files.
+
+    Options:
+      --task PATH      Structured orbit-task-v1 YAML file.
+      --evidence PATH  orbit-evidence-v1 JSON/YAML manifest file.
+      --state PATH     orbit-loop-state-v1 YAML file.
+      --json           Emit machine-readable validation result.
+
+    Notes:
+      --evidence expects a manifest file, not an evidence directory.
+      Create one with: orbit evidence init --output .orbit/evidence.json
+  HELP
+  "wait-gate" => <<~HELP
+    Usage:
+      orbit wait-gate --task PATH --evidence PATH --json
+
+    Checks whether the task's required review/test gates currently pass.
+
+    Required:
+      --task PATH      Structured orbit-task-v1 YAML file.
+      --evidence PATH  orbit-evidence-v1 JSON/YAML manifest file.
+      --json           Emit machine-readable gate status.
+
+    Notes:
+      This command does not replace reviewer/tester judgment. It only reads
+      evidence records and reports whether the latest required gate records pass.
+  HELP
+}.freeze
+
+def print_help
+  puts HELP
+end
+
+def print_command_help(command)
+  puts(COMMAND_HELP.fetch(command))
+end
+
+def help_requested?(args)
+  args.length == 1 && ["-h", "--help", "help"].include?(args.first)
+end
+
+def usage_error(message)
+  warn message
+  warn "Run `orbit --help` for usage."
+  exit 64
+end
+
+def option_value(args, option)
+  value = args.shift
+  usage_error("Missing value for #{option}") if value.nil? || value.start_with?("--")
+
+  value
+end
+

@@ -1,0 +1,23 @@
+schema_version: orbit-instances-v1
+
+instances:
+  lead:
+    role_ref: lead
+    command: codex
+    env:
+      ORBIT_INSTANCE: lead
+      ORBIT_ROLE: lead
+
+  reviewer:
+    role_ref: reviewer
+    command: codex
+    env:
+      ORBIT_INSTANCE: reviewer
+      ORBIT_ROLE: reviewer
+
+  tester:
+    role_ref: tester
+    command: codex
+    env:
+      ORBIT_INSTANCE: tester
+      ORBIT_ROLE: tester

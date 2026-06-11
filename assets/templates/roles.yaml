@@ -1,0 +1,90 @@
+schema_version: orbit-roles-v1
+
+capability_registry:
+  task_contract.write:
+    kind: service_controlled
+    description: "创建或更新 task contract。"
+  code.edit:
+    kind: agent_action
+    description: "编辑生产代码或权威项目文件。"
+  review.submit:
+    kind: service_controlled
+    description: "提交 review verdict 和 findings。"
+  test.run:
+    kind: agent_action
+    description: "运行测试并收集 evidence。"
+  test.submit:
+    kind: service_controlled
+    description: "提交 test verdict 和 evidence。"
+  loop_state.update:
+    kind: service_controlled
+    description: "推进 loop state。"
+  artifact.write_authoritative:
+    kind: service_controlled
+    description: "写入权威 artifact 或 state。"
+
+roles:
+  lead:
+    role: lead
+    capabilities:
+      - task_contract.write
+      - code.edit
+      - loop_state.update
+      - artifact.write_authoritative
+    rules: []
+    permissions:
+      can_edit_production_code: true
+      can_update_loop_state: true
+
+  reviewer:
+    role: reviewer
+    capabilities:
+      - review.submit
+    rules: []
+    permissions:
+      can_edit_production_code: false
+      can_submit_review: true
+
+  tester:
+    role: tester
+    capabilities:
+      - test.run
+      - test.submit
+    rules: []
+    permissions:
+      can_edit_production_code: false
+      can_submit_test: true
+
+tool_policy:
+  service_controlled:
+    - task_contract.write
+    - review.submit
+    - test.submit
+    - loop_state.update
+    - artifact.write_authoritative
+  agent_discoverable:
+    - read_only_diagnostics
+    - inspect_context
+
+permission_projection:
+  can_edit_production_code:
+    any_capability:
+      - code.edit
+  can_update_loop_state:
+    any_capability:
+      - loop_state.update
+  can_submit_review:
+    any_capability:
+      - review.submit
+  can_submit_test:
+    any_capability:
+      - test.submit
+
+document_zones:
+  active_design: docs/design/
+  open_work: docs/open/
+  archive: docs/archive/
+  reference_only: docs/reference/
+
+default_commands: {}
+project_prohibitions: []

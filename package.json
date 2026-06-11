@@ -1,0 +1,22 @@
+{
+  "name": "@godokyang/orbit",
+  "version": "0.1.0",
+  "description": "Orbit skill and CLI.",
+  "files": [
+    "README.md",
+    "SKILL.md",
+    "install.sh",
+    "uninstall.sh",
+    "assets",
+    "lib",
+    "references/overview.md",
+    "references/runtime",
+    "scripts/orbit"
+  ],
+  "scripts": {
+    "test": "sh -n install.sh && sh -n uninstall.sh && tests/orbit_test.sh"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

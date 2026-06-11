@@ -1,0 +1,9 @@
+#!/usr/bin/env -S ruby --disable-gems
+# frozen_string_literal: true
+
+ORBIT_SCRIPT_PATH = File.expand_path(__FILE__)
+ORBIT_ROOT = File.expand_path("..", File.dirname(ORBIT_SCRIPT_PATH))
+
+require File.join(ORBIT_ROOT, "lib", "orbit", "cli")
+
+run_orbit_cli(ARGV)
