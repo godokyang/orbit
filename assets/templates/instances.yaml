@@ -4,6 +4,18 @@ instances:
   lead:
     role_ref: lead
     command: codex
+    management: user_managed
+    transport:
+      kind: local
+      binding:
+        pane: ""
+        tab: ""
+        space: ""
+      health:
+        last_heartbeat: ""
+        cwd: ""
+        git_head: ""
+        actual_client: ""
     env:
       ORBIT_INSTANCE: lead
       ORBIT_ROLE: lead
@@ -11,6 +23,18 @@ instances:
   reviewer:
     role_ref: reviewer
     command: codex
+    management: user_managed
+    transport:
+      kind: local
+      binding:
+        pane: ""
+        tab: ""
+        space: ""
+      health:
+        last_heartbeat: ""
+        cwd: ""
+        git_head: ""
+        actual_client: ""
     env:
       ORBIT_INSTANCE: reviewer
       ORBIT_ROLE: reviewer
@@ -18,6 +42,18 @@ instances:
   tester:
     role_ref: tester
     command: codex
+    management: user_managed
+    transport:
+      kind: local
+      binding:
+        pane: ""
+        tab: ""
+        space: ""
+      health:
+        last_heartbeat: ""
+        cwd: ""
+        git_head: ""
+        actual_client: ""
     env:
       ORBIT_INSTANCE: tester
       ORBIT_ROLE: tester

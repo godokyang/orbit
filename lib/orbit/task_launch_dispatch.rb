@@ -60,6 +60,206 @@ def default_gates_for_new_task(target_role, task_type)
   ]
 end
 
+def quality_outcome_template(task_type)
+  type = task_type.to_s.downcase
+  if type.include?("refactor") || type.include?("split")
+    {
+      "user_problem" => "Current structure makes future changes risky or expensive because responsibilities are hard to isolate.",
+      "desired_property" => "Responsibilities, dependency direction, and public entrypoints are clearer after the change.",
+      "measurable_thresholds" => [
+        "Reviewer can identify the new module boundaries and why they reduce future change cost.",
+        "Tests or static checks cover the moved or rewritten behavior.",
+        "Old paths no longer remain as a second authoritative implementation."
+      ],
+      "invalid_completions" => [
+        "Only moving a small amount of code without reducing coupling or clarifying ownership.",
+        "Adding a facade while the old implementation still writes authoritative state.",
+        "Passing tests without evidence that maintainability improved."
+      ]
+    }
+  elsif type.include?("doc")
+    {
+      "user_problem" => "Project documentation or runtime instructions are stale, incomplete, duplicated, or hard to act on.",
+      "desired_property" => "The relevant audience can find the current rule, decision, or workflow without relying on chat history.",
+      "measurable_thresholds" => [
+        "Updated docs map each changed rule or plan item to the problem it closes.",
+        "Stale or conflicting guidance is removed, marked deprecated, or linked to the new source of truth.",
+        "Commands, paths, or examples in the changed docs are verifiable or explicitly scoped as illustrative."
+      ],
+      "invalid_completions" => [
+        "Only adding prose without resolving the stale or conflicting guidance.",
+        "Moving documentation while leaving broken references or duplicate sources of truth.",
+        "Documenting a workflow that CLI/templates/tests do not support when the task requires hardening."
+      ]
+    }
+  elsif type.include?("performance") || type.include?("speed") || type.include?("latency")
+    {
+      "user_problem" => "The current behavior is too slow, costly, or resource-heavy for the intended workflow.",
+      "desired_property" => "The change improves speed, cost, or resource usage without hiding failures or moving cost elsewhere.",
+      "measurable_thresholds" => [
+        "Baseline and after evidence, benchmark, timing, or a clear waiver explains the performance claim.",
+        "Failure rate, retries, output quality, and resource usage do not regress in the tested path.",
+        "The metric can be re-run or audited by a tester."
+      ],
+      "invalid_completions" => [
+        "Only making a code path faster by skipping required work or validation.",
+        "Claiming speed improvement without baseline/after evidence or accepted waiver.",
+        "Moving cost to retries, background work, or another role without measuring it."
+      ]
+    }
+  elsif type.include?("ux") || type.include?("workflow")
+    {
+      "user_problem" => "The user-visible path is confusing, slow to recover from, or lacks actionable feedback.",
+      "desired_property" => "The user path is clearer, more recoverable, and easier to verify from the interface or artifact.",
+      "measurable_thresholds" => [
+        "A real or representative user path demonstrates the improved state, error, or recovery behavior.",
+        "Tester evidence includes user-visible output, screenshot, transcript, or artifact when applicable.",
+        "Failure and loading states do not create ambiguous or contradictory UI."
+      ],
+      "invalid_completions" => [
+        "Only changing layout or text without improving the user path.",
+        "Only proving API success while the user-visible state remains ambiguous.",
+        "Leaving stale, late, or failed states unrecoverable."
+      ]
+    }
+  else
+    {
+      "user_problem" => "The current behavior, structure, or workflow creates a concrete maintenance, reliability, or user problem.",
+      "desired_property" => "The completed task changes the system property that caused the problem, not only the surface action.",
+      "measurable_thresholds" => [
+        "Acceptance evidence demonstrates the desired property rather than only showing that code changed.",
+        "Reviewer can explain why the original problem is reduced or closed.",
+        "Known gaps are explicit and do not cover required acceptance."
+      ],
+      "invalid_completions" => [
+        "Completing the requested action while the original problem remains.",
+        "Only proving that existing tests pass without evidence for the quality outcome.",
+        "Using a workaround, fallback, or manual artifact to mask an unclosed implementation path."
+      ]
+    }
+  end
+end
+
+def default_review_strategy
+  {
+    "entrypoints" => ["quality_outcome", "acceptance", "changed_files", "evidence"],
+    "suggested_checks" => [
+      "Outcome: does the change satisfy the quality_outcome, not just the requested action?",
+      "Behavior: are required user, CLI, or runtime behaviors correct and fail-closed?",
+      "Structure: did the change reduce coupling, duplicate truth, or future change cost?",
+      "Evidence: do tests, commands, artifacts, or reports prove the outcome?",
+      "Residual risk: are untested paths explicit and acceptable?"
+    ],
+    "runtime_checks" => [
+      "Inspect latest structured review/test evidence before done.",
+      "Check aggregate evidence verdict and required gates."
+    ],
+    "required_capabilities" => ["review.submit"],
+    "failure_modes" => [
+      "Review only checks that tests passed.",
+      "Review ignores empty or action-only quality_outcome.",
+      "Review accepts local pass while source contract or traceability remains uncovered."
+    ]
+  }
+end
+
+def design_task?(task_type)
+  type = task_type.to_s.downcase
+  type.include?("design") || type.include?("analysis")
+end
+
+def coding_task?(task_type)
+  task_type.to_s.downcase.include?("coding")
+end
+
+def decomposition_task?(task_type)
+  type = task_type.to_s.downcase
+  type.include?("decomposition") || type.include?("parent")
+end
+
+def test_task?(target_role, task_type)
+  target_role.to_s == "tester" || task_type.to_s.downcase.include?("test")
+end
+
+def quality_measurement_task?(task_type)
+  type = task_type.to_s.downcase
+  %w[performance speed latency ux workflow quality eval llm measurement].any? { |token| type.include?(token) }
+end
+
+def default_design_lifecycle(task_type)
+  {
+    "enabled" => design_task?(task_type),
+    "phases" => ["drafting", "review_requested", "changes_requested", "user_confirmed", "coding_ready"],
+    "current_phase" => design_task?(task_type) ? "drafting" : "",
+    "user_confirmation_required" => true,
+    "coding_requires_confirmed_design" => true
+  }
+end
+
+def default_design_reference(task_type)
+  {
+    "required_for_coding" => coding_task?(task_type),
+    "artifact" => "",
+    "confirmation_evidence" => "",
+    "status" => coding_task?(task_type) ? "unconfirmed" : "not_applicable"
+  }
+end
+
+def default_implementation_plan(task_type)
+  {
+    "required" => decomposition_task?(task_type),
+    "path" => "",
+    "summary" => ""
+  }
+end
+
+def default_decomposition(task_type)
+  {
+    "parent_task" => "",
+    "child_slices" => [],
+    "aggregate_outcome_metrics" => [],
+    "stop_conditions" => [],
+    "replanning_path" => decomposition_task?(task_type) ? "Return to design review before continuing child slices when parent metrics change." : ""
+  }
+end
+
+def default_final_aggregate_audit(task_type)
+  {
+    "required" => decomposition_task?(task_type),
+    "checks" => decomposition_task?(task_type) ? [
+      "Parent quality_outcome remains satisfied after child slices.",
+      "Child slices cover the implementation_plan.",
+      "Aggregate outcome metrics have evidence beyond individual child pass records."
+    ] : []
+  }
+end
+
+def default_test_environment(target_role, task_type)
+  required = test_task?(target_role, task_type)
+  {
+    "required" => required,
+    "environment" => required ? "Record OS/runtime/service versions or CI/browser/device identity." : "",
+    "test_tab_or_pane" => required ? "Record tester pane, browser tab, CI job, or not_applicable reason." : "",
+    "server_owner" => required ? "Record owner of any server/process under test." : "",
+    "browser_owner" => required ? "Record browser/session owner or not_applicable reason." : "",
+    "cleanup_hook" => required ? "Record cleanup command/hook or not_applicable reason." : "",
+    "artifact_cleanup" => required ? "Record artifact retention/cleanup path or policy." : "",
+    "duration_budget" => required ? "Record expected max duration or not_applicable reason." : "",
+    "resource_budget" => required ? "Record process/browser/resource budget or not_applicable reason." : ""
+  }
+end
+
+def default_quality_measurement(task_type)
+  required = quality_measurement_task?(task_type)
+  {
+    "required" => required,
+    "baseline_required" => required,
+    "after_required" => required,
+    "metrics" => required ? ["baseline metric", "after metric", "quality or UX acceptance metric"] : [],
+    "waiver_policy" => required ? "If baseline/after cannot be collected, record an explicit waiver with replacement evidence and risk." : ""
+  }
+end
+
 def new_task(args)
   options = parse_new_task_args(args)
   template_path = File.join(TEMPLATE_ROOT, "task.yaml")
@@ -81,6 +281,15 @@ def new_task(args)
   task["target_role"] = options["target_role"]
   task["task_type"] = options["task_type"]
   task["gates"] = default_gates_for_new_task(options["target_role"], options["task_type"])
+  task["quality_outcome"] = quality_outcome_template(options["task_type"])
+  task["review_strategy"] = default_review_strategy
+  task["design_lifecycle"] = default_design_lifecycle(options["task_type"])
+  task["design_reference"] = default_design_reference(options["task_type"])
+  task["implementation_plan"] = default_implementation_plan(options["task_type"])
+  task["decomposition"] = default_decomposition(options["task_type"])
+  task["final_aggregate_audit"] = default_final_aggregate_audit(options["task_type"])
+  task["test_environment"] = default_test_environment(options["target_role"], options["task_type"])
+  task["quality_measurement"] = default_quality_measurement(options["task_type"])
   task_rule_packs = rule_packs_for_context(options["target_role"], options["task_type"])
   task["rule_packs"] = task_rule_packs unless task_rule_packs.empty?
 
@@ -102,6 +311,7 @@ def parse_start_args(args)
     "instance" => instance,
     "transport" => "local",
     "cwd" => Dir.pwd,
+    "allow_create" => false,
     "dry_run" => false,
     "json" => false
   }
@@ -119,6 +329,8 @@ def parse_start_args(args)
       options["cwd"] = Regexp.last_match(1)
     when "--dry-run"
       options["dry_run"] = true
+    when "--allow-create"
+      options["allow_create"] = true
     when "--json"
       options["json"] = true
     else
@@ -135,6 +347,7 @@ def start_plan(options)
   argv = normalize_command_argv(instance["command"], "Instance #{instance_key.inspect}")
   cwd = File.expand_path(options["cwd"])
   usage_error("Start cwd does not exist: #{cwd}") unless Dir.exist?(cwd)
+  status = instance_status_entry(instance_key, instance, role_ref, role_def)
 
   {
     "schema_version" => "orbit-start-plan-v1",
@@ -148,8 +361,38 @@ def start_plan(options)
     "cwd" => cwd,
     "argv" => argv,
     "env" => instance_launch_env(instance_key, instance, role_def, role_ref),
+    "instance_status" => status,
     "dry_run" => options["dry_run"]
   }.compact
+end
+
+def start_requires_reuse?(plan)
+  plan.dig("instance_status", "recommended_action") == "reuse"
+end
+
+def start_create_blocked?(plan, options)
+  status = plan["instance_status"] || {}
+  status["management"] == "user_managed" &&
+    status["recommended_action"] == "ask_user_or_bind" &&
+    !options["allow_create"]
+end
+
+def print_start_blocked(plan)
+  warn "Orbit start blocked:"
+  warn "- instance: #{plan["instance"]}"
+  warn "- role: #{plan["resolved_role"]}"
+  warn "- management: #{plan.dig("instance_status", "management")}"
+  warn "- binding_status: #{plan.dig("instance_status", "binding_status")}"
+  warn "- reason: user_managed instances require an existing healthy binding or --allow-create"
+end
+
+def print_start_reuse(plan)
+  puts "Orbit instance already bound:"
+  puts "- instance: #{plan["instance"]}"
+  puts "- role: #{plan["resolved_role"]}"
+  puts "- action: reuse"
+  binding = plan.dig("instance_status", "transport", "binding") || {}
+  puts "- pane: #{binding["pane"]}" unless binding["pane"].to_s.empty?
 end
 
 def herdr_start_argv(plan, executable = "herdr")
@@ -290,8 +533,11 @@ def run_herdr_start(plan, json:)
   end
 
   success = status.success? && (ready_wait.nil? || ready_wait["success"])
+  status_after_start = nil
+  status_after_start = write_instance_binding!(plan["instance"], transport_kind: "herdr", pane: pane_id) if success && pane_id
   result = attach_start_adapter_plan(plan).merge(
     "action" => "started",
+    "instance_status_after_start" => status_after_start,
     "adapter_result" => {
       "exit_status" => status.exitstatus,
       "success" => success,
@@ -316,6 +562,29 @@ end
 def start(args)
   options = parse_start_args(args)
   plan = attach_start_adapter_plan(start_plan(options))
+
+  if start_requires_reuse?(plan)
+    result = plan.merge("action" => "reuse")
+    if options["json"]
+      puts JSON.pretty_generate(result)
+    else
+      print_start_reuse(result)
+    end
+    return
+  end
+
+  if start_create_blocked?(plan, options)
+    result = plan.merge(
+      "action" => "blocked",
+      "reason" => "user_managed instance has no healthy binding; bind it first or pass --allow-create"
+    )
+    if options["json"]
+      puts JSON.pretty_generate(result)
+    else
+      print_start_blocked(result)
+    end
+    exit 1
+  end
 
   if options["dry_run"]
     if options["json"]
@@ -377,9 +646,6 @@ def parse_dispatch_args(args)
   usage_error("Missing required option: --to") if options["to"].nil? || options["to"].empty?
   usage_error("dispatch currently requires --json") unless options["json"]
   usage_error("dispatch --transport must be generic or herdr") unless %w[generic herdr].include?(options["transport"])
-  if options["transport"] == "herdr" && (options["pane"].nil? || options["pane"].empty?)
-    usage_error("dispatch --transport herdr requires --pane because pane ids are live transport handles.")
-  end
 
   options
 end
@@ -423,6 +689,15 @@ def dispatch_packet(options)
   task_path, task = load_dispatch_task(options["task"])
   instance_key, instance_alias, instance, role_ref, role_def = load_instance_for_launch(options["to"])
   resolved_role = role_def["role"] || role_ref
+  instance_status = instance_status_entry(instance_key, instance, role_ref, role_def)
+  binding_pane = instance_status.dig("transport", "binding", "pane").to_s
+  if options["transport"] == "herdr" && options["pane"].to_s.empty? && !binding_pane.empty?
+    options["pane"] = binding_pane
+  end
+  if options["transport"] == "herdr" && options["pane"].to_s.empty?
+    usage_error("dispatch --transport herdr requires --pane or a bound instance pane because pane ids are live transport handles.")
+  end
+
   task_id = dispatch_task_label(task_path)
   packet = {
     "schema_version" => "orbit-dispatch-v1",
@@ -437,6 +712,7 @@ def dispatch_packet(options)
     "role_ref" => role_ref,
     "resolved_role" => resolved_role,
     "transport" => options["transport"],
+    "target_instance_status" => instance_status,
     "dry_run" => options["dry_run"],
     "message" => nil,
     "checks" => {
@@ -509,4 +785,3 @@ def dispatch(args)
 
   run_herdr_dispatch(packet)
 end
-

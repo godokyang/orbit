@@ -37,6 +37,8 @@ quality_outcome:
 
 阈值不一定是数字，但必须让 reviewer 能判断“结果是否变好”，而不是只判断“动作是否发生”。
 
+Orbit CLI 对改善类、重构、文档维护、性能、UX、可靠性和架构收敛类 task 做结构校验：`quality_outcome` 必须是 mapping，且 `user_problem`、`desired_property`、`measurable_thresholds`、`invalid_completions` 都必须非空。`orbit new-task` 会按 task type 写入默认模板；lead 可以改写模板，但不能把字段清空后继续进入 coding。
+
 ## 通用审查问题
 
 review 不应被某个例子锚定。不同任务的质量结果不同，应先按任务类型选择审查问题。

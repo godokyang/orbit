@@ -23,11 +23,16 @@
   "started_at": "",
   "completed_at": "",
   "records": [],
+  "waivers": [],
   "verdict": {
-    "status": "pass",
-    "high": 0,
-    "medium": 0,
-    "low": 0
+    "status": "in_progress",
+    "mode": "aggregate",
+    "summary": "No evidence records yet.",
+    "gates": {},
+    "waivers": {
+      "total": 0,
+      "open": 0
+    }
   },
   "worktree_safety": {
     "status": "not_applicable",

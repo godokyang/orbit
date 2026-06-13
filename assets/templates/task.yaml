@@ -16,18 +16,84 @@ scope:
   include: []
   exclude: []
 quality_outcome:
-  user_problem: ""
-  desired_property: ""
-  measurable_thresholds: []
-  invalid_completions: []
+  user_problem: "The current behavior, structure, or workflow creates a concrete maintenance, reliability, or user problem."
+  desired_property: "The completed task changes the system property that caused the problem, not only the surface action."
+  measurable_thresholds:
+    - "Acceptance evidence demonstrates the desired property rather than only showing that code changed."
+    - "Reviewer can explain why the original problem is reduced or closed."
+    - "Known gaps are explicit and do not cover required acceptance."
+  invalid_completions:
+    - "Completing the requested action while the original problem remains."
+    - "Only proving that existing tests pass without evidence for the quality outcome."
+    - "Using a workaround, fallback, or manual artifact to mask an unclosed implementation path."
 acceptance: []
 review_strategy:
-  entrypoints: []
-  suggested_checks: []
-  runtime_checks: []
-  required_capabilities: []
-  failure_modes: []
+  entrypoints:
+    - quality_outcome
+    - acceptance
+    - changed_files
+    - evidence
+  suggested_checks:
+    - "Outcome: does the change satisfy the quality_outcome, not just the requested action?"
+    - "Behavior: are required user, CLI, or runtime behaviors correct and fail-closed?"
+    - "Structure: did the change reduce coupling, duplicate truth, or future change cost?"
+    - "Evidence: do tests, commands, artifacts, or reports prove the outcome?"
+    - "Residual risk: are untested paths explicit and acceptable?"
+  runtime_checks:
+    - "Inspect latest structured review/test evidence before done."
+    - "Check aggregate evidence verdict and required gates."
+  required_capabilities:
+    - review.submit
+  failure_modes:
+    - "Review only checks that tests passed."
+    - "Review ignores empty or action-only quality_outcome."
+    - "Review accepts local pass while source contract or traceability remains uncovered."
 evidence_requirements: []
+design_lifecycle:
+  enabled: false
+  phases:
+    - drafting
+    - review_requested
+    - changes_requested
+    - user_confirmed
+    - coding_ready
+  current_phase: ""
+  user_confirmation_required: true
+  coding_requires_confirmed_design: true
+design_reference:
+  required_for_coding: false
+  artifact: ""
+  confirmation_evidence: ""
+  status: not_applicable
+implementation_plan:
+  required: false
+  path: ""
+  summary: ""
+decomposition:
+  parent_task: ""
+  child_slices: []
+  aggregate_outcome_metrics: []
+  stop_conditions: []
+  replanning_path: ""
+final_aggregate_audit:
+  required: false
+  checks: []
+test_environment:
+  required: false
+  environment: ""
+  test_tab_or_pane: ""
+  server_owner: ""
+  browser_owner: ""
+  cleanup_hook: ""
+  artifact_cleanup: ""
+  duration_budget: ""
+  resource_budget: ""
+quality_measurement:
+  required: false
+  baseline_required: false
+  after_required: false
+  metrics: []
+  waiver_policy: ""
 worktree_safety:
   require_status_check: true
   before_public_action:

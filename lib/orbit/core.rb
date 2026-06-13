@@ -1,8 +1,10 @@
 # frozen_string_literal: true
 
 require "fileutils"
+require "digest"
 require "json"
 require "open3"
+require "set"
 require "time"
 require "yaml"
 
@@ -68,16 +70,24 @@ HELP = <<~HELP
     orbit version
     orbit audit --task PATH --state PATH --evidence PATH --json
     orbit init [--force]
+    orbit instances status --json
+    orbit bind-pane --instance NAME --pane PANE [--transport NAME] [--tab TAB] [--space SPACE] --json
+    orbit classify-intent --text TEXT --json
+    orbit compact-evidence --task PATH --evidence PATH [--handoff PATH] [--output PATH] --json
+    orbit docs alias --id ID --path PATH [--registry PATH] --json
+    orbit docs check [--registry PATH] [--open-dir PATH] [--archive-dir PATH] --json
     orbit evidence init --output PATH
     orbit evidence add --file PATH --kind KIND --status STATUS --summary SUMMARY
     orbit evidence from-report --file PATH --report PATH [--kind KIND] [--status STATUS] [--summary SUMMARY]
+    orbit evidence submit --file PATH --report PATH --json
+    orbit evidence waive --file PATH --waiver PATH --json
     orbit evidence attach-rule --file PATH --rule-resolution PATH
     orbit evidence show --file PATH --json
     orbit handoff --task PATH --state PATH --evidence PATH [--transport NAME] [--output PATH] [--record-state] --json
     orbit dispatch --task PATH --to INSTANCE [--transport generic|herdr] [--pane PANE] [--dry-run] --json
     orbit rules resolve --json [--task PATH] [--role ROLE] [--instance NAME] [--output PATH]
     orbit rules print-context --json [--task PATH] [--role ROLE] [--instance NAME] [--output PATH]
-    orbit start INSTANCE [--transport local|herdr] [--cwd PATH] [--dry-run] [--json]
+    orbit start INSTANCE [--transport local|herdr] [--cwd PATH] [--allow-create] [--dry-run] [--json]
     orbit state progress --message TEXT [--evidence PATH] [--state PATH]
     orbit state start --task PATH [--owner-role ROLE] [--state PATH]
     orbit state transition --to PHASE [--evidence PATH] [--reason TEXT] [--state PATH]
@@ -91,10 +101,15 @@ HELP = <<~HELP
 
   Commands:
     audit       审计 task、evidence 和 loop state 的一致性。
+    bind-pane   绑定 transport pane 到 Orbit instance。
+    classify-intent  根据用户请求输出 Orbit workflow 默认策略。
+    compact-evidence  生成 durable evidence summary，不复制 transient runtime artifacts。
     dispatch    生成或投递 task 给指定 agent instance。
+    docs        管理 stable docs registry 并检查 docs lifecycle。
     evidence    初始化、追加、挂载规则解析和读取 evidence manifest。
     handoff     输出机器可读的 handoff packet。
     init         初始化 .orbit 项目配置。
+    instances    读取 Orbit instance binding 和 health 状态。
     new-task    根据模板创建 task contract。
     rules       解析本轮默认规则、项目规则、task 规则和 rule packs。
     start        根据 instances.yaml 启动或预览 agent instance。
@@ -107,7 +122,9 @@ HELP = <<~HELP
 
   Subcommand help:
     orbit audit --help
+    orbit compact-evidence --help
     orbit dispatch --help
+    orbit docs --help
     orbit handoff --help
     orbit rules print-context --help
     orbit rules resolve --help
@@ -151,6 +168,52 @@ COMMAND_HELP = {
     Notes:
       generic transport produces a payload for manual or external delivery.
       herdr transport sends text to an existing agent pane and presses Enter.
+  HELP
+  "classify-intent" => <<~HELP,
+    Usage:
+      orbit classify-intent --text TEXT --json
+
+    Classifies a user request into an Orbit workflow intent and returns the
+    default task/evidence/gate policy. This is deterministic keyword routing,
+    not semantic LLM classification.
+
+    Required:
+      --text TEXT  User request or summarized request.
+      --json       Emit machine-readable classification.
+  HELP
+  "compact-evidence" => <<~HELP,
+    Usage:
+      orbit compact-evidence --task PATH --evidence PATH [--handoff PATH] [--output PATH] --json
+
+    Builds a durable evidence summary from task/evidence/handoff inputs. The
+    summary keeps counts, latest verdicts, content hashes, rule references, and
+    artifact references; it does not copy full transient logs or rule context.
+
+    Required:
+      --task PATH      Structured orbit-task-v1 YAML file.
+      --evidence PATH  orbit-evidence-v1 JSON/YAML manifest file.
+      --json           Emit machine-readable durable summary.
+
+    Options:
+      --handoff PATH   Handoff packet to summarize and hash.
+      --output PATH    Write the durable summary to PATH.
+  HELP
+  "docs" => <<~HELP,
+    Usage:
+      orbit docs alias --id ID --path PATH [--registry PATH] --json
+      orbit docs check [--registry PATH] [--open-dir PATH] [--archive-dir PATH] --json
+
+    Maintains a stable docs registry so evidence can reference durable doc ids
+    instead of rewriting historical paths after docs move.
+
+    Subcommands:
+      alias   Create or update a stable doc id with current path and content hash.
+      check   Validate alias targets and report open/archive lifecycle issues.
+
+    Options:
+      --registry PATH  Defaults to .orbit/docs-registry.json.
+      --open-dir PATH  Defaults to docs/open when present.
+      --archive-dir PATH  Defaults to docs/archive when present.
   HELP
   "handoff" => <<~HELP,
     Usage:
@@ -218,7 +281,7 @@ COMMAND_HELP = {
   HELP
   "start" => <<~HELP,
     Usage:
-      orbit start INSTANCE [--transport local|herdr] [--cwd PATH] [--dry-run] [--json]
+      orbit start INSTANCE [--transport local|herdr] [--cwd PATH] [--allow-create] [--dry-run] [--json]
 
     Starts or previews an agent instance from .orbit/instances.yaml.
 
@@ -228,6 +291,7 @@ COMMAND_HELP = {
     Options:
       --transport NAME  local or herdr. Defaults to local.
       --cwd PATH        Working directory for the agent. Defaults to current directory.
+      --allow-create    Allow creating a user_managed instance with no healthy binding.
       --dry-run         Print the command/env/cwd plan without starting the agent.
       --json            Emit the launch plan or launch result as JSON.
 
@@ -293,4 +357,3 @@ def option_value(args, option)
 
   value
 end
-

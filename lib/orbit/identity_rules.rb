@@ -102,6 +102,265 @@ def infer_instance_from_role(instances, roles, role_name)
   nil
 end
 
+ALLOWED_INSTANCE_MANAGEMENT = %w[user_managed orbit_managed].freeze
+ALLOWED_INSTANCE_TRANSPORTS = %w[generic herdr local].freeze
+
+def instance_management(instance)
+  value = instance["management"].to_s.strip
+  value.empty? ? "user_managed" : value
+end
+
+def validate_instance_management!(instance_name, instance)
+  management = instance_management(instance)
+  usage_error("Instance #{instance_name.inspect} management must be one of #{ALLOWED_INSTANCE_MANAGEMENT.join("|")}.") unless ALLOWED_INSTANCE_MANAGEMENT.include?(management)
+  management
+end
+
+def normalize_instance_transport(instance_name, instance)
+  transport = instance["transport"] || {}
+  usage_error("Instance #{instance_name.inspect} transport must be a mapping when present.") unless transport.is_a?(Hash)
+
+  kind = transport["kind"].to_s.strip
+  kind = "local" if kind.empty?
+  usage_error("Instance #{instance_name.inspect} transport.kind must be one of #{ALLOWED_INSTANCE_TRANSPORTS.join("|")}.") unless ALLOWED_INSTANCE_TRANSPORTS.include?(kind)
+
+  binding = transport["binding"] || {}
+  health = transport["health"] || {}
+  usage_error("Instance #{instance_name.inspect} transport.binding must be a mapping when present.") unless binding.is_a?(Hash)
+  usage_error("Instance #{instance_name.inspect} transport.health must be a mapping when present.") unless health.is_a?(Hash)
+
+  {
+    "kind" => kind,
+    "binding" => {
+      "pane" => binding["pane"].to_s,
+      "tab" => binding["tab"].to_s,
+      "space" => binding["space"].to_s
+    },
+    "health" => {
+      "last_heartbeat" => health["last_heartbeat"].to_s,
+      "cwd" => health["cwd"].to_s,
+      "git_head" => health["git_head"].to_s,
+      "actual_client" => health["actual_client"].to_s
+    }
+  }
+end
+
+def transport_binding_present?(transport)
+  binding = transport["binding"] || {}
+  %w[pane tab space].any? { |field| !binding[field].to_s.empty? }
+end
+
+def instance_binding_status(transport)
+  transport_binding_present?(transport) ? "healthy" : "unbound"
+end
+
+def recommended_instance_action(management, binding_status)
+  return "reuse" if binding_status == "healthy"
+  return "start_missing_instance" if management == "orbit_managed"
+
+  "ask_user_or_bind"
+end
+
+def command_expected_string(command)
+  normalize_command_argv(command, "instance").join(" ")
+rescue SystemExit
+  command.is_a?(Array) ? command.join(" ") : command.to_s
+end
+
+def expected_client_name(command)
+  argv = normalize_command_argv(command, "instance")
+  File.basename(argv.first.to_s)
+rescue SystemExit
+  nil
+end
+
+def runtime_actual_client
+  value = ENV["ORBIT_CLIENT"].to_s.strip
+  return value unless value.empty?
+
+  "unknown"
+end
+
+def instance_status_entry(name, instance, role_ref, role_def)
+  management = validate_instance_management!(name, instance)
+  transport = normalize_instance_transport(name, instance)
+  binding_status = instance_binding_status(transport)
+  {
+    "instance" => name,
+    "role_ref" => role_ref,
+    "resolved_role" => role_def["role"] || role_ref,
+    "management" => management,
+    "expected_command" => command_expected_string(instance["command"]),
+    "transport" => transport,
+    "binding_status" => binding_status,
+    "recommended_action" => recommended_instance_action(management, binding_status)
+  }
+end
+
+def load_project_instance_config_for_cli
+  config_dir = File.join(Dir.pwd, ".orbit")
+  roles_config = load_yaml(File.join(config_dir, "roles.yaml"))
+  instances_config = load_yaml(File.join(config_dir, "instances.yaml"))
+  roles = roles_config["roles"]
+  instances = instances_config["instances"]
+  usage_error(".orbit/roles.yaml must contain a roles mapping.") unless roles.is_a?(Hash)
+  usage_error(".orbit/instances.yaml must contain an instances mapping.") unless instances.is_a?(Hash)
+
+  [roles, instances, File.join(config_dir, "instances.yaml"), instances_config]
+end
+
+def parse_instances_args(args)
+  subcommand = args.shift
+  usage_error("Missing instances subcommand.") unless subcommand
+  usage_error("Unknown instances subcommand: #{subcommand}") unless subcommand == "status"
+
+  json = false
+  until args.empty?
+    arg = args.shift
+    case arg
+    when "--json"
+      json = true
+    else
+      usage_error("Unknown instances #{subcommand} option: #{arg}")
+    end
+  end
+
+  usage_error("instances status currently requires --json") unless json
+  { "subcommand" => subcommand, "json" => json }
+end
+
+def instances_status_result
+  roles, instances = load_project_instance_config_for_cli[0, 2]
+  entries = instances.map do |name, instance|
+    usage_error("Instance #{name.inspect} must be a mapping.") unless instance.is_a?(Hash)
+    role_ref = instance["role_ref"]
+    usage_error("Instance #{name.inspect} must define role_ref.") unless role_ref.is_a?(String) && !role_ref.empty?
+    role_def = roles[role_ref]
+    usage_error("Instance #{name.inspect} references missing role #{role_ref.inspect}.") unless role_def.is_a?(Hash)
+
+    instance_status_entry(name, instance, role_ref, role_def)
+  end
+
+  {
+    "schema_version" => "orbit-instances-status-v1",
+    "project" => File.basename(Dir.pwd),
+    "instances" => entries
+  }
+end
+
+def instances(args)
+  options = parse_instances_args(args)
+  case options["subcommand"]
+  when "status"
+    puts JSON.pretty_generate(instances_status_result)
+  else
+    usage_error("Unknown instances subcommand: #{options["subcommand"]}")
+  end
+end
+
+def parse_bind_pane_args(args)
+  options = {
+    "transport" => "herdr",
+    "json" => false
+  }
+
+  until args.empty?
+    arg = args.shift
+    case arg
+    when "--instance"
+      options["instance"] = option_value(args, "--instance")
+    when /\A--instance=(.+)\z/
+      options["instance"] = Regexp.last_match(1)
+    when "--pane"
+      options["pane"] = option_value(args, "--pane")
+    when /\A--pane=(.+)\z/
+      options["pane"] = Regexp.last_match(1)
+    when "--transport"
+      options["transport"] = option_value(args, "--transport")
+    when /\A--transport=(.+)\z/
+      options["transport"] = Regexp.last_match(1)
+    when "--tab"
+      options["tab"] = option_value(args, "--tab")
+    when /\A--tab=(.+)\z/
+      options["tab"] = Regexp.last_match(1)
+    when "--space"
+      options["space"] = option_value(args, "--space")
+    when /\A--space=(.+)\z/
+      options["space"] = Regexp.last_match(1)
+    when "--json"
+      options["json"] = true
+    else
+      usage_error("Unknown bind-pane option: #{arg}")
+    end
+  end
+
+  usage_error("Missing required option: --instance") if options["instance"].to_s.empty?
+  usage_error("Missing required option: --pane") if options["pane"].to_s.empty?
+  usage_error("bind-pane currently requires --json") unless options["json"]
+  usage_error("bind-pane --transport must be one of #{ALLOWED_INSTANCE_TRANSPORTS.join("|")}") unless ALLOWED_INSTANCE_TRANSPORTS.include?(options["transport"])
+  options
+end
+
+def bind_pane(args)
+  options = parse_bind_pane_args(args)
+  roles, instances, instances_path, instances_config = load_project_instance_config_for_cli
+  instance_key, instance_alias = find_instance(instances, roles, options["instance"])
+  usage_error("Unknown Orbit instance #{options["instance"].inspect}.") unless instance_key
+
+  instance = instances[instance_key]
+  usage_error("Instance #{instance_key.inspect} must be a mapping.") unless instance.is_a?(Hash)
+
+  role_ref = instance["role_ref"]
+  role_def = roles[role_ref]
+  usage_error("Instance #{instance_key.inspect} references missing role #{role_ref.inspect}.") unless role_def.is_a?(Hash)
+  validate_instance_management!(instance_key, instance)
+
+  transport = normalize_instance_transport(instance_key, instance)
+  transport["kind"] = options["transport"]
+  transport["binding"]["pane"] = options["pane"]
+  transport["binding"]["tab"] = options["tab"].to_s
+  transport["binding"]["space"] = options["space"].to_s
+  transport["health"]["last_heartbeat"] = Time.now.utc.iso8601
+  transport["health"]["cwd"] = Dir.pwd
+  transport["health"]["actual_client"] = runtime_actual_client
+
+  instance["transport"] = transport
+  File.write(instances_path, YAML.dump(instances_config))
+
+  entry = instance_status_entry(instance_key, instance, role_ref, role_def)
+  puts JSON.pretty_generate({
+    "schema_version" => "orbit-bind-pane-v1",
+    "project" => File.basename(Dir.pwd),
+    "instance" => instance_key,
+    "requested_instance" => options["instance"],
+    "instance_alias" => instance_alias,
+    "status" => entry
+  }.compact)
+end
+
+def write_instance_binding!(instance_name, transport_kind:, pane:, tab: "", space: "")
+  roles, instances, instances_path, instances_config = load_project_instance_config_for_cli
+  instance_key, = find_instance(instances, roles, instance_name)
+  usage_error("Unknown Orbit instance #{instance_name.inspect}.") unless instance_key
+  instance = instances[instance_key]
+  role_ref = instance["role_ref"]
+  role_def = roles[role_ref]
+  usage_error("Instance #{instance_key.inspect} references missing role #{role_ref.inspect}.") unless role_def.is_a?(Hash)
+
+  transport = normalize_instance_transport(instance_key, instance)
+  transport["kind"] = transport_kind
+  transport["binding"]["pane"] = pane.to_s
+  transport["binding"]["tab"] = tab.to_s
+  transport["binding"]["space"] = space.to_s
+  transport["health"]["last_heartbeat"] = Time.now.utc.iso8601
+  transport["health"]["cwd"] = Dir.pwd
+  transport["health"]["actual_client"] = runtime_actual_client
+  instance["transport"] = transport
+  File.write(instances_path, YAML.dump(instances_config))
+
+  instance_status_entry(instance_key, instance, role_ref, role_def)
+end
+
 def parse_whoami_args(args)
   json = false
   task_path = nil
@@ -203,6 +462,7 @@ def resolve_identity(result, roles, instances)
 
   role_ref = instance["role_ref"]
   result["instance"] = env_instance && !env_instance.empty? ? env_instance : instance_key
+  result["resolved_instance"] = instance_key
   result["role_sources"]["project_config.instance_alias"] = instance_alias if instance_alias
   result["role_sources"]["project_config.instances.#{instance_key}.role_ref"] = role_ref if role_ref
 
@@ -214,7 +474,25 @@ def resolve_identity(result, roles, instances)
 
   resolved_role = role_def["role"] || role_ref
   result["resolved_role"] = resolved_role
+  result["role_ref"] = role_ref
   result["role_sources"]["project_config.roles.#{role_ref}.role"] = resolved_role
+
+  management = instance_management(instance)
+  if ALLOWED_INSTANCE_MANAGEMENT.include?(management)
+    transport = normalize_instance_transport(instance_key, instance)
+    result["management"] = management
+    expected_client = expected_client_name(instance["command"])
+    actual_client = runtime_actual_client
+    result["expected_command"] = command_expected_string(instance["command"])
+    result["actual_client"] = actual_client
+    result["transport_binding"] = transport["binding"]
+    result["binding_status"] = instance_binding_status(transport)
+    if actual_client != "unknown" && expected_client && actual_client != expected_client
+      conflict(result, "env.ORBIT_CLIENT", "ORBIT_CLIENT #{actual_client.inspect} conflicts with configured command #{expected_client.inspect} for instance #{instance_key.inspect}.")
+    end
+  else
+    conflict(result, "project_config.instances.#{instance_key}.management", "Instance management must be one of #{ALLOWED_INSTANCE_MANAGEMENT.join("|")}.")
+  end
 
   if env_role && !env_role.empty? && env_role != resolved_role
     conflict(result, "env.ORBIT_ROLE", "ORBIT_ROLE #{env_role.inspect} conflicts with config role #{resolved_role.inspect}.")
@@ -299,6 +577,8 @@ def load_instance_for_launch(instance_name)
 
   role_def = roles[role_ref]
   usage_error("Instance #{instance_key.inspect} references missing role #{role_ref.inspect}.") unless role_def.is_a?(Hash)
+  validate_instance_management!(instance_key, instance)
+  normalize_instance_transport(instance_key, instance)
 
   [instance_key, instance_alias, instance, role_ref, role_def]
 end
@@ -394,6 +674,8 @@ def default_rule_entries(role, task_type = nil)
     DEFAULT_RULE_REFERENCES.fetch(category, []).map do |entry|
       absolute_path = File.join(SKILL_ROOT, entry["path"])
       entry.merge(
+        "id" => entry["id"] || "orbit_default:#{category}:#{entry["path"]}",
+        "relation" => entry["relation"] || "baseline",
         "category" => category,
         "source" => "orbit_default",
         "absolute_path" => absolute_path,
@@ -406,21 +688,27 @@ end
 def normalize_project_rule_entry(entry, index)
   case entry
   when String
+    absolute_path = File.expand_path(entry, Dir.pwd)
     {
       "source" => "project_role_rules",
       "index" => index,
+      "id" => "project_rule:#{entry}",
+      "relation" => "supplements",
       "path" => entry,
-      "absolute_path" => File.expand_path(entry, Dir.pwd),
-      "exists" => File.file?(File.expand_path(entry, Dir.pwd))
+      "absolute_path" => absolute_path,
+      "exists" => File.file?(absolute_path)
     }
   when Hash
     path = entry["path"] || entry["file"]
+    absolute_path = path ? File.expand_path(path, Dir.pwd) : nil
     normalized = entry.dup
     normalized["source"] = "project_role_rules"
     normalized["index"] = index
+    normalized["id"] ||= path ? "project_rule:#{path}" : "project_rule:#{index}"
+    normalized["relation"] ||= "supplements"
     normalized["path"] = path
-    normalized["absolute_path"] = path ? File.expand_path(path, Dir.pwd) : nil
-    normalized["exists"] = path ? File.file?(File.expand_path(path, Dir.pwd)) : false
+    normalized["absolute_path"] = absolute_path
+    normalized["exists"] = absolute_path ? File.file?(absolute_path) : false
     normalized
   else
     {
@@ -602,6 +890,8 @@ def rule_context_entry(entry, source, required:, default_load_policy: "required"
     "source" => source,
     "category" => entry["category"],
     "id" => entry["id"],
+    "rule_id" => entry["rule_id"] || entry["id"] || (path ? "#{source}:#{path}" : "#{source}:#{entry["index"]}"),
+    "relation" => entry["relation"] || "supplements",
     "index" => entry["index"],
     "path" => path,
     "absolute_path" => absolute_path,
@@ -621,6 +911,8 @@ def task_context_entry(task_rules)
   path = task_rules["path"]
   {
     "source" => "task_rules",
+    "rule_id" => "task_rules:#{path}",
+    "relation" => "supplements",
     "path" => path,
     "absolute_path" => path,
     "exists" => path ? File.file?(path) : false,
@@ -633,6 +925,47 @@ def task_context_entry(task_rules)
       "evidence_requirements" => task_rules["evidence_requirements"] || [],
       "source_documents" => task_rules["source_documents"] || []
     }
+  }
+end
+
+def rule_dedupe_key(entry)
+  absolute_path = entry["absolute_path"].to_s
+  return "path:#{absolute_path}" unless absolute_path.empty?
+
+  rule_id = entry["rule_id"].to_s
+  return "rule:#{rule_id}" unless rule_id.empty?
+
+  "entry:#{entry["source"]}:#{entry["path"]}:#{entry["index"]}"
+end
+
+def annotate_rule_context_budget(load_order)
+  seen = {}
+  active = []
+  deduped = []
+
+  load_order.each do |entry|
+    key = rule_dedupe_key(entry)
+    if seen.key?(key)
+      entry["dedupe_status"] = "deduped"
+      entry["deduped_by"] = seen[key]["rule_id"] || seen[key]["path"]
+      deduped << {
+        "rule_id" => entry["rule_id"],
+        "path" => entry["path"],
+        "source" => entry["source"],
+        "deduped_by" => entry["deduped_by"]
+      }.compact
+    else
+      entry["dedupe_status"] = "active"
+      seen[key] = entry
+      active << entry
+    end
+  end
+
+  {
+    "active" => active.map { |entry| { "rule_id" => entry["rule_id"], "path" => entry["path"], "source" => entry["source"] }.compact },
+    "deduped" => deduped,
+    "shadowed" => [],
+    "not_loaded_but_related" => []
   }
 end
 
@@ -672,7 +1005,8 @@ def rules_context_pack(resolution)
     )
   end
 
-  required_files = load_order.select { |entry| entry["required"] && entry["absolute_path"] }
+  context_budget = annotate_rule_context_budget(load_order)
+  required_files = load_order.select { |entry| entry["dedupe_status"] == "active" && entry["required"] && entry["absolute_path"] }
   {
     "schema_version" => "orbit-rules-context-v1",
     "project" => resolution["project"],
@@ -690,6 +1024,7 @@ def rules_context_pack(resolution)
     },
     "load_order" => load_order,
     "required_files" => required_files,
+    "context_budget" => context_budget,
     "rule_packs" => sources["rule_packs"] || [],
     "resolution_summary" => {
       "default_rule_count" => (sources["orbit_default"] || []).length,
@@ -720,6 +1055,150 @@ def rules(args)
 
   print json
   exit(result["valid"] ? 0 : 1)
+end
+
+def parse_classify_intent_args(args)
+  options = {
+    "json" => false,
+    "text" => nil
+  }
+
+  until args.empty?
+    arg = args.shift
+    case arg
+    when "--json"
+      options["json"] = true
+    when "--text"
+      options["text"] = option_value(args, "--text")
+    when /\A--text=(.+)\z/
+      options["text"] = Regexp.last_match(1)
+    else
+      usage_error("Unknown classify-intent option: #{arg}")
+    end
+  end
+
+  usage_error("classify-intent requires --json") unless options["json"]
+  usage_error("classify-intent requires --text TEXT") if options["text"].to_s.strip.empty?
+  options
+end
+
+def explicit_orbit_workflow_request?(text)
+  normalized = text.to_s.downcase
+  normalized.match?(/((按|以|用|走|执行|继续|开始|启动|进入).{0,20}(orbit|流程|workflow))|((orbit|workflow).{0,12}(流程|执行|跑完|继续|闭环))|(正式.{0,8}(task|任务))/i)
+end
+
+def classify_intent_policy(intent, text)
+  explicit_orbit = explicit_orbit_workflow_request?(text)
+  docs_affects_orbit = text.match?(/\.orbit|evidence|handoff|archive|归档|路径|历史|规则|rule/i)
+
+  policy = case intent
+           when "discussion"
+             {
+               "formal_task" => false,
+               "evidence" => false,
+               "gates" => false,
+               "default_task_type" => nil,
+               "skip_task_reason_required" => true
+             }
+           when "design"
+             {
+               "formal_task" => true,
+               "evidence" => true,
+               "gates" => true,
+               "default_task_type" => "design"
+             }
+           when "docs_maintenance"
+             {
+               "formal_task" => docs_affects_orbit,
+               "evidence" => docs_affects_orbit,
+               "gates" => docs_affects_orbit,
+               "default_task_type" => "docs_maintenance",
+               "skip_task_reason_required" => !docs_affects_orbit
+             }
+           when "review"
+             {
+               "formal_task" => true,
+               "evidence" => true,
+               "gates" => false,
+               "default_task_type" => "review"
+             }
+           when "test"
+             {
+               "formal_task" => true,
+               "evidence" => true,
+               "gates" => false,
+               "default_task_type" => "test"
+             }
+           when "handoff"
+             {
+               "formal_task" => true,
+               "evidence" => true,
+               "gates" => false,
+               "default_task_type" => "handoff"
+             }
+           else
+             {
+               "formal_task" => true,
+               "evidence" => true,
+               "gates" => true,
+               "default_task_type" => "coding"
+             }
+           end
+
+  if explicit_orbit
+    policy["formal_task"] = true
+    policy["evidence"] = true
+    policy["gates"] = true unless %w[review test handoff].include?(intent)
+    policy.delete("skip_task_reason_required")
+  end
+
+  policy
+end
+
+def classify_intent_text(text)
+  normalized = text.to_s.downcase
+  checks = [
+    ["handoff", /handoff|交接|接手/],
+    ["test", /test|测试|e2e|qa|验证/],
+    ["review", /review|评审|审查|reviewer/],
+    ["discussion", /讨论|怎么看|觉得|建议|brainstorm|question|问题/],
+    ["design", /design|设计|方案|analysis|分析|计划/],
+    ["docs_maintenance", /docs|document|文档|归档|archive|readme/],
+    ["coding", /fix|implement|coding|code|改代码|修复|实现|继续/]
+  ]
+
+  matched = checks.find { |_intent, pattern| normalized.match?(pattern) }
+  intent = matched ? matched.first : "discussion"
+  explicit_orbit = explicit_orbit_workflow_request?(normalized)
+  intent = "coding" if explicit_orbit && intent == "discussion"
+
+  {
+    "intent" => intent,
+    "confidence" => matched ? "medium" : "low",
+    "reason" => matched ? "Matched #{intent} workflow keywords." : "No strong workflow keyword matched; defaulting to discussion.",
+    "explicit_orbit_workflow" => explicit_orbit
+  }
+end
+
+def classify_intent(args)
+  options = parse_classify_intent_args(args)
+  text = options["text"].to_s
+  classification = classify_intent_text(text)
+  result = {
+    "schema_version" => "orbit-intent-classification-v1",
+    "project" => File.basename(Dir.pwd),
+    "input" => {
+      "text" => text
+    },
+    "intent" => classification["intent"],
+    "confidence" => classification["confidence"],
+    "reason" => classification["reason"],
+    "explicit_orbit_workflow" => classification["explicit_orbit_workflow"],
+    "policy" => classify_intent_policy(classification["intent"], text),
+    "allowed_intents" => %w[discussion design docs_maintenance coding review test handoff]
+  }
+
+  puts JSON.pretty_generate(result)
 end
 
 def whoami(args)
@@ -753,4 +1232,3 @@ def whoami(args)
   puts JSON.pretty_generate(result)
   exit(result["conflicts"].empty? ? 0 : 1)
 end
-

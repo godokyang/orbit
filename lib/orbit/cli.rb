@@ -7,6 +7,7 @@ require_relative "evidence"
 require_relative "state_validate_gate"
 require_relative "audit_tools"
 require_relative "handoff"
+require_relative "docs_lifecycle"
 
 def run_orbit_cli(argv)
   command = argv.shift
@@ -20,12 +21,32 @@ def run_orbit_cli(argv)
       exit 0
     end
     audit(argv)
+  when "bind-pane"
+    bind_pane(argv)
+  when "classify-intent"
+    if help_requested?(argv)
+      print_command_help("classify-intent")
+      exit 0
+    end
+    classify_intent(argv)
+  when "compact-evidence"
+    if help_requested?(argv)
+      print_command_help("compact-evidence")
+      exit 0
+    end
+    compact_evidence(argv)
   when "dispatch"
     if help_requested?(argv)
       print_command_help("dispatch")
       exit 0
     end
     dispatch(argv)
+  when "docs"
+    if help_requested?(argv)
+      print_command_help("docs")
+      exit 0
+    end
+    docs(argv)
   when "evidence"
     evidence(argv)
   when "handoff"
@@ -36,6 +57,8 @@ def run_orbit_cli(argv)
     handoff(argv)
   when "init"
     init_config(argv)
+  when "instances"
+    instances(argv)
   when "new-task"
     new_task(argv)
   when "rules"

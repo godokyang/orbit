@@ -58,7 +58,8 @@ rescue RuntimeError => e
   nil
 end
 
-ALLOWED_LOOP_PHASES = %w[idle working in_review in_test blocked done].freeze
+ALLOWED_LOOP_PHASES = %w[idle working in_review in_test blocked done drafting review_requested changes_requested user_confirmed coding_ready].freeze
+DESIGN_LIFECYCLE_PHASES = %w[drafting review_requested changes_requested user_confirmed coding_ready].freeze
 ALLOWED_GATE_KINDS = %w[review test].freeze
 
 def default_state_path
@@ -260,12 +261,13 @@ def state_start(options)
   state = load_loop_state(state_path)
   now = Time.now.utc.iso8601
   previous_phase = state["phase"]
+  start_phase = design_task?(task) ? "drafting" : "working"
 
   state["project"] = task["project"] || File.basename(Dir.pwd)
   state["current_task"] = task_path
-  state["phase"] = "working"
+  state["phase"] = start_phase
   state["owner_role"] = owner_role
-  state["status"] = "working"
+  state["status"] = start_phase
   state["updated_at"] = now
   state["artifacts"] ||= {}
   state_error("Loop state artifacts must be a mapping when present.") unless state["artifacts"].is_a?(Hash)
@@ -273,7 +275,7 @@ def state_start(options)
   append_state_history(state, {
     "event" => "start",
     "from" => previous_phase,
-    "to" => "working",
+    "to" => start_phase,
     "task" => task_path,
     "owner_role" => owner_role,
     "created_at" => now
@@ -303,6 +305,8 @@ def state_transition(options)
     validate_done_transition!(state_path, task_path, options["evidence"])
   end
 
+  validate_design_transition!(previous_phase, target_phase, task, options["evidence"]) if task && design_task?(task)
+
   if previous_phase == "working" && target_phase == "done" && task && review_or_test_gate?(task)
     state_error("Cannot transition directly from working to done for review/test task.")
   end
@@ -328,6 +332,48 @@ def state_transition(options)
   write_loop_state(state_path, state)
   puts "Transitioned Orbit state:"
   puts "- #{previous_phase} -> #{target_phase}"
+end
+
+def user_confirmation_record?(record)
+  return false unless record.is_a?(Hash)
+  return false unless record["status"] == "pass"
+  return false unless %w[implementation command].include?(record["kind"])
+
+  summary = record["summary"].to_s.downcase
+  summary.include?("user_confirmed") || summary.include?("user confirmation") || summary.include?("用户确认")
+end
+
+def evidence_has_user_confirmation?(evidence)
+  records = evidence.is_a?(Hash) ? evidence["records"] : nil
+  records.is_a?(Array) && records.any? { |record| user_confirmation_record?(record) }
+end
+
+def validate_design_coding_ready_evidence!(evidence_path)
+  state_error("Design transition to user_confirmed/coding_ready requires --evidence.") if evidence_path.nil? || evidence_path.empty?
+
+  evidence = load_evidence_manifest(File.expand_path(evidence_path))
+  records = evidence["records"].is_a?(Array) ? evidence["records"] : []
+  state_error("Design transition requires structured review pass evidence.") unless gate_passed?(records, "review")
+  state_error("Design transition requires user_confirmed evidence from the user confirmation step.") unless evidence_has_user_confirmation?(evidence)
+end
+
+def validate_design_transition!(previous_phase, target_phase, task, evidence_path)
+  return unless DESIGN_LIFECYCLE_PHASES.include?(target_phase)
+
+  allowed = {
+    "drafting" => %w[idle working drafting],
+    "review_requested" => %w[drafting changes_requested],
+    "changes_requested" => %w[review_requested],
+    "user_confirmed" => %w[review_requested],
+    "coding_ready" => %w[user_confirmed]
+  }
+
+  allowed_previous = allowed[target_phase] || []
+  unless allowed_previous.include?(previous_phase)
+    state_error("Invalid design transition #{previous_phase} -> #{target_phase}; expected previous phase one of #{allowed_previous.join("|")}.")
+  end
+
+  validate_design_coding_ready_evidence!(evidence_path) if %w[user_confirmed coding_ready].include?(target_phase)
 end
 
 def state_progress(options)
@@ -434,6 +480,34 @@ def validate_instance_env(result, source, instance_name, env, resolved_role)
   end
 end
 
+def validate_instance_management_field(result, source, instance_name, instance)
+  management = instance_management(instance)
+  unless ALLOWED_INSTANCE_MANAGEMENT.include?(management)
+    validation_error(result, "project_config.instances.#{source}.management", "Instance #{instance_name.inspect} management must be one of #{ALLOWED_INSTANCE_MANAGEMENT.join("|")}.")
+  end
+end
+
+def validate_instance_transport_field(result, source, instance_name, transport)
+  return if transport.nil?
+
+  unless transport.is_a?(Hash)
+    validation_error(result, "project_config.instances.#{source}.transport", "Instance #{instance_name.inspect} transport must be a mapping.")
+    return
+  end
+
+  kind = transport["kind"].to_s
+  unless kind.empty? || ALLOWED_INSTANCE_TRANSPORTS.include?(kind)
+    validation_error(result, "project_config.instances.#{source}.transport.kind", "Instance #{instance_name.inspect} transport.kind must be one of #{ALLOWED_INSTANCE_TRANSPORTS.join("|")}.")
+  end
+
+  %w[binding health].each do |field|
+    value = transport[field]
+    next if value.nil? || value.is_a?(Hash)
+
+    validation_error(result, "project_config.instances.#{source}.transport.#{field}", "Instance #{instance_name.inspect} transport.#{field} must be a mapping when present.")
+  end
+end
+
 def validate_project_config(result)
   config_dir = File.join(Dir.pwd, ".orbit")
   roles_path = File.join(config_dir, "roles.yaml")
@@ -476,6 +550,8 @@ def validate_project_config(result)
     end
 
     validate_instance_command(result, name, instance["command"])
+    validate_instance_management_field(result, name, name, instance)
+    validate_instance_transport_field(result, name, name, instance["transport"])
 
     role_def = role_ref && roles[role_ref]
     resolved_role = role_def.is_a?(Hash) ? (role_def["role"] || role_ref) : nil
@@ -487,7 +563,206 @@ end
 
 def improvement_task?(task)
   task_type = task["task_type"].to_s
-  task_type.include?("improvement")
+  %w[improvement refactor split docs documentation performance speed latency ux workflow reliability architecture].any? do |token|
+    task_type.include?(token)
+  end
+end
+
+def task_type_value(task_or_type)
+  task_or_type.is_a?(Hash) ? task_or_type["task_type"] : task_or_type
+end
+
+def design_task?(task_or_type)
+  task_type = task_type_value(task_or_type).to_s.downcase
+  task_type.include?("design") || task_type.include?("analysis")
+end
+
+def coding_task?(task_or_type)
+  task_type_value(task_or_type).to_s.downcase.include?("coding")
+end
+
+def decomposition_task?(task_or_type)
+  task_type = task_type_value(task_or_type).to_s.downcase
+  task_type.include?("decomposition") || task_type.include?("parent")
+end
+
+def test_task_contract?(task)
+  task.is_a?(Hash) && (task["target_role"].to_s == "tester" || task["task_type"].to_s.downcase.include?("test"))
+end
+
+def quality_measurement_task?(task_or_type)
+  task_type = task_type_value(task_or_type).to_s.downcase
+  %w[performance speed latency ux workflow quality eval llm measurement].any? { |token| task_type.include?(token) }
+end
+
+def validate_quality_outcome(result, task)
+  source = "task_file.quality_outcome"
+  outcome = task["quality_outcome"]
+  unless outcome.is_a?(Hash)
+    validation_error(result, source, "Improvement task quality_outcome must be a mapping.")
+    return
+  end
+
+  validate_non_empty_string(result, "#{source}.user_problem", outcome["user_problem"], "Quality outcome user_problem")
+  validate_non_empty_string(result, "#{source}.desired_property", outcome["desired_property"], "Quality outcome desired_property")
+
+  thresholds = outcome["measurable_thresholds"]
+  unless thresholds.is_a?(Array) && thresholds.any? && thresholds.all? { |item| item.is_a?(String) && !item.strip.empty? }
+    validation_error(result, "#{source}.measurable_thresholds", "Quality outcome measurable_thresholds must be a non-empty list of non-empty strings.")
+  end
+
+  invalid_completions = outcome["invalid_completions"]
+  unless invalid_completions.is_a?(Array) && invalid_completions.any? && invalid_completions.all? { |item| item.is_a?(String) && !item.strip.empty? }
+    validation_error(result, "#{source}.invalid_completions", "Quality outcome invalid_completions must be a non-empty list of non-empty strings.")
+  end
+end
+
+def validate_design_lifecycle(result, task)
+  lifecycle = task["design_lifecycle"]
+  if lifecycle.nil?
+    validation_error(result, "task_file.design_lifecycle", "Design task must define design_lifecycle.")
+    return
+  end
+
+  unless lifecycle.is_a?(Hash)
+    validation_error(result, "task_file.design_lifecycle", "Task design_lifecycle must be a mapping.")
+    return
+  end
+
+  unless lifecycle["enabled"] == true
+    validation_error(result, "task_file.design_lifecycle.enabled", "Design task design_lifecycle.enabled must be true.")
+  end
+
+  phases = lifecycle["phases"]
+  unless phases.is_a?(Array) && DESIGN_LIFECYCLE_PHASES.all? { |phase| phases.include?(phase) }
+    validation_error(result, "task_file.design_lifecycle.phases", "Design task phases must include #{DESIGN_LIFECYCLE_PHASES.join("|")}.")
+  end
+
+  current_phase = lifecycle["current_phase"]
+  unless DESIGN_LIFECYCLE_PHASES.include?(current_phase)
+    validation_error(result, "task_file.design_lifecycle.current_phase", "Design task current_phase must be one of #{DESIGN_LIFECYCLE_PHASES.join("|")}.")
+  end
+
+  unless lifecycle["user_confirmation_required"] == true
+    validation_error(result, "task_file.design_lifecycle.user_confirmation_required", "Design task must require user confirmation before coding_ready.")
+  end
+
+  unless lifecycle["coding_requires_confirmed_design"] == true
+    validation_error(result, "task_file.design_lifecycle.coding_requires_confirmed_design", "Design task must require confirmed design before coding.")
+  end
+end
+
+def validate_coding_design_reference(result, task)
+  reference = task["design_reference"]
+  if reference.nil?
+    validation_error(result, "task_file.design_reference", "Coding task must define design_reference.")
+    return
+  end
+
+  unless reference.is_a?(Hash)
+    validation_error(result, "task_file.design_reference", "Coding task design_reference must be a mapping.")
+    return
+  end
+
+  unless reference["required_for_coding"] == true
+    validation_error(result, "task_file.design_reference.required_for_coding", "Coding task design_reference.required_for_coding must be true.")
+  end
+
+  validate_non_empty_string(result, "task_file.design_reference.artifact", reference["artifact"], "Coding task design artifact")
+  validate_non_empty_string(result, "task_file.design_reference.confirmation_evidence", reference["confirmation_evidence"], "Coding task design confirmation evidence")
+
+  unless reference["status"] == "confirmed"
+    validation_error(result, "task_file.design_reference.status", "Coding task design_reference.status must be confirmed.")
+  end
+end
+
+def validate_decomposition_contract(result, task)
+  plan = task["implementation_plan"]
+  if plan.nil?
+    validation_error(result, "task_file.implementation_plan", "Decomposition task must define implementation_plan.")
+  elsif !plan.is_a?(Hash)
+    validation_error(result, "task_file.implementation_plan", "Task implementation_plan must be a mapping.")
+  else
+    unless plan["required"] == true
+      validation_error(result, "task_file.implementation_plan.required", "Decomposition task implementation_plan.required must be true.")
+    end
+    validate_non_empty_string(result, "task_file.implementation_plan.summary", plan["summary"], "Implementation plan summary")
+  end
+
+  decomposition = task["decomposition"]
+  if decomposition.nil?
+    validation_error(result, "task_file.decomposition", "Decomposition task must define decomposition.")
+  elsif !decomposition.is_a?(Hash)
+    validation_error(result, "task_file.decomposition", "Task decomposition must be a mapping.")
+  else
+    child_slices = decomposition["child_slices"]
+    unless child_slices.is_a?(Array) && child_slices.any? && child_slices.all? { |slice| slice.is_a?(Hash) && slice["id"].is_a?(String) && !slice["id"].strip.empty? }
+      validation_error(result, "task_file.decomposition.child_slices", "Decomposition child_slices must be a non-empty list of mappings with id.")
+    end
+
+    metrics = decomposition["aggregate_outcome_metrics"]
+    unless metrics.is_a?(Array) && metrics.any? && metrics.all? { |metric| metric.is_a?(String) && !metric.strip.empty? }
+      validation_error(result, "task_file.decomposition.aggregate_outcome_metrics", "Decomposition aggregate_outcome_metrics must be a non-empty list of non-empty strings.")
+    end
+
+    stop_conditions = decomposition["stop_conditions"]
+    unless stop_conditions.is_a?(Array) && stop_conditions.any? && stop_conditions.all? { |condition| condition.is_a?(String) && !condition.strip.empty? }
+      validation_error(result, "task_file.decomposition.stop_conditions", "Decomposition stop_conditions must be a non-empty list of non-empty strings.")
+    end
+
+    validate_non_empty_string(result, "task_file.decomposition.replanning_path", decomposition["replanning_path"], "Decomposition replanning_path")
+  end
+
+  final_audit = task["final_aggregate_audit"]
+  if final_audit.nil?
+    validation_error(result, "task_file.final_aggregate_audit", "Decomposition task must define final_aggregate_audit.")
+  elsif !final_audit.is_a?(Hash)
+    validation_error(result, "task_file.final_aggregate_audit", "Task final_aggregate_audit must be a mapping.")
+  else
+    unless final_audit["required"] == true
+      validation_error(result, "task_file.final_aggregate_audit.required", "Decomposition task final_aggregate_audit.required must be true.")
+    end
+    checks = final_audit["checks"]
+    unless checks.is_a?(Array) && checks.any? && checks.all? { |check| check.is_a?(String) && !check.strip.empty? }
+      validation_error(result, "task_file.final_aggregate_audit.checks", "Final aggregate audit checks must be a non-empty list of non-empty strings.")
+    end
+  end
+end
+
+def validate_test_environment_contract(result, task)
+  env = task["test_environment"]
+  if env.nil?
+    validation_error(result, "task_file.test_environment", "Test task must define test_environment.")
+    return
+  end
+  unless env.is_a?(Hash)
+    validation_error(result, "task_file.test_environment", "Task test_environment must be a mapping.")
+    return
+  end
+  validation_error(result, "task_file.test_environment.required", "Test task test_environment.required must be true.") unless env["required"] == true
+  %w[environment test_tab_or_pane server_owner browser_owner cleanup_hook artifact_cleanup duration_budget resource_budget].each do |field|
+    validate_non_empty_string(result, "task_file.test_environment.#{field}", env[field], "Test environment #{field}")
+  end
+end
+
+def validate_quality_measurement_contract(result, task)
+  measurement = task["quality_measurement"]
+  if measurement.nil?
+    validation_error(result, "task_file.quality_measurement", "Quality measurement task must define quality_measurement.")
+    return
+  end
+  unless measurement.is_a?(Hash)
+    validation_error(result, "task_file.quality_measurement", "Task quality_measurement must be a mapping.")
+    return
+  end
+  validation_error(result, "task_file.quality_measurement.required", "Quality measurement required must be true.") unless measurement["required"] == true
+  validation_error(result, "task_file.quality_measurement.baseline_required", "Quality measurement baseline_required must be true.") unless measurement["baseline_required"] == true
+  validation_error(result, "task_file.quality_measurement.after_required", "Quality measurement after_required must be true.") unless measurement["after_required"] == true
+  metrics = measurement["metrics"]
+  unless metrics.is_a?(Array) && metrics.any? && metrics.all? { |item| item.is_a?(String) && !item.strip.empty? }
+    validation_error(result, "task_file.quality_measurement.metrics", "Quality measurement metrics must be a non-empty list of non-empty strings.")
+  end
+  validate_non_empty_string(result, "task_file.quality_measurement.waiver_policy", measurement["waiver_policy"], "Quality measurement waiver_policy")
 end
 
 def review_or_test_gate?(task)
@@ -564,9 +839,19 @@ def validate_task(result, task_path)
     validation_error(result, "task_file.evidence_requirements", "Task must define evidence_requirements.")
   end
 
-  if improvement_task?(task) && !task.key?("quality_outcome")
-    validation_error(result, "task_file.quality_outcome", "Improvement task must define quality_outcome.")
+  if improvement_task?(task)
+    if !task.key?("quality_outcome")
+      validation_error(result, "task_file.quality_outcome", "Improvement task must define quality_outcome.")
+    else
+      validate_quality_outcome(result, task)
+    end
   end
+
+  validate_design_lifecycle(result, task) if design_task?(task)
+  validate_coding_design_reference(result, task) if coding_task?(task)
+  validate_decomposition_contract(result, task) if decomposition_task?(task)
+  validate_test_environment_contract(result, task) if test_task_contract?(task)
+  validate_quality_measurement_contract(result, task) if quality_measurement_task?(task)
 
   validate_task_runtime_fields(result, task)
 
@@ -715,6 +1000,24 @@ def validate_evidence_record(result, source, record)
   unless created_at.is_a?(String) && !created_at.empty?
     validation_error(result, "#{source}.created_at", "Evidence record created_at must be a non-empty string.")
   end
+
+  validate_structured_evidence_record(result, source, record) if record["structured_submit"] == true
+end
+
+def validate_string_array_field(result, source, value, label)
+  unless value.is_a?(Array) && value.all? { |item| item.is_a?(String) && !item.strip.empty? }
+    validation_error(result, source, "#{label} must be a list of non-empty strings.")
+  end
+end
+
+def validate_structured_evidence_record(result, source, record)
+  unless STRUCTURED_SUBMIT_KINDS.include?(record["kind"])
+    validation_error(result, "#{source}.structured_submit", "Structured submit is only valid for #{STRUCTURED_SUBMIT_KINDS.join("|")} evidence.")
+  end
+  validate_non_empty_string(result, "#{source}.source_message_id", record["source_message_id"], "Structured submit source_message_id")
+  validate_string_array_field(result, "#{source}.findings", record["findings"], "Structured submit findings")
+  validate_string_array_field(result, "#{source}.coverage", record["coverage"], "Structured submit coverage")
+  validate_string_array_field(result, "#{source}.artifacts", record["artifacts"], "Structured submit artifacts")
 end
 
 def parse_evidence_created_at(result, source, value)
@@ -737,6 +1040,7 @@ def latest_valid_gate_record(result, records, expected_kind)
     next unless record["kind"] == expected_kind
     next if record["status"] == "invalid"
     next unless ALLOWED_EVIDENCE_STATUSES.include?(record["status"])
+    next if STRUCTURED_SUBMIT_KINDS.include?(expected_kind) && record["structured_submit"] != true
 
     created_at = parse_evidence_created_at(result, "evidence_file.records[#{index}].created_at", record["created_at"])
     next unless created_at
@@ -750,7 +1054,7 @@ end
 def validate_gate_verdict(result, records, expected_kind)
   latest = latest_valid_gate_record(result, records, expected_kind)
   unless latest
-    validation_error(result, "evidence_file.records", "Review/test task requires valid #{expected_kind.inspect} evidence with status pass.")
+    validation_error(result, "evidence_file.records", "Review/test task requires structured valid #{expected_kind.inspect} evidence with status pass.")
     return
   end
 
@@ -781,6 +1085,94 @@ end
 def validate_non_empty_string(result, source, value, label)
   unless value.is_a?(String) && !value.strip.empty?
     validation_error(result, source, "#{label} must be a non-empty string.")
+  end
+end
+
+def validate_non_empty_scalar(result, source, value, label)
+  return if value.is_a?(String) && !value.strip.empty?
+  return if value.is_a?(Numeric)
+
+  validation_error(result, source, "#{label} must be a non-empty scalar.")
+end
+
+def record_field_or_nested(record, nested, field)
+  nested[field].nil? ? record[field] : nested[field]
+end
+
+def validate_test_pass_environment_evidence(result, records, task)
+  return unless test_task_contract?(task)
+
+  latest = latest_record_for_kind(records, "test", structured_gate_only: true)
+  return unless latest && latest["status"] == "pass"
+
+  environment = latest["test_environment"]
+  unless environment.is_a?(Hash)
+    validation_error(result, "evidence_file.records.test.test_environment", "Latest passing test evidence must include test_environment mapping.")
+    return
+  end
+
+  %w[environment test_tab_or_pane server_owner browser_owner cleanup_hook artifact_cleanup].each do |field|
+    validate_non_empty_string(result, "evidence_file.records.test.test_environment.#{field}", environment[field], "Test environment #{field}")
+  end
+
+  %w[duration resource_usage cleanup_status ux_quality artifact_quality].each do |field|
+    value = record_field_or_nested(latest, environment, field)
+    validate_non_empty_scalar(result, "evidence_file.records.test.test_environment.#{field}", value, "Test environment #{field}")
+  end
+end
+
+def validate_quality_metric_evidence(result, source, metric)
+  unless metric.is_a?(Hash)
+    validation_error(result, source, "Quality measurement metric must be a mapping.")
+    return
+  end
+
+  validate_non_empty_string(result, "#{source}.name", metric["name"], "Quality measurement metric name")
+  validate_non_empty_scalar(result, "#{source}.baseline", metric["baseline"], "Quality measurement metric baseline")
+  validate_non_empty_scalar(result, "#{source}.after", metric["after"], "Quality measurement metric after")
+  validate_non_empty_string(result, "#{source}.evidence", metric["evidence"], "Quality measurement metric evidence")
+end
+
+def validate_quality_measurement_waiver_evidence(result, source, waiver)
+  unless waiver.is_a?(Hash)
+    validation_error(result, source, "Quality measurement waiver must be a mapping.")
+    return
+  end
+
+  %w[reason risk replacement_evidence].each do |field|
+    validate_non_empty_string(result, "#{source}.#{field}", waiver[field], "Quality measurement waiver #{field}")
+  end
+end
+
+def validate_quality_measurement_evidence(result, records, task)
+  return unless quality_measurement_task?(task)
+
+  latest = latest_record_for_kind(records, "test", structured_gate_only: true)
+  return unless latest && latest["status"] == "pass"
+
+  measurement = latest["quality_measurement"]
+  unless measurement.is_a?(Hash)
+    validation_error(result, "evidence_file.records.test.quality_measurement", "Latest passing test evidence must include quality_measurement mapping for baseline/after evidence or an explicit waiver.")
+    return
+  end
+
+  waiver = measurement["waiver"]
+  if waiver.is_a?(Hash) && !waiver.empty?
+    validate_quality_measurement_waiver_evidence(result, "evidence_file.records.test.quality_measurement.waiver", waiver)
+    return
+  end
+
+  validate_non_empty_scalar(result, "evidence_file.records.test.quality_measurement.baseline", measurement["baseline"], "Quality measurement baseline")
+  validate_non_empty_scalar(result, "evidence_file.records.test.quality_measurement.after", measurement["after"], "Quality measurement after")
+
+  metrics = measurement["metrics"]
+  unless metrics.is_a?(Array) && !metrics.empty?
+    validation_error(result, "evidence_file.records.test.quality_measurement.metrics", "Quality measurement metrics must be a non-empty list.")
+    return
+  end
+
+  metrics.each_with_index do |metric, index|
+    validate_quality_metric_evidence(result, "evidence_file.records.test.quality_measurement.metrics[#{index}]", metric)
   end
 end
 
@@ -991,6 +1383,34 @@ def validate_tool_calls(result, value)
   end
 end
 
+def validate_waiver(result, source, waiver)
+  unless waiver.is_a?(Hash)
+    validation_error(result, source, "Waiver must be a mapping.")
+    return
+  end
+
+  %w[owner scope reason risk replacement_evidence expiry created_at].each do |field|
+    validate_non_empty_string(result, "#{source}.#{field}", waiver[field], "Waiver #{field}")
+  end
+
+  unless [true, false].include?(waiver["revoked_by_user_requirement"])
+    validation_error(result, "#{source}.revoked_by_user_requirement", "Waiver revoked_by_user_requirement must be true or false.")
+  end
+end
+
+def validate_waivers(result, value)
+  return if value.nil?
+
+  unless value.is_a?(Array)
+    validation_error(result, "evidence_file.waivers", "Evidence waivers must be a list.")
+    return
+  end
+
+  value.each_with_index do |waiver, index|
+    validate_waiver(result, "evidence_file.waivers[#{index}]", waiver)
+  end
+end
+
 def empty_rule_resolution_reference?(reference)
   return true if reference.nil?
   return false unless reference.is_a?(Hash)
@@ -1102,13 +1522,14 @@ def validate_evidence(result, evidence_path, task = nil)
     end
 
     status = verdict["status"]
-    unless ALLOWED_EVIDENCE_STATUSES.include?(status)
-      validation_error(result, "evidence_file.verdict.status", "Evidence verdict.status must be one of #{ALLOWED_EVIDENCE_STATUSES.join("|")}.")
+    unless ALLOWED_EVIDENCE_VERDICT_STATUSES.include?(status)
+      validation_error(result, "evidence_file.verdict.status", "Evidence verdict.status must be one of #{ALLOWED_EVIDENCE_VERDICT_STATUSES.join("|")}.")
     end
   elsif !records
     validation_error(result, "evidence_file.verdict", "Evidence must define verdict mapping or records list.")
   end
 
+  validate_waivers(result, evidence["waivers"])
   validate_review_judgment(result, evidence["review_judgment"]) if evidence.key?("review_judgment")
   validate_test_judgment(result, evidence["test_judgment"]) if evidence.key?("test_judgment")
   validate_worktree_safety(result, evidence["worktree_safety"])
@@ -1116,6 +1537,10 @@ def validate_evidence(result, evidence_path, task = nil)
   validate_release_surface(result, evidence["release_surface"])
   validate_tool_calls(result, evidence["tool_calls"])
   validate_rule_resolution_reference(result, evidence_path, evidence, task)
+  if task && records.is_a?(Array)
+    validate_test_pass_environment_evidence(result, records, task)
+    validate_quality_measurement_evidence(result, records, task)
+  end
 
   if task && review_or_test_gate?(task) && records.is_a?(Array) && !records.empty?
     expected_kind = expected_evidence_kind(task)
@@ -1145,7 +1570,7 @@ def evidence_has_done_signal?(evidence)
   verdict.is_a?(Hash) && verdict["status"] == "pass"
 end
 
-def latest_record_for_kind(records, kind)
+def latest_record_for_kind(records, kind, structured_gate_only: false)
   return nil unless records.is_a?(Array)
 
   candidates = []
@@ -1153,6 +1578,7 @@ def latest_record_for_kind(records, kind)
     next unless record.is_a?(Hash)
     next unless record["kind"] == kind
     next if record["status"] == "invalid"
+    next if structured_gate_only && STRUCTURED_SUBMIT_KINDS.include?(kind) && record["structured_submit"] != true
 
     begin
       created_at = Time.iso8601(record["created_at"].to_s)
@@ -1165,7 +1591,7 @@ def latest_record_for_kind(records, kind)
 end
 
 def gate_passed?(records, kind)
-  latest_record_for_kind(records, kind)&.fetch("status", nil) == "pass"
+  latest_record_for_kind(records, kind, structured_gate_only: true)&.fetch("status", nil) == "pass"
 end
 
 def parse_wait_gate_args(args)
@@ -1198,13 +1624,14 @@ def parse_wait_gate_args(args)
 end
 
 def gate_status(records, kind)
-  latest = latest_record_for_kind(records, kind)
+  latest = latest_record_for_kind(records, kind, structured_gate_only: true)
   status = latest ? latest["status"] : "missing"
   {
     "kind" => kind,
     "required" => true,
     "status" => status,
     "passed" => status == "pass",
+    "structured" => latest.is_a?(Hash) ? latest["structured_submit"] == true : false,
     "latest" => latest
   }.compact
 end
@@ -1224,6 +1651,7 @@ def wait_gate(args)
     "task" => task_path,
     "evidence" => evidence_path,
     "ready" => ready,
+    "aggregate_verdict" => evidence["verdict"],
     "gates" => gates,
     "summary" => ready ? "all required gates pass" : "required gates are not ready"
   }
@@ -1351,4 +1779,3 @@ def validate(args)
   print_validation_result(result, options["json"])
   exit(result["errors"].empty? ? 0 : 1)
 end
-

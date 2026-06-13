@@ -97,14 +97,19 @@ agents:
 skill 的推荐启动动作：
 
 ```text
-1. 调用 orbit whoami --json。
-2. 读取 resolved_role、rules、permissions、conflicts。
-3. 如果存在 conflicts，停止并报告。
-4. 调用 orbit rules resolve --json，已有 task 时带上 --task，生成规则审计产物。
-5. 调用 orbit rules print-context --json，已有 task 时带上 --task，读取其中 required_files。
-6. 加载 print-context 中声明的 Orbit 默认规则、项目规则和 task 规则；rule packs 作为 optional/conditional 增强清单。
-7. 按 permissions 和 role 执行任务。
+1. 若用户意图是否需要正式闭环不清楚，调用 orbit classify-intent --text "..." --json。
+2. 调用 orbit whoami --json。
+3. 读取 resolved_role、rules、permissions、conflicts。
+4. 如果存在 conflicts，停止并报告。
+5. 调用 orbit rules resolve --json，已有 task 时带上 --task，生成规则审计产物。
+6. 调用 orbit rules print-context --json，已有 task 时带上 --task，读取其中 active required_files。
+7. 加载 print-context 中声明的 Orbit 默认规则、项目规则和 task 规则；rule packs 作为 optional/conditional 增强清单，deduped/shadowed/not_loaded_but_related 只作为审计线索。
+8. 按 permissions 和 role 执行任务。
 ```
+
+`orbit classify-intent --json` 的输出用于把 Orbit-aware 和正式 Orbit 闭环分开。它不替代 agent 对用户上下文的判断，但给出稳定默认策略：`discussion` 不建 task 且要记录 skip reason；`design`、`coding`、`review`、`test`、`handoff` 默认进入对应结构化流程；`docs_maintenance` 只有在触及 `.orbit`、evidence、handoff、archive、路径引用、历史或规则文件时默认进入正式维护 task；用户明确要求“按 Orbit 流程”时必须建 task、写 evidence，并按 task 类型要求 gate。
+
+`orbit docs alias/check` 和 `orbit compact-evidence` 是 docs/evidence lifecycle 的协议工具。`docs alias` 建立 stable doc id、current path 和 content hash，避免文档移动时重写历史 evidence；`docs check` 检查 registry、open/archive 状态和断链；`compact-evidence` 把 task/evidence/handoff 压缩成 durable summary，只保留 hash、计数、latest verdict 和 artifact refs，不复制 transient rule context、长日志、截图或 pane transcript。
 
 `orbit whoami --json` 的输出示例：
 
@@ -113,7 +118,16 @@ skill 的推荐启动动作：
   "schema_version": "orbit-whoami-v1",
   "project": "example-project",
   "instance": "reviewer-main",
+  "resolved_instance": "reviewer-main",
+  "role_ref": "reviewer-main",
   "resolved_role": "reviewer",
+  "expected_command": "codex",
+  "actual_client": "codex",
+  "transport_binding": {
+    "pane": "pane-123",
+    "tab": "",
+    "space": ""
+  },
   "role_sources": {
     "env.ORBIT_INSTANCE": "reviewer-main",
     "env.ORBIT_ROLE": "reviewer",
@@ -235,10 +249,29 @@ instances:
   reviewer-main:
     role_ref: reviewer-main
     command: codex
+    management: user_managed
+    transport:
+      kind: herdr
+      binding:
+        pane: ""
+        tab: ""
+        space: ""
+      health:
+        last_heartbeat: ""
+        cwd: ""
+        git_head: ""
+        actual_client: ""
     env:
       ORBIT_INSTANCE: reviewer-main
       ORBIT_ROLE: reviewer
 ```
+
+`management` 定义 instance 生命周期由谁管理：
+
+- `user_managed` 是默认值。用户已经打开或绑定的 reviewer/tester 是权威协作拓扑，lead 必须复用 healthy binding；缺失或不健康时应请求确认或记录 waiver。
+- `orbit_managed` 表示 lead/Orbit 可以按配置自动启动缺失 instance。启动成功后 adapter 应写回 binding 和 health。
+
+`transport.binding` 只记录 pane/tab/session 等 transport handle，不定义 role；role 仍来自 `role_ref` 和运行时 identity。gate 等待的是 instance verdict，而不是某个自然语言 pane 消息。
 
 启动命令形态：
 
@@ -505,6 +538,59 @@ quality_outcome:
     - "能被测试、结构、指标或 artifact 验证。"
   invalid_completions:
     - "只完成表面动作但问题仍存在。"
+
+# 对改善类、重构、文档维护、性能、UX、可靠性和架构收敛类 task，
+# validator 会拒绝空 quality_outcome 字段和空列表。
+# new-task 写入的模板只是起点，lead 必须让它匹配当前 source contract。
+test_environment:
+  required: false
+  environment: ""
+  test_tab_or_pane: ""
+  server_owner: ""
+  browser_owner: ""
+  cleanup_hook: ""
+  artifact_cleanup: ""
+  duration_budget: ""
+  resource_budget: ""
+quality_measurement:
+  required: false
+  baseline_required: false
+  after_required: false
+  metrics: []
+  waiver_policy: ""
+
+# target_role=tester 或 task_type 包含 test 时，test_environment.required 必须为 true。
+# performance / UX / workflow / quality / eval / measurement 类 task
+# 会要求 quality_measurement，并在 passing test evidence 中检查 baseline/after 或 waiver。
+design_lifecycle:
+  enabled: false
+  phases:
+    - drafting
+    - review_requested
+    - changes_requested
+    - user_confirmed
+    - coding_ready
+  current_phase: ""
+  user_confirmation_required: true
+  coding_requires_confirmed_design: true
+design_reference:
+  required_for_coding: false
+  artifact: ""
+  confirmation_evidence: ""
+  status: not_applicable
+implementation_plan:
+  required: false
+  path: ""
+  summary: ""
+decomposition:
+  parent_task: ""
+  child_slices: []
+  aggregate_outcome_metrics: []
+  stop_conditions: []
+  replanning_path: ""
+final_aggregate_audit:
+  required: false
+  checks: []
 delivery_plan:
   mode: sliced
   slices:
@@ -580,6 +666,12 @@ lead 发送给 reviewer/tester 时，只发送路径：
 
 `delivery_plan` 用来表达大任务的分片交付。小任务可以省略；一旦任务跨多个模块、多个角色或多个用户路径，就应拆 slice。slice 是协作边界，不是普通 checklist：当前 slice 没有通过 review/test gate 时，不应推进下一个 slice。
 
+`design_lifecycle` 是 design/analysis task 的状态机字段。CLI 会要求 design task 包含 `drafting -> review_requested -> changes_requested|user_confirmed -> coding_ready`，并在进入 `user_confirmed` 或 `coding_ready` 前检查结构化 review pass 和用户确认证据。
+
+`design_reference` 是 coding task 的边界字段。`task_type` 包含 `coding` 时，CLI 会要求它引用已确认设计 artifact、confirmation evidence，并标记 `status: confirmed`；否则 coding task 不应 validate 通过。
+
+`implementation_plan`、`decomposition` 和 `final_aggregate_audit` 是 parent/decomposition task 的整体收口字段。child slice 的局部 pass 不等于 parent 完成；parent final audit 必须检查 aggregate outcome metrics 和 child slice 覆盖关系。
+
 ## Evidence Manifest
 
 review/test/command 结果都写 manifest。manifest 是事实记录，不替代判断。
@@ -615,11 +707,37 @@ review/test/command 结果都写 manifest。manifest 是事实记录，不替代
   },
   "started_at": "2026-06-08T12:00:00+08:00",
   "completed_at": "2026-06-08T12:08:00+08:00",
+  "records": [
+    {
+      "kind": "review",
+      "status": "pass",
+      "summary": "Structured reviewer verdict passed.",
+      "created_at": "2026-06-08T12:08:00+08:00",
+      "structured_submit": true,
+      "source_message_id": "herdr:reviewer-main:msg-123",
+      "findings": [],
+      "coverage": ["quality outcome and gate behavior"],
+      "artifacts": ["/tmp/orbit-result-review-001.md"]
+    }
+  ],
+  "waivers": [],
   "verdict": {
     "status": "pass",
-    "high": 0,
-    "medium": 0,
-    "low": 1
+    "mode": "aggregate",
+    "summary": "Aggregate evidence verdict: pass (review=pass).",
+    "gates": {
+      "review": {
+        "status": "pass",
+        "summary": "Structured reviewer verdict passed.",
+        "created_at": "2026-06-08T12:08:00+08:00",
+        "structured": true,
+        "source_message_id": "herdr:reviewer-main:msg-123"
+      }
+    },
+    "waivers": {
+      "total": 0,
+      "open": 0
+    }
   },
   "residual_risk": [
     "当前 task 未执行完整端到端验证。"
@@ -662,6 +780,12 @@ review/test/command 结果都写 manifest。manifest 是事实记录，不替代
   ]
 }
 ```
+
+`verdict` 是 aggregate summary，不是最新 record 的别名。review/test gate 只认带结构化字段的 review/test record；无关 command pass 不能覆盖仍然 fail/partial 的 review/test 结论。`orbit evidence submit` 是推荐入口，report 至少包含 `kind`、`verdict`、`summary`、`source_message_id`、`findings`、`coverage` 和 `artifacts`。
+
+passing `kind: test` record 如果用于 tester/test task，还必须包含 `test_environment` mapping，记录 environment、test_tab_or_pane、server_owner、browser_owner、cleanup_hook、artifact_cleanup、duration、resource_usage、cleanup_status、ux_quality 和 artifact_quality。质量度量类 task 的 passing test record 还必须包含 `quality_measurement`：baseline、after 和 metrics，或 waiver.reason、waiver.risk、waiver.replacement_evidence。
+
+waiver 使用独立结构，而不是普通 summary 字符串。每条 waiver 至少包含 `owner`、`scope`、`reason`、`risk`、`replacement_evidence`、`expiry` 和 `revoked_by_user_requirement`。waiver 会进入 aggregate verdict 的 risk summary，但不会自动关闭 required review/test gate。
 
 关键工具调用本身也是 evidence。对 preflight、schema validation、context pack、提交 review/test verdict、推进 loop state、写权威 artifact、handoff、transport delivery/result collection 这类关键动作，manifest 应能区分：
 

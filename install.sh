@@ -99,6 +99,7 @@ lib/orbit/evidence.rb
 lib/orbit/state_validate_gate.rb
 lib/orbit/audit_tools.rb
 lib/orbit/handoff.rb
+lib/orbit/docs_lifecycle.rb
 assets/templates/roles.yaml
 assets/templates/instances.yaml
 assets/templates/loop-state.yaml

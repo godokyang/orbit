@@ -55,11 +55,21 @@ bug fix、状态流转、artifact 写入、AI 输出解析、resolver、normaliz
 - 项目自定义规则来自 `.orbit/roles.yaml` 中当前 role 的 `rules` 字段。
 - `orbit whoami --json` 会解析当前身份，并把当前 role 的项目 `rules` 原样输出。
 - `orbit rules resolve --json` 会生成可审计的规则解析结果，列出默认规则、项目规则、task 规则和 rule packs。
-- `orbit rules print-context --json` 会把规则解析结果转换成本轮 agent 应读取的上下文清单，明确 `load_order`、`required_files` 和 optional rule packs。
+- `orbit rules print-context --json` 会把规则解析结果转换成本轮 agent 应读取的上下文清单，明确 `load_order`、去重后的 `required_files`、optional rule packs 和 `context_budget`。
 - 本轮 task 规则来自 task contract，例如 `quality_rules`、`acceptance` 和 `evidence_requirements`。
 - CLI 不读取规则文件全文，也不调用大模型做语义合并；它只做确定性解析、路径存在性检查和身份/task 冲突检查。
 
 因此，项目 `rules` 是叠加层，不是替代层。没有项目 `rules` 时，agent 仍按 Orbit 默认规则工作；存在项目 `rules` 时，agent 先按 Orbit 默认规则工作，再读取项目规则和 task 规则。重复时按更具体的项目规则解释，冲突时按更严格规则执行，或在 evidence / handoff 中显式记录用户 waiver、conflict 和 residual risk。
+
+每条规则上下文都应有稳定 `rule_id` 和 `relation`。默认规则使用 `orbit_default:<category>:<path>` 形式，项目规则默认使用 `project_rule:<path>`，task 规则使用 `task_rules:<path>`；项目可以显式设置 id。`relation` 表示规则与默认协议的关系，常见值是 `baseline`、`supplements`、`overrides`、`stricter_than` 和 `deprecated_by`。`rules print-context` 会给 `load_order` 标注 `dedupe_status`，并在 `context_budget` 中列出 `active`、`deduped`、`shadowed`、`not_loaded_but_related`。agent 只必须读取 active required files；deduped/shadowed/not_loaded entries 是审计线索，不应重复消耗上下文。
+
+当当前用户意图是否需要正式 Orbit 闭环不清楚时，可以先运行：
+
+```bash
+orbit classify-intent --text "用户原话" --json
+```
+
+分类结果包含顶层 `intent`、`explicit_orbit_workflow` 和 `reason`，以及 `policy.formal_task`、`policy.evidence`、`policy.gates`、`policy.default_task_type` 等默认策略字段。默认意图包括 `discussion`、`design`、`docs_maintenance`、`coding`、`review`、`test`、`handoff`。`discussion` 默认不建 task，但选择不建 task 时要留下 reason；用户明确说“按 Orbit 流程”时必须进入正式 task/evidence/gate；docs maintenance 如果影响 `.orbit`、evidence、handoff、archive、路径引用、历史或规则文件，默认建正式维护 task。
 
 ## CLI 优先
 
@@ -88,6 +98,10 @@ orbit state start --task .orbit/tasks/current-task.yaml
 
 ```bash
 orbit whoami --json
+orbit instances status --json
+orbit classify-intent --text "按 Orbit 流程继续实现这个功能" --json
+orbit docs alias --id decision.active-design --path docs/open/active-design.md --json
+orbit docs check --json
 orbit start reviewer --dry-run --json
 orbit new-task --target-role reviewer --task-type implementation_review --output task.yaml
 orbit rules resolve --task task.yaml --output .orbit/rules/current-resolution.json --json
@@ -96,10 +110,15 @@ orbit evidence init --output .orbit/evidence.json
 orbit evidence attach-rule --file .orbit/evidence.json --rule-resolution .orbit/rules/current-resolution.json
 orbit evidence add --file .orbit/evidence.json --kind review --status pass --summary "..."
 orbit evidence from-report --file .orbit/evidence.json --report review-report.md --kind review --json
+orbit evidence submit --file .orbit/evidence.json --report review-submit.yaml --json
+orbit evidence waive --file .orbit/evidence.json --waiver waiver.yaml --json
 orbit wait-gate --task task.yaml --evidence .orbit/evidence.json --json
 orbit state show --json
 orbit state start --task task.yaml
 orbit state transition --to in_review --evidence .orbit/evidence.json
+orbit state transition --to review_requested --evidence .orbit/evidence.json
+orbit state transition --to user_confirmed --evidence .orbit/evidence.json
+orbit state transition --to coding_ready --evidence .orbit/evidence.json
 orbit validate --task task.yaml --evidence .orbit/evidence.json --state .orbit/loop-state.yaml --json
 orbit audit --task task.yaml --evidence .orbit/evidence.json --state .orbit/loop-state.yaml --json
 orbit tools detect --json
@@ -108,9 +127,12 @@ orbit dispatch --task task.yaml --to reviewer --json
 orbit handoff --task task.yaml --state .orbit/loop-state.yaml --evidence .orbit/evidence.json --json
 orbit handoff --task task.yaml --state .orbit/loop-state.yaml --evidence .orbit/evidence.json --output handoff.json --record-state --json
 orbit handoff --task task.yaml --state .orbit/loop-state.yaml --evidence .orbit/evidence.json --transport generic --json
+orbit compact-evidence --task task.yaml --evidence .orbit/evidence.json --handoff handoff.json --output .orbit/summaries/task-summary.json --json
 ```
 
 `orbit start` 只负责按 `.orbit/instances.yaml` 解析 instance、argv、env 和 cwd；本地模式直接启动命令，Herdr 模式通过 adapter 启动或 dry-run 展示计划。它不替代 `whoami`、task contract 或 evidence。
+
+instance 默认是 `user_managed`：如果 reviewer/tester 已有 healthy binding，Orbit 应复用该 instance，而不是由 lead 新建另一个 pane。`orbit instances status --json` 会输出每个 instance 的 `management`、`binding_status` 和 `recommended_action`。`user_managed` 缺少 healthy binding 时，lead 应请求用户确认或先绑定；`orbit_managed` 才表示 Orbit 可以按配置自动启动缺失 role。`orbit bind-pane --instance reviewer --pane ... --json` 只绑定 transport handle，不改变 role identity。
 
 `orbit dispatch` 只负责生成或发送 task 投递消息；generic 模式输出手工/外部投递 payload，Herdr 模式需要显式 `--pane`。它不改变 task/evidence/state，也不让 gate 自动通过。
 
@@ -118,7 +140,25 @@ orbit handoff --task task.yaml --state .orbit/loop-state.yaml --evidence .orbit/
 
 `orbit evidence from-report` 可以把 reviewer/tester 报告导入 evidence record，但只接受明确 verdict/status token。`APPROVED_WITH_NOTES` 这类模糊结论不会被自动当成 pass；lead 应要求 reviewer/tester 给出清晰 verdict，或把残留风险记录为 `partial/fail`。
 
-`orbit wait-gate` 只检查 task 的 required gates 是否已有最新 `pass` evidence。它不会读取报告全文，也不会代替 reviewer/tester 判断。
+`orbit evidence submit` 是 review/test verdict 的结构化提交入口。report 必须包含 `kind`、`verdict`、`summary`、`source_message_id`、`findings`、`coverage` 和 `artifacts`。`source_message_id` 可以指向 Herdr message、pane transcript、CI job、report file 或其他 transport 附件；Herdr 文本本身不是权威 verdict，权威 verdict 是写入 evidence manifest 的结构化 record。兼容入口 `evidence add/from-report --kind review|test` 会写入最小结构化字段，但新流程应优先使用 `evidence submit` 保留完整 coverage/artifact 来源。
+
+tester/test task 的 task contract 会包含 `test_environment`。最新 `kind: test` 且 `verdict: pass` 的结构化 evidence 必须记录 `test_environment`：实际环境、测试 pane/tab、server/browser owner、cleanup hook、artifact cleanup、duration、resource usage、cleanup status、UX 质量和 artifact 质量。缺少这些字段时，`validate` 会拒绝把该 test pass 当作可信成功证据。
+
+性能、UX、workflow、quality、eval、measurement 等质量度量类 task 会包含 `quality_measurement`。最新 passing test evidence 必须记录 baseline、after 和 metrics，或显式记录 waiver 的 reason、risk 和 replacement_evidence。只说“感觉变好”或只跑普通测试，不足以证明这类 task 的 quality outcome。
+
+`orbit evidence waive` 用结构化 waiver 记录用户或 lead 接受的残留风险。waiver 必须包含 `owner`、`scope`、`reason`、`risk`、`replacement_evidence`、`expiry` 和 `revoked_by_user_requirement`。waiver 不会让 review/test gate 自动通过；它只让 audit/handoff 能看见是谁接受了什么风险、用什么替代证据支撑、什么时候失效。
+
+`orbit wait-gate` 只检查 task 的 required gates 是否已有最新结构化 `pass` evidence。它不会读取报告全文，也不会代替 reviewer/tester 判断。输出中的 `aggregate_verdict` 来自 evidence manifest 顶层聚合摘要，用于暴露每个 evidence kind 的最新状态和 waiver 风险；required gate 是否 ready 仍由 task 的 `gates` 和结构化 review/test records 决定。
+
+`orbit docs alias` 维护 `.orbit/docs-registry.json` 中的 stable doc id、current path、content hash 和 updated_at。evidence、task 或 handoff 需要长期引用重要文档时，优先引用 stable doc id，并在文档移动后只更新 registry，不批量重写历史 evidence。`orbit docs check` 会检查 alias target 是否存在、content hash 是否匹配、open 目录是否存在已关闭但未归档或未索引文档，以及 archive 目录是否有 README。
+
+`orbit compact-evidence` 从 task/evidence/handoff 生成 `orbit-durable-evidence-summary-v1` 摘要。摘要保留 task/evidence/handoff 的路径和 sha256、record 计数、latest verdict、rule resolution 引用、source documents、artifact refs 和 handoff audit summary；它不复制长日志、截图、server output 或完整 rule context。长期文档应优先保留 compact summary、final evidence manifest 和 handoff summary；过程中的 rule context、resolution、pane transcript、screenshots、logs 和 server output 默认是 transient artifact，用路径和 hash 引用。
+
+Design-first 任务使用独立 lifecycle：`drafting -> review_requested -> changes_requested|user_confirmed -> coding_ready`。`orbit state start` 遇到 `task_type` 包含 `design` 或 `analysis` 的 task 会从 `drafting` 开始；`coding_ready` 只能从 `user_confirmed` 进入，并且 evidence manifest 必须同时有结构化 review pass 和包含 `user_confirmed` / user confirmation / 用户确认 的 pass evidence。review pass 不能单独让 design task 进入 coding。
+
+`task_type` 包含 `coding` 的 task 必须在 `design_reference` 中引用已确认设计：`required_for_coding: true`、非空 `artifact`、非空 `confirmation_evidence`、`status: confirmed`。这防止 agent 把聊天里的隐含设计直接当成 coding 授权。
+
+中型或大型拆分任务使用 `implementation_plan`、`decomposition` 和 `final_aggregate_audit`。`task_type` 包含 `decomposition` 或 `parent` 时，`validate` 会要求非空 implementation plan summary、child slices、aggregate outcome metrics、stop conditions、replanning path 和 final aggregate audit checks。child slice pass 只证明局部完成；parent final audit 必须重新证明整体 quality outcome。
 
 如果 CLI 不可用，可以按 schema 手动检查，但必须在回复里标注 `local_fallback`，并说明哪个 CLI 动作没能执行。
 
@@ -134,6 +174,7 @@ orbit handoff --task task.yaml --state .orbit/loop-state.yaml --evidence .orbit/
 - 维护 loop state。
 - 收集 evidence。
 - 派 review/test。
+- 派 review/test 前检查 `orbit instances status --json`，默认复用 healthy reviewer/tester binding。
 - 根据 gate 结果继续、回滚、阻塞或收口。
 - coding 时遵守 `coding-guideline.md`，保留 changed files、verification、closure 和 known gaps。
 
@@ -142,6 +183,8 @@ orbit handoff --task task.yaml --state .orbit/loop-state.yaml --evidence .orbit/
 - 把“做了动作”直接当成完成。
 - 在缺少 review/test evidence 时宣布 gate-ready。
 - 用聊天总结替代 evidence manifest。
+- 在已有 healthy reviewer/tester binding 时擅自新建同 role instance。
+- 以 lead 身份提交 review/test verdict 来关闭 reviewer/tester gate。
 
 ### Reviewer
 
@@ -165,6 +208,7 @@ orbit handoff --task task.yaml --state .orbit/loop-state.yaml --evidence .orbit/
 - 保留命令、截图、日志、录屏或其他 evidence。
 - 输出 test verdict、覆盖范围和缺口。
 - testing 时遵守 `testing-guideline.md`，区分 `pass|fail|partial|invalid`。
+- `pass` evidence 必须记录测试环境生命周期；质量度量类 task 还必须记录 baseline/after 指标或显式 waiver。
 
 禁止：
 
@@ -184,7 +228,9 @@ orbit handoff --task task.yaml --state .orbit/loop-state.yaml --evidence .orbit/
 - `evidence_requirements`
 - `stop_policy`
 
-改善类任务必须有 `quality_outcome`。否则 reviewer 应默认阻塞或要求补合同。
+改善类、重构、文档维护、性能、UX、可靠性和架构收敛类任务必须有非空 `quality_outcome`。`validate` 会检查 `user_problem`、`desired_property`、`measurable_thresholds` 和 `invalid_completions`，不能只留下空 key。否则 reviewer 应默认阻塞或要求补合同。
+
+tester/test task 必须有 `test_environment` 合同，说明测试环境、pane/tab、server/browser owner、cleanup hook、artifact cleanup、duration budget 和 resource budget。质量度量类 task 必须有 `quality_measurement` 合同，说明 baseline/after 必填、需要哪些 metrics，以及 waiver policy。模板字段只是默认合同，lead 应按真实任务补具体值。
 
 ### 目标清晰和分片交付
 
@@ -200,6 +246,8 @@ task contract 应明确：
 - evidence 要求：PASS 前必须留下哪些命令结果、review/test verdict、截图、日志、handoff 或其他 artifact。
 
 如果目标仍不清楚，lead 应优先澄清。只有在用户允许继续、时间受限或上下文足够明确时，才能带假设推进；假设必须写入 task contract，不能只写在聊天里。
+
+`new-task` 会为常见改善类 task type 写入默认 quality outcome 模板和 review strategy。模板不是完成答案，lead 应按当前任务改写；但模板可以防止空 outcome 直接进入 coding。reviewer 默认按 Outcome、Behavior、Structure、Evidence、Residual risk 的顺序审查，测试通过不能替代 quality outcome verdict。
 
 大任务必须拆成 slice。每个 slice 至少包含：
 
@@ -240,6 +288,10 @@ created_at: "ISO-8601 timestamp"
 ```
 
 review evidence 和 test evidence 不能互相替代。review-only evidence 不能让 test gate 通过，test-only evidence 也不能让 review gate 通过。
+
+顶层 `verdict` 是 aggregate 摘要，不是最新 record 的别名。它应包含 `mode: aggregate`、整体 `status`、每个 evidence kind 的最新状态、最新 record 和 waiver 计数。后续 command 或 implementation pass 不能覆盖仍为 fail/partial 的 review/test gate。判断 task 是否 ready 时，以 `wait-gate`、`validate`、`audit` 对 required gates 的检查为准。
+
+Durable evidence 和 transient artifacts 必须分层。durable 层是 task summary、final evidence manifest、handoff packet、compact summary、stable doc registry 和用户可复核的最终报告；transient 层是 rule context、临时 rule resolution、pane transcript、长日志、截图、server output、浏览器录屏和一次性诊断 dump。transient artifact 可以作为 evidence record 的 artifact ref，但不应被全文塞进长期 docs。需要把任务沉淀为长期记录时，运行 `orbit compact-evidence` 并保留摘要路径。
 
 实现类 task 可以在 `gates` 中声明后续 gate：
 

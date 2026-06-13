@@ -79,7 +79,12 @@ def evidence_summary(evidence)
   summary = {
     "records" => 0,
     "by_kind" => {},
-    "latest" => nil
+    "latest" => nil,
+    "aggregate_verdict" => evidence["verdict"],
+    "waivers" => {
+      "total" => evidence["waivers"].is_a?(Array) ? evidence["waivers"].length : 0,
+      "open" => evidence["waivers"].is_a?(Array) ? evidence["waivers"].count { |waiver| waiver.is_a?(Hash) && waiver["revoked_by_user_requirement"] != true } : 0
+    }
   }
   return summary unless evidence.is_a?(Hash)
 
@@ -460,4 +465,3 @@ def handoff(args)
   puts json
   exit(blocking_errors.empty? ? 0 : 1)
 end
-
