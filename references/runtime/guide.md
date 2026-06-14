@@ -92,7 +92,7 @@ orbit evidence init --output .orbit/evidence/current-evidence.yaml
 orbit state start --task .orbit/tasks/current-task.yaml
 ```
 
-`task.yaml`、`evidence.yaml/json`、`loop-state.yaml` 是 CLI gate 的主输入。Markdown task contract、review-report、test-report 可以作为人读证据或附件，但不能替代结构化 task/evidence/state。`--evidence` 参数必须传 evidence manifest 文件，不能传 evidence 目录。
+`task.yaml`、`evidence.yaml/json`、`loop-state.yaml` 是 CLI gate 的主输入。Markdown task contract、review-report、test-report 可以作为人读证据或附件，但不能替代结构化 task/evidence/state。`--evidence` 参数必须传 evidence manifest 文件，不能传 evidence 目录。reviewer/tester 不要直接编辑 `.orbit/evidence*.json` 来提交 verdict；必须先写独立 report 文件，再运行 `orbit evidence submit`，让 CLI 生成结构化身份、校验 schema 并安全写入 manifest。
 
 推荐命令：
 
@@ -140,7 +140,7 @@ instance 默认是 `user_managed`：如果 reviewer/tester 已有 healthy bindin
 
 `orbit evidence from-report` 可以把 reviewer/tester 报告导入 evidence record，但只接受明确 verdict/status token。`APPROVED_WITH_NOTES` 这类模糊结论不会被自动当成 pass；lead 应要求 reviewer/tester 给出清晰 verdict，或把残留风险记录为 `partial/fail`。
 
-`orbit evidence submit` 是 review/test verdict 的结构化提交入口。report 必须包含 `kind`、`verdict`、`summary`、`source_message_id`、`findings`、`coverage` 和 `artifacts`；`findings`、`coverage`、`artifacts` 都是字符串列表，空 findings 写 `[]`。`verdict: blocked` 会规范化为 `status: partial` record，并可带 `blocked.reason`、`blocked.next_step`、`blocked.owner` 说明阻塞原因和下一步。`source_message_id` 可以指向 Herdr message、pane transcript、CI job、report file 或其他 transport 附件；Herdr 文本本身不是权威 verdict，权威 verdict 是写入 evidence manifest 的结构化 record。兼容入口 `evidence add/from-report --kind review|test` 会写入最小结构化字段，但新流程应优先使用 `evidence submit` 保留完整 coverage/artifact 来源。
+`orbit evidence submit` 是 review/test verdict 的结构化提交入口。report 必须包含 `kind`、`verdict`、`summary`、`source_message_id`、`findings`、`coverage` 和 `artifacts`；`findings`、`coverage`、`artifacts` 都是字符串列表，空 findings 写 `[]`。可以从 `assets/templates/review-report.yaml` 或 `assets/templates/test-report.yaml` 复制模板后填写；schema 错误时 CLI 会提示字段路径、期望结构、实际类型和模板路径。`verdict: blocked` 会规范化为 `status: partial` record，并可带 `blocked.reason`、`blocked.next_step`、`blocked.owner` 说明阻塞原因和下一步。`source_message_id` 可以指向 Herdr message、pane transcript、CI job、report file 或其他 transport 附件；Herdr 文本本身不是权威 verdict，权威 verdict 是由 CLI 写入 evidence manifest 的结构化 record。不要手写 `.orbit/evidence*.json` 里的 review/test record；直接编辑不会生成可信 identity，不能用于关闭 gate。兼容入口 `evidence add/from-report --kind review|test` 会写入最小结构化字段，但新流程应优先使用 `evidence submit` 保留完整 coverage/artifact 来源。
 
 tester/test task 的 task contract 会包含 `test_environment`。最新 `kind: test` 且 `verdict: pass` 的结构化 evidence 必须记录 `test_environment`：实际环境、测试 pane/tab、server/browser owner、cleanup hook、artifact cleanup、duration、resource usage、cleanup status、UX 质量和 artifact 质量。缺少这些字段时，`validate` 会拒绝把该 test pass 当作可信成功证据。
 

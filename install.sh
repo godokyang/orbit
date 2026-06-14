@@ -105,6 +105,8 @@ assets/templates/instances.yaml
 assets/templates/loop-state.yaml
 assets/templates/task.yaml
 assets/templates/evidence.json
+assets/templates/review-report.yaml
+assets/templates/test-report.yaml
 references/runtime/guide.md
 references/runtime/core-operating-model.md
 references/runtime/coding-guideline.md

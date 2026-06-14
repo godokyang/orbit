@@ -1,0 +1,14 @@
+kind: review
+verdict: blocked
+summary: "TODO: one-sentence review conclusion."
+source_message_id: "TODO: herdr:<pane-or-message-id> or report:<path>"
+findings:
+  - "[blocked][review] TODO: describe the blocking evidence gap or finding."
+coverage:
+  - "TODO: code paths, task contract points, and evidence checked."
+artifacts:
+  - "TODO: stable path to diff, report, transcript, command output, or log."
+blocked:
+  reason: "TODO: why this review cannot pass yet."
+  next_step: "TODO: specific action required to unblock the review."
+  owner: "lead"

@@ -44,9 +44,9 @@ def init_config(args)
       state = load_yaml(template_path)
       state["project"] = File.basename(Dir.pwd)
       state["updated_at"] = Time.now.utc.iso8601
-      File.write(target_path, YAML.dump(state))
+      write_file_atomically(target_path, YAML.dump(state))
     else
-      FileUtils.cp(template_path, target_path)
+      write_file_atomically(target_path, File.read(template_path))
     end
   end
 
@@ -69,6 +69,74 @@ rescue Errno::EISDIR
   raise "Expected a YAML/JSON file but got directory: #{path}. If this is evidence, run `orbit evidence init --output PATH` and pass that manifest file; do not pass an evidence directory."
 rescue Psych::Exception => e
   raise "Invalid YAML in #{path}: #{e.message}"
+end
+
+def with_orbit_file_lock(path)
+  expanded = File.expand_path(path)
+  FileUtils.mkdir_p(File.dirname(expanded))
+  lock_path = "#{expanded}.lock"
+
+  File.open(lock_path, File::RDWR | File::CREAT, 0o600) do |lock|
+    lock.flock(File::LOCK_EX)
+    yield expanded
+  ensure
+    lock.flock(File::LOCK_UN) if lock
+  end
+end
+
+def fsync_directory(path)
+  Dir.open(path) do |dir|
+    dir.fsync if dir.respond_to?(:fsync)
+  end
+rescue Errno::EINVAL, Errno::ENOTSUP, NotImplementedError
+  nil
+end
+
+def atomic_replace_file(path, content)
+  expanded = File.expand_path(path)
+  dir = File.dirname(expanded)
+  FileUtils.mkdir_p(dir)
+  tmp = File.join(dir, ".#{File.basename(expanded)}.tmp.#{$$}.#{Thread.current.object_id}")
+
+  File.open(tmp, File::WRONLY | File::CREAT | File::TRUNC, 0o600) do |file|
+    file.write(content)
+    file.flush
+    begin
+      file.fsync
+    rescue Errno::EINVAL, Errno::ENOTSUP, NotImplementedError
+      nil
+    end
+  end
+  File.rename(tmp, expanded)
+  fsync_directory(dir)
+ensure
+  FileUtils.rm_f(tmp) if tmp && File.exist?(tmp)
+end
+
+def write_file_atomically(path, content)
+  with_orbit_file_lock(path) do |expanded|
+    atomic_replace_file(expanded, content)
+  end
+end
+
+def update_yaml_file_atomically(path)
+  with_orbit_file_lock(path) do |expanded|
+    data = load_yaml(expanded)
+    updated = yield(data)
+    updated = data if updated.nil?
+    atomic_replace_file(expanded, YAML.dump(updated))
+    updated
+  end
+end
+
+def update_json_file_atomically(path)
+  with_orbit_file_lock(path) do |expanded|
+    data = load_yaml(expanded)
+    updated = yield(data)
+    updated = data if updated.nil?
+    atomic_replace_file(expanded, "#{JSON.pretty_generate(updated)}\n")
+    updated
+  end
 end
 
 def conflict(result, source, message)
@@ -303,29 +371,39 @@ end
 
 def bind_pane(args)
   options = parse_bind_pane_args(args)
-  roles, instances, instances_path, instances_config = load_project_instance_config_for_cli
-  instance_key, instance_alias = find_instance(instances, roles, options["instance"])
-  usage_error("Unknown Orbit instance #{options["instance"].inspect}.") unless instance_key
+  roles, _instances, instances_path = load_project_instance_config_for_cli
+  instance_key = nil
+  instance_alias = nil
+  instance = nil
+  role_ref = nil
+  role_def = nil
 
-  instance = instances[instance_key]
-  usage_error("Instance #{instance_key.inspect} must be a mapping.") unless instance.is_a?(Hash)
+  update_yaml_file_atomically(instances_path) do |instances_config|
+    instances = instances_config["instances"]
+    usage_error(".orbit/instances.yaml must contain an instances mapping.") unless instances.is_a?(Hash)
+    instance_key, instance_alias = find_instance(instances, roles, options["instance"])
+    usage_error("Unknown Orbit instance #{options["instance"].inspect}.") unless instance_key
 
-  role_ref = instance["role_ref"]
-  role_def = roles[role_ref]
-  usage_error("Instance #{instance_key.inspect} references missing role #{role_ref.inspect}.") unless role_def.is_a?(Hash)
-  validate_instance_management!(instance_key, instance)
+    instance = instances[instance_key]
+    usage_error("Instance #{instance_key.inspect} must be a mapping.") unless instance.is_a?(Hash)
 
-  transport = normalize_instance_transport(instance_key, instance)
-  transport["kind"] = options["transport"]
-  transport["binding"]["pane"] = options["pane"]
-  transport["binding"]["tab"] = options["tab"].to_s
-  transport["binding"]["space"] = options["space"].to_s
-  transport["health"]["last_heartbeat"] = Time.now.utc.iso8601
-  transport["health"]["cwd"] = Dir.pwd
-  transport["health"]["actual_client"] = runtime_actual_client
+    role_ref = instance["role_ref"]
+    role_def = roles[role_ref]
+    usage_error("Instance #{instance_key.inspect} references missing role #{role_ref.inspect}.") unless role_def.is_a?(Hash)
+    validate_instance_management!(instance_key, instance)
 
-  instance["transport"] = transport
-  File.write(instances_path, YAML.dump(instances_config))
+    transport = normalize_instance_transport(instance_key, instance)
+    transport["kind"] = options["transport"]
+    transport["binding"]["pane"] = options["pane"]
+    transport["binding"]["tab"] = options["tab"].to_s
+    transport["binding"]["space"] = options["space"].to_s
+    transport["health"]["last_heartbeat"] = Time.now.utc.iso8601
+    transport["health"]["cwd"] = Dir.pwd
+    transport["health"]["actual_client"] = runtime_actual_client
+
+    instance["transport"] = transport
+    instances_config
+  end
 
   entry = instance_status_entry(instance_key, instance, role_ref, role_def)
   puts JSON.pretty_generate({
@@ -339,24 +417,33 @@ def bind_pane(args)
 end
 
 def write_instance_binding!(instance_name, transport_kind:, pane:, tab: "", space: "")
-  roles, instances, instances_path, instances_config = load_project_instance_config_for_cli
-  instance_key, = find_instance(instances, roles, instance_name)
-  usage_error("Unknown Orbit instance #{instance_name.inspect}.") unless instance_key
-  instance = instances[instance_key]
-  role_ref = instance["role_ref"]
-  role_def = roles[role_ref]
-  usage_error("Instance #{instance_key.inspect} references missing role #{role_ref.inspect}.") unless role_def.is_a?(Hash)
+  roles, _instances, instances_path = load_project_instance_config_for_cli
+  instance_key = nil
+  instance = nil
+  role_ref = nil
+  role_def = nil
 
-  transport = normalize_instance_transport(instance_key, instance)
-  transport["kind"] = transport_kind
-  transport["binding"]["pane"] = pane.to_s
-  transport["binding"]["tab"] = tab.to_s
-  transport["binding"]["space"] = space.to_s
-  transport["health"]["last_heartbeat"] = Time.now.utc.iso8601
-  transport["health"]["cwd"] = Dir.pwd
-  transport["health"]["actual_client"] = runtime_actual_client
-  instance["transport"] = transport
-  File.write(instances_path, YAML.dump(instances_config))
+  update_yaml_file_atomically(instances_path) do |instances_config|
+    instances = instances_config["instances"]
+    usage_error(".orbit/instances.yaml must contain an instances mapping.") unless instances.is_a?(Hash)
+    instance_key, = find_instance(instances, roles, instance_name)
+    usage_error("Unknown Orbit instance #{instance_name.inspect}.") unless instance_key
+    instance = instances[instance_key]
+    role_ref = instance["role_ref"]
+    role_def = roles[role_ref]
+    usage_error("Instance #{instance_key.inspect} references missing role #{role_ref.inspect}.") unless role_def.is_a?(Hash)
+
+    transport = normalize_instance_transport(instance_key, instance)
+    transport["kind"] = transport_kind
+    transport["binding"]["pane"] = pane.to_s
+    transport["binding"]["tab"] = tab.to_s
+    transport["binding"]["space"] = space.to_s
+    transport["health"]["last_heartbeat"] = Time.now.utc.iso8601
+    transport["health"]["cwd"] = Dir.pwd
+    transport["health"]["actual_client"] = runtime_actual_client
+    instance["transport"] = transport
+    instances_config
+  end
 
   instance_status_entry(instance_key, instance, role_ref, role_def)
 end

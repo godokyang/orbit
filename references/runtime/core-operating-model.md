@@ -781,7 +781,7 @@ review/test/command 结果都写 manifest。manifest 是事实记录，不替代
 }
 ```
 
-`verdict` 是 aggregate summary，不是最新 record 的别名。review/test gate 只认带结构化字段且 identity 匹配对应角色的 review/test record：review 需要 resolved role `reviewer`，test 需要 resolved role `tester`。无关 command pass 或身份不匹配的 review/test pass 不能覆盖仍然 fail/partial 的 review/test 结论。`orbit evidence submit` 是推荐入口，report 至少包含 `kind`、`verdict`、`summary`、`source_message_id`、`findings`、`coverage` 和 `artifacts`；这三个列表字段必须是字符串列表。
+`verdict` 是 aggregate summary，不是最新 record 的别名。review/test gate 只认带结构化字段且 identity 匹配对应角色的 review/test record：review 需要 resolved role `reviewer`，test 需要 resolved role `tester`。无关 command pass 或身份不匹配的 review/test pass 不能覆盖仍然 fail/partial 的 review/test 结论。`orbit evidence submit` 是推荐入口，report 至少包含 `kind`、`verdict`、`summary`、`source_message_id`、`findings`、`coverage` 和 `artifacts`；这三个列表字段必须是字符串列表。reviewer/tester 必须写独立 report 并用 CLI submit；不要直接编辑 `.orbit/evidence*.json`，因为手写 record 不会产生可信 identity，也不会走 schema 校验和并发安全写入。
 
 `verdict: blocked` 会规范化为 partial evidence record，并通过 `blocked.reason`、`blocked.next_step`、`blocked.owner` 保留阻塞细节。`wait-gate` 和 `handoff` 输出 `gate_summary`，用于暴露 required gate 的 ready 状态、identity mismatch、blocked/partial/fail 等阻塞原因。
 

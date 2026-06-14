@@ -232,6 +232,8 @@ quality_measurement:
     replacement_evidence: "替代证据。"
 ```
 
+可以从 `assets/templates/test-report.yaml` 复制最小模板后填写，再运行 `orbit evidence submit --file <manifest> --report <report> --json`。不要直接编辑 `.orbit/evidence*.json` 来提交测试结论；直接写 manifest 会绕过 CLI 的身份解析、schema 校验和并发安全写入，不能用于关闭 test gate。
+
 `findings`、`coverage`、`artifacts` 必须是字符串列表；没有 findings 时写 `[]`，不要写对象数组或自由格式段落。`blocked` 只在 `verdict: blocked` 或需要解释 partial 阻塞时填写；CLI 会把 `blocked` verdict 存为 partial record，并在 gate summary 中显示 blocked 原因。
 
 tester 的结论进入 evidence manifest 后，由 lead 消费并更新 loop state；tester 不直接把任务标为 done。

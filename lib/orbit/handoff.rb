@@ -52,27 +52,24 @@ end
 
 def write_handoff_artifact(output_path, json)
   path = File.expand_path(output_path)
-  FileUtils.mkdir_p(File.dirname(path))
-  tmp = "#{path}.tmp.#{$$}"
-  File.write(tmp, json)
-  FileUtils.mv(tmp, path)
+  write_file_atomically(path, json)
   path
 end
 
 def record_handoff_artifact(state_path, handoff_path)
-  state = load_loop_state(state_path)
-  state["artifacts"] ||= {}
-  state_error("Loop state artifacts must be a mapping when present.") unless state["artifacts"].is_a?(Hash)
-
   now = Time.now.utc.iso8601
-  state["artifacts"]["handoff_packet"] = File.expand_path(handoff_path)
-  state["updated_at"] = now
-  append_state_history(state, {
-    "event" => "handoff",
-    "handoff_packet" => File.expand_path(handoff_path),
-    "created_at" => now
-  })
-  write_loop_state(state_path, state)
+  update_loop_state(state_path) do |state|
+    state["artifacts"] ||= {}
+    state_error("Loop state artifacts must be a mapping when present.") unless state["artifacts"].is_a?(Hash)
+    state["artifacts"]["handoff_packet"] = File.expand_path(handoff_path)
+    state["updated_at"] = now
+    append_state_history(state, {
+      "event" => "handoff",
+      "handoff_packet" => File.expand_path(handoff_path),
+      "created_at" => now
+    })
+    state
+  end
 end
 
 def evidence_summary(evidence)

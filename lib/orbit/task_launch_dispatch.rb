@@ -759,12 +759,20 @@ def run_herdr_dispatch(packet)
   end
   success = results.all? { |result| result["success"] }
   result = packet.merge(
-    "action" => "sent",
+    "action" => success ? "sent" : "failed",
     "adapter_result" => {
       "success" => success,
       "commands" => results
     }
   )
+  unless success
+    result["fallback"] = {
+      "transport" => "generic",
+      "action" => "manual_delivery_required",
+      "reason" => "Herdr dispatch failed before Orbit could confirm delivery.",
+      "message" => packet["message"]
+    }
+  end
 
   puts JSON.pretty_generate(result)
   unless success

@@ -95,6 +95,43 @@ def evidence_error(message)
   exit 1
 end
 
+def evidence_value_type(value)
+  case value
+  when nil
+    "missing"
+  when Array
+    item_types = value.map { |item| evidence_value_type(item) }.uniq
+    item_types.empty? ? "array" : "array<#{item_types.join("|")}>"
+  when Hash
+    "mapping"
+  when String
+    value.strip.empty? ? "empty string" : "string"
+  else
+    value.class.to_s.downcase
+  end
+end
+
+def submit_report_template_hint(kind = nil)
+  case kind
+  when "review"
+    "assets/templates/review-report.yaml"
+  when "test"
+    "assets/templates/test-report.yaml"
+  else
+    "assets/templates/review-report.yaml or assets/templates/test-report.yaml"
+  end
+end
+
+def submit_report_schema_error(source, message, expected:, actual:, kind: nil)
+  evidence_error([
+    message,
+    "field: #{source}",
+    "expected: #{expected}",
+    "actual: #{actual}",
+    "template: #{submit_report_template_hint(kind)}"
+  ].join("\n"))
+end
+
 def evidence_runtime_identity!
   result = {
     "project" => File.basename(Dir.pwd),
@@ -221,8 +258,21 @@ rescue RuntimeError => e
 end
 
 def write_evidence_manifest(path, manifest)
-  FileUtils.mkdir_p(File.dirname(path))
-  File.write(path, "#{JSON.pretty_generate(manifest)}\n")
+  write_file_atomically(path, "#{JSON.pretty_generate(manifest)}\n")
+end
+
+def update_evidence_manifest(path)
+  update_json_file_atomically(path) do |manifest|
+    evidence_error("#{path} must contain a mapping.") unless manifest.is_a?(Hash)
+    unless manifest["schema_version"] == "orbit-evidence-v1"
+      evidence_error("Evidence schema_version must be orbit-evidence-v1.")
+    end
+
+    updated = yield(manifest)
+    updated || manifest
+  end
+rescue RuntimeError => e
+  evidence_error(e.message)
 end
 
 def validate_evidence_record_shape!(record, source)
@@ -377,12 +427,6 @@ end
 
 def evidence_add(options)
   path = File.expand_path(options["file"])
-  manifest = load_evidence_manifest(path)
-  unless manifest["schema_version"] == "orbit-evidence-v1"
-    evidence_error("Evidence schema_version must be orbit-evidence-v1.")
-  end
-
-  records = ensure_evidence_records!(manifest)
   identity = require_evidence_submit_capability!(options["kind"])
   record = {
     "kind" => options["kind"],
@@ -395,10 +439,13 @@ def evidence_add(options)
   record["identity"] = snapshot if snapshot
   validate_evidence_record_shape!(record, "Evidence record")
 
-  records << record
-  manifest["project"] = File.basename(Dir.pwd) if manifest["project"].to_s.empty?
-  recompute_evidence_verdict!(manifest)
-  write_evidence_manifest(path, manifest)
+  update_evidence_manifest(path) do |manifest|
+    records = ensure_evidence_records!(manifest)
+    records << record
+    manifest["project"] = File.basename(Dir.pwd) if manifest["project"].to_s.empty?
+    recompute_evidence_verdict!(manifest)
+    manifest
+  end
 
   puts "Appended Orbit evidence:"
   puts "- #{path}"
@@ -479,10 +526,6 @@ end
 def evidence_from_report(options)
   path = File.expand_path(options["file"])
   report_path, report = load_report_for_evidence(options["report"])
-  manifest = load_evidence_manifest(path)
-  unless manifest["schema_version"] == "orbit-evidence-v1"
-    evidence_error("Evidence schema_version must be orbit-evidence-v1.")
-  end
 
   kind = options["kind"] || infer_report_kind(report_path, report)
   evidence_error("Could not infer report kind; pass --kind #{ALLOWED_EVIDENCE_KINDS.join("|")}.") unless ALLOWED_EVIDENCE_KINDS.include?(kind)
@@ -504,65 +547,130 @@ def evidence_from_report(options)
   record["identity"] = snapshot if snapshot
   validate_evidence_record_shape!(record, "Evidence record")
 
-  records = ensure_evidence_records!(manifest)
-  records << record
-  recompute_evidence_verdict!(manifest)
-  write_evidence_manifest(path, manifest)
+  updated_manifest = update_evidence_manifest(path) do |manifest|
+    records = ensure_evidence_records!(manifest)
+    records << record
+    recompute_evidence_verdict!(manifest)
+    manifest
+  end
 
   puts JSON.pretty_generate({
     "schema_version" => "orbit-evidence-import-v1",
     "file" => path,
     "report" => report_path,
-    "record" => record
+    "record" => record,
+    "verdict" => updated_manifest["verdict"]
   })
 end
 
-def validate_string_array!(value, source)
-  evidence_error("#{source} must be a list.") unless value.is_a?(Array)
+def validate_string_array!(value, source, kind: nil)
+  unless value.is_a?(Array)
+    submit_report_schema_error(
+      source,
+      "#{source} must be a list.",
+      expected: "list of non-empty strings",
+      actual: evidence_value_type(value),
+      kind: kind
+    )
+  end
   unless value.all? { |item| item.is_a?(String) && !item.strip.empty? }
-    evidence_error("#{source} must be a list of non-empty strings.")
+    submit_report_schema_error(
+      source,
+      "#{source} must be a list of non-empty strings.",
+      expected: "list of non-empty strings, for example: findings: [\"[medium][id] summary\"]",
+      actual: evidence_value_type(value),
+      kind: kind
+    )
   end
   value
 end
 
-def validate_blocked_submit_detail!(value, source)
-  evidence_error("#{source} must be a mapping.") unless value.is_a?(Hash)
+def validate_blocked_submit_detail!(value, source, kind: nil)
+  unless value.is_a?(Hash)
+    submit_report_schema_error(
+      source,
+      "#{source} must be a mapping.",
+      expected: "mapping with reason, next_step, and owner",
+      actual: evidence_value_type(value),
+      kind: kind
+    )
+  end
   %w[reason next_step owner].each do |field|
     field_value = value[field]
-    evidence_error("#{source}.#{field} must be a non-empty string.") unless field_value.is_a?(String) && !field_value.strip.empty?
+    unless field_value.is_a?(String) && !field_value.strip.empty?
+      submit_report_schema_error(
+        "#{source}.#{field}",
+        "#{source}.#{field} must be a non-empty string.",
+        expected: "non-empty string",
+        actual: evidence_value_type(field_value),
+        kind: kind
+      )
+    end
   end
   value
 end
 
-def report_string!(report, field, source)
+def report_string!(report, field, source, kind: nil)
   value = report[field]
-  evidence_error("#{source}.#{field} must be a non-empty string.") unless value.is_a?(String) && !value.strip.empty?
+  unless value.is_a?(String) && !value.strip.empty?
+    submit_report_schema_error(
+      "#{source}.#{field}",
+      "#{source}.#{field} must be a non-empty string.",
+      expected: "non-empty string",
+      actual: evidence_value_type(value),
+      kind: kind
+    )
+  end
   value.strip
 end
 
 def structured_submit_kind(report_path, report)
   kind = report["kind"]
   kind = infer_report_kind(report_path, report) if kind.to_s.empty?
-  evidence_error("Structured submit report kind must be one of #{STRUCTURED_SUBMIT_KINDS.join("|")}.") unless STRUCTURED_SUBMIT_KINDS.include?(kind)
+  unless STRUCTURED_SUBMIT_KINDS.include?(kind)
+    submit_report_schema_error(
+      "submit_report.kind",
+      "Structured submit report kind must be one of #{STRUCTURED_SUBMIT_KINDS.join("|")}.",
+      expected: STRUCTURED_SUBMIT_KINDS.join("|"),
+      actual: evidence_value_type(kind),
+      kind: kind
+    )
+  end
   kind
 end
 
-def structured_submit_status(report)
+def structured_submit_status(report, kind)
   status = normalize_report_status(report["verdict"] || report["status"])
-  evidence_error("Structured submit report verdict must be one of #{ALLOWED_EVIDENCE_STATUSES.join("|")}.") unless ALLOWED_EVIDENCE_STATUSES.include?(status)
+  unless ALLOWED_EVIDENCE_STATUSES.include?(status)
+    submit_report_schema_error(
+      "submit_report.verdict",
+      "Structured submit report verdict must be one of #{ALLOWED_EVIDENCE_STATUSES.join("|")}.",
+      expected: ALLOWED_EVIDENCE_STATUSES.join("|"),
+      actual: evidence_value_type(report["verdict"] || report["status"]),
+      kind: kind
+    )
+  end
   status
 end
 
 def validate_structured_submit_report!(report_path, report)
-  evidence_error("Structured submit report must be a mapping.") unless report.is_a?(Hash)
+  unless report.is_a?(Hash)
+    submit_report_schema_error(
+      "submit_report",
+      "Structured submit report must be a mapping.",
+      expected: "mapping with kind, verdict, summary, source_message_id, findings, coverage, artifacts",
+      actual: evidence_value_type(report),
+      kind: nil
+    )
+  end
   kind = structured_submit_kind(report_path, report)
-  status = structured_submit_status(report)
-  summary = report_string!(report, "summary", "submit_report")
-  source_message_id = report_string!(report, "source_message_id", "submit_report")
-  findings = validate_string_array!(report["findings"] || [], "submit_report.findings")
-  coverage = validate_string_array!(report["coverage"], "submit_report.coverage")
-  artifacts = validate_string_array!(report["artifacts"], "submit_report.artifacts")
-  validate_blocked_submit_detail!(report["blocked"], "submit_report.blocked") if report.key?("blocked")
+  status = structured_submit_status(report, kind)
+  summary = report_string!(report, "summary", "submit_report", kind: kind)
+  source_message_id = report_string!(report, "source_message_id", "submit_report", kind: kind)
+  findings = validate_string_array!(report["findings"] || [], "submit_report.findings", kind: kind)
+  coverage = validate_string_array!(report["coverage"], "submit_report.coverage", kind: kind)
+  artifacts = validate_string_array!(report["artifacts"], "submit_report.artifacts", kind: kind)
+  validate_blocked_submit_detail!(report["blocked"], "submit_report.blocked", kind: kind) if report.key?("blocked")
 
   [kind, status, summary, source_message_id, findings, coverage, artifacts]
 end
@@ -570,10 +678,6 @@ end
 def evidence_submit(options)
   path = File.expand_path(options["file"])
   report_path, report = load_report_for_evidence(options["report"])
-  manifest = load_evidence_manifest(path)
-  unless manifest["schema_version"] == "orbit-evidence-v1"
-    evidence_error("Evidence schema_version must be orbit-evidence-v1.")
-  end
 
   kind, status, summary, source_message_id, findings, coverage, artifacts = validate_structured_submit_report!(report_path, report)
   identity = require_evidence_submit_capability!(kind)
@@ -597,17 +701,19 @@ def evidence_submit(options)
   record["identity"] = snapshot if snapshot
   validate_evidence_record_shape!(record, "Evidence record")
 
-  records = ensure_evidence_records!(manifest)
-  records << record
-  recompute_evidence_verdict!(manifest)
-  write_evidence_manifest(path, manifest)
+  updated_manifest = update_evidence_manifest(path) do |manifest|
+    records = ensure_evidence_records!(manifest)
+    records << record
+    recompute_evidence_verdict!(manifest)
+    manifest
+  end
 
   puts JSON.pretty_generate({
     "schema_version" => "orbit-evidence-submit-v1",
     "file" => path,
     "report" => report_path,
     "record" => record,
-    "verdict" => manifest["verdict"]
+    "verdict" => updated_manifest["verdict"]
   })
 end
 
@@ -631,33 +737,33 @@ end
 def evidence_waive(options)
   path = File.expand_path(options["file"])
   waiver_path, waiver_report = load_report_for_evidence(options["waiver"])
-  manifest = load_evidence_manifest(path)
-  unless manifest["schema_version"] == "orbit-evidence-v1"
-    evidence_error("Evidence schema_version must be orbit-evidence-v1.")
-  end
 
   waiver = validate_waiver_report!(waiver_report)
   waiver["source_report"] = waiver_path
   waiver["created_at"] = Time.now.utc.iso8601
-  waivers = ensure_evidence_waivers!(manifest)
-  waivers << waiver
 
-  records = ensure_evidence_records!(manifest)
-  records << {
+  waiver_record = {
     "kind" => "waiver",
     "status" => waiver["revoked_by_user_requirement"] ? "invalid" : "partial",
     "summary" => "Waiver recorded for #{waiver["scope"]}: #{waiver["risk"]}",
     "created_at" => waiver["created_at"],
     "source_report" => waiver_path
   }
-  recompute_evidence_verdict!(manifest)
-  write_evidence_manifest(path, manifest)
+
+  updated_manifest = update_evidence_manifest(path) do |manifest|
+    waivers = ensure_evidence_waivers!(manifest)
+    waivers << waiver
+    records = ensure_evidence_records!(manifest)
+    records << waiver_record
+    recompute_evidence_verdict!(manifest)
+    manifest
+  end
 
   puts JSON.pretty_generate({
     "schema_version" => "orbit-evidence-waiver-v1",
     "file" => path,
     "waiver" => waiver,
-    "verdict" => manifest["verdict"]
+    "verdict" => updated_manifest["verdict"]
   })
 end
 
@@ -680,7 +786,6 @@ end
 def evidence_attach_rule(options)
   path = File.expand_path(options["file"])
   rule_resolution_path = File.expand_path(options["rule_resolution"])
-  manifest = load_evidence_manifest(path)
   rule_resolution = load_rule_resolution_manifest(rule_resolution_path)
 
   unless rule_resolution["valid"] == true
@@ -688,7 +793,7 @@ def evidence_attach_rule(options)
   end
 
   checks = rule_resolution["checks"].is_a?(Hash) ? rule_resolution["checks"] : {}
-  manifest["rule_resolution"] = {
+  rule_attachment = {
     "resolver" => "orbit rules resolve --json",
     "file" => rule_resolution_path,
     "valid" => true,
@@ -697,7 +802,10 @@ def evidence_attach_rule(options)
     "missing_project_rule_files" => checks["missing_project_rule_files"].is_a?(Array) ? checks["missing_project_rule_files"] : []
   }
 
-  write_evidence_manifest(path, manifest)
+  update_evidence_manifest(path) do |manifest|
+    manifest["rule_resolution"] = rule_attachment
+    manifest
+  end
   puts "Attached Orbit rule resolution:"
   puts "- #{rule_resolution_path}"
 end

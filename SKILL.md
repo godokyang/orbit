@@ -56,7 +56,7 @@ Orbit 是面向任意 AI agent 的运行时协作协议，不绑定具体 agent 
    - 用 `orbit rules resolve --json` 生成本轮规则解析审计产物。
    - 用 `orbit rules print-context --json` 生成本轮读取清单，并读取其中 `required_files`；项目规则不得替代默认规则。
    - 用 `orbit new-task` 创建 task contract。
-   - 用 `orbit evidence init/add/from-report/submit/waive/show` 管理 evidence manifest；review/test gate 优先要求 reviewer/tester 自己用结构化 submit 写入 verdict，且 gate 只承认 identity 匹配对应角色的 review/test record。
+   - 用 `orbit evidence init/add/from-report/submit/waive/show` 管理 evidence manifest；review/test gate 优先要求 reviewer/tester 自己写独立 report 文件并用结构化 submit 写入 verdict，且 gate 只承认 identity 匹配对应角色的 review/test record。不要直接编辑 `.orbit/evidence*.json` 来提交 review/test。
    - 用 `orbit evidence attach-rule --file ... --rule-resolution ...` 把本轮规则解析产物挂到 evidence manifest。
    - 用 `orbit state show/start/transition` 读取和推进 loop state。
    - 用 `orbit wait-gate --task ... --evidence ... --json` 检查 required review/test gates 当前是否 ready。
@@ -104,7 +104,7 @@ Orbit 是面向任意 AI agent 的运行时协作协议，不绑定具体 agent 
 - 改进类任务必须先有 Quality Outcome Contract，不能把“做了动作”直接当成完成。
 - coding task 必须引用已确认的 design artifact；如果用户要求先设计后确认，agent 不得在 `coding_ready` 前开始实现。
 - coding 必须保留 changed files、verification、closure 和 known gaps；testing 必须保留真实路径、环境、artifact、cleanup/resource/UX/artifact-quality 信息和 verdict。
-- review/test verdict 应通过结构化 evidence submit 或等价结构化记录进入 manifest；Herdr 消息只是 transport 附件，不是权威 verdict。
+- review/test verdict 应通过独立 report 文件加 `orbit evidence submit --file ... --report ... --json` 进入 manifest；可从 `assets/templates/review-report.yaml` 或 `assets/templates/test-report.yaml` 复制模板后填写。不要直接编辑 `.orbit/evidence*.json` 来提交 review/test，即使 JSON 结构看起来正确也不能用来关闭 gate；Herdr 消息只是 transport 附件，不是权威 verdict。
 - 长任务或 docs maintenance 涉及路径移动、归档或历史 evidence 时，应使用 `orbit docs alias/check` 维护 stable doc id，并用 `orbit compact-evidence` 生成 durable summary；不要把 rule context、长日志、截图或 pane transcript 全文写入长期文档。
 - 缺 evidence、verdict 不清、role 冲突或缺 quality outcome 时，默认 fail 或 escalation。
 - transport 和 protocol 要分离：herdr、tmux、CI、routines 可以搬运 task，但不定义 operating model。

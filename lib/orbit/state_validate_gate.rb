@@ -184,8 +184,19 @@ def validate_loop_state!(state, path)
 end
 
 def write_loop_state(path, state)
-  FileUtils.mkdir_p(File.dirname(path))
-  File.write(path, YAML.dump(state))
+  write_file_atomically(path, YAML.dump(state))
+end
+
+def update_loop_state(path)
+  update_yaml_file_atomically(path) do |state|
+    validate_loop_state!(state, path)
+    updated = yield(state)
+    updated ||= state
+    validate_loop_state!(updated, path)
+    updated
+  end
+rescue RuntimeError => e
+  state_error(e.message)
 end
 
 def load_loop_state(path)
@@ -262,30 +273,31 @@ def state_start(options)
   task_path = File.expand_path(options["task"])
   task = load_state_task(task_path)
   owner_role = resolve_owner_role(options["owner_role"])
-  state = load_loop_state(state_path)
   now = Time.now.utc.iso8601
-  previous_phase = state["phase"]
   start_phase = design_task?(task) ? "drafting" : "working"
+  previous_phase = nil
 
-  state["project"] = task["project"] || File.basename(Dir.pwd)
-  state["current_task"] = task_path
-  state["phase"] = start_phase
-  state["owner_role"] = owner_role
-  state["status"] = start_phase
-  state["updated_at"] = now
-  state["artifacts"] ||= {}
-  state_error("Loop state artifacts must be a mapping when present.") unless state["artifacts"].is_a?(Hash)
-  state["artifacts"]["task_file"] = task_path
-  append_state_history(state, {
-    "event" => "start",
-    "from" => previous_phase,
-    "to" => start_phase,
-    "task" => task_path,
-    "owner_role" => owner_role,
-    "created_at" => now
-  })
-
-  write_loop_state(state_path, state)
+  update_loop_state(state_path) do |state|
+    previous_phase = state["phase"]
+    state["project"] = task["project"] || File.basename(Dir.pwd)
+    state["current_task"] = task_path
+    state["phase"] = start_phase
+    state["owner_role"] = owner_role
+    state["status"] = start_phase
+    state["updated_at"] = now
+    state["artifacts"] ||= {}
+    state_error("Loop state artifacts must be a mapping when present.") unless state["artifacts"].is_a?(Hash)
+    state["artifacts"]["task_file"] = task_path
+    append_state_history(state, {
+      "event" => "start",
+      "from" => previous_phase,
+      "to" => start_phase,
+      "task" => task_path,
+      "owner_role" => owner_role,
+      "created_at" => now
+    })
+    state
+  end
   puts "Started Orbit task:"
   puts "- #{task_path}"
 end
@@ -300,40 +312,39 @@ def state_transition(options)
   reason = options["reason"].to_s.strip
   state_error("Transition to blocked requires --reason.") if target_phase == "blocked" && reason.empty?
 
-  state = load_loop_state(state_path)
-  previous_phase = state["phase"]
-  task_path = state["current_task"]
-  task = task_path ? load_state_task(task_path) : nil
-
-  if target_phase == "done"
-    validate_done_transition!(state_path, task_path, options["evidence"])
-  end
-
-  validate_design_transition!(previous_phase, target_phase, task, options["evidence"]) if task && design_task?(task)
-
-  if previous_phase == "working" && target_phase == "done" && task && review_or_test_gate?(task)
-    state_error("Cannot transition directly from working to done for review/test task.")
-  end
-
   now = Time.now.utc.iso8601
-  state["phase"] = target_phase
-  state["status"] = target_phase == "blocked" ? "blocked: #{reason}" : target_phase
-  state["updated_at"] = now
-  state["artifacts"] ||= {}
-  state_error("Loop state artifacts must be a mapping when present.") unless state["artifacts"].is_a?(Hash)
-  state["artifacts"]["evidence_file"] = File.expand_path(options["evidence"]) if options["evidence"]
+  previous_phase = nil
 
-  history_entry = {
-    "event" => "transition",
-    "from" => previous_phase,
-    "to" => target_phase,
-    "created_at" => now
-  }
-  history_entry["evidence"] = File.expand_path(options["evidence"]) if options["evidence"]
-  history_entry["reason"] = reason if target_phase == "blocked"
-  append_state_history(state, history_entry)
+  update_loop_state(state_path) do |state|
+    previous_phase = state["phase"]
+    task_path = state["current_task"]
+    task = task_path ? load_state_task(task_path) : nil
 
-  write_loop_state(state_path, state)
+    validate_done_transition!(state_path, task_path, options["evidence"]) if target_phase == "done"
+    validate_design_transition!(previous_phase, target_phase, task, options["evidence"]) if task && design_task?(task)
+
+    if previous_phase == "working" && target_phase == "done" && task && review_or_test_gate?(task)
+      state_error("Cannot transition directly from working to done for review/test task.")
+    end
+
+    state["phase"] = target_phase
+    state["status"] = target_phase == "blocked" ? "blocked: #{reason}" : target_phase
+    state["updated_at"] = now
+    state["artifacts"] ||= {}
+    state_error("Loop state artifacts must be a mapping when present.") unless state["artifacts"].is_a?(Hash)
+    state["artifacts"]["evidence_file"] = File.expand_path(options["evidence"]) if options["evidence"]
+
+    history_entry = {
+      "event" => "transition",
+      "from" => previous_phase,
+      "to" => target_phase,
+      "created_at" => now
+    }
+    history_entry["evidence"] = File.expand_path(options["evidence"]) if options["evidence"]
+    history_entry["reason"] = reason if target_phase == "blocked"
+    append_state_history(state, history_entry)
+    state
+  end
   puts "Transitioned Orbit state:"
   puts "- #{previous_phase} -> #{target_phase}"
 end
@@ -385,21 +396,22 @@ def state_progress(options)
   message = options["message"].to_s.strip
   state_error("Progress message must be non-empty.") if message.empty?
 
-  state = load_loop_state(state_path)
   now = Time.now.utc.iso8601
-  state["status"] = "progress: #{message}"
-  state["updated_at"] = now
 
-  history_entry = {
-    "event" => "progress",
-    "phase" => state["phase"],
-    "message" => message,
-    "created_at" => now
-  }
-  history_entry["evidence"] = File.expand_path(options["evidence"]) if options["evidence"]
-  append_state_history(state, history_entry)
+  update_loop_state(state_path) do |state|
+    state["status"] = "progress: #{message}"
+    state["updated_at"] = now
 
-  write_loop_state(state_path, state)
+    history_entry = {
+      "event" => "progress",
+      "phase" => state["phase"],
+      "message" => message,
+      "created_at" => now
+    }
+    history_entry["evidence"] = File.expand_path(options["evidence"]) if options["evidence"]
+    append_state_history(state, history_entry)
+    state
+  end
   puts "Recorded Orbit progress:"
   puts "- #{message}"
 end

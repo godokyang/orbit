@@ -1,0 +1,26 @@
+kind: test
+verdict: blocked
+summary: "TODO: one-sentence test conclusion."
+source_message_id: "TODO: herdr:<pane-or-message-id> or report:<path>"
+findings:
+  - "[blocked][test] TODO: describe the blocking coverage gap or failing behavior."
+coverage:
+  - "TODO: real behavior path, command, UI flow, or scenario exercised."
+artifacts:
+  - "TODO: stable path to logs, screenshots, transcripts, or command output."
+test_environment:
+  environment: "TODO: OS/runtime/tool versions or CI/browser/device identity."
+  test_tab_or_pane: "TODO: tester pane, browser tab, CI job, or not_applicable reason."
+  server_owner: "TODO: owner of any server/process under test, or none."
+  browser_owner: "TODO: browser/session owner, or none."
+  cleanup_hook: "TODO: cleanup command/hook, or not_applicable reason."
+  artifact_cleanup: "TODO: artifact retention or cleanup path/policy."
+  duration: "TODO: elapsed time or budget."
+  resource_usage: "TODO: process/browser/resource usage."
+  cleanup_status: "TODO: complete, retained, or blocked with reason."
+  ux_quality: "TODO: not_applicable or concise UX observation."
+  artifact_quality: "TODO: stable, small, reproducible, or known limitation."
+blocked:
+  reason: "TODO: why this test cannot pass yet."
+  next_step: "TODO: specific action required to unblock the test."
+  owner: "lead"
