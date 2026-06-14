@@ -202,6 +202,10 @@ coverage:
   - "覆盖的用户路径、风险路径或 acceptance。"
 artifacts:
   - "命令输出、截图、日志、run 目录或 artifact。"
+blocked:
+  reason: "verdict 为 blocked/partial 且需要阻塞时填写。"
+  next_step: "需要 lead、用户或后续 agent 做什么。"
+  owner: "负责解除阻塞的角色或人。"
 test_environment:
   environment: "测试环境、关键版本、设备或服务状态。"
   test_tab_or_pane: "执行测试的 pane/tab/CI job。"
@@ -227,5 +231,7 @@ quality_measurement:
     risk: "缺失对照带来的风险。"
     replacement_evidence: "替代证据。"
 ```
+
+`findings`、`coverage`、`artifacts` 必须是字符串列表；没有 findings 时写 `[]`，不要写对象数组或自由格式段落。`blocked` 只在 `verdict: blocked` 或需要解释 partial 阻塞时填写；CLI 会把 `blocked` verdict 存为 partial record，并在 gate summary 中显示 blocked 原因。
 
 tester 的结论进入 evidence manifest 后，由 lead 消费并更新 loop state；tester 不直接把任务标为 done。

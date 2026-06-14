@@ -4,6 +4,10 @@ ALLOWED_EVIDENCE_STATUSES = %w[pass fail partial invalid].freeze
 ALLOWED_EVIDENCE_VERDICT_STATUSES = (ALLOWED_EVIDENCE_STATUSES + %w[in_progress]).freeze
 ALLOWED_EVIDENCE_KINDS = %w[review test command implementation waiver].freeze
 STRUCTURED_SUBMIT_KINDS = %w[review test].freeze
+EVIDENCE_EXPECTED_GATE_ROLES = {
+  "review" => "reviewer",
+  "test" => "tester"
+}.freeze
 
 def parse_evidence_args(args)
   subcommand = args.shift
@@ -261,8 +265,12 @@ def latest_records_by_kind(records)
 end
 
 def aggregate_verdict_status(latest_by_kind, open_waiver_count)
-  evidence_statuses = latest_by_kind.reject { |kind, _record| kind == "waiver" }.values.map { |record| record["status"] }
-  gate_statuses = latest_by_kind.select { |kind, _record| %w[review test audit].include?(kind) }.values.map { |record| record["status"] }
+  evidence_statuses = latest_by_kind.reject { |kind, _record| kind == "waiver" }.map do |kind, record|
+    evidence_effective_verdict_status(kind, record)
+  end
+  gate_statuses = latest_by_kind.select { |kind, _record| %w[review test audit].include?(kind) }.map do |kind, record|
+    evidence_effective_verdict_status(kind, record)
+  end
   return "in_progress" if evidence_statuses.empty? && open_waiver_count.zero?
   return "fail" if evidence_statuses.include?("fail")
   return "partial" if evidence_statuses.any? { |status| %w[partial invalid].include?(status) }
@@ -272,19 +280,49 @@ def aggregate_verdict_status(latest_by_kind, open_waiver_count)
   "in_progress"
 end
 
+def evidence_gate_identity_role(record)
+  identity = record["identity"]
+  identity.is_a?(Hash) ? identity["resolved_role"] : nil
+end
+
+def evidence_structured_gate_identity_valid?(kind, record)
+  expected_role = EVIDENCE_EXPECTED_GATE_ROLES[kind]
+  return true unless expected_role
+
+  evidence_gate_identity_role(record) == expected_role
+end
+
+def evidence_effective_verdict_status(kind, record)
+  if STRUCTURED_SUBMIT_KINDS.include?(kind) && !evidence_structured_gate_identity_valid?(kind, record)
+    return "partial"
+  end
+
+  record["status"]
+end
+
+def evidence_gate_verdict_entry(kind, record)
+  expected_role = EVIDENCE_EXPECTED_GATE_ROLES[kind]
+  {
+    "status" => record["status"],
+    "effective_status" => evidence_effective_verdict_status(kind, record),
+    "summary" => record["summary"],
+    "created_at" => record["created_at"],
+    "structured" => record["structured_submit"] == true,
+    "source_message_id" => record["source_message_id"],
+    "identity_expected_role" => expected_role,
+    "identity_resolved_role" => evidence_gate_identity_role(record),
+    "identity_valid" => expected_role ? evidence_structured_gate_identity_valid?(kind, record) : nil,
+    "blocked" => record["blocked"]
+  }.compact
+end
+
 def recompute_evidence_verdict!(manifest)
   records = manifest["records"].is_a?(Array) ? manifest["records"] : []
   waivers = manifest["waivers"].is_a?(Array) ? manifest["waivers"] : []
   latest_by_kind = latest_records_by_kind(records)
   open_waivers = waivers.select { |waiver| waiver.is_a?(Hash) && waiver["revoked_by_user_requirement"] != true }
-  gates = latest_by_kind.transform_values do |record|
-    {
-      "status" => record["status"],
-      "summary" => record["summary"],
-      "created_at" => record["created_at"],
-      "structured" => record["structured_submit"] == true,
-      "source_message_id" => record["source_message_id"]
-    }.compact
+  gates = latest_by_kind.each_with_object({}) do |(kind, record), memo|
+    memo[kind] = evidence_gate_verdict_entry(kind, record)
   end
   status = aggregate_verdict_status(latest_by_kind, open_waivers.length)
 
@@ -304,7 +342,10 @@ end
 def aggregate_verdict_summary(status, latest_by_kind, open_waiver_count)
   return "No evidence records yet." if status == "in_progress" && latest_by_kind.empty?
 
-  parts = latest_by_kind.sort.map { |kind, record| "#{kind}=#{record["status"]}" }
+  parts = latest_by_kind.sort.map do |kind, record|
+    effective_status = evidence_effective_verdict_status(kind, record)
+    effective_status == record["status"] ? "#{kind}=#{record["status"]}" : "#{kind}=#{record["status"]}/effective:#{effective_status}"
+  end
   parts << "open_waivers=#{open_waiver_count}" if open_waiver_count.positive?
   "Aggregate evidence verdict: #{status} (#{parts.join(", ")})."
 end
@@ -484,6 +525,15 @@ def validate_string_array!(value, source)
   value
 end
 
+def validate_blocked_submit_detail!(value, source)
+  evidence_error("#{source} must be a mapping.") unless value.is_a?(Hash)
+  %w[reason next_step owner].each do |field|
+    field_value = value[field]
+    evidence_error("#{source}.#{field} must be a non-empty string.") unless field_value.is_a?(String) && !field_value.strip.empty?
+  end
+  value
+end
+
 def report_string!(report, field, source)
   value = report[field]
   evidence_error("#{source}.#{field} must be a non-empty string.") unless value.is_a?(String) && !value.strip.empty?
@@ -512,6 +562,7 @@ def validate_structured_submit_report!(report_path, report)
   findings = validate_string_array!(report["findings"] || [], "submit_report.findings")
   coverage = validate_string_array!(report["coverage"], "submit_report.coverage")
   artifacts = validate_string_array!(report["artifacts"], "submit_report.artifacts")
+  validate_blocked_submit_detail!(report["blocked"], "submit_report.blocked") if report.key?("blocked")
 
   [kind, status, summary, source_message_id, findings, coverage, artifacts]
 end
@@ -541,6 +592,7 @@ def evidence_submit(options)
   %w[test_environment quality_measurement duration resource_usage ux_quality artifact_quality cleanup_status].each do |field|
     record[field] = report[field] if report.key?(field)
   end
+  record["blocked"] = report["blocked"] if report.key?("blocked")
   snapshot = evidence_identity_snapshot(identity)
   record["identity"] = snapshot if snapshot
   validate_evidence_record_shape!(record, "Evidence record")

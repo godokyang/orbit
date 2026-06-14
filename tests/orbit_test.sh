@@ -541,6 +541,45 @@ YAML
 expect_failure 'evidence submit rejects malformed coverage entries before gate' env ORBIT_INSTANCE=reviewer "$CLI" evidence submit --file "$STRUCTURED_REVIEW_EVIDENCE" --report "$TMPROOT/malformed-structured-review.yaml" --json
 "$CLI" wait-gate --task "$TASK" --evidence "$STRUCTURED_REVIEW_EVIDENCE" --json >"$TMPROOT/wait-gate-structured-review-pass.json"
 json_assert 'wait-gate passes after structured review submit' "$TMPROOT/wait-gate-structured-review-pass.json" 'j["ready"] == true && j["gates"].any? { |g| g["kind"] == "review" && g["passed"] == true && g["structured"] == true }'
+json_assert 'wait-gate exposes role-authorized gate summary' "$TMPROOT/wait-gate-structured-review-pass.json" 'j["gate_summary"]["ready"] == true && j["gates"].any? { |g| g["kind"] == "review" && g["identity_expected_role"] == "reviewer" && g["identity_resolved_role"] == "reviewer" && g["identity_valid"] == true }'
+
+IDENTITY_MISMATCH_EVIDENCE="$TMPROOT/identity-mismatch-evidence.json"
+cp "$STRUCTURED_REVIEW_EVIDENCE" "$IDENTITY_MISMATCH_EVIDENCE"
+ruby --disable-gems -rjson -e 'p=ARGV[0]; j=JSON.parse(File.read(p)); j["records"].last["identity"]["resolved_role"]="lead"; File.write(p, JSON.pretty_generate(j))' "$IDENTITY_MISMATCH_EVIDENCE"
+if "$CLI" wait-gate --task "$TASK" --evidence "$IDENTITY_MISMATCH_EVIDENCE" --json >"$TMPROOT/wait-gate-identity-mismatch.json" 2>"$TMPROOT/wait-gate-identity-mismatch.err"; then
+  printf 'FAIL wait-gate rejects identity-mismatched structured review evidence: command unexpectedly succeeded\n' >&2
+  exit 1
+fi
+pass 'wait-gate rejects identity-mismatched structured review evidence'
+json_assert 'wait-gate reports identity mismatch blocker' "$TMPROOT/wait-gate-identity-mismatch.json" 'j["ready"] == false && j["gate_summary"]["not_ready"].any? { |g| g["kind"] == "review" && g["blocking_reason"] == "identity_mismatch" } && j["gates"].any? { |g| g["kind"] == "review" && g["identity_resolved_role"] == "lead" && g["identity_valid"] == false }'
+expect_failure 'validate rejects identity-mismatched structured review evidence' "$CLI" validate --task "$TASK" --evidence "$IDENTITY_MISMATCH_EVIDENCE" --json
+
+BLOCKED_REVIEW_EVIDENCE="$TMPROOT/blocked-review-evidence.json"
+"$CLI" evidence init --output "$BLOCKED_REVIEW_EVIDENCE" >/dev/null
+cat >"$TMPROOT/structured-review-blocked.yaml" <<'YAML'
+kind: review
+verdict: blocked
+summary: Structured reviewer verdict is blocked on missing acceptance criteria.
+source_message_id: herdr:reviewer:structured-blocked
+findings:
+  - acceptance criteria are still ambiguous
+coverage:
+  - review checked task contract and evidence contract
+artifacts:
+  - review transcript
+blocked:
+  reason: acceptance criteria are ambiguous
+  next_step: lead must clarify pass criteria before implementation can close
+  owner: lead
+YAML
+ORBIT_INSTANCE=reviewer "$CLI" evidence submit --file "$BLOCKED_REVIEW_EVIDENCE" --report "$TMPROOT/structured-review-blocked.yaml" --json >"$TMPROOT/evidence-submit-blocked-review.json"
+json_assert 'evidence submit records blocked detail as partial verdict' "$TMPROOT/evidence-submit-blocked-review.json" 'j["record"]["status"] == "partial" && j["record"]["blocked"]["reason"] == "acceptance criteria are ambiguous" && j["verdict"]["gates"]["review"]["blocked"]["owner"] == "lead"'
+if "$CLI" wait-gate --task "$TASK" --evidence "$BLOCKED_REVIEW_EVIDENCE" --json >"$TMPROOT/wait-gate-blocked-review.json" 2>"$TMPROOT/wait-gate-blocked-review.err"; then
+  printf 'FAIL wait-gate reports blocked structured review evidence: command unexpectedly succeeded\n' >&2
+  exit 1
+fi
+pass 'wait-gate reports blocked structured review evidence'
+json_assert 'wait-gate includes blocked detail in gate status' "$TMPROOT/wait-gate-blocked-review.json" 'j["ready"] == false && j["gates"].any? { |g| g["kind"] == "review" && g["status"] == "blocked" && g["record_status"] == "partial" && g["blocked"]["owner"] == "lead" } && j["gate_summary"]["not_ready"].any? { |g| g["kind"] == "review" && g["status"] == "blocked" }'
 
 AGGREGATE_EVIDENCE="$TMPROOT/aggregate-evidence.json"
 "$CLI" evidence init --output "$AGGREGATE_EVIDENCE" >/dev/null
@@ -808,7 +847,7 @@ json_assert 'state transition allows done with implementation pass evidence' "$T
 test ! -s "$TMPROOT/audit-valid.err"
 json_assert 'audit passes done state with matching evidence' "$TMPROOT/audit-valid.json" 'j["schema_version"] == "orbit-audit-v1" && j["trust_level"]["mode"] == "audit_only" && j["done_ready"] == true && j["trusted_for_handoff"] == true && j["trusted_for_done"] == true && j["trusted_for_release"] == false && j["blocking_findings"].empty? && j["warnings"].any? { |e| e["source"] == "state_file.artifacts.handoff_packet" && e["remediation"].is_a?(String) } && j["issues"].length == j["blocking_findings"].length + j["warnings"].length && j["validation"]["valid"] == true'
 "$CLI" handoff --task "$IMPL_TASK" --evidence "$IMPL_EVIDENCE" --state .orbit/loop-state.yaml --output "$TMPROOT/implementation-handoff.json" --record-state --json >"$TMPROOT/implementation-handoff.stdout"
-json_assert 'handoff can write artifact and record it in state' "$TMPROOT/implementation-handoff.json" 'j["schema_version"] == "orbit-handoff-v1" && j["blocking_errors"].empty? && j["judgment_summary"]["review_judgment"]["present"] == true && j["judgment_summary"]["review_judgment"]["source"] == "latest_evidence_record" && j["judgment_summary"]["test_judgment"]["present"] == true && j["worktree_safety_summary"]["status"] == "not_git"'
+json_assert 'handoff can write artifact and record it in state' "$TMPROOT/implementation-handoff.json" 'j["schema_version"] == "orbit-handoff-v1" && j["blocking_errors"].empty? && j["gate_summary"]["ready"] == true && j["judgment_summary"]["review_judgment"]["present"] == true && j["judgment_summary"]["review_judgment"]["source"] == "latest_evidence_record" && j["judgment_summary"]["test_judgment"]["present"] == true && j["worktree_safety_summary"]["status"] == "not_git"'
 yaml_assert 'handoff record-state stores artifact path' .orbit/loop-state.yaml 'j["artifacts"]["handoff_packet"] == File.expand_path(ARGV[2]) && j["history"].last["event"] == "handoff"' "$TMPROOT/implementation-handoff.json"
 "$CLI" compact-evidence --task "$IMPL_TASK" --evidence "$IMPL_EVIDENCE" --handoff "$TMPROOT/implementation-handoff.json" --output "$TMPROOT/durable-summary.json" --json >"$TMPROOT/durable-summary.stdout"
 cmp "$TMPROOT/durable-summary.json" "$TMPROOT/durable-summary.stdout"

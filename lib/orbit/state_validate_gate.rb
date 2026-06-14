@@ -61,6 +61,10 @@ end
 ALLOWED_LOOP_PHASES = %w[idle working in_review in_test blocked done drafting review_requested changes_requested user_confirmed coding_ready].freeze
 DESIGN_LIFECYCLE_PHASES = %w[drafting review_requested changes_requested user_confirmed coding_ready].freeze
 ALLOWED_GATE_KINDS = %w[review test].freeze
+EXPECTED_GATE_ROLES = {
+  "review" => "reviewer",
+  "test" => "tester"
+}.freeze
 
 def default_state_path
   File.join(Dir.pwd, ".orbit", "loop-state.yaml")
@@ -1018,6 +1022,18 @@ def validate_structured_evidence_record(result, source, record)
   validate_string_array_field(result, "#{source}.findings", record["findings"], "Structured submit findings")
   validate_string_array_field(result, "#{source}.coverage", record["coverage"], "Structured submit coverage")
   validate_string_array_field(result, "#{source}.artifacts", record["artifacts"], "Structured submit artifacts")
+  validate_blocked_evidence_detail(result, "#{source}.blocked", record["blocked"]) if record.key?("blocked")
+end
+
+def validate_blocked_evidence_detail(result, source, blocked)
+  unless blocked.is_a?(Hash)
+    validation_error(result, source, "Blocked evidence detail must be a mapping.")
+    return
+  end
+
+  %w[reason next_step owner].each do |field|
+    validate_non_empty_string(result, "#{source}.#{field}", blocked[field], "Blocked evidence #{field}")
+  end
 end
 
 def parse_evidence_created_at(result, source, value)
@@ -1041,6 +1057,7 @@ def latest_valid_gate_record(result, records, expected_kind)
     next if record["status"] == "invalid"
     next unless ALLOWED_EVIDENCE_STATUSES.include?(record["status"])
     next if STRUCTURED_SUBMIT_KINDS.include?(expected_kind) && record["structured_submit"] != true
+    next unless gate_record_identity_valid?(record, expected_kind)
 
     created_at = parse_evidence_created_at(result, "evidence_file.records[#{index}].created_at", record["created_at"])
     next unless created_at
@@ -1064,7 +1081,11 @@ def validate_gate_verdict(result, records, expected_kind)
   when "fail"
     validation_error(result, "evidence_file.records", "Latest #{expected_kind} verdict is fail.")
   when "partial"
-    validation_error(result, "evidence_file.records", "Latest #{expected_kind} verdict is partial; task remains blocked.")
+    if latest["blocked"].is_a?(Hash)
+      validation_error(result, "evidence_file.records", "Latest #{expected_kind} verdict is blocked: #{latest.dig("blocked", "reason")}.")
+    else
+      validation_error(result, "evidence_file.records", "Latest #{expected_kind} verdict is partial; task remains blocked.")
+    end
   else
     validation_error(result, "evidence_file.records", "Latest #{expected_kind} verdict is not pass.")
   end
@@ -1102,7 +1123,7 @@ end
 def validate_test_pass_environment_evidence(result, records, task)
   return unless test_task_contract?(task)
 
-  latest = latest_record_for_kind(records, "test", structured_gate_only: true)
+  latest = latest_record_for_kind(records, "test", structured_gate_only: true, gate_identity_required: true)
   return unless latest && latest["status"] == "pass"
 
   environment = latest["test_environment"]
@@ -1147,7 +1168,7 @@ end
 def validate_quality_measurement_evidence(result, records, task)
   return unless quality_measurement_task?(task)
 
-  latest = latest_record_for_kind(records, "test", structured_gate_only: true)
+  latest = latest_record_for_kind(records, "test", structured_gate_only: true, gate_identity_required: true)
   return unless latest && latest["status"] == "pass"
 
   measurement = latest["quality_measurement"]
@@ -1570,7 +1591,23 @@ def evidence_has_done_signal?(evidence)
   verdict.is_a?(Hash) && verdict["status"] == "pass"
 end
 
-def latest_record_for_kind(records, kind, structured_gate_only: false)
+def expected_gate_role(kind)
+  EXPECTED_GATE_ROLES[kind]
+end
+
+def record_identity_role(record)
+  identity = record["identity"]
+  identity.is_a?(Hash) ? identity["resolved_role"] : nil
+end
+
+def gate_record_identity_valid?(record, kind)
+  expected_role = expected_gate_role(kind)
+  return true unless expected_role
+
+  record_identity_role(record) == expected_role
+end
+
+def latest_record_for_kind(records, kind, structured_gate_only: false, gate_identity_required: false)
   return nil unless records.is_a?(Array)
 
   candidates = []
@@ -1579,6 +1616,7 @@ def latest_record_for_kind(records, kind, structured_gate_only: false)
     next unless record["kind"] == kind
     next if record["status"] == "invalid"
     next if structured_gate_only && STRUCTURED_SUBMIT_KINDS.include?(kind) && record["structured_submit"] != true
+    next if gate_identity_required && !gate_record_identity_valid?(record, kind)
 
     begin
       created_at = Time.iso8601(record["created_at"].to_s)
@@ -1591,7 +1629,7 @@ def latest_record_for_kind(records, kind, structured_gate_only: false)
 end
 
 def gate_passed?(records, kind)
-  latest_record_for_kind(records, kind, structured_gate_only: true)&.fetch("status", nil) == "pass"
+  latest_record_for_kind(records, kind, structured_gate_only: true, gate_identity_required: true)&.fetch("status", nil) == "pass"
 end
 
 def parse_wait_gate_args(args)
@@ -1624,16 +1662,51 @@ def parse_wait_gate_args(args)
 end
 
 def gate_status(records, kind)
-  latest = latest_record_for_kind(records, kind, structured_gate_only: true)
+  latest = latest_record_for_kind(records, kind, structured_gate_only: true, gate_identity_required: false)
+  expected_role = expected_gate_role(kind)
+  identity_role = latest ? record_identity_role(latest) : nil
+  identity_valid = latest ? gate_record_identity_valid?(latest, kind) : false
   status = latest ? latest["status"] : "missing"
+  display_status = latest.is_a?(Hash) && latest["blocked"].is_a?(Hash) ? "blocked" : status
+  blocking_reason = if latest.nil?
+                      "missing"
+                    elsif !identity_valid
+                      "identity_mismatch"
+                    elsif display_status != "pass"
+                      display_status
+                    end
   {
     "kind" => kind,
     "required" => true,
-    "status" => status,
-    "passed" => status == "pass",
+    "status" => display_status,
+    "record_status" => status,
+    "passed" => status == "pass" && identity_valid,
     "structured" => latest.is_a?(Hash) ? latest["structured_submit"] == true : false,
+    "identity_expected_role" => expected_role,
+    "identity_resolved_role" => identity_role,
+    "identity_valid" => identity_valid,
+    "blocking_reason" => blocking_reason,
+    "blocked" => latest.is_a?(Hash) ? latest["blocked"] : nil,
     "latest" => latest
   }.compact
+end
+
+def required_gate_summary(task, evidence)
+  records = evidence.is_a?(Hash) && evidence["records"].is_a?(Array) ? evidence["records"] : []
+  gates = required_evidence_kinds(task).map { |kind| gate_status(records, kind) }
+  missing_or_blocked = gates.reject { |gate| gate["passed"] }.map do |gate|
+    {
+      "kind" => gate["kind"],
+      "status" => gate["status"],
+      "blocking_reason" => gate["blocking_reason"]
+    }.compact
+  end
+  {
+    "ready" => missing_or_blocked.empty?,
+    "required" => gates.map { |gate| gate["kind"] },
+    "passed" => gates.select { |gate| gate["passed"] }.map { |gate| gate["kind"] },
+    "not_ready" => missing_or_blocked
+  }
 end
 
 def wait_gate(args)
@@ -1645,6 +1718,7 @@ def wait_gate(args)
   kinds = required_evidence_kinds(task)
   gates = kinds.map { |kind| gate_status(records, kind) }
   ready = gates.all? { |gate| gate["passed"] }
+  gate_summary = required_gate_summary(task, evidence)
   packet = {
     "schema_version" => "orbit-gate-status-v1",
     "project" => task["project"] || File.basename(Dir.pwd),
@@ -1652,6 +1726,7 @@ def wait_gate(args)
     "evidence" => evidence_path,
     "ready" => ready,
     "aggregate_verdict" => evidence["verdict"],
+    "gate_summary" => gate_summary,
     "gates" => gates,
     "summary" => ready ? "all required gates pass" : "required gates are not ready"
   }

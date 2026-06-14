@@ -336,7 +336,7 @@ def judgment_summary(evidence)
       "quality_outcome_verdict" => review_judgment.dig("quality_outcome", "verdict"),
       "findings_count" => findings.is_a?(Array) ? findings.length : nil
     }
-  elsif (latest_review = latest_record_for_kind(records, "review"))
+  elsif (latest_review = latest_record_for_kind(records, "review", structured_gate_only: true, gate_identity_required: true))
     summary["review_judgment"] = {
       "present" => true,
       "source" => "latest_evidence_record",
@@ -357,7 +357,7 @@ def judgment_summary(evidence)
       "scenario_count" => scenarios.is_a?(Array) ? scenarios.length : nil,
       "coverage_gap_count" => coverage_gap.is_a?(Array) ? coverage_gap.length : nil
     }
-  elsif (latest_test = latest_record_for_kind(records, "test"))
+  elsif (latest_test = latest_record_for_kind(records, "test", structured_gate_only: true, gate_identity_required: true))
     summary["test_judgment"] = {
       "present" => true,
       "source" => "latest_evidence_record",
@@ -453,6 +453,7 @@ def handoff(args)
     "transport_profile" => transport_profile,
     "rule_packs" => rule_packs_for_context(target_role, task.is_a?(Hash) ? task["task_type"] : nil, include_audit: true),
     "rule_resolution_summary" => rule_resolution_summary(evidence, evidence_path),
+    "gate_summary" => task.is_a?(Hash) && evidence.is_a?(Hash) ? required_gate_summary(task, evidence) : nil,
     "judgment_summary" => judgment_summary(evidence),
     "worktree_safety_summary" => worktree_safety_summary(evidence),
     "evidence_summary" => evidence_summary(evidence),

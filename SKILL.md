@@ -56,7 +56,7 @@ Orbit 是面向任意 AI agent 的运行时协作协议，不绑定具体 agent 
    - 用 `orbit rules resolve --json` 生成本轮规则解析审计产物。
    - 用 `orbit rules print-context --json` 生成本轮读取清单，并读取其中 `required_files`；项目规则不得替代默认规则。
    - 用 `orbit new-task` 创建 task contract。
-   - 用 `orbit evidence init/add/from-report/submit/waive/show` 管理 evidence manifest；review/test gate 优先要求 reviewer/tester 自己用结构化 submit 写入 verdict。
+   - 用 `orbit evidence init/add/from-report/submit/waive/show` 管理 evidence manifest；review/test gate 优先要求 reviewer/tester 自己用结构化 submit 写入 verdict，且 gate 只承认 identity 匹配对应角色的 review/test record。
    - 用 `orbit evidence attach-rule --file ... --rule-resolution ...` 把本轮规则解析产物挂到 evidence manifest。
    - 用 `orbit state show/start/transition` 读取和推进 loop state。
    - 用 `orbit wait-gate --task ... --evidence ... --json` 检查 required review/test gates 当前是否 ready。

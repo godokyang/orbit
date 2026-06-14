@@ -140,7 +140,7 @@ instance 默认是 `user_managed`：如果 reviewer/tester 已有 healthy bindin
 
 `orbit evidence from-report` 可以把 reviewer/tester 报告导入 evidence record，但只接受明确 verdict/status token。`APPROVED_WITH_NOTES` 这类模糊结论不会被自动当成 pass；lead 应要求 reviewer/tester 给出清晰 verdict，或把残留风险记录为 `partial/fail`。
 
-`orbit evidence submit` 是 review/test verdict 的结构化提交入口。report 必须包含 `kind`、`verdict`、`summary`、`source_message_id`、`findings`、`coverage` 和 `artifacts`。`source_message_id` 可以指向 Herdr message、pane transcript、CI job、report file 或其他 transport 附件；Herdr 文本本身不是权威 verdict，权威 verdict 是写入 evidence manifest 的结构化 record。兼容入口 `evidence add/from-report --kind review|test` 会写入最小结构化字段，但新流程应优先使用 `evidence submit` 保留完整 coverage/artifact 来源。
+`orbit evidence submit` 是 review/test verdict 的结构化提交入口。report 必须包含 `kind`、`verdict`、`summary`、`source_message_id`、`findings`、`coverage` 和 `artifacts`；`findings`、`coverage`、`artifacts` 都是字符串列表，空 findings 写 `[]`。`verdict: blocked` 会规范化为 `status: partial` record，并可带 `blocked.reason`、`blocked.next_step`、`blocked.owner` 说明阻塞原因和下一步。`source_message_id` 可以指向 Herdr message、pane transcript、CI job、report file 或其他 transport 附件；Herdr 文本本身不是权威 verdict，权威 verdict 是写入 evidence manifest 的结构化 record。兼容入口 `evidence add/from-report --kind review|test` 会写入最小结构化字段，但新流程应优先使用 `evidence submit` 保留完整 coverage/artifact 来源。
 
 tester/test task 的 task contract 会包含 `test_environment`。最新 `kind: test` 且 `verdict: pass` 的结构化 evidence 必须记录 `test_environment`：实际环境、测试 pane/tab、server/browser owner、cleanup hook、artifact cleanup、duration、resource usage、cleanup status、UX 质量和 artifact 质量。缺少这些字段时，`validate` 会拒绝把该 test pass 当作可信成功证据。
 
@@ -148,7 +148,7 @@ tester/test task 的 task contract 会包含 `test_environment`。最新 `kind: 
 
 `orbit evidence waive` 用结构化 waiver 记录用户或 lead 接受的残留风险。waiver 必须包含 `owner`、`scope`、`reason`、`risk`、`replacement_evidence`、`expiry` 和 `revoked_by_user_requirement`。waiver 不会让 review/test gate 自动通过；它只让 audit/handoff 能看见是谁接受了什么风险、用什么替代证据支撑、什么时候失效。
 
-`orbit wait-gate` 只检查 task 的 required gates 是否已有最新结构化 `pass` evidence。它不会读取报告全文，也不会代替 reviewer/tester 判断。输出中的 `aggregate_verdict` 来自 evidence manifest 顶层聚合摘要，用于暴露每个 evidence kind 的最新状态和 waiver 风险；required gate 是否 ready 仍由 task 的 `gates` 和结构化 review/test records 决定。
+`orbit wait-gate` 只检查 task 的 required gates 是否已有最新结构化 `pass` evidence，并且 review gate 必须来自 resolved role 为 `reviewer` 的 record、test gate 必须来自 resolved role 为 `tester` 的 record。它不会读取报告全文，也不会代替 reviewer/tester 判断。输出中的 `aggregate_verdict` 来自 evidence manifest 顶层聚合摘要，用于暴露每个 evidence kind 的最新状态和 waiver 风险；`gate_summary` 和 `gates[*].blocking_reason` 暴露缺失、身份不匹配、fail、partial 或 blocked 的具体阻塞原因。required gate 是否 ready 仍由 task 的 `gates`、结构化 review/test records 和 record identity 共同决定。
 
 `orbit docs alias` 维护 `.orbit/docs-registry.json` 中的 stable doc id、current path、content hash 和 updated_at。evidence、task 或 handoff 需要长期引用重要文档时，优先引用 stable doc id，并在文档移动后只更新 registry，不批量重写历史 evidence。`orbit docs check` 会检查 alias target 是否存在、content hash 是否匹配、open 目录是否存在已关闭但未归档或未索引文档，以及 archive 目录是否有 README。
 
@@ -289,7 +289,9 @@ created_at: "ISO-8601 timestamp"
 
 review evidence 和 test evidence 不能互相替代。review-only evidence 不能让 test gate 通过，test-only evidence 也不能让 review gate 通过。
 
-顶层 `verdict` 是 aggregate 摘要，不是最新 record 的别名。它应包含 `mode: aggregate`、整体 `status`、每个 evidence kind 的最新状态、最新 record 和 waiver 计数。后续 command 或 implementation pass 不能覆盖仍为 fail/partial 的 review/test gate。判断 task 是否 ready 时，以 `wait-gate`、`validate`、`audit` 对 required gates 的检查为准。
+review/test gate 还要求 record identity 匹配对应角色：review 只能由 resolved role 为 `reviewer` 的 record 关闭，test 只能由 resolved role 为 `tester` 的 record 关闭。record 里缺少 identity 或 identity 不匹配时，该 record 可以保留为历史证据，但不能让 required gate ready。
+
+顶层 `verdict` 是 aggregate 摘要，不是最新 record 的别名。它应包含 `mode: aggregate`、整体 `status`、每个 evidence kind 的最新状态、最新 record 和 waiver 计数。后续 command 或 implementation pass 不能覆盖仍为 fail/partial 的 review/test gate；身份不匹配的 review/test pass 只会形成 partial effective status。判断 task 是否 ready 时，以 `wait-gate`、`validate`、`audit` 对 required gates 的检查为准。
 
 Durable evidence 和 transient artifacts 必须分层。durable 层是 task summary、final evidence manifest、handoff packet、compact summary、stable doc registry 和用户可复核的最终报告；transient 层是 rule context、临时 rule resolution、pane transcript、长日志、截图、server output、浏览器录屏和一次性诊断 dump。transient artifact 可以作为 evidence record 的 artifact ref，但不应被全文塞进长期 docs。需要把任务沉淀为长期记录时，运行 `orbit compact-evidence` 并保留摘要路径。
 
@@ -315,7 +317,7 @@ reviewer 或 tester 可以在 evidence manifest 中补充结构化 judgment：
 - `test_judgment`：包含 `verdict`、`environment`、`scenarios` 和可选 `coverage_gap`。
 
 CLI 只校验这些 judgment 的结构和必填字段，不替代 reviewer/tester 的判断。
-如果没有顶层结构化 judgment，`orbit handoff --json` 会从最新的 `kind=review` / `kind=test` evidence record 推导 `judgment_summary`，来源会标记为 `latest_evidence_record`。这不是替代详细报告，而是给下一位 agent 一个稳定、可机器读取的 gate 摘要。
+如果没有顶层结构化 judgment，`orbit handoff --json` 会从最新且身份有效的 `kind=review` / `kind=test` evidence record 推导 `judgment_summary`，来源会标记为 `latest_evidence_record`。handoff 还会输出 `gate_summary`，让下一位 agent 直接看到 required gate 是否 ready，以及未 ready 的 gate 被什么原因阻塞。这不是替代详细报告，而是给下一位 agent 一个稳定、可机器读取的 gate 摘要。
 
 ## Worktree 和 Git 安全
 
