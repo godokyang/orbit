@@ -416,7 +416,7 @@ def bind_pane(args)
   }.compact)
 end
 
-def write_instance_binding!(instance_name, transport_kind:, pane:, tab: "", space: "")
+def write_instance_binding!(instance_name, transport_kind:, pane:, tab: "", space: "", actual_client: nil)
   roles, _instances, instances_path = load_project_instance_config_for_cli
   instance_key = nil
   instance = nil
@@ -440,7 +440,7 @@ def write_instance_binding!(instance_name, transport_kind:, pane:, tab: "", spac
     transport["binding"]["space"] = space.to_s
     transport["health"]["last_heartbeat"] = Time.now.utc.iso8601
     transport["health"]["cwd"] = Dir.pwd
-    transport["health"]["actual_client"] = runtime_actual_client
+    transport["health"]["actual_client"] = actual_client.to_s.empty? ? runtime_actual_client : actual_client.to_s
     instance["transport"] = transport
     instances_config
   end

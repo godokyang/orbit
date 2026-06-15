@@ -138,6 +138,8 @@ instance 默认是 `user_managed`：如果 reviewer/tester 已有 healthy bindin
 
 `orbit dispatch` 只负责生成或发送 task 投递消息；generic 模式输出手工/外部投递 payload，Herdr 模式需要显式 `--pane`。它不改变 task/evidence/state，也不让 gate 自动通过。
 
+lead 协调 reviewer/tester 时，不要把 Herdr `agent-status done` 当作权威完成条件。真实角色可能已经成功提交结构化 evidence，但在回复消息、审批 prompt 或客户端 UI 上停在 `blocked`。收口应优先读取 `.orbit/evidence*`、运行 `orbit wait-gate --task ... --evidence ... --json`，再用 `validate/audit/handoff` 判断是否可 done；Herdr 状态只作为定位 transport 卡点的辅助信号。需要回信给特定 pane 时，使用明确的 `reply-to` pane，避免把完整报告投递到普通 shell/root pane。
+
 如果 evidence manifest 通过 `rule_resolution.file` 引用了规则解析产物，`validate` 会检查该文件存在、schema 正确、`valid: true`，并且和当前 task / role 对得上；`audit` 和 `handoff` 会输出 `rule_resolution_summary`，方便接手者复核本轮实际使用的规则来源。`rules print-context` 生成的是读取清单，不替代可挂载到 evidence 的 `rules resolve` 审计产物。
 
 `orbit evidence from-report` 可以把 reviewer/tester 报告导入 evidence record，但只接受明确 verdict/status token。`APPROVED_WITH_NOTES` 这类模糊结论不会被自动当成 pass；lead 应要求 reviewer/tester 给出清晰 verdict，或把残留风险记录为 `partial/fail`。

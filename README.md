@@ -497,6 +497,8 @@ orbit dispatch --task .orbit/tasks/current-task.yaml --to reviewer --transport h
 
 当 reviewer/tester 这类 `user_managed` instance 已经有 healthy binding 时，Orbit 必须优先复用现有 pane。只有用户明确允许创建缺失 instance（例如 `--allow-create`）时，Herdr adapter 才会准备新 role；此时应尽量在 lead 当前同级视图创建，优先沿用当前 tab / workspace 元数据，缺失时在 start plan 中暴露 fallback。新建 role 还必须显式准备权限或 approval mode；Orbit 可以记录这项 requirement，但不能静默绕过用户授权或客户端审批。
 
+真实 Herdr 协调时，lead 不应把 `agent-status done` 当作 reviewer/tester gate。agent 可能已提交结构化 evidence，但在回复 lead、审批 prompt 或 UI 状态上停住。收口时以 `.orbit/evidence*`、`orbit wait-gate --task ... --evidence ... --json`、`orbit validate` 和 `orbit audit` 为准；Herdr status 只作为 transport 诊断信号。需要投递给特定 pane 时，优先使用明确的 `reply-to`，避免把长报告发到普通 shell/root pane。
+
 ## 不能直接说完成的情况
 
 - 没有 task contract。

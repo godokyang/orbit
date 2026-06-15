@@ -84,7 +84,7 @@ HELP = <<~HELP
     orbit evidence attach-rule --file PATH --rule-resolution PATH
     orbit evidence show --file PATH --json
     orbit handoff --task PATH --state PATH --evidence PATH [--transport NAME] [--output PATH] [--record-state] --json
-    orbit dispatch --task PATH --to INSTANCE [--transport generic|herdr] [--pane PANE] [--dry-run] --json
+    orbit dispatch --task PATH --to INSTANCE [--transport generic|herdr] [--pane PANE] [--reply-to PANE] [--dry-run] --json
     orbit rules resolve --json [--task PATH] [--role ROLE] [--instance NAME] [--output PATH]
     orbit rules print-context --json [--task PATH] [--role ROLE] [--instance NAME] [--output PATH]
     orbit start INSTANCE [--transport local|herdr] [--cwd PATH] [--allow-create] [--dry-run] [--json]
@@ -151,7 +151,7 @@ COMMAND_HELP = {
   HELP
   "dispatch" => <<~HELP,
     Usage:
-      orbit dispatch --task PATH --to INSTANCE [--transport generic|herdr] [--pane PANE] [--dry-run] --json
+      orbit dispatch --task PATH --to INSTANCE [--transport generic|herdr] [--pane PANE] [--reply-to PANE] [--dry-run] --json
 
     Builds a machine-readable task dispatch packet for an agent instance.
 
@@ -163,11 +163,14 @@ COMMAND_HELP = {
     Options:
       --transport NAME  generic or herdr. Defaults to generic.
       --pane PANE       Herdr pane id for --transport herdr.
+      --reply-to PANE   Pane id to place in the herdr-msg reply-to header.
       --dry-run         Print the dispatch plan without sending.
 
     Notes:
       generic transport produces a payload for manual or external delivery.
       herdr transport sends text to an existing agent pane and presses Enter.
+      Completion should be collected from structured evidence and wait-gate;
+      Herdr agent-status is only a transport hint.
   HELP
   "classify-intent" => <<~HELP,
     Usage:

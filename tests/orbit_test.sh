@@ -125,7 +125,7 @@ grep -q 'orbit docs alias --id ID --path PATH' "$TMPROOT/help.txt"
 grep -q 'orbit audit' "$TMPROOT/help.txt"
 grep -q 'orbit dispatch' "$TMPROOT/help.txt"
 grep -q 'orbit handoff' "$TMPROOT/help.txt"
-grep -Fq 'orbit dispatch --task PATH --to INSTANCE [--transport generic|herdr] [--pane PANE] [--dry-run] --json' "$TMPROOT/help.txt"
+grep -Fq 'orbit dispatch --task PATH --to INSTANCE [--transport generic|herdr] [--pane PANE] [--reply-to PANE] [--dry-run] --json' "$TMPROOT/help.txt"
 grep -Fq 'orbit handoff --task PATH --state PATH --evidence PATH [--transport NAME] [--output PATH] [--record-state] --json' "$TMPROOT/help.txt"
 grep -Fq 'orbit rules print-context --json [--task PATH] [--role ROLE] [--instance NAME] [--output PATH]' "$TMPROOT/help.txt"
 grep -q 'orbit start INSTANCE' "$TMPROOT/help.txt"
@@ -145,7 +145,8 @@ pass 'audit subcommand help works'
 
 "$CLI" dispatch --help >"$TMPROOT/dispatch-help.txt" 2>"$TMPROOT/dispatch-help.err"
 test ! -s "$TMPROOT/dispatch-help.err"
-grep -Fq 'orbit dispatch --task PATH --to INSTANCE [--transport generic|herdr] [--pane PANE] [--dry-run] --json' "$TMPROOT/dispatch-help.txt"
+grep -Fq 'orbit dispatch --task PATH --to INSTANCE [--transport generic|herdr] [--pane PANE] [--reply-to PANE] [--dry-run] --json' "$TMPROOT/dispatch-help.txt"
+grep -q 'wait-gate' "$TMPROOT/dispatch-help.txt"
 grep -q 'sends text to an existing agent pane' "$TMPROOT/dispatch-help.txt"
 pass 'dispatch subcommand help works'
 
@@ -245,7 +246,7 @@ json_assert 'bind-pane records reviewer binding and status reuse' "$TMPROOT/bind
 json_assert 'start reuses healthy user-managed binding' "$TMPROOT/start-reviewer-reuse.json" 'j["action"] == "reuse" && j["instance_status"]["recommended_action"] == "reuse" && j["instance_status"]["transport"]["binding"]["pane"] == "pane-reviewer"'
 "$CLI" init --force >/dev/null
 "$CLI" start reviewer --allow-create --dry-run --json >"$TMPROOT/start-reviewer.json"
-json_assert 'start dry-run resolves instance command env and cwd' "$TMPROOT/start-reviewer.json" 'j["schema_version"] == "orbit-start-plan-v1" && j["action"] == "dry_run" && j["transport"] == "local" && j["instance"] == "reviewer" && j["argv"] == ["codex"] && j["env"]["ORBIT_INSTANCE"] == "reviewer" && j["env"]["ORBIT_ROLE"] == "reviewer" && j["cwd"] == Dir.pwd'
+json_assert 'start dry-run resolves instance command env cwd and client metadata' "$TMPROOT/start-reviewer.json" 'j["schema_version"] == "orbit-start-plan-v1" && j["action"] == "dry_run" && j["transport"] == "local" && j["instance"] == "reviewer" && j["argv"] == ["codex"] && j["client"]["expected_client"] == "codex" && j["client"]["full_permission"]["known_client"] == true && j["client"]["full_permission"]["configured"] == false && j["env"]["ORBIT_INSTANCE"] == "reviewer" && j["env"]["ORBIT_ROLE"] == "reviewer" && j["cwd"] == Dir.pwd'
 "$CLI" start reviewer --allow-create --dry-run >"$TMPROOT/start-reviewer-human.txt" 2>"$TMPROOT/start-reviewer-human.err"
 test ! -s "$TMPROOT/start-reviewer-human.err"
 grep -q 'Orbit start plan:' "$TMPROOT/start-reviewer-human.txt"
@@ -268,7 +269,7 @@ case "$1 $2" in
     printf '%s\n' "$@" >"$ORBIT_FAKE_HERDR_ARGS"
     printf '%s/%s\n' "$ORBIT_INSTANCE" "$ORBIT_ROLE" >"$ORBIT_FAKE_HERDR_ENV"
     pwd >"$ORBIT_FAKE_HERDR_CWD"
-    printf '{"pane_id":"fake-pane","agent":"%s"}\n' "$ORBIT_INSTANCE"
+    printf '{"result":{"agent":{"pane_id":"fake-pane","agent":"codex"}}}\n'
     ;;
   "wait output")
     : "${ORBIT_FAKE_HERDR_WAIT_ARGS:?}"
@@ -283,7 +284,7 @@ esac
 HERDR
 chmod +x "$TMPROOT/fakebin/herdr"
 ORBIT_FAKE_HERDR_ARGS="$TMPROOT/fake-herdr-args.txt" ORBIT_FAKE_HERDR_WAIT_ARGS="$TMPROOT/fake-herdr-wait-args.txt" ORBIT_FAKE_HERDR_ENV="$TMPROOT/fake-herdr-env.txt" ORBIT_FAKE_HERDR_CWD="$TMPROOT/fake-herdr-cwd.txt" HERDR_PANE_ID=lead-pane HERDR_TAB_ID=lead-tab PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer --transport herdr --allow-create --json >"$TMPROOT/start-herdr-real.json"
-json_assert 'start herdr invokes adapter and returns result' "$TMPROOT/start-herdr-real.json" 'j["action"] == "started" && j["adapter_result"]["success"] == true && j["adapter_result"]["stdout"].include?("fake-pane") && j["adapter_result"]["pane_id"] == "fake-pane" && j["adapter_result"]["ready_wait"]["success"] == true && j["creation_policy"]["same_level_view"]["strategy"] == "same_tab" && j["instance_status_after_start"]["transport"]["binding"]["tab"] == "lead-tab"'
+json_assert 'start herdr invokes adapter, returns result, and records actual client' "$TMPROOT/start-herdr-real.json" 'j["action"] == "started" && j["adapter_result"]["success"] == true && j["adapter_result"]["stdout"].include?("fake-pane") && j["adapter_result"]["pane_id"] == "fake-pane" && j["adapter_result"]["ready_wait"]["success"] == true && j["creation_policy"]["same_level_view"]["strategy"] == "same_tab" && j["instance_status_after_start"]["transport"]["binding"]["tab"] == "lead-tab" && j["instance_status_after_start"]["transport"]["health"]["actual_client"] == "codex"'
 ruby --disable-gems -e 'expected=["agent","start","reviewer","--cwd",Dir.pwd,"--tab","lead-tab","--split","right","--no-focus","--","codex"]; actual=File.read(ARGV[0]).lines.map(&:chomp); abort(actual.inspect) unless actual == expected' "$TMPROOT/fake-herdr-args.txt"
 ruby --disable-gems -e 'actual=File.read(ARGV[0]).lines.map(&:chomp); abort(actual.inspect) unless actual[0,3] == ["wait","output","fake-pane"] && actual.include?("--regex") && actual.include?("OpenAI Codex|›")' "$TMPROOT/fake-herdr-wait-args.txt"
 grep -qx 'reviewer/reviewer' "$TMPROOT/fake-herdr-env.txt"
@@ -335,6 +336,13 @@ ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases
 json_assert 'validate accepts array instance command' "$TMPROOT/valid-array-command.json" 'j["valid"] == true'
 "$CLI" start reviewer --allow-create --dry-run --json >"$TMPROOT/start-array-command.json"
 json_assert 'start dry-run preserves array instance command' "$TMPROOT/start-array-command.json" 'j["argv"] == ["codex", "--profile", "review"]'
+ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["instances"]["reviewer"]["command"]=["codex","--dangerously-bypass-approvals-and-sandbox"]; y["instances"]["lead"]["command"]=["claude","--dangerously-skip-permissions"]; y["instances"]["tester"]["command"]=["opencode","run","--interactive","--dangerously-skip-permissions"]; File.write(p, YAML.dump(y))' .orbit/instances.yaml
+"$CLI" start reviewer --allow-create --dry-run --json >"$TMPROOT/start-codex-full-permission.json"
+"$CLI" start lead --allow-create --dry-run --json >"$TMPROOT/start-claude-full-permission.json"
+"$CLI" start tester --allow-create --dry-run --json >"$TMPROOT/start-opencode-full-permission.json"
+json_assert 'start dry-run audits codex full-permission flag' "$TMPROOT/start-codex-full-permission.json" 'j["client"]["expected_client"] == "codex" && j["client"]["full_permission"]["configured"] == true && j["client"]["full_permission"]["present_flags"].include?("--dangerously-bypass-approvals-and-sandbox")'
+json_assert 'start dry-run audits claude full-permission flag' "$TMPROOT/start-claude-full-permission.json" 'j["client"]["expected_client"] == "claude" && j["client"]["full_permission"]["configured"] == true && j["client"]["full_permission"]["present_flags"].include?("--dangerously-skip-permissions")'
+json_assert 'start dry-run audits opencode full-permission flag' "$TMPROOT/start-opencode-full-permission.json" 'j["client"]["expected_client"] == "opencode" && j["client"]["full_permission"]["configured"] == true && j["client"]["full_permission"]["present_flags"].include?("--dangerously-skip-permissions")'
 cp "$TMPROOT/schema-instances.yaml.bak" .orbit/instances.yaml
 ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["instances"]["reviewer"]["command"]=""; File.write(p, YAML.dump(y))' .orbit/instances.yaml
 expect_failure 'validate rejects empty instance command' "$CLI" validate --json
@@ -461,8 +469,10 @@ yaml_assert 'new-task initializes decomposition contract fields' "$DECOMP_TASK" 
 expect_failure 'new-task refuses overwrite' "$CLI" new-task --target-role reviewer --task-type implementation_review --output "$TASK"
 "$CLI" dispatch --task "$TASK" --to reviewer --json >"$TMPROOT/dispatch-generic.json"
 json_assert 'dispatch generic emits manual delivery payload' "$TMPROOT/dispatch-generic.json" 'j["schema_version"] == "orbit-dispatch-v1" && j["action"] == "manual_delivery_required" && j["transport"] == "generic" && j["to_instance"] == "reviewer" && j["resolved_role"] == "reviewer" && j["task"] == File.expand_path(ARGV[2]) && j["message"].include?("orbit whoami --task") && j["message"].include?("orbit rules print-context --task") && j["checks"]["target_role_matches"] == true' "$TASK"
-"$CLI" dispatch --task "$TASK" --to reviewer --transport herdr --pane pane-123 --dry-run --json >"$TMPROOT/dispatch-herdr-dry-run.json"
-json_assert 'dispatch herdr dry-run emits adapter plan' "$TMPROOT/dispatch-herdr-dry-run.json" 'j["action"] == "dry_run" && j["adapter"]["schema_version"] == "orbit-herdr-dispatch-v1" && j["adapter"]["submit_delay_seconds"] > 0 && j["adapter"]["commands"][0][0,4] == ["herdr", "pane", "send-text", "pane-123"] && j["adapter"]["commands"][0][4].include?(File.expand_path(ARGV[2])) && j["adapter"]["commands"][1] == ["herdr", "pane", "send-keys", "pane-123", "Enter"]' "$TASK"
+"$CLI" dispatch --task "$TASK" --to reviewer --transport herdr --pane pane-123 --reply-to observer-pane --dry-run --json >"$TMPROOT/dispatch-herdr-dry-run.json"
+json_assert 'dispatch herdr dry-run emits adapter plan with explicit reply-to' "$TMPROOT/dispatch-herdr-dry-run.json" 'j["action"] == "dry_run" && j["reply_to"] == "observer-pane" && j["reply_to_source"] == "explicit_option" && j["message"].include?("reply-to:observer-pane") && j["adapter"]["schema_version"] == "orbit-herdr-dispatch-v1" && j["adapter"]["submit_delay_seconds"] > 0 && j["adapter"]["commands"][0][0,4] == ["herdr", "pane", "send-text", "pane-123"] && j["adapter"]["commands"][0][4].include?(File.expand_path(ARGV[2])) && j["adapter"]["commands"][1] == ["herdr", "pane", "send-keys", "pane-123", "Enter"]' "$TASK"
+HERDR_PANE_ID=lead-reply-pane "$CLI" dispatch --task "$TASK" --to reviewer --transport herdr --pane pane-123 --dry-run --json >"$TMPROOT/dispatch-herdr-env-reply-to.json"
+json_assert 'dispatch herdr reply-to defaults to current Herdr pane' "$TMPROOT/dispatch-herdr-env-reply-to.json" 'j["reply_to"] == "lead-reply-pane" && j["reply_to_source"] == "HERDR_PANE_ID" && j["message"].include?("reply-to:lead-reply-pane")'
 cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
 #!/bin/sh
 : "${ORBIT_FAKE_HERDR_DISPATCH_ARGS:?}"

@@ -369,6 +369,7 @@ def start_plan(options)
     "transport" => options["transport"],
     "cwd" => cwd,
     "argv" => argv,
+    "client" => start_client_metadata(argv),
     "env" => instance_launch_env(instance_key, instance, role_def, role_ref),
     "instance_status" => status,
     "creation_policy" => creation_policy,
@@ -437,6 +438,29 @@ def role_creation_policy(transport)
   }
   policy["same_level_view"] = herdr_same_level_view if transport == "herdr"
   policy
+end
+
+def start_client_metadata(argv)
+  executable = File.basename(argv.first.to_s)
+  full_permission_flags = {
+    "codex" => ["--dangerously-bypass-approvals-and-sandbox"],
+    "claude" => ["--dangerously-skip-permissions"],
+    "opencode" => ["--dangerously-skip-permissions"]
+  }
+  required_flags = full_permission_flags.fetch(executable, [])
+  present_flags = required_flags.select { |flag| argv.include?(flag) }
+  {
+    "expected_client" => executable,
+    "argv" => argv,
+    "full_permission" => {
+      "known_client" => full_permission_flags.key?(executable),
+      "required_flags" => required_flags,
+      "present_flags" => present_flags,
+      "configured" => !required_flags.empty? && (required_flags - present_flags).empty?,
+      "mode" => required_flags.empty? ? "unknown_client" : "argv_flag",
+      "note" => "Full-permission flags are audited in the start plan; the client may still require runtime approval, so completion must be verified through evidence and wait-gate."
+    }
+  }
 end
 
 def start_requires_reuse?(plan)
@@ -584,6 +608,17 @@ rescue JSON::ParserError
   nil
 end
 
+def herdr_start_agent_client(stdout)
+  parsed = JSON.parse(stdout)
+  return parsed.dig("result", "agent", "agent") if parsed.dig("result", "agent", "agent")
+  return parsed.dig("result", "agent") if parsed.dig("result", "agent").is_a?(String)
+  return parsed["agent"] if parsed["agent"].is_a?(String)
+
+  nil
+rescue JSON::ParserError
+  nil
+end
+
 def run_herdr_start(plan, json:)
   herdr_path = command_path("herdr")
   usage_error("herdr command not found; run `orbit tools doctor --json` or use --transport local.") unless herdr_path
@@ -593,6 +628,8 @@ def run_herdr_start(plan, json:)
   stdout, stderr, status = Open3.capture3(exec_env, *argv, chdir: plan["cwd"])
   adapter = attach_start_adapter_plan(plan)["adapter"]
   pane_id = status.success? ? herdr_start_pane_id(stdout) : nil
+  actual_client = status.success? ? herdr_start_agent_client(stdout) : nil
+  actual_client = plan.dig("client", "expected_client") if actual_client.to_s.empty?
   ready_wait = nil
 
   if status.success? && pane_id && adapter["ready_wait"]
@@ -637,7 +674,8 @@ def run_herdr_start(plan, json:)
       transport_kind: "herdr",
       pane: pane_id,
       tab: view["tab"].to_s,
-      space: view["workspace"].to_s
+      space: view["workspace"].to_s,
+      actual_client: actual_client
     )
   end
   result = attach_start_adapter_plan(plan).merge(
@@ -738,6 +776,10 @@ def parse_dispatch_args(args)
       options["pane"] = option_value(args, "--pane")
     when /\A--pane=(.+)\z/
       options["pane"] = Regexp.last_match(1)
+    when "--reply-to"
+      options["reply_to"] = option_value(args, "--reply-to")
+    when /\A--reply-to=(.+)\z/
+      options["reply_to"] = Regexp.last_match(1)
     when "--dry-run"
       options["dry_run"] = true
     when "--json"
@@ -770,9 +812,24 @@ def dispatch_task_label(task_path)
   File.basename(task_path, File.extname(task_path)).gsub(/[^A-Za-z0-9_.-]/, "-")
 end
 
+def dispatch_reply_to(explicit_reply_to = nil)
+  explicit = explicit_reply_to.to_s.strip
+  return [explicit, "explicit_option"] unless explicit.empty?
+
+  env_pane = ENV["HERDR_PANE_ID"].to_s.strip
+  return [env_pane, "HERDR_PANE_ID"] unless env_pane.empty?
+
+  lead_binding = lead_transport_binding
+  lead_pane = lead_binding["pane"].to_s.strip
+  return [lead_pane, "lead_transport_binding"] unless lead_pane.empty?
+
+  ["manual", "manual_fallback"]
+end
+
 def dispatch_message(packet)
-  reply_to = ENV["HERDR_PANE_ID"]
-  header = "[herdr-msg from:orbit pane:#{reply_to || "unknown"} reply-to:#{reply_to || "manual"} at:current kind:request task:#{packet["task_id"]}]"
+  reply_to = packet["reply_to"]
+  sender_pane = reply_to == "manual" ? "unknown" : reply_to
+  header = "[herdr-msg from:orbit pane:#{sender_pane} reply-to:#{reply_to} at:current kind:request task:#{packet["task_id"]}]"
   [
     header,
     "请接收 Orbit task。",
@@ -795,6 +852,7 @@ def dispatch_packet(options)
   instance_key, instance_alias, instance, role_ref, role_def = load_instance_for_launch(options["to"])
   resolved_role = role_def["role"] || role_ref
   instance_status = instance_status_entry(instance_key, instance, role_ref, role_def)
+  reply_to, reply_to_source = dispatch_reply_to(options["reply_to"])
   binding_pane = instance_status.dig("transport", "binding", "pane").to_s
   if options["transport"] == "herdr" && options["pane"].to_s.empty? && !binding_pane.empty?
     options["pane"] = binding_pane
@@ -818,6 +876,8 @@ def dispatch_packet(options)
     "resolved_role" => resolved_role,
     "transport" => options["transport"],
     "target_instance_status" => instance_status,
+    "reply_to" => reply_to,
+    "reply_to_source" => reply_to_source,
     "dry_run" => options["dry_run"],
     "message" => nil,
     "checks" => {
