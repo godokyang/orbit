@@ -134,15 +134,17 @@ orbit compact-evidence --task task.yaml --evidence .orbit/evidence.json --handof
 
 instance 默认是 `user_managed`：如果 reviewer/tester 已有 healthy binding，Orbit 应复用该 instance，而不是由 lead 新建另一个 pane。`orbit instances status --json` 会输出每个 instance 的 `management`、`binding_status` 和 `recommended_action`。`user_managed` 缺少 healthy binding 时，lead 应请求用户确认或先绑定；`orbit_managed` 才表示 Orbit 可以按配置自动启动缺失 role。`orbit bind-pane --instance reviewer --pane ... --json` 只绑定 transport handle，不改变 role identity。
 
+当用户确认或配置允许创建缺失 role instance 时，Herdr adapter 应尽量在 lead 当前同级视图创建新 role：优先使用当前 lead 的 tab / workspace 元数据，缺失时记录 fallback，而不是静默把 reviewer/tester 开到不相关视图。新建 role 后还要显式处理权限准备：Orbit 可以在 start plan 中记录 permission setup requirement，但不能在没有明确 adapter/client 能力和用户授权时静默绕过审批或打开危险权限。
+
 `orbit dispatch` 只负责生成或发送 task 投递消息；generic 模式输出手工/外部投递 payload，Herdr 模式需要显式 `--pane`。它不改变 task/evidence/state，也不让 gate 自动通过。
 
 如果 evidence manifest 通过 `rule_resolution.file` 引用了规则解析产物，`validate` 会检查该文件存在、schema 正确、`valid: true`，并且和当前 task / role 对得上；`audit` 和 `handoff` 会输出 `rule_resolution_summary`，方便接手者复核本轮实际使用的规则来源。`rules print-context` 生成的是读取清单，不替代可挂载到 evidence 的 `rules resolve` 审计产物。
 
 `orbit evidence from-report` 可以把 reviewer/tester 报告导入 evidence record，但只接受明确 verdict/status token。`APPROVED_WITH_NOTES` 这类模糊结论不会被自动当成 pass；lead 应要求 reviewer/tester 给出清晰 verdict，或把残留风险记录为 `partial/fail`。
 
-`orbit evidence submit` 是 review/test verdict 的结构化提交入口。report 必须包含 `kind`、`verdict`、`summary`、`source_message_id`、`findings`、`coverage` 和 `artifacts`；`findings`、`coverage`、`artifacts` 都是字符串列表，空 findings 写 `[]`。可以从 `assets/templates/review-report.yaml` 或 `assets/templates/test-report.yaml` 复制模板后填写；schema 错误时 CLI 会提示字段路径、期望结构、实际类型和模板路径。`verdict: blocked` 会规范化为 `status: partial` record，并可带 `blocked.reason`、`blocked.next_step`、`blocked.owner` 说明阻塞原因和下一步。`source_message_id` 可以指向 Herdr message、pane transcript、CI job、report file 或其他 transport 附件；Herdr 文本本身不是权威 verdict，权威 verdict 是由 CLI 写入 evidence manifest 的结构化 record。不要手写 `.orbit/evidence*.json` 里的 review/test record；直接编辑不会生成可信 identity，不能用于关闭 gate。兼容入口 `evidence add/from-report --kind review|test` 会写入最小结构化字段，但新流程应优先使用 `evidence submit` 保留完整 coverage/artifact 来源。
+`orbit evidence submit` 是 review/test verdict 的结构化提交入口。report 必须包含 `kind`、`verdict`、`summary`、`source_message_id`、`findings`、`coverage` 和 `artifacts`；review report 还必须包含 `quality_outcome_verdict`，review PASS 必须写 `quality_outcome_verdict: pass`；test PASS 必须包含 `test_level`，且不能是 `not_applicable`。`coverage` 和 `artifacts` 是字符串列表；`findings` 可以是字符串列表，也可以是 finding mapping。High/Medium finding 必须用 mapping 写出 `severity`、`summary`、`symptom`、`source`、`consequence` 和 `remedy`。可以从 `assets/templates/review-report.yaml`、`assets/templates/design-review-report.yaml` 或 `assets/templates/test-report.yaml` 复制模板后填写；schema 错误时 CLI 会提示字段路径、期望结构、实际类型和模板路径。`verdict: blocked` 会规范化为 `status: partial` record，并可带 `blocked.reason`、`blocked.next_step`、`blocked.owner` 说明阻塞原因和下一步。`source_message_id` 可以指向 Herdr message、pane transcript、CI job、report file 或其他 transport 附件；Herdr 文本本身不是权威 verdict，权威 verdict 是由 CLI 写入 evidence manifest 的结构化 record。不要手写 `.orbit/evidence*.json` 里的 review/test record；直接编辑不会生成可信 identity，不能用于关闭 gate。兼容入口 `evidence add/from-report --kind review|test` 会写入最小结构化字段，但新流程应优先使用 `evidence submit` 保留完整 coverage/artifact 来源。
 
-tester/test task 的 task contract 会包含 `test_environment`。最新 `kind: test` 且 `verdict: pass` 的结构化 evidence 必须记录 `test_environment`：实际环境、测试 pane/tab、server/browser owner、cleanup hook、artifact cleanup、duration、resource usage、cleanup status、UX 质量和 artifact 质量。缺少这些字段时，`validate` 会拒绝把该 test pass 当作可信成功证据。
+tester/test task 或带 required test gate 的 implementation task 会包含 `test_level`。最新 `kind: test` 且 `verdict: pass` 的结构化 evidence 必须记录同级别 `test_level`，并记录 `test_environment`：实际环境、测试 pane/tab、server/browser owner、cleanup hook、artifact cleanup、duration、resource usage、cleanup status、UX 质量和 artifact 质量。缺少这些字段，或 evidence 声称的 test level 与 task 声明不一致时，`validate` 会拒绝把该 test pass 当作可信成功证据。
 
 性能、UX、workflow、quality、eval、measurement 等质量度量类 task 会包含 `quality_measurement`。最新 passing test evidence 必须记录 baseline、after 和 metrics，或显式记录 waiver 的 reason、risk 和 replacement_evidence。只说“感觉变好”或只跑普通测试，不足以证明这类 task 的 quality outcome。
 
@@ -152,13 +154,13 @@ tester/test task 的 task contract 会包含 `test_environment`。最新 `kind: 
 
 `orbit docs alias` 维护 `.orbit/docs-registry.json` 中的 stable doc id、current path、content hash 和 updated_at。evidence、task 或 handoff 需要长期引用重要文档时，优先引用 stable doc id，并在文档移动后只更新 registry，不批量重写历史 evidence。`orbit docs check` 会检查 alias target 是否存在、content hash 是否匹配、open 目录是否存在已关闭但未归档或未索引文档，以及 archive 目录是否有 README。
 
-`orbit compact-evidence` 从 task/evidence/handoff 生成 `orbit-durable-evidence-summary-v1` 摘要。摘要保留 task/evidence/handoff 的路径和 sha256、record 计数、latest verdict、rule resolution 引用、source documents、artifact refs 和 handoff audit summary；它不复制长日志、截图、server output 或完整 rule context。长期文档应优先保留 compact summary、final evidence manifest 和 handoff summary；过程中的 rule context、resolution、pane transcript、screenshots、logs 和 server output 默认是 transient artifact，用路径和 hash 引用。
+`orbit compact-evidence` 从 task/evidence/handoff 生成 `orbit-durable-evidence-summary-v1` 摘要。摘要保留 task/evidence/handoff 的路径和 sha256、record 计数、latest verdict、rule resolution 引用、source documents、artifact refs、latest review/test verdict、closure checklist、known gaps 和 handoff audit summary；它不复制长日志、截图、server output 或完整 rule context。长期文档应优先保留 compact summary、final evidence manifest 和 handoff summary；过程中的 rule context、resolution、pane transcript、screenshots、logs 和 server output 默认是 transient artifact，用路径和 hash 引用。
 
 Design-first 任务使用独立 lifecycle：`drafting -> review_requested -> changes_requested|user_confirmed -> coding_ready`。`orbit state start` 遇到 `task_type` 包含 `design` 或 `analysis` 的 task 会从 `drafting` 开始；`coding_ready` 只能从 `user_confirmed` 进入，并且 evidence manifest 必须同时有结构化 review pass 和包含 `user_confirmed` / user confirmation / 用户确认 的 pass evidence。review pass 不能单独让 design task 进入 coding。
 
 `task_type` 包含 `coding` 的 task 必须在 `design_reference` 中引用已确认设计：`required_for_coding: true`、非空 `artifact`、非空 `confirmation_evidence`、`status: confirmed`。这防止 agent 把聊天里的隐含设计直接当成 coding 授权。
 
-中型或大型拆分任务使用 `implementation_plan`、`decomposition` 和 `final_aggregate_audit`。`task_type` 包含 `decomposition` 或 `parent` 时，`validate` 会要求非空 implementation plan summary、child slices、aggregate outcome metrics、stop conditions、replanning path 和 final aggregate audit checks。child slice pass 只证明局部完成；parent final audit 必须重新证明整体 quality outcome。
+中型或大型拆分任务使用 `implementation_plan`、`decomposition` 和 `final_aggregate_audit`。`task_type` 包含 `decomposition` 或 `parent` 时，`validate` 会要求非空 implementation plan summary、child slices、aggregate outcome metrics、stop conditions、replanning path 和 final aggregate audit checks。每个 child slice 必须写出 `id`、`include`、`exclude`、`order_basis`、`stop_condition` 和 `replan_path`。child slice pass 只证明局部完成；parent final audit 必须重新证明整体 quality outcome。
 
 如果 CLI 不可用，可以按 schema 手动检查，但必须在回复里标注 `local_fallback`，并说明哪个 CLI 动作没能执行。
 

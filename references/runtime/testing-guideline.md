@@ -197,6 +197,7 @@ kind: test
 verdict: pass | fail | partial | invalid
 summary: "本轮测试结论。"
 source_message_id: "Herdr message、CI job、pane transcript 或 report id。"
+test_level: unit | integration | repo_regression | browser_e2e | provider_e2e | dogfood | manual
 findings: []
 coverage:
   - "覆盖的用户路径、风险路径或 acceptance。"
@@ -234,6 +235,6 @@ quality_measurement:
 
 可以从 `assets/templates/test-report.yaml` 复制最小模板后填写，再运行 `orbit evidence submit --file <manifest> --report <report> --json`。不要直接编辑 `.orbit/evidence*.json` 来提交测试结论；直接写 manifest 会绕过 CLI 的身份解析、schema 校验和并发安全写入，不能用于关闭 test gate。
 
-`findings`、`coverage`、`artifacts` 必须是字符串列表；没有 findings 时写 `[]`，不要写对象数组或自由格式段落。`blocked` 只在 `verdict: blocked` 或需要解释 partial 阻塞时填写；CLI 会把 `blocked` verdict 存为 partial record，并在 gate summary 中显示 blocked 原因。
+`test_level` 必须与 task contract 声明一致；只跑 repository regression 不能声称 browser/provider E2E 或 dogfood 通过。`coverage`、`artifacts` 必须是字符串列表；没有 findings 时写 `[]`。High/Medium findings 必须使用结构化 mapping，包含 `severity`、`summary`、`symptom`、`source`、`consequence` 和 `remedy`。`blocked` 只在 `verdict: blocked` 或需要解释 partial 阻塞时填写；CLI 会把 `blocked` verdict 存为 partial record，并在 gate summary 中显示 blocked 原因。
 
 tester 的结论进入 evidence manifest 后，由 lead 消费并更新 loop state；tester 不直接把任务标为 done。

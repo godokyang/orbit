@@ -281,27 +281,29 @@ orbit evidence add \
   --summary "npm test passed"
 ```
 
-记录 review 证据：
+记录 review verdict：
 
 ```bash
-orbit evidence add \
+ORBIT_INSTANCE=reviewer orbit evidence submit \
   --file .orbit/evidence/current-evidence.json \
-  --kind review \
-  --status pass \
-  --summary "review passed with no high or medium findings"
+  --report .orbit/evidence/review-report.yaml \
+  --json
 ```
 
-记录 test 证据：
+review report 必须包含 `quality_outcome_verdict`。High/Medium finding 需要写成结构化 mapping，包含 symptom、source、consequence 和 remedy。design/analysis review 可从 `assets/templates/design-review-report.yaml` 复制模板。
+
+记录 test verdict：
 
 ```bash
-orbit evidence add \
+ORBIT_INSTANCE=tester orbit evidence submit \
   --file .orbit/evidence/current-evidence.json \
-  --kind test \
-  --status pass \
-  --summary "real user flow test passed"
+  --report .orbit/evidence/test-report.yaml \
+  --json
 ```
 
-也可以把 reviewer/tester 写出的报告导入 evidence：
+test PASS report 必须包含与 task contract 一致的 `test_level`，并记录 `test_environment` 生命周期字段。只跑 repo regression 不能声称 browser/provider E2E 或 dogfood 通过。
+
+也可以把历史 reviewer/tester 报告导入 evidence：
 
 ```bash
 orbit evidence from-report \
@@ -492,6 +494,8 @@ orbit dispatch --task .orbit/tasks/current-task.yaml --to reviewer --transport h
 ```
 
 `dispatch` 只是 transport adapter，不改变 task/evidence/state 的权威语义。真实 gate 仍以 reviewer/tester 写入的 evidence 和后续 `validate/audit` 为准。
+
+当 reviewer/tester 这类 `user_managed` instance 已经有 healthy binding 时，Orbit 必须优先复用现有 pane。只有用户明确允许创建缺失 instance（例如 `--allow-create`）时，Herdr adapter 才会准备新 role；此时应尽量在 lead 当前同级视图创建，优先沿用当前 tab / workspace 元数据，缺失时在 start plan 中暴露 fallback。新建 role 还必须显式准备权限或 approval mode；Orbit 可以记录这项 requirement，但不能静默绕过用户授权或客户端审批。
 
 ## 不能直接说完成的情况
 

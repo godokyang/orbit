@@ -286,8 +286,9 @@ orbit start tester-main
 1. 设置进程 env：`ORBIT_INSTANCE=reviewer-main`、`ORBIT_ROLE=reviewer`。
 2. 启动 Codex / Claude Code / 其他 agent 客户端，或在 `--transport herdr` 下生成/调用 Herdr start adapter。
 3. 输出 argv/env/cwd，避免通过 shell 字符串拼接命令。
+4. 对缺失 role 的创建输出 creation policy：先复用 existing binding；确需创建时尽量使用 lead 的同级 tab/workspace；并提醒新 agent 的权限/approval 模式需要被用户或客户端能力显式准备。
 
-transport label、pane 布局和启动 prelude 属于 adapter/agent 客户端能力；如果当前 adapter 不支持，不能假装已经注入。agent 启动后仍必须自己运行 `orbit whoami --json`、`orbit rules resolve --json` 和 `orbit rules print-context --json`。
+transport label、pane 布局、权限模式和启动 prelude 属于 adapter/agent 客户端能力；如果当前 adapter 不支持，不能假装已经注入。agent 启动后仍必须自己运行 `orbit whoami --json`、`orbit rules resolve --json` 和 `orbit rules print-context --json`。
 
 这样最终流程变成：
 
@@ -542,6 +543,7 @@ quality_outcome:
 # 对改善类、重构、文档维护、性能、UX、可靠性和架构收敛类 task，
 # validator 会拒绝空 quality_outcome 字段和空列表。
 # new-task 写入的模板只是起点，lead 必须让它匹配当前 source contract。
+test_level: not_applicable
 test_environment:
   required: false
   environment: ""
@@ -559,6 +561,8 @@ quality_measurement:
   metrics: []
   waiver_policy: ""
 
+# target_role=tester、task_type 包含 test，或 required test gate 存在时，
+# test_level 必须声明；passing test evidence 的 test_level 必须与 task 一致。
 # target_role=tester 或 task_type 包含 test 时，test_environment.required 必须为 true。
 # performance / UX / workflow / quality / eval / measurement 类 task
 # 会要求 quality_measurement，并在 passing test evidence 中检查 baseline/after 或 waiver。
@@ -588,6 +592,8 @@ decomposition:
   aggregate_outcome_metrics: []
   stop_conditions: []
   replanning_path: ""
+# decomposition/parent task 的 child_slices 每项必须包含：
+# id/include/exclude/order_basis/stop_condition/replan_path。
 final_aggregate_audit:
   required: false
   checks: []
@@ -781,11 +787,11 @@ review/test/command 结果都写 manifest。manifest 是事实记录，不替代
 }
 ```
 
-`verdict` 是 aggregate summary，不是最新 record 的别名。review/test gate 只认带结构化字段且 identity 匹配对应角色的 review/test record：review 需要 resolved role `reviewer`，test 需要 resolved role `tester`。无关 command pass 或身份不匹配的 review/test pass 不能覆盖仍然 fail/partial 的 review/test 结论。`orbit evidence submit` 是推荐入口，report 至少包含 `kind`、`verdict`、`summary`、`source_message_id`、`findings`、`coverage` 和 `artifacts`；这三个列表字段必须是字符串列表。reviewer/tester 必须写独立 report 并用 CLI submit；不要直接编辑 `.orbit/evidence*.json`，因为手写 record 不会产生可信 identity，也不会走 schema 校验和并发安全写入。
+`verdict` 是 aggregate summary，不是最新 record 的别名。review/test gate 只认带结构化字段且 identity 匹配对应角色的 review/test record：review 需要 resolved role `reviewer`，test 需要 resolved role `tester`。无关 command pass 或身份不匹配的 review/test pass 不能覆盖仍然 fail/partial 的 review/test 结论。`orbit evidence submit` 是推荐入口，report 至少包含 `kind`、`verdict`、`summary`、`source_message_id`、`findings`、`coverage` 和 `artifacts`。review report 必须包含 `quality_outcome_verdict`，review PASS 必须是 `quality_outcome_verdict: pass`；High/Medium finding 必须用 mapping 写出 symptom/source/consequence/remedy。test PASS report 必须包含 `test_level`，且不能是 `not_applicable`。reviewer/tester 必须写独立 report 并用 CLI submit；不要直接编辑 `.orbit/evidence*.json`，因为手写 record 不会产生可信 identity，也不会走 schema 校验和并发安全写入。
 
 `verdict: blocked` 会规范化为 partial evidence record，并通过 `blocked.reason`、`blocked.next_step`、`blocked.owner` 保留阻塞细节。`wait-gate` 和 `handoff` 输出 `gate_summary`，用于暴露 required gate 的 ready 状态、identity mismatch、blocked/partial/fail 等阻塞原因。
 
-passing `kind: test` record 如果用于 tester/test task，还必须包含 `test_environment` mapping，记录 environment、test_tab_or_pane、server_owner、browser_owner、cleanup_hook、artifact_cleanup、duration、resource_usage、cleanup_status、ux_quality 和 artifact_quality。质量度量类 task 的 passing test record 还必须包含 `quality_measurement`：baseline、after 和 metrics，或 waiver.reason、waiver.risk、waiver.replacement_evidence。
+passing `kind: test` record 如果用于 tester/test task 或 required test gate，还必须包含与 task 声明一致的 `test_level` 和 `test_environment` mapping，记录 environment、test_tab_or_pane、server_owner、browser_owner、cleanup_hook、artifact_cleanup、duration、resource_usage、cleanup_status、ux_quality 和 artifact_quality。质量度量类 task 的 passing test record 还必须包含 `quality_measurement`：baseline、after 和 metrics，或 waiver.reason、waiver.risk、waiver.replacement_evidence。
 
 waiver 使用独立结构，而不是普通 summary 字符串。每条 waiver 至少包含 `owner`、`scope`、`reason`、`risk`、`replacement_evidence`、`expiry` 和 `revoked_by_user_requirement`。waiver 会进入 aggregate verdict 的 risk summary，但不会自动关闭 required review/test gate。
 
