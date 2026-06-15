@@ -186,6 +186,13 @@ def quality_measurement_task?(task_type)
   %w[performance speed latency ux workflow quality eval llm measurement].any? { |token| type.include?(token) }
 end
 
+def default_test_level(target_role, task_type)
+  return "repo_regression" if test_task?(target_role, task_type)
+  return "repo_regression" unless default_gates_for_new_task(target_role, task_type).none? { |gate| gate["kind"] == "test" }
+
+  "not_applicable"
+end
+
 def default_design_lifecycle(task_type)
   {
     "enabled" => design_task?(task_type),
@@ -288,6 +295,7 @@ def new_task(args)
   task["implementation_plan"] = default_implementation_plan(options["task_type"])
   task["decomposition"] = default_decomposition(options["task_type"])
   task["final_aggregate_audit"] = default_final_aggregate_audit(options["task_type"])
+  task["test_level"] = default_test_level(options["target_role"], options["task_type"])
   task["test_environment"] = default_test_environment(options["target_role"], options["task_type"])
   task["quality_measurement"] = default_quality_measurement(options["task_type"])
   task_rule_packs = rule_packs_for_context(options["target_role"], options["task_type"])
@@ -348,6 +356,7 @@ def start_plan(options)
   cwd = File.expand_path(options["cwd"])
   usage_error("Start cwd does not exist: #{cwd}") unless Dir.exist?(cwd)
   status = instance_status_entry(instance_key, instance, role_ref, role_def)
+  creation_policy = role_creation_policy(options["transport"])
 
   {
     "schema_version" => "orbit-start-plan-v1",
@@ -362,8 +371,72 @@ def start_plan(options)
     "argv" => argv,
     "env" => instance_launch_env(instance_key, instance, role_def, role_ref),
     "instance_status" => status,
+    "creation_policy" => creation_policy,
     "dry_run" => options["dry_run"]
   }.compact
+end
+
+def non_empty_env(*names)
+  names.each do |name|
+    value = ENV[name].to_s.strip
+    return value unless value.empty?
+  end
+  ""
+end
+
+def lead_transport_binding
+  roles, instances = load_project_instance_config_for_cli[0, 2]
+  lead_key = find_instance(instances, roles, "lead").first || infer_instance_from_role(instances, roles, "lead")
+  return {} unless lead_key && instances[lead_key].is_a?(Hash)
+
+  normalize_instance_transport(lead_key, instances[lead_key])["binding"] || {}
+rescue RuntimeError
+  {}
+end
+
+def herdr_same_level_view
+  lead_binding = lead_transport_binding
+  source_pane = non_empty_env("HERDR_PANE_ID")
+  source_pane = lead_binding["pane"].to_s if source_pane.empty?
+
+  tab = non_empty_env("HERDR_TAB_ID", "HERDR_TAB")
+  tab = lead_binding["tab"].to_s if tab.empty?
+
+  workspace = non_empty_env("HERDR_WORKSPACE_ID", "HERDR_WORKSPACE", "HERDR_SPACE_ID", "HERDR_SPACE")
+  workspace = lead_binding["space"].to_s if workspace.empty?
+
+  strategy = if !tab.empty?
+               "same_tab"
+             elsif !workspace.empty?
+               "same_workspace"
+             elsif !source_pane.empty?
+               "source_pane_recorded"
+             else
+               "fallback_default_view"
+             end
+
+  {
+    "strategy" => strategy,
+    "source_pane" => source_pane,
+    "tab" => tab,
+    "workspace" => workspace,
+    "source" => "HERDR_* env or lead transport binding",
+    "fallback" => strategy == "fallback_default_view" || strategy == "source_pane_recorded"
+  }
+end
+
+def role_creation_policy(transport)
+  policy = {
+    "reuse_first" => true,
+    "user_managed_requires_allow_create" => true,
+    "permission_setup" => {
+      "required" => true,
+      "mode" => "operator_or_client_specific",
+      "summary" => "Before assigning tool work to a newly-created role, ensure the agent client has the required permissions or approval mode. Orbit records this requirement but does not silently bypass user approval."
+    }
+  }
+  policy["same_level_view"] = herdr_same_level_view if transport == "herdr"
+  policy
 end
 
 def start_requires_reuse?(plan)
@@ -396,13 +469,23 @@ def print_start_reuse(plan)
 end
 
 def herdr_start_argv(plan, executable = "herdr")
-  [
+  argv = [
     executable,
     "agent",
     "start",
     plan["instance"],
     "--cwd",
-    plan["cwd"],
+    plan["cwd"]
+  ]
+
+  view = plan.dig("creation_policy", "same_level_view") || {}
+  if !view["tab"].to_s.empty?
+    argv += ["--tab", view["tab"]]
+  elsif !view["workspace"].to_s.empty?
+    argv += ["--workspace", view["workspace"]]
+  end
+
+  argv + [
     "--split",
     "right",
     "--no-focus",
@@ -449,6 +532,19 @@ def print_start_human_plan(plan)
     plan["env"].sort.each do |key, value|
       puts "  - #{key}=#{value}"
     end
+  end
+  if plan["creation_policy"]
+    view = plan.dig("creation_policy", "same_level_view")
+    puts "- create policy:"
+    puts "  - reuse_first: #{plan["creation_policy"]["reuse_first"]}"
+    if view
+      puts "  - same_level_view: #{view["strategy"]}"
+      puts "  - source_pane: #{view["source_pane"]}" unless view["source_pane"].to_s.empty?
+      puts "  - tab: #{view["tab"]}" unless view["tab"].to_s.empty?
+      puts "  - workspace: #{view["workspace"]}" unless view["workspace"].to_s.empty?
+    end
+    permission_setup = plan.dig("creation_policy", "permission_setup")
+    puts "  - permission_setup: #{permission_setup["summary"]}" if permission_setup
   end
   puts "- action: dry-run" if plan["dry_run"]
 end
@@ -534,7 +630,16 @@ def run_herdr_start(plan, json:)
 
   success = status.success? && (ready_wait.nil? || ready_wait["success"])
   status_after_start = nil
-  status_after_start = write_instance_binding!(plan["instance"], transport_kind: "herdr", pane: pane_id) if success && pane_id
+  if success && pane_id
+    view = plan.dig("creation_policy", "same_level_view") || {}
+    status_after_start = write_instance_binding!(
+      plan["instance"],
+      transport_kind: "herdr",
+      pane: pane_id,
+      tab: view["tab"].to_s,
+      space: view["workspace"].to_s
+    )
+  end
   result = attach_start_adapter_plan(plan).merge(
     "action" => "started",
     "instance_status_after_start" => status_after_start,

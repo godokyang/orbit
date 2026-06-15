@@ -78,6 +78,7 @@ decomposition:
 final_aggregate_audit:
   required: false
   checks: []
+test_level: not_applicable
 test_environment:
   required: false
   environment: ""

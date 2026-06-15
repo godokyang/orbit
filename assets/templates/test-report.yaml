@@ -2,6 +2,7 @@ kind: test
 verdict: blocked
 summary: "TODO: one-sentence test conclusion."
 source_message_id: "TODO: herdr:<pane-or-message-id> or report:<path>"
+test_level: not_applicable
 findings:
   - "[blocked][test] TODO: describe the blocking coverage gap or failing behavior."
 coverage:

@@ -106,6 +106,87 @@ def evidence_summary(evidence)
   summary
 end
 
+def latest_gate_verdicts_for_handoff(evidence)
+  records = evidence.is_a?(Hash) && evidence["records"].is_a?(Array) ? evidence["records"] : []
+  latest = latest_records_by_kind(records)
+  %w[review test].each_with_object({}) do |kind, memo|
+    record = latest[kind]
+    memo[kind] = if record
+                   {
+                     "status" => record["status"],
+                     "effective_status" => evidence_effective_verdict_status(kind, record),
+                     "summary" => record["summary"],
+                     "created_at" => record["created_at"],
+                     "source_report" => record["source_report"],
+                     "source_message_id" => record["source_message_id"]
+                   }.compact
+                 else
+                   { "status" => "missing" }
+                 end
+  end
+end
+
+def known_gaps_for_handoff(evidence, audit_warnings)
+  gaps = []
+  Array(audit_warnings).each do |warning|
+    next unless warning.is_a?(Hash)
+
+    gaps << {
+      "source" => warning["source"],
+      "message" => warning["message"],
+      "severity" => warning["severity"] || "warning"
+    }.compact
+  end
+
+  if evidence.is_a?(Hash)
+    Array(evidence["waivers"]).each do |waiver|
+      next unless waiver.is_a?(Hash)
+      next if waiver["revoked_by_user_requirement"] == true
+
+      gaps << {
+        "source" => "evidence_file.waivers",
+        "message" => "#{waiver["scope"]}: #{waiver["risk"]}",
+        "severity" => "waiver",
+        "replacement_evidence" => waiver["replacement_evidence"]
+      }.compact
+    end
+  end
+
+  gaps
+end
+
+def closure_checklist_for_handoff(task, evidence, validation, audit_blocking, audit_warnings)
+  source_documents = task.is_a?(Hash) && task["source_documents"].is_a?(Array) ? task["source_documents"] : []
+  verdicts = latest_gate_verdicts_for_handoff(evidence)
+  [
+    {
+      "item" => "task_contract_valid",
+      "status" => validation["errors"].empty? ? "pass" : "blocked",
+      "detail" => "validate error_count=#{validation["errors"].length}"
+    },
+    {
+      "item" => "source_documents_referenced",
+      "status" => source_documents.empty? ? "not_applicable" : "pass",
+      "detail" => "source_documents=#{source_documents.length}"
+    },
+    {
+      "item" => "latest_review_verdict",
+      "status" => verdicts.dig("review", "status") || "missing",
+      "detail" => verdicts.dig("review", "summary").to_s
+    },
+    {
+      "item" => "latest_test_verdict",
+      "status" => verdicts.dig("test", "status") || "missing",
+      "detail" => verdicts.dig("test", "summary").to_s
+    },
+    {
+      "item" => "known_gaps_recorded",
+      "status" => audit_blocking.empty? && audit_warnings.empty? ? "pass" : "partial",
+      "detail" => "blocking=#{audit_blocking.length}, warnings=#{audit_warnings.length}"
+    }
+  ]
+end
+
 def rule_resolution_summary(evidence, evidence_path = nil)
   summary = {
     "present" => false
@@ -436,6 +517,9 @@ def handoff(args)
   next_action = required_action_for_phase(current_phase, blocking_errors)
   transport_profile = resolve_transport_profile(options["transport"])
   transport_profile["payload"] = transport_handoff_payload(transport_profile, task_path, state_path, evidence_path, next_action)
+  latest_gate_verdicts = latest_gate_verdicts_for_handoff(evidence)
+  known_gaps = known_gaps_for_handoff(evidence, audit_warnings)
+  closure_checklist = closure_checklist_for_handoff(task, evidence, validation, audit_blocking, audit_warnings)
   packet = {
     "schema_version" => "orbit-handoff-v1",
     "project" => task.is_a?(Hash) && task["project"] ? task["project"] : File.basename(Dir.pwd),
@@ -451,7 +535,18 @@ def handoff(args)
     "rule_packs" => rule_packs_for_context(target_role, task.is_a?(Hash) ? task["task_type"] : nil, include_audit: true),
     "rule_resolution_summary" => rule_resolution_summary(evidence, evidence_path),
     "gate_summary" => task.is_a?(Hash) && evidence.is_a?(Hash) ? required_gate_summary(task, evidence) : nil,
+    "latest_gate_verdicts" => latest_gate_verdicts,
     "judgment_summary" => judgment_summary(evidence),
+    "closure_checklist" => closure_checklist,
+    "known_gaps" => known_gaps,
+    "readable_summary" => {
+      "current_task" => task_path,
+      "phase" => current_phase,
+      "next_action" => next_action,
+      "latest_review_verdict" => latest_gate_verdicts.dig("review", "status"),
+      "latest_test_verdict" => latest_gate_verdicts.dig("test", "status"),
+      "known_gaps_count" => known_gaps.length
+    },
     "worktree_safety_summary" => worktree_safety_summary(evidence),
     "evidence_summary" => evidence_summary(evidence),
     "blocking_errors" => blocking_errors

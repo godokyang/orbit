@@ -57,6 +57,15 @@ def evidence_record_summary(records)
   }
 end
 
+def compact_latest_gate_verdicts(record_summary, handoff)
+  return handoff["latest_gate_verdicts"] if handoff.is_a?(Hash) && handoff["latest_gate_verdicts"].is_a?(Hash)
+
+  latest = record_summary["latest_by_kind"].is_a?(Hash) ? record_summary["latest_by_kind"] : {}
+  %w[review test].each_with_object({}) do |kind, memo|
+    memo[kind] = latest[kind] || { "status" => "missing" }
+  end
+end
+
 def parse_compact_evidence_args(args)
   options = {
     "json" => false
@@ -121,6 +130,9 @@ def compact_evidence(args)
   end.compact
   rule_ref = evidence["rule_resolution"].is_a?(Hash) ? compact_file_ref(evidence["rule_resolution"]["file"]) : nil
   record_summary = evidence_record_summary(evidence["records"])
+  latest_gate_verdicts = compact_latest_gate_verdicts(record_summary, handoff)
+  closure_checklist = handoff.is_a?(Hash) ? handoff["closure_checklist"] : nil
+  known_gaps = handoff.is_a?(Hash) ? handoff["known_gaps"] : nil
   result = {
     "schema_version" => "orbit-durable-evidence-summary-v1",
     "project" => task["project"] || evidence["project"] || File.basename(Dir.pwd),
@@ -147,7 +159,11 @@ def compact_evidence(args)
     "handoff_summary" => handoff ? {
       "current_phase" => handoff["current_phase"],
       "required_action" => handoff["required_action"],
-      "audit_summary" => handoff["audit_summary"]
+      "audit_summary" => handoff["audit_summary"],
+      "latest_gate_verdicts" => latest_gate_verdicts,
+      "closure_checklist" => closure_checklist,
+      "known_gaps" => known_gaps,
+      "readable_summary" => handoff["readable_summary"]
     } : nil,
     "transient_artifacts" => {
       "policy" => "referenced_by_path_and_hash",

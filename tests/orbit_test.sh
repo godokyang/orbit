@@ -69,6 +69,7 @@ test -f "$INSTALL_RUNTIME/references/runtime/coding-guideline.md"
 test -f "$INSTALL_RUNTIME/references/runtime/quality-outcome-and-review.md"
 test -f "$INSTALL_RUNTIME/references/runtime/testing-guideline.md"
 test -f "$INSTALL_RUNTIME/assets/templates/review-report.yaml"
+test -f "$INSTALL_RUNTIME/assets/templates/design-review-report.yaml"
 test -f "$INSTALL_RUNTIME/assets/templates/test-report.yaml"
 "$INSTALL_BIN/orbit" version >"$TMPROOT/installed-version.txt"
 grep -qx '0.1.0' "$TMPROOT/installed-version.txt"
@@ -251,8 +252,11 @@ grep -q 'Orbit start plan:' "$TMPROOT/start-reviewer-human.txt"
 grep -q -- '- instance: reviewer' "$TMPROOT/start-reviewer-human.txt"
 grep -q -- '- command: codex' "$TMPROOT/start-reviewer-human.txt"
 pass 'start dry-run works without json'
-"$CLI" start reviewer --transport herdr --allow-create --dry-run --json >"$TMPROOT/start-herdr-dry-run.json"
+env -u HERDR_PANE_ID -u HERDR_TAB_ID -u HERDR_TAB -u HERDR_WORKSPACE_ID -u HERDR_WORKSPACE -u HERDR_SPACE_ID -u HERDR_SPACE "$CLI" start reviewer --transport herdr --allow-create --dry-run --json >"$TMPROOT/start-herdr-dry-run.json"
 json_assert 'start herdr dry-run emits adapter plan' "$TMPROOT/start-herdr-dry-run.json" 'j["schema_version"] == "orbit-start-plan-v1" && j["action"] == "dry_run" && j["transport"] == "herdr" && j["adapter"]["schema_version"] == "orbit-herdr-start-v1" && j["adapter"]["command"] == ["herdr", "agent", "start", "reviewer", "--cwd", Dir.pwd, "--split", "right", "--no-focus", "--", "codex"] && j["adapter"]["env"]["ORBIT_INSTANCE"] == "reviewer" && j["adapter"]["ready_wait"]["mode"] == "output_match"'
+json_assert 'start herdr dry-run exposes create policy and permission setup' "$TMPROOT/start-herdr-dry-run.json" 'j["creation_policy"]["reuse_first"] == true && j["creation_policy"]["same_level_view"]["strategy"] == "fallback_default_view" && j["creation_policy"]["permission_setup"]["required"] == true && j["creation_policy"]["permission_setup"]["summary"].include?("does not silently bypass")'
+env HERDR_PANE_ID=lead-pane HERDR_TAB_ID=lead-tab "$CLI" start reviewer --transport herdr --allow-create --dry-run --json >"$TMPROOT/start-herdr-same-tab-dry-run.json"
+json_assert 'start herdr prefers lead same-level tab when available' "$TMPROOT/start-herdr-same-tab-dry-run.json" 'j["creation_policy"]["same_level_view"]["strategy"] == "same_tab" && j["creation_policy"]["same_level_view"]["source_pane"] == "lead-pane" && j["creation_policy"]["same_level_view"]["tab"] == "lead-tab" && j["adapter"]["command"] == ["herdr", "agent", "start", "reviewer", "--cwd", Dir.pwd, "--tab", "lead-tab", "--split", "right", "--no-focus", "--", "codex"]'
 mkdir -p "$TMPROOT/fakebin"
 cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
 #!/bin/sh
@@ -278,9 +282,9 @@ case "$1 $2" in
 esac
 HERDR
 chmod +x "$TMPROOT/fakebin/herdr"
-ORBIT_FAKE_HERDR_ARGS="$TMPROOT/fake-herdr-args.txt" ORBIT_FAKE_HERDR_WAIT_ARGS="$TMPROOT/fake-herdr-wait-args.txt" ORBIT_FAKE_HERDR_ENV="$TMPROOT/fake-herdr-env.txt" ORBIT_FAKE_HERDR_CWD="$TMPROOT/fake-herdr-cwd.txt" PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer --transport herdr --allow-create --json >"$TMPROOT/start-herdr-real.json"
-json_assert 'start herdr invokes adapter and returns result' "$TMPROOT/start-herdr-real.json" 'j["action"] == "started" && j["adapter_result"]["success"] == true && j["adapter_result"]["stdout"].include?("fake-pane") && j["adapter_result"]["pane_id"] == "fake-pane" && j["adapter_result"]["ready_wait"]["success"] == true'
-ruby --disable-gems -e 'expected=["agent","start","reviewer","--cwd",Dir.pwd,"--split","right","--no-focus","--","codex"]; actual=File.read(ARGV[0]).lines.map(&:chomp); abort(actual.inspect) unless actual == expected' "$TMPROOT/fake-herdr-args.txt"
+ORBIT_FAKE_HERDR_ARGS="$TMPROOT/fake-herdr-args.txt" ORBIT_FAKE_HERDR_WAIT_ARGS="$TMPROOT/fake-herdr-wait-args.txt" ORBIT_FAKE_HERDR_ENV="$TMPROOT/fake-herdr-env.txt" ORBIT_FAKE_HERDR_CWD="$TMPROOT/fake-herdr-cwd.txt" HERDR_PANE_ID=lead-pane HERDR_TAB_ID=lead-tab PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer --transport herdr --allow-create --json >"$TMPROOT/start-herdr-real.json"
+json_assert 'start herdr invokes adapter and returns result' "$TMPROOT/start-herdr-real.json" 'j["action"] == "started" && j["adapter_result"]["success"] == true && j["adapter_result"]["stdout"].include?("fake-pane") && j["adapter_result"]["pane_id"] == "fake-pane" && j["adapter_result"]["ready_wait"]["success"] == true && j["creation_policy"]["same_level_view"]["strategy"] == "same_tab" && j["instance_status_after_start"]["transport"]["binding"]["tab"] == "lead-tab"'
+ruby --disable-gems -e 'expected=["agent","start","reviewer","--cwd",Dir.pwd,"--tab","lead-tab","--split","right","--no-focus","--","codex"]; actual=File.read(ARGV[0]).lines.map(&:chomp); abort(actual.inspect) unless actual == expected' "$TMPROOT/fake-herdr-args.txt"
 ruby --disable-gems -e 'actual=File.read(ARGV[0]).lines.map(&:chomp); abort(actual.inspect) unless actual[0,3] == ["wait","output","fake-pane"] && actual.include?("--regex") && actual.include?("OpenAI Codex|›")' "$TMPROOT/fake-herdr-wait-args.txt"
 grep -qx 'reviewer/reviewer' "$TMPROOT/fake-herdr-env.txt"
 grep -qx "$PROJECT" "$TMPROOT/fake-herdr-cwd.txt"
@@ -536,6 +540,8 @@ kind: review
 verdict: pass
 summary: Structured reviewer verdict passed.
 source_message_id: herdr:reviewer:structured-pass
+quality_outcome_verdict: pass
+quality_outcome_reasoning: Outcome and acceptance evidence were checked.
 findings: []
 coverage:
   - review checked aggregate verdict behavior
@@ -545,11 +551,41 @@ YAML
 expect_failure 'lead cannot structured submit review evidence' env ORBIT_INSTANCE=lead "$CLI" evidence submit --file "$STRUCTURED_REVIEW_EVIDENCE" --report "$TMPROOT/structured-review.yaml" --json
 ORBIT_INSTANCE=reviewer "$CLI" evidence submit --file "$STRUCTURED_REVIEW_EVIDENCE" --report "$TMPROOT/structured-review.yaml" --json >"$TMPROOT/evidence-submit-review.json"
 json_assert 'evidence submit records structured review verdict' "$TMPROOT/evidence-submit-review.json" 'j["schema_version"] == "orbit-evidence-submit-v1" && j["record"]["structured_submit"] == true && j["record"]["source_message_id"] == "herdr:reviewer:structured-pass" && j["record"]["coverage"].include?("review checked aggregate verdict behavior") && j["verdict"]["mode"] == "aggregate" && j["verdict"]["gates"]["review"]["structured"] == true'
+cat >"$TMPROOT/review-missing-quality-outcome.yaml" <<'YAML'
+kind: review
+verdict: pass
+summary: Missing quality outcome verdict.
+source_message_id: herdr:reviewer:missing-qo
+findings: []
+coverage:
+  - review checked behavior
+artifacts:
+  - tests/orbit_test.sh
+YAML
+expect_failure 'evidence submit rejects review pass without quality_outcome_verdict' env ORBIT_INSTANCE=reviewer "$CLI" evidence submit --file "$STRUCTURED_REVIEW_EVIDENCE" --report "$TMPROOT/review-missing-quality-outcome.yaml" --json
+cat >"$TMPROOT/review-high-finding-incomplete.yaml" <<'YAML'
+kind: review
+verdict: fail
+summary: High finding lacks required detail.
+source_message_id: herdr:reviewer:high-incomplete
+quality_outcome_verdict: fail
+quality_outcome_reasoning: A high severity issue remains.
+findings:
+  - severity: high
+    summary: Missing required detail.
+coverage:
+  - review checked finding schema
+artifacts:
+  - tests/orbit_test.sh
+YAML
+expect_failure 'evidence submit rejects high finding missing remedy fields' env ORBIT_INSTANCE=reviewer "$CLI" evidence submit --file "$STRUCTURED_REVIEW_EVIDENCE" --report "$TMPROOT/review-high-finding-incomplete.yaml" --json
 cat >"$TMPROOT/malformed-structured-review.yaml" <<'YAML'
 kind: review
 verdict: pass
 summary: Malformed structured reviewer verdict.
 source_message_id: herdr:reviewer:malformed
+quality_outcome_verdict: pass
+quality_outcome_reasoning: Outcome checked before schema validation.
 findings: []
 coverage:
   - name: malformed coverage object
@@ -590,6 +626,10 @@ if "$CLI" wait-gate --task "$TASK" --evidence "$MISSING_IDENTITY_EVIDENCE" --jso
 fi
 pass 'wait-gate rejects hand-written structured review without identity'
 json_assert 'wait-gate reports missing identity as mismatch blocker' "$TMPROOT/wait-gate-missing-identity.json" 'j["ready"] == false && j["gate_summary"]["not_ready"].any? { |g| g["kind"] == "review" && g["blocking_reason"] == "identity_mismatch" } && j["gates"].any? { |g| g["kind"] == "review" && g["identity_resolved_role"].nil? && g["identity_valid"] == false }'
+MISSING_QO_EVIDENCE="$TMPROOT/missing-quality-outcome-evidence.json"
+cp "$STRUCTURED_REVIEW_EVIDENCE" "$MISSING_QO_EVIDENCE"
+ruby --disable-gems -rjson -e 'p=ARGV[0]; j=JSON.parse(File.read(p)); j["records"].last.delete("quality_outcome_verdict"); File.write(p, JSON.pretty_generate(j))' "$MISSING_QO_EVIDENCE"
+expect_failure 'validate rejects hand-written structured review without quality_outcome_verdict' "$CLI" validate --task "$TASK" --evidence "$MISSING_QO_EVIDENCE" --json
 
 BLOCKED_REVIEW_EVIDENCE="$TMPROOT/blocked-review-evidence.json"
 "$CLI" evidence init --output "$BLOCKED_REVIEW_EVIDENCE" >/dev/null
@@ -598,6 +638,8 @@ kind: review
 verdict: blocked
 summary: Structured reviewer verdict is blocked on missing acceptance criteria.
 source_message_id: herdr:reviewer:structured-blocked
+quality_outcome_verdict: blocked
+quality_outcome_reasoning: Acceptance criteria are ambiguous, so the outcome cannot be verified.
 findings:
   - acceptance criteria are still ambiguous
 coverage:
@@ -629,6 +671,8 @@ kind: review
 verdict: fail
 summary: Structured reviewer verdict failed.
 source_message_id: herdr:reviewer:structured-fail
+quality_outcome_verdict: fail
+quality_outcome_reasoning: Blocking review finding remains.
 findings:
   - blocking finding retained
 coverage:
@@ -664,6 +708,7 @@ json_assert 'validate accepts structured waiver schema' "$TMPROOT/valid-waiver-e
 TEST_TASK="$TMPROOT/test-task.yaml"
 "$CLI" new-task --target-role tester --task-type implementation_test --output "$TEST_TASK" >/dev/null
 yaml_assert 'new-task initializes test environment contract' "$TEST_TASK" 'j["test_environment"]["required"] == true && %w[environment test_tab_or_pane server_owner browser_owner cleanup_hook artifact_cleanup duration_budget resource_budget].all? { |k| j["test_environment"][k].is_a?(String) && !j["test_environment"][k].empty? }'
+yaml_assert 'new-task initializes test level contract' "$TEST_TASK" 'j["test_level"] == "repo_regression"'
 TEST_EVIDENCE="$TMPROOT/test-evidence.json"
 "$CLI" evidence init --output "$TEST_EVIDENCE" >/dev/null
 TEMPLATE_TEST_EVIDENCE="$TMPROOT/template-test-evidence.json"
@@ -685,6 +730,7 @@ kind: test
 verdict: pass
 summary: Structured test evidence includes environment lifecycle.
 source_message_id: herdr:tester:complete-test-env
+test_level: repo_regression
 findings: []
 coverage:
   - test exercised success path and cleanup path
@@ -706,6 +752,12 @@ YAML
 ORBIT_INSTANCE=tester "$CLI" evidence submit --file "$TEST_EVIDENCE" --report "$TMPROOT/complete-test-submit.yaml" --json >"$TMPROOT/complete-test-submit.json"
 "$CLI" validate --task "$TEST_TASK" --evidence "$TEST_EVIDENCE" --json >"$TMPROOT/valid-complete-test-env.json"
 json_assert 'validate accepts passing test evidence with environment lifecycle' "$TMPROOT/valid-complete-test-env.json" 'j["valid"] == true'
+cp "$TEST_EVIDENCE" "$TMPROOT/missing-test-level-evidence.json"
+ruby --disable-gems -rjson -e 'p=ARGV[0]; j=JSON.parse(File.read(p)); j["records"].last.delete("test_level"); File.write(p, JSON.pretty_generate(j))' "$TMPROOT/missing-test-level-evidence.json"
+expect_failure 'validate rejects passing test evidence without test_level' "$CLI" validate --task "$TEST_TASK" --evidence "$TMPROOT/missing-test-level-evidence.json" --json
+cp "$TEST_EVIDENCE" "$TMPROOT/mismatched-test-level-evidence.json"
+ruby --disable-gems -rjson -e 'p=ARGV[0]; j=JSON.parse(File.read(p)); j["records"].last["test_level"]="manual"; File.write(p, JSON.pretty_generate(j))' "$TMPROOT/mismatched-test-level-evidence.json"
+expect_failure 'validate rejects passing test evidence overclaiming test_level' "$CLI" validate --task "$TEST_TASK" --evidence "$TMPROOT/mismatched-test-level-evidence.json" --json
 OPTIONAL_GATE_TASK="$TMPROOT/optional-gate-task.yaml"
 "$CLI" new-task --target-role lead --task-type implementation --output "$OPTIONAL_GATE_TASK" >/dev/null
 ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["gates"].each { |g| g["required"]=false if g["kind"]=="test" }; File.write(p, YAML.dump(y))' "$OPTIONAL_GATE_TASK"
@@ -763,6 +815,8 @@ kind: review
 verdict: pass
 summary: Concurrent review submit passed.
 source_message_id: herdr:reviewer:concurrent
+quality_outcome_verdict: pass
+quality_outcome_reasoning: Concurrent review record is complete.
 findings: []
 coverage:
   - concurrent review record retained
@@ -774,6 +828,7 @@ kind: test
 verdict: pass
 summary: Concurrent test submit passed.
 source_message_id: herdr:tester:concurrent
+test_level: repo_regression
 findings: []
 coverage:
   - concurrent test record retained
@@ -871,6 +926,8 @@ kind: review
 verdict: pass
 summary: Design review passed for coding readiness.
 source_message_id: design-review-pass
+quality_outcome_verdict: pass
+quality_outcome_reasoning: Reviewed design artifact is ready for user confirmation.
 findings: []
 coverage:
   - Design artifact was reviewed before coding.
@@ -907,6 +964,7 @@ cp .orbit/loop-state.yaml "$TMPROOT/review-done-state.yaml"
 IMPL_TASK="$TMPROOT/implementation-task.yaml"
 "$CLI" new-task --target-role lead --task-type implementation --output "$IMPL_TASK" >/dev/null
 yaml_assert 'new-task adds implementation review/test gates' "$IMPL_TASK" 'j["gates"].is_a?(Array) && j["gates"].any? { |g| g["kind"] == "review" && g["roles"].include?("reviewer") } && j["gates"].any? { |g| g["kind"] == "test" && g["roles"].include?("tester") }'
+yaml_assert 'new-task marks implementation test gate level' "$IMPL_TASK" 'j["test_level"] == "repo_regression"'
 ORBIT_INSTANCE=reviewer "$CLI" rules resolve --task "$IMPL_TASK" --json >"$TMPROOT/implementation-reviewer-rules.json"
 json_assert 'rules resolve allows reviewer gate role on implementation task' "$TMPROOT/implementation-reviewer-rules.json" 'j["valid"] == true && j["resolved_role"] == "reviewer" && j["role_sources"]["task_file.target_role"] == "lead"'
 BAD_GATE_TASK="$TMPROOT/bad-gate-task.yaml"
@@ -931,7 +989,31 @@ wait
 yaml_assert 'concurrent state progress preserves both history entries' "$CONCURRENT_STATE" 'messages = j["history"].select { |h| h["event"] == "progress" }.map { |h| h["message"] }; messages.include?("concurrent progress one") && messages.include?("concurrent progress two")'
 expect_failure 'state transition blocks done until implementation gates pass' "$CLI" state transition --to done --evidence "$IMPL_EVIDENCE"
 ORBIT_INSTANCE=reviewer "$CLI" evidence add --file "$IMPL_EVIDENCE" --kind review --status pass --summary "review gate passed" >/dev/null
-ORBIT_INSTANCE=tester "$CLI" evidence add --file "$IMPL_EVIDENCE" --kind test --status pass --summary "test gate passed" >/dev/null
+cat >"$TMPROOT/implementation-test-submit.yaml" <<'YAML'
+kind: test
+verdict: pass
+summary: Implementation test gate passed with environment lifecycle.
+source_message_id: herdr:tester:implementation-gate
+test_level: repo_regression
+findings: []
+coverage:
+  - implementation gate success path
+artifacts:
+  - .orbit/test-artifacts/implementation-gate.log
+test_environment:
+  environment: local shell
+  test_tab_or_pane: current pane
+  server_owner: none
+  browser_owner: none
+  cleanup_hook: no persistent runtime started
+  artifact_cleanup: retained compact log only
+  duration: 1s
+  resource_usage: one shell process
+  cleanup_status: complete
+  ux_quality: not_applicable
+  artifact_quality: artifact path is stable and small
+YAML
+ORBIT_INSTANCE=tester "$CLI" evidence submit --file "$IMPL_EVIDENCE" --report "$TMPROOT/implementation-test-submit.yaml" --json >/dev/null
 "$CLI" state transition --to done --evidence "$IMPL_EVIDENCE" >"$TMPROOT/implementation-done.out" 2>"$TMPROOT/implementation-done.err"
 test ! -s "$TMPROOT/implementation-done.err"
 "$CLI" state show --json >"$TMPROOT/implementation-done.json"
@@ -940,11 +1022,11 @@ json_assert 'state transition allows done with implementation pass evidence' "$T
 test ! -s "$TMPROOT/audit-valid.err"
 json_assert 'audit passes done state with matching evidence' "$TMPROOT/audit-valid.json" 'j["schema_version"] == "orbit-audit-v1" && j["trust_level"]["mode"] == "audit_only" && j["done_ready"] == true && j["trusted_for_handoff"] == true && j["trusted_for_done"] == true && j["trusted_for_release"] == false && j["blocking_findings"].empty? && j["warnings"].any? { |e| e["source"] == "state_file.artifacts.handoff_packet" && e["remediation"].is_a?(String) } && j["issues"].length == j["blocking_findings"].length + j["warnings"].length && j["validation"]["valid"] == true'
 "$CLI" handoff --task "$IMPL_TASK" --evidence "$IMPL_EVIDENCE" --state .orbit/loop-state.yaml --output "$TMPROOT/implementation-handoff.json" --record-state --json >"$TMPROOT/implementation-handoff.stdout"
-json_assert 'handoff can write artifact and record it in state' "$TMPROOT/implementation-handoff.json" 'j["schema_version"] == "orbit-handoff-v1" && j["blocking_errors"].empty? && j["gate_summary"]["ready"] == true && j["judgment_summary"]["review_judgment"]["present"] == true && j["judgment_summary"]["review_judgment"]["source"] == "latest_evidence_record" && j["judgment_summary"]["test_judgment"]["present"] == true && j["worktree_safety_summary"]["status"] == "not_git"'
+json_assert 'handoff can write artifact and record it in state' "$TMPROOT/implementation-handoff.json" 'j["schema_version"] == "orbit-handoff-v1" && j["blocking_errors"].empty? && j["gate_summary"]["ready"] == true && j["judgment_summary"]["review_judgment"]["present"] == true && j["judgment_summary"]["review_judgment"]["source"] == "latest_evidence_record" && j["judgment_summary"]["test_judgment"]["present"] == true && j["latest_gate_verdicts"]["review"]["status"] == "pass" && j["latest_gate_verdicts"]["test"]["status"] == "pass" && j["closure_checklist"].is_a?(Array) && j["closure_checklist"].any? { |c| c["item"] == "latest_test_verdict" } && j["known_gaps"].is_a?(Array) && j["readable_summary"]["next_action"] == "none" && j["worktree_safety_summary"]["status"] == "not_git"'
 yaml_assert 'handoff record-state stores artifact path' .orbit/loop-state.yaml 'j["artifacts"]["handoff_packet"] == File.expand_path(ARGV[2]) && j["history"].last["event"] == "handoff"' "$TMPROOT/implementation-handoff.json"
 "$CLI" compact-evidence --task "$IMPL_TASK" --evidence "$IMPL_EVIDENCE" --handoff "$TMPROOT/implementation-handoff.json" --output "$TMPROOT/durable-summary.json" --json >"$TMPROOT/durable-summary.stdout"
 cmp "$TMPROOT/durable-summary.json" "$TMPROOT/durable-summary.stdout"
-json_assert 'compact-evidence writes durable summary with hashes and refs' "$TMPROOT/durable-summary.json" 'j["schema_version"] == "orbit-durable-evidence-summary-v1" && j["inputs"]["task"]["sha256"].is_a?(String) && j["inputs"]["evidence"]["sha256"].is_a?(String) && j["inputs"]["handoff"]["sha256"].is_a?(String) && j["evidence_summary"]["records"]["count"] >= 3 && j["evidence_summary"]["aggregate_verdict"]["mode"] == "aggregate" && j["handoff_summary"]["current_phase"] == "done" && j["transient_artifacts"]["policy"] == "referenced_by_path_and_hash" && j["transient_artifacts"]["large_artifacts_not_embedded"] == true'
+json_assert 'compact-evidence writes durable summary with hashes and refs' "$TMPROOT/durable-summary.json" 'j["schema_version"] == "orbit-durable-evidence-summary-v1" && j["inputs"]["task"]["sha256"].is_a?(String) && j["inputs"]["evidence"]["sha256"].is_a?(String) && j["inputs"]["handoff"]["sha256"].is_a?(String) && j["evidence_summary"]["records"]["count"] >= 3 && j["evidence_summary"]["aggregate_verdict"]["mode"] == "aggregate" && j["handoff_summary"]["current_phase"] == "done" && j["handoff_summary"]["latest_gate_verdicts"]["test"]["status"] == "pass" && j["handoff_summary"]["closure_checklist"].is_a?(Array) && j["handoff_summary"]["known_gaps"].is_a?(Array) && j["handoff_summary"]["readable_summary"]["next_action"] == "none" && j["transient_artifacts"]["policy"] == "referenced_by_path_and_hash" && j["transient_artifacts"]["large_artifacts_not_embedded"] == true'
 "$CLI" audit --task "$IMPL_TASK" --evidence "$IMPL_EVIDENCE" --state .orbit/loop-state.yaml --json >"$TMPROOT/audit-release.json"
 json_assert 'audit trusts release when handoff artifact is recorded' "$TMPROOT/audit-release.json" 'j["trusted_for_handoff"] == true && j["trusted_for_done"] == true && j["trusted_for_release"] == true && j["warnings"].empty?'
 RISKY_EVIDENCE="$TMPROOT/risky-evidence.json"
@@ -969,7 +1051,7 @@ expect_failure 'audit rejects missing evidence option value' "$CLI" audit --task
 json_assert 'validate includes loop state and trust level' "$TMPROOT/valid-task-evidence-state.json" 'j["valid"] == true && j["checked"].include?("state") && j["trust_level"]["mode"] == "audit_only"'
 "$CLI" handoff --task "$TASK" --state "$TMPROOT/review-done-state.yaml" --evidence "$REVIEW_JUDGMENT_EVIDENCE" --json >"$TMPROOT/handoff-valid.json" 2>"$TMPROOT/handoff-valid.err"
 test ! -s "$TMPROOT/handoff-valid.err"
-json_assert 'handoff outputs valid packet' "$TMPROOT/handoff-valid.json" 'j["schema_version"] == "orbit-handoff-v1" && j["target_role"] == "reviewer" && j["current_phase"] == "done" && j["required_action"] == "none" && j["next_action"] == "none" && j["blocking_errors"].empty? && j["validation_summary"]["valid"] == true && j["audit_summary"]["done_ready"] == true && j["tools_summary"]["preferred_transport"].is_a?(String) && j["transport_profile"]["selected"] == "generic" && j["transport_profile"]["payload"]["required_action"] == "none" && j["rule_packs"].any? { |p| p["category"] == "review" && p["id"] == "brooks-review" } && j["rule_packs"].any? { |p| p["category"] == "audit" && p["id"] == "orbit-drift" } && j["rule_resolution_summary"]["present"] == true && j["rule_resolution_summary"]["valid"] == true && j["rule_resolution_summary"]["resolved_role"] == "reviewer" && j["judgment_summary"]["review_judgment"]["present"] == true && j["evidence_summary"]["records"] >= 1'
+json_assert 'handoff outputs valid packet' "$TMPROOT/handoff-valid.json" 'j["schema_version"] == "orbit-handoff-v1" && j["target_role"] == "reviewer" && j["current_phase"] == "done" && j["required_action"] == "none" && j["next_action"] == "none" && j["blocking_errors"].empty? && j["validation_summary"]["valid"] == true && j["audit_summary"]["done_ready"] == true && j["tools_summary"]["preferred_transport"].is_a?(String) && j["transport_profile"]["selected"] == "generic" && j["transport_profile"]["payload"]["required_action"] == "none" && j["rule_packs"].any? { |p| p["category"] == "review" && p["id"] == "brooks-review" } && j["rule_packs"].any? { |p| p["category"] == "audit" && p["id"] == "orbit-drift" } && j["rule_resolution_summary"]["present"] == true && j["rule_resolution_summary"]["valid"] == true && j["rule_resolution_summary"]["resolved_role"] == "reviewer" && j["judgment_summary"]["review_judgment"]["present"] == true && j["closure_checklist"].is_a?(Array) && j["readable_summary"]["next_action"] == "none" && j["evidence_summary"]["records"] >= 1'
 ruby --disable-gems -ryaml -e 'p=ARGV[0]; y={"schema_version"=>"orbit-tools-config-v1","transport_profiles"=>{"generic"=>{"handoff"=>{"format"=>"json","delivery"=>"manual"}},"herdr"=>{"fallback"=>"generic","handoff"=>{"format"=>"json","delivery"=>"pane.message"}}},"preference"=>{"handoff"=>"herdr"}}; File.write(p, YAML.dump(y))' .orbit/tools.yaml
 "$CLI" handoff --task "$TASK" --state "$TMPROOT/review-done-state.yaml" --evidence "$REVIEW_JUDGMENT_EVIDENCE" --transport generic --json >"$TMPROOT/handoff-generic-transport.json"
 json_assert 'handoff outputs generic transport payload' "$TMPROOT/handoff-generic-transport.json" 'j["required_action"] == "none" && j["transport_profile"]["requested"] == "generic" && j["transport_profile"]["selected"] == "generic" && j["transport_profile"]["fallback_used"] == false && j["transport_profile"]["payload"]["delivery"] == "manual"'
@@ -998,6 +1080,7 @@ kind: test
 verdict: pass
 summary: Explicit test task passed with environment lifecycle.
 source_message_id: herdr:tester:eq-test-pass
+test_level: repo_regression
 findings: []
 coverage:
   - explicit task test evidence path
@@ -1070,7 +1153,7 @@ json_assert 'validate passes coding task with confirmed design reference' "$TMPR
 
 expect_failure 'validate fails decomposition task missing aggregate contract details' "$CLI" validate --task "$DECOMP_TASK" --evidence "$EVIDENCE" --json
 cp "$DECOMP_TASK" "$TMPROOT/decomposition-complete.yaml"
-ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["implementation_plan"]["summary"]="Split parent work into reviewed child slices."; y["decomposition"]["child_slices"]=[{"id"=>"S1","objective"=>"first child"}]; y["decomposition"]["aggregate_outcome_metrics"]=["parent outcome rechecked after child slices"]; y["decomposition"]["stop_conditions"]=["all child slices and parent audit pass"]; y["decomposition"]["replanning_path"]="return to design review"; y["final_aggregate_audit"]["checks"]=["parent outcome still holds"]; File.write(p, YAML.dump(y))' "$TMPROOT/decomposition-complete.yaml"
+ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["implementation_plan"]["summary"]="Split parent work into reviewed child slices."; y["decomposition"]["child_slices"]=[{"id"=>"S1","include"=>"first child behavior","exclude"=>"second child behavior","order_basis"=>"unblocks shared contract first","stop_condition"=>"slice review and tests pass","replan_path"=>"return to parent plan before continuing"}]; y["decomposition"]["aggregate_outcome_metrics"]=["parent outcome rechecked after child slices"]; y["decomposition"]["stop_conditions"]=["all child slices and parent audit pass"]; y["decomposition"]["replanning_path"]="return to design review"; y["final_aggregate_audit"]["checks"]=["parent outcome still holds"]; File.write(p, YAML.dump(y))' "$TMPROOT/decomposition-complete.yaml"
 "$CLI" validate --task "$TMPROOT/decomposition-complete.yaml" --evidence "$EVIDENCE" --json >"$TMPROOT/decomposition-complete.json"
 json_assert 'validate passes complete decomposition contract' "$TMPROOT/decomposition-complete.json" 'j["valid"] == true'
 
@@ -1084,11 +1167,24 @@ kind: test
 verdict: pass
 summary: Performance quality measurement includes baseline and after values.
 source_message_id: herdr:tester:quality-measurement-pass
+test_level: repo_regression
 findings: []
 coverage:
   - measured baseline and after behavior
 artifacts:
   - .orbit/test-artifacts/quality-measurement.json
+test_environment:
+  environment: local shell
+  test_tab_or_pane: current pane
+  server_owner: none
+  browser_owner: none
+  cleanup_hook: no persistent runtime started
+  artifact_cleanup: retained compact log only
+  duration: 1s
+  resource_usage: one shell process
+  cleanup_status: complete
+  ux_quality: not_applicable
+  artifact_quality: artifact path is stable and small
 quality_measurement:
   baseline: 120
   after: 80

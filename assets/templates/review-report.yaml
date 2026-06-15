@@ -2,6 +2,8 @@ kind: review
 verdict: blocked
 summary: "TODO: one-sentence review conclusion."
 source_message_id: "TODO: herdr:<pane-or-message-id> or report:<path>"
+quality_outcome_verdict: blocked
+quality_outcome_reasoning: "TODO: whether the task quality_outcome is satisfied, and why."
 findings:
   - "[blocked][review] TODO: describe the blocking evidence gap or finding."
 coverage:

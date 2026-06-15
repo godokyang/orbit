@@ -712,8 +712,21 @@ def validate_decomposition_contract(result, task)
     validation_error(result, "task_file.decomposition", "Task decomposition must be a mapping.")
   else
     child_slices = decomposition["child_slices"]
-    unless child_slices.is_a?(Array) && child_slices.any? && child_slices.all? { |slice| slice.is_a?(Hash) && slice["id"].is_a?(String) && !slice["id"].strip.empty? }
-      validation_error(result, "task_file.decomposition.child_slices", "Decomposition child_slices must be a non-empty list of mappings with id.")
+    required_slice_fields = %w[id include exclude order_basis stop_condition replan_path]
+    unless child_slices.is_a?(Array) && child_slices.any?
+      validation_error(result, "task_file.decomposition.child_slices", "Decomposition child_slices must be a non-empty list of mappings.")
+    else
+      child_slices.each_with_index do |slice, index|
+        source = "task_file.decomposition.child_slices[#{index}]"
+        unless slice.is_a?(Hash)
+          validation_error(result, source, "Decomposition child slice must be a mapping.")
+          next
+        end
+
+        required_slice_fields.each do |field|
+          validate_non_empty_string(result, "#{source}.#{field}", slice[field], "Decomposition child slice #{field}")
+        end
+      end
     end
 
     metrics = decomposition["aggregate_outcome_metrics"]
@@ -758,6 +771,30 @@ def validate_test_environment_contract(result, task)
   validation_error(result, "task_file.test_environment.required", "Test task test_environment.required must be true.") unless env["required"] == true
   %w[environment test_tab_or_pane server_owner browser_owner cleanup_hook artifact_cleanup duration_budget resource_budget].each do |field|
     validate_non_empty_string(result, "task_file.test_environment.#{field}", env[field], "Test environment #{field}")
+  end
+end
+
+def task_requires_test_evidence?(task)
+  return false unless task.is_a?(Hash)
+
+  test_task_contract?(task) || task_gate_kinds(task, required_only: true).include?("test")
+end
+
+def validate_task_test_level_contract(result, task)
+  return unless task_requires_test_evidence?(task)
+
+  level = task["test_level"]
+  unless level.is_a?(String) && !level.strip.empty?
+    validation_error(result, "task_file.test_level", "Task requiring test evidence must define test_level.")
+    return
+  end
+
+  unless ALLOWED_TEST_LEVELS.include?(level)
+    validation_error(result, "task_file.test_level", "Task test_level must be one of #{ALLOWED_TEST_LEVELS.join("|")}.")
+  end
+
+  if test_task_contract?(task) && level == "not_applicable"
+    validation_error(result, "task_file.test_level", "Test task test_level must not be not_applicable.")
   end
 end
 
@@ -867,6 +904,7 @@ def validate_task(result, task_path)
   validate_coding_design_reference(result, task) if coding_task?(task)
   validate_decomposition_contract(result, task) if decomposition_task?(task)
   validate_test_environment_contract(result, task) if test_task_contract?(task)
+  validate_task_test_level_contract(result, task)
   validate_quality_measurement_contract(result, task) if quality_measurement_task?(task)
 
   validate_task_runtime_fields(result, task)
@@ -1026,14 +1064,101 @@ def validate_string_array_field(result, source, value, label)
   end
 end
 
+def string_finding_severity(value)
+  match = value.to_s.downcase.match(/\[(high|medium|low|advisory)\]/)
+  match ? match[1] : nil
+end
+
+def validate_structured_finding_field(result, source, finding)
+  if finding.is_a?(String)
+    if finding.strip.empty?
+      validation_error(result, source, "Structured submit finding must be non-empty.")
+      return
+    end
+
+    severity = string_finding_severity(finding)
+    if %w[high medium].include?(severity)
+      validation_error(result, source, "High/medium findings must be mappings with symptom, source, consequence, and remedy.")
+    end
+    return
+  end
+
+  unless finding.is_a?(Hash)
+    validation_error(result, source, "Structured submit finding must be a string or mapping.")
+    return
+  end
+
+  severity = finding["severity"]
+  unless %w[high medium low advisory].include?(severity)
+    validation_error(result, "#{source}.severity", "Finding severity must be one of high|medium|low|advisory.")
+  end
+  validate_non_empty_string(result, "#{source}.summary", finding["summary"], "Finding summary")
+
+  return unless %w[high medium].include?(severity)
+
+  REQUIRED_FINDING_DETAIL_FIELDS.each do |field|
+    validate_non_empty_string(result, "#{source}.#{field}", finding[field], "High/medium finding #{field}")
+  end
+end
+
+def validate_findings_array_field(result, source, value, label)
+  unless value.is_a?(Array)
+    validation_error(result, source, "#{label} must be a list.")
+    return
+  end
+
+  value.each_with_index do |finding, index|
+    validate_structured_finding_field(result, "#{source}[#{index}]", finding)
+  end
+end
+
+def validate_structured_review_quality_outcome(result, source, record)
+  return unless record["kind"] == "review"
+
+  value = record["quality_outcome_verdict"]
+  unless value.is_a?(String) && !value.strip.empty?
+    validation_error(result, "#{source}.quality_outcome_verdict", "Structured review evidence must define quality_outcome_verdict.")
+    return
+  end
+
+  unless ALLOWED_REVIEW_QUALITY_OUTCOME_VERDICTS.include?(value)
+    validation_error(result, "#{source}.quality_outcome_verdict", "Review quality_outcome_verdict must be one of #{ALLOWED_REVIEW_QUALITY_OUTCOME_VERDICTS.join("|")}.")
+  end
+
+  if record["status"] == "pass" && value != "pass"
+    validation_error(result, "#{source}.quality_outcome_verdict", "Review PASS requires quality_outcome_verdict: pass.")
+  end
+end
+
+def validate_structured_test_level(result, source, record)
+  return unless record["kind"] == "test"
+  return unless record["status"] == "pass" || record.key?("test_level")
+
+  level = record["test_level"]
+  unless level.is_a?(String) && !level.strip.empty?
+    validation_error(result, "#{source}.test_level", "Structured test PASS evidence must define test_level.")
+    return
+  end
+
+  unless ALLOWED_TEST_LEVELS.include?(level)
+    validation_error(result, "#{source}.test_level", "Test evidence test_level must be one of #{ALLOWED_TEST_LEVELS.join("|")}.")
+  end
+
+  if record["status"] == "pass" && level == "not_applicable"
+    validation_error(result, "#{source}.test_level", "Test PASS evidence test_level must not be not_applicable.")
+  end
+end
+
 def validate_structured_evidence_record(result, source, record)
   unless STRUCTURED_SUBMIT_KINDS.include?(record["kind"])
     validation_error(result, "#{source}.structured_submit", "Structured submit is only valid for #{STRUCTURED_SUBMIT_KINDS.join("|")} evidence.")
   end
   validate_non_empty_string(result, "#{source}.source_message_id", record["source_message_id"], "Structured submit source_message_id")
-  validate_string_array_field(result, "#{source}.findings", record["findings"], "Structured submit findings")
+  validate_findings_array_field(result, "#{source}.findings", record["findings"], "Structured submit findings")
   validate_string_array_field(result, "#{source}.coverage", record["coverage"], "Structured submit coverage")
   validate_string_array_field(result, "#{source}.artifacts", record["artifacts"], "Structured submit artifacts")
+  validate_structured_review_quality_outcome(result, source, record)
+  validate_structured_test_level(result, source, record)
   validate_blocked_evidence_detail(result, "#{source}.blocked", record["blocked"]) if record.key?("blocked")
 end
 
@@ -1133,10 +1258,22 @@ def record_field_or_nested(record, nested, field)
 end
 
 def validate_test_pass_environment_evidence(result, records, task)
-  return unless test_task_contract?(task)
+  return unless task_requires_test_evidence?(task)
 
   latest = latest_record_for_kind(records, "test", structured_gate_only: true, gate_identity_required: true)
   return unless latest && latest["status"] == "pass"
+
+  declared_level = task["test_level"]
+  evidence_level = latest["test_level"]
+  if !evidence_level.is_a?(String) || evidence_level.strip.empty?
+    validation_error(result, "evidence_file.records.test.test_level", "Latest passing test evidence must include test_level.")
+  elsif !ALLOWED_TEST_LEVELS.include?(evidence_level)
+    validation_error(result, "evidence_file.records.test.test_level", "Latest passing test evidence test_level must be one of #{ALLOWED_TEST_LEVELS.join("|")}.")
+  elsif evidence_level == "not_applicable"
+    validation_error(result, "evidence_file.records.test.test_level", "Latest passing test evidence test_level must not be not_applicable.")
+  elsif declared_level.is_a?(String) && !declared_level.empty? && declared_level != "not_applicable" && evidence_level != declared_level
+    validation_error(result, "evidence_file.records.test.test_level", "Latest passing test evidence test_level #{evidence_level.inspect} must match task test_level #{declared_level.inspect}.")
+  end
 
   environment = latest["test_environment"]
   unless environment.is_a?(Hash)
@@ -1242,9 +1379,9 @@ def validate_review_judgment(result, judgment)
       validate_non_empty_string(result, "#{source}.summary", finding["summary"], "Review finding summary")
       validate_non_empty_string(result, "#{source}.evidence", finding["evidence"], "Review finding evidence")
       if %w[high medium].include?(finding["severity"])
-        %w[symptom source consequence remedy trigger guard].each do |field|
+        REQUIRED_FINDING_DETAIL_FIELDS.each do |field|
           unless finding[field].is_a?(String) && !finding[field].strip.empty?
-            validation_warning(result, "#{source}.#{field}", "High/medium review findings should include #{field} for the finding quality gate.")
+            validation_error(result, "#{source}.#{field}", "High/medium review findings must include #{field} for the finding quality gate.")
           end
         end
       end

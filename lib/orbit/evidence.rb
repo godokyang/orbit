@@ -4,6 +4,9 @@ ALLOWED_EVIDENCE_STATUSES = %w[pass fail partial invalid].freeze
 ALLOWED_EVIDENCE_VERDICT_STATUSES = (ALLOWED_EVIDENCE_STATUSES + %w[in_progress]).freeze
 ALLOWED_EVIDENCE_KINDS = %w[review test command implementation waiver].freeze
 STRUCTURED_SUBMIT_KINDS = %w[review test].freeze
+ALLOWED_TEST_LEVELS = %w[unit integration repo_regression browser_e2e provider_e2e dogfood manual not_applicable].freeze
+ALLOWED_REVIEW_QUALITY_OUTCOME_VERDICTS = %w[pass fail partial blocked unknown not_applicable].freeze
+REQUIRED_FINDING_DETAIL_FIELDS = %w[symptom source consequence remedy].freeze
 EVIDENCE_EXPECTED_GATE_ROLES = {
   "review" => "reviewer",
   "test" => "tester"
@@ -200,6 +203,15 @@ def apply_structured_gate_defaults!(record, source_message_id)
   record["findings"] ||= []
   record["coverage"] ||= []
   record["artifacts"] ||= []
+  if record["kind"] == "review"
+    record["quality_outcome_verdict"] ||= case record["status"]
+                                          when "pass" then "pass"
+                                          when "fail" then "fail"
+                                          when "partial" then "partial"
+                                          else "unknown"
+                                          end
+  end
+  record["test_level"] ||= "repo_regression" if record["kind"] == "test" && record["status"] == "pass"
   record
 end
 
@@ -585,6 +597,175 @@ def validate_string_array!(value, source, kind: nil)
   value
 end
 
+def finding_severity_from_string(value)
+  match = value.to_s.downcase.match(/\[(high|medium|low|advisory)\]/)
+  match ? match[1] : nil
+end
+
+def validate_structured_finding!(finding, source, kind: nil)
+  unless finding.is_a?(Hash)
+    submit_report_schema_error(
+      source,
+      "#{source} must be a string finding or a mapping finding.",
+      expected: "non-empty string or mapping with severity and summary",
+      actual: evidence_value_type(finding),
+      kind: kind
+    )
+  end
+
+  severity = finding["severity"]
+  unless %w[high medium low advisory].include?(severity)
+    submit_report_schema_error(
+      "#{source}.severity",
+      "#{source}.severity must be one of high|medium|low|advisory.",
+      expected: "high|medium|low|advisory",
+      actual: evidence_value_type(severity),
+      kind: kind
+    )
+  end
+
+  summary = finding["summary"]
+  unless summary.is_a?(String) && !summary.strip.empty?
+    submit_report_schema_error(
+      "#{source}.summary",
+      "#{source}.summary must be a non-empty string.",
+      expected: "non-empty string",
+      actual: evidence_value_type(summary),
+      kind: kind
+    )
+  end
+
+  return finding unless %w[high medium].include?(severity)
+
+  REQUIRED_FINDING_DETAIL_FIELDS.each do |field|
+    value = finding[field]
+    next if value.is_a?(String) && !value.strip.empty?
+
+    submit_report_schema_error(
+      "#{source}.#{field}",
+      "High/medium findings must include #{field}.",
+      expected: "non-empty string",
+      actual: evidence_value_type(value),
+      kind: kind
+    )
+  end
+
+  finding
+end
+
+def validate_findings_array!(value, source, kind: nil)
+  unless value.is_a?(Array)
+    submit_report_schema_error(
+      source,
+      "#{source} must be a list.",
+      expected: "list of non-empty strings or finding mappings",
+      actual: evidence_value_type(value),
+      kind: kind
+    )
+  end
+
+  value.each_with_index do |finding, index|
+    item_source = "#{source}[#{index}]"
+    if finding.is_a?(String)
+      if finding.strip.empty?
+        submit_report_schema_error(
+          item_source,
+          "#{item_source} must be non-empty.",
+          expected: "non-empty string or finding mapping",
+          actual: evidence_value_type(finding),
+          kind: kind
+        )
+      end
+
+      severity = finding_severity_from_string(finding)
+      if %w[high medium].include?(severity)
+        submit_report_schema_error(
+          item_source,
+          "High/medium findings must be mappings with symptom, source, consequence, and remedy.",
+          expected: "mapping with severity, summary, symptom, source, consequence, remedy",
+          actual: "string finding tagged #{severity}",
+          kind: kind
+        )
+      end
+    else
+      validate_structured_finding!(finding, item_source, kind: kind)
+    end
+  end
+
+  value
+end
+
+def validate_review_quality_outcome_verdict!(report, status, source, kind: nil)
+  value = report["quality_outcome_verdict"]
+  unless value.is_a?(String) && !value.strip.empty?
+    submit_report_schema_error(
+      "#{source}.quality_outcome_verdict",
+      "#{source}.quality_outcome_verdict must be a non-empty string.",
+      expected: ALLOWED_REVIEW_QUALITY_OUTCOME_VERDICTS.join("|"),
+      actual: evidence_value_type(value),
+      kind: kind
+    )
+  end
+
+  verdict = value.strip
+  unless ALLOWED_REVIEW_QUALITY_OUTCOME_VERDICTS.include?(verdict)
+    submit_report_schema_error(
+      "#{source}.quality_outcome_verdict",
+      "#{source}.quality_outcome_verdict must be one of #{ALLOWED_REVIEW_QUALITY_OUTCOME_VERDICTS.join("|")}.",
+      expected: ALLOWED_REVIEW_QUALITY_OUTCOME_VERDICTS.join("|"),
+      actual: evidence_value_type(value),
+      kind: kind
+    )
+  end
+
+  if status == "pass" && verdict != "pass"
+    submit_report_schema_error(
+      "#{source}.quality_outcome_verdict",
+      "Review PASS requires quality_outcome_verdict: pass.",
+      expected: "pass",
+      actual: verdict,
+      kind: kind
+    )
+  end
+
+  verdict
+end
+
+def validate_test_level!(value, source, kind: nil, pass_required: false)
+  unless value.is_a?(String) && !value.strip.empty?
+    submit_report_schema_error(
+      source,
+      "#{source} must be a non-empty string.",
+      expected: ALLOWED_TEST_LEVELS.join("|"),
+      actual: evidence_value_type(value),
+      kind: kind
+    )
+  end
+
+  level = value.strip
+  unless ALLOWED_TEST_LEVELS.include?(level)
+    submit_report_schema_error(
+      source,
+      "#{source} must be one of #{ALLOWED_TEST_LEVELS.join("|")}.",
+      expected: ALLOWED_TEST_LEVELS.join("|"),
+      actual: level,
+      kind: kind
+    )
+  end
+
+  if pass_required && level == "not_applicable"
+    submit_report_schema_error(
+      source,
+      "Test PASS requires an executable test_level, not not_applicable.",
+      expected: (ALLOWED_TEST_LEVELS - ["not_applicable"]).join("|"),
+      actual: level,
+      kind: kind
+    )
+  end
+
+  level
+end
+
 def validate_blocked_submit_detail!(value, source, kind: nil)
   unless value.is_a?(Hash)
     submit_report_schema_error(
@@ -667,19 +848,30 @@ def validate_structured_submit_report!(report_path, report)
   status = structured_submit_status(report, kind)
   summary = report_string!(report, "summary", "submit_report", kind: kind)
   source_message_id = report_string!(report, "source_message_id", "submit_report", kind: kind)
-  findings = validate_string_array!(report["findings"] || [], "submit_report.findings", kind: kind)
+  findings = validate_findings_array!(report["findings"] || [], "submit_report.findings", kind: kind)
   coverage = validate_string_array!(report["coverage"], "submit_report.coverage", kind: kind)
   artifacts = validate_string_array!(report["artifacts"], "submit_report.artifacts", kind: kind)
   validate_blocked_submit_detail!(report["blocked"], "submit_report.blocked", kind: kind) if report.key?("blocked")
+  extra = {}
+  if kind == "review"
+    extra["quality_outcome_verdict"] = validate_review_quality_outcome_verdict!(report, status, "submit_report", kind: kind)
+    extra["quality_outcome_reasoning"] = report_string!(report, "quality_outcome_reasoning", "submit_report", kind: kind) if report.key?("quality_outcome_reasoning")
+  elsif kind == "test"
+    if status == "pass"
+      extra["test_level"] = validate_test_level!(report["test_level"], "submit_report.test_level", kind: kind, pass_required: true)
+    elsif report.key?("test_level")
+      extra["test_level"] = validate_test_level!(report["test_level"], "submit_report.test_level", kind: kind)
+    end
+  end
 
-  [kind, status, summary, source_message_id, findings, coverage, artifacts]
+  [kind, status, summary, source_message_id, findings, coverage, artifacts, extra]
 end
 
 def evidence_submit(options)
   path = File.expand_path(options["file"])
   report_path, report = load_report_for_evidence(options["report"])
 
-  kind, status, summary, source_message_id, findings, coverage, artifacts = validate_structured_submit_report!(report_path, report)
+  kind, status, summary, source_message_id, findings, coverage, artifacts, extra = validate_structured_submit_report!(report_path, report)
   identity = require_evidence_submit_capability!(kind)
   record = {
     "kind" => kind,
@@ -693,6 +885,7 @@ def evidence_submit(options)
     "coverage" => coverage,
     "artifacts" => artifacts
   }
+  extra.each { |field, value| record[field] = value } if extra.is_a?(Hash)
   %w[test_environment quality_measurement duration resource_usage ux_quality artifact_quality cleanup_status].each do |field|
     record[field] = report[field] if report.key?(field)
   end

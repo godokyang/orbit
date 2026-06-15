@@ -1,0 +1,16 @@
+kind: review
+verdict: blocked
+summary: "TODO: one-sentence design or analysis review conclusion."
+source_message_id: "TODO: herdr:<pane-or-message-id> or report:<path>"
+quality_outcome_verdict: blocked
+quality_outcome_reasoning: "TODO: whether the design/analysis outcome is ready for user confirmation and coding, and why."
+findings:
+  - "[blocked][design-review] TODO: describe the blocking design, analysis, or evidence gap."
+coverage:
+  - "TODO: design artifact, acceptance point, lifecycle phase, and evidence checked."
+artifacts:
+  - "TODO: stable path to design doc, analysis note, screenshot, transcript, or report."
+blocked:
+  reason: "TODO: why this design/analysis review cannot pass yet."
+  next_step: "TODO: specific action required before user_confirmed or coding_ready."
+  owner: "lead"
