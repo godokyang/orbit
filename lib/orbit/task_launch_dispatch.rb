@@ -523,10 +523,31 @@ def herdr_agent_list_for_pane(herdr_path, pane)
 
   parsed = JSON.parse(stdout)
   agents = parsed.dig("result", "agents") || parsed["agents"] || []
-  agent = agents.find { |entry| entry.is_a?(Hash) && entry["pane_id"].to_s == pane.to_s }
+  pane_ids = Array(pane).map(&:to_s)
+  agent = agents.find { |entry| entry.is_a?(Hash) && pane_ids.include?(entry["pane_id"].to_s) }
   [agent, { "success" => true, "stdout" => stdout, "stderr" => stderr, "exit_status" => status.exitstatus }]
 rescue JSON::ParserError => e
   [nil, { "success" => false, "stdout" => stdout.to_s, "stderr" => e.message, "exit_status" => status&.exitstatus }]
+end
+
+def herdr_pane_info(herdr_path, pane)
+  return [nil, { "success" => false, "reason" => "empty pane id" }] if pane.to_s.empty?
+
+  stdout, stderr, status = Open3.capture3(herdr_path, "pane", "get", pane.to_s)
+  return [nil, { "success" => false, "stdout" => stdout, "stderr" => stderr, "exit_status" => status.exitstatus }] unless status.success?
+
+  parsed = JSON.parse(stdout)
+  info = parsed.dig("result", "pane") || parsed["pane"] || parsed.dig("result") || parsed
+  [info, { "success" => true, "stdout" => stdout, "stderr" => stderr, "exit_status" => status.exitstatus }]
+rescue JSON::ParserError => e
+  [nil, { "success" => false, "stdout" => stdout.to_s, "stderr" => e.message, "exit_status" => status&.exitstatus }]
+end
+
+def current_herdr_pane_info(herdr_path)
+  current_pane = ENV["HERDR_PANE_ID"].to_s
+  return [nil, { "success" => false, "reason" => "HERDR_PANE_ID is not set" }] if current_pane.empty?
+
+  herdr_pane_info(herdr_path, current_pane)
 end
 
 def pane_output_safe_to_wake?(output)
@@ -552,10 +573,22 @@ def herdr_reuse_probe(plan, herdr_path = nil)
     "reason" => "herdr command not found"
   } unless herdr_path
 
-  agent, list_result = herdr_agent_list_for_pane(herdr_path, pane)
+  bound_pane_info, pane_get_result = herdr_pane_info(herdr_path, pane)
+  canonical_pane = bound_pane_info["pane_id"].to_s unless bound_pane_info.nil?
+  canonical_pane = pane if canonical_pane.to_s.empty?
+  current_pane_info, current_pane_result = current_herdr_pane_info(herdr_path)
+  current_pane = current_pane_info["pane_id"].to_s unless current_pane_info.nil?
+  current_pane = ENV["HERDR_PANE_ID"].to_s if current_pane.to_s.empty?
+  self_pane = !current_pane.to_s.empty? && [pane.to_s, canonical_pane.to_s].include?(current_pane.to_s)
+  agent, list_result = herdr_agent_list_for_pane(herdr_path, [pane, canonical_pane])
   probe = {
     "schema_version" => "orbit-herdr-reuse-probe-v1",
     "pane" => pane,
+    "canonical_pane" => canonical_pane,
+    "current_pane" => current_pane,
+    "self_pane" => self_pane,
+    "pane_get" => pane_get_result,
+    "current_pane_get" => current_pane_result,
     "agent_list" => list_result
   }
   if agent
@@ -574,12 +607,20 @@ def herdr_reuse_probe(plan, herdr_path = nil)
     "decision" => "needs_attention",
     "reason" => "could not inspect Herdr agents"
   ) unless list_result["success"]
+  if self_pane
+    return probe.merge(
+      "agent_detected" => false,
+      "safe_to_wake" => true,
+      "decision" => "self_wake",
+      "reason" => "bound pane is the current Herdr pane; start can exec the agent command directly"
+    )
+  end
 
   read_stdout, read_stderr, read_status = Open3.capture3(
     herdr_path,
     "pane",
     "read",
-    pane,
+    canonical_pane,
     "--source",
     "recent-unwrapped",
     "--lines",
@@ -618,6 +659,16 @@ def herdr_wake_adapter(plan, probe, executable = "herdr")
     "command" => [executable, "pane", "run", pane, wake_command_text(plan)],
     "ready_wait" => ready_wait
   }.compact
+end
+
+def self_wake_plan(plan, probe)
+  {
+    "schema_version" => "orbit-herdr-self-wake-v1",
+    "transport" => "herdr",
+    "pane" => probe["canonical_pane"] || probe["pane"],
+    "command" => wake_command_text(plan),
+    "mode" => "exec_current_process"
+  }
 end
 
 def start_create_blocked?(plan, options)
@@ -663,6 +714,15 @@ def print_start_wake_dry_run(plan)
   puts "- action: wake_dry_run"
   puts "- pane: #{plan.dig("reuse_probe", "pane")}"
   puts "- command: #{plan.dig("wake_adapter", "command", 4)}"
+end
+
+def print_start_self_wake_dry_run(plan)
+  puts "Orbit self-wake plan:"
+  puts "- instance: #{plan["instance"]}"
+  puts "- role: #{plan["resolved_role"]}"
+  puts "- action: self_wake_dry_run"
+  puts "- pane: #{plan.dig("reuse_probe", "canonical_pane") || plan.dig("reuse_probe", "pane")}"
+  puts "- command: #{plan.dig("self_wake", "command")}"
 end
 
 def herdr_start_argv(plan, executable = "herdr")
@@ -944,13 +1004,65 @@ def run_herdr_wake(plan, probe, json:)
   exit(status.exitstatus || 1) unless success
 end
 
+def run_herdr_self_wake(plan, probe, json:)
+  binding = plan.dig("instance_status", "transport", "binding") || {}
+  status_after_start = write_instance_binding!(
+    plan["instance"],
+    transport_kind: "herdr",
+    pane: probe["canonical_pane"] || probe["pane"],
+    tab: binding["tab"].to_s,
+    space: binding["space"].to_s,
+    actual_client: plan.dig("client", "expected_client")
+  )
+  result = plan.merge(
+    "action" => "self_wake_exec",
+    "reuse_probe" => probe,
+    "self_wake" => self_wake_plan(plan, probe),
+    "instance_status_after_start" => status_after_start
+  )
+
+  if json
+    puts JSON.pretty_generate(result)
+  else
+    puts "Starting Orbit instance in current Herdr pane:"
+    puts "- instance: #{plan["instance"]}"
+    puts "- role: #{plan["resolved_role"]}"
+    puts "- pane: #{probe["canonical_pane"] || probe["pane"]}"
+  end
+  $stdout.flush
+  $stderr.flush
+  Dir.chdir(plan["cwd"]) do
+    Process.exec(ENV.to_hash.merge(plan["env"]), *plan["argv"])
+  end
+rescue SystemCallError => e
+  warn "Orbit self-wake failed: #{e.message}"
+  exit 1
+end
+
 def start(args)
   options = parse_start_args(args)
   plan = attach_start_adapter_plan(start_plan(options))
 
   if start_requires_reuse?(plan)
     probe = herdr_reuse_probe(plan)
-    if probe && probe["decision"] == "wake"
+    if probe && probe["decision"] == "self_wake"
+      result = plan.merge(
+        "action" => "self_wake_dry_run",
+        "reuse_probe" => probe,
+        "self_wake" => self_wake_plan(plan, probe)
+      )
+      if options["dry_run"]
+        if options["json"]
+          puts JSON.pretty_generate(result)
+        else
+          print_start_self_wake_dry_run(result)
+        end
+        return
+      end
+
+      run_herdr_self_wake(plan, probe, json: options["json"])
+      return
+    elsif probe && probe["decision"] == "wake"
       result = plan.merge(
         "action" => "wake_dry_run",
         "reuse_probe" => probe,

@@ -258,6 +258,44 @@ HERDR
 chmod +x "$TMPROOT/fakebin/herdr"
 PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer --dry-run --json >"$TMPROOT/start-reviewer-reuse.json"
 json_assert 'start reuses healthy user-managed binding only when agent is detected' "$TMPROOT/start-reviewer-reuse.json" 'j["action"] == "reuse" && j["reuse_probe"]["agent_detected"] == true && j["reuse_probe"]["agent"] == "codex" && j["instance_status"]["recommended_action"] == "reuse" && j["instance_status"]["transport"]["binding"]["pane"] == "pane-reviewer" && j["context_preflight"]["required_files"].any? { |r| r["path"] == "SKILL.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "references/runtime/guide.md" }'
+"$CLI" bind-pane --instance reviewer --pane alias-reviewer --transport herdr --json >"$TMPROOT/bind-pane-reviewer-alias.json"
+cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
+#!/bin/sh
+case "$1 $2" in
+  "pane get")
+    printf '{"result":{"pane":{"pane_id":"canonical-reviewer"}}}\n'
+    ;;
+  "agent list")
+    printf '{"result":{"agents":[{"pane_id":"canonical-reviewer","agent":"codex","agent_status":"idle"}]}}\n'
+    ;;
+  *)
+    printf 'unexpected herdr args: %s\n' "$*" >&2
+    exit 1
+    ;;
+esac
+HERDR
+chmod +x "$TMPROOT/fakebin/herdr"
+PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer --dry-run --json >"$TMPROOT/start-reviewer-alias-reuse.json"
+json_assert 'start resolves Herdr pane aliases before matching detected agents' "$TMPROOT/start-reviewer-alias-reuse.json" 'j["action"] == "reuse" && j["reuse_probe"]["pane"] == "alias-reviewer" && j["reuse_probe"]["canonical_pane"] == "canonical-reviewer" && j["reuse_probe"]["agent_detected"] == true && j["reuse_probe"]["agent"] == "codex"'
+"$CLI" bind-pane --instance reviewer --pane self-alias --transport herdr --json >"$TMPROOT/bind-pane-reviewer-self.json"
+cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
+#!/bin/sh
+case "$1 $2" in
+  "pane get")
+    printf '{"result":{"pane":{"pane_id":"self-canonical"}}}\n'
+    ;;
+  "agent list")
+    printf '{"result":{"agents":[]}}\n'
+    ;;
+  *)
+    printf 'unexpected herdr args: %s\n' "$*" >&2
+    exit 1
+    ;;
+esac
+HERDR
+chmod +x "$TMPROOT/fakebin/herdr"
+HERDR_PANE_ID=current-alias PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer --dry-run --json >"$TMPROOT/start-reviewer-self-wake-dry-run.json"
+json_assert 'start self-wakes current Herdr pane without requiring prompt classification' "$TMPROOT/start-reviewer-self-wake-dry-run.json" 'j["action"] == "self_wake_dry_run" && j["reuse_probe"]["decision"] == "self_wake" && j["reuse_probe"]["self_pane"] == true && j["reuse_probe"]["safe_to_wake"] == true && j["self_wake"]["mode"] == "exec_current_process" && j["self_wake"]["command"].include?("codex")'
 "$CLI" bind-pane --instance reviewer --pane shell-pane --transport herdr --json >"$TMPROOT/bind-pane-reviewer-shell.json"
 cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
 #!/bin/sh
