@@ -242,11 +242,66 @@ wait
 yaml_assert 'concurrent bind-pane preserves all instance bindings' .orbit/instances.yaml 'j["instances"]["lead"]["transport"]["binding"]["pane"] == "concurrent-lead" && j["instances"]["reviewer"]["transport"]["binding"]["pane"] == "concurrent-reviewer" && j["instances"]["tester"]["transport"]["binding"]["pane"] == "concurrent-tester"'
 "$CLI" bind-pane --instance reviewer --pane pane-reviewer --transport herdr --json >"$TMPROOT/bind-pane-reviewer.json"
 json_assert 'bind-pane records reviewer binding and status reuse' "$TMPROOT/bind-pane-reviewer.json" 'j["schema_version"] == "orbit-bind-pane-v1" && j["instance"] == "reviewer" && j["status"]["binding_status"] == "healthy" && j["status"]["recommended_action"] == "reuse" && j["status"]["transport"]["binding"]["pane"] == "pane-reviewer"'
-"$CLI" start reviewer --dry-run --json >"$TMPROOT/start-reviewer-reuse.json"
-json_assert 'start reuses healthy user-managed binding' "$TMPROOT/start-reviewer-reuse.json" 'j["action"] == "reuse" && j["instance_status"]["recommended_action"] == "reuse" && j["instance_status"]["transport"]["binding"]["pane"] == "pane-reviewer"'
+mkdir -p "$TMPROOT/fakebin"
+cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
+#!/bin/sh
+case "$1 $2" in
+  "agent list")
+    printf '{"result":{"agents":[{"pane_id":"pane-reviewer","agent":"codex","agent_status":"idle"}]}}\n'
+    ;;
+  *)
+    printf 'unexpected herdr args: %s\n' "$*" >&2
+    exit 1
+    ;;
+esac
+HERDR
+chmod +x "$TMPROOT/fakebin/herdr"
+PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer --dry-run --json >"$TMPROOT/start-reviewer-reuse.json"
+json_assert 'start reuses healthy user-managed binding only when agent is detected' "$TMPROOT/start-reviewer-reuse.json" 'j["action"] == "reuse" && j["reuse_probe"]["agent_detected"] == true && j["reuse_probe"]["agent"] == "codex" && j["instance_status"]["recommended_action"] == "reuse" && j["instance_status"]["transport"]["binding"]["pane"] == "pane-reviewer" && j["context_preflight"]["required_files"].any? { |r| r["path"] == "SKILL.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "references/runtime/guide.md" }'
+"$CLI" bind-pane --instance reviewer --pane shell-pane --transport herdr --json >"$TMPROOT/bind-pane-reviewer-shell.json"
+cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
+#!/bin/sh
+case "$1 $2" in
+  "agent list")
+    printf '{"result":{"agents":[]}}\n'
+    ;;
+  "pane read")
+    printf 'project %%\n'
+    ;;
+  *)
+    printf 'unexpected herdr args: %s\n' "$*" >&2
+    exit 1
+    ;;
+esac
+HERDR
+chmod +x "$TMPROOT/fakebin/herdr"
+PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer --dry-run --json >"$TMPROOT/start-reviewer-wake-dry-run.json"
+json_assert 'start wakes bound Herdr shell pane in dry-run when no agent is detected' "$TMPROOT/start-reviewer-wake-dry-run.json" 'j["action"] == "wake_dry_run" && j["reuse_probe"]["agent_detected"] == false && j["reuse_probe"]["safe_to_wake"] == true && j["wake_adapter"]["command"][0,4] == ["herdr", "pane", "run", "shell-pane"] && j["wake_adapter"]["command"][4].include?("ORBIT_INSTANCE") && j["wake_adapter"]["command"][4].include?("reviewer") && j["wake_adapter"]["command"][4].include?("ORBIT_ROLE") && j["wake_adapter"]["command"][4].include?("codex")'
+"$CLI" bind-pane --instance reviewer --pane busy-pane --transport herdr --json >"$TMPROOT/bind-pane-reviewer-busy.json"
+cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
+#!/bin/sh
+case "$1 $2" in
+  "agent list")
+    printf '{"result":{"agents":[]}}\n'
+    ;;
+  "pane read")
+    printf 'running build\n'
+    ;;
+  *)
+    printf 'unexpected herdr args: %s\n' "$*" >&2
+    exit 1
+    ;;
+esac
+HERDR
+chmod +x "$TMPROOT/fakebin/herdr"
+if PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer --dry-run --json >"$TMPROOT/start-reviewer-needs-attention.json" 2>"$TMPROOT/start-reviewer-needs-attention.err"; then
+  printf 'FAIL start stale busy binding: command unexpectedly succeeded\n' >&2
+  exit 1
+fi
+json_assert 'start fails closed for bound Herdr pane that is not safe to wake' "$TMPROOT/start-reviewer-needs-attention.json" 'j["action"] == "needs_attention" && j["reuse_probe"]["agent_detected"] == false && j["reuse_probe"]["safe_to_wake"] == false && j["reuse_probe"]["decision"] == "needs_attention"'
 "$CLI" init --force >/dev/null
 "$CLI" start reviewer --allow-create --dry-run --json >"$TMPROOT/start-reviewer.json"
-json_assert 'start dry-run resolves instance command env cwd and client metadata' "$TMPROOT/start-reviewer.json" 'j["schema_version"] == "orbit-start-plan-v1" && j["action"] == "dry_run" && j["transport"] == "local" && j["instance"] == "reviewer" && j["argv"] == ["codex"] && j["client"]["expected_client"] == "codex" && j["client"]["full_permission"]["known_client"] == true && j["client"]["full_permission"]["configured"] == false && j["env"]["ORBIT_INSTANCE"] == "reviewer" && j["env"]["ORBIT_ROLE"] == "reviewer" && j["cwd"] == Dir.pwd'
+json_assert 'start dry-run resolves instance command env cwd client and context metadata' "$TMPROOT/start-reviewer.json" 'j["schema_version"] == "orbit-start-plan-v1" && j["action"] == "dry_run" && j["transport"] == "local" && j["instance"] == "reviewer" && j["argv"] == ["codex"] && j["client"]["expected_client"] == "codex" && j["client"]["full_permission"]["known_client"] == true && j["client"]["full_permission"]["configured"] == false && j["env"]["ORBIT_INSTANCE"] == "reviewer" && j["env"]["ORBIT_ROLE"] == "reviewer" && j["cwd"] == Dir.pwd && j["context_preflight"]["required_files"].any? { |r| r["path"] == "SKILL.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "references/runtime/guide.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "references/runtime/quality-outcome-and-review.md" }'
 "$CLI" start reviewer --allow-create --dry-run >"$TMPROOT/start-reviewer-human.txt" 2>"$TMPROOT/start-reviewer-human.err"
 test ! -s "$TMPROOT/start-reviewer-human.err"
 grep -q 'Orbit start plan:' "$TMPROOT/start-reviewer-human.txt"
@@ -468,7 +523,7 @@ DECOMP_TASK="$TMPROOT/decomposition-task.yaml"
 yaml_assert 'new-task initializes decomposition contract fields' "$DECOMP_TASK" 'j["implementation_plan"]["required"] == true && j["decomposition"]["child_slices"].is_a?(Array) && j["decomposition"]["aggregate_outcome_metrics"].is_a?(Array) && j["final_aggregate_audit"]["required"] == true'
 expect_failure 'new-task refuses overwrite' "$CLI" new-task --target-role reviewer --task-type implementation_review --output "$TASK"
 "$CLI" dispatch --task "$TASK" --to reviewer --json >"$TMPROOT/dispatch-generic.json"
-json_assert 'dispatch generic emits manual delivery payload' "$TMPROOT/dispatch-generic.json" 'j["schema_version"] == "orbit-dispatch-v1" && j["action"] == "manual_delivery_required" && j["transport"] == "generic" && j["to_instance"] == "reviewer" && j["resolved_role"] == "reviewer" && j["task"] == File.expand_path(ARGV[2]) && j["message"].include?("orbit whoami --task") && j["message"].include?("orbit rules print-context --task") && j["checks"]["target_role_matches"] == true' "$TASK"
+json_assert 'dispatch generic emits manual delivery payload with context preflight' "$TMPROOT/dispatch-generic.json" 'j["schema_version"] == "orbit-dispatch-v1" && j["action"] == "manual_delivery_required" && j["transport"] == "generic" && j["to_instance"] == "reviewer" && j["resolved_role"] == "reviewer" && j["task"] == File.expand_path(ARGV[2]) && j["message"].include?("orbit whoami --json") && !j["message"].include?("orbit whoami --task") && j["message"].include?("orbit rules print-context --task") && j["message"].include?("context_preflight.required_files") && j["context_preflight"]["commands"].include?(["orbit", "whoami", "--json"]) && j["context_preflight"]["required_files"].any? { |r| r["path"] == "SKILL.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "references/runtime/guide.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "references/runtime/quality-outcome-and-review.md" } && j["checks"]["target_role_matches"] == true' "$TASK"
 "$CLI" dispatch --task "$TASK" --to reviewer --transport herdr --pane pane-123 --reply-to observer-pane --dry-run --json >"$TMPROOT/dispatch-herdr-dry-run.json"
 json_assert 'dispatch herdr dry-run emits adapter plan with explicit reply-to' "$TMPROOT/dispatch-herdr-dry-run.json" 'j["action"] == "dry_run" && j["reply_to"] == "observer-pane" && j["reply_to_source"] == "explicit_option" && j["message"].include?("reply-to:observer-pane") && j["adapter"]["schema_version"] == "orbit-herdr-dispatch-v1" && j["adapter"]["submit_delay_seconds"] > 0 && j["adapter"]["commands"][0][0,4] == ["herdr", "pane", "send-text", "pane-123"] && j["adapter"]["commands"][0][4].include?(File.expand_path(ARGV[2])) && j["adapter"]["commands"][1] == ["herdr", "pane", "send-keys", "pane-123", "Enter"]' "$TASK"
 HERDR_PANE_ID=lead-reply-pane "$CLI" dispatch --task "$TASK" --to reviewer --transport herdr --pane pane-123 --dry-run --json >"$TMPROOT/dispatch-herdr-env-reply-to.json"

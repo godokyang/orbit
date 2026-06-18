@@ -287,8 +287,10 @@ orbit start tester-main
 2. 启动 Codex / Claude Code / 其他 agent 客户端，或在 `--transport herdr` 下生成/调用 Herdr start adapter。
 3. 输出 argv/env/cwd，避免通过 shell 字符串拼接命令。
 4. 对缺失 role 的创建输出 creation policy：先复用 existing binding；确需创建时尽量使用 lead 的同级 tab/workspace；并提醒新 agent 的权限/approval 模式需要被用户或客户端能力显式准备。
+5. 对已有 Herdr pane binding 做可用性判断：pane 里已检测到 agent 时复用；pane 存在但未检测到 agent 且可安全判断为空闲 shell 时自动 wake；无法安全判断时返回 `needs_attention`，不盲打命令。
+6. 在 start/dispatch 输出中提供 `context_preflight`，列出当前 instance 必须读取的 common、role 和 task 规则文件，以及推荐的 whoami / rules resolve / rules print-context 命令。`whoami` 只解析当前运行身份，不应携带 task；task 约束由 `rules resolve --task ... --instance ...` 和 `rules print-context --task ... --instance ...` 解析，避免 gate role 在读取规范前被 target-role mismatch 阻断。
 
-transport label、pane 布局、权限模式和启动 prelude 属于 adapter/agent 客户端能力；如果当前 adapter 不支持，不能假装已经注入。agent 启动后仍必须自己运行 `orbit whoami --json`、`orbit rules resolve --json` 和 `orbit rules print-context --json`。
+transport label、pane 布局、权限模式和启动 prelude 属于 adapter/agent 客户端能力；如果当前 adapter 不支持，不能假装已经注入。agent 启动后仍必须自己运行 `orbit whoami --json`、`orbit rules resolve --json` 和 `orbit rules print-context --json`，并读取 `context_preflight.required_files` 中的 active required files；CLI 暴露 preflight 不等于 LLM 已经语义读取。
 
 这样最终流程变成：
 

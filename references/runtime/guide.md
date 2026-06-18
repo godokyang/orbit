@@ -130,13 +130,15 @@ orbit handoff --task task.yaml --state .orbit/loop-state.yaml --evidence .orbit/
 orbit compact-evidence --task task.yaml --evidence .orbit/evidence.json --handoff handoff.json --output .orbit/summaries/task-summary.json --json
 ```
 
-`orbit start` 只负责按 `.orbit/instances.yaml` 解析 instance、argv、env 和 cwd；本地模式直接启动命令，Herdr 模式通过 adapter 启动或 dry-run 展示计划。它不替代 `whoami`、task contract 或 evidence。
+`orbit start` 只负责按 `.orbit/instances.yaml` 解析 instance、argv、env 和 cwd；本地模式直接启动命令，Herdr 模式通过 adapter 启动或 dry-run 展示计划。它不替代 `whoami`、task contract 或 evidence。start plan 会输出 `context_preflight`，列出该 instance 在开始角色工作前应运行的 `whoami` / `rules resolve` / `rules print-context` 命令，以及必须读取的 common、role 和 task 规则文件；agent 启动后仍要读取这些 required files，不能只靠派单文字记忆公共处理规范。
 
 instance 默认是 `user_managed`：如果 reviewer/tester 已有 healthy binding，Orbit 应复用该 instance，而不是由 lead 新建另一个 pane。`orbit instances status --json` 会输出每个 instance 的 `management`、`binding_status` 和 `recommended_action`。`user_managed` 缺少 healthy binding 时，lead 应请求用户确认或先绑定；`orbit_managed` 才表示 Orbit 可以按配置自动启动缺失 role。`orbit bind-pane --instance reviewer --pane ... --json` 只绑定 transport handle，不改变 role identity。
 
+已有 Herdr pane binding 时，`orbit start` 不能只因为 binding 存在就认为 agent 可用。它应先检查绑定 pane 是否被 Herdr 识别为 agent：已识别时复用；未识别但 pane 可检查且看起来是空闲 shell prompt 时，在同一 pane 中自动执行 instance command 进行 wake；无法检查或 pane 看起来正在执行其他前台工作时 fail closed，返回 `needs_attention`，避免把 agent 命令盲打进未知进程。
+
 当用户确认或配置允许创建缺失 role instance 时，Herdr adapter 应尽量在 lead 当前同级视图创建新 role：优先使用当前 lead 的 tab / workspace 元数据，缺失时记录 fallback，而不是静默把 reviewer/tester 开到不相关视图。新建 role 后还要显式处理权限准备：Orbit 可以在 start plan 中记录 permission setup requirement，但不能在没有明确 adapter/client 能力和用户授权时静默绕过审批或打开危险权限。
 
-`orbit dispatch` 只负责生成或发送 task 投递消息；generic 模式输出手工/外部投递 payload，Herdr 模式需要显式 `--pane`。它不改变 task/evidence/state，也不让 gate 自动通过。
+`orbit dispatch` 只负责生成或发送 task 投递消息；generic 模式输出手工/外部投递 payload，Herdr 模式需要显式 `--pane`。它不改变 task/evidence/state，也不让 gate 自动通过。dispatch payload 同样包含 `context_preflight`，lead/reviewer/tester 应先读取其中 `required_files` 再开始本轮角色工作；Herdr message 里的自然语言提醒只是 transport 展示，结构化 `context_preflight` 才是可测试的读取清单。dispatch 中的身份解析命令必须使用 `orbit whoami --json`，task 文件只传给 `rules resolve` 和 `rules print-context`；这样 reviewer/tester 等 gate role 不会因为 task target role 是 lead/coder 而在读取公共规范前触发 target mismatch。
 
 lead 协调 reviewer/tester 时，不要把 Herdr `agent-status done` 当作权威完成条件。真实角色可能已经成功提交结构化 evidence，但在回复消息、审批 prompt 或客户端 UI 上停在 `blocked`。收口应优先读取 `.orbit/evidence*`、运行 `orbit wait-gate --task ... --evidence ... --json`，再用 `validate/audit/handoff` 判断是否可 done；Herdr 状态只作为定位 transport 卡点的辅助信号。需要回信给特定 pane 时，使用明确的 `reply-to` pane，避免把完整报告投递到普通 shell/root pane。
 

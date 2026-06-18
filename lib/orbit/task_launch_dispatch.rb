@@ -371,10 +371,53 @@ def start_plan(options)
     "argv" => argv,
     "client" => start_client_metadata(argv),
     "env" => instance_launch_env(instance_key, instance, role_def, role_ref),
+    "context_preflight" => context_preflight_for(instance_key),
     "instance_status" => status,
     "creation_policy" => creation_policy,
     "dry_run" => options["dry_run"]
   }.compact
+end
+
+def context_preflight_for(instance_key, task_path: nil)
+  options = { "instance" => instance_key }
+  options["task"] = task_path if task_path
+  context = rules_context_pack(rule_resolution(options))
+  rule_task_args = task_path ? ["--task", File.expand_path(task_path)] : []
+  {
+    "schema_version" => "orbit-context-preflight-v1",
+    "instance" => instance_key,
+    "resolved_role" => context["resolved_role"],
+    "valid" => context["valid"],
+    "conflicts" => context["conflicts"] || [],
+    "warnings" => context["warnings"] || [],
+    "required_files" => (context["required_files"] || []).map do |entry|
+      {
+        "source" => entry["source"],
+        "category" => entry["category"],
+        "rule_id" => entry["rule_id"],
+        "path" => entry["path"],
+        "absolute_path" => entry["absolute_path"],
+        "load_policy" => entry["load_policy"],
+        "reason" => entry["reason"]
+      }.compact
+    end,
+    "commands" => [
+      ["orbit", "whoami", "--json"],
+      ["orbit", "rules", "resolve", *rule_task_args, "--instance", instance_key, "--json"],
+      ["orbit", "rules", "print-context", *rule_task_args, "--instance", instance_key, "--json"]
+    ],
+    "next_actions" => context["next_actions"] || []
+  }
+rescue RuntimeError => e
+  {
+    "schema_version" => "orbit-context-preflight-v1",
+    "instance" => instance_key,
+    "valid" => false,
+    "conflicts" => [{ "source" => "context_preflight", "message" => e.message }],
+    "warnings" => [],
+    "required_files" => [],
+    "commands" => []
+  }
 end
 
 def non_empty_env(*names)
@@ -467,6 +510,116 @@ def start_requires_reuse?(plan)
   plan.dig("instance_status", "recommended_action") == "reuse"
 end
 
+def herdr_bound_pane(plan)
+  transport = plan.dig("instance_status", "transport") || {}
+  return "" unless transport["kind"] == "herdr"
+
+  transport.dig("binding", "pane").to_s
+end
+
+def herdr_agent_list_for_pane(herdr_path, pane)
+  stdout, stderr, status = Open3.capture3(herdr_path, "agent", "list")
+  return [nil, { "success" => false, "stdout" => stdout, "stderr" => stderr, "exit_status" => status.exitstatus }] unless status.success?
+
+  parsed = JSON.parse(stdout)
+  agents = parsed.dig("result", "agents") || parsed["agents"] || []
+  agent = agents.find { |entry| entry.is_a?(Hash) && entry["pane_id"].to_s == pane.to_s }
+  [agent, { "success" => true, "stdout" => stdout, "stderr" => stderr, "exit_status" => status.exitstatus }]
+rescue JSON::ParserError => e
+  [nil, { "success" => false, "stdout" => stdout.to_s, "stderr" => e.message, "exit_status" => status&.exitstatus }]
+end
+
+def pane_output_safe_to_wake?(output)
+  text = output.to_s
+  return true if text.strip.empty?
+  return false if text.match?(/OpenAI Codex|Claude Code|opencode|esc to interrupt|bypass permissions/i)
+
+  last_line = text.lines.map(&:strip).reject(&:empty?).last.to_s
+  last_line.match?(/[#$%>❯›]\s*\z/)
+end
+
+def herdr_reuse_probe(plan, herdr_path = nil)
+  pane = herdr_bound_pane(plan)
+  return nil if pane.empty?
+
+  herdr_path ||= command_path("herdr")
+  return {
+    "schema_version" => "orbit-herdr-reuse-probe-v1",
+    "pane" => pane,
+    "agent_detected" => false,
+    "safe_to_wake" => false,
+    "decision" => "needs_attention",
+    "reason" => "herdr command not found"
+  } unless herdr_path
+
+  agent, list_result = herdr_agent_list_for_pane(herdr_path, pane)
+  probe = {
+    "schema_version" => "orbit-herdr-reuse-probe-v1",
+    "pane" => pane,
+    "agent_list" => list_result
+  }
+  if agent
+    return probe.merge(
+      "agent_detected" => true,
+      "agent" => agent["agent"],
+      "agent_status" => agent["agent_status"],
+      "safe_to_wake" => false,
+      "decision" => "reuse",
+      "reason" => "bound pane already has a detected agent"
+    )
+  end
+  return probe.merge(
+    "agent_detected" => false,
+    "safe_to_wake" => false,
+    "decision" => "needs_attention",
+    "reason" => "could not inspect Herdr agents"
+  ) unless list_result["success"]
+
+  read_stdout, read_stderr, read_status = Open3.capture3(
+    herdr_path,
+    "pane",
+    "read",
+    pane,
+    "--source",
+    "recent-unwrapped",
+    "--lines",
+    "40"
+  )
+  safe_to_wake = read_status.success? && pane_output_safe_to_wake?(read_stdout)
+  probe.merge(
+    "agent_detected" => false,
+    "safe_to_wake" => safe_to_wake,
+    "decision" => safe_to_wake ? "wake" : "needs_attention",
+    "reason" => safe_to_wake ? "bound pane exists and looks like an idle shell prompt" : "bound pane has no detected agent but is not safe to wake automatically",
+    "pane_read" => {
+      "success" => read_status.success?,
+      "exit_status" => read_status.exitstatus,
+      "stdout" => read_stdout,
+      "stderr" => read_stderr
+    }
+  )
+end
+
+def wake_command_text(plan)
+  env_pairs = (plan["env"] || {}).sort.map { |key, value| "#{key}=#{value}" }
+  argv = plan["argv"] || []
+  return Shellwords.join(argv) if env_pairs.empty?
+
+  Shellwords.join(["env", *env_pairs, *argv])
+end
+
+def herdr_wake_adapter(plan, probe, executable = "herdr")
+  pane = probe["pane"]
+  ready_wait = herdr_start_ready_wait(plan)
+  {
+    "schema_version" => "orbit-herdr-wake-v1",
+    "transport" => "herdr",
+    "pane" => pane,
+    "command" => [executable, "pane", "run", pane, wake_command_text(plan)],
+    "ready_wait" => ready_wait
+  }.compact
+end
+
 def start_create_blocked?(plan, options)
   status = plan["instance_status"] || {}
   status["management"] == "user_managed" &&
@@ -490,6 +643,26 @@ def print_start_reuse(plan)
   puts "- action: reuse"
   binding = plan.dig("instance_status", "transport", "binding") || {}
   puts "- pane: #{binding["pane"]}" unless binding["pane"].to_s.empty?
+  probe = plan["reuse_probe"] || {}
+  puts "- agent: #{probe["agent"]}" if probe["agent"]
+end
+
+def print_start_needs_attention(plan)
+  warn "Orbit start needs attention:"
+  warn "- instance: #{plan["instance"]}"
+  warn "- role: #{plan["resolved_role"]}"
+  warn "- action: needs_attention"
+  warn "- pane: #{plan.dig("reuse_probe", "pane")}" if plan.dig("reuse_probe", "pane")
+  warn "- reason: #{plan.dig("reuse_probe", "reason") || plan["reason"]}"
+end
+
+def print_start_wake_dry_run(plan)
+  puts "Orbit wake plan:"
+  puts "- instance: #{plan["instance"]}"
+  puts "- role: #{plan["resolved_role"]}"
+  puts "- action: wake_dry_run"
+  puts "- pane: #{plan.dig("reuse_probe", "pane")}"
+  puts "- command: #{plan.dig("wake_adapter", "command", 4)}"
 end
 
 def herdr_start_argv(plan, executable = "herdr")
@@ -702,12 +875,109 @@ def run_herdr_start(plan, json:)
   end
 end
 
+def run_herdr_wake(plan, probe, json:)
+  herdr_path = command_path("herdr")
+  usage_error("herdr command not found; run `orbit tools doctor --json` or use --transport local.") unless herdr_path
+
+  adapter = herdr_wake_adapter(plan, probe, herdr_path)
+  stdout, stderr, status = Open3.capture3(*adapter["command"])
+  ready_wait = nil
+  if status.success? && adapter["ready_wait"]
+    wait = adapter["ready_wait"]
+    wait_argv = [
+      herdr_path,
+      "wait",
+      "output",
+      probe["pane"],
+      "--match",
+      wait["match"],
+      "--regex",
+      "--source",
+      "recent-unwrapped",
+      "--lines",
+      "80",
+      "--timeout",
+      wait["timeout_ms"].to_s
+    ]
+    wait_stdout, wait_stderr, wait_status = Open3.capture3(*wait_argv)
+    ready_wait = {
+      "command" => ["herdr", *wait_argv.drop(1)],
+      "exit_status" => wait_status.exitstatus,
+      "success" => wait_status.success?,
+      "stdout" => wait_stdout,
+      "stderr" => wait_stderr
+    }
+  end
+
+  success = status.success? && (ready_wait.nil? || ready_wait["success"])
+  binding = plan.dig("instance_status", "transport", "binding") || {}
+  status_after_start = nil
+  if success
+    status_after_start = write_instance_binding!(
+      plan["instance"],
+      transport_kind: "herdr",
+      pane: probe["pane"],
+      tab: binding["tab"].to_s,
+      space: binding["space"].to_s,
+      actual_client: plan.dig("client", "expected_client")
+    )
+  end
+  result = plan.merge(
+    "action" => success ? "woken" : "wake_failed",
+    "reuse_probe" => probe,
+    "wake_adapter" => herdr_wake_adapter(plan, probe),
+    "instance_status_after_start" => status_after_start,
+    "adapter_result" => {
+      "exit_status" => status.exitstatus,
+      "success" => success,
+      "stdout" => stdout,
+      "stderr" => stderr,
+      "ready_wait" => ready_wait
+    }.compact
+  )
+
+  if json
+    puts JSON.pretty_generate(result)
+  else
+    print_herdr_start_human_result(result.merge("adapter_result" => result["adapter_result"].merge("pane_id" => probe["pane"])))
+  end
+  exit(status.exitstatus || 1) unless success
+end
+
 def start(args)
   options = parse_start_args(args)
   plan = attach_start_adapter_plan(start_plan(options))
 
   if start_requires_reuse?(plan)
-    result = plan.merge("action" => "reuse")
+    probe = herdr_reuse_probe(plan)
+    if probe && probe["decision"] == "wake"
+      result = plan.merge(
+        "action" => "wake_dry_run",
+        "reuse_probe" => probe,
+        "wake_adapter" => herdr_wake_adapter(plan, probe)
+      )
+      if options["dry_run"]
+        if options["json"]
+          puts JSON.pretty_generate(result)
+        else
+          print_start_wake_dry_run(result)
+        end
+        return
+      end
+
+      run_herdr_wake(plan, probe, json: options["json"])
+      return
+    elsif probe && probe["decision"] == "needs_attention"
+      result = plan.merge("action" => "needs_attention", "reuse_probe" => probe)
+      if options["json"]
+        puts JSON.pretty_generate(result)
+      else
+        print_start_needs_attention(result)
+      end
+      exit 1
+    end
+
+    result = plan.merge("action" => "reuse", "reuse_probe" => probe)
     if options["json"]
       puts JSON.pretty_generate(result)
     else
@@ -839,9 +1109,10 @@ def dispatch_message(packet)
     "- resolved_role: #{packet["resolved_role"]}",
     "",
     "开始前请运行：",
-    "orbit whoami --task #{packet["task"]} --json",
+    "orbit whoami --json",
     "orbit rules resolve --task #{packet["task"]} --instance #{packet["to_instance"]} --json",
     "orbit rules print-context --task #{packet["task"]} --instance #{packet["to_instance"]} --json",
+    "然后读取 context_preflight.required_files 中的每个 required 文件，再开始角色工作。",
     "",
     "完成后请把结果写入约定 evidence/report，并用同一个 task id 回复 DONE、BLOCKED 或 CHANGES_REQUESTED。"
   ].join("\n")
@@ -876,6 +1147,7 @@ def dispatch_packet(options)
     "resolved_role" => resolved_role,
     "transport" => options["transport"],
     "target_instance_status" => instance_status,
+    "context_preflight" => context_preflight_for(instance_key, task_path: task_path),
     "reply_to" => reply_to,
     "reply_to_source" => reply_to_source,
     "dry_run" => options["dry_run"],

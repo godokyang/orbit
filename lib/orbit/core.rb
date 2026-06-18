@@ -5,6 +5,7 @@ require "digest"
 require "json"
 require "open3"
 require "set"
+require "shellwords"
 require "time"
 require "yaml"
 
@@ -301,6 +302,9 @@ COMMAND_HELP = {
     Notes:
       command is executed as argv, not through a shell string.
       Dry-run is the recommended way to audit instance command/env wiring.
+      When an instance already has a Herdr pane binding, start inspects the pane:
+      it reuses a detected agent, safely wakes an empty shell pane, or fails
+      closed with needs_attention when the pane cannot be classified.
   HELP
   "validate" => <<~HELP,
     Usage:
