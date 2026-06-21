@@ -168,7 +168,7 @@ test -f "$INSTALL_RUNTIME/assets/templates/review-report.yaml"
 test -f "$INSTALL_RUNTIME/assets/templates/design-review-report.yaml"
 test -f "$INSTALL_RUNTIME/assets/templates/test-report.yaml"
 "$INSTALL_BIN/orbit" version >"$TMPROOT/installed-version.txt"
-grep -qx '0.1.1' "$TMPROOT/installed-version.txt"
+grep -qx '0.1.2' "$TMPROOT/installed-version.txt"
 pass 'installer creates runnable orbit command'
 
 INSTALLED_PROJECT="$TMPROOT/installed-project"
@@ -182,7 +182,7 @@ json_assert 'installed orbit can load packaged default runtime rules' "$TMPROOT/
 sh "$SKILL_ROOT/install.sh" --bin-dir "$INSTALL_BIN" --runtime-dir "$INSTALL_RUNTIME" >"$TMPROOT/update.out" 2>"$TMPROOT/update.err"
 test ! -s "$TMPROOT/update.err"
 "$INSTALL_BIN/orbit" version >"$TMPROOT/updated-version.txt"
-grep -qx '0.1.1' "$TMPROOT/updated-version.txt"
+grep -qx '0.1.2' "$TMPROOT/updated-version.txt"
 pass 'installer can be rerun as update'
 
 sh "$SKILL_ROOT/uninstall.sh" --bin-dir "$INSTALL_BIN" --runtime-dir "$INSTALL_RUNTIME" >"$TMPROOT/uninstall.out" 2>"$TMPROOT/uninstall.err"
@@ -205,7 +205,7 @@ INSTALL_CWD_RUNTIME="$TMPROOT/install-cwd-runtime"
 (cd "$SKILL_ROOT" && sh install.sh --bin-dir "$INSTALL_CWD_BIN" --runtime-dir "$INSTALL_CWD_RUNTIME" >"$TMPROOT/install-cwd.out" 2>"$TMPROOT/install-cwd.err")
 test ! -s "$TMPROOT/install-cwd.err"
 "$INSTALL_CWD_BIN/orbit" version >"$TMPROOT/install-cwd-version.txt"
-grep -qx '0.1.1' "$TMPROOT/install-cwd-version.txt"
+grep -qx '0.1.2' "$TMPROOT/install-cwd-version.txt"
 pass 'installer detects local skill when run as sh install.sh from skill directory'
 
 "$CLI" --help >"$TMPROOT/help.txt" 2>"$TMPROOT/help.err"
@@ -312,8 +312,8 @@ grep -q 'does not replace reviewer/tester judgment' "$TMPROOT/wait-gate-help.txt
 pass 'wait-gate subcommand help works'
 
 "$CLI" version >"$TMPROOT/version.txt"
-grep -qx '0.1.1' "$TMPROOT/version.txt"
-pass 'version outputs 0.1.1'
+grep -qx '0.1.2' "$TMPROOT/version.txt"
+pass 'version outputs 0.1.2'
 
 PROJECT="$TMPROOT/project"
 mkdir -p "$PROJECT"
