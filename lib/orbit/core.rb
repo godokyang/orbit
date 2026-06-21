@@ -9,7 +9,7 @@ require "shellwords"
 require "time"
 require "yaml"
 
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 SCRIPT_PATH = defined?(ORBIT_SCRIPT_PATH) ? ORBIT_SCRIPT_PATH : File.expand_path($PROGRAM_NAME)
 SKILL_ROOT = defined?(ORBIT_ROOT) ? ORBIT_ROOT : File.expand_path("..", File.dirname(SCRIPT_PATH))
 TEMPLATE_ROOT = File.join(SKILL_ROOT, "assets", "templates")
