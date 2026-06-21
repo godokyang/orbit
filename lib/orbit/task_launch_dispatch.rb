@@ -143,12 +143,16 @@ end
 def default_review_strategy
   {
     "entrypoints" => ["quality_outcome", "acceptance", "changed_files", "evidence"],
+    "minimum_evidence_level" => "",
     "suggested_checks" => [
       "Outcome: does the change satisfy the quality_outcome, not just the requested action?",
       "Behavior: are required user, CLI, or runtime behaviors correct and fail-closed?",
       "Structure: did the change reduce coupling, duplicate truth, or future change cost?",
       "Evidence: do tests, commands, artifacts, or reports prove the outcome?",
-      "Residual risk: are untested paths explicit and acceptable?"
+      "Residual risk: are untested paths explicit and acceptable?",
+      "Evidence level: does the review/test report state mechanical_check, outcome_quality, or implementation_readiness?",
+      "Rule application: does the report explain which runtime rules were applied, not only read?",
+      "Evidence boundary: are confirmed, assumed, and missing evidence listed separately?"
     ],
     "runtime_checks" => [
       "Inspect latest structured review/test evidence before done.",
@@ -158,7 +162,9 @@ def default_review_strategy
     "failure_modes" => [
       "Review only checks that tests passed.",
       "Review ignores empty or action-only quality_outcome.",
-      "Review accepts local pass while source contract or traceability remains uncovered."
+      "Review accepts local pass while source contract or traceability remains uncovered.",
+      "Mechanical checks are reported as outcome quality.",
+      "Public rule files are read but not applied to this task's judgment."
     ]
   }
 end

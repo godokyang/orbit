@@ -953,6 +953,14 @@ def validate_task_runtime_fields(result, task)
     validation_error(result, "task_file.traceability", "Task traceability entries must be mappings.")
   end
 
+  review_strategy = task["review_strategy"]
+  if review_strategy.is_a?(Hash) && review_strategy.key?("minimum_evidence_level")
+    minimum = review_strategy["minimum_evidence_level"]
+    unless minimum.nil? || minimum.to_s.strip.empty? || ALLOWED_EVIDENCE_LEVELS.include?(minimum)
+      validation_error(result, "task_file.review_strategy.minimum_evidence_level", "Task review_strategy.minimum_evidence_level must be one of #{ALLOWED_EVIDENCE_LEVELS.join("|")}.")
+    end
+  end
+
   worktree_safety = task["worktree_safety"]
   if worktree_safety.nil?
     warn_missing_task_field(result, "worktree_safety")
@@ -1149,6 +1157,124 @@ def validate_structured_test_level(result, source, record)
   end
 end
 
+def evidence_level_rank(level)
+  ALLOWED_EVIDENCE_LEVELS.index(level)
+end
+
+def task_minimum_evidence_level(task)
+  strategy = task.is_a?(Hash) ? task["review_strategy"] : nil
+  return nil unless strategy.is_a?(Hash)
+
+  level = strategy["minimum_evidence_level"]
+  return nil if level.nil? || level.to_s.strip.empty?
+
+  level.to_s.strip
+end
+
+def task_requires_quality_evidence_fields?(task)
+  !task_minimum_evidence_level(task).nil?
+end
+
+def evidence_level_satisfies_minimum?(level, minimum)
+  return true if minimum.nil? || minimum.empty?
+
+  level_rank = evidence_level_rank(level)
+  minimum_rank = evidence_level_rank(minimum)
+  return false if level_rank.nil? || minimum_rank.nil?
+
+  level_rank >= minimum_rank
+end
+
+def validate_evidence_level_record_field(result, source, record)
+  return unless record.key?("evidence_level")
+
+  level = record["evidence_level"]
+  unless level.is_a?(String) && ALLOWED_EVIDENCE_LEVELS.include?(level)
+    validation_error(result, "#{source}.evidence_level", "Evidence level must be one of #{ALLOWED_EVIDENCE_LEVELS.join("|")}.")
+  end
+end
+
+def validate_rule_application_record_field(result, source, record)
+  return unless record.key?("rule_application")
+
+  value = record["rule_application"]
+  unless value.is_a?(Hash)
+    validation_error(result, "#{source}.rule_application", "Rule application must be a mapping.")
+    return
+  end
+
+  validate_string_array_field(result, "#{source}.rule_application.required_rule_files_read", value["required_rule_files_read"], "Rule application required_rule_files_read")
+  applied_checks = value["applied_checks"]
+  unless applied_checks.is_a?(Array)
+    validation_error(result, "#{source}.rule_application.applied_checks", "Rule application applied_checks must be a list.")
+  else
+    applied_checks.each_with_index do |check, index|
+      check_source = "#{source}.rule_application.applied_checks[#{index}]"
+      unless check.is_a?(Hash)
+        validation_error(result, check_source, "Rule application applied check must be a mapping.")
+        next
+      end
+      validate_non_empty_string(result, "#{check_source}.id", check["id"], "Rule application applied check id")
+      validate_non_empty_string(result, "#{check_source}.evidence", check["evidence"], "Rule application applied check evidence")
+      unless ALLOWED_RULE_APPLICATION_VERDICTS.include?(check["verdict"])
+        validation_error(result, "#{check_source}.verdict", "Rule application applied check verdict must be one of #{ALLOWED_RULE_APPLICATION_VERDICTS.join("|")}.")
+      end
+    end
+  end
+
+  not_applicable = value["not_applicable"]
+  unless not_applicable.is_a?(Array)
+    validation_error(result, "#{source}.rule_application.not_applicable", "Rule application not_applicable must be a list.")
+  else
+    not_applicable.each_with_index do |item, index|
+      item_source = "#{source}.rule_application.not_applicable[#{index}]"
+      unless item.is_a?(Hash)
+        validation_error(result, item_source, "Rule application not_applicable item must be a mapping.")
+        next
+      end
+      validate_non_empty_string(result, "#{item_source}.id", item["id"], "Rule application not_applicable id")
+      validate_non_empty_string(result, "#{item_source}.reason", item["reason"], "Rule application not_applicable reason")
+    end
+  end
+end
+
+def validate_quality_question_answers_record_field(result, source, record)
+  return unless record.key?("quality_question_answers")
+
+  value = record["quality_question_answers"]
+  unless value.is_a?(Array)
+    validation_error(result, "#{source}.quality_question_answers", "Quality question answers must be a list.")
+    return
+  end
+
+  value.each_with_index do |answer, index|
+    answer_source = "#{source}.quality_question_answers[#{index}]"
+    unless answer.is_a?(Hash)
+      validation_error(result, answer_source, "Quality question answer must be a mapping.")
+      next
+    end
+    validate_non_empty_string(result, "#{answer_source}.id", answer["id"], "Quality question answer id")
+    validate_non_empty_string(result, "#{answer_source}.evidence", answer["evidence"], "Quality question answer evidence")
+    unless ALLOWED_QUALITY_QUESTION_VERDICTS.include?(answer["verdict"])
+      validation_error(result, "#{answer_source}.verdict", "Quality question answer verdict must be one of #{ALLOWED_QUALITY_QUESTION_VERDICTS.join("|")}.")
+    end
+  end
+end
+
+def validate_quality_boundary_record_fields(result, source, record)
+  validate_evidence_level_record_field(result, source, record)
+  validate_rule_application_record_field(result, source, record)
+  validate_quality_question_answers_record_field(result, source, record)
+  %w[confirmed assumed missing counterexample_cases].each do |field|
+    validate_string_array_field(result, "#{source}.#{field}", record[field], "Structured submit #{field}") if record.key?(field)
+  end
+  return unless record.key?("implementation_readiness_verdict")
+
+  unless ALLOWED_IMPLEMENTATION_READINESS_VERDICTS.include?(record["implementation_readiness_verdict"])
+    validation_error(result, "#{source}.implementation_readiness_verdict", "Implementation readiness verdict must be one of #{ALLOWED_IMPLEMENTATION_READINESS_VERDICTS.join("|")}.")
+  end
+end
+
 def validate_structured_evidence_record(result, source, record)
   unless STRUCTURED_SUBMIT_KINDS.include?(record["kind"])
     validation_error(result, "#{source}.structured_submit", "Structured submit is only valid for #{STRUCTURED_SUBMIT_KINDS.join("|")} evidence.")
@@ -1159,6 +1285,7 @@ def validate_structured_evidence_record(result, source, record)
   validate_string_array_field(result, "#{source}.artifacts", record["artifacts"], "Structured submit artifacts")
   validate_structured_review_quality_outcome(result, source, record)
   validate_structured_test_level(result, source, record)
+  validate_quality_boundary_record_fields(result, source, record)
   validate_blocked_evidence_detail(result, "#{source}.blocked", record["blocked"]) if record.key?("blocked")
 end
 
@@ -1205,7 +1332,7 @@ def latest_valid_gate_record(result, records, expected_kind)
   candidates.max_by { |created_at, index, _record| [created_at, index] }&.last
 end
 
-def validate_gate_verdict(result, records, expected_kind)
+def validate_gate_verdict(result, records, expected_kind, task = nil)
   latest = latest_valid_gate_record(result, records, expected_kind)
   unless latest
     validation_error(result, "evidence_file.records", "Review/test task requires structured valid #{expected_kind.inspect} evidence with status pass.")
@@ -1214,7 +1341,15 @@ def validate_gate_verdict(result, records, expected_kind)
 
   case latest["status"]
   when "pass"
-    nil
+    if task_requires_quality_evidence_fields?(task) && !ALLOWED_EVIDENCE_LEVELS.include?(latest["evidence_level"])
+      validation_error(result, "evidence_file.records.#{expected_kind}.evidence_level", "Latest #{expected_kind} PASS must include evidence_level because task declares review_strategy.minimum_evidence_level.")
+    end
+    if expected_kind == "review"
+      minimum = task_minimum_evidence_level(task)
+      unless evidence_level_satisfies_minimum?(latest["evidence_level"], minimum)
+        validation_error(result, "evidence_file.records.review.evidence_level", "Latest review evidence_level #{latest["evidence_level"].inspect} does not satisfy task review_strategy.minimum_evidence_level #{minimum.inspect}.")
+      end
+    end
   when "fail"
     validation_error(result, "evidence_file.records", "Latest #{expected_kind} verdict is fail.")
   when "partial"
@@ -1712,9 +1847,11 @@ def validate_evidence(result, evidence_path, task = nil)
     validate_quality_measurement_evidence(result, records, task)
   end
 
-  if task && review_or_test_gate?(task) && records.is_a?(Array) && !records.empty?
+  if task && records.is_a?(Array) && !records.empty? && required_evidence_kinds(task).any?
+    validate_required_gate_evidence(result, records, task)
+  elsif task && review_or_test_gate?(task) && records.is_a?(Array) && !records.empty?
     expected_kind = expected_evidence_kind(task)
-    validate_gate_verdict(result, records, expected_kind)
+    validate_gate_verdict(result, records, expected_kind, task)
   end
 
   evidence
@@ -1724,7 +1861,7 @@ def validate_required_gate_evidence(result, records, task)
   return unless task.is_a?(Hash)
 
   required_evidence_kinds(task).each do |expected_kind|
-    validate_gate_verdict(result, records.is_a?(Array) ? records : [], expected_kind)
+    validate_gate_verdict(result, records.is_a?(Array) ? records : [], expected_kind, task)
   end
 end
 
@@ -1810,17 +1947,24 @@ def parse_wait_gate_args(args)
   options
 end
 
-def gate_status(records, kind)
+def gate_status(records, kind, task = nil)
   latest = latest_record_for_kind(records, kind, structured_gate_only: true, gate_identity_required: false)
   expected_role = expected_gate_role(kind)
   identity_role = latest ? record_identity_role(latest) : nil
   identity_valid = latest ? gate_record_identity_valid?(latest, kind) : false
   status = latest ? latest["status"] : "missing"
   display_status = latest.is_a?(Hash) && latest["blocked"].is_a?(Hash) ? "blocked" : status
+  minimum_evidence_level = kind == "review" ? task_minimum_evidence_level(task) : nil
+  quality_evidence_fields_ok = !task_requires_quality_evidence_fields?(task) || status != "pass" || ALLOWED_EVIDENCE_LEVELS.include?(latest["evidence_level"])
+  evidence_level_ok = !latest || kind != "review" || status != "pass" || evidence_level_satisfies_minimum?(latest["evidence_level"], minimum_evidence_level)
   blocking_reason = if latest.nil?
                       "missing"
                     elsif !identity_valid
                       "identity_mismatch"
+                    elsif !quality_evidence_fields_ok
+                      "missing_evidence_level"
+                    elsif !evidence_level_ok
+                      "evidence_level_below_minimum"
                     elsif display_status != "pass"
                       display_status
                     end
@@ -1829,8 +1973,15 @@ def gate_status(records, kind)
     "required" => true,
     "status" => display_status,
     "record_status" => status,
-    "passed" => status == "pass" && identity_valid,
+    "passed" => status == "pass" && identity_valid && quality_evidence_fields_ok && evidence_level_ok,
     "structured" => latest.is_a?(Hash) ? latest["structured_submit"] == true : false,
+    "evidence_level" => latest.is_a?(Hash) ? latest["evidence_level"] : nil,
+    "minimum_evidence_level" => minimum_evidence_level,
+    "quality_outcome_verdict" => latest.is_a?(Hash) ? latest["quality_outcome_verdict"] : nil,
+    "implementation_readiness_verdict" => latest.is_a?(Hash) ? latest["implementation_readiness_verdict"] : nil,
+    "test_level" => latest.is_a?(Hash) ? latest["test_level"] : nil,
+    "rule_application_summary" => latest.is_a?(Hash) ? rule_application_summary(latest["rule_application"]) : nil,
+    "evidence_boundary_summary" => latest.is_a?(Hash) ? evidence_boundary_summary(latest) : nil,
     "identity_expected_role" => expected_role,
     "identity_resolved_role" => identity_role,
     "identity_valid" => identity_valid,
@@ -1842,18 +1993,21 @@ end
 
 def required_gate_summary(task, evidence)
   records = evidence.is_a?(Hash) && evidence["records"].is_a?(Array) ? evidence["records"] : []
-  gates = required_evidence_kinds(task).map { |kind| gate_status(records, kind) }
+  gates = required_evidence_kinds(task).map { |kind| gate_status(records, kind, task) }
   missing_or_blocked = gates.reject { |gate| gate["passed"] }.map do |gate|
     {
       "kind" => gate["kind"],
       "status" => gate["status"],
-      "blocking_reason" => gate["blocking_reason"]
+      "blocking_reason" => gate["blocking_reason"],
+      "evidence_level" => gate["evidence_level"],
+      "minimum_evidence_level" => gate["minimum_evidence_level"]
     }.compact
   end
   {
     "ready" => missing_or_blocked.empty?,
     "required" => gates.map { |gate| gate["kind"] },
     "passed" => gates.select { |gate| gate["passed"] }.map { |gate| gate["kind"] },
+    "evidence_levels" => gates.each_with_object({}) { |gate, memo| memo[gate["kind"]] = gate["evidence_level"] if gate["evidence_level"] },
     "not_ready" => missing_or_blocked
   }
 end
@@ -1865,7 +2019,7 @@ def wait_gate(args)
   evidence = load_evidence_manifest(evidence_path)
   records = evidence["records"].is_a?(Array) ? evidence["records"] : []
   kinds = required_evidence_kinds(task)
-  gates = kinds.map { |kind| gate_status(records, kind) }
+  gates = kinds.map { |kind| gate_status(records, kind, task) }
   ready = gates.all? { |gate| gate["passed"] }
   gate_summary = required_gate_summary(task, evidence)
   packet = {

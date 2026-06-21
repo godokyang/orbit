@@ -117,6 +117,12 @@ def latest_gate_verdicts_for_handoff(evidence)
                      "effective_status" => evidence_effective_verdict_status(kind, record),
                      "summary" => record["summary"],
                      "created_at" => record["created_at"],
+                     "evidence_level" => record["evidence_level"],
+                     "quality_outcome_verdict" => record["quality_outcome_verdict"],
+                     "implementation_readiness_verdict" => record["implementation_readiness_verdict"],
+                     "test_level" => record["test_level"],
+                     "rule_application_summary" => rule_application_summary(record["rule_application"]),
+                     "evidence_boundary_summary" => evidence_boundary_summary(record),
                      "source_report" => record["source_report"],
                      "source_message_id" => record["source_message_id"]
                    }.compact
@@ -420,7 +426,12 @@ def judgment_summary(evidence)
       "source" => "latest_evidence_record",
       "verdict" => latest_review["status"],
       "summary" => latest_review["summary"],
-      "created_at" => latest_review["created_at"]
+      "created_at" => latest_review["created_at"],
+      "evidence_level" => latest_review["evidence_level"],
+      "quality_outcome_verdict" => latest_review["quality_outcome_verdict"],
+      "implementation_readiness_verdict" => latest_review["implementation_readiness_verdict"],
+      "rule_application_summary" => rule_application_summary(latest_review["rule_application"]),
+      "evidence_boundary_summary" => evidence_boundary_summary(latest_review)
     }
   end
 
@@ -441,7 +452,11 @@ def judgment_summary(evidence)
       "source" => "latest_evidence_record",
       "verdict" => latest_test["status"],
       "summary" => latest_test["summary"],
-      "created_at" => latest_test["created_at"]
+      "created_at" => latest_test["created_at"],
+      "evidence_level" => latest_test["evidence_level"],
+      "test_level" => latest_test["test_level"],
+      "rule_application_summary" => rule_application_summary(latest_test["rule_application"]),
+      "evidence_boundary_summary" => evidence_boundary_summary(latest_test)
     }
   end
 

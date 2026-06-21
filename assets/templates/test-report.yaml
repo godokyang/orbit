@@ -3,6 +3,18 @@ verdict: blocked
 summary: "TODO: one-sentence test conclusion."
 source_message_id: "TODO: herdr:<pane-or-message-id> or report:<path>"
 test_level: not_applicable
+evidence_level: mechanical_check
+rule_application:
+  required_rule_files_read:
+    - references/runtime/testing-guideline.md
+  applied_checks: []
+  not_applicable:
+    - id: blocked_test
+      reason: "TODO: test is blocked, so PASS rule application is not complete yet."
+confirmed: []
+assumed: []
+missing:
+  - "TODO: behavior evidence missing before this test can pass."
 findings:
   - "[blocked][test] TODO: describe the blocking coverage gap or failing behavior."
 coverage:

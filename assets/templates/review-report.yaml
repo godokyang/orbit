@@ -4,6 +4,25 @@ summary: "TODO: one-sentence review conclusion."
 source_message_id: "TODO: herdr:<pane-or-message-id> or report:<path>"
 quality_outcome_verdict: blocked
 quality_outcome_reasoning: "TODO: whether the task quality_outcome is satisfied, and why."
+evidence_level: mechanical_check
+rule_application:
+  required_rule_files_read:
+    - references/runtime/quality-outcome-and-review.md
+  applied_checks: []
+  not_applicable:
+    - id: blocked_review
+      reason: "TODO: review is blocked, so PASS rule application is not complete yet."
+quality_question_answers:
+  - id: blocked_quality_review
+    verdict: blocked
+    evidence: "TODO: question that must be answered before PASS."
+confirmed: []
+assumed: []
+missing:
+  - "TODO: evidence missing before this review can pass."
+counterexample_cases:
+  - "TODO: failure path or counterexample to check before PASS."
+implementation_readiness_verdict: not_checked
 findings:
   - "[blocked][review] TODO: describe the blocking evidence gap or finding."
 coverage:

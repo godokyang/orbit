@@ -33,12 +33,16 @@ review_strategy:
     - acceptance
     - changed_files
     - evidence
+  minimum_evidence_level: ""
   suggested_checks:
     - "Outcome: does the change satisfy the quality_outcome, not just the requested action?"
     - "Behavior: are required user, CLI, or runtime behaviors correct and fail-closed?"
     - "Structure: did the change reduce coupling, duplicate truth, or future change cost?"
     - "Evidence: do tests, commands, artifacts, or reports prove the outcome?"
     - "Residual risk: are untested paths explicit and acceptable?"
+    - "Report evidence_level; do not report mechanical checks as outcome quality."
+    - "Explain rule_application for runtime rules used in this task."
+    - "List confirmed, assumed, and missing evidence separately."
   runtime_checks:
     - "Inspect latest structured review/test evidence before done."
     - "Check aggregate evidence verdict and required gates."

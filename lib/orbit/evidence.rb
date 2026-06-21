@@ -6,6 +6,10 @@ ALLOWED_EVIDENCE_KINDS = %w[review test command implementation waiver].freeze
 STRUCTURED_SUBMIT_KINDS = %w[review test].freeze
 ALLOWED_TEST_LEVELS = %w[unit integration repo_regression browser_e2e provider_e2e dogfood manual not_applicable].freeze
 ALLOWED_REVIEW_QUALITY_OUTCOME_VERDICTS = %w[pass fail partial blocked unknown not_applicable].freeze
+ALLOWED_EVIDENCE_LEVELS = %w[mechanical_check outcome_quality implementation_readiness].freeze
+ALLOWED_RULE_APPLICATION_VERDICTS = %w[pass fail blocked not_applicable].freeze
+ALLOWED_QUALITY_QUESTION_VERDICTS = %w[pass fail blocked not_applicable].freeze
+ALLOWED_IMPLEMENTATION_READINESS_VERDICTS = %w[pass blocked not_checked].freeze
 REQUIRED_FINDING_DETAIL_FIELDS = %w[symptom source consequence remedy].freeze
 EVIDENCE_EXPECTED_GATE_ROLES = {
   "review" => "reviewer",
@@ -362,6 +366,32 @@ def evidence_effective_verdict_status(kind, record)
   record["status"]
 end
 
+def rule_application_summary(rule_application)
+  return nil unless rule_application.is_a?(Hash)
+
+  applied_checks = rule_application["applied_checks"].is_a?(Array) ? rule_application["applied_checks"] : []
+  not_applicable = rule_application["not_applicable"].is_a?(Array) ? rule_application["not_applicable"] : []
+  required_files = rule_application["required_rule_files_read"].is_a?(Array) ? rule_application["required_rule_files_read"] : []
+  {
+    "required_rule_files_read_count" => required_files.length,
+    "applied_checks_count" => applied_checks.length,
+    "not_applicable_count" => not_applicable.length
+  }
+end
+
+def evidence_boundary_summary(record)
+  return nil unless record.is_a?(Hash)
+
+  summary = {
+    "confirmed_count" => record["confirmed"].is_a?(Array) ? record["confirmed"].length : nil,
+    "assumed_count" => record["assumed"].is_a?(Array) ? record["assumed"].length : nil,
+    "missing_count" => record["missing"].is_a?(Array) ? record["missing"].length : nil,
+    "counterexample_cases_count" => record["counterexample_cases"].is_a?(Array) ? record["counterexample_cases"].length : nil,
+    "rule_application" => rule_application_summary(record["rule_application"])
+  }.compact
+  summary.empty? ? nil : summary
+end
+
 def evidence_gate_verdict_entry(kind, record)
   expected_role = EVIDENCE_EXPECTED_GATE_ROLES[kind]
   {
@@ -370,6 +400,12 @@ def evidence_gate_verdict_entry(kind, record)
     "summary" => record["summary"],
     "created_at" => record["created_at"],
     "structured" => record["structured_submit"] == true,
+    "evidence_level" => record["evidence_level"],
+    "quality_outcome_verdict" => record["quality_outcome_verdict"],
+    "implementation_readiness_verdict" => record["implementation_readiness_verdict"],
+    "test_level" => record["test_level"],
+    "rule_application_summary" => rule_application_summary(record["rule_application"]),
+    "evidence_boundary_summary" => evidence_boundary_summary(record),
     "source_message_id" => record["source_message_id"],
     "identity_expected_role" => expected_role,
     "identity_resolved_role" => evidence_gate_identity_role(record),
@@ -439,6 +475,9 @@ end
 
 def evidence_add(options)
   path = File.expand_path(options["file"])
+  if STRUCTURED_SUBMIT_KINDS.include?(options["kind"]) && options["status"] == "pass"
+    evidence_error("#{options["kind"]} PASS evidence must be submitted with evidence submit --report <structured-yaml>.")
+  end
   identity = require_evidence_submit_capability!(options["kind"])
   record = {
     "kind" => options["kind"],
@@ -544,6 +583,73 @@ def evidence_from_report(options)
 
   status = options["status"] || infer_report_status(report)
   evidence_error("Could not infer report status; pass --status #{ALLOWED_EVIDENCE_STATUSES.join("|")}.") unless ALLOWED_EVIDENCE_STATUSES.include?(status)
+
+  if STRUCTURED_SUBMIT_KINDS.include?(kind) && status == "pass"
+    unless report.is_a?(Hash)
+      submit_report_schema_error(
+        "submit_report",
+        "review/test PASS from-report must be a YAML mapping and satisfy the structured submit schema.",
+        expected: "YAML mapping with full structured PASS fields",
+        actual: evidence_value_type(report),
+        kind: kind
+      )
+    end
+    submitted_kind, submitted_status, summary, source_message_id, findings, coverage, artifacts, extra = validate_structured_submit_report!(report_path, report)
+    unless submitted_kind == kind
+      submit_report_schema_error(
+        "submit_report.kind",
+        "from-report kind must match the structured report kind.",
+        expected: kind,
+        actual: submitted_kind,
+        kind: kind
+      )
+    end
+    unless submitted_status == status
+      submit_report_schema_error(
+        "submit_report.verdict",
+        "from-report status must match the structured report verdict.",
+        expected: status,
+        actual: submitted_status,
+        kind: kind
+      )
+    end
+    identity = require_evidence_submit_capability!(kind)
+    record = {
+      "kind" => submitted_kind,
+      "status" => submitted_status,
+      "summary" => summary,
+      "created_at" => Time.now.utc.iso8601,
+      "structured_submit" => true,
+      "source_message_id" => source_message_id,
+      "source_report" => report_path,
+      "findings" => findings,
+      "coverage" => coverage,
+      "artifacts" => artifacts
+    }
+    extra.each { |field, value| record[field] = value unless value.nil? } if extra.is_a?(Hash)
+    %w[test_environment quality_measurement duration resource_usage ux_quality artifact_quality cleanup_status].each do |field|
+      record[field] = report[field] if report.key?(field)
+    end
+    snapshot = evidence_identity_snapshot(identity)
+    record["identity"] = snapshot if snapshot
+    validate_evidence_record_shape!(record, "Evidence record")
+
+    updated_manifest = update_evidence_manifest(path) do |manifest|
+      records = ensure_evidence_records!(manifest)
+      records << record
+      recompute_evidence_verdict!(manifest)
+      manifest
+    end
+
+    puts JSON.pretty_generate({
+      "schema_version" => "orbit-evidence-import-v1",
+      "file" => path,
+      "report" => report_path,
+      "record" => record,
+      "verdict" => updated_manifest["verdict"]
+    })
+    return
+  end
 
   summary = options["summary"] || infer_report_summary(report_path, report)
   identity = require_evidence_submit_capability!(kind)
@@ -766,6 +872,226 @@ def validate_test_level!(value, source, kind: nil, pass_required: false)
   level
 end
 
+def validate_evidence_level!(value, source, kind: nil, pass_required: false)
+  unless value.is_a?(String) && !value.strip.empty?
+    submit_report_schema_error(
+      source,
+      "#{source} must be a non-empty string.",
+      expected: ALLOWED_EVIDENCE_LEVELS.join("|"),
+      actual: evidence_value_type(value),
+      kind: kind
+    ) if pass_required
+    return nil
+  end
+
+  level = value.strip
+  unless ALLOWED_EVIDENCE_LEVELS.include?(level)
+    submit_report_schema_error(
+      source,
+      "#{source} must be one of #{ALLOWED_EVIDENCE_LEVELS.join("|")}.",
+      expected: ALLOWED_EVIDENCE_LEVELS.join("|"),
+      actual: level,
+      kind: kind
+    )
+  end
+  level
+end
+
+def validate_rule_application!(value, source, kind: nil, pass_required: false)
+  unless value.is_a?(Hash)
+    submit_report_schema_error(
+      source,
+      "#{source} must be a mapping.",
+      expected: "mapping with required_rule_files_read, applied_checks, not_applicable",
+      actual: evidence_value_type(value),
+      kind: kind
+    ) if pass_required || !value.nil?
+    return nil
+  end
+
+  required_files = validate_string_array!(value["required_rule_files_read"], "#{source}.required_rule_files_read", kind: kind)
+  applied_checks = value["applied_checks"]
+  unless applied_checks.is_a?(Array)
+    submit_report_schema_error(
+      "#{source}.applied_checks",
+      "#{source}.applied_checks must be a list.",
+      expected: "list of mappings with id, verdict, evidence",
+      actual: evidence_value_type(applied_checks),
+      kind: kind
+    )
+  end
+  applied_checks.each_with_index do |check, index|
+    item_source = "#{source}.applied_checks[#{index}]"
+    unless check.is_a?(Hash)
+      submit_report_schema_error(
+        item_source,
+        "#{item_source} must be a mapping.",
+        expected: "mapping with id, verdict, evidence",
+        actual: evidence_value_type(check),
+        kind: kind
+      )
+    end
+    report_string!(check, "id", item_source, kind: kind)
+    verdict = report_string!(check, "verdict", item_source, kind: kind)
+    unless ALLOWED_RULE_APPLICATION_VERDICTS.include?(verdict)
+      submit_report_schema_error(
+        "#{item_source}.verdict",
+        "#{item_source}.verdict must be one of #{ALLOWED_RULE_APPLICATION_VERDICTS.join("|")}.",
+        expected: ALLOWED_RULE_APPLICATION_VERDICTS.join("|"),
+        actual: verdict,
+        kind: kind
+      )
+    end
+    report_string!(check, "evidence", item_source, kind: kind)
+  end
+
+  not_applicable = value["not_applicable"]
+  unless not_applicable.is_a?(Array)
+    submit_report_schema_error(
+      "#{source}.not_applicable",
+      "#{source}.not_applicable must be a list.",
+      expected: "list of mappings with id and reason",
+      actual: evidence_value_type(not_applicable),
+      kind: kind
+    )
+  end
+  not_applicable.each_with_index do |item, index|
+    item_source = "#{source}.not_applicable[#{index}]"
+    unless item.is_a?(Hash)
+      submit_report_schema_error(
+        item_source,
+        "#{item_source} must be a mapping.",
+        expected: "mapping with id and reason",
+        actual: evidence_value_type(item),
+        kind: kind
+      )
+    end
+    report_string!(item, "id", item_source, kind: kind)
+    report_string!(item, "reason", item_source, kind: kind)
+  end
+
+  if pass_required && applied_checks.empty? && not_applicable.empty?
+    submit_report_schema_error(
+      source,
+      "PASS report rule_application must include at least one applied check or not_applicable entry.",
+      expected: "non-empty applied_checks or not_applicable",
+      actual: "empty applied_checks and empty not_applicable",
+      kind: kind
+    )
+  end
+
+  {
+    "required_rule_files_read" => required_files,
+    "applied_checks" => applied_checks,
+    "not_applicable" => not_applicable
+  }
+end
+
+def validate_quality_question_answers!(value, source, kind: nil, pass_required: false)
+  unless value.is_a?(Array)
+    submit_report_schema_error(
+      source,
+      "#{source} must be a list.",
+      expected: "list of mappings with id, verdict, evidence",
+      actual: evidence_value_type(value),
+      kind: kind
+    ) if pass_required || !value.nil?
+    return nil
+  end
+  if pass_required && value.empty?
+    submit_report_schema_error(
+      source,
+      "Review PASS requires at least one quality question answer.",
+      expected: "non-empty list",
+      actual: "empty list",
+      kind: kind
+    )
+  end
+  value.each_with_index do |answer, index|
+    item_source = "#{source}[#{index}]"
+    unless answer.is_a?(Hash)
+      submit_report_schema_error(
+        item_source,
+        "#{item_source} must be a mapping.",
+        expected: "mapping with id, verdict, evidence",
+        actual: evidence_value_type(answer),
+        kind: kind
+      )
+    end
+    report_string!(answer, "id", item_source, kind: kind)
+    verdict = report_string!(answer, "verdict", item_source, kind: kind)
+    unless ALLOWED_QUALITY_QUESTION_VERDICTS.include?(verdict)
+      submit_report_schema_error(
+        "#{item_source}.verdict",
+        "#{item_source}.verdict must be one of #{ALLOWED_QUALITY_QUESTION_VERDICTS.join("|")}.",
+        expected: ALLOWED_QUALITY_QUESTION_VERDICTS.join("|"),
+        actual: verdict,
+        kind: kind
+      )
+    end
+    report_string!(answer, "evidence", item_source, kind: kind)
+  end
+  value
+end
+
+def validate_string_list_field!(report, field, source, kind: nil, pass_required: false, non_empty: false)
+  value = report[field]
+  unless value.is_a?(Array)
+    submit_report_schema_error(
+      "#{source}.#{field}",
+      "#{source}.#{field} must be a list.",
+      expected: "list of non-empty strings",
+      actual: evidence_value_type(value),
+      kind: kind
+    ) if pass_required || report.key?(field)
+    return nil
+  end
+  if non_empty && value.empty?
+    submit_report_schema_error(
+      "#{source}.#{field}",
+      "#{source}.#{field} must not be empty.",
+      expected: "non-empty list of strings",
+      actual: "empty list",
+      kind: kind
+    )
+  end
+  validate_string_array!(value, "#{source}.#{field}", kind: kind)
+end
+
+def validate_implementation_readiness_verdict!(value, source, evidence_level:, kind: nil, pass_required: false)
+  unless value.is_a?(String) && !value.strip.empty?
+    submit_report_schema_error(
+      source,
+      "#{source} must be a non-empty string.",
+      expected: ALLOWED_IMPLEMENTATION_READINESS_VERDICTS.join("|"),
+      actual: evidence_value_type(value),
+      kind: kind
+    ) if pass_required || evidence_level == "implementation_readiness"
+    return nil
+  end
+
+  verdict = value.strip
+  unless ALLOWED_IMPLEMENTATION_READINESS_VERDICTS.include?(verdict)
+    submit_report_schema_error(
+      source,
+      "#{source} must be one of #{ALLOWED_IMPLEMENTATION_READINESS_VERDICTS.join("|")}.",
+      expected: ALLOWED_IMPLEMENTATION_READINESS_VERDICTS.join("|"),
+      actual: verdict,
+      kind: kind
+    )
+  end
+  if evidence_level == "implementation_readiness" && verdict != "pass"
+    submit_report_schema_error(
+      source,
+      "Review PASS with evidence_level implementation_readiness requires implementation_readiness_verdict: pass.",
+      expected: "pass",
+      actual: verdict,
+      kind: kind
+    )
+  end
+  verdict
+end
+
 def validate_blocked_submit_detail!(value, source, kind: nil)
   unless value.is_a?(Hash)
     submit_report_schema_error(
@@ -853,9 +1179,38 @@ def validate_structured_submit_report!(report_path, report)
   artifacts = validate_string_array!(report["artifacts"], "submit_report.artifacts", kind: kind)
   validate_blocked_submit_detail!(report["blocked"], "submit_report.blocked", kind: kind) if report.key?("blocked")
   extra = {}
+  pass_required = status == "pass"
+  if pass_required || report.key?("evidence_level")
+    extra["evidence_level"] = validate_evidence_level!(report["evidence_level"], "submit_report.evidence_level", kind: kind, pass_required: pass_required)
+  end
+  if pass_required || report.key?("rule_application")
+    extra["rule_application"] = validate_rule_application!(report["rule_application"], "submit_report.rule_application", kind: kind, pass_required: pass_required)
+  end
+  %w[confirmed assumed missing].each do |field|
+    if pass_required || report.key?(field)
+      extra[field] = validate_string_list_field!(report, field, "submit_report", kind: kind, pass_required: pass_required, non_empty: field == "confirmed" && pass_required)
+    end
+  end
   if kind == "review"
     extra["quality_outcome_verdict"] = validate_review_quality_outcome_verdict!(report, status, "submit_report", kind: kind)
-    extra["quality_outcome_reasoning"] = report_string!(report, "quality_outcome_reasoning", "submit_report", kind: kind) if report.key?("quality_outcome_reasoning")
+    if pass_required || report.key?("quality_outcome_reasoning")
+      extra["quality_outcome_reasoning"] = report_string!(report, "quality_outcome_reasoning", "submit_report", kind: kind)
+    end
+    if pass_required || report.key?("quality_question_answers")
+      extra["quality_question_answers"] = validate_quality_question_answers!(report["quality_question_answers"], "submit_report.quality_question_answers", kind: kind, pass_required: pass_required)
+    end
+    if pass_required || report.key?("counterexample_cases")
+      extra["counterexample_cases"] = validate_string_list_field!(report, "counterexample_cases", "submit_report", kind: kind, pass_required: pass_required, non_empty: pass_required)
+    end
+    if pass_required || report.key?("implementation_readiness_verdict")
+      extra["implementation_readiness_verdict"] = validate_implementation_readiness_verdict!(
+        report["implementation_readiness_verdict"],
+        "submit_report.implementation_readiness_verdict",
+        evidence_level: extra["evidence_level"],
+        kind: kind,
+        pass_required: pass_required
+      )
+    end
   elsif kind == "test"
     if status == "pass"
       extra["test_level"] = validate_test_level!(report["test_level"], "submit_report.test_level", kind: kind, pass_required: true)
@@ -885,7 +1240,7 @@ def evidence_submit(options)
     "coverage" => coverage,
     "artifacts" => artifacts
   }
-  extra.each { |field, value| record[field] = value } if extra.is_a?(Hash)
+  extra.each { |field, value| record[field] = value unless value.nil? } if extra.is_a?(Hash)
   %w[test_environment quality_measurement duration resource_usage ux_quality artifact_quality cleanup_status].each do |field|
     record[field] = report[field] if report.key?(field)
   end
