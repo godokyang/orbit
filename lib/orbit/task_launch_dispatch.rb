@@ -524,7 +524,11 @@ def herdr_agent_list_for_pane(herdr_path, pane)
   parsed = JSON.parse(stdout)
   agents = parsed.dig("result", "agents") || parsed["agents"] || []
   pane_ids = Array(pane).map(&:to_s)
-  agent = agents.find { |entry| entry.is_a?(Hash) && pane_ids.include?(entry["pane_id"].to_s) }
+  agent = agents.find do |entry|
+    entry.is_a?(Hash) &&
+      pane_ids.include?(entry["pane_id"].to_s) &&
+      !entry["agent"].to_s.strip.empty?
+  end
   [agent, { "success" => true, "stdout" => stdout, "stderr" => stderr, "exit_status" => status.exitstatus }]
 rescue JSON::ParserError => e
   [nil, { "success" => false, "stdout" => stdout.to_s, "stderr" => e.message, "exit_status" => status&.exitstatus }]
