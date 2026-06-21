@@ -735,12 +735,12 @@ def print_start_self_wake_dry_run(plan)
   puts "- command: #{plan.dig("self_wake", "command")}"
 end
 
-def herdr_start_argv(plan, executable = "herdr")
+def herdr_start_argv(plan, executable = "herdr", label = nil)
   argv = [
     executable,
     "agent",
     "start",
-    plan["instance"],
+    label || plan["instance"],
     "--cwd",
     plan["cwd"]
   ]
@@ -759,6 +759,22 @@ def herdr_start_argv(plan, executable = "herdr")
     "--",
     *plan["argv"]
   ]
+end
+
+def herdr_agent_name_taken?(stderr)
+  parsed = JSON.parse(stderr.to_s)
+  parsed.dig("error", "code") == "agent_name_taken"
+rescue JSON::ParserError
+  stderr.to_s.include?("agent_name_taken")
+end
+
+def herdr_retry_label(plan)
+  project = plan["project"].to_s
+  instance = plan["instance"].to_s
+  base = "#{project}-#{instance}".gsub(/[^A-Za-z0-9_.-]+/, "-").gsub(/\A-+|-+\z/, "")
+  base = instance.empty? ? "orbit-agent" : instance if base.empty?
+  suffix = "#{Time.now.utc.strftime("%Y%m%d%H%M%S")}-#{$$}"
+  "#{base[0, 48]}-#{suffix}"
 end
 
 def herdr_start_ready_wait(plan)
@@ -869,6 +885,25 @@ def run_herdr_start(plan, json:)
   argv = herdr_start_argv(plan, herdr_path)
   exec_env = ENV.to_hash.merge(plan["env"])
   stdout, stderr, status = Open3.capture3(exec_env, *argv, chdir: plan["cwd"])
+  retry_info = nil
+  if !status.success? && herdr_agent_name_taken?(stderr)
+    retry_label = herdr_retry_label(plan)
+    retry_argv = herdr_start_argv(plan, herdr_path, retry_label)
+    retry_stdout, retry_stderr, retry_status = Open3.capture3(exec_env, *retry_argv, chdir: plan["cwd"])
+    retry_info = {
+      "reason" => "agent_name_taken",
+      "label" => retry_label,
+      "command" => ["herdr", *retry_argv.drop(1)],
+      "initial" => {
+        "exit_status" => status.exitstatus,
+        "stdout" => stdout,
+        "stderr" => stderr
+      }
+    }
+    stdout = retry_stdout
+    stderr = retry_stderr
+    status = retry_status
+  end
   adapter = attach_start_adapter_plan(plan)["adapter"]
   pane_id = status.success? ? herdr_start_pane_id(stdout) : nil
   actual_client = status.success? ? herdr_start_agent_client(stdout) : nil
@@ -930,6 +965,7 @@ def run_herdr_start(plan, json:)
       "stdout" => stdout,
       "stderr" => stderr,
       "pane_id" => pane_id,
+      "retry" => retry_info,
       "ready_wait" => ready_wait
     }.compact
   )
@@ -1286,10 +1322,8 @@ def dispatch_packet(options)
       "schema_version" => "orbit-herdr-dispatch-v1",
       "transport" => "herdr",
       "pane" => options["pane"],
-      "submit_delay_seconds" => 0.35,
       "commands" => [
-        ["herdr", "pane", "send-text", options["pane"], packet["message"]],
-        ["herdr", "pane", "send-keys", options["pane"], "Enter"]
+        ["herdr", "pane", "run", options["pane"], packet["message"]]
       ]
     }
   end

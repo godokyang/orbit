@@ -497,6 +497,65 @@ ruby --disable-gems -e 'actual=File.read(ARGV[0]).lines.map(&:chomp); abort(actu
 grep -qx 'reviewer/reviewer' "$TMPROOT/fake-herdr-env.txt"
 grep -qx "$PROJECT" "$TMPROOT/fake-herdr-cwd.txt"
 pass 'start herdr passes argv env cwd and waits for codex readiness'
+
+cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
+#!/bin/sh
+: "${ORBIT_FAKE_HERDR_ARGS:?}"
+: "${ORBIT_FAKE_HERDR_ENV:?}"
+: "${ORBIT_FAKE_HERDR_CWD:?}"
+case "$1 $2" in
+  "agent start")
+    printf '%s\n' "$@" >>"$ORBIT_FAKE_HERDR_ARGS"
+    printf '%s\n' '---' >>"$ORBIT_FAKE_HERDR_ARGS"
+    printf '%s/%s\n' "$ORBIT_INSTANCE" "$ORBIT_ROLE" >>"$ORBIT_FAKE_HERDR_ENV"
+    pwd >>"$ORBIT_FAKE_HERDR_CWD"
+    if [ "$3" = "reviewer" ]; then
+      printf '{"error":{"code":"agent_name_taken","message":"agent name reviewer is already used"}}\n' >&2
+      exit 1
+    fi
+    printf '{"result":{"agent":{"pane_id":"retry-pane","agent":"codex"}}}\n'
+    ;;
+  "wait output")
+    printf 'OpenAI Codex\n'
+    ;;
+  *)
+    printf 'unexpected herdr args: %s\n' "$*" >&2
+    exit 1
+    ;;
+esac
+HERDR
+chmod +x "$TMPROOT/fakebin/herdr"
+"$CLI" init --force >/dev/null
+ORBIT_FAKE_HERDR_ARGS="$TMPROOT/fake-herdr-retry-args.txt" ORBIT_FAKE_HERDR_ENV="$TMPROOT/fake-herdr-retry-env.txt" ORBIT_FAKE_HERDR_CWD="$TMPROOT/fake-herdr-retry-cwd.txt" PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer --transport herdr --allow-create --json >"$TMPROOT/start-herdr-agent-name-taken-retry.json"
+json_assert 'start herdr retries agent_name_taken with unique label' "$TMPROOT/start-herdr-agent-name-taken-retry.json" 'j["action"] == "started" && j["adapter_result"]["success"] == true && j["adapter_result"]["pane_id"] == "retry-pane" && j["adapter_result"]["retry"]["reason"] == "agent_name_taken" && j["adapter_result"]["retry"]["label"].start_with?("project-reviewer-") && j["adapter_result"]["retry"]["command"][0,3] == ["herdr", "agent", "start"] && j["adapter_result"]["retry"]["command"][3] == j["adapter_result"]["retry"]["label"] && j["instance_status_after_start"]["transport"]["binding"]["pane"] == "retry-pane"'
+RETRY_LABEL=$(ruby --disable-gems -rjson -e 'j=JSON.parse(File.read(ARGV[0])); print j["adapter_result"]["retry"]["label"]' "$TMPROOT/start-herdr-agent-name-taken-retry.json")
+ruby --disable-gems -e 'entries=File.read(ARGV[0]).split("---\n").map { |s| s.lines.map(&:chomp).reject(&:empty?) }; abort(entries.inspect) unless entries.length == 2 && entries[0][0,4] == ["agent","start","reviewer","--cwd"] && entries[1][0,3] == ["agent","start",ARGV[1]]' "$TMPROOT/fake-herdr-retry-args.txt" "$RETRY_LABEL"
+grep -qx 'reviewer/reviewer' "$TMPROOT/fake-herdr-retry-env.txt"
+pass 'start herdr preserves Orbit identity across retry label'
+cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
+#!/bin/sh
+: "${ORBIT_FAKE_HERDR_ARGS:?}"
+: "${ORBIT_FAKE_HERDR_ENV:?}"
+: "${ORBIT_FAKE_HERDR_CWD:?}"
+case "$1 $2" in
+  "agent start")
+    printf '%s\n' "$@" >"$ORBIT_FAKE_HERDR_ARGS"
+    printf '%s/%s\n' "$ORBIT_INSTANCE" "$ORBIT_ROLE" >"$ORBIT_FAKE_HERDR_ENV"
+    pwd >"$ORBIT_FAKE_HERDR_CWD"
+    printf '{"result":{"agent":{"pane_id":"fake-pane","agent":"codex"}}}\n'
+    ;;
+  "wait output")
+    : "${ORBIT_FAKE_HERDR_WAIT_ARGS:?}"
+    printf '%s\n' "$@" >"$ORBIT_FAKE_HERDR_WAIT_ARGS"
+    printf 'OpenAI Codex\n'
+    ;;
+  *)
+    printf 'unexpected herdr args: %s\n' "$*" >&2
+    exit 1
+    ;;
+esac
+HERDR
+chmod +x "$TMPROOT/fakebin/herdr"
 "$CLI" init --force >/dev/null
 ORBIT_FAKE_HERDR_ARGS="$TMPROOT/fake-herdr-human-args.txt" ORBIT_FAKE_HERDR_WAIT_ARGS="$TMPROOT/fake-herdr-human-wait-args.txt" ORBIT_FAKE_HERDR_ENV="$TMPROOT/fake-herdr-human-env.txt" ORBIT_FAKE_HERDR_CWD="$TMPROOT/fake-herdr-human-cwd.txt" PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer --transport herdr --allow-create >"$TMPROOT/start-herdr-human.txt" 2>"$TMPROOT/start-herdr-human.err"
 test ! -s "$TMPROOT/start-herdr-human.err"
@@ -677,7 +736,7 @@ expect_failure 'new-task refuses overwrite' "$CLI" new-task --target-role review
 "$CLI" dispatch --task "$TASK" --to reviewer --json >"$TMPROOT/dispatch-generic.json"
 json_assert 'dispatch generic emits manual delivery payload with context preflight' "$TMPROOT/dispatch-generic.json" 'j["schema_version"] == "orbit-dispatch-v1" && j["action"] == "manual_delivery_required" && j["transport"] == "generic" && j["to_instance"] == "reviewer" && j["resolved_role"] == "reviewer" && j["task"] == File.expand_path(ARGV[2]) && j["message"].include?("orbit whoami --json") && !j["message"].include?("orbit whoami --task") && j["message"].include?("orbit rules print-context --task") && j["message"].include?("context_preflight.required_files") && j["context_preflight"]["commands"].include?(["orbit", "whoami", "--json"]) && j["context_preflight"]["required_files"].any? { |r| r["path"] == "SKILL.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "references/runtime/guide.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "references/runtime/quality-outcome-and-review.md" } && j["checks"]["target_role_matches"] == true' "$TASK"
 "$CLI" dispatch --task "$TASK" --to reviewer --transport herdr --pane pane-123 --reply-to observer-pane --dry-run --json >"$TMPROOT/dispatch-herdr-dry-run.json"
-json_assert 'dispatch herdr dry-run emits adapter plan with explicit reply-to' "$TMPROOT/dispatch-herdr-dry-run.json" 'j["action"] == "dry_run" && j["reply_to"] == "observer-pane" && j["reply_to_source"] == "explicit_option" && j["message"].include?("reply-to:observer-pane") && j["adapter"]["schema_version"] == "orbit-herdr-dispatch-v1" && j["adapter"]["submit_delay_seconds"] > 0 && j["adapter"]["commands"][0][0,4] == ["herdr", "pane", "send-text", "pane-123"] && j["adapter"]["commands"][0][4].include?(File.expand_path(ARGV[2])) && j["adapter"]["commands"][1] == ["herdr", "pane", "send-keys", "pane-123", "Enter"]' "$TASK"
+json_assert 'dispatch herdr dry-run emits adapter plan with explicit reply-to' "$TMPROOT/dispatch-herdr-dry-run.json" 'j["action"] == "dry_run" && j["reply_to"] == "observer-pane" && j["reply_to_source"] == "explicit_option" && j["message"].include?("reply-to:observer-pane") && j["adapter"]["schema_version"] == "orbit-herdr-dispatch-v1" && !j["adapter"].key?("submit_delay_seconds") && j["adapter"]["commands"] == [["herdr", "pane", "run", "pane-123", j["message"]]] && j["adapter"]["commands"][0][4].include?(File.expand_path(ARGV[2]))' "$TASK"
 HERDR_PANE_ID=lead-reply-pane "$CLI" dispatch --task "$TASK" --to reviewer --transport herdr --pane pane-123 --dry-run --json >"$TMPROOT/dispatch-herdr-env-reply-to.json"
 json_assert 'dispatch herdr reply-to defaults to current Herdr pane' "$TMPROOT/dispatch-herdr-env-reply-to.json" 'j["reply_to"] == "lead-reply-pane" && j["reply_to_source"] == "HERDR_PANE_ID" && j["message"].include?("reply-to:lead-reply-pane")'
 cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
@@ -689,9 +748,9 @@ printf 'sent:%s\n' "$3"
 HERDR
 chmod +x "$TMPROOT/fakebin/herdr"
 ORBIT_FAKE_HERDR_DISPATCH_ARGS="$TMPROOT/fake-herdr-dispatch-args.txt" PATH="$TMPROOT/fakebin:$PATH" "$CLI" dispatch --task "$TASK" --to reviewer --transport herdr --pane pane-123 --json >"$TMPROOT/dispatch-herdr-real.json"
-json_assert 'dispatch herdr sends through adapter' "$TMPROOT/dispatch-herdr-real.json" 'j["action"] == "sent" && j["adapter_result"]["success"] == true && j["adapter_result"]["commands"].length == 2 && j["adapter_result"]["commands"].all? { |c| c["success"] }'
-ruby --disable-gems -e 'actual=File.read(ARGV[0]).lines.map(&:chomp); first_sep=actual.index("---"); second=actual[(first_sep + 1)..]; second_sep=second.index("---"); first=actual[0...first_sep]; second=second[0...second_sep]; message=first[3..].join("\n"); abort(actual.inspect) unless first[0,3] == ["pane","send-text","pane-123"] && message.include?(File.expand_path(ARGV[1])) && message.include?("kind:request") && second == ["pane","send-keys","pane-123","Enter"]' "$TMPROOT/fake-herdr-dispatch-args.txt" "$TASK"
-pass 'dispatch herdr sends message text and enter to adapter'
+json_assert 'dispatch herdr sends through adapter' "$TMPROOT/dispatch-herdr-real.json" 'j["action"] == "sent" && j["adapter_result"]["success"] == true && j["adapter_result"]["commands"].length == 1 && j["adapter_result"]["commands"].all? { |c| c["success"] }'
+ruby --disable-gems -e 'actual=File.read(ARGV[0]).lines.map(&:chomp); sep=actual.index("---"); first=actual[0...sep]; message=first[3..].join("\n"); abort(actual.inspect) unless first[0,3] == ["pane","run","pane-123"] && message.include?(File.expand_path(ARGV[1])) && message.include?("kind:request")' "$TMPROOT/fake-herdr-dispatch-args.txt" "$TASK"
+pass 'dispatch herdr submits message through pane run adapter'
 cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
 #!/bin/sh
 printf 'transport denied\n' >&2
@@ -1044,6 +1103,25 @@ done
 ORBIT_INSTANCE=tester "$CLI" evidence submit --file "$TEST_EVIDENCE" --report "$TMPROOT/complete-test-submit.yaml" --json >"$TMPROOT/complete-test-submit.json"
 "$CLI" validate --task "$TEST_TASK" --evidence "$TEST_EVIDENCE" --json >"$TMPROOT/valid-complete-test-env.json"
 json_assert 'validate accepts passing test evidence with environment lifecycle' "$TMPROOT/valid-complete-test-env.json" 'j["valid"] == true'
+
+CONCURRENT_EVIDENCE="$TMPROOT/concurrent-gate-evidence.json"
+CONCURRENT_GATE_TASK="$TMPROOT/concurrent-gate-task.yaml"
+"$CLI" new-task --target-role lead --task-type implementation --output "$CONCURRENT_GATE_TASK" >/dev/null
+"$CLI" evidence init --output "$CONCURRENT_EVIDENCE" >/dev/null
+(
+  ORBIT_INSTANCE=reviewer "$CLI" evidence submit --file "$CONCURRENT_EVIDENCE" --report "$TMPROOT/structured-review.yaml" --json >"$TMPROOT/concurrent-review-submit.json"
+) &
+review_pid=$!
+(
+  ORBIT_INSTANCE=tester "$CLI" evidence submit --file "$CONCURRENT_EVIDENCE" --report "$TMPROOT/complete-test-submit.yaml" --json >"$TMPROOT/concurrent-test-submit.json"
+) &
+test_pid=$!
+wait "$review_pid"
+wait "$test_pid"
+"$CLI" evidence show --file "$CONCURRENT_EVIDENCE" --json >"$TMPROOT/concurrent-gate-evidence-show.json"
+json_assert 'concurrent evidence submits retain review and test records' "$TMPROOT/concurrent-gate-evidence-show.json" 'j["records"].count { |r| r["kind"] == "review" && r["status"] == "pass" } == 1 && j["records"].count { |r| r["kind"] == "test" && r["status"] == "pass" } == 1 && j["verdict"]["gates"]["review"]["status"] == "pass" && j["verdict"]["gates"]["test"]["status"] == "pass"'
+"$CLI" wait-gate --task "$CONCURRENT_GATE_TASK" --evidence "$CONCURRENT_EVIDENCE" --json >"$TMPROOT/wait-gate-concurrent-submit.json"
+json_assert 'wait-gate passes after concurrent structured review and test submit' "$TMPROOT/wait-gate-concurrent-submit.json" 'j["ready"] == true && j["gate_summary"]["required"].sort == ["review", "test"] && (["review", "test"] - j["gate_summary"]["passed"]).empty?'
 MIN_TEST_TASK="$TMPROOT/min-test-quality-task.yaml"
 cp "$TEST_TASK" "$MIN_TEST_TASK"
 ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["review_strategy"] ||= {}; y["review_strategy"]["minimum_evidence_level"]="outcome_quality"; File.write(p, YAML.dump(y))' "$MIN_TEST_TASK"
