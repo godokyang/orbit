@@ -292,6 +292,15 @@ ORBIT_INSTANCE=reviewer orbit evidence submit \
 
 review report 必须包含 `quality_outcome_verdict`。High/Medium finding 需要写成结构化 mapping，包含 symptom、source、consequence 和 remedy。design/analysis review 可从 `assets/templates/design-review-report.yaml` 复制模板。
 
+review/test PASS 还必须说明证据边界，不能只写一个结论。常用字段包括：
+
+- `evidence_level`：`mechanical_check`、`outcome_quality` 或 `implementation_readiness`。
+- `rule_application`：本轮实际应用了哪些公共或项目规则，哪些不适用。
+- `confirmed` / `assumed` / `missing`：哪些结论已确认，哪些仍是假设或缺口。
+- review 还需要 `quality_question_answers`、`counterexample_cases`；如果声明 `implementation_readiness`，还需要 `implementation_readiness_verdict: pass`。
+
+如果 task 在 `review_strategy.minimum_evidence_level` 里声明了最低层级，`wait-gate` / `validate` 会拒绝低于该层级的 review PASS。
+
 记录 test verdict：
 
 ```bash
@@ -302,18 +311,18 @@ ORBIT_INSTANCE=tester orbit evidence submit \
 ```
 
 test PASS report 必须包含与 task contract 一致的 `test_level`，并记录 `test_environment` 生命周期字段。只跑 repo regression 不能声称 browser/provider E2E 或 dogfood 通过。
+test PASS 同样需要 `evidence_level`、`rule_application` 和 `confirmed/assumed/missing`，避免把命令退出码误写成真实质量结果。
 
 也可以把历史 reviewer/tester 报告导入 evidence：
 
 ```bash
 orbit evidence from-report \
   --file .orbit/evidence/current-evidence.json \
-  --report .orbit/evidence/review-report.md \
-  --kind review \
+  --report .orbit/evidence/review-report.yaml \
   --json
 ```
 
-`from-report` 只接受明确 verdict/status，例如 `APPROVED`、`PASS`、`CHANGES_REQUESTED`、`FAIL`、`BLOCKED`、`PARTIAL`。`APPROVED_WITH_NOTES` 不会自动当成通过。
+`from-report` 对 review/test PASS 使用同一套结构化校验；弱 markdown 或只有 `PASS` 的文本不能用来关闭 gate。`APPROVED_WITH_NOTES` 不会自动当成通过。
 
 ## 推进状态
 
@@ -348,6 +357,7 @@ orbit wait-gate \
 ```
 
 `wait-gate` 只检查结构化 evidence 中最新的 required gate 记录。它不能替代 reviewer/tester 的判断。
+输出里会包含 review/test 的 `evidence_level`、最低层级要求和规则应用摘要，方便 lead 区分“机械检查通过”和“质量结果/实现就绪审查通过”。
 
 ## 完成和交接
 
@@ -494,6 +504,7 @@ orbit dispatch --task .orbit/tasks/current-task.yaml --to reviewer --transport h
 ```
 
 `dispatch` 只是 transport adapter，不改变 task/evidence/state 的权威语义。真实 gate 仍以 reviewer/tester 写入的 evidence 和后续 `validate/audit` 为准。
+Herdr transport 会向指定 pane 提交一条 task 消息；目标应是正在运行的 agent pane，而不是普通 shell pane。需要 dry-run 时先看 adapter plan，确认 pane、reply-to 和 task 路径都正确。
 
 当 reviewer/tester 这类 `user_managed` instance 已经有 healthy binding 时，Orbit 必须优先复用现有 pane。只有用户明确允许创建缺失 instance（例如 `--allow-create`）时，Herdr adapter 才会准备新 role；此时应尽量在 lead 当前同级视图创建，优先沿用当前 tab / workspace 元数据，缺失时在 start plan 中暴露 fallback。新建 role 还必须显式准备权限或 approval mode；Orbit 可以记录这项 requirement，但不能静默绕过用户授权或客户端审批。
 
