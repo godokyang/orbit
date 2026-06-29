@@ -43,6 +43,7 @@ ORBIT_FEATURE_VERSIONS = {
   "quality_outcome" => "v1",           # quality_outcome_verdict, required review questions (Slice 2 foundation)
   "quality_outcome_guardrails" => "v1", # invalid_completion_guards, required_questions coverage (Slice 2)
   "parent_goal_status" => "v1",        # parent_goal + parent_goal_status task fields, user_next_action in handoff (Slice 3)
+  "destructive_action_scope" => "v1", # artifact_policy, destructive_actions task fields; scope.include changed-files guard (Slice 4)
   "schema_semantics" => "v1"           # this versioning scaffolding itself (Slice 14 step 1)
   # "gate_lease" => nil           # not yet implemented – Phase 2 Slice 9
 }.freeze

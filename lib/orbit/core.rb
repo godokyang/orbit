@@ -98,7 +98,7 @@ HELP = <<~HELP
     orbit wait-gate --task PATH --evidence PATH --json
     orbit whoami --json [--task PATH]
     orbit new-task --target-role ROLE --task-type TYPE --output PATH
-    orbit validate [--task PATH] [--evidence PATH] [--state PATH] [--json]
+    orbit validate [--task PATH] [--evidence PATH] [--state PATH] [--changed-files FILE[,FILE...]] [--json]
 
   Commands:
     audit       审计 task、evidence 和 loop state 的一致性。
@@ -308,20 +308,25 @@ COMMAND_HELP = {
   HELP
   "validate" => <<~HELP,
     Usage:
-      orbit validate [--task PATH] [--evidence PATH] [--state PATH] [--json]
+      orbit validate [--task PATH] [--evidence PATH] [--state PATH]
+                     [--changed-files FILE[,FILE...]] [--json]
 
     Validates project config plus optional structured task, evidence manifest,
     and loop-state files.
 
     Options:
-      --task PATH      Structured orbit-task-v1 YAML file.
-      --evidence PATH  orbit-evidence-v1 JSON/YAML manifest file.
-      --state PATH     orbit-loop-state-v1 YAML file.
-      --json           Emit machine-readable validation result.
+      --task PATH                Structured orbit-task-v1 YAML file.
+      --evidence PATH            orbit-evidence-v1 JSON/YAML manifest file.
+      --state PATH               orbit-loop-state-v1 YAML file.
+      --changed-files FILE,...   Comma-separated list of changed file paths to
+                                 check against task scope.include / scope.exclude
+                                 patterns. Can be repeated to add more files.
+      --json                     Emit machine-readable validation result.
 
     Notes:
       --evidence expects a manifest file, not an evidence directory.
       Create one with: orbit evidence init --output .orbit/evidence.json
+      --changed-files is typically sourced from `git diff --name-only`.
   HELP
   "wait-gate" => <<~HELP
     Usage:

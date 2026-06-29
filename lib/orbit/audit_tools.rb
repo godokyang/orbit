@@ -351,6 +351,7 @@ def audit(args)
     "quality_outcome_summary" => quality_outcome_summary(task, evidence),
     "parent_goal_summary" => pg_summary,
     "worktree_safety_summary" => worktree_safety_summary(evidence),
+    "destructive_action_summary" => destructive_action_audit(evidence),
     "rule_resolution_summary" => rule_resolution_summary(evidence, evidence_path),
     "schema_version_summary" => schema_summary,
     "issues" => issues,

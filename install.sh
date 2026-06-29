@@ -94,10 +94,17 @@ scripts/orbit
 lib/orbit/cli.rb
 lib/orbit/core.rb
 lib/orbit/identity_rules.rb
+lib/orbit/identity_rules_context.rb
 lib/orbit/schema_version.rb
 lib/orbit/task_launch_dispatch.rb
+lib/orbit/task_herdr_probe.rb
+lib/orbit/task_herdr_exec.rb
 lib/orbit/evidence.rb
+lib/orbit/evidence_submit_validate.rb
 lib/orbit/state_validate_gate.rb
+lib/orbit/validate_task_contract.rb
+lib/orbit/validate_evidence_record.rb
+lib/orbit/validate_gate_commands.rb
 lib/orbit/audit_tools.rb
 lib/orbit/handoff.rb
 lib/orbit/docs_lifecycle.rb

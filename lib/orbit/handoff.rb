@@ -266,6 +266,62 @@ def worktree_safety_summary(evidence)
   }.compact
 end
 
+def destructive_action_audit(evidence)
+  return { "present" => false } unless evidence.is_a?(Hash)
+
+  records = evidence["records"]
+  return { "present" => false } unless records.is_a?(Array)
+
+  plans = []
+  recovery_gaps = []
+
+  records.each_with_index do |record, index|
+    next unless record.is_a?(Hash)
+
+    plan = record["destructive_action_plan"]
+    next unless plan.is_a?(Hash)
+
+    targets = plan["targets"]
+    if targets.is_a?(Array)
+      targets.each do |target|
+        next unless target.is_a?(Hash)
+
+        evidence_impact = target["evidence_impact"].to_s.strip
+        recoverability = target["recoverability"].to_s.strip
+        if !evidence_impact.empty? && evidence_impact != "none"
+          unless %w[hash_only hash_and_backup full_backup].include?(recoverability)
+            recovery_gaps << {
+              "record_index" => index,
+              "path" => target["path"],
+              "evidence_impact" => evidence_impact,
+              "recoverability" => recoverability.empty? ? nil : recoverability,
+              "message" => "Evidence-affecting destructive target has insufficient recoverability."
+            }.compact
+          end
+        end
+      end
+    end
+
+    plans << {
+      "record_index" => index,
+      "action" => plan["action"],
+      "dry_run" => plan["dry_run"],
+      "target_count" => targets.is_a?(Array) ? targets.length : 0,
+      "user_confirmation_required" => plan.dig("user_confirmation", "required"),
+      "user_confirmation_received" => plan.dig("user_confirmation", "received")
+    }.compact
+  end
+
+  return { "present" => false } if plans.empty?
+
+  {
+    "present" => true,
+    "plan_count" => plans.length,
+    "plans" => plans,
+    "recovery_gaps" => recovery_gaps
+  }
+end
+
 def validation_summary(validation)
   {
     "valid" => validation["errors"].empty?,
@@ -557,6 +613,7 @@ def handoff(args)
     "closure_checklist" => closure_checklist,
     "known_gaps" => known_gaps,
     "parent_goal_status" => task.is_a?(Hash) ? task["parent_goal_status"] : nil,
+    "destructive_actions_summary" => destructive_action_audit(evidence),
     "readable_summary" => {
       "current_task" => task_path,
       "phase" => current_phase,
