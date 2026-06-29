@@ -232,7 +232,7 @@ json_assert 'minimum implementation_readiness accepts readiness review evidence'
 
 IDENTITY_MISMATCH_EVIDENCE="$TMPROOT/identity-mismatch-evidence.json"
 cp "$STRUCTURED_REVIEW_EVIDENCE" "$IDENTITY_MISMATCH_EVIDENCE"
-ruby --disable-gems -rjson -e 'p=ARGV[0]; j=JSON.parse(File.read(p)); j["records"].last["identity"]["resolved_role"]="lead"; File.write(p, JSON.pretty_generate(j))' "$IDENTITY_MISMATCH_EVIDENCE"
+ruby --disable-gems -rjson -e 'p=ARGV[0]; j=JSON.parse(File.read(p)); rec=j["records"].last; if rec.key?("role_execution_context"); rec["role_execution_context"]["resolved_role"]="lead"; else; rec["identity"]||={}; rec["identity"]["resolved_role"]="lead"; end; File.write(p, JSON.pretty_generate(j))' "$IDENTITY_MISMATCH_EVIDENCE"
 if "$CLI" wait-gate --task "$TASK" --evidence "$IDENTITY_MISMATCH_EVIDENCE" --json >"$TMPROOT/wait-gate-identity-mismatch.json" 2>"$TMPROOT/wait-gate-identity-mismatch.err"; then
   printf 'FAIL wait-gate rejects identity-mismatched structured review evidence: command unexpectedly succeeded\n' >&2
   exit 1
@@ -242,7 +242,7 @@ json_assert 'wait-gate reports identity mismatch blocker' "$TMPROOT/wait-gate-id
 expect_failure 'validate rejects identity-mismatched structured review evidence' "$CLI" validate --task "$TASK" --evidence "$IDENTITY_MISMATCH_EVIDENCE" --json
 MISSING_IDENTITY_EVIDENCE="$TMPROOT/missing-identity-evidence.json"
 cp "$STRUCTURED_REVIEW_EVIDENCE" "$MISSING_IDENTITY_EVIDENCE"
-ruby --disable-gems -rjson -e 'p=ARGV[0]; j=JSON.parse(File.read(p)); j["records"].last.delete("identity"); File.write(p, JSON.pretty_generate(j))' "$MISSING_IDENTITY_EVIDENCE"
+ruby --disable-gems -rjson -e 'p=ARGV[0]; j=JSON.parse(File.read(p)); j["records"].last.delete("identity"); j["records"].last.delete("role_execution_context"); File.write(p, JSON.pretty_generate(j))' "$MISSING_IDENTITY_EVIDENCE"
 if "$CLI" wait-gate --task "$TASK" --evidence "$MISSING_IDENTITY_EVIDENCE" --json >"$TMPROOT/wait-gate-missing-identity.json" 2>"$TMPROOT/wait-gate-missing-identity.err"; then
   printf 'FAIL wait-gate rejects hand-written structured review without identity: command unexpectedly succeeded\n' >&2
   exit 1

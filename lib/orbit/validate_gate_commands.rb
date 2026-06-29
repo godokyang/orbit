@@ -181,9 +181,43 @@ def expected_gate_role(kind)
   EXPECTED_GATE_ROLES[kind]
 end
 
-def record_identity_role(record)
+# Reads resolved_role from role_execution_context (Slice 6) or identity (Slice 5 compat).
+def record_resolved_role(record)
+  ctx = record["role_execution_context"]
+  # When role_execution_context is a Hash it is authoritative; no identity fallback
+  return (ctx["resolved_role"].is_a?(String) && !ctx["resolved_role"].empty? ? ctx["resolved_role"] : nil) if ctx.is_a?(Hash)
+  return nil if record.key?("role_execution_context") # present but non-Hash: malformed
+
   identity = record["identity"]
   identity.is_a?(Hash) ? identity["resolved_role"] : nil
+end
+
+# Reads task_sha256 from role_execution_context (Slice 6) or identity (Slice 5 compat).
+def record_task_sha256_from(record)
+  ctx = record["role_execution_context"]
+  return (ctx["task_sha256"].is_a?(String) && !ctx["task_sha256"].empty? ? ctx["task_sha256"] : nil) if ctx.is_a?(Hash)
+  return nil if record.key?("role_execution_context") # present but non-Hash: malformed
+
+  identity = record["identity"]
+  identity.is_a?(Hash) ? identity["task_sha256"] : nil
+end
+
+# Reads rules_context_sha256 from role_execution_context (Slice 6) or identity (Slice 5 compat).
+def record_rules_context_sha256_from(record)
+  ctx = record["role_execution_context"]
+  if ctx.is_a?(Hash)
+    return ctx["rules_context_sha256"] if !ctx["rules_context_sha256"].to_s.empty?
+    return ctx["rules_resolution_sha256"] if !ctx["rules_resolution_sha256"].to_s.empty?
+    return nil # Hash present but fields absent: no identity fallback
+  end
+  return nil if record.key?("role_execution_context") # present but non-Hash: malformed
+
+  identity = record["identity"]
+  identity.is_a?(Hash) ? identity["rules_context_sha256"] : nil
+end
+
+def record_identity_role(record)
+  record_resolved_role(record)
 end
 
 def gate_record_identity_valid?(record, kind)
@@ -249,12 +283,13 @@ def parse_wait_gate_args(args)
   options
 end
 
-def gate_status(records, kind, task = nil)
+def gate_status(records, kind, task = nil, task_sha256: nil)
   evidence_record_kind = GATE_KIND_EVIDENCE_RECORD_KIND[kind] || kind
   latest = latest_record_for_kind(records, evidence_record_kind, structured_gate_only: true, gate_identity_required: false)
   expected_role = expected_gate_role(kind)
-  identity_role = latest ? record_identity_role(latest) : nil
-  identity_valid = latest ? gate_record_identity_valid?(latest, kind) : false
+  malformed_rec_ctx = latest.is_a?(Hash) && latest.key?("role_execution_context") && !latest["role_execution_context"].is_a?(Hash)
+  identity_role = latest && !malformed_rec_ctx ? record_resolved_role(latest) : nil
+  identity_valid = latest && !malformed_rec_ctx ? gate_record_identity_valid?(latest, kind) : false
   status = latest ? latest["status"] : "missing"
   display_status = latest.is_a?(Hash) && latest["blocked"].is_a?(Hash) ? "blocked" : status
   minimum_evidence_level = task_minimum_evidence_level_for_gate(task, kind)
@@ -277,10 +312,18 @@ def gate_status(records, kind, task = nil)
   write_violations = latest.is_a?(Hash) && latest["write_policy"].is_a?(Hash) && latest["write_policy"]["violations"].is_a?(Array) ? latest["write_policy"]["violations"].reject { |v| v.to_s.strip.empty? } : []
   write_policy_enforcement = task.is_a?(Hash) ? (task["write_policy_enforcement"] || "standard").to_s : "standard"
   write_policy_blocked = !write_violations.empty? && write_policy_enforcement == "strict" && expected_gate_role(kind) != nil
-  missing_task_sha256 = latest.is_a?(Hash) && latest["structured_submit"] == true && expected_gate_role(kind) != nil && latest.dig("identity", "task_sha256").nil?
+  stored_task_sha256 = latest ? record_task_sha256_from(latest) : nil
+  stored_rules_context_sha256 = latest ? record_rules_context_sha256_from(latest) : nil
+  missing_task_sha256 = latest.is_a?(Hash) && latest["structured_submit"] == true && expected_gate_role(kind) != nil && stored_task_sha256.nil?
   task_sha256_blocked = missing_task_sha256 && write_policy_enforcement == "strict"
+  stale_task_sha256 = !!(task_sha256 && stored_task_sha256 && stored_task_sha256 != task_sha256)
+  stale_blocked = stale_task_sha256 && write_policy_enforcement == "strict"
+  missing_rules_context_sha256 = latest.is_a?(Hash) && latest["structured_submit"] == true && expected_gate_role(kind) != nil && stored_rules_context_sha256.nil?
+  rules_context_blocked = missing_rules_context_sha256 && write_policy_enforcement == "strict"
   blocking_reason = if latest.nil?
                       "missing"
+                    elsif malformed_rec_ctx
+                      "malformed_role_execution_context"
                     elsif !identity_valid
                       "identity_mismatch"
                     elsif !quality_evidence_fields_ok
@@ -295,6 +338,10 @@ def gate_status(records, kind, task = nil)
                       "required_questions_not_met"
                     elsif task_sha256_blocked
                       "missing_task_sha256"
+                    elsif stale_blocked
+                      "stale_task_sha256"
+                    elsif rules_context_blocked
+                      "missing_rules_context_sha256"
                     elsif write_policy_blocked
                       "write_policy_violations"
                     elsif display_status != "pass"
@@ -305,7 +352,7 @@ def gate_status(records, kind, task = nil)
     "required" => true,
     "status" => display_status,
     "record_status" => status,
-    "passed" => status == "pass" && identity_valid && quality_evidence_fields_ok && !wrong_gate_kind_level && evidence_level_ok && quality_outcome_ok && required_questions_ok && !write_policy_blocked && !task_sha256_blocked,
+    "passed" => status == "pass" && !malformed_rec_ctx && identity_valid && quality_evidence_fields_ok && !wrong_gate_kind_level && evidence_level_ok && quality_outcome_ok && required_questions_ok && !write_policy_blocked && !task_sha256_blocked && !stale_blocked && !rules_context_blocked,
     "structured" => latest.is_a?(Hash) ? latest["structured_submit"] == true : false,
     "evidence_level" => actual_evidence_level,
     "minimum_evidence_level" => minimum_evidence_level,
@@ -318,7 +365,10 @@ def gate_status(records, kind, task = nil)
     "identity_expected_role" => expected_role,
     "identity_resolved_role" => identity_role,
     "identity_valid" => identity_valid,
+    "malformed_role_execution_context" => malformed_rec_ctx ? true : nil,
     "missing_task_sha256" => missing_task_sha256 ? true : nil,
+    "stale_task_sha256" => stale_task_sha256 ? true : nil,
+    "missing_rules_context_sha256" => missing_rules_context_sha256 ? true : nil,
     "write_policy_violations_count" => write_violations.empty? ? nil : write_violations.length,
     "blocking_reason" => blocking_reason,
     "blocked" => latest.is_a?(Hash) ? latest["blocked"] : nil,
@@ -350,11 +400,12 @@ end
 def wait_gate(args)
   options = parse_wait_gate_args(args)
   task_path, task = load_dispatch_task(options["task"])
+  current_task_sha256 = sha256_file(File.expand_path(options["task"]))
   evidence_path = File.expand_path(options["evidence"])
   evidence = load_evidence_manifest(evidence_path)
   records = evidence["records"].is_a?(Array) ? evidence["records"] : []
   kinds = required_evidence_kinds(task)
-  gates = kinds.map { |kind| gate_status(records, kind, task) }
+  gates = kinds.map { |kind| gate_status(records, kind, task, task_sha256: current_task_sha256) }
   ready = gates.all? { |gate| gate["passed"] }
   gate_summary = required_gate_summary(task, evidence)
   packet = {

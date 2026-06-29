@@ -186,14 +186,14 @@ def write_policy_audit(evidence, task)
     kind = record["kind"]
     next unless EVIDENCE_EXPECTED_GATE_ROLES.key?(kind)
 
-    if record["structured_submit"] == true && record.dig("identity", "task_sha256").nil?
+    if record["structured_submit"] == true && record_task_sha256_from(record).nil?
       legacy_count += 1
     end
 
     wp = record["write_policy"]
     next unless wp.is_a?(Hash)
 
-    role = record.dig("identity", "resolved_role") || kind
+    role = record_resolved_role(record) || kind
     gate_role_writes[role] ||= { "changed_files" => [], "violations" => [] }
     if wp["changed_files"].is_a?(Array)
       gate_role_writes[role]["changed_files"].concat(wp["changed_files"].select { |f| f.is_a?(String) })
@@ -211,6 +211,31 @@ def write_policy_audit(evidence, task)
     "legacy_records_without_hash" => legacy_count,
     "has_violations" => total_violations > 0,
     "total_violations" => total_violations
+  }
+end
+
+def stale_records_audit(evidence, task_sha256)
+  return nil unless evidence.is_a?(Hash) && task_sha256
+
+  records = evidence["records"].is_a?(Array) ? evidence["records"] : []
+  stale = []
+  records.each_with_index do |record, idx|
+    next unless record.is_a?(Hash) && record["structured_submit"] == true
+
+    stored = record_task_sha256_from(record)
+    next unless stored && stored != task_sha256
+
+    stale << {
+      "index" => idx,
+      "kind" => record["kind"],
+      "created_at" => record["created_at"],
+      "stored_task_sha256" => stored
+    }.compact
+  end
+  {
+    "task_sha256" => task_sha256,
+    "stale_count" => stale.length,
+    "stale_records" => stale
   }
 end
 
@@ -328,6 +353,7 @@ def audit(args)
   task_path = File.expand_path(options["task"])
   evidence_path = File.expand_path(options["evidence"])
   state_path = File.expand_path(options["state"])
+  current_task_sha256 = sha256_file(task_path)
   validation, task, evidence, state = audit_validation_result(task_path, evidence_path, state_path)
   blocking_findings = validation["errors"].map { |error| audit_finding(error["source"], error["message"], "high") }
   warnings = validation["warnings"].map { |warning| audit_finding(warning["source"], warning["message"], "medium") }
@@ -393,6 +419,7 @@ def audit(args)
     "quality_outcome_summary" => quality_outcome_summary(task, evidence),
     "parent_goal_summary" => pg_summary,
     "write_policy_summary" => write_policy_audit(evidence, task),
+    "stale_records_summary" => stale_records_audit(evidence, current_task_sha256),
     "worktree_safety_summary" => worktree_safety_summary(evidence),
     "destructive_action_summary" => destructive_action_audit(evidence),
     "rule_resolution_summary" => rule_resolution_summary(evidence, evidence_path),

@@ -605,14 +605,6 @@ def validate_structured_submit_report!(report_path, report)
   [kind, status, summary, source_message_id, findings, coverage, artifacts, extra]
 end
 
-def sha256_file(path)
-  return nil unless path && File.file?(path)
-
-  Digest::SHA256.file(path).hexdigest
-rescue StandardError
-  nil
-end
-
 def validate_write_policy_from_report!(wp, _kind)
   return nil if wp.nil?
 
@@ -641,6 +633,20 @@ def validate_write_policy_from_report!(wp, _kind)
   result.empty? ? nil : result
 end
 
+def capture_git_head
+  result = `git rev-parse HEAD 2>/dev/null`.strip
+  result.start_with?("fatal") ? "" : result
+rescue SystemCallError
+  ""
+end
+
+def capture_git_dirty_files
+  output = `git status --porcelain --no-renames 2>/dev/null`
+  output.split("\n").map { |line| line.length > 3 ? line[3..].strip : nil }.compact.reject(&:empty?)
+rescue SystemCallError
+  []
+end
+
 def evidence_submit(options)
   path = File.expand_path(options["file"])
   report_path, report = load_report_for_evidence(options["report"])
@@ -653,6 +659,7 @@ def evidence_submit(options)
   rule_res_file = manifest_preview.is_a?(Hash) && manifest_preview["rule_resolution"].is_a?(Hash) ? manifest_preview["rule_resolution"]["file"] : nil
   rules_context_sha256 = (rule_res_file.is_a?(String) && !rule_res_file.empty?) ? sha256_file(rule_res_file) : nil
   role_config_sha256 = sha256_file(File.join(Dir.pwd, ".orbit", "roles.yaml"))
+  manifest_sha256_before = sha256_file(path)
 
   record = {
     "kind" => kind,
@@ -671,11 +678,33 @@ def evidence_submit(options)
     record[field] = report[field] if report.key?(field)
   end
   record["blocked"] = report["blocked"] if report.key?("blocked")
-  snapshot = evidence_identity_snapshot(identity)
-  snapshot["task_sha256"] = task_sha256 if snapshot && task_sha256
-  snapshot["rules_context_sha256"] = rules_context_sha256 if snapshot && rules_context_sha256
-  snapshot["role_config_sha256"] = role_config_sha256 if snapshot && role_config_sha256
-  record["identity"] = snapshot if snapshot
+  # Build role_execution_context (Slice 6 – supersedes Slice 5 flat identity block).
+  # Readers should check role_execution_context first, then fall back to identity for compat.
+  if identity
+    snapshot = evidence_identity_snapshot(identity)
+    git_head = capture_git_head
+    dirty = capture_git_dirty_files
+    write_policy_expected = report.is_a?(Hash) && report["write_policy"].is_a?(Hash) ? report.dig("write_policy", "expected") : nil
+    worktree = { "git_head" => git_head }.tap { |wt| wt["dirty_files_before"] = dirty unless dirty.empty? }.compact
+    permission_profile = {
+      "mode" => "audit_only",
+      "write_policy" => write_policy_expected || "no_production_writes",
+      "sandbox" => "none"
+    }
+    rec_ctx = {
+      "instance" => snapshot["instance"] || snapshot["resolved_instance"],
+      "resolved_role" => snapshot["resolved_role"],
+      "role_ref" => snapshot["role_ref"],
+      "role_config_sha256" => role_config_sha256,
+      "rules_resolution_sha256" => rules_context_sha256,
+      "rules_context_sha256" => rules_context_sha256,
+      "task_sha256" => task_sha256,
+      "evidence_manifest_sha256_before_submit" => manifest_sha256_before,
+      "worktree" => worktree.empty? ? nil : worktree,
+      "permission_profile" => permission_profile
+    }.compact
+    record["role_execution_context"] = rec_ctx
+  end
   if report.key?("write_policy")
     wp = validate_write_policy_from_report!(report["write_policy"], kind)
     record["write_policy"] = wp if wp

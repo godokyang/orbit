@@ -422,6 +422,9 @@ def rules_context_pack(resolution)
 
   context_budget = annotate_rule_context_budget(load_order)
   required_files = load_order.select { |entry| entry["dedupe_status"] == "active" && entry["required"] && entry["absolute_path"] }
+  # context_hash fingerprints the exact ordered rule set so evidence can reference it.
+  context_hash_input = JSON.generate(load_order.map { |e| e["rule_id"] || e["path"] })
+  context_hash = Digest::SHA256.hexdigest(context_hash_input)
   {
     "schema_version" => "orbit-rules-context-v1",
     "project" => resolution["project"],
@@ -441,6 +444,7 @@ def rules_context_pack(resolution)
     "required_files" => required_files,
     "context_budget" => context_budget,
     "rule_packs" => sources["rule_packs"] || [],
+    "context_hash" => context_hash,
     "resolution_summary" => {
       "default_rule_count" => (sources["orbit_default"] || []).length,
       "project_rule_count" => (sources["project_rules"] || []).length,
@@ -643,6 +647,8 @@ def whoami(args)
   end
 
   apply_task_constraints(result, task)
+
+  result["role_config_sha256"] = sha256_file(File.join(Dir.pwd, ".orbit", "roles.yaml"))
 
   puts JSON.pretty_generate(result)
   exit(result["conflicts"].empty? ? 0 : 1)

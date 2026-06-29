@@ -28,6 +28,59 @@ def validate_evidence_record(result, source, record)
   validate_structured_evidence_record(result, source, record) if record["structured_submit"] == true
   validate_destructive_action_plan_record(result, "#{source}.destructive_action_plan", record["destructive_action_plan"]) if record.key?("destructive_action_plan")
   validate_write_policy_record(result, "#{source}.write_policy", record["write_policy"]) if record.key?("write_policy")
+  validate_role_execution_context_record(result, "#{source}.role_execution_context", record["role_execution_context"]) if record.key?("role_execution_context")
+end
+
+def validate_role_execution_context_record(result, source, rec)
+  unless rec.is_a?(Hash)
+    validation_error(result, source, "#{source} must be a mapping.")
+    return
+  end
+
+  # Validate known string identity fields
+  %w[instance resolved_role role_ref].each do |field|
+    next unless rec.key?(field)
+
+    val = rec[field]
+    next if val.is_a?(String) && !val.strip.empty?
+
+    validation_error(result, "#{source}.#{field}", "role_execution_context.#{field} must be a non-empty string when present.")
+  end
+
+  # Validate hex SHA256 hash fields
+  %w[role_config_sha256 rules_resolution_sha256 rules_context_sha256 task_sha256 evidence_manifest_sha256_before_submit].each do |field|
+    next unless rec.key?(field)
+
+    val = rec[field]
+    next if val.is_a?(String) && val.match?(/\A[0-9a-f]{64}\z/)
+
+    validation_error(result, "#{source}.#{field}", "role_execution_context.#{field} must be a 64-char lowercase hex string when present.")
+  end
+
+  # Validate worktree sub-mapping
+  if rec.key?("worktree")
+    wt = rec["worktree"]
+    validation_error(result, "#{source}.worktree", "role_execution_context.worktree must be a mapping when present.") unless wt.is_a?(Hash)
+    if wt.is_a?(Hash) && wt.key?("dirty_files_before")
+      df = wt["dirty_files_before"]
+      unless df.is_a?(Array) && df.all? { |f| f.is_a?(String) && !f.strip.empty? }
+        validation_error(result, "#{source}.worktree.dirty_files_before", "role_execution_context.worktree.dirty_files_before must be a list of non-empty strings when present.")
+      end
+    end
+  end
+
+  # Validate permission_profile sub-mapping
+  return unless rec.key?("permission_profile")
+
+  pp = rec["permission_profile"]
+  unless pp.is_a?(Hash)
+    validation_error(result, "#{source}.permission_profile", "role_execution_context.permission_profile must be a mapping when present.")
+    return
+  end
+
+  if pp.key?("mode") && !%w[audit_only enforced_sandbox].include?(pp["mode"])
+    validation_error(result, "#{source}.permission_profile.mode", "role_execution_context.permission_profile.mode must be audit_only or enforced_sandbox.")
+  end
 end
 
 def validate_write_policy_record(result, source, wp)

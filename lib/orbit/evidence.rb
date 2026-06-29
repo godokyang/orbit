@@ -358,6 +358,9 @@ def aggregate_verdict_status(latest_by_kind, open_waiver_count)
 end
 
 def evidence_gate_identity_role(record)
+  rec_ctx = record["role_execution_context"]
+  return rec_ctx["resolved_role"] if rec_ctx.is_a?(Hash) && rec_ctx.key?("resolved_role")
+
   identity = record["identity"]
   identity.is_a?(Hash) ? identity["resolved_role"] : nil
 end

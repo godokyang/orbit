@@ -353,13 +353,16 @@ COMMAND_HELP = {
     Key options for submit:
       --file PATH    Evidence manifest file to append to.
       --report PATH  Structured review or test report (YAML).
-      --task PATH    Task contract for identity hashing (task_sha256 + role_config_sha256).
+      --task PATH    Task contract for role_execution_context hashing
+                     (task_sha256 + role_config_sha256).
       --json         Emit machine-readable submit result.
 
     Notes:
       --task PATH is required for strict write_policy_enforcement.
-      Without --task, identity.task_sha256 will be absent and strict gates
-      will remain blocked.
+      Without --task, role_execution_context.task_sha256 will be absent and
+      strict gates will remain blocked.
+      Legacy evidence may still expose task_sha256 under identity for
+      read-only compatibility.
   HELP
   "wait-gate" => <<~HELP
     Usage:
@@ -394,6 +397,14 @@ def usage_error(message)
   warn message
   warn "Run `orbit --help` for usage."
   exit 64
+end
+
+def sha256_file(path)
+  return nil unless path && File.file?(path)
+
+  Digest::SHA256.file(path).hexdigest
+rescue StandardError
+  nil
 end
 
 def option_value(args, option)

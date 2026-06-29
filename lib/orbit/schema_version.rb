@@ -45,6 +45,7 @@ ORBIT_FEATURE_VERSIONS = {
   "parent_goal_status" => "v1",        # parent_goal + parent_goal_status task fields, user_next_action in handoff (Slice 3)
   "destructive_action_scope" => "v1", # artifact_policy, destructive_actions task fields; scope.include changed-files guard (Slice 4)
   "role_identity_minimum" => "v1",    # task_sha256/rules_context_sha256 in identity; write_policy in gate records (Slice 5)
+  "role_identity_full" => "v1",       # role_execution_context replaces flat identity; stale-sha + rules-context-sha gate checks (Slice 6)
   "schema_semantics" => "v1"           # this versioning scaffolding itself (Slice 14 step 1)
   # "gate_lease" => nil           # not yet implemented – Phase 2 Slice 9
 }.freeze

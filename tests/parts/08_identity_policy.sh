@@ -46,7 +46,7 @@ pass 'validate rejects write_policy_enforcement with invalid value'
 json_assert 'write_policy_enforcement error references task_file.write_policy_enforcement' "$TMPROOT/s5-bad-wpe.json" \
   'j["errors"].any? { |e| e["source"] == "task_file.write_policy_enforcement" }'
 
-# evidence submit with --task records task_sha256 in identity
+# evidence submit with --task records task_sha256 in role context or legacy identity
 S5_REVIEW_TASK="$TMPROOT/s5-review-task.yaml"
 "$CLI" new-task --target-role reviewer --task-type implementation_review --output "$S5_REVIEW_TASK" >/dev/null
 cat >"$TMPROOT/s5-review-report.yaml" <<'YAML'
@@ -98,8 +98,8 @@ ORBIT_INSTANCE=reviewer "$CLI" evidence submit \
   --report "$TMPROOT/s5-review-report.yaml" \
   --task "$S5_REVIEW_TASK" \
   --json >"$TMPROOT/s5-hash-submit.json"
-json_assert 'evidence submit with --task records task_sha256 in identity' "$TMPROOT/s5-hash-submit.json" \
-  'j["record"]["identity"]["task_sha256"].is_a?(String) && j["record"]["identity"]["task_sha256"].length == 64'
+json_assert 'evidence submit with --task records task_sha256 in role context' "$TMPROOT/s5-hash-submit.json" \
+  '(j["record"]["role_execution_context"] || j["record"]["identity"]).fetch("task_sha256", nil).is_a?(String) && (j["record"]["role_execution_context"] || j["record"]["identity"]).fetch("task_sha256", nil).length == 64'
 
 # evidence submit without --task has no task_sha256
 S5_NO_HASH_EVIDENCE="$TMPROOT/s5-no-hash-evidence.json"
@@ -108,8 +108,8 @@ ORBIT_INSTANCE=reviewer "$CLI" evidence submit \
   --file "$S5_NO_HASH_EVIDENCE" \
   --report "$TMPROOT/s5-review-report.yaml" \
   --json >"$TMPROOT/s5-no-hash-submit.json"
-json_assert 'evidence submit without --task has no task_sha256 in identity' "$TMPROOT/s5-no-hash-submit.json" \
-  'j["record"]["identity"]["task_sha256"].nil?'
+json_assert 'evidence submit without --task has no task_sha256 in role context' "$TMPROOT/s5-no-hash-submit.json" \
+  '(j["record"]["role_execution_context"] || j["record"]["identity"] || {}).fetch("task_sha256", nil).nil?'
 
 # evidence submit with write_policy in report includes write_policy in record
 cat >"$TMPROOT/s5-review-with-wp.yaml" <<'YAML'
@@ -197,15 +197,24 @@ json_assert 'write_policy.changed_files error references write_policy source' "$
 # wait-gate passes when write_policy has violations but enforcement is standard (default)
 S5_REVIEW_TASK_STD="$TMPROOT/s5-review-task-std.yaml"
 "$CLI" new-task --target-role reviewer --task-type implementation_review --output "$S5_REVIEW_TASK_STD" >/dev/null
+# Build strict task first so its sha256 can be embedded in evidence records
+S5_STRICT_REVIEW_TASK="$TMPROOT/s5-strict-review-task.yaml"
+cp "$S5_REVIEW_TASK_STD" "$S5_STRICT_REVIEW_TASK"
+ruby --disable-gems -ryaml -e \
+  'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true)
+   y["write_policy_enforcement"]="strict"
+   File.write(p, YAML.dump(y))' \
+  "$S5_STRICT_REVIEW_TASK"
 S5_VIOLATION_EVIDENCE="$TMPROOT/s5-violation-evidence.json"
 "$CLI" evidence init --output "$S5_VIOLATION_EVIDENCE" >/dev/null
-ruby --disable-gems -rjson -e \
-  'p=ARGV[0]; j=JSON.parse(File.read(p))
+ruby --disable-gems -rjson -rdigest -e \
+  'p=ARGV[0]; t=ARGV[1]; sha=Digest::SHA256.file(t).hexdigest
+   j=JSON.parse(File.read(p))
    j["records"]||=[]
    j["records"]<<{"kind"=>"review","status"=>"pass","summary"=>"Review with write violations.",
      "created_at"=>Time.now.utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
      "structured_submit"=>true,
-     "identity"=>{"resolved_role"=>"reviewer","task_sha256"=>"a"*64},
+     "identity"=>{"resolved_role"=>"reviewer","task_sha256"=>sha,"rules_context_sha256"=>"b"*64},
      "quality_outcome_verdict"=>"pass",
      "evidence_level"=>"outcome_quality",
      "quality_question_answers"=>[
@@ -216,20 +225,13 @@ ruby --disable-gems -rjson -e \
      ],
      "write_policy"=>{"expected"=>"no_production_writes","changed_files"=>["src/impl.rb"],"violations"=>["src/impl.rb"]}}
    File.write(p, JSON.pretty_generate(j))' \
-  "$S5_VIOLATION_EVIDENCE"
+  "$S5_VIOLATION_EVIDENCE" "$S5_STRICT_REVIEW_TASK"
 "$CLI" wait-gate --task "$S5_REVIEW_TASK_STD" --evidence "$S5_VIOLATION_EVIDENCE" --json \
   >"$TMPROOT/s5-wg-standard.json" 2>/dev/null || true
 json_assert 'wait-gate passes when write_policy has violations but enforcement is standard' "$TMPROOT/s5-wg-standard.json" \
   'j["gates"].any? { |g| g["kind"] == "review" && g["passed"] == true }'
 
 # wait-gate blocks when write_policy has violations and enforcement is strict
-S5_STRICT_REVIEW_TASK="$TMPROOT/s5-strict-review-task.yaml"
-cp "$S5_REVIEW_TASK_STD" "$S5_STRICT_REVIEW_TASK"
-ruby --disable-gems -ryaml -e \
-  'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true)
-   y["write_policy_enforcement"]="strict"
-   File.write(p, YAML.dump(y))' \
-  "$S5_STRICT_REVIEW_TASK"
 if "$CLI" wait-gate --task "$S5_STRICT_REVIEW_TASK" --evidence "$S5_VIOLATION_EVIDENCE" --json \
      >"$TMPROOT/s5-wg-strict.json" 2>/dev/null; then
   printf 'FAIL wait-gate blocks when write_policy has violations and strict enforcement: command unexpectedly succeeded\n' >&2
@@ -242,13 +244,14 @@ json_assert 'wait-gate strict blocking_reason is write_policy_violations' "$TMPR
 # wait-gate passes when no violations under strict enforcement
 S5_NO_VIOLATION_EVIDENCE="$TMPROOT/s5-no-violation-evidence.json"
 "$CLI" evidence init --output "$S5_NO_VIOLATION_EVIDENCE" >/dev/null
-ruby --disable-gems -rjson -e \
-  'p=ARGV[0]; j=JSON.parse(File.read(p))
+ruby --disable-gems -rjson -rdigest -e \
+  'p=ARGV[0]; t=ARGV[1]; sha=Digest::SHA256.file(t).hexdigest
+   j=JSON.parse(File.read(p))
    j["records"]||=[]
    j["records"]<<{"kind"=>"review","status"=>"pass","summary"=>"Review with no violations.",
      "created_at"=>Time.now.utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
      "structured_submit"=>true,
-     "identity"=>{"resolved_role"=>"reviewer","task_sha256"=>"a"*64},
+     "identity"=>{"resolved_role"=>"reviewer","task_sha256"=>sha,"rules_context_sha256"=>"b"*64},
      "quality_outcome_verdict"=>"pass",
      "evidence_level"=>"outcome_quality",
      "quality_question_answers"=>[
@@ -259,7 +262,7 @@ ruby --disable-gems -rjson -e \
      ],
      "write_policy"=>{"expected"=>"no_production_writes","changed_files"=>[],"violations"=>[]}}
    File.write(p, JSON.pretty_generate(j))' \
-  "$S5_NO_VIOLATION_EVIDENCE"
+  "$S5_NO_VIOLATION_EVIDENCE" "$S5_STRICT_REVIEW_TASK"
 "$CLI" wait-gate --task "$S5_STRICT_REVIEW_TASK" --evidence "$S5_NO_VIOLATION_EVIDENCE" --json \
   >"$TMPROOT/s5-wg-no-violation.json" 2>/dev/null
 json_assert 'wait-gate passes when no write_policy violations under strict enforcement' "$TMPROOT/s5-wg-no-violation.json" \
@@ -341,9 +344,9 @@ json_assert 'wait-gate strict missing_task_sha256 blocking_reason' "$TMPROOT/s5-
   'j["gates"].any? { |g| g["kind"] == "review" && g["blocking_reason"] == "missing_task_sha256" }'
 
 # ---------------------------------------------------------------------------
-# Regression: evidence submit records role_config_sha256 in identity
+# Regression: evidence submit records role_config_sha256 in role_execution_context
 # ---------------------------------------------------------------------------
 
-# reuse existing submit result with --task from above (s5-hash-submit.json)
-json_assert 'evidence submit records role_config_sha256 in identity' "$TMPROOT/s5-hash-submit.json" \
-  'j["record"]["identity"]["role_config_sha256"].is_a?(String) && j["record"]["identity"]["role_config_sha256"].length == 64'
+# Reuse existing submit result (s5-hash-submit.json from above)
+json_assert 'evidence submit records role_config_sha256 in role_execution_context' "$TMPROOT/s5-hash-submit.json" \
+  'r=j["record"]["role_execution_context"]; r.is_a?(Hash) && r["role_config_sha256"].is_a?(String) && r["role_config_sha256"].length == 64'
