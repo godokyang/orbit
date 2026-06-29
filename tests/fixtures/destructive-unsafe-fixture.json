@@ -1,0 +1,9 @@
+{
+  "schema_version": "orbit-dogfood-fixture-v1",
+  "case_id": "destructive-dry-run-blocks",
+  "source_adjustment": "P0.5",
+  "fixture_type": "test_reference",
+  "test_part": "tests/parts/18_orbit_dogfood_governance.sh",
+  "scenario": "Destructive action without dry_run or recoverability blocks validation",
+  "expected_outcome": "validate rejects unsafe deletion plan"
+}

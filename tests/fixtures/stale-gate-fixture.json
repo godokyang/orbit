@@ -1,0 +1,9 @@
+{
+  "schema_version": "orbit-dogfood-fixture-v1",
+  "case_id": "stale-gate-detection",
+  "source_adjustment": "P1.3",
+  "fixture_type": "test_reference",
+  "test_part": "tests/parts/18_orbit_dogfood_governance.sh",
+  "scenario": "Evidence record with old task_sha256 should not close current gate",
+  "expected_outcome": "wait-gate reports stale_verdict and does not pass gate"
+}

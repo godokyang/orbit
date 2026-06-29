@@ -31,6 +31,11 @@ def default_release_readiness
     "remote_state" => {
       "branch" => "",
       "ahead_behind" => ""
+    },
+    "dogfood_suite" => {
+      "status" => "",
+      "case_ids" => [],
+      "waiver" => ""
     }
   }
 end
@@ -60,7 +65,7 @@ end
 
 # Compute release readiness blockers from a release_readiness block.
 # Returns array of {source, message} hashes.
-def release_readiness_blockers(rr)
+def release_readiness_blockers(rr, task = nil)
   return [{ "source" => "task_file.release_readiness", "message" => "Release task is missing release_readiness block entirely." }] unless rr.is_a?(Hash)
 
   blockers = []
@@ -135,6 +140,11 @@ def release_readiness_blockers(rr)
     end
   end
 
+  # Slice 15: dogfood suite check only for protocol-changing releases.
+  if task.is_a?(Hash) && task["protocol_changed"] == true
+    blockers.concat(dogfood_suite_blockers(rr))
+  end
+
   blockers
 end
 
@@ -143,7 +153,7 @@ def release_readiness_summary(task)
   rr = task.is_a?(Hash) ? task["release_readiness"] : nil
   return nil unless rr
 
-  blockers = release_readiness_blockers(rr)
+  blockers = release_readiness_blockers(rr, task)
   {
     "has_structure" => release_readiness_has_structure?(rr),
     "ci_status" => rr_dig(rr, "ci", "status"),

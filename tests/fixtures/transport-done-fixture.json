@@ -1,0 +1,9 @@
+{
+  "schema_version": "orbit-dogfood-fixture-v1",
+  "case_id": "transport-done-only",
+  "source_adjustment": "P0.3",
+  "fixture_type": "test_reference",
+  "test_part": "tests/parts/18_orbit_dogfood_governance.sh",
+  "scenario": "Evidence with only a transport notification cannot satisfy review/test gate",
+  "expected_outcome": "wait-gate blocks; transport DONE does not equal gate pass"
+}

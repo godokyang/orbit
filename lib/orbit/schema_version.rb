@@ -52,7 +52,8 @@ ORBIT_FEATURE_VERSIONS = {
   "project_profile_risk_level" => "v1", # project profile + task risk level derivation (Slice 11)
   "data_classification_retention" => "v1", # data classification + retention + trust repair (Slice 12)
   "ci_release_readiness" => "v1",           # CI release readiness: source, ci, package, version, remote state (Slice 13)
-  "protocol_schema_versioning" => "v1"      # consistency_check + negative_evidence (Slice 14)
+  "protocol_schema_versioning" => "v1",      # consistency_check + negative_evidence (Slice 14)
+  "orbit_dogfood_governance" => "v1"        # dogfood index + retrospective done criteria (Slice 15)
   # "gate_lease" => nil           # not yet implemented – Phase 2 Slice 9
 }.freeze
 

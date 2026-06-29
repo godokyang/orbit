@@ -719,7 +719,8 @@ def handoff(args)
     "evidence_summary" => evidence_summary(evidence),
     "schema_version_summary" => evidence_schema_version_summary(evidence, task.is_a?(Hash) ? task : nil),
     "release_readiness_summary" => release_readiness_summary(task),
-    "release_blockers" => release_risk?(task) ? release_readiness_blockers(task.is_a?(Hash) ? task["release_readiness"] : nil) : [],
+    "release_blockers" => release_risk?(task) ? release_readiness_blockers(task.is_a?(Hash) ? task["release_readiness"] : nil, task) : [],
+    "dogfood_governance_summary" => dogfood_governance_summary(task),
     "blocking_errors" => blocking_errors
   }
 

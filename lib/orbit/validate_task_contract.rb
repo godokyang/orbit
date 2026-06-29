@@ -565,6 +565,7 @@ def validate_task(result, task_path)
 
   validate_task_risk_level(result, task)
   validate_project_profile(result, task)
+  validate_retrospective_done_criteria(result, task)
   task
 end
 
@@ -789,7 +790,7 @@ def validate_task_risk_level(result, task)
       validation_error(result, "task_file.release_readiness",
         "Release risk level requires a release_readiness block with source, ci, package, version_fields, generated_artifacts, and remote_state.")
     end
-    release_readiness_blockers(rr).each do |blocker|
+    release_readiness_blockers(rr, task).each do |blocker|
       validation_error(result, blocker["source"], blocker["message"])
     end
   end
@@ -865,6 +866,20 @@ def validate_project_profile(result, task)
   if traits && !(traits.is_a?(Array) && traits.all? { |t| t.is_a?(String) && !t.strip.empty? })
     validation_error(result, "task_file.project_profile.workflow_traits",
       "project_profile.workflow_traits must be a list of non-empty strings when present.")
+  end
+end
+
+# Slice 15: retrospective/postmortem tasks must have done criteria.
+def validate_retrospective_done_criteria(result, task)
+  return unless requires_done_criteria?(task)
+
+  acceptance = task["acceptance"]
+  if !acceptance.is_a?(Array) || acceptance.empty?
+    validation_error(result, "task_file.acceptance",
+      "Retrospective/postmortem/lesson task must define non-empty acceptance (done criteria); cannot become infinite backlog.")
+  elsif acceptance.all? { |a| a.to_s.strip.empty? }
+    validation_error(result, "task_file.acceptance",
+      "Retrospective/postmortem/lesson task acceptance entries must be non-empty.")
   end
 end
 
