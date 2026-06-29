@@ -124,6 +124,13 @@ def compact_evidence(args)
   task = read_json_or_yaml_file(task_path)
   evidence = read_json_or_yaml_file(evidence_path)
   handoff = handoff_path && File.file?(handoff_path) ? read_json_or_yaml_file(handoff_path) : nil
+  task_ref = compact_file_ref(task_path)
+  evidence_ref = compact_file_ref(evidence_path)
+  handoff_ref = handoff_path ? compact_file_ref(handoff_path) : nil
+  task_sha256 = task_ref&.dig("sha256")
+  unless task_sha256.is_a?(String) && task_sha256.match?(/\A[0-9a-f]{64}\z/)
+    docs_error("compact-evidence: could not compute SHA256 for task file: #{task_path}")
+  end
   docs = Array(task["source_documents"]).map do |path|
     doc_ref = compact_file_ref(path)
     doc_ref&.merge("doc_id" => nil, "reference_type" => "source_document")
@@ -137,10 +144,19 @@ def compact_evidence(args)
     "schema_version" => "orbit-durable-evidence-summary-v1",
     "project" => task["project"] || evidence["project"] || File.basename(Dir.pwd),
     "generated_at" => Time.now.utc.iso8601,
+    "compact_summary" => {
+      "task_sha256" => task_sha256,
+      "evidence_sha256" => evidence_ref&.dig("sha256"),
+      "handoff_sha256" => handoff_ref&.dig("sha256"),
+      "latest_verdicts" => latest_gate_verdicts,
+      "artifact_refs" => record_summary["artifact_refs"],
+      "known_gaps" => known_gaps || [],
+      "closure_checklist" => closure_checklist || []
+    }.compact,
     "inputs" => {
-      "task" => compact_file_ref(task_path),
-      "evidence" => compact_file_ref(evidence_path),
-      "handoff" => handoff_path ? compact_file_ref(handoff_path) : nil
+      "task" => task_ref,
+      "evidence" => evidence_ref,
+      "handoff" => handoff_ref
     },
     "task_summary" => {
       "target_role" => task["target_role"],

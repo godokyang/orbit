@@ -93,7 +93,9 @@ pass 'help lists implemented commands without stderr'
 
 "$CLI" audit --help >"$TMPROOT/audit-help.txt" 2>"$TMPROOT/audit-help.err"
 test ! -s "$TMPROOT/audit-help.err"
-grep -q 'orbit audit --task PATH --state PATH --evidence PATH --json' "$TMPROOT/audit-help.txt"
+grep -q 'orbit audit --task PATH --state PATH --evidence PATH' "$TMPROOT/audit-help.txt"
+grep -q '\-\-handoff PATH' "$TMPROOT/audit-help.txt"
+grep -q '\-\-compact-summary PATH' "$TMPROOT/audit-help.txt"
 grep -q 'not an evidence directory' "$TMPROOT/audit-help.txt"
 pass 'audit subcommand help works'
 

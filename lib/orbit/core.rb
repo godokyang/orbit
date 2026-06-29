@@ -69,7 +69,7 @@ HELP = <<~HELP
   Usage:
     orbit --help
     orbit version
-    orbit audit --task PATH --state PATH --evidence PATH --json
+    orbit audit --task PATH --state PATH --evidence PATH [--handoff PATH] [--compact-summary PATH] --json
     orbit init [--force]
     orbit instances status --json
     orbit bind-pane --instance NAME --pane PANE [--transport NAME] [--tab TAB] [--space SPACE] --json
@@ -137,7 +137,7 @@ HELP
 COMMAND_HELP = {
   "audit" => <<~HELP,
     Usage:
-      orbit audit --task PATH --state PATH --evidence PATH --json
+      orbit audit --task PATH --state PATH --evidence PATH [--handoff PATH] [--compact-summary PATH] --json
 
     Audits task, loop state, and evidence consistency before done/handoff.
 
@@ -146,6 +146,13 @@ COMMAND_HELP = {
       --state PATH     orbit-loop-state-v1 YAML file.
       --evidence PATH  orbit-evidence-v1 JSON/YAML manifest file.
       --json           Emit machine-readable audit result.
+
+    Optional:
+      --handoff PATH           Handoff packet to compare against current evidence
+                               (reports drift in retention_drift_summary).
+      --compact-summary PATH   Durable evidence summary to validate and reference
+                               (validates compact_summary schema; reports
+                               retention_summary.compact_summary_present).
 
     Notes:
       --evidence expects a manifest file, not an evidence directory.

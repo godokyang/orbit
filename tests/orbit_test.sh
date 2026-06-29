@@ -166,5 +166,6 @@ source "$PARTS_DIR/06_parent_goal.sh"
 source "$PARTS_DIR/07_destructive.sh"
 source "$PARTS_DIR/08_identity_policy.sh"
 source "$PARTS_DIR/09_identity_full.sh"
+source "$PARTS_DIR/10_retention_compact.sh"
 
 printf 'REAL_TESTS_PASS count=%s tmp=%s\n' "$PASS_COUNT" "$TMPROOT"
