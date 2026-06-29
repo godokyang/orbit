@@ -1,14 +1,9 @@
 # frozen_string_literal: true
 
-# Minimum scaffolding for protocol-schema-versioning (Slice 14, step 1 in Implementation Order).
+# Protocol schema/version semantics and feature-version registry.
 #
 # Scope: feature-version vocabulary, legacy-warning helpers, compatibility-state detection,
 # and prose/structured-verdict conflict detection skeleton.
-#
-# NOT in scope here:
-#   - Full governance (dogfood cases, calibration, multi-user ownership) – Phase 3 remainder.
-#   - parent_goal_status, gate_lease feature versions – Phase 1 Slice 3 / Phase 2 Slice 9.
-#   - Project-profile risk level – Phase 2 Slice 12.
 #
 # Global compatibility policy (from development contract):
 #   - Old evidence/report lacking new fields → legacy_warning (not hard fail).
@@ -55,7 +50,6 @@ ORBIT_FEATURE_VERSIONS = {
   "protocol_schema_versioning" => "v1",      # consistency_check + negative_evidence (Slice 14)
   "orbit_dogfood_governance" => "v1",        # dogfood index + retrospective done criteria (Slice 15)
   "landing_governance_calibration" => "v1"   # compatibility policy + multi-user ownership + self-review guard + backup migration (Slice 16)
-  # "gate_lease" => nil           # not yet implemented – Phase 2 Slice 9
 }.freeze
 
 ORBIT_KNOWN_REPORT_TEMPLATE_VERSIONS = %w[review-report-v1 test-report-v1].freeze
@@ -300,7 +294,6 @@ def evidence_schema_version_summary(evidence, task = nil)
     "prose_conflicts" => prose_conflicts,
     "consistency_checks" => consistency_checks,
     "known_gaps" => [
-      "parent_goal_status feature version not yet implemented (Phase 1 Slice 3).",
       "Prose/structured conflict detection covers summary field prefix only; full field scan is a known gap."
     ]
   }
