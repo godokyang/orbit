@@ -70,7 +70,7 @@ test ! -s "$TMPROOT/help.err"
 grep -q 'orbit validate' "$TMPROOT/help.txt"
 grep -q 'changed-files' "$TMPROOT/help.txt"
 grep -q 'orbit evidence add' "$TMPROOT/help.txt"
-grep -q 'orbit evidence submit' "$TMPROOT/help.txt"
+grep -Fq 'orbit evidence submit --file PATH --report PATH [--task PATH] --json' "$TMPROOT/help.txt"
 grep -q 'orbit evidence waive' "$TMPROOT/help.txt"
 grep -q 'orbit evidence attach-rule' "$TMPROOT/help.txt"
 grep -q 'orbit classify-intent --text TEXT --json' "$TMPROOT/help.txt"
@@ -170,6 +170,17 @@ test ! -s "$TMPROOT/wait-gate-help.err"
 grep -Fq 'orbit wait-gate --task PATH --evidence PATH --json' "$TMPROOT/wait-gate-help.txt"
 grep -q 'does not replace reviewer/tester judgment' "$TMPROOT/wait-gate-help.txt"
 pass 'wait-gate subcommand help works'
+
+"$CLI" evidence --help >"$TMPROOT/evidence-help.txt" 2>"$TMPROOT/evidence-help.err"
+test ! -s "$TMPROOT/evidence-help.err"
+grep -Fq 'orbit evidence submit --file PATH --report PATH [--task PATH] --json' "$TMPROOT/evidence-help.txt"
+grep -q 'task_sha256' "$TMPROOT/evidence-help.txt"
+pass 'evidence subcommand help works'
+
+"$CLI" evidence submit --help >"$TMPROOT/evidence-submit-help.txt" 2>"$TMPROOT/evidence-submit-help.err"
+test ! -s "$TMPROOT/evidence-submit-help.err"
+grep -Fq 'orbit evidence submit --file PATH --report PATH [--task PATH] --json' "$TMPROOT/evidence-submit-help.txt"
+pass 'evidence submit --help redirects to evidence subcommand help'
 
 "$CLI" version >"$TMPROOT/version.txt"
 grep -qx '0.1.2' "$TMPROOT/version.txt"

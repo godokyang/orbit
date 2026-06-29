@@ -663,6 +663,7 @@ def validate_task_runtime_fields(result, task)
 
   validate_artifact_policy_field(result, task)
   validate_destructive_actions_field(result, task)
+  validate_write_policy_enforcement_field(result, task)
 
   gates = task["gates"]
   return if gates.nil?

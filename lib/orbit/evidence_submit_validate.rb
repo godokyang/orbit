@@ -605,12 +605,55 @@ def validate_structured_submit_report!(report_path, report)
   [kind, status, summary, source_message_id, findings, coverage, artifacts, extra]
 end
 
+def sha256_file(path)
+  return nil unless path && File.file?(path)
+
+  Digest::SHA256.file(path).hexdigest
+rescue StandardError
+  nil
+end
+
+def validate_write_policy_from_report!(wp, _kind)
+  return nil if wp.nil?
+
+  evidence_error("write_policy must be a mapping.") unless wp.is_a?(Hash)
+  result = {}
+
+  if wp.key?("expected")
+    expected = wp["expected"]
+    unless expected.is_a?(String) && !expected.to_s.strip.empty?
+      evidence_error("write_policy.expected must be a non-empty string.")
+    end
+    result["expected"] = expected
+  end
+
+  %w[changed_files violations].each do |field|
+    next unless wp.key?(field)
+
+    value = wp[field]
+    evidence_error("write_policy.#{field} must be a list.") unless value.is_a?(Array)
+    unless value.all? { |f| f.is_a?(String) && !f.strip.empty? }
+      evidence_error("write_policy.#{field} must be a list of non-empty strings.")
+    end
+    result[field] = value
+  end
+
+  result.empty? ? nil : result
+end
+
 def evidence_submit(options)
   path = File.expand_path(options["file"])
   report_path, report = load_report_for_evidence(options["report"])
 
   kind, status, summary, source_message_id, findings, coverage, artifacts, extra = validate_structured_submit_report!(report_path, report)
   identity = require_evidence_submit_capability!(kind)
+
+  task_sha256 = options["task"] ? sha256_file(File.expand_path(options["task"])) : nil
+  manifest_preview = load_evidence_manifest(path) rescue nil
+  rule_res_file = manifest_preview.is_a?(Hash) && manifest_preview["rule_resolution"].is_a?(Hash) ? manifest_preview["rule_resolution"]["file"] : nil
+  rules_context_sha256 = (rule_res_file.is_a?(String) && !rule_res_file.empty?) ? sha256_file(rule_res_file) : nil
+  role_config_sha256 = sha256_file(File.join(Dir.pwd, ".orbit", "roles.yaml"))
+
   record = {
     "kind" => kind,
     "status" => status,
@@ -629,7 +672,14 @@ def evidence_submit(options)
   end
   record["blocked"] = report["blocked"] if report.key?("blocked")
   snapshot = evidence_identity_snapshot(identity)
+  snapshot["task_sha256"] = task_sha256 if snapshot && task_sha256
+  snapshot["rules_context_sha256"] = rules_context_sha256 if snapshot && rules_context_sha256
+  snapshot["role_config_sha256"] = role_config_sha256 if snapshot && role_config_sha256
   record["identity"] = snapshot if snapshot
+  if report.key?("write_policy")
+    wp = validate_write_policy_from_report!(report["write_policy"], kind)
+    record["write_policy"] = wp if wp
+  end
   validate_evidence_record_shape!(record, "Evidence record")
 
   updated_manifest = update_evidence_manifest(path) do |manifest|

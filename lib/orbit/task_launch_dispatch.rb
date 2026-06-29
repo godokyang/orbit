@@ -374,6 +374,7 @@ def new_task(args)
   task["parent_goal_status"] = default_parent_goal_status(options["task_type"])
   task_rule_packs = rule_packs_for_context(options["target_role"], options["task_type"])
   task["rule_packs"] = task_rule_packs unless task_rule_packs.empty?
+  task["write_policy_enforcement"] = "standard"
 
   FileUtils.mkdir_p(File.dirname(output_path))
   File.write(output_path, YAML.dump(task))

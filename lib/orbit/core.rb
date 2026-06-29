@@ -80,7 +80,7 @@ HELP = <<~HELP
     orbit evidence init --output PATH
     orbit evidence add --file PATH --kind KIND --status STATUS --summary SUMMARY
     orbit evidence from-report --file PATH --report PATH [--kind KIND] [--status STATUS] [--summary SUMMARY]
-    orbit evidence submit --file PATH --report PATH --json
+    orbit evidence submit --file PATH --report PATH [--task PATH] --json
     orbit evidence waive --file PATH --waiver PATH --json
     orbit evidence attach-rule --file PATH --rule-resolution PATH
     orbit evidence show --file PATH --json
@@ -124,6 +124,7 @@ HELP = <<~HELP
   Subcommand help:
     orbit audit --help
     orbit compact-evidence --help
+    orbit evidence --help
     orbit dispatch --help
     orbit docs --help
     orbit handoff --help
@@ -327,6 +328,38 @@ COMMAND_HELP = {
       --evidence expects a manifest file, not an evidence directory.
       Create one with: orbit evidence init --output .orbit/evidence.json
       --changed-files is typically sourced from `git diff --name-only`.
+  HELP
+  "evidence" => <<~HELP,
+    Usage:
+      orbit evidence init --output PATH
+      orbit evidence add --file PATH --kind KIND --status STATUS --summary SUMMARY
+      orbit evidence from-report --file PATH --report PATH [--kind KIND] [--status STATUS] [--summary SUMMARY]
+      orbit evidence submit --file PATH --report PATH [--task PATH] --json
+      orbit evidence waive --file PATH --waiver PATH --json
+      orbit evidence attach-rule --file PATH --rule-resolution PATH
+      orbit evidence show --file PATH --json
+
+    Initializes, appends to, and reads an evidence manifest.
+
+    Subcommands:
+      init          Initialize a new evidence manifest file.
+      add           Append a free-form evidence record.
+      from-report   Append an evidence record from a structured report.
+      submit        Validate and append a structured gate record from a report.
+      waive         Append a waiver record to the evidence manifest.
+      attach-rule   Attach a rule resolution artifact to the manifest.
+      show          Print the evidence manifest as JSON.
+
+    Key options for submit:
+      --file PATH    Evidence manifest file to append to.
+      --report PATH  Structured review or test report (YAML).
+      --task PATH    Task contract for identity hashing (task_sha256 + role_config_sha256).
+      --json         Emit machine-readable submit result.
+
+    Notes:
+      --task PATH is required for strict write_policy_enforcement.
+      Without --task, identity.task_sha256 will be absent and strict gates
+      will remain blocked.
   HELP
   "wait-gate" => <<~HELP
     Usage:

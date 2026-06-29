@@ -172,6 +172,48 @@ def audit_trust_level
   }
 end
 
+def write_policy_audit(evidence, task)
+  return nil unless evidence.is_a?(Hash)
+
+  records = evidence["records"].is_a?(Array) ? evidence["records"] : []
+  enforcement = task.is_a?(Hash) ? (task["write_policy_enforcement"] || "standard").to_s : "standard"
+  gate_role_writes = {}
+  legacy_count = 0
+
+  records.each do |record|
+    next unless record.is_a?(Hash)
+
+    kind = record["kind"]
+    next unless EVIDENCE_EXPECTED_GATE_ROLES.key?(kind)
+
+    if record["structured_submit"] == true && record.dig("identity", "task_sha256").nil?
+      legacy_count += 1
+    end
+
+    wp = record["write_policy"]
+    next unless wp.is_a?(Hash)
+
+    role = record.dig("identity", "resolved_role") || kind
+    gate_role_writes[role] ||= { "changed_files" => [], "violations" => [] }
+    if wp["changed_files"].is_a?(Array)
+      gate_role_writes[role]["changed_files"].concat(wp["changed_files"].select { |f| f.is_a?(String) })
+    end
+    if wp["violations"].is_a?(Array)
+      gate_role_writes[role]["violations"].concat(wp["violations"].select { |v| v.is_a?(String) })
+    end
+  end
+
+  total_violations = gate_role_writes.values.sum { |v| v["violations"].length }
+
+  {
+    "enforcement" => enforcement,
+    "gate_role_writes" => gate_role_writes,
+    "legacy_records_without_hash" => legacy_count,
+    "has_violations" => total_violations > 0,
+    "total_violations" => total_violations
+  }
+end
+
 def parent_goal_audit(task, evidence)
   return nil unless task.is_a?(Hash)
 
@@ -350,6 +392,7 @@ def audit(args)
     "evidence_summary" => evidence_summary(evidence),
     "quality_outcome_summary" => quality_outcome_summary(task, evidence),
     "parent_goal_summary" => pg_summary,
+    "write_policy_summary" => write_policy_audit(evidence, task),
     "worktree_safety_summary" => worktree_safety_summary(evidence),
     "destructive_action_summary" => destructive_action_audit(evidence),
     "rule_resolution_summary" => rule_resolution_summary(evidence, evidence_path),

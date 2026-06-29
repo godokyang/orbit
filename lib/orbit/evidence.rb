@@ -61,6 +61,10 @@ def parse_evidence_args(args)
       options["report"] = option_value(args, "--report")
     when /\A--report=(.+)\z/
       options["report"] = Regexp.last_match(1)
+    when "--task"
+      options["task"] = option_value(args, "--task")
+    when /\A--task=(.+)\z/
+      options["task"] = Regexp.last_match(1)
     when "--waiver"
       options["waiver"] = option_value(args, "--waiver")
     when /\A--waiver=(.+)\z/

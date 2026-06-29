@@ -49,6 +49,10 @@ def run_orbit_cli(argv)
     end
     docs(argv)
   when "evidence"
+    if help_requested?(argv) || (argv.first == "submit" && help_requested?(argv[1..] || []))
+      print_command_help("evidence")
+      exit 0
+    end
     evidence(argv)
   when "handoff"
     if help_requested?(argv)

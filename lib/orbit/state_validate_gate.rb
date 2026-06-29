@@ -113,6 +113,18 @@ def validate_destructive_actions_field(result, task)
   end
 end
 
+def validate_write_policy_enforcement_field(result, task)
+  return unless task.is_a?(Hash) && task.key?("write_policy_enforcement")
+
+  enforcement = task["write_policy_enforcement"]
+  return if enforcement.nil?
+
+  unless %w[standard strict].include?(enforcement.to_s)
+    validation_error(result, "task_file.write_policy_enforcement",
+      "Task write_policy_enforcement must be standard or strict when present, got #{enforcement.inspect}.")
+  end
+end
+
 def validate_destructive_action_plan_record(result, source, plan)
   return unless plan.is_a?(Hash)
 

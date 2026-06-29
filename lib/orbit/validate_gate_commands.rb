@@ -274,6 +274,11 @@ def gate_status(records, kind, task = nil)
                            else
                              true
                            end
+  write_violations = latest.is_a?(Hash) && latest["write_policy"].is_a?(Hash) && latest["write_policy"]["violations"].is_a?(Array) ? latest["write_policy"]["violations"].reject { |v| v.to_s.strip.empty? } : []
+  write_policy_enforcement = task.is_a?(Hash) ? (task["write_policy_enforcement"] || "standard").to_s : "standard"
+  write_policy_blocked = !write_violations.empty? && write_policy_enforcement == "strict" && expected_gate_role(kind) != nil
+  missing_task_sha256 = latest.is_a?(Hash) && latest["structured_submit"] == true && expected_gate_role(kind) != nil && latest.dig("identity", "task_sha256").nil?
+  task_sha256_blocked = missing_task_sha256 && write_policy_enforcement == "strict"
   blocking_reason = if latest.nil?
                       "missing"
                     elsif !identity_valid
@@ -288,6 +293,10 @@ def gate_status(records, kind, task = nil)
                       "quality_outcome_not_pass"
                     elsif !required_questions_ok
                       "required_questions_not_met"
+                    elsif task_sha256_blocked
+                      "missing_task_sha256"
+                    elsif write_policy_blocked
+                      "write_policy_violations"
                     elsif display_status != "pass"
                       display_status
                     end
@@ -296,7 +305,7 @@ def gate_status(records, kind, task = nil)
     "required" => true,
     "status" => display_status,
     "record_status" => status,
-    "passed" => status == "pass" && identity_valid && quality_evidence_fields_ok && !wrong_gate_kind_level && evidence_level_ok && quality_outcome_ok && required_questions_ok,
+    "passed" => status == "pass" && identity_valid && quality_evidence_fields_ok && !wrong_gate_kind_level && evidence_level_ok && quality_outcome_ok && required_questions_ok && !write_policy_blocked && !task_sha256_blocked,
     "structured" => latest.is_a?(Hash) ? latest["structured_submit"] == true : false,
     "evidence_level" => actual_evidence_level,
     "minimum_evidence_level" => minimum_evidence_level,
@@ -309,6 +318,8 @@ def gate_status(records, kind, task = nil)
     "identity_expected_role" => expected_role,
     "identity_resolved_role" => identity_role,
     "identity_valid" => identity_valid,
+    "missing_task_sha256" => missing_task_sha256 ? true : nil,
+    "write_policy_violations_count" => write_violations.empty? ? nil : write_violations.length,
     "blocking_reason" => blocking_reason,
     "blocked" => latest.is_a?(Hash) ? latest["blocked"] : nil,
     "latest" => latest

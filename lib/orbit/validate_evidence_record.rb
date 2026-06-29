@@ -27,6 +27,35 @@ def validate_evidence_record(result, source, record)
 
   validate_structured_evidence_record(result, source, record) if record["structured_submit"] == true
   validate_destructive_action_plan_record(result, "#{source}.destructive_action_plan", record["destructive_action_plan"]) if record.key?("destructive_action_plan")
+  validate_write_policy_record(result, "#{source}.write_policy", record["write_policy"]) if record.key?("write_policy")
+end
+
+def validate_write_policy_record(result, source, wp)
+  return if wp.nil?
+
+  unless wp.is_a?(Hash)
+    validation_error(result, source, "Evidence record write_policy must be a mapping when present.")
+    return
+  end
+
+  if wp.key?("expected")
+    unless wp["expected"].is_a?(String) && !wp["expected"].to_s.strip.empty?
+      validation_error(result, "#{source}.expected", "write_policy.expected must be a non-empty string when present.")
+    end
+  end
+
+  %w[changed_files violations].each do |field|
+    next unless wp.key?(field)
+
+    value = wp[field]
+    unless value.is_a?(Array)
+      validation_error(result, "#{source}.#{field}", "write_policy.#{field} must be a list when present.")
+      next
+    end
+    unless value.all? { |item| item.is_a?(String) && !item.strip.empty? }
+      validation_error(result, "#{source}.#{field}", "write_policy.#{field} must be a list of non-empty strings.")
+    end
+  end
 end
 
 def validate_string_array_field(result, source, value, label)
