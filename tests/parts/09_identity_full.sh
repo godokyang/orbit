@@ -73,8 +73,8 @@ ORBIT_INSTANCE=reviewer "$CLI" evidence submit \
 json_assert 'wait-gate stale evidence sets stale_task_sha256 flag' "$TMPROOT/s6-stale-standard.json" \
   'j["gates"].any? { |g| g["kind"] == "review" && g["stale_task_sha256"] == true }'
 
-json_assert 'wait-gate standard enforcement passes despite stale evidence' "$TMPROOT/s6-stale-standard.json" \
-  'j["gates"].any? { |g| g["kind"] == "review" && g["passed"] == true }'
+json_assert 'wait-gate standard enforcement does not pass with stale evidence (Slice 9)' "$TMPROOT/s6-stale-standard.json" \
+  'j["gates"].none? { |g| g["kind"] == "review" && g["passed"] == true } && j["ready"] == false'
 
 # Strict mode + stale → blocked
 if "$CLI" wait-gate --task "$S6_STALE_TASK_B_STRICT" --evidence "$S6_STALE_EVIDENCE" --json \
@@ -83,8 +83,8 @@ if "$CLI" wait-gate --task "$S6_STALE_TASK_B_STRICT" --evidence "$S6_STALE_EVIDE
   exit 1
 fi
 pass 'wait-gate strict mode blocks stale evidence'
-json_assert 'wait-gate strict stale blocking_reason is stale_task_sha256' "$TMPROOT/s6-stale-strict.json" \
-  'j["gates"].any? { |g| g["kind"] == "review" && g["blocking_reason"] == "stale_task_sha256" }'
+json_assert 'wait-gate strict stale blocking_reason is stale_verdict' "$TMPROOT/s6-stale-strict.json" \
+  'j["gates"].any? { |g| g["kind"] == "review" && g["blocking_reason"] == "stale_verdict" }'
 
 # ---- Group 5: missing_rules_context_sha256 via role_execution_context (strict mode) ----
 # Build inline evidence with role_execution_context: has task_sha256 matching S5_STRICT_REVIEW_TASK

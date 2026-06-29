@@ -781,6 +781,51 @@ def validate_structured_submit_report!(report_path, report)
     end
   end
 
+  if report.key?("gate_lease")
+    gl = report["gate_lease"]
+    unless gl.is_a?(Hash)
+      submit_report_schema_error(
+        "submit_report.gate_lease",
+        "gate_lease must be a mapping.",
+        expected: "mapping with gate, owner_instance, task_sha256, status",
+        actual: evidence_value_type(gl),
+        kind: kind
+      )
+    else
+      gl_gate = gl["gate"]
+      unless gl_gate.is_a?(String) && !gl_gate.strip.empty?
+        submit_report_schema_error(
+          "submit_report.gate_lease.gate",
+          "gate_lease.gate must be a non-empty string identifying the gate kind.",
+          expected: "review|test|design_readiness|release|...",
+          actual: evidence_value_type(gl_gate),
+          kind: kind
+        )
+      end
+      gl_status = gl["status"]
+      unless gl_status.nil? || (gl_status.is_a?(String) && ALLOWED_GATE_LEASE_STATUSES.include?(gl_status))
+        submit_report_schema_error(
+          "submit_report.gate_lease.status",
+          "gate_lease.status must be one of #{ALLOWED_GATE_LEASE_STATUSES.join('|')}.",
+          expected: ALLOWED_GATE_LEASE_STATUSES.join("|"),
+          actual: evidence_value_type(gl_status),
+          kind: kind
+        )
+      end
+      gl_policy = gl["replacement_policy"]
+      unless gl_policy.nil? || (gl_policy.is_a?(String) && ALLOWED_GATE_LEASE_REPLACEMENT_POLICIES.include?(gl_policy))
+        submit_report_schema_error(
+          "submit_report.gate_lease.replacement_policy",
+          "gate_lease.replacement_policy must be one of #{ALLOWED_GATE_LEASE_REPLACEMENT_POLICIES.join('|')}.",
+          expected: ALLOWED_GATE_LEASE_REPLACEMENT_POLICIES.join("|"),
+          actual: evidence_value_type(gl_policy),
+          kind: kind
+        )
+      end
+      extra["gate_lease"] = gl
+    end
+  end
+
   [kind, status, summary, source_message_id, findings, coverage, artifacts, extra]
 end
 
@@ -857,6 +902,7 @@ def evidence_submit(options)
     record[field] = report[field] if report.key?(field)
   end
   record["blocked"] = report["blocked"] if report.key?("blocked")
+  record["gate_lease"] = report["gate_lease"] if report.key?("gate_lease")
   # Build role_execution_context (Slice 6 – supersedes Slice 5 flat identity block).
   # Readers should check role_execution_context first, then fall back to identity for compat.
   if identity

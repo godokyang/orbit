@@ -81,7 +81,7 @@ def validate_rule_resolution_reference(result, evidence_path, evidence, task = n
   end
 end
 
-def validate_evidence(result, evidence_path, task = nil)
+def validate_evidence(result, evidence_path, task = nil, task_sha256: nil)
   evidence = load_validation_file(result, "evidence_file", evidence_path)
   return nil unless evidence
 
@@ -148,20 +148,20 @@ def validate_evidence(result, evidence_path, task = nil)
   end
 
   if task && records.is_a?(Array) && !records.empty? && required_evidence_kinds(task).any?
-    validate_required_gate_evidence(result, records, task)
+    validate_required_gate_evidence(result, records, task, task_sha256)
   elsif task && review_or_test_gate?(task) && records.is_a?(Array) && !records.empty?
     expected_kind = expected_evidence_kind(task)
-    validate_gate_verdict(result, records, expected_kind, task)
+    validate_gate_verdict(result, records, expected_kind, task, task_sha256: task_sha256)
   end
 
   evidence
 end
 
-def validate_required_gate_evidence(result, records, task)
+def validate_required_gate_evidence(result, records, task, task_sha256 = nil)
   return unless task.is_a?(Hash)
 
   required_evidence_kinds(task).each do |expected_kind|
-    validate_gate_verdict(result, records.is_a?(Array) ? records : [], expected_kind, task)
+    validate_gate_verdict(result, records.is_a?(Array) ? records : [], expected_kind, task, task_sha256: task_sha256)
   end
 end
 
@@ -248,9 +248,9 @@ def latest_record_for_kind(records, kind, structured_gate_only: false, gate_iden
   candidates.max_by { |created_at, index, _record| [created_at, index] }&.last
 end
 
-def gate_passed?(records, kind)
+def gate_passed?(records, kind, task_sha256: nil)
   result = { "errors" => [], "warnings" => [] }
-  latest = latest_valid_gate_record(result, records, kind)
+  latest = latest_valid_gate_record(result, records, kind, task_sha256)
   latest&.fetch("status", nil) == "pass"
 end
 
@@ -285,7 +285,15 @@ end
 
 def gate_status(records, kind, task = nil, task_sha256: nil)
   evidence_record_kind = GATE_KIND_EVIDENCE_RECORD_KIND[kind] || kind
-  latest = latest_record_for_kind(records, evidence_record_kind, structured_gate_only: true, gate_identity_required: false)
+  # Slice 9: arbitration is authoritative for which record can pass the gate.
+  # When a current task_sha256 is supplied, a stale (old task sha) verdict is ignored and
+  # cannot close the gate. Records without a stored task_sha256 (legacy evidence predating
+  # identity capture) are still accepted by arbitration for backward compatibility.
+  # raw_latest is kept for flag reporting (stale_task_sha256) even when the accepted record is nil.
+  arbitration = verdict_arbitration_for_gate(records, kind, task_sha256)
+  raw_latest = latest_record_for_kind(records, evidence_record_kind, structured_gate_only: true, gate_identity_required: false)
+  stale_verdict_only = task_sha256 && arbitration["accepted_record"].nil? && arbitration["has_stale"]
+  latest = stale_verdict_only ? nil : (arbitration["accepted_record"] || raw_latest)
   expected_role = expected_gate_role(kind)
   malformed_rec_ctx = latest.is_a?(Hash) && latest.key?("role_execution_context") && !latest["role_execution_context"].is_a?(Hash)
   identity_role = latest && !malformed_rec_ctx ? record_resolved_role(latest) : nil
@@ -312,7 +320,7 @@ def gate_status(records, kind, task = nil, task_sha256: nil)
   write_violations = latest.is_a?(Hash) && latest["write_policy"].is_a?(Hash) && latest["write_policy"]["violations"].is_a?(Array) ? latest["write_policy"]["violations"].reject { |v| v.to_s.strip.empty? } : []
   write_policy_enforcement = task.is_a?(Hash) ? (task["write_policy_enforcement"] || "standard").to_s : "standard"
   write_policy_blocked = !write_violations.empty? && write_policy_enforcement == "strict" && expected_gate_role(kind) != nil
-  stored_task_sha256 = latest ? record_task_sha256_from(latest) : nil
+  stored_task_sha256 = raw_latest ? record_task_sha256_from(raw_latest) : nil
   stored_rules_context_sha256 = latest ? record_rules_context_sha256_from(latest) : nil
   missing_task_sha256 = latest.is_a?(Hash) && latest["structured_submit"] == true && expected_gate_role(kind) != nil && stored_task_sha256.nil?
   task_sha256_blocked = missing_task_sha256 && write_policy_enforcement == "strict"
@@ -320,7 +328,9 @@ def gate_status(records, kind, task = nil, task_sha256: nil)
   stale_blocked = stale_task_sha256 && write_policy_enforcement == "strict"
   missing_rules_context_sha256 = latest.is_a?(Hash) && latest["structured_submit"] == true && expected_gate_role(kind) != nil && stored_rules_context_sha256.nil?
   rules_context_blocked = missing_rules_context_sha256 && write_policy_enforcement == "strict"
-  blocking_reason = if latest.nil?
+  blocking_reason = if latest.nil? && stale_verdict_only
+                      "stale_verdict"
+                    elsif latest.nil?
                       "missing"
                     elsif malformed_rec_ctx
                       "malformed_role_execution_context"
@@ -352,7 +362,7 @@ def gate_status(records, kind, task = nil, task_sha256: nil)
     "required" => true,
     "status" => display_status,
     "record_status" => status,
-    "passed" => status == "pass" && !malformed_rec_ctx && identity_valid && quality_evidence_fields_ok && !wrong_gate_kind_level && evidence_level_ok && quality_outcome_ok && required_questions_ok && !write_policy_blocked && !task_sha256_blocked && !stale_blocked && !rules_context_blocked,
+    "passed" => !stale_verdict_only && status == "pass" && !malformed_rec_ctx && identity_valid && quality_evidence_fields_ok && !wrong_gate_kind_level && evidence_level_ok && quality_outcome_ok && required_questions_ok && !write_policy_blocked && !task_sha256_blocked && !stale_blocked && !rules_context_blocked,
     "structured" => latest.is_a?(Hash) ? latest["structured_submit"] == true : false,
     "evidence_level" => actual_evidence_level,
     "minimum_evidence_level" => minimum_evidence_level,
@@ -372,13 +382,21 @@ def gate_status(records, kind, task = nil, task_sha256: nil)
     "write_policy_violations_count" => write_violations.empty? ? nil : write_violations.length,
     "blocking_reason" => blocking_reason,
     "blocked" => latest.is_a?(Hash) ? latest["blocked"] : nil,
-    "latest" => latest
+    "latest" => latest,
+    "verdict_arbitration" => {
+      "accepted_record_id" => arbitration["accepted_record_id"],
+      "superseded_records" => arbitration["superseded_records"],
+      "stale_records" => arbitration["stale_records"],
+      "conflict_detected" => arbitration["conflict_detected"],
+      "has_stale" => arbitration["has_stale"],
+      "conflict_resolution" => arbitration["conflict_resolution"]
+    }
   }.compact
 end
 
-def required_gate_summary(task, evidence)
+def required_gate_summary(task, evidence, task_sha256: nil)
   records = evidence.is_a?(Hash) && evidence["records"].is_a?(Array) ? evidence["records"] : []
-  gates = required_evidence_kinds(task).map { |kind| gate_status(records, kind, task) }
+  gates = required_evidence_kinds(task).map { |kind| gate_status(records, kind, task, task_sha256: task_sha256) }
   missing_or_blocked = gates.reject { |gate| gate["passed"] }.map do |gate|
     {
       "kind" => gate["kind"],
@@ -407,7 +425,9 @@ def wait_gate(args)
   kinds = required_evidence_kinds(task)
   gates = kinds.map { |kind| gate_status(records, kind, task, task_sha256: current_task_sha256) }
   ready = gates.all? { |gate| gate["passed"] }
-  gate_summary = required_gate_summary(task, evidence)
+  arbitration_summary = verdict_arbitration_summary(task, evidence, current_task_sha256)
+  lease_summary = gate_lease_summary(evidence)
+  gate_summary = required_gate_summary(task, evidence, task_sha256: current_task_sha256)
   packet = {
     "schema_version" => "orbit-gate-status-v1",
     "project" => task["project"] || File.basename(Dir.pwd),
@@ -418,6 +438,8 @@ def wait_gate(args)
     "gate_summary" => gate_summary,
     "gates" => gates,
     "parent_goal_status" => task.is_a?(Hash) ? task["parent_goal_status"] : nil,
+    "verdict_arbitration" => arbitration_summary,
+    "gate_lease_summary" => lease_summary,
     "summary" => ready ? "all required gates pass" : "required gates are not ready"
   }.compact
 
@@ -443,7 +465,7 @@ def validate_done_transition!(state_path, task_path, evidence_path)
   result["checked"] << "project_config"
   task = validate_task(result, task_path)
   result["checked"] << "task"
-  evidence = validate_evidence(result, evidence_path, task)
+  evidence = validate_evidence(result, evidence_path, task, task_sha256: sha256_file(task_path))
   result["checked"] << "evidence"
   validate_state_file(result, state_path)
   result["checked"] << "state"
@@ -452,7 +474,7 @@ def validate_done_transition!(state_path, task_path, evidence_path)
     validation_error(result, "evidence_file", "Transition to done requires at least one pass evidence signal.")
   end
 
-  validate_required_gate_evidence(result, evidence.is_a?(Hash) ? evidence["records"] : [], task)
+  validate_required_gate_evidence(result, evidence.is_a?(Hash) ? evidence["records"] : [], task, sha256_file(task_path))
 
   return if result["errors"].empty?
 
@@ -528,7 +550,8 @@ def validate(args)
   end
 
   if options["evidence"]
-    validate_evidence(result, options["evidence"], task)
+    current_task_sha256 = options["task"] ? sha256_file(File.expand_path(options["task"])) : nil
+    validate_evidence(result, options["evidence"], task, task_sha256: current_task_sha256)
     result["checked"] << "evidence"
   elsif task && review_or_test_gate?(task)
     validation_error(result, "evidence_file", "Task review/test gates require --evidence manifest before passing.")

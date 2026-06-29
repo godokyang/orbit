@@ -246,7 +246,7 @@ def audit_validation_result(task_path, evidence_path, state_path)
   result["checked"] << "project_config"
   task = validate_task(result, task_path)
   result["checked"] << "task"
-  evidence = validate_evidence(result, evidence_path, task)
+  evidence = validate_evidence(result, evidence_path, task, task_sha256: sha256_file(task_path))
   result["checked"] << "evidence"
   state = validate_state_file(result, state_path)
   result["checked"] << "state"
@@ -472,7 +472,7 @@ def parent_goal_audit(task, evidence)
   }.compact
 end
 
-def audit_state_consistency(task_path, evidence_path, state, evidence, task = nil)
+def audit_state_consistency(task_path, evidence_path, state, evidence, task = nil, task_sha256: nil)
   blocking_findings = []
   warnings = []
   phase = state.is_a?(Hash) ? state["phase"] : nil
@@ -519,7 +519,7 @@ def audit_state_consistency(task_path, evidence_path, state, evidence, task = ni
   if phase == "done" && task.is_a?(Hash)
     records = evidence.is_a?(Hash) ? evidence["records"] : []
     required_evidence_kinds(task).each do |kind|
-      next if gate_passed?(records, kind)
+      next if gate_passed?(records, kind, task_sha256: task_sha256)
 
       blocking_findings << audit_finding(
         "evidence_file.records.#{kind}",
@@ -553,7 +553,7 @@ def audit(args)
   validation, task, evidence, state = audit_validation_result(task_path, evidence_path, state_path)
   blocking_findings = validation["errors"].map { |error| audit_finding(error["source"], error["message"], "high") }
   warnings = validation["warnings"].map { |warning| audit_finding(warning["source"], warning["message"], "medium") }
-  state_blocking, state_warnings = audit_state_consistency(task_path, evidence_path, state, evidence, task)
+  state_blocking, state_warnings = audit_state_consistency(task_path, evidence_path, state, evidence, task, task_sha256: current_task_sha256)
   blocking_findings.concat(state_blocking)
   warnings.concat(state_warnings)
 
@@ -670,6 +670,8 @@ def audit(args)
     "retention_summary" => orbit_retention_summary(evidence, compact_summary_path),
     "retention_drift_summary" => drift_summary,
     "runtime_reconcile_summary" => reconcile,
+    "verdict_arbitration_summary" => verdict_arbitration_summary(task, evidence, current_task_sha256),
+    "gate_lease_summary" => gate_lease_summary(evidence),
     "issues" => issues,
     "blocking_findings" => blocking_findings,
     "warnings" => warnings

@@ -106,6 +106,7 @@ lib/orbit/validate_task_contract.rb
 lib/orbit/validate_evidence_record.rb
 lib/orbit/validate_gate_commands.rb
 lib/orbit/audit_tools.rb
+lib/orbit/gate_lease.rb
 lib/orbit/handoff.rb
 lib/orbit/docs_lifecycle.rb
 assets/templates/roles.yaml

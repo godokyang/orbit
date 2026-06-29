@@ -46,7 +46,8 @@ ORBIT_FEATURE_VERSIONS = {
   "destructive_action_scope" => "v1", # artifact_policy, destructive_actions task fields; scope.include changed-files guard (Slice 4)
   "role_identity_minimum" => "v1",    # task_sha256/rules_context_sha256 in identity; write_policy in gate records (Slice 5)
   "role_identity_full" => "v1",       # role_execution_context replaces flat identity; stale-sha + rules-context-sha gate checks (Slice 6)
-  "schema_semantics" => "v1"           # this versioning scaffolding itself (Slice 14 step 1)
+  "schema_semantics" => "v1",          # this versioning scaffolding itself (Slice 14 step 1)
+  "gate_lease" => "v1"                 # gate_lease metadata + verdict arbitration (Slice 9)
   # "gate_lease" => nil           # not yet implemented – Phase 2 Slice 9
 }.freeze
 
@@ -261,7 +262,6 @@ def evidence_schema_version_summary(evidence, task = nil)
     "prose_conflicts" => prose_conflicts,
     "known_gaps" => [
       "parent_goal_status feature version not yet implemented (Phase 1 Slice 3).",
-      "gate_lease feature version not yet implemented (Phase 2 Slice 9).",
       "Prose/structured conflict detection covers summary field prefix only; full field scan is a known gap."
     ]
   }

@@ -106,11 +106,16 @@ def evidence_summary(evidence)
   summary
 end
 
-def latest_gate_verdicts_for_handoff(evidence)
+def latest_gate_verdicts_for_handoff(evidence, task_sha256 = nil)
   records = evidence.is_a?(Hash) && evidence["records"].is_a?(Array) ? evidence["records"] : []
-  latest = latest_records_by_kind(records)
   %w[review test].each_with_object({}) do |kind, memo|
-    record = latest[kind]
+    # Slice 9: use arbitration accepted record when task_sha256 is provided so stale
+    # verdicts don't surface as "pass" in handoff summaries.
+    record = if task_sha256
+               accepted_gate_record(records, kind, task_sha256)
+             else
+               latest_records_by_kind(records)[kind]
+             end
     memo[kind] = if record
                    {
                      "status" => record["status"],
@@ -226,9 +231,9 @@ def handoff_runtime_summary(evidence)
   }
 end
 
-def closure_checklist_for_handoff(task, evidence, validation, audit_blocking, audit_warnings)
+def closure_checklist_for_handoff(task, evidence, validation, audit_blocking, audit_warnings, task_sha256: nil)
   source_documents = task.is_a?(Hash) && task["source_documents"].is_a?(Array) ? task["source_documents"] : []
-  verdicts = latest_gate_verdicts_for_handoff(evidence)
+  verdicts = latest_gate_verdicts_for_handoff(evidence, task_sha256)
   [
     {
       "item" => "task_contract_valid",
@@ -611,9 +616,10 @@ def handoff(args)
   state_path = File.expand_path(options["state"])
   evidence_path = File.expand_path(options["evidence"])
   output_path = options["output"] ? File.expand_path(options["output"]) : nil
+  current_task_sha256 = sha256_file(task_path)
   validation, task, evidence, state = audit_validation_result(task_path, evidence_path, state_path)
   blocking_errors = validation["errors"].dup
-  audit_blocking, audit_warnings = audit_state_consistency(task_path, evidence_path, state, evidence, task)
+  audit_blocking, audit_warnings = audit_state_consistency(task_path, evidence_path, state, evidence, task, task_sha256: current_task_sha256)
   blocking_errors.concat(audit_blocking)
 
   current_role = nil
@@ -640,7 +646,7 @@ def handoff(args)
     record_handoff_artifact(state_path, output_path)
     validation, task, evidence, state = audit_validation_result(task_path, evidence_path, state_path)
     blocking_errors = validation["errors"].dup
-    audit_blocking, audit_warnings = audit_state_consistency(task_path, evidence_path, state, evidence, task)
+    audit_blocking, audit_warnings = audit_state_consistency(task_path, evidence_path, state, evidence, task, task_sha256: current_task_sha256)
     blocking_errors.concat(audit_blocking)
     target_role = task.is_a?(Hash) ? task["target_role"] : nil
     if current_role && target_role && current_role != target_role && !task_gate_role?(task, current_role)
@@ -655,11 +661,13 @@ def handoff(args)
   next_action = required_action_for_phase(current_phase, blocking_errors)
   transport_profile = resolve_transport_profile(options["transport"])
   transport_profile["payload"] = transport_handoff_payload(transport_profile, task_path, state_path, evidence_path, next_action)
-  latest_gate_verdicts = latest_gate_verdicts_for_handoff(evidence)
+  latest_gate_verdicts = latest_gate_verdicts_for_handoff(evidence, current_task_sha256)
   known_gaps = known_gaps_for_handoff(evidence, audit_warnings)
   runtime_summary = handoff_runtime_summary(evidence)
   reconcile_summary = runtime_reconcile_summary(evidence)
-  closure_checklist = closure_checklist_for_handoff(task, evidence, validation, audit_blocking, audit_warnings)
+  arbitration_summary = verdict_arbitration_summary(task, evidence, current_task_sha256)
+  lease_summary = gate_lease_summary(evidence)
+  closure_checklist = closure_checklist_for_handoff(task, evidence, validation, audit_blocking, audit_warnings, task_sha256: current_task_sha256)
   packet = {
     "schema_version" => "orbit-handoff-v1",
     "project" => task.is_a?(Hash) && task["project"] ? task["project"] : File.basename(Dir.pwd),
@@ -674,7 +682,7 @@ def handoff(args)
     "transport_profile" => transport_profile,
     "rule_packs" => rule_packs_for_context(target_role, task.is_a?(Hash) ? task["task_type"] : nil, include_audit: true),
     "rule_resolution_summary" => rule_resolution_summary(evidence, evidence_path),
-    "gate_summary" => task.is_a?(Hash) && evidence.is_a?(Hash) ? required_gate_summary(task, evidence) : nil,
+    "gate_summary" => task.is_a?(Hash) && evidence.is_a?(Hash) ? required_gate_summary(task, evidence, task_sha256: current_task_sha256) : nil,
     "latest_gate_verdicts" => latest_gate_verdicts,
     "judgment_summary" => judgment_summary(evidence),
     "closure_checklist" => closure_checklist,
@@ -691,10 +699,15 @@ def handoff(args)
       "runtime_binding_count" => runtime_summary["runtime_binding_count"],
       "cleanup_all_complete" => runtime_summary["cleanup_status"]["all_complete"],
       "runtime_gaps_count" => runtime_summary["runtime_gaps"].length,
-      "reproducibility_gaps_count" => runtime_summary["reproducibility_gaps"].length
+      "reproducibility_gaps_count" => runtime_summary["reproducibility_gaps"].length,
+      "gate_lease_active" => lease_summary["active_count"].to_i,
+      "gate_lease_expired" => lease_summary["expired_count"].to_i,
+      "gate_owner_replaceable" => lease_summary["any_replaceable"]
     },
     "runtime_summary" => runtime_summary,
     "runtime_reconcile_summary" => reconcile_summary,
+    "verdict_arbitration" => arbitration_summary,
+    "gate_lease_summary" => lease_summary,
     "worktree_safety_summary" => worktree_safety_summary(evidence),
     "evidence_summary" => evidence_summary(evidence),
     "schema_version_summary" => evidence_schema_version_summary(evidence, task.is_a?(Hash) ? task : nil),

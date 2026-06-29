@@ -226,7 +226,30 @@ ruby --disable-gems -rjson -rdigest -e \
      "write_policy"=>{"expected"=>"no_production_writes","changed_files"=>["src/impl.rb"],"violations"=>["src/impl.rb"]}}
    File.write(p, JSON.pretty_generate(j))' \
   "$S5_VIOLATION_EVIDENCE" "$S5_STRICT_REVIEW_TASK"
-"$CLI" wait-gate --task "$S5_REVIEW_TASK_STD" --evidence "$S5_VIOLATION_EVIDENCE" --json \
+# Slice 9: evidence must carry the current task sha to avoid stale-verdict arbitration.
+# Build a standard-task evidence variant with the standard task sha for the standard-enforcement test.
+S5_VIOLATION_EVIDENCE_STD="$TMPROOT/s5-violation-evidence-std.json"
+"$CLI" evidence init --output "$S5_VIOLATION_EVIDENCE_STD" >/dev/null
+ruby --disable-gems -rjson -rdigest -e \
+  'p=ARGV[0]; t=ARGV[1]; sha=Digest::SHA256.file(t).hexdigest
+   j=JSON.parse(File.read(p))
+   j["records"]||=[]
+   j["records"]<<{"kind"=>"review","status"=>"pass","summary"=>"Review with write violations.",
+     "created_at"=>Time.now.utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+     "structured_submit"=>true,
+     "identity"=>{"resolved_role"=>"reviewer","task_sha256"=>sha,"rules_context_sha256"=>"b"*64},
+     "quality_outcome_verdict"=>"pass",
+     "evidence_level"=>"outcome_quality",
+     "quality_question_answers"=>[
+       {"id"=>"outcome","verdict"=>"pass"},
+       {"id"=>"counterexamples","verdict"=>"pass"},
+       {"id"=>"evidence_sufficiency","verdict"=>"pass"},
+       {"id"=>"residual_risk","verdict"=>"pass"}
+     ],
+     "write_policy"=>{"expected"=>"no_production_writes","changed_files"=>["src/impl.rb"],"violations"=>["src/impl.rb"]}}
+   File.write(p, JSON.pretty_generate(j))' \
+  "$S5_VIOLATION_EVIDENCE_STD" "$S5_REVIEW_TASK_STD"
+"$CLI" wait-gate --task "$S5_REVIEW_TASK_STD" --evidence "$S5_VIOLATION_EVIDENCE_STD" --json \
   >"$TMPROOT/s5-wg-standard.json" 2>/dev/null || true
 json_assert 'wait-gate passes when write_policy has violations but enforcement is standard' "$TMPROOT/s5-wg-standard.json" \
   'j["gates"].any? { |g| g["kind"] == "review" && g["passed"] == true }'

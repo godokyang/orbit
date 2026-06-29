@@ -19,6 +19,11 @@ ALLOWED_FAILURE_CLASSES = %w[code_failure environment_failure service_failure mo
 # Blocker classifications that cannot coexist with a pass verdict: they describe a non-code
 # blocker (environment/service/model_drift) or an unresolved unknown, so the path did not pass.
 NON_CODE_PASS_BLOCKER_KINDS = %w[environment_failure service_failure model_drift unknown].freeze
+# Slice 9: gate lease + stale verdict arbitration.
+ALLOWED_GATE_LEASE_STATUSES = %w[claimed expired superseded released].freeze
+ALLOWED_GATE_LEASE_REPLACEMENT_POLICIES = %w[allow_after_expiry deny owner_only].freeze
+GATE_LEASE_DEFAULT_REPLACEMENT_POLICY = "allow_after_expiry"
+VERDICT_ARBITRATION_CONFLICT_RESOLUTION = "latest_valid_for_task_revision"
 EVIDENCE_EXPECTED_GATE_ROLES = {
   "review" => "reviewer",
   "test" => "tester"

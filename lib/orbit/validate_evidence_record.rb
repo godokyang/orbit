@@ -31,6 +31,7 @@ def validate_evidence_record(result, source, record)
   validate_role_execution_context_record(result, "#{source}.role_execution_context", record["role_execution_context"]) if record.key?("role_execution_context")
   validate_runtime_binding_record_field(result, source, record)
   validate_blocker_classification_record_field(result, source, record)
+  validate_gate_lease_record_field(result, source, record)
 end
 
 def validate_role_execution_context_record(result, source, rec)
@@ -325,6 +326,34 @@ def validate_blocker_classification_record_field(result, source, record)
     "Evidence status pass is incompatible with blocker_classification.kind #{kind}: environment/service/model_drift/unknown blockers do not count as a code pass.")
 end
 
+# Slice 9: validate gate_lease metadata on records. Catches malformed leases mutated after submit.
+def validate_gate_lease_record_field(result, source, record)
+  return unless record.key?("gate_lease")
+
+  lease = record["gate_lease"]
+  unless lease.is_a?(Hash)
+    validation_error(result, "#{source}.gate_lease",
+      "Evidence gate_lease must be a mapping.")
+    return
+  end
+
+  gate = lease["gate"]
+  unless gate.is_a?(String) && !gate.strip.empty?
+    validation_error(result, "#{source}.gate_lease.gate",
+      "Evidence gate_lease.gate must be a non-empty string identifying the gate kind.")
+  end
+  status = lease["status"]
+  if !status.nil? && !(status.is_a?(String) && ALLOWED_GATE_LEASE_STATUSES.include?(status))
+    validation_error(result, "#{source}.gate_lease.status",
+      "Evidence gate_lease.status must be one of #{ALLOWED_GATE_LEASE_STATUSES.join("|")}.")
+  end
+  policy = lease["replacement_policy"]
+  if !policy.nil? && !(policy.is_a?(String) && ALLOWED_GATE_LEASE_REPLACEMENT_POLICIES.include?(policy))
+    validation_error(result, "#{source}.gate_lease.replacement_policy",
+      "Evidence gate_lease.replacement_policy must be one of #{ALLOWED_GATE_LEASE_REPLACEMENT_POLICIES.join("|")}.")
+  end
+end
+
 def validate_rule_application_record_field(result, source, record)
   return unless record.key?("rule_application")
 
@@ -448,7 +477,7 @@ rescue ArgumentError
   nil
 end
 
-def latest_valid_gate_record(result, records, expected_kind)
+def latest_valid_gate_record(result, records, expected_kind, task_sha256 = nil)
   evidence_record_kind = GATE_KIND_EVIDENCE_RECORD_KIND[expected_kind] || expected_kind
   candidates = []
 
@@ -466,12 +495,36 @@ def latest_valid_gate_record(result, records, expected_kind)
     candidates << [created_at, index, record]
   end
 
-  candidates.max_by { |created_at, index, _record| [created_at, index] }&.last
+  raw_latest = candidates.max_by { |created_at, index, _record| [created_at, index] }&.last
+  return raw_latest unless task_sha256
+
+  # Slice 9: when a current task_sha256 is provided, arbitration is authoritative.
+  # A stale (old task sha) verdict cannot be the accepted gate record.
+  arbitration = verdict_arbitration_for_gate(records, expected_kind, task_sha256)
+  accepted = arbitration["accepted_record"]
+  # The accepted record must also pass identity validation (gate_record_identity_valid?)
+  # since arbitration's candidate collection does not filter by role identity.
+  if accepted && gate_record_identity_valid?(accepted, expected_kind)
+    accepted
+  elsif arbitration["has_stale"]
+    nil
+  else
+    raw_latest
+  end
 end
 
-def validate_gate_verdict(result, records, expected_kind, task = nil)
-  latest = latest_valid_gate_record(result, records, expected_kind)
+def validate_gate_verdict(result, records, expected_kind, task = nil, task_sha256: nil)
+  latest = latest_valid_gate_record(result, records, expected_kind, task_sha256)
   unless latest
+    # Distinguish stale-verdict-only from truly missing.
+    if task_sha256
+      arbitration = verdict_arbitration_for_gate(records, expected_kind, task_sha256)
+      if arbitration["has_stale"]
+        validation_error(result, "evidence_file.records.#{expected_kind}",
+          "Latest #{expected_kind} verdict is for an old task revision (stale) and cannot close the current gate.")
+        return
+      end
+    end
     validation_error(result, "evidence_file.records", "Review/test task requires structured valid #{expected_kind.inspect} evidence with status pass.")
     return
   end
