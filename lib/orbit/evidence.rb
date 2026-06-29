@@ -81,6 +81,18 @@ def parse_evidence_args(args)
       options["decision_record"] = option_value(args, "--decision-record")
     when /\A--decision-record=(.+)\z/
       options["decision_record"] = Regexp.last_match(1)
+    when "--data-classification"
+      options["data_classification"] = option_value(args, "--data-classification")
+    when /\A--data-classification=(.+)\z/
+      options["data_classification"] = Regexp.last_match(1)
+    when "--retention-policy"
+      options["retention_policy"] = option_value(args, "--retention-policy")
+    when /\A--retention-policy=(.+)\z/
+      options["retention_policy"] = Regexp.last_match(1)
+    when "--trust-repair"
+      options["trust_repair"] = option_value(args, "--trust-repair")
+    when /\A--trust-repair=(.+)\z/
+      options["trust_repair"] = Regexp.last_match(1)
     when "--waiver"
       options["waiver"] = option_value(args, "--waiver")
     when /\A--waiver=(.+)\z/
@@ -538,6 +550,36 @@ def evidence_add(options)
     evidence_error("--decision-record must be a mapping with id, kind, summary, source.") unless normalized.is_a?(Hash)
     record["decision_record"] = normalized
   end
+  # Slice 12: parse --data-classification, --retention-policy, --trust-repair (JSON/YAML string or @file).
+  %w[data_classification retention_policy trust_repair].each do |field|
+    next unless options[field]
+    raw = if options[field].start_with?("@")
+            fpath = File.expand_path(options[field][1..])
+            evidence_error("--#{field.tr('_', '-')} file not found: #{fpath}") unless File.file?(fpath)
+            File.read(fpath)
+          else
+            options[field]
+          end
+    begin
+      parsed = raw.strip.start_with?("{") ? JSON.parse(raw) : YAML.safe_load(raw)
+    rescue JSON::ParserError, Psych::SyntaxError
+      evidence_error("--#{field.tr('_', '-')} must be valid JSON or YAML mapping.")
+    end
+    case field
+    when "data_classification"
+      dc = normalize_data_classification(parsed, "evidence_add", options["kind"])
+      evidence_error("--data-classification must be a mapping with categories, sensitivity, or redaction.") unless dc.is_a?(Hash)
+      record["data_classification"] = dc
+    when "retention_policy"
+      rp = normalize_retention_policy(parsed, "evidence_add", options["kind"])
+      evidence_error("--retention-policy must be a mapping with mode, expires_at, or user_approved.") unless rp.is_a?(Hash)
+      record["retention_policy"] = rp
+    when "trust_repair"
+      tr = normalize_trust_repair(parsed, "evidence_add", options["kind"])
+      evidence_error("--trust-repair must be a mapping with incident_id, impact, recovery, or prevention.") unless tr.is_a?(Hash)
+      record["trust_repair"] = tr
+    end
+  end
   validate_evidence_record_shape!(record, "Evidence record")
 
   update_evidence_manifest(path) do |manifest|
@@ -683,6 +725,19 @@ def evidence_from_report(options)
     if report.key?("decision_record")
       normalized_dr = validate_decision_record!({ "decision_record" => report["decision_record"], "kind" => kind }, "from_report")
       record["decision_record"] = normalized_dr if normalized_dr
+    end
+    # Slice 12: carry data classification fields.
+    if report.key?("data_classification")
+      dc = normalize_data_classification(report["data_classification"], "from_report", kind)
+      record["data_classification"] = dc if dc
+    end
+    if report.key?("retention_policy")
+      rp = normalize_retention_policy(report["retention_policy"], "from_report", kind)
+      record["retention_policy"] = rp if rp
+    end
+    if report.key?("trust_repair")
+      tr = normalize_trust_repair(report["trust_repair"], "from_report", kind)
+      record["trust_repair"] = tr if tr
     end
     snapshot = evidence_identity_snapshot(identity)
     record["identity"] = snapshot if snapshot

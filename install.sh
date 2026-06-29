@@ -110,6 +110,7 @@ lib/orbit/project_profile_risk.rb
 lib/orbit/gate_lease.rb
 lib/orbit/handoff.rb
 lib/orbit/docs_lifecycle.rb
+lib/orbit/data_classification.rb
 assets/templates/roles.yaml
 assets/templates/instances.yaml
 assets/templates/loop-state.yaml

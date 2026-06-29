@@ -907,6 +907,19 @@ def evidence_submit(options)
     normalized_dr = validate_decision_record!({ "decision_record" => report["decision_record"], "kind" => kind }, "submit_report")
     record["decision_record"] = normalized_dr if normalized_dr
   end
+  # Slice 12: carry data classification fields.
+  if report.key?("data_classification")
+    dc = normalize_data_classification(report["data_classification"], "submit_report", kind)
+    record["data_classification"] = dc if dc
+  end
+  if report.key?("retention_policy")
+    rp = normalize_retention_policy(report["retention_policy"], "submit_report", kind)
+    record["retention_policy"] = rp if rp
+  end
+  if report.key?("trust_repair")
+    tr = normalize_trust_repair(report["trust_repair"], "submit_report", kind)
+    record["trust_repair"] = tr if tr
+  end
   # Build role_execution_context (Slice 6 – supersedes Slice 5 flat identity block).
   # Readers should check role_execution_context first, then fall back to identity for compat.
   if identity

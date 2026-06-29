@@ -136,7 +136,7 @@ def compact_evidence(args)
     doc_ref&.merge("doc_id" => nil, "reference_type" => "source_document")
   end.compact
   rule_ref = evidence["rule_resolution"].is_a?(Hash) ? compact_file_ref(evidence["rule_resolution"]["file"]) : nil
-  record_summary = evidence_record_summary(evidence["records"])
+  record_summary = evidence_record_summary(redact_for_compact(evidence["records"]))
   latest_gate_verdicts = compact_latest_gate_verdicts(record_summary, handoff)
   closure_checklist = handoff.is_a?(Hash) ? handoff["closure_checklist"] : nil
   known_gaps = handoff.is_a?(Hash) ? handoff["known_gaps"] : nil
@@ -168,7 +168,7 @@ def compact_evidence(args)
     },
     "evidence_summary" => {
       "records" => record_summary,
-      "aggregate_verdict" => evidence["verdict"],
+      "aggregate_verdict" => redact_aggregate_verdict_for_summary(evidence["verdict"]),
       "waiver_count" => Array(evidence["waivers"]).length,
       "rule_resolution" => rule_ref
     },

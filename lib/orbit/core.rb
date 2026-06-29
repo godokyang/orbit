@@ -78,7 +78,7 @@ HELP = <<~HELP
     orbit docs alias --id ID --path PATH [--registry PATH] --json
     orbit docs check [--registry PATH] [--open-dir PATH] [--archive-dir PATH] --json
     orbit evidence init --output PATH
-    orbit evidence add --file PATH --kind KIND --status STATUS --summary SUMMARY
+    orbit evidence add --file PATH --kind KIND --status STATUS --summary SUMMARY [--decision-record JSON] [--data-classification JSON] [--retention-policy JSON] [--trust-repair JSON]
     orbit evidence from-report --file PATH --report PATH [--kind KIND] [--status STATUS] [--summary SUMMARY]
     orbit evidence submit --file PATH --report PATH [--task PATH] --json
     orbit evidence waive --file PATH --waiver PATH --json
@@ -339,7 +339,7 @@ COMMAND_HELP = {
   "evidence" => <<~HELP,
     Usage:
       orbit evidence init --output PATH
-      orbit evidence add --file PATH --kind KIND --status STATUS --summary SUMMARY
+      orbit evidence add --file PATH --kind KIND --status STATUS --summary SUMMARY [--decision-record JSON] [--data-classification JSON] [--retention-policy JSON] [--trust-repair JSON]
       orbit evidence from-report --file PATH --report PATH [--kind KIND] [--status STATUS] [--summary SUMMARY]
       orbit evidence submit --file PATH --report PATH [--task PATH] --json
       orbit evidence waive --file PATH --waiver PATH --json

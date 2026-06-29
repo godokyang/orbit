@@ -640,6 +640,16 @@ def audit(args)
     )
   end
 
+  # Slice 12: data classification audit findings.
+  dc_findings = data_classification_audit(evidence)
+  dc_findings.each do |finding|
+    if finding["severity"] == "high"
+      blocking_findings << audit_finding(finding["source"], finding["message"], "high")
+    else
+      warnings << audit_finding(finding["source"], finding["message"], finding["severity"] || "medium")
+    end
+  end
+
   issues = blocking_findings + warnings
   trust_flags = audit_trust_flags(phase, blocking_findings, warnings)
 
@@ -674,6 +684,8 @@ def audit(args)
     "gate_lease_summary" => gate_lease_summary(evidence),
     "decision_record_summary" => decision_record_summary(evidence),
     "task_risk_summary" => task_risk_summary(task),
+    "data_classification_summary" => data_classification_summary(evidence),
+    "trust_repair_summary" => trust_repair_summary(evidence),
     "issues" => issues,
     "blocking_findings" => blocking_findings,
     "warnings" => warnings

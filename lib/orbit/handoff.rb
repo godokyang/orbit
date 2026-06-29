@@ -77,7 +77,7 @@ def evidence_summary(evidence)
     "records" => 0,
     "by_kind" => {},
     "latest" => nil,
-    "aggregate_verdict" => evidence["verdict"],
+    "aggregate_verdict" => redact_aggregate_verdict_for_summary(evidence["verdict"]),
     "waivers" => {
       "total" => evidence["waivers"].is_a?(Array) ? evidence["waivers"].length : 0,
       "open" => evidence["waivers"].is_a?(Array) ? evidence["waivers"].count { |waiver| waiver.is_a?(Hash) && waiver["revoked_by_user_requirement"] != true } : 0
@@ -97,7 +97,7 @@ def evidence_summary(evidence)
       summary["by_kind"][kind][status] ||= 0
       summary["by_kind"][kind][status] += 1
     end
-    summary["latest"] = records.last
+    summary["latest"] = redact_sensitive_record(records.last)
   elsif evidence["verdict"].is_a?(Hash)
     summary["records"] = 1
     summary["latest"] = evidence["verdict"]
@@ -712,6 +712,8 @@ def handoff(args)
     "verdict_arbitration" => arbitration_summary,
     "gate_lease_summary" => lease_summary,
     "decision_record_summary" => decisions_summary,
+    "trust_repair_summary" => trust_repair_summary(evidence),
+    "data_classification_summary" => data_classification_summary(evidence),
     "worktree_safety_summary" => worktree_safety_summary(evidence),
     "evidence_summary" => evidence_summary(evidence),
     "schema_version_summary" => evidence_schema_version_summary(evidence, task.is_a?(Hash) ? task : nil),

@@ -33,6 +33,7 @@ def validate_evidence_record(result, source, record)
   validate_blocker_classification_record_field(result, source, record)
   validate_gate_lease_record_field(result, source, record)
   validate_decision_record_field(result, source, record)
+  validate_data_classification_fields(result, source, record)
 end
 
 def validate_role_execution_context_record(result, source, rec)
@@ -954,6 +955,67 @@ def validate_waivers(result, value)
 
   value.each_with_index do |waiver, index|
     validate_waiver(result, "evidence_file.waivers[#{index}]", waiver)
+  end
+end
+
+# Slice 12: validate data_classification, retention_policy, trust_repair on evidence records.
+def validate_data_classification_fields(result, source, record)
+  dc = record["data_classification"]
+  if dc.is_a?(Hash)
+    sensitivity = dc["sensitivity"]
+    if sensitivity && !(sensitivity.is_a?(String) && ALLOWED_SENSITIVITY_LEVELS.include?(sensitivity))
+      validation_error(result, "#{source}.data_classification.sensitivity",
+        "Evidence data_classification.sensitivity must be one of #{ALLOWED_SENSITIVITY_LEVELS.join("|")}.")
+    end
+
+    redaction = dc["redaction"]
+    if redaction && !(redaction.is_a?(String) && ALLOWED_REDACTION_STATES.include?(redaction))
+      validation_error(result, "#{source}.data_classification.redaction",
+        "Evidence data_classification.redaction must be one of #{ALLOWED_REDACTION_STATES.join("|")}.")
+    end
+
+    categories = dc["categories"]
+    if categories
+      unless categories.is_a?(Array) && categories.all? { |c| c.is_a?(String) }
+        validation_error(result, "#{source}.data_classification.categories",
+          "Evidence data_classification.categories must be a list of strings.")
+      end
+      if categories.is_a?(Array)
+        invalid = categories.reject { |c| c.is_a?(String) && ALLOWED_DATA_CATEGORIES.include?(c) }
+        if invalid.any?
+          validation_error(result, "#{source}.data_classification.categories",
+            "Evidence data_classification.categories contains invalid values: #{invalid.inspect}. Allowed: #{ALLOWED_DATA_CATEGORIES.join('|')}.")
+        end
+      end
+    end
+
+    # Secret + raw_allowed or missing retention is a hard violation.
+    rp = record["retention_policy"]
+    if sensitivity == "secret" && (rp.nil? || (rp.is_a?(Hash) && rp["mode"] == "raw_allowed"))
+      validation_error(result, "#{source}.retention_policy",
+        "Secret-classified data requires retention_policy with mode hash_only, redacted, or short_lived; raw_allowed is forbidden.")
+    end
+  elsif !dc.nil?
+    validation_error(result, "#{source}.data_classification",
+      "Evidence data_classification must be a mapping.")
+  end
+
+  rp = record["retention_policy"]
+  if rp.is_a?(Hash)
+    mode = rp["mode"]
+    if mode && !(mode.is_a?(String) && ALLOWED_RETENTION_MODES.include?(mode))
+      validation_error(result, "#{source}.retention_policy.mode",
+        "Evidence retention_policy.mode must be one of #{ALLOWED_RETENTION_MODES.join("|")}.")
+    end
+  elsif !rp.nil?
+    validation_error(result, "#{source}.retention_policy",
+      "Evidence retention_policy must be a mapping.")
+  end
+
+  tr = record["trust_repair"]
+  if tr && !tr.is_a?(Hash)
+    validation_error(result, "#{source}.trust_repair",
+      "Evidence trust_repair must be a mapping.")
   end
 end
 

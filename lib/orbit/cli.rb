@@ -11,6 +11,7 @@ require_relative "audit_tools"
 require_relative "gate_lease"
 require_relative "handoff"
 require_relative "docs_lifecycle"
+require_relative "data_classification"
 
 def run_orbit_cli(argv)
   command = argv.shift
