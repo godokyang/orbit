@@ -672,6 +672,7 @@ def audit(args)
     "runtime_reconcile_summary" => reconcile,
     "verdict_arbitration_summary" => verdict_arbitration_summary(task, evidence, current_task_sha256),
     "gate_lease_summary" => gate_lease_summary(evidence),
+    "decision_record_summary" => decision_record_summary(evidence),
     "issues" => issues,
     "blocking_findings" => blocking_findings,
     "warnings" => warnings

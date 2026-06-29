@@ -903,6 +903,10 @@ def evidence_submit(options)
   end
   record["blocked"] = report["blocked"] if report.key?("blocked")
   record["gate_lease"] = report["gate_lease"] if report.key?("gate_lease")
+  if report.key?("decision_record")
+    normalized_dr = validate_decision_record!({ "decision_record" => report["decision_record"], "kind" => kind }, "submit_report")
+    record["decision_record"] = normalized_dr if normalized_dr
+  end
   # Build role_execution_context (Slice 6 – supersedes Slice 5 flat identity block).
   # Readers should check role_execution_context first, then fall back to identity for compat.
   if identity

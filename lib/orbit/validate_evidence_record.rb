@@ -32,6 +32,7 @@ def validate_evidence_record(result, source, record)
   validate_runtime_binding_record_field(result, source, record)
   validate_blocker_classification_record_field(result, source, record)
   validate_gate_lease_record_field(result, source, record)
+  validate_decision_record_field(result, source, record)
 end
 
 def validate_role_execution_context_record(result, source, rec)
@@ -351,6 +352,51 @@ def validate_gate_lease_record_field(result, source, record)
   if !policy.nil? && !(policy.is_a?(String) && ALLOWED_GATE_LEASE_REPLACEMENT_POLICIES.include?(policy))
     validation_error(result, "#{source}.gate_lease.replacement_policy",
       "Evidence gate_lease.replacement_policy must be one of #{ALLOWED_GATE_LEASE_REPLACEMENT_POLICIES.join("|")}.")
+  end
+end
+
+# Slice 10: validate decision_record on evidence records. Catches malformed records mutated after submit.
+def validate_decision_record_field(result, source, record)
+  return unless record.key?("decision_record")
+
+  dr = record["decision_record"]
+  unless dr.is_a?(Hash)
+    validation_error(result, "#{source}.decision_record",
+      "Evidence decision_record must be a mapping.")
+    return
+  end
+
+  %w[id kind summary source].each do |f|
+    v = dr[f]
+    unless v.is_a?(String) && !v.strip.empty?
+      validation_error(result, "#{source}.decision_record.#{f}",
+        "Evidence decision_record.#{f} must be a non-empty string.")
+    end
+  end
+
+  kind = dr["kind"]
+  if kind.is_a?(String) && !ALLOWED_DECISION_KINDS.include?(kind)
+    validation_error(result, "#{source}.decision_record.kind",
+      "Evidence decision_record.kind must be one of #{ALLOWED_DECISION_KINDS.join("|")}.")
+  end
+
+  applies_to = dr["applies_to"]
+  if !applies_to.nil? && !applies_to.is_a?(Hash)
+    validation_error(result, "#{source}.decision_record.applies_to",
+      "Evidence decision_record.applies_to must be a mapping.")
+  end
+
+  expires = dr["expires"]
+  if expires.is_a?(String) && !expires.strip.empty?
+    begin
+      Time.iso8601(expires.strip)
+    rescue ArgumentError
+      validation_error(result, "#{source}.decision_record.expires",
+        "Evidence decision_record.expires must be a valid ISO8601 datetime string.")
+    end
+  elsif !expires.nil?
+    validation_error(result, "#{source}.decision_record.expires",
+      "Evidence decision_record.expires must be a non-empty ISO8601 string.")
   end
 end
 

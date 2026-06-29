@@ -229,6 +229,14 @@ def parse_docs_args(args)
       options["archive_dir"] = option_value(args, "--archive-dir")
     when /\A--archive-dir=(.+)\z/
       options["archive_dir"] = Regexp.last_match(1)
+    when "--status"
+      options["doc_lifecycle_status"] = option_value(args, "--status")
+    when /\A--status=(.+)\z/
+      options["doc_lifecycle_status"] = Regexp.last_match(1)
+    when "--doc-lifecycle"
+      options["doc_lifecycle"] = option_value(args, "--doc-lifecycle")
+    when /\A--doc-lifecycle=(.+)\z/
+      options["doc_lifecycle"] = Regexp.last_match(1)
     when "--json"
       options["json"] = true
     else
@@ -281,6 +289,34 @@ def docs_alias(options)
     "schema_version" => "orbit-doc-alias-v1",
     "updated_at" => Time.now.utc.iso8601
   }
+  # Slice 10: carry doc_lifecycle metadata if provided via --doc-lifecycle or --status.
+  dl_source = options["doc_lifecycle"]
+  if dl_source
+    begin
+      dl_parsed = dl_source.strip.start_with?("{") ? JSON.parse(dl_source) : YAML.safe_load(dl_source)
+    rescue JSON::ParserError, Psych::SyntaxError
+      docs_error("--doc-lifecycle must be valid JSON or YAML mapping.")
+    end
+    unless dl_parsed.is_a?(Hash)
+      docs_error("--doc-lifecycle must be a mapping; got #{dl_parsed.class}.")
+    end
+    unless dl_parsed["doc_id"].is_a?(String) && !dl_parsed["doc_id"].strip.empty?
+      docs_error("--doc-lifecycle must include a non-empty doc_id.")
+    end
+    # doc_lifecycle.doc_id must match --id to preserve stable doc id semantics.
+    if dl_parsed["doc_id"].strip != options["id"]
+      docs_error("--doc-lifecycle doc_id (#{dl_parsed["doc_id"].strip.inspect}) must match --id (#{options["id"].inspect}).")
+    end
+    dl = normalize_doc_lifecycle(dl_parsed)
+    entry["doc_lifecycle"] = dl if dl
+  elsif options["doc_lifecycle_status"]
+    status = options["doc_lifecycle_status"]
+    unless ALLOWED_DOC_LIFECYCLE_STATUSES.include?(status)
+      docs_error("--status must be one of #{ALLOWED_DOC_LIFECYCLE_STATUSES.join('|')}.")
+    end
+    entry["doc_lifecycle"] = { "doc_id" => options["id"], "status" => status, "path" => path_inside_project(doc_path), "content_sha256" => entry["content_hash"] }
+  end
+  # Slice 10: carry decision_record if the alias command includes one (rare; usually on evidence).
   registry["docs"][options["id"]] = entry
   write_docs_registry(registry_path, registry)
 
@@ -354,9 +390,36 @@ def docs_check(options)
   open_docs = check_open_docs(open_dir, registry)
   archive_readme = archive_dir && Dir.exist?(archive_dir) ? File.file?(File.join(archive_dir, "README.md")) : nil
   issues = []
+  warnings = []
   aliases.each do |entry|
     issues << { "source" => "docs_registry.#{entry["id"]}.current_path", "message" => "Registered document path is missing." } unless entry["exists"]
     issues << { "source" => "docs_registry.#{entry["id"]}.content_hash", "message" => "Registered document content hash is stale." } if entry["exists"] && !entry["hash_matches"]
+  end
+  # Slice 10: warn when a doc with doc_lifecycle.status=open_design has been marked done in its content.
+  registry_doc_entries(registry).each do |doc_id, entry|
+    next unless entry.is_a?(Hash) && entry["doc_lifecycle"].is_a?(Hash)
+    dl = entry["doc_lifecycle"]
+    next unless dl["status"] == "open_design"
+    abs_path = entry["absolute_path"].to_s.empty? ? File.expand_path(entry["current_path"].to_s) : entry["absolute_path"]
+    next unless File.file?(abs_path)
+    content_status = markdown_front_matter_value(File.read(abs_path), "status") || markdown_front_matter_value(File.read(abs_path), "state")
+    if content_status.to_s.downcase == "done" || content_status.to_s.downcase == "implemented"
+      warnings << { "source" => "docs_registry.#{doc_id}.doc_lifecycle.status", "message" => "Document content indicates done/implemented but doc_lifecycle.status is still open_design; update to implemented_archive." }
+    end
+  end
+  # Slice 10: warn when lesson_candidate is treated as promoted_rule without explicit status change.
+  registry_doc_entries(registry).each do |doc_id, entry|
+    next unless entry.is_a?(Hash) && entry["doc_lifecycle"].is_a?(Hash)
+    dl = entry["doc_lifecycle"]
+    next unless dl["status"] == "lesson_candidate"
+    # Check if the doc content claims to be a rule but lifecycle hasn't been promoted.
+    abs_path = entry["absolute_path"].to_s.empty? ? File.expand_path(entry["current_path"].to_s) : entry["absolute_path"]
+    next unless File.file?(abs_path)
+    content = File.read(abs_path)
+    promoted = markdown_front_matter_value(content, "promoted") || markdown_front_matter_value(content, "rule_status")
+    if promoted.to_s.downcase == "true" || promoted.to_s.downcase == "active"
+      warnings << { "source" => "docs_registry.#{doc_id}.doc_lifecycle.status", "message" => "Document content claims promoted/active rule but doc_lifecycle.status is lesson_candidate; explicit status change to promoted_rule required." }
+    end
   end
   open_docs.each do |entry|
     next if entry["indexed"]
@@ -366,7 +429,6 @@ def docs_check(options)
   if archive_readme == false
     issues << { "source" => "docs_archive.README.md", "message" => "Archive directory is missing README.md." }
   end
-
   {
     "schema_version" => "orbit-docs-check-v1",
     "project" => registry["project"],
@@ -378,7 +440,9 @@ def docs_check(options)
       "path" => archive_dir ? path_inside_project(File.expand_path(archive_dir)) : nil,
       "readme_present" => archive_readme
     },
-    "issues" => issues
+    "doc_lifecycle_summary" => doc_lifecycle_summary(registry),
+    "issues" => issues,
+    "warnings" => warnings
   }
 end
 
@@ -387,4 +451,188 @@ def docs(args)
   result = options["subcommand"] == "alias" ? docs_alias(options) : docs_check(options)
   print "#{JSON.pretty_generate(result)}\n"
   exit(result["valid"] == false ? 1 : 0)
+end
+
+# ---------------------------------------------------------------------------
+# Slice 10: doc_lifecycle metadata + decision_record structured records
+# ---------------------------------------------------------------------------
+
+# Validates a doc_lifecycle mapping on a doc alias entry or evidence record.
+# Returns the normalized lifecycle or nil when absent/malformed.
+def normalize_doc_lifecycle(value)
+  return nil unless value.is_a?(Hash)
+
+  doc_id = value["doc_id"]
+  path = value["path"]
+  return nil unless doc_id.is_a?(String) && !doc_id.empty?
+
+  result = { "doc_id" => doc_id }
+  result["path"] = path if path.is_a?(String) && !path.empty?
+  status = value["status"]
+  if status.is_a?(String) && !status.empty?
+    unless ALLOWED_DOC_LIFECYCLE_STATUSES.include?(status)
+      docs_error("doc_lifecycle.status must be one of #{ALLOWED_DOC_LIFECYCLE_STATUSES.join('|')}; got #{status.inspect}.")
+    end
+    result["status"] = status
+  else
+    result["status"] = "active_baseline"
+  end
+  supersedes = value["supersedes"]
+  result["supersedes"] = supersedes if supersedes.is_a?(Array) && supersedes.all? { |s| s.is_a?(String) && !s.empty? }
+  superseded_by = value["superseded_by"]
+  result["superseded_by"] = superseded_by if superseded_by.is_a?(String) && !superseded_by.empty?
+  content_sha = value["content_sha256"]
+  result["content_sha256"] = content_sha if content_sha.is_a?(String) && !content_sha.empty?
+  result
+end
+
+# Validates a decision_record mapping attached to an evidence record.
+def validate_decision_record!(record, source)
+  dr = record["decision_record"]
+  unless dr.is_a?(Hash)
+    submit_report_schema_error(
+      "#{source}.decision_record",
+      "decision_record must be a mapping.",
+      expected: "mapping with id, kind, summary, source",
+      actual: evidence_value_type(dr),
+      kind: record["kind"]
+    )
+    return nil
+  end
+
+  result = {}
+  %w[id kind summary source].each do |f|
+    v = dr[f]
+    unless v.is_a?(String) && !v.strip.empty?
+      submit_report_schema_error(
+        "#{source}.decision_record.#{f}",
+        "decision_record.#{f} must be a non-empty string.",
+        expected: "non-empty string",
+        actual: evidence_value_type(v),
+        kind: record["kind"]
+      )
+      next
+    end
+    result[f] = v.strip
+  end
+
+  kind = result["kind"]
+  if kind && !ALLOWED_DECISION_KINDS.include?(kind)
+    submit_report_schema_error(
+      "#{source}.decision_record.kind",
+      "decision_record.kind must be one of #{ALLOWED_DECISION_KINDS.join('|')}.",
+      expected: ALLOWED_DECISION_KINDS.join("|"),
+      actual: evidence_value_type(kind),
+      kind: record["kind"]
+    )
+  end
+
+  applies_to = dr["applies_to"]
+  if applies_to.is_a?(Hash)
+    at = {}
+    %w[task doc_id].each do |f|
+      v = applies_to[f]
+      at[f] = v if v.is_a?(String) && !v.empty?
+    end
+    result["applies_to"] = at unless at.empty?
+  elsif !applies_to.nil?
+    submit_report_schema_error(
+      "#{source}.decision_record.applies_to",
+      "decision_record.applies_to must be a mapping.",
+      expected: "mapping with task and/or doc_id",
+      actual: evidence_value_type(applies_to),
+      kind: record["kind"]
+    )
+  end
+
+  expires = dr["expires"]
+  if expires.is_a?(String) && !expires.strip.empty?
+    begin
+      Time.iso8601(expires.strip)
+      result["expires"] = expires.strip
+    rescue ArgumentError
+      submit_report_schema_error(
+        "#{source}.decision_record.expires",
+        "decision_record.expires must be a valid ISO8601 datetime string.",
+        expected: "ISO8601 datetime string",
+        actual: expires.inspect,
+        kind: record["kind"]
+      )
+    end
+  elsif !expires.nil?
+    submit_report_schema_error(
+      "#{source}.decision_record.expires",
+      "decision_record.expires must be a non-empty ISO8601 string.",
+      expected: "ISO8601 string",
+      actual: evidence_value_type(expires),
+      kind: record["kind"]
+    )
+  end
+
+  result
+end
+
+# Aggregates decision records from evidence into active/expired for handoff and audit.
+def decision_record_summary(evidence, now = Time.now.utc)
+  records = evidence.is_a?(Hash) && evidence["records"].is_a?(Array) ? evidence["records"] : []
+  active = []
+  expired = []
+  records.each do |record|
+    next unless record.is_a?(Hash) && record["decision_record"].is_a?(Hash)
+    dr = record["decision_record"]
+    next unless dr["id"].is_a?(String) && !dr["id"].empty?
+
+    entry = {
+      "id" => dr["id"],
+      "kind" => dr["kind"],
+      "summary" => dr["summary"],
+      "source" => dr["source"],
+      "applies_to" => dr["applies_to"],
+      "expires" => dr["expires"]
+    }.compact
+
+    expires = dr["expires"]
+    if expires.is_a?(String) && !expires.empty?
+      begin
+        exp_time = Time.iso8601(expires)
+        if exp_time < now
+          expired << entry.merge("effective_status" => "expired")
+        else
+          active << entry.merge("effective_status" => "active")
+        end
+      rescue ArgumentError
+        active << entry.merge("effective_status" => "active")
+      end
+    else
+      active << entry.merge("effective_status" => "active")
+    end
+  end
+
+  {
+    "active_decisions" => active,
+    "expired_decisions" => expired,
+    "active_count" => active.length,
+    "expired_count" => expired.length,
+    "any_expired" => !expired.empty?
+  }
+end
+
+# Summarizes doc_lifecycle metadata from doc alias entries for docs check.
+def doc_lifecycle_summary(registry)
+  entries = registry_doc_entries(registry)
+  by_status = {}
+  entries.each do |_id, entry|
+    next unless entry.is_a?(Hash)
+    dl = entry["doc_lifecycle"]
+    next unless dl.is_a?(Hash)
+    status = dl["status"].is_a?(String) ? dl["status"] : "active_baseline"
+    by_status[status] = (by_status[status] || 0) + 1
+  end
+  {
+    "doc_count" => entries.length,
+    "statuses" => by_status,
+    "has_open_design" => (by_status["open_design"] || 0) > 0,
+    "has_lesson_candidate" => (by_status["lesson_candidate"] || 0) > 0,
+    "has_promoted_rule" => (by_status["promoted_rule"] || 0) > 0
+  }
 end

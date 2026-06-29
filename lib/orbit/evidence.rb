@@ -24,6 +24,9 @@ ALLOWED_GATE_LEASE_STATUSES = %w[claimed expired superseded released].freeze
 ALLOWED_GATE_LEASE_REPLACEMENT_POLICIES = %w[allow_after_expiry deny owner_only].freeze
 GATE_LEASE_DEFAULT_REPLACEMENT_POLICY = "allow_after_expiry"
 VERDICT_ARBITRATION_CONFLICT_RESOLUTION = "latest_valid_for_task_revision"
+# Slice 10: doc lifecycle and decision records.
+ALLOWED_DOC_LIFECYCLE_STATUSES = %w[active_baseline open_design implemented_archive historical_reference lesson_candidate promoted_rule].freeze
+ALLOWED_DECISION_KINDS = %w[user_confirmation scope_change risk_acceptance design_choice lesson_promotion].freeze
 EVIDENCE_EXPECTED_GATE_ROLES = {
   "review" => "reviewer",
   "test" => "tester"
@@ -74,6 +77,10 @@ def parse_evidence_args(args)
       options["task"] = option_value(args, "--task")
     when /\A--task=(.+)\z/
       options["task"] = Regexp.last_match(1)
+    when "--decision-record"
+      options["decision_record"] = option_value(args, "--decision-record")
+    when /\A--decision-record=(.+)\z/
+      options["decision_record"] = Regexp.last_match(1)
     when "--waiver"
       options["waiver"] = option_value(args, "--waiver")
     when /\A--waiver=(.+)\z/
@@ -512,6 +519,25 @@ def evidence_add(options)
   apply_structured_gate_defaults!(record, "manual:evidence-add:#{record["created_at"]}")
   snapshot = evidence_identity_snapshot(identity)
   record["identity"] = snapshot if snapshot
+  # Slice 10: parse --decision-record (JSON/YAML string or @file) and attach to record.
+  if options["decision_record"]
+    dr_source = options["decision_record"]
+    raw = if dr_source.start_with?("@")
+            dr_path = File.expand_path(dr_source[1..])
+            evidence_error("--decision-record file not found: #{dr_path}") unless File.file?(dr_path)
+            File.read(dr_path)
+          else
+            dr_source
+          end
+    begin
+      parsed = raw.strip.start_with?("{") ? JSON.parse(raw) : YAML.safe_load(raw)
+    rescue JSON::ParserError, Psych::SyntaxError
+      evidence_error("--decision-record must be valid JSON or YAML mapping.")
+    end
+    normalized = validate_decision_record!({ "decision_record" => parsed, "kind" => options["kind"] }, "evidence_add")
+    evidence_error("--decision-record must be a mapping with id, kind, summary, source.") unless normalized.is_a?(Hash)
+    record["decision_record"] = normalized
+  end
   validate_evidence_record_shape!(record, "Evidence record")
 
   update_evidence_manifest(path) do |manifest|
@@ -653,6 +679,10 @@ def evidence_from_report(options)
     extra.each { |field, value| record[field] = value unless value.nil? } if extra.is_a?(Hash)
     %w[test_environment quality_measurement duration resource_usage ux_quality artifact_quality cleanup_status].each do |field|
       record[field] = report[field] if report.key?(field)
+    end
+    if report.key?("decision_record")
+      normalized_dr = validate_decision_record!({ "decision_record" => report["decision_record"], "kind" => kind }, "from_report")
+      record["decision_record"] = normalized_dr if normalized_dr
     end
     snapshot = evidence_identity_snapshot(identity)
     record["identity"] = snapshot if snapshot

@@ -666,6 +666,7 @@ def handoff(args)
   runtime_summary = handoff_runtime_summary(evidence)
   reconcile_summary = runtime_reconcile_summary(evidence)
   arbitration_summary = verdict_arbitration_summary(task, evidence, current_task_sha256)
+  decisions_summary = decision_record_summary(evidence)
   lease_summary = gate_lease_summary(evidence)
   closure_checklist = closure_checklist_for_handoff(task, evidence, validation, audit_blocking, audit_warnings, task_sha256: current_task_sha256)
   packet = {
@@ -702,12 +703,15 @@ def handoff(args)
       "reproducibility_gaps_count" => runtime_summary["reproducibility_gaps"].length,
       "gate_lease_active" => lease_summary["active_count"].to_i,
       "gate_lease_expired" => lease_summary["expired_count"].to_i,
-      "gate_owner_replaceable" => lease_summary["any_replaceable"]
+      "gate_owner_replaceable" => lease_summary["any_replaceable"],
+      "active_decisions_count" => decisions_summary["active_count"].to_i,
+      "expired_decisions_count" => decisions_summary["expired_count"].to_i
     },
     "runtime_summary" => runtime_summary,
     "runtime_reconcile_summary" => reconcile_summary,
     "verdict_arbitration" => arbitration_summary,
     "gate_lease_summary" => lease_summary,
+    "decision_record_summary" => decisions_summary,
     "worktree_safety_summary" => worktree_safety_summary(evidence),
     "evidence_summary" => evidence_summary(evidence),
     "schema_version_summary" => evidence_schema_version_summary(evidence, task.is_a?(Hash) ? task : nil),

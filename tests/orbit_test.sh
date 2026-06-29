@@ -175,4 +175,6 @@ source "$PARTS_DIR/09_identity_full.sh"
 source "$PARTS_DIR/10_retention_compact.sh"
 source "$PARTS_DIR/11_runtime_reconcile.sh"
 source "$PARTS_DIR/12_gate_lease.sh"
+source "$PARTS_DIR/13_doc_lifecycle.sh"
+
 printf 'REAL_TESTS_PASS count=%s tmp=%s\n' "$PASS_COUNT" "$TMPROOT"
