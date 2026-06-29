@@ -556,6 +556,7 @@ def handoff(args)
     "judgment_summary" => judgment_summary(evidence),
     "closure_checklist" => closure_checklist,
     "known_gaps" => known_gaps,
+    "parent_goal_status" => task.is_a?(Hash) ? task["parent_goal_status"] : nil,
     "readable_summary" => {
       "current_task" => task_path,
       "phase" => current_phase,

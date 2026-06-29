@@ -172,6 +172,43 @@ def audit_trust_level
   }
 end
 
+def parent_goal_audit(task, evidence)
+  return nil unless task.is_a?(Hash)
+
+  parent_goal = task["parent_goal"]
+  unless parent_goal.is_a?(Hash) && parent_goal["required"] == true
+    return { "state" => "not_applicable", "message" => "Task does not require parent goal tracking." }
+  end
+
+  status = task["parent_goal_status"]
+  current_state = status.is_a?(Hash) ? status["state"] : nil
+  done_criteria = parent_goal["done_criteria"].is_a?(Array) ? parent_goal["done_criteria"] : []
+  criteria_status = status.is_a?(Hash) && status["done_criteria_status"].is_a?(Array) ? status["done_criteria_status"] : []
+
+  evidenced_criteria = criteria_status.select { |cs| cs.is_a?(Hash) && cs["evidenced"] == true }.map { |cs| cs["criterion"] }
+  unevidenced = done_criteria.reject { |c| evidenced_criteria.include?(c) }
+
+  blocking = []
+  if current_state == "parent_done" && !unevidenced.empty?
+    blocking << {
+      "source" => "parent_goal_status.done_criteria",
+      "message" => "parent_goal_status.state is parent_done but #{unevidenced.length} done criteria lack evidence.",
+      "unevidenced" => unevidenced
+    }
+  end
+
+  {
+    "required" => true,
+    "objective" => parent_goal["objective"],
+    "current_state" => current_state,
+    "done_criteria_count" => done_criteria.length,
+    "evidenced_count" => evidenced_criteria.length,
+    "unevidenced_criteria" => unevidenced,
+    "blocking" => blocking,
+    "user_next_action" => status.is_a?(Hash) ? status["user_next_action"] : nil
+  }.compact
+end
+
 def audit_state_consistency(task_path, evidence_path, state, evidence, task = nil)
   blocking_findings = []
   warnings = []
@@ -286,6 +323,15 @@ def audit(args)
 
   trust_flags = audit_trust_flags(phase, blocking_findings, warnings)
 
+  # Merge parent_goal_summary.blocking into blocking_findings BEFORE building packet
+  # so that issues and trust_flags reflect parent_done violations consistently
+  pg_summary = parent_goal_audit(task, evidence)
+  if pg_summary.is_a?(Hash) && pg_summary["blocking"].is_a?(Array)
+    pg_summary["blocking"].each { |b| blocking_findings << b unless blocking_findings.include?(b) }
+  end
+  issues = blocking_findings + warnings
+  trust_flags = audit_trust_flags(phase, blocking_findings, warnings)
+
   packet = {
     "schema_version" => "orbit-audit-v1",
     "project" => task.is_a?(Hash) && task["project"] ? task["project"] : File.basename(Dir.pwd),
@@ -303,6 +349,7 @@ def audit(args)
     "done_ready" => trust_flags["trusted_for_done"],
     "evidence_summary" => evidence_summary(evidence),
     "quality_outcome_summary" => quality_outcome_summary(task, evidence),
+    "parent_goal_summary" => pg_summary,
     "worktree_safety_summary" => worktree_safety_summary(evidence),
     "rule_resolution_summary" => rule_resolution_summary(evidence, evidence_path),
     "schema_version_summary" => schema_summary,

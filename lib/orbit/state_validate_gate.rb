@@ -60,6 +60,7 @@ end
 
 ALLOWED_LOOP_PHASES = %w[idle working in_review in_test blocked done drafting review_requested changes_requested user_confirmed coding_ready].freeze
 DESIGN_LIFECYCLE_PHASES = %w[drafting review_requested changes_requested user_confirmed coding_ready].freeze
+ALLOWED_PARENT_GOAL_STATES = %w[not_applicable parent_in_progress slice_ready parent_blocked parent_done_ready parent_done].freeze
 ALLOWED_GATE_KINDS = %w[review test design_readiness release].freeze
 EXPECTED_GATE_ROLES = {
   "review"           => "reviewer",
@@ -152,6 +153,14 @@ def parse_state_args(args)
       options["state"] = option_value(args, "--state")
     when /\A--state=(.+)\z/
       options["state"] = Regexp.last_match(1)
+    when "--parent-state"
+      options["parent_state"] = option_value(args, "--parent-state")
+    when /\A--parent-state=(.+)\z/
+      options["parent_state"] = Regexp.last_match(1)
+    when "--active-slice"
+      options["active_slice"] = option_value(args, "--active-slice")
+    when /\A--active-slice=(.+)\z/
+      options["active_slice"] = Regexp.last_match(1)
     else
       usage_error("Unknown state #{subcommand} option: #{arg}")
     end
@@ -434,6 +443,11 @@ def state_progress(options)
   message = options["message"].to_s.strip
   state_error("Progress message must be non-empty.") if message.empty?
 
+  # Validate --parent-state enum before any side effects
+  if options["parent_state"] && !ALLOWED_PARENT_GOAL_STATES.include?(options["parent_state"])
+    state_error("--parent-state must be one of #{ALLOWED_PARENT_GOAL_STATES.join("|")}.")
+  end
+
   now = Time.now.utc.iso8601
 
   update_loop_state(state_path) do |state|
@@ -450,6 +464,30 @@ def state_progress(options)
     append_state_history(state, history_entry)
     state
   end
+
+  # Optionally update parent_goal_status in the task file if --task is given
+  if options["parent_state"] || options["active_slice"]
+    task_path_opt = options["task"]
+    if task_path_opt.nil? || task_path_opt.empty?
+      # Fall back to current_task from loop state
+      raw_state = YAML.safe_load(File.read(File.expand_path(options["state"]))) rescue nil
+      task_path_opt = raw_state.is_a?(Hash) ? raw_state["current_task"] : nil
+    end
+    if task_path_opt && !task_path_opt.empty?
+      task_full_path = File.expand_path(task_path_opt)
+      if File.exist?(task_full_path)
+        raw_task = YAML.safe_load(File.read(task_full_path)) rescue nil
+        if raw_task.is_a?(Hash)
+          raw_task["parent_goal_status"] ||= {}
+          raw_task["parent_goal_status"]["state"] = options["parent_state"] if options["parent_state"]
+          raw_task["parent_goal_status"]["active_slice"] = options["active_slice"] if options["active_slice"]
+          File.write(task_full_path, YAML.dump(raw_task))
+          puts "Updated parent_goal_status in task file."
+        end
+      end
+    end
+  end
+
   puts "Recorded Orbit progress:"
   puts "- #{message}"
 end
@@ -1028,6 +1066,7 @@ def validate_task(result, task_path)
   validate_test_environment_contract(result, task) if test_task_contract?(task)
   validate_task_test_level_contract(result, task)
   validate_quality_measurement_contract(result, task) if quality_measurement_task?(task)
+  validate_parent_goal(result, task) if parent_goal_required?(task)
 
   validate_task_runtime_fields(result, task)
 
@@ -1163,6 +1202,59 @@ def validate_task_runtime_fields(result, task)
     unless required.nil? || [true, false].include?(required)
       validation_error(result, "#{source}.required", "Task gate required must be true or false when present.")
     end
+  end
+end
+
+def parent_goal_required?(task)
+  pg = task.is_a?(Hash) ? task["parent_goal"] : nil
+  pg.is_a?(Hash) && pg["required"] == true
+end
+
+def validate_parent_goal(result, task)
+  parent_goal = task["parent_goal"]
+  unless parent_goal.is_a?(Hash)
+    validation_error(result, "task_file.parent_goal", "Task with parent_goal.required must define parent_goal as a mapping.")
+    return
+  end
+
+  objective = parent_goal["objective"]
+  if objective.nil? || !objective.is_a?(String) || objective.strip.empty?
+    validation_error(result, "task_file.parent_goal.objective", "Parent goal objective must be a non-empty string.")
+  end
+
+  done_criteria = parent_goal["done_criteria"]
+  unless done_criteria.is_a?(Array) && !done_criteria.empty? && done_criteria.all? { |c| c.is_a?(String) && !c.strip.empty? }
+    validation_error(result, "task_file.parent_goal.done_criteria", "Parent task done_criteria must be a non-empty list of non-empty strings.")
+  end
+
+  status = task["parent_goal_status"]
+  unless status.is_a?(Hash)
+    validation_error(result, "task_file.parent_goal_status", "Task with parent_goal.required must define parent_goal_status as a mapping.")
+    return
+  end
+
+  state_val = status["state"].to_s
+  if !state_val.empty? && !ALLOWED_PARENT_GOAL_STATES.include?(state_val)
+    validation_error(result, "task_file.parent_goal_status.state", "parent_goal_status.state must be one of #{ALLOWED_PARENT_GOAL_STATES.join("|")}.")
+  end
+
+  if state_val == "parent_done"
+    pg_criteria = parent_goal["done_criteria"].is_a?(Array) ? parent_goal["done_criteria"] : []
+    criteria_status = status["done_criteria_status"].is_a?(Array) ? status["done_criteria_status"] : []
+    evidenced = criteria_status.select { |cs| cs.is_a?(Hash) && cs["evidenced"] == true }.map { |cs| cs["criterion"] }
+    unevidenced = pg_criteria.reject { |c| evidenced.include?(c) }
+    unless unevidenced.empty?
+      validation_error(result, "task_file.parent_goal_status.done_criteria_status",
+        "parent_goal_status.state is parent_done but #{unevidenced.length} done criteria lack evidence.")
+    end
+  end
+
+  user_next = status["user_next_action"]
+  return unless user_next.is_a?(Hash)
+
+  default_action = user_next["default"]
+  if default_action.nil? || !default_action.is_a?(String) || default_action.strip.empty?
+    validation_error(result, "task_file.parent_goal_status.user_next_action.default", "parent_goal_status.user_next_action.default must be a non-empty string.")
   end
 end
 
@@ -2259,8 +2351,9 @@ def wait_gate(args)
     "aggregate_verdict" => evidence["verdict"],
     "gate_summary" => gate_summary,
     "gates" => gates,
+    "parent_goal_status" => task.is_a?(Hash) ? task["parent_goal_status"] : nil,
     "summary" => ready ? "all required gates pass" : "required gates are not ready"
-  }
+  }.compact
 
   puts JSON.pretty_generate(packet)
   exit(1) unless ready

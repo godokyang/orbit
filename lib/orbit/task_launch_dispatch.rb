@@ -301,6 +301,38 @@ def default_quality_measurement(task_type)
   }
 end
 
+def default_parent_goal(task_type)
+  is_decomp = decomposition_task?(task_type)
+  {
+    "required" => is_decomp,
+    "id" => "",
+    "objective" => is_decomp ? "Describe the parent objective this decomposition serves." : "",
+    "done_criteria" => is_decomp ? [
+      "All child slices are done and pass their gates.",
+      "Aggregate outcome evidence covers every done criterion."
+    ] : [],
+    "non_goals" => []
+  }
+end
+
+def default_parent_goal_status(task_type)
+  is_decomp = decomposition_task?(task_type)
+  {
+    "state" => is_decomp ? "parent_in_progress" : "not_applicable",
+    "active_slice" => "",
+    "done_criteria_status" => [],
+    "remaining_blockers" => [],
+    "required_gates" => {},
+    "user_next_action" => {
+      "default" => is_decomp ? "update_parent_goal_status" : "not_applicable",
+      "options" => [],
+      "waiting_on" => "",
+      "blocked_by" => "",
+      "do_not_do" => []
+    }
+  }
+end
+
 def new_task(args)
   options = parse_new_task_args(args)
   template_path = File.join(TEMPLATE_ROOT, "task.yaml")
@@ -338,6 +370,8 @@ def new_task(args)
   task["test_level"] = default_test_level(options["target_role"], options["task_type"])
   task["test_environment"] = default_test_environment(options["target_role"], options["task_type"])
   task["quality_measurement"] = default_quality_measurement(options["task_type"])
+  task["parent_goal"] = default_parent_goal(options["task_type"])
+  task["parent_goal_status"] = default_parent_goal_status(options["task_type"])
   task_rule_packs = rule_packs_for_context(options["target_role"], options["task_type"])
   task["rule_packs"] = task_rule_packs unless task_rule_packs.empty?
 
