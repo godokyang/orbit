@@ -599,6 +599,32 @@ def classify_intent_text(text)
   }
 end
 
+# Slice 11: recommend a risk level based on intent and text.
+# Release and UI/behavior-changing signals are checked FIRST so they override
+# discussion/docs fallbacks that would otherwise produce "light".
+def intent_risk_recommendation(intent, text)
+  normalized = text.to_s.downcase
+
+  # Priority 1: release/deploy signals always yield release risk.
+  is_release = normalized.match?(/release|deploy|publish|ship|发布|上线|部署/)
+  return { "level" => "release", "rationale" => "Release/deploy intent requires release readiness evidence." } if is_release
+
+  # Priority 2: UI/behavior-changing signals yield standard risk.
+  is_ui_or_behavior = normalized.match?(/ui|ux|interface|button|form|page|screen|按钮|交互|页面|change|changing|修改|behavior/)
+  return { "level" => "standard", "rationale" => "UI or behavior change requires review and test gates." } if is_ui_or_behavior
+
+  # Priority 3: intent-based defaults.
+  case intent
+  when "discussion"
+    { "level" => "light", "rationale" => "Discussion does not require formal gates." }
+  when "docs_maintenance"
+    affects_orbit = normalized.match?(/\.orbit|evidence|handoff|archive|rule/)
+    { "level" => affects_orbit ? "standard" : "light", "rationale" => affects_orbit ? "Docs change affects Orbit runtime; use standard." : "Light docs edit; no formal gate required." }
+  else
+    { "level" => "standard", "rationale" => "Behavior-changing task; use standard risk level." }
+  end
+end
+
 def classify_intent(args)
   options = parse_classify_intent_args(args)
   text = options["text"].to_s
@@ -614,6 +640,7 @@ def classify_intent(args)
     "reason" => classification["reason"],
     "explicit_orbit_workflow" => classification["explicit_orbit_workflow"],
     "policy" => classify_intent_policy(classification["intent"], text),
+    "risk_recommendation" => intent_risk_recommendation(classification["intent"], text),
     "allowed_intents" => %w[discussion design docs_maintenance coding review test handoff]
   }
 

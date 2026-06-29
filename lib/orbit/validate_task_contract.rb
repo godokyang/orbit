@@ -450,6 +450,8 @@ def validate_quality_measurement_contract(result, task)
 end
 
 def review_or_test_gate?(task)
+  return false if light_risk?(task)
+
   task_type = task["task_type"].to_s
   target_role = task["target_role"].to_s
 
@@ -498,6 +500,8 @@ def expected_evidence_kind(task)
 end
 
 def required_evidence_kinds(task)
+  return [] if light_risk?(task)
+
   kinds = []
   direct_kind = expected_evidence_kind(task)
   kinds << direct_kind if direct_kind
@@ -559,6 +563,8 @@ def validate_task(result, task_path)
 
   validate_task_runtime_fields(result, task)
 
+  validate_task_risk_level(result, task)
+  validate_project_profile(result, task)
   task
 end
 
@@ -748,6 +754,113 @@ def validate_parent_goal(result, task)
   default_action = user_next["default"]
   if default_action.nil? || !default_action.is_a?(String) || default_action.strip.empty?
     validation_error(result, "task_file.parent_goal_status.user_next_action.default", "parent_goal_status.user_next_action.default must be a non-empty string.")
+  end
+end
+
+# Slice 11: validate task_risk and project_profile fields.
+def validate_task_risk_level(result, task)
+  return unless task.key?("task_risk")
+
+  risk = task["task_risk"]
+  unless risk.is_a?(Hash)
+    validation_error(result, "task_file.task_risk", "Task task_risk must be a mapping.")
+    return
+  end
+
+  level = risk["level"]
+  unless level.is_a?(String) && ALLOWED_RISK_LEVELS.include?(level)
+    validation_error(result, "task_file.task_risk.level", "Task task_risk.level must be one of #{ALLOWED_RISK_LEVELS.join("|")}.")
+    return
+  end
+
+  default_levels = DEFAULT_MIN_EVIDENCE_LEVELS_BY_RISK[level] || {}
+
+  # Release risk requires release gate AND release readiness evidence fields or explicit gap.
+  if level == "release"
+    gates = task["gates"]
+    has_release_gate = gates.is_a?(Array) && gates.any? { |g| g.is_a?(Hash) && g["kind"] == "release" }
+    unless has_release_gate
+      validation_error(result, "task_file.task_risk.level",
+        "Release risk level requires a release gate with release_readiness evidence.")
+    end
+    # Fail closed: release readiness evidence fields must be present or explicit gap declared.
+    unless task.key?("release_readiness")
+      validation_error(result, "task_file.release_readiness",
+        "Release risk level requires release_readiness evidence fields or an explicit release readiness gap declaration.")
+    end
+  end
+
+  # Strict or release risk requires strict write_policy_enforcement.
+  if %w[strict release].include?(level)
+    wpe = task["write_policy_enforcement"].to_s
+    unless wpe == "strict"
+      validation_error(result, "task_file.write_policy_enforcement",
+        "#{level} risk level requires write_policy_enforcement: strict; got #{wpe.inspect}.")
+    end
+  end
+
+  # Check minimum_evidence_levels don't lower the bar below risk-derived defaults.
+  min_levels = risk["minimum_evidence_levels"]
+  if min_levels.is_a?(Hash)
+    min_levels.each do |gate_kind, actual_min|
+      next unless actual_min.is_a?(String)
+      risk_default = default_levels[gate_kind.to_s]
+      next unless risk_default
+      # actual_min must satisfy (>=) risk_default; it can only raise the bar, not lower it.
+      unless evidence_level_satisfies_minimum?(actual_min, risk_default)
+        validation_error(result, "task_file.task_risk.minimum_evidence_levels.#{gate_kind}",
+          "task_risk.minimum_evidence_levels.#{gate_kind} (#{actual_min}) cannot be lower than risk-derived default (#{risk_default}) for #{level} risk; record a waiver to lower.")
+      end
+    end
+  end
+
+  # Check review_strategy.minimum_evidence_level is not lowered below risk default.
+  # Skip for design tasks: implementation_readiness is the correct design_readiness family level,
+  # not a lowering of the review_quality family's outcome_quality.
+  unless design_task?(task["task_type"])
+    review_strategy = task["review_strategy"]
+    if review_strategy.is_a?(Hash) && review_strategy.key?("minimum_evidence_level")
+      actual_review_min = review_strategy["minimum_evidence_level"].to_s
+      risk_review_default = default_levels["review"]
+      if risk_review_default && !actual_review_min.empty? && !evidence_level_satisfies_minimum?(actual_review_min, risk_review_default)
+        validation_error(result, "task_file.review_strategy.minimum_evidence_level",
+          "review_strategy.minimum_evidence_level (#{actual_review_min}) cannot be lower than risk-derived default (#{risk_review_default}) for #{level} risk.")
+      end
+    end
+  end
+
+  # Check test_strategy.minimum_evidence_level is not lowered below risk default.
+  test_strategy = task["test_strategy"]
+  if test_strategy.is_a?(Hash) && test_strategy.key?("minimum_evidence_level")
+    actual_test_min = test_strategy["minimum_evidence_level"].to_s
+    risk_test_default = default_levels["test"]
+    if risk_test_default && !actual_test_min.empty? && !evidence_level_satisfies_minimum?(actual_test_min, risk_test_default)
+      validation_error(result, "task_file.test_strategy.minimum_evidence_level",
+        "test_strategy.minimum_evidence_level (#{actual_test_min}) cannot be lower than risk-derived default (#{risk_test_default}) for #{level} risk.")
+    end
+  end
+end
+
+# Slice 11: validate project_profile structure when present.
+def validate_project_profile(result, task)
+  return unless task.key?("project_profile")
+
+  profile = task["project_profile"]
+  unless profile.is_a?(Hash)
+    validation_error(result, "task_file.project_profile", "Task project_profile must be a mapping.")
+    return
+  end
+
+  default_risk = profile["default_risk_level"]
+  if default_risk && !(default_risk.is_a?(String) && ALLOWED_RISK_LEVELS.include?(default_risk))
+    validation_error(result, "task_file.project_profile.default_risk_level",
+      "project_profile.default_risk_level must be one of #{ALLOWED_RISK_LEVELS.join("|")} when present.")
+  end
+
+  traits = profile["workflow_traits"]
+  if traits && !(traits.is_a?(Array) && traits.all? { |t| t.is_a?(String) && !t.strip.empty? })
+    validation_error(result, "task_file.project_profile.workflow_traits",
+      "project_profile.workflow_traits must be a list of non-empty strings when present.")
   end
 end
 

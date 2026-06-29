@@ -356,12 +356,24 @@ def new_task(args)
   task["schema_semantics"] = {
     "feature_versions" => ORBIT_FEATURE_VERSIONS.reject { |_k, v| v.nil? }
   }
-  task["gates"] = default_gates_for_new_task(options["target_role"], options["task_type"])
+  # Slice 11: derive task_risk and project_profile.
+  task_risk = derive_task_risk(options["target_role"], options["task_type"])
+  task["task_risk"] = task_risk
+  task["project_profile"] = DEFAULT_PROJECT_PROFILE.dup
+  risk_gates = default_gates_for_risk(task_risk["level"], options["target_role"], options["task_type"])
+  task["gates"] = risk_gates.any? ? risk_gates : default_gates_for_new_task(options["target_role"], options["task_type"])
   task["quality_outcome"] = quality_outcome_template(options["task_type"])
   task["invalid_completion_guards"] = default_invalid_completion_guards(options["task_type"]) if improvement_task_type?(options["task_type"])
   task["review_strategy"] = default_review_strategy(options["task_type"])
+  # Apply risk-derived minimum evidence levels to review_strategy.
+  risk_review_min = task_risk["minimum_evidence_levels"]["review"]
+  task["review_strategy"]["minimum_evidence_level"] = risk_review_min if risk_review_min && !design_task?(options["task_type"])
   test_strat = default_test_strategy(options["target_role"], options["task_type"])
-  task["test_strategy"] = test_strat if test_strat
+  if test_strat
+    risk_test_min = task_risk["minimum_evidence_levels"]["test"]
+    test_strat["minimum_evidence_level"] = risk_test_min if risk_test_min
+    task["test_strategy"] = test_strat
+  end
   task["design_lifecycle"] = default_design_lifecycle(options["task_type"])
   task["design_reference"] = default_design_reference(options["task_type"])
   task["implementation_plan"] = default_implementation_plan(options["task_type"])
@@ -374,8 +386,9 @@ def new_task(args)
   task["parent_goal_status"] = default_parent_goal_status(options["task_type"])
   task_rule_packs = rule_packs_for_context(options["target_role"], options["task_type"])
   task["rule_packs"] = task_rule_packs unless task_rule_packs.empty?
-  task["write_policy_enforcement"] = "standard"
-
+  task["write_policy_enforcement"] = DEFAULT_WRITE_POLICY_ENFORCEMENT_BY_RISK[task_risk["level"]] || "standard"
+  # Slice 11: release risk tasks get a release_readiness block (initially declaring a gap).
+  task["release_readiness"] = { "status" => "gap_declared", "evidence_fields" => [], "rationale" => "Release readiness evidence fields must be populated before release gate can pass." } if task_risk["level"] == "release"
   FileUtils.mkdir_p(File.dirname(output_path))
   File.write(output_path, YAML.dump(task))
 
