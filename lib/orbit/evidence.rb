@@ -15,6 +15,10 @@ ALLOWED_RULE_APPLICATION_VERDICTS = %w[pass fail blocked not_applicable].freeze
 ALLOWED_QUALITY_QUESTION_VERDICTS = %w[pass fail blocked not_applicable].freeze
 ALLOWED_IMPLEMENTATION_READINESS_VERDICTS = %w[pass blocked not_checked].freeze
 REQUIRED_FINDING_DETAIL_FIELDS = %w[symptom source consequence remedy].freeze
+ALLOWED_FAILURE_CLASSES = %w[code_failure environment_failure service_failure model_drift expected_fail_closed unknown].freeze
+# Blocker classifications that cannot coexist with a pass verdict: they describe a non-code
+# blocker (environment/service/model_drift) or an unresolved unknown, so the path did not pass.
+NON_CODE_PASS_BLOCKER_KINDS = %w[environment_failure service_failure model_drift unknown].freeze
 EVIDENCE_EXPECTED_GATE_ROLES = {
   "review" => "reviewer",
   "test" => "tester"

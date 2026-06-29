@@ -161,6 +161,71 @@ def known_gaps_for_handoff(evidence, audit_warnings)
   gaps
 end
 
+# Machine-readable runtime summary for the handoff packet.
+# Surfaces runtime_binding identities, aggregated cleanup status, and reproducibility/runtime gaps.
+def handoff_runtime_summary(evidence)
+  records = evidence.is_a?(Hash) && evidence["records"].is_a?(Array) ? evidence["records"] : []
+
+  runtime_bindings = records.each_with_index.map do |r, idx|
+    next unless r.is_a?(Hash) && r["runtime_binding"].is_a?(Hash)
+    {
+      "record_index" => idx,
+      "kind" => r["kind"],
+      "status" => r["status"],
+      "binding" => r["runtime_binding"]
+    }
+  end.compact
+
+  cleanup_counts = {}
+  cleanup_records = 0
+  cleanup_incomplete = 0
+  records.each do |r|
+    next unless r.is_a?(Hash) && r["test_environment"].is_a?(Hash)
+    cs = r["test_environment"]["cleanup_status"]
+    next unless cs.is_a?(String) && !cs.strip.empty?
+    cleanup_records += 1
+    norm = cs.strip
+    cleanup_counts[norm] = (cleanup_counts[norm] || 0) + 1
+    cleanup_incomplete += 1 unless norm == "complete"
+  end
+
+  reproducibility_gaps = []
+  runtime_gaps = []
+  runtime_bindings.each do |entry|
+    b = entry["binding"]
+    build = b["build"]
+    if build.is_a?(Hash)
+      git_head = build["git_head"]
+      if !git_head.is_a?(String) || git_head.strip.empty?
+        reproducibility_gaps << { "record_index" => entry["record_index"], "source" => "runtime_binding.build.git_head", "gap" => "build.git_head missing; artifact provenance unverifiable." }
+      end
+    else
+      reproducibility_gaps << { "record_index" => entry["record_index"], "source" => "runtime_binding.build", "gap" => "build binding missing; artifact reproducibility unverifiable." }
+    end
+
+    if entry["kind"] == "test" && entry["status"] == "pass"
+      has_owner = %w[server browser].any? { |k| b[k].is_a?(Hash) && b[k]["owner"].is_a?(String) && !b[k]["owner"].strip.empty? }
+      unless has_owner
+        runtime_gaps << { "record_index" => entry["record_index"], "source" => "runtime_binding.server.owner|runtime_binding.browser.owner", "gap" => "real_path_test PASS without server/browser owner; runtime path not attributable." }
+      end
+    end
+  end
+
+  {
+    "runtime_binding_count" => runtime_bindings.length,
+    "runtime_bindings" => runtime_bindings,
+    "cleanup_status" => {
+      "records_with_cleanup_status" => cleanup_records,
+      "statuses" => cleanup_counts,
+      "incomplete_count" => cleanup_incomplete,
+      "all_complete" => cleanup_records > 0 && cleanup_incomplete == 0
+    },
+    "reproducibility_gaps" => reproducibility_gaps,
+    "runtime_gaps" => runtime_gaps,
+    "has_gaps" => !reproducibility_gaps.empty? || !runtime_gaps.empty?
+  }
+end
+
 def closure_checklist_for_handoff(task, evidence, validation, audit_blocking, audit_warnings)
   source_documents = task.is_a?(Hash) && task["source_documents"].is_a?(Array) ? task["source_documents"] : []
   verdicts = latest_gate_verdicts_for_handoff(evidence)
@@ -592,6 +657,8 @@ def handoff(args)
   transport_profile["payload"] = transport_handoff_payload(transport_profile, task_path, state_path, evidence_path, next_action)
   latest_gate_verdicts = latest_gate_verdicts_for_handoff(evidence)
   known_gaps = known_gaps_for_handoff(evidence, audit_warnings)
+  runtime_summary = handoff_runtime_summary(evidence)
+  reconcile_summary = runtime_reconcile_summary(evidence)
   closure_checklist = closure_checklist_for_handoff(task, evidence, validation, audit_blocking, audit_warnings)
   packet = {
     "schema_version" => "orbit-handoff-v1",
@@ -620,8 +687,14 @@ def handoff(args)
       "next_action" => next_action,
       "latest_review_verdict" => latest_gate_verdicts.dig("review", "status"),
       "latest_test_verdict" => latest_gate_verdicts.dig("test", "status"),
-      "known_gaps_count" => known_gaps.length
+      "known_gaps_count" => known_gaps.length,
+      "runtime_binding_count" => runtime_summary["runtime_binding_count"],
+      "cleanup_all_complete" => runtime_summary["cleanup_status"]["all_complete"],
+      "runtime_gaps_count" => runtime_summary["runtime_gaps"].length,
+      "reproducibility_gaps_count" => runtime_summary["reproducibility_gaps"].length
     },
+    "runtime_summary" => runtime_summary,
+    "runtime_reconcile_summary" => reconcile_summary,
     "worktree_safety_summary" => worktree_safety_summary(evidence),
     "evidence_summary" => evidence_summary(evidence),
     "schema_version_summary" => evidence_schema_version_summary(evidence, task.is_a?(Hash) ? task : nil),

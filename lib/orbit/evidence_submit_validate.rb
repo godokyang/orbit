@@ -58,6 +58,20 @@ def validate_structured_finding!(finding, source, kind: nil)
     )
   end
 
+  # failure_class is validated for ALL severities (before early return for low/advisory)
+  if finding.key?("failure_class")
+    fc = finding["failure_class"]
+    unless ALLOWED_FAILURE_CLASSES.include?(fc.to_s)
+      submit_report_schema_error(
+        "#{source}.failure_class",
+        "#{source}.failure_class must be one of #{ALLOWED_FAILURE_CLASSES.join('|')}.",
+        expected: ALLOWED_FAILURE_CLASSES.join("|"),
+        actual: evidence_value_type(fc),
+        kind: kind
+      )
+    end
+  end
+
   return finding unless %w[high medium].include?(severity)
 
   REQUIRED_FINDING_DETAIL_FIELDS.each do |field|
@@ -116,6 +130,132 @@ def validate_findings_array!(value, source, kind: nil)
   end
 
   value
+end
+
+def validate_runtime_binding_sub!(value, source, string_fields, kind: nil)
+  unless value.is_a?(Hash)
+    submit_report_schema_error(source, "#{source} must be a mapping.",
+      expected: "mapping", actual: evidence_value_type(value), kind: kind)
+    return nil
+  end
+  result = {}
+  string_fields.each do |f|
+    next unless value.key?(f)
+    v = value[f]
+    unless v.is_a?(String) && !v.strip.empty?
+      submit_report_schema_error("#{source}.#{f}", "#{source}.#{f} must be a non-empty string.",
+        expected: "non-empty string", actual: evidence_value_type(v), kind: kind)
+      next
+    end
+    result[f] = v.strip
+  end
+  result.empty? ? nil : result
+end
+
+def validate_runtime_binding!(value, source, kind: nil)
+  return nil if value.nil?
+  unless value.is_a?(Hash)
+    submit_report_schema_error(source, "#{source} must be a mapping.",
+      expected: "mapping", actual: evidence_value_type(value), kind: kind)
+    return nil
+  end
+  result = {}
+
+  if value.key?("server")
+    s = value["server"]
+    unless s.is_a?(Hash)
+      submit_report_schema_error("#{source}.server", "#{source}.server must be a mapping.",
+        expected: "mapping", actual: evidence_value_type(s), kind: kind)
+    else
+      server = {}
+      %w[name owner started_at].each do |f|
+        next unless s.key?(f)
+        v = s[f]
+        unless v.is_a?(String) && !v.strip.empty?
+          submit_report_schema_error("#{source}.server.#{f}", "#{source}.server.#{f} must be a non-empty string.",
+            expected: "non-empty string", actual: evidence_value_type(v), kind: kind)
+          next
+        end
+        server[f] = v.strip
+      end
+      %w[port pid].each do |f|
+        next unless s.key?(f)
+        v = s[f]
+        unless v.is_a?(String) && !v.strip.empty? || v.is_a?(Integer)
+          submit_report_schema_error("#{source}.server.#{f}", "#{source}.server.#{f} must be a non-empty string or integer.",
+            expected: "non-empty string or integer", actual: evidence_value_type(v), kind: kind)
+          next
+        end
+        server[f] = v
+      end
+      result["server"] = server unless server.empty?
+    end
+  end
+
+  if value.key?("browser")
+    b = validate_runtime_binding_sub!(value["browser"], "#{source}.browser", %w[name owner session_id], kind: kind)
+    result["browser"] = b if b
+  end
+
+  if value.key?("build")
+    bld = value["build"]
+    unless bld.is_a?(Hash)
+      submit_report_schema_error("#{source}.build", "#{source}.build must be a mapping.",
+        expected: "mapping", actual: evidence_value_type(bld), kind: kind)
+    else
+      build = {}
+      %w[git_head artifact_hash].each do |f|
+        next unless bld.key?(f)
+        v = bld[f]
+        unless v.is_a?(String) && !v.strip.empty?
+          submit_report_schema_error("#{source}.build.#{f}", "#{source}.build.#{f} must be a non-empty string.",
+            expected: "non-empty string", actual: evidence_value_type(v), kind: kind)
+          next
+        end
+        build[f] = v.strip
+      end
+      if bld.key?("artifact_paths")
+        ap = bld["artifact_paths"]
+        unless ap.is_a?(Array)
+          submit_report_schema_error("#{source}.build.artifact_paths", "#{source}.build.artifact_paths must be a list.",
+            expected: "list of non-empty strings", actual: evidence_value_type(ap), kind: kind)
+        else
+          validate_string_array!(ap, "#{source}.build.artifact_paths", kind: kind)
+          build["artifact_paths"] = ap
+        end
+      end
+      result["build"] = build unless build.empty?
+    end
+  end
+
+  if value.key?("model_service")
+    ms = validate_runtime_binding_sub!(value["model_service"], "#{source}.model_service",
+      %w[family alias behavior_fingerprint], kind: kind)
+    result["model_service"] = ms if ms
+  end
+
+  result.empty? ? nil : result
+end
+
+def validate_blocker_classification!(value, source, kind: nil)
+  return nil if value.nil?
+  unless value.is_a?(Hash)
+    submit_report_schema_error(source, "#{source} must be a mapping.",
+      expected: "mapping with kind field", actual: evidence_value_type(value), kind: kind)
+    return nil
+  end
+  result = {}
+  fc = value["kind"]
+  unless fc.is_a?(String) && ALLOWED_FAILURE_CLASSES.include?(fc)
+    submit_report_schema_error("#{source}.kind",
+      "#{source}.kind must be one of #{ALLOWED_FAILURE_CLASSES.join('|')}.",
+      expected: ALLOWED_FAILURE_CLASSES.join("|"), actual: evidence_value_type(fc), kind: kind)
+  end
+  result["kind"] = fc if fc.is_a?(String)
+  if value.key?("detail") && value["detail"].is_a?(String) && !value["detail"].strip.empty?
+    result["detail"] = value["detail"].strip
+  end
+  result.empty? ? nil : result
 end
 
 def validate_review_quality_outcome_verdict!(report, status, source, kind: nil)
@@ -599,6 +739,45 @@ def validate_structured_submit_report!(report_path, report)
       extra["test_level"] = validate_test_level!(report["test_level"], "submit_report.test_level", kind: kind, pass_required: true)
     elsif report.key?("test_level")
       extra["test_level"] = validate_test_level!(report["test_level"], "submit_report.test_level", kind: kind)
+    end
+  end
+
+  # real_path_test requires runtime_binding with a server or browser owner.
+  # build/model_service alone are insufficient: a real user/runtime path must
+  # identify who owns the running server or browser session so the path is reproducible.
+  if extra["evidence_level"] == "real_path_test" && pass_required
+    rb = report["runtime_binding"]
+    owner_binding_present = rb.is_a?(Hash) && %w[server browser].any? do |k|
+      b = rb[k]
+      b.is_a?(Hash) && b["owner"].is_a?(String) && !b["owner"].strip.empty?
+    end
+    unless owner_binding_present
+      submit_report_schema_error(
+        "submit_report.runtime_binding",
+        "Test PASS with evidence_level real_path_test requires runtime_binding with a server or browser binding that includes owner (build/model_service alone are insufficient).",
+        expected: "runtime_binding.server.owner or runtime_binding.browser.owner",
+        actual: evidence_value_type(rb),
+        kind: kind
+      )
+    end
+  end
+
+  if report.key?("runtime_binding")
+    extra["runtime_binding"] = validate_runtime_binding!(report["runtime_binding"], "submit_report.runtime_binding", kind: kind)
+  end
+
+  if report.key?("blocker_classification")
+    extra["blocker_classification"] = validate_blocker_classification!(report["blocker_classification"], "submit_report.blocker_classification", kind: kind)
+    # A pass verdict cannot carry a non-code blocker classification: environment/service/model_drift/unknown blockers mean the path did not pass.
+    bc_kind = extra["blocker_classification"].is_a?(Hash) ? extra["blocker_classification"]["kind"] : nil
+    if status == "pass" && bc_kind.is_a?(String) && NON_CODE_PASS_BLOCKER_KINDS.include?(bc_kind)
+      submit_report_schema_error(
+        "submit_report.blocker_classification.kind",
+        "Pass verdict is incompatible with blocker_classification.kind #{bc_kind}: environment/service/model_drift/unknown blockers do not count as a code pass.",
+        expected: "code_failure|expected_fail_closed or omit blocker_classification on pass",
+        actual: bc_kind,
+        kind: kind
+      )
     end
   end
 

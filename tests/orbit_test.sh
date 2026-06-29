@@ -96,6 +96,12 @@ confirmed:
 assumed: []
 missing: []
 residual_risk: "No residual risk: all required paths covered by test evidence."
+runtime_binding:
+  build:
+    git_head: "fixture-build"
+  browser:
+    name: "fixture-browser"
+    owner: "tester"
 YAML
 }
 
@@ -167,5 +173,6 @@ source "$PARTS_DIR/07_destructive.sh"
 source "$PARTS_DIR/08_identity_policy.sh"
 source "$PARTS_DIR/09_identity_full.sh"
 source "$PARTS_DIR/10_retention_compact.sh"
+source "$PARTS_DIR/11_runtime_reconcile.sh"
 
 printf 'REAL_TESTS_PASS count=%s tmp=%s\n' "$PASS_COUNT" "$TMPROOT"

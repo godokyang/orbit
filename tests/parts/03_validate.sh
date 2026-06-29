@@ -84,6 +84,12 @@ quality_measurement:
       baseline: 120
       after: 80
       evidence: .orbit/test-artifacts/quality-measurement.json
+runtime_binding:
+  build:
+    git_head: "fixture-build"
+  browser:
+    name: "fixture-browser"
+    owner: "tester"
 YAML
 ORBIT_INSTANCE=tester "$CLI" evidence submit --file "$QUALITY_EVIDENCE" --report "$TMPROOT/quality-measurement-submit.yaml" --json >"$TMPROOT/quality-measurement-submit.json"
 "$CLI" validate --task "$PERFORMANCE_TASK" --evidence "$QUALITY_EVIDENCE" --json >"$TMPROOT/valid-quality-measurement.json"

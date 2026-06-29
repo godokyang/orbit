@@ -29,6 +29,8 @@ def validate_evidence_record(result, source, record)
   validate_destructive_action_plan_record(result, "#{source}.destructive_action_plan", record["destructive_action_plan"]) if record.key?("destructive_action_plan")
   validate_write_policy_record(result, "#{source}.write_policy", record["write_policy"]) if record.key?("write_policy")
   validate_role_execution_context_record(result, "#{source}.role_execution_context", record["role_execution_context"]) if record.key?("role_execution_context")
+  validate_runtime_binding_record_field(result, source, record)
+  validate_blocker_classification_record_field(result, source, record)
 end
 
 def validate_role_execution_context_record(result, source, rec)
@@ -282,6 +284,45 @@ def validate_evidence_level_record_field(result, source, record)
   unless level.is_a?(String) && ALLOWED_EVIDENCE_LEVELS.include?(level)
     validation_error(result, "#{source}.evidence_level", "Evidence level must be one of #{ALLOWED_EVIDENCE_LEVELS.join("|")}.")
   end
+end
+
+# real_path_test PASS requires a runtime_binding with a server or browser owner (build/model_service alone are insufficient).
+# This mirrors the submit-time check so that records mutated after submit (e.g. runtime_binding removed) are still caught by validate/audit.
+def validate_runtime_binding_record_field(result, source, record)
+  return unless record["kind"] == "test" && record["status"] == "pass" && record["evidence_level"] == "real_path_test"
+
+  rb = record["runtime_binding"]
+  owner_binding_present = rb.is_a?(Hash) && %w[server browser].any? do |k|
+    b = rb[k]
+    b.is_a?(Hash) && b["owner"].is_a?(String) && !b["owner"].strip.empty?
+  end
+  return if owner_binding_present
+
+  validation_error(result, "#{source}.runtime_binding",
+    "Test PASS with evidence_level real_path_test requires runtime_binding with a server or browser binding that includes owner (build/model_service alone are insufficient).")
+end
+
+# blocker_classification.kind must be a recognized failure class regardless of status.
+# Catches records mutated after submit and directly-injected records with invented kinds.
+def validate_blocker_classification_record_field(result, source, record)
+  return unless record.key?("blocker_classification")
+
+  bc = record["blocker_classification"]
+  return unless bc.is_a?(Hash)
+
+  kind = bc["kind"]
+  unless kind.is_a?(String) && ALLOWED_FAILURE_CLASSES.include?(kind)
+    validation_error(result, "#{source}.blocker_classification.kind",
+      "Evidence blocker_classification.kind must be one of #{ALLOWED_FAILURE_CLASSES.join("|")}.")
+    return
+  end
+
+  # A pass verdict cannot carry a non-code blocker_classification.kind: environment/service/model_drift/unknown
+  # blockers mean the path did not pass.
+  return unless record["status"] == "pass" && NON_CODE_PASS_BLOCKER_KINDS.include?(kind)
+
+  validation_error(result, "#{source}.blocker_classification.kind",
+    "Evidence status pass is incompatible with blocker_classification.kind #{kind}: environment/service/model_drift/unknown blockers do not count as a code pass.")
 end
 
 def validate_rule_application_record_field(result, source, record)

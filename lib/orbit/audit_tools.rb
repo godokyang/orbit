@@ -153,6 +153,55 @@ def retention_drift_summary(evidence, handoff_path)
   }
 end
 
+def runtime_reconcile_summary(evidence)
+  records = evidence.is_a?(Hash) && evidence["records"].is_a?(Array) ? evidence["records"] : []
+
+  bindings_list = records.select { |r| r.is_a?(Hash) && r["runtime_binding"].is_a?(Hash) }
+                         .map { |r| r["runtime_binding"] }
+
+  # Stale artifact paths (from runtime_binding.build.artifact_paths)
+  all_paths = bindings_list.flat_map { |b|
+    b["build"].is_a?(Hash) && b["build"]["artifact_paths"].is_a?(Array) ? b["build"]["artifact_paths"] : []
+  }.uniq
+  stale = all_paths.select { |p| !File.exist?(p) }
+
+  # Model drift
+  model_identities = bindings_list.map { |b| b["model_service"] }.compact.uniq
+  model_drift = model_identities.size > 1
+
+  # Build drift (git_head + artifact_hash together as identity)
+  build_identities = bindings_list.map { |b| b["build"] }.compact.uniq
+  build_drift = build_identities.size > 1
+
+  # Blocker classification: top-level field + findings.failure_class
+  blocker_classes = {}
+  records.each do |r|
+    next unless r.is_a?(Hash)
+    bc = r["blocker_classification"]
+    if bc.is_a?(Hash) && bc["kind"].is_a?(String)
+      fc = bc["kind"]
+      blocker_classes[fc] = (blocker_classes[fc] || 0) + 1
+    end
+    if r["findings"].is_a?(Array)
+      r["findings"].each do |f|
+        next unless f.is_a?(Hash) && f["failure_class"].is_a?(String)
+        fc = f["failure_class"]
+        blocker_classes[fc] = (blocker_classes[fc] || 0) + 1
+      end
+    end
+  end
+
+  {
+    "stale_artifact_paths" => stale,
+    "model_identities" => model_identities,
+    "model_drift_detected" => model_drift,
+    "build_identities" => build_identities,
+    "build_drift_detected" => build_drift,
+    "blocker_classes" => blocker_classes,
+    "has_issues" => !stale.empty? || model_drift || build_drift
+  }
+end
+
 def orbit_retention_summary(evidence, compact_summary_path)
   size_kb = orbit_dir_size_kb
   records_count = evidence.is_a?(Hash) && evidence["records"].is_a?(Array) ? evidence["records"].length : 0
@@ -568,6 +617,29 @@ def audit(args)
     )
   end
 
+  reconcile = runtime_reconcile_summary(evidence)
+  unless reconcile["stale_artifact_paths"].empty?
+    warnings << audit_finding(
+      "runtime.stale_artifacts",
+      "Evidence records reference #{reconcile["stale_artifact_paths"].size} artifact path(s) that no longer exist on disk.",
+      "medium"
+    )
+  end
+  if reconcile["model_drift_detected"]
+    warnings << audit_finding(
+      "runtime.model_drift",
+      "Evidence records reference #{reconcile["model_identities"].size} distinct model identities; model may have changed during work.",
+      "medium"
+    )
+  end
+  if reconcile["build_drift_detected"]
+    warnings << audit_finding(
+      "runtime.build_drift",
+      "Evidence records reference #{reconcile["build_identities"].size} distinct build identities; build may have changed during work.",
+      "medium"
+    )
+  end
+
   issues = blocking_findings + warnings
   trust_flags = audit_trust_flags(phase, blocking_findings, warnings)
 
@@ -597,6 +669,7 @@ def audit(args)
     "schema_version_summary" => schema_summary,
     "retention_summary" => orbit_retention_summary(evidence, compact_summary_path),
     "retention_drift_summary" => drift_summary,
+    "runtime_reconcile_summary" => reconcile,
     "issues" => issues,
     "blocking_findings" => blocking_findings,
     "warnings" => warnings

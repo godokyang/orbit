@@ -393,6 +393,12 @@ test_environment:
   cleanup_status: complete
   ux_quality: not_applicable
   artifact_quality: artifact path is stable and small
+runtime_binding:
+  build:
+    git_head: "fixture-build"
+  browser:
+    name: "fixture-browser"
+    owner: "tester"
 YAML
 for field in evidence_level rule_application confirmed assumed missing; do
   cp "$TMPROOT/complete-test-submit.yaml" "$TMPROOT/test-missing-${field}.yaml"
@@ -544,6 +550,12 @@ test_environment:
   cleanup_status: complete
   ux_quality: not_applicable
   artifact_quality: stable test artifact
+runtime_binding:
+  build:
+    git_head: "fixture-build"
+  browser:
+    name: "fixture-browser"
+    owner: "tester"
 YAML
 "$CLI" evidence attach-rule --file "$CONCURRENT_EVIDENCE" --rule-resolution "$TMPROOT/current-rule-resolution.json" >/dev/null &
 "$CLI" evidence add --file "$CONCURRENT_EVIDENCE" --kind command --status pass --summary "concurrent command retained" >/dev/null &
@@ -731,6 +743,12 @@ test_environment:
   cleanup_status: complete
   ux_quality: not_applicable
   artifact_quality: artifact path is stable and small
+runtime_binding:
+  build:
+    git_head: "fixture-build"
+  browser:
+    name: "fixture-browser"
+    owner: "tester"
 YAML
 ORBIT_INSTANCE=tester "$CLI" evidence submit --file "$IMPL_EVIDENCE" --report "$TMPROOT/implementation-test-submit.yaml" --json >/dev/null
 "$CLI" state transition --to done --evidence "$IMPL_EVIDENCE" >"$TMPROOT/implementation-done.out" 2>"$TMPROOT/implementation-done.err"
@@ -831,6 +849,12 @@ test_environment:
   cleanup_status: complete
   ux_quality: not_applicable
   artifact_quality: artifact path is stable and small
+runtime_binding:
+  build:
+    git_head: "fixture-build"
+  browser:
+    name: "fixture-browser"
+    owner: "tester"
 YAML
 ORBIT_INSTANCE=tester "$CLI" evidence submit --file "$APPEND_EVIDENCE" --report "$TMPROOT/eq-test-submit.yaml" --json >"$TMPROOT/eq-test-submit.json"
 "$CLI" validate --task "$EQ_TASK" --evidence "$APPEND_EVIDENCE" --json >"$TMPROOT/valid-test-append-evidence.json"
