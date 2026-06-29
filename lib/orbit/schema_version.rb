@@ -50,7 +50,8 @@ ORBIT_FEATURE_VERSIONS = {
   "gate_lease" => "v1",                # gate_lease metadata + verdict arbitration (Slice 9)
   "doc_lifecycle" => "v1",             # doc_lifecycle + decision_record structured records (Slice 10)
   "project_profile_risk_level" => "v1", # project profile + task risk level derivation (Slice 11)
-  "data_classification_retention" => "v1" # data classification + retention + trust repair (Slice 12)
+  "data_classification_retention" => "v1", # data classification + retention + trust repair (Slice 12)
+  "ci_release_readiness" => "v1"           # CI release readiness: source, ci, package, version, remote state (Slice 13)
   # "gate_lease" => nil           # not yet implemented – Phase 2 Slice 9
 }.freeze
 

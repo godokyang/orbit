@@ -650,6 +650,13 @@ def audit(args)
     end
   end
 
+  # Slice 13: release readiness blockers are blocking findings (separate from implementation blockers).
+  if release_risk?(task)
+    release_readiness_blockers(task["release_readiness"]).each do |blocker|
+      blocking_findings << audit_finding(blocker["source"], blocker["message"], "high")
+    end
+  end
+
   issues = blocking_findings + warnings
   trust_flags = audit_trust_flags(phase, blocking_findings, warnings)
 
@@ -686,6 +693,8 @@ def audit(args)
     "task_risk_summary" => task_risk_summary(task),
     "data_classification_summary" => data_classification_summary(evidence),
     "trust_repair_summary" => trust_repair_summary(evidence),
+    "release_readiness_summary" => release_readiness_summary(task),
+    "release_blockers" => release_risk?(task) ? release_readiness_blockers(task["release_readiness"]) : [],
     "issues" => issues,
     "blocking_findings" => blocking_findings,
     "warnings" => warnings

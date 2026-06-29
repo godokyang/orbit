@@ -775,7 +775,7 @@ def validate_task_risk_level(result, task)
 
   default_levels = DEFAULT_MIN_EVIDENCE_LEVELS_BY_RISK[level] || {}
 
-  # Release risk requires release gate AND release readiness evidence fields or explicit gap.
+  # Release risk requires release gate AND release readiness structure with no blockers.
   if level == "release"
     gates = task["gates"]
     has_release_gate = gates.is_a?(Array) && gates.any? { |g| g.is_a?(Hash) && g["kind"] == "release" }
@@ -783,10 +783,14 @@ def validate_task_risk_level(result, task)
       validation_error(result, "task_file.task_risk.level",
         "Release risk level requires a release gate with release_readiness evidence.")
     end
-    # Fail closed: release readiness evidence fields must be present or explicit gap declared.
-    unless task.key?("release_readiness")
+    # Slice 13: validate release_readiness structure and check for blockers.
+    rr = task["release_readiness"]
+    unless release_readiness_has_structure?(rr)
       validation_error(result, "task_file.release_readiness",
-        "Release risk level requires release_readiness evidence fields or an explicit release readiness gap declaration.")
+        "Release risk level requires a release_readiness block with source, ci, package, version_fields, generated_artifacts, and remote_state.")
+    end
+    release_readiness_blockers(rr).each do |blocker|
+      validation_error(result, blocker["source"], blocker["message"])
     end
   end
 

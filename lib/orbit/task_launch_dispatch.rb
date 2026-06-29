@@ -387,8 +387,8 @@ def new_task(args)
   task_rule_packs = rule_packs_for_context(options["target_role"], options["task_type"])
   task["rule_packs"] = task_rule_packs unless task_rule_packs.empty?
   task["write_policy_enforcement"] = DEFAULT_WRITE_POLICY_ENFORCEMENT_BY_RISK[task_risk["level"]] || "standard"
-  # Slice 11: release risk tasks get a release_readiness block (initially declaring a gap).
-  task["release_readiness"] = { "status" => "gap_declared", "evidence_fields" => [], "rationale" => "Release readiness evidence fields must be populated before release gate can pass." } if task_risk["level"] == "release"
+  # Slice 13: release risk tasks get a full release_readiness skeleton.
+  task["release_readiness"] = default_release_readiness if task_risk["level"] == "release"
   FileUtils.mkdir_p(File.dirname(output_path))
   File.write(output_path, YAML.dump(task))
 

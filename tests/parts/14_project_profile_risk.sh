@@ -177,24 +177,24 @@ cp "$S11_RELEASE_TASK" "$S11_NO_RR_TASK"
 ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y.delete("release_readiness"); File.write(p, YAML.dump(y))' "$S11_NO_RR_TASK"
 expect_failure 'validate rejects release task without release_readiness fields' "$CLI" validate --task "$S11_NO_RR_TASK" --json
 
-# ---- Group 14: release task with release_readiness gap_declared ----
+# ---- Group 14: release task with release_readiness structure (Slice 13) ----
 
-# new-task writes release_readiness.status == gap_declared.
-yaml_assert 'release task has release_readiness gap_declared' "$S11_RELEASE_TASK" \
-  'j["release_readiness"].is_a?(Hash) && j["release_readiness"]["status"] == "gap_declared"'
+# new-task writes full release_readiness skeleton with source/ci/package/version_fields/generated_artifacts/remote_state.
+yaml_assert 'release task has release_readiness structure' "$S11_RELEASE_TASK" \
+  'rr = j["release_readiness"]; rr.is_a?(Hash) && rr["ci"].is_a?(Hash) && rr["package"].is_a?(Hash) && rr["remote_state"].is_a?(Hash)'
 
-# validate does not report a task_file.release_readiness missing-field error when gap_declared is present.
+# validate reports release_readiness blockers (empty skeleton has blockers for CI/package/remote).
 "$CLI" validate --task "$S11_RELEASE_TASK" --json >"$TMPROOT/s11-release-validate.json" 2>/dev/null || true
-json_assert 'validate has no release_readiness missing error with gap_declared' "$TMPROOT/s11-release-validate.json" \
-  'j["errors"].none? { |e| e["source"] == "task_file.release_readiness" }'
+json_assert 'validate reports release readiness blockers in empty skeleton' "$TMPROOT/s11-release-validate.json" \
+  'j["errors"].any? { |e| e["source"].include?("release_readiness") }'
 
-# release task with only gap_declared should NOT be trusted_for_release in audit.
+# release task with empty skeleton should NOT be trusted_for_release in audit.
 S11_RR_AUDIT_STATE="$TMPROOT/s11-rr-audit-state.yaml"
 ruby --disable-gems -ryaml -e '
   s = { "schema_version" => "orbit-loop-state-v1", "phase" => "done", "current_task" => ARGV[0], "history" => [], "artifacts" => { "evidence_file" => ARGV[1] } }
   File.write(ARGV[2], YAML.dump(s))' "$S11_RELEASE_TASK" "$S11_LIGHT_EVIDENCE" "$S11_RR_AUDIT_STATE"
 "$CLI" audit --task "$S11_RELEASE_TASK" --evidence "$S11_LIGHT_EVIDENCE" --state "$S11_RR_AUDIT_STATE" --json >"$TMPROOT/s11-rr-audit.json" 2>/dev/null || true
-json_assert 'release task with gap_declared is not trusted_for_release' "$TMPROOT/s11-rr-audit.json" \
+json_assert 'release task with empty skeleton is not trusted_for_release' "$TMPROOT/s11-rr-audit.json" \
   'j["trusted_for_release"] == false'
 
 # ---- Group 15: new-task creates nested output directory ----
