@@ -57,9 +57,18 @@ rule_application:
       evidence: Outcome, evidence boundary, and counterexample paths were checked.
   not_applicable: []
 quality_question_answers:
-  - id: outcome_satisfied
+  - id: outcome
     verdict: pass
     evidence: The reviewed evidence proves the expected behavior.
+  - id: counterexamples
+    verdict: pass
+    evidence: No counterexamples found; invalid completion patterns were checked and addressed.
+  - id: evidence_sufficiency
+    verdict: pass
+    evidence: Evidence boundary confirms, assumed, and missing paths are explicit.
+  - id: residual_risk
+    verdict: pass
+    evidence: Residual risk is acceptable; no untested required paths remain.
 confirmed:
   - Reviewed evidence proves the expected behavior.
 assumed: []
@@ -2173,5 +2182,148 @@ ruby --disable-gems -ryaml -e \
 json_assert 'audit returns structured JSON (not crash) when evidence record has malformed created_at' \
   "$TMPROOT/audit-malformed-created-at.json" \
   'j.key?("blocking_findings") && j.key?("trusted_for_done")'
+
+# ---------------------------------------------------------------------------
+# Phase 1 Slice 2: Quality Outcome Guardrails
+# ---------------------------------------------------------------------------
+
+# new-task for improvement task type seeds invalid_completion_guards
+IMPROVEMENT_TASK="$TMPROOT/slice2-improvement-task.yaml"
+"$CLI" new-task --target-role reviewer --task-type docs_improvement --output "$IMPROVEMENT_TASK" >/dev/null
+yaml_assert 'new-task improvement task seeds invalid_completion_guards' "$IMPROVEMENT_TASK" \
+  'j["invalid_completion_guards"].is_a?(Array) && !j["invalid_completion_guards"].empty? && j["invalid_completion_guards"].all? { |g| g["id"].is_a?(String) && !g["id"].empty? && g["description"].is_a?(String) && !g["description"].empty? && g["evidence_required"].is_a?(String) && !g["evidence_required"].empty? }'
+yaml_assert 'new-task review_strategy includes required_questions' "$IMPROVEMENT_TASK" \
+  'j["review_strategy"]["required_questions"] == %w[outcome counterexamples evidence_sufficiency residual_risk]'
+
+# validate rejects improvement task with malformed invalid_completion_guards
+MALFORMED_GUARDS_TASK="$TMPROOT/slice2-malformed-guards-task.yaml"
+cp "$IMPROVEMENT_TASK" "$MALFORMED_GUARDS_TASK"
+ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["invalid_completion_guards"]=[{"id"=>"","description"=>"missing id"}]; File.write(p, YAML.dump(y))' "$MALFORMED_GUARDS_TASK"
+expect_failure 'validate rejects improvement task with malformed invalid_completion_guards' "$CLI" validate --task "$MALFORMED_GUARDS_TASK" --json
+
+# wait-gate blocks when review record has quality_outcome_verdict != pass (manual injection)
+QO_FAIL_EVIDENCE="$TMPROOT/slice2-qo-fail-evidence.json"
+cp "$STRUCTURED_REVIEW_EVIDENCE" "$QO_FAIL_EVIDENCE"
+ruby --disable-gems -rjson -e 'p=ARGV[0]; j=JSON.parse(File.read(p)); j["records"].last["quality_outcome_verdict"]="fail"; File.write(p, JSON.pretty_generate(j))' "$QO_FAIL_EVIDENCE"
+if "$CLI" wait-gate --task "$TASK" --evidence "$QO_FAIL_EVIDENCE" --json >"$TMPROOT/slice2-qo-fail-wait-gate.json" 2>/dev/null; then
+  printf 'FAIL wait-gate blocks when quality_outcome_verdict is fail: command unexpectedly succeeded\n' >&2
+  exit 1
+fi
+pass 'wait-gate blocks when quality_outcome_verdict is fail'
+json_assert 'wait-gate reports quality_outcome_not_pass blocking reason' "$TMPROOT/slice2-qo-fail-wait-gate.json" \
+  'j["ready"] == false && j["gate_summary"]["not_ready"].any? { |g| g["kind"] == "review" && g["blocking_reason"] == "quality_outcome_not_pass" }'
+
+# wait-gate blocks when review record missing required question coverage
+QO_MISSING_Q_EVIDENCE="$TMPROOT/slice2-missing-question-evidence.json"
+cp "$STRUCTURED_REVIEW_EVIDENCE" "$QO_MISSING_Q_EVIDENCE"
+ruby --disable-gems -rjson -e 'p=ARGV[0]; j=JSON.parse(File.read(p)); j["records"].last["quality_question_answers"]=[{"id"=>"outcome","verdict"=>"pass","evidence"=>"only outcome covered"}]; File.write(p, JSON.pretty_generate(j))' "$QO_MISSING_Q_EVIDENCE"
+expect_failure 'validate rejects review pass missing required question coverage' "$CLI" validate --task "$TASK" --evidence "$QO_MISSING_Q_EVIDENCE" --json
+
+# audit shows quality_outcome_summary
+json_assert 'audit includes quality_outcome_summary with gate verdicts' \
+  "$TMPROOT/audit-release-gate.json" \
+  'j.key?("quality_outcome_summary") && j["quality_outcome_summary"].key?("gate_quality_outcomes")'
+
+# audit shows invalid_completion_guards in quality_outcome_summary for improvement task
+AUDIT_IMPROVEMENT_EVIDENCE="$TMPROOT/slice2-audit-improvement-evidence.json"
+"$CLI" evidence init --output "$AUDIT_IMPROVEMENT_EVIDENCE" >/dev/null
+ORBIT_INSTANCE=reviewer "$CLI" evidence submit --file "$AUDIT_IMPROVEMENT_EVIDENCE" --report "$TMPROOT/structured-review.yaml" --json >/dev/null
+"$CLI" init --force >/dev/null
+ORBIT_INSTANCE=lead "$CLI" state start --task "$IMPROVEMENT_TASK" >/dev/null
+ruby --disable-gems -ryaml -e \
+  'p=ARGV[0]; s=YAML.safe_load(File.read(p), aliases: true); s["phase"]="done"; s["status"]="done"; s["artifacts"]||={}; s["artifacts"]["evidence_file"]=File.expand_path(ARGV[1]); File.write(p, YAML.dump(s))' \
+  .orbit/loop-state.yaml "$AUDIT_IMPROVEMENT_EVIDENCE"
+"$CLI" audit --task "$IMPROVEMENT_TASK" --evidence "$AUDIT_IMPROVEMENT_EVIDENCE" --state .orbit/loop-state.yaml --json >"$TMPROOT/slice2-audit-improvement.json" 2>/dev/null || true
+json_assert 'audit shows invalid_completion_guards for improvement task' \
+  "$TMPROOT/slice2-audit-improvement.json" \
+  'qos = j["quality_outcome_summary"]; qos.is_a?(Hash) && qos["invalid_completion_guards"].is_a?(Array) && !qos["invalid_completion_guards"].empty?'
+
+# wait-gate blocks when a required question answer has verdict != pass
+QO_BLOCKED_Q_EVIDENCE="$TMPROOT/slice2-blocked-question-evidence.json"
+cp "$STRUCTURED_REVIEW_EVIDENCE" "$QO_BLOCKED_Q_EVIDENCE"
+ruby --disable-gems -rjson -e \
+  'p=ARGV[0]; j=JSON.parse(File.read(p)); j["records"].last["quality_question_answers"].find { |a| a["id"]=="counterexamples" }["verdict"]="blocked"; File.write(p, JSON.pretty_generate(j))' \
+  "$QO_BLOCKED_Q_EVIDENCE"
+if "$CLI" wait-gate --task "$TASK" --evidence "$QO_BLOCKED_Q_EVIDENCE" --json >"$TMPROOT/slice2-blocked-question-wait-gate.json" 2>/dev/null; then
+  printf 'FAIL wait-gate blocks when required question verdict is blocked: command unexpectedly succeeded\n' >&2
+  exit 1
+fi
+pass 'wait-gate blocks when required question verdict is blocked'
+json_assert 'wait-gate reports required_questions_not_met blocking reason' "$TMPROOT/slice2-blocked-question-wait-gate.json" \
+  'j["ready"] == false && j["gate_summary"]["not_ready"].any? { |g| g["kind"] == "review" && g["blocking_reason"] == "required_questions_not_met" }'
+
+# validate rejects review pass where required question answer is non-pass verdict
+QO_FAIL_Q_EVIDENCE="$TMPROOT/slice2-fail-question-evidence.json"
+cp "$STRUCTURED_REVIEW_EVIDENCE" "$QO_FAIL_Q_EVIDENCE"
+ruby --disable-gems -rjson -e \
+  'p=ARGV[0]; j=JSON.parse(File.read(p)); j["records"].last["quality_question_answers"].find { |a| a["id"]=="counterexamples" }["verdict"]="fail"; File.write(p, JSON.pretty_generate(j))' \
+  "$QO_FAIL_Q_EVIDENCE"
+expect_failure 'validate rejects review pass with counterexamples verdict fail' "$CLI" validate --task "$TASK" --evidence "$QO_FAIL_Q_EVIDENCE" --json
+
+# audit shows addressed status per guard
+json_assert 'audit guard summary includes addressed field per guard' \
+  "$TMPROOT/slice2-audit-improvement.json" \
+  'qos = j["quality_outcome_summary"]; qos["invalid_completion_guards"].all? { |g| g.key?("addressed") && g.key?("addressed_via") && g.key?("coverage") }'
+json_assert 'audit guard without guard-specific answer has addressed=false and coverage=general_only or none' \
+  "$TMPROOT/slice2-audit-improvement.json" \
+  'qos = j["quality_outcome_summary"]; qos["invalid_completion_guards"].all? { |g| g["coverage"] == "guard_specific" || g["addressed"] == false }'
+json_assert 'audit all_satisfied ignores test/release gates (not_applicable)' \
+  "$TMPROOT/audit-release-gate.json" \
+  'qos = j["quality_outcome_summary"]; qos["gate_quality_outcomes"].any? { |_k,v| v["satisfied"] == "not_applicable" } && [true, false].include?(qos["all_satisfied"])'
+
+# ---------------------------------------------------------------------------
+# High regression: design_readiness gate required_questions coverage
+# ---------------------------------------------------------------------------
+
+# design_readiness gate must apply required_questions coverage (same as review gate)
+DR_RQ_TASK="$TMPROOT/slice2-dr-rq-task.yaml"
+"$CLI" new-task --target-role reviewer --task-type design_review --output "$DR_RQ_TASK" >/dev/null
+ruby --disable-gems -ryaml -e \
+  'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["gates"]=[{"kind"=>"design_readiness","roles"=>["reviewer"],"required"=>true,"pass_condition"=>"design readiness passed"}]; File.write(p, YAML.dump(y))' \
+  "$DR_RQ_TASK"
+DR_RQ_EVIDENCE="$TMPROOT/slice2-dr-rq-evidence.json"
+"$CLI" evidence init --output "$DR_RQ_EVIDENCE" >/dev/null
+# Build a review pass report with correct evidence_level (implementation_readiness) but incomplete required questions
+DR_PARTIAL_REPORT="$TMPROOT/slice2-dr-partial-report.yaml"
+write_review_pass_report "$DR_PARTIAL_REPORT" "Design readiness partial answers." "herdr:reviewer:dr-partial"
+ruby --disable-gems -ryaml -e \
+  'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true)
+   y["evidence_level"]="implementation_readiness"
+   y["implementation_readiness_verdict"]="pass"
+   y["quality_question_answers"]=[{"id"=>"outcome","verdict"=>"pass","evidence"=>"only outcome answered"}]
+   File.write(p, YAML.dump(y))' \
+  "$DR_PARTIAL_REPORT"
+# evidence submit succeeds (submit does not have task context; task-aware check is in validate/wait-gate)
+DR_PARTIAL_EVIDENCE="$TMPROOT/slice2-dr-partial-evidence.json"
+"$CLI" evidence init --output "$DR_PARTIAL_EVIDENCE" >/dev/null
+ORBIT_INSTANCE=reviewer "$CLI" evidence submit --file "$DR_PARTIAL_EVIDENCE" --report "$DR_PARTIAL_REPORT" --json >/dev/null
+# validate and wait-gate must reject partial required_questions coverage
+expect_failure 'validate rejects design_readiness review pass with incomplete required questions' "$CLI" validate --task "$DR_RQ_TASK" --evidence "$DR_PARTIAL_EVIDENCE" --json
+if "$CLI" wait-gate --task "$DR_RQ_TASK" --evidence "$DR_PARTIAL_EVIDENCE" --json >"$TMPROOT/slice2-dr-partial-wait.json" 2>/dev/null; then
+  printf 'FAIL wait-gate blocks design_readiness gate with incomplete required questions: command unexpectedly succeeded\n' >&2
+  exit 1
+fi
+pass 'wait-gate blocks design_readiness gate with incomplete required questions'
+json_assert 'design_readiness wait-gate reports required_questions_not_met for incomplete coverage' "$TMPROOT/slice2-dr-partial-wait.json" \
+  'j["ready"] == false && j["gate_summary"]["not_ready"].any? { |g| g["kind"] == "design_readiness" && g["blocking_reason"] == "required_questions_not_met" }'
+
+# Submit with full required questions, then verify wait-gate passes; then corrupt one answer and verify it blocks
+ORBIT_INSTANCE=reviewer "$CLI" evidence submit --file "$DR_RQ_EVIDENCE" --report "$TMPROOT/design-readiness-review-pass.yaml" --json >/dev/null
+"$CLI" wait-gate --task "$DR_RQ_TASK" --evidence "$DR_RQ_EVIDENCE" --json >"$TMPROOT/slice2-dr-rq-pass.json"
+json_assert 'design_readiness gate passes with full required_questions coverage' "$TMPROOT/slice2-dr-rq-pass.json" \
+  'j["ready"] == true && j["gates"].any? { |g| g["kind"] == "design_readiness" && g["passed"] == true }'
+
+DR_BLOCKED_EVIDENCE="$TMPROOT/slice2-dr-blocked-evidence.json"
+cp "$DR_RQ_EVIDENCE" "$DR_BLOCKED_EVIDENCE"
+ruby --disable-gems -rjson -e \
+  'p=ARGV[0]; j=JSON.parse(File.read(p)); j["records"].last["quality_question_answers"].find { |a| a["id"]=="counterexamples" }["verdict"]="blocked"; File.write(p, JSON.pretty_generate(j))' \
+  "$DR_BLOCKED_EVIDENCE"
+if "$CLI" wait-gate --task "$DR_RQ_TASK" --evidence "$DR_BLOCKED_EVIDENCE" --json >"$TMPROOT/slice2-dr-blocked.json" 2>/dev/null; then
+  printf 'FAIL wait-gate blocks design_readiness gate when counterexamples verdict is blocked: command unexpectedly succeeded\n' >&2
+  exit 1
+fi
+pass 'wait-gate blocks design_readiness gate when required question verdict is blocked'
+json_assert 'design_readiness gate reports required_questions_not_met' "$TMPROOT/slice2-dr-blocked.json" \
+  'j["ready"] == false && j["gate_summary"]["not_ready"].any? { |g| g["kind"] == "design_readiness" && g["blocking_reason"] == "required_questions_not_met" }'
 
 printf 'REAL_TESTS_PASS count=%s tmp=%s\n' "$PASS_COUNT" "$TMPROOT"

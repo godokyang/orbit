@@ -649,6 +649,72 @@ def quality_measurement_task?(task_or_type)
   %w[performance speed latency ux workflow quality eval llm measurement].any? { |token| task_type.include?(token) }
 end
 
+def validate_invalid_completion_guards(result, task)
+  guards = task["invalid_completion_guards"]
+  if guards.nil?
+    validation_warning(result, "task_file.invalid_completion_guards",
+      "Improvement task should define invalid_completion_guards so reviewers can explicitly address each failure pattern.")
+    return
+  end
+  unless guards.is_a?(Array)
+    validation_error(result, "task_file.invalid_completion_guards", "Task invalid_completion_guards must be a list when present.")
+    return
+  end
+  guards.each_with_index do |guard, index|
+    src = "task_file.invalid_completion_guards[#{index}]"
+    unless guard.is_a?(Hash)
+      validation_error(result, src, "Invalid completion guard must be a mapping.")
+      next
+    end
+    validate_non_empty_string(result, "#{src}.id", guard["id"], "Guard id")
+    validate_non_empty_string(result, "#{src}.description", guard["description"], "Guard description")
+    validate_non_empty_string(result, "#{src}.evidence_required", guard["evidence_required"], "Guard evidence_required")
+  end
+end
+
+def validate_required_questions_coverage(result, record, task)
+  return unless record.is_a?(Hash) && task.is_a?(Hash)
+
+  required_questions = task.dig("review_strategy", "required_questions")
+  return unless required_questions.is_a?(Array) && !required_questions.empty?
+
+  answers = record["quality_question_answers"]
+  return unless answers.is_a?(Array)
+
+  answered_pass_ids = answers.select { |a| a.is_a?(Hash) && a["verdict"] == "pass" }.map { |a| a["id"] }.compact
+  required_questions.each do |qid|
+    next if answered_pass_ids.include?(qid)
+
+    existing = answers.find { |a| a.is_a?(Hash) && a["id"] == qid }
+    if existing
+      validation_error(
+        result,
+        "evidence_file.records.review.quality_question_answers",
+        "Review PASS requires quality_question_answers[#{qid.inspect}].verdict to be pass (got: #{existing["verdict"].inspect})."
+      )
+    else
+      validation_error(
+        result,
+        "evidence_file.records.review.quality_question_answers",
+        "Review PASS requires quality_question_answers to include an answer for required question: #{qid.inspect}."
+      )
+    end
+  end
+end
+
+def required_questions_all_pass?(record, task)
+  return true unless task.is_a?(Hash)
+
+  required_questions = task.dig("review_strategy", "required_questions")
+  return true unless required_questions.is_a?(Array) && !required_questions.empty?
+
+  answers = record["quality_question_answers"]
+  return false unless answers.is_a?(Array) && !answers.empty?
+
+  pass_ids = answers.select { |a| a.is_a?(Hash) && a["verdict"] == "pass" }.map { |a| a["id"] }.compact
+  required_questions.all? { |qid| pass_ids.include?(qid) }
+end
+
 def validate_quality_outcome(result, task)
   source = "task_file.quality_outcome"
   outcome = task["quality_outcome"]
@@ -953,6 +1019,7 @@ def validate_task(result, task_path)
     else
       validate_quality_outcome(result, task)
     end
+    validate_invalid_completion_guards(result, task)
   end
 
   validate_design_lifecycle(result, task) if design_task?(task)
@@ -1468,6 +1535,7 @@ def validate_gate_verdict(result, records, expected_kind, task = nil)
     unless evidence_level_satisfies_minimum?(actual_level, minimum)
       validation_error(result, "evidence_file.records.#{expected_kind}.evidence_level", "Latest #{expected_kind} evidence_level #{actual_level.inspect} does not satisfy minimum_evidence_level #{minimum.inspect}.")
     end
+    validate_required_questions_coverage(result, latest, task) if (GATE_KIND_EVIDENCE_RECORD_KIND[expected_kind] || expected_kind) == "review"
   when "fail"
     validation_error(result, "evidence_file.records", "Latest #{expected_kind} verdict is fail.")
   when "partial"
@@ -2098,6 +2166,18 @@ def gate_status(records, kind, task = nil)
   quality_evidence_fields_ok = !task_requires_quality_evidence_fields?(task) || status != "pass" || ALLOWED_EVIDENCE_LEVELS.include?(actual_evidence_level.to_s)
   wrong_gate_kind_level = !latest.nil? && status == "pass" && !evidence_level_valid_for_gate_kind?(actual_evidence_level, kind)
   evidence_level_ok = latest.nil? || status != "pass" || wrong_gate_kind_level || evidence_level_satisfies_minimum?(actual_evidence_level, minimum_evidence_level)
+  # For structured review evidence passes (review and design_readiness gates): quality_outcome_verdict
+  # must be "pass" AND all required_questions must have verdict "pass".
+  quality_outcome_ok = if evidence_record_kind == "review" && latest.is_a?(Hash) && latest["structured_submit"] == true && status == "pass"
+                         latest["quality_outcome_verdict"] == "pass"
+                       else
+                         true
+                       end
+  required_questions_ok = if evidence_record_kind == "review" && latest.is_a?(Hash) && latest["structured_submit"] == true && status == "pass"
+                             required_questions_all_pass?(latest, task)
+                           else
+                             true
+                           end
   blocking_reason = if latest.nil?
                       "missing"
                     elsif !identity_valid
@@ -2108,6 +2188,10 @@ def gate_status(records, kind, task = nil)
                       "evidence_level_wrong_gate_kind"
                     elsif !evidence_level_ok
                       "evidence_level_below_minimum"
+                    elsif !quality_outcome_ok
+                      "quality_outcome_not_pass"
+                    elsif !required_questions_ok
+                      "required_questions_not_met"
                     elsif display_status != "pass"
                       display_status
                     end
@@ -2116,7 +2200,7 @@ def gate_status(records, kind, task = nil)
     "required" => true,
     "status" => display_status,
     "record_status" => status,
-    "passed" => status == "pass" && identity_valid && quality_evidence_fields_ok && !wrong_gate_kind_level && evidence_level_ok,
+    "passed" => status == "pass" && identity_valid && quality_evidence_fields_ok && !wrong_gate_kind_level && evidence_level_ok && quality_outcome_ok && required_questions_ok,
     "structured" => latest.is_a?(Hash) ? latest["structured_submit"] == true : false,
     "evidence_level" => actual_evidence_level,
     "minimum_evidence_level" => minimum_evidence_level,

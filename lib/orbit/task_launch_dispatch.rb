@@ -140,9 +140,27 @@ def quality_outcome_template(task_type)
   end
 end
 
+def improvement_task_type?(task_type)
+  type = task_type.to_s.downcase
+  %w[improvement refactor split docs documentation performance speed latency ux workflow reliability architecture].any? { |token| type.include?(token) }
+end
+
+def default_invalid_completion_guards(task_type)
+  template = quality_outcome_template(task_type)
+  completions = template["invalid_completions"] || []
+  completions.each_with_index.map do |completion, index|
+    {
+      "id" => "guard_#{index + 1}",
+      "description" => completion,
+      "evidence_required" => "Reviewer must explicitly address whether this invalid completion pattern was avoided."
+    }
+  end
+end
+
 def default_review_strategy(task_type = nil)
   minimum = design_task?(task_type) ? "implementation_readiness" : "outcome_quality"
   {
+    "required_questions" => %w[outcome counterexamples evidence_sufficiency residual_risk],
     "entrypoints" => ["quality_outcome", "acceptance", "changed_files", "evidence"],
     "minimum_evidence_level" => minimum,
     "suggested_checks" => [
@@ -308,6 +326,7 @@ def new_task(args)
   }
   task["gates"] = default_gates_for_new_task(options["target_role"], options["task_type"])
   task["quality_outcome"] = quality_outcome_template(options["task_type"])
+  task["invalid_completion_guards"] = default_invalid_completion_guards(options["task_type"]) if improvement_task_type?(options["task_type"])
   task["review_strategy"] = default_review_strategy(options["task_type"])
   test_strat = default_test_strategy(options["target_role"], options["task_type"])
   task["test_strategy"] = test_strat if test_strat

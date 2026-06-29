@@ -39,9 +39,10 @@ ORBIT_CURRENT_SCHEMA_VERSIONS = {
 # release_quality (mechanical_check, release_readiness).
 # Cross-family substitution is prohibited (Phase 1 Slice 1 complete).
 ORBIT_FEATURE_VERSIONS = {
-  "evidence_level" => "v1",   # per-gate-kind family chains; cross-family substitution blocked
-  "quality_outcome" => "v1",  # quality_outcome_verdict, required review questions (Slice 2 foundation)
-  "schema_semantics" => "v1" # this versioning scaffolding itself (Slice 14 step 1)
+  "evidence_level" => "v1",            # per-gate-kind family chains; cross-family substitution blocked
+  "quality_outcome" => "v1",           # quality_outcome_verdict, required review questions (Slice 2 foundation)
+  "quality_outcome_guardrails" => "v1", # invalid_completion_guards, required_questions coverage (Slice 2)
+  "schema_semantics" => "v1"           # this versioning scaffolding itself (Slice 14 step 1)
   # "parent_goal_status" => nil   # not yet implemented – Phase 1 Slice 3
   # "gate_lease" => nil           # not yet implemented – Phase 2 Slice 9
 }.freeze

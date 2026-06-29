@@ -32,7 +32,13 @@ quality_outcome:
     - "Only proving that existing tests pass without evidence for the quality outcome."
     - "Using a workaround, fallback, or manual artifact to mask an unclosed implementation path."
 acceptance: []
+invalid_completion_guards: []
 review_strategy:
+  required_questions:
+    - outcome
+    - counterexamples
+    - evidence_sufficiency
+    - residual_risk
   entrypoints:
     - quality_outcome
     - acceptance
