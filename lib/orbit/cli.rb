@@ -14,6 +14,7 @@ require_relative "docs_lifecycle"
 require_relative "data_classification"
 require_relative "release_readiness"
 require_relative "dogfood_governance"
+require_relative "landing_governance"
 
 def run_orbit_cli(argv)
   command = argv.shift

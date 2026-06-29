@@ -721,6 +721,11 @@ def handoff(args)
     "release_readiness_summary" => release_readiness_summary(task),
     "release_blockers" => release_risk?(task) ? release_readiness_blockers(task.is_a?(Hash) ? task["release_readiness"] : nil, task) : [],
     "dogfood_governance_summary" => dogfood_governance_summary(task),
+    "compatibility_policy_summary" => compatibility_policy_summary(task),
+    "multi_user_ownership_summary" => multi_user_ownership_summary(task),
+    "self_review_guard_summary" => self_review_guard_summary(task),
+    "quality_calibration_summary" => quality_calibration_summary(task),
+    "risk_level_tradeoff_summary" => risk_level_tradeoff_summary(task),
     "blocking_errors" => blocking_errors
   }
 

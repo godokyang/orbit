@@ -566,6 +566,11 @@ def validate_task(result, task_path)
   validate_task_risk_level(result, task)
   validate_project_profile(result, task)
   validate_retrospective_done_criteria(result, task)
+  validate_compatibility_policy(result, task)
+  validate_multi_user_ownership(result, task)
+  validate_self_review_guard(result, task)
+  validate_backup_migration(result, task)
+  validate_quality_calibration(result, task)
   task
 end
 
@@ -882,4 +887,3 @@ def validate_retrospective_done_criteria(result, task)
       "Retrospective/postmortem/lesson task acceptance entries must be non-empty.")
   end
 end
-

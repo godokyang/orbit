@@ -657,6 +657,15 @@ def audit(args)
     end
   end
 
+  # Slice 16: landing governance audit findings.
+  governance_audit_findings(task).each do |finding|
+    if finding["severity"] == "high"
+      blocking_findings << audit_finding(finding["source"], finding["message"], "high")
+    else
+      warnings << audit_finding(finding["source"], finding["message"], finding["severity"] || "medium")
+    end
+  end
+
   issues = blocking_findings + warnings
   trust_flags = audit_trust_flags(phase, blocking_findings, warnings)
 
@@ -697,6 +706,11 @@ def audit(args)
     "release_readiness_summary" => release_readiness_summary(task),
     "release_blockers" => release_risk?(task) ? release_readiness_blockers(task["release_readiness"], task) : [],
     "dogfood_governance_summary" => dogfood_governance_summary(task),
+    "compatibility_policy_summary" => compatibility_policy_summary(task),
+    "self_review_guard_summary" => self_review_guard_summary(task),
+    "multi_user_ownership_summary" => multi_user_ownership_summary(task),
+    "quality_calibration_summary" => quality_calibration_summary(task),
+    "risk_level_tradeoff_summary" => risk_level_tradeoff_summary(task),
     "issues" => issues,
     "blocking_findings" => blocking_findings,
     "warnings" => warnings
