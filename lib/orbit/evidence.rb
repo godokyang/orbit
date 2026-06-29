@@ -27,6 +27,8 @@ VERDICT_ARBITRATION_CONFLICT_RESOLUTION = "latest_valid_for_task_revision"
 # Slice 10: doc lifecycle and decision records.
 ALLOWED_DOC_LIFECYCLE_STATUSES = %w[active_baseline open_design implemented_archive historical_reference lesson_candidate promoted_rule].freeze
 ALLOWED_DECISION_KINDS = %w[user_confirmation scope_change risk_acceptance design_choice lesson_promotion].freeze
+# Slice 14: negative evidence statuses.
+ALLOWED_NEGATIVE_EVIDENCE_STATUSES = %w[not_tested not_applicable waived unknown].freeze
 EVIDENCE_EXPECTED_GATE_ROLES = {
   "review" => "reviewer",
   "test" => "tester"
@@ -738,6 +740,11 @@ def evidence_from_report(options)
     if report.key?("trust_repair")
       tr = normalize_trust_repair(report["trust_repair"], "from_report", kind)
       record["trust_repair"] = tr if tr
+    end
+    # Slice 14: carry negative_evidence.
+    if report.key?("negative_evidence")
+      ne = validate_negative_evidence!(report["negative_evidence"], "from_report", kind)
+      record["negative_evidence"] = ne if ne
     end
     snapshot = evidence_identity_snapshot(identity)
     record["identity"] = snapshot if snapshot

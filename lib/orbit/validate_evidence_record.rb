@@ -34,6 +34,7 @@ def validate_evidence_record(result, source, record)
   validate_gate_lease_record_field(result, source, record)
   validate_decision_record_field(result, source, record)
   validate_data_classification_fields(result, source, record)
+  validate_negative_evidence_field(result, source, record)
 end
 
 def validate_role_execution_context_record(result, source, rec)
@@ -1019,3 +1020,35 @@ def validate_data_classification_fields(result, source, record)
   end
 end
 
+
+# Slice 14: validate negative_evidence on evidence records.
+def validate_negative_evidence_field(result, source, record)
+  return unless record.key?("negative_evidence")
+
+  ne = record["negative_evidence"]
+  unless ne.is_a?(Array)
+    validation_error(result, "#{source}.negative_evidence",
+      "Evidence negative_evidence must be a list of mappings.")
+    return
+  end
+
+  ne.each_with_index do |entry, idx|
+    unless entry.is_a?(Hash)
+      validation_error(result, "#{source}.negative_evidence[#{idx}]",
+        "Evidence negative_evidence entry must be a mapping.")
+      next
+    end
+    %w[claim status reason].each do |f|
+      v = entry[f]
+      unless v.is_a?(String) && !v.strip.empty?
+        validation_error(result, "#{source}.negative_evidence[#{idx}].#{f}",
+          "Evidence negative_evidence entry #{f} must be a non-empty string.")
+      end
+    end
+    status = entry["status"]
+    if status.is_a?(String) && !status.empty? && !ALLOWED_NEGATIVE_EVIDENCE_STATUSES.include?(status)
+      validation_error(result, "#{source}.negative_evidence[#{idx}].status",
+        "Evidence negative_evidence status must be one of #{ALLOWED_NEGATIVE_EVIDENCE_STATUSES.join('|')}.")
+    end
+  end
+end

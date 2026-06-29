@@ -920,6 +920,11 @@ def evidence_submit(options)
     tr = normalize_trust_repair(report["trust_repair"], "submit_report", kind)
     record["trust_repair"] = tr if tr
   end
+  # Slice 14: carry negative_evidence.
+  if report.key?("negative_evidence")
+    ne = validate_negative_evidence!(report["negative_evidence"], "submit_report", kind)
+    record["negative_evidence"] = ne if ne
+  end
   # Build role_execution_context (Slice 6 – supersedes Slice 5 flat identity block).
   # Readers should check role_execution_context first, then fall back to identity for compat.
   if identity

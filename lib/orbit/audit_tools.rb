@@ -693,6 +693,7 @@ def audit(args)
     "task_risk_summary" => task_risk_summary(task),
     "data_classification_summary" => data_classification_summary(evidence),
     "trust_repair_summary" => trust_repair_summary(evidence),
+    "negative_evidence_summary" => negative_evidence_summary(evidence),
     "release_readiness_summary" => release_readiness_summary(task),
     "release_blockers" => release_risk?(task) ? release_readiness_blockers(task["release_readiness"]) : [],
     "issues" => issues,

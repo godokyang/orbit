@@ -132,6 +132,66 @@ def normalize_trust_repair(value, source, kind = nil)
   result.empty? ? nil : result
 end
 
+# Slice 14: validate negative_evidence list on reports/records.
+# Each entry must have claim, status, reason; status must be in ALLOWED_NEGATIVE_EVIDENCE_STATUSES.
+def validate_negative_evidence!(value, source, kind = nil)
+  unless value.is_a?(Array)
+    submit_report_schema_error(
+      "#{source}.negative_evidence",
+      "negative_evidence must be a list of mappings.",
+      expected: "list of mappings with claim, status, reason",
+      actual: evidence_value_type(value),
+      kind: kind
+    )
+    return nil
+  end
+
+  result = []
+  value.each_with_index do |entry, idx|
+    unless entry.is_a?(Hash)
+      submit_report_schema_error(
+        "#{source}.negative_evidence[#{idx}]",
+        "negative_evidence entry must be a mapping.",
+        expected: "mapping with claim, status, reason",
+        actual: evidence_value_type(entry),
+        kind: kind
+      )
+      next
+    end
+
+    item = {}
+    %w[claim status reason].each do |f|
+      v = entry[f]
+      unless v.is_a?(String) && !v.strip.empty?
+        submit_report_schema_error(
+          "#{source}.negative_evidence[#{idx}].#{f}",
+          "negative_evidence entry #{f} must be a non-empty string.",
+          expected: "non-empty string",
+          actual: evidence_value_type(v),
+          kind: kind
+        )
+        next
+      end
+      item[f] = v.strip
+    end
+
+    status = item["status"]
+    if status && !ALLOWED_NEGATIVE_EVIDENCE_STATUSES.include?(status)
+      submit_report_schema_error(
+        "#{source}.negative_evidence[#{idx}].status",
+        "negative_evidence status must be one of #{ALLOWED_NEGATIVE_EVIDENCE_STATUSES.join('|')}.",
+        expected: ALLOWED_NEGATIVE_EVIDENCE_STATUSES.join("|"),
+        actual: status,
+        kind: kind
+      )
+    end
+
+    result << item unless item.empty?
+  end
+
+  result.empty? ? nil : result
+end
+
 # Check if a data_classification indicates secret-level content.
 def secret_classification?(dc)
   dc.is_a?(Hash) && dc["sensitivity"] == "secret"
@@ -306,4 +366,29 @@ def redact_for_compact(records)
 
     redact_sensitive_record(record, "[redacted: data_classification requires hash_only/redacted retention]")
   end
+end
+
+# Slice 14: summarize negative_evidence across evidence records.
+def negative_evidence_summary(evidence)
+  records = evidence.is_a?(Hash) && evidence["records"].is_a?(Array) ? evidence["records"] : []
+  by_status = {}
+  claims = []
+  total = 0
+
+  records.each_with_index do |record, idx|
+    next unless record.is_a?(Hash) && record["negative_evidence"].is_a?(Array)
+    record["negative_evidence"].each do |entry|
+      next unless entry.is_a?(Hash)
+      total += 1
+      status = entry["status"]
+      by_status[status] = (by_status[status] || 0) + 1 if status
+      claims << { "record_index" => idx, "claim" => entry["claim"], "status" => status, "reason" => entry["reason"] }.compact if entry["claim"]
+    end
+  end
+
+  {
+    "total" => total,
+    "by_status" => by_status,
+    "claims" => claims
+  }
 end

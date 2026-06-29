@@ -51,7 +51,8 @@ ORBIT_FEATURE_VERSIONS = {
   "doc_lifecycle" => "v1",             # doc_lifecycle + decision_record structured records (Slice 10)
   "project_profile_risk_level" => "v1", # project profile + task risk level derivation (Slice 11)
   "data_classification_retention" => "v1", # data classification + retention + trust repair (Slice 12)
-  "ci_release_readiness" => "v1"           # CI release readiness: source, ci, package, version, remote state (Slice 13)
+  "ci_release_readiness" => "v1",           # CI release readiness: source, ci, package, version, remote state (Slice 13)
+  "protocol_schema_versioning" => "v1"      # consistency_check + negative_evidence (Slice 14)
   # "gate_lease" => nil           # not yet implemented – Phase 2 Slice 9
 }.freeze
 
@@ -156,6 +157,8 @@ def detect_prose_structured_conflict(record_or_report)
 
   conflict_type = if structured_verdict == "fail" && prose_pass && !prose_fail
                     "prose_pass_structured_fail"
+                  elsif structured_verdict == "partial" && prose_pass && !prose_fail
+                    "prose_pass_structured_partial"
                   elsif structured_verdict == "pass" && prose_fail && !prose_pass
                     "prose_fail_structured_pass"
                   end
@@ -212,14 +215,43 @@ def evidence_schema_version_summary(evidence, task = nil)
       "New evidence created with 'orbit evidence init' will include schema_semantics."
     )
   end
-
-  # Scan individual records for prose/structured conflicts
+  # Scan individual records for prose/structured conflicts and build consistency_checks.
   records = evidence["records"]
+  consistency_checks = []
   if records.is_a?(Array)
     records.each_with_index do |record, index|
       next unless record.is_a?(Hash)
 
+      raw_status = record["status"] || record["verdict"]
+      structured_verdict = case raw_status.to_s.strip.upcase
+                           when "PASS", "APPROVED" then "pass"
+                           when "FAIL", "CHANGES_REQUESTED" then "fail"
+                           when "PARTIAL", "BLOCKED" then "partial"
+                           else nil
+                           end
+
+      summary = record["summary"].to_s.strip
+      summary_verdict_detected = if summary.empty?
+                                   nil
+                                 elsif PROSE_PASS_PATTERNS.match?(summary) && !PROSE_FAIL_PATTERNS.match?(summary)
+                                   "pass"
+                                 elsif PROSE_FAIL_PATTERNS.match?(summary) && !PROSE_PASS_PATTERNS.match?(summary)
+                                   "fail"
+                                 else
+                                   nil
+                                 end
+
       conflict = detect_prose_structured_conflict(record)
+
+      consistency_checks << {
+        "record_index" => index,
+        "source" => "evidence_file.records[#{index}]",
+        "structured_verdict" => structured_verdict,
+        "summary_verdict_detected" => summary_verdict_detected,
+        "conflicts" => conflict ? [conflict.merge("record_index" => index, "source" => "evidence_file.records[#{index}]")] : [],
+        "resolution" => conflict ? "structured_verdict_wins" : nil
+      }
+
       next unless conflict
 
       prose_conflicts << conflict.merge(
@@ -264,6 +296,7 @@ def evidence_schema_version_summary(evidence, task = nil)
     "legacy_warnings" => legacy_warnings,
     "unknown_versions" => unknown_versions,
     "prose_conflicts" => prose_conflicts,
+    "consistency_checks" => consistency_checks,
     "known_gaps" => [
       "parent_goal_status feature version not yet implemented (Phase 1 Slice 3).",
       "Prose/structured conflict detection covers summary field prefix only; full field scan is a known gap."

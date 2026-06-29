@@ -714,6 +714,7 @@ def handoff(args)
     "decision_record_summary" => decisions_summary,
     "trust_repair_summary" => trust_repair_summary(evidence),
     "data_classification_summary" => data_classification_summary(evidence),
+    "negative_evidence_summary" => negative_evidence_summary(evidence),
     "worktree_safety_summary" => worktree_safety_summary(evidence),
     "evidence_summary" => evidence_summary(evidence),
     "schema_version_summary" => evidence_schema_version_summary(evidence, task.is_a?(Hash) ? task : nil),

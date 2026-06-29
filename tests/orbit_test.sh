@@ -179,5 +179,6 @@ source "$PARTS_DIR/13_doc_lifecycle.sh"
 source "$PARTS_DIR/14_project_profile_risk.sh"
 source "$PARTS_DIR/15_data_classification_retention.sh"
 source "$PARTS_DIR/16_ci_release_readiness.sh"
+source "$PARTS_DIR/17_protocol_schema_versioning_full.sh"
 
 printf 'REAL_TESTS_PASS count=%s tmp=%s\n' "$PASS_COUNT" "$TMPROOT"
