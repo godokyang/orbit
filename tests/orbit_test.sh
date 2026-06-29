@@ -57,13 +57,23 @@ rule_application:
       evidence: Outcome, evidence boundary, and counterexample paths were checked.
   not_applicable: []
 quality_question_answers:
-  - id: outcome_satisfied
+  - id: outcome
     verdict: pass
     evidence: The reviewed evidence proves the expected behavior.
+  - id: counterexamples
+    verdict: pass
+    evidence: No counterexamples found; invalid completion patterns were checked and addressed.
+  - id: evidence_sufficiency
+    verdict: pass
+    evidence: Evidence boundary confirms, assumed, and missing paths are explicit.
+  - id: residual_risk
+    verdict: pass
+    evidence: Residual risk is acceptable; no untested required paths remain.
 confirmed:
   - Reviewed evidence proves the expected behavior.
 assumed: []
 missing: []
+residual_risk: "No residual risk: all required paths covered by evidence."
 counterexample_cases:
   - Latest command pass must not mask gate verdict failures.
 implementation_readiness_verdict: not_checked
@@ -72,7 +82,7 @@ YAML
 
 append_test_quality_fields() {
   cat >>"$1" <<'YAML'
-evidence_level: outcome_quality
+evidence_level: real_path_test
 rule_application:
   required_rule_files_read:
     - references/runtime/testing-guideline.md
@@ -85,6 +95,7 @@ confirmed:
   - Test evidence covers the expected behavior.
 assumed: []
 missing: []
+residual_risk: "No residual risk: all required paths covered by test evidence."
 YAML
 }
 
@@ -1054,7 +1065,7 @@ artifacts:
 REPORT
 append_test_quality_fields "$TMPROOT/test-report.yaml"
 ORBIT_INSTANCE=tester "$CLI" evidence from-report --file "$TEST_EVIDENCE" --report "$TMPROOT/test-report.yaml" --json >"$TMPROOT/evidence-from-test-report.json"
-json_assert 'evidence from-report imports structured test verdict' "$TMPROOT/evidence-from-test-report.json" 'j["record"]["kind"] == "test" && j["record"]["status"] == "pass" && j["record"]["summary"] == "Browser scenarios passed." && j["record"]["structured_submit"] == true && j["record"]["evidence_level"] == "outcome_quality"'
+json_assert 'evidence from-report imports structured test verdict' "$TMPROOT/evidence-from-test-report.json" 'j["record"]["kind"] == "test" && j["record"]["status"] == "pass" && j["record"]["summary"] == "Browser scenarios passed." && j["record"]["structured_submit"] == true && j["record"]["evidence_level"] == "real_path_test"'
 "$CLI" wait-gate --task "$TEST_TASK" --evidence "$TEST_EVIDENCE" --json >"$TMPROOT/wait-gate-test-pass.json"
 json_assert 'wait-gate passes after imported test evidence' "$TMPROOT/wait-gate-test-pass.json" 'j["ready"] == true && j["gates"].any? { |g| g["kind"] == "test" && g["passed"] == true }'
 expect_failure 'validate rejects passing test evidence without environment contract evidence' "$CLI" validate --task "$TEST_TASK" --evidence "$TEST_EVIDENCE" --json
@@ -1069,7 +1080,7 @@ coverage:
   - test exercised success path and cleanup path
 artifacts:
   - .orbit/test-artifacts/complete-test-env.log
-evidence_level: outcome_quality
+evidence_level: real_path_test
 rule_application:
   required_rule_files_read:
     - references/runtime/testing-guideline.md
@@ -1082,6 +1093,7 @@ confirmed:
   - Test environment lifecycle was recorded.
 assumed: []
 missing: []
+residual_risk: "No residual risk: all required paths covered by test evidence."
 test_environment:
   environment: local shell
   test_tab_or_pane: current pane
@@ -1124,7 +1136,7 @@ json_assert 'concurrent evidence submits retain review and test records' "$TMPRO
 json_assert 'wait-gate passes after concurrent structured review and test submit' "$TMPROOT/wait-gate-concurrent-submit.json" 'j["ready"] == true && j["gate_summary"]["required"].sort == ["review", "test"] && (["review", "test"] - j["gate_summary"]["passed"]).empty?'
 MIN_TEST_TASK="$TMPROOT/min-test-quality-task.yaml"
 cp "$TEST_TASK" "$MIN_TEST_TASK"
-ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["review_strategy"] ||= {}; y["review_strategy"]["minimum_evidence_level"]="outcome_quality"; File.write(p, YAML.dump(y))' "$MIN_TEST_TASK"
+ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["test_strategy"] ||= {}; y["test_strategy"]["minimum_evidence_level"]="real_path_test"; File.write(p, YAML.dump(y))' "$MIN_TEST_TASK"
 cp "$TEST_EVIDENCE" "$TMPROOT/legacy-test-missing-evidence-level.json"
 ruby --disable-gems -rjson -e 'p=ARGV[0]; j=JSON.parse(File.read(p)); j["records"].reverse.find { |r| r["kind"] == "test" && r["status"] == "pass" }.delete("evidence_level"); File.write(p, JSON.pretty_generate(j))' "$TMPROOT/legacy-test-missing-evidence-level.json"
 if "$CLI" wait-gate --task "$MIN_TEST_TASK" --evidence "$TMPROOT/legacy-test-missing-evidence-level.json" --json >"$TMPROOT/wait-gate-test-missing-evidence-level.json"; then
@@ -1219,7 +1231,7 @@ coverage:
   - concurrent test record retained
 artifacts:
   - tests/orbit_test.sh
-evidence_level: outcome_quality
+evidence_level: real_path_test
 rule_application:
   required_rule_files_read:
     - references/runtime/testing-guideline.md
@@ -1232,6 +1244,7 @@ confirmed:
   - Concurrent test record retained.
 assumed: []
 missing: []
+residual_risk: "No residual risk: all required paths covered by test evidence."
 test_environment:
   environment: local shell
   test_tab_or_pane: current pane
@@ -1405,7 +1418,7 @@ coverage:
   - implementation gate success path
 artifacts:
   - .orbit/test-artifacts/implementation-gate.log
-evidence_level: outcome_quality
+evidence_level: real_path_test
 rule_application:
   required_rule_files_read:
     - references/runtime/testing-guideline.md
@@ -1418,6 +1431,7 @@ confirmed:
   - Implementation gate success path covered.
 assumed: []
 missing: []
+residual_risk: "No residual risk: all required paths covered by test evidence."
 test_environment:
   environment: local shell
   test_tab_or_pane: current pane
@@ -1438,9 +1452,9 @@ test ! -s "$TMPROOT/implementation-done.err"
 json_assert 'state transition allows done with implementation pass evidence' "$TMPROOT/implementation-done.json" 'j["phase"] == "done" && j["artifacts"]["evidence_file"] == File.expand_path(ARGV[2])' "$IMPL_EVIDENCE"
 "$CLI" audit --task "$IMPL_TASK" --evidence "$IMPL_EVIDENCE" --state .orbit/loop-state.yaml --json >"$TMPROOT/audit-valid.json" 2>"$TMPROOT/audit-valid.err"
 test ! -s "$TMPROOT/audit-valid.err"
-json_assert 'audit passes done state with matching evidence' "$TMPROOT/audit-valid.json" 'j["schema_version"] == "orbit-audit-v1" && j["trust_level"]["mode"] == "audit_only" && j["done_ready"] == true && j["trusted_for_handoff"] == true && j["trusted_for_done"] == true && j["trusted_for_release"] == false && j["blocking_findings"].empty? && j["warnings"].any? { |e| e["source"] == "state_file.artifacts.handoff_packet" && e["remediation"].is_a?(String) } && j["issues"].length == j["blocking_findings"].length + j["warnings"].length && j["validation"]["valid"] == true && j["evidence_summary"]["aggregate_verdict"]["gates"]["review"]["evidence_level"] == "outcome_quality" && j["evidence_summary"]["aggregate_verdict"]["gates"]["test"]["evidence_level"] == "outcome_quality"'
+json_assert 'audit passes done state with matching evidence' "$TMPROOT/audit-valid.json" 'j["schema_version"] == "orbit-audit-v1" && j["trust_level"]["mode"] == "audit_only" && j["done_ready"] == true && j["trusted_for_handoff"] == true && j["trusted_for_done"] == true && j["trusted_for_release"] == false && j["blocking_findings"].empty? && j["warnings"].any? { |e| e["source"] == "state_file.artifacts.handoff_packet" && e["remediation"].is_a?(String) } && j["issues"].length == j["blocking_findings"].length + j["warnings"].length && j["validation"]["valid"] == true && j["evidence_summary"]["aggregate_verdict"]["gates"]["review"]["evidence_level"] == "outcome_quality" && j["evidence_summary"]["aggregate_verdict"]["gates"]["test"]["evidence_level"] == "real_path_test"'
 "$CLI" handoff --task "$IMPL_TASK" --evidence "$IMPL_EVIDENCE" --state .orbit/loop-state.yaml --output "$TMPROOT/implementation-handoff.json" --record-state --json >"$TMPROOT/implementation-handoff.stdout"
-json_assert 'handoff can write artifact and record it in state' "$TMPROOT/implementation-handoff.json" 'j["schema_version"] == "orbit-handoff-v1" && j["blocking_errors"].empty? && j["gate_summary"]["ready"] == true && j["gate_summary"]["evidence_levels"]["review"] == "outcome_quality" && j["gate_summary"]["evidence_levels"]["test"] == "outcome_quality" && j["judgment_summary"]["review_judgment"]["present"] == true && j["judgment_summary"]["review_judgment"]["source"] == "latest_evidence_record" && j["judgment_summary"]["review_judgment"]["evidence_level"] == "outcome_quality" && j["judgment_summary"]["review_judgment"]["rule_application_summary"]["applied_checks_count"] == 1 && j["judgment_summary"]["test_judgment"]["present"] == true && j["judgment_summary"]["test_judgment"]["evidence_level"] == "outcome_quality" && j["latest_gate_verdicts"]["review"]["status"] == "pass" && j["latest_gate_verdicts"]["review"]["evidence_boundary_summary"]["confirmed_count"] == 1 && j["latest_gate_verdicts"]["test"]["status"] == "pass" && j["latest_gate_verdicts"]["test"]["rule_application_summary"]["applied_checks_count"] == 1 && j["closure_checklist"].is_a?(Array) && j["closure_checklist"].any? { |c| c["item"] == "latest_test_verdict" } && j["known_gaps"].is_a?(Array) && j["readable_summary"]["next_action"] == "none" && j["worktree_safety_summary"]["status"] == "not_git"'
+json_assert 'handoff can write artifact and record it in state' "$TMPROOT/implementation-handoff.json" 'j["schema_version"] == "orbit-handoff-v1" && j["blocking_errors"].empty? && j["gate_summary"]["ready"] == true && j["gate_summary"]["evidence_levels"]["review"] == "outcome_quality" && j["gate_summary"]["evidence_levels"]["test"] == "real_path_test" && j["judgment_summary"]["review_judgment"]["present"] == true && j["judgment_summary"]["review_judgment"]["source"] == "latest_evidence_record" && j["judgment_summary"]["review_judgment"]["evidence_level"] == "outcome_quality" && j["judgment_summary"]["review_judgment"]["rule_application_summary"]["applied_checks_count"] == 1 && j["judgment_summary"]["test_judgment"]["present"] == true && j["judgment_summary"]["test_judgment"]["evidence_level"] == "real_path_test" && j["latest_gate_verdicts"]["review"]["status"] == "pass" && j["latest_gate_verdicts"]["review"]["evidence_boundary_summary"]["confirmed_count"] == 1 && j["latest_gate_verdicts"]["test"]["status"] == "pass" && j["latest_gate_verdicts"]["test"]["rule_application_summary"]["applied_checks_count"] == 1 && j["closure_checklist"].is_a?(Array) && j["closure_checklist"].any? { |c| c["item"] == "latest_test_verdict" } && j["known_gaps"].is_a?(Array) && j["readable_summary"]["next_action"] == "none" && j["worktree_safety_summary"]["status"] == "not_git"'
 yaml_assert 'handoff record-state stores artifact path' .orbit/loop-state.yaml 'j["artifacts"]["handoff_packet"] == File.expand_path(ARGV[2]) && j["history"].last["event"] == "handoff"' "$TMPROOT/implementation-handoff.json"
 "$CLI" compact-evidence --task "$IMPL_TASK" --evidence "$IMPL_EVIDENCE" --handoff "$TMPROOT/implementation-handoff.json" --output "$TMPROOT/durable-summary.json" --json >"$TMPROOT/durable-summary.stdout"
 cmp "$TMPROOT/durable-summary.json" "$TMPROOT/durable-summary.stdout"
@@ -1504,7 +1518,7 @@ coverage:
   - explicit task test evidence path
 artifacts:
   - .orbit/test-artifacts/eq-test.log
-evidence_level: outcome_quality
+evidence_level: real_path_test
 rule_application:
   required_rule_files_read:
     - references/runtime/testing-guideline.md
@@ -1517,6 +1531,7 @@ confirmed:
   - Explicit task test evidence path covered.
 assumed: []
 missing: []
+residual_risk: "No residual risk: all required paths covered by test evidence."
 test_environment:
   environment: local shell
   test_tab_or_pane: current pane
@@ -1606,7 +1621,7 @@ coverage:
   - measured baseline and after behavior
 artifacts:
   - .orbit/test-artifacts/quality-measurement.json
-evidence_level: outcome_quality
+evidence_level: real_path_test
 rule_application:
   required_rule_files_read:
     - references/runtime/testing-guideline.md
@@ -1619,6 +1634,7 @@ confirmed:
   - Baseline and after behavior were measured.
 assumed: []
 missing: []
+residual_risk: "No residual risk: all required paths covered by test evidence."
 test_environment:
   environment: local shell
   test_tab_or_pane: current pane
@@ -1805,5 +1821,760 @@ ORBIT_INSTANCE=reviewer "$CLI" handoff --task "$HANDOFF_TASK" --state "$HANDOFF_
 json_assert 'handoff includes schema_version_summary with compatibility_state' \
   "$TMPROOT/handoff-schema.json" \
   'svs = j["schema_version_summary"]; svs.is_a?(Hash) && svs.key?("compatibility_state")'
+
+# Test: review gate rejects implementation_readiness substituting for outcome_quality minimum
+# (cross-family substitution is prohibited: review_quality family ≠ design_readiness family)
+IMPL_FOR_OUTCOME_EVIDENCE="$TMPROOT/impl-review-for-outcome-gate.json"
+"$CLI" evidence init --output "$IMPL_FOR_OUTCOME_EVIDENCE" >/dev/null
+write_review_pass_report "$TMPROOT/impl-review-for-outcome-gate.yaml" "Implementation readiness review pass." "herdr:reviewer:impl-for-outcome"
+ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["evidence_level"]="implementation_readiness"; y["implementation_readiness_verdict"]="pass"; File.write(p, YAML.dump(y))' "$TMPROOT/impl-review-for-outcome-gate.yaml"
+ORBIT_INSTANCE=reviewer "$CLI" evidence submit --file "$IMPL_FOR_OUTCOME_EVIDENCE" --report "$TMPROOT/impl-review-for-outcome-gate.yaml" --json >/dev/null
+if "$CLI" wait-gate --task "$MIN_OUTCOME_TASK" --evidence "$IMPL_FOR_OUTCOME_EVIDENCE" --json >"$TMPROOT/wait-gate-impl-for-outcome.json"; then
+  printf 'FAIL review gate rejects implementation_readiness substituting for outcome_quality: command unexpectedly succeeded\n' >&2
+  exit 1
+fi
+pass 'review gate rejects implementation_readiness substituting for outcome_quality'
+json_assert 'review gate cross-family substitution reports below_minimum blocker' \
+  "$TMPROOT/wait-gate-impl-for-outcome.json" \
+  'j["ready"] == false && j["gate_summary"]["not_ready"].any? { |g| g["kind"] == "review" && g["blocking_reason"] == "evidence_level_below_minimum" && g["evidence_level"] == "implementation_readiness" && g["minimum_evidence_level"] == "outcome_quality" }'
+
+# Test: test gate rejects outcome_quality evidence (wrong gate kind – not in test_quality family)
+TEST_WRONGKIND_EVIDENCE="$TMPROOT/test-wrongkind-evidence.json"
+"$CLI" evidence init --output "$TEST_WRONGKIND_EVIDENCE" >/dev/null
+cat >"$TMPROOT/test-wrongkind-report.yaml" <<'REPORT'
+kind: test
+verdict: pass
+summary: Test pass with outcome_quality (wrong evidence family for test gate).
+source_message_id: herdr:tester:wrongkind
+test_level: repo_regression
+evidence_level: outcome_quality
+rule_application:
+  required_rule_files_read:
+    - references/runtime/testing-guideline.md
+  applied_checks:
+    - id: wrongkind_test
+      verdict: pass
+      evidence: Wrong evidence family for test gate.
+  not_applicable: []
+confirmed:
+  - Wrong evidence family for test gate.
+assumed: []
+missing: []
+residual_risk: "No residual risk: all required paths covered by test evidence."
+findings: []
+coverage:
+  - test exercised success path
+artifacts:
+  - tests/orbit_test.sh
+test_environment:
+  environment: local shell
+  test_tab_or_pane: current pane
+  server_owner: none
+  browser_owner: none
+  cleanup_hook: no persistent runtime started
+  artifact_cleanup: retained compact log only
+  duration: 1s
+  resource_usage: one shell process
+  cleanup_status: complete
+  ux_quality: not_applicable
+  artifact_quality: artifact path is stable and small
+REPORT
+ORBIT_INSTANCE=tester "$CLI" evidence submit --file "$TEST_WRONGKIND_EVIDENCE" --report "$TMPROOT/test-wrongkind-report.yaml" --json >/dev/null
+if "$CLI" wait-gate --task "$TEST_TASK" --evidence "$TEST_WRONGKIND_EVIDENCE" --json >"$TMPROOT/wait-gate-test-wrongkind.json"; then
+  printf 'FAIL test gate rejects outcome_quality (wrong gate kind): command unexpectedly succeeded\n' >&2
+  exit 1
+fi
+pass 'test gate rejects outcome_quality evidence (wrong gate kind)'
+json_assert 'test gate wrong_gate_kind blocker reported' \
+  "$TMPROOT/wait-gate-test-wrongkind.json" \
+  'j["ready"] == false && j["gate_summary"]["not_ready"].any? { |g| g["kind"] == "test" && g["blocking_reason"] == "evidence_level_wrong_gate_kind" && g["evidence_level"] == "outcome_quality" }'
+
+# ---------------------------------------------------------------------------
+# Phase 1 Slice 1 new tests: gate-kind-aware minimum, residual_risk, defaults
+# ---------------------------------------------------------------------------
+
+# Fix 1 + Fix 2: test_strategy.minimum_evidence_level is read for test gate
+# TEST_TASK now has test_strategy.minimum_evidence_level: real_path_test by default.
+# Verify wait-gate passes with real_path_test evidence on TEST_TASK.
+yaml_assert 'new-task for tester creates test_strategy with minimum_evidence_level real_path_test' \
+  "$TEST_TASK" \
+  'j["test_strategy"].is_a?(Hash) && j["test_strategy"]["minimum_evidence_level"] == "real_path_test"'
+
+# Verify test gate blocks when evidence_level is below test_strategy minimum
+BELOW_MIN_TEST_EVIDENCE="$TMPROOT/below-min-test-evidence.json"
+"$CLI" evidence init --output "$BELOW_MIN_TEST_EVIDENCE" >/dev/null
+cat >"$TMPROOT/below-min-test-report.yaml" <<'YAML'
+kind: test
+verdict: pass
+summary: Test pass with mechanical_check level below test minimum.
+source_message_id: herdr:tester:below-min
+test_level: repo_regression
+evidence_level: mechanical_check
+rule_application:
+  required_rule_files_read:
+    - references/runtime/testing-guideline.md
+  applied_checks:
+    - id: below_min_test
+      verdict: pass
+      evidence: Mechanical check only.
+  not_applicable: []
+confirmed:
+  - Mechanical check performed.
+assumed: []
+missing: []
+residual_risk: "Minimal evidence only: mechanical_check."
+findings: []
+coverage:
+  - mechanical check only
+artifacts:
+  - tests/orbit_test.sh
+test_environment:
+  environment: local shell
+  test_tab_or_pane: current pane
+  server_owner: none
+  browser_owner: none
+  cleanup_hook: no persistent runtime started
+  artifact_cleanup: retained compact log only
+  duration: 1s
+  resource_usage: one shell process
+  cleanup_status: complete
+  ux_quality: not_applicable
+  artifact_quality: artifact path is stable and small
+YAML
+ORBIT_INSTANCE=tester "$CLI" evidence submit --file "$BELOW_MIN_TEST_EVIDENCE" --report "$TMPROOT/below-min-test-report.yaml" --json >/dev/null
+if "$CLI" wait-gate --task "$TEST_TASK" --evidence "$BELOW_MIN_TEST_EVIDENCE" --json >"$TMPROOT/wait-gate-below-min-test.json"; then
+  printf 'FAIL test gate rejects mechanical_check below real_path_test minimum: command unexpectedly succeeded\n' >&2
+  exit 1
+fi
+pass 'test gate rejects mechanical_check below real_path_test minimum'
+json_assert 'test gate reports evidence_level_below_minimum for test_strategy minimum' \
+  "$TMPROOT/wait-gate-below-min-test.json" \
+  'j["ready"] == false && j["gate_summary"]["not_ready"].any? { |g| g["kind"] == "test" && g["blocking_reason"] == "evidence_level_below_minimum" && g["evidence_level"] == "mechanical_check" && g["minimum_evidence_level"] == "real_path_test" }'
+
+# Fix 2: design_readiness gate is satisfied by review evidence record
+DESIGN_GATE_TASK="$TMPROOT/design-gate-kind-task.yaml"
+"$CLI" new-task --target-role reviewer --task-type design_review --output "$DESIGN_GATE_TASK" >/dev/null
+ruby --disable-gems -ryaml -e \
+  'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["gates"]=[{"kind"=>"design_readiness","roles"=>["reviewer"],"required"=>true,"pass_condition"=>"design artifact reviewed"}]; File.write(p, YAML.dump(y))' \
+  "$DESIGN_GATE_TASK"
+DESIGN_READINESS_EVIDENCE="$TMPROOT/design-readiness-evidence.json"
+"$CLI" evidence init --output "$DESIGN_READINESS_EVIDENCE" >/dev/null
+write_review_pass_report "$TMPROOT/design-readiness-review-pass.yaml" "Design readiness review passed." "herdr:reviewer:design-readiness"
+ruby --disable-gems -ryaml -e \
+  'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["evidence_level"]="implementation_readiness"; y["implementation_readiness_verdict"]="pass"; File.write(p, YAML.dump(y))' \
+  "$TMPROOT/design-readiness-review-pass.yaml"
+ORBIT_INSTANCE=reviewer "$CLI" evidence submit --file "$DESIGN_READINESS_EVIDENCE" --report "$TMPROOT/design-readiness-review-pass.yaml" --json >/dev/null
+"$CLI" wait-gate --task "$DESIGN_GATE_TASK" --evidence "$DESIGN_READINESS_EVIDENCE" --json >"$TMPROOT/wait-gate-design-readiness.json"
+json_assert 'design_readiness gate is satisfied by review evidence record' \
+  "$TMPROOT/wait-gate-design-readiness.json" \
+  'j["ready"] == true && j["gates"].any? { |g| g["kind"] == "design_readiness" && g["passed"] == true && g["evidence_level"] == "implementation_readiness" }'
+
+# Fix 3: evidence submit requires residual_risk for PASS
+MISSING_RESIDUAL_EVIDENCE="$TMPROOT/missing-residual-evidence.json"
+"$CLI" evidence init --output "$MISSING_RESIDUAL_EVIDENCE" >/dev/null
+cat >"$TMPROOT/missing-residual-report.yaml" <<'YAML'
+kind: review
+verdict: pass
+summary: Review pass missing required residual_risk.
+source_message_id: herdr:reviewer:missing-residual
+quality_outcome_verdict: pass
+quality_outcome_reasoning: Outcome checked.
+findings: []
+coverage:
+  - review checked behavior
+artifacts:
+  - tests/orbit_test.sh
+evidence_level: outcome_quality
+rule_application:
+  required_rule_files_read:
+    - references/runtime/quality-outcome-and-review.md
+  applied_checks:
+    - id: outcome_review
+      verdict: pass
+      evidence: Outcome checked.
+  not_applicable: []
+quality_question_answers:
+  - id: outcome_satisfied
+    verdict: pass
+    evidence: Outcome satisfied.
+confirmed:
+  - Outcome confirmed.
+assumed: []
+missing: []
+counterexample_cases:
+  - none
+implementation_readiness_verdict: not_checked
+YAML
+expect_failure 'evidence submit rejects pass without residual_risk' \
+  env ORBIT_INSTANCE=reviewer "$CLI" evidence submit --file "$MISSING_RESIDUAL_EVIDENCE" --report "$TMPROOT/missing-residual-report.yaml" --json
+
+# Fix 4: new-task reviewer creates review_strategy.minimum_evidence_level: outcome_quality
+REVIEWER_NEW_TASK="$TMPROOT/reviewer-new-task.yaml"
+"$CLI" new-task --target-role reviewer --task-type review --output "$REVIEWER_NEW_TASK" >/dev/null
+yaml_assert 'new-task for reviewer creates review_strategy minimum_evidence_level outcome_quality' \
+  "$REVIEWER_NEW_TASK" \
+  'j["review_strategy"]["minimum_evidence_level"] == "outcome_quality"'
+
+# Fix 4: new-task design task creates review_strategy.minimum_evidence_level: implementation_readiness
+DESIGN_NEW_TASK="$TMPROOT/design-new-task-fix4.yaml"
+"$CLI" new-task --target-role lead --task-type design --output "$DESIGN_NEW_TASK" >/dev/null
+yaml_assert 'new-task for design type creates review_strategy minimum_evidence_level implementation_readiness' \
+  "$DESIGN_NEW_TASK" \
+  'j["review_strategy"]["minimum_evidence_level"] == "implementation_readiness"'
+
+# ---------------------------------------------------------------------------
+# Phase 1 Slice 1 reviewer round-2 fixes
+# ---------------------------------------------------------------------------
+
+# Fix: release gate is satisfied by tester submitting test evidence with release_readiness level
+RELEASE_GATE_TASK="$TMPROOT/release-gate-task.yaml"
+"$CLI" new-task --target-role lead --task-type implementation --output "$RELEASE_GATE_TASK" >/dev/null
+ruby --disable-gems -ryaml -e \
+  'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["gates"]=[{"kind"=>"release","roles"=>["tester"],"required"=>true,"pass_condition"=>"release evidence accepted"}]; File.write(p, YAML.dump(y))' \
+  "$RELEASE_GATE_TASK"
+RELEASE_EVIDENCE="$TMPROOT/release-evidence.json"
+"$CLI" evidence init --output "$RELEASE_EVIDENCE" >/dev/null
+cat >"$TMPROOT/release-pass-report.yaml" <<'YAML'
+kind: test
+verdict: pass
+summary: Release gate test evidence with release_readiness level.
+source_message_id: herdr:tester:release-gate
+test_level: repo_regression
+evidence_level: release_readiness
+rule_application:
+  required_rule_files_read:
+    - references/runtime/testing-guideline.md
+  applied_checks:
+    - id: release_gate_test
+      verdict: pass
+      evidence: Release readiness verified.
+  not_applicable: []
+confirmed:
+  - Release readiness verified.
+assumed: []
+missing: []
+residual_risk: "No residual risk: all release paths verified."
+findings: []
+coverage:
+  - release gate test evidence accepted
+artifacts:
+  - tests/orbit_test.sh
+test_environment:
+  environment: local shell
+  test_tab_or_pane: current pane
+  server_owner: none
+  browser_owner: none
+  cleanup_hook: no persistent runtime started
+  artifact_cleanup: retained compact log only
+  duration: 1s
+  resource_usage: one shell process
+  cleanup_status: complete
+  ux_quality: not_applicable
+  artifact_quality: artifact path is stable and small
+YAML
+ORBIT_INSTANCE=tester "$CLI" evidence submit --file "$RELEASE_EVIDENCE" --report "$TMPROOT/release-pass-report.yaml" --json >/dev/null
+"$CLI" wait-gate --task "$RELEASE_GATE_TASK" --evidence "$RELEASE_EVIDENCE" --json >"$TMPROOT/wait-gate-release.json"
+json_assert 'release gate is satisfied by tester test evidence with release_readiness level' \
+  "$TMPROOT/wait-gate-release.json" \
+  'j["ready"] == true && j["gates"].any? { |g| g["kind"] == "release" && g["passed"] == true && g["evidence_level"] == "release_readiness" }'
+
+# Fix: residual_risk surfaced in wait-gate gate status
+json_assert 'wait-gate gate status includes residual_risk from pass record' \
+  "$TMPROOT/wait-gate-release.json" \
+  'j["gates"].any? { |g| g["kind"] == "release" && g["residual_risk"] == "No residual risk: all release paths verified." }'
+
+# Fix: residual_risk surfaced in aggregate verdict entry
+RELEASE_EVIDENCE_SHOW="$TMPROOT/release-evidence-show.json"
+"$CLI" evidence show --file "$RELEASE_EVIDENCE" --json >"$RELEASE_EVIDENCE_SHOW"
+json_assert 'aggregate verdict gate entry includes residual_risk' \
+  "$RELEASE_EVIDENCE_SHOW" \
+  'j["verdict"]["gates"]["test"]["residual_risk"] == "No residual risk: all release paths verified."'
+
+# Fix: residual_risk surfaced in handoff judgment_summary
+RELEASE_HANDOFF_TASK="$TMPROOT/release-handoff-task.yaml"
+"$CLI" new-task --target-role tester --task-type implementation_test --output "$RELEASE_HANDOFF_TASK" >/dev/null
+RELEASE_HANDOFF_EVIDENCE="$TMPROOT/release-handoff-evidence.json"
+"$CLI" evidence init --output "$RELEASE_HANDOFF_EVIDENCE" >/dev/null
+ORBIT_INSTANCE=tester "$CLI" evidence submit --file "$RELEASE_HANDOFF_EVIDENCE" --report "$TMPROOT/release-pass-report.yaml" --json >/dev/null
+RELEASE_HANDOFF_STATE="$TMPROOT/release-handoff-state.yaml"
+cp .orbit/loop-state.yaml "$RELEASE_HANDOFF_STATE"
+ruby --disable-gems -ryaml -e \
+  'p=ARGV[0]; s=YAML.safe_load(File.read(p), aliases: true); s["current_task"]=ARGV[1]; s["artifacts"]||={}; s["artifacts"]["evidence_file"]=ARGV[2]; s["phase"]="working"; s["status"]="working"; File.write(p, YAML.dump(s))' \
+  "$RELEASE_HANDOFF_STATE" "$(realpath "$RELEASE_HANDOFF_TASK")" "$(realpath "$RELEASE_HANDOFF_EVIDENCE")"
+ORBIT_INSTANCE=tester "$CLI" handoff --task "$RELEASE_HANDOFF_TASK" --state "$RELEASE_HANDOFF_STATE" --evidence "$RELEASE_HANDOFF_EVIDENCE" --json \
+  >"$TMPROOT/release-handoff.json" 2>/dev/null || true
+json_assert 'handoff judgment_summary test_judgment includes residual_risk' \
+  "$TMPROOT/release-handoff.json" \
+  'j["judgment_summary"]["test_judgment"]["residual_risk"] == "No residual risk: all release paths verified."'
+
+# Fix: review-report.yaml template includes residual_risk field
+yaml_assert 'review-report template includes residual_risk field' \
+  "$SKILL_ROOT/assets/templates/review-report.yaml" \
+  'j.key?("residual_risk")'
+
+# Fix: test-report.yaml template includes residual_risk field
+yaml_assert 'test-report template includes residual_risk field' \
+  "$SKILL_ROOT/assets/templates/test-report.yaml" \
+  'j.key?("residual_risk")'
+
+# ---------------------------------------------------------------------------
+# High fix: audit done-state gate check respects GATE_KIND_EVIDENCE_RECORD_KIND
+# ---------------------------------------------------------------------------
+
+# audit done-state with release gate satisfied by tester test evidence (no identity_mismatch)
+RELEASE_AUDIT_TASK="$TMPROOT/release-audit-task.yaml"
+"$CLI" new-task --target-role lead --task-type implementation --output "$RELEASE_AUDIT_TASK" >/dev/null
+ruby --disable-gems -ryaml -e \
+  'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["gates"]=[{"kind"=>"release","roles"=>["tester"],"required"=>true,"pass_condition"=>"release gate passed"}]; File.write(p, YAML.dump(y))' \
+  "$RELEASE_AUDIT_TASK"
+RELEASE_AUDIT_EVIDENCE="$TMPROOT/release-audit-evidence.json"
+"$CLI" evidence init --output "$RELEASE_AUDIT_EVIDENCE" >/dev/null
+ORBIT_INSTANCE=tester "$CLI" evidence submit --file "$RELEASE_AUDIT_EVIDENCE" --report "$TMPROOT/release-pass-report.yaml" --json >/dev/null
+"$CLI" init --force >/dev/null
+ORBIT_INSTANCE=lead "$CLI" state start --task "$RELEASE_AUDIT_TASK" >/dev/null
+ruby --disable-gems -ryaml -e \
+  'p=ARGV[0]; s=YAML.safe_load(File.read(p), aliases: true); s["phase"]="done"; s["status"]="done"; s["artifacts"]||={}; s["artifacts"]["evidence_file"]=File.expand_path(ARGV[1]); File.write(p, YAML.dump(s))' \
+  .orbit/loop-state.yaml "$RELEASE_AUDIT_EVIDENCE"
+"$CLI" audit --task "$RELEASE_AUDIT_TASK" --evidence "$RELEASE_AUDIT_EVIDENCE" --state .orbit/loop-state.yaml --json >"$TMPROOT/audit-release-gate.json" 2>/dev/null
+json_assert 'audit done-state passes when release gate satisfied by tester test evidence' \
+  "$TMPROOT/audit-release-gate.json" \
+  'j["blocking_findings"].none? { |f| f["source"].include?("release") } && j["trusted_for_done"] == true'
+
+# audit done-state with design_readiness gate satisfied by reviewer review evidence
+DESIGN_AUDIT_TASK="$TMPROOT/design-audit-task.yaml"
+"$CLI" new-task --target-role reviewer --task-type design_review --output "$DESIGN_AUDIT_TASK" >/dev/null
+ruby --disable-gems -ryaml -e \
+  'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["gates"]=[{"kind"=>"design_readiness","roles"=>["reviewer"],"required"=>true,"pass_condition"=>"design readiness passed"}]; File.write(p, YAML.dump(y))' \
+  "$DESIGN_AUDIT_TASK"
+DESIGN_AUDIT_EVIDENCE="$TMPROOT/design-audit-evidence.json"
+"$CLI" evidence init --output "$DESIGN_AUDIT_EVIDENCE" >/dev/null
+ORBIT_INSTANCE=reviewer "$CLI" evidence submit --file "$DESIGN_AUDIT_EVIDENCE" --report "$TMPROOT/design-readiness-review-pass.yaml" --json >/dev/null
+ORBIT_INSTANCE=lead "$CLI" state start --task "$DESIGN_AUDIT_TASK" >/dev/null
+ruby --disable-gems -ryaml -e \
+  'p=ARGV[0]; s=YAML.safe_load(File.read(p), aliases: true); s["phase"]="done"; s["status"]="done"; s["artifacts"]||={}; s["artifacts"]["evidence_file"]=File.expand_path(ARGV[1]); File.write(p, YAML.dump(s))' \
+  .orbit/loop-state.yaml "$DESIGN_AUDIT_EVIDENCE"
+"$CLI" audit --task "$DESIGN_AUDIT_TASK" --evidence "$DESIGN_AUDIT_EVIDENCE" --state .orbit/loop-state.yaml --json >"$TMPROOT/audit-design-readiness-gate.json" 2>/dev/null
+json_assert 'audit done-state passes when design_readiness gate satisfied by reviewer review evidence' \
+  "$TMPROOT/audit-design-readiness-gate.json" \
+  'j["blocking_findings"].none? { |f| f["source"].include?("design_readiness") } && j["trusted_for_done"] == true'
+
+# ---------------------------------------------------------------------------
+# High regression: gate_passed? with malformed created_at must not crash audit
+# ---------------------------------------------------------------------------
+
+MALFORMED_AUDIT_TASK="$TMPROOT/malformed-audit-task.yaml"
+"$CLI" new-task --target-role lead --task-type implementation --output "$MALFORMED_AUDIT_TASK" >/dev/null
+ruby --disable-gems -ryaml -e \
+  'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["gates"]=[{"kind"=>"release","roles"=>["tester"],"required"=>true,"pass_condition"=>"release gate passed"}]; File.write(p, YAML.dump(y))' \
+  "$MALFORMED_AUDIT_TASK"
+MALFORMED_AUDIT_EVIDENCE="$TMPROOT/malformed-audit-evidence.json"
+"$CLI" evidence init --output "$MALFORMED_AUDIT_EVIDENCE" >/dev/null
+# Inject a test record with malformed created_at directly into the evidence file
+ruby --disable-gems -rjson -e \
+  'p=ARGV[0]; ev=JSON.parse(File.read(p)); ev["records"]||=[]; ev["records"]<<{"kind"=>"test","status"=>"pass","structured_submit"=>true,"created_at"=>"not-a-date","identity"=>{"resolved_role"=>"tester"},"evidence_level"=>"release_readiness","residual_risk"=>"acceptable"}; File.write(p, JSON.generate(ev))' \
+  "$MALFORMED_AUDIT_EVIDENCE"
+"$CLI" init --force >/dev/null
+ORBIT_INSTANCE=lead "$CLI" state start --task "$MALFORMED_AUDIT_TASK" >/dev/null
+ruby --disable-gems -ryaml -e \
+  'p=ARGV[0]; s=YAML.safe_load(File.read(p), aliases: true); s["phase"]="done"; s["status"]="done"; s["artifacts"]||={}; s["artifacts"]["evidence_file"]=File.expand_path(ARGV[1]); File.write(p, YAML.dump(s))' \
+  .orbit/loop-state.yaml "$MALFORMED_AUDIT_EVIDENCE"
+"$CLI" audit --task "$MALFORMED_AUDIT_TASK" --evidence "$MALFORMED_AUDIT_EVIDENCE" --state .orbit/loop-state.yaml --json >"$TMPROOT/audit-malformed-created-at.json" 2>/dev/null || true
+json_assert 'audit returns structured JSON (not crash) when evidence record has malformed created_at' \
+  "$TMPROOT/audit-malformed-created-at.json" \
+  'j.key?("blocking_findings") && j.key?("trusted_for_done")'
+
+# ---------------------------------------------------------------------------
+# Phase 1 Slice 2: Quality Outcome Guardrails
+# ---------------------------------------------------------------------------
+
+# new-task for improvement task type seeds invalid_completion_guards
+IMPROVEMENT_TASK="$TMPROOT/slice2-improvement-task.yaml"
+"$CLI" new-task --target-role reviewer --task-type docs_improvement --output "$IMPROVEMENT_TASK" >/dev/null
+yaml_assert 'new-task improvement task seeds invalid_completion_guards' "$IMPROVEMENT_TASK" \
+  'j["invalid_completion_guards"].is_a?(Array) && !j["invalid_completion_guards"].empty? && j["invalid_completion_guards"].all? { |g| g["id"].is_a?(String) && !g["id"].empty? && g["description"].is_a?(String) && !g["description"].empty? && g["evidence_required"].is_a?(String) && !g["evidence_required"].empty? }'
+yaml_assert 'new-task review_strategy includes required_questions' "$IMPROVEMENT_TASK" \
+  'j["review_strategy"]["required_questions"] == %w[outcome counterexamples evidence_sufficiency residual_risk]'
+
+# validate rejects improvement task with malformed invalid_completion_guards
+MALFORMED_GUARDS_TASK="$TMPROOT/slice2-malformed-guards-task.yaml"
+cp "$IMPROVEMENT_TASK" "$MALFORMED_GUARDS_TASK"
+ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["invalid_completion_guards"]=[{"id"=>"","description"=>"missing id"}]; File.write(p, YAML.dump(y))' "$MALFORMED_GUARDS_TASK"
+expect_failure 'validate rejects improvement task with malformed invalid_completion_guards' "$CLI" validate --task "$MALFORMED_GUARDS_TASK" --json
+
+# wait-gate blocks when review record has quality_outcome_verdict != pass (manual injection)
+QO_FAIL_EVIDENCE="$TMPROOT/slice2-qo-fail-evidence.json"
+cp "$STRUCTURED_REVIEW_EVIDENCE" "$QO_FAIL_EVIDENCE"
+ruby --disable-gems -rjson -e 'p=ARGV[0]; j=JSON.parse(File.read(p)); j["records"].last["quality_outcome_verdict"]="fail"; File.write(p, JSON.pretty_generate(j))' "$QO_FAIL_EVIDENCE"
+if "$CLI" wait-gate --task "$TASK" --evidence "$QO_FAIL_EVIDENCE" --json >"$TMPROOT/slice2-qo-fail-wait-gate.json" 2>/dev/null; then
+  printf 'FAIL wait-gate blocks when quality_outcome_verdict is fail: command unexpectedly succeeded\n' >&2
+  exit 1
+fi
+pass 'wait-gate blocks when quality_outcome_verdict is fail'
+json_assert 'wait-gate reports quality_outcome_not_pass blocking reason' "$TMPROOT/slice2-qo-fail-wait-gate.json" \
+  'j["ready"] == false && j["gate_summary"]["not_ready"].any? { |g| g["kind"] == "review" && g["blocking_reason"] == "quality_outcome_not_pass" }'
+
+# wait-gate blocks when review record missing required question coverage
+QO_MISSING_Q_EVIDENCE="$TMPROOT/slice2-missing-question-evidence.json"
+cp "$STRUCTURED_REVIEW_EVIDENCE" "$QO_MISSING_Q_EVIDENCE"
+ruby --disable-gems -rjson -e 'p=ARGV[0]; j=JSON.parse(File.read(p)); j["records"].last["quality_question_answers"]=[{"id"=>"outcome","verdict"=>"pass","evidence"=>"only outcome covered"}]; File.write(p, JSON.pretty_generate(j))' "$QO_MISSING_Q_EVIDENCE"
+expect_failure 'validate rejects review pass missing required question coverage' "$CLI" validate --task "$TASK" --evidence "$QO_MISSING_Q_EVIDENCE" --json
+
+# audit shows quality_outcome_summary
+json_assert 'audit includes quality_outcome_summary with gate verdicts' \
+  "$TMPROOT/audit-release-gate.json" \
+  'j.key?("quality_outcome_summary") && j["quality_outcome_summary"].key?("gate_quality_outcomes")'
+
+# audit shows invalid_completion_guards in quality_outcome_summary for improvement task
+AUDIT_IMPROVEMENT_EVIDENCE="$TMPROOT/slice2-audit-improvement-evidence.json"
+"$CLI" evidence init --output "$AUDIT_IMPROVEMENT_EVIDENCE" >/dev/null
+ORBIT_INSTANCE=reviewer "$CLI" evidence submit --file "$AUDIT_IMPROVEMENT_EVIDENCE" --report "$TMPROOT/structured-review.yaml" --json >/dev/null
+"$CLI" init --force >/dev/null
+ORBIT_INSTANCE=lead "$CLI" state start --task "$IMPROVEMENT_TASK" >/dev/null
+ruby --disable-gems -ryaml -e \
+  'p=ARGV[0]; s=YAML.safe_load(File.read(p), aliases: true); s["phase"]="done"; s["status"]="done"; s["artifacts"]||={}; s["artifacts"]["evidence_file"]=File.expand_path(ARGV[1]); File.write(p, YAML.dump(s))' \
+  .orbit/loop-state.yaml "$AUDIT_IMPROVEMENT_EVIDENCE"
+"$CLI" audit --task "$IMPROVEMENT_TASK" --evidence "$AUDIT_IMPROVEMENT_EVIDENCE" --state .orbit/loop-state.yaml --json >"$TMPROOT/slice2-audit-improvement.json" 2>/dev/null || true
+json_assert 'audit shows invalid_completion_guards for improvement task' \
+  "$TMPROOT/slice2-audit-improvement.json" \
+  'qos = j["quality_outcome_summary"]; qos.is_a?(Hash) && qos["invalid_completion_guards"].is_a?(Array) && !qos["invalid_completion_guards"].empty?'
+
+# wait-gate blocks when a required question answer has verdict != pass
+QO_BLOCKED_Q_EVIDENCE="$TMPROOT/slice2-blocked-question-evidence.json"
+cp "$STRUCTURED_REVIEW_EVIDENCE" "$QO_BLOCKED_Q_EVIDENCE"
+ruby --disable-gems -rjson -e \
+  'p=ARGV[0]; j=JSON.parse(File.read(p)); j["records"].last["quality_question_answers"].find { |a| a["id"]=="counterexamples" }["verdict"]="blocked"; File.write(p, JSON.pretty_generate(j))' \
+  "$QO_BLOCKED_Q_EVIDENCE"
+if "$CLI" wait-gate --task "$TASK" --evidence "$QO_BLOCKED_Q_EVIDENCE" --json >"$TMPROOT/slice2-blocked-question-wait-gate.json" 2>/dev/null; then
+  printf 'FAIL wait-gate blocks when required question verdict is blocked: command unexpectedly succeeded\n' >&2
+  exit 1
+fi
+pass 'wait-gate blocks when required question verdict is blocked'
+json_assert 'wait-gate reports required_questions_not_met blocking reason' "$TMPROOT/slice2-blocked-question-wait-gate.json" \
+  'j["ready"] == false && j["gate_summary"]["not_ready"].any? { |g| g["kind"] == "review" && g["blocking_reason"] == "required_questions_not_met" }'
+
+# validate rejects review pass where required question answer is non-pass verdict
+QO_FAIL_Q_EVIDENCE="$TMPROOT/slice2-fail-question-evidence.json"
+cp "$STRUCTURED_REVIEW_EVIDENCE" "$QO_FAIL_Q_EVIDENCE"
+ruby --disable-gems -rjson -e \
+  'p=ARGV[0]; j=JSON.parse(File.read(p)); j["records"].last["quality_question_answers"].find { |a| a["id"]=="counterexamples" }["verdict"]="fail"; File.write(p, JSON.pretty_generate(j))' \
+  "$QO_FAIL_Q_EVIDENCE"
+expect_failure 'validate rejects review pass with counterexamples verdict fail' "$CLI" validate --task "$TASK" --evidence "$QO_FAIL_Q_EVIDENCE" --json
+
+# audit shows addressed status per guard
+json_assert 'audit guard summary includes addressed field per guard' \
+  "$TMPROOT/slice2-audit-improvement.json" \
+  'qos = j["quality_outcome_summary"]; qos["invalid_completion_guards"].all? { |g| g.key?("addressed") && g.key?("addressed_via") && g.key?("coverage") }'
+json_assert 'audit guard without guard-specific answer has addressed=false and coverage=general_only or none' \
+  "$TMPROOT/slice2-audit-improvement.json" \
+  'qos = j["quality_outcome_summary"]; qos["invalid_completion_guards"].all? { |g| g["coverage"] == "guard_specific" || g["addressed"] == false }'
+json_assert 'audit all_satisfied ignores test/release gates (not_applicable)' \
+  "$TMPROOT/audit-release-gate.json" \
+  'qos = j["quality_outcome_summary"]; qos["gate_quality_outcomes"].any? { |_k,v| v["satisfied"] == "not_applicable" } && [true, false].include?(qos["all_satisfied"])'
+
+# ---------------------------------------------------------------------------
+# High regression: design_readiness gate required_questions coverage
+# ---------------------------------------------------------------------------
+
+# design_readiness gate must apply required_questions coverage (same as review gate)
+DR_RQ_TASK="$TMPROOT/slice2-dr-rq-task.yaml"
+"$CLI" new-task --target-role reviewer --task-type design_review --output "$DR_RQ_TASK" >/dev/null
+ruby --disable-gems -ryaml -e \
+  'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["gates"]=[{"kind"=>"design_readiness","roles"=>["reviewer"],"required"=>true,"pass_condition"=>"design readiness passed"}]; File.write(p, YAML.dump(y))' \
+  "$DR_RQ_TASK"
+DR_RQ_EVIDENCE="$TMPROOT/slice2-dr-rq-evidence.json"
+"$CLI" evidence init --output "$DR_RQ_EVIDENCE" >/dev/null
+# Build a review pass report with correct evidence_level (implementation_readiness) but incomplete required questions
+DR_PARTIAL_REPORT="$TMPROOT/slice2-dr-partial-report.yaml"
+write_review_pass_report "$DR_PARTIAL_REPORT" "Design readiness partial answers." "herdr:reviewer:dr-partial"
+ruby --disable-gems -ryaml -e \
+  'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true)
+   y["evidence_level"]="implementation_readiness"
+   y["implementation_readiness_verdict"]="pass"
+   y["quality_question_answers"]=[{"id"=>"outcome","verdict"=>"pass","evidence"=>"only outcome answered"}]
+   File.write(p, YAML.dump(y))' \
+  "$DR_PARTIAL_REPORT"
+# evidence submit succeeds (submit does not have task context; task-aware check is in validate/wait-gate)
+DR_PARTIAL_EVIDENCE="$TMPROOT/slice2-dr-partial-evidence.json"
+"$CLI" evidence init --output "$DR_PARTIAL_EVIDENCE" >/dev/null
+ORBIT_INSTANCE=reviewer "$CLI" evidence submit --file "$DR_PARTIAL_EVIDENCE" --report "$DR_PARTIAL_REPORT" --json >/dev/null
+# validate and wait-gate must reject partial required_questions coverage
+expect_failure 'validate rejects design_readiness review pass with incomplete required questions' "$CLI" validate --task "$DR_RQ_TASK" --evidence "$DR_PARTIAL_EVIDENCE" --json
+if "$CLI" wait-gate --task "$DR_RQ_TASK" --evidence "$DR_PARTIAL_EVIDENCE" --json >"$TMPROOT/slice2-dr-partial-wait.json" 2>/dev/null; then
+  printf 'FAIL wait-gate blocks design_readiness gate with incomplete required questions: command unexpectedly succeeded\n' >&2
+  exit 1
+fi
+pass 'wait-gate blocks design_readiness gate with incomplete required questions'
+json_assert 'design_readiness wait-gate reports required_questions_not_met for incomplete coverage' "$TMPROOT/slice2-dr-partial-wait.json" \
+  'j["ready"] == false && j["gate_summary"]["not_ready"].any? { |g| g["kind"] == "design_readiness" && g["blocking_reason"] == "required_questions_not_met" }'
+
+# Submit with full required questions, then verify wait-gate passes; then corrupt one answer and verify it blocks
+ORBIT_INSTANCE=reviewer "$CLI" evidence submit --file "$DR_RQ_EVIDENCE" --report "$TMPROOT/design-readiness-review-pass.yaml" --json >/dev/null
+"$CLI" wait-gate --task "$DR_RQ_TASK" --evidence "$DR_RQ_EVIDENCE" --json >"$TMPROOT/slice2-dr-rq-pass.json"
+json_assert 'design_readiness gate passes with full required_questions coverage' "$TMPROOT/slice2-dr-rq-pass.json" \
+  'j["ready"] == true && j["gates"].any? { |g| g["kind"] == "design_readiness" && g["passed"] == true }'
+
+DR_BLOCKED_EVIDENCE="$TMPROOT/slice2-dr-blocked-evidence.json"
+cp "$DR_RQ_EVIDENCE" "$DR_BLOCKED_EVIDENCE"
+ruby --disable-gems -rjson -e \
+  'p=ARGV[0]; j=JSON.parse(File.read(p)); j["records"].last["quality_question_answers"].find { |a| a["id"]=="counterexamples" }["verdict"]="blocked"; File.write(p, JSON.pretty_generate(j))' \
+  "$DR_BLOCKED_EVIDENCE"
+if "$CLI" wait-gate --task "$DR_RQ_TASK" --evidence "$DR_BLOCKED_EVIDENCE" --json >"$TMPROOT/slice2-dr-blocked.json" 2>/dev/null; then
+  printf 'FAIL wait-gate blocks design_readiness gate when counterexamples verdict is blocked: command unexpectedly succeeded\n' >&2
+  exit 1
+fi
+pass 'wait-gate blocks design_readiness gate when required question verdict is blocked'
+json_assert 'design_readiness gate reports required_questions_not_met' "$TMPROOT/slice2-dr-blocked.json" \
+  'j["ready"] == false && j["gate_summary"]["not_ready"].any? { |g| g["kind"] == "design_readiness" && g["blocking_reason"] == "required_questions_not_met" }'
+
+# ---------------------------------------------------------------------------
+# Phase 1 Slice 3 regression: reviewer findings fixed
+# ---------------------------------------------------------------------------
+
+# High fix 1a: validate rejects parent_done with unevidenced criteria
+S3R_DONE_TASK="$TMPROOT/s3r-done-task.yaml"
+"$CLI" new-task --target-role lead --task-type decomposition --output "$S3R_DONE_TASK" >/dev/null
+ruby --disable-gems -ryaml -e \
+  'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true)
+   y["parent_goal"]["objective"]="A real decomposition objective."
+   y["parent_goal"]["done_criteria"]=["All slices pass.","Evidence covers all criteria."]
+   y["parent_goal_status"]["state"]="parent_done"
+   y["parent_goal_status"]["done_criteria_status"]=[]
+   File.write(p, YAML.dump(y))' \
+  "$S3R_DONE_TASK"
+S3R_EVIDENCE="$TMPROOT/s3r-evidence.json"
+"$CLI" evidence init --output "$S3R_EVIDENCE" >/dev/null
+expect_failure 'validate rejects parent_done with unevidenced done criteria' \
+  "$CLI" validate --task "$S3R_DONE_TASK" --evidence "$S3R_EVIDENCE" --json
+
+# High fix 1b: audit exit code is 1 when parent_done with unevidenced criteria
+"$CLI" init --force >/dev/null
+ORBIT_INSTANCE=lead "$CLI" state start --task "$S3R_DONE_TASK" >/dev/null
+ruby --disable-gems -ryaml -e \
+  'p=ARGV[0]; s=YAML.safe_load(File.read(p), aliases: true); s["phase"]="working"; s["status"]="working"; File.write(p, YAML.dump(s))' \
+  .orbit/loop-state.yaml
+if "$CLI" audit --task "$S3R_DONE_TASK" --evidence "$S3R_EVIDENCE" \
+    --state .orbit/loop-state.yaml --json >"$TMPROOT/s3r-done-audit.json" 2>/dev/null; then
+  printf 'FAIL audit blocks (exit 1) when parent_done with unevidenced criteria: command unexpectedly succeeded\n' >&2
+  exit 1
+fi
+pass 'audit blocks (exit 1) when parent_done with unevidenced criteria'
+json_assert 'audit blocking_findings includes parent_goal_status.done_criteria source' \
+  "$TMPROOT/s3r-done-audit.json" \
+  'j["blocking_findings"].any? { |b| b["source"] == "parent_goal_status.done_criteria" }'
+
+# High fix 2: validate rejects missing parent_goal_status when parent_goal.required=true
+S3R_NO_STATUS_TASK="$TMPROOT/s3r-no-status-task.yaml"
+"$CLI" new-task --target-role lead --task-type decomposition --output "$S3R_NO_STATUS_TASK" >/dev/null
+ruby --disable-gems -ryaml -e \
+  'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true)
+   y["parent_goal"]["objective"]="Objective is set."
+   y.delete("parent_goal_status")
+   File.write(p, YAML.dump(y))' \
+  "$S3R_NO_STATUS_TASK"
+expect_failure 'validate rejects parent_goal.required=true task with missing parent_goal_status' \
+  "$CLI" validate --task "$S3R_NO_STATUS_TASK" --evidence "$S3R_EVIDENCE" --json
+
+# Medium fix 3: state progress --parent-state rejects invalid state enum
+"$CLI" init --force >/dev/null
+S3R_PROGRESS_TASK="$TMPROOT/s3r-progress-task.yaml"
+"$CLI" new-task --target-role lead --task-type decomposition --output "$S3R_PROGRESS_TASK" >/dev/null
+ruby --disable-gems -ryaml -e \
+  'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["parent_goal"]["objective"]="Valid."; File.write(p, YAML.dump(y))' \
+  "$S3R_PROGRESS_TASK"
+ORBIT_INSTANCE=lead "$CLI" state start --task "$S3R_PROGRESS_TASK" >/dev/null
+if ORBIT_INSTANCE=lead "$CLI" state progress --task "$S3R_PROGRESS_TASK" \
+    --message "test" --parent-state bogus_invalid_state 2>/dev/null; then
+  printf 'FAIL state progress rejects invalid --parent-state enum: command unexpectedly succeeded\n' >&2
+  exit 1
+fi
+pass 'state progress rejects invalid --parent-state enum'
+
+# Verify loop state has NO side-effect when --parent-state validation fails
+# (the progress record must NOT appear in loop-state history)
+S3R_HIST_BEFORE=$(ruby --disable-gems -ryaml -e \
+  'puts (YAML.safe_load(File.read(ARGV[0]), aliases: true)["history"] || []).length' \
+  .orbit/loop-state.yaml)
+ORBIT_INSTANCE=lead "$CLI" state progress --task "$S3R_PROGRESS_TASK" \
+  --message "bad parent" --parent-state bogus_invalid_state 2>/dev/null || true
+S3R_HIST_AFTER=$(ruby --disable-gems -ryaml -e \
+  'puts (YAML.safe_load(File.read(ARGV[0]), aliases: true)["history"] || []).length' \
+  .orbit/loop-state.yaml)
+if [ "$S3R_HIST_BEFORE" -ne "$S3R_HIST_AFTER" ]; then
+  printf 'FAIL loop state history unchanged after invalid --parent-state: grew %s -> %s\n' \
+    "$S3R_HIST_BEFORE" "$S3R_HIST_AFTER" >&2
+  exit 1
+fi
+pass 'loop state history unchanged after invalid --parent-state'
+
+# Low/Medium fix 2: audit issues list includes parent_goal blocking source (not just blocking_findings)
+json_assert 'audit issues includes parent_goal_status.done_criteria source' \
+  "$TMPROOT/s3r-done-audit.json" \
+  'j["issues"].any? { |b| b["source"] == "parent_goal_status.done_criteria" }'
+
+# ---------------------------------------------------------------------------
+# Phase 1 Slice 3: Parent Goal Status And User Next Action
+# ---------------------------------------------------------------------------
+
+# Test S3-1: new-task decomposition creates parent_goal with required=true and done_criteria
+S3_DECOMP_TASK="$TMPROOT/slice3-decomp-task.yaml"
+"$CLI" new-task --target-role lead --task-type decomposition --output "$S3_DECOMP_TASK" >/dev/null
+yaml_assert 'new-task decomposition seeds parent_goal with required=true' "$S3_DECOMP_TASK" \
+  'j["parent_goal"].is_a?(Hash) && j["parent_goal"]["required"] == true && j["parent_goal"]["done_criteria"].is_a?(Array) && !j["parent_goal"]["done_criteria"].empty?'
+yaml_assert 'new-task decomposition seeds parent_goal_status with parent_in_progress state' "$S3_DECOMP_TASK" \
+  'j["parent_goal_status"].is_a?(Hash) && j["parent_goal_status"]["state"] == "parent_in_progress"'
+yaml_assert 'new-task decomposition parent_goal_status has user_next_action default' "$S3_DECOMP_TASK" \
+  'j["parent_goal_status"]["user_next_action"].is_a?(Hash) && !j["parent_goal_status"]["user_next_action"]["default"].to_s.strip.empty?'
+
+# Test S3-2: new-task implementation creates parent_goal with required=false
+S3_IMPL_TASK="$TMPROOT/slice3-impl-task.yaml"
+"$CLI" new-task --target-role lead --task-type implementation --output "$S3_IMPL_TASK" >/dev/null
+yaml_assert 'new-task implementation seeds parent_goal with required=false' "$S3_IMPL_TASK" \
+  'j["parent_goal"].is_a?(Hash) && j["parent_goal"]["required"] == false'
+yaml_assert 'new-task implementation seeds parent_goal_status with not_applicable state' "$S3_IMPL_TASK" \
+  'j["parent_goal_status"].is_a?(Hash) && j["parent_goal_status"]["state"] == "not_applicable"'
+
+# Test S3-3: validate fails when parent_goal.required=true but objective is empty
+S3_NO_OBJ_TASK="$TMPROOT/slice3-no-objective-task.yaml"
+"$CLI" new-task --target-role lead --task-type decomposition --output "$S3_NO_OBJ_TASK" >/dev/null
+ruby --disable-gems -ryaml -e \
+  'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["parent_goal"]["objective"]=""; File.write(p, YAML.dump(y))' \
+  "$S3_NO_OBJ_TASK"
+S3_EVIDENCE="$TMPROOT/slice3-evidence.json"
+"$CLI" evidence init --output "$S3_EVIDENCE" >/dev/null
+expect_failure 'validate rejects parent task with empty objective' \
+  "$CLI" validate --task "$S3_NO_OBJ_TASK" --evidence "$S3_EVIDENCE" --json
+
+# Test S3-4: validate fails when parent_goal.required=true but done_criteria is empty
+S3_NO_CRITERIA_TASK="$TMPROOT/slice3-no-criteria-task.yaml"
+"$CLI" new-task --target-role lead --task-type decomposition --output "$S3_NO_CRITERIA_TASK" >/dev/null
+ruby --disable-gems -ryaml -e \
+  'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true)
+   y["parent_goal"]["done_criteria"]=[]
+   y["parent_goal"]["objective"]="This is a valid objective."
+   File.write(p, YAML.dump(y))' \
+  "$S3_NO_CRITERIA_TASK"
+expect_failure 'validate rejects parent task with empty done_criteria' \
+  "$CLI" validate --task "$S3_NO_CRITERIA_TASK" --evidence "$S3_EVIDENCE" --json
+
+# Test S3-5: validate passes (no parent ceremony) when parent_goal.required=false
+# (uses the implementation task from S3-2 which already has required=false)
+"$CLI" validate --task "$S3_IMPL_TASK" --evidence "$S3_EVIDENCE" --json >"$TMPROOT/slice3-impl-validate.json" 2>/dev/null || true
+json_assert 'validate passes for non-parent task (required=false) without parent ceremony' \
+  "$TMPROOT/slice3-impl-validate.json" \
+  '!j["errors"].any? { |e| e["source"].to_s.include?("parent_goal") }'
+
+# Test S3-6: schema_semantics includes parent_goal_status feature version
+yaml_assert 'new-task includes parent_goal_status in schema_semantics feature_versions' \
+  "$S3_IMPL_TASK" \
+  'j["schema_semantics"]["feature_versions"]["parent_goal_status"] == "v1"'
+
+# Test S3-7: audit includes parent_goal_summary
+S3_AUDIT_TASK="$TMPROOT/slice3-audit-task.yaml"
+"$CLI" new-task --target-role lead --task-type decomposition --output "$S3_AUDIT_TASK" >/dev/null
+ruby --disable-gems -ryaml -e \
+  'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true)
+   y["parent_goal"]["objective"]="Achieve a well-scoped parent outcome."
+   File.write(p, YAML.dump(y))' \
+  "$S3_AUDIT_TASK"
+S3_AUDIT_EVIDENCE="$TMPROOT/slice3-audit-evidence.json"
+"$CLI" evidence init --output "$S3_AUDIT_EVIDENCE" >/dev/null
+"$CLI" init --force >/dev/null
+ORBIT_INSTANCE=lead "$CLI" state start --task "$S3_AUDIT_TASK" >/dev/null
+ruby --disable-gems -ryaml -e \
+  'p=ARGV[0]; s=YAML.safe_load(File.read(p), aliases: true); s["phase"]="working"; s["status"]="working"; File.write(p, YAML.dump(s))' \
+  .orbit/loop-state.yaml
+"$CLI" audit --task "$S3_AUDIT_TASK" --evidence "$S3_AUDIT_EVIDENCE" --state .orbit/loop-state.yaml --json \
+  >"$TMPROOT/slice3-audit.json" 2>/dev/null || true
+json_assert 'audit includes parent_goal_summary for decomposition task' \
+  "$TMPROOT/slice3-audit.json" \
+  'j["parent_goal_summary"].is_a?(Hash) && j["parent_goal_summary"]["required"] == true'
+
+# Test S3-8: audit reports unevidenced criteria when parent_goal_status.state=parent_done but criteria not evidenced
+S3_DONE_TASK="$TMPROOT/slice3-done-task.yaml"
+"$CLI" new-task --target-role lead --task-type decomposition --output "$S3_DONE_TASK" >/dev/null
+ruby --disable-gems -ryaml -e \
+  'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true)
+   y["parent_goal"]["objective"]="Deliver the parent outcome."
+   y["parent_goal"]["done_criteria"]=["All slices complete.", "Evidence covers all criteria."]
+   y["parent_goal_status"]["state"]="parent_done"
+   y["parent_goal_status"]["done_criteria_status"]=[]
+   File.write(p, YAML.dump(y))' \
+  "$S3_DONE_TASK"
+S3_DONE_EVIDENCE="$TMPROOT/slice3-done-evidence.json"
+"$CLI" evidence init --output "$S3_DONE_EVIDENCE" >/dev/null
+"$CLI" init --force >/dev/null
+ORBIT_INSTANCE=lead "$CLI" state start --task "$S3_DONE_TASK" >/dev/null
+ruby --disable-gems -ryaml -e \
+  'p=ARGV[0]; s=YAML.safe_load(File.read(p), aliases: true); s["phase"]="working"; s["status"]="working"; File.write(p, YAML.dump(s))' \
+  .orbit/loop-state.yaml
+"$CLI" audit --task "$S3_DONE_TASK" --evidence "$S3_DONE_EVIDENCE" --state .orbit/loop-state.yaml --json \
+  >"$TMPROOT/slice3-done-audit.json" 2>/dev/null || true
+json_assert 'audit parent_goal_summary reports unevidenced criteria when parent_done with no evidence' \
+  "$TMPROOT/slice3-done-audit.json" \
+  'pgs = j["parent_goal_summary"]; pgs["unevidenced_criteria"].is_a?(Array) && !pgs["unevidenced_criteria"].empty? && pgs["blocking"].is_a?(Array) && !pgs["blocking"].empty?'
+json_assert 'audit parent_goal_summary blocking contains done_criteria message' \
+  "$TMPROOT/slice3-done-audit.json" \
+  'pgs = j["parent_goal_summary"]; pgs["blocking"].any? { |b| b["source"] == "parent_goal_status.done_criteria" }'
+
+# Test S3-9: handoff includes parent_goal_status with user_next_action
+S3_HO_TASK="$TMPROOT/slice3-handoff-task.yaml"
+"$CLI" new-task --target-role lead --task-type decomposition --output "$S3_HO_TASK" >/dev/null
+ruby --disable-gems -ryaml -e \
+  'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true)
+   y["parent_goal"]["objective"]="Deliver the decomposed parent outcome."
+   File.write(p, YAML.dump(y))' \
+  "$S3_HO_TASK"
+S3_HO_EVIDENCE="$TMPROOT/slice3-handoff-evidence.json"
+"$CLI" evidence init --output "$S3_HO_EVIDENCE" >/dev/null
+"$CLI" init --force >/dev/null
+ORBIT_INSTANCE=lead "$CLI" state start --task "$S3_HO_TASK" >/dev/null
+ruby --disable-gems -ryaml -e \
+  'p=ARGV[0]; s=YAML.safe_load(File.read(p), aliases: true)
+   s["current_task"]=ARGV[1]; s["artifacts"]||={}; s["artifacts"]["evidence_file"]=ARGV[2]
+   s["phase"]="working"; s["status"]="working"; File.write(p, YAML.dump(s))' \
+  .orbit/loop-state.yaml "$S3_HO_TASK" "$S3_HO_EVIDENCE"
+ORBIT_INSTANCE=lead "$CLI" handoff --task "$S3_HO_TASK" --state .orbit/loop-state.yaml \
+  --evidence "$S3_HO_EVIDENCE" --json >"$TMPROOT/slice3-handoff.json" 2>/dev/null || true
+json_assert 'handoff includes parent_goal_status' \
+  "$TMPROOT/slice3-handoff.json" \
+  'j["parent_goal_status"].is_a?(Hash) && j["parent_goal_status"]["state"] == "parent_in_progress"'
+json_assert 'handoff parent_goal_status includes user_next_action' \
+  "$TMPROOT/slice3-handoff.json" \
+  'j["parent_goal_status"]["user_next_action"].is_a?(Hash) && !j["parent_goal_status"]["user_next_action"]["default"].to_s.strip.empty?'
+
+# Test S3-10: wait-gate includes parent_goal_status in output
+S3_WG_TASK="$TMPROOT/slice3-wg-task.yaml"
+"$CLI" new-task --target-role lead --task-type decomposition --output "$S3_WG_TASK" >/dev/null
+ruby --disable-gems -ryaml -e \
+  'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true)
+   y["parent_goal"]["objective"]="Wait-gate parent goal."
+   File.write(p, YAML.dump(y))' \
+  "$S3_WG_TASK"
+S3_WG_EVIDENCE="$TMPROOT/slice3-wg-evidence.json"
+"$CLI" evidence init --output "$S3_WG_EVIDENCE" >/dev/null
+"$CLI" wait-gate --task "$S3_WG_TASK" --evidence "$S3_WG_EVIDENCE" --json \
+  >"$TMPROOT/slice3-wg.json" 2>/dev/null || true
+json_assert 'wait-gate includes parent_goal_status from task' \
+  "$TMPROOT/slice3-wg.json" \
+  'j["parent_goal_status"].is_a?(Hash) && j["parent_goal_status"]["state"] == "parent_in_progress"'
+
+# Test S3-11: state progress --parent-state updates task file
+S3_PROGRESS_TASK="$TMPROOT/slice3-progress-task.yaml"
+"$CLI" new-task --target-role lead --task-type decomposition --output "$S3_PROGRESS_TASK" >/dev/null
+ruby --disable-gems -ryaml -e \
+  'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true)
+   y["parent_goal"]["objective"]="Parent goal for progress test."
+   File.write(p, YAML.dump(y))' \
+  "$S3_PROGRESS_TASK"
+"$CLI" init --force >/dev/null
+ORBIT_INSTANCE=lead "$CLI" state start --task "$S3_PROGRESS_TASK" >/dev/null
+ORBIT_INSTANCE=lead "$CLI" state progress --task "$S3_PROGRESS_TASK" \
+  --message "Slice 1 complete" --parent-state slice_ready --active-slice "S1" >/dev/null
+yaml_assert 'state progress --parent-state updates parent_goal_status.state in task file' \
+  "$S3_PROGRESS_TASK" \
+  'j["parent_goal_status"]["state"] == "slice_ready"'
+yaml_assert 'state progress --active-slice updates parent_goal_status.active_slice in task file' \
+  "$S3_PROGRESS_TASK" \
+  'j["parent_goal_status"]["active_slice"] == "S1"'
 
 printf 'REAL_TESTS_PASS count=%s tmp=%s\n' "$PASS_COUNT" "$TMPROOT"

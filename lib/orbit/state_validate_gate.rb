@@ -60,10 +60,49 @@ end
 
 ALLOWED_LOOP_PHASES = %w[idle working in_review in_test blocked done drafting review_requested changes_requested user_confirmed coding_ready].freeze
 DESIGN_LIFECYCLE_PHASES = %w[drafting review_requested changes_requested user_confirmed coding_ready].freeze
-ALLOWED_GATE_KINDS = %w[review test].freeze
+ALLOWED_PARENT_GOAL_STATES = %w[not_applicable parent_in_progress slice_ready parent_blocked parent_done_ready parent_done].freeze
+ALLOWED_GATE_KINDS = %w[review test design_readiness release].freeze
 EXPECTED_GATE_ROLES = {
-  "review" => "reviewer",
-  "test" => "tester"
+  "review"           => "reviewer",
+  "test"             => "tester",
+  "design_readiness" => "reviewer",
+  "release"          => "tester"
+}.freeze
+# Maps gate kind to the evidence record kind used to satisfy it.
+# design_readiness uses review records; release uses test records.
+GATE_KIND_EVIDENCE_RECORD_KIND = {
+  "review"           => "review",
+  "test"             => "test",
+  "design_readiness" => "review",
+  "release"          => "test"
+}.freeze
+
+# Evidence levels are organized into semantic families. Levels from different families
+# are NOT mutually substitutable: outcome_quality cannot satisfy implementation_readiness,
+# and vice versa. mechanical_check is the universal base level for all families.
+EVIDENCE_LEVEL_FAMILIES = {
+  "review_quality"   => %w[mechanical_check outcome_quality],
+  "design_readiness" => %w[mechanical_check implementation_readiness],
+  "test_quality"     => %w[mechanical_check real_path_test],
+  "release_quality"  => %w[mechanical_check release_readiness]
+}.freeze
+
+# Maps each non-universal evidence level to its semantic family.
+# mechanical_check is universal (not in this map).
+EVIDENCE_LEVEL_FAMILY_MAP = {
+  "outcome_quality"          => "review_quality",
+  "implementation_readiness" => "design_readiness",
+  "real_path_test"           => "test_quality",
+  "release_readiness"        => "release_quality"
+}.freeze
+
+# Evidence level families accepted at each gate kind.
+# review gates accept both review_quality and design_readiness families for flexibility.
+GATE_KIND_ACCEPTED_EVIDENCE_FAMILIES = {
+  "review"           => %w[review_quality design_readiness],
+  "design_readiness" => %w[design_readiness],
+  "test"             => %w[test_quality],
+  "release"          => %w[release_quality]
 }.freeze
 
 def default_state_path
@@ -114,6 +153,14 @@ def parse_state_args(args)
       options["state"] = option_value(args, "--state")
     when /\A--state=(.+)\z/
       options["state"] = Regexp.last_match(1)
+    when "--parent-state"
+      options["parent_state"] = option_value(args, "--parent-state")
+    when /\A--parent-state=(.+)\z/
+      options["parent_state"] = Regexp.last_match(1)
+    when "--active-slice"
+      options["active_slice"] = option_value(args, "--active-slice")
+    when /\A--active-slice=(.+)\z/
+      options["active_slice"] = Regexp.last_match(1)
     else
       usage_error("Unknown state #{subcommand} option: #{arg}")
     end
@@ -396,6 +443,11 @@ def state_progress(options)
   message = options["message"].to_s.strip
   state_error("Progress message must be non-empty.") if message.empty?
 
+  # Validate --parent-state enum before any side effects
+  if options["parent_state"] && !ALLOWED_PARENT_GOAL_STATES.include?(options["parent_state"])
+    state_error("--parent-state must be one of #{ALLOWED_PARENT_GOAL_STATES.join("|")}.")
+  end
+
   now = Time.now.utc.iso8601
 
   update_loop_state(state_path) do |state|
@@ -412,6 +464,30 @@ def state_progress(options)
     append_state_history(state, history_entry)
     state
   end
+
+  # Optionally update parent_goal_status in the task file if --task is given
+  if options["parent_state"] || options["active_slice"]
+    task_path_opt = options["task"]
+    if task_path_opt.nil? || task_path_opt.empty?
+      # Fall back to current_task from loop state
+      raw_state = YAML.safe_load(File.read(File.expand_path(options["state"]))) rescue nil
+      task_path_opt = raw_state.is_a?(Hash) ? raw_state["current_task"] : nil
+    end
+    if task_path_opt && !task_path_opt.empty?
+      task_full_path = File.expand_path(task_path_opt)
+      if File.exist?(task_full_path)
+        raw_task = YAML.safe_load(File.read(task_full_path)) rescue nil
+        if raw_task.is_a?(Hash)
+          raw_task["parent_goal_status"] ||= {}
+          raw_task["parent_goal_status"]["state"] = options["parent_state"] if options["parent_state"]
+          raw_task["parent_goal_status"]["active_slice"] = options["active_slice"] if options["active_slice"]
+          File.write(task_full_path, YAML.dump(raw_task))
+          puts "Updated parent_goal_status in task file."
+        end
+      end
+    end
+  end
+
   puts "Recorded Orbit progress:"
   puts "- #{message}"
 end
@@ -609,6 +685,72 @@ end
 def quality_measurement_task?(task_or_type)
   task_type = task_type_value(task_or_type).to_s.downcase
   %w[performance speed latency ux workflow quality eval llm measurement].any? { |token| task_type.include?(token) }
+end
+
+def validate_invalid_completion_guards(result, task)
+  guards = task["invalid_completion_guards"]
+  if guards.nil?
+    validation_warning(result, "task_file.invalid_completion_guards",
+      "Improvement task should define invalid_completion_guards so reviewers can explicitly address each failure pattern.")
+    return
+  end
+  unless guards.is_a?(Array)
+    validation_error(result, "task_file.invalid_completion_guards", "Task invalid_completion_guards must be a list when present.")
+    return
+  end
+  guards.each_with_index do |guard, index|
+    src = "task_file.invalid_completion_guards[#{index}]"
+    unless guard.is_a?(Hash)
+      validation_error(result, src, "Invalid completion guard must be a mapping.")
+      next
+    end
+    validate_non_empty_string(result, "#{src}.id", guard["id"], "Guard id")
+    validate_non_empty_string(result, "#{src}.description", guard["description"], "Guard description")
+    validate_non_empty_string(result, "#{src}.evidence_required", guard["evidence_required"], "Guard evidence_required")
+  end
+end
+
+def validate_required_questions_coverage(result, record, task)
+  return unless record.is_a?(Hash) && task.is_a?(Hash)
+
+  required_questions = task.dig("review_strategy", "required_questions")
+  return unless required_questions.is_a?(Array) && !required_questions.empty?
+
+  answers = record["quality_question_answers"]
+  return unless answers.is_a?(Array)
+
+  answered_pass_ids = answers.select { |a| a.is_a?(Hash) && a["verdict"] == "pass" }.map { |a| a["id"] }.compact
+  required_questions.each do |qid|
+    next if answered_pass_ids.include?(qid)
+
+    existing = answers.find { |a| a.is_a?(Hash) && a["id"] == qid }
+    if existing
+      validation_error(
+        result,
+        "evidence_file.records.review.quality_question_answers",
+        "Review PASS requires quality_question_answers[#{qid.inspect}].verdict to be pass (got: #{existing["verdict"].inspect})."
+      )
+    else
+      validation_error(
+        result,
+        "evidence_file.records.review.quality_question_answers",
+        "Review PASS requires quality_question_answers to include an answer for required question: #{qid.inspect}."
+      )
+    end
+  end
+end
+
+def required_questions_all_pass?(record, task)
+  return true unless task.is_a?(Hash)
+
+  required_questions = task.dig("review_strategy", "required_questions")
+  return true unless required_questions.is_a?(Array) && !required_questions.empty?
+
+  answers = record["quality_question_answers"]
+  return false unless answers.is_a?(Array) && !answers.empty?
+
+  pass_ids = answers.select { |a| a.is_a?(Hash) && a["verdict"] == "pass" }.map { |a| a["id"] }.compact
+  required_questions.all? { |qid| pass_ids.include?(qid) }
 end
 
 def validate_quality_outcome(result, task)
@@ -915,6 +1057,7 @@ def validate_task(result, task_path)
     else
       validate_quality_outcome(result, task)
     end
+    validate_invalid_completion_guards(result, task)
   end
 
   validate_design_lifecycle(result, task) if design_task?(task)
@@ -923,6 +1066,7 @@ def validate_task(result, task_path)
   validate_test_environment_contract(result, task) if test_task_contract?(task)
   validate_task_test_level_contract(result, task)
   validate_quality_measurement_contract(result, task) if quality_measurement_task?(task)
+  validate_parent_goal(result, task) if parent_goal_required?(task)
 
   validate_task_runtime_fields(result, task)
 
@@ -975,6 +1119,14 @@ def validate_task_runtime_fields(result, task)
     minimum = review_strategy["minimum_evidence_level"]
     unless minimum.nil? || minimum.to_s.strip.empty? || ALLOWED_EVIDENCE_LEVELS.include?(minimum)
       validation_error(result, "task_file.review_strategy.minimum_evidence_level", "Task review_strategy.minimum_evidence_level must be one of #{ALLOWED_EVIDENCE_LEVELS.join("|")}.")
+    end
+  end
+
+  test_strategy = task["test_strategy"]
+  if test_strategy.is_a?(Hash) && test_strategy.key?("minimum_evidence_level")
+    minimum = test_strategy["minimum_evidence_level"]
+    unless minimum.nil? || minimum.to_s.strip.empty? || ALLOWED_EVIDENCE_LEVELS.include?(minimum)
+      validation_error(result, "task_file.test_strategy.minimum_evidence_level", "Task test_strategy.minimum_evidence_level must be one of #{ALLOWED_EVIDENCE_LEVELS.join("|")}.")
     end
   end
 
@@ -1050,6 +1202,59 @@ def validate_task_runtime_fields(result, task)
     unless required.nil? || [true, false].include?(required)
       validation_error(result, "#{source}.required", "Task gate required must be true or false when present.")
     end
+  end
+end
+
+def parent_goal_required?(task)
+  pg = task.is_a?(Hash) ? task["parent_goal"] : nil
+  pg.is_a?(Hash) && pg["required"] == true
+end
+
+def validate_parent_goal(result, task)
+  parent_goal = task["parent_goal"]
+  unless parent_goal.is_a?(Hash)
+    validation_error(result, "task_file.parent_goal", "Task with parent_goal.required must define parent_goal as a mapping.")
+    return
+  end
+
+  objective = parent_goal["objective"]
+  if objective.nil? || !objective.is_a?(String) || objective.strip.empty?
+    validation_error(result, "task_file.parent_goal.objective", "Parent goal objective must be a non-empty string.")
+  end
+
+  done_criteria = parent_goal["done_criteria"]
+  unless done_criteria.is_a?(Array) && !done_criteria.empty? && done_criteria.all? { |c| c.is_a?(String) && !c.strip.empty? }
+    validation_error(result, "task_file.parent_goal.done_criteria", "Parent task done_criteria must be a non-empty list of non-empty strings.")
+  end
+
+  status = task["parent_goal_status"]
+  unless status.is_a?(Hash)
+    validation_error(result, "task_file.parent_goal_status", "Task with parent_goal.required must define parent_goal_status as a mapping.")
+    return
+  end
+
+  state_val = status["state"].to_s
+  if !state_val.empty? && !ALLOWED_PARENT_GOAL_STATES.include?(state_val)
+    validation_error(result, "task_file.parent_goal_status.state", "parent_goal_status.state must be one of #{ALLOWED_PARENT_GOAL_STATES.join("|")}.")
+  end
+
+  if state_val == "parent_done"
+    pg_criteria = parent_goal["done_criteria"].is_a?(Array) ? parent_goal["done_criteria"] : []
+    criteria_status = status["done_criteria_status"].is_a?(Array) ? status["done_criteria_status"] : []
+    evidenced = criteria_status.select { |cs| cs.is_a?(Hash) && cs["evidenced"] == true }.map { |cs| cs["criterion"] }
+    unevidenced = pg_criteria.reject { |c| evidenced.include?(c) }
+    unless unevidenced.empty?
+      validation_error(result, "task_file.parent_goal_status.done_criteria_status",
+        "parent_goal_status.state is parent_done but #{unevidenced.length} done criteria lack evidence.")
+    end
+  end
+
+  user_next = status["user_next_action"]
+  return unless user_next.is_a?(Hash)
+
+  default_action = user_next["default"]
+  if default_action.nil? || !default_action.is_a?(String) || default_action.strip.empty?
+    validation_error(result, "task_file.parent_goal_status.user_next_action.default", "parent_goal_status.user_next_action.default must be a non-empty string.")
   end
 end
 
@@ -1174,10 +1379,26 @@ def validate_structured_test_level(result, source, record)
   end
 end
 
+# Returns the semantic family of a non-universal evidence level (nil for mechanical_check).
+def evidence_level_family(level)
+  EVIDENCE_LEVEL_FAMILY_MAP[level]
+end
+
+# Returns true iff the evidence level belongs to a family accepted by the given gate kind.
+# mechanical_check is universal and accepted by all gate kinds.
+def evidence_level_valid_for_gate_kind?(level, gate_kind)
+  return true if level.nil?
+  return true if level == "mechanical_check"
+  level_family = evidence_level_family(level)
+  return true if level_family.nil?
+  accepted = GATE_KIND_ACCEPTED_EVIDENCE_FAMILIES[gate_kind] || []
+  accepted.include?(level_family)
+end
+
+# Kept for backward compatibility; delegates to family-based check within review_quality.
 def evidence_level_rank(level)
-  # Only the first three levels have a defined ordering; real_path_test and release_readiness
-  # are scaffold values accepted at submit but not yet ranked (Phase 1 Slice 1 will add per-gate ordering).
-  RANKED_EVIDENCE_LEVELS.index(level)
+  chain = EVIDENCE_LEVEL_FAMILIES["review_quality"] || []
+  chain.index(level)
 end
 
 def task_minimum_evidence_level(task)
@@ -1190,18 +1411,45 @@ def task_minimum_evidence_level(task)
   level.to_s.strip
 end
 
+def task_minimum_evidence_level_for_gate(task, gate_kind)
+  return nil unless task.is_a?(Hash)
+
+  strategy_key = case gate_kind
+                 when "review", "design_readiness" then "review_strategy"
+                 when "test", "release" then "test_strategy"
+                 end
+  return nil unless strategy_key
+
+  strategy = task[strategy_key]
+  return nil unless strategy.is_a?(Hash)
+
+  level = strategy["minimum_evidence_level"]
+  return nil if level.nil? || level.to_s.strip.empty?
+
+  level.to_s.strip
+end
+
 def task_requires_quality_evidence_fields?(task)
-  !task_minimum_evidence_level(task).nil?
+  return false unless task.is_a?(Hash)
+
+  ALLOWED_GATE_KINDS.any? { |kind| !task_minimum_evidence_level_for_gate(task, kind).nil? }
 end
 
 def evidence_level_satisfies_minimum?(level, minimum)
   return true if minimum.nil? || minimum.empty?
-
-  level_rank = evidence_level_rank(level)
-  minimum_rank = evidence_level_rank(minimum)
-  return false if level_rank.nil? || minimum_rank.nil?
-
-  level_rank >= minimum_rank
+  # Any level satisfies a mechanical_check minimum.
+  return true if minimum == "mechanical_check"
+  return false if level.nil?
+  return true if level == minimum
+  # mechanical_check only satisfies a mechanical_check minimum (already handled above).
+  return false if level == "mechanical_check"
+  # Cross-family substitution is prohibited: both level and minimum must be in the same family.
+  level_family = evidence_level_family(level)
+  min_family = evidence_level_family(minimum)
+  return false if level_family != min_family
+  # Same family: compare ranks within the chain.
+  chain = EVIDENCE_LEVEL_FAMILIES[level_family] || []
+  (chain.index(level) || -1) >= (chain.index(minimum) || -1)
 end
 
 def validate_evidence_level_record_field(result, source, record)
@@ -1287,6 +1535,11 @@ def validate_quality_boundary_record_fields(result, source, record)
   %w[confirmed assumed missing counterexample_cases].each do |field|
     validate_string_array_field(result, "#{source}.#{field}", record[field], "Structured submit #{field}") if record.key?(field)
   end
+  if record.key?("residual_risk")
+    unless record["residual_risk"].is_a?(String) && !record["residual_risk"].strip.empty?
+      validation_error(result, "#{source}.residual_risk", "Evidence residual_risk must be a non-empty string when present.")
+    end
+  end
   return unless record.key?("implementation_readiness_verdict")
 
   unless ALLOWED_IMPLEMENTATION_READINESS_VERDICTS.include?(record["implementation_readiness_verdict"])
@@ -1332,14 +1585,15 @@ rescue ArgumentError
 end
 
 def latest_valid_gate_record(result, records, expected_kind)
+  evidence_record_kind = GATE_KIND_EVIDENCE_RECORD_KIND[expected_kind] || expected_kind
   candidates = []
 
   records.each_with_index do |record, index|
     next unless record.is_a?(Hash)
-    next unless record["kind"] == expected_kind
+    next unless record["kind"] == evidence_record_kind
     next if record["status"] == "invalid"
     next unless ALLOWED_EVIDENCE_STATUSES.include?(record["status"])
-    next if STRUCTURED_SUBMIT_KINDS.include?(expected_kind) && record["structured_submit"] != true
+    next if STRUCTURED_SUBMIT_KINDS.include?(evidence_record_kind) && record["structured_submit"] != true
     next unless gate_record_identity_valid?(record, expected_kind)
 
     created_at = parse_evidence_created_at(result, "evidence_file.records[#{index}].created_at", record["created_at"])
@@ -1360,15 +1614,20 @@ def validate_gate_verdict(result, records, expected_kind, task = nil)
 
   case latest["status"]
   when "pass"
-    if task_requires_quality_evidence_fields?(task) && !ALLOWED_EVIDENCE_LEVELS.include?(latest["evidence_level"])
-      validation_error(result, "evidence_file.records.#{expected_kind}.evidence_level", "Latest #{expected_kind} PASS must include evidence_level because task declares review_strategy.minimum_evidence_level.")
+    actual_level = latest["evidence_level"]
+    if task_requires_quality_evidence_fields?(task) && !ALLOWED_EVIDENCE_LEVELS.include?(actual_level.to_s)
+      validation_error(result, "evidence_file.records.#{expected_kind}.evidence_level", "Latest #{expected_kind} PASS must include evidence_level because task declares minimum_evidence_level.")
     end
-    if expected_kind == "review"
-      minimum = task_minimum_evidence_level(task)
-      unless evidence_level_satisfies_minimum?(latest["evidence_level"], minimum)
-        validation_error(result, "evidence_file.records.review.evidence_level", "Latest review evidence_level #{latest["evidence_level"].inspect} does not satisfy task review_strategy.minimum_evidence_level #{minimum.inspect}.")
-      end
+    if actual_level && !evidence_level_valid_for_gate_kind?(actual_level, expected_kind)
+      accepted_levels = (GATE_KIND_ACCEPTED_EVIDENCE_FAMILIES[expected_kind] || []).flat_map { |f| EVIDENCE_LEVEL_FAMILIES[f] || [] }.uniq
+      validation_error(result, "evidence_file.records.#{expected_kind}.evidence_level",
+        "evidence_level_wrong_gate_kind: Evidence level #{actual_level.inspect} is not valid for #{expected_kind.inspect} gate. Accepted: #{accepted_levels.join("|")}.")
     end
+    minimum = task_minimum_evidence_level_for_gate(task, expected_kind)
+    unless evidence_level_satisfies_minimum?(actual_level, minimum)
+      validation_error(result, "evidence_file.records.#{expected_kind}.evidence_level", "Latest #{expected_kind} evidence_level #{actual_level.inspect} does not satisfy minimum_evidence_level #{minimum.inspect}.")
+    end
+    validate_required_questions_coverage(result, latest, task) if (GATE_KIND_EVIDENCE_RECORD_KIND[expected_kind] || expected_kind) == "review"
   when "fail"
     validation_error(result, "evidence_file.records", "Latest #{expected_kind} verdict is fail.")
   when "partial"
@@ -1952,7 +2211,9 @@ def latest_record_for_kind(records, kind, structured_gate_only: false, gate_iden
 end
 
 def gate_passed?(records, kind)
-  latest_record_for_kind(records, kind, structured_gate_only: true, gate_identity_required: true)&.fetch("status", nil) == "pass"
+  result = { "errors" => [], "warnings" => [] }
+  latest = latest_valid_gate_record(result, records, kind)
+  latest&.fetch("status", nil) == "pass"
 end
 
 def parse_wait_gate_args(args)
@@ -1985,23 +2246,44 @@ def parse_wait_gate_args(args)
 end
 
 def gate_status(records, kind, task = nil)
-  latest = latest_record_for_kind(records, kind, structured_gate_only: true, gate_identity_required: false)
+  evidence_record_kind = GATE_KIND_EVIDENCE_RECORD_KIND[kind] || kind
+  latest = latest_record_for_kind(records, evidence_record_kind, structured_gate_only: true, gate_identity_required: false)
   expected_role = expected_gate_role(kind)
   identity_role = latest ? record_identity_role(latest) : nil
   identity_valid = latest ? gate_record_identity_valid?(latest, kind) : false
   status = latest ? latest["status"] : "missing"
   display_status = latest.is_a?(Hash) && latest["blocked"].is_a?(Hash) ? "blocked" : status
-  minimum_evidence_level = kind == "review" ? task_minimum_evidence_level(task) : nil
-  quality_evidence_fields_ok = !task_requires_quality_evidence_fields?(task) || status != "pass" || ALLOWED_EVIDENCE_LEVELS.include?(latest["evidence_level"])
-  evidence_level_ok = !latest || kind != "review" || status != "pass" || evidence_level_satisfies_minimum?(latest["evidence_level"], minimum_evidence_level)
+  minimum_evidence_level = task_minimum_evidence_level_for_gate(task, kind)
+  actual_evidence_level = latest.is_a?(Hash) ? latest["evidence_level"] : nil
+  quality_evidence_fields_ok = !task_requires_quality_evidence_fields?(task) || status != "pass" || ALLOWED_EVIDENCE_LEVELS.include?(actual_evidence_level.to_s)
+  wrong_gate_kind_level = !latest.nil? && status == "pass" && !evidence_level_valid_for_gate_kind?(actual_evidence_level, kind)
+  evidence_level_ok = latest.nil? || status != "pass" || wrong_gate_kind_level || evidence_level_satisfies_minimum?(actual_evidence_level, minimum_evidence_level)
+  # For structured review evidence passes (review and design_readiness gates): quality_outcome_verdict
+  # must be "pass" AND all required_questions must have verdict "pass".
+  quality_outcome_ok = if evidence_record_kind == "review" && latest.is_a?(Hash) && latest["structured_submit"] == true && status == "pass"
+                         latest["quality_outcome_verdict"] == "pass"
+                       else
+                         true
+                       end
+  required_questions_ok = if evidence_record_kind == "review" && latest.is_a?(Hash) && latest["structured_submit"] == true && status == "pass"
+                             required_questions_all_pass?(latest, task)
+                           else
+                             true
+                           end
   blocking_reason = if latest.nil?
                       "missing"
                     elsif !identity_valid
                       "identity_mismatch"
                     elsif !quality_evidence_fields_ok
                       "missing_evidence_level"
+                    elsif wrong_gate_kind_level
+                      "evidence_level_wrong_gate_kind"
                     elsif !evidence_level_ok
                       "evidence_level_below_minimum"
+                    elsif !quality_outcome_ok
+                      "quality_outcome_not_pass"
+                    elsif !required_questions_ok
+                      "required_questions_not_met"
                     elsif display_status != "pass"
                       display_status
                     end
@@ -2010,10 +2292,11 @@ def gate_status(records, kind, task = nil)
     "required" => true,
     "status" => display_status,
     "record_status" => status,
-    "passed" => status == "pass" && identity_valid && quality_evidence_fields_ok && evidence_level_ok,
+    "passed" => status == "pass" && identity_valid && quality_evidence_fields_ok && !wrong_gate_kind_level && evidence_level_ok && quality_outcome_ok && required_questions_ok,
     "structured" => latest.is_a?(Hash) ? latest["structured_submit"] == true : false,
-    "evidence_level" => latest.is_a?(Hash) ? latest["evidence_level"] : nil,
+    "evidence_level" => actual_evidence_level,
     "minimum_evidence_level" => minimum_evidence_level,
+    "residual_risk" => latest.is_a?(Hash) ? latest["residual_risk"] : nil,
     "quality_outcome_verdict" => latest.is_a?(Hash) ? latest["quality_outcome_verdict"] : nil,
     "implementation_readiness_verdict" => latest.is_a?(Hash) ? latest["implementation_readiness_verdict"] : nil,
     "test_level" => latest.is_a?(Hash) ? latest["test_level"] : nil,
@@ -2068,8 +2351,9 @@ def wait_gate(args)
     "aggregate_verdict" => evidence["verdict"],
     "gate_summary" => gate_summary,
     "gates" => gates,
+    "parent_goal_status" => task.is_a?(Hash) ? task["parent_goal_status"] : nil,
     "summary" => ready ? "all required gates pass" : "required gates are not ready"
-  }
+  }.compact
 
   puts JSON.pretty_generate(packet)
   exit(1) unless ready

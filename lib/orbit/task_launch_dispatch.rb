@@ -140,10 +140,29 @@ def quality_outcome_template(task_type)
   end
 end
 
-def default_review_strategy
+def improvement_task_type?(task_type)
+  type = task_type.to_s.downcase
+  %w[improvement refactor split docs documentation performance speed latency ux workflow reliability architecture].any? { |token| type.include?(token) }
+end
+
+def default_invalid_completion_guards(task_type)
+  template = quality_outcome_template(task_type)
+  completions = template["invalid_completions"] || []
+  completions.each_with_index.map do |completion, index|
+    {
+      "id" => "guard_#{index + 1}",
+      "description" => completion,
+      "evidence_required" => "Reviewer must explicitly address whether this invalid completion pattern was avoided."
+    }
+  end
+end
+
+def default_review_strategy(task_type = nil)
+  minimum = design_task?(task_type) ? "implementation_readiness" : "outcome_quality"
   {
+    "required_questions" => %w[outcome counterexamples evidence_sufficiency residual_risk],
     "entrypoints" => ["quality_outcome", "acceptance", "changed_files", "evidence"],
-    "minimum_evidence_level" => "",
+    "minimum_evidence_level" => minimum,
     "suggested_checks" => [
       "Outcome: does the change satisfy the quality_outcome, not just the requested action?",
       "Behavior: are required user, CLI, or runtime behaviors correct and fail-closed?",
@@ -166,6 +185,15 @@ def default_review_strategy
       "Mechanical checks are reported as outcome quality.",
       "Public rule files are read but not applied to this task's judgment."
     ]
+  }
+end
+
+def default_test_strategy(target_role, task_type)
+  return nil unless test_task?(target_role, task_type)
+
+  {
+    "minimum_evidence_level" => "real_path_test",
+    "required_capabilities" => ["test.submit"]
   }
 end
 
@@ -273,6 +301,38 @@ def default_quality_measurement(task_type)
   }
 end
 
+def default_parent_goal(task_type)
+  is_decomp = decomposition_task?(task_type)
+  {
+    "required" => is_decomp,
+    "id" => "",
+    "objective" => is_decomp ? "Describe the parent objective this decomposition serves." : "",
+    "done_criteria" => is_decomp ? [
+      "All child slices are done and pass their gates.",
+      "Aggregate outcome evidence covers every done criterion."
+    ] : [],
+    "non_goals" => []
+  }
+end
+
+def default_parent_goal_status(task_type)
+  is_decomp = decomposition_task?(task_type)
+  {
+    "state" => is_decomp ? "parent_in_progress" : "not_applicable",
+    "active_slice" => "",
+    "done_criteria_status" => [],
+    "remaining_blockers" => [],
+    "required_gates" => {},
+    "user_next_action" => {
+      "default" => is_decomp ? "update_parent_goal_status" : "not_applicable",
+      "options" => [],
+      "waiting_on" => "",
+      "blocked_by" => "",
+      "do_not_do" => []
+    }
+  }
+end
+
 def new_task(args)
   options = parse_new_task_args(args)
   template_path = File.join(TEMPLATE_ROOT, "task.yaml")
@@ -298,7 +358,10 @@ def new_task(args)
   }
   task["gates"] = default_gates_for_new_task(options["target_role"], options["task_type"])
   task["quality_outcome"] = quality_outcome_template(options["task_type"])
-  task["review_strategy"] = default_review_strategy
+  task["invalid_completion_guards"] = default_invalid_completion_guards(options["task_type"]) if improvement_task_type?(options["task_type"])
+  task["review_strategy"] = default_review_strategy(options["task_type"])
+  test_strat = default_test_strategy(options["target_role"], options["task_type"])
+  task["test_strategy"] = test_strat if test_strat
   task["design_lifecycle"] = default_design_lifecycle(options["task_type"])
   task["design_reference"] = default_design_reference(options["task_type"])
   task["implementation_plan"] = default_implementation_plan(options["task_type"])
@@ -307,6 +370,8 @@ def new_task(args)
   task["test_level"] = default_test_level(options["target_role"], options["task_type"])
   task["test_environment"] = default_test_environment(options["target_role"], options["task_type"])
   task["quality_measurement"] = default_quality_measurement(options["task_type"])
+  task["parent_goal"] = default_parent_goal(options["task_type"])
+  task["parent_goal_status"] = default_parent_goal_status(options["task_type"])
   task_rule_packs = rule_packs_for_context(options["target_role"], options["task_type"])
   task["rule_packs"] = task_rule_packs unless task_rule_packs.empty?
 

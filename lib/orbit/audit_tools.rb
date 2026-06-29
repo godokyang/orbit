@@ -78,6 +78,74 @@ def audit_remediation(source)
   end
 end
 
+def quality_outcome_summary(task, evidence)
+  return nil unless task.is_a?(Hash)
+
+  records = evidence.is_a?(Hash) && evidence["records"].is_a?(Array) ? evidence["records"] : []
+  required_kinds = required_evidence_kinds(task)
+
+  gate_verdicts = required_kinds.each_with_object({}) do |kind, memo|
+    evidence_kind = GATE_KIND_EVIDENCE_RECORD_KIND[kind] || kind
+    # quality_outcome_verdict is only meaningful for review evidence (review / design_readiness gates).
+    # test and release gates use test evidence which has no quality_outcome_verdict; mark them not_applicable.
+    unless evidence_kind == "review"
+      memo[kind] = { "satisfied" => "not_applicable" }
+      next
+    end
+    candidates = records.select { |r| r.is_a?(Hash) && r["kind"] == evidence_kind && r["structured_submit"] == true }
+    latest = candidates.last
+    qov = latest&.fetch("quality_outcome_verdict", nil)
+    memo[kind] = { "quality_outcome_verdict" => qov, "satisfied" => qov == "pass" }.compact
+  end
+
+  # all_satisfied only considers gates that have a quality_outcome_verdict (review-evidence gates).
+  review_gates = gate_verdicts.reject { |_k, v| v["satisfied"] == "not_applicable" }
+
+  guards = task["invalid_completion_guards"]
+  guard_summary = if guards.is_a?(Array) && !guards.empty?
+                    review_record = records.select { |r| r.is_a?(Hash) && r["kind"] == "review" && r["structured_submit"] == true }.last
+                    counterexamples_pass = review_record&.fetch("quality_question_answers", nil)&.any? do |a|
+                      a.is_a?(Hash) && a["id"] == "counterexamples" && a["verdict"] == "pass"
+                    end
+
+                    guards.map { |g|
+                      next unless g.is_a?(Hash)
+
+                      guard_id = g["id"]
+                      specific = review_record&.fetch("quality_question_answers", nil)&.find do |a|
+                        a.is_a?(Hash) && a["id"] == guard_id
+                      end
+                      if specific
+                        specific_pass = specific["verdict"] == "pass"
+                        {
+                          "id" => guard_id,
+                          "description" => g["description"],
+                          "addressed" => specific_pass,
+                          "coverage" => "guard_specific",
+                          "addressed_via" => specific_pass ? "guard-specific answer verdict: pass" : "guard-specific answer verdict: #{specific["verdict"]}"
+                        }
+                      else
+                        # No guard-specific answer: report general counterexamples coverage but mark addressed=false
+                        # so it cannot be treated as explicit per-guard closure.
+                        {
+                          "id" => guard_id,
+                          "description" => g["description"],
+                          "addressed" => false,
+                          "coverage" => counterexamples_pass ? "general_only" : "none",
+                          "addressed_via" => counterexamples_pass ? "general counterexamples verdict: pass (no guard-specific answer; add quality_question_answers entry with id: #{guard_id} to explicitly close)" : "counterexamples question not passed in latest review"
+                        }
+                      end
+                    }.compact
+                  end
+
+  result = {
+    "gate_quality_outcomes" => gate_verdicts,
+    "all_satisfied" => review_gates.values.all? { |v| v["satisfied"] == true }
+  }
+  result["invalid_completion_guards"] = guard_summary if guard_summary
+  result
+end
+
 def audit_finding(source, message, severity = "high", remediation = nil)
   {
     "source" => source,
@@ -102,6 +170,43 @@ def audit_trust_level
       "Evidence contains a pass signal for done state."
     ]
   }
+end
+
+def parent_goal_audit(task, evidence)
+  return nil unless task.is_a?(Hash)
+
+  parent_goal = task["parent_goal"]
+  unless parent_goal.is_a?(Hash) && parent_goal["required"] == true
+    return { "state" => "not_applicable", "message" => "Task does not require parent goal tracking." }
+  end
+
+  status = task["parent_goal_status"]
+  current_state = status.is_a?(Hash) ? status["state"] : nil
+  done_criteria = parent_goal["done_criteria"].is_a?(Array) ? parent_goal["done_criteria"] : []
+  criteria_status = status.is_a?(Hash) && status["done_criteria_status"].is_a?(Array) ? status["done_criteria_status"] : []
+
+  evidenced_criteria = criteria_status.select { |cs| cs.is_a?(Hash) && cs["evidenced"] == true }.map { |cs| cs["criterion"] }
+  unevidenced = done_criteria.reject { |c| evidenced_criteria.include?(c) }
+
+  blocking = []
+  if current_state == "parent_done" && !unevidenced.empty?
+    blocking << {
+      "source" => "parent_goal_status.done_criteria",
+      "message" => "parent_goal_status.state is parent_done but #{unevidenced.length} done criteria lack evidence.",
+      "unevidenced" => unevidenced
+    }
+  end
+
+  {
+    "required" => true,
+    "objective" => parent_goal["objective"],
+    "current_state" => current_state,
+    "done_criteria_count" => done_criteria.length,
+    "evidenced_count" => evidenced_criteria.length,
+    "unevidenced_criteria" => unevidenced,
+    "blocking" => blocking,
+    "user_next_action" => status.is_a?(Hash) ? status["user_next_action"] : nil
+  }.compact
 end
 
 def audit_state_consistency(task_path, evidence_path, state, evidence, task = nil)
@@ -218,6 +323,15 @@ def audit(args)
 
   trust_flags = audit_trust_flags(phase, blocking_findings, warnings)
 
+  # Merge parent_goal_summary.blocking into blocking_findings BEFORE building packet
+  # so that issues and trust_flags reflect parent_done violations consistently
+  pg_summary = parent_goal_audit(task, evidence)
+  if pg_summary.is_a?(Hash) && pg_summary["blocking"].is_a?(Array)
+    pg_summary["blocking"].each { |b| blocking_findings << b unless blocking_findings.include?(b) }
+  end
+  issues = blocking_findings + warnings
+  trust_flags = audit_trust_flags(phase, blocking_findings, warnings)
+
   packet = {
     "schema_version" => "orbit-audit-v1",
     "project" => task.is_a?(Hash) && task["project"] ? task["project"] : File.basename(Dir.pwd),
@@ -234,6 +348,8 @@ def audit(args)
     "trusted_for_release" => trust_flags["trusted_for_release"],
     "done_ready" => trust_flags["trusted_for_done"],
     "evidence_summary" => evidence_summary(evidence),
+    "quality_outcome_summary" => quality_outcome_summary(task, evidence),
+    "parent_goal_summary" => pg_summary,
     "worktree_safety_summary" => worktree_safety_summary(evidence),
     "rule_resolution_summary" => rule_resolution_summary(evidence, evidence_path),
     "schema_version_summary" => schema_summary,
