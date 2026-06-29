@@ -32,13 +32,14 @@ ORBIT_CURRENT_SCHEMA_VERSIONS = {
 # Feature versions track which feature semantics a record was created with.
 # nil means the feature is not yet implemented in this build.
 #
-# IMPORTANT: evidence_level is declared as "v1" but the implementation is partial scaffold only.
-# Currently allowed values: mechanical_check, outcome_quality, implementation_readiness,
-# real_path_test (scaffold, no gate ranking), release_readiness (scaffold, no gate ranking).
-# Per-gate-kind ranking semantics and real_path_test/release_readiness gate logic are NOT yet
-# implemented; those land in Phase 1 Slice 1 (verdict-evidence-level-schema).
+# evidence_level v1: per-gate-kind semantic families are fully implemented.
+# Gate chains: review_quality (mechanical_check, outcome_quality),
+# design_readiness (mechanical_check, implementation_readiness),
+# test_quality (mechanical_check, real_path_test),
+# release_quality (mechanical_check, release_readiness).
+# Cross-family substitution is prohibited (Phase 1 Slice 1 complete).
 ORBIT_FEATURE_VERSIONS = {
-  "evidence_level" => "v1",   # PARTIAL SCAFFOLD – see comment above; full semantics in Slice 1
+  "evidence_level" => "v1",   # per-gate-kind family chains; cross-family substitution blocked
   "quality_outcome" => "v1",  # quality_outcome_verdict, required review questions (Slice 2 foundation)
   "schema_semantics" => "v1" # this versioning scaffolding itself (Slice 14 step 1)
   # "parent_goal_status" => nil   # not yet implemented – Phase 1 Slice 3
@@ -255,7 +256,6 @@ def evidence_schema_version_summary(evidence, task = nil)
     "unknown_versions" => unknown_versions,
     "prose_conflicts" => prose_conflicts,
     "known_gaps" => [
-      "evidence_level v1 is a partial scaffold: real_path_test and release_readiness are accepted at submit but per-gate-kind ranking is not implemented. Full semantics land in Phase 1 Slice 1.",
       "parent_goal_status feature version not yet implemented (Phase 1 Slice 3).",
       "gate_lease feature version not yet implemented (Phase 2 Slice 9).",
       "Prose/structured conflict detection covers summary field prefix only; full field scan is a known gap."

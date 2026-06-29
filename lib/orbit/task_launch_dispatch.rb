@@ -140,10 +140,11 @@ def quality_outcome_template(task_type)
   end
 end
 
-def default_review_strategy
+def default_review_strategy(task_type = nil)
+  minimum = design_task?(task_type) ? "implementation_readiness" : "outcome_quality"
   {
     "entrypoints" => ["quality_outcome", "acceptance", "changed_files", "evidence"],
-    "minimum_evidence_level" => "",
+    "minimum_evidence_level" => minimum,
     "suggested_checks" => [
       "Outcome: does the change satisfy the quality_outcome, not just the requested action?",
       "Behavior: are required user, CLI, or runtime behaviors correct and fail-closed?",
@@ -166,6 +167,15 @@ def default_review_strategy
       "Mechanical checks are reported as outcome quality.",
       "Public rule files are read but not applied to this task's judgment."
     ]
+  }
+end
+
+def default_test_strategy(target_role, task_type)
+  return nil unless test_task?(target_role, task_type)
+
+  {
+    "minimum_evidence_level" => "real_path_test",
+    "required_capabilities" => ["test.submit"]
   }
 end
 
@@ -298,7 +308,9 @@ def new_task(args)
   }
   task["gates"] = default_gates_for_new_task(options["target_role"], options["task_type"])
   task["quality_outcome"] = quality_outcome_template(options["task_type"])
-  task["review_strategy"] = default_review_strategy
+  task["review_strategy"] = default_review_strategy(options["task_type"])
+  test_strat = default_test_strategy(options["target_role"], options["task_type"])
+  task["test_strategy"] = test_strat if test_strat
   task["design_lifecycle"] = default_design_lifecycle(options["task_type"])
   task["design_reference"] = default_design_reference(options["task_type"])
   task["implementation_plan"] = default_implementation_plan(options["task_type"])

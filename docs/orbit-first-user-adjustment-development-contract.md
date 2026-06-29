@@ -71,9 +71,7 @@ evidence_record:
   rule_application:
     required_files: []
     applied_rules: []
-  residual_risk:
-    level: low
-    summary: ""
+  residual_risk: "Non-empty string: describe untested paths or explain why residual risk is acceptable."
 ```
 
 Allowed evidence levels:

@@ -411,6 +411,7 @@ def evidence_gate_verdict_entry(kind, record)
     "quality_outcome_verdict" => record["quality_outcome_verdict"],
     "implementation_readiness_verdict" => record["implementation_readiness_verdict"],
     "test_level" => record["test_level"],
+    "residual_risk" => record["residual_risk"],
     "rule_application_summary" => rule_application_summary(record["rule_application"]),
     "evidence_boundary_summary" => evidence_boundary_summary(record),
     "source_message_id" => record["source_message_id"],
@@ -1250,6 +1251,19 @@ def validate_structured_submit_report!(report_path, report)
     if pass_required || report.key?(field)
       extra[field] = validate_string_list_field!(report, field, "submit_report", kind: kind, pass_required: pass_required, non_empty: field == "confirmed" && pass_required)
     end
+  end
+  if pass_required || report.key?("residual_risk")
+    residual_risk = report["residual_risk"]
+    if pass_required && (residual_risk.nil? || !residual_risk.is_a?(String) || residual_risk.strip.empty?)
+      submit_report_schema_error(
+        "submit_report.residual_risk",
+        "Structured PASS evidence requires residual_risk: a non-empty string describing untested paths or acceptable residual risk.",
+        expected: "non-empty string",
+        actual: evidence_value_type(residual_risk),
+        kind: kind
+      )
+    end
+    extra["residual_risk"] = residual_risk.strip if residual_risk.is_a?(String) && !residual_risk.strip.empty?
   end
   if kind == "review"
     extra["quality_outcome_verdict"] = validate_review_quality_outcome_verdict!(report, status, "submit_report", kind: kind)

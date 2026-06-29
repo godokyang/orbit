@@ -20,6 +20,7 @@ confirmed: []
 assumed: []
 missing:
   - "TODO: behavior evidence missing before this test can pass."
+residual_risk: "TODO: describe untested paths or explain why residual risk is acceptable."
 findings:
   - "[blocked][test] TODO: describe the blocking coverage gap or failing behavior."
 coverage:

@@ -26,6 +26,7 @@ confirmed: []
 assumed: []
 missing:
   - "TODO: evidence missing before this review can pass."
+residual_risk: "TODO: describe untested paths or explain why residual risk is acceptable."
 counterexample_cases:
   - "TODO: failure path or counterexample to check before PASS."
 implementation_readiness_verdict: not_checked

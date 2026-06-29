@@ -428,6 +428,7 @@ def judgment_summary(evidence)
       "summary" => latest_review["summary"],
       "created_at" => latest_review["created_at"],
       "evidence_level" => latest_review["evidence_level"],
+      "residual_risk" => latest_review["residual_risk"],
       "quality_outcome_verdict" => latest_review["quality_outcome_verdict"],
       "implementation_readiness_verdict" => latest_review["implementation_readiness_verdict"],
       "rule_application_summary" => rule_application_summary(latest_review["rule_application"]),
@@ -454,6 +455,7 @@ def judgment_summary(evidence)
       "summary" => latest_test["summary"],
       "created_at" => latest_test["created_at"],
       "evidence_level" => latest_test["evidence_level"],
+      "residual_risk" => latest_test["residual_risk"],
       "test_level" => latest_test["test_level"],
       "rule_application_summary" => rule_application_summary(latest_test["rule_application"]),
       "evidence_boundary_summary" => evidence_boundary_summary(latest_test)
