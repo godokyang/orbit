@@ -2,6 +2,7 @@
 
 require_relative "core"
 require_relative "identity_rules"
+require_relative "schema_version"
 require_relative "task_launch_dispatch"
 require_relative "evidence"
 require_relative "state_validate_gate"

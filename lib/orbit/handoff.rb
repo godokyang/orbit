@@ -564,6 +564,7 @@ def handoff(args)
     },
     "worktree_safety_summary" => worktree_safety_summary(evidence),
     "evidence_summary" => evidence_summary(evidence),
+    "schema_version_summary" => evidence_schema_version_summary(evidence, task.is_a?(Hash) ? task : nil),
     "blocking_errors" => blocking_errors
   }
 

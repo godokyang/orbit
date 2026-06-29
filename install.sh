@@ -94,6 +94,7 @@ scripts/orbit
 lib/orbit/cli.rb
 lib/orbit/core.rb
 lib/orbit/identity_rules.rb
+lib/orbit/schema_version.rb
 lib/orbit/task_launch_dispatch.rb
 lib/orbit/evidence.rb
 lib/orbit/state_validate_gate.rb

@@ -880,8 +880,25 @@ def validate_task(result, task_path)
 
   task["__orbit_path"] = File.expand_path(task_path)
 
-  unless task["schema_version"] == "orbit-task-v1"
+  task_compat = schema_version_compat(task["schema_version"], "task")
+  case task_compat
+  when :current
+    # OK
+  when :legacy
     validation_error(result, "task_file.schema_version", "Task schema_version must be orbit-task-v1.")
+  when :unknown_future
+    entry = schema_unknown_version_entry("task_file.schema_version", task["schema_version"], "task")
+    validation_error(result, "task_file.schema_version",
+      "#{entry["message"]} #{entry["action"]}")
+  end
+
+  # Legacy warning: schema_semantics absent means task predates schema versioning.
+  if task_compat == :current && task["schema_semantics"].nil?
+    validation_warning(result, "task_file.schema_semantics",
+      "legacy_warning: Task file lacks schema_semantics; " \
+      "feature version tracking unavailable. " \
+      "Task was created before orbit-schema-versioning-v1. " \
+      "Existing tasks remain valid.")
   end
 
   if task["target_role"].nil? || task["target_role"].to_s.empty?
@@ -1158,7 +1175,9 @@ def validate_structured_test_level(result, source, record)
 end
 
 def evidence_level_rank(level)
-  ALLOWED_EVIDENCE_LEVELS.index(level)
+  # Only the first three levels have a defined ordering; real_path_test and release_readiness
+  # are scaffold values accepted at submit but not yet ranked (Phase 1 Slice 1 will add per-gate ordering).
+  RANKED_EVIDENCE_LEVELS.index(level)
 end
 
 def task_minimum_evidence_level(task)
@@ -1803,8 +1822,26 @@ def validate_evidence(result, evidence_path, task = nil)
   evidence = load_validation_file(result, "evidence_file", evidence_path)
   return nil unless evidence
 
-  unless evidence["schema_version"] == "orbit-evidence-v1"
+  ev_compat = schema_version_compat(evidence["schema_version"], "evidence")
+  case ev_compat
+  when :current
+    # OK – known schema version
+  when :legacy
     validation_error(result, "evidence_file.schema_version", "Evidence schema_version must be orbit-evidence-v1.")
+  when :unknown_future
+    entry = schema_unknown_version_entry("evidence_file.schema_version", evidence["schema_version"], "evidence")
+    validation_error(result, "evidence_file.schema_version",
+      "#{entry["message"]} #{entry["action"]}")
+  end
+
+  # Legacy warning: schema_semantics absent means record predates schema versioning.
+  # This is a warning only – historical records remain readable per global compatibility policy.
+  if ev_compat == :current && evidence["schema_semantics"].nil?
+    validation_warning(result, "evidence_file.schema_semantics",
+      "legacy_warning: Evidence manifest lacks schema_semantics; " \
+      "feature version tracking unavailable. " \
+      "Record was created before orbit-schema-versioning-v1. " \
+      "Historical records remain readable.")
   end
 
   records = evidence["records"]
