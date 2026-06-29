@@ -6,7 +6,11 @@ ALLOWED_EVIDENCE_KINDS = %w[review test command implementation waiver].freeze
 STRUCTURED_SUBMIT_KINDS = %w[review test].freeze
 ALLOWED_TEST_LEVELS = %w[unit integration repo_regression browser_e2e provider_e2e dogfood manual not_applicable].freeze
 ALLOWED_REVIEW_QUALITY_OUTCOME_VERDICTS = %w[pass fail partial blocked unknown not_applicable].freeze
-ALLOWED_EVIDENCE_LEVELS = %w[mechanical_check outcome_quality implementation_readiness].freeze
+# Scaffold includes real_path_test and release_readiness so reports using those values are not
+# rejected at submit time. Per-gate-kind ranking semantics are not yet implemented (Phase 1 Slice 1).
+# The first three values form the current ordered set; the last two are accepted but not ranked.
+ALLOWED_EVIDENCE_LEVELS = %w[mechanical_check outcome_quality implementation_readiness real_path_test release_readiness].freeze
+RANKED_EVIDENCE_LEVELS = %w[mechanical_check outcome_quality implementation_readiness].freeze
 ALLOWED_RULE_APPLICATION_VERDICTS = %w[pass fail blocked not_applicable].freeze
 ALLOWED_QUALITY_QUESTION_VERDICTS = %w[pass fail blocked not_applicable].freeze
 ALLOWED_IMPLEMENTATION_READINESS_VERDICTS = %w[pass blocked not_checked].freeze
@@ -222,6 +226,9 @@ end
 def default_evidence_manifest
   {
     "schema_version" => "orbit-evidence-v1",
+    "schema_semantics" => {
+      "feature_versions" => ORBIT_FEATURE_VERSIONS.reject { |_k, v| v.nil? }
+    },
     "project" => File.basename(Dir.pwd),
     "records" => [],
     "verdict" => {
@@ -1178,7 +1185,60 @@ def validate_structured_submit_report!(report_path, report)
   coverage = validate_string_array!(report["coverage"], "submit_report.coverage", kind: kind)
   artifacts = validate_string_array!(report["artifacts"], "submit_report.artifacts", kind: kind)
   validate_blocked_submit_detail!(report["blocked"], "submit_report.blocked", kind: kind) if report.key?("blocked")
+
+  # Schema versioning: validate report_template_version.
+  # - Missing (legacy report): non-blocking, record legacy_warning in source_report_semantics.
+  # - Known but wrong kind (e.g. review-report-v1 for kind: test): blocking kind mismatch.
+  # - Unknown future version: blocking – cannot safely assume current parsing semantics.
+  report_template_version = report["report_template_version"]
+  template_compat = schema_version_compat_set(report_template_version, ORBIT_KNOWN_REPORT_TEMPLATE_VERSIONS)
+  if template_compat == :unknown_future
+    submit_report_schema_error(
+      "submit_report.report_template_version",
+      "Report report_template_version #{report_template_version.inspect} is not recognized. " \
+      "Unknown future template versions cannot be safely processed.",
+      expected: ORBIT_KNOWN_REPORT_TEMPLATE_VERSIONS.join("|"),
+      actual: report_template_version,
+      kind: kind
+    )
+  end
+  if template_compat == :current
+    expected_for_kind = EXPECTED_REPORT_TEMPLATE_VERSIONS[kind]
+    if expected_for_kind && report_template_version != expected_for_kind
+      submit_report_schema_error(
+        "submit_report.report_template_version",
+        "Report report_template_version #{report_template_version.inspect} does not match " \
+        "expected template for kind #{kind.inspect}.",
+        expected: expected_for_kind,
+        actual: report_template_version,
+        kind: kind
+      )
+    end
+  end
+  source_report_semantics = { "compatibility_state" => template_compat.to_s }
+  source_report_semantics["report_template_version"] = report_template_version if report_template_version
+  if template_compat == :legacy
+    source_report_semantics["legacy_warnings"] = [
+      schema_legacy_warning_entry(
+        "submit_report.report_template_version",
+        "Report is missing report_template_version; treating as legacy report created before schema versioning.",
+        "New reports from updated templates include report_template_version."
+      )
+    ]
+  end
+  report_schema_semantics = report["schema_semantics"]
+  if report_schema_semantics.is_a?(Hash) && report_schema_semantics["feature_versions"].is_a?(Hash)
+    source_report_semantics["feature_versions"] = report_schema_semantics["feature_versions"]
+  elsif template_compat == :current
+    # Report uses a known template version but is missing schema_semantics; feature_versions unverifiable.
+    source_report_semantics["known_gaps"] = [
+      "Report uses a known template version (#{report_template_version.inspect}) but is missing " \
+      "schema_semantics; feature_versions cannot be verified from this report."
+    ]
+  end
+
   extra = {}
+  extra["source_report_semantics"] = source_report_semantics
   pass_required = status == "pass"
   if pass_required || report.key?("evidence_level")
     extra["evidence_level"] = validate_evidence_level!(report["evidence_level"], "submit_report.evidence_level", kind: kind, pass_required: pass_required)

@@ -1,4 +1,9 @@
 kind: test
+report_template_version: test-report-v1
+schema_semantics:
+  feature_versions:
+    evidence_level: v1
+    schema_semantics: v1
 verdict: blocked
 summary: "TODO: one-sentence test conclusion."
 source_message_id: "TODO: herdr:<pane-or-message-id> or report:<path>"

@@ -1,4 +1,9 @@
 schema_version: orbit-task-v1
+schema_semantics:
+  feature_versions:
+    evidence_level: v1
+    quality_outcome: v1
+    schema_semantics: v1
 project: example
 target_role: reviewer
 task_type: slice_review

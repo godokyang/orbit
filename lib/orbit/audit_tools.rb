@@ -191,6 +191,33 @@ def audit(args)
   phase = state.is_a?(Hash) ? state["phase"] : nil
   trust_flags = audit_trust_flags(phase, blocking_findings, warnings)
   issues = blocking_findings + warnings
+
+  schema_summary = evidence_schema_version_summary(evidence, task)
+  if schema_summary
+    # Prose/structured conflicts are blocking: structured verdict wins per global compatibility policy.
+    schema_summary["prose_conflicts"].each do |conflict|
+      blocking_findings << audit_finding(
+        conflict["source"] || "evidence_file.records",
+        conflict["message"],
+        "high",
+        "Correct the report so the summary derives from the structured verdict field. Structured verdict takes precedence."
+      )
+    end
+    # Unknown future versions are blocking: do not silently treat as current semantics.
+    schema_summary["unknown_versions"].each do |uv|
+      blocking_findings << audit_finding(
+        uv["source"],
+        uv["message"],
+        "high",
+        uv["action"]
+      )
+    end
+    # Re-derive issues list with any newly added blocking_findings.
+    issues = blocking_findings + warnings
+  end
+
+  trust_flags = audit_trust_flags(phase, blocking_findings, warnings)
+
   packet = {
     "schema_version" => "orbit-audit-v1",
     "project" => task.is_a?(Hash) && task["project"] ? task["project"] : File.basename(Dir.pwd),
@@ -209,6 +236,7 @@ def audit(args)
     "evidence_summary" => evidence_summary(evidence),
     "worktree_safety_summary" => worktree_safety_summary(evidence),
     "rule_resolution_summary" => rule_resolution_summary(evidence, evidence_path),
+    "schema_version_summary" => schema_summary,
     "issues" => issues,
     "blocking_findings" => blocking_findings,
     "warnings" => warnings

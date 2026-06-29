@@ -293,6 +293,9 @@ def new_task(args)
   task["project"] = options["project"]
   task["target_role"] = options["target_role"]
   task["task_type"] = options["task_type"]
+  task["schema_semantics"] = {
+    "feature_versions" => ORBIT_FEATURE_VERSIONS.reject { |_k, v| v.nil? }
+  }
   task["gates"] = default_gates_for_new_task(options["target_role"], options["task_type"])
   task["quality_outcome"] = quality_outcome_template(options["task_type"])
   task["review_strategy"] = default_review_strategy
