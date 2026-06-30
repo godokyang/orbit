@@ -77,7 +77,7 @@ def evidence_summary(evidence)
     "records" => 0,
     "by_kind" => {},
     "latest" => nil,
-    "aggregate_verdict" => evidence["verdict"],
+    "aggregate_verdict" => redact_aggregate_verdict_for_summary(evidence["verdict"]),
     "waivers" => {
       "total" => evidence["waivers"].is_a?(Array) ? evidence["waivers"].length : 0,
       "open" => evidence["waivers"].is_a?(Array) ? evidence["waivers"].count { |waiver| waiver.is_a?(Hash) && waiver["revoked_by_user_requirement"] != true } : 0
@@ -97,7 +97,7 @@ def evidence_summary(evidence)
       summary["by_kind"][kind][status] ||= 0
       summary["by_kind"][kind][status] += 1
     end
-    summary["latest"] = records.last
+    summary["latest"] = redact_sensitive_record(records.last)
   elsif evidence["verdict"].is_a?(Hash)
     summary["records"] = 1
     summary["latest"] = evidence["verdict"]
@@ -106,11 +106,16 @@ def evidence_summary(evidence)
   summary
 end
 
-def latest_gate_verdicts_for_handoff(evidence)
+def latest_gate_verdicts_for_handoff(evidence, task_sha256 = nil)
   records = evidence.is_a?(Hash) && evidence["records"].is_a?(Array) ? evidence["records"] : []
-  latest = latest_records_by_kind(records)
   %w[review test].each_with_object({}) do |kind, memo|
-    record = latest[kind]
+    # Slice 9: use arbitration accepted record when task_sha256 is provided so stale
+    # verdicts don't surface as "pass" in handoff summaries.
+    record = if task_sha256
+               accepted_gate_record(records, kind, task_sha256)
+             else
+               latest_records_by_kind(records)[kind]
+             end
     memo[kind] = if record
                    {
                      "status" => record["status"],
@@ -161,9 +166,74 @@ def known_gaps_for_handoff(evidence, audit_warnings)
   gaps
 end
 
-def closure_checklist_for_handoff(task, evidence, validation, audit_blocking, audit_warnings)
+# Machine-readable runtime summary for the handoff packet.
+# Surfaces runtime_binding identities, aggregated cleanup status, and reproducibility/runtime gaps.
+def handoff_runtime_summary(evidence)
+  records = evidence.is_a?(Hash) && evidence["records"].is_a?(Array) ? evidence["records"] : []
+
+  runtime_bindings = records.each_with_index.map do |r, idx|
+    next unless r.is_a?(Hash) && r["runtime_binding"].is_a?(Hash)
+    {
+      "record_index" => idx,
+      "kind" => r["kind"],
+      "status" => r["status"],
+      "binding" => r["runtime_binding"]
+    }
+  end.compact
+
+  cleanup_counts = {}
+  cleanup_records = 0
+  cleanup_incomplete = 0
+  records.each do |r|
+    next unless r.is_a?(Hash) && r["test_environment"].is_a?(Hash)
+    cs = r["test_environment"]["cleanup_status"]
+    next unless cs.is_a?(String) && !cs.strip.empty?
+    cleanup_records += 1
+    norm = cs.strip
+    cleanup_counts[norm] = (cleanup_counts[norm] || 0) + 1
+    cleanup_incomplete += 1 unless norm == "complete"
+  end
+
+  reproducibility_gaps = []
+  runtime_gaps = []
+  runtime_bindings.each do |entry|
+    b = entry["binding"]
+    build = b["build"]
+    if build.is_a?(Hash)
+      git_head = build["git_head"]
+      if !git_head.is_a?(String) || git_head.strip.empty?
+        reproducibility_gaps << { "record_index" => entry["record_index"], "source" => "runtime_binding.build.git_head", "gap" => "build.git_head missing; artifact provenance unverifiable." }
+      end
+    else
+      reproducibility_gaps << { "record_index" => entry["record_index"], "source" => "runtime_binding.build", "gap" => "build binding missing; artifact reproducibility unverifiable." }
+    end
+
+    if entry["kind"] == "test" && entry["status"] == "pass"
+      has_owner = %w[server browser].any? { |k| b[k].is_a?(Hash) && b[k]["owner"].is_a?(String) && !b[k]["owner"].strip.empty? }
+      unless has_owner
+        runtime_gaps << { "record_index" => entry["record_index"], "source" => "runtime_binding.server.owner|runtime_binding.browser.owner", "gap" => "real_path_test PASS without server/browser owner; runtime path not attributable." }
+      end
+    end
+  end
+
+  {
+    "runtime_binding_count" => runtime_bindings.length,
+    "runtime_bindings" => runtime_bindings,
+    "cleanup_status" => {
+      "records_with_cleanup_status" => cleanup_records,
+      "statuses" => cleanup_counts,
+      "incomplete_count" => cleanup_incomplete,
+      "all_complete" => cleanup_records > 0 && cleanup_incomplete == 0
+    },
+    "reproducibility_gaps" => reproducibility_gaps,
+    "runtime_gaps" => runtime_gaps,
+    "has_gaps" => !reproducibility_gaps.empty? || !runtime_gaps.empty?
+  }
+end
+
+def closure_checklist_for_handoff(task, evidence, validation, audit_blocking, audit_warnings, task_sha256: nil)
   source_documents = task.is_a?(Hash) && task["source_documents"].is_a?(Array) ? task["source_documents"] : []
-  verdicts = latest_gate_verdicts_for_handoff(evidence)
+  verdicts = latest_gate_verdicts_for_handoff(evidence, task_sha256)
   [
     {
       "item" => "task_contract_valid",
@@ -264,6 +334,62 @@ def worktree_safety_summary(evidence)
     "head_before_present" => worktree["head_before"].is_a?(String) && !worktree["head_before"].empty?,
     "unexpected_changes_count" => worktree["unexpected_changes"].is_a?(Array) ? worktree["unexpected_changes"].length : nil
   }.compact
+end
+
+def destructive_action_audit(evidence)
+  return { "present" => false } unless evidence.is_a?(Hash)
+
+  records = evidence["records"]
+  return { "present" => false } unless records.is_a?(Array)
+
+  plans = []
+  recovery_gaps = []
+
+  records.each_with_index do |record, index|
+    next unless record.is_a?(Hash)
+
+    plan = record["destructive_action_plan"]
+    next unless plan.is_a?(Hash)
+
+    targets = plan["targets"]
+    if targets.is_a?(Array)
+      targets.each do |target|
+        next unless target.is_a?(Hash)
+
+        evidence_impact = target["evidence_impact"].to_s.strip
+        recoverability = target["recoverability"].to_s.strip
+        if !evidence_impact.empty? && evidence_impact != "none"
+          unless %w[hash_only hash_and_backup full_backup].include?(recoverability)
+            recovery_gaps << {
+              "record_index" => index,
+              "path" => target["path"],
+              "evidence_impact" => evidence_impact,
+              "recoverability" => recoverability.empty? ? nil : recoverability,
+              "message" => "Evidence-affecting destructive target has insufficient recoverability."
+            }.compact
+          end
+        end
+      end
+    end
+
+    plans << {
+      "record_index" => index,
+      "action" => plan["action"],
+      "dry_run" => plan["dry_run"],
+      "target_count" => targets.is_a?(Array) ? targets.length : 0,
+      "user_confirmation_required" => plan.dig("user_confirmation", "required"),
+      "user_confirmation_received" => plan.dig("user_confirmation", "received")
+    }.compact
+  end
+
+  return { "present" => false } if plans.empty?
+
+  {
+    "present" => true,
+    "plan_count" => plans.length,
+    "plans" => plans,
+    "recovery_gaps" => recovery_gaps
+  }
 end
 
 def validation_summary(validation)
@@ -490,9 +616,10 @@ def handoff(args)
   state_path = File.expand_path(options["state"])
   evidence_path = File.expand_path(options["evidence"])
   output_path = options["output"] ? File.expand_path(options["output"]) : nil
+  current_task_sha256 = sha256_file(task_path)
   validation, task, evidence, state = audit_validation_result(task_path, evidence_path, state_path)
   blocking_errors = validation["errors"].dup
-  audit_blocking, audit_warnings = audit_state_consistency(task_path, evidence_path, state, evidence, task)
+  audit_blocking, audit_warnings = audit_state_consistency(task_path, evidence_path, state, evidence, task, task_sha256: current_task_sha256)
   blocking_errors.concat(audit_blocking)
 
   current_role = nil
@@ -519,7 +646,7 @@ def handoff(args)
     record_handoff_artifact(state_path, output_path)
     validation, task, evidence, state = audit_validation_result(task_path, evidence_path, state_path)
     blocking_errors = validation["errors"].dup
-    audit_blocking, audit_warnings = audit_state_consistency(task_path, evidence_path, state, evidence, task)
+    audit_blocking, audit_warnings = audit_state_consistency(task_path, evidence_path, state, evidence, task, task_sha256: current_task_sha256)
     blocking_errors.concat(audit_blocking)
     target_role = task.is_a?(Hash) ? task["target_role"] : nil
     if current_role && target_role && current_role != target_role && !task_gate_role?(task, current_role)
@@ -534,9 +661,14 @@ def handoff(args)
   next_action = required_action_for_phase(current_phase, blocking_errors)
   transport_profile = resolve_transport_profile(options["transport"])
   transport_profile["payload"] = transport_handoff_payload(transport_profile, task_path, state_path, evidence_path, next_action)
-  latest_gate_verdicts = latest_gate_verdicts_for_handoff(evidence)
+  latest_gate_verdicts = latest_gate_verdicts_for_handoff(evidence, current_task_sha256)
   known_gaps = known_gaps_for_handoff(evidence, audit_warnings)
-  closure_checklist = closure_checklist_for_handoff(task, evidence, validation, audit_blocking, audit_warnings)
+  runtime_summary = handoff_runtime_summary(evidence)
+  reconcile_summary = runtime_reconcile_summary(evidence)
+  arbitration_summary = verdict_arbitration_summary(task, evidence, current_task_sha256)
+  decisions_summary = decision_record_summary(evidence)
+  lease_summary = gate_lease_summary(evidence)
+  closure_checklist = closure_checklist_for_handoff(task, evidence, validation, audit_blocking, audit_warnings, task_sha256: current_task_sha256)
   packet = {
     "schema_version" => "orbit-handoff-v1",
     "project" => task.is_a?(Hash) && task["project"] ? task["project"] : File.basename(Dir.pwd),
@@ -551,23 +683,49 @@ def handoff(args)
     "transport_profile" => transport_profile,
     "rule_packs" => rule_packs_for_context(target_role, task.is_a?(Hash) ? task["task_type"] : nil, include_audit: true),
     "rule_resolution_summary" => rule_resolution_summary(evidence, evidence_path),
-    "gate_summary" => task.is_a?(Hash) && evidence.is_a?(Hash) ? required_gate_summary(task, evidence) : nil,
+    "gate_summary" => task.is_a?(Hash) && evidence.is_a?(Hash) ? required_gate_summary(task, evidence, task_sha256: current_task_sha256) : nil,
     "latest_gate_verdicts" => latest_gate_verdicts,
     "judgment_summary" => judgment_summary(evidence),
     "closure_checklist" => closure_checklist,
     "known_gaps" => known_gaps,
     "parent_goal_status" => task.is_a?(Hash) ? task["parent_goal_status"] : nil,
+    "destructive_actions_summary" => destructive_action_audit(evidence),
     "readable_summary" => {
       "current_task" => task_path,
       "phase" => current_phase,
       "next_action" => next_action,
       "latest_review_verdict" => latest_gate_verdicts.dig("review", "status"),
       "latest_test_verdict" => latest_gate_verdicts.dig("test", "status"),
-      "known_gaps_count" => known_gaps.length
+      "known_gaps_count" => known_gaps.length,
+      "runtime_binding_count" => runtime_summary["runtime_binding_count"],
+      "cleanup_all_complete" => runtime_summary["cleanup_status"]["all_complete"],
+      "runtime_gaps_count" => runtime_summary["runtime_gaps"].length,
+      "reproducibility_gaps_count" => runtime_summary["reproducibility_gaps"].length,
+      "gate_lease_active" => lease_summary["active_count"].to_i,
+      "gate_lease_expired" => lease_summary["expired_count"].to_i,
+      "gate_owner_replaceable" => lease_summary["any_replaceable"],
+      "active_decisions_count" => decisions_summary["active_count"].to_i,
+      "expired_decisions_count" => decisions_summary["expired_count"].to_i
     },
+    "runtime_summary" => runtime_summary,
+    "runtime_reconcile_summary" => reconcile_summary,
+    "verdict_arbitration" => arbitration_summary,
+    "gate_lease_summary" => lease_summary,
+    "decision_record_summary" => decisions_summary,
+    "trust_repair_summary" => trust_repair_summary(evidence),
+    "data_classification_summary" => data_classification_summary(evidence),
+    "negative_evidence_summary" => negative_evidence_summary(evidence),
     "worktree_safety_summary" => worktree_safety_summary(evidence),
     "evidence_summary" => evidence_summary(evidence),
     "schema_version_summary" => evidence_schema_version_summary(evidence, task.is_a?(Hash) ? task : nil),
+    "release_readiness_summary" => release_readiness_summary(task),
+    "release_blockers" => release_risk?(task) ? release_readiness_blockers(task.is_a?(Hash) ? task["release_readiness"] : nil, task) : [],
+    "dogfood_governance_summary" => dogfood_governance_summary(task),
+    "compatibility_policy_summary" => compatibility_policy_summary(task),
+    "multi_user_ownership_summary" => multi_user_ownership_summary(task),
+    "self_review_guard_summary" => self_review_guard_summary(task),
+    "quality_calibration_summary" => quality_calibration_summary(task),
+    "risk_level_tradeoff_summary" => risk_level_tradeoff_summary(task),
     "blocking_errors" => blocking_errors
   }
 

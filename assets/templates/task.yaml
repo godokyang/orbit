@@ -20,6 +20,15 @@ slice: S1
 scope:
   include: []
   exclude: []
+artifact_policy:
+  generated: exclude_by_default
+  build_outputs: exclude_by_default
+  orbit_runtime: exclude_by_default
+  runtime_artifacts: preserve_or_hash_before_delete
+destructive_actions:
+  required_protocol: true
+  require_user_confirmation: true
+write_policy_enforcement: standard
 quality_outcome:
   user_problem: "The current behavior, structure, or workflow creates a concrete maintenance, reliability, or user problem."
   desired_property: "The completed task changes the system property that caused the problem, not only the surface action."

@@ -1,0 +1,9 @@
+{
+  "schema_version": "orbit-dogfood-fixture-v1",
+  "case_id": "user-next-action-visibility",
+  "source_adjustment": "P1.5",
+  "fixture_type": "test_reference",
+  "test_part": "tests/orbit_test.sh",
+  "scenario": "Parent goal user_next_action visible in handoff",
+  "expected_outcome": "handoff includes parent_goal_status.user_next_action"
+}

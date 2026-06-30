@@ -1,0 +1,9 @@
+{
+  "schema_version": "orbit-dogfood-fixture-v1",
+  "case_id": "evidence-level-enforcement",
+  "source_adjustment": "P0.3",
+  "fixture_type": "test_reference",
+  "test_part": "tests/orbit_test.sh",
+  "scenario": "Review pass without evidence_level cannot satisfy outcome_quality gate",
+  "expected_outcome": "wait-gate blocks on missing evidence_level"
+}

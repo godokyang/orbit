@@ -1,14 +1,9 @@
 # frozen_string_literal: true
 
-# Minimum scaffolding for protocol-schema-versioning (Slice 14, step 1 in Implementation Order).
+# Protocol schema/version semantics and feature-version registry.
 #
 # Scope: feature-version vocabulary, legacy-warning helpers, compatibility-state detection,
 # and prose/structured-verdict conflict detection skeleton.
-#
-# NOT in scope here:
-#   - Full governance (dogfood cases, calibration, multi-user ownership) – Phase 3 remainder.
-#   - parent_goal_status, gate_lease feature versions – Phase 1 Slice 3 / Phase 2 Slice 9.
-#   - Project-profile risk level – Phase 2 Slice 12.
 #
 # Global compatibility policy (from development contract):
 #   - Old evidence/report lacking new fields → legacy_warning (not hard fail).
@@ -43,8 +38,18 @@ ORBIT_FEATURE_VERSIONS = {
   "quality_outcome" => "v1",           # quality_outcome_verdict, required review questions (Slice 2 foundation)
   "quality_outcome_guardrails" => "v1", # invalid_completion_guards, required_questions coverage (Slice 2)
   "parent_goal_status" => "v1",        # parent_goal + parent_goal_status task fields, user_next_action in handoff (Slice 3)
-  "schema_semantics" => "v1"           # this versioning scaffolding itself (Slice 14 step 1)
-  # "gate_lease" => nil           # not yet implemented – Phase 2 Slice 9
+  "destructive_action_scope" => "v1", # artifact_policy, destructive_actions task fields; scope.include changed-files guard (Slice 4)
+  "role_identity_minimum" => "v1",    # task_sha256/rules_context_sha256 in identity; write_policy in gate records (Slice 5)
+  "role_identity_full" => "v1",       # role_execution_context replaces flat identity; stale-sha + rules-context-sha gate checks (Slice 6)
+  "schema_semantics" => "v1",          # this versioning scaffolding itself (Slice 14 step 1)
+  "gate_lease" => "v1",                # gate_lease metadata + verdict arbitration (Slice 9)
+  "doc_lifecycle" => "v1",             # doc_lifecycle + decision_record structured records (Slice 10)
+  "project_profile_risk_level" => "v1", # project profile + task risk level derivation (Slice 11)
+  "data_classification_retention" => "v1", # data classification + retention + trust repair (Slice 12)
+  "ci_release_readiness" => "v1",           # CI release readiness: source, ci, package, version, remote state (Slice 13)
+  "protocol_schema_versioning" => "v1",      # consistency_check + negative_evidence (Slice 14)
+  "orbit_dogfood_governance" => "v1",        # dogfood index + retrospective done criteria (Slice 15)
+  "landing_governance_calibration" => "v1"   # compatibility policy + multi-user ownership + self-review guard + backup migration (Slice 16)
 }.freeze
 
 ORBIT_KNOWN_REPORT_TEMPLATE_VERSIONS = %w[review-report-v1 test-report-v1].freeze
@@ -148,6 +153,8 @@ def detect_prose_structured_conflict(record_or_report)
 
   conflict_type = if structured_verdict == "fail" && prose_pass && !prose_fail
                     "prose_pass_structured_fail"
+                  elsif structured_verdict == "partial" && prose_pass && !prose_fail
+                    "prose_pass_structured_partial"
                   elsif structured_verdict == "pass" && prose_fail && !prose_pass
                     "prose_fail_structured_pass"
                   end
@@ -204,14 +211,43 @@ def evidence_schema_version_summary(evidence, task = nil)
       "New evidence created with 'orbit evidence init' will include schema_semantics."
     )
   end
-
-  # Scan individual records for prose/structured conflicts
+  # Scan individual records for prose/structured conflicts and build consistency_checks.
   records = evidence["records"]
+  consistency_checks = []
   if records.is_a?(Array)
     records.each_with_index do |record, index|
       next unless record.is_a?(Hash)
 
+      raw_status = record["status"] || record["verdict"]
+      structured_verdict = case raw_status.to_s.strip.upcase
+                           when "PASS", "APPROVED" then "pass"
+                           when "FAIL", "CHANGES_REQUESTED" then "fail"
+                           when "PARTIAL", "BLOCKED" then "partial"
+                           else nil
+                           end
+
+      summary = record["summary"].to_s.strip
+      summary_verdict_detected = if summary.empty?
+                                   nil
+                                 elsif PROSE_PASS_PATTERNS.match?(summary) && !PROSE_FAIL_PATTERNS.match?(summary)
+                                   "pass"
+                                 elsif PROSE_FAIL_PATTERNS.match?(summary) && !PROSE_PASS_PATTERNS.match?(summary)
+                                   "fail"
+                                 else
+                                   nil
+                                 end
+
       conflict = detect_prose_structured_conflict(record)
+
+      consistency_checks << {
+        "record_index" => index,
+        "source" => "evidence_file.records[#{index}]",
+        "structured_verdict" => structured_verdict,
+        "summary_verdict_detected" => summary_verdict_detected,
+        "conflicts" => conflict ? [conflict.merge("record_index" => index, "source" => "evidence_file.records[#{index}]")] : [],
+        "resolution" => conflict ? "structured_verdict_wins" : nil
+      }
+
       next unless conflict
 
       prose_conflicts << conflict.merge(
@@ -256,9 +292,8 @@ def evidence_schema_version_summary(evidence, task = nil)
     "legacy_warnings" => legacy_warnings,
     "unknown_versions" => unknown_versions,
     "prose_conflicts" => prose_conflicts,
+    "consistency_checks" => consistency_checks,
     "known_gaps" => [
-      "parent_goal_status feature version not yet implemented (Phase 1 Slice 3).",
-      "gate_lease feature version not yet implemented (Phase 2 Slice 9).",
       "Prose/structured conflict detection covers summary field prefix only; full field scan is a known gap."
     ]
   }

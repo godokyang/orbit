@@ -1,0 +1,9 @@
+{
+  "schema_version": "orbit-dogfood-fixture-v1",
+  "case_id": "identity-write-policy",
+  "source_adjustment": "P0.4",
+  "fixture_type": "test_reference",
+  "test_part": "tests/orbit_test.sh",
+  "scenario": "Gate role identity mismatch and write policy violations are detected",
+  "expected_outcome": "validate and audit block on identity mismatch and write violations"
+}

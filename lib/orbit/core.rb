@@ -69,7 +69,7 @@ HELP = <<~HELP
   Usage:
     orbit --help
     orbit version
-    orbit audit --task PATH --state PATH --evidence PATH --json
+    orbit audit --task PATH --state PATH --evidence PATH [--handoff PATH] [--compact-summary PATH] --json
     orbit init [--force]
     orbit instances status --json
     orbit bind-pane --instance NAME --pane PANE [--transport NAME] [--tab TAB] [--space SPACE] --json
@@ -78,9 +78,9 @@ HELP = <<~HELP
     orbit docs alias --id ID --path PATH [--registry PATH] --json
     orbit docs check [--registry PATH] [--open-dir PATH] [--archive-dir PATH] --json
     orbit evidence init --output PATH
-    orbit evidence add --file PATH --kind KIND --status STATUS --summary SUMMARY
+    orbit evidence add --file PATH --kind KIND --status STATUS --summary SUMMARY [--decision-record JSON] [--data-classification JSON] [--retention-policy JSON] [--trust-repair JSON]
     orbit evidence from-report --file PATH --report PATH [--kind KIND] [--status STATUS] [--summary SUMMARY]
-    orbit evidence submit --file PATH --report PATH --json
+    orbit evidence submit --file PATH --report PATH [--task PATH] --json
     orbit evidence waive --file PATH --waiver PATH --json
     orbit evidence attach-rule --file PATH --rule-resolution PATH
     orbit evidence show --file PATH --json
@@ -98,7 +98,7 @@ HELP = <<~HELP
     orbit wait-gate --task PATH --evidence PATH --json
     orbit whoami --json [--task PATH]
     orbit new-task --target-role ROLE --task-type TYPE --output PATH
-    orbit validate [--task PATH] [--evidence PATH] [--state PATH] [--json]
+    orbit validate [--task PATH] [--evidence PATH] [--state PATH] [--changed-files FILE[,FILE...]] [--json]
 
   Commands:
     audit       审计 task、evidence 和 loop state 的一致性。
@@ -124,6 +124,7 @@ HELP = <<~HELP
   Subcommand help:
     orbit audit --help
     orbit compact-evidence --help
+    orbit evidence --help
     orbit dispatch --help
     orbit docs --help
     orbit handoff --help
@@ -136,7 +137,7 @@ HELP
 COMMAND_HELP = {
   "audit" => <<~HELP,
     Usage:
-      orbit audit --task PATH --state PATH --evidence PATH --json
+      orbit audit --task PATH --state PATH --evidence PATH [--handoff PATH] [--compact-summary PATH] --json
 
     Audits task, loop state, and evidence consistency before done/handoff.
 
@@ -145,6 +146,13 @@ COMMAND_HELP = {
       --state PATH     orbit-loop-state-v1 YAML file.
       --evidence PATH  orbit-evidence-v1 JSON/YAML manifest file.
       --json           Emit machine-readable audit result.
+
+    Optional:
+      --handoff PATH           Handoff packet to compare against current evidence
+                               (reports drift in retention_drift_summary).
+      --compact-summary PATH   Durable evidence summary to validate and reference
+                               (validates compact_summary schema; reports
+                               retention_summary.compact_summary_present).
 
     Notes:
       --evidence expects a manifest file, not an evidence directory.
@@ -308,20 +316,60 @@ COMMAND_HELP = {
   HELP
   "validate" => <<~HELP,
     Usage:
-      orbit validate [--task PATH] [--evidence PATH] [--state PATH] [--json]
+      orbit validate [--task PATH] [--evidence PATH] [--state PATH]
+                     [--changed-files FILE[,FILE...]] [--json]
 
     Validates project config plus optional structured task, evidence manifest,
     and loop-state files.
 
     Options:
-      --task PATH      Structured orbit-task-v1 YAML file.
-      --evidence PATH  orbit-evidence-v1 JSON/YAML manifest file.
-      --state PATH     orbit-loop-state-v1 YAML file.
-      --json           Emit machine-readable validation result.
+      --task PATH                Structured orbit-task-v1 YAML file.
+      --evidence PATH            orbit-evidence-v1 JSON/YAML manifest file.
+      --state PATH               orbit-loop-state-v1 YAML file.
+      --changed-files FILE,...   Comma-separated list of changed file paths to
+                                 check against task scope.include / scope.exclude
+                                 patterns. Can be repeated to add more files.
+      --json                     Emit machine-readable validation result.
 
     Notes:
       --evidence expects a manifest file, not an evidence directory.
       Create one with: orbit evidence init --output .orbit/evidence.json
+      --changed-files is typically sourced from `git diff --name-only`.
+  HELP
+  "evidence" => <<~HELP,
+    Usage:
+      orbit evidence init --output PATH
+      orbit evidence add --file PATH --kind KIND --status STATUS --summary SUMMARY [--decision-record JSON] [--data-classification JSON] [--retention-policy JSON] [--trust-repair JSON]
+      orbit evidence from-report --file PATH --report PATH [--kind KIND] [--status STATUS] [--summary SUMMARY]
+      orbit evidence submit --file PATH --report PATH [--task PATH] --json
+      orbit evidence waive --file PATH --waiver PATH --json
+      orbit evidence attach-rule --file PATH --rule-resolution PATH
+      orbit evidence show --file PATH --json
+
+    Initializes, appends to, and reads an evidence manifest.
+
+    Subcommands:
+      init          Initialize a new evidence manifest file.
+      add           Append a free-form evidence record.
+      from-report   Append an evidence record from a structured report.
+      submit        Validate and append a structured gate record from a report.
+      waive         Append a waiver record to the evidence manifest.
+      attach-rule   Attach a rule resolution artifact to the manifest.
+      show          Print the evidence manifest as JSON.
+
+    Key options for submit:
+      --file PATH    Evidence manifest file to append to.
+      --report PATH  Structured review or test report (YAML).
+      --task PATH    Task contract for role_execution_context hashing
+                     (task_sha256 + role_config_sha256).
+      --json         Emit machine-readable submit result.
+
+    Notes:
+      --task PATH is required for strict write_policy_enforcement.
+      Without --task, role_execution_context.task_sha256 will be absent and
+      strict gates will remain blocked.
+      Legacy evidence may still expose task_sha256 under identity for
+      read-only compatibility.
   HELP
   "wait-gate" => <<~HELP
     Usage:
@@ -356,6 +404,14 @@ def usage_error(message)
   warn message
   warn "Run `orbit --help` for usage."
   exit 64
+end
+
+def sha256_file(path)
+  return nil unless path && File.file?(path)
+
+  Digest::SHA256.file(path).hexdigest
+rescue StandardError
+  nil
 end
 
 def option_value(args, option)

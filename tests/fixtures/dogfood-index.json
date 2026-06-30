@@ -1,0 +1,115 @@
+{
+  "schema_version": "orbit-dogfood-index-v1",
+  "governance": {
+    "owner": "orbit-team",
+    "slo": "All dogfood cases pass before protocol-changing release",
+    "roadmap_item": "orbit-governance-v1",
+    "failure_review_required": true,
+    "exit_criteria": [
+      "All P0/P1 adjustments have at least one passing dogfood case",
+      "Failed dogfood case maps to source_adjustment and expected behavior",
+      "Protocol-changing release cannot skip dogfood suite without waiver"
+    ]
+  },
+  "dogfood_cases": [
+    {
+      "id": "stale-gate-detection",
+      "source_adjustment": "P1.3",
+      "scenario": "Evidence record with old task_sha256 should not close current gate",
+      "expected_outcome": "wait-gate reports stale_verdict and does not pass gate",
+      "fixture": "tests/fixtures/stale-gate-fixture.json",
+      "owner": "tester",
+      "cadence": "every-release"
+    },
+    {
+      "id": "transport-done-only",
+      "source_adjustment": "P0.3",
+      "scenario": "Evidence with only a transport notification cannot satisfy review/test gate",
+      "expected_outcome": "wait-gate blocks; transport DONE does not equal gate pass",
+      "fixture": "tests/fixtures/transport-done-fixture.json",
+      "owner": "reviewer",
+      "cadence": "every-release"
+    },
+    {
+      "id": "destructive-dry-run-blocks",
+      "source_adjustment": "P0.5",
+      "scenario": "Destructive action without dry_run or recoverability blocks validation",
+      "expected_outcome": "validate rejects unsafe deletion plan",
+      "fixture": "tests/fixtures/destructive-unsafe-fixture.json",
+      "owner": "lead",
+      "cadence": "every-release"
+    },
+    {
+      "id": "evidence-level-enforcement",
+      "source_adjustment": "P0.3",
+      "scenario": "Review pass without evidence_level cannot satisfy outcome_quality gate",
+      "expected_outcome": "wait-gate blocks on missing evidence_level",
+      "fixture": "tests/fixtures/evidence-level-fixture.json",
+      "owner": "reviewer",
+      "cadence": "every-release"
+    },
+    {
+      "id": "quality-outcome-guard-check",
+      "source_adjustment": "P0.2",
+      "scenario": "Improvement task without quality_outcome fails validation",
+      "expected_outcome": "validate rejects empty quality_outcome",
+      "fixture": "tests/fixtures/quality-outcome-fixture.json",
+      "owner": "reviewer",
+      "cadence": "every-release"
+    },
+    {
+      "id": "parent-goal-tracking",
+      "source_adjustment": "P0.1",
+      "scenario": "Child slice pass but parent done criteria unmet blocks parent_done",
+      "expected_outcome": "audit blocks parent_done without evidenced criteria",
+      "fixture": "tests/fixtures/parent-goal-fixture.json",
+      "owner": "lead",
+      "cadence": "every-release"
+    },
+    {
+      "id": "identity-write-policy",
+      "source_adjustment": "P0.4",
+      "scenario": "Gate role identity mismatch and write policy violations are detected",
+      "expected_outcome": "validate and audit block on identity mismatch and write violations",
+      "fixture": "tests/fixtures/identity-write-policy-fixture.json",
+      "owner": "reviewer",
+      "cadence": "every-release"
+    },
+    {
+      "id": "evidence-retention-compact",
+      "source_adjustment": "P1.1",
+      "scenario": "Compact evidence summary preserves durable refs without raw content",
+      "expected_outcome": "compact-evidence output has sha256 refs and no raw secrets",
+      "fixture": "tests/fixtures/compact-retention-fixture.json",
+      "owner": "lead",
+      "cadence": "every-release"
+    },
+    {
+      "id": "runtime-reconcile-fingerprint",
+      "source_adjustment": "P1.2",
+      "scenario": "Runtime binding and reconcile summary detect model/build drift",
+      "expected_outcome": "audit reports model_drift and build_drift warnings",
+      "fixture": "tests/fixtures/runtime-reconcile-fixture.json",
+      "owner": "tester",
+      "cadence": "every-release"
+    },
+    {
+      "id": "doc-lifecycle-decision-record",
+      "source_adjustment": "P1.4",
+      "scenario": "Decision records persist in evidence and handoff reports active decisions",
+      "expected_outcome": "handoff includes decision_record_summary with active decisions",
+      "fixture": "tests/fixtures/doc-lifecycle-fixture.json",
+      "owner": "reviewer",
+      "cadence": "every-release"
+    },
+    {
+      "id": "user-next-action-visibility",
+      "source_adjustment": "P1.5",
+      "scenario": "Parent goal user_next_action visible in handoff",
+      "expected_outcome": "handoff includes parent_goal_status.user_next_action",
+      "fixture": "tests/fixtures/user-next-action-fixture.json",
+      "owner": "lead",
+      "cadence": "every-release"
+    }
+  ]
+}

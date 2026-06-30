@@ -3,12 +3,18 @@
 require_relative "core"
 require_relative "identity_rules"
 require_relative "schema_version"
+require_relative "project_profile_risk"
 require_relative "task_launch_dispatch"
 require_relative "evidence"
 require_relative "state_validate_gate"
 require_relative "audit_tools"
+require_relative "gate_lease"
 require_relative "handoff"
 require_relative "docs_lifecycle"
+require_relative "data_classification"
+require_relative "release_readiness"
+require_relative "dogfood_governance"
+require_relative "landing_governance"
 
 def run_orbit_cli(argv)
   command = argv.shift
@@ -49,6 +55,10 @@ def run_orbit_cli(argv)
     end
     docs(argv)
   when "evidence"
+    if help_requested?(argv) || (argv.first == "submit" && help_requested?(argv[1..] || []))
+      print_command_help("evidence")
+      exit 0
+    end
     evidence(argv)
   when "handoff"
     if help_requested?(argv)

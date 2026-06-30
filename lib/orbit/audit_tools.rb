@@ -21,6 +21,14 @@ def parse_audit_args(args)
       options["evidence"] = option_value(args, "--evidence")
     when /\A--evidence=(.+)\z/
       options["evidence"] = Regexp.last_match(1)
+    when "--handoff"
+      options["handoff"] = option_value(args, "--handoff")
+    when /\A--handoff=(.+)\z/
+      options["handoff"] = Regexp.last_match(1)
+    when "--compact-summary"
+      options["compact_summary"] = option_value(args, "--compact-summary")
+    when /\A--compact-summary=(.+)\z/
+      options["compact_summary"] = Regexp.last_match(1)
     when "--json"
       options["json"] = true
     else
@@ -34,6 +42,194 @@ def parse_audit_args(args)
   usage_error("audit currently requires --json") unless options["json"]
 
   options
+end
+
+def orbit_dir_size_kb
+  orbit_dir = File.join(Dir.pwd, ".orbit")
+  return nil unless File.directory?(orbit_dir)
+
+  total = 0
+  Dir.glob(File.join(orbit_dir, "**", "*")).each do |f|
+    total += File.size(f) if File.file?(f)
+  end
+  (total / 1024.0).ceil
+rescue
+  nil
+end
+
+def add_compact_summary_hash_error(result, source, message)
+  result["errors"] << { "source" => "compact_summary.compact_summary.#{source}", "message" => message }
+end
+
+def validate_compact_summary_hash(result, cs, key, expected_path)
+  actual = sha256_file(expected_path)
+  return unless actual.is_a?(String)
+  return if cs[key] == actual
+
+  add_compact_summary_hash_error(
+    result,
+    key,
+    "compact_summary.#{key} must match the current #{key.sub("_sha256", "")} file SHA256."
+  )
+end
+
+def validate_compact_summary_schema(path, task_path: nil, evidence_path: nil, handoff_path: nil)
+  result = { "errors" => [], "warnings" => [] }
+  return result unless path
+
+  unless File.file?(path)
+    result["errors"] << { "source" => "compact_summary", "message" => "compact summary file not found: #{path}" }
+    return result
+  end
+
+  begin
+    summary = load_yaml(path)
+  rescue RuntimeError => e
+    result["errors"] << { "source" => "compact_summary", "message" => "compact summary could not be parsed: #{e.message}" }
+    return result
+  end
+
+  unless summary.is_a?(Hash)
+    result["errors"] << { "source" => "compact_summary", "message" => "compact summary must be a mapping." }
+    return result
+  end
+
+  unless summary["schema_version"].to_s.start_with?("orbit-durable-evidence-summary")
+    result["errors"] << { "source" => "compact_summary.schema_version", "message" => "compact summary schema_version must start with 'orbit-durable-evidence-summary'." }
+  end
+
+  cs = summary["compact_summary"]
+  unless cs.is_a?(Hash)
+    result["errors"] << { "source" => "compact_summary.compact_summary", "message" => "compact summary must contain a compact_summary block." }
+    return result
+  end
+
+  hex64 = /\A[0-9a-f]{64}\z/
+
+  unless cs["task_sha256"].is_a?(String) && cs["task_sha256"].match?(hex64)
+    result["errors"] << { "source" => "compact_summary.compact_summary.task_sha256", "message" => "compact_summary.task_sha256 must be a 64-char lowercase hex string." }
+  end
+
+  unless cs["evidence_sha256"].is_a?(String) && cs["evidence_sha256"].match?(hex64)
+    result["errors"] << { "source" => "compact_summary.compact_summary.evidence_sha256", "message" => "compact_summary.evidence_sha256 must be a 64-char lowercase hex string." }
+  end
+
+  require_handoff_sha256 = !handoff_path.nil? || cs.key?("handoff_sha256")
+  if require_handoff_sha256 && !(cs["handoff_sha256"].is_a?(String) && cs["handoff_sha256"].match?(hex64))
+    add_compact_summary_hash_error(result, "handoff_sha256", "compact_summary.handoff_sha256 must be a 64-char lowercase hex string.")
+  end
+
+  validate_compact_summary_hash(result, cs, "task_sha256", task_path) if cs["task_sha256"].is_a?(String) && cs["task_sha256"].match?(hex64)
+  validate_compact_summary_hash(result, cs, "evidence_sha256", evidence_path) if cs["evidence_sha256"].is_a?(String) && cs["evidence_sha256"].match?(hex64)
+  validate_compact_summary_hash(result, cs, "handoff_sha256", handoff_path) if cs["handoff_sha256"].is_a?(String) && cs["handoff_sha256"].match?(hex64)
+
+  result
+end
+
+def retention_drift_summary(evidence, handoff_path)
+  return nil unless handoff_path && File.file?(handoff_path)
+
+  handoff = load_yaml(handoff_path)
+  return nil unless handoff.is_a?(Hash)
+
+  records = evidence.is_a?(Hash) && evidence["records"].is_a?(Array) ? evidence["records"] : []
+  latest_by_kind = latest_records_by_kind(records)
+  evidence_verdicts = %w[review test].each_with_object({}) do |kind, memo|
+    latest = latest_by_kind[kind]
+    memo[kind] = latest ? latest["status"] : "missing"
+  end
+
+  handoff_verdicts = handoff["latest_gate_verdicts"].is_a?(Hash) ? handoff["latest_gate_verdicts"] : {}
+  drift = %w[review test].each_with_object({}) do |kind, memo|
+    ev_status = evidence_verdicts[kind]
+    ho_status = handoff_verdicts.dig(kind, "status") || "missing"
+    memo[kind] = { "evidence" => ev_status, "handoff" => ho_status, "match" => ev_status == ho_status }
+  end
+
+  {
+    "handoff_path" => handoff_path,
+    "has_drift" => drift.values.any? { |d| !d["match"] },
+    "gate_verdict_drift" => drift
+  }
+end
+
+def runtime_reconcile_summary(evidence)
+  records = evidence.is_a?(Hash) && evidence["records"].is_a?(Array) ? evidence["records"] : []
+
+  bindings_list = records.select { |r| r.is_a?(Hash) && r["runtime_binding"].is_a?(Hash) }
+                         .map { |r| r["runtime_binding"] }
+
+  # Stale artifact paths (from runtime_binding.build.artifact_paths)
+  all_paths = bindings_list.flat_map { |b|
+    b["build"].is_a?(Hash) && b["build"]["artifact_paths"].is_a?(Array) ? b["build"]["artifact_paths"] : []
+  }.uniq
+  stale = all_paths.select { |p| !File.exist?(p) }
+
+  # Model drift
+  model_identities = bindings_list.map { |b| b["model_service"] }.compact.uniq
+  model_drift = model_identities.size > 1
+
+  # Build drift (git_head + artifact_hash together as identity)
+  build_identities = bindings_list.map { |b| b["build"] }.compact.uniq
+  build_drift = build_identities.size > 1
+
+  # Blocker classification: top-level field + findings.failure_class
+  blocker_classes = {}
+  records.each do |r|
+    next unless r.is_a?(Hash)
+    bc = r["blocker_classification"]
+    if bc.is_a?(Hash) && bc["kind"].is_a?(String)
+      fc = bc["kind"]
+      blocker_classes[fc] = (blocker_classes[fc] || 0) + 1
+    end
+    if r["findings"].is_a?(Array)
+      r["findings"].each do |f|
+        next unless f.is_a?(Hash) && f["failure_class"].is_a?(String)
+        fc = f["failure_class"]
+        blocker_classes[fc] = (blocker_classes[fc] || 0) + 1
+      end
+    end
+  end
+
+  {
+    "stale_artifact_paths" => stale,
+    "model_identities" => model_identities,
+    "model_drift_detected" => model_drift,
+    "build_identities" => build_identities,
+    "build_drift_detected" => build_drift,
+    "blocker_classes" => blocker_classes,
+    "has_issues" => !stale.empty? || model_drift || build_drift
+  }
+end
+
+def orbit_retention_summary(evidence, compact_summary_path)
+  size_kb = orbit_dir_size_kb
+  records_count = evidence.is_a?(Hash) && evidence["records"].is_a?(Array) ? evidence["records"].length : 0
+  compact_present = !!(compact_summary_path && File.file?(compact_summary_path))
+
+  recommendations = []
+  if size_kb && size_kb > 1024
+    recommendations << {
+      "code" => "orbit_dir_large",
+      "message" => ".orbit is #{size_kb}KB; run compact-evidence to preserve a durable summary before archiving transient artifacts."
+    }
+  end
+  unless compact_present
+    if records_count > 20
+      recommendations << {
+        "code" => "compact_summary_missing",
+        "message" => "#{records_count} evidence records without a compact summary; run compact-evidence to create one."
+      }
+    end
+  end
+
+  {
+    "orbit_dir_size_kb" => size_kb,
+    "evidence_records_count" => records_count,
+    "compact_summary_present" => compact_present,
+    "recommendations" => recommendations,
+    "recommendations_count" => recommendations.length
+  }.compact
 end
 
 def audit_validation_result(task_path, evidence_path, state_path)
@@ -50,7 +246,7 @@ def audit_validation_result(task_path, evidence_path, state_path)
   result["checked"] << "project_config"
   task = validate_task(result, task_path)
   result["checked"] << "task"
-  evidence = validate_evidence(result, evidence_path, task)
+  evidence = validate_evidence(result, evidence_path, task, task_sha256: sha256_file(task_path))
   result["checked"] << "evidence"
   state = validate_state_file(result, state_path)
   result["checked"] << "state"
@@ -172,6 +368,73 @@ def audit_trust_level
   }
 end
 
+def write_policy_audit(evidence, task)
+  return nil unless evidence.is_a?(Hash)
+
+  records = evidence["records"].is_a?(Array) ? evidence["records"] : []
+  enforcement = task.is_a?(Hash) ? (task["write_policy_enforcement"] || "standard").to_s : "standard"
+  gate_role_writes = {}
+  legacy_count = 0
+
+  records.each do |record|
+    next unless record.is_a?(Hash)
+
+    kind = record["kind"]
+    next unless EVIDENCE_EXPECTED_GATE_ROLES.key?(kind)
+
+    if record["structured_submit"] == true && record_task_sha256_from(record).nil?
+      legacy_count += 1
+    end
+
+    wp = record["write_policy"]
+    next unless wp.is_a?(Hash)
+
+    role = record_resolved_role(record) || kind
+    gate_role_writes[role] ||= { "changed_files" => [], "violations" => [] }
+    if wp["changed_files"].is_a?(Array)
+      gate_role_writes[role]["changed_files"].concat(wp["changed_files"].select { |f| f.is_a?(String) })
+    end
+    if wp["violations"].is_a?(Array)
+      gate_role_writes[role]["violations"].concat(wp["violations"].select { |v| v.is_a?(String) })
+    end
+  end
+
+  total_violations = gate_role_writes.values.sum { |v| v["violations"].length }
+
+  {
+    "enforcement" => enforcement,
+    "gate_role_writes" => gate_role_writes,
+    "legacy_records_without_hash" => legacy_count,
+    "has_violations" => total_violations > 0,
+    "total_violations" => total_violations
+  }
+end
+
+def stale_records_audit(evidence, task_sha256)
+  return nil unless evidence.is_a?(Hash) && task_sha256
+
+  records = evidence["records"].is_a?(Array) ? evidence["records"] : []
+  stale = []
+  records.each_with_index do |record, idx|
+    next unless record.is_a?(Hash) && record["structured_submit"] == true
+
+    stored = record_task_sha256_from(record)
+    next unless stored && stored != task_sha256
+
+    stale << {
+      "index" => idx,
+      "kind" => record["kind"],
+      "created_at" => record["created_at"],
+      "stored_task_sha256" => stored
+    }.compact
+  end
+  {
+    "task_sha256" => task_sha256,
+    "stale_count" => stale.length,
+    "stale_records" => stale
+  }
+end
+
 def parent_goal_audit(task, evidence)
   return nil unless task.is_a?(Hash)
 
@@ -209,7 +472,7 @@ def parent_goal_audit(task, evidence)
   }.compact
 end
 
-def audit_state_consistency(task_path, evidence_path, state, evidence, task = nil)
+def audit_state_consistency(task_path, evidence_path, state, evidence, task = nil, task_sha256: nil)
   blocking_findings = []
   warnings = []
   phase = state.is_a?(Hash) ? state["phase"] : nil
@@ -256,7 +519,7 @@ def audit_state_consistency(task_path, evidence_path, state, evidence, task = ni
   if phase == "done" && task.is_a?(Hash)
     records = evidence.is_a?(Hash) ? evidence["records"] : []
     required_evidence_kinds(task).each do |kind|
-      next if gate_passed?(records, kind)
+      next if gate_passed?(records, kind, task_sha256: task_sha256)
 
       blocking_findings << audit_finding(
         "evidence_file.records.#{kind}",
@@ -286,10 +549,11 @@ def audit(args)
   task_path = File.expand_path(options["task"])
   evidence_path = File.expand_path(options["evidence"])
   state_path = File.expand_path(options["state"])
+  current_task_sha256 = sha256_file(task_path)
   validation, task, evidence, state = audit_validation_result(task_path, evidence_path, state_path)
   blocking_findings = validation["errors"].map { |error| audit_finding(error["source"], error["message"], "high") }
   warnings = validation["warnings"].map { |warning| audit_finding(warning["source"], warning["message"], "medium") }
-  state_blocking, state_warnings = audit_state_consistency(task_path, evidence_path, state, evidence, task)
+  state_blocking, state_warnings = audit_state_consistency(task_path, evidence_path, state, evidence, task, task_sha256: current_task_sha256)
   blocking_findings.concat(state_blocking)
   warnings.concat(state_warnings)
 
@@ -329,6 +593,79 @@ def audit(args)
   if pg_summary.is_a?(Hash) && pg_summary["blocking"].is_a?(Array)
     pg_summary["blocking"].each { |b| blocking_findings << b unless blocking_findings.include?(b) }
   end
+  # Compact summary schema validation (optional --compact-summary)
+  compact_summary_path = options["compact_summary"] ? File.expand_path(options["compact_summary"]) : nil
+  # Handoff drift detection (optional --handoff)
+  handoff_path = options["handoff"] ? File.expand_path(options["handoff"]) : nil
+  if compact_summary_path
+    cs_validation = validate_compact_summary_schema(
+      compact_summary_path,
+      task_path: task_path,
+      evidence_path: evidence_path,
+      handoff_path: handoff_path
+    )
+    cs_validation["errors"].each { |e| blocking_findings << audit_finding(e["source"], e["message"], "high") }
+    cs_validation["warnings"].each { |w| warnings << audit_finding(w["source"], w["message"], "medium") }
+  end
+
+  drift_summary = retention_drift_summary(evidence, handoff_path)
+  if drift_summary && drift_summary["has_drift"]
+    warnings << audit_finding(
+      "retention.handoff_drift",
+      "Handoff latest_gate_verdicts differs from current evidence manifest latest records; handoff may need to be regenerated.",
+      "medium"
+    )
+  end
+
+  reconcile = runtime_reconcile_summary(evidence)
+  unless reconcile["stale_artifact_paths"].empty?
+    warnings << audit_finding(
+      "runtime.stale_artifacts",
+      "Evidence records reference #{reconcile["stale_artifact_paths"].size} artifact path(s) that no longer exist on disk.",
+      "medium"
+    )
+  end
+  if reconcile["model_drift_detected"]
+    warnings << audit_finding(
+      "runtime.model_drift",
+      "Evidence records reference #{reconcile["model_identities"].size} distinct model identities; model may have changed during work.",
+      "medium"
+    )
+  end
+  if reconcile["build_drift_detected"]
+    warnings << audit_finding(
+      "runtime.build_drift",
+      "Evidence records reference #{reconcile["build_identities"].size} distinct build identities; build may have changed during work.",
+      "medium"
+    )
+  end
+
+  # Slice 12: data classification audit findings.
+  dc_findings = data_classification_audit(evidence)
+  dc_findings.each do |finding|
+    if finding["severity"] == "high"
+      blocking_findings << audit_finding(finding["source"], finding["message"], "high")
+    else
+      warnings << audit_finding(finding["source"], finding["message"], finding["severity"] || "medium")
+    end
+  end
+
+  # Slice 13: release readiness blockers are blocking findings (separate from implementation blockers).
+  if release_risk?(task)
+    release_readiness_blockers(task["release_readiness"], task).each do |blocker|
+      blocking_findings << audit_finding(blocker["source"], blocker["message"], "high")
+    end
+  end
+
+  # Slice 16: landing governance audit findings.
+  governance_audit_findings(task).each do |finding|
+    if finding["severity"] == "high"
+      blocking_findings << audit_finding(finding["source"], finding["message"], "high")
+    else
+      warnings << audit_finding(finding["source"], finding["message"], finding["severity"] || "medium")
+    end
+  end
+
   issues = blocking_findings + warnings
   trust_flags = audit_trust_flags(phase, blocking_findings, warnings)
 
@@ -350,9 +687,30 @@ def audit(args)
     "evidence_summary" => evidence_summary(evidence),
     "quality_outcome_summary" => quality_outcome_summary(task, evidence),
     "parent_goal_summary" => pg_summary,
+    "write_policy_summary" => write_policy_audit(evidence, task),
+    "stale_records_summary" => stale_records_audit(evidence, current_task_sha256),
     "worktree_safety_summary" => worktree_safety_summary(evidence),
+    "destructive_action_summary" => destructive_action_audit(evidence),
     "rule_resolution_summary" => rule_resolution_summary(evidence, evidence_path),
     "schema_version_summary" => schema_summary,
+    "retention_summary" => orbit_retention_summary(evidence, compact_summary_path),
+    "retention_drift_summary" => drift_summary,
+    "runtime_reconcile_summary" => reconcile,
+    "verdict_arbitration_summary" => verdict_arbitration_summary(task, evidence, current_task_sha256),
+    "gate_lease_summary" => gate_lease_summary(evidence),
+    "decision_record_summary" => decision_record_summary(evidence),
+    "task_risk_summary" => task_risk_summary(task),
+    "data_classification_summary" => data_classification_summary(evidence),
+    "trust_repair_summary" => trust_repair_summary(evidence),
+    "negative_evidence_summary" => negative_evidence_summary(evidence),
+    "release_readiness_summary" => release_readiness_summary(task),
+    "release_blockers" => release_risk?(task) ? release_readiness_blockers(task["release_readiness"], task) : [],
+    "dogfood_governance_summary" => dogfood_governance_summary(task),
+    "compatibility_policy_summary" => compatibility_policy_summary(task),
+    "self_review_guard_summary" => self_review_guard_summary(task),
+    "multi_user_ownership_summary" => multi_user_ownership_summary(task),
+    "quality_calibration_summary" => quality_calibration_summary(task),
+    "risk_level_tradeoff_summary" => risk_level_tradeoff_summary(task),
     "issues" => issues,
     "blocking_findings" => blocking_findings,
     "warnings" => warnings
@@ -554,4 +912,3 @@ def tools(args)
     exit 1
   end
 end
-
