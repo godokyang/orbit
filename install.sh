@@ -89,6 +89,7 @@ target_cli="$runtime_dir/scripts/orbit"
 target_wrapper="$bin_dir/orbit"
 
 runtime_files="
+package.json
 SKILL.md
 scripts/orbit
 lib/orbit/cli.rb

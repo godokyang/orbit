@@ -4,6 +4,8 @@ pass 'script syntax'
 test -x "$CLI"
 pass 'script executable'
 
+EXPECTED_VERSION=$(ruby --disable-gems -rjson -e 'print JSON.parse(File.read(File.join(ARGV[0], "package.json"))).fetch("version")' "$SKILL_ROOT")
+
 "$SKILL_ROOT/install.sh" --help >"$TMPROOT/install-help.txt" 2>"$TMPROOT/install-help.err"
 test ! -s "$TMPROOT/install-help.err"
 ! grep -qiE -- 'token|github-token|private|Authorization|Bearer|--key' "$TMPROOT/install-help.txt"
@@ -15,6 +17,7 @@ sh "$SKILL_ROOT/install.sh" --bin-dir "$INSTALL_BIN" --runtime-dir "$INSTALL_RUN
 test ! -s "$TMPROOT/install.err"
 test -x "$INSTALL_BIN/orbit"
 test -x "$INSTALL_RUNTIME/scripts/orbit"
+test -f "$INSTALL_RUNTIME/package.json"
 test -f "$INSTALL_RUNTIME/SKILL.md"
 test -f "$INSTALL_RUNTIME/references/runtime/guide.md"
 test -f "$INSTALL_RUNTIME/references/runtime/core-operating-model.md"
@@ -25,7 +28,7 @@ test -f "$INSTALL_RUNTIME/assets/templates/review-report.yaml"
 test -f "$INSTALL_RUNTIME/assets/templates/design-review-report.yaml"
 test -f "$INSTALL_RUNTIME/assets/templates/test-report.yaml"
 "$INSTALL_BIN/orbit" version >"$TMPROOT/installed-version.txt"
-grep -qx '0.1.2' "$TMPROOT/installed-version.txt"
+grep -qx "$EXPECTED_VERSION" "$TMPROOT/installed-version.txt"
 pass 'installer creates runnable orbit command'
 
 INSTALLED_PROJECT="$TMPROOT/installed-project"
@@ -39,7 +42,7 @@ json_assert 'installed orbit can load packaged default runtime rules' "$TMPROOT/
 sh "$SKILL_ROOT/install.sh" --bin-dir "$INSTALL_BIN" --runtime-dir "$INSTALL_RUNTIME" >"$TMPROOT/update.out" 2>"$TMPROOT/update.err"
 test ! -s "$TMPROOT/update.err"
 "$INSTALL_BIN/orbit" version >"$TMPROOT/updated-version.txt"
-grep -qx '0.1.2' "$TMPROOT/updated-version.txt"
+grep -qx "$EXPECTED_VERSION" "$TMPROOT/updated-version.txt"
 pass 'installer can be rerun as update'
 
 sh "$SKILL_ROOT/uninstall.sh" --bin-dir "$INSTALL_BIN" --runtime-dir "$INSTALL_RUNTIME" >"$TMPROOT/uninstall.out" 2>"$TMPROOT/uninstall.err"
@@ -62,7 +65,7 @@ INSTALL_CWD_RUNTIME="$TMPROOT/install-cwd-runtime"
 (cd "$SKILL_ROOT" && sh install.sh --bin-dir "$INSTALL_CWD_BIN" --runtime-dir "$INSTALL_CWD_RUNTIME" >"$TMPROOT/install-cwd.out" 2>"$TMPROOT/install-cwd.err")
 test ! -s "$TMPROOT/install-cwd.err"
 "$INSTALL_CWD_BIN/orbit" version >"$TMPROOT/install-cwd-version.txt"
-grep -qx '0.1.2' "$TMPROOT/install-cwd-version.txt"
+grep -qx "$EXPECTED_VERSION" "$TMPROOT/install-cwd-version.txt"
 pass 'installer detects local skill when run as sh install.sh from skill directory'
 
 "$CLI" --help >"$TMPROOT/help.txt" 2>"$TMPROOT/help.err"
@@ -185,8 +188,8 @@ grep -Fq 'orbit evidence submit --file PATH --report PATH [--task PATH] --json' 
 pass 'evidence submit --help redirects to evidence subcommand help'
 
 "$CLI" version >"$TMPROOT/version.txt"
-grep -qx '0.1.2' "$TMPROOT/version.txt"
-pass 'version outputs 0.1.2'
+grep -qx "$EXPECTED_VERSION" "$TMPROOT/version.txt"
+pass 'version outputs package.json version'
 
 PROJECT="$TMPROOT/project"
 mkdir -p "$PROJECT"
@@ -572,4 +575,3 @@ json_assert 'whoami exposes configured review rule packs' "$TMPROOT/whoami-revie
 expect_failure 'whoami fails on env role conflict' env ORBIT_INSTANCE=reviewer ORBIT_ROLE=lead "$CLI" whoami --json
 expect_failure 'whoami fails on unknown instance' env ORBIT_INSTANCE=missing "$CLI" whoami --json
 expect_failure 'whoami fails without runtime identity' "$CLI" whoami --json
-

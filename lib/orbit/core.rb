@@ -9,10 +9,21 @@ require "shellwords"
 require "time"
 require "yaml"
 
-VERSION = "0.1.2"
 SCRIPT_PATH = defined?(ORBIT_SCRIPT_PATH) ? ORBIT_SCRIPT_PATH : File.expand_path($PROGRAM_NAME)
 SKILL_ROOT = defined?(ORBIT_ROOT) ? ORBIT_ROOT : File.expand_path("..", File.dirname(SCRIPT_PATH))
 TEMPLATE_ROOT = File.join(SKILL_ROOT, "assets", "templates")
+
+def orbit_version_from_package
+  package_path = File.join(SKILL_ROOT, "package.json")
+  version = JSON.parse(File.read(package_path))["version"].to_s.strip
+  raise "package.json version is empty" if version.empty?
+
+  version
+rescue StandardError => e
+  abort "orbit: failed to load version from #{package_path}: #{e.message}"
+end
+
+VERSION = orbit_version_from_package.freeze
 
 DEFAULT_RULE_REFERENCES = {
   "common" => [
