@@ -38,7 +38,7 @@ pass 'warn_legacy policy reports warning not hard failure'
 
 S16_STRICT_PROTO_TASK="$TMPROOT/s16-strict-proto-task.yaml"
 "$CLI" new-task --target-role lead --task-type security_migration --output "$S16_STRICT_PROTO_TASK" >/dev/null
-ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["self_review_guard"]={"protocol_changed"=>true,"independent_check_required"=>true,"same_system_self_approval_allowed"=>false}; File.write(p, YAML.dump(y))' "$S16_STRICT_PROTO_TASK"
+ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["compatibility_policy"]={"mode"=>"warn_legacy","applies_to"=>["task","evidence"],"breaking_change"=>false,"migration_path"=>""}; y["self_review_guard"]={"protocol_changed"=>true,"independent_check_required"=>true,"same_system_self_approval_allowed"=>false}; File.write(p, YAML.dump(y))' "$S16_STRICT_PROTO_TASK"
 expect_failure 'validate blocks strict protocol change without independent check' "$CLI" validate --task "$S16_STRICT_PROTO_TASK" --json
 pass 'protocol change under strict risk with only self-review is blocked'
 
@@ -51,14 +51,40 @@ json_assert 'validate passes protocol change with explicit waiver' "$TMPROOT/s16
   'j["errors"].none? { |e| e["source"] == "task_file.self_review_guard" }'
 pass 'protocol change with explicit waiver is allowed'
 
-# Same with independent_check_required=false passes.
+# Disabling the requirement is not enough; explicit waiver or independent check is required.
 S16_STRICT_PROTO_INDEP_TASK="$TMPROOT/s16-strict-proto-indep-task.yaml"
 cp "$S16_STRICT_PROTO_TASK" "$S16_STRICT_PROTO_INDEP_TASK"
 ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["self_review_guard"]["independent_check_required"]=false; File.write(p, YAML.dump(y))' "$S16_STRICT_PROTO_INDEP_TASK"
-"$CLI" validate --task "$S16_STRICT_PROTO_INDEP_TASK" --json >"$TMPROOT/s16-indep-validate.json" 2>/dev/null || true
-json_assert 'validate passes protocol change with independent_check_required=false' "$TMPROOT/s16-indep-validate.json" \
+expect_failure 'validate blocks protocol change when independent_check_required is disabled without waiver' "$CLI" validate --task "$S16_STRICT_PROTO_INDEP_TASK" --json
+pass 'protocol change cannot bypass independent check by disabling requirement'
+
+S16_STRICT_PROTO_CHECK_TASK="$TMPROOT/s16-strict-proto-check-task.yaml"
+cp "$S16_STRICT_PROTO_TASK" "$S16_STRICT_PROTO_CHECK_TASK"
+ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["self_review_guard"]["independent_check"]="reviewer-report:s16-independent-protocol-check"; File.write(p, YAML.dump(y))' "$S16_STRICT_PROTO_CHECK_TASK"
+"$CLI" validate --task "$S16_STRICT_PROTO_CHECK_TASK" --json >"$TMPROOT/s16-indep-validate.json" 2>/dev/null || true
+json_assert 'validate passes protocol change with independent_check evidence' "$TMPROOT/s16-indep-validate.json" \
   'j["errors"].none? { |e| e["source"] == "task_file.self_review_guard" }'
-pass 'protocol change with independent_check_required=false is allowed'
+pass 'protocol change with independent_check evidence is allowed'
+
+S16_STRICT_PROTO_NO_COMPAT_TASK="$TMPROOT/s16-strict-proto-no-compat-task.yaml"
+cp "$S16_STRICT_PROTO_CHECK_TASK" "$S16_STRICT_PROTO_NO_COMPAT_TASK"
+ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y.delete("compatibility_policy"); File.write(p, YAML.dump(y))' "$S16_STRICT_PROTO_NO_COMPAT_TASK"
+expect_failure 'validate blocks protocol change without compatibility_policy' "$CLI" validate --task "$S16_STRICT_PROTO_NO_COMPAT_TASK" --json
+pass 'protocol change requires compatibility_policy'
+
+S16_TOP_LEVEL_PROTO_TASK="$TMPROOT/s16-top-level-proto-task.yaml"
+"$CLI" new-task --target-role lead --task-type release_implementation --output "$S16_TOP_LEVEL_PROTO_TASK" >/dev/null
+ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["protocol_changed"]=true; File.write(p, YAML.dump(y))' "$S16_TOP_LEVEL_PROTO_TASK"
+expect_failure 'validate blocks top-level protocol change without governance fields' "$CLI" validate --task "$S16_TOP_LEVEL_PROTO_TASK" --json
+pass 'top-level protocol_changed requires compatibility and self-review governance'
+
+S16_TOP_LEVEL_PROTO_OK_TASK="$TMPROOT/s16-top-level-proto-ok-task.yaml"
+cp "$S16_TOP_LEVEL_PROTO_TASK" "$S16_TOP_LEVEL_PROTO_OK_TASK"
+ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["compatibility_policy"]={"mode"=>"warn_legacy","applies_to"=>["task","evidence"],"breaking_change"=>false,"migration_path"=>""}; y["self_review_guard"]={"protocol_changed"=>true,"independent_check"=>"reviewer-report:s16-top-level-protocol","independent_check_required"=>true,"same_system_self_approval_allowed"=>false}; y["release_readiness"]["ci"]={"provider"=>"github","run_id"=>"3","status"=>"passed"}; y["release_readiness"]["package"]={"artifact_path"=>"pkg.tgz","artifact_sha256"=>"c"*64,"contents_checked"=>true}; y["release_readiness"]["remote_state"]={"branch"=>"main","ahead_behind"=>"up_to_date"}; y["release_readiness"]["generated_artifacts"]=[{"path"=>"dist/app.js","checked"=>true}]; y["release_readiness"]["dogfood_suite"]={"status"=>"passed","case_ids"=>["stale-gate-detection"]}; File.write(p, YAML.dump(y))' "$S16_TOP_LEVEL_PROTO_OK_TASK"
+"$CLI" validate --task "$S16_TOP_LEVEL_PROTO_OK_TASK" --json >"$TMPROOT/s16-top-level-ok-validate.json" 2>/dev/null || true
+json_assert 'validate accepts top-level protocol change with governance fields' "$TMPROOT/s16-top-level-ok-validate.json" \
+  'j["errors"].none? { |e| e["source"].include?("compatibility_policy") || e["source"].include?("self_review_guard") }'
+pass 'top-level protocol_changed uses the same governance guard as self_review_guard protocol_changed'
 
 # ---- Group 4: backup export without restore_check fails validate ----
 

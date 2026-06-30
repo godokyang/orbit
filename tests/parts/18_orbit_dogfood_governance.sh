@@ -85,6 +85,8 @@ S15_RELEASE_TASK="$TMPROOT/s15-release-task.yaml"
 ruby --disable-gems -ryaml -e '
   p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true)
   y["protocol_changed"]=true
+  y["compatibility_policy"]={"mode"=>"warn_legacy","applies_to"=>["task","evidence"],"breaking_change"=>false,"migration_path"=>""}
+  y["self_review_guard"]={"protocol_changed"=>true,"independent_check"=>"reviewer-report:s15-protocol-release","independent_check_required"=>true,"same_system_self_approval_allowed"=>false}
   y["release_readiness"]["ci"]={"provider"=>"github","run_id"=>"1","status"=>"passed"}
   y["release_readiness"]["package"]={"artifact_path"=>"pkg.tgz","artifact_sha256"=>"a"*64,"contents_checked"=>true}
   y["release_readiness"]["remote_state"]={"branch"=>"main","ahead_behind"=>"up_to_date"}
@@ -94,6 +96,19 @@ ruby --disable-gems -ryaml -e '
 json_assert 'validate blocks protocol-changing release without dogfood' "$TMPROOT/s15-no-dogfood-validate.json" \
   'j["errors"].any? { |e| e["source"].include?("dogfood_suite") }'
 pass 'protocol-changing release without dogfood status is blocked'
+
+S15_GUARD_PROTOCOL_TASK="$TMPROOT/s15-guard-protocol-task.yaml"
+cp "$S15_RELEASE_TASK" "$S15_GUARD_PROTOCOL_TASK"
+ruby --disable-gems -ryaml -e '
+  p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true)
+  y.delete("protocol_changed")
+  y["compatibility_policy"]={"mode"=>"warn_legacy","applies_to"=>["task","evidence"],"breaking_change"=>false,"migration_path"=>""}
+  y["self_review_guard"]={"protocol_changed"=>true,"independent_check"=>"reviewer-report:s15-protocol-release","independent_check_required"=>true,"same_system_self_approval_allowed"=>false}
+  File.write(p, YAML.dump(y))' "$S15_GUARD_PROTOCOL_TASK"
+"$CLI" validate --task "$S15_GUARD_PROTOCOL_TASK" --json >"$TMPROOT/s15-guard-protocol-validate.json" 2>/dev/null || true
+json_assert 'validate blocks self_review_guard protocol change without dogfood' "$TMPROOT/s15-guard-protocol-validate.json" \
+  'j["errors"].any? { |e| e["source"].include?("dogfood_suite") }'
+pass 'self_review_guard protocol-changing release without dogfood status is blocked'
 
 # ---- Group 7: protocol-changing release with dogfood waiver is allowed ----
 

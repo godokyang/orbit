@@ -894,6 +894,7 @@ quality_calibration:
 
 self_review_guard:
   protocol_changed: true
+  independent_check: ""
   independent_check_required: true
   same_system_self_approval_allowed: false
 

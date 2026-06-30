@@ -31,6 +31,7 @@ end
 def default_self_review_guard
   {
     "protocol_changed" => false,
+    "independent_check" => "",
     "independent_check_required" => true,
     "same_system_self_approval_allowed" => false
   }
@@ -58,9 +59,20 @@ def default_backup_migration
   }
 end
 
+def landing_governance_protocol_changed?(task)
+  task.is_a?(Hash) && (task["protocol_changed"] == true || task.dig("self_review_guard", "protocol_changed") == true)
+end
+
 # Validate compatibility_policy structure when present on a task.
 def validate_compatibility_policy(result, task)
-  return unless task.key?("compatibility_policy")
+  protocol_changed = landing_governance_protocol_changed?(task)
+  unless task.key?("compatibility_policy")
+    if protocol_changed
+      validation_error(result, "task_file.compatibility_policy",
+        "Protocol-changing task must define compatibility_policy so schema/gate compatibility is explicit.")
+    end
+    return
+  end
   cp = task["compatibility_policy"]
   unless cp.is_a?(Hash)
     validation_error(result, "task_file.compatibility_policy", "compatibility_policy must be a mapping.")
@@ -104,29 +116,27 @@ def validate_multi_user_ownership(result, task)
   end
 end
 
-# Validate self_review_guard: protocol change under strict/release requires independent check or waiver.
+# Validate self_review_guard: protocol change under strict/release requires independent check evidence or waiver.
 def validate_self_review_guard(result, task)
-  return unless task.key?("self_review_guard")
+  protocol_changed = landing_governance_protocol_changed?(task)
+  return unless protocol_changed || task.key?("self_review_guard")
   guard = task["self_review_guard"]
   unless guard.is_a?(Hash)
     validation_error(result, "task_file.self_review_guard", "self_review_guard must be a mapping.")
     return
   end
 
-  protocol_changed = guard["protocol_changed"] == true
-  independent_required = guard["independent_check_required"] != false
-  self_approval = guard["same_system_self_approval_allowed"] == true
+  independent_check = guard["independent_check"]
+  independent_check = guard["independent_check_ref"] if independent_check.to_s.strip.empty?
   waiver = guard["waiver"]
-
-  return unless protocol_changed
 
   risk_level = task.is_a?(Hash) ? task.dig("task_risk", "level") : nil
   is_strict = %w[strict release].include?(risk_level)
 
-  if is_strict && independent_required && !self_approval
-    unless waiver.is_a?(String) && !waiver.strip.empty?
+  if is_strict
+    unless (independent_check.is_a?(String) && !independent_check.strip.empty?) || (waiver.is_a?(String) && !waiver.strip.empty?)
       validation_error(result, "task_file.self_review_guard",
-        "Protocol change under #{risk_level} risk requires independent_check or explicit waiver; self-review alone is blocked.")
+        "Protocol change under #{risk_level} risk requires independent_check evidence or explicit waiver; self-review alone is blocked.")
     end
   end
 end
@@ -219,6 +229,7 @@ def self_review_guard_summary(task)
   return nil unless guard
   {
     "protocol_changed" => guard["protocol_changed"],
+    "independent_check" => guard["independent_check"] || guard["independent_check_ref"],
     "independent_check_required" => guard["independent_check_required"],
     "same_system_self_approval_allowed" => guard["same_system_self_approval_allowed"],
     "waiver" => guard["waiver"]
@@ -282,18 +293,26 @@ def governance_audit_findings(task)
     }
   end
 
-  guard = task["self_review_guard"]
-  if guard.is_a?(Hash) && guard["protocol_changed"] == true
+  if landing_governance_protocol_changed?(task)
+    guard = task["self_review_guard"]
     risk_level = task.dig("task_risk", "level")
-    if %w[strict release].include?(risk_level) && guard["independent_check_required"] != false && guard["same_system_self_approval_allowed"] != true
+    if %w[strict release].include?(risk_level) && guard.is_a?(Hash)
       waiver = guard["waiver"]
-      unless waiver.is_a?(String) && !waiver.strip.empty?
+      independent_check = guard["independent_check"]
+      independent_check = guard["independent_check_ref"] if independent_check.to_s.strip.empty?
+      unless (independent_check.is_a?(String) && !independent_check.strip.empty?) || (waiver.is_a?(String) && !waiver.strip.empty?)
         findings << {
           "source" => "task_file.self_review_guard",
           "severity" => "high",
-          "message" => "Protocol change under #{risk_level} risk lacks independent check or waiver; self-review is blocked."
+          "message" => "Protocol change under #{risk_level} risk lacks independent_check evidence or waiver; self-review is blocked."
         }
       end
+    elsif %w[strict release].include?(risk_level)
+      findings << {
+        "source" => "task_file.self_review_guard",
+        "severity" => "high",
+        "message" => "Protocol change under #{risk_level} risk lacks self_review_guard; independent_check evidence or waiver is required."
+      }
     end
   end
 

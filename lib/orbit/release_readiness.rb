@@ -63,6 +63,10 @@ def release_readiness_has_structure?(rr)
   true
 end
 
+def protocol_changed_task?(task)
+  task.is_a?(Hash) && (task["protocol_changed"] == true || task.dig("self_review_guard", "protocol_changed") == true)
+end
+
 # Compute release readiness blockers from a release_readiness block.
 # Returns array of {source, message} hashes.
 def release_readiness_blockers(rr, task = nil)
@@ -141,7 +145,7 @@ def release_readiness_blockers(rr, task = nil)
   end
 
   # Slice 15: dogfood suite check only for protocol-changing releases.
-  if task.is_a?(Hash) && task["protocol_changed"] == true
+  if protocol_changed_task?(task)
     blockers.concat(dogfood_suite_blockers(rr))
   end
 
