@@ -139,6 +139,21 @@ review 要优先看失败路径，而不只看 happy path：
 - 计划里的 measurable threshold 没达成却没有更新 scope。
 - review 结论只说测试通过，没有评价 maintainability outcome。
 
+### LLM Coding Failure 审查
+
+reviewer 应显式检查实现是否落入常见 LLM coding 失败模式。以下问题不一定都构成 High / Medium，但如果它们影响 behavior、quality outcome、evidence 或长期维护，应进入 finding：
+
+- 作者是否先读了项目现有模式，还是引入了和代码库风格、imports、helper、test pattern 不一致的外来方案。
+- 是否存在隐形架构决策，例如 API 形状、schema、auth、缓存、依赖或错误处理策略，没有进入 task/evidence/handoff。
+- 实现是否为单一当前需求提前添加 service、strategy、provider、base class、interface、配置层或扩展点。
+- diff 是否修改了和 task 无直接关系的文件、格式、命名、import 顺序、注释或重构。
+- bug fix 是否有复现、root cause、regression guard 或可接受的替代 evidence；如果没有，是否明确说明为什么无法验证。
+- 调试是否只是叠 workaround，例如 catch-all、null check、sleep、retry、fallback，而没有解释为什么 root cause 已被理解。
+- 是否新增依赖；如果新增，作者是否证明现有依赖、标准库或项目 helper 不能满足，并检查 package/release 影响。
+- implementation evidence 是否具体说明做了什么、为什么、验证了什么、哪些未覆盖，而不是用“应该可以”“已优化”这类自述。
+
+低置信的风格偏好不应升级为阻塞 finding；但 scope drift、过度抽象、未验证 bug fix、隐形决策或依赖滥用导致 reviewer 无法信任结果时，应要求修复或降级 verdict。
+
 以下通用工程风险也应进入 High 或 Medium 判断：
 
 - 用黑名单 / 白名单、自然语言词表或 free-text 命中作为 AI 输入/输出、状态推进、artifact mutation、gate/block 结论的主要边界。
