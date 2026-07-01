@@ -76,9 +76,11 @@ def run_herdr_start(plan, json:)
       actual_client: actual_client
     )
   end
+  replacement = write_start_replacement_diagnostic!(plan, status_after_start) if success && status_after_start
   result = attach_start_adapter_plan(plan).merge(
     "action" => "started",
     "instance_status_after_start" => status_after_start,
+    "replacement" => replacement,
     "adapter_result" => {
       "exit_status" => status.exitstatus,
       "success" => success,
@@ -88,7 +90,7 @@ def run_herdr_start(plan, json:)
       "retry" => retry_info,
       "ready_wait" => ready_wait
     }.compact
-  )
+  ).compact
 
   if json
     puts JSON.pretty_generate(result)
@@ -149,11 +151,13 @@ def run_herdr_wake(plan, probe, json:)
       actual_client: plan.dig("client", "expected_client")
     )
   end
+  replacement = write_start_replacement_diagnostic!(plan, status_after_start) if success && status_after_start
   result = plan.merge(
     "action" => success ? "woken" : "wake_failed",
     "reuse_probe" => probe,
     "wake_adapter" => herdr_wake_adapter(plan, probe),
     "instance_status_after_start" => status_after_start,
+    "replacement" => replacement,
     "adapter_result" => {
       "exit_status" => status.exitstatus,
       "success" => success,
@@ -161,7 +165,7 @@ def run_herdr_wake(plan, probe, json:)
       "stderr" => stderr,
       "ready_wait" => ready_wait
     }.compact
-  )
+  ).compact
 
   if json
     puts JSON.pretty_generate(result)
@@ -181,12 +185,14 @@ def run_herdr_self_wake(plan, probe, json:)
     space: binding["space"].to_s,
     actual_client: plan.dig("client", "expected_client")
   )
+  replacement = write_start_replacement_diagnostic!(plan, status_after_start)
   result = plan.merge(
     "action" => "self_wake_exec",
     "reuse_probe" => probe,
     "self_wake" => self_wake_plan(plan, probe),
-    "instance_status_after_start" => status_after_start
-  )
+    "instance_status_after_start" => status_after_start,
+    "replacement" => replacement
+  ).compact
 
   if json
     puts JSON.pretty_generate(result)
@@ -212,12 +218,32 @@ def start(args)
 
   if start_requires_reuse?(plan)
     probe = herdr_reuse_probe(plan)
+    if !options["force"] && probe && probe["decision"] == "reuse"
+      result = plan.merge("action" => "reuse", "reuse_probe" => probe)
+      if options["json"]
+        puts JSON.pretty_generate(result)
+      else
+        print_start_reuse(result)
+      end
+      return
+    end
+
+    if !options["force"]
+      result = start_needs_force_result(plan, probe)
+      if options["json"]
+        puts JSON.pretty_generate(result)
+      else
+        print_start_needs_force(result)
+      end
+      exit 1
+    end
+
     if probe && probe["decision"] == "self_wake"
       result = plan.merge(
         "action" => "self_wake_dry_run",
         "reuse_probe" => probe,
         "self_wake" => self_wake_plan(plan, probe)
-      )
+      ).merge(start_force_metadata(plan))
       if options["dry_run"]
         if options["json"]
           puts JSON.pretty_generate(result)
@@ -227,14 +253,25 @@ def start(args)
         return
       end
 
-      run_herdr_self_wake(plan, probe, json: options["json"])
+      locked = try_with_start_instance_lock(plan["instance"]) do
+        run_herdr_self_wake(plan, probe, json: options["json"])
+      end
+      unless locked
+        result = start_in_progress_result(plan)
+        if options["json"]
+          puts JSON.pretty_generate(result)
+        else
+          print_start_needs_attention(result)
+        end
+        exit 1
+      end
       return
     elsif probe && probe["decision"] == "wake"
       result = plan.merge(
         "action" => "wake_dry_run",
         "reuse_probe" => probe,
         "wake_adapter" => herdr_wake_adapter(plan, probe)
-      )
+      ).merge(start_force_metadata(plan))
       if options["dry_run"]
         if options["json"]
           puts JSON.pretty_generate(result)
@@ -244,25 +281,20 @@ def start(args)
         return
       end
 
-      run_herdr_wake(plan, probe, json: options["json"])
-      return
-    elsif probe && probe["decision"] == "needs_attention"
-      result = plan.merge("action" => "needs_attention", "reuse_probe" => probe)
-      if options["json"]
-        puts JSON.pretty_generate(result)
-      else
-        print_start_needs_attention(result)
+      locked = try_with_start_instance_lock(plan["instance"]) do
+        run_herdr_wake(plan, probe, json: options["json"])
       end
-      exit 1
+      unless locked
+        result = start_in_progress_result(plan)
+        if options["json"]
+          puts JSON.pretty_generate(result)
+        else
+          print_start_needs_attention(result)
+        end
+        exit 1
+      end
+      return
     end
-
-    result = plan.merge("action" => "reuse", "reuse_probe" => probe)
-    if options["json"]
-      puts JSON.pretty_generate(result)
-    else
-      print_start_reuse(result)
-    end
-    return
   end
 
   if start_create_blocked?(plan, options)
@@ -279,17 +311,61 @@ def start(args)
   end
 
   if options["dry_run"]
+    dry_run_result = plan.merge("action" => "dry_run")
+    dry_run_result = dry_run_result.merge(start_force_metadata(plan)) if options["force"]
     if options["json"]
-      puts JSON.pretty_generate(plan.merge("action" => "dry_run"))
+      puts JSON.pretty_generate(dry_run_result)
     else
-      print_start_human_plan(plan.merge("action" => "dry_run"))
+      print_start_human_plan(dry_run_result)
     end
     return
   end
 
   if plan["transport"] == "herdr"
-    run_herdr_start(plan, json: options["json"])
+    if options["force"]
+      locked = try_with_start_instance_lock(plan["instance"]) do
+        run_herdr_start(plan, json: options["json"])
+      end
+      unless locked
+        result = start_in_progress_result(plan)
+        if options["json"]
+          puts JSON.pretty_generate(result)
+        else
+          print_start_needs_attention(result)
+        end
+        exit 1
+      end
+    else
+      run_herdr_start(plan, json: options["json"])
+    end
     return
+  end
+
+  if options["force"]
+    locked = try_with_start_instance_lock(plan["instance"]) do
+      write_start_replacement_diagnostic!(
+        plan,
+        {
+          "transport" => {
+            "kind" => "local",
+            "binding" => {},
+            "health" => {
+              "cwd" => plan["cwd"],
+              "actual_client" => plan.dig("client", "expected_client")
+            }
+          }
+        }
+      )
+    end
+    unless locked
+      result = start_in_progress_result(plan)
+      if options["json"]
+        puts JSON.pretty_generate(result)
+      else
+        print_start_needs_attention(result)
+      end
+      exit 1
+    end
   end
 
   exec_env = ENV.to_hash.merge(plan["env"])

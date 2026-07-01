@@ -7,6 +7,7 @@ def parse_start_args(args)
     "transport" => "local",
     "cwd" => Dir.pwd,
     "allow_create" => false,
+    "force" => false,
     "dry_run" => false,
     "json" => false
   }
@@ -26,6 +27,8 @@ def parse_start_args(args)
       options["dry_run"] = true
     when "--allow-create"
       options["allow_create"] = true
+    when "--force"
+      options["force"] = true
     when "--json"
       options["json"] = true
     else
@@ -61,6 +64,7 @@ def start_plan(options)
     "context_preflight" => context_preflight_for(instance_key),
     "instance_status" => status,
     "creation_policy" => creation_policy,
+    "force" => options["force"],
     "dry_run" => options["dry_run"]
   }.compact
 end
@@ -202,6 +206,123 @@ def herdr_bound_pane(plan)
   return "" unless transport["kind"] == "herdr"
 
   transport.dig("binding", "pane").to_s
+end
+
+START_FORCE_RISKS = [
+  {
+    "code" => "old_external_process_may_still_exist",
+    "message" => "Force does not kill the old external process; stop it manually if it is still running."
+  },
+  {
+    "code" => "duplicate_instance_agents_may_run_concurrently",
+    "message" => "Old and new agents with the same instance and role may run concurrently."
+  },
+  {
+    "code" => "old_and_new_agents_may_compete_for_orbit_state",
+    "message" => "Old and new agents may compete for evidence, gate leases, and loop state writes."
+  },
+  {
+    "code" => "orbit_binding_will_be_replaced",
+    "message" => "The new start replaces Orbit's current binding for this instance."
+  }
+].freeze
+
+def start_force_command(plan)
+  command = ["orbit", "start", plan["requested_instance"] || plan["instance"], "--force"]
+  command += ["--transport", plan["transport"]] unless plan["transport"] == "local"
+  command
+end
+
+def start_force_metadata(plan)
+  {
+    "force_command" => start_force_command(plan),
+    "risk" => START_FORCE_RISKS
+  }
+end
+
+def start_liveness_reason(probe)
+  return "binding_cache_unverified" unless probe
+  return "live_agent_detected" if probe["decision"] == "reuse"
+
+  probe["reason"].to_s.empty? ? "binding_cache_unverified" : probe["reason"]
+end
+
+def start_needs_force_result(plan, probe)
+  plan.merge(
+    "action" => "needs_force",
+    "binding" => "bound",
+    "liveness" => "not_alive",
+    "liveness_source" => probe ? "herdr_probe" : "static_binding_cache",
+    "liveness_reason" => start_liveness_reason(probe),
+    "reuse_probe" => probe
+  ).compact.merge(start_force_metadata(plan))
+end
+
+def start_instance_runtime_path(instance)
+  safe = instance.to_s.gsub(/[^A-Za-z0-9_.-]+/, "_")
+  File.join(Dir.pwd, ".orbit", "runtime", "instances", "#{safe}.json")
+end
+
+def start_instance_lock_path(instance)
+  safe = instance.to_s.gsub(/[^A-Za-z0-9_.-]+/, "_")
+  File.join(Dir.pwd, ".orbit", "runtime", "locks", "start-#{safe}")
+end
+
+def try_with_start_instance_lock(instance)
+  expanded = File.expand_path(start_instance_lock_path(instance))
+  FileUtils.mkdir_p(File.dirname(expanded))
+  lock_path = "#{expanded}.lock"
+
+  File.open(lock_path, File::RDWR | File::CREAT, 0o600) do |lock|
+    return false unless lock.flock(File::LOCK_EX | File::LOCK_NB)
+
+    yield
+    true
+  ensure
+    lock.flock(File::LOCK_UN) if lock
+  end
+end
+
+def start_in_progress_result(plan)
+  plan.merge(
+    "action" => "needs_attention",
+    "reason" => "start_in_progress",
+    "liveness_reason" => "another forced start is already replacing this instance"
+  )
+end
+
+def compact_transport_binding(transport)
+  binding = transport["binding"] || {}
+  health = transport["health"] || {}
+  {
+    "kind" => transport["kind"],
+    "pane" => binding["pane"],
+    "tab" => binding["tab"],
+    "space" => binding["space"],
+    "last_heartbeat" => health["last_heartbeat"],
+    "cwd" => health["cwd"],
+    "actual_client" => health["actual_client"]
+  }.compact
+end
+
+def write_start_replacement_diagnostic!(plan, status_after_start)
+  return nil unless plan["force"]
+
+  previous_transport = plan.dig("instance_status", "transport") || {}
+  new_transport = status_after_start&.dig("transport") || {}
+  path = start_instance_runtime_path(plan["instance"])
+  payload = {
+    "schema_version" => "orbit-start-replacement-v1",
+    "instance" => plan["instance"],
+    "role" => plan["resolved_role"],
+    "replaced_at" => Time.now.utc.iso8601,
+    "reason" => "user_forced_start_replace",
+    "previous_binding" => compact_transport_binding(previous_transport),
+    "new_binding" => compact_transport_binding(new_transport),
+    "risk" => START_FORCE_RISKS
+  }
+  write_file_atomically(path, "#{JSON.pretty_generate(payload)}\n")
+  path.sub("#{Dir.pwd}/", "")
 end
 
 def herdr_agent_list_for_pane(herdr_path, pane)
@@ -394,6 +515,8 @@ def self_wake_plan(plan, probe)
 end
 
 def start_create_blocked?(plan, options)
+  return false if options["force"]
+
   status = plan["instance_status"] || {}
   status["management"] == "user_managed" &&
     status["recommended_action"] == "ask_user_or_bind" &&
@@ -427,6 +550,18 @@ def print_start_needs_attention(plan)
   warn "- action: needs_attention"
   warn "- pane: #{plan.dig("reuse_probe", "pane")}" if plan.dig("reuse_probe", "pane")
   warn "- reason: #{plan.dig("reuse_probe", "reason") || plan["reason"]}"
+end
+
+def print_start_needs_force(plan)
+  warn "Orbit start found an existing binding, but it cannot prove the agent is alive:"
+  warn "- instance: #{plan["instance"]}"
+  warn "- role: #{plan["resolved_role"]}"
+  warn "- action: needs_force"
+  warn "- liveness_source: #{plan["liveness_source"]}"
+  warn "- reason: #{plan["liveness_reason"]}"
+  warn "Force does not kill the old external process; stop it manually if it is still running."
+  warn "Old and new agents with the same instance and role may run concurrently and compete for evidence, gate leases, and loop state writes."
+  warn "- next: #{Shellwords.join(plan["force_command"])}"
 end
 
 def print_start_wake_dry_run(plan)

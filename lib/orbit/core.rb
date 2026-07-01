@@ -99,7 +99,7 @@ HELP = <<~HELP
     orbit dispatch --task PATH --to INSTANCE [--transport generic|herdr] [--pane PANE] [--reply-to PANE] [--dry-run] --json
     orbit rules resolve --json [--task PATH] [--role ROLE] [--instance NAME] [--output PATH]
     orbit rules print-context --json [--task PATH] [--role ROLE] [--instance NAME] [--output PATH]
-    orbit start INSTANCE [--transport local|herdr] [--cwd PATH] [--allow-create] [--dry-run] [--json]
+    orbit start INSTANCE [--transport local|herdr] [--cwd PATH] [--allow-create] [--force] [--dry-run] [--json]
     orbit state progress --message TEXT [--evidence PATH] [--state PATH]
     orbit state start --task PATH [--owner-role ROLE] [--state PATH]
     orbit state transition --to PHASE [--evidence PATH] [--reason TEXT] [--state PATH]
@@ -304,7 +304,7 @@ COMMAND_HELP = {
   HELP
   "start" => <<~HELP,
     Usage:
-      orbit start INSTANCE [--transport local|herdr] [--cwd PATH] [--allow-create] [--dry-run] [--json]
+      orbit start INSTANCE [--transport local|herdr] [--cwd PATH] [--allow-create] [--force] [--dry-run] [--json]
 
     Starts or previews an agent instance from .orbit/instances.yaml.
 
@@ -315,15 +315,16 @@ COMMAND_HELP = {
       --transport NAME  local or herdr. Defaults to local.
       --cwd PATH        Working directory for the agent. Defaults to current directory.
       --allow-create    Allow creating a user_managed instance with no healthy binding.
+      --force           Start anyway when an existing binding cannot be proven alive.
       --dry-run         Print the command/env/cwd plan without starting the agent.
       --json            Emit the launch plan or launch result as JSON.
 
     Notes:
       command is executed as argv, not through a shell string.
       Dry-run is the recommended way to audit instance command/env wiring.
-      When an instance already has a Herdr pane binding, start inspects the pane:
-      it reuses a detected agent, safely wakes an empty shell pane, or fails
-      closed with needs_attention when the pane cannot be classified.
+      When an instance already has a binding, start only reuses a live-detected
+      agent. If the binding cannot be proven alive, it exits with needs_force.
+      --force replaces Orbit's current binding but does not kill old processes.
   HELP
   "validate" => <<~HELP,
     Usage:

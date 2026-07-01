@@ -185,7 +185,7 @@ json_assert 'classify-intent review emits review policy' "$TMPROOT/intent-review
 
 "$CLI" start --help >"$TMPROOT/start-help.txt" 2>"$TMPROOT/start-help.err"
 test ! -s "$TMPROOT/start-help.err"
-grep -Fq 'orbit start INSTANCE [--transport local|herdr] [--cwd PATH] [--allow-create] [--dry-run] [--json]' "$TMPROOT/start-help.txt"
+grep -Fq 'orbit start INSTANCE [--transport local|herdr] [--cwd PATH] [--allow-create] [--force] [--dry-run] [--json]' "$TMPROOT/start-help.txt"
 grep -q 'not through a shell string' "$TMPROOT/start-help.txt"
 pass 'start subcommand help works'
 
@@ -285,7 +285,18 @@ case "$1 $2" in
 esac
 HERDR
 chmod +x "$TMPROOT/fakebin/herdr"
-HERDR_PANE_ID=current-alias PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer --dry-run --json >"$TMPROOT/start-reviewer-self-wake-dry-run.json"
+if HERDR_PANE_ID=current-alias PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer --dry-run --json >"$TMPROOT/start-reviewer-self-wake-needs-force.json" 2>"$TMPROOT/start-reviewer-self-wake-needs-force.err"; then
+  printf 'FAIL start self-wake without force: command unexpectedly succeeded\n' >&2
+  exit 1
+fi
+json_assert 'start refuses to self-wake cached binding without force' "$TMPROOT/start-reviewer-self-wake-needs-force.json" 'j["action"] == "needs_force" && j["liveness_source"] == "herdr_probe" && j["reuse_probe"]["decision"] == "self_wake" && j["risk"].any? { |r| r["code"] == "duplicate_instance_agents_may_run_concurrently" } && j["risk"].any? { |r| r["code"] == "old_and_new_agents_may_compete_for_orbit_state" } && j["force_command"] == ["orbit", "start", "reviewer", "--force"]'
+if HERDR_PANE_ID=current-alias PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer --dry-run >"$TMPROOT/start-reviewer-self-wake-needs-force-human.out" 2>"$TMPROOT/start-reviewer-self-wake-needs-force-human.err"; then
+  printf 'FAIL start self-wake without force human: command unexpectedly succeeded\n' >&2
+  exit 1
+fi
+grep -q 'Force does not kill the old external process' "$TMPROOT/start-reviewer-self-wake-needs-force-human.err"
+grep -q 'compete for evidence, gate leases, and loop state writes' "$TMPROOT/start-reviewer-self-wake-needs-force-human.err"
+HERDR_PANE_ID=current-alias PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer --force --dry-run --json >"$TMPROOT/start-reviewer-self-wake-dry-run.json"
 json_assert 'start self-wakes current Herdr pane without requiring prompt classification' "$TMPROOT/start-reviewer-self-wake-dry-run.json" 'j["action"] == "self_wake_dry_run" && j["reuse_probe"]["decision"] == "self_wake" && j["reuse_probe"]["self_pane"] == true && j["reuse_probe"]["safe_to_wake"] == true && j["self_wake"]["mode"] == "exec_current_process" && j["self_wake"]["command"].include?("codex")'
 "$CLI" bind-pane --instance reviewer --pane shell-pane --transport herdr --json >"$TMPROOT/bind-pane-reviewer-shell.json"
 cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
@@ -304,8 +315,13 @@ case "$1 $2" in
 esac
 HERDR
 chmod +x "$TMPROOT/fakebin/herdr"
-PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer --dry-run --json >"$TMPROOT/start-reviewer-wake-dry-run.json"
-json_assert 'start wakes bound Herdr shell pane in dry-run when no agent is detected' "$TMPROOT/start-reviewer-wake-dry-run.json" 'j["action"] == "wake_dry_run" && j["reuse_probe"]["agent_detected"] == false && j["reuse_probe"]["safe_to_wake"] == true && j["wake_adapter"]["command"][0,4] == ["herdr", "pane", "run", "shell-pane"] && j["wake_adapter"]["command"][4].include?("ORBIT_INSTANCE") && j["wake_adapter"]["command"][4].include?("reviewer") && j["wake_adapter"]["command"][4].include?("ORBIT_ROLE") && j["wake_adapter"]["command"][4].include?("codex")'
+if PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer --dry-run --json >"$TMPROOT/start-reviewer-wake-needs-force.json" 2>"$TMPROOT/start-reviewer-wake-needs-force.err"; then
+  printf 'FAIL start wake without force: command unexpectedly succeeded\n' >&2
+  exit 1
+fi
+json_assert 'start refuses to wake cached Herdr shell pane without force' "$TMPROOT/start-reviewer-wake-needs-force.json" 'j["action"] == "needs_force" && j["liveness_source"] == "herdr_probe" && j["reuse_probe"]["decision"] == "wake" && j["reuse_probe"]["safe_to_wake"] == true'
+PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer --force --dry-run --json >"$TMPROOT/start-reviewer-wake-dry-run.json"
+json_assert 'start wakes bound Herdr shell pane in dry-run only with force' "$TMPROOT/start-reviewer-wake-dry-run.json" 'j["action"] == "wake_dry_run" && j["force"] == true && j["reuse_probe"]["agent_detected"] == false && j["reuse_probe"]["safe_to_wake"] == true && j["wake_adapter"]["command"][0,4] == ["herdr", "pane", "run", "shell-pane"] && j["wake_adapter"]["command"][4].include?("ORBIT_INSTANCE") && j["wake_adapter"]["command"][4].include?("reviewer") && j["wake_adapter"]["command"][4].include?("ORBIT_ROLE") && j["wake_adapter"]["command"][4].include?("codex")'
 "$CLI" bind-pane --instance reviewer --pane shell-process-pane --transport herdr --json >"$TMPROOT/bind-pane-reviewer-shell-process.json"
 cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
 #!/bin/sh
@@ -326,7 +342,7 @@ case "$1 $2" in
 esac
 HERDR
 chmod +x "$TMPROOT/fakebin/herdr"
-PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer --dry-run --json >"$TMPROOT/start-reviewer-shell-process-wake-dry-run.json"
+PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer --force --dry-run --json >"$TMPROOT/start-reviewer-shell-process-wake-dry-run.json"
 json_assert 'start treats foreground shell process as safe to wake' "$TMPROOT/start-reviewer-shell-process-wake-dry-run.json" 'j["action"] == "wake_dry_run" && j["reuse_probe"]["pane"] == "shell-process-pane" && j["reuse_probe"]["safe_to_wake"] == true && j["reuse_probe"]["pane_process_info"]["safe_to_wake"] == true && j["reuse_probe"]["pane_read"]["safe_to_wake"] == false && j["reuse_probe"]["decision"] == "wake"'
 cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
 #!/bin/sh
@@ -344,7 +360,7 @@ case "$1 $2" in
 esac
 HERDR
 chmod +x "$TMPROOT/fakebin/herdr"
-PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer --dry-run --json >"$TMPROOT/start-reviewer-placeholder-wake-dry-run.json"
+PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer --force --dry-run --json >"$TMPROOT/start-reviewer-placeholder-wake-dry-run.json"
 json_assert 'start ignores Herdr placeholder entries without an agent client' "$TMPROOT/start-reviewer-placeholder-wake-dry-run.json" 'j["action"] == "wake_dry_run" && j["reuse_probe"]["agent_detected"] == false && j["reuse_probe"]["decision"] == "wake" && j["reuse_probe"]["safe_to_wake"] == true'
 "$CLI" bind-pane --instance reviewer --pane alias-run --transport herdr --json >"$TMPROOT/bind-pane-reviewer-alias-run.json"
 cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
@@ -383,11 +399,12 @@ case "$1 $2" in
 esac
 HERDR
 chmod +x "$TMPROOT/fakebin/herdr"
-ORBIT_FAKE_HERDR_RUN_ARGS="$TMPROOT/fake-herdr-wake-run-args.txt" ORBIT_FAKE_HERDR_WAIT_ARGS="$TMPROOT/fake-herdr-wake-wait-args.txt" PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer --json >"$TMPROOT/start-reviewer-alias-wake-real.json"
-json_assert 'start wakes canonical Herdr pane when bound pane is an alias' "$TMPROOT/start-reviewer-alias-wake-real.json" 'j["action"] == "woken" && j["reuse_probe"]["pane"] == "alias-run" && j["reuse_probe"]["canonical_pane"] == "canonical-run" && j["wake_adapter"]["command"][0,4] == ["herdr", "pane", "run", "canonical-run"] && j["adapter_result"]["ready_wait"]["command"][0,4] == ["herdr", "wait", "output", "canonical-run"] && j["instance_status_after_start"]["transport"]["binding"]["pane"] == "canonical-run"'
+ORBIT_FAKE_HERDR_RUN_ARGS="$TMPROOT/fake-herdr-wake-run-args.txt" ORBIT_FAKE_HERDR_WAIT_ARGS="$TMPROOT/fake-herdr-wake-wait-args.txt" PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer --force --json >"$TMPROOT/start-reviewer-alias-wake-real.json"
+json_assert 'start wakes canonical Herdr pane when forced and bound pane is an alias' "$TMPROOT/start-reviewer-alias-wake-real.json" 'j["action"] == "woken" && j["force"] == true && j["reuse_probe"]["pane"] == "alias-run" && j["reuse_probe"]["canonical_pane"] == "canonical-run" && j["wake_adapter"]["command"][0,4] == ["herdr", "pane", "run", "canonical-run"] && j["adapter_result"]["ready_wait"]["command"][0,4] == ["herdr", "wait", "output", "canonical-run"] && j["instance_status_after_start"]["transport"]["binding"]["pane"] == "canonical-run" && j["replacement"] == ".orbit/runtime/instances/reviewer.json"'
+json_assert 'forced start writes runtime replacement diagnostic outside instances config' ".orbit/runtime/instances/reviewer.json" 'j["schema_version"] == "orbit-start-replacement-v1" && j["instance"] == "reviewer" && j["previous_binding"]["pane"] == "alias-run" && j["new_binding"]["pane"] == "canonical-run" && j["risk"].any? { |r| r["code"] == "duplicate_instance_agents_may_run_concurrently" }'
 ruby --disable-gems -e 'actual=File.read(ARGV[0]).lines.map(&:chomp); abort(actual.inspect) unless actual[0,4] == ["pane","run","canonical-run","env ORBIT_INSTANCE\\=reviewer ORBIT_ROLE\\=reviewer codex"]' "$TMPROOT/fake-herdr-wake-run-args.txt"
 ruby --disable-gems -e 'actual=File.read(ARGV[0]).lines.map(&:chomp); abort(actual.inspect) unless actual[0,3] == ["wait","output","canonical-run"] && actual.include?("OpenAI Codex|›")' "$TMPROOT/fake-herdr-wake-wait-args.txt"
-pass 'start real wake uses canonical Herdr pane'
+pass 'start real force wake uses canonical Herdr pane'
 "$CLI" bind-pane --instance reviewer --pane busy-pane --transport herdr --json >"$TMPROOT/bind-pane-reviewer-busy.json"
 cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
 #!/bin/sh
@@ -405,12 +422,35 @@ case "$1 $2" in
 esac
 HERDR
 chmod +x "$TMPROOT/fakebin/herdr"
-if PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer --dry-run --json >"$TMPROOT/start-reviewer-needs-attention.json" 2>"$TMPROOT/start-reviewer-needs-attention.err"; then
+if PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer --dry-run --json >"$TMPROOT/start-reviewer-needs-force-busy.json" 2>"$TMPROOT/start-reviewer-needs-force-busy.err"; then
   printf 'FAIL start stale busy binding: command unexpectedly succeeded\n' >&2
   exit 1
 fi
-json_assert 'start fails closed for bound Herdr pane that is not safe to wake' "$TMPROOT/start-reviewer-needs-attention.json" 'j["action"] == "needs_attention" && j["reuse_probe"]["agent_detected"] == false && j["reuse_probe"]["safe_to_wake"] == false && j["reuse_probe"]["decision"] == "needs_attention"'
+json_assert 'start requires force for bound Herdr pane that is not safe to wake' "$TMPROOT/start-reviewer-needs-force-busy.json" 'j["action"] == "needs_force" && j["reuse_probe"]["agent_detected"] == false && j["reuse_probe"]["safe_to_wake"] == false && j["reuse_probe"]["decision"] == "needs_attention"'
+"$CLI" bind-pane --instance reviewer --pane local-cache --transport local --json >"$TMPROOT/bind-pane-reviewer-local.json"
+if "$CLI" start reviewer --dry-run --json >"$TMPROOT/start-reviewer-local-cache-needs-force.json" 2>"$TMPROOT/start-reviewer-local-cache-needs-force.err"; then
+  printf 'FAIL start local cached binding: command unexpectedly succeeded\n' >&2
+  exit 1
+fi
+json_assert 'start refuses local cached binding without force' "$TMPROOT/start-reviewer-local-cache-needs-force.json" 'j["action"] == "needs_force" && j["liveness_source"] == "static_binding_cache" && !j.key?("reuse_probe") && j["force_command"] == ["orbit", "start", "reviewer", "--force"]'
+"$CLI" start reviewer --force --dry-run --json >"$TMPROOT/start-reviewer-local-cache-force-dry-run.json"
+json_assert 'start force allows local dry-run over cached binding' "$TMPROOT/start-reviewer-local-cache-force-dry-run.json" 'j["action"] == "dry_run" && j["force"] == true && j["risk"].any? { |r| r["code"] == "old_external_process_may_still_exist" }'
 "$CLI" init --force >/dev/null
+mkdir -p .orbit/runtime/locks
+ruby --disable-gems -e 'File.open(".orbit/runtime/locks/start-reviewer.lock", File::RDWR | File::CREAT, 0o600) { |f| f.flock(File::LOCK_EX); File.write(ARGV[0], "ready"); sleep 10 }' "$TMPROOT/start-reviewer-lock-ready" &
+START_LOCK_PID=$!
+while [ ! -f "$TMPROOT/start-reviewer-lock-ready" ]; do
+  sleep 0.05
+done
+if "$CLI" start reviewer --transport herdr --force --json >"$TMPROOT/start-reviewer-force-lock-busy.json" 2>"$TMPROOT/start-reviewer-force-lock-busy.err"; then
+  printf 'FAIL start force lock busy: command unexpectedly succeeded\n' >&2
+  kill "$START_LOCK_PID" 2>/dev/null || true
+  wait "$START_LOCK_PID" 2>/dev/null || true
+  exit 1
+fi
+kill "$START_LOCK_PID" 2>/dev/null || true
+wait "$START_LOCK_PID" 2>/dev/null || true
+json_assert 'start force refuses concurrent replacement when instance lock is held' "$TMPROOT/start-reviewer-force-lock-busy.json" 'j["action"] == "needs_attention" && j["reason"] == "start_in_progress" && j["liveness_reason"].include?("another forced start")'
 "$CLI" start reviewer --allow-create --dry-run --json >"$TMPROOT/start-reviewer.json"
 json_assert 'start dry-run resolves instance command env cwd client and context metadata' "$TMPROOT/start-reviewer.json" 'j["schema_version"] == "orbit-start-plan-v1" && j["action"] == "dry_run" && j["transport"] == "local" && j["instance"] == "reviewer" && j["argv"] == ["codex"] && j["client"]["expected_client"] == "codex" && j["client"]["full_permission"]["known_client"] == true && j["client"]["full_permission"]["configured"] == false && j["env"]["ORBIT_INSTANCE"] == "reviewer" && j["env"]["ORBIT_ROLE"] == "reviewer" && j["cwd"] == Dir.pwd && j["context_preflight"]["required_files"].any? { |r| r["path"] == "SKILL.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "references/runtime/guide.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "references/runtime/quality-outcome-and-review.md" }'
 "$CLI" start reviewer --allow-create --dry-run >"$TMPROOT/start-reviewer-human.txt" 2>"$TMPROOT/start-reviewer-human.err"
