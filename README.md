@@ -129,10 +129,28 @@ sh install.sh
 orbit version
 ```
 
-更新和卸载：
+更新 Orbit CLI：
+
+远程安装的用户，重新运行远程安装命令即可：
 
 ```bash
+curl -fsSL https://raw.githubusercontent.com/godokyang/orbit/main/install.sh | sh
+orbit version
+```
+
+本地 clone 的用户，先拉取最新代码，再重新运行安装脚本：
+
+```bash
+git pull
 sh install.sh
+orbit version
+```
+
+安装脚本会覆盖已安装的 Orbit CLI runtime 和 wrapper，不会修改你项目里的 `.orbit/` 配置。
+
+卸载：
+
+```bash
 sh uninstall.sh
 ```
 

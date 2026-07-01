@@ -27,12 +27,23 @@ Environment:
   ORBIT_RUNTIME_DIR  Same as --runtime-dir.
   ORBIT_REF          Same as --ref.
   ORBIT_RAW_BASE     Override raw file base URL for advanced installs.
+  ORBIT_INSTALL_QUIET=1
+                     Suppress progress messages.
 USAGE
 }
 
 fail() {
   printf 'orbit install: %s\n' "$*" >&2
   exit 1
+}
+
+progress_enabled() {
+  [ "${ORBIT_INSTALL_QUIET:-0}" != "1" ]
+}
+
+install_log() {
+  progress_enabled || return 0
+  printf 'orbit install: %s\n' "$*"
 }
 
 need_value() {
@@ -130,6 +141,11 @@ references/runtime/quality-outcome-and-review.md
 references/runtime/testing-guideline.md
 "
 
+runtime_file_count() {
+  set -- $runtime_files
+  printf '%s\n' "$#"
+}
+
 parent_dir() {
   path="$1"
   dir=${path%/*}
@@ -175,10 +191,15 @@ copy_file() {
 
 install_local_runtime() {
   source_root="$1"
+  total=$(runtime_file_count)
+  current=0
+  install_log "copying runtime files from $source_root ($total files)"
 
   for file in $runtime_files; do
+    current=$((current + 1))
     source_file="$source_root/$file"
     target_file="$runtime_dir/$file"
+    install_log "[$current/$total] copy $file"
     [ -f "$source_file" ] || fail "missing runtime source file: $source_file"
     mkdir -p "$(parent_dir "$target_file")"
     copy_file "$source_file" "$target_file"
@@ -186,8 +207,14 @@ install_local_runtime() {
 }
 
 install_remote_runtime() {
+  total=$(runtime_file_count)
+  current=0
+  install_log "downloading Orbit runtime from $raw_base"
+  install_log "this can take a minute on slower networks; progress is shown per file"
   for file in $runtime_files; do
+    current=$((current + 1))
     target_file="$runtime_dir/$file"
+    install_log "[$current/$total] download $file"
     mkdir -p "$(parent_dir "$target_file")"
     download_file "$raw_base/$file" "$target_file" ||
       fail "failed to download $raw_base/$file"
@@ -210,11 +237,18 @@ if [ -n "$script_dir" ] &&
    [ -f "$script_dir/install.sh" ] &&
    [ -f "$script_dir/scripts/orbit" ] &&
    [ -f "$script_dir/assets/templates/roles.yaml" ]; then
+  install_log "installing Orbit CLI"
+  install_log "wrapper: $target_wrapper"
+  install_log "runtime: $runtime_dir"
   install_local_runtime "$script_dir"
 else
+  install_log "installing Orbit CLI"
+  install_log "wrapper: $target_wrapper"
+  install_log "runtime: $runtime_dir"
   install_remote_runtime
 fi
 
+install_log "writing command wrapper"
 chmod 0755 "$target_cli"
 mkdir -p "$bin_dir"
 wrapper_tmp="${target_wrapper}.tmp.$$"
@@ -227,6 +261,7 @@ rm -f "$wrapper_tmp"
 chmod 0755 "$wrapper_tmp"
 mv "$wrapper_tmp" "$target_wrapper"
 
+install_log "verifying installed orbit command"
 "$target_wrapper" version >/dev/null || fail "installed orbit command failed verification"
 
 printf 'Installed orbit to %s\n' "$target_wrapper"

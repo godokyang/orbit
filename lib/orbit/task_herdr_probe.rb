@@ -341,7 +341,7 @@ def wake_command_text(plan)
 end
 
 def herdr_wake_adapter(plan, probe, executable = "herdr")
-  pane = probe["pane"]
+  pane = probe["canonical_pane"].to_s.empty? ? probe["pane"] : probe["canonical_pane"]
   ready_wait = herdr_start_ready_wait(plan)
   {
     "schema_version" => "orbit-herdr-wake-v1",
@@ -558,4 +558,3 @@ def herdr_start_agent_client(stdout)
 rescue JSON::ParserError
   nil
 end
-

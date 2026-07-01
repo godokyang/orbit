@@ -107,6 +107,7 @@ def run_herdr_wake(plan, probe, json:)
 
   adapter = herdr_wake_adapter(plan, probe, herdr_path)
   stdout, stderr, status = Open3.capture3(*adapter["command"])
+  pane = adapter["pane"]
   ready_wait = nil
   if status.success? && adapter["ready_wait"]
     wait = adapter["ready_wait"]
@@ -114,7 +115,7 @@ def run_herdr_wake(plan, probe, json:)
       herdr_path,
       "wait",
       "output",
-      probe["pane"],
+      pane,
       "--match",
       wait["match"],
       "--regex",
@@ -142,7 +143,7 @@ def run_herdr_wake(plan, probe, json:)
     status_after_start = write_instance_binding!(
       plan["instance"],
       transport_kind: "herdr",
-      pane: probe["pane"],
+      pane: pane,
       tab: binding["tab"].to_s,
       space: binding["space"].to_s,
       actual_client: plan.dig("client", "expected_client")
@@ -165,7 +166,7 @@ def run_herdr_wake(plan, probe, json:)
   if json
     puts JSON.pretty_generate(result)
   else
-    print_herdr_start_human_result(result.merge("adapter_result" => result["adapter_result"].merge("pane_id" => probe["pane"])))
+    print_herdr_start_human_result(result.merge("adapter_result" => result["adapter_result"].merge("pane_id" => pane)))
   end
   exit(status.exitstatus || 1) unless success
 end

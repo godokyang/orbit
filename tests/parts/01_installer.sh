@@ -15,6 +15,9 @@ INSTALL_BIN="$TMPROOT/install-bin"
 INSTALL_RUNTIME="$TMPROOT/install-runtime"
 sh "$SKILL_ROOT/install.sh" --bin-dir "$INSTALL_BIN" --runtime-dir "$INSTALL_RUNTIME" >"$TMPROOT/install.out" 2>"$TMPROOT/install.err"
 test ! -s "$TMPROOT/install.err"
+grep -q 'orbit install: installing Orbit CLI' "$TMPROOT/install.out"
+grep -q 'orbit install: copying runtime files' "$TMPROOT/install.out"
+grep -q 'orbit install: verifying installed orbit command' "$TMPROOT/install.out"
 test -x "$INSTALL_BIN/orbit"
 test -x "$INSTALL_RUNTIME/scripts/orbit"
 test -f "$INSTALL_RUNTIME/package.json"
@@ -30,6 +33,22 @@ test -f "$INSTALL_RUNTIME/assets/templates/test-report.yaml"
 "$INSTALL_BIN/orbit" version >"$TMPROOT/installed-version.txt"
 grep -qx "$EXPECTED_VERSION" "$TMPROOT/installed-version.txt"
 pass 'installer creates runnable orbit command'
+
+REMOTE_INSTALLER="$TMPROOT/remote-install.sh"
+REMOTE_BIN="$TMPROOT/install-remote-bin"
+REMOTE_RUNTIME="$TMPROOT/install-remote-runtime"
+cp "$SKILL_ROOT/install.sh" "$REMOTE_INSTALLER"
+ORBIT_RAW_BASE="file://$SKILL_ROOT" sh "$REMOTE_INSTALLER" --bin-dir "$REMOTE_BIN" --runtime-dir "$REMOTE_RUNTIME" >"$TMPROOT/install-remote.out" 2>"$TMPROOT/install-remote.err"
+test ! -s "$TMPROOT/install-remote.err"
+grep -q 'orbit install: downloading Orbit runtime from file://' "$TMPROOT/install-remote.out"
+grep -q 'orbit install: this can take a minute on slower networks; progress is shown per file' "$TMPROOT/install-remote.out"
+grep -q 'orbit install: \[1/' "$TMPROOT/install-remote.out"
+grep -q 'orbit install: verifying installed orbit command' "$TMPROOT/install-remote.out"
+test -x "$REMOTE_BIN/orbit"
+test -f "$REMOTE_RUNTIME/SKILL.md"
+"$REMOTE_BIN/orbit" version >"$TMPROOT/remote-installed-version.txt"
+grep -qx "$EXPECTED_VERSION" "$TMPROOT/remote-installed-version.txt"
+pass 'remote installer shows progress while downloading runtime'
 
 INSTALLED_PROJECT="$TMPROOT/installed-project"
 mkdir -p "$INSTALLED_PROJECT"
@@ -305,6 +324,48 @@ HERDR
 chmod +x "$TMPROOT/fakebin/herdr"
 PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer --dry-run --json >"$TMPROOT/start-reviewer-placeholder-wake-dry-run.json"
 json_assert 'start ignores Herdr placeholder entries without an agent client' "$TMPROOT/start-reviewer-placeholder-wake-dry-run.json" 'j["action"] == "wake_dry_run" && j["reuse_probe"]["agent_detected"] == false && j["reuse_probe"]["decision"] == "wake" && j["reuse_probe"]["safe_to_wake"] == true'
+"$CLI" bind-pane --instance reviewer --pane alias-run --transport herdr --json >"$TMPROOT/bind-pane-reviewer-alias-run.json"
+cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
+#!/bin/sh
+: "${ORBIT_FAKE_HERDR_RUN_ARGS:?}"
+: "${ORBIT_FAKE_HERDR_WAIT_ARGS:?}"
+case "$1 $2" in
+  "pane get")
+    if [ "$3" = "alias-run" ]; then
+      printf '{"result":{"pane":{"pane_id":"canonical-run"}}}\n'
+    else
+      exit 1
+    fi
+    ;;
+  "agent list")
+    printf '{"result":{"agents":[]}}\n'
+    ;;
+  "pane read")
+    test "$3" = "canonical-run" || exit 41
+    printf 'project %%\n'
+    ;;
+  "pane run")
+    test "$3" = "canonical-run" || exit 42
+    printf '%s\n' "$@" >"$ORBIT_FAKE_HERDR_RUN_ARGS"
+    printf 'running\n'
+    ;;
+  "wait output")
+    test "$3" = "canonical-run" || exit 43
+    printf '%s\n' "$@" >"$ORBIT_FAKE_HERDR_WAIT_ARGS"
+    printf 'OpenAI Codex\n'
+    ;;
+  *)
+    printf 'unexpected herdr args: %s\n' "$*" >&2
+    exit 1
+    ;;
+esac
+HERDR
+chmod +x "$TMPROOT/fakebin/herdr"
+ORBIT_FAKE_HERDR_RUN_ARGS="$TMPROOT/fake-herdr-wake-run-args.txt" ORBIT_FAKE_HERDR_WAIT_ARGS="$TMPROOT/fake-herdr-wake-wait-args.txt" PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer --json >"$TMPROOT/start-reviewer-alias-wake-real.json"
+json_assert 'start wakes canonical Herdr pane when bound pane is an alias' "$TMPROOT/start-reviewer-alias-wake-real.json" 'j["action"] == "woken" && j["reuse_probe"]["pane"] == "alias-run" && j["reuse_probe"]["canonical_pane"] == "canonical-run" && j["wake_adapter"]["command"][0,4] == ["herdr", "pane", "run", "canonical-run"] && j["adapter_result"]["ready_wait"]["command"][0,4] == ["herdr", "wait", "output", "canonical-run"] && j["instance_status_after_start"]["transport"]["binding"]["pane"] == "canonical-run"'
+ruby --disable-gems -e 'actual=File.read(ARGV[0]).lines.map(&:chomp); abort(actual.inspect) unless actual[0,4] == ["pane","run","canonical-run","env ORBIT_INSTANCE\\=reviewer ORBIT_ROLE\\=reviewer codex"]' "$TMPROOT/fake-herdr-wake-run-args.txt"
+ruby --disable-gems -e 'actual=File.read(ARGV[0]).lines.map(&:chomp); abort(actual.inspect) unless actual[0,3] == ["wait","output","canonical-run"] && actual.include?("OpenAI Codex|›")' "$TMPROOT/fake-herdr-wake-wait-args.txt"
+pass 'start real wake uses canonical Herdr pane'
 "$CLI" bind-pane --instance reviewer --pane busy-pane --transport herdr --json >"$TMPROOT/bind-pane-reviewer-busy.json"
 cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
 #!/bin/sh
