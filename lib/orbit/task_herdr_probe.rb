@@ -241,6 +241,32 @@ def current_herdr_pane_info(herdr_path)
   herdr_pane_info(herdr_path, current_pane)
 end
 
+def herdr_pane_process_info(herdr_path, pane)
+  return [nil, { "success" => false, "reason" => "empty pane id" }] if pane.to_s.empty?
+
+  stdout, stderr, status = Open3.capture3(herdr_path, "pane", "process-info", "--pane", pane.to_s)
+  return [nil, { "success" => false, "stdout" => stdout, "stderr" => stderr, "exit_status" => status.exitstatus }] unless status.success?
+
+  parsed = JSON.parse(stdout)
+  info = parsed.dig("result", "process_info") || parsed["process_info"] || parsed.dig("result") || parsed
+  [info, { "success" => true, "stdout" => stdout, "stderr" => stderr, "exit_status" => status.exitstatus }]
+rescue JSON::ParserError => e
+  [nil, { "success" => false, "stdout" => stdout.to_s, "stderr" => e.message, "exit_status" => status&.exitstatus }]
+end
+
+def shell_process_info_safe_to_wake?(info)
+  return false unless info.is_a?(Hash)
+
+  processes = Array(info["foreground_processes"]).select { |entry| entry.is_a?(Hash) }
+  return false unless processes.length == 1
+
+  process = processes.first
+  name = File.basename(process["name"].to_s)
+  argv0 = File.basename(process["argv0"].to_s)
+  shell_names = %w[sh bash zsh fish dash ksh mksh tcsh csh]
+  shell_names.include?(name) || shell_names.include?(argv0.delete_prefix("-"))
+end
+
 def pane_output_safe_to_wake?(output)
   text = output.to_s
   return true if text.strip.empty?
@@ -307,6 +333,7 @@ def herdr_reuse_probe(plan, herdr_path = nil)
     )
   end
 
+  process_info, process_result = herdr_pane_process_info(herdr_path, canonical_pane)
   read_stdout, read_stderr, read_status = Open3.capture3(
     herdr_path,
     "pane",
@@ -317,17 +344,21 @@ def herdr_reuse_probe(plan, herdr_path = nil)
     "--lines",
     "40"
   )
-  safe_to_wake = read_status.success? && pane_output_safe_to_wake?(read_stdout)
+  process_safe_to_wake = shell_process_info_safe_to_wake?(process_info)
+  output_safe_to_wake = read_status.success? && pane_output_safe_to_wake?(read_stdout)
+  safe_to_wake = process_safe_to_wake || output_safe_to_wake
   probe.merge(
     "agent_detected" => false,
     "safe_to_wake" => safe_to_wake,
     "decision" => safe_to_wake ? "wake" : "needs_attention",
-    "reason" => safe_to_wake ? "bound pane exists and looks like an idle shell prompt" : "bound pane has no detected agent but is not safe to wake automatically",
+    "reason" => safe_to_wake ? "bound pane exists and looks like an idle shell" : "bound pane has no detected agent but is not safe to wake automatically",
+    "pane_process_info" => process_result.merge("safe_to_wake" => process_safe_to_wake),
     "pane_read" => {
       "success" => read_status.success?,
       "exit_status" => read_status.exitstatus,
       "stdout" => read_stdout,
-      "stderr" => read_stderr
+      "stderr" => read_stderr,
+      "safe_to_wake" => output_safe_to_wake
     }
   )
 end

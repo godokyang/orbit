@@ -306,6 +306,28 @@ HERDR
 chmod +x "$TMPROOT/fakebin/herdr"
 PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer --dry-run --json >"$TMPROOT/start-reviewer-wake-dry-run.json"
 json_assert 'start wakes bound Herdr shell pane in dry-run when no agent is detected' "$TMPROOT/start-reviewer-wake-dry-run.json" 'j["action"] == "wake_dry_run" && j["reuse_probe"]["agent_detected"] == false && j["reuse_probe"]["safe_to_wake"] == true && j["wake_adapter"]["command"][0,4] == ["herdr", "pane", "run", "shell-pane"] && j["wake_adapter"]["command"][4].include?("ORBIT_INSTANCE") && j["wake_adapter"]["command"][4].include?("reviewer") && j["wake_adapter"]["command"][4].include?("ORBIT_ROLE") && j["wake_adapter"]["command"][4].include?("codex")'
+"$CLI" bind-pane --instance reviewer --pane shell-process-pane --transport herdr --json >"$TMPROOT/bind-pane-reviewer-shell-process.json"
+cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
+#!/bin/sh
+case "$1 $2" in
+  "agent list")
+    printf '{"result":{"agents":[]}}\n'
+    ;;
+  "pane process-info")
+    printf '{"result":{"process_info":{"pane_id":"shell-process-pane","shell_pid":123,"foreground_processes":[{"pid":123,"name":"zsh","argv0":"zsh","argv":["-zsh"],"cmdline":"-zsh"}]}}}\n'
+    ;;
+  "pane read")
+    printf 'command output without shell prompt marker\n'
+    ;;
+  *)
+    printf 'unexpected herdr args: %s\n' "$*" >&2
+    exit 1
+    ;;
+esac
+HERDR
+chmod +x "$TMPROOT/fakebin/herdr"
+PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer --dry-run --json >"$TMPROOT/start-reviewer-shell-process-wake-dry-run.json"
+json_assert 'start treats foreground shell process as safe to wake' "$TMPROOT/start-reviewer-shell-process-wake-dry-run.json" 'j["action"] == "wake_dry_run" && j["reuse_probe"]["pane"] == "shell-process-pane" && j["reuse_probe"]["safe_to_wake"] == true && j["reuse_probe"]["pane_process_info"]["safe_to_wake"] == true && j["reuse_probe"]["pane_read"]["safe_to_wake"] == false && j["reuse_probe"]["decision"] == "wake"'
 cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
 #!/bin/sh
 case "$1 $2" in
