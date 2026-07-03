@@ -5,6 +5,7 @@ require "digest"
 require "json"
 require "open3"
 require "set"
+require "securerandom"
 require "shellwords"
 require "time"
 require "yaml"
@@ -93,12 +94,16 @@ HELP = <<~HELP
     orbit evidence from-report --file PATH --report PATH [--kind KIND] [--status STATUS] [--summary SUMMARY]
     orbit evidence submit --file PATH --report PATH [--task PATH] --json
     orbit evidence waive --file PATH --waiver PATH --json
-    orbit evidence attach-rule --file PATH --rule-resolution PATH
+    orbit evidence attach-rule --file PATH --rule-resolution PATH --task PATH
     orbit evidence show --file PATH --json
     orbit handoff --task PATH --state PATH --evidence PATH [--output PATH] [--record-state] --json
+    orbit hook pre-command|pre-edit|pre-evidence|pre-start|pre-idle --intent-json PATH|- --json
+    orbit notice add --task PATH --event EVENT [--evidence PATH] [--to-instance INSTANCE] --json
+    orbit notice list --role ROLE --json
+    orbit notice ack --role ROLE --id ID --json
     orbit dispatch --task PATH --to INSTANCE [--pane PANE] [--reply-to PANE] [--manual-payload] [--dry-run] --json
-    orbit rules resolve --json [--task PATH] [--role ROLE] [--instance NAME] [--output PATH]
-    orbit rules print-context --json [--task PATH] [--role ROLE] [--instance NAME] [--output PATH]
+    orbit rules resolve --json [--task PATH] [--evidence PATH] [--role ROLE] [--instance NAME] [--output PATH]
+    orbit rules print-context --json [--task PATH] [--evidence PATH] [--role ROLE] [--instance NAME] [--output PATH]
     orbit start INSTANCE [--cwd PATH] [--layout auto|same-tab|new-tab] [--force] [--dry-run] [--json]
     orbit state progress --message TEXT [--evidence PATH] [--state PATH]
     orbit state start --task PATH [--owner-role ROLE] [--state PATH]
@@ -108,7 +113,7 @@ HELP = <<~HELP
     orbit tools doctor --json
     orbit wait-gate --task PATH --evidence PATH --json
     orbit whoami --json [--task PATH]
-    orbit new-task --target-role ROLE --task-type TYPE --output PATH
+    orbit new-task --task-type TYPE --output PATH [--operation-mode solo|team] [--implementation-authority ROLE --assigned-instance INSTANCE]
     orbit validate [--task PATH] [--evidence PATH] [--state PATH] [--changed-files FILE[,FILE...]] [--json]
 
   Commands:
@@ -120,9 +125,11 @@ HELP = <<~HELP
     docs        管理 stable docs registry 并检查 docs lifecycle。
     evidence    初始化、追加、挂载规则解析和读取 evidence manifest。
     handoff     输出机器可读的 handoff packet。
+    hook         运行 Herdr-aware preflight guardrail。
     init         初始化 .orbit 项目配置。
     instances    读取 Orbit instance binding 和 health 状态。
     new-task    根据模板创建 task contract。
+    notice      管理 owner completion notice runtime inbox。
     rules       解析本轮默认规则、项目规则、task 规则和 rule packs。
     start        根据 instances.yaml 启动或预览 agent instance。
     state        读取或管理 Orbit loop state。
@@ -139,6 +146,8 @@ HELP = <<~HELP
     orbit dispatch --help
     orbit docs --help
     orbit handoff --help
+    orbit hook --help
+    orbit notice --help
     orbit rules print-context --help
     orbit rules resolve --help
     orbit validate --help
@@ -259,9 +268,51 @@ COMMAND_HELP = {
       --evidence expects a manifest file, not an evidence directory.
       Create one with: orbit evidence init --output .orbit/evidence.json
   HELP
+  "hook" => <<~HELP,
+    Usage:
+      orbit hook pre-command --intent-json PATH|- --json
+      orbit hook pre-edit --intent-json PATH|- --json
+      orbit hook pre-evidence --intent-json PATH|- --json
+      orbit hook pre-start --intent-json PATH|- --json
+      orbit hook pre-idle --intent-json PATH|- --json
+
+    Runs a low-latency Orbit guardrail for Herdr-integrated agent clients.
+    Hooks are advisory preflight checks; authoritative enforcement remains in
+    task, evidence, validate, audit, and wait-gate commands.
+
+    Required:
+      --intent-json PATH|-  JSON intent from the caller. Missing intent fails closed.
+      --json               Emit machine-readable hook output.
+
+    Notes:
+      Caller-supplied liveness, manual payload, transport binding, or explicit
+      pane claims are ignored as live proof. Orbit derives identity and task
+      authority from project config, task contracts, evidence, and Herdr probes.
+  HELP
+  "notice" => <<~HELP,
+    Usage:
+      orbit notice add --task PATH --event EVENT [--evidence PATH] [--to-instance INSTANCE] --json
+      orbit notice list --role ROLE --json
+      orbit notice ack --role ROLE --id ID --json
+
+    Manages the Phase A completion notice inbox under .orbit/runtime/notices.
+    Notice records are protocol state; this command does not claim Herdr pane
+    delivery capability.
+
+    Events:
+      implementation_complete   From task implementation authority/assigned instance,
+                                or a valid implementation_instance_override.
+      review_complete           From reviewer role.
+      test_complete             From tester role.
+      handoff_ready             From owner, implementation authority, or gate role.
+      blocked_needs_owner       From owner, implementation authority, or gate role.
+
+    Required:
+      --json  Emit machine-readable notice output.
+  HELP
   "rules resolve" => <<~HELP,
     Usage:
-      orbit rules resolve --json [--task PATH] [--role ROLE] [--instance NAME] [--output PATH]
+      orbit rules resolve --json [--task PATH] [--evidence PATH] [--role ROLE] [--instance NAME] [--output PATH]
 
     Resolves the rule inputs a role must load for the current Orbit task.
     This is deterministic code, not an LLM merge.
@@ -271,6 +322,7 @@ COMMAND_HELP = {
 
     Options:
       --task PATH      Structured orbit-task-v1 YAML file.
+      --evidence PATH  Evidence manifest used only for override-backed identity checks.
       --role ROLE      Resolve as ROLE when ORBIT_INSTANCE is not set.
       --instance NAME  Resolve as configured instance NAME.
       --output PATH    Write the JSON resolution artifact to PATH.
@@ -282,7 +334,7 @@ COMMAND_HELP = {
   HELP
   "rules print-context" => <<~HELP,
     Usage:
-      orbit rules print-context --json [--task PATH] [--role ROLE] [--instance NAME] [--output PATH]
+      orbit rules print-context --json [--task PATH] [--evidence PATH] [--role ROLE] [--instance NAME] [--output PATH]
 
     Prints the ordered rule context an agent should load for this turn.
     This is deterministic code, not an LLM merge.
@@ -292,6 +344,7 @@ COMMAND_HELP = {
 
     Options:
       --task PATH      Structured orbit-task-v1 YAML file.
+      --evidence PATH  Evidence manifest used only for override-backed identity checks.
       --role ROLE      Resolve as ROLE when ORBIT_INSTANCE is not set.
       --instance NAME  Resolve as configured instance NAME.
       --output PATH    Write the JSON context artifact to PATH.
@@ -354,7 +407,7 @@ COMMAND_HELP = {
       orbit evidence from-report --file PATH --report PATH [--kind KIND] [--status STATUS] [--summary SUMMARY]
       orbit evidence submit --file PATH --report PATH [--task PATH] --json
       orbit evidence waive --file PATH --waiver PATH --json
-      orbit evidence attach-rule --file PATH --rule-resolution PATH
+      orbit evidence attach-rule --file PATH --rule-resolution PATH --task PATH
       orbit evidence show --file PATH --json
 
     Initializes, appends to, and reads an evidence manifest.

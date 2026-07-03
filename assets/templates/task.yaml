@@ -5,8 +5,14 @@ schema_semantics:
     quality_outcome: v1
     schema_semantics: v1
 project: example
-target_role: reviewer
 task_type: slice_review
+execution_contract:
+  owner_role: lead
+  owner_instance: lead-main
+  operation_mode: solo
+  implementation_authority: lead
+  assigned_instance: lead-main
+  source: project_defaults
 gates: []
 source_documents: []
 source_contract:

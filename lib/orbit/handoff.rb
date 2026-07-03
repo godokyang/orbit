@@ -607,9 +607,23 @@ def handoff(args)
   blocking_errors.concat(audit_blocking)
 
   current_role = nil
+  current_instance = nil
   if runtime_role_present?
     begin
-      current_role = resolved_runtime_role
+      identity_result = {
+        "project" => File.basename(Dir.pwd),
+        "instance" => nil,
+        "resolved_role" => nil,
+        "role_sources" => {},
+        "conflicts" => []
+      }
+      roles, instances = load_project_config(identity_result)
+      resolve_identity(identity_result, roles, instances)
+      unless identity_result["conflicts"].empty?
+        raise SystemExit
+      end
+      current_role = identity_result["resolved_role"]
+      current_instance = identity_result["resolved_instance"] || identity_result["instance"]
     rescue SystemExit
       blocking_errors << {
         "source" => "runtime_identity",
@@ -618,11 +632,11 @@ def handoff(args)
     end
   end
 
-  target_role = task.is_a?(Hash) ? task["target_role"] : nil
-  if current_role && target_role && current_role != target_role && !task_gate_role?(task, current_role)
+  execution_contract = task_execution_contract(task)
+  if current_role && task.is_a?(Hash) && !task_allows_instance_role?(task, current_instance, current_role)
     blocking_errors << {
       "source" => "runtime_identity",
-      "message" => "Current role #{current_role.inspect} does not match task target_role #{target_role.inspect}."
+      "message" => "Current identity #{current_role.inspect}/#{current_instance.inspect} is not task assigned_instance, owner_instance, or gate role."
     }
   end
 
@@ -632,11 +646,11 @@ def handoff(args)
     blocking_errors = validation["errors"].dup
     audit_blocking, audit_warnings = audit_state_consistency(task_path, evidence_path, state, evidence, task, task_sha256: current_task_sha256)
     blocking_errors.concat(audit_blocking)
-    target_role = task.is_a?(Hash) ? task["target_role"] : nil
-    if current_role && target_role && current_role != target_role && !task_gate_role?(task, current_role)
+    execution_contract = task_execution_contract(task)
+    if current_role && task.is_a?(Hash) && !task_allows_instance_role?(task, current_instance, current_role)
       blocking_errors << {
         "source" => "runtime_identity",
-        "message" => "Current role #{current_role.inspect} does not match task target_role #{target_role.inspect}."
+        "message" => "Current identity #{current_role.inspect}/#{current_instance.inspect} is not task assigned_instance, owner_instance, or gate role."
       }
     end
   end
@@ -657,7 +671,7 @@ def handoff(args)
     "schema_version" => "orbit-handoff-v1",
     "project" => task.is_a?(Hash) && task["project"] ? task["project"] : File.basename(Dir.pwd),
     "task" => task_path,
-    "target_role" => target_role,
+    "execution_contract" => execution_contract,
     "current_phase" => current_phase,
     "required_action" => next_action,
     "next_action" => next_action,
@@ -665,7 +679,7 @@ def handoff(args)
     "audit_summary" => audit_summary(current_phase, validation, audit_blocking, audit_warnings),
     "tools_summary" => tools_summary,
     "delivery" => delivery,
-    "rule_packs" => rule_packs_for_context(target_role, task.is_a?(Hash) ? task["task_type"] : nil, include_audit: true),
+    "rule_packs" => rule_packs_for_context(task_implementation_authority(task), task.is_a?(Hash) ? task["task_type"] : nil, include_audit: true),
     "rule_resolution_summary" => rule_resolution_summary(evidence, evidence_path),
     "gate_summary" => task.is_a?(Hash) && evidence.is_a?(Hash) ? required_gate_summary(task, evidence, task_sha256: current_task_sha256) : nil,
     "latest_gate_verdicts" => latest_gate_verdicts,

@@ -5,12 +5,12 @@
 # Provides compatibility policy enforcement, multi-user ownership summary,
 # self-review guard for protocol changes, and backup/migration validation.
 
-ALLOWED_COMPAT_MODES = %w[warn_legacy enforce_current opt_in_strict migration_period].freeze
+ALLOWED_COMPAT_MODES = %w[enforce_current opt_in_strict migration_period].freeze
 
 # Default compatibility_policy skeleton.
 def default_compatibility_policy
   {
-    "mode" => "warn_legacy",
+    "mode" => "enforce_current",
     "applies_to" => [],
     "breaking_change" => false,
     "migration_path" => ""
@@ -206,7 +206,7 @@ def compatibility_policy_summary(task)
     "breaking_change" => cp["breaking_change"],
     "applies_to" => cp["applies_to"],
     "migration_path" => cp["migration_path"],
-    "has_legacy_gap" => cp["mode"] == "warn_legacy"
+    "has_legacy_gap" => false
   }
 end
 
@@ -283,15 +283,6 @@ end
 def governance_audit_findings(task)
   findings = []
   return findings unless task.is_a?(Hash)
-
-  cp = task["compatibility_policy"]
-  if cp.is_a?(Hash) && cp["mode"] == "warn_legacy"
-    findings << {
-      "source" => "task_file.compatibility_policy.mode",
-      "severity" => "medium",
-      "message" => "compatibility_policy.mode is warn_legacy; legacy evidence may not be fully enforced by new strict rules."
-    }
-  end
 
   if landing_governance_protocol_changed?(task)
     guard = task["self_review_guard"]

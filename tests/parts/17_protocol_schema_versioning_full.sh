@@ -3,7 +3,7 @@
 # ---------------------------------------------------------------------------
 
 S14_TASK="$TMPROOT/s14-task.yaml"
-"$CLI" new-task --target-role reviewer --task-type implementation_review --output "$S14_TASK" >/dev/null
+"$CLI" new-task --implementation-authority reviewer --assigned-instance reviewer-main --task-type implementation_review --output "$S14_TASK" >/dev/null
 
 S14_STATE="$TMPROOT/s14-state.yaml"
 ruby --disable-gems -ryaml -e '
@@ -50,6 +50,12 @@ S14_NEG_EVIDENCE="$TMPROOT/s14-neg-evidence.json"
 "$CLI" evidence init --output "$S14_NEG_EVIDENCE" >/dev/null
 cat >"$TMPROOT/s14-review-with-neg.yaml" <<'YAML'
 kind: review
+report_template_version: review-report-v1
+schema_semantics:
+  feature_versions:
+    evidence_level: v1
+    quality_outcome: v1
+    schema_semantics: v1
 verdict: pass
 summary: Review pass with negative evidence for untested browser E2E.
 source_message_id: herdr:reviewer:s14-neg
@@ -94,7 +100,7 @@ negative_evidence:
     status: not_applicable
     reason: "no performance-sensitive code changed"
 YAML
-ORBIT_INSTANCE=reviewer "$CLI" evidence submit \
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit \
   --file "$S14_NEG_EVIDENCE" \
   --report "$TMPROOT/s14-review-with-neg.yaml" \
   --task "$S14_TASK" \
@@ -129,6 +135,12 @@ S14_NEG_FR_EVIDENCE="$TMPROOT/s14-neg-fr-evidence.json"
 "$CLI" evidence init --output "$S14_NEG_FR_EVIDENCE" >/dev/null
 cat >"$TMPROOT/s14-neg-fr-report.yaml" <<'YAML'
 kind: review
+report_template_version: review-report-v1
+schema_semantics:
+  feature_versions:
+    evidence_level: v1
+    quality_outcome: v1
+    schema_semantics: v1
 verdict: pass
 summary: Review pass via from-report with negative evidence.
 source_message_id: herdr:reviewer:s14-neg-fr
@@ -170,7 +182,7 @@ negative_evidence:
     status: not_tested
     reason: "no E2E changes in this task"
 YAML
-ORBIT_INSTANCE=reviewer "$CLI" evidence from-report \
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence from-report \
   --file "$S14_NEG_FR_EVIDENCE" \
   --report "$TMPROOT/s14-neg-fr-report.yaml" \
   --json >"$TMPROOT/s14-neg-fr-submit.json"
@@ -194,6 +206,12 @@ S14_BAD_SUBMIT_EVIDENCE="$TMPROOT/s14-bad-submit-evidence.json"
 "$CLI" evidence init --output "$S14_BAD_SUBMIT_EVIDENCE" >/dev/null
 cat >"$TMPROOT/s14-bad-neg-report.yaml" <<'YAML'
 kind: review
+report_template_version: review-report-v1
+schema_semantics:
+  feature_versions:
+    evidence_level: v1
+    quality_outcome: v1
+    schema_semantics: v1
 verdict: pass
 summary: Review pass with bad negative evidence.
 source_message_id: herdr:reviewer:s14-bad-neg
@@ -235,13 +253,13 @@ negative_evidence:
     status: bogus
     reason: "r"
 YAML
-expect_failure 'evidence submit rejects invalid negative_evidence status' env ORBIT_INSTANCE=reviewer "$CLI" evidence submit --file "$S14_BAD_SUBMIT_EVIDENCE" --report "$TMPROOT/s14-bad-neg-report.yaml" --task "$S14_TASK" --json
+expect_failure 'evidence submit rejects invalid negative_evidence status' env ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit --file "$S14_BAD_SUBMIT_EVIDENCE" --report "$TMPROOT/s14-bad-neg-report.yaml" --task "$S14_TASK" --json
 
 # ---- Group 7: consistency_checks present on clean records with stable keys ----
 
 S14_CLEAN_EVIDENCE="$TMPROOT/s14-clean-evidence.json"
 "$CLI" evidence init --output "$S14_CLEAN_EVIDENCE" >/dev/null
-ORBIT_INSTANCE=reviewer "$CLI" evidence add --file "$S14_CLEAN_EVIDENCE" --kind command --status pass --summary "command executed" >/dev/null
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence add --file "$S14_CLEAN_EVIDENCE" --kind command --status pass --summary "command executed" >/dev/null
 "$CLI" audit --task "$S14_TASK" --evidence "$S14_CLEAN_EVIDENCE" --state "$S14_STATE" --json >"$TMPROOT/s14-clean-audit.json" 2>/dev/null || true
 json_assert 'audit consistency_checks present on clean records' "$TMPROOT/s14-clean-audit.json" \
   'svs = j["schema_version_summary"]; svs["consistency_checks"].is_a?(Array) && svs["consistency_checks"].any? { |c| c["conflicts"].empty? }'
@@ -252,6 +270,6 @@ pass 'consistency_checks have stable keys on clean records'
 # ---- Group 8: schema_semantics includes protocol_schema_versioning v1 ----
 
 S14_IMPL_TASK="$TMPROOT/s14-impl-task.yaml"
-"$CLI" new-task --target-role lead --task-type implementation --output "$S14_IMPL_TASK" >/dev/null
+"$CLI" new-task --task-type implementation --output "$S14_IMPL_TASK" >/dev/null
 yaml_assert 'new-task includes protocol_schema_versioning feature version' "$S14_IMPL_TASK" \
   'j.dig("schema_semantics","feature_versions","protocol_schema_versioning") == "v1"'

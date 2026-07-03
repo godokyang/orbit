@@ -5,7 +5,7 @@
 # ---- Group 1: new-task writes full release_readiness skeleton ----
 
 S13_RELEASE_TASK="$TMPROOT/s13-release-task.yaml"
-"$CLI" new-task --target-role lead --task-type release_implementation --output "$S13_RELEASE_TASK" >/dev/null
+"$CLI" new-task --task-type release_implementation --output "$S13_RELEASE_TASK" >/dev/null
 yaml_assert 'new-task release writes release_readiness.source' "$S13_RELEASE_TASK" \
   'j.dig("release_readiness","source").is_a?(Hash)'
 yaml_assert 'new-task release writes release_readiness.ci' "$S13_RELEASE_TASK" \
@@ -38,7 +38,7 @@ json_assert 'validate reports remote branch missing' "$TMPROOT/s13-empty-validat
 
 S13_EMPTY_EVIDENCE="$TMPROOT/s13-empty-evidence.json"
 "$CLI" evidence init --output "$S13_EMPTY_EVIDENCE" >/dev/null
-ORBIT_INSTANCE=reviewer "$CLI" evidence add \
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence add \
   --file "$S13_EMPTY_EVIDENCE" --kind command --status pass --summary "local pass only" >/dev/null
 S13_AUDIT_STATE="$TMPROOT/s13-audit-state.yaml"
 ruby --disable-gems -ryaml -e '

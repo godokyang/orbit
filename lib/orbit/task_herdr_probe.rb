@@ -10,8 +10,8 @@ def parse_start_args(args)
     "dry_run" => false,
     "json" => false,
     "layout" => "auto",
-    "min_cols" => 100,
-    "min_rows" => 24
+    "min_cols" => nil,
+    "min_rows" => nil
   }
 
   until args.empty?
@@ -52,8 +52,8 @@ def parse_start_args(args)
   end
 
   usage_error("start --layout must be auto, same-tab, or new-tab") unless %w[auto same-tab new-tab].include?(options["layout"])
-  usage_error("start --min-cols must be positive") unless options["min_cols"].positive?
-  usage_error("start --min-rows must be positive") unless options["min_rows"].positive?
+  usage_error("start --min-cols must be positive") unless options["min_cols"].nil? || options["min_cols"].positive?
+  usage_error("start --min-rows must be positive") unless options["min_rows"].nil? || options["min_rows"].positive?
   options
 end
 
@@ -63,6 +63,12 @@ def start_plan(options)
   cwd = File.expand_path(options["cwd"])
   usage_error("Start cwd does not exist: #{cwd}") unless Dir.exist?(cwd)
   status = instance_status_entry(instance_key, instance, role_ref, role_def)
+  view_policy = normalize_instance_view(instance_key, instance)
+  options = options.merge(
+    "min_cols" => options["min_cols"] || view_policy["min_columns"],
+    "min_rows" => options["min_rows"] || view_policy["min_rows"],
+    "view_policy" => view_policy
+  )
   creation_policy = role_creation_policy(options)
 
   {
@@ -80,6 +86,7 @@ def start_plan(options)
     "env" => instance_launch_env(instance_key, instance, role_def, role_ref),
     "context_preflight" => context_preflight_for(instance_key),
     "instance_status" => status,
+    "view" => view_policy,
     "creation_policy" => creation_policy,
     "layout" => creation_policy["layout"],
     "force" => options["force"],
@@ -137,7 +144,7 @@ def non_empty_env(*names)
   ""
 end
 
-def lead_transport_binding
+def lead_herdr_binding
   roles, instances = load_project_instance_config_for_cli[0, 2]
   lead_key = find_instance(instances, roles, "lead").first || infer_instance_from_role(instances, roles, "lead")
   return {} unless lead_key && instances[lead_key].is_a?(Hash)
@@ -148,7 +155,7 @@ rescue RuntimeError
 end
 
 def herdr_same_level_view
-  lead_binding = lead_transport_binding
+  lead_binding = lead_herdr_binding
   source_pane = non_empty_env("HERDR_PANE_ID")
   source_pane = lead_binding["pane"].to_s if source_pane.empty?
 

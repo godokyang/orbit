@@ -2,11 +2,11 @@
 
 # Protocol schema/version semantics and feature-version registry.
 #
-# Scope: feature-version vocabulary, legacy-warning helpers, compatibility-state detection,
+# Scope: feature-version vocabulary, removed-schema helpers, compatibility-state detection,
 # and prose/structured-verdict conflict detection skeleton.
 #
-# Global compatibility policy (from development contract):
-#   - Old evidence/report lacking new fields → legacy_warning (not hard fail).
+# Global compatibility policy:
+#   - Old evidence/report/task files lacking required schema fields are rejected.
 #   - Unknown future schema version → explicit compatibility_state output, not silent acceptance.
 #   - Structured verdict always wins over prose summary. Summary must derive from structured fields.
 
@@ -86,15 +86,15 @@ end
 # Structured warning/notice builders
 # ---------------------------------------------------------------------------
 
-# A legacy_warning indicates the record predates the field being checked.
-# It is a warning (not an error) – historical records remain readable.
-def schema_legacy_warning_entry(source, message, detail = nil)
+# A removed_legacy_schema entry indicates the file predates a required field.
+# New Orbit packages intentionally reject these records instead of keeping compatibility.
+def schema_removed_legacy_entry(source, message, detail = nil)
   entry = {
-    "kind" => "legacy_warning",
+    "kind" => "removed_legacy_schema",
     "compatibility_state" => "legacy_missing_field",
     "source" => source,
     "message" => message,
-    "action" => "New tasks and evidence should use current templates. Historical records remain readable."
+    "action" => "Regenerate this task/evidence/report with current Orbit; legacy files are not accepted."
   }
   entry["detail"] = detail if detail
   entry
@@ -177,24 +177,24 @@ end
 # ---------------------------------------------------------------------------
 
 # Produce a structured schema_version_summary for an evidence manifest.
-# Does NOT mutate `result`; callers can add legacy_warnings to result["warnings"]
-# and unknown_versions to result["errors"] separately.
+# Does NOT mutate `result`; callers can add removed legacy entries to errors
+# and unknown_versions to errors separately.
 def evidence_schema_version_summary(evidence, task = nil)
   return nil unless evidence.is_a?(Hash)
 
   schema_version = evidence["schema_version"]
   ev_compat = schema_version_compat(schema_version, "evidence")
 
-  legacy_warnings = []
+  legacy_errors = []
   unknown_versions = []
   prose_conflicts = []
 
   # Evidence manifest schema version
   case ev_compat
   when :legacy
-    legacy_warnings << schema_legacy_warning_entry(
+    legacy_errors << schema_removed_legacy_entry(
       "evidence_file.schema_version",
-      "Evidence manifest is missing schema_version; treating as legacy.",
+      "Evidence manifest is missing schema_version.",
       "Expected: #{ORBIT_CURRENT_SCHEMA_VERSIONS["evidence"]}"
     )
   when :unknown_future
@@ -204,11 +204,10 @@ def evidence_schema_version_summary(evidence, task = nil)
   # schema_semantics field (introduced by this slice)
   schema_semantics = evidence["schema_semantics"]
   if schema_semantics.nil? && ev_compat == :current
-    legacy_warnings << schema_legacy_warning_entry(
+    legacy_errors << schema_removed_legacy_entry(
       "evidence_file.schema_semantics",
-      "Evidence manifest lacks schema_semantics; feature version tracking unavailable. " \
-      "This is expected for evidence created before orbit-schema-versioning-v1.",
-      "New evidence created with 'orbit evidence init' will include schema_semantics."
+      "Evidence manifest lacks schema_semantics; feature version tracking is required.",
+      "Recreate evidence with 'orbit evidence init'."
     )
   end
   # Scan individual records for prose/structured conflicts and build consistency_checks.
@@ -263,9 +262,9 @@ def evidence_schema_version_summary(evidence, task = nil)
     task_compat = schema_version_compat(task_schema_version, "task")
     case task_compat
     when :legacy
-      legacy_warnings << schema_legacy_warning_entry(
+      legacy_errors << schema_removed_legacy_entry(
         "task_file.schema_version",
-        "Task file is missing schema_version; treating as legacy.",
+        "Task file is missing schema_version.",
         "Expected: #{ORBIT_CURRENT_SCHEMA_VERSIONS["task"]}"
       )
     when :unknown_future
@@ -273,11 +272,10 @@ def evidence_schema_version_summary(evidence, task = nil)
     end
 
     if task["schema_semantics"].nil? && task_compat == :current
-      legacy_warnings << schema_legacy_warning_entry(
+      legacy_errors << schema_removed_legacy_entry(
         "task_file.schema_semantics",
-        "Task file lacks schema_semantics; feature version tracking unavailable. " \
-        "Expected for tasks created before orbit-schema-versioning-v1.",
-        "New tasks created with 'orbit new-task' will include schema_semantics."
+        "Task file lacks schema_semantics; feature version tracking is required.",
+        "Recreate task with 'orbit new-task'."
       )
     end
   end
@@ -289,7 +287,7 @@ def evidence_schema_version_summary(evidence, task = nil)
     "compatibility_state" => ev_compat.to_s,
     "feature_versions_present" => feature_versions_present,
     "known_feature_versions" => ORBIT_FEATURE_VERSIONS.reject { |_k, v| v.nil? },
-    "legacy_warnings" => legacy_warnings,
+    "legacy_errors" => legacy_errors,
     "unknown_versions" => unknown_versions,
     "prose_conflicts" => prose_conflicts,
     "consistency_checks" => consistency_checks,

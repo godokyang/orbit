@@ -225,7 +225,7 @@ Design-first 任务使用独立 lifecycle：`drafting -> review_requested -> cha
 
 运行时 task 至少要说明：
 
-- `target_role`
+- `execution_contract`
 - `task_type`
 - `objective`
 - `quality_outcome`
@@ -312,7 +312,7 @@ gates:
     required: true
 ```
 
-`target_role` 仍表示当前实现或协调的主要负责人。`gates.roles` 表示哪些角色可以合法读取同一个 task 并提交 gate evidence。也就是说，reviewer/tester 在 coder 或 lead 的 implementation task 上工作时，不应因为 `target_role` 不同被视为身份冲突；如果当前 role 既不是 `target_role`，也不在 `gates.roles` 中，仍然 fail closed。
+`execution_contract.implementation_authority` 和 `execution_contract.assigned_instance` 表示当前实现负责人及具体 instance。`gates.roles` 表示哪些角色可以合法读取同一个 task 并提交 gate evidence。也就是说，reviewer/tester 在 coder 或 lead 的 implementation task 上工作时，不应因为不是 implementation assignee 被视为身份冲突；如果当前 role 既不是 owner、implementation authority，也不在 `gates.roles` 中，仍然 fail closed。
 
 普通 `orbit validate --task --evidence` 不会因为 implementation task 的 gate 尚未完成而失败，这样 coder 可以先记录 implementation evidence。进入 `done` 或运行最终 `audit` 时，Orbit 会要求 task 声明的 review/test gate 都有最新 `pass` evidence。
 

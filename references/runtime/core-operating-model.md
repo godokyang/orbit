@@ -6,7 +6,7 @@
 
 - 角色是职责位，不是模型名、客户端名或 pane id。
 - 身份必须在 agent 创建、重启或恢复时注入；skill 通过 `orbit whoami` 消费解析结果。
-- task file 使用 `target_role` 声明本轮任务目标角色，但不能静默覆盖 agent 的持久身份。
+- task file 使用 `execution_contract` snapshot 声明 owner、implementation authority 和 assigned instance；它不能静默覆盖 agent 的持久身份。
 - `.orbit/roles.yaml` 是机器可读项目事实源；`docs/operating-model.md` 是人读说明。
 - reviewer/tester 是独立 gate，不是 lead 的附属流程。
 - 可枚举、可重复、可验证的动作应工具化；AI 负责判断、取舍和解释。
@@ -44,7 +44,7 @@
 | 进程环境变量 | 启动 agent 进程时 | `ORBIT_ROLE=reviewer codex` | 给 tool/skill 读取；每个 agent 进程必须单独设置 |
 | 启动 prelude | agent 启动后第一条初始化消息 | `你是当前 workspace 的 reviewer role...` | 直接进入 LLM 上下文，是最清晰的身份信号 |
 | transport metadata | 创建 tab、pane、session 或 worker 时 | label = `reviewer-main` | 作为环境信号，经 Role Mapping 映射成通用角色 |
-| task file | 每次派单时 | `target_role: reviewer` | 只校验本轮任务是否派对人，不给 agent 重新定身份 |
+| task file | 每次派单时 | `execution_contract.assigned_instance: reviewer-main` | 校验本轮任务是否派给正确 role/instance，不给 agent 重新定身份 |
 
 不要在父 shell 里全局 `export ORBIT_ROLE=reviewer` 后启动多个 agent；这样所有子进程都会继承 reviewer 身份。launcher / transport adapter 应为每个实例分别设置 env、label 和 prelude。
 
@@ -56,9 +56,9 @@ agents:
     role: lead
     env:
       ORBIT_ROLE: lead
-      ORBIT_NAME: lead-main
+      ORBIT_INSTANCE: lead-main
       ORBIT_DOC: docs/operating-model.md
-    transport:
+    herdr:
       tab_label: lead-main
     prelude: |
       你是当前 workspace 的 lead role。
@@ -69,9 +69,9 @@ agents:
     role: reviewer
     env:
       ORBIT_ROLE: reviewer
-      ORBIT_NAME: reviewer-main
+      ORBIT_INSTANCE: reviewer-main
       ORBIT_DOC: docs/operating-model.md
-    transport:
+    herdr:
       tab_label: reviewer-main
     prelude: |
       你是当前 workspace 的 reviewer role。
@@ -82,9 +82,9 @@ agents:
     role: tester
     env:
       ORBIT_ROLE: tester
-      ORBIT_NAME: tester-main
+      ORBIT_INSTANCE: tester-main
       ORBIT_DOC: docs/operating-model.md
-    transport:
+    herdr:
       tab_label: tester-main
     prelude: |
       你是当前 workspace 的 tester role。
@@ -131,12 +131,6 @@ skill 的推荐启动动作：
     "pane": "pane-123",
     "canonical_pane": "pane-123"
   },
-  "transport_binding": {
-    "_deprecated": "diagnostic alias only; use binding and herdr as primary fields",
-    "pane": "pane-123",
-    "tab": "",
-    "space": ""
-  },
   "role_sources": {
     "env.ORBIT_INSTANCE": "reviewer-main",
     "env.ORBIT_ROLE": "reviewer",
@@ -162,7 +156,7 @@ skill 的推荐启动动作：
 }
 ```
 
-`binding` 和 `herdr` 是当前 primary runtime binding fields。`transport_binding` 只保留为 deprecated diagnostic alias，不证明 liveness，也不应作为 `start` / `dispatch` 决策依据。
+`binding` 和 `herdr` 是当前 primary runtime binding fields。`transport_binding` 已移除；`start`、`dispatch`、gate 和 hook 都不得把旧 alias 当作 live proof。
 
 项目配置描述角色和规则：
 
@@ -258,7 +252,7 @@ permission_projection:
 # .orbit/instances.yaml
 instances:
   reviewer-main:
-    role_ref: reviewer-main
+    role_ref: reviewer
     command: codex
     management: user_managed
     binding:
@@ -324,7 +318,7 @@ agent 按返回值工作
 | CLI whoami | `orbit whoami --json` | 聚合身份和项目规则路径 | skill 优先使用的身份解析结果 |
 | CLI rules resolve | `orbit rules resolve --json` | 解析默认规则、项目规则、task 规则和 rule packs | 正式闭环里的规则审计产物 |
 | CLI rules print-context | `orbit rules print-context --json` | 输出 agent 本轮应读取的 load_order、required_files 和 rule packs | 正式闭环里的上下文读取清单 |
-| task file | `target_role: reviewer` | 声明本轮任务目标角色 | 必须与当前 agent 身份一致 |
+| task file | `execution_contract` | 声明 owner、implementation authority、assigned instance 和 mode | 当前 agent 必须满足 owner、implementation assignee 或 gate role 规则 |
 | 用户当前消息 | “请你 review” | 当前交互提示 | 不能覆盖已确定的持久角色 |
 
 判定算法：
@@ -333,9 +327,9 @@ agent 按返回值工作
 2. 当前 `orbit whoami` 内部收集环境变量、project config 和 task file；prelude、transport label 和用户当前消息不能被假定为已进入 CLI，除非 adapter 明确转换成 env 或后续 metadata 输入。
 3. 用 project config / Role Mapping 把项目角色名归一化，例如 `lead-main -> lead`。
 4. 如果存在多个持久身份信号且互相冲突，返回 conflicts；skill 停止并报告冲突。
-5. 如果 task file 声明的 `target_role` 与当前 agent 身份不一致，停止并要求 lead 重新派单。
+5. 如果 task file 的 `execution_contract` 与当前 agent role/instance 不匹配，停止并要求 owner 重新派单或提交受控 override evidence。
 6. 如果 CLI 不可用，skill 才按同样规则在本地做降级解析，并在 evidence 中标注 `role_source_mode: local_fallback`。
-7. 如果没有持久身份，但 task file 明确声明 `target_role`，可以只在本 task 内临时采用该 role，并在结果里标注 `role_source: task_file_only`。
+7. 如果没有持久身份，不能只凭 task file 临时采用 role；新版本要求 `ORBIT_INSTANCE` / `ORBIT_ROLE` 或 `orbit start INSTANCE` 提供 runtime identity。
 8. 如果仍无法确定角色，不得默认自己是 reviewer/tester；普通单 agent 会话中，只有用户直接要求实现或协调时，才可临时作为 lead/coder 工作。
 
 禁止事项：
@@ -485,21 +479,21 @@ project_prohibitions:
 schema_version: orbit-instances-v1
 instances:
   lead-main:
-    role_ref: lead-main
+    role_ref: lead
     command: codex
     env:
       ORBIT_INSTANCE: lead-main
       ORBIT_ROLE: lead
 
   reviewer-main:
-    role_ref: reviewer-main
+    role_ref: reviewer
     command: codex
     env:
       ORBIT_INSTANCE: reviewer-main
       ORBIT_ROLE: reviewer
 
   tester-main:
-    role_ref: tester-main
+    role_ref: tester
     command: codex
     env:
       ORBIT_INSTANCE: tester-main
@@ -512,9 +506,15 @@ instances:
 
 ```yaml
 schema_version: orbit-task-v1
-target_role: reviewer
 task_type: implementation_review
 project: example-project
+execution_contract:
+  owner_role: lead
+  owner_instance: lead-main
+  operation_mode: team
+  implementation_authority: reviewer
+  assigned_instance: reviewer-main
+  source: explicit_override
 quality_rules:
   - docs/review-rule.md
   - docs/implementation-rule.md
@@ -571,9 +571,9 @@ quality_measurement:
   metrics: []
   waiver_policy: ""
 
-# target_role=tester、task_type 包含 test，或 required test gate 存在时，
+# implementation_authority=tester、task_type 包含 test，或 required test gate 存在时，
 # test_level 必须声明；passing test evidence 的 test_level 必须与 task 一致。
-# target_role=tester 或 task_type 包含 test 时，test_environment.required 必须为 true。
+# implementation_authority=tester 或 task_type 包含 test 时，test_environment.required 必须为 true。
 # performance / UX / workflow / quality / eval / measurement 类 task
 # 会要求 quality_measurement，并在 passing test evidence 中检查 baseline/after 或 waiver。
 design_lifecycle:
@@ -704,9 +704,9 @@ review/test/command 结果都写 manifest。manifest 是事实记录，不替代
     "role_sources": {
       "env.ORBIT_INSTANCE": "reviewer-main",
       "env.ORBIT_ROLE": "reviewer",
-      "project_config.instances.reviewer-main.role_ref": "reviewer-main",
-      "project_config.roles.reviewer-main.role": "reviewer",
-      "task_file.target_role": "reviewer"
+      "project_config.instances.reviewer-main.role_ref": "reviewer",
+      "project_config.roles.reviewer.role": "reviewer",
+      "task_file.execution_contract.assigned_instance": "reviewer-main"
     },
     "role_source_mode": "persistent_identity_confirmed",
     "conflict": null

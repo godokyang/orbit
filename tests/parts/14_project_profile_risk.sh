@@ -5,7 +5,7 @@
 # ---- Group 1: new-task writes task_risk and project_profile ----
 
 S11_IMPL_TASK="$TMPROOT/s11-impl-task.yaml"
-"$CLI" new-task --target-role lead --task-type implementation --output "$S11_IMPL_TASK" >/dev/null
+"$CLI" new-task --task-type implementation --output "$S11_IMPL_TASK" >/dev/null
 yaml_assert 'new-task implementation writes task_risk' "$S11_IMPL_TASK" \
   'j["task_risk"].is_a?(Hash) && j["task_risk"]["level"].is_a?(String) && !j["task_risk"]["level"].empty?'
 yaml_assert 'new-task implementation derives standard risk' "$S11_IMPL_TASK" \
@@ -21,7 +21,7 @@ pass 'new-task writes task_risk and project_profile for standard implementation'
 # ---- Group 2: docs task derives light risk ----
 
 S11_DOCS_TASK="$TMPROOT/s11-docs-task.yaml"
-"$CLI" new-task --target-role reviewer --task-type docs_improvement --output "$S11_DOCS_TASK" >/dev/null
+"$CLI" new-task --implementation-authority reviewer --assigned-instance reviewer-main --task-type docs_improvement --output "$S11_DOCS_TASK" >/dev/null
 yaml_assert 'new-task docs derives light risk' "$S11_DOCS_TASK" \
   'j["task_risk"]["level"] == "light"'
 yaml_assert 'new-task light task has no required gates' "$S11_DOCS_TASK" \
@@ -33,7 +33,7 @@ pass 'docs task derives light risk'
 # ---- Group 3: release task type derives release risk ----
 
 S11_RELEASE_TASK="$TMPROOT/s11-release-task.yaml"
-"$CLI" new-task --target-role lead --task-type release_implementation --output "$S11_RELEASE_TASK" >/dev/null
+"$CLI" new-task --task-type release_implementation --output "$S11_RELEASE_TASK" >/dev/null
 yaml_assert 'new-task release derives release risk' "$S11_RELEASE_TASK" \
   'j["task_risk"]["level"] == "release"'
 yaml_assert 'new-task release has release gate' "$S11_RELEASE_TASK" \
@@ -48,7 +48,7 @@ pass 'release task type derives release risk with release gate and strict enforc
 
 S11_LIGHT_EVIDENCE="$TMPROOT/s11-light-evidence.json"
 "$CLI" evidence init --output "$S11_LIGHT_EVIDENCE" >/dev/null
-ORBIT_INSTANCE=reviewer "$CLI" evidence add \
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence add \
   --file "$S11_LIGHT_EVIDENCE" --kind command --status pass --summary "docs typo fixed" >/dev/null
 "$CLI" validate --task "$S11_DOCS_TASK" --evidence "$S11_LIGHT_EVIDENCE" --json >"$TMPROOT/s11-light-validate.json"
 json_assert 'light task validates without review evidence' "$TMPROOT/s11-light-validate.json" \
@@ -58,7 +58,7 @@ pass 'light task does not require parent goal or formal review gate'
 # ---- Group 5: strict task requires review/test gates and write policy ----
 
 S11_STRICT_TASK="$TMPROOT/s11-strict-task.yaml"
-"$CLI" new-task --target-role lead --task-type security_migration --output "$S11_STRICT_TASK" >/dev/null
+"$CLI" new-task --task-type security_migration --output "$S11_STRICT_TASK" >/dev/null
 yaml_assert 'new-task security_migration derives strict risk' "$S11_STRICT_TASK" \
   'j["task_risk"]["level"] == "strict"'
 yaml_assert 'strict task has strict write_policy_enforcement' "$S11_STRICT_TASK" \
@@ -132,7 +132,7 @@ json_assert 'audit task_risk_summary confirms project rules are supplement' "$TM
 S11_STRICT_EVIDENCE="$TMPROOT/s11-strict-evidence.json"
 "$CLI" evidence init --output "$S11_STRICT_EVIDENCE" >/dev/null
 write_review_pass_report "$TMPROOT/s11-strict-review.yaml" "Strict task review passed." "herdr:reviewer:s11-strict"
-ORBIT_INSTANCE=reviewer "$CLI" evidence submit --file "$S11_STRICT_EVIDENCE" --report "$TMPROOT/s11-strict-review.yaml" --task "$S11_STRICT_TASK" --json >/dev/null
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit --file "$S11_STRICT_EVIDENCE" --report "$TMPROOT/s11-strict-review.yaml" --task "$S11_STRICT_TASK" --json >/dev/null
 # Add test evidence with proper runtime_binding
 write_test_pass_report "$TMPROOT/s11-strict-test.yaml" "Strict task test passed." "herdr:tester:s11-strict"
 # Append test_environment
@@ -150,7 +150,7 @@ test_environment:
   ux_quality: not_applicable
   artifact_quality: ok
 YAML
-ORBIT_INSTANCE=tester "$CLI" evidence submit --file "$S11_STRICT_EVIDENCE" --report "$TMPROOT/s11-strict-test.yaml" --task "$S11_STRICT_TASK" --json >/dev/null
+ORBIT_INSTANCE=tester-main "$CLI" evidence submit --file "$S11_STRICT_EVIDENCE" --report "$TMPROOT/s11-strict-test.yaml" --task "$S11_STRICT_TASK" --json >/dev/null
 "$CLI" validate --task "$S11_STRICT_TASK" --evidence "$S11_STRICT_EVIDENCE" --json >"$TMPROOT/s11-strict-validate.json"
 json_assert 'strict task validates with proper evidence' "$TMPROOT/s11-strict-validate.json" \
   'j["valid"] == true'
@@ -200,7 +200,7 @@ json_assert 'release task with empty skeleton is not trusted_for_release' "$TMPR
 # ---- Group 15: new-task creates nested output directory ----
 
 S11_NESTED_TASK="$TMPROOT/s11-nested/deep/task.yaml"
-"$CLI" new-task --target-role lead --task-type implementation --output "$S11_NESTED_TASK" >/dev/null
+"$CLI" new-task --task-type implementation --output "$S11_NESTED_TASK" >/dev/null
 test -f "$S11_NESTED_TASK"
 pass 'new-task creates nested output directory'
 

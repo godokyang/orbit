@@ -4,9 +4,9 @@ expect_failure 'validate review task requires evidence' "$CLI" validate --task "
 test ! -s "$TMPROOT/valid-task-evidence.err"
 json_assert 'validate passes valid task with evidence' "$TMPROOT/valid-task-evidence.json" 'j["valid"] == true && j["checked"].include?("task") && j["checked"].include?("evidence")'
 
-cp "$TASK" "$TMPROOT/task-missing-target.yaml"
-ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y.delete("target_role"); File.write(p, YAML.dump(y))' "$TMPROOT/task-missing-target.yaml"
-expect_failure 'validate fails task missing target_role' "$CLI" validate --task "$TMPROOT/task-missing-target.yaml" --evidence "$EVIDENCE" --json
+cp "$TASK" "$TMPROOT/task-missing-execution-contract.yaml"
+ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y.delete("execution_contract"); File.write(p, YAML.dump(y))' "$TMPROOT/task-missing-execution-contract.yaml"
+expect_failure 'validate fails task missing execution_contract' "$CLI" validate --task "$TMPROOT/task-missing-execution-contract.yaml" --evidence "$EVIDENCE" --json
 
 cp "$TASK" "$TMPROOT/task-missing-evidence-req.yaml"
 ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y.delete("evidence_requirements"); File.write(p, YAML.dump(y))' "$TMPROOT/task-missing-evidence-req.yaml"
@@ -35,12 +35,17 @@ json_assert 'validate passes complete decomposition contract' "$TMPROOT/decompos
 QUALITY_EVIDENCE="$TMPROOT/quality-measurement-evidence.json"
 "$CLI" evidence init --output "$QUALITY_EVIDENCE" >/dev/null
 write_review_pass_report "$TMPROOT/quality-review-pass.yaml" "Quality review passed." "herdr:reviewer:quality-review"
-ORBIT_INSTANCE=reviewer "$CLI" evidence submit --file "$QUALITY_EVIDENCE" --report "$TMPROOT/quality-review-pass.yaml" --json >/dev/null
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit --file "$QUALITY_EVIDENCE" --report "$TMPROOT/quality-review-pass.yaml" --json >/dev/null
 write_test_pass_report "$TMPROOT/quality-test-missing-baseline.yaml" "Quality test missing baseline." "herdr:tester:quality-test-missing-baseline"
-ORBIT_INSTANCE=tester "$CLI" evidence submit --file "$QUALITY_EVIDENCE" --report "$TMPROOT/quality-test-missing-baseline.yaml" --json >/dev/null
+ORBIT_INSTANCE=tester-main "$CLI" evidence submit --file "$QUALITY_EVIDENCE" --report "$TMPROOT/quality-test-missing-baseline.yaml" --json >/dev/null
 expect_failure 'validate rejects quality measurement pass without baseline after evidence' "$CLI" validate --task "$PERFORMANCE_TASK" --evidence "$QUALITY_EVIDENCE" --json
 cat >"$TMPROOT/quality-measurement-submit.yaml" <<'YAML'
 kind: test
+report_template_version: test-report-v1
+schema_semantics:
+  feature_versions:
+    evidence_level: v1
+    schema_semantics: v1
 verdict: pass
 summary: Performance quality measurement includes baseline and after values.
 source_message_id: herdr:tester:quality-measurement-pass
@@ -91,7 +96,7 @@ runtime_binding:
     name: "fixture-browser"
     owner: "tester"
 YAML
-ORBIT_INSTANCE=tester "$CLI" evidence submit --file "$QUALITY_EVIDENCE" --report "$TMPROOT/quality-measurement-submit.yaml" --json >"$TMPROOT/quality-measurement-submit.json"
+ORBIT_INSTANCE=tester-main "$CLI" evidence submit --file "$QUALITY_EVIDENCE" --report "$TMPROOT/quality-measurement-submit.yaml" --json >"$TMPROOT/quality-measurement-submit.json"
 "$CLI" validate --task "$PERFORMANCE_TASK" --evidence "$QUALITY_EVIDENCE" --json >"$TMPROOT/valid-quality-measurement.json"
 json_assert 'validate accepts quality measurement baseline and after evidence' "$TMPROOT/valid-quality-measurement.json" 'j["valid"] == true'
 
@@ -101,4 +106,3 @@ expect_failure 'validate fails invalid evidence verdict' "$CLI" validate --evide
 expect_failure 'validate rejects missing task option value' "$CLI" validate --task --json
 expect_failure 'validate rejects missing evidence option value' "$CLI" validate --evidence --json
 expect_failure 'validate rejects missing state option value' "$CLI" validate --state --json
-

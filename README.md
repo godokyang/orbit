@@ -116,7 +116,7 @@ Herdr 不是 Orbit protocol 的必需依赖，但它是唯一官方 automatic ru
 如果没有 Herdr adapter，或 `start` 不能自动启动目标 agent：
 
 1. 在你想承载 agent 的终端、tmux pane、zellij pane、wezterm pane、CI shell 或普通 shell 里进入项目目录。
-2. 按 `.orbit/instances.yaml` 里的 `command` 手动启动，并设置 `ORBIT_INSTANCE` 和 `ORBIT_ROLE`，例如 `ORBIT_INSTANCE=reviewer ORBIT_ROLE=reviewer codex`。
+2. 按 `.orbit/instances.yaml` 里的 `command` 手动启动，并设置 `ORBIT_INSTANCE` 和 `ORBIT_ROLE`，例如 `ORBIT_INSTANCE=reviewer-main ORBIT_ROLE=reviewer codex`。
 3. agent 启动后运行 `orbit whoami --json` 和 `orbit rules print-context --json` 确认身份与规则。
 4. 对非 Herdr 环境，不要期待 Orbit 自动创建 pane 或把命令打进去；继续用 `orbit evidence ...`、`orbit validate/audit` 完成协议层工作。
 
@@ -289,7 +289,7 @@ orbit evidence init --output .orbit/evidence/current-evidence.json
 开始任务：
 
 ```bash
-ORBIT_INSTANCE=lead orbit state start --task .orbit/tasks/current-task.yaml
+ORBIT_INSTANCE=lead-main orbit state start --task .orbit/tasks/current-task.yaml
 ```
 
 实现完成后记录实现证据：
@@ -315,13 +315,13 @@ orbit evidence add \
 reviewer 和 tester 需要提交结构化 report：
 
 ```bash
-ORBIT_INSTANCE=reviewer orbit evidence submit \
+ORBIT_INSTANCE=reviewer-main orbit evidence submit \
   --file .orbit/evidence/current-evidence.json \
   --report .orbit/reports/review-report.yaml \
   --task .orbit/tasks/current-task.yaml \
   --json
 
-ORBIT_INSTANCE=tester orbit evidence submit \
+ORBIT_INSTANCE=tester-main orbit evidence submit \
   --file .orbit/evidence/current-evidence.json \
   --report .orbit/reports/test-report.yaml \
   --task .orbit/tasks/current-task.yaml \
@@ -468,18 +468,18 @@ instances:
 检查当前身份：
 
 ```bash
-ORBIT_INSTANCE=reviewer orbit whoami --json
+ORBIT_INSTANCE=reviewer-main orbit whoami --json
 ```
 
 解析本轮规则：
 
 ```bash
-ORBIT_INSTANCE=lead orbit rules resolve \
+ORBIT_INSTANCE=lead-main orbit rules resolve \
   --task .orbit/tasks/current-task.yaml \
   --output .orbit/rules/current-resolution.json \
   --json
 
-ORBIT_INSTANCE=lead orbit rules print-context \
+ORBIT_INSTANCE=lead-main orbit rules print-context \
   --task .orbit/tasks/current-task.yaml \
   --output .orbit/rules/current-context.json \
   --json
@@ -497,15 +497,15 @@ ORBIT_INSTANCE=lead orbit rules print-context \
 - review/test verdict 是 `fail`、`partial` 或 `invalid`。
 - implementation task 声明了 review/test gate，但最新 gate evidence 不是 `pass`。
 - task、evidence、loop state 引用不一致。
-- 当前 agent 身份和 task `target_role` 冲突，且当前 agent 不在 task `gates.roles` 中。
+- 当前 agent 身份不满足 task `execution_contract`，且当前 agent 不在 task `gates.roles` 中。
 
 用户可以接受风险，但 agent 必须把风险、缺口和下一步说清楚。
 
 ## 命令速查
 
 ```bash
-orbit init
-orbit new-task --target-role lead --task-type implementation --output .orbit/tasks/current-task.yaml
+orbit init --operation-mode solo
+orbit new-task --task-type implementation --output .orbit/tasks/current-task.yaml
 orbit evidence init --output .orbit/evidence/current-evidence.json
 orbit evidence add --file .orbit/evidence/current-evidence.json --kind implementation --status pass --summary "..."
 orbit evidence submit --file .orbit/evidence/current-evidence.json --report .orbit/reports/review-report.yaml --task .orbit/tasks/current-task.yaml --json

@@ -3,7 +3,7 @@
 # ---------------------------------------------------------------------------
 
 S15_TASK="$TMPROOT/s15-task.yaml"
-"$CLI" new-task --target-role reviewer --task-type implementation_review --output "$S15_TASK" >/dev/null
+"$CLI" new-task --implementation-authority reviewer --assigned-instance reviewer-main --task-type implementation_review --output "$S15_TASK" >/dev/null
 
 # ---- Group 1: dogfood index covers all P0/P1 adjustments ----
 S15_INDEX="$SCRIPT_DIR/fixtures/dogfood-index.json"
@@ -39,7 +39,7 @@ pass 'failed dogfood case maps to source_adjustment and expected behavior via he
 S15_STALE_EVIDENCE="$TMPROOT/s15-stale-evidence.json"
 "$CLI" evidence init --output "$S15_STALE_EVIDENCE" >/dev/null
 write_review_pass_report "$TMPROOT/s15-stale-review.yaml" "Review pass linked to original task." "herdr:reviewer:s15-stale"
-ORBIT_INSTANCE=reviewer "$CLI" evidence submit \
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit \
   --file "$S15_STALE_EVIDENCE" \
   --report "$TMPROOT/s15-stale-review.yaml" \
   --task "$S15_TASK" \
@@ -56,7 +56,7 @@ pass 'stale gate fixture blocks gate with old task sha'
 
 S15_TRANSPORT_EVIDENCE="$TMPROOT/s15-transport-evidence.json"
 "$CLI" evidence init --output "$S15_TRANSPORT_EVIDENCE" >/dev/null
-ORBIT_INSTANCE=reviewer "$CLI" evidence add \
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence add \
   --file "$S15_TRANSPORT_EVIDENCE" \
   --kind command --status pass --summary "DONE: transport notification only" >/dev/null
 if "$CLI" wait-gate --task "$S15_TASK" --evidence "$S15_TRANSPORT_EVIDENCE" --json >"$TMPROOT/s15-transport-wait-gate.json" 2>/dev/null; then
@@ -80,12 +80,12 @@ pass 'destructive dry-run fixture blocks unsafe deletion'
 # ---- Group 6: protocol-changing release without dogfood status is blocked ----
 
 S15_RELEASE_TASK="$TMPROOT/s15-release-task.yaml"
-"$CLI" new-task --target-role lead --task-type release_implementation --output "$S15_RELEASE_TASK" >/dev/null
+"$CLI" new-task --task-type release_implementation --output "$S15_RELEASE_TASK" >/dev/null
 # Set protocol_changed=true and fill all release_readiness fields except dogfood_suite.
 ruby --disable-gems -ryaml -e '
   p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true)
   y["protocol_changed"]=true
-  y["compatibility_policy"]={"mode"=>"warn_legacy","applies_to"=>["task","evidence"],"breaking_change"=>false,"migration_path"=>""}
+  y["compatibility_policy"]={"mode"=>"enforce_current","applies_to"=>["task","evidence"],"breaking_change"=>false,"migration_path"=>""}
   y["self_review_guard"]={"protocol_changed"=>true,"independent_check"=>"reviewer-report:s15-protocol-release","independent_check_required"=>true,"same_system_self_approval_allowed"=>false}
   y["release_readiness"]["ci"]={"provider"=>"github","run_id"=>"1","status"=>"passed"}
   y["release_readiness"]["package"]={"artifact_path"=>"pkg.tgz","artifact_sha256"=>"a"*64,"contents_checked"=>true}
@@ -102,7 +102,7 @@ cp "$S15_RELEASE_TASK" "$S15_GUARD_PROTOCOL_TASK"
 ruby --disable-gems -ryaml -e '
   p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true)
   y.delete("protocol_changed")
-  y["compatibility_policy"]={"mode"=>"warn_legacy","applies_to"=>["task","evidence"],"breaking_change"=>false,"migration_path"=>""}
+  y["compatibility_policy"]={"mode"=>"enforce_current","applies_to"=>["task","evidence"],"breaking_change"=>false,"migration_path"=>""}
   y["self_review_guard"]={"protocol_changed"=>true,"independent_check"=>"reviewer-report:s15-protocol-release","independent_check_required"=>true,"same_system_self_approval_allowed"=>false}
   File.write(p, YAML.dump(y))' "$S15_GUARD_PROTOCOL_TASK"
 "$CLI" validate --task "$S15_GUARD_PROTOCOL_TASK" --json >"$TMPROOT/s15-guard-protocol-validate.json" 2>/dev/null || true
@@ -139,7 +139,7 @@ json_assert 'audit dogfood_governance_summary shows suite status and waiver' "$T
 # ---- Group 8: non-protocol release does not require dogfood ----
 
 S15_NON_PROTO_TASK="$TMPROOT/s15-non-proto-task.yaml"
-"$CLI" new-task --target-role lead --task-type release_implementation --output "$S15_NON_PROTO_TASK" >/dev/null
+"$CLI" new-task --task-type release_implementation --output "$S15_NON_PROTO_TASK" >/dev/null
 ruby --disable-gems -ryaml -e '
   p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true)
   y["release_readiness"]["ci"]={"provider"=>"github","run_id"=>"2","status"=>"passed"}
@@ -155,7 +155,7 @@ pass 'non-protocol-changing release does not require dogfood'
 # ---- Group 9: retrospective task without done criteria fails ----
 
 S15_RETRO_TASK="$TMPROOT/s15-retro-task.yaml"
-"$CLI" new-task --target-role lead --task-type retrospective --output "$S15_RETRO_TASK" >/dev/null
+"$CLI" new-task --task-type retrospective --output "$S15_RETRO_TASK" >/dev/null
 # Clear acceptance to simulate missing done criteria.
 ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["acceptance"]=[]; File.write(p, YAML.dump(y))' "$S15_RETRO_TASK"
 expect_failure 'validate rejects retrospective without done criteria' "$CLI" validate --task "$S15_RETRO_TASK" --json
@@ -164,7 +164,7 @@ pass 'retrospective task without done criteria fails validation'
 # ---- Group 10: postmortem task with done criteria passes ----
 
 S15_POSTMORTEM_TASK="$TMPROOT/s15-postmortem-task.yaml"
-"$CLI" new-task --target-role lead --task-type postmortem --output "$S15_POSTMORTEM_TASK" >/dev/null
+"$CLI" new-task --task-type postmortem --output "$S15_POSTMORTEM_TASK" >/dev/null
 ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["acceptance"]=["Root cause identified","Action items assigned","Follow-up verification planned"]; File.write(p, YAML.dump(y))' "$S15_POSTMORTEM_TASK"
 "$CLI" validate --task "$S15_POSTMORTEM_TASK" --json >"$TMPROOT/s15-postmortem-validate.json" 2>/dev/null || true
 json_assert 'validate accepts postmortem with done criteria' "$TMPROOT/s15-postmortem-validate.json" \
@@ -174,7 +174,7 @@ pass 'postmortem task with done criteria passes validation'
 # ---- Group 11: schema_semantics includes orbit_dogfood_governance v1 ----
 
 S15_IMPL_TASK="$TMPROOT/s15-impl-task.yaml"
-"$CLI" new-task --target-role lead --task-type implementation --output "$S15_IMPL_TASK" >/dev/null
+"$CLI" new-task --task-type implementation --output "$S15_IMPL_TASK" >/dev/null
 yaml_assert 'new-task includes orbit_dogfood_governance feature version' "$S15_IMPL_TASK" \
   'j.dig("schema_semantics","feature_versions","orbit_dogfood_governance") == "v1"'
 

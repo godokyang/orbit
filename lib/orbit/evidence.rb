@@ -2,7 +2,7 @@
 
 ALLOWED_EVIDENCE_STATUSES = %w[pass fail partial invalid].freeze
 ALLOWED_EVIDENCE_VERDICT_STATUSES = (ALLOWED_EVIDENCE_STATUSES + %w[in_progress]).freeze
-ALLOWED_EVIDENCE_KINDS = %w[review test command implementation waiver].freeze
+ALLOWED_EVIDENCE_KINDS = %w[review test command implementation implementation_instance_override waiver].freeze
 STRUCTURED_SUBMIT_KINDS = %w[review test].freeze
 ALLOWED_TEST_LEVELS = %w[unit integration repo_regression browser_e2e provider_e2e dogfood manual not_applicable].freeze
 ALLOWED_REVIEW_QUALITY_OUTCOME_VERDICTS = %w[pass fail partial blocked unknown not_applicable].freeze
@@ -99,6 +99,29 @@ def parse_evidence_args(args)
       options["waiver"] = option_value(args, "--waiver")
     when /\A--waiver=(.+)\z/
       options["waiver"] = Regexp.last_match(1)
+    when "--from-instance"
+      options["from_instance"] = option_value(args, "--from-instance")
+    when /\A--from-instance=(.+)\z/
+      options["from_instance"] = Regexp.last_match(1)
+    when "--to-instance"
+      options["to_instance"] = option_value(args, "--to-instance")
+    when /\A--to-instance=(.+)\z/
+      options["to_instance"] = Regexp.last_match(1)
+    when "--reason"
+      options["reason"] = option_value(args, "--reason")
+    when /\A--reason=(.+)\z/
+      options["reason"] = Regexp.last_match(1)
+    when "--expires-at"
+      options["expires_at"] = option_value(args, "--expires-at")
+    when /\A--expires-at=(.+)\z/
+      options["expires_at"] = Regexp.last_match(1)
+    when "--no-expiry"
+      options["no_expiry"] = true
+    when "--authorized-by-role", "--authorized-by-instance"
+      option_value(args, arg)
+      usage_error("#{arg} is derived from current identity and cannot be supplied.")
+    when /\A--authorized-by-(?:role|instance)=/
+      usage_error("#{arg.split("=").first} is derived from current identity and cannot be supplied.")
     when "--json"
       options["json"] = true
     else
@@ -110,8 +133,23 @@ def parse_evidence_args(args)
   when "init"
     usage_error("Missing required option: --output") if options["output"].nil? || options["output"].empty?
   when "add"
-    %w[file kind status summary].each do |name|
+    %w[file kind].each do |name|
       usage_error("Missing required option: --#{name}") if options[name].nil? || options[name].empty?
+    end
+    unless options["kind"] == "implementation_instance_override"
+      %w[status summary].each do |name|
+        usage_error("Missing required option: --#{name}") if options[name].nil? || options[name].empty?
+      end
+    end
+    if options["kind"] == "implementation" && options["task"].to_s.empty?
+      usage_error("evidence add --kind implementation requires --task so Orbit can enforce execution_contract.")
+    end
+    if options["kind"] == "implementation_instance_override"
+      %w[task from_instance to_instance reason].each do |name|
+        usage_error("Missing required option: --#{name.tr("_", "-")}") if options[name].to_s.empty?
+      end
+      usage_error("implementation_instance_override requires --expires-at or --no-expiry.") if options["expires_at"].to_s.empty? && options["no_expiry"] != true
+      usage_error("implementation_instance_override cannot use both --expires-at and --no-expiry.") if !options["expires_at"].to_s.empty? && options["no_expiry"] == true
     end
   when "from-report"
     usage_error("Missing required option: --file") if options["file"].nil? || options["file"].empty?
@@ -125,6 +163,7 @@ def parse_evidence_args(args)
   when "attach-rule"
     usage_error("Missing required option: --file") if options["file"].nil? || options["file"].empty?
     usage_error("Missing required option: --rule-resolution") if options["rule_resolution"].nil? || options["rule_resolution"].empty?
+    usage_error("Missing required option: --task") if options["task"].nil? || options["task"].empty?
   when "show"
     usage_error("Missing required option: --file") if options["file"].nil? || options["file"].empty?
     usage_error("evidence show currently requires --json") unless options["json"]
@@ -232,8 +271,134 @@ def evidence_identity_snapshot(identity)
     "resolved_role" => identity["resolved_role"],
     "role_ref" => identity["role_ref"],
     "expected_command" => identity["expected_command"],
-    "actual_client" => identity["actual_client"],
-    "transport_binding" => identity["transport_binding"]
+    "actual_client" => identity["actual_client"]
+  }.compact
+end
+
+def structured_role_execution_context(identity, evidence_path, task_path: nil, report: nil, rules_context_sha256: nil)
+  return nil unless identity.is_a?(Hash)
+
+  snapshot = evidence_identity_snapshot(identity)
+  manifest_preview = load_evidence_manifest(evidence_path) rescue nil
+  rule_res_file = manifest_preview.is_a?(Hash) && manifest_preview["rule_resolution"].is_a?(Hash) ? manifest_preview["rule_resolution"]["file"] : nil
+  computed_rules_sha = (rule_res_file.is_a?(String) && !rule_res_file.empty?) ? sha256_file(rule_res_file) : nil
+  effective_rules_sha = rules_context_sha256 || computed_rules_sha
+  git_head = capture_git_head
+  dirty = capture_git_dirty_files
+  write_policy_expected = report.is_a?(Hash) && report["write_policy"].is_a?(Hash) ? report.dig("write_policy", "expected") : nil
+  worktree = { "git_head" => git_head }.tap { |wt| wt["dirty_files_before"] = dirty unless dirty.empty? }.compact
+  permission_profile = {
+    "mode" => "audit_only",
+    "write_policy" => write_policy_expected || "no_production_writes",
+    "sandbox" => "none"
+  }
+  {
+    "instance" => snapshot["instance"] || snapshot["resolved_instance"],
+    "resolved_role" => snapshot["resolved_role"],
+    "role_ref" => snapshot["role_ref"],
+    "role_config_sha256" => sha256_file(File.join(Dir.pwd, ".orbit", "roles.yaml")),
+    "rules_resolution_sha256" => effective_rules_sha,
+    "rules_context_sha256" => effective_rules_sha,
+    "task_sha256" => task_path ? sha256_file(File.expand_path(task_path)) : nil,
+    "evidence_manifest_sha256_before_submit" => File.file?(evidence_path) ? sha256_file(evidence_path) : nil,
+    "worktree" => worktree.empty? ? nil : worktree,
+    "permission_profile" => permission_profile
+  }.compact
+end
+
+def load_task_for_evidence!(task_path)
+  task = load_yaml(File.expand_path(task_path))
+  evidence_error("Task file must contain a mapping: #{task_path}") unless task.is_a?(Hash)
+  task["__orbit_path"] = File.expand_path(task_path)
+  evidence_error("task_schema_reinit_required: target_role was removed; recreate the task with execution_contract.") if task.key?("target_role")
+  evidence_error("Task must define execution_contract.") unless task["execution_contract"].is_a?(Hash)
+  task
+rescue RuntimeError => e
+  evidence_error(e.message)
+end
+
+def implementation_role_execution_context!(task_path, evidence_path = nil)
+  task = load_task_for_evidence!(task_path)
+  identity = evidence_runtime_identity!
+  contract = task_execution_contract(task)
+  resolved_role = identity["resolved_role"]
+  resolved_instance = identity["resolved_instance"] || identity["instance"]
+  evidence = evidence_path && File.file?(evidence_path) ? load_evidence_manifest(evidence_path) : nil
+  override = valid_implementation_override_for_identity(task, evidence, resolved_role, resolved_instance)
+  unless (resolved_role == contract["implementation_authority"] && resolved_instance == contract["assigned_instance"]) || override
+    evidence_error("implementation evidence requires #{contract["implementation_authority"].inspect}/#{contract["assigned_instance"].inspect}; current identity is #{resolved_role.inspect}/#{resolved_instance.inspect}.")
+  end
+
+  {
+    "task" => File.expand_path(task_path),
+    "task_sha256" => sha256_file(File.expand_path(task_path)),
+    "instance" => identity["instance"],
+    "resolved_instance" => resolved_instance,
+    "resolved_role" => resolved_role,
+    "role_ref" => identity["role_ref"],
+    "owner_role" => contract["owner_role"],
+    "owner_instance" => contract["owner_instance"],
+    "operation_mode" => contract["operation_mode"],
+    "implementation_authority" => contract["implementation_authority"],
+    "assigned_instance" => contract["assigned_instance"],
+    "execution_contract_source" => contract["source"],
+    "override" => override ? {
+      "from_instance" => override["from_instance"],
+      "to_instance" => override["to_instance"],
+      "authorized_by_role" => override["authorized_by_role"],
+      "authorized_by_instance" => override["authorized_by_instance"],
+      "created_at" => override["created_at"],
+      "expires_at" => override["expires_at"],
+      "no_expiry" => override["no_expiry"]
+    }.compact : nil,
+    "source" => "evidence_add"
+  }.compact
+end
+
+def parse_override_expiry!(expires_at)
+  return nil if expires_at.to_s.empty?
+
+  Time.iso8601(expires_at)
+rescue ArgumentError
+  evidence_error("--expires-at must be ISO8601.")
+end
+
+def implementation_instance_override_record!(options)
+  task_path = File.expand_path(options["task"])
+  task = load_task_for_evidence!(task_path)
+  identity = evidence_runtime_identity!
+  contract = task_execution_contract(task)
+  authorized_role = identity["resolved_role"]
+  authorized_instance = identity["resolved_instance"] || identity["instance"]
+  unless authorized_role == contract["owner_role"] && authorized_instance == contract["owner_instance"]
+    evidence_error("implementation_instance_override requires owner identity #{contract["owner_role"].inspect}/#{contract["owner_instance"].inspect}; current identity is #{authorized_role.inspect}/#{authorized_instance.inspect}.")
+  end
+
+  from_instance = options["from_instance"].to_s
+  to_instance = options["to_instance"].to_s
+  evidence_error("--from-instance must equal task assigned_instance #{contract["assigned_instance"].inspect}.") unless from_instance == contract["assigned_instance"]
+
+  roles, instances = load_project_instance_config_for_cli[0, 2]
+  to_role = role_for_instance(instances, roles, to_instance)
+  evidence_error("--to-instance #{to_instance.inspect} resolves to #{to_role.inspect}, not #{contract["implementation_authority"].inspect}.") unless to_role == contract["implementation_authority"]
+  expiry = parse_override_expiry!(options["expires_at"])
+
+  {
+    "kind" => "implementation_instance_override",
+    "status" => "pass",
+    "summary" => options["summary"].to_s.empty? ? options["reason"].to_s : options["summary"].to_s,
+    "task" => task_path,
+    "task_sha256" => sha256_file(task_path),
+    "from_role" => contract["implementation_authority"],
+    "from_instance" => from_instance,
+    "to_role" => to_role,
+    "to_instance" => to_instance,
+    "authorized_by_role" => authorized_role,
+    "authorized_by_instance" => authorized_instance,
+    "reason" => options["reason"].to_s,
+    "created_at" => Time.now.utc.iso8601,
+    "expires_at" => expiry&.utc&.iso8601,
+    "no_expiry" => options["no_expiry"] == true
   }.compact
 end
 
@@ -391,8 +556,7 @@ def evidence_gate_identity_role(record)
   rec_ctx = record["role_execution_context"]
   return rec_ctx["resolved_role"] if rec_ctx.is_a?(Hash) && rec_ctx.key?("resolved_role")
 
-  identity = record["identity"]
-  identity.is_a?(Hash) ? identity["resolved_role"] : nil
+  nil
 end
 
 def evidence_structured_gate_identity_valid?(kind, record)
@@ -524,15 +688,23 @@ def evidence_add(options)
     evidence_error("#{options["kind"]} PASS evidence must be submitted with evidence submit --report <structured-yaml>.")
   end
   identity = require_evidence_submit_capability!(options["kind"])
-  record = {
-    "kind" => options["kind"],
-    "status" => options["status"],
-    "summary" => options["summary"].strip,
-    "created_at" => Time.now.utc.iso8601
-  }
+  record = if options["kind"] == "implementation_instance_override"
+             implementation_instance_override_record!(options)
+           else
+             {
+               "kind" => options["kind"],
+               "status" => options["status"],
+               "summary" => options["summary"].strip,
+               "created_at" => Time.now.utc.iso8601
+             }
+           end
   apply_structured_gate_defaults!(record, "manual:evidence-add:#{record["created_at"]}")
-  snapshot = evidence_identity_snapshot(identity)
-  record["identity"] = snapshot if snapshot
+  if options["kind"] == "implementation"
+    record["role_execution_context"] = implementation_role_execution_context!(options["task"], path)
+  elsif STRUCTURED_SUBMIT_KINDS.include?(options["kind"])
+    rec_ctx = structured_role_execution_context(identity, path, task_path: options["task"])
+    record["role_execution_context"] = rec_ctx if rec_ctx
+  end
   # Slice 10: parse --decision-record (JSON/YAML string or @file) and attach to record.
   if options["decision_record"]
     dr_source = options["decision_record"]
@@ -746,8 +918,8 @@ def evidence_from_report(options)
       ne = validate_negative_evidence!(report["negative_evidence"], "from_report", kind)
       record["negative_evidence"] = ne if ne
     end
-    snapshot = evidence_identity_snapshot(identity)
-    record["identity"] = snapshot if snapshot
+    rec_ctx = structured_role_execution_context(identity, path, task_path: options["task"], report: report)
+    record["role_execution_context"] = rec_ctx if rec_ctx
     validate_evidence_record_shape!(record, "Evidence record")
 
     updated_manifest = update_evidence_manifest(path) do |manifest|
@@ -777,8 +949,6 @@ def evidence_from_report(options)
     "source_report" => report_path
   }
   apply_structured_gate_defaults!(record, "report:#{report_path}")
-  snapshot = evidence_identity_snapshot(identity)
-  record["identity"] = snapshot if snapshot
   validate_evidence_record_shape!(record, "Evidence record")
 
   updated_manifest = update_evidence_manifest(path) do |manifest|

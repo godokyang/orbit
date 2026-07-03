@@ -159,7 +159,7 @@ def compact_evidence(args)
       "handoff" => handoff_ref
     },
     "task_summary" => {
-      "target_role" => task["target_role"],
+      "execution_contract" => task_execution_contract(task),
       "task_type" => task["task_type"],
       "objective" => task["objective"],
       "quality_outcome" => task["quality_outcome"],

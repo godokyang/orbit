@@ -38,8 +38,8 @@ DEFAULT_WRITE_POLICY_ENFORCEMENT_BY_RISK = {
   "release" => "strict"
 }.freeze
 
-# Infer a risk level from task type and target role.
-def infer_task_risk_level(target_role, task_type)
+# Infer a risk level from task type.
+def infer_task_risk_level(task_type)
   type = task_type.to_s.downcase
   return "release" if type.include?("release") || type.include?("deploy") || type.include?("publish")
   return "strict" if type.include?("security") || type.include?("migration") || type.include?("destructive")
@@ -49,9 +49,9 @@ def infer_task_risk_level(target_role, task_type)
   "standard"
 end
 
-# Derive task_risk from target_role, task_type, and optional explicit risk level.
-def derive_task_risk(target_role, task_type, explicit_level = nil)
-  level = explicit_level || infer_task_risk_level(target_role, task_type)
+# Derive task_risk from task_type and optional explicit risk level.
+def derive_task_risk(task_type, explicit_level = nil)
+  level = explicit_level || infer_task_risk_level(task_type)
   level = "standard" unless ALLOWED_RISK_LEVELS.include?(level)
 
   min_levels = DEFAULT_MIN_EVIDENCE_LEVELS_BY_RISK[level] || {}
@@ -77,11 +77,11 @@ def derive_task_risk(target_role, task_type, explicit_level = nil)
   }
 end
 
-# Derive default gates for a task based on risk level and target_role/task_type.
-def default_gates_for_risk(risk_level, target_role, task_type)
+# Derive default gates for a task based on risk level and task_type.
+def default_gates_for_risk(risk_level, task_type)
   gate_kinds = DEFAULT_GATES_BY_RISK[risk_level] || DEFAULT_GATES_BY_RISK["standard"]
-  # For reviewer/tester targets, don't add gates (they ARE the gate role).
-  return [] if %w[reviewer tester].include?(target_role.to_s)
+  type = task_type.to_s.downcase
+  return [] if type.include?("review") || type.include?("test")
   return [] if gate_kinds.empty?
 
   gate_kinds.map do |kind|

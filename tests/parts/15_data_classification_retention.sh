@@ -3,13 +3,13 @@
 # ---------------------------------------------------------------------------
 
 S12_TASK="$TMPROOT/s12-task.yaml"
-"$CLI" new-task --target-role reviewer --task-type docs_improvement --output "$S12_TASK" >/dev/null
+"$CLI" new-task --implementation-authority reviewer --assigned-instance reviewer-main --task-type docs_improvement --output "$S12_TASK" >/dev/null
 
 # ---- Group 1: evidence add preserves data_classification / retention_policy / trust_repair ----
 
 S12_ADD_EVIDENCE="$TMPROOT/s12-add-evidence.json"
 "$CLI" evidence init --output "$S12_ADD_EVIDENCE" >/dev/null
-ORBIT_INSTANCE=reviewer "$CLI" evidence add \
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence add \
   --file "$S12_ADD_EVIDENCE" \
   --kind command --status pass --summary "Command with classified artifact." \
   --data-classification '{"categories":["log","local_path"],"sensitivity":"medium","redaction":"recommended"}' \
@@ -168,7 +168,7 @@ expect_failure 'validate rejects invalid data_classification category' "$CLI" va
 
 S12_LEGACY_EVIDENCE="$TMPROOT/s12-legacy-evidence.json"
 "$CLI" evidence init --output "$S12_LEGACY_EVIDENCE" >/dev/null
-ORBIT_INSTANCE=reviewer "$CLI" evidence add --file "$S12_LEGACY_EVIDENCE" --kind command --status pass --summary "legacy record" >/dev/null
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence add --file "$S12_LEGACY_EVIDENCE" --kind command --status pass --summary "legacy record" >/dev/null
 "$CLI" validate --task "$S12_TASK" --evidence "$S12_LEGACY_EVIDENCE" --json >"$TMPROOT/s12-legacy-validate.json"
 json_assert 'old evidence without classification fields validates' "$TMPROOT/s12-legacy-validate.json" \
   'j["valid"] == true'

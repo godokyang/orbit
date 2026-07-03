@@ -1,7 +1,7 @@
 schema_version: orbit-instances-v1
 
 instances:
-  lead:
+  lead-main:
     role_ref: lead
     command: codex
     management: user_managed
@@ -11,11 +11,14 @@ instances:
       tab: ""
       pane: ""
       canonical_pane: ""
+    view:
+      min_columns: 120
+      min_rows: 36
     env:
-      ORBIT_INSTANCE: lead
+      ORBIT_INSTANCE: lead-main
       ORBIT_ROLE: lead
 
-  reviewer:
+  reviewer-main:
     role_ref: reviewer
     command: codex
     management: user_managed
@@ -25,11 +28,14 @@ instances:
       tab: ""
       pane: ""
       canonical_pane: ""
+    view:
+      min_columns: 120
+      min_rows: 36
     env:
-      ORBIT_INSTANCE: reviewer
+      ORBIT_INSTANCE: reviewer-main
       ORBIT_ROLE: reviewer
 
-  tester:
+  tester-main:
     role_ref: tester
     command: codex
     management: user_managed
@@ -39,6 +45,9 @@ instances:
       tab: ""
       pane: ""
       canonical_pane: ""
+    view:
+      min_columns: 120
+      min_rows: 36
     env:
-      ORBIT_INSTANCE: tester
+      ORBIT_INSTANCE: tester-main
       ORBIT_ROLE: tester

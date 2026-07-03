@@ -2,15 +2,40 @@
 
 def init_config(args)
   force = false
+  operation_mode = nil
 
-  args.each do |arg|
+  until args.empty?
+    arg = args.shift
     case arg
     when "--force"
       force = true
+    when "--operation-mode"
+      operation_mode = option_value(args, "--operation-mode")
+    when /\A--operation-mode=(.+)\z/
+      operation_mode = Regexp.last_match(1)
     else
       usage_error("Unknown init option: #{arg}")
     end
   end
+  operation_mode = operation_mode.to_s.strip
+  if operation_mode.empty?
+    if $stdin.tty? && $stdout.tty?
+      puts "Choose Orbit operation mode:"
+      puts "1. solo - lead owns and implements tasks"
+      puts "2. team - lead owns tasks; coder implements"
+      print "Operation mode [solo/team]: "
+      answer = $stdin.gets.to_s.strip.downcase
+      operation_mode = case answer
+                       when "1", "solo" then "solo"
+                       when "2", "team" then "team"
+                       else
+                         usage_error("Invalid operation mode: #{answer.inspect}. Use solo or team.")
+                       end
+    else
+      usage_error("orbit init requires --operation-mode solo|team when not running interactively.")
+    end
+  end
+  usage_error("orbit init --operation-mode must be solo or team.") unless %w[solo team].include?(operation_mode)
 
   target_dir = File.join(Dir.pwd, ".orbit")
   files = {
@@ -45,6 +70,33 @@ def init_config(args)
       state["project"] = File.basename(Dir.pwd)
       state["updated_at"] = Time.now.utc.iso8601
       write_file_atomically(target_path, YAML.dump(state))
+    elsif name == "roles.yaml"
+      roles_config = load_yaml(template_path)
+      roles_config["operation_defaults"] = operation_defaults_for_mode(operation_mode)
+      if operation_mode == "team"
+        roles_config["capability_registry"] ||= {}
+        roles_config["capability_registry"]["code.implement"] ||= {
+          "kind" => "agent_action",
+          "description" => "实施 production code changes for team-mode tasks."
+        }
+        roles_config["roles"] ||= {}
+        roles_config["roles"]["coder"] ||= {
+          "role" => "coder",
+          "capabilities" => ["code.edit", "code.implement"],
+          "rules" => [],
+          "permissions" => {
+            "can_edit_production_code" => true
+          }
+        }
+      end
+      write_file_atomically(target_path, YAML.dump(roles_config))
+    elsif name == "instances.yaml"
+      instances_config = load_yaml(template_path)
+      if operation_mode == "team"
+        instances_config["instances"] ||= {}
+        instances_config["instances"]["coder-main"] ||= default_instance_config("coder", "coder-main")
+      end
+      write_file_atomically(target_path, YAML.dump(instances_config))
     else
       write_file_atomically(target_path, File.read(template_path))
     end
@@ -54,7 +106,51 @@ def init_config(args)
   files.keys.each { |name| puts "- .orbit/#{name}" }
   puts
   puts "Next:"
-  puts "- ORBIT_INSTANCE=reviewer orbit whoami --json"
+  puts "- ORBIT_INSTANCE=#{operation_mode == "team" ? "coder-main" : "lead-main"} orbit whoami --json"
+end
+
+def operation_defaults_for_mode(operation_mode)
+  case operation_mode
+  when "team"
+    {
+      "owner_role" => "lead",
+      "owner_instance" => "lead-main",
+      "operation_mode" => "team",
+      "implementation_authority" => "coder",
+      "assigned_instance" => "coder-main"
+    }
+  else
+    {
+      "owner_role" => "lead",
+      "owner_instance" => "lead-main",
+      "operation_mode" => "solo",
+      "implementation_authority" => "lead",
+      "assigned_instance" => "lead-main"
+    }
+  end
+end
+
+def default_instance_config(role_ref, instance_key)
+  {
+    "role_ref" => role_ref,
+    "command" => "codex",
+    "management" => "user_managed",
+    "binding" => {
+      "adapter" => "herdr",
+      "workspace" => "",
+      "tab" => "",
+      "pane" => "",
+      "canonical_pane" => ""
+    },
+    "view" => {
+      "min_columns" => 120,
+      "min_rows" => 36
+    },
+    "env" => {
+      "ORBIT_INSTANCE" => instance_key,
+      "ORBIT_ROLE" => role_ref
+    }
+  }
 end
 
 def load_yaml(path)
@@ -154,8 +250,26 @@ def find_instance(instances, roles, instance_name)
     alias_name = instance_name.delete_suffix("-main")
     return [alias_name, alias_name] if instances.key?(alias_name)
   end
+  main_name = "#{instance_name}-main"
+  return [main_name, main_name] if instances.key?(main_name)
 
   [nil, nil]
+end
+
+def role_for_instance_config(instances, roles, instance_key)
+  return nil unless instances.is_a?(Hash) && roles.is_a?(Hash)
+
+  resolved_key, = find_instance(instances, roles, instance_key.to_s)
+  instance = resolved_key ? instances[resolved_key] : nil
+  return nil unless instance.is_a?(Hash)
+
+  role_ref = instance["role_ref"]
+  return nil unless role_ref.is_a?(String) && !role_ref.empty?
+
+  role_def = roles[role_ref]
+  return nil unless role_def.is_a?(Hash)
+
+  role_def["role"] || role_ref
 end
 
 def infer_instance_from_role(instances, roles, role_name)
@@ -194,6 +308,7 @@ def normalize_instance_binding(instance_name, instance)
   old_transport_schema_error!(instance_name, instance)
   binding = instance["binding"] || {}
   usage_error("Instance #{instance_name.inspect} binding must be a mapping when present.") unless binding.is_a?(Hash)
+  usage_error("Instance #{instance_name.inspect} view must be a sibling of binding, not binding.view.") if binding.key?("view")
 
   adapter = binding["adapter"].to_s.strip
   adapter = "herdr" if adapter.empty?
@@ -208,6 +323,21 @@ def normalize_instance_binding(instance_name, instance)
     "tab" => binding["tab"].to_s,
     "pane" => pane,
     "canonical_pane" => canonical_pane
+  }
+end
+
+def normalize_instance_view(instance_name, instance)
+  view = instance["view"] || {}
+  usage_error("Instance #{instance_name.inspect} view must be a mapping when present.") unless view.is_a?(Hash)
+  min_columns = view["min_columns"] || view["min_cols"] || 120
+  min_rows = view["min_rows"] || 36
+  min_columns = min_columns.to_i
+  min_rows = min_rows.to_i
+  usage_error("Instance #{instance_name.inspect} view.min_columns must be positive.") unless min_columns.positive?
+  usage_error("Instance #{instance_name.inspect} view.min_rows must be positive.") unless min_rows.positive?
+  {
+    "min_columns" => min_columns,
+    "min_rows" => min_rows
   }
 end
 
@@ -236,14 +366,6 @@ def instance_availability_for_liveness(liveness)
   end
 end
 
-def deprecated_transport_binding_alias(binding)
-  {
-    "pane" => binding["canonical_pane"].to_s.empty? ? binding["pane"].to_s : binding["canonical_pane"].to_s,
-    "tab" => binding["tab"].to_s,
-    "space" => binding["workspace"].to_s
-  }
-end
-
 def command_expected_string(command)
   normalize_command_argv(command, "instance").join(" ")
 rescue SystemExit
@@ -264,11 +386,65 @@ def runtime_actual_client
   "unknown"
 end
 
+def view_observed_geometry_from_entry(entry)
+  return nil unless entry.is_a?(Hash)
+
+  cols = entry["cols"] || entry["columns"] || entry["width"] || entry.dig("geometry", "cols") || entry.dig("geometry", "columns") || entry.dig("geometry", "width")
+  rows = entry["rows"] || entry["height"] || entry.dig("geometry", "rows") || entry.dig("geometry", "height")
+  cols = cols.to_i
+  rows = rows.to_i
+  return nil unless cols.positive? && rows.positive?
+
+  {
+    "cols" => cols,
+    "rows" => rows
+  }
+end
+
+def observed_herdr_geometry(binding)
+  return nil unless binding.is_a?(Hash) && binding["adapter"] == "herdr"
+
+  pane_ids = [binding["canonical_pane"], binding["pane"]].map(&:to_s).reject(&:empty?)
+  return nil if pane_ids.empty?
+
+  herdr_path = command_path("herdr")
+  return nil unless herdr_path
+
+  stdout, _stderr, status = Open3.capture3(herdr_path, "agent", "list")
+  return nil unless status.success?
+
+  parsed = JSON.parse(stdout)
+  agents = parsed.dig("result", "agents") || parsed["agents"] || []
+  entry = agents.find { |candidate| candidate.is_a?(Hash) && pane_ids.include?(candidate["pane_id"].to_s) }
+  view_observed_geometry_from_entry(entry)
+rescue JSON::ParserError
+  nil
+end
+
+def instance_view_status(view, binding)
+  observed = observed_herdr_geometry(binding)
+  too_narrow = nil
+  remediation = nil
+  if observed
+    too_narrow = observed["cols"].to_i < view["min_columns"].to_i ||
+                 observed["rows"].to_i < view["min_rows"].to_i
+    remediation = "resize_or_recreate_view" if too_narrow
+  end
+  {
+    "policy" => view,
+    "observed_geometry" => observed,
+    "too_narrow" => too_narrow,
+    "remediation" => remediation
+  }
+end
+
 def instance_status_entry(name, instance, role_ref, role_def)
   management = validate_instance_management!(name, instance)
   binding = normalize_instance_binding(name, instance)
+  view = normalize_instance_view(name, instance)
   binding_state = instance_binding_state(binding)
   liveness, liveness_reason = instance_liveness_for_binding(binding)
+  view_status = instance_view_status(view, binding)
   {
     "instance" => name,
     "role_ref" => role_ref,
@@ -279,7 +455,9 @@ def instance_status_entry(name, instance, role_ref, role_def)
     "liveness" => liveness,
     "liveness_reason" => liveness_reason,
     "availability" => instance_availability_for_liveness(liveness),
-    "herdr" => binding
+    "herdr" => binding,
+    "view" => view,
+    "view_status" => view_status
   }
 end
 
@@ -477,6 +655,7 @@ end
 def parse_whoami_args(args)
   json = false
   task_path = nil
+  evidence_path = nil
 
   until args.empty?
     arg = args.shift
@@ -488,6 +667,10 @@ def parse_whoami_args(args)
       task_path = option_value(args, "--task")
     when /\A--task=(.+)\z/
       task_path = Regexp.last_match(1)
+    when "--evidence"
+      evidence_path = option_value(args, "--evidence")
+    when /\A--evidence=(.+)\z/
+      evidence_path = Regexp.last_match(1)
     else
       usage_error("Unknown whoami option: #{arg}")
     end
@@ -495,7 +678,7 @@ def parse_whoami_args(args)
 
   usage_error("whoami currently requires --json") unless json
 
-  task_path
+  { "task" => task_path, "evidence" => evidence_path }
 end
 
 def load_project_config(result)
@@ -534,6 +717,7 @@ def load_task(result, task_path)
     return nil
   end
 
+  task["__orbit_path"] = File.expand_path(task_path)
   task
 rescue RuntimeError => e
   conflict(result, "task_file", e.message)
@@ -600,7 +784,6 @@ def resolve_identity(result, roles, instances)
     result["actual_client"] = actual_client
     result["binding"] = instance_binding_state(binding)
     result["herdr"] = binding
-    result["transport_binding"] = deprecated_transport_binding_alias(binding)
     if actual_client != "unknown" && expected_client && actual_client != expected_client
       conflict(result, "env.ORBIT_CLIENT", "ORBIT_CLIENT #{actual_client.inspect} conflicts with configured command #{expected_client.inspect} for instance #{instance_key.inspect}.")
     end
@@ -615,18 +798,93 @@ def resolve_identity(result, roles, instances)
   role_def
 end
 
-def apply_task_constraints(result, task)
+def apply_task_constraints(result, task, evidence = nil)
   return unless task
 
   result["project"] = task["project"] if task["project"]
 
   target_role = task["target_role"]
-  result["role_sources"]["task_file.target_role"] = target_role if target_role
+  if target_role
+    result["role_sources"]["task_file.target_role"] = target_role
+    conflict(result, "task_file.target_role", "task_schema_reinit_required: target_role was removed; recreate the task with execution_contract.")
+    return
+  end
 
-  return unless target_role && result["resolved_role"] && target_role != result["resolved_role"]
-  return if task_gate_role?(task, result["resolved_role"])
+  contract = task["execution_contract"]
+  unless contract.is_a?(Hash)
+    conflict(result, "task_file.execution_contract", "Task must define execution_contract; recreate the task with orbit new-task.")
+    return
+  end
 
-  conflict(result, "task_file.target_role", "Task target_role #{target_role.inspect} does not match resolved_role #{result["resolved_role"].inspect}.")
+  required = %w[owner_role owner_instance operation_mode implementation_authority assigned_instance source]
+  missing = required.select { |field| contract[field].to_s.empty? }
+  unless missing.empty?
+    conflict(result, "task_file.execution_contract", "Task execution_contract missing required fields: #{missing.join(", ")}.")
+    return
+  end
+
+  result["execution_contract"] = contract.slice(
+    "owner_role",
+    "owner_instance",
+    "operation_mode",
+    "implementation_authority",
+    "assigned_instance",
+    "source"
+  )
+
+  resolved_role = result["resolved_role"]
+  resolved_instance = result["resolved_instance"]
+  return unless resolved_role && resolved_instance
+
+  if task_gate_role?(task, resolved_role)
+    result["execution_context"] = {
+      "allowed" => true,
+      "mode" => "gate",
+      "reason" => "resolved_role is listed on a task gate"
+    }
+    return
+  end
+
+  if resolved_role == contract["implementation_authority"]
+    if resolved_instance == contract["assigned_instance"]
+      result["execution_context"] = {
+        "allowed" => true,
+        "mode" => "implementation",
+        "reason" => "resolved instance matches execution_contract.assigned_instance"
+      }
+    elsif (override = valid_implementation_override_for_identity(task, evidence, resolved_role, resolved_instance))
+      result["execution_context"] = {
+        "allowed" => true,
+        "mode" => "implementation_override",
+        "reason" => "valid implementation_instance_override evidence authorizes this instance",
+        "override" => override
+      }
+    else
+      result["execution_context"] = {
+        "allowed" => false,
+        "mode" => "implementation",
+        "reason" => "resolved instance does not match execution_contract.assigned_instance"
+      }
+      conflict(result, "task_file.execution_contract.assigned_instance", "Task assigned_instance #{contract["assigned_instance"].inspect} does not match resolved_instance #{resolved_instance.inspect}.")
+    end
+    return
+  end
+
+  if resolved_role == contract["owner_role"] && resolved_instance == contract["owner_instance"]
+    result["execution_context"] = {
+      "allowed" => true,
+      "mode" => "owner",
+      "reason" => "resolved identity matches execution_contract owner"
+    }
+    return
+  end
+
+  result["execution_context"] = {
+    "allowed" => false,
+    "mode" => "unauthorized",
+    "reason" => "resolved role is not implementation_authority, owner_role, or gate role"
+  }
+  conflict(result, "task_file.execution_contract.implementation_authority", "Task implementation_authority #{contract["implementation_authority"].inspect} does not match resolved_role #{resolved_role.inspect}.")
 end
 
 SAFE_COMMAND_TOKEN_PATTERN = /\A[A-Za-z0-9_+@%.,:\/=-]+\z/.freeze

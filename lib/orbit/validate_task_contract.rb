@@ -158,6 +158,35 @@ def task_type_value(task_or_type)
   task_or_type.is_a?(Hash) ? task_or_type["task_type"] : task_or_type
 end
 
+def task_execution_contract(task)
+  task.is_a?(Hash) && task["execution_contract"].is_a?(Hash) ? task["execution_contract"] : {}
+end
+
+def task_implementation_authority(task)
+  task_execution_contract(task)["implementation_authority"]
+end
+
+def task_assigned_instance(task)
+  task_execution_contract(task)["assigned_instance"]
+end
+
+def task_owner_role(task)
+  task_execution_contract(task)["owner_role"]
+end
+
+def task_owner_instance(task)
+  task_execution_contract(task)["owner_instance"]
+end
+
+def task_allows_instance_role?(task, instance_key, resolved_role)
+  return false unless task.is_a?(Hash)
+  return true if task_assigned_instance(task) == instance_key && task_implementation_authority(task) == resolved_role
+  return true if task_owner_instance(task) == instance_key && task_owner_role(task) == resolved_role
+  return true if task_gate_role?(task, resolved_role)
+
+  false
+end
+
 def design_task?(task_or_type)
   task_type = task_type_value(task_or_type).to_s.downcase
   task_type.include?("design") || task_type.include?("analysis")
@@ -173,7 +202,7 @@ def decomposition_task?(task_or_type)
 end
 
 def test_task_contract?(task)
-  task.is_a?(Hash) && (task["target_role"].to_s == "tester" || task["task_type"].to_s.downcase.include?("test"))
+  task.is_a?(Hash) && (task.dig("execution_contract", "implementation_authority").to_s == "tester" || task["task_type"].to_s.downcase.include?("test"))
 end
 
 def quality_measurement_task?(task_or_type)
@@ -458,11 +487,10 @@ def review_or_test_gate?(task)
   return false if light_risk?(task)
 
   task_type = task["task_type"].to_s
-  target_role = task["target_role"].to_s
 
   task_type.include?("review") ||
     task_type.include?("test") ||
-    %w[reviewer tester].include?(target_role)
+    %w[reviewer tester].include?(task.dig("execution_contract", "implementation_authority").to_s)
 end
 
 def normalize_task_gates(task)
@@ -496,10 +524,9 @@ end
 
 def expected_evidence_kind(task)
   task_type = task["task_type"].to_s
-  target_role = task["target_role"].to_s
 
-  return "test" if task_type.include?("test") || target_role == "tester"
-  return "review" if task_type.include?("review") || target_role == "reviewer"
+  return "test" if task_type.include?("test") || task.dig("execution_contract", "implementation_authority").to_s == "tester"
+  return "review" if task_type.include?("review") || task.dig("execution_contract", "implementation_authority").to_s == "reviewer"
 
   nil
 end
@@ -512,6 +539,78 @@ def required_evidence_kinds(task)
   kinds << direct_kind if direct_kind
   kinds.concat(task_gate_kinds(task, required_only: true))
   kinds.uniq
+end
+
+def validation_role_for_instance(result, roles, instances, instance_key, source)
+  instance = instances[instance_key]
+  unless instance.is_a?(Hash)
+    validation_error(result, source, "Instance #{instance_key.inspect} must exist in .orbit/instances.yaml.")
+    return nil
+  end
+
+  role_ref = instance["role_ref"]
+  unless role_ref.is_a?(String) && !role_ref.empty?
+    validation_error(result, source, "Instance #{instance_key.inspect} must define role_ref.")
+    return nil
+  end
+
+  role_def = roles[role_ref]
+  unless role_def.is_a?(Hash)
+    validation_error(result, source, "Instance #{instance_key.inspect} references missing role #{role_ref.inspect}.")
+    return nil
+  end
+
+  role_def["role"] || role_ref
+end
+
+def validate_execution_contract_field(result, contract, field)
+  value = contract[field]
+  return value if value.is_a?(String) && !value.strip.empty?
+
+  validation_error(result, "task_file.execution_contract.#{field}", "execution_contract.#{field} must be a non-empty string.")
+  nil
+end
+
+def validate_execution_contract_role_pair(result, contract, roles, instances, role_field, instance_field)
+  role = validate_execution_contract_field(result, contract, role_field)
+  instance_key = validate_execution_contract_field(result, contract, instance_field)
+  return unless role && instance_key
+
+  actual_role = validation_role_for_instance(result, roles, instances, instance_key, "task_file.execution_contract.#{instance_field}")
+  return if actual_role.nil? || actual_role == role
+
+  validation_error(result, "task_file.execution_contract.#{instance_field}", "execution_contract.#{instance_field} #{instance_key.inspect} resolves to role #{actual_role.inspect}, not #{role.inspect}.")
+end
+
+def validate_execution_contract(result, task)
+  if task.key?("target_role")
+    validation_error(result, "task_file.target_role", "task_schema_reinit_required: target_role was removed; recreate the task with orbit new-task.")
+  end
+
+  contract = task["execution_contract"]
+  unless contract.is_a?(Hash)
+    validation_error(result, "task_file.execution_contract", "Task must define execution_contract.")
+    return
+  end
+
+  mode = validate_execution_contract_field(result, contract, "operation_mode")
+  validation_error(result, "task_file.execution_contract.operation_mode", "execution_contract.operation_mode must be solo or team.") if mode && !%w[solo team].include?(mode)
+  validate_execution_contract_field(result, contract, "source")
+
+  config_dir = File.join(Dir.pwd, ".orbit")
+  roles_config = load_validation_file(result, "project_config.roles", File.join(config_dir, "roles.yaml"))
+  instances_config = load_validation_file(result, "project_config.instances", File.join(config_dir, "instances.yaml"))
+  return unless roles_config.is_a?(Hash) && instances_config.is_a?(Hash)
+
+  roles = roles_config["roles"]
+  instances = instances_config["instances"]
+  unless roles.is_a?(Hash) && instances.is_a?(Hash)
+    validation_error(result, "project_config", "Project config must define roles and instances mappings before task execution_contract can be checked.")
+    return
+  end
+
+  validate_execution_contract_role_pair(result, contract, roles, instances, "owner_role", "owner_instance")
+  validate_execution_contract_role_pair(result, contract, roles, instances, "implementation_authority", "assigned_instance")
 end
 
 def validate_task(result, task_path)
@@ -532,18 +631,12 @@ def validate_task(result, task_path)
       "#{entry["message"]} #{entry["action"]}")
   end
 
-  # Legacy warning: schema_semantics absent means task predates schema versioning.
   if task_compat == :current && task["schema_semantics"].nil?
-    validation_warning(result, "task_file.schema_semantics",
-      "legacy_warning: Task file lacks schema_semantics; " \
-      "feature version tracking unavailable. " \
-      "Task was created before orbit-schema-versioning-v1. " \
-      "Existing tasks remain valid.")
+    validation_error(result, "task_file.schema_semantics",
+      "Task file must include schema_semantics; recreate task with current Orbit.")
   end
 
-  if task["target_role"].nil? || task["target_role"].to_s.empty?
-    validation_error(result, "task_file.target_role", "Task must define target_role.")
-  end
+  validate_execution_contract(result, task)
 
   unless task.key?("evidence_requirements")
     validation_error(result, "task_file.evidence_requirements", "Task must define evidence_requirements.")

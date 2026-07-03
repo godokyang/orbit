@@ -3,7 +3,7 @@
 # ---------------------------------------------------------------------------
 
 S5_TASK="$TMPROOT/s5-task.yaml"
-"$CLI" new-task --target-role lead --task-type implementation --output "$S5_TASK" >/dev/null
+"$CLI" new-task --task-type implementation --output "$S5_TASK" >/dev/null
 
 # new-task seeds write_policy_enforcement: standard
 yaml_assert 'new-task seeds write_policy_enforcement: standard' "$S5_TASK" \
@@ -46,11 +46,17 @@ pass 'validate rejects write_policy_enforcement with invalid value'
 json_assert 'write_policy_enforcement error references task_file.write_policy_enforcement' "$TMPROOT/s5-bad-wpe.json" \
   'j["errors"].any? { |e| e["source"] == "task_file.write_policy_enforcement" }'
 
-# evidence submit with --task records task_sha256 in role context or legacy identity
+# evidence submit with --task records task_sha256 in role_execution_context
 S5_REVIEW_TASK="$TMPROOT/s5-review-task.yaml"
-"$CLI" new-task --target-role reviewer --task-type implementation_review --output "$S5_REVIEW_TASK" >/dev/null
+"$CLI" new-task --implementation-authority reviewer --assigned-instance reviewer-main --task-type implementation_review --output "$S5_REVIEW_TASK" >/dev/null
 cat >"$TMPROOT/s5-review-report.yaml" <<'YAML'
 kind: review
+report_template_version: review-report-v1
+schema_semantics:
+  feature_versions:
+    evidence_level: v1
+    quality_outcome: v1
+    schema_semantics: v1
 verdict: pass
 summary: Slice 5 identity hash test.
 source_message_id: slice5:test:hash
@@ -63,10 +69,10 @@ rule_application:
   applied_checks:
     - id: identity_hash_propagation
       verdict: pass
-      evidence: task SHA256 stored in identity block
+      evidence: task SHA256 stored in role_execution_context
   not_applicable: []
 confirmed:
-  - identity hash fields present in submitted record
+  - role_execution_context hash fields present in submitted record
 assumed: []
 missing: []
 residual_risk: None identified.
@@ -93,27 +99,33 @@ quality_question_answers:
 YAML
 S5_HASH_EVIDENCE="$TMPROOT/s5-hash-evidence.json"
 "$CLI" evidence init --output "$S5_HASH_EVIDENCE" >/dev/null
-ORBIT_INSTANCE=reviewer "$CLI" evidence submit \
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit \
   --file "$S5_HASH_EVIDENCE" \
   --report "$TMPROOT/s5-review-report.yaml" \
   --task "$S5_REVIEW_TASK" \
   --json >"$TMPROOT/s5-hash-submit.json"
 json_assert 'evidence submit with --task records task_sha256 in role context' "$TMPROOT/s5-hash-submit.json" \
-  '(j["record"]["role_execution_context"] || j["record"]["identity"]).fetch("task_sha256", nil).is_a?(String) && (j["record"]["role_execution_context"] || j["record"]["identity"]).fetch("task_sha256", nil).length == 64'
+  'j["record"]["role_execution_context"].fetch("task_sha256", nil).is_a?(String) && j["record"]["role_execution_context"].fetch("task_sha256", nil).length == 64 && !j["record"].key?("identity")'
 
 # evidence submit without --task has no task_sha256
 S5_NO_HASH_EVIDENCE="$TMPROOT/s5-no-hash-evidence.json"
 "$CLI" evidence init --output "$S5_NO_HASH_EVIDENCE" >/dev/null
-ORBIT_INSTANCE=reviewer "$CLI" evidence submit \
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit \
   --file "$S5_NO_HASH_EVIDENCE" \
   --report "$TMPROOT/s5-review-report.yaml" \
   --json >"$TMPROOT/s5-no-hash-submit.json"
 json_assert 'evidence submit without --task has no task_sha256 in role context' "$TMPROOT/s5-no-hash-submit.json" \
-  '(j["record"]["role_execution_context"] || j["record"]["identity"] || {}).fetch("task_sha256", nil).nil?'
+  '(j["record"]["role_execution_context"] || {}).fetch("task_sha256", nil).nil? && !j["record"].key?("identity")'
 
 # evidence submit with write_policy in report includes write_policy in record
 cat >"$TMPROOT/s5-review-with-wp.yaml" <<'YAML'
 kind: review
+report_template_version: review-report-v1
+schema_semantics:
+  feature_versions:
+    evidence_level: v1
+    quality_outcome: v1
+    schema_semantics: v1
 verdict: pass
 summary: Slice 5 write policy propagation test.
 source_message_id: slice5:test:write-policy
@@ -161,7 +173,7 @@ write_policy:
 YAML
 S5_WP_EVIDENCE="$TMPROOT/s5-wp-evidence.json"
 "$CLI" evidence init --output "$S5_WP_EVIDENCE" >/dev/null
-ORBIT_INSTANCE=reviewer "$CLI" evidence submit \
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit \
   --file "$S5_WP_EVIDENCE" \
   --report "$TMPROOT/s5-review-with-wp.yaml" \
   --json >"$TMPROOT/s5-wp-submit.json"
@@ -196,7 +208,7 @@ json_assert 'write_policy.changed_files error references write_policy source' "$
 
 # wait-gate passes when write_policy has violations but enforcement is standard (default)
 S5_REVIEW_TASK_STD="$TMPROOT/s5-review-task-std.yaml"
-"$CLI" new-task --target-role reviewer --task-type implementation_review --output "$S5_REVIEW_TASK_STD" >/dev/null
+"$CLI" new-task --implementation-authority reviewer --assigned-instance reviewer-main --task-type implementation_review --output "$S5_REVIEW_TASK_STD" >/dev/null
 # Build strict task first so its sha256 can be embedded in evidence records
 S5_STRICT_REVIEW_TASK="$TMPROOT/s5-strict-review-task.yaml"
 cp "$S5_REVIEW_TASK_STD" "$S5_STRICT_REVIEW_TASK"
@@ -214,7 +226,7 @@ ruby --disable-gems -rjson -rdigest -e \
    j["records"]<<{"kind"=>"review","status"=>"pass","summary"=>"Review with write violations.",
      "created_at"=>Time.now.utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
      "structured_submit"=>true,
-     "identity"=>{"resolved_role"=>"reviewer","task_sha256"=>sha,"rules_context_sha256"=>"b"*64},
+     "role_execution_context"=>{"resolved_role"=>"reviewer","task_sha256"=>sha,"rules_context_sha256"=>"b"*64},
      "quality_outcome_verdict"=>"pass",
      "evidence_level"=>"outcome_quality",
      "quality_question_answers"=>[
@@ -237,7 +249,7 @@ ruby --disable-gems -rjson -rdigest -e \
    j["records"]<<{"kind"=>"review","status"=>"pass","summary"=>"Review with write violations.",
      "created_at"=>Time.now.utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
      "structured_submit"=>true,
-     "identity"=>{"resolved_role"=>"reviewer","task_sha256"=>sha,"rules_context_sha256"=>"b"*64},
+     "role_execution_context"=>{"resolved_role"=>"reviewer","task_sha256"=>sha,"rules_context_sha256"=>"b"*64},
      "quality_outcome_verdict"=>"pass",
      "evidence_level"=>"outcome_quality",
      "quality_question_answers"=>[
@@ -274,7 +286,7 @@ ruby --disable-gems -rjson -rdigest -e \
    j["records"]<<{"kind"=>"review","status"=>"pass","summary"=>"Review with no violations.",
      "created_at"=>Time.now.utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
      "structured_submit"=>true,
-     "identity"=>{"resolved_role"=>"reviewer","task_sha256"=>sha,"rules_context_sha256"=>"b"*64},
+     "role_execution_context"=>{"resolved_role"=>"reviewer","task_sha256"=>sha,"rules_context_sha256"=>"b"*64},
      "quality_outcome_verdict"=>"pass",
      "evidence_level"=>"outcome_quality",
      "quality_question_answers"=>[
@@ -293,11 +305,11 @@ json_assert 'wait-gate passes when no write_policy violations under strict enfor
 
 # audit includes write_policy_summary
 S5_AUDIT_TASK="$TMPROOT/s5-audit-task.yaml"
-"$CLI" new-task --target-role lead --task-type implementation --output "$S5_AUDIT_TASK" >/dev/null
+"$CLI" new-task --task-type implementation --output "$S5_AUDIT_TASK" >/dev/null
 S5_AUDIT_EVIDENCE="$TMPROOT/s5-audit-evidence.json"
 "$CLI" evidence init --output "$S5_AUDIT_EVIDENCE" >/dev/null
-"$CLI" init --force >/dev/null
-ORBIT_INSTANCE=lead "$CLI" state start --task "$S5_AUDIT_TASK" >/dev/null
+"$CLI" init --force --operation-mode solo >/dev/null
+ORBIT_INSTANCE=lead-main "$CLI" state start --task "$S5_AUDIT_TASK" >/dev/null
 ruby --disable-gems -ryaml -e \
   'p=ARGV[0]; s=YAML.safe_load(File.read(p), aliases: true); s["phase"]="done"; s["status"]="done"; File.write(p, YAML.dump(s))' \
   .orbit/loop-state.yaml
@@ -308,7 +320,7 @@ json_assert 'audit includes write_policy_summary field' "$TMPROOT/s5-audit.json"
 json_assert 'audit write_policy_summary enforcement is standard' "$TMPROOT/s5-audit.json" \
   'j["write_policy_summary"]["enforcement"] == "standard"'
 
-# audit write_policy_summary counts legacy structured gate records without task_sha256
+# legacy structured gate records without role_execution_context are rejected
 S5_LEGACY_EVIDENCE="$TMPROOT/s5-legacy-evidence.json"
 "$CLI" evidence init --output "$S5_LEGACY_EVIDENCE" >/dev/null
 ruby --disable-gems -rjson -e \
@@ -322,8 +334,8 @@ ruby --disable-gems -rjson -e \
   "$S5_LEGACY_EVIDENCE"
 "$CLI" audit --task "$S5_AUDIT_TASK" --evidence "$S5_LEGACY_EVIDENCE" \
   --state .orbit/loop-state.yaml --json >"$TMPROOT/s5-legacy-audit.json" 2>/dev/null || true
-json_assert 'audit write_policy_summary counts legacy records without task_sha256' "$TMPROOT/s5-legacy-audit.json" \
-  'j["write_policy_summary"]["legacy_records_without_hash"] == 1'
+json_assert 'audit blocks legacy structured gate without role_execution_context' "$TMPROOT/s5-legacy-audit.json" \
+  'j["blocking_findings"].any? { |e| e["source"].include?("role_execution_context") }'
 
 # ---------------------------------------------------------------------------
 # Regression: strict task blocks gate when review evidence has no task_sha256
@@ -350,11 +362,13 @@ ruby --disable-gems -rjson -e \
    File.write(p, JSON.pretty_generate(j))' \
   "$S5_NO_HASH_REVIEW_EVIDENCE"
 
-# standard enforcement: missing task_sha256 does not block gate
-"$CLI" wait-gate --task "$S5_REVIEW_TASK_STD" --evidence "$S5_NO_HASH_REVIEW_EVIDENCE" --json \
-  >"$TMPROOT/s5-no-hash-standard.json" 2>/dev/null || true
-json_assert 'wait-gate passes when task_sha256 missing and enforcement is standard' "$TMPROOT/s5-no-hash-standard.json" \
-  'j["gates"].any? { |g| g["kind"] == "review" && g["passed"] == true }'
+# standard enforcement: missing role_execution_context cannot close gate
+if "$CLI" wait-gate --task "$S5_REVIEW_TASK_STD" --evidence "$S5_NO_HASH_REVIEW_EVIDENCE" --json \
+     >"$TMPROOT/s5-no-hash-standard.json" 2>/dev/null; then
+  printf 'FAIL wait-gate blocks when role_execution_context is missing under standard enforcement: command unexpectedly succeeded\n' >&2
+  exit 1
+fi
+pass 'wait-gate blocks when role_execution_context is missing under standard enforcement'
 
 # strict enforcement: missing task_sha256 blocks gate
 if "$CLI" wait-gate --task "$S5_STRICT_REVIEW_TASK" --evidence "$S5_NO_HASH_REVIEW_EVIDENCE" --json \
@@ -363,8 +377,8 @@ if "$CLI" wait-gate --task "$S5_STRICT_REVIEW_TASK" --evidence "$S5_NO_HASH_REVI
   exit 1
 fi
 pass 'wait-gate blocks strict task when review evidence missing task_sha256'
-json_assert 'wait-gate strict missing_task_sha256 blocking_reason' "$TMPROOT/s5-no-hash-strict.json" \
-  'j["gates"].any? { |g| g["kind"] == "review" && g["blocking_reason"] == "missing_task_sha256" }'
+json_assert 'wait-gate strict missing role_execution_context does not pass gate' "$TMPROOT/s5-no-hash-strict.json" \
+  'j["gates"].any? { |g| g["kind"] == "review" && g["passed"] == false }'
 
 # ---------------------------------------------------------------------------
 # Regression: evidence submit records role_config_sha256 in role_execution_context

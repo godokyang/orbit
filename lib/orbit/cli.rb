@@ -10,6 +10,8 @@ require_relative "state_validate_gate"
 require_relative "audit_tools"
 require_relative "gate_lease"
 require_relative "handoff"
+require_relative "notice"
+require_relative "hook"
 require_relative "docs_lifecycle"
 require_relative "data_classification"
 require_relative "release_readiness"
@@ -66,12 +68,24 @@ def run_orbit_cli(argv)
       exit 0
     end
     handoff(argv)
+  when "hook"
+    if help_requested?(argv)
+      print_command_help("hook")
+      exit 0
+    end
+    hook(argv)
   when "init"
     init_config(argv)
   when "instances"
     instances(argv)
   when "new-task"
     new_task(argv)
+  when "notice"
+    if help_requested?(argv)
+      print_command_help("notice")
+      exit 0
+    end
+    notice(argv)
   when "rules"
     if argv.first == "print-context" && help_requested?(argv[1..] || [])
       print_command_help("rules print-context")

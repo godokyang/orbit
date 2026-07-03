@@ -54,11 +54,17 @@ pass 'implemented doc still marked open_design triggers warning'
 # ---- Group 5: evidence submit carries decision_record ----
 
 S10_TASK="$TMPROOT/s10-task.yaml"
-"$CLI" new-task --target-role reviewer --task-type implementation_review --output "$S10_TASK" >/dev/null
+"$CLI" new-task --implementation-authority reviewer --assigned-instance reviewer-main --task-type implementation_review --output "$S10_TASK" >/dev/null
 S10_EVIDENCE="$TMPROOT/s10-evidence.json"
 "$CLI" evidence init --output "$S10_EVIDENCE" >/dev/null
 cat >"$TMPROOT/s10-review-with-decision.yaml" <<'YAML'
 kind: review
+report_template_version: review-report-v1
+schema_semantics:
+  feature_versions:
+    evidence_level: v1
+    quality_outcome: v1
+    schema_semantics: v1
 verdict: pass
 summary: Review pass carrying a user confirmation decision record.
 source_message_id: herdr:reviewer:s10-decision
@@ -108,7 +114,7 @@ decision_record:
     doc_id: "s10.active"
   expires: "2099-12-31T00:00:00Z"
 YAML
-ORBIT_INSTANCE=reviewer "$CLI" evidence submit \
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit \
   --file "$S10_EVIDENCE" \
   --report "$TMPROOT/s10-review-with-decision.yaml" \
   --task "$S10_TASK" \
@@ -237,7 +243,7 @@ json_assert 'audit packet includes decision_record_summary' "$TMPROOT/s10-audit.
 
 S10_ADD_EVIDENCE="$TMPROOT/s10-add-evidence.json"
 "$CLI" evidence init --output "$S10_ADD_EVIDENCE" >/dev/null
-ORBIT_INSTANCE=reviewer "$CLI" evidence add \
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence add \
   --file "$S10_ADD_EVIDENCE" \
   --kind command \
   --status pass \
@@ -263,7 +269,7 @@ json_assert 'handoff sees active decision from evidence add' "$TMPROOT/s10-add-h
 pass 'evidence add --decision-record persists and surfaces in handoff'
 
 # evidence add rejects invalid decision_record kind.
-if ORBIT_INSTANCE=reviewer "$CLI" evidence add \
+if ORBIT_INSTANCE=reviewer-main "$CLI" evidence add \
   --file "$S10_ADD_EVIDENCE" \
   --kind command \
   --status pass \
@@ -281,6 +287,12 @@ S10_BAD_SUBMIT_EVIDENCE="$TMPROOT/s10-bad-submit-evidence.json"
 "$CLI" evidence init --output "$S10_BAD_SUBMIT_EVIDENCE" >/dev/null
 cat >"$TMPROOT/s10-review-bad-decision.yaml" <<'YAML'
 kind: review
+report_template_version: review-report-v1
+schema_semantics:
+  feature_versions:
+    evidence_level: v1
+    quality_outcome: v1
+    schema_semantics: v1
 verdict: pass
 summary: Review with invalid decision_record kind.
 source_message_id: herdr:reviewer:s10-bad-dr
@@ -323,7 +335,7 @@ decision_record:
   summary: "bad"
   source: "chat"
 YAML
-if ORBIT_INSTANCE=reviewer "$CLI" evidence submit \
+if ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit \
   --file "$S10_BAD_SUBMIT_EVIDENCE" \
   --report "$TMPROOT/s10-review-bad-decision.yaml" \
   --task "$S10_TASK" \
@@ -362,7 +374,7 @@ json_assert 'docs alias --doc-lifecycle valid status accepted' "$TMPROOT/s10-ali
 # a) evidence add --decision-record invalid expires fails and does not add record.
 S10_EXPIRES_ADD_EVIDENCE="$TMPROOT/s10-expires-add-evidence.json"
 "$CLI" evidence init --output "$S10_EXPIRES_ADD_EVIDENCE" >/dev/null
-if ORBIT_INSTANCE=reviewer "$CLI" evidence add \
+if ORBIT_INSTANCE=reviewer-main "$CLI" evidence add \
   --file "$S10_EXPIRES_ADD_EVIDENCE" \
   --kind command --status pass --summary "bad expires add" \
   --decision-record '{"id":"dr-bad-exp-add","kind":"user_confirmation","summary":"s","source":"src","expires":"not-a-date"}' \
@@ -379,6 +391,12 @@ S10_EXPIRES_SUBMIT_EVIDENCE="$TMPROOT/s10-expires-submit-evidence.json"
 "$CLI" evidence init --output "$S10_EXPIRES_SUBMIT_EVIDENCE" >/dev/null
 cat >"$TMPROOT/s10-submit-bad-expires.yaml" <<'YAML'
 kind: review
+report_template_version: review-report-v1
+schema_semantics:
+  feature_versions:
+    evidence_level: v1
+    quality_outcome: v1
+    schema_semantics: v1
 verdict: pass
 summary: Review with bad expires.
 source_message_id: herdr:reviewer:s10-bad-exp-submit
@@ -422,7 +440,7 @@ decision_record:
   source: "chat"
   expires: "not-a-date"
 YAML
-if ORBIT_INSTANCE=reviewer "$CLI" evidence submit \
+if ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit \
   --file "$S10_EXPIRES_SUBMIT_EVIDENCE" \
   --report "$TMPROOT/s10-submit-bad-expires.yaml" \
   --task "$S10_TASK" \
@@ -439,6 +457,12 @@ S10_EXPIRES_FROMREPORT_EVIDENCE="$TMPROOT/s10-expires-fromreport-evidence.json"
 "$CLI" evidence init --output "$S10_EXPIRES_FROMREPORT_EVIDENCE" >/dev/null
 cat >"$TMPROOT/s10-fromreport-bad-expires.yaml" <<'YAML'
 kind: review
+report_template_version: review-report-v1
+schema_semantics:
+  feature_versions:
+    evidence_level: v1
+    quality_outcome: v1
+    schema_semantics: v1
 verdict: pass
 summary: From-report with bad expires.
 source_message_id: herdr:reviewer:s10-bad-exp-fr
@@ -482,7 +506,7 @@ decision_record:
   source: "chat"
   expires: "also-not-a-date"
 YAML
-if ORBIT_INSTANCE=reviewer "$CLI" evidence from-report \
+if ORBIT_INSTANCE=reviewer-main "$CLI" evidence from-report \
   --file "$S10_EXPIRES_FROMREPORT_EVIDENCE" \
   --report "$TMPROOT/s10-fromreport-bad-expires.yaml" \
   --json 2>/dev/null; then

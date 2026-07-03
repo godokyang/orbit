@@ -26,8 +26,15 @@ def validate_evidence_record(result, source, record)
   end
 
   validate_structured_evidence_record(result, source, record) if record["structured_submit"] == true
+  if record["structured_submit"] == true && STRUCTURED_SUBMIT_KINDS.include?(kind) && !record.key?("role_execution_context")
+    validation_error(result, "#{source}.role_execution_context", "structured #{kind} evidence must include role_execution_context.")
+  end
   validate_destructive_action_plan_record(result, "#{source}.destructive_action_plan", record["destructive_action_plan"]) if record.key?("destructive_action_plan")
   validate_write_policy_record(result, "#{source}.write_policy", record["write_policy"]) if record.key?("write_policy")
+  if record["kind"] == "implementation" && !record.key?("role_execution_context")
+    validation_error(result, "#{source}.role_execution_context", "implementation evidence must include role_execution_context.")
+  end
+  validate_implementation_instance_override_record(result, source, record) if record["kind"] == "implementation_instance_override"
   validate_role_execution_context_record(result, "#{source}.role_execution_context", record["role_execution_context"]) if record.key?("role_execution_context")
   validate_runtime_binding_record_field(result, source, record)
   validate_blocker_classification_record_field(result, source, record)
@@ -44,7 +51,7 @@ def validate_role_execution_context_record(result, source, rec)
   end
 
   # Validate known string identity fields
-  %w[instance resolved_role role_ref].each do |field|
+  %w[instance resolved_instance resolved_role role_ref owner_role owner_instance operation_mode implementation_authority assigned_instance execution_contract_source source].each do |field|
     next unless rec.key?(field)
 
     val = rec[field]
@@ -86,6 +93,21 @@ def validate_role_execution_context_record(result, source, rec)
 
   if pp.key?("mode") && !%w[audit_only enforced_sandbox].include?(pp["mode"])
     validation_error(result, "#{source}.permission_profile.mode", "role_execution_context.permission_profile.mode must be audit_only or enforced_sandbox.")
+  end
+end
+
+def validate_implementation_instance_override_record(result, source, record)
+  %w[task_sha256 from_role from_instance to_role to_instance authorized_by_role authorized_by_instance reason created_at].each do |field|
+    value = record[field]
+    unless value.is_a?(String) && !value.strip.empty?
+      validation_error(result, "#{source}.#{field}", "implementation_instance_override.#{field} must be a non-empty string.")
+    end
+  end
+
+  if record["no_expiry"] == true
+    validation_error(result, "#{source}.expires_at", "implementation_instance_override cannot set expires_at when no_expiry is true.") if record["expires_at"]
+  elsif record["expires_at"].to_s.empty?
+    validation_error(result, "#{source}.expires_at", "implementation_instance_override requires expires_at or no_expiry true.")
   end
 end
 
@@ -561,6 +583,38 @@ def latest_valid_gate_record(result, records, expected_kind, task_sha256 = nil)
   end
 end
 
+def record_index_for_object(records, target)
+  records.each_with_index do |record, index|
+    return index if record.equal?(target)
+  end
+  (records.length - 1).downto(0) do |index|
+    return index if records[index] == target
+  end
+  nil
+end
+
+def latest_implementation_position(result, records)
+  candidates = []
+  records.each_with_index do |record, index|
+    next unless record.is_a?(Hash) && record["kind"] == "implementation" && record["status"] == "pass"
+
+    created_at = parse_evidence_created_at(result, "evidence_file.records[#{index}].created_at", record["created_at"])
+    next unless created_at
+
+    candidates << [created_at, index]
+  end
+  candidates.max_by { |created_at, index| [created_at, index] }
+end
+
+def latest_implementation_time(result, records)
+  latest_implementation_position(result, records)&.first
+end
+
+def evidence_position_not_newer?(left, right)
+  comparison = left <=> right
+  comparison && comparison <= 0
+end
+
 def validate_gate_verdict(result, records, expected_kind, task = nil, task_sha256: nil)
   latest = latest_valid_gate_record(result, records, expected_kind, task_sha256)
   unless latest
@@ -579,6 +633,13 @@ def validate_gate_verdict(result, records, expected_kind, task = nil, task_sha25
 
   case latest["status"]
   when "pass"
+    latest_gate_time = parse_evidence_created_at(result, "evidence_file.records.#{expected_kind}.created_at", latest["created_at"])
+    latest_gate_index = record_index_for_object(records, latest)
+    latest_gate_position = latest_gate_time && latest_gate_index ? [latest_gate_time, latest_gate_index] : nil
+    latest_impl_position = latest_implementation_position(result, records)
+    if latest_gate_position && latest_impl_position && evidence_position_not_newer?(latest_gate_position, latest_impl_position)
+      validation_error(result, "evidence_file.records.#{expected_kind}.stale_after_implementation", "Latest #{expected_kind} PASS is not newer than latest implementation evidence.")
+    end
     actual_level = latest["evidence_level"]
     if task_requires_quality_evidence_fields?(task) && !ALLOWED_EVIDENCE_LEVELS.include?(actual_level.to_s)
       validation_error(result, "evidence_file.records.#{expected_kind}.evidence_level", "Latest #{expected_kind} PASS must include evidence_level because task declares minimum_evidence_level.")

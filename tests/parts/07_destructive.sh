@@ -3,7 +3,7 @@
 # ---------------------------------------------------------------------------
 
 S4_TASK="$TMPROOT/s4-task.yaml"
-"$CLI" new-task --target-role lead --task-type implementation --output "$S4_TASK" >/dev/null
+"$CLI" new-task --task-type implementation --output "$S4_TASK" >/dev/null
 
 # new-task seeds artifact_policy and destructive_actions from template
 yaml_assert 'new-task seeds artifact_policy' "$S4_TASK" \
@@ -223,11 +223,11 @@ json_assert 'validate user-owned confirmation error references user_confirmation
 
 # audit includes destructive_action_summary (present: false when no plan)
 S4_AUDIT_TASK="$TMPROOT/s4-audit-task.yaml"
-"$CLI" new-task --target-role lead --task-type implementation --output "$S4_AUDIT_TASK" >/dev/null
+"$CLI" new-task --task-type implementation --output "$S4_AUDIT_TASK" >/dev/null
 S4_AUDIT_EV="$TMPROOT/s4-audit-evidence.json"
 "$CLI" evidence init --output "$S4_AUDIT_EV" >/dev/null
-"$CLI" init --force >/dev/null
-ORBIT_INSTANCE=lead "$CLI" state start --task "$S4_AUDIT_TASK" >/dev/null
+"$CLI" init --force --operation-mode solo >/dev/null
+ORBIT_INSTANCE=lead-main "$CLI" state start --task "$S4_AUDIT_TASK" >/dev/null
 ruby --disable-gems -ryaml -e \
   'p=ARGV[0]; s=YAML.safe_load(File.read(p), aliases: true); s["phase"]="done"; s["status"]="done"; File.write(p, YAML.dump(s))' \
   .orbit/loop-state.yaml
@@ -253,8 +253,8 @@ ruby --disable-gems -rjson -e \
      }}
    File.write(p, JSON.pretty_generate(j))' \
   "$S4_AUDIT_PLAN_EV"
-"$CLI" init --force >/dev/null
-ORBIT_INSTANCE=lead "$CLI" state start --task "$S4_AUDIT_TASK" >/dev/null
+"$CLI" init --force --operation-mode solo >/dev/null
+ORBIT_INSTANCE=lead-main "$CLI" state start --task "$S4_AUDIT_TASK" >/dev/null
 ruby --disable-gems -ryaml -e \
   'p=ARGV[0]; s=YAML.safe_load(File.read(p), aliases: true); s["phase"]="done"; s["status"]="done"; File.write(p, YAML.dump(s))' \
   .orbit/loop-state.yaml
@@ -266,7 +266,7 @@ json_assert 'audit destructive_action_summary present=true when evidence has pla
 
 # handoff includes destructive_actions_summary
 S4_HANDOFF_TASK="$TMPROOT/s4-handoff-task.yaml"
-"$CLI" new-task --target-role lead --task-type implementation --output "$S4_HANDOFF_TASK" >/dev/null
+"$CLI" new-task --task-type implementation --output "$S4_HANDOFF_TASK" >/dev/null
 S4_HANDOFF_EV="$TMPROOT/s4-handoff-evidence.json"
 "$CLI" evidence init --output "$S4_HANDOFF_EV" >/dev/null
 S4_HANDOFF_STATE="$TMPROOT/s4-handoff-state.yaml"
@@ -277,7 +277,7 @@ ruby --disable-gems -ryaml -e \
    s["phase"]="working"; s["status"]="working"
    File.write(p, YAML.dump(s))' \
   "$S4_HANDOFF_STATE" "$S4_HANDOFF_TASK" "$S4_HANDOFF_EV"
-ORBIT_INSTANCE=lead "$CLI" handoff --task "$S4_HANDOFF_TASK" --state "$S4_HANDOFF_STATE" \
+ORBIT_INSTANCE=lead-main "$CLI" handoff --task "$S4_HANDOFF_TASK" --state "$S4_HANDOFF_STATE" \
   --evidence "$S4_HANDOFF_EV" --json >"$TMPROOT/s4-handoff.json" 2>/dev/null || true
 json_assert 'handoff includes destructive_actions_summary' \
   "$TMPROOT/s4-handoff.json" \
@@ -292,7 +292,7 @@ json_assert 'handoff destructive_actions_summary present=false when no plan' \
 # ---------------------------------------------------------------------------
 
 S4_EXCL_TASK="$TMPROOT/s4-excl-task.yaml"
-"$CLI" new-task --target-role lead --task-type implementation --output "$S4_EXCL_TASK" >/dev/null
+"$CLI" new-task --task-type implementation --output "$S4_EXCL_TASK" >/dev/null
 ruby --disable-gems -ryaml -e \
   'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true)
    y["scope"]["include"]=["**/*"]; y["scope"]["exclude"]=[".orbit/**"]

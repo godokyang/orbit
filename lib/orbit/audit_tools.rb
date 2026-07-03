@@ -374,7 +374,7 @@ def write_policy_audit(evidence, task)
   records = evidence["records"].is_a?(Array) ? evidence["records"] : []
   enforcement = task.is_a?(Hash) ? (task["write_policy_enforcement"] || "standard").to_s : "standard"
   gate_role_writes = {}
-  legacy_count = 0
+  missing_context_count = 0
 
   records.each do |record|
     next unless record.is_a?(Hash)
@@ -382,8 +382,8 @@ def write_policy_audit(evidence, task)
     kind = record["kind"]
     next unless EVIDENCE_EXPECTED_GATE_ROLES.key?(kind)
 
-    if record["structured_submit"] == true && record_task_sha256_from(record).nil?
-      legacy_count += 1
+    if record["structured_submit"] == true && !record["role_execution_context"].is_a?(Hash)
+      missing_context_count += 1
     end
 
     wp = record["write_policy"]
@@ -404,9 +404,37 @@ def write_policy_audit(evidence, task)
   {
     "enforcement" => enforcement,
     "gate_role_writes" => gate_role_writes,
-    "legacy_records_without_hash" => legacy_count,
+    "records_missing_role_execution_context" => missing_context_count,
     "has_violations" => total_violations > 0,
     "total_violations" => total_violations
+  }
+end
+
+def implementation_override_summary(evidence, task)
+  records = evidence.is_a?(Hash) && evidence["records"].is_a?(Array) ? evidence["records"] : []
+  overrides = records.each_with_index.with_object([]) do |(record, index), memo|
+    next unless record.is_a?(Hash) && record["kind"] == "implementation_instance_override"
+
+    valid = task.is_a?(Hash) ? implementation_override_record_valid_for_task?(record, task) : false
+    memo << {
+      "index" => index,
+      "from_role" => record["from_role"],
+      "from_instance" => record["from_instance"],
+      "to_role" => record["to_role"],
+      "to_instance" => record["to_instance"],
+      "authorized_by_role" => record["authorized_by_role"],
+      "authorized_by_instance" => record["authorized_by_instance"],
+      "expires_at" => record["expires_at"],
+      "no_expiry" => record["no_expiry"] == true,
+      "valid" => valid
+    }.compact
+  end
+
+  {
+    "count" => overrides.length,
+    "valid_count" => overrides.count { |entry| entry["valid"] == true },
+    "invalid_count" => overrides.count { |entry| entry["valid"] != true },
+    "overrides" => overrides
   }
 end
 
@@ -581,6 +609,14 @@ def audit(args)
         uv["action"]
       )
     end
+    schema_summary.fetch("legacy_errors", []).each do |entry|
+      blocking_findings << audit_finding(
+        entry["source"],
+        entry["message"],
+        "high",
+        entry["action"]
+      )
+    end
     # Re-derive issues list with any newly added blocking_findings.
     issues = blocking_findings + warnings
   end
@@ -640,6 +676,16 @@ def audit(args)
     )
   end
 
+  notice_summary = completion_notice_summary(task, evidence)
+  if notice_summary["required"] && !notice_summary["missing_events"].empty?
+    blocking_findings << audit_finding(
+      "notice_summary.missing_completion_notice",
+      "Task requires completion notice, but #{notice_summary["missing_events"].join(", ")} notice event(s) are missing.",
+      "high",
+      "Run `orbit notice add --task #{task_path} --event EVENT --evidence #{evidence_path} --json` from the completing role."
+    )
+  end
+
   # Slice 12: data classification audit findings.
   dc_findings = data_classification_audit(evidence)
   dc_findings.each do |finding|
@@ -688,6 +734,7 @@ def audit(args)
     "quality_outcome_summary" => quality_outcome_summary(task, evidence),
     "parent_goal_summary" => pg_summary,
     "write_policy_summary" => write_policy_audit(evidence, task),
+    "implementation_override_summary" => implementation_override_summary(evidence, task),
     "stale_records_summary" => stale_records_audit(evidence, current_task_sha256),
     "worktree_safety_summary" => worktree_safety_summary(evidence),
     "destructive_action_summary" => destructive_action_audit(evidence),
@@ -696,6 +743,7 @@ def audit(args)
     "retention_summary" => orbit_retention_summary(evidence, compact_summary_path),
     "retention_drift_summary" => drift_summary,
     "runtime_reconcile_summary" => reconcile,
+    "notice_summary" => notice_summary,
     "verdict_arbitration_summary" => verdict_arbitration_summary(task, evidence, current_task_sha256),
     "gate_lease_summary" => gate_lease_summary(evidence),
     "decision_record_summary" => decision_record_summary(evidence),

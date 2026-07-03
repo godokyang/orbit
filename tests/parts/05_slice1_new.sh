@@ -14,6 +14,11 @@ BELOW_MIN_TEST_EVIDENCE="$TMPROOT/below-min-test-evidence.json"
 "$CLI" evidence init --output "$BELOW_MIN_TEST_EVIDENCE" >/dev/null
 cat >"$TMPROOT/below-min-test-report.yaml" <<'YAML'
 kind: test
+report_template_version: test-report-v1
+schema_semantics:
+  feature_versions:
+    evidence_level: v1
+    schema_semantics: v1
 verdict: pass
 summary: Test pass with mechanical_check level below test minimum.
 source_message_id: herdr:tester:below-min
@@ -50,7 +55,7 @@ test_environment:
   ux_quality: not_applicable
   artifact_quality: artifact path is stable and small
 YAML
-ORBIT_INSTANCE=tester "$CLI" evidence submit --file "$BELOW_MIN_TEST_EVIDENCE" --report "$TMPROOT/below-min-test-report.yaml" --json >/dev/null
+ORBIT_INSTANCE=tester-main "$CLI" evidence submit --file "$BELOW_MIN_TEST_EVIDENCE" --report "$TMPROOT/below-min-test-report.yaml" --json >/dev/null
 if "$CLI" wait-gate --task "$TEST_TASK" --evidence "$BELOW_MIN_TEST_EVIDENCE" --json >"$TMPROOT/wait-gate-below-min-test.json"; then
   printf 'FAIL test gate rejects mechanical_check below real_path_test minimum: command unexpectedly succeeded\n' >&2
   exit 1
@@ -62,7 +67,7 @@ json_assert 'test gate reports evidence_level_below_minimum for test_strategy mi
 
 # Fix 2: design_readiness gate is satisfied by review evidence record
 DESIGN_GATE_TASK="$TMPROOT/design-gate-kind-task.yaml"
-"$CLI" new-task --target-role reviewer --task-type design_review --output "$DESIGN_GATE_TASK" >/dev/null
+"$CLI" new-task --implementation-authority reviewer --assigned-instance reviewer-main --task-type design_review --output "$DESIGN_GATE_TASK" >/dev/null
 ruby --disable-gems -ryaml -e \
   'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["gates"]=[{"kind"=>"design_readiness","roles"=>["reviewer"],"required"=>true,"pass_condition"=>"design artifact reviewed"}]; File.write(p, YAML.dump(y))' \
   "$DESIGN_GATE_TASK"
@@ -72,7 +77,7 @@ write_review_pass_report "$TMPROOT/design-readiness-review-pass.yaml" "Design re
 ruby --disable-gems -ryaml -e \
   'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["evidence_level"]="implementation_readiness"; y["implementation_readiness_verdict"]="pass"; File.write(p, YAML.dump(y))' \
   "$TMPROOT/design-readiness-review-pass.yaml"
-ORBIT_INSTANCE=reviewer "$CLI" evidence submit --file "$DESIGN_READINESS_EVIDENCE" --report "$TMPROOT/design-readiness-review-pass.yaml" --json >/dev/null
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit --file "$DESIGN_READINESS_EVIDENCE" --report "$TMPROOT/design-readiness-review-pass.yaml" --json >/dev/null
 "$CLI" wait-gate --task "$DESIGN_GATE_TASK" --evidence "$DESIGN_READINESS_EVIDENCE" --json >"$TMPROOT/wait-gate-design-readiness.json"
 json_assert 'design_readiness gate is satisfied by review evidence record' \
   "$TMPROOT/wait-gate-design-readiness.json" \
@@ -83,6 +88,12 @@ MISSING_RESIDUAL_EVIDENCE="$TMPROOT/missing-residual-evidence.json"
 "$CLI" evidence init --output "$MISSING_RESIDUAL_EVIDENCE" >/dev/null
 cat >"$TMPROOT/missing-residual-report.yaml" <<'YAML'
 kind: review
+report_template_version: review-report-v1
+schema_semantics:
+  feature_versions:
+    evidence_level: v1
+    quality_outcome: v1
+    schema_semantics: v1
 verdict: pass
 summary: Review pass missing required residual_risk.
 source_message_id: herdr:reviewer:missing-residual
@@ -115,18 +126,18 @@ counterexample_cases:
 implementation_readiness_verdict: not_checked
 YAML
 expect_failure 'evidence submit rejects pass without residual_risk' \
-  env ORBIT_INSTANCE=reviewer "$CLI" evidence submit --file "$MISSING_RESIDUAL_EVIDENCE" --report "$TMPROOT/missing-residual-report.yaml" --json
+  env ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit --file "$MISSING_RESIDUAL_EVIDENCE" --report "$TMPROOT/missing-residual-report.yaml" --json
 
 # Fix 4: new-task reviewer creates review_strategy.minimum_evidence_level: outcome_quality
 REVIEWER_NEW_TASK="$TMPROOT/reviewer-new-task.yaml"
-"$CLI" new-task --target-role reviewer --task-type review --output "$REVIEWER_NEW_TASK" >/dev/null
+"$CLI" new-task --implementation-authority reviewer --assigned-instance reviewer-main --task-type review --output "$REVIEWER_NEW_TASK" >/dev/null
 yaml_assert 'new-task for reviewer creates review_strategy minimum_evidence_level outcome_quality' \
   "$REVIEWER_NEW_TASK" \
   'j["review_strategy"]["minimum_evidence_level"] == "outcome_quality"'
 
 # Fix 4: new-task design task creates review_strategy.minimum_evidence_level: implementation_readiness
 DESIGN_NEW_TASK="$TMPROOT/design-new-task-fix4.yaml"
-"$CLI" new-task --target-role lead --task-type design --output "$DESIGN_NEW_TASK" >/dev/null
+"$CLI" new-task --task-type design --output "$DESIGN_NEW_TASK" >/dev/null
 yaml_assert 'new-task for design type creates review_strategy minimum_evidence_level implementation_readiness' \
   "$DESIGN_NEW_TASK" \
   'j["review_strategy"]["minimum_evidence_level"] == "implementation_readiness"'
@@ -137,7 +148,7 @@ yaml_assert 'new-task for design type creates review_strategy minimum_evidence_l
 
 # Fix: release gate is satisfied by tester submitting test evidence with release_readiness level
 RELEASE_GATE_TASK="$TMPROOT/release-gate-task.yaml"
-"$CLI" new-task --target-role lead --task-type implementation --output "$RELEASE_GATE_TASK" >/dev/null
+"$CLI" new-task --task-type implementation --output "$RELEASE_GATE_TASK" >/dev/null
 ruby --disable-gems -ryaml -e \
   'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["gates"]=[{"kind"=>"release","roles"=>["tester"],"required"=>true,"pass_condition"=>"release evidence accepted"}]; File.write(p, YAML.dump(y))' \
   "$RELEASE_GATE_TASK"
@@ -145,6 +156,11 @@ RELEASE_EVIDENCE="$TMPROOT/release-evidence.json"
 "$CLI" evidence init --output "$RELEASE_EVIDENCE" >/dev/null
 cat >"$TMPROOT/release-pass-report.yaml" <<'YAML'
 kind: test
+report_template_version: test-report-v1
+schema_semantics:
+  feature_versions:
+    evidence_level: v1
+    schema_semantics: v1
 verdict: pass
 summary: Release gate test evidence with release_readiness level.
 source_message_id: herdr:tester:release-gate
@@ -181,7 +197,7 @@ test_environment:
   ux_quality: not_applicable
   artifact_quality: artifact path is stable and small
 YAML
-ORBIT_INSTANCE=tester "$CLI" evidence submit --file "$RELEASE_EVIDENCE" --report "$TMPROOT/release-pass-report.yaml" --json >/dev/null
+ORBIT_INSTANCE=tester-main "$CLI" evidence submit --file "$RELEASE_EVIDENCE" --report "$TMPROOT/release-pass-report.yaml" --json >/dev/null
 "$CLI" wait-gate --task "$RELEASE_GATE_TASK" --evidence "$RELEASE_EVIDENCE" --json >"$TMPROOT/wait-gate-release.json"
 json_assert 'release gate is satisfied by tester test evidence with release_readiness level' \
   "$TMPROOT/wait-gate-release.json" \
@@ -201,16 +217,16 @@ json_assert 'aggregate verdict gate entry includes residual_risk' \
 
 # Fix: residual_risk surfaced in handoff judgment_summary
 RELEASE_HANDOFF_TASK="$TMPROOT/release-handoff-task.yaml"
-"$CLI" new-task --target-role tester --task-type implementation_test --output "$RELEASE_HANDOFF_TASK" >/dev/null
+"$CLI" new-task --implementation-authority tester --assigned-instance tester-main --task-type implementation_test --output "$RELEASE_HANDOFF_TASK" >/dev/null
 RELEASE_HANDOFF_EVIDENCE="$TMPROOT/release-handoff-evidence.json"
 "$CLI" evidence init --output "$RELEASE_HANDOFF_EVIDENCE" >/dev/null
-ORBIT_INSTANCE=tester "$CLI" evidence submit --file "$RELEASE_HANDOFF_EVIDENCE" --report "$TMPROOT/release-pass-report.yaml" --json >/dev/null
+ORBIT_INSTANCE=tester-main "$CLI" evidence submit --file "$RELEASE_HANDOFF_EVIDENCE" --report "$TMPROOT/release-pass-report.yaml" --json >/dev/null
 RELEASE_HANDOFF_STATE="$TMPROOT/release-handoff-state.yaml"
 cp .orbit/loop-state.yaml "$RELEASE_HANDOFF_STATE"
 ruby --disable-gems -ryaml -e \
   'p=ARGV[0]; s=YAML.safe_load(File.read(p), aliases: true); s["current_task"]=ARGV[1]; s["artifacts"]||={}; s["artifacts"]["evidence_file"]=ARGV[2]; s["phase"]="working"; s["status"]="working"; File.write(p, YAML.dump(s))' \
   "$RELEASE_HANDOFF_STATE" "$(realpath "$RELEASE_HANDOFF_TASK")" "$(realpath "$RELEASE_HANDOFF_EVIDENCE")"
-ORBIT_INSTANCE=tester "$CLI" handoff --task "$RELEASE_HANDOFF_TASK" --state "$RELEASE_HANDOFF_STATE" --evidence "$RELEASE_HANDOFF_EVIDENCE" --json \
+ORBIT_INSTANCE=tester-main "$CLI" handoff --task "$RELEASE_HANDOFF_TASK" --state "$RELEASE_HANDOFF_STATE" --evidence "$RELEASE_HANDOFF_EVIDENCE" --json \
   >"$TMPROOT/release-handoff.json" 2>/dev/null || true
 json_assert 'handoff judgment_summary test_judgment includes residual_risk' \
   "$TMPROOT/release-handoff.json" \
@@ -232,15 +248,15 @@ yaml_assert 'test-report template includes residual_risk field' \
 
 # audit done-state with release gate satisfied by tester test evidence (no identity_mismatch)
 RELEASE_AUDIT_TASK="$TMPROOT/release-audit-task.yaml"
-"$CLI" new-task --target-role lead --task-type implementation --output "$RELEASE_AUDIT_TASK" >/dev/null
+"$CLI" new-task --task-type implementation --output "$RELEASE_AUDIT_TASK" >/dev/null
 ruby --disable-gems -ryaml -e \
   'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["gates"]=[{"kind"=>"release","roles"=>["tester"],"required"=>true,"pass_condition"=>"release gate passed"}]; File.write(p, YAML.dump(y))' \
   "$RELEASE_AUDIT_TASK"
 RELEASE_AUDIT_EVIDENCE="$TMPROOT/release-audit-evidence.json"
 "$CLI" evidence init --output "$RELEASE_AUDIT_EVIDENCE" >/dev/null
-ORBIT_INSTANCE=tester "$CLI" evidence submit --file "$RELEASE_AUDIT_EVIDENCE" --report "$TMPROOT/release-pass-report.yaml" --json >/dev/null
-"$CLI" init --force >/dev/null
-ORBIT_INSTANCE=lead "$CLI" state start --task "$RELEASE_AUDIT_TASK" >/dev/null
+ORBIT_INSTANCE=tester-main "$CLI" evidence submit --file "$RELEASE_AUDIT_EVIDENCE" --report "$TMPROOT/release-pass-report.yaml" --json >/dev/null
+"$CLI" init --force --operation-mode solo >/dev/null
+ORBIT_INSTANCE=lead-main "$CLI" state start --task "$RELEASE_AUDIT_TASK" >/dev/null
 ruby --disable-gems -ryaml -e \
   'p=ARGV[0]; s=YAML.safe_load(File.read(p), aliases: true); s["phase"]="done"; s["status"]="done"; s["artifacts"]||={}; s["artifacts"]["evidence_file"]=File.expand_path(ARGV[1]); File.write(p, YAML.dump(s))' \
   .orbit/loop-state.yaml "$RELEASE_AUDIT_EVIDENCE"
@@ -251,14 +267,14 @@ json_assert 'audit done-state passes when release gate satisfied by tester test 
 
 # audit done-state with design_readiness gate satisfied by reviewer review evidence
 DESIGN_AUDIT_TASK="$TMPROOT/design-audit-task.yaml"
-"$CLI" new-task --target-role reviewer --task-type design_review --output "$DESIGN_AUDIT_TASK" >/dev/null
+"$CLI" new-task --implementation-authority reviewer --assigned-instance reviewer-main --task-type design_review --output "$DESIGN_AUDIT_TASK" >/dev/null
 ruby --disable-gems -ryaml -e \
   'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["gates"]=[{"kind"=>"design_readiness","roles"=>["reviewer"],"required"=>true,"pass_condition"=>"design readiness passed"}]; File.write(p, YAML.dump(y))' \
   "$DESIGN_AUDIT_TASK"
 DESIGN_AUDIT_EVIDENCE="$TMPROOT/design-audit-evidence.json"
 "$CLI" evidence init --output "$DESIGN_AUDIT_EVIDENCE" >/dev/null
-ORBIT_INSTANCE=reviewer "$CLI" evidence submit --file "$DESIGN_AUDIT_EVIDENCE" --report "$TMPROOT/design-readiness-review-pass.yaml" --json >/dev/null
-ORBIT_INSTANCE=lead "$CLI" state start --task "$DESIGN_AUDIT_TASK" >/dev/null
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit --file "$DESIGN_AUDIT_EVIDENCE" --report "$TMPROOT/design-readiness-review-pass.yaml" --json >/dev/null
+ORBIT_INSTANCE=lead-main "$CLI" state start --task "$DESIGN_AUDIT_TASK" >/dev/null
 ruby --disable-gems -ryaml -e \
   'p=ARGV[0]; s=YAML.safe_load(File.read(p), aliases: true); s["phase"]="done"; s["status"]="done"; s["artifacts"]||={}; s["artifacts"]["evidence_file"]=File.expand_path(ARGV[1]); File.write(p, YAML.dump(s))' \
   .orbit/loop-state.yaml "$DESIGN_AUDIT_EVIDENCE"
@@ -272,7 +288,7 @@ json_assert 'audit done-state passes when design_readiness gate satisfied by rev
 # ---------------------------------------------------------------------------
 
 MALFORMED_AUDIT_TASK="$TMPROOT/malformed-audit-task.yaml"
-"$CLI" new-task --target-role lead --task-type implementation --output "$MALFORMED_AUDIT_TASK" >/dev/null
+"$CLI" new-task --task-type implementation --output "$MALFORMED_AUDIT_TASK" >/dev/null
 ruby --disable-gems -ryaml -e \
   'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["gates"]=[{"kind"=>"release","roles"=>["tester"],"required"=>true,"pass_condition"=>"release gate passed"}]; File.write(p, YAML.dump(y))' \
   "$MALFORMED_AUDIT_TASK"
@@ -282,8 +298,8 @@ MALFORMED_AUDIT_EVIDENCE="$TMPROOT/malformed-audit-evidence.json"
 ruby --disable-gems -rjson -e \
   'p=ARGV[0]; ev=JSON.parse(File.read(p)); ev["records"]||=[]; ev["records"]<<{"kind"=>"test","status"=>"pass","structured_submit"=>true,"created_at"=>"not-a-date","identity"=>{"resolved_role"=>"tester"},"evidence_level"=>"release_readiness","residual_risk"=>"acceptable"}; File.write(p, JSON.generate(ev))' \
   "$MALFORMED_AUDIT_EVIDENCE"
-"$CLI" init --force >/dev/null
-ORBIT_INSTANCE=lead "$CLI" state start --task "$MALFORMED_AUDIT_TASK" >/dev/null
+"$CLI" init --force --operation-mode solo >/dev/null
+ORBIT_INSTANCE=lead-main "$CLI" state start --task "$MALFORMED_AUDIT_TASK" >/dev/null
 ruby --disable-gems -ryaml -e \
   'p=ARGV[0]; s=YAML.safe_load(File.read(p), aliases: true); s["phase"]="done"; s["status"]="done"; s["artifacts"]||={}; s["artifacts"]["evidence_file"]=File.expand_path(ARGV[1]); File.write(p, YAML.dump(s))' \
   .orbit/loop-state.yaml "$MALFORMED_AUDIT_EVIDENCE"
@@ -298,7 +314,7 @@ json_assert 'audit returns structured JSON (not crash) when evidence record has 
 
 # new-task for improvement task type seeds invalid_completion_guards
 IMPROVEMENT_TASK="$TMPROOT/slice2-improvement-task.yaml"
-"$CLI" new-task --target-role reviewer --task-type docs_improvement --output "$IMPROVEMENT_TASK" >/dev/null
+"$CLI" new-task --implementation-authority reviewer --assigned-instance reviewer-main --task-type docs_improvement --output "$IMPROVEMENT_TASK" >/dev/null
 yaml_assert 'new-task improvement task seeds invalid_completion_guards' "$IMPROVEMENT_TASK" \
   'j["invalid_completion_guards"].is_a?(Array) && !j["invalid_completion_guards"].empty? && j["invalid_completion_guards"].all? { |g| g["id"].is_a?(String) && !g["id"].empty? && g["description"].is_a?(String) && !g["description"].empty? && g["evidence_required"].is_a?(String) && !g["evidence_required"].empty? }'
 yaml_assert 'new-task review_strategy includes required_questions' "$IMPROVEMENT_TASK" \
@@ -336,9 +352,9 @@ json_assert 'audit includes quality_outcome_summary with gate verdicts' \
 # audit shows invalid_completion_guards in quality_outcome_summary for improvement task
 AUDIT_IMPROVEMENT_EVIDENCE="$TMPROOT/slice2-audit-improvement-evidence.json"
 "$CLI" evidence init --output "$AUDIT_IMPROVEMENT_EVIDENCE" >/dev/null
-ORBIT_INSTANCE=reviewer "$CLI" evidence submit --file "$AUDIT_IMPROVEMENT_EVIDENCE" --report "$TMPROOT/structured-review.yaml" --json >/dev/null
-"$CLI" init --force >/dev/null
-ORBIT_INSTANCE=lead "$CLI" state start --task "$IMPROVEMENT_TASK" >/dev/null
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit --file "$AUDIT_IMPROVEMENT_EVIDENCE" --report "$TMPROOT/structured-review.yaml" --json >/dev/null
+"$CLI" init --force --operation-mode solo >/dev/null
+ORBIT_INSTANCE=lead-main "$CLI" state start --task "$IMPROVEMENT_TASK" >/dev/null
 ruby --disable-gems -ryaml -e \
   'p=ARGV[0]; s=YAML.safe_load(File.read(p), aliases: true); s["phase"]="done"; s["status"]="done"; s["artifacts"]||={}; s["artifacts"]["evidence_file"]=File.expand_path(ARGV[1]); File.write(p, YAML.dump(s))' \
   .orbit/loop-state.yaml "$AUDIT_IMPROVEMENT_EVIDENCE"

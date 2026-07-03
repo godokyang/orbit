@@ -111,6 +111,12 @@ write_review_pass_report() {
   local source_message_id="$3"
   cat >"$path" <<YAML
 kind: review
+report_template_version: review-report-v1
+schema_semantics:
+  feature_versions:
+    evidence_level: v1
+    quality_outcome: v1
+    schema_semantics: v1
 verdict: pass
 summary: ${summary}
 source_message_id: ${source_message_id}
@@ -131,6 +137,11 @@ write_test_pass_report() {
   local source_message_id="$3"
   cat >"$path" <<YAML
 kind: test
+report_template_version: test-report-v1
+schema_semantics:
+  feature_versions:
+    evidence_level: v1
+    schema_semantics: v1
 verdict: pass
 summary: ${summary}
 source_message_id: ${source_message_id}

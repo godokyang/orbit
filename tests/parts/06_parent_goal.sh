@@ -4,7 +4,7 @@
 
 # design_readiness gate must apply required_questions coverage (same as review gate)
 DR_RQ_TASK="$TMPROOT/slice2-dr-rq-task.yaml"
-"$CLI" new-task --target-role reviewer --task-type design_review --output "$DR_RQ_TASK" >/dev/null
+"$CLI" new-task --implementation-authority reviewer --assigned-instance reviewer-main --task-type design_review --output "$DR_RQ_TASK" >/dev/null
 ruby --disable-gems -ryaml -e \
   'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["gates"]=[{"kind"=>"design_readiness","roles"=>["reviewer"],"required"=>true,"pass_condition"=>"design readiness passed"}]; File.write(p, YAML.dump(y))' \
   "$DR_RQ_TASK"
@@ -23,7 +23,7 @@ ruby --disable-gems -ryaml -e \
 # evidence submit succeeds (submit does not have task context; task-aware check is in validate/wait-gate)
 DR_PARTIAL_EVIDENCE="$TMPROOT/slice2-dr-partial-evidence.json"
 "$CLI" evidence init --output "$DR_PARTIAL_EVIDENCE" >/dev/null
-ORBIT_INSTANCE=reviewer "$CLI" evidence submit --file "$DR_PARTIAL_EVIDENCE" --report "$DR_PARTIAL_REPORT" --json >/dev/null
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit --file "$DR_PARTIAL_EVIDENCE" --report "$DR_PARTIAL_REPORT" --json >/dev/null
 # validate and wait-gate must reject partial required_questions coverage
 expect_failure 'validate rejects design_readiness review pass with incomplete required questions' "$CLI" validate --task "$DR_RQ_TASK" --evidence "$DR_PARTIAL_EVIDENCE" --json
 if "$CLI" wait-gate --task "$DR_RQ_TASK" --evidence "$DR_PARTIAL_EVIDENCE" --json >"$TMPROOT/slice2-dr-partial-wait.json" 2>/dev/null; then
@@ -35,7 +35,7 @@ json_assert 'design_readiness wait-gate reports required_questions_not_met for i
   'j["ready"] == false && j["gate_summary"]["not_ready"].any? { |g| g["kind"] == "design_readiness" && g["blocking_reason"] == "required_questions_not_met" }'
 
 # Submit with full required questions, then verify wait-gate passes; then corrupt one answer and verify it blocks
-ORBIT_INSTANCE=reviewer "$CLI" evidence submit --file "$DR_RQ_EVIDENCE" --report "$TMPROOT/design-readiness-review-pass.yaml" --json >/dev/null
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit --file "$DR_RQ_EVIDENCE" --report "$TMPROOT/design-readiness-review-pass.yaml" --json >/dev/null
 "$CLI" wait-gate --task "$DR_RQ_TASK" --evidence "$DR_RQ_EVIDENCE" --json >"$TMPROOT/slice2-dr-rq-pass.json"
 json_assert 'design_readiness gate passes with full required_questions coverage' "$TMPROOT/slice2-dr-rq-pass.json" \
   'j["ready"] == true && j["gates"].any? { |g| g["kind"] == "design_readiness" && g["passed"] == true }'
@@ -59,7 +59,7 @@ json_assert 'design_readiness gate reports required_questions_not_met' "$TMPROOT
 
 # High fix 1a: validate rejects parent_done with unevidenced criteria
 S3R_DONE_TASK="$TMPROOT/s3r-done-task.yaml"
-"$CLI" new-task --target-role lead --task-type decomposition --output "$S3R_DONE_TASK" >/dev/null
+"$CLI" new-task --task-type decomposition --output "$S3R_DONE_TASK" >/dev/null
 ruby --disable-gems -ryaml -e \
   'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true)
    y["parent_goal"]["objective"]="A real decomposition objective."
@@ -74,8 +74,8 @@ expect_failure 'validate rejects parent_done with unevidenced done criteria' \
   "$CLI" validate --task "$S3R_DONE_TASK" --evidence "$S3R_EVIDENCE" --json
 
 # High fix 1b: audit exit code is 1 when parent_done with unevidenced criteria
-"$CLI" init --force >/dev/null
-ORBIT_INSTANCE=lead "$CLI" state start --task "$S3R_DONE_TASK" >/dev/null
+"$CLI" init --force --operation-mode solo >/dev/null
+ORBIT_INSTANCE=lead-main "$CLI" state start --task "$S3R_DONE_TASK" >/dev/null
 ruby --disable-gems -ryaml -e \
   'p=ARGV[0]; s=YAML.safe_load(File.read(p), aliases: true); s["phase"]="working"; s["status"]="working"; File.write(p, YAML.dump(s))' \
   .orbit/loop-state.yaml
@@ -91,7 +91,7 @@ json_assert 'audit blocking_findings includes parent_goal_status.done_criteria s
 
 # High fix 2: validate rejects missing parent_goal_status when parent_goal.required=true
 S3R_NO_STATUS_TASK="$TMPROOT/s3r-no-status-task.yaml"
-"$CLI" new-task --target-role lead --task-type decomposition --output "$S3R_NO_STATUS_TASK" >/dev/null
+"$CLI" new-task --task-type decomposition --output "$S3R_NO_STATUS_TASK" >/dev/null
 ruby --disable-gems -ryaml -e \
   'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true)
    y["parent_goal"]["objective"]="Objective is set."
@@ -102,14 +102,14 @@ expect_failure 'validate rejects parent_goal.required=true task with missing par
   "$CLI" validate --task "$S3R_NO_STATUS_TASK" --evidence "$S3R_EVIDENCE" --json
 
 # Medium fix 3: state progress --parent-state rejects invalid state enum
-"$CLI" init --force >/dev/null
+"$CLI" init --force --operation-mode solo >/dev/null
 S3R_PROGRESS_TASK="$TMPROOT/s3r-progress-task.yaml"
-"$CLI" new-task --target-role lead --task-type decomposition --output "$S3R_PROGRESS_TASK" >/dev/null
+"$CLI" new-task --task-type decomposition --output "$S3R_PROGRESS_TASK" >/dev/null
 ruby --disable-gems -ryaml -e \
   'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["parent_goal"]["objective"]="Valid."; File.write(p, YAML.dump(y))' \
   "$S3R_PROGRESS_TASK"
-ORBIT_INSTANCE=lead "$CLI" state start --task "$S3R_PROGRESS_TASK" >/dev/null
-if ORBIT_INSTANCE=lead "$CLI" state progress --task "$S3R_PROGRESS_TASK" \
+ORBIT_INSTANCE=lead-main "$CLI" state start --task "$S3R_PROGRESS_TASK" >/dev/null
+if ORBIT_INSTANCE=lead-main "$CLI" state progress --task "$S3R_PROGRESS_TASK" \
     --message "test" --parent-state bogus_invalid_state 2>/dev/null; then
   printf 'FAIL state progress rejects invalid --parent-state enum: command unexpectedly succeeded\n' >&2
   exit 1
@@ -121,7 +121,7 @@ pass 'state progress rejects invalid --parent-state enum'
 S3R_HIST_BEFORE=$(ruby --disable-gems -ryaml -e \
   'puts (YAML.safe_load(File.read(ARGV[0]), aliases: true)["history"] || []).length' \
   .orbit/loop-state.yaml)
-ORBIT_INSTANCE=lead "$CLI" state progress --task "$S3R_PROGRESS_TASK" \
+ORBIT_INSTANCE=lead-main "$CLI" state progress --task "$S3R_PROGRESS_TASK" \
   --message "bad parent" --parent-state bogus_invalid_state 2>/dev/null || true
 S3R_HIST_AFTER=$(ruby --disable-gems -ryaml -e \
   'puts (YAML.safe_load(File.read(ARGV[0]), aliases: true)["history"] || []).length' \
@@ -144,7 +144,7 @@ json_assert 'audit issues includes parent_goal_status.done_criteria source' \
 
 # Test S3-1: new-task decomposition creates parent_goal with required=true and done_criteria
 S3_DECOMP_TASK="$TMPROOT/slice3-decomp-task.yaml"
-"$CLI" new-task --target-role lead --task-type decomposition --output "$S3_DECOMP_TASK" >/dev/null
+"$CLI" new-task --task-type decomposition --output "$S3_DECOMP_TASK" >/dev/null
 yaml_assert 'new-task decomposition seeds parent_goal with required=true' "$S3_DECOMP_TASK" \
   'j["parent_goal"].is_a?(Hash) && j["parent_goal"]["required"] == true && j["parent_goal"]["done_criteria"].is_a?(Array) && !j["parent_goal"]["done_criteria"].empty?'
 yaml_assert 'new-task decomposition seeds parent_goal_status with parent_in_progress state' "$S3_DECOMP_TASK" \
@@ -154,7 +154,7 @@ yaml_assert 'new-task decomposition parent_goal_status has user_next_action defa
 
 # Test S3-2: new-task implementation creates parent_goal with required=false
 S3_IMPL_TASK="$TMPROOT/slice3-impl-task.yaml"
-"$CLI" new-task --target-role lead --task-type implementation --output "$S3_IMPL_TASK" >/dev/null
+"$CLI" new-task --task-type implementation --output "$S3_IMPL_TASK" >/dev/null
 yaml_assert 'new-task implementation seeds parent_goal with required=false' "$S3_IMPL_TASK" \
   'j["parent_goal"].is_a?(Hash) && j["parent_goal"]["required"] == false'
 yaml_assert 'new-task implementation seeds parent_goal_status with not_applicable state' "$S3_IMPL_TASK" \
@@ -162,7 +162,7 @@ yaml_assert 'new-task implementation seeds parent_goal_status with not_applicabl
 
 # Test S3-3: validate fails when parent_goal.required=true but objective is empty
 S3_NO_OBJ_TASK="$TMPROOT/slice3-no-objective-task.yaml"
-"$CLI" new-task --target-role lead --task-type decomposition --output "$S3_NO_OBJ_TASK" >/dev/null
+"$CLI" new-task --task-type decomposition --output "$S3_NO_OBJ_TASK" >/dev/null
 ruby --disable-gems -ryaml -e \
   'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["parent_goal"]["objective"]=""; File.write(p, YAML.dump(y))' \
   "$S3_NO_OBJ_TASK"
@@ -173,7 +173,7 @@ expect_failure 'validate rejects parent task with empty objective' \
 
 # Test S3-4: validate fails when parent_goal.required=true but done_criteria is empty
 S3_NO_CRITERIA_TASK="$TMPROOT/slice3-no-criteria-task.yaml"
-"$CLI" new-task --target-role lead --task-type decomposition --output "$S3_NO_CRITERIA_TASK" >/dev/null
+"$CLI" new-task --task-type decomposition --output "$S3_NO_CRITERIA_TASK" >/dev/null
 ruby --disable-gems -ryaml -e \
   'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true)
    y["parent_goal"]["done_criteria"]=[]
@@ -197,7 +197,7 @@ yaml_assert 'new-task includes parent_goal_status in schema_semantics feature_ve
 
 # Test S3-7: audit includes parent_goal_summary
 S3_AUDIT_TASK="$TMPROOT/slice3-audit-task.yaml"
-"$CLI" new-task --target-role lead --task-type decomposition --output "$S3_AUDIT_TASK" >/dev/null
+"$CLI" new-task --task-type decomposition --output "$S3_AUDIT_TASK" >/dev/null
 ruby --disable-gems -ryaml -e \
   'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true)
    y["parent_goal"]["objective"]="Achieve a well-scoped parent outcome."
@@ -205,8 +205,8 @@ ruby --disable-gems -ryaml -e \
   "$S3_AUDIT_TASK"
 S3_AUDIT_EVIDENCE="$TMPROOT/slice3-audit-evidence.json"
 "$CLI" evidence init --output "$S3_AUDIT_EVIDENCE" >/dev/null
-"$CLI" init --force >/dev/null
-ORBIT_INSTANCE=lead "$CLI" state start --task "$S3_AUDIT_TASK" >/dev/null
+"$CLI" init --force --operation-mode solo >/dev/null
+ORBIT_INSTANCE=lead-main "$CLI" state start --task "$S3_AUDIT_TASK" >/dev/null
 ruby --disable-gems -ryaml -e \
   'p=ARGV[0]; s=YAML.safe_load(File.read(p), aliases: true); s["phase"]="working"; s["status"]="working"; File.write(p, YAML.dump(s))' \
   .orbit/loop-state.yaml
@@ -218,7 +218,7 @@ json_assert 'audit includes parent_goal_summary for decomposition task' \
 
 # Test S3-8: audit reports unevidenced criteria when parent_goal_status.state=parent_done but criteria not evidenced
 S3_DONE_TASK="$TMPROOT/slice3-done-task.yaml"
-"$CLI" new-task --target-role lead --task-type decomposition --output "$S3_DONE_TASK" >/dev/null
+"$CLI" new-task --task-type decomposition --output "$S3_DONE_TASK" >/dev/null
 ruby --disable-gems -ryaml -e \
   'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true)
    y["parent_goal"]["objective"]="Deliver the parent outcome."
@@ -229,8 +229,8 @@ ruby --disable-gems -ryaml -e \
   "$S3_DONE_TASK"
 S3_DONE_EVIDENCE="$TMPROOT/slice3-done-evidence.json"
 "$CLI" evidence init --output "$S3_DONE_EVIDENCE" >/dev/null
-"$CLI" init --force >/dev/null
-ORBIT_INSTANCE=lead "$CLI" state start --task "$S3_DONE_TASK" >/dev/null
+"$CLI" init --force --operation-mode solo >/dev/null
+ORBIT_INSTANCE=lead-main "$CLI" state start --task "$S3_DONE_TASK" >/dev/null
 ruby --disable-gems -ryaml -e \
   'p=ARGV[0]; s=YAML.safe_load(File.read(p), aliases: true); s["phase"]="working"; s["status"]="working"; File.write(p, YAML.dump(s))' \
   .orbit/loop-state.yaml
@@ -245,7 +245,7 @@ json_assert 'audit parent_goal_summary blocking contains done_criteria message' 
 
 # Test S3-9: handoff includes parent_goal_status with user_next_action
 S3_HO_TASK="$TMPROOT/slice3-handoff-task.yaml"
-"$CLI" new-task --target-role lead --task-type decomposition --output "$S3_HO_TASK" >/dev/null
+"$CLI" new-task --task-type decomposition --output "$S3_HO_TASK" >/dev/null
 ruby --disable-gems -ryaml -e \
   'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true)
    y["parent_goal"]["objective"]="Deliver the decomposed parent outcome."
@@ -253,14 +253,14 @@ ruby --disable-gems -ryaml -e \
   "$S3_HO_TASK"
 S3_HO_EVIDENCE="$TMPROOT/slice3-handoff-evidence.json"
 "$CLI" evidence init --output "$S3_HO_EVIDENCE" >/dev/null
-"$CLI" init --force >/dev/null
-ORBIT_INSTANCE=lead "$CLI" state start --task "$S3_HO_TASK" >/dev/null
+"$CLI" init --force --operation-mode solo >/dev/null
+ORBIT_INSTANCE=lead-main "$CLI" state start --task "$S3_HO_TASK" >/dev/null
 ruby --disable-gems -ryaml -e \
   'p=ARGV[0]; s=YAML.safe_load(File.read(p), aliases: true)
    s["current_task"]=ARGV[1]; s["artifacts"]||={}; s["artifacts"]["evidence_file"]=ARGV[2]
    s["phase"]="working"; s["status"]="working"; File.write(p, YAML.dump(s))' \
   .orbit/loop-state.yaml "$S3_HO_TASK" "$S3_HO_EVIDENCE"
-ORBIT_INSTANCE=lead "$CLI" handoff --task "$S3_HO_TASK" --state .orbit/loop-state.yaml \
+ORBIT_INSTANCE=lead-main "$CLI" handoff --task "$S3_HO_TASK" --state .orbit/loop-state.yaml \
   --evidence "$S3_HO_EVIDENCE" --json >"$TMPROOT/slice3-handoff.json" 2>/dev/null || true
 json_assert 'handoff includes parent_goal_status' \
   "$TMPROOT/slice3-handoff.json" \
@@ -271,7 +271,7 @@ json_assert 'handoff parent_goal_status includes user_next_action' \
 
 # Test S3-10: wait-gate includes parent_goal_status in output
 S3_WG_TASK="$TMPROOT/slice3-wg-task.yaml"
-"$CLI" new-task --target-role lead --task-type decomposition --output "$S3_WG_TASK" >/dev/null
+"$CLI" new-task --task-type decomposition --output "$S3_WG_TASK" >/dev/null
 ruby --disable-gems -ryaml -e \
   'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true)
    y["parent_goal"]["objective"]="Wait-gate parent goal."
@@ -287,15 +287,15 @@ json_assert 'wait-gate includes parent_goal_status from task' \
 
 # Test S3-11: state progress --parent-state updates task file
 S3_PROGRESS_TASK="$TMPROOT/slice3-progress-task.yaml"
-"$CLI" new-task --target-role lead --task-type decomposition --output "$S3_PROGRESS_TASK" >/dev/null
+"$CLI" new-task --task-type decomposition --output "$S3_PROGRESS_TASK" >/dev/null
 ruby --disable-gems -ryaml -e \
   'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true)
    y["parent_goal"]["objective"]="Parent goal for progress test."
    File.write(p, YAML.dump(y))' \
   "$S3_PROGRESS_TASK"
-"$CLI" init --force >/dev/null
-ORBIT_INSTANCE=lead "$CLI" state start --task "$S3_PROGRESS_TASK" >/dev/null
-ORBIT_INSTANCE=lead "$CLI" state progress --task "$S3_PROGRESS_TASK" \
+"$CLI" init --force --operation-mode solo >/dev/null
+ORBIT_INSTANCE=lead-main "$CLI" state start --task "$S3_PROGRESS_TASK" >/dev/null
+ORBIT_INSTANCE=lead-main "$CLI" state progress --task "$S3_PROGRESS_TASK" \
   --message "Slice 1 complete" --parent-state slice_ready --active-slice "S1" >/dev/null
 yaml_assert 'state progress --parent-state updates parent_goal_status.state in task file' \
   "$S3_PROGRESS_TASK" \

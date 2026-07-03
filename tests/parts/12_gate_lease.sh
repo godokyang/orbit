@@ -12,14 +12,14 @@
 
 # S9_TASK is a review task (standard enforcement).
 S9_TASK="$TMPROOT/s9-task.yaml"
-"$CLI" new-task --target-role reviewer --task-type implementation_review --output "$S9_TASK" >/dev/null
+"$CLI" new-task --implementation-authority reviewer --assigned-instance reviewer-main --task-type implementation_review --output "$S9_TASK" >/dev/null
 
 # ---- Group 1: late verdict for old task sha is reported stale by arbitration ----
 
 S9_STALE_EVIDENCE="$TMPROOT/s9-stale-evidence.json"
 "$CLI" evidence init --output "$S9_STALE_EVIDENCE" >/dev/null
 write_review_pass_report "$TMPROOT/s9-review-pass-stale.yaml" "Review pass for original task revision." "herdr:reviewer:s9-stale"
-ORBIT_INSTANCE=reviewer "$CLI" evidence submit \
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit \
   --file "$S9_STALE_EVIDENCE" \
   --report "$TMPROOT/s9-review-pass-stale.yaml" \
   --task "$S9_TASK" \
@@ -47,7 +47,7 @@ ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases
 S9_STRICT_EVIDENCE="$TMPROOT/s9-strict-evidence.json"
 "$CLI" evidence init --output "$S9_STRICT_EVIDENCE" >/dev/null
 write_review_pass_report "$TMPROOT/s9-strict-review-pass.yaml" "Review pass linked to strict task." "herdr:reviewer:s9-strict"
-ORBIT_INSTANCE=reviewer "$CLI" evidence submit \
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit \
   --file "$S9_STRICT_EVIDENCE" \
   --report "$TMPROOT/s9-strict-review-pass.yaml" \
   --task "$S9_STRICT_TASK" \
@@ -70,7 +70,7 @@ S9_SUPERSEDE_EVIDENCE="$TMPROOT/s9-supersede-evidence.json"
 "$CLI" evidence init --output "$S9_SUPERSEDE_EVIDENCE" >/dev/null
 # Submit an early review pass linked to S9_TASK.
 write_review_pass_report "$TMPROOT/s9-review-pass-early.yaml" "Early review pass (will be superseded)." "herdr:reviewer:s9-early-pass"
-ORBIT_INSTANCE=reviewer "$CLI" evidence submit \
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit \
   --file "$S9_SUPERSEDE_EVIDENCE" \
   --report "$TMPROOT/s9-review-pass-early.yaml" \
   --task "$S9_TASK" \
@@ -81,6 +81,12 @@ ruby --disable-gems -rjson -e 'p=ARGV[0]; j=JSON.parse(File.read(p)); r=j["recor
 # Submit a later review fail for the same task revision.
 cat >"$TMPROOT/s9-review-fail-late.yaml" <<'YAML'
 kind: review
+report_template_version: review-report-v1
+schema_semantics:
+  feature_versions:
+    evidence_level: v1
+    quality_outcome: v1
+    schema_semantics: v1
 verdict: fail
 summary: Late review fail supersedes early pass.
 source_message_id: herdr:reviewer:s9-late-fail
@@ -97,7 +103,7 @@ findings:
 coverage: []
 artifacts: []
 YAML
-ORBIT_INSTANCE=reviewer "$CLI" evidence submit \
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit \
   --file "$S9_SUPERSEDE_EVIDENCE" \
   --report "$TMPROOT/s9-review-fail-late.yaml" \
   --task "$S9_TASK" \
@@ -210,7 +216,7 @@ j["records"] << {
   "quality_outcome_verdict"=>"pass",
   "quality_question_answers"=>[{"id"=>"outcome","verdict"=>"pass"},{"id"=>"counterexamples","verdict"=>"pass"},{"id"=>"evidence_sufficiency","verdict"=>"pass"},{"id"=>"residual_risk","verdict"=>"pass"}],
   "residual_risk"=>"none",
-  "identity"=>{"resolved_role"=>"reviewer","task_sha256"=>"0"*64}
+  "role_execution_context"=>{"resolved_role"=>"reviewer","task_sha256"=>"0"*64}
 }
 File.write(p, JSON.pretty_generate(j))' "$S9_AUDIT_STALE_EVIDENCE"
 S9_AUDIT_STALE_STATE="$TMPROOT/s9-audit-stale-state.yaml"
@@ -252,6 +258,12 @@ S9_SUBMIT_LEASE_EVIDENCE="$TMPROOT/s9-submit-lease-evidence.json"
 "$CLI" evidence init --output "$S9_SUBMIT_LEASE_EVIDENCE" >/dev/null
 cat >"$TMPROOT/s9-review-with-lease.yaml" <<'YAML'
 kind: review
+report_template_version: review-report-v1
+schema_semantics:
+  feature_versions:
+    evidence_level: v1
+    quality_outcome: v1
+    schema_semantics: v1
 verdict: pass
 summary: Review pass carrying a gate lease.
 source_message_id: herdr:reviewer:s9-submit-lease
@@ -299,7 +311,7 @@ gate_lease:
   expires_at: "2099-12-31T00:00:00Z"
   replacement_policy: allow_after_expiry
 YAML
-ORBIT_INSTANCE=reviewer "$CLI" evidence submit \
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit \
   --file "$S9_SUBMIT_LEASE_EVIDENCE" \
   --report "$TMPROOT/s9-review-with-lease.yaml" \
   --task "$S9_TASK" \
@@ -341,13 +353,13 @@ pass 'evidence manifest schema_semantics includes gate_lease=v1'
 S9_STD_STALE_EVIDENCE="$TMPROOT/s9-std-stale-evidence.json"
 "$CLI" evidence init --output "$S9_STD_STALE_EVIDENCE" >/dev/null
 write_review_pass_report "$TMPROOT/s9-std-stale-review.yaml" "Standard task review pass with stale sha." "herdr:reviewer:s9-std-stale"
-ORBIT_INSTANCE=reviewer "$CLI" evidence submit \
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit \
   --file "$S9_STD_STALE_EVIDENCE" \
   --report "$TMPROOT/s9-std-stale-review.yaml" \
   --task "$S9_TASK" \
   --json >/dev/null
 # Mutate to old task sha.
-ruby --disable-gems -rjson -e 'p=ARGV[0]; j=JSON.parse(File.read(p)); r=j["records"].find { |x| x["kind"]=="review" }; ctx=r["role_execution_context"]||r["identity"]||{}; ctx["task_sha256"]="0"*64; r["role_execution_context"] ? r["role_execution_context"]=ctx : r["identity"]=ctx; File.write(p, JSON.pretty_generate(j))' "$S9_STD_STALE_EVIDENCE"
+ruby --disable-gems -rjson -e 'p=ARGV[0]; j=JSON.parse(File.read(p)); r=j["records"].find { |x| x["kind"]=="review" }; ctx=r["role_execution_context"]||{}; ctx["task_sha256"]="0"*64; r["role_execution_context"]=ctx; File.write(p, JSON.pretty_generate(j))' "$S9_STD_STALE_EVIDENCE"
 if "$CLI" wait-gate --task "$S9_TASK" --evidence "$S9_STD_STALE_EVIDENCE" --json >"$TMPROOT/s9-std-stale-wait-gate.json" 2>/dev/null; then
   printf 'FAIL standard enforcement stale verdict does not close gate: command unexpectedly succeeded\n' >&2
   exit 1
@@ -365,7 +377,7 @@ json_assert 'standard stale gate still reports stale_task_sha256 flag' "$TMPROOT
 S9_HANDOFF_STALE_EVIDENCE="$TMPROOT/s9-handoff-stale-evidence.json"
 "$CLI" evidence init --output "$S9_HANDOFF_STALE_EVIDENCE" >/dev/null
 write_review_pass_report "$TMPROOT/s9-handoff-stale-review.yaml" "Review pass with stale sha for handoff." "herdr:reviewer:s9-ho-stale"
-ORBIT_INSTANCE=reviewer "$CLI" evidence submit \
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit \
   --file "$S9_HANDOFF_STALE_EVIDENCE" \
   --report "$TMPROOT/s9-handoff-stale-review.yaml" \
   --task "$S9_TASK" \
@@ -418,7 +430,7 @@ json_assert 'validate reports gate_lease error for array value' "$TMPROOT/s9-arr
 S9_VALIDATE_STALE_EVIDENCE="$TMPROOT/s9-validate-stale-evidence.json"
 "$CLI" evidence init --output "$S9_VALIDATE_STALE_EVIDENCE" >/dev/null
 write_review_pass_report "$TMPROOT/s9-validate-stale-review.yaml" "Review pass with stale sha for validate." "herdr:reviewer:s9-val-stale"
-ORBIT_INSTANCE=reviewer "$CLI" evidence submit \
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit \
   --file "$S9_VALIDATE_STALE_EVIDENCE" \
   --report "$TMPROOT/s9-validate-stale-review.yaml" \
   --task "$S9_TASK" \
@@ -438,7 +450,7 @@ json_assert 'validate reports stale verdict error' "$TMPROOT/s9-validate-stale.j
 S9_AUDIT_DONE_EVIDENCE="$TMPROOT/s9-audit-done-evidence.json"
 "$CLI" evidence init --output "$S9_AUDIT_DONE_EVIDENCE" >/dev/null
 write_review_pass_report "$TMPROOT/s9-audit-done-review.yaml" "Review pass with stale sha for audit done." "herdr:reviewer:s9-audit-done"
-ORBIT_INSTANCE=reviewer "$CLI" evidence submit \
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit \
   --file "$S9_AUDIT_DONE_EVIDENCE" \
   --report "$TMPROOT/s9-audit-done-review.yaml" \
   --task "$S9_TASK" \

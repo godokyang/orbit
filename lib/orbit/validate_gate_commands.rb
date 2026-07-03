@@ -74,9 +74,152 @@ def validate_rule_resolution_reference(result, evidence_path, evidence, task = n
       validation_error(result, "evidence_file.rule_resolution.task", "Attached rule resolution was generated for a different task.")
     end
 
-    target_role = task["target_role"]
-    if target_role && resolution["resolved_role"] && target_role != resolution["resolved_role"] && !task_gate_role?(task, resolution["resolved_role"])
-      validation_error(result, "evidence_file.rule_resolution.resolved_role", "Attached rule resolution role does not match task target_role.")
+    resolved_role = resolution["resolved_role"]
+    resolved_instance = resolution["instance"] || resolution["resolved_instance"]
+    if resolved_role && !task_gate_role?(task, resolved_role)
+      if resolved_role != task_implementation_authority(task)
+        validation_error(result, "evidence_file.rule_resolution.resolved_role", "Attached rule resolution role does not match task implementation_authority or a task gate role.")
+      elsif !resolved_instance.to_s.empty? &&
+            resolved_instance != task_assigned_instance(task) &&
+            !valid_implementation_override_for_identity(task, evidence, resolved_role, resolved_instance)
+        validation_error(result, "evidence_file.rule_resolution.instance", "Attached rule resolution instance does not match task assigned_instance.")
+      elsif resolved_instance.to_s.empty?
+        validation_error(result, "evidence_file.rule_resolution.instance", "Attached implementation rule resolution must record instance.")
+      end
+    end
+  end
+end
+
+def validate_implementation_records_for_task(result, records, task)
+  return unless task.is_a?(Hash)
+
+  records.each_with_index do |record, index|
+    next unless record.is_a?(Hash) && record["kind"] == "implementation"
+
+    ctx = record["role_execution_context"]
+    unless ctx.is_a?(Hash)
+      validation_error(result, "evidence_file.records[#{index}].role_execution_context", "implementation evidence must include role_execution_context.")
+      next
+    end
+
+    required_fields = %w[
+      owner_role
+      owner_instance
+      operation_mode
+      implementation_authority
+      assigned_instance
+      resolved_role
+      resolved_instance
+      execution_contract_source
+    ]
+    required_fields.each do |field|
+      unless ctx[field].is_a?(String) && !ctx[field].strip.empty?
+        validation_error(result, "evidence_file.records[#{index}].role_execution_context.#{field}", "implementation evidence role_execution_context.#{field} is required.")
+      end
+    end
+
+    if ctx["task_sha256"].is_a?(String) && task["__orbit_path"]
+      expected = sha256_file(task["__orbit_path"])
+      validation_error(result, "evidence_file.records[#{index}].role_execution_context.task_sha256", "implementation evidence task_sha256 does not match current task.") if expected && ctx["task_sha256"] != expected
+    end
+
+    if ctx["owner_role"] != task_owner_role(task)
+      validation_error(result, "evidence_file.records[#{index}].role_execution_context.owner_role", "implementation evidence owner_role does not match task owner_role.")
+    end
+
+    if ctx["owner_instance"] != task_owner_instance(task)
+      validation_error(result, "evidence_file.records[#{index}].role_execution_context.owner_instance", "implementation evidence owner_instance does not match task owner_instance.")
+    end
+
+    contract = task_execution_contract(task)
+    if ctx["operation_mode"] != contract["operation_mode"]
+      validation_error(result, "evidence_file.records[#{index}].role_execution_context.operation_mode", "implementation evidence operation_mode does not match task execution_contract.")
+    end
+
+    if ctx["execution_contract_source"] != contract["source"]
+      validation_error(result, "evidence_file.records[#{index}].role_execution_context.execution_contract_source", "implementation evidence execution_contract_source does not match task execution_contract.")
+    end
+
+    if ctx["implementation_authority"] != task_implementation_authority(task)
+      validation_error(result, "evidence_file.records[#{index}].role_execution_context.implementation_authority", "implementation evidence role does not match task implementation_authority.")
+    end
+
+    if ctx["resolved_role"] != task_implementation_authority(task)
+      validation_error(result, "evidence_file.records[#{index}].role_execution_context.resolved_role", "implementation evidence resolved_role does not match task implementation_authority.")
+    end
+
+    override = valid_implementation_override_for_identity(task, { "records" => records }, ctx["resolved_role"], ctx["resolved_instance"])
+    if ctx["assigned_instance"] != task_assigned_instance(task)
+      validation_error(result, "evidence_file.records[#{index}].role_execution_context.assigned_instance", "implementation evidence assigned_instance does not match task assigned_instance.")
+    elsif ctx["resolved_instance"] != task_assigned_instance(task) && !override
+      validation_error(result, "evidence_file.records[#{index}].role_execution_context.resolved_instance", "implementation evidence instance does not match task assigned_instance and has no valid override.")
+    end
+  end
+end
+
+def implementation_override_record_valid_for_task?(record, task, now: Time.now.utc)
+  return false unless record.is_a?(Hash) && record["kind"] == "implementation_instance_override"
+  return false unless record["status"] == "pass"
+  return false unless record["task_sha256"] == sha256_file(task["__orbit_path"])
+  return false unless record["from_role"] == task_implementation_authority(task)
+  return false unless record["from_instance"] == task_assigned_instance(task)
+  return false unless record["authorized_by_role"] == task_owner_role(task)
+  return false unless record["authorized_by_instance"] == task_owner_instance(task)
+  return false unless record["to_role"] == task_implementation_authority(task)
+  return false unless implementation_override_to_instance_role(record) == task_implementation_authority(task)
+  return true if record["no_expiry"] == true
+  return false if record["expires_at"].to_s.empty?
+
+  Time.iso8601(record["expires_at"]) > now
+rescue ArgumentError
+  false
+end
+
+def implementation_override_to_instance_role(record)
+  config_dir = File.join(Dir.pwd, ".orbit")
+  roles_config = load_yaml(File.join(config_dir, "roles.yaml"))
+  instances_config = load_yaml(File.join(config_dir, "instances.yaml"))
+  role_for_instance_config(instances_config["instances"], roles_config["roles"], record["to_instance"])
+rescue RuntimeError
+  nil
+end
+
+def valid_implementation_override_for_identity(task, evidence, resolved_role, resolved_instance)
+  return nil unless task.is_a?(Hash) && evidence.is_a?(Hash)
+  return nil unless resolved_role == task_implementation_authority(task)
+
+  Array(evidence["records"]).find do |record|
+    implementation_override_record_valid_for_task?(record, task) &&
+      record["to_instance"] == resolved_instance &&
+      record["to_role"] == resolved_role
+  end
+end
+
+def validate_implementation_overrides_for_task(result, records, task)
+  return unless task.is_a?(Hash)
+
+  records.each_with_index do |record, index|
+    next unless record.is_a?(Hash) && record["kind"] == "implementation_instance_override"
+
+    unless record["task_sha256"] == sha256_file(task["__orbit_path"])
+      validation_error(result, "evidence_file.records[#{index}].task_sha256", "implementation_instance_override task_sha256 does not match current task.")
+    end
+    unless record["from_instance"] == task_assigned_instance(task)
+      validation_error(result, "evidence_file.records[#{index}].from_instance", "implementation_instance_override from_instance must match task assigned_instance.")
+    end
+    unless record["authorized_by_role"] == task_owner_role(task) && record["authorized_by_instance"] == task_owner_instance(task)
+      validation_error(result, "evidence_file.records[#{index}].authorized_by_role", "implementation_instance_override must be authorized by task owner identity.")
+    end
+    unless implementation_override_to_instance_role(record) == task_implementation_authority(task)
+      validation_error(result, "evidence_file.records[#{index}].to_instance", "implementation_instance_override to_instance must resolve to task implementation_authority.")
+    end
+    if record["no_expiry"] != true
+      begin
+        expires_at = Time.iso8601(record["expires_at"].to_s)
+        validation_error(result, "evidence_file.records[#{index}].expires_at", "implementation_instance_override is expired.") unless expires_at > Time.now.utc
+      rescue ArgumentError
+        validation_error(result, "evidence_file.records[#{index}].expires_at", "implementation_instance_override expires_at must be ISO8601.")
+      end
     end
   end
 end
@@ -97,14 +240,9 @@ def validate_evidence(result, evidence_path, task = nil, task_sha256: nil)
       "#{entry["message"]} #{entry["action"]}")
   end
 
-  # Legacy warning: schema_semantics absent means record predates schema versioning.
-  # This is a warning only – historical records remain readable per global compatibility policy.
   if ev_compat == :current && evidence["schema_semantics"].nil?
-    validation_warning(result, "evidence_file.schema_semantics",
-      "legacy_warning: Evidence manifest lacks schema_semantics; " \
-      "feature version tracking unavailable. " \
-      "Record was created before orbit-schema-versioning-v1. " \
-      "Historical records remain readable.")
+    validation_error(result, "evidence_file.schema_semantics",
+      "Evidence manifest must include schema_semantics; recreate evidence with current Orbit.")
   end
 
   records = evidence["records"]
@@ -117,6 +255,8 @@ def validate_evidence(result, evidence_path, task = nil, task_sha256: nil)
     records.each_with_index do |record, index|
       validate_evidence_record(result, "evidence_file.records[#{index}]", record)
     end
+    validate_implementation_records_for_task(result, records, task) if task
+    validate_implementation_overrides_for_task(result, records, task) if task
   end
 
   verdict = evidence["verdict"]
@@ -181,39 +321,29 @@ def expected_gate_role(kind)
   EXPECTED_GATE_ROLES[kind]
 end
 
-# Reads resolved_role from role_execution_context (Slice 6) or identity (Slice 5 compat).
+# Reads resolved_role from role_execution_context. Flat identity is not a gate authority.
 def record_resolved_role(record)
   ctx = record["role_execution_context"]
-  # When role_execution_context is a Hash it is authoritative; no identity fallback
   return (ctx["resolved_role"].is_a?(String) && !ctx["resolved_role"].empty? ? ctx["resolved_role"] : nil) if ctx.is_a?(Hash)
-  return nil if record.key?("role_execution_context") # present but non-Hash: malformed
-
-  identity = record["identity"]
-  identity.is_a?(Hash) ? identity["resolved_role"] : nil
+  nil
 end
 
-# Reads task_sha256 from role_execution_context (Slice 6) or identity (Slice 5 compat).
+# Reads task_sha256 from role_execution_context. Flat identity is not a gate authority.
 def record_task_sha256_from(record)
   ctx = record["role_execution_context"]
   return (ctx["task_sha256"].is_a?(String) && !ctx["task_sha256"].empty? ? ctx["task_sha256"] : nil) if ctx.is_a?(Hash)
-  return nil if record.key?("role_execution_context") # present but non-Hash: malformed
-
-  identity = record["identity"]
-  identity.is_a?(Hash) ? identity["task_sha256"] : nil
+  nil
 end
 
-# Reads rules_context_sha256 from role_execution_context (Slice 6) or identity (Slice 5 compat).
+# Reads rules_context_sha256 from role_execution_context. Flat identity is not a gate authority.
 def record_rules_context_sha256_from(record)
   ctx = record["role_execution_context"]
   if ctx.is_a?(Hash)
     return ctx["rules_context_sha256"] if !ctx["rules_context_sha256"].to_s.empty?
     return ctx["rules_resolution_sha256"] if !ctx["rules_resolution_sha256"].to_s.empty?
-    return nil # Hash present but fields absent: no identity fallback
+    return nil
   end
-  return nil if record.key?("role_execution_context") # present but non-Hash: malformed
-
-  identity = record["identity"]
-  identity.is_a?(Hash) ? identity["rules_context_sha256"] : nil
+  nil
 end
 
 def record_identity_role(record)
@@ -299,6 +429,11 @@ def gate_status(records, kind, task = nil, task_sha256: nil)
   identity_role = latest && !malformed_rec_ctx ? record_resolved_role(latest) : nil
   identity_valid = latest && !malformed_rec_ctx ? gate_record_identity_valid?(latest, kind) : false
   status = latest ? latest["status"] : "missing"
+  latest_gate_time = latest.is_a?(Hash) ? (Time.iso8601(latest["created_at"].to_s) rescue nil) : nil
+  latest_gate_index = latest.is_a?(Hash) ? record_index_for_object(records, latest) : nil
+  latest_gate_position = latest_gate_time && latest_gate_index ? [latest_gate_time, latest_gate_index] : nil
+  latest_impl_position = latest_implementation_position({ "errors" => [] }, records)
+  stale_after_implementation = !!(status == "pass" && latest_gate_position && latest_impl_position && evidence_position_not_newer?(latest_gate_position, latest_impl_position))
   display_status = latest.is_a?(Hash) && latest["blocked"].is_a?(Hash) ? "blocked" : status
   minimum_evidence_level = task_minimum_evidence_level_for_gate(task, kind)
   actual_evidence_level = latest.is_a?(Hash) ? latest["evidence_level"] : nil
@@ -332,6 +467,8 @@ def gate_status(records, kind, task = nil, task_sha256: nil)
                       "stale_verdict"
                     elsif latest.nil?
                       "missing"
+                    elsif stale_after_implementation
+                      "stale_after_implementation"
                     elsif malformed_rec_ctx
                       "malformed_role_execution_context"
                     elsif !identity_valid
@@ -362,7 +499,7 @@ def gate_status(records, kind, task = nil, task_sha256: nil)
     "required" => true,
     "status" => display_status,
     "record_status" => status,
-    "passed" => !stale_verdict_only && status == "pass" && !malformed_rec_ctx && identity_valid && quality_evidence_fields_ok && !wrong_gate_kind_level && evidence_level_ok && quality_outcome_ok && required_questions_ok && !write_policy_blocked && !task_sha256_blocked && !stale_blocked && !rules_context_blocked,
+    "passed" => !stale_verdict_only && status == "pass" && !stale_after_implementation && !malformed_rec_ctx && identity_valid && quality_evidence_fields_ok && !wrong_gate_kind_level && evidence_level_ok && quality_outcome_ok && required_questions_ok && !write_policy_blocked && !task_sha256_blocked && !stale_blocked && !rules_context_blocked,
     "structured" => latest.is_a?(Hash) ? latest["structured_submit"] == true : false,
     "evidence_level" => actual_evidence_level,
     "minimum_evidence_level" => minimum_evidence_level,
@@ -378,6 +515,7 @@ def gate_status(records, kind, task = nil, task_sha256: nil)
     "malformed_role_execution_context" => malformed_rec_ctx ? true : nil,
     "missing_task_sha256" => missing_task_sha256 ? true : nil,
     "stale_task_sha256" => stale_task_sha256 ? true : nil,
+    "stale_after_implementation" => stale_after_implementation ? true : nil,
     "missing_rules_context_sha256" => missing_rules_context_sha256 ? true : nil,
     "write_policy_violations_count" => write_violations.empty? ? nil : write_violations.length,
     "blocking_reason" => blocking_reason,

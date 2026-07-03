@@ -31,7 +31,7 @@ json_assert 'whoami includes role_config_sha256 as 64-char hex' "$TMPROOT/s6-who
 
 # ---- Group 3: rules print-context writes context_hash ----
 
-ORBIT_INSTANCE=reviewer "$CLI" rules print-context --json \
+ORBIT_INSTANCE=reviewer-main "$CLI" rules print-context --json \
   >"$TMPROOT/s6-print-context.json" 2>/dev/null || true
 json_assert 'rules print-context includes context_hash as 64-char hex' "$TMPROOT/s6-print-context.json" \
   'v=j["context_hash"]; v.is_a?(String) && v.length == 64 && v.match?(/\A[0-9a-f]{64}\z/)'
@@ -41,7 +41,7 @@ json_assert 'rules print-context includes context_hash as 64-char hex' "$TMPROOT
 # Create two review tasks; differentiate task_B so its sha256 differs from task_A
 S6_STALE_TASK_A="$TMPROOT/s6-stale-task-a.yaml"
 S6_STALE_TASK_B="$TMPROOT/s6-stale-task-b.yaml"
-"$CLI" new-task --target-role reviewer --task-type implementation_review --output "$S6_STALE_TASK_A" >/dev/null
+"$CLI" new-task --implementation-authority reviewer --assigned-instance reviewer-main --task-type implementation_review --output "$S6_STALE_TASK_A" >/dev/null
 cp "$S6_STALE_TASK_A" "$S6_STALE_TASK_B"
 ruby --disable-gems -ryaml -e \
   'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true)
@@ -61,7 +61,7 @@ ruby --disable-gems -ryaml -e \
 # Submit evidence linked to task_A (record gets task_sha256 of A)
 S6_STALE_EVIDENCE="$TMPROOT/s6-stale-evidence.json"
 "$CLI" evidence init --output "$S6_STALE_EVIDENCE" >/dev/null
-ORBIT_INSTANCE=reviewer "$CLI" evidence submit \
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit \
   --file "$S6_STALE_EVIDENCE" \
   --report "$TMPROOT/s5-review-report.yaml" \
   --task "$S6_STALE_TASK_A" \

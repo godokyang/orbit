@@ -10,13 +10,34 @@ def parse_new_task_args(args)
 
     case arg
     when "--target-role"
-      options["target_role"] = option_value(args, "--target-role")
+      option_value(args, "--target-role")
+      usage_error("orbit new-task --target-role was removed. Re-run orbit init with --operation-mode solo|team and use execution_contract defaults, or pass --implementation-authority/--assigned-instance.")
     when /\A--target-role=(.+)\z/
-      options["target_role"] = Regexp.last_match(1)
+      usage_error("orbit new-task --target-role was removed. Re-run orbit init with --operation-mode solo|team and use execution_contract defaults, or pass --implementation-authority/--assigned-instance.")
     when "--task-type"
       options["task_type"] = option_value(args, "--task-type")
     when /\A--task-type=(.+)\z/
       options["task_type"] = Regexp.last_match(1)
+    when "--operation-mode"
+      options["operation_mode"] = option_value(args, "--operation-mode")
+    when /\A--operation-mode=(.+)\z/
+      options["operation_mode"] = Regexp.last_match(1)
+    when "--implementation-authority"
+      options["implementation_authority"] = option_value(args, "--implementation-authority")
+    when /\A--implementation-authority=(.+)\z/
+      options["implementation_authority"] = Regexp.last_match(1)
+    when "--assigned-instance"
+      options["assigned_instance"] = option_value(args, "--assigned-instance")
+    when /\A--assigned-instance=(.+)\z/
+      options["assigned_instance"] = Regexp.last_match(1)
+    when "--owner-role"
+      options["owner_role"] = option_value(args, "--owner-role")
+    when /\A--owner-role=(.+)\z/
+      options["owner_role"] = Regexp.last_match(1)
+    when "--owner-instance"
+      options["owner_instance"] = option_value(args, "--owner-instance")
+    when /\A--owner-instance=(.+)\z/
+      options["owner_instance"] = Regexp.last_match(1)
     when "--output"
       options["output"] = option_value(args, "--output")
     when /\A--output=(.+)\z/
@@ -30,19 +51,18 @@ def parse_new_task_args(args)
     end
   end
 
-  %w[target_role task_type output].each do |name|
+  %w[task_type output].each do |name|
     usage_error("Missing required option: --#{name.tr("_", "-")}") if options[name].nil? || options[name].empty?
   end
 
   options
 end
 
-def default_gates_for_new_task(target_role, task_type)
-  target = target_role.to_s
+def default_gates_for_new_task(task_type, implementation_authority = nil)
+  authority = implementation_authority.to_s
   type = task_type.to_s
-  return [] if %w[reviewer tester].include?(target)
   return [] if type.include?("review") || type.include?("test")
-  return [] unless %w[lead coder].include?(target) || type.include?("implementation") || type.include?("coding")
+  return [] unless %w[lead coder].include?(authority) || type.include?("implementation") || type.include?("coding")
 
   [
     {
@@ -188,8 +208,8 @@ def default_review_strategy(task_type = nil)
   }
 end
 
-def default_test_strategy(target_role, task_type)
-  return nil unless test_task?(target_role, task_type)
+def default_test_strategy(task_type, implementation_authority = nil)
+  return nil unless test_task?(task_type, implementation_authority)
 
   {
     "minimum_evidence_level" => "real_path_test",
@@ -211,8 +231,8 @@ def decomposition_task?(task_type)
   type.include?("decomposition") || type.include?("parent")
 end
 
-def test_task?(target_role, task_type)
-  target_role.to_s == "tester" || task_type.to_s.downcase.include?("test")
+def test_task?(task_type, implementation_authority = nil)
+  implementation_authority.to_s == "tester" || task_type.to_s.downcase.include?("test")
 end
 
 def quality_measurement_task?(task_type)
@@ -220,9 +240,9 @@ def quality_measurement_task?(task_type)
   %w[performance speed latency ux workflow quality eval llm measurement].any? { |token| type.include?(token) }
 end
 
-def default_test_level(target_role, task_type)
-  return "repo_regression" if test_task?(target_role, task_type)
-  return "repo_regression" unless default_gates_for_new_task(target_role, task_type).none? { |gate| gate["kind"] == "test" }
+def default_test_level(task_type, implementation_authority = nil)
+  return "repo_regression" if test_task?(task_type, implementation_authority)
+  return "repo_regression" unless default_gates_for_new_task(task_type, implementation_authority).none? { |gate| gate["kind"] == "test" }
 
   "not_applicable"
 end
@@ -275,8 +295,8 @@ def default_final_aggregate_audit(task_type)
   }
 end
 
-def default_test_environment(target_role, task_type)
-  required = test_task?(target_role, task_type)
+def default_test_environment(task_type, implementation_authority = nil)
+  required = test_task?(task_type, implementation_authority)
   {
     "required" => required,
     "environment" => required ? "Record OS/runtime/service versions or CI/browser/device identity." : "",
@@ -333,6 +353,59 @@ def default_parent_goal_status(task_type)
   }
 end
 
+def role_for_instance(instances, roles, instance_key)
+  role = role_for_instance_config(instances, roles, instance_key)
+  usage_error("Unknown Orbit instance #{instance_key.inspect} or missing role_ref.") unless role
+  role
+end
+
+def validate_execution_role_pair!(contract, roles, instances, role_field, instance_field)
+  role = contract[role_field]
+  instance_key = contract[instance_field]
+  usage_error("execution_contract.#{role_field} must be a non-empty string.") unless role.is_a?(String) && !role.empty?
+  usage_error("execution_contract.#{instance_field} must be a non-empty string.") unless instance_key.is_a?(String) && !instance_key.empty?
+
+  actual_role = role_for_instance(instances, roles, instance_key)
+  return if actual_role == role
+
+  usage_error("execution_contract.#{instance_field} #{instance_key.inspect} resolves to role #{actual_role.inspect}, not #{role.inspect}.")
+end
+
+def build_task_execution_contract(options)
+  roles_config = load_yaml(File.join(Dir.pwd, ".orbit", "roles.yaml"))
+  instances_config = load_yaml(File.join(Dir.pwd, ".orbit", "instances.yaml"))
+  roles = roles_config["roles"]
+  instances = instances_config["instances"]
+  usage_error(".orbit/roles.yaml must contain a roles mapping.") unless roles.is_a?(Hash)
+  usage_error(".orbit/instances.yaml must contain an instances mapping.") unless instances.is_a?(Hash)
+
+  defaults = if options["operation_mode"]
+               operation_defaults_for_mode(options["operation_mode"].to_s)
+             else
+               roles_config["operation_defaults"]
+             end
+  usage_error(".orbit/roles.yaml must define operation_defaults; rerun orbit init with --operation-mode solo|team.") unless defaults.is_a?(Hash)
+
+  contract = {
+    "owner_role" => defaults["owner_role"],
+    "owner_instance" => defaults["owner_instance"],
+    "operation_mode" => defaults["operation_mode"],
+    "implementation_authority" => defaults["implementation_authority"],
+    "assigned_instance" => defaults["assigned_instance"],
+    "source" => "project_defaults"
+  }
+
+  explicit = %w[operation_mode implementation_authority assigned_instance owner_role owner_instance].any? { |key| options.key?(key) }
+  %w[owner_role owner_instance operation_mode implementation_authority assigned_instance].each do |key|
+    contract[key] = options[key] if options.key?(key)
+  end
+  contract["source"] = "explicit_override" if explicit
+  usage_error("execution_contract.operation_mode must be solo or team.") unless %w[solo team].include?(contract["operation_mode"].to_s)
+  validate_execution_role_pair!(contract, roles, instances, "owner_role", "owner_instance")
+  validate_execution_role_pair!(contract, roles, instances, "implementation_authority", "assigned_instance")
+  contract
+end
+
 def new_task(args)
   options = parse_new_task_args(args)
   template_path = File.join(TEMPLATE_ROOT, "task.yaml")
@@ -351,24 +424,26 @@ def new_task(args)
   end
 
   task["project"] = options["project"]
-  task["target_role"] = options["target_role"]
+  task.delete("target_role")
   task["task_type"] = options["task_type"]
+  task["execution_contract"] = build_task_execution_contract(options)
   task["schema_semantics"] = {
     "feature_versions" => ORBIT_FEATURE_VERSIONS.reject { |_k, v| v.nil? }
   }
+  implementation_authority = task.dig("execution_contract", "implementation_authority")
   # Slice 11: derive task_risk and project_profile.
-  task_risk = derive_task_risk(options["target_role"], options["task_type"])
+  task_risk = derive_task_risk(options["task_type"])
   task["task_risk"] = task_risk
   task["project_profile"] = DEFAULT_PROJECT_PROFILE.dup
-  risk_gates = default_gates_for_risk(task_risk["level"], options["target_role"], options["task_type"])
-  task["gates"] = risk_gates.any? ? risk_gates : default_gates_for_new_task(options["target_role"], options["task_type"])
+  risk_gates = default_gates_for_risk(task_risk["level"], options["task_type"])
+  task["gates"] = risk_gates.any? ? risk_gates : default_gates_for_new_task(options["task_type"], implementation_authority)
   task["quality_outcome"] = quality_outcome_template(options["task_type"])
   task["invalid_completion_guards"] = default_invalid_completion_guards(options["task_type"]) if improvement_task_type?(options["task_type"])
   task["review_strategy"] = default_review_strategy(options["task_type"])
   # Apply risk-derived minimum evidence levels to review_strategy.
   risk_review_min = task_risk["minimum_evidence_levels"]["review"]
   task["review_strategy"]["minimum_evidence_level"] = risk_review_min if risk_review_min && !design_task?(options["task_type"])
-  test_strat = default_test_strategy(options["target_role"], options["task_type"])
+  test_strat = default_test_strategy(options["task_type"], implementation_authority)
   if test_strat
     risk_test_min = task_risk["minimum_evidence_levels"]["test"]
     test_strat["minimum_evidence_level"] = risk_test_min if risk_test_min
@@ -379,12 +454,12 @@ def new_task(args)
   task["implementation_plan"] = default_implementation_plan(options["task_type"])
   task["decomposition"] = default_decomposition(options["task_type"])
   task["final_aggregate_audit"] = default_final_aggregate_audit(options["task_type"])
-  task["test_level"] = default_test_level(options["target_role"], options["task_type"])
-  task["test_environment"] = default_test_environment(options["target_role"], options["task_type"])
+  task["test_level"] = default_test_level(options["task_type"], implementation_authority)
+  task["test_environment"] = default_test_environment(options["task_type"], implementation_authority)
   task["quality_measurement"] = default_quality_measurement(options["task_type"])
   task["parent_goal"] = default_parent_goal(options["task_type"])
   task["parent_goal_status"] = default_parent_goal_status(options["task_type"])
-  task_rule_packs = rule_packs_for_context(options["target_role"], options["task_type"])
+  task_rule_packs = rule_packs_for_context(implementation_authority, options["task_type"])
   task["rule_packs"] = task_rule_packs unless task_rule_packs.empty?
   task["write_policy_enforcement"] = DEFAULT_WRITE_POLICY_ENFORCEMENT_BY_RISK[task_risk["level"]] || "standard"
   # Slice 13: release risk tasks get a full release_readiness skeleton.

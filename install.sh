@@ -151,6 +151,8 @@ lib/orbit/audit_tools.rb
 lib/orbit/project_profile_risk.rb
 lib/orbit/gate_lease.rb
 lib/orbit/handoff.rb
+lib/orbit/notice.rb
+lib/orbit/hook.rb
 lib/orbit/docs_lifecycle.rb
 lib/orbit/data_classification.rb
 lib/orbit/release_readiness.rb

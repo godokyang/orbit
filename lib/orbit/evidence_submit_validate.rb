@@ -637,11 +637,19 @@ def validate_structured_submit_report!(report_path, report)
   validate_blocked_submit_detail!(report["blocked"], "submit_report.blocked", kind: kind) if report.key?("blocked")
 
   # Schema versioning: validate report_template_version.
-  # - Missing (legacy report): non-blocking, record legacy_warning in source_report_semantics.
-  # - Known but wrong kind (e.g. review-report-v1 for kind: test): blocking kind mismatch.
-  # - Unknown future version: blocking – cannot safely assume current parsing semantics.
+  # Missing report_template_version is a breaking-schema error; new packages do
+  # not accept pre-versioning reports.
   report_template_version = report["report_template_version"]
   template_compat = schema_version_compat_set(report_template_version, ORBIT_KNOWN_REPORT_TEMPLATE_VERSIONS)
+  if template_compat == :legacy
+    submit_report_schema_error(
+      "submit_report.report_template_version",
+      "Report report_template_version is required.",
+      expected: ORBIT_KNOWN_REPORT_TEMPLATE_VERSIONS.join("|"),
+      actual: "missing",
+      kind: kind
+    )
+  end
   if template_compat == :unknown_future
     submit_report_schema_error(
       "submit_report.report_template_version",
@@ -667,24 +675,17 @@ def validate_structured_submit_report!(report_path, report)
   end
   source_report_semantics = { "compatibility_state" => template_compat.to_s }
   source_report_semantics["report_template_version"] = report_template_version if report_template_version
-  if template_compat == :legacy
-    source_report_semantics["legacy_warnings"] = [
-      schema_legacy_warning_entry(
-        "submit_report.report_template_version",
-        "Report is missing report_template_version; treating as legacy report created before schema versioning.",
-        "New reports from updated templates include report_template_version."
-      )
-    ]
-  end
   report_schema_semantics = report["schema_semantics"]
   if report_schema_semantics.is_a?(Hash) && report_schema_semantics["feature_versions"].is_a?(Hash)
     source_report_semantics["feature_versions"] = report_schema_semantics["feature_versions"]
-  elsif template_compat == :current
-    # Report uses a known template version but is missing schema_semantics; feature_versions unverifiable.
-    source_report_semantics["known_gaps"] = [
-      "Report uses a known template version (#{report_template_version.inspect}) but is missing " \
-      "schema_semantics; feature_versions cannot be verified from this report."
-    ]
+  else
+    submit_report_schema_error(
+      "submit_report.schema_semantics",
+      "Report schema_semantics.feature_versions is required.",
+      expected: "mapping",
+      actual: evidence_value_type(report_schema_semantics),
+      kind: kind
+    )
   end
 
   extra = {}
@@ -882,8 +883,6 @@ def evidence_submit(options)
   manifest_preview = load_evidence_manifest(path) rescue nil
   rule_res_file = manifest_preview.is_a?(Hash) && manifest_preview["rule_resolution"].is_a?(Hash) ? manifest_preview["rule_resolution"]["file"] : nil
   rules_context_sha256 = (rule_res_file.is_a?(String) && !rule_res_file.empty?) ? sha256_file(rule_res_file) : nil
-  role_config_sha256 = sha256_file(File.join(Dir.pwd, ".orbit", "roles.yaml"))
-  manifest_sha256_before = sha256_file(path)
 
   record = {
     "kind" => kind,
@@ -925,33 +924,8 @@ def evidence_submit(options)
     ne = validate_negative_evidence!(report["negative_evidence"], "submit_report", kind)
     record["negative_evidence"] = ne if ne
   end
-  # Build role_execution_context (Slice 6 – supersedes Slice 5 flat identity block).
-  # Readers should check role_execution_context first, then fall back to identity for compat.
-  if identity
-    snapshot = evidence_identity_snapshot(identity)
-    git_head = capture_git_head
-    dirty = capture_git_dirty_files
-    write_policy_expected = report.is_a?(Hash) && report["write_policy"].is_a?(Hash) ? report.dig("write_policy", "expected") : nil
-    worktree = { "git_head" => git_head }.tap { |wt| wt["dirty_files_before"] = dirty unless dirty.empty? }.compact
-    permission_profile = {
-      "mode" => "audit_only",
-      "write_policy" => write_policy_expected || "no_production_writes",
-      "sandbox" => "none"
-    }
-    rec_ctx = {
-      "instance" => snapshot["instance"] || snapshot["resolved_instance"],
-      "resolved_role" => snapshot["resolved_role"],
-      "role_ref" => snapshot["role_ref"],
-      "role_config_sha256" => role_config_sha256,
-      "rules_resolution_sha256" => rules_context_sha256,
-      "rules_context_sha256" => rules_context_sha256,
-      "task_sha256" => task_sha256,
-      "evidence_manifest_sha256_before_submit" => manifest_sha256_before,
-      "worktree" => worktree.empty? ? nil : worktree,
-      "permission_profile" => permission_profile
-    }.compact
-    record["role_execution_context"] = rec_ctx
-  end
+  rec_ctx = structured_role_execution_context(identity, path, task_path: options["task"], report: report, rules_context_sha256: rules_context_sha256)
+  record["role_execution_context"] = rec_ctx if rec_ctx
   if report.key?("write_policy")
     wp = validate_write_policy_from_report!(report["write_policy"], kind)
     record["write_policy"] = wp if wp
@@ -1042,20 +1016,45 @@ end
 
 def evidence_attach_rule(options)
   path = File.expand_path(options["file"])
+  task_path = File.expand_path(options["task"])
   rule_resolution_path = File.expand_path(options["rule_resolution"])
+  task = load_task_for_evidence!(task_path)
+  evidence = load_evidence_manifest(path)
   rule_resolution = load_rule_resolution_manifest(rule_resolution_path)
 
   unless rule_resolution["valid"] == true
     evidence_error("Rule resolution must be valid before attaching: #{rule_resolution_path}")
+  end
+  conflicts = rule_resolution["conflicts"].is_a?(Array) ? rule_resolution["conflicts"] : []
+  evidence_error("Rule resolution has conflicts and cannot be attached: #{rule_resolution_path}") unless conflicts.empty?
+
+  resolution_task_path = rule_resolution.dig("sources", "task_rules", "path")
+  if resolution_task_path.to_s.empty? || File.expand_path(resolution_task_path) != task_path
+    evidence_error("Rule resolution was not generated for task: #{task_path}")
+  end
+
+  resolved_role = rule_resolution["resolved_role"]
+  resolved_instance = rule_resolution["instance"] || rule_resolution["resolved_instance"]
+  unless task_gate_role?(task, resolved_role)
+    if resolved_role != task_implementation_authority(task)
+      evidence_error("Rule resolution role #{resolved_role.inspect} does not match task implementation_authority or gate role.")
+    elsif resolved_instance.to_s.empty?
+      evidence_error("Implementation rule resolution must record instance.")
+    elsif resolved_instance != task_assigned_instance(task) &&
+          !valid_implementation_override_for_identity(task, evidence, resolved_role, resolved_instance)
+      evidence_error("Implementation rule resolution instance must match task assigned_instance #{task_assigned_instance(task).inspect}.")
+    end
   end
 
   checks = rule_resolution["checks"].is_a?(Hash) ? rule_resolution["checks"] : {}
   rule_attachment = {
     "resolver" => "orbit rules resolve --json",
     "file" => rule_resolution_path,
+    "task" => task_path,
     "valid" => true,
     "resolved_role" => rule_resolution["resolved_role"],
-    "conflict_count" => rule_resolution["conflicts"].is_a?(Array) ? rule_resolution["conflicts"].length : 0,
+    "resolved_instance" => resolved_instance,
+    "conflict_count" => conflicts.length,
     "missing_project_rule_files" => checks["missing_project_rule_files"].is_a?(Array) ? checks["missing_project_rule_files"] : []
   }
 

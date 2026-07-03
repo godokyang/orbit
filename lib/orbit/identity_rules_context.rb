@@ -204,6 +204,10 @@ def parse_rules_args(args)
       options["task"] = option_value(args, "--task")
     when /\A--task=(.+)\z/
       options["task"] = Regexp.last_match(1)
+    when "--evidence"
+      options["evidence"] = option_value(args, "--evidence")
+    when /\A--evidence=(.+)\z/
+      options["evidence"] = Regexp.last_match(1)
     when "--role"
       options["role"] = option_value(args, "--role")
     when /\A--role=(.+)\z/
@@ -276,10 +280,11 @@ def rule_resolution(options)
 
   roles, instances = load_project_config(result)
   task = load_task(result, options["task"])
+  evidence = options["evidence"] ? load_evidence_manifest(File.expand_path(options["evidence"])) : nil
 
   with_rule_resolution_identity(options) do
     role_def = resolve_identity(result, roles, instances)
-    apply_task_constraints(result, task)
+    apply_task_constraints(result, task, evidence)
 
     if role_def
       task_type = task ? task["task_type"] : nil
@@ -648,7 +653,9 @@ def classify_intent(args)
 end
 
 def whoami(args)
-  task_path = parse_whoami_args(args)
+  options = parse_whoami_args(args)
+  task_path = options["task"]
+  evidence_path = options["evidence"]
   result = {
     "schema_version" => "orbit-whoami-v1",
     "project" => File.basename(Dir.pwd),
@@ -664,6 +671,7 @@ def whoami(args)
 
   roles, instances = load_project_config(result)
   task = load_task(result, task_path)
+  evidence = evidence_path ? load_evidence_manifest(File.expand_path(evidence_path)) : nil
   role_def = resolve_identity(result, roles, instances)
 
   if role_def
@@ -673,7 +681,7 @@ def whoami(args)
     result["permissions"] = role_def["permissions"] || {}
   end
 
-  apply_task_constraints(result, task)
+  apply_task_constraints(result, task, evidence)
 
   result["role_config_sha256"] = sha256_file(File.join(Dir.pwd, ".orbit", "roles.yaml"))
 

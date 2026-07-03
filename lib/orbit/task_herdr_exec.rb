@@ -229,6 +229,21 @@ def start(args)
 
   if start_requires_reuse?(plan)
     probe = herdr_reuse_probe(plan)
+    if !options["force"] && plan.dig("instance_status", "view_status", "too_narrow") == true
+      result = plan.merge(
+        "action" => "needs_attention",
+        "reason" => "pane_too_narrow",
+        "recommended_action" => "resize_or_recreate_view",
+        "reuse_probe" => probe
+      )
+      if options["json"]
+        puts JSON.pretty_generate(result)
+      else
+        print_start_needs_attention(result)
+      end
+      exit 1
+    end
+
     if !options["force"] && probe && probe["decision"] == "reuse"
       result = plan.merge("action" => "reuse", "reuse_probe" => probe)
       if options["json"]
@@ -421,7 +436,7 @@ def dispatch_reply_to(explicit_reply_to = nil)
   env_pane = ENV["HERDR_PANE_ID"].to_s.strip
   return [env_pane, "HERDR_PANE_ID"] unless env_pane.empty?
 
-  lead_binding = lead_transport_binding
+  lead_binding = lead_herdr_binding
   lead_pane = lead_binding["pane"].to_s.strip
   return [lead_pane, "lead_binding"] unless lead_pane.empty?
 
@@ -451,7 +466,9 @@ def dispatch_message(packet)
     header,
     "请接收 Orbit task。",
     "- task: #{packet["task"]}",
-    "- target_role: #{packet["task_target_role"]}",
+    "- operation_mode: #{packet.dig("execution_contract", "operation_mode")}",
+    "- implementation_authority: #{packet.dig("execution_contract", "implementation_authority")}",
+    "- assigned_instance: #{packet.dig("execution_contract", "assigned_instance")}",
     "- instance: #{packet["to_instance"]}",
     "- resolved_role: #{packet["resolved_role"]}",
     "",
@@ -470,8 +487,11 @@ def dispatch_packet(options)
   instance_key, instance_alias, instance, role_ref, role_def = load_instance_for_launch(options["to"])
   resolved_role = role_def["role"] || role_ref
   instance_status = instance_status_entry(instance_key, instance, role_ref, role_def)
-  target_role_matches = task_gate_role?(task, resolved_role) || task["target_role"].nil? || task["target_role"] == resolved_role
-  usage_error("dispatch target role mismatch: task target_role #{task["target_role"].inspect} does not match instance #{instance_key.inspect} role #{resolved_role.inspect}.") unless target_role_matches
+  execution_contract = task_execution_contract(task)
+  target_allowed = task_allows_instance_role?(task, instance_key, resolved_role)
+  unless target_allowed
+    usage_error("dispatch target mismatch: instance #{instance_key.inspect} role #{resolved_role.inspect} is not task assigned_instance, owner_instance, or gate role.")
+  end
 
   reply_to, reply_to_source = dispatch_reply_to(options["reply_to"])
   explicit_override = !options["pane"].to_s.empty?
@@ -501,14 +521,14 @@ def dispatch_packet(options)
   task_id = dispatch_task_label(task_path)
   live_binding_confirmed = live_probe && live_probe["decision"] == "reuse" ? true : false
   manual_artifact = options["manual_payload"] == true
-  delivery_precondition_met = target_role_matches && (manual_artifact || explicit_override || live_binding_confirmed)
+  delivery_precondition_met = target_allowed && (manual_artifact || explicit_override || live_binding_confirmed)
   packet = {
     "schema_version" => "orbit-dispatch-v1",
     "project" => task["project"] || File.basename(Dir.pwd),
     "task" => task_path,
     "task_id" => task_id,
     "task_type" => task["task_type"],
-    "task_target_role" => task["target_role"],
+    "execution_contract" => execution_contract,
     "to_instance" => instance_key,
     "requested_instance" => options["to"],
     "instance_alias" => instance_alias,
@@ -528,7 +548,7 @@ def dispatch_packet(options)
     "dry_run" => options["dry_run"],
     "message" => nil,
     "checks" => {
-      "target_role_matches" => target_role_matches,
+      "target_allowed_by_execution_contract" => target_allowed,
       "delivery_precondition_met" => delivery_precondition_met,
       "live_binding_confirmed" => live_binding_confirmed,
       "live_confirmed_for_delivery" => live_binding_confirmed,

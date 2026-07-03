@@ -3,15 +3,21 @@
 # ---------------------------------------------------------------------------
 
 S11_TASK="$TMPROOT/s11-task.yaml"
-"$CLI" new-task --target-role reviewer --task-type implementation_review --output "$S11_TASK" >/dev/null
+"$CLI" new-task --implementation-authority reviewer --assigned-instance reviewer-main --task-type implementation_review --output "$S11_TASK" >/dev/null
 
 S11_TEST_TASK="$TMPROOT/s11-test-task.yaml"
-"$CLI" new-task --target-role tester --task-type implementation --output "$S11_TEST_TASK" >/dev/null
+"$CLI" new-task --implementation-authority tester --assigned-instance tester-main --task-type implementation --output "$S11_TEST_TASK" >/dev/null
 
 # ---- Group 1: evidence submit with runtime_binding (singular, new schema) ----
 
 cat >"$TMPROOT/s11-review-report.yaml" <<'YAML'
 kind: review
+report_template_version: review-report-v1
+schema_semantics:
+  feature_versions:
+    evidence_level: v1
+    quality_outcome: v1
+    schema_semantics: v1
 verdict: pass
 summary: Slice 8 runtime_binding schema test.
 source_message_id: slice8:review:runtime
@@ -64,7 +70,7 @@ YAML
 
 S11_EVIDENCE="$TMPROOT/s11-evidence.json"
 "$CLI" evidence init --output "$S11_EVIDENCE" >/dev/null
-ORBIT_INSTANCE=reviewer "$CLI" evidence submit \
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit \
   --file "$S11_EVIDENCE" \
   --report "$TMPROOT/s11-review-report.yaml" \
   --task "$S11_TASK" \
@@ -83,6 +89,12 @@ json_assert 'runtime_binding.build.artifact_paths is an array' "$TMPROOT/s11-sub
 
 cat >"$TMPROOT/s11-low-bad-fc-report.yaml" <<'YAML'
 kind: review
+report_template_version: review-report-v1
+schema_semantics:
+  feature_versions:
+    evidence_level: v1
+    quality_outcome: v1
+    schema_semantics: v1
 verdict: fail
 summary: Low finding with bad failure_class.
 source_message_id: slice8:review:lowbadfc
@@ -95,7 +107,7 @@ coverage: []
 artifacts: []
 YAML
 
-if ORBIT_INSTANCE=reviewer "$CLI" evidence submit \
+if ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit \
      --file "$S11_EVIDENCE" \
      --report "$TMPROOT/s11-low-bad-fc-report.yaml" \
      --task "$S11_TASK" \
@@ -109,6 +121,11 @@ pass 'low/advisory finding with invalid failure_class is rejected'
 
 cat >"$TMPROOT/s11-rpt-no-binding-report.yaml" <<'YAML'
 kind: test
+report_template_version: test-report-v1
+schema_semantics:
+  feature_versions:
+    evidence_level: v1
+    schema_semantics: v1
 verdict: pass
 summary: real_path_test without runtime_binding.
 source_message_id: slice8:test:rpt:nobinding
@@ -146,7 +163,7 @@ YAML
 
 S11_TEST_EVIDENCE="$TMPROOT/s11-test-evidence.json"
 "$CLI" evidence init --output "$S11_TEST_EVIDENCE" >/dev/null
-if ORBIT_INSTANCE=tester "$CLI" evidence submit \
+if ORBIT_INSTANCE=tester-main "$CLI" evidence submit \
      --file "$S11_TEST_EVIDENCE" \
      --report "$TMPROOT/s11-rpt-no-binding-report.yaml" \
      --task "$S11_TEST_TASK" \
@@ -158,6 +175,11 @@ pass 'real_path_test PASS without runtime_binding is rejected'
 
 cat >"$TMPROOT/s11-rpt-with-binding-report.yaml" <<'YAML'
 kind: test
+report_template_version: test-report-v1
+schema_semantics:
+  feature_versions:
+    evidence_level: v1
+    schema_semantics: v1
 verdict: pass
 summary: real_path_test with runtime_binding.
 source_message_id: slice8:test:rpt:withbinding
@@ -200,7 +222,7 @@ runtime_binding:
     owner: "tester"
 YAML
 
-ORBIT_INSTANCE=tester "$CLI" evidence submit \
+ORBIT_INSTANCE=tester-main "$CLI" evidence submit \
   --file "$S11_TEST_EVIDENCE" \
   --report "$TMPROOT/s11-rpt-with-binding-report.yaml" \
   --task "$S11_TEST_TASK" \
@@ -212,6 +234,12 @@ json_assert 'real_path_test PASS with runtime_binding is accepted' "$TMPROOT/s11
 
 cat >"$TMPROOT/s11-bc-report.yaml" <<'YAML'
 kind: review
+report_template_version: review-report-v1
+schema_semantics:
+  feature_versions:
+    evidence_level: v1
+    quality_outcome: v1
+    schema_semantics: v1
 verdict: blocked
 summary: Blocked by missing environment.
 source_message_id: slice8:review:bc
@@ -226,7 +254,7 @@ YAML
 
 S11_BC_EVIDENCE="$TMPROOT/s11-bc-evidence.json"
 "$CLI" evidence init --output "$S11_BC_EVIDENCE" >/dev/null
-ORBIT_INSTANCE=reviewer "$CLI" evidence submit \
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit \
   --file "$S11_BC_EVIDENCE" \
   --report "$TMPROOT/s11-bc-report.yaml" \
   --task "$S11_TASK" \
@@ -443,7 +471,7 @@ json_assert 'blocker_classes counts findings.failure_class' "$TMPROOT/s11-bcat-a
 
 S11_MUTATE_EVIDENCE="$TMPROOT/s11-mutate-evidence.json"
 "$CLI" evidence init --output "$S11_MUTATE_EVIDENCE" >/dev/null
-ORBIT_INSTANCE=tester "$CLI" evidence submit \
+ORBIT_INSTANCE=tester-main "$CLI" evidence submit \
   --file "$S11_MUTATE_EVIDENCE" \
   --report "$TMPROOT/s11-rpt-with-binding-report.yaml" \
   --task "$S11_TEST_TASK" \
@@ -462,6 +490,11 @@ json_assert 'validate reports runtime_binding error source' "$TMPROOT/s11-mutate
 
 cat >"$TMPROOT/s11-rpt-build-only-report.yaml" <<'YAML'
 kind: test
+report_template_version: test-report-v1
+schema_semantics:
+  feature_versions:
+    evidence_level: v1
+    schema_semantics: v1
 verdict: pass
 summary: real_path_test with build-only runtime_binding (no server/browser owner).
 source_message_id: slice8:test:rpt:buildonly
@@ -503,7 +536,7 @@ YAML
 
 S11_BUILD_ONLY_EVIDENCE="$TMPROOT/s11-build-only-evidence.json"
 "$CLI" evidence init --output "$S11_BUILD_ONLY_EVIDENCE" >/dev/null
-if ORBIT_INSTANCE=tester "$CLI" evidence submit \
+if ORBIT_INSTANCE=tester-main "$CLI" evidence submit \
   --file "$S11_BUILD_ONLY_EVIDENCE" \
   --report "$TMPROOT/s11-rpt-build-only-report.yaml" \
   --task "$S11_TEST_TASK" \
@@ -527,7 +560,7 @@ pass 'validate rejects real_path_test PASS with build-only binding'
 
 S11_HANDOFF_EVIDENCE="$TMPROOT/s11-handoff-evidence.json"
 "$CLI" evidence init --output "$S11_HANDOFF_EVIDENCE" >/dev/null
-ORBIT_INSTANCE=tester "$CLI" evidence submit \
+ORBIT_INSTANCE=tester-main "$CLI" evidence submit \
   --file "$S11_HANDOFF_EVIDENCE" \
   --report "$TMPROOT/s11-rpt-with-binding-report.yaml" \
   --task "$S11_TEST_TASK" \
@@ -576,6 +609,12 @@ json_assert 'handoff runtime_summary reports runtime_gaps when owner missing' "$
 # Submit-time: pass + environment_failure blocker_classification is rejected.
 cat >"$TMPROOT/s11-pass-env-blocker-report.yaml" <<'YAML'
 kind: review
+report_template_version: review-report-v1
+schema_semantics:
+  feature_versions:
+    evidence_level: v1
+    quality_outcome: v1
+    schema_semantics: v1
 verdict: pass
 summary: Pass with environment blocker classification (contradictory).
 source_message_id: slice8:review:passenvblocker
@@ -621,7 +660,7 @@ YAML
 
 S11_PASS_ENV_EVIDENCE="$TMPROOT/s11-pass-env-blocker-evidence.json"
 "$CLI" evidence init --output "$S11_PASS_ENV_EVIDENCE" >/dev/null
-if ORBIT_INSTANCE=reviewer "$CLI" evidence submit \
+if ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit \
   --file "$S11_PASS_ENV_EVIDENCE" \
   --report "$TMPROOT/s11-pass-env-blocker-report.yaml" \
   --task "$S11_TASK" \
@@ -680,6 +719,12 @@ S11_BAD_KIND_EVIDENCE="$TMPROOT/s11-bad-kind-evidence.json"
 "$CLI" evidence init --output "$S11_BAD_KIND_EVIDENCE" >/dev/null
 cat >"$TMPROOT/s11-code-fail-pass-report.yaml" <<'YAML'
 kind: review
+report_template_version: review-report-v1
+schema_semantics:
+  feature_versions:
+    evidence_level: v1
+    quality_outcome: v1
+    schema_semantics: v1
 verdict: pass
 summary: Pass with code_failure blocker classification (legit baseline).
 source_message_id: slice8:review:codefailbaseline
@@ -722,7 +767,7 @@ blocker_classification:
   kind: code_failure
   detail: "Bug fixed before pass."
 YAML
-ORBIT_INSTANCE=reviewer "$CLI" evidence submit \
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit \
   --file "$S11_BAD_KIND_EVIDENCE" \
   --report "$TMPROOT/s11-code-fail-pass-report.yaml" \
   --task "$S11_TASK" \
