@@ -846,6 +846,9 @@ def evidence_from_report(options)
 
   kind = options["kind"] || infer_report_kind(report_path, report)
   evidence_error("Could not infer report kind; pass --kind #{ALLOWED_EVIDENCE_KINDS.join("|")}.") unless ALLOWED_EVIDENCE_KINDS.include?(kind)
+  if kind == "implementation"
+    evidence_error("evidence from-report cannot create implementation evidence; use evidence add --kind implementation --task PATH so Orbit can enforce execution_contract.")
+  end
 
   status = options["status"] || infer_report_status(report)
   evidence_error("Could not infer report status; pass --status #{ALLOWED_EVIDENCE_STATUSES.join("|")}.") unless ALLOWED_EVIDENCE_STATUSES.include?(status)

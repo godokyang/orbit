@@ -611,6 +611,24 @@ def validate_execution_contract(result, task)
 
   validate_execution_contract_role_pair(result, contract, roles, instances, "owner_role", "owner_instance")
   validate_execution_contract_role_pair(result, contract, roles, instances, "implementation_authority", "assigned_instance")
+  validate_execution_contract_mode_semantics(result, contract)
+end
+
+def validate_execution_contract_mode_semantics(result, contract)
+  owner_pair = [contract["owner_role"], contract["owner_instance"]]
+  implementation_pair = [contract["implementation_authority"], contract["assigned_instance"]]
+  case contract["operation_mode"]
+  when "solo"
+    return if owner_pair == implementation_pair
+
+    validation_error(result, "task_file.execution_contract.operation_mode",
+      "execution_contract.operation_mode solo requires implementation_authority/assigned_instance to match owner_role/owner_instance.")
+  when "team"
+    return if owner_pair != implementation_pair
+
+    validation_error(result, "task_file.execution_contract.operation_mode",
+      "execution_contract.operation_mode team requires implementation_authority/assigned_instance to differ from owner_role/owner_instance.")
+  end
 end
 
 def validate_task(result, task_path)

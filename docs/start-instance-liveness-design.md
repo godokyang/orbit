@@ -18,12 +18,12 @@
 - `audit`
 - 当前 `handoff`
 
-需要 runtime adapter 的情况：
+需要 Herdr runtime adapter 的情况：
 
 - `start` 要自动 wake/create 外部承载环境。
-- `dispatch` 要把消息直接投递到某个 transport pane/session/job。
+- `dispatch` 要把消息直接投递到 Herdr pane。
 
-没有 adapter 的运行环境仍然可以手动运行 Orbit protocol。
+Orbit 官方只支持 Herdr adapter。没有 Herdr 的运行环境仍然可以手动运行 Orbit protocol，但不承诺自动 wake/create、direct dispatch 或 notice delivery。
 
 ## Problem
 
@@ -122,21 +122,25 @@ Risk:
 用户运行 `orbit start INSTANCE --force` 后：
 
 - 这次启动的新 instance 成为 Orbit 当前可信 instance。
-- 旧 `transport.binding` 不再用于 `reuse`。
-- 旧 `transport.health` 可保留为 last-known diagnostic，但 replacement metadata 不写入 `instances.yaml`。
-- 新启动成功后，写回新的 binding/health。
+- 旧 `transport.binding` / `transport.health` 是 legacy problem/migration input，不再作为当前 schema 写回，也不再用于 `reuse`。
+- 新启动成功后，只写回稳定的 Herdr `binding`。
+- health、replacement metadata、old pane 和风险诊断写入 `.orbit/runtime/instances/<instance>.json`，不写入 `instances.yaml`。
 - 如果新启动失败，不要删除旧 binding；输出失败诊断和手动启动说明。
 
 `instances.yaml` 只保留稳定配置和当前 binding：
 
 ```yaml
-transport:
-  kind: herdr
-  binding:
-    pane: new-pane
-  health:
-    last_heartbeat: "2026-07-01T02:10:00Z"
-    actual_client: codex
+instances:
+  coder:
+    role_ref: coder
+    command: codex
+    management: user_managed
+    binding:
+      adapter: herdr
+      workspace: w3
+      tab: w3:t1
+      pane: new-pane
+      canonical_pane: new-pane
 ```
 
 Replacement history is runtime state and must be written outside versioned config:
@@ -183,7 +187,7 @@ load instance config
 if no binding -> normal create/block policy
 if binding is live-confirmed -> reuse
 if binding is unverified/stale and !force -> needs_force
-if binding is unverified/stale and force -> wake safe target, create external target, or local exec; write replacement diagnostic and new binding when available
+if binding is unverified/stale and force -> wake safe Herdr target or create external Herdr target; write replacement diagnostic and new binding when available
 ```
 
 当前可以 live-confirm 的范围很窄：
@@ -195,29 +199,21 @@ if binding is unverified/stale and force -> wake safe target, create external ta
 
 ## Manual fallback
 
-如果 `start` 不能自动启动目标 agent：
+如果没有 Herdr，或 `start` 不能自动启动目标 agent：
 
 1. 打开你想承载 agent 的终端、tmux pane、zellij pane、wezterm pane、CI shell、远端 shell 或普通 shell。
 2. 进入项目目录。
-3. 运行：
-
-   ```bash
-   orbit start INSTANCE
-   ```
-
-   这会在当前 shell 里 local exec。Orbit 不会创建或管理外层终端环境。
-
-4. 如果不使用 `orbit start`，就按 `.orbit/instances.yaml` 里的 command 手动启动，并设置身份：
+3. 按 `.orbit/instances.yaml` 里的 command 手动启动，并设置身份：
 
    ```bash
    ORBIT_INSTANCE=lead ORBIT_ROLE=lead <command-from-.orbit/instances.yaml>
    ```
 
-5. agent 启动后继续正常使用 Orbit protocol：`orbit whoami --json`、`orbit rules ...`、`orbit evidence ...`、`orbit validate`、`orbit audit`。
+4. agent 启动后继续正常使用 Orbit protocol：`orbit whoami --json`、`orbit rules ...`、`orbit evidence ...`、`orbit validate`、`orbit audit`。
 
 ## User-managed policy
 
-`management: user_managed` 仍然表示 Orbit 不能擅自创建缺失 instance。
+`management: user_managed` 不再需要 `--allow-create`。只要 instance 已配置且没有 live binding，`orbit start INSTANCE` 会尝试通过 Herdr 创建；已有 binding 但 liveness 不可信时才需要 `--force`。
 
 `--force` is explicit user authorization for this one start:
 
@@ -247,35 +243,49 @@ The lock is not a long-term lease; it only protects the forced replacement criti
 不要从 handle 形状推断 transport：
 
 ```text
-binding.pane == w3:p4 -> assume Herdr
+binding.pane == w3:p4 -> Herdr binding hint only
 ```
 
-transport 必须来自显式配置或 CLI option：
+binding 必须来自新 schema：
 
 ```yaml
-transport:
-  kind: herdr
+binding:
+  adapter: herdr
+  workspace: w3
+  tab: w3:t1
+  pane: w3:p4
+  canonical_pane: w3:p4
 ```
 
-没有 adapter 的运行环境只支持手动/当前 shell 路径。`orbit start lead` 如果运行在 tmux/zellij/wezterm pane 里，只是在当前 pane local exec，不代表 Orbit 管理该 runtime。
+没有 Herdr adapter 的运行环境只支持手动 protocol 路径。`orbit start lead` 是 Herdr automatic start；如果用户在 tmux/zellij/wezterm 中工作，需要手动启动 agent 并设置 `ORBIT_INSTANCE` / `ORBIT_ROLE`，或切换到 Herdr。
 
 ## Dispatch behavior
 
 `dispatch` 是消息投递，不是 liveness 证明。
 
-短期规则：
+当前规则：
 
-- `dispatch --transport herdr --pane PANE` 仍然按显式 pane 投递。
-- 如果 dispatch 目标是 instance，且只有 stale/unverified binding，应返回 `manual_delivery_required` 或要求显式 pane，不能说已投递给活 agent。
-- 不要让 dispatch 自动启动目标 instance。启动/替换属于 `start --force` 的职责。
+- `dispatch --to INSTANCE` 需要 live-confirmed Herdr binding，并会拒绝 working/blocked/unknown/done 等不可安全接收状态。
+- `dispatch --pane PANE` 是显式人工 override，仍然走 Herdr direct pane delivery。
+- `dispatch --manual-payload` 只生成手动投递 artifact。
+- 如果 dispatch 目标是 instance，且只有 stale/unverified binding，应要求先 `orbit start INSTANCE` 或使用 `--manual-payload`，不能说已投递给活 agent。
+- 不要让 dispatch 自动启动目标 instance。启动/替换属于 `start` / `start --force` 的职责。
+
+`dispatch` 输出的 checks 必须区分“投递前置条件满足”和“目标 binding 已被 live probe 证明”：
+
+- `delivery_precondition_met`: role 匹配，且 direct live binding / explicit override / manual artifact 三者之一成立。
+- `live_binding_confirmed`: 只有 `target_liveness_probe.decision == "reuse"` 时为 true。
+- `live_confirmed_for_delivery`: deprecated alias，必须等同 `live_binding_confirmed`；manual artifact 和 explicit override 不得把它置 true。
+- `explicit_override`: 用户通过 `--pane PANE` 明确绕过 target binding probe。
+- `manual_artifact`: 用户通过 `--manual-payload` 只生成手动投递 payload。
 
 ## Code cleanup
 
 要删掉或停用的 reuse 依据：
 
-- `start_requires_reuse?` 只看 `instance_status.recommended_action == "reuse"`。
-- 因为 `.orbit/instances.yaml transport.binding` 存在就返回 `reuse`。
-- 因为 `.orbit/instances.yaml transport.health.last_heartbeat` 存在就返回 `reuse`。
+- `start_requires_reuse?` 只看旧 `recommended_action` 或旧健康字段。
+- 因为 `.orbit/instances.yaml binding.pane` 存在就返回 `reuse`。
+- 因为 `.orbit/instances.yaml transport.*` 存在就返回 `reuse`。
 - `binding_status: healthy` 作为 live-health 概念。
 
 可以保留：
@@ -283,7 +293,7 @@ transport:
 - Herdr `agent list`，只用于 Herdr live-confirm 或 wake/create diagnostics。
 - Herdr `pane process-info` / `pane read`，只用于判断能否安全 wake。
 - `run_herdr_start` / `run_herdr_wake` / `run_herdr_self_wake`，作为 Herdr start adapter。
-- `dispatch --transport herdr`，作为显式消息投递。
+- `dispatch --pane PANE`，作为显式人工 override 的 Herdr pane delivery。
 - `tools detect/doctor` 的 Herdr 检查。
 
 ## Output contract
@@ -356,7 +366,7 @@ Required regressions:
 11. TTY and JSON risk output include duplicate-agent and evidence/gate/state competition warnings.
 12. Herdr detected live agent can still return `reuse`.
 13. Herdr idle pane wake/replacement of unverified binding requires `--force`.
-14. `dispatch --transport herdr --pane PANE` still works as explicit pane delivery.
+14. `dispatch --pane PANE` still works as explicit Herdr pane delivery.
 
 ## Non-goals
 
@@ -365,4 +375,5 @@ Required regressions:
 - No automatic killing of old external processes.
 - No interactive menu.
 - No transport inference from pane id format.
-- No claim that lack of a runtime adapter prevents normal Orbit protocol usage.
+- No claim that lack of Herdr prevents normal Orbit protocol usage.
+- No planned adapter promise for tmux/zellij/wezterm/CI; those environments remain manual protocol runtimes.

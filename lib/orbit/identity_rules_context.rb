@@ -280,6 +280,7 @@ def rule_resolution(options)
 
   roles, instances = load_project_config(result)
   task = load_task(result, options["task"])
+  result["task_sha256"] = sha256_file(File.expand_path(options["task"])) if task && options["task"]
   evidence = options["evidence"] ? load_evidence_manifest(File.expand_path(options["evidence"])) : nil
 
   with_rule_resolution_identity(options) do
@@ -300,6 +301,40 @@ def rule_resolution(options)
   add_rule_resolution_checks(result)
   result["valid"] = result["conflicts"].empty?
   result
+end
+
+def rule_artifact_identity(document)
+  return {} unless document.is_a?(Hash)
+
+  source = document["schema_version"] == "orbit-rules-context-v1" && document["rule_resolution"].is_a?(Hash) ? document["rule_resolution"] : document
+  {
+    "schema_version" => document["schema_version"],
+    "resolved_role" => source["resolved_role"],
+    "resolved_instance" => source["resolved_instance"] || source["instance"],
+    "task_path" => source.dig("sources", "task_rules", "path"),
+    "task_sha256" => source["task_sha256"],
+    "valid" => source["valid"]
+  }
+end
+
+def assert_rule_output_overwrite_allowed!(output_path, result)
+  return unless File.file?(output_path)
+
+  existing = JSON.parse(File.read(output_path))
+  existing_identity = rule_artifact_identity(existing)
+  new_identity = rule_artifact_identity(result)
+  %w[resolved_role resolved_instance task_path task_sha256].each do |field|
+    old_value = existing_identity[field].to_s
+    new_value = new_identity[field].to_s
+    next if old_value.empty? || new_value.empty? || old_value == new_value
+
+    usage_error("Refusing to overwrite rule artifact #{output_path}: #{field} would change from #{old_value.inspect} to #{new_value.inspect}.")
+  end
+  if existing_identity["valid"] == true && new_identity["valid"] == false
+    usage_error("Refusing to overwrite valid rule artifact #{output_path} with invalid resolution.")
+  end
+rescue JSON::ParserError
+  usage_error("Refusing to overwrite non-JSON rule artifact: #{output_path}")
 end
 
 def rule_context_entry(entry, source, required:, default_load_policy: "required", reason: nil)
@@ -474,6 +509,7 @@ def rules(args)
   if options["output"]
     output_path = File.expand_path(options["output"])
     FileUtils.mkdir_p(File.dirname(output_path))
+    assert_rule_output_overwrite_allowed!(output_path, result)
     File.write(output_path, json)
   end
 

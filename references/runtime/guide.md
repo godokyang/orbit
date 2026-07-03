@@ -86,8 +86,8 @@ command -v orbit
 推荐最小启动顺序：
 
 ```bash
-orbit init
-orbit new-task --target-role lead --task-type implementation --output .orbit/tasks/current-task.yaml
+orbit init --operation-mode solo
+orbit new-task --operation-mode solo --task-type implementation --output .orbit/tasks/current-task.yaml
 orbit evidence init --output .orbit/evidence/current-evidence.yaml
 orbit state start --task .orbit/tasks/current-task.yaml
 ```
@@ -103,11 +103,11 @@ orbit classify-intent --text "按 Orbit 流程继续实现这个功能" --json
 orbit docs alias --id decision.active-design --path docs/open/active-design.md --json
 orbit docs check --json
 orbit start reviewer --dry-run --json
-orbit new-task --target-role reviewer --task-type implementation_review --output task.yaml
+orbit new-task --implementation-authority reviewer --assigned-instance reviewer-main --task-type implementation_review --output task.yaml
 orbit rules resolve --task task.yaml --output .orbit/rules/current-resolution.json --json
 orbit rules print-context --task task.yaml --output .orbit/rules/current-context.json --json
 orbit evidence init --output .orbit/evidence.json
-orbit evidence attach-rule --file .orbit/evidence.json --rule-resolution .orbit/rules/current-resolution.json
+orbit evidence attach-rule --file .orbit/evidence.json --rule-resolution .orbit/rules/current-resolution.json --task task.yaml
 orbit evidence add --file .orbit/evidence.json --kind review --status pass --summary "..."
 orbit evidence from-report --file .orbit/evidence.json --report review-report.md --kind review --json
 orbit evidence submit --file .orbit/evidence.json --report review-submit.yaml --json

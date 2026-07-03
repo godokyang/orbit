@@ -192,7 +192,7 @@ Orbit CLI 需要 Ruby。远程安装还需要 `curl` 或 `wget`。
 
 ```bash
 cd /path/to/your-project
-orbit init
+orbit init --operation-mode solo
 ```
 
 初始化会生成：
@@ -275,7 +275,7 @@ orbit start lead --force
 mkdir -p .orbit/tasks .orbit/evidence .orbit/rules .orbit/handoff
 
 orbit new-task \
-  --target-role lead \
+  --operation-mode solo \
   --task-type implementation \
   --output .orbit/tasks/current-task.yaml
 ```

@@ -37,7 +37,7 @@
 
 第一原则：新规则不能静默改写旧 evidence 的历史含义，但新 task 必须能失败关闭（fail closed）。
 
-- 旧 evidence/report 缺少新字段时，`audit` 输出 `legacy_warning`，不直接让历史 handoff 失效。
+- 旧 evidence/report 缺少当前必需字段时，`validate` / `audit` fail closed；安装新包的项目需要重新 `orbit init` / 重新生成 task、report、evidence。
 - 新 task 一旦声明新能力字段，`validate`、`wait-gate`、`audit` 必须按新规则检查。
 - `new-task` 生成的新模板必须包含对应字段骨架；旧 task 不自动迁移。
 - `evidence submit` 对新结构严格校验；`evidence add/from-report` 只能生成兼容 record，不能伪造成高 evidence level。
@@ -873,7 +873,7 @@ CLI 行为:
 
 ```yaml
 compatibility_policy:
-  mode: warn_legacy
+  mode: enforce_current
   applies_to: []
   breaking_change: false
   migration_path: ""
@@ -906,7 +906,7 @@ backup_migration:
 
 CLI 行为:
 
-- `audit` 报告 compatibility mode 和已知 legacy gap。
+- `audit` 报告 compatibility mode；旧 schema 不作为可通过的 legacy gap 处理。
 - `handoff` 在多用户上下文中说明 ownership assumptions。
 - Migration/export 可以先作为文档化流程存在，再演进为 CLI。
 - Quality calibration 第一版可以由 scripts/tests 汇总 report data。
@@ -921,7 +921,7 @@ CLI 行为:
 
 测试:
 
-- 当 policy 是 `warn_legacy` 时，针对 legacy evidence 的新 strict rule 应报告 warning，而不是 hard failure。
+- 当文件缺少当前 schema 必需字段时，validate/audit 应 hard failure，而不是 legacy warning。
 - 只靠 self-review 的 protocol change 在 strict/release profile 下被阻塞。
 - Backup export 缺少 restore check 时 governance audit 失败。
 

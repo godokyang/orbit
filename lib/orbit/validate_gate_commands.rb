@@ -73,6 +73,12 @@ def validate_rule_resolution_reference(result, evidence_path, evidence, task = n
     elsif File.expand_path(task_path) != File.expand_path(task["__orbit_path"] || "")
       validation_error(result, "evidence_file.rule_resolution.task", "Attached rule resolution was generated for a different task.")
     end
+    task_sha256 = resolution["task_sha256"]
+    if !task_sha256.is_a?(String) || task_sha256.empty?
+      validation_error(result, "evidence_file.rule_resolution.task_sha256", "Attached rule resolution must record task_sha256.")
+    elsif task["__orbit_path"] && task_sha256 != sha256_file(task["__orbit_path"])
+      validation_error(result, "evidence_file.rule_resolution.task_sha256", "Attached rule resolution task_sha256 does not match current task.")
+    end
 
     resolved_role = resolution["resolved_role"]
     resolved_instance = resolution["instance"] || resolution["resolved_instance"]
@@ -560,12 +566,24 @@ def wait_gate(args)
   evidence_path = File.expand_path(options["evidence"])
   evidence = load_evidence_manifest(evidence_path)
   records = evidence["records"].is_a?(Array) ? evidence["records"] : []
+  implementation_result = { "errors" => [] }
+  validate_implementation_records_for_task(implementation_result, records, task)
   kinds = required_evidence_kinds(task)
   gates = kinds.map { |kind| gate_status(records, kind, task, task_sha256: current_task_sha256) }
-  ready = gates.all? { |gate| gate["passed"] }
+  implementation_errors = implementation_result["errors"]
+  ready = gates.all? { |gate| gate["passed"] } && implementation_errors.empty?
   arbitration_summary = verdict_arbitration_summary(task, evidence, current_task_sha256)
   lease_summary = gate_lease_summary(evidence)
   gate_summary = required_gate_summary(task, evidence, task_sha256: current_task_sha256)
+  unless implementation_errors.empty?
+    gate_summary["ready"] = false
+    gate_summary["not_ready"] << {
+      "kind" => "implementation",
+      "status" => "invalid",
+      "blocking_reason" => "implementation_context_invalid",
+      "error_count" => implementation_errors.length
+    }
+  end
   packet = {
     "schema_version" => "orbit-gate-status-v1",
     "project" => task["project"] || File.basename(Dir.pwd),
@@ -575,6 +593,7 @@ def wait_gate(args)
     "aggregate_verdict" => evidence["verdict"],
     "gate_summary" => gate_summary,
     "gates" => gates,
+    "implementation_context_errors" => implementation_errors,
     "parent_goal_status" => task.is_a?(Hash) ? task["parent_goal_status"] : nil,
     "verdict_arbitration" => arbitration_summary,
     "gate_lease_summary" => lease_summary,

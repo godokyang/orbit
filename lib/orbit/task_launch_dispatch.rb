@@ -399,11 +399,32 @@ def build_task_execution_contract(options)
   %w[owner_role owner_instance operation_mode implementation_authority assigned_instance].each do |key|
     contract[key] = options[key] if options.key?(key)
   end
+  if !options.key?("operation_mode") &&
+     (contract["implementation_authority"] != contract["owner_role"] ||
+      contract["assigned_instance"] != contract["owner_instance"])
+    contract["operation_mode"] = "team"
+  end
   contract["source"] = "explicit_override" if explicit
   usage_error("execution_contract.operation_mode must be solo or team.") unless %w[solo team].include?(contract["operation_mode"].to_s)
   validate_execution_role_pair!(contract, roles, instances, "owner_role", "owner_instance")
   validate_execution_role_pair!(contract, roles, instances, "implementation_authority", "assigned_instance")
+  validate_execution_contract_mode_semantics!(contract)
   contract
+end
+
+def validate_execution_contract_mode_semantics!(contract)
+  owner_pair = [contract["owner_role"], contract["owner_instance"]]
+  implementation_pair = [contract["implementation_authority"], contract["assigned_instance"]]
+  case contract["operation_mode"]
+  when "solo"
+    return if owner_pair == implementation_pair
+
+    usage_error("execution_contract.operation_mode solo requires implementation_authority/assigned_instance to match owner_role/owner_instance.")
+  when "team"
+    return if owner_pair != implementation_pair
+
+    usage_error("execution_contract.operation_mode team requires implementation_authority/assigned_instance to differ from owner_role/owner_instance.")
+  end
 end
 
 def new_task(args)

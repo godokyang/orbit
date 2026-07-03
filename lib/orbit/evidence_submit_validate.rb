@@ -1032,6 +1032,12 @@ def evidence_attach_rule(options)
   if resolution_task_path.to_s.empty? || File.expand_path(resolution_task_path) != task_path
     evidence_error("Rule resolution was not generated for task: #{task_path}")
   end
+  if rule_resolution["task_sha256"].to_s.empty?
+    evidence_error("Rule resolution must record task_sha256: #{rule_resolution_path}")
+  end
+  if rule_resolution["task_sha256"] != sha256_file(task_path)
+    evidence_error("Rule resolution task_sha256 does not match task: #{task_path}")
+  end
 
   resolved_role = rule_resolution["resolved_role"]
   resolved_instance = rule_resolution["instance"] || rule_resolution["resolved_instance"]
@@ -1051,6 +1057,7 @@ def evidence_attach_rule(options)
     "resolver" => "orbit rules resolve --json",
     "file" => rule_resolution_path,
     "task" => task_path,
+    "task_sha256" => rule_resolution["task_sha256"],
     "valid" => true,
     "resolved_role" => rule_resolution["resolved_role"],
     "resolved_instance" => resolved_instance,

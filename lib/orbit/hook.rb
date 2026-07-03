@@ -65,7 +65,7 @@ rescue ArgumentError
 end
 
 def hook_start_force_request(intent)
-  instance = intent["instance"] || intent["target_instance"]
+  instance = hook_start_instance(intent)
   force = intent["force"] == true || intent["force"].to_s == "true"
   tokens = hook_command_tokens(intent)
   if tokens.include?("--force") && (idx = tokens.index("start"))
@@ -75,6 +75,33 @@ def hook_start_force_request(intent)
   return nil unless force && !instance.to_s.empty?
 
   instance.to_s
+end
+
+def hook_start_instance(intent)
+  instance = intent["instance"] || intent["target_instance"]
+  tokens = hook_command_tokens(intent)
+  if instance.to_s.empty? && (idx = tokens.index("start"))
+    instance = tokens[idx + 1]
+  end
+  instance.to_s
+end
+
+def hook_instance_status(instance_key)
+  return nil if instance_key.to_s.empty?
+
+  result = { "role_sources" => {}, "conflicts" => [] }
+  roles, instances = load_project_config(result)
+  resolved_key, = find_instance(instances, roles, instance_key)
+  instance = resolved_key ? instances[resolved_key] : nil
+  return nil unless resolved_key && instance.is_a?(Hash)
+
+  role_ref = instance["role_ref"]
+  role_def = roles[role_ref]
+  return nil unless role_def.is_a?(Hash)
+
+  instance_status_entry(resolved_key, instance, role_ref, role_def)
+rescue StandardError
+  nil
 end
 
 def hook_force_cooldown_seconds
@@ -135,7 +162,7 @@ def hook_result(subcommand, intent)
   warnings = []
   recommended_action = "allow"
 
-  if intent.key?("live_probe") || intent.key?("transport_binding") || intent.key?("manual_payload") || intent.key?("explicit_pane")
+  if intent.key?("live_probe") || intent.key?("transport_binding") || intent.key?("manual_payload") || intent.key?("explicit_pane") || intent.key?("observed_geometry") || intent.key?("view")
     warnings << "caller_supplied_liveness_ignored"
   end
 
@@ -176,11 +203,8 @@ def hook_result(subcommand, intent)
   end
 
   if subcommand == "pre-start"
-    observed = intent["observed_geometry"].is_a?(Hash) ? intent["observed_geometry"] : {}
-    view = intent["view"].is_a?(Hash) ? intent["view"] : {}
-    min_cols = (view["min_columns"] || 120).to_i
-    min_rows = (view["min_rows"] || 36).to_i
-    if observed["cols"].to_i.positive? && (observed["cols"].to_i < min_cols || observed["rows"].to_i < min_rows)
+    status = hook_instance_status(hook_start_instance(intent))
+    if status&.dig("view_status", "too_narrow") == true
       recommended_action = "resize_or_recreate_view"
       warnings << "pane_too_narrow"
     end
@@ -199,6 +223,7 @@ def hook_result(subcommand, intent)
     "warnings" => warnings,
     "recommended_action" => recommended_action,
     "force_cooldown" => intent["force_cooldown"],
+    "target_instance_status" => subcommand == "pre-start" ? hook_instance_status(hook_start_instance(intent)) : nil,
     "identity" => identity&.slice("resolved_role", "resolved_instance", "execution_contract", "execution_context", "conflicts"),
     "herdr_context_summary" => {
       "current_pane_env_present" => !ENV["HERDR_PANE_ID"].to_s.empty?,
