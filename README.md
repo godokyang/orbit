@@ -8,7 +8,7 @@ Orbit 是给 AI agent 用的任务闭环工具。它不负责“让 AI 更会写
 - 证据、状态和交接文件在哪里。
 - 当前结果是否可以继续实现、进入下一阶段或交给别人接手。
 
-Orbit 的核心是 `.orbit/` 里的 task、evidence、state 和 handoff。它可以在 Herdr、tmux、zellij、wezterm、CI 或多个普通终端旁边使用；这些工具负责承载进程或传递消息，Orbit protocol 负责身份、证据和 gate。CLI 自动控制外部工具的范围必须按下面的 support table 理解。
+Orbit 的核心是 `.orbit/` 里的 task、evidence、state 和 handoff。它可以在 Herdr、CI 或多个普通终端旁边使用；这些工具负责承载进程或传递消息，Orbit protocol 负责身份、证据和 gate。官方 runtime adapter 只支持 Herdr；tmux、zellij、wezterm 或其它终端管理器可以手动运行 Orbit protocol，但 Orbit 不承诺自动 wake/create、direct dispatch 或 notice delivery。
 
 ## 什么时候用
 
@@ -97,27 +97,28 @@ herdr integration install claude
 herdr integration install opencode
 ```
 
-Herdr 不是 Orbit 的必需依赖。你也可以用 tmux、zellij、wezterm、CI job 或手动开多个终端运行 Orbit protocol；但在对应 adapter 实现前，这些方式不等于 `orbit start --transport NAME` 或 `orbit dispatch --transport NAME` 已经可用。
+Herdr 不是 Orbit protocol 的必需依赖，但它是唯一官方 automatic runtime adapter。你也可以用 tmux、zellij、wezterm、CI job 或手动开多个终端运行 Orbit protocol；这些方式不提供官方 start/wake/direct dispatch adapter。旧的 runtime adapter 参数已移除，安装新版本后请重新 `orbit init` 生成新的 instance binding schema。
 
 ### Runtime support
 
 | Command area | Adapter needed? | 当前状态 |
 | --- | --- | --- |
-| `start` reuse | No | 不能由 pane binding 或缓存证明；状态不可信时会提示用户用 `--force` 重新启动并替换 binding。 |
-| `start` in current shell | No | `orbit start INSTANCE` 默认 local exec，在哪个终端/pane 里运行就在哪启动。 |
-| `start` wake/create external pane | Yes | Herdr supported；tmux/zellij/wezterm/其它终端管理器 planned/manual-compatible。 |
-| `dispatch` direct pane delivery | Yes | Herdr supported；其它 transport 需要各自 adapter。 |
-| `dispatch`/`handoff` payload | No | `generic` 生成手动投递 payload。 |
+| `start` reuse | Herdr | 只有 Herdr live agent probe 能证明可复用；状态不可信时会提示用户用 `--force` 重新启动并替换 binding。 |
+| `start` wake/create external pane | Herdr | Herdr only；没有 Herdr 时请手动在目标终端启动 agent，并设置 `ORBIT_INSTANCE` / `ORBIT_ROLE`。 |
+| `dispatch` direct pane delivery | Herdr | Herdr only；目标 instance 必须有 live-confirmed Herdr binding，显式 `--pane` 可作为人工 override。 |
+| `notice` delivery | Herdr | Herdr delivery 仍是后续增强；notice record 本身是 Orbit protocol，不需要 adapter。 |
+| `dispatch`/`handoff` manual artifact | No | 使用 `dispatch --manual-payload` 或 `handoff --output` 生成手动投递 artifact。 |
 | `whoami`/`rules`/`task`/`evidence`/`state`/`wait-gate`/`validate`/`audit` | No | 这些是 Orbit protocol 命令，主要读写 `.orbit/` 文件，不依赖 terminal adapter。 |
 
 `start` 的强制替换设计见 [Orbit start force replacement design](docs/start-instance-liveness-design.md)。
+官方 runtime adapter 只支持 Herdr 的决策见 [Herdr-only runtime adapter design](docs/herdr-only-runtime-adapter-design.md)。
 
-如果 `start` 不能自动启动目标 agent：
+如果没有 Herdr adapter，或 `start` 不能自动启动目标 agent：
 
 1. 在你想承载 agent 的终端、tmux pane、zellij pane、wezterm pane、CI shell 或普通 shell 里进入项目目录。
-2. 运行 `orbit start INSTANCE`，让 Orbit 以 local exec 方式在当前 shell 启动该 instance。
-3. 如果你不使用 `orbit start`，就按 `.orbit/instances.yaml` 里的 `command` 手动启动，并设置 `ORBIT_INSTANCE` 和 `ORBIT_ROLE`。
-4. 对没有 adapter 的环境，不要期待 Orbit 自动创建 pane 或把命令打进去；继续用 `orbit whoami --json`、`orbit rules ...`、`orbit evidence ...`、`orbit validate/audit` 完成协议层工作。
+2. 按 `.orbit/instances.yaml` 里的 `command` 手动启动，并设置 `ORBIT_INSTANCE` 和 `ORBIT_ROLE`，例如 `ORBIT_INSTANCE=reviewer ORBIT_ROLE=reviewer codex`。
+3. agent 启动后运行 `orbit whoami --json` 和 `orbit rules print-context --json` 确认身份与规则。
+4. 对非 Herdr 环境，不要期待 Orbit 自动创建 pane 或把命令打进去；继续用 `orbit evidence ...`、`orbit validate/audit` 完成协议层工作。
 
 如果 `start` 发现已有 binding 但状态不可信，它不会假复用；会提示风险，并告诉你用 `orbit start INSTANCE --force` 重新启动并以新 instance 为准。`--force` 不会默认 kill 旧外部进程，因此短时间内可能存在两个同 instance/role 的 agent 同时写 evidence、gate lease 或 loop state。旧 binding 的替换诊断属于本地 runtime 状态，不写进版本化的 `instances.yaml`。
 
@@ -223,16 +224,16 @@ command: claude
 command: opencode
 ```
 
-第一次启动 lead agent 时允许 Orbit 创建缺失的 instance：
-
-```bash
-orbit start lead --allow-create
-```
-
-后续这个 instance 已经存在时，直接启动：
+第一次启动 lead agent 时，Orbit 会按配置通过 Herdr 创建缺失的 instance：
 
 ```bash
 orbit start lead
+```
+
+如果已有 binding 但 Orbit 无法证明目标 pane 里有活 agent，`start` 会拒绝静态复用并提示你确认风险后使用 `--force`：
+
+```bash
+orbit start lead --force
 ```
 
 然后把需求交给 lead agent。可以直接这样说：
@@ -380,14 +381,14 @@ pane 4: tester-agent    OpenCode
 可以手动在每个 pane 里启动 agent，也可以让 Orbit 生成启动计划：
 
 ```bash
-orbit start lead --transport herdr --allow-create
-orbit start reviewer --transport herdr --dry-run --json
-orbit start tester --transport herdr --dry-run --json
+orbit start lead
+orbit start reviewer --dry-run --json
+orbit start tester --dry-run --json
 ```
 
-先在 `.orbit/instances.yaml` 里给每个 instance 配好 `command`，例如 `codex`、`claude` 或 `opencode`。第一次启动某个缺失 instance 时使用 `--allow-create`；后续如果已有 binding 但 Orbit 无法确认它仍然有效，`start` 会提示你使用 `--force` 重新启动并替换旧 binding。
+先在 `.orbit/instances.yaml` 里给每个 instance 配好 `command`，例如 `codex`、`claude` 或 `opencode`。缺失 binding 时 `start` 默认通过 Herdr 创建；后续如果已有 binding 但 Orbit 无法确认它仍然有效，`start` 会提示你使用 `--force` 重新启动并替换旧 binding。
 
-如果 `.orbit/instances.yaml` 里已经绑定了 pane，Orbit 可以把它当成 wake/create 的目标 hint，但不能把 `transport.binding` 或 `transport.health` 当成当前 agent 还活着的证明。`local` transport 不应该靠 pane binding 直接复用。详细设计见 [Orbit start force replacement design](docs/start-instance-liveness-design.md)。
+如果 `.orbit/instances.yaml` 里已经绑定了 pane，Orbit 可以把它当成 wake/create 的目标 hint，但不能把静态 binding 当成当前 agent 还活着的证明。详细设计见 [Orbit start force replacement design](docs/start-instance-liveness-design.md)。
 
 把 task 发给指定 pane：
 
@@ -395,8 +396,17 @@ orbit start tester --transport herdr --dry-run --json
 orbit dispatch \
   --task .orbit/tasks/current-task.yaml \
   --to reviewer \
-  --transport herdr \
   --pane <pane-id> \
+  --json
+```
+
+没有 live-confirmed Herdr binding 时，生成手动投递 payload：
+
+```bash
+orbit dispatch \
+  --task .orbit/tasks/current-task.yaml \
+  --to reviewer \
+  --manual-payload \
   --json
 ```
 

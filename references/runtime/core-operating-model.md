@@ -268,10 +268,10 @@ instances:
 
 `management` 定义 instance 生命周期由谁管理：
 
-- `user_managed` 是默认值。用户已经打开或绑定的 reviewer/tester 是权威协作拓扑，lead 必须复用 healthy binding；缺失或不健康时应请求确认或记录 waiver。
-- `orbit_managed` 表示 lead/Orbit 可以按配置自动启动缺失 instance。启动成功后 adapter 应写回 binding 和 health。
+- `user_managed` 是默认值。用户已经打开或绑定的 reviewer/tester 是协作拓扑 hint，但复用前仍必须由 Herdr live probe 证明 agent 存活；缺失或不健康时应启动新 Herdr agent，已有不可信 binding 需要用户显式 `--force`。
+- `orbit_managed` 表示 lead/Orbit 可以按配置自动启动缺失 instance。启动成功后 Herdr adapter 应写回 canonical binding；live state 不写进版本控制配置。
 
-`transport.binding` 只记录 pane/tab/session 等 transport handle，不定义 role；role 仍来自 `role_ref` 和运行时 identity。gate 等待的是 instance verdict，而不是某个自然语言 pane 消息。
+`binding` 只记录 Herdr workspace/tab/pane handle，不定义 role；role 仍来自 `role_ref` 和运行时 identity。gate 等待的是 instance verdict 和 evidence，而不是某个自然语言 pane 消息。
 
 启动命令形态：
 
@@ -284,13 +284,13 @@ orbit start tester-main
 `orbit start reviewer-main --dry-run --json` 会输出当前实现可审计的启动计划；非 dry-run 会启动配置的 agent 命令。当前 CLI 已负责：
 
 1. 设置进程 env：`ORBIT_INSTANCE=reviewer-main`、`ORBIT_ROLE=reviewer`。
-2. 启动 Codex / Claude Code / 其他 agent 客户端，或在 `--transport herdr` 下生成/调用 Herdr start adapter。
+2. 启动 Codex / Claude Code / 其他 agent 客户端；自动 wake/create 只通过 Herdr start adapter。
 3. 输出 argv/env/cwd，避免通过 shell 字符串拼接命令。
 4. 对缺失 role 的创建输出 creation policy：先复用 existing binding；确需创建时尽量使用 lead 的同级 tab/workspace；并提醒新 agent 的权限/approval 模式需要被用户或客户端能力显式准备。
 5. 对已有 Herdr pane binding 做可用性判断：pane 里已检测到 agent 时复用；pane 存在但未检测到 agent 且可安全判断为空闲 shell 时自动 wake；无法安全判断时返回 `needs_attention`，不盲打命令。
 6. 在 start/dispatch 输出中提供 `context_preflight`，列出当前 instance 必须读取的 common、role 和 task 规则文件，以及推荐的 whoami / rules resolve / rules print-context 命令。`whoami` 只解析当前运行身份，不应携带 task；task 约束由 `rules resolve --task ... --instance ...` 和 `rules print-context --task ... --instance ...` 解析，避免 gate role 在读取规范前被 target-role mismatch 阻断。
 
-transport label、pane 布局、权限模式和启动 prelude 属于 adapter/agent 客户端能力；如果当前 adapter 不支持，不能假装已经注入。agent 启动后仍必须自己运行 `orbit whoami --json`、`orbit rules resolve --json` 和 `orbit rules print-context --json`，并读取 `context_preflight.required_files` 中的 active required files；CLI 暴露 preflight 不等于 LLM 已经语义读取。
+Herdr pane 布局、权限模式和启动 prelude 属于 adapter/agent 客户端能力；如果当前 adapter 不支持，不能假装已经注入。agent 启动后仍必须自己运行 `orbit whoami --json`、`orbit rules resolve --json` 和 `orbit rules print-context --json`，并读取 `context_preflight.required_files` 中的 active required files；CLI 暴露 preflight 不等于 LLM 已经语义读取。
 
 这样最终流程变成：
 
@@ -706,12 +706,12 @@ review/test/command 结果都写 manifest。manifest 是事实记录，不替代
   "task_type": "implementation_review",
   "task_file": "/tmp/orbit-task-review-001.yaml",
   "result_file": "/tmp/orbit-result-review-001.md",
-  "transport": {
-    "type": "example-transport",
+  "runtime": {
+    "adapter": "herdr",
     "workspace_id": "workspace-123",
-    "tab_label": "reviewer-main",
-    "session_id": "session-456",
-    "managed_by": "orbit adapter"
+    "tab_id": "tab-456",
+    "pane_id": "pane-789",
+    "managed_by": "orbit herdr adapter"
   },
   "started_at": "2026-06-08T12:00:00+08:00",
   "completed_at": "2026-06-08T12:08:00+08:00",
