@@ -385,7 +385,7 @@ Required behavior:
 
 - Add `orbit notice add|list|ack`.
 - Store notices under `.orbit/runtime/notices/<role>/`.
-- Notice records include task/evidence hash, `from_role`, `from_instance`, `to_role`, `to_instance`, event, status, created/acked metadata.
+- Notice records include task hash, stable evidence record fingerprint, `from_role`, `from_instance`, `to_role`, `to_instance`, event, status, created/acked metadata.
 - `notice add` derives `to_instance` from task `owner_instance`; explicit `--to-instance` must match owner instance.
 - Event-specific source contract:
   - `implementation_complete`: implementation authority and assigned instance unless override.

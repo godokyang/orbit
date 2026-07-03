@@ -75,10 +75,10 @@ Herdr 是推荐体验。用户不应该需要理解 transport registry、pane id
 
 ```bash
 herdr
-orbit start lead
-orbit start coder
-orbit start reviewer
-orbit start tester
+orbit start lead-main
+orbit start coder-main
+orbit start reviewer-main
+orbit start tester-main
 ```
 
 `orbit start INSTANCE` 默认使用 Herdr adapter。不保留 `--transport herdr` 作为日常参数，也不保留 `--transport local` 作为同级模式。user-managed instance 无 binding 时默认创建；已有 binding 但 liveness 不可信时要求用户显式 `--force`。
@@ -106,7 +106,7 @@ Orbit start: coder
 
 ```text
 Started Orbit instance:
-- instance: coder
+- instance: coder-main
 - role: coder
 - pane: w3:p4
 - ready: pass
@@ -348,10 +348,10 @@ Same-level view 的语义应该是“同一工作上下文”，不是“无条�
 建议提供显式覆盖：
 
 ```bash
-orbit start coder --layout auto
-orbit start coder --layout same-tab
-orbit start coder --layout new-tab
-orbit start coder --min-cols 120 --min-rows 30
+orbit start coder-main --layout auto
+orbit start coder-main --layout same-tab
+orbit start coder-main --layout new-tab
+orbit start coder-main --min-cols 120 --min-rows 30
 ```
 
 `auto` 是默认值。`same-tab` 如果会低于 hard minimum，应 fail closed 或要求 `--force-layout`，不要静默创建不可读 pane。
@@ -505,7 +505,7 @@ Orbit Herdr doctor:
 - current pane: w3:p1
 - codex integration: installed
 - coder binding: stale, pane w3:p4 not found
-- next: orbit start coder --force
+- next: orbit start coder-main --force
 ```
 
 ## Command contracts

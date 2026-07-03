@@ -98,7 +98,7 @@ HELP = <<~HELP
     orbit evidence show --file PATH --json
     orbit handoff --task PATH --state PATH --evidence PATH [--output PATH] [--record-state] --json
     orbit hook pre-command|pre-edit|pre-evidence|pre-start|pre-idle --intent-json PATH|- --json
-    orbit notice add --task PATH --event EVENT [--evidence PATH] [--to-instance INSTANCE] --json
+    orbit notice add --task PATH --event EVENT --evidence PATH [--to-instance INSTANCE] --json
     orbit notice list --role ROLE --json
     orbit notice ack --role ROLE --id ID --json
     orbit dispatch --task PATH --to INSTANCE [--pane PANE] [--reply-to PANE] [--manual-payload] [--dry-run] --json
@@ -291,7 +291,7 @@ COMMAND_HELP = {
   HELP
   "notice" => <<~HELP,
     Usage:
-      orbit notice add --task PATH --event EVENT [--evidence PATH] [--to-instance INSTANCE] --json
+      orbit notice add --task PATH --event EVENT --evidence PATH [--to-instance INSTANCE] --json
       orbit notice list --role ROLE --json
       orbit notice ack --role ROLE --id ID --json
 

@@ -134,15 +134,20 @@ APPEND_EVIDENCE="$TMPROOT/append-evidence.json"
 test ! -s "$TMPROOT/evidence-init.err"
 json_assert 'evidence init writes empty manifest' "$APPEND_EVIDENCE" 'j["schema_version"] == "orbit-evidence-v1" && j["project"] == File.basename(Dir.pwd) && j["records"].is_a?(Array) && j["records"].empty?'
 json_assert 'evidence init initializes runtime evidence fields' "$APPEND_EVIDENCE" 'j["worktree_safety"]["status"] == "not_applicable" && j["regression_guard"]["status"] == "not_applicable" && j["release_surface"]["status"] == "not_applicable" && j["rule_resolution"]["file"] == "" && j["tool_calls"].is_a?(Array)'
-ORBIT_INSTANCE=reviewer-main "$CLI" notice add --task "$TASK" --event review_complete --evidence "$APPEND_EVIDENCE" --json >"$TMPROOT/review-notice-add.json"
-json_assert 'notice add writes review completion to owner inbox' "$TMPROOT/review-notice-add.json" 'j["schema_version"] == "orbit-notice-v1" && j["event"] == "review_complete" && j["from_role"] == "reviewer" && j["from_instance"] == "reviewer-main" && j["to_role"] == "lead" && j["to_instance"] == "lead-main" && j["status"] == "open"'
+NOTICE_EVIDENCE="$TMPROOT/notice-evidence.json"
+"$CLI" evidence init --output "$NOTICE_EVIDENCE" >/dev/null
+write_review_pass_report "$TMPROOT/notice-review-pass.yaml" "Notice review passed." "herdr:reviewer:notice-pass"
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit --file "$NOTICE_EVIDENCE" --report "$TMPROOT/notice-review-pass.yaml" --json >/dev/null
+ORBIT_INSTANCE=reviewer-main "$CLI" notice add --task "$TASK" --event review_complete --evidence "$NOTICE_EVIDENCE" --json >"$TMPROOT/review-notice-add.json"
+json_assert 'notice add writes review completion to owner inbox' "$TMPROOT/review-notice-add.json" 'j["schema_version"] == "orbit-notice-v1" && j["event"] == "review_complete" && j["from_role"] == "reviewer" && j["from_instance"] == "reviewer-main" && j["to_role"] == "lead" && j["to_instance"] == "lead-main" && j["status"] == "open" && j["evidence_ref"].is_a?(String) && j.dig("evidence_record","record_sha256").is_a?(String)'
 "$CLI" notice list --role lead --json >"$TMPROOT/review-notice-list.json"
 json_assert 'notice list reads owner runtime inbox' "$TMPROOT/review-notice-list.json" 'j["schema_version"] == "orbit-notice-list-v1" && j["role"] == "lead" && j["notices"].any? { |n| n["event"] == "review_complete" && n["to_instance"] == "lead-main" }'
 ruby --disable-gems -rjson -e 'j=JSON.parse(File.read(ARGV[0])); File.write(ARGV[1], j.fetch("id"))' "$TMPROOT/review-notice-add.json" "$TMPROOT/review-notice-id.txt"
 expect_failure 'notice ack rejects non-recipient identity' env ORBIT_INSTANCE=tester-main "$CLI" notice ack --role lead --id "$(cat "$TMPROOT/review-notice-id.txt")" --json
 ORBIT_INSTANCE=lead-main "$CLI" notice ack --role lead --id "$(cat "$TMPROOT/review-notice-id.txt")" --json >"$TMPROOT/review-notice-ack.json"
 json_assert 'notice ack records owner identity' "$TMPROOT/review-notice-ack.json" 'j["status"] == "acked" && j["acked_by_role"] == "lead" && j["acked_by_instance"] == "lead-main"'
-expect_failure 'notice rejects explicit target instance mismatch' env ORBIT_INSTANCE=reviewer-main "$CLI" notice add --task "$TASK" --event review_complete --to-instance reviewer-main --json
+expect_failure 'notice completion events require evidence manifest' env ORBIT_INSTANCE=reviewer-main "$CLI" notice add --task "$TASK" --event review_complete --json
+expect_failure 'notice rejects explicit target instance mismatch' env ORBIT_INSTANCE=reviewer-main "$CLI" notice add --task "$TASK" --event review_complete --evidence "$NOTICE_EVIDENCE" --to-instance reviewer-main --json
 cat >"$TMPROOT/hook-delete-runtime.json" <<'JSON'
 {"command":["rm","-rf",".orbit/runtime"]}
 JSON
@@ -945,11 +950,56 @@ if "$CLI" audit --task "$REQUIRED_NOTICE_TASK" --evidence "$REQUIRED_NOTICE_EVID
   exit 1
 fi
 json_assert 'audit reports missing completion notice when policy requires it' "$TMPROOT/audit-missing-notice.json" 'j["notice_summary"]["required"] == true && j["notice_summary"]["missing_events"].include?("implementation_complete") && j["blocking_findings"].any? { |f| f["source"] == "notice_summary.missing_completion_notice" }'
+mkdir -p .orbit/runtime/notices/lead
+ruby --disable-gems -rjson -rdigest -e 'task,evidence,path=ARGV; record={"schema_version"=>"orbit-notice-v1","id"=>"fake-implementation-complete","task"=>File.expand_path(task),"task_sha256"=>Digest::SHA256.file(task).hexdigest,"evidence_ref"=>File.expand_path(evidence),"evidence_record"=>{"kind"=>"implementation","record_index"=>0,"record_created_at"=>"2000-01-01T00:00:00Z","record_sha256"=>"bad"},"event"=>"implementation_complete","status"=>"open","from_role"=>"tester","from_instance"=>"tester-main","to_role"=>"lead","to_instance"=>"wrong-owner","created_at"=>"2000-01-01T00:00:00Z"}; File.write(path, JSON.pretty_generate(record))' "$REQUIRED_NOTICE_TASK" "$REQUIRED_NOTICE_EVIDENCE" .orbit/runtime/notices/lead/fake-implementation-complete.json
+if "$CLI" audit --task "$REQUIRED_NOTICE_TASK" --evidence "$REQUIRED_NOTICE_EVIDENCE" --state "$REQUIRED_NOTICE_STATE" --json >"$TMPROOT/audit-invalid-notice.json"; then
+  printf 'FAIL audit invalid completion notice: command unexpectedly succeeded\n' >&2
+  exit 1
+fi
+json_assert 'audit ignores invalid completion notice for required policy' "$TMPROOT/audit-invalid-notice.json" 'j["notice_summary"]["missing_events"].include?("implementation_complete") && j["notice_summary"]["invalid_notices"].any? { |n| n["id"] == "fake-implementation-complete" && n["invalid_reasons"].include?("recipient_instance_mismatch") && n["invalid_reasons"].include?("source_not_allowed") && n["invalid_reasons"].include?("created_at_before_required_record") }'
 ORBIT_INSTANCE=lead-main "$CLI" notice add --task "$REQUIRED_NOTICE_TASK" --event implementation_complete --evidence "$REQUIRED_NOTICE_EVIDENCE" --json >/dev/null
+ORBIT_INSTANCE=lead-main "$CLI" evidence add --file "$REQUIRED_NOTICE_EVIDENCE" --kind command --status pass --summary "post-notice command evidence" >/dev/null
+if "$CLI" audit --task "$REQUIRED_NOTICE_TASK" --evidence "$REQUIRED_NOTICE_EVIDENCE" --state "$REQUIRED_NOTICE_STATE" --json >"$TMPROOT/audit-notice-survives-append.json"; then
+  printf 'FAIL audit should still require review/test notices after append: command unexpectedly succeeded\n' >&2
+  exit 1
+fi
+json_assert 'audit keeps implementation notice valid after later evidence append' "$TMPROOT/audit-notice-survives-append.json" '!j["notice_summary"]["missing_events"].include?("implementation_complete") && j["notice_summary"]["missing_events"].include?("review_complete") && j["notice_summary"]["missing_events"].include?("test_complete")'
+BRANCHED_NOTICE_EVIDENCE="$TMPROOT/branched-required-notice-evidence.json"
+BRANCHED_NOTICE_STATE="$TMPROOT/branched-required-notice-state.yaml"
+cp "$REQUIRED_NOTICE_EVIDENCE" "$BRANCHED_NOTICE_EVIDENCE"
+cp "$REQUIRED_NOTICE_STATE" "$BRANCHED_NOTICE_STATE"
+ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["artifacts"]["evidence_file"]=File.expand_path(ARGV[1]); File.write(p, YAML.dump(y))' "$BRANCHED_NOTICE_STATE" "$BRANCHED_NOTICE_EVIDENCE"
+if "$CLI" audit --task "$REQUIRED_NOTICE_TASK" --evidence "$BRANCHED_NOTICE_EVIDENCE" --state "$BRANCHED_NOTICE_STATE" --json >"$TMPROOT/audit-notice-cross-manifest.json"; then
+  printf 'FAIL audit cross-manifest completion notice: command unexpectedly succeeded\n' >&2
+  exit 1
+fi
+json_assert 'audit rejects completion notice from another evidence manifest' "$TMPROOT/audit-notice-cross-manifest.json" 'j["notice_summary"]["missing_events"].include?("implementation_complete") && j["notice_summary"]["invalid_notices"].any? { |n| n["event"] == "implementation_complete" && n["invalid_reasons"].include?("evidence_ref_mismatch") }'
+cat >"$TMPROOT/hook-notice-cross-manifest.json" <<JSON
+{"task":"$REQUIRED_NOTICE_TASK","evidence":"$BRANCHED_NOTICE_EVIDENCE"}
+JSON
+ORBIT_INSTANCE=lead-main "$CLI" hook pre-idle --intent-json "$TMPROOT/hook-notice-cross-manifest.json" --json >"$TMPROOT/hook-notice-cross-manifest.out"
+json_assert 'hook pre-idle rejects completion notice from another evidence manifest' "$TMPROOT/hook-notice-cross-manifest.out" 'j["allowed"] == true && j["recommended_action"] == "write_completion_notice" && j["warnings"].include?("missing_completion_notice")'
 ORBIT_INSTANCE=reviewer-main "$CLI" notice add --task "$REQUIRED_NOTICE_TASK" --event review_complete --evidence "$REQUIRED_NOTICE_EVIDENCE" --json >/dev/null
 ORBIT_INSTANCE=tester-main "$CLI" notice add --task "$REQUIRED_NOTICE_TASK" --event test_complete --evidence "$REQUIRED_NOTICE_EVIDENCE" --json >/dev/null
 "$CLI" audit --task "$REQUIRED_NOTICE_TASK" --evidence "$REQUIRED_NOTICE_EVIDENCE" --state "$REQUIRED_NOTICE_STATE" --json >"$TMPROOT/audit-required-notice-present.json"
 json_assert 'audit accepts required completion notices when present' "$TMPROOT/audit-required-notice-present.json" 'j["notice_summary"]["required"] == true && j["notice_summary"]["missing_events"].empty? && j["blocking_findings"].empty?'
+ACK_REQUIRED_NOTICE_TASK="$TMPROOT/ack-required-notice-task.yaml"
+ACK_REQUIRED_NOTICE_EVIDENCE="$TMPROOT/ack-required-notice-evidence.json"
+ACK_REQUIRED_NOTICE_STATE="$TMPROOT/ack-required-notice-state.yaml"
+cp "$IMPL_TASK" "$ACK_REQUIRED_NOTICE_TASK"
+cp "$IMPL_EVIDENCE" "$ACK_REQUIRED_NOTICE_EVIDENCE"
+cp .orbit/loop-state.yaml "$ACK_REQUIRED_NOTICE_STATE"
+ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["completion_notice_policy"]={"required"=>true,"ack_required"=>true}; File.write(p, YAML.dump(y))' "$ACK_REQUIRED_NOTICE_TASK"
+ruby --disable-gems -rjson -rdigest -e 'p, task = ARGV; sha = Digest::SHA256.file(task).hexdigest; j = JSON.parse(File.read(p)); j["records"].each { |r| next unless r["role_execution_context"].is_a?(Hash); r["role_execution_context"]["task"] = File.expand_path(task); r["role_execution_context"]["task_sha256"] = sha }; File.write(p, JSON.pretty_generate(j))' "$ACK_REQUIRED_NOTICE_EVIDENCE" "$ACK_REQUIRED_NOTICE_TASK"
+ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["current_task"]=File.expand_path(ARGV[1]); y["artifacts"]["evidence_file"]=File.expand_path(ARGV[2]); File.write(p, YAML.dump(y))' "$ACK_REQUIRED_NOTICE_STATE" "$ACK_REQUIRED_NOTICE_TASK" "$ACK_REQUIRED_NOTICE_EVIDENCE"
+ORBIT_INSTANCE=lead-main "$CLI" notice add --task "$ACK_REQUIRED_NOTICE_TASK" --event implementation_complete --evidence "$ACK_REQUIRED_NOTICE_EVIDENCE" --json >/dev/null
+ORBIT_INSTANCE=reviewer-main "$CLI" notice add --task "$ACK_REQUIRED_NOTICE_TASK" --event review_complete --evidence "$ACK_REQUIRED_NOTICE_EVIDENCE" --json >/dev/null
+ORBIT_INSTANCE=tester-main "$CLI" notice add --task "$ACK_REQUIRED_NOTICE_TASK" --event test_complete --evidence "$ACK_REQUIRED_NOTICE_EVIDENCE" --json >/dev/null
+if "$CLI" audit --task "$ACK_REQUIRED_NOTICE_TASK" --evidence "$ACK_REQUIRED_NOTICE_EVIDENCE" --state "$ACK_REQUIRED_NOTICE_STATE" --json >"$TMPROOT/audit-required-notice-unacked.json"; then
+  printf 'FAIL audit ack-required open notice: command unexpectedly succeeded\n' >&2
+  exit 1
+fi
+json_assert 'audit blocks open completion notices when ack is required' "$TMPROOT/audit-required-notice-unacked.json" 'j["notice_summary"]["ack_required"] == true && j["notice_summary"]["unacked_events"].include?("implementation_complete") && j["notice_summary"]["unacked_events"].include?("review_complete") && j["notice_summary"]["unacked_events"].include?("test_complete") && j["blocking_findings"].any? { |f| f["source"] == "notice_summary.unacked_completion_notice" }'
 "$CLI" handoff --task "$IMPL_TASK" --evidence "$IMPL_EVIDENCE" --state .orbit/loop-state.yaml --output "$TMPROOT/implementation-handoff.json" --record-state --json >"$TMPROOT/implementation-handoff.stdout"
 json_assert 'handoff can write artifact and record it in state' "$TMPROOT/implementation-handoff.json" 'j["schema_version"] == "orbit-handoff-v1" && j["blocking_errors"].empty? && j["gate_summary"]["ready"] == true && j["gate_summary"]["evidence_levels"]["review"] == "outcome_quality" && j["gate_summary"]["evidence_levels"]["test"] == "real_path_test" && j["judgment_summary"]["review_judgment"]["present"] == true && j["judgment_summary"]["review_judgment"]["source"] == "latest_evidence_record" && j["judgment_summary"]["review_judgment"]["evidence_level"] == "outcome_quality" && j["judgment_summary"]["review_judgment"]["rule_application_summary"]["applied_checks_count"] == 1 && j["judgment_summary"]["test_judgment"]["present"] == true && j["judgment_summary"]["test_judgment"]["evidence_level"] == "real_path_test" && j["latest_gate_verdicts"]["review"]["status"] == "pass" && j["latest_gate_verdicts"]["review"]["evidence_boundary_summary"]["confirmed_count"] == 1 && j["latest_gate_verdicts"]["test"]["status"] == "pass" && j["latest_gate_verdicts"]["test"]["rule_application_summary"]["applied_checks_count"] == 1 && j["closure_checklist"].is_a?(Array) && j["closure_checklist"].any? { |c| c["item"] == "latest_test_verdict" } && j["known_gaps"].is_a?(Array) && j["readable_summary"]["next_action"] == "none" && j["worktree_safety_summary"]["status"] == "not_git"'
 yaml_assert 'handoff record-state stores artifact path' .orbit/loop-state.yaml 'j["artifacts"]["handoff_packet"] == File.expand_path(ARGV[2]) && j["history"].last["event"] == "handoff"' "$TMPROOT/implementation-handoff.json"
@@ -1075,6 +1125,7 @@ mkdir -p "$OVERRIDE_PROJECT"
   ruby --disable-gems -ryaml -e 'p=".orbit/instances.yaml"; y=YAML.safe_load(File.read(p), aliases: true); y["instances"]["coder-android"]=Marshal.load(Marshal.dump(y["instances"]["coder-main"])); y["instances"]["coder-android"]["env"]={"ORBIT_INSTANCE"=>"coder-android","ORBIT_ROLE"=>"coder"}; File.write(p, YAML.dump(y))'
   "$CLI" new-task --task-type docs_improvement --output task.yaml >/dev/null
   "$CLI" evidence init --output evidence.json >/dev/null
+  expect_failure 'team implementation evidence rejects role-name instance alias' env ORBIT_INSTANCE=coder "$CLI" evidence add --file evidence.json --kind implementation --status pass --summary "alias implementation" --task task.yaml
   expect_failure 'team same-role non-assigned coder fails without override' env ORBIT_INSTANCE=coder-android "$CLI" whoami --task task.yaml --json
   cat >"$TMPROOT/hook-non-assigned-coder-edit.json" <<JSON
 {"task":"$OVERRIDE_PROJECT/task.yaml","paths":["lib/feature.rb"],"live_probe":{"decision":"reuse"}}

@@ -65,7 +65,7 @@ This keeps the CLI simple: no interactive menu, no hidden default choice, no blo
 
 ```text
 Orbit instance has an unverified binding:
-- instance: coder
+- instance: coder-main
 - role: coder
 - configured transport: local
 - bound pane: w3:p4
@@ -74,12 +74,12 @@ Orbit instance has an unverified binding:
 
 No new agent was started.
 
-To replace Orbit's binding and start a new coder, run:
-  orbit start coder --force
+To replace Orbit's binding and start coder-main, run:
+  orbit start coder-main --force
 
 Risk:
 - The old external process may still exist.
-- Orbit will trust the newly started coder as the current instance.
+- Orbit will trust the newly started coder-main as the current instance.
 - This does not kill or clean up the old process.
 - You may temporarily have two agents with the same Orbit instance/role.
 - The old and new agents may both write evidence, gate leases, or loop state if the old one keeps running.
@@ -206,7 +206,7 @@ if binding is unverified/stale and force -> wake safe Herdr target or create ext
 3. 按 `.orbit/instances.yaml` 里的 command 手动启动，并设置身份：
 
    ```bash
-   ORBIT_INSTANCE=lead ORBIT_ROLE=lead <command-from-.orbit/instances.yaml>
+   ORBIT_INSTANCE=lead-main ORBIT_ROLE=lead <command-from-.orbit/instances.yaml>
    ```
 
 4. agent 启动后继续正常使用 Orbit protocol：`orbit whoami --json`、`orbit rules ...`、`orbit evidence ...`、`orbit validate`、`orbit audit`。
@@ -226,7 +226,7 @@ if binding is unverified/stale and force -> wake safe Herdr target or create ext
 
 ## Force concurrency and writes
 
-Forced replacement must be serialized per instance. Without this, two concurrent `orbit start coder --force` calls can both launch agents and race to write `instances.yaml`.
+Forced replacement must be serialized per instance. Without this, two concurrent `orbit start coder-main --force` calls can both launch agents and race to write `instances.yaml`.
 
 Required behavior:
 

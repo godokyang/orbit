@@ -133,8 +133,8 @@ rescue JSON::ParserError, ArgumentError
   nil
 end
 
-def hook_completion_notice_missing?(task, evidence)
-  completion_notice_summary(task, evidence)["missing_events"].any?
+def hook_completion_notice_summary(task, evidence, evidence_path)
+  completion_notice_summary(task, evidence, evidence_path: evidence_path)
 end
 
 def hook_intent_paths(intent)
@@ -210,9 +210,15 @@ def hook_result(subcommand, intent)
     end
   end
 
-  if subcommand == "pre-idle" && hook_completion_notice_missing?(task, evidence)
-    warnings << "missing_completion_notice"
-    recommended_action = "write_completion_notice"
+  if subcommand == "pre-idle"
+    notice_summary = hook_completion_notice_summary(task, evidence, evidence_path)
+    if notice_summary["missing_events"].any?
+      warnings << "missing_completion_notice"
+      recommended_action = "write_completion_notice"
+    elsif notice_summary["unacked_events"].any?
+      warnings << "unacked_completion_notice"
+      recommended_action = "ack_completion_notice"
+    end
   end
 
   {

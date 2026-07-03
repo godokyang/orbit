@@ -227,13 +227,13 @@ command: opencode
 第一次启动 lead agent 时，Orbit 会按配置通过 Herdr 创建缺失的 instance：
 
 ```bash
-orbit start lead
+orbit start lead-main
 ```
 
 如果已有 binding 但 Orbit 无法证明目标 pane 里有活 agent，`start` 会拒绝静态复用并提示你确认风险后使用 `--force`：
 
 ```bash
-orbit start lead --force
+orbit start lead-main --force
 ```
 
 然后把需求交给 lead agent。可以直接这样说：
@@ -381,9 +381,9 @@ pane 4: tester-agent    OpenCode
 可以手动在每个 pane 里启动 agent，也可以让 Orbit 生成启动计划：
 
 ```bash
-orbit start lead
-orbit start reviewer --dry-run --json
-orbit start tester --dry-run --json
+orbit start lead-main
+orbit start reviewer-main --dry-run --json
+orbit start tester-main --dry-run --json
 ```
 
 先在 `.orbit/instances.yaml` 里给每个 instance 配好 `command`，例如 `codex`、`claude` 或 `opencode`。缺失 binding 时 `start` 默认通过 Herdr 创建；后续如果已有 binding 但 Orbit 无法确认它仍然有效，`start` 会提示你使用 `--force` 重新启动并替换旧 binding。

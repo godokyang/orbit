@@ -799,6 +799,10 @@ ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases
 expect_failure 'validate fails on missing role_ref target' "$CLI" validate --json
 cp "$TMPROOT/instances.yaml.bak" .orbit/instances.yaml
 
+ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["instances"]["reviewer-main"]["binding"] ||= {}; y["instances"]["reviewer-main"]["binding"]["view"]={"min_columns"=>120}; File.write(p, YAML.dump(y))' .orbit/instances.yaml
+expect_failure 'validate fails when instance view is nested under binding' "$CLI" validate --json
+cp "$TMPROOT/instances.yaml.bak" .orbit/instances.yaml
+
 for pair in lead-main:lead reviewer-main:reviewer tester-main:tester; do
   instance=${pair%%:*}
   role=${pair##*:}
@@ -806,6 +810,7 @@ for pair in lead-main:lead reviewer-main:reviewer tester-main:tester; do
   test ! -s "$TMPROOT/whoami-$role.err"
   json_assert "whoami resolves $role" "$TMPROOT/whoami-$role.json" "j[\"resolved_role\"] == \"$role\" && j[\"instance\"] == \"$instance\" && j[\"resolved_instance\"] == \"$instance\" && j[\"role_ref\"] == \"$role\" && j[\"expected_command\"] == \"codex\" && j[\"herdr\"].is_a?(Hash) && !j.key?(\"transport_binding\") && j[\"conflicts\"].empty?"
 done
+expect_failure 'whoami rejects role-name alias when concrete instance key is required' env ORBIT_INSTANCE=lead ORBIT_ROLE=lead "$CLI" whoami --json
 env ORBIT_INSTANCE=reviewer-main ORBIT_ROLE=reviewer ORBIT_CLIENT=codex "$CLI" whoami --json >"$TMPROOT/whoami-reviewer-client.json"
 json_assert 'whoami exposes actual client from env' "$TMPROOT/whoami-reviewer-client.json" 'j["actual_client"] == "codex" && !j.key?("binding_status") && j["binding"] == "unbound"'
 expect_failure 'whoami fails on actual client mismatch' env ORBIT_INSTANCE=reviewer-main ORBIT_ROLE=reviewer ORBIT_CLIENT=opencode "$CLI" whoami --json

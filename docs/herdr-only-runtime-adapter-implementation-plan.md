@@ -104,13 +104,13 @@ Code/tests:
 
 Tests to add or flip:
 
-- `orbit start lead --transport herdr --json` fails with migration guidance.
-- `orbit start lead --transport local --json` fails with migration guidance.
-- `orbit start lead --allow-create --json` fails with migration guidance.
+- `orbit start lead-main --transport herdr --json` fails with migration guidance.
+- `orbit start lead-main --transport local --json` fails with migration guidance.
+- `orbit start lead-main --allow-create --json` fails with migration guidance.
 - `orbit dispatch --task ... --to coder --transport generic --json` fails with migration guidance.
 - `orbit dispatch --task ... --to coder --transport herdr --json` fails with migration guidance.
 - `orbit handoff ... --transport generic --json` fails with migration guidance.
-- `orbit bind-pane --instance coder --pane P --transport herdr --json` fails with migration guidance.
+- `orbit bind-pane --instance coder-main --pane P --transport herdr --json` fails with migration guidance.
 - Help no longer advertises removed flags.
 
 Parser requirement:

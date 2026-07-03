@@ -102,7 +102,7 @@ orbit instances status --json
 orbit classify-intent --text "按 Orbit 流程继续实现这个功能" --json
 orbit docs alias --id decision.active-design --path docs/open/active-design.md --json
 orbit docs check --json
-orbit start reviewer --dry-run --json
+orbit start reviewer-main --dry-run --json
 orbit new-task --implementation-authority reviewer --assigned-instance reviewer-main --task-type implementation_review --output task.yaml
 orbit rules resolve --task task.yaml --output .orbit/rules/current-resolution.json --json
 orbit rules print-context --task task.yaml --output .orbit/rules/current-context.json --json
@@ -131,7 +131,7 @@ orbit compact-evidence --task task.yaml --evidence .orbit/evidence.json --handof
 
 `orbit start` 只负责按 `.orbit/instances.yaml` 解析 instance、argv、env 和 cwd，并通过 Herdr adapter wake/create/reuse agent 或 dry-run 展示计划。它不替代 `whoami`、task contract 或 evidence。start plan 会输出 `context_preflight`，列出该 instance 在开始角色工作前应运行的 `whoami` / `rules resolve` / `rules print-context` 命令，以及必须读取的 common、role 和 task 规则文件；agent 启动后仍要读取这些 required files，不能只靠派单文字记忆公共处理规范。
 
-instance 默认是 `user_managed`：如果 reviewer/tester 已有 binding，Orbit 仍要通过 Herdr live probe 确认 agent 存活后才复用。`orbit instances status --json` 会输出每个 instance 的 `management`、`binding`、`liveness`、`availability` 和 `herdr`。缺少 binding 时，`start` 会默认创建配置中的 instance；已有 binding 但 liveness 不可信时，`start` 会提示用户使用 `--force` 替换。`orbit bind-pane --instance reviewer --pane ... --json` 只绑定 Herdr handle，不改变 role identity。
+instance 默认是 `user_managed`：如果 reviewer-main/tester-main 已有 binding，Orbit 仍要通过 Herdr live probe 确认 agent 存活后才复用。`orbit instances status --json` 会输出每个 instance 的 `management`、`binding`、`liveness`、`availability` 和 `herdr`。缺少 binding 时，`start` 会默认创建配置中的 instance；已有 binding 但 liveness 不可信时，`start` 会提示用户使用 `--force` 替换。`orbit bind-pane --instance reviewer-main --pane ... --json` 只绑定 Herdr handle，不改变 role identity。
 
 已有 Herdr pane binding 时，`orbit start` 不能只因为 binding 存在就认为 agent 可用。它应先检查绑定 pane 是否被 Herdr 识别为 agent：已识别时复用；未识别但 pane 可检查且看起来是空闲 shell prompt 时，在同一 pane 中自动执行 instance command 进行 wake；无法检查或 pane 看起来正在执行其他前台工作时 fail closed，返回 `needs_attention`，避免把 agent 命令盲打进未知进程。
 

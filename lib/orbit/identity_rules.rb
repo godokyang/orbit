@@ -242,16 +242,9 @@ def conflict(result, source, message)
   }
 end
 
-def find_instance(instances, roles, instance_name)
+def find_instance(instances, _roles, instance_name)
   return [nil, nil] unless instance_name
   return [instance_name, nil] if instances.key?(instance_name)
-
-  if instance_name.end_with?("-main")
-    alias_name = instance_name.delete_suffix("-main")
-    return [alias_name, alias_name] if instances.key?(alias_name)
-  end
-  main_name = "#{instance_name}-main"
-  return [main_name, main_name] if instances.key?(main_name)
 
   [nil, nil]
 end

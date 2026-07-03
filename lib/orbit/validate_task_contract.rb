@@ -86,6 +86,10 @@ def validate_instance_binding_field(result, source, instance_name, instance)
     validation_error(result, "project_config.instances.#{source}.binding.adapter", "Instance #{instance_name.inspect} binding.adapter must be herdr.")
   end
 
+  if binding.key?("view")
+    validation_error(result, "project_config.instances.#{source}.binding.view", "Instance #{instance_name.inspect} view must be a sibling of binding, not binding.view.")
+  end
+
   %w[workspace tab pane canonical_pane].each do |field|
     value = binding[field]
     next if value.nil? || value.is_a?(String)

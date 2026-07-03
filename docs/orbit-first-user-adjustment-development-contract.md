@@ -305,7 +305,7 @@ CLI 行为:
 
 ```yaml
 identity:
-  resolved_instance: reviewer
+  resolved_instance: reviewer-main
   resolved_role: reviewer
   role_ref: reviewer
   task_sha256: ""
@@ -351,7 +351,7 @@ CLI 行为:
 
 ```yaml
 role_execution_context:
-  instance: reviewer
+  instance: reviewer-main
   role_ref: reviewer
   role_config_sha256: ""
   rules_resolution_sha256: ""
@@ -518,7 +518,7 @@ CLI 行为:
 ```yaml
 gate_lease:
   gate: review
-  owner_instance: reviewer
+  owner_instance: reviewer-main
   task_sha256: ""
   evidence_revision: 3
   status: claimed

@@ -20,12 +20,19 @@
   "task_type": "slice_review",
   "task_file": "",
   "result_file": "",
-  "transport": {
-    "type": "",
-    "workspace_id": "",
-    "tab_label": "",
-    "pane_id": "",
-    "managed_by": ""
+  "delivery": {
+    "mode": "manual_artifact",
+    "runtime_adapter": "none",
+    "manual_artifact": {
+      "path": "",
+      "sha256": ""
+    },
+    "herdr": {
+      "workspace": "",
+      "tab": "",
+      "pane": "",
+      "canonical_pane": ""
+    }
   },
   "started_at": "",
   "completed_at": "",

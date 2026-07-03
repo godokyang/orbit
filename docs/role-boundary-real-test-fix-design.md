@@ -541,12 +541,12 @@ Notice 分两阶段落地：
 核心命令应避免命名成 `notify`，因为它暗示“发消息”。建议使用 notice：
 
 ```bash
-orbit notice add --task TASK --to ROLE [--to-instance INSTANCE] --event implementation_complete --evidence EVIDENCE --json
-orbit notice list --for ROLE --json
-orbit notice ack --id ID --json
+orbit notice add --task TASK --event implementation_complete --evidence EVIDENCE [--to-instance INSTANCE] --json
+orbit notice list --role ROLE --json
+orbit notice ack --role ROLE --id ID --json
 ```
 
-`notice add` 默认从 task `execution_contract.owner_instance` 派生 `to_instance`。如果用户显式传 `--to-instance`，它必须等于 `owner_instance`，否则 fail closed；Phase A 仍只写 role inbox，Phase B 才使用 `to_instance` 找 Herdr pane。
+`notice add` 默认从 task `execution_contract.owner_role` / `owner_instance` 派生收件方。completion 事件（`implementation_complete` / `review_complete` / `test_complete`）必须传 `--evidence`，并且该 evidence 中必须存在当前身份提交的对应 passing record。notice 绑定的是该完成 record 的稳定 fingerprint，不绑定会继续变化的 evidence manifest sha。如果用户显式传 `--to-instance`，它必须等于 `owner_instance`，否则 fail closed；Phase A 仍只写 role inbox，Phase B 才使用 `to_instance` 找 Herdr pane。
 
 推荐 notice 记录：
 
@@ -557,13 +557,19 @@ orbit notice ack --id ID --json
   "task": ".orbit/tasks/example.yaml",
   "task_sha256": "sha256...",
   "evidence_ref": ".orbit/evidence/example.json",
-  "evidence_sha256": "sha256...",
+  "evidence_record": {
+    "kind": "implementation",
+    "record_index": 3,
+    "record_created_at": "2026-07-03T10:17:58Z",
+    "source_message_id": "herdr:coder:implementation-pass",
+    "record_sha256": "sha256..."
+  },
   "from_role": "coder",
   "from_instance": "coder-main",
   "to_role": "lead",
   "to_instance": "lead-main",
   "event": "implementation_complete",
-  "status": "pending_ack",
+  "status": "open",
   "created_at": "2026-07-03T10:18:00Z",
   "delivery": {
     "attempted": false,
@@ -597,9 +603,11 @@ Gate/audit 判断的是 notice protocol，不是 Herdr surface/delivery：
 - `to_role` 是否等于 task `owner_role`。
 - `to_instance` 是否等于 task `owner_instance`；如果只写 role inbox，Phase B surfacing 不得执行。
 - `from_role` / `from_instance` 必须按 event-specific source contract 校验。
-- `task_sha256` / `evidence_sha256` 是否匹配。
-- notice 是否晚于对应 implementation/review/test pass。
-- notice 是否 `pending_ack` 或 `acked`，以及当前 task policy 是否要求 ack。
+- `task_sha256` 是否匹配。
+- `evidence_ref` 是否等于当前 audit / validate 使用的 evidence manifest 路径；同 task 的不同 evidence 分支不能复用 completion notice。
+- `evidence_record.record_sha256` 是否匹配当前 evidence 中对应的 latest implementation/review/test pass record；不要用会继续变化的 evidence manifest sha 作为完成 notice 的有效性条件。
+- notice 是否不早于对应 implementation/review/test pass。
+- notice 是否 `open` 或 `acked`，以及当前 task policy 是否要求 ack。
 
 Event-specific source contract：
 
@@ -614,7 +622,7 @@ Phase B 的 Herdr notice surfacing 规则：
 - Phase A 不声明 `notice.delivery` capability；Phase B 实现前，capability table 仍必须显示 protocol record only。
 - Herdr 把 notice summary surface 到 owner pane 前，必须走 `execution_contract.owner_instance` 的 live-confirmed Herdr binding。
 - `manual_artifact` 和 `explicit_override` 只能表示 delivery precondition / user override，不得把 `live_binding_confirmed` 或 deprecated alias `live_confirmed_for_delivery` 置为 true。
-- 非 Herdr 环境不提供官方 adapter；notice 仍然有效，owner 下次运行 `orbit notice list --for lead`、`orbit audit`、`orbit whoami --task` 时能看到。
+- 非 Herdr 环境不提供官方 adapter；notice 仍然有效，owner 下次运行 `orbit notice list --role lead --json`、`orbit audit`、`orbit whoami --task` 时能看到。
 - Herdr surfacing 失败不得让 notice 消失；只记录 `delivery.herdr.success=false` 和错误摘要。
 
 ### 9. Runtime contract alignment
@@ -700,25 +708,22 @@ Gate 不应直接判定：
 
 已有：
 
-- 没有真正的 hook 层。
+- `orbit hook pre-command|pre-edit|pre-evidence|pre-start|pre-idle --intent-json PATH|- --json` 已存在，缺少 `--intent-json` 时 fail closed。
+- `pre-command` 能阻止直接删除 `.orbit/runtime` / `.orbit/instances.yaml` 这类 runtime 状态。
+- `pre-edit` / `pre-evidence` 能复用 identity / execution contract 判定，拦截 owner 在 team 模式下直接编辑 production code，以及直接编辑 `.orbit` evidence/runtime。
+- `pre-start` 能基于 Orbit 自己采集的 Herdr instance status 提示 `pane_too_narrow` 和 force replacement cooldown；caller 传入的 liveness / geometry 只作为 ignored warning。
+- `pre-idle` 会读取当前 task/evidence，并通过 `completion_notice_summary(..., evidence_path:)` 检查 missing / cross-manifest / unacked completion notice，避免和 audit 的 notice 判定分叉。
 
 缺口：
 
-- `lib/orbit/core.rb` 的 help/dispatch 里没有 `orbit hook` 子命令。
-- 没有 `pre-command`、`pre-edit`、`pre-evidence`、`pre-start` entrypoint。
-- 没有 `pre-idle` / completion guard，不能在 agent 结束前提醒它写 completion notice。
-- 不能在 agent 准备编辑 production code 前按 `execution_contract` 拦截。
-- 不能在 agent 准备直接编辑 `.orbit/evidence*.json`、`.orbit/loop-state.yaml`、`.orbit/instances.yaml` 前拦截。
-- 不能在 repeated `start --force` 之前做 grace window / cooldown 提醒。
-- 不能在 role 完成 implementation/review/test 后检查是否已向 task owner 写 notice。
+- hook 只能在调用方接入对应 agent hook 时生效；没有接入的工具仍只能靠 CLI write-time enforcement 和 audit 兜底。
+- `pre-start` 的 view/layout repair 仍是提示型 recommended action，真正 resize/recreate view 的 Herdr UX 还需要单独落地。
+- `pre-idle` 只提示 completion notice 状态；是否自动 surface 到 Herdr pane 属于 Phase B，不改变 `.orbit/runtime/notices/` 权威 inbox。
 
 需要补：
 
-- 新增 `orbit hook pre-command|pre-edit|pre-evidence|pre-start|pre-idle --intent-json PATH|- --json`。
-- hook 缺少 `--intent-json` 时 fail closed，避免从外部上下文猜测 command/edit/evidence/start intent。
-- hook 只读 task、roles、instances、runtime replacement diagnostics 和 lock 状态，输出 `allow|warn|require_confirmation|block`。
-- hook 必须复用 CLI 内部的 identity / execution contract 判定函数，避免 hook 和 CLI 判断分叉。
-- hook 读取 `.orbit/runtime/notices/`，发现 completion pass 后缺 notice 时提示写 `orbit notice add`。
+- 继续补齐接入文档和 agent hook 示例，明确 pre-idle intent 必须带当前 `task` 和 `evidence`，否则无法证明 completion notice 属于当前 evidence manifest。
+- Phase B 如做 Herdr surfacing，只能 surface notice summary，不能把 pane delivery 当作 notice protocol 本身。
 
 ### Layer 2: CLI write-time enforcement
 
@@ -730,6 +735,8 @@ Gate 不应直接判定：
 - `evidence attach-rule` 当前至少要求 rule resolution schema 正确且 `valid == true`。
 - `start --force` 已有 per-instance lock，能阻止并发 force start 写坏状态。
 - `start --force` replacement diagnostic 已写到 `.orbit/runtime/instances/<name>.json`，没有继续污染 `instances.yaml`。
+- `orbit notice add|list|ack` 已写入 `.orbit/runtime/notices/` 权威 inbox；completion notice 需要绑定 task hash、当前 evidence manifest 路径和 stable evidence record fingerprint。
+- `notice ack` 已要求当前 identity 等于 notice recipient，非 owner instance 不能 ack。
 
 缺口：
 
@@ -743,8 +750,7 @@ Gate 不应直接判定：
 - `evidence attach-rule` parser 虽然接受 `--task`，但 attach 当下没有要求 `--task`，也没有校验 resolution task path/hash、resolved role 与 execution contract 是否匹配。
 - `rules resolve --output` 还没有 role/instance suffix overwrite guard。
 - `start --force` 只有并发 lock 和风险提示，没有 readiness grace window、cooldown、重复 force 阈值。
-- 没有 `orbit notice` 子命令，也没有 `.orbit/runtime/notices/` 权威 notice 存储。
-- completion/handoff 仍依赖 agent 自觉口头汇报、direct delivery 消息或手工 payload，不能被 gate/audit 稳定复核。
+- notice Phase A 只做 protocol record，不声明 Herdr delivery capability；Herdr surfacing 仍是 Phase B。
 
 需要补：
 
@@ -752,7 +758,7 @@ Gate 不应直接判定：
 - `evidence add --kind implementation|pass` 必须带 `--task`，并写 `role_execution_context`。
 - `attach-rule --task` 必须在写 manifest 前 fail closed。
 - `start --force` 写入/读取 recent replacement diagnostics，执行 cooldown 和 repeated force guard。
-- 增加 `orbit notice add|list|ack`，只写/读 `.orbit/runtime/notices/`；本轮不实现 Herdr notice surfacing。
+- Phase B 如果实现 Herdr notice surfacing，必须只对 owner_instance 的 live-confirmed Herdr binding 做 best-effort surface，失败只进入 observability。
 
 ### Layer 3: Gate / audit post-check
 
@@ -763,6 +769,8 @@ Gate 不应直接判定：
 - `validate` / `audit` 会复核 attached rule resolution 是否 valid、是否属于当前 task、resolved role 是否匹配旧 `target_role` / gate role。
 - `wait-gate` 已有 verdict arbitration，能阻止旧 task sha 的 stale verdict 关闭当前 gate。
 - `validate` / `audit` 已有 write policy、quality outcome、required questions、evidence level、release readiness 等后验检查。
+- `audit` 已输出 `notice_summary`，在 `completion_notice_policy.required` 下阻塞缺失 completion notice。
+- `notice_summary` 会复核 notice schema、task hash、当前 evidence manifest 路径、stable evidence record fingerprint、recipient owner、event-specific source、created_at，以及 `ack_required` 下的 unacked events。
 
 缺口：
 
@@ -772,8 +780,7 @@ Gate 不应直接判定：
 - 旧 task schema 仍被当前 validator 接受为 `orbit-task-v1 + target_role`，没有按 breaking change 要求 fail closed 并提示重新 init。
 - attached rule resolution 的 role mismatch 后验检查目前依赖旧 target_role，没有覆盖 solo/team execution contract。
 - 没有针对直接手工修改 `.orbit` 权威文件的后验 drift/audit 摘要；只能通过文件内容本身的 schema/字段检查发现一部分问题。
-- gate/audit 还没有 completion notice 检查；无法发现 coder/reviewer/tester 已完成但未向 owner 留下结构化 notice。
-- audit 也不区分 protocol notice 和 Herdr surfacing，当前没有可复核的 notice status / ack status。
+- `wait-gate` 是否也要阻塞 completion notice 仍需按 workflow 阶段决定；当前 completion notice 是 audit/done 前协议，不依赖 Herdr surfacing。
 
 需要补：
 
@@ -784,7 +791,6 @@ Gate 不应直接判定：
 - 对 implementation evidence 缺失 `role_execution_context` 或 author mismatch fail closed。
 - 对 non-assigned implementation instance 必须复核 `implementation_instance_override` 的 task hash、授权者、目标 instance 和过期时间。
 - audit 输出 direct-edit suspicion：manifest/state/task 缺少 CLI 写入痕迹或 hash 链断裂时给出 explicit finding。
-- gate/audit 增加 `notice_summary`，检查 required completion notice 是否存在、是否指向最新 evidence、是否发给 task owner、是否需要 ack。
 - gate/audit 不依赖 Herdr surfacing 成功；delivery 只作为 observability 字段。
 
 ## Implementation Order
@@ -850,22 +856,24 @@ Gate 不应直接判定：
 36. hook `pre-start` 在 readiness grace window 内阻止重复 `orbit start INSTANCE --force`。
 37. hook `pre-command` 阻止手工删除 `.orbit/instances.yaml` 或批量删除 `.orbit/runtime`，并提示使用 Orbit CLI 出口。
 38. hook `pre-command|pre-edit|pre-evidence|pre-start|pre-idle` 缺少 `--intent-json` 时 fail closed。
-39. `orbit notice add --event implementation_complete` 写入 `.orbit/runtime/notices/<owner-role>/...json`，记录 task/evidence hash、`from_instance: coder-main` 和 `to_instance: lead-main`。
+39. `orbit notice add --event implementation_complete` 写入 `.orbit/runtime/notices/<owner-role>/...json`，记录 task hash、stable evidence record fingerprint、`from_instance: coder-main` 和 `to_instance: lead-main`。
 40. `review_complete` / `test_complete` notice 按 reviewer/tester event-specific source contract 校验，不要求 `from_instance == assigned_instance`。
-41. `orbit notice list --for lead` 能列出 pending completion notice。
-42. `orbit notice ack --id ...` 能把 notice 标为 acked，且保留 ack role/instance/time。
+41. `orbit notice list --role lead --json` 能列出 open completion notice。
+42. `orbit notice ack --role lead --id ... --json` 能把 notice 标为 acked，且保留 ack role/instance/time。
 43. hook `pre-idle` 在 implementation/review/test pass 后缺 completion notice 时返回 `warn` 或 `require_confirmation`。
-44. audit 在 team task 中发现 latest implementation pass 缺 owner completion notice 时给出 `missing_completion_notice`。
-45. notice record 在没有 Herdr surfacing 时仍可创建、列出、ack；audit 不因为没有自动投递而失败。
-46. 如果未来启用 Herdr notice surfacing，surfacing 失败不影响 notice 存在；audit 只把 surfacing failure 作为 warning/observability。
-47. `whoami --task --json` 的 role preflight 示例和测试只使用 `binding` / `herdr` 主字段，不输出 `binding_status` 或 `transport_binding`。
-48. `orbit init --operation-mode team` 生成 coder/reviewer/tester instance 的 sibling Herdr `view` hint，不把 `view` 写进 `binding`。
-49. `orbit start INSTANCE --dry-run --json` 输出 planned workspace/tab/pane 和 view size policy。
-50. validator 接受 sibling `view.min_columns/min_rows`，并拒绝新 schema 中的 `binding.view`。
-51. `instances status --json` 输出 observed geometry、view policy、`too_narrow` 和 `resize_or_recreate_view` remediation。
-52. Herdr 报告 pane 过窄时，`hook pre-start` 或 `instances status` 输出 `too_narrow` / remediation，而不是让 agent 静默运行。
-53. hook `pre-*` 不接受 caller 提供的 Herdr live probe、manual payload、explicit pane override 或 `transport_binding` 作为 live proof；只认 Orbit CLI 自己采集的 Herdr probe。
-54. Phase A 不声明 `notice.delivery` capability；Phase B Herdr surfacing 只对 `owner_instance` 的 live-confirmed binding 发 best-effort pane message，失败只进 observability。
+44. hook `pre-idle` 和 audit 都拒绝跨 evidence manifest 复用 completion notice，并报告 `evidence_ref_mismatch` / `missing_completion_notice`。
+45. `completion_notice_policy.ack_required: true` 下，open notice 只能算 present，不能让 audit 通过；audit 必须输出 `unacked_completion_notice`。
+46. audit 在 team task 中发现 latest implementation pass 缺 owner completion notice 时给出 `missing_completion_notice`。
+47. notice record 在没有 Herdr surfacing 时仍可创建、列出、ack；audit 不因为没有自动投递而失败。
+48. 如果未来启用 Herdr notice surfacing，surfacing 失败不影响 notice 存在；audit 只把 surfacing failure 作为 warning/observability。
+49. `whoami --task --json` 的 role preflight 示例和测试只使用 `binding` / `herdr` 主字段，不输出 `binding_status` 或 `transport_binding`。
+50. `orbit init --operation-mode team` 生成 coder/reviewer/tester instance 的 sibling Herdr `view` hint，不把 `view` 写进 `binding`。
+51. `orbit start INSTANCE --dry-run --json` 输出 planned workspace/tab/pane 和 view size policy。
+52. validator 接受 sibling `view.min_columns/min_rows`，并拒绝新 schema 中的 `binding.view`。
+53. `instances status --json` 输出 observed geometry、view policy、`too_narrow` 和 `resize_or_recreate_view` remediation。
+54. Herdr 报告 pane 过窄时，`hook pre-start` 或 `instances status` 输出 `too_narrow` / remediation，而不是让 agent 静默运行。
+55. hook `pre-*` 不接受 caller 提供的 Herdr live probe、manual payload、explicit pane override 或 `transport_binding` 作为 live proof；只认 Orbit CLI 自己采集的 Herdr probe。
+56. Phase A 不声明 `notice.delivery` capability；Phase B Herdr surfacing 只对 `owner_instance` 的 live-confirmed binding 发 best-effort pane message，失败只进 observability。
 
 ## Upgrade Notes
 

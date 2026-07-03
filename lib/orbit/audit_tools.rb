@@ -676,13 +676,21 @@ def audit(args)
     )
   end
 
-  notice_summary = completion_notice_summary(task, evidence)
+  notice_summary = completion_notice_summary(task, evidence, evidence_path: evidence_path)
   if notice_summary["required"] && !notice_summary["missing_events"].empty?
     blocking_findings << audit_finding(
       "notice_summary.missing_completion_notice",
       "Task requires completion notice, but #{notice_summary["missing_events"].join(", ")} notice event(s) are missing.",
       "high",
       "Run `orbit notice add --task #{task_path} --event EVENT --evidence #{evidence_path} --json` from the completing role."
+    )
+  end
+  if notice_summary["ack_required"] && !notice_summary["unacked_events"].empty?
+    blocking_findings << audit_finding(
+      "notice_summary.unacked_completion_notice",
+      "Task requires owner acknowledgement for completion notice, but #{notice_summary["unacked_events"].join(", ")} notice event(s) are still open.",
+      "high",
+      "Run `orbit notice ack --role #{notice_summary["owner_role"]} --id NOTICE_ID --json` from #{notice_summary["owner_instance"]}."
     )
   end
 
