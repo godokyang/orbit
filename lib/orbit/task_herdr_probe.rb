@@ -4,21 +4,24 @@ def parse_start_args(args)
 
   options = {
     "instance" => instance,
-    "transport" => "local",
+    "adapter" => "herdr",
     "cwd" => Dir.pwd,
-    "allow_create" => false,
     "force" => false,
     "dry_run" => false,
-    "json" => false
+    "json" => false,
+    "layout" => "auto",
+    "min_cols" => 100,
+    "min_rows" => 24
   }
 
   until args.empty?
     arg = args.shift
     case arg
     when "--transport"
-      options["transport"] = option_value(args, "--transport")
+      option_value(args, "--transport")
+      usage_error("start --transport was removed. Herdr is the only automatic runtime adapter. For manual protocol usage, start the agent in a terminal with ORBIT_INSTANCE and ORBIT_ROLE set.")
     when /\A--transport=(.+)\z/
-      options["transport"] = Regexp.last_match(1)
+      usage_error("start --transport was removed. Herdr is the only automatic runtime adapter. For manual protocol usage, start the agent in a terminal with ORBIT_INSTANCE and ORBIT_ROLE set.")
     when "--cwd"
       options["cwd"] = option_value(args, "--cwd")
     when /\A--cwd=(.+)\z/
@@ -26,7 +29,19 @@ def parse_start_args(args)
     when "--dry-run"
       options["dry_run"] = true
     when "--allow-create"
-      options["allow_create"] = true
+      usage_error("start --allow-create was removed. Configured instances are created by default; use instance config to disable automatic launch when launch policy exists.")
+    when "--layout"
+      options["layout"] = option_value(args, "--layout")
+    when /\A--layout=(.+)\z/
+      options["layout"] = Regexp.last_match(1)
+    when "--min-cols"
+      options["min_cols"] = option_value(args, "--min-cols").to_i
+    when /\A--min-cols=(.+)\z/
+      options["min_cols"] = Regexp.last_match(1).to_i
+    when "--min-rows"
+      options["min_rows"] = option_value(args, "--min-rows").to_i
+    when /\A--min-rows=(.+)\z/
+      options["min_rows"] = Regexp.last_match(1).to_i
     when "--force"
       options["force"] = true
     when "--json"
@@ -36,7 +51,9 @@ def parse_start_args(args)
     end
   end
 
-  usage_error("start --transport must be local or herdr") unless %w[local herdr].include?(options["transport"])
+  usage_error("start --layout must be auto, same-tab, or new-tab") unless %w[auto same-tab new-tab].include?(options["layout"])
+  usage_error("start --min-cols must be positive") unless options["min_cols"].positive?
+  usage_error("start --min-rows must be positive") unless options["min_rows"].positive?
   options
 end
 
@@ -46,17 +63,17 @@ def start_plan(options)
   cwd = File.expand_path(options["cwd"])
   usage_error("Start cwd does not exist: #{cwd}") unless Dir.exist?(cwd)
   status = instance_status_entry(instance_key, instance, role_ref, role_def)
-  creation_policy = role_creation_policy(options["transport"])
+  creation_policy = role_creation_policy(options)
 
   {
     "schema_version" => "orbit-start-plan-v1",
+    "adapter" => "herdr",
     "project" => File.basename(Dir.pwd),
     "instance" => instance_key,
     "requested_instance" => options["instance"],
     "instance_alias" => instance_alias,
     "role_ref" => role_ref,
     "resolved_role" => role_def["role"] || role_ref,
-    "transport" => options["transport"],
     "cwd" => cwd,
     "argv" => argv,
     "client" => start_client_metadata(argv),
@@ -64,6 +81,7 @@ def start_plan(options)
     "context_preflight" => context_preflight_for(instance_key),
     "instance_status" => status,
     "creation_policy" => creation_policy,
+    "layout" => creation_policy["layout"],
     "force" => options["force"],
     "dry_run" => options["dry_run"]
   }.compact
@@ -124,7 +142,7 @@ def lead_transport_binding
   lead_key = find_instance(instances, roles, "lead").first || infer_instance_from_role(instances, roles, "lead")
   return {} unless lead_key && instances[lead_key].is_a?(Hash)
 
-  normalize_instance_transport(lead_key, instances[lead_key])["binding"] || {}
+  normalize_instance_binding(lead_key, instances[lead_key])
 rescue RuntimeError
   {}
 end
@@ -138,7 +156,7 @@ def herdr_same_level_view
   tab = lead_binding["tab"].to_s if tab.empty?
 
   workspace = non_empty_env("HERDR_WORKSPACE_ID", "HERDR_WORKSPACE", "HERDR_SPACE_ID", "HERDR_SPACE")
-  workspace = lead_binding["space"].to_s if workspace.empty?
+  workspace = lead_binding["workspace"].to_s if workspace.empty?
 
   strategy = if !tab.empty?
                "same_tab"
@@ -155,22 +173,161 @@ def herdr_same_level_view
     "source_pane" => source_pane,
     "tab" => tab,
     "workspace" => workspace,
-    "source" => "HERDR_* env or lead transport binding",
+    "source" => "HERDR_* env or lead Herdr binding",
     "fallback" => strategy == "fallback_default_view" || strategy == "source_pane_recorded"
   }
 end
 
-def role_creation_policy(transport)
+def numeric_field(hash, *keys)
+  keys.each do |key|
+    value = hash[key] if hash.is_a?(Hash)
+    return value.to_i if value.respond_to?(:to_i) && value.to_i.positive?
+  end
+  nil
+end
+
+def rect_dimensions(rect)
+  return nil unless rect.is_a?(Hash)
+
+  cols = numeric_field(rect, "cols", "columns", "width")
+  rows = numeric_field(rect, "rows", "height")
+  return nil unless cols && rows
+
+  { "cols" => cols, "rows" => rows }
+end
+
+def herdr_layout_probe(view, options)
+  minimum = {
+    "cols" => options["min_cols"],
+    "rows" => options["min_rows"]
+  }
+  probe = {
+    "source" => "herdr pane layout",
+    "minimum" => minimum,
+    "source_pane" => view["source_pane"],
+    "tab" => view["tab"],
+    "workspace" => view["workspace"],
+    "source_pane_size" => nil,
+    "projected_same_tab_size" => nil,
+    "existing_agent_panes_in_tab" => nil,
+    "inspectable" => false,
+    "same_tab_readable" => false
+  }
+
+  herdr_path = command_path("herdr")
+  return probe.merge("reason" => "herdr command not found") unless herdr_path
+
+  layout_stdout, layout_stderr, layout_status = Open3.capture3(herdr_path, "pane", "layout")
+  unless layout_status.success?
+    return probe.merge(
+      "reason" => "herdr pane layout failed",
+      "layout_result" => {
+        "success" => false,
+        "exit_status" => layout_status.exitstatus,
+        "stdout" => layout_stdout,
+        "stderr" => layout_stderr
+      }
+    )
+  end
+
+  parsed = JSON.parse(layout_stdout)
+  layout = parsed.dig("result", "layout") || parsed["layout"] || parsed.dig("result") || parsed
+  panes = Array(layout["panes"]).select { |entry| entry.is_a?(Hash) }
+  source_pane = view["source_pane"].to_s
+  pane_entry = panes.find { |entry| !source_pane.empty? && entry["pane_id"].to_s == source_pane }
+  pane_entry ||= panes.find { |entry| entry["focused"] == true }
+  pane_entry ||= panes.first
+  source_size = rect_dimensions(pane_entry && (pane_entry["rect"] || pane_entry["area"] || pane_entry))
+  source_size ||= rect_dimensions(layout["area"])
+  return probe.merge("reason" => "herdr pane layout did not include pane dimensions") unless source_size
+
+  layout_tab = layout["tab_id"].to_s
+  layout_workspace = layout["workspace_id"].to_s
+  tab = layout_tab.empty? ? view["tab"].to_s : layout_tab
+  workspace = layout_workspace.empty? ? view["workspace"].to_s : layout_workspace
+  probe["tab"] = tab unless tab.empty?
+  probe["workspace"] = workspace unless workspace.empty?
+
+  agent_count = nil
+  agent_stdout, _agent_stderr, agent_status = Open3.capture3(herdr_path, "agent", "list")
+  if agent_status.success?
+    agents_parsed = JSON.parse(agent_stdout)
+    agents = agents_parsed.dig("result", "agents") || agents_parsed["agents"] || []
+    agent_count = Array(agents).count do |entry|
+      entry.is_a?(Hash) &&
+        !entry["agent"].to_s.strip.empty? &&
+        (tab.empty? || entry["tab_id"].to_s == tab)
+    end
+  end
+
+  projected = {
+    "cols" => [source_size["cols"] / 2, 0].max,
+    "rows" => source_size["rows"]
+  }
+  same_tab_readable = projected["cols"] >= minimum["cols"] && projected["rows"] >= minimum["rows"]
+  probe.merge(
+    "source_pane_size" => source_size,
+    "projected_same_tab_size" => projected,
+    "existing_agent_panes_in_tab" => agent_count,
+    "inspectable" => true,
+    "same_tab_readable" => same_tab_readable,
+    "reason" => same_tab_readable ? "same-tab split remains above minimum readable size" : "same-tab split would be below minimum readable size"
+  )
+rescue JSON::ParserError => e
+  probe.merge("reason" => "could not parse Herdr layout JSON", "error" => e.message)
+end
+
+def role_creation_policy(options)
+  view = herdr_same_level_view
+  layout_mode = options["layout"] || "auto"
+  layout_probe = herdr_layout_probe(view, options)
+  unless view["fallback"]
+    view = view.merge(
+      "tab" => layout_probe["tab"].to_s.empty? ? view["tab"] : layout_probe["tab"],
+      "workspace" => layout_probe["workspace"].to_s.empty? ? view["workspace"] : layout_probe["workspace"]
+    )
+  end
+  requested_same_tab = layout_mode == "same-tab"
+  auto_same_tab = layout_mode == "auto" && !view["tab"].to_s.empty? && layout_probe["same_tab_readable"] == true
+  selected_layout = requested_same_tab || auto_same_tab ? "same_tab" : "new_tab"
+  blocked = requested_same_tab && layout_probe["same_tab_readable"] != true
+  reason = if layout_mode == "new-tab"
+             "new-tab layout was requested"
+           elsif selected_layout == "same_tab"
+             layout_probe["reason"]
+           elsif layout_mode == "same-tab"
+             layout_probe["reason"]
+           elsif view["tab"].to_s.empty?
+             "no Herdr tab was available; using a new tab"
+           else
+             "#{layout_probe["reason"]}; using a new tab"
+           end
   policy = {
     "reuse_first" => true,
-    "user_managed_requires_allow_create" => true,
+    "user_managed_requires_allow_create" => false,
+    "same_level_view" => view,
+    "layout" => {
+      "mode" => layout_mode,
+      "selected" => selected_layout,
+      "reason" => reason,
+      "minimum" => {
+        "cols" => options["min_cols"],
+        "rows" => options["min_rows"]
+      },
+      "source_pane_size" => layout_probe["source_pane_size"],
+      "projected_same_tab_size" => layout_probe["projected_same_tab_size"],
+      "existing_agent_panes_in_tab" => layout_probe["existing_agent_panes_in_tab"],
+      "workspace" => view["workspace"],
+      "tab" => view["tab"],
+      "inspectable" => layout_probe["inspectable"],
+      "blocked" => blocked
+    },
     "permission_setup" => {
       "required" => true,
       "mode" => "operator_or_client_specific",
       "summary" => "Before assigning tool work to a newly-created role, ensure the agent client has the required permissions or approval mode. Orbit records this requirement but does not silently bypass user approval."
     }
   }
-  policy["same_level_view"] = herdr_same_level_view if transport == "herdr"
   policy
 end
 
@@ -198,14 +355,14 @@ def start_client_metadata(argv)
 end
 
 def start_requires_reuse?(plan)
-  plan.dig("instance_status", "recommended_action") == "reuse"
+  plan.dig("instance_status", "binding") == "bound"
 end
 
 def herdr_bound_pane(plan)
-  transport = plan.dig("instance_status", "transport") || {}
-  return "" unless transport["kind"] == "herdr"
+  binding = plan.dig("instance_status", "herdr") || {}
+  return "" unless binding["adapter"] == "herdr"
 
-  transport.dig("binding", "pane").to_s
+  binding["canonical_pane"].to_s.empty? ? binding["pane"].to_s : binding["canonical_pane"].to_s
 end
 
 START_FORCE_RISKS = [
@@ -228,9 +385,7 @@ START_FORCE_RISKS = [
 ].freeze
 
 def start_force_command(plan)
-  command = ["orbit", "start", plan["requested_instance"] || plan["instance"], "--force"]
-  command += ["--transport", plan["transport"]] unless plan["transport"] == "local"
-  command
+  ["orbit", "start", plan["requested_instance"] || plan["instance"], "--force"]
 end
 
 def start_force_metadata(plan)
@@ -291,25 +446,21 @@ def start_in_progress_result(plan)
   )
 end
 
-def compact_transport_binding(transport)
-  binding = transport["binding"] || {}
-  health = transport["health"] || {}
+def compact_instance_binding(binding)
   {
-    "kind" => transport["kind"],
     "pane" => binding["pane"],
     "tab" => binding["tab"],
-    "space" => binding["space"],
-    "last_heartbeat" => health["last_heartbeat"],
-    "cwd" => health["cwd"],
-    "actual_client" => health["actual_client"]
+    "workspace" => binding["workspace"],
+    "canonical_pane" => binding["canonical_pane"],
+    "adapter" => binding["adapter"]
   }.compact
 end
 
 def write_start_replacement_diagnostic!(plan, status_after_start)
   return nil unless plan["force"]
 
-  previous_transport = plan.dig("instance_status", "transport") || {}
-  new_transport = status_after_start&.dig("transport") || {}
+  previous_binding = plan.dig("instance_status", "herdr") || {}
+  new_binding = status_after_start&.dig("herdr") || {}
   path = start_instance_runtime_path(plan["instance"])
   payload = {
     "schema_version" => "orbit-start-replacement-v1",
@@ -317,8 +468,8 @@ def write_start_replacement_diagnostic!(plan, status_after_start)
     "role" => plan["resolved_role"],
     "replaced_at" => Time.now.utc.iso8601,
     "reason" => "user_forced_start_replace",
-    "previous_binding" => compact_transport_binding(previous_transport),
-    "new_binding" => compact_transport_binding(new_transport),
+    "previous_binding" => compact_instance_binding(previous_binding),
+    "new_binding" => compact_instance_binding(new_binding),
     "risk" => START_FORCE_RISKS
   }
   write_file_atomically(path, "#{JSON.pretty_generate(payload)}\n")
@@ -331,15 +482,98 @@ def herdr_agent_list_for_pane(herdr_path, pane)
 
   parsed = JSON.parse(stdout)
   agents = parsed.dig("result", "agents") || parsed["agents"] || []
-  pane_ids = Array(pane).map(&:to_s)
-  agent = agents.find do |entry|
+  pane_ids = Array(pane).map(&:to_s).reject(&:empty?)
+  candidates = agents.select do |entry|
     entry.is_a?(Hash) &&
       pane_ids.include?(entry["pane_id"].to_s) &&
       !entry["agent"].to_s.strip.empty?
   end
-  [agent, { "success" => true, "stdout" => stdout, "stderr" => stderr, "exit_status" => status.exitstatus }]
+  candidates = candidates.uniq do |entry|
+    [
+      entry["pane_id"].to_s,
+      entry["agent"].to_s,
+      entry["agent_status"].to_s,
+      entry["cwd"].to_s,
+      entry["foreground_cwd"].to_s,
+      entry["project_root"].to_s
+    ]
+  end
+  result = {
+    "success" => true,
+    "stdout" => stdout,
+    "stderr" => stderr,
+    "exit_status" => status.exitstatus,
+    "candidate_count" => candidates.length,
+    "candidates" => candidates.map { |entry| compact_herdr_agent_entry(entry) }
+  }
+  [candidates.first, result]
 rescue JSON::ParserError => e
   [nil, { "success" => false, "stdout" => stdout.to_s, "stderr" => e.message, "exit_status" => status&.exitstatus }]
+end
+
+def compact_herdr_agent_entry(entry)
+  return {} unless entry.is_a?(Hash)
+
+  %w[agent agent_status pane_id tab_id workspace_id cwd foreground_cwd project_root].each_with_object({}) do |key, compact|
+    value = entry[key]
+    compact[key] = value unless value.nil? || value.to_s.empty?
+  end
+end
+
+def expanded_path_for_compare(path)
+  value = path.to_s.strip
+  return "" if value.empty?
+
+  File.expand_path(value)
+rescue StandardError
+  value
+end
+
+def herdr_agent_identity_checks(agent, plan)
+  checks = []
+  conflicts = []
+
+  expected_client = plan.dig("client", "expected_client").to_s.strip
+  actual_client = agent["agent"].to_s.strip
+  if expected_client.empty?
+    checks << { "check" => "client", "status" => "unavailable", "reason" => "expected_client_missing" }
+  elsif actual_client.empty?
+    checks << { "check" => "client", "status" => "unavailable", "expected" => expected_client, "reason" => "herdr_agent_missing" }
+  elsif actual_client == expected_client
+    checks << { "check" => "client", "status" => "pass", "expected" => expected_client, "actual" => actual_client }
+  else
+    conflicts << "client_mismatch"
+    checks << { "check" => "client", "status" => "fail", "expected" => expected_client, "actual" => actual_client, "reason" => "client_mismatch" }
+  end
+
+  expected_cwd = expanded_path_for_compare(plan["cwd"])
+  cwd_fields = %w[cwd foreground_cwd project_root].each_with_object([]) do |field, fields|
+    value = expanded_path_for_compare(agent[field])
+    fields << [field, value] unless value.empty?
+  end
+  if expected_cwd.empty?
+    checks << { "check" => "cwd", "status" => "unavailable", "reason" => "expected_cwd_missing" }
+  elsif cwd_fields.empty?
+    checks << { "check" => "cwd", "status" => "unavailable", "expected" => expected_cwd, "reason" => "herdr_cwd_missing" }
+  elsif cwd_fields.any? { |_field, value| value == expected_cwd }
+    checks << {
+      "check" => "cwd",
+      "status" => "pass",
+      "expected" => expected_cwd,
+      "actual" => cwd_fields.to_h
+    }
+  else
+    conflicts << "cwd_mismatch"
+    checks << {
+      "check" => "cwd",
+      "status" => "fail",
+      "expected" => expected_cwd,
+      "actual" => cwd_fields.to_h,
+      "reason" => "cwd_mismatch"
+    }
+  end
+
+  [conflicts.empty?, checks, conflicts]
 end
 
 def herdr_pane_info(herdr_path, pane)
@@ -429,14 +663,39 @@ def herdr_reuse_probe(plan, herdr_path = nil)
     "current_pane_get" => current_pane_result,
     "agent_list" => list_result
   }
+  if list_result["candidate_count"].to_i > 1
+    return probe.merge(
+      "agent_detected" => true,
+      "safe_to_wake" => false,
+      "decision" => "needs_attention",
+      "reason" => "duplicate_live_candidates",
+      "identity_checks" => [],
+      "identity_conflicts" => ["duplicate_live_candidates"]
+    )
+  end
   if agent
+    identity_ok, identity_checks, identity_conflicts = herdr_agent_identity_checks(agent, plan)
+    unless identity_ok
+      return probe.merge(
+        "agent_detected" => true,
+        "agent" => agent["agent"],
+        "agent_status" => agent["agent_status"],
+        "safe_to_wake" => false,
+        "decision" => "needs_attention",
+        "reason" => identity_conflicts.join(","),
+        "identity_checks" => identity_checks,
+        "identity_conflicts" => identity_conflicts
+      )
+    end
     return probe.merge(
       "agent_detected" => true,
       "agent" => agent["agent"],
       "agent_status" => agent["agent_status"],
       "safe_to_wake" => false,
       "decision" => "reuse",
-      "reason" => "bound pane already has a detected agent"
+      "reason" => "bound pane already has a detected agent",
+      "identity_checks" => identity_checks,
+      "identity_conflicts" => []
     )
   end
   return probe.merge(
@@ -497,7 +756,7 @@ def herdr_wake_adapter(plan, probe, executable = "herdr")
   ready_wait = herdr_start_ready_wait(plan)
   {
     "schema_version" => "orbit-herdr-wake-v1",
-    "transport" => "herdr",
+    "adapter" => "herdr",
     "pane" => pane,
     "command" => [executable, "pane", "run", pane, wake_command_text(plan)],
     "ready_wait" => ready_wait
@@ -507,7 +766,7 @@ end
 def self_wake_plan(plan, probe)
   {
     "schema_version" => "orbit-herdr-self-wake-v1",
-    "transport" => "herdr",
+    "adapter" => "herdr",
     "pane" => probe["canonical_pane"] || probe["pane"],
     "command" => wake_command_text(plan),
     "mode" => "exec_current_process"
@@ -515,12 +774,7 @@ def self_wake_plan(plan, probe)
 end
 
 def start_create_blocked?(plan, options)
-  return false if options["force"]
-
-  status = plan["instance_status"] || {}
-  status["management"] == "user_managed" &&
-    status["recommended_action"] == "ask_user_or_bind" &&
-    !options["allow_create"]
+  plan.dig("layout", "blocked") == true
 end
 
 def print_start_blocked(plan)
@@ -528,8 +782,9 @@ def print_start_blocked(plan)
   warn "- instance: #{plan["instance"]}"
   warn "- role: #{plan["resolved_role"]}"
   warn "- management: #{plan.dig("instance_status", "management")}"
-  warn "- binding_status: #{plan.dig("instance_status", "binding_status")}"
-  warn "- reason: user_managed instances require an existing healthy binding or --allow-create"
+  warn "- binding: #{plan.dig("instance_status", "binding")}"
+  warn "- layout: #{plan.dig("layout", "selected")}" if plan.dig("layout", "selected")
+  warn "- reason: #{plan.dig("layout", "reason") || "start could not create or wake a Herdr agent automatically"}"
 end
 
 def print_start_reuse(plan)
@@ -537,7 +792,7 @@ def print_start_reuse(plan)
   puts "- instance: #{plan["instance"]}"
   puts "- role: #{plan["resolved_role"]}"
   puts "- action: reuse"
-  binding = plan.dig("instance_status", "transport", "binding") || {}
+  binding = plan.dig("instance_status", "herdr") || {}
   puts "- pane: #{binding["pane"]}" unless binding["pane"].to_s.empty?
   probe = plan["reuse_probe"] || {}
   puts "- agent: #{probe["agent"]}" if probe["agent"]
@@ -593,19 +848,15 @@ def herdr_start_argv(plan, executable = "herdr", label = nil)
   ]
 
   view = plan.dig("creation_policy", "same_level_view") || {}
-  if !view["tab"].to_s.empty?
+  selected_layout = plan.dig("layout", "selected")
+  if selected_layout == "same_tab" && !view["tab"].to_s.empty?
     argv += ["--tab", view["tab"]]
   elsif !view["workspace"].to_s.empty?
     argv += ["--workspace", view["workspace"]]
   end
 
-  argv + [
-    "--split",
-    "right",
-    "--no-focus",
-    "--",
-    *plan["argv"]
-  ]
+  argv += ["--split", "right"] if selected_layout == "same_tab"
+  argv + ["--no-focus", "--", *plan["argv"]]
 end
 
 def herdr_agent_name_taken?(stderr)
@@ -625,23 +876,27 @@ def herdr_retry_label(plan)
 end
 
 def herdr_start_ready_wait(plan)
-  return nil unless plan["argv"].first == "codex"
+  matches = {
+    "codex" => "OpenAI Codex|›",
+    "claude" => "Claude Code|>",
+    "opencode" => "opencode|>"
+  }
+  match = matches[plan["argv"].first.to_s]
+  return nil unless match
 
   {
     "mode" => "output_match",
-    "match" => "OpenAI Codex|›",
+    "match" => match,
     "timeout_ms" => 10_000
   }
 end
 
 def attach_start_adapter_plan(plan)
-  return plan unless plan["transport"] == "herdr"
-
   ready_wait = herdr_start_ready_wait(plan)
   plan.merge(
-    "adapter" => {
+    "herdr_start" => {
       "schema_version" => "orbit-herdr-start-v1",
-      "transport" => "herdr",
+      "adapter" => "herdr",
       "command" => herdr_start_argv(plan),
       "label" => plan["instance"],
       "env" => plan["env"],
@@ -654,7 +909,7 @@ def print_start_human_plan(plan)
   puts "Orbit start plan:"
   puts "- instance: #{plan["instance"]}"
   puts "- role: #{plan["resolved_role"]}"
-  puts "- transport: #{plan["transport"]}"
+  puts "- adapter: herdr"
   puts "- cwd: #{plan["cwd"]}"
   puts "- command: #{plan["argv"].join(" ")}"
   unless plan["env"].empty?
@@ -676,6 +931,8 @@ def print_start_human_plan(plan)
     permission_setup = plan.dig("creation_policy", "permission_setup")
     puts "  - permission_setup: #{permission_setup["summary"]}" if permission_setup
   end
+  layout = plan["layout"] || {}
+  puts "- layout: #{layout["selected"]}" if layout["selected"]
   puts "- action: dry-run" if plan["dry_run"]
 end
 
@@ -685,16 +942,24 @@ def print_herdr_start_human_result(result)
     puts "Started Orbit instance:"
     puts "- instance: #{result["instance"]}"
     puts "- role: #{result["resolved_role"]}"
-    puts "- transport: #{result["transport"]}"
+    puts "- adapter: herdr"
     puts "- cwd: #{result["cwd"]}"
     puts "- pane: #{adapter_result["pane_id"] || "unknown"}"
     if adapter_result["ready_wait"]
-      puts "- ready: #{adapter_result["ready_wait"]["success"] ? "pass" : "fail"}"
+      ready = adapter_result["ready_wait"]
+      ready_status = if ready["success"] == true
+                       "pass"
+                     elsif ready["success"] == false
+                       "fail"
+                     else
+                       ready["status"] || "unverified"
+                     end
+      puts "- ready: #{ready_status}"
     end
   else
     warn "Orbit start failed:"
     warn "- instance: #{result["instance"]}"
-    warn "- transport: #{result["transport"]}"
+    warn "- adapter: herdr"
     warn "- stderr: #{adapter_result["stderr"]}" if adapter_result["stderr"] && !adapter_result["stderr"].empty?
     if adapter_result["ready_wait"] && !adapter_result["ready_wait"]["success"]
       warn "- ready wait stderr: #{adapter_result["ready_wait"]["stderr"]}"

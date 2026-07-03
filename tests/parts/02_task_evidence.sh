@@ -31,11 +31,12 @@ DECOMP_TASK="$TMPROOT/decomposition-task.yaml"
 "$CLI" new-task --target-role lead --task-type decomposition --output "$DECOMP_TASK" >/dev/null
 yaml_assert 'new-task initializes decomposition contract fields' "$DECOMP_TASK" 'j["implementation_plan"]["required"] == true && j["decomposition"]["child_slices"].is_a?(Array) && j["decomposition"]["aggregate_outcome_metrics"].is_a?(Array) && j["final_aggregate_audit"]["required"] == true'
 expect_failure 'new-task refuses overwrite' "$CLI" new-task --target-role reviewer --task-type implementation_review --output "$TASK"
-"$CLI" dispatch --task "$TASK" --to reviewer --json >"$TMPROOT/dispatch-generic.json"
-json_assert 'dispatch generic emits manual delivery payload with context preflight' "$TMPROOT/dispatch-generic.json" 'j["schema_version"] == "orbit-dispatch-v1" && j["action"] == "manual_delivery_required" && j["transport"] == "generic" && j["to_instance"] == "reviewer" && j["resolved_role"] == "reviewer" && j["task"] == File.expand_path(ARGV[2]) && j["message"].include?("orbit whoami --json") && !j["message"].include?("orbit whoami --task") && j["message"].include?("orbit rules print-context --task") && j["message"].include?("context_preflight.required_files") && j["context_preflight"]["commands"].include?(["orbit", "whoami", "--json"]) && j["context_preflight"]["required_files"].any? { |r| r["path"] == "SKILL.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "references/runtime/guide.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "references/runtime/quality-outcome-and-review.md" } && j["checks"]["target_role_matches"] == true' "$TASK"
-"$CLI" dispatch --task "$TASK" --to reviewer --transport herdr --pane pane-123 --reply-to observer-pane --dry-run --json >"$TMPROOT/dispatch-herdr-dry-run.json"
+"$CLI" dispatch --task "$TASK" --to reviewer --manual-payload --json >"$TMPROOT/dispatch-generic.json"
+json_assert 'dispatch manual payload emits delivery artifact with context preflight' "$TMPROOT/dispatch-generic.json" 'j["schema_version"] == "orbit-dispatch-v1" && j["action"] == "manual_delivery_required" && j["delivery"]["mode"] == "manual_artifact" && j["delivery"]["runtime_adapter"] == "none" && j["to_instance"] == "reviewer" && j["resolved_role"] == "reviewer" && j["task"] == File.expand_path(ARGV[2]) && j["message"].include?("orbit whoami --json") && !j["message"].include?("orbit whoami --task") && j["message"].include?("orbit rules print-context --task") && j["message"].include?("context_preflight.required_files") && j["context_preflight"]["commands"].include?(["orbit", "whoami", "--json"]) && j["context_preflight"]["required_files"].any? { |r| r["path"] == "SKILL.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "references/runtime/guide.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "references/runtime/quality-outcome-and-review.md" } && j["checks"]["target_role_matches"] == true' "$TASK"
+expect_failure 'dispatch rejects removed transport flag with migration guidance' "$CLI" dispatch --task "$TASK" --to reviewer --transport herdr --json
+"$CLI" dispatch --task "$TASK" --to reviewer --pane pane-123 --reply-to observer-pane --dry-run --json >"$TMPROOT/dispatch-herdr-dry-run.json"
 json_assert 'dispatch herdr dry-run emits adapter plan with explicit reply-to' "$TMPROOT/dispatch-herdr-dry-run.json" 'j["action"] == "dry_run" && j["reply_to"] == "observer-pane" && j["reply_to_source"] == "explicit_option" && j["message"].include?("reply-to:observer-pane") && j["adapter"]["schema_version"] == "orbit-herdr-dispatch-v1" && !j["adapter"].key?("submit_delay_seconds") && j["adapter"]["commands"] == [["herdr", "pane", "run", "pane-123", j["message"]]] && j["adapter"]["commands"][0][4].include?(File.expand_path(ARGV[2]))' "$TASK"
-HERDR_PANE_ID=lead-reply-pane "$CLI" dispatch --task "$TASK" --to reviewer --transport herdr --pane pane-123 --dry-run --json >"$TMPROOT/dispatch-herdr-env-reply-to.json"
+HERDR_PANE_ID=lead-reply-pane "$CLI" dispatch --task "$TASK" --to reviewer --pane pane-123 --dry-run --json >"$TMPROOT/dispatch-herdr-env-reply-to.json"
 json_assert 'dispatch herdr reply-to defaults to current Herdr pane' "$TMPROOT/dispatch-herdr-env-reply-to.json" 'j["reply_to"] == "lead-reply-pane" && j["reply_to_source"] == "HERDR_PANE_ID" && j["message"].include?("reply-to:lead-reply-pane")'
 cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
 #!/bin/sh
@@ -45,7 +46,7 @@ printf '%s\n' '---' >>"$ORBIT_FAKE_HERDR_DISPATCH_ARGS"
 printf 'sent:%s\n' "$3"
 HERDR
 chmod +x "$TMPROOT/fakebin/herdr"
-ORBIT_FAKE_HERDR_DISPATCH_ARGS="$TMPROOT/fake-herdr-dispatch-args.txt" PATH="$TMPROOT/fakebin:$PATH" "$CLI" dispatch --task "$TASK" --to reviewer --transport herdr --pane pane-123 --json >"$TMPROOT/dispatch-herdr-real.json"
+ORBIT_FAKE_HERDR_DISPATCH_ARGS="$TMPROOT/fake-herdr-dispatch-args.txt" PATH="$TMPROOT/fakebin:$PATH" "$CLI" dispatch --task "$TASK" --to reviewer --pane pane-123 --json >"$TMPROOT/dispatch-herdr-real.json"
 json_assert 'dispatch herdr sends through adapter' "$TMPROOT/dispatch-herdr-real.json" 'j["action"] == "sent" && j["adapter_result"]["success"] == true && j["adapter_result"]["commands"].length == 1 && j["adapter_result"]["commands"].all? { |c| c["success"] }'
 ruby --disable-gems -e 'actual=File.read(ARGV[0]).lines.map(&:chomp); sep=actual.index("---"); first=actual[0...sep]; message=first[3..].join("\n"); abort(actual.inspect) unless first[0,3] == ["pane","run","pane-123"] && message.include?(File.expand_path(ARGV[1])) && message.include?("kind:request")' "$TMPROOT/fake-herdr-dispatch-args.txt" "$TASK"
 pass 'dispatch herdr submits message through pane run adapter'
@@ -55,12 +56,32 @@ printf 'transport denied\n' >&2
 exit 42
 HERDR
 chmod +x "$TMPROOT/fakebin/herdr"
-if PATH="$TMPROOT/fakebin:$PATH" "$CLI" dispatch --task "$TASK" --to reviewer --transport herdr --pane pane-123 --json >"$TMPROOT/dispatch-herdr-fail.json" 2>"$TMPROOT/dispatch-herdr-fail.err"; then
+if PATH="$TMPROOT/fakebin:$PATH" "$CLI" dispatch --task "$TASK" --to reviewer --pane pane-123 --json >"$TMPROOT/dispatch-herdr-fail.json" 2>"$TMPROOT/dispatch-herdr-fail.err"; then
   printf 'FAIL dispatch herdr failure: command unexpectedly succeeded\n' >&2
   exit 1
 fi
-json_assert 'dispatch herdr failure exits with fallback payload' "$TMPROOT/dispatch-herdr-fail.json" 'j["action"] == "failed" && j["adapter_result"]["success"] == false && j["fallback"]["transport"] == "generic" && j["fallback"]["action"] == "manual_delivery_required" && j["fallback"]["message"].include?(File.expand_path(ARGV[2]))' "$TASK"
-expect_failure 'dispatch herdr requires pane' "$CLI" dispatch --task "$TASK" --to reviewer --transport herdr --json
+json_assert 'dispatch herdr failure exits with fallback payload' "$TMPROOT/dispatch-herdr-fail.json" 'j["action"] == "failed" && j["adapter_result"]["success"] == false && j["fallback"]["delivery"] == "manual_artifact" && j["fallback"]["action"] == "manual_delivery_required" && j["fallback"]["message"].include?(File.expand_path(ARGV[2]))' "$TASK"
+"$CLI" bind-pane --instance reviewer --pane dispatch-live-pane --json >"$TMPROOT/dispatch-bind-reviewer.json"
+cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
+#!/bin/sh
+case "$1 $2" in
+  "agent list")
+    printf '{"result":{"agents":[{"pane_id":"dispatch-live-pane","agent":"codex"}]}}\n'
+    ;;
+  *)
+    printf 'unexpected herdr args: %s\n' "$*" >&2
+    exit 1
+    ;;
+esac
+HERDR
+chmod +x "$TMPROOT/fakebin/herdr"
+if PATH="$TMPROOT/fakebin:$PATH" "$CLI" dispatch --task "$TASK" --to reviewer --dry-run --json >"$TMPROOT/dispatch-unknown-status.json" 2>"$TMPROOT/dispatch-unknown-status.err"; then
+  printf 'FAIL dispatch unknown agent status: command unexpectedly succeeded\n' >&2
+  exit 1
+fi
+grep -q 'target_state_unknown' "$TMPROOT/dispatch-unknown-status.err"
+pass 'dispatch refuses live binding when Herdr agent status is unknown'
+expect_failure 'dispatch requires live binding without pane override' "$CLI" dispatch --task "$TASK" --to reviewer --json
 expect_failure 'dispatch rejects unknown target instance' "$CLI" dispatch --task "$TASK" --to missing --json
 
 mkdir -p docs
@@ -788,16 +809,11 @@ expect_failure 'audit rejects missing evidence option value' "$CLI" audit --task
 json_assert 'validate includes loop state and trust level' "$TMPROOT/valid-task-evidence-state.json" 'j["valid"] == true && j["checked"].include?("state") && j["trust_level"]["mode"] == "audit_only"'
 "$CLI" handoff --task "$TASK" --state "$TMPROOT/review-done-state.yaml" --evidence "$REVIEW_JUDGMENT_EVIDENCE" --json >"$TMPROOT/handoff-valid.json" 2>"$TMPROOT/handoff-valid.err"
 test ! -s "$TMPROOT/handoff-valid.err"
-json_assert 'handoff outputs valid packet' "$TMPROOT/handoff-valid.json" 'j["schema_version"] == "orbit-handoff-v1" && j["target_role"] == "reviewer" && j["current_phase"] == "done" && j["required_action"] == "none" && j["next_action"] == "none" && j["blocking_errors"].empty? && j["validation_summary"]["valid"] == true && j["audit_summary"]["done_ready"] == true && j["tools_summary"]["preferred_transport"].is_a?(String) && j["transport_profile"]["selected"] == "generic" && j["transport_profile"]["payload"]["required_action"] == "none" && j["rule_packs"].any? { |p| p["category"] == "review" && p["id"] == "brooks-review" } && j["rule_packs"].any? { |p| p["category"] == "audit" && p["id"] == "orbit-drift" } && j["rule_resolution_summary"]["present"] == true && j["rule_resolution_summary"]["valid"] == true && j["rule_resolution_summary"]["resolved_role"] == "reviewer" && j["judgment_summary"]["review_judgment"]["present"] == true && j["closure_checklist"].is_a?(Array) && j["readable_summary"]["next_action"] == "none" && j["evidence_summary"]["records"] >= 1'
-ruby --disable-gems -ryaml -e 'p=ARGV[0]; y={"schema_version"=>"orbit-tools-config-v1","transport_profiles"=>{"generic"=>{"handoff"=>{"format"=>"json","delivery"=>"manual"}},"herdr"=>{"fallback"=>"generic","handoff"=>{"format"=>"json","delivery"=>"pane.message"}}},"preference"=>{"handoff"=>"herdr"}}; File.write(p, YAML.dump(y))' .orbit/tools.yaml
-"$CLI" handoff --task "$TASK" --state "$TMPROOT/review-done-state.yaml" --evidence "$REVIEW_JUDGMENT_EVIDENCE" --transport generic --json >"$TMPROOT/handoff-generic-transport.json"
-json_assert 'handoff outputs generic transport payload' "$TMPROOT/handoff-generic-transport.json" 'j["required_action"] == "none" && j["transport_profile"]["requested"] == "generic" && j["transport_profile"]["selected"] == "generic" && j["transport_profile"]["fallback_used"] == false && j["transport_profile"]["payload"]["delivery"] == "manual"'
-"$CLI" handoff --task "$TASK" --state "$TMPROOT/review-done-state.yaml" --evidence "$REVIEW_JUDGMENT_EVIDENCE" --transport herdr --json >"$TMPROOT/handoff-herdr-transport.json"
-json_assert 'handoff outputs herdr transport or generic fallback payload' "$TMPROOT/handoff-herdr-transport.json" 'j["required_action"] == "none" && j["transport_profile"]["requested"] == "herdr" && ((j["transport_profile"]["selected"] == "herdr" && j["transport_profile"]["payload"]["delivery"] == "pane.message") || (j["transport_profile"]["selected"] == "generic" && j["transport_profile"]["fallback_used"] == true))'
-ruby --disable-gems -ryaml -e 'p=ARGV[0]; y={"schema_version"=>"orbit-tools-config-v1","transport_profiles"=>{"generic"=>{"handoff"=>{"format"=>"json","delivery"=>"manual"}}}}; File.write(p, YAML.dump(y))' .orbit/tools.yaml
-"$CLI" handoff --task "$TASK" --state "$TMPROOT/review-done-state.yaml" --evidence "$REVIEW_JUDGMENT_EVIDENCE" --transport herdr --json >"$TMPROOT/handoff-missing-profile-fallback.json"
-json_assert 'handoff falls back when transport profile is missing' "$TMPROOT/handoff-missing-profile-fallback.json" 'j["required_action"] == "none" && j["transport_profile"]["requested"] == "herdr" && j["transport_profile"]["selected"] == "generic" && j["transport_profile"]["fallback_used"] == true && j["transport_profile"]["reason"].include?("not configured")'
-expect_failure 'handoff rejects missing transport option value' "$CLI" handoff --task "$TASK" --state "$TMPROOT/review-done-state.yaml" --evidence "$REVIEW_JUDGMENT_EVIDENCE" --transport --json
+json_assert 'handoff outputs valid packet' "$TMPROOT/handoff-valid.json" 'j["schema_version"] == "orbit-handoff-v1" && j["target_role"] == "reviewer" && j["current_phase"] == "done" && j["required_action"] == "none" && j["next_action"] == "none" && j["blocking_errors"].empty? && j["validation_summary"]["valid"] == true && j["audit_summary"]["done_ready"] == true && j["tools_summary"]["runtime_adapter"].is_a?(String) && j["tools_summary"]["manual_payload_available"] == true && j["delivery"]["mode"] == "manual_artifact" && j["delivery"]["runtime_adapter"] == "none" && j["delivery"]["payload"]["required_action"] == "none" && j["rule_packs"].any? { |p| p["category"] == "review" && p["id"] == "brooks-review" } && j["rule_packs"].any? { |p| p["category"] == "audit" && p["id"] == "orbit-drift" } && j["rule_resolution_summary"]["present"] == true && j["rule_resolution_summary"]["valid"] == true && j["rule_resolution_summary"]["resolved_role"] == "reviewer" && j["judgment_summary"]["review_judgment"]["present"] == true && j["closure_checklist"].is_a?(Array) && j["readable_summary"]["next_action"] == "none" && j["evidence_summary"]["records"] >= 1'
+ruby --disable-gems -ryaml -e 'p=ARGV[0]; y={"schema_version"=>"orbit-tools-config-v1","delivery_profiles"=>{"manual"=>{"format"=>"json","delivery"=>"manual"}},"preference"=>{"handoff"=>"manual"}}; File.write(p, YAML.dump(y))' .orbit/tools.yaml
+"$CLI" handoff --task "$TASK" --state "$TMPROOT/review-done-state.yaml" --evidence "$REVIEW_JUDGMENT_EVIDENCE" --json >"$TMPROOT/handoff-manual-delivery.json"
+json_assert 'handoff outputs manual delivery payload' "$TMPROOT/handoff-manual-delivery.json" 'j["required_action"] == "none" && j["delivery"]["mode"] == "manual_artifact" && j["delivery"]["selected"] == "manual" && j["delivery"]["payload"]["delivery"] == "manual"'
+expect_failure 'handoff rejects removed transport flag' "$CLI" handoff --task "$TASK" --state "$TMPROOT/review-done-state.yaml" --evidence "$REVIEW_JUDGMENT_EVIDENCE" --transport generic --json
 INVALID_HANDOFF_TASK="$TMPROOT/invalid-handoff-task.yaml"
 cp "$TASK" "$INVALID_HANDOFF_TASK"
 ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y.delete("target_role"); File.write(p, YAML.dump(y))' "$INVALID_HANDOFF_TASK"
@@ -879,4 +895,3 @@ MISMATCH_TASK="$TMPROOT/task-mismatch.yaml"
 ruby --disable-gems -e 'File.write(ARGV[0], "schema_version: orbit-task-v1\nproject: project\ntarget_role: tester\n")' "$MISMATCH_TASK"
 expect_failure 'whoami fails on task target mismatch' env ORBIT_INSTANCE=reviewer "$CLI" whoami --json --task "$MISMATCH_TASK"
 expect_failure 'whoami fails on missing task file conflict' env ORBIT_INSTANCE=reviewer "$CLI" whoami --json --task "$TMPROOT/missing.yaml"
-

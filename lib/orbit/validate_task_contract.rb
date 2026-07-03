@@ -68,24 +68,29 @@ def validate_instance_management_field(result, source, instance_name, instance)
   end
 end
 
-def validate_instance_transport_field(result, source, instance_name, transport)
-  return if transport.nil?
+def validate_instance_binding_field(result, source, instance_name, instance)
+  if instance.key?("transport")
+    validation_error(result, "project_config.instances.#{source}.transport", "Instance #{instance_name.inspect} uses removed transport schema. #{INSTANCE_SCHEMA_REMOVED_TRANSPORT_MESSAGE}")
+  end
 
-  unless transport.is_a?(Hash)
-    validation_error(result, "project_config.instances.#{source}.transport", "Instance #{instance_name.inspect} transport must be a mapping.")
+  binding = instance["binding"]
+  return if binding.nil?
+
+  unless binding.is_a?(Hash)
+    validation_error(result, "project_config.instances.#{source}.binding", "Instance #{instance_name.inspect} binding must be a mapping.")
     return
   end
 
-  kind = transport["kind"].to_s
-  unless kind.empty? || ALLOWED_INSTANCE_TRANSPORTS.include?(kind)
-    validation_error(result, "project_config.instances.#{source}.transport.kind", "Instance #{instance_name.inspect} transport.kind must be one of #{ALLOWED_INSTANCE_TRANSPORTS.join("|")}.")
+  adapter = binding["adapter"].to_s
+  unless adapter.empty? || adapter == "herdr"
+    validation_error(result, "project_config.instances.#{source}.binding.adapter", "Instance #{instance_name.inspect} binding.adapter must be herdr.")
   end
 
-  %w[binding health].each do |field|
-    value = transport[field]
-    next if value.nil? || value.is_a?(Hash)
+  %w[workspace tab pane canonical_pane].each do |field|
+    value = binding[field]
+    next if value.nil? || value.is_a?(String)
 
-    validation_error(result, "project_config.instances.#{source}.transport.#{field}", "Instance #{instance_name.inspect} transport.#{field} must be a mapping when present.")
+    validation_error(result, "project_config.instances.#{source}.binding.#{field}", "Instance #{instance_name.inspect} binding.#{field} must be a string when present.")
   end
 end
 
@@ -132,7 +137,7 @@ def validate_project_config(result)
 
     validate_instance_command(result, name, instance["command"])
     validate_instance_management_field(result, name, name, instance)
-    validate_instance_transport_field(result, name, name, instance["transport"])
+    validate_instance_binding_field(result, name, name, instance)
 
     role_def = role_ref && roles[role_ref]
     resolved_role = role_def.is_a?(Hash) ? (role_def["role"] || role_ref) : nil

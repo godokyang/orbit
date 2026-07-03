@@ -23,9 +23,10 @@ def parse_handoff_args(args)
     when /\A--evidence=(.+)\z/
       options["evidence"] = Regexp.last_match(1)
     when "--transport"
-      options["transport"] = option_value(args, "--transport")
+      option_value(args, "--transport")
+      usage_error("handoff --transport was removed. Handoff is an Orbit protocol packet; use the delivery.manual_artifact payload for manual delivery.")
     when /\A--transport=(.+)\z/
-      options["transport"] = Regexp.last_match(1)
+      usage_error("handoff --transport was removed. Handoff is an Orbit protocol packet; use the delivery.manual_artifact payload for manual delivery.")
     when "--output"
       options["output"] = option_value(args, "--output")
     when /\A--output=(.+)\z/
@@ -420,7 +421,8 @@ def tools_summary
   doctor = tools_doctor_packet
   {
     "health" => doctor["health"],
-    "preferred_transport" => doctor["preferred_transport"],
+    "runtime_adapter" => doctor["runtime_adapter"],
+    "manual_payload_available" => doctor["manual_payload_available"],
     "findings_count" => doctor["findings"].length,
     "available" => doctor["detected"].each_with_object({}) do |tool, memo|
       memo[tool["name"]] = tool["available"]
@@ -442,17 +444,15 @@ rescue RuntimeError => e
   [{}, path, e.message]
 end
 
-def default_generic_transport_profile
+def default_manual_delivery_profile
   {
-    "handoff" => {
-      "format" => "json",
-      "delivery" => "manual"
-    }
+    "format" => "json",
+    "delivery" => "manual"
   }
 end
 
-def configured_transport_profiles(config)
-  profiles = config["transport_profiles"]
+def configured_delivery_profiles(config)
+  profiles = config["delivery_profiles"]
   return {} unless profiles.is_a?(Hash)
 
   profiles.select { |_name, profile| profile.is_a?(Hash) }
@@ -475,48 +475,32 @@ def tool_available?(name, detected_by_name)
   tool.is_a?(Hash) && tool["available"] == true
 end
 
-def resolve_transport_profile(requested_transport)
+def resolve_delivery_profile
   config, config_path, config_error = load_tools_config
-  configured_profiles = configured_transport_profiles(config)
-  profiles = { "generic" => default_generic_transport_profile }.merge(configured_profiles)
-  requested = requested_transport || configured_handoff_preference(config) || "generic"
-  detected_by_name = detect_tools.to_h { |tool| [tool["name"], tool] }
-  selected = requested
-  reason = nil
-  fallback_used = false
-
+  configured_profiles = configured_delivery_profiles(config)
+  profiles = { "manual" => default_manual_delivery_profile }.merge(configured_profiles)
+  selected = configured_handoff_preference(config) || "manual"
   unless profiles.key?(selected)
-    reason = "Transport profile #{selected.inspect} is not configured; using generic."
-    selected = "generic"
-    fallback_used = true
+    selected = "manual"
   end
-
-  unless tool_available?(selected, detected_by_name)
-    reason = "Transport #{selected.inspect} is unavailable; using generic."
-    selected = "generic"
-    fallback_used = true
-  end
-
-  profile = profiles.fetch(selected, default_generic_transport_profile)
+  profile = profiles.fetch(selected, default_manual_delivery_profile)
   {
-    "requested" => requested,
+    "mode" => "manual_artifact",
+    "runtime_adapter" => "none",
+    "payload_format" => profile["format"] || "json",
     "selected" => selected,
-    "fallback_used" => fallback_used,
     "source" => config_path || "builtin",
     "config_error" => config_error,
-    "reason" => reason,
     "profile" => profile
   }.compact
 end
 
-def transport_handoff_payload(resolution, task_path, state_path, evidence_path, next_action)
+def manual_handoff_payload(resolution, task_path, state_path, evidence_path, next_action)
   profile = resolution["profile"].is_a?(Hash) ? resolution["profile"] : {}
-  handoff_config = profile["handoff"].is_a?(Hash) ? profile["handoff"] : {}
   {
-    "schema_version" => "orbit-transport-payload-v1",
-    "transport" => resolution["selected"],
-    "format" => handoff_config["format"] || "json",
-    "delivery" => handoff_config["delivery"] || handoff_config["action"] || "manual",
+    "schema_version" => "orbit-manual-delivery-payload-v1",
+    "format" => profile["format"] || resolution["payload_format"] || "json",
+    "delivery" => profile["delivery"] || profile["action"] || "manual",
     "task" => task_path,
     "state" => state_path,
     "evidence" => evidence_path,
@@ -659,8 +643,8 @@ def handoff(args)
 
   current_phase = state.is_a?(Hash) ? state["phase"] : nil
   next_action = required_action_for_phase(current_phase, blocking_errors)
-  transport_profile = resolve_transport_profile(options["transport"])
-  transport_profile["payload"] = transport_handoff_payload(transport_profile, task_path, state_path, evidence_path, next_action)
+  delivery = resolve_delivery_profile
+  delivery["payload"] = manual_handoff_payload(delivery, task_path, state_path, evidence_path, next_action)
   latest_gate_verdicts = latest_gate_verdicts_for_handoff(evidence, current_task_sha256)
   known_gaps = known_gaps_for_handoff(evidence, audit_warnings)
   runtime_summary = handoff_runtime_summary(evidence)
@@ -680,7 +664,7 @@ def handoff(args)
     "validation_summary" => validation_summary(validation),
     "audit_summary" => audit_summary(current_phase, validation, audit_blocking, audit_warnings),
     "tools_summary" => tools_summary,
-    "transport_profile" => transport_profile,
+    "delivery" => delivery,
     "rule_packs" => rule_packs_for_context(target_role, task.is_a?(Hash) ? task["task_type"] : nil, include_audit: true),
     "rule_resolution_summary" => rule_resolution_summary(evidence, evidence_path),
     "gate_summary" => task.is_a?(Hash) && evidence.is_a?(Hash) ? required_gate_summary(task, evidence, task_sha256: current_task_sha256) : nil,

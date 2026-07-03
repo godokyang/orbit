@@ -83,7 +83,7 @@ HELP = <<~HELP
     orbit audit --task PATH --state PATH --evidence PATH [--handoff PATH] [--compact-summary PATH] --json
     orbit init [--force]
     orbit instances status --json
-    orbit bind-pane --instance NAME --pane PANE [--transport NAME] [--tab TAB] [--space SPACE] --json
+    orbit bind-pane --instance NAME --pane PANE [--tab TAB] [--workspace WORKSPACE] [--canonical-pane PANE] --json
     orbit classify-intent --text TEXT --json
     orbit compact-evidence --task PATH --evidence PATH [--handoff PATH] [--output PATH] --json
     orbit docs alias --id ID --path PATH [--registry PATH] --json
@@ -95,11 +95,11 @@ HELP = <<~HELP
     orbit evidence waive --file PATH --waiver PATH --json
     orbit evidence attach-rule --file PATH --rule-resolution PATH
     orbit evidence show --file PATH --json
-    orbit handoff --task PATH --state PATH --evidence PATH [--transport NAME] [--output PATH] [--record-state] --json
-    orbit dispatch --task PATH --to INSTANCE [--transport generic|herdr] [--pane PANE] [--reply-to PANE] [--dry-run] --json
+    orbit handoff --task PATH --state PATH --evidence PATH [--output PATH] [--record-state] --json
+    orbit dispatch --task PATH --to INSTANCE [--pane PANE] [--reply-to PANE] [--manual-payload] [--dry-run] --json
     orbit rules resolve --json [--task PATH] [--role ROLE] [--instance NAME] [--output PATH]
     orbit rules print-context --json [--task PATH] [--role ROLE] [--instance NAME] [--output PATH]
-    orbit start INSTANCE [--transport local|herdr] [--cwd PATH] [--allow-create] [--force] [--dry-run] [--json]
+    orbit start INSTANCE [--cwd PATH] [--layout auto|same-tab|new-tab] [--force] [--dry-run] [--json]
     orbit state progress --message TEXT [--evidence PATH] [--state PATH]
     orbit state start --task PATH [--owner-role ROLE] [--state PATH]
     orbit state transition --to PHASE [--evidence PATH] [--reason TEXT] [--state PATH]
@@ -113,7 +113,7 @@ HELP = <<~HELP
 
   Commands:
     audit       审计 task、evidence 和 loop state 的一致性。
-    bind-pane   绑定 transport pane 到 Orbit instance。
+    bind-pane   绑定 Herdr pane 到 Orbit instance。
     classify-intent  根据用户请求输出 Orbit workflow 默认策略。
     compact-evidence  生成 durable evidence summary，不复制 transient runtime artifacts。
     dispatch    生成或投递 task 给指定 agent instance。
@@ -126,7 +126,7 @@ HELP = <<~HELP
     rules       解析本轮默认规则、项目规则、task 规则和 rule packs。
     start        根据 instances.yaml 启动或预览 agent instance。
     state        读取或管理 Orbit loop state。
-    tools        检测当前环境可用的 transport 和执行工具。
+    tools        检测 Herdr runtime adapter、手动 artifact 和执行工具。
     validate    校验 Orbit config、task、evidence 和 state 文件。
     wait-gate   检查 task required gates 当前是否满足。
     whoami      解析运行时 role identity。
@@ -171,7 +171,7 @@ COMMAND_HELP = {
   HELP
   "dispatch" => <<~HELP,
     Usage:
-      orbit dispatch --task PATH --to INSTANCE [--transport generic|herdr] [--pane PANE] [--reply-to PANE] [--dry-run] --json
+      orbit dispatch --task PATH --to INSTANCE [--pane PANE] [--reply-to PANE] [--manual-payload] [--dry-run] --json
 
     Builds a machine-readable task dispatch packet for an agent instance.
 
@@ -181,16 +181,16 @@ COMMAND_HELP = {
       --json            Emit the dispatch packet/result as JSON.
 
     Options:
-      --transport NAME  generic or herdr. Defaults to generic.
-      --pane PANE       Herdr pane id for --transport herdr.
+      --pane PANE       Repair/override Herdr pane id. Normal delivery uses the target instance binding.
       --reply-to PANE   Pane id to place in the herdr-msg reply-to header.
+      --manual-payload  Emit a manual delivery artifact instead of sending through Herdr.
       --dry-run         Print the dispatch plan without sending.
 
     Notes:
-      generic transport produces a payload for manual or external delivery.
-      herdr transport sends text to an existing agent pane and presses Enter.
+      Herdr is the only official direct delivery adapter.
+      Manual payloads are artifacts; they do not prove delivery.
       Completion should be collected from structured evidence and wait-gate;
-      Herdr agent-status is only a transport hint.
+      Herdr agent-status is only runtime availability context.
   HELP
   "classify-intent" => <<~HELP,
     Usage:
@@ -240,7 +240,7 @@ COMMAND_HELP = {
   HELP
   "handoff" => <<~HELP,
     Usage:
-      orbit handoff --task PATH --state PATH --evidence PATH [--transport NAME] [--output PATH] [--record-state] --json
+      orbit handoff --task PATH --state PATH --evidence PATH [--output PATH] [--record-state] --json
 
     Builds a machine-readable handoff packet from task, state, evidence, audit,
     tool discovery, and rule-pack context.
@@ -252,7 +252,6 @@ COMMAND_HELP = {
       --json           Emit machine-readable handoff packet.
 
     Options:
-      --transport NAME  Transport profile to use. Defaults to generic/fallback.
       --output PATH     Write the handoff packet to PATH.
       --record-state    Record --output path into loop state artifacts.
 
@@ -304,7 +303,7 @@ COMMAND_HELP = {
   HELP
   "start" => <<~HELP,
     Usage:
-      orbit start INSTANCE [--transport local|herdr] [--cwd PATH] [--allow-create] [--force] [--dry-run] [--json]
+      orbit start INSTANCE [--cwd PATH] [--layout auto|same-tab|new-tab] [--force] [--dry-run] [--json]
 
     Starts or previews an agent instance from .orbit/instances.yaml.
 
@@ -312,9 +311,8 @@ COMMAND_HELP = {
       INSTANCE         Instance name from .orbit/instances.yaml.
 
     Options:
-      --transport NAME  local or herdr. Defaults to local.
       --cwd PATH        Working directory for the agent. Defaults to current directory.
-      --allow-create    Allow creating a user_managed instance with no healthy binding.
+      --layout MODE     auto, same-tab, or new-tab. Defaults to auto.
       --force           Start anyway when an existing binding cannot be proven alive.
       --dry-run         Print the command/env/cwd plan without starting the agent.
       --json            Emit the launch plan or launch result as JSON.
@@ -322,6 +320,7 @@ COMMAND_HELP = {
     Notes:
       command is executed as argv, not through a shell string.
       Dry-run is the recommended way to audit instance command/env wiring.
+      Herdr is required for automatic create/wake/reuse.
       When an instance already has a binding, start only reuses a live-detected
       agent. If the binding cannot be proven alive, it exits with needs_force.
       --force replaces Orbit's current binding but does not kill old processes.

@@ -788,7 +788,6 @@ def detect_tools
   shell_path = shell && !shell.empty? && File.executable?(shell) ? shell : nil
   shell_path ||= "/bin/sh" if File.executable?("/bin/sh")
   herdr_path = command_path("herdr")
-  tmux_path = command_path("tmux")
   git_path = command_path("git")
   ci_env = ci_environment
 
@@ -803,16 +802,9 @@ def detect_tools
     detected_tool(
       "herdr",
       !herdr_path.nil?,
-      %w[agent.start pane.message pane.capture review.request],
+      %w[agent.start pane.message pane.capture direct.dispatch],
       herdr_path ? nil : "command not found",
       "path" => herdr_path
-    ),
-    detected_tool(
-      "tmux",
-      !tmux_path.nil?,
-      %w[pane.message pane.capture session.manage],
-      tmux_path ? nil : "command not found",
-      "path" => tmux_path
     ),
     detected_tool(
       "ci",
@@ -831,6 +823,137 @@ def detect_tools
   ]
 end
 
+def compact_herdr_pane_info(info)
+  return {} unless info.is_a?(Hash)
+
+  %w[pane_id tab_id workspace_id pane tab workspace cwd foreground_cwd].each_with_object({}) do |key, compact|
+    value = info[key]
+    compact[key] = value unless value.nil? || value.to_s.empty?
+  end
+end
+
+def compact_tool_command_result(result)
+  return {} unless result.is_a?(Hash)
+
+  compact = {}
+  %w[success exit_status reason].each do |key|
+    compact[key] = result[key] if result.key?(key)
+  end
+  stderr = result["stderr"].to_s.strip
+  compact["stderr"] = stderr unless stderr.empty?
+  compact
+end
+
+def herdr_current_pane_diagnostic(herdr_path)
+  env_pane = ENV["HERDR_PANE_ID"].to_s.strip
+  return { "available" => false, "reason" => "herdr_unavailable" } unless herdr_path
+  return { "available" => false, "reason" => "HERDR_PANE_ID_not_set" } if env_pane.empty?
+
+  info, result = herdr_pane_info(herdr_path, env_pane)
+  {
+    "available" => result["success"] == true,
+    "env_pane" => env_pane,
+    "pane" => compact_herdr_pane_info(info),
+    "command" => compact_tool_command_result(result)
+  }
+end
+
+def configured_herdr_binding_diagnostics(herdr_path)
+  roles, instances = load_project_instance_config_for_cli[0, 2]
+  Array(instances).each_with_object([]) do |(name, instance), diagnostics|
+    next diagnostics unless instance.is_a?(Hash)
+
+    binding = normalize_instance_binding(name, instance)
+    pane = binding["canonical_pane"].to_s.empty? ? binding["pane"].to_s : binding["canonical_pane"].to_s
+    next diagnostics if pane.empty?
+
+    entry = {
+      "instance" => name,
+      "configured" => binding,
+      "lookup_pane" => pane
+    }
+    if herdr_path
+      info, result = herdr_pane_info(herdr_path, pane)
+      entry["exists"] = result["success"] == true
+      entry["canonical_pane"] = info["pane_id"].to_s unless info.nil? || info["pane_id"].to_s.empty?
+      entry["pane"] = compact_herdr_pane_info(info)
+      entry["command"] = compact_tool_command_result(result)
+    else
+      entry["exists"] = nil
+      entry["reason"] = "herdr_unavailable"
+    end
+    diagnostics << entry
+  end
+rescue RuntimeError => e
+  [{ "error" => e.message }]
+end
+
+def herdr_agent_state_authority_diagnostic(herdr_path)
+  authority = {
+    "codex" => "screen_manifest",
+    "claude" => "screen_manifest",
+    "opencode" => "unknown"
+  }
+  result = {
+    "source" => herdr_path ? "herdr_agent_list_plus_orbit_client_rules" : "orbit_client_rules",
+    "authority" => authority
+  }
+  return result unless herdr_path
+
+  stdout, stderr, status = Open3.capture3(herdr_path, "agent", "list")
+  result["command"] = { "success" => status.success?, "exit_status" => status.exitstatus }
+  result["command"]["stderr"] = stderr.strip unless stderr.strip.empty?
+  if status.success?
+    parsed = JSON.parse(stdout)
+    agents = parsed.dig("result", "agents") || parsed["agents"] || []
+    result["agents_seen"] = agents.select { |entry| entry.is_a?(Hash) }
+                                  .map { |entry| entry["agent"].to_s }
+                                  .reject(&:empty?)
+                                  .uniq
+  end
+  result
+rescue JSON::ParserError => e
+  result.merge("command" => { "success" => false, "stderr" => e.message })
+end
+
+def process_info_contains_inner_tmux?(info)
+  processes = Array(info["foreground_processes"]).select { |entry| entry.is_a?(Hash) }
+  processes.any? do |process|
+    [process["name"], process["argv0"], Array(process["argv"]).first].any? do |value|
+      File.basename(value.to_s).match?(/\A(?:tmux|screen)\z/)
+    end
+  end
+end
+
+def herdr_inner_tmux_diagnostic(herdr_path, current_pane_diagnostic)
+  env_tmux = !ENV["TMUX"].to_s.empty?
+  diagnostic = {
+    "detected" => env_tmux,
+    "sources" => env_tmux ? ["TMUX"] : []
+  }
+  return diagnostic unless herdr_path && current_pane_diagnostic["available"]
+
+  pane = current_pane_diagnostic.dig("pane", "pane_id").to_s
+  pane = current_pane_diagnostic["env_pane"].to_s if pane.empty?
+  info, result = herdr_pane_process_info(herdr_path, pane)
+  process_tmux = result["success"] == true && process_info_contains_inner_tmux?(info)
+  diagnostic["detected"] ||= process_tmux
+  diagnostic["sources"] << "herdr_pane_process_info" if process_tmux
+  diagnostic["pane_process_info"] = compact_tool_command_result(result)
+  diagnostic
+end
+
+def herdr_diagnostics(herdr_path)
+  current_pane = herdr_current_pane_diagnostic(herdr_path)
+  {
+    "runtime_adapter" => herdr_path ? "herdr" : "unavailable",
+    "current_pane" => current_pane,
+    "configured_bindings" => configured_herdr_binding_diagnostics(herdr_path),
+    "client_integration_authority" => herdr_agent_state_authority_diagnostic(herdr_path),
+    "inner_tmux" => herdr_inner_tmux_diagnostic(herdr_path, current_pane)
+  }
+end
+
 def tools_detect_packet
   {
     "schema_version" => "orbit-tools-v1",
@@ -843,6 +966,7 @@ end
 def tools_doctor_packet
   detected = detect_tools
   by_name = detected.to_h { |tool| [tool["name"], tool] }
+  herdr_diag = herdr_diagnostics(by_name.fetch("herdr")["path"])
   findings = []
 
   unless by_name.fetch("local_shell")["available"]
@@ -853,13 +977,19 @@ def tools_doctor_packet
     }
   end
 
-  %w[herdr tmux ci].each do |name|
-    next if by_name.fetch(name)["available"]
-
+  unless by_name.fetch("herdr")["available"]
     findings << {
       "severity" => "warning",
-      "source" => "tools.#{name}",
-      "message" => "#{name} is unavailable; generic JSON/file handoff remains valid."
+      "source" => "tools.herdr",
+      "message" => "herdr is unavailable; automatic runtime adapter features are unavailable, but manual protocol usage and JSON/file handoff artifacts remain valid."
+    }
+  end
+
+  unless by_name.fetch("ci")["available"]
+    findings << {
+      "severity" => "warning",
+      "source" => "tools.ci",
+      "message" => "CI environment variables are not set; CI artifact collection is unavailable, but manual JSON/file handoff artifacts remain valid."
     }
   end
 
@@ -871,6 +1001,14 @@ def tools_doctor_packet
     }
   end
 
+  if herdr_diag.dig("inner_tmux", "detected")
+    findings << {
+      "severity" => "warning",
+      "source" => "tools.herdr.inner_tmux",
+      "message" => "A nested tmux/screen session was detected; Herdr remains the runtime adapter, but pane control may target the outer Herdr pane."
+    }
+  end
+
   health = if findings.any? { |finding| finding["severity"] == "error" }
              "fail"
            elsif findings.any? { |finding| finding["severity"] == "warning" }
@@ -879,20 +1017,19 @@ def tools_doctor_packet
              "pass"
            end
 
-  preferred_transport = if by_name.fetch("herdr")["available"]
-                          "herdr"
-                        elsif by_name.fetch("tmux")["available"]
-                          "tmux"
-                        else
-                          "generic"
-                        end
-
   {
     "schema_version" => "orbit-tools-doctor-v1",
     "project" => File.basename(Dir.pwd),
     "generated_at" => Time.now.utc.iso8601,
     "health" => health,
-    "preferred_transport" => preferred_transport,
+    "runtime_adapter" => by_name.fetch("herdr")["available"] ? "herdr" : "unavailable",
+    "manual_payload_available" => true,
+    "agent_state_authority" => {
+      "codex" => "screen_manifest",
+      "claude" => "screen_manifest",
+      "opencode" => "unknown"
+    },
+    "herdr_diagnostics" => herdr_diag,
     "detected" => detected,
     "findings" => findings
   }

@@ -171,7 +171,7 @@ def infer_instance_from_role(instances, roles, role_name)
 end
 
 ALLOWED_INSTANCE_MANAGEMENT = %w[user_managed orbit_managed].freeze
-ALLOWED_INSTANCE_TRANSPORTS = %w[generic herdr local].freeze
+INSTANCE_SCHEMA_REMOVED_TRANSPORT_MESSAGE = "transport.* instance schema is no longer supported; rerun orbit init or update instances.yaml to binding.adapter: herdr."
 
 def instance_management(instance)
   value = instance["management"].to_s.strip
@@ -184,49 +184,64 @@ def validate_instance_management!(instance_name, instance)
   management
 end
 
-def normalize_instance_transport(instance_name, instance)
-  transport = instance["transport"] || {}
-  usage_error("Instance #{instance_name.inspect} transport must be a mapping when present.") unless transport.is_a?(Hash)
+def old_transport_schema_error!(instance_name, instance)
+  return unless instance.key?("transport")
 
-  kind = transport["kind"].to_s.strip
-  kind = "local" if kind.empty?
-  usage_error("Instance #{instance_name.inspect} transport.kind must be one of #{ALLOWED_INSTANCE_TRANSPORTS.join("|")}.") unless ALLOWED_INSTANCE_TRANSPORTS.include?(kind)
+  usage_error("Instance #{instance_name.inspect} uses removed transport schema. #{INSTANCE_SCHEMA_REMOVED_TRANSPORT_MESSAGE}")
+end
 
-  binding = transport["binding"] || {}
-  health = transport["health"] || {}
-  usage_error("Instance #{instance_name.inspect} transport.binding must be a mapping when present.") unless binding.is_a?(Hash)
-  usage_error("Instance #{instance_name.inspect} transport.health must be a mapping when present.") unless health.is_a?(Hash)
+def normalize_instance_binding(instance_name, instance)
+  old_transport_schema_error!(instance_name, instance)
+  binding = instance["binding"] || {}
+  usage_error("Instance #{instance_name.inspect} binding must be a mapping when present.") unless binding.is_a?(Hash)
 
+  adapter = binding["adapter"].to_s.strip
+  adapter = "herdr" if adapter.empty?
+  usage_error("Instance #{instance_name.inspect} binding.adapter must be herdr.") unless adapter == "herdr"
+
+  pane = binding["pane"].to_s
+  canonical_pane = binding["canonical_pane"].to_s
+  canonical_pane = pane if canonical_pane.empty?
   {
-    "kind" => kind,
-    "binding" => {
-      "pane" => binding["pane"].to_s,
-      "tab" => binding["tab"].to_s,
-      "space" => binding["space"].to_s
-    },
-    "health" => {
-      "last_heartbeat" => health["last_heartbeat"].to_s,
-      "cwd" => health["cwd"].to_s,
-      "git_head" => health["git_head"].to_s,
-      "actual_client" => health["actual_client"].to_s
-    }
+    "adapter" => adapter,
+    "workspace" => binding["workspace"].to_s,
+    "tab" => binding["tab"].to_s,
+    "pane" => pane,
+    "canonical_pane" => canonical_pane
   }
 end
 
-def transport_binding_present?(transport)
-  binding = transport["binding"] || {}
-  %w[pane tab space].any? { |field| !binding[field].to_s.empty? }
+def binding_present?(binding)
+  %w[pane canonical_pane].any? { |field| !binding[field].to_s.empty? }
 end
 
-def instance_binding_status(transport)
-  transport_binding_present?(transport) ? "healthy" : "unbound"
+def instance_binding_state(binding)
+  binding_present?(binding) ? "bound" : "unbound"
 end
 
-def recommended_instance_action(management, binding_status)
-  return "reuse" if binding_status == "healthy"
-  return "start_missing_instance" if management == "orbit_managed"
+def instance_liveness_for_binding(binding)
+  return ["not_alive", "no_binding"] unless binding_present?(binding)
 
-  "ask_user_or_bind"
+  ["unknown", "unverified_binding"]
+end
+
+def instance_availability_for_liveness(liveness)
+  case liveness
+  when "alive"
+    "available"
+  when "not_alive"
+    "missing"
+  else
+    "unknown"
+  end
+end
+
+def deprecated_transport_binding_alias(binding)
+  {
+    "pane" => binding["canonical_pane"].to_s.empty? ? binding["pane"].to_s : binding["canonical_pane"].to_s,
+    "tab" => binding["tab"].to_s,
+    "space" => binding["workspace"].to_s
+  }
 end
 
 def command_expected_string(command)
@@ -251,17 +266,20 @@ end
 
 def instance_status_entry(name, instance, role_ref, role_def)
   management = validate_instance_management!(name, instance)
-  transport = normalize_instance_transport(name, instance)
-  binding_status = instance_binding_status(transport)
+  binding = normalize_instance_binding(name, instance)
+  binding_state = instance_binding_state(binding)
+  liveness, liveness_reason = instance_liveness_for_binding(binding)
   {
     "instance" => name,
     "role_ref" => role_ref,
     "resolved_role" => role_def["role"] || role_ref,
     "management" => management,
     "expected_command" => command_expected_string(instance["command"]),
-    "transport" => transport,
-    "binding_status" => binding_status,
-    "recommended_action" => recommended_instance_action(management, binding_status)
+    "binding" => binding_state,
+    "liveness" => liveness,
+    "liveness_reason" => liveness_reason,
+    "availability" => instance_availability_for_liveness(liveness),
+    "herdr" => binding
   }
 end
 
@@ -328,7 +346,6 @@ end
 
 def parse_bind_pane_args(args)
   options = {
-    "transport" => "herdr",
     "json" => false
   }
 
@@ -344,9 +361,10 @@ def parse_bind_pane_args(args)
     when /\A--pane=(.+)\z/
       options["pane"] = Regexp.last_match(1)
     when "--transport"
-      options["transport"] = option_value(args, "--transport")
+      option_value(args, "--transport")
+      usage_error("bind-pane --transport was removed. Herdr is the only automatic runtime adapter; pass --pane with optional --tab and --workspace.")
     when /\A--transport=(.+)\z/
-      options["transport"] = Regexp.last_match(1)
+      usage_error("bind-pane --transport was removed. Herdr is the only automatic runtime adapter; pass --pane with optional --tab and --workspace.")
     when "--tab"
       options["tab"] = option_value(args, "--tab")
     when /\A--tab=(.+)\z/
@@ -355,6 +373,14 @@ def parse_bind_pane_args(args)
       options["space"] = option_value(args, "--space")
     when /\A--space=(.+)\z/
       options["space"] = Regexp.last_match(1)
+    when "--workspace"
+      options["workspace"] = option_value(args, "--workspace")
+    when /\A--workspace=(.+)\z/
+      options["workspace"] = Regexp.last_match(1)
+    when "--canonical-pane"
+      options["canonical_pane"] = option_value(args, "--canonical-pane")
+    when /\A--canonical-pane=(.+)\z/
+      options["canonical_pane"] = Regexp.last_match(1)
     when "--json"
       options["json"] = true
     else
@@ -365,7 +391,7 @@ def parse_bind_pane_args(args)
   usage_error("Missing required option: --instance") if options["instance"].to_s.empty?
   usage_error("Missing required option: --pane") if options["pane"].to_s.empty?
   usage_error("bind-pane currently requires --json") unless options["json"]
-  usage_error("bind-pane --transport must be one of #{ALLOWED_INSTANCE_TRANSPORTS.join("|")}") unless ALLOWED_INSTANCE_TRANSPORTS.include?(options["transport"])
+  options["workspace"] = options["space"].to_s if options["workspace"].to_s.empty? && !options["space"].to_s.empty?
   options
 end
 
@@ -392,16 +418,14 @@ def bind_pane(args)
     usage_error("Instance #{instance_key.inspect} references missing role #{role_ref.inspect}.") unless role_def.is_a?(Hash)
     validate_instance_management!(instance_key, instance)
 
-    transport = normalize_instance_transport(instance_key, instance)
-    transport["kind"] = options["transport"]
-    transport["binding"]["pane"] = options["pane"]
-    transport["binding"]["tab"] = options["tab"].to_s
-    transport["binding"]["space"] = options["space"].to_s
-    transport["health"]["last_heartbeat"] = Time.now.utc.iso8601
-    transport["health"]["cwd"] = Dir.pwd
-    transport["health"]["actual_client"] = runtime_actual_client
-
-    instance["transport"] = transport
+    normalize_instance_binding(instance_key, instance)
+    instance["binding"] = {
+      "adapter" => "herdr",
+      "workspace" => options["workspace"].to_s,
+      "tab" => options["tab"].to_s,
+      "pane" => options["pane"].to_s,
+      "canonical_pane" => options["canonical_pane"].to_s.empty? ? options["pane"].to_s : options["canonical_pane"].to_s
+    }
     instances_config
   end
 
@@ -416,7 +440,7 @@ def bind_pane(args)
   }.compact)
 end
 
-def write_instance_binding!(instance_name, transport_kind:, pane:, tab: "", space: "", actual_client: nil)
+def write_instance_binding!(instance_name, adapter: "herdr", transport_kind: nil, pane:, tab: "", space: "", workspace: nil, canonical_pane: nil, actual_client: nil)
   roles, _instances, instances_path = load_project_instance_config_for_cli
   instance_key = nil
   instance = nil
@@ -433,15 +457,17 @@ def write_instance_binding!(instance_name, transport_kind:, pane:, tab: "", spac
     role_def = roles[role_ref]
     usage_error("Instance #{instance_key.inspect} references missing role #{role_ref.inspect}.") unless role_def.is_a?(Hash)
 
-    transport = normalize_instance_transport(instance_key, instance)
-    transport["kind"] = transport_kind
-    transport["binding"]["pane"] = pane.to_s
-    transport["binding"]["tab"] = tab.to_s
-    transport["binding"]["space"] = space.to_s
-    transport["health"]["last_heartbeat"] = Time.now.utc.iso8601
-    transport["health"]["cwd"] = Dir.pwd
-    transport["health"]["actual_client"] = actual_client.to_s.empty? ? runtime_actual_client : actual_client.to_s
-    instance["transport"] = transport
+    normalize_instance_binding(instance_key, instance)
+    selected_adapter = adapter || transport_kind || "herdr"
+    usage_error("Instance binding adapter must be herdr.") unless selected_adapter == "herdr"
+    selected_workspace = workspace.nil? ? space.to_s : workspace.to_s
+    instance["binding"] = {
+      "adapter" => "herdr",
+      "workspace" => selected_workspace,
+      "tab" => tab.to_s,
+      "pane" => pane.to_s,
+      "canonical_pane" => canonical_pane.to_s.empty? ? pane.to_s : canonical_pane.to_s
+    }
     instances_config
   end
 
@@ -566,14 +592,16 @@ def resolve_identity(result, roles, instances)
 
   management = instance_management(instance)
   if ALLOWED_INSTANCE_MANAGEMENT.include?(management)
-    transport = normalize_instance_transport(instance_key, instance)
+    binding = normalize_instance_binding(instance_key, instance)
     result["management"] = management
     expected_client = expected_client_name(instance["command"])
     actual_client = runtime_actual_client
     result["expected_command"] = command_expected_string(instance["command"])
     result["actual_client"] = actual_client
-    result["transport_binding"] = transport["binding"]
-    result["binding_status"] = instance_binding_status(transport)
+    result["binding"] = instance_binding_state(binding)
+    result["herdr"] = binding
+    result["transport_binding"] = deprecated_transport_binding_alias(binding)
+    result["binding_status"] = result["binding"] == "bound" ? "healthy" : "unbound"
     if actual_client != "unknown" && expected_client && actual_client != expected_client
       conflict(result, "env.ORBIT_CLIENT", "ORBIT_CLIENT #{actual_client.inspect} conflicts with configured command #{expected_client.inspect} for instance #{instance_key.inspect}.")
     end
@@ -665,7 +693,7 @@ def load_instance_for_launch(instance_name)
   role_def = roles[role_ref]
   usage_error("Instance #{instance_key.inspect} references missing role #{role_ref.inspect}.") unless role_def.is_a?(Hash)
   validate_instance_management!(instance_key, instance)
-  normalize_instance_transport(instance_key, instance)
+  normalize_instance_binding(instance_key, instance)
 
   [instance_key, instance_alias, instance, role_ref, role_def]
 end

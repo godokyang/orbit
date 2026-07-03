@@ -46,6 +46,36 @@ install_log() {
   printf 'orbit install: %s\n' "$*"
 }
 
+progress_update() {
+  current="$1"
+  total="$2"
+  action="$3"
+  file="$4"
+
+  progress_enabled || return 0
+  if [ -t 1 ]; then
+    printf '\rorbit install: [%s/%s] %s %s' "$current" "$total" "$action" "$file"
+    return 0
+  fi
+
+  if [ "$current" -eq 1 ] ||
+     [ "$current" -eq "$total" ] ||
+     [ $((current % 10)) -eq 0 ]; then
+    install_log "[$current/$total] $action $file"
+  fi
+}
+
+progress_done() {
+  total="$1"
+  action="$2"
+
+  progress_enabled || return 0
+  if [ -t 1 ]; then
+    printf '\n'
+  fi
+  install_log "$action complete ($total files)"
+}
+
 need_value() {
   option="$1"
   value="${2:-}"
@@ -199,26 +229,28 @@ install_local_runtime() {
     current=$((current + 1))
     source_file="$source_root/$file"
     target_file="$runtime_dir/$file"
-    install_log "[$current/$total] copy $file"
+    progress_update "$current" "$total" "copy" "$file"
     [ -f "$source_file" ] || fail "missing runtime source file: $source_file"
     mkdir -p "$(parent_dir "$target_file")"
     copy_file "$source_file" "$target_file"
   done
+  progress_done "$total" "copying runtime files"
 }
 
 install_remote_runtime() {
   total=$(runtime_file_count)
   current=0
   install_log "downloading Orbit runtime from $raw_base"
-  install_log "this can take a minute on slower networks; progress is shown per file"
+  install_log "this can take a minute on slower networks; progress updates in place on terminals"
   for file in $runtime_files; do
     current=$((current + 1))
     target_file="$runtime_dir/$file"
-    install_log "[$current/$total] download $file"
+    progress_update "$current" "$total" "download" "$file"
     mkdir -p "$(parent_dir "$target_file")"
     download_file "$raw_base/$file" "$target_file" ||
       fail "failed to download $raw_base/$file"
   done
+  progress_done "$total" "downloading runtime files"
 }
 
 script_dir=""

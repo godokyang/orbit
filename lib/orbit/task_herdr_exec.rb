@@ -1,6 +1,6 @@
 def run_herdr_start(plan, json:)
   herdr_path = command_path("herdr")
-  usage_error("herdr command not found; run `orbit tools doctor --json` or use --transport local.") unless herdr_path
+  usage_error("herdr command not found. Automatic start/wake requires Herdr. Run `orbit tools doctor --json`, or start the agent manually with ORBIT_INSTANCE and ORBIT_ROLE set.") unless herdr_path
 
   argv = herdr_start_argv(plan, herdr_path)
   exec_env = ENV.to_hash.merge(plan["env"])
@@ -24,7 +24,7 @@ def run_herdr_start(plan, json:)
     stderr = retry_stderr
     status = retry_status
   end
-  adapter = attach_start_adapter_plan(plan)["adapter"]
+  adapter = attach_start_adapter_plan(plan)["herdr_start"]
   pane_id = status.success? ? herdr_start_pane_id(stdout) : nil
   actual_client = status.success? ? herdr_start_agent_client(stdout) : nil
   actual_client = plan.dig("client", "expected_client") if actual_client.to_s.empty?
@@ -61,18 +61,23 @@ def run_herdr_start(plan, json:)
       "stdout" => "",
       "stderr" => "Could not parse Herdr pane id from agent start output."
     }
+  elsif status.success?
+    ready_wait = {
+      "success" => nil,
+      "status" => "started_unverified",
+      "reason" => "no ready marker is configured for this client"
+    }
   end
 
-  success = status.success? && (ready_wait.nil? || ready_wait["success"])
+  success = status.success? && (ready_wait.nil? || ready_wait["success"] != false)
   status_after_start = nil
   if success && pane_id
     view = plan.dig("creation_policy", "same_level_view") || {}
     status_after_start = write_instance_binding!(
       plan["instance"],
-      transport_kind: "herdr",
       pane: pane_id,
       tab: view["tab"].to_s,
-      space: view["workspace"].to_s,
+      workspace: view["workspace"].to_s,
       actual_client: actual_client
     )
   end
@@ -105,7 +110,7 @@ end
 
 def run_herdr_wake(plan, probe, json:)
   herdr_path = command_path("herdr")
-  usage_error("herdr command not found; run `orbit tools doctor --json` or use --transport local.") unless herdr_path
+  usage_error("herdr command not found. Automatic start/wake requires Herdr. Run `orbit tools doctor --json`, or start the agent manually with ORBIT_INSTANCE and ORBIT_ROLE set.") unless herdr_path
 
   adapter = herdr_wake_adapter(plan, probe, herdr_path)
   stdout, stderr, status = Open3.capture3(*adapter["command"])
@@ -136,18 +141,24 @@ def run_herdr_wake(plan, probe, json:)
       "stdout" => wait_stdout,
       "stderr" => wait_stderr
     }
+  elsif status.success?
+    ready_wait = {
+      "success" => nil,
+      "status" => "started_unverified",
+      "reason" => "no ready marker is configured for this client"
+    }
   end
 
-  success = status.success? && (ready_wait.nil? || ready_wait["success"])
-  binding = plan.dig("instance_status", "transport", "binding") || {}
+  success = status.success? && (ready_wait.nil? || ready_wait["success"] != false)
+  binding = plan.dig("instance_status", "herdr") || {}
   status_after_start = nil
   if success
     status_after_start = write_instance_binding!(
       plan["instance"],
-      transport_kind: "herdr",
       pane: pane,
       tab: binding["tab"].to_s,
-      space: binding["space"].to_s,
+      workspace: binding["workspace"].to_s,
+      canonical_pane: pane,
       actual_client: plan.dig("client", "expected_client")
     )
   end
@@ -176,13 +187,13 @@ def run_herdr_wake(plan, probe, json:)
 end
 
 def run_herdr_self_wake(plan, probe, json:)
-  binding = plan.dig("instance_status", "transport", "binding") || {}
+  binding = plan.dig("instance_status", "herdr") || {}
   status_after_start = write_instance_binding!(
     plan["instance"],
-    transport_kind: "herdr",
     pane: probe["canonical_pane"] || probe["pane"],
     tab: binding["tab"].to_s,
-    space: binding["space"].to_s,
+    workspace: binding["workspace"].to_s,
+    canonical_pane: probe["canonical_pane"] || probe["pane"],
     actual_client: plan.dig("client", "expected_client")
   )
   replacement = write_start_replacement_diagnostic!(plan, status_after_start)
@@ -300,7 +311,7 @@ def start(args)
   if start_create_blocked?(plan, options)
     result = plan.merge(
       "action" => "blocked",
-      "reason" => "user_managed instance has no healthy binding; bind it first or pass --allow-create"
+      "reason" => "start could not create or wake a Herdr agent automatically"
     )
     if options["json"]
       puts JSON.pretty_generate(result)
@@ -321,41 +332,9 @@ def start(args)
     return
   end
 
-  if plan["transport"] == "herdr"
-    if options["force"]
-      locked = try_with_start_instance_lock(plan["instance"]) do
-        run_herdr_start(plan, json: options["json"])
-      end
-      unless locked
-        result = start_in_progress_result(plan)
-        if options["json"]
-          puts JSON.pretty_generate(result)
-        else
-          print_start_needs_attention(result)
-        end
-        exit 1
-      end
-    else
-      run_herdr_start(plan, json: options["json"])
-    end
-    return
-  end
-
   if options["force"]
     locked = try_with_start_instance_lock(plan["instance"]) do
-      write_start_replacement_diagnostic!(
-        plan,
-        {
-          "transport" => {
-            "kind" => "local",
-            "binding" => {},
-            "health" => {
-              "cwd" => plan["cwd"],
-              "actual_client" => plan.dig("client", "expected_client")
-            }
-          }
-        }
-      )
+      run_herdr_start(plan, json: options["json"])
     end
     unless locked
       result = start_in_progress_result(plan)
@@ -366,19 +345,15 @@ def start(args)
       end
       exit 1
     end
-  end
-
-  exec_env = ENV.to_hash.merge(plan["env"])
-  argv = plan["argv"]
-  Dir.chdir(plan["cwd"]) do
-    exec(exec_env, [argv.first, argv.first], *argv.drop(1))
+  else
+    run_herdr_start(plan, json: options["json"])
   end
 end
 
 def parse_dispatch_args(args)
   options = {
-    "transport" => "generic",
     "dry_run" => false,
+    "manual_payload" => false,
     "json" => false
   }
 
@@ -394,9 +369,10 @@ def parse_dispatch_args(args)
     when /\A--to=(.+)\z/
       options["to"] = Regexp.last_match(1)
     when "--transport"
-      options["transport"] = option_value(args, "--transport")
+      option_value(args, "--transport")
+      usage_error("dispatch --transport was removed. Direct delivery uses the target instance's live Herdr binding. Use --dry-run or --manual-payload for manual delivery artifacts.")
     when /\A--transport=(.+)\z/
-      options["transport"] = Regexp.last_match(1)
+      usage_error("dispatch --transport was removed. Direct delivery uses the target instance's live Herdr binding. Use --dry-run or --manual-payload for manual delivery artifacts.")
     when "--pane"
       options["pane"] = option_value(args, "--pane")
     when /\A--pane=(.+)\z/
@@ -407,6 +383,8 @@ def parse_dispatch_args(args)
       options["reply_to"] = Regexp.last_match(1)
     when "--dry-run"
       options["dry_run"] = true
+    when "--manual-payload"
+      options["manual_payload"] = true
     when "--json"
       options["json"] = true
     else
@@ -417,7 +395,6 @@ def parse_dispatch_args(args)
   usage_error("Missing required option: --task") if options["task"].nil? || options["task"].empty?
   usage_error("Missing required option: --to") if options["to"].nil? || options["to"].empty?
   usage_error("dispatch currently requires --json") unless options["json"]
-  usage_error("dispatch --transport must be generic or herdr") unless %w[generic herdr].include?(options["transport"])
 
   options
 end
@@ -446,9 +423,24 @@ def dispatch_reply_to(explicit_reply_to = nil)
 
   lead_binding = lead_transport_binding
   lead_pane = lead_binding["pane"].to_s.strip
-  return [lead_pane, "lead_transport_binding"] unless lead_pane.empty?
+  return [lead_pane, "lead_binding"] unless lead_pane.empty?
 
   ["manual", "manual_fallback"]
+end
+
+def dispatch_availability(agent_status)
+  case agent_status.to_s
+  when "idle"
+    ["available", nil]
+  when "done"
+    ["available_needs_seen", "target_done_needs_inspection"]
+  when "working"
+    ["busy", "target_busy"]
+  when "blocked"
+    ["needs_user_or_owner_attention", "target_blocked"]
+  else
+    ["unknown", "target_state_unknown"]
+  end
 end
 
 def dispatch_message(packet)
@@ -478,13 +470,32 @@ def dispatch_packet(options)
   instance_key, instance_alias, instance, role_ref, role_def = load_instance_for_launch(options["to"])
   resolved_role = role_def["role"] || role_ref
   instance_status = instance_status_entry(instance_key, instance, role_ref, role_def)
+  target_role_matches = task_gate_role?(task, resolved_role) || task["target_role"].nil? || task["target_role"] == resolved_role
+  usage_error("dispatch target role mismatch: task target_role #{task["target_role"].inspect} does not match instance #{instance_key.inspect} role #{resolved_role.inspect}.") unless target_role_matches
+
   reply_to, reply_to_source = dispatch_reply_to(options["reply_to"])
-  binding_pane = instance_status.dig("transport", "binding", "pane").to_s
-  if options["transport"] == "herdr" && options["pane"].to_s.empty? && !binding_pane.empty?
-    options["pane"] = binding_pane
-  end
-  if options["transport"] == "herdr" && options["pane"].to_s.empty?
-    usage_error("dispatch --transport herdr requires --pane or a bound instance pane because pane ids are live transport handles.")
+  explicit_override = !options["pane"].to_s.empty?
+  live_probe = nil
+  availability = nil
+  availability_reason = nil
+  unless explicit_override || options["manual_payload"]
+    argv = normalize_command_argv(instance["command"], "Instance #{instance_key.inspect}")
+    live_probe = herdr_reuse_probe({
+      "instance_status" => instance_status,
+      "instance" => instance_key,
+      "resolved_role" => resolved_role,
+      "cwd" => Dir.pwd,
+      "argv" => argv,
+      "client" => start_client_metadata(argv)
+    })
+    unless live_probe && live_probe["decision"] == "reuse"
+      usage_error("dispatch target #{instance_key.inspect} does not have a live-confirmed Herdr binding; run `orbit start #{instance_key}` or use --manual-payload.")
+    end
+    availability, availability_reason = dispatch_availability(live_probe["agent_status"])
+    unless availability == "available"
+      usage_error("dispatch target #{instance_key.inspect} is not available: #{availability_reason || availability}. Inspect the Herdr pane before sending new work.")
+    end
+    options["pane"] = live_probe["canonical_pane"].to_s.empty? ? live_probe["pane"] : live_probe["canonical_pane"]
   end
 
   task_id = dispatch_task_label(task_path)
@@ -500,24 +511,31 @@ def dispatch_packet(options)
     "instance_alias" => instance_alias,
     "role_ref" => role_ref,
     "resolved_role" => resolved_role,
-    "transport" => options["transport"],
+    "delivery" => {
+      "mode" => options["manual_payload"] ? "manual_artifact" : "herdr_direct",
+      "runtime_adapter" => options["manual_payload"] ? "none" : "herdr",
+      "explicit_override" => explicit_override
+    },
     "target_instance_status" => instance_status,
+    "target_liveness_probe" => live_probe,
+    "target_availability" => availability,
     "context_preflight" => context_preflight_for(instance_key, task_path: task_path),
     "reply_to" => reply_to,
     "reply_to_source" => reply_to_source,
     "dry_run" => options["dry_run"],
     "message" => nil,
     "checks" => {
-      "target_role_matches" => task_gate_role?(task, resolved_role) || task["target_role"].nil? || task["target_role"] == resolved_role,
-      "pane_required_for_herdr" => options["transport"] == "herdr"
+      "target_role_matches" => target_role_matches,
+      "live_confirmed_for_delivery" => options["manual_payload"] || explicit_override || (live_probe && live_probe["decision"] == "reuse")
     }
   }.compact
 
   packet["message"] = dispatch_message(packet)
-  if options["transport"] == "herdr"
+  unless options["manual_payload"]
+    usage_error("dispatch requires a Herdr pane from live binding or explicit --pane override.") if options["pane"].to_s.empty?
     packet["adapter"] = {
       "schema_version" => "orbit-herdr-dispatch-v1",
-      "transport" => "herdr",
+      "adapter" => "herdr",
       "pane" => options["pane"],
       "commands" => [
         ["herdr", "pane", "run", options["pane"], packet["message"]]
@@ -530,7 +548,7 @@ end
 
 def run_herdr_dispatch(packet)
   herdr_path = command_path("herdr")
-  usage_error("herdr command not found; run `orbit tools doctor --json` or use --transport generic.") unless herdr_path
+  usage_error("herdr command not found. Direct dispatch requires Herdr. Use --manual-payload for manual delivery artifacts.") unless herdr_path
 
   adapter = packet["adapter"]
   submit_delay_seconds = adapter.fetch("submit_delay_seconds", 0).to_f
@@ -557,7 +575,7 @@ def run_herdr_dispatch(packet)
   )
   unless success
     result["fallback"] = {
-      "transport" => "generic",
+      "delivery" => "manual_artifact",
       "action" => "manual_delivery_required",
       "reason" => "Herdr dispatch failed before Orbit could confirm delivery.",
       "message" => packet["message"]
@@ -575,7 +593,7 @@ def dispatch(args)
   options = parse_dispatch_args(args)
   packet = dispatch_packet(options)
 
-  if options["dry_run"] || options["transport"] == "generic"
+  if options["dry_run"] || options["manual_payload"]
     action = options["dry_run"] ? "dry_run" : "manual_delivery_required"
     puts JSON.pretty_generate(packet.merge("action" => action))
     return
