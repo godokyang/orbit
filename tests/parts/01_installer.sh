@@ -699,6 +699,9 @@ ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases
 json_assert 'validate accepts array instance command' "$TMPROOT/valid-array-command.json" 'j["valid"] == true'
 "$CLI" start reviewer --dry-run --json >"$TMPROOT/start-array-command.json"
 json_assert 'start dry-run preserves array instance command' "$TMPROOT/start-array-command.json" 'j["argv"] == ["codex", "--profile", "review"]'
+ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["instances"]["reviewer"]["command"]=["/usr/local/bin/codex"]; File.write(p, YAML.dump(y))' .orbit/instances.yaml
+"$CLI" start reviewer --dry-run --json >"$TMPROOT/start-absolute-codex-command.json"
+json_assert 'start ready wait uses basename for absolute client command' "$TMPROOT/start-absolute-codex-command.json" 'j["argv"] == ["/usr/local/bin/codex"] && j["client"]["expected_client"] == "codex" && j["herdr_start"]["ready_wait"]["mode"] == "output_match" && j["herdr_start"]["ready_wait"]["match"].include?("OpenAI Codex")'
 ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["instances"]["reviewer"]["command"]=["codex","--dangerously-bypass-approvals-and-sandbox"]; y["instances"]["lead"]["command"]=["claude","--dangerously-skip-permissions"]; y["instances"]["tester"]["command"]=["opencode","run","--interactive","--dangerously-skip-permissions"]; File.write(p, YAML.dump(y))' .orbit/instances.yaml
 "$CLI" start reviewer --dry-run --json >"$TMPROOT/start-codex-full-permission.json"
 "$CLI" start lead --dry-run --json >"$TMPROOT/start-claude-full-permission.json"
@@ -780,7 +783,7 @@ for role in lead reviewer tester; do
   json_assert "whoami resolves $role" "$TMPROOT/whoami-$role.json" "j[\"resolved_role\"] == \"$role\" && j[\"instance\"] == \"$role\" && j[\"resolved_instance\"] == \"$role\" && j[\"role_ref\"] == \"$role\" && j[\"expected_command\"] == \"codex\" && j[\"transport_binding\"].is_a?(Hash) && j[\"conflicts\"].empty?"
 done
 env ORBIT_INSTANCE=reviewer ORBIT_ROLE=reviewer ORBIT_CLIENT=codex "$CLI" whoami --json >"$TMPROOT/whoami-reviewer-client.json"
-json_assert 'whoami exposes actual client from env' "$TMPROOT/whoami-reviewer-client.json" 'j["actual_client"] == "codex" && j["binding_status"] == "unbound"'
+json_assert 'whoami exposes actual client from env' "$TMPROOT/whoami-reviewer-client.json" 'j["actual_client"] == "codex" && !j.key?("binding_status") && j["binding"] == "unbound"'
 expect_failure 'whoami fails on actual client mismatch' env ORBIT_INSTANCE=reviewer ORBIT_ROLE=reviewer ORBIT_CLIENT=opencode "$CLI" whoami --json
 json_assert 'whoami returns no project rules until user configures them' "$TMPROOT/whoami-reviewer.json" 'j["rules"].is_a?(Array) && j["rules"].empty?'
 

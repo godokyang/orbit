@@ -881,7 +881,9 @@ def herdr_start_ready_wait(plan)
     "claude" => "Claude Code|>",
     "opencode" => "opencode|>"
   }
-  match = matches[plan["argv"].first.to_s]
+  client = plan.dig("client", "expected_client").to_s
+  client = File.basename(plan["argv"].first.to_s) if client.empty?
+  match = matches[client]
   return nil unless match
 
   {

@@ -499,6 +499,9 @@ def dispatch_packet(options)
   end
 
   task_id = dispatch_task_label(task_path)
+  live_binding_confirmed = live_probe && live_probe["decision"] == "reuse" ? true : false
+  manual_artifact = options["manual_payload"] == true
+  delivery_precondition_met = target_role_matches && (manual_artifact || explicit_override || live_binding_confirmed)
   packet = {
     "schema_version" => "orbit-dispatch-v1",
     "project" => task["project"] || File.basename(Dir.pwd),
@@ -526,7 +529,11 @@ def dispatch_packet(options)
     "message" => nil,
     "checks" => {
       "target_role_matches" => target_role_matches,
-      "live_confirmed_for_delivery" => options["manual_payload"] || explicit_override || (live_probe && live_probe["decision"] == "reuse")
+      "delivery_precondition_met" => delivery_precondition_met,
+      "live_binding_confirmed" => live_binding_confirmed,
+      "live_confirmed_for_delivery" => live_binding_confirmed,
+      "explicit_override" => explicit_override,
+      "manual_artifact" => manual_artifact
     }
   }.compact
 

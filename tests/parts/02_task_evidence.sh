@@ -32,10 +32,10 @@ DECOMP_TASK="$TMPROOT/decomposition-task.yaml"
 yaml_assert 'new-task initializes decomposition contract fields' "$DECOMP_TASK" 'j["implementation_plan"]["required"] == true && j["decomposition"]["child_slices"].is_a?(Array) && j["decomposition"]["aggregate_outcome_metrics"].is_a?(Array) && j["final_aggregate_audit"]["required"] == true'
 expect_failure 'new-task refuses overwrite' "$CLI" new-task --target-role reviewer --task-type implementation_review --output "$TASK"
 "$CLI" dispatch --task "$TASK" --to reviewer --manual-payload --json >"$TMPROOT/dispatch-generic.json"
-json_assert 'dispatch manual payload emits delivery artifact with context preflight' "$TMPROOT/dispatch-generic.json" 'j["schema_version"] == "orbit-dispatch-v1" && j["action"] == "manual_delivery_required" && j["delivery"]["mode"] == "manual_artifact" && j["delivery"]["runtime_adapter"] == "none" && j["to_instance"] == "reviewer" && j["resolved_role"] == "reviewer" && j["task"] == File.expand_path(ARGV[2]) && j["message"].include?("orbit whoami --json") && !j["message"].include?("orbit whoami --task") && j["message"].include?("orbit rules print-context --task") && j["message"].include?("context_preflight.required_files") && j["context_preflight"]["commands"].include?(["orbit", "whoami", "--json"]) && j["context_preflight"]["required_files"].any? { |r| r["path"] == "SKILL.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "references/runtime/guide.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "references/runtime/quality-outcome-and-review.md" } && j["checks"]["target_role_matches"] == true' "$TASK"
+json_assert 'dispatch manual payload emits delivery artifact with context preflight' "$TMPROOT/dispatch-generic.json" 'j["schema_version"] == "orbit-dispatch-v1" && j["action"] == "manual_delivery_required" && j["delivery"]["mode"] == "manual_artifact" && j["delivery"]["runtime_adapter"] == "none" && j["to_instance"] == "reviewer" && j["resolved_role"] == "reviewer" && j["task"] == File.expand_path(ARGV[2]) && j["message"].include?("orbit whoami --json") && !j["message"].include?("orbit whoami --task") && j["message"].include?("orbit rules print-context --task") && j["message"].include?("context_preflight.required_files") && j["context_preflight"]["commands"].include?(["orbit", "whoami", "--json"]) && j["context_preflight"]["required_files"].any? { |r| r["path"] == "SKILL.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "references/runtime/guide.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "references/runtime/quality-outcome-and-review.md" } && j["checks"]["target_role_matches"] == true && j["checks"]["delivery_precondition_met"] == true && j["checks"]["manual_artifact"] == true && j["checks"]["explicit_override"] == false && j["checks"]["live_binding_confirmed"] == false && j["checks"]["live_confirmed_for_delivery"] == false' "$TASK"
 expect_failure 'dispatch rejects removed transport flag with migration guidance' "$CLI" dispatch --task "$TASK" --to reviewer --transport herdr --json
 "$CLI" dispatch --task "$TASK" --to reviewer --pane pane-123 --reply-to observer-pane --dry-run --json >"$TMPROOT/dispatch-herdr-dry-run.json"
-json_assert 'dispatch herdr dry-run emits adapter plan with explicit reply-to' "$TMPROOT/dispatch-herdr-dry-run.json" 'j["action"] == "dry_run" && j["reply_to"] == "observer-pane" && j["reply_to_source"] == "explicit_option" && j["message"].include?("reply-to:observer-pane") && j["adapter"]["schema_version"] == "orbit-herdr-dispatch-v1" && !j["adapter"].key?("submit_delay_seconds") && j["adapter"]["commands"] == [["herdr", "pane", "run", "pane-123", j["message"]]] && j["adapter"]["commands"][0][4].include?(File.expand_path(ARGV[2]))' "$TASK"
+json_assert 'dispatch herdr dry-run emits adapter plan with explicit reply-to' "$TMPROOT/dispatch-herdr-dry-run.json" 'j["action"] == "dry_run" && j["reply_to"] == "observer-pane" && j["reply_to_source"] == "explicit_option" && j["message"].include?("reply-to:observer-pane") && j["adapter"]["schema_version"] == "orbit-herdr-dispatch-v1" && !j["adapter"].key?("submit_delay_seconds") && j["adapter"]["commands"] == [["herdr", "pane", "run", "pane-123", j["message"]]] && j["adapter"]["commands"][0][4].include?(File.expand_path(ARGV[2])) && j["checks"]["delivery_precondition_met"] == true && j["checks"]["manual_artifact"] == false && j["checks"]["explicit_override"] == true && j["checks"]["live_binding_confirmed"] == false && j["checks"]["live_confirmed_for_delivery"] == false' "$TASK"
 HERDR_PANE_ID=lead-reply-pane "$CLI" dispatch --task "$TASK" --to reviewer --pane pane-123 --dry-run --json >"$TMPROOT/dispatch-herdr-env-reply-to.json"
 json_assert 'dispatch herdr reply-to defaults to current Herdr pane' "$TMPROOT/dispatch-herdr-env-reply-to.json" 'j["reply_to"] == "lead-reply-pane" && j["reply_to_source"] == "HERDR_PANE_ID" && j["message"].include?("reply-to:lead-reply-pane")'
 cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
@@ -62,6 +62,21 @@ if PATH="$TMPROOT/fakebin:$PATH" "$CLI" dispatch --task "$TASK" --to reviewer --
 fi
 json_assert 'dispatch herdr failure exits with fallback payload' "$TMPROOT/dispatch-herdr-fail.json" 'j["action"] == "failed" && j["adapter_result"]["success"] == false && j["fallback"]["delivery"] == "manual_artifact" && j["fallback"]["action"] == "manual_delivery_required" && j["fallback"]["message"].include?(File.expand_path(ARGV[2]))' "$TASK"
 "$CLI" bind-pane --instance reviewer --pane dispatch-live-pane --json >"$TMPROOT/dispatch-bind-reviewer.json"
+cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
+#!/bin/sh
+case "$1 $2" in
+  "agent list")
+    printf '{"result":{"agents":[{"pane_id":"dispatch-live-pane","agent":"codex","agent_status":"idle"}]}}\n'
+    ;;
+  *)
+    printf 'unexpected herdr args: %s\n' "$*" >&2
+    exit 1
+    ;;
+esac
+HERDR
+chmod +x "$TMPROOT/fakebin/herdr"
+PATH="$TMPROOT/fakebin:$PATH" "$CLI" dispatch --task "$TASK" --to reviewer --dry-run --json >"$TMPROOT/dispatch-live-confirmed.json"
+json_assert 'dispatch live binding marks only probed binding as live-confirmed' "$TMPROOT/dispatch-live-confirmed.json" 'j["action"] == "dry_run" && j["checks"]["delivery_precondition_met"] == true && j["checks"]["manual_artifact"] == false && j["checks"]["explicit_override"] == false && j["checks"]["live_binding_confirmed"] == true && j["checks"]["live_confirmed_for_delivery"] == true && j["adapter"]["pane"] == "dispatch-live-pane"'
 cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
 #!/bin/sh
 case "$1 $2" in

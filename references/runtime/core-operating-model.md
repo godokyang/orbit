@@ -123,7 +123,16 @@ skill 的推荐启动动作：
   "resolved_role": "reviewer",
   "expected_command": "codex",
   "actual_client": "codex",
+  "binding": "bound",
+  "herdr": {
+    "adapter": "herdr",
+    "workspace": "",
+    "tab": "",
+    "pane": "pane-123",
+    "canonical_pane": "pane-123"
+  },
   "transport_binding": {
+    "_deprecated": "diagnostic alias only; use binding and herdr as primary fields",
     "pane": "pane-123",
     "tab": "",
     "space": ""
@@ -152,6 +161,8 @@ skill 的推荐启动动作：
   "conflicts": []
 }
 ```
+
+`binding` 和 `herdr` 是当前 primary runtime binding fields。`transport_binding` 只保留为 deprecated diagnostic alias，不证明 liveness，也不应作为 `start` / `dispatch` 决策依据。
 
 项目配置描述角色和规则：
 
@@ -250,21 +261,18 @@ instances:
     role_ref: reviewer-main
     command: codex
     management: user_managed
-    transport:
-      kind: herdr
-      binding:
-        pane: ""
-        tab: ""
-        space: ""
-      health:
-        last_heartbeat: ""
-        cwd: ""
-        git_head: ""
-        actual_client: ""
+    binding:
+      adapter: herdr
+      workspace: ""
+      tab: ""
+      pane: ""
+      canonical_pane: ""
     env:
       ORBIT_INSTANCE: reviewer-main
       ORBIT_ROLE: reviewer
 ```
+
+`transport.kind` / `transport.binding` / `transport.health` schema 已移除；新版本 CLI 会拒绝该旧 schema。静态 Herdr binding 只是启动和诊断 hint，不能证明 agent live/healthy；live reuse 只能由 Herdr probe 确认。
 
 `management` 定义 instance 生命周期由谁管理：
 

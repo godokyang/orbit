@@ -106,7 +106,7 @@ Herdr 不是 Orbit protocol 的必需依赖，但它是唯一官方 automatic ru
 | `start` reuse | Herdr | 只有 Herdr live agent probe 能证明可复用；状态不可信时会提示用户用 `--force` 重新启动并替换 binding。 |
 | `start` wake/create external pane | Herdr | Herdr only；没有 Herdr 时请手动在目标终端启动 agent，并设置 `ORBIT_INSTANCE` / `ORBIT_ROLE`。 |
 | `dispatch` direct pane delivery | Herdr | Herdr only；目标 instance 必须有 live-confirmed Herdr binding，显式 `--pane` 可作为人工 override。 |
-| `notice` delivery | Herdr | Herdr delivery 仍是后续增强；notice record 本身是 Orbit protocol，不需要 adapter。 |
+| `notice` record | No adapter | Delivery backend 未实现；当前只作为 Orbit protocol record / future enhancement，不声明 Herdr notice delivery 支持。 |
 | `dispatch`/`handoff` manual artifact | No | 使用 `dispatch --manual-payload` 或 `handoff --output` 生成手动投递 artifact。 |
 | `whoami`/`rules`/`task`/`evidence`/`state`/`wait-gate`/`validate`/`audit` | No | 这些是 Orbit protocol 命令，主要读写 `.orbit/` 文件，不依赖 terminal adapter。 |
 

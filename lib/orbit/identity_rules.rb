@@ -601,7 +601,6 @@ def resolve_identity(result, roles, instances)
     result["binding"] = instance_binding_state(binding)
     result["herdr"] = binding
     result["transport_binding"] = deprecated_transport_binding_alias(binding)
-    result["binding_status"] = result["binding"] == "bound" ? "healthy" : "unbound"
     if actual_client != "unknown" && expected_client && actual_client != expected_client
       conflict(result, "env.ORBIT_CLIENT", "ORBIT_CLIENT #{actual_client.inspect} conflicts with configured command #{expected_client.inspect} for instance #{instance_key.inspect}.")
     end
