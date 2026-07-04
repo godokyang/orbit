@@ -97,23 +97,22 @@ herdr integration install claude
 herdr integration install opencode
 ```
 
-Herdr 不是 Orbit protocol 的必需依赖，但它是唯一官方 automatic runtime adapter。你也可以用 tmux、zellij、wezterm、CI job 或手动开多个终端运行 Orbit protocol；这些方式不提供官方 start/wake/direct dispatch adapter。旧的 runtime adapter 参数已移除，安装新版本后请重新 `orbit init` 生成新的 instance binding schema。
+Herdr 是 Orbit 普通 automatic runtime 的必需依赖，也是唯一官方 runtime layer。手动 Orbit protocol 仍可用，但必须显式降级使用：自己在终端里启动 agent、设置 `ORBIT_INSTANCE` / `ORBIT_ROLE`，并用 evidence / validate / audit 完成协议层闭环；这种模式不支持 `orbit start` 自动创建/唤醒、Herdr direct dispatch 或 Herdr notice surfacing。旧的 runtime adapter 参数已移除，安装新版本后请重新 `orbit init` 生成新的 instance binding schema。
 
 ### Runtime support
 
 | Command area | Adapter needed? | 当前状态 |
 | --- | --- | --- |
-| `start` reuse | Herdr | 只有 Herdr live agent probe 能证明可复用；状态不可信时会提示用户用 `--force` 重新启动并替换 binding。 |
+| `start` reuse | Herdr | 只有 live Herdr facts 和 Orbit runtime session identity 同时匹配时才能复用；状态不可信时会提示用户用 `--force` 重新启动并替换 binding。 |
 | `start` wake/create external pane | Herdr | Herdr only；没有 Herdr 时请手动在目标终端启动 agent，并设置 `ORBIT_INSTANCE` / `ORBIT_ROLE`。 |
-| `dispatch` direct pane delivery | Herdr | Herdr only；目标 instance 必须有 live-confirmed Herdr binding，显式 `--pane` 可作为人工 override。 |
+| `dispatch` direct pane delivery | Herdr | Herdr only；目标 instance 必须是 live + verified + available 的 runtime participant，显式 `--pane` 只是人工 override，不是 verified identity。 |
 | `notice` record | No adapter | Delivery backend 未实现；当前只作为 Orbit protocol record / future enhancement，不声明 Herdr notice delivery 支持。 |
 | `dispatch`/`handoff` manual artifact | No | 使用 `dispatch --manual-payload` 或 `handoff --output` 生成手动投递 artifact。 |
 | `whoami`/`rules`/`task`/`evidence`/`state`/`wait-gate`/`validate`/`audit` | No | 这些是 Orbit protocol 命令，主要读写 `.orbit/` 文件，不依赖 terminal adapter。 |
 
-`start` 的强制替换设计见 [Orbit start force replacement design](docs/start-instance-liveness-design.md)。
-官方 runtime adapter 只支持 Herdr 的决策见 [Herdr-only runtime adapter design](docs/herdr-only-runtime-adapter-design.md)。
+Orbit 不把 `.orbit/instances.yaml` 里的 binding 当成 alive proof。自动投递前必须重新解析 runtime identity：config expected identity、runtime session self-registration 和 Herdr live probe 同时成立，才算 verified participant。
 
-如果没有 Herdr adapter，或 `start` 不能自动启动目标 agent：
+如果显式使用 manual-only protocol，或 `start` 不能自动启动目标 agent：
 
 1. 在你想承载 agent 的终端、tmux pane、zellij pane、wezterm pane、CI shell 或普通 shell 里进入项目目录。
 2. 按 `.orbit/instances.yaml` 里的 `command` 手动启动，并设置 `ORBIT_INSTANCE` 和 `ORBIT_ROLE`，例如 `ORBIT_INSTANCE=reviewer-main ORBIT_ROLE=reviewer codex`。
@@ -388,7 +387,7 @@ orbit start tester-main --dry-run --json
 
 先在 `.orbit/instances.yaml` 里给每个 instance 配好 `command`，例如 `codex`、`claude` 或 `opencode`。缺失 binding 时 `start` 默认通过 Herdr 创建；后续如果已有 binding 但 Orbit 无法确认它仍然有效，`start` 会提示你使用 `--force` 重新启动并替换旧 binding。
 
-如果 `.orbit/instances.yaml` 里已经绑定了 pane，Orbit 可以把它当成 wake/create 的目标 hint，但不能把静态 binding 当成当前 agent 还活着的证明。详细设计见 [Orbit start force replacement design](docs/start-instance-liveness-design.md)。
+如果 `.orbit/instances.yaml` 里已经绑定了 pane，Orbit 只把它当成 wake/create 的目标 hint，不能把静态 binding 当成当前 agent 还活着的证明。`start`、`instances status`、`dispatch` 和 gate-closing evidence 都需要按需解析 runtime session 和 Herdr live facts；如果 binding stale 但能找回唯一 verified session，Orbit 可以修复本地 runtime pointer，只有显式 `instances status --repair-binding --json` 才写回版本化 config。
 
 把 task 发给指定 pane：
 
@@ -400,7 +399,7 @@ orbit dispatch \
   --json
 ```
 
-没有 live-confirmed Herdr binding 时，生成手动投递 payload：
+没有 live verified runtime participant 时，生成手动投递 payload：
 
 ```bash
 orbit dispatch \
@@ -518,11 +517,9 @@ orbit audit --task .orbit/tasks/current-task.yaml --evidence .orbit/evidence/cur
 orbit handoff --task .orbit/tasks/current-task.yaml --evidence .orbit/evidence/current-evidence.json --state .orbit/loop-state.yaml --output .orbit/handoff/current-handoff.json --record-state --json
 ```
 
-## 继续阅读
+## 运行规则摘要
 
-- 运行时指南：[references/runtime/guide.md](references/runtime/guide.md)
-- 协议字段说明：[references/runtime/core-operating-model.md](references/runtime/core-operating-model.md)
-- coding 规范：[references/runtime/coding-guideline.md](references/runtime/coding-guideline.md)
-- review 规范：[references/runtime/quality-outcome-and-review.md](references/runtime/quality-outcome-and-review.md)
-- testing 规范：[references/runtime/testing-guideline.md](references/runtime/testing-guideline.md)
-- Herdr 安装文档：[https://herdr.dev/docs/install/](https://herdr.dev/docs/install/)
+- Orbit 默认规则随 skill 一起安装；agent 进入正式任务后会通过 `orbit rules resolve` 和 `orbit rules print-context` 读取本轮需要的规则。
+- 项目规则可以叠加，但不能替代 Orbit 默认 runtime 规则。
+- coding、review、testing 都必须通过 task/evidence/state/gate/audit 闭环证明结果；聊天结论、Herdr pane 状态和本地命令输出本身都不是 gate。
+- Herdr 安装见 https://herdr.dev/docs/install/ 。
