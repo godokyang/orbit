@@ -1,3 +1,48 @@
+def start_pending_next_steps(pane)
+  [
+    { "inspect_pane" => "herdr pane read #{pane}" },
+    { "request_agent" => "请在目标 agent pane 内运行 orbit runtime register --json" }
+  ]
+end
+
+def start_provisional_session!(plan, pane)
+  hashes = runtime_config_hashes(plan["instance"])
+  herdr = herdr_current_context
+  session = {
+    "schema_version" => RUNTIME_SESSION_SCHEMA,
+    "session_id" => plan["session_id"],
+    "launch_id" => plan["launch_id"],
+    "state" => "pending",
+    "project_root" => plan["cwd"],
+    "project_root_sha256" => runtime_project_root_sha256(plan["cwd"]),
+    "project_id" => plan["project"],
+    "host_id" => runtime_host_id,
+    "user" => runtime_user,
+    "instance" => plan["instance"],
+    "role" => plan["resolved_role"],
+    "role_ref" => plan["role_ref"],
+    "role_config_sha256" => hashes["role_config_sha256"],
+    "instance_config_sha256" => hashes["instance_config_sha256"],
+    "client" => plan.dig("client", "expected_client").to_s,
+    "command" => (plan["argv"] || []).join(" "),
+    "herdr" => {
+      "session" => herdr["session"],
+      "workspace" => herdr["workspace"],
+      "tab" => herdr["tab"],
+      "pane" => pane.to_s,
+      "canonical_pane" => pane.to_s
+    },
+    "identity" => {
+      "verification" => "identity_pending",
+      "whoami_valid" => nil,
+      "conflicts" => []
+    }
+  }
+  runtime_write_session!(session)
+  runtime_set_current_session!(plan["instance"], plan["session_id"], "pending")
+  session
+end
+
 def run_herdr_start(plan, json:)
   herdr_path = command_path("herdr")
   usage_error("herdr command not found. Automatic start/wake requires Herdr. Run `orbit tools doctor --json`, or start the agent manually with ORBIT_INSTANCE and ORBIT_ROLE set.") unless herdr_path
@@ -71,7 +116,9 @@ def run_herdr_start(plan, json:)
 
   success = status.success? && (ready_wait.nil? || ready_wait["success"] != false)
   status_after_start = nil
+  runtime_session = nil
   if success && pane_id
+    runtime_session = start_provisional_session!(plan, pane_id)
     view = plan.dig("creation_policy", "same_level_view") || {}
     status_after_start = write_instance_binding!(
       plan["instance"],
@@ -83,7 +130,10 @@ def run_herdr_start(plan, json:)
   end
   replacement = write_start_replacement_diagnostic!(plan, status_after_start) if success && status_after_start
   result = attach_start_adapter_plan(plan).merge(
-    "action" => "started",
+    "action" => success ? "started_identity_pending" : "start_failed",
+    "dispatch_ready" => false,
+    "next" => (success && pane_id ? start_pending_next_steps(pane_id) : nil),
+    "runtime_session" => runtime_session,
     "instance_status_after_start" => status_after_start,
     "replacement" => replacement,
     "adapter_result" => {
@@ -152,7 +202,9 @@ def run_herdr_wake(plan, probe, json:)
   success = status.success? && (ready_wait.nil? || ready_wait["success"] != false)
   binding = plan.dig("instance_status", "herdr") || {}
   status_after_start = nil
+  runtime_session = nil
   if success
+    runtime_session = start_provisional_session!(plan, pane)
     status_after_start = write_instance_binding!(
       plan["instance"],
       pane: pane,
@@ -164,7 +216,10 @@ def run_herdr_wake(plan, probe, json:)
   end
   replacement = write_start_replacement_diagnostic!(plan, status_after_start) if success && status_after_start
   result = plan.merge(
-    "action" => success ? "woken" : "wake_failed",
+    "action" => success ? "started_identity_pending" : "wake_failed",
+    "dispatch_ready" => false,
+    "next" => (success ? start_pending_next_steps(pane) : nil),
+    "runtime_session" => runtime_session,
     "reuse_probe" => probe,
     "wake_adapter" => herdr_wake_adapter(plan, probe),
     "instance_status_after_start" => status_after_start,
@@ -188,17 +243,22 @@ end
 
 def run_herdr_self_wake(plan, probe, json:)
   binding = plan.dig("instance_status", "herdr") || {}
+  pane = probe["canonical_pane"] || probe["pane"]
+  runtime_session = start_provisional_session!(plan, pane)
   status_after_start = write_instance_binding!(
     plan["instance"],
-    pane: probe["canonical_pane"] || probe["pane"],
+    pane: pane,
     tab: binding["tab"].to_s,
     workspace: binding["workspace"].to_s,
-    canonical_pane: probe["canonical_pane"] || probe["pane"],
+    canonical_pane: pane,
     actual_client: plan.dig("client", "expected_client")
   )
   replacement = write_start_replacement_diagnostic!(plan, status_after_start)
   result = plan.merge(
-    "action" => "self_wake_exec",
+    "action" => "started_identity_pending",
+    "dispatch_ready" => false,
+    "next" => start_pending_next_steps(pane),
+    "runtime_session" => runtime_session,
     "reuse_probe" => probe,
     "self_wake" => self_wake_plan(plan, probe),
     "instance_status_after_start" => status_after_start,
@@ -211,7 +271,7 @@ def run_herdr_self_wake(plan, probe, json:)
     puts "Starting Orbit instance in current Herdr pane:"
     puts "- instance: #{plan["instance"]}"
     puts "- role: #{plan["resolved_role"]}"
-    puts "- pane: #{probe["canonical_pane"] || probe["pane"]}"
+    puts "- pane: #{pane}"
   end
   $stdout.flush
   $stderr.flush
@@ -226,6 +286,44 @@ end
 def start(args)
   options = parse_start_args(args)
   plan = attach_start_adapter_plan(start_plan(options))
+
+  if !start_requires_reuse?(plan) && !options["force"]
+    candidates = runtime_verified_session_candidates(plan["instance"])
+    if candidates.length == 1
+      session = candidates.first
+      runtime_set_current_session!(plan["instance"], session["session_id"], session["state"])
+      result = plan.merge(
+        "action" => "reuse_discovered",
+        "dispatch_ready" => true,
+        "runtime_session" => session,
+        "reuse_probe" => {
+          "decision" => "reuse_discovered",
+          "pane" => session.dig("herdr", "pane"),
+          "canonical_pane" => session.dig("herdr", "canonical_pane"),
+          "source" => ".orbit/runtime/sessions"
+        }
+      )
+      if options["json"]
+        puts JSON.pretty_generate(result)
+      else
+        print_start_reuse(result)
+      end
+      return
+    elsif candidates.length > 1
+      result = plan.merge(
+        "action" => "needs_attention",
+        "reason" => "ambiguous_verified_runtime_sessions",
+        "dispatch_ready" => false,
+        "candidates" => candidates.map { |session| session.slice("session_id", "instance", "role", "herdr", "updated_at") }
+      )
+      if options["json"]
+        puts JSON.pretty_generate(result)
+      else
+        print_start_needs_attention(result)
+      end
+      exit 1
+    end
+  end
 
   if start_requires_reuse?(plan)
     probe = herdr_reuse_probe(plan)
@@ -245,11 +343,28 @@ def start(args)
     end
 
     if !options["force"] && probe && probe["decision"] == "reuse"
-      result = plan.merge("action" => "reuse", "reuse_probe" => probe)
+      runtime_resolution = runtime_resolve_instance(plan["instance"])
+      if runtime_resolution["dispatch_ready"]
+        result = plan.merge(
+          "action" => "reuse_verified",
+          "dispatch_ready" => true,
+          "reuse_probe" => probe,
+          "runtime_resolution" => runtime_resolution.reject { |key, _| %w[runtime_instance runtime_session].include?(key) }
+        )
+      else
+        result = plan.merge(
+          "action" => "started_identity_pending",
+          "reason" => "binding_agent_found_but_runtime_identity_unverified",
+          "dispatch_ready" => false,
+          "reuse_probe" => probe,
+          "runtime_resolution" => runtime_resolution.reject { |key, _| %w[runtime_instance runtime_session].include?(key) },
+          "next" => start_pending_next_steps(probe["canonical_pane"] || probe["pane"])
+        )
+      end
       if options["json"]
         puts JSON.pretty_generate(result)
       else
-        print_start_reuse(result)
+        result["dispatch_ready"] ? print_start_reuse(result) : print_start_needs_attention(result)
       end
       return
     end
@@ -496,30 +611,46 @@ def dispatch_packet(options)
   reply_to, reply_to_source = dispatch_reply_to(options["reply_to"])
   explicit_override = !options["pane"].to_s.empty?
   live_probe = nil
+  runtime_resolution = nil
   availability = nil
   availability_reason = nil
-  unless explicit_override || options["manual_payload"]
-    argv = normalize_command_argv(instance["command"], "Instance #{instance_key.inspect}")
-    live_probe = herdr_reuse_probe({
-      "instance_status" => instance_status,
+  override_risks = []
+  if explicit_override
+    runtime_resolution = {
+      "schema_version" => "orbit-runtime-resolution-v1",
       "instance" => instance_key,
-      "resolved_role" => resolved_role,
-      "cwd" => Dir.pwd,
-      "argv" => argv,
-      "client" => start_client_metadata(argv)
-    })
-    unless live_probe && live_probe["decision"] == "reuse"
-      usage_error("dispatch target #{instance_key.inspect} does not have a live-confirmed Herdr binding; run `orbit start #{instance_key}` or use --manual-payload.")
+      "identity_verification" => "override",
+      "herdr_liveness" => "unknown",
+      "availability" => "unknown",
+      "binding_resolution" => "manual_override",
+      "canonical_pane" => options["pane"],
+      "dispatch_ready" => false,
+      "reason" => "explicit_pane_override_not_live_verified"
+    }
+    override_risks = [
+      "explicit_pane_override_not_herdr_verified",
+      "do_not_use_as_evidence_runtime_identity",
+      "target_agent_identity_not_confirmed"
+    ]
+  end
+  unless explicit_override || options["manual_payload"]
+    runtime_resolution = runtime_resolve_instance(instance_key)
+    unless runtime_resolution["identity_verification"] == "verified" && runtime_resolution["herdr_liveness"] == "alive"
+      usage_error("dispatch target #{instance_key.inspect} does not have a verified live Orbit runtime session; run `orbit start #{instance_key}` and wait for `orbit runtime register --json`, or use --manual-payload.")
     end
-    availability, availability_reason = dispatch_availability(live_probe["agent_status"])
+    availability = runtime_resolution["availability"]
+    availability_reason = runtime_resolution["availability_reason"] || runtime_resolution["liveness_reason"]
     unless availability == "available"
       usage_error("dispatch target #{instance_key.inspect} is not available: #{availability_reason || availability}. Inspect the Herdr pane before sending new work.")
     end
-    options["pane"] = live_probe["canonical_pane"].to_s.empty? ? live_probe["pane"] : live_probe["canonical_pane"]
+    unless runtime_resolution["dispatch_ready"]
+      usage_error("dispatch target #{instance_key.inspect} is not dispatch-ready: canonical pane mismatch or runtime policy blocked delivery.")
+    end
+    options["pane"] = runtime_resolution["canonical_pane"]
   end
 
   task_id = dispatch_task_label(task_path)
-  live_binding_confirmed = live_probe && live_probe["decision"] == "reuse" ? true : false
+  live_binding_confirmed = runtime_resolution && runtime_resolution["dispatch_ready"] ? true : false
   manual_artifact = options["manual_payload"] == true
   delivery_precondition_met = target_allowed && (manual_artifact || explicit_override || live_binding_confirmed)
   packet = {
@@ -541,6 +672,7 @@ def dispatch_packet(options)
     },
     "target_instance_status" => instance_status,
     "target_liveness_probe" => live_probe,
+    "target_runtime_resolution" => runtime_resolution&.reject { |key, _| %w[runtime_instance runtime_session].include?(key) },
     "target_availability" => availability,
     "context_preflight" => context_preflight_for(instance_key, task_path: task_path),
     "reply_to" => reply_to,
@@ -554,7 +686,8 @@ def dispatch_packet(options)
       "live_confirmed_for_delivery" => live_binding_confirmed,
       "explicit_override" => explicit_override,
       "manual_artifact" => manual_artifact
-    }
+    },
+    "risk" => override_risks
   }.compact
 
   packet["message"] = dispatch_message(packet)

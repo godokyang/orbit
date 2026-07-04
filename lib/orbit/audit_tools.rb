@@ -547,11 +547,12 @@ def audit_state_consistency(task_path, evidence_path, state, evidence, task = ni
   if phase == "done" && task.is_a?(Hash)
     records = evidence.is_a?(Hash) ? evidence["records"] : []
     required_evidence_kinds(task).each do |kind|
-      next if gate_passed?(records, kind, task_sha256: task_sha256)
+      gate = gate_status(records, kind, task, task_sha256: task_sha256, evidence: evidence)
+      next if gate["passed"]
 
       blocking_findings << audit_finding(
         "evidence_file.records.#{kind}",
-        "Done state requires latest #{kind} gate evidence to be pass.",
+        "Done state requires latest #{kind} gate evidence to be pass. blocking_reason=#{gate["blocking_reason"]}",
         "high",
         "让 #{kind == "review" ? "reviewer" : "tester"} 提交 pass evidence，或显式记录 waiver/residual risk 后重新审计。"
       )

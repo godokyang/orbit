@@ -2,6 +2,10 @@
 
 require_relative "core"
 require_relative "identity_rules"
+require_relative "runtime_store"
+require_relative "herdr_probe"
+require_relative "runtime_resolver"
+require_relative "runtime_commands"
 require_relative "schema_version"
 require_relative "project_profile_risk"
 require_relative "task_launch_dispatch"
@@ -20,6 +24,7 @@ require_relative "landing_governance"
 
 def run_orbit_cli(argv)
   command = argv.shift
+  runtime_maybe_piggyback!(command, argv)
 
   case command
   when nil, "-h", "--help", "help"
@@ -96,6 +101,8 @@ def run_orbit_cli(argv)
       exit 0
     end
     rules(argv)
+  when "runtime"
+    runtime(argv)
   when "start"
     if help_requested?(argv)
       print_command_help("start")

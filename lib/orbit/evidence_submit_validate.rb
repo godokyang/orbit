@@ -926,6 +926,8 @@ def evidence_submit(options)
   end
   rec_ctx = structured_role_execution_context(identity, path, task_path: options["task"], report: report, rules_context_sha256: rules_context_sha256)
   record["role_execution_context"] = rec_ctx if rec_ctx
+  runtime_identity = evidence_runtime_attribution(identity)
+  record["runtime_identity"] = runtime_identity if runtime_identity
   if report.key?("write_policy")
     wp = validate_write_policy_from_report!(report["write_policy"], kind)
     record["write_policy"] = wp if wp

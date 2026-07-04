@@ -70,6 +70,14 @@ def start_plan(options)
     "view_policy" => view_policy
   )
   creation_policy = role_creation_policy(options)
+  session_id = "ors_#{SecureRandom.hex(12)}"
+  launch_id = "orl_#{SecureRandom.hex(12)}"
+  launch_env = instance_launch_env(instance_key, instance, role_def, role_ref).merge(
+    "ORBIT_PROJECT_ROOT" => cwd,
+    "ORBIT_PROJECT_ID" => File.basename(Dir.pwd),
+    "ORBIT_SESSION_ID" => session_id,
+    "ORBIT_LAUNCH_ID" => launch_id
+  )
 
   {
     "schema_version" => "orbit-start-plan-v1",
@@ -80,10 +88,12 @@ def start_plan(options)
     "instance_alias" => instance_alias,
     "role_ref" => role_ref,
     "resolved_role" => role_def["role"] || role_ref,
+    "session_id" => session_id,
+    "launch_id" => launch_id,
     "cwd" => cwd,
     "argv" => argv,
     "client" => start_client_metadata(argv),
-    "env" => instance_launch_env(instance_key, instance, role_def, role_ref),
+    "env" => launch_env,
     "context_preflight" => context_preflight_for(instance_key),
     "instance_status" => status,
     "view" => view_policy,
@@ -118,6 +128,7 @@ def context_preflight_for(instance_key, task_path: nil)
       }.compact
     end,
     "commands" => [
+      ["orbit", "runtime", "register", "--json"],
       ["orbit", "whoami", "--json"],
       ["orbit", "rules", "resolve", *rule_task_args, "--instance", instance_key, "--json"],
       ["orbit", "rules", "print-context", *rule_task_args, "--instance", instance_key, "--json"]
@@ -421,8 +432,7 @@ def start_needs_force_result(plan, probe)
 end
 
 def start_instance_runtime_path(instance)
-  safe = instance.to_s.gsub(/[^A-Za-z0-9_.-]+/, "_")
-  File.join(Dir.pwd, ".orbit", "runtime", "instances", "#{safe}.json")
+  runtime_replacement_path(instance)
 end
 
 def start_instance_lock_path(instance)
@@ -473,13 +483,14 @@ def write_start_replacement_diagnostic!(plan, status_after_start)
     "schema_version" => "orbit-start-replacement-v1",
     "instance" => plan["instance"],
     "role" => plan["resolved_role"],
+    "new_session_id" => plan["session_id"],
     "replaced_at" => Time.now.utc.iso8601,
     "reason" => "user_forced_start_replace",
     "previous_binding" => compact_instance_binding(previous_binding),
     "new_binding" => compact_instance_binding(new_binding),
     "risk" => START_FORCE_RISKS
   }
-  write_file_atomically(path, "#{JSON.pretty_generate(payload)}\n")
+  runtime_record_replacement!(plan["instance"], payload)
   path.sub("#{Dir.pwd}/", "")
 end
 

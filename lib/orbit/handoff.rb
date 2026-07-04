@@ -107,19 +107,18 @@ def evidence_summary(evidence)
   summary
 end
 
-def latest_gate_verdicts_for_handoff(evidence, task_sha256 = nil)
+def latest_gate_verdicts_for_handoff(evidence, task_sha256 = nil, task = nil)
   records = evidence.is_a?(Hash) && evidence["records"].is_a?(Array) ? evidence["records"] : []
   %w[review test].each_with_object({}) do |kind, memo|
-    # Slice 9: use arbitration accepted record when task_sha256 is provided so stale
-    # verdicts don't surface as "pass" in handoff summaries.
-    record = if task_sha256
-               accepted_gate_record(records, kind, task_sha256)
-             else
-               latest_records_by_kind(records)[kind]
-             end
+    gate = gate_status(records, kind, task, task_sha256: task_sha256, evidence: evidence)
+    record = gate["latest"]
     memo[kind] = if record
+                   status = gate["passed"] ? record["status"] : "blocked"
                    {
-                     "status" => record["status"],
+                     "status" => status,
+                     "record_status" => record["status"],
+                     "blocking_reason" => gate["blocking_reason"],
+                     "runtime_identity_verification" => gate["runtime_identity_verification"],
                      "effective_status" => evidence_effective_verdict_status(kind, record),
                      "summary" => record["summary"],
                      "created_at" => record["created_at"],
@@ -234,7 +233,7 @@ end
 
 def closure_checklist_for_handoff(task, evidence, validation, audit_blocking, audit_warnings, task_sha256: nil)
   source_documents = task.is_a?(Hash) && task["source_documents"].is_a?(Array) ? task["source_documents"] : []
-  verdicts = latest_gate_verdicts_for_handoff(evidence, task_sha256)
+  verdicts = latest_gate_verdicts_for_handoff(evidence, task_sha256, task)
   [
     {
       "item" => "task_contract_valid",
@@ -659,7 +658,7 @@ def handoff(args)
   next_action = required_action_for_phase(current_phase, blocking_errors)
   delivery = resolve_delivery_profile
   delivery["payload"] = manual_handoff_payload(delivery, task_path, state_path, evidence_path, next_action)
-  latest_gate_verdicts = latest_gate_verdicts_for_handoff(evidence, current_task_sha256)
+  latest_gate_verdicts = latest_gate_verdicts_for_handoff(evidence, current_task_sha256, task)
   known_gaps = known_gaps_for_handoff(evidence, audit_warnings)
   runtime_summary = handoff_runtime_summary(evidence)
   reconcile_summary = runtime_reconcile_summary(evidence)

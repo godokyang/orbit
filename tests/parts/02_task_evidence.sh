@@ -40,7 +40,7 @@ expect_failure 'new-task refuses overwrite' "$CLI" new-task --implementation-aut
 json_assert 'dispatch manual payload emits delivery artifact with context preflight' "$TMPROOT/dispatch-generic.json" 'j["schema_version"] == "orbit-dispatch-v1" && j["action"] == "manual_delivery_required" && j["delivery"]["mode"] == "manual_artifact" && j["delivery"]["runtime_adapter"] == "none" && j["to_instance"] == "reviewer-main" && j["resolved_role"] == "reviewer" && j.dig("execution_contract","assigned_instance") == "reviewer-main" && j["task"] == File.expand_path(ARGV[2]) && j["message"].include?("orbit whoami --json") && !j["message"].include?("orbit whoami --task") && j["message"].include?("orbit rules print-context --task") && j["message"].include?("context_preflight.required_files") && j["context_preflight"]["commands"].include?(["orbit", "whoami", "--json"]) && j["context_preflight"]["required_files"].any? { |r| r["path"] == "SKILL.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "references/runtime/guide.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "references/runtime/quality-outcome-and-review.md" } && j["checks"]["target_allowed_by_execution_contract"] == true && j["checks"]["delivery_precondition_met"] == true && j["checks"]["manual_artifact"] == true && j["checks"]["explicit_override"] == false && j["checks"]["live_binding_confirmed"] == false && j["checks"]["live_confirmed_for_delivery"] == false' "$TASK"
 expect_failure 'dispatch rejects removed transport flag with migration guidance' "$CLI" dispatch --task "$TASK" --to reviewer-main --transport herdr --json
 "$CLI" dispatch --task "$TASK" --to reviewer-main --pane pane-123 --reply-to observer-pane --dry-run --json >"$TMPROOT/dispatch-herdr-dry-run.json"
-json_assert 'dispatch herdr dry-run emits adapter plan with explicit reply-to' "$TMPROOT/dispatch-herdr-dry-run.json" 'j["action"] == "dry_run" && j["reply_to"] == "observer-pane" && j["reply_to_source"] == "explicit_option" && j["message"].include?("reply-to:observer-pane") && j["adapter"]["schema_version"] == "orbit-herdr-dispatch-v1" && !j["adapter"].key?("submit_delay_seconds") && j["adapter"]["commands"] == [["herdr", "pane", "run", "pane-123", j["message"]]] && j["adapter"]["commands"][0][4].include?(File.expand_path(ARGV[2])) && j["checks"]["delivery_precondition_met"] == true && j["checks"]["manual_artifact"] == false && j["checks"]["explicit_override"] == true && j["checks"]["live_binding_confirmed"] == false && j["checks"]["live_confirmed_for_delivery"] == false' "$TASK"
+json_assert 'dispatch herdr dry-run emits adapter plan with explicit reply-to' "$TMPROOT/dispatch-herdr-dry-run.json" 'j["action"] == "dry_run" && j["reply_to"] == "observer-pane" && j["reply_to_source"] == "explicit_option" && j["message"].include?("reply-to:observer-pane") && j["adapter"]["schema_version"] == "orbit-herdr-dispatch-v1" && !j["adapter"].key?("submit_delay_seconds") && j["adapter"]["commands"] == [["herdr", "pane", "run", "pane-123", j["message"]]] && j["adapter"]["commands"][0][4].include?(File.expand_path(ARGV[2])) && j["checks"]["delivery_precondition_met"] == true && j["checks"]["manual_artifact"] == false && j["checks"]["explicit_override"] == true && j["checks"]["live_binding_confirmed"] == false && j["checks"]["live_confirmed_for_delivery"] == false && j.dig("target_runtime_resolution","identity_verification") == "override" && j["risk"].include?("do_not_use_as_evidence_runtime_identity")' "$TASK"
 HERDR_PANE_ID=lead-reply-pane "$CLI" dispatch --task "$TASK" --to reviewer-main --pane pane-123 --dry-run --json >"$TMPROOT/dispatch-herdr-env-reply-to.json"
 json_assert 'dispatch herdr reply-to defaults to current Herdr pane' "$TMPROOT/dispatch-herdr-env-reply-to.json" 'j["reply_to"] == "lead-reply-pane" && j["reply_to_source"] == "HERDR_PANE_ID" && j["message"].include?("reply-to:lead-reply-pane")'
 cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
@@ -67,11 +67,69 @@ if PATH="$TMPROOT/fakebin:$PATH" "$CLI" dispatch --task "$TASK" --to reviewer-ma
 fi
 json_assert 'dispatch herdr failure exits with fallback payload' "$TMPROOT/dispatch-herdr-fail.json" 'j["action"] == "failed" && j["adapter_result"]["success"] == false && j["fallback"]["delivery"] == "manual_artifact" && j["fallback"]["action"] == "manual_delivery_required" && j["fallback"]["message"].include?(File.expand_path(ARGV[2]))' "$TASK"
 "$CLI" bind-pane --instance reviewer-main --pane dispatch-live-pane --json >"$TMPROOT/dispatch-bind-reviewer.json"
+ruby --disable-gems -rjson -ryaml -rdigest -rtime -rfileutils -e '
+  roles = YAML.safe_load(File.read(".orbit/roles.yaml"), aliases: true).fetch("roles")
+  instances = YAML.safe_load(File.read(".orbit/instances.yaml"), aliases: true).fetch("instances")
+  instance = instances.fetch("reviewer-main")
+  role = roles.fetch(instance.fetch("role_ref"))
+  now = Time.now.utc.iso8601
+  session = {
+    "schema_version" => "orbit-runtime-session-v1",
+    "session_id" => "ors-dispatch-live",
+    "launch_id" => "orl-dispatch-live",
+    "state" => "active",
+    "project_root" => Dir.pwd,
+    "project_root_sha256" => Digest::SHA256.hexdigest(File.expand_path(Dir.pwd)),
+    "project_id" => File.basename(Dir.pwd),
+    "host_id" => "test-host",
+    "user" => "test-user",
+    "instance" => "reviewer-main",
+    "role" => "reviewer",
+    "role_ref" => "reviewer",
+    "role_config_sha256" => Digest::SHA256.hexdigest(JSON.generate(role)),
+    "instance_config_sha256" => Digest::SHA256.hexdigest(JSON.generate(instance)),
+    "client" => "codex",
+    "command" => "codex",
+    "herdr" => {
+      "session" => "",
+      "workspace" => "",
+      "tab" => "",
+      "pane" => "dispatch-live-pane",
+      "canonical_pane" => "dispatch-live-pane"
+    },
+    "identity" => {
+      "verification" => "herdr_verified",
+      "whoami_valid" => true,
+      "conflicts" => []
+    },
+    "created_at" => now,
+    "updated_at" => now,
+    "heartbeat" => {
+      "last_seen_at" => now,
+      "ttl_seconds" => 300
+    }
+  }
+  instance_record = {
+    "schema_version" => "orbit-runtime-instance-v1",
+    "instance" => "reviewer-main",
+    "current_session_id" => "ors-dispatch-live",
+    "current_state" => "active",
+    "previous_sessions" => [],
+    "replacement_diagnostics" => [],
+    "ack" => nil,
+    "updated_at" => now
+  }
+  FileUtils.mkdir_p(".orbit/runtime/sessions")
+  FileUtils.mkdir_p(".orbit/runtime/instances")
+  File.write(".orbit/runtime/sessions/ors-dispatch-live.json", JSON.pretty_generate(session) + "\n")
+  File.write(".orbit/runtime/instances/reviewer-main.json", JSON.pretty_generate(instance_record) + "\n")
+'
 cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
 #!/bin/sh
 case "$1 $2" in
   "agent list")
-    printf '{"result":{"agents":[{"pane_id":"dispatch-live-pane","agent":"codex","agent_status":"idle"}]}}\n'
+    ruby_pwd=$(ruby --disable-gems -e 'print Dir.pwd')
+    printf '{"result":{"agents":[{"pane_id":"dispatch-live-pane","agent":"codex","agent_status":"idle","cwd":"__PWD__"}]}}\n' | sed "s#__PWD__#$ruby_pwd#g"
     ;;
   *)
     printf 'unexpected herdr args: %s\n' "$*" >&2
@@ -81,12 +139,84 @@ esac
 HERDR
 chmod +x "$TMPROOT/fakebin/herdr"
 PATH="$TMPROOT/fakebin:$PATH" "$CLI" dispatch --task "$TASK" --to reviewer-main --dry-run --json >"$TMPROOT/dispatch-live-confirmed.json"
-json_assert 'dispatch live binding marks only probed binding as live-confirmed' "$TMPROOT/dispatch-live-confirmed.json" 'j["action"] == "dry_run" && j["checks"]["delivery_precondition_met"] == true && j["checks"]["manual_artifact"] == false && j["checks"]["explicit_override"] == false && j["checks"]["live_binding_confirmed"] == true && j["checks"]["live_confirmed_for_delivery"] == true && j["adapter"]["pane"] == "dispatch-live-pane"'
+json_assert 'dispatch verified runtime binding marks only probed binding as live-confirmed' "$TMPROOT/dispatch-live-confirmed.json" 'j["action"] == "dry_run" && j["target_runtime_resolution"]["identity_verification"] == "verified" && j["target_runtime_resolution"]["canonical_pane"] == "dispatch-live-pane" && j["checks"]["delivery_precondition_met"] == true && j["checks"]["manual_artifact"] == false && j["checks"]["explicit_override"] == false && j["checks"]["live_binding_confirmed"] == true && j["checks"]["live_confirmed_for_delivery"] == true && j["adapter"]["pane"] == "dispatch-live-pane"'
 cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
 #!/bin/sh
 case "$1 $2" in
   "agent list")
-    printf '{"result":{"agents":[{"pane_id":"dispatch-live-pane","agent":"codex"}]}}\n'
+    ruby_pwd=$(ruby --disable-gems -e 'print Dir.pwd')
+    printf '{"result":{"agents":[{"pane_id":"dispatch-live-pane","agent":"claude","agent_status":"idle","cwd":"__PWD__"}]}}\n' | sed "s#__PWD__#$ruby_pwd#g"
+    ;;
+  *)
+    printf 'unexpected herdr args: %s\n' "$*" >&2
+    exit 1
+    ;;
+esac
+HERDR
+chmod +x "$TMPROOT/fakebin/herdr"
+if PATH="$TMPROOT/fakebin:$PATH" "$CLI" dispatch --task "$TASK" --to reviewer-main --dry-run --json >"$TMPROOT/dispatch-live-wrong-agent.json" 2>"$TMPROOT/dispatch-live-wrong-agent.err"; then
+  printf 'FAIL dispatch wrong agent on verified pane: command unexpectedly succeeded\n' >&2
+  exit 1
+fi
+grep -q 'verified live Orbit runtime session' "$TMPROOT/dispatch-live-wrong-agent.err"
+pass 'dispatch refuses verified session when Herdr pane now hosts different agent identity'
+cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
+#!/bin/sh
+case "$1 $2" in
+  "agent list")
+    ruby_pwd=$(ruby --disable-gems -e 'print Dir.pwd')
+    printf '{"result":{"agents":[{"pane_id":"dispatch-live-pane","agent_status":"idle","cwd":"__PWD__"}]}}\n' | sed "s#__PWD__#$ruby_pwd#g"
+    ;;
+  *)
+    printf 'unexpected herdr args: %s\n' "$*" >&2
+    exit 1
+    ;;
+esac
+HERDR
+chmod +x "$TMPROOT/fakebin/herdr"
+if PATH="$TMPROOT/fakebin:$PATH" "$CLI" dispatch --task "$TASK" --to reviewer-main --dry-run --json >"$TMPROOT/dispatch-live-missing-client.json" 2>"$TMPROOT/dispatch-live-missing-client.err"; then
+  printf 'FAIL dispatch missing client on verified pane: command unexpectedly succeeded\n' >&2
+  exit 1
+fi
+grep -q 'verified live Orbit runtime session' "$TMPROOT/dispatch-live-missing-client.err"
+pass 'dispatch refuses verified session when Herdr agent client is missing'
+cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
+#!/bin/sh
+case "$1 $2" in
+  "agent list")
+    ruby_pwd=$(ruby --disable-gems -e 'print Dir.pwd')
+    printf '{"result":{"agents":[{"pane_id":"dispatch-live-pane","agent":"codex","agent_status":"done","cwd":"__PWD__"}]}}\n' | sed "s#__PWD__#$ruby_pwd#g"
+    ;;
+  *)
+    printf 'unexpected herdr args: %s\n' "$*" >&2
+    exit 1
+    ;;
+esac
+HERDR
+chmod +x "$TMPROOT/fakebin/herdr"
+if PATH="$TMPROOT/fakebin:$PATH" "$CLI" dispatch --task "$TASK" --to reviewer-main --dry-run --json >"$TMPROOT/dispatch-done-needs-ack.json" 2>"$TMPROOT/dispatch-done-needs-ack.err"; then
+  printf 'FAIL dispatch done target without ack: command unexpectedly succeeded\n' >&2
+  exit 1
+fi
+grep -q 'target_done_needs_inspection' "$TMPROOT/dispatch-done-needs-ack.err"
+pass 'dispatch blocks done Herdr target until owner ack'
+expect_failure 'runtime ack-session rejects non-owner identity' env ORBIT_INSTANCE=tester-main ORBIT_ROLE=tester PATH="$TMPROOT/fakebin:$PATH" "$CLI" runtime ack-session reviewer-main --json
+if PATH="$TMPROOT/fakebin:$PATH" "$CLI" dispatch --task "$TASK" --to reviewer-main --dry-run --json >"$TMPROOT/dispatch-done-after-non-owner-ack.json" 2>"$TMPROOT/dispatch-done-after-non-owner-ack.err"; then
+  printf 'FAIL dispatch done target after non-owner ack: command unexpectedly succeeded\n' >&2
+  exit 1
+fi
+grep -q 'target_done_needs_inspection' "$TMPROOT/dispatch-done-after-non-owner-ack.err"
+pass 'dispatch remains blocked after non-owner ack-session attempt'
+ORBIT_INSTANCE=lead-main ORBIT_ROLE=lead PATH="$TMPROOT/fakebin:$PATH" "$CLI" runtime ack-session reviewer-main --json >"$TMPROOT/runtime-ack-reviewer.json"
+json_assert 'runtime ack-session marks done target dispatch-ready' "$TMPROOT/runtime-ack-reviewer.json" 'j["ack"]["target_session_id"] == "ors-dispatch-live" && j["runtime_resolution"]["availability"] == "available" && j["dispatch_ready"] == true'
+PATH="$TMPROOT/fakebin:$PATH" "$CLI" dispatch --task "$TASK" --to reviewer-main --dry-run --json >"$TMPROOT/dispatch-done-after-ack.json"
+json_assert 'dispatch allows done target after owner ack' "$TMPROOT/dispatch-done-after-ack.json" 'j["action"] == "dry_run" && j["target_runtime_resolution"]["availability"] == "available" && j["checks"]["live_binding_confirmed"] == true'
+cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
+#!/bin/sh
+case "$1 $2" in
+  "agent list")
+    ruby_pwd=$(ruby --disable-gems -e 'print Dir.pwd')
+    printf '{"result":{"agents":[{"pane_id":"dispatch-live-pane","agent":"codex","cwd":"__PWD__"}]}}\n' | sed "s#__PWD__#$ruby_pwd#g"
     ;;
   *)
     printf 'unexpected herdr args: %s\n' "$*" >&2
@@ -172,8 +302,8 @@ JSON
 PATH="$TMPROOT/fakebin:$PATH" "$CLI" hook pre-start --intent-json "$TMPROOT/hook-pre-start-narrow.json" --json >"$TMPROOT/hook-pre-start-narrow.out"
 json_assert 'hook pre-start ignores caller geometry and uses Orbit Herdr probe' "$TMPROOT/hook-pre-start-narrow.out" 'j["allowed"] == true && j["recommended_action"] == "resize_or_recreate_view" && j["warnings"].include?("pane_too_narrow") && j["warnings"].include?("caller_supplied_liveness_ignored") && j.dig("target_instance_status","view_status","observed_geometry","cols") == 80'
 cp "$TMPROOT/hook-pre-start-instances-before.yaml" .orbit/instances.yaml
-mkdir -p .orbit/runtime/instances
-ruby --disable-gems -rjson -rtime -e 'p=ARGV[0]; j={"schema_version"=>"orbit-start-replacement-v1","instance"=>"reviewer-main","replaced_at"=>Time.now.utc.iso8601}; File.write(p, JSON.pretty_generate(j))' .orbit/runtime/instances/reviewer-main.json
+mkdir -p .orbit/runtime/replacements
+ruby --disable-gems -rjson -rtime -e 'p=ARGV[0]; j={"schema_version"=>"orbit-start-replacement-v1","instance"=>"reviewer-main","replaced_at"=>Time.now.utc.iso8601}; File.write(p, JSON.pretty_generate(j))' .orbit/runtime/replacements/reviewer-main.json
 cat >"$TMPROOT/hook-force-cooldown.json" <<'JSON'
 {"command":["orbit","start","reviewer-main","--force"]}
 JSON
@@ -220,6 +350,73 @@ append_review_quality_fields "$TMPROOT/structured-review.yaml"
 expect_failure 'lead cannot structured submit review evidence' env ORBIT_INSTANCE=lead-main "$CLI" evidence submit --file "$STRUCTURED_REVIEW_EVIDENCE" --report "$TMPROOT/structured-review.yaml" --json
 ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit --file "$STRUCTURED_REVIEW_EVIDENCE" --report "$TMPROOT/structured-review.yaml" --json >"$TMPROOT/evidence-submit-review.json"
 json_assert 'evidence submit records structured review verdict' "$TMPROOT/evidence-submit-review.json" 'j["schema_version"] == "orbit-evidence-submit-v1" && j["record"]["structured_submit"] == true && j["record"]["source_message_id"] == "herdr:reviewer:structured-pass" && j["record"]["coverage"].include?("review checked aggregate verdict behavior") && j["verdict"]["mode"] == "aggregate" && j["verdict"]["gates"]["review"]["structured"] == true'
+cp "$STRUCTURED_REVIEW_EVIDENCE" "$TMPROOT/replaced-runtime-evidence.json"
+ruby --disable-gems -rjson -e 'p=ARGV[0]; j=JSON.parse(File.read(p)); rec=j["records"].find { |r| r["kind"]=="review" && r["status"]=="pass" }; rec["runtime_identity"]={"verification"=>"replaced","session_id"=>"ors-replaced","source"=>"test"}; File.write(p, JSON.pretty_generate(j))' "$TMPROOT/replaced-runtime-evidence.json"
+expect_failure 'validate rejects replaced runtime gate evidence under default policy' "$CLI" validate --task "$TASK" --evidence "$TMPROOT/replaced-runtime-evidence.json" --json
+if "$CLI" wait-gate --task "$TASK" --evidence "$TMPROOT/replaced-runtime-evidence.json" --json >"$TMPROOT/replaced-runtime-wait-gate.json"; then
+  printf 'FAIL wait-gate replaced runtime: command unexpectedly succeeded\n' >&2
+  exit 1
+fi
+json_assert 'wait-gate rejects replaced runtime gate evidence' "$TMPROOT/replaced-runtime-wait-gate.json" 'j["ready"] == false && j["gates"].any? { |g| g["kind"] == "review" && g["passed"] == false && g["runtime_identity_verification"] == "replaced" && g["blocking_reason"] == "runtime_identity_replaced" } && j["gate_summary"]["not_ready"].any? { |g| g["kind"] == "review" && g["blocking_reason"] == "runtime_identity_replaced" }'
+ruby --disable-gems -ryaml -e 'task,evidence,state=ARGV; y={"schema_version"=>"orbit-loop-state-v1","project"=>File.basename(Dir.pwd),"current_task"=>File.expand_path(task),"phase"=>"done","owner_role"=>"lead","status"=>"done","updated_at"=>"2026-01-01T00:00:00Z","history"=>[],"budget"=>{},"quality_outcome_ref"=>nil,"artifacts"=>{"evidence_file"=>File.expand_path(evidence)}}; File.write(state, YAML.dump(y))' "$TASK" "$TMPROOT/replaced-runtime-evidence.json" "$TMPROOT/replaced-runtime-state.yaml"
+if "$CLI" audit --task "$TASK" --evidence "$TMPROOT/replaced-runtime-evidence.json" --state "$TMPROOT/replaced-runtime-state.yaml" --json >"$TMPROOT/replaced-runtime-audit.json"; then
+  printf 'FAIL audit replaced runtime: command unexpectedly succeeded\n' >&2
+  exit 1
+fi
+json_assert 'audit rejects replaced runtime gate evidence' "$TMPROOT/replaced-runtime-audit.json" 'j["blocking_findings"].any? { |f| f["source"] == "evidence_file.records.review" && f["message"].include?("runtime_identity_replaced") }'
+"$CLI" handoff --task "$TASK" --evidence "$TMPROOT/replaced-runtime-evidence.json" --state "$TMPROOT/replaced-runtime-state.yaml" --json >"$TMPROOT/replaced-runtime-handoff.json" 2>/dev/null || true
+json_assert 'handoff does not surface replaced runtime gate as pass' "$TMPROOT/replaced-runtime-handoff.json" 'j["gate_summary"]["ready"] == false && j.dig("latest_gate_verdicts","review","status") == "blocked" && j.dig("latest_gate_verdicts","review","blocking_reason") == "runtime_identity_replaced"'
+cp "$TASK" "$TMPROOT/strict-runtime-task.yaml"
+ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["runtime_identity_policy"]={"gate"=>"herdr_verified"}; File.write(p, YAML.dump(y))' "$TMPROOT/strict-runtime-task.yaml"
+cp "$STRUCTURED_REVIEW_EVIDENCE" "$TMPROOT/strict-runtime-manual-evidence.json"
+ruby --disable-gems -rjson -e 'p=ARGV[0]; j=JSON.parse(File.read(p)); rec=j["records"].find { |r| r["kind"]=="review" && r["status"]=="pass" }; rec["runtime_identity"]={"verification"=>"manual_runtime","source"=>"test"}; File.write(p, JSON.pretty_generate(j))' "$TMPROOT/strict-runtime-manual-evidence.json"
+expect_failure 'validate blocks manual runtime gate evidence under strict Herdr policy' "$CLI" validate --task "$TMPROOT/strict-runtime-task.yaml" --evidence "$TMPROOT/strict-runtime-manual-evidence.json" --json
+"$CLI" validate --task "$TMPROOT/strict-runtime-task.yaml" --evidence "$TMPROOT/strict-runtime-manual-evidence.json" --json >"$TMPROOT/strict-runtime-manual-validate.json" 2>/dev/null || true
+json_assert 'strict runtime validation reports runtime identity blocker' "$TMPROOT/strict-runtime-manual-validate.json" 'j["valid"] == false && j["errors"].any? { |e| e["source"].include?("runtime_identity") && e["message"].include?("Herdr-verified") }'
+cp "$TMPROOT/strict-runtime-manual-evidence.json" "$TMPROOT/strict-runtime-waived-evidence.json"
+ruby --disable-gems -rjson -rtime -rdigest -e '
+  def canonical(value)
+    case value
+    when Hash
+      value.keys.sort.each_with_object({}) { |key, memo| memo[key] = canonical(value[key]) }
+    when Array
+      value.map { |entry| canonical(entry) }
+    else
+      value
+    end
+  end
+  p = ARGV[0]
+  j = JSON.parse(File.read(p))
+  rec = j["records"].find { |r| r["kind"] == "review" && r["status"] == "pass" }
+  sha = Digest::SHA256.hexdigest(JSON.generate(canonical(rec)))
+  j["waivers"] ||= []
+  j["waivers"] << {
+    "schema_version" => "orbit-runtime-identity-waiver-v1",
+    "waiver_id" => "runtime-waiver-review",
+    "owner_role" => "lead",
+    "owner_instance" => "lead-main",
+    "accepted_by_role" => "lead",
+    "accepted_by_instance" => "lead-main",
+    "scope" => "runtime_identity:review",
+    "reason" => "Manual evidence accepted for strict runtime policy test.",
+    "risk" => "Evidence was not Herdr-verified.",
+    "replacement_evidence" => sha,
+    "task_sha256" => Digest::SHA256.file(ARGV[1]).hexdigest,
+    "evidence_record_sha256" => sha,
+    "no_expiry" => true,
+    "created_at" => Time.now.utc.iso8601,
+    "revoked_by_user_requirement" => false
+  }
+  File.write(p, JSON.pretty_generate(j))
+' "$TMPROOT/strict-runtime-waived-evidence.json" "$TMPROOT/strict-runtime-task.yaml"
+"$CLI" validate --task "$TMPROOT/strict-runtime-task.yaml" --evidence "$TMPROOT/strict-runtime-waived-evidence.json" --json >"$TMPROOT/strict-runtime-waived-validate.json"
+json_assert 'validate accepts manual runtime gate evidence with explicit runtime waiver' "$TMPROOT/strict-runtime-waived-validate.json" 'j["valid"] == true'
+cp "$TMPROOT/strict-runtime-waived-evidence.json" "$TMPROOT/strict-runtime-waiver-missing-reason.json"
+ruby --disable-gems -rjson -e 'p=ARGV[0]; j=JSON.parse(File.read(p)); j["waivers"][0].delete("reason"); File.write(p, JSON.pretty_generate(j))' "$TMPROOT/strict-runtime-waiver-missing-reason.json"
+expect_failure 'validate rejects runtime waiver missing reason under strict Herdr policy' "$CLI" validate --task "$TMPROOT/strict-runtime-task.yaml" --evidence "$TMPROOT/strict-runtime-waiver-missing-reason.json" --json
+cp "$TMPROOT/strict-runtime-waived-evidence.json" "$TMPROOT/strict-runtime-waiver-expired.json"
+ruby --disable-gems -rjson -rtime -e 'p=ARGV[0]; j=JSON.parse(File.read(p)); j["waivers"][0].delete("no_expiry"); j["waivers"][0]["expires_at"]=(Time.now.utc - 60).iso8601; File.write(p, JSON.pretty_generate(j))' "$TMPROOT/strict-runtime-waiver-expired.json"
+expect_failure 'validate rejects expired runtime waiver under strict Herdr policy' "$CLI" validate --task "$TMPROOT/strict-runtime-task.yaml" --evidence "$TMPROOT/strict-runtime-waiver-expired.json" --json
 cat >"$TMPROOT/review-missing-quality-outcome.yaml" <<'YAML'
 kind: review
 report_template_version: review-report-v1
@@ -859,6 +1056,7 @@ IMPL_EVIDENCE="$TMPROOT/implementation-evidence.json"
 ORBIT_INSTANCE=lead-main "$CLI" evidence add --file "$IMPL_EVIDENCE" --kind implementation --status pass --summary "implementation evidence passed" --task "$IMPL_TASK" >/dev/null
 ruby --disable-gems -rjson -e 'p=ARGV[0]; j=JSON.parse(File.read(p)); j["worktree_safety"]={"status"=>"not_git","reason"=>"generated test app is not a git repository","unexpected_changes"=>[]}; File.write(p, JSON.pretty_generate(j))' "$IMPL_EVIDENCE"
 "$CLI" init --force --operation-mode solo >/dev/null
+register_manual_runtime_instances
 ORBIT_INSTANCE=lead-main "$CLI" state start --task "$IMPL_TASK" >/dev/null
 "$CLI" state progress --message "implementation complete, waiting for gates" --evidence "$IMPL_EVIDENCE" >"$TMPROOT/state-progress.out" 2>"$TMPROOT/state-progress.err"
 test ! -s "$TMPROOT/state-progress.err"
@@ -1111,6 +1309,7 @@ cp "$TEST_JUDGMENT_EVIDENCE" "$BAD_TEST_JUDGMENT_EVIDENCE"
 ruby --disable-gems -rjson -e 'p=ARGV[0]; j=JSON.parse(File.read(p)); j["test_judgment"].delete("scenarios"); File.write(p, JSON.pretty_generate(j))' "$BAD_TEST_JUDGMENT_EVIDENCE"
 expect_failure 'validate rejects incomplete test judgment' "$CLI" validate --task "$EQ_TASK" --evidence "$BAD_TEST_JUDGMENT_EVIDENCE" --json
 "$CLI" init --force --operation-mode solo >/dev/null
+register_manual_runtime_instances
 ORBIT_INSTANCE=lead-main "$CLI" state start --task "$EQ_TASK" >/dev/null
 "$CLI" state show --json >"$TMPROOT/state-owner-instance.json"
 json_assert 'state start infers owner from instance' "$TMPROOT/state-owner-instance.json" 'j["phase"] == "working" && j["owner_role"] == "lead"'
@@ -1123,6 +1322,9 @@ mkdir -p "$OVERRIDE_PROJECT"
   cd "$OVERRIDE_PROJECT"
   "$CLI" init --operation-mode team >/dev/null
   ruby --disable-gems -ryaml -e 'p=".orbit/instances.yaml"; y=YAML.safe_load(File.read(p), aliases: true); y["instances"]["coder-android"]=Marshal.load(Marshal.dump(y["instances"]["coder-main"])); y["instances"]["coder-android"]["env"]={"ORBIT_INSTANCE"=>"coder-android","ORBIT_ROLE"=>"coder"}; File.write(p, YAML.dump(y))'
+  register_manual_runtime_instance lead-main lead
+  register_manual_runtime_instance coder-main coder
+  register_manual_runtime_instance coder-android coder
   "$CLI" new-task --task-type docs_improvement --output task.yaml >/dev/null
   "$CLI" evidence init --output evidence.json >/dev/null
   expect_failure 'team implementation evidence rejects role-name instance alias' env ORBIT_INSTANCE=coder "$CLI" evidence add --file evidence.json --kind implementation --status pass --summary "alias implementation" --task task.yaml

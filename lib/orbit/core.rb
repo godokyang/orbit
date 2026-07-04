@@ -101,6 +101,7 @@ HELP = <<~HELP
     orbit notice add --task PATH --event EVENT --evidence PATH [--to-instance INSTANCE] --json
     orbit notice list --role ROLE --json
     orbit notice ack --role ROLE --id ID --json
+    orbit runtime register|ping|ack-session [INSTANCE] --json
     orbit dispatch --task PATH --to INSTANCE [--pane PANE] [--reply-to PANE] [--manual-payload] [--dry-run] --json
     orbit rules resolve --json [--task PATH] [--evidence PATH] [--role ROLE] [--instance NAME] [--output PATH]
     orbit rules print-context --json [--task PATH] [--evidence PATH] [--role ROLE] [--instance NAME] [--output PATH]
@@ -130,6 +131,7 @@ HELP = <<~HELP
     instances    读取 Orbit instance binding 和 health 状态。
     new-task    根据模板创建 task contract。
     notice      管理 owner completion notice runtime inbox。
+    runtime     注册、刷新或确认 Orbit-Herdr runtime session。
     rules       解析本轮默认规则、项目规则、task 规则和 rule packs。
     start        根据 instances.yaml 启动或预览 agent instance。
     state        读取或管理 Orbit loop state。
@@ -148,6 +150,7 @@ HELP = <<~HELP
     orbit handoff --help
     orbit hook --help
     orbit notice --help
+    orbit runtime --help
     orbit rules print-context --help
     orbit rules resolve --help
     orbit validate --help
@@ -212,6 +215,19 @@ COMMAND_HELP = {
     Required:
       --text TEXT  User request or summarized request.
       --json       Emit machine-readable classification.
+  HELP
+  "runtime" => <<~HELP,
+    Usage:
+      orbit runtime register --json
+      orbit runtime ping --json
+      orbit runtime ack-session INSTANCE --json
+
+    Manages Orbit-Herdr runtime session identity.
+
+    Notes:
+      Herdr environment variables are probe input only. A session is
+      dispatch-ready only after Orbit can match runtime state with a live Herdr
+      pane/agent probe.
   HELP
   "compact-evidence" => <<~HELP,
     Usage:

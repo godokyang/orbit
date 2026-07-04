@@ -275,6 +275,33 @@ def evidence_identity_snapshot(identity)
   }.compact
 end
 
+def evidence_runtime_attribution(identity)
+  return nil unless identity.is_a?(Hash)
+
+  instance = (identity["resolved_instance"] || identity["instance"]).to_s
+  return nil if instance.empty?
+
+  resolution = runtime_resolve_instance(instance)
+  if resolution["identity_verification"] == "verified"
+    {
+      "verification" => "herdr_verified",
+      "session_id" => resolution["session_id"],
+      "herdr_pane" => resolution["canonical_pane"],
+      "source" => "runtime_resolver"
+    }.compact
+  else
+    verification = resolution["identity_verification"].to_s
+    verification = "absent" if verification.empty?
+    verification = "replaced" if verification == "stale" && resolution["state"].to_s == "replaced"
+    {
+      "verification" => verification,
+      "session_id" => resolution["session_id"],
+      "source" => "runtime_resolver",
+      "resolution" => resolution["identity_verification"]
+    }.compact
+  end
+end
+
 def structured_role_execution_context(identity, evidence_path, task_path: nil, report: nil, rules_context_sha256: nil)
   return nil unless identity.is_a?(Hash)
 
@@ -705,6 +732,10 @@ def evidence_add(options)
     rec_ctx = structured_role_execution_context(identity, path, task_path: options["task"])
     record["role_execution_context"] = rec_ctx if rec_ctx
   end
+  if %w[implementation review test].include?(options["kind"])
+    runtime_identity = evidence_runtime_attribution(identity || evidence_runtime_identity!)
+    record["runtime_identity"] = runtime_identity if runtime_identity
+  end
   # Slice 10: parse --decision-record (JSON/YAML string or @file) and attach to record.
   if options["decision_record"]
     dr_source = options["decision_record"]
@@ -923,6 +954,8 @@ def evidence_from_report(options)
     end
     rec_ctx = structured_role_execution_context(identity, path, task_path: options["task"], report: report)
     record["role_execution_context"] = rec_ctx if rec_ctx
+    runtime_identity = evidence_runtime_attribution(identity)
+    record["runtime_identity"] = runtime_identity if runtime_identity
     validate_evidence_record_shape!(record, "Evidence record")
 
     updated_manifest = update_evidence_manifest(path) do |manifest|

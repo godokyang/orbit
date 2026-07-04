@@ -438,7 +438,8 @@ def instance_status_entry(name, instance, role_ref, role_def)
   binding_state = instance_binding_state(binding)
   liveness, liveness_reason = instance_liveness_for_binding(binding)
   view_status = instance_view_status(view, binding)
-  {
+  runtime_resolution = runtime_resolve_instance(name)
+  entry = {
     "instance" => name,
     "role_ref" => role_ref,
     "resolved_role" => role_def["role"] || role_ref,
@@ -448,10 +449,22 @@ def instance_status_entry(name, instance, role_ref, role_def)
     "liveness" => liveness,
     "liveness_reason" => liveness_reason,
     "availability" => instance_availability_for_liveness(liveness),
+    "identity_verification" => runtime_resolution["identity_verification"],
+    "dispatch_ready" => runtime_resolution["dispatch_ready"],
+    "canonical_pane" => runtime_resolution["canonical_pane"],
+    "runtime_resolution" => runtime_resolution.reject { |key, _| %w[runtime_instance runtime_session].include?(key) },
     "herdr" => binding,
     "view" => view,
     "view_status" => view_status
   }
+  if runtime_resolution["binding_resolution"] == "repaired"
+    entry["config_write"] = "not_written"
+    entry["repair_binding_command"] = ["orbit", "instances", "status", "--repair-binding", "--json"]
+    entry["diagnostics"] = [
+      "Stored Herdr binding is stale or missing. Runtime session is verified; pass --repair-binding to update .orbit/instances.yaml."
+    ]
+  end
+  entry
 end
 
 def load_project_instance_config_for_cli
@@ -472,22 +485,60 @@ def parse_instances_args(args)
   usage_error("Unknown instances subcommand: #{subcommand}") unless subcommand == "status"
 
   json = false
+  repair_binding = false
   until args.empty?
     arg = args.shift
     case arg
     when "--json"
       json = true
+    when "--repair-binding"
+      repair_binding = true
     else
       usage_error("Unknown instances #{subcommand} option: #{arg}")
     end
   end
 
   usage_error("instances status currently requires --json") unless json
-  { "subcommand" => subcommand, "json" => json }
+  { "subcommand" => subcommand, "json" => json, "repair_binding" => repair_binding }
 end
 
-def instances_status_result
+def repair_instance_binding_from_runtime!(instance_name)
+  resolution = runtime_resolve_instance(instance_name)
+  return nil unless resolution["binding_resolution"] == "repaired"
+  return nil unless resolution["identity_verification"] == "verified"
+  return nil unless resolution["herdr_liveness"] == "alive"
+
+  session = resolution["runtime_session"]
+  herdr = session.is_a?(Hash) ? (session["herdr"] || {}) : {}
+  canonical = herdr["canonical_pane"].to_s
+  canonical = resolution["canonical_pane"].to_s if canonical.empty?
+  return nil if canonical.empty?
+
+  write_instance_binding!(
+    instance_name,
+    pane: canonical,
+    tab: herdr["tab"].to_s,
+    workspace: herdr["workspace"].to_s,
+    canonical_pane: canonical
+  )
+  {
+    "instance" => instance_name,
+    "session_id" => resolution["session_id"],
+    "canonical_pane" => canonical,
+    "config_write" => "written"
+  }
+end
+
+def instances_status_result(repair_binding: false)
   roles, instances = load_project_instance_config_for_cli[0, 2]
+  repairs = []
+  if repair_binding
+    instances.keys.each do |name|
+      repair = repair_instance_binding_from_runtime!(name)
+      repairs << repair if repair
+    end
+    roles, instances = load_project_instance_config_for_cli[0, 2]
+  end
   entries = instances.map do |name, instance|
     usage_error("Instance #{name.inspect} must be a mapping.") unless instance.is_a?(Hash)
     role_ref = instance["role_ref"]
@@ -501,6 +552,8 @@ def instances_status_result
   {
     "schema_version" => "orbit-instances-status-v1",
     "project" => File.basename(Dir.pwd),
+    "config_write" => repair_binding ? "requested" : "not_written",
+    "config_repairs" => repairs,
     "instances" => entries
   }
 end
@@ -509,7 +562,7 @@ def instances(args)
   options = parse_instances_args(args)
   case options["subcommand"]
   when "status"
-    puts JSON.pretty_generate(instances_status_result)
+    puts JSON.pretty_generate(instances_status_result(repair_binding: options["repair_binding"]))
   else
     usage_error("Unknown instances subcommand: #{options["subcommand"]}")
   end
@@ -601,13 +654,26 @@ def bind_pane(args)
   end
 
   entry = instance_status_entry(instance_key, instance, role_ref, role_def)
+  entry["identity_verification"] = "absent"
+  entry["dispatch_ready"] = false
+  entry["runtime_resolution"] = {
+    "identity_verification" => "absent",
+    "dispatch_ready" => false,
+    "binding_resolution" => "manual_hint",
+    "reason" => "bind-pane writes a manual Herdr hint only; run orbit runtime register --json from the target agent to verify identity."
+  }
   puts JSON.pretty_generate({
     "schema_version" => "orbit-bind-pane-v1",
     "project" => File.basename(Dir.pwd),
     "instance" => instance_key,
     "requested_instance" => options["instance"],
     "instance_alias" => instance_alias,
-    "status" => entry
+    "status" => entry,
+    "identity_verification" => "absent",
+    "dispatch_ready" => false,
+    "next" => [
+      "请在目标 agent pane 内运行 orbit runtime register --json"
+    ]
   }.compact)
 end
 

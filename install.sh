@@ -124,6 +124,8 @@ done
 [ -n "$bin_dir" ] || fail "bin directory is empty"
 [ -n "$runtime_dir" ] || fail "runtime directory is empty"
 command -v ruby >/dev/null 2>&1 || fail "ruby is required but was not found in PATH"
+command -v herdr >/dev/null 2>&1 || fail "Herdr is required for Orbit automatic runtime. Install Herdr first: curl -fsSL https://herdr.dev/install.sh | sh && herdr --version"
+herdr --version >/dev/null 2>&1 || fail 'Herdr was found but `herdr --version` failed. Fix Herdr, then rerun the Orbit installer.'
 
 raw_base="${ORBIT_RAW_BASE:-https://raw.githubusercontent.com/godokyang/orbit/${ORBIT_REF}}"
 target_cli="$runtime_dir/scripts/orbit"
@@ -137,6 +139,10 @@ lib/orbit/cli.rb
 lib/orbit/core.rb
 lib/orbit/identity_rules.rb
 lib/orbit/identity_rules_context.rb
+lib/orbit/runtime_store.rb
+lib/orbit/herdr_probe.rb
+lib/orbit/runtime_resolver.rb
+lib/orbit/runtime_commands.rb
 lib/orbit/schema_version.rb
 lib/orbit/task_launch_dispatch.rb
 lib/orbit/task_herdr_probe.rb

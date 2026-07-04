@@ -263,6 +263,7 @@ def validate_evidence(result, evidence_path, task = nil, task_sha256: nil)
     end
     validate_implementation_records_for_task(result, records, task) if task
     validate_implementation_overrides_for_task(result, records, task) if task
+    validate_runtime_identity_policy_for_task(result, records, evidence, task, task_sha256) if task
   end
 
   verdict = evidence["verdict"]
@@ -308,6 +309,111 @@ def validate_required_gate_evidence(result, records, task, task_sha256 = nil)
 
   required_evidence_kinds(task).each do |expected_kind|
     validate_gate_verdict(result, records.is_a?(Array) ? records : [], expected_kind, task, task_sha256: task_sha256)
+  end
+end
+
+def task_requires_herdr_verified_runtime_gate?(task)
+  return false unless task.is_a?(Hash)
+
+  policy = task["runtime_identity_policy"] || task["runtime_policy"]
+  return false unless policy.is_a?(Hash)
+
+  policy["require_herdr_verified_gate"] == true ||
+    policy["gate"] == "herdr_verified" ||
+    policy["mode"] == "herdr_verified"
+end
+
+def runtime_identity_record_gate_kind(record)
+  kind = record["kind"].to_s
+  return "implementation" if kind == "implementation"
+  return "review" if kind == "review"
+  return "test" if kind == "test"
+
+  nil
+end
+
+RUNTIME_IDENTITY_WAIVER_SCHEMA = "orbit-runtime-identity-waiver-v1"
+
+def runtime_identity_waiver_expiry_valid?(waiver)
+  return true if waiver["no_expiry"] == true
+
+  expires_at = waiver["expires_at"].to_s
+  return false if expires_at.empty?
+
+  Time.iso8601(expires_at) > Time.now.utc
+rescue ArgumentError
+  false
+end
+
+def runtime_identity_waiver_matches?(waiver, task_sha256, record, gate_kind)
+  return false unless waiver.is_a?(Hash)
+  return false unless waiver["schema_version"].to_s == RUNTIME_IDENTITY_WAIVER_SCHEMA
+  return false if waiver["revoked_by_user_requirement"] == true
+
+  scope = waiver["scope"].to_s
+  return false unless ["runtime_identity", "runtime_identity:#{gate_kind}", "herdr_verified_runtime"].include?(scope)
+  return false unless waiver["task_sha256"].to_s == task_sha256.to_s
+  return false if waiver["owner_role"].to_s.empty? || waiver["owner_instance"].to_s.empty?
+  return false unless waiver["accepted_by_role"].to_s == waiver["owner_role"].to_s
+  return false unless waiver["accepted_by_instance"].to_s == waiver["owner_instance"].to_s
+  return false if waiver["reason"].to_s.empty? || waiver["risk"].to_s.empty?
+
+  replacement = waiver["replacement_evidence"].to_s
+  record_sha = stable_record_sha256(record)
+  return false unless waiver["evidence_record_sha256"].to_s == record_sha
+  source_report = record["source_report"].to_s
+  source_message = record["source_message_id"].to_s
+  return false unless [record_sha, source_report, source_message].any? { |value| !value.empty? && replacement.include?(value) }
+
+  runtime_identity_waiver_expiry_valid?(waiver)
+end
+
+def runtime_identity_has_explicit_waiver?(evidence, task_sha256, record, gate_kind)
+  Array(evidence["waivers"]).any? { |waiver| runtime_identity_waiver_matches?(waiver, task_sha256, record, gate_kind) }
+end
+
+RUNTIME_GATE_BLOCKING_VERIFICATIONS = %w[pending identity_pending stale replaced mismatch absent override].freeze
+
+def runtime_identity_gate_blocking_reason(record, evidence = nil, task = nil, task_sha256 = nil, gate_kind = nil)
+  return nil unless record.is_a?(Hash)
+  return nil unless record["status"] == "pass"
+
+  kind = gate_kind || runtime_identity_record_gate_kind(record)
+  return nil unless kind
+
+  verification = record.dig("runtime_identity", "verification").to_s
+  return "runtime_identity_#{verification.empty? ? "missing" : verification}" if RUNTIME_GATE_BLOCKING_VERIFICATIONS.include?(verification)
+
+  strict_runtime = task_requires_herdr_verified_runtime_gate?(task)
+  return nil unless strict_runtime
+  return nil if verification == "herdr_verified"
+  return nil if runtime_identity_has_explicit_waiver?(evidence || {}, task_sha256, record, kind)
+
+  "runtime_identity_#{verification.empty? ? "missing" : verification}"
+end
+
+def validate_runtime_identity_policy_for_task(result, records, evidence, task, task_sha256 = nil)
+  strict_runtime = task_requires_herdr_verified_runtime_gate?(task)
+
+  records.each_with_index do |record, index|
+    next unless record.is_a?(Hash) && record["status"] == "pass"
+
+    gate_kind = runtime_identity_record_gate_kind(record)
+    next unless gate_kind
+
+    verification = record.dig("runtime_identity", "verification").to_s
+    if RUNTIME_GATE_BLOCKING_VERIFICATIONS.include?(verification)
+      validation_error(result, "evidence_file.records[#{index}].runtime_identity",
+        "#{gate_kind} pass record cannot close a gate with runtime_identity #{verification.inspect}; only herdr_verified, manual_runtime under default policy, or an explicit runtime waiver is allowed.")
+      next
+    end
+    next unless strict_runtime
+
+    next if verification == "herdr_verified"
+    next if runtime_identity_has_explicit_waiver?(evidence, task_sha256, record, gate_kind)
+
+    validation_error(result, "evidence_file.records[#{index}].runtime_identity",
+      "Task requires Herdr-verified runtime gate evidence; #{gate_kind} pass record has runtime_identity #{verification.empty? ? "missing" : verification.inspect} without explicit runtime waiver.")
   end
 end
 
@@ -387,7 +493,7 @@ end
 def gate_passed?(records, kind, task_sha256: nil)
   result = { "errors" => [], "warnings" => [] }
   latest = latest_valid_gate_record(result, records, kind, task_sha256)
-  latest&.fetch("status", nil) == "pass"
+  latest&.fetch("status", nil) == "pass" && runtime_identity_gate_blocking_reason(latest, nil, nil, task_sha256, kind).nil?
 end
 
 def parse_wait_gate_args(args)
@@ -419,7 +525,7 @@ def parse_wait_gate_args(args)
   options
 end
 
-def gate_status(records, kind, task = nil, task_sha256: nil)
+def gate_status(records, kind, task = nil, task_sha256: nil, evidence: nil)
   evidence_record_kind = GATE_KIND_EVIDENCE_RECORD_KIND[kind] || kind
   # Slice 9: arbitration is authoritative for which record can pass the gate.
   # When a current task_sha256 is supplied, a stale (old task sha) verdict is ignored and
@@ -469,6 +575,7 @@ def gate_status(records, kind, task = nil, task_sha256: nil)
   stale_blocked = stale_task_sha256 && write_policy_enforcement == "strict"
   missing_rules_context_sha256 = latest.is_a?(Hash) && latest["structured_submit"] == true && expected_gate_role(kind) != nil && stored_rules_context_sha256.nil?
   rules_context_blocked = missing_rules_context_sha256 && write_policy_enforcement == "strict"
+  runtime_identity_blocking_reason = latest.is_a?(Hash) ? runtime_identity_gate_blocking_reason(latest, evidence || {}, task, task_sha256, kind) : nil
   blocking_reason = if latest.nil? && stale_verdict_only
                       "stale_verdict"
                     elsif latest.nil?
@@ -479,6 +586,8 @@ def gate_status(records, kind, task = nil, task_sha256: nil)
                       "malformed_role_execution_context"
                     elsif !identity_valid
                       "identity_mismatch"
+                    elsif runtime_identity_blocking_reason
+                      runtime_identity_blocking_reason
                     elsif !quality_evidence_fields_ok
                       "missing_evidence_level"
                     elsif wrong_gate_kind_level
@@ -505,7 +614,7 @@ def gate_status(records, kind, task = nil, task_sha256: nil)
     "required" => true,
     "status" => display_status,
     "record_status" => status,
-    "passed" => !stale_verdict_only && status == "pass" && !stale_after_implementation && !malformed_rec_ctx && identity_valid && quality_evidence_fields_ok && !wrong_gate_kind_level && evidence_level_ok && quality_outcome_ok && required_questions_ok && !write_policy_blocked && !task_sha256_blocked && !stale_blocked && !rules_context_blocked,
+    "passed" => !stale_verdict_only && status == "pass" && !stale_after_implementation && !malformed_rec_ctx && identity_valid && runtime_identity_blocking_reason.nil? && quality_evidence_fields_ok && !wrong_gate_kind_level && evidence_level_ok && quality_outcome_ok && required_questions_ok && !write_policy_blocked && !task_sha256_blocked && !stale_blocked && !rules_context_blocked,
     "structured" => latest.is_a?(Hash) ? latest["structured_submit"] == true : false,
     "evidence_level" => actual_evidence_level,
     "minimum_evidence_level" => minimum_evidence_level,
@@ -518,6 +627,8 @@ def gate_status(records, kind, task = nil, task_sha256: nil)
     "identity_expected_role" => expected_role,
     "identity_resolved_role" => identity_role,
     "identity_valid" => identity_valid,
+    "runtime_identity_verification" => latest.is_a?(Hash) ? latest.dig("runtime_identity", "verification") : nil,
+    "runtime_identity_blocking_reason" => runtime_identity_blocking_reason,
     "malformed_role_execution_context" => malformed_rec_ctx ? true : nil,
     "missing_task_sha256" => missing_task_sha256 ? true : nil,
     "stale_task_sha256" => stale_task_sha256 ? true : nil,
@@ -540,7 +651,7 @@ end
 
 def required_gate_summary(task, evidence, task_sha256: nil)
   records = evidence.is_a?(Hash) && evidence["records"].is_a?(Array) ? evidence["records"] : []
-  gates = required_evidence_kinds(task).map { |kind| gate_status(records, kind, task, task_sha256: task_sha256) }
+  gates = required_evidence_kinds(task).map { |kind| gate_status(records, kind, task, task_sha256: task_sha256, evidence: evidence) }
   missing_or_blocked = gates.reject { |gate| gate["passed"] }.map do |gate|
     {
       "kind" => gate["kind"],
@@ -569,7 +680,7 @@ def wait_gate(args)
   implementation_result = { "errors" => [] }
   validate_implementation_records_for_task(implementation_result, records, task)
   kinds = required_evidence_kinds(task)
-  gates = kinds.map { |kind| gate_status(records, kind, task, task_sha256: current_task_sha256) }
+  gates = kinds.map { |kind| gate_status(records, kind, task, task_sha256: current_task_sha256, evidence: evidence) }
   implementation_errors = implementation_result["errors"]
   ready = gates.all? { |gate| gate["passed"] } && implementation_errors.empty?
   arbitration_summary = verdict_arbitration_summary(task, evidence, current_task_sha256)

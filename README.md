@@ -389,22 +389,23 @@ orbit start tester-main --dry-run --json
 
 如果 `.orbit/instances.yaml` 里已经绑定了 pane，Orbit 只把它当成 wake/create 的目标 hint，不能把静态 binding 当成当前 agent 还活着的证明。`start`、`instances status`、`dispatch` 和 gate-closing evidence 都需要按需解析 runtime session 和 Herdr live facts；如果 binding stale 但能找回唯一 verified session，Orbit 可以修复本地 runtime pointer，只有显式 `instances status --repair-binding --json` 才写回版本化 config。
 
-把 task 发给指定 pane：
+把 task 发给 live verified runtime participant：
 
 ```bash
 orbit dispatch \
   --task .orbit/tasks/current-task.yaml \
-  --to reviewer \
-  --pane <pane-id> \
+  --to reviewer-main \
   --json
 ```
+
+只有在明确接受风险时才传 `--pane <pane-id>` 做人工 override；它不会被标记为 Herdr-verified identity。
 
 没有 live verified runtime participant 时，生成手动投递 payload：
 
 ```bash
 orbit dispatch \
   --task .orbit/tasks/current-task.yaml \
-  --to reviewer \
+  --to reviewer-main \
   --manual-payload \
   --json
 ```

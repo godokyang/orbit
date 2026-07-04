@@ -998,6 +998,33 @@ def validate_waiver(result, source, waiver)
     return
   end
 
+  if waiver["schema_version"].to_s == "orbit-runtime-identity-waiver-v1"
+    %w[
+      waiver_id
+      owner_role
+      owner_instance
+      accepted_by_role
+      accepted_by_instance
+      reason
+      risk
+      scope
+      replacement_evidence
+      created_at
+      task_sha256
+      evidence_record_sha256
+    ].each do |field|
+      validate_non_empty_string(result, "#{source}.#{field}", waiver[field], "Runtime identity waiver #{field}")
+    end
+
+    unless waiver["no_expiry"] == true || !waiver["expires_at"].to_s.empty?
+      validation_error(result, "#{source}.expires_at", "Runtime identity waiver must define expires_at or no_expiry: true.")
+    end
+    if waiver.key?("revoked_by_user_requirement") && ![true, false].include?(waiver["revoked_by_user_requirement"])
+      validation_error(result, "#{source}.revoked_by_user_requirement", "Waiver revoked_by_user_requirement must be true or false.")
+    end
+    return
+  end
+
   %w[owner scope reason risk replacement_evidence expiry created_at].each do |field|
     validate_non_empty_string(result, "#{source}.#{field}", waiver[field], "Waiver #{field}")
   end

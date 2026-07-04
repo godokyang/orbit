@@ -169,12 +169,27 @@ test_environment:
 YAML
 }
 
+register_manual_runtime_instance() {
+  local instance="$1"
+  local role="$2"
+  env -u HERDR_ENV -u HERDR_PANE_ID -u HERDR_SESSION_ID -u HERDR_SESSION -u HERDR_TAB_ID -u HERDR_WORKSPACE_ID -u ORBIT_SESSION_ID -u ORBIT_LAUNCH_ID \
+    ORBIT_INSTANCE="$instance" ORBIT_ROLE="$role" "$CLI" runtime register --json >"$TMPROOT/manual-runtime-${instance}.json"
+  json_assert "manual runtime registers ${instance}" "$TMPROOT/manual-runtime-${instance}.json" 'j["identity_verification"] == "manual_runtime" && j["runtime_session"]["state"] == "active" && j["runtime_session"].dig("identity", "verification") == "manual_runtime"'
+}
+
+register_manual_runtime_instances() {
+  for pair in lead-main:lead reviewer-main:reviewer tester-main:tester; do
+    register_manual_runtime_instance "${pair%%:*}" "${pair##*:}"
+  done
+}
+
 
 # ---------------------------------------------------------------------------
 # Test parts (sourced to share TMPROOT/PASS_COUNT/CLI state)
 # ---------------------------------------------------------------------------
 PARTS_DIR="$SCRIPT_DIR/parts"
 source "$PARTS_DIR/01_installer.sh"
+register_manual_runtime_instances
 source "$PARTS_DIR/02_task_evidence.sh"
 source "$PARTS_DIR/03_validate.sh"
 source "$PARTS_DIR/04_schema_version.sh"
