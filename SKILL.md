@@ -7,7 +7,7 @@ metadata:
 
 # Orbit
 
-Orbit 是面向 AI agent 的任务闭环协议。当前官方 automatic runtime 只支持 Herdr；非 Herdr 环境仍可手动执行 Orbit protocol，但不能使用 automatic start、direct dispatch、Herdr notice delivery 或 Herdr-verified runtime identity。这个 skill 的职责是让当前 agent 在项目里感知 Orbit 边界，并在进入正式执行闭环时自动执行 Orbit 流程：确认身份、建立任务合同、记录证据、推进状态、触发 review/test gate、生成交接。
+Orbit 是面向 AI agent 的任务闭环协议。当前官方 automatic runtime 只支持 Herdr；非 Herdr 环境仍可手动执行 Orbit protocol，但不能使用 automatic start、direct dispatch 或 Herdr-verified runtime identity。notice 当前只是 `.orbit/runtime/notices` 下的 protocol record / inbox，不是 Herdr pane delivery。这个 skill 的职责是让当前 agent 在项目里感知 Orbit 边界，并在进入正式执行闭环时自动执行 Orbit 流程：确认身份、建立任务合同、记录证据、推进状态、触发 review/test gate、生成交接。
 
 ## 何时触发
 
@@ -52,7 +52,7 @@ Orbit 是面向 AI agent 的任务闭环协议。当前官方 automatic runtime 
    - 如果没有可用 CLI，只能做只读本地文件诊断，并说明 role/config 检查来自文件和 reference，而不是 CLI 解析结果；不要写正式 task/evidence/gate-closing record。
 3. 进入正式 Orbit 闭环后，agent 必须自己运行常规 Orbit 命令，不要要求用户代跑：
    - 用 `orbit whoami --json` 解析身份。
-   - 需要 reviewer/tester 或其他 role gate 前，先用 `orbit instances status --json` 或 `orbit start INSTANCE --json` 走 runtime resolver。`.orbit/instances.yaml` 的 binding 只是 last-known hint，不是 alive proof；只有输出明确 `dispatch_ready: true` 且 runtime identity verified 时，才能 direct dispatch。否则按 resolver remediation 处理；常规手动路径是 `orbit dispatch --manual-payload` 生成 manual protocol artifact，只有 stale/conflict/replacement 场景且用户或 owner 接受替换风险时才用 `orbit start INSTANCE --force`。
+   - 需要 reviewer/tester 或其他 role gate 前，先用 `orbit instances status --json` 或 `orbit start INSTANCE --json` 走 runtime resolver。`.orbit/instances.yaml` 的 binding 只是 last-known hint，不是 alive proof；只有 resolver 输出明确 `dispatch_ready: true` 时，才能 direct dispatch。不要自行用 Herdr env、pane、client、binding 或旧 session file 判断 verified。否则按 resolver remediation 处理；常规手动路径是 `orbit dispatch --manual-payload` 生成 manual protocol artifact，只有 stale/conflict/replacement 场景且用户或 owner 接受替换风险时才用 `orbit start INSTANCE --force`。
    - 用 `orbit rules resolve --task task.yaml --output .orbit/rules/current-resolution.json --json` 生成本轮规则解析审计产物；还没有 task 时先用 `orbit rules resolve --output .orbit/rules/current-resolution.json --json`。
    - 用 `orbit rules print-context --task task.yaml --output .orbit/rules/current-context.json --json` 生成本轮读取清单，并读取其中 `required_files`；还没有 task 时先用 `orbit rules print-context --output .orbit/rules/current-context.json --json`。项目规则不得替代默认规则。
    - 用 `orbit new-task` 创建 task contract。
