@@ -151,7 +151,7 @@ grep -q 'orbit docs alias --id ID --path PATH' "$TMPROOT/help.txt"
 grep -q 'orbit audit' "$TMPROOT/help.txt"
 grep -q 'orbit dispatch' "$TMPROOT/help.txt"
 grep -q 'orbit handoff' "$TMPROOT/help.txt"
-grep -q 'orbit runtime register|ping|ack-session' "$TMPROOT/help.txt"
+grep -q 'orbit runtime register|ack-session' "$TMPROOT/help.txt"
 grep -Fq 'orbit dispatch --task PATH --to INSTANCE [--pane PANE] [--reply-to PANE] [--manual-payload] [--dry-run] --json' "$TMPROOT/help.txt"
 grep -Fq 'orbit handoff --task PATH --state PATH --evidence PATH [--output PATH] [--record-state] --json' "$TMPROOT/help.txt"
 grep -Fq 'orbit rules print-context --json [--task PATH] [--evidence PATH] [--role ROLE] [--instance NAME] [--output PATH]' "$TMPROOT/help.txt"
@@ -167,7 +167,6 @@ pass 'help lists implemented commands without stderr'
 "$CLI" runtime --help >"$TMPROOT/runtime-help.txt" 2>"$TMPROOT/runtime-help.err"
 test ! -s "$TMPROOT/runtime-help.err"
 grep -Fq 'orbit runtime register --json' "$TMPROOT/runtime-help.txt"
-grep -Fq 'orbit runtime ping --json' "$TMPROOT/runtime-help.txt"
 grep -Fq 'orbit runtime ack-session INSTANCE --json' "$TMPROOT/runtime-help.txt"
 pass 'runtime subcommand help works'
 
@@ -293,14 +292,20 @@ pass 'init creates config from templates'
 "$CLI" instances status --json >"$TMPROOT/instances-status.json"
 json_assert 'instances status defaults user-managed unbound instances to startable Herdr binding' "$TMPROOT/instances-status.json" 'j["schema_version"] == "orbit-instances-status-v1" && j["instances"].any? { |i| i["instance"] == "reviewer-main" && i["management"] == "user_managed" && i["binding"] == "unbound" && i["liveness"] == "not_alive" && i["liveness_reason"] == "no_binding" && i["availability"] == "missing" && i["herdr"]["adapter"] == "herdr" && i["view"]["min_columns"] == 120 && i["view_status"]["too_narrow"].nil? }'
 ORBIT_INSTANCE=lead-main HERDR_PANE_ID=manual-pane "$CLI" runtime register --json >"$TMPROOT/runtime-register-no-pending.json"
-json_assert 'runtime register without pending launch does not produce Herdr-verified identity' "$TMPROOT/runtime-register-no-pending.json" 'j["identity_verification"] != "verified" && j["dispatch_ready"] == false && j["runtime_session"]["identity"]["verification"] != "herdr_verified"'
+json_assert 'runtime register without pending launch does not produce Herdr-verified identity' "$TMPROOT/runtime-register-no-pending.json" 'j["identity_verification"] == "identity_pending_unbound" && j["dispatch_ready"] == false && j["runtime_session"]["identity"]["verification"] != "herdr_verified"'
+ruby --disable-gems -rjson -e 'p=".orbit/runtime/instances/lead-main.json"; if File.exist?(p); j=JSON.parse(File.read(p)); abort(JSON.pretty_generate(j)) unless j["current_session_id"].to_s.empty?; end'
+pass 'runtime register without pending launch does not update current session pointer'
 mkdir -p "$TMPROOT/fakebin"
 cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
 #!/bin/sh
 case "$1 $2" in
   "agent list")
     ruby_pwd=$(ruby --disable-gems -e 'print Dir.pwd')
-    printf '{"result":{"agents":[{"pane_id":"register-pane","agent":"codex","agent_status":"idle","cwd":"__PWD__"}]}}\n' | sed "s#__PWD__#$ruby_pwd#g"
+    if [ "${ORBIT_FAKE_HERDR_REGISTER_MODE:-}" = "empty" ]; then
+      printf '{"result":{"agents":[]}}\n'
+    else
+      printf '{"result":{"agents":[{"pane_id":"register-pane","agent":"codex","agent_status":"idle","cwd":"__PWD__"}]}}\n' | sed "s#__PWD__#$ruby_pwd#g"
+    fi
     ;;
   *)
     printf 'unexpected herdr args: %s\n' "$*" >&2
@@ -342,9 +347,9 @@ ruby --disable-gems -rjson -ryaml -rdigest -rtime -rfileutils -e '
       "heartbeat" => {"last_seen_at"=>now, "ttl_seconds"=>300}
     }) + "\n")
   end
-' ors-register-ok ors-register-bad-launch ors-config-drift ors-project-drift ors-session-mismatch ors-reentry ors-piggyback
-ORBIT_INSTANCE=lead-main ORBIT_ROLE=lead ORBIT_SESSION_ID=ors-register-ok ORBIT_LAUNCH_ID=orl-ors-register-ok HERDR_SESSION_ID=hs-register HERDR_PANE_ID=register-pane PATH="$TMPROOT/fakebin:$PATH" "$CLI" runtime register --json >"$TMPROOT/runtime-register-verified.json"
-json_assert 'runtime register verifies only matching pending Herdr session' "$TMPROOT/runtime-register-verified.json" 'j["identity_verification"] == "verified" && j["dispatch_ready"] == true && j["runtime_session"]["identity"]["verification"] == "herdr_verified"'
+  ' ors-register-ok ors-register-bad-launch ors-config-drift ors-project-drift ors-session-mismatch ors-probe-pending ors-wrong-pane ors-reentry ors-piggyback
+ORBIT_INSTANCE=lead-main ORBIT_ROLE=lead ORBIT_SESSION_ID=ors-register-ok ORBIT_LAUNCH_ID=orl-ors-register-ok HERDR_SESSION_ID=hs-register HERDR_PANE_ID=register-pane PATH="$TMPROOT/fakebin:$PATH" "$CLI" runtime register --json >"$TMPROOT/runtime-register-correct-pane-spoof.json"
+json_assert 'runtime register does not verify even when env claims the matching Herdr pane' "$TMPROOT/runtime-register-correct-pane-spoof.json" 'j["identity_verification"] == "pending" && j["dispatch_ready"] == false && j["runtime_session"]["state"] == "pending" && j["runtime_session"]["identity"]["verification"] == "identity_pending"'
 expect_failure 'runtime register refuses forged session id without pending store record' env ORBIT_INSTANCE=lead-main ORBIT_ROLE=lead ORBIT_SESSION_ID=ors-forged-missing ORBIT_LAUNCH_ID=orl-ors-forged-missing HERDR_SESSION_ID=hs-register HERDR_PANE_ID=register-pane PATH="$TMPROOT/fakebin:$PATH" "$CLI" runtime register --json
 expect_failure 'runtime register refuses wrong launch id' env ORBIT_INSTANCE=lead-main ORBIT_ROLE=lead ORBIT_SESSION_ID=ors-register-bad-launch ORBIT_LAUNCH_ID=wrong-launch HERDR_SESSION_ID=hs-register HERDR_PANE_ID=register-pane PATH="$TMPROOT/fakebin:$PATH" "$CLI" runtime register --json
 cp .orbit/instances.yaml "$TMPROOT/instances-before-register-config-drift.yaml"
@@ -354,16 +359,20 @@ cp "$TMPROOT/instances-before-register-config-drift.yaml" .orbit/instances.yaml
 ruby --disable-gems -rjson -e 'p=".orbit/runtime/sessions/ors-project-drift.json"; j=JSON.parse(File.read(p)); j["project_root_sha256"]="wrong-project-root"; File.write(p, JSON.pretty_generate(j))'
 expect_failure 'runtime register refuses cross-checkout project hash drift' env ORBIT_INSTANCE=lead-main ORBIT_ROLE=lead ORBIT_SESSION_ID=ors-project-drift ORBIT_LAUNCH_ID=orl-ors-project-drift HERDR_SESSION_ID=hs-register HERDR_PANE_ID=register-pane PATH="$TMPROOT/fakebin:$PATH" "$CLI" runtime register --json
 expect_failure 'runtime register refuses named Herdr session namespace mismatch' env ORBIT_INSTANCE=lead-main ORBIT_ROLE=lead ORBIT_SESSION_ID=ors-session-mismatch ORBIT_LAUNCH_ID=orl-ors-session-mismatch HERDR_SESSION_ID=wrong-herdr-session HERDR_PANE_ID=register-pane PATH="$TMPROOT/fakebin:$PATH" "$CLI" runtime register --json
+ORBIT_FAKE_HERDR_REGISTER_MODE=empty ORBIT_INSTANCE=lead-main ORBIT_ROLE=lead ORBIT_SESSION_ID=ors-probe-pending ORBIT_LAUNCH_ID=orl-ors-probe-pending HERDR_SESSION_ID=hs-register HERDR_PANE_ID=register-pane PATH="$TMPROOT/fakebin:$PATH" "$CLI" runtime register --json >"$TMPROOT/runtime-register-probe-pending.json"
+json_assert 'runtime register keeps identity pending when Herdr probe is not ready' "$TMPROOT/runtime-register-probe-pending.json" 'j["identity_verification"] == "pending" && j["dispatch_ready"] == false && j["runtime_session"]["state"] == "pending" && j["runtime_session"]["identity"]["verification"] == "identity_pending"'
+ORBIT_INSTANCE=lead-main ORBIT_ROLE=lead ORBIT_SESSION_ID=ors-wrong-pane ORBIT_LAUNCH_ID=orl-ors-wrong-pane HERDR_SESSION_ID=hs-register HERDR_PANE_ID=attacker-pane PATH="$TMPROOT/fakebin:$PATH" "$CLI" runtime register --json >"$TMPROOT/runtime-register-wrong-pane.json"
+json_assert 'runtime register does not verify pending session from a different current pane' "$TMPROOT/runtime-register-wrong-pane.json" 'j["identity_verification"] == "pending" && j["dispatch_ready"] == false && j["runtime_session"]["state"] == "pending" && j["runtime_session"]["identity"]["verification"] == "identity_pending"'
 ORBIT_INSTANCE=lead-main ORBIT_ROLE=lead ORBIT_SESSION_ID=ors-reentry ORBIT_LAUNCH_ID=orl-ors-reentry HERDR_SESSION_ID=hs-register HERDR_PANE_ID=register-pane ORBIT_RUNTIME_REFRESHING=1 PATH="$TMPROOT/fakebin:$PATH" "$CLI" whoami --json >"$TMPROOT/piggyback-reentry-whoami.json"
 ruby --disable-gems -rjson -e 'j=JSON.parse(File.read(".orbit/runtime/sessions/ors-reentry.json")); abort(JSON.pretty_generate(j)) unless j.dig("identity","verification") == "identity_pending" && j["state"] == "pending"'
 pass 'Herdr Orbit command skips piggyback under runtime refresh reentry guard'
 ORBIT_INSTANCE=lead-main ORBIT_ROLE=lead ORBIT_SESSION_ID=ors-piggyback ORBIT_LAUNCH_ID=orl-ors-piggyback HERDR_SESSION_ID=hs-register HERDR_PANE_ID=register-pane PATH="$TMPROOT/fakebin:$PATH" "$CLI" whoami --json >"$TMPROOT/piggyback-whoami.json"
-ruby --disable-gems -rjson -e 'j=JSON.parse(File.read(".orbit/runtime/sessions/ors-piggyback.json")); abort(JSON.pretty_generate(j)) unless j.dig("identity","verification") == "herdr_verified" && j["state"] == "active"'
-pass 'Herdr Orbit command piggybacks pending runtime registration'
+ruby --disable-gems -rjson -e 'j=JSON.parse(File.read(".orbit/runtime/sessions/ors-piggyback.json")); abort(JSON.pretty_generate(j)) unless j.dig("identity","verification") == "identity_pending" && j["state"] == "pending"'
+pass 'Herdr Orbit command piggybacks pending runtime registration without trusting env pane'
 ruby --disable-gems -rjson -e 'p=".orbit/runtime/sessions/ors-piggyback.json"; j=JSON.parse(File.read(p)); j["heartbeat"]["last_seen_at"]="2000-01-01T00:00:00Z"; File.write(p, JSON.pretty_generate(j))'
-ORBIT_INSTANCE=lead-main ORBIT_ROLE=lead ORBIT_SESSION_ID=ors-piggyback ORBIT_LAUNCH_ID=orl-ors-piggyback HERDR_SESSION_ID=hs-register HERDR_PANE_ID=register-pane PATH="$TMPROOT/fakebin:$PATH" "$CLI" whoami --json >"$TMPROOT/piggyback-ping-whoami.json"
+ORBIT_INSTANCE=lead-main ORBIT_ROLE=lead ORBIT_SESSION_ID=ors-piggyback ORBIT_LAUNCH_ID=orl-ors-piggyback HERDR_SESSION_ID=hs-register HERDR_PANE_ID=register-pane PATH="$TMPROOT/fakebin:$PATH" "$CLI" whoami --json >"$TMPROOT/piggyback-refresh-whoami.json"
 ruby --disable-gems -rjson -e 'j=JSON.parse(File.read(".orbit/runtime/sessions/ors-piggyback.json")); abort(JSON.pretty_generate(j)) unless j.dig("heartbeat","last_seen_at") != "2000-01-01T00:00:00Z"'
-pass 'Herdr Orbit command piggybacks verified runtime ping'
+pass 'Herdr Orbit command refreshes pending registration without producing verified heartbeat'
 rm -rf .orbit/runtime
 yaml_assert 'init creates user-managed Herdr instance bindings and sibling view by default' .orbit/instances.yaml 'j["instances"].values.all? { |i| i["management"] == "user_managed" && i["binding"].is_a?(Hash) && i["binding"]["adapter"] == "herdr" && !i["binding"].key?("view") && i["view"].is_a?(Hash) && !i.key?("transport") }'
 cp .orbit/instances.yaml "$TMPROOT/instances-before-workspace-only.yaml"
@@ -427,17 +436,22 @@ ruby --disable-gems -rjson -ryaml -rdigest -rtime -rfileutils -e '
   }) + "\n")
 '
 PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer-main --dry-run --json >"$TMPROOT/start-reviewer-reuse-discovered.json"
-json_assert 'start reuses unique verified runtime session even when binding is missing' "$TMPROOT/start-reviewer-reuse-discovered.json" 'j["action"] == "reuse_discovered" && j["dispatch_ready"] == true && j["runtime_session"]["session_id"] == "ors-runtime-only" && j["reuse_probe"]["canonical_pane"] == "runtime-only-pane"'
+json_assert 'start ignores handwritten herdr_verified runtime session without trusted caller proof' "$TMPROOT/start-reviewer-reuse-discovered.json" 'j["action"] == "dry_run" && j["dispatch_ready"].nil? && j.dig("instance_status","runtime_resolution","binding_resolution") == "missing" && j.dig("instance_status","runtime_resolution","identity_verification") == "absent"'
+ruby --disable-gems -rjson -e 'p=".orbit/runtime/sessions/ors-runtime-only.json"; j=JSON.parse(File.read(p)); j["heartbeat"]["last_seen_at"]="2000-01-01T00:00:00Z"; File.write(p, JSON.pretty_generate(j))'
+ruby --disable-gems -rjson -rtime -e 'p=".orbit/runtime/sessions/ors-runtime-only.json"; j=JSON.parse(File.read(p)); now=Time.now.utc.iso8601; j["heartbeat"]["last_seen_at"]=now; j["updated_at"]=now; File.write(p, JSON.pretty_generate(j))'
 ruby --disable-gems -rjson -e 'src=".orbit/runtime/sessions/ors-runtime-only.json"; dst=".orbit/runtime/sessions/ors-runtime-duplicate.json"; j=JSON.parse(File.read(src)); j["session_id"]="ors-runtime-duplicate"; j["launch_id"]="orl-runtime-duplicate"; j["herdr"]["pane"]="runtime-duplicate-pane"; j["herdr"]["canonical_pane"]="runtime-duplicate-pane"; File.write(dst, JSON.pretty_generate(j))'
 rm -f .orbit/runtime/instances/reviewer-main.json
 if ORBIT_FAKE_HERDR_RUNTIME_MODE=ambiguous PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer-main --dry-run --json >"$TMPROOT/start-reviewer-ambiguous-runtime.json" 2>"$TMPROOT/start-reviewer-ambiguous-runtime.err"; then
-  printf 'FAIL start ambiguous runtime sessions: command unexpectedly succeeded\n' >&2
+  :
+else
+  printf 'FAIL start untrusted runtime sessions: command unexpectedly failed\n' >&2
+  cat "$TMPROOT/start-reviewer-ambiguous-runtime.err" >&2
   exit 1
 fi
-json_assert 'start with no binding refuses ambiguous verified runtime sessions' "$TMPROOT/start-reviewer-ambiguous-runtime.json" 'j["action"] == "needs_attention" && j["reason"] == "ambiguous_verified_runtime_sessions" && j.dig("instance_status","runtime_resolution","binding_resolution") == "ambiguous" && j.dig("instance_status","runtime_resolution","candidates").length == 2'
+json_assert 'start ignores ambiguous handwritten herdr_verified runtime sessions without trusted caller proof' "$TMPROOT/start-reviewer-ambiguous-runtime.json" 'j["action"] == "dry_run" && j.dig("instance_status","runtime_resolution","binding_resolution") == "missing" && j.dig("instance_status","runtime_resolution","identity_verification") == "absent"'
 rm -f .orbit/runtime/sessions/ors-runtime-duplicate.json .orbit/runtime/instances/reviewer-main.json
 PATH="$TMPROOT/fakebin:$PATH" "$CLI" instances status --json >"$TMPROOT/instances-status-repaired-not-written.json"
-json_assert 'instances status reports repaired runtime binding without config write' "$TMPROOT/instances-status-repaired-not-written.json" 'reviewer = j["instances"].find { |entry| entry["instance"] == "reviewer-main" }; j["config_write"] == "not_written" && reviewer["runtime_resolution"]["binding_resolution"] == "repaired" && reviewer["config_write"] == "not_written" && reviewer["repair_binding_command"] == ["orbit", "instances", "status", "--repair-binding", "--json"]'
+json_assert 'instances status ignores handwritten herdr_verified runtime session without trusted caller proof' "$TMPROOT/instances-status-repaired-not-written.json" 'reviewer = j["instances"].find { |entry| entry["instance"] == "reviewer-main" }; j["config_write"] == "not_written" && reviewer["runtime_resolution"]["binding_resolution"] == "missing" && reviewer["runtime_resolution"]["identity_verification"] == "absent" && reviewer["repair_binding_command"].nil?'
 yaml_assert 'instances status without repair-binding does not write config' .orbit/instances.yaml 'j["instances"]["reviewer-main"]["binding"]["pane"].to_s.empty?'
 cp .orbit/instances.yaml "$TMPROOT/instances-before-runtime-hash-drift.yaml"
 ruby --disable-gems -rjson -rtime -rfileutils -e 'FileUtils.mkdir_p(".orbit/runtime/instances"); File.write(".orbit/runtime/instances/reviewer-main.json", JSON.pretty_generate({"schema_version"=>"orbit-runtime-instance-v1","instance"=>"reviewer-main","current_session_id"=>"ors-runtime-only","current_state"=>"active","previous_sessions"=>[],"replacement_diagnostics"=>[],"ack"=>nil,"updated_at"=>Time.now.utc.iso8601}))'
@@ -445,20 +459,15 @@ ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases
 PATH="$TMPROOT/fakebin:$PATH" "$CLI" instances status --json >"$TMPROOT/instances-status-runtime-hash-drift.json"
 json_assert 'runtime resolver rejects verified session after instance config hash drift' "$TMPROOT/instances-status-runtime-hash-drift.json" 'reviewer = j["instances"].find { |entry| entry["instance"] == "reviewer-main" }; reviewer["runtime_resolution"]["identity_verification"] == "mismatch" && reviewer["runtime_resolution"]["liveness_reason"] == "instance_config_hash_mismatch" && reviewer["dispatch_ready"] == false'
 cp "$TMPROOT/instances-before-runtime-hash-drift.yaml" .orbit/instances.yaml
-expect_failure 'runtime ping rejects session from another instance' env ORBIT_INSTANCE=lead-main ORBIT_ROLE=lead ORBIT_SESSION_ID=ors-runtime-only "$CLI" runtime ping --json
-ruby --disable-gems -rjson -e 'p=".orbit/runtime/instances/lead-main.json"; if File.exist?(p); j=JSON.parse(File.read(p)); abort(JSON.pretty_generate(j)) if j["current_session_id"].to_s == "ors-runtime-only"; end'
-pass 'runtime ping does not poison current pointer with another instance session'
 PATH="$TMPROOT/fakebin:$PATH" "$CLI" instances status --repair-binding --json >"$TMPROOT/instances-status-repair-written.json"
-json_assert 'instances status repair-binding writes repaired config' "$TMPROOT/instances-status-repair-written.json" 'j["config_write"] == "requested" && j["config_repairs"].any? { |r| r["instance"] == "reviewer-main" && r["canonical_pane"] == "runtime-only-pane" && r["config_write"] == "written" }'
-yaml_assert 'instances status repair-binding writes canonical pane to config' .orbit/instances.yaml 'j["instances"]["reviewer-main"]["binding"]["pane"] == "runtime-only-pane" && j["instances"]["reviewer-main"]["binding"]["canonical_pane"] == "runtime-only-pane"'
+json_assert 'instances status repair-binding does not write untrusted runtime session to config' "$TMPROOT/instances-status-repair-written.json" 'j["config_write"] == "requested" && !j["config_repairs"].any? { |r| r["instance"] == "reviewer-main" }'
+yaml_assert 'instances status repair-binding leaves config unchanged for untrusted runtime session' .orbit/instances.yaml 'j["instances"]["reviewer-main"]["binding"]["pane"].to_s.empty? && j["instances"]["reviewer-main"]["binding"]["canonical_pane"].to_s.empty?'
 rm -rf .orbit/runtime
-expect_failure 'start rejects removed allow-create flag with migration guidance' "$CLI" start reviewer-main --allow-create --dry-run --json
 for role in lead-main reviewer-main tester-main; do
   "$CLI" bind-pane --instance "$role" --pane "concurrent-$role" --json >"$TMPROOT/concurrent-bind-$role.json" &
 done
 wait
 yaml_assert 'concurrent bind-pane preserves all Herdr instance bindings' .orbit/instances.yaml 'j["instances"]["lead-main"]["binding"]["pane"] == "concurrent-lead-main" && j["instances"]["reviewer-main"]["binding"]["pane"] == "concurrent-reviewer-main" && j["instances"]["tester-main"]["binding"]["pane"] == "concurrent-tester-main"'
-expect_failure 'bind-pane rejects removed transport flag with migration guidance' "$CLI" bind-pane --instance reviewer-main --pane pane-reviewer --transport herdr --json
 "$CLI" bind-pane --instance reviewer-main --pane pane-reviewer --json >"$TMPROOT/bind-pane-reviewer-main.json"
 json_assert 'bind-pane records reviewer Herdr binding as manual hint only' "$TMPROOT/bind-pane-reviewer-main.json" 'j["schema_version"] == "orbit-bind-pane-v1" && j["instance"] == "reviewer-main" && j["identity_verification"] == "absent" && j["dispatch_ready"] == false && j["status"]["binding"] == "bound" && j["status"]["liveness"] == "unknown" && j["status"]["herdr"]["pane"] == "pane-reviewer"'
 mkdir -p "$TMPROOT/fakebin"
@@ -496,7 +505,7 @@ esac
 HERDR
 chmod +x "$TMPROOT/fakebin/herdr"
 PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer-main --dry-run --json >"$TMPROOT/start-reviewer-reuse.json"
-json_assert 'start does not reuse Herdr binding without verified runtime identity' "$TMPROOT/start-reviewer-reuse.json" 'j["action"] == "started_identity_pending" && j["reason"] == "binding_agent_found_but_runtime_identity_unverified" && j["dispatch_ready"] == false && j["reuse_probe"]["agent_detected"] == true && j["reuse_probe"]["agent"] == "codex" && j["runtime_resolution"]["identity_verification"] == "absent" && j["next"].any? { |n| n["request_agent"].to_s.include?("orbit runtime register --json") } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "SKILL.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "references/runtime/guide.md" }'
+json_assert 'start does not reuse Herdr binding without verified runtime identity' "$TMPROOT/start-reviewer-reuse.json" 'j["action"] == "started_identity_pending" && j["reason"] == "binding_agent_found_but_runtime_identity_unverified" && j["dispatch_ready"] == false && j["reuse_probe"]["agent_detected"] == true && j["reuse_probe"]["agent"] == "codex" && j["runtime_resolution"]["identity_verification"] == "absent" && j["next"].any? { |n| n["manual_payload"].to_s.include?("trusted caller-pane proof") } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "SKILL.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "references/runtime/guide.md" }'
 cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
 #!/bin/sh
 case "$1 $2" in
@@ -773,7 +782,7 @@ kill "$START_LOCK_PID" 2>/dev/null || true
 wait "$START_LOCK_PID" 2>/dev/null || true
 json_assert 'start force refuses concurrent replacement when instance lock is held' "$TMPROOT/start-reviewer-force-lock-busy.json" 'j["action"] == "needs_attention" && j["reason"] == "start_in_progress" && j["liveness_reason"].include?("another forced start")'
 "$CLI" start reviewer-main --dry-run --json >"$TMPROOT/start-reviewer-main.json"
-json_assert 'start dry-run resolves instance command env cwd client and context metadata' "$TMPROOT/start-reviewer-main.json" 'j["schema_version"] == "orbit-start-plan-v1" && j["action"] == "dry_run" && j["adapter"] == "herdr" && j["instance"] == "reviewer-main" && j["argv"] == ["codex"] && j["client"]["expected_client"] == "codex" && j["client"]["full_permission"]["known_client"] == true && j["client"]["full_permission"]["configured"] == false && j["env"]["ORBIT_INSTANCE"] == "reviewer-main" && j["env"]["ORBIT_ROLE"] == "reviewer" && j["env"]["ORBIT_SESSION_ID"].is_a?(String) && j["env"]["ORBIT_LAUNCH_ID"].is_a?(String) && j["cwd"] == Dir.pwd && j["context_preflight"]["commands"][0] == ["orbit", "runtime", "register", "--json"] && j["context_preflight"]["required_files"].any? { |r| r["path"] == "SKILL.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "references/runtime/guide.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "references/runtime/quality-outcome-and-review.md" }'
+json_assert 'start dry-run resolves instance command env cwd client and context metadata' "$TMPROOT/start-reviewer-main.json" 'j["schema_version"] == "orbit-start-plan-v1" && j["action"] == "dry_run" && j["adapter"] == "herdr" && j["instance"] == "reviewer-main" && j["argv"] == ["codex"] && j["client"]["expected_client"] == "codex" && j["client"]["full_permission"]["known_client"] == true && j["client"]["full_permission"]["configured"] == false && j["env"]["ORBIT_INSTANCE"] == "reviewer-main" && j["env"]["ORBIT_ROLE"] == "reviewer" && j["env"]["ORBIT_SESSION_ID"].is_a?(String) && j["env"]["ORBIT_LAUNCH_ID"].is_a?(String) && j["cwd"] == Dir.pwd && j["context_preflight"]["commands"][0] == ["orbit", "whoami", "--json"] && !j["context_preflight"]["commands"].include?(["orbit", "runtime", "register", "--json"]) && j["context_preflight"]["required_files"].any? { |r| r["path"] == "SKILL.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "references/runtime/guide.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "references/runtime/quality-outcome-and-review.md" }'
 "$CLI" start reviewer-main --dry-run >"$TMPROOT/start-reviewer-human.txt" 2>"$TMPROOT/start-reviewer-human.err"
 test ! -s "$TMPROOT/start-reviewer-human.err"
 grep -q 'Orbit start plan:' "$TMPROOT/start-reviewer-human.txt"

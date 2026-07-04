@@ -6,8 +6,7 @@
 # replaceable), and stale-verdict blocking across all gate-trust paths.
 # Gate pass/block decisions are arbitration-aware: a stale (old task sha)
 # verdict is ignored and cannot close the gate in wait-gate, validate, audit,
-# or handoff. Records without a stored task_sha256 (legacy evidence) are still
-# accepted for backward compatibility.
+# or handoff. Records without a stored task_sha256 cannot close the gate.
 # ---------------------------------------------------------------------------
 
 # S9_TASK is a review task (standard enforcement).
@@ -28,7 +27,7 @@ ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit \
 # Mutate the record's stored task_sha256 to simulate a verdict for an OLD task revision.
 ruby --disable-gems -rjson -e 'p=ARGV[0]; j=JSON.parse(File.read(p)); r=j["records"].find { |x| x["kind"]=="review" }; ctx=r["role_execution_context"] || {}; ctx["task_sha256"]="0"*64; r["role_execution_context"]=ctx; File.write(p, JSON.pretty_generate(j))' "$S9_STALE_EVIDENCE"
 
-# wait-gate runs (standard enforcement still accepts latest record, but arbitration reports stale).
+# wait-gate runs and reports the old task revision as stale.
 "$CLI" wait-gate --task "$S9_TASK" --evidence "$S9_STALE_EVIDENCE" --json >"$TMPROOT/s9-wait-gate-stale.json" 2>/dev/null || true
 json_assert 'arbitration reports stale_records for old task sha' "$TMPROOT/s9-wait-gate-stale.json" \
   'va = j["verdict_arbitration"]["gates"].find { |g| g["gate"] == "review" }; va["stale_records"].is_a?(Array) && !va["stale_records"].empty? && va["has_stale"] == true'

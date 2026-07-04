@@ -547,12 +547,12 @@ def evidence_has_user_confirmation?(evidence)
   records.is_a?(Array) && records.any? { |record| user_confirmation_record?(record) }
 end
 
-def validate_design_coding_ready_evidence!(evidence_path)
+def validate_design_coding_ready_evidence!(evidence_path, task = nil)
   state_error("Design transition to user_confirmed/coding_ready requires --evidence.") if evidence_path.nil? || evidence_path.empty?
 
   evidence = load_evidence_manifest(File.expand_path(evidence_path))
   records = evidence["records"].is_a?(Array) ? evidence["records"] : []
-  state_error("Design transition requires structured review pass evidence.") unless gate_passed?(records, "review")
+  state_error("Design transition requires structured review pass evidence.") unless gate_passed?(records, "review", task: task, evidence: evidence)
   state_error("Design transition requires user_confirmed evidence from the user confirmation step.") unless evidence_has_user_confirmation?(evidence)
 end
 
@@ -572,7 +572,7 @@ def validate_design_transition!(previous_phase, target_phase, task, evidence_pat
     state_error("Invalid design transition #{previous_phase} -> #{target_phase}; expected previous phase one of #{allowed_previous.join("|")}.")
   end
 
-  validate_design_coding_ready_evidence!(evidence_path) if %w[user_confirmed coding_ready].include?(target_phase)
+  validate_design_coding_ready_evidence!(evidence_path, task) if %w[user_confirmed coding_ready].include?(target_phase)
 end
 
 def state_progress(options)

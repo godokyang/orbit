@@ -20,10 +20,10 @@ ruby --disable-gems -ryaml -e \
    y["quality_question_answers"]=[{"id"=>"outcome","verdict"=>"pass","evidence"=>"only outcome answered"}]
    File.write(p, YAML.dump(y))' \
   "$DR_PARTIAL_REPORT"
-# evidence submit succeeds (submit does not have task context; task-aware check is in validate/wait-gate)
+# evidence submit succeeds with explicit task context; required question coverage is checked by validate/wait-gate.
 DR_PARTIAL_EVIDENCE="$TMPROOT/slice2-dr-partial-evidence.json"
 "$CLI" evidence init --output "$DR_PARTIAL_EVIDENCE" >/dev/null
-ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit --file "$DR_PARTIAL_EVIDENCE" --report "$DR_PARTIAL_REPORT" --json >/dev/null
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit --file "$DR_PARTIAL_EVIDENCE" --report "$DR_PARTIAL_REPORT" --task "$DR_RQ_TASK" --json >/dev/null
 # validate and wait-gate must reject partial required_questions coverage
 expect_failure 'validate rejects design_readiness review pass with incomplete required questions' "$CLI" validate --task "$DR_RQ_TASK" --evidence "$DR_PARTIAL_EVIDENCE" --json
 if "$CLI" wait-gate --task "$DR_RQ_TASK" --evidence "$DR_PARTIAL_EVIDENCE" --json >"$TMPROOT/slice2-dr-partial-wait.json" 2>/dev/null; then
@@ -35,7 +35,7 @@ json_assert 'design_readiness wait-gate reports required_questions_not_met for i
   'j["ready"] == false && j["gate_summary"]["not_ready"].any? { |g| g["kind"] == "design_readiness" && g["blocking_reason"] == "required_questions_not_met" }'
 
 # Submit with full required questions, then verify wait-gate passes; then corrupt one answer and verify it blocks
-ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit --file "$DR_RQ_EVIDENCE" --report "$TMPROOT/design-readiness-review-pass.yaml" --json >/dev/null
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit --file "$DR_RQ_EVIDENCE" --report "$TMPROOT/design-readiness-review-pass.yaml" --task "$DR_RQ_TASK" --json >/dev/null
 "$CLI" wait-gate --task "$DR_RQ_TASK" --evidence "$DR_RQ_EVIDENCE" --json >"$TMPROOT/slice2-dr-rq-pass.json"
 json_assert 'design_readiness gate passes with full required_questions coverage' "$TMPROOT/slice2-dr-rq-pass.json" \
   'j["ready"] == true && j["gates"].any? { |g| g["kind"] == "design_readiness" && g["passed"] == true }'
@@ -303,4 +303,3 @@ yaml_assert 'state progress --parent-state updates parent_goal_status.state in t
 yaml_assert 'state progress --active-slice updates parent_goal_status.active_slice in task file' \
   "$S3_PROGRESS_TASK" \
   'j["parent_goal_status"]["active_slice"] == "S1"'
-

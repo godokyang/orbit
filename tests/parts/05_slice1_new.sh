@@ -55,7 +55,7 @@ test_environment:
   ux_quality: not_applicable
   artifact_quality: artifact path is stable and small
 YAML
-ORBIT_INSTANCE=tester-main "$CLI" evidence submit --file "$BELOW_MIN_TEST_EVIDENCE" --report "$TMPROOT/below-min-test-report.yaml" --json >/dev/null
+ORBIT_INSTANCE=tester-main "$CLI" evidence submit --file "$BELOW_MIN_TEST_EVIDENCE" --report "$TMPROOT/below-min-test-report.yaml" --task "$TEST_TASK" --json >/dev/null
 if "$CLI" wait-gate --task "$TEST_TASK" --evidence "$BELOW_MIN_TEST_EVIDENCE" --json >"$TMPROOT/wait-gate-below-min-test.json"; then
   printf 'FAIL test gate rejects mechanical_check below real_path_test minimum: command unexpectedly succeeded\n' >&2
   exit 1
@@ -77,7 +77,7 @@ write_review_pass_report "$TMPROOT/design-readiness-review-pass.yaml" "Design re
 ruby --disable-gems -ryaml -e \
   'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["evidence_level"]="implementation_readiness"; y["implementation_readiness_verdict"]="pass"; File.write(p, YAML.dump(y))' \
   "$TMPROOT/design-readiness-review-pass.yaml"
-ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit --file "$DESIGN_READINESS_EVIDENCE" --report "$TMPROOT/design-readiness-review-pass.yaml" --json >/dev/null
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit --file "$DESIGN_READINESS_EVIDENCE" --report "$TMPROOT/design-readiness-review-pass.yaml" --task "$DESIGN_GATE_TASK" --json >/dev/null
 "$CLI" wait-gate --task "$DESIGN_GATE_TASK" --evidence "$DESIGN_READINESS_EVIDENCE" --json >"$TMPROOT/wait-gate-design-readiness.json"
 json_assert 'design_readiness gate is satisfied by review evidence record' \
   "$TMPROOT/wait-gate-design-readiness.json" \
@@ -126,7 +126,7 @@ counterexample_cases:
 implementation_readiness_verdict: not_checked
 YAML
 expect_failure 'evidence submit rejects pass without residual_risk' \
-  env ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit --file "$MISSING_RESIDUAL_EVIDENCE" --report "$TMPROOT/missing-residual-report.yaml" --json
+  env ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit --file "$MISSING_RESIDUAL_EVIDENCE" --report "$TMPROOT/missing-residual-report.yaml" --task "$TASK" --json
 
 # Fix 4: new-task reviewer creates review_strategy.minimum_evidence_level: outcome_quality
 REVIEWER_NEW_TASK="$TMPROOT/reviewer-new-task.yaml"
@@ -197,7 +197,7 @@ test_environment:
   ux_quality: not_applicable
   artifact_quality: artifact path is stable and small
 YAML
-ORBIT_INSTANCE=tester-main "$CLI" evidence submit --file "$RELEASE_EVIDENCE" --report "$TMPROOT/release-pass-report.yaml" --json >/dev/null
+ORBIT_INSTANCE=tester-main "$CLI" evidence submit --file "$RELEASE_EVIDENCE" --report "$TMPROOT/release-pass-report.yaml" --task "$RELEASE_GATE_TASK" --json >/dev/null
 "$CLI" wait-gate --task "$RELEASE_GATE_TASK" --evidence "$RELEASE_EVIDENCE" --json >"$TMPROOT/wait-gate-release.json"
 json_assert 'release gate is satisfied by tester test evidence with release_readiness level' \
   "$TMPROOT/wait-gate-release.json" \
@@ -220,7 +220,7 @@ RELEASE_HANDOFF_TASK="$TMPROOT/release-handoff-task.yaml"
 "$CLI" new-task --implementation-authority tester --assigned-instance tester-main --task-type implementation_test --output "$RELEASE_HANDOFF_TASK" >/dev/null
 RELEASE_HANDOFF_EVIDENCE="$TMPROOT/release-handoff-evidence.json"
 "$CLI" evidence init --output "$RELEASE_HANDOFF_EVIDENCE" >/dev/null
-ORBIT_INSTANCE=tester-main "$CLI" evidence submit --file "$RELEASE_HANDOFF_EVIDENCE" --report "$TMPROOT/release-pass-report.yaml" --json >/dev/null
+ORBIT_INSTANCE=tester-main "$CLI" evidence submit --file "$RELEASE_HANDOFF_EVIDENCE" --report "$TMPROOT/release-pass-report.yaml" --task "$RELEASE_HANDOFF_TASK" --json >/dev/null
 RELEASE_HANDOFF_STATE="$TMPROOT/release-handoff-state.yaml"
 cp .orbit/loop-state.yaml "$RELEASE_HANDOFF_STATE"
 ruby --disable-gems -ryaml -e \
@@ -254,7 +254,7 @@ ruby --disable-gems -ryaml -e \
   "$RELEASE_AUDIT_TASK"
 RELEASE_AUDIT_EVIDENCE="$TMPROOT/release-audit-evidence.json"
 "$CLI" evidence init --output "$RELEASE_AUDIT_EVIDENCE" >/dev/null
-ORBIT_INSTANCE=tester-main "$CLI" evidence submit --file "$RELEASE_AUDIT_EVIDENCE" --report "$TMPROOT/release-pass-report.yaml" --json >/dev/null
+ORBIT_INSTANCE=tester-main "$CLI" evidence submit --file "$RELEASE_AUDIT_EVIDENCE" --report "$TMPROOT/release-pass-report.yaml" --task "$RELEASE_AUDIT_TASK" --json >/dev/null
 "$CLI" init --force --operation-mode solo >/dev/null
 ORBIT_INSTANCE=lead-main "$CLI" state start --task "$RELEASE_AUDIT_TASK" >/dev/null
 ruby --disable-gems -ryaml -e \
@@ -273,7 +273,7 @@ ruby --disable-gems -ryaml -e \
   "$DESIGN_AUDIT_TASK"
 DESIGN_AUDIT_EVIDENCE="$TMPROOT/design-audit-evidence.json"
 "$CLI" evidence init --output "$DESIGN_AUDIT_EVIDENCE" >/dev/null
-ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit --file "$DESIGN_AUDIT_EVIDENCE" --report "$TMPROOT/design-readiness-review-pass.yaml" --json >/dev/null
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit --file "$DESIGN_AUDIT_EVIDENCE" --report "$TMPROOT/design-readiness-review-pass.yaml" --task "$DESIGN_AUDIT_TASK" --json >/dev/null
 ORBIT_INSTANCE=lead-main "$CLI" state start --task "$DESIGN_AUDIT_TASK" >/dev/null
 ruby --disable-gems -ryaml -e \
   'p=ARGV[0]; s=YAML.safe_load(File.read(p), aliases: true); s["phase"]="done"; s["status"]="done"; s["artifacts"]||={}; s["artifacts"]["evidence_file"]=File.expand_path(ARGV[1]); File.write(p, YAML.dump(s))' \
@@ -352,7 +352,7 @@ json_assert 'audit includes quality_outcome_summary with gate verdicts' \
 # audit shows invalid_completion_guards in quality_outcome_summary for improvement task
 AUDIT_IMPROVEMENT_EVIDENCE="$TMPROOT/slice2-audit-improvement-evidence.json"
 "$CLI" evidence init --output "$AUDIT_IMPROVEMENT_EVIDENCE" >/dev/null
-ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit --file "$AUDIT_IMPROVEMENT_EVIDENCE" --report "$TMPROOT/structured-review.yaml" --json >/dev/null
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit --file "$AUDIT_IMPROVEMENT_EVIDENCE" --report "$TMPROOT/structured-review.yaml" --task "$IMPROVEMENT_TASK" --json >/dev/null
 "$CLI" init --force --operation-mode solo >/dev/null
 ORBIT_INSTANCE=lead-main "$CLI" state start --task "$IMPROVEMENT_TASK" >/dev/null
 ruby --disable-gems -ryaml -e \
@@ -395,4 +395,3 @@ json_assert 'audit guard without guard-specific answer has addressed=false and c
 json_assert 'audit all_satisfied ignores test/release gates (not_applicable)' \
   "$TMPROOT/audit-release-gate.json" \
   'qos = j["quality_outcome_summary"]; qos["gate_quality_outcomes"].any? { |_k,v| v["satisfied"] == "not_applicable" } && [true, false].include?(qos["all_satisfied"])'
-

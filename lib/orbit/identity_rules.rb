@@ -584,19 +584,10 @@ def parse_bind_pane_args(args)
       options["pane"] = option_value(args, "--pane")
     when /\A--pane=(.+)\z/
       options["pane"] = Regexp.last_match(1)
-    when "--transport"
-      option_value(args, "--transport")
-      usage_error("bind-pane --transport was removed. Herdr is the only automatic runtime adapter; pass --pane with optional --tab and --workspace.")
-    when /\A--transport=(.+)\z/
-      usage_error("bind-pane --transport was removed. Herdr is the only automatic runtime adapter; pass --pane with optional --tab and --workspace.")
     when "--tab"
       options["tab"] = option_value(args, "--tab")
     when /\A--tab=(.+)\z/
       options["tab"] = Regexp.last_match(1)
-    when "--space"
-      options["space"] = option_value(args, "--space")
-    when /\A--space=(.+)\z/
-      options["space"] = Regexp.last_match(1)
     when "--workspace"
       options["workspace"] = option_value(args, "--workspace")
     when /\A--workspace=(.+)\z/
@@ -615,7 +606,6 @@ def parse_bind_pane_args(args)
   usage_error("Missing required option: --instance") if options["instance"].to_s.empty?
   usage_error("Missing required option: --pane") if options["pane"].to_s.empty?
   usage_error("bind-pane currently requires --json") unless options["json"]
-  options["workspace"] = options["space"].to_s if options["workspace"].to_s.empty? && !options["space"].to_s.empty?
   options
 end
 
@@ -660,7 +650,7 @@ def bind_pane(args)
     "identity_verification" => "absent",
     "dispatch_ready" => false,
     "binding_resolution" => "manual_hint",
-    "reason" => "bind-pane writes a manual Herdr hint only; run orbit runtime register --json from the target agent to verify identity."
+    "reason" => "bind-pane writes a manual Herdr hint only; Herdr verified runtime is unavailable until trusted caller-pane proof exists."
   }
   puts JSON.pretty_generate({
     "schema_version" => "orbit-bind-pane-v1",
@@ -672,12 +662,12 @@ def bind_pane(args)
     "identity_verification" => "absent",
     "dispatch_ready" => false,
     "next" => [
-      "请在目标 agent pane 内运行 orbit runtime register --json"
+      "Herdr verified runtime is unavailable until trusted caller-pane proof exists; use manual dispatch when needed."
     ]
   }.compact)
 end
 
-def write_instance_binding!(instance_name, adapter: "herdr", transport_kind: nil, pane:, tab: "", space: "", workspace: nil, canonical_pane: nil, actual_client: nil)
+def write_instance_binding!(instance_name, adapter: "herdr", pane:, tab: "", workspace: "", canonical_pane: nil, actual_client: nil)
   roles, _instances, instances_path = load_project_instance_config_for_cli
   instance_key = nil
   instance = nil
@@ -695,12 +685,10 @@ def write_instance_binding!(instance_name, adapter: "herdr", transport_kind: nil
     usage_error("Instance #{instance_key.inspect} references missing role #{role_ref.inspect}.") unless role_def.is_a?(Hash)
 
     normalize_instance_binding(instance_key, instance)
-    selected_adapter = adapter || transport_kind || "herdr"
-    usage_error("Instance binding adapter must be herdr.") unless selected_adapter == "herdr"
-    selected_workspace = workspace.nil? ? space.to_s : workspace.to_s
+    usage_error("Instance binding adapter must be herdr.") unless adapter == "herdr"
     instance["binding"] = {
       "adapter" => "herdr",
-      "workspace" => selected_workspace,
+      "workspace" => workspace.to_s,
       "tab" => tab.to_s,
       "pane" => pane.to_s,
       "canonical_pane" => canonical_pane.to_s.empty? ? pane.to_s : canonical_pane.to_s

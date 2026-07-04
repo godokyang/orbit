@@ -27,6 +27,20 @@ def runtime_current_session_for_instance(instance)
   [record, session]
 end
 
+def runtime_trusted_caller_proof_provider_available?
+  false
+end
+
+def runtime_session_trusted_caller_proof?(session)
+  return false unless session.is_a?(Hash)
+  return false unless runtime_trusted_caller_proof_provider_available?
+
+  # Current Herdr only exposes pane/session as process environment. Until Orbit
+  # has a non-spoofable caller-pane proof provider, serialized proof markers are
+  # diagnostic only and must not make a local session trusted.
+  false
+end
+
 def runtime_verification_to_status(session)
   return "absent" unless session.is_a?(Hash)
   return "replaced" if session["state"].to_s == "replaced"
@@ -34,6 +48,8 @@ def runtime_verification_to_status(session)
 
   case session.dig("identity", "verification").to_s
   when "herdr_verified"
+    return "mismatch" unless runtime_session_trusted_caller_proof?(session)
+
     session["state"].to_s == "active" ? "verified" : "pending"
   when "identity_pending"
     "pending"
@@ -49,6 +65,7 @@ def runtime_liveness_for_session(session)
   return ["not_alive", "runtime_session_replaced"] if session["state"].to_s == "replaced"
   return ["not_alive", "runtime_session_expired"] if runtime_session_expired?(session)
   return ["unknown", "runtime_session_not_herdr_verified"] unless session.dig("identity", "verification") == "herdr_verified"
+  return ["unknown", "trusted_caller_proof_unavailable"] unless runtime_session_trusted_caller_proof?(session)
 
   canonical = session.dig("herdr", "canonical_pane").to_s
   pane = session.dig("herdr", "pane").to_s
@@ -82,6 +99,7 @@ def runtime_ack_valid_for_session?(record, session)
 
   ack = record["ack"]
   return false unless ack.is_a?(Hash)
+  return false unless ack["verification"].to_s == "herdr_verified"
   return false unless ack["target_session_id"].to_s == session["session_id"].to_s
   return false unless ack["target_pane"].to_s == session.dig("herdr", "canonical_pane").to_s
 
@@ -91,6 +109,73 @@ def runtime_ack_valid_for_session?(record, session)
   ttl = ack["ttl_seconds"].to_i
   ttl = DEFAULT_RUNTIME_HEARTBEAT_TTL_SECONDS unless ttl.positive?
   runtime_now - acknowledged_at <= ttl
+end
+
+def runtime_current_process_session_attribution(identity)
+  return nil unless identity.is_a?(Hash)
+
+  instance = identity["resolved_instance"].to_s
+  role = identity["resolved_role"].to_s
+  session_id = runtime_env_session_id
+  herdr = herdr_current_context
+  if session_id.empty?
+    if herdr["pane"].to_s.empty?
+      return {
+        "verification" => "manual_runtime",
+        "source" => "current_process",
+        "reason" => "missing_orbit_session_id"
+      }
+    end
+
+    return {
+      "verification" => "identity_pending",
+      "source" => "current_process",
+      "reason" => "unbound_herdr_session",
+      "herdr_pane" => herdr["pane"].to_s
+    }
+  end
+
+  session = runtime_read_session(session_id)
+  return { "verification" => "absent", "session_id" => session_id, "source" => "current_process", "reason" => "runtime_session_missing" } unless session.is_a?(Hash)
+  return { "verification" => "mismatch", "session_id" => session_id, "source" => "current_process", "reason" => "instance_mismatch" } unless session["instance"].to_s == instance
+  return { "verification" => "mismatch", "session_id" => session_id, "source" => "current_process", "reason" => "role_mismatch" } unless session["role"].to_s == role
+
+  launch_id = runtime_env_launch_id
+  if !launch_id.empty? && session["launch_id"].to_s != launch_id
+    return { "verification" => "mismatch", "session_id" => session_id, "source" => "current_process", "reason" => "launch_id_mismatch" }
+  end
+
+  config_mismatch = runtime_session_config_mismatch_reason(session, instance)
+  if config_mismatch
+    return { "verification" => "mismatch", "session_id" => session_id, "source" => "current_process", "reason" => config_mismatch }
+  end
+
+  session_status = runtime_verification_to_status(session)
+  unless session["state"].to_s == "active" && session.dig("identity", "verification") == "herdr_verified" && session_status == "verified"
+    verification = session_status == "verified" ? "mismatch" : session_status
+    return { "verification" => verification, "session_id" => session_id, "source" => "current_process", "reason" => "session_not_active_herdr_verified" }
+  end
+
+  expected_panes = [session.dig("herdr", "canonical_pane"), session.dig("herdr", "pane")].map(&:to_s).reject(&:empty?)
+  current_pane = herdr["pane"].to_s
+  return { "verification" => "mismatch", "session_id" => session_id, "source" => "current_process", "reason" => "herdr_pane_missing" } if current_pane.empty?
+  unless expected_panes.include?(current_pane)
+    return { "verification" => "mismatch", "session_id" => session_id, "source" => "current_process", "reason" => "herdr_pane_mismatch", "herdr_pane" => current_pane }
+  end
+
+  expected_herdr_session = session.dig("herdr", "session").to_s
+  current_herdr_session = herdr["session"].to_s
+  if !expected_herdr_session.empty? && expected_herdr_session != current_herdr_session
+    return { "verification" => "mismatch", "session_id" => session_id, "source" => "current_process", "reason" => "herdr_session_mismatch" }
+  end
+
+  {
+    "verification" => "identity_pending",
+    "session_id" => session_id,
+    "herdr_pane" => session.dig("herdr", "canonical_pane"),
+    "source" => "current_process",
+    "reason" => "caller_process_not_herdr_proven"
+  }.compact
 end
 
 def runtime_availability_for_session(session, liveness, agent = nil, record = nil)
@@ -240,6 +325,8 @@ def runtime_resolve_instance(instance, explicit_pane: nil)
 end
 
 def runtime_verified_session_candidates(instance)
+  return [] unless runtime_trusted_caller_proof_provider_available?
+
   hashes = runtime_config_hashes(instance)
   project_hash = runtime_project_root_sha256(Dir.pwd)
   pattern = File.join(orbit_runtime_sessions_dir, "*.json")
@@ -252,6 +339,7 @@ def runtime_verified_session_candidates(instance)
     next unless session["instance_config_sha256"].to_s == hashes["instance_config_sha256"].to_s
     next unless session["state"].to_s == "active"
     next unless session.dig("identity", "verification") == "herdr_verified"
+    next unless runtime_session_trusted_caller_proof?(session)
     next if runtime_session_expired?(session)
 
     liveness, = runtime_liveness_for_session(session)

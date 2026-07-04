@@ -222,12 +222,13 @@ S5_VIOLATION_EVIDENCE="$TMPROOT/s5-violation-evidence.json"
 ruby --disable-gems -rjson -rdigest -e \
   'p=ARGV[0]; t=ARGV[1]; sha=Digest::SHA256.file(t).hexdigest
    j=JSON.parse(File.read(p))
-   j["records"]||=[]
-   j["records"]<<{"kind"=>"review","status"=>"pass","summary"=>"Review with write violations.",
-     "created_at"=>Time.now.utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
-     "structured_submit"=>true,
-     "role_execution_context"=>{"resolved_role"=>"reviewer","task_sha256"=>sha,"rules_context_sha256"=>"b"*64},
-     "quality_outcome_verdict"=>"pass",
+	   j["records"]||=[]
+	   j["records"]<<{"kind"=>"review","status"=>"pass","summary"=>"Review with write violations.",
+	     "created_at"=>Time.now.utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+	     "structured_submit"=>true,
+	     "role_execution_context"=>{"resolved_role"=>"reviewer","task_sha256"=>sha,"rules_context_sha256"=>"b"*64},
+	     "runtime_identity"=>{"verification"=>"manual_runtime","source"=>"test"},
+	     "quality_outcome_verdict"=>"pass",
      "evidence_level"=>"outcome_quality",
      "quality_question_answers"=>[
        {"id"=>"outcome","verdict"=>"pass"},
@@ -245,12 +246,13 @@ S5_VIOLATION_EVIDENCE_STD="$TMPROOT/s5-violation-evidence-std.json"
 ruby --disable-gems -rjson -rdigest -e \
   'p=ARGV[0]; t=ARGV[1]; sha=Digest::SHA256.file(t).hexdigest
    j=JSON.parse(File.read(p))
-   j["records"]||=[]
-   j["records"]<<{"kind"=>"review","status"=>"pass","summary"=>"Review with write violations.",
-     "created_at"=>Time.now.utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
-     "structured_submit"=>true,
-     "role_execution_context"=>{"resolved_role"=>"reviewer","task_sha256"=>sha,"rules_context_sha256"=>"b"*64},
-     "quality_outcome_verdict"=>"pass",
+	   j["records"]||=[]
+	   j["records"]<<{"kind"=>"review","status"=>"pass","summary"=>"Review with write violations.",
+	     "created_at"=>Time.now.utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+	     "structured_submit"=>true,
+	     "role_execution_context"=>{"resolved_role"=>"reviewer","task_sha256"=>sha,"rules_context_sha256"=>"b"*64},
+	     "runtime_identity"=>{"verification"=>"manual_runtime","source"=>"test"},
+	     "quality_outcome_verdict"=>"pass",
      "evidence_level"=>"outcome_quality",
      "quality_question_answers"=>[
        {"id"=>"outcome","verdict"=>"pass"},
@@ -282,12 +284,13 @@ S5_NO_VIOLATION_EVIDENCE="$TMPROOT/s5-no-violation-evidence.json"
 ruby --disable-gems -rjson -rdigest -e \
   'p=ARGV[0]; t=ARGV[1]; sha=Digest::SHA256.file(t).hexdigest
    j=JSON.parse(File.read(p))
-   j["records"]||=[]
-   j["records"]<<{"kind"=>"review","status"=>"pass","summary"=>"Review with no violations.",
-     "created_at"=>Time.now.utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
-     "structured_submit"=>true,
-     "role_execution_context"=>{"resolved_role"=>"reviewer","task_sha256"=>sha,"rules_context_sha256"=>"b"*64},
-     "quality_outcome_verdict"=>"pass",
+	   j["records"]||=[]
+	   j["records"]<<{"kind"=>"review","status"=>"pass","summary"=>"Review with no violations.",
+	     "created_at"=>Time.now.utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+	     "structured_submit"=>true,
+	     "role_execution_context"=>{"resolved_role"=>"reviewer","task_sha256"=>sha,"rules_context_sha256"=>"b"*64},
+	     "runtime_identity"=>{"verification"=>"manual_runtime","source"=>"test"},
+	     "quality_outcome_verdict"=>"pass",
      "evidence_level"=>"outcome_quality",
      "quality_question_answers"=>[
        {"id"=>"outcome","verdict"=>"pass"},
@@ -350,7 +353,8 @@ ruby --disable-gems -rjson -e \
    j["records"]<<{"kind"=>"review","status"=>"pass","summary"=>"No task_sha256 review.",
      "created_at"=>Time.now.utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
      "structured_submit"=>true,
-     "identity"=>{"resolved_role"=>"reviewer"},
+     "role_execution_context"=>{"resolved_role"=>"reviewer","rules_context_sha256"=>"b"*64},
+     "runtime_identity"=>{"verification"=>"manual_runtime"},
      "quality_outcome_verdict"=>"pass",
      "evidence_level"=>"outcome_quality",
      "quality_question_answers"=>[
@@ -362,13 +366,15 @@ ruby --disable-gems -rjson -e \
    File.write(p, JSON.pretty_generate(j))' \
   "$S5_NO_HASH_REVIEW_EVIDENCE"
 
-# standard enforcement: missing role_execution_context cannot close gate
+# standard enforcement: missing task_sha256 cannot close gate
 if "$CLI" wait-gate --task "$S5_REVIEW_TASK_STD" --evidence "$S5_NO_HASH_REVIEW_EVIDENCE" --json \
      >"$TMPROOT/s5-no-hash-standard.json" 2>/dev/null; then
-  printf 'FAIL wait-gate blocks when role_execution_context is missing under standard enforcement: command unexpectedly succeeded\n' >&2
+  printf 'FAIL wait-gate blocks when task_sha256 is missing under standard enforcement: command unexpectedly succeeded\n' >&2
   exit 1
 fi
-pass 'wait-gate blocks when role_execution_context is missing under standard enforcement'
+pass 'wait-gate blocks when task_sha256 is missing under standard enforcement'
+json_assert 'wait-gate standard missing task_sha256 blocks gate' "$TMPROOT/s5-no-hash-standard.json" \
+  'j["gates"].any? { |g| g["kind"] == "review" && g["passed"] == false && g["blocking_reason"] == "stale_verdict" && g.dig("verdict_arbitration", "has_stale") == true }'
 
 # strict enforcement: missing task_sha256 blocks gate
 if "$CLI" wait-gate --task "$S5_STRICT_REVIEW_TASK" --evidence "$S5_NO_HASH_REVIEW_EVIDENCE" --json \
@@ -377,8 +383,8 @@ if "$CLI" wait-gate --task "$S5_STRICT_REVIEW_TASK" --evidence "$S5_NO_HASH_REVI
   exit 1
 fi
 pass 'wait-gate blocks strict task when review evidence missing task_sha256'
-json_assert 'wait-gate strict missing role_execution_context does not pass gate' "$TMPROOT/s5-no-hash-strict.json" \
-  'j["gates"].any? { |g| g["kind"] == "review" && g["passed"] == false }'
+json_assert 'wait-gate strict missing task_sha256 does not pass gate' "$TMPROOT/s5-no-hash-strict.json" \
+  'j["gates"].any? { |g| g["kind"] == "review" && g["passed"] == false && g["blocking_reason"] == "stale_verdict" && g.dig("verdict_arbitration", "has_stale") == true }'
 
 # ---------------------------------------------------------------------------
 # Regression: evidence submit records role_config_sha256 in role_execution_context

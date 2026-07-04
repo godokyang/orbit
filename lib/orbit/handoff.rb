@@ -22,11 +22,6 @@ def parse_handoff_args(args)
       options["evidence"] = option_value(args, "--evidence")
     when /\A--evidence=(.+)\z/
       options["evidence"] = Regexp.last_match(1)
-    when "--transport"
-      option_value(args, "--transport")
-      usage_error("handoff --transport was removed. Handoff is an Orbit protocol packet; use the delivery.manual_artifact payload for manual delivery.")
-    when /\A--transport=(.+)\z/
-      usage_error("handoff --transport was removed. Handoff is an Orbit protocol packet; use the delivery.manual_artifact payload for manual delivery.")
     when "--output"
       options["output"] = option_value(args, "--output")
     when /\A--output=(.+)\z/

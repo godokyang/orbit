@@ -17,19 +17,12 @@ def parse_start_args(args)
   until args.empty?
     arg = args.shift
     case arg
-    when "--transport"
-      option_value(args, "--transport")
-      usage_error("start --transport was removed. Herdr is the only automatic runtime adapter. For manual protocol usage, start the agent in a terminal with ORBIT_INSTANCE and ORBIT_ROLE set.")
-    when /\A--transport=(.+)\z/
-      usage_error("start --transport was removed. Herdr is the only automatic runtime adapter. For manual protocol usage, start the agent in a terminal with ORBIT_INSTANCE and ORBIT_ROLE set.")
     when "--cwd"
       options["cwd"] = option_value(args, "--cwd")
     when /\A--cwd=(.+)\z/
       options["cwd"] = Regexp.last_match(1)
     when "--dry-run"
       options["dry_run"] = true
-    when "--allow-create"
-      usage_error("start --allow-create was removed. Configured instances are created by default; use instance config to disable automatic launch when launch policy exists.")
     when "--layout"
       options["layout"] = option_value(args, "--layout")
     when /\A--layout=(.+)\z/
@@ -79,6 +72,9 @@ def start_plan(options)
     "ORBIT_LAUNCH_ID" => launch_id
   )
 
+  context_preflight = context_preflight_for(instance_key)
+  assert_context_preflight_ready!(context_preflight, "start")
+
   {
     "schema_version" => "orbit-start-plan-v1",
     "adapter" => "herdr",
@@ -94,7 +90,7 @@ def start_plan(options)
     "argv" => argv,
     "client" => start_client_metadata(argv),
     "env" => launch_env,
-    "context_preflight" => context_preflight_for(instance_key),
+    "context_preflight" => context_preflight,
     "instance_status" => status,
     "view" => view_policy,
     "creation_policy" => creation_policy,
@@ -128,7 +124,6 @@ def context_preflight_for(instance_key, task_path: nil)
       }.compact
     end,
     "commands" => [
-      ["orbit", "runtime", "register", "--json"],
       ["orbit", "whoami", "--json"],
       ["orbit", "rules", "resolve", *rule_task_args, "--instance", instance_key, "--json"],
       ["orbit", "rules", "print-context", *rule_task_args, "--instance", instance_key, "--json"]
@@ -145,6 +140,28 @@ rescue RuntimeError => e
     "required_files" => [],
     "commands" => []
   }
+end
+
+def context_preflight_ready?(context)
+  context.is_a?(Hash) && context["valid"] == true && Array(context["conflicts"]).empty?
+end
+
+def context_preflight_failure_summary(context)
+  conflicts = Array(context && context["conflicts"]).map do |entry|
+    next entry.to_s unless entry.is_a?(Hash)
+
+    [entry["source"], entry["message"]].compact.join(": ")
+  end.compact
+  conflicts.reject!(&:empty?)
+  return "context_preflight.valid=false" if conflicts.empty?
+
+  conflicts.join("; ")
+end
+
+def assert_context_preflight_ready!(context, action)
+  return if context_preflight_ready?(context)
+
+  usage_error("Orbit #{action} blocked: context_preflight is invalid. Resolve rule conflicts first. #{context_preflight_failure_summary(context)}")
 end
 
 def non_empty_env(*names)
@@ -803,17 +820,6 @@ def print_start_blocked(plan)
   warn "- binding: #{plan.dig("instance_status", "binding")}"
   warn "- layout: #{plan.dig("layout", "selected")}" if plan.dig("layout", "selected")
   warn "- reason: #{plan.dig("layout", "reason") || "start could not create or wake a Herdr agent automatically"}"
-end
-
-def print_start_reuse(plan)
-  puts "Orbit instance already bound:"
-  puts "- instance: #{plan["instance"]}"
-  puts "- role: #{plan["resolved_role"]}"
-  puts "- action: reuse"
-  binding = plan.dig("instance_status", "herdr") || {}
-  puts "- pane: #{binding["pane"]}" unless binding["pane"].to_s.empty?
-  probe = plan["reuse_probe"] || {}
-  puts "- agent: #{probe["agent"]}" if probe["agent"]
 end
 
 def print_start_needs_attention(plan)

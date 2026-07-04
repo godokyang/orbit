@@ -101,13 +101,14 @@ ruby --disable-gems -rjson -rdigest -e \
      "summary"=>"role_execution_context without rules_context_sha256.",
      "created_at"=>Time.now.utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
      "structured_submit"=>true,
-     "role_execution_context"=>{
-       "resolved_role"=>"reviewer","task_sha256"=>sha,
-       "role_config_sha256"=>"a"*64,
-       "instance"=>"reviewer","role_ref"=>"reviewer",
-       "worktree"=>{"git_head"=>"abc123","dirty_files_before"=>[]},
-       "permission_profile"=>{"mode"=>"audit_only"}},
-     "quality_outcome_verdict"=>"pass",
+	     "role_execution_context"=>{
+	       "resolved_role"=>"reviewer","task_sha256"=>sha,
+	       "role_config_sha256"=>"a"*64,
+	       "instance"=>"reviewer","role_ref"=>"reviewer",
+	       "worktree"=>{"git_head"=>"abc123","dirty_files_before"=>[]},
+	       "permission_profile"=>{"mode"=>"audit_only"}},
+	     "runtime_identity"=>{"verification"=>"manual_runtime","source"=>"test"},
+	     "quality_outcome_verdict"=>"pass",
      "evidence_level"=>"outcome_quality",
      "quality_question_answers"=>[
        {"id"=>"outcome","verdict"=>"pass"},
@@ -213,7 +214,7 @@ json_assert 'non-mapping role_execution_context error message mentions must be a
 
 # ---- Group 8: wait-gate blocks malformed role_execution_context (no identity fallback) ----
 # Build evidence: structured review with valid identity + malformed role_execution_context (string).
-# wait-gate strict should block with malformed_role_execution_context, not fall through to identity.
+# wait-gate strict should block without falling through to legacy identity.
 S6_MALFORMED_EV="$TMPROOT/s6-malformed-ctx-evidence.json"
 "$CLI" evidence init --output "$S6_MALFORMED_EV" >/dev/null
 ruby --disable-gems -rjson -rdigest -e \
@@ -243,10 +244,8 @@ if "$CLI" wait-gate --task "$S5_STRICT_REVIEW_TASK" --evidence "$S6_MALFORMED_EV
   exit 1
 fi
 pass 'wait-gate strict blocks malformed role_execution_context'
-json_assert 'wait-gate malformed blocking_reason is malformed_role_execution_context' "$TMPROOT/s6-malformed-gate.json" \
-  'j["gates"].any? { |g| g["kind"] == "review" && g["blocking_reason"] == "malformed_role_execution_context" }'
-json_assert 'wait-gate malformed sets malformed_role_execution_context flag' "$TMPROOT/s6-malformed-gate.json" \
-  'j["gates"].any? { |g| g["kind"] == "review" && g["malformed_role_execution_context"] == true }'
+json_assert 'wait-gate malformed role context does not fall back to legacy identity' "$TMPROOT/s6-malformed-gate.json" \
+  'j["gates"].any? { |g| g["kind"] == "review" && g["passed"] == false && g["blocking_reason"] == "stale_verdict" && g.dig("verdict_arbitration", "has_stale") == true }'
 
 # ---- Group 9: wait-gate blocks partial role_execution_context (no identity fallback) ----
 # role_execution_context is a Hash but missing resolved_role/task_sha256/rules_context_sha256.
@@ -282,5 +281,5 @@ if "$CLI" wait-gate --task "$S5_STRICT_REVIEW_TASK" --evidence "$S6_PARTIAL_EV" 
   exit 1
 fi
 pass 'wait-gate strict blocks partial role_execution_context no fallback'
-json_assert 'wait-gate partial ctx blocking_reason is identity_mismatch not passing' "$TMPROOT/s6-partial-gate.json" \
-  'j["gates"].any? { |g| g["kind"] == "review" && ["identity_mismatch","missing_task_sha256","stale_task_sha256","missing_rules_context_sha256"].include?(g["blocking_reason"]) }'
+json_assert 'wait-gate partial ctx blocking_reason is stale without identity fallback' "$TMPROOT/s6-partial-gate.json" \
+  'j["gates"].any? { |g| g["kind"] == "review" && g["passed"] == false && g["blocking_reason"] == "stale_verdict" && g.dig("verdict_arbitration", "has_stale") == true }'

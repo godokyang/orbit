@@ -1,7 +1,7 @@
 def start_pending_next_steps(pane)
   [
     { "inspect_pane" => "herdr pane read #{pane}" },
-    { "request_agent" => "请在目标 agent pane 内运行 orbit runtime register --json" }
+    { "manual_payload" => "Herdr verified runtime is unavailable until trusted caller-pane proof exists; use orbit dispatch --manual-payload for task delivery." }
   ]
 end
 
@@ -287,44 +287,6 @@ def start(args)
   options = parse_start_args(args)
   plan = attach_start_adapter_plan(start_plan(options))
 
-  if !start_requires_reuse?(plan) && !options["force"]
-    candidates = runtime_verified_session_candidates(plan["instance"])
-    if candidates.length == 1
-      session = candidates.first
-      runtime_set_current_session!(plan["instance"], session["session_id"], session["state"])
-      result = plan.merge(
-        "action" => "reuse_discovered",
-        "dispatch_ready" => true,
-        "runtime_session" => session,
-        "reuse_probe" => {
-          "decision" => "reuse_discovered",
-          "pane" => session.dig("herdr", "pane"),
-          "canonical_pane" => session.dig("herdr", "canonical_pane"),
-          "source" => ".orbit/runtime/sessions"
-        }
-      )
-      if options["json"]
-        puts JSON.pretty_generate(result)
-      else
-        print_start_reuse(result)
-      end
-      return
-    elsif candidates.length > 1
-      result = plan.merge(
-        "action" => "needs_attention",
-        "reason" => "ambiguous_verified_runtime_sessions",
-        "dispatch_ready" => false,
-        "candidates" => candidates.map { |session| session.slice("session_id", "instance", "role", "herdr", "updated_at") }
-      )
-      if options["json"]
-        puts JSON.pretty_generate(result)
-      else
-        print_start_needs_attention(result)
-      end
-      exit 1
-    end
-  end
-
   if start_requires_reuse?(plan)
     probe = herdr_reuse_probe(plan)
     if !options["force"] && plan.dig("instance_status", "view_status", "too_narrow") == true
@@ -344,27 +306,18 @@ def start(args)
 
     if !options["force"] && probe && probe["decision"] == "reuse"
       runtime_resolution = runtime_resolve_instance(plan["instance"])
-      if runtime_resolution["dispatch_ready"]
-        result = plan.merge(
-          "action" => "reuse_verified",
-          "dispatch_ready" => true,
-          "reuse_probe" => probe,
-          "runtime_resolution" => runtime_resolution.reject { |key, _| %w[runtime_instance runtime_session].include?(key) }
-        )
-      else
-        result = plan.merge(
-          "action" => "started_identity_pending",
-          "reason" => "binding_agent_found_but_runtime_identity_unverified",
-          "dispatch_ready" => false,
-          "reuse_probe" => probe,
-          "runtime_resolution" => runtime_resolution.reject { |key, _| %w[runtime_instance runtime_session].include?(key) },
-          "next" => start_pending_next_steps(probe["canonical_pane"] || probe["pane"])
-        )
-      end
+      result = plan.merge(
+        "action" => "started_identity_pending",
+        "reason" => "binding_agent_found_but_runtime_identity_unverified",
+        "dispatch_ready" => false,
+        "reuse_probe" => probe,
+        "runtime_resolution" => runtime_resolution.reject { |key, _| %w[runtime_instance runtime_session].include?(key) },
+        "next" => start_pending_next_steps(probe["canonical_pane"] || probe["pane"])
+      )
       if options["json"]
         puts JSON.pretty_generate(result)
       else
-        result["dispatch_ready"] ? print_start_reuse(result) : print_start_needs_attention(result)
+        print_start_needs_attention(result)
       end
       return
     end
@@ -498,11 +451,6 @@ def parse_dispatch_args(args)
       options["to"] = option_value(args, "--to")
     when /\A--to=(.+)\z/
       options["to"] = Regexp.last_match(1)
-    when "--transport"
-      option_value(args, "--transport")
-      usage_error("dispatch --transport was removed. Direct delivery uses the target instance's live Herdr binding. Use --dry-run or --manual-payload for manual delivery artifacts.")
-    when /\A--transport=(.+)\z/
-      usage_error("dispatch --transport was removed. Direct delivery uses the target instance's live Herdr binding. Use --dry-run or --manual-payload for manual delivery artifacts.")
     when "--pane"
       options["pane"] = option_value(args, "--pane")
     when /\A--pane=(.+)\z/
@@ -573,10 +521,23 @@ def dispatch_availability(agent_status)
   end
 end
 
+def dispatch_preflight_command_lines(packet)
+  commands = Array(packet.dig("context_preflight", "commands"))
+  lines = commands.map do |command|
+    if command.is_a?(Array)
+      command.map(&:to_s).shelljoin
+    else
+      command.to_s.strip
+    end
+  end.compact
+  lines.reject(&:empty?)
+end
+
 def dispatch_message(packet)
   reply_to = packet["reply_to"]
   sender_pane = reply_to == "manual" ? "unknown" : reply_to
   header = "[herdr-msg from:orbit pane:#{sender_pane} reply-to:#{reply_to} at:current kind:request task:#{packet["task_id"]}]"
+  preflight_commands = dispatch_preflight_command_lines(packet)
   [
     header,
     "请接收 Orbit task。",
@@ -588,9 +549,7 @@ def dispatch_message(packet)
     "- resolved_role: #{packet["resolved_role"]}",
     "",
     "开始前请运行：",
-    "orbit whoami --json",
-    "orbit rules resolve --task #{packet["task"]} --instance #{packet["to_instance"]} --json",
-    "orbit rules print-context --task #{packet["task"]} --instance #{packet["to_instance"]} --json",
+    *preflight_commands,
     "然后读取 context_preflight.required_files 中的每个 required 文件，再开始角色工作。",
     "",
     "完成后请把结果写入约定 evidence/report，并用同一个 task id 回复 DONE、BLOCKED 或 CHANGES_REQUESTED。"
@@ -632,11 +591,14 @@ def dispatch_packet(options)
       "do_not_use_as_evidence_runtime_identity",
       "target_agent_identity_not_confirmed"
     ]
+    unless options["dry_run"] || options["manual_payload"]
+      usage_error("dispatch --pane is an unverified Herdr override and cannot perform direct delivery. Use --dry-run to inspect the plan or --manual-payload for a manual delivery artifact.")
+    end
   end
   unless explicit_override || options["manual_payload"]
     runtime_resolution = runtime_resolve_instance(instance_key)
     unless runtime_resolution["identity_verification"] == "verified" && runtime_resolution["herdr_liveness"] == "alive"
-      usage_error("dispatch target #{instance_key.inspect} does not have a verified live Orbit runtime session; run `orbit start #{instance_key}` and wait for `orbit runtime register --json`, or use --manual-payload.")
+      usage_error("dispatch target #{instance_key.inspect} does not have a verified live Orbit runtime session. Herdr verified runtime is unavailable until trusted caller-pane proof exists; use --manual-payload.")
     end
     availability = runtime_resolution["availability"]
     availability_reason = runtime_resolution["availability_reason"] || runtime_resolution["liveness_reason"]
@@ -652,7 +614,9 @@ def dispatch_packet(options)
   task_id = dispatch_task_label(task_path)
   live_binding_confirmed = runtime_resolution && runtime_resolution["dispatch_ready"] ? true : false
   manual_artifact = options["manual_payload"] == true
-  delivery_precondition_met = target_allowed && (manual_artifact || explicit_override || live_binding_confirmed)
+  context_preflight = context_preflight_for(instance_key, task_path: task_path)
+  assert_context_preflight_ready!(context_preflight, "dispatch")
+  delivery_precondition_met = target_allowed && (manual_artifact || live_binding_confirmed)
   packet = {
     "schema_version" => "orbit-dispatch-v1",
     "project" => task["project"] || File.basename(Dir.pwd),
@@ -674,7 +638,7 @@ def dispatch_packet(options)
     "target_liveness_probe" => live_probe,
     "target_runtime_resolution" => runtime_resolution&.reject { |key, _| %w[runtime_instance runtime_session].include?(key) },
     "target_availability" => availability,
-    "context_preflight" => context_preflight_for(instance_key, task_path: task_path),
+    "context_preflight" => context_preflight,
     "reply_to" => reply_to,
     "reply_to_source" => reply_to_source,
     "dry_run" => options["dry_run"],

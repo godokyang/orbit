@@ -80,7 +80,7 @@ SEMANTICS_EVIDENCE="$TMPROOT/semantics-submit-evidence.json"
 "$CLI" evidence init --output "$SEMANTICS_EVIDENCE" >/dev/null
 SEMANTICS_REPORT="$TMPROOT/semantics-submit-report.yaml"
 write_review_pass_report "$SEMANTICS_REPORT" "Semantics versioning test review." "herdr:reviewer:semantics-test"
-ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit --file "$SEMANTICS_EVIDENCE" --report "$SEMANTICS_REPORT" --json \
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit --file "$SEMANTICS_EVIDENCE" --report "$SEMANTICS_REPORT" --task "$SEMANTICS_TASK" --json \
   >"$TMPROOT/semantics-submit-result.json"
 json_assert 'evidence submit persists source_report_semantics with template version and feature_versions' \
   "$TMPROOT/semantics-submit-result.json" \
@@ -145,7 +145,7 @@ IMPL_FOR_OUTCOME_EVIDENCE="$TMPROOT/impl-review-for-outcome-gate.json"
 "$CLI" evidence init --output "$IMPL_FOR_OUTCOME_EVIDENCE" >/dev/null
 write_review_pass_report "$TMPROOT/impl-review-for-outcome-gate.yaml" "Implementation readiness review pass." "herdr:reviewer:impl-for-outcome"
 ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["evidence_level"]="implementation_readiness"; y["implementation_readiness_verdict"]="pass"; File.write(p, YAML.dump(y))' "$TMPROOT/impl-review-for-outcome-gate.yaml"
-ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit --file "$IMPL_FOR_OUTCOME_EVIDENCE" --report "$TMPROOT/impl-review-for-outcome-gate.yaml" --json >/dev/null
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit --file "$IMPL_FOR_OUTCOME_EVIDENCE" --report "$TMPROOT/impl-review-for-outcome-gate.yaml" --task "$MIN_OUTCOME_TASK" --json >/dev/null
 if "$CLI" wait-gate --task "$MIN_OUTCOME_TASK" --evidence "$IMPL_FOR_OUTCOME_EVIDENCE" --json >"$TMPROOT/wait-gate-impl-for-outcome.json"; then
   printf 'FAIL review gate rejects implementation_readiness substituting for outcome_quality: command unexpectedly succeeded\n' >&2
   exit 1
@@ -201,7 +201,7 @@ test_environment:
   ux_quality: not_applicable
   artifact_quality: artifact path is stable and small
 REPORT
-ORBIT_INSTANCE=tester-main "$CLI" evidence submit --file "$TEST_WRONGKIND_EVIDENCE" --report "$TMPROOT/test-wrongkind-report.yaml" --json >/dev/null
+ORBIT_INSTANCE=tester-main "$CLI" evidence submit --file "$TEST_WRONGKIND_EVIDENCE" --report "$TMPROOT/test-wrongkind-report.yaml" --task "$TEST_TASK" --json >/dev/null
 if "$CLI" wait-gate --task "$TEST_TASK" --evidence "$TEST_WRONGKIND_EVIDENCE" --json >"$TMPROOT/wait-gate-test-wrongkind.json"; then
   printf 'FAIL test gate rejects outcome_quality (wrong gate kind): command unexpectedly succeeded\n' >&2
   exit 1

@@ -35,9 +35,9 @@ json_assert 'validate passes complete decomposition contract' "$TMPROOT/decompos
 QUALITY_EVIDENCE="$TMPROOT/quality-measurement-evidence.json"
 "$CLI" evidence init --output "$QUALITY_EVIDENCE" >/dev/null
 write_review_pass_report "$TMPROOT/quality-review-pass.yaml" "Quality review passed." "herdr:reviewer:quality-review"
-ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit --file "$QUALITY_EVIDENCE" --report "$TMPROOT/quality-review-pass.yaml" --json >/dev/null
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit --file "$QUALITY_EVIDENCE" --report "$TMPROOT/quality-review-pass.yaml" --task "$PERFORMANCE_TASK" --json >/dev/null
 write_test_pass_report "$TMPROOT/quality-test-missing-baseline.yaml" "Quality test missing baseline." "herdr:tester:quality-test-missing-baseline"
-ORBIT_INSTANCE=tester-main "$CLI" evidence submit --file "$QUALITY_EVIDENCE" --report "$TMPROOT/quality-test-missing-baseline.yaml" --json >/dev/null
+ORBIT_INSTANCE=tester-main "$CLI" evidence submit --file "$QUALITY_EVIDENCE" --report "$TMPROOT/quality-test-missing-baseline.yaml" --task "$PERFORMANCE_TASK" --json >/dev/null
 expect_failure 'validate rejects quality measurement pass without baseline after evidence' "$CLI" validate --task "$PERFORMANCE_TASK" --evidence "$QUALITY_EVIDENCE" --json
 cat >"$TMPROOT/quality-measurement-submit.yaml" <<'YAML'
 kind: test
@@ -96,7 +96,7 @@ runtime_binding:
     name: "fixture-browser"
     owner: "tester"
 YAML
-ORBIT_INSTANCE=tester-main "$CLI" evidence submit --file "$QUALITY_EVIDENCE" --report "$TMPROOT/quality-measurement-submit.yaml" --json >"$TMPROOT/quality-measurement-submit.json"
+ORBIT_INSTANCE=tester-main "$CLI" evidence submit --file "$QUALITY_EVIDENCE" --report "$TMPROOT/quality-measurement-submit.yaml" --task "$PERFORMANCE_TASK" --json >"$TMPROOT/quality-measurement-submit.json"
 "$CLI" validate --task "$PERFORMANCE_TASK" --evidence "$QUALITY_EVIDENCE" --json >"$TMPROOT/valid-quality-measurement.json"
 json_assert 'validate accepts quality measurement baseline and after evidence' "$TMPROOT/valid-quality-measurement.json" 'j["valid"] == true'
 

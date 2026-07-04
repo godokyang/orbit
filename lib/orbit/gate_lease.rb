@@ -64,8 +64,9 @@ end
 #
 # conflict_resolution: latest_valid_for_task_revision — the accepted record is the latest record
 # whose stored task_sha256 matches current_task_sha256 (or the latest record overall when no
-# current_task_sha256 is supplied, preserving legacy behavior). Records for older revisions are
-# stale; earlier records superseded by a newer record within the accepted revision are superseded.
+# current_task_sha256 is supplied). Records for older revisions, or records missing task_sha256
+# when a current task revision is known, are stale; earlier records superseded by a newer record
+# within the accepted revision are superseded.
 def verdict_arbitration_for_gate(records, gate_kind, current_task_sha256 = nil)
   candidates = gate_kind_candidate_records(records, gate_kind)
   result = {
@@ -82,11 +83,9 @@ def verdict_arbitration_for_gate(records, gate_kind, current_task_sha256 = nil)
 
   current_revision, stale =
     if current_task_sha256
-      # Records without a stored task_sha256 predate Slice 9 identity capture; treat them as
-      # current-revision candidates so legacy evidence still arbitrates normally.
       partition = candidates.partition do |c|
         stored = record_task_sha256_from(c[:record])
-        stored.nil? || stored.empty? || stored == current_task_sha256
+        stored.is_a?(String) && !stored.empty? && stored == current_task_sha256
       end
       [partition[0], partition[1]]
     else

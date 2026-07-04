@@ -372,7 +372,27 @@ def runtime_identity_has_explicit_waiver?(evidence, task_sha256, record, gate_ki
   Array(evidence["waivers"]).any? { |waiver| runtime_identity_waiver_matches?(waiver, task_sha256, record, gate_kind) }
 end
 
-RUNTIME_GATE_BLOCKING_VERIFICATIONS = %w[pending identity_pending stale replaced mismatch absent override].freeze
+RUNTIME_GATE_ALLOWED_DEFAULT_VERIFICATIONS = %w[herdr_verified manual_runtime].freeze
+RUNTIME_GATE_WAIVABLE_STRICT_VERIFICATIONS = %w[manual_runtime].freeze
+
+def runtime_identity_herdr_verified_trusted?(runtime_identity)
+  return false unless runtime_identity.is_a?(Hash)
+
+  # Herdr currently exposes caller pane/session through process environment
+  # only. A serialized evidence record can be hand-written, so the string
+  # "herdr_verified" is not itself a proof. Keep this fail-closed until a
+  # non-spoofable caller-pane proof provider exists.
+  false
+end
+
+def runtime_identity_verification(record)
+  return [nil, "missing"] unless record.is_a?(Hash) && record.key?("runtime_identity")
+
+  runtime_identity = record["runtime_identity"]
+  return [nil, "malformed"] unless runtime_identity.is_a?(Hash)
+
+  [runtime_identity["verification"].to_s, nil]
+end
 
 def runtime_identity_gate_blocking_reason(record, evidence = nil, task = nil, task_sha256 = nil, gate_kind = nil)
   return nil unless record.is_a?(Hash)
@@ -381,15 +401,23 @@ def runtime_identity_gate_blocking_reason(record, evidence = nil, task = nil, ta
   kind = gate_kind || runtime_identity_record_gate_kind(record)
   return nil unless kind
 
-  verification = record.dig("runtime_identity", "verification").to_s
-  return "runtime_identity_#{verification.empty? ? "missing" : verification}" if RUNTIME_GATE_BLOCKING_VERIFICATIONS.include?(verification)
+  verification, shape_error = runtime_identity_verification(record)
+  return "runtime_identity_malformed" if shape_error == "malformed"
+  return "runtime_identity_missing" if shape_error == "missing" || verification.to_s.empty?
+  return "runtime_identity_#{verification}" unless RUNTIME_GATE_ALLOWED_DEFAULT_VERIFICATIONS.include?(verification)
+  if verification == "herdr_verified" && !runtime_identity_herdr_verified_trusted?(record["runtime_identity"])
+    return "runtime_identity_herdr_verified_untrusted"
+  end
 
   strict_runtime = task_requires_herdr_verified_runtime_gate?(task)
   return nil unless strict_runtime
   return nil if verification == "herdr_verified"
-  return nil if runtime_identity_has_explicit_waiver?(evidence || {}, task_sha256, record, kind)
+  if RUNTIME_GATE_WAIVABLE_STRICT_VERIFICATIONS.include?(verification) &&
+      runtime_identity_has_explicit_waiver?(evidence || {}, task_sha256, record, kind)
+    return nil
+  end
 
-  "runtime_identity_#{verification.empty? ? "missing" : verification}"
+  "runtime_identity_#{verification}"
 end
 
 def validate_runtime_identity_policy_for_task(result, records, evidence, task, task_sha256 = nil)
@@ -401,16 +429,34 @@ def validate_runtime_identity_policy_for_task(result, records, evidence, task, t
     gate_kind = runtime_identity_record_gate_kind(record)
     next unless gate_kind
 
-    verification = record.dig("runtime_identity", "verification").to_s
-    if RUNTIME_GATE_BLOCKING_VERIFICATIONS.include?(verification)
+    verification, shape_error = runtime_identity_verification(record)
+    if shape_error == "malformed"
       validation_error(result, "evidence_file.records[#{index}].runtime_identity",
-        "#{gate_kind} pass record cannot close a gate with runtime_identity #{verification.inspect}; only herdr_verified, manual_runtime under default policy, or an explicit runtime waiver is allowed.")
+        "runtime_identity must be a mapping when present.")
+      next
+    end
+    if shape_error == "missing" || verification.to_s.empty?
+      validation_error(result, "evidence_file.records[#{index}].runtime_identity",
+        "#{gate_kind} pass record cannot close a gate without runtime_identity; only herdr_verified or manual_runtime under default policy is allowed.")
+      next
+    end
+    unless RUNTIME_GATE_ALLOWED_DEFAULT_VERIFICATIONS.include?(verification)
+      validation_error(result, "evidence_file.records[#{index}].runtime_identity",
+        "#{gate_kind} pass record cannot close a gate with unsupported runtime_identity #{verification.inspect}; only herdr_verified or manual_runtime are allowed.")
+      next
+    end
+    if verification == "herdr_verified" && !runtime_identity_herdr_verified_trusted?(record["runtime_identity"])
+      validation_error(result, "evidence_file.records[#{index}].runtime_identity",
+        "#{gate_kind} pass record cannot close a gate with herdr_verified runtime_identity because trusted caller-pane proof is unavailable.")
       next
     end
     next unless strict_runtime
 
     next if verification == "herdr_verified"
-    next if runtime_identity_has_explicit_waiver?(evidence, task_sha256, record, gate_kind)
+    if RUNTIME_GATE_WAIVABLE_STRICT_VERIFICATIONS.include?(verification) &&
+        runtime_identity_has_explicit_waiver?(evidence, task_sha256, record, gate_kind)
+      next
+    end
 
     validation_error(result, "evidence_file.records[#{index}].runtime_identity",
       "Task requires Herdr-verified runtime gate evidence; #{gate_kind} pass record has runtime_identity #{verification.empty? ? "missing" : verification.inspect} without explicit runtime waiver.")
@@ -490,10 +536,10 @@ def latest_record_for_kind(records, kind, structured_gate_only: false, gate_iden
   candidates.max_by { |created_at, index, _record| [created_at, index] }&.last
 end
 
-def gate_passed?(records, kind, task_sha256: nil)
+def gate_passed?(records, kind, task_sha256: nil, task: nil, evidence: nil)
   result = { "errors" => [], "warnings" => [] }
   latest = latest_valid_gate_record(result, records, kind, task_sha256)
-  latest&.fetch("status", nil) == "pass" && runtime_identity_gate_blocking_reason(latest, nil, nil, task_sha256, kind).nil?
+  latest&.fetch("status", nil) == "pass" && runtime_identity_gate_blocking_reason(latest, evidence, task, task_sha256, kind).nil?
 end
 
 def parse_wait_gate_args(args)
@@ -528,10 +574,8 @@ end
 def gate_status(records, kind, task = nil, task_sha256: nil, evidence: nil)
   evidence_record_kind = GATE_KIND_EVIDENCE_RECORD_KIND[kind] || kind
   # Slice 9: arbitration is authoritative for which record can pass the gate.
-  # When a current task_sha256 is supplied, a stale (old task sha) verdict is ignored and
-  # cannot close the gate. Records without a stored task_sha256 (legacy evidence predating
-  # identity capture) are still accepted by arbitration for backward compatibility.
-  # raw_latest is kept for flag reporting (stale_task_sha256) even when the accepted record is nil.
+  # When a current task_sha256 is supplied, stale verdicts and records missing task_sha256
+  # cannot close the gate. raw_latest is kept for flag reporting even when no record is accepted.
   arbitration = verdict_arbitration_for_gate(records, kind, task_sha256)
   raw_latest = latest_record_for_kind(records, evidence_record_kind, structured_gate_only: true, gate_identity_required: false)
   stale_verdict_only = task_sha256 && arbitration["accepted_record"].nil? && arbitration["has_stale"]
@@ -570,7 +614,7 @@ def gate_status(records, kind, task = nil, task_sha256: nil, evidence: nil)
   stored_task_sha256 = raw_latest ? record_task_sha256_from(raw_latest) : nil
   stored_rules_context_sha256 = latest ? record_rules_context_sha256_from(latest) : nil
   missing_task_sha256 = latest.is_a?(Hash) && latest["structured_submit"] == true && expected_gate_role(kind) != nil && stored_task_sha256.nil?
-  task_sha256_blocked = missing_task_sha256 && write_policy_enforcement == "strict"
+  task_sha256_blocked = missing_task_sha256
   stale_task_sha256 = !!(task_sha256 && stored_task_sha256 && stored_task_sha256 != task_sha256)
   stale_blocked = stale_task_sha256 && write_policy_enforcement == "strict"
   missing_rules_context_sha256 = latest.is_a?(Hash) && latest["structured_submit"] == true && expected_gate_role(kind) != nil && stored_rules_context_sha256.nil?
@@ -627,7 +671,7 @@ def gate_status(records, kind, task = nil, task_sha256: nil, evidence: nil)
     "identity_expected_role" => expected_role,
     "identity_resolved_role" => identity_role,
     "identity_valid" => identity_valid,
-    "runtime_identity_verification" => latest.is_a?(Hash) ? latest.dig("runtime_identity", "verification") : nil,
+    "runtime_identity_verification" => latest.is_a?(Hash) ? runtime_identity_verification(latest).first : nil,
     "runtime_identity_blocking_reason" => runtime_identity_blocking_reason,
     "malformed_role_execution_context" => malformed_rec_ctx ? true : nil,
     "missing_task_sha256" => missing_task_sha256 ? true : nil,

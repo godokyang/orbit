@@ -281,25 +281,7 @@ def evidence_runtime_attribution(identity)
   instance = (identity["resolved_instance"] || identity["instance"]).to_s
   return nil if instance.empty?
 
-  resolution = runtime_resolve_instance(instance)
-  if resolution["identity_verification"] == "verified"
-    {
-      "verification" => "herdr_verified",
-      "session_id" => resolution["session_id"],
-      "herdr_pane" => resolution["canonical_pane"],
-      "source" => "runtime_resolver"
-    }.compact
-  else
-    verification = resolution["identity_verification"].to_s
-    verification = "absent" if verification.empty?
-    verification = "replaced" if verification == "stale" && resolution["state"].to_s == "replaced"
-    {
-      "verification" => verification,
-      "session_id" => resolution["session_id"],
-      "source" => "runtime_resolver",
-      "resolution" => resolution["identity_verification"]
-    }.compact
-  end
+  runtime_current_process_session_attribution(identity)
 end
 
 def structured_role_execution_context(identity, evidence_path, task_path: nil, report: nil, rules_context_sha256: nil)

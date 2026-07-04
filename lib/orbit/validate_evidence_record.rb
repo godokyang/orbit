@@ -36,12 +36,27 @@ def validate_evidence_record(result, source, record)
   end
   validate_implementation_instance_override_record(result, source, record) if record["kind"] == "implementation_instance_override"
   validate_role_execution_context_record(result, "#{source}.role_execution_context", record["role_execution_context"]) if record.key?("role_execution_context")
+  validate_runtime_identity_record_field(result, "#{source}.runtime_identity", record["runtime_identity"]) if record.key?("runtime_identity")
   validate_runtime_binding_record_field(result, source, record)
   validate_blocker_classification_record_field(result, source, record)
   validate_gate_lease_record_field(result, source, record)
   validate_decision_record_field(result, source, record)
   validate_data_classification_fields(result, source, record)
   validate_negative_evidence_field(result, source, record)
+end
+
+def validate_runtime_identity_record_field(result, source, runtime_identity)
+  unless runtime_identity.is_a?(Hash)
+    validation_error(result, source, "runtime_identity must be a mapping when present.")
+    return
+  end
+
+  return unless runtime_identity.key?("verification")
+
+  verification = runtime_identity["verification"]
+  return if verification.is_a?(String) && !verification.strip.empty?
+
+  validation_error(result, "#{source}.verification", "runtime_identity.verification must be a non-empty string when present.")
 end
 
 def validate_role_execution_context_record(result, source, rec)
@@ -244,12 +259,6 @@ def evidence_level_valid_for_gate_kind?(level, gate_kind)
   return true if level_family.nil?
   accepted = GATE_KIND_ACCEPTED_EVIDENCE_FAMILIES[gate_kind] || []
   accepted.include?(level_family)
-end
-
-# Kept for backward compatibility; delegates to family-based check within review_quality.
-def evidence_level_rank(level)
-  chain = EVIDENCE_LEVEL_FAMILIES["review_quality"] || []
-  chain.index(level)
 end
 
 def task_minimum_evidence_level(task)

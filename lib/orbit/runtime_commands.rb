@@ -32,12 +32,11 @@ def print_runtime_help
   puts <<~HELP
     Usage:
       orbit runtime register --json
-      orbit runtime ping --json
       orbit runtime ack-session INSTANCE --json
 
-    Runtime registration is the Orbit-Herdr identity protocol. Herdr env is
-    probe input only; verified identity requires Orbit runtime session state
-    and a live Herdr probe.
+    Runtime register records Orbit session diagnostics. In the current Herdr
+    adapter, Herdr pane identity is exposed only through process environment,
+    so CLI register cannot promote a session to herdr_verified.
   HELP
 end
 
@@ -126,32 +125,37 @@ def runtime_base_session(identity, session_id:, launch_id:, state:, verification
   }
 end
 
-def runtime_register_verified?(pending, identity)
-  return false unless pending.is_a?(Hash)
-  return false unless pending["state"].to_s == "pending"
-  return false unless pending.dig("identity", "verification").to_s == "identity_pending"
-  return false unless pending["session_id"].to_s == runtime_env_session_id
-  return false unless pending["launch_id"].to_s == runtime_env_launch_id
-  return false unless identity["valid"]
-  return false unless pending["instance"].to_s == identity["resolved_instance"].to_s
-  return false unless pending["role"].to_s == identity["resolved_role"].to_s
-  return false unless pending["project_root_sha256"].to_s == runtime_project_root_sha256(Dir.pwd)
+def runtime_pending_session_mismatch_reason(pending, identity)
+  return "missing_pending_session" unless pending.is_a?(Hash)
+  return "session_not_pending" unless pending["state"].to_s == "pending"
+  return "identity_not_pending" unless pending.dig("identity", "verification").to_s == "identity_pending"
+  return "session_id_mismatch" unless pending["session_id"].to_s == runtime_env_session_id
+  return "launch_id_mismatch" unless pending["launch_id"].to_s == runtime_env_launch_id
+  return "identity_invalid" unless identity["valid"]
+  return "instance_mismatch" unless pending["instance"].to_s == identity["resolved_instance"].to_s
+  return "role_mismatch" unless pending["role"].to_s == identity["resolved_role"].to_s
+  return "project_root_hash_mismatch" unless pending["project_root_sha256"].to_s == runtime_project_root_sha256(Dir.pwd)
   hashes = runtime_config_hashes(identity["resolved_instance"])
-  return false unless pending["role_config_sha256"].to_s == hashes["role_config_sha256"].to_s
-  return false unless pending["instance_config_sha256"].to_s == hashes["instance_config_sha256"].to_s
+  return "role_config_hash_mismatch" unless pending["role_config_sha256"].to_s == hashes["role_config_sha256"].to_s
+  return "instance_config_hash_mismatch" unless pending["instance_config_sha256"].to_s == hashes["instance_config_sha256"].to_s
 
   herdr = herdr_current_context
-  return false if herdr["pane"].to_s.empty?
-  return false unless pending.dig("herdr", "session").to_s == herdr["session"].to_s
-  pane_ids = [herdr["pane"], pending.dig("herdr", "canonical_pane"), pending.dig("herdr", "pane")]
-  probe = herdr_probe_agents_for_panes(pane_ids)
-  return false unless probe["success"]
-  return false unless probe["candidate_count"].to_i == 1
+  return "herdr_session_mismatch" unless pending.dig("herdr", "session").to_s == herdr["session"].to_s
 
-  agent = probe["candidates"].first || {}
-  return false unless herdr_agent_matches_session?(agent, pending)
+  nil
+end
 
-  true
+def runtime_register_verified?(pending, identity)
+  runtime_pending_session_mismatch_reason(pending, identity).nil? && runtime_trusted_caller_proof["available"] == true
+end
+
+def runtime_trusted_caller_proof
+  {
+    "available" => false,
+    "provider" => "herdr",
+    "reason" => "herdr_caller_pane_proof_unavailable",
+    "detail" => "HERDR_PANE_ID is process environment, not proof that the caller belongs to that pane."
+  }
 end
 
 def runtime_register(_options)
@@ -161,68 +165,56 @@ def runtime_register(_options)
   env_session_id = runtime_env_session_id
   if !env_session_id.empty?
     pending = runtime_read_session(env_session_id)
-    runtime_usage_error("register session is not pending identity verification") unless pending.is_a?(Hash) && pending["state"].to_s == "pending" && pending.dig("identity", "verification").to_s == "identity_pending"
+    mismatch = runtime_pending_session_mismatch_reason(pending, identity)
+    runtime_usage_error("register session is not pending identity verification: #{mismatch}") if mismatch
   else
     pending = nil
   end
-  verified = runtime_register_verified?(pending, identity)
   session_id = env_session_id.empty? ? runtime_generated_session_id("orm") : env_session_id
   launch_id = runtime_env_launch_id
-  verification = verified ? "herdr_verified" : (herdr_current_context["pane"].to_s.empty? ? "manual_runtime" : "identity_pending")
-  state = verification == "identity_pending" ? "pending" : "active"
-  session = runtime_base_session(identity, session_id: session_id, launch_id: launch_id, state: state, verification: verification)
-  session["herdr"] = pending["herdr"] if verified && pending&.dig("herdr").is_a?(Hash)
+  session = nil
   if !env_session_id.empty?
     runtime_update_session!(session_id) do |current|
-      runtime_usage_error("register session is not pending identity verification") unless runtime_register_verified?(current, identity)
+      mismatch = runtime_pending_session_mismatch_reason(current, identity)
+      runtime_usage_error("register session is not pending identity verification: #{mismatch}") if mismatch
 
+      proof = runtime_trusted_caller_proof
+      verified = runtime_register_verified?(current, identity)
+      verification = verified ? "herdr_verified" : "identity_pending"
+      state = verified ? "active" : "pending"
+      session = runtime_base_session(identity, session_id: session_id, launch_id: launch_id, state: state, verification: verification)
       session["herdr"] = current["herdr"] if current["herdr"].is_a?(Hash)
+      session["identity"]["verification_reason"] = proof["reason"] unless verified
+      session["identity"]["trusted_caller_proof"] = proof
       session
     end
   else
+    verification = herdr_current_context["pane"].to_s.empty? ? "manual_runtime" : "identity_pending"
+    state = verification == "identity_pending" ? "pending" : "active"
+    session = runtime_base_session(identity, session_id: session_id, launch_id: launch_id, state: state, verification: verification)
+    proof = runtime_trusted_caller_proof
+    session["identity"]["verification_reason"] = verification == "identity_pending" ? proof["reason"] : "manual_runtime_no_herdr_session"
+    session["identity"]["trusted_caller_proof"] = proof if verification == "identity_pending"
     runtime_write_session!(session)
   end
-  runtime_set_current_session!(identity["resolved_instance"], session_id, state)
-  resolution = runtime_resolve_instance(identity["resolved_instance"])
+  runtime_set_current_session!(identity["resolved_instance"], session_id, state) unless env_session_id.empty?
+  resolution = env_session_id.empty? ? nil : runtime_resolve_instance(identity["resolved_instance"])
+  identity_verification = if resolution
+                            resolution["identity_verification"]
+                          elsif verification == "identity_pending"
+                            "identity_pending_unbound"
+                          else
+                            verification
+                          end
   {
     "schema_version" => "orbit-runtime-register-v1",
     "instance" => identity["resolved_instance"],
     "role" => identity["resolved_role"],
     "session_id" => session_id,
-    "identity_verification" => resolution["identity_verification"],
-    "dispatch_ready" => resolution["dispatch_ready"],
+    "identity_verification" => identity_verification,
+    "dispatch_ready" => resolution ? resolution["dispatch_ready"] : false,
+    "trusted_caller_proof" => runtime_trusted_caller_proof,
     "runtime_session" => session
-  }
-end
-
-def runtime_ping(_options)
-  identity = runtime_identity_snapshot
-  runtime_usage_error("ping requires valid .orbit identity") unless identity["valid"]
-  session_id = runtime_env_session_id
-  runtime_usage_error("ping requires ORBIT_SESSION_ID") if session_id.empty?
-  session = nil
-  runtime_update_session!(session_id) do |current|
-    runtime_usage_error("unknown runtime session #{session_id.inspect}") unless current
-    runtime_usage_error("ping session instance mismatch") unless current["instance"].to_s == identity["resolved_instance"].to_s
-    runtime_usage_error("ping session role mismatch") unless current["role"].to_s == identity["resolved_role"].to_s
-    runtime_usage_error("ping requires active Herdr-verified session") unless current["state"].to_s == "active" && current.dig("identity", "verification") == "herdr_verified"
-    mismatch = runtime_session_config_mismatch_reason(current, identity["resolved_instance"])
-    runtime_usage_error("ping session is not current for this checkout: #{mismatch}") if mismatch
-
-    now = Time.now.utc.iso8601
-    current["heartbeat"] ||= {}
-    current["heartbeat"]["last_seen_at"] = now
-    current["updated_at"] = now
-    session = current
-    current
-  end
-  runtime_set_current_session!(identity["resolved_instance"], session_id, session["state"])
-  {
-    "schema_version" => "orbit-runtime-ping-v1",
-    "instance" => identity["resolved_instance"],
-    "session_id" => session_id,
-    "heartbeat" => session["heartbeat"],
-    "identity_verification" => runtime_resolve_instance(identity["resolved_instance"])["identity_verification"]
   }
 end
 
@@ -256,30 +248,24 @@ def runtime_ack_session(options)
   runtime_usage_error("ack-session requires lead or project runtime owner role") unless allowed
   resolution = runtime_resolve_instance(instance)
   runtime_usage_error("ack-session target has no current session") if resolution["session_id"].to_s.empty?
+  owner_runtime_identity = runtime_current_process_session_attribution(identity) || { "verification" => "absent" }
 
-  ack = {
-    "acknowledged_at" => Time.now.utc.iso8601,
-    "ttl_seconds" => DEFAULT_RUNTIME_HEARTBEAT_TTL_SECONDS,
+  {
+    "schema_version" => "orbit-runtime-ack-session-v1",
+    "instance" => instance,
+    "action" => "unsupported",
+    "reason" => "trusted_owner_ack_unavailable",
+    "detail" => "ack-session cannot mark done Herdr targets available until trusted caller-pane proof exists.",
+    "ack_written" => false,
     "acknowledged_by" => {
       "role" => identity["resolved_role"],
       "instance" => identity["resolved_instance"],
       "session_id" => runtime_env_session_id,
-      "pane" => ENV["HERDR_PANE_ID"].to_s
+      "pane" => ENV["HERDR_PANE_ID"].to_s,
+      "runtime_identity" => owner_runtime_identity
     },
-    "target_session_id" => resolution["session_id"],
-    "target_pane" => resolution["canonical_pane"]
-  }
-  runtime_update_instance!(instance) do |record|
-    record["ack"] = ack
-    record
-  end
-  after_ack = runtime_resolve_instance(instance)
-  {
-    "schema_version" => "orbit-runtime-ack-session-v1",
-    "instance" => instance,
-    "ack" => ack,
-    "dispatch_ready" => after_ack["dispatch_ready"],
-    "runtime_resolution" => after_ack.reject { |key, _| %w[runtime_instance runtime_session].include?(key) }
+    "dispatch_ready" => false,
+    "runtime_resolution" => resolution.reject { |key, _| %w[runtime_instance runtime_session].include?(key) }
   }
 end
 
@@ -294,8 +280,6 @@ def runtime(args)
   result = case options["subcommand"]
            when "register"
              runtime_register(options)
-           when "ping"
-             runtime_ping(options)
            when "ack-session"
              runtime_ack_session(options)
            else
@@ -328,11 +312,9 @@ def runtime_maybe_piggyback!(command, argv)
   return unless identity["valid"]
 
   session = ENV["ORBIT_SESSION_ID"].to_s.empty? ? nil : runtime_read_session(ENV["ORBIT_SESSION_ID"])
-  if session && session.dig("identity", "verification") == "herdr_verified"
-    runtime_ping("json" => true)
-  else
-    runtime_register("json" => true)
-  end
+  return if session && session.dig("identity", "verification") == "herdr_verified"
+
+  runtime_register("json" => true)
 rescue SystemExit
   nil
 ensure

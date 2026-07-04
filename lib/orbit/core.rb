@@ -101,7 +101,7 @@ HELP = <<~HELP
     orbit notice add --task PATH --event EVENT --evidence PATH [--to-instance INSTANCE] --json
     orbit notice list --role ROLE --json
     orbit notice ack --role ROLE --id ID --json
-    orbit runtime register|ping|ack-session [INSTANCE] --json
+    orbit runtime register|ack-session [INSTANCE] --json
     orbit dispatch --task PATH --to INSTANCE [--pane PANE] [--reply-to PANE] [--manual-payload] [--dry-run] --json
     orbit rules resolve --json [--task PATH] [--evidence PATH] [--role ROLE] [--instance NAME] [--output PATH]
     orbit rules print-context --json [--task PATH] [--evidence PATH] [--role ROLE] [--instance NAME] [--output PATH]
@@ -219,10 +219,10 @@ COMMAND_HELP = {
   "runtime" => <<~HELP,
     Usage:
       orbit runtime register --json
-      orbit runtime ping --json
       orbit runtime ack-session INSTANCE --json
 
-    Manages Orbit-Herdr runtime session identity.
+    Manages Orbit-Herdr runtime session diagnostics. Herdr-verified runtime
+    identity is unavailable until Herdr exposes trusted caller-pane proof.
 
     Notes:
       Herdr environment variables are probe input only. A session is
