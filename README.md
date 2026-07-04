@@ -1,74 +1,69 @@
 # Orbit
 
-Orbit 是给 AI agent 用的任务闭环工具。它不负责“让 AI 更会写代码”，而是把一次开发任务拆成可检查的事实：
+Orbit 是给 AI agent 用的任务闭环工具。它不负责“让 AI 更会写代码”，而是让 agent 的工作结果更可追溯、更可接手、更难假完成。
 
-- 这次到底要交付什么。
-- 哪个 agent 负责实现、review、测试和收口。
-- review/test 是否真的独立发生。
-- 证据、状态和交接文件在哪里。
-- 当前结果是否可以继续实现、进入下一阶段或交给别人接手。
+## 用了以后有什么效果
 
-Orbit 的核心是 `.orbit/` 里的 task、evidence、state 和 handoff。它可以在 Herdr、CI 或多个普通终端旁边使用；这些工具负责承载进程或传递消息，Orbit protocol 负责身份、证据和 gate。官方 runtime adapter 只支持 Herdr；tmux、zellij、wezterm 或其它终端管理器可以手动运行 Orbit protocol，但 Orbit 不承诺自动 wake/create、direct dispatch 或 notice delivery。
+使用 Orbit 后，一次任务不会只停留在聊天里。agent 会把任务目标写成 task contract，把实现、review、test 和收口写入 evidence / state / handoff。用户可以看到：这轮到底承诺了什么、谁实现了、谁 review 了、谁测试了、哪些 gate 通过了、还有哪些风险没关。
 
-## 什么时候用
+直接效果：
 
-适合用 Orbit：
+- 目标不容易被 agent 偷偷改小。
+- “完成了”必须有证据支撑。
+- review/test 需要独立结论，不能由实现者自评通过。
+- 长任务中断后可以交给下一个 agent 接手。
+- 多 agent 协作不依赖聊天记忆或 pane 名字。
+- 用户可以根据 validate / audit / handoff 判断结果是否可信。
 
-- 中等复杂或更大的 AI 开发任务。
-- 需要 coder、reviewer、tester 分工的任务。
-- 长任务需要暂停、换 agent、换 pane 或跨天接手。
-- 你不想只听 agent 说“完成了”，而是要看到 task、review、test、audit 和 handoff。
+Orbit 适合中等复杂或更大的 AI 开发任务、长任务、多 agent 协作和需要 review/test gate 的任务。不适合简单问答、一行小修、目标未定的需求澄清，或只是临时跑一个命令。
 
-不适合用 Orbit：
+## 用户怎么开始
 
-- 简单问答。
-- 一行小修。
-- 还在澄清需求，目标和验收标准没定下来。
-- 只是临时跑一个命令，不需要 review/test/handoff。
+主路径：
 
-需求不清楚时，先澄清需求；不要急着创建 task 或推进状态。
-
-## 核心流程
-
-Orbit 的一轮任务通常长这样：
-
-```text
-用户目标
-  -> task contract：目标、边界、验收标准
-  -> implementation evidence：实现改了什么、跑了什么
-  -> review evidence：独立 review 是否放行
-  -> test evidence：真实测试是否通过
-  -> validate / audit：task、evidence、state 是否一致
-  -> handoff：交给用户或下一位 agent 的收口包
+```bash
+cd /path/to/your-project
+orbit init --operation-mode solo
+# 编辑 .orbit/instances.yaml 里的 command
+orbit start lead-main
 ```
 
-典型角色：
+`orbit start` 依赖 Herdr automatic runtime。如果只用 manual protocol，可以不运行 `orbit start`，而是手动设置 `ORBIT_INSTANCE` / `ORBIT_ROLE` 启动 agent。
+
+然后告诉 lead agent：
 
 ```text
-lead      负责澄清目标、创建 task、派工、判断 gate、收口
-coder     负责实现代码并记录实现证据
-reviewer 负责独立 review，不替 tester 宣称测试通过
-tester   负责真实测试，不临时改生产代码来让测试通过
+请按 Orbit 流程执行这个任务：
+
+目标：...
+范围：...
+验收：...
+限制：...
 ```
 
-这些角色可以由不同工具承担，例如 Codex + Claude Code + OpenCode；也可以多开同一种 agent，用不同的 `ORBIT_INSTANCE` 区分身份。
+用户不需要手写 task contract、编辑 evidence manifest、提交 review/test verdict，也不需要理解所有 runtime identity 字段。lead agent 应该自己创建 task、补全 evidence/state，并在关键节点展示目标、边界、验收标准和风险。
+
+进入正式 Orbit 流程后，agent 会：
+
+- 确认身份并读取规则上下文。
+- 创建 task contract。
+- 写 implementation evidence。
+- 派 reviewer/tester，并等待结构化 verdict。
+- 运行 `wait-gate`、`validate`、`audit`。
+- 生成 handoff。
+
+执行细节以 [SKILL.md](SKILL.md) 为准。README 只给用户和新 agent 最小路径。
 
 ## 安装
 
-### 1. 安装 Herdr（可选但推荐）
-
-如果你要跑多个 agent，推荐先安装 Herdr：
+安装 Herdr。Herdr 是 Orbit automatic runtime 的唯一官方 adapter：
 
 ```bash
 curl -fsSL https://herdr.dev/install.sh | sh
 herdr --version
 ```
 
-也可以用 Homebrew：
-
-```bash
-brew install herdr
-```
+也可以用 Homebrew 安装 Herdr；需要更准确识别 agent 状态时，可安装 `codex` / `claude` / `opencode` Herdr integration。
 
 启动 Herdr：
 
@@ -77,90 +72,20 @@ cd /path/to/your-project
 herdr
 ```
 
-Herdr 会打开或连接到一个持久会话。你可以在里面开多个 pane，分别运行 Codex、Claude Code、OpenCode 或其它 agent。
-
-常用 Herdr 操作：
-
-```text
-ctrl+b 然后 v       左右分屏
-ctrl+b 然后 -       上下分屏
-ctrl+b 然后 c       新建 tab
-ctrl+b 然后 q       detach，agent 继续运行
-herdr               重新进入会话
-```
-
-如果你希望 Herdr 更准确识别 agent 状态，可以安装对应集成：
-
-```bash
-herdr integration install codex
-herdr integration install claude
-herdr integration install opencode
-```
-
-Herdr 是 Orbit automatic runtime 的必需依赖，也是唯一官方 runtime layer。没有 Herdr 时，automatic runtime fail closed，`orbit start` 自动 create/wake、Herdr direct dispatch 和 Herdr notice surfacing 都不可用。手动 Orbit protocol 仍可用，但它是 explicit manual protocol path：自己在终端里启动 agent、设置 `ORBIT_INSTANCE` / `ORBIT_ROLE`，并用 evidence / validate / audit 完成协议层闭环；manual evidence 不产生 Herdr-verified runtime identity。旧的 runtime adapter 参数已移除，安装新版本后请重新 `orbit init` 生成新的 instance binding schema。
-
-### Runtime support
-
-| Command area | Adapter needed? | 当前状态 |
-| --- | --- | --- |
-| `start` reuse | Herdr | 只有 runtime resolver 输出 `dispatch_ready: true` 时才能复用；Herdr facts 只是 resolver 输入，状态不可信时按 remediation 处理，只有 stale/conflict/replacement 且 owner 接受风险时才用 `--force`。 |
-| `start` wake/create external pane | Herdr | Herdr only；没有 Herdr 时请手动在目标终端启动 agent，并设置 `ORBIT_INSTANCE` / `ORBIT_ROLE`。 |
-| `dispatch` direct pane delivery | Herdr | Herdr only；目标 instance 必须由 runtime resolver 确认为 `dispatch_ready: true`，显式 `--pane` 只是人工 override，不是 verified identity。 |
-| `notice` record | No adapter | Delivery backend 未实现；当前只作为 Orbit protocol record / future enhancement，不声明 Herdr notice delivery 支持。 |
-| `dispatch`/`handoff` manual artifact | No | 使用 `dispatch --manual-payload` 或 `handoff --output` 生成手动投递 artifact。 |
-| `whoami`/`rules`/`task`/`evidence`/`state`/`wait-gate`/`validate`/`audit` | No | 这些是 Orbit protocol 命令，主要读写 `.orbit/` 文件，不依赖 terminal adapter。 |
-
-Orbit 不把 `.orbit/instances.yaml` 里的 binding 当成 alive proof。自动投递前必须走 runtime resolver；只有输出 `dispatch_ready: true`，才算可 direct dispatch。config expected identity、runtime session self-registration 和 Herdr live facts 都只是 resolver 的输入。
-
-如果显式使用 manual protocol，或 `start` 不能自动启动目标 agent：
-
-1. 在你想承载 agent 的终端、tmux pane、zellij pane、wezterm pane、CI shell 或普通 shell 里进入项目目录。
-2. 按 `.orbit/instances.yaml` 里的 `command` 手动启动，并设置 `ORBIT_INSTANCE` 和 `ORBIT_ROLE`，例如 `ORBIT_INSTANCE=reviewer-main ORBIT_ROLE=reviewer codex`。
-3. agent 启动后运行 `orbit whoami --json` 和 `orbit rules print-context --json` 确认身份与规则。
-4. 对非 Herdr 环境，不要期待 Orbit 自动创建 pane 或把命令打进去；继续用 `orbit evidence ...`、`orbit validate/audit` 完成协议层工作。
-
-如果 `start` 发现已有 binding 但 resolver 不能确认 `dispatch_ready: true`，它不会假复用；会按 remediation 提示 manual protocol artifact、等待注册、检查冲突或替换风险。只有 stale/conflict/replacement 且 owner 接受风险时，才用 `orbit start INSTANCE --force` 重新启动并以新 instance 为准。`--force` 不会默认 kill 旧外部进程，因此短时间内可能存在两个同 instance/role 的 agent 同时写 evidence、gate lease 或 loop state。旧 binding 的替换诊断属于本地 runtime 状态，不写进版本化的 `instances.yaml`。
-
-### 2. 安装 Orbit skill
-
-让支持 agent skill 的工具认识 Orbit：
+安装 Orbit skill：
 
 ```bash
 npx skills add https://github.com/godokyang/orbit -g
 ```
 
-如果输出里出现 `PromptScript does not support global skill installation`，但同时显示 `~/.agents/skills/orbit` 已安装成功，可以忽略；这是 PromptScript 不支持全局 skill 安装，不代表 Orbit 安装失败。
-
-如果遇到 GitHub rate limit，按 `skills` CLI 提示使用 `gh login`、设置 `GITHUB_TOKEN`，或改用它提示的 `--full-depth`。
-
-### 3. 安装 Orbit CLI
-
-远程安装：
+安装 Orbit CLI：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/godokyang/orbit/main/install.sh | sh
 orbit version
 ```
 
-本地安装：
-
-```bash
-git clone git@github.com:godokyang/orbit.git
-cd orbit
-sh install.sh
-orbit version
-```
-
-更新 Orbit CLI：
-
-远程安装的用户，重新运行远程安装命令即可：
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/godokyang/orbit/main/install.sh | sh
-orbit version
-```
-
-本地 clone 的用户，先拉取最新代码，再重新运行安装脚本：
+本地 clone 的用户更新：
 
 ```bash
 git pull
@@ -168,176 +93,116 @@ sh install.sh
 orbit version
 ```
 
-安装脚本会覆盖已安装的 Orbit CLI runtime 和 wrapper，不会修改你项目里的 `.orbit/` 配置。
+Orbit CLI 需要 Ruby。远程安装还需要 `curl` 或 `wget`。安装脚本会覆盖已安装的 Orbit CLI runtime 和 wrapper，不会修改你项目里的 `.orbit/` 配置。
 
-卸载：
+## Herdr 和 manual protocol
 
-```bash
-sh uninstall.sh
-```
+Herdr 是 Orbit automatic runtime 的唯一官方 adapter。需要 `orbit start` 自动创建/唤醒 agent 或 `orbit dispatch` direct delivery 时，必须有 Herdr。
 
-Orbit CLI 需要 Ruby。远程安装还需要 `curl` 或 `wget`。
-
-## 快速开始
-
-用户只需要做四件事：
-
-1. 进入项目并初始化 Orbit。
-2. 配置并启动 lead agent。
-3. 把真实需求交给 lead agent。
-4. 在 agent 给出 task contract 后，确认目标、边界和验收标准是否正确。
-
-### 用户操作
+没有 Herdr 时，只能走 manual protocol：用户自己打开终端，进入项目目录，设置 `ORBIT_INSTANCE` / `ORBIT_ROLE` 后启动 agent。
 
 ```bash
 cd /path/to/your-project
-orbit init --operation-mode solo
+ORBIT_INSTANCE=reviewer-main ORBIT_ROLE=reviewer codex
 ```
 
-初始化会生成：
+direct dispatch 只看 runtime resolver 输出是否明确 `dispatch_ready: true`。没有 verified target 时，生成 manual payload：
 
-```text
-.orbit/
-├── roles.yaml
-├── instances.yaml
-└── loop-state.yaml
+```bash
+orbit dispatch \
+  --task .orbit/tasks/current-task.yaml \
+  --to reviewer-main \
+  --manual-payload \
+  --json
 ```
 
-然后配置 agent 命令。打开 `.orbit/instances.yaml`，把 `instances.lead.command` 改成你要用的 agent：
+manual protocol 不是 automatic runtime fallback，不提供 automatic start、direct dispatch 或 Herdr-verified runtime identity。当前 notice 是 `.orbit/runtime/notices` 下的 protocol record / inbox，不是 Herdr pane delivery。
+
+## 配置 agent
+
+用户主要改 `.orbit/instances.yaml` 里的 `command`。role 是 `lead` / `reviewer` / `tester`；instance 是 `lead-main` / `reviewer-main` / `tester-main`。启动和 dispatch 使用 instance key，不使用 role 名。
 
 ```yaml
 instances:
-  lead:
+  lead-main:
     role_ref: lead
     command: codex
     env:
-      ORBIT_INSTANCE: lead
+      ORBIT_INSTANCE: lead-main
       ORBIT_ROLE: lead
+
+  reviewer-main:
+    role_ref: reviewer
+    command: claude
+    env:
+      ORBIT_INSTANCE: reviewer-main
+      ORBIT_ROLE: reviewer
+
+  tester-main:
+    role_ref: tester
+    command: opencode
+    env:
+      ORBIT_INSTANCE: tester-main
+      ORBIT_ROLE: tester
 ```
 
-常见写法：
+同一个 role 可以有多个 instance，例如 `reviewer-main`、`reviewer-security`。
 
-```yaml
-command: codex
-command: claude
-command: opencode
-```
+## 判断是否完成
 
-第一次启动 lead agent 时，Orbit 会按配置通过 Herdr 创建缺失的 instance：
+不要根据聊天回复或 Herdr pane 状态判断 Orbit 任务完成。至少要看：
+
+- task contract 是否存在，目标、范围、验收标准是否清楚。
+- implementation evidence 是否记录了实现事实。
+- required review/test gate 是否有最新结构化 `pass` verdict。
+- `orbit wait-gate`、`orbit validate`、`orbit audit` 是否通过。
+- handoff 是否记录剩余风险、验证方式和下一步。
+
+用户可以接受风险，但 agent 必须把风险、缺口和下一步说清楚。
+
+## Agent / 排障命令
+
+下面命令主要给 Orbit-aware agent 和排障使用。普通用户通常不需要手动运行。
 
 ```bash
-orbit start lead-main
-```
-
-如果已有 binding 但 runtime resolver 不能确认 `dispatch_ready: true`，`start` 会拒绝静态复用并按 remediation 处理；只有 stale/conflict/replacement 且 owner 接受风险时才使用 `--force`：
-
-```bash
-orbit start lead-main --force
-```
-
-然后把需求交给 lead agent。可以直接这样说：
-
-```text
-请按 Orbit 流程执行这个任务：
-
-目标：<写清楚你想要的结果>
-范围：<哪些模块/页面/文件可以改，不确定可以让 agent 判断>
-验收：<你会怎样判断它做对了>
-限制：<这轮明确不要做什么>
-```
-
-如果你还没想清楚，也可以让 lead agent 先帮你澄清：
-
-```text
-请先按 Orbit 的方式帮我澄清这个需求，先不要开始实现：
-
-<描述你的想法>
-```
-
-用户不需要手工填写 `.orbit/tasks/current-task.yaml`。lead agent 应该自己创建和补全 task contract，然后把关键内容展示给用户确认。你只需要重点看这些内容是否正确：
-
-- 目标有没有被误解。
-- 哪些范围会改，哪些范围不会改。
-- 验收标准是否能判断成败。
-- 是否需要独立 review 和真实测试。
-- 有哪些风险、假设或需要你确认的点。
-
-不要把“优化一下”“修一下”“做完整一点”直接交给 coder。lead agent 应先把用户表达压成可验证的 task contract；如果目标、边界或验收标准不清楚，先追问用户，再进入实现。
-
-### Agent 动作参考
-
-下面这些命令通常由 lead agent、reviewer 或 tester 执行。普通用户读完“用户操作”就可以开始使用；这一节主要给 agent、维护者和排障时参考。
-
-创建 task：
-
-```bash
-mkdir -p .orbit/tasks .orbit/evidence .orbit/rules .orbit/handoff
+orbit whoami --json
 
 orbit new-task \
-  --operation-mode solo \
   --task-type implementation \
   --output .orbit/tasks/current-task.yaml
-```
 
-初始化 evidence：
+orbit rules resolve \
+  --task .orbit/tasks/current-task.yaml \
+  --output .orbit/rules/current-resolution.json \
+  --json
 
-```bash
+orbit rules print-context \
+  --task .orbit/tasks/current-task.yaml \
+  --output .orbit/rules/current-context.json \
+  --json
+
 orbit evidence init --output .orbit/evidence/current-evidence.json
-```
 
-开始任务：
+orbit state start --task .orbit/tasks/current-task.yaml
 
-```bash
-ORBIT_INSTANCE=lead-main orbit state start --task .orbit/tasks/current-task.yaml
-```
+orbit evidence attach-rule \
+  --file .orbit/evidence/current-evidence.json \
+  --rule-resolution .orbit/rules/current-resolution.json \
+  --task .orbit/tasks/current-task.yaml
 
-实现完成后记录实现证据：
-
-```bash
 orbit evidence add \
   --file .orbit/evidence/current-evidence.json \
   --kind implementation \
   --status pass \
-  --summary "implementation completed"
-```
+  --summary "implementation completed" \
+  --task .orbit/tasks/current-task.yaml
 
-记录命令证据：
-
-```bash
-orbit evidence add \
-  --file .orbit/evidence/current-evidence.json \
-  --kind command \
-  --status pass \
-  --summary "npm test passed"
-```
-
-reviewer 和 tester 需要提交结构化 report：
-
-```bash
-ORBIT_INSTANCE=reviewer-main orbit evidence submit \
+orbit evidence submit \
   --file .orbit/evidence/current-evidence.json \
   --report .orbit/reports/review-report.yaml \
   --task .orbit/tasks/current-task.yaml \
   --json
 
-ORBIT_INSTANCE=tester-main orbit evidence submit \
-  --file .orbit/evidence/current-evidence.json \
-  --report .orbit/reports/test-report.yaml \
-  --task .orbit/tasks/current-task.yaml \
-  --json
-```
-
-报告模板在：
-
-```text
-assets/templates/review-report.yaml
-assets/templates/test-report.yaml
-assets/templates/design-review-report.yaml
-```
-
-最后检查 gate、校验、审计并生成 handoff：
-
-```bash
 orbit wait-gate \
   --task .orbit/tasks/current-task.yaml \
   --evidence .orbit/evidence/current-evidence.json \
@@ -364,163 +229,15 @@ orbit handoff \
   --json
 ```
 
-如果 `wait-gate`、`validate` 或 `audit` 没过，不要直接说完成。先修复 task、evidence、state 或实际代码问题。
-
-## 在 Herdr 里跑多 agent
-
-一个常见布局：
-
-```text
-pane 1: lead-agent      Codex
-pane 2: coder-agent     OpenCode
-pane 3: reviewer-agent  Claude Code
-pane 4: tester-agent    OpenCode
-```
-
-可以手动在每个 pane 里启动 agent，也可以让 Orbit 生成启动计划：
-
-```bash
-orbit start lead-main
-orbit start reviewer-main --dry-run --json
-orbit start tester-main --dry-run --json
-```
-
-先在 `.orbit/instances.yaml` 里给每个 instance 配好 `command`，例如 `codex`、`claude` 或 `opencode`。缺失 binding 时 `start` 默认通过 Herdr 创建；后续如果已有 binding 但 runtime resolver 不能确认 `dispatch_ready: true`，`start` 会按 remediation 处理，只有 stale/conflict/replacement 且 owner 接受风险时才提示使用 `--force` 重新启动并替换旧 binding。
-
-如果 `.orbit/instances.yaml` 里已经绑定了 pane，Orbit 只把它当成 wake/create 的目标 hint，不能把静态 binding 当成当前 agent 还活着的证明。`start`、`instances status`、`dispatch` 和 gate-closing evidence 都必须以 runtime resolver 输出为准；Herdr live facts 只是 resolver 输入之一。如果 binding stale 但能找回唯一 verified session，Orbit 可以修复本地 runtime pointer，只有显式 `instances status --repair-binding --json` 才写回版本化 config。
-
-把 task 发给 live verified runtime participant：
-
-```bash
-orbit dispatch \
-  --task .orbit/tasks/current-task.yaml \
-  --to reviewer-main \
-  --json
-```
-
-只有在明确接受风险时才传 `--pane <pane-id>` 做人工 override；它不会被标记为 Herdr-verified identity。
-
-没有 live verified runtime participant 时，生成手动投递 payload：
-
-```bash
-orbit dispatch \
-  --task .orbit/tasks/current-task.yaml \
-  --to reviewer-main \
-  --manual-payload \
-  --json
-```
-
-注意：
-
-- Herdr 负责承载 pane 和传消息。
-- Orbit 负责 task、evidence、state、gate 和 handoff。
-- 不要把 Herdr 的 `agent-status done` 当作 review/test 通过。
-- 收口时以 `.orbit/evidence*`、`orbit wait-gate`、`orbit validate` 和 `orbit audit` 为准。
-
-## 配置角色和实例
-
-`.orbit/roles.yaml` 定义角色规则和权限：
-
-```yaml
-roles:
-  lead:
-    role: lead
-    permissions:
-      can_edit_production_code: true
-
-  reviewer:
-    role: reviewer
-    permissions:
-      can_edit_production_code: false
-
-  tester:
-    role: tester
-    permissions:
-      can_edit_production_code: false
-```
-
-`.orbit/instances.yaml` 定义运行中的 agent instance：
-
-```yaml
-instances:
-  lead:
-    role_ref: lead
-    command: codex
-    env:
-      ORBIT_INSTANCE: lead
-      ORBIT_ROLE: lead
-
-  reviewer:
-    role_ref: reviewer
-    command: claude
-    env:
-      ORBIT_INSTANCE: reviewer
-      ORBIT_ROLE: reviewer
-
-  tester:
-    role_ref: tester
-    command: opencode
-    env:
-      ORBIT_INSTANCE: tester
-      ORBIT_ROLE: tester
-```
-
-检查当前身份：
-
-```bash
-ORBIT_INSTANCE=reviewer-main orbit whoami --json
-```
-
-解析本轮规则：
-
-```bash
-ORBIT_INSTANCE=lead-main orbit rules resolve \
-  --task .orbit/tasks/current-task.yaml \
-  --output .orbit/rules/current-resolution.json \
-  --json
-
-ORBIT_INSTANCE=lead-main orbit rules print-context \
-  --task .orbit/tasks/current-task.yaml \
-  --output .orbit/rules/current-context.json \
-  --json
-```
-
-`rules resolve` 是可审计的规则来源结果；`rules print-context` 是本轮 agent 应读取的上下文清单。项目规则是叠加层，不会替代 Orbit 默认规则。
-
-## 不能直接宣布完成的情况
-
-出现下面任意情况时，agent 不能直接说“完成”：
-
-- 没有 task contract。
-- 改善类任务没有 quality outcome。
-- 没有 evidence manifest。
-- review/test verdict 是 `fail`、`partial` 或 `invalid`。
-- implementation task 声明了 review/test gate，但最新 gate evidence 不是 `pass`。
-- task、evidence、loop state 引用不一致。
-- 当前 agent 身份不满足 task `execution_contract`，且当前 agent 不在 task `gates.roles` 中。
-
-用户可以接受风险，但 agent 必须把风险、缺口和下一步说清楚。
-
-## 命令速查
-
-```bash
-orbit init --operation-mode solo
-orbit new-task --task-type implementation --output .orbit/tasks/current-task.yaml
-orbit evidence init --output .orbit/evidence/current-evidence.json
-orbit evidence add --file .orbit/evidence/current-evidence.json --kind implementation --status pass --summary "..."
-orbit evidence submit --file .orbit/evidence/current-evidence.json --report .orbit/reports/review-report.yaml --task .orbit/tasks/current-task.yaml --json
-orbit state start --task .orbit/tasks/current-task.yaml
-orbit state progress --message "..." --evidence .orbit/evidence/current-evidence.json
-orbit state transition --to in_review --evidence .orbit/evidence/current-evidence.json
-orbit wait-gate --task .orbit/tasks/current-task.yaml --evidence .orbit/evidence/current-evidence.json --json
-orbit validate --task .orbit/tasks/current-task.yaml --evidence .orbit/evidence/current-evidence.json --state .orbit/loop-state.yaml --json
-orbit audit --task .orbit/tasks/current-task.yaml --evidence .orbit/evidence/current-evidence.json --state .orbit/loop-state.yaml --json
-orbit handoff --task .orbit/tasks/current-task.yaml --evidence .orbit/evidence/current-evidence.json --state .orbit/loop-state.yaml --output .orbit/handoff/current-handoff.json --record-state --json
-```
+Report 模板在 `assets/templates/review-report.yaml`、`assets/templates/test-report.yaml` 和 `assets/templates/design-review-report.yaml`。
 
 ## 运行规则摘要
 
 - Orbit 默认规则随 skill 一起安装；agent 进入正式任务后会通过 `orbit rules resolve` 和 `orbit rules print-context` 读取本轮需要的规则。
 - 项目规则可以叠加，但不能替代 Orbit 默认 runtime 规则。
-- coding、review、testing 都必须通过 task/evidence/state/gate/audit 闭环证明结果；聊天结论、Herdr pane 状态和本地命令输出本身都不是 gate。
-- Herdr 安装见 https://herdr.dev/docs/install/ 。
+- coding、review、testing 都必须通过 task/evidence/state/gate/audit 闭环证明结果。
+- 聊天结论、Herdr done、静态 binding、旧 session file、手写 runtime identity 都不是 gate proof。
+- review/test verdict 必须由对应 role 用结构化 report 提交。
+- implementation evidence 必须带 `--task`，让 CLI 校验 execution contract。
+- `dispatch --to` 使用 instance key，例如 `reviewer-main`，不要使用 role 名 `reviewer`。
+- 缺 Herdr 时只能走 explicit manual protocol；不要把 manual protocol 写成 automatic runtime downgrade。
