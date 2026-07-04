@@ -22,11 +22,11 @@
       "cadence": "every-release"
     },
     {
-      "id": "transport-done-only",
+      "id": "notification-done-only",
       "source_adjustment": "P0.3",
-      "scenario": "Evidence with only a transport notification cannot satisfy review/test gate",
-      "expected_outcome": "wait-gate blocks; transport DONE does not equal gate pass",
-      "fixture": "tests/fixtures/transport-done-fixture.json",
+      "scenario": "Evidence with only a DONE notification cannot satisfy review/test gate",
+      "expected_outcome": "wait-gate blocks; notification DONE does not equal gate pass",
+      "fixture": "tests/fixtures/notification-done-fixture.json",
       "owner": "reviewer",
       "cadence": "every-release"
     },

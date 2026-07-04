@@ -9,11 +9,6 @@ def parse_new_task_args(args)
     arg = args.shift
 
     case arg
-    when "--target-role"
-      option_value(args, "--target-role")
-      usage_error("orbit new-task --target-role was removed. Re-run orbit init with --operation-mode solo|team and use execution_contract defaults, or pass --implementation-authority/--assigned-instance.")
-    when /\A--target-role=(.+)\z/
-      usage_error("orbit new-task --target-role was removed. Re-run orbit init with --operation-mode solo|team and use execution_contract defaults, or pass --implementation-authority/--assigned-instance.")
     when "--task-type"
       options["task_type"] = option_value(args, "--task-type")
     when /\A--task-type=(.+)\z/
@@ -445,7 +440,6 @@ def new_task(args)
   end
 
   task["project"] = options["project"]
-  task.delete("target_role")
   task["task_type"] = options["task_type"]
   task["execution_contract"] = build_task_execution_contract(options)
   task["schema_semantics"] = {

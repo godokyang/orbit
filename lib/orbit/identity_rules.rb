@@ -278,7 +278,6 @@ def infer_instance_from_role(instances, roles, role_name)
 end
 
 ALLOWED_INSTANCE_MANAGEMENT = %w[user_managed orbit_managed].freeze
-INSTANCE_SCHEMA_REMOVED_TRANSPORT_MESSAGE = "transport.* instance schema is no longer supported; rerun orbit init or update instances.yaml to binding.adapter: herdr."
 
 def instance_management(instance)
   value = instance["management"].to_s.strip
@@ -291,20 +290,13 @@ def validate_instance_management!(instance_name, instance)
   management
 end
 
-def old_transport_schema_error!(instance_name, instance)
-  return unless instance.key?("transport")
-
-  usage_error("Instance #{instance_name.inspect} uses removed transport schema. #{INSTANCE_SCHEMA_REMOVED_TRANSPORT_MESSAGE}")
-end
-
 def normalize_instance_binding(instance_name, instance)
-  old_transport_schema_error!(instance_name, instance)
-  binding = instance["binding"] || {}
+  binding = instance["binding"]
+  usage_error("Instance #{instance_name.inspect} binding must be present with adapter herdr.") if binding.nil?
   usage_error("Instance #{instance_name.inspect} binding must be a mapping when present.") unless binding.is_a?(Hash)
   usage_error("Instance #{instance_name.inspect} view must be a sibling of binding, not binding.view.") if binding.key?("view")
 
   adapter = binding["adapter"].to_s.strip
-  adapter = "herdr" if adapter.empty?
   usage_error("Instance #{instance_name.inspect} binding.adapter must be herdr.") unless adapter == "herdr"
 
   pane = binding["pane"].to_s
@@ -322,7 +314,8 @@ end
 def normalize_instance_view(instance_name, instance)
   view = instance["view"] || {}
   usage_error("Instance #{instance_name.inspect} view must be a mapping when present.") unless view.is_a?(Hash)
-  min_columns = view["min_columns"] || view["min_cols"] || 120
+  usage_error("Instance #{instance_name.inspect} view.min_cols was removed; use view.min_columns.") if view.key?("min_cols")
+  min_columns = view["min_columns"] || 120
   min_rows = view["min_rows"] || 36
   min_columns = min_columns.to_i
   min_rows = min_rows.to_i
@@ -849,13 +842,6 @@ def apply_task_constraints(result, task, evidence = nil)
   return unless task
 
   result["project"] = task["project"] if task["project"]
-
-  target_role = task["target_role"]
-  if target_role
-    result["role_sources"]["task_file.target_role"] = target_role
-    conflict(result, "task_file.target_role", "task_schema_reinit_required: target_role was removed; recreate the task with execution_contract.")
-    return
-  end
 
   contract = task["execution_contract"]
   unless contract.is_a?(Hash)

@@ -593,7 +593,7 @@ def audit(args)
   schema_summary = evidence_schema_version_summary(evidence, task)
   if schema_summary
     # Prose/structured conflicts are blocking: structured verdict wins per global compatibility policy.
-    schema_summary["prose_conflicts"].each do |conflict|
+    Array(schema_summary["consistency_checks"]).flat_map { |check| Array(check["conflicts"]) }.each do |conflict|
       blocking_findings << audit_finding(
         conflict["source"] || "evidence_file.records",
         conflict["message"],

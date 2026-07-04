@@ -233,7 +233,7 @@ quality_measurement:
     replacement_evidence: "替代证据。"
 ```
 
-可以从 `assets/templates/test-report.yaml` 复制最小模板后填写，再运行 `orbit evidence submit --file <manifest> --report <report> --json`。不要直接编辑 `.orbit/evidence*.json` 来提交测试结论；直接写 manifest 会绕过 CLI 的身份解析、schema 校验和并发安全写入，不能用于关闭 test gate。
+可以从 `assets/templates/test-report.yaml` 复制最小模板后填写，再运行 `orbit evidence submit --file <manifest> --report <report> --task <task> --json`。不要直接编辑 `.orbit/evidence*.json` 来提交测试结论；直接写 manifest 会绕过 CLI 的身份解析、schema 校验和并发安全写入，不能用于关闭 test gate。
 
 `test_level` 必须与 task contract 声明一致；只跑 repository regression 不能声称 browser/provider E2E 或 dogfood 通过。`coverage`、`artifacts` 必须是字符串列表；没有 findings 时写 `[]`。High/Medium findings 必须使用结构化 mapping，包含 `severity`、`summary`、`symptom`、`source`、`consequence` 和 `remedy`。`blocked` 只在 `verdict: blocked` 或需要解释 partial 阻塞时填写；CLI 会把 `blocked` verdict 存为 partial record，并在 gate summary 中显示 blocked 原因。
 

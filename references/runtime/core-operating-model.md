@@ -101,8 +101,8 @@ skill 的推荐启动动作：
 2. 调用 orbit whoami --json。
 3. 读取 resolved_role、rules、permissions、conflicts。
 4. 如果存在 conflicts，停止并报告。
-5. 调用 orbit rules resolve --json，已有 task 时带上 --task，生成规则审计产物。
-6. 调用 orbit rules print-context --json，已有 task 时带上 --task，读取其中 active required_files。
+5. 调用 `orbit rules resolve --task task.yaml --output .orbit/rules/current-resolution.json --json`；还没有 task 时用 `orbit rules resolve --output .orbit/rules/current-resolution.json --json`，生成可挂载到 evidence 的规则审计产物。
+6. 调用 `orbit rules print-context --task task.yaml --output .orbit/rules/current-context.json --json`；还没有 task 时用 `orbit rules print-context --output .orbit/rules/current-context.json --json`，读取其中 active required_files。
 7. 加载 print-context 中声明的 Orbit 默认规则、项目规则和 task 规则；rule packs 作为 optional/conditional 增强清单，deduped/shadowed/not_loaded_but_related 只作为审计线索。
 8. 按 permissions 和 role 执行任务。
 ```
@@ -119,7 +119,7 @@ skill 的推荐启动动作：
   "project": "example-project",
   "instance": "reviewer-main",
   "resolved_instance": "reviewer-main",
-  "role_ref": "reviewer-main",
+  "role_ref": "reviewer",
   "resolved_role": "reviewer",
   "expected_command": "codex",
   "actual_client": "codex",
@@ -134,8 +134,8 @@ skill 的推荐启动动作：
   "role_sources": {
     "env.ORBIT_INSTANCE": "reviewer-main",
     "env.ORBIT_ROLE": "reviewer",
-    "project_config.instances.reviewer-main.role_ref": "reviewer-main",
-    "project_config.roles.reviewer-main.role": "reviewer"
+    "project_config.instances.reviewer-main.role_ref": "reviewer",
+    "project_config.roles.reviewer.role": "reviewer"
   },
   "rules": [
     "docs/operating-model.md",
@@ -186,7 +186,7 @@ capability_registry:
     description: "写权威产物或状态。"
 
 roles:
-  lead-main:
+  lead:
     role: lead
     capabilities:
       - task_contract.write
@@ -199,7 +199,7 @@ roles:
       can_edit_production_code: true
       can_update_loop_state: true
 
-  reviewer-main:
+  reviewer:
     role: reviewer
     capabilities:
       - review.submit
@@ -210,7 +210,7 @@ roles:
       can_edit_production_code: false
       can_submit_review: true
 
-  tester-main:
+  tester:
     role: tester
     capabilities:
       - test.run
@@ -266,11 +266,11 @@ instances:
       ORBIT_ROLE: reviewer
 ```
 
-`transport.kind` / `transport.binding` / `transport.health` schema 已移除；新版本 CLI 会拒绝该旧 schema。静态 Herdr binding 只是启动和诊断 hint，不能证明 agent live/healthy；live reuse 只能由 Herdr probe 确认。
+`transport.kind` / `transport.binding` / `transport.health` schema 已移除；新版本 CLI 会拒绝该旧 schema。静态 Herdr binding 只是启动和诊断 hint，不能证明 agent live/healthy。复用、direct dispatch 或 gate attribution 必须以 runtime resolver 输出为准；Herdr live probe 只是 resolver 的输入之一，不能单独构成 verified identity。
 
 `management` 定义 instance 生命周期由谁管理：
 
-- `user_managed` 是默认值。用户已经打开或绑定的 reviewer/tester 是协作拓扑 hint，但复用前仍必须由 Herdr live probe 证明 agent 存活；缺失或不健康时应启动新 Herdr agent，已有不可信 binding 需要用户显式 `--force`。
+- `user_managed` 是默认值。用户已经打开或绑定的 reviewer/tester 只是协作拓扑 hint；复用前必须由 runtime resolver 确认 `dispatch_ready: true`。缺失 verified runtime identity 时按 remediation 或 manual-payload 处理；只有 stale/conflict/replacement 场景且 owner 接受风险时才使用 `--force`。
 - `orbit_managed` 表示 lead/Orbit 可以按配置自动启动缺失 instance。启动成功后 Herdr adapter 应写回 canonical binding；live state 不写进版本控制配置。
 
 `binding` 只记录 Herdr workspace/tab/pane handle，不定义 role；role 仍来自 `role_ref` 和运行时 identity。gate 等待的是 instance verdict 和 evidence，而不是某个自然语言 pane 消息。
@@ -288,11 +288,11 @@ orbit start tester-main
 1. 设置进程 env：`ORBIT_INSTANCE=reviewer-main`、`ORBIT_ROLE=reviewer`。
 2. 启动 Codex / Claude Code / 其他 agent 客户端；自动 wake/create 只通过 Herdr start adapter。
 3. 输出 argv/env/cwd，避免通过 shell 字符串拼接命令。
-4. 对缺失 role 的创建输出 creation policy：先复用 existing binding；确需创建时尽量使用 lead 的同级 tab/workspace；并提醒新 agent 的权限/approval 模式需要被用户或客户端能力显式准备。
-5. 对已有 Herdr pane binding 做可用性判断：pane 里已检测到 agent 时复用；pane 存在但未检测到 agent 且可安全判断为空闲 shell 时自动 wake；无法安全判断时返回 `needs_attention`，不盲打命令。
+4. 对缺失或目标不确定的 role 输出 creation policy：先运行 runtime resolver；只有 `dispatch_ready: true` 才复用。缺失 verified runtime identity 时按 remediation/manual-payload 处理；确需创建时尽量使用 lead 的同级 tab/workspace，并提醒新 agent 的权限/approval 模式需要被显式准备。
+5. 对已有 Herdr pane binding 做可用性判断时，Herdr pane/agent detection 只是 resolver 输入。verified 且 `dispatch_ready: true` 才能 direct delivery；否则 `identity_pending`、`stale`、`replaced`、`override`、manual protocol 或 conflict 都 fail closed 或按 remediation 处理。需要替换旧 binding 时必须显式 `--force` 并告知 owner 风险。
 6. 在 start/dispatch 输出中提供 `context_preflight`，列出当前 instance 必须读取的 common、role 和 task 规则文件，以及推荐的 whoami / rules resolve / rules print-context 命令。`whoami` 只解析当前运行身份，不应携带 task；task 约束由 `rules resolve --task ... --instance ...` 和 `rules print-context --task ... --instance ...` 解析，避免 gate role 在读取规范前被 target-role mismatch 阻断。
 
-Herdr pane 布局、权限模式和启动 prelude 属于 adapter/agent 客户端能力；如果当前 adapter 不支持，不能假装已经注入。agent 启动后仍必须自己运行 `orbit whoami --json`、`orbit rules resolve --json` 和 `orbit rules print-context --json`，并读取 `context_preflight.required_files` 中的 active required files；CLI 暴露 preflight 不等于 LLM 已经语义读取。
+Herdr pane 布局、权限模式和启动 prelude 属于 adapter/agent 客户端能力；如果当前 adapter 不支持，不能假装已经注入。agent 启动后仍必须自己运行 `orbit whoami --json`、带 `--output` 的 `orbit rules resolve ... --json` 和带 `--output` 的 `orbit rules print-context ... --json`，并读取 `context_preflight.required_files` 中的 active required files；CLI 暴露 preflight 不等于 LLM 已经语义读取。
 
 这样最终流程变成：
 
@@ -316,8 +316,8 @@ agent 按返回值工作
 | transport label | tab / pane / session label = `reviewer-main` | 提供环境信号 | 当前 CLI 不直接读取；adapter 应转成 `ORBIT_INSTANCE` 或后续 metadata 输入 |
 | 环境变量 | `ORBIT_ROLE=reviewer` | 机器可读兜底 | 与 prelude 冲突时 fail closed |
 | CLI whoami | `orbit whoami --json` | 聚合身份和项目规则路径 | skill 优先使用的身份解析结果 |
-| CLI rules resolve | `orbit rules resolve --json` | 解析默认规则、项目规则、task 规则和 rule packs | 正式闭环里的规则审计产物 |
-| CLI rules print-context | `orbit rules print-context --json` | 输出 agent 本轮应读取的 load_order、required_files 和 rule packs | 正式闭环里的上下文读取清单 |
+| CLI rules resolve | `orbit rules resolve --task task.yaml --output .orbit/rules/current-resolution.json --json` | 解析默认规则、项目规则、task 规则和 rule packs | 正式闭环里的规则审计产物，必须写成文件后挂到 evidence |
+| CLI rules print-context | `orbit rules print-context --task task.yaml --output .orbit/rules/current-context.json --json` | 输出 agent 本轮应读取的 load_order、required_files 和 rule packs | 正式闭环里的上下文读取清单，必须写成文件供 handoff/audit 复核 |
 | task file | `execution_contract` | 声明 owner、implementation authority、assigned instance 和 mode | 当前 agent 必须满足 owner、implementation assignee 或 gate role 规则 |
 | 用户当前消息 | “请你 review” | 当前交互提示 | 不能覆盖已确定的持久角色 |
 
@@ -328,7 +328,7 @@ agent 按返回值工作
 3. 用 project config / Role Mapping 把项目角色名归一化，例如 `lead-main -> lead`。
 4. 如果存在多个持久身份信号且互相冲突，返回 conflicts；skill 停止并报告冲突。
 5. 如果 task file 的 `execution_contract` 与当前 agent role/instance 不匹配，停止并要求 owner 重新派单或提交受控 override evidence。
-6. 如果 CLI 不可用，skill 才按同样规则在本地做降级解析，并在 evidence 中标注 `role_source_mode: local_fallback`。
+6. 如果 CLI 不可用，skill 只能做只读本地诊断，并在回复或 handoff 中标注 role 来源不是 CLI 解析结果；不得写正式 task/evidence/gate-closing record。正式 task/evidence/gate 必须等 CLI 可用，或走明确 manual protocol artifact 后由具备 CLI 的 agent 提交。
 7. 如果没有持久身份，不能只凭 task file 临时采用 role；新版本要求 `ORBIT_INSTANCE` / `ORBIT_ROLE` 或 `orbit start INSTANCE` 提供 runtime identity。
 8. 如果仍无法确定角色，不得默认自己是 reviewer/tester；普通单 agent 会话中，只有用户直接要求实现或协调时，才可临时作为 lead/coder 工作。
 
@@ -402,7 +402,7 @@ capability_registry:
     kind: service_controlled
 
 roles:
-  lead-main:
+  lead:
     role: lead
     capabilities:
       - task_contract.write
@@ -415,7 +415,7 @@ roles:
       can_edit_production_code: true
       can_update_loop_state: true
 
-  reviewer-main:
+  reviewer:
     role: reviewer
     capabilities:
       - review.submit
@@ -426,7 +426,7 @@ roles:
       can_edit_production_code: false
       can_submit_review: true
 
-  tester-main:
+  tester:
     role: tester
     capabilities:
       - test.run
@@ -695,34 +695,16 @@ review/test/command 结果都写 manifest。manifest 是事实记录，不替代
 ```json
 {
   "schema_version": "orbit-evidence-v1",
+  "schema_semantics": {
+    "feature_versions": {
+      "evidence_level": "v1",
+      "quality_outcome": "v1",
+      "schema_semantics": "v1",
+      "role_identity_full": "v1",
+      "data_classification_retention": "v1"
+    }
+  },
   "project": "example-project",
-  "role": "reviewer",
-  "role_resolution": {
-    "resolved_role": "reviewer",
-    "resolver": "orbit whoami --json",
-    "whoami_result_file": "/tmp/orbit-whoami-reviewer-main.json",
-    "role_sources": {
-      "env.ORBIT_INSTANCE": "reviewer-main",
-      "env.ORBIT_ROLE": "reviewer",
-      "project_config.instances.reviewer-main.role_ref": "reviewer",
-      "project_config.roles.reviewer.role": "reviewer",
-      "task_file.execution_contract.assigned_instance": "reviewer-main"
-    },
-    "role_source_mode": "persistent_identity_confirmed",
-    "conflict": null
-  },
-  "task_type": "implementation_review",
-  "task_file": "/tmp/orbit-task-review-001.yaml",
-  "result_file": "/tmp/orbit-result-review-001.md",
-  "runtime": {
-    "adapter": "herdr",
-    "workspace_id": "workspace-123",
-    "tab_id": "tab-456",
-    "pane_id": "pane-789",
-    "managed_by": "orbit herdr adapter"
-  },
-  "started_at": "2026-06-08T12:00:00+08:00",
-  "completed_at": "2026-06-08T12:08:00+08:00",
   "records": [
     {
       "kind": "review",
@@ -731,9 +713,41 @@ review/test/command 结果都写 manifest。manifest 是事实记录，不替代
       "created_at": "2026-06-08T12:08:00+08:00",
       "structured_submit": true,
       "source_message_id": "herdr:reviewer-main:msg-123",
+      "source_report": "/tmp/review-submit.yaml",
+      "role_execution_context": {
+        "owner_role": "lead",
+        "owner_instance": "lead-main",
+        "operation_mode": "team",
+        "implementation_authority": "reviewer",
+        "assigned_instance": "reviewer-main",
+        "resolved_role": "reviewer",
+        "resolved_instance": "reviewer-main",
+        "execution_contract_source": "project_defaults",
+        "task_sha256": "task-sha256",
+        "rules_context_sha256": "rules-context-sha256"
+      },
+      "runtime_identity": {
+        "verification": "manual_runtime",
+        "source": "current_process",
+        "session_id": "",
+        "herdr": {
+          "pane": "",
+          "canonical_pane": ""
+        }
+      },
       "findings": [],
       "coverage": ["quality outcome and gate behavior"],
-      "artifacts": ["/tmp/orbit-result-review-001.md"]
+      "artifacts": ["/tmp/orbit-result-review-001.md"],
+      "quality_outcome_verdict": "pass",
+      "quality_outcome_reasoning": "Outcome and acceptance evidence were checked.",
+      "evidence_level": "outcome_quality",
+      "data_classification": {
+        "sensitivity": "internal",
+        "categories": []
+      },
+      "retention_policy": {
+        "mode": "project_default"
+      }
     }
   ],
   "waivers": [],
@@ -775,10 +789,12 @@ review/test/command 结果都写 manifest。manifest 是事实记录，不替代
     "gaps": []
   },
   "rule_resolution": {
-    "resolver": "orbit rules resolve --json",
+    "resolver": "orbit rules resolve --task task.yaml --output .orbit/rules/current-resolution.json --json",
     "file": "/tmp/orbit-rule-resolution-review-001.json",
     "valid": true,
     "resolved_role": "reviewer",
+    "resolved_instance": "reviewer-main",
+    "task_sha256": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
     "conflict_count": 0,
     "missing_project_rule_files": []
   },
@@ -797,7 +813,7 @@ review/test/command 结果都写 manifest。manifest 是事实记录，不替代
 }
 ```
 
-`verdict` 是 aggregate summary，不是最新 record 的别名。review/test gate 只认带结构化字段且 identity 匹配对应角色的 review/test record：review 需要 resolved role `reviewer`，test 需要 resolved role `tester`。无关 command pass 或身份不匹配的 review/test pass 不能覆盖仍然 fail/partial 的 review/test 结论。`orbit evidence submit` 是推荐入口，report 至少包含 `kind`、`verdict`、`summary`、`source_message_id`、`findings`、`coverage` 和 `artifacts`。review report 必须包含 `quality_outcome_verdict`，review PASS 必须是 `quality_outcome_verdict: pass`；High/Medium finding 必须用 mapping 写出 symptom/source/consequence/remedy。test PASS report 必须包含 `test_level`，且不能是 `not_applicable`。reviewer/tester 必须写独立 report 并用 CLI submit；不要直接编辑 `.orbit/evidence*.json`，因为手写 record 不会产生可信 identity，也不会走 schema 校验和并发安全写入。
+`verdict` 是 aggregate summary，不是最新 record 的别名。review/test gate 只认带结构化字段且 identity 匹配对应角色的 review/test record：review 需要 resolved role `reviewer`，test 需要 resolved role `tester`。无关 command pass 或身份不匹配的 review/test pass 不能覆盖仍然 fail/partial 的 review/test 结论。`orbit evidence submit` 是 review/test verdict 的唯一入口，report 必须包含 `kind`、`verdict`、`summary`、`source_message_id`、`findings`、`coverage` 和 `artifacts`；CLI 不从文件名推断 `kind`，也不接受 `status/result/decision` 或 `APPROVED/CHANGES_REQUESTED` 作为 verdict 别名。review report 必须包含 `quality_outcome_verdict`，review PASS 必须是 `quality_outcome_verdict: pass`；High/Medium finding 必须用 mapping 写出 symptom/source/consequence/remedy。test PASS report 必须包含 `test_level`，且不能是 `not_applicable`。reviewer/tester 必须写独立 report 并用 CLI submit；不要直接编辑 `.orbit/evidence*.json`，因为手写 record 不会产生可信 identity，也不会走 schema 校验和并发安全写入。
 
 `verdict: blocked` 会规范化为 partial evidence record，并通过 `blocked.reason`、`blocked.next_step`、`blocked.owner` 保留阻塞细节。`wait-gate` 和 `handoff` 输出 `gate_summary`，用于暴露 required gate 的 ready 状态、identity mismatch、blocked/partial/fail 等阻塞原因。
 

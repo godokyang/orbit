@@ -590,7 +590,6 @@ end
 
 def structured_submit_kind(report_path, report)
   kind = report["kind"]
-  kind = infer_report_kind(report_path, report) if kind.to_s.empty?
   unless STRUCTURED_SUBMIT_KINDS.include?(kind)
     submit_report_schema_error(
       "submit_report.kind",
@@ -604,13 +603,13 @@ def structured_submit_kind(report_path, report)
 end
 
 def structured_submit_status(report, kind)
-  status = normalize_report_status(report["verdict"] || report["status"])
+  status = normalize_report_status(report["verdict"])
   unless ALLOWED_EVIDENCE_STATUSES.include?(status)
     submit_report_schema_error(
       "submit_report.verdict",
       "Structured submit report verdict must be one of #{ALLOWED_EVIDENCE_STATUSES.join("|")}.",
       expected: ALLOWED_EVIDENCE_STATUSES.join("|"),
-      actual: evidence_value_type(report["verdict"] || report["status"]),
+      actual: evidence_value_type(report["verdict"]),
       kind: kind
     )
   end
@@ -631,7 +630,16 @@ def validate_structured_submit_report!(report_path, report)
   status = structured_submit_status(report, kind)
   summary = report_string!(report, "summary", "submit_report", kind: kind)
   source_message_id = report_string!(report, "source_message_id", "submit_report", kind: kind)
-  findings = validate_findings_array!(report["findings"] || [], "submit_report.findings", kind: kind)
+  unless report.key?("findings")
+    submit_report_schema_error(
+      "submit_report.findings",
+      "Structured submit report findings is required.",
+      expected: "list of strings or finding mappings",
+      actual: "missing",
+      kind: kind
+    )
+  end
+  findings = validate_findings_array!(report["findings"], "submit_report.findings", kind: kind)
   coverage = validate_string_array!(report["coverage"], "submit_report.coverage", kind: kind)
   artifacts = validate_string_array!(report["artifacts"], "submit_report.artifacts", kind: kind)
   validate_blocked_submit_detail!(report["blocked"], "submit_report.blocked", kind: kind) if report.key?("blocked")
@@ -915,6 +923,7 @@ def evidence_submit(options)
     rp = normalize_retention_policy(report["retention_policy"], "submit_report", kind)
     record["retention_policy"] = rp if rp
   end
+  apply_default_data_policy!(record)
   if report.key?("trust_repair")
     tr = normalize_trust_repair(report["trust_repair"], "submit_report", kind)
     record["trust_repair"] = tr if tr
@@ -982,6 +991,7 @@ def evidence_waive(options)
     "created_at" => waiver["created_at"],
     "source_report" => waiver_path
   }
+  apply_default_data_policy!(waiver_record)
 
   updated_manifest = update_evidence_manifest(path) do |manifest|
     waivers = ensure_evidence_waivers!(manifest)

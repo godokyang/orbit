@@ -1059,6 +1059,10 @@ end
 # Slice 12: validate data_classification, retention_policy, trust_repair on evidence records.
 def validate_data_classification_fields(result, source, record)
   dc = record["data_classification"]
+  unless record.key?("data_classification")
+    validation_error(result, "#{source}.data_classification",
+      "Evidence record must include data_classification.")
+  end
   if dc.is_a?(Hash)
     sensitivity = dc["sensitivity"]
     if sensitivity && !(sensitivity.is_a?(String) && ALLOWED_SENSITIVITY_LEVELS.include?(sensitivity))
@@ -1099,6 +1103,10 @@ def validate_data_classification_fields(result, source, record)
   end
 
   rp = record["retention_policy"]
+  unless record.key?("retention_policy")
+    validation_error(result, "#{source}.retention_policy",
+      "Evidence record must include retention_policy.")
+  end
   if rp.is_a?(Hash)
     mode = rp["mode"]
     if mode && !(mode.is_a?(String) && ALLOWED_RETENTION_MODES.include?(mode))

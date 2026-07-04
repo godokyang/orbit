@@ -141,7 +141,7 @@ pass 'installer detects local skill when run as sh install.sh from skill directo
 test ! -s "$TMPROOT/help.err"
 grep -q 'orbit validate' "$TMPROOT/help.txt"
 grep -q 'changed-files' "$TMPROOT/help.txt"
-grep -q 'orbit evidence add' "$TMPROOT/help.txt"
+grep -Fq 'orbit evidence add --file PATH --kind KIND --status STATUS --summary SUMMARY [--task PATH]' "$TMPROOT/help.txt"
 grep -Fq 'orbit evidence submit --file PATH --report PATH [--task PATH] --json' "$TMPROOT/help.txt"
 grep -q 'orbit evidence waive' "$TMPROOT/help.txt"
 grep -q 'orbit evidence attach-rule' "$TMPROOT/help.txt"
@@ -258,6 +258,7 @@ pass 'wait-gate subcommand help works'
 "$CLI" evidence --help >"$TMPROOT/evidence-help.txt" 2>"$TMPROOT/evidence-help.err"
 test ! -s "$TMPROOT/evidence-help.err"
 grep -Fq 'orbit evidence submit --file PATH --report PATH [--task PATH] --json' "$TMPROOT/evidence-help.txt"
+grep -Fq 'orbit evidence add --file PATH --kind KIND --status STATUS --summary SUMMARY [--task PATH]' "$TMPROOT/evidence-help.txt"
 grep -q 'task_sha256' "$TMPROOT/evidence-help.txt"
 pass 'evidence subcommand help works'
 
@@ -789,9 +790,9 @@ grep -q 'Orbit start plan:' "$TMPROOT/start-reviewer-human.txt"
 grep -q -- '- instance: reviewer-main' "$TMPROOT/start-reviewer-human.txt"
 grep -q -- '- command: codex' "$TMPROOT/start-reviewer-human.txt"
 pass 'start dry-run works without json'
-env -u HERDR_PANE_ID -u HERDR_TAB_ID -u HERDR_TAB -u HERDR_WORKSPACE_ID -u HERDR_WORKSPACE -u HERDR_SPACE_ID -u HERDR_SPACE "$CLI" start reviewer-main --dry-run --json >"$TMPROOT/start-herdr-dry-run.json"
+env -u HERDR_PANE_ID -u HERDR_TAB_ID -u HERDR_TAB -u HERDR_WORKSPACE_ID -u HERDR_WORKSPACE "$CLI" start reviewer-main --dry-run --json >"$TMPROOT/start-herdr-dry-run.json"
 json_assert 'start herdr dry-run emits adapter plan' "$TMPROOT/start-herdr-dry-run.json" 'j["schema_version"] == "orbit-start-plan-v1" && j["action"] == "dry_run" && j["adapter"] == "herdr" && j["herdr_start"]["schema_version"] == "orbit-herdr-start-v1" && j["herdr_start"]["command"] == ["herdr", "agent", "start", "reviewer-main", "--cwd", Dir.pwd, "--no-focus", "--", "codex"] && j["herdr_start"]["env"]["ORBIT_INSTANCE"] == "reviewer-main" && j["herdr_start"]["ready_wait"]["mode"] == "output_match"'
-json_assert 'start herdr dry-run exposes create policy and permission setup' "$TMPROOT/start-herdr-dry-run.json" 'j["creation_policy"]["reuse_first"] == true && j["creation_policy"]["same_level_view"]["strategy"] == "fallback_default_view" && j["creation_policy"]["permission_setup"]["required"] == true && j["creation_policy"]["permission_setup"]["summary"].include?("does not silently bypass")'
+json_assert 'start herdr dry-run exposes create policy and permission setup' "$TMPROOT/start-herdr-dry-run.json" 'j["creation_policy"]["reuse_first"] == true && j["creation_policy"]["same_level_view"]["strategy"] == "default_view" && j["creation_policy"]["permission_setup"]["required"] == true && j["creation_policy"]["permission_setup"]["summary"].include?("does not silently bypass")'
 mkdir -p "$TMPROOT/fakebin"
 cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
 #!/bin/sh

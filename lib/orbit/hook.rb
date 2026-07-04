@@ -162,7 +162,7 @@ def hook_result(subcommand, intent)
   warnings = []
   recommended_action = "allow"
 
-  if intent.key?("live_probe") || intent.key?("transport_binding") || intent.key?("manual_payload") || intent.key?("explicit_pane") || intent.key?("observed_geometry") || intent.key?("view")
+  if intent.key?("live_probe") || intent.key?("manual_payload") || intent.key?("explicit_pane") || intent.key?("observed_geometry") || intent.key?("view")
     warnings << "caller_supplied_liveness_ignored"
   end
 

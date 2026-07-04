@@ -97,29 +97,29 @@ herdr integration install claude
 herdr integration install opencode
 ```
 
-Herdr 是 Orbit 普通 automatic runtime 的必需依赖，也是唯一官方 runtime layer。手动 Orbit protocol 仍可用，但必须显式降级使用：自己在终端里启动 agent、设置 `ORBIT_INSTANCE` / `ORBIT_ROLE`，并用 evidence / validate / audit 完成协议层闭环；这种模式不支持 `orbit start` 自动创建/唤醒、Herdr direct dispatch 或 Herdr notice surfacing。旧的 runtime adapter 参数已移除，安装新版本后请重新 `orbit init` 生成新的 instance binding schema。
+Herdr 是 Orbit automatic runtime 的必需依赖，也是唯一官方 runtime layer。没有 Herdr 时，automatic runtime fail closed，`orbit start` 自动 create/wake、Herdr direct dispatch 和 Herdr notice surfacing 都不可用。手动 Orbit protocol 仍可用，但它是 explicit manual protocol path：自己在终端里启动 agent、设置 `ORBIT_INSTANCE` / `ORBIT_ROLE`，并用 evidence / validate / audit 完成协议层闭环；manual evidence 不产生 Herdr-verified runtime identity。旧的 runtime adapter 参数已移除，安装新版本后请重新 `orbit init` 生成新的 instance binding schema。
 
 ### Runtime support
 
 | Command area | Adapter needed? | 当前状态 |
 | --- | --- | --- |
-| `start` reuse | Herdr | 只有 live Herdr facts 和 Orbit runtime session identity 同时匹配时才能复用；状态不可信时会提示用户用 `--force` 重新启动并替换 binding。 |
+| `start` reuse | Herdr | 只有 runtime resolver 输出 `dispatch_ready: true` 时才能复用；Herdr facts 只是 resolver 输入，状态不可信时按 remediation 处理，只有 stale/conflict/replacement 且 owner 接受风险时才用 `--force`。 |
 | `start` wake/create external pane | Herdr | Herdr only；没有 Herdr 时请手动在目标终端启动 agent，并设置 `ORBIT_INSTANCE` / `ORBIT_ROLE`。 |
-| `dispatch` direct pane delivery | Herdr | Herdr only；目标 instance 必须是 live + verified + available 的 runtime participant，显式 `--pane` 只是人工 override，不是 verified identity。 |
+| `dispatch` direct pane delivery | Herdr | Herdr only；目标 instance 必须由 runtime resolver 确认为 `dispatch_ready: true`，显式 `--pane` 只是人工 override，不是 verified identity。 |
 | `notice` record | No adapter | Delivery backend 未实现；当前只作为 Orbit protocol record / future enhancement，不声明 Herdr notice delivery 支持。 |
 | `dispatch`/`handoff` manual artifact | No | 使用 `dispatch --manual-payload` 或 `handoff --output` 生成手动投递 artifact。 |
 | `whoami`/`rules`/`task`/`evidence`/`state`/`wait-gate`/`validate`/`audit` | No | 这些是 Orbit protocol 命令，主要读写 `.orbit/` 文件，不依赖 terminal adapter。 |
 
-Orbit 不把 `.orbit/instances.yaml` 里的 binding 当成 alive proof。自动投递前必须重新解析 runtime identity：config expected identity、runtime session self-registration 和 Herdr live probe 同时成立，才算 verified participant。
+Orbit 不把 `.orbit/instances.yaml` 里的 binding 当成 alive proof。自动投递前必须走 runtime resolver；只有输出 `dispatch_ready: true`，才算可 direct dispatch。config expected identity、runtime session self-registration 和 Herdr live facts 都只是 resolver 的输入。
 
-如果显式使用 manual-only protocol，或 `start` 不能自动启动目标 agent：
+如果显式使用 manual protocol，或 `start` 不能自动启动目标 agent：
 
 1. 在你想承载 agent 的终端、tmux pane、zellij pane、wezterm pane、CI shell 或普通 shell 里进入项目目录。
 2. 按 `.orbit/instances.yaml` 里的 `command` 手动启动，并设置 `ORBIT_INSTANCE` 和 `ORBIT_ROLE`，例如 `ORBIT_INSTANCE=reviewer-main ORBIT_ROLE=reviewer codex`。
 3. agent 启动后运行 `orbit whoami --json` 和 `orbit rules print-context --json` 确认身份与规则。
 4. 对非 Herdr 环境，不要期待 Orbit 自动创建 pane 或把命令打进去；继续用 `orbit evidence ...`、`orbit validate/audit` 完成协议层工作。
 
-如果 `start` 发现已有 binding 但状态不可信，它不会假复用；会提示风险，并告诉你用 `orbit start INSTANCE --force` 重新启动并以新 instance 为准。`--force` 不会默认 kill 旧外部进程，因此短时间内可能存在两个同 instance/role 的 agent 同时写 evidence、gate lease 或 loop state。旧 binding 的替换诊断属于本地 runtime 状态，不写进版本化的 `instances.yaml`。
+如果 `start` 发现已有 binding 但 resolver 不能确认 `dispatch_ready: true`，它不会假复用；会按 remediation 提示 manual protocol artifact、等待注册、检查冲突或替换风险。只有 stale/conflict/replacement 且 owner 接受风险时，才用 `orbit start INSTANCE --force` 重新启动并以新 instance 为准。`--force` 不会默认 kill 旧外部进程，因此短时间内可能存在两个同 instance/role 的 agent 同时写 evidence、gate lease 或 loop state。旧 binding 的替换诊断属于本地 runtime 状态，不写进版本化的 `instances.yaml`。
 
 ### 2. 安装 Orbit skill
 
@@ -229,7 +229,7 @@ command: opencode
 orbit start lead-main
 ```
 
-如果已有 binding 但 Orbit 无法证明目标 pane 里有活 agent，`start` 会拒绝静态复用并提示你确认风险后使用 `--force`：
+如果已有 binding 但 runtime resolver 不能确认 `dispatch_ready: true`，`start` 会拒绝静态复用并按 remediation 处理；只有 stale/conflict/replacement 且 owner 接受风险时才使用 `--force`：
 
 ```bash
 orbit start lead-main --force
@@ -385,9 +385,9 @@ orbit start reviewer-main --dry-run --json
 orbit start tester-main --dry-run --json
 ```
 
-先在 `.orbit/instances.yaml` 里给每个 instance 配好 `command`，例如 `codex`、`claude` 或 `opencode`。缺失 binding 时 `start` 默认通过 Herdr 创建；后续如果已有 binding 但 Orbit 无法确认它仍然有效，`start` 会提示你使用 `--force` 重新启动并替换旧 binding。
+先在 `.orbit/instances.yaml` 里给每个 instance 配好 `command`，例如 `codex`、`claude` 或 `opencode`。缺失 binding 时 `start` 默认通过 Herdr 创建；后续如果已有 binding 但 runtime resolver 不能确认 `dispatch_ready: true`，`start` 会按 remediation 处理，只有 stale/conflict/replacement 且 owner 接受风险时才提示使用 `--force` 重新启动并替换旧 binding。
 
-如果 `.orbit/instances.yaml` 里已经绑定了 pane，Orbit 只把它当成 wake/create 的目标 hint，不能把静态 binding 当成当前 agent 还活着的证明。`start`、`instances status`、`dispatch` 和 gate-closing evidence 都需要按需解析 runtime session 和 Herdr live facts；如果 binding stale 但能找回唯一 verified session，Orbit 可以修复本地 runtime pointer，只有显式 `instances status --repair-binding --json` 才写回版本化 config。
+如果 `.orbit/instances.yaml` 里已经绑定了 pane，Orbit 只把它当成 wake/create 的目标 hint，不能把静态 binding 当成当前 agent 还活着的证明。`start`、`instances status`、`dispatch` 和 gate-closing evidence 都必须以 runtime resolver 输出为准；Herdr live facts 只是 resolver 输入之一。如果 binding stale 但能找回唯一 verified session，Orbit 可以修复本地 runtime pointer，只有显式 `instances status --repair-binding --json` 才写回版本化 config。
 
 把 task 发给 live verified runtime participant：
 

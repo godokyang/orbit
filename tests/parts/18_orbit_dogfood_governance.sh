@@ -52,18 +52,18 @@ if "$CLI" wait-gate --task "$S15_TASK" --evidence "$S15_STALE_EVIDENCE" --json >
 fi
 pass 'stale gate fixture blocks gate with old task sha'
 
-# ---- Group 4: transport DONE fixture cannot satisfy gate ----
+# ---- Group 4: notification-only DONE fixture cannot satisfy gate ----
 
-S15_TRANSPORT_EVIDENCE="$TMPROOT/s15-transport-evidence.json"
-"$CLI" evidence init --output "$S15_TRANSPORT_EVIDENCE" >/dev/null
+S15_NOTIFICATION_EVIDENCE="$TMPROOT/s15-notification-evidence.json"
+"$CLI" evidence init --output "$S15_NOTIFICATION_EVIDENCE" >/dev/null
 ORBIT_INSTANCE=reviewer-main "$CLI" evidence add \
-  --file "$S15_TRANSPORT_EVIDENCE" \
-  --kind command --status pass --summary "DONE: transport notification only" >/dev/null
-if "$CLI" wait-gate --task "$S15_TASK" --evidence "$S15_TRANSPORT_EVIDENCE" --json >"$TMPROOT/s15-transport-wait-gate.json" 2>/dev/null; then
-  printf 'FAIL transport DONE should not satisfy gate\n' >&2
+  --file "$S15_NOTIFICATION_EVIDENCE" \
+  --kind command --status pass --summary "DONE: notification only" >/dev/null
+if "$CLI" wait-gate --task "$S15_TASK" --evidence "$S15_NOTIFICATION_EVIDENCE" --json >"$TMPROOT/s15-notification-wait-gate.json" 2>/dev/null; then
+  printf 'FAIL notification-only DONE should not satisfy gate\n' >&2
   exit 1
 fi
-pass 'transport DONE cannot satisfy gate'
+pass 'notification-only DONE cannot satisfy gate'
 
 # ---- Group 5: destructive dry-run fixture blocks unsafe deletion ----
 

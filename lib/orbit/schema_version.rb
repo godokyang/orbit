@@ -187,7 +187,6 @@ def evidence_schema_version_summary(evidence, task = nil)
 
   legacy_errors = []
   unknown_versions = []
-  prose_conflicts = []
 
   # Evidence manifest schema version
   case ev_compat
@@ -249,10 +248,6 @@ def evidence_schema_version_summary(evidence, task = nil)
 
       next unless conflict
 
-      prose_conflicts << conflict.merge(
-        "record_index" => index,
-        "source" => "evidence_file.records[#{index}]"
-      )
     end
   end
 
@@ -289,7 +284,6 @@ def evidence_schema_version_summary(evidence, task = nil)
     "known_feature_versions" => ORBIT_FEATURE_VERSIONS.reject { |_k, v| v.nil? },
     "legacy_errors" => legacy_errors,
     "unknown_versions" => unknown_versions,
-    "prose_conflicts" => prose_conflicts,
     "consistency_checks" => consistency_checks,
     "known_gaps" => [
       "Prose/structured conflict detection covers summary field prefix only; full field scan is a known gap."

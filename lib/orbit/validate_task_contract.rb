@@ -69,12 +69,11 @@ def validate_instance_management_field(result, source, instance_name, instance)
 end
 
 def validate_instance_binding_field(result, source, instance_name, instance)
-  if instance.key?("transport")
-    validation_error(result, "project_config.instances.#{source}.transport", "Instance #{instance_name.inspect} uses removed transport schema. #{INSTANCE_SCHEMA_REMOVED_TRANSPORT_MESSAGE}")
-  end
-
   binding = instance["binding"]
-  return if binding.nil?
+  if binding.nil?
+    validation_error(result, "project_config.instances.#{source}.binding", "Instance #{instance_name.inspect} binding must be present with adapter herdr.")
+    return
+  end
 
   unless binding.is_a?(Hash)
     validation_error(result, "project_config.instances.#{source}.binding", "Instance #{instance_name.inspect} binding must be a mapping.")
@@ -82,7 +81,7 @@ def validate_instance_binding_field(result, source, instance_name, instance)
   end
 
   adapter = binding["adapter"].to_s
-  unless adapter.empty? || adapter == "herdr"
+  unless adapter == "herdr"
     validation_error(result, "project_config.instances.#{source}.binding.adapter", "Instance #{instance_name.inspect} binding.adapter must be herdr.")
   end
 
@@ -95,6 +94,18 @@ def validate_instance_binding_field(result, source, instance_name, instance)
     next if value.nil? || value.is_a?(String)
 
     validation_error(result, "project_config.instances.#{source}.binding.#{field}", "Instance #{instance_name.inspect} binding.#{field} must be a string when present.")
+  end
+
+  view = instance["view"]
+  return if view.nil?
+
+  unless view.is_a?(Hash)
+    validation_error(result, "project_config.instances.#{source}.view", "Instance #{instance_name.inspect} view must be a mapping when present.")
+    return
+  end
+
+  if view.key?("min_cols")
+    validation_error(result, "project_config.instances.#{source}.view.min_cols", "Instance #{instance_name.inspect} view.min_cols was removed; use view.min_columns.")
   end
 end
 
@@ -587,10 +598,6 @@ def validate_execution_contract_role_pair(result, contract, roles, instances, ro
 end
 
 def validate_execution_contract(result, task)
-  if task.key?("target_role")
-    validation_error(result, "task_file.target_role", "task_schema_reinit_required: target_role was removed; recreate the task with orbit new-task.")
-  end
-
   contract = task["execution_contract"]
   unless contract.is_a?(Hash)
     validation_error(result, "task_file.execution_contract", "Task must define execution_contract.")

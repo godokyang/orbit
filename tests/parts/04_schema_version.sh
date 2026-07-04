@@ -71,7 +71,7 @@ ruby --disable-gems -ryaml -e \
   >"$TMPROOT/audit-conflict.json" 2>/dev/null || true
 json_assert 'audit detects prose PASS / structured fail conflict and flags it' \
   "$TMPROOT/audit-conflict.json" \
-  'svs = j["schema_version_summary"]; svs.is_a?(Hash) && svs["prose_conflicts"].is_a?(Array) && svs["prose_conflicts"].any? { |c| c["conflict_type"] == "prose_pass_structured_fail" && c["resolution"] == "structured_verdict_wins" }'
+  'svs = j["schema_version_summary"]; svs.is_a?(Hash) && !svs.key?("prose_conflicts") && svs["consistency_checks"].is_a?(Array) && svs["consistency_checks"].any? { |check| check["conflicts"].any? { |c| c["conflict_type"] == "prose_pass_structured_fail" && c["resolution"] == "structured_verdict_wins" } }'
 
 # Test 6: evidence submit writes source_report_semantics into the evidence record
 SEMANTICS_TASK="$TMPROOT/semantics-submit-task.yaml"

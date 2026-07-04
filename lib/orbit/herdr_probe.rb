@@ -50,7 +50,7 @@ end
 def herdr_current_context
   {
     "session" => non_empty_env("HERDR_SESSION_ID", "HERDR_SESSION"),
-    "workspace" => non_empty_env("HERDR_WORKSPACE_ID", "HERDR_WORKSPACE", "HERDR_SPACE_ID", "HERDR_SPACE"),
+    "workspace" => non_empty_env("HERDR_WORKSPACE_ID", "HERDR_WORKSPACE"),
     "tab" => non_empty_env("HERDR_TAB_ID", "HERDR_TAB"),
     "pane" => ENV["HERDR_PANE_ID"].to_s
   }

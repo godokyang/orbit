@@ -503,7 +503,7 @@ def dispatch_reply_to(explicit_reply_to = nil)
   lead_pane = lead_binding["pane"].to_s.strip
   return [lead_pane, "lead_binding"] unless lead_pane.empty?
 
-  ["manual", "manual_fallback"]
+  ["manual", "manual_protocol"]
 end
 
 def dispatch_availability(agent_status)
@@ -698,7 +698,7 @@ def run_herdr_dispatch(packet)
     }
   )
   unless success
-    result["fallback"] = {
+    result["manual_protocol"] = {
       "delivery" => "manual_artifact",
       "action" => "manual_delivery_required",
       "reason" => "Herdr dispatch failed before Orbit could confirm delivery.",

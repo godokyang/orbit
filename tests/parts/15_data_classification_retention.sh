@@ -164,12 +164,13 @@ j["records"] << {"kind"=>"command","status"=>"pass","summary"=>"bad cat","create
 File.write(p, JSON.pretty_generate(j))' "$S12_BAD_CAT_EVIDENCE"
 expect_failure 'validate rejects invalid data_classification category' "$CLI" validate --task "$S12_TASK" --evidence "$S12_BAD_CAT_EVIDENCE" --json
 
-# ---- Group 9: old evidence without new fields still validates ----
+# ---- Group 9: records missing data policy fail closed ----
 
 S12_LEGACY_EVIDENCE="$TMPROOT/s12-legacy-evidence.json"
 "$CLI" evidence init --output "$S12_LEGACY_EVIDENCE" >/dev/null
-ORBIT_INSTANCE=reviewer-main "$CLI" evidence add --file "$S12_LEGACY_EVIDENCE" --kind command --status pass --summary "legacy record" >/dev/null
-"$CLI" validate --task "$S12_TASK" --evidence "$S12_LEGACY_EVIDENCE" --json >"$TMPROOT/s12-legacy-validate.json"
-json_assert 'old evidence without classification fields validates' "$TMPROOT/s12-legacy-validate.json" \
-  'j["valid"] == true'
-pass 'legacy evidence without classification fields is compatible'
+ruby --disable-gems -rjson -e '
+p=ARGV[0]; j=JSON.parse(File.read(p)); j["records"] ||= []
+j["records"] << {"kind"=>"command","status"=>"pass","summary"=>"record missing current data policy","created_at"=>"2026-06-29T10:00:00Z"}
+File.write(p, JSON.pretty_generate(j))' "$S12_LEGACY_EVIDENCE"
+expect_failure 'validate rejects record without data classification fields' "$CLI" validate --task "$S12_TASK" --evidence "$S12_LEGACY_EVIDENCE" --json
+pass 'record missing data policy fields fails closed'

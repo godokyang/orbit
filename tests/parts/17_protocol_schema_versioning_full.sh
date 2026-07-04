@@ -18,8 +18,8 @@ ruby --disable-gems -rjson -e 'p=ARGV[0]; j=JSON.parse(File.read(p)); j["records
 "$CLI" audit --task "$S14_TASK" --evidence "$S14_CONFLICT_EVIDENCE" --state "$S14_STATE" --json >"$TMPROOT/s14-conflict-audit.json" 2>/dev/null || true
 json_assert 'audit consistency_checks has conflict for prose-pass-structured-fail' "$TMPROOT/s14-conflict-audit.json" \
   'svs = j["schema_version_summary"]; svs["consistency_checks"].is_a?(Array) && svs["consistency_checks"].any? { |c| !c["conflicts"].empty? && c["structured_verdict"] == "fail" && c["summary_verdict_detected"] == "pass" && c["resolution"] == "structured_verdict_wins" }'
-json_assert 'audit prose_conflicts still present for compatibility' "$TMPROOT/s14-conflict-audit.json" \
-  'j["schema_version_summary"]["prose_conflicts"].is_a?(Array) && !j["schema_version_summary"]["prose_conflicts"].empty?'
+json_assert 'audit schema summary only exposes consistency_checks for prose conflicts' "$TMPROOT/s14-conflict-audit.json" \
+  '!j["schema_version_summary"].key?("prose_conflicts") && j["schema_version_summary"]["consistency_checks"].any? { |check| !check["conflicts"].empty? }'
 json_assert 'audit blocking_findings include prose conflict' "$TMPROOT/s14-conflict-audit.json" \
   'j["blocking_findings"].any? { |f| f["source"].include?("records[0]") }'
 pass 'prose PASS + structured fail yields consistency_check conflict and audit blocks'
@@ -129,7 +129,7 @@ json_assert 'handoff includes negative_evidence_summary' "$TMPROOT/s14-neg-hando
   'j.key?("negative_evidence_summary") && j["negative_evidence_summary"]["total"] == 2'
 pass 'negative_evidence appears in audit and handoff summary without becoming fail'
 
-# ---- Group 5: evidence from-report persists negative_evidence ----
+# ---- Group 5: evidence from-report cannot write review/test negative_evidence ----
 
 S14_NEG_FR_EVIDENCE="$TMPROOT/s14-neg-fr-evidence.json"
 "$CLI" evidence init --output "$S14_NEG_FR_EVIDENCE" >/dev/null
@@ -182,13 +182,11 @@ negative_evidence:
     status: not_tested
     reason: "no E2E changes in this task"
 YAML
-ORBIT_INSTANCE=reviewer-main "$CLI" evidence from-report \
+expect_failure 'evidence from-report rejects review negative_evidence report' env ORBIT_INSTANCE=reviewer-main "$CLI" evidence from-report \
   --file "$S14_NEG_FR_EVIDENCE" \
   --report "$TMPROOT/s14-neg-fr-report.yaml" \
-  --json >"$TMPROOT/s14-neg-fr-submit.json"
-json_assert 'evidence from-report persists negative_evidence' "$TMPROOT/s14-neg-fr-submit.json" \
-  'r = j["record"]; r["negative_evidence"].is_a?(Array) && r["negative_evidence"][0]["status"] == "not_tested"'
-pass 'negative_evidence persisted via evidence from-report'
+  --json
+pass 'review/test negative_evidence must use evidence submit, not from-report'
 
 # ---- Group 6: malformed negative_evidence rejected by validate and submit ----
 

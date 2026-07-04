@@ -90,7 +90,7 @@ review findings 必须先于总结出现。每个 High / Medium finding 至少�
 
 没有 High / Medium 问题时，也要说明剩余风险、实际检查过的证据、未验证路径和为什么可接受。PASS 不是“看起来可以”，而是“未发现阻塞问题 + 证据足够 + residual risk 可接受”。
 
-reviewer 的 gate verdict 必须先写成独立 report，再运行 `orbit evidence submit --file <manifest> --report <report> --json`。可以从 `assets/templates/review-report.yaml` 复制模板后填写；design/analysis review 可从 `assets/templates/design-review-report.yaml` 复制。结构化 review report 必须包含 `quality_outcome_verdict`，PASS 时必须是 `pass`；High/Medium finding 必须用 mapping 写出 symptom、source、consequence 和 remedy。不要直接编辑 `.orbit/evidence*.json` 提交 review；直接写 manifest 会绕过身份解析、schema 校验和并发安全写入，不能用于关闭 review gate。
+reviewer 的 gate verdict 必须先写成独立 report，再运行 `orbit evidence submit --file <manifest> --report <report> --task <task> --json`。可以从 `assets/templates/review-report.yaml` 复制模板后填写；design/analysis review 可从 `assets/templates/design-review-report.yaml` 复制。结构化 review report 必须包含 `quality_outcome_verdict`，PASS 时必须是 `pass`；High/Medium finding 必须用 mapping 写出 symptom、source、consequence 和 remedy。不要直接编辑 `.orbit/evidence*.json` 提交 review；直接写 manifest 会绕过身份解析、schema 校验和并发安全写入，不能用于关闭 review gate。
 
 ### Finding 质量门槛
 

@@ -319,7 +319,6 @@ def load_task_for_evidence!(task_path)
   task = load_yaml(File.expand_path(task_path))
   evidence_error("Task file must contain a mapping: #{task_path}") unless task.is_a?(Hash)
   task["__orbit_path"] = File.expand_path(task_path)
-  evidence_error("task_schema_reinit_required: target_role was removed; recreate the task with execution_contract.") if task.key?("target_role")
   evidence_error("Task must define execution_contract.") unless task["execution_contract"].is_a?(Hash)
   task
 rescue RuntimeError => e
@@ -693,8 +692,8 @@ end
 
 def evidence_add(options)
   path = File.expand_path(options["file"])
-  if STRUCTURED_SUBMIT_KINDS.include?(options["kind"]) && options["status"] == "pass"
-    evidence_error("#{options["kind"]} PASS evidence must be submitted with evidence submit --report <structured-yaml>.")
+  if STRUCTURED_SUBMIT_KINDS.include?(options["kind"])
+    evidence_error("#{options["kind"]} evidence must be submitted with evidence submit --report <structured-yaml>.")
   end
   identity = require_evidence_submit_capability!(options["kind"])
   record = if options["kind"] == "implementation_instance_override"
@@ -767,6 +766,7 @@ def evidence_add(options)
       record["trust_repair"] = tr
     end
   end
+  apply_default_data_policy!(record)
   validate_evidence_record_shape!(record, "Evidence record")
 
   update_evidence_manifest(path) do |manifest|
@@ -798,27 +798,23 @@ def normalize_report_status(value)
   token = value.to_s.strip.upcase
   return nil if token.empty?
 
-  return "pass" if %w[PASS APPROVED].include?(token)
-  return "fail" if %w[FAIL CHANGES_REQUESTED].include?(token)
+  return "pass" if token == "PASS"
+  return "fail" if token == "FAIL"
   return "partial" if %w[BLOCKED PARTIAL].include?(token)
+  return "invalid" if token == "INVALID"
 
   nil
 end
 
 def status_from_report_line(line)
   stripped = line.to_s.strip.sub(/\A#+\s*/, "")
-  return normalize_report_status(stripped) if normalize_report_status(stripped)
-
-  match = stripped.match(/\A(?:VERDICT|STATUS|RESULT|DECISION)\s*:\s*([A-Za-z_]+)\z/i)
+  match = stripped.match(/\AVERDICT\s*:\s*([A-Za-z_]+)\z/i)
   match ? normalize_report_status(match[1]) : nil
 end
 
 def infer_report_status(report)
   if report.is_a?(Hash)
-    %w[status verdict result decision].each do |field|
-      status = normalize_report_status(report[field])
-      return status if status
-    end
+    return normalize_report_status(report["verdict"])
   end
 
   first_line = report.to_s.lines.map(&:strip).find { |line| !line.empty? }
@@ -859,103 +855,15 @@ def evidence_from_report(options)
 
   kind = options["kind"] || infer_report_kind(report_path, report)
   evidence_error("Could not infer report kind; pass --kind #{ALLOWED_EVIDENCE_KINDS.join("|")}.") unless ALLOWED_EVIDENCE_KINDS.include?(kind)
+  if STRUCTURED_SUBMIT_KINDS.include?(kind)
+    evidence_error("#{kind} evidence must be submitted with evidence submit --report <structured-yaml>.")
+  end
   if kind == "implementation"
     evidence_error("evidence from-report cannot create implementation evidence; use evidence add --kind implementation --task PATH so Orbit can enforce execution_contract.")
   end
 
   status = options["status"] || infer_report_status(report)
   evidence_error("Could not infer report status; pass --status #{ALLOWED_EVIDENCE_STATUSES.join("|")}.") unless ALLOWED_EVIDENCE_STATUSES.include?(status)
-
-  if STRUCTURED_SUBMIT_KINDS.include?(kind) && status == "pass"
-    unless report.is_a?(Hash)
-      submit_report_schema_error(
-        "submit_report",
-        "review/test PASS from-report must be a YAML mapping and satisfy the structured submit schema.",
-        expected: "YAML mapping with full structured PASS fields",
-        actual: evidence_value_type(report),
-        kind: kind
-      )
-    end
-    submitted_kind, submitted_status, summary, source_message_id, findings, coverage, artifacts, extra = validate_structured_submit_report!(report_path, report)
-    unless submitted_kind == kind
-      submit_report_schema_error(
-        "submit_report.kind",
-        "from-report kind must match the structured report kind.",
-        expected: kind,
-        actual: submitted_kind,
-        kind: kind
-      )
-    end
-    unless submitted_status == status
-      submit_report_schema_error(
-        "submit_report.verdict",
-        "from-report status must match the structured report verdict.",
-        expected: status,
-        actual: submitted_status,
-        kind: kind
-      )
-    end
-    identity = require_evidence_submit_capability!(kind)
-    record = {
-      "kind" => submitted_kind,
-      "status" => submitted_status,
-      "summary" => summary,
-      "created_at" => Time.now.utc.iso8601,
-      "structured_submit" => true,
-      "source_message_id" => source_message_id,
-      "source_report" => report_path,
-      "findings" => findings,
-      "coverage" => coverage,
-      "artifacts" => artifacts
-    }
-    extra.each { |field, value| record[field] = value unless value.nil? } if extra.is_a?(Hash)
-    %w[test_environment quality_measurement duration resource_usage ux_quality artifact_quality cleanup_status].each do |field|
-      record[field] = report[field] if report.key?(field)
-    end
-    if report.key?("decision_record")
-      normalized_dr = validate_decision_record!({ "decision_record" => report["decision_record"], "kind" => kind }, "from_report")
-      record["decision_record"] = normalized_dr if normalized_dr
-    end
-    # Slice 12: carry data classification fields.
-    if report.key?("data_classification")
-      dc = normalize_data_classification(report["data_classification"], "from_report", kind)
-      record["data_classification"] = dc if dc
-    end
-    if report.key?("retention_policy")
-      rp = normalize_retention_policy(report["retention_policy"], "from_report", kind)
-      record["retention_policy"] = rp if rp
-    end
-    if report.key?("trust_repair")
-      tr = normalize_trust_repair(report["trust_repair"], "from_report", kind)
-      record["trust_repair"] = tr if tr
-    end
-    # Slice 14: carry negative_evidence.
-    if report.key?("negative_evidence")
-      ne = validate_negative_evidence!(report["negative_evidence"], "from_report", kind)
-      record["negative_evidence"] = ne if ne
-    end
-    rec_ctx = structured_role_execution_context(identity, path, task_path: options["task"], report: report)
-    record["role_execution_context"] = rec_ctx if rec_ctx
-    runtime_identity = evidence_runtime_attribution(identity)
-    record["runtime_identity"] = runtime_identity if runtime_identity
-    validate_evidence_record_shape!(record, "Evidence record")
-
-    updated_manifest = update_evidence_manifest(path) do |manifest|
-      records = ensure_evidence_records!(manifest)
-      records << record
-      recompute_evidence_verdict!(manifest)
-      manifest
-    end
-
-    puts JSON.pretty_generate({
-      "schema_version" => "orbit-evidence-import-v1",
-      "file" => path,
-      "report" => report_path,
-      "record" => record,
-      "verdict" => updated_manifest["verdict"]
-    })
-    return
-  end
 
   summary = options["summary"] || infer_report_summary(report_path, report)
   identity = require_evidence_submit_capability!(kind)
@@ -967,6 +875,7 @@ def evidence_from_report(options)
     "source_report" => report_path
   }
   apply_structured_gate_defaults!(record, "report:#{report_path}")
+  apply_default_data_policy!(record)
   validate_evidence_record_shape!(record, "Evidence record")
 
   updated_manifest = update_evidence_manifest(path) do |manifest|

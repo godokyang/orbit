@@ -190,17 +190,17 @@ def herdr_same_level_view
   tab = non_empty_env("HERDR_TAB_ID", "HERDR_TAB")
   tab = lead_binding["tab"].to_s if tab.empty?
 
-  workspace = non_empty_env("HERDR_WORKSPACE_ID", "HERDR_WORKSPACE", "HERDR_SPACE_ID", "HERDR_SPACE")
+  workspace = non_empty_env("HERDR_WORKSPACE_ID", "HERDR_WORKSPACE")
   workspace = lead_binding["workspace"].to_s if workspace.empty?
 
   strategy = if !tab.empty?
                "same_tab"
              elsif !workspace.empty?
                "same_workspace"
-             elsif !source_pane.empty?
-               "source_pane_recorded"
-             else
-               "fallback_default_view"
+	             elsif !source_pane.empty?
+	               "source_pane_recorded"
+	             else
+	               "default_view"
              end
 
   {
@@ -208,8 +208,8 @@ def herdr_same_level_view
     "source_pane" => source_pane,
     "tab" => tab,
     "workspace" => workspace,
-    "source" => "HERDR_* env or lead Herdr binding",
-    "fallback" => strategy == "fallback_default_view" || strategy == "source_pane_recorded"
+	    "source" => "HERDR_* env or lead Herdr binding",
+	    "layout_context_incomplete" => strategy == "default_view" || strategy == "source_pane_recorded"
   }
 end
 
@@ -316,7 +316,7 @@ def role_creation_policy(options)
   view = herdr_same_level_view
   layout_mode = options["layout"] || "auto"
   layout_probe = herdr_layout_probe(view, options)
-  unless view["fallback"]
+  unless view["layout_context_incomplete"]
     view = view.merge(
       "tab" => layout_probe["tab"].to_s.empty? ? view["tab"] : layout_probe["tab"],
       "workspace" => layout_probe["workspace"].to_s.empty? ? view["workspace"] : layout_probe["workspace"]

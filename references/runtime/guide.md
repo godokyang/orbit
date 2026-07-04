@@ -54,8 +54,8 @@ bug fix、状态流转、artifact 写入、AI 输出解析、resolver、normaliz
 - Orbit 默认规则来自 `SKILL.md` 和本目录下的 runtime reference，始终适用。
 - 项目自定义规则来自 `.orbit/roles.yaml` 中当前 role 的 `rules` 字段。
 - `orbit whoami --json` 会解析当前身份，并把当前 role 的项目 `rules` 原样输出。
-- `orbit rules resolve --json` 会生成可审计的规则解析结果，列出默认规则、项目规则、task 规则和 rule packs。
-- `orbit rules print-context --json` 会把规则解析结果转换成本轮 agent 应读取的上下文清单，明确 `load_order`、去重后的 `required_files`、optional rule packs 和 `context_budget`。
+- `orbit rules resolve --task task.yaml --output .orbit/rules/current-resolution.json --json` 会生成可审计的规则解析结果，列出默认规则、项目规则、task 规则和 rule packs。
+- `orbit rules print-context --task task.yaml --output .orbit/rules/current-context.json --json` 会把规则解析结果转换成本轮 agent 应读取的上下文清单，明确 `load_order`、去重后的 `required_files`、optional rule packs 和 `context_budget`。
 - 本轮 task 规则来自 task contract，例如 `quality_rules`、`acceptance` 和 `evidence_requirements`。
 - CLI 不读取规则文件全文，也不调用大模型做语义合并；它只做确定性解析、路径存在性检查和身份/task 冲突检查。
 
@@ -108,9 +108,7 @@ orbit rules resolve --task task.yaml --output .orbit/rules/current-resolution.js
 orbit rules print-context --task task.yaml --output .orbit/rules/current-context.json --json
 orbit evidence init --output .orbit/evidence.json
 orbit evidence attach-rule --file .orbit/evidence.json --rule-resolution .orbit/rules/current-resolution.json --task task.yaml
-orbit evidence add --file .orbit/evidence.json --kind review --status pass --summary "..."
-orbit evidence from-report --file .orbit/evidence.json --report review-report.md --kind review --json
-orbit evidence submit --file .orbit/evidence.json --report review-submit.yaml --json
+orbit evidence submit --file .orbit/evidence.json --report review-submit.yaml --task task.yaml --json
 orbit evidence waive --file .orbit/evidence.json --waiver waiver.yaml --json
 orbit wait-gate --task task.yaml --evidence .orbit/evidence.json --json
 orbit state show --json
@@ -123,7 +121,7 @@ orbit validate --task task.yaml --evidence .orbit/evidence.json --state .orbit/l
 orbit audit --task task.yaml --evidence .orbit/evidence.json --state .orbit/loop-state.yaml --json
 orbit tools detect --json
 orbit tools doctor --json
-orbit dispatch --task task.yaml --to reviewer --json
+orbit dispatch --task task.yaml --to reviewer-main --json
 orbit handoff --task task.yaml --state .orbit/loop-state.yaml --evidence .orbit/evidence.json --json
 orbit handoff --task task.yaml --state .orbit/loop-state.yaml --evidence .orbit/evidence.json --output handoff.json --record-state --json
 orbit compact-evidence --task task.yaml --evidence .orbit/evidence.json --handoff handoff.json --output .orbit/summaries/task-summary.json --json
@@ -131,21 +129,21 @@ orbit compact-evidence --task task.yaml --evidence .orbit/evidence.json --handof
 
 `orbit start` 只负责按 `.orbit/instances.yaml` 解析 instance、argv、env 和 cwd，并通过 Herdr adapter wake/create/reuse agent 或 dry-run 展示计划。它不替代 `whoami`、task contract 或 evidence。start plan 会输出 `context_preflight`，列出该 instance 在开始角色工作前应运行的 `whoami` / `rules resolve` / `rules print-context` 命令，以及必须读取的 common、role 和 task 规则文件；agent 启动后仍要读取这些 required files，不能只靠派单文字记忆公共处理规范。
 
-instance 默认是 `user_managed`：如果 reviewer-main/tester-main 已有 binding，Orbit 仍要通过 Herdr live probe 确认 agent 存活后才复用。`orbit instances status --json` 会输出每个 instance 的 `management`、`binding`、`liveness`、`availability` 和 `herdr`。缺少 binding 时，`start` 会默认创建配置中的 instance；已有 binding 但 liveness 不可信时，`start` 会提示用户使用 `--force` 替换。`orbit bind-pane --instance reviewer-main --pane ... --json` 只绑定 Herdr handle，不改变 role identity。
+instance 默认是 `user_managed`，但 `instances.yaml` 中的 binding 只是 last-known launch/reuse hint，不是 alive proof。派 reviewer-main/tester-main 前先用 `orbit instances status --json` 或 `orbit start INSTANCE --json` 走 runtime resolver；只有输出明确 `dispatch_ready: true` 且 runtime identity verified 时，才能 direct dispatch。缺少 verified runtime identity 时，使用 explicit manual protocol path：`orbit dispatch --manual-payload` 只生成手工投递 artifact，不触发 automatic runtime；只有 stale/conflict/replacement 场景且用户或 owner 接受替换风险时，才使用 `orbit start INSTANCE --force`。`orbit bind-pane --instance reviewer-main --pane ... --json` 只绑定 Herdr handle，不改变 role identity，也不产生 verified runtime identity。
 
-已有 Herdr pane binding 时，`orbit start` 不能只因为 binding 存在就认为 agent 可用。它应先检查绑定 pane 是否被 Herdr 识别为 agent：已识别时复用；未识别但 pane 可检查且看起来是空闲 shell prompt 时，在同一 pane 中自动执行 instance command 进行 wake；无法检查或 pane 看起来正在执行其他前台工作时 fail closed，返回 `needs_attention`，避免把 agent 命令盲打进未知进程。
+已有 Herdr pane binding 时，`orbit start` 不能只因为 binding 存在就认为 agent 可用，也不能只凭 pane id、client name、Herdr env 或 `user_managed` 复用目标。它必须走 runtime resolver：verified 且 `dispatch_ready: true` 才能作为 direct delivery 目标；`identity_pending`、`stale`、`replaced`、`override`、manual protocol 或 conflict 都按输出中的 remediation 处理。需要替换旧 binding 时必须显式 `--force`，并把旧同名同 role agent 可能继续写 evidence/state 的风险告知 owner。
 
 当创建缺失 role instance 时，Herdr adapter 应尽量在 lead 当前同级视图创建新 role，但必须先检查布局可读性：默认 `auto` 会在 same-tab split 低于最小可读尺寸或无法检查尺寸时改用 new-tab；显式 `--layout same-tab` 在尺寸不足时 fail closed。新建 role 后还要显式处理权限准备：Orbit 可以在 start plan 中记录 permission setup requirement，但不能在没有明确 adapter/client 能力和用户授权时静默绕过审批或打开危险权限。
 
-`orbit dispatch` 只负责生成或发送 task 投递消息；direct delivery 只走 live-confirmed Herdr binding，`--pane` 是显式人工 override，`--manual-payload` 输出手工投递 artifact。它不改变 task/evidence/state，也不让 gate 自动通过。dispatch payload 同样包含 `context_preflight`，lead/reviewer/tester 应先读取其中 `required_files` 再开始本轮角色工作；Herdr message 里的自然语言提醒只是 delivery 展示，结构化 `context_preflight` 才是可测试的读取清单。dispatch 中的身份解析命令必须使用 `orbit whoami --json`，task 文件只传给 `rules resolve` 和 `rules print-context`；这样 reviewer/tester 等 gate role 不会因为 task target role 是 lead/coder 而在读取公共规范前触发 target mismatch。
+`orbit dispatch` 只负责生成或发送 task 投递消息；direct delivery 只走 resolver 确认的 `dispatch_ready: true` 目标，`--pane` 是显式人工 override，`--manual-payload` 输出手工投递 artifact。manual payload 和 explicit pane override 不是 live proof，也不能作为 evidence runtime identity。dispatch 不改变 task/evidence/state，也不让 gate 自动通过。dispatch payload 同样包含 `context_preflight`，lead/reviewer/tester 应先读取其中 `required_files` 再开始本轮角色工作；Herdr message 里的自然语言提醒只是 delivery 展示，结构化 `context_preflight` 才是可测试的读取清单。dispatch 中的身份解析命令必须使用 `orbit whoami --json`，task 文件只传给 `rules resolve` 和 `rules print-context`；这样 reviewer/tester 等 gate role 不会因为 task target role 是 lead/coder 而在读取公共规范前触发 target mismatch。
 
 lead 协调 reviewer/tester 时，不要把 Herdr `agent-status done` 当作权威完成条件。真实角色可能已经成功提交结构化 evidence，但在回复消息、审批 prompt 或客户端 UI 上停在 `blocked`。收口应优先读取 `.orbit/evidence*`、运行 `orbit wait-gate --task ... --evidence ... --json`，再用 `validate/audit/handoff` 判断是否可 done；Herdr 状态只作为定位 transport 卡点的辅助信号。需要回信给特定 pane 时，使用明确的 `reply-to` pane，避免把完整报告投递到普通 shell/root pane。
 
 如果 evidence manifest 通过 `rule_resolution.file` 引用了规则解析产物，`validate` 会检查该文件存在、schema 正确、`valid: true`，并且和当前 task / role 对得上；`audit` 和 `handoff` 会输出 `rule_resolution_summary`，方便接手者复核本轮实际使用的规则来源。`rules print-context` 生成的是读取清单，不替代可挂载到 evidence 的 `rules resolve` 审计产物。
 
-`orbit evidence from-report` 可以把 reviewer/tester 报告导入 evidence record，但只接受明确 verdict/status token。`APPROVED_WITH_NOTES` 这类模糊结论不会被自动当成 pass；lead 应要求 reviewer/tester 给出清晰 verdict，或把残留风险记录为 `partial/fail`。
+`orbit evidence from-report` 只用于非 gate 报告导入。review/test verdict 不能通过 `evidence add` 或 `from-report` 写入，必须走 `orbit evidence submit --report ... --task ...`，这样 Orbit 才能校验 task contract、role identity、report schema 和 runtime attribution。
 
-`orbit evidence submit` 是 review/test verdict 的结构化提交入口。report 必须包含 `kind`、`verdict`、`summary`、`source_message_id`、`findings`、`coverage` 和 `artifacts`；review report 还必须包含 `quality_outcome_verdict`，review PASS 必须写 `quality_outcome_verdict: pass`；test PASS 必须包含 `test_level`，且不能是 `not_applicable`。`coverage` 和 `artifacts` 是字符串列表；`findings` 可以是字符串列表，也可以是 finding mapping。High/Medium finding 必须用 mapping 写出 `severity`、`summary`、`symptom`、`source`、`consequence` 和 `remedy`。可以从 `assets/templates/review-report.yaml`、`assets/templates/design-review-report.yaml` 或 `assets/templates/test-report.yaml` 复制模板后填写；schema 错误时 CLI 会提示字段路径、期望结构、实际类型和模板路径。`verdict: blocked` 会规范化为 `status: partial` record，并可带 `blocked.reason`、`blocked.next_step`、`blocked.owner` 说明阻塞原因和下一步。`source_message_id` 可以指向 Herdr message、pane transcript、CI job、report file 或其他 transport 附件；Herdr 文本本身不是权威 verdict，权威 verdict 是由 CLI 写入 evidence manifest 的结构化 record。不要手写 `.orbit/evidence*.json` 里的 review/test record；直接编辑不会生成可信 identity，不能用于关闭 gate。兼容入口 `evidence add/from-report --kind review|test` 会写入最小结构化字段，但新流程应优先使用 `evidence submit` 保留完整 coverage/artifact 来源。
+`orbit evidence submit` 是 review/test verdict 的唯一结构化提交入口。report 必须包含 `kind`、`verdict`、`summary`、`source_message_id`、`findings`、`coverage` 和 `artifacts`；CLI 不会从文件名推断 `kind`，也不会把 `status`、`result`、`decision`、`APPROVED` 或 `CHANGES_REQUESTED` 当作 verdict 别名。review report 还必须包含 `quality_outcome_verdict`，review PASS 必须写 `quality_outcome_verdict: pass`；test PASS 必须包含 `test_level`，且不能是 `not_applicable`。`coverage` 和 `artifacts` 是字符串列表；`findings` 可以是字符串列表，也可以是 finding mapping。High/Medium finding 必须用 mapping 写出 `severity`、`summary`、`symptom`、`source`、`consequence` 和 `remedy`。可以从 `assets/templates/review-report.yaml`、`assets/templates/design-review-report.yaml` 或 `assets/templates/test-report.yaml` 复制模板后填写；schema 错误时 CLI 会提示字段路径、期望结构、实际类型和模板路径。`verdict: blocked` 会规范化为 `status: partial` record，并可带 `blocked.reason`、`blocked.next_step`、`blocked.owner` 说明阻塞原因和下一步。`source_message_id` 可以指向 Herdr message、pane transcript、CI job、report file 或其他附件；Herdr 文本本身不是权威 verdict，权威 verdict 是由 CLI 写入 evidence manifest 的结构化 record。不要手写 `.orbit/evidence*.json` 里的 review/test record；直接编辑不会生成可信 identity，不能用于关闭 gate。
 
 tester/test task 或带 required test gate 的 implementation task 会包含 `test_level`。最新 `kind: test` 且 `verdict: pass` 的结构化 evidence 必须记录同级别 `test_level`，并记录 `test_environment`：实际环境、测试 pane/tab、server/browser owner、cleanup hook、artifact cleanup、duration、resource usage、cleanup status、UX 质量和 artifact 质量。缺少这些字段，或 evidence 声称的 test level 与 task 声明不一致时，`validate` 会拒绝把该 test pass 当作可信成功证据。
 
@@ -165,7 +163,7 @@ Design-first 任务使用独立 lifecycle：`drafting -> review_requested -> cha
 
 中型或大型拆分任务使用 `implementation_plan`、`decomposition` 和 `final_aggregate_audit`。`task_type` 包含 `decomposition` 或 `parent` 时，`validate` 会要求非空 implementation plan summary、child slices、aggregate outcome metrics、stop conditions、replanning path 和 final aggregate audit checks。每个 child slice 必须写出 `id`、`include`、`exclude`、`order_basis`、`stop_condition` 和 `replan_path`。child slice pass 只证明局部完成；parent final audit 必须重新证明整体 quality outcome。
 
-如果 CLI 不可用，可以按 schema 手动检查，但必须在回复里标注 `local_fallback`，并说明哪个 CLI 动作没能执行。
+如果 CLI 不可用，只能按 schema 做只读本地诊断，并在回复或 handoff 中标注这不是 CLI 解析结果、哪个 CLI 动作没能执行。不要在 CLI 不可用时写正式 task/evidence/gate-closing record；正式 task/evidence/gate 必须等 CLI 可用，或走明确 manual protocol artifact 后由具备 CLI 的 agent 提交。
 
 ## 角色运行规则
 
@@ -179,7 +177,8 @@ Design-first 任务使用独立 lifecycle：`drafting -> review_requested -> cha
 - 维护 loop state。
 - 收集 evidence。
 - 派 review/test。
-- 派 review/test 前检查 `orbit instances status --json`，默认复用 healthy reviewer/tester binding。
+- 派 review/test 前运行 `orbit instances status --json` 或 `orbit start INSTANCE --json`，按 runtime resolver 判断目标是否 `dispatch_ready: true`。
+- 如果 resolver 没有给出 verified direct dispatch 目标，默认使用 `orbit dispatch --manual-payload` 或按 remediation 处理；只有 stale/conflict/replacement 场景且 owner 接受替换风险时才使用 `orbit start INSTANCE --force`。
 - 根据 gate 结果继续、回滚、阻塞或收口。
 - coding 时遵守 `coding-guideline.md`，保留 changed files、verification、closure 和 known gaps。
 
@@ -188,7 +187,8 @@ Design-first 任务使用独立 lifecycle：`drafting -> review_requested -> cha
 - 把“做了动作”直接当成完成。
 - 在缺少 review/test evidence 时宣布 gate-ready。
 - 用聊天总结替代 evidence manifest。
-- 在已有 healthy reviewer/tester binding 时擅自新建同 role instance。
+- 只凭 `.orbit/instances.yaml` binding、pane id、client name、Herdr env、旧 session file 或手写 `herdr_verified` 判断 reviewer/tester 可复用。
+- 在 resolver 返回 stale/conflict/replacement 风险时，未取得用户或 owner 风险确认就 `--force` 替换同 role instance。
 - 以 lead 身份提交 review/test verdict 来关闭 reviewer/tester gate。
 
 ### Reviewer
@@ -286,7 +286,7 @@ evidence 是事实记录，不是口头说明。
 最小 evidence record：
 
 ```yaml
-kind: command | review | test | handoff
+kind: command | implementation | review | test | handoff
 status: pass | fail | partial | invalid
 summary: "发生了什么，以及这个证据支持什么结论。"
 created_at: "ISO-8601 timestamp"
@@ -314,14 +314,22 @@ gates:
 
 `execution_contract.implementation_authority` 和 `execution_contract.assigned_instance` 表示当前实现负责人及具体 instance。`gates.roles` 表示哪些角色可以合法读取同一个 task 并提交 gate evidence。也就是说，reviewer/tester 在 coder 或 lead 的 implementation task 上工作时，不应因为不是 implementation assignee 被视为身份冲突；如果当前 role 既不是 owner、implementation authority，也不在 `gates.roles` 中，仍然 fail closed。
 
-普通 `orbit validate --task --evidence` 不会因为 implementation task 的 gate 尚未完成而失败，这样 coder 可以先记录 implementation evidence。进入 `done` 或运行最终 `audit` 时，Orbit 会要求 task 声明的 review/test gate 都有最新 `pass` evidence。
+普通 `orbit validate --task --evidence` 不会因为 implementation task 的 gate 尚未完成而失败，这样 coder 可以先记录 implementation evidence。implementation evidence 必须带 task，让 CLI 校验 `execution_contract` 和当前执行 identity：
 
-reviewer 或 tester 可以在 evidence manifest 中补充结构化 judgment：
+```bash
+orbit evidence add --file .orbit/evidence.json --kind implementation --status pass --summary "..." --task task.yaml
+```
+
+`orbit evidence from-report` 不能创建 implementation evidence。进入 `done` 或运行最终 `audit` 时，Orbit 会要求 task 声明的 review/test gate 都有最新 `pass` evidence。
+
+`review_judgment` / `test_judgment` 是 handoff/audit 摘要或 legacy manifest 字段，不是 reviewer/tester 的正常提交入口。reviewer/tester 应写独立 report，并通过 `orbit evidence submit --file ... --report ... --task ... --json` 提交 verdict；不要手写 `.orbit/evidence*.json` 来补 judgment。
+
+这些 judgment 字段的含义如下：
 
 - `review_judgment`：包含 `verdict`、`quality_outcome`、`findings` 和可选 `residual_risk`。
 - `test_judgment`：包含 `verdict`、`environment`、`scenarios` 和可选 `coverage_gap`。
 
-CLI 只校验这些 judgment 的结构和必填字段，不替代 reviewer/tester 的判断。
+CLI 只校验这些 judgment 的结构和必填字段，不替代 reviewer/tester 的判断，也不让手写 judgment 关闭 gate。
 如果没有顶层结构化 judgment，`orbit handoff --json` 会从最新且身份有效的 `kind=review` / `kind=test` evidence record 推导 `judgment_summary`，来源会标记为 `latest_evidence_record`。handoff 还会输出 `gate_summary`，让下一位 agent 直接看到 required gate 是否 ready，以及未 ready 的 gate 被什么原因阻塞。这不是替代详细报告，而是给下一位 agent 一个稳定、可机器读取的 gate 摘要。
 
 ## Worktree 和 Git 安全
@@ -367,7 +375,7 @@ rule_packs:
     - orbit-drift
 ```
 
-没有这个文件时，Orbit 仍然正常运行。存在这个文件时，`orbit whoami --json`、`orbit new-task ...`、`orbit rules resolve --json`、`orbit rules print-context --json` 和 `orbit handoff --json` 会在 `rule_packs` 字段列出本轮建议读取的规则包。CLI 只暴露规则包清单，不解释规则内容，也不把子仓库规则写进默认协议。`print-context` 会把 rule packs 放进 `load_order`，但默认标为 optional/conditional；项目需要强制读取某个规则包时，应把它作为项目规则文件写入 `.orbit/roles.yaml`。
+没有这个文件时，Orbit 仍然正常运行。存在这个文件时，`orbit whoami --json`、`orbit new-task ...`、带 `--output` 的 `orbit rules resolve ... --json`、带 `--output` 的 `orbit rules print-context ... --json` 和 `orbit handoff --json` 会在 `rule_packs` 字段列出本轮建议读取的规则包。CLI 只暴露规则包清单，不解释规则内容，也不把子仓库规则写进默认协议。`print-context` 会把 rule packs 放进 `load_order`，但默认标为 optional/conditional；项目需要强制读取某个规则包时，应把它作为项目规则文件写入 `.orbit/roles.yaml`。
 
 ## Project Health 和 Supply Chain
 
@@ -434,7 +442,7 @@ Orbit protocol 不绑定具体终端工具。Herdr 是唯一官方 runtime adapt
 - delivery confirmation：任务确实送达目标 role / instance。
 - result collection：lead 主动等待、读取并记录对方输出；不能假设 transport 会自动把回复路由回来。
 
-runtime adapter 不改变 Orbit 语义。缺少 Herdr 不代表 Orbit 不能运行；可以退回 manual JSON / file handoff。
+runtime adapter 不改变 Orbit 语义。缺少 Herdr 不代表 Orbit protocol 不能运行；可以显式使用 manual JSON / file handoff。manual 模式不能 automatic wake/create/direct dispatch，也不会产生 Herdr-verified runtime identity；handoff/audit 应把它标为 manual protocol evidence。
 需要自动 wake/create/direct dispatch 前，先用 `orbit tools detect --json` 或 `orbit tools doctor --json` 检查当前环境能力。
 handoff packet 会带上 validate、audit、tools、delivery artifact 和 judgment 摘要，供下一位 agent 或人工投递流程判断当前交接是否可信。
 

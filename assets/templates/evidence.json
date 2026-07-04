@@ -4,40 +4,24 @@
     "feature_versions": {
       "evidence_level": "v1",
       "quality_outcome": "v1",
-      "schema_semantics": "v1"
+      "quality_outcome_guardrails": "v1",
+      "parent_goal_status": "v1",
+      "destructive_action_scope": "v1",
+      "role_identity_minimum": "v1",
+      "role_identity_full": "v1",
+      "schema_semantics": "v1",
+      "gate_lease": "v1",
+      "doc_lifecycle": "v1",
+      "project_profile_risk_level": "v1",
+      "data_classification_retention": "v1",
+      "ci_release_readiness": "v1",
+      "protocol_schema_versioning": "v1",
+      "orbit_dogfood_governance": "v1",
+      "landing_governance_calibration": "v1"
     }
   },
   "project": "example",
-  "role": "reviewer",
-  "role_resolution": {
-    "resolved_role": "reviewer",
-    "resolver": "orbit whoami --json",
-    "whoami_result_file": "",
-    "role_sources": {},
-    "role_source_mode": "persistent_identity_confirmed",
-    "conflict": null
-  },
-  "task_type": "slice_review",
-  "task_file": "",
-  "result_file": "",
-  "delivery": {
-    "mode": "manual_artifact",
-    "runtime_adapter": "none",
-    "manual_artifact": {
-      "path": "",
-      "sha256": ""
-    },
-    "herdr": {
-      "workspace": "",
-      "tab": "",
-      "pane": "",
-      "canonical_pane": ""
-    }
-  },
-  "started_at": "",
-  "completed_at": "",
   "records": [],
-  "waivers": [],
   "verdict": {
     "status": "in_progress",
     "mode": "aggregate",
@@ -48,6 +32,7 @@
       "open": 0
     }
   },
+  "waivers": [],
   "worktree_safety": {
     "status": "not_applicable",
     "reason": "",
@@ -67,10 +52,12 @@
     "gaps": []
   },
   "rule_resolution": {
-    "resolver": "orbit rules resolve --json",
+    "resolver": "orbit rules resolve --task task.yaml --output .orbit/rules/current-resolution.json --json",
     "file": "",
     "valid": null,
     "resolved_role": "",
+    "resolved_instance": "",
+    "task_sha256": "",
     "conflict_count": null,
     "missing_project_rule_files": []
   },

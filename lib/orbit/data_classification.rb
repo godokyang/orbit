@@ -15,6 +15,29 @@ ALLOWED_SENSITIVITY_LEVELS = %w[low medium high secret].freeze
 ALLOWED_REDACTION_STATES = %w[none recommended required applied].freeze
 ALLOWED_RETENTION_MODES = %w[raw_allowed redacted hash_only short_lived].freeze
 
+def default_data_classification
+  {
+    "categories" => ["public"],
+    "sensitivity" => "low",
+    "redaction" => "none"
+  }
+end
+
+def default_retention_policy
+  {
+    "mode" => "raw_allowed",
+    "user_approved" => false
+  }
+end
+
+def apply_default_data_policy!(record)
+  return record unless record.is_a?(Hash)
+
+  record["data_classification"] = default_data_classification unless record["data_classification"].is_a?(Hash)
+  record["retention_policy"] = default_retention_policy unless record["retention_policy"].is_a?(Hash)
+  record
+end
+
 # Validate a data_classification mapping on an evidence record.
 # Returns normalized classification. Fails on non-Hash input (does not silently drop).
 def normalize_data_classification(value, source, kind = nil)
