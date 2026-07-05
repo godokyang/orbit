@@ -209,7 +209,8 @@ def runtime_register(_options)
     proof = runtime_trusted_caller_proof
     session["identity"]["verification_reason"] = verification == "identity_pending" ? proof["reason"] : "manual_runtime_no_herdr_session"
     session["identity"]["trusted_caller_proof"] = proof if verification == "identity_pending"
-    runtime_write_session!(session)
+    session["diagnostic_only"] = true
+    session["persistence"] = "not_written"
   end
   runtime_set_current_session!(identity["resolved_instance"], session_id, state) unless env_session_id.empty?
   resolution = env_session_id.empty? ? nil : runtime_resolve_instance(identity["resolved_instance"])

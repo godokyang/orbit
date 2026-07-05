@@ -964,10 +964,10 @@ def instance_launch_env(instance_name, instance, role_def, role_ref)
   usage_error("Instance #{instance_name.inspect} env must be a mapping when present.") unless env.nil? || env.is_a?(Hash)
 
   resolved_role = role_def["role"] || role_ref
-  {
+  (env || {}).transform_keys(&:to_s).transform_values(&:to_s).merge(
     "ORBIT_INSTANCE" => instance_name,
     "ORBIT_ROLE" => resolved_role
-  }.merge((env || {}).transform_keys(&:to_s).transform_values(&:to_s))
+  )
 end
 
 def load_instance_for_launch(instance_name)

@@ -55,6 +55,10 @@ def start_plan(options)
   argv = normalize_command_argv(instance["command"], "Instance #{instance_key.inspect}")
   cwd = File.expand_path(options["cwd"])
   usage_error("Start cwd does not exist: #{cwd}") unless Dir.exist?(cwd)
+  project_root = Dir.pwd
+  if File.realpath(cwd) != File.realpath(project_root)
+    usage_error("start --cwd must be the Orbit project root #{project_root.inspect}; start from the target project root instead of launching agents in a subdirectory or another checkout.")
+  end
   status = instance_status_entry(instance_key, instance, role_ref, role_def)
   view_policy = normalize_instance_view(instance_key, instance)
   options = options.merge(

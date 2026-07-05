@@ -245,8 +245,9 @@ json_assert 'classify-intent review emits review policy' "$TMPROOT/intent-review
 
 "$CLI" start --help >"$TMPROOT/start-help.txt" 2>"$TMPROOT/start-help.err"
 test ! -s "$TMPROOT/start-help.err"
-grep -Fq 'orbit start INSTANCE [--cwd PATH] [--layout auto|same-tab|new-tab] [--force] [--dry-run] [--json]' "$TMPROOT/start-help.txt"
+grep -Fq 'orbit start INSTANCE [--cwd PROJECT_ROOT] [--layout auto|same-tab|new-tab] [--force] [--dry-run] [--json]' "$TMPROOT/start-help.txt"
 grep -q 'not through a shell string' "$TMPROOT/start-help.txt"
+grep -q -- '--cwd must be the same Orbit project root' "$TMPROOT/start-help.txt"
 pass 'start subcommand help works'
 
 "$CLI" wait-gate --help >"$TMPROOT/wait-gate-help.txt" 2>"$TMPROOT/wait-gate-help.err"
@@ -293,9 +294,10 @@ pass 'init creates config from templates'
 "$CLI" instances status --json >"$TMPROOT/instances-status.json"
 json_assert 'instances status defaults user-managed unbound instances to startable Herdr binding' "$TMPROOT/instances-status.json" 'j["schema_version"] == "orbit-instances-status-v1" && j["instances"].any? { |i| i["instance"] == "reviewer-main" && i["management"] == "user_managed" && i["binding"] == "unbound" && i["liveness"] == "not_alive" && i["liveness_reason"] == "no_binding" && i["availability"] == "missing" && i["herdr"]["adapter"] == "herdr" && i["view"]["min_columns"] == 120 && i["view_status"]["too_narrow"].nil? }'
 ORBIT_INSTANCE=lead-main HERDR_PANE_ID=manual-pane "$CLI" runtime register --json >"$TMPROOT/runtime-register-no-pending.json"
-json_assert 'runtime register without pending launch does not produce Herdr-verified identity' "$TMPROOT/runtime-register-no-pending.json" 'j["identity_verification"] == "identity_pending_unbound" && j["dispatch_ready"] == false && j["runtime_session"]["identity"]["verification"] != "herdr_verified"'
+json_assert 'runtime register without pending launch does not produce Herdr-verified identity' "$TMPROOT/runtime-register-no-pending.json" 'j["identity_verification"] == "identity_pending_unbound" && j["dispatch_ready"] == false && j["runtime_session"]["identity"]["verification"] != "herdr_verified" && j["runtime_session"]["diagnostic_only"] == true && j["runtime_session"]["persistence"] == "not_written"'
+ruby --disable-gems -rjson -e 'session = JSON.parse(File.read(ARGV[0])).dig("runtime_session", "session_id"); abort("session_id missing") if session.to_s.empty?; abort(session) if File.exist?(File.join(".orbit/runtime/sessions", "#{session}.json"))' "$TMPROOT/runtime-register-no-pending.json"
 ruby --disable-gems -rjson -e 'p=".orbit/runtime/instances/lead-main.json"; if File.exist?(p); j=JSON.parse(File.read(p)); abort(JSON.pretty_generate(j)) unless j["current_session_id"].to_s.empty?; end'
-pass 'runtime register without pending launch does not update current session pointer'
+pass 'runtime register without pending launch is diagnostic-only'
 mkdir -p "$TMPROOT/fakebin"
 cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
 #!/bin/sh
@@ -799,6 +801,8 @@ wait "$START_LOCK_PID" 2>/dev/null || true
 json_assert 'start force refuses concurrent replacement when instance lock is held' "$TMPROOT/start-reviewer-force-lock-busy.json" 'j["action"] == "needs_attention" && j["reason"] == "start_in_progress" && j["liveness_reason"].include?("another forced start")'
 "$CLI" start reviewer-main --dry-run --json >"$TMPROOT/start-reviewer-main.json"
 json_assert 'start dry-run resolves instance command env cwd client and context metadata' "$TMPROOT/start-reviewer-main.json" 'j["schema_version"] == "orbit-start-plan-v1" && j["action"] == "dry_run" && j["adapter"] == "herdr" && j["instance"] == "reviewer-main" && j["argv"] == ["codex"] && j["client"]["expected_client"] == "codex" && j["client"]["full_permission"]["known_client"] == true && j["client"]["full_permission"]["configured"] == false && j["env"]["ORBIT_INSTANCE"] == "reviewer-main" && j["env"]["ORBIT_ROLE"] == "reviewer" && j["env"]["ORBIT_SESSION_ID"].is_a?(String) && j["env"]["ORBIT_LAUNCH_ID"].is_a?(String) && j["cwd"] == Dir.pwd && j["context_preflight"]["commands"][0] == ["orbit", "whoami", "--json"] && !j["context_preflight"]["commands"].include?(["orbit", "runtime", "register", "--json"]) && j["context_preflight"]["required_files"].any? { |r| r["path"] == "SKILL.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "references/runtime/guide.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "references/runtime/quality-outcome-and-review.md" }'
+mkdir -p "$TMPROOT/project/subdir"
+expect_failure 'start rejects cwd outside Orbit project root' "$CLI" start reviewer-main --cwd "$TMPROOT/project/subdir" --dry-run --json
 "$CLI" start reviewer-main --dry-run >"$TMPROOT/start-reviewer-human.txt" 2>"$TMPROOT/start-reviewer-human.err"
 test ! -s "$TMPROOT/start-reviewer-human.err"
 grep -q 'Orbit start plan:' "$TMPROOT/start-reviewer-human.txt"
@@ -1018,8 +1022,7 @@ ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases
 expect_failure 'validate rejects non-string instance env value' "$CLI" validate --json
 cp "$TMPROOT/schema-instances.yaml.bak" .orbit/instances.yaml
 ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["instances"]["reviewer-main"]["env"]["ORBIT_INSTANCE"]="other"; y["instances"]["reviewer-main"]["env"]["ORBIT_ROLE"]="lead"; File.write(p, YAML.dump(y))' .orbit/instances.yaml
-"$CLI" validate --json >"$TMPROOT/warn-env-identity.json"
-json_assert 'validate warns on instance env identity mismatch' "$TMPROOT/warn-env-identity.json" 'j["valid"] == true && j["warnings"].any? { |w| w["source"] == "project_config.instances.reviewer-main.env.ORBIT_INSTANCE" } && j["warnings"].any? { |w| w["source"] == "project_config.instances.reviewer-main.env.ORBIT_ROLE" }'
+expect_failure 'validate rejects reserved instance env identity mismatch' "$CLI" validate --json
 cp "$TMPROOT/schema-instances.yaml.bak" .orbit/instances.yaml
 mkdir -p "$TMPROOT/evidence-dir"
 if "$CLI" validate --evidence "$TMPROOT/evidence-dir" --json >"$TMPROOT/validate-evidence-dir.json" 2>"$TMPROOT/validate-evidence-dir.err"; then

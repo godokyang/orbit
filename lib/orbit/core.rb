@@ -82,7 +82,7 @@ HELP = <<~HELP
     orbit --help
     orbit version
     orbit audit --task PATH --state PATH --evidence PATH [--handoff PATH] [--compact-summary PATH] --json
-    orbit init [--force]
+    orbit init --operation-mode solo|team [--force]
     orbit instances status --json
     orbit bind-pane --instance NAME --pane PANE [--tab TAB] [--workspace WORKSPACE] [--canonical-pane PANE] --json
     orbit classify-intent --text TEXT --json
@@ -105,7 +105,7 @@ HELP = <<~HELP
     orbit dispatch --task PATH --to INSTANCE [--pane PANE] [--reply-to PANE] [--manual-payload] [--dry-run] --json
     orbit rules resolve --json [--task PATH] [--evidence PATH] [--role ROLE] [--instance NAME] [--output PATH]
     orbit rules print-context --json [--task PATH] [--evidence PATH] [--role ROLE] [--instance NAME] [--output PATH]
-    orbit start INSTANCE [--cwd PATH] [--layout auto|same-tab|new-tab] [--force] [--dry-run] [--json]
+    orbit start INSTANCE [--cwd PROJECT_ROOT] [--layout auto|same-tab|new-tab] [--force] [--dry-run] [--json]
     orbit state progress --message TEXT [--evidence PATH] [--state PATH]
     orbit state start --task PATH [--owner-role ROLE] [--state PATH]
     orbit state transition --to PHASE [--evidence PATH] [--reason TEXT] [--state PATH]
@@ -372,7 +372,7 @@ COMMAND_HELP = {
   HELP
   "start" => <<~HELP,
     Usage:
-      orbit start INSTANCE [--cwd PATH] [--layout auto|same-tab|new-tab] [--force] [--dry-run] [--json]
+      orbit start INSTANCE [--cwd PROJECT_ROOT] [--layout auto|same-tab|new-tab] [--force] [--dry-run] [--json]
 
     Starts or previews an agent instance from .orbit/instances.yaml.
 
@@ -380,7 +380,7 @@ COMMAND_HELP = {
       INSTANCE         Instance name from .orbit/instances.yaml.
 
     Options:
-      --cwd PATH        Working directory for the agent. Defaults to current directory.
+      --cwd PROJECT_ROOT  Orbit project root for the agent. Defaults to current directory.
       --layout MODE     auto, same-tab, or new-tab. Defaults to auto.
       --force           Start anyway when an existing binding cannot be proven alive.
       --dry-run         Print the command/env/cwd plan without starting the agent.
@@ -389,6 +389,7 @@ COMMAND_HELP = {
     Notes:
       command is executed as argv, not through a shell string.
       Dry-run is the recommended way to audit instance command/env wiring.
+      --cwd must be the same Orbit project root that owns .orbit config.
       Herdr is required for automatic create/wake/reuse.
       When an instance already has a binding, start only reuses a live-detected
       agent. If the binding cannot be proven alive, it exits with needs_force.
@@ -448,8 +449,7 @@ COMMAND_HELP = {
       --task PATH is required for strict write_policy_enforcement.
       Without --task, role_execution_context.task_sha256 will be absent and
       strict gates will remain blocked.
-      Legacy evidence may still expose task_sha256 under identity for
-      read-only compatibility.
+      Review/test pass records must use current role_execution_context fields.
   HELP
   "wait-gate" => <<~HELP
     Usage:

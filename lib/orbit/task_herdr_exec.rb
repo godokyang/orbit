@@ -647,7 +647,6 @@ def dispatch_packet(options)
       "target_allowed_by_execution_contract" => target_allowed,
       "delivery_precondition_met" => delivery_precondition_met,
       "live_binding_confirmed" => live_binding_confirmed,
-      "live_confirmed_for_delivery" => live_binding_confirmed,
       "explicit_override" => explicit_override,
       "manual_artifact" => manual_artifact
     },

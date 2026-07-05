@@ -53,11 +53,11 @@ def validate_instance_env(result, source, instance_name, env, resolved_role)
   end
 
   if env.key?("ORBIT_INSTANCE") && env["ORBIT_INSTANCE"] != instance_name
-    validation_warning(result, "project_config.instances.#{source}.env.ORBIT_INSTANCE", "ORBIT_INSTANCE #{env["ORBIT_INSTANCE"].inspect} does not match instance #{instance_name.inspect}; launcher will set #{instance_name.inspect} first, then merge configured env.")
+    validation_error(result, "project_config.instances.#{source}.env.ORBIT_INSTANCE", "ORBIT_INSTANCE #{env["ORBIT_INSTANCE"].inspect} does not match instance #{instance_name.inspect}; ORBIT_INSTANCE is reserved and must match the instance key.")
   end
 
   if resolved_role && env.key?("ORBIT_ROLE") && env["ORBIT_ROLE"] != resolved_role
-    validation_warning(result, "project_config.instances.#{source}.env.ORBIT_ROLE", "ORBIT_ROLE #{env["ORBIT_ROLE"].inspect} does not match resolved role #{resolved_role.inspect}; launcher will set #{resolved_role.inspect} first, then merge configured env.")
+    validation_error(result, "project_config.instances.#{source}.env.ORBIT_ROLE", "ORBIT_ROLE #{env["ORBIT_ROLE"].inspect} does not match resolved role #{resolved_role.inspect}; ORBIT_ROLE is reserved and must match the resolved role.")
   end
 end
 

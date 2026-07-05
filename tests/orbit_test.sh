@@ -175,7 +175,7 @@ register_manual_runtime_instance() {
   local role="$2"
   env -u HERDR_ENV -u HERDR_PANE_ID -u HERDR_SESSION_ID -u HERDR_SESSION -u HERDR_TAB_ID -u HERDR_WORKSPACE_ID -u ORBIT_SESSION_ID -u ORBIT_LAUNCH_ID \
     ORBIT_INSTANCE="$instance" ORBIT_ROLE="$role" "$CLI" runtime register --json >"$TMPROOT/manual-runtime-${instance}.json"
-  json_assert "manual runtime registers ${instance}" "$TMPROOT/manual-runtime-${instance}.json" 'j["identity_verification"] == "manual_runtime" && j["runtime_session"]["state"] == "active" && j["runtime_session"].dig("identity", "verification") == "manual_runtime"'
+  json_assert "manual runtime registers ${instance}" "$TMPROOT/manual-runtime-${instance}.json" 'j["identity_verification"] == "manual_runtime" && j["runtime_session"]["state"] == "active" && j["runtime_session"].dig("identity", "verification") == "manual_runtime" && j["runtime_session"]["diagnostic_only"] == true && j["runtime_session"]["persistence"] == "not_written"'
 }
 
 register_manual_runtime_instances() {
