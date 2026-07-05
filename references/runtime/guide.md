@@ -159,7 +159,7 @@ tester/test task 或带 required test gate 的 implementation task 会包含 `te
 
 Design-first 任务使用独立 lifecycle：`drafting -> review_requested -> changes_requested|user_confirmed -> coding_ready`。`orbit state start` 遇到 `task_type` 包含 `design` 或 `analysis` 的 task 会从 `drafting` 开始；`coding_ready` 只能从 `user_confirmed` 进入，并且 evidence manifest 必须同时有结构化 review pass 和包含 `user_confirmed` / user confirmation / 用户确认 的 pass evidence。review pass 不能单独让 design task 进入 coding。
 
-`task_type` 包含 `coding` 的 task 必须在 `design_reference` 中引用已确认设计：`required_for_coding: true`、非空 `artifact`、非空 `confirmation_evidence`、`status: confirmed`。这防止 agent 把聊天里的隐含设计直接当成 coding 授权。
+`task_type` 包含 `coding` 的 task 可以通过 `design_reference.required_for_coding` 显式声明是否需要设计授权。小型实现 task 默认可以是 `required_for_coding: false`；一旦设为 `true`，就必须引用已确认设计：非空 `artifact`、非空 `confirmation_evidence`、`status: confirmed`。这防止 design-first 流程里 agent 把聊天中的隐含设计直接当成 coding 授权。
 
 中型或大型拆分任务使用 `implementation_plan`、`decomposition` 和 `final_aggregate_audit`。`task_type` 包含 `decomposition` 或 `parent` 时，`validate` 会要求非空 implementation plan summary、child slices、aggregate outcome metrics、stop conditions、replanning path 和 final aggregate audit checks。每个 child slice 必须写出 `id`、`include`、`exclude`、`order_basis`、`stop_condition` 和 `replan_path`。child slice pass 只证明局部完成；parent final audit 必须重新证明整体 quality outcome。
 

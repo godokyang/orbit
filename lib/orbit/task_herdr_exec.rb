@@ -307,7 +307,7 @@ def start(args)
     if !options["force"] && probe && probe["decision"] == "reuse"
       runtime_resolution = runtime_resolve_instance(plan["instance"])
       result = plan.merge(
-        "action" => "started_identity_pending",
+        "action" => "reuse_identity_pending",
         "reason" => "binding_agent_found_but_runtime_identity_unverified",
         "dispatch_ready" => false,
         "reuse_probe" => probe,

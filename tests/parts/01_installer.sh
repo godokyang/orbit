@@ -319,6 +319,11 @@ ruby --disable-gems -rjson -ryaml -rdigest -rtime -rfileutils -e '
   ids = ARGV
   roles = YAML.safe_load(File.read(".orbit/roles.yaml"), aliases: true).fetch("roles")
   instances = YAML.safe_load(File.read(".orbit/instances.yaml"), aliases: true).fetch("instances")
+  stable_instance = ->(value) {
+    copy = JSON.parse(JSON.generate(value))
+    %w[binding herdr view].each { |key| copy.delete(key) }
+    copy
+  }
   instance = instances.fetch("lead-main")
   role = roles.fetch(instance.fetch("role_ref"))
   now = Time.now.utc.iso8601
@@ -338,7 +343,7 @@ ruby --disable-gems -rjson -ryaml -rdigest -rtime -rfileutils -e '
       "role" => "lead",
       "role_ref" => "lead",
       "role_config_sha256" => Digest::SHA256.hexdigest(JSON.generate(role)),
-      "instance_config_sha256" => Digest::SHA256.hexdigest(JSON.generate(instance)),
+      "instance_config_sha256" => Digest::SHA256.hexdigest(JSON.generate(stable_instance.call(instance))),
       "client" => "codex",
       "command" => "codex",
       "herdr" => {"session"=>"hs-register", "workspace"=>"", "tab"=>"", "pane"=>"register-pane", "canonical_pane"=>"register-pane"},
@@ -407,6 +412,11 @@ json_assert 'start does not reuse Herdr client/cwd match without verified runtim
 ruby --disable-gems -rjson -ryaml -rdigest -rtime -rfileutils -e '
   roles = YAML.safe_load(File.read(".orbit/roles.yaml"), aliases: true).fetch("roles")
   instances = YAML.safe_load(File.read(".orbit/instances.yaml"), aliases: true).fetch("instances")
+  stable_instance = ->(value) {
+    copy = JSON.parse(JSON.generate(value))
+    %w[binding herdr view].each { |key| copy.delete(key) }
+    copy
+  }
   instance = instances.fetch("reviewer-main")
   role = roles.fetch(instance.fetch("role_ref"))
   now = Time.now.utc.iso8601
@@ -426,7 +436,7 @@ ruby --disable-gems -rjson -ryaml -rdigest -rtime -rfileutils -e '
     "role" => "reviewer",
     "role_ref" => "reviewer",
     "role_config_sha256" => Digest::SHA256.hexdigest(JSON.generate(role)),
-    "instance_config_sha256" => Digest::SHA256.hexdigest(JSON.generate(instance)),
+    "instance_config_sha256" => Digest::SHA256.hexdigest(JSON.generate(stable_instance.call(instance))),
     "client" => "codex",
     "command" => "codex",
     "herdr" => {"session"=>"", "workspace"=>"", "tab"=>"", "pane"=>"runtime-only-pane", "canonical_pane"=>"runtime-only-pane"},
@@ -506,7 +516,7 @@ esac
 HERDR
 chmod +x "$TMPROOT/fakebin/herdr"
 PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer-main --dry-run --json >"$TMPROOT/start-reviewer-reuse.json"
-json_assert 'start does not reuse Herdr binding without verified runtime identity' "$TMPROOT/start-reviewer-reuse.json" 'j["action"] == "started_identity_pending" && j["reason"] == "binding_agent_found_but_runtime_identity_unverified" && j["dispatch_ready"] == false && j["reuse_probe"]["agent_detected"] == true && j["reuse_probe"]["agent"] == "codex" && j["runtime_resolution"]["identity_verification"] == "absent" && j["next"].any? { |n| n["manual_payload"].to_s.include?("trusted caller-pane proof") } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "SKILL.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "references/runtime/guide.md" }'
+json_assert 'start does not reuse Herdr binding without verified runtime identity' "$TMPROOT/start-reviewer-reuse.json" 'j["action"] == "reuse_identity_pending" && j["reason"] == "binding_agent_found_but_runtime_identity_unverified" && j["dispatch_ready"] == false && j["reuse_probe"]["agent_detected"] == true && j["reuse_probe"]["agent"] == "codex" && j["runtime_resolution"]["identity_verification"] == "absent" && j["next"].any? { |n| n["manual_payload"].to_s.include?("trusted caller-pane proof") } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "SKILL.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "references/runtime/guide.md" }'
 cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
 #!/bin/sh
 case "$1 $2" in
@@ -561,7 +571,7 @@ esac
 HERDR
 chmod +x "$TMPROOT/fakebin/herdr"
 PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer-main --dry-run --json >"$TMPROOT/start-reviewer-alias-reuse.json"
-json_assert 'start resolves Herdr pane aliases but still requires verified runtime identity' "$TMPROOT/start-reviewer-alias-reuse.json" 'j["action"] == "started_identity_pending" && j["reason"] == "binding_agent_found_but_runtime_identity_unverified" && j["reuse_probe"]["pane"] == "alias-reviewer" && j["reuse_probe"]["canonical_pane"] == "canonical-reviewer" && j["reuse_probe"]["agent_detected"] == true && j["reuse_probe"]["agent"] == "codex" && j["dispatch_ready"] == false'
+json_assert 'start resolves Herdr pane aliases but still requires verified runtime identity' "$TMPROOT/start-reviewer-alias-reuse.json" 'j["action"] == "reuse_identity_pending" && j["reason"] == "binding_agent_found_but_runtime_identity_unverified" && j["reuse_probe"]["pane"] == "alias-reviewer" && j["reuse_probe"]["canonical_pane"] == "canonical-reviewer" && j["reuse_probe"]["agent_detected"] == true && j["reuse_probe"]["agent"] == "codex" && j["dispatch_ready"] == false'
 "$CLI" bind-pane --instance reviewer-main --pane self-alias --json >"$TMPROOT/bind-pane-reviewer-self.json"
 cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
 #!/bin/sh
@@ -660,6 +670,11 @@ json_assert 'start ignores Herdr placeholder entries without an agent client' "$
 ruby --disable-gems -rjson -ryaml -rdigest -rtime -rfileutils -e '
   roles = YAML.safe_load(File.read(".orbit/roles.yaml"), aliases: true).fetch("roles")
   instances = YAML.safe_load(File.read(".orbit/instances.yaml"), aliases: true).fetch("instances")
+  stable_instance = ->(value) {
+    copy = JSON.parse(JSON.generate(value))
+    %w[binding herdr view].each { |key| copy.delete(key) }
+    copy
+  }
   instance = instances.fetch("reviewer-main")
   role = roles.fetch(instance.fetch("role_ref"))
   now = Time.now.utc.iso8601
@@ -677,7 +692,7 @@ ruby --disable-gems -rjson -ryaml -rdigest -rtime -rfileutils -e '
     "role"=>"reviewer",
     "role_ref"=>"reviewer",
     "role_config_sha256"=>Digest::SHA256.hexdigest(JSON.generate(role)),
-    "instance_config_sha256"=>Digest::SHA256.hexdigest(JSON.generate(instance)),
+    "instance_config_sha256"=>Digest::SHA256.hexdigest(JSON.generate(stable_instance.call(instance))),
     "client"=>"codex",
     "command"=>"codex",
     "herdr"=>{"session"=>"","workspace"=>"","tab"=>"","pane"=>"alias-run","canonical_pane"=>"alias-run"},
@@ -791,7 +806,7 @@ grep -q -- '- instance: reviewer-main' "$TMPROOT/start-reviewer-human.txt"
 grep -q -- '- command: codex' "$TMPROOT/start-reviewer-human.txt"
 pass 'start dry-run works without json'
 env -u HERDR_PANE_ID -u HERDR_TAB_ID -u HERDR_TAB -u HERDR_WORKSPACE_ID -u HERDR_WORKSPACE "$CLI" start reviewer-main --dry-run --json >"$TMPROOT/start-herdr-dry-run.json"
-json_assert 'start herdr dry-run emits adapter plan' "$TMPROOT/start-herdr-dry-run.json" 'j["schema_version"] == "orbit-start-plan-v1" && j["action"] == "dry_run" && j["adapter"] == "herdr" && j["herdr_start"]["schema_version"] == "orbit-herdr-start-v1" && j["herdr_start"]["command"] == ["herdr", "agent", "start", "reviewer-main", "--cwd", Dir.pwd, "--no-focus", "--", "codex"] && j["herdr_start"]["env"]["ORBIT_INSTANCE"] == "reviewer-main" && j["herdr_start"]["ready_wait"]["mode"] == "output_match"'
+json_assert 'start herdr dry-run emits adapter plan' "$TMPROOT/start-herdr-dry-run.json" 'cmd=j["herdr_start"]["command"]; sep=cmd.index("--"); j["schema_version"] == "orbit-start-plan-v1" && j["action"] == "dry_run" && j["adapter"] == "herdr" && j["herdr_start"]["schema_version"] == "orbit-herdr-start-v1" && cmd[0,7] == ["herdr", "agent", "start", "reviewer-main", "--cwd", Dir.pwd, "--no-focus"] && sep == 7 && cmd[sep + 1] == "env" && cmd.include?("ORBIT_INSTANCE=reviewer-main") && cmd.include?("ORBIT_ROLE=reviewer") && cmd.any? { |part| part.start_with?("ORBIT_SESSION_ID=") } && cmd.any? { |part| part.start_with?("ORBIT_LAUNCH_ID=") } && cmd.last == "codex" && j["herdr_start"]["env"]["ORBIT_INSTANCE"] == "reviewer-main" && j["herdr_start"]["ready_wait"]["mode"] == "output_match"'
 json_assert 'start herdr dry-run exposes create policy and permission setup' "$TMPROOT/start-herdr-dry-run.json" 'j["creation_policy"]["reuse_first"] == true && j["creation_policy"]["same_level_view"]["strategy"] == "default_view" && j["creation_policy"]["permission_setup"]["required"] == true && j["creation_policy"]["permission_setup"]["summary"].include?("does not silently bypass")'
 mkdir -p "$TMPROOT/fakebin"
 cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
@@ -811,7 +826,7 @@ esac
 HERDR
 chmod +x "$TMPROOT/fakebin/herdr"
 env HERDR_PANE_ID=lead-pane HERDR_TAB_ID=lead-tab PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer-main --dry-run --json >"$TMPROOT/start-herdr-same-tab-dry-run.json"
-json_assert 'start herdr uses same tab only when layout stays readable' "$TMPROOT/start-herdr-same-tab-dry-run.json" 'j["creation_policy"]["same_level_view"]["strategy"] == "same_tab" && j["layout"]["selected"] == "same_tab" && j["layout"]["source_pane_size"] == {"cols"=>260, "rows"=>50} && j["layout"]["projected_same_tab_size"] == {"cols"=>130, "rows"=>50} && j["layout"]["existing_agent_panes_in_tab"] == 1 && j["herdr_start"]["command"] == ["herdr", "agent", "start", "reviewer-main", "--cwd", Dir.pwd, "--tab", "lead-tab", "--split", "right", "--no-focus", "--", "codex"]'
+json_assert 'start herdr uses same tab only when layout stays readable' "$TMPROOT/start-herdr-same-tab-dry-run.json" 'cmd=j["herdr_start"]["command"]; sep=cmd.index("--"); j["creation_policy"]["same_level_view"]["strategy"] == "same_tab" && j["layout"]["selected"] == "same_tab" && j["layout"]["source_pane_size"] == {"cols"=>260, "rows"=>50} && j["layout"]["projected_same_tab_size"] == {"cols"=>130, "rows"=>50} && j["layout"]["existing_agent_panes_in_tab"] == 1 && cmd[0,11] == ["herdr", "agent", "start", "reviewer-main", "--cwd", Dir.pwd, "--tab", "lead-tab", "--split", "right", "--no-focus"] && sep == 11 && cmd[sep + 1] == "env" && cmd.include?("ORBIT_INSTANCE=reviewer-main") && cmd.include?("ORBIT_ROLE=reviewer") && cmd.last == "codex"'
 cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
 #!/bin/sh
 case "$1 $2" in
@@ -829,7 +844,7 @@ esac
 HERDR
 chmod +x "$TMPROOT/fakebin/herdr"
 env HERDR_PANE_ID=lead-pane HERDR_TAB_ID=lead-tab PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer-main --dry-run --json >"$TMPROOT/start-herdr-auto-new-tab-dry-run.json"
-json_assert 'start herdr auto chooses new tab when same-tab split would be unreadable' "$TMPROOT/start-herdr-auto-new-tab-dry-run.json" 'j["action"] == "dry_run" && j["layout"]["selected"] == "new_tab" && j["layout"]["projected_same_tab_size"] == {"cols"=>60, "rows"=>50} && j["layout"]["reason"].include?("below minimum") && j["herdr_start"]["command"] == ["herdr", "agent", "start", "reviewer-main", "--cwd", Dir.pwd, "--workspace", "lead-workspace", "--no-focus", "--", "codex"]'
+json_assert 'start herdr auto chooses new tab when same-tab split would be unreadable' "$TMPROOT/start-herdr-auto-new-tab-dry-run.json" 'cmd=j["herdr_start"]["command"]; sep=cmd.index("--"); j["action"] == "dry_run" && j["layout"]["selected"] == "new_tab" && j["layout"]["projected_same_tab_size"] == {"cols"=>60, "rows"=>50} && j["layout"]["reason"].include?("below minimum") && cmd[0,9] == ["herdr", "agent", "start", "reviewer-main", "--cwd", Dir.pwd, "--workspace", "lead-workspace", "--no-focus"] && sep == 9 && cmd[sep + 1] == "env" && cmd.include?("ORBIT_INSTANCE=reviewer-main") && cmd.include?("ORBIT_ROLE=reviewer") && cmd.last == "codex"'
 if env HERDR_PANE_ID=lead-pane HERDR_TAB_ID=lead-tab PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer-main --layout same-tab --dry-run --json >"$TMPROOT/start-herdr-same-tab-blocked.json" 2>"$TMPROOT/start-herdr-same-tab-blocked.err"; then
   printf 'FAIL start same-tab unreadable layout: command unexpectedly succeeded\n' >&2
   exit 1
@@ -867,7 +882,7 @@ HERDR
 chmod +x "$TMPROOT/fakebin/herdr"
 ORBIT_FAKE_HERDR_ARGS="$TMPROOT/fake-herdr-args.txt" ORBIT_FAKE_HERDR_WAIT_ARGS="$TMPROOT/fake-herdr-wait-args.txt" ORBIT_FAKE_HERDR_ENV="$TMPROOT/fake-herdr-env.txt" ORBIT_FAKE_HERDR_CWD="$TMPROOT/fake-herdr-cwd.txt" HERDR_PANE_ID=lead-pane HERDR_TAB_ID=lead-tab PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer-main --json >"$TMPROOT/start-herdr-real.json"
 json_assert 'start herdr invokes adapter, records actual client, and waits for runtime identity' "$TMPROOT/start-herdr-real.json" 'j["action"] == "started_identity_pending" && j["dispatch_ready"] == false && j["adapter_result"]["success"] == true && j["adapter_result"]["stdout"].include?("fake-pane") && j["adapter_result"]["pane_id"] == "fake-pane" && j["adapter_result"]["ready_wait"]["success"] == true && j["creation_policy"]["same_level_view"]["strategy"] == "same_tab" && j["instance_status_after_start"]["herdr"]["tab"] == "lead-tab" && j["instance_status_after_start"]["herdr"]["pane"] == "fake-pane" && j["runtime_session"]["state"] == "pending" && j["runtime_session"]["identity"]["verification"] == "identity_pending"'
-ruby --disable-gems -e 'expected=["agent","start","reviewer-main","--cwd",Dir.pwd,"--tab","lead-tab","--split","right","--no-focus","--","codex"]; actual=File.read(ARGV[0]).lines.map(&:chomp); abort(actual.inspect) unless actual == expected' "$TMPROOT/fake-herdr-args.txt"
+ruby --disable-gems -e 'actual=File.read(ARGV[0]).lines.map(&:chomp); sep=actual.index("--"); cwd_ok=[Dir.pwd, File.realpath(Dir.pwd)].include?(actual[4]); abort(actual.inspect) unless actual[0,4] == ["agent","start","reviewer-main","--cwd"] && cwd_ok && actual[5,6] == ["--tab","lead-tab","--split","right","--no-focus","--"] && sep == 10 && actual[sep + 1] == "env" && actual.include?("ORBIT_INSTANCE=reviewer-main") && actual.include?("ORBIT_ROLE=reviewer") && actual.any? { |part| part.start_with?("ORBIT_SESSION_ID=") } && actual.any? { |part| part.start_with?("ORBIT_LAUNCH_ID=") } && actual.last == "codex"' "$TMPROOT/fake-herdr-args.txt"
 ruby --disable-gems -e 'actual=File.read(ARGV[0]).lines.map(&:chomp); abort(actual.inspect) unless actual[0,3] == ["wait","output","fake-pane"] && actual.include?("--regex") && actual.include?("OpenAI Codex|›")' "$TMPROOT/fake-herdr-wait-args.txt"
 grep -qx 'reviewer-main/reviewer' "$TMPROOT/fake-herdr-env.txt"
 grep -qx "$PROJECT" "$TMPROOT/fake-herdr-cwd.txt"

@@ -41,9 +41,9 @@
 ## Code Entry Points
 
 - `install.sh`
-  - Herdr prerequisite check、manual-only 显式模式、安装输出。
+  - Herdr prerequisite check、manual protocol 显式模式、安装输出。
 - `README.md`
-  - 安装步骤、Herdr requirement、manual-only 降级说明。
+  - 安装步骤、Herdr requirement、explicit manual protocol 能力边界说明。
 - `lib/orbit/core.rb`
   - `runtime` subcommand help、top-level usage、removed/migration messages。
 - `lib/orbit/cli.rb`
@@ -123,7 +123,7 @@ Install Herdr first:
 Then rerun the Orbit installer.
 ```
 
-- If manual-only mode is implemented, it must be explicit (`--manual-only` or `ORBIT_MANUAL_ONLY=1`) and print that `orbit start` automatic create/wake, Herdr direct dispatch, and Herdr notice surfacing are unavailable.
+- If manual protocol mode is implemented, it must be explicit (`--manual-only` or `ORBIT_MANUAL_ONLY=1`) and print that `orbit start` automatic create/wake, Herdr direct dispatch, and Herdr notice surfacing are unavailable.
 - README install section presents Herdr as required for normal Orbit runtime usage.
 
 Tests:
@@ -131,7 +131,7 @@ Tests:
 - installer fails when `herdr` is absent from `PATH`.
 - installer fails when `herdr --version` exits non-zero.
 - installer succeeds when fake `herdr --version` succeeds.
-- manual-only mode, if implemented, succeeds only when explicit and prints capability downgrade.
+- manual protocol mode, if implemented, succeeds only when explicit and prints that it does not trigger automatic runtime.
 
 Acceptance:
 
@@ -359,7 +359,7 @@ Changes:
 - Direct dispatch requires task contract allowed + `alive` + `verified` + `available`.
 - Direct dispatch target pane must be the verified session's `canonical_pane`; a caller-supplied pane or repaired hint cannot substitute for session ownership.
 - `available_needs_seen` blocks until `orbit runtime ack-session INSTANCE --json`.
-- `--manual-payload` remains protocol-safe fallback.
+- `--manual-payload` remains an explicit manual protocol artifact path; it does not trigger automatic runtime and never produces Herdr-verified identity.
 - `--pane` remains explicit override but sets `identity_verification: override`, emits risk, and never writes active session/evidence identity.
 
 Tests:
@@ -479,7 +479,7 @@ git diff --check
 Expected final state:
 
 - ordinary installer fails clearly without Herdr.
-- explicit manual-only install, if implemented, reports degraded capabilities.
+- explicit manual protocol install, if implemented, reports that automatic start/wake, direct dispatch, Herdr notice delivery, and Herdr-verified identity are unavailable.
 - `start` can create/wake agents or return `started_identity_pending` with pane-aware remediation; it does not output verified reuse in the current version.
 - `start` with no binding ignores handwritten/old verified runtime sessions until trusted caller-pane proof exists.
 - Herdr-launched agents do not receive `orbit runtime register --json` as a verified promotion preflight command.

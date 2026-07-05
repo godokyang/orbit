@@ -89,7 +89,7 @@ design_lifecycle:
     - coding_ready
   current_phase: ""
   user_confirmation_required: true
-  coding_requires_confirmed_design: true
+  coding_requires_confirmed_design: false
 design_reference:
   required_for_coding: false
   artifact: ""

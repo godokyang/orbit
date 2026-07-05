@@ -64,6 +64,10 @@ def runtime_identity_snapshot
   result
 end
 
+def deep_dup_data(value)
+  JSON.parse(JSON.generate(value))
+end
+
 def runtime_config_hashes(instance_key)
   roles_config = load_yaml(File.join(Dir.pwd, ".orbit", "roles.yaml"))
   instances_config = load_yaml(File.join(Dir.pwd, ".orbit", "instances.yaml"))
@@ -73,8 +77,18 @@ def runtime_config_hashes(instance_key)
   role_ref = instance["role_ref"].to_s
   {
     "role_config_sha256" => runtime_sha256_for_value(roles[role_ref] || {}),
-    "instance_config_sha256" => runtime_sha256_for_value(instance)
+    "instance_config_sha256" => runtime_sha256_for_value(runtime_stable_instance_config(instance))
   }
+end
+
+def runtime_stable_instance_config(instance)
+  return {} unless instance.is_a?(Hash)
+
+  stable = deep_dup_data(instance)
+  stable.delete("binding")
+  stable.delete("herdr")
+  stable.delete("view")
+  stable
 end
 
 def runtime_env_session_id

@@ -20,7 +20,11 @@ cp "$TASK" "$TMPROOT/task-empty-qo.yaml"
 ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["task_type"]="quality_improvement"; y["quality_outcome"]={"user_problem"=>"","desired_property"=>"","measurable_thresholds"=>[],"invalid_completions"=>[]}; File.write(p, YAML.dump(y))' "$TMPROOT/task-empty-qo.yaml"
 expect_failure 'validate fails improvement task empty quality_outcome fields' "$CLI" validate --task "$TMPROOT/task-empty-qo.yaml" --evidence "$EVIDENCE" --json
 
-expect_failure 'validate fails coding task without confirmed design reference' "$CLI" validate --task "$CODING_TASK" --evidence "$EVIDENCE" --json
+"$CLI" validate --task "$CODING_TASK" --evidence "$EVIDENCE" --json >"$TMPROOT/coding-default-design-optional.json"
+json_assert 'validate accepts default coding task without mandatory design reference' "$TMPROOT/coding-default-design-optional.json" 'j["valid"] == true'
+cp "$CODING_TASK" "$TMPROOT/coding-required-design-unconfirmed.yaml"
+ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["design_reference"]={"required_for_coding"=>true,"artifact"=>"","confirmation_evidence"=>"","status"=>"unconfirmed"}; File.write(p, YAML.dump(y))' "$TMPROOT/coding-required-design-unconfirmed.yaml"
+expect_failure 'validate fails coding task with required but unconfirmed design reference' "$CLI" validate --task "$TMPROOT/coding-required-design-unconfirmed.yaml" --evidence "$EVIDENCE" --json
 cp "$CODING_TASK" "$TMPROOT/coding-confirmed-design.yaml"
 ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["design_reference"]={"required_for_coding"=>true,"artifact"=>"docs/open/design.md","confirmation_evidence"=>"evidence:user_confirmed","status"=>"confirmed"}; File.write(p, YAML.dump(y))' "$TMPROOT/coding-confirmed-design.yaml"
 "$CLI" validate --task "$TMPROOT/coding-confirmed-design.yaml" --evidence "$EVIDENCE" --json >"$TMPROOT/coding-confirmed-design.json"

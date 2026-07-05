@@ -71,7 +71,6 @@ end
 def validate_instance_binding_field(result, source, instance_name, instance)
   binding = instance["binding"]
   if binding.nil?
-    validation_error(result, "project_config.instances.#{source}.binding", "Instance #{instance_name.inspect} binding must be present with adapter herdr.")
     return
   end
 
@@ -351,7 +350,6 @@ end
 def validate_coding_design_reference(result, task)
   reference = task["design_reference"]
   if reference.nil?
-    validation_error(result, "task_file.design_reference", "Coding task must define design_reference.")
     return
   end
 
@@ -360,9 +358,13 @@ def validate_coding_design_reference(result, task)
     return
   end
 
-  unless reference["required_for_coding"] == true
-    validation_error(result, "task_file.design_reference.required_for_coding", "Coding task design_reference.required_for_coding must be true.")
+  required = reference["required_for_coding"]
+  unless required == true || required == false
+    validation_error(result, "task_file.design_reference.required_for_coding", "Coding task design_reference.required_for_coding must be true or false.")
+    return
   end
+
+  return unless required == true
 
   validate_non_empty_string(result, "task_file.design_reference.artifact", reference["artifact"], "Coding task design artifact")
   validate_non_empty_string(result, "task_file.design_reference.confirmation_evidence", reference["confirmation_evidence"], "Coding task design confirmation evidence")

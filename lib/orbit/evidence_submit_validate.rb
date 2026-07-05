@@ -574,6 +574,15 @@ def validate_blocked_submit_detail!(value, source, kind: nil)
   value
 end
 
+def empty_or_not_applicable_blocked_detail?(value)
+  return false unless value.is_a?(Hash)
+
+  %w[reason next_step owner].all? do |field|
+    text = value[field].to_s.strip.downcase
+    text.empty? || text == "none" || text == "n/a" || text.start_with?("not_applicable")
+  end
+end
+
 def report_string!(report, field, source, kind: nil)
   value = report[field]
   unless value.is_a?(String) && !value.strip.empty?
@@ -628,6 +637,7 @@ def validate_structured_submit_report!(report_path, report)
   end
   kind = structured_submit_kind(report_path, report)
   status = structured_submit_status(report, kind)
+  pass_required = status == "pass"
   summary = report_string!(report, "summary", "submit_report", kind: kind)
   source_message_id = report_string!(report, "source_message_id", "submit_report", kind: kind)
   unless report.key?("findings")
@@ -642,7 +652,22 @@ def validate_structured_submit_report!(report_path, report)
   findings = validate_findings_array!(report["findings"], "submit_report.findings", kind: kind)
   coverage = validate_string_array!(report["coverage"], "submit_report.coverage", kind: kind)
   artifacts = validate_string_array!(report["artifacts"], "submit_report.artifacts", kind: kind)
-  validate_blocked_submit_detail!(report["blocked"], "submit_report.blocked", kind: kind) if report.key?("blocked")
+  blocked_detail_for_record = nil
+  if report.key?("blocked")
+    if pass_required
+      unless empty_or_not_applicable_blocked_detail?(report["blocked"])
+        submit_report_schema_error(
+          "submit_report.blocked",
+          "PASS report must omit blocked, or set blocked.reason/next_step/owner to empty or not_applicable values.",
+          expected: "absent blocked section for PASS",
+          actual: evidence_value_type(report["blocked"]),
+          kind: kind
+        )
+      end
+    else
+      blocked_detail_for_record = validate_blocked_submit_detail!(report["blocked"], "submit_report.blocked", kind: kind)
+    end
+  end
 
   # Schema versioning: validate report_template_version.
   # Missing report_template_version is a breaking-schema error; new packages do
@@ -698,7 +723,7 @@ def validate_structured_submit_report!(report_path, report)
 
   extra = {}
   extra["source_report_semantics"] = source_report_semantics
-  pass_required = status == "pass"
+  extra["blocked"] = blocked_detail_for_record if blocked_detail_for_record
   if pass_required || report.key?("evidence_level")
     extra["evidence_level"] = validate_evidence_level!(report["evidence_level"], "submit_report.evidence_level", kind: kind, pass_required: pass_required)
   end
@@ -908,7 +933,6 @@ def evidence_submit(options)
   %w[test_environment quality_measurement duration resource_usage ux_quality artifact_quality cleanup_status].each do |field|
     record[field] = report[field] if report.key?(field)
   end
-  record["blocked"] = report["blocked"] if report.key?("blocked")
   record["gate_lease"] = report["gate_lease"] if report.key?("gate_lease")
   if report.key?("decision_record")
     normalized_dr = validate_decision_record!({ "decision_record" => report["decision_record"], "kind" => kind }, "submit_report")

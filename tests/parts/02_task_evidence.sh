@@ -72,7 +72,9 @@ DESIGN_TASK="$TMPROOT/design-task.yaml"
 yaml_assert 'new-task initializes design lifecycle for design task' "$DESIGN_TASK" 'j["design_lifecycle"]["enabled"] == true && j["design_lifecycle"]["current_phase"] == "drafting" && j["design_lifecycle"]["phases"].include?("coding_ready") && j["design_lifecycle"]["user_confirmation_required"] == true'
 CODING_TASK="$TMPROOT/coding-task.yaml"
 "$CLI" new-task --task-type coding --output "$CODING_TASK" >/dev/null
-yaml_assert 'new-task marks coding tasks as requiring confirmed design' "$CODING_TASK" 'j["design_reference"]["required_for_coding"] == true && j["design_reference"]["status"] == "unconfirmed"'
+yaml_assert 'new-task creates coding tasks without mandatory design by default' "$CODING_TASK" 'j["design_lifecycle"]["enabled"] == false && j["design_lifecycle"]["coding_requires_confirmed_design"] == false && j["design_reference"]["required_for_coding"] == false && j["design_reference"]["status"] == "unconfirmed"'
+"$CLI" validate --task "$CODING_TASK" --json >"$TMPROOT/coding-task-default-validate.json"
+json_assert 'default coding task validates without confirmed design' "$TMPROOT/coding-task-default-validate.json" 'j["valid"] == true'
 DECOMP_TASK="$TMPROOT/decomposition-task.yaml"
 "$CLI" new-task --task-type decomposition --output "$DECOMP_TASK" >/dev/null
 yaml_assert 'new-task initializes decomposition contract fields' "$DECOMP_TASK" 'j["implementation_plan"]["required"] == true && j["decomposition"]["child_slices"].is_a?(Array) && j["decomposition"]["aggregate_outcome_metrics"].is_a?(Array) && j["final_aggregate_audit"]["required"] == true'
@@ -110,6 +112,11 @@ pass 'dispatch explicit pane failure occurs before adapter transport'
 ruby --disable-gems -rjson -ryaml -rdigest -rtime -rfileutils -e '
   roles = YAML.safe_load(File.read(".orbit/roles.yaml"), aliases: true).fetch("roles")
   instances = YAML.safe_load(File.read(".orbit/instances.yaml"), aliases: true).fetch("instances")
+  stable_instance = ->(value) {
+    copy = JSON.parse(JSON.generate(value))
+    %w[binding herdr view].each { |key| copy.delete(key) }
+    copy
+  }
   instance = instances.fetch("reviewer-main")
   role = roles.fetch(instance.fetch("role_ref"))
   lead_instance = instances.fetch("lead-main")
@@ -129,7 +136,7 @@ ruby --disable-gems -rjson -ryaml -rdigest -rtime -rfileutils -e '
     "role" => "reviewer",
     "role_ref" => "reviewer",
     "role_config_sha256" => Digest::SHA256.hexdigest(JSON.generate(role)),
-    "instance_config_sha256" => Digest::SHA256.hexdigest(JSON.generate(instance)),
+    "instance_config_sha256" => Digest::SHA256.hexdigest(JSON.generate(stable_instance.call(instance))),
     "client" => "codex",
     "command" => "codex",
     "herdr" => {
@@ -165,7 +172,7 @@ ruby --disable-gems -rjson -ryaml -rdigest -rtime -rfileutils -e '
     "role" => "lead",
     "role_ref" => "lead",
     "role_config_sha256" => Digest::SHA256.hexdigest(JSON.generate(lead_role)),
-    "instance_config_sha256" => Digest::SHA256.hexdigest(JSON.generate(lead_instance)),
+    "instance_config_sha256" => Digest::SHA256.hexdigest(JSON.generate(stable_instance.call(lead_instance))),
     "client" => "codex",
     "command" => "codex",
     "herdr" => {
@@ -697,6 +704,12 @@ grep -q 'expected: list of non-empty strings' "$TMPROOT/malformed-submit.err"
 grep -q 'actual: array<mapping>' "$TMPROOT/malformed-submit.err"
 grep -q 'template: assets/templates/review-report.yaml' "$TMPROOT/malformed-submit.err"
 pass 'evidence submit rejects malformed coverage entries before gate'
+PASS_REVIEW_EMPTY_BLOCKED_EVIDENCE="$TMPROOT/pass-review-empty-blocked-evidence.json"
+"$CLI" evidence init --output "$PASS_REVIEW_EMPTY_BLOCKED_EVIDENCE" >/dev/null
+cp "$TMPROOT/structured-review.yaml" "$TMPROOT/structured-review-empty-blocked.yaml"
+ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["blocked"]={"reason"=>"","next_step"=>"","owner"=>""}; File.write(p, YAML.dump(y))' "$TMPROOT/structured-review-empty-blocked.yaml"
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit --file "$PASS_REVIEW_EMPTY_BLOCKED_EVIDENCE" --report "$TMPROOT/structured-review-empty-blocked.yaml" --task "$TASK" --json >"$TMPROOT/pass-review-empty-blocked-submit.json"
+json_assert 'review PASS ignores empty blocked placeholder' "$TMPROOT/pass-review-empty-blocked-submit.json" 'j["record"]["kind"] == "review" && j["record"]["status"] == "pass" && !j["record"].key?("blocked")'
 "$CLI" wait-gate --task "$TASK" --evidence "$STRUCTURED_REVIEW_EVIDENCE" --json >"$TMPROOT/wait-gate-structured-review-pass.json"
 json_assert 'wait-gate passes after structured review submit' "$TMPROOT/wait-gate-structured-review-pass.json" 'j["ready"] == true && j["gates"].any? { |g| g["kind"] == "review" && g["passed"] == true && g["structured"] == true }'
 json_assert 'wait-gate exposes role-authorized gate summary' "$TMPROOT/wait-gate-structured-review-pass.json" 'j["gate_summary"]["ready"] == true && j["gates"].any? { |g| g["kind"] == "review" && g["identity_expected_role"] == "reviewer" && g["identity_resolved_role"] == "reviewer" && g["identity_valid"] == true }'
@@ -902,6 +915,12 @@ append_test_quality_fields "$TMPROOT/test-report.yaml"
 expect_failure 'evidence from-report rejects structured test verdict' env ORBIT_INSTANCE=tester-main "$CLI" evidence from-report --file "$TEST_EVIDENCE" --report "$TMPROOT/test-report.yaml" --task "$TEST_TASK" --json
 ORBIT_INSTANCE=tester-main "$CLI" evidence submit --file "$TEST_EVIDENCE" --report "$TMPROOT/test-report.yaml" --task "$TEST_TASK" --json >"$TMPROOT/evidence-submit-test-report.json"
 json_assert 'evidence submit imports structured test verdict' "$TMPROOT/evidence-submit-test-report.json" 'j["record"]["kind"] == "test" && j["record"]["status"] == "pass" && j["record"]["summary"] == "Browser scenarios passed." && j["record"]["structured_submit"] == true && j["record"]["evidence_level"] == "real_path_test"'
+PASS_TEST_NA_BLOCKED_EVIDENCE="$TMPROOT/pass-test-not-applicable-blocked-evidence.json"
+"$CLI" evidence init --output "$PASS_TEST_NA_BLOCKED_EVIDENCE" >/dev/null
+cp "$TMPROOT/test-report.yaml" "$TMPROOT/test-report-not-applicable-blocked.yaml"
+ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["blocked"]={"reason"=>"not_applicable: verdict is pass","next_step"=>"not_applicable: verdict is pass","owner"=>"none"}; File.write(p, YAML.dump(y))' "$TMPROOT/test-report-not-applicable-blocked.yaml"
+ORBIT_INSTANCE=tester-main "$CLI" evidence submit --file "$PASS_TEST_NA_BLOCKED_EVIDENCE" --report "$TMPROOT/test-report-not-applicable-blocked.yaml" --task "$TEST_TASK" --json >"$TMPROOT/pass-test-not-applicable-blocked-submit.json"
+json_assert 'test PASS ignores not_applicable blocked placeholder' "$TMPROOT/pass-test-not-applicable-blocked-submit.json" 'j["record"]["kind"] == "test" && j["record"]["status"] == "pass" && !j["record"].key?("blocked")'
 "$CLI" wait-gate --task "$TEST_TASK" --evidence "$TEST_EVIDENCE" --json >"$TMPROOT/wait-gate-test-pass.json"
 json_assert 'wait-gate passes after imported test evidence' "$TMPROOT/wait-gate-test-pass.json" 'j["ready"] == true && j["gates"].any? { |g| g["kind"] == "test" && g["passed"] == true }'
 expect_failure 'validate rejects passing test evidence without environment contract evidence' "$CLI" validate --task "$TEST_TASK" --evidence "$TEST_EVIDENCE" --json

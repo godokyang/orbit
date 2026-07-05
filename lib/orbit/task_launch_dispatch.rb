@@ -248,13 +248,13 @@ def default_design_lifecycle(task_type)
     "phases" => ["drafting", "review_requested", "changes_requested", "user_confirmed", "coding_ready"],
     "current_phase" => design_task?(task_type) ? "drafting" : "",
     "user_confirmation_required" => true,
-    "coding_requires_confirmed_design" => true
+    "coding_requires_confirmed_design" => design_task?(task_type)
   }
 end
 
 def default_design_reference(task_type)
   {
-    "required_for_coding" => coding_task?(task_type),
+    "required_for_coding" => false,
     "artifact" => "",
     "confirmation_evidence" => "",
     "status" => coding_task?(task_type) ? "unconfirmed" : "not_applicable"

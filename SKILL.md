@@ -112,7 +112,7 @@ Orbit 是面向 AI agent 的任务闭环协议。当前官方 automatic runtime 
 ## 输出要求
 
 - 改进类任务必须先有 Quality Outcome Contract，不能把“做了动作”直接当成完成。
-- coding task 必须引用已确认的 design artifact；如果用户要求先设计后确认，agent 不得在 `coding_ready` 前开始实现。
+- 当 task 的 `design_reference.required_for_coding: true` 时，coding 必须引用已确认的 design artifact；如果用户要求先设计后确认，agent 不得在 `coding_ready` 前开始实现。小型 coding task 可以显式保持 `required_for_coding: false`。
 - coding 必须保留 changed files、verification、closure 和 known gaps；testing 必须保留真实路径、环境、artifact、cleanup/resource/UX/artifact-quality 信息和 verdict。
 - review/test verdict 应通过独立 report 文件加 `orbit evidence submit --file ... --report ... --task ... --json` 进入 manifest；可从 `assets/templates/review-report.yaml` 或 `assets/templates/test-report.yaml` 复制模板后填写。不要直接编辑 `.orbit/evidence*.json` 来提交 review/test，即使 JSON 结构看起来正确也不能用来关闭 gate；Herdr 消息只是 transport 附件，不是权威 verdict。
 - 长任务或 docs maintenance 涉及路径移动、归档或历史 evidence 时，应使用 `orbit docs alias/check` 维护 stable doc id，并用 `orbit compact-evidence` 生成 durable summary；不要把 rule context、长日志、截图或 pane transcript 全文写入长期文档。

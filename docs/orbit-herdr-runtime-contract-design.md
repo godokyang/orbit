@@ -7,7 +7,7 @@
 - Status: proposed
 - Scope: `start` / `instances status` / `dispatch` / runtime registration / Herdr probe
 - Compatibility: breaking change；不保留旧 transport schema 或静态 binding 假复用语义。
-- Baseline: Herdr 是唯一官方 automatic runtime adapter；普通安装必须检测 Herdr 是否可用。没有 Herdr 时，默认安装应停止并提示安装 Herdr；manual-only protocol 只能作为显式模式，不能让用户误以为 `start` / direct `dispatch` 可用。
+- Baseline: Herdr 是唯一官方 automatic runtime adapter；普通安装必须检测 Herdr 是否可用。没有 Herdr 时，默认安装应停止并提示安装 Herdr；manual protocol 只能作为显式模式，不能让用户误以为 `start` / direct `dispatch` 可用。
 - Sources: Herdr docs [Quick start](https://herdr.dev/docs/quick-start/), [Concepts](https://herdr.dev/docs/concepts/), [How to work with Herdr](https://herdr.dev/docs/how-to-work/), [Agents](https://herdr.dev/docs/agents/), [Session state and restore](https://herdr.dev/docs/session-state/), [CLI reference](https://herdr.dev/docs/cli-reference/), [Integrations](https://herdr.dev/docs/integrations/), [Agent skill file](https://herdr.dev/docs/agent-skill/)。
 
 ## 用户可见目标
@@ -29,7 +29,7 @@ Install Herdr first:
 Then rerun the Orbit installer.
 ```
 
-如果未来保留 manual-only 安装，它必须使用显式选项，例如 `--manual-only` 或 `ORBIT_MANUAL_ONLY=1`，并在安装结果里写清楚：`orbit start` 自动创建/唤醒、Herdr direct dispatch、Herdr notice surfacing 都不可用。
+如果未来保留 manual protocol 安装，它必须使用显式选项，例如 `--manual-only` 或 `ORBIT_MANUAL_ONLY=1`，并在安装结果里写清楚：`orbit start` 自动创建/唤醒、Herdr direct dispatch、Herdr notice surfacing 都不可用。
 
 典型体验应是：
 
@@ -319,7 +319,7 @@ Orbit 不依赖常驻 watcher，也不假设用户手动修改 Herdr UI 时 Orbi
 Herdr 的 `agent explain` 和 `server agent-manifests` 应进入 `orbit tools doctor --json`：
 
 - 如果 liveness 是 `unknown`，对目标 pane 附带 `agent explain --json`。
-- 如果已知 agent 被分类为 idle，但输出看起来像 blocked，报告 manifest source 和 fallback reason。
+- 如果已知 agent 被分类为 idle，但输出看起来像 blocked，报告 manifest source 和 classification reason。
 - 在把 detection 判为损坏前，建议运行 `herdr server update-agent-manifests --json`。
 
 这样 Orbit 不需要自己实现脆弱的 screen parser。
@@ -915,7 +915,7 @@ replaced
 - 缺少 Herdr 时安装应失败，并输出明确 remediation 和 Herdr 安装命令。
 - README 安装流程必须把 Herdr 写成普通 Orbit runtime 使用的必需依赖，而不是“可选但推荐”。
 - 如果保留 manual-only 安装模式，它必须显式开启，例如 `--manual-only` 或 `ORBIT_MANUAL_ONLY=1`，并在安装结果里说明 `orbit start` 自动 create/wake、Herdr direct dispatch 和 Herdr notice surfacing 都不可用。
-- 增加 installer 测试：缺少 Herdr、Herdr 已安装、以及 manual-only 模式如果实现时的显式降级输出。
+- 增加 installer 测试：缺少 Herdr、Herdr 已安装、以及 explicit manual protocol 模式如果实现时的能力边界输出。
 
 ### Slice 1: runtime session files
 
@@ -957,7 +957,7 @@ replaced
 - `available_needs_seen` 必须通过 `orbit runtime ack-session INSTANCE --json` ack 后才可继续。
 - 让 `--pane` 显式 override 设置 `identity_verification: override`，但不得写 active session、evidence author identity 或 gate-closing identity。
 - `--pane` JSON/TTY 输出必须包含 manual override risk。
-- 保留 `--manual-payload` 作为 protocol-safe fallback。
+- 保留 `--manual-payload` 作为 explicit manual protocol artifact 路径；它不触发 automatic runtime，也不产生 Herdr-verified identity。
 
 ### Slice 5: evidence session attribution
 
@@ -985,7 +985,7 @@ replaced
 - 不从 pane title、Herdr display label、agent name 或自然语言 prompt 推断 role。
 - 不要求 long-running Orbit daemon。
 - 不让 Herdr 成为 task/evidence/gate semantics 的权威。
-- 不默认安装成“没有 Herdr 但看起来可用”的半功能状态；manual-only 必须显式选择并清楚降级能力。
+- 不默认安装成“没有 Herdr 但看起来可用”的半功能状态；manual protocol 必须显式选择，并清楚说明 automatic start/wake、direct dispatch、Herdr notice delivery 和 Herdr-verified identity 都不可用。
 
 ## 待定问题
 

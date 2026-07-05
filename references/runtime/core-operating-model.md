@@ -586,7 +586,7 @@ design_lifecycle:
     - coding_ready
   current_phase: ""
   user_confirmation_required: true
-  coding_requires_confirmed_design: true
+  coding_requires_confirmed_design: false
 design_reference:
   required_for_coding: false
   artifact: ""
@@ -684,7 +684,7 @@ lead 发送给 reviewer/tester 时，只发送路径：
 
 `design_lifecycle` 是 design/analysis task 的状态机字段。CLI 会要求 design task 包含 `drafting -> review_requested -> changes_requested|user_confirmed -> coding_ready`，并在进入 `user_confirmed` 或 `coding_ready` 前检查结构化 review pass 和用户确认证据。
 
-`design_reference` 是 coding task 的边界字段。`task_type` 包含 `coding` 时，CLI 会要求它引用已确认设计 artifact、confirmation evidence，并标记 `status: confirmed`；否则 coding task 不应 validate 通过。
+`design_reference` 是 coding task 的可选授权边界字段。`task_type` 包含 `coding` 时，CLI 会读取 `required_for_coding`：默认小型 coding task 可以保持 `false`；如果项目或 task 将它设为 `true`，CLI 会要求它引用已确认设计 artifact、confirmation evidence，并标记 `status: confirmed`，否则该 task 不应 validate 通过。
 
 `implementation_plan`、`decomposition` 和 `final_aggregate_audit` 是 parent/decomposition task 的整体收口字段。child slice 的局部 pass 不等于 parent 完成；parent final audit 必须检查 aggregate outcome metrics 和 child slice 覆盖关系。
 

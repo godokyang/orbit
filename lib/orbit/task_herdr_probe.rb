@@ -368,22 +368,29 @@ end
 
 def start_client_metadata(argv)
   executable = File.basename(argv.first.to_s)
-  full_permission_flags = {
-    "codex" => ["--dangerously-bypass-approvals-and-sandbox"],
-    "claude" => ["--dangerously-skip-permissions"],
-    "opencode" => ["--dangerously-skip-permissions"]
+  full_permission_flag_sets = {
+    "codex" => [["--dangerously-bypass-approvals-and-sandbox"]],
+    "claude" => [["--dangerously-skip-permissions"]],
+    "opencode" => [["--auto"], ["--dangerously-skip-permissions"]],
+    "omp" => [["--auto-approve"], ["--approval-mode=yolo"], ["--approval-mode", "yolo"]]
   }
-  required_flags = full_permission_flags.fetch(executable, [])
+  flag_sets = full_permission_flag_sets.fetch(executable, [])
+  matched = flag_sets.find do |required|
+    required.each_cons(2).any? { |a, b| argv.each_cons(2).any? { |x, y| x == a && y == b } } ||
+      required.all? { |flag| argv.include?(flag) }
+  end
+  required_flags = matched || flag_sets.first || []
   present_flags = required_flags.select { |flag| argv.include?(flag) }
   {
     "expected_client" => executable,
     "argv" => argv,
     "full_permission" => {
-      "known_client" => full_permission_flags.key?(executable),
+      "known_client" => full_permission_flag_sets.key?(executable),
       "required_flags" => required_flags,
+      "accepted_flag_sets" => flag_sets,
       "present_flags" => present_flags,
-      "configured" => !required_flags.empty? && (required_flags - present_flags).empty?,
-      "mode" => required_flags.empty? ? "unknown_client" : "argv_flag",
+      "configured" => !matched.nil?,
+      "mode" => flag_sets.empty? ? "unknown_client" : "argv_flag",
       "note" => "Full-permission flags are audited in the start plan; the client may still require runtime approval, so completion must be verified through evidence and wait-gate."
     }
   }
@@ -862,6 +869,9 @@ def print_start_self_wake_dry_run(plan)
 end
 
 def herdr_start_argv(plan, executable = "herdr", label = nil)
+  command_argv = plan["argv"] || []
+  env_pairs = (plan["env"] || {}).sort.map { |key, value| "#{key}=#{value}" }
+  command_argv = ["env", *env_pairs, *command_argv] unless env_pairs.empty?
   argv = [
     executable,
     "agent",
@@ -880,7 +890,7 @@ def herdr_start_argv(plan, executable = "herdr", label = nil)
   end
 
   argv += ["--split", "right"] if selected_layout == "same_tab"
-  argv + ["--no-focus", "--", *plan["argv"]]
+  argv + ["--no-focus", "--", *command_argv]
 end
 
 def herdr_agent_name_taken?(stderr)

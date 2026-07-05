@@ -292,7 +292,15 @@ end
 
 def normalize_instance_binding(instance_name, instance)
   binding = instance["binding"]
-  usage_error("Instance #{instance_name.inspect} binding must be present with adapter herdr.") if binding.nil?
+  if binding.nil?
+    return {
+      "adapter" => "herdr",
+      "workspace" => "",
+      "tab" => "",
+      "pane" => "",
+      "canonical_pane" => ""
+    }
+  end
   usage_error("Instance #{instance_name.inspect} binding must be a mapping when present.") unless binding.is_a?(Hash)
   usage_error("Instance #{instance_name.inspect} view must be a sibling of binding, not binding.view.") if binding.key?("view")
 
