@@ -4,13 +4,10 @@
   "description": "Orbit skill and CLI.",
   "files": [
     "README.md",
-    "SKILL.md",
     "install.sh",
     "uninstall.sh",
-    "assets",
     "lib",
-    "references/overview.md",
-    "references/runtime",
+    "skills/orbit",
     "scripts/orbit"
   ],
   "scripts": {

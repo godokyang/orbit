@@ -65,7 +65,7 @@ quality_outcome_reasoning: Identity fields test.
 evidence_level: outcome_quality
 rule_application:
   required_rule_files_read:
-    - references/runtime/quality-outcome-and-review.md
+    - skills/orbit/references/runtime/quality-outcome-and-review.md
   applied_checks:
     - id: identity_hash_propagation
       verdict: pass
@@ -134,7 +134,7 @@ quality_outcome_reasoning: Write policy test.
 evidence_level: outcome_quality
 rule_application:
   required_rule_files_read:
-    - references/runtime/quality-outcome-and-review.md
+    - skills/orbit/references/runtime/quality-outcome-and-review.md
   applied_checks:
     - id: write_policy_propagation
       verdict: pass

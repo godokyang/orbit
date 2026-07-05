@@ -69,18 +69,84 @@ grep -q 'orbit install: verifying installed orbit command' "$TMPROOT/install.out
 test -x "$INSTALL_BIN/orbit"
 test -x "$INSTALL_RUNTIME/scripts/orbit"
 test -f "$INSTALL_RUNTIME/package.json"
-test -f "$INSTALL_RUNTIME/SKILL.md"
-test -f "$INSTALL_RUNTIME/references/runtime/guide.md"
-test -f "$INSTALL_RUNTIME/references/runtime/core-operating-model.md"
-test -f "$INSTALL_RUNTIME/references/runtime/coding-guideline.md"
-test -f "$INSTALL_RUNTIME/references/runtime/quality-outcome-and-review.md"
-test -f "$INSTALL_RUNTIME/references/runtime/testing-guideline.md"
-test -f "$INSTALL_RUNTIME/assets/templates/review-report.yaml"
-test -f "$INSTALL_RUNTIME/assets/templates/design-review-report.yaml"
-test -f "$INSTALL_RUNTIME/assets/templates/test-report.yaml"
+test -f "$INSTALL_RUNTIME/skills/orbit/SKILL.md"
+test -f "$INSTALL_RUNTIME/skills/orbit/references/runtime/guide.md"
+test -f "$INSTALL_RUNTIME/skills/orbit/references/runtime/core-operating-model.md"
+test -f "$INSTALL_RUNTIME/skills/orbit/references/runtime/coding-guideline.md"
+test -f "$INSTALL_RUNTIME/skills/orbit/references/runtime/quality-outcome-and-review.md"
+test -f "$INSTALL_RUNTIME/skills/orbit/references/runtime/testing-guideline.md"
+test -f "$INSTALL_RUNTIME/skills/orbit/assets/templates/review-report.yaml"
+test -f "$INSTALL_RUNTIME/skills/orbit/assets/templates/design-review-report.yaml"
+test -f "$INSTALL_RUNTIME/skills/orbit/assets/templates/test-report.yaml"
 "$INSTALL_BIN/orbit" version >"$TMPROOT/installed-version.txt"
 grep -qx "$EXPECTED_VERSION" "$TMPROOT/installed-version.txt"
 pass 'installer creates runnable orbit command'
+
+test ! -e "$SKILL_ROOT/SKILL.md"
+test -f "$SKILL_ROOT/skills/orbit/SKILL.md"
+test -f "$SKILL_ROOT/skills/orbit/references/overview.md"
+test -f "$SKILL_ROOT/skills/orbit/references/runtime/guide.md"
+test -f "$SKILL_ROOT/skills/orbit/references/runtime/core-operating-model.md"
+test -f "$SKILL_ROOT/skills/orbit/references/runtime/coding-guideline.md"
+test -f "$SKILL_ROOT/skills/orbit/references/runtime/quality-outcome-and-review.md"
+test -f "$SKILL_ROOT/skills/orbit/references/runtime/testing-guideline.md"
+test -f "$SKILL_ROOT/skills/orbit/assets/templates/task.yaml"
+test -f "$SKILL_ROOT/skills/orbit/assets/templates/review-report.yaml"
+! grep -q 'internal: true' "$SKILL_ROOT/skills/orbit/SKILL.md"
+pass 'public npx skill package includes referenced resources'
+
+ruby --disable-gems -rjson - "$SKILL_ROOT" <<'RUBY'
+root = ARGV.fetch(0)
+package = JSON.parse(File.read(File.join(root, "package.json")))
+files = package.fetch("files")
+abort("package.json must include skills/orbit") unless files.include?("skills/orbit")
+%w[SKILL.md assets references].each do |legacy|
+  abort("package.json must not include legacy root skill path: #{legacy}") if files.include?(legacy)
+end
+RUBY
+pass 'npm package manifest publishes skills/orbit instead of legacy root skill paths'
+
+ruby --disable-gems - "$SKILL_ROOT" <<'RUBY'
+root = ARGV.fetch(0)
+install_script = File.read(File.join(root, "install.sh"))
+runtime_manifest = install_script[/runtime_files="\n(.*?)\n"/m, 1].to_s.lines.map(&:strip).reject(&:empty?)
+abort("install.sh runtime_files manifest was not found") if runtime_manifest.empty?
+skill_files = Dir.chdir(root) { Dir["skills/orbit/**/*"].select { |path| File.file?(path) }.sort }
+missing = skill_files - runtime_manifest
+legacy = runtime_manifest.select { |path| path == "SKILL.md" || path.start_with?("assets/") || path.start_with?("references/") }
+abort("install.sh runtime_files missing skill resources: #{missing.join(", ")}") unless missing.empty?
+abort("install.sh runtime_files still includes legacy root skill paths: #{legacy.join(", ")}") unless legacy.empty?
+RUBY
+pass 'installer runtime manifest includes every packaged skill resource'
+
+ruby --disable-gems - "$SKILL_ROOT" <<'RUBY'
+root = ARGV.fetch(0)
+skill_root = File.join(root, "skills", "orbit")
+missing = []
+
+Dir[File.join(skill_root, "**/*.md")].each do |file|
+  File.read(file).scan(/\[[^\]]+\]\(([^)]+)\)/) do |match|
+    href = match.fetch(0).split(/[ #]/, 2).first
+    next if href.nil? || href.empty? || href =~ %r{\A(?:https?:|mailto:|#)}
+
+    target = File.expand_path(href, File.dirname(file))
+    missing << "#{file.delete_prefix(root + "/")}: #{href}" unless File.exist?(target)
+  end
+end
+
+Dir[File.join(skill_root, "**/*.{md,yaml,json}")].each do |file|
+  text = File.read(file)
+  text.scan(%r{(?:references/runtime|references|assets/templates)/[A-Za-z0-9_.\-/]+|SKILL\.md}) do |ref|
+    next if ref == "SKILL.md"
+
+    target = File.join(skill_root, ref)
+    missing << "#{file.delete_prefix(root + "/")}: #{ref}" unless File.exist?(target)
+  end
+end
+
+abort("packaged skill contains missing local references: #{missing.join("; ")}") unless missing.empty?
+RUBY
+pass 'packaged skill markdown links and resource references are self-contained'
 
 REMOTE_INSTALLER="$TMPROOT/remote-install.sh"
 REMOTE_BIN="$TMPROOT/install-remote-bin"
@@ -95,7 +161,7 @@ test "$(grep -c 'orbit install: \[[0-9][0-9]*/' "$TMPROOT/install-remote.out")" 
 grep -q 'orbit install: downloading runtime files complete' "$TMPROOT/install-remote.out"
 grep -q 'orbit install: verifying installed orbit command' "$TMPROOT/install-remote.out"
 test -x "$REMOTE_BIN/orbit"
-test -f "$REMOTE_RUNTIME/SKILL.md"
+test -f "$REMOTE_RUNTIME/skills/orbit/SKILL.md"
 "$REMOTE_BIN/orbit" version >"$TMPROOT/remote-installed-version.txt"
 grep -qx "$EXPECTED_VERSION" "$TMPROOT/remote-installed-version.txt"
 pass 'remote installer shows progress while downloading runtime'
@@ -106,7 +172,7 @@ mkdir -p "$INSTALLED_PROJECT"
 INSTALLED_TASK="$TMPROOT/installed-task.yaml"
 (cd "$INSTALLED_PROJECT" && "$INSTALL_BIN/orbit" new-task --task-type implementation --output "$INSTALLED_TASK" >/dev/null)
 (cd "$INSTALLED_PROJECT" && ORBIT_INSTANCE=lead-main "$INSTALL_BIN/orbit" rules print-context --task "$INSTALLED_TASK" --json >"$TMPROOT/installed-rules-context.json")
-json_assert 'installed orbit can load packaged default runtime rules' "$TMPROOT/installed-rules-context.json" 'j["valid"] == true && j["load_order"].any? { |r| r["source"] == "orbit_default" && r["path"] == "SKILL.md" && r["exists"] == true } && j["load_order"].any? { |r| r["source"] == "orbit_default" && r["path"] == "references/runtime/coding-guideline.md" && r["exists"] == true }'
+json_assert 'installed orbit can load packaged default runtime rules' "$TMPROOT/installed-rules-context.json" 'j["valid"] == true && j["load_order"].any? { |r| r["source"] == "orbit_default" && r["path"] == "skills/orbit/SKILL.md" && r["exists"] == true } && j["load_order"].any? { |r| r["source"] == "orbit_default" && r["path"] == "skills/orbit/references/runtime/coding-guideline.md" && r["exists"] == true }'
 
 sh "$SKILL_ROOT/install.sh" --bin-dir "$INSTALL_BIN" --runtime-dir "$INSTALL_RUNTIME" >"$TMPROOT/update.out" 2>"$TMPROOT/update.err"
 test ! -s "$TMPROOT/update.err"
@@ -518,7 +584,7 @@ esac
 HERDR
 chmod +x "$TMPROOT/fakebin/herdr"
 PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer-main --dry-run --json >"$TMPROOT/start-reviewer-reuse.json"
-json_assert 'start does not reuse Herdr binding without verified runtime identity' "$TMPROOT/start-reviewer-reuse.json" 'j["action"] == "reuse_identity_pending" && j["reason"] == "binding_agent_found_but_runtime_identity_unverified" && j["dispatch_ready"] == false && j["reuse_probe"]["agent_detected"] == true && j["reuse_probe"]["agent"] == "codex" && j["runtime_resolution"]["identity_verification"] == "absent" && j["next"].any? { |n| n["manual_payload"].to_s.include?("trusted caller-pane proof") } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "SKILL.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "references/runtime/guide.md" }'
+json_assert 'start does not reuse Herdr binding without verified runtime identity' "$TMPROOT/start-reviewer-reuse.json" 'j["action"] == "reuse_identity_pending" && j["reason"] == "binding_agent_found_but_runtime_identity_unverified" && j["dispatch_ready"] == false && j["reuse_probe"]["agent_detected"] == true && j["reuse_probe"]["agent"] == "codex" && j["runtime_resolution"]["identity_verification"] == "absent" && j["next"].any? { |n| n["manual_payload"].to_s.include?("trusted caller-pane proof") } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "skills/orbit/SKILL.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "skills/orbit/references/runtime/guide.md" }'
 cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
 #!/bin/sh
 case "$1 $2" in
@@ -800,7 +866,7 @@ kill "$START_LOCK_PID" 2>/dev/null || true
 wait "$START_LOCK_PID" 2>/dev/null || true
 json_assert 'start force refuses concurrent replacement when instance lock is held' "$TMPROOT/start-reviewer-force-lock-busy.json" 'j["action"] == "needs_attention" && j["reason"] == "start_in_progress" && j["liveness_reason"].include?("another forced start")'
 "$CLI" start reviewer-main --dry-run --json >"$TMPROOT/start-reviewer-main.json"
-json_assert 'start dry-run resolves instance command env cwd client and context metadata' "$TMPROOT/start-reviewer-main.json" 'j["schema_version"] == "orbit-start-plan-v1" && j["action"] == "dry_run" && j["adapter"] == "herdr" && j["instance"] == "reviewer-main" && j["argv"] == ["codex"] && j["client"]["expected_client"] == "codex" && j["client"]["full_permission"]["known_client"] == true && j["client"]["full_permission"]["configured"] == false && j["env"]["ORBIT_INSTANCE"] == "reviewer-main" && j["env"]["ORBIT_ROLE"] == "reviewer" && j["env"]["ORBIT_SESSION_ID"].is_a?(String) && j["env"]["ORBIT_LAUNCH_ID"].is_a?(String) && j["cwd"] == Dir.pwd && j["context_preflight"]["commands"][0] == ["orbit", "whoami", "--json"] && !j["context_preflight"]["commands"].include?(["orbit", "runtime", "register", "--json"]) && j["context_preflight"]["required_files"].any? { |r| r["path"] == "SKILL.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "references/runtime/guide.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "references/runtime/quality-outcome-and-review.md" }'
+json_assert 'start dry-run resolves instance command env cwd client and context metadata' "$TMPROOT/start-reviewer-main.json" 'j["schema_version"] == "orbit-start-plan-v1" && j["action"] == "dry_run" && j["adapter"] == "herdr" && j["instance"] == "reviewer-main" && j["argv"] == ["codex"] && j["client"]["expected_client"] == "codex" && j["client"]["full_permission"]["known_client"] == true && j["client"]["full_permission"]["configured"] == false && j["env"]["ORBIT_INSTANCE"] == "reviewer-main" && j["env"]["ORBIT_ROLE"] == "reviewer" && j["env"]["ORBIT_SESSION_ID"].is_a?(String) && j["env"]["ORBIT_LAUNCH_ID"].is_a?(String) && j["cwd"] == Dir.pwd && j["context_preflight"]["commands"][0] == ["orbit", "whoami", "--json"] && !j["context_preflight"]["commands"].include?(["orbit", "runtime", "register", "--json"]) && j["context_preflight"]["required_files"].any? { |r| r["path"] == "skills/orbit/SKILL.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "skills/orbit/references/runtime/guide.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "skills/orbit/references/runtime/quality-outcome-and-review.md" }'
 mkdir -p "$TMPROOT/project/subdir"
 expect_failure 'start rejects cwd outside Orbit project root' "$CLI" start reviewer-main --cwd "$TMPROOT/project/subdir" --dry-run --json
 "$CLI" start reviewer-main --dry-run >"$TMPROOT/start-reviewer-human.txt" 2>"$TMPROOT/start-reviewer-human.err"
@@ -1100,9 +1166,9 @@ json_assert 'whoami supports reviewer-main instance' "$TMPROOT/whoami-reviewer-m
 
 ORBIT_ROLE=reviewer "$CLI" whoami --json >"$TMPROOT/whoami-role-only.json"
 json_assert 'whoami infers unique instance from role' "$TMPROOT/whoami-role-only.json" 'j["resolved_role"] == "reviewer" && j["conflicts"].empty?'
-ruby --disable-gems -ryaml -e 'p=ARGV[0]; y={"schema_version"=>"orbit-rule-packs-v1","rule_packs"=>{"common"=>["project-common"],"review"=>[{"id"=>"brooks-review","path"=>"references/rule-packs/brooks-review.md"}],"test"=>["brooks-test"],"audit"=>["orbit-drift"]}}; File.write(p, YAML.dump(y))' .orbit/rule-packs.yaml
+ruby --disable-gems -ryaml -e 'p=ARGV[0]; y={"schema_version"=>"orbit-rule-packs-v1","rule_packs"=>{"common"=>["project-common"],"review"=>[{"id"=>"brooks-review","path"=>".orbit/rule-packs/brooks-review.md"}],"test"=>["brooks-test"],"audit"=>["orbit-drift"]}}; File.write(p, YAML.dump(y))' .orbit/rule-packs.yaml
 ORBIT_INSTANCE=reviewer-main "$CLI" whoami --json >"$TMPROOT/whoami-reviewer-rule-packs.json"
-json_assert 'whoami exposes configured review rule packs' "$TMPROOT/whoami-reviewer-rule-packs.json" 'j["rule_packs"].any? { |p| p["category"] == "common" && p["id"] == "project-common" } && j["rule_packs"].any? { |p| p["category"] == "review" && p["id"] == "brooks-review" && p["path"] == "references/rule-packs/brooks-review.md" }'
+json_assert 'whoami exposes configured review rule packs' "$TMPROOT/whoami-reviewer-rule-packs.json" 'j["rule_packs"].any? { |p| p["category"] == "common" && p["id"] == "project-common" } && j["rule_packs"].any? { |p| p["category"] == "review" && p["id"] == "brooks-review" && p["path"] == ".orbit/rule-packs/brooks-review.md" }'
 
 expect_failure 'whoami fails on env role conflict' env ORBIT_INSTANCE=reviewer-main ORBIT_ROLE=lead "$CLI" whoami --json
 expect_failure 'whoami fails on unknown instance' env ORBIT_INSTANCE=missing "$CLI" whoami --json

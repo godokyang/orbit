@@ -80,7 +80,7 @@ DECOMP_TASK="$TMPROOT/decomposition-task.yaml"
 yaml_assert 'new-task initializes decomposition contract fields' "$DECOMP_TASK" 'j["implementation_plan"]["required"] == true && j["decomposition"]["child_slices"].is_a?(Array) && j["decomposition"]["aggregate_outcome_metrics"].is_a?(Array) && j["final_aggregate_audit"]["required"] == true'
 expect_failure 'new-task refuses overwrite' "$CLI" new-task --implementation-authority reviewer --assigned-instance reviewer-main --task-type implementation_review --output "$TASK"
 "$CLI" dispatch --task "$TASK" --to reviewer-main --manual-payload --json >"$TMPROOT/dispatch-generic.json"
-json_assert 'dispatch manual payload emits delivery artifact with context preflight' "$TMPROOT/dispatch-generic.json" 'j["schema_version"] == "orbit-dispatch-v1" && j["action"] == "manual_delivery_required" && j["delivery"]["mode"] == "manual_artifact" && j["delivery"]["runtime_adapter"] == "none" && j["to_instance"] == "reviewer-main" && j["resolved_role"] == "reviewer" && j.dig("execution_contract","assigned_instance") == "reviewer-main" && j["task"] == File.expand_path(ARGV[2]) && !j["message"].include?("orbit runtime register --json") && j["message"].include?("orbit whoami --json") && !j["message"].include?("orbit whoami --task") && j["message"].include?("orbit rules print-context --task") && j["message"].include?("context_preflight.required_files") && !j["context_preflight"]["commands"].include?(["orbit", "runtime", "register", "--json"]) && j["context_preflight"]["commands"].include?(["orbit", "whoami", "--json"]) && j["context_preflight"]["required_files"].any? { |r| r["path"] == "SKILL.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "references/runtime/guide.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "references/runtime/quality-outcome-and-review.md" } && j["checks"]["target_allowed_by_execution_contract"] == true && j["checks"]["delivery_precondition_met"] == true && j["checks"]["manual_artifact"] == true && j["checks"]["explicit_override"] == false && j["checks"]["live_binding_confirmed"] == false && !j["checks"].key?("live_confirmed_for_delivery")' "$TASK"
+json_assert 'dispatch manual payload emits delivery artifact with context preflight' "$TMPROOT/dispatch-generic.json" 'j["schema_version"] == "orbit-dispatch-v1" && j["action"] == "manual_delivery_required" && j["delivery"]["mode"] == "manual_artifact" && j["delivery"]["runtime_adapter"] == "none" && j["to_instance"] == "reviewer-main" && j["resolved_role"] == "reviewer" && j.dig("execution_contract","assigned_instance") == "reviewer-main" && j["task"] == File.expand_path(ARGV[2]) && !j["message"].include?("orbit runtime register --json") && j["message"].include?("orbit whoami --json") && !j["message"].include?("orbit whoami --task") && j["message"].include?("orbit rules print-context --task") && j["message"].include?("context_preflight.required_files") && !j["context_preflight"]["commands"].include?(["orbit", "runtime", "register", "--json"]) && j["context_preflight"]["commands"].include?(["orbit", "whoami", "--json"]) && j["context_preflight"]["required_files"].any? { |r| r["path"] == "skills/orbit/SKILL.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "skills/orbit/references/runtime/guide.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "skills/orbit/references/runtime/quality-outcome-and-review.md" } && j["checks"]["target_allowed_by_execution_contract"] == true && j["checks"]["delivery_precondition_met"] == true && j["checks"]["manual_artifact"] == true && j["checks"]["explicit_override"] == false && j["checks"]["live_binding_confirmed"] == false && !j["checks"].key?("live_confirmed_for_delivery")' "$TASK"
 "$CLI" dispatch --task "$TASK" --to reviewer-main --pane pane-123 --reply-to observer-pane --dry-run --json >"$TMPROOT/dispatch-herdr-dry-run.json"
 json_assert 'dispatch herdr dry-run emits adapter plan with explicit reply-to' "$TMPROOT/dispatch-herdr-dry-run.json" 'j["action"] == "dry_run" && j["reply_to"] == "observer-pane" && j["reply_to_source"] == "explicit_option" && j["message"].include?("reply-to:observer-pane") && j["adapter"]["schema_version"] == "orbit-herdr-dispatch-v1" && !j["adapter"].key?("submit_delay_seconds") && j["adapter"]["commands"] == [["herdr", "pane", "run", "pane-123", j["message"]]] && j["adapter"]["commands"][0][4].include?(File.expand_path(ARGV[2])) && j["checks"]["delivery_precondition_met"] == false && j["checks"]["manual_artifact"] == false && j["checks"]["explicit_override"] == true && j["checks"]["live_binding_confirmed"] == false && !j["checks"].key?("live_confirmed_for_delivery") && j.dig("target_runtime_resolution","identity_verification") == "override" && j["risk"].include?("do_not_use_as_evidence_runtime_identity")' "$TASK"
 HERDR_PANE_ID=lead-reply-pane "$CLI" dispatch --task "$TASK" --to reviewer-main --pane pane-123 --dry-run --json >"$TMPROOT/dispatch-herdr-env-reply-to.json"
@@ -343,12 +343,12 @@ ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases
 ORBIT_INSTANCE=reviewer-main "$CLI" rules resolve --task "$TASK" --json --output "$TMPROOT/rules-resolution.json" >"$TMPROOT/rules-resolution.stdout" 2>"$TMPROOT/rules-resolution.err"
 test ! -s "$TMPROOT/rules-resolution.err"
 cmp "$TMPROOT/rules-resolution.json" "$TMPROOT/rules-resolution.stdout"
-json_assert 'rules resolve includes default, project, task, and rule pack sources' "$TMPROOT/rules-resolution.json" 'j["schema_version"] == "orbit-rule-resolution-v1" && j["valid"] == true && j["resolved_role"] == "reviewer" && j["sources"]["orbit_default"].any? { |r| r["path"] == "SKILL.md" && r["id"].is_a?(String) && r["relation"] == "baseline" && r["exists"] == true } && j["sources"]["orbit_default"].any? { |r| r["path"] == "references/runtime/quality-outcome-and-review.md" && r["load_policy"] == "required" } && j["sources"]["project_rules"].any? { |r| r["path"] == "docs/review-rule.md" && r["id"].is_a?(String) && r["relation"] == "supplements" && r["exists"] == true } && j["sources"]["project_rules"].any? { |r| r["path"] == "docs/review-rule.md" && r["id"] == "duplicate-review-rule" } && j["sources"]["task_rules"]["path"] == File.expand_path(ARGV[2]) && j["sources"]["rule_packs"].any? { |p| p["category"] == "review" && p["id"] == "brooks-review" }' "$TASK"
+json_assert 'rules resolve includes default, project, task, and rule pack sources' "$TMPROOT/rules-resolution.json" 'j["schema_version"] == "orbit-rule-resolution-v1" && j["valid"] == true && j["resolved_role"] == "reviewer" && j["sources"]["orbit_default"].any? { |r| r["path"] == "skills/orbit/SKILL.md" && r["id"].is_a?(String) && r["relation"] == "baseline" && r["exists"] == true } && j["sources"]["orbit_default"].any? { |r| r["path"] == "skills/orbit/references/runtime/quality-outcome-and-review.md" && r["load_policy"] == "required" } && j["sources"]["project_rules"].any? { |r| r["path"] == "docs/review-rule.md" && r["id"].is_a?(String) && r["relation"] == "supplements" && r["exists"] == true } && j["sources"]["project_rules"].any? { |r| r["path"] == "docs/review-rule.md" && r["id"] == "duplicate-review-rule" } && j["sources"]["task_rules"]["path"] == File.expand_path(ARGV[2]) && j["sources"]["rule_packs"].any? { |p| p["category"] == "review" && p["id"] == "brooks-review" }' "$TASK"
 json_assert 'rules resolve records task_sha256 for artifact drift checks' "$TMPROOT/rules-resolution.json" 'j["task_sha256"].is_a?(String) && j["task_sha256"].length == 64'
 ORBIT_INSTANCE=reviewer-main "$CLI" rules print-context --task "$TASK" --json --output "$TMPROOT/rules-context.json" >"$TMPROOT/rules-context.stdout" 2>"$TMPROOT/rules-context.err"
 test ! -s "$TMPROOT/rules-context.err"
 cmp "$TMPROOT/rules-context.json" "$TMPROOT/rules-context.stdout"
-json_assert 'rules print-context emits ordered default project task and pack context' "$TMPROOT/rules-context.json" 'j["schema_version"] == "orbit-rules-context-v1" && j["valid"] == true && j["resolved_role"] == "reviewer" && j["load_model"]["default_rules_always_loaded"] == true && j["load_model"]["project_rules_are_additive"] == true && j["load_order"].all? { |r| r["rule_id"].is_a?(String) && r["relation"].is_a?(String) && r["dedupe_status"].is_a?(String) } && j["load_order"].any? { |r| r["source"] == "orbit_default" && r["path"] == "SKILL.md" && r["required"] == true && r["exists"] == true && r["dedupe_status"] == "active" } && j["load_order"].any? { |r| r["source"] == "orbit_default" && r["path"] == "references/runtime/core-operating-model.md" && r["required"] == false } && j["load_order"].any? { |r| r["source"] == "project_role_rules" && r["path"] == "docs/review-rule.md" && r["required"] == true && r["exists"] == true && r["dedupe_status"] == "active" } && j["load_order"].any? { |r| r["source"] == "project_role_rules" && r["path"] == "docs/review-rule.md" && r["id"] == "duplicate-review-rule" && r["dedupe_status"] == "deduped" } && j["load_order"].any? { |r| r["source"] == "task_rules" && r["path"] == File.expand_path(ARGV[2]) && r["required"] == true } && j["load_order"].any? { |r| r["source"] == "rule_packs" && r["id"] == "brooks-review" && r["required"] == false } && j["required_files"].any? { |r| r["source"] == "project_role_rules" && r["path"] == "docs/review-rule.md" } && j["required_files"].select { |r| r["path"] == "docs/review-rule.md" }.length == 1 && j["context_budget"]["deduped"].any? { |r| r["path"] == "docs/review-rule.md" } && j["context_budget"]["shadowed"].is_a?(Array) && j["context_budget"]["not_loaded_but_related"].is_a?(Array) && j["rule_resolution"]["schema_version"] == "orbit-rule-resolution-v1"' "$TASK"
+json_assert 'rules print-context emits ordered default project task and pack context' "$TMPROOT/rules-context.json" 'j["schema_version"] == "orbit-rules-context-v1" && j["valid"] == true && j["resolved_role"] == "reviewer" && j["load_model"]["default_rules_always_loaded"] == true && j["load_model"]["project_rules_are_additive"] == true && j["load_order"].all? { |r| r["rule_id"].is_a?(String) && r["relation"].is_a?(String) && r["dedupe_status"].is_a?(String) } && j["load_order"].any? { |r| r["source"] == "orbit_default" && r["path"] == "skills/orbit/SKILL.md" && r["required"] == true && r["exists"] == true && r["dedupe_status"] == "active" } && j["load_order"].any? { |r| r["source"] == "orbit_default" && r["path"] == "skills/orbit/references/runtime/core-operating-model.md" && r["required"] == false } && j["load_order"].any? { |r| r["source"] == "project_role_rules" && r["path"] == "docs/review-rule.md" && r["required"] == true && r["exists"] == true && r["dedupe_status"] == "active" } && j["load_order"].any? { |r| r["source"] == "project_role_rules" && r["path"] == "docs/review-rule.md" && r["id"] == "duplicate-review-rule" && r["dedupe_status"] == "deduped" } && j["load_order"].any? { |r| r["source"] == "task_rules" && r["path"] == File.expand_path(ARGV[2]) && r["required"] == true } && j["load_order"].any? { |r| r["source"] == "rule_packs" && r["id"] == "brooks-review" && r["required"] == false } && j["required_files"].any? { |r| r["source"] == "project_role_rules" && r["path"] == "docs/review-rule.md" } && j["required_files"].select { |r| r["path"] == "docs/review-rule.md" }.length == 1 && j["context_budget"]["deduped"].any? { |r| r["path"] == "docs/review-rule.md" } && j["context_budget"]["shadowed"].is_a?(Array) && j["context_budget"]["not_loaded_but_related"].is_a?(Array) && j["rule_resolution"]["schema_version"] == "orbit-rule-resolution-v1"' "$TASK"
 expect_failure 'rules output refuses overwrite with different role artifact' env ORBIT_INSTANCE=tester-main "$CLI" rules resolve --task "$TASK" --json --output "$TMPROOT/rules-resolution.json"
 ORBIT_ROLE=reviewer "$CLI" rules resolve --task "$TASK" --json >"$TMPROOT/rules-resolution-role.json"
 json_assert 'rules resolve supports role identity' "$TMPROOT/rules-resolution-role.json" 'j["resolved_role"] == "reviewer" && j["valid"] == true'
@@ -702,7 +702,7 @@ cmp "$TMPROOT/structured-review-before-malformed.json" "$STRUCTURED_REVIEW_EVIDE
 grep -q 'field: submit_report.coverage' "$TMPROOT/malformed-submit.err"
 grep -q 'expected: list of non-empty strings' "$TMPROOT/malformed-submit.err"
 grep -q 'actual: array<mapping>' "$TMPROOT/malformed-submit.err"
-grep -q 'template: assets/templates/review-report.yaml' "$TMPROOT/malformed-submit.err"
+grep -q 'template: skills/orbit/assets/templates/review-report.yaml' "$TMPROOT/malformed-submit.err"
 pass 'evidence submit rejects malformed coverage entries before gate'
 PASS_REVIEW_EMPTY_BLOCKED_EVIDENCE="$TMPROOT/pass-review-empty-blocked-evidence.json"
 "$CLI" evidence init --output "$PASS_REVIEW_EMPTY_BLOCKED_EVIDENCE" >/dev/null
@@ -834,7 +834,7 @@ pass 'wait-gate reports blocked structured review evidence'
 json_assert 'wait-gate includes blocked detail in gate status' "$TMPROOT/wait-gate-blocked-review.json" 'j["ready"] == false && j["gates"].any? { |g| g["kind"] == "review" && g["status"] == "blocked" && g["record_status"] == "partial" && g["blocked"]["owner"] == "lead" } && j["gate_summary"]["not_ready"].any? { |g| g["kind"] == "review" && g["status"] == "blocked" }'
 TEMPLATE_REVIEW_EVIDENCE="$TMPROOT/template-review-evidence.json"
 "$CLI" evidence init --output "$TEMPLATE_REVIEW_EVIDENCE" >/dev/null
-ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit --file "$TEMPLATE_REVIEW_EVIDENCE" --report "$SKILL_ROOT/assets/templates/review-report.yaml" --task "$TASK" --json >"$TMPROOT/template-review-submit.json"
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit --file "$TEMPLATE_REVIEW_EVIDENCE" --report "$SKILL_ROOT/skills/orbit/assets/templates/review-report.yaml" --task "$TASK" --json >"$TMPROOT/template-review-submit.json"
 json_assert 'review report template is directly submittable as blocked evidence' "$TMPROOT/template-review-submit.json" 'j["record"]["kind"] == "review" && j["record"]["status"] == "partial" && j["record"]["blocked"]["owner"] == "lead" && j["record"]["findings"].all? { |f| f.is_a?(String) }'
 
 AGGREGATE_EVIDENCE="$TMPROOT/aggregate-evidence.json"
@@ -892,7 +892,7 @@ TEST_EVIDENCE="$TMPROOT/test-evidence.json"
 "$CLI" evidence init --output "$TEST_EVIDENCE" >/dev/null
 TEMPLATE_TEST_EVIDENCE="$TMPROOT/template-test-evidence.json"
 "$CLI" evidence init --output "$TEMPLATE_TEST_EVIDENCE" >/dev/null
-ORBIT_INSTANCE=tester-main "$CLI" evidence submit --file "$TEMPLATE_TEST_EVIDENCE" --report "$SKILL_ROOT/assets/templates/test-report.yaml" --task "$TEST_TASK" --json >"$TMPROOT/template-test-submit.json"
+ORBIT_INSTANCE=tester-main "$CLI" evidence submit --file "$TEMPLATE_TEST_EVIDENCE" --report "$SKILL_ROOT/skills/orbit/assets/templates/test-report.yaml" --task "$TEST_TASK" --json >"$TMPROOT/template-test-submit.json"
 json_assert 'test report template is directly submittable as blocked evidence' "$TMPROOT/template-test-submit.json" 'j["record"]["kind"] == "test" && j["record"]["status"] == "partial" && j["record"]["blocked"]["owner"] == "lead" && j["record"]["test_environment"]["cleanup_status"].is_a?(String)'
 cat >"$TMPROOT/test-report.yaml" <<'REPORT'
 kind: test
@@ -943,7 +943,7 @@ artifacts:
 evidence_level: real_path_test
 rule_application:
   required_rule_files_read:
-    - references/runtime/testing-guideline.md
+    - skills/orbit/references/runtime/testing-guideline.md
   applied_checks:
     - id: environment_lifecycle
       verdict: pass
@@ -1117,7 +1117,7 @@ artifacts:
 evidence_level: real_path_test
 rule_application:
   required_rule_files_read:
-    - references/runtime/testing-guideline.md
+    - skills/orbit/references/runtime/testing-guideline.md
   applied_checks:
     - id: concurrent_test
       verdict: pass
@@ -1339,7 +1339,7 @@ artifacts:
 evidence_level: real_path_test
 rule_application:
   required_rule_files_read:
-    - references/runtime/testing-guideline.md
+    - skills/orbit/references/runtime/testing-guideline.md
   applied_checks:
     - id: implementation_gate_test
       verdict: pass
@@ -1513,7 +1513,7 @@ artifacts:
 evidence_level: real_path_test
 rule_application:
   required_rule_files_read:
-    - references/runtime/testing-guideline.md
+    - skills/orbit/references/runtime/testing-guideline.md
   applied_checks:
     - id: explicit_task_test
       verdict: pass

@@ -52,7 +52,7 @@ orbit start lead-main
 - 运行 `wait-gate`、`validate`、`audit`。
 - 生成 handoff。
 
-执行细节以 [SKILL.md](SKILL.md) 为准。README 只给用户和新 agent 最小路径。
+执行细节以 [Orbit skill](skills/orbit/SKILL.md) 为准。README 只给用户和新 agent 最小路径。
 
 ## 安装
 
@@ -77,6 +77,8 @@ herdr
 ```bash
 npx skills add https://github.com/godokyang/orbit -g
 ```
+
+这会安装完整 Orbit skill 目录，包括 `references/` 和 `assets/templates/`。公开 skill package 位于 `skills/orbit/`，CLI runtime 也使用同一份规则和模板。
 
 安装 Orbit CLI：
 
@@ -229,7 +231,7 @@ orbit handoff \
   --json
 ```
 
-Report 模板在 `assets/templates/review-report.yaml`、`assets/templates/test-report.yaml` 和 `assets/templates/design-review-report.yaml`。
+Report 模板在 `skills/orbit/assets/templates/review-report.yaml`、`skills/orbit/assets/templates/test-report.yaml` 和 `skills/orbit/assets/templates/design-review-report.yaml`。
 
 ## 运行规则摘要
 

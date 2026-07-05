@@ -133,7 +133,6 @@ target_wrapper="$bin_dir/orbit"
 
 runtime_files="
 package.json
-SKILL.md
 scripts/orbit
 lib/orbit/cli.rb
 lib/orbit/core.rb
@@ -164,19 +163,21 @@ lib/orbit/data_classification.rb
 lib/orbit/release_readiness.rb
 lib/orbit/dogfood_governance.rb
 lib/orbit/landing_governance.rb
-assets/templates/roles.yaml
-assets/templates/instances.yaml
-assets/templates/loop-state.yaml
-assets/templates/task.yaml
-assets/templates/evidence.json
-assets/templates/review-report.yaml
-assets/templates/design-review-report.yaml
-assets/templates/test-report.yaml
-references/runtime/guide.md
-references/runtime/core-operating-model.md
-references/runtime/coding-guideline.md
-references/runtime/quality-outcome-and-review.md
-references/runtime/testing-guideline.md
+skills/orbit/SKILL.md
+skills/orbit/assets/templates/roles.yaml
+skills/orbit/assets/templates/instances.yaml
+skills/orbit/assets/templates/loop-state.yaml
+skills/orbit/assets/templates/task.yaml
+skills/orbit/assets/templates/evidence.json
+skills/orbit/assets/templates/review-report.yaml
+skills/orbit/assets/templates/design-review-report.yaml
+skills/orbit/assets/templates/test-report.yaml
+skills/orbit/references/overview.md
+skills/orbit/references/runtime/guide.md
+skills/orbit/references/runtime/core-operating-model.md
+skills/orbit/references/runtime/coding-guideline.md
+skills/orbit/references/runtime/quality-outcome-and-review.md
+skills/orbit/references/runtime/testing-guideline.md
 "
 
 runtime_file_count() {
@@ -276,7 +277,7 @@ esac
 if [ -n "$script_dir" ] &&
    [ -f "$script_dir/install.sh" ] &&
    [ -f "$script_dir/scripts/orbit" ] &&
-   [ -f "$script_dir/assets/templates/roles.yaml" ]; then
+   [ -f "$script_dir/skills/orbit/assets/templates/roles.yaml" ]; then
   install_log "installing Orbit CLI"
   install_log "wrapper: $target_wrapper"
   install_log "runtime: $runtime_dir"

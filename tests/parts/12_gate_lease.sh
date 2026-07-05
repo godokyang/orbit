@@ -275,7 +275,7 @@ artifacts: []
 evidence_level: outcome_quality
 rule_application:
   required_rule_files_read:
-    - references/runtime/quality-outcome-and-review.md
+    - skills/orbit/references/runtime/quality-outcome-and-review.md
   applied_checks:
     - id: lease_check
       verdict: pass

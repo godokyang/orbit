@@ -12,7 +12,8 @@ require "yaml"
 
 SCRIPT_PATH = defined?(ORBIT_SCRIPT_PATH) ? ORBIT_SCRIPT_PATH : File.expand_path($PROGRAM_NAME)
 SKILL_ROOT = defined?(ORBIT_ROOT) ? ORBIT_ROOT : File.expand_path("..", File.dirname(SCRIPT_PATH))
-TEMPLATE_ROOT = File.join(SKILL_ROOT, "assets", "templates")
+ORBIT_SKILL_DIR = File.join(SKILL_ROOT, "skills", "orbit")
+TEMPLATE_ROOT = File.join(ORBIT_SKILL_DIR, "assets", "templates")
 
 def orbit_version_from_package
   package_path = File.join(SKILL_ROOT, "package.json")
@@ -29,45 +30,45 @@ VERSION = orbit_version_from_package.freeze
 DEFAULT_RULE_REFERENCES = {
   "common" => [
     {
-      "path" => "SKILL.md",
+      "path" => "skills/orbit/SKILL.md",
       "load_policy" => "required",
       "reason" => "Orbit skill trigger boundary, runtime workflow, role behavior, and reporting contract."
     },
     {
-      "path" => "references/runtime/guide.md",
+      "path" => "skills/orbit/references/runtime/guide.md",
       "load_policy" => "required",
       "reason" => "Runtime operating rules for task, evidence, gate, audit, and handoff."
     },
     {
-      "path" => "references/runtime/core-operating-model.md",
+      "path" => "skills/orbit/references/runtime/core-operating-model.md",
       "load_policy" => "conditional",
       "reason" => "Protocol field details; read when task, evidence, state, or identity semantics are unclear."
     }
   ],
   "lead" => [
     {
-      "path" => "references/runtime/coding-guideline.md",
+      "path" => "skills/orbit/references/runtime/coding-guideline.md",
       "load_policy" => "required",
       "reason" => "Lead/coder implementation closure and coding evidence rules."
     }
   ],
   "coder" => [
     {
-      "path" => "references/runtime/coding-guideline.md",
+      "path" => "skills/orbit/references/runtime/coding-guideline.md",
       "load_policy" => "required",
       "reason" => "Implementation closure and coding evidence rules."
     }
   ],
   "reviewer" => [
     {
-      "path" => "references/runtime/quality-outcome-and-review.md",
+      "path" => "skills/orbit/references/runtime/quality-outcome-and-review.md",
       "load_policy" => "required",
       "reason" => "Independent review and quality outcome judgment rules."
     }
   ],
   "tester" => [
     {
-      "path" => "references/runtime/testing-guideline.md",
+      "path" => "skills/orbit/references/runtime/testing-guideline.md",
       "load_policy" => "required",
       "reason" => "Real behavior testing, coverage, and test evidence rules."
     }

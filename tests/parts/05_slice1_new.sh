@@ -26,7 +26,7 @@ test_level: repo_regression
 evidence_level: mechanical_check
 rule_application:
   required_rule_files_read:
-    - references/runtime/testing-guideline.md
+    - skills/orbit/references/runtime/testing-guideline.md
   applied_checks:
     - id: below_min_test
       verdict: pass
@@ -107,7 +107,7 @@ artifacts:
 evidence_level: outcome_quality
 rule_application:
   required_rule_files_read:
-    - references/runtime/quality-outcome-and-review.md
+    - skills/orbit/references/runtime/quality-outcome-and-review.md
   applied_checks:
     - id: outcome_review
       verdict: pass
@@ -168,7 +168,7 @@ test_level: repo_regression
 evidence_level: release_readiness
 rule_application:
   required_rule_files_read:
-    - references/runtime/testing-guideline.md
+    - skills/orbit/references/runtime/testing-guideline.md
   applied_checks:
     - id: release_gate_test
       verdict: pass
@@ -234,12 +234,12 @@ json_assert 'handoff judgment_summary test_judgment includes residual_risk' \
 
 # Fix: review-report.yaml template includes residual_risk field
 yaml_assert 'review-report template includes residual_risk field' \
-  "$SKILL_ROOT/assets/templates/review-report.yaml" \
+  "$SKILL_ROOT/skills/orbit/assets/templates/review-report.yaml" \
   'j.key?("residual_risk")'
 
 # Fix: test-report.yaml template includes residual_risk field
 yaml_assert 'test-report template includes residual_risk field' \
-  "$SKILL_ROOT/assets/templates/test-report.yaml" \
+  "$SKILL_ROOT/skills/orbit/assets/templates/test-report.yaml" \
   'j.key?("residual_risk")'
 
 # ---------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-EVIDENCE="$SKILL_ROOT/assets/templates/evidence.json"
+EVIDENCE="$SKILL_ROOT/skills/orbit/assets/templates/evidence.json"
 expect_failure 'validate review task requires evidence' "$CLI" validate --task "$TASK" --json
 "$CLI" validate --task "$TASK" --evidence "$EVIDENCE" --json >"$TMPROOT/valid-task-evidence.json" 2>"$TMPROOT/valid-task-evidence.err"
 test ! -s "$TMPROOT/valid-task-evidence.err"
@@ -62,7 +62,7 @@ artifacts:
 evidence_level: real_path_test
 rule_application:
   required_rule_files_read:
-    - references/runtime/testing-guideline.md
+    - skills/orbit/references/runtime/testing-guideline.md
   applied_checks:
     - id: quality_measurement_test
       verdict: pass

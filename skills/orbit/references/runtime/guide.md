@@ -2,7 +2,7 @@
 
 本文只服务一个场景：在真实项目里运行 Orbit。
 
-如果你是第一次使用 Orbit，先读 [../../README.md](../../README.md)。那里按用户视角说明安装、初始化、配置和跑一轮任务；本文补充更细的运行时规则。
+如果你是第一次使用 Orbit，先读 [../../SKILL.md](../../SKILL.md)。那里给出 skill 触发边界、最小工作流和必读 reference 路由；本文补充更细的运行时规则。
 
 如果目标不是在真实项目里运行 Orbit，不读本文。本文不承载 Orbit 内部开发计划、产品设计过程或外部资料整理。
 
@@ -368,7 +368,7 @@ rule_packs:
     - project-common
   review:
     - id: brooks-review
-      path: references/rule-packs/brooks-review.md
+      path: .orbit/rule-packs/brooks-review.md
   test:
     - brooks-test
   audit:

@@ -172,7 +172,7 @@ test_level: repo_regression
 evidence_level: outcome_quality
 rule_application:
   required_rule_files_read:
-    - references/runtime/testing-guideline.md
+    - skills/orbit/references/runtime/testing-guideline.md
   applied_checks:
     - id: wrongkind_test
       verdict: pass

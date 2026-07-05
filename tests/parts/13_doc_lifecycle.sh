@@ -77,7 +77,7 @@ artifacts: []
 evidence_level: outcome_quality
 rule_application:
   required_rule_files_read:
-    - references/runtime/quality-outcome-and-review.md
+    - skills/orbit/references/runtime/quality-outcome-and-review.md
   applied_checks:
     - id: decision_check
       verdict: pass
@@ -304,7 +304,7 @@ artifacts: []
 evidence_level: outcome_quality
 rule_application:
   required_rule_files_read:
-    - references/runtime/quality-outcome-and-review.md
+    - skills/orbit/references/runtime/quality-outcome-and-review.md
   applied_checks:
     - id: c
       verdict: pass
@@ -408,7 +408,7 @@ artifacts: []
 evidence_level: outcome_quality
 rule_application:
   required_rule_files_read:
-    - references/runtime/quality-outcome-and-review.md
+    - skills/orbit/references/runtime/quality-outcome-and-review.md
   applied_checks:
     - id: c
       verdict: pass
@@ -474,7 +474,7 @@ artifacts: []
 evidence_level: outcome_quality
 rule_application:
   required_rule_files_read:
-    - references/runtime/quality-outcome-and-review.md
+    - skills/orbit/references/runtime/quality-outcome-and-review.md
   applied_checks:
     - id: c
       verdict: pass

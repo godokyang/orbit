@@ -51,7 +51,7 @@ append_review_quality_fields() {
 evidence_level: outcome_quality
 rule_application:
   required_rule_files_read:
-    - references/runtime/quality-outcome-and-review.md
+    - skills/orbit/references/runtime/quality-outcome-and-review.md
   applied_checks:
     - id: outcome_review
       verdict: pass
@@ -86,7 +86,7 @@ append_test_quality_fields() {
 evidence_level: real_path_test
 rule_application:
   required_rule_files_read:
-    - references/runtime/testing-guideline.md
+    - skills/orbit/references/runtime/testing-guideline.md
   applied_checks:
     - id: behavior_test
       verdict: pass

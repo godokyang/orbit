@@ -26,7 +26,7 @@ quality_outcome_reasoning: Runtime binding fields validated.
 evidence_level: outcome_quality
 rule_application:
   required_rule_files_read:
-    - references/runtime/quality-outcome-and-review.md
+    - skills/orbit/references/runtime/quality-outcome-and-review.md
   applied_checks:
     - id: runtime_binding_check
       verdict: pass
@@ -133,7 +133,7 @@ test_level: repo_regression
 evidence_level: real_path_test
 rule_application:
   required_rule_files_read:
-    - references/runtime/testing-guideline.md
+    - skills/orbit/references/runtime/testing-guideline.md
   applied_checks:
     - id: real_path
       verdict: pass
@@ -187,7 +187,7 @@ test_level: repo_regression
 evidence_level: real_path_test
 rule_application:
   required_rule_files_read:
-    - references/runtime/testing-guideline.md
+    - skills/orbit/references/runtime/testing-guideline.md
   applied_checks:
     - id: real_path
       verdict: pass
@@ -502,7 +502,7 @@ test_level: repo_regression
 evidence_level: real_path_test
 rule_application:
   required_rule_files_read:
-    - references/runtime/testing-guideline.md
+    - skills/orbit/references/runtime/testing-guideline.md
   applied_checks:
     - id: real_path_build_only
       verdict: pass
@@ -623,7 +623,7 @@ quality_outcome_reasoning: Contradictory pass.
 evidence_level: outcome_quality
 rule_application:
   required_rule_files_read:
-    - references/runtime/quality-outcome-and-review.md
+    - skills/orbit/references/runtime/quality-outcome-and-review.md
   applied_checks:
     - id: blocker_check
       verdict: pass
@@ -733,7 +733,7 @@ quality_outcome_reasoning: Code bug found and fixed.
 evidence_level: outcome_quality
 rule_application:
   required_rule_files_read:
-    - references/runtime/quality-outcome-and-review.md
+    - skills/orbit/references/runtime/quality-outcome-and-review.md
   applied_checks:
     - id: code_fail_check
       verdict: pass

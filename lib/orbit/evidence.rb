@@ -198,11 +198,11 @@ end
 def submit_report_template_hint(kind = nil)
   case kind
   when "review"
-    "assets/templates/review-report.yaml"
+    "skills/orbit/assets/templates/review-report.yaml"
   when "test"
-    "assets/templates/test-report.yaml"
+    "skills/orbit/assets/templates/test-report.yaml"
   else
-    "assets/templates/review-report.yaml or assets/templates/test-report.yaml"
+    "skills/orbit/assets/templates/review-report.yaml or skills/orbit/assets/templates/test-report.yaml"
   end
 end
 
