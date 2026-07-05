@@ -4,3 +4,5 @@ references/development/
 .orbit
 test_apps/
 docs/dogfood-guide.md
+.claude/
+.copilot/
