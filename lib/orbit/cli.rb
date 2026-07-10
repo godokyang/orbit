@@ -25,6 +25,7 @@ require_relative "data_classification"
 require_relative "release_readiness"
 require_relative "dogfood_governance"
 require_relative "landing_governance"
+require_relative "task_workflow"
 
 def run_orbit_cli(argv)
   command = argv.shift
@@ -46,6 +47,10 @@ def run_orbit_cli(argv)
     end
     artifact(argv)
   when "bind-pane"
+    if help_requested?(argv)
+      print_command_help("bind-pane")
+      exit 0
+    end
     bind_pane(argv)
   when "classify-intent"
     if help_requested?(argv)
@@ -90,10 +95,22 @@ def run_orbit_cli(argv)
     end
     hook(argv)
   when "init"
+    if help_requested?(argv)
+      print_command_help("init")
+      exit 0
+    end
     init_config(argv)
   when "instances"
+    if help_requested?(argv)
+      print_command_help("instances")
+      exit 0
+    end
     instances(argv)
   when "new-task"
+    if help_requested?(argv)
+      print_command_help("new-task")
+      exit 0
+    end
     new_task(argv)
   when "notice"
     if help_requested?(argv)
@@ -108,6 +125,10 @@ def run_orbit_cli(argv)
     end
     status_command(argv, next_only: true)
   when "rules"
+    if help_requested?(argv)
+      print_command_help("rules")
+      exit 0
+    end
     if argv.first == "print-context" && help_requested?(argv[1..] || [])
       print_command_help("rules print-context")
       exit 0
@@ -124,6 +145,10 @@ def run_orbit_cli(argv)
     end
     revision(argv)
   when "runtime"
+    if help_requested?(argv)
+      print_command_help("runtime")
+      exit 0
+    end
     runtime(argv)
   when "start"
     if help_requested?(argv)
@@ -138,8 +163,16 @@ def run_orbit_cli(argv)
     end
     status_command(argv)
   when "state"
+    if help_requested?(argv)
+      print_command_help("state")
+      exit 0
+    end
     state(argv)
   when "tools"
+    if help_requested?(argv)
+      print_command_help("tools")
+      exit 0
+    end
     tools(argv)
   when "test-hook"
     if help_requested?(argv) || (argv.first == "run" && help_requested?(argv[1..] || []))
@@ -147,6 +180,12 @@ def run_orbit_cli(argv)
       exit 0
     end
     test_hook(argv)
+  when "task"
+    if help_requested?(argv) || (%w[draft start].include?(argv.first) && help_requested?(argv[1..] || []))
+      print_command_help("task")
+      exit 0
+    end
+    task_workflow(argv)
   when "validate"
     if help_requested?(argv)
       print_command_help("validate")
@@ -160,6 +199,10 @@ def run_orbit_cli(argv)
     end
     wait_gate(argv)
   when "whoami"
+    if help_requested?(argv)
+      print_command_help("whoami")
+      exit 0
+    end
     whoami(argv)
   when "version", "--version", "-v"
     puts VERSION

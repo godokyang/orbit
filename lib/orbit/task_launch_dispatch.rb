@@ -456,7 +456,7 @@ def validate_execution_contract_mode_semantics!(contract)
   end
 end
 
-def new_task(args)
+def new_task(args, quiet: false)
   options = parse_new_task_args(args)
   template_path = File.join(TEMPLATE_ROOT, "task.yaml")
   task = load_yaml(template_path)
@@ -527,13 +527,16 @@ def new_task(args)
   # Slice 13: release risk tasks get a full release_readiness skeleton.
   task["release_readiness"] = default_release_readiness if task_risk["level"] == "release"
   FileUtils.mkdir_p(File.dirname(output_path))
-  File.write(output_path, YAML.dump(task))
+  write_file_atomically(output_path, YAML.dump(task))
 
-  puts "Created Orbit task:"
-  puts "- #{output_path}"
-  puts
-  puts "Next:"
-  puts "- orbit validate --task #{output_path}"
+  unless quiet
+    puts "Created Orbit task:"
+    puts "- #{output_path}"
+    puts
+    puts "Next:"
+    puts "- orbit validate --task #{output_path}"
+  end
+  { "path" => output_path, "task" => task }
 end
 
 

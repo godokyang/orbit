@@ -109,6 +109,8 @@ HELP = <<~HELP
     orbit rules resolve --json [--task PATH] [--evidence PATH] [--role ROLE] [--instance NAME] [--output PATH]
     orbit rules print-context --json [--task PATH] [--evidence PATH] [--role ROLE] [--instance NAME] [--output PATH]
     orbit revision create --task PATH --reason TEXT --change-type TYPE[,TYPE...] --json
+    orbit task draft --task-type TYPE --output PATH [new-task options] [--json|--verbose]
+    orbit task start --task PATH [--evidence PATH] [--state PATH] [--json|--verbose]
     orbit start INSTANCE [--cwd PROJECT_ROOT] [--layout auto|same-tab|new-tab] [--force] [--dry-run] [--json]
     orbit status [--task PATH] [--state PATH] [--evidence PATH] [--json]
     orbit next [--task PATH] [--state PATH] [--evidence PATH] [--json]
@@ -146,6 +148,7 @@ HELP = <<~HELP
     start        根据 instances.yaml 启动或预览 agent instance。
     status       从 task/state/evidence/runtime 派生一屏只读状态摘要。
     state        读取或管理 Orbit loop state。
+    task         用一条高层命令创建草稿或启动完整执行闭环。
     tools        检测 Herdr runtime adapter、手动 artifact 和执行工具。
     test-hook    运行 task journey 引用的项目级真实路径测试 hook。
     validate    校验 Orbit config、task、evidence 和 state 文件。
@@ -166,6 +169,7 @@ HELP = <<~HELP
     orbit status --help
     orbit test-hook --help
     orbit runtime --help
+    orbit task --help
     orbit rules print-context --help
     orbit rules resolve --help
     orbit revision --help
@@ -174,6 +178,40 @@ HELP = <<~HELP
 HELP
 
 COMMAND_HELP = {
+  "bind-pane" => <<~HELP,
+    Usage:
+      orbit bind-pane --instance NAME --pane PANE [--tab TAB]
+                      [--workspace WORKSPACE] [--canonical-pane PANE] --json
+
+    Records a Herdr pane binding hint for an Orbit instance. A binding is not
+    trusted runtime identity or proof that the target is alive.
+  HELP
+  "init" => <<~HELP,
+    Usage:
+      orbit init --operation-mode solo|team [--force]
+
+    Creates the starter .orbit configuration for the current project.
+    Existing files are preserved unless --force is explicitly supplied.
+  HELP
+  "instances" => <<~HELP,
+    Usage:
+      orbit instances status [--repair-binding] --json
+
+    Reports configured agent instances and resolver health. Status is read-only
+    unless --repair-binding is explicitly supplied.
+  HELP
+  "new-task" => <<~HELP,
+    Usage:
+      orbit new-task --task-type TYPE --output PATH
+                     [--operation-mode solo|team]
+                     [--implementation-authority ROLE --assigned-instance NAME]
+                     [--risk-level light|standard|strict|release]
+                     [--change-surface SURFACE] [--risk-sink SINK]
+                     [--real-path-required] [--artifact-provenance-required]
+
+    Creates a draft task contract. Prefer `orbit task draft` for concise output
+    and `orbit task start` after filling the concrete execution contract.
+  HELP
   "audit" => <<~HELP,
     Usage:
       orbit audit --task PATH --state PATH --evidence PATH [--handoff PATH] [--compact-summary PATH] --json
@@ -264,6 +302,15 @@ COMMAND_HELP = {
       Herdr environment variables are probe input only. A session is
       dispatch-ready only after Orbit can match runtime state with a live Herdr
       pane/agent probe.
+  HELP
+  "rules" => <<~HELP,
+    Usage:
+      orbit rules resolve --json [options]
+      orbit rules print-context [--json|--verbose] [options]
+
+    Resolves additive Orbit, project, task, and role-pack rules. Use
+    `orbit rules print-context` for a concise list of active required files;
+    use --json or --verbose for the full protocol record.
   HELP
   "revision" => <<~HELP,
     Usage:
@@ -407,12 +454,10 @@ COMMAND_HELP = {
   "rules print-context" => <<~HELP,
     Usage:
       orbit rules print-context --json [--task PATH] [--evidence PATH] [--role ROLE] [--instance NAME] [--output PATH]
+      orbit rules print-context [--verbose] [--task PATH] [--evidence PATH] [--role ROLE] [--instance NAME] [--output PATH]
 
     Prints the ordered rule context an agent should load for this turn.
     This is deterministic code, not an LLM merge.
-
-    Required:
-      --json           Emit machine-readable context instructions.
 
     Options:
       --task PATH      Structured orbit-task-v1 YAML file.
@@ -420,11 +465,44 @@ COMMAND_HELP = {
       --role ROLE      Resolve as ROLE when ORBIT_INSTANCE is not set.
       --instance NAME  Resolve as configured instance NAME.
       --output PATH    Write the JSON context artifact to PATH.
+      --json           Emit the complete machine-readable context.
+      --verbose        Alias for the complete protocol output.
 
     Notes:
       Orbit default rules, project rules, task rules, and configured rule
       packs are all listed separately. Project rules are additive and never
       suppress the default Orbit runtime rules.
+  HELP
+  "state" => <<~HELP,
+    Usage:
+      orbit state show --json [--state PATH]
+      orbit state start --task PATH [--owner-role ROLE] [--state PATH]
+      orbit state progress --message TEXT [--evidence PATH] [--state PATH]
+      orbit state transition --to PHASE [--evidence PATH] [--reason TEXT] [--state PATH]
+
+    Reads or advances the durable Orbit loop state. `task start` is the shorter
+    high-level entry point for validating and starting a new task.
+  HELP
+  "task" => <<~HELP,
+    Usage:
+      orbit task draft --task-type TYPE --output PATH [new-task options] [--json|--verbose]
+      orbit task start --task PATH [--evidence PATH] [--state PATH] [--json|--verbose]
+
+    High-level workflow:
+      draft  Create a risk-aware task draft with concise next steps.
+      start  Validate execution readiness, freeze the revision, initialize and
+             attach evidence/rules, then start loop state in order.
+
+    Human output is concise by default. Use --json or --verbose for the full
+    protocol packet.
+  HELP
+  "tools" => <<~HELP,
+    Usage:
+      orbit tools detect --json
+      orbit tools doctor --json
+
+    Reports execution and transport capabilities without upgrading preview or
+    manual signals into trusted automatic capability.
   HELP
   "start" => <<~HELP,
     Usage:
@@ -551,7 +629,7 @@ COMMAND_HELP = {
       strict gates will remain blocked.
       Review/test pass records must use current role_execution_context fields.
   HELP
-  "wait-gate" => <<~HELP
+  "wait-gate" => <<~HELP,
     Usage:
       orbit wait-gate --task PATH --evidence PATH --json
 
@@ -565,6 +643,13 @@ COMMAND_HELP = {
     Notes:
       This command does not replace reviewer/tester judgment. It only reads
       evidence records and reports whether the latest required gate records pass.
+  HELP
+  "whoami" => <<~HELP
+    Usage:
+      orbit whoami --json [--task PATH]
+
+    Resolves the current configured role and instance, including conflicts and
+    permission context. Environment or pane names alone are not trusted proof.
   HELP
 }.freeze
 

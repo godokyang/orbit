@@ -191,7 +191,8 @@ def parse_rules_args(args)
 
   options = {
     "subcommand" => subcommand,
-    "json" => false
+    "json" => false,
+    "verbose" => false
   }
 
   until args.empty?
@@ -200,6 +201,8 @@ def parse_rules_args(args)
     case arg
     when "--json"
       options["json"] = true
+    when "--verbose"
+      options["verbose"] = true
     when "--task"
       options["task"] = option_value(args, "--task")
     when /\A--task=(.+)\z/
@@ -226,10 +229,34 @@ def parse_rules_args(args)
   end
 
   usage_error("Unknown rules subcommand: #{subcommand}") unless %w[resolve print-context].include?(subcommand)
-  usage_error("rules #{subcommand} currently requires --json") unless options["json"]
+  if subcommand == "resolve" && !options["json"] && !options["verbose"]
+    usage_error("rules resolve requires --json or --verbose")
+  end
   usage_error("Use only one of --role or --instance.") if options["role"] && options["instance"]
 
   options
+end
+
+def print_rules_context_summary(result)
+  required = Array(result["required_files"])
+  conflicts = Array(result["conflicts"])
+  puts "Rules context=#{result["context_hash"]} role=#{result["resolved_role"] || "unresolved"}"
+  puts "Required files (#{required.length}):"
+  if required.empty?
+    puts "- none"
+  else
+    required.each do |entry|
+      path = entry["path"] || entry["absolute_path"]
+      digest = sha256_file(entry["absolute_path"])
+      puts "- #{path}#{digest ? " sha256=#{digest}" : ""}"
+    end
+  end
+  if conflicts.empty?
+    puts "Conflicts: none"
+  else
+    puts "Conflicts (#{conflicts.length}):"
+    conflicts.each { |entry| puts "- #{entry["message"] || entry}" }
+  end
 end
 
 def with_rule_resolution_identity(options)
@@ -340,10 +367,11 @@ def rule_resolution_fingerprint(result)
         }.compact
       end
     end
-    task_rules = sources["task_rules"].is_a?(Hash) ? sources["task_rules"].reject { |key, _value| key == "path" } : {}
+    task_rules = sources["task_rules"].is_a?(Hash) ? sources["task_rules"] : {}
     entries << {
       "group" => "task_rules",
-      "sha256" => revision_value_digest(task_rules)
+      "path" => task_rules["path"].to_s.empty? ? nil : File.expand_path(task_rules["path"]),
+      "sha256" => revision_value_digest(task_rules.reject { |key, _value| key == "path" })
     }
   end
   Digest::SHA256.hexdigest(JSON.generate(entries))
@@ -591,7 +619,11 @@ def rules(args)
     write_file_atomically(output_path, json) unless same_cache_key
   end
 
-  print json
+  if options["subcommand"] == "print-context" && !options["json"] && !options["verbose"]
+    print_rules_context_summary(result)
+  else
+    print json
+  end
   exit(result["valid"] ? 0 : 1)
 end
 

@@ -265,5 +265,6 @@ source "$PARTS_DIR/20_status_solo.sh"
 source "$PARTS_DIR/21_user_journey.sh"
 source "$PARTS_DIR/22_artifact_provenance.sh"
 source "$PARTS_DIR/23_revision_knowledge.sh"
+source "$PARTS_DIR/24_task_workflow.sh"
 
 printf 'REAL_TESTS_PASS count=%s tmp=%s\n' "$PASS_COUNT" "$TMPROOT"

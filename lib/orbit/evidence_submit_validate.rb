@@ -1103,7 +1103,7 @@ rescue RuntimeError => e
   evidence_error(e.message)
 end
 
-def evidence_attach_rule(options)
+def evidence_attach_rule(options, quiet: false)
   path = File.expand_path(options["file"])
   task_path = File.expand_path(options["task"])
   rule_resolution_path = File.expand_path(options["rule_resolution"])
@@ -1158,8 +1158,11 @@ def evidence_attach_rule(options)
     manifest["rule_resolution"] = rule_attachment
     manifest
   end
-  puts "Attached Orbit rule resolution:"
-  puts "- #{rule_resolution_path}"
+  unless quiet
+    puts "Attached Orbit rule resolution:"
+    puts "- #{rule_resolution_path}"
+  end
+  rule_attachment
 end
 
 def evidence(args)

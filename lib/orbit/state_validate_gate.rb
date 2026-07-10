@@ -464,7 +464,7 @@ def state_show(options)
   puts JSON.pretty_generate(load_loop_state(path))
 end
 
-def state_start(options)
+def state_start(options, quiet: false)
   state_path = File.expand_path(options["state"])
   task_path = File.expand_path(options["task"])
   readiness_result = { "errors" => [], "warnings" => [] }
@@ -509,8 +509,11 @@ def state_start(options)
     })
     state
   end
-  puts "Started Orbit task:"
-  puts "- #{task_path}"
+  unless quiet
+    puts "Started Orbit task:"
+    puts "- #{task_path}"
+  end
+  task
 end
 
 def state_transition(options)
