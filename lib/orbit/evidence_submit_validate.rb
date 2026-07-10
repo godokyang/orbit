@@ -774,6 +774,15 @@ def validate_structured_submit_report!(report_path, report)
     elsif report.key?("test_level")
       extra["test_level"] = validate_test_level!(report["test_level"], "submit_report.test_level", kind: kind)
     end
+    extra["user_outcomes"] = validate_user_outcomes_report!(report["user_outcomes"], kind: kind) if report.key?("user_outcomes")
+  elsif report.key?("user_outcomes")
+    submit_report_schema_error(
+      "submit_report.user_outcomes",
+      "user_outcomes is only valid for test reports.",
+      expected: "test report field",
+      actual: kind,
+      kind: kind
+    )
   end
 
   # real_path_test requires runtime_binding with a server or browser owner.
@@ -934,6 +943,22 @@ def evidence_submit(options)
     record[field] = report[field] if report.key?(field)
   end
   record["gate_lease"] = report["gate_lease"] if report.key?("gate_lease")
+  if kind == "test" && options["task"]
+    task = load_yaml(File.expand_path(options["task"]))
+    assessment = user_journey_evidence_assessment(task, record)
+    record["journey_validation"] = assessment if assessment["required"]
+    if status == "pass" && assessment["required"] && !assessment["valid"]
+      record["status"] = "partial"
+      record["summary"] = "Partial: #{summary}"
+      record["blocked"] = {
+        "reason" => "Required user journey evidence is incomplete: #{assessment["blocking_reason"]}.",
+        "next_step" => "Run the configured project test hook and submit complete user_outcomes for every required journey.",
+        "owner" => "tester"
+      }
+      record["missing"] ||= []
+      record["missing"] << "Required user journey evidence: #{assessment["blocking_reason"]}."
+    end
+  end
   if report.key?("decision_record")
     normalized_dr = validate_decision_record!({ "decision_record" => report["decision_record"], "kind" => kind }, "submit_report")
     record["decision_record"] = normalized_dr if normalized_dr

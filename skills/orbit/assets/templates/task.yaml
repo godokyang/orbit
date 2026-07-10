@@ -4,11 +4,13 @@ schema_semantics:
     evidence_level: v1
     quality_outcome: v1
     schema_semantics: v1
+    user_journey_evidence: v1
 project: example
 task_type: slice_review
 change_surface: internal
 risk_sinks: []
 real_path_required: false
+user_journeys: []
 execution_contract:
   owner_role: lead
   owner_instance: lead-main

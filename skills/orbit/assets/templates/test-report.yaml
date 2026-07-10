@@ -4,11 +4,13 @@ schema_semantics:
   feature_versions:
     evidence_level: v1
     schema_semantics: v1
+    user_journey_evidence: v1
 verdict: blocked
 summary: "TODO: one-sentence test conclusion."
 source_message_id: "TODO: herdr:<pane-or-message-id> or report:<path>"
 test_level: repo_regression
 evidence_level: real_path_test
+user_outcomes: []
 rule_application:
   required_rule_files_read:
     - references/runtime/testing-guideline.md

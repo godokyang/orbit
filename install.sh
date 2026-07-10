@@ -171,6 +171,7 @@ lib/orbit/validate_evidence_record.rb
 lib/orbit/validate_gate_commands.rb
 lib/orbit/audit_tools.rb
 lib/orbit/project_profile_risk.rb
+lib/orbit/user_journey.rb
 lib/orbit/gate_lease.rb
 lib/orbit/handoff.rb
 lib/orbit/status.rb
@@ -190,6 +191,7 @@ skills/orbit/assets/templates/evidence.json
 skills/orbit/assets/templates/review-report.yaml
 skills/orbit/assets/templates/design-review-report.yaml
 skills/orbit/assets/templates/test-report.yaml
+skills/orbit/assets/templates/test-hooks.yaml
 skills/orbit/references/overview.md
 skills/orbit/references/runtime/guide.md
 skills/orbit/references/runtime/core-operating-model.md

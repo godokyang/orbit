@@ -637,6 +637,12 @@ def gate_status(records, kind, task = nil, task_sha256: nil, evidence: nil)
   missing_rules_context_sha256 = latest.is_a?(Hash) && latest["structured_submit"] == true && expected_gate_role(kind) != nil && stored_rules_context_sha256.nil?
   rules_context_blocked = missing_rules_context_sha256 && write_policy_enforcement == "strict"
   runtime_identity_blocking_reason = latest.is_a?(Hash) ? runtime_identity_gate_blocking_reason(latest, evidence || {}, task, task_sha256, kind) : nil
+  journey_assessment = if evidence_record_kind == "test" && latest.is_a?(Hash)
+                         user_journey_evidence_assessment(task, latest)
+                       else
+                         { "required" => false, "valid" => true }
+                       end
+  journey_evidence_ok = journey_assessment["valid"] == true
   blocking_reason = if latest.nil? && stale_verdict_only
                       "stale_verdict"
                     elsif latest.nil?
@@ -667,6 +673,8 @@ def gate_status(records, kind, task = nil, task_sha256: nil, evidence: nil)
                       "missing_rules_context_sha256"
                     elsif write_policy_blocked
                       "write_policy_violations"
+                    elsif !journey_evidence_ok
+                      journey_assessment["blocking_reason"] || "missing_user_journey_evidence"
                     elsif display_status != "pass"
                       display_status
                     end
@@ -675,7 +683,7 @@ def gate_status(records, kind, task = nil, task_sha256: nil, evidence: nil)
     "required" => true,
     "status" => display_status,
     "record_status" => status,
-    "passed" => !stale_verdict_only && status == "pass" && !stale_after_implementation && !malformed_rec_ctx && identity_valid && runtime_identity_blocking_reason.nil? && quality_evidence_fields_ok && !wrong_gate_kind_level && evidence_level_ok && quality_outcome_ok && required_questions_ok && !write_policy_blocked && !task_sha256_blocked && !stale_blocked && !rules_context_blocked,
+    "passed" => !stale_verdict_only && status == "pass" && !stale_after_implementation && !malformed_rec_ctx && identity_valid && runtime_identity_blocking_reason.nil? && quality_evidence_fields_ok && !wrong_gate_kind_level && evidence_level_ok && quality_outcome_ok && required_questions_ok && !write_policy_blocked && !task_sha256_blocked && !stale_blocked && !rules_context_blocked && journey_evidence_ok,
     "structured" => latest.is_a?(Hash) ? latest["structured_submit"] == true : false,
     "evidence_level" => actual_evidence_level,
     "minimum_evidence_level" => minimum_evidence_level,
@@ -696,6 +704,7 @@ def gate_status(records, kind, task = nil, task_sha256: nil, evidence: nil)
     "stale_after_implementation" => stale_after_implementation ? true : nil,
     "missing_rules_context_sha256" => missing_rules_context_sha256 ? true : nil,
     "write_policy_violations_count" => write_violations.empty? ? nil : write_violations.length,
+    "user_journey_evidence" => journey_assessment["required"] ? journey_assessment : nil,
     "blocking_reason" => blocking_reason,
     "blocked" => latest.is_a?(Hash) ? latest["blocked"] : nil,
     "latest" => latest,

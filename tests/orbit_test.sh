@@ -71,6 +71,29 @@ make_task_execution_ready() {
       task["decomposition"]["aggregate_outcome_metrics"] = ["The required fixture behavior is evidenced."]
       task["decomposition"]["stop_conditions"] = ["Stop if the fixture contract changes."]
     end
+    if task["real_path_required"] == true
+      task["user_journeys"] = [{
+        "id" => "fixture_real_path",
+        "actor" => "test user",
+        "surface" => task["change_surface"],
+        "steps" => ["Run the configured fixture path."],
+        "expected_observables" => ["The fixture path completes without an error."],
+        "required_evidence" => task["test_level"],
+        "test_hook" => "fixture_real_path"
+      }]
+      hooks_path = File.join(Dir.pwd, ".orbit", "test-hooks.yaml")
+      hooks = File.file?(hooks_path) ? YAML.safe_load(File.read(hooks_path), aliases: true) : {}
+      hooks = {} unless hooks.is_a?(Hash)
+      hooks["schema_version"] = "orbit-test-hooks-v1"
+      hooks["hooks"] ||= {}
+      hooks["hooks"]["fixture_real_path"] = {
+        "enabled" => true,
+        "surfaces" => ["*"],
+        "command" => ["ruby", "-e", "puts \"fixture real path\""],
+        "evidence_provider" => "test_fixture"
+      }
+      File.write(hooks_path, YAML.dump(hooks))
+    end
     File.write(path, YAML.dump(task))
   ' "$1"
 }
@@ -239,5 +262,6 @@ source "$PARTS_DIR/17_protocol_schema_versioning_full.sh"
 source "$PARTS_DIR/18_orbit_dogfood_governance.sh"
 source "$PARTS_DIR/19_landing_governance_calibration.sh"
 source "$PARTS_DIR/20_status_solo.sh"
+source "$PARTS_DIR/21_user_journey.sh"
 
 printf 'REAL_TESTS_PASS count=%s tmp=%s\n' "$PASS_COUNT" "$TMPROOT"

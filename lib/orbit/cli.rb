@@ -8,6 +8,7 @@ require_relative "runtime_resolver"
 require_relative "runtime_commands"
 require_relative "schema_version"
 require_relative "project_profile_risk"
+require_relative "user_journey"
 require_relative "task_launch_dispatch"
 require_relative "evidence"
 require_relative "state_validate_gate"
@@ -126,6 +127,12 @@ def run_orbit_cli(argv)
     state(argv)
   when "tools"
     tools(argv)
+  when "test-hook"
+    if help_requested?(argv) || (argv.first == "run" && help_requested?(argv[1..] || []))
+      print_command_help("test-hook")
+      exit 0
+    end
+    test_hook(argv)
   when "validate"
     if help_requested?(argv)
       print_command_help("validate")

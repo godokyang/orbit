@@ -158,6 +158,8 @@ def validate_project_config(result)
     validate_instance_env(result, name, name, instance["env"], resolved_role)
   end
 
+  validate_project_test_hooks_config(result)
+
   [roles, instances]
 end
 
@@ -693,6 +695,7 @@ def validate_task(result, task_path)
   validate_task_runtime_fields(result, task)
 
   validate_task_risk_contract(result, task)
+  validate_task_user_journeys(result, task)
   validate_task_risk_level(result, task)
   validate_project_profile(result, task)
   validate_retrospective_done_criteria(result, task)
@@ -788,6 +791,7 @@ def task_execution_readiness_errors(task)
     errors << "risk_sinks must contain only supported structured values"
   end
   errors << "real_path_required must be true or false" unless [true, false].include?(task["real_path_required"])
+  errors.concat(user_journey_execution_readiness_errors(task))
 
   errors
 end

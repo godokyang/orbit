@@ -109,7 +109,7 @@ Orbit 是面向 AI agent 的任务闭环协议。manual file/JSON protocol 是�
 - design/analysis：不要把设计评审通过当成 coding 授权。design task 应按 `drafting -> review_requested -> changes_requested|user_confirmed -> coding_ready` 推进；进入 `coding_ready` 前必须有结构化 review pass 和用户确认证据。
 - parent/decomposition：中型或大型任务必须维护 `implementation_plan`、`child_slices`、aggregate outcome metrics、stop conditions、replanning path 和 final aggregate audit；child slice pass 不能替代 parent outcome 审计。
 - reviewer：围绕 quality outcome 做独立评审，输出 verdict 和 findings；高/中风险未关闭时不得放行 gate。
-- tester：执行真实行为路径和失败路径验证，保留环境、步骤、artifact 和 verdict；passing test evidence 还要记录测试 pane/tab、server/browser owner、duration/resource、cleanup 和 artifact lifecycle；性能/UX/quality/measurement 类任务要记录 baseline/after 或显式 waiver；只跑 build 不等于真实测试。
+- tester：执行真实行为路径和失败路径验证，保留环境、步骤、artifact 和 verdict；`real_path_required` task 必须运行 journey 引用的项目 test hook，并在 report 开头用 `user_outcomes` 记录用户完成了什么、实际步骤/结果、截图/崩溃/网络/媒体 artifact、设备/浏览器/服务版本和未覆盖路径；passing test evidence 还要记录测试 pane/tab、server/browser owner、duration/resource、cleanup 和 artifact lifecycle；性能/UX/quality/measurement 类任务要记录 baseline/after 或显式 waiver；只跑 build 不等于真实测试。
 - handoff receiver：不是当前循环的执行者，而是下一轮接手者；接收 handoff 时先读 task/state/evidence/audit，再判断是否可信。
 
 ## 输出要求

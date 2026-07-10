@@ -561,6 +561,8 @@ def judgment_summary(evidence)
       "evidence_level" => latest_test["evidence_level"],
       "residual_risk" => latest_test["residual_risk"],
       "test_level" => latest_test["test_level"],
+      "user_outcomes" => latest_test["user_outcomes"],
+      "journey_validation" => latest_test["journey_validation"],
       "rule_application_summary" => rule_application_summary(latest_test["rule_application"]),
       "evidence_boundary_summary" => evidence_boundary_summary(latest_test)
     }

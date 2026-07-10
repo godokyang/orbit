@@ -43,6 +43,7 @@ def validate_evidence_record(result, source, record)
   validate_decision_record_field(result, source, record)
   validate_data_classification_fields(result, source, record)
   validate_negative_evidence_field(result, source, record)
+  validate_user_outcomes_record(result, source, record)
 end
 
 def validate_runtime_identity_record_field(result, source, runtime_identity)
@@ -642,6 +643,14 @@ def validate_gate_verdict(result, records, expected_kind, task = nil, task_sha25
 
   case latest["status"]
   when "pass"
+    journey_assessment = user_journey_evidence_assessment(task, latest)
+    if journey_assessment["required"] && !journey_assessment["valid"]
+      validation_error(
+        result,
+        "evidence_file.records.#{expected_kind}.user_outcomes",
+        "Required user journey evidence is incomplete: #{journey_assessment["blocking_reason"]}."
+      )
+    end
     latest_gate_time = parse_evidence_created_at(result, "evidence_file.records.#{expected_kind}.created_at", latest["created_at"])
     latest_gate_index = record_index_for_object(records, latest)
     latest_gate_position = latest_gate_time && latest_gate_index ? [latest_gate_time, latest_gate_index] : nil

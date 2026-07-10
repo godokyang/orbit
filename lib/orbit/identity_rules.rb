@@ -41,7 +41,8 @@ def init_config(args)
   files = {
     "roles.yaml" => File.join(TEMPLATE_ROOT, "roles.yaml"),
     "instances.yaml" => File.join(TEMPLATE_ROOT, "instances.yaml"),
-    "loop-state.yaml" => File.join(TEMPLATE_ROOT, "loop-state.yaml")
+    "loop-state.yaml" => File.join(TEMPLATE_ROOT, "loop-state.yaml"),
+    "test-hooks.yaml" => File.join(TEMPLATE_ROOT, "test-hooks.yaml")
   }
 
   missing_templates = files.values.reject { |path| File.file?(path) }

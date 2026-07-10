@@ -198,6 +198,29 @@ verdict: pass | fail | partial | invalid
 summary: "本轮测试结论。"
 source_message_id: "Herdr message、CI job、pane transcript 或 report id。"
 test_level: unit | integration | repo_regression | browser_e2e | provider_e2e | dogfood | manual
+user_outcomes:
+  - journey_id: "task.user_journeys 中的 id。"
+    verdict: pass | fail | partial | blocked
+    actual_steps:
+      - step: "实际执行的用户动作。"
+        result: "实际观察结果。"
+    observed_results:
+      - "用户完成了什么；先写结果，再写命令。"
+    artifacts:
+      screenshots: []
+      crash_logs: []
+      network_requests: []
+      media_state: []
+      logs: []
+    environment:
+      device: {}
+      browser: {}
+      services: {}
+    uncovered_paths: []
+    test_hook:
+      id: "项目 .orbit/test-hooks.yaml 中的 hook id。"
+      status: pass
+      command: ["实际执行的", "argv"]
 findings: []
 coverage:
   - "覆盖的用户路径、风险路径或 acceptance。"
@@ -232,6 +255,8 @@ quality_measurement:
     risk: "缺失对照带来的风险。"
     replacement_evidence: "替代证据。"
 ```
+
+`real_path_required: true` 的 task 必须先定义 `user_journeys`，并让每条 journey 引用 `.orbit/test-hooks.yaml` 中与 surface 匹配的项目 hook。可用 `orbit test-hook run --task ... --journey ... --json` 运行 hook；Orbit 只负责安全执行项目配置的 argv 和捕获 provider 结果，不内置 Android、浏览器或跨系统 runner。test PASS 缺少对应 `user_outcomes`、实际步骤、observed result、真实 artifact、设备/浏览器/服务版本、hook pass 或所需 test level 时会被降级为 `partial`，不能关闭 gate。
 
 可以从 `assets/templates/test-report.yaml` 复制最小模板后填写，再运行 `orbit evidence submit --file <manifest> --report <report> --task <task> --json`。不要直接编辑 `.orbit/evidence*.json` 来提交测试结论；直接写 manifest 会绕过 CLI 的身份解析、schema 校验和并发安全写入，不能用于关闭 test gate。
 

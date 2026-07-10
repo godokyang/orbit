@@ -115,6 +115,7 @@ HELP = <<~HELP
     orbit state show --json [--state PATH]
     orbit tools detect --json
     orbit tools doctor --json
+    orbit test-hook run --task PATH --journey ID [--dry-run] --json
     orbit wait-gate --task PATH --evidence PATH --json
     orbit whoami --json [--task PATH]
     orbit new-task --task-type TYPE --output PATH [--operation-mode solo|team] [--implementation-authority ROLE --assigned-instance INSTANCE] [--risk-level LEVEL] [--change-surface SURFACE] [--risk-sink SINK] [--real-path-required]
@@ -141,6 +142,7 @@ HELP = <<~HELP
     status       从 task/state/evidence/runtime 派生一屏只读状态摘要。
     state        读取或管理 Orbit loop state。
     tools        检测 Herdr runtime adapter、手动 artifact 和执行工具。
+    test-hook    运行 task journey 引用的项目级真实路径测试 hook。
     validate    校验 Orbit config、task、evidence 和 state 文件。
     wait-gate   检查 task required gates 当前是否满足。
     whoami      解析运行时 role identity。
@@ -156,6 +158,7 @@ HELP = <<~HELP
     orbit hook --help
     orbit notice --help
     orbit status --help
+    orbit test-hook --help
     orbit runtime --help
     orbit rules print-context --help
     orbit rules resolve --help
@@ -419,6 +422,22 @@ COMMAND_HELP = {
     Completion:
       implemented_not_independently_accepted means implementation evidence
       exists but required fresh-context review/test acceptance is still missing.
+  HELP
+  "test-hook" => <<~HELP,
+    Usage:
+      orbit test-hook run --task PATH --journey ID [--dry-run] --json
+
+    Runs the argv command configured in .orbit/test-hooks.yaml for one task
+    user journey. Orbit captures the provider result but does not implement
+    Android, browser, or cross-system runners itself.
+
+    Required:
+      --task PATH       Task containing the user_journeys contract.
+      --journey ID      Journey id whose configured test_hook should run.
+      --json            Emit command, provider, status, output, and duration.
+
+    Options:
+      --dry-run         Resolve and print the hook without executing it.
   HELP
   "validate" => <<~HELP,
     Usage:

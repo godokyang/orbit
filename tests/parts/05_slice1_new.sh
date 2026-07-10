@@ -42,6 +42,28 @@ coverage:
   - mechanical check only
 artifacts:
   - tests/orbit_test.sh
+user_outcomes:
+  - journey_id: fixture_real_path
+    verdict: pass
+    actual_steps:
+      - step: Run the configured fixture path.
+        result: The fixture path completed without an error.
+    observed_results:
+      - The required user-visible fixture result was observed.
+    artifacts:
+      logs:
+        - .orbit/test-artifacts/fixture-real-path.log
+    environment:
+      services:
+        fixture: v1
+    uncovered_paths: []
+    test_hook:
+      id: fixture_real_path
+      status: pass
+      command:
+        - ruby
+        - -e
+        - puts "fixture real path"
 test_environment:
   environment: local shell
   test_tab_or_pane: current pane
@@ -291,7 +313,7 @@ json_assert 'audit done-state passes when design_readiness gate satisfied by rev
 # ---------------------------------------------------------------------------
 
 MALFORMED_AUDIT_TASK="$TMPROOT/malformed-audit-task.yaml"
-"$CLI" new-task --task-type implementation --change-surface user_flow --output "$MALFORMED_AUDIT_TASK" >/dev/null
+"$CLI" new-task --task-type implementation --output "$MALFORMED_AUDIT_TASK" >/dev/null
 make_task_execution_ready "$MALFORMED_AUDIT_TASK"
 ruby --disable-gems -ryaml -e \
   'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["gates"]<<{"kind"=>"release","roles"=>["tester"],"required"=>true,"pass_condition"=>"release gate passed"}; File.write(p, YAML.dump(y))' \
