@@ -413,6 +413,7 @@ loop state 记录当前协作状态，不依赖聊天历史。
 进入 `done` 前必须运行 validate。
 使用 `orbit status` 可在一屏内读取当前 task、风险、operation mode、runtime identity、implementation/review/test、High/Medium finding、blocker 和下一条命令；`orbit next` 只输出派生的下一步。两者是只读入口，不修改 task、evidence、state 或 runtime。solo task 在 implementation pass 后可运行 `orbit state transition --to implemented_not_independently_accepted --evidence ...` 明确收口；audit/handoff 此时允许交接，但 `trusted_for_done`、`done_ready` 和 complete claim 必须保持 false。
 长任务应使用 `orbit state progress --message "..." --evidence ...` 记录阶段心跳。progress 不改变 phase，只更新 `status`、`updated_at` 和 `history`，用于让 lead、reviewer、tester 或 handoff receiver 知道当前停在哪个检查点。长时间只在聊天或 pane 输出里说明进度，不如写入 loop state 可审计。
+父任务的动态进度也属于 loop state：`state start` 初始化 `parent_goal_status`，`state progress --parent-state ... --active-slice ...` 只更新 state，不修改已冻结 task。task 只保留 `parent_goal` 合同；旧 task 中已有的 `parent_goal_status` 仅作为初始化兼容输入。需要在 gate 输出中查看当前父任务进度时，显式传 `orbit wait-gate ... --state <loop-state>`，避免读取过期 task 快照。
 声明 `done` 或交接前应运行 audit，确认 task/evidence/state 没有漂移。
 audit 输出会区分 `trusted_for_handoff`、`trusted_for_done` 和 `trusted_for_release`。如果存在 issue，agent 应读取 `remediation` 并补证据或修正状态；例如 done 状态没有记录 handoff artifact 时，`trusted_for_done` 可以为 true，但 `trusted_for_release` 会保持 false。生成最终交接产物时，优先使用 `orbit handoff --output handoff.json --record-state --json`，让 loop state 记录可追溯的 handoff artifact。
 

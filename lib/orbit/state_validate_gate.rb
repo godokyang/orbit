@@ -381,6 +381,15 @@ def validate_loop_state!(state, path)
   if state.key?("owner_role") && !state["owner_role"].nil? && !state["owner_role"].is_a?(String)
     state_error("Loop state owner_role must be a string when present.")
   end
+
+  if state.key?("parent_goal_status")
+    status = state["parent_goal_status"]
+    state_error("Loop state parent_goal_status must be a mapping when present.") unless status.is_a?(Hash)
+    parent_state = status["state"].to_s
+    unless parent_state.empty? || ALLOWED_PARENT_GOAL_STATES.include?(parent_state)
+      state_error("Loop state parent_goal_status.state must be one of #{ALLOWED_PARENT_GOAL_STATES.join("|")}.")
+    end
+  end
 end
 
 def write_loop_state(path, state)
@@ -492,6 +501,7 @@ def state_start(options, quiet: false)
 
   update_loop_state(state_path) do |state|
     previous_phase = state["phase"]
+    previous_parent_status = state["parent_goal_status"] if state["task_id"].to_s == task["task_id"].to_s
     state["project"] = task["project"] || File.basename(Dir.pwd)
     state["current_task"] = persisted_task_path
     state["phase"] = start_phase
@@ -504,6 +514,7 @@ def state_start(options, quiet: false)
     state["task_id"] = task["task_id"]
     state["task_revision_id"] = task["revision_id"]
     state["task_revision_number"] = task["revision_number"]
+    state["parent_goal_status"] = previous_parent_status.is_a?(Hash) ? deep_dup_data(previous_parent_status) : effective_parent_goal_status(task)
     append_state_history(state, {
       "event" => "start",
       "from" => previous_phase,
@@ -663,6 +674,9 @@ def state_progress(options)
   update_loop_state(state_path) do |state|
     state["status"] = "progress: #{message}"
     state["updated_at"] = now
+    state["parent_goal_status"] = effective_parent_goal_status(load_state_task(state["current_task"]), state) if options["parent_state"] || options["active_slice"]
+    state["parent_goal_status"]["state"] = options["parent_state"] if options["parent_state"]
+    state["parent_goal_status"]["active_slice"] = options["active_slice"] if options["active_slice"]
 
     history_entry = {
       "event" => "progress",
@@ -673,29 +687,6 @@ def state_progress(options)
     history_entry["evidence"] = project_relative_persisted_path(options["evidence"], field: "evidence") if options["evidence"]
     append_state_history(state, history_entry)
     state
-  end
-
-  # Optionally update parent_goal_status in the task file if --task is given
-  if options["parent_state"] || options["active_slice"]
-    task_path_opt = options["task"]
-    if task_path_opt.nil? || task_path_opt.empty?
-      # Fall back to current_task from loop state
-      raw_state = YAML.safe_load(File.read(File.expand_path(options["state"]))) rescue nil
-      task_path_opt = raw_state.is_a?(Hash) ? raw_state["current_task"] : nil
-    end
-    if task_path_opt && !task_path_opt.empty?
-      task_full_path = File.expand_path(task_path_opt)
-      if File.exist?(task_full_path)
-        raw_task = YAML.safe_load(File.read(task_full_path)) rescue nil
-        if raw_task.is_a?(Hash)
-          raw_task["parent_goal_status"] ||= {}
-          raw_task["parent_goal_status"]["state"] = options["parent_state"] if options["parent_state"]
-          raw_task["parent_goal_status"]["active_slice"] = options["active_slice"] if options["active_slice"]
-          File.write(task_full_path, YAML.dump(raw_task))
-          puts "Updated parent_goal_status in task file."
-        end
-      end
-    end
   end
 
   puts "Recorded Orbit progress:"

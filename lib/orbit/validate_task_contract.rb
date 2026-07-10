@@ -945,6 +945,37 @@ def parent_goal_required?(task)
   pg.is_a?(Hash) && pg["required"] == true
 end
 
+def validate_parent_goal_status(result, parent_goal, status, source)
+  unless status.is_a?(Hash)
+    validation_error(result, source, "parent_goal_status must be a mapping.")
+    return
+  end
+
+  state_val = status["state"].to_s
+  if !state_val.empty? && !ALLOWED_PARENT_GOAL_STATES.include?(state_val)
+    validation_error(result, "#{source}.state", "parent_goal_status.state must be one of #{ALLOWED_PARENT_GOAL_STATES.join("|")}.")
+  end
+
+  if state_val == "parent_done"
+    pg_criteria = parent_goal.is_a?(Hash) && parent_goal["done_criteria"].is_a?(Array) ? parent_goal["done_criteria"] : []
+    criteria_status = status["done_criteria_status"].is_a?(Array) ? status["done_criteria_status"] : []
+    evidenced = criteria_status.select { |cs| cs.is_a?(Hash) && cs["evidenced"] == true }.map { |cs| cs["criterion"] }
+    unevidenced = pg_criteria.reject { |criterion| evidenced.include?(criterion) }
+    unless unevidenced.empty?
+      validation_error(result, "#{source}.done_criteria_status",
+        "parent_goal_status.state is parent_done but #{unevidenced.length} done criteria lack evidence.")
+    end
+  end
+
+  user_next = status["user_next_action"]
+  return unless user_next.is_a?(Hash)
+
+  default_action = user_next["default"]
+  if default_action.nil? || !default_action.is_a?(String) || default_action.strip.empty?
+    validation_error(result, "#{source}.user_next_action.default", "parent_goal_status.user_next_action.default must be a non-empty string.")
+  end
+end
+
 def validate_parent_goal(result, task)
   parent_goal = task["parent_goal"]
   unless parent_goal.is_a?(Hash)
@@ -963,34 +994,8 @@ def validate_parent_goal(result, task)
   end
 
   status = task["parent_goal_status"]
-  unless status.is_a?(Hash)
-    validation_error(result, "task_file.parent_goal_status", "Task with parent_goal.required must define parent_goal_status as a mapping.")
-    return
-  end
-
-  state_val = status["state"].to_s
-  if !state_val.empty? && !ALLOWED_PARENT_GOAL_STATES.include?(state_val)
-    validation_error(result, "task_file.parent_goal_status.state", "parent_goal_status.state must be one of #{ALLOWED_PARENT_GOAL_STATES.join("|")}.")
-  end
-
-  if state_val == "parent_done"
-    pg_criteria = parent_goal["done_criteria"].is_a?(Array) ? parent_goal["done_criteria"] : []
-    criteria_status = status["done_criteria_status"].is_a?(Array) ? status["done_criteria_status"] : []
-    evidenced = criteria_status.select { |cs| cs.is_a?(Hash) && cs["evidenced"] == true }.map { |cs| cs["criterion"] }
-    unevidenced = pg_criteria.reject { |c| evidenced.include?(c) }
-    unless unevidenced.empty?
-      validation_error(result, "task_file.parent_goal_status.done_criteria_status",
-        "parent_goal_status.state is parent_done but #{unevidenced.length} done criteria lack evidence.")
-    end
-  end
-
-  user_next = status["user_next_action"]
-  return unless user_next.is_a?(Hash)
-
-  default_action = user_next["default"]
-  if default_action.nil? || !default_action.is_a?(String) || default_action.strip.empty?
-    validation_error(result, "task_file.parent_goal_status.user_next_action.default", "parent_goal_status.user_next_action.default must be a non-empty string.")
-  end
+  return if status.nil?
+  validate_parent_goal_status(result, parent_goal, status, "task_file.parent_goal_status")
 end
 
 # Slice 11: validate task_risk and project_profile fields.

@@ -666,13 +666,14 @@ COMMAND_HELP = {
   HELP
   "wait-gate" => <<~HELP,
     Usage:
-      orbit wait-gate --task PATH --evidence PATH --json
+      orbit wait-gate --task PATH --evidence PATH [--state PATH] --json
 
     Checks whether the task's required review/test gates currently pass.
 
     Required:
       --task PATH      Structured orbit-task-v1 YAML file.
       --evidence PATH  orbit-evidence-v1 JSON/YAML manifest file.
+      --state PATH     Optional loop state for dynamic parent_goal_status output.
       --json           Emit machine-readable gate status.
 
     Notes:

@@ -260,7 +260,7 @@ def audit_validation_result(task_path, evidence_path, state_path)
     allow_missing_independent_gates: allow_missing_independent_gates
   )
   result["checked"] << "evidence"
-  state = validate_state_file(result, state_path)
+  state = validate_state_file(result, state_path, task)
   result["checked"] << "state"
   result["valid"] = result["errors"].empty?
 
@@ -477,7 +477,7 @@ def stale_records_audit(evidence, task_sha256, task = nil)
   }
 end
 
-def parent_goal_audit(task, evidence)
+def parent_goal_audit(task, evidence, state = nil)
   return nil unless task.is_a?(Hash)
 
   parent_goal = task["parent_goal"]
@@ -485,7 +485,7 @@ def parent_goal_audit(task, evidence)
     return { "state" => "not_applicable", "message" => "Task does not require parent goal tracking." }
   end
 
-  status = task["parent_goal_status"]
+  status = effective_parent_goal_status(task, state)
   current_state = status.is_a?(Hash) ? status["state"] : nil
   done_criteria = parent_goal["done_criteria"].is_a?(Array) ? parent_goal["done_criteria"] : []
   criteria_status = status.is_a?(Hash) && status["done_criteria_status"].is_a?(Array) ? status["done_criteria_status"] : []
@@ -679,7 +679,7 @@ def audit(args)
 
   # Merge parent_goal_summary.blocking into blocking_findings BEFORE building packet
   # so that issues and trust_flags reflect parent_done violations consistently
-  pg_summary = parent_goal_audit(task, evidence)
+  pg_summary = parent_goal_audit(task, evidence, state)
   if pg_summary.is_a?(Hash) && pg_summary["blocking"].is_a?(Array)
     pg_summary["blocking"].each { |b| blocking_findings << b unless blocking_findings.include?(b) }
   end

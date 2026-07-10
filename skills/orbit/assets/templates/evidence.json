@@ -5,7 +5,7 @@
       "evidence_level": "v1",
       "quality_outcome": "v1",
       "quality_outcome_guardrails": "v1",
-      "parent_goal_status": "v1",
+      "parent_goal_status": "v2",
       "destructive_action_scope": "v1",
       "role_identity_minimum": "v1",
       "role_identity_full": "v1",

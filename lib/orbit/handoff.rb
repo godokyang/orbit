@@ -703,7 +703,7 @@ def handoff(args)
     "judgment_summary" => judgment_summary(evidence),
     "closure_checklist" => closure_checklist,
     "known_gaps" => known_gaps,
-    "parent_goal_status" => task.is_a?(Hash) ? task["parent_goal_status"] : nil,
+    "parent_goal_status" => effective_parent_goal_status(task, state),
     "destructive_actions_summary" => destructive_action_audit(evidence),
     "readable_summary" => {
       "current_task" => project_relative_persisted_path(task_path, field: "task"),

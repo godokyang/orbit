@@ -382,6 +382,21 @@ def default_parent_goal_status(task_type)
   }
 end
 
+def effective_parent_goal_status(task, state = nil)
+  task_hash = task.is_a?(Hash) ? task : {}
+  state_hash = state.is_a?(Hash) ? state : {}
+  task_id = task_hash["task_id"].to_s
+  state_task_id = state_hash["task_id"].to_s
+  state_matches_task = task_id.empty? || state_task_id.empty? || task_id == state_task_id
+  runtime_status = state_hash["parent_goal_status"] if state_matches_task
+  return deep_dup_data(runtime_status) if runtime_status.is_a?(Hash)
+
+  legacy_status = task_hash["parent_goal_status"]
+  return deep_dup_data(legacy_status) if legacy_status.is_a?(Hash)
+
+  default_parent_goal_status(task_hash["task_type"])
+end
+
 def role_for_instance(instances, roles, instance_key)
   role = role_for_instance_config(instances, roles, instance_key)
   usage_error("Unknown Orbit instance #{instance_key.inspect} or missing role_ref.") unless role
@@ -521,7 +536,6 @@ def new_task(args, quiet: false)
   task["test_environment"] = default_test_environment(options["task_type"], implementation_authority)
   task["quality_measurement"] = default_quality_measurement(options["task_type"])
   task["parent_goal"] = default_parent_goal(options["task_type"])
-  task["parent_goal_status"] = default_parent_goal_status(options["task_type"])
   task_rule_packs = rule_packs_for_context(implementation_authority, options["task_type"])
   task["rule_packs"] = task_rule_packs unless task_rule_packs.empty?
   task["write_policy_enforcement"] = DEFAULT_WRITE_POLICY_ENFORCEMENT_BY_RISK[task_risk["level"]] || "standard"

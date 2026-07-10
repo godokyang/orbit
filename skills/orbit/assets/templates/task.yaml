@@ -151,18 +151,6 @@ parent_goal:
   objective: ""
   done_criteria: []
   non_goals: []
-parent_goal_status:
-  state: not_applicable
-  active_slice: ""
-  done_criteria_status: []
-  remaining_blockers: []
-  required_gates: {}
-  user_next_action:
-    default: not_applicable
-    options: []
-    waiting_on: ""
-    blocked_by: ""
-    do_not_do: []
 worktree_safety:
   require_status_check: true
   before_public_action:

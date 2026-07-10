@@ -609,6 +609,10 @@ def parse_wait_gate_args(args)
       options["evidence"] = option_value(args, "--evidence")
     when /\A--evidence=(.+)\z/
       options["evidence"] = Regexp.last_match(1)
+    when "--state"
+      options["state"] = option_value(args, "--state")
+    when /\A--state=(.+)\z/
+      options["state"] = Regexp.last_match(1)
     when "--json"
       options["json"] = true
     else
@@ -787,6 +791,7 @@ def wait_gate(args)
   current_task_sha256 = sha256_file(File.expand_path(options["task"]))
   evidence_path = File.expand_path(options["evidence"])
   evidence = load_evidence_manifest(evidence_path)
+  state = options["state"] ? load_loop_state(File.expand_path(options["state"])) : nil
   records = evidence["records"].is_a?(Array) ? evidence["records"] : []
   implementation_result = { "errors" => [] }
   validate_implementation_records_for_task(implementation_result, records, task)
@@ -817,7 +822,7 @@ def wait_gate(args)
     "gate_summary" => gate_summary,
     "gates" => gates,
     "implementation_context_errors" => implementation_errors,
-    "parent_goal_status" => task.is_a?(Hash) ? task["parent_goal_status"] : nil,
+    "parent_goal_status" => effective_parent_goal_status(task, state),
     "verdict_arbitration" => arbitration_summary,
     "gate_lease_summary" => lease_summary,
     "summary" => ready ? "all required gates pass" : "required gates are not ready"
@@ -847,7 +852,7 @@ def validate_done_transition!(state_path, task_path, evidence_path)
   result["checked"] << "task"
   evidence = validate_evidence(result, evidence_path, task, task_sha256: sha256_file(task_path))
   result["checked"] << "evidence"
-  validate_state_file(result, state_path)
+  validate_state_file(result, state_path, task)
   result["checked"] << "state"
 
   unless evidence_has_done_signal?(evidence)
@@ -862,7 +867,7 @@ def validate_done_transition!(state_path, task_path, evidence_path)
   state_error("Transition to done requires valid task, evidence, and state: #{details}")
 end
 
-def validate_state_file(result, state_path)
+def validate_state_file(result, state_path, task = nil)
   state = load_validation_file(result, "state_file", state_path)
   return nil unless state
 
@@ -877,6 +882,16 @@ def validate_state_file(result, state_path)
 
   unless state["history"].is_a?(Array)
     validation_error(result, "state_file.history", "Loop state history must be a list.")
+  end
+
+  status = state["parent_goal_status"]
+  status = task["parent_goal_status"] if !status.is_a?(Hash) && task.is_a?(Hash) && task["parent_goal_status"].is_a?(Hash)
+  if parent_goal_required?(task) && !status.is_a?(Hash)
+    validation_error(result, "state_file.parent_goal_status", "Started parent tasks must keep dynamic parent_goal_status in loop state.")
+  elsif status && !status.is_a?(Hash)
+    validation_error(result, "state_file.parent_goal_status", "Loop state parent_goal_status must be a mapping when present.")
+  elsif status.is_a?(Hash)
+    validate_parent_goal_status(result, task.is_a?(Hash) ? task["parent_goal"] : nil, status, "state_file.parent_goal_status")
   end
 
   state
@@ -940,7 +955,7 @@ def validate(args)
   end
 
   if options["state"]
-    validate_state_file(result, options["state"])
+    validate_state_file(result, options["state"], task)
     result["checked"] << "state"
   end
 

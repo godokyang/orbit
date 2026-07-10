@@ -363,7 +363,7 @@ pass 'start subcommand help works'
 
 "$CLI" wait-gate --help >"$TMPROOT/wait-gate-help.txt" 2>"$TMPROOT/wait-gate-help.err"
 test ! -s "$TMPROOT/wait-gate-help.err"
-grep -Fq 'orbit wait-gate --task PATH --evidence PATH --json' "$TMPROOT/wait-gate-help.txt"
+grep -Fq 'orbit wait-gate --task PATH --evidence PATH [--state PATH] --json' "$TMPROOT/wait-gate-help.txt"
 grep -q 'does not replace reviewer/tester judgment' "$TMPROOT/wait-gate-help.txt"
 pass 'wait-gate subcommand help works'
 
