@@ -478,8 +478,11 @@ start
 | 指标分子与 paired cohort 对齐 | 已实现（边界加固） | `4b9d5f1` | 四类 task-scoped count event 强制绑定不可变 `task_id`；只统计 paired task IDs，并单列 unbound/out-of-cohort 事件 |
 | progress 显式 task 一致性 | 已实现（边界加固） | `1351c70` | 在原子 state 写入前同时核对 canonical task path 和 `task_id`；不匹配时 state 哈希保持不变 |
 | gate role 兼容归一化 | 已实现（边界加固） | `fc9ca68` | status 与 validator 共用单复数 role normalizer，实例通过 `role_for_instance_config` 解析；唯一候选直接 resolved |
+| unbound 指标事件 fail-closed | 已实现（决策边界加固） | `bfce67a` | unbound task-scoped event 不进入 paired cohort 分子，同时把顶层状态降为 `ambiguous_event_scope`；已绑定的 out-of-cohort 事件仍可安全排除 |
+| trial report 语义自描述 | 已实现（兼容边界加固） | `bfce67a` | standalone report 升级为 `orbit-trial-metrics-report-v2`，并携带 `schema_semantics.feature_versions.trial_metrics: v4` |
+| gate role 原始合同校验 | 已实现（合同边界加固） | `9c17542` | validator 逐项检查原始 roles 数组，只在合同合法后由 runtime normalizer 消费；混合合法/非法值不再被静默过滤 |
 
-本轮复核加固后的最终完整回归为 `REAL_TESTS_PASS count=1096`。测试同时保留了旧 Herdr、无 provider、手写 `herdr_verified`、identity pending、artifact 漂移、跨任务证据复用、凭证本地过期和真实路径缺失等负向场景，避免新能力通过放宽旧 gate 获得绿色结果。
+本轮复核加固后的最终完整回归为 `REAL_TESTS_PASS count=1098`。测试同时保留了旧 Herdr、无 provider、手写 `herdr_verified`、identity pending、artifact 漂移、跨任务证据复用、凭证本地过期和真实路径缺失等负向场景，避免新能力通过放宽旧 gate 获得绿色结果。
 
 ### 当前产品行为
 
@@ -491,7 +494,8 @@ start
 - `parent_goal` 是冻结 task 中的合同；`parent_goal_status` 是 loop state 中的动态执行状态。进度心跳不会再造成 task revision 漂移。
 - `state progress --task ...` 是兼容入口，但显式 task 必须与 loop state 的 current task 在 canonical path 和不可变 `task_id` 上同时一致，否则在写入前拒绝。
 - `orbit next` 根据归一化 gate role 查找真实配置实例，兼容 `roles: [...]` 和旧 `role: ...`；唯一实例可直接生成 dispatch 建议，多实例必须先由用户选择。
-- `orbit metrics capture|record|report` 从现在开始收集 30 天试用所需的结构化计数，不保存 prompt、报告正文或自由文本；成本类 snapshot 必须形成同一 `task_id` 的 baseline/after 配对后才进入变化量统计，计数类指标强制绑定 task，并且只有 paired task cohort 内的事件进入分子。旧 unbound 或 out-of-cohort 事件单独报告，不参与决策指标。
+- `orbit metrics capture|record|report` 从现在开始收集 30 天试用所需的结构化计数，不保存 prompt、报告正文或自由文本；成本类 snapshot 必须形成同一 `task_id` 的 baseline/after 配对后才进入变化量统计，计数类指标强制绑定 task，并且只有 paired task cohort 内的事件进入分子。已绑定的 out-of-cohort 事件单独报告并安全排除；旧 unbound 事件虽然不进入分子，但会将报告降为 `ambiguous_event_scope`，避免把未知归属误报为零缺陷。
+- 新生成的指标报告使用 `orbit-trial-metrics-report-v2`，并在报告自身声明 `trial_metrics: v4`。v1 报告只代表旧 global-count/非自描述语义，必须从原始 JSONL 重新生成，不能直接作为 cohort-safe 决策输入；旧 v1 event ledger 仍可读取，但其中 unbound task-scoped event 必须先备份账本并完成经核验的显式 task 迁移，不能由报告器猜测归属。当前版本不提供 event-scope waiver 入口。
 
 ### 尚需真实观察期验证的结果
 
@@ -503,4 +507,4 @@ start
 - production Herdr automatic session 的 verified 比例是否稳定；
 - 完整 Orbit 相比精简检查清单是否持续产生独立有效 finding。
 
-用 `orbit metrics report --window-days 30 --json` 查看覆盖状态。`observed_zero` 表示已经观测但变化量或计数为零，`missing` 才表示没有数据；只有 coverage 不含 `missing` 且真实趋势满足第 14 节条件后，才能作出长期保留或进一步精简的产品决策。
+用 `orbit metrics report --window-days 30 --json` 查看覆盖状态。`observed_zero` 表示已经观测但变化量或计数为零，`missing` 才表示没有数据；只有 `observation_status` 明确为 `ready_for_trial_decision`，且真实趋势满足第 14 节条件后，才能作出长期保留或进一步精简的产品决策。`ambiguous_event_scope` 表示仍有未绑定事件，必须先完成经核验的显式迁移，不能把局部 `observed_zero` 当成可决策结论。
