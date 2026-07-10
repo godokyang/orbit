@@ -108,6 +108,7 @@ HELP = <<~HELP
     orbit dispatch --task PATH --to INSTANCE [--pane PANE] [--reply-to PANE] [--manual-payload] [--dry-run] --json
     orbit rules resolve --json [--task PATH] [--evidence PATH] [--role ROLE] [--instance NAME] [--output PATH]
     orbit rules print-context --json [--task PATH] [--evidence PATH] [--role ROLE] [--instance NAME] [--output PATH]
+    orbit revision create --task PATH --reason TEXT --change-type TYPE[,TYPE...] --json
     orbit start INSTANCE [--cwd PROJECT_ROOT] [--layout auto|same-tab|new-tab] [--force] [--dry-run] [--json]
     orbit status [--task PATH] [--state PATH] [--evidence PATH] [--json]
     orbit next [--task PATH] [--state PATH] [--evidence PATH] [--json]
@@ -141,6 +142,7 @@ HELP = <<~HELP
     next        输出当前 Orbit 状态派生出的下一条建议命令。
     runtime     注册、刷新或确认 Orbit-Herdr runtime session。
     rules       解析本轮默认规则、项目规则、task 规则和 rule packs。
+    revision    为已启动 task 创建显式 revision 并精确失效相关 evidence。
     start        根据 instances.yaml 启动或预览 agent instance。
     status       从 task/state/evidence/runtime 派生一屏只读状态摘要。
     state        读取或管理 Orbit loop state。
@@ -166,6 +168,7 @@ HELP = <<~HELP
     orbit runtime --help
     orbit rules print-context --help
     orbit rules resolve --help
+    orbit revision --help
     orbit validate --help
     orbit wait-gate --help
 HELP
@@ -262,9 +265,24 @@ COMMAND_HELP = {
       dispatch-ready only after Orbit can match runtime state with a live Herdr
       pane/agent probe.
   HELP
+  "revision" => <<~HELP,
+    Usage:
+      orbit revision create --task PATH --reason TEXT
+                            --change-type TYPE[,TYPE...] [--state PATH] --json
+
+    Freezes task semantics into explicit revisions. Edit the intended task
+    fields, then create a revision with a reason and all applicable change
+    types. Orbit records changed fields and invalidates only affected evidence.
+
+    Change types:
+      scope, acceptance, quality_outcome, implementation, review_contract,
+      test_contract, release_contract, risk, rules, runtime, documentation.
+  HELP
   "compact-evidence" => <<~HELP,
     Usage:
       orbit compact-evidence --task PATH --evidence PATH [--handoff PATH] [--output PATH] --json
+      orbit compact-evidence --task PATH --evidence PATH [--output PATH]
+                             [--cleanup-transient|--dry-run-cleanup] --json
 
     Builds a durable evidence summary from task/evidence/handoff inputs. The
     summary keeps counts, latest verdicts, content hashes, rule references, and
@@ -277,7 +295,11 @@ COMMAND_HELP = {
 
     Options:
       --handoff PATH   Handoff packet to summarize and hash.
-      --output PATH    Write the durable summary to PATH.
+      --output PATH    Write the one-per-task durable summary to PATH. Defaults
+                       to knowledge.durable_summary_dir/<task>.json.
+      --cleanup-transient  After summarizing, remove only structured transient
+                           refs under Orbit runtime directories.
+      --dry-run-cleanup    Show the same cleanup set without deleting files.
   HELP
   "docs" => <<~HELP,
     Usage:
@@ -310,7 +332,8 @@ COMMAND_HELP = {
       --json           Emit machine-readable handoff packet.
 
     Options:
-      --output PATH     Write the handoff packet to PATH.
+      --output PATH     Write the handoff packet to PATH. Defaults to the single
+                        canonical .orbit/handoffs/<task>.json path.
       --record-state    Record --output path into loop state artifacts.
 
     Notes:

@@ -77,7 +77,11 @@ def validate_rule_resolution_reference(result, evidence_path, evidence, task = n
     if !task_sha256.is_a?(String) || task_sha256.empty?
       validation_error(result, "evidence_file.rule_resolution.task_sha256", "Attached rule resolution must record task_sha256.")
     elsif task["__orbit_path"] && task_sha256 != sha256_file(task["__orbit_path"])
-      validation_error(result, "evidence_file.rule_resolution.task_sha256", "Attached rule resolution task_sha256 does not match current task.")
+      pre_freeze_sha = Array(task["revision_history"]).first&.dig("pre_freeze_task_sha256")
+      pre_freeze_compatible = task_revision_frozen?(task) && task["revision_number"].to_i == 1 && task_sha256 == pre_freeze_sha
+      unless pre_freeze_compatible
+        validation_error(result, "evidence_file.rule_resolution.task_sha256", "Attached rule resolution task_sha256 does not match current task revision.")
+      end
     end
 
     resolved_role = resolution["resolved_role"]
@@ -102,6 +106,11 @@ def validate_implementation_records_for_task(result, records, task)
   records.each_with_index do |record, index|
     next unless record.is_a?(Hash) && record["kind"] == "implementation"
 
+    expected_task_sha = task["__orbit_path"] ? sha256_file(task["__orbit_path"]) : nil
+    if task_revision_frozen?(task)
+      next unless evidence_record_revision_eligible?(record, task, "implementation", expected_task_sha)
+    end
+
     ctx = record["role_execution_context"]
     unless ctx.is_a?(Hash)
       validation_error(result, "evidence_file.records[#{index}].role_execution_context", "implementation evidence must include role_execution_context.")
@@ -124,9 +133,8 @@ def validate_implementation_records_for_task(result, records, task)
       end
     end
 
-    if ctx["task_sha256"].is_a?(String) && task["__orbit_path"]
-      expected = sha256_file(task["__orbit_path"])
-      validation_error(result, "evidence_file.records[#{index}].role_execution_context.task_sha256", "implementation evidence task_sha256 does not match current task.") if expected && ctx["task_sha256"] != expected
+    if ctx["task_sha256"].is_a?(String) && task["__orbit_path"] && !task_revision_frozen?(task)
+      validation_error(result, "evidence_file.records[#{index}].role_execution_context.task_sha256", "implementation evidence task_sha256 does not match current task.") if expected_task_sha && ctx["task_sha256"] != expected_task_sha
     end
 
     if ctx["owner_role"] != task_owner_role(task)
@@ -166,7 +174,13 @@ end
 def implementation_override_record_valid_for_task?(record, task, now: Time.now.utc)
   return false unless record.is_a?(Hash) && record["kind"] == "implementation_instance_override"
   return false unless record["status"] == "pass"
-  return false unless record["task_sha256"] == sha256_file(task["__orbit_path"])
+  current_sha = sha256_file(task["__orbit_path"])
+  task_matches = if task_revision_frozen?(task)
+                   evidence_record_revision_eligible?(record, task, "implementation", current_sha)
+                 else
+                   record["task_sha256"] == current_sha
+                 end
+  return false unless task_matches
   return false unless record["from_role"] == task_implementation_authority(task)
   return false unless record["from_instance"] == task_assigned_instance(task)
   return false unless record["authorized_by_role"] == task_owner_role(task)
@@ -207,7 +221,11 @@ def validate_implementation_overrides_for_task(result, records, task)
   records.each_with_index do |record, index|
     next unless record.is_a?(Hash) && record["kind"] == "implementation_instance_override"
 
-    unless record["task_sha256"] == sha256_file(task["__orbit_path"])
+    if task_revision_frozen?(task)
+      next unless evidence_record_revision_eligible?(record, task, "implementation", sha256_file(task["__orbit_path"]))
+    end
+
+    unless task_revision_frozen?(task) || record["task_sha256"] == sha256_file(task["__orbit_path"])
       validation_error(result, "evidence_file.records[#{index}].task_sha256", "implementation_instance_override task_sha256 does not match current task.")
     end
     unless record["from_instance"] == task_assigned_instance(task)
@@ -556,7 +574,7 @@ end
 
 def gate_passed?(records, kind, task_sha256: nil, task: nil, evidence: nil)
   result = { "errors" => [], "warnings" => [] }
-  latest = latest_valid_gate_record(result, records, kind, task_sha256)
+  latest = latest_valid_gate_record(result, records, kind, task_sha256, task: task)
   latest&.fetch("status", nil) == "pass" && runtime_identity_gate_blocking_reason(latest, evidence, task, task_sha256, kind).nil?
 end
 
@@ -594,7 +612,7 @@ def gate_status(records, kind, task = nil, task_sha256: nil, evidence: nil)
   # Slice 9: arbitration is authoritative for which record can pass the gate.
   # When a current task_sha256 is supplied, stale verdicts and records missing task_sha256
   # cannot close the gate. raw_latest is kept for flag reporting even when no record is accepted.
-  arbitration = verdict_arbitration_for_gate(records, kind, task_sha256)
+  arbitration = verdict_arbitration_for_gate(records, kind, task_sha256, task: task)
   raw_latest = latest_record_for_kind(records, evidence_record_kind, structured_gate_only: true, gate_identity_required: false)
   stale_verdict_only = task_sha256 && arbitration["accepted_record"].nil? && arbitration["has_stale"]
   latest = stale_verdict_only ? nil : (arbitration["accepted_record"] || raw_latest)
@@ -631,9 +649,10 @@ def gate_status(records, kind, task = nil, task_sha256: nil, evidence: nil)
   write_policy_blocked = !write_violations.empty? && write_policy_enforcement == "strict" && expected_gate_role(kind) != nil
   stored_task_sha256 = raw_latest ? record_task_sha256_from(raw_latest) : nil
   stored_rules_context_sha256 = latest ? record_rules_context_sha256_from(latest) : nil
-  missing_task_sha256 = latest.is_a?(Hash) && latest["structured_submit"] == true && expected_gate_role(kind) != nil && stored_task_sha256.nil?
+  revision_eligible = latest.is_a?(Hash) && task_revision_frozen?(task) && evidence_record_revision_eligible?(latest, task, kind, task_sha256)
+  missing_task_sha256 = latest.is_a?(Hash) && latest["structured_submit"] == true && expected_gate_role(kind) != nil && stored_task_sha256.nil? && !revision_eligible
   task_sha256_blocked = missing_task_sha256
-  stale_task_sha256 = !!(task_sha256 && stored_task_sha256 && stored_task_sha256 != task_sha256)
+  stale_task_sha256 = !!(task_sha256 && stored_task_sha256 && stored_task_sha256 != task_sha256 && !revision_eligible)
   stale_blocked = stale_task_sha256 && write_policy_enforcement == "strict"
   missing_rules_context_sha256 = latest.is_a?(Hash) && latest["structured_submit"] == true && expected_gate_role(kind) != nil && stored_rules_context_sha256.nil?
   rules_context_blocked = missing_rules_context_sha256 && write_policy_enforcement == "strict"

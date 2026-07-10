@@ -94,6 +94,8 @@ orbit state start --task .orbit/tasks/current-task.yaml
 
 `task.yaml`、`evidence.yaml/json`、`loop-state.yaml` 是 CLI gate 的主输入。Markdown task contract、review-report、test-report 可以作为人读证据或附件，但不能替代结构化 task/evidence/state。`--evidence` 参数必须传 evidence manifest 文件，不能传 evidence 目录。reviewer/tester 不要直接编辑 `.orbit/evidence*.json` 来提交 verdict；必须先写独立 report 文件，再运行 `orbit evidence submit`，让 CLI 生成结构化身份、校验 schema 并安全写入 manifest。
 
+execution-ready task 在 `orbit state start` 时冻结为显式 `revision_id`。冻结后直接修改 scope、acceptance、quality outcome、risk 或 gate 合同会让 validate fail closed；应先完成目标字段编辑，再用 `orbit revision create --task ... --reason ... --change-type ... --json` 记录新 revision。每个 evidence record 绑定 revision id/number；Orbit 根据 change type 精确失效 implementation/review/test/design/release，而 documentation-only revision 可以保留未受影响 gate。rules resolution 按 `(task revision, role, rules hash)` 缓存在 `.orbit/cache/rules/`，相同输入直接复用，不重复生成。
+
 推荐命令：
 
 ```bash
@@ -158,6 +160,8 @@ tester/test task 或带 required test gate 的 implementation task 会包含 `te
 `orbit docs alias` 维护 `.orbit/docs-registry.json` 中的 stable doc id、current path、content hash 和 updated_at。evidence、task 或 handoff 需要长期引用重要文档时，优先引用 stable doc id，并在文档移动后只更新 registry，不批量重写历史 evidence。`orbit docs check` 会检查 alias target 是否存在、content hash 是否匹配、open 目录是否存在已关闭但未归档或未索引文档，以及 archive 目录是否有 README。
 
 `orbit compact-evidence` 从 task/evidence/handoff 生成 `orbit-durable-evidence-summary-v1` 摘要。摘要保留 task/evidence/handoff 的路径和 sha256、record 计数、latest verdict、rule resolution 引用、source documents、artifact refs、latest review/test verdict、closure checklist、known gaps 和 handoff audit summary；它不复制长日志、截图、server output 或完整 rule context。长期文档应优先保留 compact summary、final evidence manifest 和 handoff summary；过程中的 rule context、resolution、pane transcript、screenshots、logs 和 server output 默认是 transient artifact，用路径和 hash 引用。
+
+持久记录使用项目相对路径。handoff 只使用 canonical `.orbit/handoffs/`（singular `.orbit/handoff/` 会被拒绝）；compact summary 默认写入 `.orbit/roles.yaml` 的 `knowledge.durable_summary_dir`，每个 task 固定一份 `<task>.json`，因此可在 clone 后直接阅读。`--dry-run-cleanup` 先列出可清理的 structured transient refs，`--cleanup-transient` 只删除 Orbit runtime 目录下 lifecycle=transient 的文件，不删除 durable summary 或任意用户文件。
 
 Design-first 任务使用独立 lifecycle：`drafting -> review_requested -> changes_requested|user_confirmed -> coding_ready`。`orbit state start` 遇到 `task_type` 包含 `design` 或 `analysis` 的 task 会从 `drafting` 开始；`coding_ready` 只能从 `user_confirmed` 进入，并且 evidence manifest 必须同时有结构化 review pass 和包含 `user_confirmed` / user confirmation / 用户确认 的 pass evidence。review pass 不能单独让 design task 进入 coding。
 

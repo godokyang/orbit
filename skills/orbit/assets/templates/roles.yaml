@@ -7,6 +7,11 @@ operation_defaults:
   implementation_authority: lead
   assigned_instance: lead-main
 
+knowledge:
+  durable_summary_dir: orbit-summaries
+  handoff_dir: .orbit/handoffs
+  transient_artifacts_local_only: true
+
 capability_registry:
   task_contract.write:
     kind: service_controlled

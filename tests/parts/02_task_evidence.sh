@@ -1477,7 +1477,9 @@ cp .orbit/loop-state.yaml "$RISKY_STATE"
 ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["artifacts"]["evidence_file"]=File.expand_path(ARGV[1]); File.write(p, YAML.dump(y))' "$RISKY_STATE" "$RISKY_EVIDENCE"
 "$CLI" audit --task "$IMPL_TASK" --evidence "$RISKY_EVIDENCE" --state "$RISKY_STATE" --json >"$TMPROOT/audit-risky-evidence.json"
 json_assert 'audit lowers release trust on runtime guardrail warnings' "$TMPROOT/audit-risky-evidence.json" 'j["trusted_for_handoff"] == true && j["trusted_for_done"] == true && j["trusted_for_release"] == false && j["warnings"].any? { |w| w["source"] == "evidence_file.regression_guard" } && j["warnings"].any? { |w| w["source"] == "evidence_file.release_surface.gaps" }'
-expect_failure 'handoff record-state requires output' "$CLI" handoff --task "$IMPL_TASK" --evidence "$IMPL_EVIDENCE" --state .orbit/loop-state.yaml --record-state --json
+"$CLI" handoff --task "$IMPL_TASK" --evidence "$IMPL_EVIDENCE" --state .orbit/loop-state.yaml --record-state --json >"$TMPROOT/default-handoff.json"
+test -f .orbit/handoffs/implementation-task.json
+pass 'handoff record-state uses canonical default output'
 cp .orbit/loop-state.yaml "$TMPROOT/audit-drift-state.yaml"
 ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["current_task"]=File.expand_path(ARGV[1]); File.write(p, YAML.dump(y))' "$TMPROOT/audit-drift-state.yaml" "$TASK"
 if "$CLI" audit --task "$IMPL_TASK" --evidence "$IMPL_EVIDENCE" --state "$TMPROOT/audit-drift-state.yaml" --json >"$TMPROOT/audit-drift.json"; then

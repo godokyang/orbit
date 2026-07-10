@@ -281,6 +281,10 @@ def rule_resolution(options)
   roles, instances = load_project_config(result)
   task = load_task(result, options["task"])
   result["task_sha256"] = sha256_file(File.expand_path(options["task"])) if task && options["task"]
+  if task_revision_frozen?(task)
+    result["task_revision_id"] = task["revision_id"]
+    result["task_revision_number"] = task["revision_number"]
+  end
   evidence = options["evidence"] ? load_evidence_manifest(File.expand_path(options["evidence"])) : nil
 
   with_rule_resolution_identity(options) do
@@ -313,8 +317,74 @@ def rule_artifact_identity(document)
     "resolved_instance" => source["resolved_instance"] || source["instance"],
     "task_path" => source.dig("sources", "task_rules", "path"),
     "task_sha256" => source["task_sha256"],
+    "task_revision_id" => source["task_revision_id"],
     "valid" => source["valid"]
   }
+end
+
+def rule_resolution_fingerprint(result)
+  sources = result.is_a?(Hash) ? result["sources"] : nil
+  entries = []
+  if sources.is_a?(Hash)
+    %w[orbit_default project_rules rule_packs].each do |group|
+      Array(sources[group]).each do |entry|
+        next unless entry.is_a?(Hash)
+
+        path = entry["absolute_path"] || entry["path"]
+        expanded = path.to_s.empty? ? nil : File.expand_path(path)
+        entries << {
+          "group" => group,
+          "id" => entry["id"],
+          "path" => entry["path"],
+          "sha256" => expanded && File.file?(expanded) ? sha256_file(expanded) : nil
+        }.compact
+      end
+    end
+    task_rules = sources["task_rules"].is_a?(Hash) ? sources["task_rules"].reject { |key, _value| key == "path" } : {}
+    entries << {
+      "group" => "task_rules",
+      "sha256" => revision_value_digest(task_rules)
+    }
+  end
+  Digest::SHA256.hexdigest(JSON.generate(entries))
+end
+
+def cached_rule_resolution(result)
+  return result unless result.is_a?(Hash) && result["valid"] == true
+
+  revision = result["task_revision_id"] || (result["task_sha256"] ? "sha256:#{result["task_sha256"]}" : "no-task")
+  role = result["resolved_role"].to_s
+  rules_hash = rule_resolution_fingerprint(result)
+  cache_key = Digest::SHA256.hexdigest(JSON.generate([revision, role, rules_hash]))
+  relative_path = File.join(".orbit", "cache", "rules", "#{cache_key}.json")
+  cache_path = File.expand_path(relative_path)
+  if File.file?(cache_path)
+    cached = JSON.parse(File.read(cache_path))
+    response = JSON.parse(JSON.generate(cached))
+    %w[instance resolved_instance role_sources capabilities permissions conflicts warnings checks valid].each do |field|
+      response[field] = result[field] if result.key?(field)
+    end
+    response["cache"] ||= {}
+    response["cache"]["status"] = "hit"
+    return response
+  end
+
+  result["generated_at"] = Time.now.utc.iso8601
+  result["rules_hash"] = rules_hash
+  result["cache"] = {
+    "key" => cache_key,
+    "status" => "miss",
+    "path" => relative_path,
+    "identity" => {
+      "task_revision" => revision,
+      "role" => role,
+      "rules_hash" => rules_hash
+    }
+  }
+  write_file_atomically(cache_path, "#{JSON.pretty_generate(result)}\n")
+  result
+rescue JSON::ParserError
+  result
 end
 
 def assert_rule_output_overwrite_allowed!(output_path, result)
@@ -327,6 +397,11 @@ def assert_rule_output_overwrite_allowed!(output_path, result)
     old_value = existing_identity[field].to_s
     new_value = new_identity[field].to_s
     next if old_value.empty? || new_value.empty? || old_value == new_value
+    if field == "task_sha256" && !existing_identity["task_revision_id"].to_s.empty? &&
+       !new_identity["task_revision_id"].to_s.empty? &&
+       existing_identity["task_revision_id"] != new_identity["task_revision_id"]
+      next
+    end
 
     usage_error("Refusing to overwrite rule artifact #{output_path}: #{field} would change from #{old_value.inspect} to #{new_value.inspect}.")
   end
@@ -503,6 +578,7 @@ end
 def rules(args)
   options = parse_rules_args(args)
   result = rule_resolution(options)
+  result = cached_rule_resolution(result) if options["subcommand"] == "resolve"
   result = rules_context_pack(result) if options["subcommand"] == "print-context"
   json = "#{JSON.pretty_generate(result)}\n"
 
@@ -510,7 +586,9 @@ def rules(args)
     output_path = File.expand_path(options["output"])
     FileUtils.mkdir_p(File.dirname(output_path))
     assert_rule_output_overwrite_allowed!(output_path, result)
-    File.write(output_path, json)
+    existing = File.file?(output_path) ? (JSON.parse(File.read(output_path)) rescue nil) : nil
+    same_cache_key = existing.is_a?(Hash) && existing.dig("cache", "key") == result.dig("cache", "key")
+    write_file_atomically(output_path, json) unless same_cache_key
   end
 
   print json

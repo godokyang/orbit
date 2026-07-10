@@ -45,6 +45,14 @@ def validate_evidence_record(result, source, record)
   validate_negative_evidence_field(result, source, record)
   validate_user_outcomes_record(result, source, record)
   validate_artifact_refs_record(result, source, record)
+  if record.key?("task_revision_id") || record.key?("task_revision_number")
+    unless record["task_revision_id"].is_a?(String) && record["task_revision_id"].match?(/\Ar\d+-[0-9a-f]{12}\z/)
+      validation_error(result, "#{source}.task_revision_id", "task_revision_id must use r<number>-<12 hex>.")
+    end
+    unless record["task_revision_number"].is_a?(Integer) && record["task_revision_number"].positive?
+      validation_error(result, "#{source}.task_revision_number", "task_revision_number must be a positive integer.")
+    end
+  end
 end
 
 def validate_runtime_identity_record_field(result, source, runtime_identity)
@@ -558,7 +566,7 @@ rescue ArgumentError
   nil
 end
 
-def latest_valid_gate_record(result, records, expected_kind, task_sha256 = nil)
+def latest_valid_gate_record(result, records, expected_kind, task_sha256 = nil, task: nil)
   evidence_record_kind = GATE_KIND_EVIDENCE_RECORD_KIND[expected_kind] || expected_kind
   candidates = []
 
@@ -581,7 +589,7 @@ def latest_valid_gate_record(result, records, expected_kind, task_sha256 = nil)
 
   # Slice 9: when a current task_sha256 is provided, arbitration is authoritative.
   # A stale (old task sha) verdict cannot be the accepted gate record.
-  arbitration = verdict_arbitration_for_gate(records, expected_kind, task_sha256)
+  arbitration = verdict_arbitration_for_gate(records, expected_kind, task_sha256, task: task)
   accepted = arbitration["accepted_record"]
   # The accepted record must also pass identity validation (gate_record_identity_valid?)
   # since arbitration's candidate collection does not filter by role identity.
@@ -627,11 +635,11 @@ def evidence_position_not_newer?(left, right)
 end
 
 def validate_gate_verdict(result, records, expected_kind, task = nil, task_sha256: nil)
-  latest = latest_valid_gate_record(result, records, expected_kind, task_sha256)
+  latest = latest_valid_gate_record(result, records, expected_kind, task_sha256, task: task)
   unless latest
     # Distinguish stale-verdict-only from truly missing.
     if task_sha256
-      arbitration = verdict_arbitration_for_gate(records, expected_kind, task_sha256)
+      arbitration = verdict_arbitration_for_gate(records, expected_kind, task_sha256, task: task)
       if arbitration["has_stale"]
         validation_error(result, "evidence_file.records.#{expected_kind}",
           "Latest #{expected_kind} verdict is for an old task revision (stale) and cannot close the current gate.")

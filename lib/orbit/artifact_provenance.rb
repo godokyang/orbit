@@ -18,8 +18,7 @@ rescue SystemCallError
 end
 
 def artifact_task_revision(task, task_path = nil)
-  revision = task.is_a?(Hash) ? task["revision_id"].to_s : ""
-  return revision unless revision.empty?
+  return task["revision_id"] if task_revision_frozen?(task)
 
   path = task_path || (task.is_a?(Hash) ? task["__orbit_path"] : nil)
   path && File.file?(path) ? "sha256:#{sha256_file(path)}" : ""
@@ -65,7 +64,23 @@ def artifact_reference_shape_errors(ref)
   errors
 end
 
-def artifact_reference_fact_errors(ref, task, task_path = nil)
+def artifact_revision_eligible?(ref, task, evidence_kind)
+  return false unless task_revision_frozen?(task)
+
+  entry = Array(task["revision_history"]).find do |revision|
+    revision.is_a?(Hash) && (
+      revision["revision_id"] == ref["task_revision"] ||
+      "sha256:#{revision["pre_freeze_task_sha256"]}" == ref["task_revision"]
+    )
+  end
+  return false unless entry
+
+  revision_entries_after(task, entry["number"]).none? do |later|
+    Array(later["invalidated_evidence"]).include?(evidence_kind)
+  end
+end
+
+def artifact_reference_fact_errors(ref, task, task_path = nil, evidence_kind: nil)
   errors = artifact_reference_shape_errors(ref)
   return errors unless ref.is_a?(Hash) && artifact_relative_path?(ref["path"])
 
@@ -81,7 +96,9 @@ def artifact_reference_fact_errors(ref, task, task_path = nil)
   expected_git_head = artifact_current_git_head
   errors << "artifact git_head does not match current checkout" unless ref["git_head"] == expected_git_head
   expected_revision = artifact_task_revision(task, task_path)
-  errors << "artifact task_revision does not match the current task" unless !expected_revision.empty? && ref["task_revision"] == expected_revision
+  revision_matches = !expected_revision.empty? && ref["task_revision"] == expected_revision
+  revision_matches ||= artifact_revision_eligible?(ref, task, evidence_kind) if evidence_kind
+  errors << "artifact task_revision does not match the current task" unless revision_matches
   begin
     declared = Time.iso8601(ref["created_at"].to_s)
     file_time = File.mtime(real_artifact).utc
@@ -179,16 +196,22 @@ def validate_artifact_refs_record(result, source, record)
   end
 end
 
-def current_implementation_artifact_record(manifest, task_revision)
+def current_implementation_artifact_record(manifest, task, task_path = nil)
   records = manifest.is_a?(Hash) && manifest["records"].is_a?(Array) ? manifest["records"] : []
+  task_revision = artifact_task_revision(task, task_path)
   records.reverse.find do |entry|
-    entry.is_a?(Hash) && entry["kind"] == "implementation" && entry["status"] == "pass" &&
-      (task_revision.empty? || entry.dig("role_execution_context", "task_sha256").to_s.empty? || "sha256:#{entry.dig("role_execution_context", "task_sha256")}" == task_revision)
+    next false unless entry.is_a?(Hash) && entry["kind"] == "implementation" && entry["status"] == "pass"
+
+    if task_revision_frozen?(task)
+      evidence_record_revision_eligible?(entry, task, "implementation")
+    else
+      task_revision.empty? || "sha256:#{entry.dig("role_execution_context", "task_sha256")}" == task_revision
+    end
   end
 end
 
-def current_implementation_artifact_ids(manifest, task_revision)
-  record = current_implementation_artifact_record(manifest, task_revision)
+def current_implementation_artifact_ids(manifest, task, task_path = nil)
+  record = current_implementation_artifact_record(manifest, task, task_path)
   Array(record && record["artifact_refs"]).map { |ref| ref.is_a?(Hash) ? ref["id"] : nil }.compact
 end
 
@@ -197,7 +220,7 @@ def artifact_provenance_assessment(task, record, manifest: nil, task_path: nil)
   refs = record.is_a?(Hash) && record["artifact_refs"].is_a?(Array) ? record["artifact_refs"] : []
   failures = []
   refs.each do |ref|
-    artifact_reference_fact_errors(ref, task, task_path).each do |message|
+    artifact_reference_fact_errors(ref, task, task_path, evidence_kind: record["kind"]).each do |message|
       failures << { "artifact_id" => ref.is_a?(Hash) ? ref["id"] : nil, "reason" => message }
     end
   end
@@ -214,9 +237,8 @@ def artifact_provenance_assessment(task, record, manifest: nil, task_path: nil)
     end
     if %w[review test].include?(kind) && task.dig("artifact_provenance", "require_gate_cross_reference") == true
       referenced = Array(record["implementation_artifact_refs"])
-      task_revision = artifact_task_revision(task, task_path)
-      implementation_record = current_implementation_artifact_record(manifest, task_revision)
-      current_ids = current_implementation_artifact_ids(manifest, task_revision)
+      implementation_record = current_implementation_artifact_record(manifest, task, task_path)
+      current_ids = current_implementation_artifact_ids(manifest, task, task_path)
       failures << { "reason" => "missing_implementation_artifact_reference" } if referenced.empty? || current_ids.empty? || (referenced & current_ids).empty?
       if implementation_record
         implementation_assessment = artifact_provenance_assessment(task, implementation_record, manifest: manifest, task_path: task_path)

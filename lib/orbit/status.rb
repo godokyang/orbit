@@ -93,11 +93,15 @@ rescue SystemExit
   { "verification" => "pending", "reason" => "identity_unavailable" }
 end
 
-def status_record_summary(record, current_task_sha256 = nil)
+def status_record_summary(record, current_task_sha256 = nil, task: nil, evidence_kind: nil)
   return { "status" => "missing" } unless record.is_a?(Hash)
 
   record_task_sha = record.dig("role_execution_context", "task_sha256").to_s
-  current_revision = current_task_sha256.to_s.empty? || record_task_sha.empty? || record_task_sha == current_task_sha256
+  current_revision = if task_revision_frozen?(task) && evidence_kind
+                       evidence_record_revision_eligible?(record, task, evidence_kind, current_task_sha256)
+                     else
+                       current_task_sha256.to_s.empty? || record_task_sha.empty? || record_task_sha == current_task_sha256
+                     end
   {
     "status" => current_revision ? record["status"] : "stale",
     "record_status" => record["status"],
@@ -113,11 +117,11 @@ end
 def status_activity_summary(task, evidence, task_sha256)
   records = evidence.is_a?(Hash) && evidence["records"].is_a?(Array) ? evidence["records"] : []
   implementation = records.reverse.find { |record| record.is_a?(Hash) && record["kind"] == "implementation" }
-  activity = { "implementation" => status_record_summary(implementation, task_sha256) }
+  activity = { "implementation" => status_record_summary(implementation, task_sha256, task: task, evidence_kind: "implementation") }
 
   %w[review test].each do |kind|
     gate = gate_status(records, kind, task, task_sha256: task_sha256, evidence: evidence || {})
-    summary = status_record_summary(gate["latest"], task_sha256)
+    summary = status_record_summary(gate["latest"], task_sha256, task: task, evidence_kind: kind)
     summary["status"] = gate["passed"] ? "pass" : summary["status"]
     summary["blocking_reason"] = gate["blocking_reason"] unless gate["passed"]
     activity[kind] = summary.compact

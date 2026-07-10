@@ -38,8 +38,20 @@ def evidence_record_summary(records)
     counts[kind][status] += 1
     latest[kind] = record
 
-    Array(record["artifacts"]).each { |artifact| artifacts << artifact.to_s unless artifact.to_s.empty? }
-    artifacts << record["source_report"].to_s if record["source_report"].is_a?(String) && !record["source_report"].empty?
+    Array(record["artifacts"]).each do |artifact|
+      next if artifact.to_s.empty?
+
+      artifacts << (Pathname.new(artifact.to_s).absolute? ? path_inside_project(artifact.to_s) : artifact.to_s)
+    end
+    Array(record["artifact_refs"]).each do |ref|
+      next unless ref.is_a?(Hash)
+
+      artifacts << ref.select { |key, _value| %w[id path sha256 producer_command created_at git_head task_revision lifecycle].include?(key) }
+    end
+    if record["source_report"].is_a?(String) && !record["source_report"].empty?
+      source_report = record["source_report"]
+      artifacts << (Pathname.new(source_report).absolute? ? path_inside_project(source_report) : source_report)
+    end
   end
 
   {
@@ -90,6 +102,11 @@ def parse_compact_evidence_args(args)
       options["output"] = option_value(args, "--output")
     when /\A--output=(.+)\z/
       options["output"] = Regexp.last_match(1)
+    when "--cleanup-transient"
+      options["cleanup_transient"] = true
+    when "--dry-run-cleanup"
+      options["cleanup_transient"] = true
+      options["dry_run_cleanup"] = true
     when "--json"
       options["json"] = true
     else
@@ -110,10 +127,52 @@ def compact_file_ref(path)
   expanded = File.expand_path(path)
   {
     "path" => path_inside_project(expanded),
-    "absolute_path" => expanded,
     "exists" => File.file?(expanded),
     "sha256" => File.file?(expanded) ? file_sha256(expanded) : nil
   }
+end
+
+def compact_cleanup_transient_artifacts(evidence, dry_run: false)
+  allowed_roots = %w[.orbit/test-artifacts/ .orbit/runtime/ .orbit/cache/ .orbit/rules/ .orbit/handoffs/]
+  candidates = Array(evidence["records"]).flat_map do |record|
+    Array(record.is_a?(Hash) ? record["artifact_refs"] : nil)
+  end.select do |ref|
+    ref.is_a?(Hash) && ref["lifecycle"] == "transient" && artifact_relative_path?(ref["path"]) &&
+      allowed_roots.any? { |prefix| ref["path"].start_with?(prefix) }
+  end
+  planned = candidates.map { |ref| ref["path"] }.uniq
+  removed = []
+  unless dry_run
+    planned.each do |relative|
+      path = File.expand_path(relative)
+      next unless File.file?(path)
+      next unless File.realpath(path).start_with?("#{File.realpath(Dir.pwd)}/")
+
+      File.delete(path)
+      removed << relative
+    end
+  end
+  {
+    "requested" => true,
+    "dry_run" => dry_run,
+    "planned" => planned,
+    "removed" => removed,
+    "policy" => "structured transient refs under Orbit runtime roots only"
+  }
+end
+
+def portable_paths_for_summary(value)
+  case value
+  when Hash
+    value.each_with_object({}) { |(key, item), memo| memo[key] = portable_paths_for_summary(item) }
+  when Array
+    value.map { |item| portable_paths_for_summary(item) }
+  when String
+    root = "#{File.expand_path(Dir.pwd)}/"
+    value.start_with?(root) ? value.delete_prefix(root) : value
+  else
+    value
+  end
 end
 
 def compact_evidence(args)
@@ -144,6 +203,8 @@ def compact_evidence(args)
     "schema_version" => "orbit-durable-evidence-summary-v1",
     "project" => task["project"] || evidence["project"] || File.basename(Dir.pwd),
     "generated_at" => Time.now.utc.iso8601,
+    "task_revision_id" => task["revision_id"],
+    "task_revision_number" => task["revision_number"],
     "compact_summary" => {
       "task_sha256" => task_sha256,
       "evidence_sha256" => evidence_ref&.dig("sha256"),
@@ -161,6 +222,8 @@ def compact_evidence(args)
     "task_summary" => {
       "execution_contract" => task_execution_contract(task),
       "task_type" => task["task_type"],
+      "revision_id" => task["revision_id"],
+      "revision_number" => task["revision_number"],
       "objective" => task["objective"],
       "quality_outcome" => task["quality_outcome"],
       "acceptance_count" => Array(task["acceptance"]).length,
@@ -188,12 +251,18 @@ def compact_evidence(args)
     }
   }
 
+  output_path = if options["output"]
+                  File.expand_path(options["output"])
+                else
+                  File.expand_path(File.join(durable_summary_directory, "#{durable_task_slug(task_path)}.json"))
+                end
+  result["durable_output"] = path_inside_project(output_path)
+  result["cleanup"] = compact_cleanup_transient_artifacts(evidence, dry_run: options["dry_run_cleanup"] == true) if options["cleanup_transient"]
+  result = portable_paths_for_summary(result)
+
   json = "#{JSON.pretty_generate(result)}\n"
-  if options["output"]
-    output_path = File.expand_path(options["output"])
-    FileUtils.mkdir_p(File.dirname(output_path))
-    File.write(output_path, json)
-  end
+  FileUtils.mkdir_p(File.dirname(output_path))
+  write_file_atomically(output_path, json)
   print json
 end
 

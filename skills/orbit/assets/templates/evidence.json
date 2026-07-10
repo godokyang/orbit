@@ -17,7 +17,10 @@
       "ci_release_readiness": "v1",
       "protocol_schema_versioning": "v1",
       "orbit_dogfood_governance": "v1",
-      "landing_governance_calibration": "v1"
+      "landing_governance_calibration": "v1",
+      "user_journey_evidence": "v1",
+      "artifact_provenance": "v1",
+      "revision_durable_knowledge": "v1"
     }
   },
   "project": "example",

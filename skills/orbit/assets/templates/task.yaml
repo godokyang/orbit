@@ -6,8 +6,14 @@ schema_semantics:
     schema_semantics: v1
     user_journey_evidence: v1
     artifact_provenance: v1
+    revision_durable_knowledge: v1
 project: example
 task_type: slice_review
+revision_id: draft
+revision_number: 0
+revision_signature: ""
+revision_snapshot: {}
+revision_history: []
 change_surface: internal
 risk_sinks: []
 real_path_required: false

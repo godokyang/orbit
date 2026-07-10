@@ -693,6 +693,7 @@ def validate_task(result, task_path)
   validate_parent_goal(result, task) if parent_goal_required?(task)
 
   validate_task_runtime_fields(result, task)
+  validate_task_revision_contract(result, task)
 
   validate_task_risk_contract(result, task)
   validate_task_user_journeys(result, task)

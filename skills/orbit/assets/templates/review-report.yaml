@@ -6,6 +6,7 @@ schema_semantics:
     quality_outcome: v1
     schema_semantics: v1
     artifact_provenance: v1
+    revision_durable_knowledge: v1
 verdict: blocked
 summary: "TODO: one-sentence review conclusion."
 source_message_id: "TODO: herdr:<pane-or-message-id> or report:<path>"

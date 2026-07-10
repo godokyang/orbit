@@ -226,7 +226,7 @@ orbit handoff \
   --task .orbit/tasks/current-task.yaml \
   --evidence .orbit/evidence/current-evidence.json \
   --state .orbit/loop-state.yaml \
-  --output .orbit/handoff/current-handoff.json \
+  --output .orbit/handoffs/current-handoff.json \
   --record-state \
   --json
 ```

@@ -64,7 +64,6 @@ progress_update() {
   fi
 
   if [ "$current" -eq 1 ] ||
-     [ "$current" -eq "$total" ] ||
      [ $((current % 10)) -eq 0 ]; then
     install_log "[$current/$total] $action $file"
   fi
@@ -171,6 +170,7 @@ lib/orbit/validate_evidence_record.rb
 lib/orbit/validate_gate_commands.rb
 lib/orbit/audit_tools.rb
 lib/orbit/project_profile_risk.rb
+lib/orbit/revision_knowledge.rb
 lib/orbit/user_journey.rb
 lib/orbit/artifact_provenance.rb
 lib/orbit/gate_lease.rb

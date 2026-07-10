@@ -450,7 +450,7 @@ def implementation_override_summary(evidence, task)
   }
 end
 
-def stale_records_audit(evidence, task_sha256)
+def stale_records_audit(evidence, task_sha256, task = nil)
   return nil unless evidence.is_a?(Hash) && task_sha256
 
   records = evidence["records"].is_a?(Array) ? evidence["records"] : []
@@ -460,6 +460,8 @@ def stale_records_audit(evidence, task_sha256)
 
     stored = record_task_sha256_from(record)
     next unless stored && stored != task_sha256
+    evidence_kind = record["kind"]
+    next if task_revision_frozen?(task) && evidence_record_revision_eligible?(record, task, evidence_kind, task_sha256)
 
     stale << {
       "index" => idx,
@@ -523,6 +525,13 @@ def audit_state_consistency(task_path, evidence_path, state, evidence, task = ni
       blocking_findings << audit_finding("state_file.current_task", "Loop state must reference the audited task.")
     elsif File.expand_path(current_task) != task_path
       blocking_findings << audit_finding("state_file.current_task", "Loop state current_task does not match audited task.")
+    end
+    state_declares_revision = state.key?("task_revision_id") || state.key?("task_revision_number")
+    if task_revision_frozen?(task) && state_declares_revision && (
+      state["task_revision_id"] != task["revision_id"] ||
+      state["task_revision_number"] != task["revision_number"]
+    )
+      blocking_findings << audit_finding("state_file.task_revision", "Loop state task revision does not match the audited task revision.")
     end
 
     artifacts = state["artifacts"]
@@ -786,7 +795,7 @@ def audit(args)
     "parent_goal_summary" => pg_summary,
     "write_policy_summary" => write_policy_audit(evidence, task),
     "implementation_override_summary" => implementation_override_summary(evidence, task),
-    "stale_records_summary" => stale_records_audit(evidence, current_task_sha256),
+    "stale_records_summary" => stale_records_audit(evidence, current_task_sha256, task),
     "worktree_safety_summary" => worktree_safety_summary(evidence),
     "destructive_action_summary" => destructive_action_audit(evidence),
     "rule_resolution_summary" => rule_resolution_summary(evidence, evidence_path),

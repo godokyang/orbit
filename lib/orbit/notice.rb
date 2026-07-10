@@ -113,9 +113,11 @@ def notice_add(options)
   record = {
     "schema_version" => "orbit-notice-v1",
     "id" => id,
-    "task" => task_path,
+    "task" => project_relative_persisted_path(task_path, field: "task"),
     "task_sha256" => sha256_file(task_path),
-    "evidence_ref" => options["evidence"] ? File.expand_path(options["evidence"]) : nil,
+    "task_revision_id" => task_revision_frozen?(task) ? task["revision_id"] : nil,
+    "task_revision_number" => task_revision_frozen?(task) ? task["revision_number"] : nil,
+    "evidence_ref" => options["evidence"] ? project_relative_persisted_path(options["evidence"], field: "evidence") : nil,
     "evidence_record" => evidence_item && {
       "kind" => evidence_item["kind"],
       "record_index" => evidence_item["record_index"],
@@ -175,8 +177,11 @@ def evidence_record_context(record)
   record["role_execution_context"].is_a?(Hash) ? record["role_execution_context"] : {}
 end
 
-def evidence_record_matches_task?(record, task_hash)
+def evidence_record_matches_task?(record, task_hash, task = nil)
   return true unless task_hash
+  if task_revision_frozen?(task)
+    return evidence_record_revision_eligible?(record, task, record["kind"], task_hash)
+  end
 
   ctx = evidence_record_context(record)
   return true unless ctx["task_sha256"].is_a?(String)
@@ -191,7 +196,7 @@ def completion_notice_required_items(task, evidence)
   latest_by_event = {}
   Array(evidence["records"]).each_with_index do |record, index|
     next unless record.is_a?(Hash) && record["status"] == "pass"
-    next unless evidence_record_matches_task?(record, task_hash)
+    next unless evidence_record_matches_task?(record, task_hash, task)
 
     event = COMPLETION_NOTICE_EVENTS_BY_KIND[record["kind"]]
     next unless event
@@ -239,7 +244,14 @@ def completion_notice_validation_errors(notice, item, task, evidence, task_hash,
   errors = []
   errors << "schema_version_mismatch" unless notice["schema_version"] == "orbit-notice-v1"
   errors << "status_not_open_or_acked" unless %w[open acked].include?(notice["status"])
-  errors << "task_sha256_mismatch" unless task_hash && notice["task_sha256"] == task_hash
+  notice_task_match = task_hash && notice["task_sha256"] == task_hash
+  if !notice_task_match && task_revision_frozen?(task) && notice["task_revision_number"].to_i.positive?
+    evidence_kind = COMPLETION_NOTICE_EVENTS_BY_KIND.key(notice["event"])
+    notice_task_match = revision_entries_after(task, notice["task_revision_number"]).none? do |entry|
+      Array(entry["invalidated_evidence"]).include?(evidence_kind)
+    end
+  end
+  errors << "task_sha256_mismatch" unless notice_task_match
   if evidence_path
     expected_evidence_ref = File.expand_path(evidence_path)
     actual_evidence_ref = notice["evidence_ref"].to_s.empty? ? nil : File.expand_path(notice["evidence_ref"])
@@ -278,7 +290,17 @@ def completion_notice_summary(task, evidence, evidence_path: nil)
   task_hash = task.is_a?(Hash) && task["__orbit_path"] ? sha256_file(task["__orbit_path"]) : nil
   required_items = completion_notice_required_items(task, evidence)
   required_events = required_items.map { |item| item["event"] }
-  notices = notice_records(owner_role).select { |notice| notice["task_sha256"] == task_hash }
+  pre_freeze_sha = Array(task["revision_history"]).first&.dig("pre_freeze_task_sha256") if task_revision_frozen?(task)
+  notices = notice_records(owner_role).select do |notice|
+    revision_match = notice["task_revision_id"] == task["revision_id"] && notice["task_revision_number"] == task["revision_number"]
+    if task_revision_frozen?(task) && !revision_match && notice["task_revision_number"].to_i.positive?
+      evidence_kind = COMPLETION_NOTICE_EVENTS_BY_KIND.key(notice["event"])
+      revision_match = revision_entries_after(task, notice["task_revision_number"]).none? do |entry|
+        Array(entry["invalidated_evidence"]).include?(evidence_kind)
+      end
+    end
+    revision_match || notice["task_sha256"] == task_hash || (task["revision_number"].to_i == 1 && notice["task_sha256"] == pre_freeze_sha)
+  end
   valid_notices = []
   invalid_notices = []
   notices.each do |notice|

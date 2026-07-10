@@ -51,7 +51,8 @@ ORBIT_FEATURE_VERSIONS = {
   "orbit_dogfood_governance" => "v1",        # dogfood index + retrospective done criteria (Slice 15)
   "landing_governance_calibration" => "v1",  # compatibility policy + multi-user ownership + self-review guard + backup migration (Slice 16)
   "user_journey_evidence" => "v1",           # real-path journey contracts, project hooks, and test evidence
-  "artifact_provenance" => "v1"              # hashed, revision-bound artifact references and cross-gate traceability
+  "artifact_provenance" => "v1",             # hashed, revision-bound artifact references and cross-gate traceability
+  "revision_durable_knowledge" => "v1"        # explicit revisions, selective invalidation, cache, and portable summaries
 }.freeze
 
 ORBIT_KNOWN_REPORT_TEMPLATE_VERSIONS = %w[review-report-v1 test-report-v1].freeze

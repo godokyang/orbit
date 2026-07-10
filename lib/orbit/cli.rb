@@ -8,6 +8,7 @@ require_relative "runtime_resolver"
 require_relative "runtime_commands"
 require_relative "schema_version"
 require_relative "project_profile_risk"
+require_relative "revision_knowledge"
 require_relative "user_journey"
 require_relative "artifact_provenance"
 require_relative "task_launch_dispatch"
@@ -116,6 +117,12 @@ def run_orbit_cli(argv)
       exit 0
     end
     rules(argv)
+  when "revision"
+    if help_requested?(argv) || (argv.first == "create" && help_requested?(argv[1..] || []))
+      print_command_help("revision")
+      exit 0
+    end
+    revision(argv)
   when "runtime"
     runtime(argv)
   when "start"

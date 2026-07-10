@@ -946,6 +946,10 @@ def evidence_submit(options)
     "artifacts" => artifacts
   }
   extra.each { |field, value| record[field] = value unless value.nil? } if extra.is_a?(Hash)
+  if task_revision_frozen?(task)
+    record["task_revision_id"] = task["revision_id"]
+    record["task_revision_number"] = task["revision_number"]
+  end
   %w[test_environment quality_measurement duration resource_usage ux_quality artifact_quality cleanup_status].each do |field|
     record[field] = report[field] if report.key?(field)
   end

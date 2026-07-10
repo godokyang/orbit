@@ -38,10 +38,12 @@ def parse_handoff_args(args)
   %w[task state evidence].each do |name|
     usage_error("Missing required option: --#{name}") if options[name].nil? || options[name].empty?
   end
-  usage_error("handoff currently requires --json") unless options["json"]
-  if options["record_state"] && (options["output"].nil? || options["output"].empty?)
-    usage_error("--record-state requires --output so loop state can reference a stable handoff artifact.")
+  options["output"] ||= File.join(DEFAULT_HANDOFF_DIR, "#{durable_task_slug(options["task"])}.json")
+  normalized_output = options["output"].tr("\\", "/")
+  if normalized_output.start_with?(".orbit/handoff/") || normalized_output.include?("/.orbit/handoff/")
+    usage_error("Use the canonical .orbit/handoffs/ directory; singular .orbit/handoff/ is no longer supported.")
   end
+  usage_error("handoff currently requires --json") unless options["json"]
 
   options
 end
@@ -57,11 +59,12 @@ def record_handoff_artifact(state_path, handoff_path)
   update_loop_state(state_path) do |state|
     state["artifacts"] ||= {}
     state_error("Loop state artifacts must be a mapping when present.") unless state["artifacts"].is_a?(Hash)
-    state["artifacts"]["handoff_packet"] = File.expand_path(handoff_path)
+    relative_handoff = project_relative_persisted_path(handoff_path, field: "handoff")
+    state["artifacts"]["handoff_packet"] = relative_handoff
     state["updated_at"] = now
     append_state_history(state, {
       "event" => "handoff",
-      "handoff_packet" => File.expand_path(handoff_path),
+      "handoff_packet" => relative_handoff,
       "created_at" => now
     })
     state
@@ -495,9 +498,9 @@ def manual_handoff_payload(resolution, task_path, state_path, evidence_path, nex
     "schema_version" => "orbit-manual-delivery-payload-v1",
     "format" => profile["format"] || resolution["payload_format"] || "json",
     "delivery" => profile["delivery"] || profile["action"] || "manual",
-    "task" => task_path,
-    "state" => state_path,
-    "evidence" => evidence_path,
+    "task" => project_relative_persisted_path(task_path, field: "task"),
+    "state" => project_relative_persisted_path(state_path, field: "state"),
+    "evidence" => project_relative_persisted_path(evidence_path, field: "evidence"),
     "required_action" => next_action
   }
 end
@@ -674,7 +677,12 @@ def handoff(args)
   packet = {
     "schema_version" => "orbit-handoff-v1",
     "project" => task.is_a?(Hash) && task["project"] ? task["project"] : File.basename(Dir.pwd),
-    "task" => task_path,
+    "task" => project_relative_persisted_path(task_path, field: "task"),
+    "task_revision" => task_revision_frozen?(task) ? {
+      "revision_id" => task["revision_id"],
+      "revision_number" => task["revision_number"],
+      "latest_change" => Array(task["revision_history"]).last
+    } : nil,
     "execution_contract" => execution_contract,
     "current_phase" => current_phase,
     "completion_semantics" => completion_semantics_for_phase(
@@ -697,7 +705,7 @@ def handoff(args)
     "parent_goal_status" => task.is_a?(Hash) ? task["parent_goal_status"] : nil,
     "destructive_actions_summary" => destructive_action_audit(evidence),
     "readable_summary" => {
-      "current_task" => task_path,
+      "current_task" => project_relative_persisted_path(task_path, field: "task"),
       "phase" => current_phase,
       "next_action" => next_action,
       "latest_review_verdict" => latest_gate_verdicts.dig("review", "status"),
@@ -734,6 +742,7 @@ def handoff(args)
     "risk_level_tradeoff_summary" => risk_level_tradeoff_summary(task),
     "blocking_errors" => blocking_errors
   }
+  packet = portable_paths_for_summary(packet)
 
   json = JSON.pretty_generate(packet)
   write_handoff_artifact(output_path, json) if output_path

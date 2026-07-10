@@ -67,7 +67,7 @@ end
 # current_task_sha256 is supplied). Records for older revisions, or records missing task_sha256
 # when a current task revision is known, are stale; earlier records superseded by a newer record
 # within the accepted revision are superseded.
-def verdict_arbitration_for_gate(records, gate_kind, current_task_sha256 = nil)
+def verdict_arbitration_for_gate(records, gate_kind, current_task_sha256 = nil, task: nil)
   candidates = gate_kind_candidate_records(records, gate_kind)
   result = {
     "gate" => gate_kind,
@@ -82,7 +82,11 @@ def verdict_arbitration_for_gate(records, gate_kind, current_task_sha256 = nil)
   return result if candidates.empty?
 
   current_revision, stale =
-    if current_task_sha256
+    if task_revision_frozen?(task)
+      candidates.partition do |candidate|
+        evidence_record_revision_eligible?(candidate[:record], task, gate_kind, current_task_sha256)
+      end
+    elsif current_task_sha256
       partition = candidates.partition do |c|
         stored = record_task_sha256_from(c[:record])
         stored.is_a?(String) && !stored.empty? && stored == current_task_sha256
@@ -114,8 +118,8 @@ def verdict_arbitration_for_gate(records, gate_kind, current_task_sha256 = nil)
 end
 
 # Returns the accepted record for a gate per arbitration, or nil.
-def accepted_gate_record(records, gate_kind, current_task_sha256 = nil)
-  verdict_arbitration_for_gate(records, gate_kind, current_task_sha256)["accepted_record"]
+def accepted_gate_record(records, gate_kind, current_task_sha256 = nil, task: nil)
+  verdict_arbitration_for_gate(records, gate_kind, current_task_sha256, task: task)["accepted_record"]
 end
 
 # Parses and validates a gate_lease mapping carried by a record. Returns nil when absent or malformed.
@@ -209,7 +213,7 @@ end
 def verdict_arbitration_summary(task, evidence, current_task_sha256 = nil)
   records = evidence.is_a?(Hash) && evidence["records"].is_a?(Array) ? evidence["records"] : []
   required = required_evidence_kinds(task).map do |kind|
-    arb = verdict_arbitration_for_gate(records, kind, current_task_sha256)
+    arb = verdict_arbitration_for_gate(records, kind, current_task_sha256, task: task)
     {
       "gate" => kind,
       "accepted_record_id" => arb["accepted_record_id"],

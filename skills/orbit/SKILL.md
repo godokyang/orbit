@@ -57,6 +57,7 @@ Orbit 是面向 AI agent 的任务闭环协议。manual file/JSON protocol 是�
    - 用 `orbit rules resolve --task task.yaml --output .orbit/rules/current-resolution.json --json` 生成本轮规则解析审计产物；还没有 task 时先用 `orbit rules resolve --output .orbit/rules/current-resolution.json --json`。
    - 用 `orbit rules print-context --task task.yaml --output .orbit/rules/current-context.json --json` 生成本轮读取清单，并读取其中 `required_files`；还没有 task 时先用 `orbit rules print-context --output .orbit/rules/current-context.json --json`。项目规则不得替代默认规则。
    - 用 `orbit new-task` 创建 task contract。
+   - `orbit state start` 会把 execution-ready task 冻结为 revision 1。启动后如果 scope、acceptance、risk、规则或其他合同字段变化，先修改 task，再运行 `orbit revision create --task ... --reason ... --change-type ... --json`；不要手改后继续沿用旧 gate。Orbit 只失效该 change type 影响的 evidence。
    - 用 `orbit evidence init/add/from-report/submit/waive/show` 管理 evidence manifest；implementation evidence 必须用 `orbit evidence add --file ... --kind implementation --status pass --summary ... --task task.yaml` 写入，`from-report` 不能创建 implementation evidence。`artifact_provenance.required: true` 时，先用 `orbit artifact inspect` 为实际输出生成带 hash/git head/task revision 的引用，再在 implementation PASS 中提交 changed files、verification 和 `--artifact-ref`；review/test report 必须引用当前 implementation artifact。review/test verdict 必须由 reviewer/tester 自己写独立 report 文件，并用 `orbit evidence submit --file ... --report ... --task ... --json` 写入。gate 只承认 identity 匹配对应角色且 artifact 仍可验证的 record。不要用 `evidence add`、`from-report` 或直接编辑 `.orbit/evidence*.json` 来提交 review/test。
    - 用 `orbit evidence attach-rule --file ... --rule-resolution .orbit/rules/current-resolution.json --task task.yaml` 把本轮规则解析产物挂到 evidence manifest。
    - 默认先用只读的 `orbit status` / `orbit next` 看当前 task、身份、implementation/gate 状态、blocker 和下一条命令；它们只能从 task/state/evidence/runtime 派生，不能建立新的状态事实源。
@@ -64,6 +65,7 @@ Orbit 是面向 AI agent 的任务闭环协议。manual file/JSON protocol 是�
    - 用 `orbit wait-gate --task ... --evidence ... --json` 检查 required review/test gates 当前是否 ready。
    - 用 `orbit validate --task ... --evidence ... --state ... --json` 做结构化 gate-ready 检查。
    - 用 `orbit audit --task ... --evidence ... --state ... --json` 做 done/handoff/release 前审计。
+   - handoff 统一写入 `.orbit/handoffs/`；`orbit compact-evidence` 默认在 `knowledge.durable_summary_dir` 为每个 task 维护一份可版本化摘要。长日志、截图、rules cache 和 runtime output 保持 transient；生成摘要后才可用 `--cleanup-transient` 清理结构化 transient refs。
    - 用 `orbit handoff --task ... --state ... --evidence ... --json` 生成机器可读交接包。
 4. 只有以下情况才向用户要输入：目标不明确、缺少外部权限或密钥、需要破坏性操作、需要公开发布、需要访问用户私有系统但当前环境没有授权。
 5. 读取 reference 时按场景分层：

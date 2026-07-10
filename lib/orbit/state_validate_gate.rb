@@ -477,26 +477,33 @@ def state_start(options)
     state_error("Task is not execution-ready:\n- #{readiness_errors.join("\n- ")}")
   end
   owner_role = resolve_owner_role(options["owner_role"])
+  task = freeze_task_revision!(task_path)
+  task["__orbit_path"] = task_path
   now = Time.now.utc.iso8601
   start_phase = design_task?(task) ? "drafting" : "working"
   previous_phase = nil
+  persisted_task_path = project_relative_persisted_path(task_path, field: "task")
 
   update_loop_state(state_path) do |state|
     previous_phase = state["phase"]
     state["project"] = task["project"] || File.basename(Dir.pwd)
-    state["current_task"] = task_path
+    state["current_task"] = persisted_task_path
     state["phase"] = start_phase
     state["owner_role"] = owner_role
     state["status"] = start_phase
     state["updated_at"] = now
     state["artifacts"] ||= {}
     state_error("Loop state artifacts must be a mapping when present.") unless state["artifacts"].is_a?(Hash)
-    state["artifacts"]["task_file"] = task_path
+    state["artifacts"]["task_file"] = persisted_task_path
+    state["task_revision_id"] = task["revision_id"]
+    state["task_revision_number"] = task["revision_number"]
     append_state_history(state, {
       "event" => "start",
       "from" => previous_phase,
       "to" => start_phase,
-      "task" => task_path,
+      "task" => persisted_task_path,
+      "task_revision_id" => task["revision_id"],
+      "task_revision_number" => task["revision_number"],
       "owner_role" => owner_role,
       "created_at" => now
     })
@@ -542,7 +549,7 @@ def state_transition(options)
     state["updated_at"] = now
     state["artifacts"] ||= {}
     state_error("Loop state artifacts must be a mapping when present.") unless state["artifacts"].is_a?(Hash)
-    state["artifacts"]["evidence_file"] = File.expand_path(options["evidence"]) if options["evidence"]
+    state["artifacts"]["evidence_file"] = project_relative_persisted_path(options["evidence"], field: "evidence") if options["evidence"]
 
     history_entry = {
       "event" => "transition",
@@ -550,7 +557,7 @@ def state_transition(options)
       "to" => target_phase,
       "created_at" => now
     }
-    history_entry["evidence"] = File.expand_path(options["evidence"]) if options["evidence"]
+    history_entry["evidence"] = project_relative_persisted_path(options["evidence"], field: "evidence") if options["evidence"]
     history_entry["reason"] = reason if target_phase == "blocked"
     append_state_history(state, history_entry)
     state
@@ -652,7 +659,7 @@ def state_progress(options)
       "message" => message,
       "created_at" => now
     }
-    history_entry["evidence"] = File.expand_path(options["evidence"]) if options["evidence"]
+    history_entry["evidence"] = project_relative_persisted_path(options["evidence"], field: "evidence") if options["evidence"]
     append_state_history(state, history_entry)
     state
   end

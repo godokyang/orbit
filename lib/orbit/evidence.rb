@@ -421,7 +421,7 @@ def implementation_instance_override_record!(options)
   evidence_error("--to-instance #{to_instance.inspect} resolves to #{to_role.inspect}, not #{contract["implementation_authority"].inspect}.") unless to_role == contract["implementation_authority"]
   expiry = parse_override_expiry!(options["expires_at"])
 
-  {
+  record = {
     "kind" => "implementation_instance_override",
     "status" => "pass",
     "summary" => options["summary"].to_s.empty? ? options["reason"].to_s : options["summary"].to_s,
@@ -438,6 +438,11 @@ def implementation_instance_override_record!(options)
     "expires_at" => expiry&.utc&.iso8601,
     "no_expiry" => options["no_expiry"] == true
   }.compact
+  if task_revision_frozen?(task)
+    record["task_revision_id"] = task["revision_id"]
+    record["task_revision_number"] = task["revision_number"]
+  end
+  record
 end
 
 def apply_structured_gate_defaults!(record, source_message_id)
@@ -810,6 +815,10 @@ def evidence_add(options)
     task_path = File.expand_path(options["task"])
     task = load_yaml(task_path)
     task["__orbit_path"] = task_path
+    if task_revision_frozen?(task)
+      record["task_revision_id"] = task["revision_id"]
+      record["task_revision_number"] = task["revision_number"]
+    end
     manifest_preview = load_evidence_manifest(path) rescue nil
     artifact_assessment = artifact_provenance_assessment(task, record, manifest: manifest_preview, task_path: task_path)
     record["artifact_validation"] = artifact_assessment if artifact_assessment["required"] || !Array(record["artifact_refs"]).empty?
