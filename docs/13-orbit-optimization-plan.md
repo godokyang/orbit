@@ -472,8 +472,11 @@ start
 | runtime proof 生命周期 | 已实现（复核加固） | `d8b6bae` | 一次性 challenge 兑换 300 秒 renewable session attestation；本地过期优先于 provider valid |
 | 试用指标配对与仲裁 | 已实现（复核加固） | `27e8b1d` | snapshot 按 `task_id + stage` 配对，报告 baseline/after/delta、分母与 missing/observed_zero；gate wait 使用当前 revision 仲裁 |
 | 稳定知识进入版本历史 | 已实现（复核加固） | 本文档提交 | 本方案、两份评估、ADR 与 `.orbit/README.md` 进入 Git；运行缓存继续本地化 |
+| 父任务进度与 revision 隔离 | 已实现（收尾加固） | `9da93d4` | `parent_goal` 合同留在 task，动态 `parent_goal_status` 进入 loop state；冻结任务 progress 后哈希不变且 validate 通过 |
+| 零事件计数的独立观测分母 | 已实现（收尾加固） | `4573d22` | baseline/after 配对任务作为观测分母，失败、缺陷、用户追问事件只作为指标值；零事件报告 `observed_zero` |
+| next action 动态实例解析 | 已实现（收尾加固） | `fad1940` | 从缺失 gate 的 roles 和 `instances.yaml` 解析目标；多实例时返回候选并要求选择，不生成虚假 dispatch 命令 |
 
-本轮复核加固后的最终完整回归为 `REAL_TESTS_PASS count=1087`。测试同时保留了旧 Herdr、无 provider、手写 `herdr_verified`、identity pending、artifact 漂移、跨任务证据复用、凭证本地过期和真实路径缺失等负向场景，避免新能力通过放宽旧 gate 获得绿色结果。
+本轮复核加固后的最终完整回归为 `REAL_TESTS_PASS count=1090`。测试同时保留了旧 Herdr、无 provider、手写 `herdr_verified`、identity pending、artifact 漂移、跨任务证据复用、凭证本地过期和真实路径缺失等负向场景，避免新能力通过放宽旧 gate 获得绿色结果。
 
 ### 当前产品行为
 
@@ -482,7 +485,9 @@ start
 - Herdr 实现受控 `orbit-proof status/prove/verify` 且完整 E2E 为 pass 时，Orbit 才进入 `automatic`；resolver 会持续复核 proof，失效后立即 fail closed。
 - 常见正式任务使用 `orbit task draft` → 填写业务合同 → `orbit task start`；从 init 计共 3 条 Orbit 命令。
 - 轻量问答/低风险一次性修改由 trigger/classifier 保持非正式路径，不强制创建完整 task。
-- `orbit metrics capture|record|report` 从现在开始收集 30 天试用所需的结构化计数，不保存 prompt、报告正文或自由文本；成本类 snapshot 必须形成同一 `task_id` 的 baseline/after 配对后才进入变化量统计。
+- `parent_goal` 是冻结 task 中的合同；`parent_goal_status` 是 loop state 中的动态执行状态。进度心跳不会再造成 task revision 漂移。
+- `orbit next` 根据 gate role 查找真实配置实例；唯一实例可直接生成 dispatch 建议，多实例必须先由用户选择。
+- `orbit metrics capture|record|report` 从现在开始收集 30 天试用所需的结构化计数，不保存 prompt、报告正文或自由文本；成本类 snapshot 必须形成同一 `task_id` 的 baseline/after 配对后才进入变化量统计，计数类指标也使用这些配对任务作为独立观测分母。
 
 ### 尚需真实观察期验证的结果
 
