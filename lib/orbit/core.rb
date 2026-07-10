@@ -89,6 +89,7 @@ HELP = <<~HELP
     orbit instances status --json
     orbit bind-pane --instance NAME --pane PANE [--tab TAB] [--workspace WORKSPACE] [--canonical-pane PANE] --json
     orbit classify-intent --text TEXT --json
+    orbit classify-intent --text TEXT --intent INTENT --reason TEXT [--task PATH] --json
     orbit compact-evidence --task PATH --evidence PATH [--handoff PATH] [--output PATH] --json
     orbit docs alias --id ID --path PATH [--registry PATH] --json
     orbit docs check [--registry PATH] [--open-dir PATH] [--archive-dir PATH] --json
@@ -281,14 +282,24 @@ COMMAND_HELP = {
   "classify-intent" => <<~HELP,
     Usage:
       orbit classify-intent --text TEXT --json
+      orbit classify-intent --text TEXT --intent INTENT --reason TEXT
+                            [--task PATH] --json
 
-    Classifies a user request into an Orbit workflow intent and returns the
-    default task/evidence/gate policy. This is deterministic keyword routing,
-    not semantic LLM classification.
+    Reports every matched workflow signal, candidate conflict, and the selected
+    advisory workflow intent. Generic words such as 问题 are not discussion signals.
 
     Required:
       --text TEXT  User request or summarized request.
       --json       Emit machine-readable classification.
+
+    Options:
+      --intent VALUE  Explicitly override the selected intent.
+      --reason TEXT   Required audit reason whenever --intent is supplied.
+      --task PATH     Read the authoritative structured risk from an Orbit task.
+
+    Notes:
+      Natural-language intent and risk are recommendations only. They cannot
+      lower task_risk, change structured surfaces/sinks, or skip required gates.
   HELP
   "runtime" => <<~HELP,
     Usage:

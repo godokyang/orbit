@@ -630,7 +630,10 @@ end
 def parse_classify_intent_args(args)
   options = {
     "json" => false,
-    "text" => nil
+    "text" => nil,
+    "intent" => nil,
+    "reason" => nil,
+    "task" => nil
   }
 
   until args.empty?
@@ -642,6 +645,18 @@ def parse_classify_intent_args(args)
       options["text"] = option_value(args, "--text")
     when /\A--text=(.+)\z/
       options["text"] = Regexp.last_match(1)
+    when "--intent"
+      options["intent"] = option_value(args, "--intent")
+    when /\A--intent=(.+)\z/
+      options["intent"] = Regexp.last_match(1)
+    when "--reason"
+      options["reason"] = option_value(args, "--reason")
+    when /\A--reason=(.+)\z/
+      options["reason"] = Regexp.last_match(1)
+    when "--task"
+      options["task"] = option_value(args, "--task")
+    when /\A--task=(.+)\z/
+      options["task"] = Regexp.last_match(1)
     else
       usage_error("Unknown classify-intent option: #{arg}")
     end
@@ -649,6 +664,14 @@ def parse_classify_intent_args(args)
 
   usage_error("classify-intent requires --json") unless options["json"]
   usage_error("classify-intent requires --text TEXT") if options["text"].to_s.strip.empty?
+  allowed = %w[discussion design docs_maintenance coding review test handoff]
+  if options["intent"] && !allowed.include?(options["intent"])
+    usage_error("--intent must be one of #{allowed.join('|')}.")
+  end
+  if options["intent"] && options["reason"].to_s.strip.empty?
+    usage_error("--intent requires a non-empty --reason so the override is auditable.")
+  end
+  usage_error("--reason can only be used with --intent.") if options["reason"] && !options["intent"]
   options
 end
 
@@ -689,21 +712,21 @@ def classify_intent_policy(intent, text)
              {
                "formal_task" => true,
                "evidence" => true,
-               "gates" => false,
+               "gates" => true,
                "default_task_type" => "review"
              }
            when "test"
              {
                "formal_task" => true,
                "evidence" => true,
-               "gates" => false,
+               "gates" => true,
                "default_task_type" => "test"
              }
            when "handoff"
              {
                "formal_task" => true,
                "evidence" => true,
-               "gates" => false,
+               "gates" => true,
                "default_task_type" => "handoff"
              }
            else
@@ -722,31 +745,96 @@ def classify_intent_policy(intent, text)
     policy.delete("skip_task_reason_required")
   end
 
+  policy["authority"] = "advisory_only"
+  policy["task_contract_authoritative"] = true
+  policy["may_skip_required_gates"] = false
+
   policy
+end
+
+INTENT_SIGNAL_RULES = [
+  { "id" => "handoff_action", "intent" => "handoff", "weight" => 100, "pattern" => /\bhandoff\b|交接|接手/i },
+  { "id" => "test_action", "intent" => "test", "weight" => 95, "pattern" => /\b(?:test|qa|e2e)\b|测试|验收|验证/i },
+  { "id" => "review_action", "intent" => "review", "weight" => 95, "pattern" => /\breview\b|评审|审查|审视|评估/i },
+  { "id" => "explicit_discussion", "intent" => "discussion", "weight" => 110, "pattern" => /先.{0,8}(?:讨论|聊|看看)|讨论|怎么看|觉得|brainstorm|只.{0,8}(?:解释|说明)|不要.{0,8}(?:开|创建|启动).{0,5}(?:任务|task)|是什么[？?]?/i },
+  { "id" => "design_action", "intent" => "design", "weight" => 70, "pattern" => /\b(?:design|analysis|plan)\b|设计|方案|分析|计划/i },
+  { "id" => "docs_edit", "intent" => "docs_maintenance", "weight" => 105, "pattern" => /(?:fix|改|修复|更新|整理).{0,24}(?:typo|错别字|readme|docs?|documents?|文档)|(?:typo|错别字|readme|docs?|documents?|文档).{0,24}(?:fix|改|修复|更新|整理)/i },
+  { "id" => "docs_target", "intent" => "docs_maintenance", "weight" => 55, "pattern" => /\b(?:docs?|documents?|readme|archive)\b|文档|归档/i },
+  { "id" => "coding_action", "intent" => "coding", "weight" => 90, "pattern" => /\b(?:fix|implement|coding|code|refactor|change|update|build|add|remove|deploy|release|publish|ship)\b|修复|实现|改代码|重构|修改|更新|新增|删除|开发|构建|发布|上线|部署|继续(?:实现|修改|开发)/i }
+].freeze
+
+INTENT_PRECEDENCE = %w[handoff test review coding docs_maintenance design discussion].freeze
+
+def matched_intent_signals(text, explicit_orbit)
+  signals = []
+  INTENT_SIGNAL_RULES.each do |rule|
+    matches = []
+    text.to_s.scan(rule["pattern"]) { matches << Regexp.last_match[0] }
+    next if matches.empty?
+
+    signals << {
+      "id" => rule["id"],
+      "intent" => rule["intent"],
+      "weight" => rule["weight"],
+      "matched_text" => matches.uniq
+    }
+  end
+  if explicit_orbit
+    signals << {
+      "id" => "explicit_orbit_execution",
+      "intent" => "coding",
+      "weight" => 120,
+      "matched_text" => ["explicit Orbit workflow request"]
+    }
+  end
+  signals
+end
+
+def intent_candidates(signals)
+  grouped = signals.group_by { |signal| signal["intent"] }
+  grouped.map do |intent, entries|
+    {
+      "intent" => intent,
+      "score" => entries.map { |entry| entry["weight"] }.max,
+      "signal_ids" => entries.map { |entry| entry["id"] }
+    }
+  end.sort_by do |candidate|
+    [-candidate["score"], INTENT_PRECEDENCE.index(candidate["intent"]) || INTENT_PRECEDENCE.length]
+  end
 end
 
 def classify_intent_text(text)
   normalized = text.to_s.downcase
-  checks = [
-    ["handoff", /handoff|交接|接手/],
-    ["test", /test|测试|e2e|qa|验证/],
-    ["review", /review|评审|审查|reviewer/],
-    ["discussion", /讨论|怎么看|觉得|建议|brainstorm|question|问题/],
-    ["design", /design|设计|方案|analysis|分析|计划/],
-    ["docs_maintenance", /docs|document|文档|归档|archive|readme/],
-    ["coding", /fix|implement|coding|code|改代码|修复|实现|继续/]
-  ]
-
-  matched = checks.find { |_intent, pattern| normalized.match?(pattern) }
-  intent = matched ? matched.first : "discussion"
   explicit_orbit = explicit_orbit_workflow_request?(normalized)
-  intent = "coding" if explicit_orbit && intent == "discussion"
+  signals = matched_intent_signals(normalized, explicit_orbit)
+  candidates = intent_candidates(signals)
+  selected = candidates.first
+  intent = selected ? selected["intent"] : "discussion"
+  conflicts = []
+  if candidates.length > 1
+    conflicts << {
+      "kind" => "multiple_workflow_signals",
+      "intents" => candidates.map { |candidate| candidate["intent"] },
+      "selected_intent" => intent,
+      "resolution" => "highest_specific_signal_weight_then_stable_precedence"
+    }
+  end
+  confidence = if selected.nil?
+                 "low"
+               elsif candidates.length == 1 || (selected["score"] - candidates[1]["score"] >= 20)
+                 "high"
+               else
+                 "medium"
+               end
 
   {
     "intent" => intent,
-    "confidence" => matched ? "medium" : "low",
-    "reason" => matched ? "Matched #{intent} workflow keywords." : "No strong workflow keyword matched; defaulting to discussion.",
-    "explicit_orbit_workflow" => explicit_orbit
+    "confidence" => confidence,
+    "reason" => selected ? "Selected #{intent} from all matched workflow signals." : "No strong workflow signal matched; defaulting to discussion without treating generic words such as 问题 as discussion evidence.",
+    "explicit_orbit_workflow" => explicit_orbit,
+    "matched_signals" => signals,
+    "candidate_intents" => candidates,
+    "conflicts" => conflicts
   }
 end
 
@@ -758,30 +846,86 @@ def intent_risk_recommendation(intent, text)
 
   # Priority 1: release/deploy signals always yield release risk.
   is_release = normalized.match?(/release|deploy|publish|ship|发布|上线|部署/)
-  return { "level" => "release", "rationale" => "Release/deploy intent requires release readiness evidence." } if is_release
+  return { "level" => "release", "rationale" => "Release/deploy language recommends release readiness evidence." } if is_release
+
+  is_sensitive = normalized.match?(/auth|authentication|authorization|permission|privacy|payment|billing|production data|delete data|migration|登录|认证|鉴权|权限|隐私|支付|账单|生产数据|删除数据|迁移/)
+  return { "level" => "strict", "rationale" => "Sensitive or destructive language recommends strict independent verification." } if is_sensitive
 
   # Priority 2: UI/behavior-changing signals yield standard risk.
-  is_ui_or_behavior = normalized.match?(/ui|ux|interface|button|form|page|screen|按钮|交互|页面|change|changing|修改|behavior/)
+  is_ui_or_behavior = normalized.match?(/ui|ux|interface|button|form|page|screen|按钮|交互|页面|change|changing|修改|behavior|修复|实现|审视|评估|功能效果/)
   return { "level" => "standard", "rationale" => "UI or behavior change requires review and test gates." } if is_ui_or_behavior
 
   # Priority 3: intent-based defaults.
   case intent
   when "discussion"
-    { "level" => "light", "rationale" => "Discussion does not require formal gates." }
+    { "level" => "light", "rationale" => "Discussion language recommends light handling only when no structured task exists; task gates remain authoritative." }
   when "docs_maintenance"
     affects_orbit = normalized.match?(/\.orbit|evidence|handoff|archive|rule/)
-    { "level" => affects_orbit ? "standard" : "light", "rationale" => affects_orbit ? "Docs change affects Orbit runtime; use standard." : "Light docs edit; no formal gate required." }
+    { "level" => affects_orbit ? "standard" : "light", "rationale" => affects_orbit ? "Docs change affects Orbit runtime; standard verification is recommended." : "Light docs language recommends minimal verification; task gates remain authoritative." }
   else
     { "level" => "standard", "rationale" => "Behavior-changing task; use standard risk level." }
   end
+end
+
+def task_risk_contract(task_path, recommendation)
+  unless task_path
+    return {
+      "source" => "task_contract_required",
+      "effective_level" => nil,
+      "recommendation_only" => recommendation["level"],
+      "classification_can_override" => false
+    }
+  end
+
+  expanded = File.expand_path(task_path)
+  task = load_yaml(expanded)
+  usage_error("classify-intent --task must reference an orbit-task-v1 mapping.") unless task.is_a?(Hash) && task["schema_version"] == "orbit-task-v1"
+  level = task.dig("task_risk", "level")
+  usage_error("classify-intent --task must define task_risk.level.") if level.to_s.empty?
+  {
+    "source" => "task_contract",
+    "task" => project_relative_persisted_path(expanded, field: "task"),
+    "effective_level" => level,
+    "change_surface" => task["change_surface"],
+    "risk_sinks" => task["risk_sinks"],
+    "recommendation_only" => recommendation["level"],
+    "classification_can_override" => false,
+    "recommendation_differs" => recommendation["level"] != level
+  }
+rescue StandardError => e
+  usage_error("Cannot read classify-intent task: #{e.message}")
 end
 
 def classify_intent(args)
   options = parse_classify_intent_args(args)
   text = options["text"].to_s
   classification = classify_intent_text(text)
+  detected_intent = classification["intent"]
+  override = nil
+  if options["intent"]
+    override = {
+      "applied" => true,
+      "detected_intent" => detected_intent,
+      "selected_intent" => options["intent"],
+      "reason" => options["reason"].strip
+    }
+    if detected_intent != options["intent"]
+      classification["conflicts"] << {
+        "kind" => "explicit_override",
+        "intents" => [detected_intent, options["intent"]],
+        "selected_intent" => options["intent"],
+        "resolution" => "audited_user_override"
+      }
+    end
+    classification["intent"] = options["intent"]
+    classification["confidence"] = "explicit"
+    classification["reason"] = "Explicit intent override applied: #{options["reason"].strip}"
+  end
+  recommendation = intent_risk_recommendation(classification["intent"], text)
+  recommendation["authority"] = "advisory_only"
+  recommendation["task_contract_authoritative"] = true
   result = {
-    "schema_version" => "orbit-intent-classification-v1",
+    "schema_version" => "orbit-intent-classification-v2",
     "project" => File.basename(Dir.pwd),
     "input" => {
       "text" => text
@@ -790,8 +934,14 @@ def classify_intent(args)
     "confidence" => classification["confidence"],
     "reason" => classification["reason"],
     "explicit_orbit_workflow" => classification["explicit_orbit_workflow"],
+    "detected_intent" => detected_intent,
+    "matched_signals" => classification["matched_signals"],
+    "candidate_intents" => classification["candidate_intents"],
+    "conflicts" => classification["conflicts"],
+    "override" => override || { "applied" => false },
     "policy" => classify_intent_policy(classification["intent"], text),
-    "risk_recommendation" => intent_risk_recommendation(classification["intent"], text),
+    "risk_recommendation" => recommendation,
+    "risk_contract" => task_risk_contract(options["task"], recommendation),
     "allowed_intents" => %w[discussion design docs_maintenance coding review test handoff]
   }
 
