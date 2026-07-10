@@ -110,7 +110,7 @@ def trial_collect_artifact_refs(value, refs = [])
   case value
   when Hash
     is_ref = value["schema_version"] == "orbit-artifact-ref-v1" ||
-             %w[id path sha256 producer_command created_at git_head task_revision lifecycle].all? { |field| value.key?(field) }
+             %w[id path sha256 producer_command created_at git_head task_id task_revision lifecycle].all? { |field| value.key?(field) }
     refs << (value["artifact"].is_a?(Hash) ? value["artifact"] : value) if is_ref
     value.each_value { |child| trial_collect_artifact_refs(child, refs) }
   when Array
@@ -140,25 +140,33 @@ end
 
 def trial_implementation_to_gate_wait(task, evidence)
   records = Array(evidence["records"]).select { |record| record.is_a?(Hash) }
-  implementation = records.select { |record| record["kind"] == "implementation" && record["status"] == "pass" }
-                          .map { |record| runtime_time(record["created_at"]) }.compact.max
+  task_sha256 = task["__orbit_path"] && File.file?(task["__orbit_path"]) ? sha256_file(task["__orbit_path"]) : nil
+  implementation = records.reverse.find do |record|
+    record["kind"] == "implementation" && record["status"] == "pass" &&
+      evidence_record_revision_eligible?(record, task, "implementation", task_sha256)
+  end
   return nil unless implementation
+  implementation_time = runtime_time(implementation["created_at"])
+  return nil unless implementation_time
   gate_times = required_evidence_kinds(task).reject { |kind| kind == "implementation" }.map do |kind|
-    records.select { |record| record["kind"] == kind && record["status"] == "pass" }
-           .map { |record| runtime_time(record["created_at"]) }.compact.max
+    gate = gate_status(records, kind, task, task_sha256: task_sha256, evidence: evidence)
+    gate["passed"] ? runtime_time(gate.dig("latest", "created_at")) : nil
   end
   return nil if gate_times.empty? || gate_times.any?(&:nil?)
 
-  [(gate_times.max - implementation).round, 0].max
+  [(gate_times.max - implementation_time).round, 0].max
 end
 
 def capture_trial_metrics(options)
   task_path = File.expand_path(options["task"])
   evidence_path = File.expand_path(options["evidence"])
   task = load_yaml(task_path)
+  task["__orbit_path"] = task_path if task.is_a?(Hash)
   evidence = load_yaml(evidence_path)
   usage_error("metrics capture task must be orbit-task-v1.") unless task.is_a?(Hash) && task["schema_version"] == "orbit-task-v1"
   usage_error("metrics capture evidence must be orbit-evidence-v1.") unless evidence.is_a?(Hash) && evidence["schema_version"] == "orbit-evidence-v1"
+  usage_error("metrics capture requires a valid task_id.") unless task_id_valid?(task["task_id"])
+  usage_error("metrics capture evidence task_id does not match the task.") unless evidence["task_id"] == task["task_id"]
   dimensions = {
     "stage" => options["stage"],
     "task_type" => task["task_type"],
@@ -168,6 +176,7 @@ def capture_trial_metrics(options)
     "implementation_to_gate_seconds" => trial_implementation_to_gate_wait(task, evidence)
   }.merge(trial_artifact_snapshot(evidence))
   event = trial_metric_event("task_snapshot", task: task_path, dimensions: dimensions)
+  event["task_id"] = task["task_id"]
   append_trial_metric_event(options["file"], event)
 end
 
@@ -223,37 +232,94 @@ def trial_median(values)
   sorted.length.odd? ? sorted[middle] : ((sorted[middle - 1] + sorted[middle]) / 2.0)
 end
 
+def trial_snapshot_pairs(snapshots)
+  latest = {}
+  snapshots.each do |event|
+    task_id = event["task_id"].to_s
+    stage = event.dig("dimensions", "stage").to_s
+    next unless task_id_valid?(task_id) && %w[baseline after].include?(stage)
+
+    key = [task_id, stage]
+    existing = latest[key]
+    latest[key] = event if existing.nil? || event["created_at"].to_s > existing["created_at"].to_s
+  end
+  task_ids = latest.keys.map(&:first).uniq
+  pairs = task_ids.map do |task_id|
+    baseline = latest[[task_id, "baseline"]]
+    after = latest[[task_id, "after"]]
+    next unless baseline && after
+
+    { "task_id" => task_id, "baseline" => baseline, "after" => after }
+  end.compact
+  [pairs, task_ids.length - pairs.length]
+end
+
+def trial_paired_metric_summary(pairs, field)
+  comparable = pairs.map do |pair|
+    baseline = pair.dig("baseline", "dimensions", field)
+    after = pair.dig("after", "dimensions", field)
+    next unless baseline.is_a?(Numeric) && after.is_a?(Numeric)
+
+    { "task_id" => pair["task_id"], "baseline" => baseline, "after" => after, "delta" => after - baseline }
+  end.compact
+  baselines = comparable.map { |row| row["baseline"] }
+  afters = comparable.map { |row| row["after"] }
+  deltas = comparable.map { |row| row["delta"] }
+  {
+    "denominator_pairs" => pairs.length,
+    "comparable_pairs" => comparable.length,
+    "missing_value_pairs" => pairs.length - comparable.length,
+    "baseline" => { "samples" => baselines.length, "total" => baselines.sum, "median" => trial_median(baselines) },
+    "after" => { "samples" => afters.length, "total" => afters.sum, "median" => trial_median(afters) },
+    "delta" => {
+      "samples" => deltas.length,
+      "total" => deltas.sum,
+      "median" => trial_median(deltas),
+      "improved" => deltas.count(&:negative?),
+      "unchanged" => deltas.count(&:zero?),
+      "worsened" => deltas.count(&:positive?)
+    },
+    "pairs" => comparable
+  }
+end
+
+def trial_coverage_state(observation_count, observed_value = nil)
+  return "missing" unless observation_count.to_i.positive?
+  return "observed_zero" if !observed_value.nil? && observed_value.respond_to?(:zero?) && observed_value.zero?
+
+  "observed"
+end
+
 def trial_metrics_report(options)
   now = Time.now.utc
   start_time = now - options["window_days"] * 86_400
   events = load_trial_metric_events(options["file"], start_time)
   snapshots = events.select { |event| event["metric"] == "task_snapshot" }
-  durations = snapshots.map { |event| event.dig("dimensions", "duration_seconds") }.compact
-  tokens = snapshots.map { |event| event.dig("dimensions", "tokens") }.compact
-  waits = snapshots.map { |event| event.dig("dimensions", "implementation_to_gate_seconds") }.compact
-  artifact_counts = snapshots.map { |event| event.dig("dimensions", "artifact_count") }.compact
-  artifact_bytes = snapshots.map { |event| event.dig("dimensions", "artifact_bytes") }.compact
+  pairs, unpaired_task_count = trial_snapshot_pairs(snapshots)
+  duration_summary = trial_paired_metric_summary(pairs, "duration_seconds")
+  token_summary = trial_paired_metric_summary(pairs, "tokens")
+  wait_summary = trial_paired_metric_summary(pairs, "implementation_to_gate_seconds")
+  artifact_count_summary = trial_paired_metric_summary(pairs, "artifact_count")
+  artifact_bytes_summary = trial_paired_metric_summary(pairs, "artifact_bytes")
   automatic = trial_group_counts(events, "automatic_session", "outcome")
   automatic_total = automatic.values.sum
   verified = automatic.fetch("verified", 0)
   metrics = {
     "task_cost" => {
-      "samples" => snapshots.length,
-      "duration_seconds_total" => durations.sum,
-      "duration_seconds_median" => trial_median(durations),
-      "tokens_total" => tokens.sum,
-      "tokens_median" => trial_median(tokens),
-      "by_task_type" => trial_group_counts(snapshots, "task_snapshot", "task_type"),
-      "by_risk_level" => trial_group_counts(snapshots, "task_snapshot", "risk_level")
+      "snapshot_events" => snapshots.length,
+      "paired_tasks" => pairs.length,
+      "unpaired_tasks" => unpaired_task_count,
+      "duration_seconds" => duration_summary,
+      "tokens" => token_summary,
+      "by_task_type" => trial_group_counts(pairs.map { |pair| pair["after"] }, "task_snapshot", "task_type"),
+      "by_risk_level" => trial_group_counts(pairs.map { |pair| pair["after"] }, "task_snapshot", "risk_level")
     },
     "artifact_footprint" => {
-      "samples" => artifact_counts.length,
-      "count_total" => artifact_counts.sum,
-      "bytes_total" => artifact_bytes.sum,
-      "count_median" => trial_median(artifact_counts),
-      "bytes_median" => trial_median(artifact_bytes)
+      "paired_tasks" => pairs.length,
+      "count" => artifact_count_summary,
+      "bytes" => artifact_bytes_summary
     },
-    "implementation_to_gate_wait" => { "samples" => waits.length, "median_seconds" => trial_median(waits) },
+    "implementation_to_gate_wait" => wait_summary,
     "workflow_failures" => trial_group_counts(events, "workflow_failure", "failure_kind"),
     "independent_defects" => {
       "total" => events.count { |event| event["metric"] == "independent_defect" },
@@ -270,14 +336,14 @@ def trial_metrics_report(options)
     }
   }
   coverage = {
-    "task_cost" => snapshots.empty? ? "missing" : "observed",
-    "artifact_footprint" => artifact_counts.empty? ? "missing" : "observed",
-    "implementation_to_gate_wait" => waits.empty? ? "missing" : "observed",
-    "workflow_failures" => metrics["workflow_failures"].empty? ? "missing" : "observed",
-    "independent_defects" => metrics.dig("independent_defects", "total").zero? ? "missing" : "observed",
-    "post_gate_user_defects" => metrics["post_gate_user_defects"].empty? ? "missing" : "observed",
-    "status_questions" => metrics["status_questions"].empty? ? "missing" : "observed",
-    "automatic_verified_ratio" => automatic_total.zero? ? "missing" : "observed"
+    "task_cost" => trial_coverage_state(duration_summary["comparable_pairs"], duration_summary.dig("delta", "total")),
+    "artifact_footprint" => trial_coverage_state(artifact_count_summary["comparable_pairs"], artifact_count_summary.dig("delta", "total")),
+    "implementation_to_gate_wait" => trial_coverage_state(wait_summary["comparable_pairs"], wait_summary.dig("delta", "total")),
+    "workflow_failures" => trial_coverage_state(metrics["workflow_failures"].values.sum),
+    "independent_defects" => trial_coverage_state(metrics.dig("independent_defects", "total")),
+    "post_gate_user_defects" => trial_coverage_state(metrics["post_gate_user_defects"].values.sum),
+    "status_questions" => trial_coverage_state(metrics["status_questions"].values.sum),
+    "automatic_verified_ratio" => trial_coverage_state(automatic_total, verified)
   }
   {
     "schema_version" => TRIAL_METRICS_REPORT_SCHEMA,
@@ -286,7 +352,14 @@ def trial_metrics_report(options)
     "privacy" => { "prompt_content_stored" => false, "free_text_stored" => false, "dimensions_only" => true },
     "metrics" => metrics,
     "coverage" => coverage,
-    "observation_status" => coverage.values.all? { |state| state == "observed" } ? "ready_for_trial_decision" : "collect_more_data",
+    "denominators" => {
+      "snapshot_events" => snapshots.length,
+      "paired_tasks" => pairs.length,
+      "unpaired_tasks" => unpaired_task_count,
+      "automatic_sessions" => automatic_total,
+      "all_events" => events.length
+    },
+    "observation_status" => coverage.values.none? { |state| state == "missing" } ? "ready_for_trial_decision" : "collect_more_data",
     "event_count" => events.length,
     "events_file" => project_relative_persisted_path(options["file"], field: "metrics file", strict: true)
   }
