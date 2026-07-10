@@ -938,9 +938,10 @@ def validate_task_runtime_fields(result, task)
       validation_error(result, "#{source}.kind", "Task gate kind must be one of #{ALLOWED_GATE_KINDS.join("|")}.")
     end
 
-    roles = normalize_task_gate_roles(gate)
-    unless !roles.empty? && roles.all? { |role| role.is_a?(String) && !role.strip.empty? }
-      validation_error(result, "#{source}.roles", "Task gate roles must be a list of role strings.")
+    raw_roles = gate["roles"]
+    raw_roles = [gate["role"]] if raw_roles.nil? && gate["role"].is_a?(String)
+    unless raw_roles.is_a?(Array) && !raw_roles.empty? && raw_roles.all? { |role| role.is_a?(String) && !role.strip.empty? }
+      validation_error(result, "#{source}.roles", "Task gate roles must be a non-empty list of non-empty role strings.")
     end
 
     required = gate["required"]

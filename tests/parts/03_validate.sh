@@ -4,6 +4,14 @@ expect_failure 'validate review task requires evidence' "$CLI" validate --task "
 test ! -s "$TMPROOT/valid-task-evidence.err"
 json_assert 'validate passes valid task with evidence' "$TMPROOT/valid-task-evidence.json" 'j["valid"] == true && j["checked"].include?("task") && j["checked"].include?("evidence")'
 
+cp "$TASK" "$TMPROOT/task-mixed-invalid-gate-roles.yaml"
+ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["gates"]=[{"kind"=>"review", "roles"=>["reviewer", 7, ""], "required"=>true}]; File.write(p, YAML.dump(y))' "$TMPROOT/task-mixed-invalid-gate-roles.yaml"
+if "$CLI" validate --task "$TMPROOT/task-mixed-invalid-gate-roles.yaml" --evidence "$EVIDENCE" --json >"$TMPROOT/task-mixed-invalid-gate-roles.json" 2>/dev/null; then
+  printf 'FAIL validate accepted mixed valid and invalid gate roles\n' >&2
+  exit 1
+fi
+json_assert 'validate checks every raw gate role before normalization' "$TMPROOT/task-mixed-invalid-gate-roles.json" 'j["valid"] == false && j["errors"].any? { |error| error["source"] == "task_file.gates[0].roles" }'
+
 cp "$TASK" "$TMPROOT/task-missing-execution-contract.yaml"
 ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y.delete("execution_contract"); File.write(p, YAML.dump(y))' "$TMPROOT/task-missing-execution-contract.yaml"
 expect_failure 'validate fails task missing execution_contract' "$CLI" validate --task "$TMPROOT/task-missing-execution-contract.yaml" --evidence "$EVIDENCE" --json
