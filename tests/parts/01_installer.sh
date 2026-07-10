@@ -261,7 +261,7 @@ grep -q 'orbit docs alias --id ID --path PATH' "$TMPROOT/help.txt"
 grep -q 'orbit audit' "$TMPROOT/help.txt"
 grep -q 'orbit dispatch' "$TMPROOT/help.txt"
 grep -q 'orbit handoff' "$TMPROOT/help.txt"
-grep -q 'orbit runtime register|ack-session' "$TMPROOT/help.txt"
+grep -q 'orbit runtime register|refresh-session|ack-session' "$TMPROOT/help.txt"
 grep -Fq 'orbit dispatch --task PATH --to INSTANCE [--pane PANE] [--reply-to PANE] [--manual-payload] [--dry-run] --json' "$TMPROOT/help.txt"
 grep -Fq 'orbit handoff --task PATH --state PATH --evidence PATH [--output PATH] [--record-state] --json' "$TMPROOT/help.txt"
 grep -Fq 'orbit rules print-context --json [--task PATH] [--evidence PATH] [--role ROLE] [--instance NAME] [--output PATH]' "$TMPROOT/help.txt"
@@ -277,6 +277,7 @@ pass 'help lists implemented commands without stderr'
 "$CLI" runtime --help >"$TMPROOT/runtime-help.txt" 2>"$TMPROOT/runtime-help.err"
 test ! -s "$TMPROOT/runtime-help.err"
 grep -Fq 'orbit runtime register --json' "$TMPROOT/runtime-help.txt"
+grep -Fq 'orbit runtime refresh-session --json' "$TMPROOT/runtime-help.txt"
 grep -Fq 'orbit runtime ack-session INSTANCE --json' "$TMPROOT/runtime-help.txt"
 pass 'runtime subcommand help works'
 

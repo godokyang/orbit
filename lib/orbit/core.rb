@@ -93,7 +93,7 @@ HELP = <<~HELP
     orbit compact-evidence --task PATH --evidence PATH [--handoff PATH] [--output PATH] --json
     orbit docs alias --id ID --path PATH [--registry PATH] --json
     orbit docs check [--registry PATH] [--open-dir PATH] [--archive-dir PATH] --json
-    orbit evidence init --output PATH
+    orbit evidence init --output PATH [--task PATH]
     orbit evidence add --file PATH --kind KIND --status STATUS --summary SUMMARY [--task PATH] [--changed-file PATH] [--verification TEXT] [--no-change-reason TEXT] [--artifact-ref JSON|@FILE]
     orbit evidence from-report --file PATH --report PATH [--kind KIND] [--status STATUS] [--summary SUMMARY]
     orbit evidence submit --file PATH --report PATH [--task PATH] --json
@@ -108,7 +108,7 @@ HELP = <<~HELP
     orbit metrics capture --task PATH --evidence PATH [--stage baseline|after] [--duration-seconds N] [--tokens N] --json
     orbit metrics record --metric NAME [metric dimensions] --json
     orbit metrics report [--window-days 30] --json
-    orbit runtime register|ack-session [INSTANCE] --json
+    orbit runtime register|refresh-session|ack-session [INSTANCE] --json
     orbit dispatch --task PATH --to INSTANCE [--pane PANE] [--reply-to PANE] [--manual-payload] [--dry-run] --json
     orbit rules resolve --json [--task PATH] [--evidence PATH] [--role ROLE] [--instance NAME] [--output PATH]
     orbit rules print-context --json [--task PATH] [--evidence PATH] [--role ROLE] [--instance NAME] [--output PATH]
@@ -309,6 +309,7 @@ COMMAND_HELP = {
   "runtime" => <<~HELP,
     Usage:
       orbit runtime register --json
+      orbit runtime refresh-session --json
       orbit runtime ack-session INSTANCE --json
 
     Manages Orbit-Herdr runtime sessions. With a controlled orbit-proof provider,

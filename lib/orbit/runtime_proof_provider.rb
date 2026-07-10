@@ -5,6 +5,7 @@ RUNTIME_PROOF_CHALLENGE_SCHEMA = "orbit-runtime-proof-challenge-v1"
 RUNTIME_PROOF_SCHEMA = "orbit-runtime-proof-v1"
 RUNTIME_PROOF_TTL_SECONDS = 60
 RUNTIME_PROOF_CLOCK_SKEW_SECONDS = 5
+RUNTIME_SESSION_ATTESTATION_TTL_SECONDS = DEFAULT_RUNTIME_HEARTBEAT_TTL_SECONDS
 RUNTIME_PROVIDER_E2E_FLOW = %w[
   start
   verified_identity
@@ -164,19 +165,41 @@ def runtime_request_trusted_caller_proof(session)
   validation_error = runtime_proof_validation_error(proof, challenge)
   return status.merge("verified" => false, "reason" => validation_error) if validation_error
 
+  verified_at = Time.now.utc
   {
     "available" => true,
     "verified" => true,
     "provider" => status["provider"],
     "protocol" => status["protocol"],
     "proof_id" => proof["proof_id"],
-    "verified_at" => Time.now.utc.iso8601,
+    "verified_at" => verified_at.iso8601,
+    "credential_type" => "renewable_session_attestation",
+    "attestation_issued_at" => verified_at.iso8601,
+    "attestation_expires_at" => (verified_at + RUNTIME_SESSION_ATTESTATION_TTL_SECONDS).iso8601,
+    "attestation_ttl_seconds" => RUNTIME_SESSION_ATTESTATION_TTL_SECONDS,
+    "renewal_count" => 0,
     "proof" => proof
   }
 end
 
+def runtime_stored_attestation_active?(proof_record)
+  return false unless proof_record.is_a?(Hash)
+  return false unless proof_record["credential_type"] == "renewable_session_attestation"
+
+  issued_at = runtime_time(proof_record["attestation_issued_at"])
+  expires_at = runtime_time(proof_record["attestation_expires_at"])
+  ttl = proof_record["attestation_ttl_seconds"].to_i
+  return false unless issued_at && expires_at && ttl.positive?
+  return false if ttl > RUNTIME_SESSION_ATTESTATION_TTL_SECONDS
+  return false unless expires_at > issued_at && expires_at - issued_at <= ttl
+  return false if issued_at - runtime_now > RUNTIME_PROOF_CLOCK_SKEW_SECONDS
+
+  runtime_now < expires_at
+end
+
 def runtime_verify_stored_provider_proof(proof_record)
   return false unless proof_record.is_a?(Hash) && proof_record["verified"] == true
+  return false unless runtime_stored_attestation_active?(proof_record)
   proof = proof_record["proof"]
   return false unless proof.is_a?(Hash) && proof_record["proof_id"].to_s == proof["proof_id"].to_s
   status = runtime_proof_provider_status

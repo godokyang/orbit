@@ -53,8 +53,9 @@ ORBIT_FEATURE_VERSIONS = {
   "user_journey_evidence" => "v1",           # real-path journey contracts, project hooks, and test evidence
   "artifact_provenance" => "v1",             # hashed, revision-bound artifact references and cross-gate traceability
   "revision_durable_knowledge" => "v1",       # explicit revisions, selective invalidation, cache, and portable summaries
-  "automatic_runtime_proof" => "v1",          # provider-issued nonce/project/instance-bound runtime proof
-  "trial_metrics" => "v1"                     # privacy-minimized 30-day trial measurements
+  "task_identity" => "v1",                    # immutable task_id across revisions, evidence, artifacts, state, and handoff
+  "automatic_runtime_proof" => "v2",          # one-time provider proof exchanged for expiring renewable attestation
+  "trial_metrics" => "v2"                     # task_id+stage paired baseline/after/delta measurements
 }.freeze
 
 ORBIT_KNOWN_REPORT_TEMPLATE_VERSIONS = %w[review-report-v1 test-report-v1].freeze

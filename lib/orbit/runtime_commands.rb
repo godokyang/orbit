@@ -32,11 +32,13 @@ def print_runtime_help
   puts <<~HELP
     Usage:
       orbit runtime register --json
+      orbit runtime refresh-session --json
       orbit runtime ack-session INSTANCE --json
 
     Runtime register redeems a one-time short-TTL Herdr orbit-proof challenge
-    when a controlled provider and provider E2E are available. Otherwise it
-    records diagnostics and cannot promote a session to herdr_verified.
+    into a locally expiring session attestation. refresh-session renews an
+    expired attestation from the controlled provider and canonical pane.
+    Without provider E2E, registration remains diagnostic-only.
   HELP
 end
 
@@ -246,6 +248,60 @@ def runtime_register(_options)
   }
 end
 
+def runtime_refresh_session(_options)
+  identity = runtime_identity_snapshot
+  runtime_usage_error("refresh-session requires valid .orbit identity") unless identity["valid"]
+  session_id = runtime_env_session_id
+  runtime_usage_error("refresh-session requires ORBIT_SESSION_ID from the active Herdr session") if session_id.empty?
+  current = runtime_read_session(session_id)
+  runtime_usage_error("refresh-session requires an existing active session") unless current.is_a?(Hash) && current["state"] == "active"
+  runtime_usage_error("refresh-session requires a previously provider-verified session") unless current.dig("identity", "verification") == "herdr_verified"
+
+  expected = {
+    "launch_id" => runtime_env_launch_id,
+    "instance" => identity["resolved_instance"],
+    "role" => identity["resolved_role"],
+    "project_root_sha256" => runtime_project_root_sha256(Dir.pwd)
+  }
+  mismatch = expected.find { |field, value| current[field].to_s != value.to_s }
+  runtime_usage_error("refresh-session active identity mismatch: #{mismatch[0]}") if mismatch
+  hashes = runtime_config_hashes(identity["resolved_instance"])
+  %w[role_config_sha256 instance_config_sha256].each do |field|
+    runtime_usage_error("refresh-session active identity mismatch: #{field}") unless current[field].to_s == hashes[field].to_s
+  end
+  herdr = herdr_current_context
+  runtime_usage_error("refresh-session must run in the session canonical pane") unless herdr["pane"].to_s == current.dig("herdr", "canonical_pane").to_s
+
+  candidate = deep_dup_data(current)
+  challenge = runtime_issue_proof_challenge(candidate)
+  runtime_usage_error("refresh-session could not issue a provider challenge") unless challenge
+  candidate["identity"]["proof_challenge"] = challenge
+  proof = runtime_request_trusted_caller_proof(candidate)
+  runtime_usage_error("refresh-session provider proof failed: #{proof["reason"]}") unless proof["verified"] == true
+  challenge["used_at"] = Time.now.utc.iso8601
+  challenge["used_proof_id"] = proof["proof_id"]
+
+  runtime_update_session!(session_id) do |session|
+    runtime_usage_error("refresh-session changed concurrently") unless session.is_a?(Hash) && session["state"] == "active"
+    session["identity"]["proof_challenge"] = challenge
+    session["identity"]["trusted_caller_proof"] = proof
+    session["heartbeat"] ||= {}
+    session["heartbeat"]["last_seen_at"] = Time.now.utc.iso8601
+    session["heartbeat"]["ttl_seconds"] = DEFAULT_RUNTIME_HEARTBEAT_TTL_SECONDS
+    session
+  end
+  refreshed = runtime_read_session(session_id)
+  resolution = runtime_resolve_instance(identity["resolved_instance"])
+  {
+    "schema_version" => "orbit-runtime-refresh-v1",
+    "instance" => identity["resolved_instance"],
+    "session_id" => session_id,
+    "identity_verification" => resolution["identity_verification"],
+    "dispatch_ready" => resolution["dispatch_ready"],
+    "trusted_caller_proof" => refreshed.dig("identity", "trusted_caller_proof")
+  }
+end
+
 def runtime_ack_owner_roles
   roles_config = load_yaml(File.join(Dir.pwd, ".orbit", "roles.yaml"))
   policy = roles_config["runtime_policy"]
@@ -352,6 +408,8 @@ def runtime(args)
              runtime_register(options)
            when "ack-session"
              runtime_ack_session(options)
+           when "refresh-session"
+             runtime_refresh_session(options)
            else
              runtime_usage_error("Unknown runtime subcommand: #{options["subcommand"]}")
            end
@@ -380,6 +438,14 @@ def runtime_refresh_verified_session!(session, identity)
     current["heartbeat"] ||= {}
     current["heartbeat"]["last_seen_at"] = Time.now.utc.iso8601
     current["heartbeat"]["ttl_seconds"] ||= DEFAULT_RUNTIME_HEARTBEAT_TTL_SECONDS
+    attestation = current.dig("identity", "trusted_caller_proof")
+    if runtime_stored_attestation_active?(attestation)
+      now = Time.now.utc
+      attestation["attestation_issued_at"] = now.iso8601
+      attestation["attestation_expires_at"] = (now + RUNTIME_SESSION_ATTESTATION_TTL_SECONDS).iso8601
+      attestation["attestation_ttl_seconds"] = RUNTIME_SESSION_ATTESTATION_TTL_SECONDS
+      attestation["renewal_count"] = attestation["renewal_count"].to_i + 1
+    end
     current
   end
   true
