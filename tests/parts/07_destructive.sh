@@ -224,6 +224,7 @@ json_assert 'validate user-owned confirmation error references user_confirmation
 # audit includes destructive_action_summary (present: false when no plan)
 S4_AUDIT_TASK="$TMPROOT/s4-audit-task.yaml"
 "$CLI" new-task --task-type implementation --output "$S4_AUDIT_TASK" >/dev/null
+make_task_execution_ready "$S4_AUDIT_TASK"
 S4_AUDIT_EV="$TMPROOT/s4-audit-evidence.json"
 "$CLI" evidence init --output "$S4_AUDIT_EV" >/dev/null
 "$CLI" init --force --operation-mode solo >/dev/null

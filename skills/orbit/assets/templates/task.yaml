@@ -6,6 +6,9 @@ schema_semantics:
     schema_semantics: v1
 project: example
 task_type: slice_review
+change_surface: internal
+risk_sinks: []
+real_path_required: false
 execution_contract:
   owner_role: lead
   owner_instance: lead-main

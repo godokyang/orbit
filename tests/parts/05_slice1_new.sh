@@ -249,11 +249,13 @@ yaml_assert 'test-report template includes residual_risk field' \
 # audit done-state with release gate satisfied by tester test evidence (no identity_mismatch)
 RELEASE_AUDIT_TASK="$TMPROOT/release-audit-task.yaml"
 "$CLI" new-task --task-type implementation --output "$RELEASE_AUDIT_TASK" >/dev/null
+make_task_execution_ready "$RELEASE_AUDIT_TASK"
 ruby --disable-gems -ryaml -e \
-  'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["gates"]=[{"kind"=>"release","roles"=>["tester"],"required"=>true,"pass_condition"=>"release gate passed"}]; File.write(p, YAML.dump(y))' \
+  'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["gates"]<<{"kind"=>"release","roles"=>["tester"],"required"=>true,"pass_condition"=>"release gate passed"}; File.write(p, YAML.dump(y))' \
   "$RELEASE_AUDIT_TASK"
 RELEASE_AUDIT_EVIDENCE="$TMPROOT/release-audit-evidence.json"
 "$CLI" evidence init --output "$RELEASE_AUDIT_EVIDENCE" >/dev/null
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit --file "$RELEASE_AUDIT_EVIDENCE" --report "$TMPROOT/structured-review.yaml" --task "$RELEASE_AUDIT_TASK" --json >/dev/null
 ORBIT_INSTANCE=tester-main "$CLI" evidence submit --file "$RELEASE_AUDIT_EVIDENCE" --report "$TMPROOT/release-pass-report.yaml" --task "$RELEASE_AUDIT_TASK" --json >/dev/null
 "$CLI" init --force --operation-mode solo >/dev/null
 ORBIT_INSTANCE=lead-main "$CLI" state start --task "$RELEASE_AUDIT_TASK" >/dev/null
@@ -268,6 +270,7 @@ json_assert 'audit done-state passes when release gate satisfied by tester test 
 # audit done-state with design_readiness gate satisfied by reviewer review evidence
 DESIGN_AUDIT_TASK="$TMPROOT/design-audit-task.yaml"
 "$CLI" new-task --implementation-authority reviewer --assigned-instance reviewer-main --task-type design_review --output "$DESIGN_AUDIT_TASK" >/dev/null
+make_task_execution_ready "$DESIGN_AUDIT_TASK"
 ruby --disable-gems -ryaml -e \
   'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["gates"]=[{"kind"=>"design_readiness","roles"=>["reviewer"],"required"=>true,"pass_condition"=>"design readiness passed"}]; File.write(p, YAML.dump(y))' \
   "$DESIGN_AUDIT_TASK"
@@ -288,9 +291,10 @@ json_assert 'audit done-state passes when design_readiness gate satisfied by rev
 # ---------------------------------------------------------------------------
 
 MALFORMED_AUDIT_TASK="$TMPROOT/malformed-audit-task.yaml"
-"$CLI" new-task --task-type implementation --output "$MALFORMED_AUDIT_TASK" >/dev/null
+"$CLI" new-task --task-type implementation --change-surface user_flow --output "$MALFORMED_AUDIT_TASK" >/dev/null
+make_task_execution_ready "$MALFORMED_AUDIT_TASK"
 ruby --disable-gems -ryaml -e \
-  'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["gates"]=[{"kind"=>"release","roles"=>["tester"],"required"=>true,"pass_condition"=>"release gate passed"}]; File.write(p, YAML.dump(y))' \
+  'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["gates"]<<{"kind"=>"release","roles"=>["tester"],"required"=>true,"pass_condition"=>"release gate passed"}; File.write(p, YAML.dump(y))' \
   "$MALFORMED_AUDIT_TASK"
 MALFORMED_AUDIT_EVIDENCE="$TMPROOT/malformed-audit-evidence.json"
 "$CLI" evidence init --output "$MALFORMED_AUDIT_EVIDENCE" >/dev/null

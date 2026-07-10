@@ -309,6 +309,7 @@ json_assert 'wait-gate passes when no write_policy violations under strict enfor
 # audit includes write_policy_summary
 S5_AUDIT_TASK="$TMPROOT/s5-audit-task.yaml"
 "$CLI" new-task --task-type implementation --output "$S5_AUDIT_TASK" >/dev/null
+make_task_execution_ready "$S5_AUDIT_TASK"
 S5_AUDIT_EVIDENCE="$TMPROOT/s5-audit-evidence.json"
 "$CLI" evidence init --output "$S5_AUDIT_EVIDENCE" >/dev/null
 "$CLI" init --force --operation-mode solo >/dev/null

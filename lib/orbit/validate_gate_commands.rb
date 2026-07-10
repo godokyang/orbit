@@ -845,6 +845,7 @@ def validate(args)
   result = {
     "schema_version" => "orbit-validate-v1",
     "project" => File.basename(Dir.pwd),
+    "stage" => options["stage"],
     "checked" => [],
     "trust_level" => audit_trust_level,
     "valid" => false,
@@ -858,6 +859,7 @@ def validate(args)
   task = nil
   if options["task"]
     task = validate_task(result, options["task"])
+    validate_task_execution_readiness(result, task) if task && options["stage"] == "execution-ready"
     result["checked"] << "task"
   end
 

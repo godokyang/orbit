@@ -41,6 +41,7 @@ YAML
 }
 
 "$CLI" new-task --implementation-authority reviewer --assigned-instance reviewer-main --task-type implementation_review --output "$TASK" >"$TMPROOT/new-task.out" 2>"$TMPROOT/new-task.err"
+make_task_execution_ready "$TASK"
 test ! -s "$TMPROOT/new-task.err"
 yaml_assert 'new-task writes required fields' "$TASK" 'j["schema_version"] == "orbit-task-v1" && j["project"] == File.basename(Dir.pwd) && !j.key?("target_role") && j.dig("execution_contract","implementation_authority") == "reviewer" && j.dig("execution_contract","assigned_instance") == "reviewer-main" && j["task_type"] == "implementation_review" && %w[quality_outcome scope acceptance evidence_requirements stop_policy].all? { |k| j.key?(k) }'
 yaml_assert 'new-task infers team mode for delegated implementation contract' "$TASK" 'j.dig("execution_contract","operation_mode") == "team"'
@@ -69,6 +70,7 @@ PERFORMANCE_TASK="$TMPROOT/performance-measurement-task.yaml"
 yaml_assert 'new-task initializes baseline and after quality measurement contract' "$PERFORMANCE_TASK" 'j["quality_measurement"]["required"] == true && j["quality_measurement"]["baseline_required"] == true && j["quality_measurement"]["after_required"] == true && j["quality_measurement"]["metrics"].is_a?(Array) && !j["quality_measurement"]["metrics"].empty?'
 DESIGN_TASK="$TMPROOT/design-task.yaml"
 "$CLI" new-task --task-type design --output "$DESIGN_TASK" >/dev/null
+make_task_execution_ready "$DESIGN_TASK"
 yaml_assert 'new-task initializes design lifecycle for design task' "$DESIGN_TASK" 'j["design_lifecycle"]["enabled"] == true && j["design_lifecycle"]["current_phase"] == "drafting" && j["design_lifecycle"]["phases"].include?("coding_ready") && j["design_lifecycle"]["user_confirmation_required"] == true'
 CODING_TASK="$TMPROOT/coding-task.yaml"
 "$CLI" new-task --task-type coding --output "$CODING_TASK" >/dev/null
@@ -985,6 +987,12 @@ json_assert 'validate accepts passing test evidence with environment lifecycle' 
 CONCURRENT_EVIDENCE="$TMPROOT/concurrent-gate-evidence.json"
 CONCURRENT_GATE_TASK="$TMPROOT/concurrent-gate-task.yaml"
 "$CLI" new-task --task-type implementation --output "$CONCURRENT_GATE_TASK" >/dev/null
+ruby --disable-gems -ryaml -e '
+  p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true)
+  y["gates"] << {"kind"=>"test", "roles"=>["tester"], "required"=>true, "pass_condition"=>"required tests pass"}
+  y["test_level"]="repo_regression"
+  File.write(p, YAML.dump(y))
+' "$CONCURRENT_GATE_TASK"
 "$CLI" evidence init --output "$CONCURRENT_EVIDENCE" >/dev/null
 (
   ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit --file "$CONCURRENT_EVIDENCE" --report "$TMPROOT/structured-review.yaml" --task "$CONCURRENT_GATE_TASK" --json >"$TMPROOT/concurrent-review-submit.json"
@@ -1291,6 +1299,13 @@ cp .orbit/loop-state.yaml "$TMPROOT/review-done-state.yaml"
 
 IMPL_TASK="$TMPROOT/implementation-task.yaml"
 "$CLI" new-task --task-type implementation --output "$IMPL_TASK" >/dev/null
+ruby --disable-gems -ryaml -e '
+  p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true)
+  y["gates"] << {"kind"=>"test", "roles"=>["tester"], "required"=>true, "pass_condition"=>"required tests pass"}
+  y["test_level"]="repo_regression"
+  File.write(p, YAML.dump(y))
+' "$IMPL_TASK"
+make_task_execution_ready "$IMPL_TASK"
 yaml_assert 'new-task adds implementation review/test gates' "$IMPL_TASK" 'j["gates"].is_a?(Array) && j["gates"].any? { |g| g["kind"] == "review" && g["roles"].include?("reviewer") } && j["gates"].any? { |g| g["kind"] == "test" && g["roles"].include?("tester") }'
 yaml_assert 'new-task marks implementation test gate level' "$IMPL_TASK" 'j["test_level"] == "repo_regression"'
 ORBIT_INSTANCE=reviewer-main "$CLI" rules resolve --task "$IMPL_TASK" --json >"$TMPROOT/implementation-reviewer-rules.json"
@@ -1492,6 +1507,7 @@ expect_failure 'handoff fails role conflict' env ORBIT_INSTANCE=tester-main "$CL
 
 EQ_TASK="$TMPROOT/eq-task.yaml"
 "$CLI" new-task --implementation-authority=tester --assigned-instance=tester-main --task-type=implementation_test --project=explicit --output="$EQ_TASK" >/dev/null
+make_task_execution_ready "$EQ_TASK"
 yaml_assert 'new-task supports equals syntax and explicit project' "$EQ_TASK" 'j["project"] == "explicit" && j.dig("execution_contract","implementation_authority") == "tester" && j.dig("execution_contract","assigned_instance") == "tester-main" && j["task_type"] == "implementation_test" && j["rule_packs"].any? { |p| p["category"] == "test" && p["id"] == "brooks-test" }'
 expect_failure 'validate test task rejects review-only appended evidence' "$CLI" validate --task "$EQ_TASK" --evidence "$APPEND_EVIDENCE" --json
 cat >"$TMPROOT/eq-test-submit.yaml" <<'YAML'

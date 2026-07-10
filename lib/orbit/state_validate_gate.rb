@@ -2,7 +2,8 @@
 
 def parse_validate_args(args)
   options = {
-    "json" => false
+    "json" => false,
+    "stage" => "draft"
   }
 
   until args.empty?
@@ -28,11 +29,22 @@ def parse_validate_args(args)
     when /\A--changed-files=(.+)\z/
       options["changed_files"] ||= []
       options["changed_files"].concat(Regexp.last_match(1).split(",").map(&:strip).reject(&:empty?))
+    when "--stage"
+      options["stage"] = option_value(args, "--stage")
+    when /\A--stage=(.+)\z/
+      options["stage"] = Regexp.last_match(1)
     when "--json"
       options["json"] = true
     else
       usage_error("Unknown validate option: #{arg}")
     end
+  end
+
+  unless %w[draft execution-ready].include?(options["stage"])
+    usage_error("validate --stage must be draft or execution-ready.")
+  end
+  if options["stage"] == "execution-ready" && options["task"].to_s.empty?
+    usage_error("validate --stage execution-ready requires --task PATH.")
   end
 
   options
@@ -455,7 +467,15 @@ end
 def state_start(options)
   state_path = File.expand_path(options["state"])
   task_path = File.expand_path(options["task"])
-  task = load_state_task(task_path)
+  readiness_result = { "errors" => [], "warnings" => [] }
+  task = validate_task(readiness_result, task_path)
+  validate_task_execution_readiness(readiness_result, task) if task
+  readiness_errors = readiness_result["errors"].map do |error|
+    [error["source"], error["message"]].compact.join(": ")
+  end
+  unless readiness_errors.empty?
+    state_error("Task is not execution-ready:\n- #{readiness_errors.join("\n- ")}")
+  end
   owner_role = resolve_owner_role(options["owner_role"])
   now = Time.now.utc.iso8601
   start_phase = design_task?(task) ? "drafting" : "working"

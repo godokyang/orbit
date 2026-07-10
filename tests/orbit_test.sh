@@ -46,6 +46,35 @@ yaml_assert() {
   pass "$name"
 }
 
+make_task_execution_ready() {
+  ruby --disable-gems -ryaml -e '
+    path = ARGV[0]
+    task = YAML.safe_load(File.read(path), aliases: true)
+    exit 0 if task.dig("task_risk", "level") == "light"
+    task["source_contract"] ||= {}
+    task["source_contract"]["required_outcomes"] = ["Required behavior is implemented and independently verifiable."]
+    task["acceptance"] = ["Required behavior passes its risk-matched verification path."]
+    task["evidence_requirements"] = ["Record implementation and required gate evidence."]
+    task["traceability"] = [{"requirement" => "required behavior", "slice" => "test-fixture"}]
+    task["quality_outcome"] ||= {}
+    task["quality_outcome"]["user_problem"] = "The test fixture needs a concrete, execution-ready user problem."
+    if task["task_type"].to_s.include?("decomposition")
+      task["implementation_plan"]["summary"] = "Execute one bounded fixture slice and aggregate its outcome evidence."
+      task["decomposition"]["child_slices"] = [{
+        "id" => "S1",
+        "include" => "the bounded fixture behavior",
+        "exclude" => "unrelated fixture behavior",
+        "order_basis" => "single dependency-free test slice",
+        "stop_condition" => "stop when the required behavior is verifiable",
+        "replan_path" => "return to the parent fixture contract"
+      }]
+      task["decomposition"]["aggregate_outcome_metrics"] = ["The required fixture behavior is evidenced."]
+      task["decomposition"]["stop_conditions"] = ["Stop if the fixture contract changes."]
+    end
+    File.write(path, YAML.dump(task))
+  ' "$1"
+}
+
 append_review_quality_fields() {
   cat >>"$1" <<'YAML'
 evidence_level: outcome_quality

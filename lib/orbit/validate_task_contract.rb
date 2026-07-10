@@ -692,6 +692,7 @@ def validate_task(result, task_path)
 
   validate_task_runtime_fields(result, task)
 
+  validate_task_risk_contract(result, task)
   validate_task_risk_level(result, task)
   validate_project_profile(result, task)
   validate_retrospective_done_criteria(result, task)
@@ -701,6 +702,100 @@ def validate_task(result, task_path)
   validate_backup_migration(result, task)
   validate_quality_calibration(result, task)
   task
+end
+
+def validate_task_risk_contract(result, task)
+  surface = task["change_surface"]
+  sinks = task["risk_sinks"]
+  real_path_required = task["real_path_required"]
+
+  if surface.nil?
+    validation_warning(result, "task_file.change_surface", "Task should define change_surface so risk and gate selection do not depend on free text.")
+  elsif !surface.is_a?(String) || !ALLOWED_CHANGE_SURFACES.include?(surface)
+    validation_error(result, "task_file.change_surface", "Task change_surface must be one of #{ALLOWED_CHANGE_SURFACES.join("|")}.")
+  end
+
+  if sinks.nil?
+    validation_warning(result, "task_file.risk_sinks", "Task should define risk_sinks, using an empty list when no high-risk sink applies.")
+  elsif !sinks.is_a?(Array) || sinks.any? { |sink| !sink.is_a?(String) || !ALLOWED_RISK_SINKS.include?(sink) }
+    validation_error(result, "task_file.risk_sinks", "Task risk_sinks must contain only #{ALLOWED_RISK_SINKS.join("|")}.")
+  end
+
+  if real_path_required.nil?
+    validation_warning(result, "task_file.real_path_required", "Task should declare whether real-path evidence is required.")
+  elsif ![true, false].include?(real_path_required)
+    validation_error(result, "task_file.real_path_required", "Task real_path_required must be true or false.")
+  end
+
+  return unless surface.is_a?(String) && ALLOWED_CHANGE_SURFACES.include?(surface)
+  return unless sinks.is_a?(Array) && sinks.all? { |sink| ALLOWED_RISK_SINKS.include?(sink) }
+
+  minimum_level = minimum_risk_level_for_contract(
+    task["task_type"],
+    change_surface: surface,
+    risk_sinks: sinks
+  )
+  actual_level = task.dig("task_risk", "level")
+  if ALLOWED_RISK_LEVELS.include?(actual_level) &&
+     RISK_LEVEL_ORDER.fetch(actual_level) < RISK_LEVEL_ORDER.fetch(minimum_level)
+    validation_error(
+      result,
+      "task_file.task_risk.level",
+      "Task risk level #{actual_level.inspect} is below structured change contract minimum #{minimum_level.inspect}."
+    )
+  end
+
+  if surface == "user_flow" && real_path_required != true
+    validation_error(result, "task_file.real_path_required", "user_flow tasks must require real-path evidence.")
+  end
+end
+
+def execution_ready_string_list?(value)
+  value.is_a?(Array) && !value.empty? && value.all? { |entry| entry.is_a?(String) && !entry.strip.empty? }
+end
+
+def execution_ready_traceability?(value)
+  value.is_a?(Array) && !value.empty? && value.all? do |entry|
+    entry.is_a?(Hash) &&
+      entry["requirement"].is_a?(String) && !entry["requirement"].strip.empty? &&
+      entry["slice"].is_a?(String) && !entry["slice"].strip.empty?
+  end
+end
+
+def task_execution_readiness_errors(task)
+  return ["task must be a mapping"] unless task.is_a?(Hash)
+  return [] if light_risk?(task)
+
+  errors = []
+  source_contract = task["source_contract"]
+  required_outcomes = source_contract.is_a?(Hash) ? source_contract["required_outcomes"] : nil
+  errors << "source_contract.required_outcomes must be a non-empty list of concrete strings" unless execution_ready_string_list?(required_outcomes)
+  errors << "acceptance must be a non-empty list of concrete strings" unless execution_ready_string_list?(task["acceptance"])
+  errors << "evidence_requirements must be a non-empty list of concrete strings" unless execution_ready_string_list?(task["evidence_requirements"])
+  errors << "traceability must map each requirement to a slice" unless execution_ready_traceability?(task["traceability"])
+
+  quality_outcome = task["quality_outcome"]
+  user_problem = quality_outcome.is_a?(Hash) ? quality_outcome["user_problem"] : nil
+  placeholder_problem = quality_outcome_template(task["task_type"])["user_problem"]
+  unless user_problem.is_a?(String) && !user_problem.strip.empty? && user_problem != placeholder_problem
+    errors << "quality_outcome.user_problem must replace the generated placeholder with a concrete user problem"
+  end
+
+  surface = task["change_surface"]
+  errors << "change_surface must be one of #{ALLOWED_CHANGE_SURFACES.join("|")}" unless ALLOWED_CHANGE_SURFACES.include?(surface)
+  sinks = task["risk_sinks"]
+  unless sinks.is_a?(Array) && sinks.all? { |sink| ALLOWED_RISK_SINKS.include?(sink) }
+    errors << "risk_sinks must contain only supported structured values"
+  end
+  errors << "real_path_required must be true or false" unless [true, false].include?(task["real_path_required"])
+
+  errors
+end
+
+def validate_task_execution_readiness(result, task)
+  task_execution_readiness_errors(task).each do |message|
+    validation_error(result, "task_file.execution_readiness", message)
+  end
 end
 
 def validate_string_list(result, source, value, label)
@@ -909,6 +1004,27 @@ def validate_task_risk_level(result, task)
   end
 
   default_levels = DEFAULT_MIN_EVIDENCE_LEVELS_BY_RISK[level] || {}
+  expected_gate_kinds = gate_kinds_for_risk(
+    level,
+    task["task_type"],
+    change_surface: task["change_surface"] || "internal"
+  )
+  declared_required = risk["required_gates"]
+  unless declared_required.is_a?(Hash)
+    validation_error(result, "task_file.task_risk.required_gates", "task_risk.required_gates must be a mapping.")
+  else
+    expected_gate_kinds.each do |kind|
+      unless declared_required[kind] == true
+        validation_error(result, "task_file.task_risk.required_gates.#{kind}", "Risk contract requires #{kind} gate.")
+      end
+    end
+  end
+  task_gates = task_gate_kinds(task, required_only: true)
+  expected_gate_kinds.each do |kind|
+    unless task_gates.include?(kind)
+      validation_error(result, "task_file.gates", "Task risk contract requires a #{kind} gate.")
+    end
+  end
 
   # Release risk requires release gate AND release readiness structure with no blockers.
   if level == "release"

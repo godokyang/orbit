@@ -12,11 +12,24 @@ yaml_assert 'new-task implementation derives standard risk' "$S11_IMPL_TASK" \
   'j["task_risk"]["level"] == "standard"'
 yaml_assert 'new-task writes project_profile' "$S11_IMPL_TASK" \
   'j["project_profile"].is_a?(Hash) && j["project_profile"]["default_risk_level"] == "standard"'
-yaml_assert 'new-task implementation has review and test gates' "$S11_IMPL_TASK" \
-  'j["gates"].is_a?(Array) && j["gates"].any? { |g| g["kind"] == "review" } && j["gates"].any? { |g| g["kind"] == "test" }'
+yaml_assert 'new-task internal implementation has one review gate' "$S11_IMPL_TASK" \
+  'j["gates"].is_a?(Array) && j["gates"].map { |g| g["kind"] } == ["review"] && j["test_level"] == "not_applicable"'
+yaml_assert 'new-task writes structured risk contract' "$S11_IMPL_TASK" \
+  'j["change_surface"] == "internal" && j["risk_sinks"] == [] && j["real_path_required"] == false'
 yaml_assert 'new-task implementation has task_risk in schema_semantics' "$S11_IMPL_TASK" \
   'j["schema_semantics"]["feature_versions"]["project_profile_risk_level"] == "v1"'
 pass 'new-task writes task_risk and project_profile for standard implementation'
+
+S11_USER_FLOW_TASK="$TMPROOT/s11-user-flow-task.yaml"
+"$CLI" new-task --task-type implementation --change-surface user_flow --output "$S11_USER_FLOW_TASK" >/dev/null
+yaml_assert 'standard user-flow task selects one real-path test gate' "$S11_USER_FLOW_TASK" \
+  'j["task_risk"]["level"] == "standard" && j["gates"].map { |g| g["kind"] } == ["test"] && j["real_path_required"] == true && j["test_level"] == "repo_regression"'
+
+S11_SINK_TASK="$TMPROOT/s11-risk-sink-task.yaml"
+"$CLI" new-task --task-type implementation --risk-level light --risk-sink auth --output "$S11_SINK_TASK" >/dev/null
+yaml_assert 'structured risk sink raises an explicitly lowered task to strict' "$S11_SINK_TASK" \
+  'j["task_risk"]["level"] == "strict" && j["gates"].map { |g| g["kind"] } == ["review", "test"] && j["write_policy_enforcement"] == "strict"'
+pass 'structured surface and risk sinks drive gate selection'
 
 # ---- Group 2: docs task derives light risk ----
 
@@ -54,6 +67,49 @@ ORBIT_INSTANCE=reviewer-main "$CLI" evidence add \
 json_assert 'light task validates without review evidence' "$TMPROOT/s11-light-validate.json" \
   'j["valid"] == true'
 pass 'light task does not require parent goal or formal review gate'
+
+# ---- Group 4b: draft validation is distinct from execution readiness ----
+
+"$CLI" validate --task "$S11_IMPL_TASK" --json >"$TMPROOT/s11-draft-valid.json"
+json_assert 'draft validation accepts generated placeholder task' "$TMPROOT/s11-draft-valid.json" \
+  'j["valid"] == true && j["stage"] == "draft"'
+expect_failure 'execution-ready validation rejects placeholder task' \
+  "$CLI" validate --task "$S11_IMPL_TASK" --stage execution-ready --json
+
+S11_PLACEHOLDER_STATE="$TMPROOT/s11-placeholder-state.yaml"
+cp .orbit/loop-state.yaml "$S11_PLACEHOLDER_STATE"
+S11_PLACEHOLDER_STATE_BEFORE=$(ruby --disable-gems -rdigest -e 'puts Digest::SHA256.file(ARGV[0]).hexdigest' "$S11_PLACEHOLDER_STATE")
+expect_failure 'state start rejects placeholder standard task' env ORBIT_INSTANCE=lead-main \
+  "$CLI" state start --state "$S11_PLACEHOLDER_STATE" --task "$S11_IMPL_TASK"
+S11_PLACEHOLDER_STATE_AFTER=$(ruby --disable-gems -rdigest -e 'puts Digest::SHA256.file(ARGV[0]).hexdigest' "$S11_PLACEHOLDER_STATE")
+test "$S11_PLACEHOLDER_STATE_BEFORE" = "$S11_PLACEHOLDER_STATE_AFTER"
+pass 'rejected state start leaves loop state unchanged'
+
+S11_READY_TASK="$TMPROOT/s11-ready-task.yaml"
+cp "$S11_IMPL_TASK" "$S11_READY_TASK"
+make_task_execution_ready "$S11_READY_TASK"
+"$CLI" validate --task "$S11_READY_TASK" --stage execution-ready --json >"$TMPROOT/s11-ready-validate.json"
+json_assert 'execution-ready validation accepts concrete task contract' "$TMPROOT/s11-ready-validate.json" \
+  'j["valid"] == true && j["stage"] == "execution-ready"'
+S11_READY_STATE="$TMPROOT/s11-ready-state.yaml"
+cp .orbit/loop-state.yaml "$S11_READY_STATE"
+ORBIT_INSTANCE=lead-main "$CLI" state start --state "$S11_READY_STATE" --task "$S11_READY_TASK" >/dev/null
+yaml_assert 'state start accepts execution-ready contract' "$S11_READY_STATE" \
+  'j["phase"] == "working" && j["current_task"] == File.expand_path(ARGV[2])' "$S11_READY_TASK"
+pass 'execution readiness blocks placeholders before state mutation'
+
+S11_INVALID_READY_TASK="$TMPROOT/s11-invalid-ready-task.yaml"
+cp "$S11_READY_TASK" "$S11_INVALID_READY_TASK"
+ruby --disable-gems -ryaml -e '
+  p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true)
+  y["change_surface"]="user_flow"
+  y["real_path_required"]=false
+  File.write(p, YAML.dump(y))
+' "$S11_INVALID_READY_TASK"
+S11_INVALID_READY_STATE="$TMPROOT/s11-invalid-ready-state.yaml"
+cp .orbit/loop-state.yaml "$S11_INVALID_READY_STATE"
+expect_failure 'state start applies full task validation before execution readiness' env ORBIT_INSTANCE=lead-main \
+  "$CLI" state start --state "$S11_INVALID_READY_STATE" --task "$S11_INVALID_READY_TASK"
 
 # ---- Group 5: strict task requires review/test gates and write policy ----
 

@@ -2,7 +2,10 @@
 
 def parse_new_task_args(args)
   options = {
-    "project" => File.basename(Dir.pwd)
+    "project" => File.basename(Dir.pwd),
+    "change_surface" => "internal",
+    "risk_sinks" => [],
+    "real_path_required" => false
   }
 
   until args.empty?
@@ -41,6 +44,20 @@ def parse_new_task_args(args)
       options["project"] = option_value(args, "--project")
     when /\A--project=(.+)\z/
       options["project"] = Regexp.last_match(1)
+    when "--risk-level"
+      options["risk_level"] = option_value(args, "--risk-level")
+    when /\A--risk-level=(.+)\z/
+      options["risk_level"] = Regexp.last_match(1)
+    when "--change-surface"
+      options["change_surface"] = option_value(args, "--change-surface")
+    when /\A--change-surface=(.+)\z/
+      options["change_surface"] = Regexp.last_match(1)
+    when "--risk-sink"
+      options["risk_sinks"].concat(option_value(args, "--risk-sink").split(","))
+    when /\A--risk-sink=(.+)\z/
+      options["risk_sinks"].concat(Regexp.last_match(1).split(","))
+    when "--real-path-required"
+      options["real_path_required"] = true
     else
       usage_error("Unknown new-task option: #{arg}")
     end
@@ -49,6 +66,18 @@ def parse_new_task_args(args)
   %w[task_type output].each do |name|
     usage_error("Missing required option: --#{name.tr("_", "-")}") if options[name].nil? || options[name].empty?
   end
+  unless ALLOWED_CHANGE_SURFACES.include?(options["change_surface"])
+    usage_error("--change-surface must be one of #{ALLOWED_CHANGE_SURFACES.join("|")}.")
+  end
+  if options["risk_level"] && !ALLOWED_RISK_LEVELS.include?(options["risk_level"])
+    usage_error("--risk-level must be one of #{ALLOWED_RISK_LEVELS.join("|")}.")
+  end
+  options["risk_sinks"] = options["risk_sinks"].map(&:strip).reject(&:empty?).uniq
+  invalid_sinks = options["risk_sinks"] - ALLOWED_RISK_SINKS
+  unless invalid_sinks.empty?
+    usage_error("--risk-sink contains unsupported values: #{invalid_sinks.join(", ")}; expected #{ALLOWED_RISK_SINKS.join("|")}.")
+  end
+  options["real_path_required"] = true if options["change_surface"] == "user_flow"
 
   options
 end
@@ -235,9 +264,10 @@ def quality_measurement_task?(task_type)
   %w[performance speed latency ux workflow quality eval llm measurement].any? { |token| type.include?(token) }
 end
 
-def default_test_level(task_type, implementation_authority = nil)
+def default_test_level(task_type, implementation_authority = nil, gates = nil)
   return "repo_regression" if test_task?(task_type, implementation_authority)
-  return "repo_regression" unless default_gates_for_new_task(task_type, implementation_authority).none? { |gate| gate["kind"] == "test" }
+  selected_gates = gates || default_gates_for_new_task(task_type, implementation_authority)
+  return "repo_regression" if selected_gates.any? { |gate| gate["kind"] == "test" }
 
   "not_applicable"
 end
@@ -447,11 +477,23 @@ def new_task(args)
   }
   implementation_authority = task.dig("execution_contract", "implementation_authority")
   # Slice 11: derive task_risk and project_profile.
-  task_risk = derive_task_risk(options["task_type"])
+  task["change_surface"] = options["change_surface"]
+  task["risk_sinks"] = options["risk_sinks"]
+  task["real_path_required"] = options["real_path_required"]
+  task_risk = derive_task_risk(
+    options["task_type"],
+    options["risk_level"],
+    change_surface: options["change_surface"],
+    risk_sinks: options["risk_sinks"]
+  )
   task["task_risk"] = task_risk
   task["project_profile"] = DEFAULT_PROJECT_PROFILE.dup
-  risk_gates = default_gates_for_risk(task_risk["level"], options["task_type"])
-  task["gates"] = risk_gates.any? ? risk_gates : default_gates_for_new_task(options["task_type"], implementation_authority)
+  risk_gates = default_gates_for_risk(
+    task_risk["level"],
+    options["task_type"],
+    change_surface: options["change_surface"]
+  )
+  task["gates"] = risk_gates
   task["quality_outcome"] = quality_outcome_template(options["task_type"])
   task["invalid_completion_guards"] = default_invalid_completion_guards(options["task_type"]) if improvement_task_type?(options["task_type"])
   task["review_strategy"] = default_review_strategy(options["task_type"])
@@ -469,7 +511,7 @@ def new_task(args)
   task["implementation_plan"] = default_implementation_plan(options["task_type"])
   task["decomposition"] = default_decomposition(options["task_type"])
   task["final_aggregate_audit"] = default_final_aggregate_audit(options["task_type"])
-  task["test_level"] = default_test_level(options["task_type"], implementation_authority)
+  task["test_level"] = default_test_level(options["task_type"], implementation_authority, task["gates"])
   task["test_environment"] = default_test_environment(options["task_type"], implementation_authority)
   task["quality_measurement"] = default_quality_measurement(options["task_type"])
   task["parent_goal"] = default_parent_goal(options["task_type"])

@@ -115,8 +115,8 @@ HELP = <<~HELP
     orbit tools doctor --json
     orbit wait-gate --task PATH --evidence PATH --json
     orbit whoami --json [--task PATH]
-    orbit new-task --task-type TYPE --output PATH [--operation-mode solo|team] [--implementation-authority ROLE --assigned-instance INSTANCE]
-    orbit validate [--task PATH] [--evidence PATH] [--state PATH] [--changed-files FILE[,FILE...]] [--json]
+    orbit new-task --task-type TYPE --output PATH [--operation-mode solo|team] [--implementation-authority ROLE --assigned-instance INSTANCE] [--risk-level LEVEL] [--change-surface SURFACE] [--risk-sink SINK] [--real-path-required]
+    orbit validate [--task PATH] [--evidence PATH] [--state PATH] [--stage draft|execution-ready] [--changed-files FILE[,FILE...]] [--json]
 
   Commands:
     audit       审计 task、evidence 和 loop state 的一致性。
@@ -399,6 +399,7 @@ COMMAND_HELP = {
   "validate" => <<~HELP,
     Usage:
       orbit validate [--task PATH] [--evidence PATH] [--state PATH]
+                     [--stage draft|execution-ready]
                      [--changed-files FILE[,FILE...]] [--json]
 
     Validates project config plus optional structured task, evidence manifest,
@@ -408,6 +409,7 @@ COMMAND_HELP = {
       --task PATH                Structured orbit-task-v1 YAML file.
       --evidence PATH            orbit-evidence-v1 JSON/YAML manifest file.
       --state PATH               orbit-loop-state-v1 YAML file.
+      --stage STAGE              draft (default) or execution-ready.
       --changed-files FILE,...   Comma-separated list of changed file paths to
                                  check against task scope.include / scope.exclude
                                  patterns. Can be repeated to add more files.
