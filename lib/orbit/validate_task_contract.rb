@@ -696,6 +696,7 @@ def validate_task(result, task_path)
 
   validate_task_risk_contract(result, task)
   validate_task_user_journeys(result, task)
+  validate_task_artifact_provenance(result, task)
   validate_task_risk_level(result, task)
   validate_project_profile(result, task)
   validate_retrospective_done_criteria(result, task)

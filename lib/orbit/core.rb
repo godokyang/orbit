@@ -4,6 +4,7 @@ require "fileutils"
 require "digest"
 require "json"
 require "open3"
+require "pathname"
 require "set"
 require "securerandom"
 require "shellwords"
@@ -83,6 +84,7 @@ HELP = <<~HELP
     orbit --help
     orbit version
     orbit audit --task PATH --state PATH --evidence PATH [--handoff PATH] [--compact-summary PATH] --json
+    orbit artifact inspect --path PATH --task PATH --id ID --producer-command TEXT [--lifecycle transient|durable] --json
     orbit init --operation-mode solo|team [--force]
     orbit instances status --json
     orbit bind-pane --instance NAME --pane PANE [--tab TAB] [--workspace WORKSPACE] [--canonical-pane PANE] --json
@@ -91,7 +93,7 @@ HELP = <<~HELP
     orbit docs alias --id ID --path PATH [--registry PATH] --json
     orbit docs check [--registry PATH] [--open-dir PATH] [--archive-dir PATH] --json
     orbit evidence init --output PATH
-    orbit evidence add --file PATH --kind KIND --status STATUS --summary SUMMARY [--task PATH] [--decision-record JSON] [--data-classification JSON] [--retention-policy JSON] [--trust-repair JSON]
+    orbit evidence add --file PATH --kind KIND --status STATUS --summary SUMMARY [--task PATH] [--changed-file PATH] [--verification TEXT] [--no-change-reason TEXT] [--artifact-ref JSON|@FILE]
     orbit evidence from-report --file PATH --report PATH [--kind KIND] [--status STATUS] [--summary SUMMARY]
     orbit evidence submit --file PATH --report PATH [--task PATH] --json
     orbit evidence waive --file PATH --waiver PATH --json
@@ -118,11 +120,12 @@ HELP = <<~HELP
     orbit test-hook run --task PATH --journey ID [--dry-run] --json
     orbit wait-gate --task PATH --evidence PATH --json
     orbit whoami --json [--task PATH]
-    orbit new-task --task-type TYPE --output PATH [--operation-mode solo|team] [--implementation-authority ROLE --assigned-instance INSTANCE] [--risk-level LEVEL] [--change-surface SURFACE] [--risk-sink SINK] [--real-path-required]
+    orbit new-task --task-type TYPE --output PATH [--operation-mode solo|team] [--implementation-authority ROLE --assigned-instance INSTANCE] [--risk-level LEVEL] [--change-surface SURFACE] [--risk-sink SINK] [--real-path-required] [--artifact-provenance-required]
     orbit validate [--task PATH] [--evidence PATH] [--state PATH] [--stage draft|execution-ready] [--changed-files FILE[,FILE...]] [--json]
 
   Commands:
     audit       审计 task、evidence 和 loop state 的一致性。
+    artifact    为当前 task 生成可验证的结构化 artifact reference。
     bind-pane   绑定 Herdr pane 到 Orbit instance。
     classify-intent  根据用户请求输出 Orbit workflow 默认策略。
     compact-evidence  生成 durable evidence summary，不复制 transient runtime artifacts。
@@ -150,6 +153,7 @@ HELP = <<~HELP
 
   Subcommand help:
     orbit audit --help
+    orbit artifact --help
     orbit compact-evidence --help
     orbit evidence --help
     orbit dispatch --help
@@ -189,6 +193,26 @@ COMMAND_HELP = {
     Notes:
       --evidence expects a manifest file, not an evidence directory.
       Create one with: orbit evidence init --output .orbit/evidence.json
+  HELP
+  "artifact" => <<~HELP,
+    Usage:
+      orbit artifact inspect --path PATH --task PATH --id ID
+                             --producer-command TEXT
+                             [--lifecycle transient|durable] --json
+
+    Builds a structured artifact reference for an existing project-relative
+    file. The reference binds file bytes to the current git HEAD and task
+    revision; validators recheck these facts whenever the gate is evaluated.
+
+    Required:
+      --path PATH              Existing project-relative artifact path.
+      --task PATH              Task contract that produced the artifact.
+      --id ID                  Stable artifact id referenced by later gates.
+      --producer-command TEXT  Exact command or action that produced it.
+      --json                   Emit orbit-artifact-ref-v1 JSON.
+
+    Options:
+      --lifecycle VALUE        transient (default) or durable.
   HELP
   "dispatch" => <<~HELP,
     Usage:
@@ -466,7 +490,7 @@ COMMAND_HELP = {
   "evidence" => <<~HELP,
     Usage:
       orbit evidence init --output PATH
-      orbit evidence add --file PATH --kind KIND --status STATUS --summary SUMMARY [--task PATH] [--decision-record JSON] [--data-classification JSON] [--retention-policy JSON] [--trust-repair JSON]
+      orbit evidence add --file PATH --kind KIND --status STATUS --summary SUMMARY [--task PATH] [--changed-file PATH] [--verification TEXT] [--no-change-reason TEXT] [--artifact-ref JSON|@FILE]
       orbit evidence from-report --file PATH --report PATH [--kind KIND] [--status STATUS] [--summary SUMMARY]
       orbit evidence submit --file PATH --report PATH [--task PATH] --json
       orbit evidence waive --file PATH --waiver PATH --json
@@ -490,6 +514,13 @@ COMMAND_HELP = {
       --task PATH    Task contract for role_execution_context hashing
                      (task_sha256 + role_config_sha256).
       --json         Emit machine-readable submit result.
+
+    Implementation PASS:
+      --changed-file PATH       Repeatable project-relative changed file.
+      --verification TEXT       Repeatable verification result.
+      --no-change-reason TEXT   Required instead of changed files for a valid
+                                no-change implementation.
+      --artifact-ref JSON|@FILE Repeatable orbit-artifact-ref-v1 reference.
 
     Notes:
       --task PATH is required for strict write_policy_enforcement.

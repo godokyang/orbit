@@ -5,7 +5,8 @@ def parse_new_task_args(args)
     "project" => File.basename(Dir.pwd),
     "change_surface" => "internal",
     "risk_sinks" => [],
-    "real_path_required" => false
+    "real_path_required" => false,
+    "artifact_provenance_required" => false
   }
 
   until args.empty?
@@ -58,6 +59,8 @@ def parse_new_task_args(args)
       options["risk_sinks"].concat(Regexp.last_match(1).split(","))
     when "--real-path-required"
       options["real_path_required"] = true
+    when "--artifact-provenance-required"
+      options["artifact_provenance_required"] = true
     else
       usage_error("Unknown new-task option: #{arg}")
     end
@@ -78,6 +81,7 @@ def parse_new_task_args(args)
     usage_error("--risk-sink contains unsupported values: #{invalid_sinks.join(", ")}; expected #{ALLOWED_RISK_SINKS.join("|")}.")
   end
   options["real_path_required"] = true if options["change_surface"] == "user_flow"
+  options["artifact_provenance_required"] = true if options["real_path_required"]
 
   options
 end
@@ -480,6 +484,7 @@ def new_task(args)
   task["change_surface"] = options["change_surface"]
   task["risk_sinks"] = options["risk_sinks"]
   task["real_path_required"] = options["real_path_required"]
+  task["artifact_provenance"]["required"] = options["artifact_provenance_required"]
   task_risk = derive_task_risk(
     options["task_type"],
     options["risk_level"],

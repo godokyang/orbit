@@ -44,6 +44,7 @@ def validate_evidence_record(result, source, record)
   validate_data_classification_fields(result, source, record)
   validate_negative_evidence_field(result, source, record)
   validate_user_outcomes_record(result, source, record)
+  validate_artifact_refs_record(result, source, record)
 end
 
 def validate_runtime_identity_record_field(result, source, runtime_identity)

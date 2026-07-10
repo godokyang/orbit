@@ -25,6 +25,9 @@ ruby --disable-gems -ryaml -e '
     "required_evidence"=>"repo_regression",
     "test_hook"=>"android_to_web"
   }]
+  # This part isolates user-journey semantics; artifact provenance is covered
+  # independently in part 22.
+  y["artifact_provenance"]["required"]=false
   File.write(p, YAML.dump(y))
 ' .orbit/tasks/journey-task.yaml
 ruby --disable-gems -ryaml -e '

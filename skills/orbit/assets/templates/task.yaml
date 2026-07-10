@@ -5,6 +5,7 @@ schema_semantics:
     quality_outcome: v1
     schema_semantics: v1
     user_journey_evidence: v1
+    artifact_provenance: v1
 project: example
 task_type: slice_review
 change_surface: internal
@@ -36,6 +37,10 @@ artifact_policy:
   build_outputs: exclude_by_default
   orbit_runtime: exclude_by_default
   runtime_artifacts: preserve_or_hash_before_delete
+artifact_provenance:
+  required: false
+  require_implementation_facts: true
+  require_gate_cross_reference: true
 destructive_actions:
   required_protocol: true
   require_user_confirmation: true

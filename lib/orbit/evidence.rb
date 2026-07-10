@@ -40,7 +40,10 @@ def parse_evidence_args(args)
 
   options = {
     "subcommand" => subcommand,
-    "json" => false
+    "json" => false,
+    "changed_files" => [],
+    "verification" => [],
+    "artifact_refs" => []
   }
 
   until args.empty?
@@ -67,6 +70,22 @@ def parse_evidence_args(args)
       options["summary"] = option_value(args, "--summary")
     when /\A--summary=(.+)\z/
       options["summary"] = Regexp.last_match(1)
+    when "--changed-file"
+      options["changed_files"].concat(option_value(args, "--changed-file").split(","))
+    when /\A--changed-file=(.+)\z/
+      options["changed_files"].concat(Regexp.last_match(1).split(","))
+    when "--verification"
+      options["verification"] << option_value(args, "--verification")
+    when /\A--verification=(.+)\z/
+      options["verification"] << Regexp.last_match(1)
+    when "--no-change-reason"
+      options["no_change_reason"] = option_value(args, "--no-change-reason")
+    when /\A--no-change-reason=(.+)\z/
+      options["no_change_reason"] = Regexp.last_match(1)
+    when "--artifact-ref"
+      options["artifact_refs"] << option_value(args, "--artifact-ref")
+    when /\A--artifact-ref=(.+)\z/
+      options["artifact_refs"] << Regexp.last_match(1)
     when "--rule-resolution"
       options["rule_resolution"] = option_value(args, "--rule-resolution")
     when /\A--rule-resolution=(.+)\z/
@@ -127,6 +146,17 @@ def parse_evidence_args(args)
     else
       usage_error("Unknown evidence #{subcommand} option: #{arg}")
     end
+  end
+
+  options["changed_files"] = options["changed_files"].map(&:strip).reject(&:empty?).uniq
+  options["verification"] = options["verification"].map(&:strip).reject(&:empty?)
+  artifact_options_used = !options["changed_files"].empty? || !options["verification"].empty? ||
+                          !options["artifact_refs"].empty? || !options["no_change_reason"].to_s.empty?
+  if artifact_options_used && !(subcommand == "add" && options["kind"] == "implementation")
+    usage_error("--changed-file, --verification, --no-change-reason, and --artifact-ref are only valid for evidence add --kind implementation.")
+  end
+  if !options["changed_files"].empty? && !options["no_change_reason"].to_s.empty?
+    usage_error("Implementation evidence cannot use both --changed-file and --no-change-reason.")
   end
 
   case subcommand
@@ -709,6 +739,15 @@ def evidence_add(options)
   apply_structured_gate_defaults!(record, "manual:evidence-add:#{record["created_at"]}")
   if options["kind"] == "implementation"
     record["role_execution_context"] = implementation_role_execution_context!(options["task"], path)
+    facts_supplied = !options["changed_files"].empty? || !options["verification"].empty? || !options["no_change_reason"].to_s.strip.empty?
+    if facts_supplied
+      record["implementation_facts"] = {
+        "changed_files" => options["changed_files"],
+        "verification" => options["verification"]
+      }
+      record["implementation_facts"]["no_change_reason"] = options["no_change_reason"].strip unless options["no_change_reason"].to_s.strip.empty?
+    end
+    record["artifact_refs"] = options["artifact_refs"].map { |value| load_artifact_ref_option(value) } unless options["artifact_refs"].empty?
   elsif STRUCTURED_SUBMIT_KINDS.include?(options["kind"])
     rec_ctx = structured_role_execution_context(identity, path, task_path: options["task"])
     record["role_execution_context"] = rec_ctx if rec_ctx
@@ -767,6 +806,18 @@ def evidence_add(options)
     end
   end
   apply_default_data_policy!(record)
+  if options["kind"] == "implementation"
+    task_path = File.expand_path(options["task"])
+    task = load_yaml(task_path)
+    task["__orbit_path"] = task_path
+    manifest_preview = load_evidence_manifest(path) rescue nil
+    artifact_assessment = artifact_provenance_assessment(task, record, manifest: manifest_preview, task_path: task_path)
+    record["artifact_validation"] = artifact_assessment if artifact_assessment["required"] || !Array(record["artifact_refs"]).empty?
+    unless artifact_assessment["valid"]
+      reasons = artifact_assessment["failures"].map { |failure| failure["reason"] }.uniq
+      evidence_error("Implementation artifact provenance is invalid: #{reasons.join('; ')}.")
+    end
+  end
   validate_evidence_record_shape!(record, "Evidence record")
 
   update_evidence_manifest(path) do |manifest|

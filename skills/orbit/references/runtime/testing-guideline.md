@@ -258,6 +258,8 @@ quality_measurement:
 
 `real_path_required: true` 的 task 必须先定义 `user_journeys`，并让每条 journey 引用 `.orbit/test-hooks.yaml` 中与 surface 匹配的项目 hook。可用 `orbit test-hook run --task ... --journey ... --json` 运行 hook；Orbit 只负责安全执行项目配置的 argv 和捕获 provider 结果，不内置 Android、浏览器或跨系统 runner。test PASS 缺少对应 `user_outcomes`、实际步骤、observed result、真实 artifact、设备/浏览器/服务版本、hook pass 或所需 test level 时会被降级为 `partial`，不能关闭 gate。
 
+当 task 要求 artifact provenance 时，测试输出不能只写进 `artifacts` 字符串列表。先用 `orbit artifact inspect` 对真实日志、截图索引或测试结果文件生成结构化引用，把 mapping 写入 `artifact_refs`，并在 `implementation_artifact_refs` 中引用本轮 implementation artifact id。文件不存在、内容 hash 变化、git head/task revision 不一致、生成时间早于当前文件内容，或引用了旧 implementation 时，PASS 必须 fail closed。失败输出不要原地覆盖成成功输出；每次运行使用独立文件或 id，确保失败历史仍可复核。
+
 可以从 `assets/templates/test-report.yaml` 复制最小模板后填写，再运行 `orbit evidence submit --file <manifest> --report <report> --task <task> --json`。不要直接编辑 `.orbit/evidence*.json` 来提交测试结论；直接写 manifest 会绕过 CLI 的身份解析、schema 校验和并发安全写入，不能用于关闭 test gate。
 
 `test_level` 必须与 task contract 声明一致；只跑 repository regression 不能声称 browser/provider E2E 或 dogfood 通过。`coverage`、`artifacts` 必须是字符串列表；没有 findings 时写 `[]`。High/Medium findings 必须使用结构化 mapping，包含 `severity`、`summary`、`symptom`、`source`、`consequence` 和 `remedy`。`blocked` 只在 `verdict: blocked` 或需要解释 partial 阻塞时填写；CLI 会把 `blocked` verdict 存为 partial record，并在 gate summary 中显示 blocked 原因。

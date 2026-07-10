@@ -9,6 +9,7 @@ require_relative "runtime_commands"
 require_relative "schema_version"
 require_relative "project_profile_risk"
 require_relative "user_journey"
+require_relative "artifact_provenance"
 require_relative "task_launch_dispatch"
 require_relative "evidence"
 require_relative "state_validate_gate"
@@ -37,6 +38,12 @@ def run_orbit_cli(argv)
       exit 0
     end
     audit(argv)
+  when "artifact"
+    if help_requested?(argv) || (argv.first == "inspect" && help_requested?(argv[1..] || []))
+      print_command_help("artifact")
+      exit 0
+    end
+    artifact(argv)
   when "bind-pane"
     bind_pane(argv)
   when "classify-intent"

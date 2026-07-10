@@ -4,6 +4,10 @@
 
 本规范抽象自已有项目实践，以及 Waza / brooks-lint 中关于证据、scope、维护性和代码衰减的可迁移规则。它不是通用代码风格大全，也不替代项目自己的语言、框架和架构规范。
 
+## Implementation fact record
+
+当 task 的 `artifact_provenance.required` 为 true，implementation PASS 必须同时记录实际 changed files 与 verification，或明确 `no-change reason`。把验证输出写入独立、项目相对的 artifact 文件，再运行 `orbit artifact inspect` 生成包含 sha256、producer command、created_at、git head、task revision 和 lifecycle 的引用；通过 `orbit evidence add ... --changed-file ... --verification ... --artifact-ref @ref.json` 提交。不要复用同一路径覆盖失败 run，也不要把大日志或截图正文塞进 summary。
+
 ## Coding 目标
 
 coding 的目标不是“把代码写出来”，而是让 task contract 中的质量结果变成可验证的软件变化。

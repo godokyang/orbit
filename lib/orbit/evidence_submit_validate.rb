@@ -724,6 +724,10 @@ def validate_structured_submit_report!(report_path, report)
   extra = {}
   extra["source_report_semantics"] = source_report_semantics
   extra["blocked"] = blocked_detail_for_record if blocked_detail_for_record
+  extra["artifact_refs"] = validate_artifact_refs_report!(report["artifact_refs"], kind: kind) if report.key?("artifact_refs")
+  if report.key?("implementation_artifact_refs")
+    extra["implementation_artifact_refs"] = validate_implementation_artifact_refs_report!(report["implementation_artifact_refs"], kind: kind)
+  end
   if pass_required || report.key?("evidence_level")
     extra["evidence_level"] = validate_evidence_level!(report["evidence_level"], "submit_report.evidence_level", kind: kind, pass_required: pass_required)
   end
@@ -921,7 +925,10 @@ def evidence_submit(options)
   kind, status, summary, source_message_id, findings, coverage, artifacts, extra = validate_structured_submit_report!(report_path, report)
   identity = require_evidence_submit_capability!(kind)
 
-  task_sha256 = options["task"] ? sha256_file(File.expand_path(options["task"])) : nil
+  task_path = options["task"] ? File.expand_path(options["task"]) : nil
+  task = task_path ? load_yaml(task_path) : nil
+  task["__orbit_path"] = task_path if task.is_a?(Hash)
+  task_sha256 = task_path ? sha256_file(task_path) : nil
   manifest_preview = load_evidence_manifest(path) rescue nil
   rule_res_file = manifest_preview.is_a?(Hash) && manifest_preview["rule_resolution"].is_a?(Hash) ? manifest_preview["rule_resolution"]["file"] : nil
   rules_context_sha256 = (rule_res_file.is_a?(String) && !rule_res_file.empty?) ? sha256_file(rule_res_file) : nil
@@ -943,8 +950,7 @@ def evidence_submit(options)
     record[field] = report[field] if report.key?(field)
   end
   record["gate_lease"] = report["gate_lease"] if report.key?("gate_lease")
-  if kind == "test" && options["task"]
-    task = load_yaml(File.expand_path(options["task"]))
+  if kind == "test" && task
     assessment = user_journey_evidence_assessment(task, record)
     record["journey_validation"] = assessment if assessment["required"]
     if status == "pass" && assessment["required"] && !assessment["valid"]
@@ -957,6 +963,24 @@ def evidence_submit(options)
       }
       record["missing"] ||= []
       record["missing"] << "Required user journey evidence: #{assessment["blocking_reason"]}."
+    end
+  end
+  artifact_refs_present = record["artifact_refs"].is_a?(Array) && !record["artifact_refs"].empty?
+  if task || artifact_refs_present
+    artifact_assessment = artifact_provenance_assessment(task || {}, record, manifest: manifest_preview, task_path: task_path)
+    record["artifact_validation"] = artifact_assessment if artifact_assessment["required"] || artifact_refs_present
+    if artifact_assessment["required"] && !artifact_assessment["valid"]
+      record["missing"] ||= []
+      record["missing"] << "Required artifact provenance: #{artifact_assessment["blocking_reason"]}."
+    end
+    if record["status"] == "pass" && !artifact_assessment["valid"]
+      record["status"] = "partial"
+      record["summary"] = "Partial: #{summary}" unless record["summary"].start_with?("Partial:")
+      record["blocked"] = {
+        "reason" => "Artifact provenance is incomplete or stale: #{artifact_assessment["blocking_reason"]}.",
+        "next_step" => "Generate fresh structured artifact refs and reference the current implementation artifact.",
+        "owner" => kind == "review" ? "reviewer" : "tester"
+      }
     end
   end
   if report.key?("decision_record")

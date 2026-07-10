@@ -5,6 +5,7 @@ schema_semantics:
     evidence_level: v1
     quality_outcome: v1
     schema_semantics: v1
+    artifact_provenance: v1
 verdict: blocked
 summary: "TODO: one-sentence review conclusion."
 source_message_id: "TODO: herdr:<pane-or-message-id> or report:<path>"
@@ -56,6 +57,8 @@ findings:
   - "[blocked][review] TODO: describe the blocking evidence gap or finding."
 coverage:
   - "TODO: code paths, task contract points, and evidence checked."
+artifact_refs: []
+implementation_artifact_refs: []
 artifacts:
   - "TODO: stable path to diff, report, transcript, command output, or log."
 blocked:

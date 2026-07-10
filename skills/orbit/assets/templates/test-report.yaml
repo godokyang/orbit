@@ -5,12 +5,15 @@ schema_semantics:
     evidence_level: v1
     schema_semantics: v1
     user_journey_evidence: v1
+    artifact_provenance: v1
 verdict: blocked
 summary: "TODO: one-sentence test conclusion."
 source_message_id: "TODO: herdr:<pane-or-message-id> or report:<path>"
 test_level: repo_regression
 evidence_level: real_path_test
 user_outcomes: []
+artifact_refs: []
+implementation_artifact_refs: []
 rule_application:
   required_rule_files_read:
     - references/runtime/testing-guideline.md

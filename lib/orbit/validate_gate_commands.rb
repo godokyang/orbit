@@ -264,6 +264,7 @@ def validate_evidence(result, evidence_path, task = nil, task_sha256: nil, allow
     validate_implementation_records_for_task(result, records, task) if task
     validate_implementation_overrides_for_task(result, records, task) if task
     validate_runtime_identity_policy_for_task(result, records, evidence, task, task_sha256) if task
+    validate_current_artifact_provenance(result, records, task) if task
   end
 
   verdict = evidence["verdict"]
@@ -643,6 +644,8 @@ def gate_status(records, kind, task = nil, task_sha256: nil, evidence: nil)
                          { "required" => false, "valid" => true }
                        end
   journey_evidence_ok = journey_assessment["valid"] == true
+  artifact_assessment = latest.is_a?(Hash) ? artifact_provenance_assessment(task || {}, latest, manifest: evidence) : { "required" => false, "valid" => true }
+  artifact_evidence_ok = artifact_assessment["valid"] == true
   blocking_reason = if latest.nil? && stale_verdict_only
                       "stale_verdict"
                     elsif latest.nil?
@@ -675,6 +678,8 @@ def gate_status(records, kind, task = nil, task_sha256: nil, evidence: nil)
                       "write_policy_violations"
                     elsif !journey_evidence_ok
                       journey_assessment["blocking_reason"] || "missing_user_journey_evidence"
+                    elsif !artifact_evidence_ok
+                      artifact_assessment["blocking_reason"] || "invalid_artifact_provenance"
                     elsif display_status != "pass"
                       display_status
                     end
@@ -683,7 +688,7 @@ def gate_status(records, kind, task = nil, task_sha256: nil, evidence: nil)
     "required" => true,
     "status" => display_status,
     "record_status" => status,
-    "passed" => !stale_verdict_only && status == "pass" && !stale_after_implementation && !malformed_rec_ctx && identity_valid && runtime_identity_blocking_reason.nil? && quality_evidence_fields_ok && !wrong_gate_kind_level && evidence_level_ok && quality_outcome_ok && required_questions_ok && !write_policy_blocked && !task_sha256_blocked && !stale_blocked && !rules_context_blocked && journey_evidence_ok,
+    "passed" => !stale_verdict_only && status == "pass" && !stale_after_implementation && !malformed_rec_ctx && identity_valid && runtime_identity_blocking_reason.nil? && quality_evidence_fields_ok && !wrong_gate_kind_level && evidence_level_ok && quality_outcome_ok && required_questions_ok && !write_policy_blocked && !task_sha256_blocked && !stale_blocked && !rules_context_blocked && journey_evidence_ok && artifact_evidence_ok,
     "structured" => latest.is_a?(Hash) ? latest["structured_submit"] == true : false,
     "evidence_level" => actual_evidence_level,
     "minimum_evidence_level" => minimum_evidence_level,
@@ -705,6 +710,7 @@ def gate_status(records, kind, task = nil, task_sha256: nil, evidence: nil)
     "missing_rules_context_sha256" => missing_rules_context_sha256 ? true : nil,
     "write_policy_violations_count" => write_violations.empty? ? nil : write_violations.length,
     "user_journey_evidence" => journey_assessment["required"] ? journey_assessment : nil,
+    "artifact_provenance" => artifact_assessment["required"] || !artifact_assessment["artifact_ids"].to_a.empty? ? artifact_assessment : nil,
     "blocking_reason" => blocking_reason,
     "blocked" => latest.is_a?(Hash) ? latest["blocked"] : nil,
     "latest" => latest,
@@ -743,12 +749,14 @@ end
 def wait_gate(args)
   options = parse_wait_gate_args(args)
   task_path, task = load_dispatch_task(options["task"])
+  task["__orbit_path"] = task_path
   current_task_sha256 = sha256_file(File.expand_path(options["task"]))
   evidence_path = File.expand_path(options["evidence"])
   evidence = load_evidence_manifest(evidence_path)
   records = evidence["records"].is_a?(Array) ? evidence["records"] : []
   implementation_result = { "errors" => [] }
   validate_implementation_records_for_task(implementation_result, records, task)
+  validate_current_artifact_provenance(implementation_result, records, task)
   kinds = required_evidence_kinds(task)
   gates = kinds.map { |kind| gate_status(records, kind, task, task_sha256: current_task_sha256, evidence: evidence) }
   implementation_errors = implementation_result["errors"]

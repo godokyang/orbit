@@ -172,6 +172,7 @@ lib/orbit/validate_gate_commands.rb
 lib/orbit/audit_tools.rb
 lib/orbit/project_profile_risk.rb
 lib/orbit/user_journey.rb
+lib/orbit/artifact_provenance.rb
 lib/orbit/gate_lease.rb
 lib/orbit/handoff.rb
 lib/orbit/status.rb

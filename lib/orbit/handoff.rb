@@ -535,6 +535,9 @@ def judgment_summary(evidence)
       "residual_risk" => latest_review["residual_risk"],
       "quality_outcome_verdict" => latest_review["quality_outcome_verdict"],
       "implementation_readiness_verdict" => latest_review["implementation_readiness_verdict"],
+      "artifact_refs" => latest_review["artifact_refs"],
+      "implementation_artifact_refs" => latest_review["implementation_artifact_refs"],
+      "artifact_validation" => latest_review["artifact_validation"],
       "rule_application_summary" => rule_application_summary(latest_review["rule_application"]),
       "evidence_boundary_summary" => evidence_boundary_summary(latest_review)
     }
@@ -563,6 +566,9 @@ def judgment_summary(evidence)
       "test_level" => latest_test["test_level"],
       "user_outcomes" => latest_test["user_outcomes"],
       "journey_validation" => latest_test["journey_validation"],
+      "artifact_refs" => latest_test["artifact_refs"],
+      "implementation_artifact_refs" => latest_test["implementation_artifact_refs"],
+      "artifact_validation" => latest_test["artifact_validation"],
       "rule_application_summary" => rule_application_summary(latest_test["rule_application"]),
       "evidence_boundary_summary" => evidence_boundary_summary(latest_test)
     }
