@@ -930,6 +930,7 @@ def evidence_submit(options)
   task["__orbit_path"] = task_path if task.is_a?(Hash)
   task_sha256 = task_path ? sha256_file(task_path) : nil
   manifest_preview = load_evidence_manifest(path) rescue nil
+  assert_evidence_manifest_bindable_to_task!(manifest_preview, task, source: path) if task.is_a?(Hash)
   rule_res_file = manifest_preview.is_a?(Hash) && manifest_preview["rule_resolution"].is_a?(Hash) ? manifest_preview["rule_resolution"]["file"] : nil
   rules_context_sha256 = (rule_res_file.is_a?(String) && !rule_res_file.empty?) ? sha256_file(rule_res_file) : nil
 
@@ -946,6 +947,7 @@ def evidence_submit(options)
     "artifacts" => artifacts
   }
   extra.each { |field, value| record[field] = value unless value.nil? } if extra.is_a?(Hash)
+  record["task_id"] = task["task_id"] if task_id_valid?(task && task["task_id"])
   if task_revision_frozen?(task)
     record["task_revision_id"] = task["revision_id"]
     record["task_revision_number"] = task["revision_number"]
@@ -1021,6 +1023,7 @@ def evidence_submit(options)
   validate_evidence_record_shape!(record, "Evidence record")
 
   updated_manifest = update_evidence_manifest(path) do |manifest|
+    bind_evidence_manifest_to_task!(manifest, task, source: path) if task.is_a?(Hash)
     records = ensure_evidence_records!(manifest)
     records << record
     recompute_evidence_verdict!(manifest)
@@ -1109,6 +1112,7 @@ def evidence_attach_rule(options, quiet: false)
   rule_resolution_path = File.expand_path(options["rule_resolution"])
   task = load_task_for_evidence!(task_path)
   evidence = load_evidence_manifest(path)
+  assert_evidence_manifest_bindable_to_task!(evidence, task, source: path)
   rule_resolution = load_rule_resolution_manifest(rule_resolution_path)
 
   unless rule_resolution["valid"] == true
@@ -1146,6 +1150,7 @@ def evidence_attach_rule(options, quiet: false)
     "resolver" => "orbit rules resolve --json",
     "file" => rule_resolution_path,
     "task" => task_path,
+    "task_id" => task["task_id"],
     "task_sha256" => rule_resolution["task_sha256"],
     "valid" => true,
     "resolved_role" => rule_resolution["resolved_role"],
@@ -1155,6 +1160,7 @@ def evidence_attach_rule(options, quiet: false)
   }
 
   update_evidence_manifest(path) do |manifest|
+    bind_evidence_manifest_to_task!(manifest, task, source: path)
     manifest["rule_resolution"] = rule_attachment
     manifest
   end

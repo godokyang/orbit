@@ -20,6 +20,15 @@ ruby --disable-gems -ryaml -e '
 ' .orbit/tasks/revision-task.yaml
 make_task_execution_ready .orbit/tasks/revision-task.yaml
 yaml_assert 'new task starts with a draft revision contract' .orbit/tasks/revision-task.yaml 'j["revision_id"] == "draft" && j["revision_number"] == 0 && j["revision_history"] == []'
+ruby --disable-gems -ryaml -e '
+  ORBIT_ROOT = File.expand_path(ARGV.shift)
+  require File.expand_path(ARGV.shift)
+  template = YAML.safe_load(File.read(ARGV.shift), aliases: true)
+  semantic_fields = template.keys - REVISION_METADATA_FIELDS
+  missing = semantic_fields - REVISION_FIELD_CHANGE_TYPES.keys
+  abort("unmapped template fields: #{missing.join(", ")}") unless missing.empty?
+' "$SKILL_ROOT" "$SKILL_ROOT/lib/orbit/cli.rb" "$SKILL_ROOT/skills/orbit/assets/templates/task.yaml"
+pass 'every task template field has an explicit revision change-type mapping'
 ORBIT_INSTANCE=lead-main "$CLI" state start --task .orbit/tasks/revision-task.yaml >/dev/null
 yaml_assert 'state start freezes revision one and persists portable task paths' .orbit/tasks/revision-task.yaml 'j["revision_id"].match?(/\Ar1-[0-9a-f]{12}\z/) && j["revision_number"] == 1 && j["revision_signature"].match?(/\A[0-9a-f]{64}\z/) && j.dig("revision_history", 0, "reason") == "execution_start"'
 yaml_assert 'loop state binds the frozen revision using project-relative paths' .orbit/loop-state.yaml 'j["current_task"] == ".orbit/tasks/revision-task.yaml" && j.dig("artifacts", "task_file") == ".orbit/tasks/revision-task.yaml" && j["task_revision_id"].match?(/\Ar1-/) && j["task_revision_number"] == 1'
@@ -81,5 +90,19 @@ if "$CLI" wait-gate --task .orbit/tasks/revision-task.yaml --evidence .orbit/evi
   exit 1
 fi
 json_assert 'acceptance revision makes old review and test evidence stale' revision-three-gate.json 'j["ready"] == false && j["gates"].all? { |g| g["passed"] == false && g["blocking_reason"] == "stale_verdict" }'
+
+ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["execution_contract"]["source"]="revision-contract-change"; File.write(p, YAML.dump(y))' .orbit/tasks/revision-task.yaml
+expect_failure 'execution_contract revision cannot be mislabeled as documentation' "$CLI" revision create --task .orbit/tasks/revision-task.yaml --reason 'Wrong execution mapping.' --change-type documentation --json
+"$CLI" revision create --task .orbit/tasks/revision-task.yaml --reason 'Execution authority contract metadata changed.' --change-type runtime --json >revision-four.json
+json_assert 'execution_contract uses runtime mapping and invalidates implementation plus gates' revision-four.json 'r=j["revision"]; r["changed_fields"] == ["execution_contract"] && %w[implementation review test release rules].all? { |kind| r["invalidated_evidence"].include?(kind) }'
+
+ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["future_contract"]={"enabled"=>true}; File.write(p, YAML.dump(y))' .orbit/tasks/revision-task.yaml
+expect_failure 'unknown future task fields fail closed until explicitly mapped' "$CLI" revision create --task .orbit/tasks/revision-task.yaml --reason 'Unknown contract.' --change-type runtime --json
+ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y.delete("future_contract"); File.write(p, YAML.dump(y))' .orbit/tasks/revision-task.yaml
+
+ORIGINAL_TASK_ID=$(ruby --disable-gems -ryaml -e 'puts YAML.safe_load(File.read(ARGV[0]), aliases: true)["task_id"]' .orbit/tasks/revision-task.yaml)
+ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["task_id"]="otask_000000000000000000000000"; File.write(p, YAML.dump(y))' .orbit/tasks/revision-task.yaml
+expect_failure 'task_id remains immutable across revisions' "$CLI" revision create --task .orbit/tasks/revision-task.yaml --reason 'Identity rewrite.' --change-type runtime --json
+ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["task_id"]=ARGV[1]; File.write(p, YAML.dump(y))' .orbit/tasks/revision-task.yaml "$ORIGINAL_TASK_ID"
 
 cd "$REVISION_ORIGINAL_DIR"

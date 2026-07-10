@@ -5,39 +5,94 @@ REVISION_CHANGE_TYPES = %w[
   release_contract risk rules runtime documentation
 ].freeze
 
-REVISION_TRACKED_FIELDS = %w[
-  project task_type change_surface risk_sinks real_path_required user_journeys
-  execution_contract gates source_documents source_contract traceability quality_rules
-  plan slice scope artifact_policy artifact_provenance destructive_actions
-  write_policy_enforcement quality_outcome acceptance invalid_completion_guards
-  review_strategy test_strategy test_level evidence_requirements stop_policy final_audit
-  task_risk project_profile design_reference implementation_plan decomposition
-  parent_goal compatibility_policy multi_user_ownership self_review_guard backup_migration
-].freeze
+TASK_ID_PATTERN = /\Aotask_[0-9a-f]{24}\z/
+
+def generate_task_id
+  "otask_#{SecureRandom.hex(12)}"
+end
+
+def task_id_valid?(value)
+  value.is_a?(String) && value.match?(TASK_ID_PATTERN)
+end
+
+def ensure_task_id!(task)
+  state_error("Task file must contain a mapping before assigning task_id.") unless task.is_a?(Hash)
+
+  current = task["task_id"]
+  if current.nil? || current.to_s.empty? || current == "draft"
+    task["task_id"] = generate_task_id
+  elsif !task_id_valid?(current)
+    state_error("Task task_id must use otask_<24 lowercase hex>.")
+  end
+  task["task_id"]
+end
 
 REVISION_FIELD_CHANGE_TYPES = {
+  "task_id" => "identity",
+  "schema_version" => "runtime",
+  "schema_semantics" => "runtime",
+  "project" => "scope",
+  "task_type" => "scope",
+  "change_surface" => "risk",
+  "risk_sinks" => "risk",
+  "real_path_required" => "test_contract",
+  "user_journeys" => "test_contract",
+  "execution_contract" => "runtime",
+  "gates" => "risk",
+  "source_documents" => "documentation",
   "scope" => "scope",
   "source_contract" => "scope",
   "traceability" => "scope",
+  "plan" => "documentation",
+  "slice" => "implementation",
   "acceptance" => "acceptance",
   "quality_outcome" => "quality_outcome",
   "invalid_completion_guards" => "quality_outcome",
+  "quality_rules" => "rules",
+  "artifact_policy" => "risk",
+  "artifact_provenance" => "risk",
+  "destructive_actions" => "risk",
+  "write_policy_enforcement" => "risk",
   "implementation_plan" => "implementation",
   "decomposition" => "implementation",
+  "design_lifecycle" => "implementation",
+  "design_reference" => "implementation",
   "review_strategy" => "review_contract",
   "test_strategy" => "test_contract",
   "test_level" => "test_contract",
-  "user_journeys" => "test_contract",
-  "real_path_required" => "test_contract",
+  "test_environment" => "test_contract",
+  "quality_measurement" => "test_contract",
+  "evidence_requirements" => "acceptance",
   "release_readiness" => "release_contract",
+  "release_surface" => "release_contract",
+  "supply_chain" => "release_contract",
+  "final_aggregate_audit" => "release_contract",
+  "final_audit" => "release_contract",
+  "must_answer" => "review_contract",
+  "stop_policy" => "release_contract",
+  "tool_requirements" => "runtime",
+  "worktree_safety" => "runtime",
+  "runtime_identity_policy" => "runtime",
+  "runtime_policy" => "runtime",
+  "completion_notice_policy" => "release_contract",
+  "protocol_changed" => "release_contract",
+  "quality_calibration" => "review_contract",
+  "objective" => "scope",
   "task_risk" => "risk",
-  "risk_sinks" => "risk",
-  "change_surface" => "risk",
-  "gates" => "risk",
-  "quality_rules" => "rules",
-  "source_documents" => "documentation",
-  "plan" => "documentation"
+  "project_profile" => "risk",
+  "parent_goal" => "scope",
+  "parent_goal_status" => "documentation",
+  "rule_packs" => "rules",
+  "compatibility_policy" => "risk",
+  "multi_user_ownership" => "risk",
+  "self_review_guard" => "review_contract",
+  "backup_migration" => "risk"
 }.freeze
+
+REVISION_TRACKED_FIELDS = REVISION_FIELD_CHANGE_TYPES.keys.freeze
+REVISION_METADATA_FIELDS = %w[
+  __orbit_path revision_id revision_number revision_signature revision_snapshot revision_history
+].freeze
 
 REVISION_INVALIDATION = {
   "scope" => %w[implementation review test design_readiness release rules],
@@ -49,7 +104,7 @@ REVISION_INVALIDATION = {
   "release_contract" => %w[release rules],
   "risk" => %w[implementation review test design_readiness release rules],
   "rules" => %w[review test design_readiness release rules],
-  "runtime" => %w[review test release],
+  "runtime" => %w[implementation review test release rules],
   "documentation" => []
 }.freeze
 
@@ -88,8 +143,10 @@ def revision_value_digest(value)
 end
 
 def task_revision_snapshot(task)
-  REVISION_TRACKED_FIELDS.each_with_object({}) do |field, snapshot|
-    snapshot[field] = revision_value_digest(task[field]) if task.key?(field)
+  task.each_with_object({}) do |(field, value), snapshot|
+    next if REVISION_METADATA_FIELDS.include?(field)
+
+    snapshot[field] = revision_value_digest(value)
   end
 end
 
@@ -133,6 +190,7 @@ def freeze_task_revision!(task_path)
   with_orbit_file_lock(task_path) do |expanded|
     task = load_yaml(expanded)
     state_error("Task file must contain a mapping before revision freeze.") unless task.is_a?(Hash)
+    ensure_task_id!(task)
     if task_revision_frozen?(task)
       updated = task
       next
@@ -164,6 +222,13 @@ def freeze_task_revision!(task_path)
 end
 
 def validate_task_revision_contract(result, task)
+  unless task_id_valid?(task["task_id"])
+    if !task_revision_frozen?(task) && task["task_id"].to_s.empty?
+      validation_warning(result, "task_file.task_id", "Legacy draft task has no task_id; Orbit will assign one when the revision is first frozen.")
+    else
+      validation_error(result, "task_file.task_id", "Task must define an immutable task_id using otask_<24 lowercase hex>.")
+    end
+  end
   revision_id = task["revision_id"]
   revision_number = task["revision_number"]
   history = task["revision_history"]
@@ -210,6 +275,7 @@ end
 
 def evidence_record_revision_eligible?(record, task, evidence_kind, current_task_sha256 = nil)
   return false unless record.is_a?(Hash)
+  return false if task_id_valid?(task["task_id"]) && record["task_id"] != task["task_id"]
   unless task_revision_frozen?(task)
     stored = record.dig("role_execution_context", "task_sha256")
     return true if current_task_sha256.to_s.empty?
@@ -276,7 +342,14 @@ def revision(args)
     usage_error("Task revision is not frozen; run orbit state start first.") unless task_revision_frozen?(task)
     changed_fields = changed_revision_fields(task)
     usage_error("No revision-tracked task fields changed.") if changed_fields.empty?
-    required_types = changed_fields.map { |field| REVISION_FIELD_CHANGE_TYPES[field] }.compact.uniq
+    if changed_fields.include?("task_id")
+      usage_error("task_id is immutable and cannot be changed by a revision.")
+    end
+    unmapped_fields = changed_fields.reject { |field| REVISION_FIELD_CHANGE_TYPES.key?(field) }
+    unless unmapped_fields.empty?
+      usage_error("Changed task fields have no revision change-type mapping and cannot be accepted: #{unmapped_fields.join(', ')}.")
+    end
+    required_types = changed_fields.map { |field| REVISION_FIELD_CHANGE_TYPES.fetch(field) }.uniq
     missing_types = required_types - options["change_types"]
     unless missing_types.empty?
       usage_error("Declared change types do not cover changed fields; add: #{missing_types.join(', ')}.")
@@ -307,6 +380,7 @@ def revision(args)
     packet = {
       "schema_version" => "orbit-task-revision-v1",
       "task" => project_relative_persisted_path(expanded, field: "task"),
+      "task_id" => task["task_id"],
       "revision" => entry,
       "previous_revision_id" => previous_id
     }
@@ -316,11 +390,13 @@ def revision(args)
     state = load_yaml(state_path) rescue nil
     if state.is_a?(Hash) && !state["current_task"].to_s.empty? && File.expand_path(state["current_task"]) == task_path
       update_loop_state(state_path) do |current|
+        current["task_id"] = packet["task_id"]
         current["task_revision_id"] = packet.dig("revision", "revision_id")
         current["task_revision_number"] = packet.dig("revision", "number")
         current["updated_at"] = packet.dig("revision", "created_at")
         append_state_history(current, {
           "event" => "revision",
+          "task_id" => packet["task_id"],
           "task_revision_id" => packet.dig("revision", "revision_id"),
           "task_revision_number" => packet.dig("revision", "number"),
           "reason" => packet.dig("revision", "reason"),

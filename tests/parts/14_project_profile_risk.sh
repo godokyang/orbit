@@ -60,7 +60,7 @@ pass 'release task type derives release risk with release gate and strict enforc
 # ---- Group 4: light task validates without parent goal or review evidence ----
 
 S11_LIGHT_EVIDENCE="$TMPROOT/s11-light-evidence.json"
-"$CLI" evidence init --output "$S11_LIGHT_EVIDENCE" >/dev/null
+"$CLI" evidence init --output "$S11_LIGHT_EVIDENCE" --task "$S11_DOCS_TASK" >/dev/null
 ORBIT_INSTANCE=reviewer-main "$CLI" evidence add \
   --file "$S11_LIGHT_EVIDENCE" --kind command --status pass --summary "docs typo fixed" >/dev/null
 "$CLI" validate --task "$S11_DOCS_TASK" --evidence "$S11_LIGHT_EVIDENCE" --json >"$TMPROOT/s11-light-validate.json"

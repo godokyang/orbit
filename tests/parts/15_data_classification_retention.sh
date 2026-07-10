@@ -8,7 +8,7 @@ S12_TASK="$TMPROOT/s12-task.yaml"
 # ---- Group 1: evidence add preserves data_classification / retention_policy / trust_repair ----
 
 S12_ADD_EVIDENCE="$TMPROOT/s12-add-evidence.json"
-"$CLI" evidence init --output "$S12_ADD_EVIDENCE" >/dev/null
+"$CLI" evidence init --output "$S12_ADD_EVIDENCE" --task "$S12_TASK" >/dev/null
 ORBIT_INSTANCE=reviewer-main "$CLI" evidence add \
   --file "$S12_ADD_EVIDENCE" \
   --kind command --status pass --summary "Command with classified artifact." \
@@ -32,7 +32,7 @@ json_assert 'validate accepts evidence with data_classification' "$TMPROOT/s12-a
 # ---- Group 2: secret + raw_allowed/missing retention fails validate ----
 
 S12_SECRET_RAW_EVIDENCE="$TMPROOT/s12-secret-raw-evidence.json"
-"$CLI" evidence init --output "$S12_SECRET_RAW_EVIDENCE" >/dev/null
+"$CLI" evidence init --output "$S12_SECRET_RAW_EVIDENCE" --task "$S12_TASK" >/dev/null
 ruby --disable-gems -rjson -e '
 p=ARGV[0]; j=JSON.parse(File.read(p)); j["records"] ||= []
 j["records"] << {"kind"=>"command","status"=>"pass","summary"=>"secret raw content","created_at"=>"2026-06-29T10:00:00Z",
@@ -43,7 +43,7 @@ expect_failure 'validate rejects secret with raw_allowed retention' "$CLI" valid
 
 # secret without retention_policy also fails validate.
 S12_SECRET_NO_RP_EVIDENCE="$TMPROOT/s12-secret-no-rp-evidence.json"
-"$CLI" evidence init --output "$S12_SECRET_NO_RP_EVIDENCE" >/dev/null
+"$CLI" evidence init --output "$S12_SECRET_NO_RP_EVIDENCE" --task "$S12_TASK" >/dev/null
 ruby --disable-gems -rjson -e '
 p=ARGV[0]; j=JSON.parse(File.read(p)); j["records"] ||= []
 j["records"] << {"kind"=>"command","status"=>"pass","summary"=>"secret no rp","created_at"=>"2026-06-29T10:00:00Z",
@@ -53,7 +53,7 @@ expect_failure 'validate rejects secret without retention_policy' "$CLI" validat
 
 # secret with hash_only retention passes validate.
 S12_SECRET_HASH_EVIDENCE="$TMPROOT/s12-secret-hash-evidence.json"
-"$CLI" evidence init --output "$S12_SECRET_HASH_EVIDENCE" >/dev/null
+"$CLI" evidence init --output "$S12_SECRET_HASH_EVIDENCE" --task "$S12_TASK" >/dev/null
 ruby --disable-gems -rjson -e '
 p=ARGV[0]; j=JSON.parse(File.read(p)); j["records"] ||= []
 j["records"] << {"kind"=>"command","status"=>"pass","summary"=>"secret hash_only","created_at"=>"2026-06-29T10:00:00Z",
@@ -68,7 +68,7 @@ pass 'secret with hash_only retention passes validate'
 # ---- Group 3: audit warns on unclassified screenshot ----
 
 S12_SCREENSHOT_EVIDENCE="$TMPROOT/s12-screenshot-evidence.json"
-"$CLI" evidence init --output "$S12_SCREENSHOT_EVIDENCE" >/dev/null
+"$CLI" evidence init --output "$S12_SCREENSHOT_EVIDENCE" --task "$S12_TASK" >/dev/null
 ruby --disable-gems -rjson -e '
 p=ARGV[0]; j=JSON.parse(File.read(p)); j["records"] ||= []
 j["records"] << {"kind"=>"command","status"=>"pass","summary"=>"screenshot taken","created_at"=>"2026-06-29T10:00:00Z",
@@ -92,7 +92,7 @@ json_assert 'audit includes data_classification_summary' "$TMPROOT/s12-dc-audit.
 # ---- Group 5: audit includes trust_repair_summary ----
 
 S12_TR_EVIDENCE="$TMPROOT/s12-tr-evidence.json"
-"$CLI" evidence init --output "$S12_TR_EVIDENCE" >/dev/null
+"$CLI" evidence init --output "$S12_TR_EVIDENCE" --task "$S12_TASK" >/dev/null
 ruby --disable-gems -rjson -e '
 p=ARGV[0]; j=JSON.parse(File.read(p)); j["records"] ||= []
 j["records"] << {"kind"=>"command","status"=>"pass","summary"=>"incident logged","created_at"=>"2026-06-29T10:00:00Z",
@@ -105,7 +105,7 @@ json_assert 'audit includes trust_repair_summary with incidents' "$TMPROOT/s12-t
 # ---- Group 6: compact-evidence excludes secret raw content ----
 
 S12_COMPACT_EVIDENCE="$TMPROOT/s12-compact-evidence.json"
-"$CLI" evidence init --output "$S12_COMPACT_EVIDENCE" >/dev/null
+"$CLI" evidence init --output "$S12_COMPACT_EVIDENCE" --task "$S12_TASK" >/dev/null
 ruby --disable-gems -rjson -e '
 p=ARGV[0]; j=JSON.parse(File.read(p)); j["records"] ||= []
 j["records"] << {"kind"=>"command","status"=>"pass","summary"=>"SECRET_API_KEY=abc123","created_at"=>"2026-06-29T10:00:00Z",
@@ -122,7 +122,7 @@ json_assert 'compact summary has artifact refs' "$TMPROOT/s12-compact-stdout.jso
 # ---- Group 7: handoff excludes secret raw content but includes trust_repair_summary ----
 
 S12_HANDOFF_EVIDENCE="$TMPROOT/s12-handoff-evidence.json"
-"$CLI" evidence init --output "$S12_HANDOFF_EVIDENCE" >/dev/null
+"$CLI" evidence init --output "$S12_HANDOFF_EVIDENCE" --task "$S12_TASK" >/dev/null
 ruby --disable-gems -rjson -e '
 p=ARGV[0]; j=JSON.parse(File.read(p)); j["records"] ||= []
 j["records"] << {"kind"=>"command","status"=>"pass","summary"=>"SECRET_TOKEN=xyz789","created_at"=>"2026-06-29T10:00:00Z",
@@ -146,7 +146,7 @@ json_assert 'handoff evidence_summary latest is redacted for secret' "$TMPROOT/s
 # ---- Group 8: evidence submit rejects invalid data_classification ----
 
 S12_BAD_DC_EVIDENCE="$TMPROOT/s12-bad-dc-evidence.json"
-"$CLI" evidence init --output "$S12_BAD_DC_EVIDENCE" >/dev/null
+"$CLI" evidence init --output "$S12_BAD_DC_EVIDENCE" --task "$S12_TASK" >/dev/null
 ruby --disable-gems -rjson -e '
 p=ARGV[0]; j=JSON.parse(File.read(p)); j["records"] ||= []
 j["records"] << {"kind"=>"command","status"=>"pass","summary"=>"bad dc","created_at"=>"2026-06-29T10:00:00Z",
@@ -156,7 +156,7 @@ expect_failure 'validate rejects non-Hash data_classification' "$CLI" validate -
 
 # validate rejects invalid category enum.
 S12_BAD_CAT_EVIDENCE="$TMPROOT/s12-bad-cat-evidence.json"
-"$CLI" evidence init --output "$S12_BAD_CAT_EVIDENCE" >/dev/null
+"$CLI" evidence init --output "$S12_BAD_CAT_EVIDENCE" --task "$S12_TASK" >/dev/null
 ruby --disable-gems -rjson -e '
 p=ARGV[0]; j=JSON.parse(File.read(p)); j["records"] ||= []
 j["records"] << {"kind"=>"command","status"=>"pass","summary"=>"bad cat","created_at"=>"2026-06-29T10:00:00Z",
@@ -167,7 +167,7 @@ expect_failure 'validate rejects invalid data_classification category' "$CLI" va
 # ---- Group 9: records missing data policy fail closed ----
 
 S12_LEGACY_EVIDENCE="$TMPROOT/s12-legacy-evidence.json"
-"$CLI" evidence init --output "$S12_LEGACY_EVIDENCE" >/dev/null
+"$CLI" evidence init --output "$S12_LEGACY_EVIDENCE" --task "$S12_TASK" >/dev/null
 ruby --disable-gems -rjson -e '
 p=ARGV[0]; j=JSON.parse(File.read(p)); j["records"] ||= []
 j["records"] << {"kind"=>"command","status"=>"pass","summary"=>"record missing current data policy","created_at"=>"2026-06-29T10:00:00Z"}

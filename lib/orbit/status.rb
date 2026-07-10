@@ -165,6 +165,10 @@ def status_open_findings(activity, evidence)
   end.compact
 end
 
+def status_gate_target(kind)
+  %w[test release].include?(kind.to_s) ? "tester-main" : "reviewer-main"
+end
+
 def status_next_action(state, task, evidence_path, activity, gate_summary, blockers)
   phase = state["phase"]
   task_path = state["current_task"]
@@ -179,7 +183,7 @@ def status_next_action(state, task, evidence_path, activity, gate_summary, block
   end
   if phase == "implemented_not_independently_accepted"
     gate = missing_gate && missing_gate["kind"]
-    target = gate == "test" ? "tester-main" : "reviewer-main"
+    target = status_gate_target(gate)
     return {
       "command" => "orbit dispatch --task #{task_path} --to #{target} --manual-payload --json",
       "reason" => "implementation is ready, but independent #{gate || "review/test"} acceptance is missing"
@@ -189,7 +193,7 @@ def status_next_action(state, task, evidence_path, activity, gate_summary, block
     return { "command" => "continue implementation", "reason" => "no current implementation pass evidence" }
   end
   if missing_gate
-    target = missing_gate["kind"] == "test" ? "tester-main" : "reviewer-main"
+    target = status_gate_target(missing_gate["kind"])
     return {
       "command" => "orbit dispatch --task #{task_path} --to #{target} --manual-payload --json",
       "reason" => "required #{missing_gate["kind"]} gate is not ready"

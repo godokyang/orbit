@@ -25,10 +25,14 @@ json_assert 'compact_summary.artifact_refs is an Array' "$TMPROOT/durable-summar
 # Build a dedicated state for retention audit tests pointing to IMPL task/evidence
 S10_STATE="$TMPROOT/s10-state.yaml"
 ruby --disable-gems -ryaml -e '
+  task = YAML.safe_load(File.read(ARGV[1]), aliases: true)
   File.write(ARGV[0], YAML.dump({
     "schema_version" => "orbit-loop-state-v1",
     "phase" => "done",
     "current_task" => File.expand_path(ARGV[1]),
+    "task_id" => task["task_id"],
+    "task_revision_id" => task["revision_id"],
+    "task_revision_number" => task["revision_number"],
     "artifacts" => {
       "evidence_file" => File.expand_path(ARGV[2]),
       "handoff_packet" => File.expand_path(ARGV[3])

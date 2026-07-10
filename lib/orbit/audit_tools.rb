@@ -526,6 +526,9 @@ def audit_state_consistency(task_path, evidence_path, state, evidence, task = ni
     elsif File.expand_path(current_task) != task_path
       blocking_findings << audit_finding("state_file.current_task", "Loop state current_task does not match audited task.")
     end
+    if task_id_valid?(task["task_id"]) && state["task_id"] != task["task_id"]
+      blocking_findings << audit_finding("state_file.task_id", "Loop state task_id does not match the audited task.")
+    end
     state_declares_revision = state.key?("task_revision_id") || state.key?("task_revision_number")
     if task_revision_frozen?(task) && state_declares_revision && (
       state["task_revision_id"] != task["revision_id"] ||

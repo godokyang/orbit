@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 ARTIFACT_LIFECYCLES = %w[transient durable].freeze
-ARTIFACT_REQUIRED_FIELDS = %w[id path sha256 producer_command created_at git_head task_revision lifecycle].freeze
+ARTIFACT_REQUIRED_FIELDS = %w[id path sha256 producer_command created_at git_head task_id task_revision lifecycle].freeze
 
 def artifact_provenance_required?(task)
   task.is_a?(Hash) && task.dig("artifact_provenance", "required") == true
@@ -66,6 +66,7 @@ end
 
 def artifact_revision_eligible?(ref, task, evidence_kind)
   return false unless task_revision_frozen?(task)
+  return false unless ref["task_id"] == task["task_id"]
 
   entry = Array(task["revision_history"]).find do |revision|
     revision.is_a?(Hash) && (
@@ -96,6 +97,7 @@ def artifact_reference_fact_errors(ref, task, task_path = nil, evidence_kind: ni
   expected_git_head = artifact_current_git_head
   errors << "artifact git_head does not match current checkout" unless ref["git_head"] == expected_git_head
   expected_revision = artifact_task_revision(task, task_path)
+  errors << "artifact task_id does not match the current task" unless task_id_valid?(task["task_id"]) && ref["task_id"] == task["task_id"]
   revision_matches = !expected_revision.empty? && ref["task_revision"] == expected_revision
   revision_matches ||= artifact_revision_eligible?(ref, task, evidence_kind) if evidence_kind
   errors << "artifact task_revision does not match the current task" unless revision_matches
@@ -325,6 +327,7 @@ def artifact(args)
     "producer_command" => options["producer_command"],
     "created_at" => File.mtime(real_artifact).utc.iso8601,
     "git_head" => artifact_current_git_head,
+    "task_id" => task["task_id"],
     "task_revision" => artifact_task_revision(task, task_path),
     "lifecycle" => options["lifecycle"]
   }

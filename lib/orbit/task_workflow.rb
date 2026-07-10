@@ -78,6 +78,7 @@ def task_draft(options)
   packet = {
     "schema_version" => "orbit-task-draft-v1",
     "task" => project_relative_persisted_path(created["path"], field: "task"),
+    "task_id" => task["task_id"],
     "risk_level" => task.dig("task_risk", "level"),
     "required_gates" => required_evidence_kinds(task),
     "revision_id" => task["revision_id"],
@@ -96,14 +97,20 @@ def task_start_workflow(options)
   task_path = File.expand_path(options["task"])
   task = task_workflow_validation!(task_path)
   owner_role = resolve_owner_role(task_owner_role(task))
+  evidence_path = File.expand_path(options["evidence"] || File.join(".orbit", "evidence", "#{durable_task_slug(task_path)}.json"))
+  if File.file?(evidence_path)
+    assert_evidence_manifest_bindable_to_task!(load_evidence_manifest(evidence_path), task, source: evidence_path)
+  end
+
   task = freeze_task_revision!(task_path)
   task["__orbit_path"] = task_path
-
-  evidence_path = File.expand_path(options["evidence"] || File.join(".orbit", "evidence", "#{durable_task_slug(task_path)}.json"))
   evidence_created = false
   unless File.file?(evidence_path)
-    write_evidence_manifest(evidence_path, manifest_with_recomputed_verdict(default_evidence_manifest))
+    manifest = bind_evidence_manifest_to_task!(default_evidence_manifest, task, source: evidence_path)
+    write_evidence_manifest(evidence_path, manifest_with_recomputed_verdict(manifest))
     evidence_created = true
+  else
+    bind_evidence_file_to_task!(evidence_path, task)
   end
   rules_path, rules_result = task_rules_resolution!(task_path, evidence_path, task)
   state_start(
@@ -118,6 +125,7 @@ def task_start_workflow(options)
   packet = {
     "schema_version" => "orbit-task-start-v1",
     "task" => project_relative_persisted_path(task_path, field: "task"),
+    "task_id" => task["task_id"],
     "revision_id" => task["revision_id"],
     "revision_number" => task["revision_number"],
     "state" => project_relative_persisted_path(options["state"], field: "state"),

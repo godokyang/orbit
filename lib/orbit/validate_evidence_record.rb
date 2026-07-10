@@ -46,6 +46,9 @@ def validate_evidence_record(result, source, record)
   validate_user_outcomes_record(result, source, record)
   validate_artifact_refs_record(result, source, record)
   if record.key?("task_revision_id") || record.key?("task_revision_number")
+    unless task_id_valid?(record["task_id"])
+      validation_error(result, "#{source}.task_id", "Revision-bound evidence must include task_id using otask_<24 lowercase hex>.")
+    end
     unless record["task_revision_id"].is_a?(String) && record["task_revision_id"].match?(/\Ar\d+-[0-9a-f]{12}\z/)
       validation_error(result, "#{source}.task_revision_id", "task_revision_id must use r<number>-<12 hex>.")
     end

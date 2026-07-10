@@ -678,6 +678,7 @@ def handoff(args)
     "schema_version" => "orbit-handoff-v1",
     "project" => task.is_a?(Hash) && task["project"] ? task["project"] : File.basename(Dir.pwd),
     "task" => project_relative_persisted_path(task_path, field: "task"),
+    "task_id" => task.is_a?(Hash) ? task["task_id"] : nil,
     "task_revision" => task_revision_frozen?(task) ? {
       "revision_id" => task["revision_id"],
       "revision_number" => task["revision_number"],

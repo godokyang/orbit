@@ -46,7 +46,7 @@ def evidence_record_summary(records)
     Array(record["artifact_refs"]).each do |ref|
       next unless ref.is_a?(Hash)
 
-      artifacts << ref.select { |key, _value| %w[id path sha256 producer_command created_at git_head task_revision lifecycle].include?(key) }
+      artifacts << ref.select { |key, _value| %w[id path sha256 producer_command created_at git_head task_id task_revision lifecycle].include?(key) }
     end
     if record["source_report"].is_a?(String) && !record["source_report"].empty?
       source_report = record["source_report"]
@@ -205,6 +205,7 @@ def compact_evidence(args)
     "generated_at" => Time.now.utc.iso8601,
     "task_revision_id" => task["revision_id"],
     "task_revision_number" => task["revision_number"],
+    "task_id" => task["task_id"],
     "compact_summary" => {
       "task_sha256" => task_sha256,
       "evidence_sha256" => evidence_ref&.dig("sha256"),

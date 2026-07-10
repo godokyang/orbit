@@ -475,6 +475,7 @@ def new_task(args, quiet: false)
 
   task["project"] = options["project"]
   task["task_type"] = options["task_type"]
+  task["task_id"] = generate_task_id
   task["execution_contract"] = build_task_execution_contract(options)
   task["schema_semantics"] = {
     "feature_versions" => ORBIT_FEATURE_VERSIONS.reject { |_k, v| v.nil? }

@@ -308,6 +308,7 @@ def rule_resolution(options)
   roles, instances = load_project_config(result)
   task = load_task(result, options["task"])
   result["task_sha256"] = sha256_file(File.expand_path(options["task"])) if task && options["task"]
+  result["task_id"] = task["task_id"] if task_id_valid?(task && task["task_id"])
   if task_revision_frozen?(task)
     result["task_revision_id"] = task["revision_id"]
     result["task_revision_number"] = task["revision_number"]
@@ -344,6 +345,7 @@ def rule_artifact_identity(document)
     "resolved_instance" => source["resolved_instance"] || source["instance"],
     "task_path" => source.dig("sources", "task_rules", "path"),
     "task_sha256" => source["task_sha256"],
+    "task_id" => source["task_id"],
     "task_revision_id" => source["task_revision_id"],
     "valid" => source["valid"]
   }
@@ -381,9 +383,10 @@ def cached_rule_resolution(result)
   return result unless result.is_a?(Hash) && result["valid"] == true
 
   revision = result["task_revision_id"] || (result["task_sha256"] ? "sha256:#{result["task_sha256"]}" : "no-task")
+  task_id = result["task_id"] || "no-task-id"
   role = result["resolved_role"].to_s
   rules_hash = rule_resolution_fingerprint(result)
-  cache_key = Digest::SHA256.hexdigest(JSON.generate([revision, role, rules_hash]))
+  cache_key = Digest::SHA256.hexdigest(JSON.generate([task_id, revision, role, rules_hash]))
   relative_path = File.join(".orbit", "cache", "rules", "#{cache_key}.json")
   cache_path = File.expand_path(relative_path)
   if File.file?(cache_path)
@@ -404,6 +407,7 @@ def cached_rule_resolution(result)
     "status" => "miss",
     "path" => relative_path,
     "identity" => {
+      "task_id" => task_id,
       "task_revision" => revision,
       "role" => role,
       "rules_hash" => rules_hash
@@ -421,7 +425,7 @@ def assert_rule_output_overwrite_allowed!(output_path, result)
   existing = JSON.parse(File.read(output_path))
   existing_identity = rule_artifact_identity(existing)
   new_identity = rule_artifact_identity(result)
-  %w[resolved_role resolved_instance task_path task_sha256].each do |field|
+  %w[resolved_role resolved_instance task_path task_id task_sha256].each do |field|
     old_value = existing_identity[field].to_s
     new_value = new_identity[field].to_s
     next if old_value.empty? || new_value.empty? || old_value == new_value
@@ -677,7 +681,13 @@ end
 
 def explicit_orbit_workflow_request?(text)
   normalized = text.to_s.downcase
+  return false if explicit_orbit_opt_out?(normalized)
+
   normalized.match?(/((按|以|用|走|执行|继续|开始|启动|进入).{0,20}(orbit|流程|workflow))|((orbit|workflow).{0,12}(流程|执行|跑完|继续|闭环))|(正式.{0,8}(task|任务))/i)
+end
+
+def explicit_orbit_opt_out?(text)
+  text.to_s.match?(/(?:不要|不需要|无需|别|禁止|do\s+not|don't|without).{0,12}(?:用|走|执行|启动|进入|use|run)?\s*(?:orbit|orbit\s*流程|workflow)/i)
 end
 
 def classify_intent_policy(intent, text)
@@ -756,7 +766,7 @@ INTENT_SIGNAL_RULES = [
   { "id" => "handoff_action", "intent" => "handoff", "weight" => 100, "pattern" => /\bhandoff\b|交接|接手/i },
   { "id" => "test_action", "intent" => "test", "weight" => 95, "pattern" => /\b(?:test|qa|e2e)\b|测试|验收|验证/i },
   { "id" => "review_action", "intent" => "review", "weight" => 95, "pattern" => /\breview\b|评审|审查|审视|评估/i },
-  { "id" => "explicit_discussion", "intent" => "discussion", "weight" => 110, "pattern" => /先.{0,8}(?:讨论|聊|看看)|讨论|怎么看|觉得|brainstorm|只.{0,8}(?:解释|说明)|不要.{0,8}(?:开|创建|启动).{0,5}(?:任务|task)|是什么[？?]?/i },
+  { "id" => "explicit_discussion", "intent" => "discussion", "weight" => 110, "pattern" => /先.{0,8}(?:讨论|聊|看看)|讨论|怎么看|觉得|brainstorm|只.{0,8}(?:解释|说明)|(?:不要|不需要|无需|别|禁止).{0,12}(?:用|走|执行|启动|进入)?\s*(?:orbit|workflow)|不要.{0,8}(?:开|创建|启动).{0,5}(?:任务|task)|是什么[？?]?/i },
   { "id" => "design_action", "intent" => "design", "weight" => 70, "pattern" => /\b(?:design|analysis|plan)\b|设计|方案|分析|计划/i },
   { "id" => "docs_edit", "intent" => "docs_maintenance", "weight" => 105, "pattern" => /(?:fix|改|修复|更新|整理).{0,24}(?:typo|错别字|readme|docs?|documents?|文档)|(?:typo|错别字|readme|docs?|documents?|文档).{0,24}(?:fix|改|修复|更新|整理)/i },
   { "id" => "docs_target", "intent" => "docs_maintenance", "weight" => 55, "pattern" => /\b(?:docs?|documents?|readme|archive)\b|文档|归档/i },

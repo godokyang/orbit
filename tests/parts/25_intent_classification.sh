@@ -36,6 +36,9 @@ json_assert 'explicit override records detected selected and reason without hidi
 "$CLI" classify-intent --text '问题' --json >generic-problem.json
 json_assert 'generic problem is not treated as a discussion signal' generic-problem.json 'j["intent"] == "discussion" && j["confidence"] == "low" && j["matched_signals"].empty? && j["reason"].include?("generic words")'
 
+"$CLI" classify-intent --text '不要用 Orbit 流程，只解释这个问题' --json >orbit-opt-out.json
+json_assert 'explicit Orbit negation remains discussion instead of formal coding' orbit-opt-out.json 'j["intent"] == "discussion" && j.dig("policy", "formal_task") == false && j["matched_signals"].any? { |s| s["id"] == "explicit_discussion" } && j["matched_signals"].none? { |s| s["id"] == "explicit_orbit_execution" }'
+
 "$CLI" new-task --task-type implementation --risk-level strict --risk-sink auth --output .orbit/tasks/strict.yaml >/dev/null
 "$CLI" classify-intent --text 'fix a typo in the README' --task .orbit/tasks/strict.yaml --json >task-risk.json
 json_assert 'structured task risk remains authoritative over a light language recommendation' task-risk.json 'j.dig("risk_recommendation", "level") == "light" && j.dig("risk_recommendation", "authority") == "advisory_only" && j.dig("risk_contract", "source") == "task_contract" && j.dig("risk_contract", "effective_level") == "strict" && j.dig("risk_contract", "classification_can_override") == false && j.dig("risk_contract", "recommendation_differs") == true'

@@ -438,6 +438,7 @@ def implementation_instance_override_record!(options)
     "expires_at" => expiry&.utc&.iso8601,
     "no_expiry" => options["no_expiry"] == true
   }.compact
+  record["task_id"] = task["task_id"] if task_id_valid?(task["task_id"])
   if task_revision_frozen?(task)
     record["task_revision_id"] = task["revision_id"]
     record["task_revision_number"] = task["revision_number"]
@@ -472,6 +473,7 @@ def default_evidence_manifest
       "feature_versions" => ORBIT_FEATURE_VERSIONS.reject { |_k, v| v.nil? }
     },
     "project" => File.basename(Dir.pwd),
+    "task_id" => nil,
     "records" => [],
     "verdict" => {
       "status" => "in_progress",
@@ -512,6 +514,35 @@ def default_evidence_manifest
     },
     "tool_calls" => []
   }
+end
+
+def assert_evidence_manifest_bindable_to_task!(manifest, task, source: "Evidence manifest")
+  evidence_error("#{source} must contain a mapping.") unless manifest.is_a?(Hash)
+  evidence_error("Task must define a valid immutable task_id before evidence can be bound.") unless task_id_valid?(task["task_id"])
+
+  records = manifest["records"]
+  evidence_error("#{source} records must be a list.") unless records.is_a?(Array)
+  bound_task_id = manifest["task_id"]
+  if bound_task_id.to_s.empty?
+    unless records.empty?
+      evidence_error("#{source} already contains records but has no task_id; refusing to reuse unbound evidence for task #{task["task_id"]}.")
+    end
+  elsif bound_task_id != task["task_id"]
+    evidence_error("#{source} belongs to task_id #{bound_task_id.inspect}, not #{task["task_id"].inspect}.")
+  end
+  true
+end
+
+def bind_evidence_manifest_to_task!(manifest, task, source: "Evidence manifest")
+  assert_evidence_manifest_bindable_to_task!(manifest, task, source: source)
+  manifest["task_id"] = task["task_id"]
+  manifest
+end
+
+def bind_evidence_file_to_task!(path, task)
+  update_evidence_manifest(path) do |manifest|
+    bind_evidence_manifest_to_task!(manifest, task, source: path)
+  end
 end
 
 def load_evidence_manifest(path)
@@ -720,7 +751,13 @@ def evidence_init(options)
     evidence_error("Evidence file already exists: #{output_path}")
   end
 
-  write_evidence_manifest(output_path, manifest_with_recomputed_verdict(default_evidence_manifest))
+  manifest = default_evidence_manifest
+  if options["task"]
+    task_path = File.expand_path(options["task"])
+    task = load_task_for_evidence!(task_path)
+    bind_evidence_manifest_to_task!(manifest, task, source: output_path)
+  end
+  write_evidence_manifest(output_path, manifest_with_recomputed_verdict(manifest))
   puts "Created Orbit evidence manifest:"
   puts "- #{output_path}"
 end
@@ -815,6 +852,7 @@ def evidence_add(options)
     task_path = File.expand_path(options["task"])
     task = load_yaml(task_path)
     task["__orbit_path"] = task_path
+    record["task_id"] = task["task_id"] if task_id_valid?(task["task_id"])
     if task_revision_frozen?(task)
       record["task_revision_id"] = task["revision_id"]
       record["task_revision_number"] = task["revision_number"]
@@ -829,7 +867,14 @@ def evidence_add(options)
   end
   validate_evidence_record_shape!(record, "Evidence record")
 
+  task_for_binding = if defined?(task) && task.is_a?(Hash)
+                       task
+                     elsif !options["task"].to_s.empty?
+                       load_task_for_evidence!(File.expand_path(options["task"]))
+                     end
+
   update_evidence_manifest(path) do |manifest|
+    bind_evidence_manifest_to_task!(manifest, task_for_binding, source: path) if task_for_binding.is_a?(Hash)
     records = ensure_evidence_records!(manifest)
     records << record
     manifest["project"] = File.basename(Dir.pwd) if manifest["project"].to_s.empty?

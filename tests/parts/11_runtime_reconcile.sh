@@ -272,6 +272,7 @@ ruby --disable-gems -ryaml -e '
     "schema_version" => "orbit-loop-state-v1",
     "phase" => "done",
     "current_task" => ARGV[0],
+    "task_id" => YAML.safe_load(File.read(ARGV[0]), aliases: true)["task_id"],
     "history" => [],
     "artifacts" => { "evidence_file" => ARGV[1] }
   }
@@ -308,6 +309,7 @@ ruby --disable-gems -ryaml -e '
     "schema_version" => "orbit-loop-state-v1",
     "phase" => "in_review",
     "current_task" => ARGV[0],
+    "task_id" => YAML.safe_load(File.read(ARGV[0]), aliases: true)["task_id"],
     "history" => [],
     "artifacts" => { "evidence_file" => ARGV[1] }
   }
@@ -345,6 +347,7 @@ ruby --disable-gems -ryaml -e '
     "schema_version" => "orbit-loop-state-v1",
     "phase" => "in_review",
     "current_task" => ARGV[0],
+    "task_id" => YAML.safe_load(File.read(ARGV[0]), aliases: true)["task_id"],
     "history" => [],
     "artifacts" => { "evidence_file" => ARGV[1] }
   }
@@ -382,6 +385,7 @@ ruby --disable-gems -ryaml -e '
     "schema_version" => "orbit-loop-state-v1",
     "phase" => "in_review",
     "current_task" => ARGV[0],
+    "task_id" => YAML.safe_load(File.read(ARGV[0]), aliases: true)["task_id"],
     "history" => [],
     "artifacts" => { "evidence_file" => ARGV[1] }
   }
@@ -415,6 +419,7 @@ ruby --disable-gems -ryaml -e '
     "schema_version" => "orbit-loop-state-v1",
     "phase" => "in_review",
     "current_task" => ARGV[0],
+    "task_id" => YAML.safe_load(File.read(ARGV[0]), aliases: true)["task_id"],
     "history" => [],
     "artifacts" => { "evidence_file" => ARGV[1] }
   }
@@ -453,6 +458,7 @@ ruby --disable-gems -ryaml -e '
     "schema_version" => "orbit-loop-state-v1",
     "phase" => "in_review",
     "current_task" => ARGV[0],
+    "task_id" => YAML.safe_load(File.read(ARGV[0]), aliases: true)["task_id"],
     "history" => [],
     "artifacts" => { "evidence_file" => ARGV[1] }
   }
@@ -571,6 +577,7 @@ ruby --disable-gems -ryaml -e '
     "schema_version" => "orbit-loop-state-v1",
     "phase" => "done",
     "current_task" => ARGV[0],
+    "task_id" => YAML.safe_load(File.read(ARGV[0]), aliases: true)["task_id"],
     "history" => [],
     "artifacts" => { "evidence_file" => ARGV[1] }
   }
@@ -692,6 +699,7 @@ ruby --disable-gems -ryaml -e '
     "schema_version" => "orbit-loop-state-v1",
     "phase" => "in_review",
     "current_task" => ARGV[0],
+    "task_id" => YAML.safe_load(File.read(ARGV[0]), aliases: true)["task_id"],
     "history" => [],
     "artifacts" => { "evidence_file" => ARGV[1] }
   }

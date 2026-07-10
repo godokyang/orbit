@@ -20,10 +20,14 @@
       "landing_governance_calibration": "v1",
       "user_journey_evidence": "v1",
       "artifact_provenance": "v1",
-      "revision_durable_knowledge": "v1"
+      "revision_durable_knowledge": "v1",
+      "task_identity": "v1",
+      "automatic_runtime_proof": "v2",
+      "trial_metrics": "v2"
     }
   },
   "project": "example",
+  "task_id": null,
   "records": [],
   "verdict": {
     "status": "in_progress",

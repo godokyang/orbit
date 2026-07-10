@@ -25,8 +25,8 @@ yaml_assert 'failed task start performs no workflow writes' .orbit/loop-state.ya
 make_task_execution_ready .orbit/tasks/high-level.yaml
 ORBIT_INSTANCE=lead-main "$CLI" task start --task .orbit/tasks/high-level.yaml --json >task-start.json
 json_assert 'task start completes validation revision evidence rules and state in one command' task-start.json 'j["schema_version"] == "orbit-task-start-v1" && j["revision_id"].match?(/\Ar1-/) && j["revision_number"] == 1 && j["phase"] == "working" && j["evidence_created"] == true && j["commands_required"] == 1 && j["workflow_commands_from_init"] <= 5 && File.file?(j["evidence"]) && File.file?(j["rules_resolution"])'
-yaml_assert 'task start freezes the contract and starts portable loop state' .orbit/loop-state.yaml 'j["current_task"] == ".orbit/tasks/high-level.yaml" && j["task_revision_id"].match?(/\Ar1-/) && j["phase"] == "working"'
-json_assert 'task start attaches its current role rule resolution' .orbit/evidence/high-level.json 'r=j["rule_resolution"]; r["valid"] == true && r["resolved_role"] == "lead" && r["resolved_instance"] == "lead-main" && r["file"].include?("/.orbit/rules/high-level-r1-")'
+yaml_assert 'task start freezes the contract and starts portable loop state' .orbit/loop-state.yaml 'j["current_task"] == ".orbit/tasks/high-level.yaml" && j["task_id"].match?(/\Aotask_/) && j["task_revision_id"].match?(/\Ar1-/) && j["phase"] == "working"'
+json_assert 'task start attaches its current task-bound role rule resolution' .orbit/evidence/high-level.json 'r=j["rule_resolution"]; j["task_id"].match?(/\Aotask_/) && r["task_id"] == j["task_id"] && r["valid"] == true && r["resolved_role"] == "lead" && r["resolved_instance"] == "lead-main" && r["file"].include?("/.orbit/rules/high-level-r1-")'
 ORBIT_INSTANCE=lead-main "$CLI" evidence add --file .orbit/evidence/high-level.json --kind implementation --status pass --summary 'High-level workflow implementation fixture.' --task .orbit/tasks/high-level.yaml --changed-file lib/high-level.rb --verification 'high-level fixture passed' >/dev/null
 ORBIT_INSTANCE=lead-main "$CLI" state transition --to implemented_not_independently_accepted --evidence .orbit/evidence/high-level.json >/dev/null
 yaml_assert 'task-start evidence remains valid during later state transitions' .orbit/loop-state.yaml 'j["phase"] == "implemented_not_independently_accepted" && j.dig("artifacts", "evidence_file") == ".orbit/evidence/high-level.json"'
@@ -49,6 +49,8 @@ pass 'rules context output artifact remains the full machine record'
 
 "$CLI" task draft --task-type implementation --output .orbit/tasks/human.yaml >/dev/null
 make_task_execution_ready .orbit/tasks/human.yaml
+expect_failure 'a second same-shaped task cannot reuse nonempty evidence from the first task' env ORBIT_INSTANCE=lead-main "$CLI" task start --task .orbit/tasks/human.yaml --evidence .orbit/evidence/high-level.json --json
+yaml_assert 'cross-task evidence rejection happens before revision freeze' .orbit/tasks/human.yaml 'j["revision_id"] == "draft" && j["revision_number"] == 0'
 ORBIT_INSTANCE=lead-main "$CLI" task start --task .orbit/tasks/human.yaml >task-start-human.txt
 test "$(wc -l <task-start-human.txt | tr -d ' ')" -le 3
 test "$(grep -c '^Started ' task-start-human.txt)" = "1"
@@ -58,6 +60,7 @@ if grep -q 'schema_version' task-start-human.txt; then
 fi
 pass 'task start human output stays within one concise screen'
 json_assert 'separate same-shaped tasks never share a task-bound rule cache entry' .orbit/evidence/human.json 'first=JSON.parse(File.read(".orbit/evidence/high-level.json")); j.dig("rule_resolution", "file") != first.dig("rule_resolution", "file") && j.dig("rule_resolution", "task").end_with?("/.orbit/tasks/human.yaml")'
+yaml_assert 'same-shaped tasks receive distinct immutable identities and revision ids' .orbit/tasks/human.yaml 'first=YAML.safe_load(File.read(".orbit/tasks/high-level.yaml"), aliases: true); j["task_id"] != first["task_id"] && j["revision_id"] != first["revision_id"]'
 
 for command in audit artifact bind-pane classify-intent compact-evidence dispatch docs evidence handoff hook init instances new-task notice next revision rules runtime start state status task test-hook tools validate wait-gate whoami version; do
   if ! "$CLI" "$command" --help >command-help.txt 2>command-help.err; then

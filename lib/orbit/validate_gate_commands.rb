@@ -67,6 +67,9 @@ def validate_rule_resolution_reference(result, evidence_path, evidence, task = n
   end
 
   if task.is_a?(Hash)
+    if resolution["task_id"] != task["task_id"]
+      validation_error(result, "evidence_file.rule_resolution.task_id", "Attached rule resolution task_id does not match the current task.")
+    end
     task_path = resolution.dig("sources", "task_rules", "path")
     if task_path.nil? || task_path.to_s.empty?
       validation_error(result, "evidence_file.rule_resolution.task", "Attached rule resolution must include task_rules for the current task.")
@@ -267,6 +270,15 @@ def validate_evidence(result, evidence_path, task = nil, task_sha256: nil, allow
   if ev_compat == :current && evidence["schema_semantics"].nil?
     validation_error(result, "evidence_file.schema_semantics",
       "Evidence manifest must include schema_semantics; recreate evidence with current Orbit.")
+  end
+
+  if task.is_a?(Hash) && task_id_valid?(task["task_id"])
+    unbound_empty_manifest = evidence["task_id"].to_s.empty? && evidence["records"].is_a?(Array) && evidence["records"].empty?
+    if evidence["task_id"] != task["task_id"] && !unbound_empty_manifest
+      validation_error(result, "evidence_file.task_id", "Evidence task_id must match the current task; cross-task evidence reuse is forbidden.")
+    end
+  elsif evidence.key?("task_id") && !evidence["task_id"].nil? && !task_id_valid?(evidence["task_id"])
+    validation_error(result, "evidence_file.task_id", "Evidence task_id must use otask_<24 lowercase hex> when present.")
   end
 
   records = evidence["records"]

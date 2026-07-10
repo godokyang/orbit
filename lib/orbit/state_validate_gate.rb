@@ -374,6 +374,10 @@ def validate_loop_state!(state, path)
     state_error("Loop state current_task must be a string when present.")
   end
 
+  if state.key?("task_id") && !state["task_id"].nil? && !task_id_valid?(state["task_id"])
+    state_error("Loop state task_id must use otask_<24 lowercase hex> when present.")
+  end
+
   if state.key?("owner_role") && !state["owner_role"].nil? && !state["owner_role"].is_a?(String)
     state_error("Loop state owner_role must be a string when present.")
   end
@@ -497,6 +501,7 @@ def state_start(options, quiet: false)
     state["artifacts"] ||= {}
     state_error("Loop state artifacts must be a mapping when present.") unless state["artifacts"].is_a?(Hash)
     state["artifacts"]["task_file"] = persisted_task_path
+    state["task_id"] = task["task_id"]
     state["task_revision_id"] = task["revision_id"]
     state["task_revision_number"] = task["revision_number"]
     append_state_history(state, {
@@ -504,6 +509,7 @@ def state_start(options, quiet: false)
       "from" => previous_phase,
       "to" => start_phase,
       "task" => persisted_task_path,
+      "task_id" => task["task_id"],
       "task_revision_id" => task["revision_id"],
       "task_revision_number" => task["revision_number"],
       "owner_role" => owner_role,

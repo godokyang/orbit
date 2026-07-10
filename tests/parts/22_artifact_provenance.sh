@@ -23,7 +23,7 @@ printf '{"result":"implementation verified"}\n' >.orbit/test-artifacts/implement
   --id implementation-output \
   --producer-command 'ruby fixture implementation verification' \
   --lifecycle durable --json >implementation-ref.json
-json_assert 'artifact inspect binds bytes, producer, git head, task revision, and lifecycle' implementation-ref.json 'a=j["artifact"]; j["schema_version"] == "orbit-artifact-ref-v1" && a["path"] == ".orbit/test-artifacts/implementation.json" && a["sha256"].match?(/\A[0-9a-f]{64}\z/) && a["producer_command"].include?("verification") && a["git_head"] == "not_git" && a["task_revision"].start_with?("sha256:") && a["lifecycle"] == "durable"'
+json_assert 'artifact inspect binds bytes, producer, git head, task identity, revision, and lifecycle' implementation-ref.json 'a=j["artifact"]; j["schema_version"] == "orbit-artifact-ref-v1" && a["path"] == ".orbit/test-artifacts/implementation.json" && a["sha256"].match?(/\A[0-9a-f]{64}\z/) && a["producer_command"].include?("verification") && a["git_head"] == "not_git" && a["task_id"].match?(/\Aotask_/) && a["task_revision"].start_with?("sha256:") && a["lifecycle"] == "durable"'
 expect_failure 'artifact inspect rejects absolute artifact paths' "$CLI" artifact inspect --path "$ARTIFACT_PROJECT/.orbit/test-artifacts/implementation.json" --task .orbit/tasks/artifact-task.yaml --id absolute-output --producer-command fixture --json
 ln -s /etc/hosts .orbit/test-artifacts/outside-link
 expect_failure 'artifact inspect rejects project-relative symlinks that escape the project' "$CLI" artifact inspect --path .orbit/test-artifacts/outside-link --task .orbit/tasks/artifact-task.yaml --id escaped-output --producer-command fixture --json

@@ -2,6 +2,9 @@
 # Status/next read model and explicit solo completion semantics
 # ---------------------------------------------------------------------------
 
+ruby --disable-gems -e 'ORBIT_ROOT=File.expand_path(ARGV.shift); require File.expand_path(ARGV.shift); abort unless status_gate_target("release") == "tester-main" && status_gate_target("review") == "reviewer-main"' "$SKILL_ROOT" "$SKILL_ROOT/lib/orbit/cli.rb"
+pass 'status routes missing release readiness to tester instead of reviewer'
+
 STATUS_PROJECT="$TMPROOT/status-solo-project"
 mkdir -p "$STATUS_PROJECT"
 STATUS_ORIGINAL_DIR=$PWD

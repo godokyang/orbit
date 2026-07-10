@@ -993,7 +993,7 @@ ruby --disable-gems -ryaml -e '
   y["test_level"]="repo_regression"
   File.write(p, YAML.dump(y))
 ' "$CONCURRENT_GATE_TASK"
-"$CLI" evidence init --output "$CONCURRENT_EVIDENCE" >/dev/null
+"$CLI" evidence init --output "$CONCURRENT_EVIDENCE" --task "$CONCURRENT_GATE_TASK" >/dev/null
 (
   ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit --file "$CONCURRENT_EVIDENCE" --report "$TMPROOT/structured-review.yaml" --task "$CONCURRENT_GATE_TASK" --json >"$TMPROOT/concurrent-review-submit.json"
 ) &
@@ -1085,7 +1085,7 @@ cp "$TMPROOT/current-rule-resolution.json" "$TMPROOT/bad-task-sha-rule-resolutio
 ruby --disable-gems -rjson -e 'p=ARGV[0]; j=JSON.parse(File.read(p)); j["task_sha256"]="0"*64; File.write(p, JSON.pretty_generate(j))' "$TMPROOT/bad-task-sha-rule-resolution.json"
 expect_failure 'attach-rule rejects rule resolution with stale task_sha256' "$CLI" evidence attach-rule --file "$REVIEW_JUDGMENT_EVIDENCE" --rule-resolution "$TMPROOT/bad-task-sha-rule-resolution.json" --task "$TASK"
 CONCURRENT_EVIDENCE="$TMPROOT/concurrent-evidence.json"
-"$CLI" evidence init --output "$CONCURRENT_EVIDENCE" >/dev/null
+"$CLI" evidence init --output "$CONCURRENT_EVIDENCE" --task "$TASK" >/dev/null
 cat >"$TMPROOT/concurrent-review-submit.yaml" <<'YAML'
 kind: review
 report_template_version: review-report-v1
@@ -1158,7 +1158,7 @@ YAML
 "$CLI" evidence attach-rule --file "$CONCURRENT_EVIDENCE" --rule-resolution "$TMPROOT/current-rule-resolution.json" --task "$TASK" >/dev/null &
 "$CLI" evidence add --file "$CONCURRENT_EVIDENCE" --kind command --status pass --summary "concurrent command retained" >/dev/null &
 ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit --file "$CONCURRENT_EVIDENCE" --report "$TMPROOT/concurrent-review-submit.yaml" --task "$TASK" --json >/dev/null &
-ORBIT_INSTANCE=tester-main "$CLI" evidence submit --file "$CONCURRENT_EVIDENCE" --report "$TMPROOT/concurrent-test-submit.yaml" --task "$TEST_TASK" --json >/dev/null &
+ORBIT_INSTANCE=tester-main "$CLI" evidence submit --file "$CONCURRENT_EVIDENCE" --report "$TMPROOT/concurrent-test-submit.yaml" --task "$TASK" --json >/dev/null &
 wait
 json_assert 'concurrent evidence writers preserve rules and all records' "$CONCURRENT_EVIDENCE" 'j["rule_resolution"]["file"] == File.expand_path(ARGV[2]) && j["records"].any? { |r| r["kind"] == "command" && r["summary"] == "concurrent command retained" } && j["records"].any? { |r| r["kind"] == "review" && r["source_message_id"] == "herdr:reviewer:concurrent" } && j["records"].any? { |r| r["kind"] == "test" && r["source_message_id"] == "herdr:tester:concurrent" }' "$TMPROOT/current-rule-resolution.json"
 "$CLI" validate --task "$TASK" --evidence "$REVIEW_JUDGMENT_EVIDENCE" --json >"$TMPROOT/valid-review-judgment.json"
@@ -1266,12 +1266,14 @@ expect_failure 'state transition blocks user_confirmed without user confirmation
 STRICT_DESIGN_TASK="$TMPROOT/strict-runtime-design-task.yaml"
 STRICT_DESIGN_STATE="$TMPROOT/strict-runtime-design-state.yaml"
 STRICT_DESIGN_EVIDENCE="$TMPROOT/strict-runtime-design-evidence.json"
-cp "$DESIGN_TASK" "$STRICT_DESIGN_TASK"
+"$CLI" new-task --task-type design --output "$STRICT_DESIGN_TASK" >/dev/null
+make_task_execution_ready "$STRICT_DESIGN_TASK"
 ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["runtime_identity_policy"]={"gate"=>"herdr_verified"}; File.write(p, YAML.dump(y))' "$STRICT_DESIGN_TASK"
-cp "$DESIGN_GATE_EVIDENCE" "$STRICT_DESIGN_EVIDENCE"
-ruby --disable-gems -rjson -e 'p=ARGV[0]; j=JSON.parse(File.read(p)); rec=j["records"].find { |r| r["kind"]=="review" && r["status"]=="pass" }; rec["runtime_identity"]={"verification"=>"manual_runtime","source"=>"test"}; File.write(p, JSON.pretty_generate(j))' "$STRICT_DESIGN_EVIDENCE"
+"$CLI" evidence init --output "$STRICT_DESIGN_EVIDENCE" >/dev/null
 cp .orbit/loop-state.yaml "$STRICT_DESIGN_STATE"
 ORBIT_INSTANCE=lead-main "$CLI" state start --state "$STRICT_DESIGN_STATE" --task "$STRICT_DESIGN_TASK" --owner-role lead >/dev/null
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit --file "$STRICT_DESIGN_EVIDENCE" --report "$TMPROOT/design-review-pass.yaml" --task "$STRICT_DESIGN_TASK" --json >/dev/null
+"$CLI" evidence add --file "$STRICT_DESIGN_EVIDENCE" --kind command --status pass --summary "user_confirmed: strict design fixture approved." >/dev/null
 "$CLI" state transition --state "$STRICT_DESIGN_STATE" --to review_requested >/dev/null
 expect_failure 'design transition blocks manual runtime review under strict runtime policy' "$CLI" state transition --state "$STRICT_DESIGN_STATE" --to user_confirmed --evidence "$STRICT_DESIGN_EVIDENCE"
 "$CLI" state transition --state "$DESIGN_STATE" --to user_confirmed --evidence "$DESIGN_GATE_EVIDENCE" >/dev/null
@@ -1404,8 +1406,9 @@ cp "$IMPL_TASK" "$REQUIRED_NOTICE_TASK"
 cp "$IMPL_EVIDENCE" "$REQUIRED_NOTICE_EVIDENCE"
 cp .orbit/loop-state.yaml "$REQUIRED_NOTICE_STATE"
 ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["completion_notice_policy"]="required"; File.write(p, YAML.dump(y))' "$REQUIRED_NOTICE_TASK"
+"$CLI" revision create --task "$REQUIRED_NOTICE_TASK" --state "$REQUIRED_NOTICE_STATE" --reason 'Require completion notices for the notice fixture.' --change-type release_contract --json >/dev/null
 ruby --disable-gems -rjson -rdigest -e 'p, task = ARGV; sha = Digest::SHA256.file(task).hexdigest; j = JSON.parse(File.read(p)); j["records"].each { |r| next unless r["role_execution_context"].is_a?(Hash); r["role_execution_context"]["task"] = File.expand_path(task); r["role_execution_context"]["task_sha256"] = sha }; File.write(p, JSON.pretty_generate(j))' "$REQUIRED_NOTICE_EVIDENCE" "$REQUIRED_NOTICE_TASK"
-ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["current_task"]=File.expand_path(ARGV[1]); y["artifacts"]["evidence_file"]=File.expand_path(ARGV[2]); File.write(p, YAML.dump(y))' "$REQUIRED_NOTICE_STATE" "$REQUIRED_NOTICE_TASK" "$REQUIRED_NOTICE_EVIDENCE"
+ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); t=YAML.safe_load(File.read(ARGV[1]), aliases: true); y["current_task"]=File.expand_path(ARGV[1]); y["task_id"]=t["task_id"]; y["task_revision_id"]=t["revision_id"]; y["task_revision_number"]=t["revision_number"]; y["artifacts"]["evidence_file"]=File.expand_path(ARGV[2]); File.write(p, YAML.dump(y))' "$REQUIRED_NOTICE_STATE" "$REQUIRED_NOTICE_TASK" "$REQUIRED_NOTICE_EVIDENCE"
 if "$CLI" audit --task "$REQUIRED_NOTICE_TASK" --evidence "$REQUIRED_NOTICE_EVIDENCE" --state "$REQUIRED_NOTICE_STATE" --json >"$TMPROOT/audit-missing-notice.json"; then
   printf 'FAIL audit missing completion notice: command unexpectedly succeeded\n' >&2
   exit 1
@@ -1451,8 +1454,9 @@ cp "$IMPL_TASK" "$ACK_REQUIRED_NOTICE_TASK"
 cp "$IMPL_EVIDENCE" "$ACK_REQUIRED_NOTICE_EVIDENCE"
 cp .orbit/loop-state.yaml "$ACK_REQUIRED_NOTICE_STATE"
 ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["completion_notice_policy"]={"required"=>true,"ack_required"=>true}; File.write(p, YAML.dump(y))' "$ACK_REQUIRED_NOTICE_TASK"
+"$CLI" revision create --task "$ACK_REQUIRED_NOTICE_TASK" --state "$ACK_REQUIRED_NOTICE_STATE" --reason 'Require acknowledged completion notices for the fixture.' --change-type release_contract --json >/dev/null
 ruby --disable-gems -rjson -rdigest -e 'p, task = ARGV; sha = Digest::SHA256.file(task).hexdigest; j = JSON.parse(File.read(p)); j["records"].each { |r| next unless r["role_execution_context"].is_a?(Hash); r["role_execution_context"]["task"] = File.expand_path(task); r["role_execution_context"]["task_sha256"] = sha }; File.write(p, JSON.pretty_generate(j))' "$ACK_REQUIRED_NOTICE_EVIDENCE" "$ACK_REQUIRED_NOTICE_TASK"
-ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["current_task"]=File.expand_path(ARGV[1]); y["artifacts"]["evidence_file"]=File.expand_path(ARGV[2]); File.write(p, YAML.dump(y))' "$ACK_REQUIRED_NOTICE_STATE" "$ACK_REQUIRED_NOTICE_TASK" "$ACK_REQUIRED_NOTICE_EVIDENCE"
+ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); t=YAML.safe_load(File.read(ARGV[1]), aliases: true); y["current_task"]=File.expand_path(ARGV[1]); y["task_id"]=t["task_id"]; y["task_revision_id"]=t["revision_id"]; y["task_revision_number"]=t["revision_number"]; y["artifacts"]["evidence_file"]=File.expand_path(ARGV[2]); File.write(p, YAML.dump(y))' "$ACK_REQUIRED_NOTICE_STATE" "$ACK_REQUIRED_NOTICE_TASK" "$ACK_REQUIRED_NOTICE_EVIDENCE"
 ORBIT_INSTANCE=lead-main "$CLI" notice add --task "$ACK_REQUIRED_NOTICE_TASK" --event implementation_complete --evidence "$ACK_REQUIRED_NOTICE_EVIDENCE" --json >/dev/null
 ORBIT_INSTANCE=reviewer-main "$CLI" notice add --task "$ACK_REQUIRED_NOTICE_TASK" --event review_complete --evidence "$ACK_REQUIRED_NOTICE_EVIDENCE" --json >/dev/null
 ORBIT_INSTANCE=tester-main "$CLI" notice add --task "$ACK_REQUIRED_NOTICE_TASK" --event test_complete --evidence "$ACK_REQUIRED_NOTICE_EVIDENCE" --json >/dev/null
@@ -1508,8 +1512,10 @@ json_assert 'handoff invalid task reports blocking errors' "$TMPROOT/handoff-inv
 expect_failure 'handoff fails role conflict' env ORBIT_INSTANCE=tester-main "$CLI" handoff --task "$TASK" --state "$TMPROOT/review-done-state.yaml" --evidence "$REVIEW_JUDGMENT_EVIDENCE" --json
 
 EQ_TASK="$TMPROOT/eq-task.yaml"
+EQ_EVIDENCE="$TMPROOT/eq-evidence.json"
 "$CLI" new-task --implementation-authority=tester --assigned-instance=tester-main --task-type=implementation_test --project=explicit --output="$EQ_TASK" >/dev/null
 make_task_execution_ready "$EQ_TASK"
+"$CLI" evidence init --output "$EQ_EVIDENCE" --task "$EQ_TASK" >/dev/null
 yaml_assert 'new-task supports equals syntax and explicit project' "$EQ_TASK" 'j["project"] == "explicit" && j.dig("execution_contract","implementation_authority") == "tester" && j.dig("execution_contract","assigned_instance") == "tester-main" && j["task_type"] == "implementation_test" && j["rule_packs"].any? { |p| p["category"] == "test" && p["id"] == "brooks-test" }'
 expect_failure 'validate test task rejects review-only appended evidence' "$CLI" validate --task "$EQ_TASK" --evidence "$APPEND_EVIDENCE" --json
 cat >"$TMPROOT/eq-test-submit.yaml" <<'YAML'
@@ -1561,11 +1567,11 @@ runtime_binding:
     name: "fixture-browser"
     owner: "tester"
 YAML
-ORBIT_INSTANCE=tester-main "$CLI" evidence submit --file "$APPEND_EVIDENCE" --report "$TMPROOT/eq-test-submit.yaml" --task "$EQ_TASK" --json >"$TMPROOT/eq-test-submit.json"
-"$CLI" validate --task "$EQ_TASK" --evidence "$APPEND_EVIDENCE" --json >"$TMPROOT/valid-test-append-evidence.json"
+ORBIT_INSTANCE=tester-main "$CLI" evidence submit --file "$EQ_EVIDENCE" --report "$TMPROOT/eq-test-submit.yaml" --task "$EQ_TASK" --json >"$TMPROOT/eq-test-submit.json"
+"$CLI" validate --task "$EQ_TASK" --evidence "$EQ_EVIDENCE" --json >"$TMPROOT/valid-test-append-evidence.json"
 json_assert 'validate reads appended test evidence' "$TMPROOT/valid-test-append-evidence.json" 'j["valid"] == true'
 TEST_JUDGMENT_EVIDENCE="$TMPROOT/test-judgment-evidence.json"
-cp "$APPEND_EVIDENCE" "$TEST_JUDGMENT_EVIDENCE"
+cp "$EQ_EVIDENCE" "$TEST_JUDGMENT_EVIDENCE"
 ruby --disable-gems -rjson -e 'p=ARGV[0]; j=JSON.parse(File.read(p)); j["test_judgment"]={"verdict"=>"pass","environment"=>"local shell","scenarios"=>[{"name"=>"happy path","result"=>"pass","evidence"=>"command output retained"}],"coverage_gap"=>[]}; File.write(p, JSON.pretty_generate(j))' "$TEST_JUDGMENT_EVIDENCE"
 "$CLI" validate --task "$EQ_TASK" --evidence "$TEST_JUDGMENT_EVIDENCE" --json >"$TMPROOT/valid-test-judgment.json"
 json_assert 'validate accepts structured test judgment' "$TMPROOT/valid-test-judgment.json" 'j["valid"] == true'

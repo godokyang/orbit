@@ -7,8 +7,12 @@ schema_semantics:
     user_journey_evidence: v1
     artifact_provenance: v1
     revision_durable_knowledge: v1
+    task_identity: v1
+    automatic_runtime_proof: v2
+    trial_metrics: v2
 project: example
 task_type: slice_review
+task_id: draft
 revision_id: draft
 revision_number: 0
 revision_signature: ""
