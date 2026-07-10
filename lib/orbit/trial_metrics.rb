@@ -1,7 +1,7 @@
 # frozen_string_literal: true
 
 TRIAL_METRIC_EVENT_SCHEMA = "orbit-trial-metric-event-v1"
-TRIAL_METRICS_REPORT_SCHEMA = "orbit-trial-metrics-report-v1"
+TRIAL_METRICS_REPORT_SCHEMA = "orbit-trial-metrics-report-v2"
 TRIAL_METRIC_NAMES = %w[
   task_snapshot
   workflow_failure
@@ -387,8 +387,21 @@ def trial_metrics_report(options)
     "status_questions" => trial_coverage_state(pairs.length, count_metric_totals["status_questions"]),
     "automatic_verified_ratio" => trial_coverage_state(automatic_total, verified)
   }
+  event_scope_status = unbound_count_events.empty? ? "resolved" : "ambiguous_event_scope"
+  observation_status = if event_scope_status == "ambiguous_event_scope"
+                         event_scope_status
+                       elsif coverage.values.any? { |state| state == "missing" }
+                         "collect_more_data"
+                       else
+                         "ready_for_trial_decision"
+                       end
   {
     "schema_version" => TRIAL_METRICS_REPORT_SCHEMA,
+    "schema_semantics" => {
+      "feature_versions" => {
+        "trial_metrics" => ORBIT_FEATURE_VERSIONS.fetch("trial_metrics")
+      }
+    },
     "project" => File.basename(Dir.pwd),
     "window" => { "days" => options["window_days"], "start_at" => start_time.iso8601, "end_at" => now.iso8601 },
     "privacy" => { "prompt_content_stored" => false, "free_text_stored" => false, "dimensions_only" => true },
@@ -400,6 +413,7 @@ def trial_metrics_report(options)
       "included_events" => cohort_count_events.length,
       "unbound_events" => unbound_count_events.length,
       "unbound_by_metric" => trial_metric_name_counts(unbound_count_events),
+      "scope_status" => event_scope_status,
       "out_of_cohort_events" => out_of_cohort_count_events.length,
       "out_of_cohort_by_metric" => trial_metric_name_counts(out_of_cohort_count_events)
     },
@@ -418,7 +432,7 @@ def trial_metrics_report(options)
       end,
       "all_events" => events.length
     },
-    "observation_status" => coverage.values.none? { |state| state == "missing" } ? "ready_for_trial_decision" : "collect_more_data",
+    "observation_status" => observation_status,
     "event_count" => events.length,
     "events_file" => project_relative_persisted_path(options["file"], field: "metrics file", strict: true)
   }
