@@ -14,6 +14,7 @@ require_relative "state_validate_gate"
 require_relative "audit_tools"
 require_relative "gate_lease"
 require_relative "handoff"
+require_relative "status"
 require_relative "notice"
 require_relative "hook"
 require_relative "docs_lifecycle"
@@ -91,6 +92,12 @@ def run_orbit_cli(argv)
       exit 0
     end
     notice(argv)
+  when "next"
+    if help_requested?(argv)
+      print_command_help("status")
+      exit 0
+    end
+    status_command(argv, next_only: true)
   when "rules"
     if argv.first == "print-context" && help_requested?(argv[1..] || [])
       print_command_help("rules print-context")
@@ -109,6 +116,12 @@ def run_orbit_cli(argv)
       exit 0
     end
     start(argv)
+  when "status"
+    if help_requested?(argv)
+      print_command_help("status")
+      exit 0
+    end
+    status_command(argv)
   when "state"
     state(argv)
   when "tools"

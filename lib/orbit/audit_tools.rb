@@ -246,7 +246,19 @@ def audit_validation_result(task_path, evidence_path, state_path)
   result["checked"] << "project_config"
   task = validate_task(result, task_path)
   result["checked"] << "task"
-  evidence = validate_evidence(result, evidence_path, task, task_sha256: sha256_file(task_path))
+  state_hint = begin
+    load_yaml(state_path)
+  rescue RuntimeError
+    {}
+  end
+  allow_missing_independent_gates = state_hint.is_a?(Hash) && state_hint["phase"] == "implemented_not_independently_accepted"
+  evidence = validate_evidence(
+    result,
+    evidence_path,
+    task,
+    task_sha256: sha256_file(task_path),
+    allow_missing_independent_gates: allow_missing_independent_gates
+  )
   result["checked"] << "evidence"
   state = validate_state_file(result, state_path)
   result["checked"] << "state"
@@ -573,6 +585,35 @@ def audit_trust_flags(phase, blocking_findings, warnings)
   }
 end
 
+def completion_semantics_for_phase(phase, trusted_for_done: nil)
+  case phase
+  when "done"
+    trusted = trusted_for_done.nil? ? true : trusted_for_done
+    {
+      "status" => trusted ? "done" : "done_not_trusted",
+      "implementation_complete" => true,
+      "independently_accepted" => trusted,
+      "complete_claim_allowed" => trusted,
+      "required_action" => ("resolve_blocking_errors" unless trusted)
+    }.compact
+  when "implemented_not_independently_accepted"
+    {
+      "status" => "implemented_not_independently_accepted",
+      "implementation_complete" => true,
+      "independently_accepted" => false,
+      "complete_claim_allowed" => false,
+      "required_action" => "obtain_independent_acceptance"
+    }
+  else
+    {
+      "status" => "in_progress",
+      "implementation_complete" => false,
+      "independently_accepted" => false,
+      "complete_claim_allowed" => false
+    }
+  end
+end
+
 def audit(args)
   options = parse_audit_args(args)
   task_path = File.expand_path(options["task"])
@@ -735,6 +776,7 @@ def audit(args)
     "trust_level" => audit_trust_level,
     "validation" => validation,
     "state_phase" => phase,
+    "completion_semantics" => completion_semantics_for_phase(phase, trusted_for_done: trust_flags["trusted_for_done"]),
     "trusted_for_handoff" => trust_flags["trusted_for_handoff"],
     "trusted_for_done" => trust_flags["trusted_for_done"],
     "trusted_for_release" => trust_flags["trusted_for_release"],

@@ -238,5 +238,6 @@ source "$PARTS_DIR/16_ci_release_readiness.sh"
 source "$PARTS_DIR/17_protocol_schema_versioning_full.sh"
 source "$PARTS_DIR/18_orbit_dogfood_governance.sh"
 source "$PARTS_DIR/19_landing_governance_calibration.sh"
+source "$PARTS_DIR/20_status_solo.sh"
 
 printf 'REAL_TESTS_PASS count=%s tmp=%s\n' "$PASS_COUNT" "$TMPROOT"

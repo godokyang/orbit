@@ -107,6 +107,8 @@ HELP = <<~HELP
     orbit rules resolve --json [--task PATH] [--evidence PATH] [--role ROLE] [--instance NAME] [--output PATH]
     orbit rules print-context --json [--task PATH] [--evidence PATH] [--role ROLE] [--instance NAME] [--output PATH]
     orbit start INSTANCE [--cwd PROJECT_ROOT] [--layout auto|same-tab|new-tab] [--force] [--dry-run] [--json]
+    orbit status [--task PATH] [--state PATH] [--evidence PATH] [--json]
+    orbit next [--task PATH] [--state PATH] [--evidence PATH] [--json]
     orbit state progress --message TEXT [--evidence PATH] [--state PATH]
     orbit state start --task PATH [--owner-role ROLE] [--state PATH]
     orbit state transition --to PHASE [--evidence PATH] [--reason TEXT] [--state PATH]
@@ -132,9 +134,11 @@ HELP = <<~HELP
     instances    读取 Orbit instance binding 和 health 状态。
     new-task    根据模板创建 task contract。
     notice      管理 owner completion notice runtime inbox。
+    next        输出当前 Orbit 状态派生出的下一条建议命令。
     runtime     注册、刷新或确认 Orbit-Herdr runtime session。
     rules       解析本轮默认规则、项目规则、task 规则和 rule packs。
     start        根据 instances.yaml 启动或预览 agent instance。
+    status       从 task/state/evidence/runtime 派生一屏只读状态摘要。
     state        读取或管理 Orbit loop state。
     tools        检测 Herdr runtime adapter、手动 artifact 和执行工具。
     validate    校验 Orbit config、task、evidence 和 state 文件。
@@ -151,6 +155,7 @@ HELP = <<~HELP
     orbit handoff --help
     orbit hook --help
     orbit notice --help
+    orbit status --help
     orbit runtime --help
     orbit rules print-context --help
     orbit rules resolve --help
@@ -395,6 +400,25 @@ COMMAND_HELP = {
       When an instance already has a binding, start only reuses a live-detected
       agent. If the binding cannot be proven alive, it exits with needs_force.
       --force replaces Orbit's current binding but does not kill old processes.
+  HELP
+  "status" => <<~HELP,
+    Usage:
+      orbit status [--task PATH] [--state PATH] [--evidence PATH] [--json]
+      orbit next [--task PATH] [--state PATH] [--evidence PATH] [--json]
+
+    Derives the current task, risk, runtime identity, implementation/gate
+    activity, blockers, completion meaning, and next command from existing
+    task, loop-state, evidence, and runtime files. It never writes state.
+
+    Options:
+      --task PATH      Override the task referenced by loop state.
+      --state PATH     Loop state; defaults to .orbit/loop-state.yaml.
+      --evidence PATH  Override evidence discovery from loop state/task name.
+      --json           Emit the complete derived read model.
+
+    Completion:
+      implemented_not_independently_accepted means implementation evidence
+      exists but required fresh-context review/test acceptance is still missing.
   HELP
   "validate" => <<~HELP,
     Usage:

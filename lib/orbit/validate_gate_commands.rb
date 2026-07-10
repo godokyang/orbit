@@ -230,7 +230,7 @@ def validate_implementation_overrides_for_task(result, records, task)
   end
 end
 
-def validate_evidence(result, evidence_path, task = nil, task_sha256: nil)
+def validate_evidence(result, evidence_path, task = nil, task_sha256: nil, allow_missing_independent_gates: false)
   evidence = load_validation_file(result, "evidence_file", evidence_path)
   return nil unless evidence
 
@@ -295,7 +295,24 @@ def validate_evidence(result, evidence_path, task = nil, task_sha256: nil)
   end
 
   if task && records.is_a?(Array) && !records.empty? && required_evidence_kinds(task).any?
-    validate_required_gate_evidence(result, records, task, task_sha256)
+    if allow_missing_independent_gates
+      gate_result = { "errors" => [], "warnings" => [] }
+      validate_required_gate_evidence(gate_result, records, task, task_sha256)
+      gate_result["errors"].each do |error|
+        if error["message"].to_s.start_with?("Review/test task requires structured valid")
+          validation_warning(
+            result,
+            error["source"],
+            "Independent acceptance is still pending; this is allowed only for implemented_not_independently_accepted handoff."
+          )
+        else
+          result["errors"] << error
+        end
+      end
+      result["warnings"].concat(gate_result["warnings"])
+    else
+      validate_required_gate_evidence(result, records, task, task_sha256)
+    end
   elsif task && review_or_test_gate?(task) && records.is_a?(Array) && !records.empty?
     expected_kind = expected_evidence_kind(task)
     validate_gate_verdict(result, records, expected_kind, task, task_sha256: task_sha256)

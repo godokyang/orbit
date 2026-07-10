@@ -207,7 +207,7 @@ rescue RuntimeError => e
   nil
 end
 
-ALLOWED_LOOP_PHASES = %w[idle working in_review in_test blocked done drafting review_requested changes_requested user_confirmed coding_ready].freeze
+ALLOWED_LOOP_PHASES = %w[idle working in_review in_test implemented_not_independently_accepted blocked done drafting review_requested changes_requested user_confirmed coding_ready].freeze
 DESIGN_LIFECYCLE_PHASES = %w[drafting review_requested changes_requested user_confirmed coding_ready].freeze
 ALLOWED_PARENT_GOAL_STATES = %w[not_applicable parent_in_progress slice_ready parent_blocked parent_done_ready parent_done].freeze
 ALLOWED_GATE_KINDS = %w[review test design_readiness release].freeze
@@ -525,6 +525,12 @@ def state_transition(options)
     task = task_path ? load_state_task(task_path) : nil
 
     validate_done_transition!(state_path, task_path, options["evidence"]) if target_phase == "done"
+    if target_phase == "implemented_not_independently_accepted"
+      unless %w[working in_review in_test].include?(previous_phase)
+        state_error("implemented_not_independently_accepted requires working, in_review, or in_test phase; got #{previous_phase.inspect}.")
+      end
+      validate_solo_implemented_transition!(task_path, task, options["evidence"])
+    end
     validate_design_transition!(previous_phase, target_phase, task, options["evidence"]) if task && design_task?(task)
 
     if previous_phase == "working" && target_phase == "done" && task && review_or_test_gate?(task)
@@ -551,6 +557,35 @@ def state_transition(options)
   end
   puts "Transitioned Orbit state:"
   puts "- #{previous_phase} -> #{target_phase}"
+end
+
+def validate_solo_implemented_transition!(task_path, task, evidence_path)
+  state_error("implemented_not_independently_accepted requires a current task.") unless task.is_a?(Hash) && task_path
+  unless task.dig("execution_contract", "operation_mode") == "solo"
+    state_error("implemented_not_independently_accepted is only valid for solo tasks.")
+  end
+  if evidence_path.to_s.empty?
+    state_error("implemented_not_independently_accepted requires --evidence with implementation pass evidence.")
+  end
+
+  result = { "errors" => [], "warnings" => [] }
+  evidence = validate_evidence(
+    result,
+    evidence_path,
+    task,
+    task_sha256: sha256_file(task_path),
+    allow_missing_independent_gates: true
+  )
+  records = evidence.is_a?(Hash) && evidence["records"].is_a?(Array) ? evidence["records"] : []
+  implementation_pass = records.reverse.find { |record| record.is_a?(Hash) && record["kind"] == "implementation" && record["status"] == "pass" }
+  result["errors"] << {
+    "source" => "evidence_file.records.implementation",
+    "message" => "Solo implementation outcome requires a current implementation pass record."
+  } unless implementation_pass
+  return if result["errors"].empty?
+
+  messages = result["errors"].map { |error| "#{error["source"]}: #{error["message"]}" }
+  state_error("Cannot record solo implementation outcome:\n- #{messages.join("\n- ")}")
 end
 
 def user_confirmation_record?(record)

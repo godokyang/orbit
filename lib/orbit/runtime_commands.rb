@@ -305,7 +305,7 @@ end
 
 def runtime_piggyback_skip_command?(command, argv)
   return true if command.nil?
-  return true if %w[-h --help help version --version -v init runtime].include?(command)
+  return true if %w[-h --help help version --version -v init runtime status next].include?(command)
   return true if argv.length == 1 && %w[-h --help help].include?(argv.first)
 
   false

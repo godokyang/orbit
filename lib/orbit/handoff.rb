@@ -579,6 +579,8 @@ def required_action_for_phase(phase, blocking_errors)
     "submit_test_evidence"
   when "working"
     "continue_work"
+  when "implemented_not_independently_accepted"
+    "obtain_independent_acceptance"
   when "blocked"
     "resolve_blocked_state"
   when "done"
@@ -667,6 +669,10 @@ def handoff(args)
     "task" => task_path,
     "execution_contract" => execution_contract,
     "current_phase" => current_phase,
+    "completion_semantics" => completion_semantics_for_phase(
+      current_phase,
+      trusted_for_done: current_phase == "done" && blocking_errors.empty? && audit_blocking.empty?
+    ),
     "required_action" => next_action,
     "next_action" => next_action,
     "validation_summary" => validation_summary(validation),
