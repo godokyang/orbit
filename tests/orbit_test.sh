@@ -267,5 +267,6 @@ source "$PARTS_DIR/22_artifact_provenance.sh"
 source "$PARTS_DIR/23_revision_knowledge.sh"
 source "$PARTS_DIR/24_task_workflow.sh"
 source "$PARTS_DIR/25_intent_classification.sh"
+source "$PARTS_DIR/26_automatic_runtime.sh"
 
 printf 'REAL_TESTS_PASS count=%s tmp=%s\n' "$PASS_COUNT" "$TMPROOT"

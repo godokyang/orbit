@@ -413,12 +413,15 @@ RUNTIME_GATE_WAIVABLE_STRICT_VERIFICATIONS = %w[manual_runtime].freeze
 
 def runtime_identity_herdr_verified_trusted?(runtime_identity)
   return false unless runtime_identity.is_a?(Hash)
+  return false unless runtime_ack_identity_trusted?(runtime_identity)
 
-  # Herdr currently exposes caller pane/session through process environment
-  # only. A serialized evidence record can be hand-written, so the string
-  # "herdr_verified" is not itself a proof. Keep this fail-closed until a
-  # non-spoofable caller-pane proof provider exists.
-  false
+  session = runtime_read_session(runtime_identity["session_id"])
+  return false unless session.is_a?(Hash)
+  return false unless runtime_identity["herdr_pane"].to_s == session.dig("herdr", "canonical_pane").to_s
+  return false unless runtime_identity["instance"].to_s == session["instance"].to_s
+  return false unless runtime_identity["role"].to_s == session["role"].to_s
+
+  true
 end
 
 def runtime_identity_verification(record)
@@ -483,7 +486,7 @@ def validate_runtime_identity_policy_for_task(result, records, evidence, task, t
     end
     if verification == "herdr_verified" && !runtime_identity_herdr_verified_trusted?(record["runtime_identity"])
       validation_error(result, "evidence_file.records[#{index}].runtime_identity",
-        "#{gate_kind} pass record cannot close a gate with herdr_verified runtime_identity because trusted caller-pane proof is unavailable.")
+        "#{gate_kind} pass record cannot close a gate because its herdr_verified provider proof is unavailable or invalid.")
       next
     end
     next unless strict_runtime

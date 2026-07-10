@@ -571,7 +571,8 @@ def expanded_path_for_compare(path)
   value = path.to_s.strip
   return "" if value.empty?
 
-  File.expand_path(value)
+  expanded = File.expand_path(value)
+  File.exist?(expanded) ? File.realpath(expanded) : expanded
 rescue StandardError
   value
 end

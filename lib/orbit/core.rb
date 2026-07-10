@@ -306,8 +306,9 @@ COMMAND_HELP = {
       orbit runtime register --json
       orbit runtime ack-session INSTANCE --json
 
-    Manages Orbit-Herdr runtime session diagnostics. Herdr-verified runtime
-    identity is unavailable until Herdr exposes trusted caller-pane proof.
+    Manages Orbit-Herdr runtime sessions. With a controlled orbit-proof provider,
+    register redeems a one-time nonce/project/instance-bound challenge; without
+    that provider it remains diagnostic and cannot produce verified identity.
 
     Notes:
       Herdr environment variables are probe input only. A session is

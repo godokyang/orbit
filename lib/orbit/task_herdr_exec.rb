@@ -1,4 +1,11 @@
 def start_pending_next_steps(pane)
+  if runtime_capability_profile(herdr_available: true)["mode"] == "automatic"
+    return [
+      { "register_identity" => "Run orbit runtime register --json inside pane #{pane}; Orbit will redeem the one-time provider challenge." },
+      { "verify_dispatch" => "Confirm orbit instances status --json reports dispatch_ready: true before direct delivery." }
+    ]
+  end
+
   [
     { "inspect_pane" => "herdr pane read #{pane}" },
     { "manual_payload" => "Herdr verified runtime is unavailable until trusted caller-pane proof exists; use orbit dispatch --manual-payload for task delivery." }
@@ -38,6 +45,8 @@ def start_provisional_session!(plan, pane)
       "conflicts" => []
     }
   }
+  challenge = runtime_issue_proof_challenge(session)
+  session["identity"]["proof_challenge"] = challenge if challenge
   runtime_write_session!(session)
   runtime_set_current_session!(plan["instance"], plan["session_id"], "pending")
   session
@@ -598,7 +607,7 @@ def dispatch_packet(options)
   unless explicit_override || options["manual_payload"]
     runtime_resolution = runtime_resolve_instance(instance_key)
     unless runtime_resolution["identity_verification"] == "verified" && runtime_resolution["herdr_liveness"] == "alive"
-      usage_error("dispatch target #{instance_key.inspect} does not have a verified live Orbit runtime session. Herdr verified runtime is unavailable until trusted caller-pane proof exists; use --manual-payload.")
+      usage_error("dispatch target #{instance_key.inspect} does not have a verified live Orbit runtime session. Complete provider-backed runtime registration or use --manual-payload.")
     end
     availability = runtime_resolution["availability"]
     availability_reason = runtime_resolution["availability_reason"] || runtime_resolution["liveness_reason"]

@@ -28,16 +28,17 @@ def runtime_current_session_for_instance(instance)
 end
 
 def runtime_trusted_caller_proof_provider_available?
-  false
+  runtime_proof_provider_status["available"] == true
 end
 
 def runtime_automatic_provider_e2e_available?
-  false
+  runtime_proof_provider_e2e_pass?
 end
 
 def runtime_capability_profile(herdr_available: herdr_available?)
-  trusted_proof = runtime_trusted_caller_proof_provider_available?
-  provider_e2e = runtime_automatic_provider_e2e_available?
+  provider_status = runtime_proof_provider_status
+  trusted_proof = provider_status["available"] == true
+  provider_e2e = runtime_proof_provider_e2e_pass?(provider_status)
   mode = if !herdr_available
            "manual"
          elsif trusted_proof && provider_e2e
@@ -63,6 +64,7 @@ def runtime_capability_profile(herdr_available: herdr_available?)
     "direct_dispatch" => direct_dispatch ? "available" : "unavailable",
     "trusted_proof_provider" => trusted_proof ? "available" : "unavailable",
     "provider_e2e" => provider_e2e ? "pass" : "unavailable",
+    "proof_provider" => provider_status.reject { |key, _value| key == "command" },
     "reason" => reason,
     "recommended_action" => direct_dispatch ? "use_resolver_before_dispatch" : "use_manual_payload"
   }
@@ -71,11 +73,29 @@ end
 def runtime_session_trusted_caller_proof?(session)
   return false unless session.is_a?(Hash)
   return false unless runtime_trusted_caller_proof_provider_available?
+  return false unless session["state"].to_s == "active"
+  proof_record = session.dig("identity", "trusted_caller_proof")
+  return false unless proof_record.is_a?(Hash) && proof_record["verified"] == true
+  proof = proof_record["proof"]
+  return false unless proof.is_a?(Hash)
+  expected = {
+    "session_id" => session["session_id"],
+    "launch_id" => session["launch_id"],
+    "project_root_sha256" => session["project_root_sha256"],
+    "role_config_sha256" => session["role_config_sha256"],
+    "instance_config_sha256" => session["instance_config_sha256"],
+    "instance" => session["instance"],
+    "role" => session["role"],
+    "canonical_pane" => session.dig("herdr", "canonical_pane")
+  }
+  return false unless expected.all? { |field, value| proof[field].to_s == value.to_s }
 
-  # Current Herdr only exposes pane/session as process environment. Until Orbit
-  # has a non-spoofable caller-pane proof provider, serialized proof markers are
-  # diagnostic only and must not make a local session trusted.
-  false
+  challenge = session.dig("identity", "proof_challenge")
+  return false unless challenge.is_a?(Hash)
+  return false unless challenge["used_proof_id"].to_s == proof["proof_id"].to_s
+  return false if challenge["used_at"].to_s.empty?
+
+  runtime_verify_stored_provider_proof(proof_record)
 end
 
 def runtime_verification_to_status(session)
@@ -131,6 +151,17 @@ def runtime_availability_from_agent_status(agent_status)
   end
 end
 
+def runtime_ack_identity_trusted?(runtime_identity)
+  return false unless runtime_identity.is_a?(Hash)
+  return false unless runtime_identity["verification"] == "herdr_verified"
+
+  session = runtime_read_session(runtime_identity["session_id"])
+  return false unless session.is_a?(Hash)
+  return false unless session.dig("identity", "trusted_caller_proof", "proof_id").to_s == runtime_identity["proof_id"].to_s
+
+  runtime_session_trusted_caller_proof?(session)
+end
+
 def runtime_ack_valid_for_session?(record, session)
   return false unless record.is_a?(Hash) && session.is_a?(Hash)
 
@@ -139,6 +170,7 @@ def runtime_ack_valid_for_session?(record, session)
   return false unless ack["verification"].to_s == "herdr_verified"
   return false unless ack["target_session_id"].to_s == session["session_id"].to_s
   return false unless ack["target_pane"].to_s == session.dig("herdr", "canonical_pane").to_s
+  return false unless runtime_ack_identity_trusted?(ack["runtime_identity"])
 
   acknowledged_at = runtime_time(ack["acknowledged_at"])
   return false unless acknowledged_at
@@ -207,11 +239,16 @@ def runtime_current_process_session_attribution(identity)
   end
 
   {
-    "verification" => "identity_pending",
+    "verification" => "herdr_verified",
     "session_id" => session_id,
     "herdr_pane" => session.dig("herdr", "canonical_pane"),
+    "instance" => session["instance"],
+    "role" => session["role"],
+    "provider" => session.dig("identity", "trusted_caller_proof", "provider"),
+    "proof_id" => session.dig("identity", "trusted_caller_proof", "proof_id"),
+    "proof_verified_at" => session.dig("identity", "trusted_caller_proof", "verified_at"),
     "source" => "current_process",
-    "reason" => "caller_process_not_herdr_proven"
+    "reason" => "trusted_provider_proof_verified"
   }.compact
 end
 

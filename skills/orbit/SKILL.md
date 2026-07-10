@@ -47,6 +47,8 @@ manual file/JSON protocol 是稳定默认路径。pane、tab、环境变量、�
 
 只有 capability truth source 明确返回 `automatic`，且目标 resolver 返回 `dispatch_ready: true`，才能 direct dispatch。否则用 `orbit dispatch --manual-payload`；manual payload 只证明生成了投递 artifact，不证明目标已收到。
 
+`automatic` 只来自 Herdr `orbit-proof` 受控 provider：一次性 challenge 必须绑定 nonce、session、pane、project/role/instance hash 和短 TTL，resolver 还会向 provider 复核 proof id。缺接口、E2E 未通过、proof 过期/重放/漂移时自动降回 preview 或 fail closed。
+
 notice 是 protocol inbox record，不等于 pane delivery。无法验证的 `herdr_verified`、stale/replaced/override identity 不能关闭 gate。
 
 ## 按需读取

@@ -652,7 +652,7 @@ def bind_pane(args)
     "identity_verification" => "absent",
     "dispatch_ready" => false,
     "binding_resolution" => "manual_hint",
-    "reason" => "bind-pane writes a manual Herdr hint only; Herdr verified runtime is unavailable until trusted caller-pane proof exists."
+    "reason" => "bind-pane writes a manual Herdr hint only; verified runtime requires a provider-issued start/register challenge."
   }
   puts JSON.pretty_generate({
     "schema_version" => "orbit-bind-pane-v1",
@@ -664,7 +664,7 @@ def bind_pane(args)
     "identity_verification" => "absent",
     "dispatch_ready" => false,
     "next" => [
-      "Herdr verified runtime is unavailable until trusted caller-pane proof exists; use manual dispatch when needed."
+      "Run provider-backed start/register to establish verified runtime, or use manual dispatch when automatic proof is unavailable."
     ]
   }.compact)
 end
