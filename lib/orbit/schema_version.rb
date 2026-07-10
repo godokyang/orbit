@@ -55,7 +55,7 @@ ORBIT_FEATURE_VERSIONS = {
   "revision_durable_knowledge" => "v1",       # explicit revisions, selective invalidation, cache, and portable summaries
   "task_identity" => "v1",                    # immutable task_id across revisions, evidence, artifacts, state, and handoff
   "automatic_runtime_proof" => "v2",          # one-time provider proof exchanged for expiring renewable attestation
-  "trial_metrics" => "v2"                     # task_id+stage paired baseline/after/delta measurements
+  "trial_metrics" => "v3"                     # paired snapshots independently denominate zero count metrics
 }.freeze
 
 ORBIT_KNOWN_REPORT_TEMPLATE_VERSIONS = %w[review-report-v1 test-report-v1].freeze

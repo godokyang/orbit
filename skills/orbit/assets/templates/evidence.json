@@ -23,7 +23,7 @@
       "revision_durable_knowledge": "v1",
       "task_identity": "v1",
       "automatic_runtime_proof": "v2",
-      "trial_metrics": "v2"
+      "trial_metrics": "v3"
     }
   },
   "project": "example",

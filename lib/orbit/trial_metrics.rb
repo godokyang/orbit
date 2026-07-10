@@ -304,6 +304,12 @@ def trial_metrics_report(options)
   automatic = trial_group_counts(events, "automatic_session", "outcome")
   automatic_total = automatic.values.sum
   verified = automatic.fetch("verified", 0)
+  count_metric_totals = {
+    "workflow_failures" => trial_group_counts(events, "workflow_failure", "failure_kind").values.sum,
+    "independent_defects" => events.count { |event| event["metric"] == "independent_defect" },
+    "post_gate_user_defects" => trial_group_counts(events, "post_gate_defect", "severity").values.sum,
+    "status_questions" => trial_group_counts(events, "status_question", "topic").values.sum
+  }
   metrics = {
     "task_cost" => {
       "snapshot_events" => snapshots.length,
@@ -322,7 +328,7 @@ def trial_metrics_report(options)
     "implementation_to_gate_wait" => wait_summary,
     "workflow_failures" => trial_group_counts(events, "workflow_failure", "failure_kind"),
     "independent_defects" => {
-      "total" => events.count { |event| event["metric"] == "independent_defect" },
+      "total" => count_metric_totals["independent_defects"],
       "by_source" => trial_group_counts(events, "independent_defect", "source"),
       "by_severity" => trial_group_counts(events, "independent_defect", "severity")
     },
@@ -339,10 +345,10 @@ def trial_metrics_report(options)
     "task_cost" => trial_coverage_state(duration_summary["comparable_pairs"], duration_summary.dig("delta", "total")),
     "artifact_footprint" => trial_coverage_state(artifact_count_summary["comparable_pairs"], artifact_count_summary.dig("delta", "total")),
     "implementation_to_gate_wait" => trial_coverage_state(wait_summary["comparable_pairs"], wait_summary.dig("delta", "total")),
-    "workflow_failures" => trial_coverage_state(metrics["workflow_failures"].values.sum),
-    "independent_defects" => trial_coverage_state(metrics.dig("independent_defects", "total")),
-    "post_gate_user_defects" => trial_coverage_state(metrics["post_gate_user_defects"].values.sum),
-    "status_questions" => trial_coverage_state(metrics["status_questions"].values.sum),
+    "workflow_failures" => trial_coverage_state(pairs.length, count_metric_totals["workflow_failures"]),
+    "independent_defects" => trial_coverage_state(pairs.length, count_metric_totals["independent_defects"]),
+    "post_gate_user_defects" => trial_coverage_state(pairs.length, count_metric_totals["post_gate_user_defects"]),
+    "status_questions" => trial_coverage_state(pairs.length, count_metric_totals["status_questions"]),
     "automatic_verified_ratio" => trial_coverage_state(automatic_total, verified)
   }
   {
@@ -357,6 +363,14 @@ def trial_metrics_report(options)
       "paired_tasks" => pairs.length,
       "unpaired_tasks" => unpaired_task_count,
       "automatic_sessions" => automatic_total,
+      "count_metrics" => count_metric_totals.transform_values do |event_count|
+        {
+          "observation_unit" => "paired_task",
+          "observed_tasks" => pairs.length,
+          "events" => event_count,
+          "events_per_task" => pairs.empty? ? nil : (event_count.to_f / pairs.length).round(4)
+        }
+      end,
       "all_events" => events.length
     },
     "observation_status" => coverage.values.none? { |state| state == "missing" } ? "ready_for_trial_decision" : "collect_more_data",
