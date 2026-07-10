@@ -672,6 +672,26 @@ def state_progress(options)
   now = Time.now.utc.iso8601
 
   update_loop_state(state_path) do |state|
+    if options["task"]
+      current_task_path = state["current_task"].to_s
+      state_error("state progress --task requires current_task in loop state.") if current_task_path.empty?
+      explicit_task_path = File.expand_path(options["task"])
+      current_task_path = File.expand_path(current_task_path)
+      same_path = begin
+        File.realpath(explicit_task_path) == File.realpath(current_task_path)
+      rescue SystemCallError
+        explicit_task_path == current_task_path
+      end
+      explicit_task = load_state_task(explicit_task_path)
+      current_task = load_state_task(current_task_path)
+      task_ids_match = task_id_valid?(explicit_task["task_id"]) &&
+                       explicit_task["task_id"] == current_task["task_id"] &&
+                       explicit_task["task_id"] == state["task_id"]
+      unless same_path && task_ids_match
+        state_error("state progress --task must match loop state current_task by canonical path and task_id.")
+      end
+    end
+
     state["status"] = "progress: #{message}"
     state["updated_at"] = now
     state["parent_goal_status"] = effective_parent_goal_status(load_state_task(state["current_task"]), state) if options["parent_state"] || options["active_slice"]

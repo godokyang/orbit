@@ -320,3 +320,13 @@ ORBIT_INSTANCE=lead-main "$CLI" validate --task "$S3_PROGRESS_TASK" --evidence "
 json_assert 'frozen task validates after state progress parent update' \
   "$TMPROOT/slice3-progress-validate.json" \
   'j["valid"] == true && !j["errors"].any? { |e| e["message"].to_s.include?("Frozen task fields changed") }'
+
+S3_FOREIGN_PROGRESS_TASK="$TMPROOT/slice3-foreign-progress-task.yaml"
+"$CLI" new-task --task-type implementation --output "$S3_FOREIGN_PROGRESS_TASK" >/dev/null
+S3_PROGRESS_STATE_SHA_BEFORE=$(ruby --disable-gems -rdigest -e 'puts Digest::SHA256.file(ARGV[0]).hexdigest' .orbit/loop-state.yaml)
+expect_failure 'state progress rejects an explicit task that differs from current state' \
+  env ORBIT_INSTANCE=lead-main "$CLI" state progress --task "$S3_FOREIGN_PROGRESS_TASK" \
+    --message "must not touch current task" --parent-state parent_blocked
+S3_PROGRESS_STATE_SHA_AFTER=$(ruby --disable-gems -rdigest -e 'puts Digest::SHA256.file(ARGV[0]).hexdigest' .orbit/loop-state.yaml)
+test "$S3_PROGRESS_STATE_SHA_BEFORE" = "$S3_PROGRESS_STATE_SHA_AFTER"
+pass 'mismatched state progress leaves the loop state hash unchanged'
