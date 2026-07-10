@@ -481,6 +481,7 @@ start
 | unbound 指标事件 fail-closed | 已实现（决策边界加固） | `bfce67a` | unbound task-scoped event 不进入 paired cohort 分子，同时把顶层状态降为 `ambiguous_event_scope`；已绑定的 out-of-cohort 事件仍可安全排除 |
 | trial report 语义自描述 | 已实现（兼容边界加固） | `bfce67a` | standalone report 升级为 `orbit-trial-metrics-report-v2`，并携带 `schema_semantics.feature_versions.trial_metrics: v4` |
 | gate role 原始合同校验 | 已实现（合同边界加固） | `9c17542` | validator 逐项检查原始 roles 数组，只在合同合法后由 runtime normalizer 消费；混合合法/非法值不再被静默过滤 |
+| breaking report 协议兼容治理 | 已实现（审查补强） | task revision `r2-21da4093ecc8` | 明确 `protocol_changed: true`、`migration_period`、v1 JSONL 重生成路径和禁止同系统自批；旧 r1 证据失效后重新绑定 r2，独立 review gate 保持开启 |
 
 本轮复核加固后的最终完整回归为 `REAL_TESTS_PASS count=1098`。测试同时保留了旧 Herdr、无 provider、手写 `herdr_verified`、identity pending、artifact 漂移、跨任务证据复用、凭证本地过期和真实路径缺失等负向场景，避免新能力通过放宽旧 gate 获得绿色结果。
 
