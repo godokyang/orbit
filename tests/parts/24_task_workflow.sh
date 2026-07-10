@@ -27,6 +27,9 @@ ORBIT_INSTANCE=lead-main "$CLI" task start --task .orbit/tasks/high-level.yaml -
 json_assert 'task start completes validation revision evidence rules and state in one command' task-start.json 'j["schema_version"] == "orbit-task-start-v1" && j["revision_id"].match?(/\Ar1-/) && j["revision_number"] == 1 && j["phase"] == "working" && j["evidence_created"] == true && j["commands_required"] == 1 && j["workflow_commands_from_init"] <= 5 && File.file?(j["evidence"]) && File.file?(j["rules_resolution"])'
 yaml_assert 'task start freezes the contract and starts portable loop state' .orbit/loop-state.yaml 'j["current_task"] == ".orbit/tasks/high-level.yaml" && j["task_revision_id"].match?(/\Ar1-/) && j["phase"] == "working"'
 json_assert 'task start attaches its current role rule resolution' .orbit/evidence/high-level.json 'r=j["rule_resolution"]; r["valid"] == true && r["resolved_role"] == "lead" && r["resolved_instance"] == "lead-main" && r["file"].include?("/.orbit/rules/high-level-r1-")'
+ORBIT_INSTANCE=lead-main "$CLI" evidence add --file .orbit/evidence/high-level.json --kind implementation --status pass --summary 'High-level workflow implementation fixture.' --task .orbit/tasks/high-level.yaml --changed-file lib/high-level.rb --verification 'high-level fixture passed' >/dev/null
+ORBIT_INSTANCE=lead-main "$CLI" state transition --to implemented_not_independently_accepted --evidence .orbit/evidence/high-level.json >/dev/null
+yaml_assert 'task-start evidence remains valid during later state transitions' .orbit/loop-state.yaml 'j["phase"] == "implemented_not_independently_accepted" && j.dig("artifacts", "evidence_file") == ".orbit/evidence/high-level.json"'
 
 ORBIT_INSTANCE=lead-main "$CLI" rules print-context --task .orbit/tasks/high-level.yaml >rules-context.txt
 test "$(wc -l <rules-context.txt | tr -d ' ')" -le 10

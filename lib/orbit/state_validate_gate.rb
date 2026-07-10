@@ -404,11 +404,13 @@ rescue RuntimeError => e
 end
 
 def load_state_task(path)
-  task = load_yaml(path)
+  expanded = File.expand_path(path)
+  task = load_yaml(expanded)
   state_error("Task file must contain a mapping.") unless task.is_a?(Hash)
   unless task["schema_version"] == "orbit-task-v1"
     state_error("Task schema_version must be orbit-task-v1.")
   end
+  task["__orbit_path"] = expanded
   task
 rescue RuntimeError => e
   state_error(e.message)
