@@ -165,8 +165,72 @@ def status_open_findings(activity, evidence)
   end.compact
 end
 
-def status_gate_target(kind)
-  %w[test release].include?(kind.to_s) ? "tester-main" : "reviewer-main"
+def status_gate_roles(task, kind)
+  gate = Array(task.is_a?(Hash) ? task["gates"] : nil).find do |entry|
+    entry.is_a?(Hash) && entry["kind"].to_s == kind.to_s
+  end
+  declared_roles = Array(gate && gate["roles"]).select { |role| role.is_a?(String) && !role.empty? }
+  return declared_roles.uniq unless declared_roles.empty?
+
+  fallback = expected_gate_role(kind)
+  fallback ? [fallback] : []
+end
+
+def status_gate_target(task, kind)
+  roles, instances, = load_project_instance_config_for_cli
+  gate_roles = status_gate_roles(task, kind)
+  inferred = gate_roles.map { |role| infer_instance_from_role(instances, roles, role) }.compact
+  candidates = instances.each_with_object([]) do |(instance_name, _instance), names|
+    names << instance_name if gate_roles.include?(role_for_instance_config(instances, roles, instance_name))
+  end.sort
+
+  if candidates.length == 1 && inferred.include?(candidates.first)
+    {
+      "status" => "resolved",
+      "roles" => gate_roles,
+      "instance" => candidates.first,
+      "candidates" => candidates
+    }
+  elsif candidates.empty?
+    {
+      "status" => "missing",
+      "roles" => gate_roles,
+      "candidates" => []
+    }
+  else
+    {
+      "status" => "ambiguous",
+      "roles" => gate_roles,
+      "candidates" => candidates
+    }
+  end
+end
+
+def status_gate_dispatch_action(task, task_path, gate_kind, reason)
+  target = status_gate_target(task, gate_kind)
+  if target["status"] == "resolved"
+    return {
+      "command" => "orbit dispatch --task #{task_path} --to #{target["instance"]} --manual-payload --json",
+      "reason" => reason,
+      "gate" => gate_kind,
+      "roles" => target["roles"],
+      "target_instance" => target["instance"]
+    }
+  end
+
+  selection_reason = if target["status"] == "ambiguous"
+                       "#{reason}; choose one configured instance for #{target["roles"].join("/")}: #{target["candidates"].join(", ")}"
+                     else
+                       "#{reason}; no configured instance resolves the gate roles #{target["roles"].join("/")}"
+                     end
+  {
+    "command" => "orbit instances status --json",
+    "reason" => selection_reason,
+    "gate" => gate_kind,
+    "roles" => target["roles"],
+    "requires_instance_selection" => true,
+    "candidate_instances" => target["candidates"]
+  }
 end
 
 def status_next_action(state, task, evidence_path, activity, gate_summary, blockers)
@@ -183,21 +247,23 @@ def status_next_action(state, task, evidence_path, activity, gate_summary, block
   end
   if phase == "implemented_not_independently_accepted"
     gate = missing_gate && missing_gate["kind"]
-    target = status_gate_target(gate)
-    return {
-      "command" => "orbit dispatch --task #{task_path} --to #{target} --manual-payload --json",
-      "reason" => "implementation is ready, but independent #{gate || "review/test"} acceptance is missing"
-    }
+    return status_gate_dispatch_action(
+      task,
+      task_path,
+      gate,
+      "implementation is ready, but independent #{gate || "review/test"} acceptance is missing"
+    )
   end
   if activity.dig("implementation", "status") != "pass"
     return { "command" => "continue implementation", "reason" => "no current implementation pass evidence" }
   end
   if missing_gate
-    target = status_gate_target(missing_gate["kind"])
-    return {
-      "command" => "orbit dispatch --task #{task_path} --to #{target} --manual-payload --json",
-      "reason" => "required #{missing_gate["kind"]} gate is not ready"
-    }
+    return status_gate_dispatch_action(
+      task,
+      task_path,
+      missing_gate["kind"],
+      "required #{missing_gate["kind"]} gate is not ready"
+    )
   end
   unless phase == "done"
     return {

@@ -2,7 +2,7 @@
 # Status/next read model and explicit solo completion semantics
 # ---------------------------------------------------------------------------
 
-ruby --disable-gems -e 'ORBIT_ROOT=File.expand_path(ARGV.shift); require File.expand_path(ARGV.shift); abort unless status_gate_target("release") == "tester-main" && status_gate_target("review") == "reviewer-main"' "$SKILL_ROOT" "$SKILL_ROOT/lib/orbit/cli.rb"
+ruby --disable-gems -e 'ORBIT_ROOT=File.expand_path(ARGV.shift); require File.expand_path(ARGV.shift); release={"gates"=>[{"kind"=>"release", "roles"=>["tester"]}]}; review={"gates"=>[{"kind"=>"review", "roles"=>["reviewer"]}]}; abort unless status_gate_target(release, "release")["instance"] == "tester-main" && status_gate_target(review, "review")["instance"] == "reviewer-main"' "$SKILL_ROOT" "$SKILL_ROOT/lib/orbit/cli.rb"
 pass 'status routes missing release readiness to tester instead of reviewer'
 
 STATUS_PROJECT="$TMPROOT/status-solo-project"
@@ -24,16 +24,29 @@ STATUS_ORIGINAL_DIR=$PWD
   json_assert 'status derives task risk mode identity and activity' status-working.json 'j.dig("task", "risk_level") == "standard" && j.dig("task", "operation_mode") == "solo" && j.dig("runtime", "verification") == "manual" && j.dig("activity", "implementation", "status") == "pass" && j.dig("activity", "review", "status") == "missing"'
 
   ORBIT_INSTANCE=lead-main "$CLI" state transition --to implemented_not_independently_accepted --evidence .orbit/evidence/status-task.json >/dev/null
+  cp .orbit/instances.yaml instances-status.bak.yaml
+  ruby --disable-gems -ryaml -e '
+    p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); reviewer=y["instances"].delete("reviewer-main"); reviewer["env"]["ORBIT_INSTANCE"]="review-custom"; y["instances"]["review-custom"]=reviewer; File.write(p, YAML.dump(y))
+  ' .orbit/instances.yaml
   STATE_BEFORE_STATUS=$(ruby --disable-gems -rdigest -e 'puts Digest::SHA256.file(ARGV[0]).hexdigest' .orbit/loop-state.yaml)
   ORBIT_INSTANCE=lead-main "$CLI" status --json >status-unaccepted.json
   ORBIT_INSTANCE=lead-main "$CLI" next >next-unaccepted.txt
   STATE_AFTER_STATUS=$(ruby --disable-gems -rdigest -e 'puts Digest::SHA256.file(ARGV[0]).hexdigest' .orbit/loop-state.yaml)
   test "$STATE_BEFORE_STATUS" = "$STATE_AFTER_STATUS"
   pass 'status and next are read-only over authoritative state'
-  json_assert 'status exposes explicit unaccepted solo implementation semantic' status-unaccepted.json 'j.dig("completion", "status") == "implemented_not_independently_accepted" && j.dig("completion", "independently_accepted") == false && j["blockers"].any? { |b| b["kind"] == "independent_acceptance" } && j.dig("next", "command").include?("--manual-payload")'
+  json_assert 'status resolves custom gate instance from role configuration' status-unaccepted.json 'j.dig("completion", "status") == "implemented_not_independently_accepted" && j.dig("completion", "independently_accepted") == false && j["blockers"].any? { |b| b["kind"] == "independent_acceptance" } && j.dig("next", "command").include?("--to review-custom") && j.dig("next", "target_instance") == "review-custom"'
   grep -q 'orbit dispatch --task' next-unaccepted.txt
+  grep -q -- '--to review-custom' next-unaccepted.txt
   grep -q 'independent review' next-unaccepted.txt
   pass 'orbit next explains how to obtain independent acceptance'
+  cp instances-status.bak.yaml .orbit/instances.yaml
+
+  ruby --disable-gems -ryaml -e '
+    p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); reviewer=Marshal.load(Marshal.dump(y["instances"]["reviewer-main"])); reviewer["env"]["ORBIT_INSTANCE"]="reviewer-alt"; y["instances"]["reviewer-alt"]=reviewer; File.write(p, YAML.dump(y))
+  ' .orbit/instances.yaml
+  ORBIT_INSTANCE=lead-main "$CLI" next --json >next-ambiguous.json
+  json_assert 'next requires user selection when a gate role has multiple instances' next-ambiguous.json 'n=j["next"]; n["requires_instance_selection"] == true && n["command"] == "orbit instances status --json" && n["candidate_instances"] == ["reviewer-alt", "reviewer-main"] && !n["reason"].include?("--to")'
+  cp instances-status.bak.yaml .orbit/instances.yaml
 
   ORBIT_INSTANCE=lead-main "$CLI" audit --task .orbit/tasks/status-task.yaml --evidence .orbit/evidence/status-task.json --state .orbit/loop-state.yaml --json >audit-unaccepted.json
   json_assert 'audit allows handoff but never claims solo implementation is done' audit-unaccepted.json 'j["trusted_for_handoff"] == true && j["trusted_for_done"] == false && j["done_ready"] == false && j.dig("completion_semantics", "complete_claim_allowed") == false'
