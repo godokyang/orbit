@@ -432,7 +432,7 @@ Final completeness audit 和真实 E2E / dogfood 不是一回事。Final audit �
 
 ## Transport
 
-Orbit protocol 不绑定具体终端工具。Herdr 是唯一官方 runtime adapter；tmux、zellij、wezterm、CI、GitHub Actions、普通 shell 或远端 shell 只能作为手动承载环境或文件/payload 投递路径，不提供官方自动 wake/create、direct dispatch 或 notice delivery。
+Orbit protocol 不绑定具体终端工具。manual JSON/file protocol 是当前稳定默认路径。Herdr 是当前唯一的 automatic-preview adapter，只提供 pane start/inspect；在 trusted proof provider 和 provider E2E 通过前，不提供 direct dispatch、verified runtime identity 或 notice delivery。tmux、zellij、wezterm、CI、GitHub Actions、普通 shell 或远端 shell 也只能作为手动承载环境或文件/payload 投递路径。
 
 运行时只需要保证：
 
@@ -442,8 +442,8 @@ Orbit protocol 不绑定具体终端工具。Herdr 是唯一官方 runtime adapt
 - delivery confirmation：任务确实送达目标 role / instance。
 - result collection：lead 主动等待、读取并记录对方输出；不能假设 transport 会自动把回复路由回来。
 
-runtime adapter 不改变 Orbit 语义。缺少 Herdr 不代表 Orbit protocol 不能运行；可以显式使用 manual JSON / file handoff。manual 模式不能 automatic wake/create/direct dispatch，也不会产生 Herdr-verified runtime identity；handoff/audit 应把它标为 manual protocol evidence。
-需要自动 wake/create/direct dispatch 前，先用 `orbit tools detect --json` 或 `orbit tools doctor --json` 检查当前环境能力。
+runtime adapter 不改变 Orbit 语义。缺少 Herdr 不代表 Orbit protocol 不能运行；`install.sh --mode manual` 不依赖 Herdr，manual JSON/file handoff 可完成完整协议。manual 模式不能 automatic wake/create/direct dispatch，也不会产生 Herdr-verified runtime identity；handoff/audit 应把它标为 manual protocol evidence。
+需要任何 automatic 能力前，先用 `orbit tools detect --json` 或 `orbit tools doctor --json` 检查 capability mode。`automatic-preview` 不能被当成 `automatic`；只有输出明确包含 `direct.dispatch` 且目标 resolver 为 `dispatch_ready: true` 时才允许直接投递。
 handoff packet 会带上 validate、audit、tools、delivery artifact 和 judgment 摘要，供下一位 agent 或人工投递流程判断当前交接是否可信。
 
 如果项目提供 `.orbit/tools.yaml`，可以使用 `delivery_profiles` 调整 manual artifact 文案。handoff 不调用 Herdr、tmux、CI 或其它工具，也不改变 `required_action`、gate verdict 或 exit code；它只生成 protocol handoff packet 和可手动投递的 delivery payload。

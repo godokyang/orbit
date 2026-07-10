@@ -82,6 +82,7 @@ def start_plan(options)
   {
     "schema_version" => "orbit-start-plan-v1",
     "adapter" => "herdr",
+    "runtime_capabilities" => runtime_capability_profile(herdr_available: !command_path("herdr").nil?),
     "project" => File.basename(Dir.pwd),
     "instance" => instance_key,
     "requested_instance" => options["instance"],
@@ -823,6 +824,16 @@ def start_create_blocked?(plan, options)
   plan.dig("layout", "blocked") == true
 end
 
+def print_start_capability_summary(plan, stream = $stdout)
+  capabilities = plan["runtime_capabilities"] || {}
+  stream.puts "- runtime mode: #{capabilities["mode"]}" unless capabilities["mode"].to_s.empty?
+  return if capabilities["direct_dispatch"] == "available"
+
+  stream.puts "- direct dispatch: unavailable"
+  stream.puts "- capability degradation: #{capabilities["reason"]}" unless capabilities["reason"].to_s.empty?
+  stream.puts "- next: orbit dispatch --manual-payload"
+end
+
 def print_start_blocked(plan)
   warn "Orbit start blocked:"
   warn "- instance: #{plan["instance"]}"
@@ -831,6 +842,7 @@ def print_start_blocked(plan)
   warn "- binding: #{plan.dig("instance_status", "binding")}"
   warn "- layout: #{plan.dig("layout", "selected")}" if plan.dig("layout", "selected")
   warn "- reason: #{plan.dig("layout", "reason") || "start could not create or wake a Herdr agent automatically"}"
+  print_start_capability_summary(plan, $stderr)
 end
 
 def print_start_needs_attention(plan)
@@ -840,6 +852,7 @@ def print_start_needs_attention(plan)
   warn "- action: needs_attention"
   warn "- pane: #{plan.dig("reuse_probe", "pane")}" if plan.dig("reuse_probe", "pane")
   warn "- reason: #{plan.dig("reuse_probe", "reason") || plan["reason"]}"
+  print_start_capability_summary(plan, $stderr)
 end
 
 def print_start_needs_force(plan)
@@ -852,6 +865,7 @@ def print_start_needs_force(plan)
   warn "Force does not kill the old external process; stop it manually if it is still running."
   warn "Old and new agents with the same instance and role may run concurrently and compete for evidence, gate leases, and loop state writes."
   warn "- next: #{Shellwords.join(plan["force_command"])}"
+  print_start_capability_summary(plan, $stderr)
 end
 
 def print_start_wake_dry_run(plan)
@@ -861,6 +875,7 @@ def print_start_wake_dry_run(plan)
   puts "- action: wake_dry_run"
   puts "- pane: #{plan.dig("reuse_probe", "pane")}"
   puts "- command: #{plan.dig("wake_adapter", "command", 4)}"
+  print_start_capability_summary(plan)
 end
 
 def print_start_self_wake_dry_run(plan)
@@ -870,6 +885,7 @@ def print_start_self_wake_dry_run(plan)
   puts "- action: self_wake_dry_run"
   puts "- pane: #{plan.dig("reuse_probe", "canonical_pane") || plan.dig("reuse_probe", "pane")}"
   puts "- command: #{plan.dig("self_wake", "command")}"
+  print_start_capability_summary(plan)
 end
 
 def herdr_start_argv(plan, executable = "herdr", label = nil)
@@ -950,6 +966,7 @@ def print_start_human_plan(plan)
   puts "- instance: #{plan["instance"]}"
   puts "- role: #{plan["resolved_role"]}"
   puts "- adapter: herdr"
+  print_start_capability_summary(plan)
   puts "- cwd: #{plan["cwd"]}"
   puts "- command: #{plan["argv"].join(" ")}"
   unless plan["env"].empty?
@@ -985,6 +1002,7 @@ def print_herdr_start_human_result(result)
     puts "- adapter: herdr"
     puts "- cwd: #{result["cwd"]}"
     puts "- pane: #{adapter_result["pane_id"] || "unknown"}"
+    print_start_capability_summary(result)
     if adapter_result["ready_wait"]
       ready = adapter_result["ready_wait"]
       ready_status = if ready["success"] == true
@@ -1000,6 +1018,7 @@ def print_herdr_start_human_result(result)
     warn "Orbit start failed:"
     warn "- instance: #{result["instance"]}"
     warn "- adapter: herdr"
+    print_start_capability_summary(result, $stderr)
     warn "- stderr: #{adapter_result["stderr"]}" if adapter_result["stderr"] && !adapter_result["stderr"].empty?
     if adapter_result["ready_wait"] && !adapter_result["ready_wait"]["success"]
       warn "- ready wait stderr: #{adapter_result["ready_wait"]["stderr"]}"

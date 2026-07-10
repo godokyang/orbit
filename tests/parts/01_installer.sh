@@ -12,6 +12,7 @@ test -x "$CLI"
 pass 'script executable'
 
 EXPECTED_VERSION=$(ruby --disable-gems -rjson -e 'print JSON.parse(File.read(File.join(ARGV[0], "package.json"))).fetch("version")' "$SKILL_ROOT")
+ORBIT_TEST_REAL_RUBY=$(command -v ruby)
 
 mkdir -p "$TMPROOT/install-no-herdr-bin"
 cat >"$TMPROOT/install-no-herdr-bin/ruby" <<'RUBY'
@@ -19,12 +20,53 @@ cat >"$TMPROOT/install-no-herdr-bin/ruby" <<'RUBY'
 printf 'ruby fake\n'
 RUBY
 chmod +x "$TMPROOT/install-no-herdr-bin/ruby"
-if PATH="$TMPROOT/install-no-herdr-bin" /bin/sh "$SKILL_ROOT/install.sh" --bin-dir "$TMPROOT/install-no-herdr-out-bin" --runtime-dir "$TMPROOT/install-no-herdr-runtime" >"$TMPROOT/install-no-herdr.out" 2>"$TMPROOT/install-no-herdr.err"; then
-  printf 'FAIL installer without herdr: command unexpectedly succeeded\n' >&2
+PATH="$TMPROOT/install-no-herdr-bin:/usr/bin:/bin" /bin/sh "$SKILL_ROOT/install.sh" --mode manual --bin-dir "$TMPROOT/install-no-herdr-out-bin" --runtime-dir "$TMPROOT/install-no-herdr-runtime" >"$TMPROOT/install-no-herdr.out" 2>"$TMPROOT/install-no-herdr.err"
+test ! -s "$TMPROOT/install-no-herdr.err"
+test -x "$TMPROOT/install-no-herdr-out-bin/orbit"
+grep -q 'Manual protocol is ready; Herdr is not required' "$TMPROOT/install-no-herdr.out"
+pass 'installer supports manual mode without Herdr'
+MANUAL_PROJECT="$TMPROOT/install-no-herdr-project"
+MANUAL_RUNTIME_CLI="$TMPROOT/install-no-herdr-runtime/scripts/orbit"
+mkdir -p "$MANUAL_PROJECT"
+(
+  cd "$MANUAL_PROJECT"
+  PATH="/usr/bin:/bin" "$ORBIT_TEST_REAL_RUBY" --disable-gems "$MANUAL_RUNTIME_CLI" init --operation-mode solo >/dev/null
+  PATH="/usr/bin:/bin" "$ORBIT_TEST_REAL_RUBY" --disable-gems "$MANUAL_RUNTIME_CLI" new-task --task-type implementation --output task.yaml >/dev/null
+  make_task_execution_ready task.yaml
+  PATH="/usr/bin:/bin" "$ORBIT_TEST_REAL_RUBY" --disable-gems "$MANUAL_RUNTIME_CLI" evidence init --output evidence.json >/dev/null
+  ORBIT_INSTANCE=lead-main PATH="/usr/bin:/bin" "$ORBIT_TEST_REAL_RUBY" --disable-gems "$MANUAL_RUNTIME_CLI" state start --task task.yaml >/dev/null
+  ORBIT_INSTANCE=lead-main PATH="/usr/bin:/bin" "$ORBIT_TEST_REAL_RUBY" --disable-gems "$MANUAL_RUNTIME_CLI" evidence add --file evidence.json --kind implementation --status pass --summary "Manual implementation complete." --task task.yaml >/dev/null
+  cat >review.yaml <<'YAML'
+kind: review
+report_template_version: review-report-v1
+schema_semantics:
+  feature_versions:
+    evidence_level: v1
+    quality_outcome: v1
+    schema_semantics: v1
+verdict: pass
+summary: Manual reviewer accepted the implementation outcome.
+source_message_id: manual:file-review
+quality_outcome_verdict: pass
+quality_outcome_reasoning: The concrete fixture outcome and acceptance evidence are satisfied.
+findings: []
+coverage:
+  - manual file protocol
+artifacts:
+  - task.yaml
+YAML
+  append_review_quality_fields review.yaml
+  ORBIT_INSTANCE=reviewer-main PATH="/usr/bin:/bin" "$ORBIT_TEST_REAL_RUBY" --disable-gems "$MANUAL_RUNTIME_CLI" evidence submit --file evidence.json --report review.yaml --task task.yaml --json >/dev/null
+  PATH="/usr/bin:/bin" "$ORBIT_TEST_REAL_RUBY" --disable-gems "$MANUAL_RUNTIME_CLI" wait-gate --task task.yaml --evidence evidence.json --json >wait-gate.json
+  ORBIT_INSTANCE=lead-main PATH="/usr/bin:/bin" "$ORBIT_TEST_REAL_RUBY" --disable-gems "$MANUAL_RUNTIME_CLI" state transition --to done --evidence evidence.json >/dev/null
+)
+json_assert 'manual install completes a review-gated workflow without Herdr' "$MANUAL_PROJECT/wait-gate.json" 'j["ready"] == true && j["gate_summary"]["passed"] == ["review"]'
+if PATH="$TMPROOT/install-no-herdr-bin:/usr/bin:/bin" /bin/sh "$SKILL_ROOT/install.sh" --mode automatic --bin-dir "$TMPROOT/install-no-herdr-auto-bin" --runtime-dir "$TMPROOT/install-no-herdr-auto-runtime" >"$TMPROOT/install-no-herdr-auto.out" 2>"$TMPROOT/install-no-herdr-auto.err"; then
+  printf 'FAIL automatic installer without herdr: command unexpectedly succeeded\n' >&2
   exit 1
 fi
-grep -q 'Herdr is required for Orbit automatic runtime' "$TMPROOT/install-no-herdr.err"
-pass 'installer fails clearly when Herdr is absent'
+grep -q 'Herdr is required for --mode automatic' "$TMPROOT/install-no-herdr-auto.err"
+pass 'automatic installer fails clearly when Herdr is absent'
 
 mkdir -p "$TMPROOT/install-bad-herdr-bin"
 cat >"$TMPROOT/install-bad-herdr-bin/ruby" <<'RUBY'
@@ -36,7 +78,7 @@ cat >"$TMPROOT/install-bad-herdr-bin/herdr" <<'HERDR'
 exit 42
 HERDR
 chmod +x "$TMPROOT/install-bad-herdr-bin/ruby" "$TMPROOT/install-bad-herdr-bin/herdr"
-if PATH="$TMPROOT/install-bad-herdr-bin" /bin/sh "$SKILL_ROOT/install.sh" --bin-dir "$TMPROOT/install-bad-herdr-out-bin" --runtime-dir "$TMPROOT/install-bad-herdr-runtime" >"$TMPROOT/install-bad-herdr.out" 2>"$TMPROOT/install-bad-herdr.err"; then
+if PATH="$TMPROOT/install-bad-herdr-bin:/usr/bin:/bin" /bin/sh "$SKILL_ROOT/install.sh" --mode automatic --bin-dir "$TMPROOT/install-bad-herdr-out-bin" --runtime-dir "$TMPROOT/install-bad-herdr-runtime" >"$TMPROOT/install-bad-herdr.out" 2>"$TMPROOT/install-bad-herdr.err"; then
   printf 'FAIL installer with bad herdr: command unexpectedly succeeded\n' >&2
   exit 1
 fi
@@ -57,15 +99,17 @@ PATH="$TMPROOT/install-fakebin:$PATH"
 "$SKILL_ROOT/install.sh" --help >"$TMPROOT/install-help.txt" 2>"$TMPROOT/install-help.err"
 test ! -s "$TMPROOT/install-help.err"
 ! grep -qiE -- 'token|github-token|private|Authorization|Bearer|--key' "$TMPROOT/install-help.txt"
+grep -q -- '--mode manual|automatic' "$TMPROOT/install-help.txt"
 pass 'installer help omits private repository token options'
 
 INSTALL_BIN="$TMPROOT/install-bin"
 INSTALL_RUNTIME="$TMPROOT/install-runtime"
-sh "$SKILL_ROOT/install.sh" --bin-dir "$INSTALL_BIN" --runtime-dir "$INSTALL_RUNTIME" >"$TMPROOT/install.out" 2>"$TMPROOT/install.err"
+sh "$SKILL_ROOT/install.sh" --mode automatic --bin-dir "$INSTALL_BIN" --runtime-dir "$INSTALL_RUNTIME" >"$TMPROOT/install.out" 2>"$TMPROOT/install.err"
 test ! -s "$TMPROOT/install.err"
 grep -q 'orbit install: installing Orbit CLI' "$TMPROOT/install.out"
 grep -q 'orbit install: copying runtime files' "$TMPROOT/install.out"
 grep -q 'orbit install: verifying installed orbit command' "$TMPROOT/install.out"
+grep -q 'Automatic runtime status: preview' "$TMPROOT/install.out"
 test -x "$INSTALL_BIN/orbit"
 test -x "$INSTALL_RUNTIME/scripts/orbit"
 test -f "$INSTALL_RUNTIME/package.json"
@@ -454,7 +498,12 @@ ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases
 "$CLI" instances status --json >"$TMPROOT/instances-workspace-only-status.json"
 json_assert 'workspace and tab without pane do not count as a live binding' "$TMPROOT/instances-workspace-only-status.json" 'j["instances"].any? { |i| i["instance"] == "reviewer-main" && i["binding"] == "unbound" && i["liveness"] == "not_alive" && i["liveness_reason"] == "no_binding" && i["herdr"]["workspace"] == "w1" && i["herdr"]["tab"] == "t1" }'
 "$CLI" start reviewer-main --dry-run --json >"$TMPROOT/start-reviewer-workspace-only-create.json"
-json_assert 'start creates by default when only workspace tab hints are configured' "$TMPROOT/start-reviewer-workspace-only-create.json" 'j["action"] == "dry_run" && j["instance_status"]["binding"] == "unbound" && j["instance_status"]["liveness_reason"] == "no_binding" && j["view"]["min_columns"] == 120 && j.dig("layout","minimum","cols") == 120 && !j.key?("force_command")'
+json_assert 'start creates by default when only workspace tab hints are configured' "$TMPROOT/start-reviewer-workspace-only-create.json" 'j["action"] == "dry_run" && j["instance_status"]["binding"] == "unbound" && j["instance_status"]["liveness_reason"] == "no_binding" && j["view"]["min_columns"] == 120 && j.dig("layout","minimum","cols") == 120 && !j.key?("force_command") && j.dig("runtime_capabilities", "mode") == "automatic-preview" && j.dig("runtime_capabilities", "direct_dispatch") == "unavailable" && j.dig("runtime_capabilities", "recommended_action") == "use_manual_payload"'
+"$CLI" start reviewer-main --dry-run >"$TMPROOT/start-reviewer-workspace-only-create.txt"
+grep -q -- '- runtime mode: automatic-preview' "$TMPROOT/start-reviewer-workspace-only-create.txt"
+grep -q -- '- direct dispatch: unavailable' "$TMPROOT/start-reviewer-workspace-only-create.txt"
+grep -q -- '- next: orbit dispatch --manual-payload' "$TMPROOT/start-reviewer-workspace-only-create.txt"
+pass 'start human output explains automatic preview degradation and manual next step'
 cp "$TMPROOT/instances-before-workspace-only.yaml" .orbit/instances.yaml
 mkdir -p "$TMPROOT/fakebin"
 cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
@@ -1100,9 +1149,13 @@ json_assert 'validate evidence directory reports manifest hint' "$TMPROOT/valida
 "$CLI" tools detect --json >"$TMPROOT/tools-detect.json" 2>"$TMPROOT/tools-detect.err"
 test ! -s "$TMPROOT/tools-detect.err"
 json_assert 'tools detect outputs Herdr-only capabilities' "$TMPROOT/tools-detect.json" 'j["schema_version"] == "orbit-tools-v1" && j["detected"].any? { |t| t["name"] == "local_shell" && t["available"] == true } && %w[herdr ci git].all? { |name| j["detected"].any? { |t| t["name"] == name && [true, false].include?(t["available"]) } } && j["detected"].find { |t| t["name"] == "herdr" }["capabilities"].none? { |c| c == "notice.delivery" } && !j["detected"].any? { |t| t["name"] == "tmux" }'
+json_assert 'tools detect does not advertise direct dispatch without trusted proof' "$TMPROOT/tools-detect.json" 'j.dig("runtime_capabilities", "mode") == "automatic-preview" && j.dig("runtime_capabilities", "direct_dispatch") == "unavailable" && !j["detected"].find { |t| t["name"] == "herdr" }["capabilities"].include?("direct.dispatch")'
 "$CLI" tools doctor --json >"$TMPROOT/tools-doctor.json" 2>"$TMPROOT/tools-doctor.err"
 test ! -s "$TMPROOT/tools-doctor.err"
-json_assert 'tools doctor reports Herdr runtime adapter diagnostics' "$TMPROOT/tools-doctor.json" 'j["schema_version"] == "orbit-tools-doctor-v1" && %w[pass warn].include?(j["health"]) && %w[herdr unavailable].include?(j["runtime_adapter"]) && j["manual_payload_available"] == true && j["agent_state_authority"].is_a?(Hash) && j["herdr_diagnostics"].is_a?(Hash) && j["herdr_diagnostics"]["current_pane"].is_a?(Hash) && j["herdr_diagnostics"]["configured_bindings"].is_a?(Array) && j["herdr_diagnostics"]["client_integration_authority"].is_a?(Hash) && j["herdr_diagnostics"]["inner_tmux"].is_a?(Hash) && j["detected"].any? { |t| t["name"] == "local_shell" && t["available"] == true } && !j["detected"].any? { |t| t["name"] == "tmux" } && j["findings"].is_a?(Array)'
+json_assert 'tools doctor reports Herdr runtime adapter diagnostics' "$TMPROOT/tools-doctor.json" 'j["schema_version"] == "orbit-tools-doctor-v1" && %w[pass warn].include?(j["health"]) && %w[herdr manual].include?(j["runtime_adapter"]) && %w[manual automatic-preview automatic].include?(j["runtime_mode"]) && j["manual_payload_available"] == true && j["agent_state_authority"].is_a?(Hash) && j["herdr_diagnostics"].is_a?(Hash) && j["herdr_diagnostics"]["current_pane"].is_a?(Hash) && j["herdr_diagnostics"]["configured_bindings"].is_a?(Array) && j["herdr_diagnostics"]["client_integration_authority"].is_a?(Hash) && j["herdr_diagnostics"]["inner_tmux"].is_a?(Hash) && j["detected"].any? { |t| t["name"] == "local_shell" && t["available"] == true } && !j["detected"].any? { |t| t["name"] == "tmux" } && j["findings"].is_a?(Array)'
+ORBIT_TEST_RUBY=$(command -v ruby)
+PATH="/usr/bin:/bin" "$ORBIT_TEST_RUBY" --disable-gems "$CLI" tools detect --json >"$TMPROOT/tools-detect-manual.json"
+json_assert 'tools detect reports stable manual mode when Herdr is absent' "$TMPROOT/tools-detect-manual.json" 'j.dig("runtime_capabilities", "mode") == "manual" && j.dig("runtime_capabilities", "manual_protocol") == "available" && j.dig("runtime_capabilities", "direct_dispatch") == "unavailable" && j["detected"].find { |t| t["name"] == "herdr" }["available"] == false'
 expect_failure 'tools detect requires json' "$CLI" tools detect
 expect_failure 'tools rejects missing subcommand' "$CLI" tools
 

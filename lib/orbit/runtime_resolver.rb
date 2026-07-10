@@ -31,6 +31,43 @@ def runtime_trusted_caller_proof_provider_available?
   false
 end
 
+def runtime_automatic_provider_e2e_available?
+  false
+end
+
+def runtime_capability_profile(herdr_available: herdr_available?)
+  trusted_proof = runtime_trusted_caller_proof_provider_available?
+  provider_e2e = runtime_automatic_provider_e2e_available?
+  mode = if !herdr_available
+           "manual"
+         elsif trusted_proof && provider_e2e
+           "automatic"
+         else
+           "automatic-preview"
+         end
+  direct_dispatch = mode == "automatic"
+  reason = case mode
+           when "manual"
+             "Herdr is unavailable; stable manual file/JSON protocol remains available."
+           when "automatic-preview"
+             "Herdr can start or inspect panes, but trusted caller proof and provider E2E are unavailable; verified identity and direct dispatch are disabled."
+           else
+             "Trusted runtime proof and provider E2E are available."
+           end
+
+  {
+    "mode" => mode,
+    "manual_protocol" => "available",
+    "automatic_start" => herdr_available ? (direct_dispatch ? "available" : "preview") : "unavailable",
+    "verified_identity" => direct_dispatch ? "available" : "unavailable",
+    "direct_dispatch" => direct_dispatch ? "available" : "unavailable",
+    "trusted_proof_provider" => trusted_proof ? "available" : "unavailable",
+    "provider_e2e" => provider_e2e ? "pass" : "unavailable",
+    "reason" => reason,
+    "recommended_action" => direct_dispatch ? "use_resolver_before_dispatch" : "use_manual_payload"
+  }
+end
+
 def runtime_session_trusted_caller_proof?(session)
   return false unless session.is_a?(Hash)
   return false unless runtime_trusted_caller_proof_provider_available?

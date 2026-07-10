@@ -845,6 +845,7 @@ def detect_tools
   shell_path = shell && !shell.empty? && File.executable?(shell) ? shell : nil
   shell_path ||= "/bin/sh" if File.executable?("/bin/sh")
   herdr_path = command_path("herdr")
+  runtime_profile = runtime_capability_profile(herdr_available: !herdr_path.nil?)
   git_path = command_path("git")
   ci_env = ci_environment
 
@@ -859,9 +860,12 @@ def detect_tools
     detected_tool(
       "herdr",
       !herdr_path.nil?,
-      %w[agent.start pane.message pane.capture direct.dispatch],
+      runtime_profile["direct_dispatch"] == "available" ? %w[agent.start pane.capture direct.dispatch] : %w[agent.start pane.capture],
       herdr_path ? nil : "command not found",
-      "path" => herdr_path
+      "path" => herdr_path,
+      "runtime_mode" => runtime_profile["mode"],
+      "direct_dispatch" => runtime_profile["direct_dispatch"],
+      "capability_reason" => runtime_profile["reason"]
     ),
     detected_tool(
       "ci",
@@ -1012,10 +1016,12 @@ def herdr_diagnostics(herdr_path)
 end
 
 def tools_detect_packet
+  herdr_path = command_path("herdr")
   {
     "schema_version" => "orbit-tools-v1",
     "project" => File.basename(Dir.pwd),
     "generated_at" => Time.now.utc.iso8601,
+    "runtime_capabilities" => runtime_capability_profile(herdr_available: !herdr_path.nil?),
     "detected" => detect_tools
   }
 end
@@ -1024,6 +1030,7 @@ def tools_doctor_packet
   detected = detect_tools
   by_name = detected.to_h { |tool| [tool["name"], tool] }
   herdr_diag = herdr_diagnostics(by_name.fetch("herdr")["path"])
+  runtime_profile = runtime_capability_profile(herdr_available: by_name.fetch("herdr")["available"])
   findings = []
 
   unless by_name.fetch("local_shell")["available"]
@@ -1036,9 +1043,17 @@ def tools_doctor_packet
 
   unless by_name.fetch("herdr")["available"]
     findings << {
-      "severity" => "warning",
+      "severity" => "info",
       "source" => "tools.herdr",
-      "message" => "herdr is unavailable; automatic runtime adapter features are unavailable, but manual protocol usage and JSON/file handoff artifacts remain valid."
+      "message" => "herdr is unavailable; Orbit is in stable manual mode with JSON/file handoff artifacts."
+    }
+  end
+
+  if by_name.fetch("herdr")["available"] && runtime_profile["mode"] == "automatic-preview"
+    findings << {
+      "severity" => "warning",
+      "source" => "tools.runtime_capabilities",
+      "message" => runtime_profile["reason"]
     }
   end
 
@@ -1079,7 +1094,9 @@ def tools_doctor_packet
     "project" => File.basename(Dir.pwd),
     "generated_at" => Time.now.utc.iso8601,
     "health" => health,
-    "runtime_adapter" => by_name.fetch("herdr")["available"] ? "herdr" : "unavailable",
+    "runtime_adapter" => by_name.fetch("herdr")["available"] ? "herdr" : "manual",
+    "runtime_mode" => runtime_profile["mode"],
+    "runtime_capabilities" => runtime_profile,
     "manual_payload_available" => true,
     "agent_state_authority" => {
       "codex" => "screen_manifest",

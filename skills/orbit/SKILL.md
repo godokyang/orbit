@@ -1,13 +1,13 @@
 ---
 name: orbit
-description: 用于 AI agent 在项目中感知或执行 Orbit 工作流：发现 .orbit 配置后先进入 Orbit-aware 模式；当目标明确且进入实现、评审、测试、验收、交接或 long-running/multi-agent workflow 时，再自动调用 orbit CLI 解析 role identity、创建 task contract、维护 evidence manifest 和 loop state、执行 review/test gate、validate/audit/handoff。当前官方 automatic runtime 只支持 Herdr；manual protocol 可用但不提供 direct dispatch 或 verified runtime identity。需求澄清和结对梳理阶段不要创建 task/state/gate。
+description: 用于 AI agent 在项目中感知或执行 Orbit 工作流：发现 .orbit 配置后先进入 Orbit-aware 模式；当目标明确且进入实现、评审、测试、验收、交接或 long-running/multi-agent workflow 时，再自动调用 orbit CLI 解析 role identity、创建 task contract、维护 evidence manifest 和 loop state、执行 review/test gate、validate/audit/handoff。manual protocol 是当前稳定默认路径；Herdr automatic runtime 仍是 preview，不提供 direct dispatch 或 verified runtime identity。需求澄清和结对梳理阶段不要创建 task/state/gate。
 metadata:
   short-description: Orbit 任务闭环和 gate
 ---
 
 # Orbit
 
-Orbit 是面向 AI agent 的任务闭环协议。当前官方 automatic runtime 只支持 Herdr；非 Herdr 环境仍可手动执行 Orbit protocol，但不能使用 automatic start、direct dispatch 或 Herdr-verified runtime identity。notice 当前只是 `.orbit/runtime/notices` 下的 protocol record / inbox，不是 Herdr pane delivery。这个 skill 的职责是让当前 agent 在项目里感知 Orbit 边界，并在进入正式执行闭环时自动执行 Orbit 流程：确认身份、建立任务合同、记录证据、推进状态、触发 review/test gate、生成交接。
+Orbit 是面向 AI agent 的任务闭环协议。manual file/JSON protocol 是当前稳定、默认且不依赖 Herdr 的路径。Herdr 只能提供 `automatic-preview` 的 pane start/inspect；在 trusted proof provider 和 provider E2E 都未通过前，不能宣称 automatic、direct dispatch 或 Herdr-verified runtime identity。notice 当前只是 `.orbit/runtime/notices` 下的 protocol record / inbox，不是 Herdr pane delivery。这个 skill 的职责是让当前 agent 在项目里感知 Orbit 边界，并在进入正式执行闭环时自动执行 Orbit 流程：确认身份、建立任务合同、记录证据、推进状态、触发 review/test gate、生成交接。
 
 ## 何时触发
 
@@ -52,7 +52,8 @@ Orbit 是面向 AI agent 的任务闭环协议。当前官方 automatic runtime 
    - 如果没有可用 CLI，只能做只读本地文件诊断，并说明 role/config 检查来自文件和 reference，而不是 CLI 解析结果；不要写正式 task/evidence/gate-closing record。
 3. 进入正式 Orbit 闭环后，agent 必须自己运行常规 Orbit 命令，不要要求用户代跑：
    - 用 `orbit whoami --json` 解析身份。
-   - 需要 reviewer/tester 或其他 role gate 前，先用 `orbit instances status --json` 或 `orbit start INSTANCE --json` 走 runtime resolver。`.orbit/instances.yaml` 的 binding 只是 last-known hint，不是 alive proof；只有 resolver 输出明确 `dispatch_ready: true` 时，才能 direct dispatch。不要自行用 Herdr env、pane、client、binding 或旧 session file 判断 verified。否则按 resolver remediation 处理；常规手动路径是 `orbit dispatch --manual-payload` 生成 manual protocol artifact，只有 stale/conflict/replacement 场景且用户或 owner 接受替换风险时才用 `orbit start INSTANCE --force`。
+   - 默认按稳定 manual protocol 工作。需要 reviewer/tester 或其他 role gate 前，先用 `orbit tools detect --json` 确认 capability mode；当前通常是 `manual` 或 `automatic-preview`，这两种模式都用 `orbit dispatch --manual-payload` 生成手工投递 artifact。
+   - 只有未来 capability mode 明确为 `automatic`，且 `orbit instances status --json` 的 resolver 对目标输出 `dispatch_ready: true` 时，才能 direct dispatch。`.orbit/instances.yaml` 的 binding 只是 last-known hint，不是 alive proof；不要自行用 Herdr env、pane、client、binding 或旧 session file 判断 verified。`orbit start INSTANCE` 在 preview 中只代表 pane 启动/检查能力，不代表可信投递；只有 stale/conflict/replacement 场景且用户或 owner 接受替换风险时才用 `--force`。
    - 用 `orbit rules resolve --task task.yaml --output .orbit/rules/current-resolution.json --json` 生成本轮规则解析审计产物；还没有 task 时先用 `orbit rules resolve --output .orbit/rules/current-resolution.json --json`。
    - 用 `orbit rules print-context --task task.yaml --output .orbit/rules/current-context.json --json` 生成本轮读取清单，并读取其中 `required_files`；还没有 task 时先用 `orbit rules print-context --output .orbit/rules/current-context.json --json`。项目规则不得替代默认规则。
    - 用 `orbit new-task` 创建 task contract。
@@ -88,6 +89,7 @@ Orbit 是面向 AI agent 的任务闭环协议。当前官方 automatic runtime 
 - `orbit whoami --json` 解析当前 role / instance，但这不等于目标 agent live verified。
 - Herdr env、pane id、tab/workspace 名字、client name 都不是可信 identity proof。
 - `orbit runtime register --json` 和 piggyback register 在当前版本只能记录 `identity_pending` 或 `manual_runtime` diagnostics，不能把 session 提升为 `herdr_verified`。
+- `orbit tools detect --json` 是 capability truth source；`manual` 是稳定路径，`automatic-preview` 只允许 pane start/inspect，二者都不能输出或使用 `direct.dispatch` capability。
 - direct dispatch 必须要求目标 instance 的 resolver 输出 `dispatch_ready: true`。
 - `identity_pending`、`stale`、`replaced`、`override` 不能关闭 gate，也不能被当成 verified delivery identity。
 - 当前版本没有 trusted caller-pane proof provider；任何手写、旧 session file 或无法由 resolver 复核的 `herdr_verified` 都不能 direct dispatch，也不能关闭 gate。
@@ -117,7 +119,7 @@ Orbit 是面向 AI agent 的任务闭环协议。当前官方 automatic runtime 
 - review/test verdict 应通过独立 report 文件加 `orbit evidence submit --file ... --report ... --task ... --json` 进入 manifest；可从 `assets/templates/review-report.yaml` 或 `assets/templates/test-report.yaml` 复制模板后填写。不要直接编辑 `.orbit/evidence*.json` 来提交 review/test，即使 JSON 结构看起来正确也不能用来关闭 gate；Herdr 消息只是 transport 附件，不是权威 verdict。
 - 长任务或 docs maintenance 涉及路径移动、归档或历史 evidence 时，应使用 `orbit docs alias/check` 维护 stable doc id，并用 `orbit compact-evidence` 生成 durable summary；不要把 rule context、长日志、截图或 pane transcript 全文写入长期文档。
 - 缺 evidence、verdict 不清、role 冲突或缺 quality outcome 时，默认 fail 或 escalation。
-- transport 和 protocol 要分离：Herdr 是唯一官方 automatic runtime；tmux、zellij、wezterm、CI 或普通终端只能作为 manual protocol 承载环境，不提供 Orbit automatic start、direct dispatch 或 verified runtime identity。
+- transport 和 protocol 要分离：manual file/JSON protocol 是稳定默认路径；Herdr 当前只是 automatic-preview transport。tmux、zellij、wezterm、CI 或普通终端也只能承载 manual protocol，不提供 Orbit automatic start、direct dispatch 或 verified runtime identity。
 - 汇报时说明 agent 已运行的 Orbit 命令、当前 gate 状态、剩余风险和下一步，而不是要求用户自己执行常规 Orbit 命令。
 
 ## 模板

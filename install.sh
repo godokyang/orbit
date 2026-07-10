@@ -10,9 +10,13 @@ Install or update the Orbit CLI.
 
 Usage:
   curl -fsSL https://raw.githubusercontent.com/godokyang/orbit/main/install.sh | sh
-  sh install.sh [--bin-dir DIR] [--runtime-dir DIR] [--ref REF]
+  sh install.sh [--mode manual|automatic] [--bin-dir DIR] [--runtime-dir DIR] [--ref REF]
 
 Options:
+  --mode MODE       manual (default) installs the stable file/JSON protocol
+                    without Herdr. automatic also checks the Herdr adapter;
+                    runtime remains preview and direct dispatch stays unavailable
+                    until trusted proof and provider E2E pass.
   --bin-dir DIR      Install the orbit command wrapper here.
                      Default: $ORBIT_INSTALL_DIR or $HOME/.local/bin
   --runtime-dir DIR  Install the skill runtime files here.
@@ -26,6 +30,7 @@ Environment:
   ORBIT_INSTALL_DIR  Same as --bin-dir.
   ORBIT_RUNTIME_DIR  Same as --runtime-dir.
   ORBIT_REF          Same as --ref.
+  ORBIT_INSTALL_MODE Same as --mode. Default: manual.
   ORBIT_RAW_BASE     Override raw file base URL for advanced installs.
   ORBIT_INSTALL_QUIET=1
                      Suppress progress messages.
@@ -86,6 +91,7 @@ need_value() {
 }
 
 bin_dir="${ORBIT_INSTALL_DIR:-${HOME:-}/.local/bin}"
+install_mode="${ORBIT_INSTALL_MODE:-manual}"
 if [ -n "${ORBIT_RUNTIME_DIR:-}" ]; then
   runtime_dir="$ORBIT_RUNTIME_DIR"
 elif [ -n "${XDG_DATA_HOME:-}" ]; then
@@ -96,6 +102,11 @@ fi
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
+    --mode)
+      need_value "$1" "${2:-}"
+      install_mode="$2"
+      shift 2
+      ;;
     --bin-dir)
       need_value "$1" "${2:-}"
       bin_dir="$2"
@@ -123,9 +134,15 @@ done
 
 [ -n "$bin_dir" ] || fail "bin directory is empty"
 [ -n "$runtime_dir" ] || fail "runtime directory is empty"
+case "$install_mode" in
+  manual|automatic) ;;
+  *) fail "mode must be manual or automatic" ;;
+esac
 command -v ruby >/dev/null 2>&1 || fail "ruby is required but was not found in PATH"
-command -v herdr >/dev/null 2>&1 || fail "Herdr is required for Orbit automatic runtime. Install Herdr first: curl -fsSL https://herdr.dev/install.sh | sh && herdr --version"
-herdr --version >/dev/null 2>&1 || fail 'Herdr was found but `herdr --version` failed. Fix Herdr, then rerun the Orbit installer.'
+if [ "$install_mode" = "automatic" ]; then
+  command -v herdr >/dev/null 2>&1 || fail "Herdr is required for --mode automatic. Use --mode manual or install Herdr first: curl -fsSL https://herdr.dev/install.sh | sh && herdr --version"
+  herdr --version >/dev/null 2>&1 || fail 'Herdr was found but `herdr --version` failed. Fix Herdr, use --mode manual, or rerun the Orbit installer.'
+fi
 
 raw_base="${ORBIT_RAW_BASE:-https://raw.githubusercontent.com/godokyang/orbit/${ORBIT_REF}}"
 target_cli="$runtime_dir/scripts/orbit"
@@ -279,11 +296,13 @@ if [ -n "$script_dir" ] &&
    [ -f "$script_dir/scripts/orbit" ] &&
    [ -f "$script_dir/skills/orbit/assets/templates/roles.yaml" ]; then
   install_log "installing Orbit CLI"
+  install_log "mode: $install_mode"
   install_log "wrapper: $target_wrapper"
   install_log "runtime: $runtime_dir"
   install_local_runtime "$script_dir"
 else
   install_log "installing Orbit CLI"
+  install_log "mode: $install_mode"
   install_log "wrapper: $target_wrapper"
   install_log "runtime: $runtime_dir"
   install_remote_runtime
@@ -307,6 +326,12 @@ install_log "verifying installed orbit command"
 
 printf 'Installed orbit to %s\n' "$target_wrapper"
 printf 'Runtime files installed to %s\n' "$runtime_dir"
+printf 'Install mode: %s\n' "$install_mode"
+if [ "$install_mode" = "automatic" ]; then
+  printf 'Automatic runtime status: preview until trusted identity proof and provider E2E are available.\n'
+else
+  printf 'Manual protocol is ready; Herdr is not required.\n'
+fi
 printf 'Update: rerun this installer.\n'
 printf 'Uninstall: sh uninstall.sh --bin-dir %s --runtime-dir %s\n' "$bin_dir" "$runtime_dir"
 
