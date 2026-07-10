@@ -9,7 +9,7 @@ schema_semantics:
     revision_durable_knowledge: v1
     task_identity: v1
     automatic_runtime_proof: v2
-    trial_metrics: v3
+    trial_metrics: v4
 project: example
 task_type: slice_review
 task_id: draft

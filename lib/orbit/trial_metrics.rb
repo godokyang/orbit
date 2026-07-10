@@ -10,6 +10,12 @@ TRIAL_METRIC_NAMES = %w[
   status_question
   automatic_session
 ].freeze
+TRIAL_TASK_SCOPED_COUNT_METRICS = %w[
+  workflow_failure
+  independent_defect
+  post_gate_defect
+  status_question
+].freeze
 
 def default_trial_metrics_file
   File.join(".orbit", "metrics", "trial-events.jsonl")
@@ -72,6 +78,9 @@ def parse_trial_metrics_args(args)
     usage_error("--stage must be baseline or after.") unless %w[baseline after].include?(options["stage"])
   elsif subcommand == "record"
     usage_error("metrics record requires --metric.") unless TRIAL_METRIC_NAMES.include?(options["metric"]) && options["metric"] != "task_snapshot"
+    if TRIAL_TASK_SCOPED_COUNT_METRICS.include?(options["metric"]) && options["task"].to_s.empty?
+      usage_error("metrics record --metric #{options["metric"]} requires --task.")
+    end
   end
   options
 end
@@ -180,6 +189,14 @@ def capture_trial_metrics(options)
   append_trial_metric_event(options["file"], event)
 end
 
+def trial_metric_task_identity(task_path)
+  expanded = File.expand_path(task_path)
+  task = load_yaml(expanded)
+  usage_error("metrics record task must be orbit-task-v1.") unless task.is_a?(Hash) && task["schema_version"] == "orbit-task-v1"
+  usage_error("metrics record requires a valid task_id.") unless task_id_valid?(task["task_id"])
+  [expanded, task["task_id"]]
+end
+
 def record_trial_metric(options)
   metric = options["metric"]
   dimensions = case metric
@@ -200,7 +217,13 @@ def record_trial_metric(options)
                  usage_error("automatic_session requires --outcome verified|pending|manual.") unless %w[verified pending manual].include?(options["outcome"])
                  { "outcome" => options["outcome"] }
                end
-  event = trial_metric_event(metric, task: options["task"] && File.expand_path(options["task"]), dimensions: dimensions)
+  task_path = options["task"] && File.expand_path(options["task"])
+  task_id = nil
+  if TRIAL_TASK_SCOPED_COUNT_METRICS.include?(metric)
+    task_path, task_id = trial_metric_task_identity(options["task"])
+  end
+  event = trial_metric_event(metric, task: task_path, dimensions: dimensions)
+  event["task_id"] = task_id if task_id
   append_trial_metric_event(options["file"], event)
 end
 
@@ -223,6 +246,13 @@ def trial_group_counts(events, metric, field)
   events.select { |event| event["metric"] == metric }
         .each_with_object(Hash.new(0)) { |event, counts| counts[event.dig("dimensions", field).to_s] += 1 }
         .reject { |key, _value| key.empty? }
+end
+
+def trial_metric_name_counts(events)
+  events.each_with_object(Hash.new(0)) do |event, counts|
+    metric = event["metric"].to_s
+    counts[metric] += 1 unless metric.empty?
+  end
 end
 
 def trial_median(values)
@@ -296,6 +326,12 @@ def trial_metrics_report(options)
   events = load_trial_metric_events(options["file"], start_time)
   snapshots = events.select { |event| event["metric"] == "task_snapshot" }
   pairs, unpaired_task_count = trial_snapshot_pairs(snapshots)
+  paired_task_ids = pairs.map { |pair| pair["task_id"] }
+  task_scoped_count_events = events.select { |event| TRIAL_TASK_SCOPED_COUNT_METRICS.include?(event["metric"]) }
+  unbound_count_events = task_scoped_count_events.reject { |event| task_id_valid?(event["task_id"]) }
+  bound_count_events = task_scoped_count_events.select { |event| task_id_valid?(event["task_id"]) }
+  cohort_count_events = bound_count_events.select { |event| paired_task_ids.include?(event["task_id"]) }
+  out_of_cohort_count_events = bound_count_events.reject { |event| paired_task_ids.include?(event["task_id"]) }
   duration_summary = trial_paired_metric_summary(pairs, "duration_seconds")
   token_summary = trial_paired_metric_summary(pairs, "tokens")
   wait_summary = trial_paired_metric_summary(pairs, "implementation_to_gate_seconds")
@@ -305,10 +341,10 @@ def trial_metrics_report(options)
   automatic_total = automatic.values.sum
   verified = automatic.fetch("verified", 0)
   count_metric_totals = {
-    "workflow_failures" => trial_group_counts(events, "workflow_failure", "failure_kind").values.sum,
-    "independent_defects" => events.count { |event| event["metric"] == "independent_defect" },
-    "post_gate_user_defects" => trial_group_counts(events, "post_gate_defect", "severity").values.sum,
-    "status_questions" => trial_group_counts(events, "status_question", "topic").values.sum
+    "workflow_failures" => trial_group_counts(cohort_count_events, "workflow_failure", "failure_kind").values.sum,
+    "independent_defects" => cohort_count_events.count { |event| event["metric"] == "independent_defect" },
+    "post_gate_user_defects" => trial_group_counts(cohort_count_events, "post_gate_defect", "severity").values.sum,
+    "status_questions" => trial_group_counts(cohort_count_events, "status_question", "topic").values.sum
   }
   metrics = {
     "task_cost" => {
@@ -326,14 +362,14 @@ def trial_metrics_report(options)
       "bytes" => artifact_bytes_summary
     },
     "implementation_to_gate_wait" => wait_summary,
-    "workflow_failures" => trial_group_counts(events, "workflow_failure", "failure_kind"),
+    "workflow_failures" => trial_group_counts(cohort_count_events, "workflow_failure", "failure_kind"),
     "independent_defects" => {
       "total" => count_metric_totals["independent_defects"],
-      "by_source" => trial_group_counts(events, "independent_defect", "source"),
-      "by_severity" => trial_group_counts(events, "independent_defect", "severity")
+      "by_source" => trial_group_counts(cohort_count_events, "independent_defect", "source"),
+      "by_severity" => trial_group_counts(cohort_count_events, "independent_defect", "severity")
     },
-    "post_gate_user_defects" => trial_group_counts(events, "post_gate_defect", "severity"),
-    "status_questions" => trial_group_counts(events, "status_question", "topic"),
+    "post_gate_user_defects" => trial_group_counts(cohort_count_events, "post_gate_defect", "severity"),
+    "status_questions" => trial_group_counts(cohort_count_events, "status_question", "topic"),
     "automatic_verified_ratio" => {
       "verified" => verified,
       "total" => automatic_total,
@@ -358,6 +394,15 @@ def trial_metrics_report(options)
     "privacy" => { "prompt_content_stored" => false, "free_text_stored" => false, "dimensions_only" => true },
     "metrics" => metrics,
     "coverage" => coverage,
+    "count_event_scope" => {
+      "paired_task_ids" => paired_task_ids,
+      "task_scoped_events" => task_scoped_count_events.length,
+      "included_events" => cohort_count_events.length,
+      "unbound_events" => unbound_count_events.length,
+      "unbound_by_metric" => trial_metric_name_counts(unbound_count_events),
+      "out_of_cohort_events" => out_of_cohort_count_events.length,
+      "out_of_cohort_by_metric" => trial_metric_name_counts(out_of_cohort_count_events)
+    },
     "denominators" => {
       "snapshot_events" => snapshots.length,
       "paired_tasks" => pairs.length,

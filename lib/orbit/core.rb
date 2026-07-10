@@ -106,7 +106,7 @@ HELP = <<~HELP
     orbit notice list --role ROLE --json
     orbit notice ack --role ROLE --id ID --json
     orbit metrics capture --task PATH --evidence PATH [--stage baseline|after] [--duration-seconds N] [--tokens N] --json
-    orbit metrics record --metric NAME [metric dimensions] --json
+    orbit metrics record --metric NAME [--task PATH] [metric dimensions] --json
     orbit metrics report [--window-days 30] --json
     orbit runtime register|refresh-session|ack-session [INSTANCE] --json
     orbit dispatch --task PATH --to INSTANCE [--pane PANE] [--reply-to PANE] [--manual-payload] [--dry-run] --json
@@ -452,17 +452,18 @@ COMMAND_HELP = {
       orbit metrics capture --task PATH --evidence PATH
                             [--stage baseline|after]
                             [--duration-seconds N] [--tokens N] --json
-      orbit metrics record --metric workflow_failure --failure-kind identity|schema|revision --json
-      orbit metrics record --metric independent_defect --source reviewer|tester --severity high|medium|low --json
-      orbit metrics record --metric post_gate_defect --severity P0|P1|P2 --json
-      orbit metrics record --metric status_question --topic status|next|who --json
+      orbit metrics record --task PATH --metric workflow_failure --failure-kind identity|schema|revision --json
+      orbit metrics record --task PATH --metric independent_defect --source reviewer|tester --severity high|medium|low --json
+      orbit metrics record --task PATH --metric post_gate_defect --severity P0|P1|P2 --json
+      orbit metrics record --task PATH --metric status_question --topic status|next|who --json
       orbit metrics record --metric automatic_session --outcome verified|pending|manual --json
       orbit metrics report [--window-days N] --json
 
     Stores local structured trial events in .orbit/metrics/trial-events.jsonl.
     Capture derives artifact footprint and implementation-to-gate wait from the
-    current task/evidence. Record accepts enum/count fields only: no prompt,
-    report prose, or user content is persisted.
+    current task/evidence. Task-scoped count metrics require --task and bind its
+    immutable task_id. Record accepts enum/count fields only: no prompt, report
+    prose, or user content is persisted.
   HELP
   "rules resolve" => <<~HELP,
     Usage:
