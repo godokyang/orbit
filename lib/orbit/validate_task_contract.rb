@@ -519,20 +519,31 @@ def normalize_task_gates(task)
   gates.select { |gate| gate.is_a?(Hash) }
 end
 
-def task_gate_role?(task, role)
-  normalize_task_gates(task).any? do |gate|
-    next false unless ALLOWED_GATE_KINDS.include?(gate["kind"])
+def normalize_task_gate_roles(gate)
+  return [] unless gate.is_a?(Hash)
 
-    roles = gate["roles"]
-    role_list = if roles.is_a?(Array)
-                  roles
-                elsif gate["role"].is_a?(String)
-                  [gate["role"]]
-                else
-                  []
-                end
-    role_list.include?(role)
-  end
+  roles = gate["roles"]
+  role_list = if roles.is_a?(Array)
+                roles
+              elsif roles.nil? && gate["role"].is_a?(String)
+                [gate["role"]]
+              else
+                []
+              end
+  role_list.select { |role| role.is_a?(String) && !role.strip.empty? }
+end
+
+def task_gate_roles(task, kind: nil)
+  normalize_task_gates(task).each_with_object([]) do |gate, roles|
+    next unless ALLOWED_GATE_KINDS.include?(gate["kind"])
+    next if kind && gate["kind"].to_s != kind.to_s
+
+    roles.concat(normalize_task_gate_roles(gate))
+  end.uniq
+end
+
+def task_gate_role?(task, role)
+  task_gate_roles(task).include?(role)
 end
 
 def task_gate_kinds(task, required_only: false)
@@ -927,9 +938,8 @@ def validate_task_runtime_fields(result, task)
       validation_error(result, "#{source}.kind", "Task gate kind must be one of #{ALLOWED_GATE_KINDS.join("|")}.")
     end
 
-    roles = gate["roles"]
-    roles = [gate["role"]] if roles.nil? && gate["role"].is_a?(String)
-    unless roles.is_a?(Array) && roles.all? { |role| role.is_a?(String) && !role.strip.empty? }
+    roles = normalize_task_gate_roles(gate)
+    unless !roles.empty? && roles.all? { |role| role.is_a?(String) && !role.strip.empty? }
       validation_error(result, "#{source}.roles", "Task gate roles must be a list of role strings.")
     end
 

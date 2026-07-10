@@ -2,8 +2,9 @@
 # Status/next read model and explicit solo completion semantics
 # ---------------------------------------------------------------------------
 
-ruby --disable-gems -e 'ORBIT_ROOT=File.expand_path(ARGV.shift); require File.expand_path(ARGV.shift); release={"gates"=>[{"kind"=>"release", "roles"=>["tester"]}]}; review={"gates"=>[{"kind"=>"review", "roles"=>["reviewer"]}]}; abort unless status_gate_target(release, "release")["instance"] == "tester-main" && status_gate_target(review, "review")["instance"] == "reviewer-main"' "$SKILL_ROOT" "$SKILL_ROOT/lib/orbit/cli.rb"
+ruby --disable-gems -e 'ORBIT_ROOT=File.expand_path(ARGV.shift); require File.expand_path(ARGV.shift); release={"gates"=>[{"kind"=>"release", "roles"=>["tester"]}]}; review={"gates"=>[{"kind"=>"review", "roles"=>["reviewer"]}]}; legacy={"gates"=>[{"kind"=>"review", "role"=>"tester"}]}; abort unless status_gate_target(release, "release")["instance"] == "tester-main" && status_gate_target(review, "review")["instance"] == "reviewer-main" && status_gate_target(legacy, "review")["instance"] == "tester-main"' "$SKILL_ROOT" "$SKILL_ROOT/lib/orbit/cli.rb"
 pass 'status routes missing release readiness to tester instead of reviewer'
+pass 'status normalizes the legacy singular gate role format'
 
 STATUS_PROJECT="$TMPROOT/status-solo-project"
 mkdir -p "$STATUS_PROJECT"
@@ -24,6 +25,11 @@ STATUS_ORIGINAL_DIR=$PWD
   json_assert 'status derives task risk mode identity and activity' status-working.json 'j.dig("task", "risk_level") == "standard" && j.dig("task", "operation_mode") == "solo" && j.dig("runtime", "verification") == "manual" && j.dig("activity", "implementation", "status") == "pass" && j.dig("activity", "review", "status") == "missing"'
 
   ORBIT_INSTANCE=lead-main "$CLI" state transition --to implemented_not_independently_accepted --evidence .orbit/evidence/status-task.json >/dev/null
+  cp .orbit/roles.yaml roles-status.bak.yaml
+  ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["roles"]["reviewer"].delete("role"); File.write(p, YAML.dump(y))' .orbit/roles.yaml
+  ORBIT_INSTANCE=lead-main "$CLI" next --json >next-role-ref-fallback.json
+  json_assert 'next resolves a sole candidate through role_ref fallback' next-role-ref-fallback.json 'n=j["next"]; n["requires_instance_selection"].nil? && n["target_instance"] == "reviewer-main" && n["command"].include?("--to reviewer-main")'
+  cp roles-status.bak.yaml .orbit/roles.yaml
   cp .orbit/instances.yaml instances-status.bak.yaml
   ruby --disable-gems -ryaml -e '
     p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); reviewer=y["instances"].delete("reviewer-main"); reviewer["env"]["ORBIT_INSTANCE"]="review-custom"; y["instances"]["review-custom"]=reviewer; File.write(p, YAML.dump(y))

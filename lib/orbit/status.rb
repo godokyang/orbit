@@ -166,10 +166,7 @@ def status_open_findings(activity, evidence)
 end
 
 def status_gate_roles(task, kind)
-  gate = Array(task.is_a?(Hash) ? task["gates"] : nil).find do |entry|
-    entry.is_a?(Hash) && entry["kind"].to_s == kind.to_s
-  end
-  declared_roles = Array(gate && gate["roles"]).select { |role| role.is_a?(String) && !role.empty? }
+  declared_roles = task_gate_roles(task, kind: kind)
   return declared_roles.uniq unless declared_roles.empty?
 
   fallback = expected_gate_role(kind)
@@ -179,12 +176,11 @@ end
 def status_gate_target(task, kind)
   roles, instances, = load_project_instance_config_for_cli
   gate_roles = status_gate_roles(task, kind)
-  inferred = gate_roles.map { |role| infer_instance_from_role(instances, roles, role) }.compact
   candidates = instances.each_with_object([]) do |(instance_name, _instance), names|
     names << instance_name if gate_roles.include?(role_for_instance_config(instances, roles, instance_name))
   end.sort
 
-  if candidates.length == 1 && inferred.include?(candidates.first)
+  if candidates.length == 1
     {
       "status" => "resolved",
       "roles" => gate_roles,
