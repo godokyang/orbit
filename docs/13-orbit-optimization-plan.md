@@ -475,8 +475,11 @@ start
 | 父任务进度与 revision 隔离 | 已实现（收尾加固） | `9da93d4` | `parent_goal` 合同留在 task，动态 `parent_goal_status` 进入 loop state；冻结任务 progress 后哈希不变且 validate 通过 |
 | 零事件计数的独立观测分母 | 已实现（收尾加固） | `4573d22` | baseline/after 配对任务作为观测分母，失败、缺陷、用户追问事件只作为指标值；零事件报告 `observed_zero` |
 | next action 动态实例解析 | 已实现（收尾加固） | `fad1940` | 从缺失 gate 的 roles 和 `instances.yaml` 解析目标；多实例时返回候选并要求选择，不生成虚假 dispatch 命令 |
+| 指标分子与 paired cohort 对齐 | 已实现（边界加固） | `4b9d5f1` | 四类 task-scoped count event 强制绑定不可变 `task_id`；只统计 paired task IDs，并单列 unbound/out-of-cohort 事件 |
+| progress 显式 task 一致性 | 已实现（边界加固） | `1351c70` | 在原子 state 写入前同时核对 canonical task path 和 `task_id`；不匹配时 state 哈希保持不变 |
+| gate role 兼容归一化 | 已实现（边界加固） | `fc9ca68` | status 与 validator 共用单复数 role normalizer，实例通过 `role_for_instance_config` 解析；唯一候选直接 resolved |
 
-本轮复核加固后的最终完整回归为 `REAL_TESTS_PASS count=1090`。测试同时保留了旧 Herdr、无 provider、手写 `herdr_verified`、identity pending、artifact 漂移、跨任务证据复用、凭证本地过期和真实路径缺失等负向场景，避免新能力通过放宽旧 gate 获得绿色结果。
+本轮复核加固后的最终完整回归为 `REAL_TESTS_PASS count=1096`。测试同时保留了旧 Herdr、无 provider、手写 `herdr_verified`、identity pending、artifact 漂移、跨任务证据复用、凭证本地过期和真实路径缺失等负向场景，避免新能力通过放宽旧 gate 获得绿色结果。
 
 ### 当前产品行为
 
@@ -486,8 +489,9 @@ start
 - 常见正式任务使用 `orbit task draft` → 填写业务合同 → `orbit task start`；从 init 计共 3 条 Orbit 命令。
 - 轻量问答/低风险一次性修改由 trigger/classifier 保持非正式路径，不强制创建完整 task。
 - `parent_goal` 是冻结 task 中的合同；`parent_goal_status` 是 loop state 中的动态执行状态。进度心跳不会再造成 task revision 漂移。
-- `orbit next` 根据 gate role 查找真实配置实例；唯一实例可直接生成 dispatch 建议，多实例必须先由用户选择。
-- `orbit metrics capture|record|report` 从现在开始收集 30 天试用所需的结构化计数，不保存 prompt、报告正文或自由文本；成本类 snapshot 必须形成同一 `task_id` 的 baseline/after 配对后才进入变化量统计，计数类指标也使用这些配对任务作为独立观测分母。
+- `state progress --task ...` 是兼容入口，但显式 task 必须与 loop state 的 current task 在 canonical path 和不可变 `task_id` 上同时一致，否则在写入前拒绝。
+- `orbit next` 根据归一化 gate role 查找真实配置实例，兼容 `roles: [...]` 和旧 `role: ...`；唯一实例可直接生成 dispatch 建议，多实例必须先由用户选择。
+- `orbit metrics capture|record|report` 从现在开始收集 30 天试用所需的结构化计数，不保存 prompt、报告正文或自由文本；成本类 snapshot 必须形成同一 `task_id` 的 baseline/after 配对后才进入变化量统计，计数类指标强制绑定 task，并且只有 paired task cohort 内的事件进入分子。旧 unbound 或 out-of-cohort 事件单独报告，不参与决策指标。
 
 ### 尚需真实观察期验证的结果
 
