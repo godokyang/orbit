@@ -27,6 +27,7 @@ require_relative "release_readiness"
 require_relative "dogfood_governance"
 require_relative "landing_governance"
 require_relative "task_workflow"
+require_relative "trial_metrics"
 
 def run_orbit_cli(argv)
   command = argv.shift
@@ -125,6 +126,12 @@ def run_orbit_cli(argv)
       exit 0
     end
     status_command(argv, next_only: true)
+  when "metrics"
+    if help_requested?(argv) || (%w[capture record report].include?(argv.first) && help_requested?(argv[1..] || []))
+      print_command_help("metrics")
+      exit 0
+    end
+    trial_metrics(argv)
   when "rules"
     if help_requested?(argv)
       print_command_help("rules")

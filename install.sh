@@ -185,6 +185,7 @@ lib/orbit/release_readiness.rb
 lib/orbit/dogfood_governance.rb
 lib/orbit/landing_governance.rb
 lib/orbit/task_workflow.rb
+lib/orbit/trial_metrics.rb
 skills/orbit/SKILL.md
 skills/orbit/assets/templates/roles.yaml
 skills/orbit/assets/templates/instances.yaml

@@ -105,6 +105,9 @@ HELP = <<~HELP
     orbit notice add --task PATH --event EVENT --evidence PATH [--to-instance INSTANCE] --json
     orbit notice list --role ROLE --json
     orbit notice ack --role ROLE --id ID --json
+    orbit metrics capture --task PATH --evidence PATH [--stage baseline|after] [--duration-seconds N] [--tokens N] --json
+    orbit metrics record --metric NAME [metric dimensions] --json
+    orbit metrics report [--window-days 30] --json
     orbit runtime register|ack-session [INSTANCE] --json
     orbit dispatch --task PATH --to INSTANCE [--pane PANE] [--reply-to PANE] [--manual-payload] [--dry-run] --json
     orbit rules resolve --json [--task PATH] [--evidence PATH] [--role ROLE] [--instance NAME] [--output PATH]
@@ -140,6 +143,7 @@ HELP = <<~HELP
     hook         运行 Herdr-aware preflight guardrail。
     init         初始化 .orbit 项目配置。
     instances    读取 Orbit instance binding 和 health 状态。
+    metrics      记录并汇总本地 30 天试用指标，不保存 prompt 内容。
     new-task    根据模板创建 task contract。
     notice      管理 owner completion notice runtime inbox。
     next        输出当前 Orbit 状态派生出的下一条建议命令。
@@ -167,6 +171,7 @@ HELP = <<~HELP
     orbit handoff --help
     orbit hook --help
     orbit notice --help
+    orbit metrics --help
     orbit status --help
     orbit test-hook --help
     orbit runtime --help
@@ -440,6 +445,23 @@ COMMAND_HELP = {
 
     Required:
       --json  Emit machine-readable notice output.
+  HELP
+  "metrics" => <<~HELP,
+    Usage:
+      orbit metrics capture --task PATH --evidence PATH
+                            [--stage baseline|after]
+                            [--duration-seconds N] [--tokens N] --json
+      orbit metrics record --metric workflow_failure --failure-kind identity|schema|revision --json
+      orbit metrics record --metric independent_defect --source reviewer|tester --severity high|medium|low --json
+      orbit metrics record --metric post_gate_defect --severity P0|P1|P2 --json
+      orbit metrics record --metric status_question --topic status|next|who --json
+      orbit metrics record --metric automatic_session --outcome verified|pending|manual --json
+      orbit metrics report [--window-days N] --json
+
+    Stores local structured trial events in .orbit/metrics/trial-events.jsonl.
+    Capture derives artifact footprint and implementation-to-gate wait from the
+    current task/evidence. Record accepts enum/count fields only: no prompt,
+    report prose, or user content is persisted.
   HELP
   "rules resolve" => <<~HELP,
     Usage:
