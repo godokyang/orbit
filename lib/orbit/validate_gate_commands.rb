@@ -498,7 +498,7 @@ def validate_runtime_identity_policy_for_task(result, records, evidence, task, t
     end
     if verification == "herdr_verified" && !runtime_identity_herdr_verified_trusted?(record["runtime_identity"])
       validation_error(result, "evidence_file.records[#{index}].runtime_identity",
-        "#{gate_kind} pass record cannot close a gate because its herdr_verified provider proof is unavailable or invalid.")
+        "#{gate_kind} pass record cannot close a gate because herdr_verified identity is unavailable or invalid under the current runtime boundary.")
       next
     end
     next unless strict_runtime

@@ -32,13 +32,12 @@ def print_runtime_help
   puts <<~HELP
     Usage:
       orbit runtime register --json
-      orbit runtime refresh-session --json
       orbit runtime ack-session INSTANCE --json
 
-    Runtime register redeems a one-time short-TTL Herdr orbit-proof challenge
-    into a locally expiring session attestation. refresh-session renews an
-    expired attestation from the controlled provider and canonical pane.
-    Without provider E2E, registration remains diagnostic-only.
+    Runtime register records diagnostic identity for manual or Herdr preview
+    sessions. Herdr's public API does not authenticate the calling process to
+    a pane, so registration cannot produce herdr_verified identity or enable
+    direct dispatch. Use manual payload delivery for authoritative work.
   HELP
 end
 
@@ -161,23 +160,6 @@ def runtime_pending_session_mismatch_reason(pending, identity)
   nil
 end
 
-def runtime_register_verified?(pending, identity, proof)
-  runtime_pending_session_mismatch_reason(pending, identity).nil? &&
-    proof.is_a?(Hash) && proof["available"] == true && proof["verified"] == true
-end
-
-def runtime_trusted_caller_proof(pending = nil, _identity = nil)
-  return runtime_request_trusted_caller_proof(pending) if pending.is_a?(Hash)
-
-  status = runtime_proof_provider_status
-  return status unless status["available"] == true
-
-  status.merge(
-    "verified" => false,
-    "reason" => runtime_proof_provider_e2e_pass?(status) ? "pending_session_challenge_required" : "provider_e2e_unavailable"
-  )
-end
-
 def runtime_register(_options)
   identity = runtime_identity_snapshot
   runtime_usage_error("register requires valid .orbit identity") unless identity["valid"]
@@ -193,37 +175,26 @@ def runtime_register(_options)
   session_id = env_session_id.empty? ? runtime_generated_session_id("orm") : env_session_id
   launch_id = runtime_env_launch_id
   session = nil
-  proof = nil
+  boundary = runtime_identity_boundary
   if !env_session_id.empty?
     runtime_update_session!(session_id) do |current|
       mismatch = runtime_pending_session_mismatch_reason(current, identity)
       runtime_usage_error("register session is not pending identity verification: #{mismatch}") if mismatch
 
-      proof = runtime_trusted_caller_proof(current, identity)
-      verified = runtime_register_verified?(current, identity, proof)
-      verification = verified ? "herdr_verified" : "identity_pending"
-      state = verified ? "active" : "pending"
+      verification = "identity_pending"
+      state = "pending"
       session = runtime_base_session(identity, session_id: session_id, launch_id: launch_id, state: state, verification: verification)
       session["herdr"] = current["herdr"] if current["herdr"].is_a?(Hash)
-      challenge = deep_dup_data(current.dig("identity", "proof_challenge")) if current.dig("identity", "proof_challenge").is_a?(Hash)
-      if challenge
-        if verified
-          challenge["used_at"] = Time.now.utc.iso8601
-          challenge["used_proof_id"] = proof["proof_id"]
-        end
-        session["identity"]["proof_challenge"] = challenge
-      end
-      session["identity"]["verification_reason"] = proof["reason"] unless verified
-      session["identity"]["trusted_caller_proof"] = proof
+      session["identity"]["verification_reason"] = boundary["reason"]
+      session["identity"]["identity_boundary"] = boundary
       session
     end
   else
     verification = herdr_current_context["pane"].to_s.empty? ? "manual_runtime" : "identity_pending"
     state = verification == "identity_pending" ? "pending" : "active"
     session = runtime_base_session(identity, session_id: session_id, launch_id: launch_id, state: state, verification: verification)
-    proof = runtime_trusted_caller_proof
-    session["identity"]["verification_reason"] = verification == "identity_pending" ? proof["reason"] : "manual_runtime_no_herdr_session"
-    session["identity"]["trusted_caller_proof"] = proof if verification == "identity_pending"
+    session["identity"]["verification_reason"] = verification == "identity_pending" ? boundary["reason"] : "manual_runtime_no_herdr_session"
+    session["identity"]["identity_boundary"] = boundary if verification == "identity_pending"
     session["diagnostic_only"] = true
     session["persistence"] = "not_written"
   end
@@ -243,62 +214,8 @@ def runtime_register(_options)
     "session_id" => session_id,
     "identity_verification" => identity_verification,
     "dispatch_ready" => resolution ? resolution["dispatch_ready"] : false,
-    "trusted_caller_proof" => proof,
+    "identity_boundary" => boundary,
     "runtime_session" => session
-  }
-end
-
-def runtime_refresh_session(_options)
-  identity = runtime_identity_snapshot
-  runtime_usage_error("refresh-session requires valid .orbit identity") unless identity["valid"]
-  session_id = runtime_env_session_id
-  runtime_usage_error("refresh-session requires ORBIT_SESSION_ID from the active Herdr session") if session_id.empty?
-  current = runtime_read_session(session_id)
-  runtime_usage_error("refresh-session requires an existing active session") unless current.is_a?(Hash) && current["state"] == "active"
-  runtime_usage_error("refresh-session requires a previously provider-verified session") unless current.dig("identity", "verification") == "herdr_verified"
-
-  expected = {
-    "launch_id" => runtime_env_launch_id,
-    "instance" => identity["resolved_instance"],
-    "role" => identity["resolved_role"],
-    "project_root_sha256" => runtime_project_root_sha256(Dir.pwd)
-  }
-  mismatch = expected.find { |field, value| current[field].to_s != value.to_s }
-  runtime_usage_error("refresh-session active identity mismatch: #{mismatch[0]}") if mismatch
-  hashes = runtime_config_hashes(identity["resolved_instance"])
-  %w[role_config_sha256 instance_config_sha256].each do |field|
-    runtime_usage_error("refresh-session active identity mismatch: #{field}") unless current[field].to_s == hashes[field].to_s
-  end
-  herdr = herdr_current_context
-  runtime_usage_error("refresh-session must run in the session canonical pane") unless herdr["pane"].to_s == current.dig("herdr", "canonical_pane").to_s
-
-  candidate = deep_dup_data(current)
-  challenge = runtime_issue_proof_challenge(candidate)
-  runtime_usage_error("refresh-session could not issue a provider challenge") unless challenge
-  candidate["identity"]["proof_challenge"] = challenge
-  proof = runtime_request_trusted_caller_proof(candidate)
-  runtime_usage_error("refresh-session provider proof failed: #{proof["reason"]}") unless proof["verified"] == true
-  challenge["used_at"] = Time.now.utc.iso8601
-  challenge["used_proof_id"] = proof["proof_id"]
-
-  runtime_update_session!(session_id) do |session|
-    runtime_usage_error("refresh-session changed concurrently") unless session.is_a?(Hash) && session["state"] == "active"
-    session["identity"]["proof_challenge"] = challenge
-    session["identity"]["trusted_caller_proof"] = proof
-    session["heartbeat"] ||= {}
-    session["heartbeat"]["last_seen_at"] = Time.now.utc.iso8601
-    session["heartbeat"]["ttl_seconds"] = DEFAULT_RUNTIME_HEARTBEAT_TTL_SECONDS
-    session
-  end
-  refreshed = runtime_read_session(session_id)
-  resolution = runtime_resolve_instance(identity["resolved_instance"])
-  {
-    "schema_version" => "orbit-runtime-refresh-v1",
-    "instance" => identity["resolved_instance"],
-    "session_id" => session_id,
-    "identity_verification" => resolution["identity_verification"],
-    "dispatch_ready" => resolution["dispatch_ready"],
-    "trusted_caller_proof" => refreshed.dig("identity", "trusted_caller_proof")
   }
 end
 
@@ -340,7 +257,7 @@ def runtime_ack_session(options)
       "instance" => instance,
       "action" => "unsupported",
       "reason" => "trusted_owner_ack_unavailable",
-      "detail" => "ack-session requires a provider-verified owner runtime identity.",
+      "detail" => "ack-session requires a trusted owner runtime identity, which Herdr's public API cannot currently provide.",
       "ack_written" => false,
       "acknowledged_by" => {
         "role" => identity["resolved_role"],
@@ -408,8 +325,6 @@ def runtime(args)
              runtime_register(options)
            when "ack-session"
              runtime_ack_session(options)
-           when "refresh-session"
-             runtime_refresh_session(options)
            else
              runtime_usage_error("Unknown runtime subcommand: #{options["subcommand"]}")
            end
@@ -422,33 +337,6 @@ def runtime_piggyback_skip_command?(command, argv)
   return true if argv.length == 1 && %w[-h --help help].include?(argv.first)
 
   false
-end
-
-def runtime_refresh_verified_session!(session, identity)
-  return false unless session.is_a?(Hash) && identity.is_a?(Hash)
-  attribution = runtime_current_process_session_attribution(identity)
-  return false unless attribution.is_a?(Hash) && attribution["verification"] == "herdr_verified"
-
-  session_id = session["session_id"].to_s
-  runtime_update_session!(session_id) do |current|
-    next current unless current.is_a?(Hash)
-    next current unless current["state"] == "active" && current.dig("identity", "verification") == "herdr_verified"
-    next current unless current.dig("identity", "trusted_caller_proof", "proof_id").to_s == attribution["proof_id"].to_s
-
-    current["heartbeat"] ||= {}
-    current["heartbeat"]["last_seen_at"] = Time.now.utc.iso8601
-    current["heartbeat"]["ttl_seconds"] ||= DEFAULT_RUNTIME_HEARTBEAT_TTL_SECONDS
-    attestation = current.dig("identity", "trusted_caller_proof")
-    if runtime_stored_attestation_active?(attestation)
-      now = Time.now.utc
-      attestation["attestation_issued_at"] = now.iso8601
-      attestation["attestation_expires_at"] = (now + RUNTIME_SESSION_ATTESTATION_TTL_SECONDS).iso8601
-      attestation["attestation_ttl_seconds"] = RUNTIME_SESSION_ATTESTATION_TTL_SECONDS
-      attestation["renewal_count"] = attestation["renewal_count"].to_i + 1
-    end
-    current
-  end
-  true
 end
 
 def runtime_herdr_env_present?
@@ -465,12 +353,6 @@ def runtime_maybe_piggyback!(command, argv)
   ENV["ORBIT_RUNTIME_REFRESHING"] = "1"
   identity = runtime_identity_snapshot
   return unless identity["valid"]
-
-  session = ENV["ORBIT_SESSION_ID"].to_s.empty? ? nil : runtime_read_session(ENV["ORBIT_SESSION_ID"])
-  if session && session.dig("identity", "verification") == "herdr_verified"
-    runtime_refresh_verified_session!(session, identity)
-    return
-  end
 
   runtime_register("json" => true)
 rescue SystemExit

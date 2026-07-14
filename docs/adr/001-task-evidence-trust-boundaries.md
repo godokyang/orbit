@@ -34,7 +34,7 @@ Orbit 已能用 revision、evidence、runtime proof 和 gate 约束 agent 工作
 
 - 旧的非空、未绑定 evidence 不能自动迁移到新 task，需要保留为历史或重新采集。
 - 新 task 字段必须同时声明 revision change type，否则 revision 创建会被拒绝。
-- automatic session 需要定期可信活动或显式 `runtime refresh-session`。
+- 本 ADR 原先描述的 automatic session refresh 已由 ADR-002 推翻：真实 Herdr 不提供对应信任原语，Orbit 不再暴露该成功路径。
 - v1 指标报告属于旧 global-count/非自描述语义，不能原地解释为 cohort-safe v2；消费者必须从原始 JSONL 重新生成 v2 报告。
 - v1 event ledger 仍可作为迁移输入，但其中 unbound task-scoped event 会阻断决策，直到备份账本并完成经核验的显式 task 绑定迁移。迁移工具不得根据路径或时间静默猜测 `task_id`；当前版本不定义 event-scope waiver。
 - v2 指标消费者必须读取 standalone schema、`schema_semantics`、分阶段数据、分母与 `observation_status`，不能只检查局部 coverage 或继续使用 snapshot 总和。
@@ -43,7 +43,7 @@ Orbit 已能用 revision、evidence、runtime proof 和 gate 约束 agent 工作
 
 - 两个同形 task 的 `task_id` 与 revision id 必须不同，且不能互用 evidence 或 artifact。
 - task 模板每个语义字段必须出现在 revision 映射中；未知字段测试必须失败。
-- attestation 本地过期而 provider proof 仍存在时，`dispatch_ready` 必须为 false；受控刷新后才能恢复。
+- legacy `herdr_verified`/provider proof 记录必须 fail closed，`dispatch_ready` 始终为 false；不得通过本地 refresh 恢复。
 - 指标固定样例 `120 → 90` 秒应报告 delta `-30`，`500 → 350` tokens 应报告 delta `-150`。
 - 存在 unbound task-scoped event 时，计数分子仍只包含 paired cohort，但 `observation_status` 必须为 `ambiguous_event_scope`；只有 bound out-of-cohort event 时可保持 `ready_for_trial_decision`。
 - gate roles 原始数组含数字、空字符串等非法项时必须校验失败，不能由运行时 normalizer 过滤后通过。

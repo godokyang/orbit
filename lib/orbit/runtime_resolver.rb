@@ -27,75 +27,32 @@ def runtime_current_session_for_instance(instance)
   [record, session]
 end
 
-def runtime_trusted_caller_proof_provider_available?
-  runtime_proof_provider_status["available"] == true
-end
-
-def runtime_automatic_provider_e2e_available?
-  runtime_proof_provider_e2e_pass?
-end
-
 def runtime_capability_profile(herdr_available: herdr_available?)
-  provider_status = runtime_proof_provider_status
-  trusted_proof = provider_status["available"] == true
-  provider_e2e = runtime_proof_provider_e2e_pass?(provider_status)
-  mode = if !herdr_available
-           "manual"
-         elsif trusted_proof && provider_e2e
-           "automatic"
-         else
-           "automatic-preview"
-         end
-  direct_dispatch = mode == "automatic"
+  boundary = runtime_identity_boundary
+  mode = herdr_available ? "automatic-preview" : "manual"
   reason = case mode
            when "manual"
              "Herdr is unavailable; stable manual file/JSON protocol remains available."
-           when "automatic-preview"
-             "Herdr can start or inspect panes, but trusted caller proof and provider E2E are unavailable; verified identity and direct dispatch are disabled."
            else
-             "Trusted runtime proof and provider E2E are available."
+             boundary["detail"]
            end
 
   {
     "mode" => mode,
     "manual_protocol" => "available",
-    "automatic_start" => herdr_available ? (direct_dispatch ? "available" : "preview") : "unavailable",
-    "verified_identity" => direct_dispatch ? "available" : "unavailable",
-    "direct_dispatch" => direct_dispatch ? "available" : "unavailable",
-    "trusted_proof_provider" => trusted_proof ? "available" : "unavailable",
-    "provider_e2e" => provider_e2e ? "pass" : "unavailable",
-    "proof_provider" => provider_status.reject { |key, _value| key == "command" },
+    "automatic_start" => herdr_available ? "preview" : "unavailable",
+    "verified_identity" => "unavailable",
+    "direct_dispatch" => "unavailable",
+    "trusted_proof_provider" => "unavailable",
+    "provider_e2e" => "unavailable",
+    "identity_boundary" => boundary,
     "reason" => reason,
-    "recommended_action" => direct_dispatch ? "use_resolver_before_dispatch" : "use_manual_payload"
+    "recommended_action" => "use_manual_payload"
   }
 end
 
-def runtime_session_trusted_caller_proof?(session)
-  return false unless session.is_a?(Hash)
-  return false unless runtime_trusted_caller_proof_provider_available?
-  return false unless session["state"].to_s == "active"
-  proof_record = session.dig("identity", "trusted_caller_proof")
-  return false unless proof_record.is_a?(Hash) && proof_record["verified"] == true
-  proof = proof_record["proof"]
-  return false unless proof.is_a?(Hash)
-  expected = {
-    "session_id" => session["session_id"],
-    "launch_id" => session["launch_id"],
-    "project_root_sha256" => session["project_root_sha256"],
-    "role_config_sha256" => session["role_config_sha256"],
-    "instance_config_sha256" => session["instance_config_sha256"],
-    "instance" => session["instance"],
-    "role" => session["role"],
-    "canonical_pane" => session.dig("herdr", "canonical_pane")
-  }
-  return false unless expected.all? { |field, value| proof[field].to_s == value.to_s }
-
-  challenge = session.dig("identity", "proof_challenge")
-  return false unless challenge.is_a?(Hash)
-  return false unless challenge["used_proof_id"].to_s == proof["proof_id"].to_s
-  return false if challenge["used_at"].to_s.empty?
-
-  runtime_verify_stored_provider_proof(proof_record)
+def runtime_session_verified_identity_supported?(_session)
+  false
 end
 
 def runtime_verification_to_status(session)
@@ -105,7 +62,7 @@ def runtime_verification_to_status(session)
 
   case session.dig("identity", "verification").to_s
   when "herdr_verified"
-    return "mismatch" unless runtime_session_trusted_caller_proof?(session)
+    return "mismatch" unless runtime_session_verified_identity_supported?(session)
 
     session["state"].to_s == "active" ? "verified" : "pending"
   when "identity_pending"
@@ -122,7 +79,7 @@ def runtime_liveness_for_session(session)
   return ["not_alive", "runtime_session_replaced"] if session["state"].to_s == "replaced"
   return ["not_alive", "runtime_session_expired"] if runtime_session_expired?(session)
   return ["unknown", "runtime_session_not_herdr_verified"] unless session.dig("identity", "verification") == "herdr_verified"
-  return ["unknown", "trusted_caller_proof_unavailable"] unless runtime_session_trusted_caller_proof?(session)
+  return ["unknown", "authenticated_caller_pane_unavailable"] unless runtime_session_verified_identity_supported?(session)
 
   canonical = session.dig("herdr", "canonical_pane").to_s
   pane = session.dig("herdr", "pane").to_s
@@ -159,7 +116,7 @@ def runtime_ack_identity_trusted?(runtime_identity)
   return false unless session.is_a?(Hash)
   return false unless session.dig("identity", "trusted_caller_proof", "proof_id").to_s == runtime_identity["proof_id"].to_s
 
-  runtime_session_trusted_caller_proof?(session)
+  runtime_session_verified_identity_supported?(session)
 end
 
 def runtime_ack_valid_for_session?(record, session)
@@ -398,27 +355,6 @@ def runtime_resolve_instance(instance, explicit_pane: nil)
   }.compact
 end
 
-def runtime_verified_session_candidates(instance)
-  return [] unless runtime_trusted_caller_proof_provider_available?
-
-  hashes = runtime_config_hashes(instance)
-  project_hash = runtime_project_root_sha256(Dir.pwd)
-  pattern = File.join(orbit_runtime_sessions_dir, "*.json")
-  Dir.glob(pattern).each_with_object([]) do |path, sessions|
-    session = runtime_load_json_file(path)
-    next unless session.is_a?(Hash)
-    next unless session["instance"].to_s == instance.to_s
-    next unless session["project_root_sha256"].to_s == project_hash
-    next unless session["role_config_sha256"].to_s == hashes["role_config_sha256"].to_s
-    next unless session["instance_config_sha256"].to_s == hashes["instance_config_sha256"].to_s
-    next unless session["state"].to_s == "active"
-    next unless session.dig("identity", "verification") == "herdr_verified"
-    next unless runtime_session_trusted_caller_proof?(session)
-    next if runtime_session_expired?(session)
-
-    liveness, = runtime_liveness_for_session(session)
-    next unless liveness == "alive"
-
-    sessions << session
-  end
+def runtime_verified_session_candidates(_instance)
+  []
 end

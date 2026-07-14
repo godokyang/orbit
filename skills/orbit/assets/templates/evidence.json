@@ -22,7 +22,7 @@
       "artifact_provenance": "v1",
       "revision_durable_knowledge": "v1",
       "task_identity": "v1",
-      "automatic_runtime_proof": "v2",
+      "herdr_runtime_capability_boundary": "v1",
       "trial_metrics": "v4"
     }
   },

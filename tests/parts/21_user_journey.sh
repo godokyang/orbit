@@ -25,6 +25,12 @@ ruby --disable-gems -ryaml -e '
     "required_evidence"=>"repo_regression",
     "test_hook"=>"android_to_web"
   }]
+  y["gates"].unshift({
+    "kind"=>"review",
+    "roles"=>["reviewer"],
+    "required"=>true,
+    "pass_condition"=>"latest review evidence status is pass and no high/medium findings remain"
+  }) unless y["gates"].any? { |gate| gate["kind"] == "review" }
   # This part isolates user-journey semantics; artifact provenance is covered
   # independently in part 22.
   y["artifact_provenance"]["required"]=false
@@ -52,6 +58,8 @@ json_assert 'test-hook dry-run resolves project argv without executing it' hook-
 json_assert 'test-hook run executes the configured project provider with journey context' hook-run.json 'j["status"] == "pass" && j["stdout"].strip == "upload_and_review" && j["exit_status"] == 0'
 
 "$CLI" evidence init --output .orbit/evidence/journey-missing.json >/dev/null
+write_review_pass_report journey-missing-review.yaml "Independent review passed without duplicating tester journey evidence." "manual:reviewer:journey-missing"
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit --file .orbit/evidence/journey-missing.json --report journey-missing-review.yaml --task .orbit/tasks/journey-task.yaml --json >/dev/null
 write_test_pass_report journey-missing.yaml "Build and regression commands passed without user journey evidence." "manual:tester:journey-missing"
 ORBIT_INSTANCE=tester-main "$CLI" evidence submit --file .orbit/evidence/journey-missing.json --report journey-missing.yaml --task .orbit/tasks/journey-task.yaml --json >journey-missing-submit.json
 json_assert 'test submit downgrades a technical pass without required journey evidence to partial' journey-missing-submit.json 'j.dig("record", "status") == "partial" && j.dig("record", "journey_validation", "valid") == false && j.dig("record", "journey_validation", "blocking_reason") == "missing_user_journey_evidence"'
@@ -62,6 +70,8 @@ fi
 json_assert 'real-path gate reports the missing journey evidence blocker' journey-missing-gate.json 'j["ready"] == false && j["gate_summary"]["not_ready"].any? { |g| g["kind"] == "test" && g["blocking_reason"] == "missing_user_journey_evidence" }'
 
 "$CLI" evidence init --output .orbit/evidence/journey-valid.json >/dev/null
+write_review_pass_report journey-valid-review.yaml "Independent review passed without duplicating tester journey evidence." "manual:reviewer:journey-valid"
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit --file .orbit/evidence/journey-valid.json --report journey-valid-review.yaml --task .orbit/tasks/journey-task.yaml --json >/dev/null
 write_test_pass_report journey-valid.yaml "Android to Web user journey completed." "manual:tester:journey-valid"
 cat >>journey-valid.yaml <<'YAML'
 user_outcomes:
@@ -107,7 +117,7 @@ json_assert 'complete user journey test evidence remains pass' journey-valid-sub
 "$CLI" wait-gate --task .orbit/tasks/journey-task.yaml --evidence .orbit/evidence/journey-valid.json --json >journey-valid-gate.json
 json_assert 'complete real-path journey evidence closes the test gate' journey-valid-gate.json 'j["ready"] == true && j["gates"].any? { |g| g["kind"] == "test" && g["passed"] == true && g.dig("user_journey_evidence", "status") == "pass" }'
 "$CLI" validate --task .orbit/tasks/journey-task.yaml --evidence .orbit/evidence/journey-valid.json --json >journey-valid-validate.json
-json_assert 'validator accepts complete user journey evidence' journey-valid-validate.json 'j["valid"] == true'
+json_assert 'validator accepts review without tester-only journey evidence' journey-valid-validate.json 'j["valid"] == true && j["errors"].none? { |e| e["source"].include?("records.review.user_outcomes") }'
 ORBIT_INSTANCE=lead-main "$CLI" state start --task .orbit/tasks/journey-task.yaml >/dev/null
 ORBIT_INSTANCE=lead-main "$CLI" handoff --task .orbit/tasks/journey-task.yaml --evidence .orbit/evidence/journey-valid.json --state .orbit/loop-state.yaml --json >journey-handoff.json
 json_assert 'handoff presents user outcomes with the latest test judgment' journey-handoff.json 'j.dig("judgment_summary", "test_judgment", "user_outcomes", 0, "journey_id") == "upload_and_review" && j.dig("judgment_summary", "test_judgment", "journey_validation", "valid") == true'

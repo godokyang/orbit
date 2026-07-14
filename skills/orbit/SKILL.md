@@ -1,6 +1,6 @@
 ---
 name: orbit
-description: 用于 AI agent 在项目中感知或执行 Orbit 工作流：发现 .orbit 配置后先进入 Orbit-aware 模式；当目标明确且进入实现、评审、测试、验收、交接或 long-running/multi-agent workflow 时，再自动调用 orbit CLI 建立风险匹配的 task/evidence/state/gate 闭环。manual protocol 是稳定默认路径；只有可信 provider proof 验证成功时才可使用 automatic runtime。需求澄清阶段不要创建 task/state/gate。
+description: 用于 AI agent 在项目中感知或执行 Orbit 工作流：发现 .orbit 配置后先进入 Orbit-aware 模式；当目标明确且进入实现、评审、测试、验收、交接或 long-running/multi-agent workflow 时，再自动调用 orbit CLI 建立风险匹配的 task/evidence/state/gate 闭环。manual protocol 是稳定默认路径；Herdr 仅作为 automatic-preview 的 pane start/inspect adapter。需求澄清阶段不要创建 task/state/gate。
 metadata:
   short-description: Orbit 风险匹配的任务闭环
 ---
@@ -47,7 +47,7 @@ manual file/JSON protocol 是稳定默认路径。pane、tab、环境变量、�
 
 只有 capability truth source 明确返回 `automatic`，且目标 resolver 返回 `dispatch_ready: true`，才能 direct dispatch。否则用 `orbit dispatch --manual-payload`；manual payload 只证明生成了投递 artifact，不证明目标已收到。
 
-`automatic` 只来自 Herdr `orbit-proof` 受控 provider：一次性 challenge 必须绑定 nonce、session、pane、project/role/instance hash 和短 TTL，resolver 还会向 provider 复核 proof id。缺接口、E2E 未通过、proof 过期/重放/漂移时自动降回 preview 或 fail closed。
+Herdr 是独立项目。其公开 CLI、socket API、integration 和 plugin 可以启动、观察或控制 pane，但不能认证“当前 Orbit 调用进程属于哪个 pane”。因此当前产品只有 `automatic-preview`，不得生成 `herdr_verified`、`dispatch_ready: true` 或可信 direct dispatch。未来只有 Herdr 公开提供可独立复核的 server-owned caller-to-pane assertion 后，才能另行设计和验收 automatic 模式；不得用环境变量、pane id、plugin context 或模拟 provider 替代该信任根。
 
 notice 是 protocol inbox record，不等于 pane delivery。无法验证的 `herdr_verified`、stale/replaced/override identity 不能关闭 gate。
 

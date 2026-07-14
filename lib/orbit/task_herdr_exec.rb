@@ -1,14 +1,7 @@
 def start_pending_next_steps(pane)
-  if runtime_capability_profile(herdr_available: true)["mode"] == "automatic"
-    return [
-      { "register_identity" => "Run orbit runtime register --json inside pane #{pane}; Orbit will redeem the one-time provider challenge." },
-      { "verify_dispatch" => "Confirm orbit instances status --json reports dispatch_ready: true before direct delivery." }
-    ]
-  end
-
   [
     { "inspect_pane" => "herdr pane read #{pane}" },
-    { "manual_payload" => "Herdr verified runtime is unavailable until trusted caller-pane proof exists; use orbit dispatch --manual-payload for task delivery." }
+    { "manual_payload" => "Herdr's public API does not authenticate the calling process to a pane; use orbit dispatch --manual-payload for task delivery." }
   ]
 end
 
@@ -45,8 +38,6 @@ def start_provisional_session!(plan, pane)
       "conflicts" => []
     }
   }
-  challenge = runtime_issue_proof_challenge(session)
-  session["identity"]["proof_challenge"] = challenge if challenge
   runtime_write_session!(session)
   runtime_set_current_session!(plan["instance"], plan["session_id"], "pending")
   session
@@ -557,6 +548,8 @@ def dispatch_message(packet)
     "- instance: #{packet["to_instance"]}",
     "- resolved_role: #{packet["resolved_role"]}",
     "",
+    "Worktree safety: 当前 task 使用共享 checkout。未经用户明确授权，不得执行 git checkout、git switch、git reset、git stash 或 git clean，也不得改变 HEAD；检查其他提交请使用 git show。",
+    "",
     "开始前请运行：",
     *preflight_commands,
     "然后读取 context_preflight.required_files 中的每个 required 文件，再开始角色工作。",
@@ -607,7 +600,7 @@ def dispatch_packet(options)
   unless explicit_override || options["manual_payload"]
     runtime_resolution = runtime_resolve_instance(instance_key)
     unless runtime_resolution["identity_verification"] == "verified" && runtime_resolution["herdr_liveness"] == "alive"
-      usage_error("dispatch target #{instance_key.inspect} does not have a verified live Orbit runtime session. Complete provider-backed runtime registration or use --manual-payload.")
+      usage_error("dispatch target #{instance_key.inspect} does not have a verified live Orbit runtime session. Herdr's public API cannot establish that identity; use --manual-payload.")
     end
     availability = runtime_resolution["availability"]
     availability_reason = runtime_resolution["availability_reason"] || runtime_resolution["liveness_reason"]
@@ -648,6 +641,12 @@ def dispatch_packet(options)
     "target_runtime_resolution" => runtime_resolution&.reject { |key, _| %w[runtime_instance runtime_session].include?(key) },
     "target_availability" => availability,
     "context_preflight" => context_preflight,
+    "worktree_safety" => {
+      "checkout_is_shared" => true,
+      "policy" => "preserve_head_and_user_changes",
+      "prohibited_without_explicit_user_authority" => %w[checkout switch reset stash clean],
+      "inspect_other_commits_with" => "git show"
+    },
     "reply_to" => reply_to,
     "reply_to_source" => reply_to_source,
     "dry_run" => options["dry_run"],

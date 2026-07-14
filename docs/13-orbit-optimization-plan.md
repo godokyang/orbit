@@ -171,7 +171,7 @@ Solo 明确拆成两种结果：
 
 - `manual`：当前稳定模式，不依赖 Herdr。
 - `automatic-preview`：可以启动 pane，但不承诺 verified identity/direct dispatch。
-- `automatic`：只有 provider E2E 通过后才能启用。
+- `automatic`：当前不存在；只有 Herdr 未来公开提供可复核的 server-owned caller-to-pane assertion，并通过真实 E2E 后才能重新设计和启用。
 
 具体修改：
 
@@ -342,9 +342,9 @@ artifact:
 实施顺序：
 
 1. 先让能力报告诚实。
-2. 再定义 Herdr 与 Orbit 的可信握手协议。
-3. 使用 nonce、project hash、instance hash、短 TTL 和受控签发。
-4. 最后增加真实 provider E2E：
+2. 审计 Herdr 已公开的 CLI、socket API、integration 和 plugin，不把 Orbit 私有需求写成 Herdr 约束。
+3. 只有上游存在可复核的 server-owned caller-to-pane assertion 时，才定义可信握手协议。
+4. 最后增加真实 Herdr E2E；fixture 只能验证 Orbit 内部状态机，不能作为集成证据：
 
 ```text
 start
@@ -355,7 +355,7 @@ start
 → wait-gate ready
 ```
 
-只有这条路径稳定通过，automatic 模式才能从 preview 升级为正式能力。
+只有真实 Herdr 路径稳定通过，automatic 模式才能从 preview 升级为正式能力。当前公开能力不满足第 3 步，因此必须保持 `automatic-preview`。
 
 ## 12. 推荐实施顺序
 
@@ -452,7 +452,7 @@ start
 
 ## 16. 实施状态（2026-07-10）
 
-本方案的工程改造已全部落地，按独立功能提交并推送到 `V1`。原始“为什么要改”和验收标准保留在上文；下表记录实现证据，而不是重写方案。
+本方案的大部分工程改造已落地。2026-07-14 的真实 Herdr 审计推翻了其中“正式 automatic runtime 已实现”的结论：原测试用自建 `herdr` fixture 实现了并不存在于 Herdr 的 `orbit-proof` 命令，只证明 Orbit 内部协议模拟可运行，不能证明真实集成。原始“为什么要改”和验收标准保留在上文；下表同时记录实现证据与纠正结果。
 
 | 调优项 | 状态 | 实现提交 | 主要验收证据 |
 | --- | --- | --- | --- |
@@ -464,12 +464,12 @@ start
 | task revision 与耐久知识 | 已实现 | `e4604ee` | `tests/parts/23_revision_knowledge.sh`：精确失效、rules cache、相对路径、单一 summary、受控清理 |
 | 高层 CLI 与 Skill/context 瘦身 | 已实现 | `e42f3a1` | `tests/parts/24_task_workflow.sh`：3 条命令进入执行、统一 help、精简输出、跨 task cache 隔离 |
 | 可审计意图分类 | 已实现 | `6d8e42d` | `tests/parts/25_intent_classification.sh`：全部信号/冲突、带理由覆盖、task 风险权威、三个中文反例 |
-| 正式 automatic runtime | 已实现 | `2864f31` | `tests/parts/26_automatic_runtime.sh`：nonce/project/role/instance/pane/TTL、重放/撤销、direct dispatch、evidence、gate、ack 完整 E2E |
+| 正式 automatic runtime | 撤回；当前不可实现 | 原提交 `2864f31` | 原 `tests/parts/26_automatic_runtime.sh` 使用模拟 `orbit-proof`，不属于真实 Herdr E2E；现由 `tests/parts/26_runtime_capability_boundary.sh` 验证永不因 fixture 升级能力，并保持 preview/fail-closed |
 | 30 天试用指标采集 | 已实现 | `0f583fc` | `tests/parts/27_trial_metrics.sh`：8 类指标、30 天窗口、缺失覆盖可见、无 prompt/自由文本落盘 |
 | 状态 transition 最终加固 | 已实现 | `5fc2ced` | `tests/parts/24_task_workflow.sh`：高层 start 挂载的 rules/evidence 可继续用于 solo 结果 transition |
 | 任务身份与证据域隔离 | 已实现（复核加固） | `89be7b8` | 不可变 `task_id` 贯穿 revision/evidence/artifact/cache/state/handoff；非空跨任务 evidence 在 revision freeze 前拒绝 |
 | revision 全字段 fail-closed | 已实现（复核加固） | `89be7b8` | 单一字段映射覆盖模板；`execution_contract` 有明确失效语义；未知字段和 task_id 变更拒绝 |
-| runtime proof 生命周期 | 已实现（复核加固） | `d8b6bae` | 一次性 challenge 兑换 300 秒 renewable session attestation；本地过期优先于 provider valid |
+| runtime proof 生命周期 | 撤回；模拟协议已删除 | 原提交 `d8b6bae` | Herdr 无对应公开 proof provider；production 不再探测 Orbit 专用 Herdr 命令，也不再暴露 refresh-session 成功路径 |
 | 试用指标配对与仲裁 | 已实现（复核加固） | `27e8b1d` | snapshot 按 `task_id + stage` 配对，报告 baseline/after/delta、分母与 missing/observed_zero；gate wait 使用当前 revision 仲裁 |
 | 稳定知识进入版本历史 | 已实现（复核加固） | 本文档提交 | 本方案、两份评估、ADR 与 `.orbit/README.md` 进入 Git；运行缓存继续本地化 |
 | 父任务进度与 revision 隔离 | 已实现（收尾加固） | `9da93d4` | `parent_goal` 合同留在 task，动态 `parent_goal_status` 进入 loop state；冻结任务 progress 后哈希不变且 validate 通过 |
@@ -483,13 +483,13 @@ start
 | gate role 原始合同校验 | 已实现（合同边界加固） | `9c17542` | validator 逐项检查原始 roles 数组，只在合同合法后由 runtime normalizer 消费；混合合法/非法值不再被静默过滤 |
 | breaking report 协议兼容治理 | 已实现（审查补强） | task revision `r2-21da4093ecc8` | 明确 `protocol_changed: true`、`migration_period`、v1 JSONL 重生成路径和禁止同系统自批；旧 r1 证据失效后重新绑定 r2，独立 review gate 保持开启 |
 
-本轮复核加固后的最终完整回归为 `REAL_TESTS_PASS count=1098`。测试同时保留了旧 Herdr、无 provider、手写 `herdr_verified`、identity pending、artifact 漂移、跨任务证据复用、凭证本地过期和真实路径缺失等负向场景，避免新能力通过放宽旧 gate 获得绿色结果。
+2026-07-10 的完整回归曾为 `REAL_TESTS_PASS count=1098`，但其中 automatic 正向路径是模拟 provider，不构成 production Herdr 证据。2026-07-14 起，回归测试明确区分内部 fixture 与真实集成，并把“任何可执行文件自报 proof 均不能开启 automatic”作为 fail-closed 不变量；最新回归结果以本轮真实审计报告为准。
 
 ### 当前产品行为
 
 - `manual` 仍是无 Herdr 依赖的稳定路径。
-- 旧 Herdr 或 provider E2E 未通过时保持 `automatic-preview`，不暴露 `direct.dispatch`。
-- Herdr 实现受控 `orbit-proof status/prove/verify` 且完整 E2E 为 pass 时，Orbit 才进入 `automatic`；resolver 会持续复核 proof，失效后立即 fail closed。
+- 有 Herdr 时保持 `automatic-preview`，只提供 pane start/inspect，不暴露 `direct.dispatch`。
+- Orbit 不再假定 Herdr 提供 `orbit-proof` 或其他 Orbit 专用命令。Herdr 当前公开接口没有可认证 caller-to-pane 归属的信任原语，因此不存在 production `automatic` 升级路径。
 - 常见正式任务使用 `orbit task draft` → 填写业务合同 → `orbit task start`；从 init 计共 3 条 Orbit 命令。
 - 轻量问答/低风险一次性修改由 trigger/classifier 保持非正式路径，不强制创建完整 task。
 - `parent_goal` 是冻结 task 中的合同；`parent_goal_status` 是 loop state 中的动态执行状态。进度心跳不会再造成 task revision 漂移。
@@ -505,7 +505,7 @@ start
 - gate 后用户发现的 P0/P1 缺陷是否下降；
 - B/C 类任务的实际时间与 token 成本是否下降；
 - 用户追问状态、下一步和执行者的次数是否下降；
-- production Herdr automatic session 的 verified 比例是否稳定；
+- production Herdr preview session 的启动/观察是否稳定，以及 manual payload 是否可接受；
 - 完整 Orbit 相比精简检查清单是否持续产生独立有效 finding。
 
 用 `orbit metrics report --window-days 30 --json` 查看覆盖状态。`observed_zero` 表示已经观测但变化量或计数为零，`missing` 才表示没有数据；只有 `observation_status` 明确为 `ready_for_trial_decision`，且真实趋势满足第 14 节条件后，才能作出长期保留或进一步精简的产品决策。`ambiguous_event_scope` 表示仍有未绑定事件，必须先完成经核验的显式迁移，不能把局部 `observed_zero` 当成可决策结论。

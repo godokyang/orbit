@@ -108,7 +108,7 @@ HELP = <<~HELP
     orbit metrics capture --task PATH --evidence PATH [--stage baseline|after] [--duration-seconds N] [--tokens N] --json
     orbit metrics record --metric NAME [--task PATH] [metric dimensions] --json
     orbit metrics report [--window-days 30] --json
-    orbit runtime register|refresh-session|ack-session [INSTANCE] --json
+    orbit runtime register|ack-session [INSTANCE] --json
     orbit dispatch --task PATH --to INSTANCE [--pane PANE] [--reply-to PANE] [--manual-payload] [--dry-run] --json
     orbit rules resolve --json [--task PATH] [--evidence PATH] [--role ROLE] [--instance NAME] [--output PATH]
     orbit rules print-context --json [--task PATH] [--evidence PATH] [--role ROLE] [--instance NAME] [--output PATH]
@@ -309,17 +309,15 @@ COMMAND_HELP = {
   "runtime" => <<~HELP,
     Usage:
       orbit runtime register --json
-      orbit runtime refresh-session --json
       orbit runtime ack-session INSTANCE --json
 
-    Manages Orbit-Herdr runtime sessions. With a controlled orbit-proof provider,
-    register redeems a one-time nonce/project/instance-bound challenge; without
-    that provider it remains diagnostic and cannot produce verified identity.
+    Manages diagnostic Orbit-Herdr runtime sessions. Herdr's public API does not
+    authenticate the calling process to a pane, so register cannot produce
+    verified identity and direct dispatch remains disabled.
 
     Notes:
-      Herdr environment variables are probe input only. A session is
-      dispatch-ready only after Orbit can match runtime state with a live Herdr
-      pane/agent probe.
+      Herdr environment variables and pane/agent probes are observational input
+      only. Use manual payload delivery for authoritative task dispatch.
   HELP
   "rules" => <<~HELP,
     Usage:

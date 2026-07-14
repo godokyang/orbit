@@ -257,7 +257,10 @@ def herdr_layout_probe(view, options)
   herdr_path = command_path("herdr")
   return probe.merge("reason" => "herdr command not found") unless herdr_path
 
-  layout_stdout, layout_stderr, layout_status = Open3.capture3(herdr_path, "pane", "layout")
+  layout_command = [herdr_path, "pane", "layout"]
+  source_pane = view["source_pane"].to_s
+  layout_command.concat(["--pane", source_pane]) unless source_pane.empty?
+  layout_stdout, layout_stderr, layout_status = Open3.capture3(*layout_command)
   unless layout_status.success?
     return probe.merge(
       "reason" => "herdr pane layout failed",
@@ -273,7 +276,6 @@ def herdr_layout_probe(view, options)
   parsed = JSON.parse(layout_stdout)
   layout = parsed.dig("result", "layout") || parsed["layout"] || parsed.dig("result") || parsed
   panes = Array(layout["panes"]).select { |entry| entry.is_a?(Hash) }
-  source_pane = view["source_pane"].to_s
   pane_entry = panes.find { |entry| !source_pane.empty? && entry["pane_id"].to_s == source_pane }
   pane_entry ||= panes.find { |entry| entry["focused"] == true }
   pane_entry ||= panes.first
@@ -934,7 +936,7 @@ def herdr_start_ready_wait(plan)
   matches = {
     "codex" => "OpenAI Codex|›",
     "claude" => "Claude Code|>",
-    "opencode" => "opencode|>"
+    "opencode" => "OpenCode|opencode|Ask anything"
   }
   client = plan.dig("client", "expected_client").to_s
   client = File.basename(plan["argv"].first.to_s) if client.empty?

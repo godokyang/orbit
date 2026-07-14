@@ -261,7 +261,7 @@ grep -q 'orbit docs alias --id ID --path PATH' "$TMPROOT/help.txt"
 grep -q 'orbit audit' "$TMPROOT/help.txt"
 grep -q 'orbit dispatch' "$TMPROOT/help.txt"
 grep -q 'orbit handoff' "$TMPROOT/help.txt"
-grep -q 'orbit runtime register|refresh-session|ack-session' "$TMPROOT/help.txt"
+grep -q 'orbit runtime register|ack-session' "$TMPROOT/help.txt"
 grep -Fq 'orbit dispatch --task PATH --to INSTANCE [--pane PANE] [--reply-to PANE] [--manual-payload] [--dry-run] --json' "$TMPROOT/help.txt"
 grep -Fq 'orbit handoff --task PATH --state PATH --evidence PATH [--output PATH] [--record-state] --json' "$TMPROOT/help.txt"
 grep -Fq 'orbit rules print-context --json [--task PATH] [--evidence PATH] [--role ROLE] [--instance NAME] [--output PATH]' "$TMPROOT/help.txt"
@@ -277,7 +277,6 @@ pass 'help lists implemented commands without stderr'
 "$CLI" runtime --help >"$TMPROOT/runtime-help.txt" 2>"$TMPROOT/runtime-help.err"
 test ! -s "$TMPROOT/runtime-help.err"
 grep -Fq 'orbit runtime register --json' "$TMPROOT/runtime-help.txt"
-grep -Fq 'orbit runtime refresh-session --json' "$TMPROOT/runtime-help.txt"
 grep -Fq 'orbit runtime ack-session INSTANCE --json' "$TMPROOT/runtime-help.txt"
 pass 'runtime subcommand help works'
 
@@ -634,7 +633,7 @@ esac
 HERDR
 chmod +x "$TMPROOT/fakebin/herdr"
 PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer-main --dry-run --json >"$TMPROOT/start-reviewer-reuse.json"
-json_assert 'start does not reuse Herdr binding without verified runtime identity' "$TMPROOT/start-reviewer-reuse.json" 'j["action"] == "reuse_identity_pending" && j["reason"] == "binding_agent_found_but_runtime_identity_unverified" && j["dispatch_ready"] == false && j["reuse_probe"]["agent_detected"] == true && j["reuse_probe"]["agent"] == "codex" && j["runtime_resolution"]["identity_verification"] == "absent" && j["next"].any? { |n| n["manual_payload"].to_s.include?("trusted caller-pane proof") } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "skills/orbit/SKILL.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "skills/orbit/references/runtime/guide.md" }'
+json_assert 'start does not reuse Herdr binding without verified runtime identity' "$TMPROOT/start-reviewer-reuse.json" 'j["action"] == "reuse_identity_pending" && j["reason"] == "binding_agent_found_but_runtime_identity_unverified" && j["dispatch_ready"] == false && j["reuse_probe"]["agent_detected"] == true && j["reuse_probe"]["agent"] == "codex" && j["runtime_resolution"]["identity_verification"] == "absent" && j["next"].any? { |n| n["manual_payload"].to_s.include?("public API") } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "skills/orbit/SKILL.md" } && j["context_preflight"]["required_files"].any? { |r| r["path"] == "skills/orbit/references/runtime/guide.md" }'
 cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
 #!/bin/sh
 case "$1 $2" in
@@ -933,6 +932,10 @@ cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
 #!/bin/sh
 case "$1 $2" in
   "pane layout")
+    if [ "$3" != "--pane" ] || [ "$4" != "lead-pane" ]; then
+      printf 'pane layout must be scoped to the caller pane: %s\n' "$*" >&2
+      exit 1
+    fi
     printf '{"result":{"layout":{"tab_id":"lead-tab","workspace_id":"lead-workspace","panes":[{"pane_id":"lead-pane","focused":true,"rect":{"width":260,"height":50}}]}}}\n'
     ;;
   "agent list")
@@ -951,6 +954,10 @@ cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
 #!/bin/sh
 case "$1 $2" in
   "pane layout")
+    if [ "$3" != "--pane" ] || [ "$4" != "lead-pane" ]; then
+      printf 'pane layout must be scoped to the caller pane: %s\n' "$*" >&2
+      exit 1
+    fi
     printf '{"result":{"layout":{"tab_id":"lead-tab","workspace_id":"lead-workspace","panes":[{"pane_id":"lead-pane","focused":true,"rect":{"width":120,"height":50}}]}}}\n'
     ;;
   "agent list")
@@ -1127,6 +1134,7 @@ ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases
 json_assert 'start dry-run audits codex full-permission flag' "$TMPROOT/start-codex-full-permission.json" 'j["client"]["expected_client"] == "codex" && j["client"]["full_permission"]["configured"] == true && j["client"]["full_permission"]["present_flags"].include?("--dangerously-bypass-approvals-and-sandbox")'
 json_assert 'start dry-run audits claude full-permission flag' "$TMPROOT/start-claude-full-permission.json" 'j["client"]["expected_client"] == "claude" && j["client"]["full_permission"]["configured"] == true && j["client"]["full_permission"]["present_flags"].include?("--dangerously-skip-permissions")'
 json_assert 'start dry-run audits opencode full-permission flag' "$TMPROOT/start-opencode-full-permission.json" 'j["client"]["expected_client"] == "opencode" && j["client"]["full_permission"]["configured"] == true && j["client"]["full_permission"]["present_flags"].include?("--dangerously-skip-permissions")'
+json_assert 'start ready wait recognizes the current OpenCode prompt' "$TMPROOT/start-opencode-full-permission.json" 'j.dig("herdr_start", "ready_wait", "match").include?("Ask anything")'
 cp "$TMPROOT/schema-instances.yaml.bak" .orbit/instances.yaml
 ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["instances"]["reviewer-main"]["command"]=""; File.write(p, YAML.dump(y))' .orbit/instances.yaml
 expect_failure 'validate rejects empty instance command' "$CLI" validate --json

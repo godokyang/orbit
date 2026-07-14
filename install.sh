@@ -156,7 +156,7 @@ lib/orbit/identity_rules.rb
 lib/orbit/identity_rules_context.rb
 lib/orbit/runtime_store.rb
 lib/orbit/herdr_probe.rb
-lib/orbit/runtime_proof_provider.rb
+lib/orbit/runtime_identity_boundary.rb
 lib/orbit/runtime_resolver.rb
 lib/orbit/runtime_commands.rb
 lib/orbit/schema_version.rb

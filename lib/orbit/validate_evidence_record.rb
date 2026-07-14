@@ -655,13 +655,16 @@ def validate_gate_verdict(result, records, expected_kind, task = nil, task_sha25
 
   case latest["status"]
   when "pass"
-    journey_assessment = user_journey_evidence_assessment(task, latest)
-    if journey_assessment["required"] && !journey_assessment["valid"]
-      validation_error(
-        result,
-        "evidence_file.records.#{expected_kind}.user_outcomes",
-        "Required user journey evidence is incomplete: #{journey_assessment["blocking_reason"]}."
-      )
+    evidence_kind = GATE_KIND_EVIDENCE_RECORD_KIND[expected_kind] || expected_kind
+    if evidence_kind == "test"
+      journey_assessment = user_journey_evidence_assessment(task, latest)
+      if journey_assessment["required"] && !journey_assessment["valid"]
+        validation_error(
+          result,
+          "evidence_file.records.#{expected_kind}.user_outcomes",
+          "Required user journey evidence is incomplete: #{journey_assessment["blocking_reason"]}."
+        )
+      end
     end
     latest_gate_time = parse_evidence_created_at(result, "evidence_file.records.#{expected_kind}.created_at", latest["created_at"])
     latest_gate_index = record_index_for_object(records, latest)
@@ -683,7 +686,7 @@ def validate_gate_verdict(result, records, expected_kind, task = nil, task_sha25
     unless evidence_level_satisfies_minimum?(actual_level, minimum)
       validation_error(result, "evidence_file.records.#{expected_kind}.evidence_level", "Latest #{expected_kind} evidence_level #{actual_level.inspect} does not satisfy minimum_evidence_level #{minimum.inspect}.")
     end
-    validate_required_questions_coverage(result, latest, task) if (GATE_KIND_EVIDENCE_RECORD_KIND[expected_kind] || expected_kind) == "review"
+    validate_required_questions_coverage(result, latest, task) if evidence_kind == "review"
   when "fail"
     validation_error(result, "evidence_file.records", "Latest #{expected_kind} verdict is fail.")
   when "partial"

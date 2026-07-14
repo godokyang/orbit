@@ -28,7 +28,7 @@ orbit init --operation-mode solo
 orbit start lead-main
 ```
 
-`orbit start` 依赖 Herdr automatic runtime。如果只用 manual protocol，可以不运行 `orbit start`，而是手动设置 `ORBIT_INSTANCE` / `ORBIT_ROLE` 启动 agent。
+`orbit start` 使用 Herdr 的 `automatic-preview` adapter 创建或唤醒 pane，但这不产生可信 runtime identity，也不允许 direct dispatch。如果只用稳定的 manual protocol，可以不运行 `orbit start`，而是手动设置 `ORBIT_INSTANCE` / `ORBIT_ROLE` 启动 agent。
 
 然后告诉 lead agent：
 
@@ -56,7 +56,7 @@ orbit start lead-main
 
 ## 安装
 
-安装 Herdr。Herdr 是 Orbit automatic runtime 的唯一官方 adapter：
+如需 `orbit start` 的 pane 创建与观察能力，安装 Herdr。Herdr 是独立项目，Orbit 只消费其公开 CLI/socket 能力，不约束 Herdr 的接口：
 
 ```bash
 curl -fsSL https://herdr.dev/install.sh | sh
@@ -99,7 +99,7 @@ Orbit CLI 需要 Ruby。远程安装还需要 `curl` 或 `wget`。安装脚本�
 
 ## Herdr 和 manual protocol
 
-Herdr 是 Orbit automatic runtime 的唯一官方 adapter。需要 `orbit start` 自动创建/唤醒 agent 或 `orbit dispatch` direct delivery 时，必须有 Herdr。
+Herdr 是 Orbit 当前唯一的 `automatic-preview` adapter。它可以支持 `orbit start` 创建/唤醒 agent，但公开接口不能认证“当前 Orbit 调用来自哪个 pane”，因此不能产生 Herdr-verified identity，当前也不提供可信 direct delivery。
 
 没有 Herdr 时，只能走 manual protocol：用户自己打开终端，进入项目目录，设置 `ORBIT_INSTANCE` / `ORBIT_ROLE` 后启动 agent。
 
@@ -108,7 +108,7 @@ cd /path/to/your-project
 ORBIT_INSTANCE=reviewer-main ORBIT_ROLE=reviewer codex
 ```
 
-direct dispatch 只看 runtime resolver 输出是否明确 `dispatch_ready: true`。没有 verified target 时，生成 manual payload：
+当前 resolver 对 Herdr target 保持 `dispatch_ready: false`。生成 manual payload 进行权威投递：
 
 ```bash
 orbit dispatch \

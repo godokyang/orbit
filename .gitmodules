@@ -1,0 +1,4 @@
+[submodule "upstream/herdr"]
+	path = upstream/herdr
+	url = https://github.com/ogulcancelik/herdr.git
+	branch = master

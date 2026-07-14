@@ -54,7 +54,7 @@ ORBIT_FEATURE_VERSIONS = {
   "artifact_provenance" => "v1",             # hashed, revision-bound artifact references and cross-gate traceability
   "revision_durable_knowledge" => "v1",       # explicit revisions, selective invalidation, cache, and portable summaries
   "task_identity" => "v1",                    # immutable task_id across revisions, evidence, artifacts, state, and handoff
-  "automatic_runtime_proof" => "v2",          # one-time provider proof exchanged for expiring renewable attestation
+  "herdr_runtime_capability_boundary" => "v1", # public Herdr surfaces cannot authenticate caller process to pane
   "trial_metrics" => "v4"                     # task-bound count events filtered to the paired task cohort
 }.freeze
 
