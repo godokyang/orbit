@@ -1,6 +1,6 @@
 {
   "name": "@godokyang/orbit",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "description": "Orbit skill and CLI.",
   "files": [
     "README.md",
