@@ -43,34 +43,146 @@ def start_provisional_session!(plan, pane)
   session
 end
 
+def cleanup_failed_weighted_pane(herdr_path, pane)
+  return nil if pane.to_s.empty?
+
+  stdout, stderr, status = Open3.capture3(herdr_path, "pane", "close", pane.to_s)
+  {
+    "command" => ["herdr", "pane", "close", pane.to_s],
+    "success" => status.success?,
+    "exit_status" => status.exitstatus,
+    "stdout" => stdout,
+    "stderr" => stderr
+  }
+end
+
+def run_weighted_same_tab_start(plan, herdr_path)
+  commands = herdr_weighted_start_commands(plan, herdr_path)
+  steps = []
+  split_stdout, split_stderr, split_status = Open3.capture3(*commands[0])
+  steps << {
+    "action" => "split",
+    "command" => ["herdr", *commands[0].drop(1)],
+    "success" => split_status.success?,
+    "exit_status" => split_status.exitstatus,
+    "stdout" => split_stdout,
+    "stderr" => split_stderr
+  }
+  pane_id = split_status.success? ? herdr_start_pane_id(split_stdout) : nil
+  unless split_status.success? && pane_id
+    error = pane_id ? split_stderr : [split_stderr, "Could not parse Herdr pane id from pane split output."].reject(&:empty?).join("\n")
+    return {
+      "status" => split_status,
+      "stdout" => split_stdout,
+      "stderr" => error,
+      "pane_id" => pane_id,
+      "steps" => steps
+    }
+  end
+
+  label = plan["instance"]
+  rename_argv = herdr_weighted_start_commands(plan, herdr_path, pane_id, label)[1]
+  rename_stdout, rename_stderr, rename_status = Open3.capture3(*rename_argv)
+  retry_info = nil
+  if !rename_status.success? && herdr_agent_name_taken?(rename_stderr)
+    label = herdr_retry_label(plan)
+    retry_argv = herdr_weighted_start_commands(plan, herdr_path, pane_id, label)[1]
+    retry_stdout, retry_stderr, retry_status = Open3.capture3(*retry_argv)
+    retry_info = {
+      "reason" => "agent_name_taken",
+      "label" => label,
+      "command" => ["herdr", *retry_argv.drop(1)],
+      "initial" => {
+        "exit_status" => rename_status.exitstatus,
+        "stdout" => rename_stdout,
+        "stderr" => rename_stderr
+      }
+    }
+    rename_stdout = retry_stdout
+    rename_stderr = retry_stderr
+    rename_status = retry_status
+    rename_argv = retry_argv
+  end
+  steps << {
+    "action" => "rename",
+    "command" => ["herdr", *rename_argv.drop(1)],
+    "success" => rename_status.success?,
+    "exit_status" => rename_status.exitstatus,
+    "stdout" => rename_stdout,
+    "stderr" => rename_stderr
+  }
+  unless rename_status.success?
+    cleanup = cleanup_failed_weighted_pane(herdr_path, pane_id)
+    return {
+      "status" => rename_status,
+      "stdout" => rename_stdout,
+      "stderr" => rename_stderr,
+      "pane_id" => pane_id,
+      "retry" => retry_info,
+      "steps" => steps,
+      "cleanup" => cleanup
+    }
+  end
+
+  run_argv = herdr_weighted_start_commands(plan, herdr_path, pane_id, label)[2]
+  run_stdout, run_stderr, run_status = Open3.capture3(*run_argv)
+  steps << {
+    "action" => "run",
+    "command" => ["herdr", *run_argv.drop(1)],
+    "success" => run_status.success?,
+    "exit_status" => run_status.exitstatus,
+    "stdout" => run_stdout,
+    "stderr" => run_stderr
+  }
+  cleanup = cleanup_failed_weighted_pane(herdr_path, pane_id) unless run_status.success?
+  {
+    "status" => run_status,
+    "stdout" => [split_stdout, rename_stdout, run_stdout].reject(&:empty?).join("\n"),
+    "stderr" => run_stderr,
+    "pane_id" => pane_id,
+    "retry" => retry_info,
+    "steps" => steps,
+    "cleanup" => cleanup
+  }.compact
+end
+
 def run_herdr_start(plan, json:)
   herdr_path = command_path("herdr")
   usage_error("herdr command not found. Automatic start/wake requires Herdr. Run `orbit tools doctor --json`, or start the agent manually with ORBIT_INSTANCE and ORBIT_ROLE set.") unless herdr_path
 
-  argv = herdr_start_argv(plan, herdr_path)
-  exec_env = ENV.to_hash.merge(plan["env"])
-  stdout, stderr, status = Open3.capture3(exec_env, *argv, chdir: plan["cwd"])
-  retry_info = nil
-  if !status.success? && herdr_agent_name_taken?(stderr)
-    retry_label = herdr_retry_label(plan)
-    retry_argv = herdr_start_argv(plan, herdr_path, retry_label)
-    retry_stdout, retry_stderr, retry_status = Open3.capture3(exec_env, *retry_argv, chdir: plan["cwd"])
-    retry_info = {
-      "reason" => "agent_name_taken",
-      "label" => retry_label,
-      "command" => ["herdr", *retry_argv.drop(1)],
-      "initial" => {
-        "exit_status" => status.exitstatus,
-        "stdout" => stdout,
-        "stderr" => stderr
+  weighted_result = nil
+  if herdr_weighted_same_tab_start?(plan)
+    weighted_result = run_weighted_same_tab_start(plan, herdr_path)
+    stdout = weighted_result["stdout"]
+    stderr = weighted_result["stderr"]
+    status = weighted_result["status"]
+    retry_info = weighted_result["retry"]
+  else
+    argv = herdr_start_argv(plan, herdr_path)
+    exec_env = ENV.to_hash.merge(plan["env"])
+    stdout, stderr, status = Open3.capture3(exec_env, *argv, chdir: plan["cwd"])
+    retry_info = nil
+    if !status.success? && herdr_agent_name_taken?(stderr)
+      retry_label = herdr_retry_label(plan)
+      retry_argv = herdr_start_argv(plan, herdr_path, retry_label)
+      retry_stdout, retry_stderr, retry_status = Open3.capture3(exec_env, *retry_argv, chdir: plan["cwd"])
+      retry_info = {
+        "reason" => "agent_name_taken",
+        "label" => retry_label,
+        "command" => ["herdr", *retry_argv.drop(1)],
+        "initial" => {
+          "exit_status" => status.exitstatus,
+          "stdout" => stdout,
+          "stderr" => stderr
+        }
       }
-    }
-    stdout = retry_stdout
-    stderr = retry_stderr
-    status = retry_status
+      stdout = retry_stdout
+      stderr = retry_stderr
+      status = retry_status
+    end
   end
   adapter = attach_start_adapter_plan(plan)["herdr_start"]
-  pane_id = status.success? ? herdr_start_pane_id(stdout) : nil
+  pane_id = weighted_result ? weighted_result["pane_id"] : (status.success? ? herdr_start_pane_id(stdout) : nil)
   actual_client = status.success? ? herdr_start_agent_client(stdout) : nil
   actual_client = plan.dig("client", "expected_client") if actual_client.to_s.empty?
   ready_wait = nil
@@ -143,6 +255,8 @@ def run_herdr_start(plan, json:)
       "stderr" => stderr,
       "pane_id" => pane_id,
       "retry" => retry_info,
+      "steps" => weighted_result && weighted_result["steps"],
+      "cleanup" => weighted_result && weighted_result["cleanup"],
       "ready_wait" => ready_wait
     }.compact
   ).compact

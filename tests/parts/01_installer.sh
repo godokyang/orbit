@@ -949,7 +949,28 @@ esac
 HERDR
 chmod +x "$TMPROOT/fakebin/herdr"
 env HERDR_PANE_ID=lead-pane HERDR_TAB_ID=lead-tab PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer-main --dry-run --json >"$TMPROOT/start-herdr-same-tab-dry-run.json"
-json_assert 'start herdr uses same tab only when layout stays readable' "$TMPROOT/start-herdr-same-tab-dry-run.json" 'cmd=j["herdr_start"]["command"]; sep=cmd.index("--"); j["creation_policy"]["same_level_view"]["strategy"] == "same_tab" && j["layout"]["selected"] == "same_tab" && j["layout"]["source_pane_size"] == {"cols"=>260, "rows"=>50} && j["layout"]["projected_same_tab_size"] == {"cols"=>130, "rows"=>50} && j["layout"]["existing_agent_panes_in_tab"] == 1 && cmd[0,11] == ["herdr", "agent", "start", "reviewer-main", "--cwd", Dir.pwd, "--tab", "lead-tab", "--split", "right", "--no-focus"] && sep == 11 && cmd[sep + 1] == "env" && cmd.include?("ORBIT_INSTANCE=reviewer-main") && cmd.include?("ORBIT_ROLE=reviewer") && cmd.last == "codex"'
+json_assert 'start herdr protects lead area with a weighted current-tab split' "$TMPROOT/start-herdr-same-tab-dry-run.json" 'cmd=j["herdr_start"]["command"]; p=j.dig("layout","placement"); run=j.dig("herdr_start","commands",2); j["creation_policy"]["same_level_view"]["strategy"] == "same_tab" && j["layout"]["selected"] == "same_tab" && j["layout"]["source_pane_size"] == {"cols"=>260, "rows"=>50} && j["layout"]["projected_same_tab_size"] == {"cols"=>87, "rows"=>50} && j["layout"]["existing_agent_panes_in_tab"] == 1 && p["target_role"] == "lead" && p["new_role"] == "reviewer" && p["ratio"] == 0.667 && p["projected_target_size"] == {"cols"=>173, "rows"=>50} && cmd == ["herdr", "pane", "split", "lead-pane", "--direction", "right", "--ratio", "0.667", "--cwd", Dir.pwd, "--no-focus"] && j.dig("herdr_start","placement_mode") == "weighted_same_tab" && j.dig("herdr_start","commands",1) == ["herdr", "agent", "rename", "<new-pane>", "reviewer-main"] && run[0,3] == ["herdr", "pane", "run"] && run[4].include?("ORBIT_ROLE\\=reviewer")'
+"$CLI" init --force --operation-mode team >/dev/null
+cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
+#!/bin/sh
+case "$1 $2" in
+  "pane layout")
+    printf '{"result":{"layout":{"tab_id":"lead-tab","workspace_id":"lead-workspace","panes":[{"pane_id":"lead-pane","focused":true,"rect":{"width":260,"height":50}},{"pane_id":"reviewer-pane","rect":{"width":180,"height":50}}]}}}\n'
+    ;;
+  "agent list")
+    printf '{"result":{"agents":[{"pane_id":"lead-pane","tab_id":"lead-tab","name":"lead-main","agent":"claude"},{"pane_id":"reviewer-pane","tab_id":"lead-tab","name":"reviewer-main","agent":"codex"}]}}\n'
+    ;;
+  *)
+    printf 'unexpected herdr args: %s\n' "$*" >&2
+    exit 1
+    ;;
+esac
+HERDR
+chmod +x "$TMPROOT/fakebin/herdr"
+env HERDR_PANE_ID=lead-pane HERDR_TAB_ID=lead-tab PATH="$TMPROOT/fakebin:$PATH" "$CLI" start tester-main --dry-run --json >"$TMPROOT/start-herdr-tester-priority.json"
+json_assert 'start herdr gives tester the smallest human-view priority and avoids splitting lead' "$TMPROOT/start-herdr-tester-priority.json" 'p=j.dig("layout","placement"); p["target_pane"] == "reviewer-pane" && p["target_role"] == "reviewer" && p["target_weight"] == 2.0 && p["new_role"] == "tester" && p["new_weight"] == 1.0 && p["ratio"] == 0.667 && p["projected_target_size"] == {"cols"=>120, "rows"=>50} && p["projected_new_size"] == {"cols"=>60, "rows"=>50} && j.dig("herdr_start","command",3) == "reviewer-pane"'
+env HERDR_PANE_ID=lead-pane HERDR_TAB_ID=lead-tab PATH="$TMPROOT/fakebin:$PATH" "$CLI" start coder-main --dry-run --json >"$TMPROOT/start-herdr-coder-priority.json"
+json_assert 'start herdr gives coder and reviewer equal human-view priority' "$TMPROOT/start-herdr-coder-priority.json" 'p=j.dig("layout","placement"); p["target_pane"] == "reviewer-pane" && p["target_role"] == "reviewer" && p["target_weight"] == 2.0 && p["new_role"] == "coder" && p["new_weight"] == 2.0 && p["ratio"] == 0.5 && p["projected_target_size"] == {"cols"=>90, "rows"=>50} && p["projected_new_size"] == {"cols"=>90, "rows"=>50}'
 cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
 #!/bin/sh
 case "$1 $2" in
@@ -970,18 +991,13 @@ case "$1 $2" in
 esac
 HERDR
 chmod +x "$TMPROOT/fakebin/herdr"
-env HERDR_PANE_ID=lead-pane HERDR_TAB_ID=lead-tab PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer-main --dry-run --json >"$TMPROOT/start-herdr-auto-new-tab-dry-run.json"
-json_assert 'start herdr auto chooses new tab when same-tab split would be unreadable' "$TMPROOT/start-herdr-auto-new-tab-dry-run.json" 'cmd=j["herdr_start"]["command"]; sep=cmd.index("--"); j["action"] == "dry_run" && j["layout"]["selected"] == "new_tab" && j["layout"]["projected_same_tab_size"] == {"cols"=>60, "rows"=>50} && j["layout"]["reason"].include?("below minimum") && cmd[0,9] == ["herdr", "agent", "start", "reviewer-main", "--cwd", Dir.pwd, "--workspace", "lead-workspace", "--no-focus"] && sep == 9 && cmd[sep + 1] == "env" && cmd.include?("ORBIT_INSTANCE=reviewer-main") && cmd.include?("ORBIT_ROLE=reviewer") && cmd.last == "codex"'
-if env HERDR_PANE_ID=lead-pane HERDR_TAB_ID=lead-tab PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer-main --layout same-tab --dry-run --json >"$TMPROOT/start-herdr-same-tab-blocked.json" 2>"$TMPROOT/start-herdr-same-tab-blocked.err"; then
-  printf 'FAIL start same-tab unreadable layout: command unexpectedly succeeded\n' >&2
-  exit 1
-fi
-json_assert 'start herdr same-tab fails closed when split would be unreadable' "$TMPROOT/start-herdr-same-tab-blocked.json" 'j["action"] == "blocked" && j["layout"]["selected"] == "same_tab" && j["layout"]["blocked"] == true && j["layout"]["reason"].include?("below minimum")'
+env HERDR_PANE_ID=lead-pane HERDR_TAB_ID=lead-tab PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer-main --dry-run --json >"$TMPROOT/start-herdr-auto-small-tab-dry-run.json"
+json_assert 'start herdr auto stays in the current tab and chooses the more readable axis' "$TMPROOT/start-herdr-auto-small-tab-dry-run.json" 'cmd=j["herdr_start"]["command"]; p=j.dig("layout","placement"); j["action"] == "dry_run" && j["layout"]["selected"] == "same_tab" && j["layout"]["same_tab_readable"] != true && j["layout"]["blocked"] == false && j["layout"]["projected_same_tab_size"] == {"cols"=>120, "rows"=>17} && p["target_role"] == "lead" && p["direction"] == "down" && p["ratio"] == 0.667 && cmd[0,7] == ["herdr", "pane", "split", "lead-pane", "--direction", "down", "--ratio"]'
+env HERDR_PANE_ID=lead-pane HERDR_TAB_ID=lead-tab PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer-main --layout same-tab --dry-run --json >"$TMPROOT/start-herdr-same-tab-small.json"
+json_assert 'start herdr explicit same-tab uses weighted placement even below the soft readability target' "$TMPROOT/start-herdr-same-tab-small.json" 'j["action"] == "dry_run" && j["layout"]["selected"] == "same_tab" && j["layout"]["blocked"] == false && j.dig("layout","placement","readable") == false'
 cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
 #!/bin/sh
 : "${ORBIT_FAKE_HERDR_ARGS:?}"
-: "${ORBIT_FAKE_HERDR_ENV:?}"
-: "${ORBIT_FAKE_HERDR_CWD:?}"
 case "$1 $2" in
   "pane layout")
     printf '{"result":{"layout":{"tab_id":"lead-tab","workspace_id":"lead-workspace","panes":[{"pane_id":"lead-pane","focused":true,"rect":{"width":260,"height":50}}]}}}\n'
@@ -989,11 +1005,19 @@ case "$1 $2" in
   "agent list")
     printf '{"result":{"agents":[{"pane_id":"lead-pane","tab_id":"lead-tab","agent":"codex","agent_status":"idle"}]}}\n'
     ;;
-  "agent start")
+  "pane split")
     printf '%s\n' "$@" >"$ORBIT_FAKE_HERDR_ARGS"
-    printf '%s/%s\n' "$ORBIT_INSTANCE" "$ORBIT_ROLE" >"$ORBIT_FAKE_HERDR_ENV"
-    pwd >"$ORBIT_FAKE_HERDR_CWD"
-    printf '{"result":{"agent":{"pane_id":"fake-pane","agent":"codex"}}}\n'
+    printf '%s\n' '---' >>"$ORBIT_FAKE_HERDR_ARGS"
+    printf '{"result":{"pane":{"pane_id":"fake-pane","tab_id":"lead-tab","workspace_id":"lead-workspace"}}}\n'
+    ;;
+  "agent rename")
+    printf '%s\n' "$@" >>"$ORBIT_FAKE_HERDR_ARGS"
+    printf '%s\n' '---' >>"$ORBIT_FAKE_HERDR_ARGS"
+    printf '{"result":{"agent":{"pane_id":"fake-pane","name":"reviewer-main"}}}\n'
+    ;;
+  "pane run")
+    printf '%s\n' "$@" >>"$ORBIT_FAKE_HERDR_ARGS"
+    printf '{"result":{"pane":{"pane_id":"fake-pane"}}}\n'
     ;;
   "wait output")
     : "${ORBIT_FAKE_HERDR_WAIT_ARGS:?}"
@@ -1007,13 +1031,11 @@ case "$1 $2" in
 esac
 HERDR
 chmod +x "$TMPROOT/fakebin/herdr"
-ORBIT_FAKE_HERDR_ARGS="$TMPROOT/fake-herdr-args.txt" ORBIT_FAKE_HERDR_WAIT_ARGS="$TMPROOT/fake-herdr-wait-args.txt" ORBIT_FAKE_HERDR_ENV="$TMPROOT/fake-herdr-env.txt" ORBIT_FAKE_HERDR_CWD="$TMPROOT/fake-herdr-cwd.txt" HERDR_PANE_ID=lead-pane HERDR_TAB_ID=lead-tab PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer-main --json >"$TMPROOT/start-herdr-real.json"
-json_assert 'start herdr invokes adapter, records actual client, and waits for runtime identity' "$TMPROOT/start-herdr-real.json" 'j["action"] == "started_identity_pending" && j["dispatch_ready"] == false && j["adapter_result"]["success"] == true && j["adapter_result"]["stdout"].include?("fake-pane") && j["adapter_result"]["pane_id"] == "fake-pane" && j["adapter_result"]["ready_wait"]["success"] == true && j["creation_policy"]["same_level_view"]["strategy"] == "same_tab" && j["instance_status_after_start"]["herdr"]["tab"] == "lead-tab" && j["instance_status_after_start"]["herdr"]["pane"] == "fake-pane" && j["runtime_session"]["state"] == "pending" && j["runtime_session"]["identity"]["verification"] == "identity_pending"'
-ruby --disable-gems -e 'actual=File.read(ARGV[0]).lines.map(&:chomp); sep=actual.index("--"); cwd_ok=[Dir.pwd, File.realpath(Dir.pwd)].include?(actual[4]); abort(actual.inspect) unless actual[0,4] == ["agent","start","reviewer-main","--cwd"] && cwd_ok && actual[5,6] == ["--tab","lead-tab","--split","right","--no-focus","--"] && sep == 10 && actual[sep + 1] == "env" && actual.include?("ORBIT_INSTANCE=reviewer-main") && actual.include?("ORBIT_ROLE=reviewer") && actual.any? { |part| part.start_with?("ORBIT_SESSION_ID=") } && actual.any? { |part| part.start_with?("ORBIT_LAUNCH_ID=") } && actual.last == "codex"' "$TMPROOT/fake-herdr-args.txt"
+ORBIT_FAKE_HERDR_ARGS="$TMPROOT/fake-herdr-args.txt" ORBIT_FAKE_HERDR_WAIT_ARGS="$TMPROOT/fake-herdr-wait-args.txt" HERDR_PANE_ID=lead-pane HERDR_TAB_ID=lead-tab PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer-main --json >"$TMPROOT/start-herdr-real.json"
+json_assert 'start herdr invokes weighted adapter, records actual client, and waits for runtime identity' "$TMPROOT/start-herdr-real.json" 'j["action"] == "started_identity_pending" && j["dispatch_ready"] == false && j["adapter_result"]["success"] == true && j["adapter_result"]["stdout"].include?("fake-pane") && j["adapter_result"]["pane_id"] == "fake-pane" && j["adapter_result"]["ready_wait"]["success"] == true && j["adapter_result"]["steps"].map { |s| s["action"] } == ["split", "rename", "run"] && j["creation_policy"]["same_level_view"]["strategy"] == "same_tab" && j["instance_status_after_start"]["herdr"]["tab"] == "lead-tab" && j["instance_status_after_start"]["herdr"]["pane"] == "fake-pane" && j["runtime_session"]["state"] == "pending" && j["runtime_session"]["identity"]["verification"] == "identity_pending"'
+ruby --disable-gems -e 'entries=File.read(ARGV[0]).split("---\n").map { |s| s.lines.map(&:chomp).reject(&:empty?) }; abort(entries.inspect) unless entries.length == 3 && entries[0][0,7] == ["pane","split","lead-pane","--direction","right","--ratio","0.667"] && entries[0].include?("--no-focus") && entries[1] == ["agent","rename","fake-pane","reviewer-main"] && entries[2][0,3] == ["pane","run","fake-pane"] && entries[2][3].include?("ORBIT_INSTANCE\\=reviewer-main") && entries[2][3].include?("ORBIT_ROLE\\=reviewer") && entries[2][3].include?("ORBIT_SESSION_ID\\=") && entries[2][3].include?("ORBIT_LAUNCH_ID\\=") && entries[2][3].end_with?(" codex")' "$TMPROOT/fake-herdr-args.txt"
 ruby --disable-gems -e 'actual=File.read(ARGV[0]).lines.map(&:chomp); abort(actual.inspect) unless actual[0,3] == ["wait","output","fake-pane"] && actual.include?("--regex") && actual.include?("OpenAI Codex|›")' "$TMPROOT/fake-herdr-wait-args.txt"
-grep -qx 'reviewer-main/reviewer' "$TMPROOT/fake-herdr-env.txt"
-grep -qx "$PROJECT" "$TMPROOT/fake-herdr-cwd.txt"
-pass 'start herdr passes argv env cwd and waits for codex readiness'
+pass 'start herdr applies weighted split, pane identity, command env, and readiness wait'
 
 cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
 #!/bin/sh

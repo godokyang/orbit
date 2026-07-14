@@ -35,8 +35,14 @@ case "$1 $2" in
       puts JSON.generate({"result"=>{"agents"=>agents}})
     '
     ;;
-  "agent start")
-    printf '{"result":{"agent":{"pane_id":"preview-%s","agent":"codex"}}}\n' "$3"
+  "pane split")
+    printf '{"result":{"pane":{"pane_id":"preview-reviewer-main","tab_id":"lead-tab","workspace_id":"lead-workspace"}}}\n'
+    ;;
+  "agent rename")
+    printf '{"result":{"agent":{"pane_id":"preview-reviewer-main","name":"reviewer-main"}}}\n'
+    ;;
+  "pane run")
+    printf '{"result":{"pane":{"pane_id":"preview-reviewer-main"}}}\n'
     ;;
   "wait output")
     printf 'OpenAI Codex\n'

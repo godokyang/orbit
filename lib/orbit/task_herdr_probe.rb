@@ -64,7 +64,8 @@ def start_plan(options)
   options = options.merge(
     "min_cols" => options["min_cols"] || view_policy["min_columns"],
     "min_rows" => options["min_rows"] || view_policy["min_rows"],
-    "view_policy" => view_policy
+    "view_policy" => view_policy,
+    "resolved_role" => role_def["role"] || role_ref
   )
   creation_policy = role_creation_policy(options)
   session_id = "ors_#{SecureRandom.hex(12)}"
@@ -236,6 +237,131 @@ def rect_dimensions(rect)
   { "cols" => cols, "rows" => rows }
 end
 
+HUMAN_VIEW_ROLE_WEIGHTS = {
+  "lead" => 4.0,
+  "reviewer" => 2.0,
+  "coder" => 2.0,
+  "tester" => 1.0
+}.freeze
+
+def human_view_role_weight(role)
+  HUMAN_VIEW_ROLE_WEIGHTS.fetch(role.to_s, 1.0)
+end
+
+def herdr_roles_by_pane(agents, source_pane: nil)
+  roles, instances = load_project_instance_config_for_cli[0, 2]
+  result = instances.each_with_object({}) do |(instance_key, instance), mapped|
+    next unless instance.is_a?(Hash)
+
+    pane = normalize_instance_binding(instance_key, instance)["pane"].to_s
+    role = role_for_instance_config(instances, roles, instance_key)
+    mapped[pane] = role unless pane.empty? || role.to_s.empty?
+  end
+  source_role = ENV["ORBIT_ROLE"].to_s.strip
+  source_role = "lead" if source_role.empty?
+  result[source_pane.to_s] ||= source_role unless source_pane.to_s.empty?
+  Array(agents).each_with_object(result) do |entry, mapped|
+    next unless entry.is_a?(Hash)
+
+    pane = entry["pane_id"].to_s
+    instance = entry["name"] || entry["label"] || entry["instance"]
+    next if pane.empty? || instance.to_s.empty?
+
+    mapped[pane] = role_for_instance_config(instances, roles, instance.to_s) || mapped[pane] || "other"
+  end
+rescue SystemExit, RuntimeError
+  {}
+end
+
+def weighted_split_projection(size, direction, ratio)
+  if direction == "right"
+    retained_cols = (size["cols"] * ratio).round
+    {
+      "retained" => { "cols" => retained_cols, "rows" => size["rows"] },
+      "new" => { "cols" => size["cols"] - retained_cols, "rows" => size["rows"] }
+    }
+  else
+    retained_rows = (size["rows"] * ratio).round
+    {
+      "retained" => { "cols" => size["cols"], "rows" => retained_rows },
+      "new" => { "cols" => size["cols"], "rows" => size["rows"] - retained_rows }
+    }
+  end
+end
+
+def weighted_same_tab_placement(panes, agents, new_role, minimum, source_pane: nil)
+  roles_by_pane = herdr_roles_by_pane(agents, source_pane: source_pane)
+  candidates = Array(panes).each_with_object([]) do |entry, collected|
+    next unless entry.is_a?(Hash)
+
+    pane = entry["pane_id"].to_s
+    size = rect_dimensions(entry["rect"] || entry["area"] || entry)
+    next if pane.empty? || size.nil?
+
+    role = roles_by_pane[pane] || "other"
+    collected << {
+      "pane" => pane,
+      "role" => role,
+      "weight" => human_view_role_weight(role),
+      "size" => size,
+      "area" => size["cols"] * size["rows"]
+    }
+  end
+  return nil if candidates.empty?
+
+  new_weight = human_view_role_weight(new_role)
+  highest_existing_weight = candidates.map { |entry| entry["weight"] }.max
+  ordered = if new_weight > highest_existing_weight
+              candidates.sort_by { |entry| [-entry["area"], entry["weight"], entry["pane"]] }
+            else
+              candidates.sort_by { |entry| [entry["weight"], -entry["area"], entry["pane"]] }
+            end
+  soft_minimum = {
+    "cols" => [minimum["cols"].to_i / 2, 40].max,
+    "rows" => [minimum["rows"].to_i / 2, 12].max
+  }
+  all_options = []
+  ordered.each_with_index do |candidate, order_index|
+    ratio = candidate["weight"] / (candidate["weight"] + new_weight)
+    ratio = [[ratio, 0.20].max, 0.80].min
+    options = %w[right down].map do |direction|
+      projection = weighted_split_projection(candidate["size"], direction, ratio)
+      dimensions = [projection["retained"], projection["new"]]
+      fit = dimensions.map do |size|
+        [size["cols"].to_f / soft_minimum["cols"], size["rows"].to_f / soft_minimum["rows"]].min
+      end.min
+      {
+        "target_pane" => candidate["pane"],
+        "target_role" => candidate["role"],
+        "target_weight" => candidate["weight"],
+        "new_role" => new_role,
+        "new_weight" => new_weight,
+        "direction" => direction,
+        "ratio" => ratio.round(3),
+        "target_size" => candidate["size"],
+        "projected_target_size" => projection["retained"],
+        "projected_new_size" => projection["new"],
+        "soft_minimum" => soft_minimum,
+        "readable" => fit >= 1.0,
+        "fit_score" => fit,
+        "candidate_order" => order_index
+      }
+    end
+    readable = options.select { |entry| entry["readable"] }
+    unless readable.empty?
+      return readable.max_by do |entry|
+        [entry["fit_score"], entry["projected_new_size"]["cols"] * entry["projected_new_size"]["rows"]]
+      end
+    end
+
+    all_options.concat(options)
+  end
+
+  all_options.max_by do |entry|
+    [-entry["candidate_order"], entry["fit_score"], entry["projected_new_size"]["cols"] * entry["projected_new_size"]["rows"]]
+  end
+end
+
 def herdr_layout_probe(view, options)
   minimum = {
     "cols" => options["min_cols"],
@@ -291,6 +417,7 @@ def herdr_layout_probe(view, options)
   probe["workspace"] = workspace unless workspace.empty?
 
   agent_count = nil
+  agents = []
   agent_stdout, _agent_stderr, agent_status = Open3.capture3(herdr_path, "agent", "list")
   if agent_status.success?
     agents_parsed = JSON.parse(agent_stdout)
@@ -302,18 +429,17 @@ def herdr_layout_probe(view, options)
     end
   end
 
-  projected = {
-    "cols" => [source_size["cols"] / 2, 0].max,
-    "rows" => source_size["rows"]
-  }
-  same_tab_readable = projected["cols"] >= minimum["cols"] && projected["rows"] >= minimum["rows"]
+  placement = weighted_same_tab_placement(panes, agents, options["resolved_role"], minimum, source_pane: source_pane)
+  projected = placement && placement["projected_new_size"]
+  same_tab_readable = placement && placement["readable"] == true
   probe.merge(
     "source_pane_size" => source_size,
     "projected_same_tab_size" => projected,
     "existing_agent_panes_in_tab" => agent_count,
+    "placement" => placement,
     "inspectable" => true,
     "same_tab_readable" => same_tab_readable,
-    "reason" => same_tab_readable ? "same-tab split remains above minimum readable size" : "same-tab split would be below minimum readable size"
+    "reason" => placement ? "weighted current-tab placement is available" : "no current-tab pane is available for weighted placement"
   )
 rescue JSON::ParserError => e
   probe.merge("reason" => "could not parse Herdr layout JSON", "error" => e.message)
@@ -330,13 +456,14 @@ def role_creation_policy(options)
     )
   end
   requested_same_tab = layout_mode == "same-tab"
-  auto_same_tab = layout_mode == "auto" && !view["tab"].to_s.empty? && layout_probe["same_tab_readable"] == true
+  placement = layout_probe["placement"]
+  auto_same_tab = layout_mode == "auto" && !view["tab"].to_s.empty? && placement.is_a?(Hash)
   selected_layout = requested_same_tab || auto_same_tab ? "same_tab" : "new_tab"
-  blocked = requested_same_tab && layout_probe["same_tab_readable"] != true
+  blocked = requested_same_tab && !placement.is_a?(Hash)
   reason = if layout_mode == "new-tab"
              "new-tab layout was requested"
            elsif selected_layout == "same_tab"
-             layout_probe["reason"]
+             "weighted current-tab placement: #{placement["new_role"]} splits #{placement["target_role"]} pane #{placement["target_pane"]} #{placement["direction"]} at retained ratio #{placement["ratio"]}"
            elsif layout_mode == "same-tab"
              layout_probe["reason"]
            elsif view["tab"].to_s.empty?
@@ -359,6 +486,8 @@ def role_creation_policy(options)
       "source_pane_size" => layout_probe["source_pane_size"],
       "projected_same_tab_size" => layout_probe["projected_same_tab_size"],
       "existing_agent_panes_in_tab" => layout_probe["existing_agent_panes_in_tab"],
+      "placement" => placement,
+      "same_tab_readable" => layout_probe["same_tab_readable"],
       "workspace" => view["workspace"],
       "tab" => view["tab"],
       "inspectable" => layout_probe["inspectable"],
@@ -916,6 +1045,31 @@ def herdr_start_argv(plan, executable = "herdr", label = nil)
   argv + ["--no-focus", "--", *command_argv]
 end
 
+def herdr_weighted_start_commands(plan, executable = "herdr", pane = "<new-pane>", label = nil)
+  placement = plan.dig("layout", "placement") || {}
+  [
+    [
+      executable,
+      "pane",
+      "split",
+      placement["target_pane"],
+      "--direction",
+      placement["direction"],
+      "--ratio",
+      placement["ratio"].to_s,
+      "--cwd",
+      plan["cwd"],
+      "--no-focus"
+    ],
+    [executable, "agent", "rename", pane, label || plan["instance"]],
+    [executable, "pane", "run", pane, wake_command_text(plan)]
+  ]
+end
+
+def herdr_weighted_same_tab_start?(plan)
+  plan.dig("layout", "selected") == "same_tab" && plan.dig("layout", "placement").is_a?(Hash)
+end
+
 def herdr_agent_name_taken?(stderr)
   parsed = JSON.parse(stderr.to_s)
   parsed.dig("error", "code") == "agent_name_taken"
@@ -952,11 +1106,15 @@ end
 
 def attach_start_adapter_plan(plan)
   ready_wait = herdr_start_ready_wait(plan)
+  weighted_commands = herdr_weighted_start_commands(plan) if herdr_weighted_same_tab_start?(plan)
   plan.merge(
     "herdr_start" => {
       "schema_version" => "orbit-herdr-start-v1",
       "adapter" => "herdr",
-      "command" => herdr_start_argv(plan),
+      "placement_mode" => weighted_commands ? "weighted_same_tab" : "agent_start",
+      "command" => weighted_commands ? weighted_commands.first : herdr_start_argv(plan),
+      "commands" => weighted_commands,
+      "placement" => plan.dig("layout", "placement"),
       "label" => plan["instance"],
       "env" => plan["env"],
       "ready_wait" => ready_wait
@@ -993,6 +1151,12 @@ def print_start_human_plan(plan)
   end
   layout = plan["layout"] || {}
   puts "- layout: #{layout["selected"]}" if layout["selected"]
+  if layout["placement"]
+    placement = layout["placement"]
+    puts "  - role priority: lead > reviewer/coder > tester"
+    puts "  - split target: #{placement["target_role"]} (#{placement["target_pane"]})"
+    puts "  - split: #{placement["direction"]}, retained ratio #{placement["ratio"]}"
+  end
   puts "- action: dry-run" if plan["dry_run"]
 end
 
@@ -1033,6 +1197,7 @@ def herdr_start_pane_id(stdout)
   parsed = JSON.parse(stdout)
   if parsed.is_a?(Hash)
     return parsed.dig("result", "agent", "pane_id") if parsed.dig("result", "agent", "pane_id")
+    return parsed.dig("result", "pane", "pane_id") if parsed.dig("result", "pane", "pane_id")
     return parsed["pane_id"] if parsed["pane_id"]
   end
 
