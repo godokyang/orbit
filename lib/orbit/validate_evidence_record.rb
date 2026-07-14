@@ -729,14 +729,14 @@ def record_field_or_nested(record, nested, field)
   nested[field].nil? ? record[field] : nested[field]
 end
 
-def validate_test_pass_environment_evidence(result, records, task)
+def validate_test_pass_environment_evidence(result, records, task, task_sha256 = nil)
   return unless task_requires_test_evidence?(task)
 
-  latest = latest_record_for_kind(records, "test", structured_gate_only: true, gate_identity_required: true)
-  return unless latest && latest["status"] == "pass"
+  accepted = accepted_gate_record_for_evidence_kind(records, task, "test", task_sha256)
+  return unless accepted && accepted["status"] == "pass"
 
   declared_level = task["test_level"]
-  evidence_level = latest["test_level"]
+  evidence_level = accepted["test_level"]
   if !evidence_level.is_a?(String) || evidence_level.strip.empty?
     validation_error(result, "evidence_file.records.test.test_level", "Latest passing test evidence must include test_level.")
   elsif !ALLOWED_TEST_LEVELS.include?(evidence_level)
@@ -747,7 +747,7 @@ def validate_test_pass_environment_evidence(result, records, task)
     validation_error(result, "evidence_file.records.test.test_level", "Latest passing test evidence test_level #{evidence_level.inspect} must match task test_level #{declared_level.inspect}.")
   end
 
-  environment = latest["test_environment"]
+  environment = accepted["test_environment"]
   unless environment.is_a?(Hash)
     validation_error(result, "evidence_file.records.test.test_environment", "Latest passing test evidence must include test_environment mapping.")
     return
@@ -758,7 +758,7 @@ def validate_test_pass_environment_evidence(result, records, task)
   end
 
   %w[duration resource_usage cleanup_status ux_quality artifact_quality].each do |field|
-    value = record_field_or_nested(latest, environment, field)
+    value = record_field_or_nested(accepted, environment, field)
     validate_non_empty_scalar(result, "evidence_file.records.test.test_environment.#{field}", value, "Test environment #{field}")
   end
 end
@@ -786,13 +786,13 @@ def validate_quality_measurement_waiver_evidence(result, source, waiver)
   end
 end
 
-def validate_quality_measurement_evidence(result, records, task)
+def validate_quality_measurement_evidence(result, records, task, task_sha256 = nil)
   return unless quality_measurement_task?(task)
 
-  latest = latest_record_for_kind(records, "test", structured_gate_only: true, gate_identity_required: true)
-  return unless latest && latest["status"] == "pass"
+  accepted = accepted_gate_record_for_evidence_kind(records, task, "test", task_sha256)
+  return unless accepted && accepted["status"] == "pass"
 
-  measurement = latest["quality_measurement"]
+  measurement = accepted["quality_measurement"]
   unless measurement.is_a?(Hash)
     validation_error(result, "evidence_file.records.test.quality_measurement", "Latest passing test evidence must include quality_measurement mapping for baseline/after evidence or an explicit waiver.")
     return

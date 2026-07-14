@@ -262,14 +262,19 @@ def validate_current_artifact_provenance(result, records, task)
   return unless task.is_a?(Hash) && records.is_a?(Array)
 
   manifest = { "records" => records }
+  task_path = task["__orbit_path"]
+  task_sha256 = task_path && File.file?(task_path) ? sha256_file(task_path) : nil
   %w[implementation review test].each do |kind|
-    record = records.reverse.find do |entry|
-      entry.is_a?(Hash) && entry["kind"] == kind && entry["status"] == "pass" &&
-        (kind == "implementation" || entry["structured_submit"] == true)
-    end
+    record = if kind == "implementation"
+               records.reverse.find do |entry|
+                 entry.is_a?(Hash) && entry["kind"] == kind && entry["status"] == "pass"
+               end
+             else
+               accepted_gate_record_for_evidence_kind(records, task, kind, task_sha256)
+             end
     next unless record
 
-    assessment = artifact_provenance_assessment(task, record, manifest: manifest, task_path: task["__orbit_path"])
+    assessment = artifact_provenance_assessment(task, record, manifest: manifest, task_path: task_path)
     next if assessment["valid"]
 
     assessment["failures"].each_with_index do |failure, index|

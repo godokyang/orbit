@@ -488,3 +488,128 @@ json_assert 'handoff readable_summary latest_review_verdict is not pass under st
   'j["readable_summary"]["latest_review_verdict"] != "pass"'
 json_assert 'handoff verdict_arbitration any_stale is true' "$TMPROOT/s9-handoff-stale.json" \
   'j["verdict_arbitration"]["any_stale"] == true'
+
+# ---- Group 16: superseded pending identities do not block accepted gate records ----
+
+S9_ACCEPTED_TASK="$TMPROOT/s9-accepted-record-task.yaml"
+S9_ACCEPTED_EVIDENCE="$TMPROOT/s9-accepted-record-evidence.json"
+S9_ACCEPTED_STATE="$TMPROOT/s9-accepted-record-state.yaml"
+"$CLI" new-task --task-type implementation --output "$S9_ACCEPTED_TASK" >/dev/null
+ruby --disable-gems -ryaml -e '
+  path = ARGV[0]
+  task = YAML.safe_load(File.read(path), aliases: true)
+  task["gates"] << {
+    "kind" => "test",
+    "roles" => ["tester"],
+    "required" => true,
+    "pass_condition" => "required tests pass"
+  }
+  task["test_level"] = "repo_regression"
+  File.write(path, YAML.dump(task))
+' "$S9_ACCEPTED_TASK"
+make_task_execution_ready "$S9_ACCEPTED_TASK"
+"$CLI" evidence init --output "$S9_ACCEPTED_EVIDENCE" >/dev/null
+cp .orbit/loop-state.yaml "$S9_ACCEPTED_STATE"
+ORBIT_INSTANCE=lead-main "$CLI" state start --state "$S9_ACCEPTED_STATE" --task "$S9_ACCEPTED_TASK" >/dev/null
+ORBIT_INSTANCE=lead-main "$CLI" evidence add \
+  --file "$S9_ACCEPTED_EVIDENCE" \
+  --kind implementation \
+  --status pass \
+  --summary "Accepted-record arbitration implementation fixture passed." \
+  --task "$S9_ACCEPTED_TASK" >/dev/null
+ruby --disable-gems -rjson -e '
+  path = ARGV[0]
+  evidence = JSON.parse(File.read(path))
+  evidence["worktree_safety"] = {
+    "status" => "not_git",
+    "reason" => "generated accepted-record fixture is not a git repository",
+    "unexpected_changes" => []
+  }
+  File.write(path, JSON.pretty_generate(evidence))
+' "$S9_ACCEPTED_EVIDENCE"
+
+write_review_pass_report \
+  "$TMPROOT/s9-accepted-review.yaml" \
+  "Latest manual-runtime review supersedes pending history." \
+  "manual:reviewer:s9-accepted"
+write_test_pass_report \
+  "$TMPROOT/s9-accepted-test.yaml" \
+  "Latest manual-runtime test supersedes pending history." \
+  "manual:tester:s9-accepted"
+ORBIT_INSTANCE=reviewer-main "$CLI" evidence submit \
+  --file "$S9_ACCEPTED_EVIDENCE" \
+  --report "$TMPROOT/s9-accepted-review.yaml" \
+  --task "$S9_ACCEPTED_TASK" \
+  --json >/dev/null
+ORBIT_INSTANCE=tester-main "$CLI" evidence submit \
+  --file "$S9_ACCEPTED_EVIDENCE" \
+  --report "$TMPROOT/s9-accepted-test.yaml" \
+  --task "$S9_ACCEPTED_TASK" \
+  --json >/dev/null
+
+# Preserve two older PASS records with unsupported pending identities. They remain valid
+# historical records, but arbitration must supersede them for gate-closing policy checks.
+ruby --disable-gems -rjson -e '
+  path = ARGV[0]
+  evidence = JSON.parse(File.read(path))
+  review = evidence["records"].find { |record| record["source_message_id"] == "manual:reviewer:s9-accepted" }
+  test = evidence["records"].find { |record| record["source_message_id"] == "manual:tester:s9-accepted" }
+  pending_review = Marshal.load(Marshal.dump(review))
+  pending_review["source_message_id"] = "history:reviewer:s9-pending"
+  pending_review["created_at"] = "2026-07-14T10:00:00Z"
+  pending_review["runtime_identity"] = {"verification" => "pending", "source" => "historical_attempt"}
+  pending_test = Marshal.load(Marshal.dump(test))
+  pending_test["source_message_id"] = "history:tester:s9-identity-pending"
+  pending_test["created_at"] = "2026-07-14T10:00:01Z"
+  pending_test["runtime_identity"] = {"verification" => "identity_pending", "source" => "historical_attempt"}
+  # Keep history append-only and deliberately out of array order: arbitration uses
+  # created_at/current revision, not physical position in the manifest.
+  evidence["records"].concat([pending_review, pending_test])
+  File.write(path, JSON.pretty_generate(evidence))
+' "$S9_ACCEPTED_EVIDENCE"
+
+"$CLI" wait-gate \
+  --task "$S9_ACCEPTED_TASK" \
+  --evidence "$S9_ACCEPTED_EVIDENCE" \
+  --state "$S9_ACCEPTED_STATE" \
+  --json >"$TMPROOT/s9-accepted-wait-gate.json"
+json_assert 'wait-gate accepts latest review and test records over pending history' \
+  "$TMPROOT/s9-accepted-wait-gate.json" \
+  'j["ready"] == true && j["gate_summary"]["passed"].sort == ["review", "test"]'
+json_assert 'wait-gate reports pending review and test history as superseded' \
+  "$TMPROOT/s9-accepted-wait-gate.json" \
+  'review = j["verdict_arbitration"]["gates"].find { |gate| gate["gate"] == "review" }; test = j["verdict_arbitration"]["gates"].find { |gate| gate["gate"] == "test" }; review["accepted_record_id"] == "manual:reviewer:s9-accepted" && review["superseded_records"].include?("history:reviewer:s9-pending") && test["accepted_record_id"] == "manual:tester:s9-accepted" && test["superseded_records"].include?("history:tester:s9-identity-pending")'
+
+"$CLI" validate \
+  --task "$S9_ACCEPTED_TASK" \
+  --evidence "$S9_ACCEPTED_EVIDENCE" \
+  --state "$S9_ACCEPTED_STATE" \
+  --json >"$TMPROOT/s9-accepted-validate.json"
+json_assert 'validate ignores superseded pending runtime identities' \
+  "$TMPROOT/s9-accepted-validate.json" \
+  'j["valid"] == true && j["errors"].empty?'
+
+ORBIT_INSTANCE=lead-main "$CLI" state transition \
+  --state "$S9_ACCEPTED_STATE" \
+  --to in_review \
+  --evidence "$S9_ACCEPTED_EVIDENCE" >/dev/null
+ORBIT_INSTANCE=lead-main "$CLI" state transition \
+  --state "$S9_ACCEPTED_STATE" \
+  --to done \
+  --evidence "$S9_ACCEPTED_EVIDENCE" >/dev/null
+yaml_assert 'state transition reaches done without deleting pending history' \
+  "$S9_ACCEPTED_STATE" \
+  'j["phase"] == "done" && j.dig("artifacts", "evidence_file") == File.expand_path(ARGV[2])' \
+  "$S9_ACCEPTED_EVIDENCE"
+json_assert 'superseded pending review and test records remain preserved' \
+  "$S9_ACCEPTED_EVIDENCE" \
+  'j["records"].any? { |record| record["source_message_id"] == "history:reviewer:s9-pending" && record.dig("runtime_identity", "verification") == "pending" } && j["records"].any? { |record| record["source_message_id"] == "history:tester:s9-identity-pending" && record.dig("runtime_identity", "verification") == "identity_pending" }'
+
+"$CLI" audit \
+  --task "$S9_ACCEPTED_TASK" \
+  --evidence "$S9_ACCEPTED_EVIDENCE" \
+  --state "$S9_ACCEPTED_STATE" \
+  --json >"$TMPROOT/s9-accepted-audit.json"
+json_assert 'audit trusts done state with accepted review and test records' \
+  "$TMPROOT/s9-accepted-audit.json" \
+  'j["validation"]["valid"] == true && j["trusted_for_done"] == true && j["done_ready"] == true && j["blocking_findings"].empty?'

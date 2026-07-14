@@ -321,8 +321,8 @@ def validate_evidence(result, evidence_path, task = nil, task_sha256: nil, allow
   validate_tool_calls(result, evidence["tool_calls"])
   validate_rule_resolution_reference(result, evidence_path, evidence, task)
   if task && records.is_a?(Array)
-    validate_test_pass_environment_evidence(result, records, task)
-    validate_quality_measurement_evidence(result, records, task)
+    validate_test_pass_environment_evidence(result, records, task, task_sha256)
+    validate_quality_measurement_evidence(result, records, task, task_sha256)
   end
 
   if task && records.is_a?(Array) && !records.empty? && required_evidence_kinds(task).any?
@@ -473,12 +473,23 @@ end
 
 def validate_runtime_identity_policy_for_task(result, records, evidence, task, task_sha256 = nil)
   strict_runtime = task_requires_herdr_verified_runtime_gate?(task)
+  accepted_gate_record_ids = %w[review test]
+    .map { |kind| accepted_gate_record_for_evidence_kind(records, task, kind, task_sha256) }
+    .compact
+    .map(&:object_id)
+    .to_h { |object_id| [object_id, true] }
 
   records.each_with_index do |record, index|
     next unless record.is_a?(Hash) && record["status"] == "pass"
 
     gate_kind = runtime_identity_record_gate_kind(record)
     next unless gate_kind
+    # Review/test PASS history remains structurally validated by validate_evidence_record,
+    # but only the arbitration winner may close a gate. Applying runtime gate policy to a
+    # superseded attempt makes validate/audit/state-transition contradict wait-gate.
+    if %w[review test].include?(gate_kind)
+      next unless accepted_gate_record_ids[record.object_id]
+    end
 
     verification, shape_error = runtime_identity_verification(record)
     if shape_error == "malformed"

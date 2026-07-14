@@ -122,6 +122,31 @@ def accepted_gate_record(records, gate_kind, current_task_sha256 = nil, task: ni
   verdict_arbitration_for_gate(records, gate_kind, current_task_sha256, task: task)["accepted_record"]
 end
 
+# Returns the accepted record for each required gate. Consumers that enforce gate-closing
+# policy must use this projection instead of scanning every historical PASS record: older
+# records remain in the manifest for auditability, but arbitration has already superseded
+# them for the current task revision.
+def accepted_gate_records_for_task(records, task, current_task_sha256 = nil)
+  return {} unless task.is_a?(Hash)
+
+  required_evidence_kinds(task).each_with_object({}) do |gate_kind, accepted|
+    record = accepted_gate_record(records, gate_kind, current_task_sha256, task: task)
+    accepted[gate_kind] = record if record
+  end
+end
+
+def accepted_gate_record_for_evidence_kind(records, task, evidence_kind, current_task_sha256 = nil)
+  accepted_gate_records_for_task(records, task, current_task_sha256).each do |gate_kind, record|
+    mapped_kind = GATE_KIND_EVIDENCE_RECORD_KIND[gate_kind] || gate_kind
+    return record if mapped_kind == evidence_kind
+  end
+
+  # Some task contracts (for example quality measurement) require structured test
+  # evidence without declaring a separate required test gate. They still need the same
+  # current-revision/latest-record arbitration instead of falling back to array order.
+  accepted_gate_record(records, evidence_kind, current_task_sha256, task: task)
+end
+
 # Parses and validates a gate_lease mapping carried by a record. Returns nil when absent or malformed.
 def normalize_gate_lease(value)
   return nil unless value.is_a?(Hash)

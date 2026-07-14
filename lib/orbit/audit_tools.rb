@@ -291,6 +291,8 @@ def quality_outcome_summary(task, evidence)
 
   records = evidence.is_a?(Hash) && evidence["records"].is_a?(Array) ? evidence["records"] : []
   required_kinds = required_evidence_kinds(task)
+  task_sha256 = task["__orbit_path"] && File.file?(task["__orbit_path"]) ? sha256_file(task["__orbit_path"]) : nil
+  accepted_records = accepted_gate_records_for_task(records, task, task_sha256)
 
   gate_verdicts = required_kinds.each_with_object({}) do |kind, memo|
     evidence_kind = GATE_KIND_EVIDENCE_RECORD_KIND[kind] || kind
@@ -300,9 +302,8 @@ def quality_outcome_summary(task, evidence)
       memo[kind] = { "satisfied" => "not_applicable" }
       next
     end
-    candidates = records.select { |r| r.is_a?(Hash) && r["kind"] == evidence_kind && r["structured_submit"] == true }
-    latest = candidates.last
-    qov = latest&.fetch("quality_outcome_verdict", nil)
+    accepted = accepted_records[kind]
+    qov = accepted&.fetch("quality_outcome_verdict", nil)
     memo[kind] = { "quality_outcome_verdict" => qov, "satisfied" => qov == "pass" }.compact
   end
 
@@ -311,7 +312,7 @@ def quality_outcome_summary(task, evidence)
 
   guards = task["invalid_completion_guards"]
   guard_summary = if guards.is_a?(Array) && !guards.empty?
-                    review_record = records.select { |r| r.is_a?(Hash) && r["kind"] == "review" && r["structured_submit"] == true }.last
+                    review_record = accepted_gate_record_for_evidence_kind(records, task, "review", task_sha256)
                     counterexamples_pass = review_record&.fetch("quality_question_answers", nil)&.any? do |a|
                       a.is_a?(Hash) && a["id"] == "counterexamples" && a["verdict"] == "pass"
                     end
