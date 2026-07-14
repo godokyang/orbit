@@ -983,7 +983,7 @@ def print_start_needs_attention(plan)
   warn "- role: #{plan["resolved_role"]}"
   warn "- action: needs_attention"
   warn "- pane: #{plan.dig("reuse_probe", "pane")}" if plan.dig("reuse_probe", "pane")
-  warn "- reason: #{plan.dig("reuse_probe", "reason") || plan["reason"]}"
+  warn "- reason: #{plan["reason"] || plan.dig("reuse_probe", "reason")}"
   print_start_capability_summary(plan, $stderr)
 end
 

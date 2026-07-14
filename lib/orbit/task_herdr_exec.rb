@@ -222,6 +222,48 @@ def start_needs_attention_next_steps(pane, ready_wait)
   ]
 end
 
+def pending_runtime_readiness_recheck?(plan)
+  resolution = plan.dig("instance_status", "runtime_resolution") || {}
+  resolution["state"] == "pending" || resolution["identity_verification"] == "pending"
+end
+
+def observe_existing_pane_readiness(plan, herdr_path, pane)
+  wait = herdr_start_ready_wait(plan)
+  return nil unless wait
+
+  argv = [herdr_path, "pane", "read", pane, "--source", "recent-unwrapped", "--lines", "80"]
+  stdout, stderr, status = Open3.capture3(*argv)
+  result = {
+    "command" => ["herdr", *argv.drop(1)],
+    "success" => status.success?,
+    "exit_status" => status.exitstatus,
+    "stdout" => stdout,
+    "stderr" => stderr,
+    "client" => wait["client"],
+    "match" => wait["match"]
+  }
+  return result.merge("status" => "unknown", "reason" => "pane output could not be inspected") unless status.success?
+
+  return result.merge("status" => "ready", "reason" => "client main interface observed") if Regexp.new(wait["match"]).match?(stdout)
+
+  prompt = herdr_startup_prompt(wait["client"], stdout)
+  if prompt
+    return result.merge(
+      "status" => "needs_attention",
+      "reason" => "client_startup_prompt",
+      "detected_prompt" => prompt
+    )
+  end
+
+  result.merge("status" => "not_ready", "reason" => "client main interface not observed")
+rescue RegexpError => e
+  {
+    "status" => "unknown",
+    "reason" => "invalid client ready marker",
+    "error" => e.message
+  }
+end
+
 def run_herdr_start(plan, json:)
   herdr_path = command_path("herdr")
   usage_error("herdr command not found. Automatic start/wake requires Herdr. Run `orbit tools doctor --json`, or start the agent manually with ORBIT_INSTANCE and ORBIT_ROLE set.") unless herdr_path
@@ -482,14 +524,44 @@ def start(args)
 
     if !options["force"] && probe && probe["decision"] == "reuse"
       runtime_resolution = runtime_resolve_instance(plan["instance"])
+      pane = probe["canonical_pane"] || probe["pane"]
+      readiness = observe_existing_pane_readiness(plan, command_path("herdr"), pane) if pending_runtime_readiness_recheck?(plan)
+      if readiness && readiness["status"] != "ready"
+        prompt = readiness["detected_prompt"]
+        reason = prompt && prompt["summary"]
+        reason ||= readiness["reason"]
+        next_steps = [
+          { "inspect_pane" => "herdr pane read #{pane} --source recent-unwrapped --lines 80" },
+          {
+            "resolve_startup_prompt" => prompt && prompt["summary"],
+            "blocking_reason" => readiness["reason"]
+          }.compact
+        ]
+        result = plan.merge(
+          "action" => "reuse_needs_attention",
+          "reason" => reason,
+          "dispatch_ready" => false,
+          "reuse_probe" => probe,
+          "readiness" => readiness,
+          "runtime_resolution" => runtime_resolution.reject { |key, _| %w[runtime_instance runtime_session].include?(key) },
+          "next" => next_steps
+        )
+        if options["json"]
+          puts JSON.pretty_generate(result)
+        else
+          print_start_needs_attention(result)
+        end
+        exit 1
+      end
       result = plan.merge(
         "action" => "reuse_identity_pending",
-        "reason" => "binding_agent_found_but_runtime_identity_unverified",
+        "reason" => readiness ? "client_ready_but_runtime_identity_unverified" : "binding_agent_found_but_runtime_identity_unverified",
         "dispatch_ready" => false,
         "reuse_probe" => probe,
+        "readiness" => readiness,
         "runtime_resolution" => runtime_resolution.reject { |key, _| %w[runtime_instance runtime_session].include?(key) },
-        "next" => start_pending_next_steps(probe["canonical_pane"] || probe["pane"])
-      )
+        "next" => start_pending_next_steps(pane)
+      ).compact
       if options["json"]
         puts JSON.pretty_generate(result)
       else

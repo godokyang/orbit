@@ -1045,7 +1045,8 @@ case "$1 $2" in
     printf '{"result":{"layout":{"tab_id":"lead-tab","workspace_id":"lead-workspace","panes":[{"pane_id":"lead-pane","focused":true,"rect":{"width":260,"height":50}}]}}}\n'
     ;;
   "agent list")
-    printf '{"result":{"agents":[{"pane_id":"lead-pane","tab_id":"lead-tab","agent":"codex","agent_status":"idle"}]}}\n'
+    client=${ORBIT_FAKE_CLIENT:-codex}
+    printf '{"result":{"agents":[{"pane_id":"lead-pane","tab_id":"lead-tab","agent":"codex","agent_status":"idle"},{"pane_id":"update-pane","tab_id":"lead-tab","name":"reviewer-main","agent":"%s","agent_status":"idle","cwd":"%s","foreground_cwd":"%s"}]}}\n' "$client" "$PWD" "$PWD"
     ;;
   "pane split")
     printf '{"result":{"pane":{"pane_id":"update-pane","tab_id":"lead-tab","workspace_id":"lead-workspace"}}}\n'
@@ -1060,7 +1061,11 @@ case "$1 $2" in
     exit 124
     ;;
   "pane read")
-    printf '✨ Update available! 0.144.1 -> 0.144.3\n› 1. Update now\n  2. Skip\nPress enter to continue\n'
+    if [ "${ORBIT_FAKE_CODEX_READY:-}" = "1" ]; then
+      printf '│ >_ OpenAI Codex (v0.144.3) │\n› Implement feature\n'
+    else
+      printf '✨ Update available! 0.144.1 -> 0.144.3\n› 1. Update now\n  2. Skip\nPress enter to continue\n'
+    fi
     ;;
   *)
     printf 'unexpected herdr args: %s\n' "$*" >&2
@@ -1075,6 +1080,19 @@ if env HERDR_PANE_ID=lead-pane HERDR_TAB_ID=lead-tab PATH="$TMPROOT/fakebin:$PAT
 fi
 json_assert 'start detects Codex update prompt without claiming ready' "$TMPROOT/start-herdr-update-prompt.json" 'r=j["adapter_result"]; j["action"] == "started_needs_attention" && j["dispatch_ready"] == false && r["started"] == true && r["success"] == false && r.dig("ready_wait","status") == "needs_attention" && r.dig("ready_wait","blocking_reason") == "client_startup_prompt" && r.dig("ready_wait","detected_prompt","kind") == "client_update_prompt" && r.dig("ready_wait","inspection","success") == true'
 json_assert 'start preserves pane binding and pending runtime for a resolvable startup prompt' "$TMPROOT/start-herdr-update-prompt.json" 'j.dig("runtime_session","state") == "pending" && j.dig("instance_status_after_start","herdr","pane") == "update-pane" && j.dig("next",0,"inspect_pane").include?("update-pane") && j.dig("next",1,"resolve_startup_prompt").include?("update choice")'
+if env HERDR_PANE_ID=lead-pane HERDR_TAB_ID=lead-tab PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer-main --json >"$TMPROOT/start-herdr-update-recheck-blocked.json" 2>"$TMPROOT/start-herdr-update-recheck-blocked.err"; then
+  printf 'FAIL start Codex unresolved prompt recheck: command unexpectedly succeeded\n' >&2
+  exit 1
+fi
+json_assert 'start rechecks a bound pending pane and keeps unresolved startup prompts blocking' "$TMPROOT/start-herdr-update-recheck-blocked.json" 'j["action"] == "reuse_needs_attention" && j["dispatch_ready"] == false && j["readiness"]["status"] == "needs_attention" && j.dig("readiness","detected_prompt","kind") == "client_update_prompt" && j.dig("runtime_resolution","state") == "pending" && j.dig("next",0,"inspect_pane").include?("update-pane")'
+env ORBIT_FAKE_CODEX_READY=1 HERDR_PANE_ID=lead-pane HERDR_TAB_ID=lead-tab PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer-main --json >"$TMPROOT/start-herdr-update-recheck-ready.json"
+json_assert 'start recovers the existing pane after the client main interface appears' "$TMPROOT/start-herdr-update-recheck-ready.json" 'j["action"] == "reuse_identity_pending" && j["reason"] == "client_ready_but_runtime_identity_unverified" && j["dispatch_ready"] == false && j.dig("readiness","status") == "ready" && j.dig("reuse_probe","pane") == "update-pane" && j.dig("runtime_resolution","state") == "pending" && j["next"].any? { |entry| entry.key?("manual_payload") }'
+"$CLI" init --force --operation-mode solo >/dev/null
+ruby --disable-gems -ryaml -e 'p=ARGV[0]; y=YAML.safe_load(File.read(p), aliases: true); y["instances"]["reviewer-main"]["command"]="custom-agent"; File.write(p, YAML.dump(y))' .orbit/instances.yaml
+env ORBIT_FAKE_CLIENT=custom-agent HERDR_PANE_ID=lead-pane HERDR_TAB_ID=lead-tab PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer-main --json >"$TMPROOT/start-herdr-custom-client.json"
+json_assert 'start keeps custom clients without a readiness marker identity-pending' "$TMPROOT/start-herdr-custom-client.json" 'j["action"] == "started_identity_pending" && j["dispatch_ready"] == false && j.dig("adapter_result","success") == true && j.dig("adapter_result","ready_wait","status") == "started_unverified"'
+env ORBIT_FAKE_CLIENT=custom-agent HERDR_PANE_ID=lead-pane HERDR_TAB_ID=lead-tab PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer-main --json >"$TMPROOT/start-herdr-custom-client-reuse.json"
+json_assert 'start preserves legacy reuse behavior when a custom client has no readiness marker' "$TMPROOT/start-herdr-custom-client-reuse.json" 'j["action"] == "reuse_identity_pending" && j["reason"] == "binding_agent_found_but_runtime_identity_unverified" && j["dispatch_ready"] == false && !j.key?("readiness") && j.dig("reuse_probe","pane") == "update-pane"'
 
 cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
 #!/bin/sh
