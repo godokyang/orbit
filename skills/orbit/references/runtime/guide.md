@@ -137,6 +137,8 @@ instance 默认是 `user_managed`，但 `instances.yaml` 中的 binding 只是 l
 
 当创建缺失 role instance 时，Herdr adapter 默认在当前 tab 内按人类查看概率分配空间，而不是另开 tab。面积优先级固定为 `lead > reviewer = coder > tester`（权重分别为 4、2、2、1）：优先切分当前 tab 中低优先级且仍可读的 pane，并按双方权重保留原 pane 与新 pane 的比例；因此 lead 通常保持最大，tester 占用最少。Orbit 会同时比较左右和上下切分的可读性。最小尺寸现在是软诊断目标，不会让 `auto` 静默改到新 tab；只有无法获得可切分 pane 时，`auto` 才回退到 new-tab。`--layout same-tab` 强制留在当前 tab，`--layout new-tab` 是用户显式选择的逃生口。新建 role 后还要显式处理权限准备：Orbit 可以在 start plan 中记录 permission setup requirement，但不能在没有明确 adapter/client 能力和用户授权时静默绕过审批或打开危险权限。
 
+客户端 readiness 必须匹配明确的主界面标识，不能把通用提示符当作 ready。若 Codex 等客户端停在更新选择或其他启动提示，`orbit start` 应返回非零的 `started_needs_attention`，保留已创建 pane、binding 和 pending runtime，并在 `next` 中给出检查与处理提示；只有真正进入客户端主界面后才能返回 `started_identity_pending`。
+
 `orbit dispatch` 只负责生成或发送 task 投递消息；direct delivery 只走 resolver 确认的 `dispatch_ready: true` 目标，`--pane` 是显式人工 override，`--manual-payload` 输出手工投递 artifact。manual payload 和 explicit pane override 不是 live proof，也不能作为 evidence runtime identity。dispatch 不改变 task/evidence/state，也不让 gate 自动通过。dispatch payload 同样包含 `context_preflight`，lead/reviewer/tester 应先读取其中 `required_files` 再开始本轮角色工作；Herdr message 里的自然语言提醒只是 delivery 展示，结构化 `context_preflight` 才是可测试的读取清单。dispatch 中的身份解析命令必须使用 `orbit whoami --json`，task 文件只传给 `rules resolve` 和 `rules print-context`；这样 reviewer/tester 等 gate role 不会因为 task target role 是 lead/coder 而在读取公共规范前触发 target mismatch。
 
 lead 协调 reviewer/tester 时，不要把 Herdr `agent-status done` 当作权威完成条件。真实角色可能已经成功提交结构化 evidence，但在回复消息、审批 prompt 或客户端 UI 上停在 `blocked`。收口应优先读取 `.orbit/evidence*`、运行 `orbit wait-gate --task ... --evidence ... --json`，再用 `validate/audit/handoff` 判断是否可 done；Herdr 状态只作为定位 transport 卡点的辅助信号。需要回信给特定 pane 时，使用明确的 `reply-to` pane，避免把完整报告投递到普通 shell/root pane。

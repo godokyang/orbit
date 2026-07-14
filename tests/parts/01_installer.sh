@@ -866,7 +866,7 @@ json_assert 'forced start marks previous verified runtime session replaced' ".or
 expect_failure 'runtime register refuses to reactivate replaced session' env ORBIT_INSTANCE=reviewer-main ORBIT_ROLE=reviewer ORBIT_SESSION_ID=ors-force-old ORBIT_LAUNCH_ID=orl-force-old PATH="$TMPROOT/fakebin:$PATH" "$CLI" runtime register --json
 json_assert 'replaced session remains replaced after rejected register' ".orbit/runtime/sessions/ors-force-old.json" 'j["state"] == "replaced" && j.dig("identity", "verification") == "herdr_verified"'
 ruby --disable-gems -e 'actual=File.read(ARGV[0]).lines.map(&:chomp); abort(actual.inspect) unless actual[0,3] == ["pane","run","canonical-run"] && actual[3].include?("env ") && actual[3].include?("ORBIT_INSTANCE\\=reviewer-main") && actual[3].include?("ORBIT_ROLE\\=reviewer") && actual[3].include?("ORBIT_SESSION_ID\\=") && actual[3].include?("ORBIT_LAUNCH_ID\\=") && actual[3].end_with?(" codex")' "$TMPROOT/fake-herdr-wake-run-args.txt"
-ruby --disable-gems -e 'actual=File.read(ARGV[0]).lines.map(&:chomp); abort(actual.inspect) unless actual[0,3] == ["wait","output","canonical-run"] && actual.include?("OpenAI Codex|›")' "$TMPROOT/fake-herdr-wake-wait-args.txt"
+ruby --disable-gems -e 'actual=File.read(ARGV[0]).lines.map(&:chomp); abort(actual.inspect) unless actual[0,3] == ["wait","output","canonical-run"] && actual.include?("OpenAI Codex \\(v") && !actual.any? { |part| part.include?("›") }' "$TMPROOT/fake-herdr-wake-wait-args.txt"
 pass 'start real force wake uses canonical Herdr pane'
 "$CLI" bind-pane --instance reviewer-main --pane busy-pane --json >"$TMPROOT/bind-pane-reviewer-busy.json"
 cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
@@ -1034,8 +1034,47 @@ chmod +x "$TMPROOT/fakebin/herdr"
 ORBIT_FAKE_HERDR_ARGS="$TMPROOT/fake-herdr-args.txt" ORBIT_FAKE_HERDR_WAIT_ARGS="$TMPROOT/fake-herdr-wait-args.txt" HERDR_PANE_ID=lead-pane HERDR_TAB_ID=lead-tab PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer-main --json >"$TMPROOT/start-herdr-real.json"
 json_assert 'start herdr invokes weighted adapter, records actual client, and waits for runtime identity' "$TMPROOT/start-herdr-real.json" 'j["action"] == "started_identity_pending" && j["dispatch_ready"] == false && j["adapter_result"]["success"] == true && j["adapter_result"]["stdout"].include?("fake-pane") && j["adapter_result"]["pane_id"] == "fake-pane" && j["adapter_result"]["ready_wait"]["success"] == true && j["adapter_result"]["steps"].map { |s| s["action"] } == ["split", "rename", "run"] && j["creation_policy"]["same_level_view"]["strategy"] == "same_tab" && j["instance_status_after_start"]["herdr"]["tab"] == "lead-tab" && j["instance_status_after_start"]["herdr"]["pane"] == "fake-pane" && j["runtime_session"]["state"] == "pending" && j["runtime_session"]["identity"]["verification"] == "identity_pending"'
 ruby --disable-gems -e 'entries=File.read(ARGV[0]).split("---\n").map { |s| s.lines.map(&:chomp).reject(&:empty?) }; abort(entries.inspect) unless entries.length == 3 && entries[0][0,7] == ["pane","split","lead-pane","--direction","right","--ratio","0.667"] && entries[0].include?("--no-focus") && entries[1] == ["agent","rename","fake-pane","reviewer-main"] && entries[2][0,3] == ["pane","run","fake-pane"] && entries[2][3].include?("ORBIT_INSTANCE\\=reviewer-main") && entries[2][3].include?("ORBIT_ROLE\\=reviewer") && entries[2][3].include?("ORBIT_SESSION_ID\\=") && entries[2][3].include?("ORBIT_LAUNCH_ID\\=") && entries[2][3].end_with?(" codex")' "$TMPROOT/fake-herdr-args.txt"
-ruby --disable-gems -e 'actual=File.read(ARGV[0]).lines.map(&:chomp); abort(actual.inspect) unless actual[0,3] == ["wait","output","fake-pane"] && actual.include?("--regex") && actual.include?("OpenAI Codex|›")' "$TMPROOT/fake-herdr-wait-args.txt"
+ruby --disable-gems -e 'actual=File.read(ARGV[0]).lines.map(&:chomp); abort(actual.inspect) unless actual[0,3] == ["wait","output","fake-pane"] && actual.include?("--regex") && actual.include?("OpenAI Codex \\(v") && !actual.any? { |part| part.include?("›") }' "$TMPROOT/fake-herdr-wait-args.txt"
 pass 'start herdr applies weighted split, pane identity, command env, and readiness wait'
+
+"$CLI" init --force --operation-mode solo >/dev/null
+cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
+#!/bin/sh
+case "$1 $2" in
+  "pane layout")
+    printf '{"result":{"layout":{"tab_id":"lead-tab","workspace_id":"lead-workspace","panes":[{"pane_id":"lead-pane","focused":true,"rect":{"width":260,"height":50}}]}}}\n'
+    ;;
+  "agent list")
+    printf '{"result":{"agents":[{"pane_id":"lead-pane","tab_id":"lead-tab","agent":"codex","agent_status":"idle"}]}}\n'
+    ;;
+  "pane split")
+    printf '{"result":{"pane":{"pane_id":"update-pane","tab_id":"lead-tab","workspace_id":"lead-workspace"}}}\n'
+    ;;
+  "agent rename")
+    printf '{"result":{"agent":{"pane_id":"update-pane","name":"reviewer-main"}}}\n'
+    ;;
+  "pane run")
+    ;;
+  "wait output")
+    printf 'timed out waiting for main interface\n' >&2
+    exit 124
+    ;;
+  "pane read")
+    printf '✨ Update available! 0.144.1 -> 0.144.3\n› 1. Update now\n  2. Skip\nPress enter to continue\n'
+    ;;
+  *)
+    printf 'unexpected herdr args: %s\n' "$*" >&2
+    exit 1
+    ;;
+esac
+HERDR
+chmod +x "$TMPROOT/fakebin/herdr"
+if env HERDR_PANE_ID=lead-pane HERDR_TAB_ID=lead-tab PATH="$TMPROOT/fakebin:$PATH" "$CLI" start reviewer-main --json >"$TMPROOT/start-herdr-update-prompt.json" 2>"$TMPROOT/start-herdr-update-prompt.err"; then
+  printf 'FAIL start Codex update prompt: command unexpectedly reported ready\n' >&2
+  exit 1
+fi
+json_assert 'start detects Codex update prompt without claiming ready' "$TMPROOT/start-herdr-update-prompt.json" 'r=j["adapter_result"]; j["action"] == "started_needs_attention" && j["dispatch_ready"] == false && r["started"] == true && r["success"] == false && r.dig("ready_wait","status") == "needs_attention" && r.dig("ready_wait","blocking_reason") == "client_startup_prompt" && r.dig("ready_wait","detected_prompt","kind") == "client_update_prompt" && r.dig("ready_wait","inspection","success") == true'
+json_assert 'start preserves pane binding and pending runtime for a resolvable startup prompt' "$TMPROOT/start-herdr-update-prompt.json" 'j.dig("runtime_session","state") == "pending" && j.dig("instance_status_after_start","herdr","pane") == "update-pane" && j.dig("next",0,"inspect_pane").include?("update-pane") && j.dig("next",1,"resolve_startup_prompt").include?("update choice")'
 
 cat >"$TMPROOT/fakebin/herdr" <<'HERDR'
 #!/bin/sh

@@ -146,6 +146,82 @@ def run_weighted_same_tab_start(plan, herdr_path)
   }.compact
 end
 
+def herdr_startup_prompt(client, output)
+  text = output.to_s
+  case client.to_s
+  when "codex"
+    return nil unless text.match?(/Update available!/i)
+    return nil unless text.match?(/Press enter to continue|\b1\.\s*Update now/i)
+
+    {
+      "kind" => "client_update_prompt",
+      "client" => "codex",
+      "summary" => "Codex is waiting for an update choice before entering its main interface."
+    }
+  end
+end
+
+def herdr_wait_for_start_ready(herdr_path, pane, wait)
+  wait_argv = [
+    herdr_path,
+    "wait",
+    "output",
+    pane,
+    "--match",
+    wait["match"],
+    "--regex",
+    "--source",
+    "recent-unwrapped",
+    "--lines",
+    "80",
+    "--timeout",
+    wait["timeout_ms"].to_s
+  ]
+  stdout, stderr, status = Open3.capture3(*wait_argv)
+  result = {
+    "command" => ["herdr", *wait_argv.drop(1)],
+    "exit_status" => status.exitstatus,
+    "success" => status.success?,
+    "status" => status.success? ? "ready" : "not_ready",
+    "stdout" => stdout,
+    "stderr" => stderr
+  }
+  return result if status.success?
+
+  read_argv = [herdr_path, "pane", "read", pane, "--source", "recent-unwrapped", "--lines", "80"]
+  read_stdout, read_stderr, read_status = Open3.capture3(*read_argv)
+  result["inspection"] = {
+    "command" => ["herdr", *read_argv.drop(1)],
+    "exit_status" => read_status.exitstatus,
+    "success" => read_status.success?,
+    "stdout" => read_stdout,
+    "stderr" => read_stderr
+  }
+  prompt = herdr_startup_prompt(wait["client"], read_stdout) if read_status.success?
+  return result unless prompt
+
+  result.merge(
+    "status" => "needs_attention",
+    "blocking_reason" => "client_startup_prompt",
+    "detected_prompt" => prompt
+  )
+end
+
+def start_ready_needs_attention?(ready_wait)
+  ready_wait.is_a?(Hash) && ready_wait["status"] == "needs_attention"
+end
+
+def start_needs_attention_next_steps(pane, ready_wait)
+  prompt = ready_wait && ready_wait["detected_prompt"]
+  [
+    { "inspect_pane" => "herdr pane read #{pane} --source recent-unwrapped --lines 80" },
+    {
+      "resolve_startup_prompt" => prompt && prompt["summary"],
+      "blocking_reason" => ready_wait && ready_wait["blocking_reason"]
+    }.compact
+  ]
+end
+
 def run_herdr_start(plan, json:)
   herdr_path = command_path("herdr")
   usage_error("herdr command not found. Automatic start/wake requires Herdr. Run `orbit tools doctor --json`, or start the agent manually with ORBIT_INSTANCE and ORBIT_ROLE set.") unless herdr_path
@@ -188,30 +264,7 @@ def run_herdr_start(plan, json:)
   ready_wait = nil
 
   if status.success? && pane_id && adapter["ready_wait"]
-    wait = adapter["ready_wait"]
-    wait_argv = [
-      herdr_path,
-      "wait",
-      "output",
-      pane_id,
-      "--match",
-      wait["match"],
-      "--regex",
-      "--source",
-      "recent-unwrapped",
-      "--lines",
-      "80",
-      "--timeout",
-      wait["timeout_ms"].to_s
-    ]
-    wait_stdout, wait_stderr, wait_status = Open3.capture3(*wait_argv)
-    ready_wait = {
-      "command" => ["herdr", *wait_argv.drop(1)],
-      "exit_status" => wait_status.exitstatus,
-      "success" => wait_status.success?,
-      "stdout" => wait_stdout,
-      "stderr" => wait_stderr
-    }
+    ready_wait = herdr_wait_for_start_ready(herdr_path, pane_id, adapter["ready_wait"])
   elsif status.success? && adapter["ready_wait"]
     ready_wait = {
       "success" => false,
@@ -227,9 +280,11 @@ def run_herdr_start(plan, json:)
   end
 
   success = status.success? && (ready_wait.nil? || ready_wait["success"] != false)
+  needs_attention = status.success? && start_ready_needs_attention?(ready_wait)
+  started = status.success? && !pane_id.to_s.empty?
   status_after_start = nil
   runtime_session = nil
-  if success && pane_id
+  if started && (success || needs_attention)
     runtime_session = start_provisional_session!(plan, pane_id)
     view = plan.dig("creation_policy", "same_level_view") || {}
     status_after_start = write_instance_binding!(
@@ -240,17 +295,30 @@ def run_herdr_start(plan, json:)
       actual_client: actual_client
     )
   end
-  replacement = write_start_replacement_diagnostic!(plan, status_after_start) if success && status_after_start
+  replacement = write_start_replacement_diagnostic!(plan, status_after_start) if (success || needs_attention) && status_after_start
+  action = if success
+             "started_identity_pending"
+           elsif needs_attention
+             "started_needs_attention"
+           else
+             "start_failed"
+           end
+  next_steps = if success && pane_id
+                 start_pending_next_steps(pane_id)
+               elsif needs_attention && pane_id
+                 start_needs_attention_next_steps(pane_id, ready_wait)
+               end
   result = attach_start_adapter_plan(plan).merge(
-    "action" => success ? "started_identity_pending" : "start_failed",
+    "action" => action,
     "dispatch_ready" => false,
-    "next" => (success && pane_id ? start_pending_next_steps(pane_id) : nil),
+    "next" => next_steps,
     "runtime_session" => runtime_session,
     "instance_status_after_start" => status_after_start,
     "replacement" => replacement,
     "adapter_result" => {
       "exit_status" => status.exitstatus,
       "success" => success,
+      "started" => started,
       "stdout" => stdout,
       "stderr" => stderr,
       "pane_id" => pane_id,
@@ -281,30 +349,7 @@ def run_herdr_wake(plan, probe, json:)
   pane = adapter["pane"]
   ready_wait = nil
   if status.success? && adapter["ready_wait"]
-    wait = adapter["ready_wait"]
-    wait_argv = [
-      herdr_path,
-      "wait",
-      "output",
-      pane,
-      "--match",
-      wait["match"],
-      "--regex",
-      "--source",
-      "recent-unwrapped",
-      "--lines",
-      "80",
-      "--timeout",
-      wait["timeout_ms"].to_s
-    ]
-    wait_stdout, wait_stderr, wait_status = Open3.capture3(*wait_argv)
-    ready_wait = {
-      "command" => ["herdr", *wait_argv.drop(1)],
-      "exit_status" => wait_status.exitstatus,
-      "success" => wait_status.success?,
-      "stdout" => wait_stdout,
-      "stderr" => wait_stderr
-    }
+    ready_wait = herdr_wait_for_start_ready(herdr_path, pane, adapter["ready_wait"])
   elsif status.success?
     ready_wait = {
       "success" => nil,
@@ -314,10 +359,11 @@ def run_herdr_wake(plan, probe, json:)
   end
 
   success = status.success? && (ready_wait.nil? || ready_wait["success"] != false)
+  needs_attention = status.success? && start_ready_needs_attention?(ready_wait)
   binding = plan.dig("instance_status", "herdr") || {}
   status_after_start = nil
   runtime_session = nil
-  if success
+  if success || needs_attention
     runtime_session = start_provisional_session!(plan, pane)
     status_after_start = write_instance_binding!(
       plan["instance"],
@@ -328,11 +374,23 @@ def run_herdr_wake(plan, probe, json:)
       actual_client: plan.dig("client", "expected_client")
     )
   end
-  replacement = write_start_replacement_diagnostic!(plan, status_after_start) if success && status_after_start
+  replacement = write_start_replacement_diagnostic!(plan, status_after_start) if (success || needs_attention) && status_after_start
+  action = if success
+             "started_identity_pending"
+           elsif needs_attention
+             "wake_needs_attention"
+           else
+             "wake_failed"
+           end
+  next_steps = if success
+                 start_pending_next_steps(pane)
+               elsif needs_attention
+                 start_needs_attention_next_steps(pane, ready_wait)
+               end
   result = plan.merge(
-    "action" => success ? "started_identity_pending" : "wake_failed",
+    "action" => action,
     "dispatch_ready" => false,
-    "next" => (success ? start_pending_next_steps(pane) : nil),
+    "next" => next_steps,
     "runtime_session" => runtime_session,
     "reuse_probe" => probe,
     "wake_adapter" => herdr_wake_adapter(plan, probe),
@@ -341,6 +399,7 @@ def run_herdr_wake(plan, probe, json:)
     "adapter_result" => {
       "exit_status" => status.exitstatus,
       "success" => success,
+      "started" => status.success?,
       "stdout" => stdout,
       "stderr" => stderr,
       "ready_wait" => ready_wait
@@ -352,7 +411,10 @@ def run_herdr_wake(plan, probe, json:)
   else
     print_herdr_start_human_result(result.merge("adapter_result" => result["adapter_result"].merge("pane_id" => pane)))
   end
-  exit(status.exitstatus || 1) unless success
+  unless success
+    failed_exit_status = ready_wait && !ready_wait["success"] ? ready_wait["exit_status"] : status.exitstatus
+    exit(failed_exit_status || 1)
+  end
 end
 
 def run_herdr_self_wake(plan, probe, json:)

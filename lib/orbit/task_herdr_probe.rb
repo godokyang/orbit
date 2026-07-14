@@ -1088,9 +1088,9 @@ end
 
 def herdr_start_ready_wait(plan)
   matches = {
-    "codex" => "OpenAI Codex|›",
-    "claude" => "Claude Code|>",
-    "opencode" => "OpenCode|opencode|Ask anything"
+    "codex" => "OpenAI Codex \\(v",
+    "claude" => "Claude Code",
+    "opencode" => "OpenCode|Ask anything"
   }
   client = plan.dig("client", "expected_client").to_s
   client = File.basename(plan["argv"].first.to_s) if client.empty?
@@ -1099,6 +1099,7 @@ def herdr_start_ready_wait(plan)
 
   {
     "mode" => "output_match",
+    "client" => client,
     "match" => match,
     "timeout_ms" => 10_000
   }
@@ -1162,7 +1163,15 @@ end
 
 def print_herdr_start_human_result(result)
   adapter_result = result["adapter_result"] || {}
-  if adapter_result["success"]
+  if result["action"].to_s.end_with?("needs_attention")
+    ready = adapter_result["ready_wait"] || {}
+    warn "Orbit started the instance, but it needs attention:"
+    warn "- instance: #{result["instance"]}"
+    warn "- role: #{result["resolved_role"]}"
+    warn "- pane: #{adapter_result["pane_id"] || result.dig("wake_adapter", "pane") || "unknown"}"
+    warn "- reason: #{ready.dig("detected_prompt", "summary") || ready["blocking_reason"] || "client did not reach its main interface"}"
+    warn "- next: #{result.dig("next", 0, "inspect_pane")}" if result.dig("next", 0, "inspect_pane")
+  elsif adapter_result["success"]
     puts "Started Orbit instance:"
     puts "- instance: #{result["instance"]}"
     puts "- role: #{result["resolved_role"]}"
