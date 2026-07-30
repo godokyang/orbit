@@ -3,6 +3,5 @@ references/development/
 .orbit/*
 !.orbit/README.md
 test_apps/
-docs/dogfood-guide.md
 .claude/
 .copilot/
