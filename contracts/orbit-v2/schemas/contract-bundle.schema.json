@@ -1,0 +1,130 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orbit.local/contracts/orbit-v2/schemas/contract-bundle.schema.json",
+  "title": "Orbit v2 Slice 0 Contract Bundle",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "protocol_epoch",
+    "protocol_root",
+    "authority_assertions",
+    "authorization_records",
+    "project_policy_revisions",
+    "task_revisions",
+    "gate_requirements",
+    "work_units",
+    "change_theses",
+    "agent_instances",
+    "logical_leads",
+    "lead_sessions",
+    "work_unit_attempts",
+    "rule_resolution_artifacts",
+    "evidence_records",
+    "gate_evaluations",
+    "findings",
+    "finding_resolutions",
+    "repository_snapshot",
+    "code_surface"
+  ],
+  "properties": {
+    "schema_version": {"const": "orbit-v2-contract-bundle-v1"},
+    "protocol_epoch": {"const": "orbit-v2"},
+    "protocol_root": {"$ref": "protocol-root.schema.json"},
+    "authority_assertions": {
+      "type": "array",
+      "items": {"$ref": "authority.schema.json#/$defs/AuthorityAssertion"}
+    },
+    "authorization_records": {
+      "type": "array",
+      "items": {"$ref": "authority.schema.json#/$defs/AuthorizationRecord"}
+    },
+    "project_policy_revisions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "authority.schema.json#/$defs/ProjectPolicyRevision"}
+    },
+    "task_revisions": {
+      "type": "array",
+      "items": {"$ref": "task-work.schema.json#/$defs/TaskRevision"}
+    },
+    "gate_requirements": {
+      "type": "array",
+      "items": {"$ref": "gate.schema.json#/$defs/GateRequirement"}
+    },
+    "work_units": {
+      "type": "array",
+      "items": {"$ref": "task-work.schema.json#/$defs/WorkUnit"}
+    },
+    "change_theses": {
+      "type": "array",
+      "items": {"$ref": "task-work.schema.json#/$defs/ChangeThesis"}
+    },
+    "agent_instances": {
+      "type": "array",
+      "items": {"$ref": "agent-runtime.schema.json#/$defs/AgentInstance"}
+    },
+    "logical_leads": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "agent-runtime.schema.json#/$defs/LogicalLead"}
+    },
+    "lead_sessions": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "agent-runtime.schema.json#/$defs/LeadSession"}
+    },
+    "work_unit_attempts": {
+      "type": "array",
+      "items": {"$ref": "agent-runtime.schema.json#/$defs/WorkUnitAttempt"}
+    },
+    "rule_resolution_artifacts": {
+      "type": "array",
+      "items": {"$ref": "rule-resolution.schema.json"}
+    },
+    "evidence_records": {
+      "type": "array",
+      "items": {"$ref": "evidence.schema.json"}
+    },
+    "gate_evaluations": {
+      "type": "array",
+      "items": {"$ref": "gate.schema.json#/$defs/GateEvaluation"}
+    },
+    "findings": {
+      "type": "array",
+      "items": {"$ref": "finding.schema.json#/$defs/Finding"}
+    },
+    "finding_resolutions": {
+      "type": "array",
+      "items": {"$ref": "finding.schema.json#/$defs/FindingResolution"}
+    },
+    "repository_snapshot": {
+      "type": "object",
+      "required": ["kind", "commit_sha", "tree_digest"],
+      "properties": {
+        "kind": {"const": "git"},
+        "commit_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "tree_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "code_surface": {
+      "type": "object",
+      "required": [
+        "kind",
+        "derivation_version",
+        "repository_tree_digest",
+        "code_surface_digest",
+        "paths"
+      ],
+      "properties": {
+        "kind": {"const": "derived_code_surface"},
+        "derivation_version": {"const": "orbit-code-surface-v1"},
+        "repository_tree_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "code_surface_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "paths": {"type": "array", "items": {"type": "string", "minLength": 1}}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

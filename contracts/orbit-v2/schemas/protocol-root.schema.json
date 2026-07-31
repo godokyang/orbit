@@ -1,0 +1,41 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orbit.local/contracts/orbit-v2/schemas/protocol-root.schema.json",
+  "title": "ProtocolRoot",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "protocol_epoch",
+    "project_id",
+    "project_policy_genesis_ref",
+    "content_digest"
+  ],
+  "properties": {
+    "schema_version": {"const": "orbit-protocol-root-v1"},
+    "protocol_epoch": {"const": "orbit-v2"},
+    "project_id": {
+      "type": "string",
+      "pattern": "^oproj_[a-z0-9][a-z0-9_-]{7,63}$"
+    },
+    "project_policy_genesis_ref": {
+      "type": "object",
+      "required": ["policy_revision_id", "content_digest"],
+      "properties": {
+        "policy_revision_id": {
+          "type": "string",
+          "pattern": "^opolicy_[a-z0-9][a-z0-9_-]{7,95}$"
+        },
+        "content_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "content_digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    }
+  },
+  "additionalProperties": false
+}

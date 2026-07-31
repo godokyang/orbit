@@ -1,0 +1,177 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orbit.local/contracts/orbit-v2/schemas/finding.schema.json",
+  "$defs": {
+    "Finding": {
+      "type": "object",
+      "required": [
+        "schema_version",
+        "protocol_epoch",
+        "project_id",
+        "finding_id",
+        "gate_evaluation_id",
+        "severity",
+        "blocking",
+        "body",
+        "source_evidence_record_refs",
+        "supersedes_finding_id",
+        "content_digest"
+      ],
+      "properties": {
+        "schema_version": {"const": "orbit-finding-v1"},
+        "protocol_epoch": {"const": "orbit-v2"},
+        "project_id": {"type": "string", "pattern": "^oproj_[a-z0-9][a-z0-9_-]{7,63}$"},
+        "finding_id": {"type": "string", "pattern": "^ofinding_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "gate_evaluation_id": {"type": "string", "pattern": "^ogeval_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "severity": {"enum": ["P0", "P1", "P2", "P3"]},
+        "blocking": {"type": "boolean"},
+        "body": {"type": "string", "minLength": 1},
+        "source_evidence_record_refs": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^oevr_[a-z0-9][a-z0-9_-]{7,95}$"}
+        },
+        "supersedes_finding_id": {
+          "oneOf": [
+            {"type": "string", "pattern": "^ofinding_[a-z0-9][a-z0-9_-]{7,95}$"},
+            {"type": "null"}
+          ]
+        },
+        "related_finding_refs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^ofinding_[a-z0-9][a-z0-9_-]{7,95}$"}
+        },
+        "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "FindingResolution": {
+      "type": "object",
+      "required": [
+        "schema_version",
+        "protocol_epoch",
+        "project_id",
+        "finding_resolution_id",
+        "finding_id",
+        "resolution",
+        "supporting_record_refs",
+        "supersedes_finding_resolution_id",
+        "content_digest"
+      ],
+      "properties": {
+        "schema_version": {"const": "orbit-finding-resolution-v1"},
+        "protocol_epoch": {"const": "orbit-v2"},
+        "project_id": {"type": "string", "pattern": "^oproj_[a-z0-9][a-z0-9_-]{7,63}$"},
+        "finding_resolution_id": {"type": "string", "pattern": "^ofres_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "finding_id": {"type": "string", "pattern": "^ofinding_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "resolution": {"enum": ["addressed", "disproved", "waived"]},
+        "issuer_attempt_id": {"type": "string", "pattern": "^oattempt_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "issuer_submission_record_id": {"type": "string", "pattern": "^oevr_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "resolving_gate_evaluation_ref": {"$ref": "#/$defs/GateEvaluationRef"},
+        "proposal_evidence_record_id": {"type": "string", "pattern": "^oevr_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "authorization_record_ref": {"type": "string", "pattern": "^oauthz_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "source_finding_ref": {"$ref": "#/$defs/FindingRef"},
+        "source_gate_evaluation_ref": {"$ref": "#/$defs/GateEvaluationRef"},
+        "supporting_record_refs": {
+          "type": "array",
+          "items": {"type": "string", "pattern": "^oevr_[a-z0-9][a-z0-9_-]{7,95}$"}
+        },
+        "supersedes_finding_resolution_id": {
+          "oneOf": [
+            {"type": "string", "pattern": "^ofres_[a-z0-9][a-z0-9_-]{7,95}$"},
+            {"type": "null"}
+          ]
+        },
+        "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      },
+      "oneOf": [
+        {
+          "properties": {"resolution": {"const": "addressed"}},
+          "allOf": [
+            {
+              "properties": {
+                "supporting_record_refs": {"type": "array", "minItems": 1}
+              }
+            },
+            {"not": {"required": ["authorization_record_ref"]}}
+          ],
+          "required": [
+            "issuer_attempt_id",
+            "issuer_submission_record_id",
+            "source_finding_ref",
+            "source_gate_evaluation_ref",
+            "resolving_gate_evaluation_ref",
+            "proposal_evidence_record_id"
+          ]
+        },
+        {
+          "properties": {"resolution": {"const": "disproved"}},
+          "required": [
+            "issuer_attempt_id",
+            "issuer_submission_record_id",
+            "source_finding_ref",
+            "source_gate_evaluation_ref",
+            "resolving_gate_evaluation_ref"
+          ],
+          "allOf": [
+            {
+              "properties": {
+                "supporting_record_refs": {"type": "array", "minItems": 1}
+              }
+            },
+            {"not": {"required": ["proposal_evidence_record_id"]}},
+            {"not": {"required": ["authorization_record_ref"]}}
+          ]
+        },
+        {
+          "properties": {
+            "resolution": {"const": "waived"},
+            "supporting_record_refs": {"type": "array", "maxItems": 0}
+          },
+          "required": ["authorization_record_ref"],
+          "allOf": [
+            {"not": {"required": ["issuer_attempt_id"]}},
+            {"not": {"required": ["issuer_submission_record_id"]}},
+            {"not": {"required": ["source_finding_ref"]}},
+            {"not": {"required": ["source_gate_evaluation_ref"]}},
+            {"not": {"required": ["resolving_gate_evaluation_ref"]}},
+            {"not": {"required": ["proposal_evidence_record_id"]}}
+          ]
+        }
+      ],
+      "additionalProperties": false
+    },
+    "FindingRef": {
+      "type": "object",
+      "required": ["finding_id", "content_digest"],
+      "properties": {
+        "finding_id": {
+          "type": "string",
+          "pattern": "^ofinding_[a-z0-9][a-z0-9_-]{7,95}$"
+        },
+        "content_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "GateEvaluationRef": {
+      "type": "object",
+      "required": ["gate_evaluation_id", "content_digest"],
+      "properties": {
+        "gate_evaluation_id": {
+          "type": "string",
+          "pattern": "^ogeval_[a-z0-9][a-z0-9_-]{7,95}$"
+        },
+        "content_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

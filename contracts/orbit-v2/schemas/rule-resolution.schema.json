@@ -1,0 +1,78 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orbit.local/contracts/orbit-v2/schemas/rule-resolution.schema.json",
+  "title": "RuleResolutionArtifact",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "protocol_epoch",
+    "project_id",
+    "resolution_id",
+    "identity",
+    "identity_sha256",
+    "envelope"
+  ],
+  "properties": {
+    "schema_version": {"const": "orbit-rule-resolution-v2"},
+    "protocol_epoch": {"const": "orbit-v2"},
+    "project_id": {"type": "string", "pattern": "^oproj_[a-z0-9][a-z0-9_-]{7,63}$"},
+    "resolution_id": {"type": "string", "pattern": "^rr-sha256-[0-9a-f]{64}$"},
+    "identity_sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+    "identity": {
+      "type": "object",
+      "required": [
+        "identity_schema",
+        "protocol_epoch",
+        "project_id",
+        "task_id",
+        "task_revision_id",
+        "work_unit_id",
+        "attempt_id",
+        "resolved_role",
+        "agent_instance_id",
+        "context_generation",
+        "required_rules"
+      ],
+      "properties": {
+        "identity_schema": {"const": "orbit-rule-resolution-identity-v1"},
+        "protocol_epoch": {"const": "orbit-v2"},
+        "project_id": {"type": "string", "pattern": "^oproj_[a-z0-9][a-z0-9_-]{7,63}$"},
+        "task_id": {"type": "string", "pattern": "^otask_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "task_revision_id": {"type": "string", "pattern": "^trev_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "work_unit_id": {"type": "string", "pattern": "^owu_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "attempt_id": {"type": "string", "pattern": "^oattempt_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "resolved_role": {"type": "string", "minLength": 1},
+        "agent_instance_id": {"type": "string", "pattern": "^oagent_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "context_generation": {"type": "integer", "minimum": 1},
+        "required_rules": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "required": ["rule_id", "path", "content_sha256", "relation"],
+            "properties": {
+              "rule_id": {"type": "string", "minLength": 1},
+              "path": {
+                "type": "string",
+                "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?/)(?!.*\\\\)(?!.*//).+$"
+              },
+              "content_sha256": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+              "relation": {"enum": ["baseline", "supplements", "stricter_than", "overrides"]}
+            },
+            "additionalProperties": false
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "envelope": {
+      "type": "object",
+      "required": ["created_at"],
+      "properties": {
+        "created_at": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    }
+  },
+  "additionalProperties": false
+}

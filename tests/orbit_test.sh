@@ -269,5 +269,6 @@ source "$PARTS_DIR/24_task_workflow.sh"
 source "$PARTS_DIR/25_intent_classification.sh"
 source "$PARTS_DIR/26_runtime_capability_boundary.sh"
 source "$PARTS_DIR/27_trial_metrics.sh"
+source "$PARTS_DIR/28_orbit_v2_slice0_contracts.sh"
 
 printf 'REAL_TESTS_PASS count=%s tmp=%s\n' "$PASS_COUNT" "$TMPROOT"

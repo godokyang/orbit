@@ -1,0 +1,612 @@
+schema_version: orbit-v2-contract-definition-v1
+protocol_epoch: orbit-v2
+activation:
+  status: isolated_contract_only
+  runtime_imports_allowed: false
+  v1_fallback_allowed: false
+  project_commands_enabled: false
+  activation_slice: 6
+
+schema_dispatch:
+  exact_versions:
+    ProtocolRoot: orbit-protocol-root-v1
+    AuthorityAssertion: orbit-authority-assertion-v1
+    AuthorizationRecord: orbit-authorization-record-v1
+    ProjectPolicyRevision: orbit-project-policy-v1
+    TaskRevision: orbit-task-v2
+    WorkUnit: orbit-work-unit-v1
+    ChangeThesis: orbit-change-thesis-v1
+    AgentInstance: orbit-agent-runtime-v1
+    LogicalLead: orbit-agent-runtime-v1
+    LeadSession: orbit-agent-runtime-v1
+    WorkUnitAttempt: orbit-agent-runtime-v1
+    RuleResolutionArtifact: orbit-rule-resolution-v2
+    EvidenceRecord: orbit-evidence-v2
+    GateRequirement: orbit-gate-requirement-v1
+    GateEvaluation: orbit-gate-evaluation-v1
+    Finding: orbit-finding-v1
+    FindingResolution: orbit-finding-resolution-v1
+    ContractBundle: orbit-v2-contract-bundle-v1
+  mismatch_error: unsupported_schema_version
+  missing_version_behavior: reject
+  older_version_fallback: forbidden
+
+canonical_json:
+  profile: RFC-8785-compatible-restricted-domain
+  unicode_normalization: NFC
+  object_key_order: UTF-16-code-unit
+  permitted_values:
+    - object_with_string_keys
+    - array
+    - unicode_string
+    - signed_53_bit_integer
+    - boolean
+    - "null"
+  forbidden_values:
+    - floating_point
+    - non_string_object_key
+    - invalid_utf8
+  semantic_digest:
+    algorithm: sha256
+    format: "sha256:<64-lowercase-hex>"
+    excluded_envelope_fields:
+      - content_digest
+      - envelope
+      - created_at
+      - accepted_at
+
+stable_identifiers:
+  project_id: "^oproj_[a-z0-9][a-z0-9_-]{7,63}$"
+  policy_revision_id: "^opolicy_[a-z0-9][a-z0-9_-]{7,95}$"
+  task_id: "^otask_[a-z0-9][a-z0-9_-]{7,95}$"
+  task_revision_id: "^trev_[a-z0-9][a-z0-9_-]{7,95}$"
+  work_unit_id: "^owu_[a-z0-9][a-z0-9_-]{7,95}$"
+  attempt_id: "^oattempt_[a-z0-9][a-z0-9_-]{7,95}$"
+  agent_instance_id: "^oagent_[a-z0-9][a-z0-9_-]{7,95}$"
+  change_thesis_id: "^othesis_[a-z0-9][a-z0-9_-]{7,95}$"
+  evidence_record_id: "^oevr_[a-z0-9][a-z0-9_-]{7,95}$"
+  gate_requirement_id: "^ogreq_[a-z0-9][a-z0-9_-]{7,95}$"
+  gate_lineage_id: "^ogline_[a-z0-9][a-z0-9_-]{7,95}$"
+  gate_evaluation_id: "^ogeval_[a-z0-9][a-z0-9_-]{7,95}$"
+  finding_id: "^ofinding_[a-z0-9][a-z0-9_-]{7,95}$"
+  finding_resolution_id: "^ofres_[a-z0-9][a-z0-9_-]{7,95}$"
+  authorization_record_id: "^oauthz_[a-z0-9][a-z0-9_-]{7,95}$"
+  assertion_id: "^oassert_[a-z0-9][a-z0-9_-]{7,95}$"
+  authority_receipt_id: "^oareceipt_[a-z0-9][a-z0-9_-]{7,95}$"
+  logical_lead_id: "^olead_[a-z0-9][a-z0-9_-]{7,95}$"
+  lead_session_id: "^oleadsession_[a-z0-9][a-z0-9_-]{7,95}$"
+  event_id: "^oevent_[a-z0-9][a-z0-9_-]{7,95}$"
+  rule_resolution_id: "^rr-sha256-[0-9a-f]{64}$"
+  local_requirement_id: "^(acc|src|evreq|question)_[a-z0-9][a-z0-9_-]{2,95}$"
+
+protocol_root:
+  location_contract: marker_parent_is_active_artifact_root
+  required_epoch: orbit-v2
+  required_genesis_ref:
+    - policy_revision_id
+    - content_digest
+  copied_task_or_policy_facts: forbidden
+  mixed_epoch_behavior: fail_closed
+
+policy_lineage:
+  authority_verification:
+    boundary: configured_provider
+    provider_receipt_schema: orbit-authority-verification-receipt-v1
+    receipt_binding:
+      - assertion_digest
+      - project_id
+      - assertion_id
+      - issuer_kind
+      - issuer_subject
+      - authority_scope_ref
+      - grants
+    no_configured_provider: fail_closed
+    opaque_or_self_reported_assertion: forbidden
+    fixture_provider: fake_provider_only
+  genesis:
+    count: exactly_one
+    issuer_kinds:
+      - user
+      - control_plane
+    required_grant: policy.genesis
+    candidate_or_lead_self_grant: forbidden
+    issuance_envelope: provider_signed_candidate_content_digest
+  rotation:
+    model: compare_and_append_from_unique_tip
+    parent_authority_action: policy.rotate
+    authority_source: unique_exact_parent_grant
+    parent_without_grant_or_parent_revocation: fail_closed
+    fork_or_multiple_tip: fail_closed
+  issuance_envelope:
+    schema_version: orbit-policy-issuance-v1
+    location: provider_verified_AuthorityAssertion
+    policy_reference_to_assertion: preallocated_stable_id_plus_exact_assertion_digest
+    exact_bindings:
+      - project_id
+      - issuance_kind
+      - exact_parent_policy_id_and_digest_or_null_for_genesis
+      - exact_candidate_policy_id_and_content_digest
+      - provider_receipt_id_assertion_id_and_assertion_digest
+      - decision
+      - issued_at
+    candidate_byte_change_after_receipt: fail_closed
+    mutable_policy_pointer: forbidden
+  authority_grants:
+    semantic_key: action
+    duplicate_action: fail_closed_independent_of_array_order
+  protected_gate_minimums:
+    semantic_key: gate_kind
+    duplicate_gate_kind: fail_closed_independent_of_array_order
+  active_policy:
+    model: deterministic_unique_lineage_tip
+    mutable_pointer: forbidden
+  task_closure:
+    caller_owned_closure_flag: forbidden
+    eligibility: deterministic_gate_engine_projection
+    active_attempt_or_new_submission_requires_active_task_policy: true
+    historical_terminal_attempt_and_provenance: retained_only_when_terminal_and_accepted_before_first_policy_successor_issuance
+    historical_time_requirements:
+      - trusted_attempt_start_before_cutoff
+      - trusted_attempt_end_before_cutoff
+      - start_not_after_end
+      - evidence_acceptance_not_before_start
+      - evidence_acceptance_before_cutoff
+    attempt_policy_snapshot_must_equal_task_policy_ref: true
+    protected_contract_must_meet_policy_minimums: true
+  protected_task_change:
+    authorization_envelope: content_addressed_create_only
+    provider_signed_scope: canonical_protected_change_digest
+    exact_bindings:
+      - project_id
+      - task_id
+      - parent_task_revision_id_and_digest
+      - candidate_task_revision_id_and_digest
+      - canonical_protected_change_digest
+      - authority_source_provider_receipt_revision
+      - issuer_assertion_id_and_digest
+      - project_policy_revision_id_and_digest
+      - decision
+      - issued_at
+    replay_across_task_revision_or_diff: fail_closed
+    accepted_authority_policy: current_active_policy_tip
+    superseded_policy_authorization: rejected_even_when_diff_matches
+    inherited_parent_contract_and_active_policy: both_must_pass
+  gate_strength:
+    authoritative_owner: lib/orbit/v2/gate_strength.rb
+    evidence_level_schema_enum_must_equal_rank_keys: true
+    independence_schema_enum_must_equal_rank_keys: true
+
+work_model:
+  TaskRevision:
+    lineage:
+      genesis: exactly_one_parentless_revision_number_one_per_task
+      successors: connected_contiguous_linear_parent_chain
+      orphan_fork_cycle_or_skipped_revision: fail_closed
+    owns:
+      - goal
+      - non_goals
+      - quality_outcome
+      - acceptance
+      - source_requirements
+      - evidence_requirements
+      - task_questions
+      - gate_requirement_refs
+      - authority_grant_refs
+      - project_policy_revision_ref
+      - protected_change_authorization_ref
+    authority_grants:
+      action_source: lib/orbit/v2/task_authority.rb
+      allowed_actions:
+        - task.adjudication_authority.delegate
+        - task.risk_authority.delegate
+        - task.waiver_authority.delegate
+      subject: canonical_exact_task_revision_scope_digest
+      cross_action_or_cross_subject: fail_closed
+  GateRequirement:
+    model: create_only_per_task_revision
+    stable_lineage_identity: gate_lineage_id
+    successor_ref: parent_gate_requirement_ref
+    reused_lineage_requires_immediate_parent_ref: true
+    lineage_compatibility: derived_by_validated_parent_edge_traversal
+    task_revision_ref_ownership: exact
+    same_kind_requirements: allowed_with_distinct_stable_lineage_and_subject_selector
+    protected_minimum_aggregation: every_matching_protected_requirement_must_meet_minimum
+    inherited_contract_comparison:
+      - evidence_level
+      - independence
+      - subject_selector
+      - waiver_policy
+      - authority_provenance
+  WorkUnit:
+    identity_is_stable: true
+    owns:
+      - objective
+      - scope
+      - authority_scope
+      - input_refs
+      - output_refs
+      - stop_conditions
+      - acceptance_refs
+      - source_requirement_refs
+      - evidence_requirement_refs
+      - immutable_initial_change_thesis_ref
+    forbidden:
+      - copied_task_contract
+      - mutable_assignment
+      - mutable_status
+      - mutable_current_thesis_pointer
+    authorization_records:
+      action_source: lib/orbit/v2/work_authority.rb
+      stable_actions:
+        - work.implement
+        - gate.review.evaluate
+        - gate.test.evaluate
+        - gate.adjudication.evaluate
+        - work.research
+        - gate.release.evaluate
+      action: must_be_in_allowed_actions
+      subject: canonical_work_unit_action_scope
+      policy: exact_task_revision_policy
+      cardinality: at_least_one_exact_record_for_every_allowed_action
+    writable_path_authority:
+      owner: WorkUnit.authority_scope.writable_paths
+      binding: included_in_canonical_work_unit_action_scope_digest
+      implementation_cardinality: non_empty
+      non_implementation_cardinality: empty
+      path_profile: canonical_repo_relative_posix_lexical_only
+      containment: segment_aware_prefix
+  WorkUnitAttempt:
+    model: immutable_identity_plus_append_only_events
+    creation_order:
+      - preallocate_attempt_id
+      - resolve_or_reuse_content_addressed_assigned_rules
+      - append_single_AttemptCreated_with_immutable_assignment_started_at_and_active_status
+      - dispatch
+    derived_from_events:
+      - start
+      - end
+      - status
+    lifecycle_event_union:
+      initial: AttemptCreated
+      terminal:
+        AttemptCompleted: completed
+        AttemptFailed: failed
+        AttemptBlocked: blocked
+        AttemptCancelled: cancelled
+        AttemptSuperseded: superseded
+      assignment_allowed_only_on: AttemptCreated
+      single_terminal: true
+      events_after_terminal: forbidden
+      writer_timestamp:
+        source: configured_provider_backed_writer_receipt
+        digest_binding:
+          - event_id
+          - event_type
+          - event_digest
+          - project_id
+          - recorded_at
+        initial_started_at_equals_recorded_at: true
+        terminal_ended_at_equals_recorded_at: true
+        append_order: strictly_monotonic
+    assignment_pins:
+      - agent_instance_id
+      - context_generation
+      - authority_snapshot
+      - resolved_role
+      - purpose
+      - change_thesis_ref
+      - assigned_rule_resolution_id
+    assignment_agent_binding:
+      source: AgentInstance_and_WorkUnit
+      exact_fields:
+        - AgentCreated.role
+        - AgentInstance.context_generation
+        - AgentInstance.capability_profile
+        - AgentInstance.permission_profile
+        - WorkUnit.authority_scope.allowed_actions
+      kind_purpose_mapping:
+        implementation: [implementation]
+        evaluation: [review, test, adjudication, release]
+        research: [research]
+        release: [release]
+      cross_stream_chronology:
+        agent_created_no_later_than_attempt: true
+        exact_context_generation_exists_no_later_than_attempt: true
+        agent_termination_strictly_after_attempt: true
+    assignment_authority_records:
+      source: WorkUnit.authority_scope.authorization_record_refs
+      selection: exact_records_for_assignment_purpose_action
+      subject: canonical_work_unit_action_scope
+      cross_action_or_cross_subject: fail_closed
+      cardinality: non_empty_exact_purpose_record_set
+  LogicalLead:
+    model: create_only_orchestration_identity
+    owns:
+      - task_id
+      - authority_scope_ref
+      - durable_context_ref
+  LeadSession:
+    model: immutable_identity_plus_append_only_events
+    owns:
+      - logical_lead_id
+      - agent_instance_id
+      - session_generation
+      - task_revision_id
+      - durable_context_ref
+    lifecycle_event_union:
+      initial: LeadSessionStarted
+      terminal: LeadSessionEnded
+      single_terminal: true
+      events_after_terminal: forbidden
+  AgentInstance:
+    model: immutable_identity_plus_append_only_events
+    owns:
+      - provider_backed_runtime_identity_ref
+      - capability_profile
+      - permission_profile
+    lifecycle_event_union:
+      initial: AgentCreated
+      intermediate: AgentContextAdvanced
+      terminal: AgentTerminated
+      context_generation: contiguous_append_only
+      single_terminal: true
+      events_after_terminal: forbidden
+    runtime_identity:
+      verifier: configured_provider
+      receipt_binds:
+        - provider_id
+        - project_id
+        - agent_instance_id
+        - runtime_subject_id
+      uniqueness: one_verified_provider_subject_per_agent_instance_id
+      evaluator_independence_key:
+        - provider_id
+        - runtime_subject_id
+  ChangeThesis:
+    model: create_only_revision
+    identity:
+      - change_thesis_id
+      - revision
+      - content_digest
+    ownership:
+      - project_id
+      - task_id
+      - task_revision_id
+      - work_unit_id
+    lineage: same_id_unique_revision_one_genesis_then_contiguous_revisions_with_stable_ownership
+    work_unit_initial_ref: exact_revision_one_genesis
+    successor_attempt_pins_new_revision: true
+
+rule_resolution:
+  artifact_lifecycle: create_only
+  owner: WorkUnitAttempt
+  canonical_identity_fields:
+    - identity_schema
+    - protocol_epoch
+    - project_id
+    - task_id
+    - task_revision_id
+    - work_unit_id
+    - attempt_id
+    - resolved_role
+    - agent_instance_id
+    - context_generation
+    - required_rules
+  required_rule_tuple:
+    - relation
+    - rule_id
+    - path
+    - content_sha256
+  relation_precedence:
+    baseline: 0
+    supplements: 1
+    stricter_than: 2
+    overrides: 3
+  path_normalization: canonical_project_relative_posix
+  hash_domain: canonical_identity_only
+  excluded_from_identity:
+    - resolution_id
+    - identity_sha256
+    - schema_version
+    - envelope
+    - created_at
+  same_identity_same_id: required
+  existing_id_different_bytes: fail_closed
+
+evidence_record:
+  artifact_claim_trust_boundary:
+    owner: EvidenceRecord.submission_artifact_refs
+    semantics: implementation_submitted_create_only_provenance_claim
+    validator_proves:
+      - record_internal_ref_identity_closure
+      - exact_claim_digest_binding
+      - expected_claim_kind
+    validator_does_not_prove:
+      - external_artifact_exists
+      - external_bytes_match_claimed_digest
+      - claim_is_true
+    gate_use: independent_outcome_review_required_claim_presence_never_implies_pass
+    path_semantics:
+      change: non_empty_sorted_unique_canonical_repo_relative_paths
+      verification: empty
+      report: empty
+      changed_path_authority_participant: change_only
+  implementation_check:
+    required_non_empty:
+      - changed_paths
+      - verification_refs
+      - submission_artifact_refs
+    scope_match: pass_with_evidence
+    acceptance_results: exact_work_unit_acceptance_refs_all_pass_with_evidence
+    evidence_requirement_results: exact_work_unit_evidence_requirement_refs_all_pass_with_evidence
+    change_thesis_status: supported_with_evidence
+    assumptions_changed: empty_or_successor_thesis_attempt_required
+    known_gaps: empty_for_accepted_implementation
+    artifact_ref_shape: exact_artifact_ref_plus_content_digest
+    changed_paths_scope:
+      - canonical_code_surface
+      - exact_work_unit_writable_paths
+      - exact_change_artifact_claim_paths
+    repository_path_profile: canonical_repo_relative_posix_lexical_only
+    path_containment: segment_aware_prefix
+  evaluator_submission:
+    submission_artifact_refs: non_empty
+
+gate_evaluation:
+  verdict_owner: GateEvaluation
+  finding_body_owner: Finding
+  evaluator_submission_owner: EvidenceRecord
+  evaluator_provenance:
+    - evaluator_attempt_id
+    - evaluator_submission_record_id
+  evaluator_gate_binding:
+    review:
+      purpose: review
+      resolved_role: reviewer
+      capability: review.evaluate
+      permission: gate.review.submit
+      authority_action: gate.review.evaluate
+    test:
+      purpose: test
+      resolved_role: tester
+      capability: test.execute
+      permission: gate.test.submit
+      authority_action: gate.test.evaluate
+    release:
+      purpose: release
+      resolved_role: release
+      capability: release.evaluate
+      permission: gate.release.submit
+      authority_action: gate.release.evaluate
+    adjudication:
+      purpose: adjudication
+      resolved_role: adjudicator
+      capability: adjudication.evaluate
+      permission: finding.resolve
+      authority_action: gate.adjudication.evaluate
+    evaluator_work_unit_kind: evaluation
+    cross_task_evaluation: unsupported_fail_closed
+  quality_outcome_fields:
+    - quality_outcome_verdict
+    - counterexample_cases
+    - confirmed
+    - assumed
+    - missing
+    - coverage
+    - residual_risk
+  canonical_subject:
+    selector_owner: GateRequirement
+    required_refs:
+      - gate_requirement_ref
+      - task_revision_ref
+      - work_unit_refs
+      - implementation_attempt_refs
+      - evidence_record_refs
+      - repository_snapshot_ref
+      - code_surface_ref
+      - subject_digest
+    task_wide_policy: all_accepted_contributors_to_snapshot
+    accepted_required_evidence_policy: all_selected_attempt_records
+    freshness: exact_current_subject
+    independence_against: every_verified_subject_producer_runtime_identity
+    passing_answer_evidence: non_empty_subject_evidence_refs
+  closure:
+    stale_or_incomplete_subject: excluded
+    subject_change_invalidates_old_evaluation: true
+    field_presence_or_count_is_verdict: false
+    finding_refs: bidirectional_create_only_closure
+    task_unresolved_finding_refs: must_resolve_within_task_gate_lineage
+    blocking_finding_for_closure: requires_single_authorized_resolution_tip
+  waiver_policy:
+    mode: finding_resolution_only
+    required_authorization_action: finding.waive
+    risk_authority_source: project_policy_or_task_authorization
+
+immutability:
+  create_only:
+    - ProtocolRoot
+    - ProjectPolicyRevision
+    - TaskRevision
+    - WorkUnit
+    - ChangeThesis
+    - LogicalLead
+    - EvidenceRecord
+    - GateRequirement
+    - GateEvaluation
+    - Finding
+  append_only:
+    - AgentInstance.lifecycle_events
+    - LeadSession.lifecycle_events
+    - WorkUnitAttempt.events
+    - FindingResolution
+  same_id_different_content: reject
+  overwrite: reject
+  delete_authoritative_history: reject
+  correction_model: new_id_with_validated_supersedes_or_related_ref
+  evidence_acceptance_time:
+    owner: EvidenceRecord.acceptance_recorded_at
+    included_in_content_digest: true
+    format: ISO-8601
+    purpose: distinguish_pre_rotation_history_from_post_rotation_submission
+
+finding_resolution:
+  addressed:
+    proposer: implementation_evidence
+    confirmer: independent_evaluator
+    issuer_provenance:
+      - authorized_attempt
+      - evaluator_submission
+      - content_addressed_resolving_gate_evaluation_ref
+      - content_addressed_source_finding_and_evaluation_refs
+      - submitted_rule_resolution
+      - supporting_records
+    gate_binding: exact_finding_gate_requirement_subject_evidence_level_and_independence
+    resolving_evaluation: distinct_immutable_follow_up_in_same_gate_lineage
+  disproved:
+    issuer:
+      - independent_evaluator
+      - adjudicator
+    issuer_provenance:
+      - authorized_attempt
+      - evaluator_submission
+      - content_addressed_resolving_gate_evaluation_ref
+      - content_addressed_source_finding_and_evaluation_refs
+      - submitted_rule_resolution
+      - counterevidence
+    gate_binding: exact_finding_gate_requirement_subject_evidence_level_and_independence
+    resolving_evaluation: distinct_immutable_follow_up_or_adjudication_in_same_gate_lineage
+  waived:
+    issuer: active_policy_or_task_authorized_risk_authority
+    authorization_record_required: true
+    supporting_record_refs: empty_authorization_is_sole_provenance
+    lead_free_text_issuer: forbidden
+  provenance_variants:
+    addressed_disproved_waived: mutually_exclusive
+  old_blocking_finding:
+    supersedes_alone_closes: false
+    closure_requires_valid_resolution: true
+  lineage_refs:
+    supersedes_and_related: existing_non_self_compatible_task_gate_and_subject_lineage
+    supersedes_cycles: forbidden
+
+derived_only:
+  CodeSurface:
+    writable_authority: none
+    identity: derivation_version_plus_input_digests
+    digest_input:
+      - derivation_version
+      - repository_tree_digest
+      - sorted_unique_paths
+  RelationshipView:
+    writable_authority: none
+    identity: deterministic_projection
+  AggregateOutcome:
+    writable_authority: GateEngine_only_as_projection
+    inputs:
+      - active_ProjectPolicyRevision
+      - TaskRevision
+      - GateRequirement
+      - current_subject_matching_GateEvaluation
+      - acceptance_results
+      - unresolved_Findings_and_Resolutions
+    persisted_form: deletable_cache_with_complete_source_ids_and_digests

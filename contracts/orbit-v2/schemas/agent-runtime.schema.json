@@ -1,0 +1,549 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orbit.local/contracts/orbit-v2/schemas/agent-runtime.schema.json",
+  "$defs": {
+    "AgentInstance": {
+      "type": "object",
+      "required": [
+        "schema_version",
+        "protocol_epoch",
+        "project_id",
+        "object_type",
+        "agent_instance_id",
+        "runtime_identity",
+        "capability_profile",
+        "permission_profile",
+        "lifecycle_events"
+      ],
+      "properties": {
+        "schema_version": {"const": "orbit-agent-runtime-v1"},
+        "protocol_epoch": {"const": "orbit-v2"},
+        "project_id": {"type": "string", "pattern": "^oproj_[a-z0-9][a-z0-9_-]{7,63}$"},
+        "object_type": {"const": "agent_instance"},
+        "agent_instance_id": {"type": "string", "pattern": "^oagent_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "runtime_identity": {"$ref": "#/$defs/RuntimeIdentity"},
+        "capability_profile": {"$ref": "#/$defs/CapabilityProfile"},
+        "permission_profile": {"$ref": "#/$defs/PermissionProfile"},
+        "lifecycle_events": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/AgentLifecycleEvent"}
+        }
+      },
+      "additionalProperties": false
+    },
+    "LogicalLead": {
+      "type": "object",
+      "required": [
+        "schema_version",
+        "protocol_epoch",
+        "project_id",
+        "object_type",
+        "logical_lead_id",
+        "task_id",
+        "authority_scope_ref",
+        "durable_context_ref",
+        "content_digest"
+      ],
+      "properties": {
+        "schema_version": {"const": "orbit-agent-runtime-v1"},
+        "protocol_epoch": {"const": "orbit-v2"},
+        "project_id": {"type": "string", "pattern": "^oproj_[a-z0-9][a-z0-9_-]{7,63}$"},
+        "object_type": {"const": "logical_lead"},
+        "logical_lead_id": {"type": "string", "pattern": "^olead_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "task_id": {"type": "string", "pattern": "^otask_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "authority_scope_ref": {"type": "string", "minLength": 1},
+        "durable_context_ref": {"type": "string", "minLength": 1},
+        "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "LeadSession": {
+      "type": "object",
+      "required": [
+        "schema_version",
+        "protocol_epoch",
+        "project_id",
+        "object_type",
+        "lead_session_id",
+        "logical_lead_id",
+        "agent_instance_id",
+        "task_id",
+        "task_revision_id",
+        "session_generation",
+        "durable_context_ref",
+        "lifecycle_events"
+      ],
+      "properties": {
+        "schema_version": {"const": "orbit-agent-runtime-v1"},
+        "protocol_epoch": {"const": "orbit-v2"},
+        "project_id": {"type": "string", "pattern": "^oproj_[a-z0-9][a-z0-9_-]{7,63}$"},
+        "object_type": {"const": "lead_session"},
+        "lead_session_id": {
+          "type": "string",
+          "pattern": "^oleadsession_[a-z0-9][a-z0-9_-]{7,95}$"
+        },
+        "logical_lead_id": {"type": "string", "pattern": "^olead_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "agent_instance_id": {"type": "string", "pattern": "^oagent_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "task_id": {"type": "string", "pattern": "^otask_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "task_revision_id": {"type": "string", "pattern": "^trev_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "session_generation": {"type": "integer", "minimum": 1},
+        "durable_context_ref": {"type": "string", "minLength": 1},
+        "lifecycle_events": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/LeadSessionLifecycleEvent"}
+        }
+      },
+      "additionalProperties": false
+    },
+    "WorkUnitAttempt": {
+      "type": "object",
+      "required": [
+        "schema_version",
+        "protocol_epoch",
+        "project_id",
+        "object_type",
+        "attempt_id",
+        "task_id",
+        "task_revision_id",
+        "work_unit_id",
+        "events"
+      ],
+      "properties": {
+        "schema_version": {"const": "orbit-agent-runtime-v1"},
+        "protocol_epoch": {"const": "orbit-v2"},
+        "project_id": {"type": "string", "pattern": "^oproj_[a-z0-9][a-z0-9_-]{7,63}$"},
+        "object_type": {"const": "work_unit_attempt"},
+        "attempt_id": {"type": "string", "pattern": "^oattempt_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "task_id": {"type": "string", "pattern": "^otask_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "task_revision_id": {"type": "string", "pattern": "^trev_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "work_unit_id": {"type": "string", "pattern": "^owu_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "events": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/AttemptLifecycleEvent"}
+        }
+      },
+      "additionalProperties": false
+    },
+    "LifecycleWriterReceipt": {
+      "type": "object",
+      "required": [
+        "schema_version",
+        "provider_id",
+        "receipt_id",
+        "project_id",
+        "event_id",
+        "event_type",
+        "event_digest",
+        "recorded_at",
+        "receipt"
+      ],
+      "properties": {
+        "schema_version": {"const": "orbit-lifecycle-writer-receipt-v1"},
+        "provider_id": {"type": "string", "pattern": "^[a-z][a-z0-9._-]{2,95}$"},
+        "receipt_id": {"type": "string", "pattern": "^olreceipt_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "project_id": {"type": "string", "pattern": "^oproj_[a-z0-9][a-z0-9_-]{7,63}$"},
+        "event_id": {"type": "string", "pattern": "^oevent_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "event_type": {"type": "string", "minLength": 1},
+        "event_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "recorded_at": {"type": "string", "minLength": 1},
+        "receipt": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "AgentLifecycleEvent": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "event_id",
+            "event_type",
+            "previous_event_digest",
+            "event_digest",
+            "role",
+            "context_generation",
+            "started_at",
+            "recorded_at",
+            "writer_receipt",
+            "status"
+          ],
+          "properties": {
+            "event_id": {"type": "string", "pattern": "^oevent_[a-z0-9][a-z0-9_-]{7,95}$"},
+            "event_type": {"const": "AgentCreated"},
+            "previous_event_digest": {"const": null},
+            "event_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+            "role": {
+              "enum": [
+                "lead",
+                "coder",
+                "reviewer",
+                "tester",
+                "adjudicator",
+                "researcher",
+                "release"
+              ]
+            },
+            "context_generation": {"type": "integer", "minimum": 1},
+            "started_at": {"type": "string", "minLength": 1},
+            "recorded_at": {"type": "string", "minLength": 1},
+            "writer_receipt": {"$ref": "#/$defs/LifecycleWriterReceipt"},
+            "status": {"const": "active"}
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "event_id",
+            "event_type",
+            "previous_event_digest",
+            "event_digest",
+            "context_generation",
+            "recorded_at",
+            "writer_receipt",
+            "reason"
+          ],
+          "properties": {
+            "event_id": {"type": "string", "pattern": "^oevent_[a-z0-9][a-z0-9_-]{7,95}$"},
+            "event_type": {"const": "AgentContextAdvanced"},
+            "previous_event_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+            "event_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+            "context_generation": {"type": "integer", "minimum": 2},
+            "recorded_at": {"type": "string", "minLength": 1},
+            "writer_receipt": {"$ref": "#/$defs/LifecycleWriterReceipt"},
+            "reason": {"type": "string", "minLength": 1}
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "event_id",
+            "event_type",
+            "previous_event_digest",
+            "event_digest",
+            "ended_at",
+            "recorded_at",
+            "writer_receipt",
+            "status"
+          ],
+          "properties": {
+            "event_id": {"type": "string", "pattern": "^oevent_[a-z0-9][a-z0-9_-]{7,95}$"},
+            "event_type": {"const": "AgentTerminated"},
+            "previous_event_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+            "event_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+            "ended_at": {"type": "string", "minLength": 1},
+            "recorded_at": {"type": "string", "minLength": 1},
+            "writer_receipt": {"$ref": "#/$defs/LifecycleWriterReceipt"},
+            "status": {"enum": ["retired", "failed", "cancelled", "superseded"]},
+            "reason": {"type": "string", "minLength": 1}
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "LeadSessionLifecycleEvent": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "event_id",
+            "event_type",
+            "previous_event_digest",
+            "event_digest",
+            "role",
+            "context_generation",
+            "started_at",
+            "recorded_at",
+            "writer_receipt",
+            "status"
+          ],
+          "properties": {
+            "event_id": {"type": "string", "pattern": "^oevent_[a-z0-9][a-z0-9_-]{7,95}$"},
+            "event_type": {"const": "LeadSessionStarted"},
+            "previous_event_digest": {"const": null},
+            "event_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+            "role": {"const": "lead"},
+            "context_generation": {"type": "integer", "minimum": 1},
+            "started_at": {"type": "string", "minLength": 1},
+            "recorded_at": {"type": "string", "minLength": 1},
+            "writer_receipt": {"$ref": "#/$defs/LifecycleWriterReceipt"},
+            "status": {"const": "active"}
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "event_id",
+            "event_type",
+            "previous_event_digest",
+            "event_digest",
+            "ended_at",
+            "recorded_at",
+            "writer_receipt",
+            "status"
+          ],
+          "properties": {
+            "event_id": {"type": "string", "pattern": "^oevent_[a-z0-9][a-z0-9_-]{7,95}$"},
+            "event_type": {"const": "LeadSessionEnded"},
+            "previous_event_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+            "event_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+            "ended_at": {"type": "string", "minLength": 1},
+            "recorded_at": {"type": "string", "minLength": 1},
+            "writer_receipt": {"$ref": "#/$defs/LifecycleWriterReceipt"},
+            "status": {"enum": ["completed", "failed", "cancelled", "superseded"]},
+            "reason": {"type": "string", "minLength": 1}
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "AttemptLifecycleEvent": {
+      "oneOf": [
+        {
+          "type": "object",
+          "required": [
+            "event_id",
+            "event_type",
+            "previous_event_digest",
+            "event_digest",
+            "assignment",
+            "started_at",
+            "recorded_at",
+            "writer_receipt",
+            "status"
+          ],
+          "properties": {
+            "event_id": {"type": "string", "pattern": "^oevent_[a-z0-9][a-z0-9_-]{7,95}$"},
+            "event_type": {"const": "AttemptCreated"},
+            "previous_event_digest": {"const": null},
+            "event_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+            "assignment": {"$ref": "#/$defs/Assignment"},
+            "started_at": {"type": "string", "minLength": 1},
+            "recorded_at": {"type": "string", "minLength": 1},
+            "writer_receipt": {"$ref": "#/$defs/LifecycleWriterReceipt"},
+            "status": {"const": "active"}
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "event_id",
+            "event_type",
+            "previous_event_digest",
+            "event_digest",
+            "ended_at",
+            "recorded_at",
+            "writer_receipt",
+            "status"
+          ],
+          "properties": {
+            "event_id": {"type": "string", "pattern": "^oevent_[a-z0-9][a-z0-9_-]{7,95}$"},
+            "event_type": {"const": "AttemptCompleted"},
+            "previous_event_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+            "event_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+            "ended_at": {"type": "string", "minLength": 1},
+            "recorded_at": {"type": "string", "minLength": 1},
+            "writer_receipt": {"$ref": "#/$defs/LifecycleWriterReceipt"},
+            "status": {"const": "completed"},
+            "reason": {"type": "string", "minLength": 1}
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "event_id",
+            "event_type",
+            "previous_event_digest",
+            "event_digest",
+            "ended_at",
+            "recorded_at",
+            "writer_receipt",
+            "status"
+          ],
+          "properties": {
+            "event_id": {"type": "string", "pattern": "^oevent_[a-z0-9][a-z0-9_-]{7,95}$"},
+            "event_type": {"const": "AttemptFailed"},
+            "previous_event_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+            "event_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+            "ended_at": {"type": "string", "minLength": 1},
+            "recorded_at": {"type": "string", "minLength": 1},
+            "writer_receipt": {"$ref": "#/$defs/LifecycleWriterReceipt"},
+            "status": {"const": "failed"},
+            "reason": {"type": "string", "minLength": 1}
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "event_id",
+            "event_type",
+            "previous_event_digest",
+            "event_digest",
+            "ended_at",
+            "recorded_at",
+            "writer_receipt",
+            "status"
+          ],
+          "properties": {
+            "event_id": {"type": "string", "pattern": "^oevent_[a-z0-9][a-z0-9_-]{7,95}$"},
+            "event_type": {"const": "AttemptBlocked"},
+            "previous_event_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+            "event_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+            "ended_at": {"type": "string", "minLength": 1},
+            "recorded_at": {"type": "string", "minLength": 1},
+            "writer_receipt": {"$ref": "#/$defs/LifecycleWriterReceipt"},
+            "status": {"const": "blocked"},
+            "reason": {"type": "string", "minLength": 1}
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "event_id",
+            "event_type",
+            "previous_event_digest",
+            "event_digest",
+            "ended_at",
+            "recorded_at",
+            "writer_receipt",
+            "status"
+          ],
+          "properties": {
+            "event_id": {"type": "string", "pattern": "^oevent_[a-z0-9][a-z0-9_-]{7,95}$"},
+            "event_type": {"const": "AttemptCancelled"},
+            "previous_event_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+            "event_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+            "ended_at": {"type": "string", "minLength": 1},
+            "recorded_at": {"type": "string", "minLength": 1},
+            "writer_receipt": {"$ref": "#/$defs/LifecycleWriterReceipt"},
+            "status": {"const": "cancelled"},
+            "reason": {"type": "string", "minLength": 1}
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "event_id",
+            "event_type",
+            "previous_event_digest",
+            "event_digest",
+            "ended_at",
+            "recorded_at",
+            "writer_receipt",
+            "status"
+          ],
+          "properties": {
+            "event_id": {"type": "string", "pattern": "^oevent_[a-z0-9][a-z0-9_-]{7,95}$"},
+            "event_type": {"const": "AttemptSuperseded"},
+            "previous_event_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+            "event_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+            "ended_at": {"type": "string", "minLength": 1},
+            "recorded_at": {"type": "string", "minLength": 1},
+            "writer_receipt": {"$ref": "#/$defs/LifecycleWriterReceipt"},
+            "status": {"const": "superseded"},
+            "reason": {"type": "string", "minLength": 1}
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "RuntimeIdentity": {
+      "type": "object",
+      "required": ["provider_id", "runtime_subject_id", "verification_receipt_ref"],
+      "properties": {
+        "provider_id": {"type": "string", "minLength": 1},
+        "runtime_subject_id": {"type": "string", "minLength": 1},
+        "verification_receipt_ref": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "CapabilityProfile": {
+      "type": "object",
+      "required": ["profile_id", "capabilities"],
+      "properties": {
+        "profile_id": {"type": "string", "minLength": 1},
+        "capabilities": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        }
+      },
+      "additionalProperties": false
+    },
+    "PermissionProfile": {
+      "type": "object",
+      "required": ["profile_id", "permissions"],
+      "properties": {
+        "profile_id": {"type": "string", "minLength": 1},
+        "permissions": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        }
+      },
+      "additionalProperties": false
+    },
+    "Assignment": {
+      "type": "object",
+      "required": [
+        "agent_instance_id",
+        "context_generation",
+        "resolved_role",
+        "purpose",
+        "authority_snapshot",
+        "change_thesis_ref",
+        "assigned_rule_resolution_id"
+      ],
+      "properties": {
+        "agent_instance_id": {"type": "string", "pattern": "^oagent_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "context_generation": {"type": "integer", "minimum": 1},
+        "resolved_role": {"type": "string", "minLength": 1},
+        "purpose": {"enum": ["implementation", "review", "test", "adjudication", "research", "release"]},
+        "authority_snapshot": {
+          "type": "object",
+          "required": ["project_policy_revision_ref", "authorization_record_refs"],
+          "properties": {
+            "project_policy_revision_ref": {
+              "type": "object",
+              "required": ["policy_revision_id", "content_digest"],
+              "properties": {
+                "policy_revision_id": {
+                  "type": "string",
+                  "pattern": "^opolicy_[a-z0-9][a-z0-9_-]{7,95}$"
+                },
+                "content_digest": {
+                  "type": "string",
+                  "pattern": "^sha256:[0-9a-f]{64}$"
+                }
+              },
+              "additionalProperties": false
+            },
+            "authorization_record_refs": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {
+                "type": "string",
+                "pattern": "^oauthz_[a-z0-9][a-z0-9_-]{7,95}$"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "change_thesis_ref": {"$ref": "task-work.schema.json#/$defs/ThesisRef"},
+        "assigned_rule_resolution_id": {"type": "string", "pattern": "^rr-sha256-[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    }
+  }
+}

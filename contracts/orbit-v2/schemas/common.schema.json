@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orbit.local/contracts/orbit-v2/schemas/common.schema.json",
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "protocolEpoch": {
+      "const": "orbit-v2"
+    },
+    "projectId": {
+      "type": "string",
+      "pattern": "^oproj_[a-z0-9][a-z0-9_-]{7,63}$"
+    },
+    "contentRef": {
+      "type": "object",
+      "required": ["content_digest"],
+      "properties": {
+        "content_digest": {"$ref": "#/$defs/digest"}
+      },
+      "additionalProperties": false
+    },
+    "requirementId": {
+      "type": "string",
+      "pattern": "^(acc|src|evreq|question)_[a-z0-9][a-z0-9_-]{2,95}$"
+    }
+  }
+}

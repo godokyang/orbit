@@ -1,0 +1,142 @@
+schema_version: orbit-v2-authority-matrix-v1
+protocol_epoch: orbit-v2
+facts:
+  - fact: project_protocol_epoch_and_genesis_anchor
+    authoritative_owner: ProtocolRoot
+    lifecycle: create_only
+    prohibited_owners: [TaskRevision, WorkUnit, AgentInstance]
+  - fact: policy_grants_and_protected_gate_minimums
+    authoritative_owner: ProjectPolicyRevision
+    lifecycle: create_only_linear_lineage
+    authorized_writer: external_user_or_control_plane_authority
+    issuer_provenance: exact_authorization_source_ref_and_assertion_digest
+  - fact: policy_genesis_and_rotation_issuance
+    authoritative_owner: AuthorityAssertion.policy_issuance_envelope
+    lifecycle: provider_signed_content_bound_create_only
+    prohibited_owners: [ProjectPolicyRevision.mutable_pointer, Lead, AgentInstance]
+  - fact: external_authority_verification_receipt
+    authoritative_owner: configured_authority_provider
+    lifecycle: provider_owned_immutable_receipt
+    prohibited_owners: [Lead, AgentInstance, AuthorityAssertion.self_report]
+  - fact: task_goal_and_global_contract
+    authoritative_owner: TaskRevision
+    lifecycle: create_only_revision_lineage
+    prohibited_owners: [WorkUnit, WorkUnitAttempt, EvidenceRecord]
+  - fact: task_specific_delegated_authority
+    authoritative_owner: AuthorizationRecord
+    lifecycle: active_policy_authorized_create_only
+    subject: canonical_exact_task_revision_scope_digest
+    prohibited_owners: [TaskRevision.free_text_authority, Lead]
+  - fact: stable_bounded_work_scope
+    authoritative_owner: WorkUnit
+    lifecycle: create_only
+    prohibited_owners: [WorkUnitAttempt, AgentInstance]
+  - fact: thesis_semantics
+    authoritative_owner: ChangeThesis
+    lifecycle: create_only_revision
+    prohibited_owners: [WorkUnit.mutable_current_pointer]
+  - fact: assignment_and_execution_history
+    authoritative_owner: WorkUnitAttempt
+    lifecycle: immutable_identity_plus_append_only_events
+    prohibited_owners: [WorkUnit]
+  - fact: lifecycle_writer_timestamp_and_receipt
+    authoritative_owner: configured_lifecycle_writer_provider
+    lifecycle: provider_signed_append_only_event_provenance
+    prohibited_owners: [AgentInstance.self_report, WorkUnitAttempt.self_report, LeadSession.self_report]
+  - fact: work_unit_and_attempt_authorization_scope
+    authoritative_owner: AuthorizationRecord
+    lifecycle: active_policy_authorized_create_only
+    subject: canonical_exact_work_unit_action_scope_digest_including_writable_paths
+    prohibited_owners: [WorkUnit.free_text_authority, WorkUnitAttempt.free_text_authority]
+  - fact: agent_lifecycle
+    authoritative_owner: AgentInstance
+    lifecycle: immutable_identity_plus_append_only_events
+  - fact: agent_runtime_identity_capabilities_and_permissions
+    authoritative_owner: AgentInstance
+    lifecycle: provider_verified_unique_runtime_subject_plus_immutable_profile_and_append_only_lifecycle
+  - fact: logical_lead_orchestration_identity
+    authoritative_owner: LogicalLead
+    lifecycle: create_only
+  - fact: lead_session_generation_and_recovery_continuity
+    authoritative_owner: LeadSession
+    lifecycle: immutable_identity_plus_append_only_events
+  - fact: assigned_and_submitted_rule_set
+    authoritative_owner: RuleResolutionArtifact
+    lifecycle: content_addressed_create_only
+    prohibited_owners: [WorkUnitAttempt.required_rules, EvidenceRecord.required_rules]
+  - fact: implementation_or_evaluator_submission_provenance
+    authoritative_owner: EvidenceRecord
+    lifecycle: create_only
+    prohibited_owners: [GateEvaluation.submission_copy]
+    trust_boundary: record_internal_artifact_claim_not_external_byte_or_existence_proof
+  - fact: gate_definition_and_subject_selection_policy
+    authoritative_owner: GateRequirement
+    lifecycle: create_only_per_task_revision_with_stable_lineage
+  - fact: protected_task_change_approval
+    authoritative_owner: AuthorizationRecord.protected_change_envelope
+    lifecycle: provider_scope_bound_content_addressed_create_only
+    prohibited_owners: [TaskRevision.free_text_approval, Lead]
+  - fact: evaluator_verdict_and_question_or_acceptance_answers
+    authoritative_owner: GateEvaluation
+    lifecycle: create_only
+    prohibited_owners: [EvidenceRecord]
+  - fact: finding_identity_body_and_severity
+    authoritative_owner: Finding
+    lifecycle: create_only
+    prohibited_owners: [EvidenceRecord, GateEvaluation.inline_finding_body]
+  - fact: finding_disposition
+    authoritative_owner: FindingResolution
+    lifecycle: append_only
+    prohibited_owners: [Lead.free_text_waiver, GateEngine]
+  - fact: closure_validation
+    authoritative_owner: GateEngine
+    lifecycle: deterministic_projection
+    persisted_authority: false
+  - fact: code_surface
+    authoritative_owner: derived_projection
+    lifecycle: reproducible_from_versioned_inputs
+    persisted_authority: false
+  - fact: relationship_view
+    authoritative_owner: derived_projection
+    lifecycle: reproducible_from_authority_objects
+    persisted_authority: false
+  - fact: active_roster
+    authoritative_owner: derived_projection
+    lifecycle: derived_from_agent_and_attempt_events
+    persisted_authority: false
+
+authority_invariants:
+  - Lead cannot create or impersonate bootstrap user/control-plane authority.
+  - Every ProjectPolicyRevision and issuance source ref pin the exact provider-verified assertion digest in addition to its stable assertion ID; same-ID assertion replacement fails closed.
+  - Genesis and rotation receipts sign an immutable issuance envelope containing the exact candidate policy ID/content digest and assertion digest; changing candidate or issuer bytes makes the receipt unusable.
+  - Every policy successor is authorized by the unique policy.rotate grant of its exact parent; absence or revocation fails closed.
+  - ProjectPolicyRevision authority actions and protected minimum gate kinds are unique semantic keys, so array order cannot change authority.
+  - Every task has exactly one parentless revision-number-1 TaskRevision genesis and one connected, contiguous, linear successor chain.
+  - Lead cannot remove or weaken protected gates through a revision hop without inherited authorization.
+  - Every TaskRevision gate ref resolves to a GateRequirement owned by that exact revision; every reused gate lineage, protected or not, uses a content-addressed immediate-parent ref.
+  - Gate lineage compatibility is derived by traversing validated parent refs, never by matching a caller-supplied lineage ID alone.
+  - Protected-change authority is provider-bound to the exact project, task, parent/candidate revision digests, canonical protected-change digest, and current active policy; superseded-policy grants are not replayable.
+  - Lead cannot make itself risk owner, adjudicator, or waiver issuer by writing a name.
+  - TaskRevision authority refs use only frozen delegation actions and bind the canonical exact task/revision scope; cross-action and cross-subject refs fail closed.
+  - Gate Engine validates authority and derives closure; it cannot waive or rewrite facts.
+  - Closure eligibility is never caller-owned; active Attempts and accepted submissions require the TaskRevision active-policy ref, while terminal history is retained only when provider-recorded Attempt start/end are monotonic and both they and EvidenceRecord acceptance precede the first successor-policy issuance.
+  - EvidenceRecord acceptance_recorded_at is part of the create-only content digest; changing acceptance chronology changes every dependent subject ref.
+  - Independent evaluation is checked against every producer's verified provider/runtime-subject identity in the canonical subject; a different AgentInstance ID cannot create independence.
+  - A newer evaluation does not erase an unresolved older blocking Finding.
+  - Assignment role, context generation, capability, permission, allowed action, and WorkUnit-kind/purpose compatibility are derived from AgentInstance and WorkUnit authority; Assignment cannot self-assert them.
+  - AttemptCreated is valid only while its AgentInstance is active and after the exact bound context generation exists in provider-recorded lifecycle chronology.
+  - WorkUnit authorization refs are non-empty and bind every allowed executable action to exact canonical work scope; Attempt snapshots pin a non-empty exact record set compatible with their assignment purpose/action.
+  - Accepted implementation EvidenceRecord self-checks exactly cover WorkUnit acceptance/evidence refs and contain non-empty changed paths, verification, scope, thesis, and artifact provenance; passing GateEvaluation answers cite non-empty subject evidence.
+  - ArtifactClaim validation proves only exact identity/digest/kind closure inside one EvidenceRecord; without a trusted resolver it does not prove external existence, external bytes, or truth and cannot itself close a gate.
+  - Only change ArtifactClaims carry non-empty canonical repository paths; verification and report ArtifactClaims are path-free and never participate in changed-path authority.
+  - Implementation changed paths are canonical repo-relative POSIX paths and exactly equal change-claim paths within both WorkUnit writable authority and canonical CodeSurface; matching is segment-aware and filesystem-independent.
+  - WorkUnit, Attempt, ChangeThesis, RuleResolutionArtifact, EvidenceRecord, and evaluation subject membership share one exact project/task/revision/unit lineage.
+  - GateEvaluation finding refs and TaskRevision unresolved finding refs resolve bidirectionally through the Finding gate/task lineage.
+  - Addressed or disproved FindingResolution provenance content-addresses the exact authorized GateEvaluation for the Finding GateRequirement and subject.
+  - Addressed or disproved FindingResolution uses a distinct follow-up GateEvaluation or adjudication record in the stable gate lineage; the source evaluation cannot resolve its own Finding.
+  - Addressed, disproved, and waived resolution provenance fields are mutually exclusive.
+  - Waived FindingResolution has no supporting EvidenceRecord refs; its active-policy AuthorizationRecord is the sole provenance.
+  - Evidence-level and independence ordering come from one GateStrength table whose keys exactly equal the schema enums.
+  - A TaskRevision may own multiple same-kind GateRequirements with distinct lineages/selectors; every matching protected requirement must meet the policy minimum, independent of gate ref order.
+  - Every supersedes or related ref resolves to a non-self immutable record in a compatible task, GateRequirement, and subject lineage; supersedes cycles are forbidden.
+  - Every ChangeThesis lineage has exactly one revision 1 genesis; WorkUnit initial refs pin that genesis and Attempt refs pin it or a contiguous successor.

@@ -1,0 +1,343 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orbit.local/contracts/orbit-v2/schemas/authority.schema.json",
+  "$defs": {
+    "AuthorityAssertion": {
+      "type": "object",
+      "required": [
+        "schema_version",
+        "protocol_epoch",
+        "project_id",
+        "assertion_id",
+        "issuer_kind",
+        "issuer_subject",
+        "provider_id",
+        "authority_scope_ref",
+        "grants",
+        "asserted_at",
+        "assertion_digest",
+        "verification_receipt"
+      ],
+      "properties": {
+        "schema_version": {"const": "orbit-authority-assertion-v1"},
+        "protocol_epoch": {"const": "orbit-v2"},
+        "project_id": {"type": "string", "pattern": "^oproj_[a-z0-9][a-z0-9_-]{7,63}$"},
+        "assertion_id": {"type": "string", "pattern": "^oassert_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "issuer_kind": {"enum": ["user", "control_plane"]},
+        "issuer_subject": {"type": "string", "minLength": 1},
+        "provider_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9._-]{2,95}$"
+        },
+        "authority_scope_ref": {"type": "string", "minLength": 1},
+        "grants": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "asserted_at": {"type": "string", "minLength": 1},
+        "assertion_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "policy_issuance_envelope": {"$ref": "#/$defs/PolicyIssuanceEnvelope"},
+        "verification_receipt": {
+          "type": "object",
+          "required": [
+            "schema_version",
+            "provider_id",
+            "receipt_id",
+            "project_id",
+            "assertion_id",
+            "assertion_digest",
+            "issuer_kind",
+            "issuer_subject",
+            "authority_scope_ref",
+            "grants",
+            "issued_at",
+            "receipt"
+          ],
+          "properties": {
+            "schema_version": {"const": "orbit-authority-verification-receipt-v1"},
+            "provider_id": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9._-]{2,95}$"
+            },
+            "receipt_id": {
+              "type": "string",
+              "pattern": "^oareceipt_[a-z0-9][a-z0-9_-]{7,95}$"
+            },
+            "project_id": {
+              "type": "string",
+              "pattern": "^oproj_[a-z0-9][a-z0-9_-]{7,63}$"
+            },
+            "assertion_id": {
+              "type": "string",
+              "pattern": "^oassert_[a-z0-9][a-z0-9_-]{7,95}$"
+            },
+            "assertion_digest": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "issuer_kind": {"enum": ["user", "control_plane"]},
+            "issuer_subject": {"type": "string", "minLength": 1},
+            "authority_scope_ref": {"type": "string", "minLength": 1},
+            "grants": {
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": {"type": "string", "minLength": 1}
+            },
+            "issued_at": {"type": "string", "minLength": 1},
+            "receipt": {"type": "string", "minLength": 1}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "PolicyIssuanceEnvelope": {
+      "type": "object",
+      "required": [
+        "schema_version",
+        "issuance_kind",
+        "project_id",
+        "parent_policy_revision_ref",
+        "candidate_policy_revision_ref",
+        "authority_source_revision_ref",
+        "decision",
+        "issued_at",
+        "envelope_digest"
+      ],
+      "properties": {
+        "schema_version": {"const": "orbit-policy-issuance-v1"},
+        "issuance_kind": {"enum": ["genesis", "rotation"]},
+        "project_id": {"type": "string", "pattern": "^oproj_[a-z0-9][a-z0-9_-]{7,63}$"},
+        "parent_policy_revision_ref": {
+          "oneOf": [
+            {"$ref": "#/$defs/ProjectPolicyRevisionRef"},
+            {"type": "null"}
+          ]
+        },
+        "candidate_policy_revision_ref": {"$ref": "#/$defs/ProjectPolicyRevisionRef"},
+        "authority_source_revision_ref": {
+          "type": "object",
+          "required": [
+            "provider_id",
+            "receipt_id",
+            "assertion_id",
+            "assertion_digest"
+          ],
+          "properties": {
+            "provider_id": {"type": "string", "pattern": "^[a-z][a-z0-9._-]{2,95}$"},
+            "receipt_id": {"type": "string", "pattern": "^oareceipt_[a-z0-9][a-z0-9_-]{7,95}$"},
+            "assertion_id": {"type": "string", "pattern": "^oassert_[a-z0-9][a-z0-9_-]{7,95}$"},
+            "assertion_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+          },
+          "additionalProperties": false
+        },
+        "decision": {"const": "approved"},
+        "issued_at": {"type": "string", "minLength": 1},
+        "envelope_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"issuance_kind": {"const": "genesis"}},
+            "required": ["issuance_kind"]
+          },
+          "then": {
+            "properties": {"parent_policy_revision_ref": {"type": "null"}}
+          },
+          "else": {
+            "properties": {
+              "parent_policy_revision_ref": {"$ref": "#/$defs/ProjectPolicyRevisionRef"}
+            }
+          }
+        }
+      ],
+      "additionalProperties": false
+    },
+    "AuthorizationRecord": {
+      "type": "object",
+      "required": [
+        "schema_version",
+        "protocol_epoch",
+        "project_id",
+        "authorization_record_id",
+        "project_policy_revision_id",
+        "action",
+        "subject_ref",
+        "authorization_source_ref",
+        "authorization_assertion_digest",
+        "content_digest"
+      ],
+      "properties": {
+        "schema_version": {"const": "orbit-authorization-record-v1"},
+        "protocol_epoch": {"const": "orbit-v2"},
+        "project_id": {"type": "string", "pattern": "^oproj_[a-z0-9][a-z0-9_-]{7,63}$"},
+        "authorization_record_id": {"type": "string", "pattern": "^oauthz_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "project_policy_revision_id": {"type": "string", "pattern": "^opolicy_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "action": {"type": "string", "minLength": 1},
+        "subject_ref": {"type": "string", "minLength": 1},
+        "authorization_source_ref": {"type": "string", "pattern": "^oassert_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "authorization_assertion_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "protected_change_envelope": {"$ref": "#/$defs/ProtectedChangeEnvelope"},
+        "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      },
+      "oneOf": [
+        {
+          "required": ["protected_change_envelope"],
+          "properties": {
+            "action": {"const": "task.protected_contract.change"}
+          }
+        },
+        {
+          "properties": {
+            "action": {"not": {"const": "task.protected_contract.change"}}
+          },
+          "not": {"required": ["protected_change_envelope"]}
+        }
+      ],
+      "additionalProperties": false
+    },
+    "ProtectedChangeEnvelope": {
+      "type": "object",
+      "required": [
+        "schema_version",
+        "project_id",
+        "task_id",
+        "parent_task_revision_ref",
+        "candidate_task_revision_ref",
+        "protected_change_digest",
+        "authority_source_revision_ref",
+        "issuer_authority_ref",
+        "project_policy_revision_ref",
+        "decision",
+        "issued_at",
+        "envelope_digest"
+      ],
+      "properties": {
+        "schema_version": {"const": "orbit-protected-change-authorization-v1"},
+        "project_id": {"type": "string", "pattern": "^oproj_[a-z0-9][a-z0-9_-]{7,63}$"},
+        "task_id": {"type": "string", "pattern": "^otask_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "parent_task_revision_ref": {"$ref": "#/$defs/TaskRevisionRef"},
+        "candidate_task_revision_ref": {"$ref": "#/$defs/TaskRevisionRef"},
+        "protected_change_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "authority_source_revision_ref": {
+          "type": "object",
+          "required": [
+            "provider_id",
+            "receipt_id",
+            "assertion_id",
+            "assertion_digest"
+          ],
+          "properties": {
+            "provider_id": {"type": "string", "pattern": "^[a-z][a-z0-9._-]{2,95}$"},
+            "receipt_id": {"type": "string", "pattern": "^oareceipt_[a-z0-9][a-z0-9_-]{7,95}$"},
+            "assertion_id": {"type": "string", "pattern": "^oassert_[a-z0-9][a-z0-9_-]{7,95}$"},
+            "assertion_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+          },
+          "additionalProperties": false
+        },
+        "issuer_authority_ref": {"$ref": "#/$defs/AuthorityAssertionRef"},
+        "project_policy_revision_ref": {"$ref": "#/$defs/ProjectPolicyRevisionRef"},
+        "decision": {"const": "approved"},
+        "issued_at": {"type": "string", "minLength": 1},
+        "envelope_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "TaskRevisionRef": {
+      "type": "object",
+      "required": ["task_revision_id", "content_digest"],
+      "properties": {
+        "task_revision_id": {"type": "string", "pattern": "^trev_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "AuthorityAssertionRef": {
+      "type": "object",
+      "required": ["assertion_id", "assertion_digest"],
+      "properties": {
+        "assertion_id": {"type": "string", "pattern": "^oassert_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "assertion_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "ProjectPolicyRevisionRef": {
+      "type": "object",
+      "required": ["policy_revision_id", "content_digest"],
+      "properties": {
+        "policy_revision_id": {"type": "string", "pattern": "^opolicy_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "ProjectPolicyRevision": {
+      "type": "object",
+      "required": [
+        "schema_version",
+        "protocol_epoch",
+        "project_id",
+        "policy_revision_id",
+        "parent_policy_revision_id",
+        "authorization_source_ref",
+        "authorization_assertion_digest",
+        "protected_gate_minimums",
+        "authority_grants",
+        "content_digest"
+      ],
+      "properties": {
+        "schema_version": {"const": "orbit-project-policy-v1"},
+        "protocol_epoch": {"const": "orbit-v2"},
+        "project_id": {"type": "string", "pattern": "^oproj_[a-z0-9][a-z0-9_-]{7,63}$"},
+        "policy_revision_id": {"type": "string", "pattern": "^opolicy_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "parent_policy_revision_id": {
+          "oneOf": [
+            {"type": "string", "pattern": "^opolicy_[a-z0-9][a-z0-9_-]{7,95}$"},
+            {"type": "null"}
+          ]
+        },
+        "authorization_source_ref": {"type": "string", "pattern": "^oassert_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "authorization_assertion_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "protected_gate_minimums": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "required": ["gate_kind", "evidence_level", "independence"],
+            "properties": {
+              "gate_kind": {"enum": ["review", "test", "release", "adjudication"]},
+              "evidence_level": {
+                "enum": [
+                  "mechanical_check",
+                  "outcome_quality",
+                  "implementation_readiness",
+                  "real_path_test",
+                  "release_readiness"
+                ]
+              },
+              "independence": {"enum": ["same_agent_allowed", "independent_evaluator"]}
+            },
+            "additionalProperties": false
+          }
+        },
+        "authority_grants": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "object",
+            "required": ["action", "required_external_grant"],
+            "properties": {
+              "action": {"type": "string", "minLength": 1},
+              "required_external_grant": {"type": "string", "minLength": 1}
+            },
+            "additionalProperties": false
+          }
+        },
+        "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    }
+  }
+}

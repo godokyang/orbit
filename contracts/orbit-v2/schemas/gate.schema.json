@@ -1,0 +1,364 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orbit.local/contracts/orbit-v2/schemas/gate.schema.json",
+  "$defs": {
+    "GateRequirement": {
+      "type": "object",
+      "required": [
+        "schema_version",
+        "protocol_epoch",
+        "project_id",
+        "gate_requirement_id",
+        "gate_lineage_id",
+        "parent_gate_requirement_ref",
+        "task_id",
+        "task_revision_id",
+        "kind",
+        "protected",
+        "evidence_level",
+        "independence",
+        "acceptance_refs",
+        "required_question_refs",
+        "subject_selector",
+        "waiver_policy",
+        "content_digest"
+      ],
+      "properties": {
+        "schema_version": {"const": "orbit-gate-requirement-v1"},
+        "protocol_epoch": {"const": "orbit-v2"},
+        "project_id": {"type": "string", "pattern": "^oproj_[a-z0-9][a-z0-9_-]{7,63}$"},
+        "gate_requirement_id": {"type": "string", "pattern": "^ogreq_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "gate_lineage_id": {"type": "string", "pattern": "^ogline_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "parent_gate_requirement_ref": {
+          "oneOf": [
+            {"$ref": "#/$defs/GateRequirementRef"},
+            {"type": "null"}
+          ]
+        },
+        "task_id": {"type": "string", "pattern": "^otask_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "task_revision_id": {"type": "string", "pattern": "^trev_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "kind": {"enum": ["review", "test", "release", "adjudication"]},
+        "protected": {"type": "boolean"},
+        "evidence_level": {
+          "enum": [
+            "mechanical_check",
+            "outcome_quality",
+            "implementation_readiness",
+            "real_path_test",
+            "release_readiness"
+          ]
+        },
+        "independence": {"enum": ["same_agent_allowed", "independent_evaluator"]},
+        "acceptance_refs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^acc_[a-z0-9][a-z0-9_-]{2,95}$"}
+        },
+        "required_question_refs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^question_[a-z0-9][a-z0-9_-]{2,95}$"}
+        },
+        "subject_selector": {
+          "type": "object",
+          "required": [
+            "scope",
+            "work_unit_kind",
+            "work_unit_refs",
+            "implementation_attempt_policy",
+            "evidence_record_policy",
+            "freshness"
+          ],
+          "properties": {
+            "scope": {"enum": ["task_wide", "selected_work_units"]},
+            "work_unit_kind": {"const": "implementation"},
+            "work_unit_refs": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {"type": "string", "pattern": "^owu_[a-z0-9][a-z0-9_-]{7,95}$"}
+            },
+            "implementation_attempt_policy": {"const": "all_accepted_contributors_to_snapshot"},
+            "evidence_record_policy": {"const": "all_accepted_required_evidence_for_selected_attempts"},
+            "freshness": {"const": "exact_current_subject"}
+          },
+          "additionalProperties": false
+        },
+        "waiver_policy": {
+          "type": "object",
+          "required": ["mode", "required_authorization_action", "risk_authority_source"],
+          "properties": {
+            "mode": {"const": "finding_resolution_only"},
+            "required_authorization_action": {"const": "finding.waive"},
+            "risk_authority_source": {"const": "project_policy_or_task_authorization"}
+          },
+          "additionalProperties": false
+        },
+        "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "GateEvaluation": {
+      "type": "object",
+      "required": [
+        "schema_version",
+        "protocol_epoch",
+        "project_id",
+        "gate_evaluation_id",
+        "gate_requirement_id",
+        "gate_requirement_content_digest",
+        "evaluator_attempt_id",
+        "evaluator_submission_record_id",
+        "subject",
+        "verdict",
+        "quality_outcome_verdict",
+        "quality_question_answers",
+        "acceptance_results",
+        "counterexample_cases",
+        "confirmed",
+        "assumed",
+        "missing",
+        "coverage",
+        "residual_risk",
+        "finding_refs",
+        "supersedes_gate_evaluation_id",
+        "content_digest"
+      ],
+      "properties": {
+        "schema_version": {"const": "orbit-gate-evaluation-v1"},
+        "protocol_epoch": {"const": "orbit-v2"},
+        "project_id": {"type": "string", "pattern": "^oproj_[a-z0-9][a-z0-9_-]{7,63}$"},
+        "gate_evaluation_id": {"type": "string", "pattern": "^ogeval_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "gate_requirement_id": {"type": "string", "pattern": "^ogreq_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "gate_requirement_content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "evaluator_attempt_id": {"type": "string", "pattern": "^oattempt_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "evaluator_submission_record_id": {"type": "string", "pattern": "^oevr_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "subject": {"$ref": "#/$defs/EvaluationSubject"},
+        "verdict": {"enum": ["pass", "fail", "blocked"]},
+        "quality_outcome_verdict": {"enum": ["pass", "fail", "partial"]},
+        "quality_question_answers": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/QuestionAnswer"}
+        },
+        "acceptance_results": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/AcceptanceResult"}
+        },
+        "counterexample_cases": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "confirmed": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "assumed": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "missing": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "coverage": {"$ref": "#/$defs/EvaluationCoverage"},
+        "residual_risk": {"type": "string", "minLength": 1},
+        "finding_refs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^ofinding_[a-z0-9][a-z0-9_-]{7,95}$"}
+        },
+        "supersedes_gate_evaluation_id": {
+          "oneOf": [
+            {"type": "string", "pattern": "^ogeval_[a-z0-9][a-z0-9_-]{7,95}$"},
+            {"type": "null"}
+          ]
+        },
+        "related_gate_evaluation_refs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^ogeval_[a-z0-9][a-z0-9_-]{7,95}$"}
+        },
+        "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "EvaluationSubject": {
+      "type": "object",
+      "required": [
+        "gate_requirement_ref",
+        "task_revision_ref",
+        "work_unit_refs",
+        "implementation_attempt_refs",
+        "evidence_record_refs",
+        "repository_snapshot_ref",
+        "code_surface_ref",
+        "subject_digest"
+      ],
+      "properties": {
+        "gate_requirement_ref": {"$ref": "#/$defs/GateRequirementRef"},
+        "task_revision_ref": {"$ref": "#/$defs/TaskRevisionRef"},
+        "work_unit_refs": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/WorkUnitRef"}
+        },
+        "implementation_attempt_refs": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/ImplementationAttemptRef"}
+        },
+        "evidence_record_refs": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/EvidenceRecordRef"}
+        },
+        "repository_snapshot_ref": {"$ref": "#/$defs/RepositorySnapshotRef"},
+        "code_surface_ref": {"$ref": "#/$defs/CodeSurfaceRef"},
+        "subject_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "GateRequirementRef": {
+      "type": "object",
+      "required": ["gate_requirement_id", "content_digest"],
+      "properties": {
+        "gate_requirement_id": {"type": "string", "pattern": "^ogreq_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "TaskRevisionRef": {
+      "type": "object",
+      "required": ["task_revision_id", "content_digest"],
+      "properties": {
+        "task_revision_id": {"type": "string", "pattern": "^trev_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "WorkUnitRef": {
+      "type": "object",
+      "required": ["work_unit_id", "content_digest"],
+      "properties": {
+        "work_unit_id": {"type": "string", "pattern": "^owu_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "ImplementationAttemptRef": {
+      "type": "object",
+      "required": ["attempt_id", "creation_event_digest"],
+      "properties": {
+        "attempt_id": {"type": "string", "pattern": "^oattempt_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "creation_event_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "EvidenceRecordRef": {
+      "type": "object",
+      "required": ["evidence_record_id", "content_digest"],
+      "properties": {
+        "evidence_record_id": {"type": "string", "pattern": "^oevr_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "RepositorySnapshotRef": {
+      "type": "object",
+      "required": ["kind", "commit_sha", "tree_digest"],
+      "properties": {
+        "kind": {"const": "git"},
+        "commit_sha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "tree_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "CodeSurfaceRef": {
+      "type": "object",
+      "required": [
+        "kind",
+        "derivation_version",
+        "repository_tree_digest",
+        "code_surface_digest",
+        "paths"
+      ],
+      "properties": {
+        "kind": {"const": "derived_code_surface"},
+        "derivation_version": {"const": "orbit-code-surface-v1"},
+        "repository_tree_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "code_surface_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "paths": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "minLength": 1}
+        }
+      },
+      "additionalProperties": false
+    },
+    "EvaluationCoverage": {
+      "type": "object",
+      "required": [
+        "summary",
+        "covered_work_unit_refs",
+        "uncovered_work_unit_refs",
+        "evidence_record_refs"
+      ],
+      "properties": {
+        "summary": {"type": "string", "minLength": 1},
+        "covered_work_unit_refs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^owu_[a-z0-9][a-z0-9_-]{7,95}$"}
+        },
+        "uncovered_work_unit_refs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^owu_[a-z0-9][a-z0-9_-]{7,95}$"}
+        },
+        "evidence_record_refs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^oevr_[a-z0-9][a-z0-9_-]{7,95}$"}
+        }
+      },
+      "additionalProperties": false
+    },
+    "QuestionAnswer": {
+      "type": "object",
+      "required": ["question_id", "verdict", "evidence_record_refs"],
+      "properties": {
+        "question_id": {"type": "string", "pattern": "^question_[a-z0-9][a-z0-9_-]{2,95}$"},
+        "verdict": {"enum": ["pass", "fail", "blocked"]},
+        "evidence_record_refs": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^oevr_[a-z0-9][a-z0-9_-]{7,95}$"}
+        }
+      },
+      "additionalProperties": false
+    },
+    "AcceptanceResult": {
+      "type": "object",
+      "required": ["acceptance_id", "verdict", "evidence_record_refs"],
+      "properties": {
+        "acceptance_id": {"type": "string", "pattern": "^acc_[a-z0-9][a-z0-9_-]{2,95}$"},
+        "verdict": {"enum": ["pass", "fail", "blocked"]},
+        "evidence_record_refs": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^oevr_[a-z0-9][a-z0-9_-]{7,95}$"}
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
