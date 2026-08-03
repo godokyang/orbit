@@ -6,6 +6,7 @@
 - 范围：Agent team 拓扑、上下文生命周期、任务偏移、代码健康与结构质量审查
 - 当前实现状态：仅为设计结论，尚未修改 Orbit CLI、schema、配置或运行时
 - 切换约束：[ADR-005：Orbit v2 一次性切换与旧协议退役](./005-orbit-v2-clean-cut-and-legacy-retirement.md)
+- 编排控制 amendment：[ADR-006：串行 Lead 编排与控制循环](./006-serialized-lead-orchestration-control-loop.md)；如本文旧表述与 ADR-006 冲突，以 ADR-006 为准
 
 ## 决策定位与验证边界
 
@@ -14,6 +15,12 @@
 实际项目材料和量化数据不在本仓库中，本 ADR 不据此虚构项目名称、样本量或收益数字。已有验证支持的是架构方向，不自动证明任意字段设计、固定阈值、存储技术或 Orbit 当前实现细节。Orbit 自身仍需通过 dogfood 验证具体 schema、CLI、投影和运行成本。
 
 Accepted 表示目标架构已经确定，不表示当前 v1 runtime 已经具备这些能力。在 v2 完成一次性切换前，现有 CLI、schema 和 runtime reference 仍按当前实现解释。
+
+### 2026-08-03 amendment：dynamic team 不表示并发执行
+
+项目 owner 于 2026-08-03 进一步批准 ADR-006。本文的 dynamic team 只表示 AgentInstance 可按需创建、替换或终止，LeadSession/context 可重建，capability profile 可随 WorkUnit 选择。稳定串行 identity 是 ADR-006 的 project-scoped `lead_control_id`；Lead runtime 只是其当前可替换执行载体。
+
+同一 `lead_control_id` 可以持有多个 Task，但任一时刻最多一个 active LeadSession、一个 active Task、一个 selected WorkUnit 和一个 non-terminal WorkUnitAttempt。implementation、review、test、research 和 release 全部串行；Attempt terminal 后必须先产生 accepted LeadCheckpoint，才可 dispatch 下一 Attempt。不同 `lead_control_id` 只有 task ownership sets 与 provider-verified active runtime subject sets 都 disjoint 时才可并行，不同 project 可独立并行。本文涉及 control genesis、Task/executor ownership/transfer、LeadSession lifecycle、自检、proportionality、successor 或 task switching 的细节均由 ADR-006 统一规范，避免本文成为第二套控制权威。
 
 ## 背景
 
@@ -235,8 +242,8 @@ Lead 应保留最广、最完整的任务视角，但不能把“完整上下文
 
 需要区分：
 
-- `logical lead`：跨整个任务持续存在的编排身份和权威；
-- `lead session`：某一次实际模型会话，可以压缩、重启或被接替；
+- `LogicalLead`：跨一个 Task 持续存在的编排身份和权威；
+- `LeadSession`：某一次实际模型会话，可以压缩、重启或被接替；
 - `durable lead context`：由 task contract、设计决策、状态、evidence、handoff 和索引组成的可恢复事实。
 
 这一区分很重要：如果只有 worker 会发生上下文退化，而 lead 被允许无限持有同一对话，那么相同的问题最终会转移到 lead。
@@ -251,7 +258,9 @@ Lead 的“最全上下文”应理解为：
 
 它不意味着把所有 worker transcript、工具输出、测试日志和历史推理永久放在当前模型窗口中。
 
-Logical lead 即使更换 session，也必须能从 durable context 恢复同一个 task revision 和总体决策状态。若恢复后不能证明上下文连续性，应进入 handoff/recovery 状态，而不是假装仍是原会话。
+LogicalLead 即使更换 LeadSession，也必须能从 durable context 恢复同一个 TaskRevision 和总体决策状态。若恢复后不能证明上下文连续性，应进入 handoff/recovery 状态，而不是假装仍是原会话。
+
+LogicalLead continuity 仍然是 per-task；同一个 Lead AgentInstance/provider-verified runtime subject 可以在一条 lineage 内串行执行多个 LogicalLead，或在旧 session terminal/release 后受控 transfer 到另一 lineage，但不得跨 control lineages 同时 active。每个 LogicalLead/Task 任一时刻只能归属一个 open `lead_control_id` queue，且每个 control lineage 只有一个 Task 可被 selection 激活。多 Task 的有序 queue、跨 lineage Task/executor release/acquire、唯一 active LeadSession/selection 与跨 session 恢复由 ADR-006 的 project-scoped control registry 和 LeadCheckpoint 管理，不在本文扩展成 Portfolio 平台。
 
 ## 决策四：建立可追溯的关系视图，不新增图数据库事实源
 
@@ -264,6 +273,7 @@ Orbit 应把任务闭环中的稳定对象及其关系显式化，使 logical le
 - create-only `ProjectPolicyRevision` lineage，作为 initial/child TaskRevision protected authority 的非自授权信任根；
 - `WorkUnit`、append-only `WorkUnitAttempt` 和版本化 `ChangeThesis`；
 - `LogicalLead`、`LeadSession`、`AgentInstance` 和 `CapabilityProfile`；
+- ADR-006 的 project-scoped `lead_control_id`/control registry 与 create-only、append-only linear `LeadCheckpoint` lineage；
 - `EvidenceRecord`、`GateRequirement`、`GateEvaluation`、`Finding` 和 `FindingResolution`；
 - content-addressed `RuleResolutionArtifact` 和持久 artifact reference。
 
@@ -273,6 +283,10 @@ Orbit 应把任务闭环中的稳定对象及其关系显式化，使 logical le
 
 ```text
 ProtocolRoot        --anchors_policy-------> ProjectPolicyRevision genesis
+LeadCheckpoint      --belongs_to_control---> lead_control_id
+LeadCheckpoint      --queues/selects-------> TaskRevision/WorkUnit
+LeadSession         --executes_control-----> lead_control_id
+LeadSession         --bound_to_subject-----> provider-verified runtime subject
 TaskRevision        --authorizes------------> WorkUnit
 TaskRevision        --requires--------------> GateRequirement
 TaskRevision        --governed_by-----------> ProjectPolicyRevision
@@ -280,6 +294,8 @@ GateRequirement     --selects_subject-------> TaskRevision/WorkUnit set
 WorkUnit            --has_attempt-----------> WorkUnitAttempt
 WorkUnit            --starts_with-----------> ChangeThesis revision/digest
 WorkUnitAttempt     --assigned_to-----------> AgentInstance
+WorkUnitAttempt     --dispatched_by---------> LeadCheckpoint
+WorkUnitAttempt     --belongs_to_control----> lead_control_id
 WorkUnitAttempt     --uses_thesis-----------> ChangeThesis revision/digest
 WorkUnitAttempt     --assigned_rules--------> RuleResolutionArtifact
 EvidenceRecord      --produced_in-----------> WorkUnitAttempt
@@ -318,7 +334,7 @@ GateRequirement 冻结 task-wide/selected-work-unit subject selector、implement
 
 图结构只会让关系更容易查询，不会自动提高关系的真实性。Orbit 必须区分：
 
-- **权威事实**：来自服务控制的 `ProjectPolicyRevision`、`TaskRevision`、append-only `WorkUnitAttempt` lifecycle、create-only `EvidenceRecord`/`GateEvaluation`/`Finding` 与 append-only `FindingResolution`；
+- **权威事实**：来自服务控制的 `ProjectPolicyRevision`、`TaskRevision`、ADR-006 project-scoped `lead_control_id` registry/create-only LeadCheckpoint lineage、append-only `WorkUnitAttempt` lifecycle、create-only `EvidenceRecord`/`GateEvaluation`/`Finding` 与 append-only `FindingResolution`；
 - **可复算关系**：从权威事实确定性派生的索引或视图；
 - **候选关系**：由 agent 从聊天、源码或日志中推断，必须带来源并经过确认，不能直接改变 scope、权限、state 或 gate。
 
@@ -333,7 +349,7 @@ GateRequirement 冻结 task-wide/selected-work-unit subject selector、implement
 
 ### 先建立派生视图，不决定存储技术
 
-v2 的 `ProjectPolicyRevision`、`TaskRevision`、`WorkUnit`、`WorkUnitAttempt`、版本化 `ChangeThesis`、`LogicalLead`/`LeadSession`、`AgentInstance`、`RuleResolutionArtifact`、`EvidenceRecord`、`GateRequirement`、`GateEvaluation`、`Finding` 和 `FindingResolution` 是事实源。`CodeSurface`、typed `RelationshipView` 与 `AggregateOutcome` 只在这些数据和 repository snapshot 之上生成只读、可复算的派生对象，不把同一事实复制进新的图存储，也不要求 Neo4j、GraphRAG 或图向量检索。
+v2 的 `ProjectPolicyRevision`、`TaskRevision`、`WorkUnit`、`WorkUnitAttempt`、版本化 `ChangeThesis`、`LogicalLead`/`LeadSession`、`AgentInstance`、ADR-006 的 `lead_control_id` control registry/`LeadCheckpoint`、`RuleResolutionArtifact`、`EvidenceRecord`、`GateRequirement`、`GateEvaluation`、`Finding` 和 `FindingResolution` 是事实源。`CodeSurface`、typed `RelationshipView` 与 `AggregateOutcome` 只在这些数据和 repository snapshot 之上生成只读、可复算的派生对象，不把同一事实复制进新的图存储，也不要求 Neo4j、GraphRAG 或图向量检索。
 
 `AggregateOutcome` 只能由 Gate Engine 根据 active ProjectPolicyRevision/TaskRevision、GateRequirement 当前 subject selector、与当前 canonical subject digest 完全匹配且未 stale 的 GateEvaluation、acceptance results、unresolved Finding/FindingResolution 和 residual risk 确定性派生。subject 缺失、漏掉 required WorkUnit/Attempt/EvidenceRecord、repository snapshot/CodeSurface digest 变化，或 producer independence 不成立时，该 evaluation 不参与 closure。若为了性能持久化，只能保存带完整 source IDs/digests 的可删除 cache；任何 agent、Lead 或外部 writer 都不能直接写一个 aggregate verdict 推进状态。
 
@@ -403,8 +419,11 @@ team_policy:
 ```yaml
 # Proposed，仅表示设计方向，不是当前 schema。
 team_runtime_projection:
+  lead_control_id: lcontrol-main
   logical_lead_id: lead-main
   lead_session_generation: 3
+  lead_runtime_subject_ref: provider-runtime-subject-...
+  lead_runtime_subject_assertion_digest: sha256:...
   active_attempts:
     - attempt_id: wattempt-17
       work_unit_id: wu-fix-recovery
@@ -412,13 +431,9 @@ team_runtime_projection:
       profile: implementation
       context_generation: 1
       status: active
-    - attempt_id: wattempt-18
-      work_unit_id: wu-review-r4
-      agent_instance_id: agent-review-4
-      profile: independent_review
-      context_generation: 1
-      status: active
 ```
+
+`active_attempts` 保留为 projection collection shape 以便表达零或一个 active Attempt；同一 `lead_control_id` 中其 cardinality MUST 小于等于一，active LeadSession cardinality 也 MUST 小于等于一。Task/WorkUnit 还受跨 lineage ownership 和 project-wide non-terminal Attempt backstop 约束；provider-verified canonical Lead runtime subject 还受 project-wide active-session binding 唯一性约束，不能通过不同 AgentInstance ID/别名绕过。review/test 必须等待 implementation terminal 和 accepted LeadCheckpoint 后再 dispatch，不能与 implementation 并行。
 
 这意味着现有配置至少需要重新审视：
 
@@ -443,6 +458,8 @@ work_unit:
   work_unit_id: wu-...
   task_id: otask_...
   task_revision_id: r4-...
+  parent_work_unit_ref: wu-parent-or-null
+  depends_on_work_unit_refs: []
   objective: ...
   authority_scope: []
   input_refs: []
@@ -459,6 +476,8 @@ work_unit:
 ```
 
 Work agent 只拥有本 work unit 的执行权，不拥有修改 `TaskRevision.goal` 的权力。
+
+`parent_work_unit_ref` 与 `depends_on_work_unit_refs` 是 ADR-006 冻结的未来 exact refs；mainline、branch、critical path 与 runnable set 从它们和权威 lifecycle/gate facts 派生，不作为阶段标签写回 WorkUnit。Task/WorkUnit 的验收边界、dependency readiness 与 single-writer 规则以 ADR-006 为准。
 
 执行过程中发现新问题时，agent 可以：
 
@@ -491,10 +510,12 @@ WorkUnit 保持稳定 scope，不直接拥有可覆盖的 `assignment`、agent�
 # Proposed，仅表示设计方向，不是当前 schema。
 work_unit_attempt:
   attempt_id: wattempt-...
+  lead_control_id: lcontrol-main
   work_unit_id: wu-...
   task_id: otask_...
   task_revision_id: r4-...
-  predecessor_attempt_id: wattempt-previous
+  predecessor_work_unit_attempt_ref: wattempt-previous
+  dispatch_lead_checkpoint_ref: lcheckpoint-...
   purpose: implementation | review | test | research | release
   agent_instance_id: agent-...
   context_generation: 2
@@ -511,9 +532,9 @@ work_unit_attempt:
 
 Attempt 创建使用无循环的原子流程：先预分配尚无运行权威的 `attempt_id`，再用该 identity 解析并 create/reuse content-addressed assigned RuleResolutionArtifact，最后一次性追加包含 `assigned_rule_resolution_id` 的 `AttemptCreated` event。只有该 event 成功后 Attempt 才存在并可 dispatch；禁止创建后 patch Assignment snapshot。若 artifact 已创建而 `AttemptCreated` 失败，该 artifact 只是未引用的 immutable content，可由审计后 GC，不构成 active assignment。
 
-`AttemptCreated` event 的服务端 event timestamp 是 `started_at` 的唯一来源，并确定初始 `active` status；后续 terminal lifecycle events 提供 `ended_at` 和 `completed|failed|blocked|cancelled|superseded`。projection 只从这些 append-only events 派生时间与 status。禁止原地覆盖旧 attempt 的 agent、authority、rules、context generation 或 terminal status。一个 WorkUnit 可以有多个历史 attempts，但并发 active attempt 必须符合 TaskRevision/team policy；replacement 不得让旧 attempt 和 evidence 消失。
+`AttemptCreated` event 的服务端 event timestamp 是 `started_at` 的唯一来源，并确定初始 `active` status；后续 terminal lifecycle events 提供 `ended_at` 和 `completed|failed|blocked|cancelled|superseded`。projection 只从这些 append-only events 派生时间与 status。禁止原地覆盖旧 attempt 的 agent、authority、rules、context generation 或 terminal status。一个 WorkUnit 可以有多个历史 attempts，但同一 `lead_control_id` 最多一个 non-terminal Attempt，且 project-wide 每个 Task/WorkUnit 也最多一个 non-terminal Attempt；replacement 不得让旧 attempt 和 evidence 消失。successor 必须 pin stable control identity，并引用 terminal predecessor 和授权 dispatch 的当前 accepted LeadCheckpoint，完整规则由 ADR-006 冻结。
 
-WorkUnit 没有可覆盖的“current thesis”指针。创建新 ChangeThesis revision 后必须创建 pin 该 revision/digest 的 successor Attempt；派生视图可以报告 `active_thesis_refs`。仅当所有 active attempts pin 同一 revision 时才可显示单值 current thesis，否则必须显示集合/冲突，不能用 latest-wins 隐藏并发差异。
+WorkUnit 没有可覆盖的“current thesis”指针。创建新 ChangeThesis revision 后必须在旧 Attempt terminal、LeadCheckpoint 接受后创建 pin 该 revision/digest 的 successor Attempt；派生视图可以报告零或一个 `active_thesis_ref`。历史 attempts 可以 pin 不同 revision，但不能用 latest-wins 改写其 provenance。
 
 每条正式 `EvidenceRecord` 必须绑定 `attempt_id`。task/work-unit/agent/authority/thesis 等冗余 snapshot 如为审计而保存，validator 必须证明与 attempt 一致；`attempt_id` 和 append-only attempt history 才是 assignment 的权威来源。active roster、agent 当前工作和 replacement history 都从 open/terminal attempts 与 AgentInstance lifecycle 派生。
 
@@ -546,14 +567,16 @@ lead identifies work
   -> creates bounded work unit
   -> selects capability profile
   -> creates or selects AgentInstance
+  -> LeadControl reconciles four-layer assessment and appends LeadCheckpoint selection
   -> preallocates attempt_id and resolves assigned RuleResolutionArtifact
   -> atomically appends AttemptCreated with immutable assignment snapshot
   -> agent executes and submits EvidenceRecord bound to attempt_id
   -> lead evaluates return condition
      -> append terminal attempt event and terminate/release agent
-     -> create successor attempt for the same work unit
-     -> replace agent/context by creating a new attempt
-     -> create child work unit
+  -> LeadControl appends the next linear LeadCheckpoint
+     -> select a successor attempt for the same work unit
+     -> replace agent/context by selecting a new attempt
+     -> propose a child work unit for controlled creation/selection
      -> propose TaskRevision; protected changes require inherited authority
   -> resolve canonical evaluation subject from GateRequirement
   -> evaluate pinned subject through attempt-bound independent GateEvaluations
@@ -572,9 +595,11 @@ lead identifies work
 - 输出规模已经超过当前 review 策略能够完整覆盖的范围；
 - 从执行阶段进入需要独立判断的 gate 阶段。
 
-这些条件目前属于设计假设。Orbit 尚无数据支持一个通用的固定阈值。
+这些风险信号不是穷尽 checklist。ADR-006 进一步冻结事件触发、active ProjectPolicyRevision/authorized immutable record 绑定的有限非零 wall-clock fallback、Delivery/Assurance Progress、连续零 Delivery delta fuse、相同 fingerprint 第三次 Attempt 的 provider-verified `task.retry.override` AuthorizationRecord，以及 scope/blast-radius/review-surface/goal-relation 失控时的立即 freeze。fingerprint 只能由 LeadControl/受控 writer 从 versioned `fingerprint_identity_basis` 产生：TaskRevision/WorkUnit scope、typed category/code、stable Finding identity，或非 Finding failure 的 stable test/rule/check identity + stable signal subject identity + normalized failure code。terminal Attempt 与 Finding/GateEvaluation/test/validator outcome refs+digests 只进入不参与 hash 的 `fingerprint_supporting_provenance`，用于证明 occurrence 和跨 checkpoint prior-chain 计数。agent message、自报标签、排序、AgentInstance 别名或每轮新建 record identity 不能改变 fingerprint，无法证明稳定 signal identity 或 provenance 时必须 freeze。Orbit 不使用通用固定行数、token 或 round threshold 作为 correctness。
 
 ## 决策八：Review 必须审查方案比例性和结构质量
+
+本节保留 review 的语义判断与独立 authority；何时触发自检、如何区分 Delivery/Assurance Progress、何时停止自动继续或将 hardening 放入非抢占 WorkUnit，由 ADR-006 统一规范。
 
 Review 不能只回答“实现是否正确执行了当前方案”，还必须先回答“当前方案是否仍值得以这个范围和复杂度执行”。
 
@@ -630,7 +655,7 @@ review 应先检查 change thesis 和主要结构方向，再进入逐文件检�
 
 | 方面 | 当前 Orbit | 本 ADR 提议 |
 | --- | --- | --- |
-| 团队拓扑 | role archetype 可扩展，但 instance/assignment 主要来自静态配置 | logical lead 统领动态、任务级 agent group |
+| 团队拓扑 | role archetype 可扩展，但 instance/assignment 主要来自静态配置 | LogicalLead 统领动态、可替换的任务级 agent group；stable `lead_control_id` 严格串行，跨 lineage Task ownership 与 active runtime subjects 均不相交 |
 | 角色定义 | 可扩展 role policy + 基本静态的 instance 配置 | 可复用 capability profile + 运行时动态实例 |
 | Lead | 角色之一，可在小项目兼任 coder | 最高目标与编排权威，但不覆盖独立 verdict |
 | 上下文 | 规则、task、evidence、handoff；fresh evaluator 主要用于 gate | lead/work agent/evaluator 分层，所有 work agent 使用 bounded work unit |
@@ -638,6 +663,7 @@ review 应先检查 change thesis 和主要结构方向，再进入逐文件检�
 | 问题范围 | 主要围绕 coding、review、test 流程 | 覆盖研究、设计、计划、实现、诊断、审查、测试、发布 |
 | 代码健康治理 | coding/review 规则已覆盖 domain distortion、结构、scope 和 outcome，但未绑定动态 work unit 与完整 surface closure | 审查 change thesis、比例性、模块、抽象、复杂度、限制范围、命名和完整 surface，并绑定 work unit evidence |
 | 动态团队状态 | instances 基本静态 | append-only WorkUnitAttempt/AgentInstance lifecycle 保存历史，active roster 为派生 projection |
+| Lead 控制 | 缺少多 Task 唯一 selection、checkpoint 与统一自检 | ADR-006 的 single-active invariant、LeadCheckpoint 与 LeadControl |
 
 本表右侧是本 ADR 已接受的 v2 目标架构，不表示现有 CLI 或 schema 已经支持；具体字段、命令和存储合同仍由后续实现设计冻结。
 
@@ -669,6 +695,10 @@ review 应先检查 change thesis 和主要结构方向，再进入逐文件检�
 - 只把静态 coder/reviewer/tester 改成更多静态角色；
 - 让 lead 因为层级最高而自行关闭独立 review/test gate；
 - 让 lead 永久保留未经压缩和索引的完整聊天，把同样的上下文退化风险集中到 lead；
+- 把 dynamic team 解释为同一 `lead_control_id` 内并行执行 implementation/review/test/research/release、给同一 Task 新建第二 control lineage，或让同一 provider/runtime subject 以相同/不同 AgentInstance ID 同时执行两个 control lineages；
+- 先接受缺 active LeadSession/provider-verified runtime subject 的 genesis checkpoint，再回填 executor；
+- 让 Lead/Work Agent 用新的 message wording、排序、自报 fingerprint、AgentInstance 别名或每轮新建 Attempt/outcome record ID/digest 重置相同 failure 的 retry chain；
+- 在 active Attempt 未 terminal 或没有 LeadCheckpoint 时切换 Task、创建 successor 或 dispatch 下一工作；
 - 把动态 agent roster 写回静态配置，使 policy 和 live state 混为一个事实源；
 - 把 assignment、agent 或 status 原地写回稳定 WorkUnit，覆盖历史 attempt；
 - 原地覆盖 WorkUnit 的 current ChangeThesis 指针，让旧 attempt/evidence 失去历史 thesis；
@@ -693,6 +723,7 @@ review 应先检查 change thesis 和主要结构方向，再进入逐文件检�
 - bounded work unit 是否显著降低 `TaskRevision.goal` drift；
 - worker context 重建是否降低反复修复后的方向偏移；
 - logical lead + replaceable lead session 是否能在保持设计连续性的同时减少上下文退化；
+- ADR-006 的串行 LeadControl 是否能以可接受的吞吐成本降低 task switching、支线抢占与连续零 Delivery delta；
 - typed `RelationshipView` 是否比线性摘要更准确地恢复 `TaskRevision.goal`、未完成 `WorkUnit`/`WorkUnitAttempt`、失效 `EvidenceRecord` 和未满足的 `GateRequirement`；
 - bounded relationship projection 是否在减少 token 的同时保留 worker/evaluator 完成任务所需的关键信息；
 - agent 提议的候选关系有多少被确认、驳回或修正，错误关系是否曾尝试改变 scope、权限或 gate；
@@ -737,5 +768,7 @@ review 应先检查 change thesis 和主要结构方向，再进入逐文件检�
 13. Gate Engine 的 deterministic AggregateOutcome projection 与 cache invalidation；
 14. 从现有静态角色运行模型一次性切换到动态 team 的 cutover 与 closure guard；
 15. Orbit dogfood 对照实验和验收指标。
+
+ADR-006 已将 task queue、WorkUnit parent/dependency、Attempt predecessor/checkpoint binding、LeadCheckpoint/LeadControl、四层自检和止损另立为控制合同；这些内容不由上列 evidence/gate 实现合同隐式替代。
 
 在这些实现合同完成前，不把本 ADR 的局部示例字段零散加入 v1 正式 API。v2 必须按 ADR-005 完成全链路切换和旧路径关闭；typed RelationshipView 与 AggregateOutcome 仍不得成为 task/work-unit/evidence/state/gate 之外的第二套事实源。

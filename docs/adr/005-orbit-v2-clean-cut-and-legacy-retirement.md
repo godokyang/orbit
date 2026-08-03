@@ -3,12 +3,14 @@
 - 状态：Accepted
 - 日期：2026-07-30
 - 范围：Orbit v2 schema、CLI、runtime、evidence、gate、模板、文档和旧协议退役
-- 关联：[ADR-003](./003-lead-orchestrated-dynamic-agent-team.md)、[ADR-004](./004-role-rule-context-evidence-binding.md)
+- 关联：[ADR-003](./003-lead-orchestrated-dynamic-agent-team.md)、[ADR-004](./004-role-rule-context-evidence-binding.md)、[ADR-006](./006-serialized-lead-orchestration-control-loop.md)
 - 当前实现状态：仅为切换决策，当前 CLI 和 runtime 仍是 v1
 
 ## 背景
 
 ADR-003 将 Orbit 的目标架构改为 Logical Lead 编排的动态 agent team，以 `TaskRevision`、bounded `WorkUnit` 和 append-only `WorkUnitAttempt` 分别管理全局合同、稳定局部 scope、assignment 与执行历史。ADR-004 要求 attempt 绑定 assigned rule resolution，每条 implementation/review/test `EvidenceRecord` 绑定 attempt 和 submitted rule resolution。
+
+ADR-006 将该编排进一步冻结为 project-scoped stable `lead_control_id` 下严格串行：多 Task queue 中最多一个 active LeadSession、一个 active Task、一个 selected WorkUnit 和一个 non-terminal WorkUnitAttempt；terminal Attempt 与下一次 dispatch 之间必须存在受控、线性的 accepted LeadCheckpoint。Lead runtime、AgentInstance/LeadSession/context 是可替换执行载体，不是 control identity。不同 control lineage 只有 Task ownership sets 与 provider-verified active runtime subject sets 都不相交时才可并行；AgentInstance 别名不能绕过 executor 唯一性。
 
 这些变化不是向当前字段增加少量可选 metadata。它们改变了：
 
@@ -37,6 +39,7 @@ Orbit v2 采用一次性 clean cut：
 8. v2 writer、reader、validator、gate、模板、测试和 runtime documentation 必须在同一 cutover 中切换。
 9. v2 项目必须具有 create-only protocol root marker，声明 `protocol_epoch: orbit-v2`；所有 project-scoped 命令在读取或写入其他 artifact 前验证 marker 和输入 epoch。
 10. marker 缺失、epoch 不匹配，或 active protocol root 中同时出现 v1/v2 权威 artifact 时 fail closed；不通过“优先读新版”容忍混合状态。
+11. v2 激活前必须同时闭合 ADR-006 的 provider-subject/session/control/genesis atomic create、stable control identity、cross-lineage Task ownership/transfer、provider-verified runtime-subject active-session uniqueness/transfer、controlled fingerprint identity/provenance separation 与 prior-chain、single-active LeadSession/Task/WorkUnit/Attempt、project-wide Task/WorkUnit Attempt backstop、unique-root/reachability、checkpoint-before-dispatch 和 no-parallel-legacy-path 条件；任一条件未证明时不得 cutover。
 
 不考虑兼容不等于允许静默破坏。CLI 必须在任何会重建或删除用户本地状态的动作前明确列出目标并要求显式授权；默认行为是拒绝旧 schema，而不是自动覆盖。
 
@@ -47,11 +50,13 @@ Orbit v2 采用一次性 clean cut：
 | `ProtocolRoot` | project identity、`protocol_epoch: orbit-v2`、immutable `project_policy_genesis_ref`；marker 所在目录定义 active artifact root，不承载 task 业务事实 |
 | `ProjectPolicyRevision` | create-only bootstrap/rotation lineage：protected gate minimum、waiver/risk-owner/adjudicator/update authority 与 user/control-plane authorization provenance |
 | `TaskRevision` | `goal`、non-goals、quality outcome、带稳定 ID 的 acceptance/source/evidence requirements、task questions、`GateRequirement`、exact `project_policy_revision_ref` |
-| `WorkUnit` | 稳定局部 objective、authority scope、input/output refs、stop conditions、TaskRevision requirement refs 和 immutable initial ChangeThesis ref |
+| `WorkUnit` | 稳定局部 objective、authority scope、input/output refs、stop conditions、TaskRevision requirement refs、exact parent/dependency refs、唯一 root reachability 和 immutable initial ChangeThesis ref |
 | `ChangeThesis` revision | work-unit-scoped、create-only 的可证伪主张；稳定 `change_thesis_id + revision + digest` |
-| `WorkUnitAttempt` | append-only assignment/execution history：agent instance、context generation、authority snapshot、ChangeThesis ref、assigned rule resolution、start/end/status events |
-| `LogicalLead` / `LeadSession` | 编排身份、session generation、durable recovery continuity |
-| `AgentInstance` | runtime identity、capability/permission profile 和 instance lifecycle；当前 roster 从 AgentInstance/Attempt 派生 |
+| `WorkUnitAttempt` | append-only assignment/execution history：exact predecessor/dispatch checkpoint refs、agent instance、context generation、authority snapshot、ChangeThesis ref、assigned rule resolution、start/end/status events |
+| `LogicalLead` / `LeadSession` | per-task continuity、session generation、provider-verified canonical runtime subject binding、durable recovery continuity；每个 control 最多一个 active session且每个 project/runtime subject 最多绑定一个 active session |
+| `lead_control_id` / control registry | project-scoped stable control identity、唯一 genesis、受控 writer authority、跨 lineage Task ownership/transfer、canonical runtime-subject active-session binding 和 global Attempt backstop |
+| `LeadCheckpoint` | create-only、append-only linear accepted lineage：exact `lead_control_id`/active session/runtime subject、有序 task queue、唯一 selection、四层 assessment、controlled/versioned fingerprint identity/hash、separate supporting provenance/prior chain、progress delta、LeadDecision 与 next trigger 的 exact refs/provenance |
+| `AgentInstance` | 本地 runtime instance、capability/permission profile 和 lifecycle；不能代替 provider-verified canonical runtime subject，当前 roster 从 AgentInstance/Attempt 派生 |
 | `RuleResolutionArtifact` | content-addressed、create-only 的 assigned/submitted required rule 集合及内容摘要 |
 | `EvidenceRecord` | create-only：`attempt_id`、submitted rule resolution、artifact、observation/requirement result 和可复核 provenance；不拥有 evaluator verdict/finding |
 | `GateRequirement` | TaskRevision 声明的 gate kind、independence、question/acceptance refs、evidence level、waiver policy 和 canonical subject selector/freshness policy |
@@ -62,9 +67,25 @@ Orbit v2 采用一次性 clean cut：
 
 每项权威事实只属于一个对象。其他对象只能引用稳定 ID，不复制一份可独立修改的同义合同。
 
-`WorkUnitAttempt` 是 assignment 的唯一权威对象：预分配 `attempt_id` 后先 create/reuse assigned RuleResolutionArtifact，再一次性追加包含该 ID 的 immutable `AttemptCreated` payload；禁止 post-create patch。该 event timestamp 是唯一 `started_at` 来源并建立 initial active status，end/status 由后续 append-only events 派生。v2 不另建可覆盖的 assignment/current-worker 事实源。每条正式 EvidenceRecord 必须引用 `attempt_id`，active roster 只能由 open attempts 与 AgentInstance lifecycle 派生。
+`WorkUnitAttempt` 是 assignment 的唯一权威对象：预分配 `attempt_id` 后先 create/reuse assigned RuleResolutionArtifact，再一次性追加包含该 ID 的 immutable `AttemptCreated` payload；禁止 post-create patch。该 event timestamp 是唯一 `started_at` 来源并建立 initial active status，end/status 由后续 append-only events 派生。v2 不另建可覆盖的 assignment/current-worker 事实源。每条正式 EvidenceRecord 必须引用 `attempt_id`，active roster 只能由 open attempts 与 AgentInstance lifecycle 派生。同一 `lead_control_id` 的 open Attempt cardinality 必须小于等于一；project-wide 每个 Task 和每个 WorkUnit 的 non-terminal Attempt cardinality 也必须小于等于一。successor 还必须 pin control identity，并引用 terminal predecessor 和授权 dispatch 的当前 accepted LeadCheckpoint。
 
-WorkUnit 只有 immutable `initial_change_thesis_ref`。每个 Attempt pin 确切 `ChangeThesis revision + digest`；thesis 改变必须创建 successor attempt，不能覆盖 WorkUnit pointer。current/active thesis 只能从 active attempts 确定性派生；并发 refs 不同必须显示集合/冲突，不能 latest-wins。
+WorkUnit 只有 immutable `initial_change_thesis_ref`。每个 Attempt pin 确切 `ChangeThesis revision + digest`；thesis 改变必须在旧 Attempt terminal 和 LeadCheckpoint 接受后创建 successor，不能覆盖 WorkUnit pointer。current/active thesis 只能从零或一个 active Attempt 确定性派生；历史 refs 不同必须保留 provenance，不能 latest-wins。
+
+LeadCheckpoint 不复制 TaskRevision、EvidenceRecord、GateEvaluation、Finding 或 AggregateOutcome truth。它只通过 exact refs 保存 coordinator selection、分层 assessment、Delivery/Assurance delta、decision 和 next trigger，并以原子 compare-and-append 维持唯一 lineage tip；fork 或多个 tip fail closed。LeadControl 只在这些权威 facts 上执行 `reconcile(authoritative_facts, trigger) -> LeadDecision`，不成为新的 goal/evidence/gate 事实源。
+
+`lead_control_id` 不等同 AgentInstance/LeadSession/runtime。每条 lineage 只有 project/policy/writer-bound 的唯一 accepted genesis；每个 checkpoint/dispatch/Attempt pin exact control ID。每个 LogicalLead/Task 任一时刻最多属于一个 open lineage queue，且最多由一个 tip active-selected。每个 active LeadSession 还必须 pin 由 trusted runtime identity provider 解析的 canonical `lead_runtime_subject_ref + assertion_digest`；同一 project/runtime subject 最多绑定一个 active session，即使使用不同 AgentInstance ID/别名也视为同一 executor。
+
+genesis 顺序固定为：trusted provider 先解析 canonical runtime subject；受控 writer 随后在一个原子操作中 claim `lead_control_id`、绑定唯一 active LeadSession/runtime subject，并创建 accepted genesis LeadCheckpoint。genesis 必须保存 active session generation 与 subject assertion；不得接受 session-less/subject-less genesis 再回填，也不得在原子操作失败后留下 claimed ID、active session、accepted checkpoint 或可 dispatch 半状态。
+
+controlled writer 必须跨 project 内所有 open lineages 原子校验 Task ownership 与 runtime-subject binding，并在 checkpoint acceptance、session activate/replace 和 dispatch 前执行。Task transfer 必须由旧 checkpoint release/relinquishing-suspend 后，新 checkpoint 以 exact provenance acquire；executor transfer 必须 old session terminal/release 后 new successor/bind，或以受控原子 transfer 同时完成。重复 genesis、双 ownership、同 runtime subject 双 control active binding、双 active LeadSession 或非当前 session dispatch fail closed。
+
+每个需要 work 的 TaskRevision 恰好一个 root WorkUnit，其他 WorkUnit 通过 parent tree 从 root 可达；dependency refs 只是同 revision 内的额外 DAG ordering。multiple root、orphan、cycle 或 cross-revision edge 无效。
+
+failure/finding fingerprint 只能由 LeadControl/受控 writer 在 Attempt terminal 后产生并写入 accepted LeadCheckpoint。`fingerprint_identity_basis` 是唯一 hash 输入：canonicalization version、TaskRevision/WorkUnit scope、typed category/code、stable Finding identity，或非 Finding failure 的 stable test/rule/check identity + stable signal subject identity + normalized failure code。
+
+每轮变化的 terminal Attempt、当前 Finding/GateEvaluation/test/validator outcome refs+digests、authoring checkpoint 和 ordered prior Attempt chain 只属于 `fingerprint_supporting_provenance`，不参与 fingerprint hash。Finding message、free text、path/order、`lead_control_id`、Attempt/checkpoint/session/AgentInstance 和 outcome record identity/digest 也不进入 hash。writer 必须验证 supporting provenance 支持 identity basis，并跨 checkpoints 与 Task transfer provenance 检查 prior chain；chain 只用于计数和 retry authorization scope。相同 stable test/check signal 即使 Attempt/outcome record 不同也必须得到同一 fingerprint；stable Finding identity 相同而 GateEvaluation 更新也必须相同；typed code 或 stable signal identity 不同则 fingerprint 不同。identity/provenance/chain 无法证明时 freeze，不得自动视作新 failure。
+
+第三次相同 failure/finding fingerprint retry 只能使用 provider-verified、create-only immutable `AuthorizationRecord`，semantic action 为 `task.retry.override`，scope digest exact bind project/TaskRevision/WorkUnit/fingerprint/prior Attempt chain/authorizing checkpoint/`lead_control_id`；Lead/agent 自报、opaque ref 和 replay 无效。wall-clock fallback 只能来自 exact active ProjectPolicyRevision orchestration policy 或其授权的 immutable record，LeadCheckpoint pin exact ID/digest；mutable config 或 stale digest fail closed。
 
 GateEvaluation 是 evaluator verdict/answers 的唯一事实源，Finding 是 finding body/identity 的唯一事实源。review/test EvidenceRecord 只保存 submission provenance。每个 GateEvaluation 必须直接绑定 `evaluator_attempt_id` 和同 attempt submission EvidenceRecord，同时 pin subject TaskRevision、一个或多个 subject WorkUnit、全部 subject implementation Attempt/EvidenceRecord refs，以及 GateRequirement 要求的 repository snapshot/derived CodeSurface digest；不得重载一个 `work_unit_id` 同时表达 evaluator 与 subject。
 
@@ -131,8 +152,22 @@ Cutover 必须删除或使下列路径无法继续写入、读取或关闭权威
 - 没有 `WorkUnitAttempt` / `attempt_id` 的正式 EvidenceRecord；
 - 先创建 WorkUnitAttempt、再 patch `assigned_rule_resolution_id`，或从 snapshot 字段和 lifecycle event 双写 start/status；
 - 把 agent、assignment、context generation、authority 或 status 原地覆盖到稳定 WorkUnit；
-- 把可覆盖 current ChangeThesis ref 写入 WorkUnit，或用 latest attempt 静默覆盖并发 thesis；
+- 把可覆盖 current ChangeThesis ref 写入 WorkUnit，或用 latest attempt 静默覆盖历史 thesis refs；
 - 用可覆盖 roster/current-worker 列表替代 append-only attempt history；
+- 同一 `lead_control_id` 同时存在多个 non-terminal WorkUnitAttempt，或让 implementation、review、test、research、release 并行；
+- 把 AgentInstance/LeadSession/runtime identity 当成 control identity、为同一 Task 创建第二 `lead_control_id`/genesis，或接受未经受控 writer 原子写入的 checkpoint；
+- 在 trusted provider 解析 runtime subject/绑定 active LeadSession 前接受 genesis，或原子创建失败后留下 claimed control/session/checkpoint 半状态；
+- 同一 LogicalLead/Task 同时属于多个 open control queues，transfer 缺 old release/suspend → new acquire provenance，或不同 control lineages 以重叠 task sets 并行；
+- 同一 `lead_control_id` 有两个 active LeadSession，replacement 不 terminal old/原子 successor，或非当前 session dispatch；
+- 同一 provider-verified runtime subject 以相同或不同 AgentInstance ID 同时绑定两个 control IDs，或仅比较 AgentInstance 字符串而接受第二个 session activation/dispatch；
+- coordinator facts 损坏时仍允许同一 Task/WorkUnit 出现第二个 non-terminal Attempt；
+- TaskRevision 有 multiple root/orphan WorkUnit，或 parent/dependency cross-revision/cycle；
+- 第三次同 fingerprint retry 接受 Lead/agent 自填、opaque、scope 不完整或可 replay 的 authorization ref；
+- fingerprint 把 Attempt/checkpoint/GateEvaluation/test/validator outcome record ID/ref/digest 混入 identity hash，接受 agent/free-text/message wording，因 rename/reorder/AgentInstance alias 改变 identity，遗漏跨 checkpoint/transfer prior chain，或稳定 signal identity/provenance 不可证明时自动当作新 failure；
+- wall-clock fallback 从 mutable project config/环境值读取，或 checkpoint 不 pin active policy/authorized record exact ID/digest；
+- active Attempt 未 terminal 时切换 Task，或没有当前 LeadCheckpoint/predecessor binding 就创建、dispatch successor；
+- LeadCheckpoint 原地覆盖、按时间 latest-wins、lineage fork 后继续运行，或复制 task/evidence/gate truth；
+- Work Agent 自行创建/dispatch child work，或修改 task queue、priority、active Task、selected WorkUnit；
 - `decomposition.child_slices` 与 WorkUnit 并行表达运行时工作分解；
 - `parent_goal` 与 root WorkUnit 并行表达目标恢复；
 - `.orbit/instances.yaml` 或静态配置作为 live team roster；
@@ -209,6 +244,10 @@ next_action: choose_clean_orbit_v2_root
 8. repository-wide closure audit 证明旧路径不能再写权威 artifact，混合 epoch 不能继续运行。
 9. validator 证明 protected gate lineage、parent-authority approval 和 unresolved Finding 不能被 revision-hop 绕过。
 10. GateRequirement subject selector、GateEvaluation canonical subject/freshness/producer independence 和 immutable record lifecycle 具有正负向测试。
+11. ADR-006 的 provider-subject/session/control/genesis atomic create、stable `lead_control_id`/unique genesis、provider-verified runtime-subject project-wide active-session uniqueness/transfer、strict single-active LeadSession/Task/WorkUnit/Attempt validator、unique-root/reachability、checkpoint-before-dispatch、terminal-predecessor binding、single-writer control 和 checkpoint fork recovery 已闭合。
+12. project-wide writer/validator 已在 checkpoint acceptance、session activate/replace 和 dispatch 前闭合 cross-lineage Task ownership/transfer、canonical executor subject binding、task+executor disjoint parallelism 与 per-Task/per-WorkUnit non-terminal Attempt backstop。
+13. `fingerprint_identity_basis`/`fingerprint_supporting_provenance` hash-domain separation、stable-signal equivalence/difference、跨 checkpoint/transfer prior-chain、unknown-identity freeze、provider-verified `task.retry.override` exact scope/replay guard 与 active-policy-pinned wall-clock fallback 具有正负向测试。
+14. repository-wide closure audit 证明不存在绕过 LeadControl/LeadCheckpoint/control registry 的 legacy parallel dispatch、duplicate genesis、task switch、Task double ownership 或 current-worker 路径。
 
 在完成这些条件前，不能把部分 v2 字段加入 v1 正式 API，也不能提前修改 runtime reference 声称 v2 已生效。
 
@@ -226,6 +265,7 @@ next_action: choose_clean_orbit_v2_root
 - 让 review EvidenceRecord 与 GateEvaluation 同时拥有 verdict；
 - 让 subject-less/stale GateEvaluation 关闭后来实现，或原地改 verdict/finding；
 - 让 AggregateOutcome 成为可直接写入的状态；
+- 允许同一 control lineage 的并行 active Attempt、同一 Task 被多 lineage 持有、同一 runtime subject 以 AgentInstance 别名跨 lineage 同时 active，或保留绕过 LeadCheckpoint/control registry 的 legacy dispatch path；
 - 以“deprecated”名义继续让旧路径写权威状态；
 - 为减少一次性改动而让新旧事实源长期并存。
 
