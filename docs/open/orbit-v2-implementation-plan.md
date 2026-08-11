@@ -57,8 +57,8 @@ ADR-006 control contract、Slice 1 exact refs/single-active validator 和 Slice 
 
 | 增量 | 范围 | 依赖 |
 | --- | --- | --- |
-| 1 控制身份锚 | registry claim + model-level accepted genesis final-state closure + LeadSession required pins + 单 lineage checkpoint 血缘/pins/writer provenance/初始 task ownership/queue/最小 typed decision-trigger | 仅 Slice 0/1 事实 |
-| 2 最小可恢复闭环 | store-backed dispatch（existence/tip/selection）；active selection/current attempt/四层 assessment/progress 字段；recovery（唯一 tip 重建、连续性 fail-closed、三态互斥归位、禁补造、幂等）；`reconcile` 核心 + 基础止损；同 lineage session 替换；event trigger 全量 | 增量 1 |
+| 1 控制身份锚 | registry claim + model-level accepted genesis final-state closure + LeadSession required pins + 单 lineage checkpoint 血缘/pins/writer provenance/初始 task ownership/queue | 仅 Slice 0/1 事实 |
+| 2 最小可恢复闭环 | store-backed dispatch（existence/tip/selection）；active selection/current attempt/四层 assessment/progress 字段；最小 typed `lead_decision`/`next_trigger`（与 `reconcile`/event trigger 同增量落地）；recovery（唯一 tip 重建、连续性 fail-closed、三态互斥归位、禁补造、幂等）；`reconcile` 核心 + 基础止损；同 lineage session 替换；event trigger 全量 | 增量 1 |
 | 3 跨 lineage 与 transfer | task ownership disjoint、subject 跨 lineage active 唯一（含别名）、Task release/acquire、executor 跨 lineage transfer；移除 `unsupported_multi_lineage` 临时拒绝 | 增量 1-2 |
 | 4 anomaly/fuse/预算机制（完成 Slice 2） | fingerprint（含 Finding 分支，复用现有 stable Finding identity；typed blocking 分类属 Slice 4，不阻塞 fingerprint）、prior chain、`task.retry.override`、policy-pinned fallback + `checkpoint_due`、delegation envelope、budget 派生链、两层累计/measurements（`unverified_assessment` pending 为默认 forward 状态，未 review 时 adjust/closure fail closed）、bounded runner、`closure_basis_digest` 冻结与重算 | 增量 1-3 |
 
@@ -200,8 +200,8 @@ LeadControl 只消费上述 authoritative facts，并通过 `reconcile(authorita
 
 按「Slice 2 增量化交付」节，本 slice 拆为增量 1→4。下方「原 Slice 2 规范条目」保留全部原交付物/完成条件/负向验收文本作为规范正文，归属映射如下（增量 1 立即实施，其余按依赖顺序）：
 
-- **增量 1（控制身份锚）**：live roster 与静态配置分离复核；provider 先解析 canonical runtime subject + model-level accepted genesis final-state closure（真实事务原子性证明边界见增量化交付节，Slice 6 闭合）；provider-verified subject resolution；每 `lead_control_id` 最多一个 active LeadSession；checkpoint 身份/血缘/pins/writer provenance/初始 task ownership/queue/最小 decision-trigger 字段；duplicate genesis、自报 writer、缺 provider subject/session binding、非原子 create 均不 accepted；checkpoint 不复制 task/evidence/gate truth（schema 禁字段）。
-- **增量 2（最小可恢复闭环）**：AgentInstance/LeadSession 替换语义；roster/assignment/replacement history 派生复核；coordinator-level ordered task queue projection；`LeadControl.reconcile` 深模块核心；event triggers；四层自检 seam；Delivery/Assurance 分离、assurance-only freeze、non-preempting hardening；首轮/两轮零 Delivery delta fuse 与立即 freeze（基础规则）；durable lead context/handoff/recovery 与 fork fail-closed；session 连续性 fail-closed；Work Agent single-writer；Task switch 边界；recovery 三态互斥归位/幂等/禁补造。
+- **增量 1（控制身份锚）**：live roster 与静态配置分离复核；provider 先解析 canonical runtime subject + model-level accepted genesis final-state closure（真实事务原子性证明边界见增量化交付节，Slice 6 闭合）；provider-verified subject resolution；每 `lead_control_id` 最多一个 active LeadSession；checkpoint 身份/血缘/pins/writer provenance/初始 task ownership/queue 字段；duplicate genesis、自报 writer、缺 provider subject/session binding、非原子 create 均不 accepted；checkpoint 不复制 task/evidence/gate truth（schema 禁字段）。
+- **增量 2（最小可恢复闭环）**：AgentInstance/LeadSession 替换语义；roster/assignment/replacement history 派生复核；coordinator-level ordered task queue projection；`LeadControl.reconcile` 深模块核心；最小 typed `lead_decision`/`next_trigger`（与 `reconcile`/event trigger 同增量落地）；event triggers；四层自检 seam；Delivery/Assurance 分离、assurance-only freeze、non-preempting hardening；首轮/两轮零 Delivery delta fuse 与立即 freeze（基础规则）；durable lead context/handoff/recovery 与 fork fail-closed；session 连续性 fail-closed；Work Agent single-writer；Task switch 边界；recovery 三态互斥归位/幂等/禁补造。
 - **增量 3（跨 lineage 与 transfer）**：跨 lineage Task ownership 与 runtime-subject active binding 原子复核（别名同 executor）；release/suspend → acquire、terminal/release → successor/bind exact transfer provenance；双 active/双 queue/双 tip/重叠并行 fail-closed；移除 `unsupported_multi_lineage` 临时拒绝。
 - **增量 4（anomaly/fuse/预算机制，完成 Slice 2，Slice 3 前）**：wall-clock fallback（policy-pinned，只产生 `checkpoint_due`）；fingerprint identity basis/supporting provenance/prior chain（含 Finding 分支——复用现有 stable Finding identity；typed blocking 分类属 Slice 4，不阻塞 fingerprint）；`task.retry.override`；round fuse 完整化；delegation envelope；`closure_basis_digest` 冻结与派生链（`budget_adjustment_digest`→`effective_budget_bindings`→`effective_verification_plan_digest`→`closure_basis_digest`）；两层 budget 累计/measurements（`unverified_assessment` pending 为默认 forward 状态，未 review 时 adjust/closure fail closed）；bounded runner 与 continuation envelope。`unverified_assessment` 独立评审准入（review_status=accepted/rejected 消费 `budget_assessment_result`）归入 Slice 4「control consumer closure」，不构成 Slice 2 完成前置。
 - **Slice 0/1 已闭（本 slice 复核，不新增）**：静态配置非 live team；roster 从 attempts 重建；project-wide Attempt backstop；review/test 与 implementation 串行。
@@ -213,8 +213,8 @@ LeadControl 只消费上述 authoritative facts，并通过 `reconcile(authorita
 - LeadSession：required `lead_control_id` + canonical `lead_runtime_subject_ref` + `lead_runtime_subject_assertion_digest`（provider-verified）；不做 nullable/未绑定 session 兼容；既有 fixture 更新属 clean cut。
 - LeadControlRegistry：claim、`genesis_checkpoint_ref+digest`、writer authority provenance（active policy `control.genesis`/`control.checkpoint` grant 或 policy 授权 immutable record）、初始 task ownership/queue。
 - **queue 单一事实源**：registry `owned_task_refs` 是 project-scoped Task ownership 权威；checkpoint 初始 task ownership/queue 必须 exact match registry claim，后续 queue 仅为该权威下的可恢复 projection（随 release/acquire transfer provenance 演化，增量 3）；registry 与 checkpoint 不得各自拥有 queue truth。
-- LeadCheckpoint（genesis/lineage 形态）：身份/血缘（`is_genesis`、`predecessor_lead_checkpoint_ref`、`content_digest`）、policy/session/subject pins、writer provenance、初始 task ownership/queue、最小 typed `lead_decision`/`next_trigger`（成员随消费者扩展）。
-- **不落地**：active selection/current attempt、四层 assessment、progress、fingerprint、budget、`checkpoint_due` —— 消费者分别在增量 2/4，随消费方落地（不以"形状校验"冒充消费者）。
+- LeadCheckpoint（genesis/lineage 形态）：身份/血缘（`is_genesis`、`predecessor_lead_checkpoint_ref`、`content_digest`）、policy/session/subject pins、writer provenance、初始 task ownership/queue。`lead_decision`/`next_trigger` 不落地（消费者在增量 2 `reconcile`/event trigger）。
+- **不落地**：active selection/current attempt、四层 assessment、progress、`lead_decision`/`next_trigger`、fingerprint、budget、`checkpoint_due` —— 消费者分别在增量 2/4，随消费方落地（不以"形状校验"冒充消费者）。
 
 手工语义场景（最多 9 个，一行为一场景；结构性 missing/type/null/unknown 与禁字段由既有 schema parity 自动覆盖，不重复计）：
 
@@ -232,7 +232,7 @@ LeadControl 只消费上述 authoritative facts，并通过 `reconcile(authorita
 
 ### 增量 2/3/4：范围与顺序
 
-- 增量 2：store-backed dispatch（existence/tip/selection）、active selection/current attempt/四层 assessment/progress 字段（随 dispatch/recovery 消费者落地）、recovery、`reconcile` 核心 + 基础止损、同 lineage session 替换、event trigger 全量。fingerprint 未落地前，凡依赖 fingerprint 判定的决策一律 frozen/escalate（ADR-006），禁止以 predecessor 计数冒充相同 fingerprint 进入 `needs_user`。
+- 增量 2：store-backed dispatch（existence/tip/selection）、active selection/current attempt/四层 assessment/progress 字段（随 dispatch/recovery 消费者落地）、最小 typed `lead_decision`/`next_trigger`（随 `reconcile` 落地）、recovery、`reconcile` 核心 + 基础止损、同 lineage session 替换、event trigger 全量。fingerprint 未落地前，凡依赖 fingerprint 判定的决策一律 frozen/escalate（ADR-006），禁止以 predecessor 计数冒充相同 fingerprint 进入 `needs_user`。
 - 增量 3：跨 lineage 原子复核与 transfer（见归属映射）。
 - 增量 4：完成 Slice 2（Slice 3 前落地）；`unverified_assessment` 独立评审准入归入 Slice 4「control consumer closure」（见 Slice 4 段）。
 
