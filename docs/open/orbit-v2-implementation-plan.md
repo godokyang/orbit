@@ -49,6 +49,18 @@ ProtocolRoot(orbit-v2)
 
 ADR-006 control contract、Slice 1 exact refs/single-active validator 和 Slice 2 `lead_control_id`/registry/LeadCheckpoint/LeadControl design 未冻结前，不继续扩大 Evidence/Validator substrate，也不进入 runtime 实现。当前 Slice 0 schema 不具备 WorkUnit parent/dependency refs、Attempt predecessor/dispatch checkpoint binding、stable control identity/ownership、LeadCheckpoint 或 LeadControl；本计划不得把它们描述为既有能力。
 
+### Agent-independent control amendments（owner approved 2026-08-11）
+
+设计来源：[orbit-v2-agent-independent-control-amendments](./orbit-v2-agent-independent-control-amendments.md)（Integrated / historical design source；runtime 未实现）。**规范以 ADR-003（决策九）、ADR-004（决策七）、ADR-005（实施约束 15-17）、ADR-006（Amendment 节）为语义合同**；本 plan 各 slice 段只列交付物/验收并引用 ADR，历史设计稿仅作 provenance，实现者无需穿越。交付物、完成条件与负向/E2E 验收已分别落地到本 plan 的 Slice 2/3/4/5/6 段（各段"Agent-independent amendment 增量"小节）：
+
+- **pre-Slice docs freeze**：实现不得偏离上述 ADR 条款，也不得把 amendment 条款回填为"Slice 0 schema 已具备"。
+- **Slice 1（保持原设计，不变）**：WorkUnit exact parent/dependency refs、唯一 root、parent tree 可达、dependency DAG/readiness；WorkUnitAttempt exact `lead_control_id`、terminal predecessor、dispatch LeadCheckpoint ref；single-active。**不加无消费者 placeholder**：`dispatch_lead_checkpoint_ref` 只做格式/链内一致性校验，store-backed 存在性/tip/selection 校验随 Slice 2；不建 LeadCheckpoint schema/collection。Slice 1 proposal 的 schema 版本、error code、测试计划不受本 amendment 影响。
+- **Slice 2**：delegation envelope、`closure_basis_digest`、`budget_adjustment_digest`/`effective_verification_plan_digest` 派生链、两层 test budget、bounded runner、continuation envelope、recovery —— 详见 Slice 2 段。
+- **Slice 3**：`verification_class` 与 `verification_use` 结构化配对 —— 详见 Slice 3 段。
+- **Slice 4**：Finding typed basis 与 blocking 派生 —— 详见 Slice 4 段。
+- **Slice 5**：只投影（digest 视图、budget 两层 projection）—— 详见 Slice 5 段。
+- **Slice 6**：E2E/cutover 覆盖 amendment 条款 —— 详见 Slice 6 段。
+
 ## 权威边界
 
 | 事实 | Writer / Owner | 消费者 |
@@ -188,6 +200,42 @@ LeadControl 只消费上述 authoritative facts，并通过 `reconcile(authorita
 - review/test 与 implementation 串行，但 Gate authority 与 evaluator independence 不降低；
 - round threshold 只作为 safety fuse；scope/blast radius/review surface/goal relation 失控时不等 round 计数即 freeze。
 
+### Agent-independent amendment 增量（Slice 2）
+
+引用 ADR-004 决策七、ADR-006 Amendment 节；不重复整段规范，只列本 Slice 可验收条款。
+
+交付物：
+
+- ProjectPolicy delegation envelope：policy 定义 budget default/ceiling，Lead 在 envelope 内自治（ceiling 内 `test.budget.adjust`、agent/context 选择、继续/暂停），决策写入 accepted checkpoint，不问用户；
+- `closure_basis_digest`：dispatch 时冻结，完成标准变化分级——acceptance/evidence/gate 变化必须 authorized `TaskRevision`/`GateRequirement` revision；thesis/scope/verification-plan 变化只产生 successor basis，不得改写 TaskRevision 完成标准；
+- 派生链：`test.budget.adjust` typed payload → `budget_adjustment_digest` → 进入对应 binding 的 `lead_adjustment` source（optional，仅当前 adjustment 存在时；无则明确 absent）→ 完整 ordered `effective_budget_bindings` → `effective_verification_plan_digest` → 纳入 `closure_basis_digest`（adjustment digest 不直接进入 plan digest）；checkpoint 自身不进入任何上游派生预像；**plan/basis digest 始终被 checkpoint identity/content digest 覆盖，`budget_adjustment_digest` iff present 时同为正文字段并受覆盖**；checkpoint 始终 pin plan/basis digest，`budget_adjustment_digest` 仅当前 adjustment 存在时 pin；预像/hash domain 规范见 ADR-004 决策七；checkpoint pin source refs+digests；context projection 重算/下发；capability 匹配（test-write/verification-submit/gate-close）；
+- test budget：canonical `effective_budget_bindings`（恰好两项、固定顺序 `work_unit_lineage`/`task_lineage`、各 scope 唯一；语义见 ADR-004 决策七，authority 见 ADR-006 Amendment 节）与 `test.budget.override`（provider-verified AuthorizationRecord 预先存在，consuming checkpoint 只引用）；两层分别校验；
+- bounded runner：同一公开命令串行驱动，四互斥停止状态（completed/blocked/frozen/needs_user），每次 reconcile 恰一态、无隐式转换；
+- automatic continuation envelope：round 是 safety fuse，Lead ceiling 内自主调整，超限分类互斥（需 user authority → needs_user；可自动 replan 控制异常 → frozen）；
+- recovery：trigger/provenance/idempotency、缺资料三态互斥归位、禁补造、不重复副作用、不绕预算/gate。
+
+完成条件：
+
+- Lead 在 ceiling 内 adjust 产生 checkpoint 内 typed payload（`budget_adjustment_digest` 独立 canonicalize 且预像排除 checkpoint 自身）且不触发 needs_user；
+- 超 ceiling 无 override、第三次同 fingerprint 无 retry override 唯一进入 needs_user（不进入 frozen）；frozen 仅限 Lead 可自动 replan 的控制异常；
+- 同一 Attempt 完成标准不可移动：完成标准变化只能经 authorized revision；successor basis 不改变 TaskRevision 完成标准引用；
+- optional adjustment payload → `budget_adjustment_digest` → 对应 binding（仅当前 adjustment 存在时）→ 完整 ordered `effective_budget_bindings` → `effective_verification_plan_digest` → `closure_basis_digest` 单向派生且任一级重算 byte-identical；checkpoint ID/content digest 不进入任何上游派生预像；**plan/basis digest 始终被 checkpoint identity/content digest 覆盖，`budget_adjustment_digest` iff present**；override AuthorizationRecord 预先存在且被消费 checkpoint 引用；不存在可写的 plan truth 对象；
+- 两层预算在 retry/换 agent/session/control/对话后连续累计；拆 WorkUnit 不清零；override 缺 provider issuer/scope 不匹配/跨层或跨 scope 重放时 fail closed；
+- `effective_budget_bindings` 恰好两项、固定顺序、各 scope 唯一：default-only dispatch 与两 scope 同时有效的 dispatch 均可 byte-identical 重算；old/new 校验只适用于 current adjustment 的 authoring checkpoint（`adjust.old_effective_budget` 等于该 scope 在 authoring checkpoint 时的前一 binding 且 `new` 在 policy ceiling 内），inherited adjustment 验证 origin payload 在 origin 当时与其 predecessor 匹配、当前 effective ceiling 等于 origin 的 `new`、accepted lineage 连续且无 superseding source；无 adjustment 时 `budget_adjustment_digest` 明确 absent；旧有效调整/override 沿 accepted lineage 精确引用，不 latest-wins；
+- 每个 binding 的 `measurements.test_count`/`measurements.test_code_lines`（固定键序）各自 `status=verified|unverified`：verified 必须 `usage>=0` + exact provider/snapshot ref+digest；unverified 必须 usage/ref/digest 为 canonical null + typed `unverified_assessment`（固定字段顺序 `lead_disposition`/`lead_reason_code`/`lead_supporting_refs`/`review_status`/`review_gate_evaluation_ref`；disposition 与 review_status exact mapping：pending→`proceed_pending_independent_review`、accepted→`proceed_after_independent_review`、rejected→`replan_after_independent_rejection`，unknown/mismatch fail closed；`lead_supporting_refs` sorted unique exact ref+digest；`review_status=pending|accepted|rejected`，pending 时 review ref canonical null、accepted/rejected 时必须 exact independent GateEvaluation ref+digest 且该 GateEvaluation 携带 `budget_assessment_result` 绑定被评 binding 所在的前序 accepted checkpoint（`assessed_checkpoint_ref+digest=C_pending`、`assessed_effective_budget_binding_digest`；outcome 与 review_status/lead_disposition exact mapping；纳入 canonical subject manifest；GateRequirement selector 明确要求 budget assessment；构造顺序单向——`C_pending` → 独立评审 → successor 消费，不得绑定消费 checkpoint 自身；**stale 判定用 `budget_review_subject_projection` byte-identical（仅三 review-result 字段按 outcome 映射），不得要求完整 binding digest 相等**）且 independence 成立、same-checkpoint circular ref/跨 checkpoint/无关 evaluation fail closed）；**数值预算机械 pass/overrun 只对 verified metric 派生**；default dispatch 可 `unverified_pending_review`（绝不派生 within/over budget），accepted 后仍是 unverified（仅比例性审查通过），rejected → frozen/replan；**授权（adjust/override）不携带 measurement**：只绑定 predecessor checkpoint ref+digest 与该 scope 的 predecessor binding digest 间接冻结观测，writer 对新 checkpoint 的 current measurements 单独派生并以新 ceiling 判定；user override source 用 `mode=consume|inherit`（consume 首次消费并成为 origin_consuming_checkpoint；inherit 绑定 origin + 原 record 沿同 project/policy/TaskRevision/scope/`lead_control_id` 连续 accepted lineage、ceiling 不变且无 superseding source）；lead_adjustment 保持 current/inherited 精确区分；依赖独立 review 的 unverified budget adjust 与 closure 在 Slice 4 GateEvaluation 落地前 fail closed，最终 cutover 时 unverified adjust 与 closure 前必须 `review_status=accepted`；
+- recovery 缺资料时按三态互斥归位（blocked/frozen/needs_user），无双状态表述；不补造正文。
+
+负向验收（至少）：
+
+- 缺 `test.budget.override`、scope 不匹配（含 budget_scope_type 不符、WorkUnit override 放宽 task 总预算）或跨层重放的越 ceiling dispatch 被拒；
+- `budget_adjustment_digest` 预像含 enclosing checkpoint ID/content digest（自引用）时 fail closed；
+- `effective_budget_bindings` 漏任一 scope、重复 scope、乱序、错误 null、非法 source 组合、混用 source fields，或缺任一 scope 的预算事实时 fail closed；无 adjustment 却伪造空 `budget_adjustment_digest` 时 fail closed；
+- measurement 字段缺/混合、unverified 带数值、verified 缺 ref/digest、把 unknown 当 0 时 fail closed；`unverified_assessment` 缺字段/顺序错、disposition/review_status mismatch 或 unknown、pending 带 review ref、accepted/rejected 缺 ref、非独立 evaluator、把 pending 当 within-budget、未 review 就 unverified adjust/closure 时 fail closed；
+- override 第二次 consume、跨 lineage/task/policy/scope inherit、跳过 origin consuming checkpoint、inherit 改变 ceiling 或存在 superseding source 时 fail closed；adjust/override 携带 measurement tuple（把观测当授权事实）时 fail closed；inherited adjustment 当前 effective ceiling ≠ origin `new`、origin payload 与 origin 当时 predecessor 不匹配或 lineage 不连续时 fail closed；
+- 同一 checkpoint 派生 digest 在不同 Attempt context projection 中不一致时 evidence 不能关闭 requirement；
+- 缺权威正文时 recovery 拒绝继续且状态为 blocked/frozen/needs_user 之一，不得合成正文；
+- 完成标准变化绕过 authorized revision 时 fail closed。
+
 ## Slice 3：Content-addressed Rules 与逐记录 EvidenceRecord
 
 交付物：
@@ -214,6 +262,28 @@ LeadControl 只消费上述 authoritative facts，并通过 `reconcile(authorita
 - EvidenceRecord 同 ID 异内容、覆盖或删除时 fail closed；supersedes 不能让旧 referenced record 消失；
 - 同文件权限篡改仍按 audit-only 诚实报告，不声称不可伪造。
 
+### Agent-independent amendment 增量（Slice 3）
+
+引用 ADR-004 决策七（字段/hash/state 规范定义以 ADR 为准，本节省略）。
+
+交付物：
+
+- `EvidenceRequirement.verification_class`（`regression` / `release_audit` / `acceptance_evidence`，三类互斥），dispatch 时随 closure basis 冻结；
+- `EvidenceRecord.implementation_check.evidence_requirement_results[].verification_use` 结构化字段（固定设计，非顶层）：`permanent_test_evidence` / `audit_record_evidence` / `acceptance_proof_evidence`；单个 record 可按不同 result 同时满足不同 verification_class。
+
+完成条件：
+
+- validator 只校验结构化兼容：按 result 的 `evidence_requirement_id` 解析 requirement class → exact class/use 配对 → result 的 evidence_refs 解析到兼容 `ArtifactClaim.kind`（permanent→verification；audit/acceptance→report）；**不解析、不判断自由文本里的动态数据或稳定 signal**；
+- 缺 use、未知 use、错配、引用不兼容 claim kind 全部 fail closed；
+- 事实分类（稳定规则 vs 数据快照 vs 一次性复现）由 Lead/reviewer 语义判断并留 provenance。
+
+负向验收（至少，全部为纯结构化不兼容）：
+
+- `verification_class=regression` 的 requirement 被 `verification_use=acceptance_proof_evidence` 的 result 关闭时被拒；
+- `verification_class=acceptance_evidence` 的 requirement 被 `verification_use=permanent_test_evidence` 的 result 关闭时被拒；
+- `verification_use=audit_record_evidence` 的 result 被计入永久测试或回归证据时被拒；
+- result 的 evidence_refs 解析到不兼容 `ArtifactClaim.kind`（如 permanent 指向 report claim）时被拒。
+
 ## Slice 4：GateRequirement、GateEvaluation 与 Finding Resolution
 
 交付物：
@@ -239,6 +309,7 @@ LeadControl 只消费上述 authoritative facts，并通过 `reconcile(authorita
 - subject refs 不完整/未 accepted/stale、subject digest/snapshot/surface 不匹配，或 evaluator 对任一 producer 不独立时不能关闭 gate；
 - subject implementation/evidence/snapshot 改变后旧 pass 不能关闭新结果；
 - EvidenceRecord 中的 reviewer/tester verdict/finding 不得被提升或与 GateEvaluation 双写；
+- `budget_assessment_result`：评审 unverified measurement 的 GateEvaluation 绑定被评 binding 所在的前序 accepted checkpoint（`assessed_checkpoint_ref+digest=C_pending`、`assessed_effective_budget_binding_digest`、scope/control/metric statuses），`outcome=accepted|rejected` 与 `review_status`/`lead_disposition` exact mapping，subject/result 纳入 canonical subject manifest/digest，GateRequirement selector 明确要求 budget assessment；构造顺序单向（`C_pending` → 独立评审 → successor `C_reviewed` 消费，不得绑定自身）；`review_gate_evaluation_ref` 仅在 exact subject/result match、not stale（`budget_review_subject_projection` byte-identical：仅三 review-result 字段按 outcome 映射，其他字段变化即 stale；不得以完整 binding digest 相等为 fresh 依据）、evaluator independent 时有效；
 - `addressed` 必须有 implementation proposal、authorized evaluator attempt/submission/rule context 和 supporting refs；
 - `disproved` 必须绑定 authorized evaluator/adjudicator attempt/submission/rule context/反证；`waived` 必须绑定 active policy/TaskRevision authorization record；
 - overwrite/delete/same-ID-different-content 无效，supersedes 不关闭旧 blocking Finding；
@@ -246,6 +317,33 @@ LeadControl 只消费上述 authoritative facts，并通过 `reconcile(authorita
 - Lead 不能用 revision-hop 降级 gate、自授 authority 或清除 Finding；
 - Gate Engine 只验证 authority、requirements 和 resolutions，并派生 closure；
 - question/acceptance 字段存在或数量不能单独关闭 gate。
+
+负向验收（至少）：
+
+- 引用普通无关 GateEvaluation（无 `budget_assessment_result` 或 subject 不匹配）作为 unverified adjust/closure 的 review 依据时被拒；
+- same-checkpoint circular ref（evaluation 绑定消费它的 checkpoint 自身）、跨 checkpoint/跨 binding 引用、successor 引用非 predecessor 的 assessment 时被拒；
+- **以完整 binding digest 相等作为 fresh 依据（把合法 successor 判 stale）时被拒**；除三 review-result 字段（review_status/lead_disposition/review_gate_evaluation_ref）外任一字段变化却复用评审（projection 不 byte-identical）时被拒；
+- `budget_assessment_result` 的 assessed checkpoint/scope/control/outcome 与 `unverified_assessment` 不一致、subject 已 stale、evaluator 非独立，或 GateRequirement selector 未明确要求 budget assessment 时被拒。
+
+### Agent-independent amendment 增量（Slice 4）
+
+引用 ADR-004 决策七。
+
+交付物：
+
+- Finding typed basis：`contract_violation` / `regression` / `newly_discovered_risk` / `hardening_opportunity`；
+- Gate Engine 按 active policy 映射派生 blocking：`contract_violation`/`regression` 默认 blocking；`newly_discovered_risk` 需 risk-owner/user 裁决（否则 needs_user）；`hardening_opportunity` 默认非阻塞，进非抢占 WorkUnit；
+- **unverified measurement 的独立 review 落地（非循环构造顺序）**：`unverified_assessment.review_status=accepted|rejected` 依赖 exact independent `GateEvaluation` ref+digest（ADR-006 Amendment 节准入），且该 GateEvaluation 携带 `budget_assessment_result` 绑定**被评 binding 所在的前序 accepted checkpoint**（`assessed_checkpoint_ref+digest=C_pending`、`assessed_effective_budget_binding_digest`、scope/control/metric statuses、typed `outcome=accepted|rejected`；纳入 canonical subject manifest/digest；GateRequirement selector 必须明确要求 budget assessment，不得复用普通 implementation gate）；顺序：先接受 `C_pending`（pending、review ref null）→ 独立评审 `C_pending` 的 exact binding → successor `C_reviewed` 消费该 evaluation（不得绑定 `C_reviewed` 自身）；**stale 判定用 `budget_review_subject_projection`（排除 review_status/lead_disposition/review_gate_evaluation_ref 三字段外的全部字段）byte-identical，只允许三字段按 outcome 从 pending/null 映射，其他字段变化即 stale 需重新 pending→review；不得要求 `C_reviewed` 完整 binding digest 等于 `C_pending`**；Slice 2 至本 Slice 落地前，依赖独立 review 的 unverified budget adjust 与 closure fail closed；
+
+完成条件：
+
+- blocking 与 basis/policy 一致，agent 自由文本不能自称/否认 blocking；
+- EvidenceRecord 不复制 verdict/finding（ADR-004 保持）；`FindingResolution` authority 不变。
+
+负向验收（至少）：
+
+- `hardening_opportunity` Finding 被当作 blocking 阻塞 gate 时被拒；
+- `newly_discovered_risk` 在无 risk-owner/user 裁决时自动阻塞被拒（应转为 needs_user）。
 
 ## Slice 5：上下文投影与 Typed Relationship View
 
@@ -267,6 +365,21 @@ LeadControl 只消费上述 authoritative facts，并通过 `reconcile(authorita
 - AggregateOutcome cache 删除后可重算，且 agent/Lead 不能直接写 aggregate verdict；
 - AggregateOutcome 只消费 current subject digest 精确匹配且未 stale 的 GateEvaluation；漏 subject 或旧 pass 一律不参与 closure；
 - 不引入第二套事实源。
+
+### Agent-independent amendment 增量（Slice 5）
+
+引用 ADR-004 决策七（digest 派生）与 ADR-006 Amendment 节（budget 两层累计）。
+
+交付物（只投影，不新增事实源）：
+
+- `budget_adjustment_digest` / `effective_verification_plan_digest` / `closure_basis_digest` 视图；
+- budget 两层累计 projection（WorkUnit-lineage 与 task-lineage）；
+- 关系视图纳入 digest 引用（source refs+digests）。
+
+完成条件：
+
+- projection 从权威对象重算得到 byte-identical digest；删除视图不丢失任务/运行时/evidence/gate 事实；
+- 不新增 plan truth 对象或预算事实源。
 
 ## Slice 6：Protocol Epoch、原子 Cutover 与旧路径关闭
 
@@ -363,6 +476,16 @@ create ProjectPolicyRevision genesis from user authority source
 - agent/Lead 直接写 AggregateOutcome 或使用 stale source-digest cache 推进状态被拒绝；
 - candidate relationship 不能推进 state 或 gate；
 - 旧 writer 不能再生成可被 v2 接受的 artifact。
+
+### Agent-independent amendment 增量（Slice 6）
+
+引用 ADR-005 实施约束 15-17、ADR-006 Amendment 节、ADR-004 决策七。
+
+E2E/cutover 必须覆盖：
+
+- 完整链路：policy genesis → protocol root → control genesis → TaskRevision/WorkUnit 图 → dispatch checkpoint 冻结 `budget_adjustment_digest`/`effective_verification_plan_digest`/`closure_basis_digest`（source refs+digests，单向派生）→ AttemptCreated pin refs → evidence/gate 相对 basis 解释 → Finding basis/blocking → budget 两层累计 → terminal/checkpoint/next dispatch → recovery 沿唯一 tip 重建；
+- amendment 条款负向路径并入既有负向测试清单：缺 override/scope（含 `budget_scope_type`）不匹配、digest 自引用/不一致、禁补造、完成标准绕 authorized revision、`verification_class`/`verification_use` 配对不符、hardening 误阻塞、超 ceiling 无 override 唯一进入 needs_user、recovery 三态互斥归位；
+- 文档治理：AGENTS.md 定位为客户端提示（非产品 authority）、boom/alpha 文档治理落地。
 
 ## Cutover Done Criteria
 

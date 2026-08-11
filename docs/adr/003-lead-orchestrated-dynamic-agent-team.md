@@ -7,6 +7,7 @@
 - 当前实现状态：仅为设计结论，尚未修改 Orbit CLI、schema、配置或运行时
 - 切换约束：[ADR-005：Orbit v2 一次性切换与旧协议退役](./005-orbit-v2-clean-cut-and-legacy-retirement.md)
 - 编排控制 amendment：[ADR-006：串行 Lead 编排与控制循环](./006-serialized-lead-orchestration-control-loop.md)；如本文旧表述与 ADR-006 冲突，以 ADR-006 为准
+- Agent-independent control amendment：[orbit-v2-agent-independent-control-amendments](../open/orbit-v2-agent-independent-control-amendments.md)（owner approved 2026-08-11）；决策九与 ADR-004/006 中对应条款由此引入
 
 ## 决策定位与验证边界
 
@@ -748,6 +749,37 @@ review 应先检查 change thesis 和主要结构方向，再进入逐文件检�
 - independent gate 被 lead 绕过或错误归因的次数。
 
 试验应采用同任务、同代码基线、同模型或配对模型的对照设计。样本量和阈值通过预实验与统计功效分析确定，不在本 ADR 中臆造。
+
+## 决策九：Agent-independent 规则交付与质量治理分层
+
+本决策由 [orbit-v2-agent-independent-control-amendments](../open/orbit-v2-agent-independent-control-amendments.md)（owner approved 2026-08-11）引入；ADR-004/006 承载其 evidence/gate 与控制条款。
+
+### Agent-independent rule delivery
+
+规则与 `effective_verification_plan_digest` 的交付不依赖具体 agent 的身份、自报或对话：
+
+- 任何持有 test-write、verification-submit 或 gate-close capability 的 `WorkUnitAttempt`，其 context projection 必须重算或从 accepted `LeadCheckpoint` 下发同一 `effective_verification_plan_digest` 及其 source refs+digests（派生规则见 ADR-004 决策七；checkpoint 只 pin 权威输入 refs，不复制规则正文）；缺失或不一致则该 Attempt 的 evidence 不能关闭对应 requirement。
+- 仓库根 `AGENTS.md` 等客户端提示只是开发 Agent 的客户端纪律，不是 Orbit 产品 authority；两者冲突时以 active `ProjectPolicyRevision`/`TaskRevision` 为准。
+- 控制事实（selection、budget、closure basis、continuation）只从权威记录派生；agent 自报不产生控制事实。
+
+### Lead soft-quality delegation
+
+Lead 在 delegation envelope 内自主做软质量判断，不询问用户：
+
+- envelope = active `ProjectPolicyRevision` + closure basis + budget ceiling + authority scope（ADR-006 delegation envelope 条款）；
+- 软判断（ceiling 内 `test.budget.adjust`、agent/context 选择、继续/暂停、attempt 顺序）由 Lead 判断并写入 accepted LeadCheckpoint；
+- 只有硬越界、目标变化、风险接受需要 user/control-plane（`needs_user`，ADR-006 bounded runner 条款）。
+
+### 质量治理分层
+
+| 层 | 主体 | 范围 | 证明方式 |
+|---|------|------|---------|
+| 机械规则 | writer/validator | refs、digest、lineage、cardinality、single-active、budget 记账、blocking 派生 | fail closed、确定性、可复算 |
+| Lead 语义判断 | Logical Lead | goal 关系、比例性、thesis 取舍、ceiling 内 budget adjust、replan/split/switch/freeze/escalate | checkpoint provenance |
+| Independent review | reviewer/test gate | verdict、Finding basis、结构/价值/风险/完整性审查、production change surface | `GateEvaluation`/`Finding` |
+| User escalation | user/control-plane | goal 变更、risk acceptance、hard override、protected 变更批准 | policy/`AuthorizationRecord` |
+
+软判断不得伪装成 validator correctness："validator 通过"不等于"方案正确"；词表/naming lint 不能单独判 pass（决策一）；Lead 不能自审（ADR-006）。
 
 ## 后续设计工作
 
