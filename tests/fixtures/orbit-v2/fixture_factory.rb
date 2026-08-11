@@ -354,10 +354,11 @@ module OrbitV2FixtureFactory
     attempts = []
     resolutions = []
     [
-      ["oattempt_implementationone", "owu_implementationone", "oagent_implementerone", "coder", "implementation"],
-      ["oattempt_implementationtwo", "owu_implementationtwo", "oagent_implementertwo", "coder", "implementation"],
-      ["oattempt_independentreview", "owu_independentreview", "oagent_independentreviewer", "reviewer", "review"]
-    ].each_with_index do |(attempt_id, unit_id, agent_id, role, purpose), index|
+      ["oattempt_implementationone", "owu_implementationone", "oagent_implementerone", "coder", "implementation", nil, "2026-07-30T00:01:00Z", "2026-07-30T00:01:30Z"],
+      ["oattempt_implementationonesuccessor", "owu_implementationone", "oagent_implementerone", "coder", "implementation", "oattempt_implementationone", "2026-07-30T00:01:45Z", "2026-07-30T00:01:50Z"],
+      ["oattempt_implementationtwo", "owu_implementationtwo", "oagent_implementertwo", "coder", "implementation", nil, "2026-07-30T00:02:00Z", "2026-07-30T00:02:30Z"],
+      ["oattempt_independentreview", "owu_independentreview", "oagent_independentreviewer", "reviewer", "review", nil, "2026-07-30T00:03:00Z", nil]
+    ].each_with_index do |(attempt_id, unit_id, agent_id, role, purpose, predecessor_ref, started_at, terminal_ended_at), index|
       thesis = theses.find { |candidate| candidate["work_unit_id"] == unit_id }
       assigned_unit = units.find { |candidate| candidate["work_unit_id"] == unit_id }
       identity = {
@@ -386,7 +387,7 @@ module OrbitV2FixtureFactory
         project_root: ROOT
       )
       resolutions << resolution
-      attempts << attempt(
+      created_attempt = attempt(
         attempt_id,
         unit_id,
         agent_id,
@@ -397,8 +398,20 @@ module OrbitV2FixtureFactory
         index,
         policy["content_digest"],
         authorization_record_refs:
-          assigned_unit.dig("authority_scope", "authorization_record_refs")
+          assigned_unit.dig("authority_scope", "authorization_record_refs"),
+        predecessor_work_unit_attempt_ref: predecessor_ref,
+        started_at: started_at
       )
+      if terminal_ended_at
+        created_attempt["events"] << event(
+          "oevent_#{attempt_id.delete_prefix("oattempt_")}_completed",
+          "AttemptCompleted",
+          created_attempt.dig("events", 0, "event_digest"),
+          "ended_at" => terminal_ended_at,
+          "status" => "completed"
+        )
+      end
+      attempts << created_attempt
     end
 
     evidence = [
@@ -411,12 +424,17 @@ module OrbitV2FixtureFactory
       ),
       implementation_evidence(
         "oevr_implementationtwo",
-        attempts[1],
-        resolutions[1],
+        attempts[2],
+        resolutions[2],
         units[1]["initial_change_thesis_ref"],
         ["contracts/orbit-v2/contract.yaml"]
       ),
-      evaluator_submission("oevr_independentreview", attempts[2], resolutions[2])
+      evaluator_submission(
+        "oevr_independentreview",
+        attempts[3],
+        resolutions[3],
+        acceptance_recorded_at: "2026-07-30T00:03:30Z"
+      )
     ]
     snapshot = {
       "kind" => "git",
@@ -451,7 +469,7 @@ module OrbitV2FixtureFactory
       "gate_evaluation_id" => "ogeval_slice0review",
       "gate_requirement_id" => GATE_ID,
       "gate_requirement_content_digest" => gate["content_digest"],
-      "evaluator_attempt_id" => attempts[2]["attempt_id"],
+      "evaluator_attempt_id" => attempts[3]["attempt_id"],
       "evaluator_submission_record_id" => evidence[2]["evidence_record_id"],
       "subject" => subject,
       "verdict" => "fail",
@@ -691,6 +709,12 @@ module OrbitV2FixtureFactory
         "task_id" => TASK_ID,
         "task_revision_id" => TASK_REVISION_ID,
         "work_unit_kind" => kind,
+        "parent_work_unit_ref" =>
+          (unit_id == "owu_implementationone" ? nil : "owu_implementationone"),
+        "depends_on_work_unit_refs" => {
+          "owu_implementationone" => [],
+          "owu_implementationtwo" => ["owu_implementationone"]
+        }.fetch(unit_id, ["owu_implementationone", "owu_implementationtwo"]),
         "objective" => summary,
         "scope" => summary,
           "authority_scope" => {
@@ -861,7 +885,11 @@ module OrbitV2FixtureFactory
     policy_digest,
     task_id: TASK_ID,
     task_revision_id: TASK_REVISION_ID,
-    authorization_record_refs: []
+    authorization_record_refs: [],
+    lead_control_id: "olcontrol_slice0main",
+    predecessor_work_unit_attempt_ref: nil,
+    dispatch_lead_checkpoint_ref: nil,
+    started_at: nil
   )
     assignment = {
       "agent_instance_id" => agent_id,
@@ -888,7 +916,7 @@ module OrbitV2FixtureFactory
       "AttemptCreated",
       nil,
       "assignment" => assignment,
-      "started_at" => "2026-07-30T00:01:0#{index}Z",
+      "started_at" => started_at || "2026-07-30T00:01:0#{index}Z",
       "status" => "active"
     )
     {
@@ -897,6 +925,10 @@ module OrbitV2FixtureFactory
       "project_id" => PROJECT_ID,
       "object_type" => "work_unit_attempt",
       "attempt_id" => id,
+      "lead_control_id" => lead_control_id,
+      "predecessor_work_unit_attempt_ref" => predecessor_work_unit_attempt_ref,
+      "dispatch_lead_checkpoint_ref" => dispatch_lead_checkpoint_ref ||
+        "olcheckpoint_#{id.delete_prefix("oattempt_")}",
       "task_id" => task_id,
       "task_revision_id" => task_revision_id,
       "work_unit_id" => unit_id,
@@ -904,7 +936,14 @@ module OrbitV2FixtureFactory
     }
   end
 
-  def implementation_evidence(id, attempt, resolution, thesis_ref, paths)
+  def implementation_evidence(
+    id,
+    attempt,
+    resolution,
+    thesis_ref,
+    paths,
+    acceptance_recorded_at: "2026-07-30T00:02:00Z"
+  )
     change_claim = {
       "artifact_ref" => "artifact://#{id}/change",
       "artifact_kind" => "change",
@@ -937,7 +976,7 @@ module OrbitV2FixtureFactory
       "attempt_id" => attempt["attempt_id"],
       "submitted_rule_resolution_id" => resolution["resolution_id"],
       "accepted" => true,
-      "acceptance_recorded_at" => "2026-07-30T00:02:00Z",
+      "acceptance_recorded_at" => acceptance_recorded_at,
       "implementation_check" => {
         "change_thesis_ref" => thesis_ref,
         "scope_match" => {
@@ -972,7 +1011,12 @@ module OrbitV2FixtureFactory
     )
   end
 
-  def evaluator_submission(id, attempt, resolution)
+  def evaluator_submission(
+    id,
+    attempt,
+    resolution,
+    acceptance_recorded_at: "2026-07-30T00:02:00Z"
+  )
     report_claim = {
       "artifact_ref" => "artifact://#{id}/report",
       "artifact_kind" => "report",
@@ -991,7 +1035,7 @@ module OrbitV2FixtureFactory
       "attempt_id" => attempt["attempt_id"],
       "submitted_rule_resolution_id" => resolution["resolution_id"],
       "accepted" => true,
-      "acceptance_recorded_at" => "2026-07-30T00:02:00Z",
+      "acceptance_recorded_at" => acceptance_recorded_at,
       "submission_artifact_refs" => [report_claim],
       "supersedes_evidence_record_id" => nil
     )
@@ -1035,6 +1079,16 @@ module OrbitV2FixtureFactory
       project_id: PROJECT_ID
     )
     event
+  end
+
+  def resign_event_chain(attempt)
+    previous_digest = nil
+    attempt.fetch("events").each do |event|
+      event["previous_event_digest"] = previous_digest if previous_digest
+      resign_event(event)
+      previous_digest = event["event_digest"]
+    end
+    attempt
   end
 
   def resign_runtime_identity(agent)

@@ -62,6 +62,8 @@ stable_identifiers:
   task_revision_id: "^trev_[a-z0-9][a-z0-9_-]{7,95}$"
   work_unit_id: "^owu_[a-z0-9][a-z0-9_-]{7,95}$"
   attempt_id: "^oattempt_[a-z0-9][a-z0-9_-]{7,95}$"
+  lead_control_id: "^olcontrol_[a-z0-9][a-z0-9_-]{7,95}$"
+  lead_checkpoint_id: "^olcheckpoint_[a-z0-9][a-z0-9_-]{7,95}$"
   agent_instance_id: "^oagent_[a-z0-9][a-z0-9_-]{7,95}$"
   change_thesis_id: "^othesis_[a-z0-9][a-z0-9_-]{7,95}$"
   evidence_record_id: "^oevr_[a-z0-9][a-z0-9_-]{7,95}$"
@@ -219,6 +221,31 @@ work_model:
       - authority_provenance
   WorkUnit:
     identity_is_stable: true
+    exact_refs:
+      parent_work_unit_ref:
+        null_only_for: unique_root_per_task_revision
+        cross_revision_edge: fail_closed
+      depends_on_work_unit_refs:
+        cross_revision_edge: fail_closed
+        cycle: fail_closed
+        self_ref: fail_closed
+    graph:
+      unique_root_per_task_revision: true
+      reachability: every_work_unit_reachable_from_root_through_parent_tree
+      parent_cycle: fail_closed
+      dependency_dag: acyclic_only
+      readiness:
+        source: dependency_attempt_facts_derived_at_dependent_attempt_creation
+        terminal_before: at_least_one_terminal_attempt_ended_strictly_before_dispatch
+        active_at_dispatch: no_dependency_attempt_started_and_not_ended_at_dispatch
+        future_attempts: ignored
+        later_retry_does_not_retroactively_invalidate: true
+        not_ready_dispatch: fail_closed
+    no_stage_labels:
+      mainline: derived_projection_only
+      branch: derived_projection_only
+      critical_path: derived_projection_only
+      runnable_set: derived_projection_only
     owns:
       - objective
       - scope
@@ -319,6 +346,32 @@ work_model:
       subject: canonical_work_unit_action_scope
       cross_action_or_cross_subject: fail_closed
       cardinality: non_empty_exact_purpose_record_set
+    control_lineage:
+      lead_control_id:
+        required: true
+        stable_identity: project_scoped_immutable
+        successor_pins_same_control: true
+      predecessor_work_unit_attempt_ref:
+        null_only_for: first_attempt_of_work_unit
+        successor_requires_terminal_predecessor: true
+        successor_created_after_predecessor_terminal: true
+        same_work_unit_identity: exact_project_task_revision_work_unit
+        linear_chain: single_successor_no_fork_no_cycle
+      dispatch_lead_checkpoint_ref:
+        required: true
+        exact_ref: stable_lead_checkpoint_id
+        chain_internal_consistency: one_dispatch_per_checkpoint_per_control_lineage
+        uniqueness_scope: [project_id, lead_control_id, dispatch_lead_checkpoint_ref]
+        store_backed_existence_tip_selection: slice_2
+    strict_single_active:
+      interval_semantics: half_open_created_at_to_ended_at_any_moment_overlap_forbidden
+      open_ended_attempt: active_until_future
+      historical_overlap: fail_closed_even_when_all_terminal
+      project_scoped_keys:
+        per_lead_control_id: [project_id, lead_control_id]
+        per_task_project_wide: [project_id, task_id]
+        per_work_unit_project_wide: [project_id, work_unit_id]
+      implementation_review_test_research_release: serialized
   LogicalLead:
     model: create_only_orchestration_identity
     owns:

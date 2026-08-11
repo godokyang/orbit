@@ -161,6 +161,56 @@ the row intentionally tests a stale digest.
 Historical negative fixtures remain in place. New matrix cases extend them; they
 do not replace review-specific counterexamples with a smaller happy-path suite.
 
+## Slice 1 addendum: exact work graph, control lineage, and single-active
+
+Slice 1 freezes ADR-006 exact refs on the existing Slice 0 objects. No new
+collections are added: `dispatch_lead_checkpoint_ref` is validated for format,
+exact stable ref, and chain-internal consistency only; store-backed existence,
+tip, and selection checks belong to Slice 2's LeadCheckpoint. New frozen shapes:
+
+```yaml
+work_unit:
+  parent_work_unit_ref: null-or-owu_id   # null only for the unique root
+  depends_on_work_unit_refs: [owu_id]    # DAG ordering within one revision
+
+work_unit_attempt:
+  lead_control_id: olcontrol_id
+  predecessor_work_unit_attempt_ref: null-or-oattempt_id
+  dispatch_lead_checkpoint_ref: olcheckpoint_id
+```
+
+New invariant families and their single owner/seam:
+
+| Family | Closed invariant | Single owner/seam |
+| --- | --- | --- |
+| Work graph | exactly one root per TaskRevision; every WorkUnit reachable from the root through the parent tree; parent/dependency refs resolve only inside the same exact revision; no parent cycle; dependency graph is a DAG | Validator orchestration over `work_units` |
+| Readiness | dependency state is derived at the dependent AttemptCreated instant: at least one terminal-before Attempt (ended strictly earlier) and no dependency Attempt already started and not yet ended at that instant; dependency Attempts created later are ignored, so a post-dispatch retry never retroactively invalidates a legal dispatch | Validator orchestration over Attempt facts at the dispatch time point |
+| Attempt control lineage | every Attempt pins `lead_control_id`; a successor pins the same control, a terminal predecessor from the exact same WorkUnit, and is created only after that terminal event; null predecessor is unique per WorkUnit; the chain is linear (one successor, no fork, no cycle); one accepted LeadCheckpoint authorizes exactly one dispatch within its control lineage | RuntimeLifecycle validator |
+| Strict single-active | the half-open Attempt intervals `[created_at, ended_at)` never overlap per project-scoped scope; an open-ended Attempt stays active into the future; historical overlap of already-terminal Attempts fails closed; scopes are `[project_id, lead_control_id]`, `[project_id, task_id]`, `[project_id, work_unit_id]`; implementation/review/test/research/release share the same serial limit | RuntimeLifecycle validator |
+
+Mutation matrix additions (all cross the public `Validator#validate` seam):
+
+| Mutation class | Representative mutation | Expected invariant/error |
+| --- | --- | --- |
+| multiple root | clear the parent ref of a non-root WorkUnit | `work_unit_graph_invalid` |
+| orphan / cross-revision parent | point a parent ref at an absent unit or one in another TaskRevision | `reference_not_found` |
+| parent cycle | two WorkUnits parent each other | `work_unit_graph_invalid` |
+| dependency cycle | dependency edges close a loop | `work_unit_graph_invalid` |
+| cross-revision edge | parent/dependency ref into another TaskRevision | `reference_not_found` |
+| not ready | remove the dependency's terminal event | `work_unit_dependency_not_ready` |
+| readiness chronology | dependency terminal event after dependent start | `work_unit_dependency_not_ready` |
+| dependency open at dispatch | a dependency Attempt already started and not ended at the dependent creation instant | `work_unit_dependency_not_ready` |
+| post-dispatch dependency retry | dependency retry created after a legal dependent dispatch, all terminal | valid (no retroactive invalidation) |
+| cross-work-unit predecessor | predecessor ref into another WorkUnit | `attempt_successor_invalid` |
+| dispatch ref reuse | two Attempts claim the same dispatch checkpoint in one control lineage | `attempt_dispatch_invalid` |
+| historical interval overlap | two already-terminal Attempts with overlapping half-open intervals | `single_active_violation` |
+| second open attempt | a new open Attempt while another is active in the same scope | `single_active_violation` |
+| cross-project isolation | a second project reuses identical control/dispatch/task/WorkUnit refs | valid (project-scoped keys) |
+
+Slice 2 will add the store-backed LeadCheckpoint existence/tip/selection
+validation and the Task/executor transfer provenance exception to the
+same-control successor rule.
+
 ## InvariantGraph migration ledger
 
 This change migrates only call sites whose semantics are genuinely identical:

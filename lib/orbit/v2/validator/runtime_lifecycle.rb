@@ -242,6 +242,31 @@ module Orbit
                 add("attempt_lifecycle_invalid", "Attempt #{field} must derive from append-only events", "#{path}.#{field}")
               end
             end
+            validate_identifier(
+              "lead_control_id",
+              attempt["lead_control_id"],
+              "#{path}.lead_control_id"
+            )
+            validate_identifier(
+              "lead_checkpoint_id",
+              attempt["dispatch_lead_checkpoint_ref"],
+              "#{path}.dispatch_lead_checkpoint_ref"
+            )
+            unless attempt["dispatch_lead_checkpoint_ref"].is_a?(String)
+              add(
+                "attempt_dispatch_invalid",
+                "every WorkUnitAttempt must pin the exact dispatch LeadCheckpoint ref that authorized it",
+                "#{path}.dispatch_lead_checkpoint_ref"
+              )
+            end
+            unless attempt["predecessor_work_unit_attempt_ref"].nil? ||
+                   Identifiers.valid?("attempt_id", attempt["predecessor_work_unit_attempt_ref"])
+              add(
+                "attempt_successor_invalid",
+                "predecessor_work_unit_attempt_ref must be an exact stable Attempt ref or null",
+                "#{path}.predecessor_work_unit_attempt_ref"
+              )
+            end
             validate_event_chain(
               attempt["events"],
               path,
@@ -367,6 +392,183 @@ module Orbit
                 "attempt_authority_invalid",
                 "Attempt authority snapshot must pin exactly the WorkUnit records for its assignment purpose",
                 "#{path}.events[0].assignment.authority_snapshot.authorization_record_refs"
+              )
+            end
+          end
+          validate_attempt_succession(bundle)
+          validate_dispatch_ref_uniqueness(bundle)
+          validate_single_active_attempts(bundle)
+        end
+
+        def validate_dispatch_ref_uniqueness(bundle)
+          attempts = Array(bundle["work_unit_attempts"]).select { |attempt| attempt.is_a?(Hash) }
+          attempts.group_by do |attempt|
+            [
+              attempt["project_id"],
+              attempt["lead_control_id"],
+              attempt["dispatch_lead_checkpoint_ref"]
+            ]
+          end.each do |(project_id, control_id, ref), scoped|
+            next if ref.nil? || scoped.length <= 1
+
+            add(
+              "attempt_dispatch_invalid",
+              "one accepted LeadCheckpoint authorizes exactly one dispatch within its " \
+                "control lineage; dispatch_lead_checkpoint_ref cannot be shared",
+              "work_unit_attempts.#{control_id}.dispatch_lead_checkpoint_ref",
+              "project_id" => project_id,
+              "lead_control_id" => control_id,
+              "dispatch_lead_checkpoint_ref" => ref,
+              "attempt_ids" => scoped.map { |attempt| attempt["attempt_id"] }.sort
+            )
+          end
+        end
+
+        def validate_attempt_succession(bundle)
+          attempts = Array(bundle["work_unit_attempts"]).select { |attempt| attempt.is_a?(Hash) }
+          by_id = attempts.to_h { |attempt| [attempt["attempt_id"], attempt] }
+          successors = Hash.new { |hash, key| hash[key] = [] }
+          attempts.each do |attempt|
+            path = "work_unit_attempts.#{attempt["attempt_id"]}"
+            predecessor_ref = attempt["predecessor_work_unit_attempt_ref"]
+            next if predecessor_ref.nil?
+
+            predecessor = by_id[predecessor_ref]
+            if predecessor.nil?
+              add(
+                "attempt_successor_invalid",
+                "predecessor_work_unit_attempt_ref must resolve to an existing WorkUnitAttempt",
+                "#{path}.predecessor_work_unit_attempt_ref"
+              )
+              next
+            end
+            unless predecessor["project_id"] == attempt["project_id"] &&
+                   predecessor["task_id"] == attempt["task_id"] &&
+                   predecessor["task_revision_id"] == attempt["task_revision_id"] &&
+                   predecessor["work_unit_id"] == attempt["work_unit_id"]
+              add(
+                "attempt_successor_invalid",
+                "a successor Attempt must share exact project/task/revision/WorkUnit identity with its predecessor",
+                "#{path}.predecessor_work_unit_attempt_ref"
+              )
+            end
+            unless predecessor["lead_control_id"] == attempt["lead_control_id"]
+              add(
+                "attempt_successor_invalid",
+                "a successor Attempt must pin the same lead_control_id as its predecessor",
+                "#{path}.lead_control_id"
+              )
+            end
+            unless attempt_terminal?(predecessor)
+              add(
+                "attempt_successor_invalid",
+                "a successor Attempt requires a terminal predecessor",
+                "#{path}.predecessor_work_unit_attempt_ref"
+              )
+            end
+            created_at = parse_attempt_created_at(attempt)
+            predecessor_ended_at = parse_attempt_ended_at(predecessor)
+            if created_at && predecessor_ended_at && predecessor_ended_at >= created_at
+              add(
+                "attempt_successor_invalid",
+                "a successor Attempt must be created after its predecessor terminal event",
+                "#{path}.events[0].started_at"
+              )
+            end
+            successors[predecessor_ref] << attempt["attempt_id"]
+          end
+          successors.each do |predecessor_ref, successor_ids|
+            next if successor_ids.length <= 1
+
+            add(
+              "attempt_successor_invalid",
+              "the WorkUnitAttempt lineage is linear; #{predecessor_ref} has multiple successors",
+              "work_unit_attempts.#{predecessor_ref}.predecessor_work_unit_attempt_ref",
+              "successor_attempt_ids" => successor_ids.sort
+            )
+          end
+          firsts = Hash.new { |hash, key| hash[key] = [] }
+          attempts.each do |attempt|
+            next unless attempt["predecessor_work_unit_attempt_ref"].nil?
+
+            firsts[attempt["work_unit_id"]] << attempt["attempt_id"]
+          end
+          firsts.each do |work_unit_id, attempt_ids|
+            next if attempt_ids.length <= 1
+
+            add(
+              "attempt_successor_invalid",
+              "a WorkUnit can have only one first Attempt with a null predecessor",
+              "work_unit_attempts.#{work_unit_id}.predecessor_work_unit_attempt_ref",
+              "first_attempt_ids" => attempt_ids.sort
+            )
+          end
+          attempts.each do |attempt|
+            seen = Set.new
+            cursor = attempt
+            cycled = false
+            while cursor
+              unless seen.add?(cursor["attempt_id"])
+                cycled = true
+                break
+              end
+
+              predecessor_ref = cursor["predecessor_work_unit_attempt_ref"]
+              break if predecessor_ref.nil?
+
+              cursor = by_id[predecessor_ref]
+            end
+            if cycled
+              add(
+                "attempt_successor_invalid",
+                "the WorkUnitAttempt lineage contains a cycle",
+                "work_unit_attempts.#{attempt["attempt_id"]}.predecessor_work_unit_attempt_ref"
+              )
+            end
+          end
+        end
+
+        def validate_single_active_attempts(bundle)
+          attempts = Array(bundle["work_unit_attempts"]).select { |attempt| attempt.is_a?(Hash) }
+          {
+            %w[project_id lead_control_id] => "control",
+            %w[project_id task_id] => "task",
+            %w[project_id work_unit_id] => "work_unit"
+          }.each do |scope_fields, scope|
+            attempts.group_by do |attempt|
+              scope_fields.map { |field| attempt[field] }
+            end.each do |scope_key, scoped|
+              next if scoped.length <= 1
+
+              by_id = scoped.to_h { |attempt| [attempt["attempt_id"], attempt] }
+              intervals = scoped.map do |attempt|
+                created = parse_attempt_created_at(attempt)
+                [attempt["attempt_id"], created] if created
+              end.compact
+              intervals.sort_by! { |(_id, created)| created }
+              latest_end = nil
+              overlapping = []
+              intervals.each do |attempt_id, created|
+                if latest_end && (latest_end == :open || created < latest_end)
+                  overlapping << attempt_id
+                end
+                ended = parse_attempt_ended_at(by_id.fetch(attempt_id))
+                candidate = ended.nil? ? :open : ended
+                if latest_end.nil? || candidate == :open
+                  latest_end = candidate
+                elsif latest_end != :open && candidate > latest_end
+                  latest_end = candidate
+                end
+              end
+              next if overlapping.empty?
+
+              add(
+                "single_active_violation",
+                "strict serialization forbids overlapping WorkUnitAttempt intervals " \
+                  "per #{scope} at any moment",
+                "work_unit_attempts.#{scope_key.join(".")}",
+                "scope" => scope,
+                "overlapping_attempt_ids" => overlapping.sort
               )
             end
           end

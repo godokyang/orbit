@@ -116,6 +116,8 @@
         "task_id",
         "task_revision_id",
         "work_unit_kind",
+        "parent_work_unit_ref",
+        "depends_on_work_unit_refs",
         "objective",
         "scope",
         "authority_scope",
@@ -136,6 +138,17 @@
         "task_id": {"type": "string", "pattern": "^otask_[a-z0-9][a-z0-9_-]{7,95}$"},
         "task_revision_id": {"type": "string", "pattern": "^trev_[a-z0-9][a-z0-9_-]{7,95}$"},
         "work_unit_kind": {"enum": ["implementation", "evaluation", "research", "release"]},
+        "parent_work_unit_ref": {
+          "oneOf": [
+            {"type": "string", "pattern": "^owu_[a-z0-9][a-z0-9_-]{7,95}$"},
+            {"type": "null"}
+          ]
+        },
+        "depends_on_work_unit_refs": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^owu_[a-z0-9][a-z0-9_-]{7,95}$"}
+        },
         "objective": {"type": "string", "minLength": 1},
         "scope": {"type": "string", "minLength": 1},
         "authority_scope": {"$ref": "#/$defs/WorkAuthorityScope"},

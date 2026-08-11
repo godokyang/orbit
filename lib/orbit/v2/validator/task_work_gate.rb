@@ -502,6 +502,7 @@ module Orbit
         end
 
         def validate_work_units(bundle)
+          validate_work_unit_graph(bundle)
           tasks = @indexes.fetch("task_revisions", {})
           Array(bundle["work_units"]).each do |unit|
             next unless unit.is_a?(Hash)
@@ -606,6 +607,181 @@ module Orbit
             end
             validate_initial_change_thesis_ref(unit, path)
           end
+        end
+
+        def validate_work_unit_graph(bundle)
+          units = Array(bundle["work_units"]).select { |unit| unit.is_a?(Hash) }
+          attempts = Array(bundle["work_unit_attempts"]).select { |attempt| attempt.is_a?(Hash) }
+          by_revision = units.group_by do |unit|
+            [unit["project_id"], unit["task_id"], unit["task_revision_id"]]
+          end
+          by_revision.each do |(project_id, task_id, revision_id), revision_units|
+            path = "work_units[#{project_id}/#{task_id}/#{revision_id}]"
+            index = revision_units.to_h { |unit| [unit["work_unit_id"], unit] }
+            roots = revision_units.select { |unit| unit["parent_work_unit_ref"].nil? }
+            unless roots.length == 1
+              add(
+                "work_unit_graph_invalid",
+                "each TaskRevision requires exactly one root WorkUnit; " \
+                  "found #{roots.length} parentless WorkUnit(s)",
+                path,
+                "parentless_work_unit_ids" => roots.map { |unit| unit["work_unit_id"] }.sort
+              )
+            end
+            revision_units.each do |unit|
+              unit_path = "#{path}.#{unit["work_unit_id"]}"
+              parent_ref = unit["parent_work_unit_ref"]
+              if parent_ref && (parent_ref == unit["work_unit_id"] || !index.key?(parent_ref))
+                add(
+                  "reference_not_found",
+                  "parent_work_unit_ref must resolve to a different WorkUnit in the same TaskRevision",
+                  "#{unit_path}.parent_work_unit_ref",
+                  "parent_work_unit_ref" => parent_ref
+                )
+              end
+              Array(unit["depends_on_work_unit_refs"]).each do |dependency_ref|
+                if dependency_ref == unit["work_unit_id"] || !index.key?(dependency_ref)
+                  add(
+                    "reference_not_found",
+                    "depends_on_work_unit_refs must resolve within the same TaskRevision and exclude self",
+                    "#{unit_path}.depends_on_work_unit_refs",
+                    "depends_on_work_unit_ref" => dependency_ref
+                  )
+                end
+              end
+            end
+
+            resolved = revision_units.select do |unit|
+              parent_ref = unit["parent_work_unit_ref"]
+              parent_ref.nil? || index.key?(parent_ref)
+            end
+            resolved_index = resolved.to_h { |unit| [unit["work_unit_id"], unit] }
+            resolved.each do |unit|
+              seen = Set.new
+              cursor = unit
+              cycled = false
+              while cursor
+                unless seen.add?(cursor["work_unit_id"])
+                  cycled = true
+                  break
+                end
+
+                parent_ref = cursor["parent_work_unit_ref"]
+                break if parent_ref.nil?
+
+                parent = resolved_index[parent_ref]
+                break unless parent
+
+                cursor = parent
+              end
+              if cycled
+                add(
+                  "work_unit_graph_invalid",
+                  "parent tree contains a cycle",
+                  "#{path}.parent_work_unit_ref"
+                )
+              end
+            end
+
+            root = roots.length == 1 ? roots.first : nil
+            if root
+              reachable = Set.new
+              stack = [root]
+              while (cursor = stack.pop)
+                next unless reachable.add?(cursor["work_unit_id"])
+
+                revision_units.each do |unit|
+                  stack << unit if unit["parent_work_unit_ref"] == cursor["work_unit_id"]
+                end
+              end
+              unless reachable.length == revision_units.length
+                add(
+                  "work_unit_graph_invalid",
+                  "every WorkUnit must be reachable from the unique root through its parent tree",
+                  path,
+                  "unreachable_work_unit_ids" =>
+                    (revision_units.map { |unit| unit["work_unit_id"] } - reachable.to_a).sort
+                )
+              end
+            end
+
+            state = {}
+            visiting = lambda do |unit_id|
+              return false if state[unit_id] == :done
+
+              if state[unit_id] == :visiting
+                add(
+                  "work_unit_graph_invalid",
+                  "depends_on_work_unit_refs must form an acyclic DAG",
+                  "#{path}.#{unit_id}.depends_on_work_unit_refs"
+                )
+                return true
+              end
+              state[unit_id] = :visiting
+              Array(index.dig(unit_id, "depends_on_work_unit_refs")).each do |dependency_ref|
+                return true if visiting.call(dependency_ref)
+              end
+              state[unit_id] = :done
+              false
+            end
+            index.each_key do |unit_id|
+              visiting.call(unit_id)
+            end
+            validate_work_unit_readiness(revision_units, index, attempts, path)
+          end
+        end
+
+        def validate_work_unit_readiness(revision_units, index, attempts, path)
+          attempts_by_unit = attempts.group_by { |attempt| attempt["work_unit_id"] }
+          revision_units.each do |unit|
+            dependencies = Array(unit["depends_on_work_unit_refs"])
+            next if dependencies.empty?
+
+            unit_attempts = Array(attempts_by_unit[unit["work_unit_id"]])
+            unit_attempts.each do |attempt|
+              created_at = parse_attempt_created_at(attempt)
+              next if created_at.nil?
+
+              dependencies.each do |dependency_ref|
+                dependency_attempts = Array(attempts_by_unit[dependency_ref])
+                terminal_before = dependency_attempts.any? do |candidate|
+                  ended = parse_attempt_ended_at(candidate)
+                  ended && ended < created_at
+                end
+                active_at_dispatch = dependency_attempts.any? do |candidate|
+                  started = parse_attempt_created_at(candidate)
+                  next false if started.nil? || started > created_at
+
+                  ended = parse_attempt_ended_at(candidate)
+                  ended.nil? || ended >= created_at
+                end
+                next if terminal_before && !active_at_dispatch
+
+                add(
+                  "work_unit_dependency_not_ready",
+                  "dependency #{dependency_ref} must be ready at Attempt dispatch time: " \
+                    "at least one terminal-before Attempt and no open Attempt at that instant",
+                  "#{path}.#{unit["work_unit_id"]}.depends_on_work_unit_refs",
+                  "attempt_id" => attempt["attempt_id"],
+                  "dependency_work_unit_id" => dependency_ref,
+                  "dependency_terminal_before_attempt" => terminal_before,
+                  "dependency_active_at_dispatch" => active_at_dispatch
+                )
+              end
+            end
+          end
+        end
+
+        def parse_attempt_created_at(attempt)
+          Time.iso8601(attempt.dig("events", 0, "started_at"))
+        rescue ArgumentError, TypeError
+          nil
+        end
+
+        def parse_attempt_ended_at(attempt)
+          Time.iso8601(attempt.dig("events", -1, "ended_at"))
+        rescue ArgumentError, TypeError
+          nil
         end
 
         def validate_change_theses(bundle)

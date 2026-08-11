@@ -14,6 +14,8 @@ module Orbit
         "task_revision_id" => /\Atrev_[a-z0-9][a-z0-9_-]{7,95}\z/,
         "work_unit_id" => /\Aowu_[a-z0-9][a-z0-9_-]{7,95}\z/,
         "attempt_id" => /\Aoattempt_[a-z0-9][a-z0-9_-]{7,95}\z/,
+        "lead_control_id" => /\Aolcontrol_[a-z0-9][a-z0-9_-]{7,95}\z/,
+        "lead_checkpoint_id" => /\Aolcheckpoint_[a-z0-9][a-z0-9_-]{7,95}\z/,
         "agent_instance_id" => /\Aoagent_[a-z0-9][a-z0-9_-]{7,95}\z/,
         "logical_lead_id" => /\Aolead_[a-z0-9][a-z0-9_-]{7,95}\z/,
         "lead_session_id" => /\Aoleadsession_[a-z0-9][a-z0-9_-]{7,95}\z/,

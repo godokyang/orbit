@@ -35,6 +35,7 @@ module OrbitV2ContractTest
     test_authority_verifier(valid_bundle)
     test_schema_parity(valid_bundle)
     test_invalid_fixtures
+    test_slice1_retry_does_not_invalidate_dispatch
     test_authority_graph_regressions
     test_policy_issuance_and_stale_authority_regressions
     test_policy_assertion_pinning
@@ -449,6 +450,59 @@ module OrbitV2ContractTest
     end
   end
 
+  def test_slice1_retry_does_not_invalidate_dispatch
+    bundle = OrbitV2FixtureFactory.valid_bundle
+    review = bundle.fetch("work_unit_attempts").find { |c| c["attempt_id"] == "oattempt_independentreview" }
+    review["events"] << OrbitV2FixtureFactory.event("oevent_reviewterminalretryprobe", "AttemptCompleted",
+      review.fetch("events").last.fetch("event_digest"), "ended_at" => "2026-07-30T00:03:30Z", "status" => "completed")
+    bundle.fetch("work_unit_attempts") << retry_attempt_for(
+      bundle,
+      "oattempt_implementationoneretry2",
+      "oattempt_implementationonesuccessor",
+      "2026-07-30T00:04:00Z",
+      "2026-07-30T00:04:30Z"
+    )
+    assert(
+      validator.validate(bundle).empty?,
+      "a dependency retry after a legal dispatch does not retroactively invalidate it"
+    )
+  end
+
+  def retry_attempt_for(bundle, attempt_id, predecessor_ref, started_at, ended_at)
+    predecessor = bundle["work_unit_attempts"].find { |c| c["attempt_id"] == predecessor_ref }
+    base_rule = bundle["rule_resolution_artifacts"].find do |candidate|
+      candidate.dig("identity", "attempt_id") == predecessor_ref
+    end
+    identity = OrbitV2FixtureFactory.deep_copy(base_rule.fetch("identity"))
+    identity["attempt_id"] = attempt_id
+    rule = Orbit::V2::RuleResolution.build(identity, created_at: started_at, project_root: ROOT)
+    thesis = bundle["change_theses"].find { |c| c["work_unit_id"] == predecessor["work_unit_id"] }
+    unit = bundle["work_units"].find { |c| c["work_unit_id"] == predecessor["work_unit_id"] }
+    bundle["rule_resolution_artifacts"] << rule
+    attempt = OrbitV2FixtureFactory.attempt(
+      attempt_id,
+      predecessor["work_unit_id"],
+      identity["agent_instance_id"],
+      identity["resolved_role"],
+      "implementation",
+      thesis,
+      rule["resolution_id"],
+      9,
+      bundle["project_policy_revisions"].first["content_digest"],
+      authorization_record_refs: unit.dig("authority_scope", "authorization_record_refs"),
+      predecessor_work_unit_attempt_ref: predecessor_ref,
+      started_at: started_at
+    )
+    attempt["events"] << OrbitV2FixtureFactory.event(
+      "oevent_#{attempt_id.delete_prefix("oattempt_")}_completed",
+      "AttemptCompleted",
+      attempt.dig("events", 0, "event_digest"),
+      "ended_at" => ended_at,
+      "status" => "completed"
+    )
+    attempt
+  end
+
   def test_authority_graph_regressions
     cross_task = mutate(
       "cross_task_implementation_subject",
@@ -467,7 +521,9 @@ module OrbitV2ContractTest
     end
 
     terminal = OrbitV2FixtureFactory.valid_bundle
-    attempt = terminal.fetch("work_unit_attempts").first
+    attempt = terminal.fetch("work_unit_attempts").find do |candidate|
+      candidate["attempt_id"] == "oattempt_independentreview"
+    end
     attempt.fetch("events") << OrbitV2FixtureFactory.event(
       "oevent_validattemptcompleted",
       "AttemptCompleted",
@@ -491,6 +547,12 @@ module OrbitV2ContractTest
     successor_attempt = successor.fetch("work_unit_attempts").first
     successor_attempt.dig("events", 0, "assignment")["change_thesis_ref"] = thesis_ref
     OrbitV2FixtureFactory.resign_event(successor_attempt.dig("events", 0))
+    if successor_attempt.fetch("events").length > 1
+      terminal = successor_attempt.fetch("events").last
+      terminal["previous_event_digest"] =
+        successor_attempt.dig("events", 0, "event_digest")
+      OrbitV2FixtureFactory.resign_event(terminal)
+    end
     successor_record = successor.fetch("evidence_records").first
     successor_record.dig("implementation_check")["change_thesis_ref"] = thesis_ref
     rehash(successor_record)
@@ -1348,7 +1410,7 @@ module OrbitV2ContractTest
       "AgentContextAdvanced",
       reviewer.fetch("lifecycle_events").last.fetch("event_digest"),
       "context_generation" => 2,
-      "recorded_at" => "2026-07-30T00:02:00Z",
+      "recorded_at" => "2026-07-30T00:04:00Z",
       "reason" => "Context was created after the Attempt."
     )
     attempt = future_context.fetch("work_unit_attempts").find do |candidate|
@@ -2385,6 +2447,98 @@ module OrbitV2ContractTest
         evidence_level: "mechanical_check",
         independence: "same_agent_allowed"
       )
+    when "work_unit_multiple_roots"
+      unit = bundle["work_units"].find do |candidate|
+        candidate["work_unit_id"] == "owu_implementationtwo"
+      end
+      unit["parent_work_unit_ref"] = nil
+      rehash(unit)
+      refresh_all_evaluation_subjects(bundle)
+    when "work_unit_parent_cycle"
+      implementation = bundle["work_units"].find do |candidate|
+        candidate["work_unit_id"] == "owu_implementationtwo"
+      end
+      review = bundle["work_units"].find do |candidate|
+        candidate["work_unit_id"] == "owu_independentreview"
+      end
+      implementation["parent_work_unit_ref"] = review["work_unit_id"]
+      review["parent_work_unit_ref"] = implementation["work_unit_id"]
+      rehash(implementation)
+      rehash(review)
+      refresh_all_evaluation_subjects(bundle)
+    when "work_unit_dependency_cycle"
+      implementation = bundle["work_units"].find do |candidate|
+        candidate["work_unit_id"] == "owu_implementationtwo"
+      end
+      review = bundle["work_units"].find do |candidate|
+        candidate["work_unit_id"] == "owu_independentreview"
+      end
+      implementation["depends_on_work_unit_refs"] =
+        (implementation["depends_on_work_unit_refs"] + [review["work_unit_id"]]).uniq
+      rehash(implementation)
+      refresh_all_evaluation_subjects(bundle)
+    when "work_unit_cross_revision_edge"
+      child = add_task_revision_clone(
+        bundle,
+        id: "trev_slice0contract_r2",
+        revision_number: 2,
+        parent_id: "trev_slice0contract_r1"
+      )
+      source_unit = bundle["work_units"][1]
+      source_thesis = bundle["change_theses"].find do |candidate|
+        candidate["work_unit_id"] == source_unit["work_unit_id"]
+      end
+      thesis = OrbitV2FixtureFactory.deep_copy(source_thesis)
+      thesis["change_thesis_id"] = "othesis_crossrevisionedge"
+      thesis["work_unit_id"] = "owu_crossrevisionchild"
+      thesis["task_revision_id"] = child["task_revision_id"]
+      rehash(thesis)
+      unit = OrbitV2FixtureFactory.deep_copy(source_unit)
+      unit["work_unit_id"] = "owu_crossrevisionchild"
+      unit["task_revision_id"] = child["task_revision_id"]
+      unit["parent_work_unit_ref"] = "owu_implementationone"
+      unit["depends_on_work_unit_refs"] = []
+      unit["input_refs"] = ["task-revision://#{child["task_revision_id"]}"]
+      unit.dig("authority_scope", "authorization_record_refs").clear
+      unit["initial_change_thesis_ref"] = {
+        "change_thesis_id" => thesis["change_thesis_id"],
+        "revision" => 1,
+        "content_digest" => thesis["content_digest"]
+      }
+      bundle["change_theses"] << thesis
+      bundle["work_units"] << unit
+      authorization = OrbitV2FixtureFactory.work_authorization(
+        unit,
+        child,
+        "work.implement"
+      )
+      bundle["authority_assertions"] << authorization.fetch("assertion")
+      bundle["authorization_records"] << authorization.fetch("record")
+    when "work_unit_dependency_not_ready"
+      bundle["work_unit_attempts"].each do |attempt|
+        next unless attempt["work_unit_id"] == "owu_implementationone"
+
+        attempt["events"].pop if attempt.fetch("events").length > 1
+      end
+    when "attempt_interval_overlap"
+      impl2 = bundle["work_unit_attempts"].find { |c| c["attempt_id"] == "oattempt_implementationtwo" }
+      impl2.dig("events", 0)["started_at"] = "2026-07-30T00:01:40Z"
+      impl2.dig("events", 0)["recorded_at"] = impl2.dig("events", 0, "started_at")
+      OrbitV2FixtureFactory.resign_event_chain(impl2)
+    when "attempt_predecessor_cross_work_unit"
+      attempt = bundle["work_unit_attempts"].find do |candidate|
+        candidate["attempt_id"] == "oattempt_implementationtwo"
+      end
+      attempt["predecessor_work_unit_attempt_ref"] = "oattempt_implementationone"
+    when "attempt_dispatch_ref_reuse"
+      first = bundle["work_unit_attempts"].find do |candidate|
+        candidate["attempt_id"] == "oattempt_implementationone"
+      end
+      attempt = bundle["work_unit_attempts"].find do |candidate|
+        candidate["attempt_id"] == "oattempt_implementationtwo"
+      end
+      attempt["dispatch_lead_checkpoint_ref"] =
+        first["dispatch_lead_checkpoint_ref"]
     when "missing_change_thesis_genesis"
       thesis = bundle["change_theses"].first
       thesis["revision"] = 2
@@ -2525,6 +2679,18 @@ module OrbitV2ContractTest
       thesis = child_theses[index]
       unit["work_unit_id"] = specification.fetch("unit_id")
       unit["task_revision_id"] = child["task_revision_id"]
+      unit["parent_work_unit_ref"] =
+        if index.zero?
+          nil
+        else
+          specifications.first.fetch("unit_id")
+        end
+      unit["depends_on_work_unit_refs"] =
+        if index.zero?
+          []
+        else
+          [specifications.first.fetch("unit_id")]
+        end
       unit["input_refs"] = ["task-revision://#{child["task_revision_id"]}"]
       unit["output_refs"] = ["work-unit-output://#{unit["work_unit_id"]}"]
       unit.dig("authority_scope", "authorization_record_refs").clear
@@ -2598,22 +2764,46 @@ module OrbitV2ContractTest
         bundle["project_policy_revisions"].first["content_digest"],
         task_revision_id: child["task_revision_id"],
         authorization_record_refs: specification.fetch("unit")
-          .dig("authority_scope", "authorization_record_refs")
+          .dig("authority_scope", "authorization_record_refs"),
+        started_at: index.zero? ? "2026-07-30T00:05:00Z" : "2026-07-30T00:06:00Z"
       )
+      if index.zero?
+        attempt["events"] << OrbitV2FixtureFactory.event(
+          "oevent_revisiontwoimplementationcompleted",
+          "AttemptCompleted",
+          attempt.dig("events", 0, "event_digest"),
+          "ended_at" => "2026-07-30T00:05:30Z",
+          "status" => "completed"
+        )
+      end
       child_rules << rule
       child_attempts << attempt
+    end
+    base_review = bundle["work_unit_attempts"].find do |candidate|
+      candidate["attempt_id"] == "oattempt_independentreview"
+    end
+    if base_review && base_review.fetch("events").length == 1
+      base_review["events"] << OrbitV2FixtureFactory.event(
+        "oevent_revisiontwosupersedesreview",
+        "AttemptCompleted",
+        base_review.fetch("events").last.fetch("event_digest"),
+        "ended_at" => "2026-07-30T00:03:30Z",
+        "status" => "completed"
+      )
     end
     implementation = OrbitV2FixtureFactory.implementation_evidence(
       "oevr_revisiontwoimplementation",
       child_attempts[0],
       child_rules[0],
       child_units[0]["initial_change_thesis_ref"],
-      ["lib/orbit/v2/validator.rb"]
+      ["lib/orbit/v2/validator.rb"],
+      acceptance_recorded_at: "2026-07-30T00:05:30Z"
     )
     submission = OrbitV2FixtureFactory.evaluator_submission(
       "oevr_revisiontwoevaluation",
       child_attempts[1],
-      child_rules[1]
+      child_rules[1],
+      acceptance_recorded_at: "2026-07-30T00:06:30Z"
     )
     child_evidence = [implementation, submission]
     bundle["rule_resolution_artifacts"].concat(child_rules)
@@ -2855,7 +3045,7 @@ module OrbitV2ContractTest
                   policy_ref["policy_revision_id"] == policy["policy_revision_id"]
 
       policy_ref["content_digest"] = policy["content_digest"]
-      OrbitV2FixtureFactory.resign_event(creation)
+      OrbitV2FixtureFactory.resign_event_chain(attempt)
     end
     refresh_all_evaluation_subjects(bundle)
     policy
@@ -2942,7 +3132,7 @@ module OrbitV2ContractTest
           "authority_snapshot",
           "authorization_record_refs"
         ).replace(refs)
-        OrbitV2FixtureFactory.resign_event(creation)
+        OrbitV2FixtureFactory.resign_event_chain(attempt)
       end
     end
   end
@@ -2992,20 +3182,18 @@ module OrbitV2ContractTest
     bundle["authorization_records"] << authorization
     unit.dig("authority_scope", "authorization_record_refs") << authorization_id
     rehash(unit)
-    attempt = bundle["work_unit_attempts"].find do |candidate|
-      candidate["work_unit_id"] == unit["work_unit_id"] &&
-        candidate.dig("events", 0, "assignment", "purpose") == purpose
-    end
-    if attempt
-      refs = attempt.dig(
+    bundle["work_unit_attempts"].each do |candidate|
+      next unless candidate["work_unit_id"] == unit["work_unit_id"] &&
+                  candidate.dig("events", 0, "assignment", "purpose") == purpose
+
+      candidate.dig(
         "events",
         0,
         "assignment",
         "authority_snapshot",
         "authorization_record_refs"
-      )
-      refs << authorization_id
-      OrbitV2FixtureFactory.resign_event(attempt.dig("events", 0))
+      ) << authorization_id
+      OrbitV2FixtureFactory.resign_event_chain(candidate)
     end
     refresh_all_evaluation_subjects(bundle)
     authorization
@@ -3103,6 +3291,15 @@ module OrbitV2ContractTest
     base_rule = bundle["rule_resolution_artifacts"].find do |candidate|
       candidate.dig("identity", "attempt_id") == base_attempt["attempt_id"]
     end
+    if base_attempt.fetch("events").length == 1
+      base_attempt["events"] << OrbitV2FixtureFactory.event(
+        "oevent_independentreviewsuperseded",
+        "AttemptCompleted",
+        base_attempt.fetch("events").last.fetch("event_digest"),
+        "ended_at" => "2026-07-30T00:03:30Z",
+        "status" => "completed"
+      )
+    end
     identity = OrbitV2FixtureFactory.deep_copy(base_rule.fetch("identity"))
     identity["attempt_id"] = "oattempt_unusedreviewer"
     rule = Orbit::V2::RuleResolution.build(
@@ -3127,12 +3324,15 @@ module OrbitV2ContractTest
       4,
       bundle["project_policy_revisions"].first["content_digest"],
       authorization_record_refs:
-        unit.dig("authority_scope", "authorization_record_refs")
+        unit.dig("authority_scope", "authorization_record_refs"),
+      predecessor_work_unit_attempt_ref: base_attempt["attempt_id"],
+      started_at: "2026-07-30T00:04:00Z"
     )
     submission = OrbitV2FixtureFactory.evaluator_submission(
       "oevr_unusedreviewer",
       attempt,
-      rule
+      rule,
+      acceptance_recorded_at: "2026-07-30T00:04:30Z"
     )
     bundle["rule_resolution_artifacts"] << rule
     bundle["work_unit_attempts"] << attempt

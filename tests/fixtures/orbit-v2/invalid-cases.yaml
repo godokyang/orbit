@@ -98,3 +98,11 @@ cases:
   - {id: attempt_after_agent_termination, expected_error: attempt_agent_lifecycle_invalid}
   - {id: weak_same_kind_protected_gate, expected_error: task_authority_invalid}
   - {id: missing_change_thesis_genesis, expected_error: change_thesis_lineage_invalid}
+  - {id: work_unit_multiple_roots, expected_error: work_unit_graph_invalid}
+  - {id: work_unit_parent_cycle, expected_error: work_unit_graph_invalid}
+  - {id: work_unit_dependency_cycle, expected_error: work_unit_graph_invalid}
+  - {id: work_unit_cross_revision_edge, expected_error: reference_not_found}
+  - {id: work_unit_dependency_not_ready, expected_error: work_unit_dependency_not_ready}
+  - {id: attempt_interval_overlap, expected_error: single_active_violation}
+  - {id: attempt_predecessor_cross_work_unit, expected_error: attempt_successor_invalid}
+  - {id: attempt_dispatch_ref_reuse, expected_error: attempt_dispatch_invalid}

@@ -105,6 +105,9 @@
         "project_id",
         "object_type",
         "attempt_id",
+        "lead_control_id",
+        "predecessor_work_unit_attempt_ref",
+        "dispatch_lead_checkpoint_ref",
         "task_id",
         "task_revision_id",
         "work_unit_id",
@@ -116,6 +119,14 @@
         "project_id": {"type": "string", "pattern": "^oproj_[a-z0-9][a-z0-9_-]{7,63}$"},
         "object_type": {"const": "work_unit_attempt"},
         "attempt_id": {"type": "string", "pattern": "^oattempt_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "lead_control_id": {"type": "string", "pattern": "^olcontrol_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "predecessor_work_unit_attempt_ref": {
+          "oneOf": [
+            {"type": "string", "pattern": "^oattempt_[a-z0-9][a-z0-9_-]{7,95}$"},
+            {"type": "null"}
+          ]
+        },
+        "dispatch_lead_checkpoint_ref": {"type": "string", "pattern": "^olcheckpoint_[a-z0-9][a-z0-9_-]{7,95}$"},
         "task_id": {"type": "string", "pattern": "^otask_[a-z0-9][a-z0-9_-]{7,95}$"},
         "task_revision_id": {"type": "string", "pattern": "^trev_[a-z0-9][a-z0-9_-]{7,95}$"},
         "work_unit_id": {"type": "string", "pattern": "^owu_[a-z0-9][a-z0-9_-]{7,95}$"},
