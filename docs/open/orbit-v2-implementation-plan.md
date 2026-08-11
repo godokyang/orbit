@@ -47,7 +47,45 @@ ProtocolRoot(orbit-v2)
 
 ### 实施顺序冻结
 
-ADR-006 control contract、Slice 1 exact refs/single-active validator 和 Slice 2 `lead_control_id`/registry/LeadCheckpoint/LeadControl design 未冻结前，不继续扩大 Evidence/Validator substrate，也不进入 runtime 实现。当前 Slice 0 schema 不具备 WorkUnit parent/dependency refs、Attempt predecessor/dispatch checkpoint binding、stable control identity/ownership、LeadCheckpoint 或 LeadControl；本计划不得把它们描述为既有能力。
+ADR-006 control contract、Slice 1 exact refs/single-active validator 和 Slice 2 `lead_control_id`/registry/LeadCheckpoint/LeadControl design 未冻结前，不继续扩大 Evidence/Validator substrate，也不进入 runtime 实现。当前状态（Slice 1 于 76badb3 contract-only 落地）：WorkUnit exact parent/dependency refs、Attempt exact `lead_control_id`/terminal predecessor/`dispatch_lead_checkpoint_ref`（格式/链内一致性）与 strict single-active 已实现；Slice 2 的 control registry、LeadCheckpoint、LeadControl 尚未实现，不得把它们描述为既有能力。
+
+### Slice 2 增量化交付（docs-only plan amendment，2026-08-11）
+
+状态：本 amendment 仅改变 Slice 2 的**交付顺序与验收归属**，不修改任何 ADR 语义合同（ADR-003 决策九、ADR-004 决策七、ADR-005 实施约束 15-17、ADR-006 含 Amendment 节逐条保持有效）。Owner 已批准推进至 Slice 2 完成；本 amendment 经审核生效前不实施代码。
+
+#### 增量序列与依赖顺序
+
+| 增量 | 范围 | 依赖 |
+| --- | --- | --- |
+| 1 控制身份锚 | registry claim + model-level accepted genesis final-state closure + LeadSession required pins + 单 lineage checkpoint 血缘/pins/writer provenance/初始 task ownership/queue/最小 typed decision-trigger | 仅 Slice 0/1 事实 |
+| 2 最小可恢复闭环 | store-backed dispatch（existence/tip/selection）；active selection/current attempt/四层 assessment/progress 字段；recovery（唯一 tip 重建、连续性 fail-closed、三态互斥归位、禁补造、幂等）；`reconcile` 核心 + 基础止损；同 lineage session 替换；event trigger 全量 | 增量 1 |
+| 3 跨 lineage 与 transfer | task ownership disjoint、subject 跨 lineage active 唯一（含别名）、Task release/acquire、executor 跨 lineage transfer；移除 `unsupported_multi_lineage` 临时拒绝 | 增量 1-2 |
+| 4 anomaly/fuse/预算机制（完成 Slice 2） | fingerprint（含 Finding 分支，复用现有 stable Finding identity；typed blocking 分类属 Slice 4，不阻塞 fingerprint）、prior chain、`task.retry.override`、policy-pinned fallback + `checkpoint_due`、delegation envelope、budget 派生链、两层累计/measurements（`unverified_assessment` pending 为默认 forward 状态，未 review 时 adjust/closure fail closed）、bounded runner、`closure_basis_digest` 冻结与重算 | 增量 1-3 |
+
+**Slice 2 = 增量 1 → 2 → 3 → 4，完成于增量 4**（不要求 Slice 3/4 先行）。其后：Slice 3 → Slice 4（含「control consumer closure」小节，消费增量 4 字段与 `budget_assessment_result`）→ Slice 5 → Slice 6。Slice 3 不消费 control 增量；`unverified_assessment` 独立评审准入条款（原拆分草案，后文统一称「control consumer closure」）归入 Slice 4，不构成 Slice 2 完成前置；不存在任何要求 Slice 3/4 先行的倒置依赖。
+
+#### Pre-activation 合同演进（intermediate shapes 非 adopted runtime contract）
+
+- 增量 1-4 对 registry/LeadCheckpoint schema 的演进属 **pre-activation 合同演进中间形态**，不是 adopted runtime contract；最终激活（Slice 6）只接受**最终 exact schema 版本**。
+- **无 backfill、无双读、无旧版本有效路径、无兼容层**；中间形态字段变化以最终 schema 为准。
+- **字段与消费者同增量落地**；增量 1 不落地 active selection/current attempt（消费者在增量 2 dispatch/recovery），不以"形状校验"冒充消费者。
+- **LeadSession required pins**：自增量 1 起所有 LeadSession 必须 required pin `lead_control_id` + canonical `lead_runtime_subject_ref` + `lead_runtime_subject_assertion_digest`，不做 nullable/未绑定 session 兼容；v2 尚未激活，更新既有 fixture 属正常 clean cut（不属兼容路径）。
+
+#### 原子性证明边界
+
+- 本阶段（contract-only，Slice 6 前）只宣称：**无效 bundle 不 accepted；accepted 最终状态的 invariant 闭合**（create-only 幂等、lineage 线性、exact refs）。不设计假事务，不测试"输入 bundle 无半状态"。
+- 真实 **compare-and-append 原子执行、崩溃回滚、并发竞争**由受控 store/runtime 在 Slice 6 activation 关闭；本阶段不得宣称已闭合。
+
+#### Fingerprint 未落地时的止损规则
+
+- fingerprint 尚不可证明时（增量 4 前），凡依赖 fingerprint 判定的决策一律 **frozen/escalate**（ADR-006：identity 不可证明即 freeze）。
+- **禁止**以 predecessor chain 计数冒充"相同 fingerprint"进入 `needs_user`；`needs_user` 仅在 fingerprint **已证明相同**且第三次 Attempt 缺 `task.retry.override` 时出现（增量 4 起）。
+
+#### 测试预算规则（每增量）
+
+- 每增量**最多 9 个手工语义场景**（一行为一场景，只选真实高风险语义）+ **既有自动 schema parity** 覆盖结构性 missing/type/null/unknown 与禁字段（如 checkpoint 复制 task/evidence/gate truth 由 additionalProperties/schema parity 自动覆盖，不另写用例）。
+- `tests/**` 每增量新增 **≤300 行**；超出必须先说明。
+- 增量 1 的 9 个场景冻结于 Slice 2 段增量 1 小节。
 
 ### Agent-independent control amendments（owner approved 2026-08-11）
 
@@ -55,9 +93,9 @@ ADR-006 control contract、Slice 1 exact refs/single-active validator 和 Slice 
 
 - **pre-Slice docs freeze**：实现不得偏离上述 ADR 条款，也不得把 amendment 条款回填为"Slice 0 schema 已具备"。
 - **Slice 1（保持原设计，不变）**：WorkUnit exact parent/dependency refs、唯一 root、parent tree 可达、dependency DAG/readiness；WorkUnitAttempt exact `lead_control_id`、terminal predecessor、dispatch LeadCheckpoint ref；single-active。**不加无消费者 placeholder**：`dispatch_lead_checkpoint_ref` 只做格式/链内一致性校验，store-backed 存在性/tip/selection 校验随 Slice 2；不建 LeadCheckpoint schema/collection。Slice 1 proposal 的 schema 版本、error code、测试计划不受本 amendment 影响。
-- **Slice 2**：delegation envelope、`closure_basis_digest`、`budget_adjustment_digest`/`effective_verification_plan_digest` 派生链、两层 test budget、bounded runner、continuation envelope、recovery —— 详见 Slice 2 段。
+- **Slice 2**：delegation envelope、`closure_basis_digest`、`budget_adjustment_digest`/`effective_verification_plan_digest` 派生链、两层 test budget、bounded runner、continuation envelope、recovery —— 详见 Slice 2 增量 4 段（依赖顺序见「Slice 2 增量化交付」节）。
 - **Slice 3**：`verification_class` 与 `verification_use` 结构化配对 —— 详见 Slice 3 段。
-- **Slice 4**：Finding typed basis 与 blocking 派生 —— 详见 Slice 4 段。
+- **Slice 4**：Finding typed basis 与 blocking 派生、`unverified_assessment` 独立评审准入（control consumer closure）—— 详见 Slice 4 段；`budget_assessment_result` 消费 Slice 2 增量 4 的 checkpoint binding/派生字段（依赖顺序见 Slice 4 段注）。
 - **Slice 5**：只投影（digest 视图、budget 两层 projection）—— 详见 Slice 5 段。
 - **Slice 6**：E2E/cutover 覆盖 amendment 条款 —— 详见 Slice 6 段。
 
@@ -157,6 +195,48 @@ LeadControl 只消费上述 authoritative facts，并通过 `reconcile(authorita
 - initial TaskRevision 的 protected contract 不弱于 active ProjectPolicyRevision minimum，waiver/risk-owner/adjudicator 只能引用/收窄 policy grants 或 policy-authorized immutable record；policy rotation 不改写旧 provenance，但旧 TaskRevision closure stale，继续执行必须新 revision rebind active policy。
 
 ## Slice 2：Dynamic Team、Logical Lead Continuity 与 Lead Control
+
+### 增量结构
+
+按「Slice 2 增量化交付」节，本 slice 拆为增量 1→4。下方「原 Slice 2 规范条目」保留全部原交付物/完成条件/负向验收文本作为规范正文，归属映射如下（增量 1 立即实施，其余按依赖顺序）：
+
+- **增量 1（控制身份锚）**：live roster 与静态配置分离复核；provider 先解析 canonical runtime subject + model-level accepted genesis final-state closure（真实事务原子性证明边界见增量化交付节，Slice 6 闭合）；provider-verified subject resolution；每 `lead_control_id` 最多一个 active LeadSession；checkpoint 身份/血缘/pins/writer provenance/初始 task ownership/queue/最小 decision-trigger 字段；duplicate genesis、自报 writer、缺 provider subject/session binding、非原子 create 均不 accepted；checkpoint 不复制 task/evidence/gate truth（schema 禁字段）。
+- **增量 2（最小可恢复闭环）**：AgentInstance/LeadSession 替换语义；roster/assignment/replacement history 派生复核；coordinator-level ordered task queue projection；`LeadControl.reconcile` 深模块核心；event triggers；四层自检 seam；Delivery/Assurance 分离、assurance-only freeze、non-preempting hardening；首轮/两轮零 Delivery delta fuse 与立即 freeze（基础规则）；durable lead context/handoff/recovery 与 fork fail-closed；session 连续性 fail-closed；Work Agent single-writer；Task switch 边界；recovery 三态互斥归位/幂等/禁补造。
+- **增量 3（跨 lineage 与 transfer）**：跨 lineage Task ownership 与 runtime-subject active binding 原子复核（别名同 executor）；release/suspend → acquire、terminal/release → successor/bind exact transfer provenance；双 active/双 queue/双 tip/重叠并行 fail-closed；移除 `unsupported_multi_lineage` 临时拒绝。
+- **增量 4（anomaly/fuse/预算机制，完成 Slice 2，Slice 3 前）**：wall-clock fallback（policy-pinned，只产生 `checkpoint_due`）；fingerprint identity basis/supporting provenance/prior chain（含 Finding 分支——复用现有 stable Finding identity；typed blocking 分类属 Slice 4，不阻塞 fingerprint）；`task.retry.override`；round fuse 完整化；delegation envelope；`closure_basis_digest` 冻结与派生链（`budget_adjustment_digest`→`effective_budget_bindings`→`effective_verification_plan_digest`→`closure_basis_digest`）；两层 budget 累计/measurements（`unverified_assessment` pending 为默认 forward 状态，未 review 时 adjust/closure fail closed）；bounded runner 与 continuation envelope。`unverified_assessment` 独立评审准入（review_status=accepted/rejected 消费 `budget_assessment_result`）归入 Slice 4「control consumer closure」，不构成 Slice 2 完成前置。
+- **Slice 0/1 已闭（本 slice 复核，不新增）**：静态配置非 live team；roster 从 attempts 重建；project-wide Attempt backstop；review/test 与 implementation 串行。
+
+### 增量 1：控制身份锚（立即实施）
+
+字段范围（只落地消费者在场的字段）：
+
+- LeadSession：required `lead_control_id` + canonical `lead_runtime_subject_ref` + `lead_runtime_subject_assertion_digest`（provider-verified）；不做 nullable/未绑定 session 兼容；既有 fixture 更新属 clean cut。
+- LeadControlRegistry：claim、`genesis_checkpoint_ref+digest`、writer authority provenance（active policy `control.genesis`/`control.checkpoint` grant 或 policy 授权 immutable record）、初始 task ownership/queue。
+- **queue 单一事实源**：registry `owned_task_refs` 是 project-scoped Task ownership 权威；checkpoint 初始 task ownership/queue 必须 exact match registry claim，后续 queue 仅为该权威下的可恢复 projection（随 release/acquire transfer provenance 演化，增量 3）；registry 与 checkpoint 不得各自拥有 queue truth。
+- LeadCheckpoint（genesis/lineage 形态）：身份/血缘（`is_genesis`、`predecessor_lead_checkpoint_ref`、`content_digest`）、policy/session/subject pins、writer provenance、初始 task ownership/queue、最小 typed `lead_decision`/`next_trigger`（成员随消费者扩展）。
+- **不落地**：active selection/current attempt、四层 assessment、progress、fingerprint、budget、`checkpoint_due` —— 消费者分别在增量 2/4，随消费方落地（不以"形状校验"冒充消费者）。
+
+手工语义场景（最多 9 个，一行为一场景；结构性 missing/type/null/unknown 与禁字段由既有 schema parity 自动覆盖，不重复计）：
+
+1. valid genesis + linear successor —— 接受（happy path）；
+2. duplicate genesis（同 `lead_control_id` 第二次 genesis）—— 拒绝（`control_genesis_duplicate`）；
+3. provider assertion invalid（subject assertion 无法验证；required 字段缺失交 schema parity）—— 拒绝；
+4. writer authority invalid（自报/无 `control.genesis` grant）—— 拒绝（`control_writer_authority_invalid`）；
+5. initial task ownership/queue ref unresolved —— 拒绝；
+6. checkpoint predecessor cross-control（引用其他 control lineage 的 checkpoint）—— 拒绝（`checkpoint_lineage_invalid`）；
+7. lineage fork / multiple tip —— 拒绝（fork 为代表场景；non-tip 由同一 lineage invariant 实现，不另加低价值 case）；
+8. checkpoint session/control/subject pin mismatch —— 拒绝（`checkpoint_pin_invalid`）；
+9. active policy pin/digest mismatch —— 拒绝（`checkpoint_pin_invalid`）。
+
+完成条件（增量 1）：唯一 genesis；无 session-less/subject-less、伪 writer 或 pin 不一致的 accepted genesis/checkpoint；predecessor/fork/tip 由 lineage invariant 闭合；`tests/**` 新增 ≤300 行；既有 Slice 0/1 测试不回归（fixture 仅补 required pin 字段）。
+
+### 增量 2/3/4：范围与顺序
+
+- 增量 2：store-backed dispatch（existence/tip/selection）、active selection/current attempt/四层 assessment/progress 字段（随 dispatch/recovery 消费者落地）、recovery、`reconcile` 核心 + 基础止损、同 lineage session 替换、event trigger 全量。fingerprint 未落地前，凡依赖 fingerprint 判定的决策一律 frozen/escalate（ADR-006），禁止以 predecessor 计数冒充相同 fingerprint 进入 `needs_user`。
+- 增量 3：跨 lineage 原子复核与 transfer（见归属映射）。
+- 增量 4：完成 Slice 2（Slice 3 前落地）；`unverified_assessment` 独立评审准入归入 Slice 4「control consumer closure」（见 Slice 4 段）。
+
+### 原 Slice 2 规范条目（按归属映射交付）
 
 交付物：
 
@@ -329,6 +409,8 @@ LeadControl 只消费上述 authoritative facts，并通过 `reconcile(authorita
 
 引用 ADR-004 决策七。
 
+依赖顺序（见「Slice 2 增量化交付」节）：本增量在 Slice 2（完成于增量 4）之后落地。本节含 **control consumer closure**（该条款原属 Slice 2 拆分草案，已移出并入本节，不构成 Slice 2 完成前置）：`unverified_assessment` 独立评审准入（review_status=accepted|rejected 消费 `budget_assessment_result`）；`budget_assessment_result` 消费 Slice 2 增量 4 的 checkpoint binding/派生字段（`assessed_checkpoint_ref+digest`、`assessed_effective_budget_binding_digest`）。
+
 交付物：
 
 - Finding typed basis：`contract_violation` / `regression` / `newly_discovered_risk` / `hardening_opportunity`；
@@ -391,6 +473,7 @@ LeadControl 只消费上述 authoritative facts，并通过 `reconcile(authorita
 - 全部 v2 CLI writer/reader/validator；
 - v2 templates、help、examples 和 runtime references；
 - v1 schema rejection；
+- 激活仅接受最终 exact checkpoint/registry schema：Slice 2 增量 1-4 中间形态非 adopted runtime contract，无读兼容/backfill/双读；
 - legacy code、fallback、fixtures 和 compatibility tests 删除；
 - clean repository 安装后 E2E；
 - closure audit 和真实 dogfood。
@@ -492,6 +575,7 @@ E2E/cutover 必须覆盖：
 - ADR-003/005/006 的 accepted invariant 与最终确认的 ADR-004 contract 均有 writer、reader、validator 和测试。
 - `skills/orbit/references/runtime/` 只描述已经实现的 v2。
 - 全仓搜索和行为测试均证明 v1 fallback 已关闭。
+- pre-activation 中间 schema 形态（Slice 2 增量 1-4）无 adopted runtime contract、无读兼容；store-level compare-and-append/崩溃/并发原子性已由受控 store 闭合。
 - 所有 project-scoped commands 在其他读写前验证 `protocol_epoch: orbit-v2`，混合 epoch fail closed。
 - ProtocolRoot marker parent 是唯一 active root，不存在 cwd/config/manifest root override。
 - ProtocolRoot 只保存 immutable policy genesis ref，policy/task body 不复制进 marker。
