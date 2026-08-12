@@ -14,7 +14,6 @@
         "genesis_checkpoint_ref",
         "writer_authority_provenance",
         "owned_task_refs",
-        "active_lead_session_ref",
         "content_digest"
       ],
       "properties": {
@@ -31,7 +30,6 @@
           "uniqueItems": true,
           "items": {"$ref": "#/$defs/TaskRef"}
         },
-        "active_lead_session_ref": {"$ref": "#/$defs/LeadSessionRef"},
         "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
       },
       "additionalProperties": false
@@ -54,6 +52,15 @@
         "lead_runtime_subject_assertion_digest",
         "logical_lead_refs",
         "task_queue",
+        "active_task_ref",
+        "selected_work_unit_ref",
+        "current_or_terminal_attempt_ref",
+        "assessments",
+        "delivery_progress",
+        "assurance_progress",
+        "lead_decision",
+        "reconcile_trigger",
+        "next_trigger",
         "writer_authority_provenance",
         "content_digest"
       ],
@@ -93,6 +100,30 @@
           "uniqueItems": true,
           "items": {"$ref": "#/$defs/TaskRef"}
         },
+        "active_task_ref": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/TaskRef"}
+          ]
+        },
+        "selected_work_unit_ref": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/WorkUnitRef"}
+          ]
+        },
+        "current_or_terminal_attempt_ref": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/AttemptRef"}
+          ]
+        },
+        "assessments": {"$ref": "#/$defs/Assessments"},
+        "delivery_progress": {"$ref": "#/$defs/Progress"},
+        "assurance_progress": {"$ref": "#/$defs/Progress"},
+        "lead_decision": {"$ref": "#/$defs/LeadDecision"},
+        "reconcile_trigger": {"$ref": "#/$defs/NextTrigger"},
+        "next_trigger": {"$ref": "#/$defs/NextTrigger"},
         "writer_authority_provenance": {"$ref": "#/$defs/WriterAuthorityProvenance"},
         "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
       },
@@ -174,6 +205,150 @@
       "properties": {
         "assertion_id": {"type": "string", "pattern": "^oassert_[a-z0-9][a-z0-9_-]{7,95}$"},
         "assertion_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "WorkUnitRef": {
+      "type": "object",
+      "required": ["work_unit_id", "content_digest"],
+      "properties": {
+        "work_unit_id": {"type": "string", "pattern": "^owu_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "AttemptRef": {
+      "type": "object",
+      "required": ["attempt_id", "event_id", "event_digest"],
+      "properties": {
+        "attempt_id": {"type": "string", "pattern": "^oattempt_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "event_id": {"type": "string", "pattern": "^oevent_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "event_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "Assessments": {
+      "type": "object",
+      "required": ["task_queue", "active_mainline", "work_graph_branches", "current_attempt"],
+      "properties": {
+        "task_queue": {"$ref": "#/$defs/AssessmentLayer"},
+        "active_mainline": {"$ref": "#/$defs/AssessmentLayer"},
+        "work_graph_branches": {"$ref": "#/$defs/AssessmentLayer"},
+        "current_attempt": {"$ref": "#/$defs/AssessmentLayer"}
+      },
+      "additionalProperties": false
+    },
+    "AssessmentLayer": {
+      "type": "object",
+      "required": ["status", "rationale", "basis_projection", "supporting_refs"],
+      "properties": {
+        "status": {"enum": ["ok", "warning", "blocked", "none"]},
+        "rationale": {"type": "string", "minLength": 1},
+        "basis_projection": {
+          "enum": ["task_queue", "active_task_ref", "selected_work_unit_ref", "current_or_terminal_attempt_ref"]
+        },
+        "supporting_refs": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/SupportingRef"}
+        }
+      },
+      "additionalProperties": false
+    },
+    "SupportingRef": {
+      "type": "object",
+      "required": ["kind", "id", "digest"],
+      "properties": {
+        "kind": {
+          "enum": [
+            "work_unit",
+            "task_revision",
+            "evidence_record",
+            "finding",
+            "gate_evaluation",
+            "lead_checkpoint",
+            "change_thesis",
+            "attempt_event",
+            "agent_event",
+            "rule_resolution"
+          ]
+        },
+        "id": {"type": "string", "minLength": 1},
+        "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "event_id": {"type": "string", "pattern": "^oevent_[a-z0-9][a-z0-9_-]{7,95}$"}
+      },
+      "additionalProperties": false
+    },
+    "Progress": {
+      "type": "object",
+      "required": [
+        "change",
+        "rationale",
+        "predecessor_lead_checkpoint_ref",
+        "measured_terminal_attempt_ref",
+        "substantive_change_kinds",
+        "supporting_refs"
+      ],
+      "properties": {
+        "change": {"enum": ["not_assessed", "changed", "unchanged"]},
+        "rationale": {"type": "string", "minLength": 1},
+        "predecessor_lead_checkpoint_ref": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/LeadCheckpointRef"}
+          ]
+        },
+        "measured_terminal_attempt_ref": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/AttemptRef"}
+          ]
+        },
+        "substantive_change_kinds": {
+          "type": "array",
+          "items": {"enum": ["thesis", "agent_context", "scope", "verification_plan"]}
+        },
+        "supporting_refs": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/SupportingRef"}
+        }
+      },
+      "additionalProperties": false
+    },
+    "LeadDecision": {
+      "type": "object",
+      "required": ["state", "action", "reason"],
+      "properties": {
+        "state": {
+          "enum": ["completed", "blocked", "frozen", "needs_user"]
+        },
+        "action": {"enum": ["establish", "continue", "dispatch", "replan", "switch", "freeze", "escalate"]},
+        "reason": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "NextTrigger": {
+      "type": "object",
+      "required": ["event", "reason"],
+      "properties": {
+        "event": {
+          "enum": [
+            "genesis",
+            "attempt_created",
+            "attempt_terminal",
+            "successor_before",
+            "dispatch_before",
+            "thesis_change",
+            "scope_change",
+            "finding_change",
+            "gate_change",
+            "task_revision_change",
+            "session_change",
+            "context_change",
+            "authority_change",
+            "dependency_change"
+          ]
+        },
+        "reason": {"type": "string", "minLength": 1}
       },
       "additionalProperties": false
     }

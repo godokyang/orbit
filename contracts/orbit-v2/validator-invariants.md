@@ -234,7 +234,7 @@ lead_session:
 
 lead_control_registry:                           # create-only, one per control
   lead_control_id, genesis_checkpoint_ref, writer_authority_provenance,
-  owned_task_refs, active_lead_session_ref
+  owned_task_refs
 
 lead_checkpoint:                                 # create-only append-only linear lineage
   lead_checkpoint_id, lead_control_id, is_genesis, predecessor_lead_checkpoint_ref,
@@ -268,9 +268,66 @@ Mutation matrix additions (all cross the public `Validator#validate` seam):
 | stale tip policy | open lineage tip pins a non-active policy revision | `checkpoint_pin_invalid` |
 | late session context | session start generation context event recorded after `LeadSessionStarted` | `lead_session_invalid` |
 
-Store-backed dispatch binding (existence/tip/selection), Task/executor
-transfer provenance, decision/trigger, and recovery remain increment 2/3
-work; the Slice 1 dispatch refs stay format/chain-internal until then.
+Store-backed dispatch binding closes in increment 2 (below); Task/executor
+transfer provenance and fingerprint/fuse machinery remain increment 3/4 work.
+
+## Slice 2 increment 2 addendum: minimal recoverable control loop
+
+Closes the Slice 1 dispatch deferral and lands the recoverable loop: exact
+dispatch refs, active selection/current-attempt/assessment/progress fields,
+typed decision/trigger, `LeadControl.reconcile/2` replay, recovery, and
+same-lineage session replacement. No fingerprint/budget/fallback fields;
+fingerprint-dependent decisions freeze.
+
+New frozen shapes:
+
+```yaml
+work_unit_attempt:
+  dispatch_lead_checkpoint_ref: { lead_checkpoint_id, content_digest }
+
+lead_checkpoint:
+  active_task_ref, selected_work_unit_ref, current_or_terminal_attempt_ref,
+  assessments, delivery_progress, assurance_progress, lead_decision,
+  reconcile_trigger, next_trigger
+```
+
+New invariant families:
+
+| Family | Closed invariant | Single owner/seam |
+| --- | --- | --- |
+| Dispatch binding | attempt dispatch ref resolves to an accepted same-control checkpoint with exact digest whose selection (active task revision / selected work unit) exactly matches the Attempt; one dispatch per checkpoint; historical checkpoint pins never stale from later attempt events | RuntimeLifecycle + LeadControl |
+| One-way causality | checkpoint attempt refs only pin attempts accepted before it and never the attempt it authorizes; switch checkpoints pin a terminal attempt of the prior selection; observation pins match the current selection; event pins are exact and never require the attempt's current latest event | LeadControl |
+| Trigger lifecycle | genesis reconciles on genesis and awaits dispatch_before; dispatch checkpoints reconcile on dispatch_before/attempt_terminal/successor_before and await attempt_created; observation reconciles on attempt_created/session_change with the matching awaited event | LeadControl |
+| Decision replay | every accepted checkpoint decision is byte-equal to `LeadControl.reconcile(facts, reconcile_trigger.event)` over its own exact ref; self-reported decisions fail closed | Validator orchestration + LeadControl |
+| Assessment basis | each layer pins its exact `basis_projection` and `none` iff the basis projection is null; rationale required | LeadControl |
+| Progress judgment | `change` is not_assessed iff measured terminal ref is null; measured rounds pin an exact terminal event, delivery/assurance measured refs agree; substantive kinds require matching exact supporting refs; stop-loss only on measured terminal rounds | LeadControl |
+| Session lineage | exactly one root per control; exact predecessor terminal event pin with generation; single successor, no fork/cycle; successor starts at/after prior terminal; the unique active session is the lineage tip | LeadControl |
+| Same-failure fuse | pinned failed/blocked event with chain length >= 2 freezes the successor (fingerprint unprovable); completed/cancelled never trigger it; zero-delivery fuses walk distinct-terminal rounds only | LeadControl |
+| Dispatch observation | the exact AttemptCreated observation checkpoint is the immediate accepted successor of the Attempt's dispatch checkpoint, reconciles on attempt_created, and pins that exact AttemptCreated event; intervening checkpoints and non-tip dispatch refs fail closed | LeadControl |
+| Registry create-only | the registry carries no active-session pointer; genesis exact-pins the initial session and the current active session derives from the unique lineage tip plus session lineage | LeadControl |
+| Substantive delta | a claimed thesis/context/scope/verification-plan delta must be provable against the exact lineage predecessor projection (deterministic authoritative basis per kind; verification-plan basis is the artifact `identity_sha256`, matching supporting-ref resolution); thesis/verification-plan current basis is the single exact proposed successor ref in the authorizing checkpoint's provenance compared to the predecessor's effective basis (ADR-006 redirection: the successor Attempt does not exist yet, so zero/multiple proposals fail closed and the later AttemptCreated assignment must match); a checkpoint-level cardinality invariant rejects more than one change_thesis or rule_resolution ref (distinct or repeated identical — supporting refs have no uniqueness rule) regardless of trigger/progress/action; a merely resolvable supporting ref is never evidence; a kind without a basis fails closed | LeadControl |
+| Change-trigger delta | session/task-revision/scope/thesis/finding/gate/context/authority/dependency change triggers are never accepted from the enum alone: the exact authoritative projection must differ from the exact lineage predecessor. Finding delta is proven only by a new exact `finding` ref in the checkpoint's supporting provenance (assessment layers + progress); gate delta only by a new exact `gate_evaluation` ref; thesis_change delta is the single exact proposed successor `change_thesis` ref compared to the predecessor's effective pinned thesis (ADR-006 redirection). FindingResolution and GateRequirement-record changes have no exact ref kind in Inc2 checkpoint provenance, so those subtypes fail closed rather than inventing a latest-wins projection | LeadControl |
+| Recovery | recovery re-runs the unique tip's own stored-trigger pipeline, so stop-loss/dependency/fuse outcomes are recomputed exactly and frozen decisions never thaw; non-tip recovery fails closed | LeadControl |
+
+Mutation matrix additions (all cross the public `Validator#validate` or
+`LeadControl.reconcile` seams):
+
+| Mutation class | Representative mutation | Expected invariant/error |
+| --- | --- | --- |
+| forged decision | stored lead_decision diverges from reconcile result | `checkpoint_decision_replay_invalid` |
+| duplicate dispatch | a second Attempt claims one dispatch checkpoint | `attempt_dispatch_invalid` |
+| stale pin | later attempt event appended after an accepted pin | valid (pin exact) |
+| replacement without provenance | second session with null predecessor | `session_binding_invalid` |
+| first zero round | measured round delivery unchanged, no substantive kinds | frozen |
+| assurance-only | delivery unchanged, assurance changed | frozen |
+| two zero rounds | two distinct-terminal rounds delivery unchanged | frozen |
+| third failure | pinned failed event, chain length 2 | frozen (fingerprint unprovable) |
+| intervening dispatch | context checkpoint between dispatch and its AttemptCreated observation | `checkpoint_dispatch_observation_invalid` |
+| unobserved dispatch | Attempt cites a dispatch checkpoint no observation follows | `checkpoint_dispatch_observation_invalid` |
+| fabricated substantive delta | arbitrary resolvable scope ref claims substantive scope without a selection delta | `checkpoint_progress_invalid` |
+| fabricated change trigger | session/task-revision/scope/thesis/finding/gate/context/authority/dependency trigger with no projection delta vs predecessor | `checkpoint_trigger_invalid` |
+| ambiguous proposal | two distinct or repeated identical change_thesis/rule_resolution refs on one checkpoint | `checkpoint_proposal_ambiguous` |
+| registry active-session rewrite | registry pins a later session generation | `contract_shape_invalid` (field absent) |
 
 ## InvariantGraph migration ledger
 

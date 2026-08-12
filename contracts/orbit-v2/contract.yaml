@@ -361,10 +361,19 @@ work_model:
         linear_chain: single_successor_no_fork_no_cycle
       dispatch_lead_checkpoint_ref:
         required: true
-        exact_ref: stable_lead_checkpoint_id
+        exact_ref: lead_checkpoint_id_plus_content_digest
         chain_internal_consistency: one_dispatch_per_checkpoint_per_control_lineage
         uniqueness_scope: [project_id, lead_control_id, dispatch_lead_checkpoint_ref]
-        store_backed_existence_tip_selection: slice_2
+        store_backed_existence: slice_2_increment_2_closed
+        selection_consistency:
+          - checkpoint_active_task_ref_matches_attempt_task_revision
+          - checkpoint_selected_work_unit_ref_matches_attempt_work_unit
+        one_way_causality:
+          - attempt_references_its_dispatch_checkpoint_exactly
+          - dispatch_checkpoint_never_requires_its_authorized_attempt_id
+          - historical_checkpoint_event_pin_never_requires_attempt_latest
+        dispatch_time_tip: linear_predecessor_and_unique_consumption
+        historical_tip_with_later_successor: not_stale
     strict_single_active:
       interval_semantics: half_open_created_at_to_ended_at_any_moment_overlap_forbidden
       open_ended_attempt: active_until_future
@@ -468,7 +477,8 @@ control_registry:
     owned_task_refs_unique_per_task_id: true
     checkpoint_task_queue: exact_ordered_projection
   active_session:
-    active_lead_session_ref: exact
+    derivation: unique_lineage_tip_plus_session_lineage
+    registry_pointer: forbidden
     cardinality: at_most_one_active_per_control
   multi_lineage:
     interim_behavior: unsupported_fail_closed
@@ -504,10 +514,67 @@ lead_checkpoint:
   task_queue:
     initial_queue_required: genesis_mandatory
     projection: exact_match_registry_owned_task_refs
+  selection:
+    active_task_ref:
+      unique: true
+      in_queue: task_revision_must_appear_in_task_queue
+      null_lifecycle: genesis_only
+    selected_work_unit_ref:
+      unique: true
+      belongs_to_active_task_revision: true
+    current_or_terminal_attempt_ref:
+      exact: attempt_id_plus_pinned_event_id_and_event_digest
+      causality:
+        - checkpoint_references_only_attempts_accepted_before_it
+        - checkpoint_must_not_pin_the_attempt_it_authorizes
+        - event_belongs_to_attempt_and_matches_selection
+      null_means_no_prior_attempt_for_selection: true
+      historical_event_pin_not_stale: true
+    task_switch:
+      requires_current_attempt_terminal: true
+      switch_only_after_accepted_checkpoint: true
+    dispatch_observation:
+      immediate_successor_of_dispatch_checkpoint: true
+      reconcile_trigger_attempt_created: true
+      pins_exact_attempt_created_event: true
+      intervening_checkpoint_or_non_tip_dispatch: fail_closed
+  assessments:
+    four_layers: [task_queue, active_mainline, work_graph_branches, current_attempt]
+    status_enum: [ok, warning, blocked, none]
+    supporting_refs: typed_exact_ref_with_kind_id_and_digest
+  progress:
+    delivery_and_assurance_separated: true
+    semantic_change: changed_or_unchanged
+    measured_terminal_attempt_ref: exact_or_null_for_non_terminal_rounds
+    stop_loss_only_on_terminal_round_observations: true
+    substantive_change_kinds: [thesis, agent_context, scope, verification_plan]
+    substantive_delta_proven_against_exact_predecessor_projection: true
+    thesis_plan_current_basis: single_exact_proposed_successor_ref_vs_predecessor_effective_basis
+    proposal_cardinality: at_most_one_exact_ref_per_kind_per_checkpoint
+    duplicate_or_multiple_proposal: fail_closed
+    attempt_created_matches_authorized_proposal: true
+    kind_without_deterministic_basis: fail_closed
+    first_zero_round_requires_substantive_change_with_exact_supporting_refs: true
+    two_zero_rounds_find_previous_distinct_terminal_attempt_round: true
+    delta_judgment_not_score: true
+    supporting_refs: typed_exact_ref_with_kind_id_and_digest
+  decision_and_trigger:
+    status: increment_2_with_reconcile_consumer
+    lead_decision:
+      state_is_runner_stop_state_after_action: true
+      state_enum: [completed, blocked, frozen, needs_user]
+      action_enum: [establish, continue, dispatch, replan, switch, freeze, escalate]
+      genesis_action: establish
+    next_trigger:
+      event_enum: [dispatch_before, attempt_terminal, successor_before, thesis_change, scope_change, finding_change, gate_change, task_revision_change, session_change, context_change, authority_change, dependency_change]
+    change_trigger_delta:
+      proven_against_exact_lineage_predecessor_projection: true
+      enum_alone: fail_closed
+      finding_gate_basis: exact_supporting_provenance_refs
+      unresolvable_subtype: fail_closed
   forbidden:
     - copied_task_goal_or_evidence_or_gate_truth
-  decision_and_trigger:
-    status: deferred_to_increment_2_with_reconcile_consumer
+    - fingerprint_budget_or_fallback_fields
 
 rule_resolution:
   artifact_lifecycle: create_only

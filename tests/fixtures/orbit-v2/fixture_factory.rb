@@ -23,6 +23,7 @@ module OrbitV2FixtureFactory
   GATE_LINEAGE_ID = "ogline_slice0review"
   FINDING_ID = "ofinding_slice0example"
   CONTROL_ID = "olcontrol_slice0main"
+  DISPATCH_DECISION = { "state" => "blocked", "action" => "dispatch", "reason" => "dispatch authorized" }.freeze
   GENESIS_CHECKPOINT_ID = "olcheckpoint_genesis_slice0"
   SUCCESSOR_CHECKPOINT_ID = "olcheckpoint_slice0successor"
   ROOT = File.expand_path("../../..", __dir__)
@@ -365,56 +366,46 @@ module OrbitV2FixtureFactory
         "durable_context_ref" => "artifact://slice0/durable-lead-context"
       )
     ]
-    lead_sessions = [
-      lead_session(logical_leads.first, agents.first)
-    ]
-    session = lead_sessions.first
+    old_session = lead_session(logical_leads.first, agents.first)
+    old_session["lifecycle_events"] << event("oevent_oldsessionended", "LeadSessionEnded",
+      old_session.dig("lifecycle_events", 0, "event_digest"),
+      "ended_at" => "2026-07-30T00:05:00Z", "status" => "completed", "reason" => "Replaced by successor.")
+    agents.first["lifecycle_events"] << event("oevent_leadcontextadvanced", "AgentContextAdvanced",
+      agents.first.dig("lifecycle_events", 0, "event_digest"),
+      "context_generation" => 2, "recorded_at" => "2026-07-30T00:05:30Z", "reason" => "Successor session context.")
+    successor_session = deep_copy(old_session)
+    successor_session["lead_session_id"] = "oleadsession_successor"
+    successor_session["session_generation"] = 2
+    successor_session["lifecycle_events"] = [event("oevent_successorsessionstarted", "LeadSessionStarted", nil,
+      "role" => "lead", "context_generation" => 2, "started_at" => "2026-07-30T00:06:00Z", "status" => "active")]
+    successor_session["predecessor_lead_session_ref"] = {
+      "lead_session_id" => old_session["lead_session_id"], "session_generation" => 1,
+      "event_id" => old_session.dig("lifecycle_events", 1, "event_id"),
+      "event_digest" => old_session.dig("lifecycle_events", 1, "event_digest")
+    }
+    lead_sessions = [old_session, successor_session]
     writer_assertion = assertions[2]
     genesis_checkpoint = lead_checkpoint(
       GENESIS_CHECKPOINT_ID,
       is_genesis: true,
       predecessor_ref: nil,
       policy: policy,
-      session: session,
+      session: old_session,
       agent: agents.first,
       logical_lead: logical_leads.first,
       task: task,
       writer_action: "control.genesis",
       writer_assertion: writer_assertion
     )
-    successor_checkpoint = lead_checkpoint(
-      SUCCESSOR_CHECKPOINT_ID,
-      is_genesis: false,
-      predecessor_ref: ref(
-        "lead_checkpoint_id",
-        genesis_checkpoint["lead_checkpoint_id"],
-        genesis_checkpoint["content_digest"]
-      ),
-      policy: policy,
-      session: session,
-      agent: agents.first,
-      logical_lead: logical_leads.first,
-      task: task,
-      writer_action: "control.checkpoint",
-      writer_assertion: writer_assertion
-    )
-    control_registries = [
-      control_registry(
-        policy: policy,
-        genesis_checkpoint: genesis_checkpoint,
-        session: session,
-        task: task,
-        writer_assertion: writer_assertion
-      )
-    ]
     attempts = []
     resolutions = []
-    [
+    attempt_specs = [
       ["oattempt_implementationone", "owu_implementationone", "oagent_implementerone", "coder", "implementation", nil, "2026-07-30T00:01:00Z", "2026-07-30T00:01:30Z"],
       ["oattempt_implementationonesuccessor", "owu_implementationone", "oagent_implementerone", "coder", "implementation", "oattempt_implementationone", "2026-07-30T00:01:45Z", "2026-07-30T00:01:50Z"],
       ["oattempt_implementationtwo", "owu_implementationtwo", "oagent_implementertwo", "coder", "implementation", nil, "2026-07-30T00:02:00Z", "2026-07-30T00:02:30Z"],
       ["oattempt_independentreview", "owu_independentreview", "oagent_independentreviewer", "reviewer", "review", nil, "2026-07-30T00:03:00Z", nil]
-    ].each_with_index do |(attempt_id, unit_id, agent_id, role, purpose, predecessor_ref, started_at, terminal_ended_at), index|
+    ]
+    attempt_specs.each_with_index do |(attempt_id, unit_id, agent_id, role, purpose, predecessor_ref, started_at, terminal_ended_at), index|
       thesis = theses.find { |candidate| candidate["work_unit_id"] == unit_id }
       assigned_unit = units.find { |candidate| candidate["work_unit_id"] == unit_id }
       identity = {
@@ -456,6 +447,7 @@ module OrbitV2FixtureFactory
         authorization_record_refs:
           assigned_unit.dig("authority_scope", "authorization_record_refs"),
         predecessor_work_unit_attempt_ref: predecessor_ref,
+        dispatch_lead_checkpoint_ref: nil,
         started_at: started_at
       )
       if terminal_ended_at
@@ -469,6 +461,45 @@ module OrbitV2FixtureFactory
       end
       attempts << created_attempt
     end
+
+    dispatch_checkpoints = []
+    predecessor_checkpoint = genesis_checkpoint
+    # One dispatch checkpoint per attempt; later ones pin the previous terminal.
+    attempts.each_with_index do |created_attempt, index|
+      previous = index.zero? ? nil : attempts[index - 1]
+      unit = units.find { |candidate| candidate["work_unit_id"] == created_attempt["work_unit_id"] }
+      attempt_ref = previous && attempt_event_ref(attempts, previous["attempt_id"])
+      cp_id = index.zero? ? "olcheckpoint_dispatch_implone" : "olcheckpoint_terminal_impl#{previous["attempt_id"].delete_prefix("oattempt_implementation")}"
+      checkpoint = lead_checkpoint(
+        cp_id,
+        is_genesis: false,
+        predecessor_ref: cp_ref(predecessor_checkpoint),
+        policy: policy,
+        session: old_session,
+        agent: agents.first,
+        logical_lead: logical_leads.first,
+        task: task,
+        writer_action: "control.checkpoint",
+        writer_assertion: writer_assertion,
+        active_task_ref: task_ref(task),
+        selected_work_unit_ref: work_unit_ref(unit),
+        attempt_ref: attempt_ref,
+        delivery: checkpoint_progress(previous ? "changed" : "not_assessed", measured: previous && attempt_ref),
+        assurance: checkpoint_progress(previous ? "changed" : "not_assessed", measured: previous && attempt_ref),
+        decision: DISPATCH_DECISION,
+        reconcile_trigger: attempt_ref && { "event" => "attempt_terminal", "reason" => "Terminal observation authorizes the successor dispatch." }
+      )
+      dispatch_checkpoints << checkpoint
+      created_attempt["dispatch_lead_checkpoint_ref"] = cp_ref(checkpoint)
+      # The immediate successor observes the exact AttemptCreated event.
+      last = index == attempts.length - 1
+      dispatch_checkpoints << observation_checkpoint(checkpoint, created_attempt,
+        session: last ? successor_session : nil, cp_id: last ? SUCCESSOR_CHECKPOINT_ID : nil)
+      predecessor_checkpoint = dispatch_checkpoints.last
+    end
+    control_registries = [control_registry(policy: policy, genesis_checkpoint: genesis_checkpoint, task: task,
+      writer_assertion: writer_assertion)]
+    all_checkpoints = [genesis_checkpoint, *dispatch_checkpoints]
 
     evidence = [
       implementation_evidence(
@@ -613,7 +644,7 @@ module OrbitV2FixtureFactory
       "logical_leads" => logical_leads,
       "lead_sessions" => lead_sessions,
       "control_registries" => control_registries,
-      "lead_checkpoints" => [genesis_checkpoint, successor_checkpoint],
+      "lead_checkpoints" => all_checkpoints,
       "work_unit_attempts" => attempts,
       "rule_resolution_artifacts" => resolutions,
       "evidence_records" => evidence,
@@ -932,6 +963,7 @@ module OrbitV2FixtureFactory
       "lead_runtime_subject_assertion_digest" => digest_for(
         agent.dig("runtime_identity", "verification_receipt_ref")
       ),
+      "predecessor_lead_session_ref" => nil,
       "lifecycle_events" => [lifecycle]
     }
   end
@@ -945,8 +977,9 @@ module OrbitV2FixtureFactory
     agent:,
     logical_lead:,
     task:,
-    writer_action:,
-    writer_assertion:
+    writer_action:, writer_assertion:,
+    active_task_ref: nil, selected_work_unit_ref: nil, attempt_ref: nil,
+    delivery: nil, assurance: nil, decision: nil, reconcile_trigger: nil, next_trigger: nil
   )
     digested(
       "schema_version" => "orbit-lead-checkpoint-v1",
@@ -959,21 +992,144 @@ module OrbitV2FixtureFactory
       "predecessor_lead_checkpoint_ref" => predecessor_ref,
       "project_policy_revision_ref" => policy_ref(policy),
       "lead_agent_instance_ref" => { "agent_instance_id" => agent["agent_instance_id"] },
-      "active_lead_session_ref" => {
-        "lead_session_id" => session["lead_session_id"],
-        "session_generation" => session["session_generation"]
-      },
+      "active_lead_session_ref" => session_ref(session),
       "lead_runtime_subject_ref" => session["lead_runtime_subject_ref"],
       "lead_runtime_subject_assertion_digest" => session["lead_runtime_subject_assertion_digest"],
       "logical_lead_refs" => [
         ref("logical_lead_id", logical_lead["logical_lead_id"], logical_lead["content_digest"])
       ],
       "task_queue" => [task_ref(task)],
+      "active_task_ref" => active_task_ref,
+      "selected_work_unit_ref" => selected_work_unit_ref,
+      "current_or_terminal_attempt_ref" => attempt_ref,
+      "assessments" => checkpoint_assessments(active_task_ref, selected_work_unit_ref, attempt_ref),
+      "delivery_progress" => (delivery || checkpoint_progress("not_assessed")).merge(
+        "predecessor_lead_checkpoint_ref" => predecessor_ref
+      ),
+      "assurance_progress" => (assurance || checkpoint_progress("not_assessed")).merge(
+        "predecessor_lead_checkpoint_ref" => predecessor_ref
+      ),
+      "lead_decision" => decision || {
+        "state" => "blocked", "action" => is_genesis ? "establish" : "continue",
+        "reason" => is_genesis ? "control anchored" : "observation accepted"
+      },
+      "reconcile_trigger" => reconcile_trigger || {
+        "event" => is_genesis ? "genesis" : (decision && decision["action"] == "dispatch" ? "dispatch_before" : "attempt_terminal"),
+        "reason" => "Decision trigger recorded for this checkpoint."
+      },
+      "next_trigger" => next_trigger || {
+        "event" => is_genesis ? "dispatch_before" : (decision && decision["action"] == "dispatch" ? "attempt_created" : "successor_before"),
+        "reason" => "Awaiting the next control event."
+      },
       "writer_authority_provenance" => writer_provenance(policy, writer_action, writer_assertion)
     )
   end
 
-  def control_registry(policy:, genesis_checkpoint:, session:, task:, writer_assertion:)
+  def checkpoint_progress(change, measured: nil, substantive: [])
+    {
+      "change" => change,
+      "rationale" => "Lead judgment recorded for the control checkpoint.",
+      "measured_terminal_attempt_ref" => measured,
+      "substantive_change_kinds" => substantive,
+      "supporting_refs" => measured ? [
+        { "kind" => "attempt_event", "id" => measured["attempt_id"], "event_id" => measured["event_id"], "digest" => measured["event_digest"] }
+      ] : []
+    }
+  end
+
+  def checkpoint_assessments(active_task_ref, selected_work_unit_ref, attempt_ref)
+    layer = lambda do |basis, status|
+      {
+        "status" => status,
+        "rationale" => "Layer assessed against its exact basis projection.",
+        "basis_projection" => basis,
+        "supporting_refs" => []
+      }
+    end
+    {
+      "task_queue" => layer.call("task_queue", "ok"),
+      "active_mainline" => layer.call("active_task_ref", active_task_ref ? "ok" : "none"),
+      "work_graph_branches" => layer.call("selected_work_unit_ref", selected_work_unit_ref ? "ok" : "none"),
+      "current_attempt" => layer.call("current_or_terminal_attempt_ref", attempt_ref ? "ok" : "none")
+    }
+  end
+
+  def append_dispatch_checkpoint(bundle, attempt:, unit:, task: nil, pin_attempt_id: nil)
+    tip = bundle["lead_checkpoints"].last
+    session = bundle["lead_sessions"].last
+    lead_agent = bundle["agent_instances"].find { |candidate| candidate["agent_instance_id"] == session["agent_instance_id"] }
+    writer_assertion = bundle["authority_assertions"].find { |candidate| candidate["assertion_id"] == "oassert_controlwriter" }
+    task ||= bundle["task_revisions"].first
+    policy ||= bundle["project_policy_revisions"].last
+    attempt_ref = pin_attempt_id ? attempt_event_ref(bundle["work_unit_attempts"], pin_attempt_id) : nil
+    checkpoint = lead_checkpoint(
+      "olcheckpoint_dispatch_#{attempt["attempt_id"].delete_prefix("oattempt_")}",
+      is_genesis: false,
+      predecessor_ref: cp_ref(tip),
+      policy: policy,
+      session: session,
+      agent: lead_agent,
+      logical_lead: bundle["logical_leads"].first,
+      task: task,
+      writer_action: "control.checkpoint",
+      writer_assertion: writer_assertion,
+      active_task_ref: task_ref(task),
+      selected_work_unit_ref: work_unit_ref(unit),
+      attempt_ref: attempt_ref,
+      decision: DISPATCH_DECISION
+    )
+    bundle["lead_checkpoints"] << checkpoint
+    attempt["dispatch_lead_checkpoint_ref"] = cp_ref(checkpoint)
+    bundle["lead_checkpoints"] << observation_checkpoint(checkpoint, attempt)
+    checkpoint
+  end
+
+  # The dispatch proof is constructive: the successor observes the exact AttemptCreated event.
+  def observation_checkpoint(dispatch, attempt, session: nil, cp_id: nil)
+    observation = deep_copy(dispatch)
+    observation["lead_checkpoint_id"] = cp_id || "olcheckpoint_created_#{attempt["attempt_id"].delete_prefix("oattempt_")}"
+    observation["predecessor_lead_checkpoint_ref"] = cp_ref(dispatch)
+    observation["active_lead_session_ref"] = session_ref(session) if session
+    observation["current_or_terminal_attempt_ref"] = attempt_event_ref([attempt], attempt["attempt_id"], 0)
+    observation["assessments"] = checkpoint_assessments(
+      observation["active_task_ref"],
+      observation["selected_work_unit_ref"],
+      observation["current_or_terminal_attempt_ref"]
+    )
+    %w[delivery_progress assurance_progress].each do |field|
+      observation[field] = checkpoint_progress("not_assessed").merge("predecessor_lead_checkpoint_ref" => observation["predecessor_lead_checkpoint_ref"])
+    end
+    observation["lead_decision"] = {
+      "state" => "blocked", "action" => "continue", "reason" => "attempt creation observed"
+    }
+    observation["reconcile_trigger"] = {
+      "event" => "attempt_created", "reason" => "Observing AttemptCreated."
+    }
+    observation["next_trigger"] = {
+      "event" => "attempt_terminal", "reason" => "Awaiting the Attempt terminal event."
+    }
+    digested(observation)
+  end
+
+  def cp_ref(checkpoint)
+    checkpoint.slice("lead_checkpoint_id", "content_digest")
+  end
+
+  def session_ref(session)
+    session.slice("lead_session_id", "session_generation")
+  end
+
+  def attempt_event_ref(attempts, attempt_id, index = -1)
+    attempt = attempts.find { |candidate| candidate["attempt_id"] == attempt_id }
+    event = attempt.fetch("events")[index]
+    { "attempt_id" => attempt_id, "event_id" => event["event_id"], "event_digest" => event["event_digest"] }
+  end
+
+  def work_unit_ref(unit)
+    ref("work_unit_id", unit["work_unit_id"], unit["content_digest"])
+  end
+
+  def control_registry(policy:, genesis_checkpoint:, task:, writer_assertion:)
     digested(
       "schema_version" => "orbit-lead-control-registry-v1",
       "protocol_epoch" => "orbit-v2",
@@ -986,11 +1142,7 @@ module OrbitV2FixtureFactory
         genesis_checkpoint["content_digest"]
       ),
       "writer_authority_provenance" => writer_provenance(policy, "control.genesis", writer_assertion),
-      "owned_task_refs" => [task_ref(task)],
-      "active_lead_session_ref" => {
-        "lead_session_id" => session["lead_session_id"],
-        "session_generation" => session["session_generation"]
-      }
+      "owned_task_refs" => [task_ref(task)]
     )
   end
 
@@ -1073,8 +1225,7 @@ module OrbitV2FixtureFactory
       "attempt_id" => id,
       "lead_control_id" => lead_control_id,
       "predecessor_work_unit_attempt_ref" => predecessor_work_unit_attempt_ref,
-      "dispatch_lead_checkpoint_ref" => dispatch_lead_checkpoint_ref ||
-        "olcheckpoint_#{id.delete_prefix("oattempt_")}",
+      "dispatch_lead_checkpoint_ref" => dispatch_lead_checkpoint_ref,
       "task_id" => task_id,
       "task_revision_id" => task_revision_id,
       "work_unit_id" => unit_id,

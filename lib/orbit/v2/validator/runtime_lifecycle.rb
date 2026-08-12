@@ -313,15 +313,28 @@ module Orbit
               attempt["lead_control_id"],
               "#{path}.lead_control_id"
             )
-            validate_identifier(
-              "lead_checkpoint_id",
-              attempt["dispatch_lead_checkpoint_ref"],
-              "#{path}.dispatch_lead_checkpoint_ref"
-            )
-            unless attempt["dispatch_lead_checkpoint_ref"].is_a?(String)
+            dispatch_ref = attempt["dispatch_lead_checkpoint_ref"]
+            if dispatch_ref.is_a?(Hash)
+              validate_identifier(
+                "lead_checkpoint_id",
+                dispatch_ref["lead_checkpoint_id"],
+                "#{path}.dispatch_lead_checkpoint_ref.lead_checkpoint_id"
+              )
+            end
+            checkpoints = @indexes.fetch("lead_checkpoints", {})
+            checkpoint = dispatch_ref.is_a?(Hash) &&
+              checkpoints[dispatch_ref["lead_checkpoint_id"]]
+            unless checkpoint &&
+                   checkpoint["content_digest"] == dispatch_ref["content_digest"] &&
+                   checkpoint["lead_control_id"] == attempt["lead_control_id"] &&
+                   checkpoint.dig("active_task_ref", "task_revision_id") ==
+                     attempt["task_revision_id"] &&
+                   checkpoint.dig("selected_work_unit_ref", "work_unit_id") ==
+                     attempt["work_unit_id"]
               add(
                 "attempt_dispatch_invalid",
-                "every WorkUnitAttempt must pin the exact dispatch LeadCheckpoint ref that authorized it",
+                "dispatch LeadCheckpoint must exist with exact digest in the same control lineage " \
+                  "and its selection must exactly match this Attempt",
                 "#{path}.dispatch_lead_checkpoint_ref"
               )
             end

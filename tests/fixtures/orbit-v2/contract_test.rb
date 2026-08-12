@@ -36,6 +36,7 @@ module OrbitV2ContractTest
     test_schema_parity(valid_bundle)
     test_invalid_fixtures
     test_slice2_control_increment1
+    test_slice2_control_increment2
     test_slice1_retry_does_not_invalidate_dispatch
     test_authority_graph_regressions
     test_policy_issuance_and_stale_authority_regressions
@@ -526,6 +527,38 @@ module OrbitV2ContractTest
     assert(codes.include?("checkpoint_pin_invalid"), "lineage tip must pin the exact active policy")
   end
 
+  def test_slice2_control_increment2
+    bundle = OrbitV2FixtureFactory.valid_bundle
+    tip = bundle.fetch("lead_checkpoints").last
+    facts = {
+      "bundle" => bundle,
+      "lead_control_id" => OrbitV2FixtureFactory::CONTROL_ID,
+      "lead_checkpoint_ref" => {
+        "lead_checkpoint_id" => tip["lead_checkpoint_id"],
+        "content_digest" => tip["content_digest"]
+      }
+    }
+    recovery = Orbit::V2::LeadControl.reconcile(facts, "recovery")
+    replay = Orbit::V2::LeadControl.reconcile(facts, "recovery")
+    assert(
+      recovery == replay,
+      "recovery is idempotent"
+    )
+
+    forged = OrbitV2FixtureFactory.deep_copy(bundle)
+    forged_tip = forged.fetch("lead_checkpoints").last
+    forged_tip["lead_decision"] = {
+      "state" => "blocked", "action" => "continue", "reason" => "self-reported"
+    }
+    checkpoints = forged.fetch("lead_checkpoints")
+    checkpoints[checkpoints.index(forged_tip)] = OrbitV2FixtureFactory.digested(forged_tip)
+    codes = validator.validate(forged).map(&:code)
+    assert(
+      codes.include?("checkpoint_decision_replay_invalid"),
+      "forged lead_decision fails closed"
+    )
+  end
+
   def test_slice1_retry_does_not_invalidate_dispatch
     bundle = OrbitV2FixtureFactory.valid_bundle
     review = bundle.fetch("work_unit_attempts").find { |c| c["attempt_id"] == "oattempt_independentreview" }
@@ -569,6 +602,8 @@ module OrbitV2ContractTest
       predecessor_work_unit_attempt_ref: predecessor_ref,
       started_at: started_at
     )
+    OrbitV2FixtureFactory.append_dispatch_checkpoint(bundle, attempt: attempt, unit: unit,
+      pin_attempt_id: bundle["lead_checkpoints"].last.dig("current_or_terminal_attempt_ref", "attempt_id"))
     attempt["events"] << OrbitV2FixtureFactory.event(
       "oevent_#{attempt_id.delete_prefix("oattempt_")}_completed",
       "AttemptCompleted",
@@ -632,6 +667,7 @@ module OrbitV2ContractTest
     successor_record = successor.fetch("evidence_records").first
     successor_record.dig("implementation_check")["change_thesis_ref"] = thesis_ref
     rehash(successor_record)
+    rebind_checkpoint_refs(successor)
     refresh_evaluation_subject(successor)
     assert(
       validator.validate(successor).empty?,
@@ -2670,6 +2706,7 @@ module OrbitV2ContractTest
       authorization_record_refs:
         unit.dig("authority_scope", "authorization_record_refs")
     )
+    OrbitV2FixtureFactory.append_dispatch_checkpoint(bundle, attempt: attempt, unit: unit)
     evidence = OrbitV2FixtureFactory.implementation_evidence(
       "oevr_implementationthree",
       attempt,
@@ -2843,6 +2880,9 @@ module OrbitV2ContractTest
           .dig("authority_scope", "authorization_record_refs"),
         started_at: index.zero? ? "2026-07-30T00:05:00Z" : "2026-07-30T00:06:00Z"
       )
+      bundle["work_unit_attempts"] << attempt
+      OrbitV2FixtureFactory.append_dispatch_checkpoint(bundle, attempt: attempt, unit: specification.fetch("unit"), task: child,
+        pin_attempt_id: index.zero? ? nil : child_attempts.first["attempt_id"])
       if index.zero?
         attempt["events"] << OrbitV2FixtureFactory.event(
           "oevent_revisiontwoimplementationcompleted",
@@ -2883,7 +2923,6 @@ module OrbitV2ContractTest
     )
     child_evidence = [implementation, submission]
     bundle["rule_resolution_artifacts"].concat(child_rules)
-    bundle["work_unit_attempts"].concat(child_attempts)
     bundle["evidence_records"].concat(child_evidence)
 
     subject = Orbit::V2::EvaluationSubject.select(
@@ -3081,24 +3120,17 @@ module OrbitV2ContractTest
 
   def rebind_checkpoint_for_policy_rotation(bundle, policy, revision_number)
     tip = bundle["lead_checkpoints"].last
-    session = bundle["lead_sessions"].first
-    agent = bundle["agent_instances"].find { |candidate| candidate["agent_instance_id"] == session["agent_instance_id"] }
-    logical_lead = bundle["logical_leads"].first
-    task = bundle["task_revisions"].first
-    writer_assertion = bundle["authority_assertions"].find { |candidate| candidate["assertion_id"] == "oassert_controlwriter" }
-    rebind = OrbitV2FixtureFactory.lead_checkpoint(
-      format("olcheckpoint_policyrotation_r%04d", revision_number),
-      is_genesis: false,
-      predecessor_ref: { "lead_checkpoint_id" => tip["lead_checkpoint_id"], "content_digest" => tip["content_digest"] },
-      policy: policy,
-      session: session,
-      agent: agent,
-      logical_lead: logical_lead,
-      task: task,
-      writer_action: "control.checkpoint",
-      writer_assertion: writer_assertion
-    )
-    bundle["lead_checkpoints"] << rebind
+    # The tip is an observation checkpoint with the same continue/attempt_created
+    # decision shape; the rotation checkpoint re-pins it under the new policy.
+    rebind = OrbitV2FixtureFactory.deep_copy(tip)
+    rebind["lead_checkpoint_id"] = format("olcheckpoint_policyrotation_r%04d", revision_number)
+    rebind["predecessor_lead_checkpoint_ref"] = OrbitV2FixtureFactory.cp_ref(tip)
+    rebind["project_policy_revision_ref"] = OrbitV2FixtureFactory.policy_ref(policy)
+    rebind["writer_authority_provenance"] = OrbitV2FixtureFactory.writer_provenance(policy, "control.checkpoint",
+      bundle["authority_assertions"].find { |candidate| candidate["assertion_id"] == "oassert_controlwriter" })
+    rebind["current_or_terminal_attempt_ref"] = OrbitV2FixtureFactory.attempt_event_ref(bundle["work_unit_attempts"], "oattempt_independentreview")
+    %w[delivery_progress assurance_progress].each { |field| rebind[field]["predecessor_lead_checkpoint_ref"] = rebind["predecessor_lead_checkpoint_ref"] }
+    bundle["lead_checkpoints"] << OrbitV2FixtureFactory.digested(rebind)
   end
 
   def reissue_genesis_policy(bundle)
@@ -3155,7 +3187,7 @@ module OrbitV2ContractTest
     authorization_id = "oauthz_taskriskdelegate"
     task["authority_grant_refs"] = [authorization_id]
     rehash(task)
-    rebind_control_task_refs(bundle, task)
+    rebind_checkpoint_refs(bundle, task: task)
     scope = subject_override || Orbit::V2::TaskAuthority.scope_digest(task)
     assertion = OrbitV2FixtureFactory.assertion(
       "oassert_taskriskdelegate",
@@ -3235,6 +3267,7 @@ module OrbitV2ContractTest
         OrbitV2FixtureFactory.resign_event_chain(attempt)
       end
     end
+    units.each { |unit| rebind_checkpoint_refs(bundle, unit: unit) }
   end
 
   def add_work_authority(bundle, unit_index: 0, purpose: "implementation", subject_override: nil)
@@ -3295,6 +3328,7 @@ module OrbitV2ContractTest
       ) << authorization_id
       OrbitV2FixtureFactory.resign_event_chain(candidate)
     end
+    rebind_checkpoint_refs(bundle, unit: unit)
     refresh_all_evaluation_subjects(bundle)
     authorization
   end
@@ -3328,7 +3362,7 @@ module OrbitV2ContractTest
       task["gate_requirement_refs"] << gate_id
     end
     rehash(task)
-    rebind_control_task_refs(bundle, task)
+    rebind_checkpoint_refs(bundle, task: task)
     refresh_work_authorizations(bundle, task)
     bundle["gate_requirements"] << gate
     refresh_evaluation_subject(bundle)
@@ -3340,7 +3374,7 @@ module OrbitV2ContractTest
     task["unresolved_finding_refs"] = []
     rehash(task)
     refresh_work_authorizations(bundle, task)
-    rebind_control_task_refs(bundle, task)
+    rebind_checkpoint_refs(bundle, task: task)
     bundle["gate_evaluations"] = []
     bundle["findings"] = []
     bundle["finding_resolutions"] = []
@@ -3348,31 +3382,57 @@ module OrbitV2ContractTest
   end
 
   # Re-pin registry/checkpoint task refs and dependent digests after a fixture
-  # helper rehashes the TaskRevision they project.
-  def rebind_control_task_refs(bundle, task)
-    task_ref = { "task_id" => task["task_id"], "task_revision_id" => task["task_revision_id"], "content_digest" => task["content_digest"] }
-    bundle["lead_checkpoints"].each do |checkpoint|
-      checkpoint["task_queue"] = [task_ref]
+  def rebind_checkpoint_refs(bundle, task: nil, unit: nil)
+    task_ref = task && OrbitV2FixtureFactory.task_ref(task)
+    attempts = bundle["work_unit_attempts"].to_h { |attempt| [attempt["attempt_id"], attempt] }
+    repin = lambda do |ref|
+      next ref unless ref && (attempt = attempts[ref["attempt_id"]])
+      event = attempt["events"].find { |candidate| candidate["event_id"] == ref["event_id"] }
+      event && { "attempt_id" => ref["attempt_id"], "event_id" => event["event_id"], "event_digest" => event["event_digest"] }
     end
     bundle["lead_checkpoints"].each_with_index do |checkpoint, index|
-      if index.positive?
-        prior = bundle["lead_checkpoints"][index - 1]
-        checkpoint["predecessor_lead_checkpoint_ref"] = {
-          "lead_checkpoint_id" => prior["lead_checkpoint_id"],
-          "content_digest" => prior["content_digest"]
+      checkpoint["task_queue"] = [task_ref] if task_ref
+      checkpoint["active_task_ref"] = task_ref if task_ref && checkpoint["active_task_ref"]
+      if unit && (selected = checkpoint["selected_work_unit_ref"]) && selected["work_unit_id"] == unit["work_unit_id"]
+        checkpoint["selected_work_unit_ref"] = {
+          "work_unit_id" => unit["work_unit_id"],
+          "content_digest" => unit["content_digest"]
         }
+      end
+      checkpoint["current_or_terminal_attempt_ref"] =
+        repin.call(checkpoint["current_or_terminal_attempt_ref"]) if checkpoint["current_or_terminal_attempt_ref"]
+      %w[delivery_progress assurance_progress].each do |field|
+        measured = checkpoint.dig(field, "measured_terminal_attempt_ref")
+        updated = repin.call(measured)
+        checkpoint[field]["measured_terminal_attempt_ref"] = updated if measured
+        next unless updated && measured
+        Array(checkpoint.dig(field, "supporting_refs")).each do |ref|
+          next unless ref["kind"] == "attempt_event" && ref["id"] == measured["attempt_id"]
+          ref["event_id"] = updated["event_id"]
+          ref["digest"] = updated["event_digest"]
+        end
+      end
+      if index.positive?
+        predecessor_ref = OrbitV2FixtureFactory.cp_ref(bundle["lead_checkpoints"][index - 1])
+        checkpoint["predecessor_lead_checkpoint_ref"] = predecessor_ref
+        checkpoint["delivery_progress"]["predecessor_lead_checkpoint_ref"] = predecessor_ref
+        checkpoint["assurance_progress"]["predecessor_lead_checkpoint_ref"] = predecessor_ref
       end
       rehash(checkpoint)
     end
+    checkpoints = bundle["lead_checkpoints"].to_h { |cp| [cp["lead_checkpoint_id"], cp] }
+    bundle["work_unit_attempts"].each do |attempt|
+      ref = attempt["dispatch_lead_checkpoint_ref"]
+      next unless ref && checkpoints[ref["lead_checkpoint_id"]]
+
+      attempt["dispatch_lead_checkpoint_ref"] = OrbitV2FixtureFactory.cp_ref(checkpoints[ref["lead_checkpoint_id"]])
+    end
+    return unless task_ref
+
     bundle["control_registries"].each do |registry|
       registry["owned_task_refs"] = [task_ref]
       genesis = bundle["lead_checkpoints"].find { |checkpoint| checkpoint["lead_checkpoint_id"] == registry.dig("genesis_checkpoint_ref", "lead_checkpoint_id") }
-      if genesis
-        registry["genesis_checkpoint_ref"] = {
-          "lead_checkpoint_id" => genesis["lead_checkpoint_id"],
-          "content_digest" => genesis["content_digest"]
-        }
-      end
+      registry["genesis_checkpoint_ref"] = OrbitV2FixtureFactory.cp_ref(genesis) if genesis
       rehash(registry)
     end
   end
@@ -3460,6 +3520,7 @@ module OrbitV2ContractTest
       predecessor_work_unit_attempt_ref: base_attempt["attempt_id"],
       started_at: "2026-07-30T00:04:00Z"
     )
+    OrbitV2FixtureFactory.append_dispatch_checkpoint(bundle, attempt: attempt, unit: unit, pin_attempt_id: base_attempt["attempt_id"])
     submission = OrbitV2FixtureFactory.evaluator_submission(
       "oevr_unusedreviewer",
       attempt,

@@ -75,6 +75,7 @@
         "lead_control_id",
         "lead_runtime_subject_ref",
         "lead_runtime_subject_assertion_digest",
+        "predecessor_lead_session_ref",
         "lifecycle_events"
       ],
       "properties": {
@@ -97,6 +98,25 @@
         "lead_runtime_subject_assertion_digest": {
           "type": "string",
           "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "predecessor_lead_session_ref": {
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "required": ["lead_session_id", "session_generation", "event_id", "event_digest"],
+              "properties": {
+                "lead_session_id": {
+                  "type": "string",
+                  "pattern": "^oleadsession_[a-z0-9][a-z0-9_-]{7,95}$"
+                },
+                "session_generation": {"type": "integer", "minimum": 1},
+                "event_id": {"type": "string", "pattern": "^oevent_[a-z0-9][a-z0-9_-]{7,95}$"},
+                "event_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+              },
+              "additionalProperties": false
+            }
+          ]
         },
         "lifecycle_events": {
           "type": "array",
@@ -135,7 +155,18 @@
             {"type": "null"}
           ]
         },
-        "dispatch_lead_checkpoint_ref": {"type": "string", "pattern": "^olcheckpoint_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "dispatch_lead_checkpoint_ref": {
+          "type": "object",
+          "required": ["lead_checkpoint_id", "content_digest"],
+          "properties": {
+            "lead_checkpoint_id": {
+              "type": "string",
+              "pattern": "^olcheckpoint_[a-z0-9][a-z0-9_-]{7,95}$"
+            },
+            "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+          },
+          "additionalProperties": false
+        },
         "task_id": {"type": "string", "pattern": "^otask_[a-z0-9][a-z0-9_-]{7,95}$"},
         "task_revision_id": {"type": "string", "pattern": "^trev_[a-z0-9][a-z0-9_-]{7,95}$"},
         "work_unit_id": {"type": "string", "pattern": "^owu_[a-z0-9][a-z0-9_-]{7,95}$"},
