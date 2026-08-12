@@ -329,6 +329,57 @@ Mutation matrix additions (all cross the public `Validator#validate` or
 | ambiguous proposal | two distinct or repeated identical change_thesis/rule_resolution refs on one checkpoint | `checkpoint_proposal_ambiguous` |
 | registry active-session rewrite | registry pins a later session generation | `contract_shape_invalid` (field absent) |
 
+## Slice 2 increment 3 addendum: cross-lineage closure and transfer
+
+Lands the multi-lineage acceptance boundary and the exact release/acquire and
+executor transfer provenance. Model-level accepted-final-state closure only:
+real compare-and-append atomic execution closes at Slice 6 activation; no
+transaction primitive is simulated.
+
+New frozen shapes:
+
+```yaml
+lead_checkpoint:
+  task_transfer_acquire:            # required with the acquire decision
+    released_checkpoint_ref: { lead_checkpoint_id, content_digest }
+    released_lead_control_id: olcontrol_id
+    task_ref: { task_id, task_revision_id, content_digest }
+  lead_decision.action: [..., release, suspend, acquire]
+  next_trigger.event: [..., task_release, task_suspend, task_acquire]
+```
+
+New invariant families:
+
+| Family | Closed invariant | Single owner/seam |
+| --- | --- | --- |
+| Parallel boundary | multiple open control lineages are accepted only when derived tip task ownership sets and active canonical runtime-subject sets (provider_id + runtime_subject_id from the verified AgentInstance identity) are pairwise disjoint; AgentInstance IDs/aliases never substitute for the canonical subject; overlapping task sets fail closed | LeadControl |
+| LogicalLead closure | one Task/LogicalLead belongs to at most one open queue and is active-selected by at most one accepted tip; a lineage tip can claim only logical leads whose task its own tip queue owns | LeadControl |
+| Subject active binding | one canonical runtime subject binds at most one active LeadSession project-wide; a subject reused across controls requires exactly one origin lineage and exact terminal/release -> successor/bind transfer chains; a root session reusing a subject from another control fails closed; cross-control session forks and cycles fail closed | LeadControl |
+| Session transfer | a cross-control session successor is the first generation of its lineage, pins the prior session exact terminal LeadSessionEnded event id+digest, keeps the same canonical runtime subject, and starts at/after the prior terminal; a same-lineage replacement may coexist with one transfer from the same terminal session | LeadControl |
+| Queue projection | genesis exact-pins the immutable registry claim; release/suspend checkpoints remove exactly one owned task from the queue projection (active selection removed too); acquire checkpoints append exactly the payload task ref; other checkpoints keep the ordered projection with per-task revision lineage | LeadControl |
+| Transfer provenance | the acquire decision requires `task_transfer_acquire`; the released checkpoint ref resolves to an exact accepted release/suspend checkpoint of a different control; the acquire task ref byte-equals the released queue element; every release/suspend checkpoint has exactly one matching acquire; the released task has no non-terminal Attempt in the releasing control; missing release, early acquire, wrong refs/digest/task/control, duplicate ownership and replay fail closed | LeadControl |
+| Cross-control succession | a successor Attempt may cross control lineages only when its control validly acquired the Attempt's task from the predecessor's control and the authorizing acquire is a strict accepted-lineage ancestor of the Attempt's exact dispatch checkpoint (never the dispatch itself, a future acquire, or a side branch), with a payload resolving exactly to an accepted release/suspend checkpoint that released exactly this task ref; the predecessor is terminal | RuntimeLifecycle + LeadControl |
+
+Mutation matrix additions (all cross the public `Validator#validate` or
+`LeadControl.reconcile` seams):
+
+| Mutation class | Representative mutation | Expected invariant/error |
+| --- | --- | --- |
+| overlapping task sets | second lineage tip queue claims the main task | `control_task_ownership_conflict` |
+| unowned lead claim | tip logical_lead_refs names a lead of a task outside its queue | `checkpoint_pin_invalid` |
+| subject alias | AgentInstance alias of one verified runtime subject | `runtime_identity_duplicate` |
+| double active subject | one canonical subject backs two active LeadSessions across controls | `runtime_subject_active_conflict` |
+| subject reuse without transfer | root session reuses a subject present in another control | `session_binding_invalid` |
+| acquire without release | acquire pins an absent/non-release checkpoint | `task_transfer_invalid` |
+| wrong released control | acquire `released_lead_control_id` diverges from the release checkpoint | `task_transfer_invalid` |
+| mismatched task ref | acquire `task_ref` differs from the released queue element | `task_transfer_invalid` |
+| dangling release | release/suspend checkpoint without exactly one matching acquire | `task_transfer_invalid` |
+| release with active attempt | released task has a non-terminal Attempt in the releasing control | `task_transfer_invalid` |
+| early executor bind | cross-control successor pins a non-terminal session event | `session_binding_invalid` |
+| cross-control fork | one session referenced by two transfer successors | `session_binding_invalid` |
+| future acquire | acquire checkpoint positioned after the attempt's dispatch checkpoint in the lineage | `attempt_successor_invalid` |
+| forged acquire payload | acquire payload whose released checkpoint ref does not resolve | `attempt_successor_invalid` + `task_transfer_invalid` |
+
 ## InvariantGraph migration ledger
 
 This change migrates only call sites whose semantics are genuinely identical:

@@ -37,6 +37,7 @@ module OrbitV2ContractTest
     test_invalid_fixtures
     test_slice2_control_increment1
     test_slice2_control_increment2
+    test_slice2_control_increment3
     test_slice1_retry_does_not_invalidate_dispatch
     test_authority_graph_regressions
     test_policy_issuance_and_stale_authority_regressions
@@ -557,6 +558,210 @@ module OrbitV2ContractTest
       codes.include?("checkpoint_decision_replay_invalid"),
       "forged lead_decision fails closed"
     )
+  end
+
+  # Increment 3: cross-lineage closure and exact release/acquire + executor
+  # transfer provenance, one minimal two-lineage fixture with small mutations.
+  # Structural permutations stay with schema parity; different projects are
+  # independent by construction (one bundle pins one project).
+  def test_slice2_control_increment3
+    secondary = lambda do |bundle, control_id, agent: nil, session_id: "oleadsession_slice0secondary", predecessor: nil, started_at: "2026-07-30T00:00:00Z"|
+      writer = OrbitV2FixtureFactory.assertion(
+        "oassert_controlwriter2",
+        %w[control.genesis control.checkpoint],
+        "control-plane-writer",
+        authority_scope_ref: control_id
+      )
+      bundle["authority_assertions"] << writer
+      task2 = OrbitV2FixtureFactory.extra_task(
+        bundle,
+        task_id: "otask_slice0secondary",
+        revision_id: "trev_slice0secondary_r1",
+        gate_id: "ogreq_slice0secondary",
+        gate_lineage_id: "ogline_slice0secondary"
+      )
+      bundle["agent_instances"] << agent if agent
+      OrbitV2FixtureFactory.second_lineage(
+        bundle,
+        control_id: control_id,
+        writer_assertion: writer,
+        agent: agent || bundle["agent_instances"].first,
+        task: task2["task"],
+        logical_lead_id: "olead_slice0secondary",
+        session_id: session_id,
+        predecessor_session_ref: predecessor,
+        started_at: started_at
+      )
+    end
+
+    # 1. Disjoint task sets and active canonical runtime subjects parallel.
+    bundle = OrbitV2FixtureFactory.valid_bundle
+    secondary.call(bundle, "olcontrol_slice0secondary",
+      agent: OrbitV2FixtureFactory.agent("oagent_secondarylead", "lead"))
+    assert(validator.validate(bundle).empty?, "disjoint two-lineage parallelism is accepted")
+
+    # 2. Overlap mutations: duplicate task ownership and one canonical subject
+    #    backing two active LeadSessions both fail closed (AgentInstance
+    #    aliases are already covered by the runtime_identity_duplicate matrix).
+    bundle = OrbitV2FixtureFactory.valid_bundle
+    secondary.call(bundle, "olcontrol_slice0secondary",
+      agent: OrbitV2FixtureFactory.agent("oagent_secondarylead", "lead"))
+    main_task = bundle["task_revisions"].first
+    genesis2 = bundle["lead_checkpoints"].find { |c| c["lead_control_id"] == "olcontrol_slice0secondary" }
+    genesis2["task_queue"] = [OrbitV2FixtureFactory.task_ref(main_task)]
+    bundle["lead_checkpoints"][bundle["lead_checkpoints"].index(genesis2)] =
+      OrbitV2FixtureFactory.digested(genesis2)
+    registry2 = bundle["control_registries"].find { |c| c["lead_control_id"] == "olcontrol_slice0secondary" }
+    registry2["owned_task_refs"] = [OrbitV2FixtureFactory.task_ref(main_task)]
+    registry2["genesis_checkpoint_ref"] = OrbitV2FixtureFactory.cp_ref(genesis2)
+    bundle["control_registries"][bundle["control_registries"].index(registry2)] =
+      OrbitV2FixtureFactory.digested(registry2)
+    codes = validator.validate(bundle).map(&:code)
+    assert(codes.include?("control_task_ownership_conflict"), "overlapping tip task sets fail closed")
+    bundle = OrbitV2FixtureFactory.valid_bundle
+    secondary.call(bundle, "olcontrol_slice0secondary")
+    codes = validator.validate(bundle).map(&:code)
+    assert(
+      codes.include?("runtime_subject_active_conflict") &&
+        codes.include?("session_binding_invalid"),
+      "one canonical subject cannot bind two active LeadSessions across controls"
+    )
+
+    rehash_tail = lambda do |bundle, checkpoint|
+      start = bundle["lead_checkpoints"].index(checkpoint)
+      bundle["lead_checkpoints"][start] = OrbitV2FixtureFactory.digested(checkpoint)
+      control = checkpoint["lead_control_id"]
+      (start + 1...bundle["lead_checkpoints"].length).each do |index|
+        candidate = bundle["lead_checkpoints"][index]
+        break unless candidate["lead_control_id"] == control
+
+        candidate["predecessor_lead_checkpoint_ref"] =
+          OrbitV2FixtureFactory.cp_ref(bundle["lead_checkpoints"][index - 1])
+        %w[delivery_progress assurance_progress].each do |field|
+          candidate[field]["predecessor_lead_checkpoint_ref"] =
+            candidate["predecessor_lead_checkpoint_ref"]
+        end
+        bundle["lead_checkpoints"][index] = OrbitV2FixtureFactory.digested(candidate)
+      end
+    end
+    acquire_of = lambda do |bundle|
+      bundle["lead_checkpoints"].find do |c|
+        c["lead_control_id"] == OrbitV2FixtureFactory::TRANSFER_CONTROL_ID &&
+          c.dig("lead_decision", "action") == "acquire"
+      end
+    end
+
+    # 3. Valid task transfer: release checkpoint first, then acquire with the
+    #    exact old checkpoint ref, old/new control IDs, and Task refs; the new
+    #    lineage continues the work through a cross-control successor Attempt.
+    bundle = OrbitV2FixtureFactory.transfer_bundle
+    assert(validator.validate(bundle).empty?, "release then acquire with exact provenance is accepted")
+
+    # 4. Invalid transfer table on the same fixture: missing release, wrong
+    #    released control, a future acquire after the dispatch checkpoint, and
+    #    a non-terminal release all fail closed; none of the forged or
+    #    reordered acquires can authorize the cross-control successor.
+    bundle = OrbitV2FixtureFactory.transfer_bundle
+    acquire_of.call(bundle)["task_transfer_acquire"]["released_checkpoint_ref"] = {
+      "lead_checkpoint_id" => "olcheckpoint_absentrelease",
+      "content_digest" => "sha256:#{'0' * 64}"
+    }
+    rehash_tail.call(bundle, acquire_of.call(bundle))
+    codes = validator.validate(bundle).map(&:code)
+    assert(
+      codes.include?("task_transfer_invalid") &&
+        codes.include?("attempt_successor_invalid"),
+      "an unresolvable acquire payload fails closed and never authorizes"
+    )
+    bundle = OrbitV2FixtureFactory.transfer_bundle
+    acquire_of.call(bundle)["task_transfer_acquire"]["released_lead_control_id"] =
+      "olcontrol_wronglineage"
+    rehash_tail.call(bundle, acquire_of.call(bundle))
+    codes = validator.validate(bundle).map(&:code)
+    assert(
+      codes.include?("task_transfer_invalid") &&
+        codes.include?("attempt_successor_invalid"),
+      "wrong released control revokes the transfer and the cross-control successor"
+    )
+    bundle = OrbitV2FixtureFactory.transfer_bundle
+    checkpoints = bundle["lead_checkpoints"]
+    acquire = acquire_of.call(bundle)
+    dispatch = checkpoints.find { |c| c["lead_checkpoint_id"] == "olcheckpoint_transferdispatch_b" }
+    genesis_b = checkpoints.find do |c|
+      c["lead_checkpoint_id"] == "olcheckpoint_genesis_slice0transfertarget"
+    end
+    checkpoints << checkpoints.delete_at(checkpoints.index(acquire))
+    dispatch["predecessor_lead_checkpoint_ref"] = OrbitV2FixtureFactory.cp_ref(genesis_b)
+    rehash_tail.call(bundle, dispatch)
+    bundle["work_unit_attempts"].find do |c|
+      c["attempt_id"] == "oattempt_slice0transfersuccessor"
+    end["dispatch_lead_checkpoint_ref"] = OrbitV2FixtureFactory.cp_ref(
+      checkpoints.find { |c| c["lead_checkpoint_id"] == "olcheckpoint_transferdispatch_b" }
+    )
+    codes = validator.validate(bundle).map(&:code)
+    assert(
+      codes.include?("attempt_successor_invalid"),
+      "a future acquire after the dispatch checkpoint never authorizes a past cross-control Attempt"
+    )
+    bundle = OrbitV2FixtureFactory.transfer_bundle(terminalize_review: false)
+    codes = validator.validate(bundle).map(&:code)
+    assert(codes.include?("task_transfer_invalid"), "release with a non-terminal Attempt fails closed")
+
+    # 5. Valid executor transfer: old session terminal/release precedes the
+    #    new session successor/bind with exact cross-control provenance.
+    executor_base = lambda do |predecessor_event|
+      bundle = OrbitV2FixtureFactory.valid_bundle
+      # The old lineage's active session moves to a different subject, so the
+      # transferred subject is not active in the old lineage.
+      replacement_agent = OrbitV2FixtureFactory.agent("oagent_successorreplacement", "lead")
+      replacement_agent["lifecycle_events"] << OrbitV2FixtureFactory.event(
+        "oevent_successorreplacementcontext",
+        "AgentContextAdvanced",
+        replacement_agent.dig("lifecycle_events", 0, "event_digest"),
+        "context_generation" => 2,
+        "recorded_at" => "2026-07-30T00:05:30Z",
+        "reason" => "Successor session context."
+      )
+      bundle["agent_instances"] << replacement_agent
+      successor = bundle["lead_sessions"].find { |c| c["lead_session_id"] == "oleadsession_successor" }
+      successor["agent_instance_id"] = replacement_agent["agent_instance_id"]
+      successor["lead_runtime_subject_ref"] =
+        replacement_agent.dig("runtime_identity", "runtime_subject_id")
+      successor["lead_runtime_subject_assertion_digest"] =
+        OrbitV2FixtureFactory.digest_for(
+          replacement_agent.dig("runtime_identity", "verification_receipt_ref")
+        )
+      tip = bundle["lead_checkpoints"].last
+      tip["lead_agent_instance_ref"] = { "agent_instance_id" => replacement_agent["agent_instance_id"] }
+      tip["lead_runtime_subject_ref"] = successor["lead_runtime_subject_ref"]
+      tip["lead_runtime_subject_assertion_digest"] = successor["lead_runtime_subject_assertion_digest"]
+      bundle["lead_checkpoints"][-1] = OrbitV2FixtureFactory.digested(tip)
+      old_session = bundle["lead_sessions"].find { |c| c["lead_session_id"] == "oleadsession_slice0contract" }
+      secondary.call(
+        bundle,
+        "olcontrol_slice0executor",
+        session_id: "oleadsession_slice0executor",
+        predecessor: {
+          "lead_session_id" => old_session["lead_session_id"],
+          "session_generation" => old_session["session_generation"],
+          "event_id" => predecessor_event["event_id"],
+          "event_digest" => predecessor_event["event_digest"]
+        },
+        started_at: "2026-07-30T00:06:01Z"
+      )
+      bundle
+    end
+    old_session = OrbitV2FixtureFactory.valid_bundle["lead_sessions"].find do |c|
+      c["lead_session_id"] == "oleadsession_slice0contract"
+    end
+    bundle = executor_base.call(old_session["lifecycle_events"].last)
+    assert(validator.validate(bundle).empty?, "controlled executor transfer with terminal/release provenance is accepted")
+
+    # 6. Early/mismatched executor bind: the successor pins a non-terminal
+    #    event of the old session.
+    bundle = executor_base.call(old_session["lifecycle_events"].first)
+    codes = validator.validate(bundle).map(&:code)
+    assert(codes.include?("session_binding_invalid"), "executor bind before terminal/release fails closed")
   end
 
   def test_slice1_retry_does_not_invalidate_dispatch

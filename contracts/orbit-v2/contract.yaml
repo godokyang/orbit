@@ -481,7 +481,50 @@ control_registry:
     registry_pointer: forbidden
     cardinality: at_most_one_active_per_control
   multi_lineage:
-    interim_behavior: unsupported_fail_closed
+    parallel_boundary: task_sets_and_active_runtime_subject_sets_pairwise_disjoint
+    ownership:
+      source: derived_unique_lineage_tip_queue_projection
+      registry: immutable_genesis_claim_and_history_not_latest_truth
+      tip_queue_disjoint: true
+      logical_lead_tip_membership: logical_lead_task_must_be_owned_by_tip_queue
+      overlapping_task_sets: fail_closed
+    task_transfer:
+      ordered_provenance: release_or_relinquishing_suspend_then_acquire
+      release:
+        decision_actions: [release, suspend]
+        queue_removes_exactly_one_owned_task: true
+        active_selection_removed: true
+        no_non_terminal_attempt_for_released_task: true
+      acquire:
+        decision_action: acquire
+        queue_appends_exactly_the_acquired_task: true
+        exact_bindings:
+          - released_checkpoint_ref_id_and_digest
+          - released_lead_control_id
+          - task_ref_task_id_task_revision_id_and_digest
+        different_control_lineage: true
+      closure:
+        every_release_or_suspend_has_exactly_one_matching_acquire: true
+        missing_release_or_early_acquire: fail_closed
+        wrong_refs_digest_task_or_control: fail_closed
+        duplicate_ownership_or_replay: fail_closed
+    runtime_subject:
+      canonical_identity: provider_verified_provider_id_plus_runtime_subject_id
+      alias_or_agent_instance_string_comparison: forbidden
+      active_binding: at_most_one_active_lead_session_per_canonical_subject_project_wide
+      transfer:
+        ordered_provenance: old_session_terminal_release_then_new_successor_bind
+        exact_predecessor: session_id_generation_terminal_event_id_and_digest
+        same_canonical_subject: true
+        first_generation_of_new_lineage: true
+        missing_terminal_or_early_bind: fail_closed
+      subject_reuse_without_transfer_provenance: fail_closed
+    cross_control_attempt_succession:
+      allowed_only_after_valid_task_acquire: true
+      acquire_is_strict_accepted_lineage_ancestor_of_exact_dispatch_checkpoint: true
+      self_or_future_or_side_branch_acquire: fail_closed
+      payload_must_resolve_exact_release_or_suspend_checkpoint: true
+      same_work_unit_identity_and_terminal_predecessor: true
   atomicity:
     model_level: invalid_bundle_not_accepted_and_accepted_final_state_invariants_closed
     store_level_atomic_execution: slice_6_activation_closure
@@ -563,10 +606,19 @@ lead_checkpoint:
     lead_decision:
       state_is_runner_stop_state_after_action: true
       state_enum: [completed, blocked, frozen, needs_user]
-      action_enum: [establish, continue, dispatch, replan, switch, freeze, escalate]
+      action_enum: [establish, continue, dispatch, replan, switch, freeze, escalate, release, suspend, acquire]
       genesis_action: establish
+      release_suspend_acquire: ownership_events_reconciled_from_typed_trigger
     next_trigger:
-      event_enum: [dispatch_before, attempt_terminal, successor_before, thesis_change, scope_change, finding_change, gate_change, task_revision_change, session_change, context_change, authority_change, dependency_change]
+      event_enum: [dispatch_before, attempt_terminal, successor_before, thesis_change, scope_change, finding_change, gate_change, task_revision_change, session_change, context_change, authority_change, dependency_change, task_release, task_suspend, task_acquire]
+    task_transfer_acquire:
+      required_with_acquire_action: true
+      forbidden_without_acquire_action: true
+      exact_bindings:
+        - released_checkpoint_ref_id_and_digest
+        - released_lead_control_id
+        - task_ref_task_id_task_revision_id_and_digest
+      release_or_suspend_reference_required: true
     change_trigger_delta:
       proven_against_exact_lineage_predecessor_projection: true
       enum_alone: fail_closed

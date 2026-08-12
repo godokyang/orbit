@@ -27,56 +27,54 @@ module Orbit
           registries = @indexes.fetch("control_registries", {})
           return if registries.empty?
 
-          if registries.length > 1
-            add(
-              "unsupported_multi_lineage",
-              "Slice 2 increment 1 accepts at most one open control lineage per bundle",
-              "control_registries"
+          # Increment 3 accepts multiple open control lineages; the
+          # cross-lineage closure (pairwise disjoint tip task sets and active
+          # canonical runtime subjects, release/acquire transfer provenance)
+          # is validated in validate_multi_lineage_closure and
+          # validate_task_transfer_provenance.
+
+          registries.each_value do |registry|
+            path = "control_registries.#{registry["lead_control_id"]}"
+            checkpoints = @indexes.fetch("lead_checkpoints", {})
+            tasks = @indexes.fetch("task_revisions", {})
+
+            genesis_ref = registry["genesis_checkpoint_ref"]
+            genesis = genesis_ref && checkpoints[genesis_ref["lead_checkpoint_id"]]
+            unless genesis &&
+                   genesis["is_genesis"] == true &&
+                   genesis["lead_control_id"] == registry["lead_control_id"] &&
+                   genesis["content_digest"] == genesis_ref["content_digest"]
+              add(
+                "control_genesis_invalid",
+                "registry must pin the accepted genesis LeadCheckpoint of the same control",
+                "#{path}.genesis_checkpoint_ref"
+              )
+            end
+            # The registry is create-only and carries no active-session pointer:
+            # the genesis checkpoint exact-pins the initial session, and the
+            # current active session is derived from the unique lineage tip plus
+            # the session lineage (see validate_lead_checkpoints and
+            # validate_active_session_cardinality).
+
+            writer = registry["writer_authority_provenance"] || {}
+            policies = @indexes.fetch("project_policy_revisions", {})
+            pinned_policy = policies[writer.dig("policy_revision_ref", "policy_revision_id")]
+            unless writer_authority_valid?(
+              pinned_policy,
+              writer,
+              GENESIS_WRITER_ACTION,
+              registry["lead_control_id"]
             )
-            return
+              add(
+                "control_writer_authority_invalid",
+                "registry genesis requires a provider-verified #{GENESIS_WRITER_ACTION} assertion " \
+                  "scoped to the exact lead_control_id and pinned to its genesis policy revision",
+                "#{path}.writer_authority_provenance"
+              )
+            end
+
+            validate_owned_task_refs(registry["owned_task_refs"], tasks, "#{path}.owned_task_refs")
           end
-
-          registry = registries.values.first
-          path = "control_registries.#{registry["lead_control_id"]}"
-          checkpoints = @indexes.fetch("lead_checkpoints", {})
-          tasks = @indexes.fetch("task_revisions", {})
-
-          genesis_ref = registry["genesis_checkpoint_ref"]
-          genesis = genesis_ref && checkpoints[genesis_ref["lead_checkpoint_id"]]
-          unless genesis &&
-                 genesis["is_genesis"] == true &&
-                 genesis["lead_control_id"] == registry["lead_control_id"] &&
-                 genesis["content_digest"] == genesis_ref["content_digest"]
-            add(
-              "control_genesis_invalid",
-              "registry must pin the accepted genesis LeadCheckpoint of the same control",
-              "#{path}.genesis_checkpoint_ref"
-            )
-          end
-          # The registry is create-only and carries no active-session pointer:
-          # the genesis checkpoint exact-pins the initial session, and the
-          # current active session is derived from the unique lineage tip plus
-          # the session lineage (see validate_lead_checkpoints and
-          # validate_active_session_cardinality).
-
-          writer = registry["writer_authority_provenance"] || {}
-          policies = @indexes.fetch("project_policy_revisions", {})
-          pinned_policy = policies[writer.dig("policy_revision_ref", "policy_revision_id")]
-          unless writer_authority_valid?(
-            pinned_policy,
-            writer,
-            GENESIS_WRITER_ACTION,
-            registry["lead_control_id"]
-          )
-            add(
-              "control_writer_authority_invalid",
-              "registry genesis requires a provider-verified #{GENESIS_WRITER_ACTION} assertion " \
-                "scoped to the exact lead_control_id and pinned to its genesis policy revision",
-              "#{path}.writer_authority_provenance"
-            )
-          end
-
-          validate_owned_task_refs(registry["owned_task_refs"], tasks, "#{path}.owned_task_refs")
         end
 
         def validate_lead_checkpoints(bundle, active_policy)
@@ -357,6 +355,260 @@ module Orbit
           validate_dispatch_observation(attempts, checkpoints)
         end
 
+        # Increment 3 cross-lineage closure: multiple open control lineages
+        # are accepted only while their derived tip task ownership sets and
+        # active canonical runtime-subject sets are pairwise disjoint, and
+        # every canonical subject reuse across controls carries an exact
+        # terminal/release -> successor/bind transfer chain. AgentInstance
+        # IDs or aliases never stand in for the canonical runtime subject.
+        # Different projects remain independent (a bundle pins one project).
+        def validate_multi_lineage_closure(bundle)
+          registries = @indexes.fetch("control_registries", {})
+          checkpoints = @indexes.fetch("lead_checkpoints", {})
+          leads = @indexes.fetch("logical_leads", {})
+          sessions = @indexes.fetch("lead_sessions", {})
+          return if registries.length < 2
+
+          successors = Hash.new { |hash, key| hash[key] = [] }
+          checkpoints.each_value do |checkpoint|
+            ref = checkpoint["predecessor_lead_checkpoint_ref"]
+            successors[ref["lead_checkpoint_id"]] << checkpoint["lead_checkpoint_id"] if ref.is_a?(Hash)
+          end
+
+          tip_by_control = {}
+          registries.each_key do |control_id|
+            tips = checkpoints.values.select do |checkpoint|
+              checkpoint["lead_control_id"] == control_id &&
+                successors[checkpoint["lead_checkpoint_id"]].empty?
+            end
+            tip_by_control[control_id] = tips.first if tips.length == 1
+          end
+
+          tip_by_control.each do |control_id, tip|
+            owned = Array(tip["task_queue"]).map { |ref| ref["task_id"] }
+            other_owned = tip_by_control.reject { |id, _| id == control_id }
+              .values.flat_map { |other_tip| Array(other_tip["task_queue"]).map { |ref| ref["task_id"] } }
+            overlap = owned & other_owned
+            unless overlap.empty?
+              add(
+                "control_task_ownership_conflict",
+                "open control lineages must own pairwise disjoint task sets; " \
+                  "#{control_id} overlaps on #{overlap.sort.join(",")}",
+                "control_registries.#{control_id}.owned_task_refs"
+              )
+            end
+            # One LogicalLead/Task belongs to at most one open queue, and its
+            # tip selection is unique: a tip can claim only leads whose task
+            # its own queue owns.
+            Array(tip["logical_lead_refs"]).each do |lead_ref|
+              lead = leads[lead_ref["logical_lead_id"]]
+              next unless lead
+              next if owned.include?(lead["task_id"])
+
+              add(
+                "checkpoint_pin_invalid",
+                "lineage tip logical leads must own tasks in the tip queue",
+                "lead_checkpoints.#{tip["lead_checkpoint_id"]}.logical_lead_refs"
+              )
+            end
+          end
+
+          validate_canonical_subject_closure(sessions)
+        end
+
+        # Project-wide canonical runtime-subject closure (provider_id +
+        # runtime_subject_id from the verified AgentInstance identity): one
+        # active LeadSession per subject, and each subject's control-lineage
+        # chain has exactly one origin lineage with all later lineages entered
+        # through an exact cross-control transfer predecessor. A root session
+        # whose subject exists in another control is a transfer without
+        # provenance and fails closed.
+        def validate_canonical_subject_closure(sessions)
+          active_by_subject = Hash.new { |hash, key| hash[key] = [] }
+          chains = {}
+          sessions.each_value do |session|
+            key = canonical_subject_key(session)
+            next unless key
+
+            control_id = session["lead_control_id"]
+            active_by_subject[key] << session["lead_session_id"] if session_active?(session)
+            chain = (chains[key] ||= {
+              "controls" => Set.new,
+              "origins" => Set.new,
+              "incoming" => {}
+            })
+            chain["controls"] << control_id
+
+            # The lineage head is the session whose own predecessor is null
+            # (origin) or resolves to another control (transfer successor);
+            # only heads place a subject into a lineage.
+            ref = session["predecessor_lead_session_ref"]
+            is_head =
+              ref.nil? ||
+              (ref.is_a?(Hash) &&
+                (head_predecessor = sessions[ref["lead_session_id"]]) &&
+                head_predecessor["lead_control_id"] != control_id)
+            next unless is_head
+
+            if ref.nil?
+              chain["origins"] << control_id
+            elsif ref.is_a?(Hash)
+              predecessor = sessions[ref["lead_session_id"]]
+              if predecessor && canonical_subject_key(predecessor) == key
+                chain["incoming"][control_id] = predecessor["lead_control_id"]
+              end
+            end
+          end
+
+          active_by_subject.each do |key, holder_ids|
+            next if holder_ids.length <= 1
+
+            add(
+              "runtime_subject_active_conflict",
+              "one canonical runtime subject cannot bind more than one active LeadSession",
+              "lead_sessions",
+              "runtime_subject" => key.join("/"),
+              "active_lead_session_ids" => holder_ids.sort
+            )
+          end
+
+          chains.each do |key, chain|
+            controls = chain["controls"]
+            next if controls.length <= 1
+
+            origins = chain["origins"]
+            unless origins.length == 1 && (controls - chain["incoming"].keys) == origins
+              add(
+                "session_binding_invalid",
+                "runtime subject #{key.join("/")} reuse across controls requires exactly one " \
+                  "origin lineage and exact terminal/release -> successor/bind transfer provenance",
+                "lead_sessions"
+              )
+            end
+          end
+        end
+
+        def canonical_subject_key(session)
+          agent = session && @indexes.fetch("agent_instances", {})[session["agent_instance_id"]]
+          identity = agent && agent["runtime_identity"]
+          identity && RuntimeIdentityVerifier.identity_key(identity)
+        rescue KeyError, TypeError
+          nil
+        end
+
+        # Increment 3 release/acquire transfer provenance closure: the
+        # acquire checkpoint pins the exact old accepted release/suspend
+        # checkpoint of a different control and the exact released Task ref;
+        # every release/suspend checkpoint is matched by exactly one acquire;
+        # the released task has no non-terminal Attempt in the releasing
+        # control. Accepted-final-state model only; Slice 6 owns physical
+        # compare-and-append atomicity.
+        def validate_task_transfer_provenance(bundle)
+          checkpoints = @indexes.fetch("lead_checkpoints", {})
+          attempts = @indexes.fetch("work_unit_attempts", {})
+          acquires = []
+          checkpoints.each_value do |checkpoint|
+            payload = checkpoint["task_transfer_acquire"]
+            next unless payload.is_a?(Hash)
+
+            path = "lead_checkpoints.#{checkpoint["lead_checkpoint_id"]}.task_transfer_acquire"
+            unless checkpoint.dig("lead_decision", "action") == "acquire"
+              add("task_transfer_invalid", "task_transfer_acquire requires the acquire decision", path)
+            end
+            release_ref = payload["released_checkpoint_ref"]
+            release = release_ref && checkpoints[release_ref["lead_checkpoint_id"]]
+            unless release && release["content_digest"] == release_ref["content_digest"]
+              add(
+                "task_transfer_invalid",
+                "acquire must pin an exact accepted release/suspend checkpoint ref",
+                "#{path}.released_checkpoint_ref"
+              )
+              next
+            end
+            unless release["lead_control_id"] == payload["released_lead_control_id"]
+              add(
+                "task_transfer_invalid",
+                "released_lead_control_id must equal the release checkpoint control",
+                "#{path}.released_lead_control_id"
+              )
+            end
+            if release["lead_control_id"] == checkpoint["lead_control_id"]
+              add(
+                "task_transfer_invalid",
+                "acquire must come from a different control lineage",
+                "#{path}.released_lead_control_id"
+              )
+            end
+            unless %w[release suspend].include?(release.dig("lead_decision", "action"))
+              add(
+                "task_transfer_invalid",
+                "acquire must reference an accepted release or relinquishing suspend checkpoint",
+                "#{path}.released_checkpoint_ref"
+              )
+            end
+            released_ref = released_task_ref(release, checkpoints)
+            unless released_ref && released_ref == payload["task_ref"]
+              add(
+                "task_transfer_invalid",
+                "acquire task ref must exact match the released task ref",
+                "#{path}.task_ref"
+              )
+            end
+            if released_ref
+              non_terminal = attempts.values.select do |attempt|
+                attempt["task_id"] == released_ref["task_id"] &&
+                  attempt["lead_control_id"] == release["lead_control_id"] &&
+                  !attempt_terminal?(attempt)
+              end
+              unless non_terminal.empty?
+                add(
+                  "task_transfer_invalid",
+                  "release requires no non-terminal Task/WorkUnit Attempt in the releasing control",
+                  "#{path}.released_checkpoint_ref",
+                  "non_terminal_attempt_ids" => non_terminal.map { |attempt| attempt["attempt_id"] }.sort
+                )
+              end
+            end
+            acquires << [payload, checkpoint["lead_control_id"]]
+          end
+
+          checkpoints.each_value do |checkpoint|
+            next unless %w[release suspend].include?(checkpoint.dig("lead_decision", "action"))
+
+            released_ref = released_task_ref(checkpoint, checkpoints)
+            next unless released_ref
+
+            matching = acquires.select do |payload, _control_id|
+              payload["released_checkpoint_ref"]["lead_checkpoint_id"] == checkpoint["lead_checkpoint_id"] &&
+                payload["released_checkpoint_ref"]["content_digest"] == checkpoint["content_digest"] &&
+                payload["released_lead_control_id"] == checkpoint["lead_control_id"] &&
+                payload["task_ref"] == released_ref
+            end
+            unless matching.length == 1
+              add(
+                "task_transfer_invalid",
+                "every release/suspend checkpoint requires exactly one matching acquire",
+                "lead_checkpoints.#{checkpoint["lead_checkpoint_id"]}"
+              )
+            end
+          end
+        end
+
+        # The task an accepted release/suspend checkpoint relinquished: the
+        # single element its queue removed from the exact lineage
+        # predecessor. This derived ref is the exact binding the acquiring
+        # checkpoint must reproduce.
+        def released_task_ref(checkpoint, checkpoints)
+          return nil if checkpoint["is_genesis"] == true
+
+          ref = checkpoint["predecessor_lead_checkpoint_ref"]
+          predecessor = ref && checkpoints[ref["lead_checkpoint_id"]]
+          return nil unless predecessor
+
+          removed = Array(predecessor["task_queue"]) - Array(checkpoint["task_queue"])
+          removed.length == 1 ? removed.first : nil
+        end
+
         # Constructive dispatch proof: the exact AttemptCreated observation
         # checkpoint must be the immediate accepted successor of the
         # Attempt's dispatch checkpoint, reconcile on attempt_created, and pin
@@ -431,50 +683,96 @@ module Orbit
         end
 
         # The registry owns the stable ordered Task identities of the initial
-        # claim; checkpoints keep that ordered ownership but may advance each
-        # task's revision monotonically along the verified TaskRevision
-        # descendant lineage (exact ref/digest). No regression, no jump
-        # without lineage, no task swap, no reorder; cross-control
-        # release/acquire remains increment 3.
+        # claim and never mutates: genesis exact-pins the claim, and every
+        # later queue is a derived projection that evolves only through exact
+        # release/suspend removal or acquire append provenance. The registry
+        # stays genesis claim/history, never mutable latest truth.
         def validate_checkpoint_queue_projection(checkpoint, predecessor, registry, tasks, path)
-          registry_ids = Array(registry["owned_task_refs"]).map { |ref| ref["task_id"] }
+          claim = Array(registry["owned_task_refs"])
           queue = Array(checkpoint["task_queue"])
-          unless queue.map { |ref| ref["task_id"] } == registry_ids
-            add(
-              "checkpoint_queue_projection_invalid",
-              "checkpoint task queue must keep the registry ordered task ownership",
-              "#{path}.task_queue"
-            )
-          end
-          queue.each_with_index do |ref, index|
-            claim = Array(registry["owned_task_refs"])[index]
-            unless task_revision_descendant_or_same?(
-              tasks,
-              claim["task_revision_id"],
-              ref["task_revision_id"]
-            )
+          action = checkpoint.dig("lead_decision", "action")
+
+          if checkpoint["is_genesis"] == true
+            unless queue == claim
               add(
                 "checkpoint_queue_projection_invalid",
-                "queue revision must follow the verified TaskRevision descendant lineage",
+                "genesis task queue must exact match the registry ownership claim",
                 "#{path}.task_queue"
               )
             end
-            next unless predecessor
+          elsif %w[release suspend].include?(action)
+            prior = Array(predecessor && predecessor["task_queue"])
+            removed = prior - queue
+            unless removed.length == 1 &&
+                   queue.length == prior.length - 1 &&
+                   queue == prior.reject { |ref| ref == removed.first }
+              add(
+                "task_transfer_invalid",
+                "release checkpoint queue must remove exactly one owned task",
+                "#{path}.task_queue"
+              )
+            end
+            unless checkpoint["active_task_ref"].nil? ||
+                   checkpoint.dig("active_task_ref", "task_id") != removed.first["task_id"]
+              add(
+                "task_transfer_invalid",
+                "release checkpoint must remove the released task from active selection",
+                "#{path}.active_task_ref"
+              )
+            end
+            validate_queue_revision_progression(queue, prior, tasks, path)
+          elsif action == "acquire"
+            payload = checkpoint["task_transfer_acquire"]
+            prior = Array(predecessor && predecessor["task_queue"])
+            unless payload.is_a?(Hash) &&
+                   queue == prior + [payload["task_ref"]]
+              add(
+                "task_transfer_invalid",
+                "acquire checkpoint queue must append exactly the acquired task ref",
+                "#{path}.task_queue"
+              )
+            end
+            validate_queue_revision_progression(queue, prior, tasks, path)
+          else
+            prior = Array(predecessor && predecessor["task_queue"])
+            unless queue.map { |ref| ref["task_id"] } == prior.map { |ref| ref["task_id"] }
+              add(
+                "checkpoint_queue_projection_invalid",
+                "checkpoint task queue must keep the ordered task ownership projection",
+                "#{path}.task_queue"
+              )
+            end
+            validate_queue_revision_progression(queue, prior, tasks, path)
+          end
+          validate_owned_task_refs(queue, tasks, "#{path}.task_queue")
+        end
 
-            prior = Array(predecessor["task_queue"])[index]
-            next if prior && task_revision_descendant_or_same?(
+        # Revision consistency of the queue projection: every kept element
+        # advances only along the verified TaskRevision descendant lineage of
+        # the predecessor element with the same task identity.
+        def validate_queue_revision_progression(queue, prior, tasks, path)
+          prior_by_id = {}
+          Array(prior).each do |ref|
+            prior_by_id[ref["task_id"]] = ref if ref.is_a?(Hash)
+          end
+          Array(queue).each do |ref|
+            next unless ref.is_a?(Hash)
+
+            prior_ref = prior_by_id[ref["task_id"]]
+            next unless prior_ref
+
+            next if task_revision_descendant_or_same?(
               tasks,
-              prior["task_revision_id"],
+              prior_ref["task_revision_id"],
               ref["task_revision_id"]
             )
 
             add(
               "checkpoint_queue_projection_invalid",
-              "queue revision must not regress",
+              "queue revision must not regress or jump without lineage",
               "#{path}.task_queue"
             )
           end
-          validate_owned_task_refs(queue, tasks, "#{path}.task_queue")
         end
 
         def task_revision_descendant_or_same?(tasks, ancestor_id, candidate_id)
@@ -703,6 +1001,23 @@ module Orbit
               add(
                 "checkpoint_trigger_invalid",
                 "dispatch checkpoint must reconcile on a dispatch-authorized trigger and await attempt_created",
+                "#{path}.reconcile_trigger"
+              )
+            end
+          elsif %w[release suspend].include?(action)
+            expected_trigger = action == "release" ? "task_release" : "task_suspend"
+            unless reconcile_event == expected_trigger && next_event == "successor_before"
+              add(
+                "checkpoint_trigger_invalid",
+                "#{action} checkpoint must reconcile on #{expected_trigger} and await successor_before",
+                "#{path}.reconcile_trigger"
+              )
+            end
+          elsif action == "acquire"
+            unless reconcile_event == "task_acquire" && next_event == "dispatch_before"
+              add(
+                "checkpoint_trigger_invalid",
+                "acquire checkpoint must reconcile on task_acquire and await dispatch_before",
                 "#{path}.reconcile_trigger"
               )
             end
@@ -1134,15 +1449,70 @@ module Orbit
         end
 
         def validate_active_session_cardinality(bundle)
-          sessions_by_control = Array(bundle["lead_sessions"]).select { |session| session.is_a?(Hash) }
-            .group_by { |session| session["lead_control_id"] }
+          all_sessions = Array(bundle["lead_sessions"]).select { |session| session.is_a?(Hash) }
+          sessions_by_control = all_sessions.group_by { |session| session["lead_control_id"] }
+          global_by_id = all_sessions.to_h { |session| [session["lead_session_id"], session] }
+
+          # Session lineage closure across controls: a session can have at
+          # most one cross-control successor (a same-lineage replacement may
+          # coexist with one executor transfer, but two lineages cannot both
+          # claim the same transfer source), and cross-control predecessor
+          # chains cannot cycle.
+          cross_successors = Hash.new { |hash, key| hash[key] = [] }
+          all_sessions.each do |session|
+            ref = session["predecessor_lead_session_ref"]
+            next unless ref.is_a?(Hash)
+
+            predecessor = global_by_id[ref["lead_session_id"]]
+            next unless predecessor
+            next if predecessor["lead_control_id"] == session["lead_control_id"]
+
+            cross_successors[ref["lead_session_id"]] << session["lead_session_id"]
+          end
+          cross_successors.each do |predecessor_id, child_ids|
+            next if child_ids.length <= 1
+
+            add(
+              "session_binding_invalid",
+              "session lineage forks across controls: a session has multiple transfer successors",
+              "lead_sessions"
+            )
+          end
+          reported_cycles = Set.new
+          all_sessions.each do |start|
+            cursor = start
+            seen = Set.new
+            while cursor
+              id = cursor["lead_session_id"]
+              if seen.include?(id)
+                if reported_cycles.add?(seen.to_a.sort.join(":"))
+                  add(
+                    "session_binding_invalid",
+                    "session lineage contains a cycle across controls",
+                    "lead_sessions"
+                  )
+                end
+                break
+              end
+              seen << id
+              ref = cursor["predecessor_lead_session_ref"]
+              cursor = ref && global_by_id[ref["lead_session_id"]]
+            end
+          end
+
           sessions_by_control.each do |control_id, sessions|
             by_id = sessions.to_h { |session| [session["lead_session_id"], session] }
             roots = sessions.select { |session| session["predecessor_lead_session_ref"].nil? }
-            unless roots.length == 1
+            cross_heads = sessions.select do |session|
+              ref = session["predecessor_lead_session_ref"]
+              predecessor = ref && global_by_id[ref["lead_session_id"]]
+              predecessor && predecessor["lead_control_id"] != control_id
+            end
+            unless roots.length == 1 || (roots.empty? && cross_heads.length == 1)
               add(
                 "session_binding_invalid",
-                "control #{control_id} session lineage requires exactly one root without predecessor",
+                "control #{control_id} session lineage requires exactly one head: " \
+                  "a root or one cross-control transfer successor",
                 "lead_sessions"
               )
             end
@@ -1154,11 +1524,61 @@ module Orbit
 
               predecessor = by_id[ref["lead_session_id"]]
               unless predecessor
-                add(
-                  "session_binding_invalid",
-                  "session predecessor must resolve to an existing session of the same control",
-                  "lead_sessions.#{session["lead_session_id"]}.predecessor_lead_session_ref"
-                )
+                predecessor = global_by_id[ref["lead_session_id"]]
+                unless predecessor
+                  add(
+                    "session_binding_invalid",
+                    "session predecessor must resolve to an existing session",
+                    "lead_sessions.#{session["lead_session_id"]}.predecessor_lead_session_ref"
+                  )
+                  next
+                end
+                # Cross-control executor transfer: the old session
+                # terminal/release comes first, the new session binds as the
+                # first generation of its own lineage with the exact terminal
+                # event pin and the same canonical runtime subject; alias
+                # AgentInstance IDs never bypass the subject identity.
+                unless predecessor["lead_control_id"] != control_id &&
+                       session["session_generation"] == 1
+                  add(
+                    "session_binding_invalid",
+                    "cross-control session successor must be the first generation of its lineage",
+                    "lead_sessions.#{session["lead_session_id"]}.predecessor_lead_session_ref"
+                  )
+                end
+                terminal_event = Array(predecessor["lifecycle_events"]).last
+                unless terminal_event &&
+                       terminal_event["event_id"] == ref["event_id"] &&
+                       terminal_event["event_digest"] == ref["event_digest"] &&
+                       terminal_event["event_type"] == "LeadSessionEnded"
+                  add(
+                    "session_binding_invalid",
+                    "cross-control successor must pin the prior session terminal/release event",
+                    "lead_sessions.#{session["lead_session_id"]}.predecessor_lead_session_ref"
+                  )
+                end
+                unless canonical_subject_key(session).is_a?(Array) &&
+                       canonical_subject_key(session) == canonical_subject_key(predecessor)
+                  add(
+                    "session_binding_invalid",
+                    "executor transfer must keep the same canonical runtime subject",
+                    "lead_sessions.#{session["lead_session_id"]}.predecessor_lead_session_ref"
+                  )
+                end
+                successor_start = Array(session["lifecycle_events"]).first
+                if terminal_event &&
+                   terminal_event["event_type"] == "LeadSessionEnded" &&
+                   successor_start &&
+                   session_time(successor_start["recorded_at"]) &&
+                   session_time(terminal_event["recorded_at"]) &&
+                   session_time(successor_start["recorded_at"]) <
+                     session_time(terminal_event["recorded_at"])
+                  add(
+                    "session_binding_invalid",
+                    "successor session must start at or after the prior session terminal/release",
+                    "lead_sessions.#{session["lead_session_id"]}.lifecycle_events[0].recorded_at"
+                  )
+                end
                 next
               end
               successors[predecessor["lead_session_id"]] << session["lead_session_id"]
@@ -1189,38 +1609,6 @@ module Orbit
                   "successor session must start at or after the prior generation terminal",
                   "lead_sessions.#{session["lead_session_id"]}.lifecycle_events[0].recorded_at"
                 )
-              end
-            end
-
-            successors.each do |predecessor_id, child_ids|
-              next if child_ids.length <= 1
-
-              add(
-                "session_binding_invalid",
-                "control #{control_id} session lineage forks: a session has multiple successors",
-                "lead_sessions"
-              )
-            end
-
-            reported_cycles = Set.new
-            sessions.each do |start|
-              cursor = start
-              seen = Set.new
-              while cursor
-                id = cursor["lead_session_id"]
-                if seen.include?(id)
-                  if reported_cycles.add?(seen.to_a.sort.join(":"))
-                    add(
-                      "session_binding_invalid",
-                      "control #{control_id} session lineage contains a cycle",
-                      "lead_sessions"
-                    )
-                  end
-                  break
-                end
-                seen << id
-                ref = cursor["predecessor_lead_session_ref"]
-                cursor = ref && by_id[ref["lead_session_id"]]
               end
             end
 

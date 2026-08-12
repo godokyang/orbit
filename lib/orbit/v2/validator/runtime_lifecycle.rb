@@ -531,10 +531,12 @@ module Orbit
                 "#{path}.predecessor_work_unit_attempt_ref"
               )
             end
-            unless predecessor["lead_control_id"] == attempt["lead_control_id"]
+            if predecessor["lead_control_id"] != attempt["lead_control_id"] &&
+               !cross_control_successor_authorized?(attempt, predecessor)
               add(
                 "attempt_successor_invalid",
-                "a successor Attempt must pin the same lead_control_id as its predecessor",
+                "a cross-control successor Attempt requires a valid task transfer acquire " \
+                  "of its task from the predecessor control",
                 "#{path}.lead_control_id"
               )
             end
@@ -605,6 +607,64 @@ module Orbit
               )
             end
           end
+        end
+
+        # A successor Attempt may cross control lineages only when its control
+        # validly acquired the Attempt's task from the predecessor's control
+        # BEFORE the Attempt's exact dispatch checkpoint: the authorizing
+        # acquire must be a strict accepted-lineage ancestor of the dispatch
+        # checkpoint (never the dispatch itself, a future acquire, or a side
+        # branch), and its payload must resolve exactly. Same AgentInstance
+        # aliases never bypass the transfer requirement.
+        def cross_control_successor_authorized?(attempt, predecessor)
+          dispatch_ref = attempt["dispatch_lead_checkpoint_ref"]
+          return false unless dispatch_ref.is_a?(Hash)
+
+          checkpoints = @indexes.fetch("lead_checkpoints", {})
+          dispatch = checkpoints[dispatch_ref["lead_checkpoint_id"]]
+          return false unless dispatch &&
+                              dispatch["content_digest"] == dispatch_ref["content_digest"] &&
+                              dispatch["lead_control_id"] == attempt["lead_control_id"]
+
+          cursor = dispatch["predecessor_lead_checkpoint_ref"]
+          while cursor
+            acquire = checkpoints[cursor["lead_checkpoint_id"]]
+            break unless acquire && acquire["content_digest"] == cursor["content_digest"]
+
+            return true if acquire_authorizes?(acquire, attempt, predecessor)
+
+            cursor = acquire["predecessor_lead_checkpoint_ref"]
+          end
+          false
+        end
+
+        # One exact valid acquire authorizes the cross-control successor: the
+        # acquire decision whose payload binds the predecessor control and the
+        # Attempt task identity, and whose released checkpoint ref resolves to
+        # an exact accepted release/suspend checkpoint of that control that
+        # released exactly this task ref. A forged or unresolvable payload
+        # never authorizes.
+        def acquire_authorizes?(acquire, attempt, predecessor)
+          payload = acquire["task_transfer_acquire"]
+          return false unless payload.is_a?(Hash)
+          return false unless acquire.dig("lead_decision", "action") == "acquire"
+          return false unless payload["released_lead_control_id"] == predecessor["lead_control_id"]
+          return false unless payload.dig("task_ref", "task_id") == attempt["task_id"]
+
+          checkpoints = @indexes.fetch("lead_checkpoints", {})
+          release_ref = payload["released_checkpoint_ref"]
+          release = release_ref && checkpoints[release_ref["lead_checkpoint_id"]]
+          return false unless release &&
+                              release["content_digest"] == release_ref["content_digest"] &&
+                              release["lead_control_id"] == predecessor["lead_control_id"] &&
+                              %w[release suspend].include?(release.dig("lead_decision", "action"))
+          return false unless released_task_ref(release, checkpoints) == payload["task_ref"]
+
+          task_revision_descendant_or_same?(
+            @indexes.fetch("task_revisions", {}),
+            payload.dig("task_ref", "task_revision_id"),
+            attempt["task_revision_id"]
+          )
         end
 
         def validate_single_active_attempts(bundle)

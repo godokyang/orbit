@@ -32,7 +32,9 @@ module Orbit
       module_function
 
       STATES = %w[completed blocked frozen needs_user].freeze
-      ACTIONS = %w[establish continue dispatch replan switch freeze escalate].freeze
+      ACTIONS = %w[
+        establish continue dispatch replan switch freeze escalate release suspend acquire
+      ].freeze
       TERMINAL_ATTEMPT_EVENTS = %w[
         AttemptCompleted AttemptFailed AttemptBlocked AttemptCancelled AttemptSuperseded
       ].freeze
@@ -78,6 +80,16 @@ module Orbit
           return blocked_decision("dependency readiness not satisfied") unless facts.dependencies_ready?
 
           stop_loss(facts) || decision("blocked", "dispatch", "dispatch authorized")
+        # Task ownership events (increment 3): the decision is a direct
+        # function of the typed trigger; stop-loss still guards a release/
+        # suspend/acquire checkpoint that also observes a measured terminal
+        # round, so ownership bookkeeping never bypasses the round fuses.
+        when "task_release"
+          stop_loss(facts) || decision("blocked", "release", "task ownership released")
+        when "task_suspend"
+          stop_loss(facts) || decision("blocked", "suspend", "task ownership suspended")
+        when "task_acquire"
+          stop_loss(facts) || decision("blocked", "acquire", "task ownership acquired")
         when "session_change"
           stop_loss(facts) || decision("blocked", "continue", "same-lineage session binding accepted")
         when "thesis_change", "scope_change", "finding_change", "gate_change",

@@ -656,6 +656,302 @@ module OrbitV2FixtureFactory
     }
   end
 
+  # Increment 3 helpers: a second open control lineage cloned from the base
+  # fixture objects with fresh IDs, and the minimal release/acquire transfer
+  # bundle (the base lineage is stripped to the authority/task substrate; the
+  # transfer ends at the accepted acquire).
+  TRANSFER_CONTROL_ID = "olcontrol_slice0transfertarget"
+
+  def extra_task(bundle, task_id:, revision_id:, gate_id:, gate_lineage_id:)
+    gate = deep_copy(bundle["gate_requirements"].first)
+    gate["gate_requirement_id"] = gate_id
+    gate["gate_lineage_id"] = gate_lineage_id
+    gate["task_id"] = task_id
+    gate["task_revision_id"] = revision_id
+    gate["parent_gate_requirement_ref"] = nil
+    gate = digested(gate)
+    bundle["gate_requirements"] << gate
+    task = deep_copy(bundle["task_revisions"].first)
+    task["task_id"] = task_id
+    task["task_revision_id"] = revision_id
+    task["gate_requirement_refs"] = [gate_id]
+    task["authority_grant_refs"] = []
+    task["unresolved_finding_refs"] = []
+    task["protected_change_authorization_ref"] = nil
+    task = digested(task)
+    bundle["task_revisions"] << task
+    { "task" => task, "gate" => gate }
+  end
+
+  def second_lineage(
+    bundle,
+    control_id:,
+    writer_assertion:,
+    agent:,
+    task:,
+    logical_lead_id:,
+    session_id:,
+    queue: nil,
+    predecessor_session_ref: nil,
+    started_at: "2026-07-30T00:00:00Z"
+  )
+    policy = bundle["project_policy_revisions"].first
+    lead = deep_copy(bundle["logical_leads"].first)
+    lead["logical_lead_id"] = logical_lead_id
+    lead["task_id"] = task["task_id"]
+    lead = digested(lead)
+    session = lead_session(lead, agent)
+    session["lead_session_id"] = session_id
+    session["lead_control_id"] = control_id
+    session["task_id"] = task["task_id"]
+    session["task_revision_id"] = task["task_revision_id"]
+    session["predecessor_lead_session_ref"] = predecessor_session_ref
+    session["lifecycle_events"] = [
+      event(
+        "oevent_#{session_id.delete_prefix("oleadsession_")}_started",
+        "LeadSessionStarted",
+        nil,
+        "role" => "lead",
+        "context_generation" => 1,
+        "started_at" => started_at,
+        "status" => "active"
+      )
+    ]
+    genesis = lead_checkpoint(
+      "olcheckpoint_genesis_#{control_id.delete_prefix("olcontrol_")}",
+      is_genesis: true,
+      predecessor_ref: nil,
+      policy: policy,
+      session: session,
+      agent: agent,
+      logical_lead: lead,
+      task: task,
+      lead_control_id: control_id,
+      task_queue: queue,
+      writer_action: "control.genesis",
+      writer_assertion: writer_assertion
+    )
+    registry = control_registry(
+      policy: policy,
+      genesis_checkpoint: genesis,
+      task: task,
+      writer_assertion: writer_assertion
+    )
+    registry["lead_control_id"] = control_id
+    registry["owned_task_refs"] = queue if queue
+    bundle["logical_leads"] << lead
+    bundle["lead_sessions"] << session
+    bundle["control_registries"] << digested(registry)
+    bundle["lead_checkpoints"] << genesis
+    { "lead" => lead, "session" => session, "genesis" => genesis }
+  end
+
+  # One minimal transfer fixture for every transfer mutation: control A owns
+  # [main, kept] from genesis and releases the main task; control B owns
+  # [target] and acquires the main task with exact provenance. The base
+  # fixture's lineage, attempts, and graphs are stripped; the transfer stops
+  # at the accepted acquire.
+  # One transfer fixture for every transfer mutation: control A (the base
+  # lineage) claims [main, kept] from genesis, works the main task to a
+  # terminal round, then releases it; control B owns [target], acquires the
+  # main task with exact provenance, and continues its work through a
+  # cross-control successor Attempt (the Inc3 same-control-successor
+  # exception). terminalize_review: false leaves the review Attempt open so
+  # the release carries a non-terminal Attempt.
+  def transfer_bundle(terminalize_review: true)
+    bundle = valid_bundle
+    policy = bundle["project_policy_revisions"].first
+    writer_a = bundle["authority_assertions"].find do |candidate|
+      candidate["assertion_id"] == "oassert_controlwriter"
+    end
+    writer_b = assertion(
+      "oassert_controlwriter_b",
+      %w[control.genesis control.checkpoint],
+      "control-plane-writer",
+      authority_scope_ref: TRANSFER_CONTROL_ID
+    )
+    bundle["authority_assertions"] << writer_b
+    kept = extra_task(
+      bundle,
+      task_id: "otask_slice0transferkeep",
+      revision_id: "trev_slice0transferkeep_r1",
+      gate_id: "ogreq_slice0transferkeep",
+      gate_lineage_id: "ogline_slice0transferkeep"
+    )
+    target = extra_task(
+      bundle,
+      task_id: "otask_slice0transfertarget",
+      revision_id: "trev_slice0transfertarget_r1",
+      gate_id: "ogreq_slice0transfertarget",
+      gate_lineage_id: "ogline_slice0transfertarget"
+    )
+    main_task = bundle["task_revisions"].first
+    main_unit = bundle["work_units"].find do |candidate|
+      candidate["work_unit_id"] == "owu_implementationone"
+    end
+    if terminalize_review
+      review = bundle["work_unit_attempts"].find { |c| c["attempt_id"] == "oattempt_independentreview" }
+      review["events"] << event(
+        "oevent_reviewtransferterminal",
+        "AttemptCompleted",
+        review.dig("events", 0, "event_digest"),
+        "ended_at" => "2026-07-30T00:03:30Z",
+        "status" => "completed"
+      )
+    end
+    agent_b = agent("oagent_transferlead", "lead")
+    bundle["agent_instances"] << agent_b
+
+    # A claims [main, kept] from genesis; rebuild every A checkpoint queue
+    # projection and every dependent digest/ref.
+    queue = [task_ref(main_task), task_ref(kept["task"])]
+    checkpoints = bundle["lead_checkpoints"]
+    checkpoints.each { |checkpoint| checkpoint["task_queue"] = deep_copy(queue) }
+    checkpoints.each_with_index do |checkpoint, index|
+      if index.positive?
+        checkpoint["predecessor_lead_checkpoint_ref"] = cp_ref(checkpoints[index - 1])
+        %w[delivery_progress assurance_progress].each do |field|
+          checkpoint[field]["predecessor_lead_checkpoint_ref"] =
+            checkpoint["predecessor_lead_checkpoint_ref"]
+        end
+      end
+      checkpoints[index] = digested(checkpoint)
+    end
+    registry_a = bundle["control_registries"].find { |r| r["lead_control_id"] == CONTROL_ID }
+    registry_a["owned_task_refs"] = deep_copy(queue)
+    registry_a["genesis_checkpoint_ref"] = cp_ref(checkpoints.first)
+    bundle["control_registries"][bundle["control_registries"].index(registry_a)] = digested(registry_a)
+    bundle["work_unit_attempts"].each do |attempt|
+      ref = attempt["dispatch_lead_checkpoint_ref"]
+      next unless ref.is_a?(Hash)
+
+      dispatch = checkpoints.find { |c| c["lead_checkpoint_id"] == ref["lead_checkpoint_id"] }
+      attempt["dispatch_lead_checkpoint_ref"] = cp_ref(dispatch) if dispatch
+    end
+
+    kept_lead = deep_copy(bundle["logical_leads"].first)
+    kept_lead["logical_lead_id"] = "olead_slice0transferkeep"
+    kept_lead["task_id"] = kept["task"]["task_id"]
+    kept_lead = digested(kept_lead)
+    bundle["logical_leads"] << kept_lead
+    session_a = bundle["lead_sessions"].find { |s| s["lead_session_id"] == "oleadsession_successor" }
+    release_a = lead_checkpoint(
+      "olcheckpoint_transferrelease_a",
+      is_genesis: false,
+      predecessor_ref: cp_ref(checkpoints.last),
+      policy: policy,
+      session: session_a,
+      agent: bundle["agent_instances"].first,
+      logical_lead: kept_lead,
+      task: kept["task"],
+      lead_control_id: CONTROL_ID,
+      writer_action: "control.checkpoint",
+      writer_assertion: writer_a,
+      task_queue: [task_ref(kept["task"])],
+      decision: { "state" => "blocked", "action" => "release", "reason" => "task ownership released" },
+      reconcile_trigger: { "event" => "task_release", "reason" => "Relinquish the main task." },
+      next_trigger: { "event" => "successor_before", "reason" => "Awaiting the next control event." }
+    )
+    bundle["lead_checkpoints"] << release_a
+
+    lineage_b = second_lineage(
+      bundle,
+      control_id: TRANSFER_CONTROL_ID,
+      writer_assertion: writer_b,
+      agent: agent_b,
+      task: target["task"],
+      logical_lead_id: "olead_slice0transfertarget",
+      session_id: "oleadsession_slice0transfertarget",
+      started_at: "2026-07-30T00:10:00Z"
+    )
+    acquire_b = lead_checkpoint(
+      "olcheckpoint_transferacquire_b",
+      is_genesis: false,
+      predecessor_ref: cp_ref(lineage_b["genesis"]),
+      policy: policy,
+      session: lineage_b["session"],
+      agent: agent_b,
+      logical_lead: lineage_b["lead"],
+      task: main_task,
+      lead_control_id: TRANSFER_CONTROL_ID,
+      writer_action: "control.checkpoint",
+      writer_assertion: writer_b,
+      task_queue: [task_ref(target["task"]), task_ref(main_task)],
+      task_transfer_acquire: {
+        "released_checkpoint_ref" => cp_ref(release_a),
+        "released_lead_control_id" => CONTROL_ID,
+        "task_ref" => task_ref(main_task)
+      },
+      decision: { "state" => "blocked", "action" => "acquire", "reason" => "task ownership acquired" },
+      reconcile_trigger: { "event" => "task_acquire", "reason" => "Acquire the main task from A." },
+      next_trigger: { "event" => "dispatch_before", "reason" => "Awaiting dispatch." }
+    )
+    bundle["lead_checkpoints"] << acquire_b
+    dispatch_b = lead_checkpoint(
+      "olcheckpoint_transferdispatch_b",
+      is_genesis: false,
+      predecessor_ref: cp_ref(acquire_b),
+      policy: policy,
+      session: lineage_b["session"],
+      agent: agent_b,
+      logical_lead: lineage_b["lead"],
+      task: main_task,
+      lead_control_id: TRANSFER_CONTROL_ID,
+      writer_action: "control.checkpoint",
+      writer_assertion: writer_b,
+      task_queue: [task_ref(target["task"]), task_ref(main_task)],
+      active_task_ref: task_ref(main_task),
+      selected_work_unit_ref: work_unit_ref(main_unit),
+      decision: DISPATCH_DECISION,
+      reconcile_trigger: { "event" => "dispatch_before", "reason" => "Dispatch the transferred work unit." },
+      next_trigger: { "event" => "attempt_created", "reason" => "Awaiting creation." }
+    )
+    bundle["lead_checkpoints"] << dispatch_b
+    predecessor = bundle["work_unit_attempts"].find do |candidate|
+      candidate["attempt_id"] == "oattempt_implementationonesuccessor"
+    end
+    thesis = bundle["change_theses"].find do |candidate|
+      candidate["work_unit_id"] == main_unit["work_unit_id"]
+    end
+    base_rule = bundle["rule_resolution_artifacts"].find do |candidate|
+      candidate.dig("identity", "attempt_id") == "oattempt_implementationonesuccessor"
+    end
+    identity = deep_copy(base_rule["identity"])
+    identity["attempt_id"] = "oattempt_slice0transfersuccessor"
+    rule = Orbit::V2::RuleResolution.build(
+      identity,
+      created_at: "2026-07-30T00:12:00Z",
+      project_root: ROOT
+    )
+    bundle["rule_resolution_artifacts"] << rule
+    attempt_b = attempt(
+      "oattempt_slice0transfersuccessor",
+      main_unit["work_unit_id"],
+      "oagent_implementerone",
+      "coder",
+      "implementation",
+      thesis,
+      rule["resolution_id"],
+      9,
+      policy["content_digest"],
+      task_id: main_task["task_id"],
+      task_revision_id: main_task["task_revision_id"],
+      authorization_record_refs: main_unit.dig("authority_scope", "authorization_record_refs"),
+      lead_control_id: TRANSFER_CONTROL_ID,
+      predecessor_work_unit_attempt_ref: predecessor["attempt_id"],
+      dispatch_lead_checkpoint_ref: cp_ref(dispatch_b),
+      started_at: "2026-07-30T00:12:00Z"
+    )
+    bundle["work_unit_attempts"] << attempt_b
+    bundle["lead_checkpoints"] << observation_checkpoint(
+      dispatch_b,
+      attempt_b,
+      session: lineage_b["session"],
+      cp_id: "olcheckpoint_transfercreated_b"
+    )
+    bundle
+  end
+
   def deep_copy(value)
     Marshal.load(Marshal.dump(value))
   end
@@ -978,7 +1274,9 @@ module OrbitV2FixtureFactory
     logical_lead:,
     task:,
     writer_action:, writer_assertion:,
+    lead_control_id: CONTROL_ID,
     active_task_ref: nil, selected_work_unit_ref: nil, attempt_ref: nil,
+    task_queue: nil, task_transfer_acquire: nil,
     delivery: nil, assurance: nil, decision: nil, reconcile_trigger: nil, next_trigger: nil
   )
     digested(
@@ -987,7 +1285,7 @@ module OrbitV2FixtureFactory
       "project_id" => PROJECT_ID,
       "object_type" => "lead_checkpoint",
       "lead_checkpoint_id" => id,
-      "lead_control_id" => CONTROL_ID,
+      "lead_control_id" => lead_control_id,
       "is_genesis" => is_genesis,
       "predecessor_lead_checkpoint_ref" => predecessor_ref,
       "project_policy_revision_ref" => policy_ref(policy),
@@ -998,7 +1296,8 @@ module OrbitV2FixtureFactory
       "logical_lead_refs" => [
         ref("logical_lead_id", logical_lead["logical_lead_id"], logical_lead["content_digest"])
       ],
-      "task_queue" => [task_ref(task)],
+      "task_queue" => task_queue || [task_ref(task)],
+      "task_transfer_acquire" => task_transfer_acquire,
       "active_task_ref" => active_task_ref,
       "selected_work_unit_ref" => selected_work_unit_ref,
       "current_or_terminal_attempt_ref" => attempt_ref,

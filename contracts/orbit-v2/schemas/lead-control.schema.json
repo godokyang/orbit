@@ -121,6 +121,12 @@
         "assessments": {"$ref": "#/$defs/Assessments"},
         "delivery_progress": {"$ref": "#/$defs/Progress"},
         "assurance_progress": {"$ref": "#/$defs/Progress"},
+        "task_transfer_acquire": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/TaskAcquire"}
+          ]
+        },
         "lead_decision": {"$ref": "#/$defs/LeadDecision"},
         "reconcile_trigger": {"$ref": "#/$defs/NextTrigger"},
         "next_trigger": {"$ref": "#/$defs/NextTrigger"},
@@ -227,6 +233,19 @@
       },
       "additionalProperties": false
     },
+    "TaskAcquire": {
+      "type": "object",
+      "required": ["released_checkpoint_ref", "released_lead_control_id", "task_ref"],
+      "properties": {
+        "released_checkpoint_ref": {"$ref": "#/$defs/LeadCheckpointRef"},
+        "released_lead_control_id": {
+          "type": "string",
+          "pattern": "^olcontrol_[a-z0-9][a-z0-9_-]{7,95}$"
+        },
+        "task_ref": {"$ref": "#/$defs/TaskRef"}
+      },
+      "additionalProperties": false
+    },
     "Assessments": {
       "type": "object",
       "required": ["task_queue", "active_mainline", "work_graph_branches", "current_attempt"],
@@ -321,7 +340,7 @@
         "state": {
           "enum": ["completed", "blocked", "frozen", "needs_user"]
         },
-        "action": {"enum": ["establish", "continue", "dispatch", "replan", "switch", "freeze", "escalate"]},
+        "action": {"enum": ["establish", "continue", "dispatch", "replan", "switch", "freeze", "escalate", "release", "suspend", "acquire"]},
         "reason": {"type": "string", "minLength": 1}
       },
       "additionalProperties": false
@@ -345,7 +364,10 @@
             "session_change",
             "context_change",
             "authority_change",
-            "dependency_change"
+            "dependency_change",
+            "task_release",
+            "task_suspend",
+            "task_acquire"
           ]
         },
         "reason": {"type": "string", "minLength": 1}

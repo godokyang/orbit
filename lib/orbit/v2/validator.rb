@@ -193,6 +193,8 @@ module Orbit
         validate_active_session_cardinality(bundle)
         validate_control_registries(bundle, active_policy)
         validate_lead_checkpoints(bundle, active_policy)
+        validate_multi_lineage_closure(bundle)
+        validate_task_transfer_provenance(bundle)
         validate_attempts(bundle, active_policy)
         validate_rule_resolutions(bundle)
         validate_evidence_records(bundle, active_policy)

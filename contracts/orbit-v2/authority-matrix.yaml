@@ -68,6 +68,16 @@ facts:
     authoritative_owner: LeadCheckpoint
     lifecycle: create_only_append_only_linear
     prohibited_owners: [WorkUnitAttempt, LeadSession]
+  - fact: task_ownership_transfer
+    authoritative_owner: LeadCheckpoint
+    lifecycle: release_or_relinquishing_suspend_then_acquire_exact_provenance
+    exact_bindings: [released_checkpoint_ref_id_and_digest, released_lead_control_id, task_ref_task_id_task_revision_id_and_digest]
+    prohibited_owners: [LeadControlRegistry.mutable_ownership, AgentInstance.alias]
+  - fact: canonical_runtime_subject_active_binding
+    authoritative_owner: LeadSession
+    lifecycle: at_most_one_active_lead_session_per_provider_verified_canonical_subject_project_wide
+    exact_bindings: [provider_id, runtime_subject_id, terminal_release_then_successor_bind_provenance]
+    prohibited_owners: [AgentInstance.string_identity, LeadSession.self_report]
   - fact: assigned_and_submitted_rule_set
     authoritative_owner: RuleResolutionArtifact
     lifecycle: content_addressed_create_only
@@ -154,3 +164,8 @@ authority_invariants:
   - LeadControlRegistry is create-only: it carries no active-session pointer, genesis exact-pins the initial LeadSession, and the current active LeadSession is derived from the unique lineage tip plus the session lineage, never from registry state.
   - Every change trigger (session/task-revision/scope/thesis/finding/gate/context/authority/dependency) is accepted only when its exact authoritative projection differs from the exact lineage predecessor; the enum alone never proves a change. Finding/gate deltas are proven only by new exact finding/gate_evaluation refs in the checkpoint's supporting provenance; FindingResolution/GateRequirement-record subtypes fail closed in Inc2.
   - Thesis/verification-plan redirection is proven only by a single exact proposed successor change_thesis/rule_resolution ref in the authorizing checkpoint's provenance compared to the predecessor's effective basis (ADR-006:177); zero/multiple proposals fail closed, at most one exact ref per kind per checkpoint is allowed (distinct or repeated identical refs are rejected by `checkpoint_proposal_ambiguous`), and the later AttemptCreated assignment must match the authorized proposal.
+  - Multiple open control lineages run in parallel only when their derived tip task ownership sets and active canonical runtime-subject sets (provider_id + runtime_subject_id from the verified AgentInstance identity) are pairwise disjoint; AgentInstance IDs or aliases never stand in for the canonical subject, and overlapping task sets fail closed.
+  - One Task/LogicalLead belongs to at most one open queue and is active-selected by at most one accepted tip; a lineage tip can claim only logical leads whose task its own tip queue owns.
+  - One canonical runtime subject binds at most one active LeadSession project-wide; subject reuse across controls requires exactly one origin lineage and exact terminal/release -> successor/bind transfer chains, and a root session reusing a subject present in another control fails closed.
+  - Task transfer requires the old lineage's accepted release or relinquishing-suspend checkpoint first (queue removes exactly one owned task and its active selection, with no non-terminal Attempt of that task in the releasing control), then the new lineage's accepted acquire checkpoint binding the exact released checkpoint ref+digest, old/new control IDs, and Task/TaskRevision refs; every release/suspend has exactly one matching acquire, and missing release, early acquire, wrong refs/digest/task/control, duplicate ownership, and replay fail closed. The registry stays the immutable genesis claim; derived tip queues evolve through transfer provenance.
+  - A successor Attempt may cross control lineages only when its control validly acquired the Attempt's task from the predecessor's control (exact release/acquire provenance) and the predecessor Attempt is terminal; otherwise the frozen same-control successor rule applies.
