@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require_relative "control_authority"
+
 module Orbit
   module V2
     # Minimal deep module for the serialized lead control loop (Slice 2
@@ -64,22 +66,18 @@ module Orbit
         case trigger
         when "genesis"
           decision("blocked", "establish", "control anchored")
-        when "dispatch_before"
+        # Dispatch-authorized triggers: dispatch_before (first attempt),
+        # attempt_terminal/successor_before (successor authorization), and
+        # checkpoint_due (the wall-clock timer only ever wakes reconcile; it
+        # never selects, terminates, or dispatches by itself).
+        when "dispatch_before", "attempt_terminal", "successor_before", "checkpoint_due"
           return frozen_decision("pinned attempt still active blocks a new dispatch") if facts.pinned_attempt_active?
           return frozen_decision("no selected WorkUnit to dispatch") if facts.selected_work_unit_ref.nil?
           return blocked_decision("dependency readiness not satisfied") unless facts.dependencies_ready?
 
-          stop_loss(facts) || decision("blocked", "dispatch", "dispatch authorized")
+          dispatch_fuse(facts) || decision("blocked", "dispatch", "dispatch authorized")
         when "attempt_created"
           decision("blocked", "continue", "attempt creation observed")
-        when "attempt_terminal", "successor_before"
-          if facts.third_failure_pending?
-            return frozen_decision("third failed Attempt requires fingerprint identity proof, which is not yet provable")
-          end
-          return frozen_decision("no selected WorkUnit to dispatch") if facts.selected_work_unit_ref.nil?
-          return blocked_decision("dependency readiness not satisfied") unless facts.dependencies_ready?
-
-          stop_loss(facts) || decision("blocked", "dispatch", "dispatch authorized")
         # Task ownership events (increment 3): the decision is a direct
         # function of the typed trigger; stop-loss still guards a release/
         # suspend/acquire checkpoint that also observes a measured terminal
@@ -92,8 +90,22 @@ module Orbit
           stop_loss(facts) || decision("blocked", "acquire", "task ownership acquired")
         when "session_change"
           stop_loss(facts) || decision("blocked", "continue", "same-lineage session binding accepted")
+        when "authority_change"
+          # A needs_user stop resumes only when new user/control-plane
+          # authority facts arrive: the checkpoint consumes the exact
+          # task.retry.override ref, so the dispatch authorization path
+          # re-runs (the record validity itself is the Validator's proof).
+          if facts.retry_override_ref.is_a?(Hash)
+            return frozen_decision("pinned attempt still active blocks a new dispatch") if facts.pinned_attempt_active?
+            return frozen_decision("no selected WorkUnit to dispatch") if facts.selected_work_unit_ref.nil?
+            return blocked_decision("dependency readiness not satisfied") unless facts.dependencies_ready?
+
+            dispatch_fuse(facts) || decision("blocked", "dispatch", "dispatch authorized")
+          else
+            stop_loss(facts) || decision("blocked", "continue", "authoritative change observed")
+          end
         when "thesis_change", "scope_change", "finding_change", "gate_change",
-             "task_revision_change", "context_change", "authority_change", "dependency_change"
+             "task_revision_change", "context_change", "dependency_change"
           stop_loss(facts) || decision("blocked", "continue", "authoritative change observed")
         else
           frozen_decision("unknown trigger")
@@ -184,17 +196,73 @@ module Orbit
           event && event["event_type"] == "AttemptCreated"
         end
 
-        # The same-failure fuse applies only when the pinned event is a
-        # failed/blocked terminal and the predecessor chain already holds a
-        # prior attempt: a successor would be the third attempt and the first
-        # two failures' identity must be provable, which fingerprint
-        # machinery (increment 4) cannot yet do. completed/cancelled never
-        # trigger the fuse.
-        def third_failure_pending?
-          event = pinned_event
-          event && FAILURE_ATTEMPT_EVENTS.include?(event["event_type"]) &&
-            attempt_chain_length >= 2
+        # Increment 4 authority facts pinned by the replay point: the
+        # canonical fingerprint identity basis, its derived fingerprint, the
+        # separate supporting provenance (never hashed), the consumed
+        # task.retry.override ref, and the two canonical effective budget
+        # bindings.
+        def fingerprint_identity_basis
+          replay_point["fingerprint_identity_basis"]
         end
+
+        def fingerprint
+          replay_point["fingerprint"]
+        end
+
+        def fingerprint_provenance
+          replay_point["fingerprint_supporting_provenance"]
+        end
+
+        def retry_override_ref
+          replay_point["retry_override_ref"]
+        end
+
+        def bindings
+          Array(replay_point["effective_budget_bindings"])
+        end
+
+        # Identity is provable only from the recorded canonical basis: known
+        # canonicalization version, byte-recomputable digest, and a supporting
+        # provenance. Any gap freezes (ADR-006: identity cannot be proven is
+        # not a new failure).
+        def fingerprint_provable?
+          basis = fingerprint_identity_basis
+          basis.is_a?(Hash) &&
+            basis["canonicalization_version"] ==
+              ControlAuthority::FINGERPRINT_CANONICALIZATION_VERSION &&
+            fingerprint == ControlAuthority.fingerprint_digest(basis) &&
+            fingerprint_provenance.is_a?(Hash)
+        end
+
+        # Prior same-fingerprint occurrences recorded in the supporting
+        # provenance; used only for occurrence counting and retry
+        # authorization scope, never to change the fingerprint itself.
+        def prior_occurrence_count
+          Array(fingerprint_provenance && fingerprint_provenance["prior_attempt_chain"]).length
+        end
+
+        # Mechanical budget derivation only for verified measurements; an
+        # unverified pending measurement never derives within/over budget.
+        def verified_budget_overrun?
+          bindings.any? do |binding|
+            next false unless binding.is_a?(Hash)
+
+            overrun_for?(binding, "test_count", "effective_test_count") ||
+              overrun_for?(binding, "test_code_lines", "effective_test_code_lines")
+          end
+        end
+
+        def overrun_for?(binding, measurement_key, ceiling_key)
+          measurement = binding.dig("measurements", measurement_key)
+          usage = measurement && measurement["usage"]
+          ceiling = binding[ceiling_key]
+          measurement.is_a?(Hash) &&
+            measurement["status"] == "verified" &&
+            usage.is_a?(Integer) &&
+            ceiling.is_a?(Integer) &&
+            usage > ceiling
+        end
+        private :overrun_for?
 
         # Dependency readiness is proven only from terminal Attempt events
         # pinned by checkpoints already accepted in this lineage (including
@@ -345,6 +413,68 @@ module Orbit
       end
 
       private_constant :Facts
+
+      # Increment 4 continuation envelope: the hard-overrun fuses that need
+      # user authority (verified budget overrun, third same-fingerprint
+      # retry without a provider-verified task.retry.override) dominate the
+      # Lead-replannable stop-loss fuses, so every reconcile reports exactly
+      # one mutually exclusive stop state.
+      def dispatch_fuse(facts)
+        retry_decision = retry_fuse(facts)
+        return retry_decision if retry_decision
+
+        budget_decision = budget_fuse(facts)
+        return budget_decision if budget_decision
+
+        stop_loss(facts)
+      end
+      private_class_method :dispatch_fuse
+
+      # The same-failure fuse applies only to failed/blocked terminal rounds
+      # with a prior same-fingerprint occurrence (the successor would be the
+      # third Attempt). The fingerprint must be provable from the canonical
+      # identity basis recorded in the checkpoint itself; identity or
+      # provenance gaps freeze instead of pretending the failure is new. With
+      # a proven same fingerprint and no provider-verified override, the
+      # runner stops at needs_user — never frozen, never an automatic
+      # continue. completed/cancelled attempts never trigger the fuse.
+      def retry_fuse(facts)
+        event = facts.pinned_event
+        return nil unless event && FAILURE_ATTEMPT_EVENTS.include?(event["event_type"])
+        return nil unless facts.attempt_chain_length >= 2
+
+        unless facts.fingerprint_provable?
+          return frozen_decision("fingerprint identity not provable: stable identity or supporting provenance missing")
+        end
+        return nil unless facts.prior_occurrence_count >= 1
+
+        if facts.retry_override_ref.is_a?(Hash)
+          nil
+        else
+          decision(
+            "needs_user",
+            "escalate",
+            "third same-fingerprint Attempt requires a provider-verified task.retry.override"
+          )
+        end
+      end
+      private_class_method :retry_fuse
+
+      # Mechanical budget overrun is derived ONLY from verified measurements
+      # (usage >= 0 with an exact provider/snapshot ref): unverified pending
+      # measurements never derive within/over budget (Slice 2 forward
+      # contract). An overrun of any effective ceiling is a hard boundary:
+      # the runner stops at needs_user.
+      def budget_fuse(facts)
+        if facts.verified_budget_overrun?
+          decision(
+            "needs_user",
+            "escalate",
+            "verified test budget usage exceeds the effective ceiling without user authority"
+          )
+        end
+      end
+      private_class_method :budget_fuse
 
       # Basic stop-loss evaluated only on terminal-round observations
       # (progress.measured_terminal_attempt_ref non-null): a first

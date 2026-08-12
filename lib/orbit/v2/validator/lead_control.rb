@@ -15,6 +15,7 @@ module Orbit
         TERMINAL_ATTEMPT_EVENTS = %w[
           AttemptCompleted AttemptFailed AttemptBlocked AttemptCancelled AttemptSuperseded
         ].freeze
+        FAILURE_ATTEMPT_EVENTS = %w[AttemptFailed AttemptBlocked].freeze
 
         private
 
@@ -284,6 +285,11 @@ module Orbit
             validate_checkpoint_assessments(checkpoint, path)
             validate_checkpoint_progress(checkpoint, predecessor, path)
             validate_proposal_cardinality(checkpoint, path)
+            validate_checkpoint_fallback(checkpoint, policies, checkpoints, path)
+            validate_checkpoint_fingerprint(checkpoint, checkpoints, path)
+            validate_retry_override(checkpoint, checkpoints, path)
+            validate_checkpoint_budget(checkpoint, predecessor, policies, checkpoints, path)
+            validate_checkpoint_digests(checkpoint, tasks, attempts, path)
 
             if checkpoint["is_genesis"] == true &&
                checkpoint.dig("lead_decision", "action") != "establish"
@@ -970,7 +976,9 @@ module Orbit
           attempt_created session_change thesis_change scope_change finding_change
           gate_change task_revision_change context_change authority_change dependency_change
         ].freeze
-        DISPATCH_TRIGGERS = %w[dispatch_before attempt_terminal successor_before].freeze
+        DISPATCH_TRIGGERS = %w[
+          dispatch_before attempt_terminal successor_before checkpoint_due
+        ].freeze
         CHANGE_TRIGGERS = %w[
           thesis_change scope_change finding_change gate_change task_revision_change
           session_change context_change authority_change dependency_change
@@ -980,7 +988,12 @@ module Orbit
         # next_trigger names the awaited event AFTER this checkpoint. A change
         # trigger is never accepted from the enum alone: the exact
         # authoritative projection must differ from the exact lineage
-        # predecessor, or the checkpoint fails closed.
+        # predecessor, or the checkpoint fails closed. The four runner stop
+        # states stay mutually exclusive per checkpoint: dispatch-authorized
+        # triggers may end in dispatch, frozen (Lead-replannable control
+        # anomaly), needs_user (hard overrun awaiting user authority), or
+        # blocked (external non-user facts), and each maps to one awaited
+        # event; a frozen or needs_user decision never thaws implicitly.
         def validate_checkpoint_triggers(checkpoint, predecessor, path)
           reconcile_event = checkpoint.dig("reconcile_trigger", "event")
           next_event = checkpoint.dig("next_trigger", "event")
@@ -993,16 +1006,42 @@ module Orbit
                 "#{path}.reconcile_trigger"
               )
             end
-          elsif action == "dispatch"
-            # A dispatch checkpoint reconciles on dispatch_before (first
-            # attempt) or on attempt_terminal/successor_before (successor
-            # authorization) and awaits attempt_created.
-            unless DISPATCH_TRIGGERS.include?(reconcile_event) && next_event == "attempt_created"
+          elsif DISPATCH_TRIGGERS.include?(reconcile_event)
+            # Dispatch-authorized triggers: dispatch_before (first attempt),
+            # attempt_terminal/successor_before (successor authorization),
+            # and checkpoint_due (the timer only ever wakes reconcile).
+            unless dispatch_trigger_outcome_valid?(action, next_event)
               add(
                 "checkpoint_trigger_invalid",
-                "dispatch checkpoint must reconcile on a dispatch-authorized trigger and await attempt_created",
+                "dispatch-authorized checkpoint outcome/awaited-event combination is invalid",
                 "#{path}.reconcile_trigger"
               )
+            end
+            if reconcile_event == "checkpoint_due"
+              unless predecessor && predecessor.dig("next_trigger", "event") == "checkpoint_due"
+                add(
+                  "checkpoint_trigger_invalid",
+                  "checkpoint_due can only be produced by an exact scheduled wall-clock fallback of the lineage predecessor",
+                  "#{path}.reconcile_trigger"
+                )
+              end
+              # The timer occurrence is proven only by a provider-verified
+              # AuthorityAssertion with the typed control.checkpoint_due.observe
+              # grant whose canonical scope exact binds project, active
+              # policy, control, the scheduled checkpoint ref+digest, the
+              # derived deadline and observed_at; asserted_at and the receipt
+              # issued_at must equal observed_at >= deadline, and the active
+              # policy must trust the grant. An ordinary lifecycle event
+              # proves nothing about the timer.
+              deadline = predecessor && predecessor.dig("wall_clock_fallback", "deadline")
+              scheduled = deadline && parse_time(deadline)
+              unless checkpoint_due_observation_valid?(checkpoint, predecessor, deadline, scheduled)
+                add(
+                  "checkpoint_trigger_invalid",
+                  "checkpoint_due requires a provider-verified observation assertion bound to the exact schedule, deadline, and observed_at",
+                  "#{path}.reconcile_trigger"
+                )
+              end
             end
           elsif %w[release suspend].include?(action)
             expected_trigger = action == "release" ? "task_release" : "task_suspend"
@@ -1022,16 +1061,7 @@ module Orbit
               )
             end
           else
-            expected_next =
-              if reconcile_event == "attempt_created"
-                "attempt_terminal"
-              elsif reconcile_event == "session_change"
-                nil
-              elsif CHANGE_TRIGGERS.include?(reconcile_event)
-                "successor_before"
-              end
-            unless OBSERVE_TRIGGERS.include?(reconcile_event) &&
-                   (expected_next.nil? || next_event == expected_next)
+            unless observe_trigger_outcome_valid?(reconcile_event, action, next_event)
               add(
                 "checkpoint_trigger_invalid",
                 "observation checkpoint trigger/lifecycle combination is invalid",
@@ -1047,6 +1077,55 @@ module Orbit
               "change trigger requires an exact authoritative projection delta from the lineage predecessor",
               "#{path}.reconcile_trigger"
             )
+          end
+        end
+
+        def dispatch_trigger_outcome_valid?(action, next_event)
+          case action
+          when "dispatch"
+            next_event == "attempt_created"
+          when "freeze"
+            # A control anomaly is Lead-replannable: the next decision point
+            # is the successor boundary after replan/split/switch.
+            next_event == "successor_before"
+          when "escalate"
+            # Hard overruns await new user/control-plane authority facts.
+            next_event == "authority_change"
+          when "continue"
+            # Blocked on external non-user facts; the awaited event names the
+            # fact class that can resume reconcile.
+            %w[successor_before dependency_change authority_change].include?(next_event)
+          else
+            false
+          end
+        end
+
+        def observe_trigger_outcome_valid?(reconcile_event, action, next_event)
+          return false unless OBSERVE_TRIGGERS.include?(reconcile_event)
+
+          case action
+          when "continue"
+            expected_next =
+              if reconcile_event == "attempt_created"
+                "attempt_terminal"
+              elsif reconcile_event == "session_change"
+                nil
+              elsif CHANGE_TRIGGERS.include?(reconcile_event)
+                "successor_before"
+              end
+            # The wall-clock fallback timer may substitute for the awaited
+            # event: checkpoint_due wakes reconcile when no event arrives.
+            expected_next.nil? || next_event == expected_next || next_event == "checkpoint_due"
+          when "freeze"
+            next_event == "successor_before"
+          when "escalate"
+            next_event == "authority_change"
+          when "dispatch"
+            # A needs_user stop resumes only when new user/control-plane
+            # authority facts arrive.
+            reconcile_event == "authority_change" && next_event == "attempt_created"
+          else
+            false
           end
         end
 
@@ -1085,7 +1164,12 @@ module Orbit
           when "authority_change"
             current = checkpoint["project_policy_revision_ref"]
             prior = predecessor && predecessor["project_policy_revision_ref"]
-            current && current != prior
+            policy_delta = current && prior && current != prior
+            # New user/control-plane authority: the checkpoint consumes a
+            # task.retry.override record the predecessor did not consume.
+            override_delta = checkpoint["retry_override_ref"].is_a?(Hash) &&
+              !(predecessor && predecessor["retry_override_ref"].is_a?(Hash))
+            policy_delta || override_delta
           when "dependency_change"
             current = selected_unit_dependencies(checkpoint)
             prior = predecessor && selected_unit_dependencies(predecessor)
@@ -1253,15 +1337,1101 @@ module Orbit
         # refs count too (supporting refs have no canonical uniqueness rule),
         # so duplicate exact proposals are rejected as well.
         def validate_proposal_cardinality(checkpoint, path)
+          dispatch = checkpoint.dig("lead_decision", "action") == "dispatch"
           %w[change_thesis rule_resolution].each do |kind|
-            next unless checkpoint_exact_refs(checkpoint).count { |ref| ref["kind"] == kind } > 1
+            count = checkpoint_exact_refs(checkpoint).count { |ref| ref["kind"] == kind }
+            if count > 1
+              add(
+                "checkpoint_proposal_ambiguous",
+                "checkpoint must carry at most one exact proposed #{kind} basis ref",
+                path
+              )
+            elsif dispatch && count.zero?
+              # The closure basis is frozen AT the dispatch: the successor's
+              # ChangeThesis and RuleResolution are exactly proposed here,
+              # never chosen later by the Attempt. A generic nil basis is not
+              # a legal dispatch.
+              add(
+                "checkpoint_proposal_missing",
+                "dispatch checkpoint must pin exactly one exact proposed #{kind} successor basis ref",
+                path
+              )
+            end
+          end
+        end
 
+        # Wall-clock fallback (ADR-006): the finite non-zero interval and
+        # upper bound come only from the exact active ProjectPolicyRevision
+        # orchestration policy or a policy-authorized create-only immutable
+        # AuthorizationRecord; the checkpoint pins the exact source ID+digest.
+        # The timer itself can only produce the checkpoint_due trigger: a
+        # checkpoint awaiting checkpoint_due must pin the fallback, and a
+        # pinned fallback is only valid while awaiting checkpoint_due. Mutable
+        # config, self-reported intervals, stale digests and non-active
+        # policies fail closed.
+        def validate_checkpoint_fallback(checkpoint, policies, checkpoints, path)
+          fallback = checkpoint["wall_clock_fallback"]
+          next_event = checkpoint.dig("next_trigger", "event")
+          if next_event == "checkpoint_due" && !fallback.is_a?(Hash)
             add(
-              "checkpoint_proposal_ambiguous",
-              "checkpoint must carry at most one exact proposed #{kind} basis ref",
-              path
+              "checkpoint_fallback_invalid",
+              "a checkpoint awaiting checkpoint_due must pin an exact wall-clock fallback source",
+              "#{path}.wall_clock_fallback"
+            )
+            return
+          end
+          if fallback.is_a?(Hash) && next_event != "checkpoint_due"
+            add(
+              "checkpoint_fallback_invalid",
+              "a wall-clock fallback pin is valid only while awaiting checkpoint_due",
+              "#{path}.wall_clock_fallback"
+            )
+            return
+          end
+          return unless fallback.is_a?(Hash)
+
+          source = fallback["source_ref"] || {}
+          case fallback["source_kind"]
+          when "policy"
+            policy = policies[source["id"]]
+            unless policy &&
+                   policy["content_digest"] == source["content_digest"] &&
+                   policy["policy_revision_id"] ==
+                     checkpoint.dig("project_policy_revision_ref", "policy_revision_id") &&
+                   policy["content_digest"] ==
+                     checkpoint.dig("project_policy_revision_ref", "content_digest")
+              add(
+                "checkpoint_fallback_invalid",
+                "fallback must pin the exact active policy the checkpoint was written under",
+                "#{path}.wall_clock_fallback.source_ref"
+              )
+              return
+            end
+            interval = policy.dig("orchestration_policy", "wall_clock_fallback", "interval_seconds")
+            upper = policy.dig("orchestration_policy", "wall_clock_fallback", "upper_bound_seconds")
+            unless interval.is_a?(Integer) && interval >= 1 &&
+                   upper.is_a?(Integer) && upper >= interval
+              add(
+                "checkpoint_fallback_invalid",
+                "fallback requires a finite non-zero interval and upper bound from the exact orchestration policy",
+                "#{path}.wall_clock_fallback.source_ref"
+              )
+              return
+            end
+          when "authorization_record"
+            record = @indexes.fetch("authorization_records", {})[source["id"]]
+            envelope = record && record["fallback_envelope"]
+            expected_scope = envelope && ControlAuthority.fallback_scope_digest(
+              project_id: record["project_id"],
+              policy_ref: checkpoint["project_policy_revision_ref"],
+              lead_control_id: checkpoint["lead_control_id"],
+              interval_seconds: envelope["interval_seconds"],
+              upper_bound_seconds: envelope["upper_bound_seconds"]
+            )
+            unless record &&
+                   record["content_digest"] == source["content_digest"] &&
+                   record["action"] == ControlAuthority::FALLBACK_AUTHORIZE_ACTION &&
+                   record["project_policy_revision_id"] ==
+                     checkpoint.dig("project_policy_revision_ref", "policy_revision_id") &&
+                   envelope.is_a?(Hash) &&
+                   record["subject_ref"] == expected_scope &&
+                   envelope["scope_digest"] == expected_scope
+              add(
+                "checkpoint_fallback_invalid",
+                "fallback authorization record must exact bind project/policy/control and the finite interval",
+                "#{path}.wall_clock_fallback.source_ref"
+              )
+              return
+            end
+            interval = envelope["interval_seconds"]
+            upper = envelope["upper_bound_seconds"]
+            unless interval.is_a?(Integer) && interval >= 1 &&
+                   upper.is_a?(Integer) && upper >= interval
+              add(
+                "checkpoint_fallback_invalid",
+                "fallback requires a finite non-zero interval and upper bound from the authorization record",
+                "#{path}.wall_clock_fallback.source_ref"
+              )
+              return
+            end
+          else
+            add(
+              "checkpoint_fallback_invalid",
+              "fallback source_kind must be policy or authorization_record",
+              "#{path}.wall_clock_fallback.source_kind"
+            )
+            return
+          end
+
+          # The deadline is never free text: it must be deterministically
+          # derived from the exact trusted schedule basis event (a
+          # provider-recorded lifecycle event) plus the exact source
+          # interval. A self-reported or drifted deadline fails closed.
+          basis = fallback["schedule_basis_ref"] || {}
+          basis_event = resolve_exact_event(basis)
+          unless basis_event
+            add(
+              "checkpoint_fallback_invalid",
+              "fallback schedule basis must resolve to an exact trusted lifecycle event",
+              "#{path}.wall_clock_fallback.schedule_basis_ref"
+            )
+            return
+          end
+          # The schedule basis is only the Attempt event already observed by
+          # this checkpoint or a strict same-control lineage ancestor: a
+          # future, side, or never-observed event cannot anchor the deadline.
+          unless schedule_basis_observed_in_lineage?(checkpoint, basis, checkpoints)
+            add(
+              "checkpoint_fallback_invalid",
+              "fallback schedule basis must be an attempt event already pinned by the schedule checkpoint or a strict same-control lineage ancestor",
+              "#{path}.wall_clock_fallback.schedule_basis_ref"
+            )
+            return
+          end
+          expected_deadline = begin
+            ControlAuthority.fallback_deadline(
+              recorded_at: basis_event["recorded_at"],
+              interval_seconds: interval
+            )
+          rescue ArgumentError => error
+            add("checkpoint_fallback_invalid", error.message, "#{path}.wall_clock_fallback.deadline")
+            return
+          end
+          unless fallback["deadline"] == expected_deadline
+            add(
+              "checkpoint_fallback_invalid",
+              "fallback deadline must equal the trusted schedule basis recorded_at plus the exact source interval",
+              "#{path}.wall_clock_fallback.deadline"
             )
           end
+        end
+
+        # Resolve a typed exact attempt lifecycle event ref against its
+        # authority index with exact event digest. Only attempt events anchor
+        # control deadlines; agent events are not generalized into the
+        # schedule basis.
+        def resolve_exact_event(ref)
+          return nil unless ref.is_a?(Hash) && ref["kind"] == "attempt_event"
+
+          attempt = @indexes.fetch("work_unit_attempts", {})[ref["id"]]
+          event = attempt && Array(attempt["events"]).find do |candidate|
+            candidate["event_id"] == ref["event_id"]
+          end
+          event && event["event_digest"] == ref["digest"] ? event : nil
+        end
+
+        # The schedule basis must have been observed by the control lineage
+        # BEFORE this checkpoint: the exact event ref must equal the
+        # current_or_terminal_attempt_ref of the checkpoint itself or of a
+        # strict same-control lineage ancestor.
+        def schedule_basis_observed_in_lineage?(checkpoint, basis_ref, checkpoints)
+          cursor = checkpoint
+          visited = Set.new
+          while cursor
+            id = cursor["lead_checkpoint_id"]
+            break if visited.include?(id)
+
+            visited << id
+            pinned = cursor["current_or_terminal_attempt_ref"]
+            if pinned.is_a?(Hash) &&
+               basis_ref["id"] == pinned["attempt_id"] &&
+               basis_ref["event_id"] == pinned["event_id"] &&
+               basis_ref["digest"] == pinned["event_digest"]
+              return true
+            end
+            predecessor_ref = cursor["predecessor_lead_checkpoint_ref"]
+            cursor = predecessor_ref && checkpoints[predecessor_ref["lead_checkpoint_id"]]
+          end
+          false
+        end
+
+        # Failure/finding fingerprint authority (ADR-005/006): the only hash
+        # input is the canonical fingerprint_identity_basis (versioned scope,
+        # typed category/code, stable Finding identity OR stable
+        # test/rule/check identity + signal subject + normalized failure
+        # code). The supporting provenance never enters the hash; it must
+        # support the basis and its ordered prior attempt chain must byte-equal
+        # the same-fingerprint occurrences walked across the accepted
+        # checkpoint lineage (including exact transfer jumps). Missing stable
+        # identity, unknown version, non-recomputable digest, provenance gaps
+        # or an inconsistent chain all fail closed.
+        def validate_checkpoint_fingerprint(checkpoint, checkpoints, path)
+          pinned = pinned_attempt(checkpoint)
+          event = pinned && pinned_event(checkpoint)
+          failure = event && FAILURE_ATTEMPT_EVENTS.include?(event["event_type"])
+          basis = checkpoint["fingerprint_identity_basis"]
+          fingerprint = checkpoint["fingerprint"]
+          provenance = checkpoint["fingerprint_supporting_provenance"]
+
+          if failure
+            unless basis.is_a?(Hash) && fingerprint.is_a?(String) && provenance.is_a?(Hash)
+              add(
+                "checkpoint_fingerprint_invalid",
+                "a failed terminal round requires a provable fingerprint identity, digest, and supporting provenance",
+                path
+              )
+              return
+            end
+          elsif basis || fingerprint || provenance
+            add(
+              "checkpoint_fingerprint_invalid",
+              "fingerprint fields are allowed only when the pinned attempt event is a failure",
+              path
+            )
+            return
+          end
+          return unless failure
+
+          unless basis["canonicalization_version"] == ControlAuthority::FINGERPRINT_CANONICALIZATION_VERSION
+            add(
+              "checkpoint_fingerprint_invalid",
+              "unknown fingerprint canonicalization version fails closed",
+              "#{path}.fingerprint_identity_basis.canonicalization_version"
+            )
+          end
+          unless fingerprint == ControlAuthority.fingerprint_digest(basis)
+            add(
+              "checkpoint_fingerprint_invalid",
+              "fingerprint must be deterministically recomputable from the identity basis",
+              "#{path}.fingerprint"
+            )
+          end
+
+          scope = basis["scope"] || {}
+          task_ref = scope["task_revision_ref"] || {}
+          unit_ref = scope["work_unit_ref"] || {}
+          task = task_ref["task_revision_id"] &&
+            @indexes.fetch("task_revisions", {})[task_ref["task_revision_id"]]
+          unit = unit_ref["work_unit_id"] &&
+            @indexes.fetch("work_units", {})[unit_ref["work_unit_id"]]
+          unless pinned &&
+                 task &&
+                 task["task_id"] == task_ref["task_id"] &&
+                 task["content_digest"] == task_ref["content_digest"] &&
+                 unit &&
+                 unit["work_unit_id"] == unit_ref["work_unit_id"] &&
+                 unit["content_digest"] == unit_ref["content_digest"] &&
+                 unit["task_revision_id"] == pinned["task_revision_id"]
+            add(
+              "checkpoint_fingerprint_invalid",
+              "fingerprint identity scope must exact resolve to the pinned failure attempt task/work-unit digests",
+              "#{path}.fingerprint_identity_basis.scope"
+            )
+          end
+
+          category = basis["category"]
+          finding_ref = basis["finding_ref"]
+          signal = basis["stable_signal_identity"]
+          event_signal = pinned_event(checkpoint) && pinned_event(checkpoint)["failure_signal"]
+          # The typed failure code is never independently mutable: it must
+          # byte-equal the trusted terminal failure signal's normalized code.
+          # Without this binding, changing only failure_code would mint a new
+          # fingerprint for the SAME real failure and bypass the retry fuse.
+          unless event_signal.is_a?(Hash) &&
+                 basis["failure_code"] == event_signal["normalized_failure_code"]
+            add(
+              "checkpoint_fingerprint_invalid",
+              "fingerprint failure_code must exact match the trusted terminal failure signal normalized code",
+              "#{path}.fingerprint_identity_basis.failure_code"
+            )
+          end
+          if category == "finding"
+            unless finding_ref.is_a?(Hash) && signal.nil?
+              add(
+                "checkpoint_fingerprint_invalid",
+                "finding category requires the stable Finding identity and no signal identity",
+                "#{path}.fingerprint_identity_basis"
+              )
+            end
+            finding = finding_ref && @indexes.fetch("findings", {})[finding_ref["finding_id"]]
+            unless finding && finding["content_digest"] == finding_ref["content_digest"]
+              add(
+                "checkpoint_fingerprint_invalid",
+                "the stable Finding identity must resolve exactly and never be replaced by an outcome record identity",
+                "#{path}.fingerprint_identity_basis.finding_ref"
+              )
+            end
+          elsif %w[test rule check].include?(category)
+            unless finding_ref.nil? &&
+                   signal.is_a?(Hash) &&
+                   signal["test_or_check_id"].to_s.length >= 1 &&
+                   signal["signal_subject_id"].to_s.length >= 1 &&
+                   signal["normalized_failure_code"].to_s.length >= 1
+              add(
+                "checkpoint_fingerprint_invalid",
+                "non-Finding failure requires a stable test/rule/check identity, stable signal subject, and normalized failure code",
+                "#{path}.fingerprint_identity_basis"
+              )
+            end
+            # The basis is never free text: it must byte-equal the trusted
+            # failure signal recorded on the pinned AttemptFailed/AttemptBlocked
+            # terminal event itself (provider-verified lifecycle receipt).
+            # Changing the strings of a real signal fails closed.
+            unless signal.is_a?(Hash) && event_signal == signal
+              add(
+                "checkpoint_fingerprint_invalid",
+                "fingerprint stable signal identity must exact match the trusted terminal failure signal",
+                "#{path}.fingerprint_identity_basis.stable_signal_identity"
+              )
+            end
+          else
+            add(
+              "checkpoint_fingerprint_invalid",
+              "fingerprint category must be finding, test, rule, or check",
+              "#{path}.fingerprint_identity_basis.category"
+            )
+          end
+          unless basis["failure_code"].to_s.length >= 1
+            add(
+              "checkpoint_fingerprint_invalid",
+              "fingerprint identity requires a typed normalized failure code",
+              "#{path}.fingerprint_identity_basis.failure_code"
+            )
+          end
+
+          terminal = provenance["terminal_attempt_ref"] || {}
+          attempt_ref = checkpoint["current_or_terminal_attempt_ref"] || {}
+          unless terminal == attempt_ref
+            add(
+              "checkpoint_fingerprint_invalid",
+              "provenance terminal attempt ref must pin the exact pinned failure event",
+              "#{path}.fingerprint_supporting_provenance.terminal_attempt_ref"
+            )
+          end
+          # The authoring checkpoint is the accepted checkpoint that
+          # dispatched the failed Attempt (its exact dispatch ref): the
+          # fingerprint occurrence is authored for that dispatch. A
+          # self-referential pin to the fingerprint-bearing checkpoint would
+          # make its own content digest circular, so the authoring ref is
+          # always an exact non-circular lineage ancestor.
+          authoring = provenance["authoring_checkpoint_ref"] || {}
+          dispatch_ref = pinned && pinned["dispatch_lead_checkpoint_ref"]
+          unless dispatch_ref.is_a?(Hash) &&
+                 authoring["lead_checkpoint_id"] == dispatch_ref["lead_checkpoint_id"] &&
+                 authoring["content_digest"] == dispatch_ref["content_digest"]
+            add(
+              "checkpoint_fingerprint_invalid",
+              "provenance authoring checkpoint ref must exact pin the failed Attempt dispatch checkpoint",
+              "#{path}.fingerprint_supporting_provenance.authoring_checkpoint_ref"
+            )
+          end
+          outcomes = Array(provenance["outcome_refs"])
+          if outcomes.empty?
+            add(
+              "checkpoint_fingerprint_invalid",
+              "provenance requires exact outcome refs supporting the identity basis",
+              "#{path}.fingerprint_supporting_provenance.outcome_refs"
+            )
+          end
+          outcomes.each do |outcome|
+            next if outcome.is_a?(Hash)
+
+            add(
+              "checkpoint_fingerprint_invalid",
+              "outcome refs must be typed exact refs",
+              "#{path}.fingerprint_supporting_provenance.outcome_refs"
+            )
+          end
+          validate_supporting_refs(outcomes, path, "fingerprint_supporting_provenance")
+          if category == "finding" && finding_ref.is_a?(Hash) &&
+             !outcomes.any? do |outcome|
+               outcome.is_a?(Hash) &&
+                 outcome["kind"] == "finding" &&
+                 outcome["id"] == finding_ref["finding_id"] &&
+                 outcome["digest"] == finding_ref["content_digest"]
+             end
+            add(
+              "checkpoint_fingerprint_invalid",
+              "finding occurrence provenance must include the stable Finding ref",
+              "#{path}.fingerprint_supporting_provenance.outcome_refs"
+            )
+          end
+
+          expected_chain = fingerprint_occurrence_chain(checkpoint, fingerprint, checkpoints)
+          unless Array(provenance["prior_attempt_chain"]) == expected_chain
+            add(
+              "checkpoint_fingerprint_invalid",
+              "prior attempt chain must byte-equal the same-fingerprint occurrences across the accepted checkpoint lineage",
+              "#{path}.fingerprint_supporting_provenance.prior_attempt_chain"
+            )
+          end
+          attempts = @indexes.fetch("work_unit_attempts", {})
+          Array(provenance["prior_attempt_chain"]).each do |prior_ref|
+            prior = prior_ref && attempts[prior_ref["attempt_id"]]
+            prior_event = prior && Array(prior["events"]).find do |candidate|
+              candidate["event_id"] == prior_ref["event_id"]
+            end
+            unless prior &&
+                   prior_event &&
+                   prior_event["event_digest"] == prior_ref["event_digest"] &&
+                   prior["work_unit_id"] == pinned["work_unit_id"] &&
+                   FAILURE_ATTEMPT_EVENTS.include?(prior_event["event_type"])
+              add(
+                "checkpoint_fingerprint_invalid",
+                "prior chain entries must resolve to exact same-scope failure events",
+                "#{path}.fingerprint_supporting_provenance.prior_attempt_chain"
+              )
+            end
+          end
+        end
+
+        # Ordered same-fingerprint occurrences across the accepted lineage:
+        # walk the exact predecessor chain of the same control and, at an
+        # accepted task acquire checkpoint, jump into the released control's
+        # lineage through the exact release/suspend checkpoint ref, so the
+        # chain stays continuous across Task transfers. The chain serves
+        # occurrence counting and retry-authorization scope only.
+        def fingerprint_occurrence_chain(checkpoint, fingerprint, checkpoints)
+          chain = []
+          visited = Set.new
+          counted_events = Set.new
+          current_ref = checkpoint["current_or_terminal_attempt_ref"]
+          cursor = checkpoint["predecessor_lead_checkpoint_ref"] &&
+            checkpoints[checkpoint["predecessor_lead_checkpoint_ref"]["lead_checkpoint_id"]]
+          while cursor
+            id = cursor["lead_checkpoint_id"]
+            break if visited.include?(id)
+
+            visited << id
+            if cursor["fingerprint"] == fingerprint
+              ref = cursor["current_or_terminal_attempt_ref"]
+              if ref.is_a?(Hash) && ref != current_ref
+                # One failure OCCURRENCE is counted exactly once by its exact
+                # terminal event identity, no matter how many intermediate
+                # checkpoints re-pin the same historical event; the chain
+                # stays in stable lineage order.
+                key = [ref["attempt_id"], ref["event_id"], ref["event_digest"]]
+                if counted_events.add?(key)
+                  chain.unshift(ref)
+                end
+              end
+            end
+            acquire = cursor["task_transfer_acquire"]
+            if acquire.is_a?(Hash)
+              released = acquire["released_checkpoint_ref"] &&
+                checkpoints[acquire["released_checkpoint_ref"]["lead_checkpoint_id"]]
+              cursor = released
+            else
+              predecessor_ref = cursor["predecessor_lead_checkpoint_ref"]
+              cursor = predecessor_ref && checkpoints[predecessor_ref["lead_checkpoint_id"]]
+            end
+          end
+          chain
+        end
+
+        # The third same-fingerprint Attempt may be dispatched only against a
+        # provider-verified create-only immutable task.retry.override
+        # AuthorizationRecord whose canonical scope exact binds project,
+        # TaskRevision ref, WorkUnit ref, the normalized fingerprint, the
+        # ordered prior Attempt chain, the authorizing checkpoint ref and the
+        # lead_control_id. The record must be pre-existing (create-only) and
+        # consumed by exactly one checkpoint; absent, self-reported, opaque,
+        # mismatched, replayable or cross-scope refs fail closed.
+        def validate_retry_override(checkpoint, checkpoints, path)
+          pinned = pinned_attempt(checkpoint)
+          event = pinned && pinned_event(checkpoint)
+          failure = event && FAILURE_ATTEMPT_EVENTS.include?(event["event_type"])
+          override_ref = checkpoint["retry_override_ref"]
+          # The override binds only the checkpoint that AUTHORIZES the third
+          # dispatch. A needs_user checkpoint (the terminal observation of the
+          # second failure) proves the absence of authority and carries no
+          # override ref.
+          third_pending =
+            failure &&
+            checkpoint.dig("lead_decision", "action") == "dispatch" &&
+            fingerprint_occurrence_chain(checkpoint, checkpoint["fingerprint"], checkpoints).length >= 1
+
+          unless third_pending
+            if override_ref
+              add(
+                "checkpoint_retry_override_invalid",
+                "retry_override_ref is allowed only when the third same-fingerprint dispatch is pending",
+                "#{path}.retry_override_ref"
+              )
+            end
+            return
+          end
+
+          unless override_ref.is_a?(Hash)
+            add(
+              "checkpoint_retry_override_invalid",
+              "the third same-fingerprint dispatch requires an exact provider-verified task.retry.override ref",
+              "#{path}.retry_override_ref"
+            )
+            return
+          end
+          record = @indexes.fetch("authorization_records", {})[override_ref["authorization_record_id"]]
+          unless record && record["content_digest"] == override_ref["content_digest"] &&
+                 record["action"] == ControlAuthority::RETRY_OVERRIDE_ACTION
+            add(
+              "checkpoint_retry_override_invalid",
+              "retry_override_ref must resolve to an exact task.retry.override AuthorizationRecord",
+              "#{path}.retry_override_ref"
+            )
+            return
+          end
+
+          envelope = record["retry_override_envelope"] || {}
+          task_ref = checkpoint["active_task_ref"]
+          unit_ref = checkpoint["selected_work_unit_ref"]
+          fingerprint = checkpoint["fingerprint"]
+          prior_chain = Array(checkpoint.dig("fingerprint_supporting_provenance", "prior_attempt_chain")) +
+            [checkpoint["current_or_terminal_attempt_ref"]]
+          # The authorizing checkpoint is the accepted checkpoint that
+          # recorded the second same-fingerprint occurrence (where the third
+          # dispatch became pending): the record is authorized against that
+          # fixed ancestor, and the consuming dispatch checkpoint only
+          # references the pre-existing record. This keeps every content
+          # digest non-circular.
+          authorizing_ref = envelope["authorizing_checkpoint_ref"]
+          authorizing = authorizing_ref &&
+            checkpoints[authorizing_ref["lead_checkpoint_id"]]
+          expected_scope = ControlAuthority.retry_override_scope_digest(
+            project_id: checkpoint["project_id"],
+            task_ref: task_ref,
+            work_unit_ref: unit_ref,
+            fingerprint: fingerprint,
+            prior_attempt_chain: prior_chain,
+            authorizing_checkpoint_ref: authorizing_ref,
+            lead_control_id: checkpoint["lead_control_id"]
+          )
+          authorizing_valid =
+            authorizing.is_a?(Hash) &&
+            authorizing["content_digest"] == authorizing_ref["content_digest"] &&
+            authorizing["lead_control_id"] == checkpoint["lead_control_id"] &&
+            authorizing["fingerprint"] == fingerprint &&
+            authorizing["current_or_terminal_attempt_ref"] == prior_chain.last &&
+            lineage_ancestor?(checkpoint, authorizing_ref["lead_checkpoint_id"], checkpoints)
+          unless authorizing_valid &&
+                 envelope["scope_digest"] == expected_scope &&
+                 record["subject_ref"] == expected_scope &&
+                 envelope["project_id"] == checkpoint["project_id"] &&
+                 envelope["task_ref"] == task_ref &&
+                 envelope["work_unit_ref"] == unit_ref &&
+                 envelope["fingerprint"] == fingerprint &&
+                 envelope["prior_attempt_chain"] == prior_chain &&
+                 envelope["authorizing_checkpoint_ref"] == authorizing_ref &&
+                 envelope["lead_control_id"] == checkpoint["lead_control_id"]
+            add(
+              "checkpoint_retry_override_invalid",
+              "task.retry.override scope must exact bind project/TaskRevision/WorkUnit/fingerprint/prior chain/authorizing checkpoint/control",
+              "#{path}.retry_override_ref"
+            )
+          end
+          consumers = checkpoints.values.select do |candidate|
+            ref = candidate["retry_override_ref"]
+            ref.is_a?(Hash) &&
+              ref["authorization_record_id"] == record["authorization_record_id"]
+          end
+          unless consumers.length == 1 && consumers.first["lead_checkpoint_id"] == checkpoint["lead_checkpoint_id"]
+            add(
+              "checkpoint_retry_override_invalid",
+              "a task.retry.override record can be consumed by exactly one accepted checkpoint",
+              "#{path}.retry_override_ref"
+            )
+          end
+          # Consumption binds the exact active policy the consuming
+          # checkpoint was written under: a record issued under an old or
+          # revoked policy can never be consumed after rotation.
+          active_policy = @indexes.fetch("project_policy_revisions", {})[
+            checkpoint.dig("project_policy_revision_ref", "policy_revision_id")
+          ]
+          grant = unique_policy_grant(active_policy, ControlAuthority::RETRY_OVERRIDE_ACTION)
+          issuer = @verified_authority_assertions[record["authorization_source_ref"]]
+          unless record["project_policy_revision_id"] ==
+                   checkpoint.dig("project_policy_revision_ref", "policy_revision_id") &&
+                 grant.is_a?(Hash) &&
+                 issuer.is_a?(Hash) &&
+                 Array(issuer["grants"]).include?(grant["required_external_grant"])
+            add(
+              "checkpoint_retry_override_invalid",
+              "the retry override must be granted by the exact active policy trusted at consumption",
+              "#{path}.retry_override_ref"
+            )
+          end
+        end
+
+        # Canonical two-layer effective budget bindings (ADR-004/006): exactly
+        # two entries in fixed work_unit_lineage/task_lineage order, each
+        # deterministically derivable from the authoritative facts (policy
+        # defaults, in-ceiling lead adjustment with its independent digest,
+        # pre-existing user override consumed once or inherited along the
+        # continuous lineage). Measurements are the binding's own current
+        # observation: verified requires usage >= 0 with an exact
+        # provider/snapshot ref; unverified requires canonical nulls plus the
+        # typed unverified_assessment with the exact pending mapping. Slice 2
+        # supports unverified pending/default dispatch only: accepted/rejected
+        # review states depend on the Slice 4 independent budget assessment
+        # consumer and fail closed here.
+        def validate_checkpoint_budget(checkpoint, predecessor, policies, checkpoints, path)
+          bindings = Array(checkpoint["effective_budget_bindings"])
+          unless bindings.length == 2 &&
+                 bindings.map { |binding| binding["budget_scope_type"] } == ControlAuthority::BUDGET_SCOPES
+            add(
+              "checkpoint_budget_invalid",
+              "effective_budget_bindings must be exactly two entries in fixed work_unit_lineage/task_lineage order",
+              "#{path}.effective_budget_bindings"
+            )
+            return
+          end
+          policy = policies[checkpoint.dig("project_policy_revision_ref", "policy_revision_id")]
+          unless policy.is_a?(Hash) &&
+                 policy["content_digest"] == checkpoint.dig("project_policy_revision_ref", "content_digest")
+            return
+          end
+
+          payload = checkpoint["test_budget_adjust"]
+          adjustment_digest = checkpoint["budget_adjustment_digest"]
+          if payload.is_a?(Hash)
+            unless adjustment_digest == ControlAuthority.budget_adjustment_digest(payload)
+              add(
+                "checkpoint_budget_invalid",
+                "budget_adjustment_digest must equal the canonical digest of the typed adjust payload",
+                "#{path}.budget_adjustment_digest"
+              )
+            end
+          elsif adjustment_digest
+            add(
+              "checkpoint_budget_invalid",
+              "budget_adjustment_digest must be explicitly absent when no adjustment exists",
+              "#{path}.budget_adjustment_digest"
+            )
+          end
+
+          bindings.each_with_index do |binding, index|
+            scope = ControlAuthority::BUDGET_SCOPES[index]
+            bp = "#{path}.effective_budget_bindings[#{index}]"
+            unless binding["project_policy_revision_ref"] == checkpoint["project_policy_revision_ref"]
+              add(
+                "checkpoint_budget_invalid",
+                "binding policy ref must equal the exact active policy pin",
+                "#{bp}.project_policy_revision_ref"
+              )
+            end
+            validate_budget_measurements(
+              binding["measurements"],
+              bp,
+              scope: scope,
+              project_id: checkpoint["project_id"],
+              policy_ref: checkpoint["project_policy_revision_ref"],
+              task_ref: checkpoint["active_task_ref"],
+              work_unit_ref:
+                scope == "work_unit_lineage" ? checkpoint["selected_work_unit_ref"] : nil
+            )
+
+            predecessor_binding =
+              predecessor &&
+              Array(predecessor["effective_budget_bindings"])[index]
+            predecessor_ref = checkpoint["predecessor_lead_checkpoint_ref"]
+            payload_for_scope =
+              payload.is_a?(Hash) && payload["budget_scope_type"] == scope ? payload : nil
+            override_source = binding["user_override_source"]
+            override_record = override_source.is_a?(Hash) &&
+              (ref = override_source["authorization_record_ref"]) &&
+              @indexes.fetch("authorization_records", {})[ref["authorization_record_id"]]
+            begin
+              expected = ControlAuthority.derive_binding(
+                scope: scope,
+                project_id: checkpoint["project_id"],
+                control_id: checkpoint["lead_control_id"],
+                policy: policy,
+                policy_ref: checkpoint["project_policy_revision_ref"],
+                predecessor_binding: predecessor_binding,
+                predecessor_checkpoint_ref: predecessor_ref,
+                adjustment_payload: payload_for_scope,
+                adjustment_digest: adjustment_digest,
+                override_record: override_record,
+                override_mode: override_source.is_a?(Hash) ? override_source["mode"] : nil,
+                origin_consuming_checkpoint_ref:
+                  override_source.is_a?(Hash) ? override_source["origin_consuming_checkpoint_ref"] : nil,
+                active_task_ref: checkpoint["active_task_ref"],
+                # The WorkUnit ref binds ONLY the work_unit_lineage scope;
+                # task_lineage overrides carry the canonical null (ADR-006).
+                work_unit_ref:
+                  scope == "work_unit_lineage" ? checkpoint["selected_work_unit_ref"] : nil,
+                predecessor_work_unit_ref:
+                  scope == "work_unit_lineage" ?
+                    (predecessor && predecessor["selected_work_unit_ref"]) : nil,
+                measurements: binding["measurements"]
+              )
+            rescue ArgumentError => error
+              add("checkpoint_budget_invalid", error.message, bp)
+              next
+            end
+            unless expected == binding
+              add(
+                "checkpoint_budget_invalid",
+                "effective budget binding must be deterministically derivable from the authoritative facts",
+                bp
+              )
+            end
+            # Slice 2 phase boundary: default dispatch may proceed with
+            # unverified pending measurements, but a lead_adjustment in
+            # effect for a scope may never rest on unverified numbers — the
+            # adjusted scope's current measurements must be provider-attested
+            # verified until the Slice 4 independent budget assessment
+            # consumer lands.
+            if binding["source_kind"] == "lead_adjustment"
+              %w[test_count test_code_lines].each do |key|
+                metric = binding.dig("measurements", key)
+                unless metric.is_a?(Hash) && metric["status"] == "verified"
+                  add(
+                    "checkpoint_budget_invalid",
+                    "Slice 2 lead_adjustment requires provider-attested verified measurements for the adjusted scope; unverified pending cannot authorize an adjustment",
+                    "#{bp}.measurements.#{key}"
+                  )
+                end
+              end
+            end
+          end
+          validate_override_consumption(checkpoint, checkpoints, path)
+        end
+
+        def validate_budget_measurements(measurements, path, scope:, project_id:, policy_ref:, task_ref:, work_unit_ref:)
+          unless measurements.is_a?(Hash) &&
+                 measurements.keys.sort == %w[test_code_lines test_count]
+            add(
+              "checkpoint_budget_invalid",
+              "measurements require exactly the canonical test_count and test_code_lines metrics",
+              "#{path}.measurements"
+            )
+            return
+          end
+          %w[test_count test_code_lines].each do |key|
+            measurement = measurements[key]
+            mp = "#{path}.measurements.#{key}"
+            unless measurement.is_a?(Hash) &&
+                   %w[verified unverified].include?(measurement["status"])
+              add(
+                "checkpoint_budget_invalid",
+                "measurement status must be verified or unverified",
+                mp
+              )
+              next
+            end
+            if measurement["status"] == "verified"
+              usage = measurement["usage"]
+              source = measurement["source_ref"]
+              unless usage.is_a?(Integer) && usage >= 0 &&
+                     source.is_a?(Hash) &&
+                     measurement["unverified_assessment"].nil?
+                add(
+                  "checkpoint_budget_invalid",
+                  "verified measurement requires usage >= 0, an exact attestation ref, and no assessment",
+                  mp
+                )
+                next
+              end
+              unless verified_measurement_source_resolves?(
+                source,
+                usage: usage,
+                metric_identity: key,
+                scope: scope,
+                project_id: project_id,
+                policy_ref: policy_ref,
+                task_ref: task_ref,
+                work_unit_ref: work_unit_ref
+              )
+                add(
+                  "checkpoint_budget_invalid",
+                  "verified measurement source must resolve to an exact provider-verified measurement attestation bound to metric/usage/scope/snapshot",
+                  "#{mp}.source_ref"
+                )
+              end
+            else
+              usage = measurement["usage"]
+              source = measurement["source_ref"]
+              assessment = measurement["unverified_assessment"]
+              unless usage.nil? && source.nil? && assessment.is_a?(Hash)
+                add(
+                  "checkpoint_budget_invalid",
+                  "unverified measurement requires canonical null usage/source and a typed unverified assessment",
+                  mp
+                )
+                next
+              end
+              unless assessment.keys.sort == %w[
+                lead_disposition lead_reason_code lead_supporting_refs
+                review_gate_evaluation_ref review_status
+              ]
+                add(
+                  "checkpoint_budget_invalid",
+                  "unverified_assessment requires the fixed field set",
+                  "#{mp}.unverified_assessment"
+                )
+                next
+              end
+              review_status = assessment["review_status"]
+              expected_disposition = {
+                "pending" => "proceed_pending_independent_review",
+                "accepted" => "proceed_after_independent_review",
+                "rejected" => "replan_after_independent_rejection"
+              }[review_status]
+              unless expected_disposition && assessment["lead_disposition"] == expected_disposition
+                add(
+                  "checkpoint_budget_invalid",
+                  "lead_disposition and review_status must exact match",
+                  "#{mp}.unverified_assessment"
+                )
+                next
+              end
+              if review_status == "pending"
+                unless assessment["review_gate_evaluation_ref"].nil?
+                  add(
+                    "checkpoint_budget_invalid",
+                    "pending review requires a canonical null review gate evaluation ref",
+                    "#{mp}.unverified_assessment"
+                  )
+                end
+              else
+                add(
+                  "checkpoint_budget_invalid",
+                  "accepted/rejected review requires the Slice 4 independent budget assessment consumer; " \
+                    "Slice 2 supports unverified pending only",
+                  "#{mp}.unverified_assessment"
+                )
+              end
+              unless assessment["lead_reason_code"].to_s.length >= 1
+                add(
+                  "checkpoint_budget_invalid",
+                  "unverified_assessment requires a lead reason code",
+                  "#{mp}.unverified_assessment"
+                )
+              end
+              refs = assessment["lead_supporting_refs"]
+              unless refs.is_a?(Array) &&
+                     refs == refs.uniq &&
+                     refs == refs.sort_by { |ref| [ref["kind"], ref["id"], ref["digest"]].join("\u0000") }
+                add(
+                  "checkpoint_budget_invalid",
+                  "lead_supporting_refs must be sorted unique exact refs",
+                  "#{mp}.unverified_assessment.lead_supporting_refs"
+                )
+              end
+              validate_supporting_refs(refs, path, "assessment")
+            end
+          end
+        end
+
+        # Verified usage is never self-reported and never a bare snapshot
+        # reference: each metric resolves to its own provider-verified
+        # test.measurement.attest assertion whose canonical scope exact binds
+        # project, active policy, TaskRevision, the scope-appropriate WorkUnit
+        # ref (exact for work_unit_lineage, canonical null for task_lineage),
+        # the metric identity, the usage and the repository snapshot
+        # ref+digest. Without a real scanner adapter a bare snapshot cannot
+        # claim verified.
+        def verified_measurement_source_resolves?(
+          source, usage:, metric_identity:, scope:, project_id:, policy_ref:,
+          task_ref:, work_unit_ref:
+        )
+          return false unless source.is_a?(Hash) && source["kind"] == "measurement_attestation"
+
+          assertion = @verified_authority_assertions[source["id"]]
+          envelope = assertion && assertion["measurement_attestation_envelope"]
+          policy = @indexes.fetch("project_policy_revisions", {})[policy_ref["policy_revision_id"]]
+          grant = unique_policy_grant(policy, ControlAuthority::MEASUREMENT_ATTEST_ACTION)
+          return false unless assertion &&
+                              assertion["assertion_digest"] == source["digest"] &&
+                              envelope.is_a?(Hash) &&
+                              assertion["checkpoint_due_observation_envelope"].nil? &&
+                              %w[user control_plane].include?(assertion["issuer_kind"]) &&
+                              grant.is_a?(Hash) &&
+                              Array(assertion["grants"]).include?(grant["required_external_grant"])
+
+          expected_scope = ControlAuthority.measurement_scope_digest(
+            project_id: assertion["project_id"],
+            policy_ref: policy_ref,
+            task_ref: task_ref,
+            work_unit_ref: work_unit_ref,
+            metric_identity: metric_identity,
+            usage: usage,
+            snapshot_ref: envelope["repository_snapshot_ref"]
+          )
+          snapshot = @bundle_snapshot
+          envelope["scope_digest"] == expected_scope &&
+            assertion["authority_scope_ref"] == expected_scope &&
+            envelope["project_id"] == project_id &&
+            envelope["project_policy_revision_ref"] == policy_ref &&
+            envelope["task_revision_ref"] == task_ref &&
+            envelope["work_unit_ref"] == work_unit_ref &&
+            envelope["metric_identity"] == metric_identity &&
+            envelope["usage"] == usage &&
+            envelope["repository_snapshot_ref"] ==
+              { "id" => "repository-snapshot", "digest" => snapshot && snapshot["tree_digest"] }
+        end
+
+        # user_override consumption: a record is consumed by exactly one
+        # origin checkpoint; every later binding inherits only along the
+        # continuous accepted lineage of the same project/policy/TaskRevision/
+        # scope/control with the exact origin ref at every step. A second
+        # consume, a skipped origin, a cross-lineage/scope inherit or a
+        # ceiling change fails closed. Work-unit-level overrides never relax
+        # the task-level budget: the two bindings derive independently and
+        # each carries its own exact scope.
+        def validate_override_consumption(checkpoint, checkpoints, path)
+          Array(checkpoint["effective_budget_bindings"]).each do |binding|
+            source = binding["user_override_source"]
+            next unless source.is_a?(Hash)
+
+            record_id = source.dig("authorization_record_ref", "authorization_record_id")
+            if source["mode"] == "consume"
+              consumers = checkpoints.values.select do |candidate|
+                Array(candidate["effective_budget_bindings"]).any? do |candidate_binding|
+                  candidate_source = candidate_binding["user_override_source"]
+                  candidate_source.is_a?(Hash) &&
+                    candidate_source["mode"] == "consume" &&
+                    candidate_source.dig("authorization_record_ref", "authorization_record_id") == record_id
+                end
+              end
+              unless consumers.length == 1 &&
+                     consumers.first["lead_checkpoint_id"] == checkpoint["lead_checkpoint_id"]
+                add(
+                  "checkpoint_budget_invalid",
+                  "a test.budget.override record can be consumed by exactly one origin checkpoint",
+                  "#{path}.effective_budget_bindings"
+                )
+              end
+            elsif source["mode"] == "inherit"
+              origin_ref = source["origin_consuming_checkpoint_ref"]
+              origin = origin_ref && checkpoints[origin_ref["lead_checkpoint_id"]]
+              unless origin &&
+                     origin_ref["content_digest"] == origin["content_digest"] &&
+                     origin["lead_control_id"] == checkpoint["lead_control_id"]
+                add(
+                  "checkpoint_budget_invalid",
+                  "override inherit must bind the exact origin consuming checkpoint of the same control",
+                  "#{path}.effective_budget_bindings"
+                )
+                next
+              end
+              origin_consume = Array(origin["effective_budget_bindings"]).find do |candidate|
+                candidate["budget_scope_type"] == binding["budget_scope_type"]
+              end
+              origin_source = origin_consume && origin_consume["user_override_source"]
+              unless origin_source.is_a?(Hash) &&
+                     origin_source["mode"] == "consume" &&
+                     origin_source.dig("authorization_record_ref", "authorization_record_id") == record_id
+                add(
+                  "checkpoint_budget_invalid",
+                  "override inherit must reach an origin checkpoint that consumed the same record for the same scope",
+                  "#{path}.effective_budget_bindings"
+                )
+                next
+              end
+              unless override_lineage_continuous?(checkpoint, origin, record_id, binding["budget_scope_type"], checkpoints)
+                add(
+                  "checkpoint_budget_invalid",
+                  "override inherit requires a continuous accepted lineage with no superseding source and no skipped origin",
+                  "#{path}.effective_budget_bindings"
+                )
+              end
+            end
+          end
+        end
+
+        def override_lineage_continuous?(checkpoint, origin, record_id, scope, checkpoints)
+          cursor = checkpoint["predecessor_lead_checkpoint_ref"] &&
+            checkpoints[checkpoint["predecessor_lead_checkpoint_ref"]["lead_checkpoint_id"]]
+          while cursor && cursor["lead_checkpoint_id"] != origin["lead_checkpoint_id"]
+            binding = Array(cursor["effective_budget_bindings"]).find do |candidate|
+              candidate["budget_scope_type"] == scope
+            end
+            source = binding && binding["user_override_source"]
+            unless source.is_a?(Hash) &&
+                   source["mode"] == "inherit" &&
+                   source.dig("authorization_record_ref", "authorization_record_id") == record_id
+              return false
+            end
+            ref = cursor["predecessor_lead_checkpoint_ref"]
+            cursor = ref && checkpoints[ref["lead_checkpoint_id"]]
+          end
+          cursor.is_a?(Hash)
+        end
+
+        # The one-way digest chain recomputed byte-identical from the exact
+        # authoritative inputs: complete ordered effective_budget_bindings ->
+        # effective_verification_plan_digest -> closure_basis_digest. The
+        # enclosing checkpoint identity never enters any preimage (no
+        # self-reference) and no plan truth object exists; a stored digest
+        # that cannot be recomputed fails closed.
+        def validate_checkpoint_digests(checkpoint, tasks, attempts, path)
+          bindings = Array(checkpoint["effective_budget_bindings"])
+          policy_ref = checkpoint["project_policy_revision_ref"]
+          task_ref = checkpoint["active_task_ref"]
+          task_ref ||= Array(checkpoint["task_queue"]).first
+          rule_ref = basis_rule_ref(checkpoint)
+          plan = ControlAuthority.effective_verification_plan_digest(
+            policy_ref: policy_ref,
+            task_revision_ref: task_ref,
+            assigned_rule_resolution_ref: rule_ref,
+            effective_budget_bindings: bindings
+          )
+          unless checkpoint["effective_verification_plan_digest"] == plan
+            add(
+              "checkpoint_digest_invalid",
+              "effective_verification_plan_digest must be recomputable byte-identical from the ordered bindings and authoritative inputs",
+              "#{path}.effective_verification_plan_digest"
+            )
+          end
+          thesis_ref = basis_thesis_ref(checkpoint)
+          basis = ControlAuthority.closure_basis_digest(
+            task_revision_ref: task_ref,
+            work_unit_ref: checkpoint["selected_work_unit_ref"],
+            change_thesis_ref: thesis_ref,
+            assigned_rule_resolution_ref: rule_ref,
+            effective_verification_plan_digest: plan
+          )
+          unless checkpoint["closure_basis_digest"] == basis
+            add(
+              "checkpoint_digest_invalid",
+              "closure_basis_digest must be recomputable byte-identical from the frozen dispatch-time refs",
+              "#{path}.closure_basis_digest"
+            )
+          end
+        end
+
+        # The dispatch-time basis: the single exact proposed successor ref of
+        # the authorizing checkpoint, else — only for an observation
+        # checkpoint (reconcile on attempt_created, which pins the created
+        # Attempt itself) — the pinned Attempt's actual assignment. A
+        # terminal-dispatch checkpoint pins the PREVIOUS Attempt's terminal
+        # event, so its basis is the proposal (canonical null when none was
+        # authorized), never the previous Attempt's assignment.
+        def basis_rule_ref(checkpoint)
+          proposed = proposed_plan_basis(checkpoint)
+          return proposed if proposed
+
+          return nil unless checkpoint.dig("reconcile_trigger", "event") == "attempt_created"
+
+          attempt = pinned_attempt(checkpoint)
+          rule_id = attempt && attempt.dig("events", 0, "assignment", "assigned_rule_resolution_id")
+          rule = rule_id && @indexes.fetch("rule_resolution_artifacts", {})[rule_id]
+          rule && {
+            "resolution_id" => rule["resolution_id"],
+            "identity_sha256" => rule["identity_sha256"]
+          }
+        end
+
+        def basis_thesis_ref(checkpoint)
+          proposed = proposed_thesis_basis(checkpoint)
+          return proposed if proposed
+
+          return nil unless checkpoint.dig("reconcile_trigger", "event") == "attempt_created"
+
+          attempt = pinned_attempt(checkpoint)
+          attempt && attempt.dig("events", 0, "assignment", "change_thesis_ref")
+        end
+
+        def pinned_event(checkpoint)
+          ref = checkpoint["current_or_terminal_attempt_ref"]
+          return nil unless ref.is_a?(Hash)
+
+          attempt = @indexes.fetch("work_unit_attempts", {})[ref["attempt_id"]]
+          event = attempt && Array(attempt["events"]).find do |candidate|
+            candidate["event_id"] == ref["event_id"]
+          end
+          event && event["event_digest"] == ref["event_digest"] ? event : nil
         end
 
         # A claimed substantive delta must be provable against the exact
@@ -1650,6 +2820,53 @@ module Orbit
           Time.iso8601(value)
         rescue ArgumentError, TypeError
           nil
+        end
+
+        def parse_time(value)
+          Time.iso8601(value)
+        rescue ArgumentError, TypeError
+          nil
+        end
+
+        def checkpoint_due_observation_valid?(checkpoint, predecessor, deadline, scheduled)
+          ref = checkpoint["checkpoint_due_observation_ref"] || {}
+          assertion = ref["assertion_id"] && @verified_authority_assertions[ref["assertion_id"]]
+          envelope = assertion && assertion["checkpoint_due_observation_envelope"]
+          policy = @indexes.fetch("project_policy_revisions", {})[
+            checkpoint.dig("project_policy_revision_ref", "policy_revision_id")
+          ]
+          grant = unique_policy_grant(policy, ControlAuthority::CHECKPOINT_DUE_OBSERVE_ACTION)
+          return false unless assertion &&
+                               assertion["assertion_digest"] == ref["assertion_digest"] &&
+                               envelope.is_a?(Hash) &&
+                               assertion["measurement_attestation_envelope"].nil? &&
+                               %w[user control_plane].include?(assertion["issuer_kind"]) &&
+                               grant.is_a?(Hash) &&
+                               Array(assertion["grants"]).include?(grant["required_external_grant"])
+
+          expected_scope = ControlAuthority.checkpoint_due_scope_digest(
+            project_id: assertion["project_id"],
+            policy_ref: checkpoint["project_policy_revision_ref"],
+            lead_control_id: checkpoint["lead_control_id"],
+            scheduled_checkpoint_ref: envelope["scheduled_checkpoint_ref"],
+            deadline: envelope["deadline"],
+            observed_at: envelope["observed_at"]
+          )
+          observed_at = parse_time(envelope["observed_at"])
+          envelope["scope_digest"] == expected_scope &&
+            assertion["authority_scope_ref"] == expected_scope &&
+            envelope["project_id"] == checkpoint["project_id"] &&
+            envelope["project_policy_revision_ref"] == checkpoint["project_policy_revision_ref"] &&
+            envelope["lead_control_id"] == checkpoint["lead_control_id"] &&
+            envelope["scheduled_checkpoint_ref"] ==
+              (predecessor && {
+                "lead_checkpoint_id" => predecessor["lead_checkpoint_id"],
+                "content_digest" => predecessor["content_digest"]
+              }) &&
+            envelope["deadline"] == deadline &&
+            assertion["asserted_at"] == envelope["observed_at"] &&
+            assertion.dig("verification_receipt", "issued_at") == envelope["observed_at"] &&
+            observed_at && scheduled && observed_at >= scheduled
         end
 
         def detect_checkpoint_cycles(checkpoints)

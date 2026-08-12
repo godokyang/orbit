@@ -58,6 +58,9 @@
         "assessments",
         "delivery_progress",
         "assurance_progress",
+        "effective_budget_bindings",
+        "effective_verification_plan_digest",
+        "closure_basis_digest",
         "lead_decision",
         "reconcile_trigger",
         "next_trigger",
@@ -125,6 +128,68 @@
           "oneOf": [
             {"type": "null"},
             {"$ref": "#/$defs/TaskAcquire"}
+          ]
+        },
+        "effective_budget_bindings": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {"$ref": "#/$defs/EffectiveBudgetBinding"}
+        },
+        "budget_adjustment_digest": {
+          "oneOf": [
+            {"type": "null"},
+            {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+          ]
+        },
+        "test_budget_adjust": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/BudgetAdjustmentPayload"}
+          ]
+        },
+        "effective_verification_plan_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "closure_basis_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "wall_clock_fallback": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/WallClockFallback"}
+          ]
+        },
+        "checkpoint_due_observation_ref": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/AuthorityAssertionRef"}
+          ]
+        },
+        "fingerprint_identity_basis": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/FingerprintIdentityBasis"}
+          ]
+        },
+        "fingerprint": {
+          "oneOf": [
+            {"type": "null"},
+            {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+          ]
+        },
+        "fingerprint_supporting_provenance": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/FingerprintSupportingProvenance"}
+          ]
+        },
+        "retry_override_ref": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/AuthorizationRecordRef"}
           ]
         },
         "lead_decision": {"$ref": "#/$defs/LeadDecision"},
@@ -243,6 +308,323 @@
           "pattern": "^olcontrol_[a-z0-9][a-z0-9_-]{7,95}$"
         },
         "task_ref": {"$ref": "#/$defs/TaskRef"}
+      },
+      "additionalProperties": false
+    },
+    "AuthorizationRecordRef": {
+      "type": "object",
+      "required": ["authorization_record_id", "content_digest"],
+      "properties": {
+        "authorization_record_id": {
+          "type": "string",
+          "pattern": "^oauthz_[a-z0-9][a-z0-9_-]{7,95}$"
+        },
+        "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "EffectiveBudgetBinding": {
+      "type": "object",
+      "required": [
+        "budget_scope_type",
+        "project_policy_revision_ref",
+        "source_kind",
+        "lead_adjustment_source",
+        "user_override_source",
+        "effective_test_count",
+        "effective_test_code_lines",
+        "measurements"
+      ],
+      "properties": {
+        "budget_scope_type": {"enum": ["work_unit_lineage", "task_lineage"]},
+        "project_policy_revision_ref": {"$ref": "#/$defs/PolicyRevisionRef"},
+        "source_kind": {"enum": ["policy_default", "lead_adjustment", "user_override"]},
+        "lead_adjustment_source": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/LeadAdjustmentSource"}
+          ]
+        },
+        "user_override_source": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/UserOverrideSource"}
+          ]
+        },
+        "effective_test_count": {"type": "integer", "minimum": 0},
+        "effective_test_code_lines": {"type": "integer", "minimum": 0},
+        "measurements": {"$ref": "#/$defs/BudgetMeasurements"}
+      },
+      "additionalProperties": false
+    },
+    "LeadAdjustmentSource": {
+      "type": "object",
+      "required": ["mode", "adjustment_digest", "inherited_checkpoint_ref"],
+      "properties": {
+        "mode": {"enum": ["current", "inherited"]},
+        "adjustment_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "inherited_checkpoint_ref": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/LeadCheckpointRef"}
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "UserOverrideSource": {
+      "type": "object",
+      "required": ["mode", "authorization_record_ref", "origin_consuming_checkpoint_ref"],
+      "properties": {
+        "mode": {"enum": ["consume", "inherit"]},
+        "authorization_record_ref": {"$ref": "#/$defs/AuthorizationRecordRef"},
+        "origin_consuming_checkpoint_ref": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/LeadCheckpointRef"}
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "BudgetAdjustmentPayload": {
+      "type": "object",
+      "required": [
+        "budget_scope_type",
+        "project_policy_revision_ref",
+        "predecessor_lead_checkpoint_ref",
+        "predecessor_binding_digest",
+        "old_effective_budget",
+        "new_effective_budget",
+        "supporting_refs"
+      ],
+      "properties": {
+        "budget_scope_type": {"enum": ["work_unit_lineage", "task_lineage"]},
+        "project_policy_revision_ref": {"$ref": "#/$defs/PolicyRevisionRef"},
+        "predecessor_lead_checkpoint_ref": {"$ref": "#/$defs/LeadCheckpointRef"},
+        "predecessor_binding_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "old_effective_budget": {"$ref": "#/$defs/EffectiveCeiling"},
+        "new_effective_budget": {"$ref": "#/$defs/EffectiveCeiling"},
+        "supporting_refs": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/SupportingRef"}
+        }
+      },
+      "additionalProperties": false
+    },
+    "EffectiveCeiling": {
+      "type": "object",
+      "required": ["test_count", "test_code_lines"],
+      "properties": {
+        "test_count": {"type": "integer", "minimum": 0},
+        "test_code_lines": {"type": "integer", "minimum": 0}
+      },
+      "additionalProperties": false
+    },
+    "BudgetMeasurements": {
+      "type": "object",
+      "required": ["test_count", "test_code_lines"],
+      "properties": {
+        "test_count": {"$ref": "#/$defs/BudgetMeasurement"},
+        "test_code_lines": {"$ref": "#/$defs/BudgetMeasurement"}
+      },
+      "additionalProperties": false
+    },
+    "BudgetMeasurement": {
+      "type": "object",
+      "required": ["status", "usage", "source_ref", "unverified_assessment"],
+      "properties": {
+        "status": {"enum": ["verified", "unverified"]},
+        "usage": {
+          "oneOf": [
+            {"type": "integer", "minimum": 0},
+            {"type": "null"}
+          ]
+        },
+        "source_ref": {
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "required": ["kind", "id", "digest"],
+              "properties": {
+                "kind": {"const": "measurement_attestation"},
+                "id": {"type": "string", "pattern": "^oassert_[a-z0-9][a-z0-9_-]{7,95}$"},
+                "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "unverified_assessment": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/UnverifiedAssessment"}
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "UnverifiedAssessment": {
+      "type": "object",
+      "required": [
+        "lead_disposition",
+        "lead_reason_code",
+        "lead_supporting_refs",
+        "review_status",
+        "review_gate_evaluation_ref"
+      ],
+      "properties": {
+        "lead_disposition": {
+          "enum": [
+            "proceed_pending_independent_review",
+            "proceed_after_independent_review",
+            "replan_after_independent_rejection"
+          ]
+        },
+        "lead_reason_code": {"type": "string", "minLength": 1},
+        "lead_supporting_refs": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/SupportingRef"}
+        },
+        "review_status": {"enum": ["pending", "accepted", "rejected"]},
+        "review_gate_evaluation_ref": {
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "required": ["gate_evaluation_id", "content_digest"],
+              "properties": {
+                "gate_evaluation_id": {
+                  "type": "string",
+                  "pattern": "^ogeval_[a-z0-9][a-z0-9_-]{7,95}$"
+                },
+                "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+              },
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "ExactEventRef": {
+      "type": "object",
+      "required": ["kind", "id", "event_id", "digest"],
+      "properties": {
+        "kind": {"const": "attempt_event"},
+        "id": {"type": "string", "minLength": 1},
+        "event_id": {"type": "string", "pattern": "^oevent_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "AuthorityAssertionRef": {
+      "type": "object",
+      "required": ["assertion_id", "assertion_digest"],
+      "properties": {
+        "assertion_id": {"type": "string", "pattern": "^oassert_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "assertion_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "WallClockFallback": {
+      "type": "object",
+      "required": ["source_kind", "deadline", "source_ref", "schedule_basis_ref"],
+      "properties": {
+        "source_kind": {"enum": ["policy", "authorization_record"]},
+        "deadline": {"type": "string", "minLength": 1},
+        "source_ref": {
+          "type": "object",
+          "required": ["id", "content_digest"],
+          "properties": {
+            "id": {"type": "string", "minLength": 1},
+            "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+          },
+          "additionalProperties": false
+        },
+        "schedule_basis_ref": {"$ref": "#/$defs/ExactEventRef"}
+      },
+      "additionalProperties": false
+    },
+    "FingerprintIdentityBasis": {
+      "type": "object",
+      "required": [
+        "canonicalization_version",
+        "scope",
+        "category",
+        "failure_code",
+        "finding_ref",
+        "stable_signal_identity"
+      ],
+      "properties": {
+        "canonicalization_version": {"const": "orbit-fingerprint-v1"},
+        "scope": {
+          "type": "object",
+          "required": ["task_revision_ref", "work_unit_ref"],
+          "properties": {
+            "task_revision_ref": {"$ref": "#/$defs/TaskRef"},
+            "work_unit_ref": {"$ref": "#/$defs/WorkUnitRef"}
+          },
+          "additionalProperties": false
+        },
+        "category": {"enum": ["finding", "test", "rule", "check"]},
+        "failure_code": {"type": "string", "minLength": 1},
+        "finding_ref": {
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "required": ["finding_id", "content_digest"],
+              "properties": {
+                "finding_id": {"type": "string", "pattern": "^ofinding_[a-z0-9][a-z0-9_-]{7,95}$"},
+                "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "stable_signal_identity": {
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "required": [
+                "test_or_check_id",
+                "signal_subject_id",
+                "normalized_failure_code"
+              ],
+              "properties": {
+                "test_or_check_id": {"type": "string", "minLength": 1},
+                "signal_subject_id": {"type": "string", "minLength": 1},
+                "normalized_failure_code": {"type": "string", "minLength": 1}
+              },
+              "additionalProperties": false
+            }
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "FingerprintSupportingProvenance": {
+      "type": "object",
+      "required": [
+        "terminal_attempt_ref",
+        "outcome_refs",
+        "authoring_checkpoint_ref",
+        "prior_attempt_chain"
+      ],
+      "properties": {
+        "terminal_attempt_ref": {"$ref": "#/$defs/AttemptRef"},
+        "outcome_refs": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/SupportingRef"}
+        },
+        "authoring_checkpoint_ref": {"$ref": "#/$defs/LeadCheckpointRef"},
+        "prior_attempt_chain": {
+          "type": "array",
+          "items": {"$ref": "#/$defs/AttemptRef"}
+        }
       },
       "additionalProperties": false
     },
@@ -367,7 +749,8 @@
             "dependency_change",
             "task_release",
             "task_suspend",
-            "task_acquire"
+            "task_acquire",
+            "checkpoint_due"
           ]
         },
         "reason": {"type": "string", "minLength": 1}

@@ -122,6 +122,83 @@ facts:
     authoritative_owner: derived_projection
     lifecycle: derived_from_agent_and_attempt_events
     persisted_authority: false
+  - fact: failure_finding_fingerprint_identity
+    authoritative_owner: LeadControl.controlled_writer
+    lifecycle: deterministic_from_fingerprint_identity_basis_only
+    hash_domain: [canonicalization_version, task_revision_work_unit_scope, typed_category_code, stable_finding_identity, stable_test_rule_check_identity_plus_signal_subject_plus_normalized_failure_code]
+    excluded_from_hash: [lead_control_id, attempt_and_checkpoint_and_session_identities, agent_instance, outcome_record_ids_and_digests, wording, order, paths]
+    scope_resolution: exact_task_and_work_unit_digests_of_pinned_failure
+    signal_binding: non_finding_basis_byte_equal_trusted_terminal_event_failure_signal
+    prohibited_owners: [Lead.self_report, WorkAgent.free_text, outcome_record_identity, invented_signal_strings]
+  - fact: dispatch_closure_basis_freeze
+    authoritative_owner: LeadCheckpoint.dispatch
+    lifecycle: exactly_one_proposed_change_thesis_and_rule_resolution_per_dispatch
+    plan_and_closure_digests: derived_from_proposals
+    attempt_created_assignment: exact_match_required
+    prohibited_owners: [generic_nil_basis, attempt_late_thesis_or_rule_choice]
+  - fact: retry_override_active_policy_binding
+    authoritative_owner: LeadCheckpoint.retry_override_ref
+    lifecycle: consumption_binds_exact_active_policy_and_grant
+    prohibited_owners: [old_or_revoked_policy_record_after_rotation]
+  - fact: fingerprint_supporting_provenance_and_prior_chain
+    authoritative_owner: LeadControl.controlled_writer
+    lifecycle: separate_from_hash_byte_equal_lineage_occurrences
+    exact_bindings: [terminal_attempt_ref_and_digest, outcome_refs_and_digests, authoring_dispatch_checkpoint_ref, ordered_prior_attempt_chain]
+    prohibited_owners: [agent_reported_fingerprint, latest_wins_chain_reset]
+  - fact: third_attempt_retry_authorization
+    authoritative_owner: AuthorizationRecord.task.retry.override
+    lifecycle: provider_verified_create_only_pre_existing_consumed_once
+    scope: canonical_digest_of_project_task_revision_work_unit_fingerprint_prior_chain_authorizing_checkpoint_control
+    prohibited_owners: [Lead.self_report, opaque_ref, replay_or_second_consume]
+  - fact: wall_clock_fallback_authority
+    authoritative_owner: ProjectPolicyRevision.orchestration_policy_or_authorized_record
+    lifecycle: checkpoint_pinned_exact_source_id_and_digest
+    boundary: timer_produces_only_checkpoint_due
+    schedule_basis: exact_attempt_event_pinned_by_checkpoint_or_strict_same_control_ancestor
+    prohibited_owners: [mutable_config, lead_self_filled_interval, stale_digest, future_or_unobserved_event_basis]
+  - fact: checkpoint_due_occurrence
+    authoritative_owner: AuthorityAssertion.control.checkpoint_due.observe
+    lifecycle: provider_verified_canonical_scope
+    scope_binds: [project, active_policy, lead_control_id, scheduled_checkpoint_ref_and_digest, deadline, observed_at]
+    timing: asserted_at_and_receipt_issued_at_equal_observed_at_gte_deadline
+    prohibited_owners: [ordinary_lifecycle_event, free_text_deadline]
+  - fact: verified_test_budget_usage
+    authoritative_owner: AuthorityAssertion.test.measurement.attest
+    lifecycle: provider_verified_canonical_scope_per_metric_and_scope
+    scope_binds: [project, active_policy, task_revision, work_unit_ref_by_scope, metric_identity, usage, repository_snapshot_ref_and_digest]
+    prohibited_owners: [agent_self_report, bare_snapshot_reference, one_receipt_for_both_metrics]
+  - fact: effective_test_budget_bindings
+    authoritative_owner: LeadCheckpoint.effective_budget_bindings
+    lifecycle: deterministic_two_layer_fixed_order
+    scopes: [work_unit_lineage, task_lineage]
+    source_kinds: [policy_default, lead_adjustment, user_override]
+    prohibited_owners: [agent_self_reported_measurement, latest_wins_binding, mixed_source_fields]
+  - fact: test_budget_override_authority
+    authoritative_owner: AuthorizationRecord.test.budget.override
+    lifecycle: provider_verified_create_only_pre_existing_consume_once_inherit_continuous
+    scope: canonical_digest_of_scope_type_policy_project_task_work_unit_authorizing_checkpoint_binding_ceilings_control
+    prohibited_owners: [second_consume, cross_lineage_or_scope_inherit, ceiling_change_on_inherit]
+  - fact: budget_adjustment_authority
+    authoritative_owner: LeadCheckpoint.test_budget_adjust
+    lifecycle: in_ceiling_typed_payload_with_independent_budget_adjustment_digest
+    prohibited_owners: [checkpoint_self_reference, measurement_tuple, out_of_ceiling_request]
+  - fact: budget_measurement_observation
+    authoritative_owner: LeadCheckpoint.effective_budget_bindings.measurements
+    lifecycle: verified_usage_with_exact_measurement_attestation_or_unverified_canonical_nulls
+    trusted_sources: [provider_verified_test.measurement.attest_assertion, repository_authoritative_scan]
+    prohibited_owners: [agent_self_report, bare_snapshot_reference, null_as_zero, unverified_as_within_budget]
+    phase_boundary: lead_adjustment_requires_attested_verified_measurements_pending_adjustment_fail_closed_in_slice2
+  - fact: effective_verification_plan_and_closure_basis
+    authoritative_owner: derived_projection
+    lifecycle: one_way_digest_chain_recomputable_byte_identical
+    derivation: [budget_adjustment_digest, complete_ordered_effective_budget_bindings, effective_verification_plan_digest, closure_basis_digest]
+    persisted_authority: false
+    prohibited_owners: [writable_plan_truth_object, checkpoint_identity_in_preimage]
+  - fact: runner_stop_state
+    authoritative_owner: LeadControl.reconcile
+    lifecycle: exactly_one_mutually_exclusive_state_per_reconcile
+    states: [completed, blocked, frozen, needs_user]
+    prohibited_owners: [dual_state_write, implicit_state_transition, recovery_thaw]
 
 authority_invariants:
   - Lead cannot create or impersonate bootstrap user/control-plane authority.
@@ -169,3 +246,11 @@ authority_invariants:
   - One canonical runtime subject binds at most one active LeadSession project-wide; subject reuse across controls requires exactly one origin lineage and exact terminal/release -> successor/bind transfer chains, and a root session reusing a subject present in another control fails closed.
   - Task transfer requires the old lineage's accepted release or relinquishing-suspend checkpoint first (queue removes exactly one owned task and its active selection, with no non-terminal Attempt of that task in the releasing control), then the new lineage's accepted acquire checkpoint binding the exact released checkpoint ref+digest, old/new control IDs, and Task/TaskRevision refs; every release/suspend has exactly one matching acquire, and missing release, early acquire, wrong refs/digest/task/control, duplicate ownership, and replay fail closed. The registry stays the immutable genesis claim; derived tip queues evolve through transfer provenance.
   - A successor Attempt may cross control lineages only when its control validly acquired the Attempt's task from the predecessor's control (exact release/acquire provenance) and the predecessor Attempt is terminal; otherwise the frozen same-control successor rule applies.
+  - The failure/finding fingerprint is computed only from the canonical `fingerprint_identity_basis` (versioned scope, typed category/code, stable Finding identity or stable test/rule/check identity + signal subject + normalized failure code); attempt/checkpoint/session/AgentInstance/outcome identities, digests, wording, order and paths never enter the hash, the same basis always yields the same fingerprint, and unknown versions fail closed.
+  - Fingerprint supporting provenance is never hashed: it pins the exact terminal failure event, resolvable outcome refs, the failed Attempt's dispatch checkpoint as authoring ref, and an ordered prior attempt chain that must byte-equal the same-fingerprint occurrences across the accepted lineage (with exact transfer jumps); identity or provenance gaps freeze instead of counting as a new failure.
+  - The third same-fingerprint dispatch requires a provider-verified create-only `task.retry.override` record whose canonical scope exact binds project, TaskRevision, WorkUnit, fingerprint, ordered prior chain, the authorizing (second-failure) checkpoint and `lead_control_id`; the record is pre-existing, consumed by exactly one checkpoint, and without it the runner stops at `needs_user`.
+  - Wall-clock fallback intervals come only from the exact active ProjectPolicyRevision orchestration policy or a policy-authorized immutable record; the checkpoint pins the exact source ID+digest and the timer can only produce `checkpoint_due`.
+  - Effective test budget bindings are exactly two canonical entries in fixed work_unit_lineage/task_lineage order, each with one exclusive source (policy_default / lead_adjustment current|inherited / user_override consume|inherit); the adjust payload binds the exact predecessor checkpoint+binding and absolute in-ceiling ceilings and canonicalizes to `budget_adjustment_digest`; overrides are consumed once and inherit only along the continuous accepted lineage with the exact origin ref; a work-unit override never relaxes the task-level total.
+  - Budget measurements are canonical observations only: verified requires usage >= 0 with an exact provider/snapshot ref, unverified requires canonical nulls plus the typed `unverified_assessment` with the exact pending mapping; mechanical within/over-budget derivation exists only for verified metrics, and authorization facts never carry the measurement tuple.
+  - The one-way digest chain (budget_adjustment_digest iff present -> complete ordered effective_budget_bindings -> effective_verification_plan_digest -> closure_basis_digest) never includes the enclosing checkpoint identity in any preimage, is recomputable byte-identical, and has no writable plan truth object.
+  - Every reconcile yields exactly one mutually exclusive runner stop state (completed/blocked/frozen/needs_user): hard overruns needing user authority (verified budget overrun, third same-fingerprint retry without override) are needs_user, Lead-replannable control anomalies are frozen, and recovery never thaws a frozen or needs_user decision.

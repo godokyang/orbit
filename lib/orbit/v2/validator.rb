@@ -5,6 +5,7 @@ require "time"
 
 require_relative "authority_verifier"
 require_relative "canonical_json"
+require_relative "control_authority"
 require_relative "errors"
 require_relative "evidence_contract"
 require_relative "evaluation_subject"
@@ -163,6 +164,7 @@ module Orbit
         @event_ids = {}
         @verified_authority_assertions = {}
         @verified_runtime_identities = {}
+        @bundle_snapshot = bundle.is_a?(Hash) ? bundle["repository_snapshot"] : nil
         check("contract_bundle") { SchemaCatalog.check!("contract_bundle", bundle) }
         return errors unless bundle.is_a?(Hash)
         structural_errors = SchemaCatalog.structure_errors("contract_bundle", bundle)

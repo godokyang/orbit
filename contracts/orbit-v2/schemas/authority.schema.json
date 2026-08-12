@@ -39,6 +39,8 @@
         "asserted_at": {"type": "string", "minLength": 1},
         "assertion_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
         "policy_issuance_envelope": {"$ref": "#/$defs/PolicyIssuanceEnvelope"},
+        "checkpoint_due_observation_envelope": {"$ref": "#/$defs/CheckpointDueObservationEnvelope"},
+        "measurement_attestation_envelope": {"$ref": "#/$defs/MeasurementAttestationEnvelope"},
         "verification_receipt": {
           "type": "object",
           "required": [
@@ -88,6 +90,87 @@
             },
             "issued_at": {"type": "string", "minLength": 1},
             "receipt": {"type": "string", "minLength": 1}
+          },
+          "additionalProperties": false
+        }
+      },
+      "not": {
+        "allOf": [
+          {"required": ["checkpoint_due_observation_envelope"]},
+          {"required": ["measurement_attestation_envelope"]}
+        ]
+      },
+      "additionalProperties": false
+    },
+    "CheckpointDueObservationEnvelope": {
+      "type": "object",
+      "required": [
+        "scope_digest",
+        "project_id",
+        "project_policy_revision_ref",
+        "lead_control_id",
+        "scheduled_checkpoint_ref",
+        "deadline",
+        "observed_at"
+      ],
+      "properties": {
+        "scope_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "project_id": {"type": "string", "pattern": "^oproj_[a-z0-9][a-z0-9_-]{7,63}$"},
+        "project_policy_revision_ref": {"$ref": "#/$defs/ProjectPolicyRevisionRef"},
+        "lead_control_id": {"type": "string", "pattern": "^olcontrol_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "scheduled_checkpoint_ref": {
+          "type": "object",
+          "required": ["lead_checkpoint_id", "content_digest"],
+          "properties": {
+            "lead_checkpoint_id": {"type": "string", "pattern": "^olcheckpoint_[a-z0-9][a-z0-9_-]{7,95}$"},
+            "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+          },
+          "additionalProperties": false
+        },
+        "deadline": {"type": "string", "minLength": 1},
+        "observed_at": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
+    },
+    "MeasurementAttestationEnvelope": {
+      "type": "object",
+      "required": [
+        "scope_digest",
+        "project_id",
+        "project_policy_revision_ref",
+        "task_revision_ref",
+        "work_unit_ref",
+        "metric_identity",
+        "usage",
+        "repository_snapshot_ref"
+      ],
+      "properties": {
+        "scope_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "project_id": {"type": "string", "pattern": "^oproj_[a-z0-9][a-z0-9_-]{7,63}$"},
+        "project_policy_revision_ref": {"$ref": "#/$defs/ProjectPolicyRevisionRef"},
+        "task_revision_ref": {"$ref": "#/$defs/ExactTaskRef"},
+        "work_unit_ref": {
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "required": ["work_unit_id", "content_digest"],
+              "properties": {
+                "work_unit_id": {"type": "string", "pattern": "^owu_[a-z0-9][a-z0-9_-]{7,95}$"},
+                "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "metric_identity": {"enum": ["test_count", "test_code_lines"]},
+        "usage": {"type": "integer", "minimum": 0},
+        "repository_snapshot_ref": {
+          "type": "object",
+          "required": ["id", "digest"],
+          "properties": {
+            "id": {"type": "string", "minLength": 1},
+            "digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
           },
           "additionalProperties": false
         }
@@ -181,6 +264,9 @@
         "authorization_source_ref": {"type": "string", "pattern": "^oassert_[a-z0-9][a-z0-9_-]{7,95}$"},
         "authorization_assertion_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
         "protected_change_envelope": {"$ref": "#/$defs/ProtectedChangeEnvelope"},
+        "retry_override_envelope": {"$ref": "#/$defs/RetryOverrideEnvelope"},
+        "budget_override_envelope": {"$ref": "#/$defs/BudgetOverrideEnvelope"},
+        "fallback_envelope": {"$ref": "#/$defs/FallbackEnvelope"},
         "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
       },
       "oneOf": [
@@ -188,15 +274,182 @@
           "required": ["protected_change_envelope"],
           "properties": {
             "action": {"const": "task.protected_contract.change"}
-          }
+          },
+          "allOf": [
+            {"not": {"required": ["retry_override_envelope"]}},
+            {"not": {"required": ["budget_override_envelope"]}},
+            {"not": {"required": ["fallback_envelope"]}}
+          ]
+        },
+        {
+          "required": ["retry_override_envelope"],
+          "properties": {
+            "action": {"const": "task.retry.override"}
+          },
+          "allOf": [
+            {"not": {"required": ["protected_change_envelope"]}},
+            {"not": {"required": ["budget_override_envelope"]}},
+            {"not": {"required": ["fallback_envelope"]}}
+          ]
+        },
+        {
+          "required": ["budget_override_envelope"],
+          "properties": {
+            "action": {"const": "test.budget.override"}
+          },
+          "allOf": [
+            {"not": {"required": ["protected_change_envelope"]}},
+            {"not": {"required": ["retry_override_envelope"]}},
+            {"not": {"required": ["fallback_envelope"]}}
+          ]
+        },
+        {
+          "required": ["fallback_envelope"],
+          "properties": {
+            "action": {"const": "control.fallback.authorize"}
+          },
+          "allOf": [
+            {"not": {"required": ["protected_change_envelope"]}},
+            {"not": {"required": ["retry_override_envelope"]}},
+            {"not": {"required": ["budget_override_envelope"]}}
+          ]
         },
         {
           "properties": {
-            "action": {"not": {"const": "task.protected_contract.change"}}
+            "action": {
+              "not": {
+                "enum": [
+                  "task.protected_contract.change",
+                  "task.retry.override",
+                  "test.budget.override",
+                  "control.fallback.authorize"
+                ]
+              }
+            }
           },
-          "not": {"required": ["protected_change_envelope"]}
+          "allOf": [
+            {"not": {"required": ["protected_change_envelope"]}},
+            {"not": {"required": ["retry_override_envelope"]}},
+            {"not": {"required": ["budget_override_envelope"]}},
+            {"not": {"required": ["fallback_envelope"]}}
+          ]
         }
       ],
+      "additionalProperties": false
+    },
+    "RetryOverrideEnvelope": {
+      "type": "object",
+      "required": [
+        "scope_digest",
+        "project_id",
+        "task_ref",
+        "work_unit_ref",
+        "fingerprint",
+        "prior_attempt_chain",
+        "authorizing_checkpoint_ref",
+        "lead_control_id"
+      ],
+      "properties": {
+        "scope_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "project_id": {"type": "string", "pattern": "^oproj_[a-z0-9][a-z0-9_-]{7,63}$"},
+        "task_ref": {"$ref": "#/$defs/ExactTaskRef"},
+        "work_unit_ref": {"type": "object", "required": ["work_unit_id", "content_digest"], "properties": {"work_unit_id": {"type": "string", "pattern": "^owu_[a-z0-9][a-z0-9_-]{7,95}$"}, "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}}, "additionalProperties": false},
+        "fingerprint": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "prior_attempt_chain": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["attempt_id", "event_id", "event_digest"],
+            "properties": {
+              "attempt_id": {"type": "string", "pattern": "^oattempt_[a-z0-9][a-z0-9_-]{7,95}$"},
+              "event_id": {"type": "string", "pattern": "^oevent_[a-z0-9][a-z0-9_-]{7,95}$"},
+              "event_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+            },
+            "additionalProperties": false
+          }
+        },
+        "authorizing_checkpoint_ref": {
+          "type": "object",
+          "required": ["lead_checkpoint_id", "content_digest"],
+          "properties": {
+            "lead_checkpoint_id": {"type": "string", "pattern": "^olcheckpoint_[a-z0-9][a-z0-9_-]{7,95}$"},
+            "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+          },
+          "additionalProperties": false
+        },
+        "lead_control_id": {"type": "string", "pattern": "^olcontrol_[a-z0-9][a-z0-9_-]{7,95}$"}
+      },
+      "additionalProperties": false
+    },
+    "BudgetOverrideEnvelope": {
+      "type": "object",
+      "required": [
+        "scope_digest",
+        "budget_scope_type",
+        "project_id",
+        "project_policy_revision_ref",
+        "task_ref",
+        "work_unit_ref",
+        "authorizing_checkpoint_ref",
+        "predecessor_binding_digest",
+        "effective_test_count",
+        "effective_test_code_lines",
+        "lead_control_id"
+      ],
+      "properties": {
+        "scope_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "budget_scope_type": {"enum": ["work_unit_lineage", "task_lineage"]},
+        "project_id": {"type": "string", "pattern": "^oproj_[a-z0-9][a-z0-9_-]{7,63}$"},
+        "project_policy_revision_ref": {"$ref": "#/$defs/ProjectPolicyRevisionRef"},
+        "task_ref": {"$ref": "#/$defs/ExactTaskRef"},
+        "work_unit_ref": {
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "required": ["work_unit_id", "content_digest"],
+              "properties": {
+                "work_unit_id": {"type": "string", "pattern": "^owu_[a-z0-9][a-z0-9_-]{7,95}$"},
+                "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+              },
+              "additionalProperties": false
+            }
+          ]
+        },
+        "authorizing_checkpoint_ref": {
+          "type": "object",
+          "required": ["lead_checkpoint_id", "content_digest"],
+          "properties": {
+            "lead_checkpoint_id": {"type": "string", "pattern": "^olcheckpoint_[a-z0-9][a-z0-9_-]{7,95}$"},
+            "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+          },
+          "additionalProperties": false
+        },
+        "predecessor_binding_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "effective_test_count": {"type": "integer", "minimum": 0},
+        "effective_test_code_lines": {"type": "integer", "minimum": 0},
+        "lead_control_id": {"type": "string", "pattern": "^olcontrol_[a-z0-9][a-z0-9_-]{7,95}$"}
+      },
+      "additionalProperties": false
+    },
+    "FallbackEnvelope": {
+      "type": "object",
+      "required": [
+        "scope_digest",
+        "project_id",
+        "project_policy_revision_ref",
+        "lead_control_id",
+        "interval_seconds",
+        "upper_bound_seconds"
+      ],
+      "properties": {
+        "scope_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "project_id": {"type": "string", "pattern": "^oproj_[a-z0-9][a-z0-9_-]{7,63}$"},
+        "project_policy_revision_ref": {"$ref": "#/$defs/ProjectPolicyRevisionRef"},
+        "lead_control_id": {"type": "string", "pattern": "^olcontrol_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "interval_seconds": {"type": "integer", "minimum": 1},
+        "upper_bound_seconds": {"type": "integer", "minimum": 1}
+      },
       "additionalProperties": false
     },
     "ProtectedChangeEnvelope": {
@@ -243,6 +496,16 @@
         "decision": {"const": "approved"},
         "issued_at": {"type": "string", "minLength": 1},
         "envelope_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "ExactTaskRef": {
+      "type": "object",
+      "required": ["task_id", "task_revision_id", "content_digest"],
+      "properties": {
+        "task_id": {"type": "string", "pattern": "^otask_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "task_revision_id": {"type": "string", "pattern": "^trev_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
       },
       "additionalProperties": false
     },
@@ -335,7 +598,49 @@
             "additionalProperties": false
           }
         },
+        "orchestration_policy": {"$ref": "#/$defs/OrchestrationPolicy"},
         "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "OrchestrationPolicy": {
+      "type": "object",
+      "required": ["wall_clock_fallback", "test_budget"],
+      "properties": {
+        "wall_clock_fallback": {
+          "type": "object",
+          "required": ["interval_seconds", "upper_bound_seconds"],
+          "properties": {
+            "interval_seconds": {"type": "integer", "minimum": 1},
+            "upper_bound_seconds": {"type": "integer", "minimum": 1}
+          },
+          "additionalProperties": false
+        },
+        "test_budget": {
+          "type": "object",
+          "required": ["work_unit_lineage", "task_lineage"],
+          "properties": {
+            "work_unit_lineage": {"$ref": "#/$defs/TestBudgetScope"},
+            "task_lineage": {"$ref": "#/$defs/TestBudgetScope"}
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false
+    },
+    "TestBudgetScope": {
+      "type": "object",
+      "required": [
+        "default_test_count",
+        "default_test_code_lines",
+        "lead_ceiling_test_count",
+        "lead_ceiling_test_code_lines"
+      ],
+      "properties": {
+        "default_test_count": {"type": "integer", "minimum": 0},
+        "default_test_code_lines": {"type": "integer", "minimum": 0},
+        "lead_ceiling_test_count": {"type": "integer", "minimum": 0},
+        "lead_ceiling_test_code_lines": {"type": "integer", "minimum": 0}
       },
       "additionalProperties": false
     }

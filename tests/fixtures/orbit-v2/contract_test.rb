@@ -38,6 +38,7 @@ module OrbitV2ContractTest
     test_slice2_control_increment1
     test_slice2_control_increment2
     test_slice2_control_increment3
+    test_slice2_control_increment4
     test_slice1_retry_does_not_invalidate_dispatch
     test_authority_graph_regressions
     test_policy_issuance_and_stale_authority_regressions
@@ -560,6 +561,477 @@ module OrbitV2ContractTest
     )
   end
 
+  # Increment 4: anomaly/fuse/budget machinery completing Slice 2. Focused
+  # hand-written scenarios for the high-risk public seams (LeadControl.reconcile
+  # and the accepted-checkpoint validator); structural missing/type/null/unknown
+  # permutations stay with schema parity.
+  def test_slice2_control_increment4
+    reconcile_of = lambda do |bundle, checkpoint|
+      {
+        "bundle" => bundle,
+        "lead_control_id" => OrbitV2FixtureFactory::CONTROL_ID,
+        "lead_checkpoint_ref" => OrbitV2FixtureFactory.cp_ref(checkpoint)
+      }
+    end
+
+    # 1. Retry fuse happy path: two same-fingerprint failures are recorded
+    #    with separate supporting provenance and an ordered prior chain; the
+    #    second-failure checkpoint stops at needs_user; the provider-verified
+    #    task.retry.override (authorized against the second-failure
+    #    checkpoint, consumed by the later dispatch checkpoint) resumes the
+    #    third dispatch on authority_change.
+    bundle = OrbitV2FixtureFactory.retry_fuse_bundle(override: true)
+    assert(validator.validate(bundle).empty?, "retry override authorizes the third same-fingerprint dispatch")
+
+    # 2. Without the override the third same-fingerprint dispatch is
+    #    needs_user (never frozen, never an automatic continue); a forged
+    #    dispatch decision on the needs_user checkpoint fails decision
+    #    replay.
+    bundle = OrbitV2FixtureFactory.retry_fuse_bundle(override: false)
+    assert(validator.validate(bundle).empty?, "needs_user second-failure checkpoint is accepted")
+    second_failure = bundle["lead_checkpoints"].find do |candidate|
+      candidate["lead_checkpoint_id"] == "olcheckpoint_fuseterminal_two"
+    end
+    decision = Orbit::V2::LeadControl.reconcile(reconcile_of.call(bundle, second_failure), "attempt_terminal")
+    assert(decision["state"] == "needs_user", "third same-fingerprint without override is needs_user")
+    forged = OrbitV2FixtureFactory.deep_copy(bundle)
+    forged_cp = forged["lead_checkpoints"].find do |candidate|
+      candidate["lead_checkpoint_id"] == "olcheckpoint_fuseterminal_two"
+    end
+    forged_cp["lead_decision"] = {
+      "state" => "blocked", "action" => "dispatch", "reason" => "self-reported"
+    }
+    forged_cp["next_trigger"] = {
+      "event" => "attempt_created", "reason" => "Self-reported continuation."
+    }
+    forged["lead_checkpoints"][forged["lead_checkpoints"].index(forged_cp)] =
+      OrbitV2FixtureFactory.digested(forged_cp)
+    codes = validator.validate(forged).map(&:code)
+    assert(
+      codes.include?("checkpoint_decision_replay_invalid"),
+      "forged third dispatch without user authority fails replay"
+    )
+    recovery = Orbit::V2::LeadControl.reconcile(reconcile_of.call(bundle, second_failure), "recovery")
+    assert(
+      recovery == decision,
+      "recovery re-runs the needs_user pipeline and never thaws it"
+    )
+
+    # HIGH 4: a retry override issued under a policy that is not the exact
+    # active policy of the consuming checkpoint (rotation/revocation) fails
+    # closed at consumption.
+    stale_policy = OrbitV2FixtureFactory.retry_fuse_bundle(override: true)
+    stale_record = stale_policy["authorization_records"].find do |candidate|
+      candidate["authorization_record_id"] == "oauthz_retryoverride"
+    end
+    stale_record["project_policy_revision_id"] = "opolicy_revokedpolicy"
+    stale_policy["authorization_records"][stale_policy["authorization_records"].index(stale_record)] =
+      OrbitV2FixtureFactory.digested(stale_record)
+    assert(
+      validator.validate(stale_policy).any? { |error| error.code == "checkpoint_retry_override_invalid" },
+      "a retry override from a non-active policy fails closed at consumption"
+    )
+
+    # 3. Fingerprint identity/provenance fail-closed: a non-recomputable
+    #    fingerprint, a prior-chain gap, a fingerprint recorded without a
+    #    failure, and a failure recorded without any fingerprint are all
+    #    rejected; the same stable identity in a different Attempt/outcome
+    #    record must never be treated as a new failure.
+    bundle = OrbitV2FixtureFactory.retry_fuse_bundle(override: false, forged_fingerprint: "sha256:#{'0' * 64}")
+    assert(
+      validator.validate(bundle).any? { |error| error.code == "checkpoint_fingerprint_invalid" },
+      "non-recomputable fingerprint fails closed"
+    )
+    bundle = OrbitV2FixtureFactory.retry_fuse_bundle(override: false, gap_chain: true)
+    assert(
+      validator.validate(bundle).any? { |error| error.code == "checkpoint_fingerprint_invalid" },
+      "prior chain gap fails closed"
+    )
+    bundle = OrbitV2FixtureFactory.retry_fuse_bundle(override: false, fingerprint_without_failure: true)
+    assert(
+      validator.validate(bundle).any? { |error| error.code == "checkpoint_fingerprint_invalid" },
+      "fingerprint without a failure pin fails closed"
+    )
+    bundle = OrbitV2FixtureFactory.retry_fuse_bundle(override: false, omit_fingerprint: true)
+    assert(
+      validator.validate(bundle).any? { |error| error.code == "checkpoint_fingerprint_invalid" },
+      "failed round without provable fingerprint fails closed"
+    )
+    # A real failure signal with agent-changed strings must fail: the
+    # fingerprint basis must byte-equal the trusted terminal failure signal
+    # recorded on the AttemptFailed event itself.
+    bundle = OrbitV2FixtureFactory.retry_fuse_bundle(override: false)
+    forged_signal_cp = bundle["lead_checkpoints"].find do |candidate|
+      candidate["lead_checkpoint_id"] == "olcheckpoint_fuseterminal_two"
+    end
+    forged_signal_cp["fingerprint_identity_basis"]["stable_signal_identity"] = {
+      "test_or_check_id" => "agent-invented-test",
+      "signal_subject_id" => "agent-invented-subject",
+      "normalized_failure_code" => "agent-invented-code"
+    }
+    forged_signal_cp["fingerprint"] =
+      Orbit::V2::ControlAuthority.fingerprint_digest(forged_signal_cp["fingerprint_identity_basis"])
+    bundle["lead_checkpoints"][bundle["lead_checkpoints"].index(forged_signal_cp)] =
+      OrbitV2FixtureFactory.digested(forged_signal_cp)
+    assert(
+      validator.validate(bundle).any? { |error| error.code == "checkpoint_fingerprint_invalid" },
+      "an agent-invented stable signal string fails closed"
+    )
+    # An intermediate checkpoint re-pinning the same failure event with the
+    # same fingerprint counts the occurrence exactly once (dedupe by exact
+    # terminal event identity), so the second-failure chain stays [first].
+    bundle = OrbitV2FixtureFactory.retry_fuse_bundle(override: false, intermediate_repin: true)
+    assert(
+      validator.validate(bundle).empty?,
+      "re-pinned historical failure events are counted once per occurrence"
+    )
+    # A provider-written terminal failure event is immutable; the trusted
+    # failure_signal is its only fingerprint anchor, so it must be REQUIRED
+    # on AttemptFailed/AttemptBlocked. A correctly signed terminal failure
+    # without the signal (even unobserved by any checkpoint) fails closed at
+    # the schema.
+    bundle = OrbitV2FixtureFactory.valid_bundle
+    review = bundle["work_unit_attempts"].find do |candidate|
+      candidate["attempt_id"] == "oattempt_independentreview"
+    end
+    review["events"] << OrbitV2FixtureFactory.event(
+      "oevent_signallessfailure",
+      "AttemptFailed",
+      review.dig("events", 0, "event_digest"),
+      "ended_at" => "2026-07-30T02:00:00Z",
+      "status" => "failed"
+    )
+    assert(
+      validator.validate(bundle).any? { |error| error.code == "contract_shape_invalid" },
+      "a signed terminal failure without the trusted failure_signal is rejected"
+    )
+
+    # The compound bypass: mutate ONLY basis.failure_code to a new agent
+    # value, recompute the fingerprint, clear the prior chain, drop the
+    # override ref, and use a legal successor_before trigger; the trusted
+    # terminal failure_signal stays byte-equal to stable_signal_identity.
+    # The failure_code binding must reject the minted fingerprint.
+    bundle = OrbitV2FixtureFactory.retry_fuse_bundle(override: true)
+    third = bundle["lead_checkpoints"].find do |candidate|
+      candidate["lead_checkpoint_id"] == "olcheckpoint_fusethird_dispatch"
+    end
+    index = bundle["lead_checkpoints"].index(third)
+    forged = OrbitV2FixtureFactory.deep_copy(third)
+    forged["fingerprint_identity_basis"]["failure_code"] = "agent-invented-code"
+    forged["fingerprint"] =
+      Orbit::V2::ControlAuthority.fingerprint_digest(forged["fingerprint_identity_basis"])
+    forged["fingerprint_supporting_provenance"]["prior_attempt_chain"] = []
+    forged.delete("retry_override_ref")
+    forged["reconcile_trigger"] = {
+      "event" => "successor_before", "reason" => "Legal successor boundary."
+    }
+    forged = OrbitV2FixtureFactory.digested(forged)
+    bundle["lead_checkpoints"][index] = forged
+    observation = bundle["lead_checkpoints"][index + 1]
+    observation["predecessor_lead_checkpoint_ref"] = OrbitV2FixtureFactory.cp_ref(forged)
+    %w[delivery_progress assurance_progress].each do |field|
+      observation[field]["predecessor_lead_checkpoint_ref"] = OrbitV2FixtureFactory.cp_ref(forged)
+    end
+    fusethree = bundle["work_unit_attempts"].find do |candidate|
+      candidate["attempt_id"] == "oattempt_fuseattemptthree"
+    end
+    resolution = bundle["rule_resolution_artifacts"].find do |candidate|
+      candidate["resolution_id"] ==
+        fusethree.dig("events", 0, "assignment", "assigned_rule_resolution_id")
+    end
+    bundle["lead_checkpoints"][index + 1] = OrbitV2FixtureFactory.reseal_checkpoint(
+      observation,
+      policy: bundle["project_policy_revisions"].first,
+      predecessor_checkpoint: forged,
+      attempt: fusethree,
+      resolution: resolution
+    )
+    fusethree["dispatch_lead_checkpoint_ref"] = OrbitV2FixtureFactory.cp_ref(forged)
+    assert(
+      validator.validate(bundle).any? { |error| error.code == "checkpoint_fingerprint_invalid" },
+      "mutating only the fingerprint failure_code cannot mint a new fingerprint for the same real failure"
+    )
+
+    # 4. Wall-clock fallback: only the exact active policy (or a
+    #    policy-authorized record) may pin the finite fallback, the timer is
+    #    scheduled only as checkpoint_due, and checkpoint_due can only be
+    #    produced by the exact scheduled lineage predecessor.
+    bundle = OrbitV2FixtureFactory.fallback_bundle
+    assert(validator.validate(bundle).empty?, "scheduled fallback and timer round are accepted")
+    bundle = OrbitV2FixtureFactory.fallback_bundle(bad_fallback: true)
+    assert(
+      validator.validate(bundle).any? { |error| error.code == "checkpoint_fallback_invalid" },
+      "unresolvable fallback authorization record fails closed"
+    )
+    bundle = OrbitV2FixtureFactory.fallback_bundle(missing_schedule: true)
+    assert(
+      validator.validate(bundle).any? { |error| error.code == "checkpoint_trigger_invalid" },
+      "checkpoint_due without an exact scheduled predecessor fails closed"
+    )
+    bundle = OrbitV2FixtureFactory.fallback_bundle(unpinned_policy: true)
+    assert(
+      validator.validate(bundle).any? { |error| error.code == "checkpoint_fallback_invalid" },
+      "fallback pinned to a stale policy digest fails closed"
+    )
+    bundle = OrbitV2FixtureFactory.fallback_bundle(deadline_drift: true)
+    assert(
+      validator.validate(bundle).any? { |error| error.code == "checkpoint_fallback_invalid" },
+      "a self-reported or drifted deadline fails closed (deadline must derive from the trusted basis plus the exact interval)"
+    )
+    bundle = OrbitV2FixtureFactory.fallback_bundle(early_due: true)
+    assert(
+      validator.validate(bundle).any? { |error| error.code == "checkpoint_trigger_invalid" },
+      "a checkpoint_due observation recorded before the scheduled deadline fails closed"
+    )
+    bundle = OrbitV2FixtureFactory.fallback_bundle(unrelated_basis: true)
+    assert(
+      validator.validate(bundle).any? { |error| error.code == "checkpoint_fallback_invalid" },
+      "a schedule basis event not yet pinned by the schedule checkpoint or a strict lineage ancestor fails closed"
+    )
+    bundle = OrbitV2FixtureFactory.fallback_bundle
+    due = bundle["lead_checkpoints"].find do |candidate|
+      candidate["lead_checkpoint_id"] == "olcheckpoint_fallbackdue"
+    end
+    review = bundle["work_unit_attempts"].find { |c| c["attempt_id"] == "oattempt_independentreview" }
+    terminal = review["events"].last
+    due["checkpoint_due_observation_ref"] = {
+      "kind" => "attempt_event",
+      "id" => review["attempt_id"],
+      "event_id" => terminal["event_id"],
+      "digest" => terminal["event_digest"]
+    }
+    bundle["lead_checkpoints"][bundle["lead_checkpoints"].index(due)] =
+      OrbitV2FixtureFactory.digested(due)
+    assert(
+      !validator.validate(bundle).empty?,
+      "an ordinary lifecycle event can never act as the timer due receipt"
+    )
+
+    # 5. Verified budget overrun: mechanical overrun is derived ONLY from
+    #    verified measurements; over the effective ceiling without an
+    #    override it is needs_user, and the override raises the ceiling that
+    #    is then enforced mechanically.
+    bundle = OrbitV2FixtureFactory.budget_override_bundle(mode: :overrun)
+    dispatch = bundle["lead_checkpoints"].find do |candidate|
+      candidate["lead_checkpoint_id"] == "olcheckpoint_dispatch_implone"
+    end
+    decision = Orbit::V2::LeadControl.reconcile(reconcile_of.call(bundle, dispatch), "attempt_terminal")
+    assert(decision["state"] == "needs_user", "verified overrun without override is needs_user")
+    assert(
+      validator.validate(bundle).any? { |error| error.code == "checkpoint_decision_replay_invalid" },
+      "a stored dispatch decision on a verified overrun fails replay"
+    )
+    bundle = OrbitV2FixtureFactory.budget_override_bundle(mode: :override)
+    assert(validator.validate(bundle).empty?, "consumed override keeps the verified usage within the raised ceiling")
+    # Usage tamper: the attestation binds the exact usage; a self-reported
+    # numeric change diverges from the attested scope and fails closed.
+    tampered = OrbitV2FixtureFactory.deep_copy(bundle)
+    tampered_dispatch = tampered["lead_checkpoints"].find do |candidate|
+      candidate["lead_checkpoint_id"] == "olcheckpoint_dispatch_implone"
+    end
+    tampered_dispatch["effective_budget_bindings"][0]["measurements"]["test_count"]["usage"] = 13
+    tampered["lead_checkpoints"][tampered["lead_checkpoints"].index(tampered_dispatch)] =
+      OrbitV2FixtureFactory.digested(tampered_dispatch)
+    assert(
+      validator.validate(tampered).any? { |error| error.code == "checkpoint_budget_invalid" },
+      "a usage tampered away from the attested scope fails closed"
+    )
+    bundle = OrbitV2FixtureFactory.budget_override_bundle(mode: :override, usage_count: 25, usage_lines: 700)
+    decision = Orbit::V2::LeadControl.reconcile(
+      reconcile_of.call(bundle, bundle["lead_checkpoints"].find { |c| c["lead_checkpoint_id"] == "olcheckpoint_dispatch_implone" }),
+      "attempt_terminal"
+    )
+    assert(decision["state"] == "needs_user", "usage over even the override ceiling stays needs_user")
+
+    # 6. test.budget.override consume|inherit: a record is consumed by
+    #    exactly one origin checkpoint; later checkpoints inherit only along
+    #    the continuous accepted lineage; a second consume and a skipped
+    #    origin fail closed.
+    bundle = OrbitV2FixtureFactory.budget_override_bundle(mode: :second_consume)
+    assert(
+      validator.validate(bundle).any? { |error| error.code == "checkpoint_budget_invalid" },
+      "a second consume of the same override record fails closed"
+    )
+    bundle = OrbitV2FixtureFactory.budget_override_bundle(mode: :inherit)
+    assert(validator.validate(bundle).empty?, "override inheritance along the continuous lineage is accepted")
+    bundle = OrbitV2FixtureFactory.budget_override_bundle(mode: :inherit_gap)
+    assert(
+      validator.validate(bundle).any? { |error| error.code == "checkpoint_budget_invalid" },
+      "override inherit skipping the origin fails closed"
+    )
+
+    # The task_lineage override binds the canonical null WorkUnit ref; it is
+    # constructible and never implies a relaxed WorkUnit-lineage binding
+    # (the two layers derive independently).
+    bundle = OrbitV2FixtureFactory.budget_override_bundle(
+      mode: :override, scope: "task_lineage", usage_count: 8, usage_lines: 200
+    )
+    assert(validator.validate(bundle).empty?, "task_lineage override with canonical null WorkUnit ref is accepted")
+    task_dispatch = bundle["lead_checkpoints"].find do |candidate|
+      candidate["lead_checkpoint_id"] == "olcheckpoint_dispatch_implone"
+    end
+    wu_binding = task_dispatch["effective_budget_bindings"].first
+    assert(
+      wu_binding["source_kind"] == "policy_default" &&
+        wu_binding["effective_test_count"] == 10,
+      "a task_lineage override never relaxes the work_unit_lineage binding"
+    )
+    # Cross-scope replay: the work_unit binding consuming the task_lineage
+    # record fails closed.
+    bundle = OrbitV2FixtureFactory.budget_override_bundle(mode: :second_consume, scope: "task_lineage")
+    assert(
+      validator.validate(bundle).any? { |error| error.code == "checkpoint_budget_invalid" },
+      "a work_unit binding replaying the task_lineage override fails closed"
+    )
+    # A typed AuthorizationRecord action must carry exactly its own envelope:
+    # a budget override record with an extra retry envelope fails closed.
+    bundle = OrbitV2FixtureFactory.budget_override_bundle(mode: :override)
+    record = bundle["authorization_records"].find do |candidate|
+      candidate["authorization_record_id"] == "oauthz_budgetoverride"
+    end
+    record["retry_override_envelope"] = {
+      "scope_digest" => "sha256:#{'d' * 64}",
+      "project_id" => OrbitV2FixtureFactory::PROJECT_ID,
+      "task_ref" => record.dig("budget_override_envelope", "task_ref"),
+      "work_unit_ref" => record.dig("budget_override_envelope", "work_unit_ref"),
+      "fingerprint" => "sha256:#{'e' * 64}",
+      "prior_attempt_chain" => [],
+      "authorizing_checkpoint_ref" => record.dig("budget_override_envelope", "authorizing_checkpoint_ref"),
+      "lead_control_id" => OrbitV2FixtureFactory::CONTROL_ID
+    }
+    bundle["authorization_records"][bundle["authorization_records"].index(record)] =
+      OrbitV2FixtureFactory.digested(record)
+    assert(
+      !validator.validate(bundle).empty?,
+      "a typed action record with an extra typed envelope fails closed"
+    )
+
+    # 7. In-ceiling test.budget.adjust: the typed payload canonicalizes to
+    #    budget_adjustment_digest (no checkpoint self-reference, no
+    #    measurement tuple) and the derived binding carries the absolute
+    #    requested ceilings; above the lead ceiling, a forged digest, and an
+    #    absent-adjustment fake digest fail closed.
+    bundle = OrbitV2FixtureFactory.adjustment_bundle
+    assert(validator.validate(bundle).empty?, "in-ceiling lead adjustment is accepted inside the delegation envelope")
+    bundle = OrbitV2FixtureFactory.adjustment_bundle(mode: :over_ceiling)
+    assert(
+      validator.validate(bundle).any? { |error| error.code == "checkpoint_budget_invalid" },
+      "adjustment above the policy lead ceiling fails closed"
+    )
+    bundle = OrbitV2FixtureFactory.adjustment_bundle(mode: :forged_digest)
+    assert(
+      validator.validate(bundle).any? { |error| error.code == "checkpoint_budget_invalid" },
+      "budget_adjustment_digest must match the typed payload"
+    )
+    bundle = OrbitV2FixtureFactory.adjustment_bundle(mode: :absent_digest)
+    assert(
+      validator.validate(bundle).any? { |error| error.code == "checkpoint_budget_invalid" },
+      "an adjustment digest without any payload is explicitly absent, never forged"
+    )
+    # Slice 2 phase boundary: default dispatch may proceed unverified/pending,
+    # but a lead_adjustment may never rest on unverified numbers — the
+    # adjusted scope must carry provider-attested verified measurements.
+    bundle = OrbitV2FixtureFactory.adjustment_bundle(mode: :unverified_adjust)
+    assert(
+      validator.validate(bundle).any? { |error| error.code == "checkpoint_budget_invalid" },
+      "a pending (unverified) budget adjustment fails closed in Slice 2"
+    )
+
+    # 8. Measurement canonical shape: unverified measurements require
+    #    canonical nulls plus the typed pending assessment; pending cannot
+    #    carry a review ref and accepted/rejected depend on the Slice 4
+    #    independent budget assessment consumer (fail closed in Slice 2).
+    pending_assessment = OrbitV2FixtureFactory.unverified_pending_measurements.fetch("test_count")
+      .fetch("unverified_assessment")
+    unverified_with_usage = {
+      "test_count" => {
+        "status" => "unverified", "usage" => 5, "source_ref" => nil,
+        "unverified_assessment" => pending_assessment
+      },
+      "test_code_lines" => {
+        "status" => "unverified", "usage" => nil, "source_ref" => nil,
+        "unverified_assessment" => pending_assessment
+      }
+    }
+    pending_with_ref = OrbitV2FixtureFactory.deep_copy(pending_assessment)
+    pending_with_ref["review_gate_evaluation_ref"] = {
+      "gate_evaluation_id" => "ogeval_slice0review",
+      "content_digest" => OrbitV2FixtureFactory.digest_for("review")
+    }
+    unverified_with_ref = OrbitV2FixtureFactory.deep_copy(unverified_with_usage)
+    unverified_with_ref["test_count"]["usage"] = nil
+    unverified_with_ref["test_count"]["unverified_assessment"] = pending_with_ref
+    accepted = OrbitV2FixtureFactory.deep_copy(pending_assessment)
+    accepted["lead_disposition"] = "proceed_after_independent_review"
+    accepted["review_status"] = "accepted"
+    accepted["review_gate_evaluation_ref"] = {
+      "gate_evaluation_id" => "ogeval_slice0review",
+      "content_digest" => OrbitV2FixtureFactory.digest_for("review")
+    }
+    unverified_accepted = OrbitV2FixtureFactory.deep_copy(unverified_with_usage)
+    unverified_accepted["test_count"]["usage"] = nil
+    unverified_accepted["test_count"]["unverified_assessment"] = accepted
+    [
+      [unverified_with_usage, "unverified measurement with a numeric usage"],
+      [unverified_with_ref, "pending review carrying a review ref"],
+      [unverified_accepted, "Slice 4 accepted review state"]
+    ].each do |measurements, label|
+      bundle = OrbitV2FixtureFactory.budget_override_bundle(mode: :overrun)
+      dispatch = bundle["lead_checkpoints"].find do |candidate|
+        candidate["lead_checkpoint_id"] == "olcheckpoint_dispatch_implone"
+      end
+      index = bundle["lead_checkpoints"].index(dispatch)
+      resealed = OrbitV2FixtureFactory.reseal_checkpoint(
+        dispatch,
+        policy: bundle["project_policy_revisions"].first,
+        predecessor_checkpoint: bundle["lead_checkpoints"][index - 1],
+        measurements: measurements
+      )
+      bundle["lead_checkpoints"][index] = resealed
+      assert(
+        validator.validate(bundle).any? { |error| error.code == "checkpoint_budget_invalid" },
+        "#{label} fails closed"
+      )
+    end
+
+    # Measurement scope replay: a task_lineage metric referencing the
+    # work_unit_lineage attestation diverges from its canonical null WorkUnit
+    # scope and fails closed.
+    bundle = OrbitV2FixtureFactory.budget_override_bundle(mode: :overrun)
+    dispatch = bundle["lead_checkpoints"].find do |candidate|
+      candidate["lead_checkpoint_id"] == "olcheckpoint_dispatch_implone"
+    end
+    dispatch["effective_budget_bindings"][1]["measurements"]["test_count"]["source_ref"] = {
+      "kind" => "measurement_attestation",
+      "id" => "oassert_measurement_work_unit_lineage_test_count",
+      "digest" => bundle["authority_assertions"].find do |candidate|
+        candidate["assertion_id"] == "oassert_measurement_work_unit_lineage_test_count"
+      end["assertion_digest"]
+    }
+    bundle["lead_checkpoints"][bundle["lead_checkpoints"].index(dispatch)] =
+      OrbitV2FixtureFactory.digested(dispatch)
+    assert(
+      validator.validate(bundle).any? { |error| error.code == "checkpoint_budget_invalid" },
+      "a task_lineage metric replaying the work_unit attestation fails closed"
+    )
+
+    # 9. One-way digest chain: every stored plan/closure digest must be
+    #    recomputable byte-identical from the ordered bindings and frozen
+    #    dispatch-time refs; binding order is canonical.
+    %i[plan_digest basis_digest].each do |mutation|
+      bundle = OrbitV2FixtureFactory.digest_chain_mutation_bundle(mutation)
+      assert(
+        validator.validate(bundle).any? { |error| error.code == "checkpoint_digest_invalid" },
+        "#{mutation} mutation fails closed"
+      )
+    end
+    bundle = OrbitV2FixtureFactory.digest_chain_mutation_bundle(:binding_order)
+    assert(
+      validator.validate(bundle).any? { |error| error.code == "checkpoint_budget_invalid" },
+      "binding order mutation fails closed"
+    )
+  end
+
   # Increment 3: cross-lineage closure and exact release/acquire + executor
   # transfer provenance, one minimal two-lineage fixture with small mutations.
   # Structural permutations stay with schema parity; different projects are
@@ -872,6 +1344,18 @@ module OrbitV2ContractTest
     successor_record = successor.fetch("evidence_records").first
     successor_record.dig("implementation_check")["change_thesis_ref"] = thesis_ref
     rehash(successor_record)
+    # The dispatch checkpoint froze the proposed successor thesis at dispatch
+    # time; the same-lineage successor revision must be proposed there too
+    # for the AttemptCreated assignment to exact match.
+    dispatch_cp = successor["lead_checkpoints"].find do |candidate|
+      candidate["lead_checkpoint_id"] == "olcheckpoint_dispatch_implone"
+    end
+    Array(dispatch_cp.dig("delivery_progress", "supporting_refs")).each do |ref|
+      next unless ref["kind"] == "change_thesis"
+
+      ref["id"] = thesis_ref["change_thesis_id"]
+      ref["digest"] = thesis_ref["content_digest"]
+    end
     rebind_checkpoint_refs(successor)
     refresh_evaluation_subject(successor)
     assert(
@@ -2271,7 +2755,12 @@ module OrbitV2ContractTest
         "AttemptFailed",
         completed["event_digest"],
         "ended_at" => "2026-07-30T01:01:00Z",
-        "status" => "failed"
+        "status" => "failed",
+        "failure_signal" => {
+          "test_or_check_id" => "test-orbit-contract-suite",
+          "signal_subject_id" => "signal:owu_implementationone",
+          "normalized_failure_code" => "contract-validation-failure"
+        }
       )
       attempt["events"].concat([completed, failed])
     when "agent_event_after_terminal"
@@ -3335,7 +3824,18 @@ module OrbitV2ContractTest
       bundle["authority_assertions"].find { |candidate| candidate["assertion_id"] == "oassert_controlwriter" })
     rebind["current_or_terminal_attempt_ref"] = OrbitV2FixtureFactory.attempt_event_ref(bundle["work_unit_attempts"], "oattempt_independentreview")
     %w[delivery_progress assurance_progress].each { |field| rebind[field]["predecessor_lead_checkpoint_ref"] = rebind["predecessor_lead_checkpoint_ref"] }
-    bundle["lead_checkpoints"] << OrbitV2FixtureFactory.digested(rebind)
+    attempt = bundle["work_unit_attempts"].find { |candidate| candidate["attempt_id"] == "oattempt_independentreview" }
+    resolution = bundle["rule_resolution_artifacts"].find do |candidate|
+      candidate["resolution_id"] == attempt.dig("events", 0, "assignment", "assigned_rule_resolution_id")
+    end
+    rebind = OrbitV2FixtureFactory.reseal_checkpoint(
+      rebind,
+      policy: policy,
+      predecessor_checkpoint: tip,
+      attempt: attempt,
+      resolution: resolution
+    )
+    bundle["lead_checkpoints"] << rebind
   end
 
   def reissue_genesis_policy(bundle)
@@ -3623,7 +4123,23 @@ module OrbitV2ContractTest
         checkpoint["delivery_progress"]["predecessor_lead_checkpoint_ref"] = predecessor_ref
         checkpoint["assurance_progress"]["predecessor_lead_checkpoint_ref"] = predecessor_ref
       end
-      rehash(checkpoint)
+      policy = bundle["project_policy_revisions"].find do |candidate|
+        candidate["policy_revision_id"] == checkpoint.dig("project_policy_revision_ref", "policy_revision_id")
+      end
+      pinned_attempt = (ref = checkpoint["current_or_terminal_attempt_ref"]) && attempts[ref["attempt_id"]]
+      resolution = pinned_attempt && bundle["rule_resolution_artifacts"].find do |candidate|
+        candidate["resolution_id"] ==
+          pinned_attempt.dig("events", 0, "assignment", "assigned_rule_resolution_id")
+      end
+      resealed = OrbitV2FixtureFactory.reseal_checkpoint(
+        checkpoint,
+        policy: policy,
+        predecessor_checkpoint: index.positive? ? bundle["lead_checkpoints"][index - 1] : nil,
+        attempt: pinned_attempt,
+        resolution: resolution
+      )
+      bundle["lead_checkpoints"][index] = resealed
+      checkpoint = resealed
     end
     checkpoints = bundle["lead_checkpoints"].to_h { |cp| [cp["lead_checkpoint_id"], cp] }
     bundle["work_unit_attempts"].each do |attempt|

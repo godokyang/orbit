@@ -416,7 +416,7 @@
             "recorded_at",
             "writer_receipt",
             "status"
-          ],
+          , "failure_signal"],
           "properties": {
             "event_id": {"type": "string", "pattern": "^oevent_[a-z0-9][a-z0-9_-]{7,95}$"},
             "event_type": {"const": "AttemptFailed"},
@@ -426,6 +426,7 @@
             "recorded_at": {"type": "string", "minLength": 1},
             "writer_receipt": {"$ref": "#/$defs/LifecycleWriterReceipt"},
             "status": {"const": "failed"},
+            "failure_signal": {"$ref": "#/$defs/FailureSignal"},
             "reason": {"type": "string", "minLength": 1}
           },
           "additionalProperties": false
@@ -441,7 +442,7 @@
             "recorded_at",
             "writer_receipt",
             "status"
-          ],
+          , "failure_signal"],
           "properties": {
             "event_id": {"type": "string", "pattern": "^oevent_[a-z0-9][a-z0-9_-]{7,95}$"},
             "event_type": {"const": "AttemptBlocked"},
@@ -451,6 +452,7 @@
             "recorded_at": {"type": "string", "minLength": 1},
             "writer_receipt": {"$ref": "#/$defs/LifecycleWriterReceipt"},
             "status": {"const": "blocked"},
+            "failure_signal": {"$ref": "#/$defs/FailureSignal"},
             "reason": {"type": "string", "minLength": 1}
           },
           "additionalProperties": false
@@ -506,6 +508,16 @@
           "additionalProperties": false
         }
       ]
+    },
+    "FailureSignal": {
+      "type": "object",
+      "required": ["test_or_check_id", "signal_subject_id", "normalized_failure_code"],
+      "properties": {
+        "test_or_check_id": {"type": "string", "minLength": 1},
+        "signal_subject_id": {"type": "string", "minLength": 1},
+        "normalized_failure_code": {"type": "string", "minLength": 1}
+      },
+      "additionalProperties": false
     },
     "RuntimeIdentity": {
       "type": "object",

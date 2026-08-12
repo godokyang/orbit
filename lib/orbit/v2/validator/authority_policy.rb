@@ -211,6 +211,12 @@ module Orbit
             expected_scope =
               if authorization["action"] == "task.protected_contract.change"
                 authorization.dig("protected_change_envelope", "protected_change_digest")
+              elsif authorization["action"] == ControlAuthority::RETRY_OVERRIDE_ACTION
+                authorization.dig("retry_override_envelope", "scope_digest")
+              elsif authorization["action"] == ControlAuthority::BUDGET_OVERRIDE_ACTION
+                authorization.dig("budget_override_envelope", "scope_digest")
+              elsif authorization["action"] == ControlAuthority::FALLBACK_AUTHORIZE_ACTION
+                authorization.dig("fallback_envelope", "scope_digest")
               elsif TaskAuthority.action?(authorization["action"]) ||
                     WorkAuthority.action?(authorization["action"])
                 authorization["subject_ref"]

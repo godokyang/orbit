@@ -303,7 +303,7 @@ New invariant families:
 | Progress judgment | `change` is not_assessed iff measured terminal ref is null; measured rounds pin an exact terminal event, delivery/assurance measured refs agree; substantive kinds require matching exact supporting refs; stop-loss only on measured terminal rounds | LeadControl |
 | Session lineage | exactly one root per control; exact predecessor terminal event pin with generation; single successor, no fork/cycle; successor starts at/after prior terminal; the unique active session is the lineage tip | LeadControl |
 | Same-failure fuse | pinned failed/blocked event with chain length >= 2 freezes the successor (fingerprint unprovable); completed/cancelled never trigger it; zero-delivery fuses walk distinct-terminal rounds only | LeadControl |
-| Dispatch observation | the exact AttemptCreated observation checkpoint is the immediate accepted successor of the Attempt's dispatch checkpoint, reconciles on attempt_created, and pins that exact AttemptCreated event; intervening checkpoints and non-tip dispatch refs fail closed | LeadControl |
+| Dispatch observation | the exact AttemptCreated observation checkpoint is the immediate accepted successor of the Attempt's dispatch checkpoint, reconciles on attempt_created, and pins that exact AttemptCreated event; intervening checkpoints and non-tip dispatch refs fail closed; every dispatch checkpoint pins exactly one proposed ChangeThesis and one RuleResolution in its supporting provenance, the plan/closure digests derive from them, and the AttemptCreated assignment must exact match — a generic nil basis is never a legal dispatch | LeadControl |
 | Registry create-only | the registry carries no active-session pointer; genesis exact-pins the initial session and the current active session derives from the unique lineage tip plus session lineage | LeadControl |
 | Substantive delta | a claimed thesis/context/scope/verification-plan delta must be provable against the exact lineage predecessor projection (deterministic authoritative basis per kind; verification-plan basis is the artifact `identity_sha256`, matching supporting-ref resolution); thesis/verification-plan current basis is the single exact proposed successor ref in the authorizing checkpoint's provenance compared to the predecessor's effective basis (ADR-006 redirection: the successor Attempt does not exist yet, so zero/multiple proposals fail closed and the later AttemptCreated assignment must match); a checkpoint-level cardinality invariant rejects more than one change_thesis or rule_resolution ref (distinct or repeated identical — supporting refs have no uniqueness rule) regardless of trigger/progress/action; a merely resolvable supporting ref is never evidence; a kind without a basis fails closed | LeadControl |
 | Change-trigger delta | session/task-revision/scope/thesis/finding/gate/context/authority/dependency change triggers are never accepted from the enum alone: the exact authoritative projection must differ from the exact lineage predecessor. Finding delta is proven only by a new exact `finding` ref in the checkpoint's supporting provenance (assessment layers + progress); gate delta only by a new exact `gate_evaluation` ref; thesis_change delta is the single exact proposed successor `change_thesis` ref compared to the predecessor's effective pinned thesis (ADR-006 redirection). FindingResolution and GateRequirement-record changes have no exact ref kind in Inc2 checkpoint provenance, so those subtypes fail closed rather than inventing a latest-wins projection | LeadControl |
@@ -379,6 +379,110 @@ Mutation matrix additions (all cross the public `Validator#validate` or
 | cross-control fork | one session referenced by two transfer successors | `session_binding_invalid` |
 | future acquire | acquire checkpoint positioned after the attempt's dispatch checkpoint in the lineage | `attempt_successor_invalid` |
 | forged acquire payload | acquire payload whose released checkpoint ref does not resolve | `attempt_successor_invalid` + `task_transfer_invalid` |
+
+## Slice 2 increment 4 addendum: anomaly/fuse/budget machinery
+
+Completes Slice 2 (ADR-003 decision 7/9, ADR-004 decision 7, ADR-005
+conditions 13-17, ADR-006 Amendment): policy-pinned wall-clock fallback,
+canonical failure/finding fingerprint identity with separated supporting
+provenance and prior chain, the provider-verified `task.retry.override`,
+the two-layer effective budget bindings with verified/unverified
+measurements and adjust/override consume|inherit, the one-way
+`budget_adjustment_digest -> effective_budget_bindings ->
+effective_verification_plan_digest -> closure_basis_digest` chain, and the
+bounded runner's four mutually exclusive stop states. Model-level
+accepted-final-state closure only; compare-and-append/store atomicity
+closes at Slice 6 activation.
+
+New frozen shapes:
+
+```yaml
+project_policy_revision:
+  orchestration_policy:
+    wall_clock_fallback: { interval_seconds, upper_bound_seconds }  # finite, non-zero
+    test_budget: { work_unit_lineage: TestBudgetScope, task_lineage: TestBudgetScope }
+  TestBudgetScope: { default_test_count, default_test_code_lines,
+                     lead_ceiling_test_count, lead_ceiling_test_code_lines }
+
+authorization_record:                       # provider-verified, create-only, pre-existing
+  action: task.retry.override               # + retry_override_envelope (canonical scope digest:
+    project, TaskRevision ref, WorkUnit ref, fingerprint, ordered prior Attempt chain,
+    authorizing checkpoint ref, lead_control_id)
+  action: test.budget.override              # + budget_override_envelope (scope digest:
+    budget_scope_type, policy, project, TaskRevision, WorkUnit, authorizing predecessor
+    checkpoint ref + predecessor binding digest, absolute ceilings, lead_control_id)
+  action: control.fallback.authorize        # + fallback_envelope (project, policy, control,
+    finite interval + upper bound)
+
+lead_checkpoint:
+  effective_budget_bindings: [binding_work_unit_lineage, binding_task_lineage]  # fixed order
+  budget_adjustment_digest: sha256 | absent  # iff the typed test_budget_adjust payload exists
+  test_budget_adjust: payload | absent       # never carries the checkpoint itself or measurements
+  effective_verification_plan_digest: sha256 # derived, always pinned
+  closure_basis_digest: sha256               # frozen dispatch-time refs, always pinned
+  wall_clock_fallback: { source_kind: policy|authorization_record, deadline, source_ref } | absent
+  fingerprint_identity_basis: { canonicalization_version: orbit-fingerprint-v1, scope,
+    category: finding|test|rule|check, failure_code, finding_ref | stable_signal_identity }
+  fingerprint: sha256                       # recomputable from the identity basis only
+  fingerprint_supporting_provenance: { terminal_attempt_ref, outcome_refs,
+    authoring_checkpoint_ref, prior_attempt_chain }  # never hashed
+  retry_override_ref: authorization_record ref | absent   # consumed at the third dispatch
+```
+
+New invariant families:
+
+| Family | Closed invariant | Single owner/seam |
+| --- | --- | --- |
+| Wall-clock fallback | a checkpoint awaiting `checkpoint_due` pins the exact active policy orchestration fallback (finite non-zero interval/upper bound) or a policy-authorized `control.fallback.authorize` record; the schedule basis is the exact Attempt event already pinned by the schedule checkpoint or a strict same-control lineage ancestor (future/side/unobserved events fail closed); the deadline is never free text: it must equal the basis event's provider-recorded `recorded_at` plus the exact source interval; the timer occurrence is proven only by a provider-verified `control.checkpoint_due.observe` AuthorityAssertion whose canonical scope exact binds project/active policy/control/scheduled checkpoint ref+digest/deadline/observed_at, with asserted_at and receipt issued_at equal to observed_at >= deadline and the active policy trusting the grant — an ordinary lifecycle event never proves the timer fired; `checkpoint_due` comes only from the exact scheduled lineage predecessor | LeadControl |
+| Fingerprint identity | the ONLY fingerprint hash input is the canonical identity basis (known canonicalization version, TaskRevision/WorkUnit scope, typed category/code, stable Finding identity OR stable test/rule/check identity + signal subject + normalized failure code); fingerprint fields appear only on a failed terminal round and vice versa; the digest is byte-recomputable; the scope exact-resolves the pinned failure attempt's task/work-unit digests; the typed `failure_code` must byte-equal the trusted terminal `failure_signal.normalized_failure_code`, and a non-Finding stable signal identity must byte-equal the trusted `failure_signal` recorded on the pinned AttemptFailed/AttemptBlocked event itself (provider-verified lifecycle receipt) — changing only the code or any signal string of a real failure can never mint a new fingerprint; the trusted `failure_signal` is REQUIRED on every AttemptFailed/AttemptBlocked terminal event (an immutable failure without its only fingerprint anchor is rejected at the schema); attempt/checkpoint/session/AgentInstance/outcome identities, wording, order and paths never enter the hash | LeadControl |
+| Supporting provenance | provenance pins the exact terminal failure event, resolvable outcome refs supporting the basis (finding occurrences include the stable Finding ref), and the exact dispatch checkpoint of the failed Attempt as the non-circular authoring ref; the ordered prior attempt chain byte-equals the same-fingerprint occurrences walked across the accepted lineage (including exact transfer jumps, skipping the current occurrence and counting each terminal event identity exactly once regardless of intermediate re-pins) | LeadControl |
+| Retry override | the third same-fingerprint dispatch requires a provider-verified create-only `task.retry.override` record whose canonical scope exact binds project/TaskRevision/WorkUnit/fingerprint/ordered prior chain/authorizing checkpoint (the second-failure checkpoint)/control; consumption binds the exact ACTIVE policy the consuming checkpoint was written under (record policy == active policy + active policy grant trusted), so records issued under old or revoked policies fail closed after rotation; the record is pre-existing, consumed by exactly one checkpoint, and never appears without a pending third dispatch; a needs_user checkpoint proves the absence of authority | LeadControl |
+| Effective budget bindings | exactly two bindings in fixed `work_unit_lineage`/`task_lineage` order, each deterministically derivable from the authoritative facts with one exclusive source (`policy_default`, `lead_adjustment` current/inherited, `user_override` consume/inherit); the WorkUnit ref binds ONLY the `work_unit_lineage` scope — `task_lineage` overrides carry the canonical null and never relax the WorkUnit-lineage binding (the two layers derive independently, cross-scope replay fails closed); the adjust payload binds the exact predecessor checkpoint ref + predecessor binding digest + old/new absolute ceilings inside the policy lead ceiling and canonicalizes to `budget_adjustment_digest` (no checkpoint self-reference, no measurement tuple); an override record exact binds project/policy/task/unit/scope/authorizing predecessor/binding/ceilings/control, is consumed once, and inherits only along the continuous accepted lineage with the exact origin ref | LeadControl |
+| Measurements | `test_count`/`test_code_lines` fixed key set, each `verified` (usage >= 0 + a provider-verified `test.measurement.attest` AuthorityAssertion whose canonical scope exact binds project/active policy/TaskRevision/scope-appropriate WorkUnit ref (exact for work_unit_lineage, canonical null for task_lineage)/metric identity/usage/repository snapshot ref+digest, one assertion per metric) or `unverified` (canonical nulls + typed `unverified_assessment` with the exact pending mapping); a bare snapshot reference or a self-reported usage can never claim verified; mechanical within/over-budget derivation exists ONLY for verified metrics; default dispatch may proceed unverified/pending, but a `lead_adjustment` in effect for a scope (current or inherited) must carry provider-attested verified measurements — pending adjustment fails closed in Slice 2; accepted/rejected review states depend on the Slice 4 independent budget assessment consumer and fail closed | LeadControl |
+| One-way digest chain | `budget_adjustment_digest` (iff present) -> complete ordered `effective_budget_bindings` -> `effective_verification_plan_digest` -> `closure_basis_digest`, each recomputable byte-identical; the enclosing checkpoint identity never enters any preimage; no plan truth object exists; the closure basis freezes dispatch-time TaskRevision/WorkUnit/thesis/rule refs plus the plan digest (a terminal-dispatch checkpoint uses the proposed successor basis, an observation the pinned Attempt's actual assignment) | LeadControl |
+| Stop states | each reconcile yields exactly one of `completed/blocked/frozen/needs_user`; hard overruns needing user authority (verified budget overrun, third same-fingerprint retry without override) are `needs_user`; Lead-replannable control anomalies (zero-delivery fuses, unprovable identity) are `frozen`; recovery re-runs the tip's stored pipeline so `needs_user`/`frozen` never thaw implicitly; `checkpoint_due` and a resumed `authority_change` dispatch re-run the same dispatch authorization path | LeadControl |
+
+Mutation matrix additions (all cross the public `Validator#validate` or
+`LeadControl.reconcile` seams):
+
+| Mutation class | Representative mutation | Expected invariant/error |
+| --- | --- | --- |
+| third retry without override | second same-fingerprint failure checkpoint with a forged dispatch decision | `needs_user` + `checkpoint_decision_replay_invalid` |
+| forged fingerprint | recorded fingerprint diverges from the identity basis | `checkpoint_fingerprint_invalid` |
+| prior chain gap | second occurrence provenance chain emptied | `checkpoint_fingerprint_invalid` |
+| fingerprint on non-failure | fingerprint fields on an observation checkpoint | `checkpoint_fingerprint_invalid` |
+| failure without fingerprint | failed terminal round without identity/provenance | `checkpoint_fingerprint_invalid` |
+| fallback without pin | awaiting checkpoint_due with no wall_clock_fallback | `checkpoint_fallback_invalid` |
+| unscheduled timer | checkpoint_due reconcile without predecessor schedule | `checkpoint_trigger_invalid` |
+| stale fallback digest | fallback pin diverges from the active policy digest | `checkpoint_fallback_invalid` |
+| drifted deadline | deadline does not equal the trusted schedule basis recorded_at plus the exact interval | `checkpoint_fallback_invalid` |
+| unrelated basis | schedule basis event not pinned by the schedule checkpoint or a strict same-control ancestor | `checkpoint_fallback_invalid` |
+| early due | checkpoint_due observation assertion observed_at before the scheduled deadline | `checkpoint_trigger_invalid` |
+| lifecycle-as-due | ordinary lifecycle event ref used as the timer due receipt | schema `contract_shape_invalid` |
+| usage tamper | measurement usage diverges from the attested usage scope | `checkpoint_budget_invalid` |
+| invented signal | fingerprint stable signal strings diverge from the trusted terminal failure_signal | `checkpoint_fingerprint_invalid` |
+| invented failure code | fingerprint failure_code diverges from the trusted terminal failure_signal.normalized_failure_code (compound bypass: code change + recompute + cleared chain + dropped override + successor_before) | `checkpoint_fingerprint_invalid` |
+| signalless terminal failure | signed AttemptFailed/AttemptBlocked without the required failure_signal (unobserved event included) | schema `contract_shape_invalid` |
+| dispatch without proposal | dispatch checkpoint with zero change_thesis or rule_resolution refs | `checkpoint_proposal_missing` |
+| stale-policy retry | retry override record policy diverges from the consuming checkpoint active policy | `checkpoint_retry_override_invalid` |
+| pending adjustment | lead_adjustment binding with unverified pending measurements | `checkpoint_budget_invalid` |
+| re-pinned occurrence | intermediate checkpoint re-pins a historical failure event | valid (counted once) |
+| extra typed envelope | typed AuthorizationRecord action with a second typed envelope | schema `contract_shape_invalid` |
+| measurement scope replay | task_lineage metric references the work_unit_lineage attestation | `checkpoint_budget_invalid` |
+| task override null | task_lineage override carries a WorkUnit ref | schema/`checkpoint_budget_invalid` |
+| cross-scope replay | work_unit binding consumes the task_lineage override record | `checkpoint_budget_invalid` |
+| verified overrun | verified usage above the effective ceiling, no override | `needs_user` + replay invalid |
+| overrun past override | verified usage above even the override ceiling | `needs_user` |
+| second consume | a second checkpoint consumes the same override record | `checkpoint_budget_invalid` |
+| inherit without origin | override inherit with a nil origin ref | `checkpoint_budget_invalid` |
+| adjustment over ceiling | adjust payload `new` above the policy lead ceiling | `checkpoint_budget_invalid` |
+| forged adjustment digest | `budget_adjustment_digest` does not match the payload | `checkpoint_budget_invalid` |
+| absent-adjustment digest | digest pinned without any payload | `checkpoint_budget_invalid` |
+| unverified with usage | unverified measurement carries a numeric usage | `checkpoint_budget_invalid` |
+| pending with review ref | pending assessment carries a review ref | `checkpoint_budget_invalid` |
+| Slice 4 review state | accepted/rejected assessment before the budget GateEvaluation consumer | `checkpoint_budget_invalid` |
+| plan/basis mutation | stored effective_verification_plan_digest / closure_basis_digest diverges | `checkpoint_digest_invalid` |
+| binding order | two bindings swapped | `checkpoint_budget_invalid` |
 
 ## InvariantGraph migration ledger
 

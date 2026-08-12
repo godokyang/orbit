@@ -121,6 +121,22 @@ policy_lineage:
     authority_source: unique_exact_parent_grant
     parent_without_grant_or_parent_revocation: fail_closed
     fork_or_multiple_tip: fail_closed
+  orchestration_policy:
+    delegation_envelope: [active_policy, closure_basis, budget_ceiling, authority_scope]
+    wall_clock_fallback: finite_non_zero_interval_and_upper_bound_only
+    test_budget:
+      scopes: [work_unit_lineage, task_lineage]
+      defaults: configurable_per_scope
+      lead_ceiling: configurable_per_scope
+      repo_initial_default: ten_tests_three_hundred_lines_per_work_unit_lineage
+      not_a_schema_correctness_constant: true
+  authorization_record_actions:
+    - task.protected_contract.change
+    - task.retry.override
+    - test.budget.override
+    - control.fallback.authorize
+    - task authority delegation actions
+    - work authority actions
   issuance_envelope:
     schema_version: orbit-policy-issuance-v1
     location: provider_verified_AuthorityAssertion
@@ -610,7 +626,106 @@ lead_checkpoint:
       genesis_action: establish
       release_suspend_acquire: ownership_events_reconciled_from_typed_trigger
     next_trigger:
-      event_enum: [dispatch_before, attempt_terminal, successor_before, thesis_change, scope_change, finding_change, gate_change, task_revision_change, session_change, context_change, authority_change, dependency_change, task_release, task_suspend, task_acquire]
+      event_enum: [genesis, dispatch_before, attempt_created, attempt_terminal, successor_before, thesis_change, scope_change, finding_change, gate_change, task_revision_change, session_change, context_change, authority_change, dependency_change, task_release, task_suspend, task_acquire, checkpoint_due]
+      dispatch_outcomes:
+        dispatch: awaits_attempt_created
+        freeze: awaits_successor_before
+        escalate: awaits_authority_change
+        continue: awaits_successor_before_or_fact_change_or_checkpoint_due
+        resumed_dispatch_on_authority_change: consumes_exact_retry_override_ref
+    effective_budget_bindings:
+      exactly_two_in_fixed_order: [work_unit_lineage, task_lineage]
+      derivation: deterministic_from_authoritative_facts
+      source_kind_exclusive_per_binding: [policy_default, lead_adjustment, user_override]
+      policy_ref: exact_active_policy_pin
+      budget_adjustment_digest_iff_adjustment: true
+      adjust_payload:
+        binds: [active_policy_ref, budget_scope_type, exact_predecessor_checkpoint_ref, predecessor_binding_digest, old_and_new_absolute_ceilings, supporting_refs]
+        excludes: [enclosing_checkpoint_identity, measurement_tuple]
+        new_within_lead_ceiling: true
+        old_equals_predecessor_effective: true
+        inherited: origin_payload_matched_at_origin_ceiling_unchanged_continuous_lineage
+      user_override:
+        record_pre_existing_create_only: true
+        mode_consume: exactly_one_origin_consuming_checkpoint_matching_authorizing_predecessor_and_binding
+        mode_inherit: continuous_accepted_lineage_same_record_same_ceiling_no_superseding
+        second_consume_or_skipped_origin: fail_closed
+        work_unit_override_never_relaxes_task_total: true
+        task_override_implies_no_work_unit_override: true
+        authorization_carries_no_measurement: true
+      measurements:
+        canonical_metrics: [test_count, test_code_lines]
+        verified: usage_non_negative_plus_exact_provider_verified_measurement_attestation
+        verified_scope_binds: [project, active_policy, task_revision, work_unit_ref_by_scope, metric_identity, usage, repository_snapshot_ref_and_digest]
+        one_attestation_per_metric_and_scope: true
+        bare_snapshot_or_self_reported_usage: never_verified
+        unverified: canonical_nulls_plus_typed_unverified_assessment
+        disposition_mapping:
+          pending: proceed_pending_independent_review
+          accepted: proceed_after_independent_review
+          rejected: replan_after_independent_rejection
+        slice2_support: unverified_pending_default_dispatch_only
+        accepted_or_rejected_before_slice4_budget_assessment: fail_closed
+        mechanical_overrun_derived_only_from_verified_metrics: true
+        unverified_pending_never_derives_within_or_over: true
+    digest_chain:
+      one_way_derivation: [budget_adjustment_digest, effective_budget_bindings, effective_verification_plan_digest, closure_basis_digest]
+      budget_adjustment_digest_iff_present: true
+      plan_digest_consumes_only_complete_ordered_bindings: true
+      checkpoint_identity_never_enters_any_preimage: true
+      no_writable_plan_truth_object: true
+      closure_basis_freezes: [task_revision_ref, work_unit_ref, change_thesis_ref, assigned_rule_resolution_ref, effective_verification_plan_digest]
+      every_stored_digest_recomputable_byte_identical: true
+    wall_clock_fallback:
+      authority_sources: [exact_active_policy_orchestration_policy, policy_authorized_immutable_record]
+      checkpoint_pins_exact_source_id_and_digest: true
+      finite_non_zero_interval_and_upper_bound: true
+      schedule_basis_ref: exact_attempt_event_already_pinned_by_checkpoint_or_strict_same_control_ancestor
+      future_or_unobserved_basis: fail_closed
+      deadline_derived_from_trusted_recorded_at_plus_exact_interval: true
+      self_reported_or_drifted_deadline: fail_closed
+      timer_produces_only_checkpoint_due: true
+      checkpoint_due_only_from_exact_scheduled_predecessor: true
+      due_receipt: provider_verified_control.checkpoint_due.observe_assertion
+      due_scope_binds: [project, active_policy, lead_control_id, scheduled_checkpoint_ref_and_digest, deadline, observed_at]
+      asserted_at_and_receipt_issued_at_equal_observed_at_gte_deadline: true
+      ordinary_lifecycle_event_as_due_receipt: forbidden
+      mutable_config_or_stale_digest: fail_closed
+      store_clock_execution: slice6_activation_boundary
+    fingerprint:
+      identity_basis_only_hash_input: true
+      scope_exact_resolves_task_and_work_unit_digests: true
+      failure_signal_required_on_attempt_failed_and_attempt_blocked: true
+      signalless_terminal_failure: fail_closed
+      failure_code_byte_equal_trusted_terminal_failure_signal_normalized_code: true
+      non_finding_signal_byte_equal_trusted_terminal_failure_signal: true
+      invented_signal_strings_or_failure_code: fail_closed
+      hash_domain_excludes: [lead_control_id, attempt_and_checkpoint_and_session_identities, agent_instance, outcome_record_ids_and_digests, wording, order, paths]
+      canonicalization_version_unknown: fail_closed
+      stable_finding_identity_reused: true
+      non_finding_requires_stable_signal_identity: true
+      supporting_provenance_never_hashed: true
+      prior_chain_byte_equal_lineage_occurrences: true
+      prior_chain_used_only_for_counting_and_authorization_scope: true
+      identity_or_provenance_unprovable: freeze
+      third_same_fingerprint_dispatch:
+        requires_provider_verified_task_retry_override: true
+        scope_binds: [project, task_revision, work_unit, fingerprint, ordered_prior_chain, authorizing_checkpoint, lead_control_id]
+        work_unit_ref_bound_only_to_work_unit_lineage_scope: true
+        task_lineage_override_carries_canonical_null_work_unit_ref: true
+        task_override_never_relaxes_work_unit_lineage_binding: true
+        cross_scope_replay: fail_closed
+        absent_override: needs_user
+        second_consume_or_replay: fail_closed
+        consumption_binds_exact_active_policy_and_grant: true
+        old_or_revoked_policy_record_after_rotation: fail_closed
+    stop_states:
+      exactly_one_mutually_exclusive_state_per_reconcile: true
+      completed: gate_engine_derived_closure
+      blocked: external_non_user_facts
+      frozen: lead_replannable_control_anomalies
+      needs_user: hard_overruns_and_risk_acceptance
+      recovery_never_thaws_frozen_or_needs_user: true
     task_transfer_acquire:
       required_with_acquire_action: true
       forbidden_without_acquire_action: true
@@ -626,7 +741,10 @@ lead_checkpoint:
       unresolvable_subtype: fail_closed
   forbidden:
     - copied_task_goal_or_evidence_or_gate_truth
-    - fingerprint_budget_or_fallback_fields
+    - checkpoint_identity_inside_any_derivation_preimage
+    - agent_or_free_text_fingerprint_authority
+    - measurement_tuple_inside_any_authorization_fact
+    - writable_plan_truth_object_or_latest_wins_binding
 
 rule_resolution:
   artifact_lifecycle: create_only
