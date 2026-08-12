@@ -22,6 +22,9 @@ module OrbitV2FixtureFactory
   GATE_ID = "ogreq_slice0review"
   GATE_LINEAGE_ID = "ogline_slice0review"
   FINDING_ID = "ofinding_slice0example"
+  CONTROL_ID = "olcontrol_slice0main"
+  GENESIS_CHECKPOINT_ID = "olcheckpoint_genesis_slice0"
+  SUCCESSOR_CHECKPOINT_ID = "olcheckpoint_slice0successor"
   ROOT = File.expand_path("../../..", __dir__)
   AUTHORITY_PROVIDER_ID = "fixture.user-authority"
   LIFECYCLE_PROVIDER_ID = "fixture.lifecycle-writer"
@@ -229,6 +232,14 @@ module OrbitV2FixtureFactory
         {
           "action" => "gate.review.evaluate",
           "required_external_grant" => "gate.review.evaluate"
+        },
+        {
+          "action" => "control.genesis",
+          "required_external_grant" => "control.genesis"
+        },
+        {
+          "action" => "control.checkpoint",
+          "required_external_grant" => "control.checkpoint"
         }
       ]
     )
@@ -243,6 +254,12 @@ module OrbitV2FixtureFactory
         "oassert_findingwaiver",
         %w[finding.waive],
         "risk-owner"
+      ),
+      assertion(
+        "oassert_controlwriter",
+        %w[control.genesis control.checkpoint],
+        "control-plane-writer",
+        authority_scope_ref: CONTROL_ID
       )
     ]
     waiver = digested(
@@ -350,6 +367,45 @@ module OrbitV2FixtureFactory
     ]
     lead_sessions = [
       lead_session(logical_leads.first, agents.first)
+    ]
+    session = lead_sessions.first
+    writer_assertion = assertions[2]
+    genesis_checkpoint = lead_checkpoint(
+      GENESIS_CHECKPOINT_ID,
+      is_genesis: true,
+      predecessor_ref: nil,
+      policy: policy,
+      session: session,
+      agent: agents.first,
+      logical_lead: logical_leads.first,
+      task: task,
+      writer_action: "control.genesis",
+      writer_assertion: writer_assertion
+    )
+    successor_checkpoint = lead_checkpoint(
+      SUCCESSOR_CHECKPOINT_ID,
+      is_genesis: false,
+      predecessor_ref: ref(
+        "lead_checkpoint_id",
+        genesis_checkpoint["lead_checkpoint_id"],
+        genesis_checkpoint["content_digest"]
+      ),
+      policy: policy,
+      session: session,
+      agent: agents.first,
+      logical_lead: logical_leads.first,
+      task: task,
+      writer_action: "control.checkpoint",
+      writer_assertion: writer_assertion
+    )
+    control_registries = [
+      control_registry(
+        policy: policy,
+        genesis_checkpoint: genesis_checkpoint,
+        session: session,
+        task: task,
+        writer_assertion: writer_assertion
+      )
     ]
     attempts = []
     resolutions = []
@@ -556,6 +612,8 @@ module OrbitV2FixtureFactory
       "agent_instances" => agents,
       "logical_leads" => logical_leads,
       "lead_sessions" => lead_sessions,
+      "control_registries" => control_registries,
+      "lead_checkpoints" => [genesis_checkpoint, successor_checkpoint],
       "work_unit_attempts" => attempts,
       "rule_resolution_artifacts" => resolutions,
       "evidence_records" => evidence,
@@ -869,8 +927,96 @@ module OrbitV2FixtureFactory
       "task_revision_id" => TASK_REVISION_ID,
       "session_generation" => 1,
       "durable_context_ref" => logical_lead["durable_context_ref"],
+      "lead_control_id" => CONTROL_ID,
+      "lead_runtime_subject_ref" => agent.dig("runtime_identity", "runtime_subject_id"),
+      "lead_runtime_subject_assertion_digest" => digest_for(
+        agent.dig("runtime_identity", "verification_receipt_ref")
+      ),
       "lifecycle_events" => [lifecycle]
     }
+  end
+
+  def lead_checkpoint(
+    id,
+    is_genesis:,
+    predecessor_ref:,
+    policy:,
+    session:,
+    agent:,
+    logical_lead:,
+    task:,
+    writer_action:,
+    writer_assertion:
+  )
+    digested(
+      "schema_version" => "orbit-lead-checkpoint-v1",
+      "protocol_epoch" => "orbit-v2",
+      "project_id" => PROJECT_ID,
+      "object_type" => "lead_checkpoint",
+      "lead_checkpoint_id" => id,
+      "lead_control_id" => CONTROL_ID,
+      "is_genesis" => is_genesis,
+      "predecessor_lead_checkpoint_ref" => predecessor_ref,
+      "project_policy_revision_ref" => policy_ref(policy),
+      "lead_agent_instance_ref" => { "agent_instance_id" => agent["agent_instance_id"] },
+      "active_lead_session_ref" => {
+        "lead_session_id" => session["lead_session_id"],
+        "session_generation" => session["session_generation"]
+      },
+      "lead_runtime_subject_ref" => session["lead_runtime_subject_ref"],
+      "lead_runtime_subject_assertion_digest" => session["lead_runtime_subject_assertion_digest"],
+      "logical_lead_refs" => [
+        ref("logical_lead_id", logical_lead["logical_lead_id"], logical_lead["content_digest"])
+      ],
+      "task_queue" => [task_ref(task)],
+      "writer_authority_provenance" => writer_provenance(policy, writer_action, writer_assertion)
+    )
+  end
+
+  def control_registry(policy:, genesis_checkpoint:, session:, task:, writer_assertion:)
+    digested(
+      "schema_version" => "orbit-lead-control-registry-v1",
+      "protocol_epoch" => "orbit-v2",
+      "project_id" => PROJECT_ID,
+      "object_type" => "lead_control_registry",
+      "lead_control_id" => CONTROL_ID,
+      "genesis_checkpoint_ref" => ref(
+        "lead_checkpoint_id",
+        genesis_checkpoint["lead_checkpoint_id"],
+        genesis_checkpoint["content_digest"]
+      ),
+      "writer_authority_provenance" => writer_provenance(policy, "control.genesis", writer_assertion),
+      "owned_task_refs" => [task_ref(task)],
+      "active_lead_session_ref" => {
+        "lead_session_id" => session["lead_session_id"],
+        "session_generation" => session["session_generation"]
+      }
+    )
+  end
+
+  def writer_provenance(policy, action, assertion)
+    {
+      "policy_revision_ref" => policy_ref(policy),
+      "action" => action,
+      "assertion_ref" => assertion_ref(assertion)
+    }
+  end
+
+  def assertion_ref(assertion)
+    {
+      "assertion_id" => assertion["assertion_id"],
+      "assertion_digest" => assertion["assertion_digest"]
+    }
+  end
+
+  def policy_ref(policy)
+    ref("policy_revision_id", policy["policy_revision_id"], policy["content_digest"])
+  end
+
+  def task_ref(task)
+    ref("task_id", task["task_id"], task["content_digest"]).merge(
+      "task_revision_id" => task["task_revision_id"]
+    )
   end
 
   def attempt(

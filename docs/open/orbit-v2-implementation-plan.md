@@ -222,8 +222,8 @@ LeadControl 只消费上述 authoritative facts，并通过 `reconcile(authorita
 2. duplicate genesis（同 `lead_control_id` 第二次 genesis）—— 拒绝（`control_genesis_duplicate`）；
 3. provider assertion invalid（subject assertion 无法验证；required 字段缺失交 schema parity）—— 拒绝；
 4. writer authority invalid（自报/无 `control.genesis` grant）—— 拒绝（`control_writer_authority_invalid`）；
-5. initial task ownership/queue ref unresolved —— 拒绝；
-6. checkpoint predecessor cross-control（引用其他 control lineage 的 checkpoint）—— 拒绝（`checkpoint_lineage_invalid`）；
+5. queue ownership 按 task identity 唯一（同 task 不同 revision 的重复 owned ref）—— 拒绝（`control_task_ownership_invalid`）；unresolved exact refs 由既有 exact-ref/schema/invariant 覆盖，不另列手写场景；
+6. late Agent context / session chronology（exact generation context 事件晚于 `LeadSessionStarted`）—— 拒绝（`lead_session_invalid`）；cross-control predecessor 由 lineage invariant（same-control exact predecessor + fork/cycle）覆盖，不另列手写场景；
 7. lineage fork / multiple tip —— 拒绝（fork 为代表场景；non-tip 由同一 lineage invariant 实现，不另加低价值 case）；
 8. checkpoint session/control/subject pin mismatch —— 拒绝（`checkpoint_pin_invalid`）；
 9. active policy pin/digest mismatch —— 拒绝（`checkpoint_pin_invalid`）。

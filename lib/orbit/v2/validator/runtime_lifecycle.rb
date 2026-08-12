@@ -114,6 +114,40 @@ module Orbit
           )
         end
 
+        def validate_lead_session_agent_chronology(session, agent, started, path)
+          return unless agent && started.is_a?(Hash)
+
+          session_started_at = Time.iso8601(started.fetch("recorded_at"))
+          agent_events = Array(agent["lifecycle_events"])
+          context_event = agent_events.find do |event|
+            %w[AgentCreated AgentContextAdvanced].include?(event["event_type"]) &&
+              event["context_generation"] == session["session_generation"]
+          end
+          terminated = agent_events.find do |event|
+            event["event_type"] == "AgentTerminated"
+          end
+          active = context_event &&
+            Time.iso8601(context_event.fetch("recorded_at")) <= session_started_at &&
+            (
+              terminated.nil? ||
+              session_started_at < Time.iso8601(terminated.fetch("recorded_at"))
+            )
+          return if active
+
+          add(
+            "lead_session_invalid",
+            "LeadSessionStarted requires an active AgentInstance whose exact session generation " \
+              "context already exists at the trusted start time",
+            path
+          )
+        rescue ArgumentError, KeyError, TypeError
+          add(
+            "lead_session_invalid",
+            "LeadSession/Agent cross-stream chronology must use parseable trusted timestamps",
+            path
+          )
+        end
+
         def validate_agents(bundle)
           Array(bundle["agent_instances"]).each do |agent|
             next unless agent.is_a?(Hash)
@@ -221,6 +255,38 @@ module Orbit
                 "LeadSession start must bind its session generation to an existing Agent context",
                 "#{path}.lifecycle_events[0].context_generation"
               )
+            end
+            validate_lead_session_agent_chronology(
+              session,
+              agent,
+              started,
+              "#{path}.lifecycle_events[0].recorded_at"
+            )
+            unless @indexes.fetch("control_registries", {}).key?(session["lead_control_id"])
+              add(
+                "lead_session_invalid",
+                "LeadSession must bind an accepted control registry",
+                "#{path}.lead_control_id"
+              )
+            end
+            runtime_identity = agent && agent["runtime_identity"]
+            if runtime_identity
+              unless session["lead_runtime_subject_ref"] ==
+                     runtime_identity["runtime_subject_id"]
+                add(
+                  "lead_session_invalid",
+                  "LeadSession subject ref must equal its AgentInstance runtime subject",
+                  "#{path}.lead_runtime_subject_ref"
+                )
+              end
+              unless session["lead_runtime_subject_assertion_digest"] ==
+                     control_assertion_digest(runtime_identity["verification_receipt_ref"])
+                add(
+                  "lead_session_invalid",
+                  "LeadSession assertion digest must pin the provider-verified AgentInstance receipt",
+                  "#{path}.lead_runtime_subject_assertion_digest"
+                )
+              end
             end
           end
         end

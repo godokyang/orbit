@@ -72,6 +72,9 @@
         "task_revision_id",
         "session_generation",
         "durable_context_ref",
+        "lead_control_id",
+        "lead_runtime_subject_ref",
+        "lead_runtime_subject_assertion_digest",
         "lifecycle_events"
       ],
       "properties": {
@@ -89,6 +92,12 @@
         "task_revision_id": {"type": "string", "pattern": "^trev_[a-z0-9][a-z0-9_-]{7,95}$"},
         "session_generation": {"type": "integer", "minimum": 1},
         "durable_context_ref": {"type": "string", "minLength": 1},
+        "lead_control_id": {"type": "string", "pattern": "^olcontrol_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "lead_runtime_subject_ref": {"type": "string", "minLength": 1},
+        "lead_runtime_subject_assertion_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
         "lifecycle_events": {
           "type": "array",
           "minItems": 1,

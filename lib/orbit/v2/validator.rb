@@ -28,7 +28,8 @@ module Orbit
       BUNDLE_KEYS = %w[
         schema_version protocol_epoch protocol_root authority_assertions authorization_records
         project_policy_revisions task_revisions gate_requirements work_units change_theses
-        agent_instances logical_leads lead_sessions work_unit_attempts
+        agent_instances logical_leads lead_sessions control_registries lead_checkpoints
+        work_unit_attempts
         rule_resolution_artifacts evidence_records
         gate_evaluations findings finding_resolutions repository_snapshot code_surface
       ].freeze
@@ -42,6 +43,8 @@ module Orbit
         "agent_instances" => ["agent_instance", "agent_instance_id"],
         "logical_leads" => ["logical_lead", "logical_lead_id"],
         "lead_sessions" => ["lead_session", "lead_session_id"],
+        "control_registries" => ["lead_control_registry", "lead_control_id"],
+        "lead_checkpoints" => ["lead_checkpoint", "lead_checkpoint_id"],
         "work_unit_attempts" => ["work_unit_attempt", "attempt_id"],
         "rule_resolution_artifacts" => ["rule_resolution", "resolution_id"],
         "evidence_records" => ["evidence_record", "evidence_record_id"],
@@ -52,7 +55,7 @@ module Orbit
       CONTENT_DIGEST_COLLECTIONS = %w[
         authorization_records project_policy_revisions task_revisions gate_requirements
         work_units change_theses logical_leads evidence_records gate_evaluations findings
-        finding_resolutions
+        finding_resolutions control_registries lead_checkpoints
       ].freeze
       FORBIDDEN_WORK_UNIT_FACTS = %w[
         goal acceptance evidence_requirements source_requirements gate_requirements
@@ -186,6 +189,9 @@ module Orbit
         validate_agents(bundle)
         validate_logical_leads(bundle)
         validate_lead_sessions(bundle)
+        validate_active_session_cardinality(bundle)
+        validate_control_registries(bundle, active_policy)
+        validate_lead_checkpoints(bundle, active_policy)
         validate_attempts(bundle, active_policy)
         validate_rule_resolutions(bundle)
         validate_evidence_records(bundle, active_policy)
@@ -440,6 +446,7 @@ module Orbit
   end
 end
 require_relative "validator/authority_policy"
+require_relative "validator/lead_control"
 require_relative "validator/task_work_gate"
 require_relative "validator/runtime_lifecycle"
 require_relative "validator/evidence_evaluation"

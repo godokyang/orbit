@@ -1,0 +1,181 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orbit.local/contracts/orbit-v2/schemas/lead-control.schema.json",
+  "title": "Orbit v2 Slice 2 control registry and lead checkpoint contracts",
+  "$defs": {
+    "LeadControlRegistry": {
+      "type": "object",
+      "required": [
+        "schema_version",
+        "protocol_epoch",
+        "project_id",
+        "object_type",
+        "lead_control_id",
+        "genesis_checkpoint_ref",
+        "writer_authority_provenance",
+        "owned_task_refs",
+        "active_lead_session_ref",
+        "content_digest"
+      ],
+      "properties": {
+        "schema_version": {"const": "orbit-lead-control-registry-v1"},
+        "protocol_epoch": {"const": "orbit-v2"},
+        "project_id": {"type": "string", "pattern": "^oproj_[a-z0-9][a-z0-9_-]{7,63}$"},
+        "object_type": {"const": "lead_control_registry"},
+        "lead_control_id": {"type": "string", "pattern": "^olcontrol_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "genesis_checkpoint_ref": {"$ref": "#/$defs/LeadCheckpointRef"},
+        "writer_authority_provenance": {"$ref": "#/$defs/WriterAuthorityProvenance"},
+        "owned_task_refs": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/TaskRef"}
+        },
+        "active_lead_session_ref": {"$ref": "#/$defs/LeadSessionRef"},
+        "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "LeadCheckpoint": {
+      "type": "object",
+      "required": [
+        "schema_version",
+        "protocol_epoch",
+        "project_id",
+        "object_type",
+        "lead_checkpoint_id",
+        "lead_control_id",
+        "is_genesis",
+        "predecessor_lead_checkpoint_ref",
+        "project_policy_revision_ref",
+        "lead_agent_instance_ref",
+        "active_lead_session_ref",
+        "lead_runtime_subject_ref",
+        "lead_runtime_subject_assertion_digest",
+        "logical_lead_refs",
+        "task_queue",
+        "writer_authority_provenance",
+        "content_digest"
+      ],
+      "properties": {
+        "schema_version": {"const": "orbit-lead-checkpoint-v1"},
+        "protocol_epoch": {"const": "orbit-v2"},
+        "project_id": {"type": "string", "pattern": "^oproj_[a-z0-9][a-z0-9_-]{7,63}$"},
+        "object_type": {"const": "lead_checkpoint"},
+        "lead_checkpoint_id": {
+          "type": "string",
+          "pattern": "^olcheckpoint_[a-z0-9][a-z0-9_-]{7,95}$"
+        },
+        "lead_control_id": {"type": "string", "pattern": "^olcontrol_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "is_genesis": {"type": "boolean"},
+        "predecessor_lead_checkpoint_ref": {
+          "oneOf": [
+            {"type": "null"},
+            {"$ref": "#/$defs/LeadCheckpointRef"}
+          ]
+        },
+        "project_policy_revision_ref": {"$ref": "#/$defs/PolicyRevisionRef"},
+        "lead_agent_instance_ref": {"$ref": "#/$defs/AgentInstanceRef"},
+        "active_lead_session_ref": {"$ref": "#/$defs/LeadSessionRef"},
+        "lead_runtime_subject_ref": {"type": "string", "minLength": 1},
+        "lead_runtime_subject_assertion_digest": {
+          "type": "string",
+          "pattern": "^sha256:[0-9a-f]{64}$"
+        },
+        "logical_lead_refs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"$ref": "#/$defs/LogicalLeadRef"}
+        },
+        "task_queue": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {"$ref": "#/$defs/TaskRef"}
+        },
+        "writer_authority_provenance": {"$ref": "#/$defs/WriterAuthorityProvenance"},
+        "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "LeadCheckpointRef": {
+      "type": "object",
+      "required": ["lead_checkpoint_id", "content_digest"],
+      "properties": {
+        "lead_checkpoint_id": {
+          "type": "string",
+          "pattern": "^olcheckpoint_[a-z0-9][a-z0-9_-]{7,95}$"
+        },
+        "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "PolicyRevisionRef": {
+      "type": "object",
+      "required": ["policy_revision_id", "content_digest"],
+      "properties": {
+        "policy_revision_id": {"type": "string", "pattern": "^opolicy_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "AgentInstanceRef": {
+      "type": "object",
+      "required": ["agent_instance_id"],
+      "properties": {
+        "agent_instance_id": {"type": "string", "pattern": "^oagent_[a-z0-9][a-z0-9_-]{7,95}$"}
+      },
+      "additionalProperties": false
+    },
+    "LeadSessionRef": {
+      "type": "object",
+      "required": ["lead_session_id", "session_generation"],
+      "properties": {
+        "lead_session_id": {
+          "type": "string",
+          "pattern": "^oleadsession_[a-z0-9][a-z0-9_-]{7,95}$"
+        },
+        "session_generation": {"type": "integer", "minimum": 1}
+      },
+      "additionalProperties": false
+    },
+    "LogicalLeadRef": {
+      "type": "object",
+      "required": ["logical_lead_id", "content_digest"],
+      "properties": {
+        "logical_lead_id": {"type": "string", "pattern": "^olead_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "TaskRef": {
+      "type": "object",
+      "required": ["task_id", "task_revision_id", "content_digest"],
+      "properties": {
+        "task_id": {"type": "string", "pattern": "^otask_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "task_revision_id": {"type": "string", "pattern": "^trev_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    },
+    "WriterAuthorityProvenance": {
+      "type": "object",
+      "required": ["policy_revision_ref", "action", "assertion_ref"],
+      "properties": {
+        "policy_revision_ref": {"$ref": "#/$defs/PolicyRevisionRef"},
+        "action": {"enum": ["control.genesis", "control.checkpoint"]},
+        "assertion_ref": {"$ref": "#/$defs/AssertionRef"}
+      },
+      "additionalProperties": false
+    },
+    "AssertionRef": {
+      "type": "object",
+      "required": ["assertion_id", "assertion_digest"],
+      "properties": {
+        "assertion_id": {"type": "string", "pattern": "^oassert_[a-z0-9][a-z0-9_-]{7,95}$"},
+        "assertion_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+      },
+      "additionalProperties": false
+    }
+  }
+}

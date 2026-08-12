@@ -19,6 +19,8 @@ schema_dispatch:
     AgentInstance: orbit-agent-runtime-v1
     LogicalLead: orbit-agent-runtime-v1
     LeadSession: orbit-agent-runtime-v1
+    LeadControlRegistry: orbit-lead-control-registry-v1
+    LeadCheckpoint: orbit-lead-checkpoint-v1
     WorkUnitAttempt: orbit-agent-runtime-v1
     RuleResolutionArtifact: orbit-rule-resolution-v2
     EvidenceRecord: orbit-evidence-v2
@@ -386,6 +388,21 @@ work_model:
       - session_generation
       - task_revision_id
       - durable_context_ref
+      - lead_control_id
+      - lead_runtime_subject_ref
+      - lead_runtime_subject_assertion_digest
+    subject_binding:
+      required_pins: [lead_control_id, lead_runtime_subject_ref, lead_runtime_subject_assertion_digest]
+      nullable_unbound_session: forbidden
+      verifier: configured_runtime_identity_provider
+      exact_binding:
+        - lead_runtime_subject_ref_equals_agent_runtime_subject_id
+        - lead_runtime_subject_assertion_digest_equals_agent_verification_receipt_content_digest
+      active_session_cardinality:
+        per_lead_control_id: at_most_one_active
+      chronology:
+        exact_generation_context_event_no_later_than_session_start: true
+        no_agent_termination_before_session_start: true
     lifecycle_event_union:
       initial: LeadSessionStarted
       terminal: LeadSessionEnded
@@ -429,6 +446,68 @@ work_model:
     lineage: same_id_unique_revision_one_genesis_then_contiguous_revisions_with_stable_ownership
     work_unit_initial_ref: exact_revision_one_genesis
     successor_attempt_pins_new_revision: true
+
+control_registry:
+  model: create_only
+  identity: lead_control_id
+  claim: exactly_one_registry_record_per_lead_control_id
+  genesis:
+    genesis_checkpoint_ref: exact_accepted_genesis_lead_checkpoint
+    writer_authority:
+      source: provider_verified_AuthorityAssertion
+      assertion_binding:
+        - exact_assertion_id_and_digest
+        - authority_scope_ref_equals_lead_control_id
+        - issuer_kind_user_or_control_plane
+        - grants_include_active_policy_required_external_grant_for_action
+        - policy_ref_and_digest_exact
+      actions: [control.genesis, control.checkpoint]
+      self_report: forbidden
+  ownership:
+    owned_task_refs: project_scoped_task_ownership_authority
+    owned_task_refs_unique_per_task_id: true
+    checkpoint_task_queue: exact_ordered_projection
+  active_session:
+    active_lead_session_ref: exact
+    cardinality: at_most_one_active_per_control
+  multi_lineage:
+    interim_behavior: unsupported_fail_closed
+  atomicity:
+    model_level: invalid_bundle_not_accepted_and_accepted_final_state_invariants_closed
+    store_level_atomic_execution: slice_6_activation_closure
+
+lead_checkpoint:
+  model: create_only_append_only_linear_lineage
+  identity:
+    - lead_checkpoint_id
+    - lead_control_id
+    - is_genesis
+    - content_digest
+  lineage:
+    genesis: exactly_one_per_control
+    predecessor:
+      genesis_only_null: true
+      exact_ref: true
+      cross_control: fail_closed
+      unresolved: fail_closed
+    linearity:
+      one_successor_per_checkpoint: true
+      fork_or_multiple_tip: fail_closed
+      cycle: fail_closed
+  pins:
+    project_policy_revision_ref: exact_active_policy
+    lead_agent_instance_ref: exact_session_agent_instance
+    active_lead_session_ref: exact_binding_session_id_and_generation_active
+    lead_runtime_subject_ref: equals_session_subject_pin
+    lead_runtime_subject_assertion_digest: equals_session_assertion_digest
+    logical_lead_refs: exact_existing
+  task_queue:
+    initial_queue_required: genesis_mandatory
+    projection: exact_match_registry_owned_task_refs
+  forbidden:
+    - copied_task_goal_or_evidence_or_gate_truth
+  decision_and_trigger:
+    status: deferred_to_increment_2_with_reconcile_consumer
 
 rule_resolution:
   artifact_lifecycle: create_only

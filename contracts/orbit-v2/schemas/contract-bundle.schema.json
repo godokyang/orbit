@@ -17,6 +17,8 @@
     "agent_instances",
     "logical_leads",
     "lead_sessions",
+    "control_registries",
+    "lead_checkpoints",
     "work_unit_attempts",
     "rule_resolution_artifacts",
     "evidence_records",
@@ -72,6 +74,14 @@
       "type": "array",
       "minItems": 1,
       "items": {"$ref": "agent-runtime.schema.json#/$defs/LeadSession"}
+    },
+    "control_registries": {
+      "type": "array",
+      "items": {"$ref": "lead-control.schema.json#/$defs/LeadControlRegistry"}
+    },
+    "lead_checkpoints": {
+      "type": "array",
+      "items": {"$ref": "lead-control.schema.json#/$defs/LeadCheckpoint"}
     },
     "work_unit_attempts": {
       "type": "array",

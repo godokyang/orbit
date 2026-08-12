@@ -60,6 +60,14 @@ facts:
   - fact: lead_session_generation_and_recovery_continuity
     authoritative_owner: LeadSession
     lifecycle: immutable_identity_plus_append_only_events
+  - fact: control_identity_genesis_and_task_ownership
+    authoritative_owner: LeadControlRegistry
+    lifecycle: create_only
+    prohibited_owners: [LeadSession.self_report, AgentInstance.self_report, Lead.self_report]
+  - fact: checkpoint_lineage_and_coordinator_decision_stream
+    authoritative_owner: LeadCheckpoint
+    lifecycle: create_only_append_only_linear
+    prohibited_owners: [WorkUnitAttempt, LeadSession]
   - fact: assigned_and_submitted_rule_set
     authoritative_owner: RuleResolutionArtifact
     lifecycle: content_addressed_create_only

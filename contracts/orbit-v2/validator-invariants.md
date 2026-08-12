@@ -211,6 +211,67 @@ Slice 2 will add the store-backed LeadCheckpoint existence/tip/selection
 validation and the Task/executor transfer provenance exception to the
 same-control successor rule.
 
+## Slice 2 increment 1 addendum: control identity anchor
+
+Freezes the project-scoped control registry claim, the required
+provider-verified LeadSession subject pins, and the genesis/lineage
+LeadCheckpoint shape. Dispatch store-backed binding, active
+selection/current attempt, decision/trigger, assessment/progress, and
+recovery arrive in increment 2 with their consumers. This addendum proves
+only model-level accepted final-state closure: invalid bundles are not
+accepted and accepted final states close the invariants below.
+Store-level compare-and-append atomic execution (concurrency, crash
+rollback) closes at Slice 6 activation; no transaction primitive is
+simulated here.
+
+New frozen shapes:
+
+```yaml
+lead_session:
+  lead_control_id: olcontrol_id                  # required exact registry binding
+  lead_runtime_subject_ref: runtime-subject-...  # provider-verified pin
+  lead_runtime_subject_assertion_digest: sha256:...  # = agent verification receipt digest
+
+lead_control_registry:                           # create-only, one per control
+  lead_control_id, genesis_checkpoint_ref, writer_authority_provenance,
+  owned_task_refs, active_lead_session_ref
+
+lead_checkpoint:                                 # create-only append-only linear lineage
+  lead_checkpoint_id, lead_control_id, is_genesis, predecessor_lead_checkpoint_ref,
+  project_policy_revision_ref, lead_agent_instance_ref, active_lead_session_ref,
+  lead_runtime_subject_ref, lead_runtime_subject_assertion_digest,
+  logical_lead_refs, task_queue, writer_authority_provenance
+```
+
+New invariant families:
+
+| Family | Closed invariant | Single owner/seam |
+| --- | --- | --- |
+| Control genesis | exactly one registry per `lead_control_id`; registry pins the accepted genesis checkpoint, the exact active session id+generation, and owned task refs that resolve exactly; at most one active LeadSession per control | Validator orchestration over `control_registries` |
+| Writer authority | registry/checkpoint writer provenance carries a provider-verified AuthorityAssertion scoped to the exact `lead_control_id`, pinned to the exact policy revision written under, whose grants cover that policy's required external grant for the writer action; payload self-report is rejected | AuthorityVerifier + LeadControl |
+| Checkpoint lineage | exactly one genesis per control; genesis predecessor null; non-genesis predecessor is the exact prior same-control checkpoint; one successor per checkpoint; fork/cycle/multiple tip fail closed | LeadControl |
+| Checkpoint pins | policy pin resolves exactly to the policy revision written under; the lineage tip of an open control pins the active policy; session id+generation exact and active; agent equals the session agent; subject pins byte-equal the session pins | LeadControl |
+| Queue projection | checkpoint `task_queue` is the byte-exact ordered projection of registry `owned_task_refs`; each ref resolves to the exact TaskRevision; both arrays are unique per task identity (different revisions of one task fail closed) | LeadControl |
+| Session chronology | the exact session-generation Agent context event (`AgentCreated`/`AgentContextAdvanced`) recorded at or before `LeadSessionStarted.recorded_at`; no `AgentTerminated` at or before that instant | RuntimeLifecycle |
+
+Mutation matrix additions (all cross the public `Validator#validate` seam):
+
+| Mutation class | Representative mutation | Expected invariant/error |
+| --- | --- | --- |
+| duplicate genesis | second `is_genesis` checkpoint in one control | `control_genesis_duplicate` |
+| forged writer assertion | writer provenance `assertion_id` replaced | `control_writer_authority_invalid` |
+| unresolved queue ref | registry owned task revision id replaced | `control_task_ownership_invalid` |
+| duplicate task identity | a second owned ref for the same task (different revision) | `control_task_ownership_invalid` |
+| cross-control predecessor | successor predecessor points at another control's checkpoint | `checkpoint_lineage_invalid` |
+| fork | two successors of one checkpoint | `checkpoint_lineage_invalid` |
+| subject pin drift | checkpoint subject ref diverges from the session pin | `checkpoint_pin_invalid` |
+| stale tip policy | open lineage tip pins a non-active policy revision | `checkpoint_pin_invalid` |
+| late session context | session start generation context event recorded after `LeadSessionStarted` | `lead_session_invalid` |
+
+Store-backed dispatch binding (existence/tip/selection), Task/executor
+transfer provenance, decision/trigger, and recovery remain increment 2/3
+work; the Slice 1 dispatch refs stay format/chain-internal until then.
+
 ## InvariantGraph migration ledger
 
 This change migrates only call sites whose semantics are genuinely identical:

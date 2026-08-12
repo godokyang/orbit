@@ -35,6 +35,7 @@ module OrbitV2ContractTest
     test_authority_verifier(valid_bundle)
     test_schema_parity(valid_bundle)
     test_invalid_fixtures
+    test_slice2_control_increment1
     test_slice1_retry_does_not_invalidate_dispatch
     test_authority_graph_regressions
     test_policy_issuance_and_stale_authority_regressions
@@ -64,6 +65,8 @@ module OrbitV2ContractTest
       "agent_instance" => "orbit-agent-runtime-v1",
       "logical_lead" => "orbit-agent-runtime-v1",
       "lead_session" => "orbit-agent-runtime-v1",
+      "lead_control_registry" => "orbit-lead-control-registry-v1",
+      "lead_checkpoint" => "orbit-lead-checkpoint-v1",
       "work_unit_attempt" => "orbit-agent-runtime-v1",
       "rule_resolution" => "orbit-rule-resolution-v2",
       "evidence_record" => "orbit-evidence-v2",
@@ -165,6 +168,7 @@ module OrbitV2ContractTest
       evidence.schema.json
       finding.schema.json
       gate.schema.json
+      lead-control.schema.json
       protocol-root.schema.json
       rule-resolution.schema.json
       task-work.schema.json
@@ -448,6 +452,78 @@ module OrbitV2ContractTest
         "#{definition.fetch("id")} expected #{definition.fetch("expected_error")}, got #{codes.uniq.sort.join(",")}"
       )
     end
+  end
+
+  def test_slice2_control_increment1
+    bundle = OrbitV2FixtureFactory.valid_bundle
+    assert(validator.validate(bundle).empty?, "increment 1 happy path: genesis and linear successor pass")
+
+    duplicate = OrbitV2FixtureFactory.deep_copy(bundle)
+    second = OrbitV2FixtureFactory.deep_copy(duplicate.fetch("lead_checkpoints").first)
+    second["lead_checkpoint_id"] = "olcheckpoint_secondgenesis"
+    duplicate.fetch("lead_checkpoints") << OrbitV2FixtureFactory.digested(second)
+    codes = validator.validate(duplicate).map(&:code)
+    assert(codes.include?("control_genesis_duplicate"), "duplicate genesis fails closed")
+
+    unverified = OrbitV2FixtureFactory.deep_copy(bundle)
+    unverified.fetch("lead_sessions").first["lead_runtime_subject_assertion_digest"] = "sha256:#{'0' * 64}"
+    codes = validator.validate(unverified).map(&:code)
+    assert(codes.include?("lead_session_invalid"), "provider subject assertion must stay exact")
+
+    forged_writer = OrbitV2FixtureFactory.deep_copy(bundle)
+    forged_writer.fetch("control_registries").first.dig("writer_authority_provenance", "assertion_ref")["assertion_id"] = "oassert_selfreported"
+    codes = validator.validate(forged_writer).map(&:code)
+    assert(
+      codes.include?("control_writer_authority_invalid"),
+      "genesis writer authority must come from a provider-verified assertion"
+    )
+
+    dup_queue = OrbitV2FixtureFactory.deep_copy(bundle)
+    add_task_successor(dup_queue)
+    registry, task2 = dup_queue.fetch("control_registries").first, dup_queue.fetch("task_revisions").last
+    registry.fetch("owned_task_refs") << { "task_id" => task2["task_id"], "task_revision_id" => task2["task_revision_id"], "content_digest" => task2["content_digest"] }
+    codes = validator.validate(dup_queue).map(&:code)
+    assert(codes.include?("control_task_ownership_invalid"), "queue refs are unique per task identity")
+
+    late_context = OrbitV2FixtureFactory.deep_copy(bundle)
+    session = late_context.fetch("lead_sessions").first
+    session["session_generation"] = 2
+    session.dig("lifecycle_events", 0)["context_generation"] = 2
+    OrbitV2FixtureFactory.resign_event(session.dig("lifecycle_events", 0))
+    agent = late_context.fetch("agent_instances").find { |candidate| candidate["agent_instance_id"] == session["agent_instance_id"] }
+    agent.fetch("lifecycle_events") << OrbitV2FixtureFactory.event(
+      "oevent_leadlatecontext", "AgentContextAdvanced",
+      agent.dig("lifecycle_events", 0, "event_digest"),
+      "context_generation" => 2, "recorded_at" => "2026-07-30T01:00:00Z", "reason" => "Late generation probe"
+    )
+    agent.fetch("lifecycle_events").last["previous_event_digest"] = agent.dig("lifecycle_events", 0, "event_digest")
+    OrbitV2FixtureFactory.resign_event(agent.fetch("lifecycle_events").last)
+    codes = validator.validate(late_context).map(&:code)
+    assert(codes.include?("lead_session_invalid"), "late exact generation context fails closed")
+
+    fork = OrbitV2FixtureFactory.deep_copy(bundle)
+    forked = OrbitV2FixtureFactory.deep_copy(fork.fetch("lead_checkpoints").last)
+    forked["lead_checkpoint_id"] = "olcheckpoint_forkedlineage"
+    fork.fetch("lead_checkpoints") << OrbitV2FixtureFactory.digested(forked)
+    codes = validator.validate(fork).map(&:code)
+    assert(codes.include?("checkpoint_lineage_invalid"), "lineage fork / multiple tip fails closed")
+
+    pin_mismatch = OrbitV2FixtureFactory.deep_copy(bundle)
+    genesis = pin_mismatch.fetch("lead_checkpoints").first
+    genesis["lead_runtime_subject_ref"] = "runtime-subject:foreign"
+    pin_mismatch.fetch("lead_checkpoints")[0] = OrbitV2FixtureFactory.digested(genesis)
+    codes = validator.validate(pin_mismatch).map(&:code)
+    assert(codes.include?("checkpoint_pin_invalid"), "checkpoint subject pin mismatch fails closed")
+
+    policy_mismatch = OrbitV2FixtureFactory.deep_copy(bundle)
+    add_policy_successor(policy_mismatch)
+    tip = policy_mismatch.fetch("lead_checkpoints").last
+    genesis_policy = policy_mismatch.fetch("project_policy_revisions").first
+    tip["project_policy_revision_ref"] = { "policy_revision_id" => genesis_policy["policy_revision_id"], "content_digest" => genesis_policy["content_digest"] }
+    checkpoints = policy_mismatch.fetch("lead_checkpoints")
+    checkpoints[checkpoints.index(tip)] = OrbitV2FixtureFactory.digested(tip)
+    codes = validator.validate(policy_mismatch).map(&:code)
+    assert(codes.include?("checkpoint_pin_invalid"), "lineage tip must pin the exact active policy")
   end
 
   def test_slice1_retry_does_not_invalidate_dispatch
@@ -2999,7 +3075,30 @@ module OrbitV2ContractTest
     )
     bundle["authority_assertions"] << assertion
     bundle["project_policy_revisions"] << policy
+    rebind_checkpoint_for_policy_rotation(bundle, policy, revision_number)
     policy
+  end
+
+  def rebind_checkpoint_for_policy_rotation(bundle, policy, revision_number)
+    tip = bundle["lead_checkpoints"].last
+    session = bundle["lead_sessions"].first
+    agent = bundle["agent_instances"].find { |candidate| candidate["agent_instance_id"] == session["agent_instance_id"] }
+    logical_lead = bundle["logical_leads"].first
+    task = bundle["task_revisions"].first
+    writer_assertion = bundle["authority_assertions"].find { |candidate| candidate["assertion_id"] == "oassert_controlwriter" }
+    rebind = OrbitV2FixtureFactory.lead_checkpoint(
+      format("olcheckpoint_policyrotation_r%04d", revision_number),
+      is_genesis: false,
+      predecessor_ref: { "lead_checkpoint_id" => tip["lead_checkpoint_id"], "content_digest" => tip["content_digest"] },
+      policy: policy,
+      session: session,
+      agent: agent,
+      logical_lead: logical_lead,
+      task: task,
+      writer_action: "control.checkpoint",
+      writer_assertion: writer_assertion
+    )
+    bundle["lead_checkpoints"] << rebind
   end
 
   def reissue_genesis_policy(bundle)
@@ -3056,6 +3155,7 @@ module OrbitV2ContractTest
     authorization_id = "oauthz_taskriskdelegate"
     task["authority_grant_refs"] = [authorization_id]
     rehash(task)
+    rebind_control_task_refs(bundle, task)
     scope = subject_override || Orbit::V2::TaskAuthority.scope_digest(task)
     assertion = OrbitV2FixtureFactory.assertion(
       "oassert_taskriskdelegate",
@@ -3228,6 +3328,7 @@ module OrbitV2ContractTest
       task["gate_requirement_refs"] << gate_id
     end
     rehash(task)
+    rebind_control_task_refs(bundle, task)
     refresh_work_authorizations(bundle, task)
     bundle["gate_requirements"] << gate
     refresh_evaluation_subject(bundle)
@@ -3239,10 +3340,41 @@ module OrbitV2ContractTest
     task["unresolved_finding_refs"] = []
     rehash(task)
     refresh_work_authorizations(bundle, task)
+    rebind_control_task_refs(bundle, task)
     bundle["gate_evaluations"] = []
     bundle["findings"] = []
     bundle["finding_resolutions"] = []
     terminalize_attempts(bundle)
+  end
+
+  # Re-pin registry/checkpoint task refs and dependent digests after a fixture
+  # helper rehashes the TaskRevision they project.
+  def rebind_control_task_refs(bundle, task)
+    task_ref = { "task_id" => task["task_id"], "task_revision_id" => task["task_revision_id"], "content_digest" => task["content_digest"] }
+    bundle["lead_checkpoints"].each do |checkpoint|
+      checkpoint["task_queue"] = [task_ref]
+    end
+    bundle["lead_checkpoints"].each_with_index do |checkpoint, index|
+      if index.positive?
+        prior = bundle["lead_checkpoints"][index - 1]
+        checkpoint["predecessor_lead_checkpoint_ref"] = {
+          "lead_checkpoint_id" => prior["lead_checkpoint_id"],
+          "content_digest" => prior["content_digest"]
+        }
+      end
+      rehash(checkpoint)
+    end
+    bundle["control_registries"].each do |registry|
+      registry["owned_task_refs"] = [task_ref]
+      genesis = bundle["lead_checkpoints"].find { |checkpoint| checkpoint["lead_checkpoint_id"] == registry.dig("genesis_checkpoint_ref", "lead_checkpoint_id") }
+      if genesis
+        registry["genesis_checkpoint_ref"] = {
+          "lead_checkpoint_id" => genesis["lead_checkpoint_id"],
+          "content_digest" => genesis["content_digest"]
+        }
+      end
+      rehash(registry)
+    end
   end
 
   def terminalize_attempts(bundle)
