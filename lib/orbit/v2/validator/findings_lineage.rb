@@ -274,8 +274,9 @@ module Orbit
           supporting
         end
 
-        def validate_finding_closure(bundle)
+        def validate_finding_closure(bundle, active_policy)
           tasks = @indexes.fetch("task_revisions", {})
+          checkpoints = Array(bundle["lead_checkpoints"])
           resolutions = Array(bundle["finding_resolutions"]).select { |item| item.is_a?(Hash) }
           Array(bundle["findings"]).each do |finding|
             next unless finding.is_a?(Hash)
@@ -286,7 +287,8 @@ module Orbit
             task = tasks[lineage["task_revision_id"]]
             matching = resolutions.select { |resolution| resolution["finding_id"] == finding["finding_id"] }
             tips = resolution_lineage_tips(finding["finding_id"], matching)
-            if finding["blocking"] == true && tips.empty?
+            disposition = finding_disposition(finding, active_policy)
+            if disposition == "blocking" && tips.empty?
               unless task && Array(task["unresolved_finding_refs"]).include?(finding["finding_id"])
                 add(
                   "finding_closure_invalid",
@@ -304,7 +306,37 @@ module Orbit
                   "findings.#{finding["finding_id"]}"
                 )
               end
+            elsif disposition == "adjudication_required" && tips.empty? &&
+                  !risk_escalation_proven?(finding, lineage, checkpoints)
+              add(
+                "finding_risk_unobserved",
+                "an unadjudicated newly_discovered_risk must be introduced through exact finding_change checkpoint provenance",
+                "findings.#{finding["finding_id"]}"
+              )
             end
+          end
+        end
+
+        def risk_escalation_proven?(finding, lineage, checkpoints)
+          ref = {
+            "kind" => "finding",
+            "id" => finding["finding_id"],
+            "digest" => finding["content_digest"]
+          }
+          checkpoints.any? do |checkpoint|
+            next false unless checkpoint.is_a?(Hash)
+            next false unless checkpoint.dig("reconcile_trigger", "event") == "finding_change"
+            next false unless exact_refs_of_kind(checkpoint, "finding").include?(ref)
+
+            predecessor = @indexes.fetch("lead_checkpoints", {})[
+              checkpoint.dig("predecessor_lead_checkpoint_ref", "lead_checkpoint_id")
+            ]
+            next false if predecessor && exact_refs_of_kind(predecessor, "finding").include?(ref)
+
+            checkpoint_revision = checkpoint.dig("active_task_ref", "task_revision_id") ||
+              Array(checkpoint["task_queue"]).first&.dig("task_revision_id")
+            checkpoint_task = @indexes.fetch("task_revisions", {})[checkpoint_revision]
+            checkpoint_task && task_revision_in_lineage?(checkpoint_task, lineage["task_revision_id"])
           end
         end
 

@@ -49,19 +49,27 @@ module Orbit
                   Facts.new(authoritative_facts)
                 end
         return frozen_decision("authoritative facts missing or checkpoint not accepted") unless facts.coherent?
+        trigger = facts.reconcile_trigger if trigger == "recovery"
+
+        # Hard user-boundary precedence: a checkpoint that introduces an
+        # unadjudicated newly_discovered_risk escalates to the user regardless
+        # of ordinary warning/blocked assessment layers or stop-loss; those
+        # cannot mask the mandatory escalation.
+        if trigger == "finding_change" && facts.introduced_risk_needs_adjudication?
+          return decision("needs_user", "escalate", "newly discovered risk requires risk-owner/user adjudication")
+        end
+        # A needs_user risk stop accepts no successor trigger except an
+        # authority_change checkpoint with complete exact resolution
+        # coverage; ordinary triggers cannot wash the stop out.
+        if facts.needs_user_risk_predecessor? && trigger != "authority_change"
+          return frozen_decision("a needs_user risk stop can only be succeeded by an authority_change checkpoint with complete exact resolution coverage")
+        end
         unless facts.warning_assessment_layers.empty?
           return frozen_decision("control anomaly in assessment layers: #{facts.warning_assessment_layers.join(",")}")
         end
         unless facts.blocked_assessment_layers.empty?
           return blocked_decision("external blockage in assessment layers: #{facts.blocked_assessment_layers.join(",")}")
         end
-
-        # Recovery recomputes the unique tip's own deterministic pipeline: the
-        # stored reconcile trigger is part of the accepted checkpoint content,
-        # so stop-loss/dependency/fuse outcomes are recomputed exactly and a
-        # frozen decision is never thawed. A missing/unknown tip trigger fails
-        # closed.
-        trigger = facts.reconcile_trigger if trigger == "recovery"
 
         case trigger
         when "genesis"
@@ -91,6 +99,19 @@ module Orbit
         when "session_change"
           stop_loss(facts) || decision("blocked", "continue", "same-lineage session binding accepted")
         when "authority_change"
+          # Route by the immediate predecessor's stop cause FIRST: a
+          # needs_user risk stop resumes only through complete exact
+          # resolution coverage; policy deltas, retry overrides, unrelated
+          # resolutions, or mixed payloads cannot bypass that boundary.
+          if facts.needs_user_risk_predecessor?
+            unless facts.resolution_driven_authority_change? &&
+                   facts.resume_coverage_complete? &&
+                   !facts.policy_changed? &&
+                   !facts.retry_override_ref.is_a?(Hash)
+              return frozen_decision("a needs_user risk stop resumes only through complete exact resolution coverage")
+            end
+            return stop_loss(facts) || decision("blocked", "continue", "authoritative change observed")
+          end
           # A needs_user stop resumes only when new user/control-plane
           # authority facts arrive: the checkpoint consumes the exact
           # task.retry.override ref, so the dispatch authorization path
@@ -101,10 +122,27 @@ module Orbit
             return blocked_decision("dependency readiness not satisfied") unless facts.dependencies_ready?
 
             dispatch_fuse(facts) || decision("blocked", "dispatch", "dispatch authorized")
+          elsif facts.resolution_driven_authority_change?
+            return frozen_decision("authority_change resolution resume requires an exact needs_user risk predecessor")
           else
             stop_loss(facts) || decision("blocked", "continue", "authoritative change observed")
           end
-        when "thesis_change", "scope_change", "finding_change", "gate_change",
+        when "finding_change"
+          stop = stop_loss(facts)
+          return stop if stop
+
+          if facts.introduced_hardening_only?
+            unless facts.hardening_selection_continuous?
+              return frozen_decision("a hardening observation must preserve the predecessor active mainline selection projection")
+            end
+            decision("blocked", "continue", "authoritative change observed")
+          elsif facts.introduced_ambiguous_finding_mix?
+            frozen_decision("mixed hardening and ordinary finding introduction is ambiguous")
+          else
+            decision("blocked", "continue", "authoritative change observed")
+          end
+
+        when "thesis_change", "scope_change", "gate_change",
              "task_revision_change", "context_change", "dependency_change"
           stop_loss(facts) || decision("blocked", "continue", "authoritative change observed")
         else
@@ -141,6 +179,9 @@ module Orbit
           @checkpoints = index(@bundle["lead_checkpoints"], "lead_checkpoint_id")
           @attempts = index(@bundle["work_unit_attempts"], "attempt_id")
           @units = index(@bundle["work_units"], "work_unit_id")
+          @policies = index(@bundle["project_policy_revisions"], "policy_revision_id")
+          @findings = index(@bundle["findings"], "finding_id")
+          @resolutions = index(@bundle["finding_resolutions"], "finding_resolution_id")
         end
 
         def coherent?
@@ -219,6 +260,133 @@ module Orbit
 
         def bindings
           Array(replay_point["effective_budget_bindings"])
+        end
+
+        # The active policy for a replay is the exact policy revision pinned
+        # by the replay point, never the bundle's current tip: a rotation
+        # cannot rewrite the derivation of an already accepted checkpoint.
+        def active_policy
+          pinned_policy(replay_point)
+        end
+
+        def pinned_policy(checkpoint)
+          ref = checkpoint.is_a?(Hash) && checkpoint["project_policy_revision_ref"]
+          ref && @policies[ref["policy_revision_id"]]
+        end
+
+        def finding_disposition(finding_ref, checkpoint = replay_point)
+          finding = finding_ref.is_a?(Hash) && @findings[finding_ref["id"]]
+          policy = pinned_policy(checkpoint)
+          mapping = policy && policy["finding_disposition"]
+          return nil unless finding.is_a?(Hash) && mapping.is_a?(Hash)
+
+          mapping[finding["basis"]]
+        end
+
+        def finding_refs(checkpoint)
+          supporting_refs(checkpoint).select { |ref| ref.is_a?(Hash) && ref["kind"] == "finding" }
+        end
+
+        def finding_resolution_refs(checkpoint)
+          supporting_refs(checkpoint)
+            .select { |ref| ref.is_a?(Hash) && ref["kind"] == "finding_resolution" }
+        end
+
+        def introduced_finding_refs(checkpoint = replay_point)
+          finding_refs(checkpoint) - finding_refs(predecessor_of(checkpoint))
+        end
+
+        # A replay may consume only an exact FindingResolution ref (id +
+        # content_digest) pinned by the replay checkpoint itself; future
+        # resolutions appended to the bundle can never rewrite the history of
+        # an already accepted checkpoint.
+        def pinned_finding_resolutions(checkpoint)
+          finding_resolution_refs(checkpoint).map do |ref|
+            resolution = @resolutions[ref["id"]]
+            resolution if resolution && resolution["content_digest"] == ref["digest"]
+          end.compact
+        end
+
+        # A newly introduced risk finding escalates to the user unless an
+        # exact pinned FindingResolution for it adjudicates the risk at this
+        # checkpoint (resolution authority itself remains the Validator's
+        # proof; the resolution ref must resolve exactly).
+        def introduced_risk_needs_adjudication?
+          unadjudicated_introduced_risks(replay_point).any?
+        end
+
+        # The risks a checkpoint introduced (delta vs its predecessor) that
+        # its own pinned resolutions do not adjudicate.
+        def unadjudicated_introduced_risks(checkpoint)
+          introduced_finding_refs(checkpoint).select do |ref|
+            finding_disposition(ref, checkpoint) == "adjudication_required" &&
+              pinned_finding_resolutions(checkpoint).none? do |resolution|
+                resolution["finding_id"] == ref["id"]
+              end
+          end
+        end
+        def needs_user_risk_predecessor?
+          decision = predecessor_checkpoint && predecessor_checkpoint["lead_decision"]
+          decision.is_a?(Hash) &&
+            decision["state"] == "needs_user" &&
+            decision["action"] == "escalate" &&
+            predecessor_checkpoint.dig("reconcile_trigger", "event") == "finding_change"
+        end
+
+        def policy_changed?
+          current = replay_point && replay_point["project_policy_revision_ref"]
+          prior = predecessor_checkpoint && predecessor_checkpoint["project_policy_revision_ref"]
+          current && prior && current != prior
+        end
+
+        def introduced_hardening_only?
+          introduced = introduced_finding_refs
+          introduced.any? && introduced.all? { |ref| finding_disposition(ref) == "nonblocking" }
+        end
+
+        def introduced_ambiguous_finding_mix?
+          dispositions = introduced_finding_refs.map { |ref| finding_disposition(ref) }
+          dispositions.include?("nonblocking") &&
+            dispositions.any? { |value| value && value != "nonblocking" }
+        end
+
+        def hardening_selection_continuous?
+          predecessor = predecessor_checkpoint
+          predecessor.is_a?(Hash) &&
+            replay_point["active_task_ref"] == predecessor["active_task_ref"] &&
+            replay_point["selected_work_unit_ref"] == predecessor["selected_work_unit_ref"] &&
+            replay_point["current_or_terminal_attempt_ref"] == predecessor["current_or_terminal_attempt_ref"]
+        end
+
+        def resolution_driven_authority_change?
+          finding_resolution_refs(replay_point) -
+            finding_resolution_refs(predecessor_checkpoint) != []
+        end
+
+        def resume_coverage_complete?
+          risks = unadjudicated_introduced_risks(predecessor_checkpoint)
+          return false if risks.empty?
+
+          new_refs = finding_resolution_refs(replay_point) -
+            finding_resolution_refs(predecessor_checkpoint)
+          risks.all? do |risk_ref|
+            new_refs.any? do |ref|
+              resolution = @resolutions[ref["id"]]
+              resolution && resolution["content_digest"] == ref["digest"] &&
+                resolution["finding_id"] == risk_ref["id"]
+            end
+          end
+        end
+
+        def supporting_refs(checkpoint)
+          return [] unless checkpoint.is_a?(Hash)
+
+          ASSESSMENT_LAYERS.flat_map do |layer|
+            Array(checkpoint.dig("assessments", layer, "supporting_refs"))
+          end +
+            %w[delivery_progress assurance_progress].flat_map do |source|
+              Array(checkpoint.dig(source, "supporting_refs"))
+            end
         end
 
         # Identity is provable only from the recorded canonical basis: known
@@ -377,7 +545,11 @@ module Orbit
         end
 
         def predecessor_checkpoint
-          ref = replay_point && replay_point["predecessor_lead_checkpoint_ref"]
+          predecessor_of(replay_point)
+        end
+
+        def predecessor_of(checkpoint)
+          ref = checkpoint.is_a?(Hash) && checkpoint["predecessor_lead_checkpoint_ref"]
           ref && @checkpoints[ref["lead_checkpoint_id"]]
         end
 

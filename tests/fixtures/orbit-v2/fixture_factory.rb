@@ -210,7 +210,6 @@ module OrbitV2FixtureFactory
       providers: { LIFECYCLE_PROVIDER_ID => FAKE_LIFECYCLE_PROVIDER }
     )
   end
-
   def runtime_identity_verifier
     Orbit::V2::RuntimeIdentityVerifier.new(
       providers: {
@@ -242,6 +241,12 @@ module OrbitV2FixtureFactory
           "independence" => "independent_evaluator"
         }
       ],
+      "finding_disposition" => {
+        "contract_violation" => "blocking",
+        "regression" => "blocking",
+        "newly_discovered_risk" => "adjudication_required",
+        "hardening_opportunity" => "nonblocking"
+      },
       "authority_grants" => [
         {
           "action" => "finding.waive",
@@ -686,7 +691,7 @@ module OrbitV2FixtureFactory
       "finding_id" => FINDING_ID,
       "gate_evaluation_id" => evaluation["gate_evaluation_id"],
       "severity" => "P1",
-      "blocking" => true,
+      "basis" => "contract_violation",
       "body" => "Example unresolved contract concern.",
       "source_evidence_record_refs" => [
         evidence[0]["evidence_record_id"],
@@ -745,7 +750,86 @@ module OrbitV2FixtureFactory
       "code_surface" => code_surface
     }
   end
+  # Slice 4 increment 1: append a finding_change observation checkpoint that
+  # introduces the given Finding (already appended to the bundle and reported
+  # by its GateEvaluation). The stored decision is deterministic-replay
+  # checked: needs_user/escalate for an unadjudicated newly_discovered_risk,
+  # blocked/continue otherwise. Digests are resealed against the current tip.
+  def append_observation_checkpoint(bundle, suffix, supporting_refs, reconcile:, next_event:, decision:, reason:, preserve_attempt: false)
+    tip = bundle["lead_checkpoints"].last
+    policy = bundle["project_policy_revisions"].last
+    checkpoint = deep_copy(tip)
+    checkpoint["lead_checkpoint_id"] = "olcheckpoint_#{suffix}"
+    checkpoint["predecessor_lead_checkpoint_ref"] = cp_ref(tip)
+    checkpoint["current_or_terminal_attempt_ref"] = nil unless preserve_attempt
+    checkpoint["assessments"] = checkpoint_assessments(
+      checkpoint["active_task_ref"], checkpoint["selected_work_unit_ref"],
+      preserve_attempt ? checkpoint["current_or_terminal_attempt_ref"] : nil
+    )
+    %w[delivery_progress assurance_progress].each do |field|
+      checkpoint[field] = checkpoint_progress("not_assessed").merge(
+        "predecessor_lead_checkpoint_ref" => checkpoint["predecessor_lead_checkpoint_ref"],
+        "supporting_refs" => deep_copy(supporting_refs)
+      )
+    end
+    checkpoint["reconcile_trigger"] = { "event" => reconcile, "reason" => reason }
+    checkpoint["next_trigger"] = {
+      "event" => next_event,
+      "reason" => next_event == "authority_change" ? "Awaiting risk-owner/user adjudication." : "Awaiting the successor boundary."
+    }
+    checkpoint["lead_decision"] = deep_copy(decision)
+    bundle["lead_checkpoints"] <<
+      reseal_checkpoint(checkpoint, policy: policy, predecessor_checkpoint: tip)
+    bundle
+  end
 
+  # Slice 4 increment 1: introduce a Finding through an exact finding_change
+  # observation; may exact-pin the adjudicating FindingResolution. The stored
+  # decision is deterministic-replay checked.
+  def append_finding_change_checkpoint(bundle, finding, decision, resolution: nil, preserve_attempt: false)
+    refs = [
+      { "kind" => "finding", "id" => finding["finding_id"], "digest" => finding["content_digest"] }
+    ]
+    if resolution
+      refs << {
+        "kind" => "finding_resolution",
+        "id" => resolution["finding_resolution_id"],
+        "digest" => resolution["content_digest"]
+      }
+    end
+    append_observation_checkpoint(
+      bundle,
+      "findingchange_#{finding["finding_id"].delete_prefix("ofinding_")}",
+      refs,
+      reconcile: "finding_change",
+      next_event: decision["action"] == "escalate" ? "authority_change" : "successor_before",
+      decision: decision,
+      reason: "A new Finding was recorded.",
+      preserve_attempt: preserve_attempt
+    )
+  end
+
+  # A needs_user risk stop resumes only when a successor authority_change
+  # checkpoint exact-pins the authorized FindingResolution ref.
+  def append_authority_change_resume_checkpoint(bundle, resolution)
+    append_observation_checkpoint(
+      bundle,
+      "authoritychange_#{resolution["finding_resolution_id"].delete_prefix("ofres_")}",
+      [{
+        "kind" => "finding_resolution",
+        "id" => resolution["finding_resolution_id"],
+        "digest" => resolution["content_digest"]
+      }],
+      reconcile: "authority_change",
+      next_event: "successor_before",
+      decision: {
+        "state" => "blocked",
+        "action" => "continue",
+        "reason" => "authoritative change observed"
+      },
+      reason: "The authorized FindingResolution adjudicated the escalated risk."
+    )
+  end
   # Slice 3 increment 1 scenario: one implementation record closes all three
   # verification classes through separate paired evidence requirement results.
   def evidence_classification_bundle

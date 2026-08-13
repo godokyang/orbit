@@ -548,6 +548,7 @@
         "authorization_assertion_digest",
         "protected_gate_minimums",
         "authority_grants",
+        "finding_disposition",
         "content_digest"
       ],
       "properties": {
@@ -563,6 +564,23 @@
         },
         "authorization_source_ref": {"type": "string", "pattern": "^oassert_[a-z0-9][a-z0-9_-]{7,95}$"},
         "authorization_assertion_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "finding_disposition": {
+          "type": "object",
+          "required": [
+            "contract_violation",
+            "regression",
+            "newly_discovered_risk",
+            "hardening_opportunity"
+          ],
+          "properties": {
+            "contract_violation": {"const": "blocking"},
+            "regression": {"const": "blocking"},
+            "newly_discovered_risk": {"const": "adjudication_required"},
+            "hardening_opportunity": {"const": "nonblocking"}
+          },
+          "additionalProperties": false
+        },
+
         "protected_gate_minimums": {
           "type": "array",
           "uniqueItems": true,

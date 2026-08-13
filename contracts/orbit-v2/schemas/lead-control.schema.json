@@ -665,6 +665,7 @@
             "task_revision",
             "evidence_record",
             "finding",
+            "finding_resolution",
             "gate_evaluation",
             "lead_checkpoint",
             "change_thesis",

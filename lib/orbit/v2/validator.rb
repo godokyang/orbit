@@ -203,7 +203,7 @@ module Orbit
         validate_gate_evaluations(bundle, active_policy)
         validate_findings(bundle)
         validate_finding_resolutions(bundle, active_policy)
-        validate_finding_closure(bundle)
+        validate_finding_closure(bundle, active_policy)
         errors
       end
 
@@ -449,6 +449,13 @@ module Orbit
 
       def subset?(values, allowed)
         values.is_a?(Array) && (values - allowed).empty?
+      end
+
+      def finding_disposition(finding, policy)
+        mapping = policy.is_a?(Hash) ? policy["finding_disposition"] : nil
+        return nil unless mapping.is_a?(Hash) && finding.is_a?(Hash)
+
+        mapping[finding["basis"]]
       end
 
       def check(path)

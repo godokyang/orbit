@@ -852,6 +852,11 @@ evidence_record:
 gate_evaluation:
   verdict_owner: GateEvaluation
   finding_body_owner: Finding
+  finding_typed_basis:
+    owner: Finding.basis
+    enum: [contract_violation, regression, newly_discovered_risk, hardening_opportunity]
+    agent_writable_blocking_truth: forbidden
+    disposition_source: active_project_policy_revision_finding_disposition_only
   evaluator_submission_owner: EvidenceRecord
   evaluator_provenance:
     - evaluator_attempt_id
@@ -914,6 +919,24 @@ gate_evaluation:
     finding_refs: bidirectional_create_only_closure
     task_unresolved_finding_refs: must_resolve_within_task_gate_lineage
     blocking_finding_for_closure: requires_single_authorized_resolution_tip
+    disposition_mapping:
+      contract_violation: blocking
+      regression: blocking
+      newly_discovered_risk: adjudication_required_else_needs_user_escalate
+      hardening_opportunity: nonblocking_nonpreemptive
+    unresolved_nonblocking_or_adjudicated_finding: never_blocks_gate_closure
+    unadjudicated_risk_provenance:
+      mandatory: exact_finding_change_checkpoint_introduction
+      absent_provenance: fail_closed
+      replay_precedence: escalates_regardless_of_warning_or_blocked_assessments
+    risk_adjudication_consumption:
+      replay_source: exact_finding_resolution_ref_pinned_by_the_checkpoint_only
+      future_resolution: never_rewrites_accepted_checkpoint_history
+      resume: immediate_authority_change_successor_exact_pinning_authorized_resolutions
+      resume_precondition: exact_needs_user_escalate_finding_change_predecessor
+      resume_routing: predecessor_stop_cause_first
+      policy_or_retry_override_after_risk_stop: cannot_resume_must_fail_closed
+      resume_coverage: every_predecessor_introduced_unadjudicated_risk_covered
   waiver_policy:
     mode: finding_resolution_only
     required_authorization_action: finding.waive

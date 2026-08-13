@@ -117,6 +117,33 @@ Envelope metadata (`resolution_id`, `identity_sha256`, `schema_version`,
 `created_at`) stays outside the identity hash domain, and identical canonical
 identities always produce the same ID.
 
+### Finding typed basis and active-policy disposition
+
+`Finding.basis` is a required typed enum (`contract_violation` /
+`regression` / `newly_discovered_risk` / `hardening_opportunity`); the
+former `blocking` boolean is forbidden at contract shape, so an agent can
+never self-assert or deny blocking. Every ProjectPolicyRevision carries a
+closed `finding_disposition` mapping (all four basis keys required, const
+values, no free-text) inside its content digest; closure derives the
+disposition from the ACTIVE policy mapping, never from Finding body or
+severity. Unresolved contract_violation/regression findings still block
+gate closure and require an authorized FindingResolution tip; unresolved
+hardening_opportunity never blocks and never preempts selection. A
+finding_change checkpoint introducing a newly_discovered_risk without an
+exact pinned FindingResolution ref replays deterministically to
+`state=needs_user, action=escalate` awaiting `authority_change`, with hard
+precedence over ordinary warning/blocked assessment layers and stop-loss; a
+forged blocked/continue decision fails the public Validator replay. An
+unadjudicated risk that no accepted checkpoint introduces fails closed
+(`finding_risk_unobserved`), and replay may consume only a
+FindingResolution ref the checkpoint itself exact-pins, so a later
+resolution never rewrites accepted checkpoint history. The resume is an
+IMMEDIATE successor authority_change checkpoint whose exact predecessor is
+the needs_user/escalate finding_change checkpoint and whose newly pinned
+valid FindingResolution refs cover every risk that predecessor introduced
+left unadjudicated; unrelated, partial, or stale resolution pins fail
+closed in both the trigger proof and the deterministic replay.
+
 ## Finding-to-invariant matrix
 
 IDs use `R<review>-<ordinal>` and cover all 38 findings in the first eight
@@ -204,10 +231,16 @@ the row intentionally tests a stale digest.
 | class/use mismatch | close a requirement with a non-paired `verification_use` | pairing closure / `evidence_requirement_pair_invalid` |
 | incompatible claim kind | point permanent evidence at a report claim, or audit/acceptance evidence at a verification claim | kind closure / `evidence_reference_invalid` |
 | reviewer/tester rule reuse | assign an implementation resolution to a reviewer attempt with dependent refs consistently resealed | identity binding / `rule_resolution_identity_mismatch` |
+| forged blocking field | write `blocking` true/false on a typed Finding | contract shape / `contract_shape_invalid` |
+| forged risk continuation | store blocked/continue on a finding_change checkpoint introducing an unadjudicated risk | decision replay / `checkpoint_decision_replay_invalid` |
+| unpinned risk | record an unadjudicated risk with no introducing checkpoint provenance | risk closure / `finding_risk_unobserved` |
+| masked escalation | store a blocked/frozen decision with blocked/warning assessments over an introduced risk | decision replay precedence / `checkpoint_decision_replay_invalid` |
+| unpinned adjudication | let a later resolution adjudicate a risk the checkpoint did not pin | decision replay / `checkpoint_decision_replay_invalid` |
 | rule bytes drift | submit an artifact rebuilt from changed rule bytes for the old Attempt | assigned/submitted identity / `rule_resolution_identity_mismatch` |
 | identity field drift | shift attempt/role/agent/context inside a stored canonical identity | identity binding / `rule_resolution_identity_mismatch` |
 | illegal timeline | reverse start/end, backdate acceptance, or assign after termination | lifecycle chronology/activity error |
 | runtime alias | reuse one provider/runtime subject under a new AgentInstance ID | `runtime_identity_duplicate` + independence error |
+
 
 Historical negative fixtures remain in place. New matrix cases extend them; they
 do not replace review-specific counterexamples with a smaller happy-path suite.

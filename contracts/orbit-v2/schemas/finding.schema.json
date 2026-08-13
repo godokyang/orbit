@@ -11,7 +11,7 @@
         "finding_id",
         "gate_evaluation_id",
         "severity",
-        "blocking",
+        "basis",
         "body",
         "source_evidence_record_refs",
         "supersedes_finding_id",
@@ -24,7 +24,14 @@
         "finding_id": {"type": "string", "pattern": "^ofinding_[a-z0-9][a-z0-9_-]{7,95}$"},
         "gate_evaluation_id": {"type": "string", "pattern": "^ogeval_[a-z0-9][a-z0-9_-]{7,95}$"},
         "severity": {"enum": ["P0", "P1", "P2", "P3"]},
-        "blocking": {"type": "boolean"},
+        "basis": {
+          "enum": [
+            "contract_violation",
+            "regression",
+            "newly_discovered_risk",
+            "hardening_opportunity"
+          ]
+        },
         "body": {"type": "string", "minLength": 1},
         "source_evidence_record_refs": {
           "type": "array",

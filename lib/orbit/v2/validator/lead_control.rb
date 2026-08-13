@@ -630,6 +630,8 @@ module Orbit
             next unless created
 
             observers = checkpoints.values.select do |checkpoint|
+              next false unless checkpoint.dig("reconcile_trigger", "event") == "attempt_created"
+
               ref = checkpoint["current_or_terminal_attempt_ref"]
               ref.is_a?(Hash) &&
                 ref["attempt_id"] == attempt["attempt_id"] &&
@@ -998,6 +1000,22 @@ module Orbit
           reconcile_event = checkpoint.dig("reconcile_trigger", "event")
           next_event = checkpoint.dig("next_trigger", "event")
           action = checkpoint.dig("lead_decision", "action")
+          if risk_needs_user_predecessor?(predecessor) && reconcile_event != "authority_change"
+            add(
+              "checkpoint_trigger_invalid",
+              "a needs_user risk stop can only be succeeded by an authority_change checkpoint with complete exact resolution coverage",
+              "#{path}.reconcile_trigger"
+            )
+          end
+          if reconcile_event == "finding_change" &&
+             introduced_hardening_only?(checkpoint, predecessor) &&
+             !hardening_selection_continuous?(checkpoint, predecessor)
+            add(
+              "checkpoint_selection_invalid",
+              "a hardening-only finding_change observation must preserve the predecessor active mainline selection projection",
+              "#{path}.selected_work_unit_ref"
+            )
+          end
           if checkpoint["is_genesis"] == true
             unless reconcile_event == "genesis" && next_event == "dispatch_before"
               add(
@@ -1162,14 +1180,18 @@ module Orbit
             prior = predecessor && pinned_session_context_generation(predecessor)
             current && current != prior
           when "authority_change"
-            current = checkpoint["project_policy_revision_ref"]
-            prior = predecessor && predecessor["project_policy_revision_ref"]
-            policy_delta = current && prior && current != prior
-            # New user/control-plane authority: the checkpoint consumes a
-            # task.retry.override record the predecessor did not consume.
-            override_delta = checkpoint["retry_override_ref"].is_a?(Hash) &&
-              !(predecessor && predecessor["retry_override_ref"].is_a?(Hash))
-            policy_delta || override_delta
+            if risk_needs_user_predecessor?(predecessor)
+              # A needs_user risk stop resumes only through complete exact
+              # resolution coverage; policy/override deltas never bypass it.
+              resolution_resume_proven?(checkpoint, predecessor)
+            else
+              current = checkpoint["project_policy_revision_ref"]
+              prior = predecessor && predecessor["project_policy_revision_ref"]
+              policy_delta = current && prior && current != prior
+              override_delta = checkpoint["retry_override_ref"].is_a?(Hash) &&
+                !(predecessor && predecessor["retry_override_ref"].is_a?(Hash))
+              policy_delta || override_delta
+            end
           when "dependency_change"
             current = selected_unit_dependencies(checkpoint)
             prior = predecessor && selected_unit_dependencies(predecessor)
@@ -1236,6 +1258,88 @@ module Orbit
           end + Array(checkpoint.dig("delivery_progress", "supporting_refs")) +
             Array(checkpoint.dig("assurance_progress", "supporting_refs"))
         end
+
+        def exact_refs_of_kind(checkpoint, kind)
+          checkpoint_exact_refs(checkpoint).select { |ref| ref.is_a?(Hash) && ref["kind"] == kind }
+        end
+
+        def risk_needs_user_predecessor?(predecessor)
+          decision = predecessor.is_a?(Hash) && predecessor["lead_decision"]
+          decision.is_a?(Hash) &&
+            decision["state"] == "needs_user" &&
+            decision["action"] == "escalate" &&
+            predecessor.dig("reconcile_trigger", "event") == "finding_change"
+        end
+
+        # The resolution-driven authority_change subtype: resuming a
+        # needs_user risk stop requires the exact needs_user/escalate
+        # finding_change predecessor and newly pinned resolution refs
+        # covering every risk that predecessor introduced left
+        # unadjudicated. Unrelated, partial, or stale pins prove nothing.
+        def resolution_resume_proven?(checkpoint, predecessor)
+          return false unless risk_needs_user_predecessor?(predecessor)
+
+          risks = unadjudicated_introduced_risks(predecessor)
+          return false if risks.empty?
+
+          new_refs = exact_refs_of_kind(checkpoint, "finding_resolution") -
+            exact_refs_of_kind(predecessor, "finding_resolution")
+          resolutions = @indexes.fetch("finding_resolutions", {})
+          risks.all? do |risk_ref|
+            new_refs.any? do |ref|
+              resolution = resolutions[ref["id"]]
+              resolution && resolution["content_digest"] == ref["digest"] &&
+                resolution["finding_id"] == risk_ref["id"]
+            end
+          end
+        end
+
+
+        def unadjudicated_introduced_risks(checkpoint)
+          predecessor = @indexes.fetch("lead_checkpoints", {})[
+            checkpoint.dig("predecessor_lead_checkpoint_ref", "lead_checkpoint_id")
+          ]
+          introduced = exact_refs_of_kind(checkpoint, "finding") -
+            (predecessor ? exact_refs_of_kind(predecessor, "finding") : [])
+          policy = @indexes.fetch("project_policy_revisions", {})[
+            checkpoint.dig("project_policy_revision_ref", "policy_revision_id")
+          ]
+          findings = @indexes.fetch("findings", {})
+          resolutions = @indexes.fetch("finding_resolutions", {})
+          own_refs = exact_refs_of_kind(checkpoint, "finding_resolution")
+          introduced.select do |ref|
+            finding = findings[ref["id"]]
+            next false unless finding && finding["content_digest"] == ref["digest"] &&
+                              finding_disposition(finding, policy) == "adjudication_required"
+
+            own_refs.none? do |resolution_ref|
+              resolution = resolutions[resolution_ref["id"]]
+              resolution && resolution["content_digest"] == resolution_ref["digest"] &&
+                resolution["finding_id"] == ref["id"]
+            end
+          end
+        end
+        def introduced_hardening_only?(checkpoint, predecessor)
+          introduced = exact_refs_of_kind(checkpoint, "finding") -
+            (predecessor ? exact_refs_of_kind(predecessor, "finding") : [])
+          policy = @indexes.fetch("project_policy_revisions", {})[
+            checkpoint.dig("project_policy_revision_ref", "policy_revision_id")
+          ]
+          findings = @indexes.fetch("findings", {})
+          introduced.any? && introduced.all? do |ref|
+            finding = findings[ref["id"]]
+            finding && finding["content_digest"] == ref["digest"] &&
+              finding_disposition(finding, policy) == "nonblocking"
+          end
+        end
+
+        def hardening_selection_continuous?(checkpoint, predecessor)
+          predecessor.is_a?(Hash) &&
+            checkpoint["active_task_ref"] == predecessor["active_task_ref"] &&
+            checkpoint["selected_work_unit_ref"] == predecessor["selected_work_unit_ref"] &&
+            checkpoint["current_or_terminal_attempt_ref"] == predecessor["current_or_terminal_attempt_ref"]
+        end
+
 
         def validate_checkpoint_progress(checkpoint, predecessor, path)
           attempts = @indexes.fetch("work_unit_attempts", {})
@@ -2533,6 +2637,8 @@ module Orbit
               resolve_typed_ref(ref, @indexes.fetch("evidence_records", {}), "evidence_record_id", "content_digest", path, field)
             when "finding"
               resolve_typed_ref(ref, @indexes.fetch("findings", {}), "finding_id", "content_digest", path, field)
+            when "finding_resolution"
+              resolve_typed_ref(ref, @indexes.fetch("finding_resolutions", {}), "finding_resolution_id", "content_digest", path, field)
             when "gate_evaluation"
               resolve_typed_ref(ref, @indexes.fetch("gate_evaluations", {}), "gate_evaluation_id", "content_digest", path, field)
             when "lead_checkpoint"

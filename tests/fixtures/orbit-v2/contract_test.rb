@@ -49,6 +49,7 @@ module OrbitV2ContractTest
     test_evidence_reference_and_path_scope_regressions
     test_evidence_requirement_class_use_pairing
     test_rule_resolution_immutable_history_and_binding
+    test_finding_typed_basis_and_disposition
     test_immutable_stores(valid_bundle)
     test_v1_inventory
     test_slice_isolation
@@ -2819,6 +2820,217 @@ module OrbitV2ContractTest
     end
   end
 
+
+  # Slice 4 increment 1: Finding typed basis and active-policy-derived
+  # disposition/closure. Blocking is never agent-writable; the active policy
+  # mapping derives it, closure consumes that mapping, and an unadjudicated
+  # newly_discovered_risk escalates through deterministic LeadControl replay.
+  def test_finding_typed_basis_and_disposition
+    escalate_decision = { "state" => "needs_user", "action" => "escalate", "reason" => "newly discovered risk requires risk-owner/user adjudication" }.freeze
+    continue_decision = { "state" => "blocked", "action" => "continue", "reason" => "authoritative change observed" }.freeze
+    append_finding = lambda do |bundle, basis, id = nil|
+      evaluation = bundle["gate_evaluations"].first
+      finding = OrbitV2FixtureFactory.deep_copy(bundle["findings"].first)
+      finding["finding_id"] = id || "ofinding_#{basis}"
+      finding["basis"] = basis
+      finding["supersedes_finding_id"] = nil
+      finding["body"] = "Typed #{basis} probe finding."
+      rehash(finding)
+      evaluation["finding_refs"] = Array(evaluation["finding_refs"]) + [finding["finding_id"]]
+      rehash(evaluation)
+      bundle["findings"] << finding
+      finding
+    end
+    resolve_finding = lambda do |bundle, finding|
+      source = bundle["gate_evaluations"].first
+      followup = OrbitV2FixtureFactory.deep_copy(source)
+      followup["gate_evaluation_id"] = "ogeval_slice0riskfollowup"
+      followup["verdict"] = "pass"
+      followup["quality_outcome_verdict"] = "pass"
+      followup["quality_question_answers"].each { |answer| answer["verdict"] = "pass" }
+      followup["acceptance_results"].each { |answer| answer["verdict"] = "pass" }
+      followup["counterexample_cases"] = []
+      followup["finding_refs"] = []
+      followup["supersedes_gate_evaluation_id"] = source["gate_evaluation_id"]
+      rehash(followup)
+      bundle["gate_evaluations"] << followup
+      resolution = OrbitV2FixtureFactory.deep_copy(bundle["finding_resolutions"].first)
+      resolution["finding_resolution_id"] = "ofres_#{finding["finding_id"].delete_prefix("ofinding_")}_resolved"
+      resolution["finding_id"] = finding["finding_id"]
+      resolution.delete("authorization_record_ref")
+      resolution["resolution"] = "addressed"
+      resolution["issuer_attempt_id"] = "oattempt_independentreview"
+      resolution["issuer_submission_record_id"] = "oevr_independentreview"
+      resolution["source_finding_ref"] = { "finding_id" => finding["finding_id"], "content_digest" => finding["content_digest"] }
+      resolution["source_gate_evaluation_ref"] = { "gate_evaluation_id" => source["gate_evaluation_id"], "content_digest" => source["content_digest"] }
+      resolution["resolving_gate_evaluation_ref"] = { "gate_evaluation_id" => followup["gate_evaluation_id"], "content_digest" => followup["content_digest"] }
+      resolution["supporting_record_refs"] = ["oevr_implementationone"]
+      resolution["proposal_evidence_record_id"] = "oevr_implementationone"
+      rehash(resolution)
+      bundle["finding_resolutions"] << resolution
+    end
+
+    # 1. Both blocking classes stay valid (policy-derived blocking).
+    %w[contract_violation regression].each do |basis|
+      bundle = OrbitV2FixtureFactory.valid_bundle
+      bundle["findings"].first["basis"] = basis
+      rehash(bundle["findings"].first)
+      assert(validator.validate(bundle).empty?, "#{basis} unresolved finding keeps the existing closure path valid")
+    end
+    bundle = OrbitV2FixtureFactory.valid_bundle
+    hardening = append_finding.call(bundle, "hardening_opportunity")
+    OrbitV2FixtureFactory.append_finding_change_checkpoint(bundle, hardening, continue_decision, preserve_attempt: true)
+    assert(validator.validate(bundle).empty?, "introducing a hardening finding replays to an ordinary non-preemptive continue")
+    mutated = OrbitV2FixtureFactory.valid_bundle
+    hardening = append_finding.call(mutated, "hardening_opportunity")
+    OrbitV2FixtureFactory.append_finding_change_checkpoint(mutated, hardening, continue_decision, preserve_attempt: true)
+    checkpoint = mutated["lead_checkpoints"].last
+    predecessor = mutated["lead_checkpoints"][-2]
+    unit = mutated["work_units"].find { |candidate| candidate["work_unit_id"] == "owu_implementationone" }
+    checkpoint["selected_work_unit_ref"] = OrbitV2FixtureFactory.work_unit_ref(unit)
+    checkpoint["assessments"] = OrbitV2FixtureFactory.checkpoint_assessments(checkpoint["active_task_ref"], checkpoint["selected_work_unit_ref"], checkpoint["current_or_terminal_attempt_ref"])
+    mutated["lead_checkpoints"][-1] = OrbitV2FixtureFactory.reseal_checkpoint(checkpoint, policy: mutated["project_policy_revisions"].last, predecessor_checkpoint: predecessor)
+    codes = validator.validate(mutated).map(&:code)
+    assert(codes.include?("checkpoint_selection_invalid"), "a hardening observation switching the selected WorkUnit must be rejected, got #{codes.uniq.sort.join(",")}")
+
+    # 3. A newly_discovered_risk replays to needs_user/escalate.
+    bundle = OrbitV2FixtureFactory.valid_bundle
+    risk = append_finding.call(bundle, "newly_discovered_risk")
+    OrbitV2FixtureFactory.append_finding_change_checkpoint(bundle, risk, escalate_decision)
+    assert(validator.validate(bundle).empty?, "unadjudicated risk introduction derives needs_user/escalate deterministically")
+
+    # 4. A forged blocked/continue path for the same risk fails replay.
+    bundle = OrbitV2FixtureFactory.valid_bundle
+    risk = append_finding.call(bundle, "newly_discovered_risk")
+    OrbitV2FixtureFactory.append_finding_change_checkpoint(bundle, risk, continue_decision)
+    codes = validator.validate(bundle).map(&:code)
+    assert(
+      codes.uniq.sort == ["checkpoint_decision_replay_invalid"],
+      "forged blocked/continue on an unadjudicated risk must fail replay, got #{codes.uniq.sort.join(",")}"
+    )
+
+    # 5. An unadjudicated risk without checkpoint provenance fails closed.
+    bundle = OrbitV2FixtureFactory.valid_bundle
+    append_finding.call(bundle, "newly_discovered_risk")
+    codes = validator.validate(bundle).map(&:code)
+    assert(codes.include?("finding_risk_unobserved"), "an unpinned risk finding must fail closed, got #{codes.uniq.sort.join(",")}")
+
+    # 6. Future resolutions never rewrite history; only an exact-pinning
+    #    authority_change successor resumes.
+    bundle = OrbitV2FixtureFactory.valid_bundle
+    risk = append_finding.call(bundle, "newly_discovered_risk")
+    OrbitV2FixtureFactory.append_finding_change_checkpoint(bundle, risk, escalate_decision)
+    escalation_id = bundle["lead_checkpoints"].last["lead_checkpoint_id"]
+    escalation_digest = bundle["lead_checkpoints"].last["content_digest"]
+    assert(validator.validate(bundle).empty?, "unadjudicated risk checkpoint validates before any resolution exists")
+    resolve_finding.call(bundle, risk)
+    escalation_after = bundle["lead_checkpoints"].find { |cp| cp["lead_checkpoint_id"] == escalation_id }
+    assert(escalation_after["content_digest"] == escalation_digest, "appending a resolution leaves the historical checkpoint byte-identical")
+    assert(validator.validate(bundle).empty?, "a later resolution cannot invalidate the accepted needs_user checkpoint")
+    OrbitV2FixtureFactory.append_authority_change_resume_checkpoint(bundle, bundle["finding_resolutions"].last)
+    assert(validator.validate(bundle).empty?, "an authority_change checkpoint exact-pinning the resolution resumes deterministically")
+    bundle = OrbitV2FixtureFactory.valid_bundle
+    risk = append_finding.call(bundle, "newly_discovered_risk")
+    resolve_finding.call(bundle, risk)
+    OrbitV2FixtureFactory.append_finding_change_checkpoint(bundle, risk, escalate_decision, resolution: bundle["finding_resolutions"].last)
+    codes = validator.validate(bundle).map(&:code)
+    assert(codes.include?("checkpoint_decision_replay_invalid"), "escalating despite a pinned resolution fails replay")
+
+    # 7. Unrelated/partial/non-authority successors cannot close the risk stop.
+    resume_rejects = {
+      "unrelated" => lambda do |bundle, _risk|
+        OrbitV2FixtureFactory.append_authority_change_resume_checkpoint(bundle, bundle["finding_resolutions"].first)
+      end,
+      "hardening_successor" => lambda do |bundle, _risk|
+        hardening = append_finding.call(bundle, "hardening_opportunity")
+        OrbitV2FixtureFactory.append_finding_change_checkpoint(bundle, hardening, continue_decision)
+      end,
+      "partial" => lambda do |bundle, risk|
+        second = append_finding.call(bundle, "newly_discovered_risk", "ofinding_riskpartial")
+        checkpoint = bundle["lead_checkpoints"].last
+        %w[delivery_progress assurance_progress].each do |field|
+          checkpoint[field]["supporting_refs"] << { "kind" => "finding", "id" => second["finding_id"], "digest" => second["content_digest"] }
+        end
+        policy = bundle["project_policy_revisions"].last
+        bundle["lead_checkpoints"][-1] = OrbitV2FixtureFactory.reseal_checkpoint(checkpoint, policy: policy, predecessor_checkpoint: bundle["lead_checkpoints"][-2])
+        resolve_finding.call(bundle, risk)
+        OrbitV2FixtureFactory.append_authority_change_resume_checkpoint(bundle, bundle["finding_resolutions"].last)
+      end
+    }
+    resume_rejects.each do |name, mutate|
+      bundle = OrbitV2FixtureFactory.valid_bundle
+      risk = append_finding.call(bundle, "newly_discovered_risk")
+      OrbitV2FixtureFactory.append_finding_change_checkpoint(bundle, risk, escalate_decision)
+      mutate.call(bundle, risk)
+      codes = validator.validate(bundle).map(&:code)
+      assert(codes.include?("checkpoint_trigger_invalid"), "#{name} successor must be rejected, got #{codes.uniq.sort.join(",")}")
+    end
+
+    # Public predecessor-first regressions: policy/retry after a risk stop replay frozen.
+    predecessor_first = lambda do |mutate|
+      bundle = OrbitV2FixtureFactory.valid_bundle
+      add_policy_successor(bundle)
+      risk = append_finding.call(bundle, "newly_discovered_risk")
+      OrbitV2FixtureFactory.append_finding_change_checkpoint(bundle, risk, escalate_decision)
+      tip = bundle["lead_checkpoints"].last
+      checkpoint = OrbitV2FixtureFactory.deep_copy(tip)
+      checkpoint["lead_checkpoint_id"] = "olcheckpoint_authoritychange_bypass"
+      checkpoint["predecessor_lead_checkpoint_ref"] = OrbitV2FixtureFactory.cp_ref(tip)
+      checkpoint["reconcile_trigger"] = { "event" => "authority_change", "reason" => "Bypass probe." }
+      checkpoint["next_trigger"] = { "event" => "successor_before", "reason" => "Awaiting the successor boundary." }
+      checkpoint["lead_decision"] = { "state" => "blocked", "action" => "continue", "reason" => "authoritative change observed" }
+      mutate.call(checkpoint, bundle)
+      bundle["lead_checkpoints"] << OrbitV2FixtureFactory.reseal_checkpoint(checkpoint, policy: bundle["project_policy_revisions"].last, predecessor_checkpoint: tip)
+      Orbit::V2::LeadControl.reconcile(
+        { "bundle" => bundle, "lead_control_id" => OrbitV2FixtureFactory::CONTROL_ID,
+          "lead_checkpoint_ref" => OrbitV2FixtureFactory.cp_ref(bundle["lead_checkpoints"].last) },
+        "authority_change"
+      )
+    end
+    policy_only = predecessor_first.call(lambda do |checkpoint, bundle|
+      checkpoint["project_policy_revision_ref"] = OrbitV2FixtureFactory.policy_ref(bundle["project_policy_revisions"].first)
+    end)
+    assert(policy_only["state"] == "frozen", "a policy-only authority_change after a risk stop must replay frozen, got #{policy_only.inspect}")
+    override_only = predecessor_first.call(lambda do |checkpoint, _bundle|
+      checkpoint["retry_override_ref"] = { "authorization_record_ref" => "oauthz_findingwaiver" }
+    end)
+    assert(override_only["state"] == "frozen", "a retry-override authority_change after a risk stop must replay frozen, got #{override_only.inspect}")
+    # 8. Blocked/warning assessment layers cannot mask the mandatory escalation.
+
+    {
+      "blocked" => { "status" => "blocked", "decision" => { "state" => "blocked", "action" => "continue", "reason" => "external blockage in assessment layers: task_queue" } },
+      "warning" => { "status" => "warning", "decision" => { "state" => "frozen", "action" => "freeze", "reason" => "control anomaly in assessment layers: task_queue" } }
+    }.each do |name, variant|
+      bundle = OrbitV2FixtureFactory.valid_bundle
+      risk = append_finding.call(bundle, "newly_discovered_risk")
+      OrbitV2FixtureFactory.append_finding_change_checkpoint(bundle, risk, escalate_decision)
+      checkpoint = bundle["lead_checkpoints"].last
+      checkpoint.dig("assessments", "task_queue")["status"] = variant["status"]
+      checkpoint["lead_decision"] = variant["decision"]
+      checkpoint["next_trigger"] = { "event" => "successor_before", "reason" => "Awaiting the successor boundary." }
+      bundle["lead_checkpoints"][-1] = OrbitV2FixtureFactory.reseal_checkpoint(
+        checkpoint,
+        policy: bundle["project_policy_revisions"].last,
+        predecessor_checkpoint: bundle["lead_checkpoints"][-2]
+      )
+      codes = validator.validate(bundle).map(&:code)
+      assert(codes.include?("checkpoint_decision_replay_invalid"), "a #{name} assessment layer cannot mask the mandatory risk escalation")
+    end
+    # 9. Public LeadControl.reconcile fails closed for a nonexistent ref.
+
+    missing = Orbit::V2::LeadControl.reconcile(
+      {
+        "bundle" => OrbitV2FixtureFactory.valid_bundle,
+        "lead_control_id" => OrbitV2FixtureFactory::CONTROL_ID,
+        "lead_checkpoint_ref" => { "lead_checkpoint_id" => "olcheckpoint_missing", "content_digest" => "sha256:#{'0' * 64}" }
+      },
+      "attempt_created"
+    )
+    assert(
+      missing == { "state" => "frozen", "action" => "freeze", "reason" => "authoritative facts missing or checkpoint not accepted" },
+      "public reconcile with a nonexistent checkpoint ref must fail closed deterministically"
+    )
+  end
   def test_v1_inventory
     inventory = YAML.safe_load(
       File.read(File.join(ROOT, "contracts/orbit-v2/legacy-v1-writer-reader-inventory.yaml")),
@@ -4612,7 +4824,7 @@ module OrbitV2ContractTest
     finding = OrbitV2FixtureFactory.deep_copy(bundle["findings"].first)
     finding["finding_id"] = "ofinding_othergatelineage"
     finding["gate_evaluation_id"] = evaluation["gate_evaluation_id"]
-    finding["blocking"] = false
+    finding["basis"] = "hardening_opportunity"
     finding["supersedes_finding_id"] = nil
     rehash(finding)
     evaluation["finding_refs"] = [finding["finding_id"]]
@@ -4632,7 +4844,7 @@ module OrbitV2ContractTest
     original = bundle["findings"].first
     related = OrbitV2FixtureFactory.deep_copy(original)
     related["finding_id"] = "ofinding_samegatecycle"
-    related["blocking"] = false
+    related["basis"] = "hardening_opportunity"
     original["supersedes_finding_id"] = related["finding_id"]
     related["supersedes_finding_id"] = original["finding_id"]
     evaluation["finding_refs"] << related["finding_id"]
