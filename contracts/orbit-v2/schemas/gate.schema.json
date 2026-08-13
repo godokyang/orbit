@@ -79,7 +79,8 @@
             },
             "implementation_attempt_policy": {"const": "all_accepted_contributors_to_snapshot"},
             "evidence_record_policy": {"const": "all_accepted_required_evidence_for_selected_attempts"},
-            "freshness": {"const": "exact_current_subject"}
+            "freshness": {"const": "exact_current_subject"},
+            "budget_assessment_required": {"const": true}
           },
           "additionalProperties": false
         },
@@ -181,6 +182,51 @@
           "uniqueItems": true,
           "items": {"type": "string", "pattern": "^ogeval_[a-z0-9][a-z0-9_-]{7,95}$"}
         },
+        "budget_assessment_result": {
+          "type": "object",
+          "required": [
+            "assessed_checkpoint_ref",
+            "assessed_effective_budget_binding_digest",
+            "lead_control_id",
+            "scope",
+            "metric_statuses",
+            "outcome"
+          ],
+          "properties": {
+            "assessed_checkpoint_ref": {
+              "type": "object",
+              "required": ["lead_checkpoint_id", "content_digest"],
+              "properties": {
+                "lead_checkpoint_id": {
+                  "type": "string",
+                  "pattern": "^olcheckpoint_[a-z0-9][a-z0-9_-]{7,95}$"
+                },
+                "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+              },
+              "additionalProperties": false
+            },
+            "assessed_effective_budget_binding_digest": {
+              "type": "string",
+              "pattern": "^sha256:[0-9a-f]{64}$"
+            },
+            "lead_control_id": {
+              "type": "string",
+              "pattern": "^olcontrol_[a-z0-9][a-z0-9_-]{7,95}$"
+            },
+            "scope": {"enum": ["work_unit_lineage", "task_lineage"]},
+            "metric_statuses": {
+              "type": "object",
+              "required": ["test_count", "test_code_lines"],
+              "properties": {
+                "test_count": {"enum": ["verified", "unverified"]},
+                "test_code_lines": {"enum": ["verified", "unverified"]}
+              },
+              "additionalProperties": false
+            },
+            "outcome": {"enum": ["accepted", "rejected"]}
+          },
+          "additionalProperties": false
+        },
         "content_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
       },
       "additionalProperties": false
@@ -220,7 +266,13 @@
         },
         "repository_snapshot_ref": {"$ref": "#/$defs/RepositorySnapshotRef"},
         "code_surface_ref": {"$ref": "#/$defs/CodeSurfaceRef"},
-        "subject_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+        "subject_digest": {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"},
+        "budget_review_subject_projection": {
+          "oneOf": [
+            {"type": "null"},
+            {"type": "string", "pattern": "^sha256:[0-9a-f]{64}$"}
+          ]
+        }
       },
       "additionalProperties": false
     },

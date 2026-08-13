@@ -748,6 +748,7 @@
             "context_change",
             "authority_change",
             "dependency_change",
+            "budget_change",
             "task_release",
             "task_suspend",
             "task_acquire",

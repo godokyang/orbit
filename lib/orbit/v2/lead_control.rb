@@ -64,6 +64,9 @@ module Orbit
         if facts.needs_user_risk_predecessor? && trigger != "authority_change"
           return frozen_decision("a needs_user risk stop can only be succeeded by an authority_change checkpoint with complete exact resolution coverage")
         end
+        if facts.rejected_budget_review?
+          return frozen_decision("independent budget review rejected: replan required")
+        end
         unless facts.warning_assessment_layers.empty?
           return frozen_decision("control anomaly in assessment layers: #{facts.warning_assessment_layers.join(",")}")
         end
@@ -142,7 +145,27 @@ module Orbit
             decision("blocked", "continue", "authoritative change observed")
           end
 
-        when "thesis_change", "scope_change", "gate_change",
+        when "gate_change"
+          # The narrowed Slice 4 typed exception: an exact accepted
+          # budget-review consumption (current->inherited source flip at the
+          # consuming checkpoint) is the eligible dispatch authorization; an
+          # arbitrary gate_change never dispatches.
+          if facts.accepted_budget_review_consumption?
+            return frozen_decision("pinned attempt still active blocks a new dispatch") if facts.pinned_attempt_active?
+            return frozen_decision("no selected WorkUnit to dispatch") if facts.selected_work_unit_ref.nil?
+            return blocked_decision("dependency readiness not satisfied") unless facts.dependencies_ready?
+
+            dispatch_fuse(facts) || decision("blocked", "dispatch", "dispatch authorized")
+          else
+            stop_loss(facts) || decision("blocked", "continue", "authoritative change observed")
+          end
+        when "budget_change"
+          # A typed budget adjustment proposal: the checkpoint carries the
+          # exact test_budget_adjust payload with its deterministic derived
+          # binding (delta-proven by the Validator) and stays blocked
+          # awaiting the independent gate review of the exact proposal.
+          stop_loss(facts) || decision("blocked", "continue", "budget adjustment proposed pending independent review")
+        when "thesis_change", "scope_change",
              "task_revision_change", "context_change", "dependency_change"
           stop_loss(facts) || decision("blocked", "continue", "authoritative change observed")
         else
@@ -349,13 +372,54 @@ module Orbit
           dispositions.include?("nonblocking") &&
             dispositions.any? { |value| value && value != "nonblocking" }
         end
-
         def hardening_selection_continuous?
           predecessor = predecessor_checkpoint
           predecessor.is_a?(Hash) &&
             replay_point["active_task_ref"] == predecessor["active_task_ref"] &&
             replay_point["selected_work_unit_ref"] == predecessor["selected_work_unit_ref"] &&
             replay_point["current_or_terminal_attempt_ref"] == predecessor["current_or_terminal_attempt_ref"]
+        end
+
+        # The narrowed Slice 4 typed exception: a gate_change checkpoint may
+        # replay as an eligible dispatch ONLY when it is the exact accepted
+        # budget-review consumption — its adjusted-scope binding flips the
+        # source from current to inherited (ref exact-equal to its own
+        # predecessor) and its measurements consume an accepted review whose
+        # gate evaluation this checkpoint itself pins. An arbitrary
+        # gate_change never dispatches.
+        def accepted_budget_review_consumption?
+          return false unless reconcile_trigger == "gate_change"
+
+          ref = replay_point["predecessor_lead_checkpoint_ref"]
+          predecessor_bindings =
+            Array(predecessor_checkpoint && predecessor_checkpoint["effective_budget_bindings"])
+          bindings.each_with_index.any? do |binding, index|
+            next false unless ControlAuthority.exact_budget_review_transition?(
+              binding, predecessor_bindings[index], ref
+            )
+
+            measurements = binding.is_a?(Hash) ? binding["measurements"] : nil
+            statuses, refs = ControlAuthority.accepted_unverified_review_consumption(measurements)
+            statuses && own_gate_evaluation_ref?(refs.first)
+          end
+        end
+
+        def own_gate_evaluation_ref?(candidate)
+          candidate.is_a?(Hash) &&
+            supporting_refs(replay_point).any? do |ref|
+              ref.is_a?(Hash) && ref["kind"] == "gate_evaluation" &&
+                ref["id"] == candidate["gate_evaluation_id"] &&
+                ref["digest"] == candidate["content_digest"]
+            end
+        end
+        def rejected_budget_review?
+          Array(replay_point && replay_point["effective_budget_bindings"]).any? do |binding|
+            measurements = binding.is_a?(Hash) ? binding["measurements"] : nil
+            measurements.is_a?(Hash) && measurements.values.any? do |measurement|
+              measurement.is_a?(Hash) &&
+                measurement.dig("unverified_assessment", "review_status") == "rejected"
+            end
+          end
         end
 
         def resolution_driven_authority_change?

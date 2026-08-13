@@ -38,8 +38,90 @@ module Orbit
       CHECKPOINT_DUE_OBSERVE_ACTION = "control.checkpoint_due.observe"
       MEASUREMENT_ATTEST_ACTION = "test.measurement.attest"
       BUDGET_SCOPES = %w[work_unit_lineage task_lineage].freeze
+      BUDGET_REVIEW_RESULT_FIELDS = %w[
+        review_status lead_disposition review_gate_evaluation_ref
+      ].freeze
       FINGERPRINT_CATEGORIES = %w[finding test rule check].freeze
 
+      # The canonical budget review subject projection: the assessed binding's
+      # canonical bytes with ONLY the three review-result fields excluded.
+      # The pending and reviewed bindings differ exactly in those fields, so
+      # the projection is the byte-for-byte freshness identity — the complete
+      # binding digest (which includes the review fields) is never a
+      # freshness basis.
+      def budget_review_subject_projection(binding)
+        projected = Marshal.load(Marshal.dump(binding))
+        measurements = projected.is_a?(Hash) ? projected["measurements"] : nil
+        if measurements.is_a?(Hash)
+          measurements.each_value do |measurement|
+            assessment = measurement.is_a?(Hash) ? measurement["unverified_assessment"] : nil
+            next unless assessment.is_a?(Hash)
+
+            BUDGET_REVIEW_RESULT_FIELDS.each { |field| assessment.delete(field) }
+          end
+        end
+        projected
+      end
+
+      # The single Slice 4 typed exception: exactly one deterministic
+      # current->inherited transition of the assessed adjustment source.
+      # Predecessor mode=current, successor mode=inherited, the same
+      # adjustment digest, inherited_checkpoint_ref exactly equal to the
+      # assessed predecessor ref; every other byte stays equal (the three
+      # review-result fields aside). Shared by the deterministic replay
+      # (LeadControl) and the trigger/consumption proofs (Validator).
+      def exact_budget_review_transition?(binding, predecessor_binding, predecessor_ref)
+        return false unless binding.is_a?(Hash) &&
+                            predecessor_binding.is_a?(Hash) &&
+                            predecessor_ref.is_a?(Hash)
+
+        current_source = binding["lead_adjustment_source"]
+        predecessor_source = predecessor_binding["lead_adjustment_source"]
+        return false unless current_source.is_a?(Hash) && predecessor_source.is_a?(Hash)
+        return false unless predecessor_source["mode"] == "current" &&
+                            current_source["mode"] == "inherited" &&
+                            current_source["adjustment_digest"] ==
+                              predecessor_source["adjustment_digest"] &&
+                            current_source["inherited_checkpoint_ref"] == predecessor_ref
+
+        projected = budget_review_subject_projection(predecessor_binding)
+        projected["lead_adjustment_source"] = current_source
+        budget_review_subject_projection(binding) == projected
+      end
+
+      # The exact accepted review consumption basis: at least one unverified
+      # metric; every unverified metric accepted against the SAME exact
+      # review ref; every other metric verified with the canonical nil
+      # assessment. Returns [statuses, refs] or nil.
+      def accepted_unverified_review_consumption(measurements)
+        return nil unless measurements.is_a?(Hash)
+
+        unverified = measurements.select do |_key, metric|
+          metric.is_a?(Hash) && metric["status"] == "unverified"
+        end
+        verified = measurements.select do |_key, metric|
+          metric.is_a?(Hash) && metric["status"] == "verified"
+        end
+        return nil unless unverified.any? &&
+                            unverified.length + verified.length == measurements.length
+        return nil unless verified.values.all? do |metric|
+          metric["unverified_assessment"].nil?
+        end
+
+        statuses = unverified.values.map do |metric|
+          metric.dig("unverified_assessment", "review_status")
+        end
+        refs = unverified.values.map do |metric|
+          metric.dig("unverified_assessment", "review_gate_evaluation_ref")
+        end
+        return nil unless statuses.all? { |status| status == "accepted" }
+        return nil unless refs.uniq.length == 1 && refs.first.is_a?(Hash)
+
+        [statuses, refs]
+      end
+      def budget_review_subject_projection_digest(binding)
+        "sha256:#{CanonicalJSON.sha256(budget_review_subject_projection(binding))}"
+      end
       # ---------------------------------------------------------------- fingerprint
 
       def fingerprint_digest(identity_basis)

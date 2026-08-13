@@ -977,6 +977,7 @@ module Orbit
         OBSERVE_TRIGGERS = %w[
           attempt_created session_change thesis_change scope_change finding_change
           gate_change task_revision_change context_change authority_change dependency_change
+          budget_change
         ].freeze
         DISPATCH_TRIGGERS = %w[
           dispatch_before attempt_terminal successor_before checkpoint_due
@@ -984,8 +985,8 @@ module Orbit
         CHANGE_TRIGGERS = %w[
           thesis_change scope_change finding_change gate_change task_revision_change
           session_change context_change authority_change dependency_change
+          budget_change
         ].freeze
-
         # reconcile_trigger names the event that produced this decision;
         # next_trigger names the awaited event AFTER this checkpoint. A change
         # trigger is never accepted from the enum alone: the exact
@@ -1128,6 +1129,9 @@ module Orbit
                 "attempt_terminal"
               elsif reconcile_event == "session_change"
                 nil
+              elsif reconcile_event == "budget_change"
+                # The proposal awaits the exact independent gate review.
+                "gate_change"
               elsif CHANGE_TRIGGERS.include?(reconcile_event)
                 "successor_before"
               end
@@ -1140,10 +1144,12 @@ module Orbit
             next_event == "authority_change"
           when "dispatch"
             # A needs_user stop resumes only when new user/control-plane
-            # authority facts arrive.
-            reconcile_event == "authority_change" && next_event == "attempt_created"
-          else
-            false
+            # authority facts arrive; the narrowed Slice 4 exception lets the
+            # exact accepted budget-review gate_change dispatch (the trigger
+            # proof enforces the exactness).
+            (reconcile_event == "authority_change" && next_event == "attempt_created") ||
+              (reconcile_event == "gate_change" && next_event == "attempt_created")
+
           end
         end
 
@@ -1160,6 +1166,8 @@ module Orbit
             current = checkpoint["task_queue"]
             prior = predecessor && predecessor["task_queue"]
             current && prior && current != prior
+          when "budget_change"
+            budget_change_delta_proven?(checkpoint, predecessor)
           when "scope_change"
             checkpoint["selected_work_unit_ref"] != predecessor["selected_work_unit_ref"] ||
               checkpoint["active_task_ref"] != predecessor["active_task_ref"]
@@ -1174,7 +1182,12 @@ module Orbit
           when "gate_change"
             current = checkpoint_exact_refs(checkpoint).select { |ref| ref["kind"] == "gate_evaluation" }
             prior = predecessor && checkpoint_exact_refs(predecessor).select { |ref| ref["kind"] == "gate_evaluation" }
-            (current - prior.to_a).any?
+            added = current - prior.to_a
+            if checkpoint.dig("lead_decision", "action") == "dispatch"
+              added.any? && budget_review_dispatch_proven?(checkpoint, predecessor)
+            else
+              added.any?
+            end
           when "context_change"
             current = pinned_session_context_generation(checkpoint)
             prior = predecessor && pinned_session_context_generation(predecessor)
@@ -1200,9 +1213,54 @@ module Orbit
             false
           end
         end
+        # The budget_change trigger proves one deterministic delta: the exact
+        # test_budget_adjust payload canonicalizes to budget_adjustment_digest,
+        # binds the exact lineage predecessor checkpoint+binding with the
+        # predecessor's old effective ceilings, and requests different
+        # ceilings — a bare or forged trigger proves nothing.
+        def budget_change_delta_proven?(checkpoint, predecessor)
+          payload = checkpoint["test_budget_adjust"]
+          return false unless payload.is_a?(Hash) && predecessor.is_a?(Hash)
+          return false unless checkpoint["budget_adjustment_digest"] ==
+                              Orbit::V2::ControlAuthority.budget_adjustment_digest(payload)
+          return false unless payload["predecessor_lead_checkpoint_ref"] ==
+                              {
+                                "lead_checkpoint_id" => predecessor["lead_checkpoint_id"],
+                                "content_digest" => predecessor["content_digest"]
+                              }
 
+          predecessor_binding = Array(predecessor["effective_budget_bindings"]).find do |binding|
+            binding.is_a?(Hash) && binding["budget_scope_type"] == payload["budget_scope_type"]
+          end
+          return false unless predecessor_binding
+          return false unless payload["predecessor_binding_digest"] ==
+                              Orbit::V2::ControlAuthority.binding_digest(predecessor_binding)
+          return false unless payload["old_effective_budget"] ==
+                              Orbit::V2::ControlAuthority.effective_ceiling(predecessor_binding)
+          payload["new_effective_budget"].is_a?(Hash) &&
+            payload["new_effective_budget"] != payload["old_effective_budget"]
+        end
+        # A gate_change may replay as dispatch ONLY for the exact accepted
+        # budget-review consumption: the shared typed current->inherited
+        # transition holds for the adjusted-scope binding and its
+        # measurements carry the exact accepted review basis. An arbitrary
+        # gate_change never dispatches.
+        def budget_review_dispatch_proven?(checkpoint, predecessor)
+          ref = checkpoint["predecessor_lead_checkpoint_ref"]
+          predecessor_bindings = Array(predecessor && predecessor["effective_budget_bindings"])
+          Array(checkpoint["effective_budget_bindings"]).each_with_index.any? do |binding, index|
+            next false unless Orbit::V2::ControlAuthority.exact_budget_review_transition?(
+              binding, predecessor_bindings[index], ref
+            )
+
+            measurements = binding.is_a?(Hash) ? binding["measurements"] : nil
+            !Orbit::V2::ControlAuthority.accepted_unverified_review_consumption(measurements).nil?
+          end
+        end
         def selected_unit_dependencies(checkpoint)
+
           ref = checkpoint["selected_work_unit_ref"]
+
           unit = ref && @indexes.fetch("work_units", {})[ref["work_unit_id"]]
           unit && unit["depends_on_work_unit_refs"]
         end
@@ -1294,7 +1352,6 @@ module Orbit
           end
         end
 
-
         def unadjudicated_introduced_risks(checkpoint)
           predecessor = @indexes.fetch("lead_checkpoints", {})[
             checkpoint.dig("predecessor_lead_checkpoint_ref", "lead_checkpoint_id")
@@ -1339,7 +1396,6 @@ module Orbit
             checkpoint["selected_work_unit_ref"] == predecessor["selected_work_unit_ref"] &&
             checkpoint["current_or_terminal_attempt_ref"] == predecessor["current_or_terminal_attempt_ref"]
         end
-
 
         def validate_checkpoint_progress(checkpoint, predecessor, path)
           attempts = @indexes.fetch("work_unit_attempts", {})
@@ -2169,28 +2225,181 @@ module Orbit
                 bp
               )
             end
-            # Slice 2 phase boundary: default dispatch may proceed with
-            # unverified pending measurements, but a lead_adjustment in
-            # effect for a scope may never rest on unverified numbers — the
-            # adjusted scope's current measurements must be provider-attested
-            # verified until the Slice 4 independent budget assessment
-            # consumer lands.
-            if binding["source_kind"] == "lead_adjustment"
+            # Slice 4 semantics: a lead_adjustment may rest on
+            # provider-attested verified measurements OR on an unverified
+            # metric whose exact independent budget review was accepted;
+            # pending unverified never authorizes dispatch/closure for the
+            # adjustment, but a non-dispatch review-bound proposal may carry
+            # pending measurements awaiting that exact review. Rejected
+            # replays frozen via the deterministic guard.
+            if binding["source_kind"] == "lead_adjustment" &&
+               checkpoint.dig("lead_decision", "action") == "dispatch"
               %w[test_count test_code_lines].each do |key|
                 metric = binding.dig("measurements", key)
-                unless metric.is_a?(Hash) && metric["status"] == "verified"
+                accepted = metric.is_a?(Hash) &&
+                  metric.dig("unverified_assessment", "review_status") == "accepted" &&
+                  metric.dig("unverified_assessment", "review_gate_evaluation_ref").is_a?(Hash)
+                unless metric.is_a?(Hash) && (metric["status"] == "verified" || accepted)
                   add(
                     "checkpoint_budget_invalid",
-                    "Slice 2 lead_adjustment requires provider-attested verified measurements for the adjusted scope; unverified pending cannot authorize an adjustment",
+                    "lead_adjustment requires provider-attested verified measurements or an exact accepted independent budget review",
                     "#{bp}.measurements.#{key}"
                   )
                 end
               end
             end
           end
+          validate_budget_review_consumption(checkpoint, predecessor, bindings, path)
           validate_override_consumption(checkpoint, checkpoints, path)
         end
 
+        # Slice 4 increment 2: the one-way C_pending -> independent
+        # GateEvaluation -> immediate successor C_reviewed consumption. The
+        # consuming binding's accepted/rejected review must resolve to an
+        # exact budget-assessment GateEvaluation whose result binds the exact
+        # immediate predecessor checkpoint/binding and whose subject
+        # projection is byte-identical (fresh) — the complete binding digest
+        # is never a freshness basis.
+        def validate_budget_review_consumption(checkpoint, predecessor, bindings, path)
+          bindings.each_with_index do |binding, index|
+            measurements = binding.is_a?(Hash) ? binding["measurements"] : nil
+            next unless measurements.is_a?(Hash)
+
+            unverified_metrics = %w[test_count test_code_lines].select do |key|
+              measurements.dig(key, "status") == "unverified"
+            end
+            next if unverified_metrics.empty?
+
+            statuses = unverified_metrics.map do |key|
+              measurements.dig(key, "unverified_assessment", "review_status")
+            end
+            next unless statuses.any? { |status| %w[accepted rejected].include?(status) }
+
+            scope = ControlAuthority::BUDGET_SCOPES[index]
+            bp = "#{path}.effective_budget_bindings[#{index}]"
+            refs = unverified_metrics.map do |key|
+              measurements.dig(key, "unverified_assessment", "review_gate_evaluation_ref")
+            end
+            unless statuses.all? { |status| %w[accepted rejected].include?(status) } &&
+                   statuses.uniq.length == 1 && refs.uniq.length == 1 &&
+                   refs.first.is_a?(Hash)
+              add(
+                "checkpoint_budget_invalid",
+                "every unverified metric must consume the same exact accepted/rejected review ref",
+                bp
+              )
+              next
+            end
+            # A review already consumed by the immediate predecessor is
+            # inherited. Inheritance is never an early skip: the current
+            # projection must stay byte-identical to the predecessor
+            # projection, so no successor can reuse a stale assessment after
+            # changing source, ceilings, reason codes, or any other
+            # non-review field.
+            if predecessor.is_a?(Hash)
+              previous_binding = Array(predecessor["effective_budget_bindings"])[index]
+              if previous_binding
+                previous_unverified = %w[test_count test_code_lines].select do |key|
+                  previous_binding.dig("measurements", key, "status") == "unverified"
+                end
+                previous_refs = previous_unverified.map do |key|
+                  previous_binding.dig("measurements", key, "unverified_assessment", "review_gate_evaluation_ref")
+                end
+                if previous_refs.any? && previous_refs.first == refs.first
+                  previous_projection =
+                    Orbit::V2::ControlAuthority.budget_review_subject_projection_digest(previous_binding)
+                  current_projection =
+                    Orbit::V2::ControlAuthority.budget_review_subject_projection_digest(binding)
+                  unless current_projection == previous_projection
+                    add(
+                      "budget_assessment_invalid",
+                      "an inherited accepted review must preserve the assessed projection byte-for-byte",
+                      bp
+                    )
+                  end
+                  next
+                end
+              end
+            end
+            evaluation = @indexes.fetch("gate_evaluations", {})[refs.first["gate_evaluation_id"]]
+            unless evaluation && evaluation["content_digest"] == refs.first["content_digest"]
+              add(
+                "checkpoint_budget_invalid",
+                "review gate evaluation ref must resolve to an exact GateEvaluation",
+                "#{bp}.measurements"
+              )
+              next
+            end
+            result = evaluation["budget_assessment_result"]
+            unless result.is_a?(Hash)
+              add(
+                "budget_assessment_invalid",
+                "an ordinary GateEvaluation cannot close an unverified budget review",
+                "#{bp}.measurements"
+              )
+              next
+            end
+            unless result["outcome"] == statuses.first
+              add(
+                "budget_assessment_invalid",
+                "budget assessment outcome must equal the consumed review status",
+                "#{bp}.measurements"
+              )
+            end
+            unless result["scope"] == scope &&
+                   result["lead_control_id"] == checkpoint["lead_control_id"]
+              add(
+                "budget_assessment_invalid",
+                "consumed assessment scope and lead_control must match the consuming binding",
+                "#{bp}.measurements"
+              )
+            end
+            assessed_ref = result["assessed_checkpoint_ref"]
+            predecessor_ref = checkpoint["predecessor_lead_checkpoint_ref"]
+            unless predecessor.is_a?(Hash) &&
+                   assessed_ref == {
+                     "lead_checkpoint_id" => predecessor["lead_checkpoint_id"],
+                     "content_digest" => predecessor["content_digest"]
+                   }
+              add(
+                "budget_assessment_invalid",
+                "the assessed checkpoint must be the exact immediate lineage predecessor (never self or non-predecessor)",
+                "#{bp}.measurements"
+              )
+              next
+            end
+            predecessor_binding = Array(predecessor["effective_budget_bindings"])[index]
+            projection = Orbit::V2::ControlAuthority.budget_review_subject_projection_digest(
+              predecessor_binding
+            )
+            unless result["assessed_effective_budget_binding_digest"] ==
+                   Orbit::V2::ControlAuthority.binding_digest(predecessor_binding)
+              add(
+                "budget_assessment_invalid",
+                "assessed binding digest must equal the complete assessed predecessor binding digest",
+                "#{bp}.measurements"
+              )
+            end
+
+            unless evaluation.dig("subject", "budget_review_subject_projection") == projection
+              add(
+                "budget_assessment_invalid",
+                "subject projection must equal the canonical predecessor binding projection",
+                "#{bp}.measurements"
+              )
+            end
+            current_projection =
+              Orbit::V2::ControlAuthority.budget_review_subject_projection_digest(binding)
+            unless current_projection == projection ||
+                   Orbit::V2::ControlAuthority.exact_budget_review_transition?(binding, predecessor_binding, predecessor_ref)
+              add(
+                "budget_assessment_invalid",
+                "the consuming binding must be byte-identical to the assessed binding excluding only the review result fields, or make exactly one deterministic current-to-inherited adjustment-source transition",
+                "#{bp}.measurements"
+              )
+            end
+          end
+        end
         def validate_budget_measurements(measurements, path, scope:, project_id:, policy_ref:, task_ref:, work_unit_ref:)
           unless measurements.is_a?(Hash) &&
                  measurements.keys.sort == %w[test_code_lines test_count]
@@ -2288,12 +2497,16 @@ module Orbit
                   )
                 end
               else
-                add(
-                  "checkpoint_budget_invalid",
-                  "accepted/rejected review requires the Slice 4 independent budget assessment consumer; " \
-                    "Slice 2 supports unverified pending only",
-                  "#{mp}.unverified_assessment"
-                )
+                ref = assessment["review_gate_evaluation_ref"]
+                unless ref.is_a?(Hash) &&
+                       Identifiers.valid?("gate_evaluation_id", ref["gate_evaluation_id"]) &&
+                       Identifiers.digest?(ref["content_digest"])
+                  add(
+                    "checkpoint_budget_invalid",
+                    "accepted/rejected review requires an exact review gate evaluation ref",
+                    "#{mp}.unverified_assessment.review_gate_evaluation_ref"
+                  )
+                end
               end
               unless assessment["lead_reason_code"].to_s.length >= 1
                 add(

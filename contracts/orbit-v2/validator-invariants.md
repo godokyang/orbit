@@ -144,6 +144,33 @@ valid FindingResolution refs cover every risk that predecessor introduced
 left unadjudicated; unrelated, partial, or stale resolution pins fail
 closed in both the trigger proof and the deterministic replay.
 
+### Budget assessment consumer closure
+
+An unverified budget measurement closes only through the one-way chain
+`C_pending -> independent GateEvaluation -> immediate successor C_reviewed`.
+The GateRequirement selector must explicitly require budget assessment, and
+the evaluation's `budget_assessment_result` exact-binds the assessed
+checkpoint ref+digest, the COMPLETE assessed binding digest, lead_control,
+scope, and both metric statuses (exact-match, at least one unverified) with
+the typed `accepted|rejected` outcome; only the unverified metric(s) consume
+the accepted/rejected assessment and ref. The successor consumes it with the
+exact review_status/disposition mapping; self/circular,
+non-immediate-predecessor, cross-binding, mismatched outcome/scope/status,
+ordinary evaluations, missing selectors, and non-independent evaluators all
+fail closed; an accepted review unlocks the unverified lead_adjustment path
+while pending remains fail-closed. Freshness is the
+`budget_review_subject_projection` compared byte-for-byte while excluding
+ONLY review_status, lead_disposition, and review_gate_evaluation_ref — the
+complete binding digest is never a freshness basis. The ONE typed exception
+(Slice 4 amendment, Slice 2 current/inherited provenance unchanged): when
+the assessed binding's adjustment source is `mode=current`, the consuming
+successor may make exactly one deterministic `current->inherited` flip —
+same adjustment_digest, `inherited_checkpoint_ref` exactly equal to the
+assessed predecessor ref, every other non-review byte equal; any wrong
+ref/digest/mode/ceilings/source fails closed. Only this exact accepted
+consumption replays as the eligible dispatch decision; rejected replays
+frozen for deterministic replan.
+
 ## Finding-to-invariant matrix
 
 IDs use `R<review>-<ordinal>` and cover all 38 findings in the first eight
@@ -232,6 +259,8 @@ the row intentionally tests a stale digest.
 | incompatible claim kind | point permanent evidence at a report claim, or audit/acceptance evidence at a verification claim | kind closure / `evidence_reference_invalid` |
 | reviewer/tester rule reuse | assign an implementation resolution to a reviewer attempt with dependent refs consistently resealed | identity binding / `rule_resolution_identity_mismatch` |
 | forged blocking field | write `blocking` true/false on a typed Finding | contract shape / `contract_shape_invalid` |
+| stale budget projection | consume a budget review whose binding drifted outside the three review-result fields | projection freshness / `budget_assessment_invalid` |
+| forged adjustment transition | flip the assessed current-mode source to inherited with a wrong ref/digest/mode or drifted ceilings | typed transition / `budget_assessment_invalid` |
 | forged risk continuation | store blocked/continue on a finding_change checkpoint introducing an unadjudicated risk | decision replay / `checkpoint_decision_replay_invalid` |
 | unpinned risk | record an unadjudicated risk with no introducing checkpoint provenance | risk closure / `finding_risk_unobserved` |
 | masked escalation | store a blocked/frozen decision with blocked/warning assessments over an introduced risk | decision replay precedence / `checkpoint_decision_replay_invalid` |

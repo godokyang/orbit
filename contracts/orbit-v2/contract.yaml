@@ -917,6 +917,15 @@ gate_evaluation:
     subject_change_invalidates_old_evaluation: true
     field_presence_or_count_is_verdict: false
     finding_refs: bidirectional_create_only_closure
+    budget_assessment_consumer:
+      construction_order: [C_pending, independent_gate_evaluation, immediate_successor_C_reviewed]
+      gate_requirement_selector: explicit_budget_assessment_required
+      assessed_identity: [assessed_checkpoint_ref_plus_digest, assessed_effective_budget_binding_digest_complete, lead_control_id, scope, both_metric_statuses_exact_at_least_one_unverified]
+      outcome_mapping: consumed_review_status_exactly_equals_assessment_outcome
+      typed_adjustment_transition: exactly_one_deterministic_current_to_inherited_source_flip_at_the_consuming_successor_with_exact_predecessor_ref_and_digest_else_fail_closed
+      complete_binding_digest_as_freshness_basis: forbidden
+      self_or_circular_or_non_predecessor_or_cross_binding: fail_closed
+      ordinary_gate_evaluation_or_missing_selector_or_non_independent_evaluator: fail_closed
     task_unresolved_finding_refs: must_resolve_within_task_gate_lineage
     blocking_finding_for_closure: requires_single_authorized_resolution_tip
     disposition_mapping:

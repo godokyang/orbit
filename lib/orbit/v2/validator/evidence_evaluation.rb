@@ -187,6 +187,8 @@ module Orbit
               add("forbidden_second_fact_source", "GateEvaluation work_unit_id cannot overload evaluator and subject", "#{path}.work_unit_id")
             end
             requirement = requirements[evaluation["gate_requirement_id"]]
+            budget_gate = requirement.is_a?(Hash) &&
+              requirement.dig("subject_selector", "budget_assessment_required") == true
             task = tasks[evaluation.dig("subject", "task_revision_ref", "task_revision_id")]
             unless requirement && task && task["task_revision_id"] == requirement["task_revision_id"]
               add("reference_not_found", "GateEvaluation requirement/task subject does not exist", path)
@@ -210,6 +212,7 @@ module Orbit
               submission,
               path
             )
+            validate_budget_assessment_result(evaluation, requirement, evaluator_attempt, path)
             expected = nil
             check("#{path}.subject") do
               expected = EvaluationSubject.select(
@@ -222,11 +225,23 @@ module Orbit
                 code_surface: bundle["code_surface"]
               )
             end
-            if expected && !EvaluationSubject.same?(expected, evaluation["subject"])
-              actual = evaluation["subject"]
-              code = subject_shape_complete?(actual) ? "subject_stale" : "subject_incomplete"
-              add(code, "GateEvaluation subject is not the current canonical selector result", "#{path}.subject")
+            if expected
+              if budget_gate
+                expected = expected.merge(
+                  "budget_review_subject_projection" =>
+                    evaluation.dig("subject", "budget_review_subject_projection")
+                )
+                identity = expected.reject { |key, _value| key == "subject_digest" }
+                expected["subject_digest"] =
+                  "sha256:#{Orbit::V2::CanonicalJSON.sha256(identity)}"
+              end
+              if !EvaluationSubject.same?(expected, evaluation["subject"])
+                actual = evaluation["subject"]
+                code = subject_shape_complete?(actual) ? "subject_stale" : "subject_incomplete"
+                add(code, "GateEvaluation subject is not the current canonical selector result", "#{path}.subject")
+              end
             end
+
             if expected
               evaluator_agent_id = evaluator_attempt.fetch("events").first
                                                     .fetch("assignment")
@@ -281,6 +296,93 @@ module Orbit
             "gate_evaluation_id",
             "gate_evaluations"
           )
+        end
+        def validate_budget_assessment_result(evaluation, requirement, evaluator_attempt, path)
+          result = evaluation["budget_assessment_result"]
+          budget_gate = requirement.dig("subject_selector", "budget_assessment_required") == true
+          if budget_gate && !result.is_a?(Hash)
+            add(
+              "budget_assessment_invalid",
+              "a budget-assessment GateRequirement evaluation must carry an exact budget_assessment_result",
+              path
+            )
+            return
+          end
+          return unless result.is_a?(Hash)
+
+          unless budget_gate
+            add(
+              "budget_assessment_invalid",
+              "budget_assessment_result requires the GateRequirement selector to explicitly require budget assessment",
+              "#{path}.budget_assessment_result"
+            )
+            return
+          end
+          checkpoints = @indexes.fetch("lead_checkpoints", {})
+          ref = result["assessed_checkpoint_ref"]
+          assessed = ref.is_a?(Hash) && checkpoints[ref["lead_checkpoint_id"]]
+          unless assessed && assessed["content_digest"] == ref["content_digest"]
+            add(
+              "budget_assessment_invalid",
+              "assessed_checkpoint_ref must resolve to an exact accepted checkpoint",
+              "#{path}.budget_assessment_result.assessed_checkpoint_ref"
+            )
+            return
+          end
+          binding = Array(assessed["effective_budget_bindings"]).find do |candidate|
+            candidate.is_a?(Hash) && candidate["budget_scope_type"] == result["scope"]
+          end
+          statuses = %w[test_count test_code_lines].map do |key|
+            binding && binding.dig("measurements", key, "status")
+          end
+          unless result["lead_control_id"] == assessed["lead_control_id"]
+            add(
+              "budget_assessment_invalid",
+              "assessed lead_control_id must match the assessed checkpoint",
+              "#{path}.budget_assessment_result.lead_control_id"
+            )
+          end
+          unless binding &&
+                 result["metric_statuses"] == {
+                   "test_count" => statuses[0],
+                   "test_code_lines" => statuses[1]
+                 } &&
+                 statuses.include?("unverified")
+            add(
+              "budget_assessment_invalid",
+              "metric_statuses must exact-match the assessed binding statuses with at least one unverified metric",
+              "#{path}.budget_assessment_result.metric_statuses"
+            )
+            return
+          end
+          unless result["assessed_effective_budget_binding_digest"] ==
+                 Orbit::V2::ControlAuthority.binding_digest(binding)
+            add(
+              "budget_assessment_invalid",
+              "assessed binding digest must equal the complete assessed binding digest",
+              "#{path}.budget_assessment_result.assessed_effective_budget_binding_digest"
+            )
+          end
+          projection = Orbit::V2::ControlAuthority.budget_review_subject_projection_digest(binding)
+
+          unless evaluation.dig("subject", "budget_review_subject_projection") == projection
+            add(
+              "budget_assessment_invalid",
+              "subject budget_review_subject_projection must equal the assessed binding projection",
+              "#{path}.subject.budget_review_subject_projection"
+            )
+          end
+          lead_agent_id = assessed.dig("lead_agent_instance_ref", "agent_instance_id")
+          evaluator_agent_id = evaluator_attempt.fetch("events").first
+                                                .fetch("assignment")
+                                                .fetch("agent_instance_id")
+          if lead_agent_id && evaluator_agent_id == lead_agent_id
+            add(
+              "budget_assessment_invalid",
+              "the budget assessment evaluator must be independent of the assessed checkpoint lead writer",
+              "#{path}.evaluator_attempt_id"
+            )
+          end
         end
 
         def validate_evaluation_answers(evaluation, requirement, task, path)

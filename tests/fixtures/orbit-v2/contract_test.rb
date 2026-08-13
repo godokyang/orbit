@@ -50,6 +50,7 @@ module OrbitV2ContractTest
     test_evidence_requirement_class_use_pairing
     test_rule_resolution_immutable_history_and_binding
     test_finding_typed_basis_and_disposition
+    test_budget_assessment_consumer_closure
     test_immutable_stores(valid_bundle)
     test_v1_inventory
     test_slice_isolation
@@ -2820,7 +2821,6 @@ module OrbitV2ContractTest
     end
   end
 
-
   # Slice 4 increment 1: Finding typed basis and active-policy-derived
   # disposition/closure. Blocking is never agent-writable; the active policy
   # mapping derives it, closure consumes that mapping, and an unadjudicated
@@ -3031,7 +3031,305 @@ module OrbitV2ContractTest
       "public reconcile with a nonexistent checkpoint ref must fail closed deterministically"
     )
   end
+
+  # Slice 4 inc 2: one-way C_pending -> independent budget GateEvaluation ->
+  # immediate successor C_reviewed consumption; all identity/scope/status/
+  # freshness/evaluator independence failures close through public seams.
+  def test_budget_assessment_consumer_closure
+    continue_decision = { "state" => "blocked", "action" => "continue", "reason" => "authoritative change observed" }.freeze
+    frozen_decision = { "state" => "frozen", "action" => "freeze", "reason" => "independent budget review rejected: replan required" }.freeze
+    dispatch_decision = { "state" => "blocked", "action" => "dispatch", "reason" => "dispatch authorized" }.freeze
+    build_reviewed_bundle = lambda do |outcome:, select_budget_gate: true, with_result: true, pending_statuses: nil, adjustment: false, mixed: false|
+      bundle = OrbitV2FixtureFactory.valid_bundle
+      task = bundle["task_revisions"].first
+      gate = if select_budget_gate
+        budget_gate = OrbitV2FixtureFactory.deep_copy(bundle["gate_requirements"].first)
+        budget_gate["gate_requirement_id"] = "ogreq_budgetassessment"
+        budget_gate["gate_lineage_id"] = "ogline_budgetassessment"
+        budget_gate["subject_selector"]["budget_assessment_required"] = true
+        rehash(budget_gate)
+        task["gate_requirement_refs"] = Array(task["gate_requirement_refs"]) + [budget_gate["gate_requirement_id"]]
+        rehash(task)
+        rebind_checkpoint_refs(bundle, task: task)
+        refresh_work_authorizations(bundle, task)
+        bundle["gate_requirements"] << budget_gate
+        refresh_evaluation_subject(bundle)
+        budget_gate
+      else
+        bundle["gate_requirements"].first
+      end
+      if adjustment
+        policy = bundle["project_policy_revisions"].first
+        tip = bundle["lead_checkpoints"].last
+        payload = { "budget_scope_type" => "work_unit_lineage", "project_policy_revision_ref" => OrbitV2FixtureFactory.policy_ref(policy), "predecessor_lead_checkpoint_ref" => OrbitV2FixtureFactory.cp_ref(tip), "predecessor_binding_digest" => Orbit::V2::ControlAuthority.binding_digest(tip["effective_budget_bindings"].first), "old_effective_budget" => { "test_count" => tip["effective_budget_bindings"].first["effective_test_count"], "test_code_lines" => tip["effective_budget_bindings"].first["effective_test_code_lines"] }, "new_effective_budget" => { "test_count" => 15, "test_code_lines" => 450 }, "supporting_refs" => [] }
+        proposal = OrbitV2FixtureFactory.deep_copy(tip)
+        proposal["lead_checkpoint_id"] = "olcheckpoint_budgetproposal"
+        proposal["predecessor_lead_checkpoint_ref"] = OrbitV2FixtureFactory.cp_ref(tip)
+        proposal["current_or_terminal_attempt_ref"] = nil
+        proposal["assessments"] = OrbitV2FixtureFactory.checkpoint_assessments(proposal["active_task_ref"], proposal["selected_work_unit_ref"], nil)
+        proposal["reconcile_trigger"] = { "event" => "budget_change", "reason" => "Proposed budget adjustment pending independent review." }
+        proposal["next_trigger"] = { "event" => "gate_change", "reason" => "Awaiting the independent budget review." }
+        proposal["lead_decision"] = { "state" => "blocked", "action" => "continue", "reason" => "budget adjustment proposed pending independent review" }
+        %w[delivery_progress assurance_progress].each { |field| proposal[field] = OrbitV2FixtureFactory.checkpoint_progress("not_assessed").merge("predecessor_lead_checkpoint_ref" => proposal["predecessor_lead_checkpoint_ref"], "supporting_refs" => []) }
+        wu_measurements = OrbitV2FixtureFactory.unverified_pending_measurements
+        if mixed
+          unit = bundle["work_units"].find { |candidate| candidate["work_unit_id"] == proposal.dig("selected_work_unit_ref", "work_unit_id") }
+          attested = OrbitV2FixtureFactory.attested_measurements(bundle, usage_count: 3, usage_lines: 30, task: task, unit: unit, policy: policy, scope: "work_unit_lineage")
+          wu_measurements = OrbitV2FixtureFactory.deep_copy(wu_measurements).merge("test_count" => attested["test_count"])
+        end
+        bindings = OrbitV2FixtureFactory.default_budget_bindings(policy: policy, predecessor_checkpoint: tip, active_task_ref: proposal["active_task_ref"], selected_work_unit_ref: proposal["selected_work_unit_ref"], budget_adjustment: payload, measurements_by_scope: { "work_unit_lineage" => wu_measurements, "task_lineage" => OrbitV2FixtureFactory.unverified_pending_measurements })
+        bundle["lead_checkpoints"] << OrbitV2FixtureFactory.reseal_checkpoint(proposal, policy: policy, predecessor_checkpoint: tip, bindings: bindings, budget_adjustment: payload)
+      end
+      pending = bundle["lead_checkpoints"].last
+      if pending_statuses
+        unit = bundle["work_units"].find { |candidate| candidate["work_unit_id"] == pending.dig("selected_work_unit_ref", "work_unit_id") }
+        attested = OrbitV2FixtureFactory.attested_measurements(bundle, usage_count: 3, usage_lines: 30, task: task, unit: unit, policy: bundle["project_policy_revisions"].first, scope: "work_unit_lineage")
+        mixed = OrbitV2FixtureFactory.deep_copy(pending["effective_budget_bindings"].first["measurements"])
+        pending_statuses.each { |metric, status| mixed[metric] = status == "verified" ? attested[metric] : OrbitV2FixtureFactory.unverified_pending_measurements[metric] }
+        pinned_attempt = (ref = pending["current_or_terminal_attempt_ref"]) && bundle["work_unit_attempts"].find { |a| a["attempt_id"] == ref["attempt_id"] }
+        resolution = pinned_attempt && bundle["rule_resolution_artifacts"].find { |r| r["resolution_id"] == pinned_attempt.dig("events", 0, "assignment", "assigned_rule_resolution_id") }
+        pending_bindings = OrbitV2FixtureFactory.default_budget_bindings(policy: bundle["project_policy_revisions"].first, predecessor_checkpoint: bundle["lead_checkpoints"][-2], active_task_ref: pending["active_task_ref"], selected_work_unit_ref: pending["selected_work_unit_ref"], measurements_by_scope: { "work_unit_lineage" => mixed, "task_lineage" => pending["effective_budget_bindings"][1]["measurements"] })
+        bundle["lead_checkpoints"][-1] = OrbitV2FixtureFactory.reseal_checkpoint(pending, policy: bundle["project_policy_revisions"].first, predecessor_checkpoint: bundle["lead_checkpoints"][-2], bindings: pending_bindings, attempt: pinned_attempt, resolution: resolution)
+        pending = bundle["lead_checkpoints"].last
+      end
+      source = bundle["gate_evaluations"].first
+      evaluation = OrbitV2FixtureFactory.deep_copy(source)
+      evaluation["gate_evaluation_id"] = "ogeval_budgetassessment"
+      evaluation["gate_requirement_id"] = gate["gate_requirement_id"]
+      evaluation["gate_requirement_content_digest"] = gate["content_digest"]
+      evaluation["supersedes_gate_evaluation_id"] = nil
+      evaluation["finding_refs"] = []
+      subject = Orbit::V2::EvaluationSubject.select(
+        gate_requirement: gate,
+        task_revision: task,
+        work_units: bundle["work_units"],
+        attempts: bundle["work_unit_attempts"],
+        evidence_records: bundle["evidence_records"],
+        repository_snapshot: bundle["repository_snapshot"],
+        code_surface: bundle["code_surface"]
+      )
+      assessed_binding = pending["effective_budget_bindings"].find do |candidate|
+        candidate["budget_scope_type"] == "work_unit_lineage"
+      end
+      projection = Orbit::V2::ControlAuthority.budget_review_subject_projection_digest(assessed_binding)
+      subject["budget_review_subject_projection"] = projection
+      rehash_subject(subject)
+      evaluation["subject"] = subject
+      if with_result
+        evaluation["budget_assessment_result"] = {
+          "assessed_checkpoint_ref" => OrbitV2FixtureFactory.cp_ref(pending),
+          "assessed_effective_budget_binding_digest" =>
+            Orbit::V2::ControlAuthority.binding_digest(assessed_binding),
+          "lead_control_id" => pending["lead_control_id"],
+          "scope" => "work_unit_lineage",
+          "metric_statuses" => {
+            "test_count" => assessed_binding.dig("measurements", "test_count", "status"),
+            "test_code_lines" => assessed_binding.dig("measurements", "test_code_lines", "status")
+          },
+          "outcome" => outcome
+        }
+      end
+      rehash(evaluation)
+      bundle["gate_evaluations"] << evaluation
+
+      reviewed = OrbitV2FixtureFactory.deep_copy(pending)
+      reviewed["lead_checkpoint_id"] = "olcheckpoint_budgetreviewed"
+      reviewed["predecessor_lead_checkpoint_ref"] = OrbitV2FixtureFactory.cp_ref(pending)
+      reviewed["current_or_terminal_attempt_ref"] = nil
+      reviewed["assessments"] = OrbitV2FixtureFactory.checkpoint_assessments(reviewed["active_task_ref"], reviewed["selected_work_unit_ref"], nil)
+      gate_ref = { "kind" => "gate_evaluation", "id" => evaluation["gate_evaluation_id"], "digest" => evaluation["content_digest"] }
+      proposal_refs = [gate_ref]
+      if adjustment
+        unit = bundle["work_units"].find { |candidate| candidate["work_unit_id"] == reviewed.dig("selected_work_unit_ref", "work_unit_id") }
+        thesis = bundle["change_theses"].find { |candidate| candidate["work_unit_id"] == unit["work_unit_id"] }
+        review_attempt = bundle["work_unit_attempts"].find { |candidate| candidate["attempt_id"] == "oattempt_independentreview" }
+        rule = bundle["rule_resolution_artifacts"].find { |candidate| candidate["resolution_id"] == review_attempt.dig("events", 0, "assignment", "assigned_rule_resolution_id") }
+        proposal_refs << { "kind" => "change_thesis", "id" => thesis["change_thesis_id"], "digest" => thesis["content_digest"] }
+        proposal_refs << { "kind" => "rule_resolution", "id" => rule["resolution_id"], "digest" => rule["identity_sha256"] }
+      end
+      reviewed["delivery_progress"] = OrbitV2FixtureFactory.checkpoint_progress("not_assessed").merge("predecessor_lead_checkpoint_ref" => reviewed["predecessor_lead_checkpoint_ref"], "supporting_refs" => proposal_refs)
+      reviewed["assurance_progress"] = OrbitV2FixtureFactory.checkpoint_progress("not_assessed").merge("predecessor_lead_checkpoint_ref" => reviewed["predecessor_lead_checkpoint_ref"], "supporting_refs" => [gate_ref])
+      reviewed["reconcile_trigger"] = { "event" => "gate_change", "reason" => "Independent budget review consumed." }
+      reviewed["next_trigger"] = outcome == "accepted" && adjustment ?
+        { "event" => "attempt_created", "reason" => "Awaiting the dispatched Attempt creation." } :
+        { "event" => "successor_before", "reason" => "Awaiting the successor boundary." }
+      reviewed["lead_decision"] = outcome == "rejected" ? frozen_decision : (adjustment ? dispatch_decision : continue_decision)
+      reviewed["budget_adjustment_digest"] = nil
+      reviewed["test_budget_adjust"] = nil
+      reviewed_measurements = OrbitV2FixtureFactory.deep_copy(assessed_binding["measurements"])
+      disposition = outcome == "accepted" ? "proceed_after_independent_review" : "replan_after_independent_rejection"
+      ref = { "gate_evaluation_id" => evaluation["gate_evaluation_id"], "content_digest" => evaluation["content_digest"] }
+      %w[test_count test_code_lines].each do |metric|
+        next if reviewed_measurements[metric]["status"] == "verified"
+
+        reviewed_measurements[metric]["unverified_assessment"]["review_status"] = outcome
+        reviewed_measurements[metric]["unverified_assessment"]["lead_disposition"] = disposition
+        reviewed_measurements[metric]["unverified_assessment"]["review_gate_evaluation_ref"] = ref
+      end
+      reviewed_bindings = OrbitV2FixtureFactory.default_budget_bindings(
+        policy: bundle["project_policy_revisions"].first,
+        predecessor_checkpoint: pending,
+        active_task_ref: reviewed["active_task_ref"],
+        selected_work_unit_ref: reviewed["selected_work_unit_ref"],
+        measurements_by_scope: {
+          "work_unit_lineage" => reviewed_measurements,
+          "task_lineage" => OrbitV2FixtureFactory.unverified_pending_measurements
+        }
+      )
+      reviewed = OrbitV2FixtureFactory.reseal_checkpoint(
+        reviewed,
+        policy: bundle["project_policy_revisions"].first,
+        predecessor_checkpoint: pending,
+        bindings: reviewed_bindings
+      )
+      bundle["lead_checkpoints"] << reviewed
+      bundle
+    end
+    accepted_bundle = build_reviewed_bundle.call(outcome: "accepted")
+    assert(validator.validate(accepted_bundle).empty?, "accepted budget review consumption validates end to end")
+    pending_binding = accepted_bundle["lead_checkpoints"][-2]["effective_budget_bindings"].first
+    reviewed_binding = accepted_bundle["lead_checkpoints"][-1]["effective_budget_bindings"].first
+    assert(
+      Orbit::V2::ControlAuthority.binding_digest(pending_binding) != Orbit::V2::ControlAuthority.binding_digest(reviewed_binding) &&
+        Orbit::V2::ControlAuthority.budget_review_subject_projection_digest(pending_binding) == Orbit::V2::ControlAuthority.budget_review_subject_projection_digest(reviewed_binding),
+      "successor differs in complete digest only through the review result fields"
+    )
+    [{}, { mixed: true }].each { |options| assert(validator.validate(build_reviewed_bundle.call(options.merge(outcome: "accepted", adjustment: true))).empty?, "the budget_change proposal consumes its exact gate review and the one typed transition dispatches#{options.empty? ? "" : " with mixed metrics"}") }
+    assert(validator.validate(build_reviewed_bundle.call(pending_statuses: { "test_count" => "verified" }, outcome: "accepted")).empty?, "accepted review unlocks the verified path")
+    assert(validator.validate(build_reviewed_bundle.call(outcome: "rejected")).empty?, "rejected budget review consumption replays frozen deterministically")
+    # A bare budget_change trigger with no typed payload proves no delta.
+    bare = build_reviewed_bundle.call(outcome: "accepted", adjustment: true)
+    index = bare["lead_checkpoints"].index { |candidate| candidate["lead_checkpoint_id"] == "olcheckpoint_budgetproposal" }
+    proposal = bare["lead_checkpoints"][index]
+    %w[test_budget_adjust budget_adjustment_digest].each { |field| proposal[field] = nil }
+    bare["lead_checkpoints"][index] = OrbitV2FixtureFactory.reseal_checkpoint(proposal, policy: bare["project_policy_revisions"].first, predecessor_checkpoint: bare["lead_checkpoints"][index - 1])
+    codes = validator.validate(bare).map(&:code)
+    assert(codes.include?("checkpoint_trigger_invalid"), "a bare budget_change trigger with no payload fails the delta proof")
+    forged = build_reviewed_bundle.call(outcome: "rejected")
+    checkpoint = forged["lead_checkpoints"].last
+    checkpoint["lead_decision"] = continue_decision
+    forged["lead_checkpoints"][-1] = OrbitV2FixtureFactory.reseal_checkpoint(checkpoint, policy: forged["project_policy_revisions"].first, predecessor_checkpoint: forged["lead_checkpoints"][-2], bindings: checkpoint["effective_budget_bindings"])
+    codes = validator.validate(forged).map(&:code)
+    assert(codes.include?("checkpoint_decision_replay_invalid"), "forged continue on a rejected review must fail replay")
+    codes = validator.validate(OrbitV2FixtureFactory.adjustment_bundle(mode: :unverified_adjust)).map(&:code)
+    assert(codes.include?("checkpoint_budget_invalid"), "pending unverified measurements still cannot unlock the lead_adjustment path")
+    wrong_ref = build_reviewed_bundle.call(outcome: "accepted", adjustment: true)
+    reviewed = wrong_ref["lead_checkpoints"].last
+    reviewed["effective_budget_bindings"][0]["lead_adjustment_source"]["inherited_checkpoint_ref"] = { "lead_checkpoint_id" => "olcheckpoint_slice0successor", "content_digest" => wrong_ref["lead_checkpoints"][-2]["content_digest"] }
+    wrong_ref["lead_checkpoints"][-1] = OrbitV2FixtureFactory.reseal_checkpoint(reviewed, policy: wrong_ref["project_policy_revisions"].first, predecessor_checkpoint: wrong_ref["lead_checkpoints"][-2], bindings: reviewed["effective_budget_bindings"])
+    codes = validator.validate(wrong_ref).map(&:code)
+    assert(codes.include?("budget_assessment_invalid"), "a wrong inherited ref on the adjustment transition must fail through budget_assessment_invalid")
+
+    reinherit = build_reviewed_bundle.call(outcome: "accepted", adjustment: true)
+    reviewed = reinherit["lead_checkpoints"].last
+    stale = OrbitV2FixtureFactory.deep_copy(reviewed)
+    stale["lead_checkpoint_id"] = "olcheckpoint_budgetstale"
+    stale["predecessor_lead_checkpoint_ref"] = OrbitV2FixtureFactory.cp_ref(reviewed)
+    %w[delivery_progress assurance_progress].each { |field| stale[field]["predecessor_lead_checkpoint_ref"] = OrbitV2FixtureFactory.cp_ref(reviewed) }
+    bindings = OrbitV2FixtureFactory.default_budget_bindings(policy: reinherit["project_policy_revisions"].first, predecessor_checkpoint: reviewed, active_task_ref: stale["active_task_ref"], selected_work_unit_ref: stale["selected_work_unit_ref"], measurements_by_scope: { "work_unit_lineage" => reviewed["effective_budget_bindings"][0]["measurements"], "task_lineage" => reviewed["effective_budget_bindings"][1]["measurements"] })
+    reinherit["lead_checkpoints"] << OrbitV2FixtureFactory.reseal_checkpoint(stale, policy: reinherit["project_policy_revisions"].first, predecessor_checkpoint: reviewed, bindings: bindings)
+
+    codes = validator.validate(reinherit).map(&:code)
+    assert(codes.include?("budget_assessment_invalid"), "re-inheriting the old accepted review across the provenance change must fail through budget_assessment_invalid")
+
+    mutated = build_reviewed_bundle.call(outcome: "accepted", adjustment: true)
+    index = mutated["lead_checkpoints"].index { |candidate| candidate["lead_checkpoint_id"] == "olcheckpoint_budgetproposal" }
+    proposal = mutated["lead_checkpoints"][index]
+    proposal["effective_budget_bindings"][0]["lead_adjustment_source"]["mode"] = "inherited"
+    mutated["lead_checkpoints"][index] = OrbitV2FixtureFactory.reseal_checkpoint(proposal, policy: mutated["project_policy_revisions"].first, predecessor_checkpoint: mutated["lead_checkpoints"][index - 1], bindings: proposal["effective_budget_bindings"])
+    reviewed = mutated["lead_checkpoints"].last
+    reviewed["predecessor_lead_checkpoint_ref"] = mutated["lead_checkpoints"][index].slice("lead_checkpoint_id", "content_digest")
+    reviewed["effective_budget_bindings"][0]["lead_adjustment_source"]["inherited_checkpoint_ref"] = reviewed["predecessor_lead_checkpoint_ref"]
+    reviewed = mutated["lead_checkpoints"][-1] = OrbitV2FixtureFactory.reseal_checkpoint(reviewed, policy: mutated["project_policy_revisions"].first, predecessor_checkpoint: mutated["lead_checkpoints"][index], bindings: reviewed["effective_budget_bindings"])
+    decision = Orbit::V2::LeadControl.reconcile({ "bundle" => mutated, "lead_control_id" => OrbitV2FixtureFactory::CONTROL_ID, "lead_checkpoint_ref" => { "lead_checkpoint_id" => reviewed["lead_checkpoint_id"], "content_digest" => reviewed["content_digest"] } }, "gate_change")
+    assert(decision["action"] == "continue", "a predecessor that is not mode=current must replay continue, never dispatch")
+    # 4-8. Discriminating negative table.
+    mutate_result = lambda do |bundle, patch|
+      patch.each do |field, value|
+        bundle["gate_evaluations"].last["budget_assessment_result"][field] = value
+      end
+      rehash(bundle["gate_evaluations"].last)
+      reseal_consuming(bundle, bundle["lead_checkpoints"].last, evaluation: bundle["gate_evaluations"].last)
+
+    end
+    {
+      "ordinary-evaluation" => lambda do |bundle|
+        checkpoint = bundle["lead_checkpoints"].last
+        ref = { "gate_evaluation_id" => "ogeval_slice0review", "content_digest" => bundle["gate_evaluations"].first["content_digest"] }
+        %w[test_count test_code_lines].each do |metric|
+          checkpoint["effective_budget_bindings"][0]["measurements"][metric]["unverified_assessment"]["review_gate_evaluation_ref"] = ref
+        end
+        reseal_consuming(bundle, checkpoint)
+      end,
+      "missing-selector" => lambda { |bundle| },
+      "self-circular" => lambda do |bundle|
+        checkpoint = bundle["lead_checkpoints"].last
+        bundle["gate_evaluations"].last["budget_assessment_result"]["assessed_checkpoint_ref"] =
+          OrbitV2FixtureFactory.cp_ref(checkpoint)
+        rehash(bundle["gate_evaluations"].last)
+        reseal_consuming(bundle, checkpoint, evaluation: bundle["gate_evaluations"].last)
+      end,
+      "stale-projection" => lambda do |bundle|
+        checkpoint = bundle["lead_checkpoints"].last
+        %w[test_count test_code_lines].each do |metric|
+          checkpoint["effective_budget_bindings"][0]["measurements"][metric]["unverified_assessment"]["lead_reason_code"] = "drifted reason"
+        end
+
+        reseal_consuming(bundle, checkpoint)
+      end,
+      "outcome-mismatch" => lambda { |bundle| mutate_result.call(bundle, { "outcome" => "rejected" }) },
+      "wrong-digest" => lambda { |bundle| mutate_result.call(bundle, { "assessed_effective_budget_binding_digest" => "sha256:#{'0' * 64}" }) },
+      "scope-mismatch" => lambda { |bundle| mutate_result.call(bundle, { "scope" => "task_lineage" }) },
+      "status-mismatch" => lambda { |bundle| mutate_result.call(bundle, { "metric_statuses" => { "test_count" => "unverified", "test_code_lines" => "verified" } }) },
+      "missing-result" => lambda { |bundle| },
+      "wrong-control" => lambda { |bundle| mutate_result.call(bundle, { "lead_control_id" => "olcontrol_wrongcontrol" }) }
+    }.each do |name, mutate|
+      bundle = build_reviewed_bundle.call(outcome: "accepted", select_budget_gate: name != "missing-selector", with_result: name != "missing-result")
+
+      mutate.call(bundle)
+      codes = validator.validate(bundle).map(&:code)
+      assert(
+        codes.include?("budget_assessment_invalid"),
+        "#{name} must fail through budget_assessment_invalid, got #{codes.uniq.sort.join(",")}"
+      )
+    end
+    # 9. The evaluator must be independent of the assessed checkpoint lead writer.
+    bundle = build_reviewed_bundle.call(outcome: "accepted")
+    pending = bundle["lead_checkpoints"][-2]
+    pending["lead_agent_instance_ref"] = { "agent_instance_id" => "oagent_independentreviewer" }
+    bundle["lead_checkpoints"][-2] = OrbitV2FixtureFactory.reseal_checkpoint(pending, policy: bundle["project_policy_revisions"].first, predecessor_checkpoint: bundle["lead_checkpoints"][-3], bindings: pending["effective_budget_bindings"])
+    evaluation = bundle["gate_evaluations"].last
+    evaluation["budget_assessment_result"]["assessed_checkpoint_ref"] =
+      OrbitV2FixtureFactory.cp_ref(bundle["lead_checkpoints"][-2])
+    rehash(evaluation)
+    review = bundle["lead_checkpoints"].last
+    review["predecessor_lead_checkpoint_ref"] = OrbitV2FixtureFactory.cp_ref(bundle["lead_checkpoints"][-2])
+    reseal_consuming(bundle, review, evaluation: evaluation)
+    codes = validator.validate(bundle).map(&:code)
+
+    assert(codes.include?("budget_assessment_invalid"), "a non-independent budget evaluator must fail closed")
+  end
+
+  def reseal_consuming(bundle, checkpoint, evaluation: nil)
+    if evaluation
+      ref = { "gate_evaluation_id" => evaluation["gate_evaluation_id"], "content_digest" => evaluation["content_digest"] }
+      %w[test_count test_code_lines].each do |metric|
+        measurement = checkpoint["effective_budget_bindings"][0]["measurements"][metric]
+        measurement["unverified_assessment"]["review_gate_evaluation_ref"] = ref if measurement["status"] == "unverified"
+      end
+      supporting = { "kind" => "gate_evaluation", "id" => evaluation["gate_evaluation_id"], "digest" => evaluation["content_digest"] }
+      %w[delivery_progress assurance_progress].each { |field| checkpoint[field]["supporting_refs"] = [supporting] }
+    end
+    bundle["lead_checkpoints"][-1] = OrbitV2FixtureFactory.reseal_checkpoint(
+      checkpoint,
+      policy: bundle["project_policy_revisions"].first,
+      predecessor_checkpoint: bundle["lead_checkpoints"][-2],
+      bindings: checkpoint["effective_budget_bindings"]
+    )
+  end
+
   def test_v1_inventory
+
     inventory = YAML.safe_load(
       File.read(File.join(ROOT, "contracts/orbit-v2/legacy-v1-writer-reader-inventory.yaml")),
       aliases: false
