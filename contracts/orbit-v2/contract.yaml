@@ -214,6 +214,11 @@ work_model:
       - authority_grant_refs
       - project_policy_revision_ref
       - protected_change_authorization_ref
+    evidence_requirement_class:
+      owner: TaskRevision.EvidenceRequirement
+      required: true
+      enum: [regression, release_audit, acceptance_evidence]
+      dispatch_freeze: exact_task_revision_ref_and_digest_in_closure_basis_only
     authority_grants:
       action_source: lib/orbit/v2/task_authority.rb
       allowed_actions:
@@ -807,7 +812,18 @@ evidence_record:
       - submission_artifact_refs
     scope_match: pass_with_evidence
     acceptance_results: exact_work_unit_acceptance_refs_all_pass_with_evidence
-    evidence_requirement_results: exact_work_unit_evidence_requirement_refs_all_pass_with_evidence
+    evidence_requirement_results:
+      coverage: exact_work_unit_evidence_requirement_refs_all_pass_with_evidence
+      verification_class_use_pairing:
+        regression: permanent_test_evidence
+        release_audit: audit_record_evidence
+        acceptance_evidence: acceptance_proof_evidence
+      claim_kind_compatibility:
+        permanent_test_evidence: verification
+        audit_record_evidence: report
+        acceptance_proof_evidence: report
+      missing_or_unknown_class_or_use: fail_closed_at_contract_shape
+      class_use_mismatch_or_incompatible_claim_kind: fail_closed
     change_thesis_status: supported_with_evidence
     assumptions_changed: empty_or_successor_thesis_attempt_required
     known_gaps: empty_for_accepted_implementation

@@ -309,10 +309,13 @@
       "type": "array",
       "items": {
         "type": "object",
-        "required": ["evidence_requirement_id", "text"],
+        "required": ["evidence_requirement_id", "text", "verification_class"],
         "properties": {
           "evidence_requirement_id": {"type": "string", "pattern": "^evreq_[a-z0-9][a-z0-9_-]{2,95}$"},
-          "text": {"type": "string", "minLength": 1}
+          "text": {"type": "string", "minLength": 1},
+          "verification_class": {
+            "enum": ["regression", "release_audit", "acceptance_evidence"]
+          }
         },
         "additionalProperties": false
       }

@@ -9,6 +9,17 @@ module Orbit
   module V2
     class EvidenceContract
       IMPLEMENTATION_KINDS = %w[change verification].freeze
+      IMPLEMENTATION_CLAIM_KINDS = %w[change verification report].freeze
+      VERIFICATION_CLASS_USE_PAIRS = {
+        "regression" => "permanent_test_evidence",
+        "release_audit" => "audit_record_evidence",
+        "acceptance_evidence" => "acceptance_proof_evidence"
+      }.freeze
+      USE_CLAIM_KINDS = {
+        "permanent_test_evidence" => ["verification"],
+        "audit_record_evidence" => ["report"],
+        "acceptance_proof_evidence" => ["report"]
+      }.freeze
 
       def self.validate(record:, work_unit:, task_revision:, assignment:, code_surface:)
         new(
@@ -80,10 +91,10 @@ module Orbit
           )
         end
 
-        unless claims.all? { |claim| IMPLEMENTATION_KINDS.include?(claim["artifact_kind"]) }
+        unless claims.all? { |claim| IMPLEMENTATION_CLAIM_KINDS.include?(claim["artifact_kind"]) }
           add(
             "evidence_reference_invalid",
-            "implementation EvidenceRecord may claim only change or verification artifacts",
+            "implementation EvidenceRecord may claim only change, verification, or report artifacts",
             "#{@path}.submission_artifact_refs"
           )
         end
@@ -107,12 +118,6 @@ module Orbit
           evidence_ref_groups << [
             result["evidence_refs"],
             "acceptance_results[#{index}].evidence_refs"
-          ]
-        end
-        Array(check["evidence_requirement_results"]).each_with_index do |result, index|
-          evidence_ref_groups << [
-            result["evidence_refs"],
-            "evidence_requirement_results[#{index}].evidence_refs"
           ]
         end
         evidence_ref_groups.each do |refs, suffix|
@@ -149,6 +154,7 @@ module Orbit
           id_field: "evidence_requirement_id",
           path: "#{@path}.implementation_check.evidence_requirement_results"
         )
+        validate_evidence_requirement_pairs(check, graph)
 
         scope_match = check["scope_match"]
         unless scope_match.is_a?(Hash) &&
@@ -272,6 +278,44 @@ module Orbit
           "implementation results must exactly cover selected stable IDs with claimed evidence",
           path
         )
+      end
+
+      # Each result's evidence_requirement_id must exact-resolve to a
+      # TaskRevision EvidenceRequirement, whose verification_class fixes the
+      # only acceptable verification_use; the result's evidence refs must then
+      # resolve to record-owned ArtifactClaims of the compatible kind.
+      # Unknown requirement IDs are already reported by result coverage, so the
+      # pairing check reports only class/use mismatch and kind incompatibility.
+      def validate_evidence_requirement_pairs(check, graph)
+        requirements = Array(@task_revision && @task_revision["evidence_requirements"])
+        classes = requirements.each_with_object({}) do |item, index|
+          index[item["evidence_requirement_id"]] = item["verification_class"]
+        end
+        Array(check["evidence_requirement_results"]).each_with_index do |result, index|
+          next unless result.is_a?(Hash)
+
+          suffix = "evidence_requirement_results[#{index}]"
+          path = "#{@path}.implementation_check.#{suffix}"
+          expected_use = VERIFICATION_CLASS_USE_PAIRS[classes[result["evidence_requirement_id"]]]
+          next if expected_use.nil?
+
+          unless result["verification_use"] == expected_use
+            add(
+              "evidence_requirement_pair_invalid",
+              "verification_use must exactly pair with the requirement verification_class " \
+                "(#{classes[result["evidence_requirement_id"]]} requires #{expected_use}, " \
+                "received #{result["verification_use"].inspect})",
+              "#{path}.verification_use"
+            )
+            next
+          end
+          resolve_refs(
+            graph,
+            result["evidence_refs"],
+            allowed_kinds: USE_CLAIM_KINDS.fetch(result["verification_use"]),
+            path: "#{path}.evidence_refs"
+          )
+        end
       end
 
       def canonical_claim_set?(claims)

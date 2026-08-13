@@ -31,6 +31,38 @@ module OrbitV2FixtureFactory
   AUTHORITY_PROVIDER_ID = "fixture.user-authority"
   LIFECYCLE_PROVIDER_ID = "fixture.lifecycle-writer"
   RUNTIME_IDENTITY_PROVIDER_ID = "fixture.runtime-identity"
+  DEFAULT_EVIDENCE_REQUIREMENTS = [
+    {
+      "evidence_requirement_id" => "evreq_contract_test",
+      "text" => "Contract tests pass.",
+      "verification_class" => "regression"
+    }
+  ].freeze
+  DEFAULT_EVIDENCE_RESULTS = [
+    { "evidence_requirement_id" => "evreq_contract_test", "verification_use" => "permanent_test_evidence" }
+  ].freeze
+  CLASSIFICATION_EVIDENCE_REQUIREMENTS = [
+    {
+      "evidence_requirement_id" => "evreq_contract_test",
+      "text" => "Permanent regression contract tests pass.",
+      "verification_class" => "regression"
+    },
+    {
+      "evidence_requirement_id" => "evreq_release_audit",
+      "text" => "The release audit records the reviewed change.",
+      "verification_class" => "release_audit"
+    },
+    {
+      "evidence_requirement_id" => "evreq_acceptance_proof",
+      "text" => "The acceptance proof demonstrates the outcome.",
+      "verification_class" => "acceptance_evidence"
+    }
+  ].freeze
+  VERIFICATION_CLASS_USES = {
+    "regression" => "permanent_test_evidence",
+    "release_audit" => "audit_record_evidence",
+    "acceptance_evidence" => "acceptance_proof_evidence"
+  }.freeze
 
   class FakeAuthorityProvider
     SECRET = "orbit-v2-slice0-fixture-provider-secret"
@@ -187,7 +219,7 @@ module OrbitV2FixtureFactory
     )
   end
 
-  def valid_bundle
+  def valid_bundle(evidence_requirements: DEFAULT_EVIDENCE_REQUIREMENTS)
     policy_assertion_id = "oassert_policygenesis"
     policy_assertion_digest = policy_issuance_assertion_digest(
       assertion_id: policy_assertion_id,
@@ -341,9 +373,7 @@ module OrbitV2FixtureFactory
       "source_requirements" => [
         { "source_requirement_id" => "src_adr_contract", "text" => "ADR contract is preserved." }
       ],
-      "evidence_requirements" => [
-        { "evidence_requirement_id" => "evreq_contract_test", "text" => "Contract tests pass." }
-      ],
+      "evidence_requirements" => deep_copy(evidence_requirements),
       "task_questions" => [
         { "question_id" => "question_contract_quality", "text" => "Does the contract prevent stale approval?" }
       ],
@@ -382,7 +412,10 @@ module OrbitV2FixtureFactory
       }
     )
 
-    units, theses = make_units_and_theses
+    requirement_refs = evidence_requirements.map do |requirement|
+      requirement["evidence_requirement_id"]
+    end.sort
+    units, theses = make_units_and_theses(evidence_requirement_refs: requirement_refs)
     work_authorizations = units.flat_map do |unit|
       Array(unit.dig("authority_scope", "allowed_actions")).map do |action|
         work_authorization(unit, task, action)
@@ -551,13 +584,20 @@ module OrbitV2FixtureFactory
       writer_assertion: writer_assertion)]
     all_checkpoints = [genesis_checkpoint, *dispatch_checkpoints]
 
+    requirement_results = evidence_requirements.map do |requirement|
+      {
+        "evidence_requirement_id" => requirement["evidence_requirement_id"],
+        "verification_use" => VERIFICATION_CLASS_USES.fetch(requirement["verification_class"])
+      }
+    end
     evidence = [
       implementation_evidence(
         "oevr_implementationone",
         attempts[0],
         resolutions[0],
         units[0]["initial_change_thesis_ref"],
-        ["lib/orbit/v2/validator.rb"]
+        ["lib/orbit/v2/validator.rb"],
+        evidence_results: requirement_results
       ),
       implementation_evidence(
         "oevr_implementationtwo",
@@ -704,6 +744,12 @@ module OrbitV2FixtureFactory
       "repository_snapshot" => snapshot,
       "code_surface" => code_surface
     }
+  end
+
+  # Slice 3 increment 1 scenario: one implementation record closes all three
+  # verification classes through separate paired evidence requirement results.
+  def evidence_classification_bundle
+    valid_bundle(evidence_requirements: CLASSIFICATION_EVIDENCE_REQUIREMENTS)
   end
 
   # Increment 3 helpers: a second open control lineage cloned from the base
@@ -1118,7 +1164,7 @@ module OrbitV2FixtureFactory
     "oareceipt_#{assertion_id.delete_prefix("oassert_")}"
   end
 
-  def make_units_and_theses
+  def make_units_and_theses(evidence_requirement_refs: ["evreq_contract_test"])
     specifications = [
       ["owu_implementationone", "othesis_implementationone", "implementation", "Implement validator contracts."],
       ["owu_implementationtwo", "othesis_implementationtwo", "implementation", "Implement schema contracts."],
@@ -1181,7 +1227,8 @@ module OrbitV2FixtureFactory
         "output_refs" => ["work-unit-output://#{unit_id}"],
         "stop_conditions" => ["Stop when acceptance evidence is complete or authority is insufficient."],
         "acceptance_refs" => ["acc_contract_valid"],
-        "evidence_requirement_refs" => ["evreq_contract_test"],
+        "evidence_requirement_refs" =>
+          unit_id == "owu_implementationone" ? evidence_requirement_refs : ["evreq_contract_test"],
         "source_requirement_refs" => ["src_adr_contract"],
         "initial_change_thesis_ref" => ref(
           "change_thesis_id",
@@ -1969,7 +2016,8 @@ module OrbitV2FixtureFactory
     resolution,
     thesis_ref,
     paths,
-    acceptance_recorded_at: "2026-07-30T00:02:00Z"
+    acceptance_recorded_at: "2026-07-30T00:02:00Z",
+    evidence_results: DEFAULT_EVIDENCE_RESULTS
   )
     change_claim = {
       "artifact_ref" => "artifact://#{id}/change",
@@ -1991,6 +2039,34 @@ module OrbitV2FixtureFactory
       "artifact_ref" => verification_claim["artifact_ref"],
       "content_digest" => verification_claim["content_digest"]
     }
+    report_claims = evidence_results.map do |result|
+      use = result["verification_use"]
+      next unless %w[audit_record_evidence acceptance_proof_evidence].include?(use)
+
+      {
+        "artifact_ref" => "artifact://#{id}/report/#{result["evidence_requirement_id"]}",
+        "artifact_kind" => "report",
+        "content_digest" => digest_for("#{id}:report:#{result["evidence_requirement_id"]}"),
+        "paths" => []
+      }
+    end.compact
+    requirement_results = evidence_results.map do |result|
+      use = result["verification_use"]
+      ref = if use == "permanent_test_evidence"
+        verification_ref
+      else
+        claim = report_claims.find do |candidate|
+          candidate["artifact_ref"] == "artifact://#{id}/report/#{result["evidence_requirement_id"]}"
+        end
+        { "artifact_ref" => claim["artifact_ref"], "content_digest" => claim["content_digest"] }
+      end
+      {
+        "evidence_requirement_id" => result["evidence_requirement_id"],
+        "verification_use" => use,
+        "status" => "pass",
+        "evidence_refs" => [ref]
+      }
+    end
     digested(
       "schema_version" => "orbit-evidence-v2",
       "protocol_epoch" => "orbit-v2",
@@ -2017,13 +2093,7 @@ module OrbitV2FixtureFactory
             "evidence_refs" => [verification_ref]
           }
         ],
-        "evidence_requirement_results" => [
-          {
-            "evidence_requirement_id" => "evreq_contract_test",
-            "status" => "pass",
-            "evidence_refs" => [verification_ref]
-          }
-        ],
+        "evidence_requirement_results" => requirement_results,
         "change_thesis_status" => {
           "status" => "supported",
           "evidence_refs" => [change_ref]
@@ -2033,7 +2103,8 @@ module OrbitV2FixtureFactory
         "assumptions_changed" => [],
         "known_gaps" => []
       },
-      "submission_artifact_refs" => [change_claim, verification_claim],
+      "submission_artifact_refs" =>
+        ([change_claim, verification_claim] + report_claims).sort_by { |claim| claim["artifact_ref"] },
       "supersedes_evidence_record_id" => nil
     )
   end

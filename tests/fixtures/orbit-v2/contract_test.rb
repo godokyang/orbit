@@ -47,6 +47,7 @@ module OrbitV2ContractTest
     test_task_and_work_authority_and_gate_aggregation
     test_eighth_review_regressions
     test_evidence_reference_and_path_scope_regressions
+    test_evidence_requirement_class_use_pairing
     test_immutable_stores(valid_bundle)
     test_v1_inventory
     test_slice_isolation
@@ -2490,6 +2491,130 @@ module OrbitV2ContractTest
       codes == ["implementation_path_unauthorized"],
       "path inside WorkUnit authority and change claim but outside CodeSurface must fail only path closure, got #{codes.uniq.sort.join(",")}"
     )
+  end
+
+  # Slice 3 increment 1: EvidenceRequirement.verification_class pairs exactly
+  # with each implementation result verification_use, and every result
+  # evidence ref must resolve to a compatible record-owned ArtifactClaim kind.
+  # Pair mismatches and incompatible kinds fail closed through the public
+  # Validator; missing or unknown enum values fail at contract shape. Free
+  # text is never inspected.
+  def test_evidence_requirement_class_use_pairing
+    assert(
+      validator.validate(OrbitV2FixtureFactory.evidence_classification_bundle).empty?,
+      "one implementation record closes all three verification classes through separate paired results"
+    )
+    claim_ref = lambda do |claim|
+      { "artifact_ref" => claim["artifact_ref"], "content_digest" => claim["content_digest"] }
+    end
+    result_for = lambda do |record, requirement_id|
+      record.dig("implementation_check", "evidence_requirement_results").find do |candidate|
+        candidate["evidence_requirement_id"] == requirement_id
+      end
+    end
+    claim_for = lambda do |record, suffix|
+      record["submission_artifact_refs"].find do |candidate|
+        candidate["artifact_ref"].end_with?(suffix)
+      end
+    end
+    cases = [
+      {
+        "id" => "regression-closed-by-acceptance-proof",
+        "expected" => "evidence_requirement_pair_invalid",
+        "mutate" => lambda do |record|
+          result_for.call(record, "evreq_contract_test")["verification_use"] = "acceptance_proof_evidence"
+        end
+      },
+      {
+        "id" => "acceptance-closed-by-permanent-test",
+        "expected" => "evidence_requirement_pair_invalid",
+        "mutate" => lambda do |record|
+          result_for.call(record, "evreq_acceptance_proof")["verification_use"] = "permanent_test_evidence"
+        end
+      },
+      {
+        "id" => "audit-evidence-counted-as-regression",
+        "expected" => "evidence_requirement_pair_invalid",
+        "mutate" => lambda do |record|
+          result_for.call(record, "evreq_contract_test")["verification_use"] = "audit_record_evidence"
+        end
+      },
+      {
+        "id" => "permanent-evidence-on-report-claim",
+        "expected" => "evidence_reference_invalid",
+        "mutate" => lambda do |record|
+          report = claim_for.call(record, "report/evreq_release_audit")
+          result_for.call(record, "evreq_contract_test")["evidence_refs"] = [claim_ref.call(report)]
+        end
+      },
+      {
+        "id" => "audit-evidence-on-verification-claim",
+        "expected" => "evidence_reference_invalid",
+        "mutate" => lambda do |record|
+          verification = claim_for.call(record, "/verification")
+          result_for.call(record, "evreq_release_audit")["evidence_refs"] = [claim_ref.call(verification)]
+        end
+      },
+      {
+        "id" => "acceptance-evidence-on-verification-claim",
+        "expected" => "evidence_reference_invalid",
+        "mutate" => lambda do |record|
+          verification = claim_for.call(record, "/verification")
+          result_for.call(record, "evreq_acceptance_proof")["evidence_refs"] = [claim_ref.call(verification)]
+        end
+      }
+    ]
+    cases.each do |item|
+      bundle = OrbitV2FixtureFactory.evidence_classification_bundle
+      record = bundle["evidence_records"].find do |candidate|
+        candidate["work_unit_id"] == "owu_implementationone"
+      end
+      item.fetch("mutate").call(record)
+      rehash(record)
+      refresh_evaluation_subject(bundle)
+      assert_structure_valid(bundle, item.fetch("id"))
+      codes = validator.validate(bundle).map(&:code)
+      assert(
+        codes == [item.fetch("expected")],
+        "#{item.fetch("id")} must fail closed through #{item.fetch("expected")}, got #{codes.uniq.sort.join(",")}"
+      )
+    end
+
+    shape_cases = {
+      "missing-verification-use" => lambda do |record|
+        result_for.call(record, "evreq_contract_test").delete("verification_use")
+      end,
+      "unknown-verification-use" => lambda do |record|
+        result_for.call(record, "evreq_contract_test")["verification_use"] = "one_off_snapshot"
+      end,
+      "missing-verification-class" => lambda do |task|
+        requirement = task["evidence_requirements"].find do |candidate|
+          candidate["evidence_requirement_id"] == "evreq_contract_test"
+        end
+        requirement.delete("verification_class")
+      end,
+      "unknown-verification-class" => lambda do |task|
+        requirement = task["evidence_requirements"].find do |candidate|
+          candidate["evidence_requirement_id"] == "evreq_contract_test"
+        end
+        requirement["verification_class"] = "one_off_snapshot"
+      end
+    }
+    shape_cases.each do |id, mutate|
+      bundle = OrbitV2FixtureFactory.evidence_classification_bundle
+      record = bundle["evidence_records"].find do |candidate|
+        candidate["work_unit_id"] == "owu_implementationone"
+      end
+      target = id.include?("class") ? bundle["task_revisions"].first : record
+      mutate.call(target)
+      rehash(target)
+      refresh_evaluation_subject(bundle)
+      codes = validator.validate(bundle).map(&:code)
+      assert(
+        codes.include?("contract_shape_invalid"),
+        "#{id} must fail closed at contract shape, got #{codes.uniq.sort.join(",")}"
+      )
+    end
   end
 
   def test_v1_inventory

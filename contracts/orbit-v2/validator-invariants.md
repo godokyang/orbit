@@ -70,6 +70,27 @@ canonical sorted set of paths owned by `change` artifacts; it is not an
 independent assertion. Work authority digests include `writable_paths`, so a
 path-scope edit invalidates the AuthorizationRecord scope as well as evidence.
 
+### EvidenceRequirement class pairing
+
+Every `EvidenceRequirement` carries a required `verification_class`
+(`regression` / `release_audit` / `acceptance_evidence`), frozen at dispatch
+through the exact TaskRevision ref/digest already present in the closure
+basis; the class is never duplicated into checkpoints and no effective-plan
+object exists. Each
+`implementation_check.evidence_requirement_results[]` entry carries a
+required `verification_use`, and the validator exact-resolves the result's
+`evidence_requirement_id` to its requirement's class, then enforces the exact
+pairing `regression -> permanent_test_evidence`,
+`release_audit -> audit_record_evidence`,
+`acceptance_evidence -> acceptance_proof_evidence`. Each result's
+`evidence_refs` must resolve to record-owned ArtifactClaims of the compatible
+kind: permanent test evidence to `verification`, audit and acceptance proof to
+`report`. Missing or unknown class/use values fail at contract shape;
+class/use mismatches fail through `evidence_requirement_pair_invalid`;
+unresolved requirements/refs and incompatible claim kinds fail closed.
+Free-text semantics are never inspected or inferred; stable-rule vs
+data-snapshot classification stays with the Lead/reviewer and its provenance.
+
 ## Finding-to-invariant matrix
 
 IDs use `R<review>-<ordinal>` and cover all 38 findings in the first eight
@@ -137,7 +158,6 @@ The families close as follows:
 Every row crosses the public `Validator#validate` seam. Mutations are made from
 the valid bundle and all affected content/subject digests are recomputed unless
 the row intentionally tests a stale digest.
-
 | Mutation class | Representative mutation | Expected invariant/error |
 | --- | --- | --- |
 | missing | delete a required nested ref/field | structural closure / `contract_shape_invalid` |
@@ -155,6 +175,8 @@ the row intentionally tests a stale digest.
 | traversal path | use `lib/orbit/v2/../v1.rb` or `./lib/orbit/v2` | canonical path / `implementation_path_unauthorized` |
 | empty segment | use `lib//orbit/v2.rb` or a trailing slash | canonical path / `implementation_path_unauthorized` |
 | prefix trap | use `lib/orbit/v20/file.rb` under `lib/orbit/v2` scope | segment-aware containment / `implementation_path_unauthorized` |
+| class/use mismatch | close a requirement with a non-paired `verification_use` | pairing closure / `evidence_requirement_pair_invalid` |
+| incompatible claim kind | point permanent evidence at a report claim, or audit/acceptance evidence at a verification claim | kind closure / `evidence_reference_invalid` |
 | illegal timeline | reverse start/end, backdate acceptance, or assign after termination | lifecycle chronology/activity error |
 | runtime alias | reuse one provider/runtime subject under a new AgentInstance ID | `runtime_identity_duplicate` + independence error |
 
