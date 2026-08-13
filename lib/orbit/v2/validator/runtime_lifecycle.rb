@@ -389,7 +389,16 @@ module Orbit
               "#{path}.events[0].assignment.change_thesis_ref"
             )
             rule = rules[assignment["assigned_rule_resolution_id"]]
-            add("reference_not_found", "Attempt assigned RuleResolution does not exist", "#{path}.events[0].assignment.assigned_rule_resolution_id") unless rule
+            unless rule
+              add("reference_not_found", "Attempt assigned RuleResolution does not exist", "#{path}.events[0].assignment.assigned_rule_resolution_id")
+            end
+            if rule && !rule_resolution_identity_matches_attempt?(rule, attempt, assignment)
+              add(
+                "rule_resolution_identity_mismatch",
+                "Attempt assigned RuleResolution identity must exact-match this Attempt and its immutable assignment",
+                "#{path}.events[0].assignment.assigned_rule_resolution_id"
+              )
+            end
             validate_assignment_binding(
               assignment,
               unit,

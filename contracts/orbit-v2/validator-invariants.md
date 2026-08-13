@@ -91,6 +91,32 @@ unresolved requirements/refs and incompatible claim kinds fail closed.
 Free-text semantics are never inspected or inferred; stable-rule vs
 data-snapshot classification stays with the Lead/reviewer and its provenance.
 
+### RuleResolution immutable history and exact Attempt/Evidence binding
+
+Authoring a NEW RuleResolutionArtifact (`RuleResolution.build`) resolves
+canonical in-repo paths and hashes the current rule bytes; stored artifacts
+(`RuleResolution.validate!`) are never reinterpreted through current
+filesystem bytes — the stored identity must equal its own canonical
+normalization (deterministic relation/rule_id/path/hash tuple ordering,
+canonical paths) and its resolution ID and `identity_sha256` must describe
+exactly those stored bytes, so an already created artifact stays valid with
+its old rule hashes after rule files change or disappear. A changed rule
+produces a new resolution ID, and because the immutable AttemptCreated
+assignment pins the old assigned ID, the new artifact can never be silently
+attributed to the old Attempt. Every WorkUnitAttempt
+`assigned_rule_resolution_id` must resolve to an artifact whose canonical
+identity exact-matches that Attempt and its immutable assignment
+(protocol/project/task/task_revision/work_unit/attempt, resolved_role,
+agent_instance_id, context_generation); existence alone is insufficient, so
+reviewer/tester reuse of an implementation resolution fails closed even when
+checkpoint/evidence refs are consistently resealed. An EvidenceRecord's
+submitted resolution must resolve to its exact record Attempt and equal the
+assigned canonical identity in both ID and identity fields; mismatched
+rules/role/agent/context/attempt cannot produce accepted evidence.
+Envelope metadata (`resolution_id`, `identity_sha256`, `schema_version`,
+`created_at`) stays outside the identity hash domain, and identical canonical
+identities always produce the same ID.
+
 ## Finding-to-invariant matrix
 
 IDs use `R<review>-<ordinal>` and cover all 38 findings in the first eight
@@ -177,6 +203,9 @@ the row intentionally tests a stale digest.
 | prefix trap | use `lib/orbit/v20/file.rb` under `lib/orbit/v2` scope | segment-aware containment / `implementation_path_unauthorized` |
 | class/use mismatch | close a requirement with a non-paired `verification_use` | pairing closure / `evidence_requirement_pair_invalid` |
 | incompatible claim kind | point permanent evidence at a report claim, or audit/acceptance evidence at a verification claim | kind closure / `evidence_reference_invalid` |
+| reviewer/tester rule reuse | assign an implementation resolution to a reviewer attempt with dependent refs consistently resealed | identity binding / `rule_resolution_identity_mismatch` |
+| rule bytes drift | submit an artifact rebuilt from changed rule bytes for the old Attempt | assigned/submitted identity / `rule_resolution_identity_mismatch` |
+| identity field drift | shift attempt/role/agent/context inside a stored canonical identity | identity binding / `rule_resolution_identity_mismatch` |
 | illegal timeline | reverse start/end, backdate acceptance, or assign after termination | lifecycle chronology/activity error |
 | runtime alias | reuse one provider/runtime subject under a new AgentInstance ID | `runtime_identity_duplicate` + independence error |
 

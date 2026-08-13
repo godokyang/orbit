@@ -48,6 +48,7 @@ module OrbitV2ContractTest
     test_eighth_review_regressions
     test_evidence_reference_and_path_scope_regressions
     test_evidence_requirement_class_use_pairing
+    test_rule_resolution_immutable_history_and_binding
     test_immutable_stores(valid_bundle)
     test_v1_inventory
     test_slice_isolation
@@ -2613,6 +2614,207 @@ module OrbitV2ContractTest
       assert(
         codes.include?("contract_shape_invalid"),
         "#{id} must fail closed at contract shape, got #{codes.uniq.sort.join(",")}"
+      )
+    end
+  end
+
+  # Slice 3 increment 2: RuleResolution immutable history plus exact
+  # Attempt/Evidence identity binding. Stored artifacts validate against
+  # their own canonical identity (no filesystem re-read), authoring always
+  # hashes current rule bytes, and assigned/submitted resolutions must
+  # exact-match the Attempt's immutable assignment — existence or a matching
+  # ID string is never enough.
+  def test_rule_resolution_immutable_history_and_binding
+    # 1. Authoring-vs-stored mechanics through the public RuleResolution seam:
+    #    deterministic order/created_at independence, history-safe validation
+    #    after rule bytes change, and a new ID for the changed rule.
+    Dir.mktmpdir("orbit-v2-rule-mechanics") do |root|
+      FileUtils.mkdir_p(File.join(root, "rules"))
+      base_file = File.join(root, "rules/base.md")
+      extra_file = File.join(root, "rules/extra.md")
+      File.write(base_file, "base v1\n")
+      File.write(extra_file, "extra v1\n")
+      sha = lambda do |file|
+        "sha256:#{Digest::SHA256.file(file).hexdigest}"
+      end
+      identity = {
+        "identity_schema" => "orbit-rule-resolution-identity-v1",
+        "protocol_epoch" => "orbit-v2",
+        "project_id" => "oproj_mechanics0001",
+        "task_id" => "otask_mechanics0001",
+        "task_revision_id" => "trev_mechanics0001",
+        "work_unit_id" => "owu_mechanics0001",
+        "attempt_id" => "oattempt_mechanics01",
+        "resolved_role" => "coder",
+        "agent_instance_id" => "oagent_mechanics01",
+        "context_generation" => 1,
+        "required_rules" => [
+          { "rule_id" => "base", "path" => "rules/base.md", "content_sha256" => sha.call(base_file), "relation" => "baseline" },
+          { "rule_id" => "extra", "path" => "rules/extra.md", "content_sha256" => sha.call(extra_file), "relation" => "supplements" }
+        ]
+      }
+      first = Orbit::V2::RuleResolution.build(
+        identity,
+        created_at: "2026-07-30T00:00:00Z",
+        project_root: root
+      )
+      reordered = identity.merge("required_rules" => identity["required_rules"].reverse)
+      repeated = Orbit::V2::RuleResolution.build(
+        reordered,
+        created_at: "2099-01-01T00:00:00Z",
+        project_root: root
+      )
+      assert(
+        repeated["resolution_id"] == first["resolution_id"],
+        "rule discovery order and envelope created_at are excluded from canonical identity"
+      )
+      Orbit::V2::RuleResolution.validate!(first, project_root: root)
+      File.write(base_file, "base v2\n")
+      Orbit::V2::RuleResolution.validate!(first, project_root: root)
+      assert(true, "stored artifact stays valid with its old rule hashes after the file changes")
+      updated = OrbitV2FixtureFactory.deep_copy(identity)
+      updated["required_rules"][0]["content_sha256"] = sha.call(base_file)
+      changed = Orbit::V2::RuleResolution.build(
+        updated,
+        created_at: "2026-07-30T00:00:01Z",
+        project_root: root
+      )
+      assert(
+        changed["resolution_id"] != first["resolution_id"],
+        "a changed rule produces a new resolution ID"
+      )
+      Orbit::V2::RuleResolution.validate!(changed, project_root: root)
+      FileUtils.rm_f([base_file, extra_file])
+      Orbit::V2::RuleResolution.validate!(first, project_root: root)
+      Orbit::V2::RuleResolution.validate!(changed, project_root: root)
+      assert(
+        true,
+        "stored history stays valid with its old rule hashes after its rule files disappear"
+      )
+      mismatched_project = OrbitV2FixtureFactory.deep_copy(first)
+      mismatched_project["project_id"] = "oproj_otherproject1"
+      expect_contract_error("rule_resolution_identity_mismatch") do
+        Orbit::V2::RuleResolution.validate!(mismatched_project, project_root: root)
+      end
+    end
+
+    # 2. A changed rule cannot be attributed to the old Attempt: the new
+    #    artifact exists and is internally valid, the record's submitted ID
+    #    is rewritten to it, yet accepted evidence fails closed.
+    bundle = OrbitV2FixtureFactory.valid_bundle
+    artifact = bundle["rule_resolution_artifacts"].find do |candidate|
+      candidate.dig("identity", "attempt_id") == "oattempt_implementationone"
+    end
+    identity = OrbitV2FixtureFactory.deep_copy(artifact.fetch("identity"))
+    rule = identity["required_rules"].first
+    Dir.mktmpdir("orbit-v2-rule-bytes") do |root|
+      FileUtils.mkdir_p(File.join(root, File.dirname(rule["path"])))
+      updated_bytes = "#{File.read(File.join(ROOT, rule["path"]))}\n# slice3-inc2 changed rule bytes\n"
+      File.write(File.join(root, rule["path"]), updated_bytes)
+      identity["required_rules"][0]["content_sha256"] =
+        "sha256:#{Digest::SHA256.hexdigest(updated_bytes)}"
+      changed = Orbit::V2::RuleResolution.build(
+        identity,
+        created_at: "2026-07-30T00:09:00Z",
+        project_root: root
+      )
+      bundle["rule_resolution_artifacts"] << changed
+      record = bundle["evidence_records"].find do |candidate|
+        candidate["work_unit_id"] == "owu_implementationone"
+      end
+      record["submitted_rule_resolution_id"] = changed["resolution_id"]
+      rehash(record)
+      refresh_evaluation_subject(bundle)
+      codes = validator.validate(bundle).map(&:code)
+      assert(
+        codes == ["rule_resolution_identity_mismatch"],
+        "submitting the changed-rule artifact for the old Attempt must be rejected, got #{codes.uniq.sort.join(",")}"
+      )
+    end
+
+    # 3. Reviewer/tester reuse of an implementation resolution fails even
+    #    after every dependent checkpoint/evidence ref is consistently
+    #    resealed against the reused identity.
+    bundle = OrbitV2FixtureFactory.valid_bundle
+    review = bundle["work_unit_attempts"].find do |candidate|
+      candidate["attempt_id"] == "oattempt_independentreview"
+    end
+    impl_rule = bundle["rule_resolution_artifacts"].find do |candidate|
+      candidate.dig("identity", "attempt_id") == "oattempt_implementationone"
+    end
+    policy = bundle["project_policy_revisions"].first
+    review.dig("events", 0, "assignment")["assigned_rule_resolution_id"] =
+      impl_rule["resolution_id"]
+    OrbitV2FixtureFactory.resign_event_chain(review)
+    checkpoints = bundle["lead_checkpoints"]
+    dispatch_index = checkpoints.index do |candidate|
+      candidate["lead_checkpoint_id"] == "olcheckpoint_terminal_impltwo"
+    end
+    dispatch = checkpoints[dispatch_index]
+    observation = checkpoints[dispatch_index + 1]
+    proposal = dispatch.dig("delivery_progress", "supporting_refs").find do |ref|
+      ref["kind"] == "rule_resolution"
+    end
+    proposal["id"] = impl_rule["resolution_id"]
+    proposal["digest"] = impl_rule["identity_sha256"]
+    observation["current_or_terminal_attempt_ref"] =
+      OrbitV2FixtureFactory.attempt_event_ref([review], review["attempt_id"], 0)
+    checkpoints[dispatch_index] = OrbitV2FixtureFactory.reseal_checkpoint(
+      dispatch,
+      policy: policy,
+      predecessor_checkpoint: checkpoints[dispatch_index - 1]
+    )
+    OrbitV2FixtureFactory.repin_lineage_tail(bundle, dispatch_index + 1)
+    submission = bundle["evidence_records"].find do |candidate|
+      candidate["record_kind"] == "evaluator_submission"
+    end
+    submission["submitted_rule_resolution_id"] = impl_rule["resolution_id"]
+    rehash(submission)
+    codes = validator.validate(bundle).map(&:code)
+    assert(
+      codes.uniq.sort == ["rule_resolution_identity_mismatch"],
+      "reviewer reuse of an implementation resolution must fail through exact identity binding, got #{codes.uniq.sort.join(",")}"
+    )
+
+    # 4. Identity mismatches for attempt/role/agent/context fail closed through
+    #    internally valid content-addressed artifacts: each patched identity is
+    #    rebuilt via the public RuleResolution.build seam, assigned to the
+    #    original Attempt, and submitted by its EvidenceRecord, so the exact
+    #    binding helper is the only place the patched field can be rejected.
+    {
+      "attempt" => { "attempt_id" => "oattempt_implementationtwo" },
+      "role" => { "resolved_role" => "reviewer" },
+      "agent" => { "agent_instance_id" => "oagent_implementertwo" },
+      "context" => { "context_generation" => 2 }
+    }.each do |name, patch|
+      bundle = OrbitV2FixtureFactory.valid_bundle
+      attempt = bundle["work_unit_attempts"].find do |candidate|
+        candidate["attempt_id"] == "oattempt_implementationone"
+      end
+      base = bundle["rule_resolution_artifacts"].find do |candidate|
+        candidate.dig("identity", "attempt_id") == "oattempt_implementationone"
+      end
+      identity = OrbitV2FixtureFactory.deep_copy(base.fetch("identity"))
+      patch.each { |field, value| identity[field] = value }
+      forged = Orbit::V2::RuleResolution.build(
+        identity,
+        created_at: base.dig("envelope", "created_at"),
+        project_root: ROOT
+      )
+      bundle["rule_resolution_artifacts"] << forged
+      attempt.dig("events", 0, "assignment")["assigned_rule_resolution_id"] =
+        forged["resolution_id"]
+      OrbitV2FixtureFactory.resign_event_chain(attempt)
+      record = bundle["evidence_records"].find do |candidate|
+        candidate["work_unit_id"] == "owu_implementationone"
+      end
+      record["submitted_rule_resolution_id"] = forged["resolution_id"]
+      rehash(record)
+      refresh_evaluation_subject(bundle)
+      codes = validator.validate(bundle).map(&:code)
+      assert(
+        codes.include?("rule_resolution_identity_mismatch"),
+        "#{name} identity mismatch must fail closed through the exact binding, got #{codes.uniq.sort.join(",")}"
       )
     end
   end

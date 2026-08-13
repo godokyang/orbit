@@ -27,20 +27,12 @@ module Orbit
               next
             end
             assignment = attempt.fetch("events").first["assignment"] || {}
-            expected = {
-              "project_id" => attempt["project_id"],
-              "task_id" => attempt["task_id"],
-              "task_revision_id" => attempt["task_revision_id"],
-              "work_unit_id" => attempt["work_unit_id"],
-              "attempt_id" => attempt["attempt_id"],
-              "resolved_role" => assignment["resolved_role"],
-              "agent_instance_id" => assignment["agent_instance_id"],
-              "context_generation" => assignment["context_generation"]
-            }
-            expected.each do |field, value|
-              if identity[field] != value
-                add("rule_resolution_identity_mismatch", "#{field} does not match Attempt assignment", "rule_resolution.identity.#{field}")
-              end
+            unless rule_resolution_identity_matches_attempt?(artifact, attempt, assignment)
+              add(
+                "rule_resolution_identity_mismatch",
+                "RuleResolution identity must exact-match its Attempt immutable assignment",
+                "rule_resolution.identity"
+              )
             end
           end
         end
@@ -63,6 +55,13 @@ module Orbit
             assigned_id = assignment["assigned_rule_resolution_id"]
             unless submitted && submitted["resolution_id"] == assigned_id
               add("rule_resolution_identity_mismatch", "submitted rules must equal assigned canonical identity", "#{path}.submitted_rule_resolution_id")
+            end
+            if submitted && !rule_resolution_identity_matches_attempt?(submitted, attempt, assignment)
+              add(
+                "rule_resolution_identity_mismatch",
+                "submitted RuleResolution identity must exact-match the record Attempt immutable assignment",
+                "#{path}.submitted_rule_resolution_id"
+              )
             end
             unit = @indexes.fetch("work_units", {})[attempt["work_unit_id"]]
             unless unit &&

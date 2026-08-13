@@ -18,7 +18,7 @@ module Orbit
         "overrides" => 3
       }.freeze
 
-      def canonical_identity(identity, project_root: Dir.pwd)
+      def canonical_identity(identity, project_root: Dir.pwd, verify_files: true)
         normalized = CanonicalJSON.normalize(deep_copy(identity))
         unless normalized["identity_schema"] == "orbit-rule-resolution-identity-v1"
           raise ContractError.new(
@@ -46,7 +46,7 @@ module Orbit
               path: "identity.required_rules.relation"
             )
           end
-          rule["path"] = canonicalize_path!(rule["path"], project_root)
+          rule["path"] = canonicalize_path!(rule["path"], project_root, resolve_files: verify_files)
           unless Identifiers.digest?(rule["content_sha256"])
             raise ContractError.new(
               "rule_resolution_digest",
@@ -54,6 +54,8 @@ module Orbit
               path: "identity.required_rules.content_sha256"
             )
           end
+          next unless verify_files
+
           expected_digest = "sha256:#{Digest::SHA256.file(File.join(project_root, rule["path"])).hexdigest}"
           unless rule["content_sha256"] == expected_digest
             raise ContractError.new(
@@ -99,16 +101,18 @@ module Orbit
 
       def validate!(artifact, project_root: Dir.pwd)
         SchemaCatalog.check!("rule_resolution", artifact)
-        expected = build(
-          artifact.fetch("identity"),
-          created_at: artifact.dig("envelope", "created_at"),
-          project_root: project_root
+        identity = artifact.fetch("identity")
+        canonical = canonical_identity(
+          identity,
+          project_root: project_root,
+          verify_files: false
         )
-        unless artifact["protocol_epoch"] == expected["protocol_epoch"] &&
-               artifact["project_id"] == expected["project_id"] &&
-               artifact["resolution_id"] == expected["resolution_id"] &&
-               artifact["identity_sha256"] == expected["identity_sha256"] &&
-               CanonicalJSON.dump(artifact["identity"]) == CanonicalJSON.dump(expected["identity"])
+        digest = CanonicalJSON.sha256(canonical)
+        unless artifact["protocol_epoch"] == canonical.fetch("protocol_epoch") &&
+               artifact["project_id"] == canonical.fetch("project_id") &&
+               CanonicalJSON.dump(identity) == CanonicalJSON.dump(canonical) &&
+               artifact["resolution_id"] == "rr-sha256-#{digest}" &&
+               artifact["identity_sha256"] == "sha256:#{digest}"
           raise ContractError.new(
             "rule_resolution_identity_mismatch",
             "resolution ID, digest, and canonical identity must describe the same bytes",
@@ -118,7 +122,7 @@ module Orbit
         true
       end
 
-      def canonicalize_path!(path, project_root)
+      def canonicalize_path!(path, project_root, resolve_files: true)
         unless path.is_a?(String) &&
                !path.empty? &&
                !path.start_with?("/") &&
@@ -131,6 +135,8 @@ module Orbit
           )
         end
         normalized = path.unicode_normalize(:nfc)
+        return normalized unless resolve_files
+
         root = File.realpath(project_root)
         candidate = File.realpath(File.join(root, normalized))
         unless candidate.start_with?("#{root}#{File::SEPARATOR}")

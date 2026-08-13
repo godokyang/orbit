@@ -786,6 +786,18 @@ rule_resolution:
     - created_at
   same_identity_same_id: required
   existing_id_different_bytes: fail_closed
+  stored_artifact_validation:
+    filesystem_bytes: never_re-read
+    stored_identity_form: exact_canonical_normalization_required
+    rule_hashes: retained_as_created
+  authoring_resolves_current_in_repo_bytes: true
+  changed_rule_new_id: required
+  attempt_binding:
+    assigned_rule_resolution_id: exact_canonical_identity_match_with_immutable_assignment
+    existence_only: insufficient
+    cross_attempt_or_role_reuse: fail_closed
+  evidence_binding:
+    submitted_rule_resolution_id: equals_assigned_id_and_exact_canonical_identity_match
 
 evidence_record:
   artifact_claim_trust_boundary:

@@ -430,6 +430,23 @@ module Orbit
         value.is_a?(String) && /\A(?:acc|src|evreq|question)_[a-z0-9][a-z0-9_-]{2,95}\z/.match?(value)
       end
 
+      def rule_resolution_identity_matches_attempt?(rule, attempt, assignment)
+        identity = rule.is_a?(Hash) ? rule["identity"] : nil
+        return false unless identity.is_a?(Hash) && attempt.is_a?(Hash) && assignment.is_a?(Hash)
+
+        {
+          "protocol_epoch" => PROTOCOL_EPOCH,
+          "project_id" => attempt["project_id"],
+          "task_id" => attempt["task_id"],
+          "task_revision_id" => attempt["task_revision_id"],
+          "work_unit_id" => attempt["work_unit_id"],
+          "attempt_id" => attempt["attempt_id"],
+          "resolved_role" => assignment["resolved_role"],
+          "agent_instance_id" => assignment["agent_instance_id"],
+          "context_generation" => assignment["context_generation"]
+        }.all? { |field, expected| identity[field] == expected }
+      end
+
       def subset?(values, allowed)
         values.is_a?(Array) && (values - allowed).empty?
       end

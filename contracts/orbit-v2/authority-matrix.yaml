@@ -81,6 +81,8 @@ facts:
   - fact: assigned_and_submitted_rule_set
     authoritative_owner: RuleResolutionArtifact
     lifecycle: content_addressed_create_only
+    exact_bindings: [assigned_rule_resolution_id_canonical_identity_exact_matches_immutable_assignment, submitted_rule_resolution_id_equals_assigned_id_and_exact_identity]
+    stored_validation: identity_self_consistent_only_never_filesystem_re-read
     prohibited_owners: [WorkUnitAttempt.required_rules, EvidenceRecord.required_rules]
   - fact: implementation_or_evaluator_submission_provenance
     authoritative_owner: EvidenceRecord
