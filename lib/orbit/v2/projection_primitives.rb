@@ -202,6 +202,87 @@ module Orbit
         { "kind" => kind, "id" => id, "content_digest" => content_digest }
       end
 
+      CHECKPOINT_ASSESSMENT_LAYERS = %w[task_queue active_mainline work_graph_branches current_attempt].freeze
+
+      # The checkpoint's full exact supporting provenance (the four
+      # assessment layers plus both progress fields): the only authority that
+      # can evidence proposal/digest basis refs.
+      def checkpoint_exact_refs(checkpoint)
+        CHECKPOINT_ASSESSMENT_LAYERS.flat_map do |layer|
+          Array(checkpoint.dig("assessments", layer, "supporting_refs"))
+        end + Array(checkpoint.dig("delivery_progress", "supporting_refs")) +
+          Array(checkpoint.dig("assurance_progress", "supporting_refs"))
+      end
+
+      # The proposed successor verification-plan basis: exactly one exact
+      # rule_resolution ref (identity_sha256 authority); ambiguous or
+      # unresolvable proposals yield nil.
+      def proposed_plan_basis(checkpoint, artifacts)
+        refs = checkpoint_exact_refs(checkpoint).select do |ref|
+          ref.is_a?(Hash) && ref["kind"] == "rule_resolution"
+        end
+        return nil unless refs.length == 1
+
+        ref = refs.first
+        rule = artifacts[ref["id"]]
+        return nil unless rule.is_a?(Hash) && rule["identity_sha256"] == ref["digest"]
+
+        { "resolution_id" => ref["id"], "identity_sha256" => ref["digest"] }
+      end
+
+      # The proposed successor thesis basis: exactly one exact change_thesis
+      # ref whose digest belongs to the thesis identity and carries no event
+      # pin; ambiguous or unresolvable proposals yield nil.
+      def proposed_thesis_basis(checkpoint, thesis_digests_by_id)
+        refs = checkpoint_exact_refs(checkpoint).select do |ref|
+          ref.is_a?(Hash) && ref["kind"] == "change_thesis"
+        end
+        return nil unless refs.length == 1
+
+        ref = refs.first
+        return nil unless ref["event_id"].nil?
+        return nil unless thesis_digests_by_id.is_a?(Hash) &&
+                          Array(thesis_digests_by_id[ref["id"]]).include?(ref["digest"])
+
+        { "change_thesis_id" => ref["id"], "content_digest" => ref["digest"] }
+      end
+
+      # The dispatch-time basis rule ref: the single exact proposed successor
+      # ref of the authorizing checkpoint, else — only for an observation
+      # checkpoint (reconcile on attempt_created) — the pinned Attempt's
+      # actual assignment.
+      def basis_rule_ref(checkpoint, artifacts, attempts)
+        proposed = proposed_plan_basis(checkpoint, artifacts)
+        return proposed if proposed
+
+        return nil unless checkpoint.dig("reconcile_trigger", "event") == "attempt_created"
+
+        attempt = pinned_attempt(checkpoint, attempts)
+        rule_id = attempt && attempt.dig("events", 0, "assignment", "assigned_rule_resolution_id")
+        rule = rule_id && artifacts[rule_id]
+        rule && { "resolution_id" => rule["resolution_id"], "identity_sha256" => rule["identity_sha256"] }
+      end
+
+      # The dispatch-time basis thesis ref: the single exact proposed
+      # successor ref, else — only for an observation checkpoint — the pinned
+      # Attempt's actual assignment thesis.
+      def basis_thesis_ref(checkpoint, attempts, thesis_digests_by_id)
+        proposed = proposed_thesis_basis(checkpoint, thesis_digests_by_id)
+        return proposed if proposed
+
+        return nil unless checkpoint.dig("reconcile_trigger", "event") == "attempt_created"
+
+        attempt = pinned_attempt(checkpoint, attempts)
+        attempt && attempt.dig("events", 0, "assignment", "change_thesis_ref")
+      end
+
+      def pinned_attempt(checkpoint, attempts)
+        ref = checkpoint["current_or_terminal_attempt_ref"]
+        return nil unless ref.is_a?(Hash)
+
+        attempts[ref["attempt_id"]]
+      end
+
       # Participation predicate shared by AggregateOutcome and the
       # responsibility-scoped context projections: an evaluation participates
       # only when its GateRequirement digest is current and its pinned subject

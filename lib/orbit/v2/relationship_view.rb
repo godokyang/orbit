@@ -2,6 +2,7 @@
 
 require_relative "aggregate_outcome"
 require_relative "canonical_json"
+require_relative "control_authority"
 require_relative "errors"
 require_relative "evaluation_subject"
 require_relative "projection_primitives"
@@ -114,6 +115,17 @@ module Orbit
 
         requirements = index(bundle, "gate_requirements", "gate_requirement_id")
         tasks = index(bundle, "task_revisions", "task_revision_id")
+        artifacts_index = index(bundle, "rule_resolution_artifacts", "resolution_id")
+        attempts_index = index(bundle, "work_unit_attempts", "attempt_id")
+        assertions_index = index(bundle, "authority_assertions", "assertion_id")
+        checkpoints_index = index(bundle, "lead_checkpoints", "lead_checkpoint_id")
+        agents_index = index(bundle, "agent_instances", "agent_instance_id")
+        thesis_digests_by_id = {}
+        Array(bundle["change_theses"]).each do |thesis|
+          next unless thesis.is_a?(Hash)
+
+          (thesis_digests_by_id[thesis["change_thesis_id"]] ||= []) << thesis["content_digest"]
+        end
 
         # ---- nodes -------------------------------------------------------
         root = bundle["protocol_root"]
@@ -158,11 +170,8 @@ module Orbit
         Array(bundle["lead_sessions"]).each do |session|
           next unless session.is_a?(Hash)
 
-          subject_ref = session["lead_runtime_subject_ref"]
-          assertion_digest = session["lead_runtime_subject_assertion_digest"]
-          if subject_ref.is_a?(String) && assertion_digest.is_a?(String)
-            add_node.call("runtime_subject", subject_ref, assertion_digest)
-          end
+          pins = runtime_subject_pins(session)
+          add_node.call("runtime_subject", pins[0], pins[1]) if pins
         end
 
         # ---- edges -------------------------------------------------------
@@ -293,6 +302,275 @@ module Orbit
               node_by_ref.call("work_unit", checkpoint["selected_work_unit_ref"], "work_unit_id")
             )
           end
+          # The three derived digest identities are distinct typed nodes;
+          # each connects only to its canonical inputs (adjustment payload
+          # provenance; plan policy/task/rule + ordered binding identities;
+          # closure task/unit/thesis/rule + the plan digest).
+          plan_task_ref = checkpoint["active_task_ref"]
+          plan_task_ref ||= Array(checkpoint["task_queue"]).first
+          thesis_basis = ProjectionPrimitives.basis_thesis_ref(
+            checkpoint,
+            attempts_index,
+            thesis_digests_by_id
+          )
+          rule_basis = ProjectionPrimitives.basis_rule_ref(
+            checkpoint,
+            artifacts_index,
+            attempts_index
+          )
+          plan_digest = checkpoint["effective_verification_plan_digest"]
+          basis_digest = checkpoint["closure_basis_digest"]
+          adjustment_digest = checkpoint["budget_adjustment_digest"]
+          if plan_digest.is_a?(String) && basis_digest.is_a?(String)
+            # Only the plan and basis digest nodes are per checkpoint (the
+            # checkpoint + digest value is the identity); two checkpoints may
+            # share a digest value and each keeps its own exact derivation
+            # chain. The budget_adjustment_digest node below is
+            # content-addressed (the digest itself as id), shared by current
+            # and inherited binding links.
+            plan_node = add_node.call(
+              "effective_verification_plan_digest",
+              "#{checkpoint["lead_checkpoint_id"]}::#{plan_digest}",
+              plan_digest
+            )
+            basis_node = add_node.call(
+              "closure_basis_digest",
+              "#{checkpoint["lead_checkpoint_id"]}::#{basis_digest}",
+              basis_digest
+            )
+            adjustment_node =
+              if adjustment_digest.is_a?(String)
+                add_node.call("budget_adjustment_digest", adjustment_digest, adjustment_digest)
+              end
+            add_edge.call("lead_checkpoint_derives_plan_digest", checkpoint_node, plan_node)
+            add_edge.call("lead_checkpoint_derives_basis_digest", checkpoint_node, basis_node)
+            add_edge.call(
+              "effective_verification_plan_digest_policy_source",
+              plan_node,
+              node_by_ref.call("project_policy_revision", checkpoint["project_policy_revision_ref"], "policy_revision_id")
+            )
+            if plan_task_ref.is_a?(Hash)
+              add_edge.call(
+                "effective_verification_plan_digest_task_source",
+                plan_node,
+                node_by_ref.call("task_revision", plan_task_ref, "task_revision_id")
+              )
+            end
+            if rule_basis.is_a?(Hash)
+              # The canonical plan rule ref is {resolution_id, identity_sha256};
+              # the typed rule-identity node carries that exact hash, never
+              # the artifact object digest.
+              rule_identity_node = add_node.call(
+                "rule_identity",
+                rule_basis["resolution_id"],
+                rule_basis["identity_sha256"]
+              )
+              add_edge.call("effective_verification_plan_digest_rule_source", plan_node, rule_identity_node)
+            end
+            Array(checkpoint["effective_budget_bindings"]).each do |binding|
+              next unless binding.is_a?(Hash) && %w[work_unit_lineage task_lineage].include?(binding["budget_scope_type"])
+
+              binding_node = add_node.call(
+                "budget_binding",
+                "#{checkpoint["lead_checkpoint_id"]}::#{binding["budget_scope_type"]}",
+                ControlAuthority.binding_digest(binding),
+                "budget_scope_type" => binding["budget_scope_type"]
+              )
+              add_edge.call("lead_checkpoint_has_budget_binding", checkpoint_node, binding_node)
+              add_edge.call("effective_verification_plan_digest_uses_binding", plan_node, binding_node)
+              measurements = binding["measurements"]
+              next unless measurements.is_a?(Hash)
+
+              review_refs = {}
+              lead_support_refs = {}
+              %w[test_count test_code_lines].each do |metric|
+                measurement = measurements[metric]
+                next unless measurement.is_a?(Hash)
+
+                if measurement["status"] == "verified" && measurement["source_ref"].is_a?(Hash)
+                  source_ref = measurement["source_ref"]
+                  assertion = assertions_index[source_ref["id"]]
+                  unless assertion.is_a?(Hash) && assertion["assertion_digest"] == source_ref["digest"]
+                    raise ContractError.new(
+                      "relationship_view_invalid",
+                      "measurement attestation source does not resolve exactly",
+                      path: "lead_checkpoints.#{checkpoint["lead_checkpoint_id"]}"
+                    )
+                  end
+                  add_edge.call(
+                    "budget_binding_uses_measurement_attestation",
+                    binding_node,
+                    node_by_id.call("authority_assertion", source_ref["id"])
+                  )
+                elsif measurement["status"] == "unverified"
+                  review_ref = measurement.dig("unverified_assessment", "review_gate_evaluation_ref")
+                  review_refs[[review_ref["gate_evaluation_id"], review_ref["content_digest"]]] = review_ref if review_ref.is_a?(Hash)
+                  Array(measurement.dig("unverified_assessment", "lead_supporting_refs")).each do |ref|
+                    next unless ref.is_a?(Hash)
+
+                    lead_support_refs[[ref["kind"], ref["id"], ref["event_id"], ref["digest"]]] = ref
+                  end
+                end
+              end
+              # Both unverified metrics canonically share the same review
+              # ref; identical semantic refs emit exactly one relation.
+              review_refs.values.sort_by { |ref| ref["gate_evaluation_id"] }.each do |review_ref|
+                add_edge.call(
+                  "budget_binding_uses_review",
+                  binding_node,
+                  node_by_ref.call("gate_evaluation", review_ref, "gate_evaluation_id")
+                )
+              end
+              # Exact unverified-assessment supporting refs are binding
+              # sources; both metrics may legally share one, so dedupe by
+              # exact semantic identity before emission.
+              lead_support_refs.values.sort_by do |ref|
+                [ref["kind"], ref["id"], ref["event_id"], ref["digest"]]
+              end.each do |ref|
+                support_node = supporting_ref_node(
+                  ref, bundle, artifacts_index, attempts_index, agents_index, node_by_id, add_node
+                )
+                add_edge.call("budget_binding_uses_supporting_source", binding_node, support_node)
+              end
+              override_source = binding["user_override_source"]
+              if override_source.is_a?(Hash) && override_source["authorization_record_ref"].is_a?(Hash)
+                add_edge.call(
+                  "budget_binding_uses_override",
+                  binding_node,
+                  node_by_ref.call(
+                    "authorization_record",
+                    override_source["authorization_record_ref"],
+                    "authorization_record_id"
+                  )
+                )
+              end
+              adjustment_source = binding["lead_adjustment_source"]
+              if adjustment_source.is_a?(Hash) && adjustment_source["adjustment_digest"].is_a?(String)
+                case adjustment_source["mode"]
+                when "current"
+                  add_edge.call(
+                    "budget_binding_uses_adjustment_digest",
+                    binding_node,
+                    add_node.call(
+                      "budget_adjustment_digest",
+                      adjustment_source["adjustment_digest"],
+                      adjustment_source["adjustment_digest"]
+                    )
+                  )
+                when "inherited"
+                  inherited_ref = adjustment_source["inherited_checkpoint_ref"]
+                  if inherited_ref.is_a?(Hash)
+                    inherited_checkpoint = node_by_ref.call(
+                      "lead_checkpoint",
+                      inherited_ref,
+                      "lead_checkpoint_id"
+                    )
+                    add_edge.call(
+                      "budget_binding_inherited_checkpoint_source",
+                      binding_node,
+                      inherited_checkpoint
+                    )
+                    add_edge.call(
+                      "budget_binding_uses_adjustment_digest",
+                      binding_node,
+                      add_node.call(
+                        "budget_adjustment_digest",
+                        adjustment_source["adjustment_digest"],
+                        adjustment_source["adjustment_digest"]
+                      )
+                    )
+                  end
+                end
+              end
+            end
+            add_edge.call(
+              "closure_basis_digest_task_source",
+              basis_node,
+              node_by_ref.call("task_revision", plan_task_ref, "task_revision_id")
+            ) if plan_task_ref.is_a?(Hash)
+            if checkpoint["selected_work_unit_ref"].is_a?(Hash)
+              add_edge.call(
+                "closure_basis_digest_work_unit_source",
+                basis_node,
+                node_by_ref.call("work_unit", checkpoint["selected_work_unit_ref"], "work_unit_id")
+              )
+            end
+            if thesis_basis.is_a?(Hash)
+              add_edge.call(
+                "closure_basis_digest_thesis_source",
+                basis_node,
+                thesis_node_by_id_digest(
+                  thesis_basis["change_thesis_id"],
+                  thesis_basis["content_digest"],
+                  Array(bundle["change_theses"]),
+                  node_by_id
+                )
+              )
+            end
+            if rule_basis.is_a?(Hash)
+              rule_identity_node = add_node.call(
+                "rule_identity",
+                rule_basis["resolution_id"],
+                rule_basis["identity_sha256"]
+              )
+              add_edge.call("closure_basis_digest_rule_source", basis_node, rule_identity_node)
+            end
+            add_edge.call("closure_basis_digest_plan_source", basis_node, plan_node)
+          end
+          if adjustment_digest.is_a?(String) && adjustment_node
+            add_edge.call("lead_checkpoint_derives_adjustment_digest", checkpoint_node, adjustment_node)
+            payload = checkpoint["test_budget_adjust"]
+            if payload.is_a?(Hash)
+              predecessor_ref = payload["predecessor_lead_checkpoint_ref"]
+              if predecessor_ref.is_a?(Hash)
+                predecessor_checkpoint = node_by_ref.call("lead_checkpoint", predecessor_ref, "lead_checkpoint_id")
+                add_edge.call(
+                  "budget_adjustment_digest_predecessor_source",
+                  adjustment_node,
+                  predecessor_checkpoint
+                )
+                predecessor_binding = Array(checkpoints_index[predecessor_ref["lead_checkpoint_id"]]["effective_budget_bindings"]).find do |candidate|
+                  candidate.is_a?(Hash) && candidate["budget_scope_type"] == payload["budget_scope_type"]
+                end
+                if predecessor_binding.is_a?(Hash)
+                  add_edge.call(
+                    "budget_adjustment_digest_predecessor_binding",
+                    adjustment_node,
+                    add_node.call(
+                      "budget_binding",
+                      "#{predecessor_ref["lead_checkpoint_id"]}::#{payload["budget_scope_type"]}",
+                      ControlAuthority.binding_digest(predecessor_binding),
+                      "budget_scope_type" => payload["budget_scope_type"]
+                    )
+                  )
+                end
+              end
+              policy_ref = payload["project_policy_revision_ref"]
+              if policy_ref.is_a?(Hash)
+                add_edge.call(
+                  "budget_adjustment_digest_policy_source",
+                  adjustment_node,
+                  node_by_ref.call("project_policy_revision", policy_ref, "policy_revision_id")
+                )
+              end
+              # The schema does not require payload supporting refs unique;
+              # identical semantic refs emit exactly one edge.
+              supporting_refs = {}
+              Array(payload["supporting_refs"]).each do |ref|
+                next unless ref.is_a?(Hash)
+
+                supporting_refs[[ref["kind"], ref["id"], ref["event_id"], ref["digest"]]] = ref
+              end
+              supporting_refs.values.sort_by do |ref|
+                [ref["kind"], ref["id"], ref["event_id"], ref["digest"]]
+              end.each do |ref|
+                support_node = supporting_ref_node(
+                  ref, bundle, artifacts_index, attempts_index, agents_index, node_by_id, add_node
+                )
+                add_edge.call("budget_adjustment_digest_supporting_source", adjustment_node, support_node)
+              end
+            end
+          end
           if checkpoint["current_or_terminal_attempt_ref"].is_a?(Hash)
             add_edge.call(
               "lead_checkpoint_tracks_attempt",
@@ -309,13 +587,12 @@ module Orbit
             node_by_id.call("lead_session", session["lead_session_id"]),
             node_by_id.call("control_registry", session["lead_control_id"])
           )
-          subject_ref = session["lead_runtime_subject_ref"]
-          assertion_digest = session["lead_runtime_subject_assertion_digest"]
-          if subject_ref.is_a?(String) && assertion_digest.is_a?(String)
+          pins = runtime_subject_pins(session)
+          if pins
             add_edge.call(
               "lead_session_binds_runtime_subject",
               node_by_id.call("lead_session", session["lead_session_id"]),
-              node_by_id.call("runtime_subject", subject_ref)
+              node_by_id.call("runtime_subject", pins[0])
             )
           end
         end
@@ -499,9 +776,10 @@ module Orbit
           [edge["kind"], edge["source"]["kind"], edge["source"]["id"], edge["target"]["kind"], edge["target"]["id"]]
         end
         if edge_keys.uniq.length != edge_keys.length
+          duplicate = edge_keys.group_by(&:itself).find { |_key, items| items.length > 1 }&.first
           raise ContractError.new(
             "relationship_view_invalid",
-            "derived edge set contains a duplicate edge identity",
+            "derived edge set contains a duplicate edge identity #{duplicate.inspect}",
             path: "derived_edges"
           )
         end
@@ -586,6 +864,88 @@ module Orbit
         node
       end
       private_class_method :thesis_node_by_ref
+
+      def thesis_node_by_id_digest(change_thesis_id, content_digest, theses, node_by_id)
+        thesis = Array(theses).select do |candidate|
+          candidate.is_a?(Hash) &&
+            candidate["change_thesis_id"] == change_thesis_id &&
+            candidate["content_digest"] == content_digest
+        end.min_by { |candidate| candidate["revision"] }
+        unless thesis.is_a?(Hash)
+          raise ContractError.new(
+            "relationship_view_invalid",
+            "change thesis ref does not resolve exactly",
+            path: "derived_edges"
+          )
+        end
+        node_by_id.call("change_thesis", "#{thesis["change_thesis_id"]}@#{thesis["revision"]}")
+      end
+      private_class_method :thesis_node_by_id_digest
+
+      def runtime_subject_pins(session)
+        subject_ref = session["lead_runtime_subject_ref"]
+        assertion_digest = session["lead_runtime_subject_assertion_digest"]
+        [subject_ref, assertion_digest] if subject_ref.is_a?(String) && assertion_digest.is_a?(String)
+      end
+      private_class_method :runtime_subject_pins
+
+      def supporting_ref_node(ref, bundle, artifacts_index, attempts_index, agents_index,
+                              node_by_id, add_node)
+        case ref["kind"]
+        when "work_unit", "task_revision", "evidence_record", "finding", "finding_resolution",
+             "gate_evaluation", "lead_checkpoint"
+          node = node_by_id.call(ref["kind"], ref["id"])
+          unless node["content_digest"] == ref["digest"]
+            raise ContractError.new(
+              "relationship_view_invalid",
+              "adjustment supporting ref does not resolve exactly",
+              path: "derived_edges"
+            )
+          end
+          node
+        when "change_thesis"
+          thesis_node_by_id_digest(ref["id"], ref["digest"], Array(bundle["change_theses"]), node_by_id)
+        when "rule_resolution"
+          rule = artifacts_index[ref["id"]]
+          unless rule.is_a?(Hash) && rule["identity_sha256"] == ref["digest"]
+            raise ContractError.new(
+              "relationship_view_invalid",
+              "adjustment supporting rule ref does not resolve exactly",
+              path: "derived_edges"
+            )
+          end
+          add_node.call("rule_identity", ref["id"], ref["digest"])
+        when "attempt_event"
+          event_supporting_node(ref, attempts_index, "events", "attempt_event", add_node)
+        when "agent_event"
+          event_supporting_node(ref, agents_index, "lifecycle_events", "agent_event", add_node)
+        else
+          raise ContractError.new(
+            "relationship_view_invalid",
+            "adjustment supporting ref kind is not resolvable",
+            path: "derived_edges"
+          )
+        end
+      end
+      private_class_method :supporting_ref_node
+
+      # Event source identity is owner id + event_id + exact event_digest;
+      # the typed event node never aliases the enclosing owner object digest.
+      def event_supporting_node(ref, owner_index, events_field, kind, add_node)
+        owner = owner_index[ref["id"]]
+        event = owner.is_a?(Hash) && Array(owner[events_field]).find do |candidate|
+          candidate["event_id"] == ref["event_id"]
+        end
+        unless event.is_a?(Hash) && event["event_digest"] == ref["digest"]
+          raise ContractError.new(
+            "relationship_view_invalid",
+            "adjustment supporting event ref does not resolve exactly",
+            path: "derived_edges"
+          )
+        end
+        add_node.call(kind, "#{ref["id"]}::#{ref["event_id"]}", ref["digest"])
+      end
+      private_class_method :event_supporting_node
 
       def index(bundle, collection, id_field)
         result = {}

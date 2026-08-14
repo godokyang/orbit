@@ -3205,7 +3205,7 @@ module OrbitV2FixtureFactory
   # the payload consistent; :over_ceiling requests ceilings above the policy
   # lead ceiling; :forged_digest pins a digest that does not match the
   # payload; :absent_digest pins a digest without any payload.
-  def adjustment_bundle(mode: :valid)
+  def adjustment_bundle(mode: :valid, supporting_refs: [])
     bundle = valid_bundle
     dispatch = bundle["lead_checkpoints"].find do |candidate|
       candidate["lead_checkpoint_id"] == "olcheckpoint_dispatch_implone"
@@ -3229,7 +3229,7 @@ module OrbitV2FixtureFactory
         "test_code_lines" => predecessor_binding["effective_test_code_lines"]
       },
       "new_effective_budget" => new_ceilings,
-      "supporting_refs" => []
+      "supporting_refs" => supporting_refs
     }
     adjustment_digest = Orbit::V2::ControlAuthority.budget_adjustment_digest(payload)
     if mode == :forged_digest

@@ -231,8 +231,8 @@ stored content digest get their canonical content digest recomputed.
 `source_digest` is therefore a complete future deletable-cache key: repeat
 recomputation is byte-identical and any change to any validated bundle
 source changes the projection. No persisted cache, LeadControl transition,
-RelationshipView, audit layer, or budget digest/two-lineage projection
-exists in this increment.
+audit layer, or budget digest/two-lineage projection (see the dedicated
+increment below) exists in this increment.
 
 Shared derivation (`finding_disposition`, `finding_lineage`, supersedes-tip
 analysis, canonical budget-subject identity, participation predicate,
@@ -327,11 +327,65 @@ empty `candidate_edges` section; a candidate relation therefore cannot
 alter derived edges, scope, permission, state, gates, AggregateOutcome, or
 ContextProjection. Historical stale GateEvaluations stay stored with their
 derived edges; their node carries `current: false` and they never become a
-current/closing relation. Invalid refs, authority, independence, duplicate
-node/edge identities, and unknown input keys fail closed through the public
-seam. No persisted cache, writer, runtime activation, graph DB, LeadControl
-transition, candidate relations, audit layer, or budget digest/two-lineage
-projection exists in this increment.
+current/closing relation. Each checkpoint emits the three digest identities
+as distinct typed nodes (`effective_verification_plan_digest` and
+`closure_basis_digest` with per-checkpoint `checkpoint_id::digest` identity,
+preserving each checkpoint's own derivation chain even when two checkpoints
+share a digest value; `budget_adjustment_digest` with the content-addressed
+digest itself as its id, shared by current and inherited binding links)
+connected through narrowly typed edges to their exact authority sources: `lead_checkpoint_derives_plan_digest`/`_basis_digest`/
+`_adjustment_digest`, `effective_verification_plan_digest_policy_source`/
+`_task_source`/`_rule_source` (typed `rule_identity` carrying the exact
+identity_sha256)/`_uses_binding`, `closure_basis_digest_task_source`/
+`_work_unit_source`/`_thesis_source`/`_rule_source`/`_plan_source`,
+`budget_adjustment_digest_policy_source`/`_predecessor_source`/
+`_predecessor_binding`/`_supporting_source`, `budget_binding_uses_review`/
+`_uses_measurement_attestation`/`_uses_override`/`_uses_adjustment_digest`/
+`_inherited_checkpoint_source`/`_uses_supporting_source` — derived through
+the shared checkpoint basis-ref primitives and the single SupportingRef
+identity rule (events as owner::event_id). Invalid refs, authority,
+independence, duplicate node/edge identities, and unknown input keys fail
+closed through the public seam. No persisted cache, writer, runtime
+activation, graph DB, LeadControl transition, candidate relations, or audit
+layer exists in this increment; the budget digest/two-lineage projection is
+a separate derived seam (below).
+
+### Digest and two-layer budget projection
+
+Slice 5 increment 4 adds one pure derived seam:
+`BudgetProjection.derive(bundle, validator:)` → one canonical view per
+accepted LeadCheckpoint. It recomputes `budget_adjustment_digest` (iff the
+checkpoint carries the current typed adjustment),
+`effective_verification_plan_digest`, and `closure_basis_digest`
+byte-identical through the ControlAuthority canonical functions from the
+checkpoint's exact authority sources (policy/task/unit/thesis/rule basis
+refs via the shared `ProjectionPrimitives` basis derivation; a stored
+digest that cannot be recomputed fails closed). No new hashing rule, no
+persisted plan truth object, no second fact source.
+
+The two cumulative budget scopes project in fixed order
+(`work_unit_lineage`, then `task_lineage`) straight from each checkpoint's
+canonical `effective_budget_bindings`; bindings are cumulative snapshots
+and are never summed across checkpoints. Verified measurements expose
+deterministic `within`/`over` status against the binding's effective
+ceilings plus usage and the exact attestation `source_ref`; unverified
+measurements expose `unverified_pending`/`unverified_accepted`/
+`unverified_rejected` from the existing review-status semantics and are
+never zero or within-budget. Every view carries its exact basis source refs
+plus a complete canonical `source_manifest` and `source_digest` covering
+the checkpoint ref+digest, both ordered binding digests, each binding's
+external authority (measurement attestations, unverified assessment
+supporting/review refs, adjustment and override provenance, inherited
+checkpoint refs), and the basis refs — a legitimate source change always
+changes `source_digest`. Deletion/recomputation is byte-identical and any
+unresealed source mutation fails closed at the shared boundary; timestamps
+and array order never participate. In the typed RelationshipView the three
+digest identities are distinct typed nodes (`budget_adjustment_digest`,
+`effective_verification_plan_digest`, `closure_basis_digest`) connected
+only to their canonical inputs: adjustment predecessor provenance; plan
+policy/task/rule plus the two ordered `budget_binding` identities with
+their measurement attestation/review/override sources; closure task/unit/
+thesis/rule plus the plan digest. Candidate edges stay non-authoritative.
 
 ## Finding-to-invariant matrix
 

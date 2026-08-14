@@ -1272,14 +1272,7 @@ module Orbit
         # for thesis redirection; zero or multiple proposals fail closed, and
         # the later AttemptCreated assignment must match it.
         def proposed_thesis_basis(checkpoint)
-          refs = checkpoint_exact_refs(checkpoint).select { |ref| ref["kind"] == "change_thesis" }
-          return nil unless refs.length == 1
-
-          ref = refs.first
-          return nil unless ref["event_id"].nil? &&
-                            change_thesis_digests[ref["id"]]&.include?(ref["digest"])
-
-          { "change_thesis_id" => ref["id"], "content_digest" => ref["digest"] }
+          ProjectionPrimitives.proposed_thesis_basis(checkpoint, change_thesis_digests)
         end
 
         # Basis equality is id + digest (the pinned assignment thesis also
@@ -1294,14 +1287,10 @@ module Orbit
         # rule_resolution ref (identity_sha256 authority), compared to the
         # predecessor's effective plan; ambiguous proposals fail closed.
         def proposed_plan_basis(checkpoint)
-          refs = checkpoint_exact_refs(checkpoint).select { |ref| ref["kind"] == "rule_resolution" }
-          return nil unless refs.length == 1
-
-          ref = refs.first
-          rule = @indexes.fetch("rule_resolution_artifacts", {})[ref["id"]]
-          return nil unless rule && rule["identity_sha256"] == ref["digest"]
-
-          { "resolution_id" => ref["id"], "identity_sha256" => ref["digest"] }
+          ProjectionPrimitives.proposed_plan_basis(
+            checkpoint,
+            @indexes.fetch("rule_resolution_artifacts", {})
+          )
         end
 
         # The checkpoint's full exact supporting provenance (four assessment
@@ -1311,10 +1300,7 @@ module Orbit
         # checkpoint provenance, so those subtypes fail closed rather than
         # inventing a latest-wins projection.
         def checkpoint_exact_refs(checkpoint)
-          ASSESSMENT_BASIS.keys.flat_map do |layer|
-            Array(checkpoint.dig("assessments", layer, "supporting_refs"))
-          end + Array(checkpoint.dig("delivery_progress", "supporting_refs")) +
-            Array(checkpoint.dig("assurance_progress", "supporting_refs"))
+          ProjectionPrimitives.checkpoint_exact_refs(checkpoint)
         end
 
         def exact_refs_of_kind(checkpoint, kind)
@@ -2150,6 +2136,11 @@ module Orbit
                 "#{path}.budget_adjustment_digest"
               )
             end
+            # The typed adjust payload's supporting refs are schema-authorized
+            # source inputs; they resolve exactly through the same typed
+            # exact-ref seam as checkpoint provenance, so forged, missing, or
+            # digest-mismatched refs fail closed here.
+            validate_supporting_refs(Array(payload["supporting_refs"]), path, "budget adjustment")
           elsif adjustment_digest
             add(
               "checkpoint_budget_invalid",
@@ -2716,28 +2707,19 @@ module Orbit
         # event, so its basis is the proposal (canonical null when none was
         # authorized), never the previous Attempt's assignment.
         def basis_rule_ref(checkpoint)
-          proposed = proposed_plan_basis(checkpoint)
-          return proposed if proposed
-
-          return nil unless checkpoint.dig("reconcile_trigger", "event") == "attempt_created"
-
-          attempt = pinned_attempt(checkpoint)
-          rule_id = attempt && attempt.dig("events", 0, "assignment", "assigned_rule_resolution_id")
-          rule = rule_id && @indexes.fetch("rule_resolution_artifacts", {})[rule_id]
-          rule && {
-            "resolution_id" => rule["resolution_id"],
-            "identity_sha256" => rule["identity_sha256"]
-          }
+          ProjectionPrimitives.basis_rule_ref(
+            checkpoint,
+            @indexes.fetch("rule_resolution_artifacts", {}),
+            @indexes.fetch("work_unit_attempts", {})
+          )
         end
 
         def basis_thesis_ref(checkpoint)
-          proposed = proposed_thesis_basis(checkpoint)
-          return proposed if proposed
-
-          return nil unless checkpoint.dig("reconcile_trigger", "event") == "attempt_created"
-
-          attempt = pinned_attempt(checkpoint)
-          attempt && attempt.dig("events", 0, "assignment", "change_thesis_ref")
+          ProjectionPrimitives.basis_thesis_ref(
+            checkpoint,
+            @indexes.fetch("work_unit_attempts", {}),
+            change_thesis_digests
+          )
         end
 
         def pinned_event(checkpoint)
@@ -2793,8 +2775,10 @@ module Orbit
         end
 
         def pinned_attempt(checkpoint)
-          ref = checkpoint["current_or_terminal_attempt_ref"]
-          ref && @indexes.fetch("work_unit_attempts", {})[ref["attempt_id"]]
+          ProjectionPrimitives.pinned_attempt(
+            checkpoint,
+            @indexes.fetch("work_unit_attempts", {})
+          )
         end
 
         def pinned_assignment_thesis(checkpoint)
