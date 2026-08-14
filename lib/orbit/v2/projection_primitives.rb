@@ -283,6 +283,19 @@ module Orbit
         attempts[ref["attempt_id"]]
       end
 
+      # The single canonical CodeSurface digest rule (version + tree digest
+      # + sorted paths via CanonicalJSON), shared by the CodeSurface
+      # construction seam and the EvaluationSubject consumer so the derived
+      # digest domain can never drift.
+      def code_surface_digest(derivation_version:, repository_tree_digest:, paths:)
+        input = {
+          "derivation_version" => derivation_version,
+          "repository_tree_digest" => repository_tree_digest,
+          "paths" => paths
+        }
+        "sha256:#{CanonicalJSON.sha256(input)}"
+      end
+
       # Participation predicate shared by AggregateOutcome and the
       # responsibility-scoped context projections: an evaluation participates
       # only when its GateRequirement digest is current and its pinned subject

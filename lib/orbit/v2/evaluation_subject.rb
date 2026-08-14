@@ -1,9 +1,11 @@
 # frozen_string_literal: true
 
 require_relative "canonical_json"
+require_relative "code_surface"
 require_relative "errors"
 require_relative "identifiers"
 require_relative "path_scope"
+require_relative "projection_primitives"
 require_relative "runtime_identity_verifier"
 
 module Orbit
@@ -180,30 +182,35 @@ module Orbit
       end
 
       def validate_derived_inputs!(repository_snapshot, code_surface)
-        unless repository_snapshot.is_a?(Hash) &&
-               repository_snapshot["kind"] == "git" &&
-               /\A[0-9a-f]{40}\z/.match?(repository_snapshot["commit_sha"].to_s) &&
-               Identifiers.digest?(repository_snapshot["tree_digest"])
+        unless code_surface.is_a?(Hash)
           raise ContractError.new(
             "derived_input_invalid",
-            "repository snapshot must pin a git commit and tree digest",
-            path: "repository_snapshot"
+            "CodeSurface must be a deterministic projection of version, tree digest, and sorted paths",
+            path: "code_surface"
           )
         end
-        paths = code_surface.is_a?(Hash) ? code_surface["paths"] : nil
-        expected = code_surface_digest(
-          derivation_version: code_surface && code_surface["derivation_version"],
-          repository_tree_digest: code_surface && code_surface["repository_tree_digest"],
-          paths: paths
-        )
-        unless code_surface.is_a?(Hash) &&
-               code_surface["kind"] == "derived_code_surface" &&
-               code_surface["derivation_version"] == "orbit-code-surface-v1" &&
-               code_surface["repository_tree_digest"] == repository_snapshot["tree_digest"] &&
-               paths.is_a?(Array) &&
-               paths.any? &&
-               PathScope.canonical_set?(paths, allow_empty: false) &&
-               code_surface["code_surface_digest"] == expected
+        derived =
+          begin
+            CodeSurface.derive(
+              repository_snapshot: repository_snapshot,
+              paths: code_surface["paths"]
+            )
+          rescue ContractError => e
+            # Preserve the established EvaluationSubject error paths: an
+            # invalid snapshot reports at repository_snapshot, any other
+            # invalid stored CodeSurface reports at code_surface (the direct
+            # CodeSurface seam itself reports path-level detail).
+            raise ContractError.new(
+              "derived_input_invalid",
+              e.message,
+              path: e.path == "repository_snapshot" ? "repository_snapshot" : "code_surface"
+            )
+          end
+        unless code_surface["kind"] == derived["kind"] &&
+               code_surface["derivation_version"] == derived["derivation_version"] &&
+               code_surface["repository_tree_digest"] == derived["repository_tree_digest"] &&
+               code_surface["paths"] == derived["paths"] &&
+               code_surface["code_surface_digest"] == derived["code_surface_digest"]
           raise ContractError.new(
             "derived_input_invalid",
             "CodeSurface must be a deterministic projection of version, tree digest, and sorted paths",
@@ -213,12 +220,11 @@ module Orbit
       end
 
       def code_surface_digest(derivation_version:, repository_tree_digest:, paths:)
-        input = {
-          "derivation_version" => derivation_version,
-          "repository_tree_digest" => repository_tree_digest,
-          "paths" => paths
-        }
-        "sha256:#{CanonicalJSON.sha256(input)}"
+        ProjectionPrimitives.code_surface_digest(
+          derivation_version: derivation_version,
+          repository_tree_digest: repository_tree_digest,
+          paths: paths
+        )
       end
 
       def ref(id_key, id, digest)

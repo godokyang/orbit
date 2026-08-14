@@ -6,6 +6,7 @@ require "tmpdir"
 require "yaml"
 
 require_relative "../../../lib/orbit/v2/canonical_json"
+require_relative "../../../lib/orbit/v2/code_surface"
 require_relative "../../../lib/orbit/v2/errors"
 require_relative "../../../lib/orbit/v2/aggregate_outcome"
 require_relative "../../../lib/orbit/v2/context_projection"
@@ -59,6 +60,7 @@ module OrbitV2ContractTest
     test_context_projection
     test_relationship_view
     test_budget_projection
+    test_code_surface
     test_immutable_stores(valid_bundle)
     test_v1_inventory
     test_slice_isolation
@@ -4644,6 +4646,154 @@ module OrbitV2ContractTest
     )
     bundle["lead_checkpoints"] << reviewed
     bundle
+  end
+
+  # Slice 5 increment 5: the pure derived CodeSurface construction seam.
+  # derive(repository_snapshot:, paths:) builds the exact
+  # derived_code_surface contract object with the single canonical digest
+  # rule shared by EvaluationSubject; no filesystem reads, no writer.
+  def test_code_surface
+    derive = lambda do |snapshot, paths|
+      Orbit::V2::CodeSurface.derive(repository_snapshot: snapshot, paths: paths)
+    end
+    base = OrbitV2FixtureFactory.valid_bundle
+    snapshot = base["repository_snapshot"]
+    paths = base["code_surface"]["paths"]
+
+    # 1. Valid derivation produces the exact derived_code_surface shape with
+    #    the single canonical digest rule; the seam exposes exactly one
+    #    public construction method.
+    assert(
+      Orbit::V2::CodeSurface.methods(false).sort == [:derive],
+      "the CodeSurface seam exposes exactly one public construction method"
+    )
+    surface = derive.call(snapshot, paths)
+    assert(
+      surface == {
+        "kind" => "derived_code_surface",
+        "derivation_version" => "orbit-code-surface-v1",
+        "repository_tree_digest" => snapshot["tree_digest"],
+        "paths" => paths,
+        "code_surface_digest" => Orbit::V2::EvaluationSubject.code_surface_digest(
+          derivation_version: "orbit-code-surface-v1",
+          repository_tree_digest: snapshot["tree_digest"],
+          paths: paths
+        )
+      },
+      "derived surface matches the exact contract shape and canonical digest rule"
+    )
+
+    # 2. Rebuilding from the same snapshot+paths is byte-identical; input
+    #    order and duplicates are not silently canonicalized — the contract's
+    #    canonical-set invariant fails closed instead.
+    assert(
+      derive.call(snapshot, paths) == surface,
+      "rebuilding from the same snapshot and paths is byte-identical"
+    )
+    expect_contract_error("derived_input_invalid") { derive.call(snapshot, paths.reverse) }
+    expect_contract_error("derived_input_invalid") { derive.call(snapshot, paths + [paths.first]) }
+    # The returned surface copies its inputs deeply enough: in-place
+    # mutation of an input path string after derive leaves the output paths,
+    # element identity, and digest consistent.
+    mutable_paths = paths.map(&:dup)
+    mutated_surface = derive.call(snapshot, mutable_paths)
+    mutable_paths.first << "/mutated"
+    assert(
+      mutated_surface["paths"] == paths &&
+        !mutated_surface["paths"].first.equal?(mutable_paths.first) &&
+        mutated_surface["paths"].none? { |path| path.include?("/mutated") } &&
+        Orbit::V2::ProjectionPrimitives.code_surface_digest(
+          derivation_version: "orbit-code-surface-v1",
+          repository_tree_digest: snapshot["tree_digest"],
+          paths: mutated_surface["paths"]
+        ) == mutated_surface["code_surface_digest"],
+      "mutating an input path string after derive leaves output paths, identity, and digest consistent"
+    )
+
+    # 3. A tree digest or canonical path-set change changes the surface
+    #    digest.
+    assert(
+      derive.call(snapshot.merge("tree_digest" => "sha256:#{"1" * 64}"), paths)["code_surface_digest"] !=
+        surface["code_surface_digest"],
+      "a tree digest change changes the surface digest"
+    )
+    extended_paths = (paths + ["contracts/orbit-v2/contract.yaml"]).sort
+    assert(
+      derive.call(snapshot, extended_paths)["code_surface_digest"] != surface["code_surface_digest"],
+      "a canonical path-set change changes the surface digest"
+    )
+
+    # 4. Invalid snapshot and non-canonical path sets fail closed.
+    invalid_inputs = {
+      "unknown field" => lambda { derive.call(snapshot.merge("untrusted_extra" => "accepted"), paths) },
+      "missing kind" => lambda { derive.call(snapshot.reject { |key, _| key == "kind" }, paths) },
+      "bad commit sha" => lambda { derive.call(snapshot.merge("commit_sha" => "z" * 40), paths) },
+      "bad tree digest" => lambda { derive.call(snapshot.merge("tree_digest" => "sha256:nothex"), paths) },
+      "empty paths" => lambda { derive.call(snapshot, []) },
+      "absolute path" => lambda { derive.call(snapshot, ["/lib/orbit/v2"]) },
+      "traversal path" => lambda { derive.call(snapshot, ["lib/orbit/v2/../v1"]) },
+      "empty segment" => lambda { derive.call(snapshot, ["lib//orbit/v2"]) },
+      "backslash path" => lambda { derive.call(snapshot, ["lib\\orbit\\v2"]) }
+    }
+    invalid_inputs.each_value do |probe|
+      expect_contract_error("derived_input_invalid") { probe.call }
+    end
+
+    # 5. The seam is the single construction rule: a surface derived by the
+    #    public seam is the accepted canonical CodeSurface of a bundle, and
+    #    EvaluationSubject preserves its established error paths.
+    integration = OrbitV2FixtureFactory.deep_copy(base)
+    integration["code_surface"] = surface
+    assert(validator.validate(integration).empty?, "the derived surface is the accepted canonical CodeSurface")
+    bad_path_bundle = OrbitV2FixtureFactory.deep_copy(base)
+    bad_path_bundle["code_surface"]["paths"] = ["lib/orbit/v2/../v1"]
+    bad_path_errors = validator.validate(bad_path_bundle)
+    assert(
+      bad_path_errors.any? { |error| error.code == "derived_input_invalid" && error.path == "code_surface" },
+      "an invalid stored CodeSurface path set fails at the code_surface path"
+    )
+    # Direct EvaluationSubject probes preserve the established error paths
+    # (the bundle-level snapshot shape is schema-closed, so the semantic
+    # repository_snapshot path is exercised through the public select seam).
+    select_with = lambda do |repository_snapshot:, code_surface:|
+      Orbit::V2::EvaluationSubject.select(
+        gate_requirement: base["gate_requirements"].first,
+        task_revision: base["task_revisions"].first,
+        work_units: base["work_units"],
+        attempts: base["work_unit_attempts"],
+        evidence_records: base["evidence_records"],
+        repository_snapshot: repository_snapshot,
+        code_surface: code_surface
+      )
+    end
+    bad_snapshot_error = begin
+      select_with.call(
+        repository_snapshot: snapshot.merge("untrusted_extra" => "accepted"),
+        code_surface: base["code_surface"]
+      )
+      nil
+    rescue Orbit::V2::ContractError => error
+      error
+    end
+    assert(
+      bad_snapshot_error && bad_snapshot_error.code == "derived_input_invalid" &&
+        bad_snapshot_error.path == "repository_snapshot",
+      "an invalid repository snapshot fails at the repository_snapshot path"
+    )
+    bad_surface_error = begin
+      select_with.call(
+        repository_snapshot: snapshot,
+        code_surface: base["code_surface"].merge("paths" => ["lib/orbit/v2/../v1"])
+      )
+      nil
+    rescue Orbit::V2::ContractError => error
+      error
+    end
+    assert(
+      bad_surface_error && bad_surface_error.code == "derived_input_invalid" &&
+        bad_surface_error.path == "code_surface",
+      "an invalid stored CodeSurface path set fails at the code_surface path"
+    )
   end
 
   def reseal_consuming(bundle, checkpoint, evaluation: nil)

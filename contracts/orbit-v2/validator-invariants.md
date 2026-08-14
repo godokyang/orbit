@@ -240,6 +240,39 @@ collection source kinds, source digests) lives in `ProjectionPrimitives`;
 the Validator delegates to the same functions, so projection and validation
 cannot drift into two subtly different truths.
 
+### CodeSurface construction seam
+
+Slice 5 increment 5 adds one pure derived seam with exactly one public
+construction method: `CodeSurface.derive(repository_snapshot:, paths:)`
+producing the exact `derived_code_surface` contract object (`kind`,
+`derivation_version=orbit-code-surface-v1`, `repository_tree_digest`, sorted
+unique canonical non-empty `paths`, `code_surface_digest`). Inputs are the
+provider/store-supplied git snapshot identity already in the contract
+(kind git, 40-hex commit_sha, sha256 tree_digest) and the canonical
+repository-tree path set from the snapshot/tree enumerator boundary. The
+projector performs no filesystem reads, no latest/current lookup, no
+writes, and owns no fact source. The digest rule is the single canonical
+rule (version + tree digest + sorted paths via CanonicalJSON), living in
+`ProjectionPrimitives.code_surface_digest` and shared with `EvaluationSubject`
+— its `code_surface_digest` delegates to the same primitive and
+`validate_derived_inputs!` exact-compares the stored surface against the
+recomputed `CodeSurface.derive` output, so builder and consumer cannot
+drift while the public EvaluationSubject API is unchanged (established
+error paths preserved: invalid snapshot reports at `repository_snapshot`,
+any other invalid or mismatched stored CodeSurface at `code_surface`, while
+the direct seam reports `code_surface.paths`). Input contract (documented,
+enforced): the snapshot must be the exact closed contract shape — exactly
+`kind`/`commit_sha`/`tree_digest`, no extra or missing fields — and paths
+must already be a sorted unique canonical set — non-canonical input
+(unsorted, duplicated, empty, traversal, absolute, or non-POSIX paths)
+fails closed with `derived_input_invalid` rather than being silently
+canonicalized, keeping the digest domain exactly the contract's. The
+returned surface copies its inputs, so later source-array mutation cannot
+corrupt the derived object or its digest. Rebuilding from the same
+snapshot+paths is byte-identical; a tree digest or canonical path-set
+change changes the surface digest. No audit projection,
+runtime/store/clock/CLI/cutover activation exists in this increment.
+
 ### Responsibility-scoped context projections
 
 Slice 5 increment 2 adds three pure derived seams:
