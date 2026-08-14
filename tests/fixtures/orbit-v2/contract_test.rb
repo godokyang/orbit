@@ -11,6 +11,7 @@ require_relative "../../../lib/orbit/v2/errors"
 require_relative "../../../lib/orbit/v2/aggregate_outcome"
 require_relative "../../../lib/orbit/v2/context_projection"
 require_relative "../../../lib/orbit/v2/budget_projection"
+require_relative "../../../lib/orbit/v2/integrity_audit"
 require_relative "../../../lib/orbit/v2/relationship_view"
 require_relative "../../../lib/orbit/v2/gate_strength"
 require_relative "../../../lib/orbit/v2/immutable_store"
@@ -61,6 +62,7 @@ module OrbitV2ContractTest
     test_relationship_view
     test_budget_projection
     test_code_surface
+    test_integrity_audit
     test_immutable_stores(valid_bundle)
     test_v1_inventory
     test_slice_isolation
@@ -4794,6 +4796,202 @@ module OrbitV2ContractTest
         bad_surface_error.path == "code_surface",
       "an invalid stored CodeSurface path set fails at the code_surface path"
     )
+  end
+
+  # Slice 5 increment 6: the pure structural integrity/drift audit
+  # projection. derive(bundle, validator:) shares the projection-validation
+  # boundary and emits four mechanically frozen sections.
+  def test_integrity_audit
+    derive = lambda do |bundle|
+      Orbit::V2::IntegrityAudit.derive(bundle, validator: validator)
+    end
+    base = OrbitV2FixtureFactory.valid_bundle
+    audit = derive.call(base)
+
+    # 1. A clean canonical bundle reports nothing in any section and the
+    #    audit is canonical and deterministic.
+    assert(
+      audit["drifted_gate_evaluations"] == [] &&
+        audit["orphan_code_surface_paths"] == [] &&
+        audit["stale_evidence_records"] == [] &&
+        audit["unresolved_findings"] == [],
+      "the clean canonical bundle reports no drift, orphans, stale evidence, or unresolved findings"
+    )
+    assert(
+      audit["schema_version"] == "orbit-integrity-audit-v1" &&
+        audit["protocol_epoch"] == "orbit-v2" &&
+        audit["project_id"] == OrbitV2FixtureFactory::PROJECT_ID,
+      "the audit carries schema/protocol/project identity"
+    )
+    assert(
+      derive.call(base) == audit &&
+        Orbit::V2::CanonicalJSON.digest_excluding(audit, "content_digest") == audit["content_digest"] &&
+        audit["source_manifest"].any? { |entry| entry["kind"] == "gate_evaluation" },
+      "the audit is byte-identical on rebuild, self-consistent, and carries the complete source manifest"
+    )
+
+    # 2. A historical stale evaluation is reported with exact stored and
+    #    current subject digests; current evaluations stay absent.
+    stale_bundle = OrbitV2FixtureFactory.valid_bundle
+    stale_bundle["gate_evaluations"].first["verdict"] = "pass"
+    stale_bundle["gate_evaluations"].first["quality_outcome_verdict"] = "pass"
+    stale_bundle["gate_evaluations"].first["acceptance_results"].each { |result| result["verdict"] = "pass" }
+    rehash(stale_bundle["gate_evaluations"].first)
+    extra_record = OrbitV2FixtureFactory.deep_copy(stale_bundle["evidence_records"].first)
+    extra_record["evidence_record_id"] = "oevr_implementationoneextra"
+    rehash(extra_record)
+    stale_bundle["evidence_records"] << extra_record
+    assert(
+      validator.validate(stale_bundle).map(&:code) == ["subject_stale"],
+      "appended accepted evidence makes only the old evaluation subject-stale"
+    )
+    drifted = derive.call(stale_bundle)["drifted_gate_evaluations"]
+    stored_digest = stale_bundle["gate_evaluations"].first.dig("subject", "subject_digest")
+    current_subject = Orbit::V2::EvaluationSubject.select(
+      gate_requirement: stale_bundle["gate_requirements"].first,
+      task_revision: stale_bundle["task_revisions"].first,
+      work_units: stale_bundle["work_units"],
+      attempts: stale_bundle["work_unit_attempts"],
+      evidence_records: stale_bundle["evidence_records"],
+      repository_snapshot: stale_bundle["repository_snapshot"],
+      code_surface: stale_bundle["code_surface"]
+    )
+    assert(
+      drifted.length == 1 &&
+        drifted.first["gate_evaluation_ref"]["gate_evaluation_id"] == "ogeval_slice0review" &&
+        drifted.first["stored_subject_digest"] == stored_digest &&
+        drifted.first["current_subject_digest"] == current_subject["subject_digest"] &&
+        stale_bundle["gate_evaluations"].first["content_digest"] ==
+          drifted.first["gate_evaluation_ref"]["content_digest"],
+      "the historical evaluation is drifted with exact stored and current subject digests"
+    )
+
+    # 3. A valid extra CodeSurface path is exactly one orphan; segment-aware
+    #    parent/child overlap is not a false positive.
+    orphan_bundle = OrbitV2FixtureFactory.valid_bundle
+    orphan_bundle["code_surface"] = Orbit::V2::CodeSurface.derive(
+      repository_snapshot: orphan_bundle["repository_snapshot"],
+      paths: (orphan_bundle["code_surface"]["paths"] + ["docs/open", "contracts"]).sort
+    )
+    refresh_evaluation_subject(orphan_bundle)
+    assert(validator.validate(orphan_bundle).empty?, "the extended surface bundle must validate")
+    assert(
+      derive.call(orphan_bundle)["orphan_code_surface_paths"] == ["docs/open"],
+      "only the uncovered surface path is orphaned; parent/child overlap is not a false positive"
+    )
+
+    # 4. A revision-2 ChangeThesis makes revision-1 implementation evidence
+    #    stale with the exact stored and current thesis refs; evaluator
+    #    submissions are excluded. Clean tip-pinned absence is covered by
+    #    scenario 1 (an in-place rewrite is Validator-blocked; see below).
+    stale_evidence_bundle = OrbitV2FixtureFactory.valid_bundle
+    thesis = stale_evidence_bundle["change_theses"].find do |candidate|
+      candidate["change_thesis_id"] == "othesis_implementationone"
+    end
+    thesis2 = OrbitV2FixtureFactory.deep_copy(thesis)
+    thesis2["revision"] = 2
+    rehash(thesis2)
+    stale_evidence_bundle["change_theses"] << thesis2
+    assert(validator.validate(stale_evidence_bundle).empty?, "a contiguous revision-2 thesis validates")
+    stale_records = derive.call(stale_evidence_bundle)["stale_evidence_records"]
+    assert(
+      stale_records.length == 1 &&
+        stale_records.first["evidence_record_ref"]["evidence_record_id"] == "oevr_implementationone" &&
+        stale_records.first["stored_change_thesis_ref"]["revision"] == 1 &&
+        stale_records.first["current_change_thesis_ref"] == {
+          "change_thesis_id" => "othesis_implementationone",
+          "content_digest" => thesis2["content_digest"],
+          "revision" => 2
+        },
+      "the revision-1 implementation record is stale against the accepted tip; the evaluator submission is excluded"
+    )
+    # Tip-pinned records are absent (scenario 1 proves the clean case); an
+    # in-place record rewrite to a new tip is Validator-blocked because the
+    # Slice 2 dispatch contract requires the AttemptCreated assignment to
+    # equal the dispatch's authorized proposal, so staleness always follows
+    # the validated lineage.
+
+    # 5. Unresolved blocking, adjudication-required, and nonblocking
+    #    findings are classified from the active policy; a valid resolution
+    #    tip removes the finding.
+    unresolved_bundle = OrbitV2FixtureFactory.valid_bundle
+    evaluation = unresolved_bundle["gate_evaluations"].first
+    append_finding = lambda do |id, basis|
+      finding = OrbitV2FixtureFactory.deep_copy(unresolved_bundle["findings"].first)
+      finding["finding_id"] = id
+      finding["basis"] = basis
+      finding["supersedes_finding_id"] = nil
+      finding["body"] = "Typed #{basis} audit probe."
+      rehash(finding)
+      evaluation["finding_refs"] = Array(evaluation["finding_refs"]) + [finding["finding_id"]]
+      rehash(evaluation)
+      unresolved_bundle["findings"] << finding
+      finding
+    end
+    hardening = append_finding.call("ofinding_hardening_audit", "hardening_opportunity")
+    risk = append_finding.call("ofinding_risk_audit", "newly_discovered_risk")
+    OrbitV2FixtureFactory.append_finding_change_checkpoint(
+      unresolved_bundle,
+      risk,
+      {
+        "state" => "needs_user",
+        "action" => "escalate",
+        "reason" => "newly discovered risk requires risk-owner/user adjudication"
+      }
+    )
+    unresolved_bundle["finding_resolutions"] = []
+    assert(validator.validate(unresolved_bundle).empty?, "the typed-finding bundle must validate")
+    unresolved = derive.call(unresolved_bundle)["unresolved_findings"]
+    assert(
+      unresolved.map { |entry| [entry["finding_ref"]["finding_id"], entry["disposition"]] }.sort ==
+        [
+          ["ofinding_hardening_audit", "nonblocking"],
+          ["ofinding_risk_audit", "adjudication_required"],
+          ["ofinding_slice0example", "blocking"]
+        ],
+      "blocking, adjudication-required, and nonblocking findings classify from the active policy"
+    )
+    waiver = OrbitV2FixtureFactory.deep_copy(
+      OrbitV2FixtureFactory.valid_bundle["finding_resolutions"].first
+    )
+    unresolved_bundle["finding_resolutions"] << waiver
+    assert(
+      validator.validate(unresolved_bundle).empty? &&
+        derive.call(unresolved_bundle)["unresolved_findings"].length == 2,
+      "a valid resolution tip removes the blocking finding"
+    )
+
+    # 6. Array order never changes the audit; any exposed source change
+    #    invalidates the digests.
+    reversed_bundle = OrbitV2FixtureFactory.valid_bundle
+    reversed_bundle["work_unit_attempts"].reverse!
+    reversed_bundle["evidence_records"].reverse!
+    reversed_bundle["findings"].reverse!
+    assert(
+      derive.call(reversed_bundle)["content_digest"] == audit["content_digest"],
+      "unrelated array order never changes the audit"
+    )
+    changed_bundle = OrbitV2FixtureFactory.valid_bundle
+    changed_bundle["repository_snapshot"]["commit_sha"] = "b" * 40
+    refresh_evaluation_subject(changed_bundle)
+    assert(validator.validate(changed_bundle).empty?, "refreshed snapshot bundle must validate")
+    changed_audit = derive.call(changed_bundle)
+    assert(
+      changed_audit["source_digest"] != audit["source_digest"] &&
+        changed_audit["content_digest"] != audit["content_digest"],
+      "a participating source change invalidates the audit digests"
+    )
+
+    # 7. Invalid authority/independence fails closed through the public
+    #    seam.
+    stripped_bundle = OrbitV2FixtureFactory.valid_bundle
+    stripped_bundle["authorization_records"] = []
+    expect_contract_error("aggregate_outcome_invalid") { derive.call(stripped_bundle) }
+    swapped_bundle = OrbitV2FixtureFactory.valid_bundle
+    reviewer = swapped_bundle["agent_instances"].find { |agent| agent["agent_instance_id"] == "oagent_independentreviewer" }
+    producer = swapped_bundle["agent_instances"].find { |agent| agent["agent_instance_id"] == "oagent_implementerone" }
+    reviewer["runtime_identity"] = OrbitV2FixtureFactory.deep_copy(producer["runtime_identity"])
+    expect_contract_error("aggregate_outcome_invalid") { derive.call(swapped_bundle) }
   end
 
   def reseal_consuming(bundle, checkpoint, evaluation: nil)

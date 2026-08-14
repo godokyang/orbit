@@ -273,6 +273,47 @@ snapshot+paths is byte-identical; a tree digest or canonical path-set
 change changes the surface digest. No audit projection,
 runtime/store/clock/CLI/cutover activation exists in this increment.
 
+### Integrity/drift audit projection
+
+Slice 5 increment 6 adds one pure derived seam:
+`IntegrityAudit.derive(bundle, validator:)` emitting four mechanically
+frozen audit sections over the shared projection-validation boundary
+(accepted bundles plus the exact historical `.subject` staleness
+carve-out; every other schema/authority/provenance/independence error fails
+closed — this is not a second validator):
+
+- `drifted_gate_evaluations`: every stored GateEvaluation whose exact
+  current GateRequirement selector recomputes a different canonical
+  EvaluationSubject, with exact evaluation ref, `stored_subject_digest`, and
+  `current_subject_digest`. Current evaluations are absent; stale
+  GateRequirement digest or stale active-policy authority remain invalid at
+  the shared boundary and never reach this section.
+- `orphan_code_surface_paths`: canonical CodeSurface paths with no
+  segment-aware overlap (`PathScope.covered?` either direction) with any
+  accepted WorkUnit `authority_scope.writable_paths`; audit-only — an
+  otherwise valid extra surface path is reported, never rejected. Changed
+  paths outside surface/authority remain Validator failures.
+- `stale_evidence_records`: only implementation EvidenceRecords; stale when
+  the exact `implementation_check.change_thesis_ref` pins a non-tip
+  revision of its accepted ChangeThesis lineage (the tip is the highest
+  contiguous accepted revision, validator-guaranteed), with exact evidence
+  ref, stored thesis ref, and current thesis ref. Evaluator submissions are
+  never mislabeled stale; no timestamps or array order participate.
+- `unresolved_findings`: every accepted Finding with no current valid
+  FindingResolution lineage tip (including nonblocking hardening findings),
+  with the exact finding ref and the active-policy-derived disposition
+  (`blocking`/`adjudication_required`/`nonblocking`); a valid resolution
+  tip removes it. Disposition reuses `ProjectionPrimitives.finding_disposition`
+  and structural supersedes analysis — never severity, body, or free text.
+
+Output is canonical, sorted, and order-independent with
+schema_version/protocol_epoch/project_id, the four sections, the complete
+shared bundle source_manifest, source_digest, and content_digest;
+deletion/rebuild is byte-identical and any source change invalidates the
+digests. No writes, persisted audit truth, scoring, free-text goal
+judgment, filesystem reads, or runtime/store/clock/CLI/cutover activation
+(Slice 6) exists in this increment.
+
 ### Responsibility-scoped context projections
 
 Slice 5 increment 2 adds three pure derived seams:
