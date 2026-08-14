@@ -361,79 +361,12 @@ module Orbit
       private_class_method :resolve_exact_ref
 
       # The complete sorted source ID+digest manifest of every validated
-      # bundle source. This is whole-bundle over-invalidation by design: the
-      # eligibility boundary consumes the entire bundle, so every source is
-      # part of the key. protocol_root is a singleton and is included exactly
-      # once; every collection document appears exactly once (task revisions
-      # and policy revisions come from their collections, not from preseeded
-      # refs). Documents without a stored content_digest (authority
-      # assertions, agent instances/runtime identity, lead sessions, rule
-      # resolutions, attempts) get their canonical content digest recomputed,
-      # so any byte change to any source changes the manifest and therefore
-      # source_digest/content_digest.
+      # bundle source (see ProjectionPrimitives.bundle_source_manifest).
       def source_manifest(bundle)
-        entries = []
-        root = bundle["protocol_root"]
-        if root.is_a?(Hash) && root["project_id"].is_a?(String)
-          digest = ProjectionPrimitives.source_digest(root)
-          entries << ProjectionPrimitives.manifest_entry(
-            "protocol_root",
-            root["project_id"],
-            digest
-          )
-        end
-        ProjectionPrimitives::COLLECTION_SOURCES.each do |collection, (kind, id_field)|
-          Array(bundle[collection]).each do |document|
-            next unless document.is_a?(Hash)
-
-            id = document[id_field]
-            next if id.nil?
-
-            entries << ProjectionPrimitives.manifest_entry(
-              kind,
-              id,
-              ProjectionPrimitives.source_digest(document)
-            )
-          end
-        end
-        Array(bundle["change_theses"]).each do |thesis|
-          next unless thesis.is_a?(Hash)
-
-          entries << ProjectionPrimitives.manifest_entry(
-            "change_thesis",
-            "#{thesis["change_thesis_id"]}@#{thesis["revision"]}",
-            thesis["content_digest"]
-          )
-        end
-        snapshot = bundle["repository_snapshot"]
-        code_surface = bundle["code_surface"]
-        if snapshot.is_a?(Hash)
-          entries << ProjectionPrimitives.manifest_entry(
-            "repository_snapshot",
-            snapshot["commit_sha"],
-            snapshot["tree_digest"]
-          )
-        end
-        if code_surface.is_a?(Hash)
-          entries << ProjectionPrimitives.manifest_entry(
-            "code_surface",
-            code_surface["code_surface_digest"],
-            code_surface["code_surface_digest"]
-          )
-        end
-        seen = {}
-        entries.each do |entry|
-          key = [entry["kind"], entry["id"]]
-          if seen.key?(key)
-            raise ContractError.new(
-              "aggregate_outcome_invalid",
-              "source manifest contains a duplicate (kind, id)",
-              path: "source_manifest"
-            )
-          end
-          seen[key] = true
-        end
-        entries.sort_by { |entry| [entry["kind"], entry["id"]] }
+        ProjectionPrimitives.bundle_source_manifest(
+          bundle,
+          error_code: "aggregate_outcome_invalid"
+        )
       end
       private_class_method :source_manifest
 

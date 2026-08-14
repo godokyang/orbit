@@ -289,9 +289,49 @@ Findings/Resolutions of those gates, and the pinned plan/basis digests —
 without implementation ChangeThesis prose or author transcript/reasoning, and
 never with another gate kind's context. Unrelated bundle changes never
 perturb the narrower work_agent/evaluator manifests.
-No persisted cache, LeadControl transition, RelationshipView, candidate
-relations, audit layer, or budget digest/two-lineage projection exists in
-this increment.
+No persisted cache, LeadControl transition, audit layer, or budget digest/
+two-lineage projection exists in this increment.
+
+### Typed RelationshipView
+
+Slice 5 increment 3 adds one pure derived seam:
+`RelationshipView.derive(bundle, validator:)`. It reads validated
+authoritative facts through the shared projection-validation boundary
+(including the exact historical `.subject` staleness allowance) and emits
+canonical typed nodes and edges for the ADR-003 authoritative chains:
+protocol root to policy genesis; policy parent lineage; task revision to
+policy/WorkUnits/GateRequirements; control registry/checkpoints to control
+with exact task queue, selection, and attempt refs; LeadSession to control
+and provider-verified runtime subject (when the exact pins exist); WorkUnit
+to parent/dependencies/attempts (both directions:
+`work_unit_attempt_belongs_to_unit` and `work_unit_has_attempt`) and its
+immutable initial thesis; Attempt to unit/task/control/AgentInstance/dispatch
+checkpoint/thesis/assigned RuleResolution; EvidenceRecord to producing
+Attempt, submitted RuleResolution, its structurally pinned (supported)
+thesis, and its submission artifact claims — each `artifact_claim` node is
+identified by record ownership plus artifact_ref, so two records may reuse
+the same artifact URI with different content digests without identity
+collision; GateEvaluation to requirement, evaluator Attempt/submission, the
+exact canonical subject (task revision, WorkUnits, implementation Attempts,
+evidence, snapshot, CodeSurface) and findings; Finding to reporting
+evaluation and supersedes/related lineage; FindingResolution to finding,
+issuer attempt/submission, source/resolving evaluation, and supporting
+evidence. Every node/edge carries exact stable identities and digests;
+output is canonical and order-independent, with complete
+`source_manifest`/`source_digest`/`content_digest` (whole-bundle manifest
+via `ProjectionPrimitives.bundle_source_manifest`).
+
+Candidate edges have no authoritative fact source in the contract (the
+Validator rejects unknown bundle keys), so the view exposes an explicit
+empty `candidate_edges` section; a candidate relation therefore cannot
+alter derived edges, scope, permission, state, gates, AggregateOutcome, or
+ContextProjection. Historical stale GateEvaluations stay stored with their
+derived edges; their node carries `current: false` and they never become a
+current/closing relation. Invalid refs, authority, independence, duplicate
+node/edge identities, and unknown input keys fail closed through the public
+seam. No persisted cache, writer, runtime activation, graph DB, LeadControl
+transition, candidate relations, audit layer, or budget digest/two-lineage
+projection exists in this increment.
 
 ## Finding-to-invariant matrix
 

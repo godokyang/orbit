@@ -9,6 +9,7 @@ require_relative "../../../lib/orbit/v2/canonical_json"
 require_relative "../../../lib/orbit/v2/errors"
 require_relative "../../../lib/orbit/v2/aggregate_outcome"
 require_relative "../../../lib/orbit/v2/context_projection"
+require_relative "../../../lib/orbit/v2/relationship_view"
 require_relative "../../../lib/orbit/v2/gate_strength"
 require_relative "../../../lib/orbit/v2/immutable_store"
 require_relative "../../../lib/orbit/v2/policy_issuance"
@@ -55,6 +56,7 @@ module OrbitV2ContractTest
     test_budget_assessment_consumer_closure
     test_aggregate_outcome_projection
     test_context_projection
+    test_relationship_view
     test_immutable_stores(valid_bundle)
     test_v1_inventory
     test_slice_isolation
@@ -3854,6 +3856,296 @@ module OrbitV2ContractTest
     [lead_seam, work_seam, evaluator_seam].each do |seam|
       expect_contract_error("aggregate_outcome_invalid") { seam.call(swapped_bundle) }
     end
+  end
+
+  # Slice 5 increment 3: the pure deterministic Typed RelationshipView.
+  # derive(bundle, validator:) shares the projection-validation boundary,
+  # emits canonical typed nodes/edges for the ADR-003 chains, keeps
+  # candidate_edges mechanically empty, and never lets a stale evaluation
+  # become a current/closing relation.
+  def test_relationship_view
+    derive = lambda do |bundle|
+      Orbit::V2::RelationshipView.derive(bundle, validator: validator)
+    end
+    edge_kinds = lambda do |view|
+      view["derived_edges"].group_by { |edge| edge["kind"] }
+    end
+    edge_count = lambda do |kinds, kind|
+      kinds.fetch(kind, []).length
+    end
+    edge_between = lambda do |kinds, kind, source_id, target_id|
+      kinds.fetch(kind, []).any? do |edge|
+        edge["source"]["id"] == source_id && edge["target"]["id"] == target_id
+      end
+    end
+    base = derive.call(OrbitV2FixtureFactory.valid_bundle)
+    kinds = edge_kinds.call(base)
+
+    # 1. Protocol/policy/task/unit/gate chains carry exact identities.
+    assert(
+      edge_count.call(kinds, "protocol_root_pins_policy_genesis") == 1 &&
+        edge_between.call(kinds, "protocol_root_pins_policy_genesis", "oproj_slice0fixture", "opolicy_genesis0001"),
+      "protocol root pins the exact policy genesis"
+    )
+    assert(edge_count.call(kinds, "policy_parent_lineage") == 0, "genesis policy has no parent edge")
+    assert(
+      edge_count.call(kinds, "task_revision_governed_by_policy") == 1 &&
+        edge_between.call(kinds, "task_revision_governed_by_policy", "trev_slice0contract_r1", "opolicy_genesis0001"),
+      "task revision pins its exact policy"
+    )
+    assert(edge_count.call(kinds, "task_revision_owns_work_unit") == 3, "task owns its WorkUnit graph")
+    assert(
+      edge_count.call(kinds, "task_revision_requires_gate") == 1 &&
+        edge_between.call(kinds, "task_revision_requires_gate", "trev_slice0contract_r1", "ogreq_slice0review"),
+      "task requires its exact gate"
+    )
+    assert(
+      edge_count.call(kinds, "work_unit_parent") == 2 &&
+        edge_between.call(kinds, "work_unit_parent", "owu_independentreview", "owu_implementationone"),
+      "WorkUnit parent refs are exact"
+    )
+    assert(
+      edge_count.call(kinds, "work_unit_depends_on") == 3 &&
+        edge_between.call(kinds, "work_unit_depends_on", "owu_independentreview", "owu_implementationtwo"),
+      "WorkUnit dependency refs are exact"
+    )
+    assert(
+      edge_count.call(kinds, "work_unit_pins_initial_thesis") == 3 &&
+        edge_between.call(kinds, "work_unit_pins_initial_thesis", "owu_implementationone", "othesis_implementationone@1"),
+      "WorkUnit pins its immutable initial thesis"
+    )
+
+    # 2. Control/checkpoint/session chains and queue/selection refs.
+    checkpoints = OrbitV2FixtureFactory.valid_bundle["lead_checkpoints"]
+    assert(
+      edge_count.call(kinds, "control_registry_has_genesis_checkpoint") == 1 &&
+        edge_count.call(kinds, "control_registry_owns_task") == 1,
+      "registry pins genesis checkpoint and owned task"
+    )
+    assert(
+      edge_count.call(kinds, "lead_checkpoint_under_control") == checkpoints.length,
+      "every checkpoint belongs to its control"
+    )
+    assert(
+      edge_count.call(kinds, "lead_checkpoint_queues_task_revision") == checkpoints.length &&
+        checkpoints.all? do |cp|
+          Array(cp["task_queue"]).all? do |queued|
+            edge_between.call(kinds, "lead_checkpoint_queues_task_revision", cp["lead_checkpoint_id"], queued["task_revision_id"])
+          end
+        end,
+      "every checkpoint task queue ref is represented exactly"
+    )
+    assert(
+      edge_count.call(kinds, "lead_checkpoint_active_task") ==
+        checkpoints.count { |cp| cp["active_task_ref"].is_a?(Hash) } &&
+        edge_count.call(kinds, "lead_checkpoint_selected_work_unit") ==
+          checkpoints.count { |cp| cp["selected_work_unit_ref"].is_a?(Hash) } &&
+        edge_count.call(kinds, "lead_checkpoint_tracks_attempt") ==
+          checkpoints.count { |cp| cp["current_or_terminal_attempt_ref"].is_a?(Hash) },
+      "checkpoint selection and attempt refs are exact"
+    )
+    assert(
+      edge_count.call(kinds, "lead_session_belongs_to_control") == 2 &&
+        edge_count.call(kinds, "lead_session_binds_runtime_subject") == 2,
+      "sessions bind their control and provider-verified runtime subject"
+    )
+    assert(
+      base["nodes"].count { |node| node["kind"] == "runtime_subject" } == 1,
+      "shared runtime subject dedupes to one node"
+    )
+
+    # 3. Attempt/evidence/artifact-claim chains.
+    %w[
+      work_unit_attempt_belongs_to_unit work_unit_attempt_belongs_to_task
+      work_unit_attempt_under_control work_unit_attempt_uses_agent
+      work_unit_attempt_uses_thesis work_unit_attempt_uses_rule_resolution
+      work_unit_attempt_dispatched_by work_unit_has_attempt
+    ].each do |kind|
+      assert(edge_count.call(kinds, kind) == 4, "#{kind} covers every attempt")
+    end
+    assert(
+      edge_between.call(kinds, "work_unit_attempt_uses_agent", "oattempt_implementationone", "oagent_implementerone") &&
+        edge_between.call(kinds, "work_unit_attempt_dispatched_by", "oattempt_implementationone", "olcheckpoint_dispatch_implone") &&
+        edge_between.call(kinds, "work_unit_has_attempt", "owu_implementationone", "oattempt_implementationonesuccessor"),
+      "attempt pins its exact agent, dispatch checkpoint, and owning unit"
+    )
+    assert(
+      edge_count.call(kinds, "evidence_record_produced_by_attempt") == 3 &&
+        edge_count.call(kinds, "evidence_record_submits_rule_resolution") == 3,
+      "evidence records bind their producing attempt and submitted rules"
+    )
+    assert(
+      edge_count.call(kinds, "evidence_record_supports_change_thesis") == 2,
+      "implementation evidence structurally supports its thesis"
+    )
+    assert(
+      edge_count.call(kinds, "evidence_record_claims_artifact") == 5 &&
+        base["nodes"].count { |node| node["kind"] == "artifact_claim" } == 5 &&
+        base["nodes"].select { |node| node["kind"] == "artifact_claim" }.all? { |node| node["id"].include?("::") },
+      "every submission artifact claim is a unique per-record node and edge"
+    )
+    # Cross-record artifact reuse is valid and collision-safe: two records
+    # may reuse the same artifact URI with different digests; claim nodes
+    # stay per-record and edges stay exact.
+    reuse_bundle = OrbitV2FixtureFactory.valid_bundle
+    reuse_submission = OrbitV2FixtureFactory.deep_copy(
+      reuse_bundle["evidence_records"].find { |record| record["record_kind"] == "evaluator_submission" }
+    )
+    reuse_submission["evidence_record_id"] = "oevr_independentreviewreuse"
+    reuse_submission["submission_artifact_refs"].first["content_digest"] = "sha256:#{"1" * 64}"
+    rehash(reuse_submission)
+    reuse_bundle["evidence_records"] << reuse_submission
+    assert(validator.validate(reuse_bundle).empty?, "cross-record artifact reuse must validate")
+    reuse_view = derive.call(reuse_bundle)
+    reuse_claims = reuse_view["nodes"].select { |node| node["kind"] == "artifact_claim" }
+    assert(
+      reuse_claims.length == 6 &&
+        reuse_claims.count { |node| node["artifact_ref"] == "artifact://oevr_independentreview/report" } == 2 &&
+        reuse_claims.select { |node| node["artifact_ref"] == "artifact://oevr_independentreview/report" }
+                    .map { |node| node["content_digest"] }.uniq.length == 2 &&
+        reuse_claims.any? { |node| node["id"].start_with?("oevr_independentreviewreuse::") },
+      "reused artifact URIs produce distinct per-record claim nodes with exact digests"
+    )
+    assert(
+      reuse_view["derived_edges"].count { |edge| edge["kind"] == "evidence_record_claims_artifact" } == 6,
+      "every claim edge stays exact under artifact reuse"
+    )
+
+    # 4. Gate/finding/resolution chains with exact subject refs and current
+    #    flags.
+    assert(
+      edge_count.call(kinds, "gate_evaluation_requires_gate") == 1 &&
+        edge_count.call(kinds, "gate_evaluation_evaluated_by_attempt") == 1 &&
+        edge_count.call(kinds, "gate_evaluation_submitted_by_record") == 1,
+      "gate evaluation binds its exact requirement, evaluator, and submission"
+    )
+    %w[
+      gate_evaluation_subject_task_revision gate_evaluation_subject_repository_snapshot
+      gate_evaluation_subject_code_surface
+    ].each do |kind|
+      assert(edge_count.call(kinds, kind) == 1, "#{kind} is exact")
+    end
+    assert(
+      edge_count.call(kinds, "gate_evaluation_subject_work_unit") == 2 &&
+        edge_count.call(kinds, "gate_evaluation_subject_implementation_attempt") == 2 &&
+        edge_count.call(kinds, "gate_evaluation_subject_evidence_record") == 2,
+      "subject pins its exact implementation units, attempts, and evidence"
+    )
+    assert(
+      edge_count.call(kinds, "gate_evaluation_reports_finding") == 1 &&
+        edge_count.call(kinds, "finding_reported_by_gate_evaluation") == 1 &&
+        edge_count.call(kinds, "finding_resolution_resolves_finding") == 1,
+      "finding and resolution chains are exact"
+    )
+    assert(
+      base["nodes"].find { |node| node["kind"] == "gate_evaluation" }["current"] == true,
+      "the current evaluation node is marked current"
+    )
+
+    # 5. Canonical recompute and order independence.
+    assert(derive.call(OrbitV2FixtureFactory.valid_bundle) == base, "repeat recomputation is byte-identical")
+    assert(
+      Orbit::V2::CanonicalJSON.digest_excluding(base, "content_digest") == base["content_digest"],
+      "content_digest covers the whole view"
+    )
+    assert(
+      base["nodes"] == base["nodes"].sort_by { |node| [node["kind"], node["id"]] } &&
+        base["derived_edges"] == base["derived_edges"].sort_by { |edge| [edge["kind"], edge["source"]["kind"], edge["source"]["id"], edge["target"]["kind"], edge["target"]["id"]] },
+      "nodes and edges are canonically sorted"
+    )
+    reversed_bundle = OrbitV2FixtureFactory.valid_bundle
+    reversed_bundle["work_unit_attempts"].reverse!
+    reversed_bundle["evidence_records"].reverse!
+    reversed_bundle["gate_evaluations"].reverse!
+    assert(
+      derive.call(reversed_bundle)["content_digest"] == base["content_digest"],
+      "unrelated array order never changes the view"
+    )
+
+    # 6. Historical stale evaluations stay stored with their edges but are
+    #    marked non-current and never become closing relations.
+    stale_bundle = OrbitV2FixtureFactory.valid_bundle
+    stale_bundle["gate_evaluations"].first["verdict"] = "pass"
+    stale_bundle["gate_evaluations"].first["quality_outcome_verdict"] = "pass"
+    stale_bundle["gate_evaluations"].first["acceptance_results"].each { |result| result["verdict"] = "pass" }
+    rehash(stale_bundle["gate_evaluations"].first)
+    extra_record = OrbitV2FixtureFactory.deep_copy(stale_bundle["evidence_records"].first)
+    extra_record["evidence_record_id"] = "oevr_implementationoneextra"
+    rehash(extra_record)
+    stale_bundle["evidence_records"] << extra_record
+    assert(
+      validator.validate(stale_bundle).map(&:code) == ["subject_stale"],
+      "appended accepted evidence makes only the old evaluation subject-stale"
+    )
+    stale_view = derive.call(stale_bundle)
+    stale_evaluation_node = stale_view["nodes"].find { |node| node["kind"] == "gate_evaluation" }
+    assert(stale_evaluation_node["current"] == false, "the historical evaluation is marked non-current")
+    assert(
+      edge_kinds.call(stale_view)["gate_evaluation_subject_work_unit"].length == 2,
+      "the historical evaluation keeps its stored subject edges"
+    )
+    assert(
+      !stale_view["nodes"].any? { |node| node["kind"] == "gate_evaluation" && node["current"] },
+      "no stale evaluation becomes a current relation"
+    )
+
+    # 7. Candidate edges are mechanically isolated: the contract has no
+    #    candidate fact source, so the section is always empty and any
+    #    attempted candidate input is rejected by the shared boundary.
+    assert(base["candidate_edges"] == [], "candidate section is explicitly empty")
+    candidate_bundle = OrbitV2FixtureFactory.valid_bundle
+    candidate_bundle["candidate_relations"] = [{ "kind" => "candidate", "source" => "x", "target" => "y" }]
+    expect_contract_error("aggregate_outcome_invalid") { derive.call(candidate_bundle) }
+
+    # 8. Invalid authority/independence/refs fail closed through the public
+    #    seam.
+    stripped_bundle = OrbitV2FixtureFactory.valid_bundle
+    stripped_bundle["authorization_records"] = []
+    expect_contract_error("aggregate_outcome_invalid") { derive.call(stripped_bundle) }
+    swapped_bundle = OrbitV2FixtureFactory.valid_bundle
+    reviewer = swapped_bundle["agent_instances"].find { |agent| agent["agent_instance_id"] == "oagent_independentreviewer" }
+    producer = swapped_bundle["agent_instances"].find { |agent| agent["agent_instance_id"] == "oagent_implementerone" }
+    reviewer["runtime_identity"] = OrbitV2FixtureFactory.deep_copy(producer["runtime_identity"])
+    expect_contract_error("aggregate_outcome_invalid") { derive.call(swapped_bundle) }
+    phantom_gate = OrbitV2FixtureFactory.valid_bundle
+    phantom_gate["task_revisions"].first["gate_requirement_refs"] = ["ogreq_missing"]
+    expect_contract_error("aggregate_outcome_invalid") { derive.call(phantom_gate) }
+
+    # 9. Any exposed source change invalidates the digests.
+    changed_bundle = OrbitV2FixtureFactory.valid_bundle
+    changed_bundle["repository_snapshot"]["commit_sha"] = "b" * 40
+    refresh_evaluation_subject(changed_bundle)
+    assert(validator.validate(changed_bundle).empty?, "refreshed snapshot bundle must validate")
+    changed_view = derive.call(changed_bundle)
+    assert(
+      changed_view["source_digest"] != base["source_digest"] &&
+        changed_view["content_digest"] != base["content_digest"],
+      "a snapshot change invalidates the view digests"
+    )
+    appended_bundle = OrbitV2FixtureFactory.valid_bundle
+    extra_submission = OrbitV2FixtureFactory.deep_copy(
+      appended_bundle["evidence_records"].find { |record| record["record_kind"] == "evaluator_submission" }
+    )
+    extra_submission["evidence_record_id"] = "oevr_independentreviewextra"
+    rehash(extra_submission)
+    appended_bundle["evidence_records"] << extra_submission
+    assert(validator.validate(appended_bundle).empty?, "an extra submission keeps the bundle valid")
+    assert(
+      derive.call(appended_bundle)["source_digest"] != base["source_digest"],
+      "an appended exposed source invalidates the view digests"
+    )
+
+    # 10. Duplicate prevention: node and edge identities are unique on the
+    #     canonical graph.
+    node_identities = base["nodes"].map { |node| [node["kind"], node["id"]] }
+    edge_identities = base["derived_edges"].map do |edge|
+      [edge["kind"], edge["source"]["kind"], edge["source"]["id"], edge["target"]["kind"], edge["target"]["id"]]
+    end
+    assert(
+      node_identities.uniq.length == node_identities.length &&
+        edge_identities.uniq.length == edge_identities.length,
+      "the view emits no duplicate node or edge identity"
+    )
   end
 
   def reseal_consuming(bundle, checkpoint, evaluation: nil)

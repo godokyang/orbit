@@ -3,6 +3,7 @@
 require "set"
 
 require_relative "canonical_json"
+require_relative "errors"
 require_relative "evaluation_subject"
 
 module Orbit
@@ -135,6 +136,66 @@ module Orbit
       def source_digest(document)
         digest = document.is_a?(Hash) ? document["content_digest"] : nil
         digest.is_a?(String) ? digest : CanonicalJSON.content_digest(document)
+      end
+
+      # The complete sorted source ID+digest manifest of every validated
+      # bundle source. Whole-bundle over-invalidation by design: the shared
+      # eligibility boundary consumes the entire bundle, so every source is
+      # part of the key. protocol_root is a singleton and is included exactly
+      # once; every collection document appears exactly once; documents
+      # without a stored content_digest get their canonical content digest
+      # recomputed, so any byte change to any source changes the manifest.
+      # A duplicate (kind, id) fails closed with the caller's error code.
+      def bundle_source_manifest(bundle, error_code: "projection_invalid")
+        entries = []
+        root = bundle["protocol_root"]
+        if root.is_a?(Hash) && root["project_id"].is_a?(String)
+          entries << manifest_entry("protocol_root", root["project_id"], source_digest(root))
+        end
+        COLLECTION_SOURCES.each do |collection, (kind, id_field)|
+          Array(bundle[collection]).each do |document|
+            next unless document.is_a?(Hash)
+
+            id = document[id_field]
+            next if id.nil?
+
+            entries << manifest_entry(kind, id, source_digest(document))
+          end
+        end
+        Array(bundle["change_theses"]).each do |thesis|
+          next unless thesis.is_a?(Hash)
+
+          entries << manifest_entry(
+            "change_thesis",
+            "#{thesis["change_thesis_id"]}@#{thesis["revision"]}",
+            thesis["content_digest"]
+          )
+        end
+        snapshot = bundle["repository_snapshot"]
+        code_surface = bundle["code_surface"]
+        if snapshot.is_a?(Hash)
+          entries << manifest_entry("repository_snapshot", snapshot["commit_sha"], snapshot["tree_digest"])
+        end
+        if code_surface.is_a?(Hash)
+          entries << manifest_entry(
+            "code_surface",
+            code_surface["code_surface_digest"],
+            code_surface["code_surface_digest"]
+          )
+        end
+        seen = {}
+        entries.each do |entry|
+          key = [entry["kind"], entry["id"]]
+          if seen.key?(key)
+            raise ContractError.new(
+              error_code,
+              "source manifest contains a duplicate (kind, id)",
+              path: "source_manifest"
+            )
+          end
+          seen[key] = true
+        end
+        entries.sort_by { |entry| [entry["kind"], entry["id"]] }
       end
 
       def manifest_entry(kind, id, content_digest)
