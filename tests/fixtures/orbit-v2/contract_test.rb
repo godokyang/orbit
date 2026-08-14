@@ -7,6 +7,7 @@ require "yaml"
 
 require_relative "../../../lib/orbit/v2/canonical_json"
 require_relative "../../../lib/orbit/v2/errors"
+require_relative "../../../lib/orbit/v2/aggregate_outcome"
 require_relative "../../../lib/orbit/v2/gate_strength"
 require_relative "../../../lib/orbit/v2/immutable_store"
 require_relative "../../../lib/orbit/v2/policy_issuance"
@@ -51,6 +52,7 @@ module OrbitV2ContractTest
     test_rule_resolution_immutable_history_and_binding
     test_finding_typed_basis_and_disposition
     test_budget_assessment_consumer_closure
+    test_aggregate_outcome_projection
     test_immutable_stores(valid_bundle)
     test_v1_inventory
     test_slice_isolation
@@ -3308,6 +3310,282 @@ module OrbitV2ContractTest
     codes = validator.validate(bundle).map(&:code)
 
     assert(codes.include?("budget_assessment_invalid"), "a non-independent budget evaluator must fail closed")
+  end
+
+  # Slice 5 increment 1: the deterministic AggregateOutcome projection.
+  # derive(bundle, task_revision_id, validator:) enforces a mechanically
+  # narrow validated-input boundary: only the historical stale-subject error
+  # (code+path predicate) is tolerated, so invalid evaluator
+  # provenance/independence, authorization, resolution authority, and
+  # non-currentness can never produce closed=true, while a create-only
+  # GateEvaluation made stale by later subject changes stays stored and is
+  # excluded.
+  def test_aggregate_outcome_projection
+    derive = lambda do |bundle|
+      Orbit::V2::AggregateOutcome.derive(
+        bundle,
+        OrbitV2FixtureFactory::TASK_REVISION_ID,
+        validator: validator
+      )
+    end
+    make_pass_bundle = lambda do
+      bundle = OrbitV2FixtureFactory.valid_bundle
+      evaluation = bundle["gate_evaluations"].first
+      evaluation["verdict"] = "pass"
+      evaluation["quality_outcome_verdict"] = "pass"
+      evaluation["acceptance_results"].each { |result| result["verdict"] = "pass" }
+      rehash(evaluation)
+      bundle
+    end
+
+    # 1. A unique current evaluation decides its gate: pass closes, fail opens.
+    pass_bundle = make_pass_bundle.call
+    assert(validator.validate(pass_bundle).empty?, "pass bundle must validate")
+    pass_outcome = derive.call(pass_bundle)
+    pass_result = pass_outcome["gate_results"].first
+    assert(pass_outcome["closed"] == true, "a unique current pass closes the gate")
+    assert(pass_result["status"] == "passed", "gate status is passed")
+    assert(
+      pass_result["gate_evaluation_ref"] == {
+        "gate_evaluation_id" => "ogeval_slice0review",
+        "content_digest" => pass_bundle["gate_evaluations"].first["content_digest"]
+      },
+      "the deciding evaluation ref is exact"
+    )
+    assert(
+      pass_outcome["task_revision_ref"] == {
+        "task_revision_id" => OrbitV2FixtureFactory::TASK_REVISION_ID,
+        "content_digest" => pass_bundle["task_revisions"].first["content_digest"]
+      } &&
+        pass_outcome["project_policy_revision_ref"] ==
+          OrbitV2FixtureFactory.policy_ref(pass_bundle["project_policy_revisions"].first),
+      "task and policy refs are exact"
+    )
+    assert(pass_outcome["unresolved_blocking_finding_refs"].empty?, "a resolved finding does not block")
+    fail_outcome = derive.call(OrbitV2FixtureFactory.valid_bundle)
+    assert(fail_outcome["gate_results"].first["status"] == "not_passed", "a current fail is not_passed")
+    assert(fail_outcome["closed"] == false, "a fail stays open")
+
+    # 2. A task with no evaluation yet is missing and open (Validator-accepted).
+    missing_bundle = OrbitV2FixtureFactory.valid_bundle
+    task = missing_bundle["task_revisions"].first
+    task["unresolved_finding_refs"] = []
+    rehash(task)
+    rebind_checkpoint_refs(missing_bundle, task: task)
+    refresh_work_authorizations(missing_bundle, task)
+    missing_bundle["gate_evaluations"] = []
+    missing_bundle["findings"] = []
+    missing_bundle["finding_resolutions"] = []
+    assert(validator.validate(missing_bundle).empty?, "a not-yet-evaluated task must validate")
+    missing_outcome = derive.call(missing_bundle)
+    assert(missing_outcome["gate_results"].first["status"] == "missing", "no evaluation is missing")
+    assert(missing_outcome["closed"] == false, "missing does not close")
+
+    # 3. A historical stale evaluation stays stored but excluded: the
+    #    create-only GateEvaluation no longer matches the CURRENT subject,
+    #    the Validator emits only subject_stale, and derive returns
+    #    missing/open instead of rejecting the historical fact set.
+    stale_bundle = make_pass_bundle.call
+    extra_record = OrbitV2FixtureFactory.deep_copy(stale_bundle["evidence_records"].first)
+    extra_record["evidence_record_id"] = "oevr_implementationoneextra"
+    rehash(extra_record)
+    stale_bundle["evidence_records"] << extra_record
+    stale_errors = validator.validate(stale_bundle)
+    assert(
+      stale_errors.map(&:code) == ["subject_stale"] &&
+        stale_errors.first.path == "gate_evaluations.ogeval_slice0review.subject",
+      "appending accepted evidence makes only the old evaluation subject-stale"
+    )
+    stale_outcome = derive.call(stale_bundle)
+    assert(stale_outcome["gate_results"].first["status"] == "missing", "the stale evaluation is excluded")
+    assert(stale_outcome["closed"] == false, "a stale-only gate stays open")
+
+    # 4. Current evaluation selection is structural: the supersedes lineage
+    #    tip decides, and a fork of two current tips is ambiguous independent
+    #    of array order.
+    followup_bundle = OrbitV2FixtureFactory.valid_bundle
+    add_followup_evaluation(followup_bundle)
+    assert(validator.validate(followup_bundle).empty?, "superseding followup bundle must validate")
+    followup_outcome = derive.call(followup_bundle)
+    assert(
+      followup_outcome["gate_results"].first["gate_evaluation_ref"]["gate_evaluation_id"] ==
+        "ogeval_slice0followupreview",
+      "the supersedes tip decides the gate"
+    )
+    assert(followup_outcome["gate_results"].first["status"] == "passed", "the tip pass is passed")
+    assert(followup_outcome["closed"] == true, "a tip pass with a resolved finding closes")
+
+    fork_bundle = OrbitV2FixtureFactory.valid_bundle
+    fork_evaluation = OrbitV2FixtureFactory.deep_copy(fork_bundle["gate_evaluations"].first)
+    fork_evaluation["gate_evaluation_id"] = "ogeval_slice0fork"
+    fork_evaluation["finding_refs"] = []
+    fork_evaluation["supersedes_gate_evaluation_id"] = nil
+    rehash(fork_evaluation)
+    fork_bundle["gate_evaluations"] << fork_evaluation
+    assert(validator.validate(fork_bundle).empty?, "a fork is a validator-accepted state")
+    fork_outcome = derive.call(fork_bundle)
+    assert(fork_outcome["gate_results"].first["status"] == "ambiguous", "a fork is ambiguous")
+    assert(fork_outcome["closed"] == false, "ambiguous does not close")
+    reversed_bundle = OrbitV2FixtureFactory.deep_copy(fork_bundle)
+    reversed_bundle["gate_evaluations"].reverse!
+    assert(
+      derive.call(reversed_bundle)["content_digest"] == fork_outcome["content_digest"],
+      "fork projection is order independent"
+    )
+
+    # 5. Policy-derived disposition drives closure: unresolved blocking
+    #    findings and unadjudicated risks block; hardening never blocks.
+    unresolved_bundle = OrbitV2FixtureFactory.valid_bundle
+    unresolved_bundle["finding_resolutions"] = []
+    assert(
+      validator.validate(unresolved_bundle).empty?,
+      "an unresolved blocking finding with a failing evaluation is accepted"
+    )
+    unresolved_outcome = derive.call(unresolved_bundle)
+    assert(unresolved_outcome["closed"] == false, "an unresolved blocking finding blocks closure")
+    finding = unresolved_bundle["findings"].first
+    assert(
+      unresolved_outcome["unresolved_blocking_finding_refs"] == [
+        { "finding_id" => finding["finding_id"], "content_digest" => finding["content_digest"] }
+      ],
+      "blocking finding ref is exact"
+    )
+
+    hardening_bundle = make_pass_bundle.call
+    hardening_bundle["findings"].first["basis"] = "hardening_opportunity"
+    rehash(hardening_bundle["findings"].first)
+    hardening_bundle["finding_resolutions"] = []
+    assert(validator.validate(hardening_bundle).empty?, "hardening without resolution must validate")
+    hardening_outcome = derive.call(hardening_bundle)
+    assert(hardening_outcome["closed"] == true, "hardening stays nonblocking")
+    assert(hardening_outcome["unresolved_blocking_finding_refs"].empty?, "no blocking refs")
+
+    risk_bundle = make_pass_bundle.call
+    risk = OrbitV2FixtureFactory.deep_copy(risk_bundle["findings"].first)
+    risk["finding_id"] = "ofinding_aggregate_risk"
+    risk["basis"] = "newly_discovered_risk"
+    risk["supersedes_finding_id"] = nil
+    risk["body"] = "Unadjudicated risk probe."
+    rehash(risk)
+    risk_bundle["gate_evaluations"].first["finding_refs"] =
+      Array(risk_bundle["gate_evaluations"].first["finding_refs"]) + [risk["finding_id"]]
+    rehash(risk_bundle["gate_evaluations"].first)
+    risk_bundle["findings"] << risk
+    OrbitV2FixtureFactory.append_finding_change_checkpoint(
+      risk_bundle,
+      risk,
+      {
+        "state" => "needs_user",
+        "action" => "escalate",
+        "reason" => "newly discovered risk requires risk-owner/user adjudication"
+      }
+    )
+    assert(
+      validator.validate(risk_bundle).empty?,
+      "an unadjudicated risk with checkpoint provenance must validate"
+    )
+    risk_outcome = derive.call(risk_bundle)
+    assert(risk_outcome["closed"] == false, "an unadjudicated risk blocks closure")
+    assert(
+      risk_outcome["unresolved_adjudication_required_finding_refs"] == [
+        { "finding_id" => risk["finding_id"], "content_digest" => risk["content_digest"] }
+      ],
+      "adjudication-required finding ref is exact"
+    )
+
+    # 6. Repeat recomputation is byte-identical; any change to a validated
+    #    bundle source changes source/content digests.
+    base_outcome = derive.call(OrbitV2FixtureFactory.valid_bundle)
+    assert(
+      derive.call(OrbitV2FixtureFactory.valid_bundle) == base_outcome,
+      "repeat recomputation is byte-identical"
+    )
+    assert(
+      Orbit::V2::CanonicalJSON.digest_excluding(base_outcome, "content_digest") ==
+        base_outcome["content_digest"],
+      "content_digest covers the whole outcome"
+    )
+    changed_bundle = OrbitV2FixtureFactory.valid_bundle
+    changed_bundle["repository_snapshot"]["commit_sha"] = "b" * 40
+    refresh_evaluation_subject(changed_bundle)
+    assert(validator.validate(changed_bundle).empty?, "refreshed snapshot bundle must validate")
+    changed_outcome = derive.call(changed_bundle)
+    assert(
+      changed_outcome["source_digest"] != base_outcome["source_digest"],
+      "a source change changes source_digest"
+    )
+    assert(
+      changed_outcome["content_digest"] != base_outcome["content_digest"],
+      "a source change changes content_digest"
+    )
+    assert(
+      changed_outcome["gate_results"].first["status"] == "not_passed",
+      "the refreshed evaluation still decides"
+    )
+
+    # 7. The source manifest is complete and unique: exactly one protocol
+    #    root, exactly one entry per task/policy revision, no duplicate
+    #    (kind, id), and the authority/provenance sources are included.
+    manifest = base_outcome["source_manifest"]
+    kinds = manifest.group_by { |entry| entry["kind"] }
+    assert(kinds.fetch("protocol_root", []).length == 1, "exactly one protocol_root")
+    assert(kinds.fetch("task_revision", []).length == 1, "exactly one task_revision")
+    assert(
+      kinds.fetch("project_policy_revision", []).length == 1,
+      "exactly one project_policy_revision"
+    )
+    assert(
+      manifest.map { |entry| [entry["kind"], entry["id"]] }.uniq.length == manifest.length,
+      "manifest has no duplicate (kind, id)"
+    )
+    %w[
+      agent_instance authority_assertion authorization_record
+      rule_resolution_artifact lead_checkpoint
+    ].each do |kind|
+      assert(kinds.key?(kind), "manifest includes #{kind} sources")
+    end
+
+    # 8. Invalid authority cannot project: removing every AuthorizationRecord
+    #    fails closed instead of returning closed=true.
+    stripped_bundle = make_pass_bundle.call
+    stripped_bundle["authorization_records"] = []
+    expect_contract_error("aggregate_outcome_invalid") { derive.call(stripped_bundle) }
+
+    # 9. Invalid evaluator independence cannot project: the evaluator's
+    #    runtime identity is replaced with the implementation producer's,
+    #    which the Validator rejects; derive fails closed instead of
+    #    returning closed=true or a cache identity.
+    swapped_bundle = make_pass_bundle.call
+    reviewer = swapped_bundle["agent_instances"].find do |agent|
+      agent["agent_instance_id"] == "oagent_independentreviewer"
+    end
+    producer = swapped_bundle["agent_instances"].find do |agent|
+      agent["agent_instance_id"] == "oagent_implementerone"
+    end
+    reviewer["runtime_identity"] = OrbitV2FixtureFactory.deep_copy(producer["runtime_identity"])
+    expect_contract_error("aggregate_outcome_invalid") { derive.call(swapped_bundle) }
+
+    # 10. Non-currentness beyond the historical-subject carve-out still
+    #     rejects: stale GateRequirement digest, stale active-policy
+    #     authority, and malformed subject all fail closed.
+    stale_requirement = make_pass_bundle.call
+    stale_requirement["gate_evaluations"].first["gate_requirement_content_digest"] =
+      "sha256:#{"0" * 64}"
+    rehash(stale_requirement["gate_evaluations"].first)
+    expect_contract_error("aggregate_outcome_invalid") { derive.call(stale_requirement) }
+
+    stale_policy = OrbitV2FixtureFactory.valid_bundle
+    add_policy_successor(stale_policy)
+    assert(
+      validator.validate(stale_policy).map(&:code).include?("subject_stale"),
+      "a rotated task governed by its old policy is stale at the authority path"
+    )
+    expect_contract_error("aggregate_outcome_invalid") { derive.call(stale_policy) }
+
+    malformed_subject = make_pass_bundle.call
+    malformed_subject["gate_evaluations"].first["subject"]["evidence_record_refs"] = []
+    rehash(malformed_subject["gate_evaluations"].first)
+    expect_contract_error("aggregate_outcome_invalid") { derive.call(malformed_subject) }
   end
 
   def reseal_consuming(bundle, checkpoint, evaluation: nil)

@@ -341,74 +341,47 @@ module Orbit
         end
 
         def resolution_lineage_tips(finding_id, resolutions)
-          return [] if resolutions.empty?
-
-          by_id = resolutions.to_h { |resolution| [resolution["finding_resolution_id"], resolution] }
-          superseded = resolutions.each_with_object([]) do |resolution, ids|
-            ref = resolution["supersedes_finding_resolution_id"]
-            ids << ref if ref
-          end
-          tips = resolutions.reject do |resolution|
-            superseded.include?(resolution["finding_resolution_id"])
-          end
-          if tips.length != 1
+          analysis = ProjectionPrimitives.supersedes_tips(
+            resolutions,
+            id_key: "finding_resolution_id",
+            supersedes_key: "supersedes_finding_resolution_id"
+          )
+          case analysis.status
+          when :unique
+            analysis.tips
+          when :empty
+            []
+          when :ambiguous
             add(
               "finding_resolution_lineage_invalid",
               "Finding #{finding_id} must have one append-only current resolution tip",
               "finding_resolutions"
             )
-            return []
-          end
-          visited = Set.new
-          cursor = tips.first
-          while cursor
-            id = cursor["finding_resolution_id"]
-            if visited.include?(id)
-              add(
-                "finding_resolution_lineage_invalid",
-                "Finding #{finding_id} resolution lineage contains a cycle",
-                "finding_resolutions.#{id}"
-              )
-              return []
-            end
-            visited << id
-            parent_id = cursor["supersedes_finding_resolution_id"]
-            cursor = parent_id && by_id[parent_id]
-          end
-          unless visited.length == resolutions.length
+            []
+          when :cycle
+            add(
+              "finding_resolution_lineage_invalid",
+              "Finding #{finding_id} resolution lineage contains a cycle",
+              "finding_resolutions.#{analysis.at}"
+            )
+            []
+          when :disconnected
             add(
               "finding_resolution_lineage_invalid",
               "Finding #{finding_id} resolution lineage contains a fork or orphan",
               "finding_resolutions"
             )
-            return []
+            []
           end
-          tips
         end
 
         def finding_lineage(finding)
-          return nil unless finding.is_a?(Hash)
-
-          evaluation = @indexes.fetch("gate_evaluations", {})[finding["gate_evaluation_id"]]
-          requirement = evaluation &&
-            @indexes.fetch("gate_requirements", {})[evaluation["gate_requirement_id"]]
-          task = requirement &&
-            @indexes.fetch("task_revisions", {})[requirement["task_revision_id"]]
-          subject_ref = evaluation && evaluation.dig("subject", "task_revision_ref")
-          return nil unless evaluation &&
-                            requirement &&
-                            task &&
-                            requirement["task_id"] == task["task_id"] &&
-                            subject_ref &&
-                            subject_ref["task_revision_id"] == task["task_revision_id"] &&
-                            subject_ref["content_digest"] == task["content_digest"]
-
-          {
-            "task_id" => task["task_id"],
-            "task_revision_id" => task["task_revision_id"],
-            "gate_requirement_id" => requirement["gate_requirement_id"],
-            "gate_lineage_id" => requirement["gate_lineage_id"]
-          }
+          ProjectionPrimitives.finding_lineage(
+            finding,
+            evaluations: @indexes.fetch("gate_evaluations", {}),
+            requirements: @indexes.fetch("gate_requirements", {}),
+            tasks: @indexes.fetch("task_revisions", {})
+          )
         end
 
         def finding_lineage_compatible?(left, right)

@@ -227,13 +227,7 @@ module Orbit
             end
             if expected
               if budget_gate
-                expected = expected.merge(
-                  "budget_review_subject_projection" =>
-                    evaluation.dig("subject", "budget_review_subject_projection")
-                )
-                identity = expected.reject { |key, _value| key == "subject_digest" }
-                expected["subject_digest"] =
-                  "sha256:#{Orbit::V2::CanonicalJSON.sha256(identity)}"
+                expected = ProjectionPrimitives.canonical_budget_subject(expected, evaluation)
               end
               if !EvaluationSubject.same?(expected, evaluation["subject"])
                 actual = evaluation["subject"]

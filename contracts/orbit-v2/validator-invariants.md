@@ -171,6 +171,74 @@ ref/digest/mode/ceilings/source fails closed. Only this exact accepted
 consumption replays as the eligible dispatch decision; rejected replays
 frozen for deterministic replan.
 
+### AggregateOutcome deterministic projection
+
+Slice 5 increment 1 adds one pure derived seam:
+`AggregateOutcome.derive(bundle, task_revision_id, validator:)`. It writes
+nothing, is not an authoritative bundle collection or schema, and never
+produces an outcome an agent or Lead can persist as a fact source.
+
+The validated-input boundary is mechanically enforced: `derive` runs
+`Validator#validate` on the bundle before projecting. Validation is the
+single eligibility boundary — evaluator provenance and independence,
+active-policy/authorization, resolution authority, and every unresolved ref
+are enforced by the real Validator, never re-derived here. The ONLY tolerated
+validation error is the historical stale-evaluation error, identified by a
+shared explicit predicate (`ProjectionPrimitives.historical_stale_evaluation_error?`)
+keyed on code `subject_stale` plus the exact path
+`gate_evaluations.<id>.subject` — never message text. That error proves a
+structurally complete create-only GateEvaluation no longer matches the
+CURRENT canonical subject; ADR-005 keeps the accepted evaluation immutable,
+later subject changes make it stale for closure while the artifact remains
+stored, and `project_requirement` excludes it (status `missing`, never
+`closed`). Every other error — including the sibling `subject_stale` paths
+for stale GateRequirement digest (`.gate_requirement_content_digest`) and
+stale active-policy authority (`.subject.task_revision_ref`), malformed or
+incomplete subjects (`subject_incomplete`/shape errors), and all shape/
+authority/provenance/independence/resolution errors — raises
+`ContractError` (`aggregate_outcome_invalid`) and produces no projection, so
+no cache identity can claim validity for an invalid fact set.
+
+The output is a canonical hash: exact task/policy refs, gate results sorted
+by `gate_requirement_id`, sorted unresolved blocking/adjudication-required
+finding refs, a `closed` boolean, a complete sorted source ID+digest
+manifest, `source_digest`, and `content_digest`. Gate statuses are the
+minimal enum `passed | not_passed | missing | ambiguous`.
+
+A GateEvaluation participates only when its `gate_requirement_content_digest`
+is current and `EvaluationSubject.select` recomputes byte-identical for the
+active TaskRevision, repository snapshot, and CodeSurface (budget gates
+include the canonical `budget_review_subject_projection` identity). The
+current evaluation is selected structurally through supersedes lineage tips:
+exactly one compatible current-subject tip may decide a gate; zero is
+missing; multiple or forked tips are ambiguous and never close. No timestamp
+or array order participates. `closed` is true iff every TaskRevision-owned
+GateRequirement has a unique current passing evaluation and there are no
+unresolved policy-blocking findings or unadjudicated
+newly_discovered_risk findings; a later pass never erases an unresolved
+blocking Finding. Resolutions count only through the existing append-only
+lineage semantics, and `hardening_opportunity` is nonblocking.
+
+The source manifest covers every validated bundle source — whole-bundle
+over-invalidation by design, since the eligibility boundary consumes the
+entire bundle: protocol root (exactly once), authority assertions,
+authorization records, policy/task/gate/work-unit/attempt/evidence/
+evaluation/finding/resolution records, agent instances (runtime identity),
+lead sessions, control registries, checkpoints, rule-resolution artifacts,
+change theses, repository snapshot, and CodeSurface. Every source identity
+appears exactly once, with no duplicate (kind, id); documents without a
+stored content digest get their canonical content digest recomputed.
+`source_digest` is therefore a complete future deletable-cache key: repeat
+recomputation is byte-identical and any change to any validated bundle
+source changes the projection. No persisted cache, LeadControl transition,
+role context projection, RelationshipView, audit layer, or budget digest/
+two-lineage projection exists in this increment.
+
+Shared derivation (`finding_disposition`, `finding_lineage`, supersedes-tip
+analysis, canonical budget-subject identity) lives in
+`ProjectionPrimitives`; the Validator delegates to the same functions, so
+projection and validation cannot drift into two subtly different truths.
+
 ## Finding-to-invariant matrix
 
 IDs use `R<review>-<ordinal>` and cover all 38 findings in the first eight

@@ -18,6 +18,7 @@ require_relative "policy_issuance"
 require_relative "path_scope"
 require_relative "protected_change"
 require_relative "rule_resolution"
+require_relative "projection_primitives"
 require_relative "runtime_identity_verifier"
 require_relative "schema_catalog"
 require_relative "task_authority"
@@ -452,10 +453,7 @@ module Orbit
       end
 
       def finding_disposition(finding, policy)
-        mapping = policy.is_a?(Hash) ? policy["finding_disposition"] : nil
-        return nil unless mapping.is_a?(Hash) && finding.is_a?(Hash)
-
-        mapping[finding["basis"]]
+        ProjectionPrimitives.finding_disposition(finding, policy)
       end
 
       def check(path)
