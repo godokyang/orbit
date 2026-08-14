@@ -49,24 +49,34 @@ module Orbit
 
       STATUSES = %w[passed not_passed missing ambiguous].freeze
 
-      def derive(bundle, task_revision_id, validator:)
+      # The one shared projection-validation boundary for every derived
+      # projection. It mechanically runs the real Validator and tolerates
+      # exactly the historical stale-evaluation error (see ProjectionPrimitives
+      # .historical_stale_evaluation_error?); any other error raises
+      # `aggregate_outcome_invalid` with the full error details, so no
+      # projection or cache identity is produced for an invalid fact set.
+      def validate_projection_input!(bundle, validator:, seam: "derive")
         unless validator.is_a?(Orbit::V2::Validator)
           raise ContractError.new(
             "aggregate_outcome_invalid",
-            "derive requires an Orbit::V2::Validator validated-context seam",
+            "#{seam} requires an Orbit::V2::Validator validated-context seam",
             path: "validator"
           )
         end
         errors = validator.validate(bundle)
-        unless errors.all? do |error|
-                 ProjectionPrimitives.historical_stale_evaluation_error?(error)
-               end
-          raise ContractError.new(
-            "aggregate_outcome_invalid",
-            "bundle is not an accepted validated fact set and cannot be projected",
-            details: errors.map(&:to_h)
-          )
-        end
+        return if errors.all? do |error|
+                   ProjectionPrimitives.historical_stale_evaluation_error?(error)
+                 end
+
+        raise ContractError.new(
+          "aggregate_outcome_invalid",
+          "bundle is not an accepted validated fact set and cannot be projected",
+          details: errors.map(&:to_h)
+        )
+      end
+
+      def derive(bundle, task_revision_id, validator:)
+        validate_projection_input!(bundle, validator: validator)
         project(bundle, task_revision_id)
       rescue KeyError, TypeError, ArgumentError => e
         raise ContractError.new("aggregate_outcome_invalid", e.message)
@@ -215,18 +225,12 @@ module Orbit
             repository_snapshot: snapshot,
             code_surface: code_surface
           )
-          budget_gate = requirement.dig("subject_selector", "budget_assessment_required") == true
           participating = candidates.select do |evaluation|
-            next false unless evaluation["gate_requirement_content_digest"] == requirement["content_digest"]
-            next false unless evaluation["subject"].is_a?(Hash)
-
-            expected_subject =
-              if budget_gate
-                ProjectionPrimitives.canonical_budget_subject(expected, evaluation)
-              else
-                expected
-              end
-            EvaluationSubject.same?(expected_subject, evaluation["subject"])
+            ProjectionPrimitives.evaluation_current?(
+              evaluation,
+              requirement: requirement,
+              expected_subject: expected
+            )
           end
           status, deciding = decide_gate(participating)
         end
@@ -356,27 +360,6 @@ module Orbit
       end
       private_class_method :resolve_exact_ref
 
-      COLLECTION_KINDS = {
-        "authority_assertions" => ["authority_assertion", "assertion_id"],
-        "authorization_records" => ["authorization_record", "authorization_record_id"],
-        "project_policy_revisions" => ["project_policy_revision", "policy_revision_id"],
-        "task_revisions" => ["task_revision", "task_revision_id"],
-        "gate_requirements" => ["gate_requirement", "gate_requirement_id"],
-        "work_units" => ["work_unit", "work_unit_id"],
-        "agent_instances" => ["agent_instance", "agent_instance_id"],
-        "logical_leads" => ["logical_lead", "logical_lead_id"],
-        "lead_sessions" => ["lead_session", "lead_session_id"],
-        "control_registries" => ["control_registry", "lead_control_id"],
-        "lead_checkpoints" => ["lead_checkpoint", "lead_checkpoint_id"],
-        "work_unit_attempts" => ["work_unit_attempt", "attempt_id"],
-        "rule_resolution_artifacts" => ["rule_resolution_artifact", "resolution_id"],
-        "evidence_records" => ["evidence_record", "evidence_record_id"],
-        "gate_evaluations" => ["gate_evaluation", "gate_evaluation_id"],
-        "findings" => ["finding", "finding_id"],
-        "finding_resolutions" => ["finding_resolution", "finding_resolution_id"]
-      }.freeze
-      private_constant :COLLECTION_KINDS
-
       # The complete sorted source ID+digest manifest of every validated
       # bundle source. This is whole-bundle over-invalidation by design: the
       # eligibility boundary consumes the entire bundle, so every source is
@@ -392,26 +375,31 @@ module Orbit
         entries = []
         root = bundle["protocol_root"]
         if root.is_a?(Hash) && root["project_id"].is_a?(String)
-          digest = root["content_digest"]
-          digest = CanonicalJSON.content_digest(root) unless digest.is_a?(String)
-          entries << manifest_entry("protocol_root", root["project_id"], digest)
+          digest = ProjectionPrimitives.source_digest(root)
+          entries << ProjectionPrimitives.manifest_entry(
+            "protocol_root",
+            root["project_id"],
+            digest
+          )
         end
-        COLLECTION_KINDS.each do |collection, (kind, id_field)|
+        ProjectionPrimitives::COLLECTION_SOURCES.each do |collection, (kind, id_field)|
           Array(bundle[collection]).each do |document|
             next unless document.is_a?(Hash)
 
             id = document[id_field]
             next if id.nil?
 
-            digest = document["content_digest"]
-            digest = CanonicalJSON.content_digest(document) unless digest.is_a?(String)
-            entries << manifest_entry(kind, id, digest)
+            entries << ProjectionPrimitives.manifest_entry(
+              kind,
+              id,
+              ProjectionPrimitives.source_digest(document)
+            )
           end
         end
         Array(bundle["change_theses"]).each do |thesis|
           next unless thesis.is_a?(Hash)
 
-          entries << manifest_entry(
+          entries << ProjectionPrimitives.manifest_entry(
             "change_thesis",
             "#{thesis["change_thesis_id"]}@#{thesis["revision"]}",
             thesis["content_digest"]
@@ -420,10 +408,14 @@ module Orbit
         snapshot = bundle["repository_snapshot"]
         code_surface = bundle["code_surface"]
         if snapshot.is_a?(Hash)
-          entries << manifest_entry("repository_snapshot", snapshot["commit_sha"], snapshot["tree_digest"])
+          entries << ProjectionPrimitives.manifest_entry(
+            "repository_snapshot",
+            snapshot["commit_sha"],
+            snapshot["tree_digest"]
+          )
         end
         if code_surface.is_a?(Hash)
-          entries << manifest_entry(
+          entries << ProjectionPrimitives.manifest_entry(
             "code_surface",
             code_surface["code_surface_digest"],
             code_surface["code_surface_digest"]
@@ -444,11 +436,6 @@ module Orbit
         entries.sort_by { |entry| [entry["kind"], entry["id"]] }
       end
       private_class_method :source_manifest
-
-      def manifest_entry(kind, id, content_digest)
-        { "kind" => kind, "id" => id, "content_digest" => content_digest }
-      end
-      private_class_method :manifest_entry
 
       def finding_ref(finding)
         { "finding_id" => finding["finding_id"], "content_digest" => finding["content_digest"] }

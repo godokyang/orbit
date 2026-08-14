@@ -8,6 +8,7 @@ require "yaml"
 require_relative "../../../lib/orbit/v2/canonical_json"
 require_relative "../../../lib/orbit/v2/errors"
 require_relative "../../../lib/orbit/v2/aggregate_outcome"
+require_relative "../../../lib/orbit/v2/context_projection"
 require_relative "../../../lib/orbit/v2/gate_strength"
 require_relative "../../../lib/orbit/v2/immutable_store"
 require_relative "../../../lib/orbit/v2/policy_issuance"
@@ -53,6 +54,7 @@ module OrbitV2ContractTest
     test_finding_typed_basis_and_disposition
     test_budget_assessment_consumer_closure
     test_aggregate_outcome_projection
+    test_context_projection
     test_immutable_stores(valid_bundle)
     test_v1_inventory
     test_slice_isolation
@@ -3586,6 +3588,272 @@ module OrbitV2ContractTest
     malformed_subject["gate_evaluations"].first["subject"]["evidence_record_refs"] = []
     rehash(malformed_subject["gate_evaluations"].first)
     expect_contract_error("aggregate_outcome_invalid") { derive.call(malformed_subject) }
+  end
+
+  # Slice 5 increment 2: the three responsibility-scoped context projections.
+  # Each seam shares the AggregateOutcome validated-input boundary (including
+  # the historical `.subject` staleness allowance), is role-fixed (never a
+  # label), and emits a canonical, order-independent, role-scoped manifest.
+  def test_context_projection
+    lead_seam = lambda do |bundle|
+      Orbit::V2::ContextProjection.lead(bundle, OrbitV2FixtureFactory::CONTROL_ID, validator: validator)
+    end
+    work_seam = lambda do |bundle|
+      Orbit::V2::ContextProjection.work_agent(bundle, "oattempt_implementationone", validator: validator)
+    end
+    evaluator_seam = lambda do |bundle|
+      Orbit::V2::ContextProjection.evaluator(bundle, "oattempt_independentreview", validator: validator)
+    end
+
+    # 1. The lead projection exposes the control registry, the unique
+    #    accepted checkpoint tip, the active task/policy, and the current
+    #    AggregateOutcome, with a complete role-scoped manifest.
+    lead = lead_seam.call(OrbitV2FixtureFactory.valid_bundle)
+    assert(lead["context_kind"] == "lead", "lead context kind")
+    assert(
+      lead["subject_ref"]["lead_control_id"] == OrbitV2FixtureFactory::CONTROL_ID &&
+        lead["subject_ref"]["content_digest"].is_a?(String),
+      "lead subject ref is the exact registry"
+    )
+    assert(
+      lead["active_checkpoint_ref"]["lead_checkpoint_id"] == "olcheckpoint_slice0successor",
+      "tip is the unique accepted checkpoint"
+    )
+    assert(lead["aggregate_outcome"]["closed"] == false, "lead carries the current aggregate outcome")
+    assert(lead["task_queue"].is_a?(Array) && lead["active_task_ref"].is_a?(Hash), "queue and selection are exact")
+    lead_manifest = lead["source_manifest"]
+    assert(
+      lead_manifest.map { |entry| [entry["kind"], entry["id"]] }.uniq.length == lead_manifest.length,
+      "lead manifest has no duplicate (kind, id)"
+    )
+    lead_kinds = lead_manifest.group_by { |entry| entry["kind"] }
+    %w[control_registry task_revision project_policy_revision].each do |kind|
+      assert(lead_kinds.fetch(kind, []).length == 1, "lead manifest has exactly one #{kind}")
+    end
+    assert(
+      lead_kinds.fetch("lead_checkpoint", []).length ==
+        OrbitV2FixtureFactory.valid_bundle["lead_checkpoints"].length,
+      "lead manifest covers every embedded aggregate outcome checkpoint dependency"
+    )
+    assert(
+      lead_kinds.fetch("work_unit_attempt", []).length == 4 &&
+        lead_kinds.fetch("work_unit", []).length == 3,
+      "lead manifest covers the active roster and WorkUnit graph"
+    )
+
+    # 2. The work-agent projection is strictly scoped to one implementation
+    #    Attempt and its exact task/unit/rules/thesis/checkpoint pins.
+    work = work_seam.call(OrbitV2FixtureFactory.valid_bundle)
+    assert(work["context_kind"] == "work_agent", "work agent context kind")
+    attempt = OrbitV2FixtureFactory.valid_bundle["work_unit_attempts"].find do |candidate|
+      candidate["attempt_id"] == "oattempt_implementationone"
+    end
+    assert(
+      work["subject_ref"] == {
+        "attempt_id" => "oattempt_implementationone",
+        "creation_event_digest" => attempt.dig("events", 0, "event_digest")
+      },
+      "work agent subject ref is the exact attempt"
+    )
+    assert(work["assignment"]["purpose"] == "implementation", "immutable assignment purpose")
+    assert(work["assigned_rule_resolution"]["resolution_id"].start_with?("rr-sha256-"), "assigned rules artifact")
+    assert(work["dispatch_checkpoint_ref"]["lead_checkpoint_id"] == "olcheckpoint_dispatch_implone", "dispatch pin")
+    assert(
+      work["effective_verification_plan_digest"].is_a?(String) &&
+        work["closure_basis_digest"].is_a?(String) && work["plan_basis_source_refs"].is_a?(Hash),
+      "plan and basis digests and their exact source refs are pinned"
+    )
+    work_kinds = work["source_manifest"].group_by { |entry| entry["kind"] }
+    assert(
+      work_kinds.keys.sort == %w[
+        change_thesis lead_checkpoint project_policy_revision rule_resolution_artifact
+        task_revision work_unit work_unit_attempt
+      ],
+      "work agent manifest is exactly its role scope"
+    )
+
+    # 3. The evaluator projection exposes the TaskRevision contract, current
+    #    canonical subjects, criteria, findings, and plan/basis pins — scoped
+    #    to the gate kinds its immutable assignment purpose authorizes.
+    evaluator = evaluator_seam.call(OrbitV2FixtureFactory.valid_bundle)
+    assert(evaluator["context_kind"] == "evaluator", "evaluator context kind")
+    subject = evaluator["subjects"].first["subject"]
+    assert(subject["task_revision_ref"]["task_revision_id"] == OrbitV2FixtureFactory::TASK_REVISION_ID, "subject pins the task revision")
+    assert(evaluator["evaluation_criteria"].first["questions"].length == 1, "criteria questions")
+    assert(evaluator["findings"].length == 1 && evaluator["finding_resolutions"].length == 1, "relevant findings and resolutions")
+    assert(evaluator["gate_evaluation_refs"] == [{
+      "gate_evaluation_id" => "ogeval_slice0review",
+      "content_digest" => OrbitV2FixtureFactory.valid_bundle["gate_evaluations"].first["content_digest"],
+      "current" => true
+    }], "current evaluation ref is marked current")
+    evaluator_kinds = evaluator["source_manifest"].group_by { |entry| entry["kind"] }
+
+    # 3b. A review evaluator never sees another gate kind: a valid task with
+    #     an additional test-kind GateRequirement keeps the test context out
+    #     of the review evaluator's subjects, criteria, refs, and manifest.
+    multi_kind_bundle = OrbitV2FixtureFactory.valid_bundle
+    test_gate = OrbitV2FixtureFactory.deep_copy(multi_kind_bundle["gate_requirements"].first)
+    test_gate["gate_requirement_id"] = "ogreq_testcontext"
+    test_gate["gate_lineage_id"] = "ogline_testcontext"
+    test_gate["kind"] = "test"
+    test_gate["parent_gate_requirement_ref"] = nil
+    rehash(test_gate)
+    multi_kind_task = multi_kind_bundle["task_revisions"].first
+    multi_kind_task["gate_requirement_refs"] =
+      Array(multi_kind_task["gate_requirement_refs"]) + [test_gate["gate_requirement_id"]]
+    rehash(multi_kind_task)
+    multi_kind_bundle["gate_requirements"] << test_gate
+    rebind_checkpoint_refs(multi_kind_bundle, task: multi_kind_task)
+    refresh_work_authorizations(multi_kind_bundle, multi_kind_task)
+    refresh_evaluation_subject(multi_kind_bundle)
+    assert(validator.validate(multi_kind_bundle).empty?, "multi-kind task must validate")
+    scoped = evaluator_seam.call(multi_kind_bundle)
+    assert(
+      scoped["subjects"].map { |entry| entry["gate_requirement_ref"]["gate_requirement_id"] } ==
+        [OrbitV2FixtureFactory::GATE_ID] &&
+        scoped["evaluation_criteria"].map { |entry| entry["gate_requirement_ref"]["gate_requirement_id"] } ==
+          [OrbitV2FixtureFactory::GATE_ID],
+      "review evaluator sees only its review-gate subject and criteria"
+    )
+    assert(
+      scoped["source_manifest"].none? { |entry| entry["id"] == "ogreq_testcontext" },
+      "review evaluator manifest excludes the test gate"
+    )
+
+    # 4. The role is fixed by the seam: wrong-purpose and unknown refs fail
+    #    closed instead of relabeling.
+    expect_contract_error("context_projection_invalid") do
+      Orbit::V2::ContextProjection.work_agent(OrbitV2FixtureFactory.valid_bundle, "oattempt_independentreview", validator: validator)
+    end
+    expect_contract_error("context_projection_invalid") do
+      Orbit::V2::ContextProjection.evaluator(OrbitV2FixtureFactory.valid_bundle, "oattempt_implementationone", validator: validator)
+    end
+    expect_contract_error("context_projection_invalid") do
+      Orbit::V2::ContextProjection.work_agent(OrbitV2FixtureFactory.valid_bundle, "oattempt_missing", validator: validator)
+    end
+
+    # 5. No role leaks another role's data: the work-agent context carries no
+    #    gate/evidence/finding sources and no other attempts; the evaluator
+    #    context carries no lead/agent/session sources or thesis prose.
+    assert(
+      (work_kinds.keys & %w[evidence_record gate_evaluation gate_requirement finding finding_resolution lead_session agent_instance control_registry]).empty? &&
+        work["source_manifest"].count { |entry| entry["kind"] == "work_unit_attempt" } == 1,
+      "work agent context excludes other roles' sources and attempts"
+    )
+    assert(
+      (evaluator_kinds.keys & %w[lead_session agent_instance control_registry]).empty? &&
+        !evaluator.key?("change_thesis"),
+      "evaluator context has no lead/agent sources or thesis prose"
+    )
+    assert(
+      evaluator["subjects"].first["subject"]["implementation_attempt_refs"].all? do |ref|
+        ref.keys.sort == %w[attempt_id creation_event_digest]
+      end,
+      "subject carries exact refs only"
+    )
+
+    # 6. Historical stale GateEvaluations stay stored but are marked stale in
+    #    current lead/evaluator gate context; the history is not rejected and
+    #    the lead source digest follows the embedded outcome's sources.
+    stale_bundle = OrbitV2FixtureFactory.valid_bundle
+    stale_bundle["gate_evaluations"].first["verdict"] = "pass"
+    stale_bundle["gate_evaluations"].first["quality_outcome_verdict"] = "pass"
+    stale_bundle["gate_evaluations"].first["acceptance_results"].each { |result| result["verdict"] = "pass" }
+    rehash(stale_bundle["gate_evaluations"].first)
+    extra_record = OrbitV2FixtureFactory.deep_copy(stale_bundle["evidence_records"].first)
+    extra_record["evidence_record_id"] = "oevr_implementationoneextra"
+    rehash(extra_record)
+    stale_bundle["evidence_records"] << extra_record
+    assert(
+      validator.validate(stale_bundle).map(&:code) == ["subject_stale"],
+      "appended accepted evidence makes only the old evaluation subject-stale"
+    )
+    stale_lead = lead_seam.call(stale_bundle)
+    assert(
+      stale_lead["gate_evaluation_refs"].first["current"] == false &&
+        stale_lead["aggregate_outcome"]["gate_results"].first["status"] == "missing",
+      "lead context marks the stale evaluation non-current and the gate missing"
+    )
+    assert(
+      stale_lead["source_digest"] != lead["source_digest"],
+      "lead source digest covers the embedded aggregate outcome's sources"
+    )
+    assert(
+      evaluator_seam.call(stale_bundle)["gate_evaluation_refs"].first["current"] == false,
+      "evaluator context marks the stale evaluation non-current"
+    )
+
+    # 7. Missing or inconsistent plan/basis pins fail closed.
+    no_plan = OrbitV2FixtureFactory.valid_bundle
+    no_plan["lead_checkpoints"].find { |cp| cp["lead_checkpoint_id"] == "olcheckpoint_dispatch_implone" }
+         .delete("effective_verification_plan_digest")
+    expect_contract_error("aggregate_outcome_invalid") { work_seam.call(no_plan) }
+    bad_plan = OrbitV2FixtureFactory.valid_bundle
+    bad_dispatch = bad_plan["lead_checkpoints"].find { |cp| cp["lead_checkpoint_id"] == "olcheckpoint_dispatch_implone" }
+    bad_dispatch["closure_basis_digest"] = "sha256:#{"0" * 64}"
+    expect_contract_error("aggregate_outcome_invalid") { work_seam.call(bad_plan) }
+
+    # 8. Every projection is order independent.
+    reversed_bundle = OrbitV2FixtureFactory.valid_bundle
+    reversed_bundle["work_unit_attempts"].reverse!
+    reversed_bundle["gate_evaluations"].reverse!
+    reversed_bundle["findings"].reverse!
+    assert(lead_seam.call(reversed_bundle)["content_digest"] == lead["content_digest"], "lead is order independent")
+    assert(work_seam.call(reversed_bundle)["content_digest"] == work["content_digest"], "work agent is order independent")
+    assert(evaluator_seam.call(reversed_bundle)["content_digest"] == evaluator["content_digest"], "evaluator is order independent")
+
+    # 9. Role-scoped source-digest sensitivity: unrelated sources never
+    #    perturb the narrower projections; exposed source changes always do.
+    unrelated_bundle = OrbitV2FixtureFactory.valid_bundle
+    extra_submission = OrbitV2FixtureFactory.deep_copy(
+      unrelated_bundle["evidence_records"].find { |record| record["record_kind"] == "evaluator_submission" }
+    )
+    extra_submission["evidence_record_id"] = "oevr_independentreviewextra"
+    rehash(extra_submission)
+    unrelated_bundle["evidence_records"] << extra_submission
+    assert(validator.validate(unrelated_bundle).empty?, "an unrelated extra submission keeps the bundle valid")
+    assert(
+      work_seam.call(unrelated_bundle)["content_digest"] == work["content_digest"] &&
+        evaluator_seam.call(unrelated_bundle)["content_digest"] == evaluator["content_digest"],
+      "an unrelated bundle change perturbs neither narrower projection"
+    )
+
+    changed_task_bundle = OrbitV2FixtureFactory.valid_bundle
+    task = changed_task_bundle["task_revisions"].first
+    task["goal"] = "A changed goal must not change the work agent's role scope."
+    rehash(task)
+    rebind_checkpoint_refs(changed_task_bundle, task: task)
+    refresh_work_authorizations(changed_task_bundle, task)
+    refresh_evaluation_subject(changed_task_bundle)
+    assert(validator.validate(changed_task_bundle).empty?, "changed task bundle must validate")
+    assert(
+      work_seam.call(changed_task_bundle)["content_digest"] != work["content_digest"],
+      "an exposed source change perturbs the work agent projection"
+    )
+
+    changed_snapshot_bundle = OrbitV2FixtureFactory.valid_bundle
+    changed_snapshot_bundle["repository_snapshot"]["commit_sha"] = "b" * 40
+    refresh_evaluation_subject(changed_snapshot_bundle)
+    assert(validator.validate(changed_snapshot_bundle).empty?, "refreshed snapshot bundle must validate")
+    assert(
+      evaluator_seam.call(changed_snapshot_bundle)["content_digest"] != evaluator["content_digest"],
+      "an exposed subject source change perturbs the evaluator projection"
+    )
+
+    # 10. Invalid authority/independence rejects every seam through the
+    #     shared projection-validation boundary.
+    stripped_bundle = OrbitV2FixtureFactory.valid_bundle
+    stripped_bundle["authorization_records"] = []
+    [lead_seam, work_seam, evaluator_seam].each do |seam|
+      expect_contract_error("aggregate_outcome_invalid") { seam.call(stripped_bundle) }
+    end
+    swapped_bundle = OrbitV2FixtureFactory.valid_bundle
+    reviewer = swapped_bundle["agent_instances"].find { |agent| agent["agent_instance_id"] == "oagent_independentreviewer" }
+    producer = swapped_bundle["agent_instances"].find { |agent| agent["agent_instance_id"] == "oagent_implementerone" }
+    reviewer["runtime_identity"] = OrbitV2FixtureFactory.deep_copy(producer["runtime_identity"])
+    [lead_seam, work_seam, evaluator_seam].each do |seam|
+      expect_contract_error("aggregate_outcome_invalid") { seam.call(swapped_bundle) }
+    end
   end
 
   def reseal_consuming(bundle, checkpoint, evaluation: nil)

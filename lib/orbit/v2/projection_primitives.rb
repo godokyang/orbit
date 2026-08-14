@@ -3,6 +3,7 @@
 require "set"
 
 require_relative "canonical_json"
+require_relative "evaluation_subject"
 
 module Orbit
   module V2
@@ -106,6 +107,60 @@ module Orbit
           error.code == "subject_stale" &&
           error.path.is_a?(String) &&
           /\Agate_evaluations\.[^.]+\.subject\z/.match?(error.path)
+      end
+
+      # Collection -> (manifest kind, id field) for every authoritative
+      # bundle collection. protocol_root is a singleton and is handled
+      # separately by each projection.
+      COLLECTION_SOURCES = {
+        "authority_assertions" => ["authority_assertion", "assertion_id"],
+        "authorization_records" => ["authorization_record", "authorization_record_id"],
+        "project_policy_revisions" => ["project_policy_revision", "policy_revision_id"],
+        "task_revisions" => ["task_revision", "task_revision_id"],
+        "gate_requirements" => ["gate_requirement", "gate_requirement_id"],
+        "work_units" => ["work_unit", "work_unit_id"],
+        "agent_instances" => ["agent_instance", "agent_instance_id"],
+        "logical_leads" => ["logical_lead", "logical_lead_id"],
+        "lead_sessions" => ["lead_session", "lead_session_id"],
+        "control_registries" => ["control_registry", "lead_control_id"],
+        "lead_checkpoints" => ["lead_checkpoint", "lead_checkpoint_id"],
+        "work_unit_attempts" => ["work_unit_attempt", "attempt_id"],
+        "rule_resolution_artifacts" => ["rule_resolution_artifact", "resolution_id"],
+        "evidence_records" => ["evidence_record", "evidence_record_id"],
+        "gate_evaluations" => ["gate_evaluation", "gate_evaluation_id"],
+        "findings" => ["finding", "finding_id"],
+        "finding_resolutions" => ["finding_resolution", "finding_resolution_id"]
+      }.freeze
+
+      def source_digest(document)
+        digest = document.is_a?(Hash) ? document["content_digest"] : nil
+        digest.is_a?(String) ? digest : CanonicalJSON.content_digest(document)
+      end
+
+      def manifest_entry(kind, id, content_digest)
+        { "kind" => kind, "id" => id, "content_digest" => content_digest }
+      end
+
+      # Participation predicate shared by AggregateOutcome and the
+      # responsibility-scoped context projections: an evaluation participates
+      # only when its GateRequirement digest is current and its pinned subject
+      # equals the recomputed canonical subject (budget gates fold the
+      # canonical budget_review_subject_projection identity). Timestamps and
+      # array order never participate.
+      def evaluation_current?(evaluation, requirement:, expected_subject:)
+        return false unless evaluation.is_a?(Hash) && requirement.is_a?(Hash)
+        return false unless evaluation["gate_requirement_content_digest"] == requirement["content_digest"]
+
+        subject = evaluation["subject"]
+        return false unless subject.is_a?(Hash)
+
+        expected =
+          if requirement.dig("subject_selector", "budget_assessment_required") == true
+            canonical_budget_subject(expected_subject, evaluation)
+          else
+            expected_subject
+          end
+        EvaluationSubject.same?(expected, subject)
       end
 
       # The canonical subject identity of a budget-assessment GateEvaluation:

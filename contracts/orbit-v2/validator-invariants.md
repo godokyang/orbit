@@ -231,13 +231,67 @@ stored content digest get their canonical content digest recomputed.
 `source_digest` is therefore a complete future deletable-cache key: repeat
 recomputation is byte-identical and any change to any validated bundle
 source changes the projection. No persisted cache, LeadControl transition,
-role context projection, RelationshipView, audit layer, or budget digest/
-two-lineage projection exists in this increment.
+RelationshipView, audit layer, or budget digest/two-lineage projection
+exists in this increment.
 
 Shared derivation (`finding_disposition`, `finding_lineage`, supersedes-tip
-analysis, canonical budget-subject identity) lives in
-`ProjectionPrimitives`; the Validator delegates to the same functions, so
-projection and validation cannot drift into two subtly different truths.
+analysis, canonical budget-subject identity, participation predicate,
+collection source kinds, source digests) lives in `ProjectionPrimitives`;
+the Validator delegates to the same functions, so projection and validation
+cannot drift into two subtly different truths.
+
+### Responsibility-scoped context projections
+
+Slice 5 increment 2 adds three pure derived seams:
+`ContextProjection.lead(bundle, lead_control_id, validator:)`,
+`ContextProjection.work_agent(bundle, attempt_id, validator:)`, and
+`ContextProjection.evaluator(bundle, attempt_id, validator:)`. They write
+nothing and are not authoritative collections or schemas. The role is fixed
+by the seam, never by a label: lead resolves one control registry; the
+attempt seams resolve one exact WorkUnitAttempt whose immutable assignment
+purpose must match the role (implementation/research for work_agent;
+review/test/release/adjudication for evaluator) — wrong-purpose, unknown,
+cross-project, or non-exact refs fail closed.
+
+All three share `AggregateOutcome.validate_projection_input!` — the single
+projection-validation boundary including the exact historical `.subject`
+staleness allowance — so invalid authority/independence, non-exact
+assignment/rules/checkpoint pins, missing or inconsistent
+`effective_verification_plan_digest`/`closure_basis_digest` pins, and
+ambiguous control checkpoint tips fail closed. Historical stale
+GateEvaluations stay stored and are marked `current: false` in the
+lead/evaluator gate refs; they never close a gate or reject the history.
+
+Every output is canonical and order-independent with
+schema_version/protocol_epoch/project_id/context_kind, an exact subject
+ref, role-scoped sections, a sorted `source_manifest` of exactly the
+authoritative sources the role exposes (once each), `source_digest`, and
+`content_digest`. The lead context covers the control registry, unique
+accepted checkpoint tip, queue/active task/selection, TaskRevision
+contract, active policy, WorkUnit graph, derived attempt status/active
+roster, gate/finding/resolution refs, and the current AggregateOutcome; its
+source manifest is the canonical union of the lead role sources with the
+complete transitive manifest of the embedded AggregateOutcome (deduped by
+kind+id, no conflicting entries), so the lead `source_digest` follows every
+dependency of the embedded outcome.
+The work-agent context covers one attempt's task contract subset, exact
+WorkUnit/parent/dependency refs, assignment authority snapshot, assigned
+RuleResolutionArtifact and ChangeThesis ref, dispatch checkpoint ref with
+the pinned plan/basis digests and their exact source refs, and excludes
+other workers' attempt/evidence bodies. The evaluator context covers the
+TaskRevision contract, the Task-owned GateRequirements applicable to the
+immutable assignment purpose (the GATE_EVALUATOR_BINDINGS kind↔purpose
+mapping is exact: review→review, test→test, release→release,
+adjudication→adjudication), each current canonical subject for those
+requirements (implementation WorkUnit/Attempt/Evidence refs, snapshot,
+CodeSurface), assignment/rules, questions/acceptance criteria, the relevant
+Findings/Resolutions of those gates, and the pinned plan/basis digests —
+without implementation ChangeThesis prose or author transcript/reasoning, and
+never with another gate kind's context. Unrelated bundle changes never
+perturb the narrower work_agent/evaluator manifests.
+No persisted cache, LeadControl transition, RelationshipView, candidate
+relations, audit layer, or budget digest/two-lineage projection exists in
+this increment.
 
 ## Finding-to-invariant matrix
 
