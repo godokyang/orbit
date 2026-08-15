@@ -90,41 +90,65 @@ module Orbit
       def append(transaction_id:, expected_tip_digest:, payload:)
         validate_transaction_id!(transaction_id)
         validate_tip_digest!(expected_tip_digest)
-        begin
-          content = canonical_content_digest(payload)
-        rescue ArgumentError => error
+        content = canonical_content!(payload)
+        with_exclusive_lock do
+          current, tip = read_and_verify
+          perform_append(transaction_id, expected_tip_digest, payload, content, current, tip, cas: true)
+        end
+      end
+
+      # Locked conditional compare-and-append (Slice 6 increment 3):
+      # under the same exclusive lock, reads and verifies the log, then
+      # calls `validate` with the FRESH verified snapshot (records, tip).
+      # The block returns nil to append against that snapshot, a non-nil
+      # result (:appended/:idempotent/:stale) to short-circuit, or raises
+      # ContractError to abort without writing. Because validation and the
+      # append share one locked snapshot, a multi-record acceptance check
+      # can never race a concurrent writer the way a separate
+      # read-then-append can. Idempotency/reuse checks still apply.
+      def append_with(transaction_id:, payload:, validate:)
+        validate_transaction_id!(transaction_id)
+        content = canonical_content!(payload)
+        with_exclusive_lock do
+          current, tip = read_and_verify
+          outcome = validate.call(current, tip)
+          return outcome unless outcome.nil?
+          perform_append(transaction_id, nil, payload, content, current, tip, cas: false)
+        end
+      end
+
+      def canonical_content!(payload)
+        canonical_content_digest(payload)
+      rescue ArgumentError => error
+        raise ContractError.new(
+          "transaction_log_argument_invalid",
+          "payload is not canonical JSON: #{error.message}",
+          path: "transaction_log.payload"
+        )
+      end
+
+      def perform_append(transaction_id, expected_tip_digest, payload, content, current, tip, cas:)
+        if (existing = current.find { |record| record["transaction_id"] == transaction_id })
+          return :idempotent if existing["content_digest"] == content
+
           raise ContractError.new(
-            "transaction_log_argument_invalid",
-            "payload is not canonical JSON: #{error.message}",
-            path: "transaction_log.payload"
+            "transaction_log_reuse",
+            "transaction #{transaction_id} already exists with different canonical content",
+            path: "transaction_log.#{transaction_id}"
           )
         end
 
-        with_exclusive_lock do
-          current, tip = read_and_verify
+        return :stale if cas && expected_tip_digest != tip
 
-          if (existing = current.find { |record| record["transaction_id"] == transaction_id })
-            return :idempotent if existing["content_digest"] == content
-
-            raise ContractError.new(
-              "transaction_log_reuse",
-              "transaction #{transaction_id} already exists with different canonical content",
-              path: "transaction_log.#{transaction_id}"
-            )
-          end
-
-          return :stale unless expected_tip_digest == tip
-
-          record = {
-            "schema_version" => SCHEMA_VERSION,
-            "transaction_id" => transaction_id,
-            "previous_tip_digest" => tip,
-            "content_digest" => content,
-            "payload" => payload
-          }
-          write_atomically(current + [record])
-          :appended
-        end
+        record = {
+          "schema_version" => SCHEMA_VERSION,
+          "transaction_id" => transaction_id,
+          "previous_tip_digest" => tip,
+          "content_digest" => content,
+          "payload" => payload
+        }
+        write_atomically(current + [record])
+        :appended
       end
 
       def tip_digest
@@ -136,6 +160,8 @@ module Orbit
         current, = read_and_verify
         current
       end
+
+      private :canonical_content!, :perform_append
 
       private
 

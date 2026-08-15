@@ -93,8 +93,9 @@ protocol_root:
   required_genesis_ref:
     - policy_revision_id
     - content_digest
-  genesis_verification: existing_public_seams_schema_catalog_validator_validate_document_authority_verifier_policy_issuance
+  genesis_verification: resolved_from_durable_policy_store_walk_from_pinned_genesis_in_accepted_order
   genesis_project_binding: marker_genesis_policy_and_issuance_carry_the_same_project_id
+  caller_supplied_policy_or_assertion_hashes: never_source_of_truth
   active_root_returned: canonical_real_parent_directory_of_marker
   root_alias_behavior: real_path_and_symlink_alias_resolve_to_identical_active_root
   marker_parent_containment: enforced_before_any_file_access_create_may_create_absent_in_root_orbit
@@ -104,9 +105,46 @@ protocol_root:
   mixed_epoch_behavior: fail_closed
   known_v1_authority_artifacts: [runtime, loop-state.yaml, roles.yaml, instances.yaml, tasks, evidence, rules, handoffs]
   closure:
-    increment: slice_6_increment_2
+    increment: slice_6_increment_3
     seam_only: true
-    deferred: [controlled_genesis_writer, policy_rotation, control_session_genesis, v2_cli_activation, v1_retirement, e2e_dogfood_cutover]
+    deferred: [control_session_genesis, task_checkpoint_evidence_writers, legacy_deletion, templates, v2_cli_activation, v1_retirement, e2e_dogfood_cutover]
+
+policy_authority_store:
+  seam: Orbit::V2::PolicyStore
+  location: canonical_active_root_only
+  transaction_file: policy-transactions.json
+  transaction_shape: exact_project_policy_revision_plus_exact_authority_assertion_committed_together
+  genesis:
+    validation_before_append: [final_schema, content_digest, epoch, parentless, provider_verified_assertion, exact_genesis_issuance_envelope]
+    results: [appended, idempotent_same_revision_id_byte_identical_canonical_content]
+    conflicting_genesis_on_nonempty_store: fail_closed
+  rotation:
+    canonical_active_root_required: store_must_be_the_markers_canonical_real_active_root_realpath_equal_canonical_project_root_orbit_sibling_shadow_alias_store_never_borrows_the_pin
+    protocol_root_anchor_required: valid_in_root_marker_pin_with_full_provider_verified_lineage_resolution_inside_the_locked_snapshot
+    marker_project_binding: marker_project_id_exact_matches_store_genesis_project_id_unpinned_fail_closed
+    unverified_or_broken_lineage_never_authorizes_rotation: fail_closed
+    snapshot_cas: validation_and_append_share_one_locked_snapshot_concurrent_same_parent_exactly_one_accepted
+    parent_must_equal_resolved_active_tip: true
+    parent_grant_authorizes_issuer: exact_policy_rotate_required_external_grant
+    provider_verifies_exact_rotation_issuance: true
+    results: [appended, idempotent_committed_replay]
+    unauthorized_or_stale_or_self_authorizing_or_cross_project_or_unpinned: fail_closed
+    genesis_and_old_revisions: never_rewritten
+  active_tip:
+    derivation: walk_from_protocol_root_pinned_immutable_genesis_through_exact_parent_refs_in_accepted_transaction_order
+    resolve_verifier: required_configured_authority_verifier_provider_verifies_every_stored_assertion
+    mutable_pointer_or_latest_by_time: forbidden
+    dual_store_or_fallback_or_backfill: forbidden
+  reader_fail_closed:
+    - missing_pinned_genesis
+    - same_revision_id_different_content
+    - malformed_or_unknown_policy_transaction
+    - unauthorized_successor
+    - fork_or_multiple_tips
+    - project_or_epoch_mismatch
+    - broken_lineage
+  bootstrap_order: verified_durable_genesis_first_then_marker_pin_unreferenced_genesis_never_selected
+  cross_file_atomicity_between_store_and_marker: not_claimed
 
 policy_lineage:
   authority_verification:

@@ -2,12 +2,11 @@
 
 require "yaml"
 
-require_relative "authority_verifier"
 require_relative "canonical_json"
 require_relative "durable_file"
 require_relative "errors"
 require_relative "identifiers"
-require_relative "policy_issuance"
+require_relative "policy_store"
 require_relative "schema_catalog"
 require_relative "validator"
 
@@ -51,24 +50,26 @@ module Orbit
     # or staging byte is read or written outside. Create alone may see a
     # genuinely absent .orbit, which it then creates inside the canonical
     # root.
-    # - `preflight(project_root:, expected_project_id:, genesis_policy:,
-    #   genesis_assertion:, authority_verifier:)` returns the canonical
-    #   active artifact root — the canonical real parent directory of the
-    #   marker (<real project>/.orbit) — only after the explicit project
-    #   root is resolved through symlinks (a real path and a symlink alias
-    #   to the same physical marker resolve to the SAME active root, never
-    #   two), the marker is verified, the pinned ProjectPolicyRevision
-    #   genesis is bound through the existing public seams
-    #   (SchemaCatalog/Validator#validate_document! for the records,
-    #   AuthorityVerifier#verify! for the provider-verified issuance,
-    #   PolicyIssuance for the exact issuance envelope) INCLUDING the exact
-    #   project binding (marker, genesis policy, and issuance all carry the
-    #   same project_id), and no known v1 authority artifact exists inside
-    #   the active root. The marker's real parent must remain contained in
-    #   the canonical project root. Nothing is self-authorized from marker
-    #   text or candidate writer names: the marker only pins the genesis
-    #   ref; the ref must exact-match a create-only genesis record whose
-    #   issuance is provider-verified.
+    # - `preflight(project_root:, expected_project_id:, authority_verifier:)`
+    #   returns the canonical active artifact root — the canonical real
+    #   parent directory of the marker (<real project>/.orbit) — only after
+    #   the explicit project root is resolved through symlinks (a real path
+    #   and a symlink alias to the same physical marker resolve to the SAME
+    #   active root, never two), the marker is verified, and the pinned
+    #   ProjectPolicyRevision genesis is resolved from the durable
+    #   PolicyStore itself (Slice 6 increment 3): the store walks the
+    #   lineage from the pinned immutable genesis in accepted transaction
+    #   order, exact-binds marker project, stored policy, stored assertion,
+    #   provider receipt, and issuance envelope, and re-verifies every
+    #   stored assertion through the configured AuthorityVerifier.
+    #   Caller-supplied policy/assertion hashes are never the source of
+    #   truth. A missing or forged pin, a store whose genesis does not
+    #   exact-match the pin, a broken/unauthorized lineage, a project
+    #   mismatch, or an unverifiable issuance fails closed. The marker's
+    #   real parent must remain contained in the canonical project root,
+    #   and no known v1 authority artifact may exist inside the active
+    #   root. Nothing is self-authorized from marker text or candidate
+    #   writer names.
     #
     # The marker file must be exactly the canonical rendering of its own
     # record: unknown fields, noncanonical content, duplicate keys, trailing
@@ -147,14 +148,20 @@ module Orbit
         load_verified_record(verified_marker_path(root))
       end
 
-      def preflight(project_root:, expected_project_id:, genesis_policy:,
-                    genesis_assertion:, authority_verifier:)
+      def preflight(project_root:, expected_project_id:, authority_verifier:)
         unless expected_project_id.is_a?(String) &&
                Identifiers.valid?("project_id", expected_project_id)
           raise ContractError.new(
             "protocol_root_argument_invalid",
             "expected_project_id must be a stable project identifier",
             path: "protocol_root.expected_project_id"
+          )
+        end
+        unless authority_verifier.respond_to?(:verify!)
+          raise ContractError.new(
+            "protocol_root_argument_invalid",
+            "preflight requires a configured authority verifier",
+            path: "protocol_root.preflight"
           )
         end
         root = canonical_root(project_root)
@@ -170,13 +177,28 @@ module Orbit
             }
           )
         end
-        validate_genesis_binding!(
-          marker,
-          genesis_policy,
-          genesis_assertion,
-          authority_verifier,
-          root
-        )
+        # The pinned genesis is resolved from the durable policy store
+        # itself: caller-supplied policy/assertion hashes are never the
+        # source of truth. The store resolves the lineage from the pinned
+        # immutable genesis and re-verifies every stored assertion through
+        # the configured provider.
+        store = PolicyStore.new(active_root: File.join(root, ".orbit"))
+        begin
+          resolved = store.resolve(
+            pinned_genesis_ref: marker["project_policy_genesis_ref"],
+            authority_verifier: authority_verifier
+          )
+        rescue ContractError => error
+          raise genesis_invalid(
+            "durable policy store does not resolve the pinned genesis",
+            { "cause" => error.code, "message" => error.message }
+          )
+        end
+        unless resolved.fetch("genesis_policy").fetch("project_id") == marker["project_id"]
+          raise genesis_invalid(
+            "stored genesis policy project does not match the marker project"
+          )
+        end
         reject_mixed_epoch!(root)
         # Containment was already enforced before any file access by
         # verified_marker_path, so the active artifact root is exactly the
@@ -342,83 +364,6 @@ module Orbit
         end
       end
 
-      # Binds the marker's pinned genesis ref to the exact create-only
-      # ProjectPolicyRevision genesis through the existing public seams —
-      # the same records, digest rules, provider boundary, and issuance
-      # semantics the public Validator composes (AuthorityPolicy
-      # policy_issuance_valid? genesis branch) — never from marker text or
-      # candidate writer names.
-      def validate_genesis_binding!(marker, genesis_policy, genesis_assertion,
-                                    authority_verifier, project_root)
-        unless genesis_policy.is_a?(Hash) && genesis_assertion.is_a?(Hash) &&
-               authority_verifier.respond_to?(:verify!)
-          raise ContractError.new(
-            "protocol_root_argument_invalid",
-            "preflight requires the genesis ProjectPolicyRevision, its AuthorityAssertion, " \
-              "and a configured authority verifier",
-            path: "protocol_root.preflight"
-          )
-        end
-        validator = Orbit::V2::Validator.new(project_root: project_root)
-        begin
-          validator.validate_document!("project_policy_revision", genesis_policy)
-          validator.validate_document!("authority_assertion", genesis_assertion)
-        rescue ValidationFailure
-          raise genesis_invalid("genesis records violate their contracts")
-        end
-        unless genesis_policy["parent_policy_revision_id"].nil? &&
-               CanonicalJSON.content_digest(genesis_policy) == genesis_policy["content_digest"]
-          raise genesis_invalid("genesis policy is not a self-consistent create-only genesis")
-        end
-        pinned = marker["project_policy_genesis_ref"]
-        unless pinned == {
-          "policy_revision_id" => genesis_policy["policy_revision_id"],
-          "content_digest" => genesis_policy["content_digest"]
-        }
-          raise genesis_invalid("marker genesis ref does not exact-match the genesis policy")
-        end
-        unless genesis_policy["project_id"] == marker["project_id"]
-          raise genesis_invalid(
-            "genesis policy project does not match the marker project"
-          )
-        end
-        unless genesis_policy["authorization_source_ref"] == genesis_assertion["assertion_id"]
-          raise genesis_invalid("genesis policy does not pin its issuance assertion")
-        end
-        begin
-          authority_verifier.verify!(genesis_assertion)
-        rescue ContractError => error
-          raise genesis_invalid("genesis issuance was not provider-verified",
-                                { "cause" => error.code, "message" => error.message })
-        end
-
-        envelope = genesis_assertion["policy_issuance_envelope"]
-        receipt = genesis_assertion["verification_receipt"]
-        valid = envelope.is_a?(Hash) && receipt.is_a?(Hash) &&
-                envelope["schema_version"] == PolicyIssuance::SCHEMA_VERSION &&
-                envelope["issuance_kind"] == "genesis" &&
-                envelope["project_id"] == genesis_policy["project_id"] &&
-                envelope["parent_policy_revision_ref"].nil? &&
-                envelope["candidate_policy_revision_ref"] == PolicyIssuance.policy_ref(genesis_policy) &&
-                envelope["authority_source_revision_ref"] == {
-                  "provider_id" => genesis_assertion["provider_id"],
-                  "receipt_id" => receipt["receipt_id"],
-                  "assertion_id" => genesis_assertion["assertion_id"],
-                  "assertion_digest" => genesis_assertion["assertion_digest"]
-                } &&
-                envelope["decision"] == "approved" &&
-                envelope["issued_at"] == receipt["issued_at"] &&
-                envelope["envelope_digest"] == PolicyIssuance.envelope_digest(envelope) &&
-                genesis_assertion["authority_scope_ref"] == envelope["envelope_digest"] &&
-                genesis_assertion["project_id"] == genesis_policy["project_id"] &&
-                %w[user control_plane].include?(genesis_assertion["issuer_kind"]) &&
-                Array(genesis_assertion["grants"]) == ["policy.genesis"] &&
-                genesis_policy["authorization_assertion_digest"] == genesis_assertion["assertion_digest"]
-        return if valid
-
-        raise genesis_invalid("genesis issuance envelope does not exact-bind the genesis policy")
-      end
-
       def genesis_invalid(message, details = nil)
         ContractError.new(
           "protocol_root_genesis_invalid",
@@ -436,7 +381,6 @@ module Orbit
         :verify_record!,
         :validate_identity_inputs!,
         :reject_mixed_epoch!,
-        :validate_genesis_binding!,
         :genesis_invalid
       )
     end

@@ -15,6 +15,7 @@ require_relative "../../../lib/orbit/v2/integrity_audit"
 require_relative "../../../lib/orbit/v2/relationship_view"
 require_relative "../../../lib/orbit/v2/gate_strength"
 require_relative "../../../lib/orbit/v2/immutable_store"
+require_relative "../../../lib/orbit/v2/policy_store"
 require_relative "../../../lib/orbit/v2/protocol_root"
 require_relative "../../../lib/orbit/v2/transaction_log"
 require_relative "../../../lib/orbit/v2/policy_issuance"
@@ -70,6 +71,10 @@ module OrbitV2ContractTest
     test_transaction_log_concurrency_and_crash
     test_protocol_root_marker
     test_protocol_root_preflight
+    test_policy_store_genesis
+    test_policy_store_rotation
+    test_policy_store_concurrent_rotation
+    test_policy_store_lineage_fail_closed
     test_v1_inventory
     test_slice_isolation
     puts(
@@ -2883,42 +2888,724 @@ module OrbitV2ContractTest
     end
   end
 
-  def test_protocol_root_preflight
+  def policy_store_genesis_pair
+    bundle = OrbitV2FixtureFactory.valid_bundle
+    policy = bundle["project_policy_revisions"].first
+    assertion = OrbitV2FixtureFactory.policy_issuance_assertion(
+      policy,
+      parent_policy: nil,
+      assertion_id: "oassert_policygenesis",
+      subject: "project-owner"
+    )
+    [policy, assertion]
+  end
+
+  def policy_store_successor_pair(parent_policy, revision_id, assertion_id)
+    policy = OrbitV2FixtureFactory.deep_copy(parent_policy)
+    policy["policy_revision_id"] = revision_id
+    policy["parent_policy_revision_id"] = parent_policy["policy_revision_id"]
+    policy["authorization_source_ref"] = assertion_id
+    policy["authorization_assertion_digest"] =
+      OrbitV2FixtureFactory.policy_issuance_assertion_digest(
+        assertion_id: assertion_id,
+        required_grant: "policy.rotate",
+        subject: "project-owner",
+        issued_at: "2026-07-30T07:00:00Z"
+      )
+    policy["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(policy)
+    assertion = OrbitV2FixtureFactory.policy_issuance_assertion(
+      policy,
+      parent_policy: parent_policy,
+      assertion_id: assertion_id,
+      subject: "project-owner"
+    )
+    [policy, assertion]
+  end
+
+  def policy_store_other_project_genesis_pair
+    policy = OrbitV2FixtureFactory.valid_bundle["project_policy_revisions"].first
+    policy_b = OrbitV2FixtureFactory.deep_copy(policy)
+    policy_b["project_id"] = "oproj_slice0other"
+    policy_b["authorization_source_ref"] = "oassert_policygenesisother"
+    assertion_base_b = {
+      "schema_version" => "orbit-authority-assertion-v1",
+      "protocol_epoch" => "orbit-v2",
+      "project_id" => "oproj_slice0other",
+      "assertion_id" => "oassert_policygenesisother",
+      "issuer_kind" => "user",
+      "issuer_subject" => "project-owner",
+      "provider_id" => OrbitV2FixtureFactory::AUTHORITY_PROVIDER_ID,
+      "grants" => ["policy.genesis"],
+      "asserted_at" => "2026-07-30T00:00:00Z"
+    }
+    digest_b = Orbit::V2::AuthorityVerifier.assertion_digest(assertion_base_b)
+    policy_b["authorization_assertion_digest"] = digest_b
+    policy_b["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(policy_b)
+    envelope_b = Orbit::V2::PolicyIssuance.build_envelope(
+      candidate_policy: policy_b,
+      parent_policy: nil,
+      assertion_id: "oassert_policygenesisother",
+      assertion_digest: digest_b,
+      provider_id: OrbitV2FixtureFactory::AUTHORITY_PROVIDER_ID,
+      receipt_id: "oareceipt_policygenesisother",
+      issued_at: "2026-07-30T00:00:00Z"
+    )
+    assertion_b = assertion_base_b.merge(
+      "authority_scope_ref" => envelope_b["envelope_digest"],
+      "policy_issuance_envelope" => envelope_b,
+      "assertion_digest" => digest_b
+    )
+    assertion_b["verification_receipt"] =
+      OrbitV2FixtureFactory::FAKE_AUTHORITY_PROVIDER.issue(
+        assertion_b,
+        receipt_id: "oareceipt_policygenesisother",
+        issued_at: "2026-07-30T00:00:00Z"
+      )
+    [policy_b, assertion_b]
+  end
+
+  def policy_store_seeded_root(dir)
+    FileUtils.mkdir_p(File.join(dir, ".orbit"))
+    policy, assertion = policy_store_genesis_pair
+    store = Orbit::V2::PolicyStore.new(active_root: File.join(dir, ".orbit"))
+    assert(
+      store.genesis(
+        policy: policy,
+        assertion: assertion,
+        authority_verifier: OrbitV2FixtureFactory.authority_verifier
+      ) == :appended,
+      "seed durable policy genesis"
+    )
+    [store, policy, assertion]
+  end
+
+  def protocol_root_preflight(dir, verifier, project_id: OrbitV2FixtureFactory::PROJECT_ID)
+    Orbit::V2::ProtocolRoot.preflight(
+      project_root: dir,
+      expected_project_id: project_id,
+      authority_verifier: verifier
+    )
+  end
+
+  def test_policy_store_genesis
+    assert(
+      Orbit::V2::PolicyStore.singleton_methods(false).empty?,
+      "PolicyStore adds no class-level methods beyond the inherited constructor"
+    )
+    assert(
+      Orbit::V2::PolicyStore.instance_methods(false).sort ==
+        %i[genesis records resolve rotate],
+      "PolicyStore exposes exactly its four public seams"
+    )
+    assert(
+      Orbit::V2::TransactionLog.instance_methods(false).sort ==
+        %i[append append_with records tip_digest],
+      "TransactionLog exposes exactly its four public seams"
+    )
     Dir.mktmpdir do |dir|
-      bundle = OrbitV2FixtureFactory.valid_bundle
-      policy = bundle["project_policy_revisions"].first
-      assertion = OrbitV2FixtureFactory.policy_issuance_assertion(
-        policy,
+      FileUtils.mkdir_p(File.join(dir, ".orbit"))
+      verifier = OrbitV2FixtureFactory.authority_verifier
+      store = Orbit::V2::PolicyStore.new(active_root: File.join(dir, ".orbit"))
+      policy, assertion = policy_store_genesis_pair
+      genesis_ref = {
+        "policy_revision_id" => policy["policy_revision_id"],
+        "content_digest" => policy["content_digest"]
+      }
+
+      # Controlled genesis: schema/digests/project/issuance validated
+      # before append; policy + assertion commit as ONE canonical
+      # transaction.
+      assert(
+        store.genesis(policy: policy, assertion: assertion, authority_verifier: verifier) == :appended,
+        "controlled genesis appends"
+      )
+      records = store.records
+      assert(records.size == 1, "one accepted transaction")
+      assert(records.first.keys.sort == %w[assertion policy], "one transaction carries policy + assertion")
+      resolved = store.resolve(pinned_genesis_ref: genesis_ref, authority_verifier: verifier)
+      assert(
+        resolved["genesis_policy"]["policy_revision_id"] == policy["policy_revision_id"],
+        "resolve returns the stored genesis"
+      )
+      assert(
+        resolved["active_policy"]["policy_revision_id"] == policy["policy_revision_id"],
+        "genesis is the initial active tip"
+      )
+      assert(
+        resolved["genesis_assertion"]["assertion_id"] == assertion["assertion_id"],
+        "resolve returns the stored genesis assertion"
+      )
+
+      # Idempotent genesis replay: same revision id + byte-identical
+      # canonical content.
+      marker_bytes = File.binread(
+        File.join(dir, ".orbit", Orbit::V2::PolicyStore::POLICY_TRANSACTIONS_FILE)
+      )
+      assert(
+        store.genesis(policy: policy, assertion: assertion, authority_verifier: verifier) == :idempotent,
+        "idempotent genesis replay"
+      )
+      assert(
+        File.binread(
+          File.join(dir, ".orbit", Orbit::V2::PolicyStore::POLICY_TRANSACTIONS_FILE)
+        ) == marker_bytes,
+        "idempotent replay left bytes unchanged"
+      )
+
+      # Same revision id with different canonical content fails closed.
+      policy2 = OrbitV2FixtureFactory.deep_copy(policy)
+      policy2["authority_grants"] << {
+        "action" => "task.additional.override",
+        "required_external_grant" => "task.additional.override"
+      }
+      policy2["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(policy2)
+      assertion2 = OrbitV2FixtureFactory.policy_issuance_assertion(
+        policy2,
         parent_policy: nil,
         assertion_id: "oassert_policygenesis",
         subject: "project-owner"
       )
+      expect_contract_error("policy_store_reuse") do
+        store.genesis(policy: policy2, assertion: assertion2, authority_verifier: verifier)
+      end
+      assert(store.records.size == 1, "rejected reuse left the store unchanged")
+
+      # Invalid/unconfigured/self-reported authority leaves no transaction.
+      bad_assertion = OrbitV2FixtureFactory.deep_copy(assertion)
+      bad_assertion.dig("policy_issuance_envelope")["envelope_digest"] = "sha256:#{'0' * 64}"
+      expect_contract_error("policy_store_genesis_invalid") do
+        store.genesis(policy: policy, assertion: bad_assertion, authority_verifier: verifier)
+      end
+      wrong_grant_assertion = OrbitV2FixtureFactory.deep_copy(assertion)
+      wrong_grant_assertion["grants"] = ["policy.rotate"]
+      expect_contract_error("policy_store_genesis_invalid") do
+        store.genesis(policy: policy, assertion: wrong_grant_assertion, authority_verifier: verifier)
+      end
+      expect_contract_error("policy_store_genesis_invalid") do
+        store.genesis(
+          policy: policy,
+          assertion: assertion,
+          authority_verifier: Orbit::V2::AuthorityVerifier.new
+        )
+      end
+      self_reported = OrbitV2FixtureFactory.deep_copy(assertion)
+      self_reported["issuer_kind"] = "agent"
+      expect_contract_error("policy_store_argument_invalid") do
+        store.genesis(policy: policy, assertion: self_reported, authority_verifier: verifier)
+      end
+      assert(store.records.size == 1, "invalid authority left the store unchanged")
+
+      # A different genesis on a non-empty store fails closed.
+      other_dir = File.join(dir, "other")
+      FileUtils.mkdir_p(File.join(other_dir, ".orbit"))
+      other_store = Orbit::V2::PolicyStore.new(active_root: File.join(other_dir, ".orbit"))
+      other_policy = OrbitV2FixtureFactory.deep_copy(policy)
+      other_policy["policy_revision_id"] = "opolicy_genesis0009"
+      other_policy["authorization_source_ref"] = "oassert_policygenesis9"
+      other_policy["authorization_assertion_digest"] =
+        OrbitV2FixtureFactory.policy_issuance_assertion_digest(
+          assertion_id: "oassert_policygenesis9",
+          required_grant: "policy.genesis",
+          subject: "project-owner",
+          issued_at: "2026-07-30T00:00:00Z"
+        )
+      other_policy["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(other_policy)
+      other_assertion = OrbitV2FixtureFactory.policy_issuance_assertion(
+        other_policy,
+        parent_policy: nil,
+        assertion_id: "oassert_policygenesis9",
+        subject: "project-owner"
+      )
+      assert(
+        other_store.genesis(
+          policy: other_policy,
+          assertion: other_assertion,
+          authority_verifier: verifier
+        ) == :appended,
+        "different store accepts its own genesis"
+      )
+      expect_contract_error("policy_store_genesis_conflict") do
+        other_store.genesis(policy: policy, assertion: assertion, authority_verifier: verifier)
+      end
+
+      # Missing/absent active root fails closed.
+      expect_contract_error("policy_store_argument_invalid") do
+        Orbit::V2::PolicyStore.new(active_root: File.join(dir, "absent-root"))
+      end
+    end
+  end
+
+  def test_policy_store_rotation
+    Dir.mktmpdir do |dir|
+      store, policy, = policy_store_seeded_root(dir)
       genesis_ref = {
         "policy_revision_id" => policy["policy_revision_id"],
         "content_digest" => policy["content_digest"]
       }
       verifier = OrbitV2FixtureFactory.authority_verifier
-      root = Orbit::V2::ProtocolRoot.create(
+      successor, successor_assertion = policy_store_successor_pair(
+        policy, "opolicy_rotated0002", "oassert_policyrotated"
+      )
+
+      # Rotation extends an ACTIVE trust root only: without a valid marker
+      # pinning the store genesis, rotation fails closed and leaves the
+      # unreferenced genesis inert.
+      expect_contract_error("policy_store_unpinned") do
+        store.rotate(
+          policy: successor,
+          assertion: successor_assertion,
+          authority_verifier: verifier
+        )
+      end
+      assert(store.records.size == 1, "unpinned rotation left the store unchanged")
+      Orbit::V2::ProtocolRoot.create(
+        project_root: dir,
+        project_id: OrbitV2FixtureFactory::PROJECT_ID,
+        policy_genesis_ref: {
+          "policy_revision_id" => policy["policy_revision_id"],
+          "content_digest" => policy["content_digest"]
+        }
+      )
+
+      # Authorized rotation: parent = resolved active tip, parent grants
+      # policy.rotate, provider verifies the exact rotation issuance.
+      assert(
+        store.rotate(
+          policy: successor,
+          assertion: successor_assertion,
+          authority_verifier: verifier
+        ) == :appended,
+        "authorized rotation appends one successor"
+      )
+      assert(store.records.size == 2, "genesis plus one successor")
+      resolved = store.resolve(pinned_genesis_ref: genesis_ref, authority_verifier: verifier)
+      assert(
+        resolved["active_policy"]["policy_revision_id"] == "opolicy_rotated0002",
+        "active tip is the accepted successor"
+      )
+      assert(
+        resolved["genesis_policy"]["policy_revision_id"] == policy["policy_revision_id"],
+        "genesis is unchanged after rotation"
+      )
+      assert(
+        store.rotate(
+          policy: successor,
+          assertion: successor_assertion,
+          authority_verifier: verifier
+        ) == :idempotent,
+        "rotation replay is idempotent"
+      )
+
+      # Stale parent: a successor whose parent is no longer the active tip.
+      stale_pair = policy_store_successor_pair(policy, "opolicy_rotated0003", "oassert_policyrotated3")
+      expect_contract_error("policy_store_rotation_invalid") do
+        store.rotate(
+          policy: stale_pair[0],
+          assertion: stale_pair[1],
+          authority_verifier: verifier
+        )
+      end
+      assert(store.records.size == 2, "stale rotation left the store unchanged")
+
+      # Unauthorized: a successor of the CURRENT tip whose issuance cannot
+      # be provider-verified (tampered grants break the pinned digest).
+      forged_successor = OrbitV2FixtureFactory.deep_copy(successor)
+      forged_successor["policy_revision_id"] = "opolicy_rotated0005"
+      forged_successor["parent_policy_revision_id"] = successor["policy_revision_id"]
+      forged_successor["authorization_source_ref"] = "oassert_policyrotatedforged"
+      forged_successor["authorization_assertion_digest"] =
+        OrbitV2FixtureFactory.policy_issuance_assertion_digest(
+          assertion_id: "oassert_policyrotatedforged",
+          required_grant: "policy.rotate",
+          subject: "project-owner",
+          issued_at: "2026-07-30T07:00:00Z"
+        )
+      forged_successor["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(forged_successor)
+      forged_assertion = OrbitV2FixtureFactory.policy_issuance_assertion(
+        forged_successor,
+        parent_policy: successor,
+        assertion_id: "oassert_policyrotatedforged",
+        subject: "project-owner"
+      )
+      forged_assertion["grants"] = ["policy.genesis"]
+      expect_contract_error("policy_store_rotation_invalid") do
+        store.rotate(
+          policy: forged_successor,
+          assertion: forged_assertion,
+          authority_verifier: verifier
+        )
+      end
+      expect_contract_error("policy_store_lineage_invalid") do
+        store.rotate(
+          policy: forged_successor,
+          assertion: forged_assertion,
+          authority_verifier: Orbit::V2::AuthorityVerifier.new
+        )
+      end
+      assert(store.records.size == 2, "unauthorized rotation left the store unchanged")
+
+      # Cross-project successor fails the exact project binding.
+      policy_b, assertion_b = policy_store_other_project_genesis_pair
+      cross_successor = OrbitV2FixtureFactory.deep_copy(policy_b)
+      cross_successor["policy_revision_id"] = "opolicy_rotated0004"
+      cross_successor["parent_policy_revision_id"] = successor["policy_revision_id"]
+      cross_successor["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(cross_successor)
+      expect_contract_error("policy_store_rotation_invalid") do
+        store.rotate(
+          policy: cross_successor,
+          assertion: assertion_b,
+          authority_verifier: verifier
+        )
+      end
+
+      # Rotation without genesis fails closed.
+      empty_dir = File.join(dir, "empty")
+      FileUtils.mkdir_p(File.join(empty_dir, ".orbit"))
+      empty_store = Orbit::V2::PolicyStore.new(active_root: File.join(empty_dir, ".orbit"))
+      expect_contract_error("policy_store_rotation_invalid") do
+        empty_store.rotate(
+          policy: successor,
+          assertion: successor_assertion,
+          authority_verifier: verifier
+        )
+      end
+
+      # A marker pinning a DIFFERENT genesis ref (forged pin) fails the
+      # in-snapshot lineage resolution and never authorizes rotation.
+      forged_dir = File.join(dir, "forged-pin")
+      FileUtils.mkdir_p(File.join(forged_dir, ".orbit"))
+      forged_store = Orbit::V2::PolicyStore.new(active_root: File.join(forged_dir, ".orbit"))
+      forged_store.genesis(
+        policy: policy,
+        assertion: OrbitV2FixtureFactory.policy_issuance_assertion(
+          policy,
+          parent_policy: nil,
+          assertion_id: "oassert_policygenesis",
+          subject: "project-owner"
+        ),
+        authority_verifier: verifier
+      )
+      Orbit::V2::ProtocolRoot.create(
+        project_root: forged_dir,
+        project_id: OrbitV2FixtureFactory::PROJECT_ID,
+        policy_genesis_ref: {
+          "policy_revision_id" => policy["policy_revision_id"],
+          "content_digest" => "sha256:#{'c' * 64}"
+        }
+      )
+      expect_contract_error("policy_store_lineage_invalid") do
+        forged_store.rotate(
+          policy: successor,
+          assertion: successor_assertion,
+          authority_verifier: verifier
+        )
+      end
+      assert(forged_store.records.size == 1, "forged-pin rotation left the store unchanged")
+
+      # POLICY_STORE_ROTATION_REQUIRES_MARKER_PROJECT_BINDING: a marker for
+      # project B pinning project A's genesis never authorizes rotation of
+      # the A store.
+      project_mismatch_dir = File.join(dir, "project-mismatch")
+      FileUtils.mkdir_p(File.join(project_mismatch_dir, ".orbit"))
+      mismatch_store = Orbit::V2::PolicyStore.new(
+        active_root: File.join(project_mismatch_dir, ".orbit")
+      )
+      mismatch_store.genesis(
+        policy: policy,
+        assertion: OrbitV2FixtureFactory.policy_issuance_assertion(
+          policy,
+          parent_policy: nil,
+          assertion_id: "oassert_policygenesis",
+          subject: "project-owner"
+        ),
+        authority_verifier: verifier
+      )
+      Orbit::V2::ProtocolRoot.create(
+        project_root: project_mismatch_dir,
+        project_id: "oproj_slice0other",
+        policy_genesis_ref: {
+          "policy_revision_id" => policy["policy_revision_id"],
+          "content_digest" => policy["content_digest"]
+        }
+      )
+      expect_contract_error("policy_store_unpinned") do
+        mismatch_store.rotate(
+          policy: successor,
+          assertion: successor_assertion,
+          authority_verifier: verifier
+        )
+      end
+      assert(
+        mismatch_store.records.size == 1,
+        "marker-project-mismatch rotation left the store unchanged"
+      )
+
+      # POLICY_STORE_ROTATION_REQUIRES_CANONICAL_ACTIVE_ROOT: a shadow
+      # store in a sibling directory that copied the same genesis can never
+      # borrow the real project's marker pin to rotate.
+      shadow_dir = File.join(dir, "shadow")
+      FileUtils.mkdir_p(shadow_dir)
+      shadow_store = Orbit::V2::PolicyStore.new(active_root: shadow_dir)
+      shadow_store.genesis(
+        policy: policy,
+        assertion: OrbitV2FixtureFactory.policy_issuance_assertion(
+          policy,
+          parent_policy: nil,
+          assertion_id: "oassert_policygenesis",
+          subject: "project-owner"
+        ),
+        authority_verifier: verifier
+      )
+      expect_contract_error("policy_store_unpinned") do
+        shadow_store.rotate(
+          policy: successor,
+          assertion: successor_assertion,
+          authority_verifier: verifier
+        )
+      end
+      assert(
+        shadow_store.records.size == 1,
+        "shadow-store rotation left the shadow store unchanged"
+      )
+      assert(
+        store.records.size == 2,
+        "shadow-store rotation never touched the real store"
+      )
+    end
+  end
+
+  def test_policy_store_concurrent_rotation
+    Dir.mktmpdir do |dir|
+      store, policy, = policy_store_seeded_root(dir)
+      genesis_ref = {
+        "policy_revision_id" => policy["policy_revision_id"],
+        "content_digest" => policy["content_digest"]
+      }
+      verifier = OrbitV2FixtureFactory.authority_verifier
+      Orbit::V2::ProtocolRoot.create(
         project_root: dir,
         project_id: OrbitV2FixtureFactory::PROJECT_ID,
         policy_genesis_ref: genesis_ref
       )
-      assert(root == :created, "preflight fixture marker")
-      valid_marker_bytes = File.binread(File.join(dir, ".orbit", "protocol.yaml"))
-
-      # Success: preflight returns the canonical real parent directory of
-      # the marker — the canonical project root's .orbit — only after the
-      # marker and the provider-verified genesis binding validate.
-      expected_active_root = File.join(File.realpath(dir), ".orbit")
+      ready_r, ready_w = IO.pipe
+      go_r, go_w = IO.pipe
+      out_r, out_w = IO.pipe
+      pairs = [
+        policy_store_successor_pair(policy, "opolicy_rotated000a", "oassert_policyrotateda"),
+        policy_store_successor_pair(policy, "opolicy_rotated000b", "oassert_policyrotatedb")
+      ]
+      pids = 2.times.map do |index|
+        fork do
+          ready_r.close
+          go_w.close
+          out_r.close
+          ready_w.write("r")
+          ready_w.close
+          go_r.read(1)
+          child = Orbit::V2::PolicyStore.new(active_root: File.join(dir, ".orbit"))
+          begin
+            result = child.rotate(
+              policy: pairs[index][0],
+              assertion: pairs[index][1],
+              authority_verifier: verifier
+            )
+            out_w.write("#{result}\n")
+          rescue Orbit::V2::ContractError => error
+            out_w.write("error:#{error.code}\n")
+          end
+          out_w.close
+          exit!(0)
+        end
+      end
+      ready_w.close
+      go_r.close
+      out_w.close
+      2.times { ready_r.read(1) }
+      ready_r.close
+      2.times { go_w.write("g") }
+      go_w.close
+      outcomes = out_r.read.split("\n").sort
+      out_r.close
+      pids.each { |pid| Process.wait(pid) }
       assert(
-        Orbit::V2::ProtocolRoot.preflight(
-          project_root: dir,
-          expected_project_id: OrbitV2FixtureFactory::PROJECT_ID,
-          genesis_policy: policy,
-          genesis_assertion: assertion,
+        outcomes == %w[appended error:policy_store_rotation_invalid],
+        "snapshot CAS yields exactly one successor, got #{outcomes.inspect}"
+      )
+      assert(store.records.size == 2, "no fork: exactly one successor transaction")
+      winner = store.resolve(pinned_genesis_ref: genesis_ref, authority_verifier: verifier)
+      assert(
+        %w[opolicy_rotated000a opolicy_rotated000b].include?(
+          winner["active_policy"]["policy_revision_id"]
+        ),
+        "active tip is exactly the single accepted successor"
+      )
+    end
+  end
+
+  def test_policy_store_lineage_fail_closed
+    Dir.mktmpdir do |dir|
+      FileUtils.mkdir_p(File.join(dir, ".orbit"))
+      path = File.join(dir, ".orbit", Orbit::V2::PolicyStore::POLICY_TRANSACTIONS_FILE)
+      policy, assertion = policy_store_genesis_pair
+      genesis_ref = {
+        "policy_revision_id" => policy["policy_revision_id"],
+        "content_digest" => policy["content_digest"]
+      }
+      successor_a, assertion_a = policy_store_successor_pair(
+        policy, "opolicy_rotated000a", "oassert_policyrotateda"
+      )
+      successor_b, assertion_b = policy_store_successor_pair(
+        policy, "opolicy_rotated000b", "oassert_policyrotatedb"
+      )
+
+      # A crafted fork — two successors of the same genesis in one log —
+      # fails closed on the reader's exact-parent-refs rule.
+      tx_record = lambda do |tx_id, parent_digest, policy, assertion|
+        payload = { "assertion" => assertion, "policy" => policy }
+        record = {
+          "schema_version" => "orbit-transaction-log-v1",
+          "transaction_id" => tx_id,
+          "previous_tip_digest" => parent_digest,
+          "content_digest" => "sha256:#{Orbit::V2::CanonicalJSON.sha256(payload)}",
+          "payload" => payload
+        }
+        [record, "sha256:#{Orbit::V2::CanonicalJSON.sha256(record)}"]
+      end
+      genesis_record, genesis_digest = tx_record.call(policy["policy_revision_id"], nil, policy, assertion)
+      record_a, digest_a = tx_record.call(
+        successor_a["policy_revision_id"], genesis_digest, successor_a, assertion_a
+      )
+      # The fork is at the POLICY level: a valid log chain whose second
+      # successor's policy parent is the genesis, not record_a.
+      record_b, = tx_record.call(
+        successor_b["policy_revision_id"], digest_a, successor_b, assertion_b
+      )
+      write_log_file = lambda do |records|
+        File.write(
+          path,
+          Orbit::V2::CanonicalJSON.dump(
+            "schema_version" => "orbit-transaction-log-v1",
+            "records" => records,
+            "file_digest" => "sha256:#{Orbit::V2::CanonicalJSON.sha256(records)}"
+          )
+        )
+      end
+      write_log_file.call([genesis_record, record_a, record_b])
+      store = Orbit::V2::PolicyStore.new(active_root: File.join(dir, ".orbit"))
+      verifier = OrbitV2FixtureFactory.authority_verifier
+      expect_contract_error("policy_store_lineage_invalid") do
+        store.resolve(
+          pinned_genesis_ref: genesis_ref,
           authority_verifier: verifier
-        ) == expected_active_root,
-        "preflight returns the canonical real marker parent as the active root"
+        )
+      end
+
+      # A malformed transaction payload (unknown field) fails closed even
+      # with all digests recomputed.
+      malformed, = tx_record.call(
+        successor_a["policy_revision_id"], genesis_digest, successor_a, assertion_a
+      )
+      malformed["payload"]["authority"] = "not-a-payload-field"
+      malformed["content_digest"] =
+        "sha256:#{Orbit::V2::CanonicalJSON.sha256(malformed['payload'])}"
+      write_log_file.call([genesis_record, malformed])
+      expect_contract_error("policy_store_lineage_invalid") do
+        store.resolve(
+          pinned_genesis_ref: genesis_ref,
+          authority_verifier: verifier
+        )
+      end
+
+      # A missing pinned genesis (store has genesis, pin names a ref the
+      # store never committed) fails closed.
+      write_log_file.call([genesis_record, record_a])
+      missing_pin = {
+        "policy_revision_id" => successor_a["policy_revision_id"],
+        "content_digest" => successor_a["content_digest"]
+      }
+      expect_contract_error("policy_store_lineage_invalid") do
+        store.resolve(
+          pinned_genesis_ref: missing_pin,
+          authority_verifier: verifier
+        )
+      end
+
+      # POLICY_STORE_ROTATION_REQUIRES_VERIFIED_LINEAGE: a pinned store
+      # whose genesis issuance cannot be provider-verified (tampered
+      # receipt in a digest-consistent crafted file) never authorizes
+      # rotation — the in-snapshot resolution fails closed and the store
+      # stays unchanged.
+      broken_dir = File.join(dir, "broken-provider")
+      FileUtils.mkdir_p(File.join(broken_dir, ".orbit"))
+      broken_path = File.join(
+        broken_dir,
+        ".orbit",
+        Orbit::V2::PolicyStore::POLICY_TRANSACTIONS_FILE
+      )
+      broken_assertion = OrbitV2FixtureFactory.deep_copy(assertion)
+      broken_assertion.dig("verification_receipt")["receipt"] = "hmac-sha256:#{'0' * 64}"
+      broken_record, = tx_record.call(
+        policy["policy_revision_id"], nil, policy, broken_assertion
+      )
+      File.write(
+        broken_path,
+        Orbit::V2::CanonicalJSON.dump(
+          "schema_version" => "orbit-transaction-log-v1",
+          "records" => [broken_record],
+          "file_digest" => "sha256:#{Orbit::V2::CanonicalJSON.sha256([broken_record])}"
+        )
+      )
+      Orbit::V2::ProtocolRoot.create(
+        project_root: broken_dir,
+        project_id: OrbitV2FixtureFactory::PROJECT_ID,
+        policy_genesis_ref: {
+          "policy_revision_id" => policy["policy_revision_id"],
+          "content_digest" => policy["content_digest"]
+        }
+      )
+      broken_store = Orbit::V2::PolicyStore.new(
+        active_root: File.join(broken_dir, ".orbit")
+      )
+      expect_contract_error("policy_store_lineage_invalid") do
+        broken_store.rotate(
+          policy: successor_a,
+          assertion: assertion_a,
+          authority_verifier: verifier
+        )
+      end
+      assert(
+        broken_store.records.size == 1,
+        "unverified-lineage rotation left the store unchanged"
+      )
+    end
+  end
+
+  def test_protocol_root_preflight
+    Dir.mktmpdir do |dir|
+      store, policy, = policy_store_seeded_root(dir)
+      genesis_ref = {
+        "policy_revision_id" => policy["policy_revision_id"],
+        "content_digest" => policy["content_digest"]
+      }
+      verifier = OrbitV2FixtureFactory.authority_verifier
+      assert(
+        Orbit::V2::ProtocolRoot.create(
+          project_root: dir,
+          project_id: OrbitV2FixtureFactory::PROJECT_ID,
+          policy_genesis_ref: genesis_ref
+        ) == :created,
+        "marker pins the durable genesis"
+      )
+      valid_marker_bytes = File.binread(File.join(dir, ".orbit", "protocol.yaml"))
+      expected_active_root = File.join(File.realpath(dir), ".orbit")
+
+      # Success: preflight resolves the pinned genesis from the durable
+      # policy store itself — caller-supplied policy/assertion hashes are
+      # never the source of truth — and returns the canonical real parent
+      # directory of the marker.
+      assert(
+        protocol_root_preflight(dir, verifier) == expected_active_root,
+        "preflight resolves the pinned genesis from the durable store"
       )
 
       # The same physical marker addressed through a symlink alias of the
@@ -2926,13 +3613,7 @@ module OrbitV2ContractTest
       alias_root = File.join(dir, "alias-project-root")
       File.symlink(File.expand_path(dir), alias_root)
       assert(
-        Orbit::V2::ProtocolRoot.preflight(
-          project_root: alias_root,
-          expected_project_id: OrbitV2FixtureFactory::PROJECT_ID,
-          genesis_policy: policy,
-          genesis_assertion: assertion,
-          authority_verifier: verifier
-        ) == expected_active_root,
+        protocol_root_preflight(alias_root, verifier) == expected_active_root,
         "real path and symlink alias resolve to the same canonical active root"
       )
       File.delete(alias_root)
@@ -2963,13 +3644,7 @@ module OrbitV2ContractTest
         Orbit::V2::ProtocolRoot.read(project_root: dir)
       end
       expect_contract_error("protocol_root_path_invalid") do
-        Orbit::V2::ProtocolRoot.preflight(
-          project_root: dir,
-          expected_project_id: OrbitV2FixtureFactory::PROJECT_ID,
-          genesis_policy: policy,
-          genesis_assertion: assertion,
-          authority_verifier: verifier
-        )
+        protocol_root_preflight(dir, verifier)
       end
       assert(
         Dir.children(outside_orbit).empty?,
@@ -3001,34 +3676,16 @@ module OrbitV2ContractTest
         "read is valid again after restoring the real in-root .orbit"
       )
       assert(
-        Orbit::V2::ProtocolRoot.preflight(
-          project_root: dir,
-          expected_project_id: OrbitV2FixtureFactory::PROJECT_ID,
-          genesis_policy: policy,
-          genesis_assertion: assertion,
-          authority_verifier: verifier
-        ) == expected_active_root,
+        protocol_root_preflight(dir, verifier) == expected_active_root,
         "preflight is valid again after restoring the real in-root .orbit"
       )
 
       # Missing marker, wrong project, wrong epoch.
       expect_contract_error("protocol_root_missing") do
-        Orbit::V2::ProtocolRoot.preflight(
-          project_root: File.join(dir, "absent"),
-          expected_project_id: OrbitV2FixtureFactory::PROJECT_ID,
-          genesis_policy: policy,
-          genesis_assertion: assertion,
-          authority_verifier: verifier
-        )
+        protocol_root_preflight(File.join(dir, "absent"), verifier)
       end
       expect_contract_error("protocol_root_project_mismatch") do
-        Orbit::V2::ProtocolRoot.preflight(
-          project_root: dir,
-          expected_project_id: "oproj_slice0other",
-          genesis_policy: policy,
-          genesis_assertion: assertion,
-          authority_verifier: verifier
-        )
+        protocol_root_preflight(dir, verifier, project_id: "oproj_slice0other")
       end
       wrong_epoch = OrbitV2FixtureFactory.deep_copy(
         Orbit::V2::ProtocolRoot.read(project_root: dir)
@@ -3040,81 +3697,58 @@ module OrbitV2ContractTest
         YAML.dump(wrong_epoch)
       )
       expect_contract_error("protocol_root_epoch_mismatch") do
-        Orbit::V2::ProtocolRoot.preflight(
-          project_root: dir,
-          expected_project_id: OrbitV2FixtureFactory::PROJECT_ID,
-          genesis_policy: policy,
-          genesis_assertion: assertion,
-          authority_verifier: verifier
-        )
+        protocol_root_preflight(dir, verifier)
       end
       File.write(File.join(dir, ".orbit", "protocol.yaml"), valid_marker_bytes)
 
-      # Forged/stale genesis ref: the marker pins a digest that does not
-      # exact-match the genesis policy record.
+      # Forged marker pin: the marker pins a genesis id+digest the durable
+      # store does not hold, so preflight fails closed.
       forged_ref = {
         "policy_revision_id" => policy["policy_revision_id"],
         "content_digest" => "sha256:#{'f' * 64}"
       }
       forged_dir = File.join(dir, "forged")
-      FileUtils.mkdir_p(forged_dir)
+      policy_store_seeded_root(forged_dir)
       Orbit::V2::ProtocolRoot.create(
         project_root: forged_dir,
         project_id: OrbitV2FixtureFactory::PROJECT_ID,
         policy_genesis_ref: forged_ref
       )
       expect_contract_error("protocol_root_genesis_invalid") do
-        Orbit::V2::ProtocolRoot.preflight(
-          project_root: forged_dir,
-          expected_project_id: OrbitV2FixtureFactory::PROJECT_ID,
-          genesis_policy: policy,
-          genesis_assertion: assertion,
-          authority_verifier: verifier
-        )
+        protocol_root_preflight(forged_dir, verifier)
       end
 
-      # Cross-project genesis: a fully valid genesis policy + issuance for
-      # project B pinned by a marker that claims project A must fail the
-      # exact project binding, never be accepted as A's genesis.
-      policy_b = OrbitV2FixtureFactory.deep_copy(policy)
-      policy_b["project_id"] = "oproj_slice0other"
-      policy_b["authorization_source_ref"] = "oassert_policygenesisother"
-      policy_b["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(policy_b)
-      assertion_base_b = {
-        "schema_version" => "orbit-authority-assertion-v1",
-        "protocol_epoch" => "orbit-v2",
-        "project_id" => "oproj_slice0other",
-        "assertion_id" => "oassert_policygenesisother",
-        "issuer_kind" => "user",
-        "issuer_subject" => "project-owner",
-        "provider_id" => OrbitV2FixtureFactory::AUTHORITY_PROVIDER_ID,
-        "grants" => ["policy.genesis"],
-        "asserted_at" => "2026-07-30T00:00:00Z"
-      }
-      digest_b = Orbit::V2::AuthorityVerifier.assertion_digest(assertion_base_b)
-      policy_b["authorization_assertion_digest"] = digest_b
-      envelope_b = Orbit::V2::PolicyIssuance.build_envelope(
-        candidate_policy: policy_b,
-        parent_policy: nil,
-        assertion_id: "oassert_policygenesisother",
-        assertion_digest: digest_b,
-        provider_id: OrbitV2FixtureFactory::AUTHORITY_PROVIDER_ID,
-        receipt_id: "oareceipt_policygenesisother",
-        issued_at: "2026-07-30T00:00:00Z"
+      # Marker without a policy store: the pinned genesis is missing.
+      nostore_dir = File.join(dir, "no-store")
+      FileUtils.mkdir_p(File.join(nostore_dir, ".orbit"))
+      Orbit::V2::ProtocolRoot.create(
+        project_root: nostore_dir,
+        project_id: OrbitV2FixtureFactory::PROJECT_ID,
+        policy_genesis_ref: genesis_ref
       )
-      assertion_b = assertion_base_b.merge(
-        "authority_scope_ref" => envelope_b["envelope_digest"],
-        "policy_issuance_envelope" => envelope_b,
-        "assertion_digest" => digest_b
-      )
-      assertion_b["verification_receipt"] =
-        OrbitV2FixtureFactory::FAKE_AUTHORITY_PROVIDER.issue(
-          assertion_b,
-          receipt_id: "oareceipt_policygenesisother",
-          issued_at: "2026-07-30T00:00:00Z"
-        )
+      expect_contract_error("protocol_root_genesis_invalid") do
+        protocol_root_preflight(nostore_dir, verifier)
+      end
+
+      # Unreferenced durable genesis without a marker is never selected:
+      # preflight fails with a missing marker, not a resolved trust root.
+      nomarker_dir = File.join(dir, "no-marker")
+      policy_store_seeded_root(nomarker_dir)
+      expect_contract_error("protocol_root_missing") do
+        protocol_root_preflight(nomarker_dir, verifier)
+      end
+
+      # Cross-project genesis: a fully valid durable genesis for project B
+      # pinned by a marker claiming project A must fail the exact project
+      # binding, never be accepted as A's genesis.
+      policy_b, assertion_b = policy_store_other_project_genesis_pair
       cross_dir = File.join(dir, "cross-project")
-      FileUtils.mkdir_p(cross_dir)
+      FileUtils.mkdir_p(File.join(cross_dir, ".orbit"))
+      Orbit::V2::PolicyStore.new(active_root: File.join(cross_dir, ".orbit")).genesis(
+        policy: policy_b,
+        assertion: assertion_b,
+        authority_verifier: verifier
+      )
       Orbit::V2::ProtocolRoot.create(
         project_root: cross_dir,
         project_id: "oproj_slice0fixture",
@@ -3124,61 +3758,19 @@ module OrbitV2ContractTest
         }
       )
       expect_contract_error("protocol_root_genesis_invalid") do
-        Orbit::V2::ProtocolRoot.preflight(
-          project_root: cross_dir,
-          expected_project_id: OrbitV2FixtureFactory::PROJECT_ID,
-          genesis_policy: policy_b,
-          genesis_assertion: assertion_b,
-          authority_verifier: verifier
-        )
+        protocol_root_preflight(cross_dir, verifier)
       end
 
-      # Stale genesis record: the supplied genesis digest is not
-      # self-consistent, so the binding cannot hold.
-      stale_policy = OrbitV2FixtureFactory.deep_copy(policy)
-      stale_policy["content_digest"] = "sha256:#{'e' * 64}"
+      # An unconfigured verifier fails closed: stored assertions cannot be
+      # provider-verified, so no trust root resolves.
       expect_contract_error("protocol_root_genesis_invalid") do
-        Orbit::V2::ProtocolRoot.preflight(
-          project_root: dir,
-          expected_project_id: OrbitV2FixtureFactory::PROJECT_ID,
-          genesis_policy: stale_policy,
-          genesis_assertion: assertion,
-          authority_verifier: verifier
-        )
+        protocol_root_preflight(dir, Orbit::V2::AuthorityVerifier.new)
       end
 
-      # Forged issuance: envelope semantics or provider verification fail.
-      forged_assertion = OrbitV2FixtureFactory.deep_copy(assertion)
-      forged_assertion.dig("policy_issuance_envelope")["decision"] = "rejected"
-      expect_contract_error("protocol_root_genesis_invalid") do
-        Orbit::V2::ProtocolRoot.preflight(
-          project_root: dir,
-          expected_project_id: OrbitV2FixtureFactory::PROJECT_ID,
-          genesis_policy: policy,
-          genesis_assertion: forged_assertion,
-          authority_verifier: verifier
-        )
-      end
-      expect_contract_error("protocol_root_genesis_invalid") do
-        Orbit::V2::ProtocolRoot.preflight(
-          project_root: dir,
-          expected_project_id: OrbitV2FixtureFactory::PROJECT_ID,
-          genesis_policy: policy,
-          genesis_assertion: assertion,
-          authority_verifier: Orbit::V2::AuthorityVerifier.new
-        )
-      end
-
-      # Mixed active root fails preflight even with a valid marker+genesis.
+      # Mixed active root fails preflight even with a valid marker+store.
       File.write(File.join(dir, ".orbit", "loop-state.yaml"), "state: v1\n")
       expect_contract_error("protocol_root_mixed_epoch") do
-        Orbit::V2::ProtocolRoot.preflight(
-          project_root: dir,
-          expected_project_id: OrbitV2FixtureFactory::PROJECT_ID,
-          genesis_policy: policy,
-          genesis_assertion: assertion,
-          authority_verifier: verifier
-        )
+        protocol_root_preflight(dir, verifier)
       end
     end
   end

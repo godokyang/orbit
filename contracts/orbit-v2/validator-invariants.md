@@ -1017,20 +1017,92 @@ never consults cwd/config, and has no fallback.
   closed with `protocol_root_path_invalid` before any marker, lock, or
   staging byte is read or written outside, while create alone may create a
   genuinely absent in-root `.orbit`) AND the marker verifies AND the pinned
-  genesis is
-  bound through the existing public seams: `SchemaCatalog`/
-  `Validator#validate_document!` for the marker and the genesis
-  ProjectPolicyRevision/AuthorityAssertion records, the exact ref match
-  (marker ref == genesis id+digest), the exact project binding (marker,
-  genesis policy, and issuance all carry the same project_id), and the
-  provider-verified issuance (`AuthorityVerifier#verify!` + `PolicyIssuance`
-  envelope semantics — the same boundary and genesis-branch rules the
-  public Validator composes). Nothing is self-authorized from marker text
-  or candidate writer names; a forged/stale genesis ref or digest, a wrong
+  genesis is resolved from the durable PolicyStore itself (Slice 6
+  increment 3): the store walks the lineage from the pinned immutable
+  genesis in accepted transaction order and exact-binds marker project,
+  stored policy, stored assertion, provider receipt, and issuance envelope,
+  with every stored assertion re-verified through the configured
+  `AuthorityVerifier`. Caller-supplied policy/assertion hashes are never
+  the source of truth. Nothing is self-authorized from marker text or
+  candidate writer names; a forged or missing pin, a store whose genesis
+  does not exact-match the pin, a broken or unauthorized lineage, a wrong
   or cross-project genesis, a wrong project or epoch, and an unverifiable
   issuance all fail closed.
-- Deferred to later Slice 6 increments: the controlled genesis writer
-  (authors the genesis policy + issuance that preflight consumes), policy
-  rotation, control/session genesis, general v2 writers, v2 CLI activation,
-  v1 retirement, and E2E/dogfood cutover. This increment wires no
-  project-scoped commands; it is the seam those commands will consume.
+- Deferred to later Slice 6 increments (this increment wires no
+  project-scoped commands; it is the seam those commands will consume):
+  policy rotation, control/session genesis, general v2 writers, v2 CLI
+  activation, v1 retirement, and E2E/dogfood cutover.
+
+## Slice 6 increment 3 addendum: durable controlled policy authority store
+
+Lands `Orbit::V2::PolicyStore`, the durable controlled
+ProjectPolicyRevision authority store — genesis + linear rotation +
+active-tip resolution — built on the Slice 6 increment 1 TransactionLog
+under the canonical active root (Slice 6 increment 2). ProtocolRoot
+preflight now resolves the pinned genesis from this store; caller-supplied
+policy/assertion hashes are never the source of truth.
+
+- Transaction shape: one canonical transaction per policy revision,
+  carrying the exact ProjectPolicyRevision AND its AuthorityAssertion
+  (policy, provider-verified issuance, and issuance envelope commit or fail
+  together). The store path is derived only from the canonical active root
+  (`<active root>/policy-transactions.json`) and inherits the TransactionLog
+  single-link/containment/atomic-commit guarantees.
+- `genesis(policy:, assertion:, authority_verifier:)` validates the final
+  schema/digests/epoch, create-only parent-nil genesis, the exact genesis
+  issuance envelope (grants `[policy.genesis]`, issuer_kind
+  user/control_plane, candidate/parent refs, authority source ref, decision
+  approved, issued_at == receipt, self-consistent envelope digest), and the
+  provider-verified assertion BEFORE append; returns `:appended` or
+  `:idempotent` (same revision id, byte-identical canonical content).
+  Invalid, unconfigured, or self-reported authority leaves no accepted
+  transaction; a different genesis on a non-empty store fails closed with
+  `policy_store_genesis_conflict`.
+- `rotate(policy:, assertion:, authority_verifier:)` extends an ACTIVE
+  trust root only: INSIDE the same locked snapshot the append commits on,
+  it first proves THIS store is the marker's canonical real active root
+  (`File.realpath(active_root)` must equal `<canonical project root>/.orbit`,
+  so a sibling/shadow/alias store can never borrow the marker pin), then
+  runs the complete provider-verified lineage resolution from the in-root
+  ProtocolRoot marker's pin (schema, digest, structural binding, and
+  provider verification for every stored transaction, exact pin match
+  — broken or unverified lineage fails `policy_store_lineage_invalid`)
+  and exact-binds the marker project to the store genesis project (else
+  `policy_store_unpinned`); a missing or corrupt marker or a non-canonical
+  root fails `policy_store_unpinned`, so an unreferenced durable genesis
+  can never accumulate a rotation chain and no stale resolve can
+  authorize an append. It appends one successor only when its
+  parent ref is the currently resolved active tip, the parent policy grants
+  the exact `policy.rotate` authority to the issuer, the successor project
+  matches the parent, and the provider verifies the exact rotation issuance
+  (rotation envelope with parent/candidate refs, grants equal to the
+  parent's unique rotate grant, issued_at strictly after the parent
+  issuance). Validation and the compare-and-append share ONE locked
+  snapshot (`TransactionLog#append_with`), so concurrent same-parent
+  rotations yield exactly one accepted successor; the loser fails closed
+  with `policy_store_rotation_invalid` and re-resolves. Returns
+  `:appended` or `:idempotent` (committed replay). Stale, unauthorized,
+  self-authorizing, cross-project, or unpinned successors fail closed and
+  leave bytes unchanged; rotation never rewrites the genesis or old
+  revisions.
+- `resolve(pinned_genesis_ref:, authority_verifier:)` REQUIRES a
+  configured authority verifier and returns {genesis_policy,
+  genesis_assertion, active_policy} after verifying the complete lineage:
+  closed payload shape, per-record schema/digest/epoch, one project across
+  the store, exact parent refs in accepted transaction order (forks,
+  orphans, cycles, and skips fail closed with
+  `policy_store_lineage_invalid`), structural issuance binding for every
+  transaction, provider verification of every stored assertion, and the
+  pinned ref exact-matching the stored genesis.
+- Bootstrap order stays explicit: verified durable genesis first, then the
+  ProtocolRoot marker pins it. A marker-create failure may leave an
+  unreferenced durable genesis; it is not an active trust root and is never
+  selected without a valid marker pin (preflight fails with
+  `protocol_root_missing` or `protocol_root_genesis_invalid`). No
+  cross-file atomicity is claimed between store and marker.
+- Active policy is never a second mutable pointer, latest-by-time rule,
+  dual store/read, fallback, or backfill: it is always derived from the
+  ProtocolRoot-pinned immutable genesis.
+- Deferred to later Slice 6 increments: control/session genesis, task/
+  checkpoint/evidence writers, legacy deletion, templates, v2 CLI
+  activation, and E2E/dogfood cutover.
