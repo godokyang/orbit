@@ -15,6 +15,7 @@ require_relative "../../../lib/orbit/v2/integrity_audit"
 require_relative "../../../lib/orbit/v2/relationship_view"
 require_relative "../../../lib/orbit/v2/gate_strength"
 require_relative "../../../lib/orbit/v2/immutable_store"
+require_relative "../../../lib/orbit/v2/transaction_log"
 require_relative "../../../lib/orbit/v2/policy_issuance"
 require_relative "../../../lib/orbit/v2/rule_resolution"
 require_relative "../../../lib/orbit/v2/schema_catalog"
@@ -64,6 +65,8 @@ module OrbitV2ContractTest
     test_code_surface
     test_integrity_audit
     test_immutable_stores(valid_bundle)
+    test_transaction_log_store
+    test_transaction_log_concurrency_and_crash
     test_v1_inventory
     test_slice_isolation
     puts(
@@ -2104,6 +2107,565 @@ module OrbitV2ContractTest
         "AuthorizationRecord",
         altered_authorization["authorization_record_id"],
         altered_authorization
+      )
+    end
+  end
+
+  def test_transaction_log_store
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "transactions.json")
+
+      # Empty log: no file, no chain, genesis expectation; reopens empty.
+      log = Orbit::V2::TransactionLog.new(path: path)
+      assert(log.tip_digest.nil?, "empty log has no tip")
+      assert(log.records == [], "empty log has no records")
+      assert(
+        Orbit::V2::TransactionLog.new(path: path).records == [],
+        "empty log reopens empty"
+      )
+
+      # Append/reopen: verified chain survives reopen; reads are detached.
+      assert(
+        log.append(
+          transaction_id: "otxn_storegenesis",
+          expected_tip_digest: nil,
+          payload: { "kind" => "genesis", "origin" => "test" }
+        ) == :appended,
+        "genesis append"
+      )
+      tip = log.tip_digest
+      assert(tip.is_a?(String) && tip.start_with?("sha256:"), "tip is a sha256 digest")
+      assert(
+        log.append(
+          transaction_id: "otxn_storesecond",
+          expected_tip_digest: tip,
+          payload: { "kind" => "later", "count" => 2 }
+        ) == :appended,
+        "chained append"
+      )
+      tip = log.tip_digest
+      reopened = Orbit::V2::TransactionLog.new(path: path)
+      assert(reopened.tip_digest == tip, "reopen sees the same verified tip")
+      records = reopened.records
+      assert(
+        records.map { |record| record["transaction_id"] } ==
+          %w[otxn_storegenesis otxn_storesecond],
+        "reopen returns chain records in verified order"
+      )
+      assert(records.first["previous_tip_digest"].nil?, "genesis record has a null previous tip")
+      assert(
+        records.last["previous_tip_digest"] ==
+          "sha256:#{Orbit::V2::CanonicalJSON.sha256(records.first)}",
+        "successor pins the exact previous record digest"
+      )
+      records.last.dig("payload")["count"] = 999
+      assert(
+        reopened.records.last.dig("payload", "count") == 2,
+        "records are detached copies"
+      )
+
+      # Stale compare-and-append leaves bytes and chain unchanged.
+      stale_before = File.binread(path)
+      assert(
+        log.append(
+          transaction_id: "otxn_storestale",
+          expected_tip_digest: "sha256:#{'0' * 64}",
+          payload: { "kind" => "never" }
+        ) == :stale,
+        "stale expectation reports :stale"
+      )
+      assert(File.binread(path) == stale_before, "stale append leaves bytes unchanged")
+      assert(
+        log.records.map { |record| record["transaction_id"] } ==
+          %w[otxn_storegenesis otxn_storesecond],
+        "stale append does not extend the chain"
+      )
+
+      # Same id + byte-identical canonical payload is idempotent; same id
+      # with different content fails closed. expected_tip_digest is
+      # compare-and-append input for a NEW transaction only and never part
+      # of replay equivalence: a retry of an already-committed transaction
+      # returns :idempotent even with the pre-append tip.
+      assert(
+        log.append(
+          transaction_id: "otxn_storegenesis",
+          expected_tip_digest: log.tip_digest,
+          payload: { "kind" => "genesis", "origin" => "test" }
+        ) == :idempotent,
+        "same id and canonical content is idempotent"
+      )
+      assert(
+        log.append(
+          transaction_id: "otxn_storegenesis",
+          expected_tip_digest: nil,
+          payload: { "kind" => "genesis", "origin" => "test" }
+        ) == :idempotent,
+        "idempotent retry does not require the pre-append tip"
+      )
+      assert(
+        log.append(
+          transaction_id: "otxn_storegenesis",
+          expected_tip_digest: log.tip_digest,
+          payload: { "origin" => "test", "kind" => "genesis" }
+        ) == :idempotent,
+        "canonical key order does not change content identity"
+      )
+      expect_contract_error("transaction_log_reuse") do
+        log.append(
+          transaction_id: "otxn_storegenesis",
+          expected_tip_digest: log.tip_digest,
+          payload: { "kind" => "different" }
+        )
+      end
+      assert(
+        log.records.map { |record| record["transaction_id"] } ==
+          %w[otxn_storegenesis otxn_storesecond],
+        "rejected reuse does not write"
+      )
+
+      # Committed corruption and truncation fail closed, never latest-wins.
+      bytes = File.binread(path)
+      corrupted = bytes.dup
+      corrupted[corrupted.length / 2] = (corrupted[corrupted.length / 2].ord ^ 1).chr
+      File.write(path, corrupted)
+      expect_contract_error("transaction_log_corrupt") do
+        Orbit::V2::TransactionLog.new(path: path).tip_digest
+      end
+      File.write(path, bytes[0, bytes.length / 2])
+      expect_contract_error("transaction_log_corrupt") do
+        Orbit::V2::TransactionLog.new(path: path).records
+      end
+      File.write(path, "#{bytes}\n")
+      expect_contract_error("transaction_log_corrupt") do
+        Orbit::V2::TransactionLog.new(path: path).tip_digest
+      end
+      unknown_envelope = JSON.parse(bytes)
+      unknown_envelope["authority"] = "not-a-log-field"
+      File.write(path, Orbit::V2::CanonicalJSON.dump(unknown_envelope))
+      expect_contract_error("transaction_log_corrupt") do
+        Orbit::V2::TransactionLog.new(path: path).records
+      end
+      unknown_record = JSON.parse(bytes)
+      unknown_record.dig("records", 0)["authority"] = "not-a-record-field"
+      unknown_record["file_digest"] =
+        "sha256:#{Orbit::V2::CanonicalJSON.sha256(unknown_record.fetch('records'))}"
+      File.write(path, Orbit::V2::CanonicalJSON.dump(unknown_record))
+      expect_contract_error("transaction_log_corrupt") do
+        Orbit::V2::TransactionLog.new(path: path).tip_digest
+      end
+      File.write(path, bytes)
+      broken = JSON.parse(bytes)
+      broken.dig("records", 1)["previous_tip_digest"] = "sha256:#{'f' * 64}"
+      broken["file_digest"] = "sha256:#{Orbit::V2::CanonicalJSON.sha256(broken.fetch('records'))}"
+      File.write(path, JSON.generate(broken))
+      expect_contract_error("transaction_log_corrupt") do
+        Orbit::V2::TransactionLog.new(path: path).records
+      end
+      duped = JSON.parse(bytes)
+      duped["records"] << duped.fetch("records").last
+      duped["file_digest"] = "sha256:#{Orbit::V2::CanonicalJSON.sha256(duped.fetch('records'))}"
+      File.write(path, JSON.generate(duped))
+      expect_contract_error("transaction_log_corrupt") do
+        Orbit::V2::TransactionLog.new(path: path).tip_digest
+      end
+
+      # Canonical deterministic rebuild: a fresh store appending the same
+      # transactions (payload keys in any insertion order) writes the same
+      # bytes, and delete + re-append rebuilds byte-identically.
+      File.write(path, bytes)
+      rebuild_path = File.join(dir, "rebuild.json")
+      rebuild = Orbit::V2::TransactionLog.new(path: rebuild_path)
+      rebuild.append(
+        transaction_id: "otxn_storegenesis",
+        expected_tip_digest: nil,
+        payload: { "kind" => "genesis", "origin" => "test" }
+      )
+      rebuild.append(
+        transaction_id: "otxn_storesecond",
+        expected_tip_digest: rebuild.tip_digest,
+        payload: { "count" => 2, "kind" => "later" }
+      )
+      assert(
+        File.binread(rebuild_path) == bytes,
+        "same transactions rebuild byte-identical regardless of key insertion order"
+      )
+      File.delete(rebuild_path)
+      rebuild = Orbit::V2::TransactionLog.new(path: rebuild_path)
+      rebuild.append(
+        transaction_id: "otxn_storegenesis",
+        expected_tip_digest: nil,
+        payload: { "kind" => "genesis", "origin" => "test" }
+      )
+      rebuild.append(
+        transaction_id: "otxn_storesecond",
+        expected_tip_digest: rebuild.tip_digest,
+        payload: { "kind" => "later", "count" => 2 }
+      )
+      assert(
+        File.binread(rebuild_path) == bytes,
+        "delete and re-append rebuilds byte-identically"
+      )
+
+      # A symlink or other non-regular final path fails closed so an alias
+      # path can never split the log and bypass compare-and-append.
+      alias_path = File.join(dir, "alias.json")
+      File.symlink(path, alias_path)
+      alias_log = Orbit::V2::TransactionLog.new(path: alias_path)
+      expect_contract_error("transaction_log_path_invalid") do
+        alias_log.tip_digest
+      end
+      expect_contract_error("transaction_log_path_invalid") do
+        alias_log.append(
+          transaction_id: "otxn_alias",
+          expected_tip_digest: nil,
+          payload: {}
+        )
+      end
+      assert(File.symlink?(alias_path), "failed alias append never replaced the symlink")
+      assert(
+        log.append(
+          transaction_id: "otxn_realside",
+          expected_tip_digest: log.tip_digest,
+          payload: { "side" => "real" }
+        ) == :appended,
+        "real store is unaffected by the alias path"
+      )
+      directory_path = File.join(dir, "log-directory")
+      FileUtils.mkdir_p(directory_path)
+      expect_contract_error("transaction_log_path_invalid") do
+        Orbit::V2::TransactionLog.new(path: directory_path).records
+      end
+
+      # Invalid canonical payloads fail closed with the argument error and
+      # never leave a log record.
+      ids_before = log.records.map { |record| record["transaction_id"] }
+      expect_contract_error("transaction_log_argument_invalid") do
+        log.append(
+          transaction_id: "otxn_badpayload",
+          expected_tip_digest: log.tip_digest,
+          payload: { "float" => 1.5 }
+        )
+      end
+      expect_contract_error("transaction_log_argument_invalid") do
+        log.append(
+          transaction_id: "otxn_badpayload",
+          expected_tip_digest: log.tip_digest,
+          payload: { symbol_key: "unsupported" }
+        )
+      end
+      assert(
+        log.records.map { |record| record["transaction_id"] } == ids_before,
+        "invalid canonical payload leaves no log record"
+      )
+
+      # Transaction ids must be canonical NFC UTF-8: a composed/decomposed
+      # alias would collapse to one id in the committed file and commit
+      # state the reader rejects as a duplicate, so it fails closed and the
+      # log stays valid and unchanged.
+      assert(
+        log.append(
+          transaction_id: "otxn_nfc_\u00E9",
+          expected_tip_digest: log.tip_digest,
+          payload: { "x" => 1 }
+        ) == :appended,
+        "composed NFC transaction id appends"
+      )
+      valid_bytes = File.binread(path)
+      valid_tip = log.tip_digest
+      expect_contract_error("transaction_log_argument_invalid") do
+        log.append(
+          transaction_id: "otxn_nfc_e\u0301",
+          expected_tip_digest: valid_tip,
+          payload: { "x" => 2 }
+        )
+      end
+      expect_contract_error("transaction_log_argument_invalid") do
+        log.append(
+          transaction_id: "otxn_badbytes_\xFF".b,
+          expected_tip_digest: valid_tip,
+          payload: { "x" => 3 }
+        )
+      end
+      expect_contract_error("transaction_log_argument_invalid") do
+        log.append(
+          transaction_id: "",
+          expected_tip_digest: valid_tip,
+          payload: { "x" => 4 }
+        )
+      end
+      assert(File.binread(path) == valid_bytes, "rejected aliases left committed bytes unchanged")
+      assert(log.tip_digest == valid_tip, "rejected aliases left the verified tip unchanged")
+      assert(
+        Orbit::V2::TransactionLog.new(path: path).records.last["transaction_id"] ==
+          "otxn_nfc_\u00E9",
+        "rejected alias left the verified chain readable and unchanged"
+      )
+
+      # Hard-linked alias paths fail closed: both entries share one inode
+      # until a rename replaces only its own directory entry, which would
+      # fork the log into two independently valid chains.
+      real_tip = log.tip_digest
+      hard_alias = File.join(dir, "hard-alias.json")
+      File.link(path, hard_alias)
+      hard_log = Orbit::V2::TransactionLog.new(path: hard_alias)
+      expect_contract_error("transaction_log_path_invalid") do
+        hard_log.tip_digest
+      end
+      expect_contract_error("transaction_log_path_invalid") do
+        hard_log.append(
+          transaction_id: "otxn_hardalias",
+          expected_tip_digest: real_tip,
+          payload: {}
+        )
+      end
+      assert(
+        File.stat(path).nlink == 2 && File.stat(hard_alias).nlink == 2,
+        "failed hard-alias append never replaced either link"
+      )
+      expect_contract_error("transaction_log_path_invalid") do
+        log.tip_digest
+      end
+      File.delete(hard_alias)
+      assert(
+        log.tip_digest == real_tip,
+        "real path remains readable after removing the hard alias"
+      )
+      assert(
+        log.append(
+          transaction_id: "otxn_afterhardlink",
+          expected_tip_digest: real_tip,
+          payload: { "ok" => true }
+        ) == :appended,
+        "real path appends again once nlink is 1"
+      )
+
+      # A planted staging symlink is never followed: exclusive randomized
+      # stage creation writes a different file, the victim is untouched,
+      # and the committed log stays a single-link regular file.
+      victim = File.join(dir, "victim.txt")
+      File.write(victim, "USER_BYTES")
+      planted = File.join(dir, ".#{File.basename(path)}.tmp.#{$$}.1.victim")
+      File.symlink(victim, planted)
+      assert(
+        log.append(
+          transaction_id: "otxn_planted",
+          expected_tip_digest: log.tip_digest,
+          payload: { "kind" => "planted" }
+        ) == :appended,
+        "append succeeds using a different exclusive staging file"
+      )
+      assert(
+        File.binread(victim) == "USER_BYTES",
+        "planted staging symlink never overwrote the victim"
+      )
+      assert(
+        File.symlink?(planted),
+        "planted staging symlink was never followed or replaced"
+      )
+      assert(File.stat(path).nlink == 1, "committed log remains a single-link regular file")
+      assert(
+        Orbit::V2::TransactionLog.new(path: path).records.last["transaction_id"] ==
+          "otxn_planted",
+        "log is readable with the new record after the planted symlink"
+      )
+    end
+  end
+
+  def test_transaction_log_concurrency_and_crash
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "transactions.json")
+
+      # Two real processes append from the same genesis tip: the exclusive
+      # lock serializes the compare-and-append so exactly one commits and
+      # the loser observes :stale with bytes unchanged.
+      ready_r, ready_w = IO.pipe
+      go_r, go_w = IO.pipe
+      out_r, out_w = IO.pipe
+      pids = %w[otxn_winner_a otxn_winner_b].map do |id|
+        fork do
+          ready_r.close
+          go_w.close
+          out_r.close
+          ready_w.write("r")
+          ready_w.close
+          go_r.read(1)
+          log = Orbit::V2::TransactionLog.new(path: path)
+          begin
+            result = log.append(
+              transaction_id: id,
+              expected_tip_digest: nil,
+              payload: { "origin" => id }
+            )
+            out_w.write("#{result}\n")
+          rescue StandardError => error
+            out_w.write("error:#{error.class}\n")
+          end
+          out_w.close
+          exit!(0)
+        end
+      end
+      ready_w.close
+      go_r.close
+      out_w.close
+      2.times { ready_r.read(1) }
+      ready_r.close
+      2.times { go_w.write("g") }
+      go_w.close
+      outcomes = out_r.read.split("\n").sort
+      out_r.close
+      pids.each { |pid| Process.wait(pid) }
+      assert(outcomes == %w[appended stale], "exactly one concurrent winner, got #{outcomes.inspect}")
+      committed = Orbit::V2::TransactionLog.new(path: path).records
+      assert(committed.size == 1, "loser left no record")
+      assert(
+        %w[otxn_winner_a otxn_winner_b].include?(committed.first["transaction_id"]),
+        "chain contains only the winner's transaction"
+      )
+
+      # Crash before the commit boundary preserves the previous accepted
+      # state: a child is frozen mid-staged-write, killed, and the committed
+      # bytes and chain are untouched; the orphaned staging file is ignored.
+      log = Orbit::V2::TransactionLog.new(path: path)
+      assert(log.append(
+        transaction_id: "otxn_committed",
+        expected_tip_digest: log.tip_digest,
+        payload: { "state" => "committed" }
+      ) == :appended, "committed baseline")
+      baseline = File.binread(path)
+      baseline_ids = log.records.map { |record| record["transaction_id"] }
+      staging_glob = File.join(dir, ".#{File.basename(path)}.tmp.*")
+      payload = { "blob" => "x" * (32 * 1024 * 1024) }
+      frozen = false
+      3.times do
+        ready_r, ready_w = IO.pipe
+        pid = fork do
+          ready_r.close
+          ready_w.write("r")
+          ready_w.close
+          child = Orbit::V2::TransactionLog.new(path: path)
+          begin
+            child.append(
+              transaction_id: "otxn_crashy",
+              expected_tip_digest: child.tip_digest,
+              payload: payload
+            )
+          rescue StandardError
+          end
+          exit!(0)
+        end
+        ready_w.close
+        ready_r.read(1)
+        ready_r.close
+        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 60
+        staging = nil
+        while Process.clock_gettime(Process::CLOCK_MONOTONIC) < deadline
+          staging = Dir.glob(staging_glob).first
+          break if staging
+          sleep 0.001
+        end
+        assert(staging, "staged write appeared before the commit boundary")
+        begin
+          Process.kill("STOP", pid)
+        rescue Errno::ESRCH
+        end
+        if Dir.glob(staging_glob).any?
+          Process.kill("KILL", pid)
+          Process.wait(pid)
+          frozen = true
+          break
+        end
+        begin
+          Process.kill("CONT", pid)
+        rescue Errno::ESRCH
+        end
+        Process.wait(pid)
+      end
+      assert(frozen, "froze the child before rename")
+      assert(File.binread(path) == baseline, "crash before commit left committed bytes unchanged")
+      assert(
+        Orbit::V2::TransactionLog.new(path: path).records.map { |r| r["transaction_id"] } ==
+          baseline_ids,
+        "crash before commit left the verified chain unchanged"
+      )
+      assert(Dir.glob(staging_glob).any?, "orphaned staging file remains but is never read")
+      assert(
+        log.append(
+          transaction_id: "otxn_after",
+          expected_tip_digest: log.tip_digest,
+          payload: { "ok" => true }
+        ) == :appended,
+        "store accepts new transactions after the crash"
+      )
+      assert(
+        Orbit::V2::TransactionLog.new(path: path).records.map { |r| r["transaction_id"] } ==
+          baseline_ids + ["otxn_after"],
+        "orphaned staging never became accepted truth"
+      )
+
+      # A failure before the commit boundary (read-only directory blocks the
+      # staged write) leaves the previous accepted state readable.
+      FileUtils.chmod(0o500, dir)
+      begin
+        failed = false
+        begin
+          log.append(
+            transaction_id: "otxn_blocked",
+            expected_tip_digest: log.tip_digest,
+            payload: { "kind" => "blocked" }
+          )
+        rescue SystemCallError
+          failed = true
+        end
+        assert(failed, "staged write failure propagates")
+        assert(
+          Orbit::V2::TransactionLog.new(path: path).records.map { |r| r["transaction_id"] } ==
+            baseline_ids + ["otxn_after"],
+          "failed append leaves the previous accepted state readable"
+        )
+      ensure
+        FileUtils.chmod(0o700, dir)
+      end
+      assert(
+        log.append(
+          transaction_id: "otxn_finally",
+          expected_tip_digest: log.tip_digest,
+          payload: { "kind" => "ok" }
+        ) == :appended,
+        "store recovers after the failed append"
+      )
+
+      # Abandoned staging files — garbage or a complete valid extension of
+      # the chain — are never read and never become accepted truth.
+      File.write(
+        File.join(dir, ".#{File.basename(path)}.tmp.99999.1"),
+        "this is not json"
+      )
+      extension_dir = Dir.mktmpdir
+      begin
+        extension = Orbit::V2::TransactionLog.new(
+          path: File.join(extension_dir, "extension.json")
+        )
+        extension.append(
+          transaction_id: "otxn_committed",
+          expected_tip_digest: nil,
+          payload: { "state" => "committed" }
+        )
+        extension.append(
+          transaction_id: "otxn_stagingonly",
+          expected_tip_digest: extension.tip_digest,
+          payload: { "kind" => "never" }
+        )
+        File.write(
+          File.join(dir, ".#{File.basename(path)}.tmp.88888.2"),
+          File.binread(File.join(extension_dir, "extension.json"))
+        )
+      ensure
+        FileUtils.remove_entry(extension_dir)
+      end
+      assert(
+        Orbit::V2::TransactionLog.new(path: path).records.map { |r| r["transaction_id"] } ==
+          baseline_ids + %w[otxn_after otxn_finally],
+        "abandoned staging is never read as accepted truth"
       )
     end
   end

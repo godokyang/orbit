@@ -903,3 +903,76 @@ freshness, evaluator authority, and FindingResolution gate compatibility. They
 may use an indexed lookup, but their domain compatibility rules are not claimed
 as generic InvariantGraph behavior. Therefore this document does not claim that
 every historical exposed ref has been mechanically migrated.
+
+## Slice 6 increment 1 addendum: durable compare-and-append transaction store
+
+Lands the first Slice 6 store seam, `Orbit::V2::TransactionLog`: a
+single-file durable canonical transaction log with cross-process exclusive
+compare-and-append. This increment closes only the low-level store atomicity
+gap (real concurrency and crash rollback). Domain-level genesis/cutover is
+explicitly deferred to later Slice 6 increments:
+
+- ProtocolRoot location/preflight and root marker activation
+- the controlled genesis writer (control-id claim + active LeadSession
+  binding + genesis checkpoint committed all-or-nothing as one transaction
+  record)
+- v2 CLI activation, v1 retirement, E2E/dogfood cutover
+
+Frozen store contract:
+
+- One file-backed log per path. Every accepted transaction is one atomic
+  canonical record: `transaction_id`, `previous_tip_digest` (null for the
+  genesis record), `content_digest` (sha256 of the canonical payload), and
+  the canonical `payload`. Records carry no timestamps; ordering authority is
+  exclusively the verified `previous_tip_digest` chain, never array order or
+  free text.
+- The file is a canonical envelope `{schema_version, records, file_digest}`
+  whose `file_digest` covers the canonical records array. Envelope and
+  record key sets are closed (no authority-like fields may live outside
+  `payload`; the payload itself stays a generic canonical value), and a read
+  additionally requires the committed bytes to byte-equal the canonical dump
+  of the parsed envelope, so any single-byte change to committed bytes
+  (bit rot, partial write, trailing whitespace, alternate JSON spelling,
+  duplicate keys, unknown fields, or tampering without a full recompute)
+  fails closed, including changes confined to the final record that no
+  successor link would otherwise anchor.
+- `append(transaction_id:, expected_tip_digest:, payload:)` returns
+  `:appended`, `:idempotent` (a record with the same transaction id and
+  byte-identical canonical payload is already committed; replay does not
+  require the pre-append tip), or `:stale` (the transaction is new but the
+  expected tip is not the verified tip; bytes unchanged). `expected_tip_digest`
+  is compare-and-append input for a new transaction only and never part of
+  replay equivalence. Same id with different canonical content fails closed
+  with `transaction_log_reuse`; unreadable or inconsistent committed bytes
+  fail closed with `transaction_log_corrupt`; a non-canonical payload fails
+  closed with `transaction_log_argument_invalid` and leaves no record; a
+  symlink, hard-linked, or other non-regular final path (anything other
+  than a single-link regular file) fails closed with
+  `transaction_log_path_invalid`, never latest-wins.
+- Transaction ids must be non-empty canonical NFC UTF-8 strings: the
+  committed file stores the canonical NFC form of every string, so a
+  composed/decomposed alias (or invalid UTF-8) would collapse into a
+  duplicate id the reader rejects. Such ids fail closed with
+  `transaction_log_argument_invalid` before any lock or write, so a valid
+  public append can never commit state its own reader rejects.
+- The reader re-reads the file and verifies the complete chain: closed key
+  sets, committed-byte canonicality, envelope and file digest, genesis null
+  link, contiguous previous-tip record digest links, content digests, and
+  unique transaction ids. `tip_digest` is the verified final record digest
+  (nil for an empty log). There is no mutable current-tip fact outside the
+  verified chain, no dual store, and no fallback/backfill.
+- Commit protocol (standard library only): an exclusive cross-process flock
+  covers the whole read-verify-append cycle; bytes are written to a
+  same-directory staged file created with O_CREAT|O_EXCL on a securely
+  randomized unpredictable name (never following or pretruncating an
+  existing symlink or regular file, so a planted predictable staging path
+  cannot overwrite user data or the committed log), flushed and fsynced (a
+  staged-file fsync failure aborts before the rename and keeps the previous
+  accepted state), atomically renamed over the log, and the parent directory
+  is fsynced strictly best-effort afterwards. The rename is the commit
+  boundary: a failure before it leaves the previous accepted state readable,
+  abandoned staging files are never read and never become accepted truth,
+  and the post-commit directory fsync never surfaces as an ambiguous
+  failure.
+- Two writers with the same expected tip cannot both commit: exactly one
+  appends and the loser observes `:stale` with committed bytes unchanged.

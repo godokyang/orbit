@@ -1018,6 +1018,58 @@ finding_resolution:
     supersedes_and_related: existing_non_self_compatible_task_gate_and_subject_lineage
     supersedes_cycles: forbidden
 
+transaction_log:
+  seam: Orbit::V2::TransactionLog
+  schema_version: orbit-transaction-log-v1
+  model: single_file_durable_canonical_compare_and_append_chain
+  identity:
+    - transaction_id
+    - previous_tip_digest
+    - content_digest
+  transaction_id_validation: non_empty_canonical_nfc_utf8_fail_closed
+  invalid_transaction_id_or_payload: transaction_log_argument_invalid
+  ordering_authority: verified_previous_tip_digest_chain_only
+  prohibited_ordering_authority: [timestamps, array_order, free_text]
+  envelope_key_set: closed_exact_schema_version_records_file_digest
+  record_key_set: closed_exact_schema_version_transaction_id_previous_tip_digest_content_digest_payload
+  committed_bytes: byte_equal_canonical_dump_of_parsed_envelope
+  payload_shape: generic_canonical_value_no_domain_fields_outside_payload
+  final_path: single_link_regular_file_required_symlink_hardlink_or_non_regular_fail_closed
+  reader_verification:
+    - closed_envelope_and_record_key_sets
+    - committed_bytes_byte_equal_canonical_dump
+    - envelope_and_file_digest_over_records_array
+    - genesis_previous_tip_digest_null
+    - contiguous_previous_tip_record_digest_links
+    - content_digest_matches_canonical_payload
+    - unique_transaction_ids
+  corruption_or_truncation: fail_closed
+  append_semantics:
+    - appended
+    - idempotent_same_transaction_id_byte_identical_canonical_payload_replay_does_not_require_pre_append_tip
+    - stale_expected_tip_not_verified_tip_bytes_unchanged_expected_tip_is_cas_input_for_new_transaction_only
+    - reuse_same_id_different_content_fail_closed
+  commit_protocol:
+    exclusive_cross_process_flock: read_verify_append_cycle
+    staged_file: same_directory_exclusive_random_name_never_follows_or_pretruncates_existing_path
+    staged_file_fsync: required_failure_aborts_before_rename
+    atomic_replace: required
+    rename: commit_boundary
+    parent_directory_fsync: best_effort_never_surfaces_post_commit
+    failure_before_commit_boundary: previous_accepted_state_readable
+    abandoned_staging_files: never_accepted_truth
+  mutable_current_tip_outside_verified_chain: forbidden
+  dual_store_fallback_backfill: forbidden
+  closure:
+    increment: slice_6_increment_1
+    closes: low_level_store_atomicity_concurrency_and_crash_rollback
+    deferred_to_later_slice6_increments:
+      - protocol_root_location_and_preflight
+      - controlled_genesis_writer_control_id_claim_active_lead_session_binding_genesis_checkpoint
+      - v2_cli_activation
+      - v1_retirement
+      - e2e_dogfood_cutover
+
 derived_only:
   CodeSurface:
     writable_authority: none

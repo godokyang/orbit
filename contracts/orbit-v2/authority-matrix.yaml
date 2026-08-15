@@ -201,6 +201,27 @@ facts:
     lifecycle: exactly_one_mutually_exclusive_state_per_reconcile
     states: [completed, blocked, frozen, needs_user]
     prohibited_owners: [dual_state_write, implicit_state_transition, recovery_thaw]
+  - fact: canonical_transaction_chain
+    authoritative_owner: TransactionLog.verified_chain
+    lifecycle: single_file_durable_compare_and_append
+    identity_basis: [transaction_id, previous_tip_digest, content_digest]
+    transaction_id_validation: non_empty_canonical_nfc_utf8_fail_closed
+    ordering_authority: verified_previous_tip_digest_chain_only
+    closed_key_sets: [envelope_exact, record_exact]
+    committed_bytes: byte_equal_canonical_dump_of_parsed_envelope
+    final_path: single_link_regular_file_required_symlink_hardlink_or_non_regular_fail_closed
+    payload_shape: generic_canonical_value_no_domain_fields_outside_payload
+    prohibited_owners: [timestamps, free_text, array_order, mutable_current_tip_fact, dual_store, fallback_backfill]
+  - fact: transaction_commit_atomicity
+    authoritative_owner: TransactionLog.commit_protocol
+    lifecycle: exclusive_flock_read_verify_stage_exclusive_random_no_follow_fsync_required_atomic_rename_commit_boundary_dir_fsync_best_effort
+    staged_file_fsync_failure: aborts_before_rename_previous_state_readable
+    planted_staging_symlink: never_followed_victim_untouched_log_unchanged
+    failure_before_commit_boundary: previous_accepted_state_readable
+    abandoned_staging: never_accepted_truth
+    closure: low_level_store_atomicity_slice6_increment1
+    deferred: [protocol_root_preflight, controlled_genesis_writer, v2_cli_activation, v1_retirement, e2e_dogfood_cutover]
+    prohibited_owners: [in_memory_only_atomicity, latest_wins_chain, simulated_transaction_primitive]
 
 authority_invariants:
   - Lead cannot create or impersonate bootstrap user/control-plane authority.
@@ -259,3 +280,4 @@ authority_invariants:
   - Budget measurements are canonical observations only: verified requires usage >= 0 with an exact provider/snapshot ref, unverified requires canonical nulls plus the typed `unverified_assessment` with the exact pending mapping; mechanical within/over-budget derivation exists only for verified metrics, and authorization facts never carry the measurement tuple.
   - The one-way digest chain (budget_adjustment_digest iff present -> complete ordered effective_budget_bindings -> effective_verification_plan_digest -> closure_basis_digest) never includes the enclosing checkpoint identity in any preimage, is recomputable byte-identical, and has no writable plan truth object.
   - Every reconcile yields exactly one mutually exclusive runner stop state (completed/blocked/frozen/needs_user): hard overruns needing user authority (verified budget overrun, third same-fingerprint retry without override) are needs_user, Lead-replannable control anomalies are frozen, and recovery never thaws a frozen or needs_user decision.
+  - TransactionLog append is an exact durable compare-and-append: two processes with the same expected tip cannot both commit (exactly one :appended, the other :stale with committed bytes unchanged); same transaction_id with byte-identical canonical payload is idempotent (expected_tip_digest is CAS input for a new transaction only, never part of replay equivalence) while different content fails closed; transaction ids must be non-empty canonical NFC UTF-8 strings so composed/decomposed aliases or invalid UTF-8 fail closed with transaction_log_argument_invalid before any lock or write and a valid append can never commit state its own reader rejects; every read verifies closed envelope/record key sets, committed bytes byte-equal to the canonical dump, the complete digest chain, and the file digest, failing closed on corruption, truncation, trailing whitespace, alternate JSON spelling, duplicate keys, or unknown authority-like fields; a symlink, hard-linked, or other non-single-link regular final path fails closed so an alias path cannot split the log; commit is a same-directory staged write created with O_CREAT|O_EXCL on a securely randomized unpredictable name (a planted staging symlink is never followed and cannot overwrite user data or the committed log) + required fsync (failure aborts before the rename) + atomic rename (the commit boundary) + strictly best-effort post-commit parent-directory fsync under a cross-process exclusive lock, so a failure before the commit boundary leaves the previous accepted state readable, abandoned staging files never become accepted truth, and the post-commit directory fsync never surfaces as an ambiguous failure. This increment closes only low-level store atomicity; ProtocolRoot preflight, the controlled genesis writer, v2 CLI activation, v1 retirement, and E2E/dogfood cutover remain deferred to later Slice 6 increments.
