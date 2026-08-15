@@ -14,6 +14,8 @@ require_relative "../../../lib/orbit/v2/budget_projection"
 require_relative "../../../lib/orbit/v2/integrity_audit"
 require_relative "../../../lib/orbit/v2/relationship_view"
 require_relative "../../../lib/orbit/v2/gate_strength"
+require_relative "../../../lib/orbit/v2/active_root"
+require_relative "../../../lib/orbit/v2/control_store"
 require_relative "../../../lib/orbit/v2/immutable_store"
 require_relative "../../../lib/orbit/v2/policy_store"
 require_relative "../../../lib/orbit/v2/protocol_root"
@@ -75,6 +77,10 @@ module OrbitV2ContractTest
     test_policy_store_rotation
     test_policy_store_concurrent_rotation
     test_policy_store_lineage_fail_closed
+    test_control_store_genesis
+    test_control_store_conflicts
+    test_control_store_concurrency
+    test_control_store_lineage_fail_closed
     test_v1_inventory
     test_slice_isolation
     puts(
@@ -3580,6 +3586,289 @@ module OrbitV2ContractTest
     end
   end
 
+  class BlockingAuthorityVerifier
+    def initialize(delegate, signal_w, release_r)
+      @delegate = delegate
+      @signal_w = signal_w
+      @release_r = release_r
+      @blocked = false
+    end
+
+    def verify!(assertion)
+      unless @blocked
+        @blocked = true
+        @signal_w.write("b")
+        @release_r.read(1)
+      end
+      @delegate.verify!(assertion)
+    end
+  end
+
+  def control_verifiers
+    [
+      OrbitV2FixtureFactory.authority_verifier,
+      OrbitV2FixtureFactory.runtime_identity_verifier,
+      OrbitV2FixtureFactory.lifecycle_verifier
+    ]
+  end
+
+  def control_store_writer_assertion(control_id)
+    OrbitV2FixtureFactory.assertion("oassert_#{control_id.delete_prefix('olcontrol_')}writer",
+      %w[control.genesis control.checkpoint], "control-plane-writer", authority_scope_ref: control_id)
+  end
+
+  def control_store_genesis_records(bundle, task, agent, control_id, assertion)
+    control = control_id.delete_prefix("olcontrol_")
+    result = OrbitV2FixtureFactory.second_lineage(bundle, control_id: control_id,
+      writer_assertion: assertion, agent: agent, task: task,
+      logical_lead_id: "olead_#{control}", session_id: "oleadsession_#{control}")
+    [bundle["control_registries"].last, result["session"], result["genesis"], agent, assertion]
+  end
+
+  def control_store_seeded_root(dir, bundle)
+    FileUtils.mkdir_p(File.join(dir, ".orbit"))
+    policy = bundle["project_policy_revisions"].first
+    assertion = OrbitV2FixtureFactory.policy_issuance_assertion(policy, parent_policy: nil,
+      assertion_id: "oassert_policygenesis", subject: "project-owner")
+    Orbit::V2::PolicyStore.new(active_root: File.join(dir, ".orbit")).genesis(
+      policy: policy, assertion: assertion,
+      authority_verifier: OrbitV2FixtureFactory.authority_verifier)
+    Orbit::V2::ProtocolRoot.create(project_root: dir, project_id: OrbitV2FixtureFactory::PROJECT_ID,
+      policy_genesis_ref: { "policy_revision_id" => policy["policy_revision_id"], "content_digest" => policy["content_digest"] })
+    [Orbit::V2::ControlStore.new(active_root: File.join(dir, ".orbit")), policy, bundle["task_revisions"].first]
+  end
+
+  def control_store_genesis(store, records, verifiers, overrides = {})
+    store.genesis(registry: records[0], session: records[1], checkpoint: records[2],
+      agent: records[3], assertion: records[4],
+      authority_verifier: overrides.fetch(:authority, verifiers[0]),
+      runtime_identity_verifier: overrides.fetch(:runtime, verifiers[1]),
+      lifecycle_verifier: overrides.fetch(:lifecycle, verifiers[2]))
+  end
+
+  def control_store_resolve(store, control_id, verifiers)
+    store.resolve(control_id: control_id, authority_verifier: verifiers[0],
+      runtime_identity_verifier: verifiers[1], lifecycle_verifier: verifiers[2])
+  end
+
+  def test_control_store_genesis
+    assert(Orbit::V2::ControlStore.instance_methods(false).sort == %i[genesis records resolve],
+      "ControlStore exposes exactly its three public seams")
+    Dir.mktmpdir do |dir|
+      bundle = OrbitV2FixtureFactory.valid_bundle
+      store, _policy, task = control_store_seeded_root(dir, bundle)
+      vf = control_verifiers
+      agent = OrbitV2FixtureFactory.agent("oagent_inc4lead", "lead")
+      records = control_store_genesis_records(bundle, task, agent, "olcontrol_inc4main",
+        control_store_writer_assertion("olcontrol_inc4main"))
+      assert(control_store_genesis(store, records, vf) == :appended, "atomic genesis")
+      assert(store.records.size == 1 &&
+        store.records.first.keys.sort == %w[agent assertion checkpoint registry session], "one closed payload")
+      resolved = control_store_resolve(
+        Orbit::V2::ControlStore.new(active_root: File.join(dir, ".orbit")), "olcontrol_inc4main", vf)
+      assert(resolved["checkpoint"]["is_genesis"] == true &&
+        resolved["session"]["lead_runtime_subject_ref"] == agent.dig("runtime_identity", "runtime_subject_id"),
+        "reopen and resolve")
+      assert(control_store_genesis(store, records, vf) == :idempotent, "same-content replay")
+      altered = OrbitV2FixtureFactory.deep_copy(records[2])
+      altered.dig("lead_decision")["reason"] = "different content"
+      expect_contract_error("control_store_reuse") do
+        store.genesis(registry: records[0], session: records[1], checkpoint: altered,
+          agent: records[3], assertion: records[4],
+          authority_verifier: vf[0], runtime_identity_verifier: vf[1], lifecycle_verifier: vf[2])
+      end
+      neg = control_store_genesis_records(bundle, task, OrbitV2FixtureFactory.agent("oagent_inc4neg", "lead"),
+        "olcontrol_inc4neg", control_store_writer_assertion("olcontrol_inc4neg"))
+      expect_contract_error("control_store_argument_invalid") { control_store_genesis(store, neg, vf, authority: nil) }
+      expect_contract_error("control_store_argument_invalid") { control_store_genesis(store, neg, vf, lifecycle: nil) }
+      expect_contract_error("control_store_genesis_invalid") { control_store_genesis(store, neg, vf, authority: Orbit::V2::AuthorityVerifier.new) }
+      expect_contract_error("control_store_genesis_invalid") { control_store_genesis(store, neg, vf, runtime: Orbit::V2::RuntimeIdentityVerifier.new) }
+      expect_contract_error("control_store_genesis_invalid") { control_store_genesis(store, neg, vf, lifecycle: Orbit::V2::LifecycleVerifier.new) }
+      reviewer = control_store_genesis_records(bundle, task, OrbitV2FixtureFactory.agent("oagent_inc4reviewer", "reviewer"),
+        "olcontrol_inc4reviewer", control_store_writer_assertion("olcontrol_inc4reviewer"))
+      expect_contract_error("control_store_genesis_invalid") { control_store_genesis(store, reviewer, vf) }
+      expect_contract_error("control_store_argument_invalid") { store.resolve(control_id: "olcontrol_inc4main", authority_verifier: vf[0], runtime_identity_verifier: vf[1], lifecycle_verifier: nil) }
+      assert(store.records.size == 1, "invalid authority left the store unchanged")
+    end
+  end
+
+  def test_control_store_conflicts
+    Dir.mktmpdir do |dir|
+      bundle = OrbitV2FixtureFactory.valid_bundle
+      store, policy, task = control_store_seeded_root(dir, bundle)
+      vf = control_verifiers
+      verifier = vf[0]
+      task2 = OrbitV2FixtureFactory.extra_task(bundle, task_id: "otask_inc4second",
+        revision_id: "trev_inc4second_r1", gate_id: "ogreq_inc4second", gate_lineage_id: "ogline_inc4second")["task"]
+      agent = OrbitV2FixtureFactory.agent("oagent_inc4lead", "lead")
+      agent2 = OrbitV2FixtureFactory.agent("oagent_inc4lead2", "lead")
+      main = control_store_genesis_records(bundle, task, agent, "olcontrol_inc4main",
+        control_store_writer_assertion("olcontrol_inc4main"))
+      assert(control_store_genesis(store, main, vf) == :appended, "first control")
+      disjoint = control_store_genesis_records(bundle, task2, agent2, "olcontrol_inc4disjoint",
+        control_store_writer_assertion("olcontrol_inc4disjoint"))
+      assert(control_store_genesis(store, disjoint, vf) == :appended, "disjoint accepted")
+      subject_copy = OrbitV2FixtureFactory.agent("oagent_inc4leadcopy", "lead")
+      subject_copy["runtime_identity"]["runtime_subject_id"] = agent.dig("runtime_identity", "runtime_subject_id")
+      subject_copy["runtime_identity"]["verification_receipt_ref"] =
+        OrbitV2FixtureFactory::FAKE_RUNTIME_IDENTITY_PROVIDER.issue(provider_id: OrbitV2FixtureFactory::RUNTIME_IDENTITY_PROVIDER_ID,
+          project_id: OrbitV2FixtureFactory::PROJECT_ID, agent_instance_id: "oagent_inc4leadcopy",
+          runtime_subject_id: agent.dig("runtime_identity", "runtime_subject_id"))
+      same_subject = control_store_genesis_records(bundle, task2, subject_copy, "olcontrol_inc4samesubject",
+        control_store_writer_assertion("olcontrol_inc4samesubject"))
+      expect_contract_error("control_store_subject_conflict") do
+        control_store_genesis(store, same_subject, vf)
+      end
+      overlap = control_store_genesis_records(bundle, task,
+        OrbitV2FixtureFactory.agent("oagent_inc4lead4", "lead"), "olcontrol_inc4overlap",
+        control_store_writer_assertion("olcontrol_inc4overlap"))
+      expect_contract_error("control_store_task_conflict") do
+        control_store_genesis(store, overlap, vf)
+      end
+      assert(store.records.size == 2, "conflicting claims left the store unchanged")
+      successor, successor_assertion = policy_store_successor_pair(policy, "opolicy_rotated0002", "oassert_policyrotated")
+      assert(Orbit::V2::PolicyStore.new(active_root: File.join(dir, ".orbit")).rotate(
+        policy: successor, assertion: successor_assertion, authority_verifier: verifier) == :appended, "policy rotates")
+      stale = control_store_genesis_records(bundle, task2, agent2, "olcontrol_inc4stale",
+        control_store_writer_assertion("olcontrol_inc4stale"))
+      expect_contract_error("control_store_genesis_invalid") do
+        control_store_genesis(store, stale, vf)
+      end
+      fresh_bundle = OrbitV2FixtureFactory.deep_copy(bundle)
+      fresh_bundle["project_policy_revisions"] = [successor]
+      task3 = OrbitV2FixtureFactory.extra_task(fresh_bundle, task_id: "otask_inc4third",
+        revision_id: "trev_inc4third_r1", gate_id: "ogreq_inc4third", gate_lineage_id: "ogline_inc4third")["task"]
+      fresh = control_store_genesis_records(fresh_bundle, task3,
+        OrbitV2FixtureFactory.agent("oagent_inc4lead3", "lead"), "olcontrol_inc4fresh",
+        control_store_writer_assertion("olcontrol_inc4fresh"))
+      assert(control_store_genesis(store, fresh, vf) == :appended, "fresh tip accepted")
+      assert(control_store_resolve(store, "olcontrol_inc4main", vf)
+        .dig("checkpoint", "project_policy_revision_ref", "policy_revision_id") ==
+        policy["policy_revision_id"], "reader accepts the pinned accepted-policy revision after rotation")
+    end
+  end
+
+  def test_control_store_concurrency
+    Dir.mktmpdir do |dir|
+      bundle = OrbitV2FixtureFactory.valid_bundle
+      store, policy, task = control_store_seeded_root(dir, bundle)
+      vf = control_verifiers
+      verifier = vf[0]
+      claim = lambda do |index|
+        records = control_store_genesis_records(bundle, task,
+          OrbitV2FixtureFactory.agent("oagent_inc4claim#{index}", "lead"), "olcontrol_inc4claim",
+          control_store_writer_assertion("olcontrol_inc4claim"))
+        control_store_genesis(Orbit::V2::ControlStore.new(active_root: File.join(dir, ".orbit")),
+          records, vf)
+      end
+      out_r, out_w = IO.pipe
+      pids = 2.times.map do |index|
+        fork do
+          out_r.close
+          begin
+            out_w.write("#{claim.call(index)}\n")
+          rescue Orbit::V2::ContractError => error
+            out_w.write("error:#{error.code}\n")
+          end
+          out_w.close
+          exit!(0)
+        end
+      end
+      out_w.close
+      outcomes = out_r.read.split("\n").sort
+      out_r.close
+      pids.each { |pid| Process.wait(pid) }
+      assert(outcomes == %w[appended error:control_store_reuse] && store.records.size == 1,
+        "concurrent same-control claims yield exactly one accepted genesis")
+      race_task = OrbitV2FixtureFactory.extra_task(bundle, task_id: "otask_inc4race",
+        revision_id: "trev_inc4race_r1", gate_id: "ogreq_inc4race", gate_lineage_id: "ogline_inc4race")["task"]
+      signal_r, signal_w = IO.pipe
+      release_r, release_w = IO.pipe
+      rec = control_store_genesis_records(bundle, race_task, OrbitV2FixtureFactory.agent("oagent_inc4race", "lead"),
+        "olcontrol_inc4race", control_store_writer_assertion("olcontrol_inc4race"))
+      genesis_pid = fork do
+        control_store_genesis(Orbit::V2::ControlStore.new(active_root: File.join(dir, ".orbit")),
+          rec, vf, authority: BlockingAuthorityVerifier.new(vf[0], signal_w, release_r))
+        exit!(0)
+      end
+      signal_w.close
+      release_r.close
+      signal_r.read(1)
+      signal_r.close
+      successor, successor_assertion = policy_store_successor_pair(policy, "opolicy_rotated0002", "oassert_policyrotated")
+      rotation_pid = fork do
+        Orbit::V2::PolicyStore.new(active_root: File.join(dir, ".orbit")).rotate(
+          policy: successor, assertion: successor_assertion, authority_verifier: verifier)
+        exit!(0)
+      end
+      sleep 0.3
+      assert(Process.waitpid(rotation_pid, Process::WNOHANG).nil?,
+        "rotation cannot commit inside the control genesis lock window")
+      release_w.write("g")
+      release_w.close
+      assert(Process.wait2(genesis_pid).last.success?, "genesis completed")
+      assert(Process.wait2(rotation_pid).last.success?, "rotation completed after the window")
+      assert(control_store_resolve(store, "olcontrol_inc4race", vf)
+        .dig("checkpoint", "project_policy_revision_ref", "policy_revision_id") ==
+        policy["policy_revision_id"], "control pinned the policy active inside its locked window")
+      assert(Orbit::V2::PolicyStore.new(active_root: File.join(dir, ".orbit")).resolve(
+        pinned_genesis_ref: { "policy_revision_id" => policy["policy_revision_id"], "content_digest" => policy["content_digest"] },
+        authority_verifier: verifier)["active_policy"]["policy_revision_id"] == "opolicy_rotated0002",
+        "rotation then completes after the control window")
+    end
+  end
+
+  def test_control_store_lineage_fail_closed
+    Dir.mktmpdir do |dir|
+      bundle = OrbitV2FixtureFactory.valid_bundle
+      store, _policy, task = control_store_seeded_root(dir, bundle)
+      vf = control_verifiers
+      path = File.join(dir, ".orbit", Orbit::V2::ControlStore::CONTROL_TRANSACTIONS_FILE)
+      records = control_store_genesis_records(bundle, task, OrbitV2FixtureFactory.agent("oagent_inc4lead", "lead"),
+        "olcontrol_inc4main", control_store_writer_assertion("olcontrol_inc4main"))
+      payload = { "assertion" => records[4], "agent" => records[3], "checkpoint" => records[2],
+        "registry" => records[0], "session" => records[1] }
+      write_file = lambda do |tx_payload|
+        record = { "schema_version" => "orbit-transaction-log-v1", "transaction_id" => "olcontrol_inc4main",
+          "previous_tip_digest" => nil,
+          "content_digest" => "sha256:#{Orbit::V2::CanonicalJSON.sha256(tx_payload)}",
+          "payload" => tx_payload }
+        File.write(path, Orbit::V2::CanonicalJSON.dump("schema_version" => "orbit-transaction-log-v1",
+          "records" => [record], "file_digest" => "sha256:#{Orbit::V2::CanonicalJSON.sha256([record])}"))
+      end
+      resolve = lambda { control_store_resolve(store, "olcontrol_inc4main", vf) }
+      unknown = OrbitV2FixtureFactory.deep_copy(payload)
+      unknown["authority"] = "not-a-control-field"
+      write_file.call(unknown)
+      expect_contract_error("control_store_lineage_invalid") { resolve.call }
+      expect_contract_error("control_store_genesis_invalid") do
+        control_store_genesis(store, records, vf)
+      end
+      half = OrbitV2FixtureFactory.deep_copy(payload)
+      half.delete("session")
+      write_file.call(half)
+      expect_contract_error("control_store_lineage_invalid") { resolve.call }
+      broken = OrbitV2FixtureFactory.deep_copy(payload)
+      broken["checkpoint"]["lead_runtime_subject_ref"] = "runtime-subject:someone-else"
+      broken["checkpoint"]["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(broken["checkpoint"])
+      write_file.call(broken)
+      expect_contract_error("control_store_lineage_invalid") { resolve.call }
+      non_increasing = OrbitV2FixtureFactory.deep_copy(payload)
+      agent_events = non_increasing["agent"]["lifecycle_events"]
+      agent_events << OrbitV2FixtureFactory.event("oevent_inc4lead_adv", "AgentContextAdvanced",
+        agent_events[0]["event_digest"], "context_generation" => 2,
+        "started_at" => agent_events[0]["recorded_at"], "status" => "active")
+      write_file.call(non_increasing)
+      expect_contract_error("control_store_lineage_invalid") { resolve.call }
+      reused_id = OrbitV2FixtureFactory.deep_copy(payload)
+      reused_id["agent"]["lifecycle_events"] = [OrbitV2FixtureFactory.event(
+        payload.dig("session", "lifecycle_events", 0, "event_id"), "AgentCreated", nil,
+        "role" => "lead", "context_generation" => 1,
+        "started_at" => "2026-07-30T00:00:00Z", "status" => "active")]
+      write_file.call(reused_id)
+      expect_contract_error("control_store_lineage_invalid") { resolve.call }
+    end
+  end
   def test_protocol_root_preflight
     Dir.mktmpdir do |dir|
       store, policy, = policy_store_seeded_root(dir)

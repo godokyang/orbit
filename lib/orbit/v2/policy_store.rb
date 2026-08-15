@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require_relative "active_root"
 require_relative "authority_verifier"
 require_relative "canonical_json"
 require_relative "errors"
@@ -333,42 +334,11 @@ module Orbit
         }
       end
 
-      # Rotation may only extend the store that IS the marker's canonical
-      # real active root: File.realpath(active_root) must equal
-      # <canonical project root>/.orbit (containment through symlinks), so
-      # a sibling/shadow/alias store can never borrow the marker's pin.
-      # The marker is then read at that canonical root (Inc2 containment
-      # re-verified by ProtocolRoot.read). Missing/corrupt markers or
-      # non-canonical roots fail closed with policy_store_unpinned.
       def marker_for_rotation!
-        canonical_project_root = File.realpath(File.dirname(@active_root))
-        canonical_active_root = File.join(canonical_project_root, ".orbit")
-        unless File.realpath(@active_root) == canonical_active_root
-          raise ContractError.new(
-            "policy_store_unpinned",
-            "store is not the canonical real active root of its ProtocolRoot marker",
-            path: "policy_store.rotate",
-            details: {
-              "active_root" => File.expand_path(@active_root),
-              "canonical_active_root" => canonical_active_root
-            }
-          )
-        end
-        ProtocolRoot.read(project_root: canonical_project_root)
-      rescue Errno::ENOENT, Errno::ENOTDIR
-        raise ContractError.new(
-          "policy_store_unpinned",
-          "store is not the canonical real active root of its ProtocolRoot marker",
-          path: "policy_store.rotate"
-        )
-      rescue ContractError => e
-        raise e if e.code == "policy_store_unpinned"
-
-        raise ContractError.new(
-          "policy_store_unpinned",
-          "rotation requires a valid in-root ProtocolRoot marker",
-          path: "policy_store.rotate",
-          details: { "cause" => e.code, "message" => e.message }
+        ActiveRoot.marker_for(
+          @active_root,
+          code: "policy_store_unpinned",
+          label: "policy_store.rotate"
         )
       end
 

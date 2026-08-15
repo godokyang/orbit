@@ -1106,3 +1106,76 @@ policy/assertion hashes are never the source of truth.
 - Deferred to later Slice 6 increments: control/session genesis, task/
   checkpoint/evidence writers, legacy deletion, templates, v2 CLI
   activation, and E2E/dogfood cutover.
+
+## Slice 6 increment 4 addendum: controlled control/session genesis
+
+Lands `Orbit::V2::ControlStore`, the minimal durable control/session
+genesis seam under the canonical ProtocolRoot active root, on top of the
+TransactionLog CAS (Slice 6 increment 1), the ProtocolRoot marker and
+canonical-active-root proof (`Orbit::V2::ActiveRoot`, shared with
+PolicyStore rotation — Slice 6 increments 2/3), and the provider-verified
+active-policy resolution from the PolicyStore (Slice 6 increment 3).
+
+- Transaction shape: ONE canonical transaction per control carrying the
+  exact records that close the genesis: the create-only LeadControlRegistry
+  claim (stable lead_control_id + owned task refs), the initial active
+  LeadSession with its runtime-subject binding, the accepted genesis
+  LeadCheckpoint (is_genesis, parentless, exact-pinning the session and the
+  policy active at commit time), the AgentInstance whose runtime identity
+  the session pins, and the provider-verified control.genesis
+  AuthorityAssertion. All-or-nothing: a partial claim never becomes
+  accepted truth.
+- The writer resolves the provider-verified ACTIVE policy from the
+  PolicyStore itself INSIDE the same locked snapshot the append commits on
+  (canonical active root proven first via the marker), then exact-binds
+  project, control identity (registry/session/checkpoint), the genesis
+  checkpoint ref, the policy revision ref, the writer authority provenance
+  (assertion provider-verified, grants matching the pinned policy's unique
+  control.genesis grant, scope == control id), and the runtime subject
+  (AgentInstance provider-verified; session and checkpoint subject pins
+  exact-bind it). LeadSession/AgentInstance lifecycle semantics are closed
+  (mirroring the public Validator's runtime_lifecycle rules): the initial
+  session is exactly one active LeadSessionStarted event whose context
+  generation exists in the AgentInstance's context lineage at the start
+  time, the agent is active at that time, and the agent carries the
+  task.orchestrate capability + task_revision.propose permission — a
+  provider-verified agent without the lead role can never be bound as the
+  initial lead session. Root-level shared serialization uses a FIXED lock
+  order: the policy log's exclusive lock is acquired before the control
+  log's, so a policy rotation can never commit between the policy
+  resolution and the control append — an old active policy can never
+  authorize a new control append, and a stale candidate built against a
+  pre-rotation policy fails closed at commit time. PolicyStore.rotate takes
+  only the policy lock, so no cycle exists.
+- All three verifiers (authority, runtime identity, lifecycle) are
+  REQUIRED for genesis and resolve; nil or unconfigured verifiers fail
+  closed. Lifecycle events are provider-verified with typed
+  event-chain/digest/writer-receipt semantics (mirroring
+  validate_event_chain + LifecycleVerifier) BEFORE the cross-stream
+  active checks. Same control id with byte-identical canonical content is
+  idempotent ONLY after the whole existing snapshot re-verifies (marker,
+  policy lineage, provider, lifecycle, cross-control) — invalid persisted
+  records never report success; same id with different content, a reused
+  control, or a second genesis fails closed; real concurrent same-control
+  claims yield exactly one accepted genesis (the loser observes
+  control_store_reuse). A second
+  control genesis must reject an overlapping owned task set
+  (control_store_task_conflict) or an already-active canonical runtime
+  subject (control_store_subject_conflict); disjoint task + subject is
+  acceptable.
+- The reader re-resolves the marker + policy lineage from the
+  ProtocolRoot anchor and re-verifies every transaction with the configured
+  authority, runtime identity, AND lifecycle verifiers (typed event
+  chains, strict chronology, global create-only event ids, writer
+  receipts), failing closed on unknown, malformed, forked, or half
+  transactions. The checkpoint's pinned policy
+  must be an accepted revision of the policy store (the active tip after a
+  rotation remains acceptable for previously committed controls). Task and
+  logical-lead EXISTENCE against TaskRevision/LogicalLead records is not
+  closed here (later writer increments author those records); their refs
+  are schema- and cross-record validated (registry owned_task_refs ==
+  genesis checkpoint task_queue; session/checkpoint logical-lead identity
+  agreement).
+- Not implemented: successor checkpoints, session replacement, task/
+  checkpoint/evidence general writers, CLI activation, legacy deletion,
+  and E2E cutover.

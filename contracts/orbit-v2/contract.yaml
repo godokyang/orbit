@@ -105,9 +105,32 @@ protocol_root:
   mixed_epoch_behavior: fail_closed
   known_v1_authority_artifacts: [runtime, loop-state.yaml, roles.yaml, instances.yaml, tasks, evidence, rules, handoffs]
   closure:
-    increment: slice_6_increment_3
+    increment: slice_6_increment_4
     seam_only: true
-    deferred: [control_session_genesis, task_checkpoint_evidence_writers, legacy_deletion, templates, v2_cli_activation, v1_retirement, e2e_dogfood_cutover]
+    deferred: [successor_checkpoints, session_replacement, task_checkpoint_evidence_writers, legacy_deletion, templates, v2_cli_activation, v1_retirement, e2e_dogfood_cutover]
+
+control_authority_store:
+  seam: Orbit::V2::ControlStore
+  location: canonical_active_root_only_canonical_real_active_root_proof_required
+  transaction_file: control-transactions.json
+  transaction_shape: closed_payload_of_registry_session_genesis_checkpoint_agent_and_assertion_all_or_nothing
+  genesis:
+    authority_before_append: [provider_verified_active_policy_from_policy_store_inside_locked_snapshot, provider_verified_control_genesis_assertion, provider_verified_runtime_identity, final_schema_digest_epoch_cross_ref_project_policy_task_refs]
+    policy_rotation_race: checkpoint_must_pin_policy_resolved_at_commit_time_stale_candidate_fails_closed
+    root_level_serialization: fixed_lock_order_policy_log_lock_then_control_log_lock_rotation_never_interleaves_into_the_control_window
+    session_lifecycle_closure: initial_session_one_active_leadsessionstarted_exact_context_generation_agent_active_at_start_task_orchestrate_capability_and_task_revision_propose_permission
+    verifiers_required: [authority, runtime_identity, lifecycle]
+    lifecycle_event_closure: provider_verified_event_chains_with_strict_chronology_digest_linkage_writer_receipts_and_globally_create_only_event_ids
+    results: [appended, idempotent_only_after_whole_existing_snapshot_reverifies]
+    reused_control_or_second_genesis_different_content: fail_closed
+    concurrent_claims: exactly_one_accepted
+    overlapping_owned_task: fail_closed
+    already_active_canonical_runtime_subject: fail_closed
+    disjoint_task_and_subject: accepted
+  reader:
+    replay: from_protocol_root_anchor_with_provider_reverification_of_authority_runtime_identity_and_lifecycle_events
+    fail_closed: [unknown, malformed, fork, half_transaction, missing_control]
+  not_implemented: [successor_checkpoints, session_replacement, general_writers]
 
 policy_authority_store:
   seam: Orbit::V2::PolicyStore
