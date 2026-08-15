@@ -85,12 +85,28 @@ stable_identifiers:
 
 protocol_root:
   location_contract: marker_parent_is_active_artifact_root
+  seam: Orbit::V2::ProtocolRoot
+  marker_path: ".orbit/protocol.yaml"
+  marker_creation: create_only_atomic_idempotent_same_canonical_content
+  marker_file: exact_canonical_rendering_of_record_single_link_regular_required
   required_epoch: orbit-v2
   required_genesis_ref:
     - policy_revision_id
     - content_digest
+  genesis_verification: existing_public_seams_schema_catalog_validator_validate_document_authority_verifier_policy_issuance
+  genesis_project_binding: marker_genesis_policy_and_issuance_carry_the_same_project_id
+  active_root_returned: canonical_real_parent_directory_of_marker
+  root_alias_behavior: real_path_and_symlink_alias_resolve_to_identical_active_root
+  marker_parent_containment: enforced_before_any_file_access_create_may_create_absent_in_root_orbit
   copied_task_or_policy_facts: forbidden
+  mutable_active_pointer: forbidden
+  fallback_root_cwd_config_override: forbidden
   mixed_epoch_behavior: fail_closed
+  known_v1_authority_artifacts: [runtime, loop-state.yaml, roles.yaml, instances.yaml, tasks, evidence, rules, handoffs]
+  closure:
+    increment: slice_6_increment_2
+    seam_only: true
+    deferred: [controlled_genesis_writer, policy_rotation, control_session_genesis, v2_cli_activation, v1_retirement, e2e_dogfood_cutover]
 
 policy_lineage:
   authority_verification:

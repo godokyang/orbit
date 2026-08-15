@@ -976,3 +976,61 @@ Frozen store contract:
   failure.
 - Two writers with the same expected tip cannot both commit: exactly one
   appends and the loser observes `:stale` with committed bytes unchanged.
+
+## Slice 6 increment 2 addendum: ProtocolRoot marker and root/epoch preflight
+
+Lands the isolated ProtocolRoot marker seam, `Orbit::V2::ProtocolRoot`
+(create/read/preflight), on top of the Slice 6 increment 1 durable commit
+primitives (`Orbit::V2::DurableFile`, shared with TransactionLog). The
+create-only `.orbit/protocol.yaml` marker's parent directory canonically
+defines the sole active artifact root; the seam never searches for a root,
+never consults cwd/config, and has no fallback.
+
+- Marker shape is the exact final ProtocolRoot contract only: schema_version,
+  protocol_epoch (orbit-v2), project_id, the immutable exact
+  ProjectPolicyRevision genesis id+digest ref, and the canonical
+  content_digest. No copied policy/task/control body, compatibility fields,
+  mutable active pointer, backfill, or dual read.
+- The marker file must be the exact canonical rendering of its own record
+  (safe YAML, closed keys, content_digest self-consistent, single-link
+  regular file): unknown fields, noncanonical content, duplicate keys,
+  trailing junk, tag/alias tricks, wrong epoch, tampered digests, and
+  symlink/hard-linked/non-regular paths all fail closed.
+- `create` is atomic and create-only: absent -> one durable marker; same
+  canonical content is idempotent; different content raises
+  `protocol_root_reuse`; competing creators serialize on the exclusive lock
+  (exactly one :created, the rest :idempotent); a failure before the rename
+  leaves the previous state readable; a root already carrying known v1
+  authority artifacts (`.orbit/runtime`, `loop-state.yaml`, `roles.yaml`,
+  `instances.yaml`, `tasks`, `evidence`, `rules`, `handoffs`) fails closed
+  with `protocol_root_mixed_epoch` so the marker can never become accepted
+  truth in a mixed-epoch root. v1 archives outside the active root are
+  irrelevant.
+- `preflight` returns the canonical active artifact root — the canonical
+  real parent directory of the marker (the real `<project>/.orbit`) — only
+  after the explicit project root is resolved through symlinks (a real path
+  and a symlink alias to the same physical marker resolve to the IDENTICAL
+  active root, never two; the marker's real parent must remain contained in
+  the canonical project root — containment is enforced centrally BEFORE any
+  file access in create/read/preflight, so a pre-existing `.orbit` that is
+  a symlink, a non-directory, or resolves outside the canonical root fails
+  closed with `protocol_root_path_invalid` before any marker, lock, or
+  staging byte is read or written outside, while create alone may create a
+  genuinely absent in-root `.orbit`) AND the marker verifies AND the pinned
+  genesis is
+  bound through the existing public seams: `SchemaCatalog`/
+  `Validator#validate_document!` for the marker and the genesis
+  ProjectPolicyRevision/AuthorityAssertion records, the exact ref match
+  (marker ref == genesis id+digest), the exact project binding (marker,
+  genesis policy, and issuance all carry the same project_id), and the
+  provider-verified issuance (`AuthorityVerifier#verify!` + `PolicyIssuance`
+  envelope semantics — the same boundary and genesis-branch rules the
+  public Validator composes). Nothing is self-authorized from marker text
+  or candidate writer names; a forged/stale genesis ref or digest, a wrong
+  or cross-project genesis, a wrong project or epoch, and an unverifiable
+  issuance all fail closed.
+- Deferred to later Slice 6 increments: the controlled genesis writer
+  (authors the genesis policy + issuance that preflight consumes), policy
+  rotation, control/session genesis, general v2 writers, v2 CLI activation,
+  v1 retirement, and E2E/dogfood cutover. This increment wires no
+  project-scoped commands; it is the seam those commands will consume.

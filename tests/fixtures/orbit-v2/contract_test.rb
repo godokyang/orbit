@@ -15,6 +15,7 @@ require_relative "../../../lib/orbit/v2/integrity_audit"
 require_relative "../../../lib/orbit/v2/relationship_view"
 require_relative "../../../lib/orbit/v2/gate_strength"
 require_relative "../../../lib/orbit/v2/immutable_store"
+require_relative "../../../lib/orbit/v2/protocol_root"
 require_relative "../../../lib/orbit/v2/transaction_log"
 require_relative "../../../lib/orbit/v2/policy_issuance"
 require_relative "../../../lib/orbit/v2/rule_resolution"
@@ -67,6 +68,8 @@ module OrbitV2ContractTest
     test_immutable_stores(valid_bundle)
     test_transaction_log_store
     test_transaction_log_concurrency_and_crash
+    test_protocol_root_marker
+    test_protocol_root_preflight
     test_v1_inventory
     test_slice_isolation
     puts(
@@ -2666,6 +2669,572 @@ module OrbitV2ContractTest
         Orbit::V2::TransactionLog.new(path: path).records.map { |r| r["transaction_id"] } ==
           baseline_ids + %w[otxn_after otxn_finally],
         "abandoned staging is never read as accepted truth"
+      )
+    end
+  end
+
+  def test_protocol_root_marker
+    assert(
+      Orbit::V2::ProtocolRoot.singleton_methods(false).sort ==
+        %i[create marker_path preflight read],
+      "ProtocolRoot exposes exactly its four public seam methods"
+    )
+    assert(
+      Orbit::V2::DurableFile.singleton_methods(false).sort ==
+        %i[atomic_write verify_single_link! with_exclusive_lock],
+      "DurableFile exposes exactly its three consumed primitives"
+    )
+    Dir.mktmpdir do |dir|
+      marker_path = File.join(dir, ".orbit", "protocol.yaml")
+      genesis_ref = {
+        "policy_revision_id" => "opolicy_genesis0001",
+        "content_digest" => "sha256:#{'a' * 64}"
+      }
+
+      # Missing marker: read fails closed, then create -> read -> reopen ->
+      # idempotent create round-trips the exact record.
+      expect_contract_error("protocol_root_missing") do
+        Orbit::V2::ProtocolRoot.read(project_root: dir)
+      end
+      assert(
+        Orbit::V2::ProtocolRoot.create(
+          project_root: dir,
+          project_id: "oproj_slice0fixture",
+          policy_genesis_ref: genesis_ref
+        ) == :created,
+        "create writes the first marker"
+      )
+      record = Orbit::V2::ProtocolRoot.read(project_root: dir)
+      assert(record["protocol_epoch"] == "orbit-v2", "marker pins the orbit-v2 epoch")
+      assert(
+        record["project_policy_genesis_ref"] == genesis_ref,
+        "marker pins the exact genesis id+digest ref"
+      )
+      assert(
+        record["content_digest"] == Orbit::V2::CanonicalJSON.content_digest(record),
+        "marker content_digest matches its canonical semantic content"
+      )
+      assert(
+        Orbit::V2::ProtocolRoot.read(project_root: dir)["project_id"] == "oproj_slice0fixture",
+        "reopen reads the same verified marker"
+      )
+      marker_bytes = File.binread(marker_path)
+      assert(
+        Orbit::V2::ProtocolRoot.create(
+          project_root: dir,
+          project_id: "oproj_slice0fixture",
+          policy_genesis_ref: genesis_ref
+        ) == :idempotent,
+        "same accepted marker content is idempotent"
+      )
+      assert(File.binread(marker_path) == marker_bytes, "idempotent create left bytes unchanged")
+
+      # Create-only: different content never overwrites the marker.
+      expect_contract_error("protocol_root_reuse") do
+        Orbit::V2::ProtocolRoot.create(
+          project_root: dir,
+          project_id: "oproj_slice0other",
+          policy_genesis_ref: genesis_ref
+        )
+      end
+      assert(File.binread(marker_path) == marker_bytes, "rejected reuse left the marker unchanged")
+      expect_contract_error("protocol_root_argument_invalid") do
+        Orbit::V2::ProtocolRoot.create(
+          project_root: dir,
+          project_id: "not-a-project-id",
+          policy_genesis_ref: genesis_ref
+        )
+      end
+
+      # Noncanonical marker bytes and unknown fields fail closed.
+      File.write(marker_path, "#{marker_bytes}\n")
+      expect_contract_error("protocol_root_corrupt") do
+        Orbit::V2::ProtocolRoot.read(project_root: dir)
+      end
+      tampered = JSON.parse(JSON.generate(record))
+      tampered["authority"] = "not-a-marker-field"
+      File.write(marker_path, YAML.dump(tampered))
+      expect_contract_error("protocol_root_corrupt") do
+        Orbit::V2::ProtocolRoot.read(project_root: dir)
+      end
+      tampered = JSON.parse(JSON.generate(record))
+      tampered["content_digest"] = "sha256:#{'f' * 64}"
+      File.write(marker_path, YAML.dump(tampered))
+      expect_contract_error("protocol_root_corrupt") do
+        Orbit::V2::ProtocolRoot.read(project_root: dir)
+      end
+      File.write(
+        marker_path,
+        marker_bytes.sub(/^(content_digest:.*)$/, "\\1\\n\\1")
+      )
+      expect_contract_error("protocol_root_corrupt") do
+        Orbit::V2::ProtocolRoot.read(project_root: dir)
+      end
+      wrong_schema = JSON.parse(JSON.generate(record))
+      wrong_schema["schema_version"] = "orbit-protocol-root-v9"
+      File.write(marker_path, YAML.dump(wrong_schema))
+      expect_contract_error("unsupported_schema_version") do
+        Orbit::V2::ProtocolRoot.read(project_root: dir)
+      end
+
+      # Symlink and hard-linked marker paths fail closed; the real path
+      # recovers once the alias is removed.
+      File.write(marker_path, marker_bytes)
+      alias_root = File.join(dir, "alias-root")
+      FileUtils.mkdir_p(File.join(alias_root, ".orbit"))
+      File.symlink(
+        marker_path,
+        File.join(alias_root, ".orbit", "protocol.yaml")
+      )
+      expect_contract_error("protocol_root_path_invalid") do
+        Orbit::V2::ProtocolRoot.read(project_root: alias_root)
+      end
+      expect_contract_error("protocol_root_path_invalid") do
+        Orbit::V2::ProtocolRoot.create(
+          project_root: alias_root,
+          project_id: "oproj_slice0fixture",
+          policy_genesis_ref: genesis_ref
+        )
+      end
+      assert(File.symlink?(File.join(alias_root, ".orbit", "protocol.yaml")), "alias symlink never replaced")
+      hard_alias = File.join(dir, "marker-hard.yaml")
+      File.link(marker_path, hard_alias)
+      expect_contract_error("protocol_root_path_invalid") do
+        Orbit::V2::ProtocolRoot.read(project_root: dir)
+      end
+      expect_contract_error("protocol_root_path_invalid") do
+        Orbit::V2::ProtocolRoot.create(
+          project_root: dir,
+          project_id: "oproj_slice0fixture",
+          policy_genesis_ref: genesis_ref
+        )
+      end
+      File.delete(hard_alias)
+      assert(
+        Orbit::V2::ProtocolRoot.read(project_root: dir)["content_digest"] ==
+          record["content_digest"],
+        "real marker path recovers after alias removal"
+      )
+
+      # A failure before the commit boundary (read-only .orbit blocks the
+      # staged write) leaves the previous state — an absent marker —
+      # readable, and a later create succeeds.
+      fresh = File.join(dir, "fresh-root")
+      FileUtils.mkdir_p(File.join(fresh, ".orbit"))
+      FileUtils.chmod(0o500, File.join(fresh, ".orbit"))
+      begin
+        failed = false
+        begin
+          Orbit::V2::ProtocolRoot.create(
+            project_root: fresh,
+            project_id: "oproj_slice0fixture",
+            policy_genesis_ref: genesis_ref
+          )
+        rescue SystemCallError
+          failed = true
+        end
+        assert(failed, "marker create failure propagates")
+        expect_contract_error("protocol_root_missing") do
+          Orbit::V2::ProtocolRoot.read(project_root: fresh)
+        end
+      ensure
+        FileUtils.chmod(0o700, File.join(fresh, ".orbit"))
+      end
+      assert(
+        Orbit::V2::ProtocolRoot.create(
+          project_root: fresh,
+          project_id: "oproj_slice0fixture",
+          policy_genesis_ref: genesis_ref
+        ) == :created,
+        "create succeeds after the failed attempt and leaves one durable marker"
+      )
+
+      # Known v1 authority artifacts inside the active root fail closed at
+      # create; the marker itself stays readable, and v1 archives outside
+      # the active root are irrelevant.
+      FileUtils.mkdir_p(File.join(dir, ".orbit", "runtime", "sessions"))
+      File.write(File.join(dir, ".orbit", "runtime", "sessions", "v1.json"), "{}")
+      expect_contract_error("protocol_root_mixed_epoch") do
+        Orbit::V2::ProtocolRoot.create(
+          project_root: dir,
+          project_id: "oproj_slice0fixture",
+          policy_genesis_ref: genesis_ref
+        )
+      end
+      assert(
+        Orbit::V2::ProtocolRoot.read(project_root: dir)["project_id"] == "oproj_slice0fixture",
+        "mixed-epoch rejection never touches the committed marker"
+      )
+      FileUtils.remove_entry(File.join(dir, ".orbit", "runtime"))
+      outside = File.join(Dir.tmpdir, "v1-archive-outside-root-#{$$}")
+      FileUtils.mkdir_p(File.join(outside, ".orbit", "runtime"))
+      begin
+        assert(
+          Orbit::V2::ProtocolRoot.create(
+            project_root: dir,
+            project_id: "oproj_slice0fixture",
+            policy_genesis_ref: genesis_ref
+          ) == :idempotent,
+          "v1 archives outside the active root are irrelevant"
+        )
+      ensure
+        FileUtils.remove_entry(outside)
+      end
+    end
+  end
+
+  def test_protocol_root_preflight
+    Dir.mktmpdir do |dir|
+      bundle = OrbitV2FixtureFactory.valid_bundle
+      policy = bundle["project_policy_revisions"].first
+      assertion = OrbitV2FixtureFactory.policy_issuance_assertion(
+        policy,
+        parent_policy: nil,
+        assertion_id: "oassert_policygenesis",
+        subject: "project-owner"
+      )
+      genesis_ref = {
+        "policy_revision_id" => policy["policy_revision_id"],
+        "content_digest" => policy["content_digest"]
+      }
+      verifier = OrbitV2FixtureFactory.authority_verifier
+      root = Orbit::V2::ProtocolRoot.create(
+        project_root: dir,
+        project_id: OrbitV2FixtureFactory::PROJECT_ID,
+        policy_genesis_ref: genesis_ref
+      )
+      assert(root == :created, "preflight fixture marker")
+      valid_marker_bytes = File.binread(File.join(dir, ".orbit", "protocol.yaml"))
+
+      # Success: preflight returns the canonical real parent directory of
+      # the marker — the canonical project root's .orbit — only after the
+      # marker and the provider-verified genesis binding validate.
+      expected_active_root = File.join(File.realpath(dir), ".orbit")
+      assert(
+        Orbit::V2::ProtocolRoot.preflight(
+          project_root: dir,
+          expected_project_id: OrbitV2FixtureFactory::PROJECT_ID,
+          genesis_policy: policy,
+          genesis_assertion: assertion,
+          authority_verifier: verifier
+        ) == expected_active_root,
+        "preflight returns the canonical real marker parent as the active root"
+      )
+
+      # The same physical marker addressed through a symlink alias of the
+      # project root resolves to the IDENTICAL active root, never two.
+      alias_root = File.join(dir, "alias-project-root")
+      File.symlink(File.expand_path(dir), alias_root)
+      assert(
+        Orbit::V2::ProtocolRoot.preflight(
+          project_root: alias_root,
+          expected_project_id: OrbitV2FixtureFactory::PROJECT_ID,
+          genesis_policy: policy,
+          genesis_assertion: assertion,
+          authority_verifier: verifier
+        ) == expected_active_root,
+        "real path and symlink alias resolve to the same canonical active root"
+      )
+      File.delete(alias_root)
+
+      # A pre-existing .orbit symlink to a sibling directory fails closed
+      # BEFORE any file access: create and read both reject with
+      # path_invalid, the outside directory receives no marker/lock/staging
+      # bytes, and restoring a real in-root .orbit restores normal
+      # create/read/preflight.
+      outside_orbit = File.join(dir, "outside-orbit")
+      FileUtils.mkdir_p(outside_orbit)
+      FileUtils.mv(
+        File.join(dir, ".orbit"),
+        File.join(dir, ".orbit.real")
+      )
+      File.symlink(outside_orbit, File.join(dir, ".orbit"))
+      expect_contract_error("protocol_root_path_invalid") do
+        Orbit::V2::ProtocolRoot.create(
+          project_root: dir,
+          project_id: "oproj_slice0other",
+          policy_genesis_ref: {
+            "policy_revision_id" => policy["policy_revision_id"],
+            "content_digest" => "sha256:#{'d' * 64}"
+          }
+        )
+      end
+      expect_contract_error("protocol_root_path_invalid") do
+        Orbit::V2::ProtocolRoot.read(project_root: dir)
+      end
+      expect_contract_error("protocol_root_path_invalid") do
+        Orbit::V2::ProtocolRoot.preflight(
+          project_root: dir,
+          expected_project_id: OrbitV2FixtureFactory::PROJECT_ID,
+          genesis_policy: policy,
+          genesis_assertion: assertion,
+          authority_verifier: verifier
+        )
+      end
+      assert(
+        Dir.children(outside_orbit).empty?,
+        "outside .orbit received no marker, lock, or staging entries"
+      )
+      assert(
+        File.file?(File.join(dir, ".orbit.real", "protocol.yaml")),
+        "the real in-root marker was preserved untouched"
+      )
+      File.delete(File.join(dir, ".orbit"))
+      FileUtils.mv(
+        File.join(dir, ".orbit.real"),
+        File.join(dir, ".orbit")
+      )
+      assert(
+        Orbit::V2::ProtocolRoot.create(
+          project_root: dir,
+          project_id: OrbitV2FixtureFactory::PROJECT_ID,
+          policy_genesis_ref: {
+            "policy_revision_id" => policy["policy_revision_id"],
+            "content_digest" => policy["content_digest"]
+          }
+        ) == :idempotent,
+        "create is valid again after restoring the real in-root .orbit"
+      )
+      assert(
+        Orbit::V2::ProtocolRoot.read(project_root: dir)["project_id"] ==
+          OrbitV2FixtureFactory::PROJECT_ID,
+        "read is valid again after restoring the real in-root .orbit"
+      )
+      assert(
+        Orbit::V2::ProtocolRoot.preflight(
+          project_root: dir,
+          expected_project_id: OrbitV2FixtureFactory::PROJECT_ID,
+          genesis_policy: policy,
+          genesis_assertion: assertion,
+          authority_verifier: verifier
+        ) == expected_active_root,
+        "preflight is valid again after restoring the real in-root .orbit"
+      )
+
+      # Missing marker, wrong project, wrong epoch.
+      expect_contract_error("protocol_root_missing") do
+        Orbit::V2::ProtocolRoot.preflight(
+          project_root: File.join(dir, "absent"),
+          expected_project_id: OrbitV2FixtureFactory::PROJECT_ID,
+          genesis_policy: policy,
+          genesis_assertion: assertion,
+          authority_verifier: verifier
+        )
+      end
+      expect_contract_error("protocol_root_project_mismatch") do
+        Orbit::V2::ProtocolRoot.preflight(
+          project_root: dir,
+          expected_project_id: "oproj_slice0other",
+          genesis_policy: policy,
+          genesis_assertion: assertion,
+          authority_verifier: verifier
+        )
+      end
+      wrong_epoch = OrbitV2FixtureFactory.deep_copy(
+        Orbit::V2::ProtocolRoot.read(project_root: dir)
+      )
+      wrong_epoch["protocol_epoch"] = "orbit-v1"
+      wrong_epoch["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(wrong_epoch)
+      File.write(
+        File.join(dir, ".orbit", "protocol.yaml"),
+        YAML.dump(wrong_epoch)
+      )
+      expect_contract_error("protocol_root_epoch_mismatch") do
+        Orbit::V2::ProtocolRoot.preflight(
+          project_root: dir,
+          expected_project_id: OrbitV2FixtureFactory::PROJECT_ID,
+          genesis_policy: policy,
+          genesis_assertion: assertion,
+          authority_verifier: verifier
+        )
+      end
+      File.write(File.join(dir, ".orbit", "protocol.yaml"), valid_marker_bytes)
+
+      # Forged/stale genesis ref: the marker pins a digest that does not
+      # exact-match the genesis policy record.
+      forged_ref = {
+        "policy_revision_id" => policy["policy_revision_id"],
+        "content_digest" => "sha256:#{'f' * 64}"
+      }
+      forged_dir = File.join(dir, "forged")
+      FileUtils.mkdir_p(forged_dir)
+      Orbit::V2::ProtocolRoot.create(
+        project_root: forged_dir,
+        project_id: OrbitV2FixtureFactory::PROJECT_ID,
+        policy_genesis_ref: forged_ref
+      )
+      expect_contract_error("protocol_root_genesis_invalid") do
+        Orbit::V2::ProtocolRoot.preflight(
+          project_root: forged_dir,
+          expected_project_id: OrbitV2FixtureFactory::PROJECT_ID,
+          genesis_policy: policy,
+          genesis_assertion: assertion,
+          authority_verifier: verifier
+        )
+      end
+
+      # Cross-project genesis: a fully valid genesis policy + issuance for
+      # project B pinned by a marker that claims project A must fail the
+      # exact project binding, never be accepted as A's genesis.
+      policy_b = OrbitV2FixtureFactory.deep_copy(policy)
+      policy_b["project_id"] = "oproj_slice0other"
+      policy_b["authorization_source_ref"] = "oassert_policygenesisother"
+      policy_b["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(policy_b)
+      assertion_base_b = {
+        "schema_version" => "orbit-authority-assertion-v1",
+        "protocol_epoch" => "orbit-v2",
+        "project_id" => "oproj_slice0other",
+        "assertion_id" => "oassert_policygenesisother",
+        "issuer_kind" => "user",
+        "issuer_subject" => "project-owner",
+        "provider_id" => OrbitV2FixtureFactory::AUTHORITY_PROVIDER_ID,
+        "grants" => ["policy.genesis"],
+        "asserted_at" => "2026-07-30T00:00:00Z"
+      }
+      digest_b = Orbit::V2::AuthorityVerifier.assertion_digest(assertion_base_b)
+      policy_b["authorization_assertion_digest"] = digest_b
+      envelope_b = Orbit::V2::PolicyIssuance.build_envelope(
+        candidate_policy: policy_b,
+        parent_policy: nil,
+        assertion_id: "oassert_policygenesisother",
+        assertion_digest: digest_b,
+        provider_id: OrbitV2FixtureFactory::AUTHORITY_PROVIDER_ID,
+        receipt_id: "oareceipt_policygenesisother",
+        issued_at: "2026-07-30T00:00:00Z"
+      )
+      assertion_b = assertion_base_b.merge(
+        "authority_scope_ref" => envelope_b["envelope_digest"],
+        "policy_issuance_envelope" => envelope_b,
+        "assertion_digest" => digest_b
+      )
+      assertion_b["verification_receipt"] =
+        OrbitV2FixtureFactory::FAKE_AUTHORITY_PROVIDER.issue(
+          assertion_b,
+          receipt_id: "oareceipt_policygenesisother",
+          issued_at: "2026-07-30T00:00:00Z"
+        )
+      cross_dir = File.join(dir, "cross-project")
+      FileUtils.mkdir_p(cross_dir)
+      Orbit::V2::ProtocolRoot.create(
+        project_root: cross_dir,
+        project_id: "oproj_slice0fixture",
+        policy_genesis_ref: {
+          "policy_revision_id" => policy_b["policy_revision_id"],
+          "content_digest" => policy_b["content_digest"]
+        }
+      )
+      expect_contract_error("protocol_root_genesis_invalid") do
+        Orbit::V2::ProtocolRoot.preflight(
+          project_root: cross_dir,
+          expected_project_id: OrbitV2FixtureFactory::PROJECT_ID,
+          genesis_policy: policy_b,
+          genesis_assertion: assertion_b,
+          authority_verifier: verifier
+        )
+      end
+
+      # Stale genesis record: the supplied genesis digest is not
+      # self-consistent, so the binding cannot hold.
+      stale_policy = OrbitV2FixtureFactory.deep_copy(policy)
+      stale_policy["content_digest"] = "sha256:#{'e' * 64}"
+      expect_contract_error("protocol_root_genesis_invalid") do
+        Orbit::V2::ProtocolRoot.preflight(
+          project_root: dir,
+          expected_project_id: OrbitV2FixtureFactory::PROJECT_ID,
+          genesis_policy: stale_policy,
+          genesis_assertion: assertion,
+          authority_verifier: verifier
+        )
+      end
+
+      # Forged issuance: envelope semantics or provider verification fail.
+      forged_assertion = OrbitV2FixtureFactory.deep_copy(assertion)
+      forged_assertion.dig("policy_issuance_envelope")["decision"] = "rejected"
+      expect_contract_error("protocol_root_genesis_invalid") do
+        Orbit::V2::ProtocolRoot.preflight(
+          project_root: dir,
+          expected_project_id: OrbitV2FixtureFactory::PROJECT_ID,
+          genesis_policy: policy,
+          genesis_assertion: forged_assertion,
+          authority_verifier: verifier
+        )
+      end
+      expect_contract_error("protocol_root_genesis_invalid") do
+        Orbit::V2::ProtocolRoot.preflight(
+          project_root: dir,
+          expected_project_id: OrbitV2FixtureFactory::PROJECT_ID,
+          genesis_policy: policy,
+          genesis_assertion: assertion,
+          authority_verifier: Orbit::V2::AuthorityVerifier.new
+        )
+      end
+
+      # Mixed active root fails preflight even with a valid marker+genesis.
+      File.write(File.join(dir, ".orbit", "loop-state.yaml"), "state: v1\n")
+      expect_contract_error("protocol_root_mixed_epoch") do
+        Orbit::V2::ProtocolRoot.preflight(
+          project_root: dir,
+          expected_project_id: OrbitV2FixtureFactory::PROJECT_ID,
+          genesis_policy: policy,
+          genesis_assertion: assertion,
+          authority_verifier: verifier
+        )
+      end
+    end
+  end
+
+  def test_protocol_root_concurrent_creators
+    Dir.mktmpdir do |dir|
+      genesis_ref = {
+        "policy_revision_id" => "opolicy_genesis0001",
+        "content_digest" => "sha256:#{'a' * 64}"
+      }
+      ready_r, ready_w = IO.pipe
+      go_r, go_w = IO.pipe
+      out_r, out_w = IO.pipe
+      pids = 2.times.map do
+        fork do
+          ready_r.close
+          go_w.close
+          out_r.close
+          ready_w.write("r")
+          ready_w.close
+          go_r.read(1)
+          begin
+            result = Orbit::V2::ProtocolRoot.create(
+              project_root: dir,
+              project_id: "oproj_slice0fixture",
+              policy_genesis_ref: genesis_ref
+            )
+            out_w.write("#{result}\n")
+          rescue StandardError => error
+            out_w.write("error:#{error.class}\n")
+          end
+          out_w.close
+          exit!(0)
+        end
+      end
+      ready_w.close
+      go_r.close
+      out_w.close
+      2.times { ready_r.read(1) }
+      ready_r.close
+      2.times { go_w.write("g") }
+      go_w.close
+      outcomes = out_r.read.split("\n").sort
+      out_r.close
+      pids.each { |pid| Process.wait(pid) }
+      assert(
+        outcomes == %w[created idempotent],
+        "competing creators serialize to exactly one durable marker, got #{outcomes.inspect}"
+      )
+      assert(
+        Orbit::V2::ProtocolRoot.read(project_root: dir)["project_id"] == "oproj_slice0fixture",
+        "the single committed marker is readable"
+      )
+      assert(
+        Dir.glob(File.join(dir, ".orbit", "protocol.yaml*")).grep_v(/\.lock\z/).size == 1,
+        "exactly one marker file exists, no orphaned staging truth"
       )
     end
   end

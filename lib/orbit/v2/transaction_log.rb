@@ -1,11 +1,10 @@
 # frozen_string_literal: true
 
 require "digest"
-require "fileutils"
 require "json"
-require "securerandom"
 
 require_relative "canonical_json"
+require_relative "durable_file"
 require_relative "errors"
 require_relative "identifiers"
 
@@ -272,89 +271,21 @@ module Orbit
         ContractError.new("transaction_log_corrupt", message, path: "transaction_log", details: details)
       end
 
-      # The committed log must be one single-link regular file. A symlink
-      # (or any other non-regular path) would let an alias store rename its
-      # staged file over the link, and a hard-linked path shares one inode
-      # until a rename replaces only its own directory entry — either way
-      # the log forks into two independently valid chains and bypasses
-      # compare-and-append, so both fail closed.
       def verify_final_path!
-        stat = File.lstat(@path)
-        unless stat.file? && stat.nlink == 1
-          raise ContractError.new(
-            "transaction_log_path_invalid",
-            "transaction log path must be a single-link regular file " \
-              "(#{stat.ftype}, nlink #{stat.nlink})",
-            path: "transaction_log"
-          )
-        end
-      rescue Errno::ENOENT
-        nil
+        DurableFile.verify_single_link!(@path, code: "transaction_log_path_invalid", label: "transaction log")
       end
 
-      def with_exclusive_lock
-        lock_path = "#{@path}.lock"
-        FileUtils.mkdir_p(File.dirname(lock_path))
-        File.open(lock_path, File::RDWR | File::CREAT, 0o600) do |lock|
-          lock.flock(File::LOCK_EX)
-          yield
-        ensure
-          lock.flock(File::LOCK_UN) if lock
-        end
+      def with_exclusive_lock(&block)
+        DurableFile.with_exclusive_lock(@path, &block)
       end
 
       def write_atomically(records)
-        dir = File.dirname(@path)
-        FileUtils.mkdir_p(dir)
         content = CanonicalJSON.dump(
           "schema_version" => SCHEMA_VERSION,
           "records" => records,
           "file_digest" => "sha256:#{CanonicalJSON.sha256(records)}"
         )
-        tmp = create_staging_file(dir, content)
-        # The rename is the commit boundary. The parent-directory fsync
-        # afterwards is strictly best-effort and never surfaces, so a
-        # directory-fsync failure cannot report an ambiguous "failed"
-        # append after the transaction is already visible.
-        File.rename(tmp, @path)
-        fsync_directory(dir)
-      ensure
-        FileUtils.rm_f(tmp) if tmp && File.exist?(tmp)
-      end
-
-      # Securely randomized exclusive staging file in the same directory.
-      # O_CREAT|O_EXCL on an unpredictable name never follows or
-      # pretruncates an existing symlink or regular file, so a planted
-      # predictable staging path is ignored and can never overwrite user
-      # data or the committed log. Staged-file fsync is required: if the
-      # payload bytes cannot be fsynced, fail before the rename and keep
-      # the previous accepted state (the caller's ensure removes the
-      # staging file). Orphaned exclusive staging files are never read and
-      # never become accepted truth.
-      def create_staging_file(dir, content)
-        base = ".#{File.basename(@path)}.tmp."
-        10.times do
-          candidate = File.join(dir, "#{base}#{$$}.#{Thread.current.object_id}.#{SecureRandom.hex(8)}")
-          begin
-            File.open(candidate, File::WRONLY | File::CREAT | File::EXCL, 0o600) do |file|
-              file.write(content)
-              file.flush
-              file.fsync
-            end
-            return candidate
-          rescue Errno::EEXIST
-            next
-          end
-        end
-        raise Errno::EEXIST, "could not create an exclusive staging file in #{dir}"
-      end
-
-      def fsync_directory(path)
-        Dir.open(path) do |dir|
-          dir.fsync if dir.respond_to?(:fsync)
-        end
-      rescue IOError, SystemCallError, NotImplementedError
-        nil
+        DurableFile.atomic_write(@path, content)
       end
     end
   end
