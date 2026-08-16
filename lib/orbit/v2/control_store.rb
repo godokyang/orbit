@@ -1040,11 +1040,22 @@ module Orbit
         verified = []
         txs.each_with_index do |tx, index|
           begin
+            # Historical replay is per transaction: each existing control
+            # transaction is provider-reverified against an ancestor-prefix
+            # policy snapshot whose ACTIVE revision is the exact
+            # project_policy_revision_ref frozen by that transaction
+            # (checkpoint/Attempt). Different historical transactions may
+            # pin different accepted revisions; a later rotation never
+            # reinterprets them with one global active. NEW writer
+            # candidates are still validated against the current active
+            # policy in the same locked window, so stale writes keep
+            # failing closed.
+            prefix, prefix_assertions = historical_policy_prefix(policy, tx)
             validated = validate_transaction!(
               tx,
               policy: nil,
-              pinned_policies: policy.fetch("accepted"),
-              accepted_assertions: policy.fetch("accepted_assertions"),
+              pinned_policies: prefix,
+              accepted_assertions: prefix_assertions,
               marker: marker,
               authority_verifier: authority_verifier,
               runtime_identity_verifier: runtime_identity_verifier,
@@ -1071,6 +1082,49 @@ module Orbit
         verified
       end
 
+
+      # The ancestor-prefix policy snapshot for one persisted transaction:
+      # walk the accepted lineage from the transaction-owned policy pin
+      # (checkpoint project_policy_revision_ref) back to genesis, so the
+      # prefix tip IS the frozen revision and the transaction is never
+      # reinterpreted by a later rotation.
+      def historical_policy_prefix(policy, tx)
+        accepted = policy.fetch("accepted")
+        assertions = policy.fetch("accepted_assertions")
+        pin = tx_policy_pin(tx)
+        raise lineage_invalid("transaction has no frozen policy pin") unless pin
+        return [accepted, assertions] if accepted.last &&
+                                          accepted.last["policy_revision_id"] == pin["policy_revision_id"] &&
+                                          accepted.last["content_digest"] == pin["content_digest"]
+
+        by_id = accepted.to_h { |candidate| [candidate["policy_revision_id"], candidate] }
+        chain = []
+        cursor = by_id[pin["policy_revision_id"]]
+        raise lineage_invalid("transaction pins a policy the store never accepted") unless cursor
+        while cursor
+          chain << cursor
+          parent = cursor["parent_policy_revision_id"]
+          cursor = parent && by_id[parent]
+        end
+        prefix = chain.reverse
+        prefix_assertions = assertions.select do |assertion|
+          prefix.any? { |candidate| candidate["authorization_source_ref"] == assertion["assertion_id"] }
+        end
+        [prefix, prefix_assertions]
+      end
+
+      def tx_policy_pin(tx)
+        return nil unless tx.is_a?(Hash)
+
+        checkpoint =
+          case tx.keys.sort
+          when PAYLOAD_KEYS, CHECKPOINT_PAYLOAD_KEYS, SESSION_CHECKPOINT_PAYLOAD_KEYS, TERMINAL_PAYLOAD_KEYS
+            tx["checkpoint"]
+          when EXECUTION_PAYLOAD_KEYS
+            tx["dispatch_checkpoint"]
+          end
+        checkpoint && checkpoint["project_policy_revision_ref"]
+      end
       # Dispatches on the closed transaction shape: the control-genesis
       # payload or the successor-checkpoint payload. Any other shape is
       # malformed persisted data and fails closed.
@@ -1749,8 +1803,17 @@ module Orbit
         register_id!(seen_event_ids, "rule_resolution", rule.fetch("resolution_id"), failure)
         register_id!(seen_event_ids, "agent_instance", worker.fetch("agent_instance_id"), failure)
         if chain_to
-          unless attempt["predecessor_work_unit_attempt_ref"] == chain_to
-            raise invalid.call("successor Attempt must exact-chain to the terminated attempt")
+          # RuntimeLifecycle: a non-empty predecessor must be the exact same
+          # WorkUnit, while each new WorkUnit may start a first Attempt with
+          # predecessor nil. The terminal composite therefore accepts a
+          # same-unit exact chain (a) or a fresh different-WorkUnit first
+          # Attempt (b); the assembled whole-snapshot Validator rejects a
+          # second nil-first on the same unit.
+          ref = attempt["predecessor_work_unit_attempt_ref"]
+          unless ref.nil? || ref == chain_to
+            raise invalid.call(
+              "successor Attempt must exact-chain to the terminated attempt or start fresh"
+            )
           end
         elsif attempt["predecessor_work_unit_attempt_ref"]
           raise invalid.call("first Attempt must carry no predecessor attempt ref")

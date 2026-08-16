@@ -289,13 +289,11 @@ module Orbit
             tips = resolution_lineage_tips(finding["finding_id"], matching)
             disposition = finding_disposition(finding, active_policy)
             if disposition == "blocking" && tips.empty?
-              unless task && Array(task["unresolved_finding_refs"]).include?(finding["finding_id"])
-                add(
-                  "finding_closure_invalid",
-                  "an unresolved blocking Finding must remain referenced by its TaskRevision",
-                  "findings.#{finding["finding_id"]}"
-                )
-              end
+              # TaskRevision unresolved_finding_refs are genesis/legacy
+              # seeds only: the current unresolved state of NEW Findings is
+              # derived from the accepted GateFactStore facts (the Finding
+              # is tracked by the GateEvaluation that reports it), never
+              # written back into the immutable TaskRevision.
               source_evaluation = @indexes.fetch("gate_evaluations", {})[
                 finding["gate_evaluation_id"]
               ]

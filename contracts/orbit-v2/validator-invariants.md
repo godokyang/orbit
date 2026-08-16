@@ -1358,11 +1358,12 @@ reintroduced through the terminal path).
   status/ended_at == recorded_at, a provider-verified writer receipt, and a
   globally create-only event id. The terminal checkpoint exact-extends the
   unique current observation tip of that attempt and terminal-pins the
-  exact terminal event; the successor attempt exact-chains to the
-  terminated attempt, starts strictly after the terminal event
-  (single-active continuity), and its dispatch ref, assignment, thesis and
-  rule proposals, observation pin, and writer authority are exact-bound as
-  in the Inc6b composite.
+  exact terminal event. The successor starts strictly after that event and
+  either exact-chains to the terminated Attempt on the same WorkUnit or is
+  the unique nil-predecessor first Attempt of a different WorkUnit; the
+  whole assembled snapshot proves the latter has no prior first Attempt.
+  Its dispatch ref, assignment, thesis and rule proposals, observation pin,
+  and writer authority are exact-bound as in the Inc6b composite.
 - `ControlStore#recover` is a pure read/reconcile seam: the complete
   window (log read, whole-snapshot reverification, tip derivation,
   reconcile) runs under the SAME three-level fixed locks as every writer
@@ -1495,3 +1496,52 @@ existing evidence lineage re-verifies.
   read and whole-lineage reverification and returns only the exact accepted
   record plus its frozen snapshot/surface. GateEvaluation+Finding atomic
   transactions and FindingResolution remain deferred to the next increments.
+
+## Slice 6 increment 6g addendum: durable GateEvaluation + Finding acceptance
+
+`Orbit::V2::GateFactStore` commits ONE GateEvaluation together with its
+create-only Findings (possibly none for a clean pass) as a closed
+gate-facts transaction under the fixed global lock order policy -> task ->
+control -> evidence -> gate. The exact active/accepted policy, TaskRevision
+and GateRequirement, the evaluator Attempt (ControlStore) and the accepted
+EvidenceStore evidence are resolved and provider-reverified inside the SAME
+locked snapshot the append commits on, and the complete assembled snapshot
+runs through the PUBLIC Validator.
+
+- Finding ids are globally create-only; the evaluation's `finding_refs`
+  must exactly equal its committed findings; supersession/related finding
+  and evaluation lineages stay deferred. Evidence refs (subject, coverage,
+  answers, acceptance, finding sources) must resolve to accepted
+  EvidenceStore records of the exact task revision; finding source
+  evidence must stay inside the evaluation subject or evaluator submission.
+- Every payload carries a STORE-OWNED frozen `policy_pin` (exact active
+  policy at acceptance) and a STORE-OWNED `acceptance_recorded_at` from the
+  configured clock in the same locked window. Acceptance chronology is the
+  authoritative E2E order: evaluator Attempt started <= submission
+  evidence accepted <= evaluation accepted; a NEW write is unconditionally
+  rejected once the evaluator Attempt is terminal (no back-dated or
+  configured clock can retro-fill a GateEvaluation after the round
+  closed), while replay of a STORED payload proves its frozen acceptance
+  strictly preceded the later terminal. A historical (non-active pin)
+  evaluation additionally requires the evaluator Attempt to be TERMINAL and
+  the acceptance/submission/terminal all strictly before the first
+  successor policy issuance. The fixed policy-first lock order prevents a
+  controlled accept from racing a rotation, while replay checks the stored
+  pin and declared chronology; the store clock is not described as an
+  independent signature over arbitrary direct file rewrites.
+- The reader reverifies the whole store before returning an exact
+  gate_evaluation_id / finding_id (never a latest pointer). Historical
+  facts are validated against the frozen pin's ancestor policy set, never
+  reinterpreted by a later rotation; new writes must pin the currently
+  active policy.
+- CONTRACT ADJUSTMENT (minimal): TaskRevision `unresolved_finding_refs`
+  are genesis/legacy seeds only. The current unresolved state of NEW
+  Findings derives from the accepted GateFactStore facts and is never
+  written back into the immutable TaskRevision: the Validator no longer
+  requires every new unresolved blocking Finding to be pre-listed in its
+  TaskRevision (the finding is tracked by the GateEvaluation reporting
+  it). Existing seed refs still undergo exact lineage validation, the
+  pass-evaluation-with-unresolved-blocking-finding rule still fails
+  closed, and resolution-tip derivation is unchanged.
+- Deferred: FindingResolution and the control checkpoint
+  observation/dispatch barrier.
