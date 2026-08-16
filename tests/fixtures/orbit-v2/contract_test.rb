@@ -8316,6 +8316,37 @@ module OrbitV2ContractTest
         exact.dig("agent", "agent_instance_id") == execution[4]["agent_instance_id"],
         "resolve_attempt returns only provider-reverified exact execution facts")
 
+      terminal = control_store_terminal_records(bundle, policy, control_records,
+        task_records, execution, dir, checkpoint_id: "olcheckpoint_inc6fterminal",
+        successor_attempt_id: "oattempt_inc6fsuccessor",
+        successor_worker_id: "oagent_inc6fsuccessorworker",
+        rule_path: "rules/inc6f-successor.md")
+      signal_r, signal_w = IO.pipe
+      release_r, release_w = IO.pipe
+      resolver_pid = fork do
+        control.resolve_attempt(attempt_id: execution[3]["attempt_id"],
+          authority_verifier: BlockingAuthorityVerifier.new(vf[0], signal_w, release_r),
+          runtime_identity_verifier: vf[1], lifecycle_verifier: vf[2])
+        exit!(0)
+      end
+      signal_w.close
+      assert(signal_r.read(1) == "b", "exact Attempt resolution holds its locked snapshot")
+      terminal_pid = fork do
+        control_store_terminal(control, terminal, vf)
+        exit!(0)
+      end
+      sleep 0.3
+      assert(Process.waitpid(terminal_pid, Process::WNOHANG).nil?,
+        "terminal append cannot change the latest Attempt inside the resolution window")
+      release_w.write("r")
+      release_w.close
+      Process.wait(resolver_pid)
+      Process.wait(terminal_pid)
+      latest = control.resolve_attempt(attempt_id: execution[3]["attempt_id"],
+        authority_verifier: vf[0], runtime_identity_verifier: vf[1], lifecycle_verifier: vf[2])
+      assert(latest.dig("attempt", "events", -1, "event_type") == "AttemptCompleted",
+        "a later resolution returns the terminal latest representation")
+
       unit = task_records[2].first
       thesis = task_records[3].find { |candidate| candidate["work_unit_id"] == unit["work_unit_id"] }
       record = OrbitV2FixtureFactory.implementation_evidence(

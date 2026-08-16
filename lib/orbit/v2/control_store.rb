@@ -558,79 +558,21 @@ module Orbit
           )
         end
 
-        txs = payloads(@log.records)
-        marker = ActiveRoot.marker_for(
-          @active_root,
-          code: "control_store_unpinned",
-          label: "control_store"
-        )
-        policy = begin
-          resolve_active_policy(marker, authority_verifier)
-        rescue ContractError => error
-          raise lineage_invalid("#{error.code}: #{error.message}")
-        end
-        verified = verify_all_transactions!(
-          txs,
-          marker,
-          policy,
-          authority_verifier,
-          runtime_identity_verifier,
-          lifecycle_verifier
-        )
-
-        attempts = {}
-        agents = {}
-        resolutions = {}
-        verified.each do |tx|
-          case tx.keys.sort
-          when PAYLOAD_KEYS
-            agent = tx.fetch("agent")
-            agents[agent.fetch("agent_instance_id")] = agent
-          when SESSION_CHECKPOINT_PAYLOAD_KEYS
-            agent = tx.fetch("agent")
-            agents[agent.fetch("agent_instance_id")] = agent
-          when EXECUTION_PAYLOAD_KEYS
-            attempt = tx.fetch("attempt")
-            attempts[attempt.fetch("attempt_id")] = attempt
-            agent = tx.fetch("worker_agent")
-            agents[agent.fetch("agent_instance_id")] = agent
-            rule = tx.fetch("rule_resolution")
-            resolutions[rule.fetch("resolution_id")] = rule
-          when TERMINAL_PAYLOAD_KEYS
-            terminal = tx.fetch("attempt")
-            attempts[terminal.fetch("attempt_id")] = terminal if attempts.key?(terminal.fetch("attempt_id"))
-            successor = tx.fetch("successor_attempt")
-            attempts[successor.fetch("attempt_id")] = successor
-            agent = tx.fetch("worker_agent")
-            agents[agent.fetch("agent_instance_id")] = agent
-            rule = tx.fetch("rule_resolution")
-            resolutions[rule.fetch("resolution_id")] = rule
+        policy_log = File.join(@active_root, PolicyStore::POLICY_TRANSACTIONS_FILE)
+        task_log = File.join(@active_root, TaskStore::TASK_DEFINITIONS_FILE)
+        control_log = File.join(@active_root, CONTROL_TRANSACTIONS_FILE)
+        DurableFile.with_exclusive_lock(policy_log) do
+          DurableFile.with_exclusive_lock(task_log) do
+            DurableFile.with_exclusive_lock(control_log) do
+              resolve_attempt_snapshot!(
+                attempt_id,
+                authority_verifier,
+                runtime_identity_verifier,
+                lifecycle_verifier
+              )
+            end
           end
         end
-
-        attempt = attempts[attempt_id]
-        unless attempt
-          raise ContractError.new(
-            "control_store_missing",
-            "no accepted Attempt exists for #{attempt_id}",
-            path: "control_store.attempts.#{attempt_id}"
-          )
-        end
-        assignment = attempt.dig("events", 0, "assignment") || {}
-        rule = resolutions[assignment["assigned_rule_resolution_id"]]
-        agent = agents[assignment["agent_instance_id"]]
-        unless rule && agent
-          raise lineage_invalid("accepted Attempt has no exact RuleResolution or worker AgentInstance")
-        end
-
-        JSON.parse(
-          CanonicalJSON.dump(
-            "attempt" => attempt,
-            "agent" => agent,
-            "rule_resolution" => rule,
-            "lead_control_id" => attempt.fetch("lead_control_id")
-          )
-        )
       end
 
       # Durable recovery from the unique accepted lineage tip as a pure
@@ -751,6 +693,83 @@ module Orbit
       end
 
       private
+
+      def resolve_attempt_snapshot!(attempt_id, authority_verifier,
+                                    runtime_identity_verifier, lifecycle_verifier)
+        txs = payloads(@log.records)
+        marker = ActiveRoot.marker_for(
+          @active_root,
+          code: "control_store_unpinned",
+          label: "control_store"
+        )
+        policy = begin
+          resolve_active_policy(marker, authority_verifier)
+        rescue ContractError => error
+          raise lineage_invalid("#{error.code}: #{error.message}")
+        end
+        verified = verify_all_transactions!(
+          txs,
+          marker,
+          policy,
+          authority_verifier,
+          runtime_identity_verifier,
+          lifecycle_verifier
+        )
+
+        attempts = {}
+        agents = {}
+        resolutions = {}
+        verified.each do |tx|
+          case tx.keys.sort
+          when PAYLOAD_KEYS
+            agent = tx.fetch("agent")
+            agents[agent.fetch("agent_instance_id")] = agent
+          when SESSION_CHECKPOINT_PAYLOAD_KEYS
+            agent = tx.fetch("agent")
+            agents[agent.fetch("agent_instance_id")] = agent
+          when EXECUTION_PAYLOAD_KEYS
+            attempt = tx.fetch("attempt")
+            attempts[attempt.fetch("attempt_id")] = attempt
+            agent = tx.fetch("worker_agent")
+            agents[agent.fetch("agent_instance_id")] = agent
+            rule = tx.fetch("rule_resolution")
+            resolutions[rule.fetch("resolution_id")] = rule
+          when TERMINAL_PAYLOAD_KEYS
+            terminal = tx.fetch("attempt")
+            attempts[terminal.fetch("attempt_id")] = terminal if attempts.key?(terminal.fetch("attempt_id"))
+            successor = tx.fetch("successor_attempt")
+            attempts[successor.fetch("attempt_id")] = successor
+            agent = tx.fetch("worker_agent")
+            agents[agent.fetch("agent_instance_id")] = agent
+            rule = tx.fetch("rule_resolution")
+            resolutions[rule.fetch("resolution_id")] = rule
+          end
+        end
+
+        attempt = attempts[attempt_id]
+        unless attempt
+          raise ContractError.new(
+            "control_store_missing",
+            "no accepted Attempt exists for #{attempt_id}",
+            path: "control_store.attempts.#{attempt_id}"
+          )
+        end
+        assignment = attempt.dig("events", 0, "assignment") || {}
+        rule = resolutions[assignment["assigned_rule_resolution_id"]]
+        agent = agents[assignment["agent_instance_id"]]
+        unless rule && agent
+          raise lineage_invalid("accepted Attempt has no exact RuleResolution or worker AgentInstance")
+        end
+
+        JSON.parse(
+          CanonicalJSON.dump(
+            "attempt" => attempt,
+            "agent" => agent,
+            "rule_resolution" => rule,
+            "lead_control_id" => attempt.fetch("lead_control_id")
+          )
+        )
+      end
 
       def payload(registry, session, checkpoint, agent, assertion)
         {

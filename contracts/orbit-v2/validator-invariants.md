@@ -1471,11 +1471,14 @@ recomputes the digest. A replay compares the proposal and frozen snapshot
 rather than a newly sampled time, and is idempotent only after the entire
 existing evidence lineage re-verifies.
 
-- `ControlStore#resolve_attempt` first replays and provider-reverifies the
-  complete control log, then returns the exact latest Attempt representation,
-  its assigned content-addressed RuleResolution, and its verified worker
-  AgentInstance. Evidence acceptance never upgrades raw transaction bytes to
-  execution authority by scanning `records`.
+- `ControlStore#resolve_attempt` holds policy -> task -> control locks across
+  the complete control-log replay/provider reverification and latest
+  projection, then returns the exact latest Attempt representation, its
+  assigned content-addressed RuleResolution, and its verified worker
+  AgentInstance. Same-execution-context nested acquisition is reentrant while
+  the outermost descriptor remains flocked, so EvidenceStore can preserve its
+  larger acceptance window without self-deadlock. Evidence acceptance never
+  upgrades raw transaction bytes to execution authority by scanning `records`.
 - The exact historical TaskRevision, WorkUnit and ChangeThesis are resolved
   from TaskStore. A new record requires that revision to pin the active
   provider-verified policy in the same lock window. Historical old-policy

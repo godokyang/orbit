@@ -36,15 +36,35 @@ module Orbit
       end
 
       # Exclusive cross-process lock on "<path>.lock" covering the whole
-      # read-verify-write cycle.
+      # read-verify-write cycle. Nested store composition may reacquire the
+      # same lock on the same thread; only the outermost acquisition owns
+      # the flock descriptor, so cross-process exclusion remains intact.
       def with_exclusive_lock(path)
-        lock_path = "#{path}.lock"
-        FileUtils.mkdir_p(File.dirname(lock_path))
-        File.open(lock_path, File::RDWR | File::CREAT, 0o600) do |lock|
-          lock.flock(File::LOCK_EX)
-          yield
+        lock_path = File.expand_path("#{path}.lock")
+        held = Thread.current[:orbit_v2_exclusive_locks]
+        if held&.key?(lock_path)
+          held[lock_path] += 1
+          begin
+            return yield
+          ensure
+            held[lock_path] -= 1
+          end
+        end
+
+        held ||= {}
+        Thread.current[:orbit_v2_exclusive_locks] = held
+        held[lock_path] = 1
+        begin
+          FileUtils.mkdir_p(File.dirname(lock_path))
+          File.open(lock_path, File::RDWR | File::CREAT, 0o600) do |lock|
+            lock.flock(File::LOCK_EX)
+            yield
+          ensure
+            lock.flock(File::LOCK_UN) if lock
+          end
         ensure
-          lock.flock(File::LOCK_UN) if lock
+          held.delete(lock_path)
+          Thread.current[:orbit_v2_exclusive_locks] = nil if held.empty?
         end
       end
 
