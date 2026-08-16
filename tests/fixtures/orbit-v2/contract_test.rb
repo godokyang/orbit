@@ -84,6 +84,7 @@ module OrbitV2ContractTest
     test_control_store_checkpoint
     test_control_store_dispatch
     test_control_store_terminal
+    test_control_store_activation
     test_control_store_lineage_fail_closed
     test_task_store_genesis
     test_task_store_lineage_fail_closed
@@ -3672,8 +3673,8 @@ module OrbitV2ContractTest
 
   def test_control_store_genesis
     assert(Orbit::V2::ControlStore.instance_methods(false).sort ==
-      %i[checkpoint dispatch genesis records recover resolve terminal],
-      "ControlStore exposes exactly its seven public seams")
+      %i[activate checkpoint dispatch genesis records recover resolve terminal],
+      "ControlStore exposes exactly its eight public seams")
     Dir.mktmpdir do |dir|
       bundle = OrbitV2FixtureFactory.valid_bundle
       store, _policy, task = control_store_seeded_root(dir, bundle)
@@ -4013,7 +4014,8 @@ module OrbitV2ContractTest
                                       worker_id: "oagent_inc6bworker",
                                       rule_path: "rules/inc6b-coder.md",
                                       predecessor: nil,
-                                      started_at: "2026-07-30T02:01:00Z")
+                                      started_at: "2026-07-30T02:01:00Z",
+                                      lead: nil)
     control_id = control_records[0]["lead_control_id"]
     task = task_records[0]
     unit = task_records[2].first
@@ -4056,7 +4058,7 @@ module OrbitV2ContractTest
       task_revision_id: task["task_revision_id"], lead_control_id: control_id,
       authorization_record_refs: unit.dig("authority_scope", "authorization_record_refs"),
       started_at: started_at)
-    lead = task_records[6]
+    lead = lead || task_records[6]
     dispatch_assertion = OrbitV2FixtureFactory.assertion(
       "oassert_#{dispatch_id.delete_prefix('olcheckpoint_')}dispatch",
       %w[control.checkpoint], "control-plane-writer", authority_scope_ref: control_id)
@@ -4178,6 +4180,39 @@ module OrbitV2ContractTest
     [attempt, checkpoint, assertion, successor, worker, rule, successor_observation, observation_assertion]
   end
 
+  def control_store_activation_records(bundle, policy, control_records, task_records, child_records,
+                                       checkpoint_id: "olcheckpoint_inc6eactivate",
+                                       predecessor_checkpoint: nil, lead: nil)
+    control_id = control_records[0]["lead_control_id"]
+    predecessor_checkpoint ||= control_records[2]
+    lead = lead || task_records[6]
+    child = child_records[0]
+    child_ref = OrbitV2FixtureFactory.task_ref(child)
+    assertion = OrbitV2FixtureFactory.assertion("oassert_inc6eactivate",
+      %w[control.checkpoint], "control-plane-writer", authority_scope_ref: control_id)
+    checkpoint = OrbitV2FixtureFactory.lead_checkpoint(
+      checkpoint_id, is_genesis: false,
+      predecessor_ref: OrbitV2FixtureFactory.cp_ref(predecessor_checkpoint),
+      predecessor_checkpoint: predecessor_checkpoint, policy: policy,
+      session: control_records[1], agent: control_records[3], logical_lead: lead,
+      task: child, writer_action: "control.checkpoint", writer_assertion: assertion,
+      lead_control_id: control_id, active_task_ref: child_ref,
+      selected_work_unit_ref: nil, task_queue: [child_ref], unit: nil,
+      decision: { "state" => "blocked", "action" => "continue",
+        "reason" => "authoritative change observed" },
+      reconcile_trigger: { "event" => "task_revision_change",
+        "reason" => "Activating the accepted child TaskRevision." },
+      next_trigger: { "event" => "successor_before", "reason" => "Awaiting the successor boundary." })
+    [checkpoint, assertion]
+  end
+
+  def control_store_activate(store, records, verifiers)
+    store.activate(task_revision_id: records[0].dig("task_queue", 0, "task_revision_id"),
+      checkpoint: records[0], assertion: records[1],
+      authority_verifier: verifiers[0], runtime_identity_verifier: verifiers[1],
+      lifecycle_verifier: verifiers[2])
+  end
+
   def control_store_terminal(store, records, verifiers)
     store.terminal(attempt: records[0], checkpoint: records[1], assertion: records[2],
       successor_attempt: records[3], worker_agent: records[4], rule_resolution: records[5],
@@ -4196,7 +4231,7 @@ module OrbitV2ContractTest
 
   def test_control_store_dispatch
     assert(Orbit::V2::ControlStore.instance_methods(false).sort ==
-      %i[checkpoint dispatch genesis records recover resolve terminal],
+      %i[activate checkpoint dispatch genesis records recover resolve terminal],
       "ControlStore exposes the atomic dispatch seam")
     Dir.mktmpdir do |dir|
       bundle = OrbitV2FixtureFactory.valid_bundle
@@ -4381,6 +4416,118 @@ module OrbitV2ContractTest
       assert(store.records.size == 4 && final.dig("checkpoint", "lead_checkpoint_id") ==
         "olcheckpoint_created_inc6cthird",
         "the concurrent append committed exactly one new terminal transaction after recovery")
+    end
+  end
+
+  def test_control_store_activation
+    Dir.mktmpdir do |dir|
+      bundle = OrbitV2FixtureFactory.valid_bundle
+      bundle["logical_leads"].first["logical_lead_id"] = "olead_inc6emain"
+      bundle["logical_leads"].first["content_digest"] =
+        Orbit::V2::CanonicalJSON.content_digest(bundle["logical_leads"].first)
+      store, policy, _task = control_store_seeded_root(dir, bundle)
+      vf = control_verifiers
+      task_records = task_store_genesis_records(bundle)
+      bundle["task_revisions"] = [OrbitV2FixtureFactory.deep_copy(task_records[0])]
+      task_store = Orbit::V2::TaskStore.new(active_root: File.join(dir, ".orbit"))
+      assert(task_store_genesis(task_store, task_records, vf[0]) == :appended, "r1 task facts commit")
+      lead_agent = OrbitV2FixtureFactory.agent("oagent_inc6elead", "lead")
+      control_records = control_store_genesis_records(bundle, task_records[0], lead_agent,
+        "olcontrol_inc6emain", control_store_writer_assertion("olcontrol_inc6emain"),
+        lead: task_records[6])
+      assert(control_store_genesis(store, control_records, vf) == :appended, "control genesis commits")
+      r2 = task_store_successor_records(task_records, suffix: "r2")
+      assert(task_store_successor(task_store, r2, vf[0]) == :appended,
+        "the TaskStore r2 append is a proposal-only successor")
+      selection_decision = {
+        "state" => "blocked", "action" => "continue", "reason" => "dependency readiness not satisfied"
+      }
+      selection, selection_assertion = control_store_checkpoint_records(
+        bundle, policy, control_records, "olcontrol_inc6emain", "olcheckpoint_inc6er1selection",
+        selection_decision, lead: task_records[6], unit: task_records[2].fetch(1))
+      assert(store.checkpoint(checkpoint: selection, assertion: selection_assertion,
+        authority_verifier: vf[0], runtime_identity_verifier: vf[1],
+        lifecycle_verifier: vf[2]) == :appended,
+        "the r1 control stays readable/dispatchable while the r2 proposal is not activated")
+      activation = control_store_activation_records(bundle, policy, control_records, task_records, r2,
+        predecessor_checkpoint: selection)
+      expect_contract_error("control_store_argument_invalid") do
+        store.activate(task_revision_id: "trev_inc6dr3_r2", checkpoint: activation[0],
+          assertion: activation[1], authority_verifier: vf[0],
+          runtime_identity_verifier: vf[1], lifecycle_verifier: vf[2])
+      end
+      assert(control_store_activate(store, activation, vf) == :appended,
+        "activation commits the exact task_revision_change checkpoint")
+      assert(control_store_activate(store, activation, vf) == :idempotent,
+        "activation replay is idempotent after full verification")
+      resolved = control_store_resolve(
+        Orbit::V2::ControlStore.new(active_root: File.join(dir, ".orbit")), "olcontrol_inc6emain", vf)
+      assert(resolved.dig("checkpoint", "lead_checkpoint_id") == "olcheckpoint_inc6eactivate" &&
+        resolved.dig("checkpoint", "task_queue", 0, "task_revision_id") == "trev_inc6dr2_r2",
+        "resolve derives the current queue from the accepted activation lineage")
+      assert(store.recover(control_id: "olcontrol_inc6emain", authority_verifier: vf[0],
+        runtime_identity_verifier: vf[1], lifecycle_verifier: vf[2]) ==
+        { "state" => "blocked", "action" => "continue", "reason" => "authoritative change observed" },
+        "recovery re-runs the activation tip projection")
+      r1_after = control_store_execution_records(bundle, policy, control_records, task_records, dir,
+        attempt_id: "oattempt_inc6er1after", dispatch_id: "olcheckpoint_inc6er1after",
+        worker_id: "oagent_inc6er1afterworker", rule_path: "rules/inc6e-r1.md",
+        predecessor: activation[0])
+      expect_contract_error("control_store_dispatch_invalid") { control_store_dispatch(store, r1_after, vf) }
+      r2_dispatch = control_store_execution_records(bundle, policy, control_records, r2, dir,
+        attempt_id: "oattempt_inc6er2attempt", dispatch_id: "olcheckpoint_inc6er2dispatch",
+        worker_id: "oagent_inc6er2worker", rule_path: "rules/inc6e-r2.md",
+        predecessor: activation[0], lead: task_records[6])
+      assert(control_store_dispatch(store, r2_dispatch, vf) == :appended,
+        "a new dispatch after activation uses only the r2 WorkUnit/Thesis/authority facts")
+      r3 = task_store_successor_records(r2, suffix: "r3")
+      assert(task_store_successor(task_store, r3, vf[0]) == :appended, "an r3 proposal appends")
+      r3_activation = control_store_activation_records(bundle, policy, control_records, r2, r3,
+        checkpoint_id: "olcheckpoint_inc6er3activate", predecessor_checkpoint: activation[0],
+        lead: task_records[6])
+      expect_contract_error("control_store_activation_invalid") do
+        control_store_activate(store, r3_activation, vf)
+      end
+      stale = control_store_activation_records(bundle, policy, control_records, task_records, r2,
+        checkpoint_id: "olcheckpoint_inc6estale", predecessor_checkpoint: control_records[2])
+      expect_contract_error("control_store_activation_invalid") { control_store_activate(store, stale, vf) }
+      unknown = control_store_activation_records(bundle, policy, control_records, task_records, r2,
+        checkpoint_id: "olcheckpoint_inc6eunknown")
+      unknown[0]["task_queue"] = [{ "task_id" => task_records[0]["task_id"],
+        "task_revision_id" => "trev_slice0unknown", "content_digest" => "sha256:#{'0' * 64}" }]
+      unknown[0]["active_task_ref"] = unknown[0]["task_queue"].first
+      unknown[0]["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(unknown[0])
+      expect_contract_error("control_store_activation_invalid") do
+        control_store_activate(store, unknown, vf)
+      end
+      assert(store.records.size == 4, "rejected activations leave the accepted lineage intact")
+    end
+    Dir.mktmpdir do |dir|
+      bundle = OrbitV2FixtureFactory.valid_bundle
+      bundle["logical_leads"].first["logical_lead_id"] = "olead_inc6egenesis"
+      bundle["logical_leads"].first["content_digest"] =
+        Orbit::V2::CanonicalJSON.content_digest(bundle["logical_leads"].first)
+      store, policy, _task = control_store_seeded_root(dir, bundle)
+      vf = control_verifiers
+      task_records = task_store_genesis_records(bundle)
+      bundle["task_revisions"] = [OrbitV2FixtureFactory.deep_copy(task_records[0])]
+      task_store = Orbit::V2::TaskStore.new(active_root: File.join(dir, ".orbit"))
+      assert(task_store_genesis(task_store, task_records, vf[0]) == :appended, "r1 commits")
+      lead_agent = OrbitV2FixtureFactory.agent("oagent_inc6egenesislead", "lead")
+      control_records = control_store_genesis_records(bundle, task_records[0], lead_agent,
+        "olcontrol_inc6egenesis", control_store_writer_assertion("olcontrol_inc6egenesis"),
+        lead: task_records[6])
+      assert(control_store_genesis(store, control_records, vf) == :appended, "genesis commits")
+      r2 = task_store_successor_records(task_records, suffix: "genesis")
+      assert(task_store_successor(task_store, r2, vf[0]) == :appended, "r2 proposal appends")
+      activation = control_store_activation_records(bundle, policy, control_records, task_records, r2,
+        checkpoint_id: "olcheckpoint_inc6egenesisactivate")
+      assert(control_store_activate(store, activation, vf) == :appended,
+        "a fresh r1 control directly activates the accepted child from its genesis tip")
+      assert(store.recover(control_id: "olcontrol_inc6egenesis", authority_verifier: vf[0],
+        runtime_identity_verifier: vf[1], lifecycle_verifier: vf[2]) ==
+        { "state" => "blocked", "action" => "continue", "reason" => "authoritative change observed" },
+        "recovery re-runs the direct-genesis activation tip")
     end
   end
 

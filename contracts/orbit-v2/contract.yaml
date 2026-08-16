@@ -194,6 +194,21 @@ control_authority_store:
     projection: tip_stored_trigger_re_run_through_deterministic_LeadControl_reconcile_over_the_assembled_snapshot_idempotent
     result: exactly_one_documented_state_state_action_reason
     fail_closed: [stored_decision_mismatch, fork, partial_payload, stale_tip, missing_control, unresolvable_task_facts]
+  task_revision_activation:
+    seam_method: activate
+    transaction_shape: closed_payload_of_one_exact_task_revision_change_checkpoint_and_writer_assertion
+    proposal_boundary: TaskStore_successor_append_is_proposal_only_activation_is_the_only_control_side_effect
+    fixed_lock_order: policy_log_then_task_log_then_control_log
+    public_binding: task_revision_id_argument_exact_binds_the_checkpoint_queue_and_active_task_ref_same_snapshot
+    transition: one_owned_task_from_exact_accepted_parent_revision_to_exact_accepted_immediate_child_revision_of_the_same_task
+    child_closure: [exact_ID_and_digest_refs, revision_number_parent_plus_one, task_id_unchanged, parent_ref_exact, active_policy_pin, gates_work_graph_theses_authority_facts_from_the_accepted_TaskStore]
+    logical_lead_closure: checkpoint_logical_lead_refs_exact_match_the_accepted_task_logical_lead
+    attempt_guard: rejected_while_any_active_or_nonterminal_attempt_exists_on_the_control
+    queue_derivation: current_queue_and_task_facts_derive_from_the_accepted_checkpoint_lineage_registry_stays_immutable_genesis_claim
+    post_activation: dispatch_and_checkpoint_resolve_the_queue_revision_only_r1_refs_regress_and_fail_closed
+    decision: deterministic_task_revision_change_reconcile_continue_outcome
+    results: [appended, idempotent_only_after_whole_existing_snapshot_reverifies]
+    fail_closed: [active_attempt, stale_tip, skipped_revision, cross_task_revision, unknown_revision, digest_forged_ref, mismatched_public_argument, wrong_trigger, stale_policy_after_rotation]
   not_implemented: [general_writers]
   deferred_to_later_increments:
     terminal_successor_reconciliation: closed_here
@@ -233,7 +248,11 @@ task_authority_store:
     writer_policy: owner_TaskRevision_must_pin_current_active_policy_in_the_same_locked_snapshot
     historical_replay: accepted_old_policy_remains_readable_but_cannot_authorize_a_new_thesis
     activation: only_a_later_exact_control_checkpoint_and_attempt_pin_never_latest_wins
-  deferred: [task_revision_activation_and_transfer, evidence_finding_machinery]
+  successor_activation_boundary:
+    proposal_only: appending_a_child_TaskRevision_never_reinterprets_an_r1_control
+    activation_owner: ControlStore.activate_exact_task_revision_change_checkpoint
+    queue_resolution: every_control_checkpoint_resolves_the_task_at_its_own_accepted_queue_revision_never_the_TaskStore_proposal_tip
+  deferred: [cross_control_transfer, evidence_finding_machinery]
 
 
 policy_authority_store:

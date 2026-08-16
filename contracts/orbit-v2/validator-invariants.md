@@ -1423,3 +1423,38 @@ transaction; a partial definition is never accepted.
   reuse, authority partition drift, and thesis cross-owner/skip fail closed.
   TaskRevision activation/transfer and Evidence/Gate/Finding durable stores
   remain deferred.
+
+## Slice 6 increment 6e addendum: controlled TaskRevision activation
+
+`ControlStore#activate` commits ONE exact `task_revision_change`
+LeadCheckpoint (plus its writer assertion) as a closed control-log
+transaction under the fixed policy -> task -> control locks. The TaskStore
+`successor` append is deliberately proposal-only: it never reinterprets an
+r1 control, and the r1 control stays readable/dispatchable until the
+activation commits.
+
+- The public `task_revision_id` argument exact-binds the checkpoint's
+  task queue and active task ref in the same locked snapshot (a caller can
+  never activate revision A while committing revision B), and the
+  activation must exact-extend the unique current control tip with the
+  deterministic continue outcome and successor boundary.
+- The activation transitions one owned task from the exact accepted parent
+  revision (the current lineage-derived queue revision) to the exact
+  accepted immediate child revision of the SAME task: exact ID+digest
+  queue/active refs, revision_number = parent + 1 (no skipped revisions),
+  exact parent ref, child pinned to the currently active policy, and full
+  TaskStore gate/work-graph/thesis/LogicalLead closure. The registry stays
+  the immutable genesis claim; the current queue and task facts derive
+  from the accepted checkpoint lineage, and every later checkpoint
+  (dispatch, terminal, selection) resolves the task at its OWN queue
+  revision with the exact ownership chain walk back to the registry claim
+  — so r1 refs after activation regress and fail closed, and proposals
+  never leak into unactivated controls.
+- Activation is rejected while any active or nonterminal attempt exists on
+  the control (latest attempt representation per id decides). The complete
+  assembled snapshot — parent AND child revision histories (task
+  revisions, gates, work units, theses, authorization records, and
+  issuance assertions across every accepted revision) — runs through the
+  PUBLIC Validator, so queue progression, selection, decisions, and writer
+  authority are proven, not schema-accepted.
+- Deferred: cross-control transfer, Evidence/Gate/Finding writers.

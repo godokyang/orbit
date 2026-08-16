@@ -186,6 +186,13 @@ module Orbit
             path: "control_store"
           )
         end
+        if checkpoint.dig("reconcile_trigger", "event") == "task_revision_change"
+          raise ContractError.new(
+            "control_store_argument_invalid",
+            "task revision activation is owned by the activate seam",
+            path: "control_store.checkpoint"
+          )
+        end
         checkpoint_id = checkpoint["lead_checkpoint_id"]
         unless checkpoint_id.is_a?(String) && Identifiers.valid?("lead_checkpoint_id", checkpoint_id)
           raise ContractError.new(
@@ -354,6 +361,88 @@ module Orbit
         raise ContractError.new(
           "control_store_reuse",
           "terminal checkpoint #{checkpoint_id} already exists with different canonical content",
+          path: "control_store.#{checkpoint_id}"
+        )
+      end
+
+      # Controlled TaskRevision activation: commits ONE exact
+      # task_revision_change LeadCheckpoint (plus its writer assertion) that
+      # transitions the owned task from the exact accepted parent revision
+      # to the exact accepted child revision of the same task, in one
+      # closed control-log transaction under policy -> task -> control
+      # locks. The TaskStore child append itself is proposal-only: the r1
+      # control stays readable/dispatchable until this activation commits,
+      # and every later checkpoint resolves the task at its OWN queue
+      # revision.
+      def activate(task_revision_id:, checkpoint:, assertion:, authority_verifier:,
+                   runtime_identity_verifier:, lifecycle_verifier:)
+        unless checkpoint.is_a?(Hash) && assertion.is_a?(Hash) &&
+               task_revision_id.is_a?(String) && Identifiers.valid?("task_revision_id", task_revision_id) &&
+               authority_verifier.respond_to?(:verify!) &&
+               runtime_identity_verifier.respond_to?(:verify!) &&
+               lifecycle_verifier.respond_to?(:verify!)
+          raise ContractError.new(
+            "control_store_argument_invalid",
+            "activate requires the child task_revision_id, checkpoint, assertion, and three configured verifiers",
+            path: "control_store.activate"
+          )
+        end
+        # Canonical same-snapshot copy: the bound revision id and the
+        # committed candidate are frozen snapshots taken BEFORE binding, so
+        # concurrent caller mutation of the mutable input objects can never
+        # swap revision A for committed revision B (the resolved child
+        # descends from the snapshot queue ref).
+        revision_id = task_revision_id.dup
+        candidate = JSON.parse(CanonicalJSON.dump(
+          { "assertion" => assertion, "checkpoint" => checkpoint }
+        ))
+        unless candidate.dig("checkpoint", "reconcile_trigger", "event") == "task_revision_change"
+          raise ContractError.new(
+            "control_store_argument_invalid",
+            "activation checkpoint must reconcile on task_revision_change",
+            path: "control_store.activate"
+          )
+        end
+        queue_ref = Array(candidate.dig("checkpoint", "task_queue")).first
+        unless queue_ref.is_a?(Hash) &&
+               queue_ref["task_revision_id"] == revision_id &&
+               candidate.dig("checkpoint", "active_task_ref", "task_revision_id") == revision_id
+          raise ContractError.new(
+            "control_store_argument_invalid",
+            "task_revision_id must exact-bind the activation checkpoint queue and active task ref",
+            path: "control_store.activate.task_revision_id"
+          )
+        end
+        checkpoint_id = candidate.dig("checkpoint", "lead_checkpoint_id")
+        unless checkpoint_id.is_a?(String) && Identifiers.valid?("lead_checkpoint_id", checkpoint_id)
+          raise ContractError.new(
+            "control_store_argument_invalid",
+            "activation checkpoint lead_checkpoint_id must be a stable checkpoint identifier",
+            path: "control_store.activate.lead_checkpoint_id"
+          )
+        end
+        policy_log = File.join(@active_root, PolicyStore::POLICY_TRANSACTIONS_FILE)
+        task_log = File.join(@active_root, TaskStore::TASK_DEFINITIONS_FILE)
+        DurableFile.with_exclusive_lock(policy_log) do
+          DurableFile.with_exclusive_lock(task_log) do
+            @log.append_with(
+              transaction_id: checkpoint_id,
+              payload: candidate,
+              validate: lambda do |records, _tip|
+                validate_checkpoint_snapshot!(
+                  records, candidate, checkpoint_id,
+                  authority_verifier, runtime_identity_verifier, lifecycle_verifier
+                )
+              end
+            )
+          end
+        end
+      rescue ContractError => e
+        raise e unless e.code == "transaction_log_reuse"
+
+        raise ContractError.new(
+          "control_store_reuse",
+          "activation checkpoint #{checkpoint_id} already exists with different canonical content",
           path: "control_store.#{checkpoint_id}"
         )
       end
@@ -882,7 +971,23 @@ module Orbit
             marker: marker, authority_verifier: authority_verifier,
             runtime_identity_verifier: runtime_identity_verifier,
             lifecycle_verifier: lifecycle_verifier, seen_event_ids: seen_event_ids)
-        when CHECKPOINT_PAYLOAD_KEYS, SESSION_CHECKPOINT_PAYLOAD_KEYS
+        when CHECKPOINT_PAYLOAD_KEYS
+          if tx.dig("checkpoint", "reconcile_trigger", "event") == "task_revision_change"
+            validate_task_revision_change_transaction!(tx, policy: policy,
+              pinned_policies: pinned_policies, accepted_assertions: accepted_assertions,
+              marker: marker, authority_verifier: authority_verifier,
+              runtime_identity_verifier: runtime_identity_verifier,
+              lifecycle_verifier: lifecycle_verifier, seen_event_ids: seen_event_ids,
+              all_txs: all_txs)
+          else
+            validate_checkpoint_transaction!(tx, policy: policy, pinned_policies: pinned_policies,
+              accepted_assertions: accepted_assertions,
+              marker: marker, authority_verifier: authority_verifier,
+              runtime_identity_verifier: runtime_identity_verifier,
+              lifecycle_verifier: lifecycle_verifier, seen_event_ids: seen_event_ids,
+              all_txs: all_txs)
+          end
+        when SESSION_CHECKPOINT_PAYLOAD_KEYS
           validate_checkpoint_transaction!(tx, policy: policy, pinned_policies: pinned_policies,
             accepted_assertions: accepted_assertions,
             marker: marker, authority_verifier: authority_verifier,
@@ -1210,9 +1315,14 @@ module Orbit
           raise checkpoint_invalid("checkpoint pins a policy the store never accepted") unless pinned_policy
         end
 
-        unless canonical_equal?(checkpoint["task_queue"], registry["owned_task_refs"])
+        # The queue derives from the accepted checkpoint lineage (the
+        # unique current tip), never from the immutable genesis registry
+        # claim: a TaskRevision activation advances the queue, and any
+        # regression or fork fails closed (transfers deferred).
+        current_queue = latest["task_queue"]
+        unless canonical_equal?(checkpoint["task_queue"], current_queue)
           raise checkpoint_invalid(
-            "checkpoint task queue must exact-match the control ownership claim (transfers deferred)"
+            "checkpoint task queue must exact-match the current lineage tip queue"
           )
         end
         active_ref = checkpoint["active_task_ref"]
@@ -1274,6 +1384,216 @@ module Orbit
           runtime_identity_verifier, lifecycle_verifier
         ) unless skip_assembled
         tx
+      end
+
+      # Full final validation of one TaskRevision activation transaction:
+      # an exact task_revision_change checkpoint that transitions the owned
+      # task from the exact accepted parent revision (the current queue
+      # revision) to the exact accepted child revision of the SAME task.
+      # The child must be the immediate successor (no skipped revisions),
+      # exact ID+digest pinned by the checkpoint queue and active task ref,
+      # must pin the currently active policy, and the complete assembled
+      # snapshot (parent + child task facts) runs through the public
+      # Validator. Activation is rejected while any active/nonterminal
+      # attempt exists on the control; the registry stays the immutable
+      # genesis claim and the queue/task facts derive from the accepted
+      # checkpoint lineage.
+      def validate_task_revision_change_transaction!(tx, policy:, pinned_policies:, accepted_assertions:, marker:,
+                                                     authority_verifier:, runtime_identity_verifier:,
+                                                     lifecycle_verifier:, seen_event_ids:, all_txs:)
+        checkpoint = tx.fetch("checkpoint")
+        assertion = tx.fetch("assertion")
+        control_id = checkpoint["lead_control_id"]
+        project_id = policy ? policy["project_id"] : marker["project_id"]
+        validator = Orbit::V2::Validator.new(project_root: @active_root)
+        begin
+          validator.validate_document!("lead_checkpoint", checkpoint)
+          validator.validate_document!("authority_assertion", assertion)
+        rescue ValidationFailure, ContractError
+          raise activation_invalid("records violate their contracts")
+        end
+        unless CanonicalJSON.content_digest(checkpoint) == checkpoint["content_digest"]
+          raise activation_invalid("activation checkpoint content_digest is not self-consistent")
+        end
+        unless checkpoint["project_id"] == project_id && assertion["project_id"] == project_id
+          raise activation_invalid("records do not all carry the marker project identity")
+        end
+        register_id!(seen_event_ids, "lead_checkpoint", checkpoint.fetch("lead_checkpoint_id"), :activation)
+        register_id!(seen_event_ids, "authority_assertion", assertion.fetch("assertion_id"), :activation)
+        if checkpoint["is_genesis"] == true
+          raise activation_invalid("activation checkpoint must be non-genesis")
+        end
+        genesis_tx = all_txs.reverse.find do |candidate|
+          candidate.is_a?(Hash) && candidate.keys.sort == PAYLOAD_KEYS &&
+            candidate.fetch("registry").fetch("lead_control_id") == control_id
+        end
+        raise activation_invalid("activation must belong to an accepted control") unless genesis_tx
+        registry = genesis_tx.fetch("registry")
+        prior = all_txs.select do |candidate|
+          checkpoint_entries(candidate).any? do |entry|
+            entry.fetch("checkpoint").fetch("lead_control_id") == control_id
+          end
+        end
+        prior_entries = prior.flat_map { |candidate| checkpoint_entries(candidate) }.select do |entry|
+          entry.fetch("checkpoint").fetch("lead_control_id") == control_id
+        end
+        # The unique current tip includes the genesis checkpoint when no
+        # successor exists: a fresh r1 control can directly activate an
+        # accepted child revision.
+        tip_entries = [{ "checkpoint" => genesis_tx.fetch("checkpoint"),
+                         "assertion" => genesis_tx.fetch("assertion") }] + prior_entries
+        tip = tip_entries.last
+        tip_ref = {
+          "lead_checkpoint_id" => tip.fetch("checkpoint").fetch("lead_checkpoint_id"),
+          "content_digest" => tip.fetch("checkpoint").fetch("content_digest")
+        }
+        unless checkpoint["predecessor_lead_checkpoint_ref"] == tip_ref
+          raise activation_invalid(
+            "activation must exact-extend the unique current control tip"
+          )
+        end
+        tip_checkpoint = tip.fetch("checkpoint")
+        session = genesis_tx.fetch("session")
+        agent = genesis_tx.fetch("agent")
+        prior.each do |candidate|
+          if candidate.keys.sort == SESSION_CHECKPOINT_PAYLOAD_KEYS
+            session = candidate.fetch("session")
+            agent = candidate.fetch("agent")
+          end
+        end
+        unless checkpoint["active_lead_session_ref"] == {
+                 "lead_session_id" => session["lead_session_id"],
+                 "session_generation" => session["session_generation"]
+               } &&
+               checkpoint["lead_agent_instance_ref"] == { "agent_instance_id" => agent["agent_instance_id"] } &&
+               checkpoint["lead_runtime_subject_ref"] == session["lead_runtime_subject_ref"] &&
+               checkpoint["lead_runtime_subject_assertion_digest"] ==
+                 session["lead_runtime_subject_assertion_digest"]
+          raise activation_invalid("activation checkpoint pins must equal the bound LeadSession/AgentInstance")
+        end
+        # No active or nonterminal attempt may exist on the control: the
+        # latest attempt representation per attempt id decides (a terminal
+        # reconciliation supersedes the composite payload).
+        latest = latest_attempt_map(all_txs)
+        if latest.values.any? do |entry|
+             entry.fetch("attempt")["lead_control_id"] == control_id &&
+               !terminal_attempt?(entry.fetch("attempt"))
+           end
+          raise activation_invalid(
+            "activation requires no active or nonterminal attempt on the control"
+          )
+        end
+        pinned_ref = checkpoint["project_policy_revision_ref"]
+        if policy
+          unless pinned_ref == {
+            "policy_revision_id" => policy["policy_revision_id"],
+            "content_digest" => policy["content_digest"]
+          }
+            raise activation_invalid(
+              "activation does not pin the currently active policy (stale authority after rotation)"
+            )
+          end
+          pinned_policy = policy
+        else
+          pinned_policy = pinned_policies.find do |candidate|
+            candidate["policy_revision_id"] == pinned_ref["policy_revision_id"] &&
+              candidate["content_digest"] == pinned_ref["content_digest"]
+          end
+          raise activation_invalid("activation pins a policy the store never accepted") unless pinned_policy
+        end
+        begin
+          authority_verifier.verify!(assertion)
+        rescue ContractError => error
+          raise activation_invalid("activation assertion was not provider-verified: #{error.code}")
+        end
+        provenance = checkpoint["writer_authority_provenance"]
+        ref = provenance && provenance["assertion_ref"]
+        grant = unique_policy_grant(pinned_policy, CHECKPOINT_ACTION)
+        valid = provenance.is_a?(Hash) &&
+                provenance["action"] == CHECKPOINT_ACTION &&
+                provenance["policy_revision_ref"] == {
+                  "policy_revision_id" => pinned_policy["policy_revision_id"],
+                  "content_digest" => pinned_policy["content_digest"]
+                } &&
+                assertion["assertion_id"] == ref["assertion_id"] &&
+                assertion["assertion_digest"] == ref["assertion_digest"] &&
+                assertion["authority_scope_ref"] == control_id &&
+                %w[user control_plane].include?(assertion["issuer_kind"]) &&
+                grant.is_a?(Hash) &&
+                Array(assertion["grants"]).include?(grant["required_external_grant"])
+        raise activation_invalid("activation writer authority is not exact-bound") unless valid
+
+        # Parent facts: the control's current queue revision (the tip's
+        # derived task facts, never the TaskStore proposal tip).
+        parent_facts = resolve_task_facts!(tip_checkpoint, registry, authority_verifier)
+        parent = parent_facts.fetch("payload").fetch("task")
+        queue = Array(checkpoint["task_queue"])
+        unless queue.length == 1
+          raise activation_invalid("activation task queue must carry exactly one owned task")
+        end
+        queue_ref = queue.first
+        child_store = TaskStore.new(active_root: @active_root)
+        child_resolved = begin
+          child_store.resolve(
+            task_id: parent.fetch("task_id"),
+            task_revision_id: queue_ref.fetch("task_revision_id"),
+            authority_verifier: authority_verifier
+          )
+        rescue ContractError => error
+          raise activation_invalid("child TaskRevision does not resolve: #{error.code}")
+        end
+        child_resolved = enriched_task_payload(
+          child_resolved, { "task_id" => parent.fetch("task_id") }, child_store, authority_verifier
+        )
+        child = child_resolved.fetch("task")
+        child_ref = {
+          "task_id" => child.fetch("task_id"),
+          "task_revision_id" => child.fetch("task_revision_id"),
+          "content_digest" => child.fetch("content_digest")
+        }
+        unless queue_ref == child_ref && checkpoint["active_task_ref"] == child_ref
+          raise activation_invalid(
+            "activation queue and active task ref must exact-pin the accepted child TaskRevision"
+          )
+        end
+        unless child["task_id"] == parent["task_id"] &&
+               child["parent_task_revision_id"] == parent["task_revision_id"] &&
+               child["revision_number"] == parent["revision_number"] + 1
+          raise activation_invalid(
+            "activation must transition one owned task to its exact immediate child revision"
+          )
+        end
+        unless child["project_policy_revision_ref"] == checkpoint["project_policy_revision_ref"]
+          raise activation_invalid("child TaskRevision must pin the checkpoint's active policy revision")
+        end
+        lead_ref = {
+          "logical_lead_id" => child_resolved.fetch("logical_lead").fetch("logical_lead_id"),
+          "content_digest" => child_resolved.fetch("logical_lead").fetch("content_digest")
+        }
+        unless checkpoint["logical_lead_refs"] == [lead_ref]
+          raise activation_invalid(
+            "activation logical lead refs must exact-match the accepted task LogicalLead"
+          )
+        end
+        unless checkpoint.dig("lead_decision", "action") == "continue"
+          raise activation_invalid("activation decision must be the deterministic continue outcome")
+        end
+        unless checkpoint.dig("next_trigger", "event") == "successor_before"
+          raise activation_invalid("activation must await the successor boundary")
+        end
+        # Full semantic closure over parent + child task facts (the child
+        # resolve carries the complete revision histories): queue
+        # progression, selection, decisions, lineage, and writer authority.
+        validate_assembled_snapshot!(
+          marker, pinned_policies, accepted_assertions, genesis_tx, prior, tx,
+          child_resolved, authority_verifier,
+          runtime_identity_verifier, lifecycle_verifier
+        )
+        tx
+      rescue ContractError => error
+        raise error if error.code == "control_store_activation_invalid"
+
+        raise activation_invalid("#{error.code}: #{error.message}")
       end
 
       # Shared closure for the successor binding carried by the atomic
@@ -1669,9 +1989,10 @@ module Orbit
       # immutable AttemptCreated-only payload) is classified, and any
       # non-terminal attempt sharing control, task, work unit, or canonical
       # runtime subject with the candidate fails closed.
-      def reject_nonterminal_conflicts!(txs, control_id, attempt, worker, failure,
-                                        terminal_overrides: {})
-        invalid = failure == :terminal ? method(:terminal_invalid) : method(:dispatch_invalid)
+      # The LATEST attempt representation per attempt id across the accepted
+      # execution and terminal transactions: a terminal reconciliation
+      # supersedes the composite's immutable AttemptCreated-only payload.
+      def latest_attempt_map(txs)
         latest = {}
         txs.each do |candidate|
           next unless candidate.is_a?(Hash)
@@ -1691,6 +2012,13 @@ module Orbit
             }
           end
         end
+        latest
+      end
+
+      def reject_nonterminal_conflicts!(txs, control_id, attempt, worker, failure,
+                                        terminal_overrides: {})
+        invalid = failure == :terminal ? method(:terminal_invalid) : method(:dispatch_invalid)
+        latest = latest_attempt_map(txs)
         terminal_overrides.each do |attempt_id, representation|
           latest[attempt_id]["attempt"] = representation if latest[attempt_id]
         end
@@ -1814,13 +2142,13 @@ module Orbit
           "schema_version" => "orbit-v2-contract-bundle-v1",
           "protocol_epoch" => "orbit-v2",
           "protocol_root" => marker,
-          "authority_assertions" => accepted_assertions + assertions + task_payload.fetch("authority_assertions"),
-          "authorization_records" => task_payload.fetch("authorization_records"),
+          "authority_assertions" => accepted_assertions + assertions + task_payload.fetch("all_authority_assertions"),
+          "authorization_records" => task_payload.fetch("all_authorization_records"),
           "project_policy_revisions" => pinned_policies,
-          "task_revisions" => [task_payload.fetch("task")],
-          "gate_requirements" => task_payload.fetch("gate_requirements"),
-          "work_units" => task_payload.fetch("work_units"),
-          "change_theses" => task_payload.fetch("change_theses"),
+          "task_revisions" => task_payload.fetch("task_revisions"),
+          "gate_requirements" => task_payload.fetch("all_gate_requirements"),
+          "work_units" => task_payload.fetch("all_work_units"),
+          "change_theses" => task_payload.fetch("all_change_theses"),
           "logical_leads" => [task_payload.fetch("logical_lead")],
           "lead_sessions" => sessions.values,
           "control_registries" => [genesis_tx.fetch("registry")],
@@ -1847,20 +2175,34 @@ module Orbit
       # deferred) through the accepted TaskStore and returns the FULL
       # accepted task-definition payload the checkpoint must close against.
       # A task whose pinned policy does not match the checkpoint's pinned
-      # policy is never an acceptable dispatch basis.
+      # policy is never an acceptable dispatch basis. The resolved revision
+      # is the checkpoint's OWN task queue revision (the current queue
+      # derived from the accepted checkpoint lineage, never the TaskStore
+      # proposal tip), and its parent chain must reach the immutable
+      # registry claim — so a proposal that is not yet activated never
+      # reinterprets an r1 control, and an activation or dispatch can never
+      # use a skipped, cross-task, unknown, or digest-forged revision.
       def resolve_task_facts!(checkpoint, registry, authority_verifier)
         owned = Array(registry["owned_task_refs"])
         raise checkpoint_invalid("checkpoint requires exactly one owned task (transfers deferred)") unless owned.length == 1
 
+        claim = owned.first
+        queue = Array(checkpoint["task_queue"])
+        queue_ref = queue.length == 1 ? queue.first : nil
+        unless queue_ref.is_a?(Hash) && queue_ref["task_id"] == claim["task_id"]
+          raise checkpoint_invalid(
+            "checkpoint task queue must pin the owned task identity (transfers deferred)"
+          )
+        end
         task_store = TaskStore.new(active_root: @active_root)
         resolved = begin
           task_store.resolve(
-            task_id: owned.first.fetch("task_id"),
-            task_revision_id: owned.first.fetch("task_revision_id"),
+            task_id: claim.fetch("task_id"),
+            task_revision_id: queue_ref.fetch("task_revision_id"),
             authority_verifier: authority_verifier
           )
         rescue ContractError => error
-          raise checkpoint_invalid("owned task has no accepted task definition: #{error.code}")
+          raise checkpoint_invalid("owned task has no accepted definition at the queue revision: #{error.code}")
         end
         task = resolved.fetch("task")
         task_ref = {
@@ -1868,8 +2210,27 @@ module Orbit
           "task_revision_id" => task.fetch("task_revision_id"),
           "content_digest" => task.fetch("content_digest")
         }
-        unless owned.first == task_ref
-          raise checkpoint_invalid("control ownership claim must exact-match the accepted TaskRevision")
+        unless queue_ref == task_ref
+          raise checkpoint_invalid("checkpoint task queue ref must exact-match the accepted TaskRevision")
+        end
+        # The queue revision must descend from the immutable registry claim
+        # (same task, exact revision lineage) — forged or unrelated
+        # revisions never satisfy ownership.
+        revisions = resolved.fetch("task_revisions")
+        cursor = task
+        claim_found = false
+        while cursor
+          if cursor["task_revision_id"] == claim["task_revision_id"]
+            claim_found = cursor["content_digest"] == claim["content_digest"]
+            break
+          end
+          parent_id = cursor["parent_task_revision_id"]
+          cursor = parent_id && revisions.find { |revision| revision["task_revision_id"] == parent_id }
+        end
+        unless claim_found
+          raise checkpoint_invalid(
+            "queue revision must descend from the exact registry ownership claim"
+          )
         end
         unless task["project_policy_revision_ref"] == checkpoint["project_policy_revision_ref"]
           raise checkpoint_invalid(
@@ -1877,6 +2238,7 @@ module Orbit
           )
         end
         lead = resolved.fetch("logical_lead")
+        payload = enriched_task_payload(resolved, claim, task_store, authority_verifier)
         {
           "task_ref" => task_ref,
           "logical_lead_ref" => {
@@ -1890,8 +2252,31 @@ module Orbit
             }
           end,
           "work_units" => resolved.fetch("work_units"),
-          "payload" => resolved
+          "payload" => payload
         }
+      end
+
+      # Full accepted facts across every accepted revision of the owned
+      # task (records + issuance assertions per revision), so assembled
+      # snapshots that include historical checkpoints/attempts always
+      # resolve their authority facts.
+      def enriched_task_payload(resolved, claim, task_store, authority_verifier)
+        all_authorization_records = resolved.fetch("task_revisions").flat_map do |revision|
+          task_store.resolve(
+            task_id: claim.fetch("task_id"),
+            task_revision_id: revision.fetch("task_revision_id"),
+            authority_verifier: authority_verifier
+          ).fetch("authorization_records")
+        end
+        all_authority_assertions = resolved.fetch("task_revisions").flat_map do |revision|
+          task_store.resolve(
+            task_id: claim.fetch("task_id"),
+            task_revision_id: revision.fetch("task_revision_id"),
+            authority_verifier: authority_verifier
+          ).fetch("authority_assertions")
+        end
+        resolved.merge("all_authorization_records" => all_authorization_records,
+          "all_authority_assertions" => all_authority_assertions)
       end
 
       # The minimum session successor/termination form required for
@@ -2032,6 +2417,15 @@ module Orbit
         )
       end
 
+      def activation_invalid(message, details = nil)
+        ContractError.new(
+          "control_store_activation_invalid",
+          "control activation rejected: #{message}",
+          path: "control_store.activate",
+          details: details
+        )
+      end
+
       def register_id!(seen_ids, kind, id, failure = :genesis)
         return if seen_ids.add?(id)
 
@@ -2041,6 +2435,8 @@ module Orbit
           raise dispatch_invalid("#{kind} id #{id} is globally create-only and reused")
         elsif failure == :terminal
           raise terminal_invalid("#{kind} id #{id} is globally create-only and reused")
+        elsif failure == :activation
+          raise activation_invalid("#{kind} id #{id} is globally create-only and reused")
         end
 
         raise genesis_invalid("#{kind} id #{id} is globally create-only and reused")
