@@ -66,7 +66,7 @@ module Orbit
     #   re-resolves. Returns `:appended` or `:idempotent` (committed
     #   replay). Stale, unauthorized, self-authorizing, cross-project, or
     #   unpinned successors fail closed and leave bytes unchanged.
-    # - `records` returns detached verified transaction payloads in chain
+    # - `records` returns detached TransactionLog-verified transaction payloads in chain
     #   order; `resolve(pinned_genesis_ref:, authority_verifier:)`
     #   REQUIRES a configured authority verifier and returns
     #   {genesis_policy, genesis_assertion, active_policy} after verifying
@@ -330,7 +330,11 @@ module Orbit
         {
           "genesis_policy" => genesis,
           "genesis_assertion" => txs.first.fetch("assertion"),
-          "active_policy" => txs.last.fetch("policy")
+          "active_policy" => txs.last.fetch("policy"),
+          # The complete accepted revision list comes from the SAME
+          # provider-verified snapshot the lineage was resolved from, never
+          # a separate read.
+          "accepted_policies" => txs.map { |tx| tx.fetch("policy") }
         }
       end
 

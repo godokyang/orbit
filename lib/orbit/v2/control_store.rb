@@ -57,7 +57,7 @@ module Orbit
     #   control, a reused control with different content, an overlapping
     #   owned task, or an already-active canonical runtime subject fails
     #   closed.
-    # - `records` returns detached verified transaction payloads in chain
+    # - `records` returns detached TransactionLog-verified transaction payloads in chain
     #   order; `resolve(control_id:, authority_verifier:,
     #   runtime_identity_verifier:, lifecycle_verifier:)` REQUIRES all
     #   three configured verifiers and returns {registry, session,
@@ -243,10 +243,11 @@ module Orbit
         unless resolved.fetch("genesis_policy").fetch("project_id") == marker["project_id"]
           raise genesis_invalid("policy store genesis project does not match the marker project")
         end
-        accepted_policies = policy_store.records.map { |tx| tx.fetch("policy") }
         {
           "active" => resolved.fetch("active_policy"),
-          "accepted" => accepted_policies
+          # Accepted revisions come from the SAME provider-verified
+          # PolicyStore snapshot as the resolved lineage.
+          "accepted" => resolved.fetch("accepted_policies")
         }
       rescue ContractError => e
         raise e if e.code == "control_store_genesis_invalid"

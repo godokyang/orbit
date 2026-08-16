@@ -1179,3 +1179,53 @@ active-policy resolution from the PolicyStore (Slice 6 increment 3).
 - Not implemented: successor checkpoints, session replacement, task/
   checkpoint/evidence general writers, CLI activation, legacy deletion,
   and E2E cutover.
+
+## Slice 6 increment 5 addendum: durable controlled task-definition store
+
+Lands `Orbit::V2::TaskStore`, the durable controlled task-definition store
+under the canonical ProtocolRoot active root, on top of the TransactionLog
+CAS, the ActiveRoot canonical-root proof, and the provider-verified
+PolicyStore resolution (Slice 6 increments 1-4). One canonical transaction
+per task carries the revision-1 TaskRevision, its owned GateRequirement
+set, the WorkUnit graph, the revision-1 ChangeTheses, and their
+AuthorityAssertions + AuthorizationRecords, all-or-nothing.
+
+- Commit and resolve prove the canonical ActiveRoot/ProtocolRoot marker and
+  the marker project exact-binding, then resolve the provider-verified
+  accepted policy lineage from the PolicyStore with a FIXED root lock order
+  (policy log lock -> task log lock); the accepted revision list comes from
+  the SAME provider-verified PolicyStore snapshot as the resolved lineage
+  (never a separate read), so a policy rotation can never create
+  stale-policy acceptance. Validation and the append share ONE locked
+  snapshot.
+- Genesis closes final schemas/content digests/epoch/project and exact
+  ownership/ref closure: parentless revision-1 task with the exact policy
+  pin (writer: currently active; reader: accepted revision), exact owned
+  gate set with parentless lineages, gate acceptance/question refs
+  resolving to task stable IDs, gate selector work-unit refs closing
+  against the owned units, each policy protected_gate_minimums entry met by
+  at least one same-kind protected gate with ALL such gates meeting the
+  GateStrength evidence/independence minimums (unrelated legal gates stay
+  allowed), one-root reachable acyclic parent/dependency work graph, every
+  revision-1 thesis referenced by exactly one WorkUnit with an exact
+  initial pin, canonical work authority scopes (stable actions, canonical
+  writable paths, exact authorization-record provenance with
+  WorkAuthority.scope_digest subjects), authority assertion sets
+  exact-equal to the sources consumed by AuthorizationRecords, and
+  policy-enabled grants (unique policy grant + assertion grants). Genesis
+  carries empty unresolved_finding_refs (findings are later create-only
+  facts — no forward dangling refs) and must not claim protected-change
+  authorization or self-authorize.
+- Same task id with byte-identical canonical content is idempotent ONLY
+  after the whole existing snapshot re-verifies; same id with different
+  content, malformed/unknown/half/forked persisted data, and IDs borrowed
+  across transactions (task/gate/gate-lineage/work-unit/thesis/assertion/
+  authorization ids are globally create-only) fail closed; concurrent
+  same-identity genesis accepts exactly one transaction. Missing or
+  malformed inputs and persisted component types produce documented
+  ContractError codes, never KeyError/NoMethodError/TypeError.
+- DEFERRED explicitly to later increments: successor TaskRevisions
+  (revision_number > 1, parent refs, protected-change authorization
+  envelopes), ChangeThesis revisions > 1, GateRequirement successor
+  lineages, TaskAuthority task-level records, and evidence/finding
+  machinery.

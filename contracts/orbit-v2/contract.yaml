@@ -132,6 +132,23 @@ control_authority_store:
     fail_closed: [unknown, malformed, fork, half_transaction, missing_control]
   not_implemented: [successor_checkpoints, session_replacement, general_writers]
 
+task_authority_store:
+  seam: Orbit::V2::TaskStore
+  location: canonical_active_root_only_canonical_real_active_root_proof_required
+  transaction_file: task-definitions.json
+  transaction_shape: closed_payload_of_revision1_task_owned_gates_work_unit_graph_revision1_theses_and_their_assertions_and_authorization_records
+  genesis:
+    authority_before_append: [provider_verified_active_policy_from_policy_store_same_snapshot_accepted_revisions, fixed_lock_order_policy_log_then_task_log, provider_verified_assertions, policy_enabled_grants]
+    final_validation: [schemas, content_digests, epoch, project, exact_ownership_and_ref_closure, parentless_revision1_task, empty_unresolved_finding_refs, no_protected_change_authorization_or_self_authorization, stable_requirement_question_evidence_ids, exact_gate_ownership_and_policy_minimums, one_root_reachable_acyclic_work_graph, exact_revision1_thesis_pin_per_work_unit, canonical_work_authority_scopes, exact_assertion_and_authorization_set_closure]
+    results: [appended, idempotent_only_after_whole_existing_snapshot_reverifies]
+    reused_task_or_different_content_or_borrowed_ids: fail_closed
+    concurrent_same_identity: exactly_one_accepted
+  reader:
+    replay: from_protocol_root_anchor_with_provider_reverification_and_cross_transaction_create_only_closure
+    fail_closed: [unknown, malformed, half, forked, borrowed_cross_transaction_ids]
+  deferred: [successor_task_revisions_with_protected_change_authorization, thesis_revisions_above_one, gate_successor_lineages, task_authority_records, evidence_finding_machinery]
+
+
 policy_authority_store:
   seam: Orbit::V2::PolicyStore
   location: canonical_active_root_only
