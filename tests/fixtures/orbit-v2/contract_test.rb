@@ -83,6 +83,7 @@ module OrbitV2ContractTest
     test_control_store_concurrency
     test_control_store_checkpoint
     test_control_store_dispatch
+    test_control_store_terminal
     test_control_store_lineage_fail_closed
     test_task_store_genesis
     test_task_store_lineage_fail_closed
@@ -3669,8 +3670,9 @@ module OrbitV2ContractTest
   end
 
   def test_control_store_genesis
-    assert(Orbit::V2::ControlStore.instance_methods(false).sort == %i[checkpoint dispatch genesis records resolve],
-      "ControlStore exposes exactly its five public seams")
+    assert(Orbit::V2::ControlStore.instance_methods(false).sort ==
+      %i[checkpoint dispatch genesis records recover resolve terminal],
+      "ControlStore exposes exactly its seven public seams")
     Dir.mktmpdir do |dir|
       bundle = OrbitV2FixtureFactory.valid_bundle
       store, _policy, task = control_store_seeded_root(dir, bundle)
@@ -4004,14 +4006,19 @@ module OrbitV2ContractTest
     end
   end
 
-  def control_store_execution_records(bundle, policy, control_records, task_records, project_root)
+  def control_store_execution_records(bundle, policy, control_records, task_records, project_root,
+                                      attempt_id: "oattempt_inc6bimplementation",
+                                      dispatch_id: "olcheckpoint_inc6bdispatch",
+                                      worker_id: "oagent_inc6bworker",
+                                      rule_path: "rules/inc6b-coder.md",
+                                      predecessor: nil,
+                                      started_at: "2026-07-30T02:01:00Z")
     control_id = control_records[0]["lead_control_id"]
     task = task_records[0]
     unit = task_records[2].first
     thesis = task_records[3].find { |candidate| candidate["work_unit_id"] == unit["work_unit_id"] }
-    worker = OrbitV2FixtureFactory.agent("oagent_inc6bworker", "coder")
-    attempt_id = "oattempt_inc6bimplementation"
-    rule_path = "rules/inc6b-coder.md"
+    worker = OrbitV2FixtureFactory.agent(worker_id, "coder")
+    rule_path = rule_path
     rule_bytes = "Inc6b coder rule.\n"
     FileUtils.mkdir_p(File.join(project_root, "rules"))
     File.write(File.join(project_root, rule_path), rule_bytes)
@@ -4047,14 +4054,16 @@ module OrbitV2ContractTest
       rule["resolution_id"], 1, policy["content_digest"], task_id: task["task_id"],
       task_revision_id: task["task_revision_id"], lead_control_id: control_id,
       authorization_record_refs: unit.dig("authority_scope", "authorization_record_refs"),
-      started_at: "2026-07-30T02:01:00Z")
+      started_at: started_at)
     lead = task_records[6]
-    dispatch_assertion = OrbitV2FixtureFactory.assertion("oassert_inc6bdispatch",
+    dispatch_assertion = OrbitV2FixtureFactory.assertion(
+      "oassert_#{dispatch_id.delete_prefix('olcheckpoint_')}dispatch",
       %w[control.checkpoint], "control-plane-writer", authority_scope_ref: control_id)
+    predecessor ||= control_records[2]
     dispatch = OrbitV2FixtureFactory.lead_checkpoint(
-      "olcheckpoint_inc6bdispatch", is_genesis: false,
-      predecessor_ref: OrbitV2FixtureFactory.cp_ref(control_records[2]),
-      predecessor_checkpoint: control_records[2], policy: policy,
+      dispatch_id, is_genesis: false,
+      predecessor_ref: OrbitV2FixtureFactory.cp_ref(predecessor),
+      predecessor_checkpoint: predecessor, policy: policy,
       session: control_records[1], agent: control_records[3], logical_lead: lead,
       task: task, writer_action: "control.checkpoint", writer_assertion: dispatch_assertion,
       lead_control_id: control_id, active_task_ref: OrbitV2FixtureFactory.task_ref(task),
@@ -4066,7 +4075,8 @@ module OrbitV2ContractTest
         "identity_sha256" => rule["identity_sha256"] },
       decision: OrbitV2FixtureFactory::DISPATCH_DECISION)
     attempt["dispatch_lead_checkpoint_ref"] = OrbitV2FixtureFactory.cp_ref(dispatch)
-    observation_assertion = OrbitV2FixtureFactory.assertion("oassert_inc6bobservation",
+    observation_assertion = OrbitV2FixtureFactory.assertion(
+      "oassert_#{attempt_id.delete_prefix('oattempt_')}observation",
       %w[control.checkpoint], "control-plane-writer", authority_scope_ref: control_id)
     observation = OrbitV2FixtureFactory.observation_checkpoint(dispatch, attempt,
       policy: policy, resolution: rule)
@@ -4074,6 +4084,105 @@ module OrbitV2ContractTest
       policy, "control.checkpoint", observation_assertion)
     observation = OrbitV2FixtureFactory.digested(observation)
     [rule, dispatch, dispatch_assertion, attempt, worker, observation, observation_assertion]
+  end
+
+  def control_store_terminal_records(bundle, policy, control_records, task_records, execution,
+                                     project_root, checkpoint_id: "olcheckpoint_inc6bterminal",
+                                     event_type: "AttemptCompleted",
+                                     successor_attempt_id: "oattempt_inc6csuccessor",
+                                     successor_worker_id: "oagent_inc6csuccessorworker",
+                                     rule_path: "rules/inc6c-successor.md",
+                                     successor_started_at: "2026-07-30T02:40:00Z",
+                                     terminal_ended_at: "2026-07-30T02:30:00Z")
+    control_id = control_records[0]["lead_control_id"]
+    stored = execution[3]
+    unit = task_records[2].first
+    thesis = task_records[3].find { |candidate| candidate["work_unit_id"] == unit["work_unit_id"] }
+    terminal_event = OrbitV2FixtureFactory.event(
+      "oevent_#{stored["attempt_id"].delete_prefix('oattempt_')}_#{event_type.downcase}",
+      event_type, stored.dig("events", -1, "event_digest"),
+      "ended_at" => terminal_ended_at,
+      "status" => { "AttemptCompleted" => "completed", "AttemptFailed" => "failed",
+        "AttemptBlocked" => "blocked", "AttemptCancelled" => "cancelled",
+        "AttemptSuperseded" => "superseded" }.fetch(event_type))
+    attempt = OrbitV2FixtureFactory.deep_copy(stored)
+    attempt["events"] = stored["events"] + [terminal_event]
+    assertion = OrbitV2FixtureFactory.assertion(
+      "oassert_#{checkpoint_id.delete_prefix('olcheckpoint_')}terminal",
+      %w[control.checkpoint], "control-plane-writer", authority_scope_ref: control_id)
+    observation = execution[5]
+    worker = OrbitV2FixtureFactory.agent(successor_worker_id, "coder")
+    rule_bytes = "Inc6c successor rule.\n"
+    FileUtils.mkdir_p(File.join(project_root, "rules"))
+    File.write(File.join(project_root, rule_path), rule_bytes)
+    source_rule = { "rule_id" => "rule_inc6c_successor", "path" => rule_path,
+      "content_sha256" => "sha256:#{Digest::SHA256.hexdigest(rule_bytes)}", "relation" => "baseline" }
+    identity = {
+      "identity_schema" => "orbit-rule-resolution-identity-v1",
+      "protocol_epoch" => "orbit-v2",
+      "project_id" => OrbitV2FixtureFactory::PROJECT_ID,
+      "task_id" => task_records[0]["task_id"],
+      "task_revision_id" => task_records[0]["task_revision_id"],
+      "work_unit_id" => unit["work_unit_id"],
+      "attempt_id" => successor_attempt_id,
+      "resolved_role" => "coder",
+      "agent_instance_id" => worker["agent_instance_id"],
+      "context_generation" => 1,
+      "required_rules" => [OrbitV2FixtureFactory.deep_copy(source_rule)]
+    }
+    canonical = Orbit::V2::RuleResolution.canonical_identity(identity,
+      project_root: project_root, verify_files: true)
+    identity_sha = Orbit::V2::CanonicalJSON.sha256(canonical)
+    rule = {
+      "schema_version" => "orbit-rule-resolution-v2",
+      "protocol_epoch" => "orbit-v2",
+      "project_id" => OrbitV2FixtureFactory::PROJECT_ID,
+      "resolution_id" => "rr-sha256-#{identity_sha}",
+      "identity" => canonical,
+      "identity_sha256" => "sha256:#{identity_sha}",
+      "envelope" => { "created_at" => "2026-07-30T02:35:00Z" }
+    }
+    successor = OrbitV2FixtureFactory.attempt(successor_attempt_id, unit["work_unit_id"],
+      worker["agent_instance_id"], "coder", "implementation", thesis,
+      rule["resolution_id"], 2, policy["content_digest"], task_id: task_records[0]["task_id"],
+      task_revision_id: task_records[0]["task_revision_id"], lead_control_id: control_id,
+      authorization_record_refs: unit.dig("authority_scope", "authorization_record_refs"),
+      predecessor_work_unit_attempt_ref: stored["attempt_id"],
+      started_at: successor_started_at)
+    checkpoint = OrbitV2FixtureFactory.lead_checkpoint(
+      checkpoint_id, is_genesis: false,
+      predecessor_ref: OrbitV2FixtureFactory.cp_ref(observation),
+      predecessor_checkpoint: observation, policy: policy,
+      session: control_records[1], agent: control_records[3], logical_lead: task_records[6],
+      task: task_records[0], writer_action: "control.checkpoint", writer_assertion: assertion,
+      lead_control_id: control_id, active_task_ref: OrbitV2FixtureFactory.task_ref(task_records[0]),
+      selected_work_unit_ref: OrbitV2FixtureFactory.work_unit_ref(unit),
+      task_queue: [OrbitV2FixtureFactory.task_ref(task_records[0])], unit: unit,
+      attempt_ref: OrbitV2FixtureFactory.attempt_event_ref([attempt], attempt["attempt_id"], -1),
+      proposed_thesis_ref: { "change_thesis_id" => thesis["change_thesis_id"],
+        "content_digest" => thesis["content_digest"] },
+      proposed_rule_ref: OrbitV2FixtureFactory.pinned_rule_ref(successor, rule),
+      decision: OrbitV2FixtureFactory::DISPATCH_DECISION,
+      reconcile_trigger: { "event" => "attempt_terminal", "reason" => "Terminal observation authorizes the successor dispatch." },
+      next_trigger: { "event" => "attempt_created", "reason" => "Awaiting the successor AttemptCreated observation." })
+    successor["dispatch_lead_checkpoint_ref"] = OrbitV2FixtureFactory.cp_ref(checkpoint)
+    observation_assertion = OrbitV2FixtureFactory.assertion(
+      "oassert_#{successor_attempt_id.delete_prefix('oattempt_')}observation",
+      %w[control.checkpoint], "control-plane-writer", authority_scope_ref: control_id)
+    successor_observation = OrbitV2FixtureFactory.observation_checkpoint(checkpoint, successor,
+      policy: policy, resolution: rule)
+    successor_observation["writer_authority_provenance"] = OrbitV2FixtureFactory.writer_provenance(
+      policy, "control.checkpoint", observation_assertion)
+    successor_observation = OrbitV2FixtureFactory.digested(successor_observation)
+    [attempt, checkpoint, assertion, successor, worker, rule, successor_observation, observation_assertion]
+  end
+
+  def control_store_terminal(store, records, verifiers)
+    store.terminal(attempt: records[0], checkpoint: records[1], assertion: records[2],
+      successor_attempt: records[3], worker_agent: records[4], rule_resolution: records[5],
+      observation_checkpoint: records[6], observation_assertion: records[7],
+      authority_verifier: verifiers[0], runtime_identity_verifier: verifiers[1],
+      lifecycle_verifier: verifiers[2])
   end
 
   def control_store_dispatch(store, records, verifiers)
@@ -4085,7 +4194,8 @@ module OrbitV2ContractTest
   end
 
   def test_control_store_dispatch
-    assert(Orbit::V2::ControlStore.instance_methods(false).sort == %i[checkpoint dispatch genesis records resolve],
+    assert(Orbit::V2::ControlStore.instance_methods(false).sort ==
+      %i[checkpoint dispatch genesis records recover resolve terminal],
       "ControlStore exposes the atomic dispatch seam")
     Dir.mktmpdir do |dir|
       bundle = OrbitV2FixtureFactory.valid_bundle
@@ -4158,6 +4268,118 @@ module OrbitV2ContractTest
       assert(store.records.size == 2 && store.records.last.keys.sort ==
         Orbit::V2::ControlStore::EXECUTION_PAYLOAD_KEYS,
         "the execution is one closed control-log transaction with no half-state")
+    end
+  end
+
+  def test_control_store_terminal
+    Dir.mktmpdir do |dir|
+      bundle = OrbitV2FixtureFactory.valid_bundle
+      bundle["logical_leads"].first["logical_lead_id"] = "olead_inc6cmain"
+      bundle["logical_leads"].first["content_digest"] =
+        Orbit::V2::CanonicalJSON.content_digest(bundle["logical_leads"].first)
+      store, policy, _task = control_store_seeded_root(dir, bundle)
+      vf = control_verifiers
+      task_records = task_store_genesis_records(bundle)
+      task_store = Orbit::V2::TaskStore.new(active_root: File.join(dir, ".orbit"))
+      assert(task_store_genesis(task_store, task_records, vf[0]) == :appended, "task facts commit")
+      lead_agent = OrbitV2FixtureFactory.agent("oagent_inc6clead", "lead")
+      control_records = control_store_genesis_records(bundle, task_records[0], lead_agent,
+        "olcontrol_inc6cmain", control_store_writer_assertion("olcontrol_inc6cmain"),
+        lead: task_records[6])
+      assert(control_store_genesis(store, control_records, vf) == :appended, "control genesis commits")
+      assert(store.recover(control_id: "olcontrol_inc6cmain", authority_verifier: vf[0],
+        runtime_identity_verifier: vf[1], lifecycle_verifier: vf[2]) ==
+        { "state" => "blocked", "action" => "establish", "reason" => "control anchored" },
+        "recovery treats the genesis checkpoint as the unique tip before any successor")
+      execution = control_store_execution_records(bundle, policy, control_records, task_records, dir)
+      assert(control_store_dispatch(store, execution, vf) == :appended, "dispatch composite commits")
+      terminal_records = control_store_terminal_records(bundle, policy, control_records, task_records, execution, dir)
+      commit_terminal = lambda do |records|
+        control_store_terminal(store, records, vf)
+      end
+      assert(commit_terminal.call(terminal_records) == :appended,
+        "terminal reconciliation appends as one closed transaction")
+      resolved = control_store_resolve(
+        Orbit::V2::ControlStore.new(active_root: File.join(dir, ".orbit")), "olcontrol_inc6cmain", vf)
+      assert(resolved.dig("checkpoint", "lead_checkpoint_id") ==
+        "olcheckpoint_created_inc6csuccessor" &&
+        resolved["checkpoints"].map { |cp| cp["lead_checkpoint_id"] } ==
+          %w[olcheckpoint_inc6bdispatch olcheckpoint_created_inc6bimplementation
+             olcheckpoint_inc6bterminal olcheckpoint_created_inc6csuccessor] &&
+        resolved.dig("attempts", 0, "events", -1, "event_type") == "AttemptCompleted" &&
+        resolved.dig("attempts", 1, "attempt_id") == "oattempt_inc6csuccessor" &&
+        resolved["attempts"].size == 2 && resolved["rule_resolutions"].size == 2,
+        "resolve exposes the terminal tip, both checkpoint events, and latest attempt facts")
+      assert(store.recover(control_id: "olcontrol_inc6cmain", authority_verifier: vf[0],
+        runtime_identity_verifier: vf[1], lifecycle_verifier: vf[2]) ==
+        { "state" => "blocked", "action" => "continue", "reason" => "attempt creation observed" } &&
+        store.recover(control_id: "olcontrol_inc6cmain", authority_verifier: vf[0],
+          runtime_identity_verifier: vf[1], lifecycle_verifier: vf[2]) ==
+        { "state" => "blocked", "action" => "continue", "reason" => "attempt creation observed" },
+        "recovery re-runs the stored tip projection idempotently and returns one state")
+      assert(commit_terminal.call(terminal_records) == :idempotent,
+        "terminal replay is idempotent after full verification")
+      prefix = control_store_terminal_records(bundle, policy, control_records, task_records, execution, dir,
+        checkpoint_id: "olcheckpoint_inc6bprefix")
+      prefix[0].dig("events", 0)["status"] = "superseded"
+      expect_contract_error("control_store_terminal_invalid") { commit_terminal.call(prefix) }
+      superseded = control_store_terminal_records(bundle, policy, control_records, task_records, execution, dir,
+        checkpoint_id: "olcheckpoint_inc6bsuperseded", event_type: "AttemptSuperseded")
+      expect_contract_error("control_store_terminal_invalid") { commit_terminal.call(superseded) }
+      stale = control_store_terminal_records(bundle, policy, control_records, task_records, execution, dir,
+        checkpoint_id: "olcheckpoint_inc6bstale")
+      stale[1]["predecessor_lead_checkpoint_ref"] = OrbitV2FixtureFactory.cp_ref(execution[1])
+      stale[1]["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(stale[1])
+      expect_contract_error("control_store_terminal_invalid") { commit_terminal.call(stale) }
+      unreceipted = control_store_terminal_records(bundle, policy, control_records, task_records, execution, dir,
+        checkpoint_id: "olcheckpoint_inc6bnoreceipt")
+      unreceipted[0].dig("events", -1)["writer_receipt"] = { "receipt_id" => "oreceipt_forged" }
+      expect_contract_error("control_store_terminal_invalid") { commit_terminal.call(unreceipted) }
+      overlap = control_store_terminal_records(bundle, policy, control_records, task_records, execution, dir,
+        checkpoint_id: "olcheckpoint_inc6boverlap", successor_started_at: "2026-07-30T02:20:00Z")
+      expect_contract_error("control_store_terminal_invalid") { commit_terminal.call(overlap) }
+      assert(store.records.size == 3, "rejected terminal records leave the three accepted transactions intact")
+      standalone, standalone_assertion = control_store_checkpoint_records(bundle, policy, control_records,
+        "olcontrol_inc6cmain", "olcheckpoint_inc6cstandalone",
+        { "state" => "blocked", "action" => "dispatch", "reason" => "dispatch authorized" },
+        lead: task_records[6], unit: task_records[2].first)
+      expect_contract_error("control_store_checkpoint_invalid") do
+        store.checkpoint(checkpoint: standalone, assertion: standalone_assertion,
+          authority_verifier: vf[0], runtime_identity_verifier: vf[1], lifecycle_verifier: vf[2])
+      end
+      successor_execution = [terminal_records[5], terminal_records[1], terminal_records[2],
+        terminal_records[3], terminal_records[4], terminal_records[6], terminal_records[7]]
+      second_terminal = control_store_terminal_records(bundle, policy, control_records, task_records,
+        successor_execution, dir, checkpoint_id: "olcheckpoint_inc6bterminal2",
+        successor_attempt_id: "oattempt_inc6cthird", successor_worker_id: "oagent_inc6cthirdworker",
+        rule_path: "rules/inc6c-third.md", successor_started_at: "2026-07-30T03:00:00Z",
+        terminal_ended_at: "2026-07-30T02:50:00Z")
+      signal_r, signal_w = IO.pipe
+      release_r, release_w = IO.pipe
+      recovered_pid = fork do
+        store.recover(control_id: "olcontrol_inc6cmain",
+          authority_verifier: BlockingAuthorityVerifier.new(vf[0], signal_w, release_r),
+          runtime_identity_verifier: vf[1], lifecycle_verifier: vf[2])
+        exit!(0)
+      end
+      signal_w.close
+      assert(signal_r.read(1) == "b", "recovery blocks inside the locked snapshot window")
+      append_pid = fork do
+        control_store_terminal(store, second_terminal, vf)
+        exit!(0)
+      end
+      sleep 0.5
+      assert(Process.waitpid(append_pid, Process::WNOHANG).nil?,
+        "a genuinely new terminal append is excluded while recovery holds the lock window")
+      release_w.write("r")
+      release_w.close
+      Process.wait(recovered_pid)
+      Process.wait(append_pid)
+      final = control_store_resolve(
+        Orbit::V2::ControlStore.new(active_root: File.join(dir, ".orbit")), "olcontrol_inc6cmain", vf)
+      assert(store.records.size == 4 && final.dig("checkpoint", "lead_checkpoint_id") ==
+        "olcheckpoint_created_inc6cthird",
+        "the concurrent append committed exactly one new terminal transaction after recovery")
     end
   end
 

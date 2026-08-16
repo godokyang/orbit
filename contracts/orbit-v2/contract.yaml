@@ -167,14 +167,36 @@ control_authority_store:
   reader:
     replay: from_protocol_root_anchor_with_provider_reverification_of_authority_runtime_identity_and_lifecycle_events
     shape_guarded_genesis_discovery: checkpoint_payloads_never_mistaken_for_genesis_registry_payloads
-    lineage_includes: [ordinary_checkpoint_transactions, session_transition_transactions, atomic_execution_dispatch_transactions]
+    lineage_includes: [ordinary_checkpoint_transactions, session_transition_transactions, atomic_execution_dispatch_transactions, terminal_reconciliation_transactions]
     tip: latest_accepted_checkpoint_assertion_session_and_agent_not_genesis_only_state
     checkpoints: accepted_successor_checkpoints_in_transaction_order
-    execution_projection: [attempts, rule_resolutions, dispatch_and_observation_checkpoints_in_order]
+    execution_projection: [attempts_latest_representation_per_attempt_id, rule_resolutions, dispatch_and_observation_checkpoints_in_order]
     fail_closed: [unknown, malformed, fork, half_transaction, missing_control]
+  terminal_reconciliation:
+    seam_method: terminal
+    transaction_shape: closed_payload_of_terminated_attempt_plus_terminal_checkpoint_and_assertion_plus_successor_composite_attempt_worker_assigned_rule_and_immediate_observation_checkpoint_and_assertion
+    durable_boundary: one_control_transaction_log_record_one_fsync_rename_no_standalone_dispatch_or_attempt_half_state
+    fixed_lock_order: policy_log_then_task_log_then_control_log
+    terminal_closure:
+      - terminated_attempt_must_equal_the_accepted_composite_attempt_plus_exactly_one_provider_verified_terminal_event_byte_identical_prefix
+      - terminal_event_types: [AttemptCompleted, AttemptFailed, AttemptBlocked, AttemptCancelled]
+      - terminal_checkpoint_exact_extends_the_unique_current_observation_tip_of_the_attempt_and_terminal_pins_the_exact_terminal_event
+      - terminal_checkpoint_is_the_exact_authorizing_dispatch_checkpoint_of_the_successor_composite_in_the_same_transaction
+      - successor_attempt_exact_chains_to_the_terminated_attempt_and_starts_after_the_terminal_event
+      - dispatch_decision_outside_the_atomic_execution_or_terminal_composite_is_rejected_including_ordinary_checkpoint_and_terminal_without_successor
+    results: [appended, idempotent_only_after_whole_existing_snapshot_reverifies]
+    fail_closed: [prefix_mutation, unallowed_terminal_type, stale_tip, wrong_attempt, provider_failure, successor_overlap, reused_ids, partial_payload]
+  recovery:
+    seam_method: recover
+    boundary: pure_read_reconcile_never_writes_never_synthesizes_facts_never_redispatches_an_accepted_attempt
+    lock_window: policy_log_then_task_log_then_control_log_held_over_the_complete_read_reverify_tip_derivation_and_reconcile
+    tip: unique_current_accepted_checkpoint_genesis_checkpoint_is_the_tip_when_no_successor_exists
+    projection: tip_stored_trigger_re_run_through_deterministic_LeadControl_reconcile_over_the_assembled_snapshot_idempotent
+    result: exactly_one_documented_state_state_action_reason
+    fail_closed: [stored_decision_mismatch, fork, partial_payload, stale_tip, missing_control, unresolvable_task_facts]
   not_implemented: [general_writers]
   deferred_to_later_increments:
-    terminal_attempt_and_successor_reconciliation: later_slice_6
+    terminal_successor_reconciliation: closed_here
     cross_control_session_transfer_and_recovery: later_slice_6
 
 task_authority_store:

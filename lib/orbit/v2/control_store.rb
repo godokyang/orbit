@@ -89,6 +89,15 @@ module Orbit
         attempt dispatch_assertion dispatch_checkpoint observation_assertion
         observation_checkpoint rule_resolution worker_agent
       ].freeze
+      # The terminal reconciliation transaction carries the terminated
+      # attempt plus, when the deterministic attempt_terminal reconcile
+      # authorizes a successor dispatch, the full successor composite: the
+      # terminal checkpoint IS the exact authorizing dispatch checkpoint.
+      TERMINAL_PAYLOAD_KEYS = %w[
+        assertion attempt checkpoint observation_assertion observation_checkpoint
+        rule_resolution successor_attempt worker_agent
+      ].freeze
+      TERMINAL_EVENT_TYPES = %w[AttemptCompleted AttemptFailed AttemptBlocked AttemptCancelled].freeze
       GENESIS_ACTION = "control.genesis".freeze
       CHECKPOINT_ACTION = "control.checkpoint".freeze
 
@@ -282,6 +291,73 @@ module Orbit
         )
       end
 
+      # Commits the controlled atomic terminal reconciliation as ONE
+      # control-log transaction: the accepted Attempt's byte-identical
+      # lifecycle prefix plus exactly one provider-verified terminal event,
+      # and the exact successor LeadCheckpoint + writer assertion that
+      # terminal-pins it. The terminal checkpoint extends the unique current
+      # observation tip of that attempt, and a later dispatch is accepted
+      # only once this terminal transaction is the lineage tip.
+      def terminal(attempt:, checkpoint:, assertion:, successor_attempt:,
+                   worker_agent:, rule_resolution:, observation_checkpoint:,
+                   observation_assertion:, authority_verifier:,
+                   runtime_identity_verifier:, lifecycle_verifier:)
+        unless [attempt, checkpoint, assertion, successor_attempt, worker_agent,
+                rule_resolution, observation_checkpoint, observation_assertion].all? { |record| record.is_a?(Hash) } &&
+               authority_verifier.respond_to?(:verify!) &&
+               runtime_identity_verifier.respond_to?(:verify!) &&
+               lifecycle_verifier.respond_to?(:verify!)
+          raise ContractError.new(
+            "control_store_argument_invalid",
+            "terminal reconciliation requires the terminated attempt, terminal checkpoint, " \
+              "successor composite (attempt/worker/rule/observation) with assertions, and three verifiers",
+            path: "control_store.terminal"
+          )
+        end
+        checkpoint_id = checkpoint["lead_checkpoint_id"]
+        unless checkpoint_id.is_a?(String) && Identifiers.valid?("lead_checkpoint_id", checkpoint_id)
+          raise ContractError.new(
+            "control_store_argument_invalid",
+            "terminal checkpoint lead_checkpoint_id must be a stable checkpoint identifier",
+            path: "control_store.terminal.lead_checkpoint_id"
+          )
+        end
+        candidate = {
+          "assertion" => assertion,
+          "attempt" => attempt,
+          "checkpoint" => checkpoint,
+          "observation_assertion" => observation_assertion,
+          "observation_checkpoint" => observation_checkpoint,
+          "rule_resolution" => rule_resolution,
+          "successor_attempt" => successor_attempt,
+          "worker_agent" => worker_agent
+        }
+        policy_log = File.join(@active_root, PolicyStore::POLICY_TRANSACTIONS_FILE)
+        task_log = File.join(@active_root, TaskStore::TASK_DEFINITIONS_FILE)
+        DurableFile.with_exclusive_lock(policy_log) do
+          DurableFile.with_exclusive_lock(task_log) do
+            @log.append_with(
+              transaction_id: checkpoint_id,
+              payload: candidate,
+              validate: lambda do |records, _tip|
+                validate_terminal_snapshot!(
+                  records, candidate, checkpoint_id,
+                  authority_verifier, runtime_identity_verifier, lifecycle_verifier
+                )
+              end
+            )
+          end
+        end
+      rescue ContractError => e
+        raise e unless e.code == "transaction_log_reuse"
+
+        raise ContractError.new(
+          "control_store_reuse",
+          "terminal checkpoint #{checkpoint_id} already exists with different canonical content",
+          path: "control_store.#{checkpoint_id}"
+        )
+      end
+
       def records
         payloads(@log.records)
       end
@@ -341,7 +417,25 @@ module Orbit
           entry.fetch("checkpoint").fetch("lead_control_id") == control_id
         end
         latest = entries.last || { "checkpoint" => target.fetch("checkpoint"), "assertion" => target.fetch("assertion") }
-        executions = successor_txs.select { |tx| tx.keys.sort == EXECUTION_PAYLOAD_KEYS }
+        # Accepted execution facts: the LATEST attempt representation per
+        # attempt id (a terminal reconciliation supersedes the composite's
+        # immutable AttemptCreated-only payload) plus the content-addressed
+        # rule resolutions carried by the composites.
+        attempts = {}
+        resolutions = {}
+        successor_txs.each do |tx|
+          if tx.keys.sort == EXECUTION_PAYLOAD_KEYS
+            attempt = tx.fetch("attempt")
+            attempts[attempt.fetch("attempt_id")] = attempt
+            resolutions[tx.fetch("rule_resolution").fetch("resolution_id")] = tx.fetch("rule_resolution")
+          elsif tx.keys.sort == TERMINAL_PAYLOAD_KEYS
+            attempt = tx.fetch("attempt")
+            attempts[attempt.fetch("attempt_id")] = attempt if attempts.key?(attempt.fetch("attempt_id"))
+            successor = tx.fetch("successor_attempt")
+            attempts[successor.fetch("attempt_id")] = successor
+            resolutions[tx.fetch("rule_resolution").fetch("resolution_id")] = tx.fetch("rule_resolution")
+          end
+        end
         {
           "registry" => target.fetch("registry"),
           "session" => current_session,
@@ -351,9 +445,126 @@ module Orbit
           # Accepted successor checkpoints of the control, in accepted
           # transaction order.
           "checkpoints" => entries.map { |entry| entry.fetch("checkpoint") },
-          "attempts" => executions.map { |tx| tx.fetch("attempt") },
-          "rule_resolutions" => executions.map { |tx| tx.fetch("rule_resolution") }
+          "attempts" => attempts.values,
+          "rule_resolutions" => resolutions.values
         }
+      end
+
+      # Durable recovery from the unique accepted lineage tip as a pure
+      # read/reconcile seam: the whole snapshot re-verifies, then the tip's
+      # own stored trigger is re-run through the deterministic
+      # LeadControl.reconcile projection over the assembled bundle. The
+      # recomputed decision must byte-equal the stored tip decision
+      # (idempotent by construction); recovery never synthesizes missing
+      # facts, never redispatchs an accepted attempt, and returns exactly
+      # one documented state: the tip decision's state/action/reason.
+      def recover(control_id:, authority_verifier:, runtime_identity_verifier:,
+                  lifecycle_verifier:)
+        unless authority_verifier.respond_to?(:verify!) &&
+               runtime_identity_verifier.respond_to?(:verify!) &&
+               lifecycle_verifier.respond_to?(:verify!)
+          raise ContractError.new(
+            "control_store_argument_invalid",
+            "recover requires configured authority, runtime identity, and lifecycle verifiers",
+            path: "control_store.recover"
+          )
+        end
+        unless control_id.is_a?(String) && Identifiers.valid?("lead_control_id", control_id)
+          raise ContractError.new(
+            "control_store_argument_invalid",
+            "control_id must be a stable lead control identifier",
+            path: "control_store.recover.control_id"
+          )
+        end
+        # The complete recovery window — log read, whole-snapshot
+        # reverification, tip derivation, and reconcile — runs under the
+        # SAME fixed policy -> task -> control locks as every writer
+        # (writers hold policy + task across their append, and the append
+        # itself takes the control log lock), so a concurrent successor can
+        # never append between the read and the returned decision: the
+        # recovered tip is the unique current tip by construction.
+        policy_log = File.join(@active_root, PolicyStore::POLICY_TRANSACTIONS_FILE)
+        task_log = File.join(@active_root, TaskStore::TASK_DEFINITIONS_FILE)
+        control_log = File.join(@active_root, CONTROL_TRANSACTIONS_FILE)
+        recovered = DurableFile.with_exclusive_lock(policy_log) do
+          DurableFile.with_exclusive_lock(task_log) do
+            DurableFile.with_exclusive_lock(control_log) do
+            txs = payloads(@log.records)
+            marker = ActiveRoot.marker_for(@active_root, code: "control_store_unpinned", label: "control_store")
+            policy = begin
+              resolve_active_policy(marker, authority_verifier)
+            rescue ContractError => e
+              raise lineage_invalid("#{e.code}: #{e.message}")
+            end
+            verified = verify_all_transactions!(txs, marker, policy, authority_verifier,
+              runtime_identity_verifier, lifecycle_verifier)
+            genesis_tx = verified.find do |tx|
+              tx.is_a?(Hash) && tx.keys.sort == PAYLOAD_KEYS &&
+                tx.fetch("registry").fetch("lead_control_id") == control_id
+            end
+            unless genesis_tx
+              raise ContractError.new(
+                "control_store_missing",
+                "no accepted genesis exists for control #{control_id}",
+                path: "control_store.#{control_id}"
+              )
+            end
+            control_txs = verified.select do |tx|
+              checkpoint_entries(tx).any? do |entry|
+                entry.fetch("checkpoint").fetch("lead_control_id") == control_id
+              end
+            end
+            entries = control_txs.flat_map { |tx| checkpoint_entries(tx) }.select do |entry|
+              entry.fetch("checkpoint").fetch("lead_control_id") == control_id
+            end
+            # The unique current tip: the genesis checkpoint when no
+            # successor exists, else the last accepted checkpoint of the
+            # lineage (the log is a single compare-and-append chain, so the
+            # last entry is the only tip; the stored-decision reconcile
+            # comparison below fails closed on any stale/corrupted tip).
+            entries = [{ "checkpoint" => genesis_tx.fetch("checkpoint"),
+                         "assertion" => genesis_tx.fetch("assertion") }] + entries
+            tip = entries.last
+            checkpoint = tip.fetch("checkpoint")
+            trigger = checkpoint.dig("reconcile_trigger", "event")
+            trigger = "genesis" if trigger.nil? && checkpoint["is_genesis"] == true
+            unless trigger.is_a?(String) && !trigger.empty?
+              raise recovery_invalid("tip checkpoint carries no stored trigger to re-run")
+            end
+            registry = genesis_tx.fetch("registry")
+            task_facts = begin
+              resolve_task_facts!(checkpoint, registry, authority_verifier)
+            rescue ContractError => error
+              raise recovery_invalid("tip task facts do not resolve: #{error.code}")
+            end
+            bundle = assemble_bundle(marker, policy.fetch("accepted"),
+              policy.fetch("accepted_assertions"), genesis_tx, control_txs,
+              {}, task_facts.fetch("payload"))
+            begin
+              decision = Orbit::V2::LeadControl.reconcile(
+                {
+                  "bundle" => bundle,
+                  "lead_control_id" => control_id,
+                  "lead_checkpoint_ref" => {
+                    "lead_checkpoint_id" => checkpoint["lead_checkpoint_id"],
+                    "content_digest" => checkpoint["content_digest"]
+                  }
+                },
+                trigger
+              )
+            rescue StandardError
+              raise recovery_invalid("tip trigger projection failed to recompute")
+            end
+            unless canonical_equal?(checkpoint["lead_decision"], decision)
+              raise recovery_invalid(
+                "tip stored decision does not match the deterministic reconcile projection"
+              )
+            end
+            decision
+            end
+          end
+        end
+        recovered
       end
 
       private
@@ -387,10 +598,11 @@ module Orbit
         case tx.keys.sort
         when CHECKPOINT_PAYLOAD_KEYS, SESSION_CHECKPOINT_PAYLOAD_KEYS
           [{ "checkpoint" => tx.fetch("checkpoint"), "assertion" => tx.fetch("assertion") }]
-        when EXECUTION_PAYLOAD_KEYS
+        when EXECUTION_PAYLOAD_KEYS, TERMINAL_PAYLOAD_KEYS
+          dispatch = tx["dispatch_checkpoint"] || tx.fetch("checkpoint")
+          dispatch_assertion = tx["dispatch_assertion"] || tx.fetch("assertion")
           [
-            { "checkpoint" => tx.fetch("dispatch_checkpoint"),
-              "assertion" => tx.fetch("dispatch_assertion") },
+            { "checkpoint" => dispatch, "assertion" => dispatch_assertion },
             { "checkpoint" => tx.fetch("observation_checkpoint"),
               "assertion" => tx.fetch("observation_assertion") }
           ]
@@ -584,6 +796,42 @@ module Orbit
         nil
       end
 
+      def validate_terminal_snapshot!(records, candidate, checkpoint_id,
+                                      authority_verifier, runtime_identity_verifier,
+                                      lifecycle_verifier)
+        txs = payloads(records)
+        marker = ActiveRoot.marker_for(@active_root, code: "control_store_unpinned", label: "control_store")
+        policy = resolve_active_policy(marker, authority_verifier)
+        seen_ids = Set.new
+        verified_existing = begin
+          verify_all_transactions!(txs, marker, policy, authority_verifier,
+            runtime_identity_verifier, lifecycle_verifier, seen_event_ids: seen_ids)
+        rescue ContractError => error
+          raise terminal_invalid("existing snapshot does not fully re-verify: #{error.code}")
+        end
+        existing = verified_existing.find do |tx|
+          tx.is_a?(Hash) && tx.keys.sort == TERMINAL_PAYLOAD_KEYS &&
+            tx.fetch("checkpoint").fetch("lead_checkpoint_id") == checkpoint_id
+        end
+        if existing
+          return :idempotent if canonical_equal?(existing, candidate)
+
+          raise ContractError.new(
+            "control_store_reuse",
+            "terminal checkpoint #{checkpoint_id} already exists with different canonical content",
+            path: "control_store.#{checkpoint_id}"
+          )
+        end
+        validate_transaction!(candidate,
+          policy: policy.fetch("active"), pinned_policies: policy.fetch("accepted"),
+          accepted_assertions: policy.fetch("accepted_assertions"), marker: marker,
+          authority_verifier: authority_verifier,
+          runtime_identity_verifier: runtime_identity_verifier,
+          lifecycle_verifier: lifecycle_verifier, seen_event_ids: seen_ids,
+          all_txs: txs)
+        nil
+      end
+
       def verify_all_transactions!(txs, marker, policy, authority_verifier,
                                    runtime_identity_verifier, lifecycle_verifier,
                                    seen_event_ids: Set.new)
@@ -637,6 +885,13 @@ module Orbit
         when CHECKPOINT_PAYLOAD_KEYS, SESSION_CHECKPOINT_PAYLOAD_KEYS
           validate_checkpoint_transaction!(tx, policy: policy, pinned_policies: pinned_policies,
             accepted_assertions: accepted_assertions,
+            marker: marker, authority_verifier: authority_verifier,
+            runtime_identity_verifier: runtime_identity_verifier,
+            lifecycle_verifier: lifecycle_verifier, seen_event_ids: seen_event_ids,
+            all_txs: all_txs)
+        when TERMINAL_PAYLOAD_KEYS
+          validate_terminal_transaction!(tx, policy: policy,
+            pinned_policies: pinned_policies, accepted_assertions: accepted_assertions,
             marker: marker, authority_verifier: authority_verifier,
             runtime_identity_verifier: runtime_identity_verifier,
             lifecycle_verifier: lifecycle_verifier, seen_event_ids: seen_event_ids,
@@ -834,7 +1089,8 @@ module Orbit
       def validate_checkpoint_transaction!(tx, policy:, pinned_policies:, accepted_assertions:, marker:,
                                            authority_verifier:, runtime_identity_verifier:,
                                            lifecycle_verifier:, seen_event_ids:, all_txs:,
-                                           allow_attempt_ref: false, skip_assembled: false)
+                                           allow_attempt_ref: false, skip_assembled: false,
+                                           allow_dispatch: false)
         checkpoint = tx.fetch("checkpoint")
         assertion = tx.fetch("assertion")
         control_id = checkpoint["lead_control_id"]
@@ -846,6 +1102,15 @@ module Orbit
           validator.validate_document!("authority_assertion", assertion)
         rescue ValidationFailure, ContractError
           raise checkpoint_invalid("records violate their contracts")
+        end
+        # A dispatch decision commits ONLY inside the atomic execution or
+        # terminal composite transaction that carries the AttemptCreated and
+        # its immediate observation; a standalone dispatch-authorizing
+        # checkpoint is the exact half-state Inc6b closed and never commits.
+        if checkpoint.dig("lead_decision", "action") == "dispatch" && !allow_dispatch
+          raise checkpoint_invalid(
+            "dispatch decisions are owned by the atomic execution/terminal composite transaction"
+          )
         end
         unless CanonicalJSON.content_digest(checkpoint) == checkpoint["content_digest"]
           raise checkpoint_invalid("checkpoint content_digest is not self-consistent")
@@ -1011,22 +1276,26 @@ module Orbit
         tx
       end
 
-      def validate_execution_transaction!(tx, policy:, pinned_policies:, accepted_assertions:, marker:,
-                                          authority_verifier:, runtime_identity_verifier:,
-                                          lifecycle_verifier:, seen_event_ids:, all_txs:)
-        unless tx.is_a?(Hash) && tx.keys.sort == EXECUTION_PAYLOAD_KEYS
-          raise dispatch_invalid("transaction carries fields outside the closed execution shape")
+      # Shared closure for the successor binding carried by the atomic
+      # execution composite AND the terminal reconciliation (where the
+      # terminal checkpoint is the exact authorizing dispatch checkpoint):
+      # content-addressed assigned rule (current canonical bytes for a new
+      # writer), provider-verified worker, exactly one AttemptCreated with
+      # receipt, byte-exact dispatch/observation pins, and byte-exact
+      # proposal closure. The dispatch checkpoint never commits without its
+      # AttemptCreated and immediate observation in the SAME transaction.
+      def validate_successor_composite!(attempt:, worker:, rule:, dispatch:, observation:,
+                                        dispatch_assertion:, observation_assertion:,
+                                        policy:, pinned_policies:, accepted_assertions:, marker:,
+                                        authority_verifier:, runtime_identity_verifier:,
+                                        lifecycle_verifier:, seen_event_ids:, all_txs:,
+                                        failure: :dispatch, dispatch_pins_nothing: true,
+                                        chain_to: nil)
+        invalid = failure == :terminal ? method(:terminal_invalid) : method(:dispatch_invalid)
+        unless [attempt, worker, rule, dispatch, observation,
+                dispatch_assertion, observation_assertion].all? { |record| record.is_a?(Hash) }
+          raise invalid.call("successor composite components must all be canonical objects")
         end
-        attempt = tx.fetch("attempt")
-        rule = tx.fetch("rule_resolution")
-        worker = tx.fetch("worker_agent")
-        dispatch = tx.fetch("dispatch_checkpoint")
-        observation = tx.fetch("observation_checkpoint")
-        unless [attempt, rule, worker, dispatch, observation,
-                tx.fetch("dispatch_assertion"), tx.fetch("observation_assertion")].all? { |record| record.is_a?(Hash) }
-          raise dispatch_invalid("execution components must all be canonical objects")
-        end
-
         validator = Orbit::V2::Validator.new(project_root: @active_root)
         begin
           validator.validate_document!("work_unit_attempt", attempt)
@@ -1036,24 +1305,31 @@ module Orbit
             current_identity = RuleResolution.canonical_identity(rule.fetch("identity"),
               project_root: File.dirname(@active_root), verify_files: true)
             unless canonical_equal?(current_identity, rule.fetch("identity"))
-              raise dispatch_invalid("new assigned rules do not match current project rule bytes")
+              raise invalid.call("new assigned rules do not match current project rule bytes")
             end
           end
         rescue ValidationFailure, ContractError => error
-          raise dispatch_invalid("execution components violate their contracts: #{error.message}")
+          raise invalid.call("successor composite components violate their contracts: #{error.message}")
         end
         attempt_id = attempt["attempt_id"]
-        register_id!(seen_event_ids, "work_unit_attempt", attempt_id, :dispatch)
-        register_id!(seen_event_ids, "rule_resolution", rule.fetch("resolution_id"), :dispatch)
-        register_id!(seen_event_ids, "agent_instance", worker.fetch("agent_instance_id"), :dispatch)
+        register_id!(seen_event_ids, "work_unit_attempt", attempt_id, failure)
+        register_id!(seen_event_ids, "rule_resolution", rule.fetch("resolution_id"), failure)
+        register_id!(seen_event_ids, "agent_instance", worker.fetch("agent_instance_id"), failure)
+        if chain_to
+          unless attempt["predecessor_work_unit_attempt_ref"] == chain_to
+            raise invalid.call("successor Attempt must exact-chain to the terminated attempt")
+          end
+        elsif attempt["predecessor_work_unit_attempt_ref"]
+          raise invalid.call("first Attempt must carry no predecessor attempt ref")
+        end
         events = Array(attempt["events"])
         unless events.length == 1 && events.first["event_type"] == "AttemptCreated" &&
                events.first["status"] == "active" &&
                events.first["started_at"] == events.first["recorded_at"]
-          raise dispatch_invalid("Inc6b creation requires exactly one active AttemptCreated event")
+          raise invalid.call("creation requires exactly one active AttemptCreated event")
         end
         event = events.first
-        register_id!(seen_event_ids, "lifecycle event", event.fetch("event_id"), :dispatch)
+        register_id!(seen_event_ids, "lifecycle event", event.fetch("event_id"), failure)
         begin
           lifecycle_verifier.verify!(event, project_id: marker.fetch("project_id"))
           verify_event_stream!(Array(worker["lifecycle_events"]), stream: "agent",
@@ -1061,27 +1337,22 @@ module Orbit
             seen_event_ids: seen_event_ids)
           runtime_identity_verifier.verify!(worker)
         rescue ContractError => error
-          raise dispatch_invalid("worker identity or AttemptCreated receipt was not provider-verified: #{error.code}")
+          raise invalid.call("worker identity or AttemptCreated receipt was not provider-verified: #{error.code}")
         end
 
         control_id = dispatch["lead_control_id"]
         unless observation["lead_control_id"] == control_id && attempt["lead_control_id"] == control_id
-          raise dispatch_invalid("dispatch, observation, and attempt must belong to one control")
+          raise invalid.call("dispatch, observation, and attempt must belong to one control")
         end
-        dispatch_tx = {
-          "assertion" => tx.fetch("dispatch_assertion"),
-          "checkpoint" => dispatch
-        }
-        observation_tx = {
-          "assertion" => tx.fetch("observation_assertion"),
-          "checkpoint" => observation
-        }
+        dispatch_tx = { "assertion" => dispatch_assertion, "checkpoint" => dispatch }
+        observation_tx = { "assertion" => observation_assertion, "checkpoint" => observation }
         validate_checkpoint_transaction!(dispatch_tx, policy: policy,
           pinned_policies: pinned_policies, accepted_assertions: accepted_assertions,
           marker: marker, authority_verifier: authority_verifier,
           runtime_identity_verifier: runtime_identity_verifier,
           lifecycle_verifier: lifecycle_verifier, seen_event_ids: seen_event_ids,
-          all_txs: all_txs, skip_assembled: true)
+          all_txs: all_txs, allow_attempt_ref: !dispatch_pins_nothing,
+          skip_assembled: true, allow_dispatch: true)
         validate_checkpoint_transaction!(observation_tx, policy: policy,
           pinned_policies: pinned_policies, accepted_assertions: accepted_assertions,
           marker: marker, authority_verifier: authority_verifier,
@@ -1103,8 +1374,8 @@ module Orbit
                observation["current_or_terminal_attempt_ref"] == created_ref &&
                observation.dig("reconcile_trigger", "event") == "attempt_created" &&
                dispatch.dig("lead_decision", "action") == "dispatch" &&
-               dispatch["current_or_terminal_attempt_ref"].nil?
-          raise dispatch_invalid("dispatch/AttemptCreated/observation refs are not exact-bound")
+               (!dispatch_pins_nothing || dispatch["current_or_terminal_attempt_ref"].nil?)
+          raise invalid.call("dispatch/AttemptCreated/observation refs are not exact-bound")
         end
 
         identity = rule.fetch("identity")
@@ -1122,7 +1393,7 @@ module Orbit
         unless exact_identity.all? { |field, value| identity[field] == value } &&
                assignment["agent_instance_id"] == worker["agent_instance_id"] &&
                assignment["assigned_rule_resolution_id"] == rule["resolution_id"]
-          raise dispatch_invalid("assigned rule identity and AttemptCreated assignment do not exact-match")
+          raise invalid.call("assigned rule identity and AttemptCreated assignment do not exact-match")
         end
         # The dispatch-time basis is frozen AT the dispatch: exactly one
         # rule_resolution proposal exact-pinning the assigned artifact and
@@ -1149,31 +1420,41 @@ module Orbit
                  "id" => thesis_ref.fetch("change_thesis_id"),
                  "digest" => thesis_ref.fetch("content_digest")
                }
-          raise dispatch_invalid(
+          raise invalid.call(
             "dispatch must propose exactly the assigned RuleResolution artifact and ChangeThesis"
           )
         end
+        [control_id, event, attempt_id]
+      end
 
-        active_executions = all_txs.select do |candidate|
-          candidate.is_a?(Hash) && candidate.keys.sort == EXECUTION_PAYLOAD_KEYS &&
-            !terminal_attempt?(candidate.fetch("attempt"))
+      # Full final validation of one atomic execution composite: the
+      # content-addressed assigned rule, the authorizing dispatch
+      # checkpoint + assertion, the worker AgentInstance, one active
+      # AttemptCreated, and the required immediate observation checkpoint +
+      # assertion — all in one closed transaction.
+      def validate_execution_transaction!(tx, policy:, pinned_policies:, accepted_assertions:, marker:,
+                                          authority_verifier:, runtime_identity_verifier:,
+                                          lifecycle_verifier:, seen_event_ids:, all_txs:)
+        unless tx.is_a?(Hash) && tx.keys.sort == EXECUTION_PAYLOAD_KEYS
+          raise dispatch_invalid("transaction carries fields outside the closed execution shape")
         end
-        worker_key = RuntimeIdentityVerifier.identity_key(worker.fetch("runtime_identity"))
-        conflict = active_executions.find do |candidate|
-          existing = candidate.fetch("attempt")
-          existing_worker_key = RuntimeIdentityVerifier.identity_key(
-            candidate.fetch("worker_agent").fetch("runtime_identity")
-          )
-          existing["lead_control_id"] == control_id ||
-            existing["task_id"] == attempt["task_id"] ||
-            existing["work_unit_id"] == attempt["work_unit_id"] ||
-            existing_worker_key == worker_key
-        end
-        if conflict
-          raise dispatch_invalid(
-            "another non-terminal attempt conflicts by control, task, work unit, or runtime subject"
-          )
-        end
+        attempt = tx.fetch("attempt")
+        rule = tx.fetch("rule_resolution")
+        worker = tx.fetch("worker_agent")
+        dispatch = tx.fetch("dispatch_checkpoint")
+        observation = tx.fetch("observation_checkpoint")
+        control_id, = validate_successor_composite!(
+          attempt: attempt, worker: worker, rule: rule, dispatch: dispatch,
+          observation: observation,
+          dispatch_assertion: tx.fetch("dispatch_assertion"),
+          observation_assertion: tx.fetch("observation_assertion"),
+          policy: policy, pinned_policies: pinned_policies,
+          accepted_assertions: accepted_assertions, marker: marker,
+          authority_verifier: authority_verifier,
+          runtime_identity_verifier: runtime_identity_verifier,
+          lifecycle_verifier: lifecycle_verifier, seen_event_ids: seen_event_ids,
+          all_txs: all_txs, failure: :dispatch)
+        reject_nonterminal_conflicts!(all_txs, control_id, attempt, worker, :dispatch)
 
         genesis_tx = all_txs.reverse.find do |candidate|
           candidate.is_a?(Hash) && candidate.keys.sort == PAYLOAD_KEYS &&
@@ -1197,9 +1478,244 @@ module Orbit
         raise dispatch_invalid("#{error.code}: #{error.message}")
       end
 
+      # Full final validation of one terminal reconciliation transaction:
+      # the accepted composite Attempt extended by exactly one
+      # provider-verified terminal event (byte-identical prefix) plus the
+      # full successor composite — the terminal checkpoint IS the exact
+      # authorizing dispatch checkpoint, with the successor's assigned rule,
+      # worker, AttemptCreated, and immediate observation checkpoint all in
+      # the SAME closed transaction. The terminal checkpoint must
+      # exact-extend the unique current observation tip of the terminated
+      # attempt, and the successor attempt must start after the terminal
+      # event (single-active continuity), so no accepted dispatch/attempt
+      # half-state can exist and a later dispatch always has exactly one
+      # authorizing checkpoint.
+      def validate_terminal_transaction!(tx, policy:, pinned_policies:, accepted_assertions:, marker:,
+                                         authority_verifier:, runtime_identity_verifier:,
+                                         lifecycle_verifier:, seen_event_ids:, all_txs:)
+        unless tx.is_a?(Hash) && tx.keys.sort == TERMINAL_PAYLOAD_KEYS
+          raise terminal_invalid("transaction carries fields outside the closed terminal shape")
+        end
+        attempt = tx.fetch("attempt")
+        checkpoint = tx.fetch("checkpoint")
+        assertion = tx.fetch("assertion")
+        successor_attempt = tx.fetch("successor_attempt")
+        worker = tx.fetch("worker_agent")
+        rule = tx.fetch("rule_resolution")
+        observation = tx.fetch("observation_checkpoint")
+        observation_assertion = tx.fetch("observation_assertion")
+        unless [attempt, checkpoint, assertion, successor_attempt, worker, rule,
+                observation, observation_assertion].all? { |record| record.is_a?(Hash) }
+          raise terminal_invalid("terminal components must all be canonical objects")
+        end
+        validator = Orbit::V2::Validator.new(project_root: @active_root)
+        begin
+          validator.validate_document!("work_unit_attempt", attempt)
+          validator.validate_document!("lead_checkpoint", checkpoint)
+          validator.validate_document!("authority_assertion", assertion)
+        rescue ValidationFailure, ContractError
+          raise terminal_invalid("terminal records violate their contracts")
+        end
+        unless CanonicalJSON.content_digest(checkpoint) == checkpoint["content_digest"]
+          raise terminal_invalid("terminal checkpoint content_digest is not self-consistent")
+        end
+        control_id = checkpoint["lead_control_id"]
+        project_id = policy ? policy["project_id"] : marker["project_id"]
+        unless checkpoint["project_id"] == project_id && attempt["project_id"] == project_id &&
+               assertion["project_id"] == project_id
+          raise terminal_invalid("records do not all carry the marker project identity")
+        end
+        attempt_id = attempt["attempt_id"]
+        # The accepted immutable representation of the attempt being
+        # terminated: its own dispatch composite (first dispatch) or the
+        # successor slot of an accepted terminal reconciliation (later
+        # dispatches) — exactly one source, byte-identical prefix.
+        executions = all_txs.select do |candidate|
+          next false unless candidate.is_a?(Hash)
+
+          if candidate.keys.sort == EXECUTION_PAYLOAD_KEYS
+            candidate.fetch("attempt").fetch("attempt_id") == attempt_id
+          elsif candidate.keys.sort == TERMINAL_PAYLOAD_KEYS
+            candidate.fetch("successor_attempt").fetch("attempt_id") == attempt_id
+          else
+            false
+          end
+        end
+        unless executions.length == 1
+          raise terminal_invalid("terminal reconciliation requires exactly one accepted composite for the attempt")
+        end
+        stored = executions.first.fetch("attempt")
+        stored = executions.first.fetch("successor_attempt") if executions.first.keys.sort == TERMINAL_PAYLOAD_KEYS
+        stored_events = Array(stored["events"])
+        events = Array(attempt["events"])
+        expected_attempt = JSON.parse(CanonicalJSON.dump(stored))
+        expected_attempt["events"] = events
+        unless canonical_equal?(events.first(stored_events.length), stored_events) &&
+               events.length == stored_events.length + 1 &&
+               canonical_equal?(attempt, expected_attempt)
+          raise terminal_invalid(
+            "terminal attempt must equal the accepted composite attempt plus exactly one terminal event"
+          )
+        end
+        terminal_event = events.last
+        unless TERMINAL_EVENT_TYPES.include?(terminal_event["event_type"])
+          raise terminal_invalid("terminal event type is not allowed by the final schema")
+        end
+        status = {
+          "AttemptCompleted" => "completed",
+          "AttemptFailed" => "failed",
+          "AttemptBlocked" => "blocked",
+          "AttemptCancelled" => "cancelled"
+        }.fetch(terminal_event["event_type"])
+        unless terminal_event["status"] == status &&
+               terminal_event["previous_event_digest"] == stored_events.last["event_digest"] &&
+               terminal_event["ended_at"] == terminal_event["recorded_at"]
+          raise terminal_invalid("terminal event must exact-extend the accepted attempt chain")
+        end
+        register_id!(seen_event_ids, "lifecycle event", terminal_event.fetch("event_id"), :terminal)
+        begin
+          lifecycle_verifier.verify!(terminal_event, project_id: project_id)
+        rescue ContractError => error
+          raise terminal_invalid("terminal event was not provider-verified: #{error.code}")
+        end
+
+        genesis_tx = all_txs.reverse.find do |candidate|
+          candidate.is_a?(Hash) && candidate.keys.sort == PAYLOAD_KEYS &&
+            candidate.fetch("registry").fetch("lead_control_id") == control_id
+        end
+        raise terminal_invalid("terminal checkpoint must belong to an accepted control") unless genesis_tx
+        prior = all_txs.select do |candidate|
+          checkpoint_entries(candidate).any? do |entry|
+            entry.fetch("checkpoint").fetch("lead_control_id") == control_id
+          end
+        end
+        prior_entries = prior.flat_map { |candidate| checkpoint_entries(candidate) }.select do |entry|
+          entry.fetch("checkpoint").fetch("lead_control_id") == control_id
+        end
+        tip = prior_entries.last
+        tip_ref = tip && {
+          "lead_checkpoint_id" => tip.fetch("checkpoint").fetch("lead_checkpoint_id"),
+          "content_digest" => tip.fetch("checkpoint").fetch("content_digest")
+        }
+        # The terminal checkpoint must exact-extend the unique current
+        # observation tip of THIS attempt: the tip pins the attempt's
+        # AttemptCreated event and no checkpoint may sit between it and the
+        # terminal successor.
+        unless tip &&
+               tip.fetch("checkpoint").dig("current_or_terminal_attempt_ref") == {
+                 "attempt_id" => attempt_id,
+                 "event_id" => stored_events.first.fetch("event_id"),
+                 "event_digest" => stored_events.first.fetch("event_digest")
+               } &&
+               checkpoint["predecessor_lead_checkpoint_ref"] == tip_ref &&
+               checkpoint.dig("reconcile_trigger", "event") == "attempt_terminal"
+          raise terminal_invalid(
+            "terminal checkpoint must exact-extend the unique current observation tip of the attempt"
+          )
+        end
+
+        _control, event, = validate_successor_composite!(
+          attempt: successor_attempt, worker: worker, rule: rule, dispatch: checkpoint,
+          observation: observation,
+          dispatch_assertion: assertion,
+          observation_assertion: observation_assertion,
+          policy: policy, pinned_policies: pinned_policies,
+          accepted_assertions: accepted_assertions, marker: marker,
+          authority_verifier: authority_verifier,
+          runtime_identity_verifier: runtime_identity_verifier,
+          lifecycle_verifier: lifecycle_verifier, seen_event_ids: seen_event_ids,
+          all_txs: all_txs, failure: :terminal,
+          dispatch_pins_nothing: false, chain_to: attempt_id)
+        terminal_ref = {
+          "attempt_id" => attempt_id,
+          "event_id" => terminal_event.fetch("event_id"),
+          "event_digest" => terminal_event.fetch("event_digest")
+        }
+        unless checkpoint["current_or_terminal_attempt_ref"] == terminal_ref
+          raise terminal_invalid("terminal checkpoint must terminal-pin the exact terminal event")
+        end
+        successor_created_at = begin
+          Time.iso8601(event.fetch("recorded_at"))
+        rescue ArgumentError, KeyError, TypeError
+          nil
+        end
+        terminated_at = begin
+          Time.iso8601(terminal_event.fetch("recorded_at"))
+        rescue ArgumentError, KeyError, TypeError
+          nil
+        end
+        unless successor_created_at && terminated_at && successor_created_at > terminated_at
+          raise terminal_invalid(
+            "successor Attempt must start after the terminated attempt's terminal event"
+          )
+        end
+        reject_nonterminal_conflicts!(all_txs, control_id, successor_attempt, worker, :terminal,
+          terminal_overrides: { attempt_id => attempt })
+        task_facts = resolve_task_facts!(checkpoint, genesis_tx.fetch("registry"), authority_verifier)
+        control_txs = prior
+        validate_assembled_snapshot!(marker, pinned_policies, accepted_assertions,
+          genesis_tx, control_txs, tx,
+          task_facts.fetch("payload"), authority_verifier,
+          runtime_identity_verifier, lifecycle_verifier)
+        tx
+      rescue ContractError => error
+        raise error if error.code == "control_store_terminal_invalid"
+
+        raise terminal_invalid("#{error.code}: #{error.message}")
+      end
+
+      # Project-wide active backstop: the LATEST attempt representation per
+      # attempt id (a terminal reconciliation supersedes the composite's
+      # immutable AttemptCreated-only payload) is classified, and any
+      # non-terminal attempt sharing control, task, work unit, or canonical
+      # runtime subject with the candidate fails closed.
+      def reject_nonterminal_conflicts!(txs, control_id, attempt, worker, failure,
+                                        terminal_overrides: {})
+        invalid = failure == :terminal ? method(:terminal_invalid) : method(:dispatch_invalid)
+        latest = {}
+        txs.each do |candidate|
+          next unless candidate.is_a?(Hash)
+
+          if candidate.keys.sort == EXECUTION_PAYLOAD_KEYS
+            latest[candidate.fetch("attempt").fetch("attempt_id")] = {
+              "attempt" => candidate.fetch("attempt"),
+              "worker" => candidate.fetch("worker_agent")
+            }
+          elsif candidate.keys.sort == TERMINAL_PAYLOAD_KEYS
+            attempt_id = candidate.fetch("attempt").fetch("attempt_id")
+            latest[attempt_id]["attempt"] = candidate.fetch("attempt") if latest[attempt_id]
+            successor = candidate.fetch("successor_attempt")
+            latest[successor.fetch("attempt_id")] = {
+              "attempt" => successor,
+              "worker" => candidate.fetch("worker_agent")
+            }
+          end
+        end
+        terminal_overrides.each do |attempt_id, representation|
+          latest[attempt_id]["attempt"] = representation if latest[attempt_id]
+        end
+        worker_key = RuntimeIdentityVerifier.identity_key(worker.fetch("runtime_identity"))
+        conflict = latest.values.find do |entry|
+          next false if terminal_attempt?(entry.fetch("attempt"))
+
+          existing = entry.fetch("attempt")
+          existing_worker_key = RuntimeIdentityVerifier.identity_key(
+            entry.fetch("worker").fetch("runtime_identity")
+          )
+          existing["lead_control_id"] == control_id ||
+            existing["task_id"] == attempt["task_id"] ||
+            existing["work_unit_id"] == attempt["work_unit_id"] ||
+            existing_worker_key == worker_key
+        end
+        return unless conflict
+
+        raise invalid.call(
+          "another non-terminal attempt conflicts by control, task, work unit, or runtime subject"
+        )
+      end
       def terminal_attempt?(attempt)
         Array(attempt["events"]).any? do |event|
-          %w[AttemptCompleted AttemptFailed AttemptBlocked AttemptCancelled AttemptSuperseded].include?(event["event_type"])
+          (TERMINAL_EVENT_TYPES + ["AttemptSuperseded"]).include?(event["event_type"])
         end
       end
 
@@ -1209,11 +1725,37 @@ module Orbit
       def validate_assembled_snapshot!(marker, pinned_policies, accepted_assertions, genesis_tx, prior,
                                        candidate, task_payload, authority_verifier,
                                        runtime_identity_verifier, lifecycle_verifier)
+        bundle = assemble_bundle(marker, pinned_policies, accepted_assertions, genesis_tx,
+          prior, candidate, task_payload)
+        validator = Orbit::V2::Validator.new(
+          project_root: @active_root,
+          authority_verifier: authority_verifier,
+          lifecycle_verifier: lifecycle_verifier,
+          runtime_identity_verifier: runtime_identity_verifier
+        )
+        errors = validator.validate(bundle)
+        return if errors.empty?
+
+        raise checkpoint_invalid(
+          "assembled snapshot fails the LeadControl/Validator invariants: " \
+            "#{errors.map(&:code).uniq.join(', ')}"
+        )
+      end
+
+      # The deterministic contract bundle for a control lineage: marker
+      # protocol root, accepted policy revisions + issuance assertions,
+      # accepted TaskStore payload, control genesis + successor checkpoints
+      # (ordinary, session, execution, terminal) in accepted order, one
+      # authoritative latest stream representation per session/agent id,
+      # and one authoritative latest Attempt per attempt id (a terminal
+      # reconciliation supersedes the composite's attempt in the bundle).
+      def assemble_bundle(marker, pinned_policies, accepted_assertions, genesis_tx, prior,
+                          candidate, task_payload)
         sessions = { genesis_tx.fetch("session").fetch("lead_session_id") => genesis_tx.fetch("session") }
         checkpoints = [genesis_tx.fetch("checkpoint")]
         assertions = [genesis_tx.fetch("assertion")]
         agents = { genesis_tx.fetch("agent").fetch("agent_instance_id") => genesis_tx.fetch("agent") }
-        attempts = []
+        attempts = {}
         resolutions = {}
         prior.each do |tx|
           checkpoint_entries(tx).each do |entry|
@@ -1225,7 +1767,17 @@ module Orbit
             sessions[tx.fetch("session").fetch("lead_session_id")] = tx.fetch("session")
             agents[tx.fetch("agent").fetch("agent_instance_id")] = tx.fetch("agent")
           elsif tx.keys.sort == EXECUTION_PAYLOAD_KEYS
-            attempts << tx.fetch("attempt")
+            attempt = tx.fetch("attempt")
+            attempts[attempt.fetch("attempt_id")] = attempt
+            rule = tx.fetch("rule_resolution")
+            resolutions[rule.fetch("resolution_id")] = rule
+            worker = tx.fetch("worker_agent")
+            agents[worker.fetch("agent_instance_id")] = worker
+          elsif tx.keys.sort == TERMINAL_PAYLOAD_KEYS
+            attempt = tx.fetch("attempt")
+            attempts[attempt.fetch("attempt_id")] = attempt if attempts.key?(attempt.fetch("attempt_id"))
+            successor = tx.fetch("successor_attempt")
+            attempts[successor.fetch("attempt_id")] = successor
             rule = tx.fetch("rule_resolution")
             resolutions[rule.fetch("resolution_id")] = rule
             worker = tx.fetch("worker_agent")
@@ -1241,14 +1793,24 @@ module Orbit
           sessions[candidate.fetch("session").fetch("lead_session_id")] = candidate.fetch("session")
           agents[candidate.fetch("agent").fetch("agent_instance_id")] = candidate.fetch("agent")
         elsif candidate.keys.sort == EXECUTION_PAYLOAD_KEYS
-          attempts << candidate.fetch("attempt")
+          attempt = candidate.fetch("attempt")
+          attempts[attempt.fetch("attempt_id")] = attempt
+          rule = candidate.fetch("rule_resolution")
+          resolutions[rule.fetch("resolution_id")] = rule
+          worker = candidate.fetch("worker_agent")
+          agents[worker.fetch("agent_instance_id")] = worker
+        elsif candidate.keys.sort == TERMINAL_PAYLOAD_KEYS
+          attempt = candidate.fetch("attempt")
+          attempts[attempt.fetch("attempt_id")] = attempt if attempts.key?(attempt.fetch("attempt_id"))
+          successor = candidate.fetch("successor_attempt")
+          attempts[successor.fetch("attempt_id")] = successor
           rule = candidate.fetch("rule_resolution")
           resolutions[rule.fetch("resolution_id")] = rule
           worker = candidate.fetch("worker_agent")
           agents[worker.fetch("agent_instance_id")] = worker
         end
         snapshot = { "kind" => "git", "commit_sha" => "a" * 40, "tree_digest" => "sha256:#{'a' * 64}" }
-        bundle = {
+        {
           "schema_version" => "orbit-v2-contract-bundle-v1",
           "protocol_epoch" => "orbit-v2",
           "protocol_root" => marker,
@@ -1264,7 +1826,7 @@ module Orbit
           "control_registries" => [genesis_tx.fetch("registry")],
           "lead_checkpoints" => checkpoints,
           "agent_instances" => agents.values,
-          "work_unit_attempts" => attempts,
+          "work_unit_attempts" => attempts.values,
           "rule_resolution_artifacts" => resolutions.values,
           "evidence_records" => [],
           "gate_evaluations" => [],
@@ -1279,19 +1841,6 @@ module Orbit
             "paths" => []
           }
         }
-        validator = Orbit::V2::Validator.new(
-          project_root: @active_root,
-          authority_verifier: authority_verifier,
-          lifecycle_verifier: lifecycle_verifier,
-          runtime_identity_verifier: runtime_identity_verifier
-        )
-        errors = validator.validate(bundle)
-        return if errors.empty?
-
-        raise checkpoint_invalid(
-          "assembled snapshot fails the LeadControl/Validator invariants: " \
-            "#{errors.map(&:code).uniq.join(', ')}"
-        )
       end
 
       # Resolves the control's owned task (exactly one; transfers are
@@ -1461,6 +2010,24 @@ module Orbit
         )
       end
 
+      def terminal_invalid(message, details = nil)
+        ContractError.new(
+          "control_store_terminal_invalid",
+          "control terminal reconciliation rejected: #{message}",
+          path: "control_store.terminal",
+          details: details
+        )
+      end
+
+      def recovery_invalid(message, details = nil)
+        ContractError.new(
+          "control_store_recovery_invalid",
+          "control recovery rejected: #{message}",
+          path: "control_store.recover",
+          details: details
+        )
+      end
+
       def register_id!(seen_ids, kind, id, failure = :genesis)
         return if seen_ids.add?(id)
 
@@ -1468,6 +2035,8 @@ module Orbit
           raise checkpoint_invalid("#{kind} id #{id} is globally create-only and reused")
         elsif failure == :dispatch
           raise dispatch_invalid("#{kind} id #{id} is globally create-only and reused")
+        elsif failure == :terminal
+          raise terminal_invalid("#{kind} id #{id} is globally create-only and reused")
         end
 
         raise genesis_invalid("#{kind} id #{id} is globally create-only and reused")

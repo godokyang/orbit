@@ -1338,3 +1338,51 @@ log, and validation plus append share that locked snapshot.
 
 Deferred: terminal Attempt events and terminal successor reconciliation,
 retry/fingerprint recovery, transfer, Evidence/Gate/Finding writers.
+
+## Slice 6 increment 6c addendum: atomic terminal reconciliation and tip recovery
+
+`ControlStore#terminal` commits the terminated Attempt (the accepted
+immutable composite representation plus exactly one provider-verified
+terminal event) AND the full successor composite — successor assigned
+RuleResolution, worker AgentInstance, one active AttemptCreated, and the
+required immediate observation checkpoint — as ONE closed control-log
+transaction under the fixed policy -> task -> control locks. The terminal
+checkpoint IS the exact authorizing dispatch checkpoint of the successor:
+no standalone dispatch-authorizing checkpoint can ever commit, because
+ordinary `checkpoint()` and any terminal transaction without the successor
+composite reject `lead_decision.action == "dispatch"` (the exact
+dispatch/AttemptCreated/observation half-state Inc6b closed cannot be
+reintroduced through the terminal path).
+
+- The terminated attempt must equal the accepted composite attempt plus
+  exactly one terminal event (Completed/Failed/Blocked/Cancelled per the
+  final schema), with byte-identical prefix, exact digest linkage, terminal
+  status/ended_at == recorded_at, a provider-verified writer receipt, and a
+  globally create-only event id. The terminal checkpoint exact-extends the
+  unique current observation tip of that attempt and terminal-pins the
+  exact terminal event; the successor attempt exact-chains to the
+  terminated attempt, starts strictly after the terminal event
+  (single-active continuity), and its dispatch ref, assignment, thesis and
+  rule proposals, observation pin, and writer authority are exact-bound as
+  in the Inc6b composite.
+- `ControlStore#recover` is a pure read/reconcile seam: the complete
+  window (log read, whole-snapshot reverification, tip derivation,
+  reconcile) runs under the SAME three-level fixed locks as every writer
+  (policy -> task -> control), so a concurrent successor can never append
+  between the read and the returned decision. The unique current tip is
+  the genesis checkpoint when no successor exists; recovery re-runs the
+  tip's stored trigger through the deterministic LeadControl.reconcile
+  projection over the assembled snapshot, requires the recomputed decision
+  to byte-equal the stored tip decision (idempotent), never synthesizes
+  missing facts, never redispatches an accepted attempt, and returns
+  exactly one documented state (state/action/reason). Forks, partial
+  payloads, stale tips, and mismatched stored decisions fail closed.
+- Resolve returns the latest attempt representation per attempt id (a
+  terminal reconciliation supersedes the composite's immutable
+  AttemptCreated-only payload), the content-addressed rule resolutions,
+  and both checkpoint events of each execution/terminal transaction in
+  accepted order; the project-wide nonterminal backstop classifies the
+  same latest representations so a successor dispatch after an accepted
+  terminal reconciliation is never falsely blocked.
+- Deferred: retry/fingerprint/budget recovery, cross-control session
+  transfer, Evidence/Gate/Finding writers.
