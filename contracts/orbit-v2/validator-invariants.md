@@ -1421,8 +1421,8 @@ transaction; a partial definition is never accepted.
   policies and provider assertions reverify. Same-id different bytes,
   stale policy, fork/skip/wrong parent, gate parent forgery, global lineage
   reuse, authority partition drift, and thesis cross-owner/skip fail closed.
-  TaskRevision activation/transfer and Evidence/Gate/Finding durable stores
-  remain deferred.
+  Cross-control transfer and GateEvaluation/Finding durable stores remain
+  deferred; EvidenceRecord acceptance is closed by increment 6f below.
 
 ## Slice 6 increment 6e addendum: controlled TaskRevision activation
 
@@ -1458,3 +1458,37 @@ activation commits.
   PUBLIC Validator, so queue progression, selection, decisions, and writer
   authority are proven, not schema-accepted.
 - Deferred: cross-control transfer, Evidence/Gate/Finding writers.
+
+## Slice 6 increment 6f addendum: durable EvidenceRecord acceptance
+
+`EvidenceStore#accept` commits one accepted EvidenceRecord together with the
+repository snapshot and its exact deterministically derived CodeSurface as a
+single `evidence-transactions.json` record. The caller proposes only evidence
+content: `accepted`, `acceptance_recorded_at`, and `content_digest` are
+store-owned. The configured clock is sampled inside the fixed policy -> task
+-> control -> evidence lock window, then the store sets accepted=true and
+recomputes the digest. A replay compares the proposal and frozen snapshot
+rather than a newly sampled time, and is idempotent only after the entire
+existing evidence lineage re-verifies.
+
+- `ControlStore#resolve_attempt` first replays and provider-reverifies the
+  complete control log, then returns the exact latest Attempt representation,
+  its assigned content-addressed RuleResolution, and its verified worker
+  AgentInstance. Evidence acceptance never upgrades raw transaction bytes to
+  execution authority by scanning `records`.
+- The exact historical TaskRevision, WorkUnit and ChangeThesis are resolved
+  from TaskStore. A new record requires that revision to pin the active
+  provider-verified policy in the same lock window. Historical old-policy
+  evidence remains readable only when the terminal Attempt and store-owned
+  acceptance time both precede the first successor-policy issuance.
+- EvidenceContract closes ArtifactClaim identity/digest/kind sets,
+  implementation acceptance/evidence/thesis coverage, canonical changed
+  paths, WorkUnit writable scope and the frozen CodeSurface. This proves only
+  record-internal provenance, never external artifact existence, bytes, or
+  truth. Supersedes/related refs are append-order exact and same-scope; phantom,
+  cross-task, malformed, provider-invalid, stale-policy, or same-id different
+  proposals fail without a write.
+- `resolve(evidence_record_id:)` holds the same four-level lock order across
+  read and whole-lineage reverification and returns only the exact accepted
+  record plus its frozen snapshot/surface. GateEvaluation+Finding atomic
+  transactions and FindingResolution remain deferred to the next increments.

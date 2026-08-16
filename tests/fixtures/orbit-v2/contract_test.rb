@@ -16,6 +16,7 @@ require_relative "../../../lib/orbit/v2/relationship_view"
 require_relative "../../../lib/orbit/v2/gate_strength"
 require_relative "../../../lib/orbit/v2/active_root"
 require_relative "../../../lib/orbit/v2/control_store"
+require_relative "../../../lib/orbit/v2/evidence_store"
 require_relative "../../../lib/orbit/v2/immutable_store"
 require_relative "../../../lib/orbit/v2/policy_store"
 require_relative "../../../lib/orbit/v2/protocol_root"
@@ -91,6 +92,7 @@ module OrbitV2ContractTest
     test_task_store_cross_transaction
     test_task_store_concurrency
     test_task_store_successors
+    test_evidence_store
     test_v1_inventory
     test_slice_isolation
     puts(
@@ -3673,8 +3675,8 @@ module OrbitV2ContractTest
 
   def test_control_store_genesis
     assert(Orbit::V2::ControlStore.instance_methods(false).sort ==
-      %i[activate checkpoint dispatch genesis records recover resolve terminal],
-      "ControlStore exposes exactly its eight public seams")
+      %i[activate checkpoint dispatch genesis records recover resolve resolve_attempt terminal],
+      "ControlStore exposes exactly its nine public seams")
     Dir.mktmpdir do |dir|
       bundle = OrbitV2FixtureFactory.valid_bundle
       store, _policy, task = control_store_seeded_root(dir, bundle)
@@ -4231,7 +4233,7 @@ module OrbitV2ContractTest
 
   def test_control_store_dispatch
     assert(Orbit::V2::ControlStore.instance_methods(false).sort ==
-      %i[activate checkpoint dispatch genesis records recover resolve terminal],
+      %i[activate checkpoint dispatch genesis records recover resolve resolve_attempt terminal],
       "ControlStore exposes the atomic dispatch seam")
     Dir.mktmpdir do |dir|
       bundle = OrbitV2FixtureFactory.valid_bundle
@@ -8278,6 +8280,103 @@ module OrbitV2ContractTest
       predecessor_checkpoint: bundle["lead_checkpoints"][-2],
       bindings: checkpoint["effective_budget_bindings"]
     )
+  end
+
+  def test_evidence_store
+    assert(Orbit::V2::EvidenceStore.instance_methods(false).sort ==
+      %i[accept records resolve], "EvidenceStore exposes exactly its three public seams")
+    Dir.mktmpdir do |dir|
+      bundle = OrbitV2FixtureFactory.valid_bundle
+      bundle["logical_leads"].first["logical_lead_id"] = "olead_inc6fevidence"
+      bundle["logical_leads"].first["content_digest"] =
+        Orbit::V2::CanonicalJSON.content_digest(bundle["logical_leads"].first)
+      control, policy, = control_store_seeded_root(dir, bundle)
+      vf = control_verifiers
+      task_records = task_store_genesis_records(bundle)
+      task = Orbit::V2::TaskStore.new(active_root: File.join(dir, ".orbit"))
+      assert(task_store_genesis(task, task_records, vf[0]) == :appended,
+        "evidence task facts commit")
+      control_records = control_store_genesis_records(bundle, task_records[0],
+        OrbitV2FixtureFactory.agent("oagent_inc6fevidencelead", "lead"),
+        "olcontrol_inc6fevidence", control_store_writer_assertion("olcontrol_inc6fevidence"),
+        lead: task_records[6])
+      assert(control_store_genesis(control, control_records, vf) == :appended,
+        "evidence control commits")
+      execution = control_store_execution_records(bundle, policy, control_records,
+        task_records, dir, attempt_id: "oattempt_inc6fevidence",
+        dispatch_id: "olcheckpoint_inc6fevidencedispatch",
+        worker_id: "oagent_inc6fevidenceworker", rule_path: "rules/inc6f-coder.md")
+      assert(control_store_dispatch(control, execution, vf) == :appended,
+        "evidence producing Attempt commits")
+      exact = control.resolve_attempt(attempt_id: execution[3]["attempt_id"],
+        authority_verifier: vf[0], runtime_identity_verifier: vf[1],
+        lifecycle_verifier: vf[2])
+      assert(exact.dig("attempt", "attempt_id") == execution[3]["attempt_id"] &&
+        exact.dig("rule_resolution", "resolution_id") == execution[0]["resolution_id"] &&
+        exact.dig("agent", "agent_instance_id") == execution[4]["agent_instance_id"],
+        "resolve_attempt returns only provider-reverified exact execution facts")
+
+      unit = task_records[2].first
+      thesis = task_records[3].find { |candidate| candidate["work_unit_id"] == unit["work_unit_id"] }
+      record = OrbitV2FixtureFactory.implementation_evidence(
+        "oevr_inc6fimplementation", execution[3], execution[0],
+        { "change_thesis_id" => thesis["change_thesis_id"], "revision" => thesis["revision"],
+          "content_digest" => thesis["content_digest"] }, ["lib/orbit/v2/validator.rb"])
+      proposal = OrbitV2FixtureFactory.deep_copy(record)
+      Orbit::V2::EvidenceStore::STORE_OWNED_KEYS.each { |key| proposal.delete(key) }
+      snapshot = bundle["repository_snapshot"]
+      paths = ["contracts/orbit-v2", "lib/orbit/v2"]
+      clock_values = ["2026-07-30T02:10:00Z", "2026-07-30T02:11:00Z"]
+      store = Orbit::V2::EvidenceStore.new(active_root: File.join(dir, ".orbit"),
+        clock: -> { Time.iso8601(clock_values.shift || "2026-07-30T02:12:00Z") })
+      accept = lambda do |candidate, overrides = {}|
+        store.accept(proposal: candidate, repository_snapshot: snapshot,
+          code_surface_paths: paths,
+          authority_verifier: overrides.fetch(:authority, vf[0]),
+          runtime_identity_verifier: overrides.fetch(:runtime, vf[1]),
+          lifecycle_verifier: overrides.fetch(:lifecycle, vf[2]))
+      end
+      assert(accept.call(proposal) == :appended, "store-owned evidence acceptance commits")
+      resolved = store.resolve(evidence_record_id: proposal["evidence_record_id"],
+        authority_verifier: vf[0], runtime_identity_verifier: vf[1], lifecycle_verifier: vf[2])
+      assert(resolved.dig("evidence_record", "accepted") == true &&
+        resolved.dig("evidence_record", "acceptance_recorded_at") == "2026-07-30T02:10:00.000000Z" &&
+        resolved["code_surface"] == Orbit::V2::CodeSurface.derive(
+          repository_snapshot: snapshot, paths: paths),
+        "resolve returns exact accepted record and frozen deterministic snapshot projection")
+      assert(accept.call(proposal) == :idempotent,
+        "same proposal is idempotent despite a newly sampled store clock")
+      changed = OrbitV2FixtureFactory.deep_copy(proposal)
+      changed.dig("submission_artifact_refs", 0)["content_digest"] = "sha256:#{'0' * 64}"
+      expect_contract_error("evidence_store_reuse") { accept.call(changed) }
+      expect_contract_error("evidence_store_argument_invalid") { accept.call(proposal, authority: nil) }
+      outside = OrbitV2FixtureFactory.deep_copy(proposal)
+      outside.dig("implementation_check", "changed_paths").replace(["outside/scope.rb"])
+      outside.dig("submission_artifact_refs", 0)["paths"] = ["outside/scope.rb"]
+      expect_contract_error("evidence_store_acceptance_invalid") do
+        outside["evidence_record_id"] = "oevr_inc6foutsidepath"
+        accept.call(outside)
+      end
+      phantom = OrbitV2FixtureFactory.deep_copy(proposal)
+      phantom["evidence_record_id"] = "oevr_inc6fphantomparent"
+      phantom["supersedes_evidence_record_id"] = "oevr_inc6fdoesnotexist"
+      expect_contract_error("evidence_store_acceptance_invalid") { accept.call(phantom) }
+      assert(store.records.size == 1, "rejected evidence leaves the store unchanged")
+
+      payload = OrbitV2FixtureFactory.deep_copy(store.records.first)
+      payload["authority"] = "forbidden-second-fact"
+      tx = { "schema_version" => "orbit-transaction-log-v1",
+        "transaction_id" => proposal["evidence_record_id"], "previous_tip_digest" => nil,
+        "content_digest" => "sha256:#{Orbit::V2::CanonicalJSON.sha256(payload)}", "payload" => payload }
+      path = File.join(dir, ".orbit", Orbit::V2::EvidenceStore::EVIDENCE_TRANSACTIONS_FILE)
+      File.write(path, Orbit::V2::CanonicalJSON.dump("schema_version" => "orbit-transaction-log-v1",
+        "records" => [tx], "file_digest" => "sha256:#{Orbit::V2::CanonicalJSON.sha256([tx])}"))
+      expect_contract_error("evidence_store_lineage_invalid") do
+        store.resolve(evidence_record_id: proposal["evidence_record_id"],
+          authority_verifier: vf[0], runtime_identity_verifier: vf[1], lifecycle_verifier: vf[2])
+      end
+      expect_contract_error("evidence_store_acceptance_invalid") { accept.call(proposal) }
+    end
   end
 
   def test_v1_inventory

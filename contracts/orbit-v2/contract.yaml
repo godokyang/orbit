@@ -252,7 +252,30 @@ task_authority_store:
     proposal_only: appending_a_child_TaskRevision_never_reinterprets_an_r1_control
     activation_owner: ControlStore.activate_exact_task_revision_change_checkpoint
     queue_resolution: every_control_checkpoint_resolves_the_task_at_its_own_accepted_queue_revision_never_the_TaskStore_proposal_tip
-  deferred: [cross_control_transfer, evidence_finding_machinery]
+  deferred: [cross_control_transfer, gate_evaluation_finding_machinery]
+
+evidence_authority_store:
+  seam: Orbit::V2::EvidenceStore
+  location: canonical_active_root_only
+  transaction_file: evidence-transactions.json
+  transaction_shape: closed_payload_of_store_accepted_EvidenceRecord_repository_snapshot_and_exact_derived_CodeSurface
+  acceptance:
+    caller_proposes: EvidenceRecord_without_accepted_acceptance_recorded_at_or_content_digest
+    store_owns: [accepted_true, configured_clock_acceptance_recorded_at, recomputed_content_digest]
+    fixed_lock_order: policy_log_then_task_log_then_control_log_then_evidence_log
+    exact_dependencies: [provider_verified_active_or_historical_policy, exact_TaskStore_TaskRevision_WorkUnit_and_ChangeThesis, ControlStore_resolve_attempt_latest_representation, exact_assigned_RuleResolution, provider_verified_worker_runtime_and_lifecycle]
+    snapshot_projection: CodeSurface_is_deterministically_derived_from_the_stored_repository_snapshot_and_canonical_paths
+    fresh_policy_rule: new_evidence_requires_the_TaskRevision_to_pin_the_active_policy
+    historical_rule: old_policy_evidence_replays_only_when_attempt_start_terminal_and_acceptance_all_precede_the_first_successor_policy_issuance
+    artifact_claim_boundary: internal_identity_digest_kind_and_path_closure_only_never_external_truth_or_existence
+    lineage: supersedes_and_related_refs_resolve_only_to_earlier_exact_compatible_records
+    results: [appended, idempotent_same_proposal_snapshot_and_surface_only_after_whole_existing_store_reverifies]
+    fail_closed: [caller_owned_acceptance_truth, stale_policy, missing_or_mismatched_task_attempt_rule_or_worker, provider_failure, path_scope_failure, phantom_or_cross_scope_lineage, malformed_or_reused_id]
+  reader:
+    selection: exact_evidence_record_id_only_never_latest_wins
+    lock_window: policy_log_then_task_log_then_control_log_then_evidence_log_over_read_and_whole_store_reverification
+    result: exact_record_plus_frozen_repository_snapshot_and_derived_CodeSurface
+  deferred: [GateEvaluation_plus_Finding_atomic_transactions, FindingResolution_transactions, control_checkpoint_evidence_consumers]
 
 
 policy_authority_store:
