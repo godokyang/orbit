@@ -2576,6 +2576,112 @@ module OrbitV2ContractTest
       assert(log.records.last(2).map { |record| record["transaction_id"] } ==
         %w[otxn_fork_parent otxn_fork_child], "forked writes remain serialized in chain order")
 
+      # A no-block fork can unwind the inherited Ruby lock stack in the
+      # child. That unwind must close only the child's descriptor; it must
+      # never LOCK_UN the parent-owned open-file-description lock while the
+      # parent validation callback is still running.
+      unwind_r, unwind_w = IO.pipe
+      race_go_r, race_go_w = IO.pipe
+      race_done_r, race_done_w = IO.pipe
+      contender_pid = fork do
+        unwind_r.close
+        unwind_w.close
+        race_go_w.close
+        race_done_r.close
+        race_go_r.read(1)
+        race_go_r.close
+        contender = Orbit::V2::TransactionLog.new(path: path)
+        contender.append_with(transaction_id: "otxn_fork_unwind_contender",
+          payload: { "owner" => "contender" }, validate: ->(_records, _tip) { nil })
+        race_done_w.write("r")
+        race_done_w.close
+        exit!(0)
+      end
+      unwind_pid = nil
+      begin
+        result = log.append_with(transaction_id: "otxn_fork_unwind_parent",
+          payload: { "owner" => "unwind-parent" }, validate: lambda do |_records, _tip|
+            unwind_pid = fork
+            raise "orbit_v2_child_unwind" if unwind_pid.nil?
+
+            unwind_w.close
+            assert(unwind_r.read(1) == "u", "no-block fork child unwinds its inherited lock stack")
+            race_go_w.write("g")
+            race_go_w.close
+            assert(IO.select([race_done_r], nil, nil, 0.3).nil?,
+              "child unwind cannot unlock the parent while validation is still running")
+            nil
+          end)
+        assert(result == :appended, "parent commits after no-block child unwind")
+      rescue RuntimeError => error
+        raise unless error.message == "orbit_v2_child_unwind"
+
+        unwind_r.close
+        race_go_r.close
+        race_go_w.close
+        race_done_r.close
+        race_done_w.close
+        unwind_w.write("u")
+        unwind_w.close
+        exit!(0)
+      end
+      unwind_r.close
+      race_go_r.close
+      race_done_w.close
+      Process.wait(unwind_pid)
+      assert(race_done_r.read(1) == "r", "contender appends after the parent releases its lock")
+      race_done_r.close
+      Process.wait(contender_pid)
+      assert(log.records.last(2).map { |record| record["transaction_id"] } ==
+        %w[otxn_fork_unwind_parent otxn_fork_unwind_contender],
+        "no-block fork unwind preserves serialized chain order")
+
+      # If the lock-owning parent exits without running ensure, the forked
+      # child must close its inherited flock descriptor before reacquiring;
+      # otherwise it deadlocks forever on its own inherited lock.
+      pid_r, pid_w = IO.pipe
+      done_r, done_w = IO.pipe
+      holder_pid = fork do
+        pid_r.close
+        done_r.close
+        crash_log = Orbit::V2::TransactionLog.new(path: path)
+        suspended_holder = Fiber.new do
+          crash_log.append_with(transaction_id: "otxn_fork_crashed_parent",
+            payload: { "owner" => "crashed-parent" },
+            validate: ->(_records, _tip) { Fiber.yield })
+        end
+        suspended_holder.resume
+        inherited_pid = fork do
+          pid_w.close
+          child = Orbit::V2::TransactionLog.new(path: path)
+          child.append_with(transaction_id: "otxn_fork_after_crash",
+            payload: { "owner" => "survivor" },
+            validate: ->(_child_records, _child_tip) { nil })
+          done_w.write("d")
+          done_w.close
+          exit!(0)
+        end
+        pid_w.write("#{inherited_pid}\n")
+        pid_w.close
+        exit!(0)
+      end
+      pid_w.close
+      done_w.close
+      inherited_pid = pid_r.gets.to_i
+      pid_r.close
+      Process.wait(holder_pid)
+      completed = IO.select([done_r], nil, nil, 3)
+      begin
+        Process.kill("KILL", inherited_pid) unless completed
+      rescue Errno::ESRCH
+        nil
+      end
+      assert(completed && done_r.read(1) == "d",
+        "forked child reacquires after abnormal parent exit without inherited-fd deadlock")
+      done_r.close
+      assert(log.records.last["transaction_id"] == "otxn_fork_after_crash",
+        "only the child transaction commits after the lock-owning parent exits")
+
       # Crash before the commit boundary preserves the previous accepted
       # state: a child is frozen mid-staged-write, killed, and the committed
       # bytes and chain are untouched; the orphaned staging file is ignored.

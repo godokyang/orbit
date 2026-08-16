@@ -41,34 +41,83 @@ module Orbit
       # the flock descriptor, so cross-process exclusion remains intact.
       def with_exclusive_lock(path)
         lock_path = File.expand_path("#{path}.lock")
+        reset_lock_registry_after_fork!
         state = Thread.current[:orbit_v2_exclusive_locks]
-        if !state || state[:pid] != Process.pid
+        if state && state[:pid] != Process.pid
+          state = nil
+        end
+        unless state
           state = { pid: Process.pid, locks: {} }
           Thread.current[:orbit_v2_exclusive_locks] = state
         end
         held = state.fetch(:locks)
-        if held&.key?(lock_path)
-          held[lock_path] += 1
+        if (entry = held[lock_path])
+          entry[:depth] += 1
           begin
             return yield
           ensure
-            held[lock_path] -= 1
+            entry[:depth] -= 1
           end
         end
 
-        held[lock_path] = 1
         begin
           FileUtils.mkdir_p(File.dirname(lock_path))
+          owner_pid = Process.pid
           File.open(lock_path, File::RDWR | File::CREAT, 0o600) do |lock|
-            lock.flock(File::LOCK_EX)
-            yield
-          ensure
-            lock.flock(File::LOCK_UN) if lock
+            register_lock_io(lock)
+            begin
+              lock.flock(File::LOCK_EX)
+              held[lock_path] = { depth: 1, io: lock }
+              yield
+            ensure
+              if Process.pid == owner_pid
+                lock.flock(File::LOCK_UN) unless lock.closed?
+                held.delete(lock_path)
+                unregister_lock_io(lock)
+              else
+                # A no-block fork may unwind the inherited Ruby stack in
+                # the child. It must never LOCK_UN the parent's shared
+                # open-file-description lock. Closing the child's inherited
+                # descriptor is safe because the parent still owns its copy.
+                reset_lock_registry_after_fork!
+              end
+            end
           end
         ensure
           held.delete(lock_path)
-          Thread.current[:orbit_v2_exclusive_locks] = nil if held.empty?
+          current = Thread.current[:orbit_v2_exclusive_locks]
+          Thread.current[:orbit_v2_exclusive_locks] = nil if current.equal?(state) && held.empty?
         end
+      end
+
+      # Reentrancy is Fiber-local, but inherited descriptor cleanup must be
+      # process-wide: a fork from Fiber A also inherits locks held by every
+      # suspended Fiber/thread. The first DurableFile lock call in the child
+      # closes every inherited registered IO without LOCK_UN, then starts a
+      # registry owned by the child PID. Parent IO objects are unaffected by
+      # copy-on-write process isolation.
+      def reset_lock_registry_after_fork!
+        pid = Process.pid
+        return if @exclusive_lock_registry_pid == pid
+
+        inherited = @exclusive_lock_ios || {}
+        @exclusive_lock_registry_pid = pid
+        @exclusive_lock_ios = {}
+        inherited.each_key do |io|
+          io.close unless io.closed?
+        rescue IOError, SystemCallError
+          nil
+        end
+      end
+
+      def register_lock_io(io)
+        reset_lock_registry_after_fork!
+        @exclusive_lock_ios[io] = true
+      end
+
+      def unregister_lock_io(io)
+        reset_lock_registry_after_fork!
+        @exclusive_lock_ios.delete(io)
       end
 
       # Atomically replaces +path+ with +content+ via a same-directory
@@ -117,7 +166,8 @@ module Orbit
         nil
       end
 
-      private_class_method :create_staging_file, :fsync_directory
+      private_class_method :reset_lock_registry_after_fork!, :register_lock_io,
+                           :unregister_lock_io, :create_staging_file, :fsync_directory
     end
   end
 end
