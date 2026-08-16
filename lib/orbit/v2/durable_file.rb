@@ -41,7 +41,12 @@ module Orbit
       # the flock descriptor, so cross-process exclusion remains intact.
       def with_exclusive_lock(path)
         lock_path = File.expand_path("#{path}.lock")
-        held = Thread.current[:orbit_v2_exclusive_locks]
+        state = Thread.current[:orbit_v2_exclusive_locks]
+        if !state || state[:pid] != Process.pid
+          state = { pid: Process.pid, locks: {} }
+          Thread.current[:orbit_v2_exclusive_locks] = state
+        end
+        held = state.fetch(:locks)
         if held&.key?(lock_path)
           held[lock_path] += 1
           begin
@@ -51,8 +56,6 @@ module Orbit
           end
         end
 
-        held ||= {}
-        Thread.current[:orbit_v2_exclusive_locks] = held
         held[lock_path] = 1
         begin
           FileUtils.mkdir_p(File.dirname(lock_path))

@@ -2548,6 +2548,34 @@ module OrbitV2ContractTest
         "chain contains only the winner's transaction"
       )
 
+      # A child forked from inside a locked validation callback inherits
+      # process memory but never inherits in-process reentrancy authority:
+      # it must take the real cross-process flock after the parent commits.
+      signal_r, signal_w = IO.pipe
+      child_pid = nil
+      log = Orbit::V2::TransactionLog.new(path: path)
+      assert(log.append_with(transaction_id: "otxn_fork_parent", payload: { "owner" => "parent" },
+        validate: lambda do |_records, _tip|
+          child_pid = fork do
+            signal_r.close
+            child = Orbit::V2::TransactionLog.new(path: path)
+            child.append_with(transaction_id: "otxn_fork_child", payload: { "owner" => "child" },
+              validate: ->(_child_records, _child_tip) { nil })
+            signal_w.write("c")
+            signal_w.close
+            exit!(0)
+          end
+          signal_w.close
+          assert(IO.select([signal_r], nil, nil, 0.3).nil?,
+            "forked child cannot bypass the parent's inherited lock state")
+          nil
+        end) == :appended, "parent commits after excluding its forked child")
+      assert(signal_r.read(1) == "c", "forked child appends only after parent lock release")
+      signal_r.close
+      Process.wait(child_pid)
+      assert(log.records.last(2).map { |record| record["transaction_id"] } ==
+        %w[otxn_fork_parent otxn_fork_child], "forked writes remain serialized in chain order")
+
       # Crash before the commit boundary preserves the previous accepted
       # state: a child is frozen mid-staged-write, killed, and the committed
       # bytes and chain are untouched; the orphaned staging file is ignored.
