@@ -160,7 +160,42 @@ module Orbit
         result
       end
 
+      # DELIBERATE collaborator for the GateFactStore cutoff: the one
+      # internal already-locked verified EvidenceStore snapshot seam, kept
+      # OUT of the public instance surface. The caller MUST already hold the
+      # full fixed lock chain; the whole evidence store re-verifies with the
+      # non-recursive attempt resolution, so a forged digest-consistent
+      # EvidenceRecord can never enter the gate cutoff cache.
+      class Cutoff
+        def initialize(active_root:)
+          @store = EvidenceStore.new(active_root: active_root)
+        end
+
+        def verified_payloads(gate_cutoff:, authority_verifier:,
+                              runtime_identity_verifier:, lifecycle_verifier:,
+                              verified_control_txs: nil)
+          @store.send(:verified_payloads_locked, gate_cutoff,
+            authority_verifier, runtime_identity_verifier, lifecycle_verifier,
+            verified_control_txs: verified_control_txs)
+        end
+      end
+
       private
+
+      def verified_payloads_locked(gate_cutoff, authority_verifier,
+                                   runtime_identity_verifier, lifecycle_verifier,
+                                   verified_control_txs: nil)
+        verified_txs = verified_control_txs ||
+          Orbit::V2::ControlStore::Cutoff.new(active_root: @active_root)
+            .verified_records(gate_cutoff: gate_cutoff,
+              authority_verifier: authority_verifier,
+              runtime_identity_verifier: runtime_identity_verifier,
+              lifecycle_verifier: lifecycle_verifier)
+        marker, policy = marker_and_policy(authority_verifier)
+        verify_existing!(@log.records, marker, policy, authority_verifier,
+          runtime_identity_verifier, lifecycle_verifier, locked: true,
+          verified_control_txs: verified_txs)
+      end
 
       def validate_inputs!(proposal, snapshot, paths, authority, runtime, lifecycle)
         valid = proposal.is_a?(Hash) &&
@@ -235,7 +270,8 @@ module Orbit
         raise acceptance_invalid(error)
       end
 
-      def verify_existing!(records, marker, policy, authority, runtime, lifecycle)
+      def verify_existing!(records, marker, policy, authority, runtime, lifecycle,
+                           locked: false, verified_control_txs: nil)
         seen = {}
         records.map.with_index do |transaction, index|
           payload = transaction["payload"]
@@ -256,7 +292,9 @@ module Orbit
               runtime,
               lifecycle,
               seen,
-              fresh: false
+              fresh: false,
+              locked: locked,
+              verified_control_txs: verified_control_txs
             )
             record = payload.fetch("evidence_record")
             seen[record.fetch("evidence_record_id")] = record
@@ -269,7 +307,8 @@ module Orbit
         end
       end
 
-      def validate_payload!(payload, marker, policy, authority, runtime, lifecycle, seen, fresh:)
+      def validate_payload!(payload, marker, policy, authority, runtime, lifecycle, seen, fresh:,
+                            locked: false, verified_control_txs: nil)
         unless payload.is_a?(Hash) && payload.keys.sort == PAYLOAD_KEYS &&
                payload["evidence_record"].is_a?(Hash) &&
                payload["repository_snapshot"].is_a?(Hash) &&
@@ -311,15 +350,75 @@ module Orbit
           task_revision_id: record.fetch("task_revision_id"),
           authority_verifier: authority
         )
-        execution = ControlStore.new(active_root: @active_root).resolve_attempt(
-          attempt_id: record.fetch("attempt_id"),
-          authority_verifier: authority,
-          runtime_identity_verifier: runtime,
-          lifecycle_verifier: lifecycle
-        )
+        execution = if locked
+                      resolve_attempt_locked(record.fetch("attempt_id"), authority, runtime,
+                        lifecycle, verified_control_txs)
+                    else
+                      ControlStore.new(active_root: @active_root).resolve_attempt(
+                        attempt_id: record.fetch("attempt_id"),
+                        authority_verifier: authority,
+                        runtime_identity_verifier: runtime,
+                        lifecycle_verifier: lifecycle
+                      )
+                    end
         validate_evidence_fact!(record, task, execution, payload.fetch("code_surface"), policy, fresh)
         validate_lineage!(record, seen)
         true
+      end
+
+      # INTERNAL non-recursive attempt resolution for callers that already
+      # hold the full fixed lock chain (policy -> task -> control ->
+      # evidence): the attempt/rule/worker facts come from the ControlStore
+      # verified-records seam (whole-lineage verification against the
+      # prebuilt structural gate cutoff), NOT a raw record scan, so a
+      # digest-consistent forged control transaction can never enter the
+      # staged evidence/gate verification.
+      def resolve_attempt_locked(attempt_id, authority, runtime, lifecycle, verified_txs)
+        attempts = {}
+        agents = {}
+        resolutions = {}
+        verified_txs.each do |tx|
+          case tx.keys.sort
+          when ControlStore::EXECUTION_PAYLOAD_KEYS
+            attempt = tx.fetch("attempt")
+            attempts[attempt.fetch("attempt_id")] = attempt
+            agents[tx.fetch("worker_agent").fetch("agent_instance_id")] = tx.fetch("worker_agent")
+            resolutions[tx.fetch("rule_resolution").fetch("resolution_id")] = tx.fetch("rule_resolution")
+          when ControlStore::TERMINAL_PAYLOAD_KEYS
+            terminated = tx.fetch("attempt")
+            attempts[terminated.fetch("attempt_id")] = terminated if attempts.key?(terminated.fetch("attempt_id"))
+            successor = tx.fetch("successor_attempt")
+            attempts[successor.fetch("attempt_id")] = successor
+            agents[tx.fetch("worker_agent").fetch("agent_instance_id")] = tx.fetch("worker_agent")
+            resolutions[tx.fetch("rule_resolution").fetch("resolution_id")] = tx.fetch("rule_resolution")
+          end
+        end
+        attempt = attempts[attempt_id]
+        raise ContractError.new(
+          "evidence_store_lineage_invalid",
+          "accepted Attempt #{attempt_id} does not resolve in the raw control lineage",
+          path: "evidence_store.attempts.#{attempt_id}"
+        ) unless attempt
+        assignment = attempt.dig("events", 0, "assignment") || {}
+        rule = resolutions[assignment["assigned_rule_resolution_id"]]
+        agent = agents[assignment["agent_instance_id"]]
+        raise ContractError.new(
+          "evidence_store_lineage_invalid",
+          "accepted Attempt has no exact RuleResolution or worker AgentInstance",
+          path: "evidence_store.attempts.#{attempt_id}"
+        ) unless rule && agent
+        runtime.verify!(agent)
+        Array(agent["lifecycle_events"]).each do |event|
+          lifecycle.verify!(event, project_id: attempt.fetch("project_id"))
+        end
+        lifecycle.verify!(attempt.fetch("events").first,
+          project_id: attempt.fetch("project_id"))
+        {
+          "attempt" => attempt,
+          "agent" => agent,
+          "rule_resolution" => rule,
+          "lead_control_id" => attempt.fetch("lead_control_id")
+        }
       end
 
       def validate_evidence_fact!(record, task_payload, execution, code_surface, policy, fresh)

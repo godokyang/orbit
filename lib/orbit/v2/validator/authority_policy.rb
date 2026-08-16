@@ -217,6 +217,8 @@ module Orbit
                 authorization.dig("budget_override_envelope", "scope_digest")
               elsif authorization["action"] == ControlAuthority::FALLBACK_AUTHORIZE_ACTION
                 authorization.dig("fallback_envelope", "scope_digest")
+              elsif authorization["action"] == "finding.waive"
+                authorization["subject_ref"]
               elsif TaskAuthority.action?(authorization["action"]) ||
                     WorkAuthority.action?(authorization["action"])
                 authorization["subject_ref"]

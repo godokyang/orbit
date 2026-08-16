@@ -86,16 +86,16 @@ module Orbit
       CHECKPOINT_PAYLOAD_KEYS = %w[assertion checkpoint].freeze
       SESSION_CHECKPOINT_PAYLOAD_KEYS = %w[agent assertion checkpoint prior_session session].freeze
       EXECUTION_PAYLOAD_KEYS = %w[
-        attempt dispatch_assertion dispatch_checkpoint observation_assertion
-        observation_checkpoint rule_resolution worker_agent
+        attempt dispatch_assertion dispatch_checkpoint gate_cutoff_tip
+        observation_assertion observation_checkpoint rule_resolution worker_agent
       ].freeze
       # The terminal reconciliation transaction carries the terminated
       # attempt plus, when the deterministic attempt_terminal reconcile
       # authorizes a successor dispatch, the full successor composite: the
       # terminal checkpoint IS the exact authorizing dispatch checkpoint.
       TERMINAL_PAYLOAD_KEYS = %w[
-        assertion attempt checkpoint observation_assertion observation_checkpoint
-        rule_resolution successor_attempt worker_agent
+        assertion attempt checkpoint gate_cutoff_tip observation_assertion
+        observation_checkpoint rule_resolution successor_attempt worker_agent
       ].freeze
       TERMINAL_EVENT_TYPES = %w[AttemptCompleted AttemptFailed AttemptBlocked AttemptCancelled].freeze
       GENESIS_ACTION = "control.genesis".freeze
@@ -133,9 +133,18 @@ module Orbit
         # stable as well as the policy snapshot until its append commits.
         policy_log = File.join(@active_root, PolicyStore::POLICY_TRANSACTIONS_FILE)
         task_log = File.join(@active_root, TaskStore::TASK_DEFINITIONS_FILE)
+        control_log = File.join(@active_root, CONTROL_TRANSACTIONS_FILE)
+        evidence_log = File.join(@active_root, EvidenceStore::EVIDENCE_TRANSACTIONS_FILE)
+        gate_log = File.join(@active_root, GateFactStore::GATE_FACTS_FILE)
+        # Fixed policy -> task -> control -> evidence -> gate window: the
+        # gate cutoff snapshot resolves once inside this window and the
+        # append's own control-log lock is re-entrant for this thread.
         DurableFile.with_exclusive_lock(policy_log) do
           DurableFile.with_exclusive_lock(task_log) do
-            @log.append_with(
+            DurableFile.with_exclusive_lock(control_log) do
+              DurableFile.with_exclusive_lock(evidence_log) do
+                DurableFile.with_exclusive_lock(gate_log) do
+                  @log.append_with(
               transaction_id: control_id,
               payload: candidate,
               validate: lambda do |records, _tip|
@@ -143,8 +152,11 @@ module Orbit
                   records, candidate, control_id,
                   authority_verifier, runtime_identity_verifier, lifecycle_verifier
                 )
+                end
+              )
+                end
               end
-            )
+            end
           end
         end
       rescue ContractError => e
@@ -207,15 +219,23 @@ module Orbit
                     else
                       { "assertion" => assertion, "checkpoint" => checkpoint }
                     end
-        # Fixed root lock order: policy log -> task log -> control log, so
-        # the TaskStore facts resolved inside the checkpoint snapshot and
-        # the control append are atomic with respect to task commits and
-        # policy rotations.
+        # Fixed root lock order: policy -> task -> control -> evidence ->
+        # gate, so every cross-store fact resolved inside the checkpoint
+        # snapshot and the control append share one operation window.
         policy_log = File.join(@active_root, PolicyStore::POLICY_TRANSACTIONS_FILE)
         task_log = File.join(@active_root, TaskStore::TASK_DEFINITIONS_FILE)
+        control_log = File.join(@active_root, CONTROL_TRANSACTIONS_FILE)
+        evidence_log = File.join(@active_root, EvidenceStore::EVIDENCE_TRANSACTIONS_FILE)
+        gate_log = File.join(@active_root, GateFactStore::GATE_FACTS_FILE)
+        # Fixed policy -> task -> control -> evidence -> gate window: the
+        # gate cutoff snapshot resolves once inside this window and the
+        # append's own control-log lock is re-entrant for this thread.
         DurableFile.with_exclusive_lock(policy_log) do
           DurableFile.with_exclusive_lock(task_log) do
-            @log.append_with(
+            DurableFile.with_exclusive_lock(control_log) do
+              DurableFile.with_exclusive_lock(evidence_log) do
+                DurableFile.with_exclusive_lock(gate_log) do
+                  @log.append_with(
               transaction_id: checkpoint_id,
               payload: candidate,
               validate: lambda do |records, _tip|
@@ -223,8 +243,11 @@ module Orbit
                   records, candidate, checkpoint_id,
                   authority_verifier, runtime_identity_verifier, lifecycle_verifier
                 )
+                end
+              )
+                end
               end
-            )
+            end
           end
         end
       rescue ContractError => e
@@ -276,16 +299,29 @@ module Orbit
         }
         policy_log = File.join(@active_root, PolicyStore::POLICY_TRANSACTIONS_FILE)
         task_log = File.join(@active_root, TaskStore::TASK_DEFINITIONS_FILE)
+        control_log = File.join(@active_root, CONTROL_TRANSACTIONS_FILE)
+        evidence_log = File.join(@active_root, EvidenceStore::EVIDENCE_TRANSACTIONS_FILE)
+        gate_log = File.join(@active_root, GateFactStore::GATE_FACTS_FILE)
+        # Fixed policy -> task -> control -> evidence -> gate window: the
+        # gate cutoff snapshot resolves once inside this window and the
+        # append's own control-log lock is re-entrant for this thread.
         DurableFile.with_exclusive_lock(policy_log) do
           DurableFile.with_exclusive_lock(task_log) do
-            @log.append_with(
+            DurableFile.with_exclusive_lock(control_log) do
+              DurableFile.with_exclusive_lock(evidence_log) do
+                DurableFile.with_exclusive_lock(gate_log) do
+                  candidate["gate_cutoff_tip"] = frozen_gate_tip_for(control_log, gate_log, attempt_id)
+                  @log.append_with(
               transaction_id: attempt_id,
               payload: candidate,
               validate: lambda do |records, _tip|
                 validate_dispatch_snapshot!(records, candidate, attempt_id,
                   authority_verifier, runtime_identity_verifier, lifecycle_verifier)
+                end
+              )
+                end
               end
-            )
+            end
           end
         end
       rescue ContractError => e
@@ -341,9 +377,19 @@ module Orbit
         }
         policy_log = File.join(@active_root, PolicyStore::POLICY_TRANSACTIONS_FILE)
         task_log = File.join(@active_root, TaskStore::TASK_DEFINITIONS_FILE)
+        control_log = File.join(@active_root, CONTROL_TRANSACTIONS_FILE)
+        evidence_log = File.join(@active_root, EvidenceStore::EVIDENCE_TRANSACTIONS_FILE)
+        gate_log = File.join(@active_root, GateFactStore::GATE_FACTS_FILE)
+        # Fixed policy -> task -> control -> evidence -> gate window: the
+        # gate cutoff snapshot resolves once inside this window and the
+        # append's own control-log lock is re-entrant for this thread.
         DurableFile.with_exclusive_lock(policy_log) do
           DurableFile.with_exclusive_lock(task_log) do
-            @log.append_with(
+            DurableFile.with_exclusive_lock(control_log) do
+              DurableFile.with_exclusive_lock(evidence_log) do
+                DurableFile.with_exclusive_lock(gate_log) do
+                  candidate["gate_cutoff_tip"] = frozen_gate_tip_for(control_log, gate_log, checkpoint_id)
+                  @log.append_with(
               transaction_id: checkpoint_id,
               payload: candidate,
               validate: lambda do |records, _tip|
@@ -351,8 +397,11 @@ module Orbit
                   records, candidate, checkpoint_id,
                   authority_verifier, runtime_identity_verifier, lifecycle_verifier
                 )
+                end
+              )
+                end
               end
-            )
+            end
           end
         end
       rescue ContractError => e
@@ -369,8 +418,9 @@ module Orbit
       # task_revision_change LeadCheckpoint (plus its writer assertion) that
       # transitions the owned task from the exact accepted parent revision
       # to the exact accepted child revision of the same task, in one
-      # closed control-log transaction under policy -> task -> control
-      # locks. The TaskStore child append itself is proposal-only: the r1
+      # closed control-log transaction under policy -> task -> control ->
+      # evidence -> gate locks. The TaskStore child append itself is
+      # proposal-only: the r1
       # control stays readable/dispatchable until this activation commits,
       # and every later checkpoint resolves the task at its OWN queue
       # revision.
@@ -423,9 +473,18 @@ module Orbit
         end
         policy_log = File.join(@active_root, PolicyStore::POLICY_TRANSACTIONS_FILE)
         task_log = File.join(@active_root, TaskStore::TASK_DEFINITIONS_FILE)
+        control_log = File.join(@active_root, CONTROL_TRANSACTIONS_FILE)
+        evidence_log = File.join(@active_root, EvidenceStore::EVIDENCE_TRANSACTIONS_FILE)
+        gate_log = File.join(@active_root, GateFactStore::GATE_FACTS_FILE)
+        # Fixed policy -> task -> control -> evidence -> gate window: the
+        # gate cutoff snapshot resolves once inside this window and the
+        # append's own control-log lock is re-entrant for this thread.
         DurableFile.with_exclusive_lock(policy_log) do
           DurableFile.with_exclusive_lock(task_log) do
-            @log.append_with(
+            DurableFile.with_exclusive_lock(control_log) do
+              DurableFile.with_exclusive_lock(evidence_log) do
+                DurableFile.with_exclusive_lock(gate_log) do
+                  @log.append_with(
               transaction_id: checkpoint_id,
               payload: candidate,
               validate: lambda do |records, _tip|
@@ -433,8 +492,11 @@ module Orbit
                   records, candidate, checkpoint_id,
                   authority_verifier, runtime_identity_verifier, lifecycle_verifier
                 )
+                end
+              )
+                end
               end
-            )
+            end
           end
         end
       rescue ContractError => e
@@ -469,16 +531,28 @@ module Orbit
             path: "control_store.control_id"
           )
         end
-        txs = payloads(@log.records)
-        marker = ActiveRoot.marker_for(@active_root, code: "control_store_unpinned", label: "control_store")
-        policy = begin
-          resolve_active_policy(marker, authority_verifier)
-        rescue ContractError => e
-          raise lineage_invalid("#{e.code}: #{e.message}")
-        end
-        verified = verify_all_transactions!(txs, marker, policy, authority_verifier,
-          runtime_identity_verifier, lifecycle_verifier)
-        target = verified.find do |tx|
+        policy_log = File.join(@active_root, PolicyStore::POLICY_TRANSACTIONS_FILE)
+        task_log = File.join(@active_root, TaskStore::TASK_DEFINITIONS_FILE)
+        control_log = File.join(@active_root, CONTROL_TRANSACTIONS_FILE)
+        evidence_log = File.join(@active_root, EvidenceStore::EVIDENCE_TRANSACTIONS_FILE)
+        gate_log = File.join(@active_root, GateFactStore::GATE_FACTS_FILE)
+        DurableFile.with_exclusive_lock(policy_log) do
+          DurableFile.with_exclusive_lock(task_log) do
+            DurableFile.with_exclusive_lock(control_log) do
+              DurableFile.with_exclusive_lock(evidence_log) do
+                DurableFile.with_exclusive_lock(gate_log) do
+                  txs = payloads(@log.records)
+                  marker = ActiveRoot.marker_for(@active_root, code: "control_store_unpinned", label: "control_store")
+                  policy = begin
+                    resolve_active_policy(marker, authority_verifier)
+                  rescue ContractError => e
+                    raise lineage_invalid("#{e.code}: #{e.message}")
+                  end
+                  gate_cutoff = resolve_gate_cutoff(authority_verifier,
+                    runtime_identity_verifier, lifecycle_verifier)
+                  verified = verify_all_transactions!(txs, marker, policy, authority_verifier,
+                    runtime_identity_verifier, lifecycle_verifier, gate_cutoff: gate_cutoff)
+                  target = verified.find do |tx|
           tx.is_a?(Hash) && tx.keys.sort == PAYLOAD_KEYS &&
             tx.fetch("registry").fetch("lead_control_id") == control_id
         end
@@ -535,8 +609,13 @@ module Orbit
           # transaction order.
           "checkpoints" => entries.map { |entry| entry.fetch("checkpoint") },
           "attempts" => attempts.values,
-          "rule_resolutions" => resolutions.values
-        }
+                  "rule_resolutions" => resolutions.values
+                }
+                end
+              end
+            end
+          end
+        end
       end
 
       # Resolves one exact accepted Attempt from the fully reverified
@@ -561,15 +640,21 @@ module Orbit
         policy_log = File.join(@active_root, PolicyStore::POLICY_TRANSACTIONS_FILE)
         task_log = File.join(@active_root, TaskStore::TASK_DEFINITIONS_FILE)
         control_log = File.join(@active_root, CONTROL_TRANSACTIONS_FILE)
+        evidence_log = File.join(@active_root, EvidenceStore::EVIDENCE_TRANSACTIONS_FILE)
+        gate_log = File.join(@active_root, GateFactStore::GATE_FACTS_FILE)
         DurableFile.with_exclusive_lock(policy_log) do
           DurableFile.with_exclusive_lock(task_log) do
             DurableFile.with_exclusive_lock(control_log) do
-              resolve_attempt_snapshot!(
-                attempt_id,
-                authority_verifier,
-                runtime_identity_verifier,
-                lifecycle_verifier
-              )
+              DurableFile.with_exclusive_lock(evidence_log) do
+                DurableFile.with_exclusive_lock(gate_log) do
+                  resolve_attempt_snapshot!(
+                    attempt_id,
+                    authority_verifier,
+                    runtime_identity_verifier,
+                    lifecycle_verifier
+                  )
+                end
+              end
             end
           end
         end
@@ -603,17 +688,20 @@ module Orbit
         end
         # The complete recovery window — log read, whole-snapshot
         # reverification, tip derivation, and reconcile — runs under the
-        # SAME fixed policy -> task -> control locks as every writer
-        # (writers hold policy + task across their append, and the append
-        # itself takes the control log lock), so a concurrent successor can
+        # SAME fixed policy -> task -> control -> evidence -> gate locks as
+        # every writer, so a concurrent successor can
         # never append between the read and the returned decision: the
         # recovered tip is the unique current tip by construction.
         policy_log = File.join(@active_root, PolicyStore::POLICY_TRANSACTIONS_FILE)
         task_log = File.join(@active_root, TaskStore::TASK_DEFINITIONS_FILE)
         control_log = File.join(@active_root, CONTROL_TRANSACTIONS_FILE)
+        evidence_log = File.join(@active_root, EvidenceStore::EVIDENCE_TRANSACTIONS_FILE)
+        gate_log = File.join(@active_root, GateFactStore::GATE_FACTS_FILE)
         recovered = DurableFile.with_exclusive_lock(policy_log) do
           DurableFile.with_exclusive_lock(task_log) do
             DurableFile.with_exclusive_lock(control_log) do
+              DurableFile.with_exclusive_lock(evidence_log) do
+                DurableFile.with_exclusive_lock(gate_log) do
             txs = payloads(@log.records)
             marker = ActiveRoot.marker_for(@active_root, code: "control_store_unpinned", label: "control_store")
             policy = begin
@@ -621,8 +709,10 @@ module Orbit
             rescue ContractError => e
               raise lineage_invalid("#{e.code}: #{e.message}")
             end
+            gate_cutoff = resolve_gate_cutoff(authority_verifier, runtime_identity_verifier,
+              lifecycle_verifier)
             verified = verify_all_transactions!(txs, marker, policy, authority_verifier,
-              runtime_identity_verifier, lifecycle_verifier)
+              runtime_identity_verifier, lifecycle_verifier, gate_cutoff: gate_cutoff)
             genesis_tx = verified.find do |tx|
               tx.is_a?(Hash) && tx.keys.sort == PAYLOAD_KEYS &&
                 tx.fetch("registry").fetch("lead_control_id") == control_id
@@ -662,9 +752,14 @@ module Orbit
             rescue ContractError => error
               raise recovery_invalid("tip task facts do not resolve: #{error.code}")
             end
+            tip_tx = control_txs.last || genesis_tx
+            tip_cutoff = historical_gate_cutoff(gate_cutoff, tip_tx, control_txs)
             bundle = assemble_bundle(marker, policy.fetch("accepted"),
               policy.fetch("accepted_assertions"), genesis_tx, control_txs,
-              {}, task_facts.fetch("payload"))
+              {}, task_facts.fetch("payload"), gate_cutoff: tip_cutoff,
+              authority_verifier: authority_verifier,
+              runtime_identity_verifier: runtime_identity_verifier,
+              lifecycle_verifier: lifecycle_verifier)
             begin
               decision = Orbit::V2::LeadControl.reconcile(
                 {
@@ -686,13 +781,49 @@ module Orbit
               )
             end
             decision
+                end
+              end
             end
           end
         end
         recovered
       end
 
+      # DELIBERATE collaborator for the GateFactStore cutoff staging: the
+      # one internal already-locked ControlStore verified-records seam, kept
+      # OUT of the public instance surface. The caller MUST already hold the
+      # full fixed lock chain (policy -> task -> control -> evidence ->
+      # gate); the WHOLE control lineage re-verifies (checkpoint/assertion
+      # authority, exact policy pins, terminal prefixes, dispatch/
+      # observation binding, global conflicts, historical causal decisions)
+      # against the prebuilt STRUCTURAL gate cutoff, and the attempt facts
+      # are resolved from those verified transactions — a digest-consistent
+      # forged control transaction can never enter the staged evidence/gate
+      # verification. The gate resolutions are finalized later in the staged
+      # verification; the entire operation fails if any final resolution
+      # verification fails, so the outcome stays atomic and non-recursive.
+      class Cutoff
+        def initialize(active_root:)
+          @store = ControlStore.new(active_root: active_root)
+        end
+
+        def verified_records(gate_cutoff:, evidence_payloads: nil, authority_verifier:,
+                             runtime_identity_verifier:, lifecycle_verifier:)
+          @store.send(:verified_records_locked, gate_cutoff, evidence_payloads,
+            authority_verifier, runtime_identity_verifier, lifecycle_verifier)
+        end
+      end
+
       private
+
+      def verified_records_locked(gate_cutoff, evidence_payloads, authority_verifier,
+                                  runtime_identity_verifier, lifecycle_verifier)
+        marker = ActiveRoot.marker_for(@active_root, code: "control_store_unpinned", label: "control_store")
+        policy = resolve_active_policy(marker, authority_verifier)
+        verify_all_transactions!(payloads(@log.records), marker, policy,
+          authority_verifier, runtime_identity_verifier, lifecycle_verifier,
+          gate_cutoff: gate_cutoff, evidence_payloads: evidence_payloads)
+      end
 
       def resolve_attempt_snapshot!(attempt_id, authority_verifier,
                                     runtime_identity_verifier, lifecycle_verifier)
@@ -707,13 +838,16 @@ module Orbit
         rescue ContractError => error
           raise lineage_invalid("#{error.code}: #{error.message}")
         end
+        gate_cutoff = resolve_gate_cutoff(authority_verifier, runtime_identity_verifier,
+          lifecycle_verifier)
         verified = verify_all_transactions!(
           txs,
           marker,
           policy,
           authority_verifier,
           runtime_identity_verifier,
-          lifecycle_verifier
+          lifecycle_verifier,
+          gate_cutoff: gate_cutoff
         )
 
         attempts = {}
@@ -870,6 +1004,8 @@ module Orbit
         txs = payloads(records)
         marker = ActiveRoot.marker_for(@active_root, code: "control_store_unpinned", label: "control_store")
         policy = resolve_active_policy(marker, authority_verifier)
+        gate_cutoff = resolve_gate_cutoff(authority_verifier, runtime_identity_verifier,
+          lifecycle_verifier, failure: :genesis)
         # Existing controls are re-verified against the same snapshot (a
         # broken/forged store can never be extended), and the candidate is
         # validated against the policy resolved AT COMMIT TIME (never an
@@ -878,7 +1014,8 @@ module Orbit
         seen_event_ids = Set.new
         verified_existing = begin
           verify_all_transactions!(txs, marker, policy, authority_verifier,
-            runtime_identity_verifier, lifecycle_verifier, seen_event_ids: seen_event_ids)
+            runtime_identity_verifier, lifecycle_verifier, seen_event_ids: seen_event_ids,
+            gate_cutoff: gate_cutoff)
         rescue ContractError => error
           raise genesis_invalid(
             "existing snapshot does not fully re-verify: #{error.code}"
@@ -906,7 +1043,9 @@ module Orbit
           runtime_identity_verifier: runtime_identity_verifier,
           lifecycle_verifier: lifecycle_verifier,
           seen_event_ids: seen_event_ids,
-          all_txs: txs
+          all_txs: txs,
+          gate_cutoff: gate_cutoff,
+          fresh: true
         )
         reject_cross_control_conflicts!(
           verified_existing.select { |tx| tx.is_a?(Hash) && tx.keys.sort == PAYLOAD_KEYS },
@@ -925,10 +1064,13 @@ module Orbit
         txs = payloads(records)
         marker = ActiveRoot.marker_for(@active_root, code: "control_store_unpinned", label: "control_store")
         policy = resolve_active_policy(marker, authority_verifier)
+        gate_cutoff = resolve_gate_cutoff(authority_verifier, runtime_identity_verifier,
+          lifecycle_verifier, failure: :checkpoint)
         seen_event_ids = Set.new
         verified_existing = begin
           verify_all_transactions!(txs, marker, policy, authority_verifier,
-            runtime_identity_verifier, lifecycle_verifier, seen_event_ids: seen_event_ids)
+            runtime_identity_verifier, lifecycle_verifier, seen_event_ids: seen_event_ids,
+            gate_cutoff: gate_cutoff)
         rescue ContractError => error
           raise checkpoint_invalid(
             "existing snapshot does not fully re-verify: #{error.code}"
@@ -952,12 +1094,14 @@ module Orbit
           policy: policy.fetch("active"),
           pinned_policies: policy.fetch("accepted"),
           accepted_assertions: policy.fetch("accepted_assertions"),
+          fresh: true,
           marker: marker,
           authority_verifier: authority_verifier,
           runtime_identity_verifier: runtime_identity_verifier,
           lifecycle_verifier: lifecycle_verifier,
           seen_event_ids: seen_event_ids,
-          all_txs: txs
+          all_txs: txs,
+          gate_cutoff: gate_cutoff
         )
         nil
       end
@@ -968,10 +1112,13 @@ module Orbit
         txs = payloads(records)
         marker = ActiveRoot.marker_for(@active_root, code: "control_store_unpinned", label: "control_store")
         policy = resolve_active_policy(marker, authority_verifier)
+        gate_cutoff = resolve_gate_cutoff(authority_verifier, runtime_identity_verifier,
+          lifecycle_verifier, failure: :dispatch)
         seen_ids = Set.new
         verified_existing = begin
           verify_all_transactions!(txs, marker, policy, authority_verifier,
-            runtime_identity_verifier, lifecycle_verifier, seen_event_ids: seen_ids)
+            runtime_identity_verifier, lifecycle_verifier, seen_event_ids: seen_ids,
+            gate_cutoff: gate_cutoff)
         rescue ContractError => error
           raise dispatch_invalid("existing snapshot does not fully re-verify: #{error.code}")
         end
@@ -994,7 +1141,7 @@ module Orbit
           authority_verifier: authority_verifier,
           runtime_identity_verifier: runtime_identity_verifier,
           lifecycle_verifier: lifecycle_verifier, seen_event_ids: seen_ids,
-          all_txs: txs)
+          all_txs: txs, gate_cutoff: gate_cutoff, fresh: true)
         nil
       end
 
@@ -1004,10 +1151,13 @@ module Orbit
         txs = payloads(records)
         marker = ActiveRoot.marker_for(@active_root, code: "control_store_unpinned", label: "control_store")
         policy = resolve_active_policy(marker, authority_verifier)
+        gate_cutoff = resolve_gate_cutoff(authority_verifier, runtime_identity_verifier,
+          lifecycle_verifier, failure: :terminal)
         seen_ids = Set.new
         verified_existing = begin
           verify_all_transactions!(txs, marker, policy, authority_verifier,
-            runtime_identity_verifier, lifecycle_verifier, seen_event_ids: seen_ids)
+            runtime_identity_verifier, lifecycle_verifier, seen_event_ids: seen_ids,
+            gate_cutoff: gate_cutoff)
         rescue ContractError => error
           raise terminal_invalid("existing snapshot does not fully re-verify: #{error.code}")
         end
@@ -1030,13 +1180,14 @@ module Orbit
           authority_verifier: authority_verifier,
           runtime_identity_verifier: runtime_identity_verifier,
           lifecycle_verifier: lifecycle_verifier, seen_event_ids: seen_ids,
-          all_txs: txs)
+          all_txs: txs, gate_cutoff: gate_cutoff, fresh: true)
         nil
       end
 
       def verify_all_transactions!(txs, marker, policy, authority_verifier,
                                    runtime_identity_verifier, lifecycle_verifier,
-                                   seen_event_ids: Set.new)
+                                   seen_event_ids: Set.new, gate_cutoff:,
+                                   evidence_payloads: nil)
         verified = []
         txs.each_with_index do |tx, index|
           begin
@@ -1061,7 +1212,9 @@ module Orbit
               runtime_identity_verifier: runtime_identity_verifier,
               lifecycle_verifier: lifecycle_verifier,
               seen_event_ids: seen_event_ids,
-              all_txs: txs.first(index)
+              all_txs: txs.first(index),
+              gate_cutoff: historical_gate_cutoff(gate_cutoff, tx, txs),
+              evidence_payloads: evidence_payloads, fresh: false
             )
             if validated.is_a?(Hash) && validated.keys.sort == PAYLOAD_KEYS
               reject_cross_control_conflicts!(
@@ -1082,6 +1235,268 @@ module Orbit
         verified
       end
 
+
+      # The transaction-scoped HISTORICAL gate cutoff: only the gate facts
+      # causally exact-pinned by the transaction's own checkpoint lineage
+      # (finding/finding_resolution refs in delivery_progress.supporting_refs,
+      # walked back through predecessor checkpoints) plus their transitive
+      # source/resolving evaluation/finding/resolution dependencies. Future
+      # gate facts never enter a historical replay bundle, so an evaluation
+      # accepted AFTER a persisted transaction can never reinterpret the
+      # stored decision; the NEW candidate validation always receives the
+      # complete current locked cutoff instead.
+      def historical_gate_cutoff(gate_cutoff, tx, txs, fresh: false)
+        evaluations = gate_cutoff.fetch("gate_evaluations")
+        findings = gate_cutoff.fetch("findings")
+        resolutions = gate_cutoff.fetch("finding_resolutions")
+        transactions = gate_cutoff.fetch("transactions")
+        evaluation_by_id = evaluations.to_h { |evaluation| [evaluation["gate_evaluation_id"], evaluation] }
+        finding_by_id = findings.to_h { |finding| [finding["finding_id"], finding] }
+        resolution_by_id = resolutions.to_h { |resolution| [resolution["finding_resolution_id"], resolution] }
+        owner = {}
+        txs.each do |candidate|
+          checkpoint_entries(candidate).each do |entry|
+            owner[entry.fetch("checkpoint")["lead_checkpoint_id"]] = candidate
+          end
+        end
+        wanted_evaluations = {}
+        wanted_findings = {}
+        wanted_resolutions = {}
+        # Controlled-writer history proof: every dispatch-bearing
+        # transaction freezes the exact gate-log tip (last accepted gate
+        # transaction id + digest) the controlled writer observed inside
+        # its locked window. The historical slice for such a transaction is
+        # the verified gate PREFIX ending at that frozen tip — facts already
+        # present at write time are included even when the checkpoint omits
+        # refs to them, and facts accepted later never enter. A tip that
+        # does not resolve inside the current verified gate log leaves the
+        # slice ref-derived here; the payload validation then rejects the
+        # transaction with the precise failure. This is history proof for
+        # controlled-writer commits, not authentication against arbitrary
+        # direct-file recomputation.
+        tip = tx["gate_cutoff_tip"]
+        if tip.is_a?(Hash)
+          position = transactions.index do |entry|
+            entry["transaction_id"] == tip["transaction_id"] &&
+              entry["content_digest"] == tip["content_digest"]
+          end
+          if position
+            transactions.first(position + 1).each do |entry|
+              if entry["gate_evaluation_id"] && evaluation_by_id[entry["gate_evaluation_id"]]
+                wanted_evaluations[entry["gate_evaluation_id"]] =
+                  evaluation_by_id[entry["gate_evaluation_id"]]
+              elsif entry["finding_resolution_id"] && resolution_by_id[entry["finding_resolution_id"]]
+                wanted_resolutions[entry["finding_resolution_id"]] =
+                  resolution_by_id[entry["finding_resolution_id"]]
+              end
+            end
+            findings.each do |finding|
+              if wanted_evaluations.key?(finding["gate_evaluation_id"])
+                wanted_findings[finding["finding_id"]] = finding
+              end
+            end
+          end
+        end
+        cursor = tx
+        seen = Set.new
+        while cursor.is_a?(Hash)
+          entries = checkpoint_entries(cursor)
+          break if entries.empty?
+
+          entries.each do |entry|
+            checkpoint = entry.fetch("checkpoint")
+            next unless seen.add?(checkpoint["lead_checkpoint_id"])
+
+            Orbit::V2::ProjectionPrimitives.checkpoint_exact_refs(checkpoint).each do |ref|
+              next unless ref.is_a?(Hash)
+
+              if ref["kind"] == "gate_evaluation"
+                evaluation = evaluation_by_id[ref["id"]]
+                if evaluation && evaluation["content_digest"] == ref["digest"]
+                  wanted_evaluations[evaluation["gate_evaluation_id"]] = evaluation
+                end
+              elsif ref["kind"] == "finding"
+                finding = finding_by_id[ref["id"]]
+                next unless finding && finding["content_digest"] == ref["digest"]
+
+                wanted_findings[finding["finding_id"]] = finding
+                evaluation = evaluation_by_id[finding["gate_evaluation_id"]]
+                wanted_evaluations[finding["gate_evaluation_id"]] = evaluation if evaluation
+              elsif ref["kind"] == "finding_resolution"
+                resolution = resolution_by_id[ref["id"]]
+                next unless resolution && resolution["content_digest"] == ref["digest"]
+
+                wanted_resolutions[resolution["finding_resolution_id"]] = resolution
+                finding = finding_by_id[resolution["finding_id"]]
+                wanted_findings[resolution["finding_id"]] = finding if finding
+                [resolution["source_gate_evaluation_ref"],
+                 resolution["resolving_gate_evaluation_ref"]].each do |evaluation_ref|
+                  next unless evaluation_ref.is_a?(Hash)
+
+                  evaluation = evaluation_by_id[evaluation_ref["gate_evaluation_id"]]
+                  wanted_evaluations[evaluation_ref["gate_evaluation_id"]] = evaluation if evaluation
+                end
+              end
+            end
+          end
+          first = entries.first
+          ref = first && first.fetch("checkpoint")["predecessor_lead_checkpoint_ref"]
+          cursor = if ref.is_a?(Hash) && ref["lead_checkpoint_id"]
+                     owner[ref["lead_checkpoint_id"]]
+                   end
+        end
+        # Transitive closure to a fixed point: every wanted evaluation's
+        # supersede chain and owned findings, and every wanted finding's
+        # source evaluation, so the historical bundle is internally closed.
+        changed = true
+        while changed
+          changed = false
+          wanted_evaluations.values.each do |evaluation|
+            parent_id = evaluation["supersedes_gate_evaluation_id"]
+            if parent_id && !wanted_evaluations.key?(parent_id) && evaluation_by_id[parent_id]
+              wanted_evaluations[parent_id] = evaluation_by_id[parent_id]
+              changed = true
+            end
+            Array(evaluation["finding_refs"]).each do |finding_id|
+              if finding_by_id[finding_id] && !wanted_findings.key?(finding_id)
+                wanted_findings[finding_id] = finding_by_id[finding_id]
+                changed = true
+              end
+            end
+          end
+          wanted_findings.values.each do |finding|
+            evaluation = evaluation_by_id[finding["gate_evaluation_id"]]
+            if evaluation && !wanted_evaluations.key?(finding["gate_evaluation_id"])
+              wanted_evaluations[finding["gate_evaluation_id"]] = evaluation
+              changed = true
+            end
+          end
+          wanted_resolutions.values.each do |resolution|
+            parent_id = resolution["supersedes_finding_resolution_id"]
+            if parent_id && !wanted_resolutions.key?(parent_id) && resolution_by_id[parent_id]
+              wanted_resolutions[parent_id] = resolution_by_id[parent_id]
+              changed = true
+            end
+            finding = finding_by_id[resolution["finding_id"]]
+            if finding && !wanted_findings.key?(finding["finding_id"])
+              wanted_findings[finding["finding_id"]] = finding
+              changed = true
+            end
+            # Descendant supersessions join the slice ONLY for a FRESH
+            # candidate (its current-tip proof may see the complete current
+            # descendants): a stored transaction's causal slice must contain
+            # only facts visible at its write time or its exact-ref closure
+            # — a future FindingResolution never rewrites accepted
+            # checkpoint history, so an authority_change that was legal when
+            # its resolution was the current tip stays valid after a later
+            # supersession.
+            if fresh
+              resolution_by_id.each do |descendant_id, descendant|
+                next unless descendant["supersedes_finding_resolution_id"] ==
+                            resolution["finding_resolution_id"]
+                next if wanted_resolutions.key?(descendant_id)
+
+                wanted_resolutions[descendant_id] = descendant
+                changed = true
+              end
+            end
+            [resolution["source_gate_evaluation_ref"],
+             resolution["resolving_gate_evaluation_ref"]].each do |evaluation_ref|
+              next unless evaluation_ref.is_a?(Hash)
+
+              evaluation = evaluation_by_id[evaluation_ref["gate_evaluation_id"]]
+              if evaluation && !wanted_evaluations.key?(evaluation["gate_evaluation_id"])
+                wanted_evaluations[evaluation["gate_evaluation_id"]] = evaluation
+                changed = true
+              end
+            end
+          end
+        end
+        {
+          "gate_evaluations" => wanted_evaluations.values,
+          "findings" => wanted_findings.values,
+          "finding_resolutions" => wanted_resolutions.values,
+          # The full verified transaction manifest rides the slice for exact
+          # tip membership proof only; it is not semantic gate facts.
+          "transactions" => transactions
+        }
+      end
+
+      # ONE gate cutoff snapshot per operation window: resolved once under
+      # the already-held fixed policy -> task -> control -> evidence -> gate
+      # locks and passed explicitly into every validator/assembly step, so
+      # validation can never re-enter the gate reader mid-window and the
+      # cutoff is frozen for the whole commit/recovery decision. The
+      # no-lock internal seam is used here because the window is already
+      # held; cutoff failures map to the calling operation's own error code.
+      def resolve_gate_cutoff(authority_verifier, runtime_identity_verifier,
+                              lifecycle_verifier, failure: :lineage)
+        Orbit::V2::GateFactStore::Cutoff.new(active_root: @active_root).snapshot_locked(
+          authority_verifier: authority_verifier,
+          runtime_identity_verifier: runtime_identity_verifier,
+          lifecycle_verifier: lifecycle_verifier
+        )
+      rescue ContractError => error
+        message = "gate cutoff snapshot does not resolve: #{error.code}"
+        case failure
+        when :genesis then raise genesis_invalid(message)
+        when :checkpoint then raise checkpoint_invalid(message)
+        when :dispatch then raise dispatch_invalid(message)
+        when :terminal then raise terminal_invalid(message)
+        else raise lineage_invalid(message)
+        end
+      end
+
+      # The exact gate-log tip the controlled writer observed inside its
+      # locked append window: the last accepted gate transaction (id +
+      # digest), or nil while the gate log is still empty. The tip is
+      # stamped by the store immediately before append_with, so the frozen
+      # payload bytes carry the gate state the append commits against; it
+      # is controlled-writer history proof, not a trust root against
+      # arbitrary direct-file recomputation (TransactionLog provides no
+      # such guarantee).
+      def current_gate_tip(gate_log)
+        tip = TransactionLog.new(path: gate_log).records.last
+        tip && {
+          "transaction_id" => tip["transaction_id"],
+          "content_digest" => tip["content_digest"]
+        }
+      end
+
+      # Store-owned gate tip freeze inside the locked window: a RETRY of an
+      # already-committed dispatch-bearing transaction reuses the committed
+      # payload's store-owned gate_cutoff_tip (still after whole-store
+      # reverify), so the same semantic write stays canonically identical
+      # and reports verified :idempotent even after the gate log advanced; a
+      # NEW transaction id freezes the current gate tip.
+      def frozen_gate_tip_for(control_log, gate_log, transaction_id)
+        committed = TransactionLog.new(path: control_log).records.find do |record|
+          record["transaction_id"] == transaction_id
+        end
+        if committed && committed["payload"].is_a?(Hash) &&
+           committed["payload"].key?("gate_cutoff_tip")
+          return committed["payload"]["gate_cutoff_tip"]
+        end
+        current_gate_tip(gate_log)
+      end
+
+      # A dispatch-bearing transaction must freeze a gate-log tip the store
+      # actually accepted (nil only while the gate log was empty at write).
+      # A tip naming an absent transaction or mismatching digest fails
+      # closed; the prefix replay then never extends beyond facts the
+      # controlled writer had accepted.
+      def validate_gate_cutoff_tip!(tx, gate_cutoff, invalid)
+        tip = tx["gate_cutoff_tip"]
+        return if tip.nil?
+
+        unless tip.is_a?(Hash) && tip.keys.sort == %w[content_digest transaction_id] &&
+               gate_cutoff.fetch("transactions").any? do |entry|
+                 entry["transaction_id"] == tip["transaction_id"] &&
+                   entry["content_digest"] == tip["content_digest"]
+               end
+          raise invalid.call("transaction freezes a gate cutoff tip the gate store never accepted")
+        end
+      end
 
       # The ancestor-prefix policy snapshot for one persisted transaction:
       # walk the accepted lineage from the transaction-owned policy pin
@@ -1130,14 +1545,16 @@ module Orbit
       # malformed persisted data and fails closed.
       def validate_transaction!(tx, policy:, pinned_policies:, accepted_assertions: [], marker:,
                                 authority_verifier:, runtime_identity_verifier:,
-                                lifecycle_verifier:, seen_event_ids:, all_txs: [])
+                                lifecycle_verifier:, seen_event_ids:, all_txs: [], gate_cutoff:,
+                                evidence_payloads: nil, fresh: false)
         shape = tx.is_a?(Hash) ? tx.keys.sort : nil
         case shape
         when PAYLOAD_KEYS
           validate_genesis_transaction!(tx, policy: policy, pinned_policies: pinned_policies,
             marker: marker, authority_verifier: authority_verifier,
             runtime_identity_verifier: runtime_identity_verifier,
-            lifecycle_verifier: lifecycle_verifier, seen_event_ids: seen_event_ids)
+            lifecycle_verifier: lifecycle_verifier, seen_event_ids: seen_event_ids,
+            gate_cutoff: gate_cutoff, evidence_payloads: evidence_payloads)
         when CHECKPOINT_PAYLOAD_KEYS
           if tx.dig("checkpoint", "reconcile_trigger", "event") == "task_revision_change"
             validate_task_revision_change_transaction!(tx, policy: policy,
@@ -1145,14 +1562,16 @@ module Orbit
               marker: marker, authority_verifier: authority_verifier,
               runtime_identity_verifier: runtime_identity_verifier,
               lifecycle_verifier: lifecycle_verifier, seen_event_ids: seen_event_ids,
-              all_txs: all_txs)
+              all_txs: all_txs, gate_cutoff: gate_cutoff,
+              evidence_payloads: evidence_payloads, fresh: fresh)
           else
             validate_checkpoint_transaction!(tx, policy: policy, pinned_policies: pinned_policies,
               accepted_assertions: accepted_assertions,
               marker: marker, authority_verifier: authority_verifier,
               runtime_identity_verifier: runtime_identity_verifier,
               lifecycle_verifier: lifecycle_verifier, seen_event_ids: seen_event_ids,
-              all_txs: all_txs)
+              all_txs: all_txs, gate_cutoff: gate_cutoff,
+              evidence_payloads: evidence_payloads, fresh: fresh)
           end
         when SESSION_CHECKPOINT_PAYLOAD_KEYS
           validate_checkpoint_transaction!(tx, policy: policy, pinned_policies: pinned_policies,
@@ -1160,21 +1579,24 @@ module Orbit
             marker: marker, authority_verifier: authority_verifier,
             runtime_identity_verifier: runtime_identity_verifier,
             lifecycle_verifier: lifecycle_verifier, seen_event_ids: seen_event_ids,
-            all_txs: all_txs)
+            all_txs: all_txs, gate_cutoff: gate_cutoff,
+            evidence_payloads: evidence_payloads, fresh: fresh)
         when TERMINAL_PAYLOAD_KEYS
           validate_terminal_transaction!(tx, policy: policy,
             pinned_policies: pinned_policies, accepted_assertions: accepted_assertions,
             marker: marker, authority_verifier: authority_verifier,
             runtime_identity_verifier: runtime_identity_verifier,
             lifecycle_verifier: lifecycle_verifier, seen_event_ids: seen_event_ids,
-            all_txs: all_txs)
+            all_txs: all_txs, gate_cutoff: gate_cutoff,
+            evidence_payloads: evidence_payloads, fresh: fresh)
         when EXECUTION_PAYLOAD_KEYS
           validate_execution_transaction!(tx, policy: policy,
             pinned_policies: pinned_policies, accepted_assertions: accepted_assertions,
             marker: marker, authority_verifier: authority_verifier,
             runtime_identity_verifier: runtime_identity_verifier,
             lifecycle_verifier: lifecycle_verifier, seen_event_ids: seen_event_ids,
-            all_txs: all_txs)
+            all_txs: all_txs, gate_cutoff: gate_cutoff,
+            evidence_payloads: evidence_payloads, fresh: fresh)
         else
           raise lineage_invalid("transaction carries malformed component types or unknown fields")
         end
@@ -1185,7 +1607,8 @@ module Orbit
       # refs, the pinned policy authority, and the runtime-subject binding.
       def validate_genesis_transaction!(tx, policy:, pinned_policies:, marker:,
                                         authority_verifier:, runtime_identity_verifier:,
-                                        lifecycle_verifier:, seen_event_ids:)
+                                        lifecycle_verifier:, seen_event_ids:, gate_cutoff:,
+                                        evidence_payloads: nil)
         unless tx.is_a?(Hash) && tx.keys.sort == PAYLOAD_KEYS
           raise genesis_invalid("transaction carries fields outside the closed payload shape")
         end
@@ -1362,7 +1785,8 @@ module Orbit
                                            authority_verifier:, runtime_identity_verifier:,
                                            lifecycle_verifier:, seen_event_ids:, all_txs:,
                                            allow_attempt_ref: false, skip_assembled: false,
-                                           allow_dispatch: false)
+                                           allow_dispatch: false, gate_cutoff:,
+                                           evidence_payloads: nil, fresh: false)
         checkpoint = tx.fetch("checkpoint")
         assertion = tx.fetch("assertion")
         control_id = checkpoint["lead_control_id"]
@@ -1548,7 +1972,8 @@ module Orbit
         validate_assembled_snapshot!(
           marker, pinned_policies, accepted_assertions, genesis_tx, prior, tx,
           task_facts.fetch("payload"), authority_verifier,
-          runtime_identity_verifier, lifecycle_verifier
+          runtime_identity_verifier, lifecycle_verifier, gate_cutoff: gate_cutoff,
+          evidence_payloads: evidence_payloads, fresh: fresh
         ) unless skip_assembled
         tx
       end
@@ -1567,7 +1992,8 @@ module Orbit
       # checkpoint lineage.
       def validate_task_revision_change_transaction!(tx, policy:, pinned_policies:, accepted_assertions:, marker:,
                                                      authority_verifier:, runtime_identity_verifier:,
-                                                     lifecycle_verifier:, seen_event_ids:, all_txs:)
+                                                     lifecycle_verifier:, seen_event_ids:, all_txs:, gate_cutoff:,
+                                                     evidence_payloads: nil, fresh: false)
         checkpoint = tx.fetch("checkpoint")
         assertion = tx.fetch("assertion")
         control_id = checkpoint["lead_control_id"]
@@ -1754,7 +2180,8 @@ module Orbit
         validate_assembled_snapshot!(
           marker, pinned_policies, accepted_assertions, genesis_tx, prior, tx,
           child_resolved, authority_verifier,
-          runtime_identity_verifier, lifecycle_verifier
+          runtime_identity_verifier, lifecycle_verifier, gate_cutoff: gate_cutoff,
+          evidence_payloads: evidence_payloads, fresh: fresh
         )
         tx
       rescue ContractError => error
@@ -1777,11 +2204,23 @@ module Orbit
                                         authority_verifier:, runtime_identity_verifier:,
                                         lifecycle_verifier:, seen_event_ids:, all_txs:,
                                         failure: :dispatch, dispatch_pins_nothing: true,
-                                        chain_to: nil)
+                                        chain_to: nil, gate_cutoff:, evidence_payloads: nil)
         invalid = failure == :terminal ? method(:terminal_invalid) : method(:dispatch_invalid)
         unless [attempt, worker, rule, dispatch, observation,
                 dispatch_assertion, observation_assertion].all? { |record| record.is_a?(Hash) }
           raise invalid.call("successor composite components must all be canonical objects")
+        end
+        pinned_policy = policy || pinned_policies.find do |candidate|
+          ref = dispatch["project_policy_revision_ref"]
+          ref.is_a?(Hash) &&
+            candidate["policy_revision_id"] == ref["policy_revision_id"] &&
+            candidate["content_digest"] == ref["content_digest"]
+        end
+        purpose = attempt.dig("events", 0, "assignment", "purpose")
+        resolving_purpose = %w[review test adjudication].include?(purpose)
+        if !resolving_purpose &&
+           unresolved_blocking_finding_at_cutoff?(dispatch, gate_cutoff, pinned_policy)
+          raise invalid.call("unresolved blocking Finding at the accepted gate cutoff forbids dispatch")
         end
         validator = Orbit::V2::Validator.new(project_root: @active_root)
         begin
@@ -1810,9 +2249,35 @@ module Orbit
           # Attempt (b); the assembled whole-snapshot Validator rejects a
           # second nil-first on the same unit.
           ref = attempt["predecessor_work_unit_attempt_ref"]
-          unless ref.nil? || ref == chain_to
+          target_unit = attempt["work_unit_id"]
+          latest_terminal_by_unit = {}
+          chain_to_unit = nil
+          all_txs.each do |tx|
+            next unless tx.is_a?(Hash)
+            if tx.keys.sort == EXECUTION_PAYLOAD_KEYS
+              tx_attempt = tx.fetch("attempt")
+              if tx_attempt.fetch("attempt_id") == chain_to
+                chain_to_unit = tx_attempt.fetch("work_unit_id")
+              end
+            elsif tx.keys.sort == TERMINAL_PAYLOAD_KEYS
+              terminated = tx.fetch("attempt")
+              latest_terminal_by_unit[terminated.fetch("work_unit_id")] = terminated.fetch("attempt_id")
+              tx_successor = tx.fetch("successor_attempt")
+              if tx_successor.fetch("attempt_id") == chain_to
+                chain_to_unit = tx_successor.fetch("work_unit_id")
+              end
+            end
+          end
+          expected = if target_unit == chain_to_unit
+                       chain_to
+                     else
+                       latest_terminal_by_unit[target_unit]
+                     end
+          unless ref == expected
             raise invalid.call(
-              "successor Attempt must exact-chain to the terminated attempt or start fresh"
+              "successor Attempt predecessor must exact-chain: same unit -> terminated attempt; " \
+                "other previously attempted unit -> its unique latest terminal; " \
+                "never-attempted target -> nil"
             )
           end
         elsif attempt["predecessor_work_unit_attempt_ref"]
@@ -1848,14 +2313,16 @@ module Orbit
           runtime_identity_verifier: runtime_identity_verifier,
           lifecycle_verifier: lifecycle_verifier, seen_event_ids: seen_event_ids,
           all_txs: all_txs, allow_attempt_ref: !dispatch_pins_nothing,
-          skip_assembled: true, allow_dispatch: true)
+          skip_assembled: true, allow_dispatch: true, gate_cutoff: gate_cutoff,
+          evidence_payloads: evidence_payloads)
         validate_checkpoint_transaction!(observation_tx, policy: policy,
           pinned_policies: pinned_policies, accepted_assertions: accepted_assertions,
           marker: marker, authority_verifier: authority_verifier,
           runtime_identity_verifier: runtime_identity_verifier,
           lifecycle_verifier: lifecycle_verifier, seen_event_ids: seen_event_ids,
           all_txs: all_txs + [dispatch_tx], allow_attempt_ref: true,
-          skip_assembled: true)
+          skip_assembled: true, gate_cutoff: gate_cutoff,
+          evidence_payloads: evidence_payloads)
 
         created_ref = {
           "attempt_id" => attempt_id,
@@ -1930,10 +2397,12 @@ module Orbit
       # assertion — all in one closed transaction.
       def validate_execution_transaction!(tx, policy:, pinned_policies:, accepted_assertions:, marker:,
                                           authority_verifier:, runtime_identity_verifier:,
-                                          lifecycle_verifier:, seen_event_ids:, all_txs:)
+                                          lifecycle_verifier:, seen_event_ids:, all_txs:, gate_cutoff:,
+                                          evidence_payloads: nil, fresh: false)
         unless tx.is_a?(Hash) && tx.keys.sort == EXECUTION_PAYLOAD_KEYS
           raise dispatch_invalid("transaction carries fields outside the closed execution shape")
         end
+        validate_gate_cutoff_tip!(tx, gate_cutoff, method(:dispatch_invalid))
         attempt = tx.fetch("attempt")
         rule = tx.fetch("rule_resolution")
         worker = tx.fetch("worker_agent")
@@ -1949,7 +2418,7 @@ module Orbit
           authority_verifier: authority_verifier,
           runtime_identity_verifier: runtime_identity_verifier,
           lifecycle_verifier: lifecycle_verifier, seen_event_ids: seen_event_ids,
-          all_txs: all_txs, failure: :dispatch)
+          all_txs: all_txs, failure: :dispatch, gate_cutoff: gate_cutoff)
         reject_nonterminal_conflicts!(all_txs, control_id, attempt, worker, :dispatch)
 
         genesis_tx = all_txs.reverse.find do |candidate|
@@ -1966,7 +2435,8 @@ module Orbit
         validate_assembled_snapshot!(marker, pinned_policies, accepted_assertions,
           genesis_tx, control_txs, tx,
           task_facts.fetch("payload"), authority_verifier,
-          runtime_identity_verifier, lifecycle_verifier)
+          runtime_identity_verifier, lifecycle_verifier, gate_cutoff: gate_cutoff,
+          evidence_payloads: evidence_payloads, fresh: fresh)
         tx
       rescue ContractError => error
         raise error if error.code == "control_store_dispatch_invalid"
@@ -1980,18 +2450,21 @@ module Orbit
       # full successor composite — the terminal checkpoint IS the exact
       # authorizing dispatch checkpoint, with the successor's assigned rule,
       # worker, AttemptCreated, and immediate observation checkpoint all in
-      # the SAME closed transaction. The terminal checkpoint must
-      # exact-extend the unique current observation tip of the terminated
-      # attempt, and the successor attempt must start after the terminal
+      # SAME closed transaction. The terminal checkpoint must
+      # exact-extend the unique current control tip (the terminated
+      # attempt's AttemptCreated observation, and the successor attempt
+      # must start after the terminal
       # event (single-active continuity), so no accepted dispatch/attempt
       # half-state can exist and a later dispatch always has exactly one
       # authorizing checkpoint.
       def validate_terminal_transaction!(tx, policy:, pinned_policies:, accepted_assertions:, marker:,
                                          authority_verifier:, runtime_identity_verifier:,
-                                         lifecycle_verifier:, seen_event_ids:, all_txs:)
+                                         lifecycle_verifier:, seen_event_ids:, all_txs:, gate_cutoff:,
+                                         evidence_payloads: nil, fresh: false)
         unless tx.is_a?(Hash) && tx.keys.sort == TERMINAL_PAYLOAD_KEYS
           raise terminal_invalid("transaction carries fields outside the closed terminal shape")
         end
+        validate_gate_cutoff_tip!(tx, gate_cutoff, method(:terminal_invalid))
         attempt = tx.fetch("attempt")
         checkpoint = tx.fetch("checkpoint")
         assertion = tx.fetch("assertion")
@@ -2121,7 +2594,7 @@ module Orbit
           runtime_identity_verifier: runtime_identity_verifier,
           lifecycle_verifier: lifecycle_verifier, seen_event_ids: seen_event_ids,
           all_txs: all_txs, failure: :terminal,
-          dispatch_pins_nothing: false, chain_to: attempt_id)
+          dispatch_pins_nothing: false, chain_to: attempt_id, gate_cutoff: gate_cutoff)
         terminal_ref = {
           "attempt_id" => attempt_id,
           "event_id" => terminal_event.fetch("event_id"),
@@ -2152,7 +2625,8 @@ module Orbit
         validate_assembled_snapshot!(marker, pinned_policies, accepted_assertions,
           genesis_tx, control_txs, tx,
           task_facts.fetch("payload"), authority_verifier,
-          runtime_identity_verifier, lifecycle_verifier)
+          runtime_identity_verifier, lifecycle_verifier, gate_cutoff: gate_cutoff,
+          evidence_payloads: evidence_payloads, fresh: fresh)
         tx
       rescue ContractError => error
         raise error if error.code == "control_store_terminal_invalid"
@@ -2168,6 +2642,61 @@ module Orbit
       # The LATEST attempt representation per attempt id across the accepted
       # execution and terminal transactions: a terminal reconciliation
       # supersedes the composite's immutable AttemptCreated-only payload.
+      # New composites see the complete locked cutoff; historical replay
+      # receives the transaction-scoped cutoff derived above. This keeps
+      # future facts from rewriting accepted dispatches while preventing a
+      # fresh dispatch from hiding an accepted blocking Finding simply by
+      # omitting it from checkpoint progress refs.
+      def unresolved_blocking_finding_at_cutoff?(checkpoint, gate_cutoff, policy)
+        mapping = policy.is_a?(Hash) && policy["finding_disposition"]
+        task_ref = checkpoint["active_task_ref"]
+        return false unless mapping.is_a?(Hash) && task_ref.is_a?(Hash)
+
+        evaluations = gate_cutoff.fetch("gate_evaluations").to_h do |evaluation|
+          [evaluation["gate_evaluation_id"], evaluation]
+        end
+        resolutions = gate_cutoff.fetch("finding_resolutions")
+        unresolved = gate_cutoff.fetch("findings").select do |finding|
+          next false unless mapping[finding["basis"]] == "blocking"
+
+          evaluation = evaluations[finding["gate_evaluation_id"]]
+          subject_ref = evaluation && evaluation.dig("subject", "task_revision_ref")
+          next false unless subject_ref.is_a?(Hash) &&
+                            subject_ref["task_revision_id"] == task_ref["task_revision_id"] &&
+                            subject_ref["content_digest"] == task_ref["content_digest"]
+
+          lineage = resolutions.select { |item| item["finding_id"] == finding["finding_id"] }
+          tips = lineage.reject do |item|
+            lineage.any? do |candidate|
+              candidate["supersedes_finding_resolution_id"] == item["finding_resolution_id"]
+            end
+          end
+          tips.length != 1
+        end
+        return false if unresolved.empty?
+
+        # EXACT remediation exception (ADR): an unresolved blocking Finding
+        # blocks gate closure, not remediation work. A remediation dispatch
+        # must exact-pin EVERY unresolved blocker (id+digest — no hiding)
+        # and select a WorkUnit present in AT LEAST ONE unresolved source
+        # evaluation subject; unrelated or omitting dispatch fails closed.
+        pinned_refs = Array(checkpoint.dig("delivery_progress", "supporting_refs"))
+        return true unless unresolved.all? do |finding|
+          pinned_refs.any? do |candidate|
+            candidate.is_a?(Hash) && candidate["kind"] == "finding" &&
+              candidate["id"] == finding["finding_id"] &&
+              candidate["digest"] == finding["content_digest"]
+          end
+        end
+        selected = checkpoint.dig("selected_work_unit_ref", "work_unit_id")
+        !unresolved.any? do |finding|
+          selected && Array(evaluations[finding["gate_evaluation_id"]]
+            .dig("subject", "work_unit_refs")).any? do |ref|
+            ref.is_a?(Hash) && ref["work_unit_id"] == selected
+          end
+        end
+      end
+
       def latest_attempt_map(txs)
         latest = {}
         txs.each do |candidate|
@@ -2228,9 +2757,21 @@ module Orbit
       # configured verifiers. Any error fails the checkpoint closed.
       def validate_assembled_snapshot!(marker, pinned_policies, accepted_assertions, genesis_tx, prior,
                                        candidate, task_payload, authority_verifier,
-                                       runtime_identity_verifier, lifecycle_verifier)
+                                       runtime_identity_verifier, lifecycle_verifier, gate_cutoff:,
+                                       evidence_payloads: nil, fresh: false)
+        # The candidate's own causal slice: FRESH candidates (validated by
+        # the write-path snapshot validators) may see the complete current
+        # descendants for current-tip proofs; stored transactions replay
+        # with write-time facts and exact-ref closure only, so a future
+        # FindingResolution never rewrites accepted checkpoint history.
+        causal_cutoff = historical_gate_cutoff(gate_cutoff, candidate, prior + [candidate],
+          fresh: fresh)
         bundle = assemble_bundle(marker, pinned_policies, accepted_assertions, genesis_tx,
-          prior, candidate, task_payload)
+          prior, candidate, task_payload, gate_cutoff: causal_cutoff,
+          authority_verifier: authority_verifier,
+          runtime_identity_verifier: runtime_identity_verifier,
+          lifecycle_verifier: lifecycle_verifier,
+          evidence_payloads: evidence_payloads)
         validator = Orbit::V2::Validator.new(
           project_root: @active_root,
           authority_verifier: authority_verifier,
@@ -2238,12 +2779,81 @@ module Orbit
           runtime_identity_verifier: runtime_identity_verifier
         )
         errors = validator.validate(bundle)
-        return if errors.empty?
+        # A gate evaluation in this causal cutoff was already replayed
+        # against its own frozen evidence/snapshot closure by GateFactStore.
+        # Combining several such immutable closures under one projection
+        # anchor may therefore report subject_stale for that exact verified
+        # evaluation path. Only that projection-currentness error is ignored;
+        # every shape, digest, policy, authority, provenance, independence,
+        # resolution, and unknown-evaluation error remains fail-closed.
+        # STAGED control transition boundary (narrow, store-layer): during
+        # the window before the finding_change exact-pin, an unobserved
+        # newly discovered risk may ride an EXECUTION/TERMINAL candidate's
+        # causal slice ONLY through the exact staged predicate — the
+        # finding's source evaluation subject must exact-match the
+        # candidate's active TaskRevision, and the successor must either be
+        # a review/test/adjudication resolving transition or exact-pin the
+        # Finding (id+digest) with its selected work unit inside the source
+        # subject. Ordinary checkpoints, other codes/paths, cross-task
+        # facts, and coder omissions fail closed unchanged; the predicate
+        # is identical for fresh and historical payloads.
+        verified_evaluation_ids = causal_cutoff.fetch("gate_evaluations").map do |evaluation|
+          evaluation.fetch("gate_evaluation_id")
+        end
+        remaining = errors.reject do |error|
+          staged_unobserved_risk?(candidate, causal_cutoff, error) ||
+            (ProjectionPrimitives.historical_stale_evaluation_error?(error) &&
+             verified_evaluation_ids.any? do |evaluation_id|
+               error.path == "gate_evaluations.#{evaluation_id}.subject"
+             end)
+        end
+        return if remaining.empty?
 
         raise checkpoint_invalid(
           "assembled snapshot fails the LeadControl/Validator invariants: " \
-            "#{errors.map(&:code).uniq.join(', ')}"
+            "#{remaining.map(&:code).uniq.join(', ')}"
         )
+      end
+
+      # The narrow staged unobserved-risk predicate: the error must be
+      # finding_risk_unobserved at exactly the candidate's causal slice
+      # finding path, the finding's source evaluation subject must
+      # exact-bind the candidate's active TaskRevision, and the successor
+      # must either be a review/test/adjudication resolving transition or
+      # exact-pin the Finding (id+digest) with a selected work unit inside
+      # the source subject.
+      def staged_unobserved_risk?(candidate, causal_cutoff, error)
+        return false unless error.code == "finding_risk_unobserved" &&
+                            candidate.is_a?(Hash) &&
+                            [EXECUTION_PAYLOAD_KEYS, TERMINAL_PAYLOAD_KEYS]
+                              .include?(candidate.keys.sort)
+        finding_id = error.path.to_s.delete_prefix("findings.")
+        finding = causal_cutoff.fetch("findings").find { |item| item["finding_id"] == finding_id }
+        evaluation = finding && causal_cutoff.fetch("gate_evaluations").find do |item|
+          item["gate_evaluation_id"] == finding["gate_evaluation_id"]
+        end
+        subject = evaluation && evaluation["subject"]
+        checkpoint = candidate["checkpoint"] || candidate["dispatch_checkpoint"]
+        return false unless subject.is_a?(Hash) && checkpoint.is_a?(Hash)
+
+        task_ref = subject["task_revision_ref"]
+        active_ref = checkpoint["active_task_ref"]
+        return false unless task_ref.is_a?(Hash) && active_ref.is_a?(Hash) &&
+                            task_ref["task_revision_id"] == active_ref["task_revision_id"] &&
+                            task_ref["content_digest"] == active_ref["content_digest"]
+        successor = candidate["successor_attempt"] || candidate["attempt"]
+        purpose = successor.is_a?(Hash) && successor.dig("events", 0, "assignment", "purpose")
+        return true if %w[review test adjudication].include?(purpose)
+
+        pinned = Array(checkpoint.dig("delivery_progress", "supporting_refs")).any? do |ref|
+          ref.is_a?(Hash) && ref["kind"] == "finding" &&
+            ref["id"] == finding_id && ref["digest"] == finding["content_digest"]
+        end
+        return false unless pinned
+        selected = checkpoint.dig("selected_work_unit_ref", "work_unit_id")
+        Array(subject["work_unit_refs"]).any? do |ref|
+          ref.is_a?(Hash) && ref["work_unit_id"] == selected
+        end
       end
 
       # The deterministic contract bundle for a control lineage: marker
@@ -2254,7 +2864,9 @@ module Orbit
       # and one authoritative latest Attempt per attempt id (a terminal
       # reconciliation supersedes the composite's attempt in the bundle).
       def assemble_bundle(marker, pinned_policies, accepted_assertions, genesis_tx, prior,
-                          candidate, task_payload)
+                          candidate, task_payload, gate_cutoff:,
+                          authority_verifier:, runtime_identity_verifier:,
+                          lifecycle_verifier:, evidence_payloads: nil)
         sessions = { genesis_tx.fetch("session").fetch("lead_session_id") => genesis_tx.fetch("session") }
         checkpoints = [genesis_tx.fetch("checkpoint")]
         assertions = [genesis_tx.fetch("assertion")]
@@ -2313,7 +2925,62 @@ module Orbit
           worker = candidate.fetch("worker_agent")
           agents[worker.fetch("agent_instance_id")] = worker
         end
-        snapshot = { "kind" => "git", "commit_sha" => "a" * 40, "tree_digest" => "sha256:#{'a' * 64}" }
+        # Causal gate slice closure: the assembled public bundle carries the
+        # exact EvidenceStore payloads and the exact repository
+        # snapshot/code surface referenced by the slice's evaluations, so
+        # the Validator gate checks never see empty/forged closure. The
+        # control-only fallback keeps the legacy fake snapshot for controls
+        # with no gate facts.
+        evidence_ids = []
+        gate_cutoff.fetch("gate_evaluations").each do |evaluation|
+          evidence_ids << evaluation["evaluator_submission_record_id"]
+          Array(evaluation.dig("subject", "evidence_record_refs")).each do |ref|
+            evidence_ids << ref["evidence_record_id"] if ref.is_a?(Hash)
+          end
+        end
+        gate_cutoff.fetch("findings").each do |finding|
+          evidence_ids.concat(Array(finding["source_evidence_record_refs"]))
+        end
+        gate_cutoff.fetch("finding_resolutions").each do |resolution|
+          evidence_ids << resolution["issuer_submission_record_id"]
+          evidence_ids << resolution["proposal_evidence_record_id"]
+          evidence_ids.concat(Array(resolution["supporting_record_refs"]))
+        end
+        # NON-RECURSIVE evidence closure for the staged window: the VERIFIED
+        # evidence cache (stage 5) supplies the bundle payloads when present;
+        # otherwise the raw EvidenceStore records act as a structural bootstrap
+        # only. No public EvidenceStore reader is ever entered inside the
+        # already-locked ControlStore seam.
+        raw_evidence = evidence_payloads || EvidenceStore.new(active_root: @active_root).records
+        evidence_records = []
+        evidence_ids.compact.uniq.each do |record_id|
+          found = raw_evidence.find do |record|
+            entry = record["evidence_record"]
+            entry.is_a?(Hash) && entry["evidence_record_id"] == record_id
+          end
+          evidence_records << found["evidence_record"] if found
+        end
+        subject = gate_cutoff.fetch("gate_evaluations").first &&
+          gate_cutoff.fetch("gate_evaluations").first["subject"]
+        snapshot_ref = subject.is_a?(Hash) && subject["repository_snapshot_ref"]
+        surface_ref = subject.is_a?(Hash) && subject["code_surface_ref"]
+        snapshot = if snapshot_ref.is_a?(Hash)
+                     snapshot_ref
+                   else
+                     { "kind" => "git", "commit_sha" => "a" * 40,
+                       "tree_digest" => "sha256:#{'a' * 64}" }
+                   end
+        code_surface = if surface_ref.is_a?(Hash)
+                         surface_ref
+                       else
+                         {
+                           "kind" => "derived_code_surface",
+                           "derivation_version" => "orbit-code-surface-v1",
+                           "repository_tree_digest" => snapshot["tree_digest"],
+                           "code_surface_digest" => "sha256:#{'a' * 64}",
+                           "paths" => []
+                         }
+                       end
         {
           "schema_version" => "orbit-v2-contract-bundle-v1",
           "protocol_epoch" => "orbit-v2",
@@ -2332,18 +2999,12 @@ module Orbit
           "agent_instances" => agents.values,
           "work_unit_attempts" => attempts.values,
           "rule_resolution_artifacts" => resolutions.values,
-          "evidence_records" => [],
-          "gate_evaluations" => [],
-          "findings" => [],
-          "finding_resolutions" => [],
+          "evidence_records" => evidence_records,
+          "gate_evaluations" => gate_cutoff.fetch("gate_evaluations"),
+          "findings" => gate_cutoff.fetch("findings"),
+          "finding_resolutions" => gate_cutoff.fetch("finding_resolutions"),
           "repository_snapshot" => snapshot,
-          "code_surface" => {
-            "kind" => "derived_code_surface",
-            "derivation_version" => "orbit-code-surface-v1",
-            "repository_tree_digest" => snapshot["tree_digest"],
-            "code_surface_digest" => "sha256:#{'a' * 64}",
-            "paths" => []
-          }
+          "code_surface" => code_surface
         }
       end
 
@@ -2437,19 +3098,26 @@ module Orbit
       # snapshots that include historical checkpoints/attempts always
       # resolve their authority facts.
       def enriched_task_payload(resolved, claim, task_store, authority_verifier)
-        all_authorization_records = resolved.fetch("task_revisions").flat_map do |revision|
-          task_store.resolve(
+        revision_facts = resolved.fetch("task_revisions").map do |revision|
+          task_payload = task_store.resolve(
             task_id: claim.fetch("task_id"),
             task_revision_id: revision.fetch("task_revision_id"),
             authority_verifier: authority_verifier
-          ).fetch("authorization_records")
+          )
+          appended = task_store.authorizations(
+            task_id: claim.fetch("task_id"),
+            task_revision_id: revision.fetch("task_revision_id"),
+            authority_verifier: authority_verifier
+          )
+          [task_payload, appended]
         end
-        all_authority_assertions = resolved.fetch("task_revisions").flat_map do |revision|
-          task_store.resolve(
-            task_id: claim.fetch("task_id"),
-            task_revision_id: revision.fetch("task_revision_id"),
-            authority_verifier: authority_verifier
-          ).fetch("authority_assertions")
+        all_authorization_records = revision_facts.flat_map do |task_payload, appended|
+          task_payload.fetch("authorization_records") +
+            appended.map { |entry| entry.fetch("authorization") }
+        end
+        all_authority_assertions = revision_facts.flat_map do |task_payload, appended|
+          task_payload.fetch("authority_assertions") +
+            appended.map { |entry| entry.fetch("assertion") }
         end
         resolved.merge("all_authorization_records" => all_authorization_records,
           "all_authority_assertions" => all_authority_assertions)

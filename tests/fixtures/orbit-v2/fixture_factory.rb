@@ -332,7 +332,8 @@ module OrbitV2FixtureFactory
       assertion(
         "oassert_findingwaiver",
         %w[finding.waive],
-        "risk-owner"
+        "risk-owner",
+        authority_scope_ref: FINDING_ID
       ),
       assertion(
         "oassert_controlwriter",

@@ -1295,10 +1295,10 @@ module Orbit
 
         # The checkpoint's full exact supporting provenance (four assessment
         # layers plus both progress fields): the only Inc2 authority that can
-        # evidence Finding/GateEvaluation record changes. FindingResolution
-        # and GateRequirement-record changes have no exact ref kind in Inc2
-        # checkpoint provenance, so those subtypes fail closed rather than
-        # inventing a latest-wins projection.
+        # evidence Finding/GateEvaluation record changes. GateRequirement
+        # record changes have no exact ref kind in Inc2 checkpoint
+        # provenance, so that subtype fails closed rather than inventing a
+        # latest-wins projection; FindingResolution refs are exact kinds.
         def checkpoint_exact_refs(checkpoint)
           ProjectionPrimitives.checkpoint_exact_refs(checkpoint)
         end
@@ -1319,7 +1319,9 @@ module Orbit
         # needs_user risk stop requires the exact needs_user/escalate
         # finding_change predecessor and newly pinned resolution refs
         # covering every risk that predecessor introduced left
-        # unadjudicated. Unrelated, partial, or stale pins prove nothing.
+        # unadjudicated. Unrelated, partial, or stale pins prove nothing:
+        # a ref must name the Finding's UNIQUE CURRENT tip of the verified
+        # resolution lineage (a superseded resolution never resumes).
         def resolution_resume_proven?(checkpoint, predecessor)
           return false unless risk_needs_user_predecessor?(predecessor)
 
@@ -1333,8 +1335,17 @@ module Orbit
             new_refs.any? do |ref|
               resolution = resolutions[ref["id"]]
               resolution && resolution["content_digest"] == ref["digest"] &&
-                resolution["finding_id"] == risk_ref["id"]
+                resolution["finding_id"] == risk_ref["id"] &&
+                current_resolution_tip?(resolutions, resolution)
             end
+          end
+        end
+
+        # The unique current tip: no accepted resolution in the verified
+        # lineage supersedes it.
+        def current_resolution_tip?(resolutions, resolution)
+          resolutions.values.none? do |candidate|
+            candidate["supersedes_finding_resolution_id"] == resolution["finding_resolution_id"]
           end
         end
 

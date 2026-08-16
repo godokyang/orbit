@@ -48,7 +48,8 @@ module Orbit
     # exact linear parents, active-policy writer pins, gate lineage closure,
     # protected-change envelopes, and exact WorkAuthority/TaskAuthority
     # partitions. Activation remains a later ControlStore checkpoint fact;
-    # evidence/finding durable stores are still deferred.
+    # the durable GateFactStore evidence/finding/resolution stores are
+    # live seams (see gate_fact_store.rb) and never modified here.
     #
     # Public behavior:
     # - `genesis(task:, gate_requirements:, work_units:, change_theses:,
@@ -78,6 +79,7 @@ module Orbit
     # storage-level failures propagate as-is.
     class TaskStore
       TASK_DEFINITIONS_FILE = "task-definitions.json".freeze
+      AUTHORIZATION_PAYLOAD_KEYS = %w[assertion authorization task_id task_revision_id].freeze
       PAYLOAD_KEYS = %w[
         authority_assertions authorization_records change_theses
         gate_requirements logical_lead task work_units
@@ -101,6 +103,100 @@ module Orbit
         end
         @log = TransactionLog.new(path: File.join(@active_root, TASK_DEFINITIONS_FILE))
       end
+
+      # Append-only TaskRevision-scoped authorization seam: one closed
+      # authorization transaction (AuthorizationRecord + provider-verified
+      # AuthorityAssertion) under the fixed policy -> task locks. The record
+      # exact-binds project, the ACTIVE policy revision, the owned task
+      # revision, and the target subject (finding id for finding.waive);
+      # authorization ids are globally create-only. The immutable
+      # TaskRevision/WorkUnit records are never modified.
+      def authorize(authorization:, assertion:, task_id:, task_revision_id:,
+                    authority_verifier:)
+        unless authorization.is_a?(Hash) && assertion.is_a?(Hash) &&
+               authorization["authorization_record_id"].is_a?(String) &&
+               Identifiers.valid?("authorization_record_id", authorization["authorization_record_id"]) &&
+               authority_verifier.respond_to?(:verify!)
+          raise ContractError.new(
+            "task_store_argument_invalid",
+            "authorize requires an AuthorizationRecord, its assertion, and a configured authority verifier",
+            path: "task_store.authorize"
+          )
+        end
+        frozen = JSON.parse(CanonicalJSON.dump(
+          "assertion" => assertion,
+          "authorization" => authorization,
+          "task_id" => task_id,
+          "task_revision_id" => task_revision_id
+        ))
+        record_id = frozen.dig("authorization", "authorization_record_id")
+        policy_log = File.join(@active_root, PolicyStore::POLICY_TRANSACTIONS_FILE)
+        DurableFile.with_exclusive_lock(policy_log) do
+          @log.append_with(
+            transaction_id: record_id,
+            payload: frozen,
+            validate: lambda do |records, _tip|
+              validate_authorization_snapshot!(records, frozen, task_id, task_revision_id,
+                authority_verifier)
+            end
+          )
+        end
+      rescue ContractError => error
+        raise error unless error.code == "transaction_log_reuse"
+
+        raise ContractError.new(
+          "task_store_reuse",
+          "authorization already exists with different content",
+          path: "task_store.authorize"
+        )
+      end
+
+      # The accepted TaskRevision-scoped authorizations (append-only log),
+      # fully reverified before return; never a raw record scan. The whole
+      # marker + policy resolution + log read + replay + filter cycle runs
+      # under the same policy lock the writer holds (DurableFile locks are
+      # thread-reentrant, so GateFactStore composition is safe), so a reader
+      # never observes a half-appended transaction.
+      def authorizations(task_id:, task_revision_id:, authority_verifier:)
+        policy_log = File.join(@active_root, PolicyStore::POLICY_TRANSACTIONS_FILE)
+        DurableFile.with_exclusive_lock(policy_log) do
+          marker = ActiveRoot.marker_for(@active_root, code: "task_store_unpinned", label: "task_store")
+          policy = begin
+            resolve_active_policy(marker, authority_verifier)
+          rescue ContractError => error
+            raise lineage_invalid("#{error.code}: #{error.message}")
+          end
+          seen_ids = Set.new
+          prior = []
+          verified = []
+          @log.records.each do |record|
+            payload = record["payload"]
+            raise lineage_invalid("transaction payload is not a canonical object") unless payload.is_a?(Hash)
+            if payload.keys.sort == AUTHORIZATION_PAYLOAD_KEYS &&
+               record["transaction_id"] != payload.dig("authorization", "authorization_record_id")
+              raise lineage_invalid("authorization envelope does not exact-bind its frozen authorization id")
+            end
+
+            tx = JSON.parse(CanonicalJSON.dump(payload))
+            validate_transaction!(tx, policy: nil,
+              pinned_policies: policy.fetch("accepted"), marker: marker,
+              authority_verifier: authority_verifier, seen_ids: seen_ids,
+              prior_transactions: prior)
+            prior << tx
+            next unless tx.keys.sort == AUTHORIZATION_PAYLOAD_KEYS &&
+                        tx["task_id"] == task_id &&
+                        tx["task_revision_id"] == task_revision_id &&
+                        record["transaction_id"] == tx.dig("authorization", "authorization_record_id")
+
+            verified << JSON.parse(CanonicalJSON.dump(
+              "assertion" => tx["assertion"],
+              "authorization" => tx["authorization"]
+            ))
+          end
+          verified
+        end
+      end
+
 
       def genesis(task:, gate_requirements:, work_units:, change_theses:,
                   authority_assertions:, authorization_records:, logical_lead:,
@@ -316,7 +412,122 @@ module Orbit
 
       private
 
+      def validate_authorization_snapshot!(records, candidate, task_id, task_revision_id,
+                                           authority_verifier)
+        marker = ActiveRoot.marker_for(@active_root, code: "task_store_unpinned", label: "task_store")
+        policy = resolve_active_policy(marker, authority_verifier)
+        active = policy.fetch("active")
+        accepted = policy.fetch("accepted")
+        seen_ids = Set.new
+        prior = []
+        records.each do |record|
+          payload = record["payload"]
+          raise lineage_invalid("transaction payload is not a canonical object") unless payload.is_a?(Hash)
+          if payload.keys.sort == AUTHORIZATION_PAYLOAD_KEYS &&
+             record["transaction_id"] != payload.dig("authorization", "authorization_record_id")
+            raise lineage_invalid("authorization envelope does not exact-bind its frozen authorization id")
+          end
+
+          tx = JSON.parse(CanonicalJSON.dump(payload))
+          validate_transaction!(tx, policy: nil, pinned_policies: accepted, marker: marker,
+            authority_verifier: authority_verifier, seen_ids: seen_ids,
+            prior_transactions: prior)
+          prior << tx
+        end
+        candidate_tx = JSON.parse(CanonicalJSON.dump(candidate))
+        if candidate_tx.keys.sort == AUTHORIZATION_PAYLOAD_KEYS
+          existing = prior.find do |tx|
+            tx.keys.sort == AUTHORIZATION_PAYLOAD_KEYS &&
+              tx.dig("authorization", "authorization_record_id") ==
+                candidate_tx.dig("authorization", "authorization_record_id")
+          end
+          if existing
+            # Verified idempotency: byte-identical replay of a stored
+            # transaction is :idempotent; the same record id with different
+            # content is a reuse conflict. No fresh validation or duplicate
+            # id registration is ever run for the stored transaction.
+            return :idempotent if CanonicalJSON.dump(existing) == CanonicalJSON.dump(candidate_tx)
+
+            raise ContractError.new(
+              "task_store_reuse",
+              "authorization already exists with different content",
+              path: "task_store.authorize"
+            )
+          end
+          # Only a NEW candidate enters the fresh active-policy validation
+          # with the same verified prior snapshot; both frozen ids are
+          # registered against the same verified seen set first (globally
+          # create-only, so a new auth record can never borrow a prior id).
+          register_id!(seen_ids, "authority_assertion", candidate_tx.dig("assertion", "assertion_id"))
+          register_id!(seen_ids, "authorization_record", candidate_tx.dig("authorization", "authorization_record_id"))
+          validate_authorization_payload!(candidate_tx, marker, active, accepted,
+            authority_verifier, fresh: true, prior_transactions: prior)
+        else
+          validate_transaction!(candidate_tx, policy: nil, pinned_policies: accepted,
+            marker: marker, authority_verifier: authority_verifier, seen_ids: seen_ids,
+            prior_transactions: prior)
+        end
+        nil
+      end
+
+      def validate_authorization_payload!(payload, marker, active_policy, pinned_policies,
+                                          authority_verifier, fresh: false, prior_transactions: [])
+        authorization = payload["authorization"]
+        assertion = payload["assertion"]
+        validator = Orbit::V2::Validator.new(project_root: @active_root)
+        begin
+          validator.validate_document!("authorization_record", authorization)
+          validator.validate_document!("authority_assertion", assertion)
+        rescue ValidationFailure, ContractError
+          raise genesis_invalid("authorization records violate their contracts")
+        end
+        pinned = pinned_policies.find do |candidate|
+          candidate["policy_revision_id"] == authorization["project_policy_revision_id"]
+        end
+        unless authorization["content_digest"] == CanonicalJSON.content_digest(authorization) &&
+               authorization["protocol_epoch"] == "orbit-v2" &&
+               authorization["project_id"] == marker["project_id"] &&
+               assertion["protocol_epoch"] == "orbit-v2" &&
+               assertion["project_id"] == marker["project_id"] &&
+               authorization["action"] == "finding.waive" &&
+               authorization["subject_ref"].is_a?(String) &&
+               authorization["subject_ref"].start_with?("ofinding_") &&
+               assertion["authority_scope_ref"] == authorization["subject_ref"] &&
+               assertion["assertion_digest"] == authorization["authorization_assertion_digest"] &&
+               authorization["authorization_source_ref"] == assertion["assertion_id"] &&
+               %w[user control_plane].include?(assertion["issuer_kind"]) &&
+               Array(assertion["grants"]).include?("finding.waive") &&
+               pinned
+          raise genesis_invalid("authorization record is not exact-bound to its provider-verified assertion")
+        end
+        revision = prior_transactions.find do |tx|
+          tx.is_a?(Hash) && tx["task"].is_a?(Hash) &&
+            tx["task"]["task_id"] == payload["task_id"] &&
+            tx["task"]["task_revision_id"] == payload["task_revision_id"]
+        end
+        unless revision
+          raise genesis_invalid("authorization task revision is not an accepted TaskRevision")
+        end
+        if fresh
+          unless authorization["project_policy_revision_id"] == active_policy["policy_revision_id"] &&
+                 payload["task_id"].is_a?(String) && payload["task_revision_id"].is_a?(String)
+            raise genesis_invalid("a new authorization must pin the currently active policy")
+          end
+        end
+        begin
+          authority_verifier.verify!(assertion)
+        rescue ContractError => error
+          raise genesis_invalid("authorization assertion was not provider-verified: " + error.code)
+        end
+        grant = unique_policy_grant(pinned, "finding.waive")
+        unless grant && Array(assertion["grants"]).include?(grant["required_external_grant"])
+          raise genesis_invalid("authorization action is not enabled by its frozen policy revision")
+        end
+        true
+      end
+
       def payload(records)
+
         {
           "authority_assertions" => records.fetch("authority_assertions"),
           "authorization_records" => records.fetch("authorization_records"),
@@ -506,6 +717,12 @@ module Orbit
           validate_thesis_transaction!(tx, policy: policy,
             pinned_policies: pinned_policies, marker: marker, seen_ids: seen_ids,
             prior_transactions: prior_transactions)
+        when AUTHORIZATION_PAYLOAD_KEYS
+          register_id!(seen_ids, "authority_assertion", tx.dig("assertion", "assertion_id"))
+          register_id!(seen_ids, "authorization_record", tx.dig("authorization", "authorization_record_id"))
+          validate_authorization_payload!(tx, marker, policy, pinned_policies,
+            authority_verifier, prior_transactions: prior_transactions)
+          tx
         else
           raise genesis_invalid("transaction carries malformed component types or unknown fields")
         end
@@ -976,6 +1193,9 @@ module Orbit
             end
             Array(tx["gate_requirements"]).each { |record| ids << record["gate_lineage_id"] }
             Array(tx["change_theses"]).each { |record| ids << record["change_thesis_id"] }
+          when AUTHORIZATION_PAYLOAD_KEYS
+            ids << tx.dig("assertion", "assertion_id")
+            ids << tx.dig("authorization", "authorization_record_id")
           end
         end
         ids.delete(nil)

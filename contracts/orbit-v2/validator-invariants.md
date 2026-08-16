@@ -1344,7 +1344,8 @@ immutable composite representation plus exactly one provider-verified
 terminal event) AND the full successor composite — successor assigned
 RuleResolution, worker AgentInstance, one active AttemptCreated, and the
 required immediate observation checkpoint — as ONE closed control-log
-transaction under the fixed policy -> task -> control locks. The terminal
+transaction under the fixed policy -> task -> control -> evidence -> gate
+locks. The terminal
 checkpoint IS the exact authorizing dispatch checkpoint of the successor:
 no standalone dispatch-authorizing checkpoint can ever commit, because
 ordinary `checkpoint()` and any terminal transaction without the successor
@@ -1359,15 +1360,16 @@ reintroduced through the terminal path).
   globally create-only event id. The terminal checkpoint exact-extends the
   unique current observation tip of that attempt and terminal-pins the
   exact terminal event. The successor starts strictly after that event and
-  either exact-chains to the terminated Attempt on the same WorkUnit or is
-  the unique nil-predecessor first Attempt of a different WorkUnit; the
-  whole assembled snapshot proves the latter has no prior first Attempt.
+  exact-chains to the terminated Attempt on the same WorkUnit, to the
+  selected target WorkUnit's unique latest accepted terminal Attempt when
+  that target was previously attempted, or has nil predecessor only for a
+  never-attempted target; the whole assembled snapshot proves the choice.
   Its dispatch ref, assignment, thesis and rule proposals, observation pin,
   and writer authority are exact-bound as in the Inc6b composite.
 - `ControlStore#recover` is a pure read/reconcile seam: the complete
   window (log read, whole-snapshot reverification, tip derivation,
-  reconcile) runs under the SAME three-level fixed locks as every writer
-  (policy -> task -> control), so a concurrent successor can never append
+  reconcile) runs under the SAME five-level fixed locks as every writer
+  (policy -> task -> control -> evidence -> gate), so a concurrent successor can never append
   between the read and the returned decision. The unique current tip is
   the genesis checkpoint when no successor exists; recovery re-runs the
   tip's stored trigger through the deterministic LeadControl.reconcile
@@ -1429,7 +1431,8 @@ transaction; a partial definition is never accepted.
 
 `ControlStore#activate` commits ONE exact `task_revision_change`
 LeadCheckpoint (plus its writer assertion) as a closed control-log
-transaction under the fixed policy -> task -> control locks. The TaskStore
+transaction under the fixed policy -> task -> control -> evidence -> gate
+locks. The TaskStore
 `successor` append is deliberately proposal-only: it never reinterprets an
 r1 control, and the r1 control stays readable/dispatchable until the
 activation commits.
@@ -1472,7 +1475,8 @@ recomputes the digest. A replay compares the proposal and frozen snapshot
 rather than a newly sampled time, and is idempotent only after the entire
 existing evidence lineage re-verifies.
 
-- `ControlStore#resolve_attempt` holds policy -> task -> control locks across
+- `ControlStore#resolve_attempt` holds policy -> task -> control -> evidence ->
+  gate locks across
   the complete control-log replay/provider reverification and latest
   projection, then returns the exact latest Attempt representation, its
   assigned content-addressed RuleResolution, and its verified worker
@@ -1497,6 +1501,22 @@ existing evidence lineage re-verifies.
   record plus its frozen snapshot/surface. GateEvaluation+Finding atomic
   transactions and FindingResolution remain deferred to the next increments.
 
+## Slice 6 increment 6h TaskStore authorize seam
+
+`TaskStore#authorize` commits one append-only TaskRevision-scoped
+AuthorizationRecord + provider-verified AuthorityAssertion as a SECOND closed
+payload shape in the SAME task-definitions TransactionLog under the fixed
+policy -> task locks. The record exact-binds project, the ACTIVE policy
+revision (fresh writes), the accepted owned TaskRevision (resolved from the
+verified same-log prior transactions), and the target Finding id; authorization
+ids are globally create-only. Historical replay validates each authorization
+against its OWN frozen accepted policy revision and never reinterprets old
+records with the current active policy; `TaskStore#authorizations` whole-log
+reverifies then filters the requested task/revision and returns closed
+{authorization, assertion} pairs. The immutable TaskRevision/WorkUnit records
+are never modified; the GateFactStore waived resolution consumes only these
+already-accepted pairs and never co-commits authority.
+
 ## Slice 6 increment 6g addendum: durable GateEvaluation + Finding acceptance
 
 `Orbit::V2::GateFactStore` commits ONE GateEvaluation together with its
@@ -1508,6 +1528,21 @@ EvidenceStore evidence are resolved and provider-reverified inside the SAME
 locked snapshot the append commits on, and the complete assembled snapshot
 runs through the PUBLIC Validator.
 
+- STAGED risk acceptance boundary: a newly discovered unadjudicated risk is
+  atomically accepted as a closed gate-facts transaction while its GLOBAL
+  closure is still pending — the ONLY tolerated public-Validator error at
+  that stage is `finding_risk_unobserved` at exactly the current payload's
+  own `findings.<finding_id>` path (any other code, any other finding's
+  path, or a stale/foreign finding fails closed unchanged). The complete
+  bundle remains invalid and the ControlStore dispatch barrier applies. A
+  narrow store-layer transition permits only execution/terminal candidates
+  whose causal slice contains that exact path, whose active TaskRevision
+  exact-matches the source evaluation, and whose successor is either a
+  review/test/adjudication resolver or exact-pins the Finding while selecting
+  a WorkUnit from its source subject. Ordinary checkpoints, other error codes
+  or paths, cross-task candidates, and coder omissions still fail closed.
+  The later `finding_change` checkpoint exact-pins the Finding before any
+  resolution is accepted; the resolution path itself is never relaxed.
 - Finding ids are globally create-only; the evaluation's `finding_refs`
   must exactly equal its committed findings; supersession/related finding
   and evaluation lineages stay deferred. Evidence refs (subject, coverage,
@@ -1543,5 +1578,105 @@ runs through the PUBLIC Validator.
   it). Existing seed refs still undergo exact lineage validation, the
   pass-evaluation-with-unresolved-blocking-finding rule still fails
   closed, and resolution-tip derivation is unchanged.
-- Deferred: FindingResolution and the control checkpoint
-  observation/dispatch barrier.
+- Deferred from increment 6g: FindingResolution and the control checkpoint
+  observation/dispatch barrier; both land in increment 6h below.
+
+## Slice 6 increment 6h addendum: FindingResolution + causal control observation
+
+`GateFactStore#accept_resolution` commits one closed FindingResolution
+transaction under the same policy -> task -> control -> evidence -> gate lock
+order. The store replays the complete mixed gate-facts log before idempotency,
+keeps resolution ids globally create-only, and requires a linear per-Finding
+lineage that exact-extends the unique current tip.
+
+- `addressed` and `disproved` exact-bind the accepted source Finding and
+  GateEvaluation, a distinct descending resolving GateEvaluation, an
+  authorized review/test/adjudication Attempt and evaluator submission, and
+  accepted supporting EvidenceStore records. The source evaluation cannot
+  resolve its own Finding. `waived` carries no evidence and references only an
+  already accepted active-policy `finding.waive` AuthorizationRecord; the
+  resolution transaction cannot co-commit or self-assert authority.
+- GateEvaluation supersession now exact-extends the current tip of the same
+  GateRequirement without forks. Related evaluation refs and Finding
+  supersession/related refs remain deferred and fail closed.
+- ControlStore freezes one gate cutoff inside its five-lock operation window.
+  New non-evaluator dispatch checks the complete cutoff and fails while the
+  active TaskRevision has unresolved blocking Findings without exactly one
+  accepted resolution tip per Finding, EXCEPT the exact remediation path: a
+  dispatch that exact-pins EVERY unresolved blocker (id+digest) and selects a
+  WorkUnit present in at least one unresolved source evaluation subject.
+  Review/test/adjudication dispatch remains possible so the distinct resolving
+  evaluation can be produced, and a successor attempt may continue the
+  selected target WorkUnit's unique latest accepted TERMINAL attempt (or the
+  exact same-unit chain), so a review round can re-enter a previously
+  attempted implementation unit for remediation while the lineage stays exact.
+- PUBLIC Validator bundles receive only the checkpoint lineage's causal gate
+  slice plus its exact EvidenceStore records, repository snapshot and code
+  surface. Every historical control transaction is replayed against its own
+  slice, so a later Finding or FindingResolution never rewrites an accepted
+  decision. A `finding_change` checkpoint exact-pinning an unadjudicated risk
+  deterministically yields `needs_user/escalate`; its immediate
+  `authority_change` successor must exact-pin the Finding's UNIQUE CURRENT
+  resolution lineage tip (a superseded resolution ref fails closed) before
+  deterministic continuation and later dispatch. This current-tip proof is
+  FRESH-CANDIDATE ONLY: a stored transaction's causal slice never joins
+  future resolution descendants, so an authority_change that was legal when
+  its resolution was the current tip stays valid after a later supersession.
+- The control cutoff is verified in STAGES over the already-locked private
+  seams: the ControlStore whole lineage re-verifies against the structural
+  gate cutoff (ControlStore::Cutoff), then the EvidenceStore whole store
+  re-verifies with those verified control transactions (EvidenceStore::Cutoff),
+  and only then is EVERY gate payload (evaluations AND resolutions) replayed
+  prefix-scoped through the full validate_payload! path, so a digest-consistent
+  but provider/authority/evidence-invalid fact can never enter historical
+  control bundles or the dispatch barrier. Any stage failure fails the whole
+  operation; the outcome is atomic and non-recursive.
+- The GateFact writer keeps the verified operation cache produced by that
+  same five-lock cutoff and reuses it for the candidate/idempotency decision;
+  it never re-enters a public EvidenceStore or ControlStore reader and never
+  validates the candidate against a second snapshot.
+- Each lineage evaluation of a resolution is re-verified against ITS OWN
+  frozen EvidenceStore snapshot/evidence closure in a separate public
+  Validator bundle (the same assemble_bundle path the accept uses, with the
+  lineage-free projection), so a real addressed fix with new snapshot/evidence
+  never reinterprets the historical source evaluation as stale.
+- The combined resolution bundle carries the COMPLETE accepted resolution
+  ancestor lineage, every ancestor's source/resolving evaluation ancestry,
+  and the proposal/support/issuer-submission plus evaluation/finding evidence
+  closure. A waived successor therefore cannot erase an addressed/disproved
+  ancestor's immutable provenance.
+- STAGE 5: after the full gate replay, the ControlStore whole lineage
+  re-verifies one final time with the VERIFIED evidence cache and the FINAL
+  (fully verified) gate cutoff, so the returned control facts are only ever
+  produced from verified authority; the structural bootstrap is never exposed
+  as verified authority.
+- Control bundles include the append-only TaskStore authorization/assertion
+  pairs for every accepted task revision only after the task log whole-history
+  replay verifies them. When multiple already-verified evaluations use
+  different frozen snapshots, the store may ignore only `subject_stale` at
+  the exact `gate_evaluations.<verified-id>.subject` path as a projection-only
+  artifact; every other Validator error remains fail-closed.
+- Every dispatch-bearing ControlStore transaction (execution and terminal)
+  freezes a STORE-OWNED `gate_cutoff_tip` — the exact last accepted gate
+  transaction (id + digest) observed inside the append's locked window (nil
+  only while the gate log is empty). Historical replay validates the tip
+  resolves inside the verified gate log and slices the causal gate state at
+  that frozen prefix: facts already present at write time are included even
+  when the checkpoint omits refs to them (an inserted post-Finding dispatch
+  omitting the Finding fails closed), and facts accepted later never enter.
+  The tip is controlled-writer history proof — it records the gate state the
+  locked store observed and committed — not a trust root authenticating
+  arbitrary direct-file recomputation. This closed `gate_cutoff_tip` key is
+  part of the Inc6h controlled dispatch-bearing transaction shape; no legacy
+  dual-shape layer is added for intermediate formats (v2 CLI/runtime
+  activation remain deferred).
+- The combined resolution relation bundle keeps the immutable evaluations and
+  the resolution bytes untouched under ONE frozen repository snapshot anchor
+  (the accepted Finding's owning evaluation for waived) and rejects every
+  public Validator error EXCEPT the exact ProjectionPrimitives
+  historical-stale-evaluation predicate (gate_evaluations.<id>.subject
+  currentness only) — never stale gate digest/policy, shape, authority,
+  provenance, independence, or resolution errors.
+- Exact readers cover GateEvaluation, Finding and FindingResolution and
+  reverify the whole mixed store before returning. Gate Engine closure output
+  and Finding supersession/related lineages remain deferred.

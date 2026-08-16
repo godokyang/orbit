@@ -437,8 +437,18 @@ module Orbit
             new_refs.any? do |ref|
               resolution = @resolutions[ref["id"]]
               resolution && resolution["content_digest"] == ref["digest"] &&
-                resolution["finding_id"] == risk_ref["id"]
+                resolution["finding_id"] == risk_ref["id"] &&
+                current_resolution_tip?(resolution)
             end
+          end
+        end
+
+        # The unique current tip of the finding's verified resolution
+        # lineage: a resolution superseded by any later accepted resolution
+        # proves nothing for the resume.
+        def current_resolution_tip?(resolution)
+          @resolutions.values.none? do |candidate|
+            candidate["supersedes_finding_resolution_id"] == resolution["finding_resolution_id"]
           end
         end
 

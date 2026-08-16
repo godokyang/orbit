@@ -95,6 +95,7 @@ module OrbitV2ContractTest
     test_task_store_successors
     test_evidence_store
     test_control_store_gate_facts
+    test_control_store_finding_resolution
     test_v1_inventory
     test_slice_isolation
     puts(
@@ -4237,7 +4238,8 @@ module OrbitV2ContractTest
                                      successor_started_at: "2026-07-30T02:40:00Z",
                                      terminal_ended_at: "2026-07-30T02:30:00Z",
                                      role: "coder", purpose: "implementation", unit: nil,
-                                     successor_predecessor: :chained)
+                                     successor_predecessor: :chained,
+                                     successor_supporting_refs: nil)
     control_id = control_records[0]["lead_control_id"]
     stored = execution[3]
     unit = unit || task_records[2].first
@@ -4310,6 +4312,8 @@ module OrbitV2ContractTest
       decision: OrbitV2FixtureFactory::DISPATCH_DECISION,
       reconcile_trigger: { "event" => "attempt_terminal", "reason" => "Terminal observation authorizes the successor dispatch." },
       next_trigger: { "event" => "attempt_created", "reason" => "Awaiting the successor AttemptCreated observation." })
+    checkpoint["delivery_progress"]["supporting_refs"] = Array(checkpoint.dig("delivery_progress", "supporting_refs")) + successor_supporting_refs if successor_supporting_refs
+    checkpoint["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(checkpoint)
     successor["dispatch_lead_checkpoint_ref"] = OrbitV2FixtureFactory.cp_ref(checkpoint)
     observation_assertion = OrbitV2FixtureFactory.assertion(
       "oassert_#{successor_attempt_id.delete_prefix('oattempt_')}observation",
@@ -4958,8 +4962,8 @@ module OrbitV2ContractTest
 
   def test_task_store_genesis
     assert(Orbit::V2::TaskStore.instance_methods(false).sort ==
-      %i[genesis records resolve revise_thesis successor],
-      "TaskStore exposes exactly its five public seams")
+      %i[authorizations authorize genesis records resolve revise_thesis successor],
+      "TaskStore exposes exactly its seven public seams")
     Dir.mktmpdir do |dir|
       bundle = OrbitV2FixtureFactory.valid_bundle
       store, _policy = task_store_seeded_root(dir, bundle)
@@ -8568,8 +8572,8 @@ module OrbitV2ContractTest
 
   def test_control_store_gate_facts
     assert(Orbit::V2::GateFactStore.instance_methods(false).sort ==
-      %i[accept records resolve resolve_finding],
-      "GateFactStore exposes exactly its four public seams")
+      %i[accept accept_resolution records resolve resolve_finding resolve_finding_resolution],
+      "GateFactStore exposes exactly its six public seams")
     Dir.mktmpdir do |dir|
       bundle = OrbitV2FixtureFactory.valid_bundle
       bundle["logical_leads"].first["logical_lead_id"] = "olead_inc6ggate"
@@ -8613,7 +8617,7 @@ module OrbitV2ContractTest
       end
       accept_evidence = lambda do |record|
         evidence_store.accept(proposal: strip.call(record), repository_snapshot: snapshot,
-          code_surface_paths: paths, authority_verifier: vf[0],
+          code_surface_paths: %w[contracts/orbit-v2 lib/orbit/v2], authority_verifier: vf[0],
           runtime_identity_verifier: vf[1], lifecycle_verifier: vf[2])
       end
       unit0 = task_records[2].first
@@ -8681,9 +8685,7 @@ module OrbitV2ContractTest
         "coverage" => {
           "summary" => "All implementation WorkUnits and evidence records were evaluated.",
           "covered_work_unit_refs" => subject["work_unit_refs"].map { |ref| ref["work_unit_id"] },
-          "uncovered_work_unit_refs" => [],
-          "evidence_record_refs" => evidence_ids
-        },
+          "uncovered_work_unit_refs" => [], "evidence_record_refs" => evidence_ids },
         "residual_risk" => "The blocking finding remains unresolved.",
         "finding_refs" => [finding_id],
         "supersedes_gate_evaluation_id" => nil)
@@ -8750,6 +8752,42 @@ module OrbitV2ContractTest
       early_evaluation, early_finding = re_target.call("ogeval_inc6gbeforeterminal")
       assert(gate_fact_accept(before_terminal, early_evaluation, [early_finding], vf) == :appended,
         "an evaluation accepted while the evaluator Attempt is still active commits")
+      resolving_evaluation = OrbitV2FixtureFactory.deep_copy(evaluation)
+      resolving_evaluation["gate_evaluation_id"] = "ogeval_inc6gresolve"
+      resolving_evaluation["verdict"] = "pass"
+      resolving_evaluation["quality_outcome_verdict"] = "pass"
+      resolving_evaluation["acceptance_results"] = [
+        { "acceptance_id" => "acc_contract_valid", "verdict" => "pass",
+          "evidence_record_refs" => evidence_ids }
+      ]
+      resolving_evaluation["counterexample_cases"] = []
+      resolving_evaluation["finding_refs"] = []
+      resolving_evaluation["supersedes_gate_evaluation_id"] = evaluation["gate_evaluation_id"]
+      resolving_evaluation["content_digest"] =
+        Orbit::V2::CanonicalJSON.content_digest(resolving_evaluation)
+      assert(gate_fact_accept(gate_store, resolving_evaluation, [], vf) == :appended,
+        "a resolving GateEvaluation descends from the source evaluation")
+      resolution = OrbitV2FixtureFactory.digested(
+        "schema_version" => "orbit-finding-resolution-v1",
+        "protocol_epoch" => "orbit-v2",
+        "project_id" => OrbitV2FixtureFactory::PROJECT_ID,
+        "finding_resolution_id" => "ofres_inc6gaddressed",
+        "finding_id" => finding_id,
+        "resolution" => "addressed",
+        "issuer_attempt_id" => review[3]["attempt_id"],
+        "issuer_submission_record_id" => submission["evidence_record_id"],
+        "source_finding_ref" => { "finding_id" => finding_id,
+          "content_digest" => finding["content_digest"] },
+        "source_gate_evaluation_ref" => { "gate_evaluation_id" => evaluation["gate_evaluation_id"],
+          "content_digest" => evaluation["content_digest"] },
+        "resolving_gate_evaluation_ref" => {
+          "gate_evaluation_id" => resolving_evaluation["gate_evaluation_id"],
+          "content_digest" => resolving_evaluation["content_digest"] },
+        "proposal_evidence_record_id" => evidence_ids.first,
+        "supporting_record_refs" => [evidence_ids.first],
+        "supersedes_finding_resolution_id" => nil)
+      assert(gate_fact_resolution(gate_store, resolution, vf) == :appended,
+        "the blocking Finding is resolved before the evaluator round continues")
       evaluator_terminal = control_store_terminal_records(bundle, policy, control_records,
         task_records, review, dir, checkpoint_id: "olcheckpoint_inc6greviewterminal",
         successor_attempt_id: "oattempt_inc6greviewsuccessor",
@@ -8818,7 +8856,7 @@ module OrbitV2ContractTest
       expect_contract_error("gate_facts_acceptance_invalid") do
         gate_fact_accept(gate_store, stale_gate, [finding], vf)
       end
-      assert(gate_store.records.size == 3, "rejected gate facts leave the accepted transactions intact")
+      assert(gate_store.records.size == 5, "rejected gate facts leave the accepted transactions intact")
       payload = OrbitV2FixtureFactory.deep_copy(gate_store.records.first)
       payload["authority"] = "forbidden-second-fact"
       tx = { "schema_version" => "orbit-transaction-log-v1",
@@ -8833,6 +8871,255 @@ module OrbitV2ContractTest
     end
   end
 
+  def gate_fact_resolution(store, resolution, verifiers)
+    store.accept_resolution(resolution: resolution, authority_verifier: verifiers[0],
+      runtime_identity_verifier: verifiers[1], lifecycle_verifier: verifiers[2])
+  end
+
+  def test_control_store_finding_resolution
+    Dir.mktmpdir do |dir|
+      bundle = OrbitV2FixtureFactory.valid_bundle
+      review_bundle_unit = bundle["work_units"].fetch(2)
+      review_bundle_unit["depends_on_work_unit_refs"] = [bundle["work_units"].first["work_unit_id"]]
+      review_bundle_unit["content_digest"] =
+        Orbit::V2::CanonicalJSON.content_digest(review_bundle_unit)
+      control, policy, = control_store_seeded_root(dir, bundle)
+      vf = control_verifiers
+      task_records = task_store_genesis_records(bundle)
+      gate = task_records[1].first
+      gate["subject_selector"]["scope"] = "selected_work_units"
+      gate["subject_selector"]["work_unit_refs"] = [task_records[2].first["work_unit_id"]]
+      gate["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(gate)
+      task_store = Orbit::V2::TaskStore.new(active_root: File.join(dir, ".orbit"))
+      assert(task_store_genesis(task_store, task_records, vf[0]) == :appended, "task facts commit")
+      control_records = control_store_genesis_records(bundle, task_records[0],
+        OrbitV2FixtureFactory.agent("oagent_inc6hgatelead", "lead"), "olcontrol_inc6hgate",
+        control_store_writer_assertion("olcontrol_inc6hgate"), lead: task_records[6])
+      assert(control_store_genesis(control, control_records, vf) == :appended, "control commits")
+      impl = control_store_execution_records(bundle, policy, control_records, task_records, dir,
+        attempt_id: "oattempt_inc6himpl", dispatch_id: "olcheckpoint_inc6himpldispatch", worker_id: "oagent_inc6himplworker",
+        rule_path: "rules/inc6h-coder.md")
+      assert(control_store_dispatch(control, impl, vf) == :appended, "implementation round commits")
+      snapshot = bundle["repository_snapshot"]
+      surface = Orbit::V2::CodeSurface.derive(repository_snapshot: snapshot, paths: %w[contracts/orbit-v2 lib/orbit/v2])
+      review_unit = task_records[2].fetch(2)
+      review_terminal = control_store_terminal_records(bundle, policy, control_records,
+        task_records, impl, dir, checkpoint_id: "olcheckpoint_inc6himplterminal",
+        successor_attempt_id: "oattempt_inc6hreview", successor_worker_id: "oagent_inc6hreviewer",
+        rule_path: "rules/inc6h-review.md", role: "reviewer", purpose: "review", unit: review_unit,
+        successor_predecessor: nil, successor_started_at: "2026-07-30T02:40:00Z", terminal_ended_at: "2026-07-30T02:30:00Z")
+      assert(control_store_terminal(control, review_terminal, vf) == :appended,
+        "the evaluator review round succeeds the implementation round")
+      review = [5, 1, 2, 3, 4, 6, 7].map { |index| review_terminal[index] }
+      unit0 = task_records[2].first
+      thesis0 = task_records[3].find { |candidate| candidate["work_unit_id"] == unit0["work_unit_id"] }
+      evidence_times = %w[2026-07-30T02:12:00Z 2026-07-30T02:50:00Z 2026-07-30T03:25:00Z 2026-07-30T03:45:00Z]
+      evidence_store = Orbit::V2::EvidenceStore.new(active_root: File.join(dir, ".orbit"),
+        clock: -> { Time.iso8601(evidence_times.shift) })
+      accept_evidence = lambda do |record|
+        proposal = OrbitV2FixtureFactory.deep_copy(record)
+        Orbit::V2::EvidenceStore::STORE_OWNED_KEYS.each { |key| proposal.delete(key) }
+        evidence_store.accept(proposal: proposal, repository_snapshot: snapshot,
+          code_surface_paths: %w[contracts/orbit-v2 lib/orbit/v2], authority_verifier: vf[0],
+          runtime_identity_verifier: vf[1], lifecycle_verifier: vf[2])
+      end
+      impl_record = OrbitV2FixtureFactory.implementation_evidence("oevr_inc6himpl", impl[3], impl[0],
+        { "change_thesis_id" => thesis0["change_thesis_id"], "revision" => thesis0["revision"], "content_digest" => thesis0["content_digest"] },
+        ["lib/orbit/v2/validator.rb"])
+      accept_evidence.call(impl_record)
+      submission = OrbitV2FixtureFactory.evaluator_submission("oevr_inc6hreview", review[3], review[0])
+      accept_evidence.call(submission)
+      accepted_impl = evidence_store.resolve(evidence_record_id: "oevr_inc6himpl",
+        authority_verifier: vf[0], runtime_identity_verifier: vf[1], lifecycle_verifier: vf[2]).fetch("evidence_record")
+      subject = Orbit::V2::EvaluationSubject.select(gate_requirement: gate,
+        task_revision: task_records[0], work_units: task_records[2], attempts: [review_terminal[0]],
+        evidence_records: [accepted_impl], repository_snapshot: snapshot, code_surface: surface)
+      evidence_ids = subject["evidence_record_refs"].map { |ref| ref["evidence_record_id"] }
+      risk_finding_id = "ofinding_inc6hrisk"
+      gate_evaluation = OrbitV2FixtureFactory.deep_copy(bundle["gate_evaluations"].first)
+      gate_evaluation.merge!("gate_evaluation_id" => "ogeval_inc6hrisk",
+        "supersedes_gate_evaluation_id" => nil,
+        "evaluator_attempt_id" => review[3]["attempt_id"],
+        "evaluator_submission_record_id" => submission["evidence_record_id"],
+        "subject" => subject, "verdict" => "fail", "quality_outcome_verdict" => "fail",
+        "counterexample_cases" => ["A resolution barrier is bypassed."], "residual_risk" => "The unadjudicated risk blocks dispatch until resolved.",
+        "finding_refs" => [risk_finding_id])
+      gate_evaluation["quality_question_answers"].each { |answer| answer["evidence_record_refs"] = evidence_ids }
+      gate_evaluation["acceptance_results"].each { |result| result["verdict"] = "fail"; result["evidence_record_refs"] = evidence_ids }
+      gate_evaluation["coverage"].merge!(
+        "covered_work_unit_refs" => subject["work_unit_refs"].map { |ref| ref["work_unit_id"] },
+        "evidence_record_refs" => evidence_ids)
+      gate_evaluation["gate_requirement_content_digest"] = gate["content_digest"]; gate_evaluation["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(gate_evaluation)
+      risk_finding = OrbitV2FixtureFactory.digested("schema_version" => "orbit-finding-v1",
+        "protocol_epoch" => "orbit-v2", "project_id" => OrbitV2FixtureFactory::PROJECT_ID,
+        "finding_id" => risk_finding_id, "gate_evaluation_id" => gate_evaluation["gate_evaluation_id"],
+        "severity" => "P0", "basis" => "newly_discovered_risk",
+        "body" => "Example unadjudicated risk.",
+        "source_evidence_record_refs" => evidence_ids, "supersedes_finding_id" => nil)
+      gate_times = %w[2026-07-30T02:55:00Z 2026-07-30T03:50:00Z 2026-07-30T03:51:00Z 2026-07-30T03:52:00Z 2026-07-30T03:53:00Z]
+      gate_store = Orbit::V2::GateFactStore.new(active_root: File.join(dir, ".orbit"), clock: -> { Time.iso8601(gate_times.shift) })
+      assert(gate_fact_accept(gate_store, gate_evaluation, [risk_finding], vf) == :appended,
+        "the risk evaluation and Finding commit atomically")
+      assert(control_store_dispatch(control, impl, vf) == :idempotent,
+        "the committed dispatch replays idempotently after later gate facts")
+      finding_ref = { "kind" => "finding", "id" => risk_finding_id, "digest" => risk_finding["content_digest"] }
+      barrier_terminal = control_store_terminal_records(bundle, policy, control_records,
+        task_records, review, dir, checkpoint_id: "olcheckpoint_inc6hbarrier",
+        successor_attempt_id: "oattempt_inc6hbarrier", successor_worker_id: "oagent_inc6hbarrierworker",
+        rule_path: "rules/inc6h-barrier.md", terminal_ended_at: "2026-07-30T03:05:00Z",
+        role: "coder", purpose: "implementation", unit: unit0, successor_predecessor: impl[3]["attempt_id"])
+      control_log_path = File.join(dir, ".orbit", Orbit::V2::ControlStore::CONTROL_TRANSACTIONS_FILE)
+      control_log_bytes = File.binread(control_log_path)
+      gate_tip = Orbit::V2::TransactionLog.new(
+        path: File.join(dir, ".orbit", Orbit::V2::GateFactStore::GATE_FACTS_FILE)).records.last
+      forged = { "assertion" => barrier_terminal[2], "attempt" => barrier_terminal[0],
+        "checkpoint" => barrier_terminal[1], "observation_assertion" => barrier_terminal[7],
+        "observation_checkpoint" => barrier_terminal[6], "rule_resolution" => barrier_terminal[5],
+        "successor_attempt" => barrier_terminal[3], "worker_agent" => barrier_terminal[4],
+        "gate_cutoff_tip" => { "transaction_id" => gate_tip["transaction_id"],
+          "content_digest" => gate_tip["content_digest"] } }
+      Orbit::V2::TransactionLog.new(path: control_log_path)
+        .append_with(transaction_id: "olcheckpoint_inc6hbarrier", payload: forged,
+          validate: ->(_records, _tip) { nil })
+      expect_contract_error("control_store_lineage_invalid") do
+        control.resolve(control_id: "olcontrol_inc6hgate", authority_verifier: vf[0],
+          runtime_identity_verifier: vf[1], lifecycle_verifier: vf[2])
+      end
+      File.binwrite(control_log_path, control_log_bytes)
+      remediation_terminal = control_store_terminal_records(bundle, policy, control_records,
+        task_records, review, dir, checkpoint_id: "olcheckpoint_inc6hreviewterminal",
+        successor_attempt_id: "oattempt_inc6hremediation", successor_worker_id: "oagent_inc6hremediationworker",
+        rule_path: "rules/inc6h-remediation.md", terminal_ended_at: "2026-07-30T03:10:00Z",
+        role: "coder", purpose: "implementation", unit: unit0, successor_predecessor: impl[3]["attempt_id"],
+        successor_supporting_refs: [finding_ref], successor_started_at: "2026-07-30T03:20:00Z")
+      assert(control_store_terminal(control, remediation_terminal, vf) == :appended,
+        "the review terminalizes into the remediation attempt exact-pinning the Finding")
+      remediation = [5, 1, 2, 3, 4, 6, 7].map { |index| remediation_terminal[index] }
+      remediation_evidence = OrbitV2FixtureFactory.implementation_evidence("oevr_inc6hremediation", remediation[3], remediation[0],
+        { "change_thesis_id" => thesis0["change_thesis_id"], "revision" => thesis0["revision"], "content_digest" => thesis0["content_digest"] },
+        ["lib/orbit/v2/validator.rb"])
+      accept_evidence.call(remediation_evidence); remediation_evidence = evidence_store.resolve(evidence_record_id: "oevr_inc6hremediation", authority_verifier: vf[0], runtime_identity_verifier: vf[1], lifecycle_verifier: vf[2]).fetch("evidence_record")
+      reviewer2_terminal = control_store_terminal_records(bundle, policy, control_records,
+        task_records, remediation, dir, checkpoint_id: "olcheckpoint_inc6himpl2terminal",
+        successor_attempt_id: "oattempt_inc6hreviewer2", successor_worker_id: "oagent_inc6hreviewer2worker",
+        rule_path: "rules/inc6h-review2.md", terminal_ended_at: "2026-07-30T03:30:00Z",
+        role: "reviewer", purpose: "review", unit: review_unit, successor_predecessor: review[3]["attempt_id"], successor_started_at: "2026-07-30T03:40:00Z")
+      assert(control_store_terminal(control, reviewer2_terminal, vf) == :appended,
+        "the remediation attempt terminalizes into the independent reviewer2")
+      review2 = [5, 1, 2, 3, 4, 6, 7].map { |index| reviewer2_terminal[index] }
+      escalate_assertion = OrbitV2FixtureFactory.assertion("oassert_inc6hescalate",
+        %w[control.checkpoint], "control-plane-writer", authority_scope_ref: "olcontrol_inc6hgate")
+      escalate = inc6h_checkpoint("olcheckpoint_inc6hescalate", reviewer2_terminal[6], policy,
+        escalate_assertion, control_records, task_records, unit0,
+        decision: { "state" => "needs_user", "action" => "escalate", "reason" => "newly discovered risk requires risk-owner/user adjudication" },
+        reconcile_trigger: { "event" => "finding_change", "reason" => "Risk Finding accepted." },
+        next_trigger: { "event" => "authority_change", "reason" => "Awaiting adjudication." },
+        supporting_refs: [finding_ref])
+      assert(control.checkpoint(checkpoint: escalate, assertion: escalate_assertion, authority_verifier: vf[0], runtime_identity_verifier: vf[1], lifecycle_verifier: vf[2]) == :appended,
+        "the finding_change checkpoint yields needs_user/escalate")
+      review2_submission = OrbitV2FixtureFactory.evaluator_submission("oevr_inc6hreviewer2", review2[3], review2[0])
+      accept_evidence.call(review2_submission)
+      new_subject = Orbit::V2::EvaluationSubject.select(gate_requirement: gate,
+        task_revision: task_records[0], work_units: task_records[2], attempts: [remediation[3]],
+        evidence_records: [remediation_evidence], repository_snapshot: snapshot, code_surface: surface)
+        .tap { |subject| evidence_ids = subject["evidence_record_refs"].map { |ref| ref["evidence_record_id"] } }
+      followup = OrbitV2FixtureFactory.deep_copy(gate_evaluation)
+      followup.merge!("gate_evaluation_id" => "ogeval_inc6hresolved", "verdict" => "pass",
+        "quality_outcome_verdict" => "pass", "finding_refs" => [],
+        "supersedes_gate_evaluation_id" => gate_evaluation["gate_evaluation_id"],
+        "evaluator_attempt_id" => review2[3]["attempt_id"],
+        "evaluator_submission_record_id" => review2_submission["evidence_record_id"],
+        "subject" => new_subject)
+      followup["quality_question_answers"].each { |answer| answer["evidence_record_refs"] = evidence_ids }; followup["acceptance_results"].each { |result| result["verdict"] = "pass"; result["evidence_record_refs"] = evidence_ids }; followup["coverage"]["evidence_record_refs"] = evidence_ids; followup["counterexample_cases"] = []
+      followup["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(followup)
+      assert(gate_fact_accept(gate_store, followup, [], vf) == :appended,
+        "a distinct follow-up GateEvaluation with fix evidence commits")
+      resolution = OrbitV2FixtureFactory.digested("schema_version" => "orbit-finding-resolution-v1",
+        "protocol_epoch" => "orbit-v2", "project_id" => OrbitV2FixtureFactory::PROJECT_ID,
+        "finding_resolution_id" => "ofres_inc6haddressed", "finding_id" => risk_finding_id,
+        "resolution" => "addressed", "issuer_attempt_id" => review2[3]["attempt_id"],
+        "issuer_submission_record_id" => review2_submission["evidence_record_id"],
+        "source_finding_ref" => { "finding_id" => risk_finding_id,
+          "content_digest" => risk_finding["content_digest"] },
+        "source_gate_evaluation_ref" => { "gate_evaluation_id" => gate_evaluation["gate_evaluation_id"],
+          "content_digest" => gate_evaluation["content_digest"] },
+        "resolving_gate_evaluation_ref" => { "gate_evaluation_id" => followup["gate_evaluation_id"],
+          "content_digest" => followup["content_digest"] },
+        "proposal_evidence_record_id" => remediation_evidence["evidence_record_id"],
+        "supporting_record_refs" => [remediation_evidence["evidence_record_id"]],
+        "supersedes_finding_resolution_id" => nil)
+      assert(gate_fact_resolution(gate_store, resolution, vf) == :appended,
+        "an addressed FindingResolution commits atomically")
+      waiver_assertion = OrbitV2FixtureFactory.assertion("oassert_inc6hwaive",
+        %w[finding.waive], "risk-owner", authority_scope_ref: risk_finding_id)
+      waiver_record = OrbitV2FixtureFactory.digested(
+        "schema_version" => "orbit-authorization-record-v1", "protocol_epoch" => "orbit-v2",
+        "project_id" => OrbitV2FixtureFactory::PROJECT_ID,
+        "authorization_record_id" => "oauthz_inc6hwaive", "project_policy_revision_id" => policy["policy_revision_id"],
+        "action" => "finding.waive", "subject_ref" => risk_finding_id,
+        "authorization_source_ref" => waiver_assertion["assertion_id"],
+        "authorization_assertion_digest" => waiver_assertion["assertion_digest"])
+      foreign_assertion = OrbitV2FixtureFactory.deep_copy(waiver_assertion)
+      foreign_assertion["project_id"] = "oproject_foreign"
+      foreign_assertion["assertion_digest"] = Orbit::V2::AuthorityVerifier.assertion_digest(foreign_assertion); foreign_assertion["verification_receipt"] = OrbitV2FixtureFactory::FAKE_AUTHORITY_PROVIDER.issue(foreign_assertion, receipt_id: foreign_assertion.dig("verification_receipt", "receipt_id"))
+      foreign_waiver = OrbitV2FixtureFactory.deep_copy(waiver_record)
+      foreign_waiver["authorization_assertion_digest"] = foreign_assertion["assertion_digest"]
+      foreign_waiver["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(foreign_waiver)
+      expect_contract_error("task_store_genesis_invalid") do
+        task_store.authorize(authorization: foreign_waiver, assertion: foreign_assertion,
+          task_id: task_records[0]["task_id"], task_revision_id: task_records[0]["task_revision_id"],
+          authority_verifier: vf[0])
+      end
+      assert(task_store.authorize(authorization: waiver_record, assertion: waiver_assertion,
+        task_id: task_records[0]["task_id"], task_revision_id: task_records[0]["task_revision_id"],
+        authority_verifier: vf[0]) == :appended,
+        "a TaskRevision-scoped finding.waive authorization commits append-only")
+      waived = OrbitV2FixtureFactory.deep_copy(resolution)
+      waived.merge!("finding_resolution_id" => "ofres_inc6hwaived",
+        "resolution" => "waived",
+        "supersedes_finding_resolution_id" => "ofres_inc6haddressed")
+      waived["supporting_record_refs"] = []
+      %w[issuer_attempt_id issuer_submission_record_id source_finding_ref source_gate_evaluation_ref resolving_gate_evaluation_ref proposal_evidence_record_id].each { |key| waived.delete(key) }
+      waived["authorization_record_ref"] = waiver_record["authorization_record_id"]
+      waived["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(waived)
+      assert(gate_fact_resolution(gate_store, waived, vf) == :appended,
+        "the waived FindingResolution commits by referencing the accepted TaskRevision-scoped record")
+      resume_assertion = OrbitV2FixtureFactory.assertion("oassert_inc6hresume",
+        %w[control.checkpoint], "control-plane-writer", authority_scope_ref: "olcontrol_inc6hgate")
+      resume_for = lambda do |id, resolution_ref|
+        inc6h_checkpoint(id, escalate, policy, resume_assertion, control_records, task_records,
+          unit0, decision: { "state" => "blocked", "action" => "continue", "reason" => "authoritative change observed" },
+          reconcile_trigger: { "event" => "authority_change", "reason" => "Resuming after adjudication." },
+          next_trigger: { "event" => "successor_before", "reason" => "Awaiting the successor boundary." },
+          supporting_refs: [resolution_ref])
+      end
+      stale_resume = resume_for.call("olcheckpoint_inc6hstaleresume", { "kind" => "finding_resolution", "id" => resolution["finding_resolution_id"], "digest" => resolution["content_digest"] })
+      expect_contract_error("control_store_checkpoint_invalid") do
+        control.checkpoint(checkpoint: stale_resume, assertion: resume_assertion, authority_verifier: vf[0], runtime_identity_verifier: vf[1], lifecycle_verifier: vf[2])
+      end
+      resume = resume_for.call("olcheckpoint_inc6hresume", { "kind" => "finding_resolution", "id" => waived["finding_resolution_id"], "digest" => waived["content_digest"] })
+      assert(control.checkpoint(checkpoint: resume, assertion: resume_assertion, authority_verifier: vf[0], runtime_identity_verifier: vf[1], lifecycle_verifier: vf[2]) == :appended,
+        "the authority_change resume exact-pins the unique current waived resolution tip")
+    end
+  end
+
+  def inc6h_checkpoint(id, predecessor, policy, assertion, control_records, task_records,
+                      unit0, decision:, reconcile_trigger:, next_trigger:, supporting_refs:)
+    checkpoint = OrbitV2FixtureFactory.lead_checkpoint(
+      id, is_genesis: false,
+      predecessor_ref: OrbitV2FixtureFactory.cp_ref(predecessor),
+      predecessor_checkpoint: predecessor, policy: policy,
+      session: control_records[1], agent: control_records[3], logical_lead: task_records[6],
+      task: task_records[0], writer_action: "control.checkpoint", writer_assertion: assertion,
+      lead_control_id: "olcontrol_inc6hgate",
+      active_task_ref: OrbitV2FixtureFactory.task_ref(task_records[0]),
+      selected_work_unit_ref: OrbitV2FixtureFactory.work_unit_ref(unit0),
+      task_queue: [OrbitV2FixtureFactory.task_ref(task_records[0])], unit: unit0,
+      decision: decision, reconcile_trigger: reconcile_trigger, next_trigger: next_trigger)
+    checkpoint["delivery_progress"]["supporting_refs"] = supporting_refs
+    checkpoint["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(checkpoint)
+    checkpoint
+  end
   def test_v1_inventory
 
     inventory = YAML.safe_load(
