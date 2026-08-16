@@ -74,7 +74,7 @@ module Orbit
       TASK_DEFINITIONS_FILE = "task-definitions.json".freeze
       PAYLOAD_KEYS = %w[
         authority_assertions authorization_records change_theses
-        gate_requirements task work_units
+        gate_requirements logical_lead task work_units
       ].freeze
       STABLE_ID = /\A(?:acc|src|evreq|question)_[a-z0-9][a-z0-9_-]{2,95}\z/.freeze
       WORK_UNIT_KINDS = %w[implementation evaluation research release].freeze
@@ -92,16 +92,19 @@ module Orbit
       end
 
       def genesis(task:, gate_requirements:, work_units:, change_theses:,
-                  authority_assertions:, authorization_records:, authority_verifier:)
+                  authority_assertions:, authorization_records:, logical_lead:,
+                  authority_verifier:)
         records = {
           "task" => task,
           "gate_requirements" => gate_requirements,
           "work_units" => work_units,
           "change_theses" => change_theses,
           "authority_assertions" => authority_assertions,
-          "authorization_records" => authorization_records
+          "authorization_records" => authorization_records,
+          "logical_lead" => logical_lead
         }
         unless task.is_a?(Hash) && task["task_id"].is_a?(String) && !task["task_id"].empty? &&
+               logical_lead.is_a?(Hash) &&
                [gate_requirements, work_units, change_theses,
                 authority_assertions, authorization_records].all? { |list| list.is_a?(Array) } &&
                authority_verifier.respond_to?(:verify!)
@@ -189,6 +192,7 @@ module Orbit
           "authorization_records" => records.fetch("authorization_records"),
           "change_theses" => records.fetch("change_theses"),
           "gate_requirements" => records.fetch("gate_requirements"),
+          "logical_lead" => records.fetch("logical_lead"),
           "task" => records.fetch("task"),
           "work_units" => records.fetch("work_units")
         }
@@ -303,7 +307,7 @@ module Orbit
       def validate_transaction!(tx, policy:, pinned_policies:, marker:,
                                 authority_verifier:, seen_ids:)
         unless tx.is_a?(Hash) && tx.keys.sort == PAYLOAD_KEYS &&
-               tx["task"].is_a?(Hash) &&
+               tx["task"].is_a?(Hash) && tx["logical_lead"].is_a?(Hash) &&
                [tx["gate_requirements"], tx["work_units"], tx["change_theses"],
                 tx["authority_assertions"], tx["authorization_records"]].all? do |list|
                  list.is_a?(Array)
@@ -316,11 +320,13 @@ module Orbit
         theses = tx.fetch("change_theses")
         assertions = tx.fetch("authority_assertions")
         authorizations = tx.fetch("authorization_records")
+        logical_lead = tx.fetch("logical_lead")
         project_id = policy ? policy["project_id"] : marker["project_id"]
 
         validator = Orbit::V2::Validator.new(project_root: @active_root)
         begin
           validator.validate_document!("task_revision", task)
+          validator.validate_document!("logical_lead", logical_lead)
           gates.each { |gate| validator.validate_document!("gate_requirement", gate) }
           units.each { |unit| validator.validate_document!("work_unit", unit) }
           theses.each { |thesis| validator.validate_document!("change_thesis", thesis) }
@@ -329,12 +335,12 @@ module Orbit
         rescue ValidationFailure, ContractError
           raise genesis_invalid("records violate their contracts")
         end
-        [task, *gates, *units, *theses, *authorizations].each do |record|
+        [task, *gates, *units, *theses, *authorizations, logical_lead].each do |record|
           unless CanonicalJSON.content_digest(record) == record["content_digest"]
             raise genesis_invalid("record content_digest is not self-consistent")
           end
         end
-        unless ([task, *gates, *units, *theses, *assertions, *authorizations]).all? do |record|
+        unless ([task, *gates, *units, *theses, *assertions, *authorizations, logical_lead]).all? do |record|
                  record["project_id"] == project_id
                end
           raise genesis_invalid("records do not all carry the marker project identity")
@@ -345,6 +351,7 @@ module Orbit
         end
         raise genesis_invalid("task pins a policy the store never accepted") unless effective_policy
 
+        validate_logical_lead!(task, logical_lead, seen_ids)
         validate_task!(task, gates, policy, pinned_policies, seen_ids, project_id)
         validate_gates!(task, gates, effective_policy, units, seen_ids)
         validate_theses!(task, units, theses, seen_ids)
@@ -352,6 +359,29 @@ module Orbit
         validate_authorizations!(task, units, assertions, authorizations,
           effective_policy, authority_verifier, seen_ids)
         tx
+      end
+
+      # Exactly one LogicalLead per task transaction with exact closure:
+      # the task_id must equal the task, the authority_scope_ref must
+      # exact-equal the task's pinned policy revision id (the active policy
+      # for the writer, the accepted revision for the reader), and the
+      # durable_context_ref must be a canonical artifact URI. Logical lead
+      # ids are globally create-only.
+      def validate_logical_lead!(task, logical_lead, seen_ids)
+        register_id!(seen_ids, "logical_lead", logical_lead.fetch("logical_lead_id"))
+        unless logical_lead["task_id"] == task["task_id"]
+          raise genesis_invalid("LogicalLead task_id must exact-equal the task")
+        end
+        unless logical_lead["authority_scope_ref"] ==
+               task.dig("project_policy_revision_ref", "policy_revision_id")
+          raise genesis_invalid(
+            "LogicalLead authority_scope_ref must exact-equal the task's pinned policy revision"
+          )
+        end
+        durable_context_ref = logical_lead["durable_context_ref"]
+        unless durable_context_ref.is_a?(String) && /\Aartifact:\/\/[^\s]+\z/.match?(durable_context_ref)
+          raise genesis_invalid("LogicalLead durable_context_ref must be a canonical artifact URI")
+        end
       end
 
       def validate_task!(task, gates, policy, pinned_policies, seen_ids, project_id)

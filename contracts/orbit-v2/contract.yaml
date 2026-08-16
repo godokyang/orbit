@@ -127,18 +127,45 @@ control_authority_store:
     overlapping_owned_task: fail_closed
     already_active_canonical_runtime_subject: fail_closed
     disjoint_task_and_subject: accepted
+  successor_checkpoints:
+    seam_method: checkpoint
+    transaction_shapes:
+      - ordinary: closed_payload_of_assertion_and_checkpoint
+      - session_transition: closed_payload_of_agent_assertion_checkpoint_prior_session_and_session
+    fixed_lock_order: policy_log_then_task_log_then_control_log_checkpoint_facts_resolve_inside_the_same_locked_snapshot_the_append_commits_on
+    predecessor_closure: exact_prior_accepted_checkpoint_of_the_same_control_extended_with_byte_identical_predecessor_ref
+    control_pins: [registry_owned_task_refs, genesis_active_session_generation, lead_agent_instance, runtime_subject_pins]
+    cross_store_facts: owned_task_resolved_through_accepted_TaskStore_logical_lead_task_and_work_units_exact_refs_never_checkpoint_local_text
+    task_policy_binding: resolved_task_pins_the_same_policy_revision_as_the_checkpoint_stale_or_mismatched_task_facts_fail_closed
+    authority_before_append: [provider_verified_control_checkpoint_assertion, provider_verified_active_policy, writer_provenance_exact_bound_to_unique_policy_grant, provider_verified_runtime_identity]
+    semantic_closure: assembled_snapshot_of_marker_accepted_policy_revisions_and_issuance_assertions_task_payload_and_control_transactions_run_through_the_public_Validator_any_error_fails_closed
+    session_transition_minimum:
+      prior_session: active_session_plus_exactly_one_provider_verified_LeadSessionEnded
+      successor_session: generation_plus_one_with_exact_predecessor_pin_and_same_subject_agent_control_task_and_durable_context
+      transitioned_agent: same_agent_plus_exactly_one_AgentContextAdvanced_generation_binds_successor_session_between_termination_and_start
+      lifecycle_ids: new_event_ids_globally_create_only_repeated_verified_prefixes_reasserted_byte_identical
+    results: [appended, idempotent_only_after_whole_existing_snapshot_reverifies_both_shapes]
+    fail_closed: [stale_predecessor, wrong_control, wrong_policy_after_rotation, queue_mismatch, task_fact_mismatch, dispatch_without_exact_selection, attempt_refs, malformed_shape, borrowed_ids]
   reader:
     replay: from_protocol_root_anchor_with_provider_reverification_of_authority_runtime_identity_and_lifecycle_events
+    shape_guarded_genesis_discovery: checkpoint_payloads_never_mistaken_for_genesis_registry_payloads
+    lineage_includes: [ordinary_checkpoint_transactions, session_transition_transactions]
+    tip: latest_accepted_checkpoint_assertion_session_and_agent_not_genesis_only_state
+    checkpoints: accepted_successor_checkpoints_in_transaction_order
     fail_closed: [unknown, malformed, fork, half_transaction, missing_control]
-  not_implemented: [successor_checkpoints, session_replacement, general_writers]
+  not_implemented: [general_writers]
+  deferred_to_later_increments:
+    dispatch_with_ChangeThesis_and_RuleResolution_proposals_and_AttemptCreated: slice_6_increment_6b
+    cross_control_session_transfer_and_recovery: later_slice_6
 
 task_authority_store:
   seam: Orbit::V2::TaskStore
   location: canonical_active_root_only_canonical_real_active_root_proof_required
   transaction_file: task-definitions.json
-  transaction_shape: closed_payload_of_revision1_task_owned_gates_work_unit_graph_revision1_theses_and_their_assertions_and_authorization_records
+  transaction_shape: closed_payload_of_revision1_task_owned_gates_work_unit_graph_revision1_theses_their_assertions_authorization_records_and_exactly_one_logical_lead
   genesis:
     authority_before_append: [provider_verified_active_policy_from_policy_store_same_snapshot_accepted_revisions, fixed_lock_order_policy_log_then_task_log, provider_verified_assertions, policy_enabled_grants]
+    logical_lead_closure: [exact_task_id_binding, authority_scope_ref_exact_equals_task_pinned_policy_revision, canonical_artifact_durable_context_ref, globally_create_only_logical_lead_id]
     final_validation: [schemas, content_digests, epoch, project, exact_ownership_and_ref_closure, parentless_revision1_task, empty_unresolved_finding_refs, no_protected_change_authorization_or_self_authorization, stable_requirement_question_evidence_ids, exact_gate_ownership_and_policy_minimums, one_root_reachable_acyclic_work_graph, exact_revision1_thesis_pin_per_work_unit, canonical_work_authority_scopes, exact_assertion_and_authorization_set_closure]
     results: [appended, idempotent_only_after_whole_existing_snapshot_reverifies]
     reused_task_or_different_content_or_borrowed_ids: fail_closed

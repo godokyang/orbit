@@ -81,6 +81,7 @@ module OrbitV2ContractTest
     test_control_store_genesis
     test_control_store_conflicts
     test_control_store_concurrency
+    test_control_store_checkpoint
     test_control_store_lineage_fail_closed
     test_task_store_genesis
     test_task_store_lineage_fail_closed
@@ -3622,11 +3623,21 @@ module OrbitV2ContractTest
       %w[control.genesis control.checkpoint], "control-plane-writer", authority_scope_ref: control_id)
   end
 
-  def control_store_genesis_records(bundle, task, agent, control_id, assertion)
+  def control_store_genesis_records(bundle, task, agent, control_id, assertion, lead: nil)
     control = control_id.delete_prefix("olcontrol_")
     result = OrbitV2FixtureFactory.second_lineage(bundle, control_id: control_id,
       writer_assertion: assertion, agent: agent, task: task,
       logical_lead_id: "olead_#{control}", session_id: "oleadsession_#{control}")
+    if lead
+      result["session"]["logical_lead_id"] = lead["logical_lead_id"]
+      result["genesis"]["logical_lead_refs"] = [{ "logical_lead_id" => lead["logical_lead_id"],
+        "content_digest" => lead["content_digest"] }]
+      result["genesis"]["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(result["genesis"])
+      registry = bundle["control_registries"].last
+      registry["genesis_checkpoint_ref"] = { "lead_checkpoint_id" => result["genesis"]["lead_checkpoint_id"],
+        "content_digest" => result["genesis"]["content_digest"] }
+      registry["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(registry)
+    end
     [bundle["control_registries"].last, result["session"], result["genesis"], agent, assertion]
   end
 
@@ -3657,8 +3668,8 @@ module OrbitV2ContractTest
   end
 
   def test_control_store_genesis
-    assert(Orbit::V2::ControlStore.instance_methods(false).sort == %i[genesis records resolve],
-      "ControlStore exposes exactly its three public seams")
+    assert(Orbit::V2::ControlStore.instance_methods(false).sort == %i[checkpoint genesis records resolve],
+      "ControlStore exposes exactly its four public seams")
     Dir.mktmpdir do |dir|
       bundle = OrbitV2FixtureFactory.valid_bundle
       store, _policy, task = control_store_seeded_root(dir, bundle)
@@ -3823,6 +3834,175 @@ module OrbitV2ContractTest
     end
   end
 
+  def control_store_checkpoint_records(bundle, policy, records, control_id, checkpoint_id, decision,
+                                       lead: nil, unit: nil, predecessor_checkpoint: nil)
+    genesis_cp = records[2]
+    predecessor_checkpoint ||= genesis_cp
+    session = records[1]
+    agent = records[3]
+    task = bundle["task_revisions"].first
+    unit ||= bundle["work_units"].first
+    lead = lead || bundle["logical_leads"].find do |candidate|
+      candidate["logical_lead_id"] == genesis_cp.dig("logical_lead_refs", 0, "logical_lead_id")
+    end
+    assertion = OrbitV2FixtureFactory.assertion(
+      "oassert_#{checkpoint_id.delete_prefix('olcheckpoint_')}writer",
+      %w[control.checkpoint], "control-plane-writer", authority_scope_ref: control_id)
+    checkpoint = OrbitV2FixtureFactory.lead_checkpoint(
+      checkpoint_id, is_genesis: false,
+      predecessor_ref: OrbitV2FixtureFactory.cp_ref(predecessor_checkpoint),
+      predecessor_checkpoint: predecessor_checkpoint,
+      policy: policy, session: session, agent: agent, logical_lead: lead, task: task,
+      writer_action: "control.checkpoint", writer_assertion: assertion, lead_control_id: control_id,
+      active_task_ref: OrbitV2FixtureFactory.task_ref(task),
+      selected_work_unit_ref: OrbitV2FixtureFactory.work_unit_ref(unit),
+      task_queue: [OrbitV2FixtureFactory.task_ref(task)], decision: decision)
+    [checkpoint, assertion]
+  end
+
+  def control_store_session_transition(bundle, policy, records, control_id, checkpoint_id, decision,
+                                       lead: nil, unit: nil, predecessor_checkpoint: nil)
+    checkpoint, assertion = control_store_checkpoint_records(
+      bundle, policy, records, control_id, checkpoint_id, decision,
+      lead: lead, unit: unit, predecessor_checkpoint: predecessor_checkpoint
+    )
+    genesis_cp = records[2]
+    session = records[1]
+    agent = records[3]
+    ended = OrbitV2FixtureFactory.event("oevent_inc6a_ended", "LeadSessionEnded",
+      session.dig("lifecycle_events", -1, "event_digest"),
+      "ended_at" => "2026-07-30T01:00:00Z", "status" => "completed", "reason" => "Successor session.")
+    prior_session = OrbitV2FixtureFactory.deep_copy(session)
+    prior_session["lifecycle_events"] = session["lifecycle_events"] + [ended]
+    successor = OrbitV2FixtureFactory.deep_copy(session)
+    successor["lead_session_id"] = "oleadsession_inc6asuccessor"
+    successor["session_generation"] = 2
+    successor["predecessor_lead_session_ref"] = { "lead_session_id" => session["lead_session_id"],
+      "session_generation" => 1, "event_id" => ended["event_id"], "event_digest" => ended["event_digest"] }
+    successor["lifecycle_events"] = [OrbitV2FixtureFactory.event("oevent_inc6a_successorstarted", "LeadSessionStarted", nil,
+      "role" => "lead", "context_generation" => 2, "started_at" => "2026-07-30T01:05:00Z", "status" => "active")]
+    transitioned_agent = OrbitV2FixtureFactory.deep_copy(agent)
+    transitioned_agent["lifecycle_events"] = agent["lifecycle_events"] + [OrbitV2FixtureFactory.event(
+      "oevent_inc6a_agentadv", "AgentContextAdvanced", agent.dig("lifecycle_events", -1, "event_digest"),
+      "context_generation" => 2, "recorded_at" => "2026-07-30T01:02:00Z", "reason" => "Successor session context.")]
+    checkpoint["active_lead_session_ref"] = { "lead_session_id" => successor["lead_session_id"], "session_generation" => 2 }
+    checkpoint["lead_runtime_subject_ref"] = successor["lead_runtime_subject_ref"]
+    checkpoint["lead_runtime_subject_assertion_digest"] = successor["lead_runtime_subject_assertion_digest"]
+    checkpoint["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(checkpoint)
+    [checkpoint, assertion, prior_session, successor, transitioned_agent]
+  end
+
+  def test_control_store_checkpoint
+    Dir.mktmpdir do |dir|
+      bundle = OrbitV2FixtureFactory.valid_bundle
+      bundle["logical_leads"].first["logical_lead_id"] = "olead_inc6amain"
+      bundle["logical_leads"].first["content_digest"] =
+        Orbit::V2::CanonicalJSON.content_digest(bundle["logical_leads"].first)
+      store, policy, _task = control_store_seeded_root(dir, bundle)
+      vf = control_verifiers
+      task_records = task_store_genesis_records(bundle)
+      bundle["task_revisions"] = [OrbitV2FixtureFactory.deep_copy(task_records[0])]
+      bundle["work_units"] = OrbitV2FixtureFactory.deep_copy(task_records[2])
+      bundle["logical_leads"] = [OrbitV2FixtureFactory.deep_copy(task_records[6])]
+      task_store = Orbit::V2::TaskStore.new(active_root: File.join(dir, ".orbit"))
+      assert(task_store.genesis(task: task_records[0], gate_requirements: task_records[1],
+        work_units: task_records[2], change_theses: task_records[3],
+        authority_assertions: task_records[4], authorization_records: task_records[5],
+        logical_lead: task_records[6], authority_verifier: vf[0]) == :appended, "task definition")
+      agent = OrbitV2FixtureFactory.agent("oagent_inc6alead", "lead")
+      records = control_store_genesis_records(bundle, task_records[0], agent, "olcontrol_inc6amain",
+        control_store_writer_assertion("olcontrol_inc6amain"), lead: task_records[6])
+      assert(control_store_genesis(store, records, vf) == :appended, "genesis control")
+      selected_unit = bundle["work_units"].fetch(1)
+      selection = {
+        "state" => "blocked", "action" => "continue", "reason" => "dependency readiness not satisfied"
+      }
+      checkpoint, assertion = control_store_checkpoint_records(
+        bundle, policy, records, "olcontrol_inc6amain", "olcheckpoint_inc6a_selection", selection,
+        lead: task_records[6], unit: selected_unit)
+      checkpoint["reconcile_trigger"] = {
+        "event" => "dispatch_before", "reason" => "Selecting the first task before dispatch."
+      }
+      checkpoint["next_trigger"] = {
+        "event" => "successor_before", "reason" => "Awaiting the dispatch successor boundary."
+      }
+      checkpoint["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(checkpoint)
+      commit = lambda do |cp, as, extra = {}|
+        store.checkpoint(checkpoint: cp, assertion: as, authority_verifier: vf[0],
+          runtime_identity_verifier: vf[1], lifecycle_verifier: vf[2], **extra)
+      end
+      assert(commit.call(checkpoint, assertion) == :appended, "successor selection checkpoint appends")
+      resolved = control_store_resolve(store, "olcontrol_inc6amain", vf)
+      assert(resolved["checkpoints"].size == 1 &&
+        resolved["checkpoints"].first["lead_checkpoint_id"] == "olcheckpoint_inc6a_selection",
+        "resolve returns the accepted successor checkpoints")
+      assert(commit.call(checkpoint, assertion) == :idempotent, "checkpoint replay idempotent")
+      stale, stale_assertion = control_store_checkpoint_records(
+        bundle, policy, records, "olcontrol_inc6amain", "olcheckpoint_inc6a_stale", selection,
+        lead: task_records[6], unit: selected_unit)
+      expect_contract_error("control_store_checkpoint_invalid") { commit.call(stale, stale_assertion) }
+      second, second_assertion = control_store_checkpoint_records(
+        bundle, policy, records, "olcontrol_inc6amain", "olcheckpoint_inc6a_second", selection,
+        lead: task_records[6], unit: selected_unit, predecessor_checkpoint: checkpoint)
+      second["reconcile_trigger"] = {
+        "event" => "successor_before", "reason" => "Observing the successor boundary."
+      }
+      second["next_trigger"] = {
+        "event" => "successor_before", "reason" => "Awaiting a later successor boundary."
+      }
+      second["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(second)
+      assert(commit.call(second, second_assertion) == :appended, "successor extends the accepted tip")
+      borrowed = OrbitV2FixtureFactory.deep_copy(checkpoint)
+      borrowed.dig("lead_decision")["reason"] = "different content"
+      borrowed["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(borrowed)
+      expect_contract_error("control_store_reuse") { commit.call(borrowed, assertion) }
+      no_selection, no_selection_assertion = control_store_checkpoint_records(
+        bundle, policy, records, "olcontrol_inc6amain", "olcheckpoint_inc6a_noselection",
+        { "state" => "blocked", "action" => "dispatch", "reason" => "dispatch without selection" },
+        lead: task_records[6])
+      no_selection["active_task_ref"] = nil
+      no_selection["selected_work_unit_ref"] = nil
+      no_selection["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(no_selection)
+      expect_contract_error("control_store_checkpoint_invalid") { commit.call(no_selection, no_selection_assertion) }
+      transition, transition_assertion, prior_session, successor, transitioned_agent =
+        control_store_session_transition(bundle, policy, records, "olcontrol_inc6amain",
+          "olcheckpoint_inc6a_transition",
+          { "state" => "blocked", "action" => "continue", "reason" => "same-lineage session binding accepted" },
+          lead: task_records[6], unit: selected_unit, predecessor_checkpoint: second)
+      transition["reconcile_trigger"] = {
+        "event" => "session_change", "reason" => "Replacing the active LeadSession."
+      }
+      transition["next_trigger"] = {
+        "event" => "successor_before", "reason" => "Awaiting the next successor boundary."
+      }
+      transition["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(transition)
+      mutated_session = OrbitV2FixtureFactory.deep_copy(prior_session)
+      mutated_session["durable_context_ref"] = "artifact://other-context"
+      expect_contract_error("control_store_checkpoint_invalid") do
+        commit.call(transition, transition_assertion,
+          prior_session: mutated_session, session: successor, agent: transitioned_agent)
+      end
+      mutated_agent = OrbitV2FixtureFactory.deep_copy(transitioned_agent)
+      mutated_agent.dig("capability_profile")["profile_id"] = "capability-profile:replacement"
+      expect_contract_error("control_store_checkpoint_invalid") do
+        commit.call(transition, transition_assertion,
+          prior_session: prior_session, session: successor, agent: mutated_agent)
+      end
+      assert(commit.call(transition, transition_assertion,
+        prior_session: prior_session, session: successor, agent: transitioned_agent) == :appended,
+        "session successor/termination form appends")
+      transitioned = control_store_resolve(store, "olcontrol_inc6amain", vf)
+      assert(transitioned["checkpoints"].size == 3 &&
+        transitioned.dig("checkpoint", "lead_checkpoint_id") == "olcheckpoint_inc6a_transition" &&
+        transitioned.dig("session", "lead_session_id") == "oleadsession_inc6asuccessor",
+        "resolve returns the transition as the current checkpoint/session tip")
+      assert(commit.call(transition, transition_assertion,
+        prior_session: prior_session, session: successor, agent: transitioned_agent) == :idempotent,
+        "session transition replay is idempotent after full verification")
+      assert(store.records.size == 4, "rejected checkpoints and replays leave the store unchanged")
+    end
+  end
+
   def test_control_store_lineage_fail_closed
     Dir.mktmpdir do |dir|
       bundle = OrbitV2FixtureFactory.valid_bundle
@@ -3945,7 +4125,12 @@ module OrbitV2ContractTest
         authorizations << built["record"]
       end
     end
-    [task, gates, units, theses, assertions, authorizations]
+    lead = OrbitV2FixtureFactory.deep_copy(bundle["logical_leads"].first)
+    lead["task_id"] = task["task_id"]
+    lead["authority_scope_ref"] = policy["policy_revision_id"]
+    lead["logical_lead_id"] = "olead_inc5#{task['task_id'].delete_prefix('otask_')}" if task_id
+    lead["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(lead)
+    [task, gates, units, theses, assertions, authorizations, lead]
   end
 
   def task_store_seeded_root(dir, bundle)
@@ -3964,7 +4149,7 @@ module OrbitV2ContractTest
   def task_store_genesis(store, records, verifier, overrides = {})
     store.genesis(task: records[0], gate_requirements: records[1], work_units: records[2],
       change_theses: records[3], authority_assertions: records[4], authorization_records: records[5],
-      authority_verifier: overrides.fetch(:authority, verifier))
+      logical_lead: records[6], authority_verifier: overrides.fetch(:authority, verifier))
   end
 
   def task_store_resolve(store, task_id, verifier)
@@ -3982,26 +4167,27 @@ module OrbitV2ContractTest
       task_id = records[0]["task_id"]
       assert(task_store_genesis(store, records, verifier) == :appended, "atomic task genesis")
       assert(store.records.size == 1 &&
-        store.records.first.keys.sort == %w[authority_assertions authorization_records change_theses gate_requirements task work_units],
+        store.records.first.keys.sort == %w[authority_assertions authorization_records change_theses gate_requirements logical_lead task work_units],
         "one closed payload")
       resolved = task_store_resolve(Orbit::V2::TaskStore.new(active_root: File.join(dir, ".orbit")), task_id, verifier)
       assert(resolved["task"]["task_id"] == task_id && resolved["gate_requirements"].size == 1 &&
         resolved["work_units"].size == 3 && resolved["change_theses"].size == 3 &&
-        resolved["authorization_records"].size == 3, "reopen and resolve")
+        resolved["authorization_records"].size == 3 &&
+        resolved["logical_lead"]["task_id"] == task_id, "reopen and resolve")
       assert(task_store_genesis(store, records, verifier) == :idempotent, "same-content replay")
       altered = OrbitV2FixtureFactory.deep_copy(records[0])
       altered.dig("quality_outcome")["user_problem"] = "different content"
       expect_contract_error("task_store_reuse") do
         store.genesis(task: altered, gate_requirements: records[1], work_units: records[2],
           change_theses: records[3], authority_assertions: records[4],
-          authorization_records: records[5], authority_verifier: verifier)
+          authorization_records: records[5], logical_lead: records[6], authority_verifier: verifier)
       end
       expect_contract_error("task_store_argument_invalid") do
         store.genesis(task: records[0], gate_requirements: records[1], work_units: records[2],
           change_theses: records[3], authority_assertions: records[4],
-          authorization_records: records[5], authority_verifier: nil)
+          authorization_records: records[5], logical_lead: records[6], authority_verifier: nil)
       end
-      expect_contract_error("task_store_argument_invalid") { store.genesis(task: { "task_id" => 42 }, gate_requirements: records[1], work_units: records[2], change_theses: records[3], authority_assertions: records[4], authorization_records: records[5], authority_verifier: verifier) }
+      expect_contract_error("task_store_argument_invalid") { store.genesis(task: { "task_id" => 42 }, gate_requirements: records[1], work_units: records[2], change_theses: records[3], authority_assertions: records[4], authorization_records: records[5], logical_lead: records[6], authority_verifier: verifier) }
       expect_contract_error("task_store_genesis_invalid") { task_store_genesis(store, records, Orbit::V2::AuthorityVerifier.new) }
       assert(store.records.size == 1, "invalid authority left the store unchanged")
     end
@@ -4017,7 +4203,7 @@ module OrbitV2ContractTest
       path = File.join(dir, ".orbit", Orbit::V2::TaskStore::TASK_DEFINITIONS_FILE)
       payload = { "authority_assertions" => records[4], "authorization_records" => records[5],
         "change_theses" => records[3], "gate_requirements" => records[1],
-        "task" => records[0], "work_units" => records[2] }
+        "logical_lead" => records[6], "task" => records[0], "work_units" => records[2] }
       write_file = lambda do |tx_payload|
         record = { "schema_version" => "orbit-transaction-log-v1", "transaction_id" => task_id,
           "previous_tip_digest" => nil,
@@ -4050,6 +4236,21 @@ module OrbitV2ContractTest
       misplaced["work_units"][0]["task_id"] = "otask_someoneelses"
       misplaced["work_units"][0]["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(misplaced["work_units"][0])
       write_file.call(misplaced)
+      expect_contract_error("task_store_lineage_invalid") { resolve.call }
+      wrong_lead = OrbitV2FixtureFactory.deep_copy(payload)
+      wrong_lead["logical_lead"]["task_id"] = "otask_someoneelses"
+      wrong_lead["logical_lead"]["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(wrong_lead["logical_lead"])
+      write_file.call(wrong_lead)
+      expect_contract_error("task_store_lineage_invalid") { resolve.call }
+      wrong_scope = OrbitV2FixtureFactory.deep_copy(payload)
+      wrong_scope["logical_lead"]["authority_scope_ref"] = "opolicy_someoneelses"
+      wrong_scope["logical_lead"]["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(wrong_scope["logical_lead"])
+      write_file.call(wrong_scope)
+      expect_contract_error("task_store_lineage_invalid") { resolve.call }
+      bad_context = OrbitV2FixtureFactory.deep_copy(payload)
+      bad_context["logical_lead"]["durable_context_ref"] = "not-an-artifact-uri"
+      bad_context["logical_lead"]["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(bad_context["logical_lead"])
+      write_file.call(bad_context)
       expect_contract_error("task_store_lineage_invalid") { resolve.call }
       write_file.call(payload)
       assert(resolve.call["task"]["task_id"] == task_id, "valid log restored")
@@ -4114,7 +4315,7 @@ module OrbitV2ContractTest
       second.dig("quality_outcome")["user_problem"] = "different content"
       second["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(second)
       out_r, out_w = IO.pipe
-      pids = [records, [second, records[1], records[2], records[3], records[4], records[5]]].map do |candidate|
+      pids = [records, [second, records[1], records[2], records[3], records[4], records[5], records[6]]].map do |candidate|
         fork do
           out_r.close
           begin

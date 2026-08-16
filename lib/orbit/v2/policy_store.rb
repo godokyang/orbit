@@ -331,10 +331,11 @@ module Orbit
           "genesis_policy" => genesis,
           "genesis_assertion" => txs.first.fetch("assertion"),
           "active_policy" => txs.last.fetch("policy"),
-          # The complete accepted revision list comes from the SAME
-          # provider-verified snapshot the lineage was resolved from, never
-          # a separate read.
-          "accepted_policies" => txs.map { |tx| tx.fetch("policy") }
+          # The complete accepted revision + issuance lists come from the
+          # SAME provider-verified snapshot the lineage was resolved from,
+          # never a separate read.
+          "accepted_policies" => txs.map { |tx| tx.fetch("policy") },
+          "accepted_assertions" => txs.map { |tx| tx.fetch("assertion") }
         }
       end
 

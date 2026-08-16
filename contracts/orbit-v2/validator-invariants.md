@@ -1229,3 +1229,75 @@ AuthorityAssertions + AuthorizationRecords, all-or-nothing.
   envelopes), ChangeThesis revisions > 1, GateRequirement successor
   lineages, TaskAuthority task-level records, and evidence/finding
   machinery.
+
+## Slice 6 increment 6a addendum: logical-lead closure and controlled successor checkpoints
+
+Lands the LogicalLead inside the TaskStore transaction (Slice 6 increment 5
+baseline) and the controlled successor LeadCheckpoint seam on
+`Orbit::V2::ControlStore`, with the minimum session successor/termination
+form for continuity. The dispatch action stays DEFERRED to increment 6b:
+a legal dispatch must exact-pin one accepted ChangeThesis and one accepted
+content-addressed RuleResolution, and RuleResolution durable ownership is
+not yet a store fact — no placeholder/basis bypass is fabricated. A
+dispatch checkpoint without exact proposals fails closed
+(`checkpoint_proposal_missing` from the assembled Validator), and
+`ControlStore#checkpoint` remains general/fail-closed so 6b extends the
+assembled snapshot with the RuleStore and activates dispatch +
+AttemptCreated without store seams changing shape.
+
+- TaskStore genesis carries EXACTLY ONE LogicalLead whose task_id
+  exact-equals the task, whose authority_scope_ref exact-equals the task's
+  pinned policy revision id (writer: active policy; reader: accepted
+  revision), and whose durable_context_ref is a canonical `artifact://`
+  URI; logical_lead ids are globally create-only. `resolve` returns the
+  full payload including the accepted LogicalLead.
+- `ControlStore#checkpoint` appends an ordinary (`assertion`+`checkpoint`)
+  or session-transition (`agent`+`assertion`+`checkpoint`+`prior_session`+
+  `session`) transaction under the FIXED root lock order policy log -> task
+  log -> control log, so the TaskStore facts resolved inside the checkpoint
+  snapshot and the append are atomic with respect to task commits and
+  policy rotations. Validation and the append share ONE locked snapshot;
+  replay is idempotent ONLY after the whole existing snapshot re-verifies,
+  and the idempotency lookup covers both transaction shapes.
+- A successor checkpoint must extend the exact prior accepted checkpoint
+  of the same control (genesis or earlier successor, ordinary or
+  session form), pin the control's active LeadSession generation, the
+  bound AgentInstance, and the runtime-subject pins, and its task queue
+  must exact-match the registry ownership claim (transfers deferred). It
+  resolves the single owned task through the accepted TaskStore
+  (LogicalLead/Task/WorkUnit facts, never checkpoint-local text); the
+  resolved logical lead, task ref, and work-unit refs must exact-match the
+  checkpoint pins, the resolved task must pin the same policy revision as
+  the checkpoint, and the checkpoint must pin the currently active policy
+  (stale-after-rotation fails closed). Writer authority is exact-bound: a
+  provider-verified control.checkpoint assertion whose provenance pins the
+  unique policy grant and the control scope.
+- SESSION TRANSITION MINIMUM: the prior active session carries exactly one
+  provider-verified LeadSessionEnded appended to its verified chain; the
+  successor session is generation+1 with an exact predecessor pin (ended
+  event id+digest) and the same subject/agent/control/task/durable-context
+  pins; the transitioned agent equals the bound agent plus exactly one
+  AgentContextAdvanced whose generation binds the successor session and
+  whose recorded_at sits between termination and successor start. New
+  event ids are globally create-only; repeated verified prefixes are
+  re-asserted byte-identical (known-prefix reverification, only new suffix
+  ids enter the create-only set).
+- SEMANTIC CLOSURE: the assembled snapshot (marker as protocol_root,
+  accepted policy revisions AND their provider-verified issuance
+  assertions — PolicyStore resolve exposes both from the same snapshot —
+  plus the task payload and the control genesis/successor transactions,
+  one authoritative latest stream representation per session/agent id,
+  synthetic repository_snapshot/code_surface) runs through the PUBLIC
+  `Validator#validate` with the configured authority/lifecycle/runtime
+  verifiers; ANY error fails the checkpoint closed
+  (`control_store_checkpoint_invalid`). Schema-valid semantic
+  counterexamples are never accepted.
+- `ControlStore#resolve` shape-guards genesis discovery (checkpoint
+  payloads are never mistaken for genesis registry payloads), includes
+  BOTH successor shapes in the lineage, and returns the current
+  checkpoint/assertion/session/agent tip plus the accepted `checkpoints`
+  list — never a silently genesis-only state.
+- DEFERRED to 6b: dispatch with ChangeThesis+RuleResolution proposals and
+  AttemptCreated. Cross-control session transfer/recovery remains deferred
+  to a later Slice 6 increment; same-lineage session succession is closed
+  here.

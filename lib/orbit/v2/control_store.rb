@@ -82,7 +82,10 @@ module Orbit
     class ControlStore
       CONTROL_TRANSACTIONS_FILE = "control-transactions.json".freeze
       PAYLOAD_KEYS = %w[agent assertion checkpoint registry session].freeze
+      CHECKPOINT_PAYLOAD_KEYS = %w[assertion checkpoint].freeze
+      SESSION_CHECKPOINT_PAYLOAD_KEYS = %w[agent assertion checkpoint prior_session session].freeze
       GENESIS_ACTION = "control.genesis".freeze
+      CHECKPOINT_ACTION = "control.checkpoint".freeze
 
       def initialize(active_root:)
         @active_root = File.expand_path(active_root)
@@ -110,26 +113,25 @@ module Orbit
         end
         candidate = payload(registry, session, checkpoint, agent, assertion)
         control_id = registry.fetch("lead_control_id")
-        # Root-level shared serialization with a FIXED lock order: the
-        # policy log's exclusive lock is acquired BEFORE the control log's,
-        # so the policy resolution inside the control snapshot and the
-        # control append are atomic with respect to policy rotations — a
-        # rotation can never commit between the resolve and the append,
-        # and an old active policy can never authorize a new control
-        # append. PolicyStore.rotate takes only the policy lock, so no
-        # cycle exists.
+        # Root-level shared serialization with a FIXED lock order: policy
+        # log -> task log -> control log. Genesis re-verifies every
+        # existing successor checkpoint, so it must hold the task snapshot
+        # stable as well as the policy snapshot until its append commits.
         policy_log = File.join(@active_root, PolicyStore::POLICY_TRANSACTIONS_FILE)
+        task_log = File.join(@active_root, TaskStore::TASK_DEFINITIONS_FILE)
         DurableFile.with_exclusive_lock(policy_log) do
-          @log.append_with(
-            transaction_id: control_id,
-            payload: candidate,
-            validate: lambda do |records, _tip|
-              validate_genesis_snapshot!(
-                records, candidate, control_id,
-                authority_verifier, runtime_identity_verifier, lifecycle_verifier
-              )
-            end
-          )
+          DurableFile.with_exclusive_lock(task_log) do
+            @log.append_with(
+              transaction_id: control_id,
+              payload: candidate,
+              validate: lambda do |records, _tip|
+                validate_genesis_snapshot!(
+                  records, candidate, control_id,
+                  authority_verifier, runtime_identity_verifier, lifecycle_verifier
+                )
+              end
+            )
+          end
         end
       rescue ContractError => e
         raise e unless e.code == "transaction_log_reuse"
@@ -138,6 +140,79 @@ module Orbit
           "control_store_reuse",
           "control #{registry.fetch("lead_control_id")} already exists with different canonical content",
           path: "control_store.#{registry.fetch("lead_control_id")}"
+        )
+      end
+
+      # Controlled successor LeadCheckpoint selection/dispatch: appends a
+      # non-genesis checkpoint transaction for an existing control, with
+      # the exact prior accepted checkpoint as predecessor, the control's
+      # genesis active-session pins, the owned task queue, and a
+      # provider-verified control.checkpoint writer assertion. Returns
+      # `:appended` or `:idempotent` (same checkpoint id, byte-identical
+      # canonical content, only after the whole existing snapshot
+      # re-verifies).
+      def checkpoint(checkpoint:, assertion:, authority_verifier:,
+                     runtime_identity_verifier:, lifecycle_verifier:,
+                     prior_session: nil, session: nil, agent: nil)
+        unless checkpoint.is_a?(Hash) && assertion.is_a?(Hash) &&
+               authority_verifier.respond_to?(:verify!) &&
+               runtime_identity_verifier.respond_to?(:verify!) &&
+               lifecycle_verifier.respond_to?(:verify!)
+          raise ContractError.new(
+            "control_store_argument_invalid",
+            "checkpoint, assertion, and all three configured verifiers are required",
+            path: "control_store"
+          )
+        end
+        session_form = [prior_session, session, agent].any? { |record| !record.nil? }
+        if session_form && ![prior_session, session, agent].all? { |record| record.is_a?(Hash) }
+          raise ContractError.new(
+            "control_store_argument_invalid",
+            "session transition requires prior_session, session, and agent records together",
+            path: "control_store"
+          )
+        end
+        checkpoint_id = checkpoint["lead_checkpoint_id"]
+        unless checkpoint_id.is_a?(String) && Identifiers.valid?("lead_checkpoint_id", checkpoint_id)
+          raise ContractError.new(
+            "control_store_argument_invalid",
+            "checkpoint lead_checkpoint_id must be a stable checkpoint identifier",
+            path: "control_store.lead_checkpoint_id"
+          )
+        end
+        candidate = if session_form
+                      { "agent" => agent, "assertion" => assertion, "checkpoint" => checkpoint,
+                        "prior_session" => prior_session, "session" => session }
+                    else
+                      { "assertion" => assertion, "checkpoint" => checkpoint }
+                    end
+        # Fixed root lock order: policy log -> task log -> control log, so
+        # the TaskStore facts resolved inside the checkpoint snapshot and
+        # the control append are atomic with respect to task commits and
+        # policy rotations.
+        policy_log = File.join(@active_root, PolicyStore::POLICY_TRANSACTIONS_FILE)
+        task_log = File.join(@active_root, TaskStore::TASK_DEFINITIONS_FILE)
+        DurableFile.with_exclusive_lock(policy_log) do
+          DurableFile.with_exclusive_lock(task_log) do
+            @log.append_with(
+              transaction_id: checkpoint_id,
+              payload: candidate,
+              validate: lambda do |records, _tip|
+                validate_checkpoint_snapshot!(
+                  records, candidate, checkpoint_id,
+                  authority_verifier, runtime_identity_verifier, lifecycle_verifier
+                )
+              end
+            )
+          end
+        end
+      rescue ContractError => e
+        raise e unless e.code == "transaction_log_reuse"
+
+        raise ContractError.new(
+          "control_store_reuse",
+          "checkpoint #{checkpoint_id} already exists with different canonical content",
+          path: "control_store.#{checkpoint_id}"
         )
       end
 
@@ -173,7 +248,8 @@ module Orbit
         verified = verify_all_transactions!(txs, marker, policy, authority_verifier,
           runtime_identity_verifier, lifecycle_verifier)
         target = verified.find do |tx|
-          tx.fetch("registry").fetch("lead_control_id") == control_id
+          tx.is_a?(Hash) && tx.keys.sort == PAYLOAD_KEYS &&
+            tx.fetch("registry").fetch("lead_control_id") == control_id
         end
         unless target
           raise ContractError.new(
@@ -182,12 +258,28 @@ module Orbit
             path: "control_store.#{control_id}"
           )
         end
+        successor_txs = verified.select do |tx|
+          tx.is_a?(Hash) && [CHECKPOINT_PAYLOAD_KEYS, SESSION_CHECKPOINT_PAYLOAD_KEYS].include?(tx.keys.sort) &&
+            tx.fetch("checkpoint").fetch("lead_control_id") == control_id
+        end
+        current_session = target.fetch("session")
+        current_agent = target.fetch("agent")
+        successor_txs.each do |tx|
+          if tx.keys.sort == SESSION_CHECKPOINT_PAYLOAD_KEYS
+            current_session = tx.fetch("session")
+            current_agent = tx.fetch("agent")
+          end
+        end
+        latest = successor_txs.last || target
         {
           "registry" => target.fetch("registry"),
-          "session" => target.fetch("session"),
-          "checkpoint" => target.fetch("checkpoint"),
-          "agent" => target.fetch("agent"),
-          "assertion" => target.fetch("assertion")
+          "session" => current_session,
+          "checkpoint" => latest.fetch("checkpoint"),
+          "agent" => current_agent,
+          "assertion" => latest.fetch("assertion"),
+          # Accepted successor checkpoints of the control, in accepted
+          # transaction order.
+          "checkpoints" => successor_txs.map { |tx| tx.fetch("checkpoint") }
         }
       end
 
@@ -245,9 +337,11 @@ module Orbit
         end
         {
           "active" => resolved.fetch("active_policy"),
-          # Accepted revisions come from the SAME provider-verified
-          # PolicyStore snapshot as the resolved lineage.
-          "accepted" => resolved.fetch("accepted_policies")
+          # Accepted revisions and their issuance assertions come from the
+          # SAME provider-verified PolicyStore snapshot as the resolved
+          # lineage.
+          "accepted" => resolved.fetch("accepted_policies"),
+          "accepted_assertions" => resolved.fetch("accepted_assertions")
         }
       rescue ContractError => e
         raise e if e.code == "control_store_genesis_invalid"
@@ -277,20 +371,17 @@ module Orbit
         # old active policy read before the lock), so a policy rotation
         # between construction and commit fails closed.
         seen_event_ids = Set.new
-        verified_existing = txs.map do |tx|
-          validate_transaction!(
-            tx,
-            policy: nil,
-            pinned_policies: policy.fetch("accepted"),
-            marker: marker,
-            authority_verifier: authority_verifier,
-            runtime_identity_verifier: runtime_identity_verifier,
-            lifecycle_verifier: lifecycle_verifier,
-            seen_event_ids: seen_event_ids
+        verified_existing = begin
+          verify_all_transactions!(txs, marker, policy, authority_verifier,
+            runtime_identity_verifier, lifecycle_verifier, seen_event_ids: seen_event_ids)
+        rescue ContractError => error
+          raise genesis_invalid(
+            "existing snapshot does not fully re-verify: #{error.code}"
           )
         end
         existing = verified_existing.find do |tx|
-          tx.fetch("registry").fetch("lead_control_id") == control_id
+          tx.is_a?(Hash) && tx.keys.sort == PAYLOAD_KEYS &&
+            tx.fetch("registry").fetch("lead_control_id") == control_id
         end
         if existing
           return :idempotent if canonical_equal?(existing, candidate)
@@ -309,29 +400,87 @@ module Orbit
           authority_verifier: authority_verifier,
           runtime_identity_verifier: runtime_identity_verifier,
           lifecycle_verifier: lifecycle_verifier,
-          seen_event_ids: seen_event_ids
+          seen_event_ids: seen_event_ids,
+          all_txs: txs
         )
-        reject_cross_control_conflicts!(verified_existing, validated)
+        reject_cross_control_conflicts!(
+          verified_existing.select { |tx| tx.is_a?(Hash) && tx.keys.sort == PAYLOAD_KEYS },
+          validated
+        )
+        nil
+      end
+
+      # Runs inside TransactionLog's exclusive lock against the same
+      # verified snapshot the append commits on. Returns nil to proceed,
+      # :idempotent for a committed replay, or raises. The whole existing
+      # snapshot re-verifies BEFORE any idempotency short-circuit.
+      def validate_checkpoint_snapshot!(records, candidate, checkpoint_id,
+                                        authority_verifier, runtime_identity_verifier,
+                                        lifecycle_verifier)
+        txs = payloads(records)
+        marker = ActiveRoot.marker_for(@active_root, code: "control_store_unpinned", label: "control_store")
+        policy = resolve_active_policy(marker, authority_verifier)
+        seen_event_ids = Set.new
+        verified_existing = begin
+          verify_all_transactions!(txs, marker, policy, authority_verifier,
+            runtime_identity_verifier, lifecycle_verifier, seen_event_ids: seen_event_ids)
+        rescue ContractError => error
+          raise checkpoint_invalid(
+            "existing snapshot does not fully re-verify: #{error.code}"
+          )
+        end
+        existing = verified_existing.find do |tx|
+          tx.is_a?(Hash) && [CHECKPOINT_PAYLOAD_KEYS, SESSION_CHECKPOINT_PAYLOAD_KEYS].include?(tx.keys.sort) &&
+            tx.fetch("checkpoint").fetch("lead_checkpoint_id") == checkpoint_id
+        end
+        if existing
+          return :idempotent if canonical_equal?(existing, candidate)
+
+          raise ContractError.new(
+            "control_store_reuse",
+            "checkpoint #{checkpoint_id} already exists with different canonical content",
+            path: "control_store.#{checkpoint_id}"
+          )
+        end
+        validate_transaction!(
+          candidate,
+          policy: policy.fetch("active"),
+          pinned_policies: policy.fetch("accepted"),
+          accepted_assertions: policy.fetch("accepted_assertions"),
+          marker: marker,
+          authority_verifier: authority_verifier,
+          runtime_identity_verifier: runtime_identity_verifier,
+          lifecycle_verifier: lifecycle_verifier,
+          seen_event_ids: seen_event_ids,
+          all_txs: txs
+        )
         nil
       end
 
       def verify_all_transactions!(txs, marker, policy, authority_verifier,
-                                   runtime_identity_verifier, lifecycle_verifier)
+                                   runtime_identity_verifier, lifecycle_verifier,
+                                   seen_event_ids: Set.new)
         verified = []
-        seen_event_ids = Set.new
         txs.each_with_index do |tx, index|
           begin
             validated = validate_transaction!(
               tx,
               policy: nil,
               pinned_policies: policy.fetch("accepted"),
+              accepted_assertions: policy.fetch("accepted_assertions"),
               marker: marker,
               authority_verifier: authority_verifier,
               runtime_identity_verifier: runtime_identity_verifier,
               lifecycle_verifier: lifecycle_verifier,
-              seen_event_ids: seen_event_ids
+              seen_event_ids: seen_event_ids,
+              all_txs: txs.first(index)
             )
-            reject_cross_control_conflicts!(verified, validated)
+            if validated.is_a?(Hash) && validated.keys.sort == PAYLOAD_KEYS
+              reject_cross_control_conflicts!(
+                verified.select { |existing| existing.is_a?(Hash) && existing.keys.sort == PAYLOAD_KEYS },
+                validated
+              )
+            end
           rescue ContractError => e
             raise e if %w[
               control_store_lineage_invalid control_store_subject_conflict
@@ -345,12 +494,37 @@ module Orbit
         verified
       end
 
+      # Dispatches on the closed transaction shape: the control-genesis
+      # payload or the successor-checkpoint payload. Any other shape is
+      # malformed persisted data and fails closed.
+      def validate_transaction!(tx, policy:, pinned_policies:, accepted_assertions: [], marker:,
+                                authority_verifier:, runtime_identity_verifier:,
+                                lifecycle_verifier:, seen_event_ids:, all_txs: [])
+        shape = tx.is_a?(Hash) ? tx.keys.sort : nil
+        case shape
+        when PAYLOAD_KEYS
+          validate_genesis_transaction!(tx, policy: policy, pinned_policies: pinned_policies,
+            marker: marker, authority_verifier: authority_verifier,
+            runtime_identity_verifier: runtime_identity_verifier,
+            lifecycle_verifier: lifecycle_verifier, seen_event_ids: seen_event_ids)
+        when CHECKPOINT_PAYLOAD_KEYS, SESSION_CHECKPOINT_PAYLOAD_KEYS
+          validate_checkpoint_transaction!(tx, policy: policy, pinned_policies: pinned_policies,
+            accepted_assertions: accepted_assertions,
+            marker: marker, authority_verifier: authority_verifier,
+            runtime_identity_verifier: runtime_identity_verifier,
+            lifecycle_verifier: lifecycle_verifier, seen_event_ids: seen_event_ids,
+            all_txs: all_txs)
+        else
+          raise lineage_invalid("transaction carries malformed component types or unknown fields")
+        end
+      end
+
       # Full final validation of one control-genesis transaction:
       # schemas/digests/epoch/project, control identity and cross-record
       # refs, the pinned policy authority, and the runtime-subject binding.
-      def validate_transaction!(tx, policy:, pinned_policies:, marker:,
-                                authority_verifier:, runtime_identity_verifier:,
-                                lifecycle_verifier:, seen_event_ids:)
+      def validate_genesis_transaction!(tx, policy:, pinned_policies:, marker:,
+                                        authority_verifier:, runtime_identity_verifier:,
+                                        lifecycle_verifier:, seen_event_ids:)
         unless tx.is_a?(Hash) && tx.keys.sort == PAYLOAD_KEYS
           raise genesis_invalid("transaction carries fields outside the closed payload shape")
         end
@@ -387,6 +561,8 @@ module Orbit
         unless [session, checkpoint].all? { |record| record["lead_control_id"] == control_id }
           raise genesis_invalid("session and checkpoint must belong to the registry control")
         end
+        register_id!(seen_event_ids, "lead_checkpoint", checkpoint.fetch("lead_checkpoint_id"))
+        register_id!(seen_event_ids, "authority_assertion", assertion.fetch("assertion_id"))
 
         unless checkpoint["is_genesis"] == true && checkpoint["predecessor_lead_checkpoint_ref"].nil?
           raise genesis_invalid("control genesis requires a parentless genesis LeadCheckpoint")
@@ -516,6 +692,427 @@ module Orbit
         tx
       end
 
+      # Full final validation of one successor LeadCheckpoint transaction
+      # (selection/dispatch): exact prior-checkpoint extension, the
+      # control's genesis session/agent/subject pins, owned task queue,
+      # selection/dispatch closure, and a provider-verified
+      # control.checkpoint writer assertion granted by the pinned policy.
+      def validate_checkpoint_transaction!(tx, policy:, pinned_policies:, accepted_assertions:, marker:,
+                                           authority_verifier:, runtime_identity_verifier:,
+                                           lifecycle_verifier:, seen_event_ids:, all_txs:)
+        checkpoint = tx.fetch("checkpoint")
+        assertion = tx.fetch("assertion")
+        control_id = checkpoint["lead_control_id"]
+        project_id = policy ? policy["project_id"] : marker["project_id"]
+
+        validator = Orbit::V2::Validator.new(project_root: @active_root)
+        begin
+          validator.validate_document!("lead_checkpoint", checkpoint)
+          validator.validate_document!("authority_assertion", assertion)
+        rescue ValidationFailure, ContractError
+          raise checkpoint_invalid("records violate their contracts")
+        end
+        unless CanonicalJSON.content_digest(checkpoint) == checkpoint["content_digest"]
+          raise checkpoint_invalid("checkpoint content_digest is not self-consistent")
+        end
+        unless checkpoint["project_id"] == project_id && assertion["project_id"] == project_id
+          raise checkpoint_invalid("records do not all carry the marker project identity")
+        end
+        register_id!(seen_event_ids, "lead_checkpoint", checkpoint.fetch("lead_checkpoint_id"), :checkpoint)
+        register_id!(seen_event_ids, "authority_assertion", assertion.fetch("assertion_id"), :checkpoint)
+        if checkpoint["is_genesis"] == true
+          raise checkpoint_invalid("successor checkpoint transaction must be non-genesis")
+        end
+
+        genesis_tx = all_txs.reverse.find do |tx|
+          tx.is_a?(Hash) && tx.keys.sort == PAYLOAD_KEYS &&
+            tx.fetch("registry").fetch("lead_control_id") == control_id
+        end
+        raise checkpoint_invalid("checkpoint must belong to an accepted control") unless genesis_tx
+
+        registry = genesis_tx.fetch("registry")
+        agent = genesis_tx.fetch("agent")
+        genesis_checkpoint = genesis_tx.fetch("checkpoint")
+        prior = all_txs.select do |tx|
+          tx.is_a?(Hash) && [CHECKPOINT_PAYLOAD_KEYS, SESSION_CHECKPOINT_PAYLOAD_KEYS].include?(tx.keys.sort) &&
+            tx.fetch("checkpoint").fetch("lead_control_id") == control_id
+        end
+        latest = prior.empty? ? genesis_checkpoint : prior.last.fetch("checkpoint")
+        predecessor = checkpoint["predecessor_lead_checkpoint_ref"]
+        unless predecessor == {
+          "lead_checkpoint_id" => latest["lead_checkpoint_id"],
+          "content_digest" => latest["content_digest"]
+        }
+          raise checkpoint_invalid(
+            "checkpoint must extend the exact prior accepted checkpoint of the same control"
+          )
+        end
+        current_session = genesis_tx.fetch("session")
+        prior.each do |tx|
+          if tx.keys.sort == SESSION_CHECKPOINT_PAYLOAD_KEYS
+            current_session = tx.fetch("session")
+            agent = tx.fetch("agent")
+          end
+        end
+        session_form = tx.keys.sort == SESSION_CHECKPOINT_PAYLOAD_KEYS
+        if session_form
+          validate_session_transition!(tx, current_session, agent, project_id,
+            authority_verifier, runtime_identity_verifier, lifecycle_verifier, seen_event_ids)
+          session = tx.fetch("session")
+          agent = tx.fetch("agent")
+        else
+          session = current_session
+        end
+        unless checkpoint["active_lead_session_ref"] == {
+          "lead_session_id" => session["lead_session_id"],
+          "session_generation" => session["session_generation"]
+        }
+          raise checkpoint_invalid("checkpoint must pin the control's active LeadSession generation")
+        end
+        unless checkpoint["lead_agent_instance_ref"] == { "agent_instance_id" => agent["agent_instance_id"] }
+          raise checkpoint_invalid("checkpoint Lead AgentInstance must equal the bound session AgentInstance")
+        end
+        unless checkpoint["lead_runtime_subject_ref"] == session["lead_runtime_subject_ref"] &&
+               checkpoint["lead_runtime_subject_assertion_digest"] ==
+                 session["lead_runtime_subject_assertion_digest"]
+          raise checkpoint_invalid("checkpoint subject pins must equal the bound LeadSession subject pins")
+        end
+        # The checkpoint resolves against the TaskStore's accepted
+        # task-definition facts (LogicalLead/Task/WorkUnit), never against
+        # the checkpoint's own text.
+        task_facts = resolve_task_facts!(checkpoint, registry, authority_verifier)
+        unless checkpoint["logical_lead_refs"] == [task_facts.fetch("logical_lead_ref")]
+          raise checkpoint_invalid(
+            "checkpoint logical lead refs must exact-match the accepted TaskStore LogicalLead"
+          )
+        end
+
+        pinned_ref = checkpoint["project_policy_revision_ref"]
+        if policy
+          unless pinned_ref == {
+            "policy_revision_id" => policy["policy_revision_id"],
+            "content_digest" => policy["content_digest"]
+          }
+            raise checkpoint_invalid(
+              "checkpoint does not pin the currently active policy (stale authority after rotation)"
+            )
+          end
+          pinned_policy = policy
+        else
+          pinned_policy = pinned_policies.find do |candidate|
+            candidate["policy_revision_id"] == pinned_ref["policy_revision_id"] &&
+              candidate["content_digest"] == pinned_ref["content_digest"]
+          end
+          raise checkpoint_invalid("checkpoint pins a policy the store never accepted") unless pinned_policy
+        end
+
+        unless canonical_equal?(checkpoint["task_queue"], registry["owned_task_refs"])
+          raise checkpoint_invalid(
+            "checkpoint task queue must exact-match the control ownership claim (transfers deferred)"
+          )
+        end
+        active_ref = checkpoint["active_task_ref"]
+        if active_ref && active_ref != task_facts.fetch("task_ref")
+          raise checkpoint_invalid("active task ref must exact-match the accepted TaskStore TaskRevision")
+        end
+        if checkpoint.dig("lead_decision", "action") == "dispatch"
+          selected = checkpoint["selected_work_unit_ref"]
+          unless active_ref && selected.is_a?(Hash) &&
+                 task_facts.fetch("work_unit_refs").include?(selected)
+            raise checkpoint_invalid(
+              "dispatch requires the active task and a selected WorkUnit of the accepted TaskStore graph"
+            )
+          end
+          resolved_unit = task_facts.fetch("work_units").find do |unit|
+            unit["work_unit_id"] == selected["work_unit_id"] &&
+              unit["content_digest"] == selected["content_digest"]
+          end
+          unless resolved_unit && resolved_unit["task_revision_id"] == active_ref["task_revision_id"]
+            raise checkpoint_invalid(
+              "selected WorkUnit must resolve under the active TaskRevision"
+            )
+          end
+        end
+        unless checkpoint["current_or_terminal_attempt_ref"].nil?
+          raise checkpoint_invalid("attempt refs are deferred; no attempt pin is allowed")
+        end
+
+        begin
+          authority_verifier.verify!(assertion)
+        rescue ContractError => error
+          raise checkpoint_invalid("control.checkpoint assertion was not provider-verified: #{error.code}")
+        end
+        provenance = checkpoint["writer_authority_provenance"]
+        ref = provenance && provenance["assertion_ref"]
+        grant = unique_policy_grant(pinned_policy, CHECKPOINT_ACTION)
+        valid = provenance.is_a?(Hash) &&
+                provenance["action"] == CHECKPOINT_ACTION &&
+                provenance["policy_revision_ref"] == {
+                  "policy_revision_id" => pinned_policy["policy_revision_id"],
+                  "content_digest" => pinned_policy["content_digest"]
+                } &&
+                assertion["assertion_id"] == ref["assertion_id"] &&
+                assertion["assertion_digest"] == ref["assertion_digest"] &&
+                assertion["authority_scope_ref"] == control_id &&
+                %w[user control_plane].include?(assertion["issuer_kind"]) &&
+                grant.is_a?(Hash) &&
+                Array(assertion["grants"]).include?(grant["required_external_grant"])
+        raise checkpoint_invalid("checkpoint writer authority is not exact-bound") unless valid
+
+        # Semantic closure: the complete relevant LeadControl/Validator
+        # invariants run over the assembled provider-verified policy/task/
+        # control snapshot (dispatch basis, budget/plan digests, decision,
+        # lineage, queue, selection, session continuity), so schema-valid
+        # semantic counterexamples are never accepted.
+        validate_assembled_snapshot!(
+          marker, pinned_policies, accepted_assertions, genesis_tx, prior, tx,
+          task_facts.fetch("payload"), authority_verifier,
+          runtime_identity_verifier, lifecycle_verifier
+        )
+        tx
+      end
+
+      # Assembles the accepted policy/task/control snapshot into a
+      # contract bundle and runs the PUBLIC Validator over it with the
+      # configured verifiers. Any error fails the checkpoint closed.
+      def validate_assembled_snapshot!(marker, pinned_policies, accepted_assertions, genesis_tx, prior,
+                                       candidate, task_payload, authority_verifier,
+                                       runtime_identity_verifier, lifecycle_verifier)
+        sessions = { genesis_tx.fetch("session").fetch("lead_session_id") => genesis_tx.fetch("session") }
+        checkpoints = [genesis_tx.fetch("checkpoint")]
+        assertions = [genesis_tx.fetch("assertion")]
+        agents = { genesis_tx.fetch("agent").fetch("agent_instance_id") => genesis_tx.fetch("agent") }
+        prior.each do |tx|
+          checkpoints << tx.fetch("checkpoint")
+          assertions << tx.fetch("assertion")
+          if tx.keys.sort == SESSION_CHECKPOINT_PAYLOAD_KEYS
+            sessions[tx.fetch("prior_session").fetch("lead_session_id")] = tx.fetch("prior_session")
+            sessions[tx.fetch("session").fetch("lead_session_id")] = tx.fetch("session")
+            agents[tx.fetch("agent").fetch("agent_instance_id")] = tx.fetch("agent")
+          end
+        end
+        checkpoints << candidate.fetch("checkpoint")
+        assertions << candidate.fetch("assertion")
+        if candidate.keys.sort == SESSION_CHECKPOINT_PAYLOAD_KEYS
+          sessions[candidate.fetch("prior_session").fetch("lead_session_id")] = candidate.fetch("prior_session")
+          sessions[candidate.fetch("session").fetch("lead_session_id")] = candidate.fetch("session")
+          agents[candidate.fetch("agent").fetch("agent_instance_id")] = candidate.fetch("agent")
+        end
+        snapshot = { "kind" => "git", "commit_sha" => "a" * 40, "tree_digest" => "sha256:#{'a' * 64}" }
+        bundle = {
+          "schema_version" => "orbit-v2-contract-bundle-v1",
+          "protocol_epoch" => "orbit-v2",
+          "protocol_root" => marker,
+          "authority_assertions" => accepted_assertions + assertions + task_payload.fetch("authority_assertions"),
+          "authorization_records" => task_payload.fetch("authorization_records"),
+          "project_policy_revisions" => pinned_policies,
+          "task_revisions" => [task_payload.fetch("task")],
+          "gate_requirements" => task_payload.fetch("gate_requirements"),
+          "work_units" => task_payload.fetch("work_units"),
+          "change_theses" => task_payload.fetch("change_theses"),
+          "logical_leads" => [task_payload.fetch("logical_lead")],
+          "lead_sessions" => sessions.values,
+          "control_registries" => [genesis_tx.fetch("registry")],
+          "lead_checkpoints" => checkpoints,
+          "agent_instances" => agents.values,
+          "work_unit_attempts" => [],
+          "rule_resolution_artifacts" => [],
+          "evidence_records" => [],
+          "gate_evaluations" => [],
+          "findings" => [],
+          "finding_resolutions" => [],
+          "repository_snapshot" => snapshot,
+          "code_surface" => {
+            "kind" => "derived_code_surface",
+            "derivation_version" => "orbit-code-surface-v1",
+            "repository_tree_digest" => snapshot["tree_digest"],
+            "code_surface_digest" => "sha256:#{'a' * 64}",
+            "paths" => []
+          }
+        }
+        validator = Orbit::V2::Validator.new(
+          project_root: @active_root,
+          authority_verifier: authority_verifier,
+          lifecycle_verifier: lifecycle_verifier,
+          runtime_identity_verifier: runtime_identity_verifier
+        )
+        errors = validator.validate(bundle)
+        return if errors.empty?
+
+        raise checkpoint_invalid(
+          "assembled snapshot fails the LeadControl/Validator invariants: " \
+            "#{errors.map(&:code).uniq.join(', ')}"
+        )
+      end
+
+      # Resolves the control's owned task (exactly one; transfers are
+      # deferred) through the accepted TaskStore and returns the FULL
+      # accepted task-definition payload the checkpoint must close against.
+      # A task whose pinned policy does not match the checkpoint's pinned
+      # policy is never an acceptable dispatch basis.
+      def resolve_task_facts!(checkpoint, registry, authority_verifier)
+        owned = Array(registry["owned_task_refs"])
+        raise checkpoint_invalid("checkpoint requires exactly one owned task (transfers deferred)") unless owned.length == 1
+
+        task_store = TaskStore.new(active_root: @active_root)
+        resolved = begin
+          task_store.resolve(task_id: owned.first.fetch("task_id"), authority_verifier: authority_verifier)
+        rescue ContractError => error
+          raise checkpoint_invalid("owned task has no accepted task definition: #{error.code}")
+        end
+        task = resolved.fetch("task")
+        task_ref = {
+          "task_id" => task.fetch("task_id"),
+          "task_revision_id" => task.fetch("task_revision_id"),
+          "content_digest" => task.fetch("content_digest")
+        }
+        unless owned.first == task_ref
+          raise checkpoint_invalid("control ownership claim must exact-match the accepted TaskRevision")
+        end
+        unless task["project_policy_revision_ref"] == checkpoint["project_policy_revision_ref"]
+          raise checkpoint_invalid(
+            "task facts must exact-match the checkpoint's pinned policy revision"
+          )
+        end
+        lead = resolved.fetch("logical_lead")
+        {
+          "task_ref" => task_ref,
+          "logical_lead_ref" => {
+            "logical_lead_id" => lead.fetch("logical_lead_id"),
+            "content_digest" => lead.fetch("content_digest")
+          },
+          "work_unit_refs" => resolved.fetch("work_units").map do |unit|
+            {
+              "work_unit_id" => unit.fetch("work_unit_id"),
+              "content_digest" => unit.fetch("content_digest")
+            }
+          end,
+          "work_units" => resolved.fetch("work_units"),
+          "payload" => resolved
+        }
+      end
+
+      # The minimum session successor/termination form required for
+      # checkpoint continuity: the prior active session gains exactly one
+      # provider-verified LeadSessionEnded event, and the successor session
+      # (generation + 1) exact-pins it via predecessor_lead_session_ref
+      # with the same canonical subject, agent, control, task, and durable
+      # context. Only the checkpoint transaction that transitions the
+      # session carries this form.
+      def validate_session_transition!(tx, current_session, agent, project_id,
+                                        authority_verifier, runtime_identity_verifier,
+                                        lifecycle_verifier, seen_event_ids)
+        prior_session = tx.fetch("prior_session")
+        successor = tx.fetch("session")
+        validator = Orbit::V2::Validator.new(project_root: @active_root)
+        begin
+          validator.validate_document!("lead_session", prior_session)
+          validator.validate_document!("lead_session", successor)
+        rescue ValidationFailure, ContractError
+          raise checkpoint_invalid("session transition records violate their contracts")
+        end
+        unless prior_session["project_id"] == project_id && successor["project_id"] == project_id
+          raise checkpoint_invalid("session transition records do not carry the marker project identity")
+        end
+        prior_events = Array(current_session["lifecycle_events"])
+        unless prior_session["lead_session_id"] == current_session["lead_session_id"] &&
+               prior_session["session_generation"] == current_session["session_generation"]
+          raise checkpoint_invalid("prior session must be the control's current active session")
+        end
+        prior_session_events = Array(prior_session["lifecycle_events"])
+        expected_prior_session = JSON.parse(CanonicalJSON.dump(current_session))
+        expected_prior_session["lifecycle_events"] = prior_session_events
+        unless canonical_equal?(prior_session_events.first(prior_events.length), prior_events) &&
+               prior_session_events.length == prior_events.length + 1 &&
+               canonical_equal?(prior_session, expected_prior_session)
+          raise checkpoint_invalid("prior session must equal the active session plus exactly one terminal event")
+        end
+        ended = prior_session_events.last
+        unless ended["event_type"] == "LeadSessionEnded" &&
+               ended["previous_event_digest"] == prior_events.last["event_digest"] &&
+               ended["ended_at"] == ended["recorded_at"]
+          raise checkpoint_invalid("session termination requires one exact LeadSessionEnded on the active chain")
+        end
+        verify_event_stream!(prior_session_events, stream: "lead_session",
+          project_id: project_id, lifecycle_verifier: lifecycle_verifier,
+          seen_event_ids: seen_event_ids, known_prefix_length: prior_events.length)
+
+        unless successor["session_generation"] == current_session["session_generation"] + 1 &&
+               successor["predecessor_lead_session_ref"] == {
+                 "lead_session_id" => current_session["lead_session_id"],
+                 "session_generation" => current_session["session_generation"],
+                 "event_id" => ended["event_id"],
+                 "event_digest" => ended["event_digest"]
+               }
+          raise checkpoint_invalid("successor session must exact-pin the prior session generation and terminal event")
+        end
+        %w[agent_instance_id task_id task_revision_id logical_lead_id durable_context_ref
+           lead_runtime_subject_ref lead_runtime_subject_assertion_digest lead_control_id].each do |field|
+          unless successor[field] == current_session[field]
+            raise checkpoint_invalid("successor session must preserve the #{field} of the prior session")
+          end
+        end
+        verify_event_stream!(Array(successor["lifecycle_events"]), stream: "lead_session",
+          project_id: project_id, lifecycle_verifier: lifecycle_verifier, seen_event_ids: seen_event_ids)
+
+        # The successor session's context generation must exist in the
+        # AgentInstance's context lineage: the transition carries the agent
+        # with exactly one AgentContextAdvanced appended after the
+        # termination, provider-verified and globally create-only.
+        transitioned_agent = tx.fetch("agent")
+        validator = Orbit::V2::Validator.new(project_root: @active_root)
+        begin
+          validator.validate_document!("agent_instance", transitioned_agent)
+        rescue ValidationFailure, ContractError
+          raise checkpoint_invalid("transitioned agent violates its contract")
+        end
+        current_agent_events = Array(agent["lifecycle_events"])
+        transitioned_events = Array(transitioned_agent["lifecycle_events"])
+        expected_agent = JSON.parse(CanonicalJSON.dump(agent))
+        expected_agent["lifecycle_events"] = transitioned_events
+        unless canonical_equal?(transitioned_events.first(current_agent_events.length), current_agent_events) &&
+               transitioned_events.length == current_agent_events.length + 1 &&
+               canonical_equal?(transitioned_agent, expected_agent)
+          raise checkpoint_invalid("transitioned agent must equal the bound agent plus exactly one context event")
+        end
+        advanced = transitioned_events.last
+        successor_started = Array(successor["lifecycle_events"]).first
+        unless advanced["event_type"] == "AgentContextAdvanced" &&
+               advanced["context_generation"] == successor["session_generation"] &&
+               advanced["previous_event_digest"] == current_agent_events.last["event_digest"] &&
+               Time.iso8601(advanced["recorded_at"]) > Time.iso8601(ended["recorded_at"]) &&
+               Time.iso8601(advanced["recorded_at"]) <= Time.iso8601(successor_started["recorded_at"])
+          raise checkpoint_invalid("agent context advance must exact-pin the successor session generation")
+        end
+        verify_event_stream!(transitioned_events, stream: "agent",
+          project_id: project_id, lifecycle_verifier: lifecycle_verifier,
+          seen_event_ids: seen_event_ids, known_prefix_length: current_agent_events.length)
+        begin
+          runtime_identity_verifier.verify!(transitioned_agent)
+        rescue ContractError => error
+          raise checkpoint_invalid("transitioned agent was not runtime-verified: #{error.code}")
+        end
+      end
+
+      def checkpoint_invalid(message, details = nil)
+        ContractError.new(
+          "control_store_checkpoint_invalid",
+          "control checkpoint rejected: #{message}",
+          path: "control_store",
+          details: details
+        )
+      end
+
+      def register_id!(seen_ids, kind, id, failure = :genesis)
+        return if seen_ids.add?(id)
+
+        if failure == :checkpoint
+          raise checkpoint_invalid("#{kind} id #{id} is globally create-only and reused")
+        end
+
+        raise genesis_invalid("#{kind} id #{id} is globally create-only and reused")
+      end
+
       def reject_cross_control_conflicts!(others, candidate)
         candidate_key = RuntimeIdentityVerifier.identity_key(
           candidate.fetch("agent").fetch("runtime_identity")
@@ -560,7 +1157,7 @@ module Orbit
       # writer receipt for every event, and contiguously advancing Agent
       # context generations.
       def verify_event_stream!(events, stream:, project_id:, lifecycle_verifier:,
-                                seen_event_ids:)
+                                seen_event_ids:, known_prefix_length: 0)
         contract = {
           "agent" => {
             "initial" => "AgentCreated",
@@ -582,12 +1179,18 @@ module Orbit
           unless event.is_a?(Hash) && Identifiers.valid?("event_id", event["event_id"])
             raise genesis_invalid("lifecycle event stream has an invalid event id")
           end
-          if seen_event_ids.include?(event["event_id"])
-            raise genesis_invalid(
-              "lifecycle event id #{event["event_id"]} is globally create-only and reused"
-            )
+          if index < known_prefix_length
+            unless seen_event_ids.include?(event["event_id"])
+              raise genesis_invalid("lifecycle extension does not repeat a verified prefix")
+            end
+          else
+            if seen_event_ids.include?(event["event_id"])
+              raise genesis_invalid(
+                "lifecycle event id #{event["event_id"]} is globally create-only and reused"
+              )
+            end
+            seen_event_ids << event["event_id"]
           end
-          seen_event_ids << event["event_id"]
           event_type = event["event_type"]
           unless contract.fetch("allowed").include?(event_type)
             raise genesis_invalid("#{event_type.inspect} is not a typed #{stream} lifecycle event")
