@@ -1854,7 +1854,11 @@ module Orbit
 
         task_store = TaskStore.new(active_root: @active_root)
         resolved = begin
-          task_store.resolve(task_id: owned.first.fetch("task_id"), authority_verifier: authority_verifier)
+          task_store.resolve(
+            task_id: owned.first.fetch("task_id"),
+            task_revision_id: owned.first.fetch("task_revision_id"),
+            authority_verifier: authority_verifier
+          )
         rescue ContractError => error
           raise checkpoint_invalid("owned task has no accepted task definition: #{error.code}")
         end

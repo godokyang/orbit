@@ -89,6 +89,7 @@ module OrbitV2ContractTest
     test_task_store_lineage_fail_closed
     test_task_store_cross_transaction
     test_task_store_concurrency
+    test_task_store_successors
     test_v1_inventory
     test_slice_isolation
     puts(
@@ -4536,9 +4537,140 @@ module OrbitV2ContractTest
     store.resolve(task_id: task_id, authority_verifier: verifier)
   end
 
+  def task_store_successor_records(parent, suffix: "main", extra_lineage: nil)
+    task = OrbitV2FixtureFactory.deep_copy(parent[0])
+    task["task_revision_id"] = "trev_inc6d#{suffix}_r2"
+    task["revision_number"] = parent[0]["revision_number"] + 1
+    task["parent_task_revision_id"] = parent[0]["task_revision_id"]
+    task["protected_change_authorization_ref"] = nil
+    task["authority_grant_refs"] = []
+    gate = OrbitV2FixtureFactory.deep_copy(parent[1].first)
+    gate["gate_requirement_id"] = "ogreq_inc6d#{suffix}_r2"
+    gate["task_revision_id"] = task["task_revision_id"]
+    gate["parent_gate_requirement_ref"] = {
+      "gate_requirement_id" => parent[1].first["gate_requirement_id"],
+      "content_digest" => parent[1].first["content_digest"]
+    }
+    gate["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(gate)
+    gates = [gate]
+    if extra_lineage
+      extra = OrbitV2FixtureFactory.deep_copy(gate)
+      extra["gate_requirement_id"] = "ogreq_inc6d#{suffix}_extra"
+      extra["gate_lineage_id"] = extra_lineage
+      extra["parent_gate_requirement_ref"] = nil
+      extra["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(extra)
+      gates << extra
+    end
+    task["gate_requirement_refs"] = gates.map { |candidate| candidate["gate_requirement_id"] }
+    units = OrbitV2FixtureFactory.deep_copy(parent[2])
+    unit_ids = {}
+    units.each_with_index do |unit, index|
+      unit_ids[unit["work_unit_id"]] = "owu_inc6d#{suffix}unit#{index + 1}"
+    end
+    units.each do |unit|
+      unit["work_unit_id"] = unit_ids.fetch(unit["work_unit_id"])
+      unit["task_revision_id"] = task["task_revision_id"]
+      unit["parent_work_unit_ref"] = unit_ids[unit["parent_work_unit_ref"]]
+      unit["depends_on_work_unit_refs"] = Array(unit["depends_on_work_unit_refs"]).map do |id|
+        unit_ids.fetch(id)
+      end
+      unit["authority_scope"]["authorization_record_refs"] = []
+    end
+    theses = OrbitV2FixtureFactory.deep_copy(parent[3])
+    theses.each_with_index do |thesis, index|
+      thesis["change_thesis_id"] = "othesis_inc6d#{suffix}unit#{index + 1}"
+      thesis["task_revision_id"] = task["task_revision_id"]
+      thesis["work_unit_id"] = units[index]["work_unit_id"]
+      thesis["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(thesis)
+      units[index]["initial_change_thesis_ref"] = {
+        "change_thesis_id" => thesis["change_thesis_id"],
+        "revision" => 1,
+        "content_digest" => thesis["content_digest"]
+      }
+      units[index]["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(units[index])
+    end
+    task["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(task)
+    assertions = []
+    authorizations = []
+    units.each do |unit|
+      Array(unit.dig("authority_scope", "allowed_actions")).each do |action|
+        built = OrbitV2FixtureFactory.work_authorization(unit, task, action)
+        assertions << built.fetch("assertion")
+        authorizations << built.fetch("record")
+      end
+    end
+    [task, gates, units, theses, assertions, authorizations]
+  end
+
+  def task_store_successor(store, records, verifier)
+    store.successor(task: records[0], gate_requirements: records[1], work_units: records[2],
+      change_theses: records[3], authority_assertions: records[4],
+      authorization_records: records[5], authority_verifier: verifier)
+  end
+
+  def task_store_authorize_successor(parent, successor, policy)
+    task, gates, units, theses = successor[0, 4]
+    task_record_id = "oauthz_inc6dtaskrisk"
+    protected_record_id = "oauthz_inc6dprotected"
+    task["authority_grant_refs"] = [task_record_id]
+    task["protected_change_authorization_ref"] = protected_record_id
+    task["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(task)
+    units.each { |unit| unit["authority_scope"]["authorization_record_refs"] = [] }
+    work = units.flat_map do |unit|
+      Array(unit.dig("authority_scope", "allowed_actions")).map do |action|
+        OrbitV2FixtureFactory.work_authorization(unit, task, action)
+      end
+    end
+    task_scope = Orbit::V2::TaskAuthority.scope_digest(task)
+    task_assertion = OrbitV2FixtureFactory.assertion("oassert_inc6dtaskrisk",
+      ["task.risk_authority.delegate"], "project-owner", authority_scope_ref: task_scope)
+    task_record = OrbitV2FixtureFactory.digested(
+      "schema_version" => "orbit-authorization-record-v1", "protocol_epoch" => "orbit-v2",
+      "project_id" => task["project_id"], "authorization_record_id" => task_record_id,
+      "project_policy_revision_id" => policy["policy_revision_id"],
+      "action" => "task.risk_authority.delegate", "subject_ref" => task_scope,
+      "authorization_source_ref" => task_assertion["assertion_id"],
+      "authorization_assertion_digest" => task_assertion["assertion_digest"])
+    change_digest = Orbit::V2::ProtectedChange.diff_digest(parent_task: parent[0],
+      candidate_task: task, parent_gates: parent[1], candidate_gates: gates)
+    protected_assertion = OrbitV2FixtureFactory.assertion("oassert_inc6dprotected",
+      ["task.protected_contract.change"], "project-owner", authority_scope_ref: change_digest)
+    receipt = protected_assertion.fetch("verification_receipt")
+    envelope = {
+      "schema_version" => "orbit-protected-change-authorization-v1",
+      "project_id" => task["project_id"], "task_id" => task["task_id"],
+      "parent_task_revision_ref" => { "task_revision_id" => parent[0]["task_revision_id"],
+        "content_digest" => parent[0]["content_digest"] },
+      "candidate_task_revision_ref" => { "task_revision_id" => task["task_revision_id"],
+        "content_digest" => task["content_digest"] },
+      "protected_change_digest" => change_digest,
+      "authority_source_revision_ref" => { "provider_id" => protected_assertion["provider_id"],
+        "receipt_id" => receipt["receipt_id"], "assertion_id" => protected_assertion["assertion_id"],
+        "assertion_digest" => protected_assertion["assertion_digest"] },
+      "issuer_authority_ref" => { "assertion_id" => protected_assertion["assertion_id"],
+        "assertion_digest" => protected_assertion["assertion_digest"] },
+      "project_policy_revision_ref" => { "policy_revision_id" => policy["policy_revision_id"],
+        "content_digest" => policy["content_digest"] }, "decision" => "approved",
+      "issued_at" => receipt["issued_at"]
+    }
+    envelope["envelope_digest"] = Orbit::V2::ProtectedChange.envelope_digest(envelope)
+    protected_record = OrbitV2FixtureFactory.digested(
+      "schema_version" => "orbit-authorization-record-v1", "protocol_epoch" => "orbit-v2",
+      "project_id" => task["project_id"], "authorization_record_id" => protected_record_id,
+      "project_policy_revision_id" => policy["policy_revision_id"],
+      "action" => "task.protected_contract.change", "subject_ref" => task["task_revision_id"],
+      "authorization_source_ref" => protected_assertion["assertion_id"],
+      "authorization_assertion_digest" => protected_assertion["assertion_digest"],
+      "protected_change_envelope" => envelope)
+    successor[4] = work.map { |pair| pair["assertion"] } + [task_assertion, protected_assertion]
+    successor[5] = work.map { |pair| pair["record"] } + [task_record, protected_record]
+    successor
+  end
+
   def test_task_store_genesis
-    assert(Orbit::V2::TaskStore.instance_methods(false).sort == %i[genesis records resolve],
-      "TaskStore exposes exactly its three public seams")
+    assert(Orbit::V2::TaskStore.instance_methods(false).sort ==
+      %i[genesis records resolve revise_thesis successor],
+      "TaskStore exposes exactly its five public seams")
     Dir.mktmpdir do |dir|
       bundle = OrbitV2FixtureFactory.valid_bundle
       store, _policy = task_store_seeded_root(dir, bundle)
@@ -4747,6 +4879,103 @@ module OrbitV2ContractTest
         pinned_genesis_ref: { "policy_revision_id" => policy["policy_revision_id"], "content_digest" => policy["content_digest"] },
         authority_verifier: verifier)["active_policy"]["policy_revision_id"] == "opolicy_rotated0002",
         "rotation then completes after the task window")
+    end
+  end
+
+  def test_task_store_successors
+    Dir.mktmpdir do |dir|
+      bundle = OrbitV2FixtureFactory.valid_bundle
+      store, _policy = task_store_seeded_root(dir, bundle)
+      verifier = OrbitV2FixtureFactory.authority_verifier
+      genesis = task_store_genesis_records(bundle)
+      assert(task_store_genesis(store, genesis, verifier) == :appended, "task genesis commits")
+      control = Orbit::V2::ControlStore.new(active_root: File.join(dir, ".orbit"))
+      control_records = control_store_genesis_records(bundle, genesis[0],
+        OrbitV2FixtureFactory.agent("oagent_inc6dhistoricallead", "lead"),
+        "olcontrol_inc6dhistorical", control_store_writer_assertion("olcontrol_inc6dhistorical"),
+        lead: genesis[6])
+      assert(control_store_genesis(control, control_records, control_verifiers) == :appended,
+        "control pins the accepted revision-1 task")
+      successor = task_store_successor_records(genesis, extra_lineage: "ogline_inc6dshared")
+      assert(task_store_successor(store, successor, verifier) == :appended,
+        "unprotected exact successor commits")
+      tip = store.resolve(task_id: genesis[0]["task_id"], authority_verifier: verifier)
+      historical = store.resolve(task_id: genesis[0]["task_id"],
+        task_revision_id: genesis[0]["task_revision_id"], authority_verifier: verifier)
+      assert(tip.dig("task", "task_revision_id") == successor[0]["task_revision_id"] &&
+        tip["task_revisions"].size == 2 &&
+        historical.dig("task", "task_revision_id") == genesis[0]["task_revision_id"] &&
+        historical.dig("logical_lead", "task_id") == genesis[0]["task_id"],
+        "default resolve selects the unique tip while exact historical reads stay stable")
+      assert(control_store_resolve(control, "olcontrol_inc6dhistorical", control_verifiers)
+        .dig("registry", "owned_task_refs", 0, "task_revision_id") == genesis[0]["task_revision_id"],
+        "a proposed successor does not reinterpret an existing control's exact task revision")
+      assert(task_store_successor(store, successor, verifier) == :idempotent,
+        "successor replay is idempotent after full verification")
+      borrowed_lineage = task_store_genesis_records(bundle, task_id: "otask_inc6dother",
+        task_revision_id: "trev_inc6dother_r1", gate_id: "ogreq_inc6dother",
+        gate_lineage_id: "ogline_inc6dshared")
+      expect_contract_error("task_store_genesis_invalid") do
+        task_store_genesis(store, borrowed_lineage, verifier)
+      end
+      forked = task_store_successor_records(genesis, suffix: "fork")
+      expect_contract_error("task_store_genesis_invalid") do
+        task_store_successor(store, forked, verifier)
+      end
+      wrong_gate = OrbitV2FixtureFactory.deep_copy(successor)
+      wrong_gate[1][0]["parent_gate_requirement_ref"]["content_digest"] = "sha256:#{'0' * 64}"
+      wrong_gate[1][0]["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(wrong_gate[1][0])
+      expect_contract_error("task_store_reuse") do
+        task_store_successor(store, wrong_gate, verifier)
+      end
+      thesis = OrbitV2FixtureFactory.deep_copy(successor[3].first)
+      thesis["revision"] = 2
+      thesis["observed_problem"] = "The accepted first thesis needs a narrower causal claim."
+      thesis["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(thesis)
+      assert(store.revise_thesis(change_thesis: thesis, authority_verifier: verifier) == :appended &&
+        store.revise_thesis(change_thesis: thesis, authority_verifier: verifier) == :idempotent,
+        "ChangeThesis successor is contiguous and replay-safe")
+      skipped = OrbitV2FixtureFactory.deep_copy(thesis)
+      skipped["revision"] = 4
+      skipped["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(skipped)
+      expect_contract_error("task_store_genesis_invalid") do
+        store.revise_thesis(change_thesis: skipped, authority_verifier: verifier)
+      end
+      resolved = store.resolve(task_id: genesis[0]["task_id"], authority_verifier: verifier)
+      assert(resolved["change_theses"].count do |candidate|
+        candidate["change_thesis_id"] == thesis["change_thesis_id"]
+      end == 2 && store.records.size == 3,
+        "resolved revision preserves the thesis lineage without changing the WorkUnit initial ref")
+      policy = bundle["project_policy_revisions"].first
+      rotated, issuance = policy_store_successor_pair(
+        policy, "opolicy_inc6drotated", "oassert_inc6drotation"
+      )
+      Orbit::V2::PolicyStore.new(active_root: File.join(dir, ".orbit")).rotate(
+        policy: rotated, assertion: issuance, authority_verifier: verifier)
+      stale_thesis = OrbitV2FixtureFactory.deep_copy(thesis)
+      stale_thesis["revision"] = 3
+      stale_thesis["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(stale_thesis)
+      expect_contract_error("task_store_genesis_invalid") do
+        store.revise_thesis(change_thesis: stale_thesis, authority_verifier: verifier)
+      end
+    end
+    Dir.mktmpdir do |dir|
+      bundle = OrbitV2FixtureFactory.valid_bundle
+      store, policy = task_store_seeded_root(dir, bundle)
+      verifier = OrbitV2FixtureFactory.authority_verifier
+      genesis = task_store_genesis_records(bundle)
+      task_store_genesis(store, genesis, verifier)
+      protected = task_store_authorize_successor(
+        genesis, task_store_successor_records(genesis, suffix: "protected"), policy
+      )
+      assert(task_store_successor(store, protected, verifier) == :appended,
+        "exact protected-change envelope and TaskAuthority scope authorize a successor")
+      forged = OrbitV2FixtureFactory.deep_copy(protected)
+      forged[5].last.dig("protected_change_envelope")["protected_change_digest"] = "sha256:#{'0' * 64}"
+      forged[5].last.dig("protected_change_envelope")["envelope_digest"] =
+        Orbit::V2::ProtectedChange.envelope_digest(forged[5].last["protected_change_envelope"])
+      forged[5].last["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(forged[5].last)
+      expect_contract_error("task_store_reuse") { task_store_successor(store, forged, verifier) }
     end
   end
   def test_protocol_root_preflight

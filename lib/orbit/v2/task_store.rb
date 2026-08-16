@@ -11,7 +11,9 @@ require_relative "gate_strength"
 require_relative "identifiers"
 require_relative "path_scope"
 require_relative "policy_store"
+require_relative "protected_change"
 require_relative "schema_catalog"
+require_relative "task_authority"
 require_relative "transaction_log"
 require_relative "validator"
 require_relative "work_authority"
@@ -42,11 +44,11 @@ module Orbit
     # genesis carries empty authority_grant_refs and a nil
     # protected_change_authorization_ref).
     #
-    # DEFERRED explicitly to later increments: successor TaskRevisions
-    # (revision_number > 1, parent refs, protected-change authorization
-    # envelopes), ChangeThesis revisions > 1, GateRequirement successor
-    # lineages (parent refs), TaskAuthority task-level records, and
-    # evidence/finding machinery.
+    # Successor TaskRevisions and ChangeTheses are create-only transactions:
+    # exact linear parents, active-policy writer pins, gate lineage closure,
+    # protected-change envelopes, and exact WorkAuthority/TaskAuthority
+    # partitions. Activation remains a later ControlStore checkpoint fact;
+    # evidence/finding durable stores are still deferred.
     #
     # Public behavior:
     # - `genesis(task:, gate_requirements:, work_units:, change_theses:,
@@ -58,13 +60,17 @@ module Orbit
     #   half/forked persisted data, or IDs borrowed from another task fail
     #   closed; concurrent same-identity genesis accepts exactly one
     #   transaction.
+    # - `successor(...)` appends one complete TaskRevision definition that
+    #   exact-extends the unique tip. `revise_thesis(...)` appends one
+    #   contiguous exact-owner ChangeThesis revision. Both write only under
+    #   the active policy snapshot and return `:appended` or verified
+    #   `:idempotent`.
     # - `records` returns detached TransactionLog-verified payloads in
-    #   chain order (store-level reverification requires `resolve`); `resolve(task_id:,
-    #   authority_verifier:)` returns {task, gate_requirements, work_units,
-    #   change_theses, authority_assertions, authorization_records} after
-    #   replaying every transaction from the ProtocolRoot anchor with
-    #   provider reverification and the cross-transaction create-only
-    #   closure.
+    #   chain order (store-level reverification requires `resolve`);
+    #   `resolve(task_id:, task_revision_id: nil, authority_verifier:)`
+    #   selects the unique tip or an exact historical revision and returns
+    #   its complete definition plus revision/thesis histories after replay
+    #   from the ProtocolRoot anchor with provider reverification.
     #
     # Error codes: task_store_argument_invalid, task_store_reuse,
     # task_store_unpinned, task_store_genesis_invalid,
@@ -76,6 +82,11 @@ module Orbit
         authority_assertions authorization_records change_theses
         gate_requirements logical_lead task work_units
       ].freeze
+      SUCCESSOR_PAYLOAD_KEYS = %w[
+        authority_assertions authorization_records change_theses
+        gate_requirements task work_units
+      ].freeze
+      THESIS_PAYLOAD_KEYS = %w[change_thesis].freeze
       STABLE_ID = /\A(?:acc|src|evreq|question)_[a-z0-9][a-z0-9_-]{2,95}\z/.freeze
       WORK_UNIT_KINDS = %w[implementation evaluation research release].freeze
 
@@ -146,11 +157,88 @@ module Orbit
         )
       end
 
+      # Appends one complete immutable TaskRevision proposal. Activation is
+      # deliberately not a TaskStore side effect: a later controlled
+      # LeadCheckpoint must exact-pin the accepted revision before it can
+      # become executable truth.
+      def successor(task:, gate_requirements:, work_units:, change_theses:,
+                    authority_assertions:, authorization_records:,
+                    authority_verifier:)
+        candidate = {
+          "authority_assertions" => authority_assertions,
+          "authorization_records" => authorization_records,
+          "change_theses" => change_theses,
+          "gate_requirements" => gate_requirements,
+          "task" => task,
+          "work_units" => work_units
+        }
+        unless task.is_a?(Hash) &&
+               task["task_revision_id"].is_a?(String) &&
+               Identifiers.valid?("task_revision_id", task["task_revision_id"]) &&
+               [gate_requirements, work_units, change_theses,
+                authority_assertions, authorization_records].all? { |value| value.is_a?(Array) } &&
+               authority_verifier.respond_to?(:verify!)
+          raise ContractError.new(
+            "task_store_argument_invalid",
+            "successor requires a stable TaskRevision, complete owned records, and a configured verifier",
+            path: "task_store.successor"
+          )
+        end
+        append_task_candidate!(
+          transaction_id: task.fetch("task_revision_id"),
+          candidate: candidate,
+          authority_verifier: authority_verifier,
+          kind: :successor
+        )
+      rescue ContractError => error
+        raise error unless error.code == "transaction_log_reuse"
+
+        raise ContractError.new(
+          "task_store_reuse",
+          "TaskRevision #{task.fetch("task_revision_id")} already exists with different canonical content",
+          path: "task_store.#{task.fetch("task_revision_id")}"
+        )
+      end
+
+      # Appends a same-identity, next-revision ChangeThesis proposal. The
+      # composite identity is (change_thesis_id, revision); the stable thesis
+      # id itself intentionally remains unchanged across the contiguous
+      # lineage.
+      def revise_thesis(change_thesis:, authority_verifier:)
+        unless change_thesis.is_a?(Hash) &&
+               change_thesis["change_thesis_id"].is_a?(String) &&
+               Identifiers.valid?("change_thesis_id", change_thesis["change_thesis_id"]) &&
+               change_thesis["revision"].is_a?(Integer) &&
+               change_thesis["revision"] > 1 &&
+               authority_verifier.respond_to?(:verify!)
+          raise ContractError.new(
+            "task_store_argument_invalid",
+            "thesis revision requires a stable identity, revision above one, and a configured verifier",
+            path: "task_store.revise_thesis"
+          )
+        end
+        transaction_id = "#{change_thesis.fetch("change_thesis_id")}@#{change_thesis.fetch("revision")}"
+        append_task_candidate!(
+          transaction_id: transaction_id,
+          candidate: { "change_thesis" => change_thesis },
+          authority_verifier: authority_verifier,
+          kind: :thesis
+        )
+      rescue ContractError => error
+        raise error unless error.code == "transaction_log_reuse"
+
+        raise ContractError.new(
+          "task_store_reuse",
+          "ChangeThesis revision #{transaction_id} already exists with different canonical content",
+          path: "task_store.#{transaction_id}"
+        )
+      end
+
       def records
         payloads(@log.records)
       end
 
-      def resolve(task_id:, authority_verifier:)
+      def resolve(task_id:, task_revision_id: nil, authority_verifier:)
         unless authority_verifier.respond_to?(:verify!)
           raise ContractError.new(
             "task_store_argument_invalid",
@@ -165,6 +253,14 @@ module Orbit
             path: "task_store.task_id"
           )
         end
+        if task_revision_id &&
+           (!task_revision_id.is_a?(String) || !Identifiers.valid?("task_revision_id", task_revision_id))
+          raise ContractError.new(
+            "task_store_argument_invalid",
+            "task_revision_id must be a stable task revision identifier",
+            path: "task_store.task_revision_id"
+          )
+        end
         txs = payloads(@log.records)
         marker = ActiveRoot.marker_for(@active_root, code: "task_store_unpinned", label: "task_store")
         policy = begin
@@ -173,15 +269,49 @@ module Orbit
           raise lineage_invalid("#{e.code}: #{e.message}")
         end
         verified = verify_all_transactions!(txs, marker, policy, authority_verifier)
-        target = verified.find { |tx| tx.fetch("task").fetch("task_id") == task_id }
-        unless target
+        task_txs = verified.select do |tx|
+          [PAYLOAD_KEYS, SUCCESSOR_PAYLOAD_KEYS].include?(tx.keys.sort) &&
+            tx.fetch("task").fetch("task_id") == task_id
+        end
+        unless task_txs.any?
           raise ContractError.new(
             "task_store_missing",
             "no accepted genesis exists for task #{task_id}",
             path: "task_store.#{task_id}"
           )
         end
-        target
+        selected = if task_revision_id
+                     task_txs.find do |tx|
+                       tx.fetch("task").fetch("task_revision_id") == task_revision_id
+                     end
+                   else
+                     task_txs.max_by { |tx| tx.fetch("task").fetch("revision_number") }
+                   end
+        unless selected
+          raise ContractError.new(
+            "task_store_missing",
+            "no accepted TaskRevision #{task_revision_id} exists for task #{task_id}",
+            path: "task_store.#{task_id}.#{task_revision_id}"
+          )
+        end
+        genesis_tx = task_txs.find { |tx| tx.keys.sort == PAYLOAD_KEYS }
+        selected_revision_id = selected.fetch("task").fetch("task_revision_id")
+        thesis_updates = verified.select do |tx|
+          tx.keys.sort == THESIS_PAYLOAD_KEYS &&
+            tx.fetch("change_thesis").fetch("task_id") == task_id &&
+            tx.fetch("change_thesis").fetch("task_revision_id") == selected_revision_id
+        end.map { |tx| tx.fetch("change_thesis") }
+        result = JSON.parse(CanonicalJSON.dump(selected))
+        result["logical_lead"] = genesis_tx.fetch("logical_lead")
+        result["change_theses"] = result.fetch("change_theses") + thesis_updates
+        result["task_revisions"] = task_txs.map { |tx| tx.fetch("task") }
+        result["all_gate_requirements"] = task_txs.flat_map { |tx| tx.fetch("gate_requirements") }
+        result["all_work_units"] = task_txs.flat_map { |tx| tx.fetch("work_units") }
+        result["all_change_theses"] = task_txs.flat_map { |tx| tx.fetch("change_theses") } +
+          verified.select { |tx| tx.keys.sort == THESIS_PAYLOAD_KEYS }
+                  .map { |tx| tx.fetch("change_thesis") }
+                  .select { |thesis| thesis["task_id"] == task_id }
+        result
       end
 
       private
@@ -259,12 +389,10 @@ module Orbit
         txs = payloads(log_records)
         marker = ActiveRoot.marker_for(@active_root, code: "task_store_unpinned", label: "task_store")
         policy = resolve_active_policy(marker, authority_verifier)
-        seen_ids = Set.new
-        verified_existing = txs.map do |tx|
-          validate_transaction!(tx, policy: nil, pinned_policies: policy.fetch("accepted"),
-            marker: marker, authority_verifier: authority_verifier, seen_ids: seen_ids)
+        verified_existing = verify_existing_for_write!(txs, marker, policy, authority_verifier)
+        existing = verified_existing.find do |tx|
+          tx.keys.sort == PAYLOAD_KEYS && tx.fetch("task").fetch("task_id") == task_id
         end
-        existing = verified_existing.find { |tx| tx.fetch("task").fetch("task_id") == task_id }
         if existing
           return :idempotent if canonical_equal?(existing, candidate)
 
@@ -276,7 +404,56 @@ module Orbit
         end
         validate_transaction!(candidate, policy: policy.fetch("active"),
           pinned_policies: policy.fetch("accepted"), marker: marker,
-          authority_verifier: authority_verifier, seen_ids: seen_ids)
+          authority_verifier: authority_verifier, seen_ids: ids_from(verified_existing),
+          prior_transactions: verified_existing)
+        nil
+      end
+
+      def append_task_candidate!(transaction_id:, candidate:, authority_verifier:, kind:)
+        policy_log = File.join(@active_root, PolicyStore::POLICY_TRANSACTIONS_FILE)
+        DurableFile.with_exclusive_lock(policy_log) do
+          @log.append_with(
+            transaction_id: transaction_id,
+            payload: candidate,
+            validate: lambda do |records, _tip|
+              validate_candidate_snapshot!(
+                records, candidate, transaction_id, authority_verifier, kind
+              )
+            end
+          )
+        end
+      end
+
+      def validate_candidate_snapshot!(log_records, candidate, transaction_id,
+                                       authority_verifier, kind)
+        txs = payloads(log_records)
+        marker = ActiveRoot.marker_for(@active_root, code: "task_store_unpinned", label: "task_store")
+        policy = resolve_active_policy(marker, authority_verifier)
+        verified = verify_existing_for_write!(txs, marker, policy, authority_verifier)
+        existing = verified.find do |tx|
+          case kind
+          when :successor
+            [PAYLOAD_KEYS, SUCCESSOR_PAYLOAD_KEYS].include?(tx.keys.sort) &&
+              tx.fetch("task").fetch("task_revision_id") == transaction_id
+          when :thesis
+            tx.keys.sort == THESIS_PAYLOAD_KEYS &&
+              "#{tx.dig("change_thesis", "change_thesis_id")}@#{tx.dig("change_thesis", "revision")}" ==
+                transaction_id
+          end
+        end
+        if existing
+          return :idempotent if canonical_equal?(existing, candidate)
+
+          raise ContractError.new(
+            "task_store_reuse",
+            "transaction #{transaction_id} already exists with different canonical content",
+            path: "task_store.#{transaction_id}"
+          )
+        end
+        validate_transaction!(candidate, policy: policy.fetch("active"),
+          pinned_policies: policy.fetch("accepted"), marker: marker,
+          authority_verifier: authority_verifier, seen_ids: ids_from(verified),
+          prior_transactions: verified)
         nil
       end
 
@@ -287,7 +464,8 @@ module Orbit
           begin
             validated = validate_transaction!(tx, policy: nil,
               pinned_policies: policy.fetch("accepted"), marker: marker,
-              authority_verifier: authority_verifier, seen_ids: seen_ids)
+              authority_verifier: authority_verifier, seen_ids: seen_ids,
+              prior_transactions: verified)
           rescue ContractError => e
             raise e if %w[
               task_store_lineage_invalid task_store_unpinned
@@ -300,12 +478,41 @@ module Orbit
         verified
       end
 
+      def verify_existing_for_write!(txs, marker, policy, authority_verifier)
+        verify_all_transactions!(txs, marker, policy, authority_verifier)
+      rescue ContractError => error
+        raise error unless error.code == "task_store_lineage_invalid"
+
+        raise genesis_invalid("existing task lineage does not reverify: #{error.message}")
+      end
+
       # Full final validation of one task-genesis transaction: schemas,
       # content digests, epoch, project, exact ownership/ref closure for
       # the task, gates, work graph, theses, and authorizations, with
       # provider verification and policy-enabled grants.
       def validate_transaction!(tx, policy:, pinned_policies:, marker:,
-                                authority_verifier:, seen_ids:)
+                                authority_verifier:, seen_ids:, prior_transactions:)
+        case tx.is_a?(Hash) && tx.keys.sort
+        when PAYLOAD_KEYS
+          validate_genesis_transaction!(tx, policy: policy,
+            pinned_policies: pinned_policies, marker: marker,
+            authority_verifier: authority_verifier, seen_ids: seen_ids)
+        when SUCCESSOR_PAYLOAD_KEYS
+          validate_successor_transaction!(tx, policy: policy,
+            pinned_policies: pinned_policies, marker: marker,
+            authority_verifier: authority_verifier, seen_ids: seen_ids,
+            prior_transactions: prior_transactions)
+        when THESIS_PAYLOAD_KEYS
+          validate_thesis_transaction!(tx, policy: policy,
+            pinned_policies: pinned_policies, marker: marker, seen_ids: seen_ids,
+            prior_transactions: prior_transactions)
+        else
+          raise genesis_invalid("transaction carries malformed component types or unknown fields")
+        end
+      end
+
+      def validate_genesis_transaction!(tx, policy:, pinned_policies:, marker:,
+                                        authority_verifier:, seen_ids:)
         unless tx.is_a?(Hash) && tx.keys.sort == PAYLOAD_KEYS &&
                tx["task"].is_a?(Hash) && tx["logical_lead"].is_a?(Hash) &&
                [tx["gate_requirements"], tx["work_units"], tx["change_theses"],
@@ -361,6 +568,429 @@ module Orbit
         tx
       end
 
+      def validate_successor_transaction!(tx, policy:, pinned_policies:, marker:,
+                                          authority_verifier:, seen_ids:,
+                                          prior_transactions:)
+        unless tx["task"].is_a?(Hash) &&
+               [tx["gate_requirements"], tx["work_units"], tx["change_theses"],
+                tx["authority_assertions"], tx["authorization_records"]].all? { |list| list.is_a?(Array) }
+          raise genesis_invalid("successor transaction carries malformed component types")
+        end
+        task = tx.fetch("task")
+        gates = tx.fetch("gate_requirements")
+        units = tx.fetch("work_units")
+        theses = tx.fetch("change_theses")
+        assertions = tx.fetch("authority_assertions")
+        authorizations = tx.fetch("authorization_records")
+        project_id = policy ? policy.fetch("project_id") : marker.fetch("project_id")
+        validator = Orbit::V2::Validator.new(project_root: @active_root)
+        begin
+          validator.validate_document!("task_revision", task)
+          gates.each { |gate| validator.validate_document!("gate_requirement", gate) }
+          units.each { |unit| validator.validate_document!("work_unit", unit) }
+          theses.each { |thesis| validator.validate_document!("change_thesis", thesis) }
+          assertions.each { |assertion| validator.validate_document!("authority_assertion", assertion) }
+          authorizations.each { |record| validator.validate_document!("authorization_record", record) }
+        rescue ValidationFailure, ContractError
+          raise genesis_invalid("successor records violate their contracts")
+        end
+        [task, *gates, *units, *theses, *authorizations].each do |record|
+          unless CanonicalJSON.content_digest(record) == record["content_digest"]
+            raise genesis_invalid("successor record content_digest is not self-consistent")
+          end
+        end
+        unless [task, *gates, *units, *theses, *assertions, *authorizations].all? do |record|
+                 record["project_id"] == project_id
+               end
+          raise genesis_invalid("successor records do not all carry the marker project identity")
+        end
+
+        lineage = task_transactions(prior_transactions, task.fetch("task_id"))
+        raise genesis_invalid("successor requires one accepted task genesis") if lineage.empty?
+
+        parent = lineage.max_by { |candidate| candidate.fetch("task").fetch("revision_number") }
+                        .fetch("task")
+        unless task["parent_task_revision_id"] == parent["task_revision_id"] &&
+               task["revision_number"] == parent["revision_number"] + 1 &&
+               task["project_id"] == parent["project_id"] &&
+               task["task_id"] == parent["task_id"]
+          raise genesis_invalid("TaskRevision successor must exact-extend the unique accepted tip")
+        end
+        effective_policy = pinned_policy_for(task, policy, pinned_policies)
+        register_id!(seen_ids, "task_revision", task.fetch("task_revision_id"))
+        validate_successor_task!(task, parent, gates, policy, pinned_policies)
+        parent_tx = lineage.find do |candidate|
+          candidate.fetch("task").fetch("task_revision_id") == parent.fetch("task_revision_id")
+        end
+        validate_successor_gates!(task, gates, effective_policy, units,
+          parent_tx.fetch("gate_requirements"), prior_transactions, seen_ids)
+        validate_theses!(task, units, theses, seen_ids)
+        validate_work_units!(task, units, theses, seen_ids)
+        validate_successor_authorizations!(task, parent, gates,
+          parent_tx.fetch("gate_requirements"), units, assertions, authorizations,
+          effective_policy, authority_verifier, seen_ids)
+        tx
+      end
+
+      def validate_thesis_transaction!(tx, policy:, pinned_policies:, marker:,
+                                       seen_ids:, prior_transactions:)
+        thesis = tx["change_thesis"]
+        unless thesis.is_a?(Hash)
+          raise genesis_invalid("thesis transaction carries a malformed component")
+        end
+        begin
+          Orbit::V2::Validator.new(project_root: @active_root)
+            .validate_document!("change_thesis", thesis)
+        rescue ValidationFailure, ContractError
+          raise genesis_invalid("ChangeThesis successor violates its contract")
+        end
+        unless CanonicalJSON.content_digest(thesis) == thesis["content_digest"] &&
+               thesis["project_id"] == marker["project_id"]
+          raise genesis_invalid("ChangeThesis successor digest or project identity is invalid")
+        end
+        task_tx = task_transactions(prior_transactions, thesis.fetch("task_id")).find do |candidate|
+          candidate.fetch("task").fetch("task_revision_id") == thesis.fetch("task_revision_id")
+        end
+        unit = task_tx && task_tx.fetch("work_units").find do |candidate|
+          candidate["work_unit_id"] == thesis["work_unit_id"]
+        end
+        raise genesis_invalid("ChangeThesis successor owner does not resolve") unless unit
+        pinned_policy_for(task_tx.fetch("task"), policy, pinned_policies)
+
+        revisions = thesis_history(prior_transactions, thesis.fetch("change_thesis_id"))
+        raise genesis_invalid("ChangeThesis successor requires an accepted revision-1 genesis") if revisions.empty?
+
+        tip = revisions.max_by { |candidate| candidate.fetch("revision") }
+        ownership = %w[project_id task_id task_revision_id work_unit_id]
+        unless thesis["revision"] == tip["revision"] + 1 &&
+               ownership.all? { |field| thesis[field] == tip[field] } &&
+               ownership.all? { |field| thesis[field] == unit[field] }
+          raise genesis_invalid("ChangeThesis successor must contiguously extend one exact owned lineage")
+        end
+        # The stable ChangeThesis id is intentionally reused; the log's
+        # composite transaction id makes each revision create-only.
+        seen_ids
+        tx
+      end
+
+      def task_transactions(transactions, task_id)
+        transactions.select do |tx|
+          [PAYLOAD_KEYS, SUCCESSOR_PAYLOAD_KEYS].include?(tx.keys.sort) &&
+            tx.dig("task", "task_id") == task_id
+        end
+      end
+
+      def thesis_history(transactions, thesis_id)
+        transactions.flat_map do |tx|
+          case tx.keys.sort
+          when PAYLOAD_KEYS, SUCCESSOR_PAYLOAD_KEYS
+            Array(tx["change_theses"])
+          when THESIS_PAYLOAD_KEYS
+            [tx.fetch("change_thesis")]
+          else
+            []
+          end
+        end.select { |thesis| thesis["change_thesis_id"] == thesis_id }
+      end
+
+      def pinned_policy_for(task, active_policy, accepted_policies)
+        ref = task["project_policy_revision_ref"]
+        if active_policy
+          unless ref == {
+            "policy_revision_id" => active_policy["policy_revision_id"],
+            "content_digest" => active_policy["content_digest"]
+          }
+            raise genesis_invalid("successor does not pin the currently active policy")
+          end
+          active_policy
+        else
+          accepted = accepted_policies.find do |candidate|
+            ref == {
+              "policy_revision_id" => candidate["policy_revision_id"],
+              "content_digest" => candidate["content_digest"]
+            }
+          end
+          raise genesis_invalid("successor pins a policy the store never accepted") unless accepted
+
+          accepted
+        end
+      end
+
+      def validate_successor_task!(task, parent, gates, policy, pinned_policies)
+        pinned_policy_for(task, policy, pinned_policies)
+        unless Array(task["unresolved_finding_refs"]) == Array(parent["unresolved_finding_refs"])
+          raise genesis_invalid("unresolved Finding refs must carry forward until durable resolutions exist")
+        end
+        owned_gate_ids = gates.map { |gate| gate.fetch("gate_requirement_id") }.sort
+        unless Array(task["gate_requirement_refs"]).sort == owned_gate_ids
+          raise genesis_invalid("successor gate_requirement_refs must exact-equal its owned gate set")
+        end
+        {
+          "acceptance" => "acceptance_id",
+          "source_requirements" => "source_requirement_id",
+          "evidence_requirements" => "evidence_requirement_id",
+          "task_questions" => "question_id"
+        }.each do |field, id_key|
+          ids = Array(task[field]).map { |entry| entry[id_key] }
+          unless ids.all? { |id| id.is_a?(String) && STABLE_ID.match?(id) } && ids == ids.uniq
+            raise genesis_invalid("successor #{field} must carry unique stable IDs")
+          end
+        end
+      end
+
+      def validate_successor_gates!(task, gates, policy, units, parent_gates,
+                                    prior_transactions, seen_ids)
+        parent_by_lineage = parent_gates.to_h { |gate| [gate["gate_lineage_id"], gate] }
+        prior_gates = prior_transactions.flat_map do |tx|
+          [PAYLOAD_KEYS, SUCCESSOR_PAYLOAD_KEYS].include?(tx.keys.sort) ? tx.fetch("gate_requirements") : []
+        end
+        candidate_lineages = gates.map { |gate| gate["gate_lineage_id"] }
+        if candidate_lineages.any?(&:nil?) || candidate_lineages.uniq.length != candidate_lineages.length
+          raise genesis_invalid("successor cannot carry duplicate or missing gate lineage identities")
+        end
+        acceptance_ids = Array(task["acceptance"]).map { |entry| entry["acceptance_id"] }
+        question_ids = Array(task["task_questions"]).map { |entry| entry["question_id"] }
+        unit_ids = units.map { |unit| unit.fetch("work_unit_id") }
+        gates.each do |gate|
+          register_id!(seen_ids, "gate_requirement", gate.fetch("gate_requirement_id"))
+          unless gate["task_id"] == task["task_id"] &&
+                 gate["task_revision_id"] == task["task_revision_id"]
+            raise genesis_invalid("successor GateRequirement is not owned by the exact TaskRevision")
+          end
+          immediate = parent_by_lineage[gate["gate_lineage_id"]]
+          if immediate
+            unless gate["parent_gate_requirement_ref"] == {
+              "gate_requirement_id" => immediate["gate_requirement_id"],
+              "content_digest" => immediate["content_digest"]
+            }
+              raise genesis_invalid("inherited gate must exact-pin its immediate parent")
+            end
+          elsif gate["parent_gate_requirement_ref"]
+            raise genesis_invalid("new gate lineage must be parentless")
+          elsif prior_gates.any? { |prior| prior["gate_lineage_id"] == gate["gate_lineage_id"] }
+            raise genesis_invalid("a disappeared gate lineage cannot later reappear")
+          else
+            register_id!(seen_ids, "gate_lineage", gate.fetch("gate_lineage_id"))
+          end
+          unless Array(gate["acceptance_refs"]).all? { |id| acceptance_ids.include?(id) } &&
+                 Array(gate["required_question_refs"]).all? { |id| question_ids.include?(id) }
+            raise genesis_invalid("successor gate refs must resolve within its TaskRevision")
+          end
+          selector = gate["subject_selector"] || {}
+          unless (selector["scope"] == "task_wide" && Array(selector["work_unit_refs"]).empty?) ||
+                 (selector["scope"] == "selected_work_units" &&
+                   Array(selector["work_unit_refs"]).all? { |id| unit_ids.include?(id) })
+            raise genesis_invalid("successor gate selector must close against its owned WorkUnits")
+          end
+        end
+        validate_policy_minimums!(task, gates, policy)
+      end
+
+      def validate_successor_authorizations!(task, parent, gates, parent_gates,
+                                             units, assertions, authorizations,
+                                             policy, authority_verifier, seen_ids)
+        assertions.each do |assertion|
+          register_id!(seen_ids, "authority_assertion", assertion.fetch("assertion_id"))
+          begin
+            authority_verifier.verify!(assertion)
+          rescue ContractError => error
+            raise genesis_invalid("successor authority assertion was not provider-verified: #{error.code}")
+          end
+        end
+        assertion_by_id = assertions.to_h { |assertion| [assertion["assertion_id"], assertion] }
+        authorizations.each do |record|
+          register_id!(seen_ids, "authorization_record", record.fetch("authorization_record_id"))
+        end
+        work_records = authorizations.select { |record| WorkAuthority.action?(record["action"]) }
+        task_records = authorizations.select { |record| TaskAuthority.action?(record["action"]) }
+        protected_records = authorizations.select do |record|
+          record["action"] == "task.protected_contract.change"
+        end
+        unless work_records.length + task_records.length + protected_records.length == authorizations.length &&
+               protected_records.length <= 1
+          raise genesis_invalid("successor authorization transaction contains an unsupported or duplicate record")
+        end
+
+        validate_successor_work_authority!(
+          task, units, work_records, assertion_by_id, policy
+        )
+        validate_successor_task_authority!(task, task_records, assertion_by_id, policy)
+
+        authorization_required = ProtectedChange.authorization_required?(parent_gates, gates) ||
+          Array(parent["authority_grant_refs"]).sort != Array(task["authority_grant_refs"]).sort
+        protected_ref = task["protected_change_authorization_ref"]
+        protected = protected_records.first
+        if authorization_required || protected_ref
+          unless protected && protected["authorization_record_id"] == protected_ref &&
+                 valid_protected_change_authorization?(
+                   protected, assertion_by_id, parent, task, parent_gates, gates, policy
+                 )
+            raise genesis_invalid(
+              "protected contract changes require the exact active-policy authorization envelope"
+            )
+          end
+        elsif protected
+          raise genesis_invalid("orphan protected-change authorization is not allowed")
+        end
+
+        consumed = authorizations.map { |record| record["authorization_source_ref"] }
+        unless consumed.sort == assertions.map { |assertion| assertion["assertion_id"] }.sort &&
+               consumed.uniq.length == consumed.length
+          raise genesis_invalid("successor assertions must exact-equal uniquely consumed authorization sources")
+        end
+      end
+
+      def validate_successor_work_authority!(task, units, records, assertion_by_id, policy)
+        units.each do |unit|
+          refs = Array(unit.dig("authority_scope", "authorization_record_refs"))
+          owned = records.select { |record| refs.include?(record["authorization_record_id"]) }
+          allowed_actions = Array(unit.dig("authority_scope", "allowed_actions"))
+          unless refs.sort == owned.map { |record| record["authorization_record_id"] }.sort &&
+                 refs.uniq.length == refs.length &&
+                 owned.all? { |record| allowed_actions.include?(record["action"]) }
+            raise genesis_invalid("WorkUnit authorization refs must exact-equal newly committed records")
+          end
+          allowed_actions.each do |action|
+            matching = owned.select { |record| record["action"] == action }
+            unless matching.length == 1 && valid_scoped_authorization?(
+              matching.first, assertion_by_id, policy,
+              WorkAuthority.scope_digest(unit, task, action), action
+            )
+              raise genesis_invalid("each successor WorkUnit action requires exact policy-enabled provenance")
+            end
+          end
+        end
+        unit_refs = units.flat_map do |unit|
+          Array(unit.dig("authority_scope", "authorization_record_refs"))
+        end
+        unless unit_refs.sort == records.map { |record| record["authorization_record_id"] }.sort
+          raise genesis_invalid("successor WorkAuthority records cannot be orphaned or borrowed")
+        end
+      end
+
+      def validate_successor_task_authority!(task, records, assertion_by_id, policy)
+        refs = Array(task["authority_grant_refs"])
+        unless refs.sort == records.map { |record| record["authorization_record_id"] }.sort &&
+               refs.uniq.length == refs.length
+          raise genesis_invalid("TaskAuthority refs must exact-equal newly committed records")
+        end
+        expected_scope = TaskAuthority.scope_digest(task)
+        records.each do |record|
+          unless valid_scoped_authorization?(
+            record, assertion_by_id, policy, expected_scope, record["action"]
+          )
+            raise genesis_invalid("TaskAuthority record is not exact-bound to the successor revision")
+          end
+        end
+      end
+
+      def valid_scoped_authorization?(record, assertion_by_id, policy, expected_scope, action)
+        assertion = assertion_by_id[record["authorization_source_ref"]]
+        grant = unique_policy_grant(policy, action)
+        record["project_policy_revision_id"] == policy["policy_revision_id"] &&
+          record["subject_ref"] == expected_scope &&
+          record["action"] == action &&
+          assertion &&
+          assertion["assertion_digest"] == record["authorization_assertion_digest"] &&
+          assertion["authority_scope_ref"] == expected_scope &&
+          %w[user control_plane].include?(assertion["issuer_kind"]) &&
+          Array(assertion["grants"]).include?(action) &&
+          grant &&
+          Array(assertion["grants"]).include?(grant["required_external_grant"])
+      end
+
+      def valid_protected_change_authorization?(record, assertion_by_id, parent,
+                                                candidate, parent_gates,
+                                                candidate_gates, policy)
+        assertion = assertion_by_id[record["authorization_source_ref"]]
+        envelope = record["protected_change_envelope"]
+        receipt = assertion && assertion["verification_receipt"]
+        grant = unique_policy_grant(policy, "task.protected_contract.change")
+        expected_diff = ProtectedChange.diff_digest(
+          parent_task: parent,
+          candidate_task: candidate,
+          parent_gates: parent_gates,
+          candidate_gates: candidate_gates
+        )
+        record["action"] == "task.protected_contract.change" &&
+          record["subject_ref"] == candidate["task_revision_id"] &&
+          record["project_id"] == candidate["project_id"] &&
+          record["project_policy_revision_id"] == policy["policy_revision_id"] &&
+          record["authorization_assertion_digest"] == assertion&.dig("assertion_digest") &&
+          assertion && receipt && grant &&
+          %w[user control_plane].include?(assertion["issuer_kind"]) &&
+          assertion["authority_scope_ref"] == expected_diff &&
+          Array(assertion["grants"]).include?("task.protected_contract.change") &&
+          Array(assertion["grants"]).include?(grant["required_external_grant"]) &&
+          envelope.is_a?(Hash) &&
+          envelope["schema_version"] == "orbit-protected-change-authorization-v1" &&
+          envelope["project_id"] == candidate["project_id"] &&
+          envelope["task_id"] == candidate["task_id"] &&
+          envelope["parent_task_revision_ref"] == {
+            "task_revision_id" => parent["task_revision_id"],
+            "content_digest" => parent["content_digest"]
+          } &&
+          envelope["candidate_task_revision_ref"] == {
+            "task_revision_id" => candidate["task_revision_id"],
+            "content_digest" => candidate["content_digest"]
+          } &&
+          envelope["protected_change_digest"] == expected_diff &&
+          envelope["envelope_digest"] == ProtectedChange.envelope_digest(envelope) &&
+          envelope["issuer_authority_ref"] == {
+            "assertion_id" => assertion["assertion_id"],
+            "assertion_digest" => assertion["assertion_digest"]
+          } &&
+          envelope["authority_source_revision_ref"] == {
+            "provider_id" => assertion["provider_id"],
+            "receipt_id" => receipt["receipt_id"],
+            "assertion_id" => assertion["assertion_id"],
+            "assertion_digest" => assertion["assertion_digest"]
+          } &&
+          envelope["project_policy_revision_ref"] == {
+            "policy_revision_id" => policy["policy_revision_id"],
+            "content_digest" => policy["content_digest"]
+          } &&
+          envelope["decision"] == "approved" &&
+          envelope["issued_at"] == receipt["issued_at"]
+      rescue KeyError, ArgumentError
+        false
+      end
+
+      def ids_from(transactions)
+        ids = Set.new
+        transactions.each do |tx|
+          case tx.keys.sort
+          when PAYLOAD_KEYS
+            ids << tx.dig("task", "task_id")
+            ids << tx.dig("logical_lead", "logical_lead_id")
+            ids << tx.dig("task", "task_revision_id")
+            %w[gate_requirements work_units authority_assertions authorization_records].each do |field|
+              Array(tx[field]).each { |record| ids << primary_id(record) }
+            end
+            Array(tx["gate_requirements"]).each { |record| ids << record["gate_lineage_id"] }
+            Array(tx["change_theses"]).each { |record| ids << record["change_thesis_id"] }
+          when SUCCESSOR_PAYLOAD_KEYS
+            ids << tx.dig("task", "task_revision_id")
+            %w[gate_requirements work_units authority_assertions authorization_records].each do |field|
+              Array(tx[field]).each { |record| ids << primary_id(record) }
+            end
+            Array(tx["gate_requirements"]).each { |record| ids << record["gate_lineage_id"] }
+            Array(tx["change_theses"]).each { |record| ids << record["change_thesis_id"] }
+          end
+        end
+        ids.delete(nil)
+        ids
+      end
+
+      def primary_id(record)
+        return unless record.is_a?(Hash)
+
+        %w[gate_requirement_id work_unit_id assertion_id authorization_record_id].each do |field|
+          return record[field] if record[field]
+        end
+        nil
+      end
+
       # Exactly one LogicalLead per task transaction with exact closure:
       # the task_id must equal the task, the authority_scope_ref must
       # exact-equal the task's pinned policy revision id (the active policy
@@ -387,9 +1017,9 @@ module Orbit
       def validate_task!(task, gates, policy, pinned_policies, seen_ids, project_id)
         task_id = task.fetch("task_id")
         register_id!(seen_ids, "task", task_id)
+        register_id!(seen_ids, "task_revision", task.fetch("task_revision_id"))
         unless task["parent_task_revision_id"].nil? && task["revision_number"] == 1
-          raise genesis_invalid("task genesis requires a parentless revision-1 TaskRevision " \
-            "(successor revisions are deferred)")
+          raise genesis_invalid("task genesis requires a parentless revision-1 TaskRevision")
         end
         unless task["protected_change_authorization_ref"].nil? &&
                Array(task["authority_grant_refs"]).empty?
@@ -446,7 +1076,7 @@ module Orbit
             raise genesis_invalid("gate #{gate["gate_requirement_id"]} is not owned by the task revision")
           end
           unless gate["parent_gate_requirement_ref"].nil?
-            raise genesis_invalid("gate genesis lineages must be parentless (successors deferred)")
+            raise genesis_invalid("gate genesis lineages must be parentless")
           end
           unless Array(gate["acceptance_refs"]).all? { |id| acceptance_ids.include?(id) } &&
                  Array(gate["required_question_refs"]).all? { |id| question_ids.include?(id) }
@@ -489,7 +1119,7 @@ module Orbit
         theses.each do |thesis|
           register_id!(seen_ids, "change_thesis", thesis.fetch("change_thesis_id"))
           unless thesis["revision"] == 1
-            raise genesis_invalid("task genesis requires revision-1 ChangeTheses only (successors deferred)")
+            raise genesis_invalid("task genesis requires revision-1 ChangeTheses only")
           end
           unless thesis["task_id"] == task["task_id"] &&
                  thesis["task_revision_id"] == task["task_revision_id"] &&

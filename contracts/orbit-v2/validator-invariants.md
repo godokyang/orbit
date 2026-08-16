@@ -1224,11 +1224,9 @@ AuthorityAssertions + AuthorizationRecords, all-or-nothing.
   same-identity genesis accepts exactly one transaction. Missing or
   malformed inputs and persisted component types produce documented
   ContractError codes, never KeyError/NoMethodError/TypeError.
-- DEFERRED explicitly to later increments: successor TaskRevisions
-  (revision_number > 1, parent refs, protected-change authorization
-  envelopes), ChangeThesis revisions > 1, GateRequirement successor
-  lineages, TaskAuthority task-level records, and evidence/finding
-  machinery.
+- Successor TaskRevisions, GateRequirement lineages, TaskAuthority records,
+  and ChangeThesis revisions are closed by the increment 6d addendum below.
+  TaskRevision activation and evidence/finding machinery remain deferred.
 
 ## Slice 6 increment 6a addendum: logical-lead closure and controlled successor checkpoints
 
@@ -1386,3 +1384,42 @@ reintroduced through the terminal path).
   terminal reconciliation is never falsely blocked.
 - Deferred: retry/fingerprint/budget recovery, cross-control session
   transfer, Evidence/Gate/Finding writers.
+
+## Slice 6 increment 6d addendum: TaskRevision and ChangeThesis successors
+
+`TaskStore#successor` commits one complete immutable TaskRevision definition
+under the fixed policy -> task locks. The candidate must exact-extend the
+unique accepted tip of the same task by one revision and pin the active
+provider-verified policy resolved inside that same locked append snapshot.
+Its GateRequirements, entirely new same-revision WorkUnit graph, revision-1
+ChangeTheses, AuthorityAssertions and AuthorizationRecords are one closed
+transaction; a partial definition is never accepted.
+
+- Inherited gate lineages recreate the gate and exact-pin the immediate
+  parent id+digest. A new lineage is parentless and globally create-only;
+  a disappeared lineage cannot reappear. Protected weakening/removal, or a
+  TaskAuthority ref-set change, requires the exact provider-bound active-
+  policy protected-change envelope for the parent/candidate/diff.
+- WorkAuthority and TaskAuthority records are newly scoped to the candidate
+  TaskRevision and exact-partition the transaction with the optional
+  protected-change record. Their provider-verified assertion sources are
+  uniquely consumed; borrowed/orphan/self-authorizing records fail closed.
+  Until durable FindingResolution storage lands, unresolved Finding refs
+  carry forward byte-identically.
+- `TaskStore#revise_thesis` appends a `(change_thesis_id, revision)` fact
+  only when it contiguously extends the exact stable project/task/revision/
+  WorkUnit owner and that owner TaskRevision pins the active policy in the
+  same locked snapshot. Policy rotation therefore preserves historical
+  thesis replay but forbids new thesis facts under a stale TaskRevision.
+- `resolve(task_revision_id:)` selects an exact accepted historical
+  TaskRevision; omitting it selects the unique task tip. Existing controls
+  always request their exact registry-pinned revision, so appending a
+  proposal never reinterprets historical control provenance. Thesis
+  successors likewise become executable only through a later exact
+  checkpoint/Attempt pin, never a mutable latest pointer.
+- Idempotent replay is reported only after the whole existing store,
+  policies and provider assertions reverify. Same-id different bytes,
+  stale policy, fork/skip/wrong parent, gate parent forgery, global lineage
+  reuse, authority partition drift, and thesis cross-owner/skip fail closed.
+  TaskRevision activation/transfer and Evidence/Gate/Finding durable stores
+  remain deferred.

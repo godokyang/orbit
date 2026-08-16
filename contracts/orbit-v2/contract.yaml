@@ -213,8 +213,27 @@ task_authority_store:
     concurrent_same_identity: exactly_one_accepted
   reader:
     replay: from_protocol_root_anchor_with_provider_reverification_and_cross_transaction_create_only_closure
+    selection: unique_task_revision_tip_by_default_or_exact_task_revision_id_for_historical_consumers
+    thesis_projection: complete_contiguous_lineage_for_the_selected_revision
     fail_closed: [unknown, malformed, half, forked, borrowed_cross_transaction_ids]
-  deferred: [successor_task_revisions_with_protected_change_authorization, thesis_revisions_above_one, gate_successor_lineages, task_authority_records, evidence_finding_machinery]
+  successor:
+    transaction_shape: exact_TaskRevision_plus_owned_GateRequirements_WorkUnits_revision1_ChangeTheses_and_exact_authority_partition
+    fixed_lock_order: policy_log_then_task_log_with_validation_and_append_on_one_verified_snapshot
+    lineage: exact_unique_tip_parent_same_task_contiguous_revision_no_fork_or_skip
+    gate_lineage: inherited_exact_immediate_parent_new_lineage_parentless_globally_create_only_disappearance_never_reappears
+    active_policy: writer_exact_pins_current_active_policy_reader_accepts_provider_verified_historical_policy
+    protected_change: weakening_removal_or_TaskAuthority_ref_change_requires_exact_provider_bound_active_policy_envelope
+    authority_partition: exact_new_WorkAuthority_plus_TaskAuthority_plus_optional_protected_change_records_and_uniquely_consumed_assertions
+    work_graph: entirely_new_same_revision_ids_one_root_reachable_acyclic_with_revision1_theses
+    unresolved_findings: exact_parent_carry_forward_until_durable_resolution_store_exists
+    results: [appended, idempotent_only_after_whole_existing_snapshot_reverifies]
+  thesis_successor:
+    transaction_identity: change_thesis_id_at_revision
+    lineage: same_stable_id_exact_owner_contiguous_revision
+    writer_policy: owner_TaskRevision_must_pin_current_active_policy_in_the_same_locked_snapshot
+    historical_replay: accepted_old_policy_remains_readable_but_cannot_authorize_a_new_thesis
+    activation: only_a_later_exact_control_checkpoint_and_attempt_pin_never_latest_wins
+  deferred: [task_revision_activation_and_transfer, evidence_finding_machinery]
 
 
 policy_authority_store:
