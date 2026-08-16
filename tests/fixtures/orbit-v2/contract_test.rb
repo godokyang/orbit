@@ -18,6 +18,7 @@ require_relative "../../../lib/orbit/v2/active_root"
 require_relative "../../../lib/orbit/v2/control_store"
 require_relative "../../../lib/orbit/v2/evidence_store"
 require_relative "../../../lib/orbit/v2/gate_fact_store"
+require_relative "../../../lib/orbit/v2/gate_engine"
 require_relative "../../../lib/orbit/v2/immutable_store"
 require_relative "../../../lib/orbit/v2/policy_store"
 require_relative "../../../lib/orbit/v2/protocol_root"
@@ -96,6 +97,7 @@ module OrbitV2ContractTest
     test_evidence_store
     test_control_store_gate_facts
     test_control_store_finding_resolution
+    test_gate_engine
     test_v1_inventory
     test_slice_isolation
     puts(
@@ -9120,6 +9122,194 @@ module OrbitV2ContractTest
     checkpoint["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(checkpoint)
     checkpoint
   end
+
+  def test_gate_engine
+    assert(Orbit::V2::GateEngine.instance_methods(false).sort == [:derive],
+      "GateEngine exposes exactly its single derive seam")
+    Dir.mktmpdir do |dir|
+      bundle = OrbitV2FixtureFactory.valid_bundle
+      review_bundle_unit = bundle["work_units"].fetch(2)
+      review_bundle_unit["depends_on_work_unit_refs"] = [bundle["work_units"].first["work_unit_id"]]
+      review_bundle_unit["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(review_bundle_unit)
+      control, policy, = control_store_seeded_root(dir, bundle)
+      vf = control_verifiers
+      task_records = task_store_genesis_records(bundle)
+      gate = task_records[1].first
+      gate["subject_selector"]["scope"] = "selected_work_units"
+      gate["subject_selector"]["work_unit_refs"] = [task_records[2].first["work_unit_id"]]
+      gate["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(gate)
+      task_store = Orbit::V2::TaskStore.new(active_root: File.join(dir, ".orbit"))
+      assert(task_store_genesis(task_store, task_records, vf[0]) == :appended, "task facts commit")
+      foreign = task_store_genesis_records(bundle, task_id: "otask_inc6iforeign",
+        task_revision_id: "trev_inc6iforeign", gate_id: "ogreq_inc6iforeign",
+        gate_lineage_id: "ogline_inc6iforeign")
+      assert(task_store_genesis(task_store, foreign, vf[0]) == :appended, "foreign task commits")
+      control_records = control_store_genesis_records(bundle, task_records[0],
+        OrbitV2FixtureFactory.agent("oagent_inc6hgatelead", "lead"), "olcontrol_inc6hgate",
+        control_store_writer_assertion("olcontrol_inc6hgate"), lead: task_records[6])
+      assert(control_store_genesis(control, control_records, vf) == :appended, "control commits")
+      impl = control_store_execution_records(bundle, policy, control_records, task_records, dir,
+        attempt_id: "oattempt_inc6iimpl", dispatch_id: "olcheckpoint_inc6iimpldispatch",
+        worker_id: "oagent_inc6iimplworker", rule_path: "rules/inc6i-coder.md")
+      assert(control_store_dispatch(control, impl, vf) == :appended, "implementation round commits")
+      snapshot = bundle["repository_snapshot"]
+      review_unit = task_records[2].fetch(2)
+      review_terminal = control_store_terminal_records(bundle, policy, control_records,
+        task_records, impl, dir, checkpoint_id: "olcheckpoint_inc6iimplterminal",
+        successor_attempt_id: "oattempt_inc6ireview", successor_worker_id: "oagent_inc6ireviewer",
+        rule_path: "rules/inc6i-review.md", role: "reviewer", purpose: "review", unit: review_unit,
+        successor_predecessor: nil, successor_started_at: "2026-07-30T02:40:00Z",
+        terminal_ended_at: "2026-07-30T02:30:00Z")
+      assert(control_store_terminal(control, review_terminal, vf) == :appended,
+        "the review round succeeds the implementation round")
+      review = [5, 1, 2, 3, 4, 6, 7].map { |index| review_terminal[index] }
+      unit0 = task_records[2].first
+      thesis0 = task_records[3].find { |candidate| candidate["work_unit_id"] == unit0["work_unit_id"] }
+      evidence_times = %w[2026-07-30T02:12:00Z 2026-07-30T02:50:00Z 2026-07-30T03:45:00Z]
+      evidence_store = Orbit::V2::EvidenceStore.new(active_root: File.join(dir, ".orbit"),
+        clock: -> { Time.iso8601(evidence_times.shift) })
+      accept_evidence = lambda do |record|
+        proposal = OrbitV2FixtureFactory.deep_copy(record)
+        Orbit::V2::EvidenceStore::STORE_OWNED_KEYS.each { |key| proposal.delete(key) }
+        evidence_store.accept(proposal: proposal, repository_snapshot: snapshot,
+          code_surface_paths: %w[contracts/orbit-v2 lib/orbit/v2], authority_verifier: vf[0],
+          runtime_identity_verifier: vf[1], lifecycle_verifier: vf[2])
+      end
+      impl_record = OrbitV2FixtureFactory.implementation_evidence("oevr_inc6iimpl", impl[3], impl[0],
+        { "change_thesis_id" => thesis0["change_thesis_id"], "revision" => thesis0["revision"], "content_digest" => thesis0["content_digest"] },
+        ["lib/orbit/v2/validator.rb"])
+      accept_evidence.call(impl_record)
+      review_submission = OrbitV2FixtureFactory.evaluator_submission("oevr_inc6ireview", review[3], review[0])
+      accept_evidence.call(review_submission)
+      followup_submission = OrbitV2FixtureFactory.evaluator_submission("oevr_inc6ifollowup", review[3], review[0])
+      accept_evidence.call(followup_submission)
+      accepted_impl = evidence_store.resolve(evidence_record_id: "oevr_inc6iimpl",
+        authority_verifier: vf[0], runtime_identity_verifier: vf[1], lifecycle_verifier: vf[2]).fetch("evidence_record")
+      accepted_review = evidence_store.resolve(evidence_record_id: "oevr_inc6ireview",
+        authority_verifier: vf[0], runtime_identity_verifier: vf[1], lifecycle_verifier: vf[2]).fetch("evidence_record")
+      accepted_followup = evidence_store.resolve(evidence_record_id: "oevr_inc6ifollowup",
+        authority_verifier: vf[0], runtime_identity_verifier: vf[1], lifecycle_verifier: vf[2]).fetch("evidence_record")
+      surface = Orbit::V2::CodeSurface.derive(repository_snapshot: snapshot, paths: %w[contracts/orbit-v2 lib/orbit/v2])
+      subject = Orbit::V2::EvaluationSubject.select(gate_requirement: gate,
+        task_revision: task_records[0], work_units: task_records[2], attempts: [review_terminal[0]],
+        evidence_records: [accepted_impl, accepted_review], repository_snapshot: snapshot, code_surface: surface)
+      risk_finding_id = "ofinding_inc6irisk"
+      risk = OrbitV2FixtureFactory.deep_copy(bundle["gate_evaluations"].first)
+      risk.merge!("gate_evaluation_id" => "ogeval_inc6irisk",
+        "supersedes_gate_evaluation_id" => nil,
+        "evaluator_attempt_id" => review[3]["attempt_id"],
+        "evaluator_submission_record_id" => review_submission["evidence_record_id"],
+        "subject" => subject, "verdict" => "fail", "quality_outcome_verdict" => "fail",
+        "counterexample_cases" => ["A stale gate decision must never decide."],
+        "residual_risk" => "The old evaluation predates the follow-up evidence.",
+        "finding_refs" => [risk_finding_id])
+      risk["gate_requirement_content_digest"] = gate["content_digest"]
+      risk_evidence_ids = subject["evidence_record_refs"].map { |ref| ref["evidence_record_id"] }
+      risk["quality_question_answers"].each { |answer| answer["evidence_record_refs"] = risk_evidence_ids }
+      risk["acceptance_results"].each { |result| result["evidence_record_refs"] = risk_evidence_ids }
+      risk["coverage"].merge!("covered_work_unit_refs" =>
+        subject["work_unit_refs"].map { |ref| ref["work_unit_id"] },
+        "evidence_record_refs" => risk_evidence_ids)
+      risk["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(risk)
+      risk_finding = OrbitV2FixtureFactory.digested(
+        "schema_version" => "orbit-finding-v1", "protocol_epoch" => "orbit-v2",
+        "project_id" => OrbitV2FixtureFactory::PROJECT_ID,
+        "finding_id" => risk_finding_id, "gate_evaluation_id" => risk["gate_evaluation_id"],
+        "severity" => "P0", "basis" => "newly_discovered_risk",
+        "body" => "Example unadjudicated risk.",
+        "source_evidence_record_refs" => subject["evidence_record_refs"].map { |ref| ref["evidence_record_id"] },
+        "supersedes_finding_id" => nil)
+      gate_times = %w[2026-07-30T02:55:00Z 2026-07-30T03:50:00Z 2026-07-30T03:51:00Z]
+      gate_store = Orbit::V2::GateFactStore.new(active_root: File.join(dir, ".orbit"),
+        clock: -> { Time.iso8601(gate_times.shift) })
+      assert(gate_fact_accept(gate_store, risk, [risk_finding], vf) == :appended,
+        "the failing evaluation and Finding commit atomically")
+      finding_ref = { "kind" => "finding", "id" => risk_finding_id, "digest" => risk_finding["content_digest"] }
+      escalate_assertion = OrbitV2FixtureFactory.assertion("oassert_inc6iescalate",
+        %w[control.checkpoint], "control-plane-writer", authority_scope_ref: "olcontrol_inc6hgate")
+      escalate = inc6h_checkpoint("olcheckpoint_inc6iescalate", review_terminal[6], policy,
+        escalate_assertion, control_records, task_records, unit0,
+        decision: { "state" => "needs_user", "action" => "escalate", "reason" => "newly discovered risk requires risk-owner/user adjudication" },
+        reconcile_trigger: { "event" => "finding_change", "reason" => "Risk Finding accepted." },
+        next_trigger: { "event" => "authority_change", "reason" => "Awaiting adjudication." },
+        supporting_refs: [finding_ref])
+      assert(control.checkpoint(checkpoint: escalate, assertion: escalate_assertion,
+        authority_verifier: vf[0], runtime_identity_verifier: vf[1], lifecycle_verifier: vf[2]) == :appended,
+        "the finding_change checkpoint observes the risk")
+      current_subject = Orbit::V2::EvaluationSubject.select(gate_requirement: gate,
+        task_revision: task_records[0], work_units: task_records[2], attempts: [review_terminal[0]],
+        evidence_records: [accepted_impl, accepted_review, accepted_followup],
+        repository_snapshot: snapshot, code_surface: surface)
+      followup = OrbitV2FixtureFactory.deep_copy(risk)
+      followup.merge!("gate_evaluation_id" => "ogeval_inc6iresolved", "verdict" => "pass",
+        "quality_outcome_verdict" => "pass", "finding_refs" => [],
+        "supersedes_gate_evaluation_id" => risk["gate_evaluation_id"],
+        "evaluator_attempt_id" => review[3]["attempt_id"],
+        "evaluator_submission_record_id" => followup_submission["evidence_record_id"],
+        "subject" => current_subject)
+      followup["acceptance_results"].each { |result| result["verdict"] = "pass" }
+      followup["counterexample_cases"] = []
+      followup["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(followup)
+      assert(gate_fact_accept(gate_store, followup, [], vf) == :appended,
+        "a distinct follow-up GateEvaluation commits")
+      resolution = OrbitV2FixtureFactory.digested(
+        "schema_version" => "orbit-finding-resolution-v1",
+        "protocol_epoch" => "orbit-v2", "project_id" => OrbitV2FixtureFactory::PROJECT_ID,
+        "finding_resolution_id" => "ofres_inc6iaddressed", "finding_id" => risk_finding_id,
+        "resolution" => "addressed", "issuer_attempt_id" => review[3]["attempt_id"],
+        "issuer_submission_record_id" => followup_submission["evidence_record_id"],
+        "source_finding_ref" => { "finding_id" => risk_finding_id, "content_digest" => risk_finding["content_digest"] },
+        "source_gate_evaluation_ref" => { "gate_evaluation_id" => risk["gate_evaluation_id"],
+          "content_digest" => risk["content_digest"] },
+        "resolving_gate_evaluation_ref" => { "gate_evaluation_id" => followup["gate_evaluation_id"],
+          "content_digest" => followup["content_digest"] },
+        "proposal_evidence_record_id" => impl_record["evidence_record_id"],
+        "supporting_record_refs" => [impl_record["evidence_record_id"]],
+        "supersedes_finding_resolution_id" => nil)
+      assert(gate_fact_resolution(gate_store, resolution, vf) == :appended,
+        "the addressed FindingResolution commits atomically")
+      engine = Orbit::V2::GateEngine.new(active_root: File.join(dir, ".orbit"))
+      derive = lambda do
+        engine.derive(task_id: task_records[0]["task_id"], task_revision_id: task_records[0]["task_revision_id"],
+          authority_verifier: vf[0], runtime_identity_verifier: vf[1], lifecycle_verifier: vf[2])
+      end
+      outcome = derive.call
+      again = derive.call
+      assert(outcome["content_digest"] == again["content_digest"] &&
+        outcome["source_digest"] == again["source_digest"], "the outcome is deterministic")
+      reopened = Orbit::V2::GateEngine.new(active_root: File.join(dir, ".orbit")).derive(
+        task_id: task_records[0]["task_id"], task_revision_id: task_records[0]["task_revision_id"],
+        authority_verifier: vf[0], runtime_identity_verifier: vf[1], lifecycle_verifier: vf[2])
+      assert(reopened["content_digest"] == outcome["content_digest"],
+        "a fresh engine reopens the same deterministic outcome")
+      result = outcome["gate_results"].find do |candidate|
+        candidate["gate_requirement_ref"]["gate_requirement_id"] == gate["gate_requirement_id"]
+      end
+      assert(result["status"] == "passed" &&
+        result["gate_evaluation_ref"]["gate_evaluation_id"] == followup["gate_evaluation_id"],
+        "the stale failing evaluation never decides; the current follow-up does")
+      assert(outcome["closed"] == true && outcome["unresolved_adjudication_required_finding_refs"].empty?,
+        "the addressed resolution closes the gate")
+      manifest_ids = outcome["source_manifest"].map { |entry| entry["id"] }
+      assert(manifest_ids.include?("ogeval_inc6iresolved") && manifest_ids.include?("ogeval_inc6irisk") &&
+        manifest_ids.include?("ofinding_inc6irisk") && manifest_ids.include?("ofres_inc6iaddressed") &&
+        manifest_ids.include?("oevr_inc6ifollowup"),
+        "the manifest carries the full ancestor/related evaluation/finding/resolution/evidence closure")
+      assert(!manifest_ids.include?("trev_inc6iforeign"),
+        "unrelated task facts never pollute the source manifest")
+      expect_contract_error("gate_engine_invalid") do
+        engine.derive(task_id: "otask_inc6ighost", task_revision_id: task_records[0]["task_revision_id"],
+          authority_verifier: vf[0], runtime_identity_verifier: vf[1], lifecycle_verifier: vf[2])
+      end
+      expect_contract_error("gate_engine_argument_invalid") do
+        engine.derive(task_id: "not a valid task id", task_revision_id: "x",
+          authority_verifier: vf[0], runtime_identity_verifier: vf[1], lifecycle_verifier: vf[2])
+      end
+      File.write(File.join(dir, ".orbit", Orbit::V2::GateFactStore::GATE_FACTS_FILE), "corrupt")
+      expect_contract_error("gate_engine_invalid") { derive.call }
+    end
+  end
+
   def test_v1_inventory
 
     inventory = YAML.safe_load(

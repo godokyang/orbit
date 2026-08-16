@@ -1678,5 +1678,43 @@ lineage that exact-extends the unique current tip.
   currentness only) — never stale gate digest/policy, shape, authority,
   provenance, independence, or resolution errors.
 - Exact readers cover GateEvaluation, Finding and FindingResolution and
-  reverify the whole mixed store before returning. Gate Engine closure output
-  and Finding supersession/related lineages remain deferred.
+  reverify the whole mixed store before returning. Finding
+  supersession/related lineages remain deferred.
+
+## Slice 6 increment 6i addendum: read-only Gate Engine projection
+
+`GateEngine#derive` is the only public Gate Engine seam. It accepts one exact
+accepted `task_id` + `task_revision_id` and configured authority, runtime
+identity, and lifecycle verifiers; it never accepts a caller-assembled bundle.
+The entire marker/policy/task/control/evidence/gate read, provider
+reverification, source assembly, and derivation runs under the fixed
+policy -> task -> control -> evidence -> gate lock order.
+
+- The task slice contains the exact target TaskRevision and its parent chain,
+  with each revision independently resolved and its append-only TaskStore
+  authorization/assertion pairs reverified. A later successor revision and an
+  unrelated Task never enter the projection manifest.
+- The control slice is a verified causal prefix per relevant control: it ends
+  at that control's last exact-target selection/acquire or referenced Attempt
+  transaction, retains all predecessor/session/Attempt representations needed
+  to validate that prefix, and closes an acquire through the exact old release
+  checkpoint. Later control transactions after a TaskRevision switch are not
+  reinterpreted as sources of the historical target.
+- The evidence slice contains every accepted record of the target revision and
+  every evidence dependency of the selected evaluation/Finding/resolution
+  closure, including evidence supersession/related ancestors. The current
+  repository snapshot and CodeSurface are the exact pair stored with the
+  latest accepted target-revision evidence (timestamp, then append order). No
+  synthetic snapshot, empty surface, or caller-owned latest pointer is legal.
+- The gate slice starts from exact target-revision GateEvaluations and carried
+  unresolved Finding refs, then closes evaluation supersession ancestors,
+  Finding ancestry/relations, every resolution lineage, and each resolution's
+  source/resolving evaluations to a fixed point. Missing referenced accepted
+  facts fail closed.
+- The final assembled bundle is passed to the public `Validator` through the
+  existing `AggregateOutcome.derive` boundary. GateEngine does not copy gate
+  verdict logic, waive findings, mutate facts, or persist/cache an outcome.
+  The result is byte-deterministic and carries the complete sorted source
+  ID+digest manifest/source digest. Every store/provider/assembly failure is
+  mapped to the closed GateEngine error surface; no partial projection is
+  returned.
