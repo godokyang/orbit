@@ -12,6 +12,7 @@ require_relative "identifiers"
 require_relative "lifecycle_verifier"
 require_relative "policy_store"
 require_relative "runtime_identity_verifier"
+require_relative "rule_resolution"
 require_relative "schema_catalog"
 require_relative "transaction_log"
 require_relative "validator"
@@ -84,6 +85,10 @@ module Orbit
       PAYLOAD_KEYS = %w[agent assertion checkpoint registry session].freeze
       CHECKPOINT_PAYLOAD_KEYS = %w[assertion checkpoint].freeze
       SESSION_CHECKPOINT_PAYLOAD_KEYS = %w[agent assertion checkpoint prior_session session].freeze
+      EXECUTION_PAYLOAD_KEYS = %w[
+        attempt dispatch_assertion dispatch_checkpoint observation_assertion
+        observation_checkpoint rule_resolution worker_agent
+      ].freeze
       GENESIS_ACTION = "control.genesis".freeze
       CHECKPOINT_ACTION = "control.checkpoint".freeze
 
@@ -216,6 +221,67 @@ module Orbit
         )
       end
 
+      # Commits the complete dispatch boundary as one control-log
+      # transaction: assigned rules, the authorizing dispatch checkpoint,
+      # AttemptCreated, and its immediate observation checkpoint. No
+      # accepted dispatch or attempt half-state can exist between files.
+      def dispatch(rule_resolution:, dispatch_checkpoint:, dispatch_assertion:,
+                   attempt:, worker_agent:, observation_checkpoint:,
+                   observation_assertion:, authority_verifier:,
+                   runtime_identity_verifier:, lifecycle_verifier:)
+        components = [rule_resolution, dispatch_checkpoint, dispatch_assertion,
+          attempt, worker_agent, observation_checkpoint, observation_assertion]
+        unless components.all? { |record| record.is_a?(Hash) } &&
+               authority_verifier.respond_to?(:verify!) &&
+               runtime_identity_verifier.respond_to?(:verify!) &&
+               lifecycle_verifier.respond_to?(:verify!)
+          raise ContractError.new(
+            "control_store_argument_invalid",
+            "dispatch requires all seven records and three configured verifiers",
+            path: "control_store.dispatch"
+          )
+        end
+        attempt_id = attempt["attempt_id"]
+        unless attempt_id.is_a?(String) && Identifiers.valid?("attempt_id", attempt_id)
+          raise ContractError.new(
+            "control_store_argument_invalid",
+            "dispatch attempt_id must be a stable attempt identifier",
+            path: "control_store.dispatch.attempt_id"
+          )
+        end
+        candidate = {
+          "attempt" => attempt,
+          "dispatch_assertion" => dispatch_assertion,
+          "dispatch_checkpoint" => dispatch_checkpoint,
+          "observation_assertion" => observation_assertion,
+          "observation_checkpoint" => observation_checkpoint,
+          "rule_resolution" => rule_resolution,
+          "worker_agent" => worker_agent
+        }
+        policy_log = File.join(@active_root, PolicyStore::POLICY_TRANSACTIONS_FILE)
+        task_log = File.join(@active_root, TaskStore::TASK_DEFINITIONS_FILE)
+        DurableFile.with_exclusive_lock(policy_log) do
+          DurableFile.with_exclusive_lock(task_log) do
+            @log.append_with(
+              transaction_id: attempt_id,
+              payload: candidate,
+              validate: lambda do |records, _tip|
+                validate_dispatch_snapshot!(records, candidate, attempt_id,
+                  authority_verifier, runtime_identity_verifier, lifecycle_verifier)
+              end
+            )
+          end
+        end
+      rescue ContractError => e
+        raise e unless e.code == "transaction_log_reuse"
+
+        raise ContractError.new(
+          "control_store_reuse",
+          "attempt #{attempt_id} already exists with different canonical content",
+          path: "control_store.#{attempt_id}"
+        )
+      end
+
       def records
         payloads(@log.records)
       end
@@ -259,8 +325,9 @@ module Orbit
           )
         end
         successor_txs = verified.select do |tx|
-          tx.is_a?(Hash) && [CHECKPOINT_PAYLOAD_KEYS, SESSION_CHECKPOINT_PAYLOAD_KEYS].include?(tx.keys.sort) &&
-            tx.fetch("checkpoint").fetch("lead_control_id") == control_id
+          checkpoint_entries(tx).any? do |entry|
+            entry.fetch("checkpoint").fetch("lead_control_id") == control_id
+          end
         end
         current_session = target.fetch("session")
         current_agent = target.fetch("agent")
@@ -270,7 +337,11 @@ module Orbit
             current_agent = tx.fetch("agent")
           end
         end
-        latest = successor_txs.last || target
+        entries = successor_txs.flat_map { |tx| checkpoint_entries(tx) }.select do |entry|
+          entry.fetch("checkpoint").fetch("lead_control_id") == control_id
+        end
+        latest = entries.last || { "checkpoint" => target.fetch("checkpoint"), "assertion" => target.fetch("assertion") }
+        executions = successor_txs.select { |tx| tx.keys.sort == EXECUTION_PAYLOAD_KEYS }
         {
           "registry" => target.fetch("registry"),
           "session" => current_session,
@@ -279,7 +350,9 @@ module Orbit
           "assertion" => latest.fetch("assertion"),
           # Accepted successor checkpoints of the control, in accepted
           # transaction order.
-          "checkpoints" => successor_txs.map { |tx| tx.fetch("checkpoint") }
+          "checkpoints" => entries.map { |entry| entry.fetch("checkpoint") },
+          "attempts" => executions.map { |tx| tx.fetch("attempt") },
+          "rule_resolutions" => executions.map { |tx| tx.fetch("rule_resolution") }
         }
       end
 
@@ -306,6 +379,24 @@ module Orbit
 
       def canonical_equal?(left, right)
         CanonicalJSON.dump(left) == CanonicalJSON.dump(right)
+      end
+
+      def checkpoint_entries(tx)
+        return [] unless tx.is_a?(Hash)
+
+        case tx.keys.sort
+        when CHECKPOINT_PAYLOAD_KEYS, SESSION_CHECKPOINT_PAYLOAD_KEYS
+          [{ "checkpoint" => tx.fetch("checkpoint"), "assertion" => tx.fetch("assertion") }]
+        when EXECUTION_PAYLOAD_KEYS
+          [
+            { "checkpoint" => tx.fetch("dispatch_checkpoint"),
+              "assertion" => tx.fetch("dispatch_assertion") },
+            { "checkpoint" => tx.fetch("observation_checkpoint"),
+              "assertion" => tx.fetch("observation_assertion") }
+          ]
+        else
+          []
+        end
       end
 
       def lineage_invalid(message, index = nil)
@@ -457,6 +548,42 @@ module Orbit
         nil
       end
 
+      def validate_dispatch_snapshot!(records, candidate, attempt_id,
+                                      authority_verifier, runtime_identity_verifier,
+                                      lifecycle_verifier)
+        txs = payloads(records)
+        marker = ActiveRoot.marker_for(@active_root, code: "control_store_unpinned", label: "control_store")
+        policy = resolve_active_policy(marker, authority_verifier)
+        seen_ids = Set.new
+        verified_existing = begin
+          verify_all_transactions!(txs, marker, policy, authority_verifier,
+            runtime_identity_verifier, lifecycle_verifier, seen_event_ids: seen_ids)
+        rescue ContractError => error
+          raise dispatch_invalid("existing snapshot does not fully re-verify: #{error.code}")
+        end
+        existing = verified_existing.find do |tx|
+          tx.is_a?(Hash) && tx.keys.sort == EXECUTION_PAYLOAD_KEYS &&
+            tx.fetch("attempt").fetch("attempt_id") == attempt_id
+        end
+        if existing
+          return :idempotent if canonical_equal?(existing, candidate)
+
+          raise ContractError.new(
+            "control_store_reuse",
+            "attempt #{attempt_id} already exists with different canonical content",
+            path: "control_store.#{attempt_id}"
+          )
+        end
+        validate_transaction!(candidate,
+          policy: policy.fetch("active"), pinned_policies: policy.fetch("accepted"),
+          accepted_assertions: policy.fetch("accepted_assertions"), marker: marker,
+          authority_verifier: authority_verifier,
+          runtime_identity_verifier: runtime_identity_verifier,
+          lifecycle_verifier: lifecycle_verifier, seen_event_ids: seen_ids,
+          all_txs: txs)
+        nil
+      end
+
       def verify_all_transactions!(txs, marker, policy, authority_verifier,
                                    runtime_identity_verifier, lifecycle_verifier,
                                    seen_event_ids: Set.new)
@@ -510,6 +637,13 @@ module Orbit
         when CHECKPOINT_PAYLOAD_KEYS, SESSION_CHECKPOINT_PAYLOAD_KEYS
           validate_checkpoint_transaction!(tx, policy: policy, pinned_policies: pinned_policies,
             accepted_assertions: accepted_assertions,
+            marker: marker, authority_verifier: authority_verifier,
+            runtime_identity_verifier: runtime_identity_verifier,
+            lifecycle_verifier: lifecycle_verifier, seen_event_ids: seen_event_ids,
+            all_txs: all_txs)
+        when EXECUTION_PAYLOAD_KEYS
+          validate_execution_transaction!(tx, policy: policy,
+            pinned_policies: pinned_policies, accepted_assertions: accepted_assertions,
             marker: marker, authority_verifier: authority_verifier,
             runtime_identity_verifier: runtime_identity_verifier,
             lifecycle_verifier: lifecycle_verifier, seen_event_ids: seen_event_ids,
@@ -699,7 +833,8 @@ module Orbit
       # control.checkpoint writer assertion granted by the pinned policy.
       def validate_checkpoint_transaction!(tx, policy:, pinned_policies:, accepted_assertions:, marker:,
                                            authority_verifier:, runtime_identity_verifier:,
-                                           lifecycle_verifier:, seen_event_ids:, all_txs:)
+                                           lifecycle_verifier:, seen_event_ids:, all_txs:,
+                                           allow_attempt_ref: false, skip_assembled: false)
         checkpoint = tx.fetch("checkpoint")
         assertion = tx.fetch("assertion")
         control_id = checkpoint["lead_control_id"]
@@ -733,11 +868,15 @@ module Orbit
         registry = genesis_tx.fetch("registry")
         agent = genesis_tx.fetch("agent")
         genesis_checkpoint = genesis_tx.fetch("checkpoint")
-        prior = all_txs.select do |tx|
-          tx.is_a?(Hash) && [CHECKPOINT_PAYLOAD_KEYS, SESSION_CHECKPOINT_PAYLOAD_KEYS].include?(tx.keys.sort) &&
-            tx.fetch("checkpoint").fetch("lead_control_id") == control_id
+        prior = all_txs.select do |candidate|
+          checkpoint_entries(candidate).any? do |entry|
+            entry.fetch("checkpoint").fetch("lead_control_id") == control_id
+          end
         end
-        latest = prior.empty? ? genesis_checkpoint : prior.last.fetch("checkpoint")
+        prior_entries = prior.flat_map { |candidate| checkpoint_entries(candidate) }.select do |entry|
+          entry.fetch("checkpoint").fetch("lead_control_id") == control_id
+        end
+        latest = prior_entries.empty? ? genesis_checkpoint : prior_entries.last.fetch("checkpoint")
         predecessor = checkpoint["predecessor_lead_checkpoint_ref"]
         unless predecessor == {
           "lead_checkpoint_id" => latest["lead_checkpoint_id"],
@@ -833,7 +972,7 @@ module Orbit
             )
           end
         end
-        unless checkpoint["current_or_terminal_attempt_ref"].nil?
+        unless allow_attempt_ref || checkpoint["current_or_terminal_attempt_ref"].nil?
           raise checkpoint_invalid("attempt refs are deferred; no attempt pin is allowed")
         end
 
@@ -868,8 +1007,200 @@ module Orbit
           marker, pinned_policies, accepted_assertions, genesis_tx, prior, tx,
           task_facts.fetch("payload"), authority_verifier,
           runtime_identity_verifier, lifecycle_verifier
-        )
+        ) unless skip_assembled
         tx
+      end
+
+      def validate_execution_transaction!(tx, policy:, pinned_policies:, accepted_assertions:, marker:,
+                                          authority_verifier:, runtime_identity_verifier:,
+                                          lifecycle_verifier:, seen_event_ids:, all_txs:)
+        unless tx.is_a?(Hash) && tx.keys.sort == EXECUTION_PAYLOAD_KEYS
+          raise dispatch_invalid("transaction carries fields outside the closed execution shape")
+        end
+        attempt = tx.fetch("attempt")
+        rule = tx.fetch("rule_resolution")
+        worker = tx.fetch("worker_agent")
+        dispatch = tx.fetch("dispatch_checkpoint")
+        observation = tx.fetch("observation_checkpoint")
+        unless [attempt, rule, worker, dispatch, observation,
+                tx.fetch("dispatch_assertion"), tx.fetch("observation_assertion")].all? { |record| record.is_a?(Hash) }
+          raise dispatch_invalid("execution components must all be canonical objects")
+        end
+
+        validator = Orbit::V2::Validator.new(project_root: @active_root)
+        begin
+          validator.validate_document!("work_unit_attempt", attempt)
+          validator.validate_document!("agent_instance", worker)
+          RuleResolution.validate!(rule, project_root: File.dirname(@active_root))
+          if policy
+            current_identity = RuleResolution.canonical_identity(rule.fetch("identity"),
+              project_root: File.dirname(@active_root), verify_files: true)
+            unless canonical_equal?(current_identity, rule.fetch("identity"))
+              raise dispatch_invalid("new assigned rules do not match current project rule bytes")
+            end
+          end
+        rescue ValidationFailure, ContractError => error
+          raise dispatch_invalid("execution components violate their contracts: #{error.message}")
+        end
+        attempt_id = attempt["attempt_id"]
+        register_id!(seen_event_ids, "work_unit_attempt", attempt_id, :dispatch)
+        register_id!(seen_event_ids, "rule_resolution", rule.fetch("resolution_id"), :dispatch)
+        register_id!(seen_event_ids, "agent_instance", worker.fetch("agent_instance_id"), :dispatch)
+        events = Array(attempt["events"])
+        unless events.length == 1 && events.first["event_type"] == "AttemptCreated" &&
+               events.first["status"] == "active" &&
+               events.first["started_at"] == events.first["recorded_at"]
+          raise dispatch_invalid("Inc6b creation requires exactly one active AttemptCreated event")
+        end
+        event = events.first
+        register_id!(seen_event_ids, "lifecycle event", event.fetch("event_id"), :dispatch)
+        begin
+          lifecycle_verifier.verify!(event, project_id: marker.fetch("project_id"))
+          verify_event_stream!(Array(worker["lifecycle_events"]), stream: "agent",
+            project_id: marker.fetch("project_id"), lifecycle_verifier: lifecycle_verifier,
+            seen_event_ids: seen_event_ids)
+          runtime_identity_verifier.verify!(worker)
+        rescue ContractError => error
+          raise dispatch_invalid("worker identity or AttemptCreated receipt was not provider-verified: #{error.code}")
+        end
+
+        control_id = dispatch["lead_control_id"]
+        unless observation["lead_control_id"] == control_id && attempt["lead_control_id"] == control_id
+          raise dispatch_invalid("dispatch, observation, and attempt must belong to one control")
+        end
+        dispatch_tx = {
+          "assertion" => tx.fetch("dispatch_assertion"),
+          "checkpoint" => dispatch
+        }
+        observation_tx = {
+          "assertion" => tx.fetch("observation_assertion"),
+          "checkpoint" => observation
+        }
+        validate_checkpoint_transaction!(dispatch_tx, policy: policy,
+          pinned_policies: pinned_policies, accepted_assertions: accepted_assertions,
+          marker: marker, authority_verifier: authority_verifier,
+          runtime_identity_verifier: runtime_identity_verifier,
+          lifecycle_verifier: lifecycle_verifier, seen_event_ids: seen_event_ids,
+          all_txs: all_txs, skip_assembled: true)
+        validate_checkpoint_transaction!(observation_tx, policy: policy,
+          pinned_policies: pinned_policies, accepted_assertions: accepted_assertions,
+          marker: marker, authority_verifier: authority_verifier,
+          runtime_identity_verifier: runtime_identity_verifier,
+          lifecycle_verifier: lifecycle_verifier, seen_event_ids: seen_event_ids,
+          all_txs: all_txs + [dispatch_tx], allow_attempt_ref: true,
+          skip_assembled: true)
+
+        created_ref = {
+          "attempt_id" => attempt_id,
+          "event_id" => event.fetch("event_id"),
+          "event_digest" => event.fetch("event_digest")
+        }
+        unless attempt["dispatch_lead_checkpoint_ref"] == {
+                 "lead_checkpoint_id" => dispatch["lead_checkpoint_id"],
+                 "content_digest" => dispatch["content_digest"]
+               } &&
+               observation["predecessor_lead_checkpoint_ref"] == attempt["dispatch_lead_checkpoint_ref"] &&
+               observation["current_or_terminal_attempt_ref"] == created_ref &&
+               observation.dig("reconcile_trigger", "event") == "attempt_created" &&
+               dispatch.dig("lead_decision", "action") == "dispatch" &&
+               dispatch["current_or_terminal_attempt_ref"].nil?
+          raise dispatch_invalid("dispatch/AttemptCreated/observation refs are not exact-bound")
+        end
+
+        identity = rule.fetch("identity")
+        assignment = event.fetch("assignment")
+        exact_identity = {
+          "project_id" => attempt["project_id"],
+          "task_id" => attempt["task_id"],
+          "task_revision_id" => attempt["task_revision_id"],
+          "work_unit_id" => attempt["work_unit_id"],
+          "attempt_id" => attempt_id,
+          "agent_instance_id" => assignment["agent_instance_id"],
+          "context_generation" => assignment["context_generation"],
+          "resolved_role" => assignment["resolved_role"]
+        }
+        unless exact_identity.all? { |field, value| identity[field] == value } &&
+               assignment["agent_instance_id"] == worker["agent_instance_id"] &&
+               assignment["assigned_rule_resolution_id"] == rule["resolution_id"]
+          raise dispatch_invalid("assigned rule identity and AttemptCreated assignment do not exact-match")
+        end
+        # The dispatch-time basis is frozen AT the dispatch: exactly one
+        # rule_resolution proposal exact-pinning the assigned artifact and
+        # exactly one change_thesis proposal exact-pinning the assigned
+        # thesis. A proposal whose id/digest does not resolve to the
+        # transaction's own artifact/thesis would otherwise pass the
+        # assembled Validator (unresolvable proposals skip basis matching),
+        # so the store pins them byte-exact here.
+        proposals = Orbit::V2::ProjectionPrimitives.checkpoint_exact_refs(dispatch)
+        rule_proposals = proposals.select { |ref| ref.is_a?(Hash) && ref["kind"] == "rule_resolution" }
+        thesis_proposals = proposals.select do |ref|
+          ref.is_a?(Hash) && ref["kind"] == "change_thesis" && ref["event_id"].nil?
+        end
+        thesis_ref = assignment.fetch("change_thesis_ref")
+        unless rule_proposals.length == 1 &&
+               rule_proposals.first == {
+                 "kind" => "rule_resolution",
+                 "id" => rule.fetch("resolution_id"),
+                 "digest" => rule.fetch("identity_sha256")
+               } &&
+               thesis_proposals.length == 1 &&
+               thesis_proposals.first == {
+                 "kind" => "change_thesis",
+                 "id" => thesis_ref.fetch("change_thesis_id"),
+                 "digest" => thesis_ref.fetch("content_digest")
+               }
+          raise dispatch_invalid(
+            "dispatch must propose exactly the assigned RuleResolution artifact and ChangeThesis"
+          )
+        end
+
+        active_executions = all_txs.select do |candidate|
+          candidate.is_a?(Hash) && candidate.keys.sort == EXECUTION_PAYLOAD_KEYS &&
+            !terminal_attempt?(candidate.fetch("attempt"))
+        end
+        worker_key = RuntimeIdentityVerifier.identity_key(worker.fetch("runtime_identity"))
+        conflict = active_executions.find do |candidate|
+          existing = candidate.fetch("attempt")
+          existing_worker_key = RuntimeIdentityVerifier.identity_key(
+            candidate.fetch("worker_agent").fetch("runtime_identity")
+          )
+          existing["lead_control_id"] == control_id ||
+            existing["task_id"] == attempt["task_id"] ||
+            existing["work_unit_id"] == attempt["work_unit_id"] ||
+            existing_worker_key == worker_key
+        end
+        if conflict
+          raise dispatch_invalid(
+            "another non-terminal attempt conflicts by control, task, work unit, or runtime subject"
+          )
+        end
+
+        genesis_tx = all_txs.reverse.find do |candidate|
+          candidate.is_a?(Hash) && candidate.keys.sort == PAYLOAD_KEYS &&
+            candidate.fetch("registry").fetch("lead_control_id") == control_id
+        end
+        raise dispatch_invalid("execution must belong to an accepted control") unless genesis_tx
+        task_facts = resolve_task_facts!(dispatch, genesis_tx.fetch("registry"), authority_verifier)
+        control_txs = all_txs.select do |candidate|
+          checkpoint_entries(candidate).any? do |entry|
+            entry.fetch("checkpoint").fetch("lead_control_id") == control_id
+          end
+        end
+        validate_assembled_snapshot!(marker, pinned_policies, accepted_assertions,
+          genesis_tx, control_txs, tx,
+          task_facts.fetch("payload"), authority_verifier,
+          runtime_identity_verifier, lifecycle_verifier)
+        tx
+      rescue ContractError => error
+        raise error if error.code == "control_store_dispatch_invalid"
+
+        raise dispatch_invalid("#{error.code}: #{error.message}")
+      end
+
+      def terminal_attempt?(attempt)
+        Array(attempt["events"]).any? do |event|
+          %w[AttemptCompleted AttemptFailed AttemptBlocked AttemptCancelled AttemptSuperseded].include?(event["event_type"])
+        end
       end
 
       # Assembles the accepted policy/task/control snapshot into a
@@ -882,21 +1213,39 @@ module Orbit
         checkpoints = [genesis_tx.fetch("checkpoint")]
         assertions = [genesis_tx.fetch("assertion")]
         agents = { genesis_tx.fetch("agent").fetch("agent_instance_id") => genesis_tx.fetch("agent") }
+        attempts = []
+        resolutions = {}
         prior.each do |tx|
-          checkpoints << tx.fetch("checkpoint")
-          assertions << tx.fetch("assertion")
+          checkpoint_entries(tx).each do |entry|
+            checkpoints << entry.fetch("checkpoint")
+            assertions << entry.fetch("assertion")
+          end
           if tx.keys.sort == SESSION_CHECKPOINT_PAYLOAD_KEYS
             sessions[tx.fetch("prior_session").fetch("lead_session_id")] = tx.fetch("prior_session")
             sessions[tx.fetch("session").fetch("lead_session_id")] = tx.fetch("session")
             agents[tx.fetch("agent").fetch("agent_instance_id")] = tx.fetch("agent")
+          elsif tx.keys.sort == EXECUTION_PAYLOAD_KEYS
+            attempts << tx.fetch("attempt")
+            rule = tx.fetch("rule_resolution")
+            resolutions[rule.fetch("resolution_id")] = rule
+            worker = tx.fetch("worker_agent")
+            agents[worker.fetch("agent_instance_id")] = worker
           end
         end
-        checkpoints << candidate.fetch("checkpoint")
-        assertions << candidate.fetch("assertion")
+        checkpoint_entries(candidate).each do |entry|
+          checkpoints << entry.fetch("checkpoint")
+          assertions << entry.fetch("assertion")
+        end
         if candidate.keys.sort == SESSION_CHECKPOINT_PAYLOAD_KEYS
           sessions[candidate.fetch("prior_session").fetch("lead_session_id")] = candidate.fetch("prior_session")
           sessions[candidate.fetch("session").fetch("lead_session_id")] = candidate.fetch("session")
           agents[candidate.fetch("agent").fetch("agent_instance_id")] = candidate.fetch("agent")
+        elsif candidate.keys.sort == EXECUTION_PAYLOAD_KEYS
+          attempts << candidate.fetch("attempt")
+          rule = candidate.fetch("rule_resolution")
+          resolutions[rule.fetch("resolution_id")] = rule
+          worker = candidate.fetch("worker_agent")
+          agents[worker.fetch("agent_instance_id")] = worker
         end
         snapshot = { "kind" => "git", "commit_sha" => "a" * 40, "tree_digest" => "sha256:#{'a' * 64}" }
         bundle = {
@@ -915,8 +1264,8 @@ module Orbit
           "control_registries" => [genesis_tx.fetch("registry")],
           "lead_checkpoints" => checkpoints,
           "agent_instances" => agents.values,
-          "work_unit_attempts" => [],
-          "rule_resolution_artifacts" => [],
+          "work_unit_attempts" => attempts,
+          "rule_resolution_artifacts" => resolutions.values,
           "evidence_records" => [],
           "gate_evaluations" => [],
           "findings" => [],
@@ -1103,11 +1452,22 @@ module Orbit
         )
       end
 
+      def dispatch_invalid(message, details = nil)
+        ContractError.new(
+          "control_store_dispatch_invalid",
+          "control dispatch rejected: #{message}",
+          path: "control_store.dispatch",
+          details: details
+        )
+      end
+
       def register_id!(seen_ids, kind, id, failure = :genesis)
         return if seen_ids.add?(id)
 
         if failure == :checkpoint
           raise checkpoint_invalid("#{kind} id #{id} is globally create-only and reused")
+        elsif failure == :dispatch
+          raise dispatch_invalid("#{kind} id #{id} is globally create-only and reused")
         end
 
         raise genesis_invalid("#{kind} id #{id} is globally create-only and reused")

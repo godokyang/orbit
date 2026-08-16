@@ -1297,7 +1297,44 @@ AttemptCreated without store seams changing shape.
   BOTH successor shapes in the lineage, and returns the current
   checkpoint/assertion/session/agent tip plus the accepted `checkpoints`
   list — never a silently genesis-only state.
-- DEFERRED to 6b: dispatch with ChangeThesis+RuleResolution proposals and
-  AttemptCreated. Cross-control session transfer/recovery remains deferred
-  to a later Slice 6 increment; same-lineage session succession is closed
-  here.
+- At this increment boundary, dispatch with ChangeThesis+RuleResolution
+  proposals and AttemptCreated was deferred to 6b and is now closed by the
+  addendum below. Cross-control session transfer/recovery remains deferred;
+  same-lineage session succession is closed here.
+
+## Slice 6 increment 6b addendum: atomic dispatch and AttemptCreated
+
+`ControlStore#dispatch` commits the assigned RuleResolutionArtifact, the
+authorizing dispatch checkpoint and assertion, the worker AgentInstance,
+one active AttemptCreated WorkUnitAttempt, and the required immediate
+observation checkpoint and assertion as ONE closed TransactionLog record in
+the existing control lineage. The single fsync/rename boundary means no
+sequential cross-file writer can leave an accepted dispatch, attempt, or
+observation half-state. Root locks remain policy log -> task log -> control
+log, and validation plus append share that locked snapshot.
+
+- The dispatch extends the exact current control tip and exact-pins the
+  accepted TaskStore TaskRevision, selected WorkUnit, revision-1
+  ChangeThesis proposal, content-addressed RuleResolution proposal, current
+  policy, active LeadSession, lead agent, and provider-verified checkpoint
+  writer authority.
+- The AttemptCreated assignment exact-binds the same control/task/revision/
+  WorkUnit, worker AgentInstance/context/role, thesis, assigned resolution,
+  and accepted WorkUnit authorization records. Its lifecycle receipt and
+  worker runtime identity/lifecycle are provider-verified. A project-wide
+  durable backstop rejects another nonterminal Attempt sharing the control,
+  Task, WorkUnit, or provider-canonical runtime subject (including aliases).
+- The observation is the immediate second checkpoint inside the same
+  transaction, exact-pins the AttemptCreated event id+digest, and preserves
+  the dispatch closure basis. The complete final snapshot runs through the
+  public Validator before append.
+- A new assignment verifies canonical current project rule paths and file
+  bytes. Reader replay verifies the frozen RuleResolution identity and does
+  not reinterpret historical attempts when current rule files later change.
+- Resolve flattens both checkpoint entries in accepted order and returns the
+  accepted attempts and rule resolutions. Unknown/partial composite shapes
+  fail lineage replay; byte-identical replay is idempotent only after the
+  whole existing store re-verifies.
+
+Deferred: terminal Attempt events and terminal successor reconciliation,
+retry/fingerprint recovery, transfer, Evidence/Gate/Finding writers.

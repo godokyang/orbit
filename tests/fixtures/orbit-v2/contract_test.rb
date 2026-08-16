@@ -82,6 +82,7 @@ module OrbitV2ContractTest
     test_control_store_conflicts
     test_control_store_concurrency
     test_control_store_checkpoint
+    test_control_store_dispatch
     test_control_store_lineage_fail_closed
     test_task_store_genesis
     test_task_store_lineage_fail_closed
@@ -3668,8 +3669,8 @@ module OrbitV2ContractTest
   end
 
   def test_control_store_genesis
-    assert(Orbit::V2::ControlStore.instance_methods(false).sort == %i[checkpoint genesis records resolve],
-      "ControlStore exposes exactly its four public seams")
+    assert(Orbit::V2::ControlStore.instance_methods(false).sort == %i[checkpoint dispatch genesis records resolve],
+      "ControlStore exposes exactly its five public seams")
     Dir.mktmpdir do |dir|
       bundle = OrbitV2FixtureFactory.valid_bundle
       store, _policy, task = control_store_seeded_root(dir, bundle)
@@ -4000,6 +4001,163 @@ module OrbitV2ContractTest
         prior_session: prior_session, session: successor, agent: transitioned_agent) == :idempotent,
         "session transition replay is idempotent after full verification")
       assert(store.records.size == 4, "rejected checkpoints and replays leave the store unchanged")
+    end
+  end
+
+  def control_store_execution_records(bundle, policy, control_records, task_records, project_root)
+    control_id = control_records[0]["lead_control_id"]
+    task = task_records[0]
+    unit = task_records[2].first
+    thesis = task_records[3].find { |candidate| candidate["work_unit_id"] == unit["work_unit_id"] }
+    worker = OrbitV2FixtureFactory.agent("oagent_inc6bworker", "coder")
+    attempt_id = "oattempt_inc6bimplementation"
+    rule_path = "rules/inc6b-coder.md"
+    rule_bytes = "Inc6b coder rule.\n"
+    FileUtils.mkdir_p(File.join(project_root, "rules"))
+    File.write(File.join(project_root, rule_path), rule_bytes)
+    source_rule = { "rule_id" => "rule_inc6b_coder", "path" => rule_path,
+      "content_sha256" => "sha256:#{Digest::SHA256.hexdigest(rule_bytes)}", "relation" => "baseline" }
+    identity = {
+      "identity_schema" => "orbit-rule-resolution-identity-v1",
+      "protocol_epoch" => "orbit-v2",
+      "project_id" => OrbitV2FixtureFactory::PROJECT_ID,
+      "task_id" => task["task_id"],
+      "task_revision_id" => task["task_revision_id"],
+      "work_unit_id" => unit["work_unit_id"],
+      "attempt_id" => attempt_id,
+      "resolved_role" => "coder",
+      "agent_instance_id" => worker["agent_instance_id"],
+      "context_generation" => 1,
+      "required_rules" => [OrbitV2FixtureFactory.deep_copy(source_rule)]
+    }
+    canonical = Orbit::V2::RuleResolution.canonical_identity(identity,
+      project_root: project_root, verify_files: true)
+    identity_sha = Orbit::V2::CanonicalJSON.sha256(canonical)
+    rule = {
+      "schema_version" => "orbit-rule-resolution-v2",
+      "protocol_epoch" => "orbit-v2",
+      "project_id" => OrbitV2FixtureFactory::PROJECT_ID,
+      "resolution_id" => "rr-sha256-#{identity_sha}",
+      "identity" => canonical,
+      "identity_sha256" => "sha256:#{identity_sha}",
+      "envelope" => { "created_at" => "2026-07-30T02:00:00Z" }
+    }
+    attempt = OrbitV2FixtureFactory.attempt(attempt_id, unit["work_unit_id"],
+      worker["agent_instance_id"], "coder", "implementation", thesis,
+      rule["resolution_id"], 1, policy["content_digest"], task_id: task["task_id"],
+      task_revision_id: task["task_revision_id"], lead_control_id: control_id,
+      authorization_record_refs: unit.dig("authority_scope", "authorization_record_refs"),
+      started_at: "2026-07-30T02:01:00Z")
+    lead = task_records[6]
+    dispatch_assertion = OrbitV2FixtureFactory.assertion("oassert_inc6bdispatch",
+      %w[control.checkpoint], "control-plane-writer", authority_scope_ref: control_id)
+    dispatch = OrbitV2FixtureFactory.lead_checkpoint(
+      "olcheckpoint_inc6bdispatch", is_genesis: false,
+      predecessor_ref: OrbitV2FixtureFactory.cp_ref(control_records[2]),
+      predecessor_checkpoint: control_records[2], policy: policy,
+      session: control_records[1], agent: control_records[3], logical_lead: lead,
+      task: task, writer_action: "control.checkpoint", writer_assertion: dispatch_assertion,
+      lead_control_id: control_id, active_task_ref: OrbitV2FixtureFactory.task_ref(task),
+      selected_work_unit_ref: OrbitV2FixtureFactory.work_unit_ref(unit),
+      task_queue: [OrbitV2FixtureFactory.task_ref(task)], unit: unit,
+      proposed_thesis_ref: { "change_thesis_id" => thesis["change_thesis_id"],
+        "content_digest" => thesis["content_digest"] },
+      proposed_rule_ref: { "resolution_id" => rule["resolution_id"],
+        "identity_sha256" => rule["identity_sha256"] },
+      decision: OrbitV2FixtureFactory::DISPATCH_DECISION)
+    attempt["dispatch_lead_checkpoint_ref"] = OrbitV2FixtureFactory.cp_ref(dispatch)
+    observation_assertion = OrbitV2FixtureFactory.assertion("oassert_inc6bobservation",
+      %w[control.checkpoint], "control-plane-writer", authority_scope_ref: control_id)
+    observation = OrbitV2FixtureFactory.observation_checkpoint(dispatch, attempt,
+      policy: policy, resolution: rule)
+    observation["writer_authority_provenance"] = OrbitV2FixtureFactory.writer_provenance(
+      policy, "control.checkpoint", observation_assertion)
+    observation = OrbitV2FixtureFactory.digested(observation)
+    [rule, dispatch, dispatch_assertion, attempt, worker, observation, observation_assertion]
+  end
+
+  def control_store_dispatch(store, records, verifiers)
+    store.dispatch(rule_resolution: records[0], dispatch_checkpoint: records[1],
+      dispatch_assertion: records[2], attempt: records[3], worker_agent: records[4],
+      observation_checkpoint: records[5], observation_assertion: records[6],
+      authority_verifier: verifiers[0], runtime_identity_verifier: verifiers[1],
+      lifecycle_verifier: verifiers[2])
+  end
+
+  def test_control_store_dispatch
+    assert(Orbit::V2::ControlStore.instance_methods(false).sort == %i[checkpoint dispatch genesis records resolve],
+      "ControlStore exposes the atomic dispatch seam")
+    Dir.mktmpdir do |dir|
+      bundle = OrbitV2FixtureFactory.valid_bundle
+      bundle["logical_leads"].first["logical_lead_id"] = "olead_inc6bmain"
+      bundle["logical_leads"].first["content_digest"] =
+        Orbit::V2::CanonicalJSON.content_digest(bundle["logical_leads"].first)
+      store, policy, _task = control_store_seeded_root(dir, bundle)
+      vf = control_verifiers
+      task_records = task_store_genesis_records(bundle)
+      task_store = Orbit::V2::TaskStore.new(active_root: File.join(dir, ".orbit"))
+      assert(task_store_genesis(task_store, task_records, vf[0]) == :appended,
+        "dispatch task facts commit")
+      lead_agent = OrbitV2FixtureFactory.agent("oagent_inc6blead", "lead")
+      control_records = control_store_genesis_records(bundle, task_records[0], lead_agent,
+        "olcontrol_inc6bmain", control_store_writer_assertion("olcontrol_inc6bmain"),
+        lead: task_records[6])
+      assert(control_store_genesis(store, control_records, vf) == :appended,
+        "dispatch control genesis commits")
+      execution = control_store_execution_records(bundle, policy, control_records, task_records, dir)
+      invalid = OrbitV2FixtureFactory.deep_copy(execution)
+      invalid[3]["work_unit_id"] = "owu_someoneelses"
+      expect_contract_error("control_store_dispatch_invalid") do
+        control_store_dispatch(store, invalid, vf)
+      end
+      assert(store.records.size == 1, "rejected composite leaves no dispatch or attempt half-state")
+      rule_path = File.join(dir, execution[0].dig("identity", "required_rules", 0, "path"))
+      File.write(rule_path, "changed before assignment\n")
+      expect_contract_error("control_store_dispatch_invalid") do
+        control_store_dispatch(store, execution, vf)
+      end
+      File.write(rule_path, "Inc6b coder rule.\n")
+      wrong_proposal = OrbitV2FixtureFactory.deep_copy(execution)
+      proposal = wrong_proposal[1].dig("delivery_progress", "supporting_refs").find do |ref|
+        ref["kind"] == "rule_resolution"
+      end
+      proposal["digest"] = "sha256:#{'0' * 64}"
+      wrong_proposal[1]["content_digest"] =
+        Orbit::V2::CanonicalJSON.content_digest(wrong_proposal[1])
+      expect_contract_error("control_store_dispatch_invalid") do
+        control_store_dispatch(store, wrong_proposal, vf)
+      end
+      assert(control_store_dispatch(store, execution, vf) == :appended,
+        "rule, dispatch, AttemptCreated, and observation append atomically")
+      File.write(rule_path, "changed after assignment\n")
+      resolved = control_store_resolve(
+        Orbit::V2::ControlStore.new(active_root: File.join(dir, ".orbit")),
+        "olcontrol_inc6bmain", vf)
+      assert(resolved["checkpoints"].map { |cp| cp["lead_checkpoint_id"] } ==
+        %w[olcheckpoint_inc6bdispatch olcheckpoint_created_inc6bimplementation] &&
+        resolved.dig("attempts", 0, "attempt_id") == "oattempt_inc6bimplementation" &&
+        resolved["rule_resolutions"].first["resolution_id"] == execution[0]["resolution_id"],
+        "reopen resolves the two checkpoint events and execution facts")
+      log_path = File.join(dir, ".orbit", Orbit::V2::ControlStore::CONTROL_TRANSACTIONS_FILE)
+      accepted_bytes = File.binread(log_path)
+      half = JSON.parse(accepted_bytes)
+      half["records"].last["payload"].delete("observation_checkpoint")
+      half["records"].last["content_digest"] =
+        "sha256:#{Orbit::V2::CanonicalJSON.sha256(half["records"].last["payload"])}"
+      half["file_digest"] = "sha256:#{Orbit::V2::CanonicalJSON.sha256(half["records"])}"
+      File.write(log_path, Orbit::V2::CanonicalJSON.dump(half))
+      expect_contract_error("control_store_lineage_invalid") do
+        control_store_resolve(store, "olcontrol_inc6bmain", vf)
+      end
+      File.write(log_path, accepted_bytes)
+      assert(control_store_dispatch(store, execution, vf) == :idempotent,
+        "historical rule bytes are not reinterpreted and committed replay stays idempotent")
+      reused = OrbitV2FixtureFactory.deep_copy(execution)
+      reused[3]["work_unit_id"] = "owu_someoneelses"
+      expect_contract_error("control_store_reuse") { control_store_dispatch(store, reused, vf) }
+      assert(store.records.size == 2 && store.records.last.keys.sort ==
+        Orbit::V2::ControlStore::EXECUTION_PAYLOAD_KEYS,
+        "the execution is one closed control-log transaction with no half-state")
     end
   end
 
