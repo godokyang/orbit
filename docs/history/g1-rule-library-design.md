@@ -1,8 +1,10 @@
 # G.1 规则库结构设计
 
+> **历史记录（2026-08-17 归档）**：阶段 G 已按本文落地。正文是设计当时的切分；现行规则以 `skills/orbit/assets/rule-library/` 的文件和计划 D11 为准。工单见同目录 [`g1-workorder.md`](./g1-workorder.md)。
+
 - 日期：2026-08-17
 - 基线 HEAD：`fc01f60`
-- 工单：[`g1-workorder.md`](./g1-workorder.md)（只派发，不拥有裁决；完成后将移入 `docs/history/`）
+- 工单：[`g1-workorder.md`](./g1-workorder.md)（只派发，不拥有裁决）
 - 性质：**设计说明，零实现代码。** 不宣称阶段 G 完成。
 - 权威：模板与阶段 G 裁决以 [`vision-completion-plan.md`](./vision-completion-plan.md) 顶部 D1–D10 及 §3 D8/D9 正文为准。语义以 ADR / `contracts/orbit-v2/` 为准。工单与计划冲突时以计划为准。
 

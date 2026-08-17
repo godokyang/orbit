@@ -9,7 +9,7 @@
 本文只管测试与范围纪律。产品裁决不在这里，**不要凭本文推断该做什么**。
 
 - 在本仓做任何实现、重构或文档改动前，先读 [docs/README.md](docs/README.md)：它说明哪类事实归哪个文件，以及哪些层没有裁定权。
-- 承接任何交付任务前，先读 [docs/plan/vision-completion-plan.md](docs/plan/vision-completion-plan.md) 的「如果你刚接手」表——D1–D10 是全部有约束力的裁决，含已被否决的备选。
+- 承接任何交付任务前，先读 [docs/plan/handoff.md](docs/plan/handoff.md)，再读 [docs/plan/vision-completion-plan.md](docs/plan/vision-completion-plan.md) 的 D1–D11——那是全部有约束力的裁决，含已被否决的备选。
 - 动 `lib/` 或 `contracts/` 前，查 [docs/plan/debt-ledger.md](docs/plan/debt-ledger.md)：有意推迟的项目及其解除条件都在那里。
 - 语义合同以 `contracts/orbit-v2/` 与 `docs/adr/` 为准。散文与合同冲突时以合同为准。
 

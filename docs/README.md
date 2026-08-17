@@ -5,7 +5,8 @@
 | 我想知道… | 去哪 |
 | --- | --- |
 | 为什么这么设计 | [`adr/`](./adr/) —— 架构决策记录，**唯一 normative 语义来源**（连同 `contracts/orbit-v2/`） |
-| 接下来做什么 | [`plan/vision-completion-plan.md`](./plan/vision-completion-plan.md) —— 唯一前瞻计划 |
+| 刚接手、下一步是什么 | [`plan/handoff.md`](./plan/handoff.md) —— 阶段交接 |
+| 接下来做什么、裁决是什么 | [`plan/vision-completion-plan.md`](./plan/vision-completion-plan.md) —— 唯一前瞻计划 |
 | 欠了什么、能不能动这块代码 | [`plan/debt-ledger.md`](./plan/debt-ledger.md) —— 唯一欠账出处 |
 | 判据、外部规范、事故发现 | [`reference/`](./reference/) —— 参考资料，会被反复查阅 |
 | 之前发生过什么 | [`history/`](./history/) —— 已完成工作的记录，不作现在时指令阅读 |
@@ -29,9 +30,10 @@ ADR 用**修订记录**方式演进：原文不删，就近加已取代标注，
 
 | 文件 | 说明 |
 | --- | --- |
-| `vision-completion-plan.md` | 阶段 G–K，让 Orbit 达成"在合理范围内自动实现需求代码"的能力 |
+| `handoff.md` | 阶段 G 完成后的交接：现状、已否备选、阶段 H 范围 |
+| `vision-completion-plan.md` | 阶段 G–K；G 已交付，H–K 未做 |
 | `debt-ledger.md` | 有意推迟的项目，含推迟理由与解除条件 |
-| `*-workorder.md` | 派给执行方的工单。**执行中**留在 `plan/`，完成后移入 `history/` |
+| `*-workorder.md` | 派给执行方的工单。**执行中**留在 `plan/`，完成后移入 `history/`。当前 `plan/` 无执行中工单 |
 
 **工单不拥有裁决。** 它只做派发，与计划冲突时以计划为准。任何规格写进工单都会随工单进入 `history/`（无裁定权层）而失效——规格必须留在计划里。
 
@@ -53,6 +55,9 @@ ADR 用**修订记录**方式演进：原文不删，就近加已取代标注，
 | `slice6-workorder.md` | Slice 6 纠偏工单，ADR-005 引用其第 6 节为 v1 删除的决策依据 |
 | `slice6-task-local-storage-design.md` | Task 本地存储布局设计 |
 | `slice6-minimal-cli-path-design.md` | 最小真实 CLI 路径设计 |
+| `g1-rule-library-design.md` | 阶段 G 规则库切分设计（已落地） |
+| `g1-workorder.md` / `g2a`–`g2e-workorder.md` | 阶段 G 工单（无独立 g2c 文件） |
+| `v1-runtime/` | v1 `guide.md` 与 `core-operating-model.md`，不是现行操作指引 |
 
 `history/` 中的文档保留写作当时的原文与路径。**其状态描述反映当时事实**，与今日现状的差异在各文件头部说明。
 

@@ -1,7 +1,6 @@
 # Core Operating Model
 
-
-> **已停用（2026-08-17，v1 runtime 删除）**：本文描述的 `orbit` 命令（new-task/state/evidence/rules/whoami/dispatch/notice 等 v1 命令面）已全部删除，本文的协议说明（role identity / instances / rules 机制）对应已删除的 v1 实现，**不得作为现行操作指引**。当前唯一入口是 v2 CLI（`orbit v2 --help`，见 `SKILL.md`）。本文保留为 v1 语义的历史参考；完整 v2 运行时文档重写进行中（ADR-005 修订记录）。
+> **历史记录（2026-08-17 归档）**：从 `skills/orbit/references/runtime/core-operating-model.md` 移入。v1 命令面已删除，**不得作为现行操作指引**。现行入口是 `skills/orbit/SKILL.md` 与 `orbit v2 --help`。
 
 本文定义跨项目通用的 Orbit。它是运行时协议解释，不写任何单项目业务细则，也不承载实施计划。
 

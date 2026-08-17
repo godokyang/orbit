@@ -1,5 +1,7 @@
 # G.2d 工单：`orbit v2 rules update`
 
+> **历史记录（2026-08-17 归档）**：已完成。裁决在 [`../plan/vision-completion-plan.md`](../plan/vision-completion-plan.md)。
+
 - 日期：2026-08-17
 - 基线 HEAD：`682c38c`
 - 执行：grok（wA:pG）

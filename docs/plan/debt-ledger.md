@@ -13,7 +13,7 @@
 | 3 | `lead-control.schema.json` 仍含 cross-control enum | `contracts/orbit-v2/schemas/` | 低 | 与 store 改造同批，须有测试兜底 |
 | 4 | cross-control 语义残留代码 | lib ×6 / contracts ×3 | 低 | 确认自我中和后统一删除 |
 | 5 | 命令面双拼法未定形 | `lib/orbit/v2/cli.rb` | 低 | cutover 前定 |
-| 6 | v2 runtime 文档未重写 | `skills/orbit/references/runtime/` | 中 | 阶段 G 之后 |
+| 6 | v2 runtime 文档未重写 | `docs/history/v1-runtime/` | 低 | 另立项写 v2 操作指南；v1 稿已移出 skill 运行时目录 |
 
 ---
 
@@ -77,8 +77,8 @@ contracts/orbit-v2/contract.yaml                      1
 
 ## 6. v2 runtime 文档未重写
 
-ADR-005 cutover 条件第 7 条要求 `skills/orbit/references/runtime/` 只描述已实现的 v2。当前 `core-operating-model.md`（947 行）与 `guide.md`（465 行）是 v1 内容，只加了停用标注。
+ADR-005 cutover 条件第 7 条要求运行时文档只描述已实现的 v2。`guide.md` 与 `core-operating-model.md` 是 v1 内容，2026-08-17 已从 `skills/orbit/references/runtime/` 移到 [`docs/history/v1-runtime/`](../history/v1-runtime/)。
 
-**风险**：agent 读到 v1 操作模型会按已删除的命令行事。
+**风险（已降）**：skill 运行时目录不再放看起来像现行指南的 v1 稿。完整 v2 操作文档仍未写，现行入口是 `SKILL.md` 与 `orbit v2 --help`。
 
-**解除条件**：[愿景计划](./vision-completion-plan.md)阶段 G 重切规则库时一并处理；阶段 G 本身不含这两份文档的重写。
+**解除条件**：另立项写只描述已实现 v2 命令的操作指南。不在阶段 H–K 内。

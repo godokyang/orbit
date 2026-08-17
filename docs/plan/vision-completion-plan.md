@@ -1,13 +1,13 @@
 # Orbit 愿景达成计划
 
 - 日期：2026-08-17
-- 基线：`63b9d83`（阶段 F 完成，v1 已删除）
-- 状态：**计划稿，待批准**。本文不构成任何已实现能力的声明。
+- 基线：`24efecb`（阶段 G 完成）
+- 状态：**阶段 G 已交付**；下一阶段是 H。接手先读 [`handoff.md`](./handoff.md)。
 - 性质：本文是交付计划（non-normative）。语义权威仍是 ADR-003/004/005/006 与 contracts；冲突时以 ADR 为准。
 
 ## 如果你刚接手
 
-本文**自足**：不需要读任何对话记录就能执行。下表是全部有约束力的裁决，正文是它们的理由。工单（`*-workorder.md`）只做派发，**不拥有任何裁决**——工单与本文冲突时以本文为准。
+刚接手先读 [`handoff.md`](./handoff.md)。本文**自足**：不需要读任何对话记录就能执行。下表是全部有约束力的裁决，正文是它们的理由。工单只做派发，**不拥有任何裁决**——工单与本文冲突时以本文为准。已完成的工单在 `docs/history/`。
 
 | # | 裁决 | 日期 | 正文 |
 | --- | --- | --- | --- |
@@ -48,8 +48,8 @@
 | 事实/审计层 | ✅ 建成，且超建 | `lib/orbit/v2` 24,531 行；`contract_test.rb` 11,600 行 |
 | 决策层 | ✅ 建成，❌ 无出口 | `LeadControl.reconcile(facts, trigger) -> LeadDecision` 751 行，四互斥停止态、budget bindings、fingerprint 齐备 |
 | 上下文投递层 | ✅ 建成，❌ 无出口 | `ContextProjection.lead / work_agent / evaluator`；work_agent 已按 unit refs 裁剪 acceptance/evidence/source requirements 并钉 plan+basis digest |
-| 规则内容层 | ⚠️ 有素材，未接线 | 901 行手艺规范（coding 370 / testing 267 / quality 264）；按角色而非任务组织；无 `description` 元数据；无反向约束；`--rule` 无默认值——**Orbit 现在不自带任何可用规则** |
-| CLI | ⚠️ 只有脊柱 | 8 条命令覆盖 evidence/gate；控制流命令（retry/fuse/budget override/checkpoint 观测）库内已实现但未暴露 |
+| 规则内容层 | ✅ 阶段 G 已交付 | 八份任务规则 + 共享升格格式 + 常驻 `AGENTS.md` 模板；`init` 拷进项目；implementer 默认钉四条；reviewer inherit；`rules update`。母版在 `skills/orbit/assets/rule-library/` |
+| CLI | ⚠️ 脊柱 + 规则分发 | `init` / `task` / `rules update` / `dispatch` / `evidence` / `gate` / `finding` / `complete` / `status`。控制流命令（retry/fuse/budget override/checkpoint 观测）库内已实现但未暴露 |
 | 执行层 | ❌ 不存在 | `lib/orbit/v2` 全部子进程调用只有 `git rev-parse`、`git ls-tree` 与 `Process.pid`（文件锁）。**v2 不能让任何事发生** |
 
 反复出现的模式：**能力建好了，但没有出口。** 本计划的大部分工作是接线与内容，不是新建底座。
@@ -191,7 +191,7 @@ v1 曾有执行层，在 `8b5ab8c` 删除，可从 `8b5ab8c^` 取回参考（**�
 
 **并入时点**：形式在 G.1 固化为模板（本节），唯一字面借用（vantage test）在 G.2 写进"视角审计"规则。**没有独立的"合并外部文档"阶段**——不复制任何文件。
 
-**交付**：901 行按任务重切完毕、三个角色文件退役、`init` 拷贝规则进项目、4–5 条接进 `dispatch --rule` 默认。
+**交付（2026-08-17 已完成）**：901 行按任务重切完毕、三个角色文件退役、`init` 拷贝规则进项目、4–5 条接进 `dispatch` 默认、`rules update`、用户项目 `AGENTS.md` 路由器。详见 [`handoff.md`](./handoff.md)。
 
 ### 阶段 H：上下文投递出口
 
@@ -323,8 +323,8 @@ G.1 设计稿原方案是把三型 payload 表逐字复制进全部 8 份规则�
 
 - **cutover 完成**：ADR-005 有 12 条 cutover 条件，本计划不以满足全部为目标。相关记录见 ADR-005 修订记录。
 - **所有已记账欠账**：本地 provider 替换、`.cli-clock`、schema enum 分歧、cross-control 残留代码、命令面双拼法、v2 runtime 文档重写——逐条见[欠账台账](./debt-ledger.md)。其中第 1 项由阶段 J 顺带解除，其余不在本计划内。
-- **`core-operating-model.md` 重写**：阶段 G 只做规则库；这份 947 行 v1 文档（已加停用标注）的 v2 重写不在内（台账第 6 项）。
-- **README 定位措辞**：现有首句"它不负责『让 AI 更会写代码』，而是让工作结果更可追溯"把附属好处写成了产品定义，与本文第 0 节冲突。建议随阶段 G 一并修正（改动极小）。
+- **`core-operating-model.md` 重写**：v1 稿已移出 skill 运行时目录（台账第 6 项风险已降）；完整 v2 重写仍不在本计划内。
+- **README 定位措辞**：已按第 0 节改正（附属好处不再写成产品定义）。
 
 ## 5. 主要风险
 

@@ -10285,7 +10285,7 @@ module OrbitV2ContractTest
       attempt["events"][0]["assignment"]["agent_instance_id"] = "oagent_implementerone"
     when "rule_resolution_hash_tamper"
       rule = bundle["rule_resolution_artifacts"][0]["identity"]["required_rules"][0]
-      rule["path"] = "skills/orbit/references/runtime/core-operating-model.md"
+      rule["path"] = "skills/orbit/assets/rule-library/tasks/minimal-implementation.md"
       rule["content_sha256"] = "sha256:#{Digest::SHA256.file(File.join(ROOT, rule["path"])).hexdigest}"
     when "unknown_question_answer"
       evaluation = bundle["gate_evaluations"][0]

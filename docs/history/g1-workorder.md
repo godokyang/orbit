@@ -1,5 +1,7 @@
 # 阶段 G.1 工单：规则库结构设计（执行方：grok / `wA:pG`）
 
+> **历史记录（2026-08-17 归档）**：已完成。裁决在 [`../plan/vision-completion-plan.md`](../plan/vision-completion-plan.md)。交付物现为 [`g1-rule-library-design.md`](./g1-rule-library-design.md)。
+
 - 统筹与审核：`wA:pD`
 - 基线 HEAD：`fc01f60 docs: track the two files ADR decisions cite as their basis`
 - 交付物：`docs/plan/g1-rule-library-design.md`（新文件）

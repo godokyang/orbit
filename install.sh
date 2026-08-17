@@ -211,8 +211,7 @@ skills/orbit/assets/templates/design-review-report.yaml.v1-deprecated
 skills/orbit/assets/templates/test-report.yaml.v1-deprecated
 skills/orbit/assets/templates/test-hooks.yaml.v1-deprecated
 skills/orbit/references/overview.md
-skills/orbit/references/runtime/guide.md
-skills/orbit/references/runtime/core-operating-model.md
+skills/orbit/references/runtime/README.md
 skills/orbit/assets/rule-library/MANIFEST.yaml
 skills/orbit/assets/rule-library/resident/AGENTS.md.template
 skills/orbit/assets/rule-library/shared/escalation-payload.md

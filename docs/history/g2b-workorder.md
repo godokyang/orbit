@@ -1,5 +1,7 @@
 # G.2b 工单：评审侧垂直切片与共享正文的耦合验证
 
+> **历史记录（2026-08-17 归档）**：已完成。裁决在 [`../plan/vision-completion-plan.md`](../plan/vision-completion-plan.md)。
+
 - 日期：2026-08-17
 - 基线 HEAD：`27a9f72`
 - 执行：grok（wA:pG）

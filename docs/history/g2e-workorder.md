@@ -1,5 +1,7 @@
 # G.2e 工单：用户项目 AGENTS.md 模板（Q6）
 
+> **历史记录（2026-08-17 归档）**：已完成。裁决在 [`../plan/vision-completion-plan.md`](../plan/vision-completion-plan.md)。
+
 - 日期：2026-08-17
 - 基线 HEAD：`b07780f`
 - 执行：grok（wA:pG）

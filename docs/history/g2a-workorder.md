@@ -1,5 +1,7 @@
 # G.2a 工单：规则投递的垂直切片
 
+> **历史记录（2026-08-17 归档）**：已完成。裁决在 [`../plan/vision-completion-plan.md`](../plan/vision-completion-plan.md)。
+
 - 日期：2026-08-17
 - 基线 HEAD：`f81515d`
 - 执行：grok（wA:pG）

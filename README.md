@@ -1,11 +1,13 @@
 # Orbit
 
-Orbit 是给 AI agent 用的任务闭环工具。它不负责“让 AI 更会写代码”，而是让 agent 的工作结果更可追溯、更可接手、更难假完成。
+Orbit 是给 AI agent 用的控制流：在合理范围内自动实现需求代码。可追溯、可接手、难假完成是附属好处，不是产品目标。
 
 > **v1 已删除（2026-08-17）**：Orbit v1 runtime 已移除，其命令（`new-task` / `state` /
 > `evidence` / `rules` / `whoami` / `handoff` 等）、`instances.yaml` roster 与 Herdr
 > `automatic-preview` 集成不再存在。当前唯一入口是 v2 CLI（下文全部命令均为 v2）。
-> v1 代码删除 ≠ cutover 完成（见 ADR-005 修订记录）；v2 运行时文档重写进行中。
+> v1 代码删除 ≠ cutover 完成（见 ADR-005 修订记录）。操作入口是本文与
+> [skills/orbit/SKILL.md](skills/orbit/SKILL.md)；v1 长文档已归档到
+> `docs/history/v1-runtime/`。下一阶段见 [docs/plan/handoff.md](docs/plan/handoff.md)。
 
 ## 用了以后有什么效果
 

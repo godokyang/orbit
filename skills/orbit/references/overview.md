@@ -1,55 +1,17 @@
 # Orbit 参考总览
 
-本文件是 `orbit` 的文档导航。它只回答一个问题：当前要读哪类文档。
+本文件只回答：当前要读哪类文档。
 
-当前仓库的示例运行时入口是 [SKILL.md](../SKILL.md)。相关运行时长文档放在 `references/`。如果迁入新的独立实施工程，应把这些参考文档作为需求种子，而不是原样当作产品源码结构。
+> v1 runtime 已删除。v1 长文档在 [`docs/history/v1-runtime/`](../../../docs/history/v1-runtime/)，不是现行操作指引。
 
-`SKILL.md` 是 skill 的必需入口；`assets/`、`references/`、`scripts/` 都只是可选组织方式。当前公开目录只保留运行时需要的资料，不是所有 skill 必须遵循的规范。
+## 现行入口
 
-> **部分停用（2026-08-17）**：v1 runtime 已删除。三个角色文件（coding / testing / quality-outcome-and-review）已退役，任务规则在 [../assets/rule-library/tasks/](../assets/rule-library/tasks/)。`guide.md` / `core-operating-model.md` 的命令面仍是 v1 存量稿。v2 操作指引见 [SKILL.md](../SKILL.md)。
-
-## 两条主线
-
-### 真实运行时
-
-在真实项目里执行任务、review、test、handoff 时，先读 [runtime/guide.md](runtime/guide.md)。
-
-运行时文档只回答：
-
-- 当前 agent 是谁。
-- 本轮 task contract 是什么。
-- evidence 和 loop state 在哪里。
-- review/test gate 是否满足。
-- handoff 怎么交给下一位 agent 或用户。
-
-运行时不要默认读 implementation plan、工程化参考或子仓库细则。
-
-## 文档地图
-
-运行时文档：
-
-| 文档 | 类型 | 用途 |
-| --- | --- | --- |
-| [runtime/guide.md](runtime/guide.md) | 运行时入口（v1 存量） | 真实项目中执行 Orbit 的最小读法、命令和 fail-closed 规则。 |
-| [runtime/core-operating-model.md](runtime/core-operating-model.md) | 协议解释（v1 存量） | 需要解释 role、task、evidence、loop state 或 bootstrap 语义时读取。 |
-| [../assets/rule-library/tasks/](../assets/rule-library/tasks/) | 任务规则母版 | 按任务切的判据；`orbit v2 init` 拷进项目 `rules/`，由 dispatch `--rule` 钉入。 |
-| [../assets/rule-library/reference/report-and-evidence-examples.md](../assets/rule-library/reference/report-and-evidence-examples.md) | 参考层 | 提交格式示例与自检表；不进 `--rule`。 |
-
-## 目录约定
-
-- `runtime/` 放 v1 存量的操作入口和协议解释。任务规则与参考层在 `assets/rule-library/`。
-- 根目录只保留本导航，不继续堆积长正文。
-- 任何开发期参考或项目案例进入运行时协议前都必须重新做抽象边界审查；不能直接把项目细则或子仓库细则写进默认协议。
-
-当前公开目录只保留运行时文档。开发期资料和项目案例可以在本地 checkout 中保留，但不随公开仓库发布。迁入独立工程时，可以按实现需要新增 `schemas/`、`fixtures/` 或 `examples/`，但不要因为有资料就提前扩张目录。
-
-迁入新工程后的建议归位：
-
-| 当前文档 | 新工程建议位置 |
+| 文档 | 用途 |
 | --- | --- |
-| `runtime/core-operating-model.md` | 产品核心设计中的运行时协议。 |
-| `assets/rule-library/tasks/` | 按任务切的运行时规则母版。 |
-| `assets/rule-library/reference/report-and-evidence-examples.md` | 报告与证据格式示例。 |
-| `.orbit/roles.yaml`、`.orbit/instances.yaml` 和 schema 示例 | implementation fixtures / examples。 |
+| [SKILL.md](../SKILL.md) | skill 触发边界与 v2 最短闭环 |
+| [../assets/rule-library/tasks/](../assets/rule-library/tasks/) | 任务规则母版；`init` 拷进项目 `rules/`，由 dispatch 钉入 |
+| [../assets/rule-library/shared/](../assets/rule-library/shared/) | 被钉的共享层（升格 payload 格式） |
+| [../assets/rule-library/resident/](../assets/rule-library/resident/) | 用户项目 `AGENTS.md` 模板；不进 `--rule` |
+| [../../../docs/plan/handoff.md](../../../docs/plan/handoff.md) | 阶段交接：G 已完成，下一阶段是 H |
 
-核心设计判断和待补实现方向已经移到开发期文档。运行时 agent 不需要从本总览里继承这些开发讨论。
+`orbit v2 --help` 是命令面的权威。

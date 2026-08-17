@@ -9,7 +9,7 @@ metadata:
 
 Orbit 是面向 AI agent 的任务闭环协议。它把「做过动作」和「结果已被证明」分开：每个受控步骤是一条 provider-verified 的持久事务，完成判定来自派生的 AggregateOutcome，而不是 agent 的自我报告。
 
-> **状态（2026-08-17）**：Orbit v1 runtime（`orbit new-task` / `state start` / `evidence init` / `rules` / `whoami` / `handoff` 等全部 v1 命令）已从仓库删除。当前唯一可用入口是 v2 CLI。`references/runtime/` 下的长文档仍是 v1 语义的存量稿，已加停用标注；完整 v2 运行时文档重写未完成（ADR-005 修订记录）。以本文与 `orbit v2 --help` 为准。
+> **状态（2026-08-17）**：v1 runtime 已删除。当前唯一入口是 v2 CLI。v1 长文档已归档到 `docs/history/v1-runtime/`。阶段 G（规则库）已交付；下一阶段见 `docs/plan/handoff.md`。以本文与 `orbit v2 --help` 为准。
 
 ## 触发边界
 
@@ -25,8 +25,8 @@ CLI 可用时由 agent 自己执行：
 
 1. `orbit v2 init <project_id>`——一次性建立 protocol root + genesis policy + 本地 provider 密钥（`.orbit/local-provider.json`，丢失即项目不可验证，须自行备份）。
 2. 写 task 定义 YAML（goal + units），`orbit v2 task start <task_id> --def FILE` 创建 TaskRevision 与 lead control。
-3. `orbit v2 dispatch --task ID --role implementer --rule <rule-file>` 派发实现 attempt；完成后 `orbit v2 evidence submit --task ID --proposal FILE` 提交 evidence。
-4. `orbit v2 dispatch --task ID --role reviewer --rule <rule-file>` 派发独立评审 attempt（独立性由 runtime identity 机械保证，评估者不能与实现者同 subject），评审先 `evidence submit` 提交 evaluator submission。
+3. `orbit v2 dispatch --task ID --role implementer` 派发实现 attempt（默认钉四条任务规则 + 共享升格格式；显式 `--rule` 仍优先）；完成后 `orbit v2 evidence submit --task ID --proposal FILE` 提交 evidence。
+4. `orbit v2 dispatch --task ID --role reviewer` 派发独立评审 attempt（继承 subject 已记录的规则字节，再叠 `rules/review.md`；独立性由 runtime identity 机械保证），评审先 `evidence submit` 提交 evaluator submission。
 5. `orbit v2 gate submit --task ID --def FILE` 提交 GateEvaluation；verdict fail 可携带 Finding。
 6. 有 Finding 时：提交 follow-up evaluation（`gate submit` 第二次，自动 supersede）后 `orbit v2 finding resolve --task ID --def FILE`。
 7. `orbit v2 complete --task ID` 派生 AggregateOutcome：全部 gate 通过且无未决 blocking finding 时 `closed: true`（退出码 0）；否则显式列出未满足项（退出码 1）。
