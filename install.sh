@@ -213,9 +213,17 @@ skills/orbit/assets/templates/test-hooks.yaml.v1-deprecated
 skills/orbit/references/overview.md
 skills/orbit/references/runtime/guide.md
 skills/orbit/references/runtime/core-operating-model.md
-skills/orbit/references/runtime/coding-guideline.md
-skills/orbit/references/runtime/quality-outcome-and-review.md
-skills/orbit/references/runtime/testing-guideline.md
+skills/orbit/assets/rule-library/MANIFEST.yaml
+skills/orbit/assets/rule-library/shared/escalation-payload.md
+skills/orbit/assets/rule-library/reference/report-and-evidence-examples.md
+skills/orbit/assets/rule-library/tasks/minimal-implementation.md
+skills/orbit/assets/rule-library/tasks/targeted-fix.md
+skills/orbit/assets/rule-library/tasks/test-selection.md
+skills/orbit/assets/rule-library/tasks/review.md
+skills/orbit/assets/rule-library/tasks/vantage-audit.md
+skills/orbit/assets/rule-library/tasks/structured-boundary.md
+skills/orbit/assets/rule-library/tasks/mutating-surface.md
+skills/orbit/assets/rule-library/tasks/quality-outcome.md
 "
 
 runtime_file_count() {

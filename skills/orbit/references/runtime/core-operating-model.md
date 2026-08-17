@@ -23,9 +23,9 @@
 | 角色 | 职责 |
 | --- | --- |
 | lead | 建 task contract、协调任务、派 review/test、聚合 evidence、更新 loop state；在小项目里可兼任 coder |
-| coder | 可选角色；按 task contract 和 `coding-guideline.md` 实现，不拥有独立 review/test gate；也可由 lead 兼任 |
+| coder | 可选角色；按 task contract 和已钉任务规则实现，不拥有独立 review/test gate；也可由 lead 兼任 |
 | reviewer | 独立 review、判断 quality outcome、列高/中/低问题、阻塞未达标任务 |
-| tester | 按 `testing-guideline.md` 执行真实测试、保留失败证据、提交 `pass|fail|partial|invalid` verdict |
+| tester | 按已钉的 `test-selection` 执行真实测试、保留失败证据；污染时不要提交能关 gate 的 evaluation |
 
 ## 身份注入
 

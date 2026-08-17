@@ -114,6 +114,8 @@ module OrbitV2ContractTest
     test_v2_rule_byte_change_isolates_attempts
     test_v2_reviewer_inherits_recorded_subject_rules
     test_v2_reviewer_dispatch_after_subject_rule_byte_change
+    test_v2_init_installs_task_shared_and_reference_inventory
+    test_v2_implementer_default_pins_four_not_nondefaults
     puts(
       "ORBIT_V2_CONTRACT_TESTS_PASS assertions=#{@assertions} " \
         "schema_parity=#{@schema_parity_counts.sort.map { |key, value| "#{key}:#{value}" }.join(",")}"
@@ -9671,6 +9673,73 @@ module OrbitV2ContractTest
           assert(stderr.include?("error "),
             "failed reviewer dispatch must report an error (#{stderr})")
         end
+      end
+    end
+  end
+
+  INIT_TASK_RULES = %w[
+    minimal-implementation targeted-fix test-selection review
+    vantage-audit structured-boundary mutating-surface quality-outcome
+  ].freeze
+  DEFAULT_IMPLEMENTER_PINS = %w[
+    rules/minimal-implementation.md
+    rules/targeted-fix.md
+    rules/test-selection.md
+    rules/vantage-audit.md
+  ].freeze
+  NON_DEFAULT_TASK_RULES = %w[
+    rules/structured-boundary.md
+    rules/mutating-surface.md
+    rules/quality-outcome.md
+  ].freeze
+
+  # G.2c: init copies all task + shared rules and the reference layer;
+  # the reference file stays outside rules/ and is not a pin candidate.
+  def test_v2_init_installs_task_shared_and_reference_inventory
+    Dir.mktmpdir do |dir|
+      Dir.chdir(dir) do
+        g2a_cli!("init", "oproj_g2cinv0000001")
+        INIT_TASK_RULES.each do |name|
+          assert(File.file?(File.join(dir, "rules", "#{name}.md")),
+            "init must copy #{name} into rules/")
+        end
+        assert(File.file?(File.join(dir, "rules", "escalation-payload.md")),
+          "init must copy the shared escalation payload into rules/")
+        ref = File.join(dir, "docs", "orbit", "reference",
+                        "report-and-evidence-examples.md")
+        assert(File.file?(ref), "init must copy the reference layer")
+        assert(!File.exist?(File.join(dir, "rules",
+                                      "report-and-evidence-examples.md")),
+          "reference layer must not land in rules/")
+      end
+    end
+  end
+
+  # G.2c: implementer default pins the four Q4 rules plus shared payload,
+  # and does not pin the three land-not-wired task files.
+  def test_v2_implementer_default_pins_four_not_nondefaults
+    Dir.mktmpdir do |dir|
+      Dir.chdir(dir) do
+        task_id = "otask_g2cdef000001"
+        g2a_start_task(dir, "oproj_g2cdef0000001", task_id)
+        g2a_cli!("dispatch", "--task", task_id, "--role", "implementer")
+        _id, rules = g2a_attempt_rules(dir, task_id).fetch(0)
+        paths = rules.map { |entry| entry["path"] }
+        DEFAULT_IMPLEMENTER_PINS.each do |path|
+          pinned = rules.find { |entry| entry["path"] == path }
+          expected = "sha256:#{Digest::SHA256.file(File.join(dir, path)).hexdigest}"
+          assert(pinned && pinned["content_sha256"] == expected,
+            "implementer default must pin #{path}")
+        end
+        shared = rules.find { |entry| entry["path"] == "rules/escalation-payload.md" }
+        assert(shared && shared["relation"] == "supplements",
+          "shared escalation payload must stay pinned as supplements")
+        NON_DEFAULT_TASK_RULES.each do |path|
+          assert(!paths.include?(path),
+            "non-default task rule #{path} must not be pinned")
+        end
+        assert(!paths.include?("docs/orbit/reference/report-and-evidence-examples.md"),
+          "reference layer must not be pinned")
       end
     end
   end

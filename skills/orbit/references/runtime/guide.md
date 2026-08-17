@@ -42,9 +42,9 @@ identity -> task contract -> evidence -> loop state -> review/test gate -> hando
 | 情况 | 读取文档 |
 | --- | --- |
 | 不清楚协议字段含义 | `core-operating-model.md` |
-| 需要判断改善类任务是否真的变好 | `quality-outcome-and-review.md` |
-| 需要实现或修复代码 | `coding-guideline.md` |
-| 需要执行测试或判断测试证据 | `testing-guideline.md` |
+| 需要判断改善类任务是否真的变好 | `../../assets/rule-library/tasks/review.md`、`quality-outcome.md` |
+| 需要实现或修复代码 | `../../assets/rule-library/tasks/minimal-implementation.md`、`targeted-fix.md` |
+| 需要执行测试或判断测试证据 | `../../assets/rule-library/tasks/test-selection.md` |
 
 bug fix、状态流转、artifact 写入、AI 输出解析、resolver、normalizer、validator、gate 和 tool 边界相关任务，默认要遵守 runtime coding/review/testing 文档中的结构约束规则：不要用增长黑名单 / 白名单作为主要边界，检查字段族和单一事实源，修同类入口或记录 known gap，替换旧逻辑时提供 closure guard。不能为了通过当前 gate 静默降级需求、绕过旧 gate、用业务兜底掩盖底层流程没接通，或把 late result 套到错误 run / phase / attempt / revision。
 
@@ -191,7 +191,7 @@ Design-first 任务使用独立 lifecycle：`drafting -> review_requested -> cha
 - 派 review/test 前运行 `orbit instances status --json` 或 `orbit start INSTANCE --json`，按 runtime resolver 判断目标是否 `dispatch_ready: true`。
 - 如果 resolver 没有给出 verified direct dispatch 目标，默认使用 `orbit dispatch --manual-payload` 或按 remediation 处理；只有 stale/conflict/replacement 场景且 owner 接受替换风险时才使用 `orbit start INSTANCE --force`。
 - 根据 gate 结果继续、回滚、阻塞或收口。
-- coding 时遵守 `coding-guideline.md`，保留 changed files、verification、closure 和 known gaps。
+- coding 时遵守已钉的任务规则（默认 `minimal-implementation` / `targeted-fix` / `test-selection` / `vantage-audit`），保留 changed files、verification、closure 和 known gaps。
 
 禁止：
 
@@ -223,7 +223,7 @@ Design-first 任务使用独立 lifecycle：`drafting -> review_requested -> cha
 - 执行真实测试路径。
 - 保留命令、截图、日志、录屏或其他 evidence。
 - 输出 test verdict、覆盖范围和缺口。
-- testing 时遵守 `testing-guideline.md`，区分 `pass|fail|partial|invalid`。
+- testing 时遵守 `test-selection.md`；污染或前提不成立时不要提交能关 gate 的 evaluation。
 - `pass` evidence 必须记录测试环境生命周期；质量度量类 task 还必须记录 baseline/after 指标或显式 waiver。
 
 禁止：

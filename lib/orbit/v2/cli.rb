@@ -37,7 +37,12 @@ module Orbit
       }.freeze
 
       RULE_LIBRARY = File.expand_path("../../../skills/orbit/assets/rule-library", __dir__).freeze
-      DEFAULT_IMPLEMENTER_RULE = "rules/minimal-implementation.md".freeze
+      DEFAULT_IMPLEMENTER_RULES = [
+        "rules/minimal-implementation.md",
+        "rules/targeted-fix.md",
+        "rules/test-selection.md",
+        "rules/vantage-audit.md"
+      ].freeze
       DEFAULT_REVIEWER_RULE = "rules/review.md".freeze
       SHARED_ESCALATION_RULE = "rules/escalation-payload.md".freeze
 
@@ -138,16 +143,22 @@ module Orbit
         end
 
         files = []
-        %w[tasks shared].each do |layer|
+        [
+          ["tasks", dest_dir, "rules", "task"],
+          ["shared", dest_dir, "rules", "shared"],
+          ["reference", File.join(project_root, "docs", "orbit", "reference"),
+           "docs/orbit/reference", "reference"]
+        ].each do |layer, layer_dest, rel_prefix, layer_name|
           layer_dir = File.join(RULE_LIBRARY, layer)
           next unless File.directory?(layer_dir)
 
+          FileUtils.mkdir_p(layer_dest)
           Dir.children(layer_dir).sort.each do |name|
             next unless name.end_with?(".md")
 
             src = File.join(layer_dir, name)
-            dest = File.join(dest_dir, name)
-            rel = "rules/#{name}"
+            dest = File.join(layer_dest, name)
+            rel = "#{rel_prefix}/#{name}"
             if File.exist?(dest)
               warn("skip: #{rel} already exists")
               files << existing[rel] if existing[rel]
@@ -159,7 +170,7 @@ module Orbit
             files << {
               "path" => rel,
               "rule_id" => "orbit.#{File.basename(name, ".md")}",
-              "layer" => layer == "shared" ? "shared" : "task",
+              "layer" => layer_name,
               "last_installed_sha256" => digest
             }
             puts("installed: #{rel}")
@@ -393,7 +404,7 @@ module Orbit
         if rule_paths.empty?
           case role_key
           when "implementer"
-            rule_paths = [DEFAULT_IMPLEMENTER_RULE]
+            rule_paths = DEFAULT_IMPLEMENTER_RULES.dup
           when "reviewer"
             required_rules = inherit_subject_required_rules(control_result, base[:project_root])
             rule_paths = required_rules.map { |rule| rule["path"] }
@@ -747,7 +758,7 @@ module Orbit
         commands:
           init <project_id>                      create the v2 protocol root + genesis policy
           task start <task_id> --def FILE        create one task (definition + control genesis)
-          dispatch --task ID --role R [--rule P] dispatch (implementer defaults to rules/minimal-implementation.md; reviewer inherits subject rules + rules/review.md)
+          dispatch --task ID --role R [--rule P] dispatch (implementer defaults to four Q4 rules; reviewer inherits subject rules + rules/review.md)
           evidence submit --task ID --proposal F  submit evidence for an attempt
           gate submit --task ID --def FILE       submit an independent gate evaluation
           finding resolve --task ID --def FILE   resolve a finding (addressed) after a follow-up evaluation

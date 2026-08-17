@@ -2,6 +2,7 @@ schema_version: orbit-rule-library-manifest-v1
 # layer: task = selected per dispatch role/task
 #        shared = pinned on every dispatch (relation: supplements)
 #        resident = copied for humans / AGENTS.md only, never pinned
+# reference/ is copied by init into docs/orbit/reference/ and is not listed here.
 rules:
   - rule_id: orbit.minimal-implementation
     path: tasks/minimal-implementation.md
@@ -9,12 +10,48 @@ rules:
     default: true
     profiles: [implementer]
     content_sha256: "sha256:e53c9c6f03ecc93cef9765ca71d792ad063215013cc3a31b65c8e61167813561"
+  - rule_id: orbit.targeted-fix
+    path: tasks/targeted-fix.md
+    layer: task
+    default: true
+    profiles: [implementer]
+    content_sha256: "sha256:f554d2a981aff99d7a941b060b632d55db1a018b072d5a57b35fe8a13050ab22"
+  - rule_id: orbit.test-selection
+    path: tasks/test-selection.md
+    layer: task
+    default: true
+    profiles: [implementer]
+    content_sha256: "sha256:cbf99bdce86ffaa16f13bf03cd6ffe90553e87b3009e92633ca7626ec28e7575"
+  - rule_id: orbit.vantage-audit
+    path: tasks/vantage-audit.md
+    layer: task
+    default: true
+    profiles: [implementer]
+    content_sha256: "sha256:2f68da8f44aa32dcef6cad5f27b4cc67b679bb4ba31cbd2d64d3d29c18d781de"
   - rule_id: orbit.review
     path: tasks/review.md
     layer: task
     default: true
     profiles: [reviewer]
     content_sha256: "sha256:2df48dc9650fc23058958c2376198afe8e5afc1f62bd9017edc2dd49c1c907d8"
+  - rule_id: orbit.structured-boundary
+    path: tasks/structured-boundary.md
+    layer: task
+    default: false
+    profiles: [implementer]
+    content_sha256: "sha256:72cfc1b2dbb9acf8afd6b20536d7ddfde1df16ce76c11c2ccdc00dc1788918bf"
+  - rule_id: orbit.mutating-surface
+    path: tasks/mutating-surface.md
+    layer: task
+    default: false
+    profiles: [implementer]
+    content_sha256: "sha256:e35e131ad66b0661d12b58fbffb68c052f94408b82543fc5cd058bc37a60dd71"
+  - rule_id: orbit.quality-outcome
+    path: tasks/quality-outcome.md
+    layer: task
+    default: false
+    profiles: []
+    content_sha256: "sha256:93d7f4fe5f82842917c5a4758108e9595f0081a4f1c7e781a8492eaac86f10bf"
   - rule_id: orbit.escalation-payload
     path: shared/escalation-payload.md
     layer: shared

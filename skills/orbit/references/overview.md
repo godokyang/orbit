@@ -6,7 +6,7 @@
 
 `SKILL.md` 是 skill 的必需入口；`assets/`、`references/`、`scripts/` 都只是可选组织方式。当前公开目录只保留运行时需要的资料，不是所有 skill 必须遵循的规范。
 
-> **部分停用（2026-08-17）**：v1 runtime 已删除，下表中文档除 coding/testing guideline 与 quality outcome 的一般性工程原则外，命令面与协议说明均为 v1 存量稿（各文档头部有停用标注）。v2 操作指引见 [SKILL.md](../SKILL.md)。
+> **部分停用（2026-08-17）**：v1 runtime 已删除。三个角色文件（coding / testing / quality-outcome-and-review）已退役，任务规则在 [../assets/rule-library/tasks/](../assets/rule-library/tasks/)。`guide.md` / `core-operating-model.md` 的命令面仍是 v1 存量稿。v2 操作指引见 [SKILL.md](../SKILL.md)。
 
 ## 两条主线
 
@@ -30,15 +30,14 @@
 
 | 文档 | 类型 | 用途 |
 | --- | --- | --- |
-| [runtime/guide.md](runtime/guide.md) | 运行时入口 | 真实项目中执行 Orbit 的最小读法、命令和 fail-closed 规则。 |
-| [runtime/core-operating-model.md](runtime/core-operating-model.md) | 协议解释 | 需要解释 role、task、evidence、loop state 或 bootstrap 语义时读取。 |
-| [runtime/quality-outcome-and-review.md](runtime/quality-outcome-and-review.md) | 质量 gate | 改善类任务需要判断 quality outcome 时读取。 |
-| [runtime/coding-guideline.md](runtime/coding-guideline.md) | coding 规范 | lead/coder 实现代码、保留证据和控制 scope 时读取。 |
-| [runtime/testing-guideline.md](runtime/testing-guideline.md) | testing 规范 | tester 执行真实测试、保留失败证据和输出 verdict 时读取。 |
+| [runtime/guide.md](runtime/guide.md) | 运行时入口（v1 存量） | 真实项目中执行 Orbit 的最小读法、命令和 fail-closed 规则。 |
+| [runtime/core-operating-model.md](runtime/core-operating-model.md) | 协议解释（v1 存量） | 需要解释 role、task、evidence、loop state 或 bootstrap 语义时读取。 |
+| [../assets/rule-library/tasks/](../assets/rule-library/tasks/) | 任务规则母版 | 按任务切的判据；`orbit v2 init` 拷进项目 `rules/`，由 dispatch `--rule` 钉入。 |
+| [../assets/rule-library/reference/report-and-evidence-examples.md](../assets/rule-library/reference/report-and-evidence-examples.md) | 参考层 | 提交格式示例与自检表；不进 `--rule`。 |
 
 ## 目录约定
 
-- `runtime/` 放真实运行时会用到的操作入口、协议解释、coding/testing 规范和质量 gate。
+- `runtime/` 放 v1 存量的操作入口和协议解释。任务规则与参考层在 `assets/rule-library/`。
 - 根目录只保留本导航，不继续堆积长正文。
 - 任何开发期参考或项目案例进入运行时协议前都必须重新做抽象边界审查；不能直接把项目细则或子仓库细则写进默认协议。
 
@@ -49,9 +48,8 @@
 | 当前文档 | 新工程建议位置 |
 | --- | --- |
 | `runtime/core-operating-model.md` | 产品核心设计中的运行时协议。 |
-| `runtime/quality-outcome-and-review.md` | quality gate 设计。 |
-| `runtime/coding-guideline.md` | coding 运行时规范。 |
-| `runtime/testing-guideline.md` | testing 运行时规范。 |
+| `assets/rule-library/tasks/` | 按任务切的运行时规则母版。 |
+| `assets/rule-library/reference/report-and-evidence-examples.md` | 报告与证据格式示例。 |
 | `.orbit/roles.yaml`、`.orbit/instances.yaml` 和 schema 示例 | implementation fixtures / examples。 |
 
 核心设计判断和待补实现方向已经移到开发期文档。运行时 agent 不需要从本总览里继承这些开发讨论。

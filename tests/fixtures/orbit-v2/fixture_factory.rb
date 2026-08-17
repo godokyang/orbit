@@ -2295,9 +2295,9 @@ module OrbitV2FixtureFactory
 
   def rule_path(role)
     if role == "reviewer"
-      "skills/orbit/references/runtime/quality-outcome-and-review.md"
+      "skills/orbit/assets/rule-library/tasks/review.md"
     else
-      "skills/orbit/references/runtime/coding-guideline.md"
+      "skills/orbit/assets/rule-library/tasks/minimal-implementation.md"
     end
   end
 
