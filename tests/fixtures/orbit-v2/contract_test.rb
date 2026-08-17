@@ -1,7 +1,9 @@
 # frozen_string_literal: true
 
+require "digest"
 require "json"
 require "fileutils"
+require "stringio"
 require "tmpdir"
 require "yaml"
 
@@ -108,6 +110,8 @@ module OrbitV2ContractTest
     test_lib_solo_require
     test_v2_cli_end_to_end
     test_v2_entry_wiring
+    test_v2_init_dispatch_pins_default_rule
+    test_v2_rule_byte_change_isolates_attempts
     puts(
       "ORBIT_V2_CONTRACT_TESTS_PASS assertions=#{@assertions} " \
         "schema_parity=#{@schema_parity_counts.sort.map { |key, value| "#{key}:#{value}" }.join(",")}"
@@ -9483,6 +9487,117 @@ module OrbitV2ContractTest
         assert(orbit.call("init", "oproj_entrywiring1") &&
                File.file?(File.join(dir, ".orbit", "protocol.yaml")),
                "orbit init must work end to end through the script entry")
+      end
+    end
+  end
+
+  def g2a_cli!(*args)
+    code = nil
+    original = $stdout
+    $stdout = StringIO.new
+    begin
+      code = Orbit::V2::Cli.run(args.flatten)
+    ensure
+      $stdout = original
+    end
+    assert(code == 0, "orbit v2 #{args.first(2).join(" ")} must exit 0 (got #{code})")
+  end
+
+  def g2a_start_task(dir, project_id, task_id, two_units: false)
+    second = two_units ? "- objective: Second slice.\n  writable_paths: [src]\n" : ""
+    File.write(File.join(dir, "task.yaml"), [
+      "goal: Prove default rule delivery.\n",
+      "units:\n",
+      "- objective: Implement the vertical slice.\n",
+      "  writable_paths: [src]\n",
+      second
+    ].join)
+    FileUtils.mkdir_p(File.join(dir, "src"))
+    File.write(File.join(dir, "src", "app.rb"), "puts 'app'\n")
+    g2a_cli!("init", project_id)
+    g2a_cli!("task", "start", task_id, "--def", "task.yaml")
+  end
+
+  def g2a_attempt_rules(dir, task_id)
+    verifiers = Orbit::V2::LocalProvider.verifiers(dir)
+    store = Orbit::V2::ControlStore.new(active_root: File.join(dir, ".orbit"), task_id: task_id)
+    control_id = store.records.each do |payload|
+      break payload["registry"]["lead_control_id"] if payload.is_a?(Hash) && payload["registry"]
+    end
+    resolved = store.resolve(
+      control_id: control_id,
+      authority_verifier: verifiers[0],
+      runtime_identity_verifier: verifiers[1],
+      lifecycle_verifier: verifiers[2]
+    )
+    resolutions = Array(resolved["rule_resolutions"]).each_with_object({}) do |rule, acc|
+      acc[rule["resolution_id"]] = rule
+    end
+    Array(resolved["attempts"]).map do |attempt|
+      rid = attempt.dig("events", 0, "assignment", "assigned_rule_resolution_id")
+      [attempt["attempt_id"], Array(resolutions.fetch(rid).dig("identity", "required_rules"))]
+    end
+  end
+
+  # G.2a: init copies the master rule; implementer dispatch without --rule
+  # pins that file's live bytes on the attempt.
+  def test_v2_init_dispatch_pins_default_rule
+    Dir.mktmpdir do |dir|
+      Dir.chdir(dir) do
+        task_id = "otask_g2apin000001"
+        g2a_start_task(dir, "oproj_g2apin0000001", task_id)
+        rule = File.join(dir, "rules", "minimal-implementation.md")
+        assert(File.file?(rule), "init must copy the default rule into rules/")
+        expected = "sha256:#{Digest::SHA256.file(rule).hexdigest}"
+        g2a_cli!("dispatch", "--task", task_id, "--role", "implementer")
+        _id, rules = g2a_attempt_rules(dir, task_id).fetch(0)
+        assert(rules.length == 1 && rules[0]["path"] == "rules/minimal-implementation.md",
+          "dispatch must pin the default project rule path")
+        assert(rules[0]["content_sha256"] == expected,
+          "pinned content_sha256 must equal the file's real digest")
+      end
+    end
+  end
+
+  # G.2a: changing one rule byte must produce a new attempt digest while
+  # the predecessor stays bound to the old digest.
+  def test_v2_rule_byte_change_isolates_attempts
+    Dir.mktmpdir do |dir|
+      Dir.chdir(dir) do
+        task_id = "otask_g2aiso000001"
+        g2a_start_task(dir, "oproj_g2aiso0000001", task_id, two_units: true)
+        path = File.join(dir, "rules", "minimal-implementation.md")
+        before = "sha256:#{Digest::SHA256.file(path).hexdigest}"
+        g2a_cli!("dispatch", "--task", task_id, "--role", "implementer")
+        File.write(path, File.binread(path) + "\n")
+        after = "sha256:#{Digest::SHA256.file(path).hexdigest}"
+        assert(before != after, "the mutated rule bytes must change the digest")
+        g2a_cli!("dispatch", "--task", task_id, "--role", "implementer")
+        pins = g2a_attempt_rules(dir, task_id)
+        assert(pins.length == 2, "a second dispatch must create a successor attempt")
+        old_rules = pins[0][1]
+        new_rules = pins[1][1]
+        assert(old_rules[0]["content_sha256"] == before,
+          "the old attempt must keep the pre-mutation digest")
+        assert(new_rules[0]["content_sha256"] == after,
+          "the new attempt must pin the mutated bytes")
+        File.write(File.join(dir, "evidence.yaml"), "kind: implementation\npaths: [src/app.rb]\n")
+        g2a_cli!("evidence", "submit", "--task", task_id, "--proposal", "evidence.yaml")
+        # complete assembles the snapshot and runs the public Validator
+        # (contract.yaml execution_closure). Historical artifacts must
+        # reverify by identity without rereading current rule bytes.
+        stderr = StringIO.new
+        original_stdout, original_stderr = $stdout, $stderr
+        $stdout = StringIO.new
+        $stderr = stderr
+        begin
+          Orbit::V2::Cli.run(["complete", "--task", task_id])
+        ensure
+          $stdout = original_stdout
+          $stderr = original_stderr
+        end
+        assert(!stderr.string.include?("error "),
+          "complete must accept the old attempt after the rule file changed (#{stderr.string})")
       end
     end
   end

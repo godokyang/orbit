@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "digest"
 require "fileutils"
 require "optparse"
 require "time"
@@ -34,6 +35,9 @@ module Orbit
         "implementer" => { "role" => "coder", "purpose" => "implementation", "kind" => "implementation" },
         "reviewer" => { "role" => "reviewer", "purpose" => "review", "kind" => "evaluation" }
       }.freeze
+
+      RULE_LIBRARY = File.expand_path("../../../skills/orbit/assets/rule-library", __dir__).freeze
+      DEFAULT_IMPLEMENTER_RULE = "rules/minimal-implementation.md".freeze
 
       def run(argv)
         # Phase F: the dispatcher entry passes ARGV through unchanged, so
@@ -115,6 +119,50 @@ module Orbit
 
       def orbit_root(base)
         File.join(base[:project_root], ".orbit")
+      end
+
+      def install_rule_library!(project_root)
+        tasks_dir = File.join(RULE_LIBRARY, "tasks")
+        raise UsageError, "rule library tasks directory missing: #{tasks_dir}" unless File.directory?(tasks_dir)
+
+        dest_dir = File.join(project_root, "rules")
+        FileUtils.mkdir_p(dest_dir)
+        source_path = File.join(dest_dir, ".orbit-source.yaml")
+        existing = {}
+        if File.file?(source_path)
+          loaded = YAML.safe_load(File.binread(source_path), permitted_classes: [], aliases: false)
+          Array(loaded.is_a?(Hash) ? loaded["files"] : nil).each do |entry|
+            next unless entry.is_a?(Hash) && entry["path"].is_a?(String)
+
+            existing[entry["path"]] = entry
+          end
+        end
+
+        files = []
+        Dir.children(tasks_dir).sort.each do |name|
+          next unless name.end_with?(".md")
+
+          src = File.join(tasks_dir, name)
+          dest = File.join(dest_dir, name)
+          rel = "rules/#{name}"
+          if File.exist?(dest)
+            warn("skip: #{rel} already exists")
+            files << existing[rel] if existing[rel]
+            next
+          end
+
+          FileUtils.cp(src, dest)
+          digest = "sha256:#{Digest::SHA256.file(dest).hexdigest}"
+          files << {
+            "path" => rel,
+            "rule_id" => "orbit.#{File.basename(name, ".md")}",
+            "last_installed_sha256" => digest
+          }
+          puts("installed: #{rel}")
+        end
+
+        payload = { "schema_version" => "orbit-rule-source-v1", "files" => files }
+        File.binwrite(source_path, payload.to_yaml)
       end
 
 
@@ -223,6 +271,7 @@ module Orbit
           })
         ProtocolRoot.preflight(project_root: project_root, expected_project_id: project_id,
           authority_verifier: verifiers[0])
+        install_rule_library!(project_root)
         puts("project_id: #{project_id}")
         puts("policy_revision_id: #{policy['policy_revision_id']}")
         puts("protocol_root: #{File.join(project_root, '.orbit', 'protocol.yaml')} (#{created})")
@@ -284,7 +333,10 @@ module Orbit
         factory = with_task_factory(base, task_id)
         rule_paths = Array(options["rules"])
         if rule_paths.empty?
-          raise UsageError, "--rule PATH required (at least one rule file for the dispatch)"
+          unless role_key == "implementer"
+            raise UsageError, "--rule PATH required (at least one rule file for the dispatch)"
+          end
+          rule_paths = [DEFAULT_IMPLEMENTER_RULE]
         end
 
         task_result = resolved_task(base, task_id)
@@ -630,7 +682,7 @@ module Orbit
         commands:
           init <project_id>                      create the v2 protocol root + genesis policy
           task start <task_id> --def FILE        create one task (definition + control genesis)
-          dispatch --task ID --role R --rule P   dispatch an attempt (implementer|reviewer)
+          dispatch --task ID --role R [--rule P] dispatch (implementer defaults to rules/minimal-implementation.md)
           evidence submit --task ID --proposal F  submit evidence for an attempt
           gate submit --task ID --def FILE       submit an independent gate evaluation
           finding resolve --task ID --def FILE   resolve a finding (addressed) after a follow-up evaluation
