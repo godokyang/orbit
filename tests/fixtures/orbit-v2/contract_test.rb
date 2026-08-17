@@ -112,6 +112,8 @@ module OrbitV2ContractTest
     test_v2_entry_wiring
     test_v2_init_dispatch_pins_default_rule
     test_v2_rule_byte_change_isolates_attempts
+    test_v2_reviewer_inherits_recorded_subject_rules
+    test_v2_reviewer_dispatch_after_subject_rule_byte_change
     puts(
       "ORBIT_V2_CONTRACT_TESTS_PASS assertions=#{@assertions} " \
         "schema_parity=#{@schema_parity_counts.sort.map { |key, value| "#{key}:#{value}" }.join(",")}"
@@ -9548,13 +9550,17 @@ module OrbitV2ContractTest
         g2a_start_task(dir, "oproj_g2apin0000001", task_id)
         rule = File.join(dir, "rules", "minimal-implementation.md")
         assert(File.file?(rule), "init must copy the default rule into rules/")
+        assert(File.file?(File.join(dir, "rules", "escalation-payload.md")),
+          "init must copy the shared escalation payload into rules/")
         expected = "sha256:#{Digest::SHA256.file(rule).hexdigest}"
         g2a_cli!("dispatch", "--task", task_id, "--role", "implementer")
         _id, rules = g2a_attempt_rules(dir, task_id).fetch(0)
-        assert(rules.length == 1 && rules[0]["path"] == "rules/minimal-implementation.md",
-          "dispatch must pin the default project rule path")
-        assert(rules[0]["content_sha256"] == expected,
-          "pinned content_sha256 must equal the file's real digest")
+        pinned = rules.find { |entry| entry["path"] == "rules/minimal-implementation.md" }
+        shared = rules.find { |entry| entry["path"] == "rules/escalation-payload.md" }
+        assert(pinned && pinned["content_sha256"] == expected,
+          "dispatch must pin the default project rule digest")
+        assert(shared && shared["relation"] == "supplements",
+          "every dispatch must pin the shared escalation payload as supplements")
       end
     end
   end
@@ -9598,6 +9604,73 @@ module OrbitV2ContractTest
         end
         assert(!stderr.string.include?("error "),
           "complete must accept the old attempt after the rule file changed (#{stderr.string})")
+      end
+    end
+  end
+
+  def g2b_cli_capture(*args)
+    stdout = StringIO.new
+    stderr = StringIO.new
+    code = nil
+    original_stdout, original_stderr = $stdout, $stderr
+    $stdout = stdout
+    $stderr = stderr
+    begin
+      code = Orbit::V2::Cli.run(args.flatten)
+    ensure
+      $stdout = original_stdout
+      $stderr = original_stderr
+    end
+    [code, stdout.string, stderr.string]
+  end
+
+  # G.2b: reviewer default inherit copies the subject's recorded digest
+  # and adds rules/review.md as supplements.
+  def test_v2_reviewer_inherits_recorded_subject_rules
+    Dir.mktmpdir do |dir|
+      Dir.chdir(dir) do
+        task_id = "otask_g2binh000001"
+        g2a_start_task(dir, "oproj_g2binh0000001", task_id)
+        g2a_cli!("dispatch", "--task", task_id, "--role", "implementer")
+        subject_digest = g2a_attempt_rules(dir, task_id).fetch(0)[1].fetch(0).fetch("content_sha256")
+        g2a_cli!("dispatch", "--task", task_id, "--role", "reviewer")
+        pins = g2a_attempt_rules(dir, task_id)
+        reviewer_rules = pins.fetch(-1)[1]
+        inherited = reviewer_rules.find { |rule| rule["path"] == "rules/minimal-implementation.md" }
+        added = reviewer_rules.find { |rule| rule["path"] == "rules/review.md" }
+        shared = reviewer_rules.find { |rule| rule["path"] == "rules/escalation-payload.md" }
+        assert(inherited && inherited["content_sha256"] == subject_digest,
+          "reviewer must inherit the subject's recorded digest")
+        assert(added && added["relation"] == "supplements",
+          "review.md must be attached as supplements")
+        assert(shared && shared["relation"] == "supplements",
+          "reviewer dispatch must keep the shared escalation payload pinned")
+      end
+    end
+  end
+
+  # G.2b: implementer dispatch, mutate the subject rule, then reviewer
+  # dispatch. Either outcome is a fact — do not reshape the scene.
+  def test_v2_reviewer_dispatch_after_subject_rule_byte_change
+    Dir.mktmpdir do |dir|
+      Dir.chdir(dir) do
+        task_id = "otask_g2bcpl000001"
+        g2a_start_task(dir, "oproj_g2bcpl0000001", task_id)
+        path = File.join(dir, "rules", "minimal-implementation.md")
+        before = "sha256:#{Digest::SHA256.file(path).hexdigest}"
+        g2a_cli!("dispatch", "--task", task_id, "--role", "implementer")
+        File.write(path, File.binread(path) + "\n")
+        code, _stdout, stderr = g2b_cli_capture("dispatch", "--task", task_id, "--role", "reviewer")
+        warn("G2B_COUPLING_FACT exit=#{code} stderr=#{stderr.rstrip}")
+        if code == 0
+          inherited = g2a_attempt_rules(dir, task_id).fetch(-1)[1]
+            .find { |rule| rule["path"] == "rules/minimal-implementation.md" }
+          assert(inherited && inherited["content_sha256"] == before,
+            "successful reviewer inherit must keep the recorded subject digest")
+        else
+          assert(stderr.include?("error "),
+            "failed reviewer dispatch must report an error (#{stderr})")
+        end
       end
     end
   end

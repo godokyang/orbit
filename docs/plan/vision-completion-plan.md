@@ -21,6 +21,7 @@
 | D8 | 单文件模板：**八项必备（第 0–7 项）+ 三项条件性（第 8–10 项）** | 08-17 | §3 模板 |
 | D9 | 外部 skill 只借形式与判据，**不搬内容** | 08-17 | §3 外部吸收 |
 | D10 | 三项候选能力（完整性下界／`needs_user` payload／Finding 门槛）**未承诺范围** | 08-17 | §3.5 |
+| D11 | 规则中途被改导致 reviewer dispatch fail closed 是**正确行为**；升格 payload 格式抽成一份共享钉入文件，不复制进 8 份 | 08-17 | §3.6 |
 
 被否决的备选记录在各裁决正文里（`skill` 目录方案、hybrid 方案、先建全套规则再接循环、真实执行层先于 runner）。**不要重新提出而不先读它们为何落败。**
 
@@ -281,6 +282,42 @@ Orbit 的 `Finding` 是类型，但没有准入门槛。三要素可作 gate 的
 - **可复现的缺陷一票即成立**，不看其他评审是否发现；
 - **判断分歧才按多数**，且落败方理由要记录，否则同一分歧下轮重来；
 - **收口方自己核过再采纳**——复核者也会报错误的缺陷。
+
+## 3.6 规则字节漂移与共享正文（D11，2026-08-17 实测后裁决）
+
+### 实测事实
+
+阶段 G.2b 跑了这条路：dispatch implementer → 改 `rules/minimal-implementation.md` 一个字节 → dispatch reviewer（继承 subject 已记录的 `required_rules`）。
+
+结果失败，`rule_resolution_digest: rule content_sha256 does not match canonical rule bytes`。
+
+炸点是 `RuleResolution.build`（`rule_resolution.rb:88-89`）：它调用 `canonical_identity` 时不传 `verify_files:`，默认 `true`（L21），于是重读当前文件、与继承来的旧 digest 比对、在写入 control store 之前就 fail closed。比 `control_store.rb:2267` 那条更早，`if policy` 根本没走到。
+
+### 裁决 1：fail closed 是正确行为，不削弱
+
+Orbit 结构上拒绝记录一个与磁盘不符的 pin。规则以 **path 交付**，agent 读的是路径上的文件——文件改了，agent 读到的就是新字节，此时还钉旧 digest 只是记录一句假话。
+
+因此"评审者与实现者同一份字节"只在任务期间规则文件不变时成立。文件一改，那些字节真的不存在了，系统拒绝假装是诚实而不是缺陷。
+
+补救是**重新分派**，不是把校验放宽。任何"让继承路径跳过 `verify_files`"的改法都会让 pin 与磁盘脱钩，被否决。
+
+### 裁决 2：升格 payload 格式抽成一份共享钉入文件
+
+G.1 设计稿原方案是把三型 payload 表逐字复制进全部 8 份规则。**否决**。
+
+先纠正一个直觉错误：抽成共享文件**并不减小爆炸半径**。复制进 8 份时，改表等于改 8 个文件，所有在飞 subject 中招；抽成一份每次 dispatch 都钉时，改它等于改 1 个文件，但所有 attempt 都钉了它，同样全部中招。两者完全相同。
+
+决定因素是**单一事实源**：8 份手工维护的副本会漂移，而这正是规则库自己要教人避免的失败（源素材"字段族和单一事实源"一节已归 `structured-boundary`）。用一个违反该原则的结构去承载教该原则的内容，站不住。
+
+落法：`skills/orbit/assets/rule-library/shared/escalation-payload.md`，随 `init` 拷进项目 `rules/`，每次 dispatch 以 `relation: supplements` 钉上。这引入一个新类别——**被钉的共享层**，区别于 `resident/`（不被钉）与 `tasks/`（按任务选）。
+
+**留在各规则文件里的**：何时算真边界（升格触发条件）。那是规则特有的判断，八份各不相同，见 G.1 设计稿 Q1 升格表。
+**移出到共享文件的**：停下时交什么（三型 payload 的格式与禁令）。那是统一协议，与具体规则无关。
+
+### 未采用
+
+- 放进不被钉的常驻层（项目 `AGENTS.md`）：改它永不破坏任何 attempt，爆炸半径为零。但常驻层靠 Codex 自动发现，"链接不等于加载"，投递不可靠——升格格式会变成看运气的东西。
+- 把升格格式产品化进 `dispatch` 输出：投递可靠且零 pin，但让 Orbit 在代码层对 agent 输出格式定型，与"规则是项目可编辑的文件"冲突，且超出 D10 的承诺范围。
 
 ## 4. 不在本计划内（明确记账）
 

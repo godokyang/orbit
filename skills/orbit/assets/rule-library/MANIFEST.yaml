@@ -1,7 +1,23 @@
 schema_version: orbit-rule-library-manifest-v1
+# layer: task = selected per dispatch role/task
+#        shared = pinned on every dispatch (relation: supplements)
+#        resident = copied for humans / AGENTS.md only, never pinned
 rules:
   - rule_id: orbit.minimal-implementation
     path: tasks/minimal-implementation.md
+    layer: task
     default: true
     profiles: [implementer]
-    content_sha256: "sha256:00a1871a9f33284a42c467be4a51ea9f2b566dd39c39e12f9ad21a563fef8d66"
+    content_sha256: "sha256:e53c9c6f03ecc93cef9765ca71d792ad063215013cc3a31b65c8e61167813561"
+  - rule_id: orbit.review
+    path: tasks/review.md
+    layer: task
+    default: true
+    profiles: [reviewer]
+    content_sha256: "sha256:2df48dc9650fc23058958c2376198afe8e5afc1f62bd9017edc2dd49c1c907d8"
+  - rule_id: orbit.escalation-payload
+    path: shared/escalation-payload.md
+    layer: shared
+    default: true
+    profiles: [implementer, reviewer]
+    content_sha256: "sha256:5bce064a7188b4d26d97e86712ccd1ea69c074085b00620a9d7321061862d7c8"

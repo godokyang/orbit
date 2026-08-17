@@ -684,7 +684,7 @@ module Orbit
 
       # -- execution / terminal ---------------------------------------------------
 
-      def rule_identity(unit, attempt_id, worker, role, rule_paths)
+      def rule_identity(unit, attempt_id, worker, role, rule_paths, required_rules: nil)
         {
           "identity_schema" => "orbit-rule-resolution-identity-v1",
           "protocol_epoch" => "orbit-v2",
@@ -696,7 +696,7 @@ module Orbit
           "resolved_role" => role,
           "agent_instance_id" => worker["agent_instance_id"],
           "context_generation" => 1,
-          "required_rules" => rule_paths.map do |path|
+          "required_rules" => required_rules || rule_paths.map do |path|
             {
               "rule_id" => File.basename(path, ".*"),
               "path" => path,
@@ -746,11 +746,13 @@ module Orbit
       end
 
       def execution_records(task:, unit:, thesis:, lead:, control_records:, rule_paths:,
-                            role: "coder", purpose: "implementation")
+                            required_rules: nil, role: "coder", purpose: "implementation")
         control_id = control_records[0]["lead_control_id"]
         attempt_id = new_id("oattempt_")
         worker = agent_document(new_id("oagent_"), role)
-        resolution = build_resolution(rule_identity(unit, attempt_id, worker, role, rule_paths))
+        resolution = build_resolution(
+          rule_identity(unit, attempt_id, worker, role, rule_paths, required_rules: required_rules)
+        )
         attempt = attempt_document(id: attempt_id, unit: unit, worker: worker, role: role,
           purpose: purpose, thesis: thesis, resolution_id: resolution["resolution_id"],
           control_id: control_id, started_at: stamp)
@@ -777,7 +779,7 @@ module Orbit
       end
 
       def terminal_records(task:, unit:, thesis:, lead:, control_records:, execution:, rule_paths:,
-                           role:, purpose:, event_type: "AttemptCompleted")
+                           required_rules: nil, role:, purpose:, event_type: "AttemptCompleted")
         control_id = control_records[0]["lead_control_id"]
         stored = execution[3]
         ended_at = stamp
@@ -796,7 +798,7 @@ module Orbit
         successor_id = new_id("oattempt_")
         worker = agent_document(new_id("oagent_"), role)
         successor_resolution = build_resolution(
-          rule_identity(unit, successor_id, worker, role, rule_paths)
+          rule_identity(unit, successor_id, worker, role, rule_paths, required_rules: required_rules)
         )
         same_unit = unit["work_unit_id"] == stored["work_unit_id"]
         successor = attempt_document(id: successor_id, unit: unit, worker: worker, role: role,

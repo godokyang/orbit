@@ -38,6 +38,8 @@ module Orbit
 
       RULE_LIBRARY = File.expand_path("../../../skills/orbit/assets/rule-library", __dir__).freeze
       DEFAULT_IMPLEMENTER_RULE = "rules/minimal-implementation.md".freeze
+      DEFAULT_REVIEWER_RULE = "rules/review.md".freeze
+      SHARED_ESCALATION_RULE = "rules/escalation-payload.md".freeze
 
       def run(argv)
         # Phase F: the dispatcher entry passes ARGV through unchanged, so
@@ -122,9 +124,6 @@ module Orbit
       end
 
       def install_rule_library!(project_root)
-        tasks_dir = File.join(RULE_LIBRARY, "tasks")
-        raise UsageError, "rule library tasks directory missing: #{tasks_dir}" unless File.directory?(tasks_dir)
-
         dest_dir = File.join(project_root, "rules")
         FileUtils.mkdir_p(dest_dir)
         source_path = File.join(dest_dir, ".orbit-source.yaml")
@@ -139,30 +138,84 @@ module Orbit
         end
 
         files = []
-        Dir.children(tasks_dir).sort.each do |name|
-          next unless name.end_with?(".md")
+        %w[tasks shared].each do |layer|
+          layer_dir = File.join(RULE_LIBRARY, layer)
+          next unless File.directory?(layer_dir)
 
-          src = File.join(tasks_dir, name)
-          dest = File.join(dest_dir, name)
-          rel = "rules/#{name}"
-          if File.exist?(dest)
-            warn("skip: #{rel} already exists")
-            files << existing[rel] if existing[rel]
-            next
+          Dir.children(layer_dir).sort.each do |name|
+            next unless name.end_with?(".md")
+
+            src = File.join(layer_dir, name)
+            dest = File.join(dest_dir, name)
+            rel = "rules/#{name}"
+            if File.exist?(dest)
+              warn("skip: #{rel} already exists")
+              files << existing[rel] if existing[rel]
+              next
+            end
+
+            FileUtils.cp(src, dest)
+            digest = "sha256:#{Digest::SHA256.file(dest).hexdigest}"
+            files << {
+              "path" => rel,
+              "rule_id" => "orbit.#{File.basename(name, ".md")}",
+              "layer" => layer == "shared" ? "shared" : "task",
+              "last_installed_sha256" => digest
+            }
+            puts("installed: #{rel}")
           end
-
-          FileUtils.cp(src, dest)
-          digest = "sha256:#{Digest::SHA256.file(dest).hexdigest}"
-          files << {
-            "path" => rel,
-            "rule_id" => "orbit.#{File.basename(name, ".md")}",
-            "last_installed_sha256" => digest
-          }
-          puts("installed: #{rel}")
         end
 
         payload = { "schema_version" => "orbit-rule-source-v1", "files" => files }
         File.binwrite(source_path, payload.to_yaml)
+      end
+
+      def inherit_subject_required_rules(control_result, project_root)
+        subject = Array(control_result["attempts"]).reverse.find do |attempt|
+          attempt.dig("events", 0, "assignment", "purpose") == "implementation"
+        end
+        raise ContractError.new("v2_cli_subject_missing",
+          "reviewer inherit needs an implementation attempt to copy recorded rules from",
+          path: "dispatch.required_rules") unless subject
+
+        resolution_id = subject.dig("events", 0, "assignment", "assigned_rule_resolution_id")
+        resolution = Array(control_result["rule_resolutions"]).find do |rule|
+          rule["resolution_id"] == resolution_id
+        end
+        recorded = Array(resolution && resolution.dig("identity", "required_rules")).map do |rule|
+          {
+            "rule_id" => rule["rule_id"],
+            "path" => rule["path"],
+            "content_sha256" => rule["content_sha256"],
+            "relation" => rule["relation"]
+          }
+        end
+        raise ContractError.new("v2_cli_subject_missing",
+          "subject attempt has no recorded required_rules to inherit",
+          path: "dispatch.required_rules") if recorded.empty?
+
+        review = File.join(project_root, DEFAULT_REVIEWER_RULE)
+        recorded + [{
+          "rule_id" => File.basename(DEFAULT_REVIEWER_RULE, ".*"),
+          "path" => DEFAULT_REVIEWER_RULE,
+          "content_sha256" => "sha256:#{Digest::SHA256.file(review).hexdigest}",
+          "relation" => "supplements"
+        }]
+      end
+
+      def hashed_required_rule(project_root, path, relation)
+        {
+          "rule_id" => File.basename(path, ".*"),
+          "path" => path,
+          "content_sha256" => "sha256:#{Digest::SHA256.file(File.join(project_root, path)).hexdigest}",
+          "relation" => relation
+        }
+      end
+
+      def with_shared_supplement(project_root, rules)
+        return rules if rules.any? { |rule| rule["path"] == SHARED_ESCALATION_RULE }
+
+        rules + [hashed_required_rule(project_root, SHARED_ESCALATION_RULE, "supplements")]
       end
 
 
@@ -331,18 +384,28 @@ module Orbit
         spec = ROLES.fetch(role_key) { raise UsageError, "role must be implementer or reviewer" }
         base = context
         factory = with_task_factory(base, task_id)
-        rule_paths = Array(options["rules"])
-        if rule_paths.empty?
-          unless role_key == "implementer"
-            raise UsageError, "--rule PATH required (at least one rule file for the dispatch)"
-          end
-          rule_paths = [DEFAULT_IMPLEMENTER_RULE]
-        end
-
         task_result = resolved_task(base, task_id)
         revision = tip_revision(task_result)
         units = units_for_revision(task_result, revision)
         control_result = resolved_control(base, task_id)
+        rule_paths = Array(options["rules"])
+        required_rules = nil
+        if rule_paths.empty?
+          case role_key
+          when "implementer"
+            rule_paths = [DEFAULT_IMPLEMENTER_RULE]
+          when "reviewer"
+            required_rules = inherit_subject_required_rules(control_result, base[:project_root])
+            rule_paths = required_rules.map { |rule| rule["path"] }
+          else
+            raise UsageError, "--rule PATH required (at least one rule file for the dispatch)"
+          end
+        end
+        required_rules ||= rule_paths.map do |path|
+          hashed_required_rule(base[:project_root], path, "baseline")
+        end
+        required_rules = with_shared_supplement(base[:project_root], required_rules)
+        rule_paths = required_rules.map { |rule| rule["path"] }
         control_records = [
           { "lead_control_id" => control_result["registry"]["lead_control_id"] },
           control_result["session"],
@@ -364,7 +427,8 @@ module Orbit
           records = factory.terminal_records(task: revision, unit: unit, thesis: thesis,
             lead: task_result["logical_lead"], control_records: control_records,
             execution: execution_from(control_result, active),
-            rule_paths: rule_paths, role: spec["role"], purpose: spec["purpose"])
+            rule_paths: rule_paths, required_rules: required_rules,
+            role: spec["role"], purpose: spec["purpose"])
           control_store(base, task_id).terminal(attempt: records[0], checkpoint: records[1],
             assertion: records[2], successor_attempt: records[3], worker_agent: records[4],
             rule_resolution: records[5], observation_checkpoint: records[6],
@@ -377,7 +441,8 @@ module Orbit
         else
           records = factory.execution_records(task: revision, unit: unit, thesis: thesis,
             lead: task_result["logical_lead"], control_records: control_records,
-            rule_paths: rule_paths, role: spec["role"], purpose: spec["purpose"])
+            rule_paths: rule_paths, required_rules: required_rules,
+            role: spec["role"], purpose: spec["purpose"])
           control_store(base, task_id).dispatch(rule_resolution: records[0],
             dispatch_checkpoint: records[1], dispatch_assertion: records[2],
             attempt: records[3], worker_agent: records[4],
@@ -682,7 +747,7 @@ module Orbit
         commands:
           init <project_id>                      create the v2 protocol root + genesis policy
           task start <task_id> --def FILE        create one task (definition + control genesis)
-          dispatch --task ID --role R [--rule P] dispatch (implementer defaults to rules/minimal-implementation.md)
+          dispatch --task ID --role R [--rule P] dispatch (implementer defaults to rules/minimal-implementation.md; reviewer inherits subject rules + rules/review.md)
           evidence submit --task ID --proposal F  submit evidence for an attempt
           gate submit --task ID --def FILE       submit an independent gate evaluation
           finding resolve --task ID --def FILE   resolve a finding (addressed) after a follow-up evaluation
