@@ -107,9 +107,7 @@ module OrbitV2ContractTest
     test_gate_engine
     test_lib_solo_require
     test_v2_cli_end_to_end
-    test_v2_entry_isolation_and_wiring
-    test_v1_inventory
-    test_slice_isolation
+    test_v2_entry_wiring
     puts(
       "ORBIT_V2_CONTRACT_TESTS_PASS assertions=#{@assertions} " \
         "schema_parity=#{@schema_parity_counts.sort.map { |key, value| "#{key}:#{value}" }.join(",")}"
@@ -9463,80 +9461,32 @@ module OrbitV2ContractTest
     end
   end
 
-  # Phase D wiring guard: (a) BEHAVIORAL isolation — after a v1 command
-  # runs, the process has loaded ZERO lib/orbit/v2 files ($LOADED_FEATURES
-  # is immune to how a require is spelled; the grep in
-  # test_slice_isolation is not, hence its explicit allowlist); (b) the
-  # real dispatcher entry `scripts/orbit v2 ...` reaches the v2 CLI with
-  # the documented exit codes, and a v1 command still exits 0 through the
-  # same entry.
-  def test_v2_entry_isolation_and_wiring
-    probe = IO.popen([RbConfig.ruby, "--disable-gems", "-e",
-      "require #{File.join(ROOT, 'lib', 'orbit', 'cli').inspect}; " \
-      "run_orbit_cli(['version']); " \
-      "$LOADED_FEATURES.grep(%r{lib/orbit/v2}).each { |path| puts path }"],
-      err: File::NULL, chdir: ROOT, &:read)
-    v2_loaded = probe.lines.map(&:strip).select { |line| line.include?("lib/orbit/v2") }
-    assert(v2_loaded.empty?,
-      "the v1 startup path must load zero v2 files: #{v2_loaded.join(', ')}")
+  # Phase F wiring guard: scripts/orbit is now the v2-ONLY entry (v1 code
+  # deleted, Gate 6a). Asserted through the REAL dispatcher: both command
+  # spellings (historical `orbit v2 <cmd>` namespace and bare `<cmd>`),
+  # unknown commands fail closed, removed v1 commands fail closed instead
+  # of silently executing, and a full init works from the script entry.
+  def test_v2_entry_wiring
     Dir.mktmpdir do |dir|
       Dir.chdir(dir) do
         script = File.join(ROOT, "scripts", "orbit")
-        assert(system(RbConfig.ruby, "--disable-gems", script, "v2", "--help",
-          out: File::NULL), "orbit v2 --help must exit 0 through the real dispatcher")
-        assert(!system(RbConfig.ruby, "--disable-gems", script, "v2", "bogus",
-          out: File::NULL, err: File::NULL), "orbit v2 <unknown> must exit non-zero")
-        assert(system(RbConfig.ruby, "--disable-gems", script, "version",
-          out: File::NULL), "the v1 version command must still exit 0")
+        orbit = lambda do |*args|
+          system(RbConfig.ruby, "--disable-gems", script, *args.flatten,
+            out: File::NULL, err: File::NULL)
+        end
+        assert(orbit.call("v2", "--help"), "orbit v2 --help must exit 0 (namespace form)")
+        assert(orbit.call("--help"), "orbit --help must exit 0 (bare form)")
+        assert(!orbit.call("bogus"), "orbit bogus must exit non-zero")
+        assert(!orbit.call("v2", "bogus"), "orbit v2 bogus must exit non-zero")
+        assert(!orbit.call("version"), "the removed v1 version command must fail closed")
+        assert(!orbit.call("new-task"), "the removed v1 new-task command must fail closed")
+        assert(orbit.call("init", "oproj_entrywiring1") &&
+               File.file?(File.join(dir, ".orbit", "protocol.yaml")),
+               "orbit init must work end to end through the script entry")
       end
     end
   end
-  def test_v1_inventory
 
-    inventory = YAML.safe_load(
-      File.read(File.join(ROOT, "contracts/orbit-v2/legacy-v1-writer-reader-inventory.yaml")),
-      aliases: false
-    )
-    entries = inventory.fetch("surfaces")
-    actual = entries.map { |entry| entry.fetch("path") }.sort
-    expected = %w[README.md install.sh package.json scripts/orbit tests/orbit_test.sh uninstall.sh]
-    expected.concat(Dir.glob(File.join(ROOT, "lib/orbit/*.rb")).map { |path| relative(path) })
-    expected.concat(Dir.glob(File.join(ROOT, "skills/orbit/**/*")).select { |path| File.file?(path) }.map { |path| relative(path) })
-    expected.concat(Dir.glob(File.join(ROOT, "tests/fixtures/*")).select { |path| File.file?(path) }.map { |path| relative(path) })
-    expected.concat(
-      Dir.glob(File.join(ROOT, "tests/parts/*.sh"))
-         .reject { |path| File.basename(path) == "28_orbit_v2_slice0_contracts.sh" }
-         .map { |path| relative(path) }
-    )
-    expected.sort!
-    assert(actual.uniq.length == actual.length, "v1 inventory paths unique")
-    assert(actual == expected, "v1 inventory must exactly cover frozen reader/writer roots")
-    assert(
-      entries.all? do |entry|
-        %w[path surface_kind access_modes v1_semantic slice6_disposition].all? do |field|
-          value = entry[field]
-          value.is_a?(Array) ? value.any? : !value.to_s.empty?
-        end
-      end,
-      "every v1 inventory entry carries migration classification and disposition"
-    )
-  end
-
-  def test_slice_isolation
-    runtime_paths = Dir.glob(File.join(ROOT, "lib/orbit/*.rb")) + [File.join(ROOT, "scripts/orbit")]
-    # Explicit, visible exception (phase D): lib/orbit/cli.rb carries the
-    # `orbit v2` dispatch branch and lazily requires v2/cli. The spelling
-    # grep cannot see "v2/cli", so this file is exempted HERE, in the open,
-    # instead of passing by accident. The real invariant — the v1 STARTUP
-    # path loads zero v2 files however the require is spelled — is asserted
-    # behaviorally by test_v2_entry_isolation_and_wiring ($LOADED_FEATURES).
-    spelling_exempt = [File.join(ROOT, "lib", "orbit", "cli.rb")].freeze
-    forbidden_imports = runtime_paths.select do |path|
-      !spelling_exempt.include?(path) && File.read(path).match?(/orbit\/v2|Orbit::V2/)
-    end
-    assert(forbidden_imports.empty?, "v1 runtime must not import isolated v2 contracts")
-    assert(!File.exist?(File.join(ROOT, ".orbit/protocol.yaml")), "Slice 0 must not activate ProtocolRoot")
-  end
 
   def mutate(id, bundle)
     case id

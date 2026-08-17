@@ -2,6 +2,11 @@
 
 Orbit 是给 AI agent 用的任务闭环工具。它不负责“让 AI 更会写代码”，而是让 agent 的工作结果更可追溯、更可接手、更难假完成。
 
+> **v1 已删除（2026-08-17）**：Orbit v1 runtime 代码已从本仓库移除，本文其余部分
+> 描述的 `orbit init/start/new-task/state/evidence/rules/...` 等 v1 命令**不再存在**。
+> 当前唯一可用入口是 v2 CLI（`orbit v2 --help`；命名空间前缀 `v2` 可省略）。
+> v1 代码删除 ≠ cutover 完成（见 ADR-005 修订记录）；v2 文档重写进行中。
+
 ## 用了以后有什么效果
 
 使用 Orbit 后，一次任务不会只停留在聊天里。agent 会把任务目标写成 task contract，把实现、review、test 和收口写入 evidence / state / handoff。用户可以看到：这轮到底承诺了什么、谁实现了、谁 review 了、谁测试了、哪些 gate 通过了、还有哪些风险没关。

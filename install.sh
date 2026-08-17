@@ -150,42 +150,55 @@ target_wrapper="$bin_dir/orbit"
 runtime_files="
 package.json
 scripts/orbit
-lib/orbit/cli.rb
-lib/orbit/core.rb
-lib/orbit/identity_rules.rb
-lib/orbit/identity_rules_context.rb
-lib/orbit/runtime_store.rb
-lib/orbit/herdr_probe.rb
-lib/orbit/runtime_identity_boundary.rb
-lib/orbit/runtime_resolver.rb
-lib/orbit/runtime_commands.rb
-lib/orbit/schema_version.rb
-lib/orbit/task_launch_dispatch.rb
-lib/orbit/task_herdr_probe.rb
-lib/orbit/task_herdr_exec.rb
-lib/orbit/evidence.rb
-lib/orbit/evidence_submit_validate.rb
-lib/orbit/state_validate_gate.rb
-lib/orbit/validate_task_contract.rb
-lib/orbit/validate_evidence_record.rb
-lib/orbit/validate_gate_commands.rb
-lib/orbit/audit_tools.rb
-lib/orbit/project_profile_risk.rb
-lib/orbit/revision_knowledge.rb
-lib/orbit/user_journey.rb
-lib/orbit/artifact_provenance.rb
-lib/orbit/gate_lease.rb
-lib/orbit/handoff.rb
-lib/orbit/status.rb
-lib/orbit/notice.rb
-lib/orbit/hook.rb
-lib/orbit/docs_lifecycle.rb
-lib/orbit/data_classification.rb
-lib/orbit/release_readiness.rb
-lib/orbit/dogfood_governance.rb
-lib/orbit/landing_governance.rb
-lib/orbit/task_workflow.rb
-lib/orbit/trial_metrics.rb
+lib/orbit/v2/active_root.rb
+lib/orbit/v2/aggregate_outcome.rb
+lib/orbit/v2/authority_verifier.rb
+lib/orbit/v2/budget_projection.rb
+lib/orbit/v2/canonical_json.rb
+lib/orbit/v2/cli.rb
+lib/orbit/v2/cli/document_factory.rb
+lib/orbit/v2/code_surface.rb
+lib/orbit/v2/context_projection.rb
+lib/orbit/v2/control_authority.rb
+lib/orbit/v2/control_store.rb
+lib/orbit/v2/durable_file.rb
+lib/orbit/v2/errors.rb
+lib/orbit/v2/evaluation_subject.rb
+lib/orbit/v2/evidence_contract.rb
+lib/orbit/v2/evidence_store.rb
+lib/orbit/v2/gate_engine.rb
+lib/orbit/v2/gate_fact_store.rb
+lib/orbit/v2/gate_strength.rb
+lib/orbit/v2/identifiers.rb
+lib/orbit/v2/immutable_store.rb
+lib/orbit/v2/integrity_audit.rb
+lib/orbit/v2/invariant_graph.rb
+lib/orbit/v2/json_schema.rb
+lib/orbit/v2/lead_control.rb
+lib/orbit/v2/lifecycle_verifier.rb
+lib/orbit/v2/local_provider.rb
+lib/orbit/v2/path_scope.rb
+lib/orbit/v2/policy_issuance.rb
+lib/orbit/v2/policy_store.rb
+lib/orbit/v2/projection_primitives.rb
+lib/orbit/v2/protected_change.rb
+lib/orbit/v2/protocol_root.rb
+lib/orbit/v2/relationship_view.rb
+lib/orbit/v2/rule_resolution.rb
+lib/orbit/v2/runtime_identity_verifier.rb
+lib/orbit/v2/schema_catalog.rb
+lib/orbit/v2/task_authority.rb
+lib/orbit/v2/task_scopes.rb
+lib/orbit/v2/task_store.rb
+lib/orbit/v2/transaction_log.rb
+lib/orbit/v2/validator.rb
+lib/orbit/v2/validator/authority_policy.rb
+lib/orbit/v2/validator/evidence_evaluation.rb
+lib/orbit/v2/validator/findings_lineage.rb
+lib/orbit/v2/validator/lead_control.rb
+lib/orbit/v2/validator/runtime_lifecycle.rb
+lib/orbit/v2/validator/task_work_gate.rb
+lib/orbit/v2/work_authority.rb
 skills/orbit/SKILL.md
 skills/orbit/assets/templates/roles.yaml
 skills/orbit/assets/templates/instances.yaml
@@ -329,7 +342,7 @@ chmod 0755 "$wrapper_tmp"
 mv "$wrapper_tmp" "$target_wrapper"
 
 install_log "verifying installed orbit command"
-"$target_wrapper" version >/dev/null || fail "installed orbit command failed verification"
+"$target_wrapper" v2 --help >/dev/null || fail "installed orbit command failed verification"
 
 printf 'Installed orbit to %s\n' "$target_wrapper"
 printf 'Runtime files installed to %s\n' "$runtime_dir"

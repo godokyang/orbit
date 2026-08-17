@@ -354,3 +354,22 @@ cutover 前置相应修订：原条款 11/12/17 中的 cross-control 闭合条�
 ### 修订原因
 
 用户已否定「同项目多个长期 Lead control 并行 + Task 在 control 之间转移」这一前提：真实协作边界是「一个 Task = 一个 task_id = 一个 Git branch/worktree」。项目级多 control 调度、cross-control transfer 与 project-wide ownership registry 不是 Orbit MVP 必要能力。背景与完整路线见 `docs/open/orbit-v2-slice6-handoff.md`；ADR-003/ADR-006 同日修订与本文一致。
+
+---
+
+## 修订记录（2026-08-17，阶段 F）：v1 代码已删除——这不是 cutover 完成
+
+**事实**：本仓库已删除 v1 production 代码（`lib/orbit/*.rb` 36 文件）、`tests/orbit_test.sh`（v1 测试面）与 `contracts/orbit-v2/legacy-v1-writer-reader-inventory.yaml`（v1 迁移清单）；`scripts/orbit` 入口直接进入 v2 CLI（历史 `orbit v2 <cmd>` 命名空间与裸 `<cmd>` 等价）。决策依据（无用户、v2 对 v1 零依赖、v1 停用 17 天、本 ADR 本就以删除为终点）见 `docs/open/orbit-v2-slice6-workorder.md` 第 6 节；删除是可逆的（git 历史）。
+
+**纪律声明：v1 代码删除 ≠ cutover 完成。** 「v2 必须关闭的旧路径」清单的删除字段要求与「实施和发布约束」17 条编号条件中，本增量只满足一部分。**仍未满足的（至少）**：
+
+- 第 7 条：`skills/orbit/references/runtime/`、templates、help 与 examples 尚未与 v2 原子更新——v1 命令教学仍在（阶段 F Gate 6b 处理停用标注；完整 v2 文档重写未完成）。
+- 第 6 条：v1 fallback 与兼容测试已删除，但「替换为 unsupported-schema 负向测试」的完整负向面尚未按 cutover 规模重建（现有 v2 合同测试含部分负向，未宣称覆盖本条全量）。
+- 第 10 条：GateRequirement subject selector、GateEvaluation canonical subject/freshness/producer independence 的正负向测试面未做 cutover 级审计确认。
+- 第 5 条：完整 E2E 已有一条真实 CLI 路径（阶段 D），但 handoff/recovery/clean-install dogfood 未跑。
+- 第 8/14 条：repository-wide closure audit 未执行（v1 代码删除本身不是 closure proof——本 ADR 明文「删除字段名称本身不是 closure proof」）。
+- 第 11/13 条及「Cutover 行为」节的 dogfood 验收未发生；`tests/orbit_test.sh` 的全仓绿色标记随 v1 删除一并移除，v2 收口以 `contract_test.rb` 为准。
+
+**其他有意保留**：`reject_mixed_epoch!` 与 `KNOWN_V1_AUTHORITY_PATHS` 保留（防 v2 在残留 v1 数据上初始化，其他项目仍可能有）；`task-scopes` 存储段名不改（删除与布局变更不在同一增量）；本仓库 `.orbit/` 的 130 个 v1 数据文件移除是独立的不可逆步骤（阶段 F Gate 6c，先备份）。
+
+在上述条件逐条满足前，不得宣称 cutover 完成、v2 激活或 clean-install ready。

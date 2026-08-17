@@ -36,7 +36,11 @@ module Orbit
       }.freeze
 
       def run(argv)
+        # Phase F: the dispatcher entry passes ARGV through unchanged, so
+        # the historical `orbit v2 <cmd>` namespace is accepted as an
+        # optional leading prefix; bare `<cmd>` works identically.
         command = argv.shift
+        command = argv.shift if command == "v2"
         case command
         when "init" then init(argv)
         when "task" then task(argv)

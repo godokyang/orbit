@@ -1,7 +1,7 @@
 {
   "name": "@godokyang/orbit",
   "version": "0.1.15",
-  "description": "Orbit skill and CLI.",
+  "description": "Orbit v2 skill and CLI.",
   "files": [
     "README.md",
     "install.sh",
@@ -11,7 +11,7 @@
     "scripts/orbit"
   ],
   "scripts": {
-    "test": "sh -n install.sh && sh -n uninstall.sh && tests/orbit_test.sh"
+    "test": "sh -n install.sh && sh -n uninstall.sh && ruby --disable-gems tests/fixtures/orbit-v2/contract_test.rb"
   },
   "publishConfig": {
     "access": "public"
