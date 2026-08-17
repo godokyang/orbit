@@ -4,6 +4,17 @@
 >
 > 本文件是**支持读取该文件的开发 Agent 的客户端纪律**，不是 Orbit 产品 authority：它不产生任何 gate/evidence/state 事实，不影响 v2 合同；产品 authority 是 active ProjectPolicyRevision / TaskRevision 与受控 writer/validator，两者冲突时以产品 authority 为准。
 
+## 按需加载（动手前先读）
+
+本文只管测试与范围纪律。产品裁决不在这里，**不要凭本文推断该做什么**。
+
+- 在本仓做任何实现、重构或文档改动前，先读 [docs/README.md](docs/README.md)：它说明哪类事实归哪个文件，以及哪些层没有裁定权。
+- 承接任何交付任务前，先读 [docs/plan/vision-completion-plan.md](docs/plan/vision-completion-plan.md) 的「如果你刚接手」表——D1–D10 是全部有约束力的裁决，含已被否决的备选。
+- 动 `lib/` 或 `contracts/` 前，查 [docs/plan/debt-ledger.md](docs/plan/debt-ledger.md)：有意推迟的项目及其解除条件都在那里。
+- 语义合同以 `contracts/orbit-v2/` 与 `docs/adr/` 为准。散文与合同冲突时以合同为准。
+
+**禁止只在对话中拍板。** 任何架构或产品结论必须同步写进对应权威文件并记录理由；只存在于对话里的裁决，下一个上下文就没有了。
+
 ## 任务优先级
 
 1. 理解真实需求
