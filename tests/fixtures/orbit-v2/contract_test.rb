@@ -116,6 +116,8 @@ module OrbitV2ContractTest
     test_v2_reviewer_dispatch_after_subject_rule_byte_change
     test_v2_init_installs_task_shared_and_reference_inventory
     test_v2_implementer_default_pins_four_not_nondefaults
+    test_v2_rules_update_overwrites_unmodified
+    test_v2_rules_update_skips_modified_and_keeps_pin
     puts(
       "ORBIT_V2_CONTRACT_TESTS_PASS assertions=#{@assertions} " \
         "schema_parity=#{@schema_parity_counts.sort.map { |key, value| "#{key}:#{value}" }.join(",")}"
@@ -9740,6 +9742,96 @@ module OrbitV2ContractTest
         end
         assert(!paths.include?("docs/orbit/reference/report-and-evidence-examples.md"),
           "reference layer must not be pinned")
+      end
+    end
+  end
+
+  def g2d_with_library
+    Dir.mktmpdir do |libroot|
+      FileUtils.cp_r(Orbit::V2::Cli::RULE_LIBRARY, libroot)
+      library = File.join(libroot, File.basename(Orbit::V2::Cli::RULE_LIBRARY))
+      previous = ENV["ORBIT_RULE_LIBRARY"]
+      ENV["ORBIT_RULE_LIBRARY"] = library
+      begin
+        yield library
+      ensure
+        if previous.nil?
+          ENV.delete("ORBIT_RULE_LIBRARY")
+        else
+          ENV["ORBIT_RULE_LIBRARY"] = previous
+        end
+      end
+    end
+  end
+
+  def g2d_source_entry(dir, rel)
+    loaded = YAML.safe_load(File.binread(File.join(dir, "rules", ".orbit-source.yaml")),
+                            permitted_classes: [], aliases: false)
+    Array(loaded.is_a?(Hash) ? loaded["files"] : nil).find { |entry| entry["path"] == rel }
+  end
+
+  # G.2d: an unmodified project file is overwritten from a new master,
+  # and .orbit-source.yaml records the new digest.
+  def test_v2_rules_update_overwrites_unmodified
+    g2d_with_library do |library|
+      Dir.mktmpdir do |dir|
+        Dir.chdir(dir) do
+          g2a_cli!("init", "oproj_g2dupd0000001")
+          rel = "rules/minimal-implementation.md"
+          dest = File.join(dir, rel)
+          master = File.join(library, "tasks", "minimal-implementation.md")
+          before = "sha256:#{Digest::SHA256.file(dest).hexdigest}"
+          assert(g2d_source_entry(dir, rel)["last_installed_sha256"] == before,
+            "init must record the installed digest")
+          File.write(master, File.binread(master) + "\n# master-bump\n")
+          after = "sha256:#{Digest::SHA256.file(master).hexdigest}"
+          assert(before != after, "the mutated master must change the digest")
+          g2a_cli!("rules", "update")
+          assert(File.binread(dest) == File.binread(master),
+            "update must overwrite an unmodified project file")
+          assert(g2d_source_entry(dir, rel)["last_installed_sha256"] == after,
+            "update must record the new master digest")
+          assert(!File.exist?("#{dest}.upstream"),
+            "an unmodified file must not get a .upstream sidecar")
+        end
+      end
+    end
+  end
+
+  # G.2d: a locally edited file is left in place, the new master lands in
+  # .upstream, and an already-pinned attempt digest is not rewritten.
+  def test_v2_rules_update_skips_modified_and_keeps_pin
+    g2d_with_library do |library|
+      Dir.mktmpdir do |dir|
+        Dir.chdir(dir) do
+          task_id = "otask_g2dskp000001"
+          g2a_start_task(dir, "oproj_g2dskp0000001", task_id)
+          g2a_cli!("dispatch", "--task", task_id, "--role", "implementer")
+          rel = "rules/minimal-implementation.md"
+          dest = File.join(dir, rel)
+          pinned = g2a_attempt_rules(dir, task_id).fetch(0)[1]
+            .find { |rule| rule["path"] == rel }.fetch("content_sha256")
+          live_before = File.binread(dest)
+          File.write(dest, live_before + "\n# project-edit\n")
+          master = File.join(library, "tasks", "minimal-implementation.md")
+          File.write(master, File.binread(master) + "\n# master-bump\n")
+          code, _stdout, stderr = g2b_cli_capture("rules", "update")
+          assert(code == 0, "rules update must exit 0 after a skip (got #{code})")
+          assert(File.binread(dest) == live_before + "\n# project-edit\n",
+            "update must not overwrite a modified project file")
+          assert(File.file?("#{dest}.upstream"),
+            "update must write the new master beside a modified file")
+          assert(File.binread("#{dest}.upstream") == File.binread(master),
+            ".upstream must be the new master bytes")
+          assert(stderr.include?("skip: #{rel}"),
+            "update must list the skipped path (#{stderr})")
+          assert(!File.binread(dest).include?("<<<<<<<"),
+            "update must not insert conflict markers into the live file")
+          after_pin = g2a_attempt_rules(dir, task_id).fetch(0)[1]
+            .find { |rule| rule["path"] == rel }.fetch("content_sha256")
+          assert(after_pin == pinned,
+            "update must not change an already-pinned attempt digest")
+        end
       end
     end
   end

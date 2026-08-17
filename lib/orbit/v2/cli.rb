@@ -55,6 +55,7 @@ module Orbit
         case command
         when "init" then init(argv)
         when "task" then task(argv)
+        when "rules" then rules(argv)
         when "dispatch" then dispatch(argv)
         when "evidence" then evidence(argv)
         when "gate" then gate(argv)
@@ -128,10 +129,25 @@ module Orbit
         File.join(base[:project_root], ".orbit")
       end
 
-      def install_rule_library!(project_root)
+      def rule_library_dir
+        override = ENV["ORBIT_RULE_LIBRARY"]
+        return override if override.is_a?(String) && !override.empty?
+
+        RULE_LIBRARY
+      end
+
+      def rule_library_layers(project_root)
         dest_dir = File.join(project_root, "rules")
-        FileUtils.mkdir_p(dest_dir)
-        source_path = File.join(dest_dir, ".orbit-source.yaml")
+        [
+          ["tasks", dest_dir, "rules", "task"],
+          ["shared", dest_dir, "rules", "shared"],
+          ["reference", File.join(project_root, "docs", "orbit", "reference"),
+           "docs/orbit/reference", "reference"]
+        ]
+      end
+
+      def load_rule_source(project_root)
+        source_path = File.join(project_root, "rules", ".orbit-source.yaml")
         existing = {}
         if File.file?(source_path)
           loaded = YAML.safe_load(File.binread(source_path), permitted_classes: [], aliases: false)
@@ -141,44 +157,91 @@ module Orbit
             existing[entry["path"]] = entry
           end
         end
+        [source_path, existing]
+      end
 
-        files = []
-        [
-          ["tasks", dest_dir, "rules", "task"],
-          ["shared", dest_dir, "rules", "shared"],
-          ["reference", File.join(project_root, "docs", "orbit", "reference"),
-           "docs/orbit/reference", "reference"]
-        ].each do |layer, layer_dest, rel_prefix, layer_name|
-          layer_dir = File.join(RULE_LIBRARY, layer)
+      def write_rule_source!(source_path, files)
+        FileUtils.mkdir_p(File.dirname(source_path))
+        File.binwrite(source_path, {
+          "schema_version" => "orbit-rule-source-v1",
+          "files" => files
+        }.to_yaml)
+      end
+
+      def each_rule_library_file(project_root)
+        rule_library_layers(project_root).each do |layer, layer_dest, rel_prefix, layer_name|
+          layer_dir = File.join(rule_library_dir, layer)
           next unless File.directory?(layer_dir)
 
           FileUtils.mkdir_p(layer_dest)
           Dir.children(layer_dir).sort.each do |name|
             next unless name.end_with?(".md")
 
-            src = File.join(layer_dir, name)
-            dest = File.join(layer_dest, name)
-            rel = "#{rel_prefix}/#{name}"
-            if File.exist?(dest)
-              warn("skip: #{rel} already exists")
-              files << existing[rel] if existing[rel]
-              next
-            end
-
-            FileUtils.cp(src, dest)
-            digest = "sha256:#{Digest::SHA256.file(dest).hexdigest}"
-            files << {
-              "path" => rel,
-              "rule_id" => "orbit.#{File.basename(name, ".md")}",
-              "layer" => layer_name,
-              "last_installed_sha256" => digest
-            }
-            puts("installed: #{rel}")
+            yield(File.join(layer_dir, name), File.join(layer_dest, name),
+                  "#{rel_prefix}/#{name}", layer_name)
           end
         end
+      end
 
-        payload = { "schema_version" => "orbit-rule-source-v1", "files" => files }
-        File.binwrite(source_path, payload.to_yaml)
+      def rule_source_entry(rel, layer_name, digest)
+        {
+          "path" => rel,
+          "rule_id" => "orbit.#{File.basename(rel, ".md")}",
+          "layer" => layer_name,
+          "last_installed_sha256" => digest
+        }
+      end
+
+      def install_rule_library!(project_root)
+        source_path, existing = load_rule_source(project_root)
+        files = []
+        each_rule_library_file(project_root) do |src, dest, rel, layer_name|
+          if File.exist?(dest)
+            warn("skip: #{rel} already exists")
+            files << existing[rel] if existing[rel]
+            next
+          end
+
+          FileUtils.cp(src, dest)
+          files << rule_source_entry(rel, layer_name, "sha256:#{Digest::SHA256.file(dest).hexdigest}")
+          puts("installed: #{rel}")
+        end
+        write_rule_source!(source_path, files)
+      end
+
+      def update_rule_library!(project_root)
+        source_path, existing = load_rule_source(project_root)
+        files = []
+        skipped = []
+        each_rule_library_file(project_root) do |src, dest, rel, layer_name|
+          master_digest = "sha256:#{Digest::SHA256.file(src).hexdigest}"
+          if !File.exist?(dest)
+            FileUtils.mkdir_p(File.dirname(dest))
+            FileUtils.cp(src, dest)
+            files << rule_source_entry(rel, layer_name, master_digest)
+            puts("created: #{rel}")
+            next
+          end
+
+          last = existing.dig(rel, "last_installed_sha256")
+          live_digest = "sha256:#{Digest::SHA256.file(dest).hexdigest}"
+          if last.is_a?(String) && !last.empty? && live_digest == last
+            FileUtils.cp(src, dest)
+            files << rule_source_entry(rel, layer_name, master_digest)
+            puts("updated: #{rel}")
+            next
+          end
+
+          FileUtils.cp(src, "#{dest}.upstream")
+          files << existing[rel] if existing[rel]
+          skipped << rel
+          warn("skip: #{rel}")
+        end
+        write_rule_source!(source_path, files)
+        unless skipped.empty?
+          warn("skipped:")
+          skipped.each { |rel| warn("  #{rel}") }
+        end
       end
 
       def inherit_subject_required_rules(control_result, project_root)
@@ -341,6 +404,15 @@ module Orbit
         puts("protocol_root: #{File.join(project_root, '.orbit', 'protocol.yaml')} (#{created})")
         puts("local_provider_key: #{LocalProvider.key_path(project_root)} (#{key_state})")
         warn("note: the local provider is a consistency mechanism, not a security boundary; keep the key file backed up — losing it makes the project unverifiable.")
+        0
+      end
+
+      def rules(argv)
+        sub = argv.shift
+        raise UsageError, "usage: orbit v2 rules update" unless sub == "update"
+        raise UsageError, "rules update takes no arguments" unless argv.empty?
+
+        update_rule_library!(context[:project_root])
         0
       end
 
@@ -758,6 +830,7 @@ module Orbit
         commands:
           init <project_id>                      create the v2 protocol root + genesis policy
           task start <task_id> --def FILE        create one task (definition + control genesis)
+          rules update                           overwrite unmodified project rules from masters
           dispatch --task ID --role R [--rule P] dispatch (implementer defaults to four Q4 rules; reviewer inherits subject rules + rules/review.md)
           evidence submit --task ID --proposal F  submit evidence for an attempt
           gate submit --task ID --def FILE       submit an independent gate evaluation
