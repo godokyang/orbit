@@ -30,6 +30,7 @@ require_relative "../../../lib/orbit/v2/schema_catalog"
 require_relative "../../../lib/orbit/v2/task_authority"
 require_relative "../../../lib/orbit/v2/validator"
 require_relative "../../../lib/orbit/v2/work_authority"
+require_relative "../../../lib/orbit/v2/cli"
 require_relative "fixture_factory"
 require_relative "schema_parity"
 
@@ -105,6 +106,8 @@ module OrbitV2ContractTest
     test_control_store_finding_resolution
     test_gate_engine
     test_lib_solo_require
+    test_v2_cli_end_to_end
+    test_v2_entry_isolation_and_wiring
     test_v1_inventory
     test_slice_isolation
     puts(
@@ -9351,6 +9354,143 @@ module OrbitV2ContractTest
     end
   end
 
+
+  # Slice 6 phase D: one REAL runnable CLI path (workorder D.1) driven
+  # end to end through Orbit::V2::Cli — init, task start, implementer
+  # dispatch, evidence, reviewer dispatch (terminal form), independent
+  # evaluation with a Finding, follow-up evaluation, addressed resolution,
+  # derive closed — plus two-task task-scope isolation (handoff §10
+  # scenarios 1, 2, and the resolution half of 5).
+  def test_v2_cli_end_to_end
+    require "stringio"
+    Dir.mktmpdir do |dir|
+      Dir.chdir(dir) do
+        project_id = "oproj_e2ecli000001"
+        task_a = "otask_e2eclitaska01"
+        task_b = "otask_e2eclitaskb01"
+        run = lambda do |*args|
+          code = nil
+          original_stdout = $stdout
+          $stdout = StringIO.new
+          begin
+            code = Orbit::V2::Cli.run(args.flatten)
+          ensure
+            $stdout = original_stdout
+          end
+          assert(code == 0, "orbit v2 #{args.first(2).join(' ')} must exit 0 (got #{code})")
+        end
+        write = lambda { |name, body| File.write(File.join(dir, name), body) }
+        FileUtils.mkdir_p([File.join(dir, "rules"), File.join(dir, "src")])
+        write.call("rules/coder.md", "Coder rule: keep the change minimal.\n")
+        write.call("rules/reviewer.md", "Reviewer rule: verify the evidence.\n")
+        write.call("src/app.rb", "puts 'app'\n")
+        write.call("task-a.yaml", <<~YAML)
+          goal: Ship the minimal v2 CLI path.
+          units:
+          - objective: Implement the document factory.
+            writable_paths: [src]
+        YAML
+        write.call("task-b.yaml", <<~YAML)
+          goal: Second isolated task.
+          units:
+          - objective: Independent work in a second scope.
+            writable_paths: [src]
+        YAML
+        run.call("init", project_id)
+        assert(File.file?(File.join(dir, ".orbit", "protocol.yaml")), "v2 init commits the marker")
+        run.call("task", "start", task_a, "--def", "task-a.yaml")
+        run.call("dispatch", "--task", task_a, "--role", "implementer", "--rule", "rules/coder.md")
+        write.call("evidence-a.yaml", "kind: implementation\npaths: [src/app.rb]\n")
+        run.call("evidence", "submit", "--task", task_a, "--proposal", "evidence-a.yaml")
+        run.call("dispatch", "--task", task_a, "--role", "reviewer", "--rule", "rules/reviewer.md")
+        write.call("review-a.yaml", "kind: evaluator_submission\npaths: [src/app.rb]\n")
+        run.call("evidence", "submit", "--task", task_a, "--proposal", "review-a.yaml")
+        write.call("gate-fail.yaml", <<~YAML)
+          verdict: fail
+          quality_verdict: fail
+          answers: {question_main: fail}
+          acceptance: {acc_main0: fail}
+          findings:
+          - severity: P1
+            basis: regression
+            body: The change lacks regression coverage for the boundary case.
+        YAML
+        run.call("gate", "submit", "--task", task_a, "--def", "gate-fail.yaml")
+        finding_id = Orbit::V2::GateFactStore.new(
+          active_root: File.join(dir, ".orbit"), task_id: task_a
+        ).records.flat_map { |payload| Array(payload["findings"]) }
+          .map { |finding| finding["finding_id"] }.compact.first
+        assert(finding_id.to_s.start_with?("ofinding_"), "the failing evaluation records a Finding")
+        complete_code = nil
+        original_stdout = $stdout
+        $stdout = StringIO.new
+        begin
+          complete_code = Orbit::V2::Cli.run(["complete", "--task", task_a])
+        ensure
+          $stdout = original_stdout
+        end
+        assert(complete_code == 1, "an unresolved blocking Finding must keep the task open")
+        write.call("review-a2.yaml", "kind: evaluator_submission\npaths: [src/app.rb]\n")
+        run.call("evidence", "submit", "--task", task_a, "--proposal", "review-a2.yaml")
+        write.call("gate-pass.yaml", "verdict: pass\n")
+        run.call("gate", "submit", "--task", task_a, "--def", "gate-pass.yaml")
+        write.call("resolve.yaml", "finding_id: #{finding_id}\n")
+        run.call("finding", "resolve", "--task", task_a, "--def", "resolve.yaml")
+        run.call("complete", "--task", task_a)
+        # Two-task isolation: B writes live only in B's scope; A's derived
+        # outcome stays closed and byte-identical after B's activity.
+        run.call("task", "start", task_b, "--def", "task-b.yaml")
+        run.call("dispatch", "--task", task_b, "--role", "implementer", "--rule", "rules/coder.md")
+        verifiers = Orbit::V2::LocalProvider.verifiers(dir)
+        outcome = Orbit::V2::GateEngine.new(active_root: File.join(dir, ".orbit"), task_id: task_a).derive(
+          task_id: task_a,
+          task_revision_id: Orbit::V2::TaskStore.new(active_root: File.join(dir, ".orbit"), task_id: task_a)
+            .resolve(task_id: task_a, authority_verifier: verifiers[0])
+            .fetch("task_revisions").max_by { |t| t["revision_number"] }["task_revision_id"],
+          authority_verifier: verifiers[0],
+          runtime_identity_verifier: verifiers[1],
+          lifecycle_verifier: verifiers[2]
+        )
+        assert(outcome["closed"] == true, "task A closes after its addressed resolution")
+        scopes = Dir.children(File.join(dir, ".orbit", Orbit::V2::TASK_SCOPES_SEGMENT)).sort
+        assert(scopes == [task_a, task_b].sort, "task scopes are exactly the two tasks")
+        assert(File.file?(File.join(dir, ".orbit", Orbit::V2::TASK_SCOPES_SEGMENT, task_a,
+          Orbit::V2::ControlStore::CONTROL_TRANSACTIONS_FILE)) &&
+               File.file?(File.join(dir, ".orbit", Orbit::V2::TASK_SCOPES_SEGMENT, task_b,
+                 Orbit::V2::ControlStore::CONTROL_TRANSACTIONS_FILE)),
+               "each task owns a disjoint control log")
+      end
+    end
+  end
+
+  # Phase D wiring guard: (a) BEHAVIORAL isolation — after a v1 command
+  # runs, the process has loaded ZERO lib/orbit/v2 files ($LOADED_FEATURES
+  # is immune to how a require is spelled; the grep in
+  # test_slice_isolation is not, hence its explicit allowlist); (b) the
+  # real dispatcher entry `scripts/orbit v2 ...` reaches the v2 CLI with
+  # the documented exit codes, and a v1 command still exits 0 through the
+  # same entry.
+  def test_v2_entry_isolation_and_wiring
+    probe = IO.popen([RbConfig.ruby, "--disable-gems", "-e",
+      "require #{File.join(ROOT, 'lib', 'orbit', 'cli').inspect}; " \
+      "run_orbit_cli(['version']); " \
+      "$LOADED_FEATURES.grep(%r{lib/orbit/v2}).each { |path| puts path }"],
+      err: File::NULL, chdir: ROOT, &:read)
+    v2_loaded = probe.lines.map(&:strip).select { |line| line.include?("lib/orbit/v2") }
+    assert(v2_loaded.empty?,
+      "the v1 startup path must load zero v2 files: #{v2_loaded.join(', ')}")
+    Dir.mktmpdir do |dir|
+      Dir.chdir(dir) do
+        script = File.join(ROOT, "scripts", "orbit")
+        assert(system(RbConfig.ruby, "--disable-gems", script, "v2", "--help",
+          out: File::NULL), "orbit v2 --help must exit 0 through the real dispatcher")
+        assert(!system(RbConfig.ruby, "--disable-gems", script, "v2", "bogus",
+          out: File::NULL, err: File::NULL), "orbit v2 <unknown> must exit non-zero")
+        assert(system(RbConfig.ruby, "--disable-gems", script, "version",
+          out: File::NULL), "the v1 version command must still exit 0")
+      end
+    end
+  end
   def test_v1_inventory
 
     inventory = YAML.safe_load(
@@ -9384,8 +9524,15 @@ module OrbitV2ContractTest
 
   def test_slice_isolation
     runtime_paths = Dir.glob(File.join(ROOT, "lib/orbit/*.rb")) + [File.join(ROOT, "scripts/orbit")]
+    # Explicit, visible exception (phase D): lib/orbit/cli.rb carries the
+    # `orbit v2` dispatch branch and lazily requires v2/cli. The spelling
+    # grep cannot see "v2/cli", so this file is exempted HERE, in the open,
+    # instead of passing by accident. The real invariant — the v1 STARTUP
+    # path loads zero v2 files however the require is spelled — is asserted
+    # behaviorally by test_v2_entry_isolation_and_wiring ($LOADED_FEATURES).
+    spelling_exempt = [File.join(ROOT, "lib", "orbit", "cli.rb")].freeze
     forbidden_imports = runtime_paths.select do |path|
-      File.read(path).match?(/orbit\/v2|Orbit::V2/)
+      !spelling_exempt.include?(path) && File.read(path).match?(/orbit\/v2|Orbit::V2/)
     end
     assert(forbidden_imports.empty?, "v1 runtime must not import isolated v2 contracts")
     assert(!File.exist?(File.join(ROOT, ".orbit/protocol.yaml")), "Slice 0 must not activate ProtocolRoot")

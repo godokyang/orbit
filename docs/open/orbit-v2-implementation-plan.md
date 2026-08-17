@@ -625,6 +625,32 @@ Task 分支无冲突合并」因此**以项目选择跟踪为前提**；默认�
 其真实等价物是「两个 Task 的 `.orbit/task-scopes/` 路径不重叠」（已由存储布局
 保证）。
 
+### 本地 provider 信任降级记录（2026-08-17 阶段 D 裁决，欠账）
+
+阶段 D 的最小真实 CLI 路径引入**本地 HMAC provider**
+（`lib/orbit/v2/local_provider.rb`，密钥文件
+`.orbit/local-provider.json`，由 `orbit v2 init` 生成、落既有
+`.orbit/*` gitignore 覆盖、不提交）。经工单 D.3.1 裁决定性：**在阶段 D
+它是字符串一致性机制，不是安全机制**——对能读取密钥文件的本地攻击者零防御（该
+攻击者本就可以重写整个 `.orbit`）；它的真实作用是让生产验证路径
+（AuthorityVerifier/RuntimeIdentityVerifier/LifecycleVerifier 的 receipt
+验证）真的执行而非被绕过。批准它不等于批准「Orbit 的安全模型是本地用户信任」。
+
+**欠账**：`local.hmac.*` 三个 provider id 及其密钥文件参与 policy genesis 后即成为
+项目持久权威事实；替换为真实外部 provider 属于**产品级决策**（受控本地 provider
+或显式信任降级需用户批准），且密钥文件丢失 = 项目不可再验证（fail closed，无恢复
+路径）。在 cutover done criteria 满足之前，本记录是该项欠账的唯一权威出处。
+
+### `.cli-clock` 第二时间真值源（2026-08-17 阶段 D 记账，欠账）
+
+v2 CLI 的跨命令时间单调依赖旁路文件
+`.orbit/task-scopes/<task_id>/.cli-clock`（每次发戳取
+max(now, last+1s)）。已核 store 不枚举 task 目录内文件，该文件今天不会被误当
+权威事实，无现行 bug。但持久事实的时间戳因此存在**日志之外的第二个真值源**：
+该文件丢失或被编辑后，CLI 可能发出相对既有日志倒退的时间戳。更稳健的做法是从
+四个 TransactionLog 自身推导上一时间戳（自愈、无第二真值源）。阶段 D 不改实现，
+留待后续阶段处理。
+
 ## Cutover Done Criteria
 
 - ADR-003/005/006 的 accepted invariant 与最终确认的 ADR-004 contract 均有 writer、reader、validator 和测试。

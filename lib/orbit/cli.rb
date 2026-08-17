@@ -200,6 +200,14 @@ def run_orbit_cli(argv)
       exit 0
     end
     validate(argv)
+  when "v2"
+    # Slice 6 phase D: isolated v2 entry. The lazy require keeps the v1
+    # STARTUP path free of any v2 load — asserted behaviorally by
+    # test_v2_entry_isolation_and_wiring ($LOADED_FEATURES); the spelling
+    # grep in test_slice_isolation carries an explicit allowlist for this
+    # file (it cannot see "v2/cli").
+    require_relative "v2/cli"
+    exit run_v2_cli(argv)
   when "wait-gate"
     if help_requested?(argv)
       print_command_help("wait-gate")
