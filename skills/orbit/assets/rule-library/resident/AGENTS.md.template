@@ -1,0 +1,91 @@
+# AGENTS.md
+
+本文件是**这个用户项目**的路由器，给日常会话看触发条件和路径。
+
+它不是 Orbit 规则库，也不替代 ProjectPolicyRevision / TaskRevision。
+专项判据只来自 `orbit v2 dispatch` 钉入的 `rules/*.md`。
+链接不等于加载；看见路径不要把规则正文抄进本文件。
+
+把下面标成 `<PLACEHOLDER>` 的行换成这个项目自己的事实。
+不要填成别的仓库的目录、命令或产品定义。
+
+## 这个项目是做什么的
+
+`<PROJECT_PURPOSE>`
+
+一到两句：给谁用、解决什么问题。不要写实现清单。
+
+## 这个项目明确不做什么
+
+`<PROJECT_NOT>`
+
+列出本仓库拒绝承担的范围。没有就写「尚未声明」，不要编。
+
+## 命令
+
+把标记换成这个项目真实会跑的命令。没有就保持标记，不要抄别处的。
+
+- 安装：`<INSTALL_COMMAND>`
+- 测试：`<TEST_COMMAND>`
+- 检查 / lint：`<CHECK_COMMAND>`
+
+## 目录（可选）
+
+需要时补这个项目自己的入口，不要留空目录树当装饰：
+
+- 源码：`<SRC_DIR>`
+- 测试：`<TEST_DIR>`
+- 文档：`<DOC_DIR>`
+
+## 工作记忆顺序
+
+判断以这些为准，顺序在前的优先于聊天历史：
+
+1. 当前工作区里的代码
+2. 当前 diff
+3. 测试输出
+4. 日志
+5. 当前 task contract
+
+聊天里的说法只是线索。对不上时停下来，不要用对话里的记忆改代码。
+
+## 停止条件
+
+这些是可观察的停止点，不是任务规则。命中就停下问人：
+
+- 当前任务没有 quality outcome，却要开始写实现。
+- 身份、角色或「现在该谁写」对不上。
+- 接下来会删除用户数据、发布、卸载，或改生产 / 远端状态，还没有人确认。
+- 对不上当前代码、diff、测试、日志或 task contract，只剩聊天里的说法。
+
+停下来时说明看见了什么、缺什么。不要在对话里拍板后接着改。
+
+## 按需规则（由 Orbit dispatch 钉入，不要把正文抄到本文件）
+
+在执行下列动作之前，当前 attempt 应已被钉入对应文件；若当前不是 Orbit attempt，先开 task 或完整读取该文件：
+
+- 实现功能、重构、按合同改代码 → `rules/minimal-implementation.md`
+- 复现、隔离或修复一个失败症状 → `rules/targeted-fix.md`
+- 新增、修改、删除或为测试辩护；给 evidence 选 verification_class → `rules/test-selection.md`
+- 独立判断质量结果是否变好 → `rules/review.md`
+- 新增或重命名用户可见符号、文件、API、对外陈述 → `rules/vantage-audit.md`
+- 改 parser / resolver / validator / 状态机 / artifact writer / gate / tool 边界 → `rules/structured-boundary.md`
+- 改 CLI、安装、卸载、迁移、打包、release 资产 → `rules/mutating-surface.md`
+- 撰写或改写 quality outcome / 阈值 / 无效完成 → `rules/quality-outcome.md`
+
+表里只有触发和路径。不要在本文件复写判据、反向约束、降级或升格格式。
+
+## 通道
+
+本文件是路由器。`rules/*.md` 由 `orbit v2 dispatch --rule` 钉入。
+
+非 Orbit 会话若仍要做表中动作，要么先开 Orbit task，要么在动笔前完整读对应文件——但那不是可信投递。可信投递是一次 attempt 被钉住的那份字节。
+
+`docs/orbit/reference/` 里的示例不是规则，不要当成 `--rule` 目标。
+
+## 自我限定
+
+本文件不拥有产品事实、schema、budget 或 gate 语义。
+
+不要在这里写「coder 读某份角色指南」。不要贴 evidence / review 的 YAML。
+不要把测试数量预算或客户端纪律写进这份默认协议。

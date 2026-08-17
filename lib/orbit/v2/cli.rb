@@ -209,6 +209,18 @@ module Orbit
         write_rule_source!(source_path, files)
       end
 
+      def install_resident_agents!(project_root)
+        dest = File.join(project_root, "AGENTS.md")
+        if File.exist?(dest)
+          warn("请把路由器表附到现有 AGENTS.md")
+          return
+        end
+
+        src = File.join(rule_library_dir, "resident", "AGENTS.md.template")
+        FileUtils.cp(src, dest)
+        puts("installed: AGENTS.md")
+      end
+
       def update_rule_library!(project_root)
         source_path, existing = load_rule_source(project_root)
         files = []
@@ -399,6 +411,7 @@ module Orbit
         ProtocolRoot.preflight(project_root: project_root, expected_project_id: project_id,
           authority_verifier: verifiers[0])
         install_rule_library!(project_root)
+        install_resident_agents!(project_root)
         puts("project_id: #{project_id}")
         puts("policy_revision_id: #{policy['policy_revision_id']}")
         puts("protocol_root: #{File.join(project_root, '.orbit', 'protocol.yaml')} (#{created})")

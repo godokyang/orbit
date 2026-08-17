@@ -58,3 +58,9 @@ rules:
     default: true
     profiles: [implementer, reviewer]
     content_sha256: "sha256:5bce064a7188b4d26d97e86712ccd1ea69c074085b00620a9d7321061862d7c8"
+  - rule_id: orbit.agents-template
+    path: resident/AGENTS.md.template
+    layer: resident
+    default: false
+    profiles: []
+    content_sha256: "sha256:cbba4d4404326face36f8847cce1efe17cb866c4bc339b9656342bc4fcb45cd3"

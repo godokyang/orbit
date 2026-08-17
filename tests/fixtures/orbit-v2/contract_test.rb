@@ -118,6 +118,8 @@ module OrbitV2ContractTest
     test_v2_implementer_default_pins_four_not_nondefaults
     test_v2_rules_update_overwrites_unmodified
     test_v2_rules_update_skips_modified_and_keeps_pin
+    test_v2_init_writes_agents_router_without_rule_bodies
+    test_v2_init_does_not_overwrite_existing_agents
     puts(
       "ORBIT_V2_CONTRACT_TESTS_PASS assertions=#{@assertions} " \
         "schema_parity=#{@schema_parity_counts.sort.map { |key, value| "#{key}:#{value}" }.join(",")}"
@@ -9832,6 +9834,50 @@ module OrbitV2ContractTest
           assert(after_pin == pinned,
             "update must not change an already-pinned attempt digest")
         end
+      end
+    end
+  end
+
+  G2E_ROUTER_PATHS = %w[
+    rules/minimal-implementation.md rules/targeted-fix.md
+    rules/test-selection.md rules/review.md rules/vantage-audit.md
+    rules/structured-boundary.md rules/mutating-surface.md
+    rules/quality-outcome.md
+  ].freeze
+
+  # G.2e: empty-project init writes a router AGENTS.md with eight paths
+  # and no task-rule criteria sentences.
+  def test_v2_init_writes_agents_router_without_rule_bodies
+    Dir.mktmpdir do |dir|
+      Dir.chdir(dir) do
+        g2a_cli!("init", "oproj_g2eagt0000001")
+        path = File.join(dir, "AGENTS.md")
+        assert(File.file?(path), "init must create AGENTS.md when missing")
+        text = File.read(path, encoding: "UTF-8")
+        G2E_ROUTER_PATHS.each do |rule|
+          assert(text.include?(rule), "AGENTS.md must route #{rule}")
+        end
+        assert(!text.include?("删掉这处改动"),
+          "AGENTS.md must not copy task-rule criteria")
+        assert(!File.exist?(File.join(dir, "rules", "AGENTS.md")),
+          "the resident template must not land in rules/")
+      end
+    end
+  end
+
+  # G.2e: an existing AGENTS.md is left byte-identical; init only hints.
+  def test_v2_init_does_not_overwrite_existing_agents
+    Dir.mktmpdir do |dir|
+      Dir.chdir(dir) do
+        path = File.join(dir, "AGENTS.md")
+        File.write(path, "keep-me\n")
+        before = File.binread(path)
+        code, _stdout, stderr = g2b_cli_capture("init", "oproj_g2eexi0000001")
+        assert(code == 0, "init must exit 0 when AGENTS.md already exists")
+        assert(File.binread(path) == before,
+          "init must not change an existing AGENTS.md")
+        assert(stderr.include?("请把路由器表附到现有 AGENTS.md"),
+          "init must hint to attach the router table (#{stderr})")
       end
     end
   end
