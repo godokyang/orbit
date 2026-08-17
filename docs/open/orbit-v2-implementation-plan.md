@@ -597,6 +597,34 @@ rule_resolution），修改属 production 变更——删 enum 值会使既有�
 冲击面直达 contract_test fixture。该 schema 须与 store 路径改造同批进行，届时
 才有测试兜底（归阶段 C）。
 
+### 目录段名与版本控制跟踪（2026-08-17 阶段 C 裁决记录）
+
+**目录段名**：Task 本地存储段为 `.orbit/task-scopes/<task_id>/`（ADR-003/005/006
+修订记录中的目录树已同步），禁止复用 v1 权威目录名（`tasks`/`evidence`/`rules`/
+`handoffs`/`runtime`）。理由是**永久 epoch 歧义**而非撞名偶发：
+`ProtocolRoot.create` 的 v1 mixed-epoch 扫描（`reject_mixed_epoch!`）无条件先于
+create-only marker 检查执行；若 v2 段与 `KNOWN_V1_AUTHORITY_PATHS` 同名，合法 v2
+root 重放 create（幂等路径）即被自身 guard 判为 v1 混合纪元——v2 数据与 v1 产物在
+epoch 检测里不可区分。护栏：`V2::TASK_SCOPES_SEGMENT`（叶子文件
+`lib/orbit/v2/task_scopes.rb`）+ `protocol_root.rb` 加载期断言两常量不相交；
+`test_lib_solo_require` 保证循环 require 图任意入口可加载。
+
+**版本控制跟踪**：是否将 `.orbit` 纳入版本控制**按项目决定、由人自己选、默认不
+跟踪**；Orbit 不硬编码任何一种假设。选择跟踪的项目须区分 task 目录内的持久事实
+（四个 TransactionLog 日志）与运行时临时物（`*.lock` 零字节锁文件、
+`.*.tmp.<pid>.<tid>.<hex>` 原子 rename 暂存），可直接照抄的 `.gitignore` 片段与
+模式清单见
+`docs/open/orbit-v2-slice6-task-local-storage-design.md` §1.1。
+
+**c198590 提交信息措辞澄清**（不改写历史，就地记录）：该提交信息中「Git already
+provides workspace isolation and the merge boundary」对**工作目录**成立，对
+**Orbit 事实文件**不成立——`.orbit/*` 在当前仓库 `.gitignore` 中（仅放行
+README.md），默认不跟踪的项目里 Git 不提供 Orbit 事实的 merge boundary；该边界
+仅在项目选择跟踪（§1.1 片段）时由 Git 提供。handoff 阶段 D/E 的验收项「两个
+Task 分支无冲突合并」因此**以项目选择跟踪为前提**；默认不跟踪下该验收项为空转，
+其真实等价物是「两个 Task 的 `.orbit/task-scopes/` 路径不重叠」（已由存储布局
+保证）。
+
 ## Cutover Done Criteria
 
 - ADR-003/005/006 的 accepted invariant 与最终确认的 ADR-004 contract 均有 writer、reader、validator 和测试。
