@@ -6,6 +6,8 @@
 - 关联文档：[ADR-003](../adr/003-lead-orchestrated-dynamic-agent-team.md)、[ADR-004](../adr/004-role-rule-context-evidence-binding.md)、[ADR-005](../adr/005-orbit-v2-clean-cut-and-legacy-retirement.md)、[ADR-006](../adr/006-serialized-lead-orchestration-control-loop.md)、[orbit-v2-implementation-plan](./orbit-v2-implementation-plan.md)、[alpha_test_result](./alpha_test_result.md)、[boom_of_test_case](./boom_of_test_case.md)、[AGENTS.md](../../AGENTS.md)（仓库根）
 - 背景：Slice 1 implementation design proposal（WorkUnit parent/dependency refs、Attempt lineage、single-active validator；待 owner 审核，本文不改变其范围）
 
+> **修订提示（2026-08-17）**：本文引用的 ADR-003/005/006 并行边界条款已按 task-centric 模型修订（一个 Task = 一个 task_id = 一个 Git branch/worktree；串行边界收窄为 per Task；不存在 cross-control transfer 与 project-wide Task ownership registry）。详见各 ADR 文末修订记录。本文其余内容为历史设计记录，不因本提示修改。
+
 ## 0. 本稿解决的问题与术语约定
 
 Alpha 测试（`alpha_test_result.md` 十项）暴露的核心模式：**控制循环依赖 agent 自报与对话上下文，缺少与具体 agent 无关的权威边界**。本稿把"审核标准移动、测试数量爆炸、补丁链失控、软判断冒充正确性"等现象归因于同一缺口，并给出最小 amendment 设计。
@@ -44,6 +46,7 @@ Alpha 测试（`alpha_test_result.md` 十项）暴露的核心模式：**控制�
 ## 2. 设计原则
 
 1. **strict serial 不变**：ADR-006 的 single-active（每 `lead_control_id` 最多一个 active Task/selected WorkUnit/non-terminal Attempt）、terminal → accepted LeadCheckpoint → successor dispatch、project-wide Attempt backstop 全部保留，本 amendment 不放松、不并行化。
+   > **已取代（2026-08-17）**：本条中「每 `lead_control_id` 最多一个 active Task」的多 Task 前提与「project-wide Attempt backstop」的 project-wide 定性已按 task-centric 模型修订——control 收窄为 Task-scoped，backstop 收窄为 Task-local；single-active 与 checkpoint-before-dispatch 语义保留（见 ADR-006 修订记录）。
 2. **agent-independent**：控制事实（selection、budget、closure basis、fingerprint、continuation 授权）只从权威记录（TaskRevision、WorkUnitAttempt、LeadCheckpoint、Finding、AuthorizationRecord、RuleResolutionArtifact）派生；agent 自报、对话内容、pane/进程身份不产生控制事实。
 3. **用户定义边界**：goal、non-goals、risk acceptance、policy（含预算 default/ceiling）与 override 由 user/control-plane 定义；Lead 在边界内自治。
 4. **Lead 在 delegation envelope 内自主判断**：envelope = active ProjectPolicyRevision + closure basis + budget ceiling + authority scope。envelope 内的一切决策（agent 选择、budget adjust、继续/暂停、attempt 顺序）由 Lead 判断并写入 checkpoint，不询问用户。
@@ -178,6 +181,7 @@ Gate Engine 只按 policy 映射派生 blocking 并聚合 closure；`FindingReso
 - **idempotency**：attempt_id 预分配 + 单次 AttemptCreated（ADR-004）；checkpoint 原子 compare-and-append；create-only 对象同 ID 同内容幂等复用；replay 要么得到同一对象要么失败，不产生双写。
 - **缺权威正文/证据不得补造，且按互斥三态归位**：recovery 需要任何正文、artifact、resolution、checkpoint 或 evidence 而权威源缺失时：若缺失的是外部权威事实/服务且可恢复 → `blocked`；若属可自动 replan 的控制异常（如 checkpoint 投影可重建）→ `frozen`；**只有确需用户提供、授权或接受风险才进入 `needs_user`**。任何情况下**禁止从对话/缓存/候选关系合成缺失正文**（alpha #9 CandidateTree 补造缺失正文的反模式显式禁止；ADR-003 候选关系不能推进 state）。
 - **不重复副作用**：dispatch 只从已 accepted checkpoint 发生；已 dispatch 的 attempt 不得被 recovery 重复 dispatch；session/executor 操作走 terminal/release → successor/bind 或受控原子 transfer。
+- > **已取代（2026-08-17）**：本条中「受控原子 transfer」已移除；terminal/release → successor/bind 保留（见 ADR-006 修订记录）。
 - **不绕预算/gate**：budget 累计跨 recovery 连续（§7-5）；recovery 后 dispatch 仍须满足 predecessor terminal、依赖 ready、gate 要求。
 
 ## 13. 对象/authority 最小变更表

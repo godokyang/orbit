@@ -1,6 +1,6 @@
 # ADR-006：串行 Lead 编排与控制循环
 
-- 状态：Accepted
+- 状态：Accepted；2026-08-17 部分修订——串行边界收窄为 per Task、跨 Task 并行交给 Git branch/worktree，见文末修订记录
 - 日期：2026-08-03
 - Owner 批准：2026-08-03
 - 范围：Lead control lineage 的身份、任务选择、WorkUnit 调度、Attempt 继任、检查点、自检、进度判断与止损
@@ -18,6 +18,8 @@
 
 每条控制 lineage 必须具有 project-scoped、stable、immutable 的 `lead_control_id`。它是 LeadCheckpoint lineage、task ownership、selection 和 dispatch authority 的 identity，不等同于 `AgentInstance`、`LeadSession`、context generation、进程、pane 或对话。Lead runtime 仅指当前执行这条 control lineage 的可替换载体；替换 executor 不得改变 `lead_control_id`，也不得创建新的 control lineage 来绕过既有 single-active 或止损状态。
 
+> **已取代（2026-08-17）**：本段中 control identity 的「project-scoped」定性已收窄为 Task-scoped；stable、immutable、executor 可替换而不改 identity 的语义保留，见文末修订记录。
+
 所有 LeadCheckpoint、LeadDecision、dispatch authorization 和 WorkUnitAttempt 必须 pin exact `lead_control_id`。引用缺失、project 不一致，或通过 AgentInstance/LeadSession 名称反推 control identity 时 fail closed。
 
 ### Genesis、writer authority 与 accepted
@@ -27,8 +29,10 @@
 - `lead_control_id` 尚未使用，且不存在第二个 genesis；
 - trusted runtime identity provider 已先解析 canonical `lead_runtime_subject_ref + assertion_digest`，且 subject assertion 对 project/provider/current executor 有效；
 - genesis exact bind `project_id`、active `ProjectPolicyRevision` ref/digest、受控 writer authority provenance、初始 task ownership/queue、Lead AgentInstance、active LeadSession generation 与上述 canonical runtime subject assertion；
+- > **已取代（2026-08-17）**：本条中「初始 task ownership/queue」绑定已按 task-centric 模型收窄——control 不持有 Task 集合，genesis exact bind 单一 Task，见文末修订记录。
 - writer authority 来自 active ProjectPolicyRevision 的 orchestration policy 或其授权的 immutable control-plane record，不能由 Lead、AgentInstance、LeadSession 或 genesis payload 自报；
 - `lead_control_id` registry claim、project-wide runtime-subject unique active binding、active LeadSession creation 和 accepted genesis LeadCheckpoint 在同一原子 create 中成功。
+- > **已取代（2026-08-17）**：本条中「project-wide runtime-subject unique active binding」与跨 lineage registry claim 语义已收窄为 Task 内；同一原子 create 中的 genesis/session/checkpoint 原子性保留，见文末修订记录。
 
 LeadCheckpoint 只有经过该 writer 完成 authority、identity、exact refs、lineage tip、task ownership、runtime-subject/session binding 和 invariant 校验，并原子 create/compare-and-append 成功后才是 `accepted`。不得先接受 session-less/subject-less genesis 再回填 executor；原子操作任一部分失败都不得留下 accepted checkpoint、active session、claimed control ID 或任何可 dispatch 半状态。磁盘上存在一个文件、agent 声称写入成功、时间更新或可解析 YAML/JSON 都不构成 accepted。重复 genesis、伪 writer authority、同 ID 异内容、缺 active session/subject 或未被 registry 接纳的 checkpoint 全部 fail closed。
 
@@ -36,7 +40,11 @@ LeadCheckpoint 只有经过该 writer 完成 authority、identity、exact refs�
 
 每个 `lead_control_id` 任一时刻最多一个 active LeadSession；同时，同一 project 的全部 open control lineages 中，每个 provider-verified runtime subject 任一时刻也最多绑定一个 active LeadSession。project-scoped control registry/coordinator writer 必须在 accepted checkpoint、session activate/replace 和 dispatch 前对 canonical runtime subject binding 做跨 lineage 原子 compare-and-bind/check，不能只检查当前 control 或 AgentInstance 字符串。
 
+> **已取代（2026-08-17）**：本段中「同一 project 的全部 open control lineages」跨 lineage runtime subject binding 校验已按 task-centric 模型收窄为 Task 内校验；每个 control 内单 active LeadSession 保留，见文末修订记录。
+
 session replacement 或 executor/control-lineage transfer 必须先追加旧 session terminal/release event，再创建 successor；若运行时要求无间隙切换，只能使用受控 writer 的原子 compare-and-successor/transfer 操作，在同一事务中 terminal old、release old subject binding、activate/bind new session，并保存 predecessor/session/control transfer provenance。两个 active LeadSession、同一 runtime subject 同时绑定两个 control IDs、缺 predecessor/release 或非当前 session 发出的 dispatch 全部 fail closed。同一 runtime subject 可以在一个 lineage 内串行执行多个 LogicalLead，或在受控 terminal/release → successor/transfer 完成后进入另一 lineage，但不得同时 active。
+
+> **已取代（2026-08-17）**：本段中 executor/control-lineage transfer 与跨 control subject binding 语义已按 task-centric 模型取代——Lead/agent 更换走 Task 内 session replacement 或 handoff；Task 内 terminal→successor 原子性与 fail-closed 语义保留，见文末修订记录。
 
 ## 顶层 serialized orchestration invariant
 
@@ -63,6 +71,8 @@ select Task + WorkUnit in LeadCheckpoint
 
 串行不等于由同一个 agent 或同一段对话持续执行。`AgentInstance`、`LeadSession` 和 context generation 可以按能力、独立性或上下文健康替换；保持稳定的是 `lead_control_id`，保持单线的是 authority、selection 和 decision stream。不同 `lead_control_id` 只有在 task ownership sets 不相交且 active `lead_runtime_subject_ref` sets 也不相交时才可并行；不同 project 可以独立并行。本文不施加跨 project 的全局单线程限制。
 
+> **已取代（2026-08-17）**：本段中「不同 `lead_control_id` 只有在 task ownership sets 不相交且 active `lead_runtime_subject_ref` sets 也不相交时才可并行」已按 task-centric 模型取代——不同 Task 各自 branch/worktree 天然并行，同一 Task 内串行，见文末修订记录。
+
 独立 review/test 的 authority 与上下文隔离仍按 ADR-003/004/005 执行。串行只规定执行顺序，不允许 implementation agent 自审，也不允许 Lead 改写 `GateEvaluation`、关闭 `Finding` 或直接写 `AggregateOutcome`。
 
 ## Task、WorkUnit 与 work graph
@@ -88,9 +98,15 @@ writer/validator 必须验证引用存在、project/task/revision 一致、root 
 
 多任务顺序由 coordinator-level `LeadCheckpoint` 保存有序 task queue 和唯一 selection。controlled writer 必须在同一 project 的所有 open control lineages 上原子验证 Task/LogicalLead ownership disjointness 与 active runtime subject disjointness；不能只检查当前 lineage。不同 `lead_control_id` 只有在其 owned task sets 与 active executor subject sets 都 disjoint 时才可并行。
 
+> **已取代（2026-08-17）**：本段的多 Task 跨 lineage 协调与 ownership/subject disjointness 校验已按 task-centric 模型取代——协调收窄为 Task 内，不同 Task 间不需要 Orbit 层协调，见文末修订记录。
+
 Task transfer 必须形成有序的 release/acquire provenance：旧 lineage 的 accepted checkpoint 先以 `release` 或 relinquishing `suspend` decision 移除 queue ownership 和 active selection，并确认该 Task/WorkUnit 没有 non-terminal Attempt；新 lineage 的后续 accepted checkpoint 才能以 exact old checkpoint ref、old/new `lead_control_id` 和 Task/TaskRevision refs acquire。`suspend` 在这里保留旧 lineage 历史和恢复位置，但明确 relinquish ownership；它不是让两个 queue 共同持有 Task。缺 release/suspend、acquire 抢先、引用不匹配或重复 ownership 全部 fail closed。
 
+> **已取代（2026-08-17）**：本段整段为 cross-control Task transfer（release/acquire）协议，已按 task-centric 模型移除——不存在 cross-control Task transfer，一个 Task 只允许一条 accepted control lineage，见文末修订记录。
+
 初版不创建宽泛的 Portfolio 平台、跨项目资源市场或新的 task 事实源；project-scoped registry 只承担 control genesis 唯一性、Task ownership 与 transfer 的最小协调约束。
+
+> **已取代（2026-08-17）**：本段中「project-scoped registry 只承担 control genesis 唯一性、Task ownership 与 transfer 的最小协调约束」已按 task-centric 模型取代——registry 收窄为 Task 内 genesis 唯一性，不存在 project-wide Task ownership registry，见文末修订记录。
 
 ## LeadCheckpoint
 
@@ -194,15 +210,23 @@ agent-submitted string 不具有 failure/finding fingerprint authority。WorkUni
 
 `lead_control_id`、WorkUnitAttempt ID/ref/digest、LeadCheckpoint ID、LeadSession、AgentInstance、Finding/GateEvaluation/test/validator outcome record ID/ref/digest、日志或异常 message wording、path/文件名及呈现顺序都不得进入 fingerprint identity hash。相同 `fingerprint_identity_basis` 在任何 retry、checkpoint、session、AgentInstance 或 control transfer 后必须得到相同 fingerprint；typed category/code、stable Finding identity、stable test/rule/check identity 或 stable signal subject identity 任一不同则必须得到不同 fingerprint。
 
+> **已取代（2026-08-17）**：本段中「control transfer 后必须得到相同 fingerprint」的跨 control 语义随 transfer 移除；retry/checkpoint/session/AgentInstance replacement 不改变 fingerprint 的语义保留，见文末修订记录。
+
 `fingerprint_supporting_provenance` 只证明当前 occurrence 支持上述 identity basis，不参与 fingerprint hash。它必须保存 exact terminal WorkUnitAttempt ref+digest、当前 Finding/GateEvaluation/test/validator outcome refs+digests、authoring LeadCheckpoint ref，以及该 fingerprint 的 ordered prior Attempt ref+digest chain 和跨 checkpoint/Task transfer lineage continuity。controlled writer 必须验证 provenance 中的 typed result、stable signal/Finding identity、scope 和 digests 与 `fingerprint_identity_basis` 一致。
 
+> **已取代（2026-08-17）**：本段中「跨 checkpoint/Task transfer lineage continuity」的 transfer 部分已移除；Task 内跨 checkpoint prior chain 保留，见文末修订记录。
+
 controlled writer 必须跨 accepted checkpoints 检查 prior chain；Task 在 control lineage 间 transfer 时还必须沿 release/acquire provenance 连续计数。prior chain 用于 occurrence 计数并进入 `task.retry.override` AuthorizationRecord scope，但不改变 fingerprint 本身。不能通过新 Attempt/outcome record/checkpoint、不同 outcome digest、新 `lead_control_id`、session/context/AgentInstance replacement 或重排 provenance refs 重置相同 failure。若缺稳定 Finding/test/rule/check/signal subject identity、权威 supporting ref/digest、canonicalization version 未知、identity basis 不可复算、provenance 不支持 basis、prior chain 有缺口或不能证明新旧 failure identity 是否相同，LeadControl 必须 freeze/escalate，不能自动把它当成一个新的 fingerprint。
+
+> **已取代（2026-08-17）**：本段中「Task 在 control lineage 间 transfer 时沿 release/acquire provenance 连续计数」已移除；跨 checkpoint 连续计数保留，见文末修订记录。
 
 即使尚未达到上述 fuse，以下情况也必须立即 freeze：scope 或 blast radius 超出当前 authority/已证明问题面；review surface 已无法完整覆盖；局部工作与 `TaskRevision.goal`/acceptance 的关系无法证明；权威 facts、checkpoint lineage、selection 或 dependency readiness 出现矛盾；Work Agent 试图建立未授权控制路径。
 
 ## 单一 writer 与 control authority
 
 LeadControl/受控 coordinator writer 是每个 `lead_control_id` 中 task queue、priority、active Task、selected WorkUnit、checkpoint lineage 和 dispatch decision 的唯一写入路径；project-scoped registry writer 是 genesis 唯一性、跨 lineage Task ownership/transfer、canonical runtime subject active-session binding 与全局 Attempt backstop 的受控写入边界。checkpoint acceptance、session activate/replace 和 dispatch 必须经过同一 registry 的原子跨 lineage subject check。
+
+> **已取代（2026-08-17）**：本段中 project-scoped registry writer 的跨 lineage Task ownership/transfer、canonical runtime subject active-session binding 与全局 Attempt backstop 职责已按 task-centric 模型收窄为 Task 内写入边界，见文末修订记录。
 
 Work Agent 可以报告 Finding、提出 WorkUnit/scope/replan 请求并提交本 Attempt 的授权输出，但不得：
 
@@ -220,13 +244,16 @@ Task switch 只能在当前 Attempt terminal 且新 LeadCheckpoint 已接受后�
 1. **control identity/genesis**：trusted provider 先解析 canonical runtime subject；受控 writer 再以一个原子操作 claim `lead_control_id`、bind unique active LeadSession/runtime subject 并创建 project/policy/writer-bound accepted genesis。第二 genesis、伪 writer、session-less/subject-less accepted genesis、半状态或 AgentInstance/LeadSession replacement 后换 control ID 绕过 fuse 均被拒绝。
 2. **multi-task single-active**：一个 control lineage 持有多个 Task 时，只有一个 active LeadSession、一个 active Task、一个 selected WorkUnit 和最多一个 non-terminal Attempt。
 3. **disjoint parallelism/transfer**：不同 `lead_control_id` 只有 task sets 与 active provider-verified runtime subject sets 都 disjoint 时可并行；同一 Task/LogicalLead 双 queue ownership/双 tip selection 或同一 runtime subject 双 control binding 被拒绝。Task transfer 必须 old release/suspend checkpoint 在先、new acquire checkpoint 在后；executor transfer 必须 old session terminal/release 在先、new session successor/bind 在后，并保留 exact provenance；不同 project 独立。
+   > **已取代（2026-08-17）**：本条的 disjoint parallelism 与 Task/executor transfer 场景已按 task-centric 模型取代——并行改由不同 Task 各自 branch/worktree 提供；「同一 Task 双 lineage ownership 被拒绝」保留（一 Task 一 accepted lineage），见文末修订记录。
 4. **global Attempt backstop**：即使 registry/checkpoint/queue facts 损坏，同一 Task 或同一 WorkUnit 的第二个 non-terminal Attempt 仍被全局 writer/validator 拒绝。
 5. **single active LeadSession/executor**：同一 `lead_control_id` 双 active session、同一 provider/runtime subject 以相同或不同 AgentInstance ID 同时绑定两个 control IDs、别名 subject 绕过、非当前 session dispatch、无 terminal/release predecessor 的 replacement/transfer 均被拒绝；受控 atomic session successor/transfer 可在不并发 active 的前提下复用 executor。
+   > **已取代（2026-08-17）**：本条中「同一 runtime subject 绑定两个 control IDs」跨 control 场景与受控 atomic transfer 已按 task-centric 模型取代；Task 内双 active session 拒绝与 terminal→successor replacement 保留，见文末修订记录。
 6. **work graph root/readiness**：multiple root、orphan、parent/dependency cross-revision/cycle 或 dependency 未 ready 时不得选择/dispatch WorkUnit；唯一 root reachability 与 runnable set 可重建。
 7. **no switch with active attempt**：任一 Attempt non-terminal 时不得切换 Task。
 8. **checkpoint-before-successor**：没有 terminal predecessor 或没有同 `lead_control_id` 授权 dispatch 的当前 accepted LeadCheckpoint，不得创建/dispatch successor。
 9. **two zero-delivery attempts**：连续两轮 Delivery delta 为零时 automatic continue 被阻塞。
 10. **third same fingerprint**：fingerprint 必须由 LeadControl/受控 writer 按 canonical version 从 `fingerprint_identity_basis` 产生，并把 per-occurrence refs/digests 另存为不参与 hash 的 `fingerprint_supporting_provenance`。不同 Attempt、checkpoint、outcome record ID/digest 但相同 stable test/check signal 必须得到同一 fingerprint；stable Finding identity 相同而 GateEvaluation ref 更新时也必须相同；typed code 或 stable Finding/test/check/signal subject identity 不同则必须不同。rename/reorder/message wording/AgentInstance alias 不改变 identity；跨 checkpoint/transfer prior chain 必须连续且只用于计数/authorization scope。缺稳定 signal identity 或 provenance 不能支持 basis 时 freeze。第三次相同 fingerprint 缺 provider-verified `task.retry.override` AuthorizationRecord、exact scope binding、user/control-plane issuer 或尝试 replay 时被拒绝。
+   > **已取代（2026-08-17）**：本条中「跨 transfer prior chain」语义已移除；跨 checkpoint prior chain 与其余条款保留，见文末修订记录。
 11. **assurance-only freeze**：Assurance 持续增长、Delivery 不动时进入 freeze/replan，而不是继续堆 test/validator/evidence。
 12. **hardening does not preempt**：非 acceptance/core blocker 的 hardening 进入新 WorkUnit，不能自动抢占 active mainline。
 13. **checkpoint recovery**：LeadSession/AgentInstance 替换后，可沿同一 `lead_control_id` 从 authoritative facts 和唯一 checkpoint tip 恢复 queue/selection/decision；缺 runtime subject assertion、同 subject 跨 lineage 双 active、双 active session 或 lineage fork 时 fail closed。
@@ -255,6 +282,7 @@ Task switch 只能在当前 Attempt terminal 且新 LeadCheckpoint 已接受后�
 
 - `lead_control_id` 让 authority/decision stream 可跨 AgentInstance、LeadSession 和 context replacement 恢复，同时保持单线、可审计。
 - 串行执行降低吞吐上限，但消除同一 control lineage 内 selection、thesis、review surface 和 task switching 的竞态；需要并行时必须使用 task sets 与 active provider-verified runtime subjects 都 disjoint 的独立 `lead_control_id`，或使用独立 project，而不是复制 Task ownership 或给同一 executor 起别名绕过本 invariant。
+- > **已取代（2026-08-17）**：本条中「需要并行时使用 task sets 与 runtime subjects 都 disjoint 的独立 `lead_control_id`，或使用独立 project」已按 task-centric 模型取代——并行使用不同 Task 各自的 Git branch/worktree，见文末修订记录。
 - WorkUnit graph 能表达主线/支线/依赖而不固化阶段标签，也不要求图数据库。
 - checkpoint 增加了持久化和 validator 成本，但为 terminal-to-dispatch、异常止损和恢复连续性提供单一控制证据。
 - round fuse 提供保守止损，不替代 goal relation、scope、blast radius、review surface 和 progress 的持续判断。
@@ -262,6 +290,8 @@ Task switch 只能在当前 Attempt terminal 且新 LeadCheckpoint 已接受后�
 ## Amendment：Agent-independent control（owner approved 2026-08-11）
 
 本 amendment 由 [orbit-v2-agent-independent-control-amendments](../open/orbit-v2-agent-independent-control-amendments.md) 引入，不放松本 ADR 任何 strict serial 条款；不同 project 独立并行与同 project task-set/runtime-subject-set disjoint 并行边界不变。
+
+> **已取代（2026-08-17）**：本段中「同 project task-set/runtime-subject-set disjoint 并行边界不变」已按 task-centric 模型修订——跨 Task 并行交给 Git branch/worktree，见文末修订记录。
 
 ### ProjectPolicy delegation envelope
 
@@ -291,4 +321,59 @@ round 是 safety fuse，不是 correctness。Lead 可在 ceiling 内收紧/调�
 - idempotency：attempt_id 预分配 + 单次 `AttemptCreated`；checkpoint 原子 compare-and-append；create-only 对象同 ID 同内容幂等复用；replay 要么同一对象要么失败，不双写。
 - **缺权威正文/证据不得补造，且按互斥三态归位**：recovery 所需任何正文、artifact、resolution、checkpoint 或 evidence 缺失时：外部权威事实/服务可恢复 → `blocked`；可自动 replan 的控制异常 → `frozen`；**只有确需用户提供、授权或接受风险才进入 `needs_user`**。禁止从对话/缓存/候选关系合成缺失正文（ADR-003 候选关系不能推进 state）。
 - 不重复副作用：dispatch 只从已 accepted checkpoint 发生；已 dispatch 的 attempt 不得被 recovery 重复 dispatch；session/executor 操作走 terminal/release → successor/bind 或受控原子 transfer。
+- > **已取代（2026-08-17）**：本条中「受控原子 transfer」已移除；terminal/release → successor/bind 保留，见文末修订记录。
 - 不绕预算/gate：budget 累计跨 recovery 连续；recovery 后 dispatch 仍须满足 predecessor terminal、依赖 ready、gate 要求。
+
+---
+
+## 修订记录（2026-08-17）：串行边界收窄为 per Task，跨 Task 并行交给 Git branch/worktree
+
+**这是产品范围修订，不是本 ADR 原目标的全部达成。** 缩减后的控制合同不得被描述为原 ADR 完整交付。
+
+### 被取代的表述
+
+以下原文保留在上文，但自 2026-08-17 起不再作为 v2 实现权威：
+
+1. 「稳定 control lineage identity」中 control identity 的 project-scoped 定性与多 Task queue 持有前提；
+2. genesis 清单中的初始 task ownership/queue 绑定与 project-wide runtime-subject unique active binding、跨 lineage registry claim；
+3. 「同一 project 的全部 open control lineages」runtime subject 跨 lineage binding 校验；
+4. executor/control-lineage transfer、跨 control subject binding 与 session transfer 协议；
+5. 「不同 `lead_control_id` 以 task ownership sets 与 runtime subject sets disjoint 为并行前提」的并行边界；
+6. 「LogicalLead 与多任务协调」中的跨 lineage ownership disjointness 校验、Task transfer release/acquire provenance 与 project-scoped registry 最小协调职责；
+7. fingerprint 条款中的跨 control transfer 后同 fingerprint、跨 Task transfer lineage continuity 与 transfer prior chain 计数；
+8. 「单一 writer 与 control authority」中 registry writer 的跨 lineage 职责；
+9. Normative acceptance 场景 3（disjoint parallelism/transfer）的跨 control 部分、场景 5 中跨 control subject 双绑定与 atomic transfer、场景 10 中 transfer prior chain；
+10. 后果中「disjoint 独立 `lead_control_id` 并行」、Amendment 引言中「同 project disjoint 并行边界不变」、Recovery 中「受控原子 transfer」。
+
+> 同族未被逐条标注的其余表述（顶层 invariant 的多 Task queue 前提与跨 lineage subject 互斥、场景 1/4/13/15 中的 project-scoped/跨 lineage 措辞、Non-goals 的同 control 并行参照）同样以本节为准。
+
+### 取代后的新语义（冻结）
+
+```text
+.orbit/
+├── protocol.yaml          # project-level，低频全局事实
+├── policy/                # project-level authority lineage
+└── tasks/
+    └── <task-id>/         # revisions/ control/ attempts/ evidence/ gates/ findings/ handoffs/
+```
+
+1. `task_id` 是协作、存储和冲突隔离的单位。
+2. 一个 Task 通常对应一个 Git branch/worktree。
+3. 一个 Task 只允许一条 accepted control lineage。
+4. 不同 Task 路径不重叠，天然并行。
+5. 项目级 task/status/index 是派生视图，不是共享可写权威。
+6. 同一 Task 的并行修改是真实冲突，由 Git merge 和 Task lineage 校验发现。
+7. Lead/agent 更换走 Task 内 session replacement 或 handoff。
+8. 不存在 cross-control Task transfer。
+9. 不存在 project-wide Task ownership registry。
+10. 不存在同项目多 control 之间的 runtime-subject/session transfer。
+
+control identity 的 scope 从 project 收窄为 Task：`lead_control_id` 成为 Task 内 authority/decision stream 的稳定 identity。本 ADR 其余核心内容在 Task 内继续有效：串行 invariant（单 active LeadSession/selected WorkUnit/non-terminal Attempt）、checkpoint-before-dispatch、terminal→successor 控制边界、LeadControl 深模块、四层自检、Delivery/Assurance 区分、止损与 fingerprint 语义、bounded runner 与 recovery。跨 Task 并行不再由 Orbit 的 disjointness 协议提供，由 Git branch/worktree 隔离提供。
+
+### 项目级例外（有意接受）
+
+`protocol.yaml` 与 `policy/` 保留在项目级，因此保留 Git 合并冲突风险。这是有意接受的：policy rotation 低频，且两个分支同时轮换 policy 本来就是真实冲突，应该冲突。
+
+### 修订原因
+
+用户已否定「同项目多个长期 Lead control 并行 + Task 在 control 之间转移」这一前提：真实协作边界是「一个 Task = 一个 task_id = 一个 Git branch/worktree」。项目级多 control 调度、cross-control transfer 与 project-wide ownership registry 不是 Orbit MVP 必要能力。背景与完整路线见 `docs/open/orbit-v2-slice6-handoff.md`；ADR-003/ADR-005 同日修订与本文一致。

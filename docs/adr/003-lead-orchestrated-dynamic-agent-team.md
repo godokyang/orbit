@@ -1,6 +1,6 @@
 # ADR-003：Lead 编排的动态 Agent Team 与上下文治理
 
-- 状态：Accepted（Orbit v2 目标架构；尚未实现）
+- 状态：Accepted（Orbit v2 目标架构；尚未实现）；2026-08-17 部分修订——并行边界条款被文末修订记录取代
 - 日期：2026-07-28
 - 决策确认：2026-07-30
 - 范围：Agent team 拓扑、上下文生命周期、任务偏移、代码健康与结构质量审查
@@ -22,6 +22,8 @@ Accepted 表示目标架构已经确定，不表示当前 v1 runtime 已经具�
 项目 owner 于 2026-08-03 进一步批准 ADR-006。本文的 dynamic team 只表示 AgentInstance 可按需创建、替换或终止，LeadSession/context 可重建，capability profile 可随 WorkUnit 选择。稳定串行 identity 是 ADR-006 的 project-scoped `lead_control_id`；Lead runtime 只是其当前可替换执行载体。
 
 同一 `lead_control_id` 可以持有多个 Task，但任一时刻最多一个 active LeadSession、一个 active Task、一个 selected WorkUnit 和一个 non-terminal WorkUnitAttempt。implementation、review、test、research 和 release 全部串行；Attempt terminal 后必须先产生 accepted LeadCheckpoint，才可 dispatch 下一 Attempt。不同 `lead_control_id` 只有 task ownership sets 与 provider-verified active runtime subject sets 都 disjoint 时才可并行，不同 project 可独立并行。本文涉及 control genesis、Task/executor ownership/transfer、LeadSession lifecycle、自检、proportionality、successor 或 task switching 的细节均由 ADR-006 统一规范，避免本文成为第二套控制权威。
+
+> **已取代（2026-08-17）**：本段中「同一 `lead_control_id` 持有多个 Task」「不同 `lead_control_id` 以 disjoint task ownership / runtime subject sets 为并行前提」的语义已按 task-centric 模型取代，见文末修订记录。
 
 ## 背景
 
@@ -263,6 +265,8 @@ LogicalLead 即使更换 LeadSession，也必须能从 durable context 恢复同
 
 LogicalLead continuity 仍然是 per-task；同一个 Lead AgentInstance/provider-verified runtime subject 可以在一条 lineage 内串行执行多个 LogicalLead，或在旧 session terminal/release 后受控 transfer 到另一 lineage，但不得跨 control lineages 同时 active。每个 LogicalLead/Task 任一时刻只能归属一个 open `lead_control_id` queue，且每个 control lineage 只有一个 Task 可被 selection 激活。多 Task 的有序 queue、跨 lineage Task/executor release/acquire、唯一 active LeadSession/selection 与跨 session 恢复由 ADR-006 的 project-scoped control registry 和 LeadCheckpoint 管理，不在本文扩展成 Portfolio 平台。
 
+> **已取代（2026-08-17）**：本段中跨 lineage 受控 transfer、多 Task 有序 queue、跨 lineage Task/executor release/acquire 与 project-scoped control registry 语义已按 task-centric 模型取代——一个 Task 只允许一条 accepted control lineage，Lead/agent 更换走 Task 内 session replacement 或 handoff，见文末修订记录。
+
 ## 决策四：建立可追溯的关系视图，不新增图数据库事实源
 
 Orbit 应把任务闭环中的稳定对象及其关系显式化，使 logical lead、临时 work agent 和 independent evaluator 能从同一组权威事实中获得不同的上下文投影。
@@ -435,6 +439,8 @@ team_runtime_projection:
 ```
 
 `active_attempts` 保留为 projection collection shape 以便表达零或一个 active Attempt；同一 `lead_control_id` 中其 cardinality MUST 小于等于一，active LeadSession cardinality 也 MUST 小于等于一。Task/WorkUnit 还受跨 lineage ownership 和 project-wide non-terminal Attempt backstop 约束；provider-verified canonical Lead runtime subject 还受 project-wide active-session binding 唯一性约束，不能通过不同 AgentInstance ID/别名绕过。review/test 必须等待 implementation terminal 和 accepted LeadCheckpoint 后再 dispatch，不能与 implementation 并行。
+
+> **已取代（2026-08-17）**：本段中跨 lineage ownership、project-wide non-terminal Attempt backstop 与 project-wide active-session binding 唯一性约束已按 task-centric 模型收窄为 Task 内约束；同一 Task 内 active Attempt cardinality ≤ 1 与串行派发约束不变，见文末修订记录。
 
 这意味着现有配置至少需要重新审视：
 
@@ -697,6 +703,7 @@ review 应先检查 change thesis 和主要结构方向，再进入逐文件检�
 - 让 lead 因为层级最高而自行关闭独立 review/test gate；
 - 让 lead 永久保留未经压缩和索引的完整聊天，把同样的上下文退化风险集中到 lead；
 - 把 dynamic team 解释为同一 `lead_control_id` 内并行执行 implementation/review/test/research/release、给同一 Task 新建第二 control lineage，或让同一 provider/runtime subject 以相同/不同 AgentInstance ID 同时执行两个 control lineages；
+- > **已取代（2026-08-17）**：本条以「同项目多 control lineage 并行」为前提的部分已按 task-centric 模型取代——并行边界从「同项目多 control disjoint」改为「不同 Task 各自 branch/worktree」；同一 Task 内串行、单 active Attempt 与单 accepted control lineage 约束不变，见文末修订记录。
 - 先接受缺 active LeadSession/provider-verified runtime subject 的 genesis checkpoint，再回填 executor；
 - 让 Lead/Work Agent 用新的 message wording、排序、自报 fingerprint、AgentInstance 别名或每轮新建 Attempt/outcome record ID/digest 重置相同 failure 的 retry chain；
 - 在 active Attempt 未 terminal 或没有 LeadCheckpoint 时切换 Task、创建 successor 或 dispatch 下一工作；
@@ -804,3 +811,49 @@ Lead 在 delegation envelope 内自主做软质量判断，不询问用户：
 ADR-006 已将 task queue、WorkUnit parent/dependency、Attempt predecessor/checkpoint binding、LeadCheckpoint/LeadControl、四层自检和止损另立为控制合同；这些内容不由上列 evidence/gate 实现合同隐式替代。
 
 在这些实现合同完成前，不把本 ADR 的局部示例字段零散加入 v1 正式 API。v2 必须按 ADR-005 完成全链路切换和旧路径关闭；typed RelationshipView 与 AggregateOutcome 仍不得成为 task/work-unit/evidence/state/gate 之外的第二套事实源。
+
+---
+
+## 修订记录（2026-08-17）：task-centric 并行边界取代 project-wide 多 control 模型
+
+**这是产品范围修订，不是本 ADR 原目标的全部达成。** 缩减后的 MVP 不得被描述为原 ADR 的完整交付。
+
+### 被取代的表述
+
+以下原文保留在上文，但自 2026-08-17 起不再作为 v2 实现权威：
+
+1. 「2026-08-03 amendment」段中：同一 `lead_control_id` 持有多个 Task、不同 `lead_control_id` 以 disjoint task ownership sets / provider-verified active runtime subject sets 为并行前提的表述；
+2. 决策三末段中：LogicalLead 跨 lineage 受控 transfer、多 Task 有序 queue、跨 lineage Task/executor release/acquire，以及 ADR-006 project-scoped control registry 作为并行边界的表述；
+3. 决策五 `active_attempts` 段中：跨 lineage ownership、project-wide non-terminal Attempt backstop、project-wide active-session binding 唯一性约束；
+4. 「不能接受的简化」清单中以「同项目多 control lineage 并行」为前提的表述。
+
+### 取代后的新语义（冻结）
+
+```text
+.orbit/
+├── protocol.yaml          # project-level，低频全局事实
+├── policy/                # project-level authority lineage
+└── tasks/
+    └── <task-id>/         # revisions/ control/ attempts/ evidence/ gates/ findings/ handoffs/
+```
+
+1. `task_id` 是协作、存储和冲突隔离的单位。
+2. 一个 Task 通常对应一个 Git branch/worktree。
+3. 一个 Task 只允许一条 accepted control lineage。
+4. 不同 Task 路径不重叠，天然并行。
+5. 项目级 task/status/index 是派生视图，不是共享可写权威。
+6. 同一 Task 的并行修改是真实冲突，由 Git merge 和 Task lineage 校验发现。
+7. Lead/agent 更换走 Task 内 session replacement 或 handoff。
+8. 不存在 cross-control Task transfer。
+9. 不存在 project-wide Task ownership registry。
+10. 不存在同项目多 control 之间的 runtime-subject/session transfer。
+
+本 ADR 中与上述规则不冲突的内容继续有效：bounded work unit、分层上下文、独立 gate、authority 分离、Task 内串行与单 active 约束（同一 Task 内 implementation/review/test 串行、active Attempt cardinality 为一）、session replacement 恢复语义。
+
+### 项目级例外（有意接受）
+
+`protocol.yaml` 与 `policy/` 保留在项目级，因此保留 Git 合并冲突风险。这是有意接受的：policy rotation 低频，且两个分支同时轮换 policy 本来就是真实冲突，应该冲突。
+
+### 修订原因
+
+用户已否定「同项目多个长期 Lead control 并行 + Task 在 control 之间转移」这一前提：真实协作边界是「一个 Task = 一个 task_id = 一个 Git branch/worktree」。项目级多 control 调度、cross-control transfer 与 project-wide ownership registry 不是 Orbit MVP 必要能力。背景与完整路线见 `docs/open/orbit-v2-slice6-handoff.md`；ADR-005/ADR-006 同日修订与本文一致。

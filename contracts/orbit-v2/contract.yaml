@@ -124,9 +124,9 @@ control_authority_store:
     results: [appended, idempotent_only_after_whole_existing_snapshot_reverifies]
     reused_control_or_second_genesis_different_content: fail_closed
     concurrent_claims: exactly_one_accepted
-    overlapping_owned_task: fail_closed
+    second_control_for_same_task: fail_closed
     already_active_canonical_runtime_subject: fail_closed
-    disjoint_task_and_subject: accepted
+    control_for_a_different_task: accepted_task_paths_do_not_overlap
   successor_checkpoints:
     seam_method: checkpoint
     transaction_shapes:
@@ -134,8 +134,8 @@ control_authority_store:
       - session_transition: closed_payload_of_agent_assertion_checkpoint_prior_session_and_session
     fixed_lock_order: policy_log_then_task_log_then_control_log_then_evidence_log_then_gate_log_checkpoint_facts_resolve_inside_the_same_locked_snapshot_the_append_commits_on
     predecessor_closure: exact_prior_accepted_checkpoint_of_the_same_control_extended_with_byte_identical_predecessor_ref
-    control_pins: [registry_owned_task_refs, genesis_active_session_generation, lead_agent_instance, runtime_subject_pins]
-    cross_store_facts: owned_task_resolved_through_accepted_TaskStore_logical_lead_task_and_work_units_exact_refs_never_checkpoint_local_text
+    control_pins: [registry_owned_task_refs_exactly_one, genesis_active_session_generation, lead_agent_instance, runtime_subject_pins]
+    cross_store_facts: bound_task_resolved_through_accepted_TaskStore_logical_lead_task_and_work_units_exact_refs_never_checkpoint_local_text
     task_policy_binding: resolved_task_pins_the_same_policy_revision_as_the_checkpoint_stale_or_mismatched_task_facts_fail_closed
     authority_before_append: [provider_verified_control_checkpoint_assertion, provider_verified_active_policy, writer_provenance_exact_bound_to_unique_policy_grant, provider_verified_runtime_identity]
     semantic_closure: assembled_snapshot_of_marker_accepted_policy_revisions_and_issuance_assertions_task_payload_and_control_transactions_run_through_the_public_Validator_any_error_fails_closed
@@ -160,7 +160,7 @@ control_authority_store:
       - dispatch_extends_exact_current_control_tip_and_pins_exact_task_work_unit_thesis_rule_proposals
       - AttemptCreated_exactly_once_active_with_provider_verified_writer_receipt_runtime_agent_and_authority_snapshot
       - immediate_observation_is_the_second_checkpoint_in_the_same_transaction_and_exact_pins_AttemptCreated
-      - project_wide_nonterminal_backstop_for_control_task_work_unit_and_canonical_runtime_subject
+      - task_local_nonterminal_backstop_for_task_work_unit_and_canonical_runtime_subject_within_the_bound_task
       - complete_assembled_snapshot_runs_public_Validator
     results: [appended, idempotent_only_after_whole_existing_snapshot_reverifies]
     fail_closed: [partial_payload, reused_attempt_different_content, stale_tip, changed_rule_bytes_before_assignment, wrong_assignment_or_proposal, nonterminal_conflict, provider_failure]
@@ -200,7 +200,7 @@ control_authority_store:
     proposal_boundary: TaskStore_successor_append_is_proposal_only_activation_is_the_only_control_side_effect
     fixed_lock_order: policy_log_then_task_log_then_control_log_then_evidence_log_then_gate_log
     public_binding: task_revision_id_argument_exact_binds_the_checkpoint_queue_and_active_task_ref_same_snapshot
-    transition: one_owned_task_from_exact_accepted_parent_revision_to_exact_accepted_immediate_child_revision_of_the_same_task
+    transition: the_single_bound_task_from_exact_accepted_parent_revision_to_exact_accepted_immediate_child_revision_of_the_same_task
     child_closure: [exact_ID_and_digest_refs, revision_number_parent_plus_one, task_id_unchanged, parent_ref_exact, active_policy_pin, gates_work_graph_theses_authority_facts_from_the_accepted_TaskStore]
     logical_lead_closure: checkpoint_logical_lead_refs_exact_match_the_accepted_task_logical_lead
     attempt_guard: rejected_while_any_active_or_nonterminal_attempt_exists_on_the_control
@@ -212,7 +212,7 @@ control_authority_store:
   not_implemented: [general_writers]
   deferred_to_later_increments:
     terminal_successor_reconciliation: closed_here
-    cross_control_session_transfer_and_recovery: later_slice_6
+    cross_control_session_transfer_and_recovery: removed_2026_08_17_not_planned_task_centric_model
 
 gate_fact_store:
   seam: Orbit::V2::GateFactStore
@@ -273,7 +273,7 @@ gate_engine:
   evidence_scope: all_target_revision_evidence_plus_evaluation_finding_resolution_and_evidence_relation_ancestor_closure
   projection_anchor: latest_accepted_target_revision_evidence_snapshot_and_code_surface_from_one_exact_stored_payload_no_synthetic_fallback
   gate_scope: target_evaluations_plus_supersession_ancestors_carried_findings_resolution_lineages_and_source_resolving_evaluation_closure
-  control_scope: exact_per_control_verified_prefix_through_the_last_target_or_referenced_attempt_transaction_including_transfer_release_provenance
+  control_scope: exact_per_control_verified_prefix_through_the_last_target_or_referenced_attempt_transaction
   derivation: delegates_to_AggregateOutcome_derive_with_the_public_Validator_no_duplicate_gate_judgment
   output: deterministic_AggregateOutcome_with_complete_sorted_source_manifest_and_source_digest
   persistence: none_no_cache_no_latest_pointer_no_authority_write
@@ -319,7 +319,7 @@ task_authority_store:
     proposal_only: appending_a_child_TaskRevision_never_reinterprets_an_r1_control
     activation_owner: ControlStore.activate_exact_task_revision_change_checkpoint
     queue_resolution: every_control_checkpoint_resolves_the_task_at_its_own_accepted_queue_revision_never_the_TaskStore_proposal_tip
-  deferred: [cross_control_transfer]
+  deferred: []
 
 evidence_authority_store:
   seam: Orbit::V2::EvidenceStore
@@ -691,10 +691,10 @@ work_model:
       interval_semantics: half_open_created_at_to_ended_at_any_moment_overlap_forbidden
       open_ended_attempt: active_until_future
       historical_overlap: fail_closed_even_when_all_terminal
-      project_scoped_keys:
+      task_scoped_keys:
         per_lead_control_id: [project_id, lead_control_id]
-        per_task_project_wide: [project_id, task_id]
-        per_work_unit_project_wide: [project_id, work_unit_id]
+        per_task: [project_id, task_id]
+        per_work_unit: [project_id, work_unit_id]
       implementation_review_test_research_release: serialized
   LogicalLead:
     model: create_only_orchestration_identity
@@ -786,58 +786,22 @@ control_registry:
       actions: [control.genesis, control.checkpoint]
       self_report: forbidden
   ownership:
-    owned_task_refs: project_scoped_task_ownership_authority
+    owned_task_refs: task_scoped_single_task_binding_authority
     owned_task_refs_unique_per_task_id: true
     checkpoint_task_queue: exact_ordered_projection
   active_session:
     derivation: unique_lineage_tip_plus_session_lineage
     registry_pointer: forbidden
     cardinality: at_most_one_active_per_control
-  multi_lineage:
-    parallel_boundary: task_sets_and_active_runtime_subject_sets_pairwise_disjoint
-    ownership:
-      source: derived_unique_lineage_tip_queue_projection
-      registry: immutable_genesis_claim_and_history_not_latest_truth
-      tip_queue_disjoint: true
-      logical_lead_tip_membership: logical_lead_task_must_be_owned_by_tip_queue
-      overlapping_task_sets: fail_closed
-    task_transfer:
-      ordered_provenance: release_or_relinquishing_suspend_then_acquire
-      release:
-        decision_actions: [release, suspend]
-        queue_removes_exactly_one_owned_task: true
-        active_selection_removed: true
-        no_non_terminal_attempt_for_released_task: true
-      acquire:
-        decision_action: acquire
-        queue_appends_exactly_the_acquired_task: true
-        exact_bindings:
-          - released_checkpoint_ref_id_and_digest
-          - released_lead_control_id
-          - task_ref_task_id_task_revision_id_and_digest
-        different_control_lineage: true
-      closure:
-        every_release_or_suspend_has_exactly_one_matching_acquire: true
-        missing_release_or_early_acquire: fail_closed
-        wrong_refs_digest_task_or_control: fail_closed
-        duplicate_ownership_or_replay: fail_closed
-    runtime_subject:
-      canonical_identity: provider_verified_provider_id_plus_runtime_subject_id
-      alias_or_agent_instance_string_comparison: forbidden
-      active_binding: at_most_one_active_lead_session_per_canonical_subject_project_wide
-      transfer:
-        ordered_provenance: old_session_terminal_release_then_new_successor_bind
-        exact_predecessor: session_id_generation_terminal_event_id_and_digest
-        same_canonical_subject: true
-        first_generation_of_new_lineage: true
-        missing_terminal_or_early_bind: fail_closed
-      subject_reuse_without_transfer_provenance: fail_closed
-    cross_control_attempt_succession:
-      allowed_only_after_valid_task_acquire: true
-      acquire_is_strict_accepted_lineage_ancestor_of_exact_dispatch_checkpoint: true
-      self_or_future_or_side_branch_acquire: fail_closed
-      payload_must_resolve_exact_release_or_suspend_checkpoint: true
-      same_work_unit_identity_and_terminal_predecessor: true
+  parallel_boundary:
+    model: one_task_one_task_id_one_git_branch_or_worktree
+    task_paths_do_not_overlap: true
+    orbit_layer_coordination: none_required
+    second_accepted_lineage_for_same_task: fail_closed
+  runtime_subject_identity:
+    canonical_identity: provider_verified_provider_id_plus_runtime_subject_id
+    alias_or_agent_instance_string_comparison: forbidden
+    active_binding: at_most_one_active_lead_session_per_canonical_subject_per_task_lineage
   atomicity:
     model_level: invalid_bundle_not_accepted_and_accepted_final_state_invariants_closed
     store_level_atomic_execution: slice_6_activation_closure
@@ -854,7 +818,7 @@ lead_checkpoint:
     predecessor:
       genesis_only_null: true
       exact_ref: true
-      cross_control: fail_closed
+      outside_single_task_control_lineage: fail_closed
       unresolved: fail_closed
     linearity:
       one_successor_per_checkpoint: true
@@ -869,7 +833,7 @@ lead_checkpoint:
     logical_lead_refs: exact_existing
   task_queue:
     initial_queue_required: genesis_mandatory
-    projection: exact_match_registry_owned_task_refs
+    projection: exact_match_registry_owned_task_ref_single_task_binding
   selection:
     active_task_ref:
       unique: true
@@ -919,11 +883,10 @@ lead_checkpoint:
     lead_decision:
       state_is_runner_stop_state_after_action: true
       state_enum: [completed, blocked, frozen, needs_user]
-      action_enum: [establish, continue, dispatch, replan, switch, freeze, escalate, release, suspend, acquire]
+      action_enum: [establish, continue, dispatch, replan, switch, freeze, escalate]
       genesis_action: establish
-      release_suspend_acquire: ownership_events_reconciled_from_typed_trigger
     next_trigger:
-      event_enum: [genesis, dispatch_before, attempt_created, attempt_terminal, successor_before, thesis_change, scope_change, finding_change, gate_change, task_revision_change, session_change, context_change, authority_change, dependency_change, task_release, task_suspend, task_acquire, checkpoint_due]
+      event_enum: [genesis, dispatch_before, attempt_created, attempt_terminal, successor_before, thesis_change, scope_change, finding_change, gate_change, task_revision_change, session_change, context_change, authority_change, dependency_change, checkpoint_due]
       dispatch_outcomes:
         dispatch: awaits_attempt_created
         freeze: awaits_successor_before
@@ -1023,14 +986,6 @@ lead_checkpoint:
       frozen: lead_replannable_control_anomalies
       needs_user: hard_overruns_and_risk_acceptance
       recovery_never_thaws_frozen_or_needs_user: true
-    task_transfer_acquire:
-      required_with_acquire_action: true
-      forbidden_without_acquire_action: true
-      exact_bindings:
-        - released_checkpoint_ref_id_and_digest
-        - released_lead_control_id
-        - task_ref_task_id_task_revision_id_and_digest
-      release_or_suspend_reference_required: true
     change_trigger_delta:
       proven_against_exact_lineage_predecessor_projection: true
       enum_alone: fail_closed

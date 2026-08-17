@@ -200,7 +200,7 @@ LeadControl 只消费上述 authoritative facts，并通过 `reconcile(authorita
 
 按「Slice 2 增量化交付」节，本 slice 拆为增量 1→4。下方「原 Slice 2 规范条目」保留全部原交付物/完成条件/负向验收文本作为规范正文，归属映射如下（增量 1 立即实施，其余按依赖顺序）：
 
-- **增量 1（控制身份锚）**：live roster 与静态配置分离复核；provider 先解析 canonical runtime subject + model-level accepted genesis final-state closure（真实事务原子性证明边界见增量化交付节，Slice 6 闭合）；provider-verified subject resolution；每 `lead_control_id` 最多一个 active LeadSession；checkpoint 身份/血缘/pins/writer provenance/初始 task ownership/queue 字段；duplicate genesis、自报 writer、缺 provider subject/session binding、非原子 create 均不 accepted；checkpoint 不复制 task/evidence/gate truth（schema 禁字段）。
+- **增量 1（控制身份锚）**：live roster 与静态配置分离复核；provider 先解析 canonical runtime subject + model-level accepted genesis final-state closure（真实事务原子性证明边界见增量化交付节，Slice 6 闭合）；provider-verified subject resolution；每 `lead_control_id` 最多一个 active LeadSession；checkpoint 身份/血缘/pins/writer provenance/单一 Task 绑定字段（2026-08-17 task-centric 修订：control 不持有 Task 集合，无初始 task ownership/queue，见 ADR-006 修订记录）；duplicate genesis、自报 writer、缺 provider subject/session binding、非原子 create 均不 accepted；checkpoint 不复制 task/evidence/gate truth（schema 禁字段）。
 - **增量 2（最小可恢复闭环）**：AgentInstance/LeadSession 替换语义；roster/assignment/replacement history 派生复核；coordinator-level ordered task queue projection；`LeadControl.reconcile` 深模块核心；最小 typed `lead_decision`/`next_trigger`（与 `reconcile`/event trigger 同增量落地）；event triggers；四层自检 seam；Delivery/Assurance 分离、assurance-only freeze、non-preempting hardening；首轮/两轮零 Delivery delta fuse 与立即 freeze（基础规则）；durable lead context/handoff/recovery 与 fork fail-closed；session 连续性 fail-closed；Work Agent single-writer；Task switch 边界；recovery 三态互斥归位/幂等/禁补造。
 - **增量 3（跨 lineage 与 transfer）**：跨 lineage Task ownership 与 runtime-subject active binding 原子复核（别名同 executor）；release/suspend → acquire、terminal/release → successor/bind exact transfer provenance；双 active/双 queue/双 tip/重叠并行 fail-closed；移除 `unsupported_multi_lineage` 临时拒绝。
 - **增量 4（anomaly/fuse/预算机制，完成 Slice 2，Slice 3 前）**：wall-clock fallback（policy-pinned，只产生 `checkpoint_due`）；fingerprint identity basis/supporting provenance/prior chain（含 Finding 分支——复用现有 stable Finding identity；typed blocking 分类属 Slice 4，不阻塞 fingerprint）；`task.retry.override`；round fuse 完整化；delegation envelope；`closure_basis_digest` 冻结与派生链（`budget_adjustment_digest`→`effective_budget_bindings`→`effective_verification_plan_digest`→`closure_basis_digest`）；两层 budget 累计/measurements（`unverified_assessment` pending 为默认 forward 状态，未 review 时 adjust/closure fail closed）；bounded runner 与 continuation envelope。`unverified_assessment` 独立评审准入（review_status=accepted/rejected 消费 `budget_assessment_result`）归入 Slice 4「control consumer closure」，不构成 Slice 2 完成前置。
@@ -488,9 +488,9 @@ create ProjectPolicyRevision genesis from user authority source
   -> controlled writer atomically claims lead_control_id + binds one active LeadSession/runtime subject + creates accepted genesis checkpoint
   -> create multiple Task/TaskRevision refs with stable requirements/GateRequirements
   -> create exactly one root and reachable child work units with parent/dependency refs
-  -> optionally repeat provider-resolve + atomic control/session/genesis create for a disjoint Task set and distinct runtime subject
+  -> optionally repeat provider-resolve + atomic control/session/genesis create for a second Task in a separate Git branch/worktree（task-centric：路径不重叠即天然并行，无 Orbit 层 disjointness 协调）
   -> create ChangeThesis revision/digest
-  -> LeadControl atomically acquires disjoint Task ownership and appends selection/dispatch LeadCheckpoint
+  -> LeadControl appends selection/dispatch LeadCheckpoint binding the single Task
   -> preallocate attempt_id and create/reuse assigned rules
   -> append AttemptCreated exactly once with checkpoint binding and no other active Attempt
   -> submit EvidenceRecord with submitted rules
@@ -506,9 +506,7 @@ create ProjectPolicyRevision genesis from user authority source
   -> derive GateRequirement closure
   -> Gate Engine derives AggregateOutcome
   -> terminal evaluator Attempt / checkpoint before test, next implementation, or Task switch
-  -> old lineage checkpoint releases/suspends Task ownership
-  -> old LeadSession terminals/releases its runtime-subject binding
-  -> new lineage checkpoint/session acquires Task + executor with exact transfer provenance
+  -> handoff/complete the Task；executor 更换只走 Task 内 session replacement（同 lead_control_id，terminal old -> successor new），不存在 cross-control transfer
 ```
 
 负向测试至少覆盖：
@@ -521,8 +519,8 @@ create ProjectPolicyRevision genesis from user authority source
 - trusted provider 尚未解析 canonical runtime subject、active LeadSession 未绑定时接受 genesis，或 atomic create 失败后残留 claimed ID/session/checkpoint/dispatchable 半状态被拒绝；
 - 同一 `lead_control_id` 出现多个 active LeadSession、active Task、selected WorkUnit 或 non-terminal Attempt 被拒绝；非当前 session dispatch、replacement 缺 terminal/atomic successor provenance 被拒绝；
 - 同一 provider-verified runtime subject 以相同或不同 AgentInstance ID/别名同时绑定两个 control IDs 时，第二个 session activation/checkpoint acceptance/dispatch 被拒绝；self-reported subject 或只比较 AgentInstance 字符串的实现不合格；
-- 同一 LogicalLead/Task 的双 open-queue ownership/双 tip selection、new acquire 早于 old release/relinquishing-suspend、executor bind 早于 old session terminal/release、transfer refs 不匹配，或 task sets/runtime subject sets 任一重叠的 control lineages 并行被拒绝；不同 project 独立、同 project 两组集合均 disjoint 的并行不被误拦截；
-- 即使 registry/checkpoint/queue facts 损坏，同一 Task 或 WorkUnit 的第二个 non-terminal Attempt 仍被 project-wide backstop 拒绝；
+- 同一 Task 的第二条 control lineage（fork/reuse/双 tip selection）被拒绝；不同 Task 在各自 Git branch/worktree 下并行不需要 Orbit 层 disjointness 协调，也不得因缺 project-wide registry 被误拦截；不同 project 独立并行不受影响（2026-08-17 task-centric 修订）；
+- 即使 checkpoint/queue facts 损坏，同一 Task 或 WorkUnit 的第二个 non-terminal Attempt 仍被 task-local backstop 拒绝；
 - WorkUnit multiple root/orphan、parent/dependency ref missing/cross-task/cross-revision/cyclic/not-ready 时被拒绝；唯一 root reachability/runnable set 不得由阶段标签覆写；
 - active Attempt 存在时 Task switch 被拒绝；
 - successor 缺 terminal predecessor、缺 current dispatch LeadCheckpoint、checkpoint selection 不匹配或 checkpoint lineage fork 时被拒绝；
@@ -570,6 +568,35 @@ E2E/cutover 必须覆盖：
 - amendment 条款负向路径并入既有负向测试清单：缺 override/scope（含 `budget_scope_type`）不匹配、digest 自引用/不一致、禁补造、完成标准绕 authorized revision、`verification_class`/`verification_use` 配对不符、hardening 误阻塞、超 ceiling 无 override 唯一进入 needs_user、recovery 三态互斥归位；
 - 文档治理：AGENTS.md 定位为客户端提示（非产品 authority）、boom/alpha 文档治理落地。
 
+### Slice 6 验收预算（2026-08-17 task-centric 修订）
+
+本节为产品范围修订后的 Slice 6 验收预算；上文 cross-control E2E/负向条目按本节与各 ADR 修订记录执行。首个 task-centric MVP 只保留约 6 个高价值场景：
+
+1. 单 Task 完整 happy path：init v2 → create/start one Task → dispatch one Attempt → submit Evidence → independent review/test GateEvaluation → resolve Finding if present → derive outcome → handoff/complete；
+2. 两个 Task 的路径/分支隔离：不同 Git branch/worktree，无 Orbit 路径冲突；
+3. 同一 Task fork/reuse（第二条 control lineage）冲突拒绝；
+4. Evidence 与 Attempt/Task exact binding；
+5. unresolved Finding 阻止完成，合法 resolution 后通过；
+6. wrong/mixed protocol epoch 拒绝。
+
+纪律：测试方法 ≤10、新增测试代码 ≤300 行；语义稳定前只跑静态检查和精确单方法；focused 在增量收口后跑一次；`tests/orbit_test.sh` 在 focused 通过后跑一次；同一区域连续失败并引发新业务分支时停止重估，不继续堆 patch。
+
+本修订不改变项目级例外：`.orbit/protocol.yaml` 与 `policy/` 保留在项目级，有意接受其 Git 合并冲突风险（policy rotation 低频，同时轮换本来就是真实冲突）。
+
+### 已知分歧（待阶段 C 收口）
+
+`contracts/orbit-v2/schemas/lead-control.schema.json` 尚未与 2026-08-17 已修订的
+`contract.yaml` enum 对齐，仍含：L127 `task_transfer_acquire` 定义、L301-310
+`TaskAcquire`（L303 `released_*` required 块）、L726 action enum 的
+`release/suspend/acquire`、L753-754 event enum 的 `task_suspend/task_acquire`。
+
+这是有意推迟而非遗漏：与 `contracts/orbit-v2/contract.yaml`（仅被 tests 读取的
+规格文件）不同，`schemas/*.json` 经 `schema_catalog.rb` 被 lib 运行时加载
+（control_store、evidence_store、gate_fact_store、policy_store、protocol_root、
+rule_resolution），修改属 production 变更——删 enum 值会使既有合法文档立即失效，
+冲击面直达 contract_test fixture。该 schema 须与 store 路径改造同批进行，届时
+才有测试兜底（归阶段 C）。
+
 ## Cutover Done Criteria
 
 - ADR-003/005/006 的 accepted invariant 与最终确认的 ADR-004 contract 均有 writer、reader、validator 和测试。
@@ -579,7 +606,7 @@ E2E/cutover 必须覆盖：
 - 所有 project-scoped commands 在其他读写前验证 `protocol_epoch: orbit-v2`，混合 epoch fail closed。
 - ProtocolRoot marker parent 是唯一 active root，不存在 cwd/config/manifest root override。
 - ProtocolRoot 只保存 immutable policy genesis ref，policy/task body 不复制进 marker。
-- provider-subject/session/control/genesis atomic create、stable control identity/unique genesis、provider-verified runtime-subject project-wide active-session uniqueness/transfer、single-active LeadSession/Task/WorkUnit/Attempt、cross-lineage Task ownership/transfer、task+executor disjoint parallelism、project-wide Attempt backstop、unique-root/reachability、terminal-attempt-to-checkpoint-to-dispatch、fingerprint identity/provenance hash-domain separation + stable-signal equivalence/difference + cross-checkpoint prior chain、retry override、policy-pinned fallback、task-switch、checkpoint linearity/recovery 和 Work Agent single-writer guard 全部闭合；不存在 parallel legacy path。
+- provider-subject/session/control/genesis atomic create、stable Task-scoped control identity/unique genesis、provider-verified runtime-subject session binding、single-active LeadSession/selected WorkUnit/non-terminal Attempt（Task 内）、task-local Attempt backstop、unique-root/reachability、terminal-attempt-to-checkpoint-to-dispatch、fingerprint identity/provenance hash-domain separation + stable-signal equivalence/difference + cross-checkpoint prior chain、retry override、policy-pinned fallback、checkpoint linearity/recovery 和 Work Agent single-writer guard 全部闭合；Task 内 work-unit 切换仍受 terminal→checkpoint→dispatch 边界约束；不存在 parallel legacy path；跨 Task 并行由 Git branch/worktree 隔离提供，不要求 cross-lineage ownership/transfer、disjoint parallelism 或 project-wide backstop（2026-08-17 task-centric 修订，见 ADR-005/006 修订记录）。
 - v2 E2E、negative paths、recovery、audit、handoff 和 clean-install dogfood 通过。
 - 没有 compatibility branch、自动 backfill、dual-write 或 hidden fallback。
 - 未覆盖风险和无法证明的 runtime delivery 明确报告，不用字段数量代替质量证据。

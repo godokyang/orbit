@@ -611,8 +611,9 @@ Mutation matrix additions (all cross the public `Validator#validate` seam):
 | cross-project isolation | a second project reuses identical control/dispatch/task/WorkUnit refs | valid (project-scoped keys) |
 
 Slice 2 will add the store-backed LeadCheckpoint existence/tip/selection
-validation and the Task/executor transfer provenance exception to the
-same-control successor rule.
+validation (the original Task/executor transfer exception was removed by
+the 2026-08-17 task-centric revision; the same-control successor rule is
+absolute).
 
 ## Slice 2 increment 1 addendum: control identity anchor
 
@@ -671,8 +672,9 @@ Mutation matrix additions (all cross the public `Validator#validate` seam):
 | stale tip policy | open lineage tip pins a non-active policy revision | `checkpoint_pin_invalid` |
 | late session context | session start generation context event recorded after `LeadSessionStarted` | `lead_session_invalid` |
 
-Store-backed dispatch binding closes in increment 2 (below); Task/executor
-transfer provenance and fingerprint/fuse machinery remain increment 3/4 work.
+Store-backed dispatch binding closes in increment 2 (below);
+fingerprint/fuse machinery remains increment 4 work (transfer provenance
+removed 2026-08-17).
 
 ## Slice 2 increment 2 addendum: minimal recoverable control loop
 
@@ -732,56 +734,45 @@ Mutation matrix additions (all cross the public `Validator#validate` or
 | ambiguous proposal | two distinct or repeated identical change_thesis/rule_resolution refs on one checkpoint | `checkpoint_proposal_ambiguous` |
 | registry active-session rewrite | registry pins a later session generation | `contract_shape_invalid` (field absent) |
 
-## Slice 2 increment 3 addendum: cross-lineage closure and transfer
+## Slice 2 increment 3 addendum: task-scoped control boundary (2026-08-17 revision)
 
-Lands the multi-lineage acceptance boundary and the exact release/acquire and
-executor transfer provenance. Model-level accepted-final-state closure only:
-real compare-and-append atomic execution closes at Slice 6 activation; no
-transaction primitive is simulated.
+Supersedes the original cross-lineage closure and transfer addendum: the
+multiple-open-lineage acceptance boundary and the exact release/acquire and
+executor transfer provenance are removed from the model (ADR-005/ADR-006
+revision records, 2026-08-17). The parallel boundary is now provided by Git
+branch/worktree isolation: one Task = one task_id = one non-overlapping
+`.orbit` task path, with no Orbit-layer coordination between open tasks.
+Model-level accepted-final-state closure only: real compare-and-append atomic
+execution closes at Slice 6 activation; no transaction primitive is simulated.
 
 New frozen shapes:
 
 ```yaml
 lead_checkpoint:
-  task_transfer_acquire:            # required with the acquire decision
-    released_checkpoint_ref: { lead_checkpoint_id, content_digest }
-    released_lead_control_id: olcontrol_id
-    task_ref: { task_id, task_revision_id, content_digest }
-  lead_decision.action: [..., release, suspend, acquire]
-  next_trigger.event: [..., task_release, task_suspend, task_acquire]
+  lead_decision.action: [establish, continue, dispatch, replan, switch, freeze, escalate]
+  next_trigger.event: [genesis, dispatch_before, attempt_created, attempt_terminal, successor_before, thesis_change, scope_change, finding_change, gate_change, task_revision_change, session_change, context_change, authority_change, dependency_change, checkpoint_due]
 ```
 
 New invariant families:
 
 | Family | Closed invariant | Single owner/seam |
 | --- | --- | --- |
-| Parallel boundary | multiple open control lineages are accepted only when derived tip task ownership sets and active canonical runtime-subject sets (provider_id + runtime_subject_id from the verified AgentInstance identity) are pairwise disjoint; AgentInstance IDs/aliases never substitute for the canonical subject; overlapping task sets fail closed | LeadControl |
-| LogicalLead closure | one Task/LogicalLead belongs to at most one open queue and is active-selected by at most one accepted tip; a lineage tip can claim only logical leads whose task its own tip queue owns | LeadControl |
-| Subject active binding | one canonical runtime subject binds at most one active LeadSession project-wide; a subject reused across controls requires exactly one origin lineage and exact terminal/release -> successor/bind transfer chains; a root session reusing a subject from another control fails closed; cross-control session forks and cycles fail closed | LeadControl |
-| Session transfer | a cross-control session successor is the first generation of its lineage, pins the prior session exact terminal LeadSessionEnded event id+digest, keeps the same canonical runtime subject, and starts at/after the prior terminal; a same-lineage replacement may coexist with one transfer from the same terminal session | LeadControl |
-| Queue projection | genesis exact-pins the immutable registry claim; release/suspend checkpoints remove exactly one owned task from the queue projection (active selection removed too); acquire checkpoints append exactly the payload task ref; other checkpoints keep the ordered projection with per-task revision lineage | LeadControl |
-| Transfer provenance | the acquire decision requires `task_transfer_acquire`; the released checkpoint ref resolves to an exact accepted release/suspend checkpoint of a different control; the acquire task ref byte-equals the released queue element; every release/suspend checkpoint has exactly one matching acquire; the released task has no non-terminal Attempt in the releasing control; missing release, early acquire, wrong refs/digest/task/control, duplicate ownership and replay fail closed | LeadControl |
-| Cross-control succession | a successor Attempt may cross control lineages only when its control validly acquired the Attempt's task from the predecessor's control and the authorizing acquire is a strict accepted-lineage ancestor of the Attempt's exact dispatch checkpoint (never the dispatch itself, a future acquire, or a side branch), with a payload resolving exactly to an accepted release/suspend checkpoint that released exactly this task ref; the predecessor is terminal | RuntimeLifecycle + LeadControl |
+| Parallel boundary | parallel execution across Tasks comes from separate Git branches/worktrees with non-overlapping task paths; Orbit imposes no project-level disjointness protocol; within one task path a second accepted control lineage for the same task fails closed; AgentInstance IDs/aliases never substitute for the canonical subject | LeadControl |
+| LogicalLead closure | one Task/LogicalLead has at most one accepted control lineage and is active-selected by at most one accepted tip; a lineage tip can claim only the logical lead of its own bound task | LeadControl |
+| Subject active binding | one canonical runtime subject binds at most one active LeadSession within a task lineage; the same subject may act independently in separate task paths/worktrees; executor change is in-task session replacement with exact terminal -> successor/bind provenance; cross-control session transfer, forks and cycles fail closed | LeadControl |
+| Queue projection | genesis exact-pins the immutable registry single-task binding; the queue projection stays byte-equal to that binding for every later checkpoint; release/acquire-style queue mutation payloads fail closed | LeadControl |
 
 Mutation matrix additions (all cross the public `Validator#validate` or
 `LeadControl.reconcile` seams):
 
 | Mutation class | Representative mutation | Expected invariant/error |
 | --- | --- | --- |
-| overlapping task sets | second lineage tip queue claims the main task | `control_task_ownership_conflict` |
-| unowned lead claim | tip logical_lead_refs names a lead of a task outside its queue | `checkpoint_pin_invalid` |
+| second lineage for same task | second accepted control claims the same task | `control_store_task_conflict` |
+| unowned lead claim | tip logical_lead_refs names a lead of a task outside its binding | `checkpoint_pin_invalid` |
 | subject alias | AgentInstance alias of one verified runtime subject | `runtime_identity_duplicate` |
-| double active subject | one canonical subject backs two active LeadSessions across controls | `runtime_subject_active_conflict` |
-| subject reuse without transfer | root session reuses a subject present in another control | `session_binding_invalid` |
-| acquire without release | acquire pins an absent/non-release checkpoint | `task_transfer_invalid` |
-| wrong released control | acquire `released_lead_control_id` diverges from the release checkpoint | `task_transfer_invalid` |
-| mismatched task ref | acquire `task_ref` differs from the released queue element | `task_transfer_invalid` |
-| dangling release | release/suspend checkpoint without exactly one matching acquire | `task_transfer_invalid` |
-| release with active attempt | released task has a non-terminal Attempt in the releasing control | `task_transfer_invalid` |
-| early executor bind | cross-control successor pins a non-terminal session event | `session_binding_invalid` |
-| cross-control fork | one session referenced by two transfer successors | `session_binding_invalid` |
-| future acquire | acquire checkpoint positioned after the attempt's dispatch checkpoint in the lineage | `attempt_successor_invalid` |
-| forged acquire payload | acquire payload whose released checkpoint ref does not resolve | `attempt_successor_invalid` + `task_transfer_invalid` |
+| double active subject | one canonical subject backs two active LeadSessions within one task lineage | `runtime_subject_active_conflict` |
+| transfer payload present | any task_transfer_acquire / release / suspend / acquire decision or trigger payload | `task_transfer_invalid` |
+| cross-control successor | a successor Attempt cites a dispatch checkpoint of a different control | `attempt_successor_invalid` |
 
 ## Slice 2 increment 4 addendum: anomaly/fuse/budget machinery
 
@@ -838,7 +829,7 @@ New invariant families:
 | --- | --- | --- |
 | Wall-clock fallback | a checkpoint awaiting `checkpoint_due` pins the exact active policy orchestration fallback (finite non-zero interval/upper bound) or a policy-authorized `control.fallback.authorize` record; the schedule basis is the exact Attempt event already pinned by the schedule checkpoint or a strict same-control lineage ancestor (future/side/unobserved events fail closed); the deadline is never free text: it must equal the basis event's provider-recorded `recorded_at` plus the exact source interval; the timer occurrence is proven only by a provider-verified `control.checkpoint_due.observe` AuthorityAssertion whose canonical scope exact binds project/active policy/control/scheduled checkpoint ref+digest/deadline/observed_at, with asserted_at and receipt issued_at equal to observed_at >= deadline and the active policy trusting the grant — an ordinary lifecycle event never proves the timer fired; `checkpoint_due` comes only from the exact scheduled lineage predecessor | LeadControl |
 | Fingerprint identity | the ONLY fingerprint hash input is the canonical identity basis (known canonicalization version, TaskRevision/WorkUnit scope, typed category/code, stable Finding identity OR stable test/rule/check identity + signal subject + normalized failure code); fingerprint fields appear only on a failed terminal round and vice versa; the digest is byte-recomputable; the scope exact-resolves the pinned failure attempt's task/work-unit digests; the typed `failure_code` must byte-equal the trusted terminal `failure_signal.normalized_failure_code`, and a non-Finding stable signal identity must byte-equal the trusted `failure_signal` recorded on the pinned AttemptFailed/AttemptBlocked event itself (provider-verified lifecycle receipt) — changing only the code or any signal string of a real failure can never mint a new fingerprint; the trusted `failure_signal` is REQUIRED on every AttemptFailed/AttemptBlocked terminal event (an immutable failure without its only fingerprint anchor is rejected at the schema); attempt/checkpoint/session/AgentInstance/outcome identities, wording, order and paths never enter the hash | LeadControl |
-| Supporting provenance | provenance pins the exact terminal failure event, resolvable outcome refs supporting the basis (finding occurrences include the stable Finding ref), and the exact dispatch checkpoint of the failed Attempt as the non-circular authoring ref; the ordered prior attempt chain byte-equals the same-fingerprint occurrences walked across the accepted lineage (including exact transfer jumps, skipping the current occurrence and counting each terminal event identity exactly once regardless of intermediate re-pins) | LeadControl |
+| Supporting provenance | provenance pins the exact terminal failure event, resolvable outcome refs supporting the basis (finding occurrences include the stable Finding ref), and the exact dispatch checkpoint of the failed Attempt as the non-circular authoring ref; the ordered prior attempt chain byte-equals the same-fingerprint occurrences walked across the accepted lineage (skipping the current occurrence and counting each terminal event identity exactly once regardless of intermediate re-pins) | LeadControl |
 | Retry override | the third same-fingerprint dispatch requires a provider-verified create-only `task.retry.override` record whose canonical scope exact binds project/TaskRevision/WorkUnit/fingerprint/ordered prior chain/authorizing checkpoint (the second-failure checkpoint)/control; consumption binds the exact ACTIVE policy the consuming checkpoint was written under (record policy == active policy + active policy grant trusted), so records issued under old or revoked policies fail closed after rotation; the record is pre-existing, consumed by exactly one checkpoint, and never appears without a pending third dispatch; a needs_user checkpoint proves the absence of authority | LeadControl |
 | Effective budget bindings | exactly two bindings in fixed `work_unit_lineage`/`task_lineage` order, each deterministically derivable from the authoritative facts with one exclusive source (`policy_default`, `lead_adjustment` current/inherited, `user_override` consume/inherit); the WorkUnit ref binds ONLY the `work_unit_lineage` scope — `task_lineage` overrides carry the canonical null and never relax the WorkUnit-lineage binding (the two layers derive independently, cross-scope replay fails closed); the adjust payload binds the exact predecessor checkpoint ref + predecessor binding digest + old/new absolute ceilings inside the policy lead ceiling and canonicalizes to `budget_adjustment_digest` (no checkpoint self-reference, no measurement tuple); an override record exact binds project/policy/task/unit/scope/authorizing predecessor/binding/ceilings/control, is consumed once, and inherits only along the continuous accepted lineage with the exact origin ref | LeadControl |
 | Measurements | `test_count`/`test_code_lines` fixed key set, each `verified` (usage >= 0 + a provider-verified `test.measurement.attest` AuthorityAssertion whose canonical scope exact binds project/active policy/TaskRevision/scope-appropriate WorkUnit ref (exact for work_unit_lineage, canonical null for task_lineage)/metric identity/usage/repository snapshot ref+digest, one assertion per metric) or `unverified` (canonical nulls + typed `unverified_assessment` with the exact pending mapping); a bare snapshot reference or a self-reported usage can never claim verified; mechanical within/over-budget derivation exists ONLY for verified metrics; default dispatch may proceed unverified/pending, but a `lead_adjustment` in effect for a scope (current or inherited) must carry provider-attested verified measurements — pending adjustment fails closed in Slice 2; accepted/rejected review states depend on the Slice 4 independent budget assessment consumer and fail closed | LeadControl |
@@ -1154,15 +1145,16 @@ active-policy resolution from the PolicyStore (Slice 6 increment 3).
   validate_event_chain + LifecycleVerifier) BEFORE the cross-stream
   active checks. Same control id with byte-identical canonical content is
   idempotent ONLY after the whole existing snapshot re-verifies (marker,
-  policy lineage, provider, lifecycle, cross-control) — invalid persisted
+  policy lineage, provider, lifecycle) — invalid persisted
   records never report success; same id with different content, a reused
   control, or a second genesis fails closed; real concurrent same-control
   claims yield exactly one accepted genesis (the loser observes
   control_store_reuse). A second
-  control genesis must reject an overlapping owned task set
-  (control_store_task_conflict) or an already-active canonical runtime
-  subject (control_store_subject_conflict); disjoint task + subject is
-  acceptable.
+  control genesis for the same task must fail closed
+  (control_store_task_conflict), as must a genesis whose canonical runtime
+  subject is already active within the same task lineage
+  (control_store_subject_conflict); a control genesis binding a different
+  task is acceptable (task paths do not overlap).
 - The reader re-resolves the marker + policy lineage from the
   ProtocolRoot anchor and re-verifies every transaction with the configured
   authority, runtime identity, AND lifecycle verifiers (typed event
@@ -1261,7 +1253,8 @@ AttemptCreated without store seams changing shape.
   of the same control (genesis or earlier successor, ordinary or
   session form), pin the control's active LeadSession generation, the
   bound AgentInstance, and the runtime-subject pins, and its task queue
-  must exact-match the registry ownership claim (transfers deferred). It
+  must exact-match the registry single-task ownership claim (transfer
+  payloads fail closed under the 2026-08-17 task-centric revision). It
   resolves the single owned task through the accepted TaskStore
   (LogicalLead/Task/WorkUnit facts, never checkpoint-local text); the
   resolved logical lead, task ref, and work-unit refs must exact-match the
@@ -1297,8 +1290,9 @@ AttemptCreated without store seams changing shape.
   list — never a silently genesis-only state.
 - At this increment boundary, dispatch with ChangeThesis+RuleResolution
   proposals and AttemptCreated was deferred to 6b and is now closed by the
-  addendum below. Cross-control session transfer/recovery remains deferred;
-  same-lineage session succession is closed here.
+  addendum below. Same-lineage session succession is closed here
+  (cross-control session transfer removed 2026-08-17, task-centric
+  revision).
 
 ## Slice 6 increment 6b addendum: atomic dispatch and AttemptCreated
 
@@ -1319,9 +1313,10 @@ log, and validation plus append share that locked snapshot.
 - The AttemptCreated assignment exact-binds the same control/task/revision/
   WorkUnit, worker AgentInstance/context/role, thesis, assigned resolution,
   and accepted WorkUnit authorization records. Its lifecycle receipt and
-  worker runtime identity/lifecycle are provider-verified. A project-wide
+  worker runtime identity/lifecycle are provider-verified. A task-local
   durable backstop rejects another nonterminal Attempt sharing the control,
-  Task, WorkUnit, or provider-canonical runtime subject (including aliases).
+  Task, WorkUnit, or provider-canonical runtime subject within the bound
+  task (including aliases).
 - The observation is the immediate second checkpoint inside the same
   transaction, exact-pins the AttemptCreated event id+digest, and preserves
   the dispatch closure basis. The complete final snapshot runs through the
@@ -1382,11 +1377,12 @@ reintroduced through the terminal path).
   terminal reconciliation supersedes the composite's immutable
   AttemptCreated-only payload), the content-addressed rule resolutions,
   and both checkpoint events of each execution/terminal transaction in
-  accepted order; the project-wide nonterminal backstop classifies the
+  accepted order; the task-local nonterminal backstop classifies the
   same latest representations so a successor dispatch after an accepted
   terminal reconciliation is never falsely blocked.
-- Deferred: retry/fingerprint/budget recovery, cross-control session
-  transfer, Evidence/Gate/Finding writers.
+- Deferred: retry/fingerprint/budget recovery,
+  Evidence/Gate/Finding writers (cross-control session transfer removed
+  2026-08-17).
 
 ## Slice 6 increment 6d addendum: TaskRevision and ChangeThesis successors
 
@@ -1424,8 +1420,9 @@ transaction; a partial definition is never accepted.
   policies and provider assertions reverify. Same-id different bytes,
   stale policy, fork/skip/wrong parent, gate parent forgery, global lineage
   reuse, authority partition drift, and thesis cross-owner/skip fail closed.
-  Cross-control transfer and GateEvaluation/Finding durable stores remain
-  deferred; EvidenceRecord acceptance is closed by increment 6f below.
+  GateEvaluation/Finding durable stores remain
+  deferred (cross-control transfer removed 2026-08-17);
+  EvidenceRecord acceptance is closed by increment 6f below.
 
 ## Slice 6 increment 6e addendum: controlled TaskRevision activation
 
@@ -1461,7 +1458,8 @@ activation commits.
   issuance assertions across every accepted revision) — runs through the
   PUBLIC Validator, so queue progression, selection, decisions, and writer
   authority are proven, not schema-accepted.
-- Deferred: cross-control transfer, Evidence/Gate/Finding writers.
+- Deferred: Evidence/Gate/Finding writers (cross-control transfer removed
+  2026-08-17, task-centric revision).
 
 ## Slice 6 increment 6f addendum: durable EvidenceRecord acceptance
 
@@ -1695,11 +1693,11 @@ policy -> task -> control -> evidence -> gate lock order.
   authorization/assertion pairs reverified. A later successor revision and an
   unrelated Task never enter the projection manifest.
 - The control slice is a verified causal prefix per relevant control: it ends
-  at that control's last exact-target selection/acquire or referenced Attempt
-  transaction, retains all predecessor/session/Attempt representations needed
-  to validate that prefix, and closes an acquire through the exact old release
-  checkpoint. Later control transactions after a TaskRevision switch are not
-  reinterpreted as sources of the historical target.
+  at that control's last exact-target selection or referenced Attempt
+  transaction and retains all predecessor/session/Attempt representations
+  needed to validate that prefix. Later control transactions after a
+  TaskRevision switch are not reinterpreted as sources of the historical
+  target.
 - The evidence slice contains every accepted record of the target revision and
   every evidence dependency of the selected evaluation/Finding/resolution
   closure, including evidence supersession/related ancestors. The current
