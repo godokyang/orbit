@@ -1,7 +1,6 @@
 agents/
 references/development/
 .orbit/*
-!.orbit/README.md
 test_apps/
 .claude/
 .copilot/

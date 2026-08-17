@@ -2,10 +2,10 @@
 
 Orbit 是给 AI agent 用的任务闭环工具。它不负责“让 AI 更会写代码”，而是让 agent 的工作结果更可追溯、更可接手、更难假完成。
 
-> **v1 已删除（2026-08-17）**：Orbit v1 runtime 代码已从本仓库移除，本文其余部分
-> 描述的 `orbit init/start/new-task/state/evidence/rules/...` 等 v1 命令**不再存在**。
-> 当前唯一可用入口是 v2 CLI（`orbit v2 --help`；命名空间前缀 `v2` 可省略）。
-> v1 代码删除 ≠ cutover 完成（见 ADR-005 修订记录）；v2 文档重写进行中。
+> **v1 已删除（2026-08-17）**：Orbit v1 runtime 已移除，其命令（`new-task` / `state` /
+> `evidence` / `rules` / `whoami` / `handoff` 等）、`instances.yaml` roster 与 Herdr
+> `automatic-preview` 集成不再存在。当前唯一入口是 v2 CLI（下文全部命令均为 v2）。
+> v1 代码删除 ≠ cutover 完成（见 ADR-005 修订记录）；v2 运行时文档重写进行中。
 
 ## 用了以后有什么效果
 
@@ -28,12 +28,11 @@ Orbit 适合中等复杂或更大的 AI 开发任务、长任务、多 agent 协
 
 ```bash
 cd /path/to/your-project
-orbit init --operation-mode solo
-# 编辑 .orbit/instances.yaml 里的 command
-orbit start lead-main
+orbit v2 init <project_id>
 ```
 
-`orbit start` 使用 Herdr 的 `automatic-preview` adapter 创建或唤醒 pane，但这不产生可信 runtime identity，也不允许 direct dispatch。如果只用稳定的 manual protocol，可以不运行 `orbit start`，而是手动设置 `ORBIT_INSTANCE` / `ORBIT_ROLE` 启动 agent。
+`init` 一次性建立 protocol root、genesis policy 和本地 provider 密钥
+（`.orbit/local-provider.json`；密钥丢失即项目不可验证，须自行备份）。
 
 然后告诉 lead agent：
 
@@ -46,36 +45,21 @@ orbit start lead-main
 限制：...
 ```
 
-用户不需要手写 task contract、编辑 evidence manifest、提交 review/test verdict，也不需要理解所有 runtime identity 字段。lead agent 应该自己创建 task、补全 evidence/state，并在关键节点展示目标、边界、验收标准和风险。
+用户不需要手写 task 定义或 evidence 文件。lead agent 会自己创建 task、
+dispatch 实现/评审 attempt、提交 evidence 与 gate 结论；完成判定来自
+`orbit v2 complete` 的派生结果，不是 agent 的自我报告。
 
 进入正式 Orbit 流程后，agent 会：
 
-- 确认身份并读取规则上下文。
-- 创建 task contract。
-- 写 implementation evidence。
-- 派 reviewer/tester，并等待结构化 verdict。
-- 运行 `wait-gate`、`validate`、`audit`。
-- 生成 handoff。
+- 写 task 定义并 `task start`（task contract + lead control 落盘）。
+- dispatch 实现 attempt，提交 implementation evidence。
+- dispatch 独立评审 attempt（评估者与实现者 runtime identity 不同，独立性是结构约束）。
+- 提交 GateEvaluation；有 Finding 时提交 follow-up 评测并 resolve。
+- 运行 `complete` 派生 AggregateOutcome。
 
 执行细节以 [Orbit skill](skills/orbit/SKILL.md) 为准。README 只给用户和新 agent 最小路径。
 
 ## 安装
-
-如需 `orbit start` 的 pane 创建与观察能力，安装 Herdr。Herdr 是独立项目，Orbit 只消费其公开 CLI/socket 能力，不约束 Herdr 的接口：
-
-```bash
-curl -fsSL https://herdr.dev/install.sh | sh
-herdr --version
-```
-
-也可以用 Homebrew 安装 Herdr；需要更准确识别 agent 状态时，可安装 `codex` / `claude` / `opencode` Herdr integration。
-
-启动 Herdr：
-
-```bash
-cd /path/to/your-project
-herdr
-```
 
 安装 Orbit skill：
 
@@ -83,13 +67,13 @@ herdr
 npx skills add https://github.com/godokyang/orbit -g
 ```
 
-这会安装完整 Orbit skill 目录，包括 `references/` 和 `assets/templates/`。公开 skill package 位于 `skills/orbit/`，CLI runtime 也使用同一份规则和模板。
+这会安装完整 Orbit skill 目录，包括 `references/` 和 `assets/templates/`。公开 skill package 位于 `skills/orbit/`。
 
 安装 Orbit CLI：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/godokyang/orbit/main/install.sh | sh
-orbit version
+orbit v2 --help
 ```
 
 本地 clone 的用户更新：
@@ -97,154 +81,66 @@ orbit version
 ```bash
 git pull
 sh install.sh
-orbit version
+orbit v2 --help
 ```
 
-Orbit CLI 需要 Ruby。远程安装还需要 `curl` 或 `wget`。安装脚本会覆盖已安装的 Orbit CLI runtime 和 wrapper，不会修改你项目里的 `.orbit/` 配置。
-
-## Herdr 和 manual protocol
-
-Herdr 是 Orbit 当前唯一的 `automatic-preview` adapter。它可以支持 `orbit start` 创建/唤醒 agent，但公开接口不能认证“当前 Orbit 调用来自哪个 pane”，因此不能产生 Herdr-verified identity，当前也不提供可信 direct delivery。
-
-没有 Herdr 时，只能走 manual protocol：用户自己打开终端，进入项目目录，设置 `ORBIT_INSTANCE` / `ORBIT_ROLE` 后启动 agent。
-
-```bash
-cd /path/to/your-project
-ORBIT_INSTANCE=reviewer-main ORBIT_ROLE=reviewer codex
-```
-
-当前 resolver 对 Herdr target 保持 `dispatch_ready: false`。生成 manual payload 进行权威投递：
-
-```bash
-orbit dispatch \
-  --task .orbit/tasks/current-task.yaml \
-  --to reviewer-main \
-  --manual-payload \
-  --json
-```
-
-manual protocol 不是 automatic runtime fallback，不提供 automatic start、direct dispatch 或 Herdr-verified runtime identity。当前 notice 是 `.orbit/runtime/notices` 下的 protocol record / inbox，不是 Herdr pane delivery。
-
-## 配置 agent
-
-用户主要改 `.orbit/instances.yaml` 里的 `command`。role 是 `lead` / `reviewer` / `tester`；instance 是 `lead-main` / `reviewer-main` / `tester-main`。启动和 dispatch 使用 instance key，不使用 role 名。
-
-```yaml
-instances:
-  lead-main:
-    role_ref: lead
-    command: codex
-    env:
-      ORBIT_INSTANCE: lead-main
-      ORBIT_ROLE: lead
-
-  reviewer-main:
-    role_ref: reviewer
-    command: claude
-    env:
-      ORBIT_INSTANCE: reviewer-main
-      ORBIT_ROLE: reviewer
-
-  tester-main:
-    role_ref: tester
-    command: opencode
-    env:
-      ORBIT_INSTANCE: tester-main
-      ORBIT_ROLE: tester
-```
-
-同一个 role 可以有多个 instance，例如 `reviewer-main`、`reviewer-security`。
+Orbit CLI 需要 Ruby。远程安装还需要 `curl` 或 `wget`。安装脚本会覆盖已安装的 Orbit CLI runtime 和 wrapper，不会修改你项目里的 `.orbit/` 数据。
 
 ## 判断是否完成
 
-不要根据聊天回复或 Herdr pane 状态判断 Orbit 任务完成。至少要看：
+不要根据聊天回复判断 Orbit 任务完成。至少要看：
 
 - task contract 是否存在，目标、范围、验收标准是否清楚。
 - implementation evidence 是否记录了实现事实。
-- required review/test gate 是否有最新结构化 `pass` verdict。
-- `orbit wait-gate`、`orbit validate`、`orbit audit` 是否通过。
-- handoff 是否记录剩余风险、验证方式和下一步。
+- required review gate 是否有当前（非 stale）的独立 pass verdict。
+- `orbit v2 status --task <id>` 显示的 gate 状态。
+- `orbit v2 complete --task <id>` 是否输出 `closed: true` 且退出码 0；未决
+  blocking finding 会让它退出码 1 并显式列出未满足项。
 
 用户可以接受风险，但 agent 必须把风险、缺口和下一步说清楚。
 
 ## Agent / 排障命令
 
-下面命令主要给 Orbit-aware agent 和排障使用。普通用户通常不需要手动运行。
+v2 全部命令（`v2` 前缀可省略；该双拼法是未决项，最终命令面待定）：
 
 ```bash
-orbit whoami --json
+# 一次性初始化项目（protocol root + genesis policy + 本地 provider 密钥）
+orbit v2 init <project_id>
 
-orbit new-task \
-  --task-type implementation \
-  --output .orbit/tasks/current-task.yaml
+# 创建任务（task 定义 YAML：goal + units）
+orbit v2 task start <task_id> --def task.yaml
 
-orbit rules resolve \
-  --task .orbit/tasks/current-task.yaml \
-  --output .orbit/rules/current-resolution.json \
-  --json
+# 派发实现/评审 attempt（--rule 必须显式给出规则文件）
+orbit v2 dispatch --task <task_id> --role implementer --rule rules/coder.md
+orbit v2 dispatch --task <task_id> --role reviewer   --rule rules/reviewer.md
 
-orbit rules print-context \
-  --task .orbit/tasks/current-task.yaml \
-  --output .orbit/rules/current-context.json \
-  --json
+# 提交 evidence（implementation 或 evaluator_submission）
+orbit v2 evidence submit --task <task_id> --proposal evidence.yaml
 
-orbit evidence init --output .orbit/evidence/current-evidence.json
+# 提交独立 gate 评测（verdict 可为 pass/fail，fail 可携带 findings）
+orbit v2 gate submit --task <task_id> --def evaluation.yaml
 
-orbit state start --task .orbit/tasks/current-task.yaml
+# 解决 Finding（需先有 follow-up 评测）
+orbit v2 finding resolve --task <task_id> --def resolution.yaml
 
-orbit evidence attach-rule \
-  --file .orbit/evidence/current-evidence.json \
-  --rule-resolution .orbit/rules/current-resolution.json \
-  --task .orbit/tasks/current-task.yaml
+# 派生完成判定（只读；closed: true 退出码 0，否则 1）
+orbit v2 complete --task <task_id>
 
-orbit evidence add \
-  --file .orbit/evidence/current-evidence.json \
-  --kind implementation \
-  --status pass \
-  --summary "implementation completed" \
-  --task .orbit/tasks/current-task.yaml
-
-orbit evidence submit \
-  --file .orbit/evidence/current-evidence.json \
-  --report .orbit/reports/review-report.yaml \
-  --task .orbit/tasks/current-task.yaml \
-  --json
-
-orbit wait-gate \
-  --task .orbit/tasks/current-task.yaml \
-  --evidence .orbit/evidence/current-evidence.json \
-  --json
-
-orbit validate \
-  --task .orbit/tasks/current-task.yaml \
-  --evidence .orbit/evidence/current-evidence.json \
-  --state .orbit/loop-state.yaml \
-  --json
-
-orbit audit \
-  --task .orbit/tasks/current-task.yaml \
-  --evidence .orbit/evidence/current-evidence.json \
-  --state .orbit/loop-state.yaml \
-  --json
-
-orbit handoff \
-  --task .orbit/tasks/current-task.yaml \
-  --evidence .orbit/evidence/current-evidence.json \
-  --state .orbit/loop-state.yaml \
-  --output .orbit/handoffs/current-handoff.json \
-  --record-state \
-  --json
+# 只读状态
+orbit v2 status [--task <task_id>]
 ```
 
-Report 模板在 `skills/orbit/assets/templates/review-report.yaml`、`skills/orbit/assets/templates/test-report.yaml` 和 `skills/orbit/assets/templates/design-review-report.yaml`。
+输入文件格式与命令细节见 `orbit v2 --help` 与 [Orbit skill](skills/orbit/SKILL.md)。
 
 ## 运行规则摘要
 
-- Orbit 默认规则随 skill 一起安装；agent 进入正式任务后会通过 `orbit rules resolve` 和 `orbit rules print-context` 读取本轮需要的规则。
-- 项目规则可以叠加，但不能替代 Orbit 默认 runtime 规则。
-- coding、review、testing 都必须通过 task/evidence/state/gate/audit 闭环证明结果。
-- 聊天结论、Herdr done、静态 binding、旧 session file、手写 runtime identity 都不是 gate proof。
-- review/test verdict 必须由对应 role 用结构化 report 提交。
-- implementation evidence 必须带 `--task`，让 CLI 校验 execution contract。
-- `dispatch --to` 使用 instance key，例如 `reviewer-main`，不要使用 role 名 `reviewer`。
-- 缺 Herdr 时只能走 explicit manual protocol；不要把 manual protocol 写成 automatic runtime downgrade。
+- 一个 task = 一个 `task_id` = 一个 Git branch/worktree；存储在
+  `.orbit/task-scopes/<task_id>/` 下，不同 task 路径天然隔离。
+- 一切受控写入需要 provider receipt；本地 provider 是一致性机制而非安全边界
+  （信任根 = 本地机器用户，替换为真实 provider 是记录在案的欠账）。
+- 完成不可自宣：`complete` 是只读派生，未决 finding / stale 评测 / 缺 evidence
+  都会让 gate 保持 open 并 fail closed。
+- dispatch 时规则文件内容被 sha256 钉死；规则文件变动后新 dispatch 会因 digest
+  不匹配失败——这是合同语义，不是故障。
+- review/test verdict 必须来自与实现者 runtime identity 不同的独立评估者。
+- 缺 marker、epoch 不匹配、密钥文件丢失时停止并请求用户决策，不猜、不回填。
