@@ -53,7 +53,15 @@ module Orbit
       RESOLUTION_PAYLOAD_KEYS = %w[acceptance_recorded_at finding_resolution policy_pin].freeze
       STORE_OWNED_KEYS = %w[acceptance_recorded_at policy_pin].freeze
 
-      def initialize(active_root:, clock: -> { Time.now.utc })
+      def initialize(active_root:, task_id:, clock: -> { Time.now.utc })
+        unless task_id.is_a?(String) && Identifiers.valid?("task_id", task_id)
+          raise ContractError.new(
+            "gate_facts_task_scope_invalid",
+            "gate facts store requires a canonical task_id scope",
+            path: "gate_facts_store.task_id"
+          )
+        end
+        @task_id = task_id
         unless clock.respond_to?(:call)
           raise ContractError.new(
             "gate_facts_argument_invalid",
@@ -70,7 +78,17 @@ module Orbit
             path: "gate_facts_store.active_root"
           )
         end
-        @log = TransactionLog.new(path: File.join(@active_root, GATE_FACTS_FILE))
+        # Canonical-by-construction task scope (design §4a).
+        @canonical_orbit = File.realpath(@active_root)
+        @task_dir = File.join(@canonical_orbit, V2::TASK_SCOPES_SEGMENT, @task_id)
+        unless File.directory?(@task_dir)
+          raise ContractError.new(
+            "gate_facts_argument_invalid",
+            "task scope directory must exist under the canonical active root",
+            path: "gate_facts_store.task_dir"
+          )
+        end
+        @log = TransactionLog.new(path: File.join(@task_dir, GATE_FACTS_FILE))
       end
 
       # Commits one GateEvaluation + its create-only Findings as ONE closed
@@ -88,10 +106,10 @@ module Orbit
           { "findings" => findings, "gate_evaluation" => evaluation }
         ))
         evaluation_id = frozen.dig("gate_evaluation", "gate_evaluation_id")
-        policy_log = File.join(@active_root, PolicyStore::POLICY_TRANSACTIONS_FILE)
-        task_log = File.join(@active_root, TaskStore::TASK_DEFINITIONS_FILE)
-        control_log = File.join(@active_root, ControlStore::CONTROL_TRANSACTIONS_FILE)
-        evidence_log = File.join(@active_root, EvidenceStore::EVIDENCE_TRANSACTIONS_FILE)
+        policy_log = File.join(@canonical_orbit, PolicyStore::POLICY_TRANSACTIONS_FILE)
+        task_log = File.join(@task_dir, TaskStore::TASK_DEFINITIONS_FILE)
+        control_log = File.join(@task_dir, ControlStore::CONTROL_TRANSACTIONS_FILE)
+        evidence_log = File.join(@task_dir, EvidenceStore::EVIDENCE_TRANSACTIONS_FILE)
         DurableFile.with_exclusive_lock(policy_log) do
           DurableFile.with_exclusive_lock(task_log) do
             DurableFile.with_exclusive_lock(control_log) do
@@ -177,10 +195,10 @@ module Orbit
         end
         frozen = JSON.parse(CanonicalJSON.dump({ "finding_resolution" => resolution }))
         resolution_id = frozen.dig("finding_resolution", "finding_resolution_id")
-        policy_log = File.join(@active_root, PolicyStore::POLICY_TRANSACTIONS_FILE)
-        task_log = File.join(@active_root, TaskStore::TASK_DEFINITIONS_FILE)
-        control_log = File.join(@active_root, ControlStore::CONTROL_TRANSACTIONS_FILE)
-        evidence_log = File.join(@active_root, EvidenceStore::EVIDENCE_TRANSACTIONS_FILE)
+        policy_log = File.join(@canonical_orbit, PolicyStore::POLICY_TRANSACTIONS_FILE)
+        task_log = File.join(@task_dir, TaskStore::TASK_DEFINITIONS_FILE)
+        control_log = File.join(@task_dir, ControlStore::CONTROL_TRANSACTIONS_FILE)
+        evidence_log = File.join(@task_dir, EvidenceStore::EVIDENCE_TRANSACTIONS_FILE)
         DurableFile.with_exclusive_lock(policy_log) do
           DurableFile.with_exclusive_lock(task_log) do
             DurableFile.with_exclusive_lock(control_log) do
@@ -254,8 +272,8 @@ module Orbit
       # public Validator closure re-validates the gate facts semantically in
       # the bundle.
       class Cutoff
-        def initialize(active_root:)
-          @store = GateFactStore.new(active_root: active_root)
+        def initialize(active_root:, task_id:)
+          @store = GateFactStore.new(active_root: active_root, task_id: task_id)
         end
 
         def snapshot_locked(authority_verifier:, runtime_identity_verifier:,
@@ -361,13 +379,13 @@ module Orbit
           "transactions" => transactions
         }
         cache = { control_records: nil, controls: {}, evidence: {}, tasks: {} }
-        verified_control_txs = Orbit::V2::ControlStore::Cutoff.new(active_root: @active_root)
+        verified_control_txs = Orbit::V2::ControlStore::Cutoff.new(active_root: @active_root, task_id: @task_id)
           .verified_records(gate_cutoff: structural,
             authority_verifier: authority_verifier,
             runtime_identity_verifier: runtime_identity_verifier,
             lifecycle_verifier: lifecycle_verifier)
         cache[:control_records] = verified_control_txs
-        Orbit::V2::EvidenceStore::Cutoff.new(active_root: @active_root).verified_payloads(
+        Orbit::V2::EvidenceStore::Cutoff.new(active_root: @active_root, task_id: @task_id).verified_payloads(
           gate_cutoff: structural,
           authority_verifier: authority_verifier,
           runtime_identity_verifier: runtime_identity_verifier,
@@ -411,7 +429,7 @@ module Orbit
         # cutoff, so the returned control facts are only ever produced from
         # verified authority. The structural bootstrap below is never exposed
         # as verified authority.
-        final_control = Orbit::V2::ControlStore::Cutoff.new(active_root: @active_root)
+        final_control = Orbit::V2::ControlStore::Cutoff.new(active_root: @active_root, task_id: @task_id)
           .verified_records(
             gate_cutoff: {
               "gate_evaluations" => verified_evaluations,
@@ -749,7 +767,7 @@ module Orbit
           relation_evaluations: relation_evaluations,
           relation_findings: relation_findings)
         validator = Orbit::V2::Validator.new(
-          project_root: @active_root,
+          project_root: @canonical_orbit,
           authority_verifier: authority,
           lifecycle_verifier: lifecycle,
           runtime_identity_verifier: runtime
@@ -828,11 +846,11 @@ module Orbit
       end
 
       def cached_control_records(cache)
-        cache[:control_records] ||= ControlStore.new(active_root: @active_root).records
+        cache[:control_records] ||= ControlStore.new(active_root: @active_root, task_id: @task_id).records
       end
 
       def cached_task(cache, task_id, revision_id, authority)
-        cache[:tasks][[task_id, revision_id]] ||= TaskStore.new(active_root: @active_root).resolve(
+        cache[:tasks][[task_id, revision_id]] ||= TaskStore.new(active_root: @active_root, task_id: @task_id).resolve(
           task_id: task_id,
           task_revision_id: revision_id,
           authority_verifier: authority
@@ -840,7 +858,7 @@ module Orbit
       end
 
       def cached_evidence(cache, record_id, authority, runtime, lifecycle)
-        cache[:evidence][record_id] ||= EvidenceStore.new(active_root: @active_root).resolve(
+        cache[:evidence][record_id] ||= EvidenceStore.new(active_root: @active_root, task_id: @task_id).resolve(
           evidence_record_id: record_id,
           authority_verifier: authority,
           runtime_identity_verifier: runtime,
@@ -1563,7 +1581,7 @@ module Orbit
           # verified under policy -> task locks, exact-binding the Finding);
           # the resolution only references it and never co-commits authority.
           accepted_authorizations = begin
-            TaskStore.new(active_root: @active_root).authorizations(
+            TaskStore.new(active_root: @active_root, task_id: @task_id).authorizations(
               task_id: task_record.fetch("task_id"),
               task_revision_id: task_record.fetch("task_revision_id"),
               authority_verifier: authority
@@ -1687,7 +1705,7 @@ module Orbit
         # in this same operation. The resolution bundle below therefore needs
         # no second, subtly different per-evaluation validation loop.
         validator = Orbit::V2::Validator.new(
-          project_root: @active_root,
+          project_root: @canonical_orbit,
           authority_verifier: authority,
           lifecycle_verifier: lifecycle,
           runtime_identity_verifier: runtime
@@ -1696,7 +1714,7 @@ module Orbit
           task, bundle_findings, evaluations_for_bundle, bundle_resolutions, resolution,
           issuer, authority, runtime, lifecycle, cache, waiver_entry: entry)
         validator = Orbit::V2::Validator.new(
-          project_root: @active_root,
+          project_root: @canonical_orbit,
           authority_verifier: authority,
           lifecycle_verifier: lifecycle,
           runtime_identity_verifier: runtime
@@ -1836,7 +1854,7 @@ module Orbit
       end
 
       def enriched_task_facts(task, authority)
-        task_store = TaskStore.new(active_root: @active_root)
+        task_store = TaskStore.new(active_root: @active_root, task_id: @task_id)
         resolved = task_store.resolve(
           task_id: task.fetch("task").fetch("task_id"),
           authority_verifier: authority
@@ -1947,13 +1965,35 @@ module Orbit
         }
       end
 
+      # Design §2.1 binding: the verified canonical directories must equal
+      # the constructed ones; the verified path is the opened path.
+      def bind_constructed_scope!(marker)
+        _marker, _canonical_orbit, task_dir = ActiveRoot.task_scope(
+          @active_root, @task_id,
+          code: "gate_facts_unpinned", label: "gate_facts_store"
+        )
+        unless task_dir == @task_dir
+          raise ContractError.new(
+            "gate_facts_unpinned",
+            "gate_facts_store task scope no longer resolves to its constructed canonical directories",
+            path: "gate_facts_store",
+            details: {
+              "constructed_task_dir" => @task_dir,
+              "resolved_task_dir" => task_dir
+            }
+          )
+        end
+        marker
+      end
+
       def marker_and_policy(authority)
-        marker = ActiveRoot.marker_for(
-          @active_root,
+        marker, = ActiveRoot.task_scope(
+          @active_root, @task_id,
           code: "gate_facts_unpinned",
           label: "gate_facts_store"
         )
-        resolved = PolicyStore.new(active_root: @active_root).resolve(
+        bind_constructed_scope!(marker)
+        resolved = PolicyStore.new(active_root: @canonical_orbit).resolve(
           pinned_genesis_ref: marker.fetch("project_policy_genesis_ref"),
           authority_verifier: authority
         )
@@ -1993,11 +2033,11 @@ module Orbit
             path: "gate_facts_store.resolve"
           )
         end
-        policy_log = File.join(@active_root, PolicyStore::POLICY_TRANSACTIONS_FILE)
-        task_log = File.join(@active_root, TaskStore::TASK_DEFINITIONS_FILE)
-        control_log = File.join(@active_root, ControlStore::CONTROL_TRANSACTIONS_FILE)
-        evidence_log = File.join(@active_root, EvidenceStore::EVIDENCE_TRANSACTIONS_FILE)
-        gate_log = File.join(@active_root, GATE_FACTS_FILE)
+        policy_log = File.join(@canonical_orbit, PolicyStore::POLICY_TRANSACTIONS_FILE)
+        task_log = File.join(@task_dir, TaskStore::TASK_DEFINITIONS_FILE)
+        control_log = File.join(@task_dir, ControlStore::CONTROL_TRANSACTIONS_FILE)
+        evidence_log = File.join(@task_dir, EvidenceStore::EVIDENCE_TRANSACTIONS_FILE)
+        gate_log = File.join(@task_dir, GATE_FACTS_FILE)
         DurableFile.with_exclusive_lock(policy_log) do
           DurableFile.with_exclusive_lock(task_log) do
             DurableFile.with_exclusive_lock(control_log) do

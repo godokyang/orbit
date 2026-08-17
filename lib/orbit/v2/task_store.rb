@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "fileutils"
 require "set"
 
 require_relative "active_root"
@@ -92,7 +93,15 @@ module Orbit
       STABLE_ID = /\A(?:acc|src|evreq|question)_[a-z0-9][a-z0-9_-]{2,95}\z/.freeze
       WORK_UNIT_KINDS = %w[implementation evaluation research release].freeze
 
-      def initialize(active_root:)
+      def initialize(active_root:, task_id:)
+        unless task_id.is_a?(String) && Identifiers.valid?("task_id", task_id)
+          raise ContractError.new(
+            "task_store_task_scope_invalid",
+            "task store requires a canonical task_id scope",
+            path: "task_store.task_id"
+          )
+        end
+        @task_id = task_id
         @active_root = File.expand_path(active_root)
         unless File.directory?(@active_root)
           raise ContractError.new(
@@ -101,7 +110,14 @@ module Orbit
             path: "task_store.active_root"
           )
         end
-        @log = TransactionLog.new(path: File.join(@active_root, TASK_DEFINITIONS_FILE))
+        # Canonical-by-construction task scope: the log and lock paths are
+        # only ever joined from these resolved values, never re-derived
+        # from the raw active_root input. The task directory itself may
+        # not exist yet (genesis creates it under the policy lock); a
+        # missing log reads as an empty verified chain.
+        @canonical_orbit = File.realpath(@active_root)
+        @task_dir = File.join(@canonical_orbit, V2::TASK_SCOPES_SEGMENT, @task_id)
+        @log = TransactionLog.new(path: File.join(@task_dir, TASK_DEFINITIONS_FILE))
       end
 
       # Append-only TaskRevision-scoped authorization seam: one closed
@@ -123,6 +139,7 @@ module Orbit
             path: "task_store.authorize"
           )
         end
+        ensure_scope!(task_id)
         frozen = JSON.parse(CanonicalJSON.dump(
           "assertion" => assertion,
           "authorization" => authorization,
@@ -130,7 +147,7 @@ module Orbit
           "task_revision_id" => task_revision_id
         ))
         record_id = frozen.dig("authorization", "authorization_record_id")
-        policy_log = File.join(@active_root, PolicyStore::POLICY_TRANSACTIONS_FILE)
+        policy_log = File.join(@canonical_orbit, PolicyStore::POLICY_TRANSACTIONS_FILE)
         DurableFile.with_exclusive_lock(policy_log) do
           @log.append_with(
             transaction_id: record_id,
@@ -158,9 +175,10 @@ module Orbit
       # thread-reentrant, so GateFactStore composition is safe), so a reader
       # never observes a half-appended transaction.
       def authorizations(task_id:, task_revision_id:, authority_verifier:)
-        policy_log = File.join(@active_root, PolicyStore::POLICY_TRANSACTIONS_FILE)
+        ensure_scope!(task_id)
+        policy_log = File.join(@canonical_orbit, PolicyStore::POLICY_TRANSACTIONS_FILE)
         DurableFile.with_exclusive_lock(policy_log) do
-          marker = ActiveRoot.marker_for(@active_root, code: "task_store_unpinned", label: "task_store")
+          marker = task_scope!
           policy = begin
             resolve_active_policy(marker, authority_verifier)
           rescue ContractError => error
@@ -221,20 +239,15 @@ module Orbit
             path: "task_store"
           )
         end
-        unless Identifiers.valid?("task_id", task["task_id"])
-          raise ContractError.new(
-            "task_store_argument_invalid",
-            "task_id must be a stable task identifier",
-            path: "task_store.task_id"
-          )
-        end
+        ensure_scope!(task["task_id"])
         candidate = payload(records)
         task_id = task["task_id"]
         # Fixed root lock order: policy log lock -> task log lock (same as
         # ControlStore), so the policy resolution inside the snapshot and
         # the task append are atomic with respect to policy rotations.
-        policy_log = File.join(@active_root, PolicyStore::POLICY_TRANSACTIONS_FILE)
+        policy_log = File.join(@canonical_orbit, PolicyStore::POLICY_TRANSACTIONS_FILE)
         DurableFile.with_exclusive_lock(policy_log) do
+          ensure_task_dir!
           @log.append_with(
             transaction_id: task_id,
             payload: candidate,
@@ -280,6 +293,7 @@ module Orbit
             path: "task_store.successor"
           )
         end
+        ensure_scope!(task["task_id"])
         append_task_candidate!(
           transaction_id: task.fetch("task_revision_id"),
           candidate: candidate,
@@ -313,6 +327,7 @@ module Orbit
             path: "task_store.revise_thesis"
           )
         end
+        ensure_scope!(change_thesis["task_id"])
         transaction_id = "#{change_thesis.fetch("change_thesis_id")}@#{change_thesis.fetch("revision")}"
         append_task_candidate!(
           transaction_id: transaction_id,
@@ -358,7 +373,7 @@ module Orbit
           )
         end
         txs = payloads(@log.records)
-        marker = ActiveRoot.marker_for(@active_root, code: "task_store_unpinned", label: "task_store")
+        marker = task_scope!
         policy = begin
           resolve_active_policy(marker, authority_verifier)
         rescue ContractError => e
@@ -414,7 +429,7 @@ module Orbit
 
       def validate_authorization_snapshot!(records, candidate, task_id, task_revision_id,
                                            authority_verifier)
-        marker = ActiveRoot.marker_for(@active_root, code: "task_store_unpinned", label: "task_store")
+        marker = task_scope!
         policy = resolve_active_policy(marker, authority_verifier)
         active = policy.fetch("active")
         accepted = policy.fetch("accepted")
@@ -474,7 +489,7 @@ module Orbit
                                           authority_verifier, fresh: false, prior_transactions: [])
         authorization = payload["authorization"]
         assertion = payload["assertion"]
-        validator = Orbit::V2::Validator.new(project_root: @active_root)
+        validator = Orbit::V2::Validator.new(project_root: @canonical_orbit)
         begin
           validator.validate_document!("authorization_record", authorization)
           validator.validate_document!("authority_assertion", assertion)
@@ -569,9 +584,55 @@ module Orbit
           details: details
         )
       end
+      # Task-scoped trust-boundary proof per design §2.1: proves the
+      # marker, derives the canonical task directory, and binds the
+      # store's constructed canonical values to the verified ones. The
+      # verified path is the opened path.
+      def task_scope!
+        marker, canonical_orbit, task_dir = ActiveRoot.task_scope(
+          @active_root, @task_id,
+          code: "task_store_unpinned", label: "task_store"
+        )
+        unless canonical_orbit == @canonical_orbit && task_dir == @task_dir
+          raise ContractError.new(
+            "task_store_unpinned",
+            "task_store task scope no longer resolves to its constructed canonical directories",
+            path: "task_store",
+            details: {
+              "constructed_task_dir" => @task_dir,
+              "resolved_task_dir" => task_dir
+            }
+          )
+        end
+        marker
+      end
+
+      # Cross-task references fail closed at the storage seam: a store
+      # scoped to one task never reads or writes another task's facts.
+      def ensure_scope!(task_id)
+        return if task_id == @task_id
+
+        raise ContractError.new(
+          "task_store_task_scope_invalid",
+          "task store is scoped to task #{@task_id} and cannot address #{task_id.inspect}",
+          path: "task_store.task_scope"
+        )
+      end
+
+      # Genesis-time directory creation under the policy lock (design
+      # §4-d): create the task directory, then re-prove the canonical
+      # identity so a symlinked tasks/ segment can never redirect the
+      # store (a forged redirect leaves a stray directory but is never
+      # accepted as truth).
+      def ensure_task_dir!
+        return task_scope! if File.directory?(@task_dir)
+
+        FileUtils.mkdir_p(@task_dir)
+        task_scope!
+      end
 
       def resolve_active_policy(marker, authority_verifier)
-        policy_store = PolicyStore.new(active_root: @active_root)
+        policy_store = PolicyStore.new(active_root: @canonical_orbit)
         resolved = policy_store.resolve(
           pinned_genesis_ref: marker.fetch("project_policy_genesis_ref"),
           authority_verifier: authority_verifier
@@ -598,7 +659,7 @@ module Orbit
 
       def validate_task_snapshot!(log_records, candidate, task_id, authority_verifier)
         txs = payloads(log_records)
-        marker = ActiveRoot.marker_for(@active_root, code: "task_store_unpinned", label: "task_store")
+        marker = task_scope!
         policy = resolve_active_policy(marker, authority_verifier)
         verified_existing = verify_existing_for_write!(txs, marker, policy, authority_verifier)
         existing = verified_existing.find do |tx|
@@ -621,7 +682,7 @@ module Orbit
       end
 
       def append_task_candidate!(transaction_id:, candidate:, authority_verifier:, kind:)
-        policy_log = File.join(@active_root, PolicyStore::POLICY_TRANSACTIONS_FILE)
+        policy_log = File.join(@canonical_orbit, PolicyStore::POLICY_TRANSACTIONS_FILE)
         DurableFile.with_exclusive_lock(policy_log) do
           @log.append_with(
             transaction_id: transaction_id,
@@ -638,7 +699,7 @@ module Orbit
       def validate_candidate_snapshot!(log_records, candidate, transaction_id,
                                        authority_verifier, kind)
         txs = payloads(log_records)
-        marker = ActiveRoot.marker_for(@active_root, code: "task_store_unpinned", label: "task_store")
+        marker = task_scope!
         policy = resolve_active_policy(marker, authority_verifier)
         verified = verify_existing_for_write!(txs, marker, policy, authority_verifier)
         existing = verified.find do |tx|
@@ -747,7 +808,7 @@ module Orbit
         logical_lead = tx.fetch("logical_lead")
         project_id = policy ? policy["project_id"] : marker["project_id"]
 
-        validator = Orbit::V2::Validator.new(project_root: @active_root)
+        validator = Orbit::V2::Validator.new(project_root: @canonical_orbit)
         begin
           validator.validate_document!("task_revision", task)
           validator.validate_document!("logical_lead", logical_lead)
@@ -800,7 +861,7 @@ module Orbit
         assertions = tx.fetch("authority_assertions")
         authorizations = tx.fetch("authorization_records")
         project_id = policy ? policy.fetch("project_id") : marker.fetch("project_id")
-        validator = Orbit::V2::Validator.new(project_root: @active_root)
+        validator = Orbit::V2::Validator.new(project_root: @canonical_orbit)
         begin
           validator.validate_document!("task_revision", task)
           gates.each { |gate| validator.validate_document!("gate_requirement", gate) }
@@ -856,7 +917,7 @@ module Orbit
           raise genesis_invalid("thesis transaction carries a malformed component")
         end
         begin
-          Orbit::V2::Validator.new(project_root: @active_root)
+          Orbit::V2::Validator.new(project_root: @canonical_orbit)
             .validate_document!("change_thesis", thesis)
         rescue ValidationFailure, ContractError
           raise genesis_invalid("ChangeThesis successor violates its contract")

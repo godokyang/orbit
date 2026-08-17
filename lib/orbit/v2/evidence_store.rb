@@ -33,18 +33,43 @@ module Orbit
       PAYLOAD_KEYS = %w[code_surface evidence_record repository_snapshot].freeze
       STORE_OWNED_KEYS = %w[acceptance_recorded_at accepted content_digest].freeze
 
-      def initialize(active_root:, clock: -> { Time.now.utc })
-        @active_root = File.expand_path(active_root)
-        unless File.directory?(@active_root) && clock.respond_to?(:call)
+      def initialize(active_root:, task_id:, clock: -> { Time.now.utc })
+        unless task_id.is_a?(String) && Identifiers.valid?("task_id", task_id)
+          raise ContractError.new(
+            "evidence_store_task_scope_invalid",
+            "evidence store requires a canonical task_id scope",
+            path: "evidence_store.task_id"
+          )
+        end
+        @task_id = task_id
+        unless clock.respond_to?(:call)
           raise ContractError.new(
             "evidence_store_argument_invalid",
-            "active root and configured clock are required",
-            path: "evidence_store"
+            "configured clock must respond to call",
+            path: "evidence_store.clock"
           )
         end
         @clock = clock
+        @active_root = File.expand_path(active_root)
+        unless File.directory?(@active_root)
+          raise ContractError.new(
+            "evidence_store_argument_invalid",
+            "active root must be an existing directory",
+            path: "evidence_store.active_root"
+          )
+        end
+        # Canonical-by-construction task scope (design §4a).
+        @canonical_orbit = File.realpath(@active_root)
+        @task_dir = File.join(@canonical_orbit, V2::TASK_SCOPES_SEGMENT, @task_id)
+        unless File.directory?(@task_dir)
+          raise ContractError.new(
+            "evidence_store_argument_invalid",
+            "task scope directory must exist under the canonical active root",
+            path: "evidence_store.task_dir"
+          )
+        end
         @log = TransactionLog.new(
-          path: File.join(@active_root, EVIDENCE_TRANSACTIONS_FILE)
+          path: File.join(@task_dir, EVIDENCE_TRANSACTIONS_FILE)
         )
       end
 
@@ -59,9 +84,9 @@ module Orbit
           lifecycle_verifier
         )
         evidence_id = proposal.fetch("evidence_record_id")
-        policy_log = File.join(@active_root, PolicyStore::POLICY_TRANSACTIONS_FILE)
-        task_log = File.join(@active_root, TaskStore::TASK_DEFINITIONS_FILE)
-        control_log = File.join(@active_root, ControlStore::CONTROL_TRANSACTIONS_FILE)
+        policy_log = File.join(@canonical_orbit, PolicyStore::POLICY_TRANSACTIONS_FILE)
+        task_log = File.join(@task_dir, TaskStore::TASK_DEFINITIONS_FILE)
+        control_log = File.join(@task_dir, ControlStore::CONTROL_TRANSACTIONS_FILE)
 
         DurableFile.with_exclusive_lock(policy_log) do
           DurableFile.with_exclusive_lock(task_log) do
@@ -125,10 +150,10 @@ module Orbit
           )
         end
 
-        policy_log = File.join(@active_root, PolicyStore::POLICY_TRANSACTIONS_FILE)
-        task_log = File.join(@active_root, TaskStore::TASK_DEFINITIONS_FILE)
-        control_log = File.join(@active_root, ControlStore::CONTROL_TRANSACTIONS_FILE)
-        evidence_log = File.join(@active_root, EVIDENCE_TRANSACTIONS_FILE)
+        policy_log = File.join(@canonical_orbit, PolicyStore::POLICY_TRANSACTIONS_FILE)
+        task_log = File.join(@task_dir, TaskStore::TASK_DEFINITIONS_FILE)
+        control_log = File.join(@task_dir, ControlStore::CONTROL_TRANSACTIONS_FILE)
+        evidence_log = File.join(@task_dir, EVIDENCE_TRANSACTIONS_FILE)
         result = DurableFile.with_exclusive_lock(policy_log) do
           DurableFile.with_exclusive_lock(task_log) do
             DurableFile.with_exclusive_lock(control_log) do
@@ -167,8 +192,8 @@ module Orbit
       # non-recursive attempt resolution, so a forged digest-consistent
       # EvidenceRecord can never enter the gate cutoff cache.
       class Cutoff
-        def initialize(active_root:)
-          @store = EvidenceStore.new(active_root: active_root)
+        def initialize(active_root:, task_id:)
+          @store = EvidenceStore.new(active_root: active_root, task_id: task_id)
         end
 
         def verified_payloads(gate_cutoff:, authority_verifier:,
@@ -186,7 +211,7 @@ module Orbit
                                    runtime_identity_verifier, lifecycle_verifier,
                                    verified_control_txs: nil)
         verified_txs = verified_control_txs ||
-          Orbit::V2::ControlStore::Cutoff.new(active_root: @active_root)
+          Orbit::V2::ControlStore::Cutoff.new(active_root: @active_root, task_id: @task_id)
             .verified_records(gate_cutoff: gate_cutoff,
               authority_verifier: authority_verifier,
               runtime_identity_verifier: runtime_identity_verifier,
@@ -345,7 +370,8 @@ module Orbit
           )
         end
 
-        task = TaskStore.new(active_root: @active_root).resolve(
+        ensure_scope!(record.fetch("task_id"))
+        task = TaskStore.new(active_root: @active_root, task_id: @task_id).resolve(
           task_id: record.fetch("task_id"),
           task_revision_id: record.fetch("task_revision_id"),
           authority_verifier: authority
@@ -354,7 +380,7 @@ module Orbit
                       resolve_attempt_locked(record.fetch("attempt_id"), authority, runtime,
                         lifecycle, verified_control_txs)
                     else
-                      ControlStore.new(active_root: @active_root).resolve_attempt(
+                      ControlStore.new(active_root: @active_root, task_id: @task_id).resolve_attempt(
                         attempt_id: record.fetch("attempt_id"),
                         authority_verifier: authority,
                         runtime_identity_verifier: runtime,
@@ -449,7 +475,7 @@ module Orbit
             path: "evidence_store.#{record["evidence_record_id"]}.submitted_rule_resolution_id"
           )
         end
-        RuleResolution.validate!(rule, project_root: @active_root)
+        RuleResolution.validate!(rule, project_root: @canonical_orbit)
 
         accepted_at = Time.iso8601(record.fetch("acceptance_recorded_at"))
         started_at = Time.iso8601(attempt.dig("events", 0, "started_at"))
@@ -518,12 +544,13 @@ module Orbit
       end
 
       def marker_and_policy(authority)
-        marker = ActiveRoot.marker_for(
-          @active_root,
+        marker, = ActiveRoot.task_scope(
+          @active_root, @task_id,
           code: "evidence_store_unpinned",
           label: "evidence_store"
         )
-        resolved = PolicyStore.new(active_root: @active_root).resolve(
+        bind_constructed_scope!(marker)
+        resolved = PolicyStore.new(active_root: @canonical_orbit).resolve(
           pinned_genesis_ref: marker.fetch("project_policy_genesis_ref"),
           authority_verifier: authority
         )
@@ -544,6 +571,38 @@ module Orbit
           path: "evidence_store",
           details: { "cause" => error.code, "message" => error.message }
         )
+      end
+
+      # Cross-task references fail closed at the storage seam.
+      def ensure_scope!(task_id)
+        return if task_id == @task_id
+
+        raise ContractError.new(
+          "evidence_store_task_scope_invalid",
+          "evidence store is scoped to task #{@task_id} and cannot address #{task_id.inspect}",
+          path: "evidence_store.task_scope"
+        )
+      end
+
+      # Design §2.1 binding: the verified canonical directories must equal
+      # the constructed ones; the verified path is the opened path.
+      def bind_constructed_scope!(marker)
+        canonical_orbit, task_dir = ActiveRoot.task_scope(
+          @active_root, @task_id,
+          code: "evidence_store_unpinned", label: "evidence_store"
+        )[1, 2]
+        unless canonical_orbit == @canonical_orbit && task_dir == @task_dir
+          raise ContractError.new(
+            "evidence_store_unpinned",
+            "evidence_store task scope no longer resolves to its constructed canonical directories",
+            path: "evidence_store",
+            details: {
+              "constructed_task_dir" => @task_dir,
+              "resolved_task_dir" => task_dir
+            }
+          )
+        end
+        marker
       end
 
       def historical_evidence?(record, attempt, task_policy, policy)

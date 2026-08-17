@@ -40,6 +40,12 @@ module OrbitV2ContractTest
 
   def run
     @assertions = 0
+    if (only = ENV["ORBIT_V2_ONLY"])
+      tests = only.split(",")
+      tests.each { |name| send(name) }
+      puts("ORBIT_V2_ONLY_PASS #{tests.join(",")} assertions=#{@assertions}")
+      return
+    end
     valid_bundle = OrbitV2FixtureFactory.valid_bundle
     assert(validator.validate(valid_bundle).empty?, "valid fixture must pass")
     test_schema_catalog
@@ -98,6 +104,7 @@ module OrbitV2ContractTest
     test_control_store_gate_facts
     test_control_store_finding_resolution
     test_gate_engine
+    test_lib_solo_require
     test_v1_inventory
     test_slice_isolation
     puts(
@@ -3796,7 +3803,12 @@ module OrbitV2ContractTest
       authority_verifier: OrbitV2FixtureFactory.authority_verifier)
     Orbit::V2::ProtocolRoot.create(project_root: dir, project_id: OrbitV2FixtureFactory::PROJECT_ID,
       policy_genesis_ref: { "policy_revision_id" => policy["policy_revision_id"], "content_digest" => policy["content_digest"] })
-    [Orbit::V2::ControlStore.new(active_root: File.join(dir, ".orbit")), policy, bundle["task_revisions"].first]
+    # Task-local storage: create the task scope directory before the
+    # ControlStore constructor requires it (TaskStore#genesis re-proves it
+    # idempotently when the test commits task facts afterwards).
+    FileUtils.mkdir_p(File.join(dir, ".orbit", Orbit::V2::TASK_SCOPES_SEGMENT, bundle["task_revisions"].first["task_id"]))
+    [Orbit::V2::ControlStore.new(active_root: File.join(dir, ".orbit"),
+      task_id: bundle["task_revisions"].first["task_id"]), policy, bundle["task_revisions"].first]
   end
 
   def control_store_genesis(store, records, verifiers, overrides = {})
@@ -3827,7 +3839,7 @@ module OrbitV2ContractTest
       assert(store.records.size == 1 &&
         store.records.first.keys.sort == %w[agent assertion checkpoint registry session], "one closed payload")
       resolved = control_store_resolve(
-        Orbit::V2::ControlStore.new(active_root: File.join(dir, ".orbit")), "olcontrol_inc4main", vf)
+        Orbit::V2::ControlStore.new(active_root: File.join(dir, ".orbit"), task_id: task["task_id"]), "olcontrol_inc4main", vf)
       assert(resolved["checkpoint"]["is_genesis"] == true &&
         resolved["session"]["lead_runtime_subject_ref"] == agent.dig("runtime_identity", "runtime_subject_id"),
         "reopen and resolve")
@@ -3920,7 +3932,7 @@ module OrbitV2ContractTest
         records = control_store_genesis_records(bundle, task,
           OrbitV2FixtureFactory.agent("oagent_inc4claim#{index}", "lead"), "olcontrol_inc4claim",
           control_store_writer_assertion("olcontrol_inc4claim"))
-        control_store_genesis(Orbit::V2::ControlStore.new(active_root: File.join(dir, ".orbit")),
+        control_store_genesis(Orbit::V2::ControlStore.new(active_root: File.join(dir, ".orbit"), task_id: task["task_id"]),
           records, vf)
       end
       out_r, out_w = IO.pipe
@@ -3944,12 +3956,13 @@ module OrbitV2ContractTest
         "concurrent same-control claims yield exactly one accepted genesis")
       race_task = OrbitV2FixtureFactory.extra_task(bundle, task_id: "otask_inc4race",
         revision_id: "trev_inc4race_r1", gate_id: "ogreq_inc4race", gate_lineage_id: "ogline_inc4race")["task"]
+      FileUtils.mkdir_p(File.join(dir, ".orbit", Orbit::V2::TASK_SCOPES_SEGMENT, "otask_inc4race"))
       signal_r, signal_w = IO.pipe
       release_r, release_w = IO.pipe
       rec = control_store_genesis_records(bundle, race_task, OrbitV2FixtureFactory.agent("oagent_inc4race", "lead"),
         "olcontrol_inc4race", control_store_writer_assertion("olcontrol_inc4race"))
       genesis_pid = fork do
-        control_store_genesis(Orbit::V2::ControlStore.new(active_root: File.join(dir, ".orbit")),
+        control_store_genesis(Orbit::V2::ControlStore.new(active_root: File.join(dir, ".orbit"), task_id: "otask_inc4race"),
           rec, vf, authority: BlockingAuthorityVerifier.new(vf[0], signal_w, release_r))
         exit!(0)
       end
@@ -3970,7 +3983,9 @@ module OrbitV2ContractTest
       release_w.close
       assert(Process.wait2(genesis_pid).last.success?, "genesis completed")
       assert(Process.wait2(rotation_pid).last.success?, "rotation completed after the window")
-      assert(control_store_resolve(store, "olcontrol_inc4race", vf)
+      assert(control_store_resolve(
+        Orbit::V2::ControlStore.new(active_root: File.join(dir, ".orbit"), task_id: "otask_inc4race"),
+        "olcontrol_inc4race", vf)
         .dig("checkpoint", "project_policy_revision_ref", "policy_revision_id") ==
         policy["policy_revision_id"], "control pinned the policy active inside its locked window")
       assert(Orbit::V2::PolicyStore.new(active_root: File.join(dir, ".orbit")).resolve(
@@ -4050,7 +4065,7 @@ module OrbitV2ContractTest
       bundle["task_revisions"] = [OrbitV2FixtureFactory.deep_copy(task_records[0])]
       bundle["work_units"] = OrbitV2FixtureFactory.deep_copy(task_records[2])
       bundle["logical_leads"] = [OrbitV2FixtureFactory.deep_copy(task_records[6])]
-      task_store = Orbit::V2::TaskStore.new(active_root: File.join(dir, ".orbit"))
+      task_store = Orbit::V2::TaskStore.new(active_root: File.join(dir, ".orbit"), task_id: task_records[0]["task_id"])
       assert(task_store.genesis(task: task_records[0], gate_requirements: task_records[1],
         work_units: task_records[2], change_theses: task_records[3],
         authority_assertions: task_records[4], authorization_records: task_records[5],
@@ -4389,7 +4404,7 @@ module OrbitV2ContractTest
       store, policy, _task = control_store_seeded_root(dir, bundle)
       vf = control_verifiers
       task_records = task_store_genesis_records(bundle)
-      task_store = Orbit::V2::TaskStore.new(active_root: File.join(dir, ".orbit"))
+      task_store = Orbit::V2::TaskStore.new(active_root: File.join(dir, ".orbit"), task_id: task_records[0]["task_id"])
       assert(task_store_genesis(task_store, task_records, vf[0]) == :appended,
         "dispatch task facts commit")
       lead_agent = OrbitV2FixtureFactory.agent("oagent_inc6blead", "lead")
@@ -4425,14 +4440,15 @@ module OrbitV2ContractTest
         "rule, dispatch, AttemptCreated, and observation append atomically")
       File.write(rule_path, "changed after assignment\n")
       resolved = control_store_resolve(
-        Orbit::V2::ControlStore.new(active_root: File.join(dir, ".orbit")),
+        Orbit::V2::ControlStore.new(active_root: File.join(dir, ".orbit"), task_id: task_records[0]["task_id"]),
         "olcontrol_inc6bmain", vf)
       assert(resolved["checkpoints"].map { |cp| cp["lead_checkpoint_id"] } ==
         %w[olcheckpoint_inc6bdispatch olcheckpoint_created_inc6bimplementation] &&
         resolved.dig("attempts", 0, "attempt_id") == "oattempt_inc6bimplementation" &&
         resolved["rule_resolutions"].first["resolution_id"] == execution[0]["resolution_id"],
         "reopen resolves the two checkpoint events and execution facts")
-      log_path = File.join(dir, ".orbit", Orbit::V2::ControlStore::CONTROL_TRANSACTIONS_FILE)
+      log_path = File.join(dir, ".orbit", Orbit::V2::TASK_SCOPES_SEGMENT,
+        task_records[0]["task_id"], Orbit::V2::ControlStore::CONTROL_TRANSACTIONS_FILE)
       accepted_bytes = File.binread(log_path)
       half = JSON.parse(accepted_bytes)
       half["records"].last["payload"].delete("observation_checkpoint")
@@ -4464,7 +4480,7 @@ module OrbitV2ContractTest
       store, policy, _task = control_store_seeded_root(dir, bundle)
       vf = control_verifiers
       task_records = task_store_genesis_records(bundle)
-      task_store = Orbit::V2::TaskStore.new(active_root: File.join(dir, ".orbit"))
+      task_store = Orbit::V2::TaskStore.new(active_root: File.join(dir, ".orbit"), task_id: task_records[0]["task_id"])
       assert(task_store_genesis(task_store, task_records, vf[0]) == :appended, "task facts commit")
       lead_agent = OrbitV2FixtureFactory.agent("oagent_inc6clead", "lead")
       control_records = control_store_genesis_records(bundle, task_records[0], lead_agent,
@@ -4484,7 +4500,7 @@ module OrbitV2ContractTest
       assert(commit_terminal.call(terminal_records) == :appended,
         "terminal reconciliation appends as one closed transaction")
       resolved = control_store_resolve(
-        Orbit::V2::ControlStore.new(active_root: File.join(dir, ".orbit")), "olcontrol_inc6cmain", vf)
+        Orbit::V2::ControlStore.new(active_root: File.join(dir, ".orbit"), task_id: task_records[0]["task_id"]), "olcontrol_inc6cmain", vf)
       assert(resolved.dig("checkpoint", "lead_checkpoint_id") ==
         "olcheckpoint_created_inc6csuccessor" &&
         resolved["checkpoints"].map { |cp| cp["lead_checkpoint_id"] } ==
@@ -4560,7 +4576,7 @@ module OrbitV2ContractTest
       Process.wait(recovered_pid)
       Process.wait(append_pid)
       final = control_store_resolve(
-        Orbit::V2::ControlStore.new(active_root: File.join(dir, ".orbit")), "olcontrol_inc6cmain", vf)
+        Orbit::V2::ControlStore.new(active_root: File.join(dir, ".orbit"), task_id: task_records[0]["task_id"]), "olcontrol_inc6cmain", vf)
       assert(store.records.size == 4 && final.dig("checkpoint", "lead_checkpoint_id") ==
         "olcheckpoint_created_inc6cthird",
         "the concurrent append committed exactly one new terminal transaction after recovery")
@@ -4577,7 +4593,7 @@ module OrbitV2ContractTest
       vf = control_verifiers
       task_records = task_store_genesis_records(bundle)
       bundle["task_revisions"] = [OrbitV2FixtureFactory.deep_copy(task_records[0])]
-      task_store = Orbit::V2::TaskStore.new(active_root: File.join(dir, ".orbit"))
+      task_store = Orbit::V2::TaskStore.new(active_root: File.join(dir, ".orbit"), task_id: task_records[0]["task_id"])
       assert(task_store_genesis(task_store, task_records, vf[0]) == :appended, "r1 task facts commit")
       lead_agent = OrbitV2FixtureFactory.agent("oagent_inc6elead", "lead")
       control_records = control_store_genesis_records(bundle, task_records[0], lead_agent,
@@ -4609,7 +4625,7 @@ module OrbitV2ContractTest
       assert(control_store_activate(store, activation, vf) == :idempotent,
         "activation replay is idempotent after full verification")
       resolved = control_store_resolve(
-        Orbit::V2::ControlStore.new(active_root: File.join(dir, ".orbit")), "olcontrol_inc6emain", vf)
+        Orbit::V2::ControlStore.new(active_root: File.join(dir, ".orbit"), task_id: task_records[0]["task_id"]), "olcontrol_inc6emain", vf)
       assert(resolved.dig("checkpoint", "lead_checkpoint_id") == "olcheckpoint_inc6eactivate" &&
         resolved.dig("checkpoint", "task_queue", 0, "task_revision_id") == "trev_inc6dr2_r2",
         "resolve derives the current queue from the accepted activation lineage")
@@ -4659,7 +4675,7 @@ module OrbitV2ContractTest
       vf = control_verifiers
       task_records = task_store_genesis_records(bundle)
       bundle["task_revisions"] = [OrbitV2FixtureFactory.deep_copy(task_records[0])]
-      task_store = Orbit::V2::TaskStore.new(active_root: File.join(dir, ".orbit"))
+      task_store = Orbit::V2::TaskStore.new(active_root: File.join(dir, ".orbit"), task_id: task_records[0]["task_id"])
       assert(task_store_genesis(task_store, task_records, vf[0]) == :appended, "r1 commits")
       lead_agent = OrbitV2FixtureFactory.agent("oagent_inc6egenesislead", "lead")
       control_records = control_store_genesis_records(bundle, task_records[0], lead_agent,
@@ -4684,7 +4700,8 @@ module OrbitV2ContractTest
       bundle = OrbitV2FixtureFactory.valid_bundle
       store, _policy, task = control_store_seeded_root(dir, bundle)
       vf = control_verifiers
-      path = File.join(dir, ".orbit", Orbit::V2::ControlStore::CONTROL_TRANSACTIONS_FILE)
+      path = File.join(dir, ".orbit", Orbit::V2::TASK_SCOPES_SEGMENT, task["task_id"],
+        Orbit::V2::ControlStore::CONTROL_TRANSACTIONS_FILE)
       records = control_store_genesis_records(bundle, task, OrbitV2FixtureFactory.agent("oagent_inc4lead", "lead"),
         "olcontrol_inc4main", control_store_writer_assertion("olcontrol_inc4main"))
       payload = { "assertion" => records[4], "agent" => records[3], "checkpoint" => records[2],
@@ -4819,7 +4836,8 @@ module OrbitV2ContractTest
       authority_verifier: OrbitV2FixtureFactory.authority_verifier)
     Orbit::V2::ProtocolRoot.create(project_root: dir, project_id: OrbitV2FixtureFactory::PROJECT_ID,
       policy_genesis_ref: { "policy_revision_id" => policy["policy_revision_id"], "content_digest" => policy["content_digest"] })
-    [Orbit::V2::TaskStore.new(active_root: File.join(dir, ".orbit")), policy]
+    [Orbit::V2::TaskStore.new(active_root: File.join(dir, ".orbit"),
+      task_id: bundle["task_revisions"].first["task_id"]), policy]
   end
 
   def task_store_genesis(store, records, verifier, overrides = {})
@@ -4976,7 +4994,7 @@ module OrbitV2ContractTest
       assert(store.records.size == 1 &&
         store.records.first.keys.sort == %w[authority_assertions authorization_records change_theses gate_requirements logical_lead task work_units],
         "one closed payload")
-      resolved = task_store_resolve(Orbit::V2::TaskStore.new(active_root: File.join(dir, ".orbit")), task_id, verifier)
+      resolved = task_store_resolve(Orbit::V2::TaskStore.new(active_root: File.join(dir, ".orbit"), task_id: task_id), task_id, verifier)
       assert(resolved["task"]["task_id"] == task_id && resolved["gate_requirements"].size == 1 &&
         resolved["work_units"].size == 3 && resolved["change_theses"].size == 3 &&
         resolved["authorization_records"].size == 3 &&
@@ -5007,7 +5025,9 @@ module OrbitV2ContractTest
       verifier = OrbitV2FixtureFactory.authority_verifier
       records = task_store_genesis_records(bundle)
       task_id = records[0]["task_id"]
-      path = File.join(dir, ".orbit", Orbit::V2::TaskStore::TASK_DEFINITIONS_FILE)
+      path = File.join(dir, ".orbit", Orbit::V2::TASK_SCOPES_SEGMENT, task_id,
+        Orbit::V2::TaskStore::TASK_DEFINITIONS_FILE)
+      FileUtils.mkdir_p(File.dirname(path))
       payload = { "authority_assertions" => records[4], "authorization_records" => records[5],
         "change_theses" => records[3], "gate_requirements" => records[1],
         "logical_lead" => records[6], "task" => records[0], "work_units" => records[2] }
@@ -5068,7 +5088,10 @@ module OrbitV2ContractTest
         "committed replay stays idempotent after rotation")
       stale = task_store_genesis_records(bundle, task_id: "otask_inc5stale",
         task_revision_id: "trev_inc5stale_r1", gate_id: "ogreq_inc5stale", gate_lineage_id: "ogline_inc5stale")
-      expect_contract_error("task_store_genesis_invalid") do
+      # 2026-08-17 task-centric revision: the stale-policy record is also
+      # another task's definition and fails closed at the scope seam
+      # (scope rejection precedes the stale-policy check).
+      expect_contract_error("task_store_task_scope_invalid") do
         task_store_genesis(store, stale, verifier)
       end
       fresh_bundle = OrbitV2FixtureFactory.deep_copy(bundle)
@@ -5076,14 +5099,18 @@ module OrbitV2ContractTest
       weak = task_store_genesis_records(fresh_bundle, task_id: "otask_inc5weak",
         task_revision_id: "trev_inc5weak_r1", gate_id: "ogreq_inc5weak", gate_lineage_id: "ogline_inc5weak",
         weak_gate: true)
-      expect_contract_error("task_store_genesis_invalid") do
+      # 2026-08-17 task-centric revision: another task's definition (the
+      # weak/extra-gate probes below) fails closed at the scope seam;
+      # scope rejection precedes the gate-strength/extra-gate checks.
+      expect_contract_error("task_store_task_scope_invalid") do
         task_store_genesis(store, weak, verifier)
       end
       extra = task_store_genesis_records(fresh_bundle, task_id: "otask_inc5extra",
         task_revision_id: "trev_inc5extra_r1", gate_id: "ogreq_inc5extra", gate_lineage_id: "ogline_inc5extra",
         extra_gate: true)
-      assert(task_store_genesis(store, extra, verifier) == :appended,
-        "unrelated additional legal gates remain allowed")
+      expect_contract_error("task_store_task_scope_invalid") do
+        task_store_genesis(store, extra, verifier)
+      end
     end
   end
 
@@ -5096,19 +5123,22 @@ module OrbitV2ContractTest
       assert(task_store_genesis(store, records, verifier) == :appended, "first task")
       borrowed_gate = task_store_genesis_records(bundle, task_id: "otask_inc5second",
         task_revision_id: "trev_inc5second_r1")
-      expect_contract_error("task_store_genesis_invalid") { task_store_genesis(store, borrowed_gate, verifier) }
+      expect_contract_error("task_store_task_scope_invalid") { task_store_genesis(store, borrowed_gate, verifier) }
       borrowed_thesis = task_store_genesis_records(bundle, task_id: "otask_inc5third",
         task_revision_id: "trev_inc5third_r1", gate_id: "ogreq_inc5third", gate_lineage_id: "ogline_inc5third")
       borrowed_thesis[3].each_with_index do |thesis, index|
         thesis["change_thesis_id"] = records[3][index]["change_thesis_id"]
         thesis["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(thesis)
       end
-      expect_contract_error("task_store_genesis_invalid") { task_store_genesis(store, borrowed_thesis, verifier) }
+      expect_contract_error("task_store_task_scope_invalid") { task_store_genesis(store, borrowed_thesis, verifier) }
       disjoint = task_store_genesis_records(bundle, task_id: "otask_inc5fourth",
         task_revision_id: "trev_inc5fourth_r1", gate_id: "ogreq_inc5fourth", gate_lineage_id: "ogline_inc5fourth")
-      assert(task_store_genesis(store, disjoint, verifier) == :appended &&
-        task_store_resolve(store, "otask_inc5fourth", verifier)["task"]["task_id"] == "otask_inc5fourth" &&
-        store.records.size == 2, "disjoint second task accepted and resolves; borrowed ids never committed")
+      # 2026-08-17 task-centric revision: a task-scoped store never accepts
+      # another task's definition — cross-task writes fail closed at the
+      # storage seam (the old project-level disjoint acceptance is the
+      # superseded model; see ADR-005/006 revision records).
+      expect_contract_error("task_store_task_scope_invalid") { task_store_genesis(store, disjoint, verifier) }
+      assert(store.records.size == 1, "cross-task writes leave the scoped store unchanged")
     end
   end
 
@@ -5126,7 +5156,7 @@ module OrbitV2ContractTest
         fork do
           out_r.close
           begin
-            out_w.write("#{task_store_genesis(Orbit::V2::TaskStore.new(active_root: File.join(dir, ".orbit")), candidate, verifier)}\n")
+            out_w.write("#{task_store_genesis(Orbit::V2::TaskStore.new(active_root: File.join(dir, ".orbit"), task_id: candidate[0]["task_id"]), candidate, verifier)}\n")
           rescue Orbit::V2::ContractError => error
             out_w.write("error:#{error.code}\n")
           end
@@ -5145,7 +5175,7 @@ module OrbitV2ContractTest
       race = task_store_genesis_records(bundle, task_id: "otask_inc5race",
         task_revision_id: "trev_inc5race_r1", gate_id: "ogreq_inc5race", gate_lineage_id: "ogline_inc5race")
       genesis_pid = fork do
-        task_store_genesis(Orbit::V2::TaskStore.new(active_root: File.join(dir, ".orbit")),
+        task_store_genesis(Orbit::V2::TaskStore.new(active_root: File.join(dir, ".orbit"), task_id: "otask_inc5race"),
           race, BlockingAuthorityVerifier.new(verifier, signal_w, release_r))
         exit!(0)
       end
@@ -5167,7 +5197,7 @@ module OrbitV2ContractTest
       release_w.close
       assert(Process.wait2(genesis_pid).last.success?, "genesis completed")
       assert(Process.wait2(rotation_pid).last.success?, "rotation completed after the window")
-      assert(task_store_resolve(store, "otask_inc5race", verifier)
+      assert(task_store_resolve(Orbit::V2::TaskStore.new(active_root: File.join(dir, ".orbit"), task_id: "otask_inc5race"), "otask_inc5race", verifier)
         .dig("task", "project_policy_revision_ref", "policy_revision_id") ==
         policy["policy_revision_id"], "task pinned the policy active inside its locked window")
       assert(Orbit::V2::PolicyStore.new(active_root: File.join(dir, ".orbit")).resolve(
@@ -5184,7 +5214,7 @@ module OrbitV2ContractTest
       verifier = OrbitV2FixtureFactory.authority_verifier
       genesis = task_store_genesis_records(bundle)
       assert(task_store_genesis(store, genesis, verifier) == :appended, "task genesis commits")
-      control = Orbit::V2::ControlStore.new(active_root: File.join(dir, ".orbit"))
+      control = Orbit::V2::ControlStore.new(active_root: File.join(dir, ".orbit"), task_id: genesis[0]["task_id"])
       control_records = control_store_genesis_records(bundle, genesis[0],
         OrbitV2FixtureFactory.agent("oagent_inc6dhistoricallead", "lead"),
         "olcontrol_inc6dhistorical", control_store_writer_assertion("olcontrol_inc6dhistorical"),
@@ -5210,7 +5240,9 @@ module OrbitV2ContractTest
       borrowed_lineage = task_store_genesis_records(bundle, task_id: "otask_inc6dother",
         task_revision_id: "trev_inc6dother_r1", gate_id: "ogreq_inc6dother",
         gate_lineage_id: "ogline_inc6dshared")
-      expect_contract_error("task_store_genesis_invalid") do
+      # 2026-08-17 task-centric revision: the borrowed-lineage record is
+      # another task's definition and fails closed at the scope seam.
+      expect_contract_error("task_store_task_scope_invalid") do
         task_store_genesis(store, borrowed_lineage, verifier)
       end
       forked = task_store_successor_records(genesis, suffix: "fork")
@@ -8439,7 +8471,7 @@ module OrbitV2ContractTest
       control, policy, = control_store_seeded_root(dir, bundle)
       vf = control_verifiers
       task_records = task_store_genesis_records(bundle)
-      task = Orbit::V2::TaskStore.new(active_root: File.join(dir, ".orbit"))
+      task = Orbit::V2::TaskStore.new(active_root: File.join(dir, ".orbit"), task_id: task_records[0]["task_id"])
       assert(task_store_genesis(task, task_records, vf[0]) == :appended,
         "evidence task facts commit")
       control_records = control_store_genesis_records(bundle, task_records[0],
@@ -8504,7 +8536,7 @@ module OrbitV2ContractTest
       snapshot = bundle["repository_snapshot"]
       paths = ["contracts/orbit-v2", "lib/orbit/v2"]
       clock_values = ["2026-07-30T02:10:00Z", "2026-07-30T02:11:00Z"]
-      store = Orbit::V2::EvidenceStore.new(active_root: File.join(dir, ".orbit"),
+      store = Orbit::V2::EvidenceStore.new(active_root: File.join(dir, ".orbit"), task_id: task_records[0]["task_id"],
         clock: -> { Time.iso8601(clock_values.shift || "2026-07-30T02:12:00Z") })
       accept = lambda do |candidate, overrides = {}|
         store.accept(proposal: candidate, repository_snapshot: snapshot,
@@ -8545,7 +8577,8 @@ module OrbitV2ContractTest
       tx = { "schema_version" => "orbit-transaction-log-v1",
         "transaction_id" => proposal["evidence_record_id"], "previous_tip_digest" => nil,
         "content_digest" => "sha256:#{Orbit::V2::CanonicalJSON.sha256(payload)}", "payload" => payload }
-      path = File.join(dir, ".orbit", Orbit::V2::EvidenceStore::EVIDENCE_TRANSACTIONS_FILE)
+      path = File.join(dir, ".orbit", Orbit::V2::TASK_SCOPES_SEGMENT, task_records[0]["task_id"],
+        Orbit::V2::EvidenceStore::EVIDENCE_TRANSACTIONS_FILE)
       File.write(path, Orbit::V2::CanonicalJSON.dump("schema_version" => "orbit-transaction-log-v1",
         "records" => [tx], "file_digest" => "sha256:#{Orbit::V2::CanonicalJSON.sha256([tx])}"))
       expect_contract_error("evidence_store_lineage_invalid") do
@@ -8592,7 +8625,7 @@ module OrbitV2ContractTest
       gate["subject_selector"]["scope"] = "selected_work_units"
       gate["subject_selector"]["work_unit_refs"] = [task_records[2].first["work_unit_id"]]
       gate["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(gate)
-      task_store = Orbit::V2::TaskStore.new(active_root: File.join(dir, ".orbit"))
+      task_store = Orbit::V2::TaskStore.new(active_root: File.join(dir, ".orbit"), task_id: task_records[0]["task_id"])
       assert(task_store_genesis(task_store, task_records, vf[0]) == :appended,
         "gate task facts commit")
       control_records = control_store_genesis_records(bundle, task_records[0],
@@ -8610,7 +8643,7 @@ module OrbitV2ContractTest
       paths = ["contracts/orbit-v2", "lib/orbit/v2"]
       surface = Orbit::V2::CodeSurface.derive(repository_snapshot: snapshot, paths: paths)
       evidence_clocks = ["2026-07-30T02:12:00Z", "2026-07-30T02:50:00Z", "2026-07-30T02:51:00Z", "2026-07-30T02:52:00Z"]
-      evidence_store = Orbit::V2::EvidenceStore.new(active_root: File.join(dir, ".orbit"),
+      evidence_store = Orbit::V2::EvidenceStore.new(active_root: File.join(dir, ".orbit"), task_id: task_records[0]["task_id"],
         clock: -> { Time.iso8601(evidence_clocks.shift || "2026-07-30T02:52:00Z") })
       strip = lambda do |record|
         proposal = OrbitV2FixtureFactory.deep_copy(record)
@@ -8703,7 +8736,7 @@ module OrbitV2ContractTest
         "source_evidence_record_refs" => evidence_ids,
         "supersedes_finding_id" => nil)
       gate_clocks = %w[2026-07-30T02:55:00Z 2026-07-30T02:56:00Z 2026-07-30T02:57:00Z 2026-07-30T02:58:00Z 2026-07-30T02:59:00Z 2026-07-30T03:00:00Z 2026-07-30T03:01:00Z 2026-07-30T03:02:00Z 2026-07-30T03:03:00Z 2026-07-30T03:04:00Z 2026-07-30T03:05:00Z]
-      gate_store = Orbit::V2::GateFactStore.new(active_root: File.join(dir, ".orbit"),
+      gate_store = Orbit::V2::GateFactStore.new(active_root: File.join(dir, ".orbit"), task_id: task_records[0]["task_id"],
         clock: -> { Time.iso8601(gate_clocks.shift || "2026-07-30T03:06:00Z") })
       assert(gate_fact_accept(gate_store, evaluation, [finding], vf) == :appended,
         "GateEvaluation and its Finding commit as one closed transaction")
@@ -8743,13 +8776,13 @@ module OrbitV2ContractTest
         paired_finding["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(paired_finding)
         [paired_evaluation, paired_finding]
       end
-      early_clock_store = Orbit::V2::GateFactStore.new(active_root: File.join(dir, ".orbit"),
+      early_clock_store = Orbit::V2::GateFactStore.new(active_root: File.join(dir, ".orbit"), task_id: task_records[0]["task_id"],
         clock: -> { Time.iso8601("2026-07-30T02:00:00Z") })
       too_soon_evaluation, too_soon_finding = re_target.call("ogeval_inc6gtoosoon")
       expect_contract_error("gate_facts_acceptance_invalid") do
         gate_fact_accept(early_clock_store, too_soon_evaluation, [too_soon_finding], vf)
       end
-      before_terminal = Orbit::V2::GateFactStore.new(active_root: File.join(dir, ".orbit"),
+      before_terminal = Orbit::V2::GateFactStore.new(active_root: File.join(dir, ".orbit"), task_id: task_records[0]["task_id"],
         clock: -> { Time.iso8601("2026-07-30T03:05:00Z") })
       early_evaluation, early_finding = re_target.call("ogeval_inc6gbeforeterminal")
       assert(gate_fact_accept(before_terminal, early_evaluation, [early_finding], vf) == :appended,
@@ -8799,13 +8832,13 @@ module OrbitV2ContractTest
         successor_started_at: "2026-07-30T03:20:00Z")
       assert(control_store_terminal(control, evaluator_terminal, vf) == :appended,
         "the evaluator Attempt terminalizes after the evaluation round")
-      backdated = Orbit::V2::GateFactStore.new(active_root: File.join(dir, ".orbit"),
+      backdated = Orbit::V2::GateFactStore.new(active_root: File.join(dir, ".orbit"), task_id: task_records[0]["task_id"],
         clock: -> { Time.iso8601("2026-07-30T02:55:00Z") })
       late_evaluation, late_finding = re_target.call("ogeval_inc6glate")
       expect_contract_error("gate_facts_acceptance_invalid") do
         gate_fact_accept(backdated, late_evaluation, [late_finding], vf)
       end
-      after_terminal = Orbit::V2::GateFactStore.new(active_root: File.join(dir, ".orbit"),
+      after_terminal = Orbit::V2::GateFactStore.new(active_root: File.join(dir, ".orbit"), task_id: task_records[0]["task_id"],
         clock: -> { Time.iso8601("2026-07-30T03:15:00Z") })
       expect_contract_error("gate_facts_acceptance_invalid") do
         gate_fact_accept(after_terminal, late_evaluation, [late_finding], vf)
@@ -8864,7 +8897,8 @@ module OrbitV2ContractTest
       tx = { "schema_version" => "orbit-transaction-log-v1",
         "transaction_id" => "ogeval_inc6greview", "previous_tip_digest" => nil,
         "content_digest" => "sha256:#{Orbit::V2::CanonicalJSON.sha256(payload)}", "payload" => payload }
-      path = File.join(dir, ".orbit", Orbit::V2::GateFactStore::GATE_FACTS_FILE)
+      path = File.join(dir, ".orbit", Orbit::V2::TASK_SCOPES_SEGMENT, task_records[0]["task_id"],
+        Orbit::V2::GateFactStore::GATE_FACTS_FILE)
       File.write(path, Orbit::V2::CanonicalJSON.dump("schema_version" => "orbit-transaction-log-v1",
         "records" => [tx], "file_digest" => "sha256:#{Orbit::V2::CanonicalJSON.sha256([tx])}"))
       expect_contract_error("gate_facts_lineage_invalid") do
@@ -8892,7 +8926,7 @@ module OrbitV2ContractTest
       gate["subject_selector"]["scope"] = "selected_work_units"
       gate["subject_selector"]["work_unit_refs"] = [task_records[2].first["work_unit_id"]]
       gate["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(gate)
-      task_store = Orbit::V2::TaskStore.new(active_root: File.join(dir, ".orbit"))
+      task_store = Orbit::V2::TaskStore.new(active_root: File.join(dir, ".orbit"), task_id: task_records[0]["task_id"])
       assert(task_store_genesis(task_store, task_records, vf[0]) == :appended, "task facts commit")
       control_records = control_store_genesis_records(bundle, task_records[0],
         OrbitV2FixtureFactory.agent("oagent_inc6hgatelead", "lead"), "olcontrol_inc6hgate",
@@ -8916,7 +8950,7 @@ module OrbitV2ContractTest
       unit0 = task_records[2].first
       thesis0 = task_records[3].find { |candidate| candidate["work_unit_id"] == unit0["work_unit_id"] }
       evidence_times = %w[2026-07-30T02:12:00Z 2026-07-30T02:50:00Z 2026-07-30T03:25:00Z 2026-07-30T03:45:00Z]
-      evidence_store = Orbit::V2::EvidenceStore.new(active_root: File.join(dir, ".orbit"),
+      evidence_store = Orbit::V2::EvidenceStore.new(active_root: File.join(dir, ".orbit"), task_id: task_records[0]["task_id"],
         clock: -> { Time.iso8601(evidence_times.shift) })
       accept_evidence = lambda do |record|
         proposal = OrbitV2FixtureFactory.deep_copy(record)
@@ -8959,7 +8993,7 @@ module OrbitV2ContractTest
         "body" => "Example unadjudicated risk.",
         "source_evidence_record_refs" => evidence_ids, "supersedes_finding_id" => nil)
       gate_times = %w[2026-07-30T02:55:00Z 2026-07-30T03:50:00Z 2026-07-30T03:51:00Z 2026-07-30T03:52:00Z 2026-07-30T03:53:00Z]
-      gate_store = Orbit::V2::GateFactStore.new(active_root: File.join(dir, ".orbit"), clock: -> { Time.iso8601(gate_times.shift) })
+      gate_store = Orbit::V2::GateFactStore.new(active_root: File.join(dir, ".orbit"), task_id: task_records[0]["task_id"], clock: -> { Time.iso8601(gate_times.shift) })
       assert(gate_fact_accept(gate_store, gate_evaluation, [risk_finding], vf) == :appended,
         "the risk evaluation and Finding commit atomically")
       assert(control_store_dispatch(control, impl, vf) == :idempotent,
@@ -8970,10 +9004,12 @@ module OrbitV2ContractTest
         successor_attempt_id: "oattempt_inc6hbarrier", successor_worker_id: "oagent_inc6hbarrierworker",
         rule_path: "rules/inc6h-barrier.md", terminal_ended_at: "2026-07-30T03:05:00Z",
         role: "coder", purpose: "implementation", unit: unit0, successor_predecessor: impl[3]["attempt_id"])
-      control_log_path = File.join(dir, ".orbit", Orbit::V2::ControlStore::CONTROL_TRANSACTIONS_FILE)
+      control_log_path = File.join(dir, ".orbit", Orbit::V2::TASK_SCOPES_SEGMENT, task_records[0]["task_id"],
+        Orbit::V2::ControlStore::CONTROL_TRANSACTIONS_FILE)
       control_log_bytes = File.binread(control_log_path)
       gate_tip = Orbit::V2::TransactionLog.new(
-        path: File.join(dir, ".orbit", Orbit::V2::GateFactStore::GATE_FACTS_FILE)).records.last
+        path: File.join(dir, ".orbit", Orbit::V2::TASK_SCOPES_SEGMENT, task_records[0]["task_id"],
+          Orbit::V2::GateFactStore::GATE_FACTS_FILE)).records.last
       forged = { "assertion" => barrier_terminal[2], "attempt" => barrier_terminal[0],
         "checkpoint" => barrier_terminal[1], "observation_assertion" => barrier_terminal[7],
         "observation_checkpoint" => barrier_terminal[6], "rule_resolution" => barrier_terminal[5],
@@ -9138,12 +9174,14 @@ module OrbitV2ContractTest
       gate["subject_selector"]["scope"] = "selected_work_units"
       gate["subject_selector"]["work_unit_refs"] = [task_records[2].first["work_unit_id"]]
       gate["content_digest"] = Orbit::V2::CanonicalJSON.content_digest(gate)
-      task_store = Orbit::V2::TaskStore.new(active_root: File.join(dir, ".orbit"))
+      task_store = Orbit::V2::TaskStore.new(active_root: File.join(dir, ".orbit"), task_id: task_records[0]["task_id"])
       assert(task_store_genesis(task_store, task_records, vf[0]) == :appended, "task facts commit")
       foreign = task_store_genesis_records(bundle, task_id: "otask_inc6iforeign",
         task_revision_id: "trev_inc6iforeign", gate_id: "ogreq_inc6iforeign",
         gate_lineage_id: "ogline_inc6iforeign")
-      assert(task_store_genesis(task_store, foreign, vf[0]) == :appended, "foreign task commits")
+      # 2026-08-17 task-centric revision: the foreign task definition
+      # belongs to another task's scope and must fail closed here.
+      expect_contract_error("task_store_task_scope_invalid") { task_store_genesis(task_store, foreign, vf[0]) }
       control_records = control_store_genesis_records(bundle, task_records[0],
         OrbitV2FixtureFactory.agent("oagent_inc6hgatelead", "lead"), "olcontrol_inc6hgate",
         control_store_writer_assertion("olcontrol_inc6hgate"), lead: task_records[6])
@@ -9166,7 +9204,7 @@ module OrbitV2ContractTest
       unit0 = task_records[2].first
       thesis0 = task_records[3].find { |candidate| candidate["work_unit_id"] == unit0["work_unit_id"] }
       evidence_times = %w[2026-07-30T02:12:00Z 2026-07-30T02:50:00Z 2026-07-30T03:45:00Z]
-      evidence_store = Orbit::V2::EvidenceStore.new(active_root: File.join(dir, ".orbit"),
+      evidence_store = Orbit::V2::EvidenceStore.new(active_root: File.join(dir, ".orbit"), task_id: task_records[0]["task_id"],
         clock: -> { Time.iso8601(evidence_times.shift) })
       accept_evidence = lambda do |record|
         proposal = OrbitV2FixtureFactory.deep_copy(record)
@@ -9220,7 +9258,7 @@ module OrbitV2ContractTest
         "source_evidence_record_refs" => subject["evidence_record_refs"].map { |ref| ref["evidence_record_id"] },
         "supersedes_finding_id" => nil)
       gate_times = %w[2026-07-30T02:55:00Z 2026-07-30T03:50:00Z 2026-07-30T03:51:00Z]
-      gate_store = Orbit::V2::GateFactStore.new(active_root: File.join(dir, ".orbit"),
+      gate_store = Orbit::V2::GateFactStore.new(active_root: File.join(dir, ".orbit"), task_id: task_records[0]["task_id"],
         clock: -> { Time.iso8601(gate_times.shift) })
       assert(gate_fact_accept(gate_store, risk, [risk_finding], vf) == :appended,
         "the failing evaluation and Finding commit atomically")
@@ -9268,7 +9306,7 @@ module OrbitV2ContractTest
         "supersedes_finding_resolution_id" => nil)
       assert(gate_fact_resolution(gate_store, resolution, vf) == :appended,
         "the addressed FindingResolution commits atomically")
-      engine = Orbit::V2::GateEngine.new(active_root: File.join(dir, ".orbit"))
+      engine = Orbit::V2::GateEngine.new(active_root: File.join(dir, ".orbit"), task_id: task_records[0]["task_id"])
       derive = lambda do
         engine.derive(task_id: task_records[0]["task_id"], task_revision_id: task_records[0]["task_revision_id"],
           authority_verifier: vf[0], runtime_identity_verifier: vf[1], lifecycle_verifier: vf[2])
@@ -9277,7 +9315,7 @@ module OrbitV2ContractTest
       again = derive.call
       assert(outcome["content_digest"] == again["content_digest"] &&
         outcome["source_digest"] == again["source_digest"], "the outcome is deterministic")
-      reopened = Orbit::V2::GateEngine.new(active_root: File.join(dir, ".orbit")).derive(
+      reopened = Orbit::V2::GateEngine.new(active_root: File.join(dir, ".orbit"), task_id: task_records[0]["task_id"]).derive(
         task_id: task_records[0]["task_id"], task_revision_id: task_records[0]["task_revision_id"],
         authority_verifier: vf[0], runtime_identity_verifier: vf[1], lifecycle_verifier: vf[2])
       assert(reopened["content_digest"] == outcome["content_digest"],
@@ -9297,7 +9335,9 @@ module OrbitV2ContractTest
         "the manifest carries the full ancestor/related evaluation/finding/resolution/evidence closure")
       assert(!manifest_ids.include?("trev_inc6iforeign"),
         "unrelated task facts never pollute the source manifest")
-      expect_contract_error("gate_engine_invalid") do
+      # 2026-08-17 task-centric revision: deriving another task's id from
+      # a task-scoped engine fails closed at the scope seam.
+      expect_contract_error("gate_engine_task_scope_invalid") do
         engine.derive(task_id: "otask_inc6ighost", task_revision_id: task_records[0]["task_revision_id"],
           authority_verifier: vf[0], runtime_identity_verifier: vf[1], lifecycle_verifier: vf[2])
       end
@@ -9305,7 +9345,8 @@ module OrbitV2ContractTest
         engine.derive(task_id: "not a valid task id", task_revision_id: "x",
           authority_verifier: vf[0], runtime_identity_verifier: vf[1], lifecycle_verifier: vf[2])
       end
-      File.write(File.join(dir, ".orbit", Orbit::V2::GateFactStore::GATE_FACTS_FILE), "corrupt")
+      File.write(File.join(dir, ".orbit", Orbit::V2::TASK_SCOPES_SEGMENT, task_records[0]["task_id"],
+        Orbit::V2::GateFactStore::GATE_FACTS_FILE), "corrupt")
       expect_contract_error("gate_engine_invalid") { derive.call }
     end
   end
@@ -11313,6 +11354,27 @@ module OrbitV2ContractTest
         OrbitV2FixtureFactory.runtime_identity_verifier
     )
   end
-end
 
+  # 2026-08-17 task-centric revision: every lib/orbit/v2/*.rb must load
+  # standalone in its own process. active_root/policy_store/protocol_root
+  # form a cyclic require graph, so any load-order cross-module constant
+  # reference breaks some entry points while the contract test (which
+  # loads active_root early via canonical order) stays green. This is the
+  # only automated way to catch that class of bug.
+  # NOTE: glob is deliberately top-level *.rb only — validator/ internals
+  # carry explicit guards and REFUSE standalone require by design ("load
+  # Validator internals through orbit/v2/validator"); a **/*.rb glob
+  # would fabricate failures.
+  def test_lib_solo_require
+    lib_dir = File.join(ROOT, "lib", "orbit", "v2")
+    failures = []
+    Dir.glob(File.join(lib_dir, "*.rb")).sort.each do |path|
+      rel = path.sub(%r{\A#{Regexp.escape(lib_dir)}/}, "")
+      ok = system(RbConfig.ruby, "-I", File.join(ROOT, "lib"), "-e",
+        "require 'orbit/v2/#{rel.delete_suffix('.rb')}'", out: File::NULL, err: File::NULL)
+      failures << rel unless ok
+    end
+    assert(failures.empty?, "standalone require failed for: #{failures.join(', ')}")
+  end
+end
 OrbitV2ContractTest.run if $PROGRAM_NAME == __FILE__

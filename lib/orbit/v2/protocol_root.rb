@@ -8,6 +8,7 @@ require_relative "errors"
 require_relative "identifiers"
 require_relative "policy_store"
 require_relative "schema_catalog"
+require_relative "task_scopes"
 require_relative "validator"
 
 module Orbit
@@ -103,6 +104,17 @@ module Orbit
         rules
         handoffs
       ].freeze
+
+      # Task-scopes segment collision guard (2026-08-17): ProtocolRoot.create
+      # runs reject_mixed_epoch! UNCONDITIONALLY BEFORE the create-only
+      # marker check, so a v2 storage segment reusing a v1 authority name
+      # would make legitimate v2 data permanently indistinguishable from a
+      # v1 mixed epoch (a legal v2 root could never re-run create). The
+      # guard sits here, after both constants are defined, so the (cyclic)
+      # require graph loads from ANY entry point.
+      if KNOWN_V1_AUTHORITY_PATHS.include?(TASK_SCOPES_SEGMENT)
+        raise "task-scopes segment '#{TASK_SCOPES_SEGMENT}' collides with a known v1 authority path"
+      end
 
       def create(project_root:, project_id:, policy_genesis_ref:)
         validate_identity_inputs!(project_id, policy_genesis_ref)

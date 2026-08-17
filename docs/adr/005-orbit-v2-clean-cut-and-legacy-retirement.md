@@ -328,8 +328,8 @@ next_action: choose_clean_orbit_v2_root
 .orbit/
 ├── protocol.yaml          # project-level，低频全局事实
 ├── policy/                # project-level authority lineage
-└── tasks/
-    └── <task-id>/         # revisions/ control/ attempts/ evidence/ gates/ findings/ handoffs/
+└── task-scopes/
+    └── <task_id>/         # task-definitions.json control-transactions.json evidence-transactions.json gate-facts.json
 ```
 
 1. `task_id` 是协作、存储和冲突隔离的单位。

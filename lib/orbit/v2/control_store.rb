@@ -101,7 +101,15 @@ module Orbit
       GENESIS_ACTION = "control.genesis".freeze
       CHECKPOINT_ACTION = "control.checkpoint".freeze
 
-      def initialize(active_root:)
+      def initialize(active_root:, task_id:)
+        unless task_id.is_a?(String) && Identifiers.valid?("task_id", task_id)
+          raise ContractError.new(
+            "control_store_task_scope_invalid",
+            "control store requires a canonical task_id scope",
+            path: "control_store.task_id"
+          )
+        end
+        @task_id = task_id
         @active_root = File.expand_path(active_root)
         unless File.directory?(@active_root)
           raise ContractError.new(
@@ -110,7 +118,18 @@ module Orbit
             path: "control_store.active_root"
           )
         end
-        @log = TransactionLog.new(path: File.join(@active_root, CONTROL_TRANSACTIONS_FILE))
+        # Canonical-by-construction task scope (design §4a): log and lock
+        # paths only ever join from these resolved values.
+        @canonical_orbit = File.realpath(@active_root)
+        @task_dir = File.join(@canonical_orbit, V2::TASK_SCOPES_SEGMENT, @task_id)
+        unless File.directory?(@task_dir)
+          raise ContractError.new(
+            "control_store_argument_invalid",
+            "task scope directory must exist under the canonical active root",
+            path: "control_store.task_dir"
+          )
+        end
+        @log = TransactionLog.new(path: File.join(@task_dir, CONTROL_TRANSACTIONS_FILE))
       end
 
       def genesis(registry:, session:, checkpoint:, agent:, assertion:,
@@ -131,11 +150,11 @@ module Orbit
         # log -> task log -> control log. Genesis re-verifies every
         # existing successor checkpoint, so it must hold the task snapshot
         # stable as well as the policy snapshot until its append commits.
-        policy_log = File.join(@active_root, PolicyStore::POLICY_TRANSACTIONS_FILE)
-        task_log = File.join(@active_root, TaskStore::TASK_DEFINITIONS_FILE)
-        control_log = File.join(@active_root, CONTROL_TRANSACTIONS_FILE)
-        evidence_log = File.join(@active_root, EvidenceStore::EVIDENCE_TRANSACTIONS_FILE)
-        gate_log = File.join(@active_root, GateFactStore::GATE_FACTS_FILE)
+        policy_log = File.join(@canonical_orbit, PolicyStore::POLICY_TRANSACTIONS_FILE)
+        task_log = File.join(@task_dir, TaskStore::TASK_DEFINITIONS_FILE)
+        control_log = File.join(@task_dir, CONTROL_TRANSACTIONS_FILE)
+        evidence_log = File.join(@task_dir, EvidenceStore::EVIDENCE_TRANSACTIONS_FILE)
+        gate_log = File.join(@task_dir, GateFactStore::GATE_FACTS_FILE)
         # Fixed policy -> task -> control -> evidence -> gate window: the
         # gate cutoff snapshot resolves once inside this window and the
         # append's own control-log lock is re-entrant for this thread.
@@ -222,11 +241,11 @@ module Orbit
         # Fixed root lock order: policy -> task -> control -> evidence ->
         # gate, so every cross-store fact resolved inside the checkpoint
         # snapshot and the control append share one operation window.
-        policy_log = File.join(@active_root, PolicyStore::POLICY_TRANSACTIONS_FILE)
-        task_log = File.join(@active_root, TaskStore::TASK_DEFINITIONS_FILE)
-        control_log = File.join(@active_root, CONTROL_TRANSACTIONS_FILE)
-        evidence_log = File.join(@active_root, EvidenceStore::EVIDENCE_TRANSACTIONS_FILE)
-        gate_log = File.join(@active_root, GateFactStore::GATE_FACTS_FILE)
+        policy_log = File.join(@canonical_orbit, PolicyStore::POLICY_TRANSACTIONS_FILE)
+        task_log = File.join(@task_dir, TaskStore::TASK_DEFINITIONS_FILE)
+        control_log = File.join(@task_dir, CONTROL_TRANSACTIONS_FILE)
+        evidence_log = File.join(@task_dir, EvidenceStore::EVIDENCE_TRANSACTIONS_FILE)
+        gate_log = File.join(@task_dir, GateFactStore::GATE_FACTS_FILE)
         # Fixed policy -> task -> control -> evidence -> gate window: the
         # gate cutoff snapshot resolves once inside this window and the
         # append's own control-log lock is re-entrant for this thread.
@@ -297,11 +316,11 @@ module Orbit
           "rule_resolution" => rule_resolution,
           "worker_agent" => worker_agent
         }
-        policy_log = File.join(@active_root, PolicyStore::POLICY_TRANSACTIONS_FILE)
-        task_log = File.join(@active_root, TaskStore::TASK_DEFINITIONS_FILE)
-        control_log = File.join(@active_root, CONTROL_TRANSACTIONS_FILE)
-        evidence_log = File.join(@active_root, EvidenceStore::EVIDENCE_TRANSACTIONS_FILE)
-        gate_log = File.join(@active_root, GateFactStore::GATE_FACTS_FILE)
+        policy_log = File.join(@canonical_orbit, PolicyStore::POLICY_TRANSACTIONS_FILE)
+        task_log = File.join(@task_dir, TaskStore::TASK_DEFINITIONS_FILE)
+        control_log = File.join(@task_dir, CONTROL_TRANSACTIONS_FILE)
+        evidence_log = File.join(@task_dir, EvidenceStore::EVIDENCE_TRANSACTIONS_FILE)
+        gate_log = File.join(@task_dir, GateFactStore::GATE_FACTS_FILE)
         # Fixed policy -> task -> control -> evidence -> gate window: the
         # gate cutoff snapshot resolves once inside this window and the
         # append's own control-log lock is re-entrant for this thread.
@@ -375,11 +394,11 @@ module Orbit
           "successor_attempt" => successor_attempt,
           "worker_agent" => worker_agent
         }
-        policy_log = File.join(@active_root, PolicyStore::POLICY_TRANSACTIONS_FILE)
-        task_log = File.join(@active_root, TaskStore::TASK_DEFINITIONS_FILE)
-        control_log = File.join(@active_root, CONTROL_TRANSACTIONS_FILE)
-        evidence_log = File.join(@active_root, EvidenceStore::EVIDENCE_TRANSACTIONS_FILE)
-        gate_log = File.join(@active_root, GateFactStore::GATE_FACTS_FILE)
+        policy_log = File.join(@canonical_orbit, PolicyStore::POLICY_TRANSACTIONS_FILE)
+        task_log = File.join(@task_dir, TaskStore::TASK_DEFINITIONS_FILE)
+        control_log = File.join(@task_dir, CONTROL_TRANSACTIONS_FILE)
+        evidence_log = File.join(@task_dir, EvidenceStore::EVIDENCE_TRANSACTIONS_FILE)
+        gate_log = File.join(@task_dir, GateFactStore::GATE_FACTS_FILE)
         # Fixed policy -> task -> control -> evidence -> gate window: the
         # gate cutoff snapshot resolves once inside this window and the
         # append's own control-log lock is re-entrant for this thread.
@@ -471,11 +490,11 @@ module Orbit
             path: "control_store.activate.lead_checkpoint_id"
           )
         end
-        policy_log = File.join(@active_root, PolicyStore::POLICY_TRANSACTIONS_FILE)
-        task_log = File.join(@active_root, TaskStore::TASK_DEFINITIONS_FILE)
-        control_log = File.join(@active_root, CONTROL_TRANSACTIONS_FILE)
-        evidence_log = File.join(@active_root, EvidenceStore::EVIDENCE_TRANSACTIONS_FILE)
-        gate_log = File.join(@active_root, GateFactStore::GATE_FACTS_FILE)
+        policy_log = File.join(@canonical_orbit, PolicyStore::POLICY_TRANSACTIONS_FILE)
+        task_log = File.join(@task_dir, TaskStore::TASK_DEFINITIONS_FILE)
+        control_log = File.join(@task_dir, CONTROL_TRANSACTIONS_FILE)
+        evidence_log = File.join(@task_dir, EvidenceStore::EVIDENCE_TRANSACTIONS_FILE)
+        gate_log = File.join(@task_dir, GateFactStore::GATE_FACTS_FILE)
         # Fixed policy -> task -> control -> evidence -> gate window: the
         # gate cutoff snapshot resolves once inside this window and the
         # append's own control-log lock is re-entrant for this thread.
@@ -531,18 +550,18 @@ module Orbit
             path: "control_store.control_id"
           )
         end
-        policy_log = File.join(@active_root, PolicyStore::POLICY_TRANSACTIONS_FILE)
-        task_log = File.join(@active_root, TaskStore::TASK_DEFINITIONS_FILE)
-        control_log = File.join(@active_root, CONTROL_TRANSACTIONS_FILE)
-        evidence_log = File.join(@active_root, EvidenceStore::EVIDENCE_TRANSACTIONS_FILE)
-        gate_log = File.join(@active_root, GateFactStore::GATE_FACTS_FILE)
+        policy_log = File.join(@canonical_orbit, PolicyStore::POLICY_TRANSACTIONS_FILE)
+        task_log = File.join(@task_dir, TaskStore::TASK_DEFINITIONS_FILE)
+        control_log = File.join(@task_dir, CONTROL_TRANSACTIONS_FILE)
+        evidence_log = File.join(@task_dir, EvidenceStore::EVIDENCE_TRANSACTIONS_FILE)
+        gate_log = File.join(@task_dir, GateFactStore::GATE_FACTS_FILE)
         DurableFile.with_exclusive_lock(policy_log) do
           DurableFile.with_exclusive_lock(task_log) do
             DurableFile.with_exclusive_lock(control_log) do
               DurableFile.with_exclusive_lock(evidence_log) do
                 DurableFile.with_exclusive_lock(gate_log) do
                   txs = payloads(@log.records)
-                  marker = ActiveRoot.marker_for(@active_root, code: "control_store_unpinned", label: "control_store")
+                  marker = task_scope!
                   policy = begin
                     resolve_active_policy(marker, authority_verifier)
                   rescue ContractError => e
@@ -637,11 +656,11 @@ module Orbit
           )
         end
 
-        policy_log = File.join(@active_root, PolicyStore::POLICY_TRANSACTIONS_FILE)
-        task_log = File.join(@active_root, TaskStore::TASK_DEFINITIONS_FILE)
-        control_log = File.join(@active_root, CONTROL_TRANSACTIONS_FILE)
-        evidence_log = File.join(@active_root, EvidenceStore::EVIDENCE_TRANSACTIONS_FILE)
-        gate_log = File.join(@active_root, GateFactStore::GATE_FACTS_FILE)
+        policy_log = File.join(@canonical_orbit, PolicyStore::POLICY_TRANSACTIONS_FILE)
+        task_log = File.join(@task_dir, TaskStore::TASK_DEFINITIONS_FILE)
+        control_log = File.join(@task_dir, CONTROL_TRANSACTIONS_FILE)
+        evidence_log = File.join(@task_dir, EvidenceStore::EVIDENCE_TRANSACTIONS_FILE)
+        gate_log = File.join(@task_dir, GateFactStore::GATE_FACTS_FILE)
         DurableFile.with_exclusive_lock(policy_log) do
           DurableFile.with_exclusive_lock(task_log) do
             DurableFile.with_exclusive_lock(control_log) do
@@ -692,18 +711,18 @@ module Orbit
         # every writer, so a concurrent successor can
         # never append between the read and the returned decision: the
         # recovered tip is the unique current tip by construction.
-        policy_log = File.join(@active_root, PolicyStore::POLICY_TRANSACTIONS_FILE)
-        task_log = File.join(@active_root, TaskStore::TASK_DEFINITIONS_FILE)
-        control_log = File.join(@active_root, CONTROL_TRANSACTIONS_FILE)
-        evidence_log = File.join(@active_root, EvidenceStore::EVIDENCE_TRANSACTIONS_FILE)
-        gate_log = File.join(@active_root, GateFactStore::GATE_FACTS_FILE)
+        policy_log = File.join(@canonical_orbit, PolicyStore::POLICY_TRANSACTIONS_FILE)
+        task_log = File.join(@task_dir, TaskStore::TASK_DEFINITIONS_FILE)
+        control_log = File.join(@task_dir, CONTROL_TRANSACTIONS_FILE)
+        evidence_log = File.join(@task_dir, EvidenceStore::EVIDENCE_TRANSACTIONS_FILE)
+        gate_log = File.join(@task_dir, GateFactStore::GATE_FACTS_FILE)
         recovered = DurableFile.with_exclusive_lock(policy_log) do
           DurableFile.with_exclusive_lock(task_log) do
             DurableFile.with_exclusive_lock(control_log) do
               DurableFile.with_exclusive_lock(evidence_log) do
                 DurableFile.with_exclusive_lock(gate_log) do
             txs = payloads(@log.records)
-            marker = ActiveRoot.marker_for(@active_root, code: "control_store_unpinned", label: "control_store")
+            marker = task_scope!
             policy = begin
               resolve_active_policy(marker, authority_verifier)
             rescue ContractError => e
@@ -803,10 +822,9 @@ module Orbit
       # verification; the entire operation fails if any final resolution
       # verification fails, so the outcome stays atomic and non-recursive.
       class Cutoff
-        def initialize(active_root:)
-          @store = ControlStore.new(active_root: active_root)
+        def initialize(active_root:, task_id:)
+          @store = ControlStore.new(active_root: active_root, task_id: task_id)
         end
-
         def verified_records(gate_cutoff:, evidence_payloads: nil, authority_verifier:,
                              runtime_identity_verifier:, lifecycle_verifier:)
           @store.send(:verified_records_locked, gate_cutoff, evidence_payloads,
@@ -818,7 +836,7 @@ module Orbit
 
       def verified_records_locked(gate_cutoff, evidence_payloads, authority_verifier,
                                   runtime_identity_verifier, lifecycle_verifier)
-        marker = ActiveRoot.marker_for(@active_root, code: "control_store_unpinned", label: "control_store")
+        marker = task_scope!
         policy = resolve_active_policy(marker, authority_verifier)
         verify_all_transactions!(payloads(@log.records), marker, policy,
           authority_verifier, runtime_identity_verifier, lifecycle_verifier,
@@ -828,11 +846,7 @@ module Orbit
       def resolve_attempt_snapshot!(attempt_id, authority_verifier,
                                     runtime_identity_verifier, lifecycle_verifier)
         txs = payloads(@log.records)
-        marker = ActiveRoot.marker_for(
-          @active_root,
-          code: "control_store_unpinned",
-          label: "control_store"
-        )
+        marker = task_scope!
         policy = begin
           resolve_active_policy(marker, authority_verifier)
         rescue ContractError => error
@@ -965,8 +979,30 @@ module Orbit
         )
       end
 
+      # Task-scoped trust-boundary proof (design §2.1): the verified
+      # canonical directories must equal the constructed ones; the
+      # verified path is the opened path.
+      def task_scope!
+        marker, canonical_orbit, task_dir = ActiveRoot.task_scope(
+          @active_root, @task_id,
+          code: "control_store_unpinned", label: "control_store"
+        )
+        unless canonical_orbit == @canonical_orbit && task_dir == @task_dir
+          raise ContractError.new(
+            "control_store_unpinned",
+            "control_store task scope no longer resolves to its constructed canonical directories",
+            path: "control_store",
+            details: {
+              "constructed_task_dir" => @task_dir,
+              "resolved_task_dir" => task_dir
+            }
+          )
+        end
+        marker
+      end
+
       def resolve_active_policy(marker, authority_verifier)
-        policy_store = PolicyStore.new(active_root: @active_root)
+        policy_store = PolicyStore.new(active_root: @canonical_orbit)
         resolved = policy_store.resolve(
           pinned_genesis_ref: marker.fetch("project_policy_genesis_ref"),
           authority_verifier: authority_verifier
@@ -1002,7 +1038,7 @@ module Orbit
                                      authority_verifier, runtime_identity_verifier,
                                      lifecycle_verifier)
         txs = payloads(records)
-        marker = ActiveRoot.marker_for(@active_root, code: "control_store_unpinned", label: "control_store")
+        marker = task_scope!
         policy = resolve_active_policy(marker, authority_verifier)
         gate_cutoff = resolve_gate_cutoff(authority_verifier, runtime_identity_verifier,
           lifecycle_verifier, failure: :genesis)
@@ -1062,7 +1098,7 @@ module Orbit
                                         authority_verifier, runtime_identity_verifier,
                                         lifecycle_verifier)
         txs = payloads(records)
-        marker = ActiveRoot.marker_for(@active_root, code: "control_store_unpinned", label: "control_store")
+        marker = task_scope!
         policy = resolve_active_policy(marker, authority_verifier)
         gate_cutoff = resolve_gate_cutoff(authority_verifier, runtime_identity_verifier,
           lifecycle_verifier, failure: :checkpoint)
@@ -1110,7 +1146,7 @@ module Orbit
                                       authority_verifier, runtime_identity_verifier,
                                       lifecycle_verifier)
         txs = payloads(records)
-        marker = ActiveRoot.marker_for(@active_root, code: "control_store_unpinned", label: "control_store")
+        marker = task_scope!
         policy = resolve_active_policy(marker, authority_verifier)
         gate_cutoff = resolve_gate_cutoff(authority_verifier, runtime_identity_verifier,
           lifecycle_verifier, failure: :dispatch)
@@ -1149,7 +1185,7 @@ module Orbit
                                       authority_verifier, runtime_identity_verifier,
                                       lifecycle_verifier)
         txs = payloads(records)
-        marker = ActiveRoot.marker_for(@active_root, code: "control_store_unpinned", label: "control_store")
+        marker = task_scope!
         policy = resolve_active_policy(marker, authority_verifier)
         gate_cutoff = resolve_gate_cutoff(authority_verifier, runtime_identity_verifier,
           lifecycle_verifier, failure: :terminal)
@@ -1431,7 +1467,7 @@ module Orbit
       # held; cutoff failures map to the calling operation's own error code.
       def resolve_gate_cutoff(authority_verifier, runtime_identity_verifier,
                               lifecycle_verifier, failure: :lineage)
-        Orbit::V2::GateFactStore::Cutoff.new(active_root: @active_root).snapshot_locked(
+        Orbit::V2::GateFactStore::Cutoff.new(active_root: @active_root, task_id: @task_id).snapshot_locked(
           authority_verifier: authority_verifier,
           runtime_identity_verifier: runtime_identity_verifier,
           lifecycle_verifier: lifecycle_verifier
@@ -1619,7 +1655,7 @@ module Orbit
         assertion = tx.fetch("assertion")
         control_id = registry["lead_control_id"]
 
-        validator = Orbit::V2::Validator.new(project_root: @active_root)
+        validator = Orbit::V2::Validator.new(project_root: @canonical_orbit)
         begin
           validator.validate_document!("lead_control_registry", registry)
           validator.validate_document!("lead_session", session)
@@ -1792,7 +1828,7 @@ module Orbit
         control_id = checkpoint["lead_control_id"]
         project_id = policy ? policy["project_id"] : marker["project_id"]
 
-        validator = Orbit::V2::Validator.new(project_root: @active_root)
+        validator = Orbit::V2::Validator.new(project_root: @canonical_orbit)
         begin
           validator.validate_document!("lead_checkpoint", checkpoint)
           validator.validate_document!("authority_assertion", assertion)
@@ -1998,7 +2034,7 @@ module Orbit
         assertion = tx.fetch("assertion")
         control_id = checkpoint["lead_control_id"]
         project_id = policy ? policy["project_id"] : marker["project_id"]
-        validator = Orbit::V2::Validator.new(project_root: @active_root)
+        validator = Orbit::V2::Validator.new(project_root: @canonical_orbit)
         begin
           validator.validate_document!("lead_checkpoint", checkpoint)
           validator.validate_document!("authority_assertion", assertion)
@@ -2125,7 +2161,7 @@ module Orbit
           raise activation_invalid("activation task queue must carry exactly one owned task")
         end
         queue_ref = queue.first
-        child_store = TaskStore.new(active_root: @active_root)
+        child_store = TaskStore.new(active_root: @active_root, task_id: @task_id)
         child_resolved = begin
           child_store.resolve(
             task_id: parent.fetch("task_id"),
@@ -2222,14 +2258,14 @@ module Orbit
            unresolved_blocking_finding_at_cutoff?(dispatch, gate_cutoff, pinned_policy)
           raise invalid.call("unresolved blocking Finding at the accepted gate cutoff forbids dispatch")
         end
-        validator = Orbit::V2::Validator.new(project_root: @active_root)
+        validator = Orbit::V2::Validator.new(project_root: @canonical_orbit)
         begin
           validator.validate_document!("work_unit_attempt", attempt)
           validator.validate_document!("agent_instance", worker)
-          RuleResolution.validate!(rule, project_root: File.dirname(@active_root))
+          RuleResolution.validate!(rule, project_root: File.dirname(@canonical_orbit))
           if policy
             current_identity = RuleResolution.canonical_identity(rule.fetch("identity"),
-              project_root: File.dirname(@active_root), verify_files: true)
+              project_root: File.dirname(@canonical_orbit), verify_files: true)
             unless canonical_equal?(current_identity, rule.fetch("identity"))
               raise invalid.call("new assigned rules do not match current project rule bytes")
             end
@@ -2477,7 +2513,7 @@ module Orbit
                 observation, observation_assertion].all? { |record| record.is_a?(Hash) }
           raise terminal_invalid("terminal components must all be canonical objects")
         end
-        validator = Orbit::V2::Validator.new(project_root: @active_root)
+        validator = Orbit::V2::Validator.new(project_root: @canonical_orbit)
         begin
           validator.validate_document!("work_unit_attempt", attempt)
           validator.validate_document!("lead_checkpoint", checkpoint)
@@ -2773,7 +2809,7 @@ module Orbit
           lifecycle_verifier: lifecycle_verifier,
           evidence_payloads: evidence_payloads)
         validator = Orbit::V2::Validator.new(
-          project_root: @active_root,
+          project_root: @canonical_orbit,
           authority_verifier: authority_verifier,
           lifecycle_verifier: lifecycle_verifier,
           runtime_identity_verifier: runtime_identity_verifier
@@ -2951,7 +2987,7 @@ module Orbit
         # otherwise the raw EvidenceStore records act as a structural bootstrap
         # only. No public EvidenceStore reader is ever entered inside the
         # already-locked ControlStore seam.
-        raw_evidence = evidence_payloads || EvidenceStore.new(active_root: @active_root).records
+        raw_evidence = evidence_payloads || EvidenceStore.new(active_root: @active_root, task_id: @task_id).records
         evidence_records = []
         evidence_ids.compact.uniq.each do |record_id|
           found = raw_evidence.find do |record|
@@ -3031,7 +3067,7 @@ module Orbit
             "checkpoint task queue must pin the owned task identity (transfers deferred)"
           )
         end
-        task_store = TaskStore.new(active_root: @active_root)
+        task_store = TaskStore.new(active_root: @active_root, task_id: @task_id)
         resolved = begin
           task_store.resolve(
             task_id: claim.fetch("task_id"),
@@ -3135,7 +3171,7 @@ module Orbit
                                         lifecycle_verifier, seen_event_ids)
         prior_session = tx.fetch("prior_session")
         successor = tx.fetch("session")
-        validator = Orbit::V2::Validator.new(project_root: @active_root)
+        validator = Orbit::V2::Validator.new(project_root: @canonical_orbit)
         begin
           validator.validate_document!("lead_session", prior_session)
           validator.validate_document!("lead_session", successor)
@@ -3191,7 +3227,7 @@ module Orbit
         # with exactly one AgentContextAdvanced appended after the
         # termination, provider-verified and globally create-only.
         transitioned_agent = tx.fetch("agent")
-        validator = Orbit::V2::Validator.new(project_root: @active_root)
+        validator = Orbit::V2::Validator.new(project_root: @canonical_orbit)
         begin
           validator.validate_document!("agent_instance", transitioned_agent)
         rescue ValidationFailure, ContractError

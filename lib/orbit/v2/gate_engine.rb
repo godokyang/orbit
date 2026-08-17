@@ -35,13 +35,31 @@ module Orbit
     # pointer, and never accepts a caller-supplied bundle. Every failure
     # fails closed as a gate_engine contract error.
     class GateEngine
-      def initialize(active_root:)
+      def initialize(active_root:, task_id:)
+        unless task_id.is_a?(String) && Identifiers.valid?("task_id", task_id)
+          raise ContractError.new(
+            "gate_engine_task_scope_invalid",
+            "gate engine requires a canonical task_id scope",
+            path: "gate_engine.task_id"
+          )
+        end
+        @task_id = task_id
         @active_root = File.expand_path(active_root)
         unless File.directory?(@active_root)
           raise ContractError.new(
             "gate_engine_argument_invalid",
             "active root must be an existing directory",
             path: "gate_engine.active_root"
+          )
+        end
+        # Canonical-by-construction task scope (design §4a).
+        @canonical_orbit = File.realpath(@active_root)
+        @task_dir = File.join(@canonical_orbit, V2::TASK_SCOPES_SEGMENT, @task_id)
+        unless File.directory?(@task_dir)
+          raise ContractError.new(
+            "gate_engine_argument_invalid",
+            "task scope directory must exist under the canonical active root",
+            path: "gate_engine.task_dir"
           )
         end
       end
@@ -61,11 +79,13 @@ module Orbit
             path: "gate_engine.derive"
           )
         end
-        policy_log = File.join(@active_root, PolicyStore::POLICY_TRANSACTIONS_FILE)
-        task_log = File.join(@active_root, TaskStore::TASK_DEFINITIONS_FILE)
-        control_log = File.join(@active_root, ControlStore::CONTROL_TRANSACTIONS_FILE)
-        evidence_log = File.join(@active_root, EvidenceStore::EVIDENCE_TRANSACTIONS_FILE)
-        gate_log = File.join(@active_root, GateFactStore::GATE_FACTS_FILE)
+
+        ensure_scope!(task_id)
+        policy_log = File.join(@canonical_orbit, PolicyStore::POLICY_TRANSACTIONS_FILE)
+        task_log = File.join(@task_dir, TaskStore::TASK_DEFINITIONS_FILE)
+        control_log = File.join(@task_dir, ControlStore::CONTROL_TRANSACTIONS_FILE)
+        evidence_log = File.join(@task_dir, EvidenceStore::EVIDENCE_TRANSACTIONS_FILE)
+        gate_log = File.join(@task_dir, GateFactStore::GATE_FACTS_FILE)
         DurableFile.with_exclusive_lock(policy_log) do
           DurableFile.with_exclusive_lock(task_log) do
             DurableFile.with_exclusive_lock(control_log) do
@@ -99,7 +119,7 @@ module Orbit
 
       def derive_locked(task_id, task_revision_id, authority_verifier,
                         runtime_identity_verifier, lifecycle_verifier)
-        marker = ActiveRoot.marker_for(@active_root, code: "gate_engine_unpinned", label: "gate_engine")
+        marker = task_scope!
         policy = resolve_policy(marker, authority_verifier)
         task_facts = task_facts_for_revision(task_id, task_revision_id, authority_verifier)
         task_revision = task_facts.fetch("task")
@@ -108,16 +128,16 @@ module Orbit
         # then the EvidenceStore whole-store re-verify against the verified
         # control transactions, then the final ControlStore re-verify with
         # the VERIFIED evidence. No public reader is entered mid-window.
-        gate_facts = GateFactStore::Cutoff.new(active_root: @active_root).snapshot_locked(
+        gate_facts = GateFactStore::Cutoff.new(active_root: @active_root, task_id: @task_id).snapshot_locked(
           authority_verifier: authority_verifier,
           runtime_identity_verifier: runtime_identity_verifier,
           lifecycle_verifier: lifecycle_verifier)
-        evidence_payloads = EvidenceStore::Cutoff.new(active_root: @active_root).verified_payloads(
+        evidence_payloads = EvidenceStore::Cutoff.new(active_root: @active_root, task_id: @task_id).verified_payloads(
           gate_cutoff: gate_facts,
           authority_verifier: authority_verifier,
           runtime_identity_verifier: runtime_identity_verifier,
           lifecycle_verifier: lifecycle_verifier)
-        control_txs = ControlStore::Cutoff.new(active_root: @active_root).verified_records(
+        control_txs = ControlStore::Cutoff.new(active_root: @active_root, task_id: @task_id).verified_records(
           gate_cutoff: gate_facts, evidence_payloads: evidence_payloads,
           authority_verifier: authority_verifier,
           runtime_identity_verifier: runtime_identity_verifier,
@@ -193,12 +213,45 @@ module Orbit
         }
         AggregateOutcome.derive(bundle, task_revision_id,
           validator: Orbit::V2::Validator.new(
-            project_root: @active_root,
+            project_root: @canonical_orbit,
             authority_verifier: authority_verifier,
             lifecycle_verifier: lifecycle_verifier,
             runtime_identity_verifier: runtime_identity_verifier
           ))
       end
+
+      # Task-scoped trust-boundary proof (design §2.1) with the
+      # constructed-value binding.
+      def task_scope!
+        marker, canonical_orbit, task_dir = ActiveRoot.task_scope(
+          @active_root, @task_id,
+          code: "gate_engine_unpinned", label: "gate_engine"
+        )
+        unless canonical_orbit == @canonical_orbit && task_dir == @task_dir
+          raise ContractError.new(
+            "gate_engine_unpinned",
+            "gate_engine task scope no longer resolves to its constructed canonical directories",
+            path: "gate_engine",
+            details: {
+              "constructed_task_dir" => @task_dir,
+              "resolved_task_dir" => task_dir
+            }
+          )
+        end
+        marker
+      end
+
+      # Cross-task derive fails closed at the storage seam.
+      def ensure_scope!(task_id)
+        return if task_id == @task_id
+
+        raise ContractError.new(
+          "gate_engine_task_scope_invalid",
+          "gate engine is scoped to task #{@task_id} and cannot derive #{task_id.inspect}",
+          path: "gate_engine.task_scope"
+        )
+      end
+
 
       # The target revision's EXACT ancestor chain: each revision is
       # resolved independently (so a later successor revision never leaks
@@ -206,7 +259,7 @@ module Orbit
       # assertions/authorization records, gate requirements, work units and
       # theses are unioned in genesis->target order.
       def task_facts_for_revision(task_id, task_revision_id, authority_verifier)
-        task_store = TaskStore.new(active_root: @active_root)
+        task_store = TaskStore.new(active_root: @active_root, task_id: @task_id)
         target = task_store.resolve(task_id: task_id, task_revision_id: task_revision_id,
           authority_verifier: authority_verifier)
         resolved_chain = []
@@ -270,7 +323,7 @@ module Orbit
       end
 
       def resolve_policy(marker, authority_verifier)
-        resolved = PolicyStore.new(active_root: @active_root).resolve(
+        resolved = PolicyStore.new(active_root: @canonical_orbit).resolve(
           pinned_genesis_ref: marker.fetch("project_policy_genesis_ref"),
           authority_verifier: authority_verifier
         )
