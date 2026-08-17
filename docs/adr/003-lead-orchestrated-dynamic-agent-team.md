@@ -7,7 +7,7 @@
 - 当前实现状态：仅为设计结论，尚未修改 Orbit CLI、schema、配置或运行时
 - 切换约束：[ADR-005：Orbit v2 一次性切换与旧协议退役](./005-orbit-v2-clean-cut-and-legacy-retirement.md)
 - 编排控制 amendment：[ADR-006：串行 Lead 编排与控制循环](./006-serialized-lead-orchestration-control-loop.md)；如本文旧表述与 ADR-006 冲突，以 ADR-006 为准
-- Agent-independent control amendment：[orbit-v2-agent-independent-control-amendments](../open/orbit-v2-agent-independent-control-amendments.md)（owner approved 2026-08-11）；决策九与 ADR-004/006 中对应条款由此引入
+- Agent-independent control amendment：[orbit-v2-agent-independent-control-amendments](../history/agent-independent-control-amendments.md)（owner approved 2026-08-11）；决策九与 ADR-004/006 中对应条款由此引入
 
 ## 决策定位与验证边界
 
@@ -759,7 +759,7 @@ review 应先检查 change thesis 和主要结构方向，再进入逐文件检�
 
 ## 决策九：Agent-independent 规则交付与质量治理分层
 
-本决策由 [orbit-v2-agent-independent-control-amendments](../open/orbit-v2-agent-independent-control-amendments.md)（owner approved 2026-08-11）引入；ADR-004/006 承载其 evidence/gate 与控制条款。
+本决策由 [orbit-v2-agent-independent-control-amendments](../history/agent-independent-control-amendments.md)（owner approved 2026-08-11）引入；ADR-004/006 承载其 evidence/gate 与控制条款。
 
 ### Agent-independent rule delivery
 
@@ -856,4 +856,4 @@ ADR-006 已将 task queue、WorkUnit parent/dependency、Attempt predecessor/che
 
 ### 修订原因
 
-用户已否定「同项目多个长期 Lead control 并行 + Task 在 control 之间转移」这一前提：真实协作边界是「一个 Task = 一个 task_id = 一个 Git branch/worktree」。项目级多 control 调度、cross-control transfer 与 project-wide ownership registry 不是 Orbit MVP 必要能力。背景与完整路线见 `docs/open/orbit-v2-slice6-handoff.md`；ADR-005/ADR-006 同日修订与本文一致。
+用户已否定「同项目多个长期 Lead control 并行 + Task 在 control 之间转移」这一前提：真实协作边界是「一个 Task = 一个 task_id = 一个 Git branch/worktree」。项目级多 control 调度、cross-control transfer 与 project-wide ownership registry 不是 Orbit MVP 必要能力。背景与完整路线见 `docs/history/slice6-handoff.md`；ADR-005/ADR-006 同日修订与本文一致。

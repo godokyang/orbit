@@ -2,15 +2,15 @@
 
 - 状态：**Integrated / historical design source**（owner 于 2026-08-11 批准并完成 docs-only normative integration）
 - 日期：2026-08-11
-- 性质：本文是设计来源与历史记录。**只有 [ADR-003](../adr/003-lead-orchestrated-dynamic-agent-team.md)、[ADR-004](../adr/004-role-rule-context-evidence-binding.md)、[ADR-005](../adr/005-orbit-v2-clean-cut-and-legacy-retirement.md)、[ADR-006](../adr/006-serialized-lead-orchestration-control-loop.md) 是 normative semantic source**（本稿条款已整合进上述 ADR）；[orbit-v2-implementation-plan](./orbit-v2-implementation-plan.md) 是 **non-normative implementation/delivery/acceptance mapping，不得覆盖 ADR**；本文仅 provenance。**明确尚未实现**——不授权任何实现，schema/lib/tests/runtime 修改仍须按 plan 切片逐一批准。
-- 关联文档：[ADR-003](../adr/003-lead-orchestrated-dynamic-agent-team.md)、[ADR-004](../adr/004-role-rule-context-evidence-binding.md)、[ADR-005](../adr/005-orbit-v2-clean-cut-and-legacy-retirement.md)、[ADR-006](../adr/006-serialized-lead-orchestration-control-loop.md)、[orbit-v2-implementation-plan](./orbit-v2-implementation-plan.md)、[alpha_test_result](./alpha_test_result.md)、[boom_of_test_case](./boom_of_test_case.md)、[AGENTS.md](../../AGENTS.md)（仓库根）
+- 性质：本文是设计来源与历史记录。**只有 [ADR-003](../adr/003-lead-orchestrated-dynamic-agent-team.md)、[ADR-004](../adr/004-role-rule-context-evidence-binding.md)、[ADR-005](../adr/005-orbit-v2-clean-cut-and-legacy-retirement.md)、[ADR-006](../adr/006-serialized-lead-orchestration-control-loop.md) 是 normative semantic source**（本稿条款已整合进上述 ADR）；[v2 交付记录](./v2-delivery-record.md) 是 **non-normative implementation/delivery/acceptance mapping，不得覆盖 ADR**；本文仅 provenance。**明确尚未实现**——不授权任何实现，schema/lib/tests/runtime 修改仍须按 plan 切片逐一批准。
+- 关联文档：[ADR-003](../adr/003-lead-orchestrated-dynamic-agent-team.md)、[ADR-004](../adr/004-role-rule-context-evidence-binding.md)、[ADR-005](../adr/005-orbit-v2-clean-cut-and-legacy-retirement.md)、[ADR-006](../adr/006-serialized-lead-orchestration-control-loop.md)、[v2 交付记录](./v2-delivery-record.md)、[alpha 测试发现](../reference/alpha-test-findings.md)、[测试爆炸事故](../reference/test-explosion-case.md)、[AGENTS.md](../../AGENTS.md)（仓库根）
 - 背景：Slice 1 implementation design proposal（WorkUnit parent/dependency refs、Attempt lineage、single-active validator；待 owner 审核，本文不改变其范围）
 
 > **修订提示（2026-08-17）**：本文引用的 ADR-003/005/006 并行边界条款已按 task-centric 模型修订（一个 Task = 一个 task_id = 一个 Git branch/worktree；串行边界收窄为 per Task；不存在 cross-control transfer 与 project-wide Task ownership registry）。详见各 ADR 文末修订记录。本文其余内容为历史设计记录，不因本提示修改。
 
 ## 0. 本稿解决的问题与术语约定
 
-Alpha 测试（`alpha_test_result.md` 十项）暴露的核心模式：**控制循环依赖 agent 自报与对话上下文，缺少与具体 agent 无关的权威边界**。本稿把"审核标准移动、测试数量爆炸、补丁链失控、软判断冒充正确性"等现象归因于同一缺口，并给出最小 amendment 设计。
+Alpha 测试（[alpha 测试发现](../reference/alpha-test-findings.md)十项）暴露的核心模式：**控制循环依赖 agent 自报与对话上下文，缺少与具体 agent 无关的权威边界**。本稿把"审核标准移动、测试数量爆炸、补丁链失控、软判断冒充正确性"等现象归因于同一缺口，并给出最小 amendment 设计。
 
 术语与既有文档一致：
 

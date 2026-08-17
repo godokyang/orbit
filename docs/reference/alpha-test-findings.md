@@ -2,7 +2,9 @@
 
 > Codex 使用过程中的跑偏问题归纳，每节一个 issue。
 >
-> 2026-08-11 更新：本节已矩阵化为"设计状态"，**正式落点链接当前 ADR（normative semantic source）与 implementation plan（non-normative delivery/acceptance mapping，不得覆盖 ADR）**（设计来源：[orbit-v2-agent-independent-control-amendments](./orbit-v2-agent-independent-control-amendments.md)，仅 provenance）。**所有条目均为 design accepted、runtime not implemented**——Orbit v2 尚未 cutover，对应机制按 [orbit-v2-implementation-plan](./orbit-v2-implementation-plan.md) 的 slice 落地；本文不构成任何已实现能力的声明。
+> 2026-08-11 更新：本节已矩阵化为"设计状态"，**正式落点链接当前 ADR（normative semantic source）与 implementation plan（non-normative delivery/acceptance mapping，不得覆盖 ADR）**（设计来源：[orbit-v2-agent-independent-control-amendments](../history/agent-independent-control-amendments.md)，仅 provenance）。**所有条目均为 design accepted、runtime not implemented**，对应机制按 [v2 交付记录](../history/v2-delivery-record.md) 的 slice 落地；本文不构成任何已实现能力的声明。
+>
+> 2026-08-17 更新：v1 已删除，v2 是唯一 runtime，最小 CLI 路径已交付。但**本表十项的 runtime 状态不变**——它们依赖的 bounded runner 与执行层仍未接通，见 [愿景达成计划](../plan/vision-completion-plan.md)。
 
 ## 摘要
 
@@ -11,13 +13,13 @@
 | 1 | 修复链路跑偏 | 修复链路过长时，agent 把修复任务当主线需求 | design accepted：[ADR-003 决策三/六](../adr/003-lead-orchestrated-dynamic-agent-team.md)、[ADR-006](../adr/006-serialized-lead-orchestration-control-loop.md)；runtime not implemented | 1/2 |
 | 2 | 过程命名代码入正式目录 | 阶段标签（P6/slice1）被写进正式代码，主 agent 未审查到 | design accepted：[ADR-003 决策一/八](../adr/003-lead-orchestrated-dynamic-agent-team.md)、[决策九 治理分层](../adr/003-lead-orchestrated-dynamic-agent-team.md)；runtime not implemented | 4/5 |
 | 3 | 多任务编排 | 1 主线 + N 支线的编排方式缺失 | design accepted：[ADR-006 task queue/unique selection/single-active](../adr/006-serialized-lead-orchestration-control-loop.md)；runtime not implemented | 2 |
-| 4 | 任务异常评判 | 无"何时换策略"标准，单测重来九轮才人工介入 | design accepted：[ADR-006 Amendment 节：continuation envelope/bounded runner](../adr/006-serialized-lead-orchestration-control-loop.md)、[plan Slice 2](./orbit-v2-implementation-plan.md)；runtime not implemented | 2 |
-| 5 | 过度设计 | 证据链加固过深、核心未完成；应切片冻结 | design accepted：[ADR-006 non-goals](../adr/006-serialized-lead-orchestration-control-loop.md)、[ADR-006 Amendment 节：跨 Agent test budget](../adr/006-serialized-lead-orchestration-control-loop.md)、[plan Slice 2](./orbit-v2-implementation-plan.md)；runtime not implemented | 2 |
-| 6 | Lead 自检 | 需定时自检主线/支线/子任务/当前任务 | design accepted：[ADR-006 四层自检](../adr/006-serialized-lead-orchestration-control-loop.md)、[ADR-006 Amendment 节：bounded runner](../adr/006-serialized-lead-orchestration-control-loop.md)、[plan Slice 2](./orbit-v2-implementation-plan.md)；runtime not implemented | 2 |
-| 7 | 拖轮次根因 | 审核标准不断移动 + 未冻结验收清单 | design accepted：[ADR-004 决策七：closure_basis_digest](../adr/004-role-rule-context-evidence-binding.md)、[plan Slice 2/4](./orbit-v2-implementation-plan.md)；runtime not implemented | 2/4 |
-| 8 | 审核边界失误 | 动态数据当稳定契约、验收证据当永久测试 | design accepted：[ADR-004 决策七：verification_class/verification_use](../adr/004-role-rule-context-evidence-binding.md)、[plan Slice 3](./orbit-v2-implementation-plan.md)；runtime not implemented | 3 |
-| 9 | 补丁链失控 | 复审范围无限扩大，应回退并封顶小任务 | design accepted：[ADR-006 Amendment 节：bounded runner/recovery](../adr/006-serialized-lead-orchestration-control-loop.md)、[plan Slice 2](./orbit-v2-implementation-plan.md)；runtime not implemented | 2 |
-| 10 | 测试数量爆炸 | 无限扩测试弃主线；需数量上限与优先级约束 | design accepted：[ADR-006 Amendment 节：跨 Agent test budget](../adr/006-serialized-lead-orchestration-control-loop.md)、[plan Slice 2](./orbit-v2-implementation-plan.md)；runtime not implemented | 2 |
+| 4 | 任务异常评判 | 无"何时换策略"标准，单测重来九轮才人工介入 | design accepted：[ADR-006 Amendment 节：continuation envelope/bounded runner](../adr/006-serialized-lead-orchestration-control-loop.md)、[plan Slice 2](../history/v2-delivery-record.md)；runtime not implemented | 2 |
+| 5 | 过度设计 | 证据链加固过深、核心未完成；应切片冻结 | design accepted：[ADR-006 non-goals](../adr/006-serialized-lead-orchestration-control-loop.md)、[ADR-006 Amendment 节：跨 Agent test budget](../adr/006-serialized-lead-orchestration-control-loop.md)、[plan Slice 2](../history/v2-delivery-record.md)；runtime not implemented | 2 |
+| 6 | Lead 自检 | 需定时自检主线/支线/子任务/当前任务 | design accepted：[ADR-006 四层自检](../adr/006-serialized-lead-orchestration-control-loop.md)、[ADR-006 Amendment 节：bounded runner](../adr/006-serialized-lead-orchestration-control-loop.md)、[plan Slice 2](../history/v2-delivery-record.md)；runtime not implemented | 2 |
+| 7 | 拖轮次根因 | 审核标准不断移动 + 未冻结验收清单 | design accepted：[ADR-004 决策七：closure_basis_digest](../adr/004-role-rule-context-evidence-binding.md)、[plan Slice 2/4](../history/v2-delivery-record.md)；runtime not implemented | 2/4 |
+| 8 | 审核边界失误 | 动态数据当稳定契约、验收证据当永久测试 | design accepted：[ADR-004 决策七：verification_class/verification_use](../adr/004-role-rule-context-evidence-binding.md)、[plan Slice 3](../history/v2-delivery-record.md)；runtime not implemented | 3 |
+| 9 | 补丁链失控 | 复审范围无限扩大，应回退并封顶小任务 | design accepted：[ADR-006 Amendment 节：bounded runner/recovery](../adr/006-serialized-lead-orchestration-control-loop.md)、[plan Slice 2](../history/v2-delivery-record.md)；runtime not implemented | 2 |
+| 10 | 测试数量爆炸 | 无限扩测试弃主线；需数量上限与优先级约束 | design accepted：[ADR-006 Amendment 节：跨 Agent test budget](../adr/006-serialized-lead-orchestration-control-loop.md)、[plan Slice 2](../history/v2-delivery-record.md)；runtime not implemented | 2 |
 
 ## 1. 修复链路跑偏
 

@@ -408,7 +408,7 @@ Orbit schema / identity / revision / attempt 约束
 
 ## 决策七：Closure basis、Finding basis 与 verification_class
 
-本决策由 [orbit-v2-agent-independent-control-amendments](../open/orbit-v2-agent-independent-control-amendments.md)（owner approved 2026-08-11）引入。
+本决策由 [orbit-v2-agent-independent-control-amendments](../history/agent-independent-control-amendments.md)（owner approved 2026-08-11）引入。
 
 ### Closure basis digest 的 gate/evidence 消费边界
 

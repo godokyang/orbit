@@ -4,7 +4,7 @@
 - 执行：wA:pF（omp）；审核：wA:pD
 - 基线：`347fd05`（阶段 C 已提交）
 - 状态：**设计稿，待批准。本文档不含任何已实施的代码改动。**
-- 工单：`docs/open/orbit-v2-slice6-workorder.md` 第 5 节
+- 工单：[slice6-workorder](./slice6-workorder.md) 第 5 节
 
 ## 0. 现状盘点（设计输入）
 

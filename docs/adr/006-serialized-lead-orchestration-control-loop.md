@@ -289,7 +289,7 @@ Task switch 只能在当前 Attempt terminal 且新 LeadCheckpoint 已接受后�
 
 ## Amendment：Agent-independent control（owner approved 2026-08-11）
 
-本 amendment 由 [orbit-v2-agent-independent-control-amendments](../open/orbit-v2-agent-independent-control-amendments.md) 引入，不放松本 ADR 任何 strict serial 条款；不同 project 独立并行与同 project task-set/runtime-subject-set disjoint 并行边界不变。
+本 amendment 由 [orbit-v2-agent-independent-control-amendments](../history/agent-independent-control-amendments.md) 引入，不放松本 ADR 任何 strict serial 条款；不同 project 独立并行与同 project task-set/runtime-subject-set disjoint 并行边界不变。
 
 > **已取代（2026-08-17）**：本段中「同 project task-set/runtime-subject-set disjoint 并行边界不变」已按 task-centric 模型修订——跨 Task 并行交给 Git branch/worktree，见文末修订记录。
 
@@ -376,4 +376,4 @@ control identity 的 scope 从 project 收窄为 Task：`lead_control_id` 成为
 
 ### 修订原因
 
-用户已否定「同项目多个长期 Lead control 并行 + Task 在 control 之间转移」这一前提：真实协作边界是「一个 Task = 一个 task_id = 一个 Git branch/worktree」。项目级多 control 调度、cross-control transfer 与 project-wide ownership registry 不是 Orbit MVP 必要能力。背景与完整路线见 `docs/open/orbit-v2-slice6-handoff.md`；ADR-003/ADR-005 同日修订与本文一致。
+用户已否定「同项目多个长期 Lead control 并行 + Task 在 control 之间转移」这一前提：真实协作边界是「一个 Task = 一个 task_id = 一个 Git branch/worktree」。项目级多 control 调度、cross-control transfer 与 project-wide ownership registry 不是 Orbit MVP 必要能力。背景与完整路线见 `docs/history/slice6-handoff.md`；ADR-003/ADR-005 同日修订与本文一致。

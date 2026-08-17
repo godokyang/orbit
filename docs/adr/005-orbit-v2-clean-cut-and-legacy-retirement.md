@@ -269,7 +269,7 @@ next_action: choose_clean_orbit_v2_root
 17. 并行边界保持原决议：不同 project 独立并行；同一 project 内 strict serial 与 task-set/runtime-subject-set disjoint 并行规则不变，agent-independent control 条款不改变该边界。
    > **已取代（2026-08-17）**：本条的并行边界已修订——同一 project 内并行改由不同 Task 各自 Git branch/worktree 提供；同一 Task 内 strict serial 不变，见文末修订记录。
 
-> provenance only：上述 agent-independent control 条款的设计来源为 [orbit-v2-agent-independent-control-amendments](../open/orbit-v2-agent-independent-control-amendments.md)（owner approved 2026-08-11，Integrated / historical design source）；仅供追溯，不作为本 cutover 条件来源。
+> provenance only：上述 agent-independent control 条款的设计来源为 [orbit-v2-agent-independent-control-amendments](../history/agent-independent-control-amendments.md)（owner approved 2026-08-11，Integrated / historical design source）；仅供追溯，不作为本 cutover 条件来源。
 
 在完成这些条件前，不能把部分 v2 字段加入 v1 正式 API，也不能提前修改 runtime reference 声称 v2 已生效。
 
@@ -353,13 +353,13 @@ cutover 前置相应修订：原条款 11/12/17 中的 cross-control 闭合条�
 
 ### 修订原因
 
-用户已否定「同项目多个长期 Lead control 并行 + Task 在 control 之间转移」这一前提：真实协作边界是「一个 Task = 一个 task_id = 一个 Git branch/worktree」。项目级多 control 调度、cross-control transfer 与 project-wide ownership registry 不是 Orbit MVP 必要能力。背景与完整路线见 `docs/open/orbit-v2-slice6-handoff.md`；ADR-003/ADR-006 同日修订与本文一致。
+用户已否定「同项目多个长期 Lead control 并行 + Task 在 control 之间转移」这一前提：真实协作边界是「一个 Task = 一个 task_id = 一个 Git branch/worktree」。项目级多 control 调度、cross-control transfer 与 project-wide ownership registry 不是 Orbit MVP 必要能力。背景与完整路线见 `docs/history/slice6-handoff.md`；ADR-003/ADR-006 同日修订与本文一致。
 
 ---
 
 ## 修订记录（2026-08-17，阶段 F）：v1 代码已删除——这不是 cutover 完成
 
-**事实**：本仓库已删除 v1 production 代码（`lib/orbit/*.rb` 36 文件）、`tests/orbit_test.sh`（v1 测试面）与 `contracts/orbit-v2/legacy-v1-writer-reader-inventory.yaml`（v1 迁移清单）；`scripts/orbit` 入口直接进入 v2 CLI（历史 `orbit v2 <cmd>` 命名空间与裸 `<cmd>` 等价）。决策依据（无用户、v2 对 v1 零依赖、v1 停用 17 天、本 ADR 本就以删除为终点）见 `docs/open/orbit-v2-slice6-workorder.md` 第 6 节；删除是可逆的（git 历史）。
+**事实**：本仓库已删除 v1 production 代码（`lib/orbit/*.rb` 36 文件）、`tests/orbit_test.sh`（v1 测试面）与 `contracts/orbit-v2/legacy-v1-writer-reader-inventory.yaml`（v1 迁移清单）；`scripts/orbit` 入口直接进入 v2 CLI（历史 `orbit v2 <cmd>` 命名空间与裸 `<cmd>` 等价）。决策依据（无用户、v2 对 v1 零依赖、v1 停用 17 天、本 ADR 本就以删除为终点）见 `docs/history/slice6-workorder.md` 第 6 节；删除是可逆的（git 历史）。
 
 **纪律声明：v1 代码删除 ≠ cutover 完成。** 「v2 必须关闭的旧路径」清单的删除字段要求与「实施和发布约束」17 条编号条件中，本增量只满足一部分。**仍未满足的（至少）**：
 

@@ -1,12 +1,18 @@
-# Orbit v2 Implementation Plan
+# Orbit v2 交付记录（Slice 0–6）
 
-- 状态：Open
-- 日期：2026-07-30
+- 状态：**交付历史记录**。Slice 0–6 的编排与验收条目记录在此，供追溯；本文不再是前瞻计划。
+- 起始日期：2026-07-30（原名 Orbit v2 Implementation Plan）
+- 当前 runtime：**v2 是唯一 runtime**。v1 production 代码、测试面与数据已于 2026-08-17 删除（ADR-005 修订记录）。
 - 父架构：[ADR-003](../adr/003-lead-orchestrated-dynamic-agent-team.md)
 - EvidenceRecord 子协议：[ADR-004](../adr/004-role-rule-context-evidence-binding.md)
 - Cutover 决策：[ADR-005](../adr/005-orbit-v2-clean-cut-and-legacy-retirement.md)
 - 串行控制合同：[ADR-006](../adr/006-serialized-lead-orchestration-control-loop.md)
-- 当前 runtime：v1；本计划尚未生效
+
+> **去哪找别的东西**
+>
+> - 接下来做什么 → [愿景达成计划](../plan/vision-completion-plan.md)（唯一前瞻文档）
+> - 欠了什么 → [欠账台账](../plan/debt-ledger.md)（唯一欠账出处）
+> - 权威语义 → `contracts/orbit-v2/` 与 ADR；本文的散文描述不是合同
 
 ## 目标
 
@@ -89,7 +95,7 @@ ADR-006 control contract、Slice 1 exact refs/single-active validator 和 Slice 
 
 ### Agent-independent control amendments（owner approved 2026-08-11）
 
-设计来源：[orbit-v2-agent-independent-control-amendments](./orbit-v2-agent-independent-control-amendments.md)（Integrated / historical design source；runtime 未实现）。**规范以 ADR-003（决策九）、ADR-004（决策七）、ADR-005（实施约束 15-17）、ADR-006（Amendment 节）为语义合同**；本 plan 各 slice 段只列交付物/验收并引用 ADR，历史设计稿仅作 provenance，实现者无需穿越。交付物、完成条件与负向/E2E 验收已分别落地到本 plan 的 Slice 2/3/4/5/6 段（各段"Agent-independent amendment 增量"小节）：
+设计来源：[orbit-v2-agent-independent-control-amendments](./agent-independent-control-amendments.md)（Integrated / historical design source；runtime 未实现）。**规范以 ADR-003（决策九）、ADR-004（决策七）、ADR-005（实施约束 15-17）、ADR-006（Amendment 节）为语义合同**；本 plan 各 slice 段只列交付物/验收并引用 ADR，历史设计稿仅作 provenance，实现者无需穿越。交付物、完成条件与负向/E2E 验收已分别落地到本 plan 的 Slice 2/3/4/5/6 段（各段"Agent-independent amendment 增量"小节）：
 
 - **pre-Slice docs freeze**：实现不得偏离上述 ADR 条款，也不得把 amendment 条款回填为"Slice 0 schema 已具备"。
 - **Slice 1（保持原设计，不变）**：WorkUnit exact parent/dependency refs、唯一 root、parent tree 可达、dependency DAG/readiness；WorkUnitAttempt exact `lead_control_id`、terminal predecessor、dispatch LeadCheckpoint ref；single-active。**不加无消费者 placeholder**：`dispatch_lead_checkpoint_ref` 只做格式/链内一致性校验，store-backed 存在性/tip/selection 校验随 Slice 2；不建 LeadCheckpoint schema/collection。Slice 1 proposal 的 schema 版本、error code、测试计划不受本 amendment 影响。
@@ -100,6 +106,8 @@ ADR-006 control contract、Slice 1 exact refs/single-active validator 和 Slice 
 - **Slice 6**：E2E/cutover 覆盖 amendment 条款 —— 详见 Slice 6 段。
 
 ## 权威边界
+
+> **SSOT**：机器可读的权威归属以 `contracts/orbit-v2/authority-matrix.yaml`（505 行，被测试读取）为准。下表是同一事实的散文镜像，附带"消费者"列，仅供阅读；两者冲突时以合同文件为准。
 
 | 事实 | Writer / Owner | 消费者 |
 | --- | --- | --- |
@@ -509,7 +517,7 @@ create ProjectPolicyRevision genesis from user authority source
   -> handoff/complete the Task；executor 更换只走 Task 内 session replacement（同 lead_control_id，terminal old -> successor new），不存在 cross-control transfer
 ```
 
-负向测试至少覆盖：
+负向测试至少覆盖（**SSOT**：已闭合不变量的权威目录是 `contracts/orbit-v2/validator-invariants.md`，1718 行；下列条目是 Slice 6 的验收编排记录，不是不变量定义）：
 
 - v1 task/evidence/state 被明确拒绝；
 - marker missing、wrong project/epoch 和 active root 混合 v1/v2 被明确拒绝；
@@ -583,20 +591,6 @@ E2E/cutover 必须覆盖：
 
 本修订不改变项目级例外：`.orbit/protocol.yaml` 与 `policy/` 保留在项目级，有意接受其 Git 合并冲突风险（policy rotation 低频，同时轮换本来就是真实冲突）。
 
-### 已知分歧（待阶段 C 收口）
-
-`contracts/orbit-v2/schemas/lead-control.schema.json` 尚未与 2026-08-17 已修订的
-`contract.yaml` enum 对齐，仍含：L127 `task_transfer_acquire` 定义、L301-310
-`TaskAcquire`（L303 `released_*` required 块）、L726 action enum 的
-`release/suspend/acquire`、L753-754 event enum 的 `task_suspend/task_acquire`。
-
-这是有意推迟而非遗漏：与 `contracts/orbit-v2/contract.yaml`（仅被 tests 读取的
-规格文件）不同，`schemas/*.json` 经 `schema_catalog.rb` 被 lib 运行时加载
-（control_store、evidence_store、gate_fact_store、policy_store、protocol_root、
-rule_resolution），修改属 production 变更——删 enum 值会使既有合法文档立即失效，
-冲击面直达 contract_test fixture。该 schema 须与 store 路径改造同批进行，届时
-才有测试兜底（归阶段 C）。
-
 ### 目录段名与版本控制跟踪（2026-08-17 阶段 C 裁决记录）
 
 **目录段名**：Task 本地存储段为 `.orbit/task-scopes/<task_id>/`（ADR-003/005/006
@@ -614,7 +608,7 @@ epoch 检测里不可区分。护栏：`V2::TASK_SCOPES_SEGMENT`（叶子文件
 （四个 TransactionLog 日志）与运行时临时物（`*.lock` 零字节锁文件、
 `.*.tmp.<pid>.<tid>.<hex>` 原子 rename 暂存），可直接照抄的 `.gitignore` 片段与
 模式清单见
-`docs/open/orbit-v2-slice6-task-local-storage-design.md` §1.1。
+[slice6-task-local-storage-design](./slice6-task-local-storage-design.md) §1.1。
 
 **c198590 提交信息措辞澄清**（不改写历史，就地记录）：该提交信息中「Git already
 provides workspace isolation and the merge boundary」对**工作目录**成立，对
@@ -624,32 +618,6 @@ README.md），默认不跟踪的项目里 Git 不提供 Orbit 事实的 merge b
 Task 分支无冲突合并」因此**以项目选择跟踪为前提**；默认不跟踪下该验收项为空转，
 其真实等价物是「两个 Task 的 `.orbit/task-scopes/` 路径不重叠」（已由存储布局
 保证）。
-
-### 本地 provider 信任降级记录（2026-08-17 阶段 D 裁决，欠账）
-
-阶段 D 的最小真实 CLI 路径引入**本地 HMAC provider**
-（`lib/orbit/v2/local_provider.rb`，密钥文件
-`.orbit/local-provider.json`，由 `orbit v2 init` 生成、落既有
-`.orbit/*` gitignore 覆盖、不提交）。经工单 D.3.1 裁决定性：**在阶段 D
-它是字符串一致性机制，不是安全机制**——对能读取密钥文件的本地攻击者零防御（该
-攻击者本就可以重写整个 `.orbit`）；它的真实作用是让生产验证路径
-（AuthorityVerifier/RuntimeIdentityVerifier/LifecycleVerifier 的 receipt
-验证）真的执行而非被绕过。批准它不等于批准「Orbit 的安全模型是本地用户信任」。
-
-**欠账**：`local.hmac.*` 三个 provider id 及其密钥文件参与 policy genesis 后即成为
-项目持久权威事实；替换为真实外部 provider 属于**产品级决策**（受控本地 provider
-或显式信任降级需用户批准），且密钥文件丢失 = 项目不可再验证（fail closed，无恢复
-路径）。在 cutover done criteria 满足之前，本记录是该项欠账的唯一权威出处。
-
-### `.cli-clock` 第二时间真值源（2026-08-17 阶段 D 记账，欠账）
-
-v2 CLI 的跨命令时间单调依赖旁路文件
-`.orbit/task-scopes/<task_id>/.cli-clock`（每次发戳取
-max(now, last+1s)）。已核 store 不枚举 task 目录内文件，该文件今天不会被误当
-权威事实，无现行 bug。但持久事实的时间戳因此存在**日志之外的第二个真值源**：
-该文件丢失或被编辑后，CLI 可能发出相对既有日志倒退的时间戳。更稳健的做法是从
-四个 TransactionLog 自身推导上一时间戳（自愈、无第二真值源）。阶段 D 不改实现，
-留待后续阶段处理。
 
 ## Cutover Done Criteria
 
