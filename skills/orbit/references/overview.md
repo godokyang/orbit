@@ -6,6 +6,8 @@
 
 `SKILL.md` 是 skill 的必需入口；`assets/`、`references/`、`scripts/` 都只是可选组织方式。当前公开目录只保留运行时需要的资料，不是所有 skill 必须遵循的规范。
 
+> **部分停用（2026-08-17）**：v1 runtime 已删除，下表中文档除 coding/testing guideline 与 quality outcome 的一般性工程原则外，命令面与协议说明均为 v1 存量稿（各文档头部有停用标注）。v2 操作指引见 [SKILL.md](../SKILL.md)。
+
 ## 两条主线
 
 ### 真实运行时

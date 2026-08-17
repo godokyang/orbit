@@ -200,15 +200,16 @@ lib/orbit/v2/validator/runtime_lifecycle.rb
 lib/orbit/v2/validator/task_work_gate.rb
 lib/orbit/v2/work_authority.rb
 skills/orbit/SKILL.md
-skills/orbit/assets/templates/roles.yaml
-skills/orbit/assets/templates/instances.yaml
-skills/orbit/assets/templates/loop-state.yaml
-skills/orbit/assets/templates/task.yaml
-skills/orbit/assets/templates/evidence.json
-skills/orbit/assets/templates/review-report.yaml
-skills/orbit/assets/templates/design-review-report.yaml
-skills/orbit/assets/templates/test-report.yaml
-skills/orbit/assets/templates/test-hooks.yaml
+skills/orbit/assets/templates/README.md
+skills/orbit/assets/templates/roles.yaml.v1-deprecated
+skills/orbit/assets/templates/instances.yaml.v1-deprecated
+skills/orbit/assets/templates/loop-state.yaml.v1-deprecated
+skills/orbit/assets/templates/task.yaml.v1-deprecated
+skills/orbit/assets/templates/evidence.json.v1-deprecated
+skills/orbit/assets/templates/review-report.yaml.v1-deprecated
+skills/orbit/assets/templates/design-review-report.yaml.v1-deprecated
+skills/orbit/assets/templates/test-report.yaml.v1-deprecated
+skills/orbit/assets/templates/test-hooks.yaml.v1-deprecated
 skills/orbit/references/overview.md
 skills/orbit/references/runtime/guide.md
 skills/orbit/references/runtime/core-operating-model.md
@@ -312,9 +313,8 @@ case "$0" in
 esac
 
 if [ -n "$script_dir" ] &&
-   [ -f "$script_dir/install.sh" ] &&
    [ -f "$script_dir/scripts/orbit" ] &&
-   [ -f "$script_dir/skills/orbit/assets/templates/roles.yaml" ]; then
+   [ -f "$script_dir/skills/orbit/assets/templates/roles.yaml.v1-deprecated" ]; then
   install_log "installing Orbit CLI"
   install_log "mode: $install_mode"
   install_log "wrapper: $target_wrapper"
