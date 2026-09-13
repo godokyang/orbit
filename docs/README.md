@@ -2,8 +2,11 @@
 
 按**体裁**分目录，每类内容只有一个出处。找东西先看这张表。
 
+> 2026-09-13 新会话入口：[Orbit 重构讨论交接包](reference/zeen-orbit-handoff-20260913/README.md)。含 Zeen 规范、反例、研究与代码快照，以及当前讨论边界。先讨论重构方案，不自动续做旧阶段 H；尚未签发新产品合同或实现计划。
+
 | 我想知道… | 去哪 |
 | --- | --- |
+| 开发 Orbit 时如何评估、分工、验证与收尾 | [`agents/development-workflow.md`](agents/development-workflow.md) —— 开发协作规范，根 `AGENTS.md` 为加载入口；不属于产品合同 |
 | 为什么这么设计 | [`adr/`](./adr/) —— 架构决策记录，**唯一 normative 语义来源**（连同 `contracts/orbit-v2/`） |
 | 刚接手、下一步是什么 | [`plan/handoff.md`](./plan/handoff.md) —— 阶段交接 |
 | 接下来做什么、裁决是什么 | [`plan/vision-completion-plan.md`](./plan/vision-completion-plan.md) —— 唯一前瞻计划 |
@@ -11,7 +14,15 @@
 | 判据、外部规范、事故发现 | [`reference/`](./reference/) —— 参考资料，会被反复查阅 |
 | 之前发生过什么 | [`history/`](./history/) —— 已完成工作的记录，不作现在时指令阅读 |
 
+docs/plan/handoff.md 下次从这里继续
+
 ## 目录
+
+### `agents/` —— 开发协作规范
+
+| 文件 | 说明 |
+| --- | --- |
+| [development-workflow.md](agents/development-workflow.md) | Root 直接评估、按收益协作、规则派发、途中纠偏、验证与资源收尾；约束开发者，不产生 Orbit 产品事实 |
 
 ### `adr/` —— 架构决策
 
@@ -30,8 +41,8 @@ ADR 用**修订记录**方式演进：原文不删，就近加已取代标注，
 
 | 文件 | 说明 |
 | --- | --- |
-| `handoff.md` | 阶段 G 完成后的交接：现状、已否备选、阶段 H 范围 |
-| `vision-completion-plan.md` | 阶段 G–K；G 已交付，H–K 未做 |
+| `handoff.md` | 当前交接：G 已交付，先收敛重构方案；开发流程和参考入口 |
+| `vision-completion-plan.md` | 既有阶段依据：G 已交付，H–K 未做，旧实施顺序暂停执行 |
 | `debt-ledger.md` | 有意推迟的项目，含推迟理由与解除条件 |
 | `*-workorder.md` | 派给执行方的工单。**执行中**留在 `plan/`，完成后移入 `history/`。当前 `plan/` 无执行中工单 |
 
@@ -44,6 +55,7 @@ ADR 用**修订记录**方式演进：原文不删，就近加已取代标注，
 | `codex-agents-md-loading.md` | Codex 的 `AGENTS.md` 发现/合并规则与编写方法；规则库设计依据 |
 | `alpha-test-findings.md` | Alpha 测试十项病例与设计状态矩阵；规则库的病例来源 |
 | `test-explosion-case.md` | 测试爆炸事故与跨 Agent 结论 |
+| [zeen-orbit-handoff-20260913/](reference/zeen-orbit-handoff-20260913/README.md) | 重构讨论入口、用户边界、Zeen 参考副本与代码阅读索引；具体方案待讨论 |
 
 ### `history/` —— 交付历史
 
@@ -67,6 +79,7 @@ ADR 用**修订记录**方式演进：原文不删，就近加已取代标注，
 
 | 事实 | 权威出处 |
 | --- | --- |
+| 本仓开发 Agent 的协作与工程纪律 | 根 `AGENTS.md` 与 `docs/agents/development-workflow.md`；不是产品 authority |
 | 语义合同、schema | `contracts/orbit-v2/`（`schemas/*.json` 由 lib 运行时加载） |
 | 权威归属（fact → owner） | `contracts/orbit-v2/authority-matrix.yaml` |
 | 已闭合不变量 | `contracts/orbit-v2/validator-invariants.md` |

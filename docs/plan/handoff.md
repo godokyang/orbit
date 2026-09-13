@@ -1,13 +1,17 @@
-# Handoff：阶段 G 完成，下一阶段是 H
+# Handoff：阶段 G 已完成，先讨论重构方案
 
-- 日期：2026-08-17
+当前先完成 Orbit 减重与重构方向讨论：工具目标、模型与程序的职责、与 Zeen 反馈执行服务的独立接入，以及最小验收路径。尚未批准具体实现方案，不直接启动旧阶段 H、产品初始化、真实模型验证或实现 Goal。
+
+开发本仓遵守[开发协作流程](../agents/development-workflow.md)，由根 `AGENTS.md` 加载。Zeen 的规范与代码保存在[交接包](../reference/zeen-orbit-handoff-20260913/README.md)，仅作参考；本仓开发规范不代表 Orbit 产品已具备自动监督能力。
+
+- 接续日期：2026-09-13；实现状态基于阶段 G 的 2026-08-17 交付
 - 基线 HEAD：`24efecb`（本清理提交叠在其上）
 - 对象：下一个对话 / 下一个 agent。读完本文再读计划，不要从 `history/` 开始改。
 
 ## 先读什么
 
 1. 本文（现在在哪、下一步是什么、不要重开的争论）
-2. [`vision-completion-plan.md`](./vision-completion-plan.md) 顶部 D1–D11（全部有约束力的裁决）
+2. [新交接包](../reference/zeen-orbit-handoff-20260913/README.md) 的用户边界与未决事项，再读 [`vision-completion-plan.md`](./vision-completion-plan.md) D1–D11 理解既有取舍
 3. 动 `lib/` 或 `contracts/` 前：[`debt-ledger.md`](./debt-ledger.md)
 4. 语义以 `contracts/orbit-v2/` 与 `docs/adr/` 为准
 
@@ -31,7 +35,7 @@ CLI 现有：`init` / `task start` / `rules update` / `dispatch` / `evidence sub
 
 ## 已用测试钉住的性质
 
-不要在 H 里重测这些，除非你改到对应代码：
+除非改到对应代码或出现新的失败证据，不重复验证这些性质：
 
 - 默认规则的 `content_sha256` 等于文件真实 digest
 - 改规则字节后，旧 attempt 仍钉旧 digest；新 dispatch 钉新字节
@@ -54,15 +58,13 @@ CLI 现有：`init` / `task start` / `rules update` / `dispatch` / `evidence sub
 | Zeen 四层文档 / 多席轮次 / 三库正文 | D9 |
 | 完整性下界 / `needs_user` payload / Finding 门槛产品化 | D10，未承诺 |
 
-## 下一阶段：H
+## 当前讨论的交付
 
-规模最小。`ContextProjection`（`lib/orbit/v2/context_projection.rb`）已是纯函数，缺 CLI。
+由 Root 直接核查并收敛重构方案，不默认派发。明确哪些版本、证据与上下文机制保留，哪些协议操作应由程序承担；说明运行中如何发现并落实纠偏，以及如何避免 Orbit 和反馈执行服务拥有两套调度状态。
 
-交付：一条只读命令，把 `work_agent` / `evaluator` / `lead` 三种投影打到 stdout 或文件；投影里的规则来自 attempt 已钉的 rule resolution。
+方案需包含正常交付与该停时能停的最小验证，区分确定性测试和真实模型效果。未定产品问题逐项讨论，既有明确授权不重复询问。形成共识后，先对齐需要变化的 ADR／合同与实施计划，再进入开发。
 
-不要在 H 里做 runner、不要拉起 agent、不要写新规则、不要改 pin 语义。
-
-然后 I（stub runner）→ J（真执行 + 可信观测，拆 stub）→ K（场景 A 能跑完、场景 B 能停住；B 更重要）。
+旧 H（投递出口）、I（runner）、J（真实执行与观察）、K（愿景验收）见[既有计划](./vision-completion-plan.md)。它们仍是差距清单，但不是当前开工顺序；不在本交接内提前决定重写或删除产品能力。
 
 ## 本轮从活跃层清走的文件
 

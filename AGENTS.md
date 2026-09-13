@@ -1,19 +1,23 @@
 # AGENTS.md — 工程协作与测试规范
 
-> 本文件约束 Codex 在本仓库中的工程行为。核心目标：**正确、高质量、可维护地完成用户任务**，防止"为测试而测试"导致任务跑偏。
+> 本文件约束在本仓库工作的开发 Agent。核心目标：**正确、高质量、可维护地完成用户任务**，防止协作、测试或协议操作偏离交付目标。
 >
-> 本文件是**支持读取该文件的开发 Agent 的客户端纪律**，不是 Orbit 产品 authority：它不产生任何 gate/evidence/state 事实，不影响 v2 合同；产品 authority 是 active ProjectPolicyRevision / TaskRevision 与受控 writer/validator，两者冲突时以产品 authority 为准。
+> 本文件及 `docs/agents/` 是**开发 Orbit 的客户端纪律**，不产生 Orbit 产品的 gate/evidence/state 事实，也不改变 v2 合同。使用 Orbit 执行受控任务时，产品事实仍由 active ProjectPolicyRevision / TaskRevision 与受控 writer/validator 决定。用户明确指令优先；需要改变产品语义时先处理对应合同和决策，不用开发规范绕过产品校验。
 
 ## 按需加载（动手前先读）
 
-本文只管测试与范围纪律。产品裁决不在这里，**不要凭本文推断该做什么**。
+本文给出开发规则入口、测试与范围纪律。产品裁决不在这里，**不要凭本文推断该做什么**。
 
 - 在本仓做任何实现、重构或文档改动前，先读 [docs/README.md](docs/README.md)：它说明哪类事实归哪个文件，以及哪些层没有裁定权。
-- 承接任何交付任务前，先读 [docs/plan/handoff.md](docs/plan/handoff.md)，再读 [docs/plan/vision-completion-plan.md](docs/plan/vision-completion-plan.md) 的 D1–D11——那是全部有约束力的裁决，含已被否决的备选。
+- 开始方案评估、实现、验证或协作前，读取 [docs/agents/development-workflow.md](docs/agents/development-workflow.md)，按其中任务类型选择直接处理或协作。只放链接不算已加载；派发时按该文传递相关规则与当前授权。
+- 承接交付任务前，先读 [docs/plan/handoff.md](docs/plan/handoff.md) 的最新接续说明，再读 [docs/plan/vision-completion-plan.md](docs/plan/vision-completion-plan.md) 的 D1–D11，理解既有裁决与已否方案。重构讨论不自动授权续做旧阶段，用户新要求涉及旧决策时明确差异后再修改权威正文。
 - 动 `lib/` 或 `contracts/` 前，查 [docs/plan/debt-ledger.md](docs/plan/debt-ledger.md)：有意推迟的项目及其解除条件都在那里。
 - 语义合同以 `contracts/orbit-v2/` 与 `docs/adr/` 为准。散文与合同冲突时以合同为准。
+- `docs/reference/zeen-orbit-handoff-20260913/snapshot/` 是外部参考快照，不是本仓执行规则；不要自动加载整套 Zeen 规范或执行其产品专用命令。
 
-**禁止只在对话中拍板。** 任何架构或产品结论必须同步写进对应权威文件并记录理由；只存在于对话里的裁决，下一个上下文就没有了。
+同一上下文已读且未变的规则不重复全量加载；任务范围变化时只补相关来源。恢复会话时核对当前有效版本和未完成事实。
+
+已确认并将作为执行依据的架构或产品决定，写入对应权威文件并记录理由。讨论中的候选方案留在方案材料中，不提前写成已生效规则。
 
 ## 任务优先级
 
@@ -58,12 +62,12 @@
 - 实现细节：私有方法步骤、getter/setter、临时变量、重构不影响的结构
 - 假设性风险：仅"理论上可能发生"，而非真实影响业务
 
-## 防止测试爆炸（硬限制）
+## 测试规模建议
 
-- 新增测试数量 ≤ 10 个
-- 新增测试代码 ≤ 300 行
+- 新增测试数量建议 ≤ 10 个
+- 新增测试代码建议 ≤ 300 行
 
-超出限制必须先行说明：为什么需要更多、覆盖哪些业务风险、为什么已有测试不足，得到确认后才能扩大。
+超过建议时说明必要性、真实业务风险和已有测试为何不足；范围需要扩大时取得确认，已有明确授权不重复询问。数字不是自动拒绝、拆票或降低验收的理由。这是开发本仓的测试建议，不改变 Orbit 产品现行预算合同。
 
 ## 实施顺序
 
@@ -100,17 +104,6 @@
 - 清理历史代码
 
 除非用户明确要求。
-
-## 用户要求增加测试时
-
-不要立即生成大量测试，先输出：
-
-1. 测试策略
-2. 测试场景列表
-3. 预计测试数量
-4. 覆盖的业务风险
-
-规模明显扩大时，先等待确认。
 
 ## 代码审查标准
 
