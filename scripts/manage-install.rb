@@ -12,7 +12,7 @@ require "shellwords"
 require "time"
 
 module OrbitInstall
-  FORMAT = "orbit-install-2"
+  FORMAT = "orbit-install-3"
   MARKER = ".orbit-install.json"
   RELEASE = ".orbit-release.json"
   module_function
@@ -64,11 +64,9 @@ module OrbitInstall
     raise "expected install or uninstall" unless %w[install uninstall].include?(action)
     options = {}
     parser = OptionParser.new do |p|
-      p.banner = "Orbit #{action}: [--runtime-dir DIR] [--bin-dir DIR] [--skill-dir DIR | --no-skill]"
+      p.banner = "Orbit #{action}: [--runtime-dir DIR] [--bin-dir DIR]"
       p.on("--runtime-dir DIR") { |v| options[:runtime] = v }
       p.on("--bin-dir DIR") { |v| options[:bin] = v }
-      p.on("--skill-dir DIR") { |v| options[:skill] = v }
-      p.on("--no-skill") { options[:no_skill] = true }
       p.on("--opencode-dir DIR") { |v| options[:opencode] = v }
       p.on("--no-opencode") { options[:no_opencode] = true }
       p.on("--omp-dir DIR") { |v| options[:omp] = v }
@@ -81,7 +79,6 @@ module OrbitInstall
     end
     parser.parse!(argv)
     raise "unexpected arguments: #{argv.join(' ')}" unless argv.empty?
-    raise "choose --skill-dir or --no-skill" if options[:skill] && options[:no_skill]
     raise "choose --opencode-dir or --no-opencode" if options[:opencode] && options[:no_opencode]
     raise "choose --omp-dir or --no-omp" if options[:omp] && options[:no_omp]
     options[:runtime] ||= ENV["ORBIT_RUNTIME_DIR"] || File.join(ENV.fetch("XDG_DATA_HOME", File.join(Dir.home, ".local/share")), "orbit/orbit")
@@ -95,9 +92,7 @@ module OrbitInstall
       raise "runtime is not an owned installation; choose an empty directory (old installs are not migrated)"
     end
     options[:bin] ||= ENV["ORBIT_INSTALL_DIR"] || owner&.fetch("bin_dir") || File.join(Dir.home, ".local/bin")
-    options[:skill] ||= ENV["ORBIT_SKILL_DIR"] || (owner ? owner["skill_dir"] : File.join(ENV.fetch("CODEX_HOME", File.join(Dir.home, ".codex")), "skills"))
     bin = File.expand_path(options.fetch(:bin))
-    skill = options[:no_skill] || options[:skill].nil? ? nil : File.expand_path(options[:skill])
     opencode = if options[:no_opencode]
                  nil
                elsif options[:opencode]
@@ -124,29 +119,21 @@ module OrbitInstall
     if owner&.key?("omp_dir") && omp != owner["omp_dir"]
       raise "OMP installation path differs; reuse its recorded path or uninstall first"
     end
-    raise "bin and skill directories must differ" if bin == skill
-    if owner && (bin != owner["bin_dir"] || skill != owner["skill_dir"])
+    if owner && bin != owner["bin_dir"]
       raise "installation paths differ; reuse its recorded paths or uninstall before changing them"
     end
-    raise "installation entry directories must be outside runtime" if [bin, skill, opencode, omp].compact.any? { |path| path == runtime || path.start_with?(runtime + "/") }
-    [action, options.merge(runtime: runtime, bin: bin, skill: skill, opencode: opencode, omp: omp, owner: owner)]
+    raise "installation entry directories must be outside runtime" if [bin, opencode, omp].compact.any? { |path| path == runtime || path.start_with?(runtime + "/") }
+    [action, options.merge(runtime: runtime, bin: bin, opencode: opencode, omp: omp, owner: owner)]
   end
 
   def endpoints(options)
     runtime = options.fetch(:runtime)
-    entries = [[File.join(options.fetch(:bin), "orbit"), wrapper(runtime), :file],
-     *if options[:skill]
-       [[File.join(options[:skill], "orbit"), File.join(runtime, "current/skills/orbit"), :symlink]]
-     else
-       []
-     end]
+    entries = [[File.join(options.fetch(:bin), "orbit"), wrapper(runtime), :file]]
     if options[:opencode]
       entries << [File.join(options[:opencode], "plugins/orbit.js"), File.join(runtime, "current/plugins/opencode.mjs"), :symlink]
-      entries << [File.join(options[:opencode], "skills/orbit"), File.join(runtime, "current/skills/orbit"), :symlink]
     end
     if options[:omp]
       entries << [File.join(options[:omp], "extensions/orbit.js"), File.join(runtime, "current/plugins/omp.mjs"), :symlink]
-      entries << [File.join(options[:omp], "skills/orbit"), File.join(runtime, "current/skills/orbit"), :symlink]
     end
     entries
   end
@@ -277,7 +264,7 @@ module OrbitInstall
         kind == :symlink ? File.symlink(expected, path) : atomic_write(path, expected, mode: 0o755)
         created << path
       end
-      owner = { "format" => FORMAT, "bin_dir" => options.fetch(:bin), "skill_dir" => options[:skill], "opencode_dir" => options[:opencode], "omp_dir" => options[:omp] }
+      owner = { "format" => FORMAT, "bin_dir" => options.fetch(:bin), "opencode_dir" => options[:opencode], "omp_dir" => options[:omp] }
       atomic_write(marker, JSON.pretty_generate(owner) + "\n")
       link = File.join(runtime, ".current-#{SecureRandom.hex(6)}")
       File.symlink("releases/#{File.basename(release)}", link)
@@ -285,7 +272,7 @@ module OrbitInstall
       switched = true
       puts "Installed orbit #{record['version']} (#{record.dig('source', 'commit') || 'local source'})"
       puts "CLI: #{File.join(options.fetch(:bin), 'orbit')}"
-      puts "Skill: #{options[:skill] ? File.join(options[:skill], 'orbit') : 'not linked (--no-skill)'}"
+      puts "Install skill separately: npx skills install godokyang/orbit --skill orbit --global"
       puts "OpenCode: #{options[:opencode] || 'not linked (--no-opencode)'}"
       puts "OMP: #{options[:omp] || 'not linked (--no-omp)'}"
       puts "Start OpenCode or OMP normally; running sessions load their extension on the next launch."

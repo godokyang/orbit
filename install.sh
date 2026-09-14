@@ -14,9 +14,9 @@ require "rbconfig"
 abort "orbit install: Ruby >= 3.2 is required" if (RUBY_VERSION.split('.').map(&:to_i) <=> [3, 2]) < 0
 local = ARGV.shift
 if ARGV.include?("--help") || ARGV.include?("-h")
-  puts "Install/update Orbit: sh install.sh [--bin-dir DIR] [--runtime-dir DIR] [--skill-dir DIR | --no-skill] [--opencode-dir DIR | --no-opencode] [--omp-dir DIR | --no-omp] [--ref REF]"
+  puts "Install/update Orbit CLI: sh install.sh [--bin-dir DIR] [--runtime-dir DIR] [--opencode-dir DIR | --no-opencode] [--omp-dir DIR | --no-omp] [--ref REF]"
   puts "Local checkout by default; --ref (or ORBIT_REF) downloads one pinned GitHub commit. Remote default: main."
-  puts "skill-dir is the parent directory containing the orbit skill. Updates reuse recorded paths."
+  puts "Includes native connection extensions. Skill is managed separately: npx skills install godokyang/orbit --skill orbit --global"
   exit
 end
 ref_index = ARGV.index("--ref")

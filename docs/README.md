@@ -5,6 +5,7 @@
 | 要解决的问题 | 阅读入口 |
 | --- | --- |
 | 怎么安装和开始任务 | [仓库 README](../README.md) |
+| 自定义安装、skill 管理和 CLI 参数 | [进阶使用参考](reference/usage-reference.md) |
 | Agent 何时自行调用 Orbit | [Orbit skill](../skills/orbit/SKILL.md) |
 | Root 如何创建成员、使用 Herdr 和收尾 | [执行 Agent 协作说明](../skills/orbit/references/agent-collaboration.md) |
 | 各角色怎么选模型 | [模型建议](../skills/orbit/references/model-selection.md) |

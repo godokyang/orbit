@@ -1,6 +1,8 @@
 # Orbit 当前交接
 
-2026-09-14 用户同意先提交推送 OpenCode 0.3.0，再完成 OMP 接入。0.3.0 已以 `8b5de29` 推送 main；OMP 已完成，当前源码与本机安装均为 **0.4.0**，用户已要求提交并推送本轮 OMP 成果，提交及远端同步状态以 Git 为准。不启动新 Goal，不打标签、不发布，不自动扩展 pi／Kimi；被忽略的外部交接包仍留在本地。
+2026-09-14 本轮基线为 OMP 0.4.0（`db6b752`）。用户暂停其他宿主接入，先试用现有三个入口，并要求安装拆成两步：`install.sh` 装 CLI 与原生连接扩展，`npx skills` 独立管理 skill。当前源码已改为 **0.5.0**，安装器不再管理技能目录、链接或配置开关；README 与进阶说明同步。用户随后明确要求卸载本机旧版，已用旧版卸载器完成并核对七处入口与 runtime 均移除；未重新全局安装新版。开发层面不兼容旧格式，不提供迁移层。
+
+用户已授权将 0.5.0 的安装拆分与使用文档一并提交推送；未发布 npm 包或标签，被忽略的外部交接包仍留在本地。不启动新 Goal，不自动扩展 pi／Kimi。后续本机试用先按 README 分别安装程序与 skill；开发中的 skill 可用本仓绝对路径交给 npx skills 安装。
 
 ## 当前怎么用
 
@@ -11,9 +13,11 @@
 - 成员与 Root 同宿主。OMP 沿用 Root 模型、thinking、项目及有效权限，只开放 Root 当前启用的基础编码工具，不复制扩展、MCP 或再次派发。OpenCode 沿用 Root 模型、variant、Agent 和权限；Codex 默认沿用检查模型与工作区写入沙箱。均由 Root 核验集成结果。
 - **检查者仍需要 Codex**。检查模型优先 `ORBIT_REVIEW_MODEL`；OMP／OpenCode 默认从 Codex config.toml 顶层读取，使用 Codex profile 时显式指定。已实测的执行模型为 `opencode-go/deepseek-v4.1-flash`，不要与 V4、Zen 或直連混用。
 
-本机安装目录 `~/.local/share/orbit/orbit`，CLI `~/.local/bin/orbit`。安装器统一管理 Codex skill、OpenCode 插件和 skill、OMP 扩展和 skill。OMP 采用 `PI_CODING_AGENT_DIR`、其次 `OMP_PROFILE` 对应的 agent 目录，默认 `~/.omp/agent`；只对所选 profile 生效。OpenCode 遵循 `OPENCODE_CONFIG_DIR`。模型、权限配置未被改写。安装前已经打开的会话须按原生方式退出并恢复以加载新版，安装不是运行中热更新。
+推荐 runtime 目录 `~/.local/share/orbit/orbit`，CLI `~/.local/bin/orbit`；本机这套旧安装现已卸载。新版安装器只管理 CLI、OpenCode 插件和 OMP 扩展，skill 全部交给 npx skills。OMP 扩展采用 `PI_CODING_AGENT_DIR`、其次 `OMP_PROFILE` 对应的 agent 目录，默认 `~/.omp/agent`；OpenCode 遵循 `OPENCODE_CONFIG_DIR`。OMP 可原生读取 npx 安装的共享 `.agents/skills`，不需要专用 skill 安装路径。
 
-## 本轮验证
+安装职责拆分验证：四条安装生命周期回归覆盖首次安装不创建技能目录、成功／失败更新与卸载保留外部 skill；OMP 18.1.16 在无模型请求的原生启动中发现 npx 安装的项目 `.agents/skills/orbit/SKILL.md`，返回的 skill 命令路径与实际文件一致。独立只读核查无代码阻断，两处旧升级说明已随用户“不兼容”决定删除。完整 `npm test`、skill 校验、66 处文档链接与 shell 示例检查通过；隔离 skill 更新和移除也通过。验证目录和进程已清理，整次未发起执行或检查模型请求。
+
+## 0.4.0 的既有执行验收
 
 完整数据见 [OMP 运行验收](../reference/omp-runtime-acceptance-20260914.json)，保留真实失败与修正，不以接线测试代替实际运行。
 
@@ -22,7 +26,7 @@
 - 原生 Esc 中断，Root／成员及各自子进程共 4 个 PID 全部退出，心跳停止，任务 paused。
 - 原生 --resume 恢复同一会话，再运行两支原生后台任务；正常退出界面后 4 个 PID、任务进程和私有 socket 全部收尾，任务 paused。两条停止验收均未调用检查模型。
 - 既有全套回归、OMP 接线与实际后台任务结算／切换失败重试测试、四条安装更新卸载路径、skill／版本校验通过。独立只读核查与针对性复核完成，无剩余已识别阻断。
-- 本机更新到 0.4.0；在没有项目扩展的普通 OMP 中观察到全局 Orbit 扩展与新版 skill，CLI／三个宿主的入口同版。原生模型和权限配置内容保持一致。
+- 当时本机更新到 0.4.0；在没有项目扩展的普通 OMP 中观察到全局 Orbit 扩展与新版 skill，CLI／三个宿主的入口同版。原生模型和权限配置内容保持一致。
 
 实际运行发现并修正两处：小任务需要成员时也应先接入；followUp 被 hub wait 挡住，改用原生 steer，避免回报延迟。独立核查补齐切换前停止确认：未确认则取消切换，保留原连接供重试。
 
@@ -32,6 +36,6 @@
 
 ## 后续边界
 
-下一种宿主为 pi，随后 Kimi Code；Grok、dsh、Cursor Agent 低优先级，仅在官方方案合适时推进。本轮完成不自动授权下一宿主，不扩展混合宿主成员、自动恢复、Root 替换或需求讨论管理。
+其他宿主接入暂缓，先试用 Codex、OpenCode、OMP 并改进使用说明。未来恢复接入时沿用既定顺序：pi、Kimi Code；Grok、dsh、Cursor Agent 保持低优先级。本轮完成不自动授权下一宿主，不扩展混合宿主成员、自动恢复、Root 替换或需求讨论管理。
 
 [OpenCode 正式验收](../reference/opencode-runtime-acceptance-20260914.json)、[Codex 日常验收](../reference/user-flow-acceptance-20260914.json) 与 [底层验收](../reference/orbit-runtime-acceptance-20260914.md) 保留为既有证据。当前语义见 [运行合同](../../contracts/task-runtime.md) 与 [ADR-007](../adr/007-task-runtime-refactor.md)，进度见 [当前计划](vision-completion-plan.md)。旧阶段和 upstream 不再是待办；旧 0.1.15 资料仍在 `~/.local/share/orbit/retired-0.1.15-20260914`，没有兼容执行路径。

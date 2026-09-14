@@ -34,7 +34,7 @@ module InstallTest
       @skills = File.join(tmp, "skills")
       @opencode = File.join(tmp, "opencode config")
       @omp = File.join(tmp, "omp agent")
-      @env = { "ORBIT_REF" => nil, "ORBIT_RUNTIME_DIR" => nil, "ORBIT_INSTALL_DIR" => nil, "ORBIT_SKILL_DIR" => nil, "OPENCODE_CONFIG_DIR" => @opencode, "PI_CODING_AGENT_DIR" => @omp }
+      @env = { "ORBIT_REF" => nil, "ORBIT_RUNTIME_DIR" => nil, "ORBIT_INSTALL_DIR" => nil, "ORBIT_SKILL_DIR" => @skills, "OPENCODE_CONFIG_DIR" => @opencode, "PI_CODING_AGENT_DIR" => @omp }
       files = JSON.parse(run("npm", "pack", "--dry-run", "--json", "--ignore-scripts", cwd: ROOT))[0]["files"]
       files.each do |file|
         dest = File.join(@source, file.fetch("path"))
@@ -49,7 +49,7 @@ module InstallTest
   end
 
   def install(*args, env: {}, success: true, explicit_paths: true)
-    paths = explicit_paths ? ["--bin-dir", @bin, "--skill-dir", @skills] : []
+    paths = explicit_paths ? ["--bin-dir", @bin] : []
     run("sh", File.join(@source, "install.sh"), "--runtime-dir", @runtime, *paths, *args, env: env, success: success)
   end
 
@@ -102,12 +102,13 @@ module InstallTest
     assert(info.fetch("version") == json(File.join(ROOT, "package.json")).fetch("version"), "installed CLI version")
     assert(info.dig("source", "commit") == "a" * 40 && info.dig("source", "ref") == "branch/stable", "record pinned commit and requested ref")
     assert(File.readlines(log).length == 2, "resolve source once, fetch one fixed archive")
-    assert(File.read(File.join(@skills, "orbit/SKILL.md")) == File.read(File.join(@source, "skills/orbit/SKILL.md")), "discoverable skill installed with CLI")
+    assert([@skills, File.join(@opencode, "skills"), File.join(@omp, "skills")].none? { |p| File.exist?(p) }, "CLI installation creates no skill directories")
     assert(run(File.join(@bin, "orbit"), "--version").strip == "orbit #{info['version']}", "short version command")
     assert(!File.exist?(File.join(active, "lib/orbit/v2")), "no retired runtime in installation")
   end
 
   def successful_update
+    prepare_external_skills
     install("--opencode-dir", @opencode)
     old = active
     obsolete = File.join(old, "obsolete-rule.md")
@@ -124,20 +125,18 @@ module InstallTest
     assert(version.dig("source", "commit") == run("git", "rev-parse", "HEAD", cwd: @source).strip, "local source commit recorded")
     assert(version.dig("source", "dirty") == true, "local edits not mislabeled as clean commit")
     assert(!File.exist?(old) && !File.exist?(obsolete), "retired release and obsolete shipped files removed")
-    assert(File.read(File.join(@skills, "orbit/SKILL.md")).include?("Updated fixture skill."), "skill follows same update")
+    assert_external_skills
     assert(File.realpath(File.join(@opencode, "plugins/orbit.js")) == File.join(active, "plugins/opencode.mjs"), "OpenCode plugin follows update")
     assert(File.realpath(File.join(@omp, "extensions/orbit.js")) == File.join(active, "plugins/omp.mjs"), "OMP extension follows update")
-    assert(File.read(File.join(@omp, "skills/orbit/SKILL.md")).include?("Updated fixture skill."), "OMP skill follows update")
-    assert(File.read(File.join(@opencode, "skills/orbit/SKILL.md")).include?("Updated fixture skill."), "OpenCode skill follows update")
     assert(File.read(File.join(@runtime, "user-notes.txt")) == "keep", "update preserves user files")
   end
 
   def failed_update
+    prepare_external_skills
     install
     before = version
     old = active
     assert(File.realpath(File.join(@omp, "extensions/orbit.js")) == File.join(active, "plugins/omp.mjs"), "OMP installed in native agent directory")
-    old_skill = File.realpath(File.join(@skills, "orbit"))
     bump
     runner = File.join(@temp, "failed-dependency")
     FileUtils.mkdir_p(runner)
@@ -150,12 +149,13 @@ module InstallTest
     File.chmod(0o755, File.join(runner, "npm"))
     install(env: { "PATH" => runner + File::PATH_SEPARATOR + ENV.fetch("PATH") }, success: false)
     assert(version == before && active == old, "failed dependency update retains working old installation")
-    assert(File.realpath(File.join(@skills, "orbit")) == old_skill, "failed update retains matching skill")
+    assert_external_skills
     assert(File.realpath(File.join(@opencode, "plugins/orbit.js")) == File.join(old, "plugins/opencode.mjs"), "failed update retains OpenCode plugin")
     assert(Dir.glob(File.join(@runtime, ".prepare-*"), File::FNM_DOTMATCH).empty?, "failed preparation cleaned")
   end
 
   def uninstall_preserves_user_files
+    prepare_external_skills
     install
     File.write(File.join(@runtime, "user-notes.txt"), "keep root")
     release = active
@@ -167,13 +167,11 @@ module InstallTest
     File.write(File.join(@omp, "config.yml"), "user: keep\n")
     File.write(File.join(@opencode, "opencode.json"), '{"user":"keep"}')
     run("sh", File.join(@runtime, "current/uninstall.sh"), "--runtime-dir", @runtime)
+    assert_external_skills
     assert(!File.exist?(File.join(@bin, "orbit")), "owned CLI wrapper removed")
     assert(!File.symlink?(File.join(@omp, "extensions/orbit.js")), "owned OMP extension removed")
-    assert(!File.symlink?(File.join(@omp, "skills/orbit")), "owned OMP skill removed")
     assert(File.read(File.join(@omp, "config.yml")) == "user: keep\n", "OMP config retained")
-    assert(!File.symlink?(File.join(@skills, "orbit")), "owned skill link removed")
     assert(!File.symlink?(File.join(@opencode, "plugins/orbit.js")), "owned OpenCode plugin removed")
-    assert(!File.symlink?(File.join(@opencode, "skills/orbit")), "owned OpenCode skill removed")
     assert(File.read(File.join(@opencode, "opencode.json")) == '{"user":"keep"}', "OpenCode user config retained")
     assert(!File.symlink?(File.join(@runtime, "current")), "active release link removed")
     assert(!File.exist?(File.join(release, "scripts/orbit")), "shipped code removed")
@@ -181,6 +179,24 @@ module InstallTest
     assert(File.read(File.join(release, "user-extra.txt")) == "keep release", "extra file in release kept")
     assert(File.directory?(File.join(release, "user-empty-folder")), "unowned empty folder kept")
     assert(File.read(File.join(project, "task.json")) == "keep task", "project task data kept")
+  end
+
+  # Independently managed content and links must survive the CLI lifecycle.
+  def prepare_external_skills
+    @external_skill = File.join(@temp, ".agents/skills/orbit")
+    FileUtils.mkdir_p(@external_skill)
+    File.write(File.join(@external_skill, "SKILL.md"), "managed by skills CLI")
+    [@skills, File.join(@opencode, "skills"), File.join(@omp, "skills")].each do |directory|
+      FileUtils.mkdir_p(directory)
+      File.symlink(@external_skill, File.join(directory, "orbit"))
+    end
+  end
+
+  def assert_external_skills
+    assert(File.read(File.join(@external_skill, "SKILL.md")) == "managed by skills CLI", "external skill content preserved")
+    [@skills, File.join(@opencode, "skills"), File.join(@omp, "skills")].each do |directory|
+      assert(File.readlink(File.join(directory, "orbit")) == @external_skill, "external skill link preserved")
+    end
   end
 
   def main

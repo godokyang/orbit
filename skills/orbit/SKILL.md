@@ -55,4 +55,4 @@ Root 在用户授权和项目规则范围内决定是否需要执行成员，一
 
 启动本次任务时读取 [最小实现](assets/rule-library/tasks/minimal-implementation.md) 和 [共用职责](assets/rule-library/shared/escalation-payload.md)。修复、测试、对外命名、结构化边界、安装／命令表面、质量与评审，按实际动作读取 `assets/rule-library/tasks/` 中对应文件。项目规则对执行者和检查者同样适用，不将 Orbit 规则复制成项目必填配置。
 
-安装器让 CLI 和 skill 使用同一版本；`orbit version --json` 查询来源。更新或卸载在 Orbit 任务结束后进行。运行需要 Ruby 3.2+、Node.js 18+、npm 与已有 Codex CLI，安装后可直接运行 `opencode`／`omp` 或用 `orbit codex` 打开支持接入的会话；OpenCode／OMP 的检查者当前仍需要 Codex，不能将其 provider/model 填作检查模型；安装不会改造已经打开的会话。
+CLI 和原生连接扩展由 `install.sh` 管理，skill 的安装、更新与移除交给 `npx skills`，两者分别维护；`orbit version --json` 只查询运行程序来源。更新或卸载在 Orbit 任务结束后进行。运行需要 Ruby 3.2+、Node.js 18+、npm 与已有 Codex CLI，安装后可直接运行 `opencode`／`omp` 或用 `orbit codex` 打开支持接入的会话；OpenCode／OMP 的检查者当前仍需要 Codex，不能将其 provider/model 填作检查模型；安装不会改造已经打开的会话。
