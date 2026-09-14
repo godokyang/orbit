@@ -1,6 +1,6 @@
 ---
 name: orbit
-description: 当用户要求实现功能、修复问题、重构或按需求文档执行，且任务涉及多个步骤、模块、协作者或容易遗漏的验收要求时，主动使用 Orbit 做执行期间的独立检查与纠偏，无需用户点名 Orbit。用户明确要求 Orbit 时也使用。仅讨论、解释、只读评审或简单局部修改通常不启动；已有任务不重复启动。支持安装原生插件后的普通 OpenCode，以及通过 orbit codex 启动的 Codex。
+description: 当用户要求实现功能、修复问题、重构或按需求文档执行，且任务需要委派成员，或涉及多个步骤、模块、容易遗漏的验收要求时，主动使用 Orbit 做执行期间的独立检查与纠偏，无需用户点名 Orbit。用户明确要求 Orbit 时也使用。需要成员的执行任务先接入再委派；仅讨论、解释、只读评审或无协作的简单局部修改通常不启动；已有任务不重复启动。支持安装原生插件后的普通 OpenCode／OMP，以及通过 orbit codex 启动的 Codex。
 metadata:
   short-description: 在已授权的复杂执行任务中主动开展独立检查与纠偏
 ---
@@ -20,14 +20,16 @@ Orbit 是独立的任务执行辅助工具，适用于任意项目。它保存�
 
 ## 接入与执行
 
-使用当前宿主提供的 `orbit` 工具（Codex 为 MCP，OpenCode 为原生插件）；它提供 `context / start / status / check / amend / dispute / stop / delegate`。普通 Codex 工作区沙箱中的 shell 不一定能访问控制 socket，不能用反复执行 shell 命令替代可用 MCP。
+需要执行成员时，即使代码量小，也先接入 Orbit，再用 `delegate`；否则成员结果与统一停止无法纳入同一任务。
 
-1. 读取目标项目已有规则，确定用户原始要求。调用 `orbit` 工具的 `context` 检查当前会话，OpenCode 自动提供当前项目与会话，无需端口和 ID；Codex 宿主通常提供会话身份，确实缺少时从环境读取 `CODEX_THREAD_ID`，传入 `thread_id`，不要让用户查内部 ID。
-2. 用 `start`；Codex 传 `project` 绝对路径，OpenCode 自动取当前项目；用户指定文档时传 `basis` 路径数组。不传 `message_id` 时读取最近原生用户消息；若最新只是“同意”，传实际包含执行要求的原始消息 ID。不要把自己的计划或摘要冒充用户原文。
-3. 检查模型优先使用已配置的 `ORBIT_REVIEW_MODEL`，否则 Codex 沿用当前会话配置，OpenCode 读取本机 Codex config.toml 的顶层模型；有明确角色配置时传 `review_model`。需要选型再读 [模型建议](references/model-selection.md)。不启用未经授权的新供应商。
+使用当前宿主提供的 `orbit` 工具（Codex 为 MCP，OpenCode／OMP 为原生扩展）；它提供 `context / start / status / check / amend / dispute / stop / delegate`。OMP 将扩展工具挂载到 `xd://orbit` 时，先用原生 `read` 读取该设备的说明与 JSON schema，再按原生设备协议写入参数调用，这与独立命名的工具是同一入口。普通 Codex 工作区沙箱中的 shell 不一定能访问控制 socket，不能用反复执行 shell 命令替代可用 MCP。
+
+1. 读取目标项目已有规则，确定用户原始要求。调用 `orbit` 工具的 `context` 检查当前会话，OpenCode／OMP 自动提供当前项目与会话，无需端口和 ID；Codex 宿主通常提供会话身份，确实缺少时从环境读取 `CODEX_THREAD_ID`，传入 `thread_id`，不要让用户查内部 ID。
+2. 用 `start`；Codex 传 `project` 绝对路径，OpenCode／OMP 自动取当前项目；用户指定文档时传 `basis` 路径数组。不传 `message_id` 时读取最近原生用户消息；若最新只是“同意”，传实际包含执行要求的原始消息 ID。不要把自己的计划或摘要冒充用户原文。
+3. 检查模型优先使用已配置的 `ORBIT_REVIEW_MODEL`，否则 Codex 沿用当前会话配置，OpenCode／OMP 读取本机 Codex config.toml 的顶层模型；有明确角色配置时传 `review_model`。需要选型再读 [模型建议](references/model-selection.md)。不启用未经授权的新供应商。
 4. 保存返回的 `task_directory`，在下一正常工作节点用 `status` 和 `task` 核对实际接入，然后继续实现。`starting` 表示进程已创建；`queued` 表示动作已入队，均不代表完成。已有本任务时复用，不重复启动。
 
-OpenCode 用户直接运行 **`opencode`**，继续使用原生模型、恢复与权限参数；插件在下次启动时加载，skill 不能在当前会话内另开 Root。工具不可见时说明插件尚未加载，保留当前上下文，用户可按原生方式恢复会话。
+OpenCode 用户直接运行 **`opencode`**，OMP 用户直接运行 **`omp`**，继续使用原生模型、恢复与权限参数；插件在下次启动时加载，skill 不能在当前会话内另开 Root。工具不可见时说明插件尚未加载，保留当前上下文，用户可按原生方式恢复会话。
 
 Codex 没有 MCP 时，可在具有原生控制端点和相应访问权限的宿主中使用 CLI：`orbit start --project DIR --basis FILE`。`ORBIT_CODEX_SOCKET` 指向当前会话所属服务；不要猜测其他服务或迁移会话。`orbit doctor` 检查连接，`orbit --help` 提供 CLI 参数。
 
@@ -35,7 +37,7 @@ Codex 没有 MCP 时，可在具有原生控制端点和相应访问权限的宿
 
 ## 必要分工
 
-Root 在用户授权和项目规则范围内决定是否需要执行成员，一个 Agent 足够就自己完成。需要时使用 `delegate`，传 `task` 和具体 `text`（范围、文件边界、验证和回报要求）；程序自动附上原始要求与已生效修改，创建本任务拥有的同宿主成员（Codex 或 OpenCode），结果自动回到当前 Root。`model` 可指定已授权模型，否则 Codex 成员沿用检查模型，OpenCode 成员沿用 Root 的原生供应商、模型和 variant；`member` 可复用本任务已有成员。Root 核验并集成结果，成员不再创建团队。
+Root 在用户授权和项目规则范围内决定是否需要执行成员，一个 Agent 足够就自己完成。需要时使用 `delegate`，传 `task` 和具体 `text`（范围、文件边界、验证和回报要求）；程序自动附上原始要求与已生效修改，创建本任务拥有的同宿主成员（Codex、OpenCode 或 OMP），结果自动回到当前 Root。`model` 可指定已授权模型，否则 Codex 成员沿用检查模型，OpenCode 成员沿用 Root 的原生供应商、模型和 variant；OMP 成员沿用 Root 的模型、thinking、项目与权限设置，只开放当前已启用的基础编码工具（read/write/edit/grep/glob/bash/python/lsp），不复制扩展、MCP 或委派工具；`member` 可复用本任务已有成员。Root 核验并集成结果，成员不再创建团队。OMP 的 `hub wait` 不等待 Orbit 回报；不要用它或 shell 等待成员。结束本轮后，Orbit 会把结果送回当前会话。
 
 这条路径不需要额外终端窗口。Herdr、tmux 只影响展示；用户明确要求使用其他协作工具时按 [协作说明](references/agent-collaboration.md) 处理，不把外部成员说成已纳入 Orbit 的统一停止。
 
@@ -47,10 +49,10 @@ Root 在用户授权和项目规则范围内决定是否需要执行成员，一
 
 产物准备好后结束本轮并说明实际结果，让独立检查核对最终版本。不要在活跃轮次内持续等 `complete`。检查若发现遗漏，会唤起同一个 Root 继续修正；最终状态保存于任务记录，可通过 `status` 查询，不能把 Root 自己的完成声明当作独立验收通过。
 
-原生界面中断 Root 或调用 `stop` 后，程序停止 Root、本任务登记成员及各自宿主管理的命令（OpenCode 包括原生 shell 工具所附属的进程树），保留会话和产物。确认失败须报告 `stop_unconfirmed`；任务进程报错退出后，仍可用 `stop` 显式重试收尾。禁止将本任务工作放入脱离宿主管理的后台进程；外部未登记 Agent 不在确认范围。关闭 `orbit codex` 入口或正常退出 OpenCode 会收尾本次宿主的相关执行；不承诺强杀宿主后的自动恢复。
+原生界面中断 Root 或调用 `stop` 后，程序停止 Root、本任务登记成员及各自宿主管理的命令（OpenCode 包括原生 shell 工具所附属的进程树；OMP 包括本会话拥有的原生后台任务，等待实际执行结束后才确认停止），保留会话和产物。确认失败须报告 `stop_unconfirmed`；任务进程报错退出后，仍可用 `stop` 显式重试收尾。禁止将本任务工作放入脱离宿主管理的后台进程；外部未登记 Agent 不在确认范围。关闭 `orbit codex` 入口或正常退出 OpenCode／OMP 会收尾本次宿主的相关执行；不承诺强杀宿主后的自动恢复。
 
 ## 按需规则
 
 启动本次任务时读取 [最小实现](assets/rule-library/tasks/minimal-implementation.md) 和 [共用职责](assets/rule-library/shared/escalation-payload.md)。修复、测试、对外命名、结构化边界、安装／命令表面、质量与评审，按实际动作读取 `assets/rule-library/tasks/` 中对应文件。项目规则对执行者和检查者同样适用，不将 Orbit 规则复制成项目必填配置。
 
-安装器让 CLI 和 skill 使用同一版本；`orbit version --json` 查询来源。更新或卸载在 Orbit 任务结束后进行。运行需要 Ruby 3.2+、Node.js 18+、npm 与已有 Codex CLI，安装后可直接运行 `opencode` 或用 `orbit codex` 打开支持接入的会话；OpenCode 的检查者当前仍需要 Codex，不能将 OpenCode 的 provider/model 填作检查模型；安装不会改造已经打开的会话。
+安装器让 CLI 和 skill 使用同一版本；`orbit version --json` 查询来源。更新或卸载在 Orbit 任务结束后进行。运行需要 Ruby 3.2+、Node.js 18+、npm 与已有 Codex CLI，安装后可直接运行 `opencode`／`omp` 或用 `orbit codex` 打开支持接入的会话；OpenCode／OMP 的检查者当前仍需要 Codex，不能将其 provider/model 填作检查模型；安装不会改造已经打开的会话。

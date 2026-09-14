@@ -42,7 +42,7 @@ const client = { session: {
 const tool = async args => JSON.parse(await plugin.tool.orbit.execute(args, { sessionID: 'root' }));
 const state = async () => JSON.parse(await fs.readFile(path.join(started.task_directory, 'state.json'), 'utf8'));
 const ruby = source => new Promise((resolve, reject) => {
-  const child = spawn('ruby', ['--disable-gems', '-Ilib', '-rorbit/opencode_connection', '-e', source, started.task_directory]);
+  const child = spawn('ruby', ['--disable-gems', '-Ilib', '-rorbit/plugin_connection', '-e', source, started.task_directory]);
   let out = '', err = '';
   child.stdout.on('data', b => out += b); child.stderr.on('data', b => err += b);
   child.on('error', reject); child.on('close', code => code ? reject(new Error(err || out)) : resolve(out));
@@ -57,14 +57,14 @@ try {
   assert.equal((await state()).instruction_source.kind, 'opencode_user_message');
   await ruby(`
     record = JSON.parse(File.read(File.join(ARGV[0], 'state.json')))
-    connection = Orbit::OpenCodeConnection.new(socket: record.dig('connection','socket'), thread_id: 'root').connect!
+    connection = Orbit::PluginConnection.new(provider: 'opencode', socket: record.dig('connection','socket'), thread_id: 'root').connect!
     raise 'original lost' unless connection.user_message['text'] == 'Implement the original multi-step requirement.'
     sent = connection.send_message('Orbit correction, not a new user requirement.')
     messages = connection.user_messages(after_id: 'original')
     raise 'native metadata marker lost' unless messages.last['id'] == sent['id'] && messages.last['internal']
     raise 'model changed' unless connection.configured_model == 'authorized/execution-model'
     begin
-      Orbit::OpenCodeConnection.new(socket: record.dig('connection','socket'), thread_id: 'foreign').connect!
+      Orbit::PluginConnection.new(provider: 'opencode', socket: record.dig('connection','socket'), thread_id: 'foreign').connect!
       raise 'foreign session accepted'
     rescue Orbit::Connection::Error => error
       raise unless error.message.include?('has not called Orbit')

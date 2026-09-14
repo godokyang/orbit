@@ -33,7 +33,8 @@ module InstallTest
       @bin = File.join(tmp, "bin with spaces")
       @skills = File.join(tmp, "skills")
       @opencode = File.join(tmp, "opencode config")
-      @env = { "ORBIT_REF" => nil, "ORBIT_RUNTIME_DIR" => nil, "ORBIT_INSTALL_DIR" => nil, "ORBIT_SKILL_DIR" => nil, "OPENCODE_CONFIG_DIR" => @opencode }
+      @omp = File.join(tmp, "omp agent")
+      @env = { "ORBIT_REF" => nil, "ORBIT_RUNTIME_DIR" => nil, "ORBIT_INSTALL_DIR" => nil, "ORBIT_SKILL_DIR" => nil, "OPENCODE_CONFIG_DIR" => @opencode, "PI_CODING_AGENT_DIR" => @omp }
       files = JSON.parse(run("npm", "pack", "--dry-run", "--json", "--ignore-scripts", cwd: ROOT))[0]["files"]
       files.each do |file|
         dest = File.join(@source, file.fetch("path"))
@@ -63,11 +64,12 @@ module InstallTest
   def bump
     package = File.join(@source, "package.json")
     data = json(package)
-    data["version"] = "0.3.1"
+    @updated_version = data.fetch("version").sub(/\d+\z/) { |patch| (patch.to_i + 1).to_s }
+    data["version"] = @updated_version
     File.write(package, JSON.pretty_generate(data))
     lock = File.join(@source, "npm-shrinkwrap.json")
     data = json(lock)
-    data["version"] = data.fetch("packages").fetch("")["version"] = "0.3.1"
+    data["version"] = data.fetch("packages").fetch("")["version"] = @updated_version
     File.write(lock, JSON.pretty_generate(data))
   end
 
@@ -118,12 +120,14 @@ module InstallTest
     bump
     File.open(File.join(@source, "skills/orbit/SKILL.md"), "a") { |f| f.puts("\nUpdated fixture skill.") }
     install(explicit_paths: false)
-    assert(version["version"] == "0.3.1", "updated CLI version")
+    assert(version["version"] == @updated_version, "updated CLI version")
     assert(version.dig("source", "commit") == run("git", "rev-parse", "HEAD", cwd: @source).strip, "local source commit recorded")
     assert(version.dig("source", "dirty") == true, "local edits not mislabeled as clean commit")
     assert(!File.exist?(old) && !File.exist?(obsolete), "retired release and obsolete shipped files removed")
     assert(File.read(File.join(@skills, "orbit/SKILL.md")).include?("Updated fixture skill."), "skill follows same update")
     assert(File.realpath(File.join(@opencode, "plugins/orbit.js")) == File.join(active, "plugins/opencode.mjs"), "OpenCode plugin follows update")
+    assert(File.realpath(File.join(@omp, "extensions/orbit.js")) == File.join(active, "plugins/omp.mjs"), "OMP extension follows update")
+    assert(File.read(File.join(@omp, "skills/orbit/SKILL.md")).include?("Updated fixture skill."), "OMP skill follows update")
     assert(File.read(File.join(@opencode, "skills/orbit/SKILL.md")).include?("Updated fixture skill."), "OpenCode skill follows update")
     assert(File.read(File.join(@runtime, "user-notes.txt")) == "keep", "update preserves user files")
   end
@@ -132,6 +136,7 @@ module InstallTest
     install
     before = version
     old = active
+    assert(File.realpath(File.join(@omp, "extensions/orbit.js")) == File.join(active, "plugins/omp.mjs"), "OMP installed in native agent directory")
     old_skill = File.realpath(File.join(@skills, "orbit"))
     bump
     runner = File.join(@temp, "failed-dependency")
@@ -159,9 +164,13 @@ module InstallTest
     project = File.join(@temp, "project/.orbit")
     FileUtils.mkdir_p(project)
     File.write(File.join(project, "task.json"), "keep task")
+    File.write(File.join(@omp, "config.yml"), "user: keep\n")
     File.write(File.join(@opencode, "opencode.json"), '{"user":"keep"}')
     run("sh", File.join(@runtime, "current/uninstall.sh"), "--runtime-dir", @runtime)
     assert(!File.exist?(File.join(@bin, "orbit")), "owned CLI wrapper removed")
+    assert(!File.symlink?(File.join(@omp, "extensions/orbit.js")), "owned OMP extension removed")
+    assert(!File.symlink?(File.join(@omp, "skills/orbit")), "owned OMP skill removed")
+    assert(File.read(File.join(@omp, "config.yml")) == "user: keep\n", "OMP config retained")
     assert(!File.symlink?(File.join(@skills, "orbit")), "owned skill link removed")
     assert(!File.symlink?(File.join(@opencode, "plugins/orbit.js")), "owned OpenCode plugin removed")
     assert(!File.symlink?(File.join(@opencode, "skills/orbit")), "owned OpenCode skill removed")

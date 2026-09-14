@@ -71,6 +71,8 @@ module OrbitInstall
       p.on("--no-skill") { options[:no_skill] = true }
       p.on("--opencode-dir DIR") { |v| options[:opencode] = v }
       p.on("--no-opencode") { options[:no_opencode] = true }
+      p.on("--omp-dir DIR") { |v| options[:omp] = v }
+      p.on("--no-omp") { options[:no_omp] = true }
       p.on("--ref REF") { |_v| } # Source selection belongs to install.sh.
       p.on("--source DIR") { |v| options[:source] = File.realpath(v) }
       p.on("--source-commit SHA") { |v| options[:commit] = v }
@@ -81,6 +83,7 @@ module OrbitInstall
     raise "unexpected arguments: #{argv.join(' ')}" unless argv.empty?
     raise "choose --skill-dir or --no-skill" if options[:skill] && options[:no_skill]
     raise "choose --opencode-dir or --no-opencode" if options[:opencode] && options[:no_opencode]
+    raise "choose --omp-dir or --no-omp" if options[:omp] && options[:no_omp]
     options[:runtime] ||= ENV["ORBIT_RUNTIME_DIR"] || File.join(ENV.fetch("XDG_DATA_HOME", File.join(Dir.home, ".local/share")), "orbit/orbit")
     runtime = File.expand_path(options.fetch(:runtime))
     raise "runtime directory must not be a symlink" if File.symlink?(runtime)
@@ -107,12 +110,26 @@ module OrbitInstall
     if owner&.key?("opencode_dir") && opencode != owner["opencode_dir"]
       raise "OpenCode installation path differs; reuse its recorded path or uninstall first"
     end
+    omp = if options[:no_omp]
+            nil
+          elsif options[:omp]
+            File.expand_path(options[:omp])
+          elsif owner&.key?("omp_dir")
+            owner["omp_dir"]
+          elsif action == "install"
+            profile = ENV["OMP_PROFILE"]
+            default = profile && !profile.empty? ? File.join(Dir.home, ".omp/profiles", profile, "agent") : File.join(Dir.home, ".omp/agent")
+            File.expand_path(ENV["PI_CODING_AGENT_DIR"] || default)
+          end
+    if owner&.key?("omp_dir") && omp != owner["omp_dir"]
+      raise "OMP installation path differs; reuse its recorded path or uninstall first"
+    end
     raise "bin and skill directories must differ" if bin == skill
     if owner && (bin != owner["bin_dir"] || skill != owner["skill_dir"])
       raise "installation paths differ; reuse its recorded paths or uninstall before changing them"
     end
-    raise "installation entry directories must be outside runtime" if [bin, skill, opencode].compact.any? { |path| path == runtime || path.start_with?(runtime + "/") }
-    [action, options.merge(runtime: runtime, bin: bin, skill: skill, opencode: opencode, owner: owner)]
+    raise "installation entry directories must be outside runtime" if [bin, skill, opencode, omp].compact.any? { |path| path == runtime || path.start_with?(runtime + "/") }
+    [action, options.merge(runtime: runtime, bin: bin, skill: skill, opencode: opencode, omp: omp, owner: owner)]
   end
 
   def endpoints(options)
@@ -126,6 +143,10 @@ module OrbitInstall
     if options[:opencode]
       entries << [File.join(options[:opencode], "plugins/orbit.js"), File.join(runtime, "current/plugins/opencode.mjs"), :symlink]
       entries << [File.join(options[:opencode], "skills/orbit"), File.join(runtime, "current/skills/orbit"), :symlink]
+    end
+    if options[:omp]
+      entries << [File.join(options[:omp], "extensions/orbit.js"), File.join(runtime, "current/plugins/omp.mjs"), :symlink]
+      entries << [File.join(options[:omp], "skills/orbit"), File.join(runtime, "current/skills/orbit"), :symlink]
     end
     entries
   end
@@ -184,6 +205,8 @@ module OrbitInstall
     raise "skill payload missing" unless File.file?(File.join(stage, "skills/orbit/SKILL.md"))
     run("node", "--check", "plugins/opencode.mjs", chdir: stage)
     run("node", "--input-type=module", "-e", "import('./plugins/opencode.mjs')", chdir: stage)
+    run("node", "--check", "plugins/omp.mjs", chdir: stage)
+    run("node", "--input-type=module", "-e", "import('./plugins/omp-host.mjs')", chdir: stage)
     record = { "format" => FORMAT, "version" => package.fetch("version"), "source" => source_record,
                "content_digest" => digest.hexdigest, "installed_at" => Time.now.utc.iso8601,
                "files" => paths, "owned_directories" => %w[node_modules .npm-cache] }
@@ -254,7 +277,7 @@ module OrbitInstall
         kind == :symlink ? File.symlink(expected, path) : atomic_write(path, expected, mode: 0o755)
         created << path
       end
-      owner = { "format" => FORMAT, "bin_dir" => options.fetch(:bin), "skill_dir" => options[:skill], "opencode_dir" => options[:opencode] }
+      owner = { "format" => FORMAT, "bin_dir" => options.fetch(:bin), "skill_dir" => options[:skill], "opencode_dir" => options[:opencode], "omp_dir" => options[:omp] }
       atomic_write(marker, JSON.pretty_generate(owner) + "\n")
       link = File.join(runtime, ".current-#{SecureRandom.hex(6)}")
       File.symlink("releases/#{File.basename(release)}", link)
@@ -264,7 +287,8 @@ module OrbitInstall
       puts "CLI: #{File.join(options.fetch(:bin), 'orbit')}"
       puts "Skill: #{options[:skill] ? File.join(options[:skill], 'orbit') : 'not linked (--no-skill)'}"
       puts "OpenCode: #{options[:opencode] || 'not linked (--no-opencode)'}"
-      puts "Start OpenCode normally after installation; running sessions load the plugin on their next launch."
+      puts "OMP: #{options[:omp] || 'not linked (--no-omp)'}"
+      puts "Start OpenCode or OMP normally; running sessions load their extension on the next launch."
       puts "Details: orbit version --json"
       puts "Update: rerun install.sh with --runtime-dir #{runtime.shellescape} (latest local checkout, or --ref REF)."
       puts "Uninstall: sh #{File.join(runtime, 'current/uninstall.sh').shellescape} --runtime-dir #{runtime.shellescape}"

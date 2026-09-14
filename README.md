@@ -6,7 +6,7 @@ Orbit 是独立的 Coding Agent 任务执行辅助工具，可用于任意项目
 
 安装并让 Agent 发现 [Orbit skill](skills/orbit/SKILL.md) 后，用户可以直接说“按这份需求文档实现整个流程”。对于已授权且值得独立监督的执行任务，Agent 应主动调用 Orbit，**不需要用户点名工具**；讨论、只读解释和简单局部修改通常直接处理。实际启动还需具备下述会话控制通道和已授权的检查模型。
 
-需要分工时，Root 使用 Orbit 的 `delegate` 创建本任务拥有的同宿主执行成员（Codex 或 OpenCode），原始要求自动传递、结果自动回到 Root，停止时一并收尾；普通终端就能使用。Herdr、tmux 是可选的终端组织工具，见 [协作说明](skills/orbit/references/agent-collaboration.md)。
+需要分工时，Root 使用 Orbit 的 `delegate` 创建本任务拥有的同宿主执行成员（Codex、OpenCode 或 OMP），原始要求自动传递、结果自动回到 Root，停止时一并收尾；普通终端就能使用。Herdr、tmux 是可选的终端组织工具，见 [协作说明](skills/orbit/references/agent-collaboration.md)。
 
 ## 日常入口
 
@@ -15,18 +15,20 @@ Orbit 是独立的 Coding Agent 任务执行辅助工具，可用于任意项目
 ```bash
 opencode       # 使用 OpenCode 原生入口，插件自动加载
 # 或
+omp            # 使用 OMP 原生入口，扩展自动加载
+# 或
 orbit codex    # 使用 Codex 原生 TUI，入口准备所需控制服务
 ```
 
-OpenCode 继续使用原生参数，例如 `opencode --model opencode-go/deepseek-v4.1-flash`、`opencode --continue` 或 `opencode --session SESSION_ID`；登录、模型和权限配置仍由 OpenCode 管理，无需填写端口。检查者当前仍使用本机 Codex CLI，与 OpenCode 执行模型分别配置。
+OpenCode 继续使用原生参数，例如 `opencode --model opencode-go/deepseek-v4.1-flash`、`opencode --continue` 或 `opencode --session SESSION_ID`；登录、模型和权限配置仍由 OpenCode 管理，无需填写端口。OMP 同样保留原生参数，例如 `omp --model opencode-go/deepseek-v4.1-flash`、`omp --resume SESSION_ID`、`omp --approval-mode yolo`；权限由用户选择。检查者仍使用本机 Codex CLI，与执行模型分别配置。
 
 然后像平常一样说“按这份需求文档实现整个流程”。入口为当前 Codex TUI 准备本地原生服务和 Orbit MCP，Agent 可自主接入，用户不用填写 socket 或会话 ID。已有模型配置继续使用；检查模型可单独通过 `ORBIT_REVIEW_MODEL` 指定。只给 Orbit 自己的 MCP 工具配置自动批准，不修改全局 Codex 配置，也不放宽模型 shell 沙箱。
 
 Root 始终是这个正在执行的会话，Orbit 纠偏不换人。`orbit start` 只绑定已有会话；`orbit codex` 是用户明确选择的启动入口，两者职责不同。正常退出相应宿主会请求收尾其任务、执行成员与宿主管理的命令，保留磁盘上的会话历史和产物。
 
-普通已经打开的嵌入式 Codex 没有已验证的热接入能力。可先结束／暂停当前工作，再由用户明确通过 `orbit codex resume SESSION_ID` 恢复原会话；程序不会自动搬迁。OpenCode 通过安装后的原生插件接入；安装前已经打开的 OpenCode 需按原生方式退出并恢复，让插件加载。其他宿主、外部未登记成员及脱管进程尚未纳入控制。普通终端、tmux 和 Herdr 使用同一入口。
+普通已经打开的嵌入式 Codex 没有已验证的热接入能力。可先结束／暂停当前工作，再由用户明确通过 `orbit codex resume SESSION_ID` 恢复原会话；程序不会自动搬迁。OpenCode／OMP 通过安装后的原生扩展接入；安装前已经打开的会话需按原生方式退出并恢复，让插件加载。其他宿主、外部未登记成员及脱管进程尚未纳入控制。普通终端、tmux 和 Herdr 使用同一入口。
 
-原生接口已在 Codex CLI 0.154.0 验证；这些接口仍有实验性变动，连接失败会明确报告。此前底层验收见 [记录](docs/reference/orbit-runtime-acceptance-20260914.md)，本轮自然触发、纠偏、成员统一停止和三种终端入口已按 [执行计划](docs/plan/user-experience-plan.md) 验证，[原始数据](docs/reference/user-flow-acceptance-20260914.json) 保留实际范围与成本，不以单测替代真实接入。OpenCode 1.18.30 的正式安装入口、原 Root 纠偏、成员集成、原生中断及正常退出收尾均已验证，见 [验收数据](docs/reference/opencode-runtime-acceptance-20260914.json)。当前版本 0.3.0 尚未发布。
+原生接口已在 Codex CLI 0.154.0 验证；这些接口仍有实验性变动，连接失败会明确报告。此前底层验收见 [记录](docs/reference/orbit-runtime-acceptance-20260914.md)，本轮自然触发、纠偏、成员统一停止和三种终端入口已按 [执行计划](docs/plan/user-experience-plan.md) 验证，[原始数据](docs/reference/user-flow-acceptance-20260914.json) 保留实际范围与成本，不以单测替代真实接入。OpenCode 1.18.30 的正式安装入口、原 Root 纠偏、成员集成、原生中断及正常退出收尾均已验证，见 [验收数据](docs/reference/opencode-runtime-acceptance-20260914.json)。OMP 18.1.16 的同一条日常流程和原生后台任务停止已验证，见 [OMP 验收数据](docs/reference/omp-runtime-acceptance-20260914.json)。当前版本 0.4.0 尚未发布。
 
 ## 怎么开始
 
@@ -47,11 +49,11 @@ orbit --version
 orbit version --json
 ```
 
-安装器默认将 `orbit` skill 链接到 `${CODEX_HOME:-$HOME/.codex}/skills/orbit`。CLI 与 skill 指向同一个已验证版本，更新时一起切换；Agent 按其技能加载方式发现该目录。`--skill-dir DIR` 可指定技能父目录，`--no-skill` 不安装 Codex skill。同时默认安装 OpenCode 的 `plugins/orbit.js` 与 `skills/orbit` 链接，默认采用原生 `OPENCODE_CONFIG_DIR`，未设置时为 `${XDG_CONFIG_HOME:-$HOME/.config}/opencode`；`--opencode-dir DIR` 指定 OpenCode 配置目录，`--no-opencode` 不安装这两个入口。两项禁用参数一起使用才只安装 CLI。禁用与安装路径随更新沿用；要改为另一套入口，先卸载再安装。安装器不改写 OpenCode 配置、模型和凭据。已有同名自定义 skill、未知命令包装或旧安装目录时明确拒绝覆盖，使用空目录；旧安装不迁移。更新默认沿用安装记录的 CLI、skill 和插件路径；从尚无 OpenCode 记录的旧版更新时，默认新增 OpenCode 入口。
+安装器默认将 `orbit` skill 链接到 `${CODEX_HOME:-$HOME/.codex}/skills/orbit`。CLI 与 skill 指向同一个已验证版本，更新时一起切换；Agent 按其技能加载方式发现该目录。`--skill-dir DIR` 可指定技能父目录，`--no-skill` 不安装 Codex skill。同时默认安装 OpenCode 的 `plugins/orbit.js` 与 `skills/orbit` 链接，默认采用原生 `OPENCODE_CONFIG_DIR`，未设置时为 `${XDG_CONFIG_HOME:-$HOME/.config}/opencode`；`--opencode-dir DIR` 指定 OpenCode 配置目录，`--no-opencode` 不安装这两个入口。另安装 OMP 的 `extensions/orbit.js` 与 `skills/orbit`，优先采用 `PI_CODING_AGENT_DIR`，其次 `OMP_PROFILE` 对应的 `~/.omp/profiles/NAME/agent`，否则 `~/.omp/agent`。`--omp-dir DIR` 指定 OMP agent 目录，`--no-omp` 不安装 OMP 入口。`--no-skill --no-opencode --no-omp` 一起使用才只安装 CLI。禁用与安装路径随更新沿用；要改为另一套入口，先卸载再安装。安装器不改写宿主配置、模型和凭据。OMP 的 profile 是独立目录；安装到所用 profile（例如 `OMP_PROFILE=work sh install.sh ...`），不宣称默认目录的扩展会覆盖所有 profile。已有同名自定义 skill、未知命令包装或旧安装目录时明确拒绝覆盖，使用空目录；旧安装不迁移。更新默认沿用安装记录的 CLI、skill 和插件路径；从尚无对应宿主记录的旧版更新时，默认新增该宿主入口。
 
 `--bin-dir` / `--runtime-dir` / `--skill-dir` 也分别支持 `ORBIT_INSTALL_DIR` / `ORBIT_RUNTIME_DIR` / `ORBIT_SKILL_DIR`。runtime 未指定时使用 `$XDG_DATA_HOME/orbit/orbit`，没有 XDG 设置则为 `~/.local/share/orbit/orbit`。
 
-安装后运行普通 `opencode`，或用 `orbit codex` 打开 Codex；支持原生接口的自定义宿主也可使用 `ORBIT_CODEX_SOCKET` 或 `--socket` 指定确实承载当前会话的端点。Agent 优先用 MCP 的 `context` 核对接入；Codex 命令行环境可用 `orbit doctor`。若 `orbit --help` 仍显示旧的 init/dispatch/evidence/gate，说明 PATH 指向旧安装，应先检查 `command -v orbit`。
+安装后运行普通 `opencode`／`omp`，或用 `orbit codex` 打开 Codex；支持原生接口的自定义宿主也可使用 `ORBIT_CODEX_SOCKET` 或 `--socket` 指定确实承载当前会话的端点。Agent 优先用 MCP 的 `context` 核对接入；Codex 命令行环境可用 `orbit doctor`。若 `orbit --help` 仍显示旧的 init/dispatch/evidence/gate，说明 PATH 指向旧安装，应先检查 `command -v orbit`。
 
 ### 更新与卸载
 
@@ -78,13 +80,13 @@ sh "$HOME/.local/share/orbit/task-runtime/current/uninstall.sh" \
   --runtime-dir "$HOME/.local/share/orbit/task-runtime"
 ```
 
-卸载从记录读取 CLI、skill 与 OpenCode 插件路径，仅移除匹配的入口和登记文件。用户额外文件、项目规范和项目 `.orbit` 任务资料保留。
+卸载从记录读取 CLI、skill 与原生扩展路径，仅移除匹配的入口和登记文件。用户额外文件、项目规范和项目 `.orbit` 任务资料保留。
 
 ### 版本与发布
 
 版本号以 `package.json` 为准；CLI 与 Codex 连接的客户端版本从同一来源读取。`orbit version --json` 显示版本、来源提交、内容摘要与安装时间。本地安装的 commit 是工作树基线，`dirty` 表示存在本地改动；非 Git 来源的提交与修改状态记为未知。安装清单和运行记录的格式版本独立于产品版本号。
 
-维护者通过 `npm version <新版本> --no-git-tag-version` 同步包与锁文件，再运行 `npm test` 和 `npm pack --dry-run`。版本检查会拒绝包与锁文件不一致；确认发布范围后，才提交并创建对应的 `v<版本>` 标签、推送或发布 npm 包。当前 `0.3.0` 尚未发布，安装器不会自动打标签、发布或后台更新。
+维护者通过 `npm version <新版本> --no-git-tag-version` 同步包与锁文件，再运行 `npm test` 和 `npm pack --dry-run`。版本检查会拒绝包与锁文件不一致；确认发布范围后，才提交并创建对应的 `v<版本>` 标签、推送或发布 npm 包。当前 `0.4.0` 尚未发布，安装器不会自动打标签、发布或后台更新。
 
 ## 执行任务
 
@@ -120,7 +122,7 @@ orbit delegate TASK_DIRECTORY --file scope.txt --model MODEL
 - `--check-in` 是约定观察间隔，到期再排下一次；等待本身不调用模型。
 - `--estimate-minutes` / `--estimate-tokens` 不是上限。只有用户明确给出的 `--deadline` 才是硬线。
 - Root 经 skill 加载最小实现和共享规则，其他专项规则按当前动作加载。独立检查加载 review 和共享规则，同时读取固定产物中的相关项目规则。不把 Orbit 规则全局覆写进目标项目 `AGENTS.md`，只读取目标项目实际适用的规范。
-- `--review-model` 只走本机 Codex CLI（`codex exec`）。OpenCode Root 和成员使用原生 provider/model；独立检查使用 `ORBIT_REVIEW_MODEL` 或本机 Codex config.toml 顶层配置，不能把 OpenCode 模型名填成检查模型。尚不支持混合宿主成员。角色建议见 [model-selection.md](skills/orbit/references/model-selection.md)。
+- `--review-model` 只走本机 Codex CLI（`codex exec`）。OpenCode／OMP Root 和成员使用原生 provider/model；独立检查使用 `ORBIT_REVIEW_MODEL` 或本机 Codex config.toml 顶层配置，不能把执行宿主模型名填成检查模型。尚不支持混合宿主成员。角色建议见 [model-selection.md](skills/orbit/references/model-selection.md)。
 
 ## 怎么判断进度
 

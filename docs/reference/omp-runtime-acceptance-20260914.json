@@ -1,0 +1,464 @@
+{
+  "date": "2026-09-14",
+  "orbit_version": "0.4.0",
+  "status": "passed_with_recorded_attempts",
+  "omp_version": "18.1.16",
+  "opencode_version": "1.18.30",
+  "root_and_member_model": "opencode-go/deepseek-v4.1-flash",
+  "review_model": "gpt-6-astra",
+  "fixture": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-omp-20260914-35eptbt0",
+  "scope": "Installed ordinary OMP TUI extension and shared TaskRuntime; no replacement Root, ports or manually supplied session IDs for the execution task. Explicit native --resume is tested separately for stop acceptance.",
+  "natural_execution": {
+    "prompt": "Implement requirements.md completely. Use one execution member to verify the requested behaviors independently and integrate its findings.",
+    "task_directory": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-omp-20260914-35eptbt0/project/.orbit/tasks/c95c3f1d-b4a7-4e5e-bf45-c453391b4004",
+    "root_session": "01a09fd6-5495-74ce-858d-8b49dcdf708f",
+    "instruction_source": {
+      "kind": "omp_user_message",
+      "id": "eefd5ba7"
+    },
+    "basis": [
+      {
+        "source": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-omp-20260914-35eptbt0/project/requirements.md",
+        "path": "basis/0-requirements.md",
+        "sha256": "c0a64dfcd51681a20e79042121cf6671a8e0f59f410e184a568e6fbbba824e4a"
+      }
+    ],
+    "final_status": "complete",
+    "members": [
+      {
+        "thread_id": "01a09fd7-94b1-75cc-a395-e76ea6066660",
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "status": "completed",
+        "stop_confirmation": {
+          "confirmed": true,
+          "thread_id": "01a09fd7-94b1-75cc-a395-e76ea6066660",
+          "scope": "Native session execution, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+          "native_owner": "orbit-81eb100b-a99a-459d-94b2-70e13e968a4c",
+          "status_after": "idle",
+          "active_tools_after": 0,
+          "async_jobs_settled": true
+        }
+      }
+    ],
+    "controlled_omission": "After the member completed and Root ended a successful turn, moved USAGE.md out of the project. Independent check found the missing file, the same Root restored it, and the final fixed snapshot passed.",
+    "omission": {
+      "result": {
+        "thread_id": "01a09fd6-5495-74ce-858d-8b49dcdf708f",
+        "cwd": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-omp-20260914-35eptbt0/project",
+        "status": "idle",
+        "interrupted": false,
+        "turn_id": null,
+        "last_turn_id": "315d76fe",
+        "last_turn_status": "completed",
+        "observations": [
+          {
+            "kind": "agent_message",
+            "text": "Member verification integrated. No corrections needed — the member confirmed every check against real runs and edited nothing (`stop_confirmation.confirmed: true`, no unmanaged leftovers).\n\n**Integration decision per finding**\n\n| Finding | Decision |\n|---|---|\n| No missed requirements; function/CLI/USAGE.md all match | No change. Matches my own smoke test independently (bytes `Hello, Ada!\\n`; stderr-only errors; 0/1/2). |\n| Arity guard is additive beyond \"accepts one name\" | Keep. It is the smallest way to honor \"accepts one name\" without an unhandled traceback on 0/≥2 args, is documented in `USAGE.md`, and removes a crash path rather than adding a feature. |\n| `greet(None)` → `AttributeError` | Keep, not a requirement gap: `requirements.md` specifies string names and blank-string `ValueError`. Adding a type check would widen scope with no cited requirement (`minimal-implementation`: delete-it-who-breaks). Recorded as known unspecified-input behavior. |\n| `__pycache__/` artifact | Run artifact, not source; untouched. |\n\n**Final state** — `greet.py` (30 lines): `greet(name)` strips → `Hello, <name>!`, `ValueError(\"name must not be blank\")` when blank; CLI one arg → print greeting (exit 0), blank → stderr error (exit 1), wrong arity → stderr usage (exit 2). `USAGE.md`: command form, trimming example, blank-name error explanation with exit status, arity block. No tests, configs, or dependencies added — nothing in the requirement needs a permanent test.\n\nOrbit task `c95c3f1d` remains active for the final independent check of this frozen version; any correction it raises wakes this session."
+          }
+        ],
+        "active_tools": 0,
+        "async_jobs": {
+          "running": [],
+          "recent": [
+            {
+              "id": "bg_5",
+              "type": "bash",
+              "status": "completed",
+              "label": "ls -la .orbit/tasks/c95c3f1d-b4a7-4e5e-bf45-c453391b4004/ 2>&1",
+              "startTime": 1789388081028
+            },
+            {
+              "id": "bg_4",
+              "type": "bash",
+              "status": "completed",
+              "label": "python3 -c \"\nfrom greet import greet\nprint(repr(greet('Ada')))\nprint(repr(greet('  Ada  ')))\nfor bad in ('', '   ', '...",
+              "startTime": 1789388056291
+            },
+            {
+              "id": "bg_3",
+              "type": "bash",
+              "status": "completed",
+              "label": "ls .omp/skills/orbit/assets/rule-library/tasks/",
+              "startTime": 1789388035090
+            },
+            {
+              "id": "bg_2",
+              "type": "bash",
+              "status": "completed",
+              "label": "ls -R .omp 2>&1 | head -50",
+              "startTime": 1789388028808
+            },
+            {
+              "id": "bg_1",
+              "type": "bash",
+              "status": "completed",
+              "label": "ls -la . __pycache__ 2>&1; python3 -V",
+              "startTime": 1789388025640
+            }
+          ],
+          "delivery": {
+            "queued": 0,
+            "delivering": false,
+            "pendingJobIds": []
+          }
+        }
+      }
+    },
+    "checks": [
+      {
+        "number": 1,
+        "role": "reviewer",
+        "started_at": "2026-09-14T12:14:11Z",
+        "finished_at": "2026-09-14T12:15:00Z",
+        "result": {
+          "verdict": "continue",
+          "reason": "The small implementation and USAGE.md satisfy the named functional and documentation requirements. Focused read-only checks passed for trimming, blank-name ValueError, CLI output, and documented error behavior. No AGENTS.md files were present in the snapshot; no incorrect or extra work was found under the supplied rules. Root remains active. The required execution-member verification and integration are not yet evidenced: execution_members is empty. Continuing to fulfill that explicit requirement is worthwhile; this check does not replace it.",
+          "findings": [],
+          "resolved_ids": [],
+          "next_check_seconds": 20
+        },
+        "stale": true,
+        "usage": {
+          "input_tokens": 116859,
+          "cached_input_tokens": 91776,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 866,
+          "reasoning_output_tokens": 46
+        }
+      },
+      {
+        "number": 2,
+        "role": "reviewer",
+        "started_at": "2026-09-14T12:15:10Z",
+        "finished_at": "2026-09-14T12:15:57Z",
+        "result": {
+          "verdict": "continue",
+          "reason": "The small implementation and USAGE.md satisfy the functional and documentation requirements. Read-only checks confirmed trimming, blank-name ValueError, CLI greetings and blank-name errors. No AGENTS.md exists inside the snapshot; supplied project rules were applied. No incorrect or unnecessary scope was found. The requested execution member is still verifying independently, and Root must integrate its findings before completion; that remaining work advances the original instruction.",
+          "findings": [],
+          "resolved_ids": [],
+          "next_check_seconds": 20
+        },
+        "stale": true,
+        "usage": {
+          "input_tokens": 119715,
+          "cached_input_tokens": 94336,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 842,
+          "reasoning_output_tokens": 34
+        }
+      },
+      {
+        "number": 3,
+        "role": "reviewer",
+        "started_at": "2026-09-14T12:15:58Z",
+        "finished_at": "2026-09-14T12:16:24Z",
+        "result": {
+          "verdict": "correct",
+          "reason": "The small implementation satisfies the function and CLI requirements, and the execution record confirms independent member verification and integration. However, the fixed artifact lacks the required USAGE.md despite the completion report claiming it exists. Restoring that deliverable directly advances the original instruction. No AGENTS.md files were found in the snapshot.",
+          "findings": [
+            {
+              "id": "missing-usage-document",
+              "requirement": "Create USAGE.md showing the command and explaining blank-name errors.",
+              "evidence": "The fixed snapshot contains greet.py, requirements.md and __pycache__/greet.cpython-313.pyc; file enumeration and a targeted find confirm USAGE.md is absent.",
+              "action": "Include USAGE.md in the delivered artifact with the CLI command and blank-name error explanation, and verify that it is present in the next fixed snapshot."
+            }
+          ],
+          "resolved_ids": [],
+          "next_check_seconds": 30
+        },
+        "stale": false,
+        "usage": {
+          "input_tokens": 74728,
+          "cached_input_tokens": 49024,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 343,
+          "reasoning_output_tokens": 0
+        }
+      },
+      {
+        "number": 4,
+        "role": "reviewer",
+        "started_at": "2026-09-14T12:16:55Z",
+        "finished_at": "2026-09-14T12:17:18Z",
+        "result": {
+          "verdict": "continue",
+          "reason": "USAGE.md is now present and accurately documents commands and blank-name errors, resolving missing-usage-document. The small implementation satisfies trimming, greeting, ValueError, and single-name CLI requirements. The execution member independently verified function and CLI behavior; its findings match the snapshot. No AGENTS.md files or additional defects were found in the snapshot. Current work addresses the delivery gap without excess scope. Root remains active, so completion is not declared.",
+          "findings": [],
+          "resolved_ids": [
+            "missing-usage-document"
+          ],
+          "next_check_seconds": 30
+        },
+        "stale": true,
+        "usage": {
+          "input_tokens": 76629,
+          "cached_input_tokens": 50176,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 259,
+          "reasoning_output_tokens": 21
+        }
+      },
+      {
+        "number": 5,
+        "role": "reviewer",
+        "started_at": "2026-09-14T12:17:19Z",
+        "finished_at": "2026-09-14T12:17:48Z",
+        "result": {
+          "verdict": "complete",
+          "reason": "The fixed snapshot satisfies requirements.md: greet trims names, formats greetings correctly, and rejects blank names with ValueError; the CLI accepts one name and prints the greeting. USAGE.md is present and accurately documents commands and blank-name errors, resolving missing-usage-document. The implementation remains small, with no unjustified additions. One execution member independently verified function, CLI, and documentation behaviors; Root integrated the finding and restored the documentation. Root and the member have finished; no further work is needed.",
+          "findings": [],
+          "resolved_ids": [
+            "missing-usage-document"
+          ],
+          "next_check_seconds": 60
+        },
+        "stale": false,
+        "usage": {
+          "input_tokens": 75681,
+          "cached_input_tokens": 49664,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 301,
+          "reasoning_output_tokens": 28
+        }
+      }
+    ],
+    "internal_messages_excluded_from_user_amendments": true,
+    "root_history_usage_including_later_stop_fixtures": {
+      "session_file": "/Users/yangke/.omp/agent/sessions/-tmp-orbit-omp-20260914-35eptbt0-project/2026-09-14T12-13-38-837Z_01a09fd6-5495-74ce-858d-8b49dcdf708f.jsonl",
+      "models": [
+        "opencode-go/deepseek-v4.1-flash"
+      ],
+      "assistant_responses": 37,
+      "tokens": {
+        "input": 61863,
+        "output": 15238,
+        "cacheRead": 1374592,
+        "cacheWrite": 0,
+        "totalTokens": 1451693
+      },
+      "native_reported_cost": 0.022546026
+    },
+    "member_usage": {
+      "session_file": "/Users/yangke/.omp/agent/sessions/-tmp-orbit-omp-20260914-35eptbt0-project/2026-09-14T12-15-00-785Z_01a09fd7-94b1-75cc-a395-e76ea6066660.jsonl",
+      "models": [
+        "opencode-go/deepseek-v4.1-flash"
+      ],
+      "assistant_responses": 7,
+      "tokens": {
+        "input": 11807,
+        "output": 5793,
+        "cacheRead": 77184,
+        "cacheWrite": 0,
+        "totalTokens": 94784
+      },
+      "native_reported_cost": 0.005478402
+    },
+    "artifacts": {
+      "greet.py": "70ced41ccc19e0eea6ee9b46c1d85ea466b44f537ed81dbdd3febcc4b8e7c09e",
+      "USAGE.md": "125f163338a5e4288c45389a86719bc98ec3a428d0d5922a5f2e577468d64c39",
+      "requirements.md": "c0a64dfcd51681a20e79042121cf6671a8e0f59f410e184a568e6fbbba824e4a"
+    }
+  },
+  "native_escape": {
+    "before": {
+      "pids": [
+        33474,
+        33476,
+        33944,
+        33945
+      ],
+      "root": {
+        "thread_id": "01a09fd6-5495-74ce-858d-8b49dcdf708f",
+        "cwd": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-omp-20260914-35eptbt0/project",
+        "status": "active",
+        "interrupted": false,
+        "turn_id": "b6bfc42e",
+        "last_turn_id": "b6bfc42e",
+        "last_turn_status": "inProgress",
+        "observations": [
+          {
+            "kind": "agent_message",
+            "text": ""
+          }
+        ],
+        "active_tools": 1,
+        "async_jobs": {
+          "running": [
+            {
+              "id": "bg_2",
+              "type": "bash",
+              "status": "running",
+              "label": "python3 .orbit/heartbeat.py root-esc",
+              "startTime": 1789388338408
+            }
+          ],
+          "recent": [
+            {
+              "id": "bg_1",
+              "type": "bash",
+              "status": "completed",
+              "label": "ls -la .orbit 2>&1; ls -la .orbit/*.py 2>&1",
+              "startTime": 1789388328482
+            }
+          ],
+          "delivery": {
+            "queued": 0,
+            "delivering": false,
+            "pendingJobIds": []
+          }
+        }
+      },
+      "task": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-omp-20260914-35eptbt0/project/.orbit/tasks/6e7cf770-3a18-433a-9805-4e1ec9d8e15c",
+      "time": 1789388388.355227
+    },
+    "status_after": "paused",
+    "alive_after": [],
+    "heartbeat_sizes": [
+      4488,
+      3534
+    ],
+    "heartbeats_stopped": true,
+    "execution_stop_confirmation": null,
+    "error": null,
+    "checks": 0,
+    "elapsed_seconds": 1.4157800674438477
+  },
+  "normal_exit_after_native_resume": {
+    "before": {
+      "pids": [
+        35805,
+        35807,
+        36120,
+        36121
+      ],
+      "root": {
+        "thread_id": "01a09fd6-5495-74ce-858d-8b49dcdf708f",
+        "cwd": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-omp-20260914-35eptbt0/project",
+        "status": "active",
+        "interrupted": false,
+        "turn_id": "707d9e2e",
+        "last_turn_id": "707d9e2e",
+        "last_turn_status": "inProgress",
+        "observations": [
+          {
+            "kind": "agent_message",
+            "text": ""
+          }
+        ],
+        "active_tools": 1,
+        "async_jobs": {
+          "running": [
+            {
+              "id": "bg_1",
+              "type": "bash",
+              "status": "running",
+              "label": "python3 .orbit/heartbeat.py root-exit",
+              "startTime": 1789388440132
+            }
+          ],
+          "recent": [],
+          "delivery": {
+            "queued": 0,
+            "delivering": false,
+            "pendingJobIds": []
+          }
+        }
+      },
+      "task": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-omp-20260914-35eptbt0/project/.orbit/tasks/0c4cf4df-968a-403e-a398-338a8f86c389",
+      "time": 1789388447.73361
+    },
+    "status_after": "paused",
+    "alive_after": [],
+    "heartbeat_sizes": [
+      749,
+      92
+    ],
+    "heartbeats_stopped": true,
+    "execution_stop_confirmation": null,
+    "error": null,
+    "checks": 0,
+    "elapsed_seconds": 1.8296189308166504
+  },
+  "independent_review": {
+    "session": "ses_f6029ac69ffeBiGdWnZ6OUoPBd",
+    "model": "opencode-go/deepseek-v4.1-flash",
+    "logs": [
+      "review.jsonl",
+      "review-followup.jsonl"
+    ],
+    "result": "One concrete switch cleanup issue fixed; targeted review accepted preservation of the socket and cancellation of the switch on unconfirmed stop. Two other objections were withdrawn or recognized as the configured Codex dependency. No remaining identified blocker."
+  },
+  "regression": {
+    "command": "npm test",
+    "result": "passed after final runtime changes",
+    "scope": [
+      "existing snapshots/task runtime/Codex/MCP",
+      "OpenCode shared host and plugin connection regression",
+      "OMP native original/internal messages, identity, member permission inheritance, amendments, actual owner job reap, switch failure and retry",
+      "four installer paths including OMP extension and skill"
+    ],
+    "new_omp_test_lines": 113,
+    "skill_validation": "passed"
+  },
+  "installation": {
+    "global_version": {
+      "source": {
+        "kind": "local",
+        "commit": "8b5de2901439292cd8799d0877e28c737bc67710",
+        "dirty": true
+      },
+      "content_digest": "16faf00efc54cfeaacb7cf675e4bcd47830c909183523aa88eb9037f4f0a2058",
+      "installed_at": "2026-09-14T12:22:34Z",
+      "version": "0.4.0"
+    },
+    "ordinary_global_omp_discovery": {
+      "id": "01a09fde-ebcc-77cb-abd0-fc1f18b9b992",
+      "model": "opencode-go/deepseek-v4.1-flash",
+      "agentDir": "/Users/yangke/.omp/agent",
+      "extensionVisible": true,
+      "currentSkillVisible": true,
+      "orbitDescription": "xd://orbit — For authorized implementation that needs execution members, start Orbit BEFORE delegating, even for small changes. Also use for multi-step fixes/refactoring needing independent checks. Read the Orb…\\n\\nRead xd://<tool> for full docs + JS"
+    },
+    "native_config_unchanged": true,
+    "links_same_version": [
+      "Codex skill",
+      "OpenCode plugin and skill",
+      "OMP extension and skill"
+    ],
+    "profiles": "Active agent directory only: PI_CODING_AGENT_DIR, then OMP_PROFILE, then default ~/.omp/agent. Alternate profiles require installation in that profile directory.",
+    "all_packaged_source_files_match_global_install": true
+  },
+  "attempts_and_limits": [
+    "First ordinary task did not invoke Orbit: the model classified a small change as too small while still delegating a native member. Clarified that tasks needing members attach before delegation; subsequent ordinary task invoked Orbit without mentioning it in the user prompt.",
+    "Initial followUp delivery was held behind native hub wait. Changed to official native steer and clarified no hub waiting for Orbit results; the successful flow includes automatic member delivery and independent correction.",
+    "Stopping that initial attempt while a Codex check was active returned EPERM when signaling its process group; state remains stop_unconfirmed. Root/member native execution stop was confirmed, and later read-only cleanup verified all recorded check PIDs/groups were absent. Failure is retained, not rewritten as a pass.",
+    "Natural full flow ran with the steer implementation before the narrowly scoped switch-confirmation fix. Final switch behavior has a regression test and independent targeted review; both actual heartbeat stop paths used the final runtime implementation.",
+    "Tests demonstrate a controlled omission and actual scoped stopping, not a general reduction of natural mistakes or provider usage. Native cost fields are estimates, not Go subscription charges.",
+    "Final graceful exits and native interrupts are verified; forced host death, unmanaged detached processes, external agents and other host/model combinations are not covered."
+  ],
+  "cost_and_time": {
+    "initial_estimate_hours": [
+      2,
+      4
+    ],
+    "whole_implementation_elapsed": "not continuously measured",
+    "whole_provider_bill": null,
+    "successful_task_check_tokens": 466223,
+    "successful_task_elapsed_seconds": 226.219364,
+    "explanation": "Early task-size classification and followUp/hub mismatch required another real attempt. Successful flow required 5 checks, 3 stale because work continued; do not present this as proven quota savings."
+  },
+  "source_hashes": {
+    "plugins/host.mjs": "143f26f8c6a3b0ae2b1e423b63ec2c50e404da3d8ca4b6a3a0d6a62abe15736a",
+    "plugins/omp-host.mjs": "dc8a1913e00638cc2bf83c71cd9705f02777b41c06d36a4668fe20f140414afa",
+    "plugins/omp.mjs": "8774b803e1c4a5d160b419da5e8ab96a77aef543345dd7d8fbd948b250450dd2",
+    "lib/orbit/plugin_connection.rb": "d0e4a81ab5ee4fb05104a7a7e7d0e10a74572bc828207f8e5391588982a2e3e6",
+    "scripts/manage-install.rb": "8c24af8fcee0af2979c54677f051248e41155d6a5d562c28bb20faa62ef7fe7b"
+  },
+  "cleanup": {
+    "owned_native_hosts_exited": true,
+    "heartbeat_pids_exited": true,
+    "all_recorded_check_pids_and_groups_absent": true,
+    "private_sockets_absent": true,
+    "retained": "Native session histories, fixture artifacts, fixed check snapshots and bounded review logs. No credentials copied."
+  }
+}

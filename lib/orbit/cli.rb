@@ -6,7 +6,7 @@ require_relative "version"
 require_relative "task_record"
 require_relative "task_runtime"
 require_relative "codex_connection"
-require_relative "opencode_connection"
+require_relative "plugin_connection"
 require_relative "check_runner"
 require_relative "session_entry"
 
@@ -34,13 +34,13 @@ module Orbit
       orbit delegate TASK_DIRECTORY --file FILE|- [--model MODEL] [--member THREAD_ID]
 
       Root means the coding agent already responsible for the whole user task.
-      start binds an existing session: Codex app-server or OpenCode plugin (--provider opencode).
+      start binds an existing session: Codex app-server or native OpenCode/OMP extension (--provider opencode|omp).
       It never creates/resumes a Root, starts a daemon, or falls back to queue-only
       control. The invoking agent's CODEX_THREAD_ID is the default thread.
       Without --prompt-file, the selected/latest native user message is the basis.
       --basis may repeat. Estimates are advisory; only --deadline is a hard limit.
       Reviewer model uses ORBIT_REVIEW_MODEL or the existing Codex model configuration.
-      OpenCode users launch opencode normally; use its native orbit context tool.
+      OpenCode/OMP users launch opencode/omp normally; use its native orbit context tool.
       doctor diagnoses the Codex app-server connection only.
       Records and fixed inputs live under PROJECT/.orbit/tasks/<id>.
     TEXT
@@ -94,7 +94,7 @@ module Orbit
       }
       parser = OptionParser.new do |opts|
         opts.on("--project DIR") { |value| options[:project] = value }
-        opts.on("--provider NAME", %w[codex opencode]) { |value| options[:provider] = value }
+        opts.on("--provider NAME", %w[codex opencode omp]) { |value| options[:provider] = value }
         opts.on("--thread ID") { |value| options[:thread] = value }
         opts.on("--socket PATH") { |value| options[:socket] = value }
         opts.on("--review-model MODEL") { |value| options[:model] = value }

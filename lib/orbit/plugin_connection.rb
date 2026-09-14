@@ -6,14 +6,14 @@ require "timeout"
 require_relative "connection"
 
 module Orbit
-  # The official OpenCode plugin supplies the native client and owns this
+  # The official Native plugin supplies the native client and owns this
   # private socket. No public port, guessed session or replacement Root.
-  class OpenCodeConnection
+  class PluginConnection
     Error = Connection::Error
     attr_reader :thread_id, :cwd, :observation_gap
 
-    def initialize(socket:, thread_id:, deadline: 15)
-      @socket, @thread_id, @deadline = socket, thread_id, deadline
+    def initialize(provider:, socket:, thread_id:, deadline: 15)
+      @provider, @socket, @thread_id, @deadline = provider, socket, thread_id, deadline
       @sent_ids = []
     end
 
@@ -27,7 +27,7 @@ module Orbit
     def state = request("state")
     def configured_model = request("model")
     def default_member_model = configured_model
-    def instruction_source_kind = "opencode_user_message"
+    def instruction_source_kind = "#{@provider}_user_message"
     def events = []
     def send_message(text)
       result = request("send", "text" => text)
@@ -39,7 +39,7 @@ module Orbit
     def start_member(id, instruction) = request("start_member", "member" => id, "text" => instruction)
 
     def member_connection(id)
-      self.class.new(socket: @socket, thread_id: id, deadline: @deadline).connect!
+      self.class.new(provider: @provider, socket: @socket, thread_id: id, deadline: @deadline).connect!
     end
 
     def user_message(id: nil)
@@ -50,7 +50,7 @@ module Orbit
     def user_messages(after_id:)
       messages = request("messages")
       index = messages.index { |message| message["id"] == after_id }
-      @observation_gap = index ? nil : { "reason" => "boundary_not_visible", "detail" => "Original message boundary is absent from native OpenCode history" }
+      @observation_gap = index ? nil : { "reason" => "boundary_not_visible", "detail" => "Original message boundary is absent from native session history" }
       @observation_gap = { "reason" => "pending_delivery", "after_id" => after_id } if !index && @sent_ids.include?(after_id)
       index ? messages.drop(index + 1) : []
     end
@@ -61,13 +61,13 @@ module Orbit
       Timeout.timeout(@deadline) do
         UNIXSocket.open(@socket) do |socket|
           socket.puts(JSON.generate(params.merge("method" => method, "session" => @thread_id)))
-          response = JSON.parse(socket.gets || raise(Error, "OpenCode plugin disconnected"))
+          response = JSON.parse(socket.gets || raise(Error, "Native plugin disconnected"))
           raise Error, response["error"] if response["error"]
           response.fetch("result")
         end
       end
     rescue Timeout::Error, SystemCallError, JSON::ParserError, IOError => error
-      raise Error, "OpenCode connection: #{error.message}"
+      raise Error, "#{@provider} connection: #{error.message}"
     end
   end
 end
