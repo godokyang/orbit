@@ -6,3 +6,4 @@ references/development/
 test_apps/
 .claude/
 .copilot/
+node_modules/

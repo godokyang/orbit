@@ -1,5 +1,7 @@
 # ADR-005：Orbit v2 一次性切换与旧协议退役
 
+> 2026-09-14：本文属于已退役运行架构的决策历史。现行任务运行语义由 [ADR-007](007-task-runtime-refactor.md) 与 [`contracts/task-runtime.md`](../../contracts/task-runtime.md) 取代；以下保留原始裁决及修订理由，不作为当前操作指令。
+
 - 状态：Accepted；2026-08-17 部分修订——并行边界与 cross-control cutover 条款被文末修订记录取代
 - 日期：2026-07-30
 - 范围：Orbit v2 schema、CLI、runtime、evidence、gate、模板、文档和旧协议退役

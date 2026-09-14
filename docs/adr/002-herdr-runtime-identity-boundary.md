@@ -1,5 +1,7 @@
 # ADR-002：Herdr runtime identity 能力边界
 
+> 2026-09-14：本文属于已退役运行架构的决策历史。现行任务运行语义由 [ADR-007](007-task-runtime-refactor.md) 与 [`contracts/task-runtime.md`](../../contracts/task-runtime.md) 取代；以下保留原始裁决及修订理由，不作为当前操作指令。
+
 - 状态：Accepted
 - 日期：2026-07-14
 - 决策范围：Orbit runtime identity、capability reporting、direct dispatch

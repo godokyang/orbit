@@ -1,48 +1,56 @@
 ---
 name: orbit
-description: 用于 AI agent 在项目中感知或执行 Orbit v2 工作流：发现 .orbit/protocol.yaml（orbit-v2 epoch marker）后进入 Orbit-aware 模式；当目标明确且进入实现、评审、测试、验收或交接时，再调用 orbit v2 CLI 建立受控的 task/evidence/gate 闭环。v1 runtime 已删除；本 skill 当前只覆盖 v2 最小 CLI 路径，完整 v2 运行时文档重写进行中。
+description: 在用户已授权开始执行时，沿用现有 Codex app-server 会话启动 Orbit 独立检查与纠偏。不用于需求讨论、普通 embedded TUI，也不新建 Root。
 metadata:
-  short-description: Orbit v2 受控任务闭环
+  short-description: 沿用现有 Codex Root 做独立执行检查
 ---
 
-# Orbit（v2）
+# Orbit
 
-Orbit 是面向 AI agent 的任务闭环协议。它把「做过动作」和「结果已被证明」分开：每个受控步骤是一条 provider-verified 的持久事务，完成判定来自派生的 AggregateOutcome，而不是 agent 的自我报告。
+Orbit 在任意项目中陪伴一次已授权执行：现有 Root 继续做工程判断，Orbit 进程做计时、固定产物上的只读检查、纠正投递和停止确认。不依赖 Zeen、Herdr 或外部审批。最小真实纠偏与停止已验证，适用范围是下述可控会话。
 
-> **状态（2026-08-17）**：v1 runtime 已删除。当前唯一入口是 v2 CLI。v1 长文档已归档到 `docs/history/v1-runtime/`。阶段 G（规则库）已交付；下一阶段见 `docs/plan/handoff.md`。以本文与 `orbit v2 --help` 为准。
+发现本 skill 不等于可以开工。需求讨论、方案探讨、探索性阅读只保持察觉，**不要**调用 `orbit start`。
 
-## 触发边界
+## 何时启动
 
-发现 `.orbit/protocol.yaml`（v2 epoch marker）、用户明确提到 Orbit，或当前任务进入非平凡的实现、评审、测试、验收时，进入 Orbit-aware 模式。
+用户已给出可执行指令（或明确指定消息 / prompt 文件），并授权开始实现时，在**当前** Codex 会话调用：
 
-只有目标、范围和验收标准已经足够明确，且工作正式进入执行或独立验证时，才启动正式闭环。需求澄清、方案讨论和探索性结对只保持 aware：不 init、不建 task、不推进 gate。
+```bash
+orbit start --review-model MODEL [--thread ID] [--socket PATH]
+            [--message-id ID | --prompt-file FILE|-] [--project DIR]
+            [--basis FILE] [--check-in SECONDS] [--foreground]
+            [--estimate-minutes N] [--estimate-tokens N] [--deadline ISO8601]
+```
 
-仓库没有 v2 marker 且用户未要求 Orbit 时不自动启用。**注意**：`.orbit/` 目录存在 ≠ v2 项目——v1 数据目录（`.orbit/tasks/`、`.orbit/evidence/` 等）在 v2 下是 mixed-epoch 状态，`orbit v2 init` 会正确拒绝。
+- 默认 `--thread` 为 `CODEX_THREAD_ID`，`--project` 为当前项目，`--socket` 为 `$CODEX_HOME/app-server-control/app-server-control.sock`。
+- 未提供 `--message-id` 或 `--prompt-file` 时，用该会话最近一条**原生用户消息**当原文。不要把模型计划写成原文，不要另填需求表。`--basis` 可重复，指向指令指定的依据文件。
+- `--review-model`（或 `ORBIT_REVIEW_MODEL`）必须是本机 `codex exec` 能跑的模型 ID。产品检查通道只接 Codex CLI。
+- `--estimate-*` 是参考，不是上限。只有 `--deadline` 是用户明确硬线。
+- `--check-in` 为约定观察间隔（秒）；到期检查后安排下一次。
+- `--foreground` 把本次任务进程留在当前终端。不加则拉起**本次任务**陪伴进程并打印 `task_directory` 与 pid，任务结束即退出。这不是 Orbit 常驻平台，也不要为此去启动 daemon。
 
-## v2 最短闭环
+会话必须已经 loaded 在该 Unix app-server 上。普通 embedded TUI 没有即时停止接口：插座不存在或线程未 loaded 时停止并报告错误，**禁止**新建会话、自动 resume、自动 daemon 或改走仅排队控制。
 
-CLI 可用时由 agent 自己执行：
+安装需要 Ruby 3.2+、Node.js 18+、npm 与已有 Codex CLI。若命令仍显示旧的 init/dispatch/evidence/gate，使用当前版本入口，不走兼容别名或擅自覆盖未知安装。
 
-1. `orbit v2 init <project_id>`——一次性建立 protocol root + genesis policy + 本地 provider 密钥（`.orbit/local-provider.json`，丢失即项目不可验证，须自行备份）。
-2. 写 task 定义 YAML（goal + units），`orbit v2 task start <task_id> --def FILE` 创建 TaskRevision 与 lead control。
-3. `orbit v2 dispatch --task ID --role implementer` 派发实现 attempt（默认钉四条任务规则 + 共享升格格式；显式 `--rule` 仍优先）；完成后 `orbit v2 evidence submit --task ID --proposal FILE` 提交 evidence。
-4. `orbit v2 dispatch --task ID --role reviewer` 派发独立评审 attempt（继承 subject 已记录的规则字节，再叠 `rules/review.md`；独立性由 runtime identity 机械保证），评审先 `evidence submit` 提交 evaluator submission。
-5. `orbit v2 gate submit --task ID --def FILE` 提交 GateEvaluation；verdict fail 可携带 Finding。
-6. 有 Finding 时：提交 follow-up evaluation（`gate submit` 第二次，自动 supersede）后 `orbit v2 finding resolve --task ID --def FILE`。
-7. `orbit v2 complete --task ID` 派生 AggregateOutcome：全部 gate 通过且无未决 blocking finding 时 `closed: true`（退出码 0）；否则显式列出未满足项（退出码 1）。
-8. `orbit v2 status [--task ID]` 只读查看。
+## 任务进行中
 
-命名空间前缀 `v2` 可省略（`orbit init` 与 `orbit v2 init` 等价；该双拼法是未决项，最终命令面待定）。
+记录在 `PROJECT/.orbit/tasks/<id>`。后续只使用 `orbit --help` 中的命令：
 
-## v2 语义要点
+```bash
+orbit status TASK_DIRECTORY
+orbit check TASK_DIRECTORY
+orbit amend TASK_DIRECTORY --file FILE|-
+orbit dispute TASK_DIRECTORY --reason TEXT
+orbit stop TASK_DIRECTORY [--reason TEXT]
+```
 
-- **task 是协作单位**：一个 task 一个 `task_id`，对应一个 Git branch/worktree；存储在 `.orbit/task-scopes/<task_id>/` 下，不同 task 路径天然隔离。
-- **一切受控写入需要 provider receipt**：本地 provider 是一致性机制而非安全边界（信任根 = 本地机器用户）。
-- **完成不可自宣**：`complete` 是只读派生；未决 finding、stale evaluation、缺 evidence 都会让 gate 保持 open 并 fail closed。
-- **review/test 独立性是结构约束**：GateEvaluation 必须引用独立评估者 attempt，实现者不能自评通过。
+`stop` / `check` / `amend` / `dispute` 返回 `status: queued` 只表示命令已入队，不等于已停止、已检查或原文已更新。完成、暂停、需要用户、失败、停止未确认以 `orbit status` 的实际状态为准；未检查、未停止、未验证如实标明。
 
-## 停止与升级
+准备好交付后结束当前执行轮次，让程序检查最终产物；不要在同一轮里反复等待 `complete` 而持续保持 Root 活跃。收到具体纠正再继续。当前确认范围是绑定 Root 和原生登记的后台命令；不要将脱离管理的后台任务或未接入成员说成已受控。
 
-marker 缺失/epoch 不匹配、密钥文件丢失、规则文件 digest 不匹配（说明规则被改动过）、未决 blocking finding 需要 adjudication 时停止并请求用户决策。缺 verdict 或真实路径未覆盖时默认 fail。
+## 规则与分工
 
-初始化模板：`assets/templates/` 下的模板均为 v1 schema（已停用，文件名带 `.v1-deprecated`），v2 输入文件格式见各命令 `--help` 与本文示例。
+默认只读 skill 内 `assets/rule-library/tasks/minimal-implementation.md` 与 `assets/rule-library/shared/escalation-payload.md`。修复、测试、对外命名、结构化边界、命令表面、质量标准、独立评审按当前动作再读对应 `assets/rule-library/tasks/` 文件。不要把这些规则全局写入或覆盖目标项目 `AGENTS.md`。目标项目已有规则对 Root 与检查者同样适用；不要引入 Zeen 专用规范。
+
+Root 继续担任当前会话。检查者只读固定产物，对照原始指令、指定依据、用户明确修改和实际结果。真实争议再用 `orbit dispute` 按需裁定，只挡争议部分完成。角色与模型建议在需要选模型时再读 [references/model-selection.md](references/model-selection.md)。

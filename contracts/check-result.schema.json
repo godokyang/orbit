@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://orbit.local/contracts/check-result.schema.json",
+  "title": "Orbit independent check result",
+  "description": "Final JSON object returned by an independent check or adjudication run (Orbit 1, contracts/task-runtime.md). Strings are expected to be non-empty and next_check_seconds is a positive integer, even where JSON Schema alone cannot express it inside Codex structured output.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["verdict", "reason", "findings", "resolved_ids", "next_check_seconds"],
+  "properties": {
+    "verdict": {
+      "enum": ["continue", "correct", "pause", "complete", "needs_user"]
+    },
+    "reason": {
+      "type": "string"
+    },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "requirement", "evidence", "action"],
+        "properties": {
+          "id": {"type": "string"},
+          "requirement": {"type": "string"},
+          "evidence": {"type": "string"},
+          "action": {"type": "string"}
+        }
+      }
+    },
+    "resolved_ids": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "next_check_seconds": {
+      "type": "integer"
+    }
+  }
+}

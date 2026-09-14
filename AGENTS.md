@@ -2,7 +2,7 @@
 
 > 本文件约束在本仓库工作的开发 Agent。核心目标：**正确、高质量、可维护地完成用户任务**，防止协作、测试或协议操作偏离交付目标。
 >
-> 本文件及 `docs/agents/` 是**开发 Orbit 的客户端纪律**，不产生 Orbit 产品的 gate/evidence/state 事实，也不改变 v2 合同。使用 Orbit 执行受控任务时，产品事实仍由 active ProjectPolicyRevision / TaskRevision 与受控 writer/validator 决定。用户明确指令优先；需要改变产品语义时先处理对应合同和决策，不用开发规范绕过产品校验。
+> 本文件及 `docs/agents/` 是**开发 Orbit 的客户端纪律**，不产生 Orbit 产品运行事实。产品语义由 `contracts/task-runtime.md` 与 ADR-007 定义，实际会话、检查和停止结果由运行程序记录。用户明确指令优先；改变产品语义时先处理对应合同和决策，不用开发规范伪造完成或停止。
 
 ## 按需加载（动手前先读）
 
@@ -10,9 +10,9 @@
 
 - 在本仓做任何实现、重构或文档改动前，先读 [docs/README.md](docs/README.md)：它说明哪类事实归哪个文件，以及哪些层没有裁定权。
 - 开始方案评估、实现、验证或协作前，读取 [docs/agents/development-workflow.md](docs/agents/development-workflow.md)，按其中任务类型选择直接处理或协作。只放链接不算已加载；派发时按该文传递相关规则与当前授权。
-- 承接交付任务前，先读 [docs/plan/handoff.md](docs/plan/handoff.md) 的最新接续说明，再读 [docs/plan/vision-completion-plan.md](docs/plan/vision-completion-plan.md) 的 D1–D11，理解既有裁决与已否方案。重构讨论不自动授权续做旧阶段，用户新要求涉及旧决策时明确差异后再修改权威正文。
+- 承接交付任务前，先读 [docs/plan/handoff.md](docs/plan/handoff.md) 与 [当前计划](docs/plan/vision-completion-plan.md)。旧 D1–D11、H–K 已进入历史，不自动续做；需要溯源时再读历史快照。用户新要求涉及既有决定时明确差异后再修改权威正文。
 - 动 `lib/` 或 `contracts/` 前，查 [docs/plan/debt-ledger.md](docs/plan/debt-ledger.md)：有意推迟的项目及其解除条件都在那里。
-- 语义合同以 `contracts/orbit-v2/` 与 `docs/adr/` 为准。散文与合同冲突时以合同为准。
+- 现行语义以 `contracts/task-runtime.md`、检查结果 schema 与 `docs/adr/007-task-runtime-refactor.md` 为准。散文与合同冲突时以合同为准；ADR-001–006 是历史来源。
 - `docs/reference/zeen-orbit-handoff-20260913/snapshot/` 是外部参考快照，不是本仓执行规则；不要自动加载整套 Zeen 规范或执行其产品专用命令。
 
 同一上下文已读且未变的规则不重复全量加载；任务范围变化时只补相关来源。恢复会话时核对当前有效版本和未完成事实。

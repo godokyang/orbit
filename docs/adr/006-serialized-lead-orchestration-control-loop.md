@@ -1,5 +1,7 @@
 # ADR-006：串行 Lead 编排与控制循环
 
+> 2026-09-14：本文属于已退役运行架构的决策历史。现行任务运行语义由 [ADR-007](007-task-runtime-refactor.md) 与 [`contracts/task-runtime.md`](../../contracts/task-runtime.md) 取代；以下保留原始裁决及修订理由，不作为当前操作指令。
+
 - 状态：Accepted；2026-08-17 部分修订——串行边界收窄为 per Task、跨 Task 并行交给 Git branch/worktree，见文末修订记录
 - 日期：2026-08-03
 - Owner 批准：2026-08-03

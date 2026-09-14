@@ -1,19 +1,28 @@
 {
   "name": "@godokyang/orbit",
-  "version": "0.1.15",
-  "description": "Orbit v2 skill and CLI.",
+  "version": "0.2.0",
+  "description": "Independent task execution checks for existing coding sessions.",
+  "bin": { "orbit": "scripts/orbit" },
+  "engines": { "node": ">=18" },
   "files": [
     "README.md",
     "install.sh",
     "uninstall.sh",
+    "npm-shrinkwrap.json",
     "lib",
     "skills/orbit",
-    "scripts/orbit"
+    "scripts/orbit",
+    "scripts/codex-socket.cjs",
+    "contracts/task-runtime.md",
+    "contracts/check-result.schema.json"
   ],
   "scripts": {
-    "test": "sh -n install.sh && sh -n uninstall.sh && ruby --disable-gems tests/fixtures/orbit-v2/contract_test.rb"
+    "test": "sh -n install.sh && sh -n uninstall.sh && ruby --disable-gems tests/workspace_snapshot_test.rb && ruby --disable-gems tests/task_runtime_test.rb && ruby --disable-gems tests/codex_connection_test.rb"
   },
   "publishConfig": {
     "access": "public"
+  },
+  "dependencies": {
+    "ws": "8.21.3"
   }
 }

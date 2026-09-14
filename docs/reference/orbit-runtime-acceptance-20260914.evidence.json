@@ -1,0 +1,293 @@
+{
+  "description": "Selected actual acceptance records; timestamps UTC. Temporary project and process resources are cleaned separately after validation.",
+  "correction": {
+    "format": "orbit-task-1",
+    "id": "422bbccc-9ee0-4817-9890-2328bf03b09d",
+    "project_root": "/private/tmp/orbit-acceptance-20260914.B1ogZK/correction",
+    "created_at": "2026-09-13T17:13:19Z",
+    "status": "complete",
+    "instruction_source": {
+      "kind": "codex_user_message",
+      "id": "acceptance-original"
+    },
+    "basis": [],
+    "amendments": [],
+    "connection": {
+      "socket": "/tmp/orbit-acceptance-20260914.B1ogZK/control.sock",
+      "thread_id": "01a09bb8-0c7a-7863-984c-8b5cc8fb0f27"
+    },
+    "review": {
+      "model": "gpt-6-astra",
+      "interval_seconds": 300
+    },
+    "estimate": {
+      "seconds": 600.0,
+      "tokens": null
+    },
+    "checks": [
+      {
+        "number": 1,
+        "role": "reviewer",
+        "started_at": "2026-09-13T17:13:19Z",
+        "result": {
+          "verdict": "correct",
+          "reason": "Nonblank names are trimmed correctly, but blank inputs fail the required fallback. No additional features or dependencies were observed. A focused correction remains necessary.",
+          "findings": [
+            {
+              "id": "blank-name-fallback",
+              "requirement": "Blank or whitespace-only input must return \"Hello, stranger!\".",
+              "evidence": "greeter.rb directly interpolates name.strip. Ruby verification returned \"Hello, !\" for both an empty string and whitespace-only input; \"  Ada  \" correctly returned \"Hello, Ada!\".",
+              "action": "Return the stranger greeting when the trimmed name is empty, then verify both specified behaviors with Ruby."
+            }
+          ],
+          "resolved_ids": [],
+          "next_check_seconds": 30
+        },
+        "stale": false,
+        "finished_at": "2026-09-13T17:13:47Z"
+      },
+      {
+        "number": 2,
+        "role": "reviewer",
+        "started_at": "2026-09-13T17:13:55Z",
+        "result": {
+          "verdict": "continue",
+          "reason": "The snapshot satisfies the original instruction and project rules without dependencies or extra features. Ruby verification passed for a trimmed nonblank name, empty input, and whitespace-only input, resolving blank-name-fallback. No further implementation is needed; Root remains active, so completion cannot yet be declared.",
+          "findings": [],
+          "resolved_ids": [
+            "blank-name-fallback"
+          ],
+          "next_check_seconds": 10
+        },
+        "stale": true,
+        "finished_at": "2026-09-13T17:14:22Z"
+      },
+      {
+        "number": 3,
+        "role": "reviewer",
+        "started_at": "2026-09-13T17:14:23Z",
+        "result": {
+          "verdict": "complete",
+          "reason": "greeter.rb satisfies the original instruction and snapshot rules without dependencies or extra features. Read-only Ruby verification passed for a padded name, an empty string, and whitespace-only input. The stranger fallback resolves blank-name-fallback. Root is idle with its last turn completed; no further work is needed.",
+          "findings": [],
+          "resolved_ids": [
+            "blank-name-fallback"
+          ],
+          "next_check_seconds": 60
+        },
+        "stale": false,
+        "finished_at": "2026-09-13T17:14:55Z"
+      }
+    ],
+    "decisions": [],
+    "usage": {
+      "tokens": null
+    },
+    "findings": {
+      "blank-name-fallback": {
+        "id": "blank-name-fallback",
+        "requirement": "Blank or whitespace-only input must return \"Hello, stranger!\".",
+        "evidence": "greeter.rb directly interpolates name.strip. Ruby verification returned \"Hello, !\" for both an empty string and whitespace-only input; \"  Ada  \" correctly returned \"Hello, Ada!\".",
+        "action": "Return the stranger greeting when the trimmed name is empty, then verify both specified behaviors with Ruby.",
+        "status": "resolved",
+        "check": 1,
+        "resolution": "greeter.rb satisfies the original instruction and snapshot rules without dependencies or extra features. Read-only Ruby verification passed for a padded name, an empty string, and whitespace-only input. The stranger fallback resolves blank-name-fallback. Root is idle with its last turn completed; no further work is needed.",
+        "resolution_version": "sha256:09064c62d50432d851cf939512abe1b6cbbfec036f260dba0ddbb6df66883995",
+        "resolution_input": "bb8f41ec4927f20bfe153e51978e18afd8f75a73147690a46d817ca1dd4a109f"
+      }
+    },
+    "sent_message_ids": [
+      "orbit-0a60a6ca-a6e8-4118-adcb-2a4c15779b58"
+    ],
+    "last_user_message_id": "orbit-0a60a6ca-a6e8-4118-adcb-2a4c15779b58",
+    "next_check_at": "2026-09-13T17:15:55Z",
+    "stop_confirmation": {
+      "confirmed": true,
+      "turn_interrupted": null,
+      "terminals": [],
+      "verified": {
+        "status": "idle",
+        "status_detail": {
+          "type": "idle"
+        },
+        "remaining_terminals": []
+      },
+      "scope": "confirmed scope: active turn interrupt + managed background terminals listed by the app-server; detached/unmanaged processes are not covered"
+    },
+    "delivery_digest": "sha256:09064c62d50432d851cf939512abe1b6cbbfec036f260dba0ddbb6df66883995",
+    "finished_at": "2026-09-13T17:14:55Z",
+    "elapsed_seconds": 96.363384
+  },
+  "review_usage": [
+    {
+      "check": "1",
+      "usage": {
+        "input_tokens": 87626,
+        "cached_input_tokens": 64896,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 362,
+        "reasoning_output_tokens": 0
+      }
+    },
+    {
+      "check": "2",
+      "usage": {
+        "input_tokens": 87453,
+        "cached_input_tokens": 64640,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 313,
+        "reasoning_output_tokens": 0
+      }
+    },
+    {
+      "check": "3",
+      "usage": {
+        "input_tokens": 88486,
+        "cached_input_tokens": 65280,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 414,
+        "reasoning_output_tokens": 0
+      }
+    }
+  ],
+  "stopping": {
+    "format": "orbit-task-1",
+    "id": "1cc79d67-c2ab-49b8-8c36-d16946d86655",
+    "project_root": "/private/tmp/orbit-acceptance-20260914.B1ogZK/stopping",
+    "created_at": "2026-09-13T17:17:58Z",
+    "status": "paused",
+    "instruction_source": {
+      "kind": "codex_user_message",
+      "id": "acceptance-stop-original"
+    },
+    "basis": [],
+    "amendments": [],
+    "connection": {
+      "socket": "/tmp/orbit-acceptance-20260914.B1ogZK/control.sock",
+      "thread_id": "01a09bbe-65fa-7f82-ab83-9a1e932b0924"
+    },
+    "review": {
+      "model": "gpt-6-astra",
+      "interval_seconds": 300
+    },
+    "estimate": {
+      "seconds": null,
+      "tokens": null
+    },
+    "checks": [],
+    "decisions": [],
+    "usage": {
+      "tokens": null
+    },
+    "hard_deadline": "2026-09-13T17:18:12Z",
+    "findings": {},
+    "sent_message_ids": [],
+    "last_user_message_id": "acceptance-stop-original",
+    "next_check_at": "2026-09-13T17:22:58Z",
+    "stop_confirmation": {
+      "confirmed": true,
+      "turn_interrupted": true,
+      "terminals": [
+        {
+          "process_id": "5488",
+          "command": "ruby heartbeat.rb",
+          "terminated": true
+        }
+      ],
+      "verified": {
+        "status": "idle",
+        "status_detail": {
+          "type": "idle"
+        },
+        "remaining_terminals": []
+      },
+      "scope": "confirmed scope: active turn interrupt + managed background terminals listed by the app-server; detached/unmanaged processes are not covered"
+    },
+    "stop_reason": "The user's explicit hard deadline was reached",
+    "finished_at": "2026-09-13T17:18:12Z",
+    "elapsed_seconds": 14.695663
+  },
+  "stopping_after": {
+    "thread": {
+      "thread": {
+        "id": "01a09bbe-65fa-7f82-ab83-9a1e932b0924",
+        "environments": [
+          {
+            "environmentId": "local",
+            "cwd": "/private/tmp/orbit-acceptance-20260914.B1ogZK/stopping",
+            "runtimeWorkspaceRoots": [
+              "/private/tmp/orbit-acceptance-20260914.B1ogZK/stopping"
+            ]
+          }
+        ],
+        "extra": null,
+        "sessionId": "01a09bbe-65fa-7f82-ab83-9a1e932b0924",
+        "forkedFromId": null,
+        "parentThreadId": null,
+        "preview": "Run ruby heartbeat.rb using a native managed command with a short initial yield.\nKeep the command running and keep this turn active by waiting on that command in\nshort intervals. Do not voluntarily stop it or finish while it runs. An external\nOrbit task controller will impose a hard deadline after observing the heartbeat,\nthen interrupt this turn and terminate the managed background execution. Keep\nall execution under native process management; do not detach or create a daemon.",
+        "ephemeral": false,
+        "section": null,
+        "sectionEnteredAt": null,
+        "projectId": null,
+        "historyMode": "paginated",
+        "modelProvider": "openai",
+        "model": "gpt-6-astra",
+        "reasoningEffort": "high",
+        "createdAt": 1789319341,
+        "updatedAt": 1789319892,
+        "recencyAt": 1789319827,
+        "status": {
+          "type": "idle"
+        },
+        "path": "/Users/yangke/.codex/sessions/2026/09/14/rollout-2026-09-14T01-09-01-01a09bbe-65fa-7f82-ab83-9a1e932b0924.jsonl",
+        "cwd": "/private/tmp/orbit-acceptance-20260914.B1ogZK/stopping",
+        "cliVersion": "0.154.0",
+        "originator": "orbit_acceptance",
+        "source": "vscode",
+        "canAcceptDirectInput": true,
+        "threadSource": null,
+        "agentNickname": null,
+        "agentRole": null,
+        "gitInfo": null,
+        "name": null,
+        "daybreakEnabled": null,
+        "turns": []
+      }
+    },
+    "turns": {
+      "data": [
+        {
+          "id": "01a09bc5-cfdf-7040-b023-662493353969",
+          "items": [
+            {
+              "type": "userMessage",
+              "id": "01a09bc5-d410-7c83-a725-f0e1d2ced96e",
+              "clientId": "acceptance-stop-original",
+              "content": [
+                {
+                  "type": "text",
+                  "text": "Run ruby heartbeat.rb using a native managed command with a short initial yield.\nKeep the command running and keep this turn active by waiting on that command in\nshort intervals. Do not voluntarily stop it or finish while it runs. An external\nOrbit task controller will impose a hard deadline after observing the heartbeat,\nthen interrupt this turn and terminate the managed background execution. Keep\nall execution under native process management; do not detach or create a daemon.\n",
+                  "text_elements": []
+                }
+              ]
+            }
+          ],
+          "itemsView": "summary",
+          "status": "interrupted",
+          "error": null,
+          "startedAt": 1789319827,
+          "completedAt": 1789319892,
+          "durationMs": 65264
+        }
+      ],
+      "nextCursor": null,
+      "backwardsCursor": "{\"requestedThreadId\":\"01a09bbe-65fa-7f82-ab83-9a1e932b0924\",\"rolloutOrdinal\":1,\"includeAnchor\":true,\"scope\":{\"kind\":\"turns\"}}"
+    },
+    "background": {
+      "data": [],
+      "nextCursor": null
+    },
+    "heartbeat_lines": 299
+  },
+  "final_greeter": "def greet(name)\n  name = name.strip\n  name = \"stranger\" if name.empty?\n  \"Hello, #{name}!\"\nend\n"
+}
