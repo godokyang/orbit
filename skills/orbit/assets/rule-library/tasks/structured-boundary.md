@@ -4,7 +4,7 @@ description: Use when changing a parser, resolver, normalizer, validator, state 
 
 # 结构化边界
 
-**所有权边界**：本文只拥有「正式事实源是不是结构化的、旧路径是否已关闭」。最小变化归 `minimal-implementation`；同形态 sibling sweep 归 `targeted-fix`。停下与交接见 `rules/escalation-payload.md`。
+**所有权边界**：本文只拥有「正式事实源是不是结构化的、旧路径是否已关闭」。最小变化归 `minimal-implementation`；同形态 sibling sweep 归 `targeted-fix`。停下与交接见 [共用职责](../shared/escalation-payload.md)。
 
 本文是判断依据，不是可以机械勾选的清单。复核只报告不修改。普通功能接线不要默认加载本文。
 

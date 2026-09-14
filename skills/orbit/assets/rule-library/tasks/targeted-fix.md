@@ -4,7 +4,7 @@ description: Use when reproducing, isolating, or repairing a failing symptom —
 
 # 定向修复
 
-**所有权边界**：本文只拥有「这个失败症状的根因是否已被理解，以及修复是否被验证」。最小变化归 `minimal-implementation`；写不写测试归 `test-selection`；名单／字段族／旧路径关闭归 `structured-boundary`。停下与交接见 `rules/escalation-payload.md`。
+**所有权边界**：本文只拥有「这个失败症状的根因是否已被理解，以及修复是否被验证」。最小变化归 `minimal-implementation`；写不写测试归 `test-selection`；名单／字段族／旧路径关闭归 `structured-boundary`。停下与交接见 [共用职责](../shared/escalation-payload.md)。
 
 本文是判断依据，不是可以机械勾选的清单。复核只报告不修改。不要为了显得在修而叠 patch。
 
@@ -47,6 +47,6 @@ description: Use when reproducing, isolating, or repairing a failing symptom —
 
 ## 复现与验证
 
-能写回归测试时，先写能失败的测试或 fixture，再让它通过。修改前已有测试失败时，记录 baseline，避免把旧失败归因到本次。没有验证命令或替代证据，不能标完整通过。视觉 / 渲染 / 生成产物类问题，compile 不能证明修复。
+根据真实回归风险选择已有测试、必要的新测试或一次性复现；不要求每次修复都先增加永久测试。修改前已有测试失败时，记录 baseline，避免把旧失败归因到本次。没有验证命令或替代证据，不能标完整通过。视觉 / 渲染 / 生成产物类问题，compile 不能证明修复。
 
-反复出现过的 bug 必须留下长期守卫（测试、schema check、runtime assertion）。临时脚本和一次性观察不能替代。
+反复出现且有实际影响的 bug 应保留有效的长期验证；优先复用已有测试或校验，新增时按测试取舍规则判断，不为形式重复覆盖。

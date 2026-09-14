@@ -4,7 +4,7 @@ description: Use when adding, changing, skipping, or defending a test.
 
 # 测试取舍
 
-**所有权边界**：本文只拥有「这条验证该不该写成永久测试」。根因与回归守卫的作者义务归 `targeted-fix`。停下、清理与交接见 `rules/escalation-payload.md`。
+**所有权边界**：本文只拥有「这条验证该不该写成永久测试」。根因与回归守卫的作者义务归 `targeted-fix`。停下、清理与交接见 [共用职责](../shared/escalation-payload.md)。
 
 本文是判断依据，不是可以机械勾选的清单。复核只报告不修改。不要为了凑覆盖率制造测试。
 
@@ -48,6 +48,6 @@ description: Use when adding, changing, skipping, or defending a test.
 
 ## 污染与真实路径
 
-禁止改生产代码、覆盖失败 run、手工补系统应生成的产物，或改输入后仍声称原测试通过。用户可见完成状态与产物／状态文件矛盾时不能过。只跑编译或 mock happy path，不能证明真实路径。
+禁止为制造测试通过而改变业务规则、覆盖失败记录、手工补系统应生成的产物，或改输入后仍声称原测试通过。按原始要求修复生产代码并重新验证属于正常修复。用户可见完成状态与产物／状态文件矛盾时不能过。只跑编译或 mock happy path，不能证明真实路径。
 
 测 parser / resolver / 状态机 / artifact writer 时，要证明同形态输入也不会进入正式事实源；只过当前报错样例不够。

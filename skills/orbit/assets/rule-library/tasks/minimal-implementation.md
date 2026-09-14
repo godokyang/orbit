@@ -4,7 +4,7 @@ description: Use when implementing a scoped feature, refactor, or change that mu
 
 # 最小实现
 
-**所有权边界**：本文只拥有「这处改动是否满足当前任务的最小变化」。根因归 `targeted-fix`；写不写测试归 `test-selection`；对外命名归 `vantage-audit`；名单／字段族／旧路径关闭归 `structured-boundary`。停下与交接见 `rules/escalation-payload.md`。
+**所有权边界**：本文只拥有「这处改动是否满足当前任务的最小变化」。根因归 `targeted-fix`；写不写测试归 `test-selection`；对外命名归 `vantage-audit`；名单／字段族／旧路径关闭归 `structured-boundary`。停下与交接见 [共用职责](../shared/escalation-payload.md)。
 
 本文是判断依据，不是可以机械勾选的清单。复核只报告不修改。不要为了让 diff 看起来更完整而制造改动。
 

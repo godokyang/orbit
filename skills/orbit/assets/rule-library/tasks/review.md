@@ -4,7 +4,7 @@ description: Use when independently judging whether the actual product satisfies
 
 # 评审
 
-**所有权边界**：本文只拥有独立检查里「原始指令是否被满足，以及有没有做错／漏做／做多」的判定。实现规则正文归本次检查对象适用的规则。停下、裁定与交接见 `rules/escalation-payload.md`。
+**所有权边界**：本文只拥有独立检查里「原始指令是否被满足，以及有没有做错／漏做／做多」的判定。实现规则正文归本次检查对象适用的规则。停下、裁定与交接见 [共用职责](../shared/escalation-payload.md)。
 
 本文是判断依据，不是可以机械勾选的清单。复核只报告不修改。不要为了凑缺陷数量制造改动。只读固定产物，不改执行工作区。
 

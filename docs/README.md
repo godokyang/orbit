@@ -6,6 +6,7 @@
 | --- | --- |
 | 怎么安装和开始任务 | [仓库 README](../README.md) |
 | Agent 何时自行调用 Orbit | [Orbit skill](../skills/orbit/SKILL.md) |
+| Root 如何创建成员、使用 Herdr 和收尾 | [执行 Agent 协作说明](../skills/orbit/references/agent-collaboration.md) |
 | 各角色怎么选模型 | [模型建议](../skills/orbit/references/model-selection.md) |
 | 为什么采用当前设计 | [ADR-007](adr/007-task-runtime-refactor.md) |
 | 程序和模型各负责什么、何时完成或停止 | [任务运行合同](../contracts/task-runtime.md) |
@@ -13,7 +14,9 @@
 | 开发本仓要遵守什么 | [AGENTS.md](../AGENTS.md)、[开发流程](agents/development-workflow.md) |
 | 当前做到哪里、还有什么工作 | [交接](plan/handoff.md)、[当前计划](plan/vision-completion-plan.md) |
 | 哪些能力尚不具备 | [当前限制](plan/debt-ledger.md) |
-| 实际验收证明了什么 | [真实验收记录](reference/orbit-runtime-acceptance-20260914.md)及其原始结果选段 |
+| 最新项目检查发现什么 | [角色、协作与运行边界检查](reference/project-review-20260914.md) |
+| 普通终端和现有会话如何落地、有哪些现成方案 | [用户流程交付计划](plan/user-experience-plan.md)、[现成方案调研](reference/existing-orchestrators-20260914.md) |
+| 实际验收证明了什么 | [底层真实验收](reference/orbit-runtime-acceptance-20260914.md)、[日常流程验收数据](reference/user-flow-acceptance-20260914.json) |
 | 过去哪些失误值得记住 | [工程经验](reference/engineering-lessons.md) |
 | Codex 如何加载项目规范 | [按需阅读的说明](reference/codex-agents-md-loading.md) |
 

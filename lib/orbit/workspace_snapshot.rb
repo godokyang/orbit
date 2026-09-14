@@ -24,6 +24,7 @@ module Orbit
   module WorkspaceSnapshot
     SCHEMA_VERSION = "orbit-workspace-snapshot-v1"
     EXCLUDED_COMPONENTS = %w[.git .orbit].freeze
+    NON_GIT_DEPENDENCY_DIRS = %w[node_modules .venv __pycache__].freeze
     PUBLIC_KEYS = %w[path status kind content_digest size mode target external materialized].freeze
 
     class Error < StandardError
@@ -182,6 +183,7 @@ module Orbit
         absolute = File.join(dir, name)
         stat = safe_lstat(absolute)
         next unless stat
+        next if stat.directory? && NON_GIT_DEPENDENCY_DIRS.include?(name)
 
         relative = absolute.delete_prefix("#{root}/")
         if stat.symlink?

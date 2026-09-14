@@ -1,0 +1,157 @@
+{
+  "date": "2026-09-14",
+  "scope": "One current-session enrollment attempt and one isolated real Codex execution member; not an Orbit integration test.",
+  "versions": {
+    "hcom": "0.7.25",
+    "codex": "0.154.0",
+    "platform": "Darwin arm64",
+    "hcom_binary_sha256": "3216be24c6b02a1e33321e97270cccfa92e52cfa6127fc7991508065023ae067"
+  },
+  "environment": {
+    "worker_model": "gpt-6-astra",
+    "worker_reasoning_effort": "high",
+    "worker_sandbox": "workspace-write",
+    "worker_approval_policy": "never",
+    "HERDR_env_removed": true,
+    "TMUX_env_removed": true,
+    "WEZTERM_PANE_inherited": "0",
+    "new_multiplexer_panes_created": false,
+    "config_isolated_for_worker": true,
+    "hcom_auto_approve": false
+  },
+  "root_enrollment": {
+    "first_exit": 1,
+    "first_output": "Installing codex hooks...\n\nRestart Codex to enable automatic message delivery.\nThen run: hcom start\n",
+    "second_exit": 0,
+    "second_list": [
+      {
+        "agent_id": null,
+        "background_log_file": null,
+        "base_name": "nivu",
+        "created_at": 1789358737.0,
+        "description": "launching",
+        "directory": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-hcom-probe-iccpg730/work",
+        "headless": false,
+        "hooks_bound": false,
+        "launch_context": {},
+        "name": "nivu",
+        "parent_name": null,
+        "process_bound": false,
+        "session_id": "",
+        "status": "launching",
+        "status_age_seconds": 0,
+        "status_context": "new",
+        "status_detail": "",
+        "tag": null,
+        "tool": "codex",
+        "transcript_path": null,
+        "unread_count": 0
+      }
+    ],
+    "injection_probe": "No inject port for 'nivu'.\n",
+    "restarted_or_replaced": false,
+    "automatic_delivery_verified": false,
+    "limitations": "Temporary binary was not added to the existing host PATH; HCOM_DIR was only set for commands. This does not test a fully installed/restarted vanilla session."
+  },
+  "worker_launch": {
+    "args": [
+      "codex",
+      "--headless",
+      "--tag",
+      "orbitprobe",
+      "--go",
+      "--hcom-prompt",
+      "You are one temporary execution member in an explicitly authorized hcom usability experiment. Work ONLY in the current temporary directory. Create result.txt with the single line alpha. Do not inspect other projects, use the web, start subagents, install anything, or create a Goal. Reply with DONE alpha and finish this turn; wait for further messages. Later messages from orbitprobe are the test controller and may ask for a small correction. Keep responses short.",
+      "-a",
+      "never",
+      "--sandbox",
+      "workspace-write"
+    ],
+    "code": 0,
+    "stdout": "Started the launch process for 1 Codex agent\nNames: lulu\nBatch id: 1d73d50f\n\n[info] Terminal: default (unmanaged)\n[tip] Tag prefix targets all agents with that tag: hcom send @orbitprobe- <message>\n[tip] Run 'hcom start' to receive notifications/messages from instances\n[tip] Get notified when an agent needs approval: hcom events sub --blocked <name>\n[tip] Statuses: ▶ active (will read new msgs very soon)  ◉ listening (will read new msgs in <1s)■ blocked (needs human user approval)  ○ inactive (dead)  ◦ unknown (neutral)\nWaiting up to 10s for launch readiness...\nLaunch ready: lulu (1/1 ready, 0.0s).\n",
+    "stderr": "[hcom] Warning: hcom could not record exact Codex hook trust, so this codex runs with --dangerously-bypass-hook-trust.\n[hcom] Enabled hooks run without review for this invocation. hcom verified via Codex's own hook list that no non-hcom hooks are in scope.\n"
+  },
+  "feedback": {
+    "initial_result": "alpha\n",
+    "message_send": {
+      "args": [
+        "send",
+        "@lulu",
+        "--from",
+        "orbitprobe",
+        "--intent",
+        "request",
+        "--",
+        "Correction: change result.txt to the single line beta. Then run one foreground Python command that writes its PID to heartbeat.pid and appends the current time to heartbeat.log every 0.2 seconds for at most 90 seconds. This is a controlled interruption experiment; do not background it. Do not create other processes or delegate. When interrupted, do not restart the heartbeat or change the file again. Stay in this same session."
+      ],
+      "code": 0,
+      "stdout": "Sent to: ◉ orbitprobe-lulu\n",
+      "stderr": ""
+    },
+    "corrected_result": "beta\n",
+    "same_session": true,
+    "session_id": "01a09e18-98f9-75b2-a6d3-5cfb32a38dcf",
+    "delivery": "Idle wake via hcom PTY; no manually submitted user turn",
+    "result_observed_via": "File and hcom transcript/term",
+    "reply_limitation": "Member attempted ACK to unregistered external sender orbitprobe; send failed. Structured result delivery to current Root was not verified."
+  },
+  "interrupt": {
+    "before": {
+      "result": "beta\n",
+      "heartbeat_bytes": 73,
+      "heartbeat_pid": 31898
+    },
+    "interrupt": {
+      "method": "hcom term inject ESC",
+      "code": 0,
+      "stdout": "Injected 1 chars to lulu\n",
+      "stderr": ""
+    },
+    "after": {
+      "result": "beta\n",
+      "heartbeat_bytes": 260
+    },
+    "after_second_observation": {
+      "heartbeat_bytes": 443
+    },
+    "heartbeat_process_alive": true
+  },
+  "stop_after_interrupt": {
+    "method": "hcom stop lulu --go",
+    "code": 0,
+    "stdout": "Stopped hcom for orbitprobe-lulu.\n\nHeadless log: /var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-hcom-probe-iccpg730/state/.tmp/logs/background_1789358805_7167.log\n",
+    "stderr": "",
+    "bytes_at_stop": 2661,
+    "bytes_after_3s": 2934,
+    "heartbeat_alive": true,
+    "result": "beta\n",
+    "launcher_alive": false
+  },
+  "usage_last_reported": {
+    "input_tokens": 78464,
+    "cached_input_tokens": 52992,
+    "cache_write_input_tokens": 0,
+    "output_tokens": 295,
+    "reasoning_output_tokens": 18,
+    "total_tokens": 78759
+  },
+  "usage_limitations": "One worker session only; last reported counters before interrupt, not a billing total. Includes provider CLI context. Root usage and full task cost unavailable.",
+  "cleanup": {
+    "heartbeat_SIGTERM_sent_by_controller": 31898,
+    "known_processes_alive": {
+      "31070": false,
+      "31898": false
+    },
+    "ports_accept_connections": {
+      "61112": false,
+      "61113": false
+    },
+    "global_config_restored": {
+      "config.toml": true,
+      "hooks.json": true,
+      "rules/hcom.rules": true
+    },
+    "hcom_list": [],
+    "temporary_resources_removed": true
+  }
+}

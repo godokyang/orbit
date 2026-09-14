@@ -7,6 +7,7 @@ require_relative "task_record"
 require_relative "task_runtime"
 require_relative "codex_connection"
 require_relative "check_runner"
+require_relative "session_entry"
 
 module Orbit
   module CLI
@@ -17,7 +18,10 @@ module Orbit
 
       orbit --version
       orbit version [--json]
-      orbit start --review-model MODEL [--thread ID] [--socket PATH]
+      orbit doctor
+      orbit codex [Codex options] [prompt]
+      orbit codex resume [session ID]
+      orbit start [--review-model MODEL] [--thread ID] [--socket PATH]
                   [--message-id ID | --prompt-file FILE|-] [--project DIR]
                   [--basis FILE] [--check-in SECONDS] [--foreground]
                   [--estimate-minutes N] [--estimate-tokens N] [--deadline ISO8601]
@@ -26,6 +30,7 @@ module Orbit
       orbit check TASK_DIRECTORY
       orbit amend TASK_DIRECTORY --file FILE|-
       orbit dispute TASK_DIRECTORY --reason TEXT
+      orbit delegate TASK_DIRECTORY --file FILE|- [--model MODEL] [--member THREAD_ID]
 
       Root means the coding agent already responsible for the whole user task.
       start binds a session already loaded on the supplied Codex app-server.
@@ -33,7 +38,7 @@ module Orbit
       control. The invoking agent's CODEX_THREAD_ID is the default thread.
       Without --prompt-file, the selected/latest native user message is the basis.
       --basis may repeat. Estimates are advisory; only --deadline is a hard limit.
-      Reviewer model may also be set with ORBIT_REVIEW_MODEL.
+      Reviewer model uses ORBIT_REVIEW_MODEL or the existing Codex model configuration.
       Records and fixed inputs live under PROJECT/.orbit/tasks/<id>.
     TEXT
 
@@ -48,6 +53,13 @@ module Orbit
       when nil, "help", "--help", "-h"
         puts HELP
         0
+      when "doctor"
+        raise ArgumentError, "usage: orbit doctor" unless argv.empty?
+        report = SessionEntry.doctor
+        puts JSON.pretty_generate(report)
+        report["ready"] ? 0 : 2
+      when "codex"
+        SessionEntry.launch(argv)
       when "start"
         start(argv)
       when "run"
@@ -61,7 +73,7 @@ module Orbit
 
         puts JSON.pretty_generate(task.state)
         0
-      when "stop", "check", "amend", "dispute"
+      when "stop", "check", "amend", "dispute", "delegate"
         submit(command, argv)
       else
         raise ArgumentError, "unknown command #{command.inspect}; run orbit --help"
@@ -72,10 +84,9 @@ module Orbit
     end
 
     def start(argv)
-      codex_directory = ENV.fetch("CODEX_HOME", File.join(Dir.home, ".codex"))
       options = {
         project: Dir.pwd, thread: ENV["CODEX_THREAD_ID"], model: ENV["ORBIT_REVIEW_MODEL"],
-        socket: File.join(codex_directory, "app-server-control", "app-server-control.sock"),
+        socket: SessionEntry.socket_path,
         basis: [], interval: 300, estimate: { "seconds" => nil, "tokens" => nil }
       }
       parser = OptionParser.new do |opts|
@@ -95,7 +106,6 @@ module Orbit
       parser.parse!(argv)
       raise ArgumentError, "unexpected arguments: #{argv.join(' ')}" unless argv.empty?
       raise ArgumentError, "--thread or CODEX_THREAD_ID is required" if options[:thread].to_s.empty?
-      raise ArgumentError, "configure --review-model or ORBIT_REVIEW_MODEL" if options[:model].to_s.empty?
       raise ArgumentError, "--check-in must be positive" unless options[:interval].positive?
       raise ArgumentError, "choose --message-id or --prompt-file" if options[:message_id] && options[:prompt_file]
       if options[:estimate].values.compact.any? { |value| !value.positive? || !value.finite? }
@@ -108,6 +118,8 @@ module Orbit
         unless File.realpath(connection.state.fetch("cwd")) == File.realpath(options[:project])
           raise ArgumentError, "Root session belongs to a different project"
         end
+        options[:model] ||= connection.configured_model
+        raise ArgumentError, "configure --review-model or ORBIT_REVIEW_MODEL" if options[:model].to_s.empty?
         if options[:prompt_file]
           instruction = read_input(options[:prompt_file])
           source = { "kind" => "explicit_text", "file" => options[:prompt_file] }
@@ -164,14 +176,26 @@ module Orbit
       OptionParser.new do |parser|
         parser.on("--reason TEXT") { |value| options["reason"] = value }
         parser.on("--file FILE") { |value| options["file"] = value }
+        parser.on("--model MODEL") { |value| options["model"] = value }
+        parser.on("--member THREAD_ID") { |value| options["member"] = value }
       end.parse!(argv)
       raise ArgumentError, "unexpected arguments" unless argv.empty?
+      if command == "stop" && %w[failed stop_unconfirmed].include?(record.state["status"])
+        state = record.state
+        connection = CodexConnection.new(socket: state.dig("connection", "socket"), thread_id: state.dig("connection", "thread_id"))
+        result = TaskRuntime.new(record: record, connection: connection, checker: nil).retry_stop(
+          options.fetch("reason", "The user requested cleanup after runtime exit")
+        )
+        puts JSON.generate({ "task_directory" => record.path, "status" => result.fetch("status") })
+        return result["status"] == "paused" ? 0 : 1
+      end
       if TaskRuntime::TERMINAL.include?(record.state["status"])
         raise ArgumentError, "task process has ended; records are retained, no action was queued"
       end
-      if command == "amend"
+      if %w[amend delegate].include?(command)
         file = options.fetch("file") { raise ArgumentError, "--file is required" }
-        options = { "text" => read_input(file), "source" => { "kind" => "explicit_text", "file" => file } }
+        options = options.slice("model", "member").merge("text" => read_input(file), "source" => { "kind" => "explicit_text", "file" => file })
+        raise ArgumentError, "instruction is empty" if options["text"].strip.empty?
       elsif command == "dispute" && options["reason"].to_s.strip.empty?
         raise ArgumentError, "--reason is required"
       end

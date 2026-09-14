@@ -18,50 +18,37 @@ Orbit 是独立的任务执行辅助工具，适用于任意项目。它保存�
 - “这个方案怎么样”“解释这段代码”“先 review，不实现”只讨论或评审，不启动执行进程。拼写修正等可以直接完成并核对的小任务通常不用；不要为了使用工具扩大任务。
 - 已有 Orbit 任务时复用其任务目录。若你只是另一位 Agent 委派的执行者，不为同一项主任务再启动 Orbit；Orbit 的纠正消息也不是一项新的用户需求。
 
-## 接入前确认
+## 接入与执行
 
-1. 确定目标项目和用户原始执行要求。项目已有规范按作用域读取；没有规范文件不妨碍接入，不要求创建模板。指定需求文档用 `--basis` 传入。
-2. 确认本机可用的 `orbit --version`、现有会话和已授权的检查模型。复用 `ORBIT_REVIEW_MODEL`；没有设置时，用已有授权中可供 `codex exec` 调用的模型填 `--review-model`，需要选型才读 [模型建议](references/model-selection.md)。
-3. 当前适配仅支持已加载在 Codex Unix app-server 上、可读取历史的已有会话。默认会话来自 `CODEX_THREAD_ID`，默认 socket 是 `${CODEX_HOME:-$HOME/.codex}/app-server-control/app-server-control.sock`；指定其他 socket 必须确实承载当前会话。
+首选当前宿主提供的 `orbit` MCP 工具；它提供 `context / start / status / check / amend / dispute / stop / delegate`。普通 Codex 工作区沙箱中的 shell 不一定能访问控制 socket，不能用反复执行 shell 命令替代可用 MCP。
 
-接入失败时结束这次接入尝试，并说明缺少的命令、模型配置或控制能力。不得伪称 Orbit 已运行，不新建／恢复会话或启动 daemon 来代替原会话，也不反复重试同一缺口。一般已授权工作可继续，但应明确它未受 Orbit 检查；若用户明确要求必须在 Orbit 控制下执行，则先处理该缺口。
+1. 读取目标项目已有规则，确定用户原始要求。调用 `orbit` 工具的 `context` 检查当前会话，宿主通常自动提供会话身份；确实缺少时从环境读取 `CODEX_THREAD_ID`，传入 `thread_id`，不要让用户查内部 ID。
+2. 用 `start`，传 `project` 绝对路径；用户指定文档时传 `basis` 路径数组。不传 `message_id` 时读取最近原生用户消息；若最新只是“同意”，传实际包含执行要求的原始消息 ID。不要把自己的计划或摘要冒充用户原文。
+3. 检查模型优先使用已配置的 `ORBIT_REVIEW_MODEL`，否则沿用当前 Codex 配置；有明确角色配置时传 `review_model`。需要选型再读 [模型建议](references/model-selection.md)。不启用未经授权的新供应商。
+4. 保存返回的 `task_directory`，在下一正常工作节点用 `status` 和 `task` 核对实际接入，然后继续实现。`starting` 表示进程已创建；`queued` 表示动作已入队，均不代表完成。已有本任务时复用，不重复启动。
 
-## 启动一次任务
+没有 MCP 时，可在具有原生控制端点和相应访问权限的宿主中使用 CLI：`orbit start --project DIR --basis FILE`。`ORBIT_CODEX_SOCKET` 指向当前会话所属服务；不要猜测其他服务或迁移会话。`orbit doctor` 检查连接，`orbit --help` 提供 CLI 参数。
 
-在目标项目中调用；从其他目录发起时补 `--project DIR`：
+接入失败只核对具体缺口，不循环重试。普通终端、tmux、Herdr 都可由用户通过 **`orbit codex`** 打开可接入的 Codex；这是日常启动入口，skill 不能在当前会话内部再调用它来替换自己。已经打开的普通嵌入式 Codex 尚无已验证的热接入；说明情况，保留当前上下文。用户可在停止当前工作后明确使用 `orbit codex resume SESSION_ID` 恢复该会话。一般授权工作可以继续，但不得声称已受 Orbit 检查；用户要求必须受控时先解决接入缺口。
 
-```bash
-# 已配置 ORBIT_REVIEW_MODEL；原生最新用户消息本身包含本次执行要求
-orbit start --basis path/to/requirements.md
+## 必要分工
 
-# 指定包含实际要求的原始消息，而不是随后单独一句“同意”
-orbit start --message-id MESSAGE_ID --review-model MODEL --basis path/to/requirements.md
-```
+Root 在用户授权和项目规则范围内决定是否需要执行成员，一个 Agent 足够就自己完成。需要时使用 `delegate`，传 `task` 和具体 `text`（范围、文件边界、验证和回报要求）；程序自动附上原始要求与已生效修改，创建本任务拥有的 Codex 成员，结果自动回到当前 Root。`model` 可指定已授权模型，否则沿用检查模型；`member` 可复用本任务已有成员。Root 核验并集成结果，成员不再创建团队。
 
-没有指定依据文档就省略 `--basis`，多个文档可重复传入。不指定 `--message-id` 时程序读取最近一条原生用户消息；使用用户提供的 prompt 文件时可改用 `--prompt-file FILE`，程序会把该原文投递给当前主执行 Agent。不要把自己的计划或摘要冒充用户原文，不收集整段需求讨论。
+这条路径不需要额外终端窗口。Herdr、tmux 只影响展示；用户明确要求使用其他协作工具时按 [协作说明](references/agent-collaboration.md) 处理，不把外部成员说成已纳入 Orbit 的统一停止。
 
-启动成功后保存返回的 `task_directory`，继续原任务。检查按事件和约定时间发生，不需要你反复申请。`--check-in SECONDS` 设置首次约定观察间隔，之后由检查结果安排下一次；`--estimate-minutes` / `--estimate-tokens` 只作预估，只有用户明确给出的 `--deadline` 才是硬停止时间。
+## 纠偏与收尾
 
-默认在后台运行本次任务进程。Agent 自行调用时使用该默认方式；`--foreground` 会占住调用直到任务结束，仅在另有执行终端的显式安排中使用。不要用阻塞调用让主执行会话无法继续工作。
+工具的任务操作都传 `task`：`check` 请求独立核对；`dispute` 的 `text` 提供真实反证；`amend` 的 `text` 只传用户明确补充的原文；`stop` 停止整项受控任务。正常用户消息由程序观察并同步给活动成员，不需要重复手动 `amend`。
 
-## 执行与收尾
+收到检查纠正后对照原始要求修复；有真实争议才申请裁定。程序按事件和约定时间检查，无需 Root 持续轮询。首次间隔可用 `check_in` 设置，之后由检查者约定下次；预估与硬截止的 CLI 参数见 `orbit --help`，不自行把估计变成硬限制。
 
-记录在 `PROJECT/.orbit/tasks/<id>`；按需查询或控制：
+产物准备好后结束本轮并说明实际结果，让独立检查核对最终版本。不要在活跃轮次内持续等 `complete`。检查若发现遗漏，会唤起同一个 Root 继续修正；最终状态保存于任务记录，可通过 `status` 查询，不能把 Root 自己的完成声明当作独立验收通过。
 
-```bash
-orbit status TASK_DIRECTORY
-orbit check TASK_DIRECTORY
-orbit amend TASK_DIRECTORY --file FILE
-orbit dispute TASK_DIRECTORY --reason "争议点与具体依据"
-orbit stop TASK_DIRECTORY --reason "停止原因"
-```
-
-命令返回 `queued` 只说明已入队，不等于动作已完成。收到纠正时对照原始要求修正；有真实反证再申请独立裁定，工程偏好不阻断交付。`amend` 仅传用户明确修改的原文，不能用来扩大自己的授权。
-
-准备好交付后结束当前执行轮次，让 Orbit 检查最终产物；不要在同一轮持续等待 `complete` 而保持会话活跃。根据实际状态区分完成、暂停、需要用户、失败和停止未确认。停止确认覆盖当前主执行会话与原生登记的后台命令，不把未接入成员或脱管进程说成已停止。
+原生界面中断 Root 或调用 `stop` 后，程序停止 Root、本任务登记成员及各自原生后台命令，保留会话和产物。确认失败须报告 `stop_unconfirmed`；任务进程报错退出后，仍可用 `stop` 显式重试收尾。禁止将本任务工作放入脱离宿主管理的后台进程；外部未登记 Agent 不在确认范围。关闭 `orbit codex` 入口会收尾它创建的本地服务及相关执行。
 
 ## 按需规则
 
 启动本次任务时读取 [最小实现](assets/rule-library/tasks/minimal-implementation.md) 和 [共用职责](assets/rule-library/shared/escalation-payload.md)。修复、测试、对外命名、结构化边界、安装／命令表面、质量与评审，按实际动作读取 `assets/rule-library/tasks/` 中对应文件。项目规则对执行者和检查者同样适用，不将 Orbit 规则复制成项目必填配置。
 
-安装器让 CLI 和 skill 使用同一版本；`orbit version --json` 查询来源。更新或卸载在 Orbit 任务结束后进行。运行需要 Ruby 3.2+、Node.js 18+、npm 与已有 Codex CLI，安装不会自动给会话增加控制端点。
+安装器让 CLI 和 skill 使用同一版本；`orbit version --json` 查询来源。更新或卸载在 Orbit 任务结束后进行。运行需要 Ruby 3.2+、Node.js 18+、npm 与已有 Codex CLI，安装后用 `orbit codex` 打开支持接入的会话；安装不会改造已经打开的会话。

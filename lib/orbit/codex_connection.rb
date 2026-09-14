@@ -19,7 +19,7 @@ module Orbit
   # bridge's stdin/stdout; no WebSocket handling lives in Ruby.
   #
   # The connection attaches to a thread that is already loaded on that
-  # server; it never calls thread/start or thread/resume, never starts a
+  # server; attachment never calls thread/start or thread/resume, never starts a
   # daemon, and never falls back to the durable queue. An ordinary
   # embedded TUI session exposes no control socket, a thread not loaded on
   # the reachable server is not controllable, and a thread without
@@ -142,8 +142,10 @@ module Orbit
           "clientInfo" => { "name" => CLIENT_NAME, "version" => CLIENT_VERSION },
           "capabilities" => { "experimentalApi" => true }
         )
-        ensure_thread_loaded!
-        read_thread_metadata!
+        unless @thread_id.empty?
+          ensure_thread_loaded!
+          read_thread_metadata!
+        end
       rescue ConnectionError
         close
         raise
@@ -154,6 +156,49 @@ module Orbit
       end
       @connected = true
       self
+    end
+
+    # Used by the explicit user launcher to inspect only its own server during
+    # shutdown. Task attachment always supplies and verifies an existing id.
+    def loaded_threads
+      ensure_connected
+      ids = []
+      cursor = nil
+      loop do
+        params = { "limit" => PAGE_SIZE }
+        params["cursor"] = cursor if cursor
+        result = request("thread/loaded/list", params)
+        ids.concat(result.fetch("data", []))
+        cursor = result["nextCursor"]
+        break unless cursor
+      end
+      ids
+    end
+
+    def configured_model
+      ensure_connected
+      request("config/read", "includeLayers" => false, "cwd" => @cwd).dig("config", "model")
+    end
+
+    # Only the task runtime calls this after Root explicitly delegates a task.
+    # It creates an execution member; connection of Root never uses this path.
+    def create_member(model:)
+      ensure_connected
+      raise Error, "member creation requires a bound Root" if @thread_id.empty?
+      result = request("thread/start", "cwd" => @cwd, "model" => model,
+                       "approvalPolicy" => "never", "sandbox" => "workspace-write",
+                       "config" => { "mcp_servers.orbit.enabled" => false },
+                       "ephemeral" => false)
+      result.fetch("thread").fetch("id")
+    end
+
+    def start_member(id, instruction)
+      ensure_connected
+      request("turn/start", "threadId" => id, "input" => [{ "type" => "text", "text" => instruction }])
+    end
+
+    def member_connection(id)
+      self.class.new(socket: @socket_path, thread_id: id, deadline: @deadline, bridge: @bridge, node: @node).connect!
     end
 
     # Current native state plus a bounded observation summary of the newest

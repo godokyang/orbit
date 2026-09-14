@@ -1,0 +1,420 @@
+{
+  "date": "2026-09-14",
+  "codex_version": "0.154.0",
+  "orbit_version": "0.2.0",
+  "published": false,
+  "delivery": {
+    "thread_id": "01a09e47-1031-7e23-83ef-709189f150cb",
+    "natural_prompt_without_orbit_name": true,
+    "installed_skill_discovered": true,
+    "status": "complete",
+    "member_count": 0,
+    "injected_omission": {
+      "at": "2026-09-14 12:59:04 +0800",
+      "kind": "controlled post-delivery deletion of required usage document",
+      "thread_id": "01a09e47-1031-7e23-83ef-709189f150cb",
+      "original": "# Text normalization\n\nRequires Python 3; no third-party dependencies or installation needed.\nRun commands from this directory.\n\n## Command line\n\nThe CLI reads all stdin, strips leading and trailing whitespace, collapses\ninternal whitespace runs to one ASCII space, and lowercases the text.\nIt always appends exactly one newline.\n\n```sh\nprintf '  HeLLo\\t WORLD\\nAgain  \\n' | python3 cli.py\n```\n\nOutput:\n\n```text\nhello world again\n```\n\nEmpty or whitespace-only input prints just a newline (one blank line):\n\n```sh\nprintf '' | python3 cli.py\nprintf ' \\t\\n' | python3 cli.py\n```\n\n## Library\n\n```python\nfrom normalize import normalize\n\nassert normalize(\"  HeLLo\\t WORLD\\n\") == \"hello world\"\nassert normalize(\"\") == \"\"\n```\n\nThe library returns a string without adding a trailing newline.\n\n## Verification\n\n```sh\npython3 -m unittest -v\n```\n\nOr run the test file directly:\n\n```sh\npython3 test_normalize.py -v\n```\n\nThe tests cover normal and empty/whitespace-only input for both the library\nand the CLI, including the CLI's exact trailing newline.\n",
+      "turn_id": "01a09e47-1069-7c32-a4be-929399dd2773"
+    },
+    "checks": [
+      {
+        "number": 1,
+        "role": "reviewer",
+        "result": {
+          "verdict": "continue",
+          "reason": "The snapshot satisfies the required library, stdin CLI, focused executable unittest cases, and usage instructions. Isolated read-only checks confirmed normal, empty, and whitespace-only CLI output, including exact trailing newlines. No AGENTS.md files or actionable gaps were found in the snapshot, and no unnecessary implementation was observed. Root remains active, so completion cannot yet be declared.",
+          "findings": [],
+          "resolved_ids": [],
+          "next_check_seconds": 30
+        },
+        "stale": true,
+        "usage": {
+          "input_tokens": 107765,
+          "cached_input_tokens": 79232,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 520,
+          "reasoning_output_tokens": 66
+        },
+        "started_at": "2026-09-14T04:58:51Z",
+        "finished_at": "2026-09-14T04:59:30Z"
+      },
+      {
+        "number": 2,
+        "role": "reviewer",
+        "result": {
+          "verdict": "correct",
+          "reason": "The library and CLI satisfy the required behavior, confirmed by focused read-only checks. Executable unittest cases are present. No AGENTS.md files or unnecessary additions were found in the snapshot. Root is idle, but delivery remains incomplete because the required usage guide is missing; adding it directly advances the original goal.",
+          "findings": [
+            {
+              "id": "missing-usage-guide",
+              "requirement": "Provide USAGE.md showing the real stdin command and its output.",
+              "evidence": "The fixed snapshot contains requirements.md, normalize.py, cli.py, and test_normalize.py. Reading USAGE.md returns 'No such file or directory', despite Root's final message claiming it was delivered.",
+              "action": "Add USAGE.md with a runnable stdin command and its actual normalized output, then confirm the file is included in the delivered artifact."
+            }
+          ],
+          "resolved_ids": [],
+          "next_check_seconds": 30
+        },
+        "stale": false,
+        "usage": {
+          "input_tokens": 135782,
+          "cached_input_tokens": 107136,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 768,
+          "reasoning_output_tokens": 56
+        },
+        "started_at": "2026-09-14T04:59:31Z",
+        "finished_at": "2026-09-14T05:00:15Z"
+      },
+      {
+        "number": 3,
+        "role": "reviewer",
+        "result": {
+          "verdict": "continue",
+          "reason": "The snapshot satisfies the requested library, CLI, focused unittest cases, and usage instructions. USAGE.md now exists; its documented command and output, plus empty and whitespace-only CLI behavior, passed isolated read-only verification. This resolves missing-usage-guide. No missing, incorrect, or extra work was found. Root remains active, so completion cannot yet be declared; final handoff is appropriate.",
+          "findings": [],
+          "resolved_ids": [
+            "missing-usage-guide"
+          ],
+          "next_check_seconds": 15
+        },
+        "stale": true,
+        "usage": {
+          "input_tokens": 117859,
+          "cached_input_tokens": 92672,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 818,
+          "reasoning_output_tokens": 65
+        },
+        "started_at": "2026-09-14T05:00:43Z",
+        "finished_at": "2026-09-14T05:01:28Z"
+      },
+      {
+        "number": 4,
+        "role": "reviewer",
+        "result": {
+          "verdict": "complete",
+          "reason": "Root is idle and the fixed artifact satisfies the requirements. The library and CLI implement the specified normalization; isolated read-only checks confirmed normal, empty, and whitespace-only stdin behavior. Focused executable unittest cases are present. USAGE.md now contains the real stdin command and matching output, resolving missing-usage-guide. No additional scope or rule violations were observed.",
+          "findings": [],
+          "resolved_ids": [
+            "missing-usage-guide"
+          ],
+          "next_check_seconds": 60
+        },
+        "stale": false,
+        "usage": {
+          "input_tokens": 95395,
+          "cached_input_tokens": 70272,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 838,
+          "reasoning_output_tokens": 69
+        },
+        "started_at": "2026-09-14T05:01:29Z",
+        "finished_at": "2026-09-14T05:02:17Z"
+      }
+    ],
+    "stop_confirmation": {
+      "confirmed": true,
+      "turn_interrupted": null,
+      "terminals": [],
+      "verified": {
+        "status": "idle",
+        "status_detail": {
+          "type": "idle"
+        },
+        "remaining_terminals": []
+      },
+      "scope": "confirmed scope: active turn interrupt + managed background terminals listed by the app-server; detached/unmanaged processes are not covered"
+    },
+    "elapsed_seconds": 246.410188,
+    "root_usage": {
+      "input_tokens": 271475,
+      "cached_input_tokens": 236160,
+      "cache_write_input_tokens": 0,
+      "output_tokens": 3025,
+      "reasoning_output_tokens": 22,
+      "total_tokens": 274500
+    },
+    "check_tokens": 459745,
+    "verification": {
+      "unittest": "python3 -B -m unittest -v: 4 tests passed",
+      "cli": [
+        {
+          "input": "  HeLLo\t  WORLD\nAgain  ",
+          "output": "hello world again\n",
+          "passed": true
+        },
+        {
+          "input": " \n\t ",
+          "output": "\n",
+          "passed": true
+        }
+      ]
+    },
+    "delivery_digest": "sha256:1359e44611cafa15fee0e4f8195976938a7ef25fe37516c7f9ffd6f5f4303f2d"
+  },
+  "collaboration": {
+    "thread_id": "01a09e4c-6361-79d3-8dfe-1b0cc92eaa73",
+    "member_count": 1,
+    "status": "paused",
+    "checks": [
+      {
+        "number": 1,
+        "role": "reviewer",
+        "result": {
+          "verdict": "continue",
+          "reason": "The snapshot contains member.txt with FIRST, and the program records one registered execution member with Root still active. No AGENTS.md files were found in the snapshot. Result integration into combined.txt and the managed heartbeat phase remain pending; amendment and stop behavior await user triggers. No concrete violation or extra work is evidenced. Continuing the prescribed flow is worthwhile; completion cannot yet be declared.",
+          "findings": [],
+          "resolved_ids": [],
+          "next_check_seconds": 30
+        },
+        "stale": true,
+        "usage": {
+          "input_tokens": 77849,
+          "cached_input_tokens": 51200,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 307,
+          "reasoning_output_tokens": 31
+        },
+        "started_at": "2026-09-14T05:04:39Z",
+        "finished_at": "2026-09-14T05:05:07Z"
+      },
+      {
+        "number": 2,
+        "role": "reviewer",
+        "result": {
+          "verdict": "correct",
+          "reason": "The FIRST result-return and integration phase is evidenced, and both heartbeat logs show activity. No AGENTS.md exists inside the snapshot. Amendment 1 remains unapplied. Root is active, so continued execution is worthwhile; native-stop acceptance remains pending the user’s interruption.",
+          "findings": [
+            {
+              "id": "amendment-not-applied",
+              "requirement": "Amendment 1 requires the member to write AMENDED to member.txt and Root to update combined.txt while both managed heartbeat jobs continue.",
+              "evidence": "The fixed snapshot contains FIRST followed by a newline in both member.txt and combined.txt. Root and member heartbeat logs contain 33 and 23 entries respectively.",
+              "action": "Have the same registered member update member.txt to AMENDED, then have Root read and integrate it into combined.txt. Keep both managed heartbeat sessions and turns active until the user interrupts Root."
+            }
+          ],
+          "resolved_ids": [],
+          "next_check_seconds": 20
+        },
+        "stale": true,
+        "usage": {
+          "input_tokens": 111977,
+          "cached_input_tokens": 82816,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 621,
+          "reasoning_output_tokens": 24
+        },
+        "started_at": "2026-09-14T05:05:32Z",
+        "finished_at": "2026-09-14T05:06:14Z"
+      }
+    ],
+    "elapsed_seconds": 145.948348,
+    "root_usage": {
+      "input_tokens": 561507,
+      "cached_input_tokens": 509952,
+      "cache_write_input_tokens": 0,
+      "output_tokens": 2788,
+      "reasoning_output_tokens": 55,
+      "total_tokens": 564295
+    },
+    "member_usage": {
+      "input_tokens": 234786,
+      "cached_input_tokens": 210688,
+      "cache_write_input_tokens": 0,
+      "output_tokens": 684,
+      "reasoning_output_tokens": 0,
+      "total_tokens": 235470
+    },
+    "check_tokens": 190754,
+    "evidence": {
+      "task": "6f818097-bf88-4bef-af21-c4e08902b5ef",
+      "connection": {
+        "socket": "/tmp/orbit-host-20260914-54470-vqnddp/control.sock",
+        "thread_id": "01a09e4c-6361-79d3-8dfe-1b0cc92eaa73"
+      },
+      "member_ids": [
+        "01a09e4d-3f48-7643-a763-771a6e5ba537"
+      ],
+      "before_stop": {
+        "root": {
+          "pid": 55993,
+          "heartbeat_lines": 29,
+          "alive": true
+        },
+        "member": {
+          "pid": 56022,
+          "heartbeat_lines": 19,
+          "alive": true
+        }
+      },
+      "status": "paused",
+      "amendments": [
+        {
+          "path": "amendments/1.txt",
+          "source": {
+            "kind": "codex_user_message",
+            "id": "6fc0dc05-3573-47eb-8dcb-0e300b6a9c9a"
+          },
+          "at": "2026-09-14T05:05:32Z"
+        }
+      ],
+      "contents": {
+        "member.txt": "AMENDED\n",
+        "combined.txt": "AMENDED\n"
+      },
+      "stop_confirmation": {
+        "confirmed": true,
+        "turn_interrupted": null,
+        "terminals": [
+          {
+            "process_id": "78249",
+            "command": "python3 heartbeat.py root",
+            "terminated": true
+          }
+        ],
+        "verified": {
+          "status": "idle",
+          "status_detail": {
+            "type": "idle"
+          },
+          "remaining_terminals": []
+        },
+        "scope": "confirmed scope: active turn interrupt + managed background terminals listed by the app-server; detached/unmanaged processes are not covered",
+        "members": [
+          {
+            "thread_id": "01a09e4d-3f48-7643-a763-771a6e5ba537",
+            "confirmation": {
+              "confirmed": true,
+              "turn_interrupted": true,
+              "terminals": [
+                {
+                  "process_id": "64873",
+                  "command": "python3 heartbeat.py member",
+                  "terminated": true
+                }
+              ],
+              "verified": {
+                "status": "idle",
+                "status_detail": {
+                  "type": "idle"
+                },
+                "remaining_terminals": []
+              },
+              "scope": "confirmed scope: active turn interrupt + managed background terminals listed by the app-server; detached/unmanaged processes are not covered"
+            }
+          }
+        ]
+      },
+      "after_stop": {
+        "root": {
+          "alive": false,
+          "heartbeat_lines": 83,
+          "still_unchanged_at_final_cleanup": true
+        },
+        "member": {
+          "alive": false,
+          "heartbeat_lines": 74,
+          "still_unchanged_at_final_cleanup": true
+        }
+      }
+    },
+    "member_native_settings": [
+      {
+        "turn_id": "01a09e4d-3f72-7a90-8a0b-de361351140d",
+        "approval_policy": "never",
+        "sandbox_policy": {
+          "type": "workspace-write",
+          "network_access": false,
+          "exclude_tmpdir_env_var": false,
+          "exclude_slash_tmp": false
+        },
+        "model": "gpt-6-astra"
+      },
+      {
+        "turn_id": "01a09e4d-e777-7b61-982e-54641068e330",
+        "approval_policy": "never",
+        "sandbox_policy": {
+          "type": "workspace-write",
+          "network_access": false,
+          "exclude_tmpdir_env_var": false,
+          "exclude_slash_tmp": false
+        },
+        "model": "gpt-6-astra"
+      }
+    ]
+  },
+  "terminals": {
+    "plain_terminal": "Both complete model paths used a PTY with HERDR/TMUX variables removed.",
+    "tmux": {
+      "version": "3.7c",
+      "same_thread_id": "01a09e47-1031-7e23-83ef-709189f150cb",
+      "ready": true,
+      "paid_new_turn": false,
+      "socket": "/tmp/orbit-host-20260914-56676-tfn026/control.sock"
+    },
+    "herdr": {
+      "terminal": "Herdr",
+      "ready": true,
+      "same_thread": "01a09e47-1031-7e23-83ef-709189f150cb",
+      "original_input_preserved": true,
+      "state": {
+        "status": "idle",
+        "last_turn_id": "01a09e49-8e2a-71d0-a05a-fcbfe0b4b5dd",
+        "last_turn_status": "completed"
+      }
+    }
+  },
+  "limits": [
+    "Controlled omission injection is not a natural error-rate measurement.",
+    "Cached input tokens are included in input totals; token counts are not currency or provider quota billing.",
+    "This is evidence for Codex 0.154.0, not arbitrary coding agents or already-open embedded-session hot attachment.",
+    "Whole-task usage outside these fresh test sessions is unknown.",
+    "Setup probes and the entire development conversation are not included in the two fixture token totals."
+  ],
+  "independent_review": {
+    "tool": "existing project OpenCode agent",
+    "model": "DeepSeek V4.1 Flash",
+    "scope": "read-only static review of entry, MCP, runtime, connection and CLI, plus focused follow-up",
+    "findings_fixed": [
+      "Observer failure now attempts all owned execution stops before releasing Root lock.",
+      "Ended failed/unconfirmed tasks accept explicit locked stop retry.",
+      "Invisible user-amendment boundary triggers controlled needs_user.",
+      "Stale checker cleanup error clears only when its recorded process group is confirmed absent."
+    ],
+    "remaining_blockers_reported": 0,
+    "limits": "Reviewer did not rerun model experiments or claim empirical provider behavior."
+  },
+  "installation": {
+    "version": {
+      "source": {
+        "kind": "local",
+        "commit": "d8905758bf73710d0d23a4576546db72ac3d993a",
+        "dirty": true
+      },
+      "content_digest": "2c68c30886d24d941abf8e0c0430c4dede5a2b4bc2515a9f1c58203cdbd7bc2f",
+      "installed_at": "2026-09-14T05:20:17Z",
+      "version": "0.2.0"
+    },
+    "files_match_checkout": 34,
+    "skill_matches_release": true,
+    "legacy_archive": "/Users/yangke/.local/share/orbit/retired-0.1.15-20260914",
+    "global_codex_config_modified": false
+  },
+  "verification": {
+    "npm_test": "passed; snapshot, task runtime, native connection, MCP ownership/CLI and four installation paths",
+    "changed_runtime_tests_after_final_guard": "passed",
+    "skill_validator": "passed",
+    "git_diff_check": "passed",
+    "package_files": 34
+  },
+  "cleanup": {
+    "completed_at": "2026-09-14T05:21:35.024492+00:00",
+    "experiment_root": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-native-entry-t2m10w55",
+    "native_services_stopped": true,
+    "heartbeat_pids_absent": true,
+    "herdr_fixture_pane_removed": "w1B:pA",
+    "tmux_fixture_server_removed": "orbit-acceptance-20260914",
+    "temporary_files_removed": true,
+    "main_development_root_preserved": true
+  }
+}

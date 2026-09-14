@@ -4,7 +4,7 @@
 
 本文件是**这个用户项目**的路由器，只放项目入口和按需规则路径。
 
-专项判据在 `rules/*.md`。共用职责、停下与交接只看 `rules/escalation-payload.md`。链接不等于加载；不要把规则正文抄进本文件。
+专项判据在 `rules/tasks/*.md`。共用职责、停下与交接只看 `rules/shared/escalation-payload.md`。链接不等于加载；不要把规则正文抄进本文件。
 
 把下面标成 `<PLACEHOLDER>` 的行换成这个项目自己的事实。
 不要填成别的仓库的目录、命令或产品定义。
@@ -41,13 +41,13 @@
 
 做下列动作前读取对应文件。表里只有触发和路径，不要在本文件复写判据。
 
-- 实现功能、重构、按当前任务改代码 → `rules/minimal-implementation.md`
-- 复现、隔离或修复一个失败症状 → `rules/targeted-fix.md`
-- 新增、修改、删除或为测试辩护 → `rules/test-selection.md`
-- 独立判断原始指令是否被满足，同时找漏做／做错／做多 → `rules/review.md`
-- 新增或重命名用户可见符号、文件、API、对外陈述 → `rules/vantage-audit.md`
-- 改 parser / resolver / validator / 状态机 / artifact writer / gate / tool 边界 → `rules/structured-boundary.md`
-- 改 CLI、安装、卸载、迁移、打包、release 资产 → `rules/mutating-surface.md`
-- 从原始指令整理成功标准 → `rules/quality-outcome.md`
+- 实现功能、重构、按当前任务改代码 → `rules/tasks/minimal-implementation.md`
+- 复现、隔离或修复一个失败症状 → `rules/tasks/targeted-fix.md`
+- 新增、修改、删除或为测试辩护 → `rules/tasks/test-selection.md`
+- 独立判断原始指令是否被满足，同时找漏做／做错／做多 → `rules/tasks/review.md`
+- 新增或重命名用户可见符号、文件、API、对外陈述 → `rules/tasks/vantage-audit.md`
+- 改 parser / resolver / validator / 状态机 / artifact writer / gate / tool 边界 → `rules/tasks/structured-boundary.md`
+- 改 CLI、安装、卸载、迁移、打包、release 资产 → `rules/tasks/mutating-surface.md`
+- 从原始指令整理成功标准 → `rules/tasks/quality-outcome.md`
 
 项目参考资料中的示例不自动成为执行规则。

@@ -4,7 +4,7 @@ description: Use when interpreting an original execution instruction into succes
 
 # 质量结果
 
-**所有权边界**：本文只拥有「成功标准是不是可判定的质量属性，以及哪些完成方式无效」。内部结构由程序整理。对照已有标准做检查归 `review`。实现归 `minimal-implementation`。停下与交接见 `rules/escalation-payload.md`。
+**所有权边界**：本文只拥有「成功标准是不是可判定的质量属性，以及哪些完成方式无效」。内部结构由程序整理。对照已有标准做检查归 `review`。实现归 `minimal-implementation`。停下与交接见 [共用职责](../shared/escalation-payload.md)。
 
 本文是判断依据，不是可以机械勾选的清单。复核只报告不修改。明确执行指令可以开工；不要为补结果表停下。
 

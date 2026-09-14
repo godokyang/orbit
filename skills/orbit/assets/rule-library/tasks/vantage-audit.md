@@ -4,7 +4,7 @@ description: Use when adding or renaming a user-visible symbol, file, API, or ou
 
 # 视角审计
 
-**所有权边界**：本文只拥有「对外命名和可独立阅读的交付说明，站在 HEAD 的读者能否解析」。最小变化归 `minimal-implementation`；评审目标归 `review`。停下、清理与交接见 `rules/escalation-payload.md`。
+**所有权边界**：本文只拥有「对外命名和可独立阅读的交付说明，站在 HEAD 的读者能否解析」。最小变化归 `minimal-implementation`；评审目标归 `review`。停下、清理与交接见 [共用职责](../shared/escalation-payload.md)。
 
 本文是判断依据，不是可以机械勾选的清单。复核只报告不修改。不要为了去掉过程味而删掉仍需核验的事实。普通实现不要为清理历史措辞加载本文。
 

@@ -6,15 +6,23 @@ Orbit 是独立的 Coding Agent 任务执行辅助工具，可用于任意项目
 
 安装并让 Agent 发现 [Orbit skill](skills/orbit/SKILL.md) 后，用户可以直接说“按这份需求文档实现整个流程”。对于已授权且值得独立监督的执行任务，Agent 应主动调用 Orbit，**不需要用户点名工具**；讨论、只读解释和简单局部修改通常直接处理。实际启动还需具备下述会话控制通道和已授权的检查模型。
 
-本地两条最小真实验收已通过：独立发现遗漏并由原 Root 修正、明确截止时间触发实际停止。验收使用专用 app-server，不代表普通终端会话已经可直接接入。验收范围见 [记录](docs/reference/orbit-runtime-acceptance-20260914.md)；这不代表已证明所有项目均能节省额度。当前工作区版本为 0.2.0，尚未发布。
+需要分工时，Root 使用 Orbit 的 `delegate` 创建本任务拥有的 Codex 执行成员，原始要求自动传递、结果自动回到 Root，停止时一并收尾；普通终端就能使用。Herdr、tmux 是可选的终端组织工具，见 [协作说明](skills/orbit/references/agent-collaboration.md)。
 
-## 第一版能接什么
+## 日常入口
 
-只支持**已经 loaded** 于 Codex 原生 Unix app-server 的现有会话。默认线程是当前 Agent 的 `CODEX_THREAD_ID`，默认控制插座是 `$CODEX_HOME/app-server-control/app-server-control.sock`（未设 `CODEX_HOME` 时为 `~/.codex/app-server-control/app-server-control.sock`）。
+安装后，在目标项目的终端中运行：
 
-普通 embedded TUI 没有即时停止接口。插座不存在或线程未在该 app-server 上 loaded 时，Orbit **拒绝接入**，不会新建 Root、自动 resume，也不会为绕过而启动 daemon。
+```bash
+orbit codex
+```
 
-若会话本身由 Codex 的 app-server 托管，那是 Codex 的会话托管，不是 Orbit 常驻平台。`orbit start` 只为**这一次任务**拉起陪伴进程，任务结束后退出。
+然后像平常一样说“按这份需求文档实现整个流程”。入口为当前 Codex TUI 准备本地原生服务和 Orbit MCP，Agent 可自主接入，用户不用填写 socket 或会话 ID。已有模型配置继续使用；检查模型可单独通过 `ORBIT_REVIEW_MODEL` 指定。只给 Orbit 自己的 MCP 工具配置自动批准，不修改全局 Codex 配置，也不放宽模型 shell 沙箱。
+
+Root 始终是这个正在执行的会话，Orbit 纠偏不换人。`orbit start` 只绑定已有会话；`orbit codex` 是用户明确选择的启动入口，两者职责不同。入口关闭会停止其任务、执行成员与原生后台命令，保留磁盘上的会话历史和产物。
+
+普通已经打开的嵌入式 Codex 没有已验证的热接入能力。可先结束／暂停当前工作，再由用户明确通过 `orbit codex resume SESSION_ID` 恢复原会话；程序不会自动搬迁。非 Codex Agent、外部未登记成员及脱管进程尚未纳入控制。普通终端、tmux 和 Herdr 使用同一入口。
+
+原生接口已在 Codex CLI 0.154.0 验证；这些接口仍有实验性变动，连接失败会明确报告。此前底层验收见 [记录](docs/reference/orbit-runtime-acceptance-20260914.md)，本轮自然触发、纠偏、成员统一停止和三种终端入口已按 [执行计划](docs/plan/user-experience-plan.md) 验证，[原始数据](docs/reference/user-flow-acceptance-20260914.json) 保留实际范围与成本，不以单测替代真实接入。当前版本 0.2.0 尚未发布。
 
 ## 怎么开始
 
@@ -39,7 +47,7 @@ orbit version --json
 
 `--bin-dir` / `--runtime-dir` / `--skill-dir` 也分别支持 `ORBIT_INSTALL_DIR` / `ORBIT_RUNTIME_DIR` / `ORBIT_SKILL_DIR`。runtime 未指定时使用 `$XDG_DATA_HOME/orbit/orbit`，没有 XDG 设置则为 `~/.local/share/orbit/orbit`。
 
-安装 CLI 不会给现有会话补上控制端点。启动任务前，须确认 Root 已加载在所指定的 Codex app-server 中；默认端点不存在时，只能指定该会话实际所在的 `--socket`，不能随意新建服务并假定原会话已接入。若 `orbit --help` 仍显示旧的 init/dispatch/evidence/gate，说明调用的是旧安装，先检查 `command -v orbit`。
+安装后用 `orbit codex` 打开新会话；支持原生接口的自定义宿主也可使用 `ORBIT_CODEX_SOCKET` 或 `--socket` 指定确实承载当前会话的端点。Agent 优先用 MCP 的 `context` 核对接入；命令行环境可用 `orbit doctor`。若 `orbit --help` 仍显示旧的 init/dispatch/evidence/gate，说明 PATH 指向旧安装，应先检查 `command -v orbit`。
 
 ### 更新与卸载
 
@@ -76,7 +84,7 @@ sh "$HOME/.local/share/orbit/task-runtime/current/uninstall.sh" \
 
 ## 执行任务
 
-原始指令用原生用户消息或明文文件，不另填需求表。`start` 可选 `--thread`、`--socket`、`--project`（默认分别为 `CODEX_THREAD_ID`、上述 app-server 插座、当前目录）：
+Agent 优先通过 Orbit MCP 执行以下等价操作，避免 shell 沙箱阻断控制连接。原始指令用原生用户消息或明文文件，不另填需求表。`start` 可选 `--thread`、`--socket`、`--project`（默认分别为 `CODEX_THREAD_ID`、`ORBIT_CODEX_SOCKET` 或 Codex 默认控制插座、当前目录）：
 
 ```bash
 # 最近一条用户消息作为原文；检查模型须是本机 `codex exec` 可用的 ID
@@ -90,7 +98,7 @@ orbit start --review-model MODEL --prompt-file ./instruction.txt \
   --deadline 2026-09-14T18:00:00Z --estimate-tokens 200000
 ```
 
-`--foreground` 把本次任务进程留在当前终端，直到任务结束。不加该选项时，`start` 打印 `task_directory` 和本次任务进程 pid。
+`--foreground` 把本次任务进程留在当前终端，直到任务结束。不加该选项时，`start` 打印 `task_directory`、本次任务进程 pid 和 `starting`；这只证明进程已创建，实际接入状态用 `orbit status` 核对。
 
 ```bash
 orbit status TASK_DIRECTORY
@@ -98,9 +106,10 @@ orbit check TASK_DIRECTORY          # 按约定时间循环之外，立刻排一
 orbit amend TASK_DIRECTORY --file FILE
 orbit dispute TASK_DIRECTORY --reason "争议点与依据"
 orbit stop TASK_DIRECTORY --reason "停止原因"
+orbit delegate TASK_DIRECTORY --file scope.txt --model MODEL
 ```
 
-`stop` / `check` / `amend` / `dispute` 成功时返回 `status: queued`，只表示命令已交给任务进程，**不等于**停止已确认、检查已完成或原文已生效。
+`stop` / `check` / `amend` / `dispute` / `delegate` 成功时返回 `status: queued`，只表示命令已交给任务进程，**不等于**停止已确认、检查已完成或原文已生效。
 
 ## 运行时不要误会的几件事
 
@@ -111,7 +120,7 @@ orbit stop TASK_DIRECTORY --reason "停止原因"
 
 ## 怎么判断进度
 
-看任务目录和 `orbit status` 的实际状态（如 `running` / `complete` / `paused` / `needs_user` / `failed` / `stop_unconfirmed`），不要只看聊天里的「完成了」。未检查、未停止、未验证要如实看待。`queued` 不是动作完成。
+通过 MCP `status` 或 `orbit status` 看任务目录和 的实际状态（如 `running` / `complete` / `paused` / `needs_user` / `failed` / `stop_unconfirmed`），不要只看聊天里的「完成了」。未检查、未停止、未验证要如实看待。`queued` 不是动作完成。
 
 ## 被其他工具调用
 

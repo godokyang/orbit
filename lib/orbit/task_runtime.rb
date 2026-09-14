@@ -6,6 +6,7 @@ require "time"
 require "shellwords"
 require_relative "task_record"
 require_relative "workspace_snapshot"
+require_relative "codex_connection"
 
 module Orbit
   class TaskRuntime
@@ -16,6 +17,8 @@ module Orbit
       @state = record.state
       @state["findings"] ||= {}
       @state["sent_message_ids"] ||= []
+      @state["members"] ||= []
+      @member_connections = {}
       @state["last_user_message_id"] ||= @state.dig("instruction_source", "id")
       @interval = @state.fetch("review").fetch("interval_seconds", 300)
       @next_check = Time.now.to_f + @interval
@@ -33,6 +36,7 @@ module Orbit
           unless File.realpath(host.fetch("cwd")) == @state.fetch("project_root")
             raise ArgumentError, "Root session belongs to a different project"
           end
+          @attached = true
           @initial_digest = WorkspaceSnapshot.fingerprint(project_root: @state.fetch("project_root"))
           @state["status"] = "running"
           @state["runtime_pid"] = Process.pid
@@ -47,6 +51,17 @@ module Orbit
             tick
             sleep 1 unless TERMINAL.include?(@state["status"])
           end
+        rescue StandardError => error
+          # Still inside the Root lock: a failed observer must attempt member
+          # cleanup before another task can acquire ownership of this Root.
+          @state["error"] = "#{error.class}: #{error.message}"
+          @record.event("runtime_error", "error" => @state["error"])
+          if @attached
+            stop("Orbit runtime failed: #{@state['error']}", status: "failed")
+          else
+            @state["status"] = "failed"
+            save
+          end
         end
       rescue StandardError => error
         @state["status"] = "failed"
@@ -54,8 +69,14 @@ module Orbit
         @record.event("runtime_error", "error" => @state["error"])
         save
       ensure
-        @checker.stop! if @running_check
-        @connection.close
+        begin
+          @checker.stop! if @running_check
+        rescue StandardError => error
+          record_cleanup_error(error)
+        ensure
+          @connection.close
+          @member_connections.each_value(&:close)
+        end
         @state["finished_at"] = Time.now.utc.iso8601
         @state["elapsed_seconds"] = Time.now - Time.parse(@state.fetch("created_at"))
         measured = @state.fetch("checks").filter_map { |check| check["usage"] }
@@ -78,10 +99,29 @@ module Orbit
       @stop_requested = true
     end
 
+    # Explicit cleanup after the observer has exited; never resumes execution.
+    # Locks prevent an old record from stopping a newer task on the same Root.
+    def retry_stop(reason)
+      @record.with_runtime_lock do
+        @record.with_root_lock(@state.dig("connection", "thread_id")) do
+          begin
+            @connection.connect!
+          rescue CodexConnection::Error
+            # confirmed_stop must still attempt every registered member.
+          end
+          verify_prior_check_exit
+          stop(reason)
+        ensure
+          @connection.close
+          @member_connections.each_value(&:close)
+        end
+      end
+      @state
+    end
+
     # A single event-loop step is also the deterministic test seam. Host and
     # checker doubles cannot turn these tests into real-model acceptance.
     def tick(now: Time.now.to_f)
-      consume_commands
       return if TERMINAL.include?(@state["status"])
       if @stop_requested
         stop("Runtime received an explicit stop request")
@@ -93,6 +133,15 @@ module Orbit
         return
       end
 
+      consume_commands
+      return if TERMINAL.include?(@state["status"])
+
+      host = @connection.state
+      if host["status"] == "idle" && host["last_turn_status"] == "interrupted"
+        stop("The user interrupted the Root turn")
+        return
+      end
+      collect_member_results
       host = @connection.state
       @connection.events.each do |event|
         next unless event["method"] == "thread/tokenUsage/updated"
@@ -131,6 +180,10 @@ module Orbit
 
     def consume_commands
       @record.commands do |command|
+        if TERMINAL.include?(@state["status"])
+          @record.event("command_rejected", "command_type" => command["type"], "reason" => "Task execution has stopped")
+          next
+        end
         case command.fetch("type")
         when "stop"
           stop(command.fetch("reason", "User requested stop"))
@@ -138,6 +191,8 @@ module Orbit
           add_amendment(command.fetch("text"), command.fetch("source"))
           sent = @connection.send_message("Orbit: the user explicitly amended this task:\n\n" + command.fetch("text"))
           @state["sent_message_ids"] << sent.fetch("id")
+        when "delegate"
+          delegate(command)
         when "check"
           @next_check = 0
         when "dispute"
@@ -155,7 +210,67 @@ module Orbit
       @record.write(relative, text)
       @state["amendments"] << { "path" => relative, "source" => source, "at" => Time.now.utc.iso8601 }
       @record.event("instruction_amended", "source" => source)
+      @state["members"].each do |member|
+        next unless member["status"] == "working"
+        member_connection(member).send_message("The user amended the original task. Apply only changes relevant to your delegated scope:\n\n" + text)
+      end
       @next_check = 0
+    end
+
+    def delegate(command)
+      instructions = "You are an execution member for an Orbit task. Work only on the delegated scope in this project. " \
+                     "Follow project rules. Do not start Orbit, create other agents, commit, or push. " \
+                     "Report concrete results and verification to the Root. Stop your background commands before finishing.\n\n" \
+                     "Original task inputs:\n#{JSON.pretty_generate(@record.inputs(@state))}\n\n" \
+                     "Delegated scope:\n#{command.fetch('text')}"
+      if command["member"]
+        member = @state["members"].find { |entry| entry["thread_id"] == command["member"] }
+        raise ArgumentError, "member is not owned by this task" unless member
+        member["status"] = "working"
+        save
+        member_connection(member).send_message(instructions)
+      else
+        model = command["model"] || @state.dig("review", "model")
+        id = @connection.create_member(model: model)
+        member = { "thread_id" => id, "model" => model, "status" => "starting" }
+        @state["members"] << member
+        # Persist ownership before this member can start any model/tool work.
+        save
+        @connection.start_member(id, instructions)
+        member["status"] = "working"
+      end
+      @record.event("member_delegated", "thread_id" => member["thread_id"], "scope" => command.fetch("text"))
+      save
+    end
+
+    def member_connection(member)
+      id = member.fetch("thread_id")
+      @member_connections[id] ||= @connection.member_connection(id)
+    end
+
+    def collect_member_results
+      @state["members"].each do |member|
+        next unless member["status"] == "working"
+        connection = member_connection(member)
+        state = connection.state
+        next unless state["status"] == "idle" && state["last_turn_id"] && state["last_turn_id"] != member["reported_turn"]
+
+        confirmation = connection.stop!
+        raise ArgumentError, "member did not confirm background execution stopped" unless confirmation["confirmed"]
+        member["status"] = state["last_turn_status"] == "completed" ? "completed" : "failed"
+        member["reported_turn"] = state["last_turn_id"]
+        member["result"] = state["observations"]
+        member["stop_confirmation"] = confirmation
+        sent = @connection.send_message("Orbit execution member result (not a new user requirement). " \
+          "Review and integrate against the original task; continue in this same Root session.\n\n" + JSON.pretty_generate(member))
+        @state["sent_message_ids"] << sent.fetch("id")
+        @record.event("member_result", "thread_id" => member["thread_id"], "status" => member["status"])
+        save
+      end
+    end
+
+    def members_settled?
+      @state["members"].all? { |member| %w[completed failed].include?(member["status"]) }
     end
 
     def collect_amendments
@@ -168,7 +283,8 @@ module Orbit
         save
         return false if gap["reason"] == "pending_delivery"
 
-        raise ArgumentError, "cannot observe user changes: #{gap['detail']}"
+        stop("Cannot observe user changes: #{gap['detail']}", status: "needs_user")
+        return false
       end
       messages.each do |message|
         unless @state["sent_message_ids"].include?(message.fetch("id"))
@@ -198,6 +314,7 @@ module Orbit
         directory: snapshot.fetch("snapshot_path"), inputs: @record.inputs(@state),
         context: {
           "root" => host, "findings" => @state.fetch("findings"),
+          "execution_members" => @state["members"],
           "decisions" => @state.fetch("decisions"), "dispute" => @state["dispute"],
           "estimate" => @state.fetch("estimate"), "hard_deadline" => @state["hard_deadline"],
           "elapsed_seconds" => now - Time.parse(@state.fetch("created_at")).to_f,
@@ -264,6 +381,7 @@ module Orbit
       case result.fetch("verdict")
       when "complete"
         if host["status"] == "idle" && host["last_turn_status"] == "completed" &&
+           members_settled? &&
            @state["findings"].values.none? { |finding| finding["status"] == "open" }
           confirmation = confirmed_stop
           @state["stop_confirmation"] = confirmation
@@ -278,7 +396,7 @@ module Orbit
             @next_check = now
           end
         else
-          @state["observation_pending"] = { "reason" => "Completion needs an idle Root and all delivery findings resolved" }
+          @state["observation_pending"] = { "reason" => "Completion needs an idle Root, settled execution members and all delivery findings resolved" }
         end
       when "correct"
         send_correction(result)
@@ -303,9 +421,17 @@ module Orbit
     end
 
     def stop(reason, status: "paused")
-      @checker.stop! if @running_check
+      checker_error = @state["cleanup_error"]
+      begin
+        @checker.stop! if @running_check
+      rescue StandardError => error
+        checker_error = error.message
+        record_cleanup_error(error)
+      end
       @running_check = nil
       confirmation = confirmed_stop
+      @state["execution_stop_confirmation"] = confirmation if checker_error
+      raise ArgumentError, "Checker stop unconfirmed: #{checker_error}" if checker_error
       @state["stop_confirmation"] = confirmation
       @state["status"] = status
       @state["stop_reason"] = reason
@@ -319,10 +445,48 @@ module Orbit
       save
     end
 
-    def confirmed_stop
-      confirmation = @connection.stop!
-      raise ArgumentError, "host did not confirm actual stop" unless confirmation["confirmed"] == true
+    def record_cleanup_error(error)
+      @state["cleanup_error"] = error.message
+      @state["unconfirmed_check_run"] = "checks/#{@running_check.fetch('number')}/run.json" if @running_check
+    end
 
+    def verify_prior_check_exit
+      return unless @state["cleanup_error"] && @state["unconfirmed_check_run"]
+      run = JSON.parse(File.read(File.join(@record.path, @state["unconfirmed_check_run"])))
+      pgid = Integer(run.fetch("pgid"))
+      return unless pgid.positive?
+      Process.kill(0, -pgid)
+    rescue Errno::ESRCH
+      @state.delete("cleanup_error")
+      @state.delete("unconfirmed_check_run")
+      @record.event("checker_stop_verified", "pgid" => pgid, "reason" => "Recorded process group no longer exists")
+    rescue SystemCallError, JSON::ParserError, KeyError, ArgumentError
+      # Missing evidence or a still-existing group cannot be relabeled stopped.
+      nil
+    end
+
+    def confirmed_stop
+      failures = []
+      begin
+        confirmation = @connection.stop!
+        failures << "Root did not confirm actual stop" unless confirmation["confirmed"] == true
+      rescue StandardError => error
+        failures << "Root: #{error.message}"
+      end
+      members = @state["members"].map do |member|
+        begin
+          result = member_connection(member).stop!
+          failures << "Member #{member['thread_id']} did not confirm actual stop" unless result["confirmed"] == true
+          member["stop_confirmation"] = result
+          { "thread_id" => member["thread_id"], "confirmation" => result }
+        rescue StandardError => error
+          failures << "Member #{member['thread_id']}: #{error.message}"
+          { "thread_id" => member["thread_id"], "error" => error.message }
+        end
+      end
+      @state["member_stop_results"] = members
+      raise ArgumentError, failures.join("; ") unless failures.empty?
+      confirmation["members"] = members unless members.empty?
       confirmation
     end
   end

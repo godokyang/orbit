@@ -4,7 +4,7 @@ description: Use when changing a CLI, installer, uninstall/cleanup, migration, p
 
 # 可变命令表面
 
-**所有权边界**：本文只拥有「本次改动触及的命令／安装／发布表面有没有被真实路径证明」。库测试取舍归 `test-selection`。停下与交接见 `rules/escalation-payload.md`。
+**所有权边界**：本文只拥有「本次改动触及的命令／安装／发布表面有没有被真实路径证明」。库测试取舍归 `test-selection`。停下与交接见 [共用职责](../shared/escalation-payload.md)。
 
 本文是判断依据，不是可以机械勾选的清单。复核只报告不修改。不要把一次局部修改扩成完整发布或恢复验收。
 
