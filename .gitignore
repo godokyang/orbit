@@ -7,3 +7,4 @@ test_apps/
 .claude/
 .copilot/
 node_modules/
+/docs/reference/zeen-orbit-handoff-20260913/
