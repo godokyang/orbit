@@ -1,15 +1,16 @@
 {
   "name": "@godokyang/orbit",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "lockfileVersion": 3,
   "requires": true,
   "packages": {
     "": {
       "name": "@godokyang/orbit",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "dependencies": {
         "@modelcontextprotocol/sdk": "1.30.0",
-        "ws": "8.21.3"
+        "ws": "8.21.3",
+        "zod": "4.6.5"
       },
       "bin": {
         "orbit": "scripts/orbit"

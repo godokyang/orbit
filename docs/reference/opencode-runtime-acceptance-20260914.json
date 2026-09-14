@@ -1,0 +1,597 @@
+{
+  "date": "2026-09-14",
+  "production_support": true,
+  "version": "0.3.0",
+  "versions": {
+    "opencode": "1.18.30",
+    "codex": "0.154.0"
+  },
+  "scope": {
+    "root": "OpenCode",
+    "members": "OpenCode, same host",
+    "reviewer": "Codex/gpt-6-astra",
+    "execution_model": "opencode-go/deepseek-v4.1-flash",
+    "not_claimed": [
+      "Other hosts or mixed-host members",
+      "Arbitrary detached processes",
+      "Universal autonomous trigger or quota savings",
+      "Hot attachment of a session that started without the plugin",
+      "Hard-killed host recovery"
+    ]
+  },
+  "fixture": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-opencode-production-20260914-4uc98uhc",
+  "entry": {
+    "command": "opencode --model opencode-go/deepseek-v4.1-flash --prompt <ordinary original requirement>",
+    "installed_plugin": "config/opencode/plugins/orbit.js -> runtime/current/plugins/opencode.mjs",
+    "manual_port": false,
+    "manual_session_id_for_start": false,
+    "fixture_project_AGENTS": false,
+    "account_configuration_changed": false,
+    "native_resume": "opencode --session ses_f60f07dcfffeHLHcrG8uS12Yfm"
+  },
+  "correction": {
+    "task_directory": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-opencode-production-20260914-4uc98uhc/final-project/.orbit/tasks/c702bf32-e771-4d47-84d4-b930e664586d",
+    "original": "Implement requirements.md completely. Use one execution member to verify the requested behaviors independently and integrate its findings.",
+    "source": {
+      "kind": "opencode_user_message",
+      "id": "msg_09f123651001gI1SUaNfiB4mg5"
+    },
+    "basis": [
+      {
+        "source": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-opencode-production-20260914-4uc98uhc/final-project/requirements.md",
+        "path": "basis/0-requirements.md",
+        "sha256": "f593a5d1768b0fea12c34c99953712c24861ffe5e5f8ec6140291e4185365e02"
+      }
+    ],
+    "controlled_omission": {
+      "at": 1789375227.2403011,
+      "native_state": {
+        "thread_id": "ses_f60edcb0cffeYPSaCUoWjB5hlk",
+        "cwd": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-opencode-production-20260914-4uc98uhc/final-project",
+        "status": "idle",
+        "status_detail": {
+          "type": "idle"
+        },
+        "turn_id": null,
+        "last_turn_id": "msg_09f131ac5001X1a4H6zgZz08ah",
+        "last_turn_status": "completed",
+        "observations": [
+          {
+            "kind": "agent_message",
+            "text": "Requirements implemented; independent verification returned all items PASS with no deviations, so no corrections were needed.\n\nDeliverables:\n- `greet.py` — one name arg prints `Hello, <trimmed name>!`; blank input (missing or whitespace-only) exits `2` and writes an error to stderr; stdlib-only (`sys`), 18 lines.\n- `USAGE.md` — normal example plus blank-input example, matching actual behavior.\n\nVerified behaviors: `python3 greet.py Ada` → `Hello, Ada!` (exit 0); `'  Ada  '` trims to same; no-arg and whitespace-only → exit 2 with stderr-only message and empty stdout; extra args also rejected with exit 2. No files modified by the verifier and no stray artifacts."
+          }
+        ],
+        "active_tools": 0
+      },
+      "task_status": "running",
+      "action": "Removed USAGE.md only after member integration and Root idle; no user or control message sent to Root"
+    },
+    "checks": [
+      {
+        "number": 1,
+        "stale": true,
+        "verdict": "correct",
+        "reason": "The small, standard-library-only implementation passes direct checks for trimmed names and blank input. No AGENTS.md exists inside the snapshot. Documentation and the requested execution-member verification remain outstanding; continuing is worthwhile while Root is active.",
+        "usage": {
+          "input_tokens": 89343,
+          "cached_input_tokens": 66176,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 469,
+          "reasoning_output_tokens": 22
+        }
+      },
+      {
+        "number": 2,
+        "stale": true,
+        "verdict": "complete",
+        "reason": "The snapshot satisfies requirements.md: greet.py is small and standard-library-only; direct checks confirm normal and trimmed greetings, plus nonzero exits with helpful stderr for empty and whitespace-only names. USAGE.md examples match actual behavior. No AGENTS.md files exist inside the snapshot. The execution record confirms one independent member verified the behaviors and Root integrated its findings. Root has finished; no missing, incorrect, or unnecessary work was found.",
+        "usage": {
+          "input_tokens": 117225,
+          "cached_input_tokens": 92288,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 514,
+          "reasoning_output_tokens": 11
+        }
+      },
+      {
+        "number": 3,
+        "stale": false,
+        "verdict": "correct",
+        "reason": "The small, standard-library-only CLI passes normal, trimmed-name and blank-input checks. One execution member verified behaviors and Root integrated its report. However, the fixed snapshot lacks the explicitly required USAGE.md despite both reports claiming it exists. No AGENTS.md files were present in the snapshot. Completing the missing documentation remains worthwhile.",
+        "usage": {
+          "input_tokens": 92870,
+          "cached_input_tokens": 68480,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 459,
+          "reasoning_output_tokens": 17
+        }
+      },
+      {
+        "number": 4,
+        "stale": false,
+        "verdict": "complete",
+        "reason": "The fixed snapshot satisfies requirements.md: greet.py is small and standard-library-only; direct checks confirm normal and trimmed greetings, plus nonzero blank-input exits with helpful stderr errors. USAGE.md now exists with accurate normal and blank examples, resolving missing-usage-document. The required execution member completed independent verification, and Root integrated the correction. Root is idle with its turn completed. No snapshot AGENTS.md files or remaining scope gaps were found; further work is unnecessary.",
+        "usage": {
+          "input_tokens": 94116,
+          "cached_input_tokens": 69504,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 608,
+          "reasoning_output_tokens": 25
+        }
+      }
+    ],
+    "findings": {
+      "missing-usage-document": {
+        "id": "missing-usage-document",
+        "requirement": "Add USAGE.md with a normal example and a blank input example.",
+        "evidence": "The fixed snapshot contains only greet.py and requirements.md; directory listing and recursive search confirm USAGE.md is absent.",
+        "action": "Add USAGE.md with normal and blank-input commands, expected output and the blank case’s nonzero exit status; verify the file is included in the delivered artifact.",
+        "status": "resolved",
+        "check": 3,
+        "resolution": "The fixed snapshot satisfies requirements.md: greet.py is small and standard-library-only; direct checks confirm normal and trimmed greetings, plus nonzero blank-input exits with helpful stderr errors. USAGE.md now exists with accurate normal and blank examples, resolving missing-usage-document. The required execution member completed independent verification, and Root integrated the correction. Root is idle with its turn completed. No snapshot AGENTS.md files or remaining scope gaps were found; further work is unnecessary.",
+        "resolution_version": "sha256:0c96ce719148cfaf7ed5415d574a81eb31265262bb93dd77a0d0d3a1dee3f032",
+        "resolution_input": "3357ad0db6a12f92211173c8b6150053ec67d0914b1def1b9e9dba4d464fa9d0"
+      }
+    },
+    "status": "complete",
+    "elapsed_seconds": 173.374908,
+    "stop_confirmation": {
+      "confirmed": true,
+      "thread_id": "ses_f60edcb0cffeYPSaCUoWjB5hlk",
+      "scope": "Native session execution and its attached shell process trees; no unmanaged detached work",
+      "status_after": "idle",
+      "active_tools_after": 0,
+      "members": [
+        {
+          "thread_id": "ses_f60ed3b01ffeFflLYwRnB4d5q9",
+          "confirmation": {
+            "confirmed": true,
+            "thread_id": "ses_f60ed3b01ffeFflLYwRnB4d5q9",
+            "scope": "Native session execution and its attached shell process trees; no unmanaged detached work",
+            "status_after": "idle",
+            "active_tools_after": 0
+          }
+        }
+      ]
+    },
+    "internal_messages_became_amendments": false,
+    "native_sessions": [
+      {
+        "id": "ses_f60edcb0cffeYPSaCUoWjB5hlk",
+        "exists": true,
+        "actual_assistant_models": [
+          "opencode-go/deepseek-v4.1-flash"
+        ],
+        "assistant_response_cost_sum": 0.007902228,
+        "assistant_tokens": [
+          {
+            "input": 11241,
+            "output": 69,
+            "reasoning": 17,
+            "cache": {
+              "write": 0,
+              "read": 0
+            }
+          },
+          {
+            "input": 206,
+            "output": 89,
+            "reasoning": 6,
+            "cache": {
+              "write": 0,
+              "read": 11264
+            }
+          },
+          {
+            "input": 199,
+            "output": 37,
+            "reasoning": 31,
+            "cache": {
+              "write": 0,
+              "read": 11520
+            }
+          },
+          {
+            "input": 2609,
+            "output": 193,
+            "reasoning": 20,
+            "cache": {
+              "write": 0,
+              "read": 11776
+            }
+          },
+          {
+            "input": 2627,
+            "output": 37,
+            "reasoning": 41,
+            "cache": {
+              "write": 0,
+              "read": 14592
+            }
+          },
+          {
+            "input": 246,
+            "output": 106,
+            "reasoning": 77,
+            "cache": {
+              "write": 0,
+              "read": 17152
+            }
+          },
+          {
+            "input": 201,
+            "output": 136,
+            "reasoning": 371,
+            "cache": {
+              "write": 0,
+              "read": 17536
+            }
+          },
+          {
+            "input": 205,
+            "output": 219,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 18176
+            }
+          },
+          {
+            "input": 184,
+            "output": 240,
+            "reasoning": 13,
+            "cache": {
+              "write": 0,
+              "read": 18432
+            }
+          },
+          {
+            "input": 197,
+            "output": 258,
+            "reasoning": 49,
+            "cache": {
+              "write": 0,
+              "read": 18688
+            }
+          },
+          {
+            "input": 229,
+            "output": 136,
+            "reasoning": 73,
+            "cache": {
+              "write": 0,
+              "read": 19072
+            }
+          },
+          {
+            "input": 191,
+            "output": 304,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 19456
+            }
+          },
+          {
+            "input": 146,
+            "output": 368,
+            "reasoning": 279,
+            "cache": {
+              "write": 0,
+              "read": 19840
+            }
+          },
+          {
+            "input": 137,
+            "output": 125,
+            "reasoning": 152,
+            "cache": {
+              "write": 0,
+              "read": 20608
+            }
+          },
+          {
+            "input": 552,
+            "output": 97,
+            "reasoning": 58,
+            "cache": {
+              "write": 0,
+              "read": 20992
+            }
+          },
+          {
+            "input": 803,
+            "output": 55,
+            "reasoning": 70,
+            "cache": {
+              "write": 0,
+              "read": 21632
+            }
+          },
+          {
+            "input": 198,
+            "output": 134,
+            "reasoning": 143,
+            "cache": {
+              "write": 0,
+              "read": 22528
+            }
+          },
+          {
+            "input": 226,
+            "output": 171,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 22912
+            }
+          },
+          {
+            "input": 406,
+            "output": 89,
+            "reasoning": 82,
+            "cache": {
+              "write": 0,
+              "read": 23296
+            }
+          },
+          {
+            "input": 173,
+            "output": 50,
+            "reasoning": 296,
+            "cache": {
+              "write": 0,
+              "read": 23808
+            }
+          },
+          {
+            "input": 258,
+            "output": 258,
+            "reasoning": 266,
+            "cache": {
+              "write": 0,
+              "read": 24320
+            }
+          },
+          {
+            "input": 158,
+            "output": 159,
+            "reasoning": 10,
+            "cache": {
+              "write": 0,
+              "read": 24960
+            }
+          },
+          {
+            "input": 170,
+            "output": 133,
+            "reasoning": 124,
+            "cache": {
+              "write": 0,
+              "read": 25216
+            }
+          }
+        ],
+        "orbit_actions": [
+          "context",
+          "start",
+          "delegate",
+          "delegate",
+          "status"
+        ],
+        "internal_messages_marked": 2
+      },
+      {
+        "id": "ses_f60ed3b01ffeFflLYwRnB4d5q9",
+        "exists": true,
+        "actual_assistant_models": [
+          "opencode-go/deepseek-v4.1-flash"
+        ],
+        "assistant_response_cost_sum": 0.00322263,
+        "assistant_tokens": [
+          {
+            "input": 10632,
+            "output": 288,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 0
+            }
+          },
+          {
+            "input": 894,
+            "output": 426,
+            "reasoning": 16,
+            "cache": {
+              "write": 0,
+              "read": 10880
+            }
+          },
+          {
+            "input": 673,
+            "output": 174,
+            "reasoning": 226,
+            "cache": {
+              "write": 0,
+              "read": 12160
+            }
+          },
+          {
+            "input": 164,
+            "output": 87,
+            "reasoning": 61,
+            "cache": {
+              "write": 0,
+              "read": 13184
+            }
+          },
+          {
+            "input": 242,
+            "output": 57,
+            "reasoning": 37,
+            "cache": {
+              "write": 0,
+              "read": 13440
+            }
+          },
+          {
+            "input": 244,
+            "output": 470,
+            "reasoning": 0,
+            "cache": {
+              "write": 0,
+              "read": 13696
+            }
+          }
+        ],
+        "orbit_actions": [],
+        "internal_messages_marked": 1
+      }
+    ],
+    "artifact_sha256": {
+      "greet.py": "54a24979256925f6a90e415daf70cfe416b12cca5000b9bef429d59c3997d8c1",
+      "USAGE.md": "823230489a9587dba63d5befc051646b397e05d7c4bec83a6547454761139c64",
+      "requirements.md": "f593a5d1768b0fea12c34c99953712c24861ffe5e5f8ec6140291e4185365e02"
+    }
+  },
+  "native_interruption": {
+    "method": "Two physical ESC keys on ordinary no-port OpenCode TUI through PTY, 500ms apart",
+    "root_session": "ses_f60f07dcfffeHLHcrG8uS12Yfm",
+    "members": [
+      "ses_f60f02dd3fferTPQVr3MtEA2s6"
+    ],
+    "state": "paused",
+    "reason": "The user interrupted the Root turn",
+    "confirmation": {
+      "confirmed": true,
+      "thread_id": "ses_f60f07dcfffeHLHcrG8uS12Yfm",
+      "scope": "Native session execution and its attached shell process trees; no unmanaged detached work",
+      "status_after": "idle",
+      "active_tools_after": 0,
+      "members": [
+        {
+          "thread_id": "ses_f60f02dd3fferTPQVr3MtEA2s6",
+          "confirmation": {
+            "confirmed": true,
+            "thread_id": "ses_f60f02dd3fferTPQVr3MtEA2s6",
+            "scope": "Native session execution and its attached shell process trees; no unmanaged detached work",
+            "status_after": "idle",
+            "active_tools_after": 0
+          }
+        }
+      ]
+    },
+    "pids": [
+      69986,
+      69987,
+      69974,
+      69975
+    ],
+    "all_pids_gone": true,
+    "heartbeats_stable": true,
+    "session_history_preserved": true
+  },
+  "native_host_exit": {
+    "method": "Native --session resume, user instruction through TUI, Ctrl-C normal interface exit while Root and member shells running",
+    "same_root_session": "ses_f60f07dcfffeHLHcrG8uS12Yfm",
+    "state": "paused",
+    "confirmation": {
+      "confirmed": true,
+      "thread_id": "ses_f60f07dcfffeHLHcrG8uS12Yfm",
+      "scope": "Native session execution and its attached shell process trees; no unmanaged detached work",
+      "status_after": "idle",
+      "active_tools_after": 0,
+      "members": [
+        {
+          "thread_id": "ses_f60ed0190ffe7y8fnkRWzXw72Y",
+          "confirmation": {
+            "confirmed": true,
+            "thread_id": "ses_f60ed0190ffe7y8fnkRWzXw72Y",
+            "scope": "Native session execution and its attached shell process trees; no unmanaged detached work",
+            "status_after": "idle",
+            "active_tools_after": 0
+          }
+        }
+      ]
+    },
+    "pids": [
+      73389,
+      73390,
+      73315,
+      73316
+    ],
+    "all_pids_gone": true,
+    "socket_removed": true
+  },
+  "regression": [
+    "npm test: existing snapshot/runtime/Codex/MCP and four installer paths; new native bridge integration",
+    "skill-creator quick_validate: valid (isolated uv PyYAML)",
+    "npm pack --dry-run includes plugin, native connection and shared skill"
+  ],
+  "independent_review": {
+    "session": "ses_f60f2d702ffeuajueTxaGCdOed",
+    "model": "opencode-go/deepseek-v4.1-flash",
+    "status": "passed with targeted recheck",
+    "raw_log": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-opencode-production-20260914-4uc98uhc/independent-review.jsonl",
+    "conclusion": "No remaining blocker within the frozen OpenCode scope. Interruption survives an immediately busy next turn; native configuration directory and agent/model/variant are preserved; regression is wired into npm test. Explicitly disabled endpoints remain disabled by documented policy.",
+    "recheck_log": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-opencode-production-20260914-4uc98uhc/independent-recheck.jsonl",
+    "assistant_response_cost_sum": 0.135653784,
+    "assistant_input_tokens_sum": 364852,
+    "assistant_cached_read_tokens_sum": 9267328,
+    "assistant_output_tokens_sum": 10152
+  },
+  "lessons": [
+    "OpenCode automatically scans .js/.ts plugin entries; an .mjs installation link was not discovered. Fixed the installed entry to orbit.js.",
+    "First pilot completed but repeatedly polled status and invalidated checks; start/status tool replies now explicitly say to end the turn and await automatic corrections.",
+    "Controlled omission was repeated only in a fresh acceptance task, after Root ended and its member result was integrated, to isolate the independent checker from member detection.",
+    "Execution members preserve native agent as well as model/variant and project/session permissions; covered by bridge regression."
+  ],
+  "usage_limits": {
+    "estimate": "2–4 hours for implementation and acceptance; advisory",
+    "total_implementation_time": "not continuously measured",
+    "task_wide_tokens": null,
+    "actual_invoice_or_plan_charge": null,
+    "note": "Native costs are response metadata, not bills. Acceptance, earlier pilots and code review have separate usage; no general quota-saving claim."
+  },
+  "cleanup": {
+    "owned_heartbeats_gone": true,
+    "task_runtimes_finished": true,
+    "TUI_hosts_closed": true,
+    "fixtures_and_native_history_retained": true,
+    "commit_push_publish": false,
+    "independent_reviewer_finished": true
+  },
+  "implementation_after_live_acceptance": {
+    "changes": [
+      "Latch native task interruption even when a new turn is busy",
+      "Honor OPENCODE_CONFIG_DIR for new installations",
+      "Preserve native agent on member create/start"
+    ],
+    "validation": "Full npm test passed after these changes; independent targeted recheck passed. The complete live acceptance used the same runtime and plugin before these narrow fixes; no claim of rerunning every model path afterward."
+  },
+  "local_installation": {
+    "version": "0.3.0",
+    "content_digest": "b614714a7dd707db8915efd96d66f1db8df15b27d8dfa7d1211863e9fd5dc47f",
+    "installed_at": "2026-09-14T08:49:25Z",
+    "source": {
+      "kind": "local",
+      "commit": "5d6f7e7930619d41108bfaa56e953bbc7aac6928",
+      "dirty": true
+    },
+    "checked_payload_matches_worktree": [
+      "plugins/opencode.mjs",
+      "lib/orbit/opencode_connection.rb",
+      "lib/orbit/task_runtime.rb",
+      "lib/orbit/cli.rb",
+      "scripts/manage-install.rb",
+      "skills/orbit/SKILL.md",
+      "package.json",
+      "npm-shrinkwrap.json"
+    ],
+    "native_discovery": {
+      "skill": "/Users/yangke/.config/opencode/skills/orbit/SKILL.md",
+      "plugin": "/Users/yangke/.config/opencode/plugins/orbit.js",
+      "skill_supports_opencode": true
+    }
+  }
+}

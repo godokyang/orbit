@@ -6,7 +6,7 @@ require "time"
 require "shellwords"
 require_relative "task_record"
 require_relative "workspace_snapshot"
-require_relative "codex_connection"
+require_relative "connection"
 
 module Orbit
   class TaskRuntime
@@ -106,7 +106,7 @@ module Orbit
         @record.with_root_lock(@state.dig("connection", "thread_id")) do
           begin
             @connection.connect!
-          rescue CodexConnection::Error
+          rescue Connection::Error
             # confirmed_stop must still attempt every registered member.
           end
           verify_prior_check_exit
@@ -133,14 +133,13 @@ module Orbit
         return
       end
 
-      consume_commands
-      return if TERMINAL.include?(@state["status"])
-
       host = @connection.state
-      if host["status"] == "idle" && host["last_turn_status"] == "interrupted"
+      if host["interrupted"] || (host["status"] == "idle" && host["last_turn_status"] == "interrupted")
         stop("The user interrupted the Root turn")
         return
       end
+      consume_commands
+      return if TERMINAL.include?(@state["status"])
       collect_member_results
       host = @connection.state
       @connection.events.each do |event|
@@ -230,7 +229,7 @@ module Orbit
         save
         member_connection(member).send_message(instructions)
       else
-        model = command["model"] || @state.dig("review", "model")
+        model = command["model"] || (@connection.default_member_model if @connection.respond_to?(:default_member_model)) || @state.dig("review", "model")
         id = @connection.create_member(model: model)
         member = { "thread_id" => id, "model" => model, "status" => "starting" }
         @state["members"] << member
@@ -287,8 +286,9 @@ module Orbit
         return false
       end
       messages.each do |message|
-        unless @state["sent_message_ids"].include?(message.fetch("id"))
-          add_amendment(message.fetch("text"), { "kind" => "codex_user_message", "id" => message.fetch("id") })
+        unless message["internal"] || @state["sent_message_ids"].include?(message.fetch("id"))
+          kind = @connection.respond_to?(:instruction_source_kind) ? @connection.instruction_source_kind : "codex_user_message"
+          add_amendment(message.fetch("text"), { "kind" => kind, "id" => message.fetch("id") })
         end
         @state["last_user_message_id"] = message.fetch("id")
       end

@@ -18,6 +18,20 @@ module Orbit
   # never guesses prices, and never turns a failed or malformed model response
   # into a pass.
   class CheckRunner
+    # Only the top-level Codex model is used as the review default. OpenCode
+    # provider/model IDs must never be passed to a Codex reviewer.
+    def self.configured_model
+      path = File.join(ENV.fetch("CODEX_HOME", File.join(Dir.home, ".codex")), "config.toml")
+      return nil unless File.file?(path)
+      File.foreach(path) do |line|
+        break if line.lstrip.start_with?("[")
+        match = line.match(/^\s*model\s*=\s*("(?:[^"\\]|\\.)*"|'[^']*')\s*(?:#.*)?$/)
+        next unless match
+        return match[1].start_with?("\"") ? JSON.parse(match[1]) : match[1][1...-1]
+      end
+      nil
+    end
+
     ROLES = %w[reviewer adjudicator].freeze
     VERDICTS = %w[continue correct pause complete needs_user].freeze
     FINDING_KEYS = %w[id requirement evidence action].freeze

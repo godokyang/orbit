@@ -7,8 +7,8 @@
 ## 产品接入 vs 协作工具
 
 - 检查模型优先采用 `--review-model` / `ORBIT_REVIEW_MODEL`，否则沿用当前 Codex 配置的模型。检查通过本机 `codex exec`，裁定使用同一模型的独立会话。
-- `delegate` 成员默认沿用检查模型；Root 可在已有授权范围内指定 `model`（CLI 为 `--model`）。当前受控执行成员也只接 Codex，外部模型不能直接填入这个参数。
-- GLM、DeepSeek、OpenCode、OMP 等是 Root **已经在用的**协作工具选项，用来派人做实现或对照，不是 Orbit 已提供的供应商 adapter。没有适配的通道不要写成「Orbit 已能观察和停止该 Agent」。
+- `delegate` 创建与 Root 同宿主的成员。Codex 成员默认使用检查模型；OpenCode 成员默认沿用 Root 的 provider/model 和 variant，也可指定已授权的 `provider/model`。尚不支持混合宿主成员。OpenCode Root 的默认检查模型从本机 Codex config.toml 顶层读取，或显式设置 `ORBIT_REVIEW_MODEL`。
+- OpenCode 原生插件可接入用户已经配置的模型；本轮实际验证的是 `opencode-go/deepseek-v4.1-flash`，不能省略 `.1` 或把供应商换成直连／Zen。其他 OpenCode 模型不逐一保证；OMP 等宿主尚未接入。
 - 不自动启用未授权供应商或最高推理档，不因建议表替换当前 Root 会话。
 
 ## 起步搭配

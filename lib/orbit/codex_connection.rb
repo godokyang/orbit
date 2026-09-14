@@ -6,6 +6,7 @@ require "securerandom"
 require "socket"
 require "thread"
 require_relative "version"
+require_relative "connection"
 
 module Orbit
   # Orbit task runtime R5a: minimal native connection to an EXISTING Codex
@@ -48,7 +49,9 @@ module Orbit
     OBSERVATION_ITEM_LIMIT = 40
     OBSERVATION_TEXT_LIMIT = 2_000
 
-    class Error < StandardError; end
+    class Error < Connection::Error; end
+
+    def instruction_source_kind = "codex_user_message"
 
     # Socket missing, connect failed, or the target thread is not hosted on
     # the reachable app-server (for example an ordinary embedded TUI).

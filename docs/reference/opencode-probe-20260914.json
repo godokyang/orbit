@@ -1,0 +1,530 @@
+{
+  "date": "2026-09-14",
+  "kind": "opencode-integration-feasibility-probe",
+  "production_support": false,
+  "status": "feasibility_probe_passed_not_production_support",
+  "version": "1.18.30",
+  "scope": "Official OpenCode plugin + native TUI/API + bounded experimental controllers. Existing Orbit WorkspaceSnapshot and CheckRunner reused for two independent checks. No production OpenCode adapter, installer or TaskRuntime integration implemented.",
+  "fixture_directory": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-opencode-probe-20260914-yk9z8c82",
+  "owned_sessions": [
+    "ses_f613488f4ffeRuRZGEmSNASVyP",
+    "ses_f61338f7bffeS9wnM0q7GE3ZQE"
+  ],
+  "model_attempt": {
+    "provider": "deepseek",
+    "model": "deepseek-v4-flash",
+    "error": "Insufficient Balance",
+    "http_status": 402,
+    "automatic_fallback": false,
+    "completed_model_turns": 0,
+    "reported_tokens": {
+      "input": 0,
+      "output": 0,
+      "reasoning": 0,
+      "cache": {
+        "read": 0,
+        "write": 0
+      }
+    },
+    "reported_cost": 0,
+    "whole_task_cost": "unknown"
+  },
+  "entry": {
+    "ordinary_tui_with_port": true,
+    "ordinary_resume_without_port": true,
+    "same_session_id": true,
+    "original_instruction_preserved": true,
+    "plugin_client_errors": [
+      null,
+      null
+    ],
+    "reported_default_url": "http://localhost:4096/",
+    "default_url_is_not_verified_external_endpoint": true,
+    "mini_with_port": "CLI rejected --port with --mini; mini integration untested"
+  },
+  "root_only_api_abort": {
+    "processes": [
+      {
+        "file": "root.child.pid",
+        "pid": 7760,
+        "alive": false
+      },
+      {
+        "file": "root.parent.pid",
+        "pid": 7758,
+        "alive": false
+      },
+      {
+        "file": "member.parent.pid",
+        "pid": 7759,
+        "alive": true
+      },
+      {
+        "file": "member.child.pid",
+        "pid": 7761,
+        "alive": true
+      }
+    ],
+    "status": {
+      "ses_f61338f7bffeS9wnM0q7GE3ZQE": {
+        "type": "busy"
+      }
+    }
+  },
+  "explicit_member_api_abort": {
+    "processes": [
+      {
+        "file": "root.child.pid",
+        "pid": 7760,
+        "alive": false
+      },
+      {
+        "file": "root.parent.pid",
+        "pid": 7758,
+        "alive": false
+      },
+      {
+        "file": "member.parent.pid",
+        "pid": 7759,
+        "alive": false
+      },
+      {
+        "file": "member.child.pid",
+        "pid": 7761,
+        "alive": false
+      }
+    ],
+    "status": {}
+  },
+  "native_tui_interrupt": {
+    "before": [
+      {
+        "file": "root.child.pid",
+        "pid": 8925
+      },
+      {
+        "file": "root.parent.pid",
+        "pid": 8922
+      },
+      {
+        "file": "member.parent.pid",
+        "pid": 8923
+      },
+      {
+        "file": "member.child.pid",
+        "pid": 8924
+      }
+    ],
+    "command_results": [
+      true,
+      true
+    ],
+    "after_root_interrupt": [
+      {
+        "file": "root.child.pid",
+        "pid": 8925,
+        "alive": false
+      },
+      {
+        "file": "root.parent.pid",
+        "pid": 8922,
+        "alive": false
+      },
+      {
+        "file": "member.parent.pid",
+        "pid": 8923,
+        "alive": true
+      },
+      {
+        "file": "member.child.pid",
+        "pid": 8924,
+        "alive": true
+      }
+    ],
+    "status": {
+      "ses_f61338f7bffeS9wnM0q7GE3ZQE": {
+        "type": "busy"
+      }
+    },
+    "after_cleanup": [
+      {
+        "file": "root.child.pid",
+        "pid": 8925,
+        "alive": false
+      },
+      {
+        "file": "root.parent.pid",
+        "pid": 8922,
+        "alive": false
+      },
+      {
+        "file": "member.parent.pid",
+        "pid": 8923,
+        "alive": false
+      },
+      {
+        "file": "member.child.pid",
+        "pid": 8924,
+        "alive": false
+      }
+    ],
+    "final_status": {}
+  },
+  "stop_limits": [
+    "Native TUI interrupt command dispatched through official endpoint; physical keyboard Escape not validated.",
+    "Root cancellation alone did not stop the separately created member. Experimental controller observed native MessageAbortedError then cancelled exactly its registered member.",
+    "Four measured processes exited and heartbeat files stopped growing. No claim for arbitrary detached processes, native background subagent tools or external effects.",
+    "This passed automatic stop path is an experimental controller, not the production Orbit TaskRuntime."
+  ],
+  "pitfalls": [
+    "Direct calls to native SDK during plugin initialization blocked startup; deferred until after initialization succeeded.",
+    "The session.interrupt spelling returned true from the legacy TUI endpoint but did not dispatch; its accepted alias is session_interrupt.",
+    "One heartbeat fixture syntax error was corrected before recording live-process stop evidence.",
+    "On this resumed fixture, --model opencode/deepseek-v4-flash displayed OpenCode Zen, but the next TUI submission still used provider deepseek. Explicit model in native prompt_async used provider opencode. This is an observed entry-path limitation, not a general diagnosis of all resume paths."
+  ],
+  "not_yet_verified": [
+    "Production Orbit OpenCode adapter, installation and existing Orbit skill workflow",
+    "Full no-port workflow: only native-plugin SDK history read and resume verified without port; complete correction used native TUI with an explicit port",
+    "Production schedule, stale-check rejection, amendments and disputed findings through OpenCode",
+    "Cross-provider execution-member combinations or arbitrary role/provider matrix"
+  ],
+  "cleanup": {
+    "heartbeat_sizes_stable": true,
+    "processes": [
+      {
+        "file": "root.child.pid",
+        "pid": 61228,
+        "alive": false
+      },
+      {
+        "file": "root.parent.pid",
+        "pid": 61227,
+        "alive": false
+      },
+      {
+        "file": "member.parent.pid",
+        "pid": 61215,
+        "alive": false
+      },
+      {
+        "file": "member.child.pid",
+        "pid": 61216,
+        "alive": false
+      }
+    ],
+    "explicit_port_listening": false,
+    "fixture_preserved_for_resume": true,
+    "global_configuration_changed": false,
+    "root_status_before_exit": {
+      "type": "idle"
+    },
+    "member_status_before_exit": {
+      "type": "idle"
+    },
+    "preservation_reason": "Contains prototype controllers, native messages, fixed snapshots and check outputs useful for implementation review; no active processes.",
+    "check_process_groups": [
+      {
+        "check": "review-missing",
+        "pgid": 59722,
+        "alive": false
+      },
+      {
+        "check": "review-final",
+        "pgid": 60456,
+        "alive": false
+      }
+    ]
+  },
+  "sources": [
+    "https://opencode.ai/docs/server/",
+    "https://opencode.ai/docs/plugins/",
+    "https://github.com/anomalyco/opencode/blob/v1.18.30/packages/opencode/src/plugin/index.ts",
+    "https://github.com/anomalyco/opencode/blob/v1.18.30/packages/plugin/src/tool.ts",
+    "https://github.com/anomalyco/opencode/blob/v1.18.30/packages/opencode/src/server/routes/instance/httpapi/handlers/tui.ts"
+  ],
+  "zen_attempt": {
+    "user_authorized": true,
+    "provider": "opencode",
+    "model": "deepseek-v4-flash",
+    "response_provider_confirmed": "opencode",
+    "error": {
+      "message_id": "msg_09ee3f289001v3P5G1oy5I50DK",
+      "provider": "opencode",
+      "model": "deepseek-v4-flash",
+      "name": "APIError",
+      "http_status": 401,
+      "message": "Insufficient balance"
+    },
+    "completed_model_turns": 0,
+    "automatic_fallback": false,
+    "reported_tokens": {
+      "input": 0,
+      "output": 0,
+      "reasoning": 0,
+      "cache": {
+        "read": 0,
+        "write": 0
+      }
+    },
+    "reported_cost": 0
+  },
+  "go_attempt": {
+    "provider": "opencode-go",
+    "model": "deepseek-v4-flash",
+    "error_name": "APIError",
+    "status": 403,
+    "message": "The latest version of this model is only available hosted in China and requires explicit opt in: ",
+    "tokens": {
+      "input": 0,
+      "output": 0,
+      "reasoning": 0,
+      "cache": {
+        "read": 0,
+        "write": 0
+      }
+    },
+    "user_authorized": true,
+    "completed_model_turns": 0,
+    "account_settings_changed": false
+  },
+  "model_resolution": {
+    "working_provider": "opencode-go",
+    "working_model": "deepseek-v4.1-flash",
+    "failed_model": "deepseek-v4-flash",
+    "basis": "Read-only local message metadata showed recent successful V4.1 Flash outputs; probe response confirmed V4.1 on Go succeeds. Distinct model IDs must not be conflated.",
+    "observed_existing_success_local_time": "2026-09-14T15:59:12.206",
+    "account_region_setting_changed": false,
+    "prior_advice_correction": "The V4 Flash 403 response was real, but generalizing it to the user working setup and recommending account changes before checking actual model IDs was premature."
+  },
+  "binding": {
+    "root": "ses_f613488f4ffeRuRZGEmSNASVyP",
+    "native_original_message_id": "msg_09ecb786600191iqeoZDkxxAoF",
+    "original_text": [
+      "Implement requirements.md completely and verify the requested behavior."
+    ],
+    "host_provided_session_identity": true,
+    "agent_called_experimental_tool": true,
+    "production_orbit_skill_tested": false,
+    "trigger_context": "Original implementation request did not name Orbit. Fixture AGENTS.md and the native custom-tool description instructed use of independent checking for multi-requirement implementation."
+  },
+  "model_path": {
+    "same_root": "ses_f613488f4ffeRuRZGEmSNASVyP",
+    "member": "ses_f61338f7bffeS9wnM0q7GE3ZQE",
+    "provider": {
+      "providerID": "opencode-go",
+      "modelID": "deepseek-v4.1-flash"
+    },
+    "autonomous_tool_call": true,
+    "controlled_omission": true,
+    "independent_first_verdict": {
+      "verdict": "correct",
+      "reason": "greet.py satisfies the requested behavior: both invocations verified whitespace trimming, exact greeting output, and useful nonzero blank-name failure. USAGE.md is missing; adding it remains necessary and within scope. No unrelated features were observed.",
+      "findings": [
+        {
+          "id": "missing-usage-doc",
+          "requirement": "Add USAGE.md with one invocation example and the blank-name behavior.",
+          "evidence": "USAGE.md does not exist in the fixed snapshot, confirmed by filesystem inspection.",
+          "action": "Add USAGE.md containing one invocation example and explaining that a whitespace-only name exits nonzero with a useful error."
+        }
+      ],
+      "resolved_ids": [],
+      "next_check_seconds": 30
+    },
+    "independent_final_verdict": {
+      "verdict": "complete",
+      "reason": "Root is idle. The scoped deliverables satisfy requirements.md and applicable project rules: greet.py uses only the standard library, requires exactly one argument, trims whitespace, and rejects blank names with a useful error. Read-only invocations verified exact stdout 'Hello, World!\\n' with exit 0 and a whitespace-only name with exit 2 and no greeting. USAGE.md documents invocation and blank-name behavior. No missing, incorrect, or unrelated features were found; further work is unnecessary.",
+      "findings": [],
+      "resolved_ids": [],
+      "next_check_seconds": 60
+    },
+    "done_at": 1789373611.622803
+  },
+  "checks": {
+    "runner": "Existing Orbit::CheckRunner with gpt-6-astra, read-only ephemeral Codex exec",
+    "snapshot": "Existing Orbit::WorkspaceSnapshot",
+    "missing": {
+      "result": {
+        "verdict": "correct",
+        "reason": "greet.py satisfies the requested behavior: both invocations verified whitespace trimming, exact greeting output, and useful nonzero blank-name failure. USAGE.md is missing; adding it remains necessary and within scope. No unrelated features were observed.",
+        "findings": [
+          {
+            "id": "missing-usage-doc",
+            "requirement": "Add USAGE.md with one invocation example and the blank-name behavior.",
+            "evidence": "USAGE.md does not exist in the fixed snapshot, confirmed by filesystem inspection.",
+            "action": "Add USAGE.md containing one invocation example and explaining that a whitespace-only name exits nonzero with a useful error."
+          }
+        ],
+        "resolved_ids": [],
+        "next_check_seconds": 30
+      },
+      "usage": {
+        "input_tokens": 88773,
+        "cached_input_tokens": 65536,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 464,
+        "reasoning_output_tokens": 47
+      },
+      "snapshot_digest": "sha256:edf9c3cb848242a56dd91533c94cc1329a66a56664f39be4d3a16da069c88377",
+      "current_digest": "sha256:edf9c3cb848242a56dd91533c94cc1329a66a56664f39be4d3a16da069c88377"
+    },
+    "final": {
+      "result": {
+        "verdict": "complete",
+        "reason": "Root is idle. The scoped deliverables satisfy requirements.md and applicable project rules: greet.py uses only the standard library, requires exactly one argument, trims whitespace, and rejects blank names with a useful error. Read-only invocations verified exact stdout 'Hello, World!\\n' with exit 0 and a whitespace-only name with exit 2 and no greeting. USAGE.md documents invocation and blank-name behavior. No missing, incorrect, or unrelated features were found; further work is unnecessary.",
+        "findings": [],
+        "resolved_ids": [],
+        "next_check_seconds": 60
+      },
+      "usage": {
+        "input_tokens": 111872,
+        "cached_input_tokens": 88064,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 648,
+        "reasoning_output_tokens": 10
+      },
+      "snapshot_digest": "sha256:87ac957db9ae9ad9e5b2a77397d6bbb0a35713a205b7e149d562440e405084d5",
+      "current_digest": "sha256:87ac957db9ae9ad9e5b2a77397d6bbb0a35713a205b7e149d562440e405084d5"
+    },
+    "final_artifact_unchanged_after_stop": true,
+    "limitations": "Controlled removal after implementation, not a naturally observed model omission. Harness ran checks at selected completion nodes; production timer and stale-result loop not exercised."
+  },
+  "automatic_team_stop": {
+    "root": "ses_f613488f4ffeRuRZGEmSNASVyP",
+    "registered_members": [
+      "ses_f61338f7bffeS9wnM0q7GE3ZQE"
+    ],
+    "control": "experimental sidecar polling native session.error events recorded by official plugin",
+    "production_orbit_runtime": false,
+    "before": [
+      {
+        "file": "root.child.pid",
+        "pid": 61228,
+        "alive": true
+      },
+      {
+        "file": "root.parent.pid",
+        "pid": 61227,
+        "alive": true
+      },
+      {
+        "file": "member.parent.pid",
+        "pid": 61215,
+        "alive": true
+      },
+      {
+        "file": "member.child.pid",
+        "pid": 61216,
+        "alive": true
+      }
+    ],
+    "status_before": {
+      "ses_f61338f7bffeS9wnM0q7GE3ZQE": {
+        "type": "busy"
+      },
+      "ses_f613488f4ffeRuRZGEmSNASVyP": {
+        "type": "busy"
+      }
+    },
+    "interrupt_time": 1789373619.592736,
+    "native_tui_command_results": [
+      true,
+      true
+    ],
+    "observed_cancellation": {
+      "id": "evt_09efa9ebf001aEsbA7vprIN3eW",
+      "type": "session.error",
+      "properties": {
+        "sessionID": "ses_f613488f4ffeRuRZGEmSNASVyP",
+        "error": {
+          "name": "MessageAbortedError",
+          "data": {
+            "message": "Aborted"
+          }
+        }
+      }
+    },
+    "member_abort_result": true,
+    "member_abort_time": 1789373620.023071,
+    "after": [
+      {
+        "file": "root.child.pid",
+        "pid": 61228,
+        "alive": false
+      },
+      {
+        "file": "root.parent.pid",
+        "pid": 61227,
+        "alive": false
+      },
+      {
+        "file": "member.parent.pid",
+        "pid": 61215,
+        "alive": false
+      },
+      {
+        "file": "member.child.pid",
+        "pid": 61216,
+        "alive": false
+      }
+    ],
+    "status_after": {},
+    "heartbeat_growth_stopped": true,
+    "passed": true
+  },
+  "usage": {
+    "root_session": {
+      "cost": 0.007052981999999999,
+      "tokens": {
+        "input": 23433,
+        "output": 2703,
+        "reasoning": 1643,
+        "cache": {
+          "read": 310144,
+          "write": 0
+        }
+      }
+    },
+    "member_session": {
+      "cost": 0.004994322,
+      "tokens": {
+        "input": 23503,
+        "output": 1169,
+        "reasoning": 762,
+        "cache": {
+          "read": 103424,
+          "write": 0
+        }
+      }
+    },
+    "independent_checks": [
+      {
+        "input_tokens": 88773,
+        "cached_input_tokens": 65536,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 464,
+        "reasoning_output_tokens": 47
+      },
+      {
+        "input_tokens": 111872,
+        "cached_input_tokens": 88064,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 648,
+        "reasoning_output_tokens": 10
+      }
+    ],
+    "full_task_cost": "unknown",
+    "caveat": "Native cost fields are recorded as returned, not verified billing or subscription quota consumption. Aborted calls may not expose complete usage. Prior failed requests and development/user-wait time do not establish savings."
+  },
+  "timing": {
+    "successful_model_phase_started_unix": 1789373464.9422524,
+    "model_path_finished_unix": 1789373611.622803,
+    "automatic_stop_finished_unix": 1789373620.023071,
+    "successful_probe_minutes": 2.58,
+    "initial_estimate_minutes": [
+      30,
+      60
+    ],
+    "overall_active_work_minutes": "not separately measured",
+    "deviation": "Earlier supplier/model identification errors and waits for user clarification increased total elapsed time. Successful model phase separately recorded."
+  }
+}

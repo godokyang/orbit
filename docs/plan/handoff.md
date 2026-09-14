@@ -1,27 +1,32 @@
 # Orbit 当前交接
 
-2026-09-14 最新授权“列计划，把整个流程跑通”已完成日常入口、协作控制与固定验收。计划见 [日常使用交付计划](user-experience-plan.md)，语义见 [ADR-007](../adr/007-task-runtime-refactor.md) 和 [任务运行合同](../../contracts/task-runtime.md)。未启动新 Goal，未发布；用户随后明确授权提交并推送本轮成果。被忽略的本地外部资料继续保留，不进入提交。
+2026-09-14 用户要求“继续，完成这个需求，不要我继续追问”，本轮交付 OpenCode 正式接入及日常完整流程。当前源码版本 **0.3.0**。本轮未启动新 Goal。用户随后同意先提交推送 0.3.0，再完成 OMP 接入；不打标签、不发布，保留被忽略的本地外部交接包。
 
 ## 当前怎么用
 
-本机 `~/.local/bin/orbit` 已切换至 0.2.0，CLI 和 `~/.codex/skills/orbit` 指向同一受管理安装，运行目录为 `~/.local/share/orbit/orbit`。旧 0.1.15 文件及旧命令包装归档在 `~/.local/share/orbit/retired-0.1.15-20260914`，退出 PATH，无兼容执行路径。更新用本仓 `sh install.sh`；版本来源用 `orbit version --json` 核对，当前为本地 dirty 工作树而非已发布提交。
+- **OpenCode**：安装后在项目目录直接运行 `opencode`，继续使用原生模型、权限和恢复参数。插件自动提供当前会话的 Orbit 工具，无需用户填写端口或内部 ID。安装前已经打开的会话需按原生方式退出并恢复，才能加载插件。
+- **Codex**：继续运行 `orbit codex`，也可 `orbit codex resume SESSION_ID`，模型与权限参数沿用原生入口。普通 embedded Codex 不自动热接入。
+- 对合适的多步骤执行要求，Agent 根据共用 skill 主动调用；讨论、解释和简单局部修改通常不启动。Root 就是当前负责整项任务的 Agent，不另建、不自动替换。
+- `delegate` 创建同宿主成员。OpenCode 成员默认沿用 Root 的 provider/model、variant、原生 Agent 与权限；Codex 成员默认使用检查模型和工作区写入沙箱。尚不支持混合宿主成员。
+- 检查者与裁定者当前仍走 Codex。OpenCode 执行已实测 `opencode-go/deepseek-v4.1-flash`；检查模型为 `ORBIT_REVIEW_MODEL` 或本机 Codex config.toml 顶层模型。不要把 V4 与 V4.1、Go 与 Zen／直连混用，也不要求用户修改当前可用账户设置。
 
-用户在目标项目终端运行 `orbit codex`，正常给出要求；合适任务由 skill 主动接入。普通终端、tmux、Herdr 使用同一入口。既有 Codex 模型配置继续使用，可另设 ORBIT_REVIEW_MODEL。入口只给自身 MCP 工具配置批准，不修改全局 Codex 配置或扩大 shell 沙箱。
+本机已更新至 **0.3.0**，用 `~/.local/share/orbit/orbit` 管理，CLI 为 `~/.local/bin/orbit`。安装器同时管理 Codex skill、OpenCode 插件和 skill，使用同一个版本链接；尊重原生 OPENCODE_CONFIG_DIR，默认 `~/.config/opencode`，不改写模型或凭据。安装状态与源码来源用 `orbit version --json` 核对。旧 0.1.15 资料仍保留在 `~/.local/share/orbit/retired-0.1.15-20260914`，没有兼容执行路径。
 
-当前开发 Root 未迁移，也没有被替换。已经打开的普通嵌入式会话不能假装热接入；用户明确停止工作后可以 `orbit codex resume SESSION_ID`，本轮用同一夹具会话验证了恢复和原文保留。其他供应商和未登记外部 Agent 不属于已控制范围。
+## 本轮实际验证
 
-## 本轮完成与验证
+正式运行事实见 [OpenCode 验收数据](../reference/opencode-runtime-acceptance-20260914.json)。这是安装后的原生插件与 TaskRuntime，不再是实验控制脚本。
 
-- 用户只说按 requirements.md 实现：新项目中的 Agent 主动发现 skill，真实连接、保存原文和依据、继续实现。
-- 受控移除要求中的 USAGE.md 后，独立检查指出缺失，原 Root 补回并最终 complete；4 次检查中 2 次过期。无 Git 项目不采集常见依赖目录。
-- 一个受控成员完成结果回传与 Root 集成，再复用执行后台任务；用户新要求同步至成员。原生 ESC 后 Root 与成员的两个 OS 心跳 PID 均退出，原生后台列表为空，状态 paused，原文、会话和产物保留。
-- tmux 与 Herdr 恢复同一个夹具会话，未启动新的模型轮次；入口与归属核对通过。自建 Herdr pane 和 tmux 测试服务已移除。
-- 修复停止队列重新唤起、停止信号优先级、观察错误后遗留成员、退出任务拒绝显式停止、旧检查停止错误无法重新核实等问题。未绑定成功的会话不会被错误清理路径停止。
-- 复用本项目已有 OpenCode / DeepSeek V4.1 Flash 做只读独立核查，发现的停止路径问题已修复并针对性复核；没有扩大成异常矩阵或再启动团队。
-- 相关回归、官方 MCP SDK 的实际 CLI 投递与归属测试、四条隔离安装路径、skill 校验通过。原始事实与用量在 [本轮验收数据](../reference/user-flow-acceptance-20260914.json)，更早的底层验收保留于 [原记录](../reference/orbit-runtime-acceptance-20260914.md)。
+- 普通无端口 OpenCode 中，用户未点名 Orbit，Agent 主动启动；原文和 requirements.md 依据保存，登记一个 Go／V4.1 成员，回传结果并由同一 Root 集成。
+- Root 与成员完成后受控删除 USAGE.md，独立 Codex 检查发现遗漏，原 Root 收到纠正后补齐；4 次检查中 2 次过期并正确弃用，最终 complete。内部回报与纠正未被误存为用户新要求。
+- 普通 TUI 两次物理 Esc 中断后，Root、成员及各自子进程共 4 个 PID 全部退出，心跳停止；原文、会话与产物保留。
+- 原生 `--session` 恢复同一会话后再次运行两支心跳，正常退出界面也收尾全部 4 个 PID、任务进程与私有 socket。
+- 既有快照、运行、Codex、MCP 回归，新 OpenCode 原文／归属／模型／用户修改／成员／中断接线测试，以及四条安装更新卸载路径通过；skill 和包内容检查通过。
+- 真实入口发现并修正了 `.mjs` 不被自动发现的问题，安装链接采用 `.js`；工具回包补充结束当前轮次的指引，减少为等待检查而反复查询。独立核查提出的中断竞态和自定义配置目录问题已修正，针对性复核确认无剩余阻断；最后改动后全套既有回归再次通过。
+
+测试宿主和执行进程已结束。隔离夹具、原生会话、检查副本和只读评审日志保留，路径见验收数据。最初估计 2–4 小时仅作参考，整次实现未连续计时；可得检查与原生用量分别记录，整次账单／套餐扣量未知，不据最小验收宣称普遍节约额度。
 
 ## 后续边界
 
-本轮估计 3–6 小时仅作参考；完整任务费用未知，验收数据分别保留输入、缓存、输出计数。没有以一次实验证明普遍省额度。新功能按真实使用需要再定，不机械续做旧阶段、不建设 Root 自动替换／恢复、不扩成多供应商平台。
+本轮只接 OpenCode Root 与成员，检查者仍为 Codex；不扩展供应商组合矩阵、自动恢复、Root 替换或需求讨论管理。下一顺序仍是 OMP、pi、Kimi Code；Grok、dsh、Cursor Agent 低优先级，只在官方方案合适时推进。本轮完成不自动授权下一种宿主。
 
-首次源码重构、历史文档清理、安装更新与版本控制已完成；旧协议和 upstream 子模块不再是待办。用户已明确授权本轮提交与推送，执行结果以 Git 为准；npm 发布、标签和外部项目修改不在本轮范围内。
+更早的 [Codex 日常验收](../reference/user-flow-acceptance-20260914.json)、[底层验收](../reference/orbit-runtime-acceptance-20260914.md) 和 [OpenCode 最小实验](../reference/opencode-probe-20260914.json) 保留为历史证据，不机械重做。旧协议、upstream 子模块与旧阶段均不再是待办。语义见 [运行合同](../../contracts/task-runtime.md) 与 [ADR-007](../adr/007-task-runtime-refactor.md)，进度见 [当前计划](vision-completion-plan.md)。

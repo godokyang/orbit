@@ -32,7 +32,8 @@ module InstallTest
       @runtime = File.join(tmp, "runtime with spaces")
       @bin = File.join(tmp, "bin with spaces")
       @skills = File.join(tmp, "skills")
-      @env = { "ORBIT_REF" => nil, "ORBIT_RUNTIME_DIR" => nil, "ORBIT_INSTALL_DIR" => nil, "ORBIT_SKILL_DIR" => nil }
+      @opencode = File.join(tmp, "opencode config")
+      @env = { "ORBIT_REF" => nil, "ORBIT_RUNTIME_DIR" => nil, "ORBIT_INSTALL_DIR" => nil, "ORBIT_SKILL_DIR" => nil, "OPENCODE_CONFIG_DIR" => @opencode }
       files = JSON.parse(run("npm", "pack", "--dry-run", "--json", "--ignore-scripts", cwd: ROOT))[0]["files"]
       files.each do |file|
         dest = File.join(@source, file.fetch("path"))
@@ -62,11 +63,11 @@ module InstallTest
   def bump
     package = File.join(@source, "package.json")
     data = json(package)
-    data["version"] = "0.2.1"
+    data["version"] = "0.3.1"
     File.write(package, JSON.pretty_generate(data))
     lock = File.join(@source, "npm-shrinkwrap.json")
     data = json(lock)
-    data["version"] = data.fetch("packages").fetch("")["version"] = "0.2.1"
+    data["version"] = data.fetch("packages").fetch("")["version"] = "0.3.1"
     File.write(lock, JSON.pretty_generate(data))
   end
 
@@ -105,7 +106,7 @@ module InstallTest
   end
 
   def successful_update
-    install
+    install("--opencode-dir", @opencode)
     old = active
     obsolete = File.join(old, "obsolete-rule.md")
     File.write(obsolete, "old shipped rule")
@@ -117,11 +118,13 @@ module InstallTest
     bump
     File.open(File.join(@source, "skills/orbit/SKILL.md"), "a") { |f| f.puts("\nUpdated fixture skill.") }
     install(explicit_paths: false)
-    assert(version["version"] == "0.2.1", "updated CLI version")
+    assert(version["version"] == "0.3.1", "updated CLI version")
     assert(version.dig("source", "commit") == run("git", "rev-parse", "HEAD", cwd: @source).strip, "local source commit recorded")
     assert(version.dig("source", "dirty") == true, "local edits not mislabeled as clean commit")
     assert(!File.exist?(old) && !File.exist?(obsolete), "retired release and obsolete shipped files removed")
     assert(File.read(File.join(@skills, "orbit/SKILL.md")).include?("Updated fixture skill."), "skill follows same update")
+    assert(File.realpath(File.join(@opencode, "plugins/orbit.js")) == File.join(active, "plugins/opencode.mjs"), "OpenCode plugin follows update")
+    assert(File.read(File.join(@opencode, "skills/orbit/SKILL.md")).include?("Updated fixture skill."), "OpenCode skill follows update")
     assert(File.read(File.join(@runtime, "user-notes.txt")) == "keep", "update preserves user files")
   end
 
@@ -143,6 +146,7 @@ module InstallTest
     install(env: { "PATH" => runner + File::PATH_SEPARATOR + ENV.fetch("PATH") }, success: false)
     assert(version == before && active == old, "failed dependency update retains working old installation")
     assert(File.realpath(File.join(@skills, "orbit")) == old_skill, "failed update retains matching skill")
+    assert(File.realpath(File.join(@opencode, "plugins/orbit.js")) == File.join(old, "plugins/opencode.mjs"), "failed update retains OpenCode plugin")
     assert(Dir.glob(File.join(@runtime, ".prepare-*"), File::FNM_DOTMATCH).empty?, "failed preparation cleaned")
   end
 
@@ -155,9 +159,13 @@ module InstallTest
     project = File.join(@temp, "project/.orbit")
     FileUtils.mkdir_p(project)
     File.write(File.join(project, "task.json"), "keep task")
+    File.write(File.join(@opencode, "opencode.json"), '{"user":"keep"}')
     run("sh", File.join(@runtime, "current/uninstall.sh"), "--runtime-dir", @runtime)
     assert(!File.exist?(File.join(@bin, "orbit")), "owned CLI wrapper removed")
     assert(!File.symlink?(File.join(@skills, "orbit")), "owned skill link removed")
+    assert(!File.symlink?(File.join(@opencode, "plugins/orbit.js")), "owned OpenCode plugin removed")
+    assert(!File.symlink?(File.join(@opencode, "skills/orbit")), "owned OpenCode skill removed")
+    assert(File.read(File.join(@opencode, "opencode.json")) == '{"user":"keep"}', "OpenCode user config retained")
     assert(!File.symlink?(File.join(@runtime, "current")), "active release link removed")
     assert(!File.exist?(File.join(release, "scripts/orbit")), "shipped code removed")
     assert(File.read(File.join(@runtime, "user-notes.txt")) == "keep root", "root user file kept")

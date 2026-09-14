@@ -6,6 +6,7 @@ require_relative "version"
 require_relative "task_record"
 require_relative "task_runtime"
 require_relative "codex_connection"
+require_relative "opencode_connection"
 require_relative "check_runner"
 require_relative "session_entry"
 
@@ -33,12 +34,14 @@ module Orbit
       orbit delegate TASK_DIRECTORY --file FILE|- [--model MODEL] [--member THREAD_ID]
 
       Root means the coding agent already responsible for the whole user task.
-      start binds a session already loaded on the supplied Codex app-server.
+      start binds an existing session: Codex app-server or OpenCode plugin (--provider opencode).
       It never creates/resumes a Root, starts a daemon, or falls back to queue-only
       control. The invoking agent's CODEX_THREAD_ID is the default thread.
       Without --prompt-file, the selected/latest native user message is the basis.
       --basis may repeat. Estimates are advisory; only --deadline is a hard limit.
       Reviewer model uses ORBIT_REVIEW_MODEL or the existing Codex model configuration.
+      OpenCode users launch opencode normally; use its native orbit context tool.
+      doctor diagnoses the Codex app-server connection only.
       Records and fixed inputs live under PROJECT/.orbit/tasks/<id>.
     TEXT
 
@@ -78,19 +81,20 @@ module Orbit
       else
         raise ArgumentError, "unknown command #{command.inspect}; run orbit --help"
       end
-    rescue ArgumentError, OptionParser::ParseError, SystemCallError, CodexConnection::Error, CheckRunner::Error => error
+    rescue ArgumentError, OptionParser::ParseError, SystemCallError, Connection::Error, CheckRunner::Error => error
       warn "orbit: #{error.message}"
       1
     end
 
     def start(argv)
       options = {
-        project: Dir.pwd, thread: ENV["CODEX_THREAD_ID"], model: ENV["ORBIT_REVIEW_MODEL"],
+        project: Dir.pwd, provider: "codex", thread: ENV["CODEX_THREAD_ID"], model: ENV["ORBIT_REVIEW_MODEL"],
         socket: SessionEntry.socket_path,
         basis: [], interval: 300, estimate: { "seconds" => nil, "tokens" => nil }
       }
       parser = OptionParser.new do |opts|
         opts.on("--project DIR") { |value| options[:project] = value }
+        opts.on("--provider NAME", %w[codex opencode]) { |value| options[:provider] = value }
         opts.on("--thread ID") { |value| options[:thread] = value }
         opts.on("--socket PATH") { |value| options[:socket] = value }
         opts.on("--review-model MODEL") { |value| options[:model] = value }
@@ -112,13 +116,14 @@ module Orbit
         raise ArgumentError, "estimates must be positive finite numbers"
       end
 
-      connection = CodexConnection.new(socket: options[:socket], thread_id: options[:thread])
+      connection_record = { "provider" => options[:provider], "socket" => File.expand_path(options[:socket]), "thread_id" => options[:thread] }
+      connection = Connection.open(connection_record)
       begin
         connection.connect!
         unless File.realpath(connection.state.fetch("cwd")) == File.realpath(options[:project])
           raise ArgumentError, "Root session belongs to a different project"
         end
-        options[:model] ||= connection.configured_model
+        options[:model] ||= options[:provider] == "codex" ? connection.configured_model : CheckRunner.configured_model
         raise ArgumentError, "configure --review-model or ORBIT_REVIEW_MODEL" if options[:model].to_s.empty?
         if options[:prompt_file]
           instruction = read_input(options[:prompt_file])
@@ -127,7 +132,7 @@ module Orbit
           message = connection.user_message(id: options[:message_id])
           raise ArgumentError, "the selected native user message was not found" unless message
           instruction = message.fetch("text")
-          source = { "kind" => "codex_user_message", "id" => message.fetch("id") }
+          source = { "kind" => connection.instruction_source_kind, "id" => message.fetch("id") }
         end
       ensure
         connection.close
@@ -136,7 +141,7 @@ module Orbit
 
       record = TaskRecord.create(
         project_root: options[:project], instruction: instruction, source: source,
-        connection: { "socket" => File.expand_path(options[:socket]), "thread_id" => options[:thread] },
+        connection: connection_record,
         review: { "model" => options[:model], "interval_seconds" => options[:interval] },
         basis: options[:basis], estimate: options[:estimate]
       )
@@ -161,7 +166,7 @@ module Orbit
 
     def run_task(record)
       state = record.state
-      connection = CodexConnection.new(socket: state.dig("connection", "socket"), thread_id: state.dig("connection", "thread_id"))
+      connection = Connection.open(state.fetch("connection"))
       checker = CheckRunner.new(model: state.dig("review", "model"))
       runtime = TaskRuntime.new(record: record, connection: connection, checker: checker)
       %w[INT TERM].each { |signal| Signal.trap(signal) { runtime.request_stop } }
@@ -182,7 +187,7 @@ module Orbit
       raise ArgumentError, "unexpected arguments" unless argv.empty?
       if command == "stop" && %w[failed stop_unconfirmed].include?(record.state["status"])
         state = record.state
-        connection = CodexConnection.new(socket: state.dig("connection", "socket"), thread_id: state.dig("connection", "thread_id"))
+        connection = Connection.open(state.fetch("connection"))
         result = TaskRuntime.new(record: record, connection: connection, checker: nil).retry_stop(
           options.fetch("reason", "The user requested cleanup after runtime exit")
         )

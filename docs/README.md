@@ -16,7 +16,7 @@
 | 哪些能力尚不具备 | [当前限制](plan/debt-ledger.md) |
 | 最新项目检查发现什么 | [角色、协作与运行边界检查](reference/project-review-20260914.md) |
 | 普通终端和现有会话如何落地、有哪些现成方案 | [用户流程交付计划](plan/user-experience-plan.md)、[现成方案调研](reference/existing-orchestrators-20260914.md) |
-| 实际验收证明了什么 | [底层真实验收](reference/orbit-runtime-acceptance-20260914.md)、[日常流程验收数据](reference/user-flow-acceptance-20260914.json) |
+| 实际验收证明了什么 | [底层真实验收](reference/orbit-runtime-acceptance-20260914.md)、[Codex 日常流程验收](reference/user-flow-acceptance-20260914.json)、[OpenCode 正式验收](reference/opencode-runtime-acceptance-20260914.json) |
 | 过去哪些失误值得记住 | [工程经验](reference/engineering-lessons.md) |
 | Codex 如何加载项目规范 | [按需阅读的说明](reference/codex-agents-md-loading.md) |
 
