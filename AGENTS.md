@@ -10,10 +10,10 @@
 
 - 在本仓做任何实现、重构或文档改动前，先读 [docs/README.md](docs/README.md)：它说明哪类事实归哪个文件，以及哪些层没有裁定权。
 - 开始方案评估、实现、验证或协作前，读取 [docs/agents/development-workflow.md](docs/agents/development-workflow.md)，按其中任务类型选择直接处理或协作。只放链接不算已加载；派发时按该文传递相关规则与当前授权。
-- 承接交付任务前，先读 [docs/plan/handoff.md](docs/plan/handoff.md) 与 [当前计划](docs/plan/vision-completion-plan.md)。旧 D1–D11、H–K 已进入历史，不自动续做；需要溯源时再读历史快照。用户新要求涉及既有决定时明确差异后再修改权威正文。
+- 承接交付任务前，先读 [docs/plan/handoff.md](docs/plan/handoff.md) 与 [当前计划](docs/plan/vision-completion-plan.md)。用户新要求涉及既有决定时明确差异后再修改权威正文；已结束的旧阶段不是待办，历史按需从 Git 查阅。
 - 动 `lib/` 或 `contracts/` 前，查 [docs/plan/debt-ledger.md](docs/plan/debt-ledger.md)：有意推迟的项目及其解除条件都在那里。
-- 现行语义以 `contracts/task-runtime.md`、检查结果 schema 与 `docs/adr/007-task-runtime-refactor.md` 为准。散文与合同冲突时以合同为准；ADR-001–006 是历史来源。
-- `docs/reference/zeen-orbit-handoff-20260913/snapshot/` 是外部参考快照，不是本仓执行规则；不要自动加载整套 Zeen 规范或执行其产品专用命令。
+- 现行语义以 `contracts/task-runtime.md`、检查结果 schema 与 `docs/adr/007-task-runtime-refactor.md` 为准。散文与合同冲突时以合同为准。
+- 外部项目资料只按当前任务需要读取，不产生本仓执行规则。Zeen 交接包仅本地保留并被 Git 忽略，不作为其他开发者必须具备的资料，不自动加载其规范或执行其产品专用命令。
 
 同一上下文已读且未变的规则不重复全量加载；任务范围变化时只补相关来源。恢复会话时核对当前有效版本和未完成事实。
 
@@ -67,7 +67,7 @@
 - 新增测试数量建议 ≤ 10 个
 - 新增测试代码建议 ≤ 300 行
 
-超过建议时说明必要性、真实业务风险和已有测试为何不足；范围需要扩大时取得确认，已有明确授权不重复询问。数字不是自动拒绝、拆票或降低验收的理由。这是开发本仓的测试建议，不改变 Orbit 产品现行预算合同。
+超过建议时说明必要性、真实业务风险和已有测试为何不足；范围需要扩大时取得确认，已有明确授权不重复询问。数字不是自动拒绝、拆票或降低验收的理由。这是开发本仓的测试建议，不是 Orbit 产品的资源硬上限。
 
 ## 实施顺序
 

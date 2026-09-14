@@ -2,9 +2,9 @@
 
 Orbit 是独立执行工具：在**任意项目**里，沿用现有 Coding Agent（Root）推进已授权任务，并在旁路做独立检查与纠偏。不依赖 Zeen、Herdr、Feedback 或任何外部审批流程。
 
-现有 Root 可通过 [Orbit skill](skills/orbit/SKILL.md) 在已授权执行时自行接入。讨论需求、澄清方案不要启动 Orbit。
+满足下述接入条件时，现有 Root 可通过 [Orbit skill](skills/orbit/SKILL.md) 在已授权执行时自行接入。用户可以说“按照这份需求文档开始实现，用 Orbit 做独立检查与纠偏”；Agent 保存原始执行指令和指定依据，启动任务进程后继续工作。讨论需求、澄清方案不要启动 Orbit。
 
-本地两条最小真实验收已通过：独立发现遗漏并由原 Root 修正、明确截止时间触发实际停止。验收范围见 [记录](docs/reference/orbit-runtime-acceptance-20260914.md)；这不代表已证明所有项目均能节省额度。当前工作区版本为 0.2.0，尚未发布。
+本地两条最小真实验收已通过：独立发现遗漏并由原 Root 修正、明确截止时间触发实际停止。验收使用专用 app-server，不代表普通终端会话已经可直接接入。验收范围见 [记录](docs/reference/orbit-runtime-acceptance-20260914.md)；这不代表已证明所有项目均能节省额度。当前工作区版本为 0.2.0，尚未发布。
 
 ## 第一版能接什么
 
@@ -16,13 +16,23 @@ Orbit 是独立执行工具：在**任意项目**里，沿用现有 Coding Agent
 
 ## 怎么开始
 
-本地安装当前版本（需要 Ruby 3.2+、Node.js 18+ 与 npm；检查调用已有 Codex CLI）：
+先在本仓核对当前入口（需要 Ruby 3.2+、Node.js 18+ 与 npm；检查调用已有 Codex CLI）：
 
 ```bash
 npm ci
-sh install.sh --runtime-dir "$HOME/.local/share/orbit/task-runtime"
+./scripts/orbit --help
+```
+
+需要从其他项目调用时，可安装到单独目录，再让使用 Orbit 的 Agent 环境加载该 PATH：
+
+```bash
+sh install.sh --bin-dir "$HOME/.local/orbit-task-runtime/bin" \
+  --runtime-dir "$HOME/.local/share/orbit/task-runtime"
+export PATH="$HOME/.local/orbit-task-runtime/bin:$PATH"
 orbit --help
 ```
+
+安装 CLI 不会给现有会话补上控制端点。启动任务前，须确认 Root 已加载在所指定的 Codex app-server 中；默认端点不存在时，只能指定该会话实际所在的 `--socket`，不能随意新建服务并假定原会话已接入。若 `orbit --help` 仍显示旧的 init/dispatch/evidence/gate，说明调用的是旧安装，先检查 `command -v orbit`。
 
 命令面以 `orbit --help` 为准。旧 init / dispatch / evidence / gate 命令和 v2 数据格式不再支持。Unix 连接通过一个小型 Node 桥复用 `ws` 库处理原生 WebSocket，任务状态与控制逻辑仍在 Ruby 中。
 
