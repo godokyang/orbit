@@ -1,5 +1,6 @@
 agents/
 !docs/agents/
+!skills/orbit/agents/
 !docs/reference/**/snapshot/docs/agents/
 references/development/
 .orbit/*

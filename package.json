@@ -2,8 +2,12 @@
   "name": "@godokyang/orbit",
   "version": "0.2.0",
   "description": "Independent task execution checks for existing coding sessions.",
-  "bin": { "orbit": "scripts/orbit" },
-  "engines": { "node": ">=18" },
+  "bin": {
+    "orbit": "scripts/orbit"
+  },
+  "engines": {
+    "node": ">=18"
+  },
   "files": [
     "README.md",
     "install.sh",
@@ -14,10 +18,13 @@
     "scripts/orbit",
     "scripts/codex-socket.cjs",
     "contracts/task-runtime.md",
-    "contracts/check-result.schema.json"
+    "contracts/check-result.schema.json",
+    "scripts/manage-install.rb",
+    "scripts/check-version.rb"
   ],
   "scripts": {
-    "test": "sh -n install.sh && sh -n uninstall.sh && ruby --disable-gems tests/workspace_snapshot_test.rb && ruby --disable-gems tests/task_runtime_test.rb && ruby --disable-gems tests/codex_connection_test.rb"
+    "test": "npm run check:version && sh -n install.sh && sh -n uninstall.sh && ruby --disable-gems tests/workspace_snapshot_test.rb && ruby --disable-gems tests/task_runtime_test.rb && ruby --disable-gems tests/codex_connection_test.rb && ruby --disable-gems tests/install_test.rb",
+    "check:version": "ruby --disable-gems scripts/check-version.rb"
   },
   "publishConfig": {
     "access": "public"

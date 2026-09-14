@@ -5,6 +5,7 @@ require "open3"
 require "securerandom"
 require "socket"
 require "thread"
+require_relative "version"
 
 module Orbit
   # Orbit task runtime R5a: minimal native connection to an EXISTING Codex
@@ -40,7 +41,7 @@ module Orbit
   # item ids (a different server-side space) are preserved as "item_id".
   class CodexConnection
     CLIENT_NAME = "orbit"
-    CLIENT_VERSION = "0.1.0"
+    CLIENT_VERSION = Orbit::VERSION
     DEFAULT_DEADLINE = 10.0
     DEFAULT_BRIDGE = File.expand_path("../../scripts/codex-socket.cjs", __dir__)
     PAGE_SIZE = 50

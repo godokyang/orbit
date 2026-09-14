@@ -1,8 +1,10 @@
 # Orbit
 
-Orbit 是独立执行工具：在**任意项目**里，沿用现有 Coding Agent（Root）推进已授权任务，并在旁路做独立检查与纠偏。不依赖 Zeen、Herdr、Feedback 或任何外部审批流程。
+Orbit 是独立的 Coding Agent 任务执行辅助工具，可用于任意项目：保存用户原始要求，执行期间独立检查实际产物，发现偏差后要求修正，并核实最终结果。它可以直接使用，也可以被其他工具调用；不要求先接入外部业务系统或后续审批流程。
 
-满足下述接入条件时，现有 Root 可通过 [Orbit skill](skills/orbit/SKILL.md) 在已授权执行时自行接入。用户可以说“按照这份需求文档开始实现，用 Orbit 做独立检查与纠偏”；Agent 保存原始执行指令和指定依据，启动任务进程后继续工作。讨论需求、澄清方案不要启动 Orbit。
+**主执行 Agent（Root）就是当前接收用户要求、负责完成这项任务的 Coding Agent。** 通常是已经与你对话的那一个，继续沿用原会话；用户不需要额外创建“Root”角色。Orbit 程序负责观察与控制，独立检查者负责找遗漏和错误，裁定者仅在真实争议时按需参与，不要求常驻团队。
+
+安装并让 Agent 发现 [Orbit skill](skills/orbit/SKILL.md) 后，用户可以直接说“按这份需求文档实现整个流程”。对于已授权且值得独立监督的执行任务，Agent 应主动调用 Orbit，**不需要用户点名工具**；讨论、只读解释和简单局部修改通常直接处理。实际启动还需具备下述会话控制通道和已授权的检查模型。
 
 本地两条最小真实验收已通过：独立发现遗漏并由原 Root 修正、明确截止时间触发实际停止。验收使用专用 app-server，不代表普通终端会话已经可直接接入。验收范围见 [记录](docs/reference/orbit-runtime-acceptance-20260914.md)；这不代表已证明所有项目均能节省额度。当前工作区版本为 0.2.0，尚未发布。
 
@@ -29,14 +31,50 @@ npm ci
 sh install.sh --bin-dir "$HOME/.local/orbit-task-runtime/bin" \
   --runtime-dir "$HOME/.local/share/orbit/task-runtime"
 export PATH="$HOME/.local/orbit-task-runtime/bin:$PATH"
-orbit --help
+orbit --version
+orbit version --json
 ```
+
+安装器默认将 `orbit` skill 链接到 `${CODEX_HOME:-$HOME/.codex}/skills/orbit`。CLI 与 skill 指向同一个已验证版本，更新时一起切换；Agent 按其技能加载方式发现该目录。`--skill-dir DIR` 可指定技能父目录，`--no-skill` 只安装 CLI。已有同名自定义 skill、未知命令包装或旧安装目录时明确拒绝覆盖，使用空目录；旧安装不迁移。更新默认沿用这次安装记录的 bin 和 skill 路径。
+
+`--bin-dir` / `--runtime-dir` / `--skill-dir` 也分别支持 `ORBIT_INSTALL_DIR` / `ORBIT_RUNTIME_DIR` / `ORBIT_SKILL_DIR`。runtime 未指定时使用 `$XDG_DATA_HOME/orbit/orbit`，没有 XDG 设置则为 `~/.local/share/orbit/orbit`。
 
 安装 CLI 不会给现有会话补上控制端点。启动任务前，须确认 Root 已加载在所指定的 Codex app-server 中；默认端点不存在时，只能指定该会话实际所在的 `--socket`，不能随意新建服务并假定原会话已接入。若 `orbit --help` 仍显示旧的 init/dispatch/evidence/gate，说明调用的是旧安装，先检查 `command -v orbit`。
 
-命令面以 `orbit --help` 为准。旧 init / dispatch / evidence / gate 命令和 v2 数据格式不再支持。Unix 连接通过一个小型 Node 桥复用 `ws` 库处理原生 WebSocket，任务状态与控制逻辑仍在 Ruby 中。
+### 更新与卸载
 
-安装器不会覆盖没有新版安装标识的旧目录或无关命令包装。已有旧版时可另选空的 `--bin-dir` 与 `--runtime-dir`，确认新版本后再处理旧安装。Skill 位于 `skills/orbit/`，可通过支持本地目录的 skill 安装工具发现；不由 CLI 全局改写项目规范。
+在 Orbit 任务结束后更新或卸载，同一安装目录一次只运行一个安装器。当前不保证运行中的任务在旧版本文件清理后继续可用。
+
+在更新后的本地 checkout 中重跑安装器，会安装该 checkout 的内容，不自动拉取代码：
+
+```bash
+sh install.sh --runtime-dir "$HOME/.local/share/orbit/task-runtime"
+```
+
+明确指定远程 ref 时会从 GitHub 解析出一个提交 SHA，并下载该 SHA 对应的完整源码归档；后续安装只读这一份源码。`--ref` 可用分支、标签或完整提交 SHA，`ORBIT_REF` 等价。远程管道安装默认 ref 为 `main`，需要 curl 和 tar：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/godokyang/orbit/main/install.sh | \
+  sh -s -- --ref main --runtime-dir "$HOME/.local/share/orbit/task-runtime" \
+  --bin-dir "$HOME/.local/orbit-task-runtime/bin"
+```
+
+安装在临时目录准备完整包、执行锁定依赖安装并校验版本和入口，通过后才切换 `current`。准备失败时旧版仍可用，成功后清理旧版本登记的文件。用户额外文件保留；安装器登记的程序文件与依赖目录属于其管理范围，不在其中保存自定义资料。切换不是运行任务的热更新，也不实现掉电恢复或历史版本管理平台。
+
+```bash
+sh "$HOME/.local/share/orbit/task-runtime/current/uninstall.sh" \
+  --runtime-dir "$HOME/.local/share/orbit/task-runtime"
+```
+
+卸载从记录读取 bin 和 skill 路径，仅移除匹配的入口和登记文件。用户额外文件、项目规范和项目 `.orbit` 任务资料保留。
+
+### 版本与发布
+
+版本号以 `package.json` 为准；CLI 与 Codex 连接的客户端版本从同一来源读取。`orbit version --json` 显示版本、来源提交、内容摘要与安装时间。本地安装的 commit 是工作树基线，`dirty` 表示存在本地改动；非 Git 来源的提交与修改状态记为未知。安装清单和运行记录的格式版本独立于产品版本号。
+
+维护者通过 `npm version <新版本> --no-git-tag-version` 同步包与锁文件，再运行 `npm test` 和 `npm pack --dry-run`。版本检查会拒绝包与锁文件不一致；确认发布范围后，才提交并创建对应的 `v<版本>` 标签、推送或发布 npm 包。当前 `0.2.0` 尚未发布，安装器不会自动打标签、发布或后台更新。
+
+## 执行任务
 
 原始指令用原生用户消息或明文文件，不另填需求表。`start` 可选 `--thread`、`--socket`、`--project`（默认分别为 `CODEX_THREAD_ID`、上述 app-server 插座、当前目录）：
 
@@ -68,13 +106,13 @@ orbit stop TASK_DIRECTORY --reason "停止原因"
 
 - `--check-in` 是约定观察间隔，到期再排下一次；等待本身不调用模型。
 - `--estimate-minutes` / `--estimate-tokens` 不是上限。只有用户明确给出的 `--deadline` 才是硬线。
-- Root 经 skill 加载最小实现和共享规则，其他专项规则按当前动作加载。独立检查加载 review 和共享规则，同时读取固定产物中的相关项目规则。不把 Orbit 规则全局覆写进目标项目 `AGENTS.md`，也不引入 Zeen 专用规范。
+- Root 经 skill 加载最小实现和共享规则，其他专项规则按当前动作加载。独立检查加载 review 和共享规则，同时读取固定产物中的相关项目规则。不把 Orbit 规则全局覆写进目标项目 `AGENTS.md`，只读取目标项目实际适用的规范。
 - `--review-model` 只走本机 Codex CLI（`codex exec`）。GLM、DeepSeek 等是 Root 已有的协作工具选项，不是 Orbit 已接入的供应商适配。角色建议见 [model-selection.md](skills/orbit/references/model-selection.md)。
 
 ## 怎么判断进度
 
 看任务目录和 `orbit status` 的实际状态（如 `running` / `complete` / `paused` / `needs_user` / `failed` / `stop_unconfirmed`），不要只看聊天里的「完成了」。未检查、未停止、未验证要如实看待。`queued` 不是动作完成。
 
-## 接入 Feedback
+## 被其他工具调用
 
-Feedback 在自己的执行授权后调用同一个 `orbit start`，传入项目、已有会话和原始指令依据，保存返回的任务目录，通过 `orbit status` 或任务事件读取结果。业务状态映射留在接入方，不再维护第二套执行调度。Orbit 完成不依赖 Feedback 收到结果，也不要求安装 Zeen。
+反馈处理、任务管理或自动化工具可以在获得执行授权后调用同一个 `orbit start`，传入项目、已有 Agent 会话和原始指令依据，保存返回的任务目录，再通过 `orbit status` 或任务事件读取结果。调用方负责自己的业务状态，Orbit 独立运行至完成或停止；直接使用时无需这些接入方。

@@ -2,6 +2,7 @@
 
 require "optparse"
 require "rbconfig"
+require_relative "version"
 require_relative "task_record"
 require_relative "task_runtime"
 require_relative "codex_connection"
@@ -14,6 +15,8 @@ module Orbit
     HELP = <<~TEXT
       Orbit — independent execution checks for an existing coding session
 
+      orbit --version
+      orbit version [--json]
       orbit start --review-model MODEL [--thread ID] [--socket PATH]
                   [--message-id ID | --prompt-file FILE|-] [--project DIR]
                   [--basis FILE] [--check-in SECONDS] [--foreground]
@@ -24,6 +27,7 @@ module Orbit
       orbit amend TASK_DIRECTORY --file FILE|-
       orbit dispute TASK_DIRECTORY --reason TEXT
 
+      Root means the coding agent already responsible for the whole user task.
       start binds a session already loaded on the supplied Codex app-server.
       It never creates/resumes a Root, starts a daemon, or falls back to queue-only
       control. The invoking agent's CODEX_THREAD_ID is the default thread.
@@ -36,6 +40,11 @@ module Orbit
     def run(argv)
       command = argv.shift
       case command
+      when "version", "--version", "-v"
+        raise ArgumentError, "usage: orbit version [--json]" unless argv.empty? || argv == ["--json"]
+
+        puts(argv == ["--json"] ? JSON.pretty_generate(Orbit.version_info) : "orbit #{Orbit::VERSION}")
+        0
       when nil, "help", "--help", "-h"
         puts HELP
         0
