@@ -162,4 +162,10 @@ npm test
 
 版本号以 `package.json` 为准，`orbit version --json` 显示版本、来源提交、内容摘要和安装时间。本地安装的 `commit` 是工作树基线，`dirty` 表示安装时有本地改动；非 Git 来源记为未知。
 
-维护者用 `npm version <新版本> --no-git-tag-version` 同步包和锁文件，再进行相应验证。包内容用 `npm pack --dry-run` 核对。发布包、打标签与提交推送分别取得相应授权；安装器不会自动执行这些操作。
+按 [版本号管理规则](../../AGENTS.md#版本号管理)，需要升版时默认只将最后一位加一，例如 `0.6.0 → 0.6.1`；前两位由用户决定，只有明确指定后才调整。
+
+```bash
+npm version patch --no-git-tag-version
+```
+
+该命令同步包和锁文件，之后进行相应验证。仅在用户明确指定版本时使用 `npm version <指定版本> --no-git-tag-version`。不是每次文档修改或提交都需要升版。包内容用 `npm pack --dry-run` 核对；发布包、打标签与提交推送分别取得相应授权，安装器不会自动执行这些操作。
