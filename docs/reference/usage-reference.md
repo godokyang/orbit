@@ -38,6 +38,8 @@ OMP_PROFILE=work sh install.sh
 
 ### 更新和卸载的行为
 
+`orbit update` 读取当前安装记录，沿用原目录和扩展选择；远程来源沿用原 ref，本地来源沿用保存的源码目录。显式 `--ref REF` 可改用远程来源；本地源码目录不存在时给出重新安装或显式改用远程的提示。
+
 远程安装先把 ref 解析成一个 SHA，再下载该提交的完整源码。更新先准备依赖并验证新版，通过后才切换 `current`，CLI 与原生连接扩展一起切换。准备失败保留旧版，成功后清理旧版登记文件。
 
 更新或卸载应在 Orbit 任务结束后进行；这不是正在运行的任务的热更新。同一安装目录一次只运行一个安装器。
@@ -45,7 +47,7 @@ OMP_PROFILE=work sh install.sh
 卸载读取安装记录，只移除仍匹配的入口和已登记文件。用户额外文件、项目代码和项目 `.orbit` 资料保留。自定义安装的命令为：
 
 ```bash
-sh /实际的/runtime/current/uninstall.sh --runtime-dir /实际的/runtime
+orbit uninstall
 ```
 
 ## skill 管理与 OMP
@@ -83,9 +85,19 @@ npx skills install godokyang/orbit --skill orbit --agent codex --global
 
 日常由 Agent 通过宿主提供的 Orbit 工具完成调用，不需要用户填写内部 ID。下面的 CLI 用于已有控制连接的自定义宿主、诊断或集成，不能直接接管任意普通会话。
 
+### 日常查询与诊断
+
+`orbit status [TASK]`、`orbit stop [TASK]` 从当前目录向上寻找最近的 `.orbit` 项目，到独立 Git 项目边界停止。TASK 可为目录或当前项目唯一 ID 前缀。省略时优先待处理记录（包括 failed / stop_unconfirmed）；多个候选列出供选择，停止不猜测。仅 status 在无待处理记录时显示最近结束的一项。
+
+status 默认输出可读文本；`--json` 返回单项原始 state，多个／没有候选时返回 `{ "tasks": [...] }`。stop 默认说明入队和后续查询方式，`--json` 保留机器结果；MCP 和原生插件显式请求 JSON。
+
+`orbit doctor [TASK] [--json]` 不调用模型，不修改安装。依赖、扩展安装、连接和模型配置分别报告；`connection.ready: null` 表示没有可验证的会话，`false` 表示验证失败。只有环境通过且真实连接成功才有顶层 `ready: true`，并不代表模型登录或额度可用。无连接上下文时纯环境检查通过可返回退出码 0；发现环境、安装或连接错误返回 2。多个任务不自动选择连接，传 TASK 或在目标会话调用原生工具。
+
+默认 `orbit --help` 展示日常入口；`orbit start --help` 等子命令展示执行参数。
+
 ### 接入已有会话
 
-Codex 宿主提供 `CODEX_THREAD_ID` 与当前原生控制端点；`ORBIT_CODEX_SOCKET` 或 `--socket` 指向实际承载该会话的服务。`orbit doctor` 只诊断这一条 Codex 连接。
+Codex 宿主提供 `CODEX_THREAD_ID` 与当前原生控制端点；`ORBIT_CODEX_SOCKET` 或 `--socket` 指向实际承载该会话的服务。`orbit doctor` 在有当前 Codex 会话身份时验证该连接；其他宿主使用已有任务的连接记录，或由 Agent 的原生 Orbit `context` 核对。
 
 OpenCode／OMP 插件自动提供项目、会话和私有连接。Agent 分别通过原生 Orbit 工具或 `xd://orbit` 调用，不让用户猜测端口、socket 或会话 ID。
 
@@ -109,12 +121,12 @@ orbit start --review-model MODEL --prompt-file ./instruction.txt --estimate-toke
 ### 检查、补充、争议和成员
 
 ```bash
-orbit status TASK_DIRECTORY
+orbit status TASK_DIRECTORY --json
 orbit check TASK_DIRECTORY
 orbit amend TASK_DIRECTORY --file amendment.txt
 orbit dispute TASK_DIRECTORY --reason "具体争议与反证"
 orbit delegate TASK_DIRECTORY --file scope.txt --model MODEL
-orbit stop TASK_DIRECTORY --reason "停止原因"
+orbit stop TASK_DIRECTORY --reason "停止原因" --json
 ```
 
 `check` 请求一次独立检查；`amend` 只提交用户补充要求的原文；`dispute` 提交真实反证；`delegate` 的文件写明成员范围、资源和回报要求。成员必须使用当前宿主已有授权的模型，结果由 Root 核验并集成。

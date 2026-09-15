@@ -33,6 +33,11 @@ const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio
     const commands = fs.readdirSync(path.join(task, 'inbox'));
     assert.equal(commands.length, 1);
     assert.equal(JSON.parse(fs.readFileSync(path.join(task, 'inbox', commands[0]))).type, 'check');
+    for (const action of ['status', 'stop']) {
+      const reply = await client.callTool({ name: 'orbit', arguments: { action, task }, _meta: { 'codex/thread-id': 'own-root' } });
+      assert.equal(reply.isError, false);
+      assert.equal(JSON.parse(reply.content[0].text).status, action === 'status' ? 'running' : 'queued');
+    }
     console.log('MCP_TEST_PASS task ownership and real CLI delivery');
   } finally {
     await client.close();

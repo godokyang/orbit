@@ -1,6 +1,6 @@
 {
   "name": "@godokyang/orbit",
-  "version": "0.5.0",
+  "version": "0.6.0",
   "description": "Independent task execution checks for existing coding sessions.",
   "bin": {
     "orbit": "scripts/orbit"
@@ -25,7 +25,7 @@
     "plugins"
   ],
   "scripts": {
-    "test": "npm run check:version && sh -n install.sh && sh -n uninstall.sh && ruby --disable-gems tests/workspace_snapshot_test.rb && ruby --disable-gems tests/task_runtime_test.rb && ruby --disable-gems tests/codex_connection_test.rb && node tests/mcp_test.cjs && node tests/opencode_test.mjs && node tests/omp_test.mjs && ruby --disable-gems tests/install_test.rb",
+    "test": "npm run check:version && sh -n install.sh && sh -n uninstall.sh && ruby --disable-gems tests/workspace_snapshot_test.rb && ruby --disable-gems tests/task_runtime_test.rb && ruby --disable-gems tests/codex_connection_test.rb && node tests/mcp_test.cjs && node tests/opencode_test.mjs && node tests/omp_test.mjs && ruby --disable-gems tests/cli_test.rb && ruby --disable-gems tests/install_test.rb",
     "check:version": "ruby --disable-gems scripts/check-version.rb"
   },
   "publishConfig": {

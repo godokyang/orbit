@@ -1,0 +1,146 @@
+# frozen_string_literal: true
+
+require "tmpdir"
+require "fileutils"
+require "open3"
+require "rbconfig"
+require "socket"
+require_relative "../lib/orbit/task_record"
+
+module CliTest
+  ENTRY = File.expand_path("../scripts/orbit", __dir__)
+  module_function
+
+  def assert(value, message)
+    raise message unless value
+  end
+
+  def cli(*args, cwd: @project, success: true, env: {})
+    out, err, status = Open3.capture3({ "CODEX_THREAD_ID" => nil, "ORBIT_CODEX_SOCKET" => nil }.merge(env),
+                                    RbConfig.ruby, "--disable-gems", ENTRY, *args, chdir: cwd)
+    assert(status.success? == success, "#{args.inspect}\n#{out}\n#{err}")
+    out + err
+  end
+
+  def task(status = "running", **extra)
+    record = Orbit::TaskRecord.create(project_root: @project, instruction: "实现用户要求并完成验证", source: {},
+                                      connection: { "provider" => "omp", "thread_id" => "root", "socket" => File.join(@temp, "host.sock") },
+                                      review: {})
+    record.save(record.state.merge("status" => status).merge(extra.transform_keys(&:to_s)))
+    record
+  end
+
+  def commands(record)
+    Dir.glob(File.join(record.path, "inbox/*.json"))
+  end
+
+  def single_task_from_project_subdirectory
+    record = task
+    child = File.join(@project, "src/deep")
+    FileUtils.mkdir_p(child)
+    text = cli("status", cwd: child)
+    assert(text.include?("实现用户要求") && text.include?("running"), "readable requirement and status")
+    assert(JSON.parse(cli("status", "--json", cwd: child)) == record.state, "machine output preserves raw state")
+    text = cli("stop", "--reason", "用户停止", cwd: child)
+    assert(text.include?("尚未确认停止"), "queued is not reported as stopped")
+    command = JSON.parse(File.read(commands(record).fetch(0)))
+    assert(command["type"] == "stop" && command["reason"] == "用户停止", "stop targets the project task")
+    assert(record.state["status"] == "running", "CLI does not manufacture runtime state")
+  end
+
+  def multiple_tasks_require_explicit_selection
+    first, second = task, task("stop_unconfirmed")
+    list = JSON.parse(cli("status", "--json"))
+    assert(list["tasks"].map { |t| t["id"] }.sort == [first, second].map { |t| t.state["id"] }.sort, "include unresolved stop in candidates")
+    text = cli("stop", success: false)
+    assert(text.include?(first.state["id"]) && text.include?(second.state["id"]), "ambiguous stop lists choices")
+    assert(commands(first).empty? && commands(second).empty?, "ambiguous stop performs no action")
+    result = JSON.parse(cli("stop", first.state["id"][0, 8], "--json"))
+    assert(result["task_directory"] == first.path && commands(second).empty?, "unique prefix selects only the requested task")
+  end
+
+  def completed_and_absent_tasks
+    assert(JSON.parse(cli("status", "--json"))["tasks"].empty?, "empty project has no selected task")
+    cli("stop", success: false)
+    latest = task("complete", created_at: "2026-01-01T00:00:00Z", finished_at: "2026-01-03T00:00:00Z")
+    task("paused", created_at: "2026-01-02T00:00:00Z", finished_at: "2026-01-02T01:00:00Z")
+    assert(JSON.parse(cli("status", "--json"))["id"] == latest.state["id"], "status shows most recent settled task")
+    cli("stop", success: false)
+    nested = File.join(@project, "other-project")
+    FileUtils.mkdir_p(File.join(nested, ".git"))
+    assert(JSON.parse(cli("status", "--json", cwd: nested))["tasks"].empty?, "nested project does not inherit parent tasks")
+  end
+
+  def stale_result_and_user_action
+    record = task("needs_user", stop_reason: "请确认需求文档中的支付规则", next_check_at: "2026-01-01T00:00:00Z",
+                  checks: [{ "stale" => true, "result" => { "verdict" => "complete", "reason" => "旧版检查" } }])
+    text = cli("status")
+    assert(text.include?("已过期，未采纳") && text.include?("请确认需求文档中的支付规则"), "stale result and required user action remain distinct")
+    assert(!text.include?("2026-01-01"), "settled task has no upcoming check")
+    cli("stop", record.path, success: false)
+    assert(commands(record).empty?, "settled task cannot be stopped again")
+    record.save(record.state.merge("status" => "stop_unconfirmed", "stop_reason" => "用户停止", "error" => "成员仍在执行"))
+    assert(cli("status").include?("成员仍在执行"), "show the actual stop failure, not only the stop request reason")
+  end
+
+  def doctor_without_connection_or_dependencies
+    report = JSON.parse(cli("doctor", "--json"))
+    assert(report["environment_ready"] && report.dig("connection", "ready").nil? && !report["ready"], "installed dependencies do not prove a connection")
+    assert(!report.dig("credentials", "verified"), "no model or quota verification claimed")
+    report = JSON.parse(cli("doctor", "--json", env: { "PATH" => @temp }, success: false))
+    assert(!report["environment_ready"] && report["dependencies"].any? { |d| !d["ready"] && d["next_step"] }, "missing dependencies have an actionable diagnosis")
+  end
+
+  def doctor_reads_existing_native_connection
+    record = task
+    socket = record.state.dig("connection", "socket")
+    server = worker = nil
+    %w[omp opencode].each do |provider|
+      record.save(record.state.merge("connection" => record.state["connection"].merge("provider" => provider)))
+      server = UNIXServer.new(socket)
+      requests = []
+      worker = Thread.new do
+        2.times do
+          peer = server.accept
+          request = JSON.parse(peer.gets)
+          requests << request
+          peer.puts(JSON.generate("result" => { "cwd" => File.realpath(@project), "status" => "idle" }))
+          peer.close
+        end
+      end
+      report = JSON.parse(cli("doctor", record.path, "--json"))
+      assert(worker.join(3), "diagnostic requests completed")
+      assert(report["ready"] && report.dig("connection", "project") == File.realpath(@project), "native state read verifies the connection")
+      assert(requests.all? { |r| r["method"] == "state" && r["session"] == "root" }, "diagnostics sends only read requests")
+      server.close
+      File.unlink(socket)
+    end
+    report = JSON.parse(cli("doctor", record.path, "--json", success: false))
+    assert(report.dig("connection", "ready") == false && report.dig("connection", "next_step"), "closed host yields a connection error")
+  ensure
+    server&.close unless server&.closed?
+    worker&.kill if worker&.alive?
+    worker&.join
+  end
+
+  def maintenance_requires_an_installed_cli
+    %w[update uninstall].each { |command| cli(command, success: false) }
+    assert(cli("start", "--help").include?("--provider"), "execution details are available in subcommand help")
+  end
+
+  def main
+    %i[single_task_from_project_subdirectory multiple_tasks_require_explicit_selection completed_and_absent_tasks
+       stale_result_and_user_action doctor_without_connection_or_dependencies doctor_reads_existing_native_connection
+       maintenance_requires_an_installed_cli].each do |test|
+      Dir.mktmpdir("orbit-cli-test-") do |tmp|
+        @temp = tmp
+        @project = File.join(tmp, "project")
+        FileUtils.mkdir_p(@project)
+        send(test)
+      end
+      puts "CLI_TEST_PASS #{test}"
+    end
+  end
+end
+
+CliTest.main

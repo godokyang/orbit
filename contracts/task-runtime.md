@@ -50,7 +50,7 @@ Root 明确派发后，程序通过 Root 所在宿主的原生接口（Codex、O
 
 ## 当前接入与记录接口
 
-- CLI 提供 `doctor`、`codex`、`start`、`status`、`stop`、`check`、`amend`、`dispute`、`delegate`；控制命令写入任务 inbox，提交成功不代表动作已完成。`run` 是任务进程内部入口。
+- CLI 提供 `doctor`、`update`、`uninstall`、`codex`、`start`、`status`、`stop`、`check`、`amend`、`dispute`、`delegate`；控制命令写入任务 inbox，提交成功不代表动作已完成。`run` 是任务进程内部入口。
 - 用户明确运行 `orbit codex` 时，入口创建本地 app-server 并运行 Codex TUI，按会话配置 Orbit MCP；仅自动批准该工具，不修改全局配置。MCP 使用官方 SDK 并以原生调用身份限定任务归属，保留显式 ID 供缺少宿主元数据的客户端使用；这不是抵御同用户篡改的安全隔离层。
 - Codex 接入已加载在 Unix app-server 上、可读取历史的已有持久会话，通过 WebSocket 控制。OpenCode 通过官方插件持有的原生客户端接入当前会话，插件提供私有本地 socket 给任务进程；普通启动不需要用户指定端口或内部 ID。原文从原生用户消息读取，程序投递通过原生消息 metadata 标记，避免将纠正或成员回报当作新用户要求。不自动创建或恢复 Root，不用仅排队消息替代原生停止。
 - 停止确认覆盖该 Root 与本任务登记成员的当前 turn、各自 Codex 登记的后台终端和 Orbit 自有检查进程。关闭用户启动入口会尝试收尾该服务的任务和执行，无法确认时保留日志并说明。普通 Codex embedded TUI、脱离原生管理的进程及其他宿主尚未纳入该范围。OpenCode 停止覆盖本任务原生会话及其 shell 工具附属进程树，以原生 idle 且无活动工具确认；正常退出插件时先请求任务收尾再关闭私有通道。强杀宿主不自动恢复。
@@ -61,3 +61,9 @@ Root 明确派发后，程序通过 Root 所在宿主的原生接口（Codex、O
 ## OMP 原生接入
 
 按 ADR-007，OMP 原生扩展绑定当前会话，使用原生 custom message 区分纠正与用户输入，执行成员具有本任务登记的独立原生身份。停止要求原生执行结束，并按各自 owner 等待异步任务底层工作结算；原生 cancelled 标签本身不是进程停止证明。原生 custom message 采用 steer，使正在等待工具的 Root 也能收到纠正或成员结果；消息标记不冒充用户输入。用户明确切换／分支／回退会话前收尾原任务，未确认停止则取消这次切换并保留原通道供重试；不自动创建、迁移或恢复 Root。OMP 18.1.16 已完成普通入口自主接入、同一 Root 纠偏、成员集成、原生 Esc 及恢复后正常退出的真实验收。具体范围和失败记录见 docs/reference/omp-runtime-acceptance-20260914.json。
+
+## 用户查询与维护入口
+
+`status [TASK]` 默认显示可读摘要，`--json` 返回机器记录。省略任务时从当前项目定位；多个待处理候选列出选择项，`stop [TASK]` 不自动猜测。`failed` 与 `stop_unconfirmed` 不能视作已安全结束。显式任务目录或当前项目的唯一 ID 前缀都可使用。无待处理任务时查询可展示最近已结束记录，停止则说明无需停止。
+
+`doctor` 的环境和安装检查不代表会话已接入；只有通过已有原生接口读回实际会话后才报告连接成功，检查不调用模型。`update` 和 `uninstall` 只维护所属运行安装，skill 继续由 npx skills 管理，维护应在相关任务结束后执行。

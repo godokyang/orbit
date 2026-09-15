@@ -164,7 +164,7 @@ module OrbitInstall
   def source_info(options)
     return { "kind" => "github", "commit" => options[:commit], "ref" => options[:ref], "dirty" => false } if options[:commit]
     root = options.fetch(:source)
-    info = { "kind" => "local", "commit" => nil, "dirty" => nil }
+    info = { "kind" => "local", "path" => root, "commit" => nil, "dirty" => nil }
     if File.exist?(File.join(root, ".git"))
       info["commit"] = capture("git", "-C", root, "rev-parse", "HEAD").strip
       info["dirty"] = !capture("git", "-C", root, "status", "--porcelain", "--untracked-files=normal").empty?
@@ -264,7 +264,7 @@ module OrbitInstall
         kind == :symlink ? File.symlink(expected, path) : atomic_write(path, expected, mode: 0o755)
         created << path
       end
-      owner = { "format" => FORMAT, "bin_dir" => options.fetch(:bin), "opencode_dir" => options[:opencode], "omp_dir" => options[:omp] }
+      owner = { "format" => FORMAT, "runtime_dir" => runtime, "bin_dir" => options.fetch(:bin), "opencode_dir" => options[:opencode], "omp_dir" => options[:omp] }
       atomic_write(marker, JSON.pretty_generate(owner) + "\n")
       link = File.join(runtime, ".current-#{SecureRandom.hex(6)}")
       File.symlink("releases/#{File.basename(release)}", link)
@@ -277,8 +277,8 @@ module OrbitInstall
       puts "OMP: #{options[:omp] || 'not linked (--no-omp)'}"
       puts "Start OpenCode or OMP normally; running sessions load their extension on the next launch."
       puts "Details: orbit version --json"
-      puts "Update: rerun install.sh with --runtime-dir #{runtime.shellescape} (latest local checkout, or --ref REF)."
-      puts "Uninstall: sh #{File.join(runtime, 'current/uninstall.sh').shellescape} --runtime-dir #{runtime.shellescape}"
+      puts "Update: orbit update (skill: npx skills update orbit --global)."
+      puts "Uninstall: orbit uninstall"
     ensure
       unless switched
         created.reverse_each { |path| File.unlink(path) if present?(path) }

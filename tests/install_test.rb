@@ -34,7 +34,7 @@ module InstallTest
       @skills = File.join(tmp, "skills")
       @opencode = File.join(tmp, "opencode config")
       @omp = File.join(tmp, "omp agent")
-      @env = { "ORBIT_REF" => nil, "ORBIT_RUNTIME_DIR" => nil, "ORBIT_INSTALL_DIR" => nil, "ORBIT_SKILL_DIR" => @skills, "OPENCODE_CONFIG_DIR" => @opencode, "PI_CODING_AGENT_DIR" => @omp }
+      @env = { "CODEX_THREAD_ID" => nil, "ORBIT_CODEX_SOCKET" => nil, "ORBIT_REF" => nil, "ORBIT_RUNTIME_DIR" => nil, "ORBIT_INSTALL_DIR" => nil, "ORBIT_SKILL_DIR" => @skills, "OPENCODE_CONFIG_DIR" => @opencode, "PI_CODING_AGENT_DIR" => @omp }
       files = JSON.parse(run("npm", "pack", "--dry-run", "--json", "--ignore-scripts", cwd: ROOT))[0]["files"]
       files.each do |file|
         dest = File.join(@source, file.fetch("path"))
@@ -97,7 +97,8 @@ module InstallTest
     SCRIPT
     File.chmod(0o755, File.join(transport, "curl"))
     log = File.join(@temp, "downloads.log")
-    install("--ref", "branch/stable", env: { "PATH" => transport + File::PATH_SEPARATOR + ENV.fetch("PATH"), "ORBIT_FIXTURE_CURL_LOG" => log, "ORBIT_FIXTURE_ARCHIVE" => archive })
+    transport_env = { "PATH" => transport + File::PATH_SEPARATOR + ENV.fetch("PATH"), "ORBIT_FIXTURE_CURL_LOG" => log, "ORBIT_FIXTURE_ARCHIVE" => archive }
+    install("--ref", "branch/stable", env: transport_env)
     info = version
     assert(info.fetch("version") == json(File.join(ROOT, "package.json")).fetch("version"), "installed CLI version")
     assert(info.dig("source", "commit") == "a" * 40 && info.dig("source", "ref") == "branch/stable", "record pinned commit and requested ref")
@@ -105,6 +106,17 @@ module InstallTest
     assert([@skills, File.join(@opencode, "skills"), File.join(@omp, "skills")].none? { |p| File.exist?(p) }, "CLI installation creates no skill directories")
     assert(run(File.join(@bin, "orbit"), "--version").strip == "orbit #{info['version']}", "short version command")
     assert(!File.exist?(File.join(active, "lib/orbit/v2")), "no retired runtime in installation")
+    diagnosis = JSON.parse(run(File.join(@bin, "orbit"), "doctor", "--json", cwd: "/"))
+    assert(diagnosis.dig("installation", "ready") && diagnosis.dig("connection", "ready").nil?, "installed extensions do not prove a connected session")
+    File.unlink(File.join(@omp, "extensions/orbit.js"))
+    broken = JSON.parse(run(File.join(@bin, "orbit"), "doctor", "--json", cwd: "/", success: false))
+    assert(!broken.dig("installation", "ready") && !broken["ready"], "missing extension is an installation problem")
+    bump
+    run("tar", "--exclude=.git", "-czf", archive, "-C", @temp, "source")
+    run(File.join(@bin, "orbit"), "update", env: transport_env, cwd: "/")
+    assert(version["version"] == @updated_version && version.dig("source", "ref") == "branch/stable", "remote update follows the recorded ref")
+    assert(File.readlines(log).length == 4, "remote update resolves original ref again")
+    assert(File.file?(File.join(@omp, "extensions/orbit.js")), "update restores the missing owned extension")
   end
 
   def successful_update
@@ -120,7 +132,7 @@ module InstallTest
     File.write(File.join(@runtime, "user-notes.txt"), "keep")
     bump
     File.open(File.join(@source, "skills/orbit/SKILL.md"), "a") { |f| f.puts("\nUpdated fixture skill.") }
-    install(explicit_paths: false)
+    run(File.join(@bin, "orbit"), "update", env: { "ORBIT_RUNTIME_DIR" => "/wrong-runtime", "ORBIT_INSTALL_DIR" => "/wrong-bin" }, cwd: "/")
     assert(version["version"] == @updated_version, "updated CLI version")
     assert(version.dig("source", "commit") == run("git", "rev-parse", "HEAD", cwd: @source).strip, "local source commit recorded")
     assert(version.dig("source", "dirty") == true, "local edits not mislabeled as clean commit")
@@ -147,7 +159,7 @@ module InstallTest
       exec #{npm.inspect}, *ARGV
     SCRIPT
     File.chmod(0o755, File.join(runner, "npm"))
-    install(env: { "PATH" => runner + File::PATH_SEPARATOR + ENV.fetch("PATH") }, success: false)
+    run(File.join(@bin, "orbit"), "update", env: { "PATH" => runner + File::PATH_SEPARATOR + ENV.fetch("PATH") }, success: false, cwd: "/")
     assert(version == before && active == old, "failed dependency update retains working old installation")
     assert_external_skills
     assert(File.realpath(File.join(@opencode, "plugins/orbit.js")) == File.join(old, "plugins/opencode.mjs"), "failed update retains OpenCode plugin")
@@ -166,7 +178,7 @@ module InstallTest
     File.write(File.join(project, "task.json"), "keep task")
     File.write(File.join(@omp, "config.yml"), "user: keep\n")
     File.write(File.join(@opencode, "opencode.json"), '{"user":"keep"}')
-    run("sh", File.join(@runtime, "current/uninstall.sh"), "--runtime-dir", @runtime)
+    run(File.join(@bin, "orbit"), "uninstall", env: { "ORBIT_RUNTIME_DIR" => File.join(@temp, "other-runtime") }, cwd: "/")
     assert_external_skills
     assert(!File.exist?(File.join(@bin, "orbit")), "owned CLI wrapper removed")
     assert(!File.symlink?(File.join(@omp, "extensions/orbit.js")), "owned OMP extension removed")

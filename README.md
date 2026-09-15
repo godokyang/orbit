@@ -25,15 +25,13 @@ Orbit 可独立用于任何项目。你照常提出需求，当前 Agent 负责�
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/godokyang/orbit/main/install.sh | \
-  sh -s -- --ref main \
-  --bin-dir "$HOME/.local/bin" \
-  --runtime-dir "$HOME/.local/share/orbit/orbit"
+  sh
 
 export PATH="$HOME/.local/bin:$PATH"
 orbit --version
 ```
 
-当前源码版本为 `0.5.0`；远程命令安装 GitHub 上所选提交的版本。如果新终端提示找不到 `orbit`，把上面的 `export PATH=...` 加到 shell 配置文件中，例如 zsh 的 `~/.zshrc`。
+当前源码版本为 `0.6.0`；远程命令安装 GitHub 上所选提交的版本。如果新终端提示找不到 `orbit`，把上面的 `export PATH=...` 加到 shell 配置文件中，例如 zsh 的 `~/.zshrc`。
 
 这一步安装 Orbit 程序及 OpenCode／OMP 运行所需的原生连接扩展，**不安装 skill**。扩展提供会话通信与控制能力；模型、权限配置保持原样。自定义目录和 OMP profile 见[安装选项](docs/reference/usage-reference.md#安装选项)。
 
@@ -48,6 +46,8 @@ npx skills install godokyang/orbit --skill orbit --global
 按提示选择日常使用的 Coding Agent。全局安装后，各项目共用；也可省略 `--global`，只安装到当前项目。
 
 OMP 会读取共享的 `.agents/skills` 目录；skills CLI 暂无独立 OMP 选项时，选 Codex 即可同时写入共享目录，无需复制到 OMP。详见[skill 管理与 OMP](docs/reference/usage-reference.md#skill-管理与-omp)。
+
+两步完成后可运行 `orbit doctor` 检查依赖和扩展安装。普通终端没有可验证的会话时会明确显示“未验证”；安装通过不代表会话已经接入，也不验证模型登录和额度。
 
 **CLI 与 skill 两步都完成后，再启动 Coding Agent。** skill 能安装到更多 Agent，不代表这些 Agent 已具备 Orbit 执行接入；当前执行入口仍为 Codex、OpenCode、OMP。
 
@@ -82,22 +82,22 @@ OMP 会读取共享的 `.agents/skills` 目录；skills CLI 暂无独立 OMP 选
    去掉名字两端的空白；空名字抛出 ValueError。
 2. 支持 python3 greet.py Ada，打印 Hello, Ada!。
 3. 新增 USAGE.md，说明调用方式和空名字的处理。
-4. 做必要验证，交付时报告 Orbit 任务目录和最终检查状态。
+4. 做必要验证，告知 Orbit 是否已接入，交付时说明实际检查状态。
 ```
 
 这会调用执行模型和独立检查模型，适合先确认自己的安装能正常运行。
 
 ### 3. 确认已经接入并查看结果
 
-Agent 启动 Orbit 后，应能给出本次**任务目录**，形如 `.orbit/tasks/<任务ID>`，以及实际状态。你可以直接问：
+Agent 确认接入后应主动说明“已接入 Orbit，后续会独立检查”。交付时说明实际结果；独立检查尚未完成时应明确说“产物已准备好，等待检查”，不能提前宣布通过。
 
-> 请查看这次 Orbit 任务的实际状态，并告诉我还有什么未完成。
-
-也可以另开终端查询。把 `TASK_DIRECTORY` 换成 Agent 给出的完整任务目录：
+在项目目录或其子目录另开终端查看：
 
 ```bash
-orbit status TASK_DIRECTORY
+orbit status
 ```
+
+默认显示要求摘要、记录状态、最近检查、下次检查时间及用户需处理事项。只有一个待处理任务时自动定位；多个任务时列出 ID，使用 `orbit status ID` 查看其中一个，ID 可缩写为唯一前缀。没有待处理任务时显示最近已结束记录；程序读取使用 `orbit status --json`。
 
 | 状态 | 含义 |
 | --- | --- |
@@ -117,11 +117,13 @@ orbit status TASK_DIRECTORY
 停止时可以在原生界面中断当前执行，或让 Agent 停止这项 Orbit 任务。也可另开终端执行：
 
 ```bash
-orbit stop TASK_DIRECTORY --reason "用户停止本次任务"
-orbit status TASK_DIRECTORY
+orbit stop
+orbit status
 ```
 
-`stop` 返回 `queued` 只表示请求已排队，以后续实际状态为准。正常退出界面也会请求收尾；停止会保留会话、代码和任务记录。确认范围包括本任务登记的成员和原生管理的后台工作，外部未登记 Agent 不在其中。
+多个待处理任务时不会默认停止任何一个；先查看列表，再用 `orbit stop ID` 选择。需要说明原因可加 `--reason "停止原因"`。
+
+`stop` 提示“已提交停止请求”只表示请求已排队，以后续实际状态为准。正常退出界面也会请求收尾；停止会保留会话、代码和任务记录。确认范围包括本任务登记的成员和原生管理的后台工作，外部未登记 Agent 不在其中。
 
 ## 模型与启动参数
 
@@ -158,15 +160,13 @@ export ORBIT_REVIEW_MODEL=gpt-6-astra
 
 ### 程序
 
-远程安装重跑[安装 CLI 命令](#2-安装-cli)。CLI 与原生连接扩展一起更新；准备失败保留旧版。
-
-本地源码安装先更新本地仓库，再在 Orbit 仓库执行：
-
 ```bash
-sh install.sh --runtime-dir "$HOME/.local/share/orbit/orbit"
+orbit update
 ```
 
-安装器不会自动拉取本地仓库。
+自动沿用本命令所属的安装目录与入口选择，CLI 和原生连接扩展一起更新；准备失败保留旧版。远程安装沿用原分支、标签或提交，本地安装沿用原源码目录（需先自行更新该源码，不自动 git pull）。
+
+需要明确切换远程版本时使用 `orbit update --ref REF`，例如 `orbit update --ref main`。不再需要复制安装命令或填写 runtime 路径。
 
 ### skill
 
@@ -182,14 +182,13 @@ npx skills update orbit --global
 
 ```bash
 # 程序及原生连接扩展
-sh "$HOME/.local/share/orbit/orbit/current/uninstall.sh" \
-  --runtime-dir "$HOME/.local/share/orbit/orbit"
+orbit uninstall
 
 # 全局 skill
 npx skills remove orbit --global
 ```
 
-项目级 skill 则在对应项目执行 `npx skills remove orbit`。自定义安装换成实际 runtime 目录。
+项目级 skill 则在对应项目执行 `npx skills remove orbit`。`orbit uninstall` 自动定位当前 CLI 所属的安装目录，自定义安装也无需填写 runtime 路径。
 
 卸载程序不会删除 npx 管理的 skill；卸载 skill 也不会删除程序。两者均不删除项目代码和 `.orbit` 任务记录。
 
@@ -203,7 +202,9 @@ npx skills remove orbit --global
 
 先明确说“这次请使用 Orbit，并检查当前会话能否接入”。如果没有 Orbit 工具，检查是否使用了正确入口、是否在安装后重新启动，以及 skill／扩展是否装进当前配置目录。仅有 `orbit --version` 输出只能证明程序已安装。
 
-OMP 的工具可能显示为 `xd://orbit`，由 Agent 按原生设备说明调用。`orbit doctor` 仅诊断 Codex 连接，不用于判断 OpenCode／OMP 是否正常。
+先运行 `orbit doctor` 查看具体缺口。有唯一待处理任务时，它还会读取该任务的原生连接；多个任务可用 `orbit doctor ID` 选择。Codex 会话内优先验证当前会话，OpenCode／OMP 可让 Agent 调用 Orbit 工具的 `context` 核对本会话。扩展文件存在与会话已加载扩展分别报告，不根据安装文件猜测接入成功。
+
+OMP 的工具可能显示为 `xd://orbit`，由 Agent 按原生设备说明调用。
 
 ### 可以只用 OpenCode 或 OMP，不安装 Codex 吗？
 
@@ -215,7 +216,7 @@ OMP 的工具可能显示为 `xd://orbit`，由 Agent 按原生设备说明调�
 
 ## 当前范围与更多文档
 
-当前源码版本 **0.5.0**，尚未发布 npm 包。已验证 Codex CLI 0.154.0、OpenCode 1.18.30、OMP 18.1.16；真实记录覆盖自主接入、原会话纠偏、成员集成和停止。pi 与 OMP 是不同项目，pi 等其他接入暂缓，先试用现有三个入口。
+当前源码版本 **0.6.0**，尚未发布 npm 包。已验证 Codex CLI 0.154.0、OpenCode 1.18.30、OMP 18.1.16；真实记录覆盖自主接入、原会话纠偏、成员集成和停止。pi 与 OMP 是不同项目，pi 等其他接入暂缓，先试用现有三个入口。
 
 - [进阶使用参考](docs/reference/usage-reference.md)：安装目录、profile、CLI 参数、集成和版本维护。
 - [Agent 使用说明](skills/orbit/SKILL.md)：调用时机、分工与纠偏职责。

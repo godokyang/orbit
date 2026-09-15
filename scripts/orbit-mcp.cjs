@@ -56,6 +56,7 @@ server.setRequestHandler(CallToolRequestSchema, async request => {
   const env = { ...process.env };
   if (thread) env.CODEX_THREAD_ID = thread;
   const args = [a.action === 'context' ? 'doctor' : a.action];
+  if (['context', 'status', 'stop'].includes(a.action)) args.push('--json');
   let input;
   if (a.action === 'start') {
     if (!thread) throw new Error('Provide your current CODEX_THREAD_ID as thread_id.');

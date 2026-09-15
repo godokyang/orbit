@@ -97,6 +97,7 @@ export function createOrbitHost({ provider, project, dispatch, bind, reset }) {
         if (!a.task) throw new Error('Use task_directory returned by start');
         await ownedTask(a.task, id);
         const args = [a.action, a.task];
+        if (['status', 'stop'].includes(a.action)) args.push('--json');
         if (['amend', 'delegate'].includes(a.action)) {
           if (!a.text?.trim()) throw new Error('Provide the original amendment or delegated scope');
           args.push('--file', '-');
@@ -115,7 +116,7 @@ export function createOrbitHost({ provider, project, dispatch, bind, reset }) {
         try {
           let current = await ownedTask(task.task_directory, id);
           if (current.status === 'stop_unconfirmed' && requireConfirmation)
-            await run(['stop', task.task_directory, '--reason', 'Native session switch'], project);
+            await run(['stop', task.task_directory, '--reason', 'Native session switch', '--json'], project);
           if (!terminal.has(current.status)) {
             process.kill(task.pid, 'SIGTERM');
             for (let n = 0; n < 60; n++) {
