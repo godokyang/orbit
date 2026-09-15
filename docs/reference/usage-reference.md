@@ -16,13 +16,33 @@
 | `--omp-dir DIR` | `PI_CODING_AGENT_DIR`，其次 `OMP_PROFILE` 对应目录，否则 `~/.omp/agent` | OMP 的 `extensions/orbit.js` 所在 agent 目录 |
 | `--no-opencode` | 默认不禁用 | 不安装 OpenCode 原生连接插件 |
 | `--no-omp` | 默认不禁用 | 不安装 OMP 原生连接扩展 |
+| `--no-modify-path` | 默认自动配置 | 不修改 shell 配置；选择随安装记录保存，`--modify-path` 可重新开启 |
 | `--ref REF` | 远程安装默认 `main`；也可用 `ORBIT_REF` | 从 GitHub 获取分支、标签或完整提交 SHA |
 
 `--no-opencode --no-omp` 一起使用只安装 CLI。它不会让普通 OpenCode／OMP 获得控制通道。
 
-更新沿用安装记录中的目录和禁用选择；改变这些选择时先卸载再安装。环境变量和显式目录也要与原安装保持一致。
+更新沿用安装记录中的目录和扩展禁用选择；改变这些目录或扩展选择时先卸载再安装。环境变量和显式目录也要与原安装保持一致。
 
 已有未知命令包装、同名自定义扩展或无归属的安装目录时，安装器拒绝覆盖。先确认原入口由谁管理，通过对应工具卸载，或改用独立目录；不要直接覆盖自定义资料。
+
+### PATH 配置
+
+安装成功后，脚本根据 `$SHELL` 自动配置当前安装的 bin 目录（包括自定义 `--bin-dir`）：
+
+- zsh：追加到 `~/.zshrc`；已导出 `ZDOTDIR` 时使用该目录的 `.zshrc`。
+- bash：追加到 `~/.bashrc`，以及已有的第一个登录配置：`.bash_profile`、`.bash_login`、`.profile`；都不存在时使用 `~/.profile`。
+
+保留原有内容、文件链接和权限；重复安装不重复追加，重复加载也不会把目录重复放入 PATH。启动文件规则见 [zsh 官方说明](https://zsh.sourceforge.io/Doc/Release/Files.html)与 [Bash 官方说明](https://www.gnu.org/software/bash/manual/html_node/Bash-Startup-Files.html)。
+
+安装脚本无法改变父终端的环境。完成后重新打开终端，或复制安装输出中的 `export PATH=...` 命令让当前终端立即生效。使用其他 shell、特殊启动配置或配置文件无法写入时，按提示将实际 bin 目录加入对应配置；仍可通过输出中的完整命令路径使用 Orbit。
+
+不希望脚本修改配置时：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/godokyang/orbit/main/install.sh | sh -s -- --no-modify-path
+```
+
+此选择在 `orbit update` 和重复安装时保留。以后重新执行安装命令并传入 `--modify-path` 可开启；关闭自动配置不会删除已保存的 PATH 内容。卸载同样保留共享 bin 目录的 PATH 设置，避免影响该目录中的其他命令。
 
 ### OMP profile
 

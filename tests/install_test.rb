@@ -6,6 +6,7 @@ require "fileutils"
 require "open3"
 require "rbconfig"
 require "digest"
+require_relative "../scripts/manage-install"
 
 module InstallTest
   ROOT = File.expand_path("..", __dir__)
@@ -34,7 +35,8 @@ module InstallTest
       @skills = File.join(tmp, "skills")
       @opencode = File.join(tmp, "opencode config")
       @omp = File.join(tmp, "omp agent")
-      @env = { "CODEX_THREAD_ID" => nil, "ORBIT_CODEX_SOCKET" => nil, "ORBIT_REF" => nil, "ORBIT_RUNTIME_DIR" => nil, "ORBIT_INSTALL_DIR" => nil, "ORBIT_SKILL_DIR" => @skills, "OPENCODE_CONFIG_DIR" => @opencode, "PI_CODING_AGENT_DIR" => @omp }
+      @shell_config = File.join(tmp, "shell config")
+      @env = { "SHELL" => "/bin/zsh", "ZDOTDIR" => @shell_config, "CODEX_THREAD_ID" => nil, "ORBIT_CODEX_SOCKET" => nil, "ORBIT_REF" => nil, "ORBIT_RUNTIME_DIR" => nil, "ORBIT_INSTALL_DIR" => nil, "ORBIT_SKILL_DIR" => @skills, "OPENCODE_CONFIG_DIR" => @opencode, "PI_CODING_AGENT_DIR" => @omp }
       files = JSON.parse(run("npm", "pack", "--dry-run", "--json", "--ignore-scripts", cwd: ROOT))[0]["files"]
       files.each do |file|
         dest = File.join(@source, file.fetch("path"))
@@ -50,7 +52,7 @@ module InstallTest
 
   def install(*args, env: {}, success: true, explicit_paths: true)
     paths = explicit_paths ? ["--bin-dir", @bin] : []
-    run("sh", File.join(@source, "install.sh"), "--runtime-dir", @runtime, *paths, *args, env: env, success: success)
+    run("sh", File.join(@source, "install.sh"), "--runtime-dir", @runtime, "--no-modify-path", *paths, *args, env: env, success: success)
   end
 
   def version
@@ -98,7 +100,9 @@ module InstallTest
     File.chmod(0o755, File.join(transport, "curl"))
     log = File.join(@temp, "downloads.log")
     transport_env = { "PATH" => transport + File::PATH_SEPARATOR + ENV.fetch("PATH"), "ORBIT_FIXTURE_CURL_LOG" => log, "ORBIT_FIXTURE_ARCHIVE" => archive }
-    install("--ref", "branch/stable", env: transport_env)
+    install("--modify-path", "--ref", "branch/stable", env: transport_env)
+    shell_before = File.read(File.join(@shell_config, ".zshrc"))
+    assert(run("zsh", "-ic", "command -v orbit").strip == File.join(@bin, "orbit"), "fresh zsh discovers installed CLI")
     info = version
     assert(info.fetch("version") == json(File.join(ROOT, "package.json")).fetch("version"), "installed CLI version")
     assert(info.dig("source", "commit") == "a" * 40 && info.dig("source", "ref") == "branch/stable", "record pinned commit and requested ref")
@@ -117,6 +121,7 @@ module InstallTest
     assert(version["version"] == @updated_version && version.dig("source", "ref") == "branch/stable", "remote update follows the recorded ref")
     assert(File.readlines(log).length == 4, "remote update resolves original ref again")
     assert(File.file?(File.join(@omp, "extensions/orbit.js")), "update restores the missing owned extension")
+    assert(File.read(File.join(@shell_config, ".zshrc")) == shell_before, "update does not append duplicate PATH blocks")
   end
 
   def successful_update
@@ -141,6 +146,7 @@ module InstallTest
     assert(File.realpath(File.join(@opencode, "plugins/orbit.js")) == File.join(active, "plugins/opencode.mjs"), "OpenCode plugin follows update")
     assert(File.realpath(File.join(@omp, "extensions/orbit.js")) == File.join(active, "plugins/omp.mjs"), "OMP extension follows update")
     assert(File.read(File.join(@runtime, "user-notes.txt")) == "keep", "update preserves user files")
+    assert(!File.exist?(@shell_config), "update preserves the PATH opt-out")
   end
 
   def failed_update
@@ -168,7 +174,8 @@ module InstallTest
 
   def uninstall_preserves_user_files
     prepare_external_skills
-    install
+    install("--modify-path")
+    shell_before = File.read(File.join(@shell_config, ".zshrc"))
     File.write(File.join(@runtime, "user-notes.txt"), "keep root")
     release = active
     File.write(File.join(release, "user-extra.txt"), "keep release")
@@ -181,6 +188,7 @@ module InstallTest
     run(File.join(@bin, "orbit"), "uninstall", env: { "ORBIT_RUNTIME_DIR" => File.join(@temp, "other-runtime") }, cwd: "/")
     assert_external_skills
     assert(!File.exist?(File.join(@bin, "orbit")), "owned CLI wrapper removed")
+    assert(File.read(File.join(@shell_config, ".zshrc")) == shell_before, "uninstall retains shared PATH configuration")
     assert(!File.symlink?(File.join(@omp, "extensions/orbit.js")), "owned OMP extension removed")
     assert(File.read(File.join(@omp, "config.yml")) == "user: keep\n", "OMP config retained")
     assert(!File.symlink?(File.join(@opencode, "plugins/orbit.js")), "owned OpenCode plugin removed")
@@ -211,8 +219,34 @@ module InstallTest
     end
   end
 
+  def shell_configuration
+    # Existing Bash dotfiles may be symlinks and have no trailing newline.
+    target = File.join(@temp, "dotfile")
+    File.write(target, "# user settings")
+    File.chmod(0o640, target)
+    rc = File.join(@temp, ".bashrc")
+    File.symlink(target, rc)
+    profile = File.join(@temp, ".bash_profile")
+    File.write(profile, "# login settings")
+    bin = File.join(@temp, "bin with spaces ' $() [x]")
+    FileUtils.mkdir_p(bin)
+    File.write(File.join(bin, "orbit"), "#!/bin/sh\nexit 0\n")
+    File.chmod(0o755, File.join(bin, "orbit"))
+    options = { bin: bin, modify_path: true }
+    2.times { OrbitInstall.configure_shell_path(options, home: @temp, shell: "/bin/bash") }
+    assert(File.symlink?(rc) && (File.stat(target).mode & 0o777) == 0o640, "dotfile symlink and permissions preserved")
+    assert(File.read(target).start_with?("# user settings\n") && File.read(target).scan("# Orbit CLI path").length == 1, "existing content preserved and no duplicate configuration")
+    assert(!File.exist?(File.join(@temp, ".profile")), "do not create a profile that hides the existing login profile")
+    [rc, profile].each do |path|
+      command = 'source "$1"; source "$1"; command -v orbit; printf "%s\n" "$PATH"'
+      out = run("bash", "--noprofile", "--norc", "-c", command, "bash", path)
+      lines = out.lines.map(&:strip)
+      assert(lines.first == File.join(bin, "orbit") && lines.last.split(":").count(bin) == 1, "Bash loads custom path literally without duplicate entries")
+    end
+  end
+
   def main
-    %i[first_install successful_update failed_update uninstall_preserves_user_files].each do |test|
+    %i[first_install successful_update failed_update uninstall_preserves_user_files shell_configuration].each do |test|
       fixture { send(test) }
       puts "INSTALL_TEST_PASS #{test}"
     end

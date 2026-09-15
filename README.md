@@ -21,32 +21,23 @@ Orbit 可独立用于任何项目。你照常提出需求，当前 Agent 负责�
 
 ### 2. 安装 CLI
 
-按顺序执行下面三个步骤。每个代码块都可以整体复制到终端执行；程序安装一次后，可用于其他项目。
-
-**第一步：安装程序。** 下面是一条完整命令，复制整行执行：
+复制下面这一整行到终端执行；程序安装一次后，可用于其他项目：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/godokyang/orbit/main/install.sh | sh
 ```
 
-**第二步：让新终端也能找到 `orbit`。** macOS 默认使用 zsh，首次配置时整体复制下面两行执行；此前已把 `~/.local/bin` 加入 PATH 的用户可跳过：
+安装脚本会自动为 **zsh／bash 保存 PATH 配置**，重复安装不会重复添加，无需手动编辑配置文件。
 
-```bash
-printf '\nexport PATH="$HOME/.local/bin:$PATH"\n' >> ~/.zshrc
-source ~/.zshrc
-```
-
-第一行把配置保存到 `~/.zshrc`，以后新开终端、重启电脑仍会加载；第二行让当前终端立即生效。这一步只需配置一次。仅在终端执行 `export PATH=...` 不会永久保存。
-
-使用其他 shell 时，将同样的 PATH 设置写入对应的启动配置；自定义 CLI 安装目录时，把 `~/.local/bin` 换成实际的 bin 目录。
-
-**第三步：确认安装成功。**
+**安装成功后，重新打开一个终端**，执行下面的命令确认：
 
 ```bash
 orbit --version
 ```
 
-应输出类似 `orbit 0.6.0` 的版本号。当前源码版本为 `0.6.0`；远程命令安装 GitHub 上所选提交的版本。
+应输出类似 `orbit 0.6.1` 的版本号。当前源码版本为 `0.6.1`；远程命令安装 GitHub 上所选提交的版本。
+
+如果想继续使用当前终端，执行安装结束时显示的 `export PATH=...` 命令即可。自动保存的配置会在以后新开终端、重启电脑后继续生效。其他 shell 或关闭自动配置的方法见[PATH 配置](docs/reference/usage-reference.md#path-配置)。
 
 这一步安装 Orbit 程序及 OpenCode／OMP 运行所需的原生连接扩展，**不安装 skill**。扩展提供会话通信与控制能力；模型、权限配置保持原样。自定义目录和 OMP profile 见[安装选项](docs/reference/usage-reference.md#安装选项)。
 
@@ -231,7 +222,7 @@ OMP 的工具可能显示为 `xd://orbit`，由 Agent 按原生设备说明调�
 
 ## 当前范围与更多文档
 
-当前源码版本 **0.6.0**，尚未发布 npm 包。已验证 Codex CLI 0.154.0、OpenCode 1.18.30、OMP 18.1.16；真实记录覆盖自主接入、原会话纠偏、成员集成和停止。pi 与 OMP 是不同项目，pi 等其他接入暂缓，先试用现有三个入口。
+当前源码版本 **0.6.1**，尚未发布 npm 包。已验证 Codex CLI 0.154.0、OpenCode 1.18.30、OMP 18.1.16；真实记录覆盖自主接入、原会话纠偏、成员集成和停止。pi 与 OMP 是不同项目，pi 等其他接入暂缓，先试用现有三个入口。
 
 - [进阶使用参考](docs/reference/usage-reference.md)：安装目录、profile、CLI 参数、集成和版本维护。
 - [Agent 使用说明](skills/orbit/SKILL.md)：调用时机、分工与纠偏职责。

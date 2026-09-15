@@ -67,6 +67,7 @@ module OrbitInstall
       p.banner = "Orbit #{action}: [--runtime-dir DIR] [--bin-dir DIR]"
       p.on("--runtime-dir DIR") { |v| options[:runtime] = v }
       p.on("--bin-dir DIR") { |v| options[:bin] = v }
+      p.on("--[no-]modify-path") { |v| options[:modify_path] = v }
       p.on("--opencode-dir DIR") { |v| options[:opencode] = v }
       p.on("--no-opencode") { options[:no_opencode] = true }
       p.on("--omp-dir DIR") { |v| options[:omp] = v }
@@ -92,6 +93,7 @@ module OrbitInstall
       raise "runtime is not an owned installation; choose an empty directory (old installs are not migrated)"
     end
     options[:bin] ||= ENV["ORBIT_INSTALL_DIR"] || owner&.fetch("bin_dir") || File.join(Dir.home, ".local/bin")
+    options[:modify_path] = options.fetch(:modify_path) { owner ? owner.fetch("modify_path", true) : true }
     bin = File.expand_path(options.fetch(:bin))
     opencode = if options[:no_opencode]
                  nil
@@ -241,6 +243,47 @@ module OrbitInstall
     Dir.rmdir(path) if File.directory?(path) && !File.symlink?(path) && Dir.empty?(path)
   end
 
+  def configure_shell_path(options, home: Dir.home, shell: ENV["SHELL"], zdotdir: ENV["ZDOTDIR"])
+    bin = options.fetch(:bin)
+    unless options.fetch(:modify_path)
+      puts "PATH: unchanged (--no-modify-path)."
+      return
+    end
+    files = case File.basename(shell.to_s)
+            when "zsh"
+              [File.join(zdotdir.to_s.empty? ? home : File.expand_path(zdotdir), ".zshrc")]
+            when "bash"
+              profiles = %w[.bash_profile .bash_login .profile].map { |name| File.join(home, name) }
+              [File.join(home, ".bashrc"), profiles.find { |path| File.file?(path) } || File.join(home, ".profile")]
+            else
+              warn "PATH: shell #{shell.inspect} is not configured automatically; add #{bin} to your shell's PATH."
+              puts "Verify using the full command path: #{File.join(bin, 'orbit').shellescape} --version"
+              return
+            end
+    command = "export PATH=#{bin.shellescape}:\"$PATH\""
+    block = <<~SH
+      # Orbit CLI path (shared command directory)
+      case ":$PATH:" in
+        *:#{bin.shellescape}:*) ;;
+        *) #{command} ;;
+      esac
+    SH
+    files.each do |path|
+      content = File.exist?(path) ? File.read(path) : ""
+      next if content.include?(block)
+      FileUtils.mkdir_p(File.dirname(path))
+      # Append through existing dotfile symlinks; preserve content and permissions.
+      File.open(path, "a", 0o600) { |file| file.write("\n" + block) }
+    end
+    puts "PATH saved in: #{files.join(', ')}"
+    puts "Open a new terminal, then run: orbit --version"
+    puts "Or enable it in this terminal now: #{command}"
+  rescue SystemCallError, IOError => error
+    warn "Orbit is installed, but PATH configuration failed: #{error.message}"
+    warn "Add #{bin} to your shell's PATH manually."
+    puts "Verify using the full command path: #{File.join(bin, 'orbit').shellescape} --version"
+  end
+
   def install(options)
     prerequisites!
     check_endpoints!(options)
@@ -264,7 +307,7 @@ module OrbitInstall
         kind == :symlink ? File.symlink(expected, path) : atomic_write(path, expected, mode: 0o755)
         created << path
       end
-      owner = { "format" => FORMAT, "runtime_dir" => runtime, "bin_dir" => options.fetch(:bin), "opencode_dir" => options[:opencode], "omp_dir" => options[:omp] }
+      owner = { "format" => FORMAT, "runtime_dir" => runtime, "bin_dir" => options.fetch(:bin), "opencode_dir" => options[:opencode], "omp_dir" => options[:omp], "modify_path" => options.fetch(:modify_path) }
       atomic_write(marker, JSON.pretty_generate(owner) + "\n")
       link = File.join(runtime, ".current-#{SecureRandom.hex(6)}")
       File.symlink("releases/#{File.basename(release)}", link)
@@ -297,6 +340,7 @@ module OrbitInstall
     rescue StandardError => error
       warn "New version is active; old release cleanup needs attention: #{error.message}"
     end
+    configure_shell_path(options)
   end
 
   def uninstall(options)
