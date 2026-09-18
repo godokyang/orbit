@@ -146,10 +146,11 @@ orbit check TASK_DIRECTORY
 orbit amend TASK_DIRECTORY --file amendment.txt
 orbit dispute TASK_DIRECTORY --reason "具体争议与反证"
 orbit delegate TASK_DIRECTORY --file scope.txt --model MODEL
+orbit delegate TASK_DIRECTORY --file scope.txt --kind codex
 orbit stop TASK_DIRECTORY --reason "停止原因" --json
 ```
 
-`check` 请求一次独立检查；`amend` 只提交用户补充要求的原文；`dispute` 提交真实反证；`delegate` 的文件写明成员范围、资源和回报要求。成员必须使用当前宿主已有授权的模型，结果由 Root 核验并集成。
+`check` 请求一次独立检查；`amend` 只提交用户补充要求的原文；`dispute` 提交真实反证；`delegate` 的文件写明成员范围、资源和回报要求。默认 `delegate` 创建同宿主成员；已验证的 `--kind codex` 路径由 OpenCode Root 创建独立 Codex 成员，使用 Codex 自身配置的模型或显式指定的已授权模型。目标 kind 必须已获用户允许；安装或出现在 Herdr 列表中不等于授权。结果由 Root 核验并集成。
 
 这些控制操作返回 `queued` 表示入队，不能据此判断已完成或已停止。直接在原会话补充的用户消息由 Orbit 观察，不需要再手动提交相同 amendment。
 

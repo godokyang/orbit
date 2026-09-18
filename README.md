@@ -35,7 +35,7 @@ curl -fsSL https://raw.githubusercontent.com/godokyang/orbit/main/install.sh | s
 orbit --version
 ```
 
-应输出类似 `orbit 0.6.1` 的版本号。当前源码版本为 `0.6.1`；远程命令安装 GitHub 上所选提交的版本。
+应输出类似 `orbit 0.6.3` 的版本号。当前源码版本为 `0.6.3`；远程命令安装 GitHub 上所选提交的版本，未推送的本地提交不会出现在远程安装中。
 
 如果想继续使用当前终端，执行安装结束时显示的 `export PATH=...` 命令即可。自动保存的配置会在以后新开终端、重启电脑后继续生效。其他 shell 或关闭自动配置的方法见[PATH 配置](docs/reference/usage-reference.md#path-配置)。
 
@@ -118,7 +118,7 @@ orbit status
 
 ### 4. 补充要求或停止
 
-补充要求时直接在原会话里说，Orbit 会记录新的用户要求。需要分工时，Agent 通过 Orbit 创建成员并集成结果，你不必另外开窗口组队。
+补充要求时直接在原会话里说，Orbit 会记录新的用户要求。需要分工时，Agent 通过 Orbit 创建成员并集成结果，你不必另外开窗口组队。当前已验证 OpenCode Root 显式选择 `kind: codex`，让任务运行进程创建、回收和停止独立的 Codex 成员；其他跨宿主组合尚未验证。目标成员必须在本任务或项目规则中获得你的允许。
 
 停止时可以在原生界面中断当前执行，或让 Agent 停止这项 Orbit 任务。也可另开终端执行：
 
@@ -138,7 +138,7 @@ orbit status
 | 角色 | 默认选择 |
 | --- | --- |
 | 当前执行 Agent（Root） | 你在 Codex、OpenCode 或 OMP 中选择的模型 |
-| 执行成员 | OpenCode／OMP 沿用 Root 模型；Codex 沿用检查模型 |
+| 执行成员 | 同宿主 OpenCode／OMP 沿用 Root 模型；同宿主 Codex 沿用检查模型；OpenCode Root 创建的跨宿主 Codex 成员使用 Codex 自身配置或显式指定的已授权模型 |
 | 独立检查者、按需裁定者 | 使用本机 Codex CLI 的模型 |
 
 通常可以继续使用已有配置。要单独指定检查模型，在**启动 Agent 前**设置，例如：
@@ -178,7 +178,7 @@ export ORBIT_REVIEW_MODEL=gpt-6-astra
 orbit update
 ```
 
-自动沿用本命令所属的安装目录与入口选择，CLI 和原生连接扩展一起更新；准备失败保留旧版。远程安装沿用原分支、标签或提交，本地安装沿用原源码目录（需先自行更新该源码，不自动 git pull）。
+自动沿用本命令所属的安装目录与入口选择，CLI 和原生连接扩展一起更新；准备失败保留旧版。远程安装沿用原分支、标签或提交，本地安装沿用原源码目录（需先自行更新该源码，不自动 git pull）。本地来源安装可直接更新到本仓已提交的改动，不要求先推送；GitHub 来源只能取得已推送的提交。
 
 需要明确切换远程版本时使用 `orbit update --ref REF`，例如 `orbit update --ref main`。不再需要复制安装命令或填写 runtime 路径。
 
@@ -188,7 +188,7 @@ orbit update
 npx skills update orbit --global
 ```
 
-如果是项目安装，在那个项目中改用 `npx skills update orbit --project`。这一步不更新 CLI。两步完成后重新打开 Coding Agent；`orbit version --json` 查看程序版本和来源，`npx skills list --global` 查看全局 skill。
+如果是项目安装，在那个项目中改用 `npx skills update orbit --project`。这一步不更新 CLI。skill 从 GitHub 安装时，需要先推送新内容才能从 GitHub 更新；本地开发可按[进阶说明](docs/reference/usage-reference.md#skill-管理与-omp)从本仓路径安装未推送的 skill。两步完成后重新打开 Coding Agent；`orbit version --json` 查看程序版本和来源，`npx skills list --global` 查看全局 skill。
 
 ## 卸载
 
@@ -230,9 +230,9 @@ Codex 的 MCP 工具显示为 `orbit.task`；OpenCode 使用 `orbit`，OMP 的�
 
 ## 当前范围与更多文档
 
-当前源码版本 **0.6.1**，尚未发布 npm 包。已验证 Codex CLI 0.154.0、OpenCode 1.18.30、OMP 18.1.16；真实记录覆盖自主接入、原会话纠偏、成员集成和停止。pi 与 OMP 是不同项目，pi 等其他接入暂缓，先试用现有三个入口。
+当前源码版本 **0.6.3**，尚未发布 npm 包。Codex、OpenCode、OMP 的同宿主接入，以及 OpenCode Root → Codex 成员的跨宿主路径已有真实验收；其他跨宿主组合尚未验证。pi 与 OMP 是不同项目，pi 等其他接入暂缓。
 
 - [进阶使用参考](docs/reference/usage-reference.md)：安装目录、profile、CLI 参数、集成和版本维护。
 - [Agent 使用说明](skills/orbit/SKILL.md)：调用时机、分工与纠偏职责。
-- [真实验收](docs/reference/user-flow-acceptance-20260914.json)：Codex；另见 [OpenCode](docs/reference/opencode-runtime-acceptance-20260914.json) 与 [OMP](docs/reference/omp-runtime-acceptance-20260914.json)。
+- [真实验收](docs/reference/user-flow-acceptance-20260914.json)：Codex；另见 [OpenCode](docs/reference/opencode-runtime-acceptance-20260914.json)、[OMP](docs/reference/omp-runtime-acceptance-20260914.json) 与[跨宿主 Codex 成员](docs/reference/cross-host-member-acceptance-20260918.md)。
 - [当前限制](docs/plan/debt-ledger.md)与[文档索引](docs/README.md)：设计、开发规范和后续工作。
