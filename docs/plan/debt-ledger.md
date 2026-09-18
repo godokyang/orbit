@@ -4,7 +4,7 @@
 
 | 限制 | 当前影响 | 继续处理的条件 |
 | --- | --- | --- |
-| Codex 恢复会话不接受权限覆盖 | `orbit codex resume` 沿用会话保存的权限；显式权限覆盖被 Codex 拒绝（“Permission overrides are not supported when resuming a remote task”），恢复后无法通过启动参数获得 full access | 依赖 Codex 原生支持或用户在会话内用原生权限选择；新会话已默认 full access，不绕过限制、不丢弃用户参数 |
+| Codex 恢复会话的权限限制 | 远端 TUI 仍拒绝权限覆盖参数；`orbit codex` 已改为把 full access 默认放在入口持有的 app-server。显式 UUID 恢复按线程记录恢复沙箱（记录不可读时启动前失败并要求显式沙箱），显式沙箱生效；显式审批策略与 Codex 保存值不一致时启动前失败。`--last` 由入口在当前项目的本地记录内解析为最新可恢复会话的 UUID，无匹配记录时启动前失败；选择器暂不支持；显式 UUID 不受项目限制。不把可能选中其他项目的全局 `--last` 交给 Codex。其他直接 `codex --remote … resume` 仍受原生限制 | 需要 Codex 原生支持恢复时的线程设置更新；`--last` 仅限本入口记录的项目内解析，不建通用会话发现器 |
 | 旧 release 清理时机 | 仍有存活 lease 的旧 release 保留到持有进程退出后的下一次安装；长期不更新的安装可能多保留一份 release 的磁盘占用 | 出现实际磁盘或发布需求时再做后台清理或显式清理入口 |
 | 现有 Codex 嵌入式会话不能热接入 | orbit codex 已跑通日常入口和显式恢复原会话；普通已打开的 embedded TUI 仍缺少原生端点 | 用户明确停止当前工作后，从 orbit codex resume 恢复原会话；没有已验证接口时不自动迁移 |
 | 历史读取有前置条件 | 只接入已加载、具备历史读取能力的持久会话；ephemeral 或尚未物化的会话不可用 | 原生接口提供相应能力且有明确使用需求后再适配 |

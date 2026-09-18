@@ -123,6 +123,10 @@ status 默认输出可读文本；`--json` 返回单项原始 state，多个／�
 
 默认 `orbit --help` 展示日常入口；`orbit start --help` 等子命令展示执行参数。
 
+### Codex 入口的权限与恢复
+
+`orbit codex` 新会话默认 full access，显式权限参数优先。恢复使用显式会话 ID 时，Orbit 按该会话记录的沙箱恢复（full 保持 full，受限保持受限；记录不可读时要求显式沙箱，不会降权继续）；显式沙箱参数经本入口持有的 app-server 生效，不传给会拒绝远程权限覆盖的远端 TUI；显式审批参数与 Codex 保存的审批策略不一致时在启动前报错，不会以其他权限继续。`resume --last` 由 Orbit 在当前项目的本地记录中解析为最新可恢复会话的 UUID，再按该会话恢复并把 UUID 交给 Codex，不会让它使用可能选中其他项目的全局 `--last`；当前项目没有匹配记录时要求显式会话 ID，选择器暂不支持。显式会话 ID 不受项目限制。
+
 ### 接入已有会话
 
 Codex 宿主提供 `CODEX_THREAD_ID` 与当前原生控制端点；`ORBIT_CODEX_SOCKET` 或 `--socket` 指向实际承载该会话的服务。`orbit doctor` 在有当前 Codex 会话身份时验证该连接；其他宿主使用已有任务的连接记录，或由 Agent 的原生 Orbit `context` 核对。

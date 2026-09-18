@@ -185,8 +185,9 @@ module CliTest
            "the Orbit MCP server configuration is preserved")
   end
 
-  # New Codex sessions default to full access; explicit stricter options win
-  # and resume keeps the session's saved permissions.
+  # New Codex sessions default to full access; explicit stricter options win.
+  # The remote resume TUI rejects permission overrides, so resume routes them
+  # to the app-server this launcher owns instead of the TUI argv.
   def codex_launch_defaults_to_full_access
     full = ["-s", "danger-full-access", "-a", "never"]
     assert(Orbit::SessionEntry.default_permission_args(["--model", "gpt-6"]) == full, "new sessions default to full access")
@@ -200,11 +201,179 @@ module CliTest
     assert(Orbit::SessionEntry.default_permission_args(["--dangerously-bypass-approvals-and-sandbox"]) == [],
            "explicit bypass options are kept untouched")
     assert(Orbit::SessionEntry.default_permission_args(["resume", "--last"]) == [],
-           "resume keeps the session's saved permissions")
+           "resume argv receives no injected permission flags")
     assert(Orbit::SessionEntry.default_permission_args(["--model", "x", "resume", "--last"]) == [],
            "a resume subcommand after options is still a resume")
     assert(Orbit::SessionEntry.default_permission_args(["please resume the work"]) == full,
            "a prompt mentioning resume is not a resume subcommand")
+  end
+
+  # Orbit's full-access default lives on the app-server it owns, so a resume
+  # without permission flags still runs full access. Explicit permission
+  # options are translated to app-server configuration and removed from the
+  # remote resume TUI argv, which would reject them; other native options stay.
+  def codex_resume_permissions_go_to_the_app_server
+    full = ["-c", 'sandbox_mode="danger-full-access"', "-c", 'approval_policy="never"']
+    assert(Orbit::SessionEntry.server_permission_args({}) == full, "the owned app-server carries the full-access default")
+    assert(Orbit::SessionEntry.server_permission_args({ "sandbox_mode" => '"read-only"' }) ==
+           ["-c", 'sandbox_mode="read-only"', "-c", 'approval_policy="never"'],
+           "an explicit sandbox overrides only the sandbox default")
+
+    overrides, kept = Orbit::SessionEntry.split_permissions(
+      ["--dangerously-bypass-approvals-and-sandbox", "resume", "abc", "-m", "gpt-6"]
+    )
+    assert(overrides == { "sandbox_mode" => '"danger-full-access"', "approval_policy" => '"never"' },
+           "the reported resume command is translated instead of forwarded")
+    assert(kept == ["resume", "abc", "-m", "gpt-6"], "native non-permission options are preserved")
+
+    overrides, kept = Orbit::SessionEntry.split_permissions(
+      ["resume", "abc", "-s", "read-only", "-c", 'approval_policy="on-request"']
+    )
+    assert(overrides == { "sandbox_mode" => '"read-only"', "approval_policy" => '"on-request"'} && kept == ["resume", "abc"],
+           "sandbox and approval options move to the app-server for resume")
+
+    overrides, kept = Orbit::SessionEntry.split_permissions(["--approve-for-me", "-c", "mcp_servers.orbit.enabled=false"])
+    assert(overrides == { "sandbox_mode" => '"workspace-write"', "approval_policy" => '"on-request"', "approvals_reviewer" => '"auto_review"' },
+           "auto review expands to its native configuration")
+    assert(kept == ["-c", "mcp_servers.orbit.enabled=false"], "non-permission config stays with the TUI")
+
+    overrides, kept = Orbit::SessionEntry.split_permissions(["resume", "--last", "--full-auto"])
+    assert(overrides.empty? && kept == ["resume", "--last", "--full-auto"],
+           "an option this Codex no longer supports is left to Codex instead of being silently reinterpreted")
+
+    assert(Orbit::SessionEntry.resume_invocation?(["resume", "abc", "-s", "read-only"]),
+           "an explicit option does not hide a resume subcommand")
+    assert(!Orbit::SessionEntry.resume_invocation?(["--sandbox", "read-only", "prompt"]),
+           "a new session keeps its native TUI arguments")
+  end
+
+  # A resume uses the sandbox Codex recorded for that session: full stays
+  # full, a restricted session stays restricted. --last is resolved to this
+  # project's newest session before launch (see the isolation test below); a
+  # picker resume and an explicit approval option Codex would override fail
+  # before launch.
+  def codex_resume_restores_or_reports_saved_sandbox
+    id = "01a0b54f-cdea-7143-90f4-0d09fe53c417"
+    previous = ENV["CODEX_HOME"]
+    ENV["CODEX_HOME"] = File.join(@temp, "codex")
+    dir = File.join(ENV["CODEX_HOME"], "sessions", "2026", "09", "19")
+    FileUtils.mkdir_p(dir)
+    path = File.join(dir, "rollout-2026-09-19T00-18-21-#{id}.jsonl")
+    write_rollout = lambda do |mode, approval|
+      File.write(path, [
+        { "type" => "session_meta", "payload" => { "id" => id } },
+        { "type" => "turn_context", "payload" => { "sandbox_policy" => { "type" => "danger-full-access" }, "approval_policy" => "never" } },
+        { "type" => "turn_context", "payload" => { "sandbox_policy" => { "type" => mode }, "approval_policy" => approval, "approvals_reviewer" => "user" } }
+      ].map { |item| JSON.generate(item) }.join("\n") + "\n")
+    end
+
+    write_rollout.call("danger-full-access", "never")
+    assert(Orbit::SessionEntry.resume_permission_defaults(["resume", id], {}) ==
+           [{ "sandbox_mode" => '"danger-full-access"' }, nil],
+           "a full-access session resumes with the full-access sandbox restored")
+    assert(Orbit::SessionEntry.resume_permission_defaults(["resume", id], { "approval_policy" => '"never"' })[0] ==
+           { "sandbox_mode" => '"danger-full-access"' },
+           "a matching explicit approval option is accepted")
+
+    write_rollout.call("workspace-write", "on-request")
+    defaults, notice = Orbit::SessionEntry.resume_permission_defaults(["resume", id], {})
+    assert(defaults == { "sandbox_mode" => '"workspace-write"' } && notice.include?("workspace-write"),
+           "a restricted session keeps its saved sandbox and the launcher says so")
+    approval_only, = Orbit::SessionEntry.resume_permission_defaults(["resume", id], { "approval_policy" => '"on-request"' })
+    assert(approval_only == { "sandbox_mode" => '"workspace-write"' },
+           "an approval-only option still keeps the saved restricted sandbox")
+    begin
+      Orbit::SessionEntry.resume_permission_defaults(["resume", id], { "approval_policy" => '"never"' })
+      raise "an unappliable explicit approval option must fail before launch"
+    rescue ArgumentError => error
+      assert(error.message.include?("approval_policy") && error.message.include?("on-request"),
+             "the unappliable explicit approval option is reported with the saved value")
+    end
+    assert(Orbit::SessionEntry.resume_permission_defaults(["resume", id], { "sandbox_mode" => '"danger-full-access"' })[0] == {},
+           "an explicit sandbox option is applied directly")
+
+    File.delete(path)
+    begin
+      Orbit::SessionEntry.resume_permission_defaults(["resume", id], {})
+      raise "an unreadable saved sandbox must fail before launch"
+    rescue ArgumentError => error
+      assert(error.message.include?("explicit sandbox"),
+             "a resume whose saved sandbox cannot be read asks for an explicit sandbox instead of downgrading")
+    end
+    explicit_when_unreadable = Orbit::SessionEntry.resume_permission_defaults(
+      ["resume", id], { "sandbox_mode" => '"danger-full-access"' }
+    )
+    assert(explicit_when_unreadable == [{}, nil], "an explicit sandbox still works when the saved record is unreadable")
+
+    [["resume", "--last"], ["resume"],
+     ["resume", "--last", "--dangerously-bypass-approvals-and-sandbox"]].each do |argv|
+      begin
+        Orbit::SessionEntry.resume_permission_defaults(argv, Orbit::SessionEntry.split_permissions(argv).first)
+        raise "a resume target chosen inside Codex must fail before launch"
+      rescue ArgumentError => error
+        assert(error.message.include?("explicit session ID"),
+               "a resume target chosen inside Codex fails before launch instead of risking another project's session")
+      end
+    end
+    assert(Orbit::SessionEntry.server_permission_args({}, defaults: {}) == [],
+           "an undeterminable target adds no permission configuration to the app-server")
+    assert(Orbit::SessionEntry.resume_thread_id(["resume", "-m", "gpt-6", id, "prompt"]) == id,
+           "the UUID target is found behind native options")
+  ensure
+    previous.nil? ? ENV.delete("CODEX_HOME") : ENV["CODEX_HOME"] = previous
+  end
+
+  # `resume --last` must resolve to the newest resumable session of the
+  # current project, never a newer session recorded for another project.
+  def codex_resume_last_is_project_scoped
+    project = File.join(@temp, "project-a")
+    other = File.join(@temp, "project-b")
+    empty = File.join(@temp, "project-empty")
+    FileUtils.mkdir_p([project, other, empty])
+    previous = ENV["CODEX_HOME"]
+    ENV["CODEX_HOME"] = File.join(@temp, "codex")
+    id_a = "01a0b581-0000-7000-8000-000000000001"
+    id_b = "01a0b582-0000-7000-8000-000000000002"
+    write = lambda do |id, cwd, age|
+      dir = File.join(ENV["CODEX_HOME"], "sessions", "2026", "09", "19")
+      FileUtils.mkdir_p(dir)
+      path = File.join(dir, "rollout-2026-09-19T00-00-00-#{id}.jsonl")
+      File.write(path, [
+        { "type" => "session_meta", "payload" => { "id" => id, "cwd" => cwd, "originator" => "codex-tui" } },
+        { "type" => "turn_context", "payload" => { "sandbox_policy" => { "type" => "danger-full-access" }, "approval_policy" => "never" } }
+      ].map { |item| JSON.generate(item) }.join("\n") + "\n")
+      File.utime(Time.now - age, Time.now - age, path)
+    end
+    write.call(id_a, project, 60)
+    write.call(id_b, other, 1)
+
+    argv = ["--cd", project, "resume", "--last", "--dangerously-bypass-approvals-and-sandbox"]
+    assert(Orbit::SessionEntry.resume_target(argv) == id_a,
+           "--last resolves to this project's newest session, not a newer session from another project")
+    rewritten = Orbit::SessionEntry.with_resume_id(["resume", "--last", "--no-alt-screen"], id_a)
+    assert(rewritten == ["resume", id_a, "--no-alt-screen"],
+           "the TUI receives the project-scoped UUID instead of the global --last")
+    assert(Orbit::SessionEntry.resume_tui_argv(["resume", id_a], ["resume", id_a], id_a) == ["resume", id_a],
+           "an explicit UUID stays untouched instead of being inserted twice")
+    assert(Orbit::SessionEntry.resume_tui_argv(["resume", "--last"], ["resume", "--last"], id_a) == ["resume", id_a],
+           "only a --last target is rewritten for the TUI")
+
+    bare = ["--cd", project, "resume", "--last"]
+    defaults, = Orbit::SessionEntry.resume_permission_defaults(bare, {})
+    assert(defaults == { "sandbox_mode" => '"danger-full-access"' },
+           "the project-scoped --last target then goes through the saved-sandbox restore")
+
+    assert(Orbit::SessionEntry.resume_target(["--cd", empty, "resume", "--last"]).nil?,
+           "a project without records has no --last target")
+    begin
+      Orbit::SessionEntry.resume_permission_defaults(["--cd", empty, "resume", "--last"], {})
+      raise "a project without records must fail before launch"
+    rescue ArgumentError => error
+      assert(error.message.include?("explicit session ID"),
+             "a project without records asks for an explicit session ID instead of resuming another project")
+    end
+  ensure
+    previous.nil? ? ENV.delete("CODEX_HOME") : ENV["CODEX_HOME"] = previous
   end
 
   def doctor_reports_member_allowlist_and_gaps
@@ -293,7 +462,9 @@ module CliTest
        stale_result_and_user_action failed_stop_confirmation_is_reported doctor_without_connection_or_dependencies
        doctor_reads_existing_native_connection
        stop_retries_when_recorded_runtime_is_gone codex_launch_approval_targets_the_registered_tool
-       codex_launch_defaults_to_full_access doctor_reports_member_allowlist_and_gaps
+       codex_launch_defaults_to_full_access codex_resume_permissions_go_to_the_app_server
+       codex_resume_restores_or_reports_saved_sandbox codex_resume_last_is_project_scoped
+       doctor_reports_member_allowlist_and_gaps
        delegate_checks_allowlist_before_queueing maintenance_requires_an_installed_cli
        jev_setup_exports_key_in_new_shell].each do |test|
       Dir.mktmpdir("orbit-cli-test-") do |tmp|

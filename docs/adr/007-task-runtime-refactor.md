@@ -132,7 +132,7 @@ Jev 的判断不取代固定产物上的独立检查及实际停止证据。程�
 
 - 允许名单：可选 `~/.config/orbit/members.json` 只含 `allowed_kinds`。缺失时用默认六项，存在时完整覆盖，空数组禁止创建新成员；`native` 解析为 Root 实际 kind 后检查。派发前先检查名单与适配器，失败在创建任何宿主或成员之前给出具体原因；名单变化不影响已登记成员的停止与结果回收。
 - 适配器范围：只声明同宿主 Codex／OpenCode／OMP 成员与已验收的 OpenCode Root → Codex 成员；`kimi`、`cursor-agent`、`grok` 允许但无可调用适配器时表现为不可调用并说明缺口，不新增供应商适配器。`doctor` 显示允许、可调用与缺口。
-- 权限：Codex 执行成员明确设置 full access（`approvalPolicy: never` + `danger-full-access`）；OpenCode 成员沿用 Root 原生权限与模型配置，用户已确认其默认权限满足日常编码，Orbit 不修改该权限接线；OMP 成员沿用 Root 原生权限与工具集。`orbit codex` 新会话默认 full access；仅显式指定审批策略时仍补 `danger-full-access`，显式沙箱或组合权限模式优先，避免 `never` 与意外继承的 `workspace-write` 组合。不修改全局配置，不扩大检查者与裁定者的只读权限。Codex remote resume 的权限覆盖行为按真实验证记录（覆盖被拒绝），未验证不声明修复。分工提示在状态新鲜度复核后发送，同次判断触发的检查优先。
+- 权限：Codex 执行成员明确设置 full access（`approvalPolicy: never` + `danger-full-access`）；OpenCode 成员沿用 Root 原生权限与模型配置，用户已确认其默认权限满足日常编码，Orbit 不修改该权限接线；OMP 成员沿用 Root 原生权限与工具集。`orbit codex` 新会话默认 full access；仅显式指定审批策略时仍补 `danger-full-access`，显式沙箱或组合权限模式优先，避免 `never` 与意外继承的 `workspace-write` 组合。不修改全局配置，不扩大检查者与裁定者的只读权限。恢复会话：full access 默认放在入口持有的 app-server 启动配置，显式 UUID 按线程记录恢复原沙箱（受限保持受限，记录不可读时启动前失败），显式权限选项经该 app-server 生效而不传给拒绝远程覆盖的 TUI；显式审批与保存值不一致时启动前明确规定失败；`--last` 由入口在该项目的本地记录内解析为最新可恢复会话的 UUID 后传给 TUI，无匹配记录时启动前失败；picker 暂不支持；显式 UUID 不受项目限制。未解决范围记入当前限制。分工提示在状态新鲜度复核后发送，同次判断触发的检查优先。
 - Jev 分工提示：在同一请求中增加“可能适合独立分工”的概率；只有存在允许且可调用的成员时至多提示 Root 一次，不自动派发、不选择 kind、不替代检查者。记录信号、实际派发与额外用量；无收益不增加阈值或路由。真实样本尚未触发提示，分工收益未验证。
 
 真实验收要求：名单允许与拒绝都在创建前生效；不支持 kind 不报成可调用；当前受控路径成员真实任务无反复审批、结果回 Root、停止确认；Codex 新会话与恢复分别核对；Jev 提示最多一次且不自动派发。验证事实见 [成员名单与 full access 验收](../reference/member-policy-acceptance-20260918.md)。
