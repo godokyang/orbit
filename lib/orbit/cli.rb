@@ -45,7 +45,7 @@ module Orbit
       "check" => "orbit check TASK_DIRECTORY",
       "amend" => "orbit amend TASK_DIRECTORY --file FILE|-",
       "dispute" => "orbit dispute TASK_DIRECTORY --reason TEXT",
-      "delegate" => "orbit delegate TASK_DIRECTORY --file FILE|- [--model MODEL] [--member THREAD_ID]",
+      "delegate" => "orbit delegate TASK_DIRECTORY --file FILE|- [--kind codex] [--model MODEL] [--member THREAD_ID]",
       "start" => <<~TEXT
         orbit start [--provider codex|opencode|omp] [--project DIR]
                     [--review-model MODEL] [--thread ID] [--socket PATH]
@@ -272,6 +272,7 @@ module Orbit
       OptionParser.new do |parser|
         parser.on("--reason TEXT") { |value| options["reason"] = value }
         parser.on("--file FILE") { |value| options["file"] = value }
+        parser.on("--kind KIND") { |value| options["kind"] = value }
         parser.on("--model MODEL") { |value| options["model"] = value }
         parser.on("--member THREAD_ID") { |value| options["member"] = value }
         parser.on("--json") { options["json"] = true } if command == "stop"
@@ -280,7 +281,7 @@ module Orbit
       raise ArgumentError, "unexpected arguments" unless argv.empty?
       record = command == "stop" ? TaskView.single!(argument) : TaskRecord.new(argument || raise(ArgumentError, "task directory is required"))
       json = command != "stop" || options.delete("json")
-      if command == "stop" && %w[failed stop_unconfirmed].include?(record.state["status"])
+      if command == "stop" && retryable_stop?(record)
         state = record.state
         connection = Connection.open(state.fetch("connection"))
         result = TaskRuntime.new(record: record, connection: connection, checker: nil).retry_stop(
@@ -294,7 +295,7 @@ module Orbit
       end
       if %w[amend delegate].include?(command)
         file = options.fetch("file") { raise ArgumentError, "--file is required" }
-        options = options.slice("model", "member").merge("text" => read_input(file), "source" => { "kind" => "explicit_text", "file" => file })
+        options = options.slice("model", "member", "kind").merge("text" => read_input(file), "source" => { "kind" => "explicit_text", "file" => file })
         raise ArgumentError, "instruction is empty" if options["text"].strip.empty?
       elsif command == "dispute" && options["reason"].to_s.strip.empty?
         raise ArgumentError, "--reason is required"
@@ -302,6 +303,17 @@ module Orbit
       id = record.submit(command, options)
       puts(json ? JSON.generate({ "task_directory" => record.path, "command_id" => id, "status" => "queued" }) : "已提交停止请求，尚未确认停止。用 orbit status #{record.state.fetch('id')} 查看结果。")
       0
+    end
+
+    # failed/stop_unconfirmed always accept an explicit stop retry; a task
+    # whose recorded runtime process is gone is treated the same way instead
+    # of queueing a command no process will ever consume.
+    def retryable_stop?(record)
+      status = record.state["status"]
+      return true if %w[failed stop_unconfirmed].include?(status)
+      return false unless %w[starting running].include?(status)
+
+      TaskView.runtime_abandoned?(record.state)
     end
 
     def read_input(file)

@@ -123,6 +123,33 @@ module CliTest
     worker&.join
   end
 
+  # A record whose runtime process is gone cannot consume queued commands; an
+  # explicit stop must go through the confirmed retry path instead.
+  def stop_retries_when_recorded_runtime_is_gone
+    dead = Process.spawn(RbConfig.ruby, "--disable-gems", "-e", "exit 0")
+    Process.wait(dead)
+    record = task("running", runtime_pid: dead)
+    socket = record.state.dig("connection", "socket")
+    server = UNIXServer.new(socket)
+    worker = Thread.new do
+      2.times do
+        peer = server.accept
+        request = JSON.parse(peer.gets)
+        result = request["method"] == "state" ? { "cwd" => File.realpath(@project), "status" => "idle" } : { "confirmed" => true }
+        peer.puts(JSON.generate("result" => result))
+        peer.close
+      end
+    end
+    result = JSON.parse(cli("stop", record.path, "--json"))
+    assert(worker.join(3), "retry reconnects the native Root")
+    assert(result["status"] == "paused", "a dead runtime record still accepts an explicit confirmed stop")
+    assert(commands(record).empty?, "retry performs cleanup instead of queueing an unconsumed command")
+  ensure
+    server&.close unless server&.closed?
+    worker&.kill if worker&.alive?
+    worker&.join
+  end
+
   def maintenance_requires_an_installed_cli
     %w[update uninstall].each { |command| cli(command, success: false) }
     assert(cli("start", "--help").include?("--provider"), "execution details are available in subcommand help")
@@ -131,7 +158,7 @@ module CliTest
   def main
     %i[single_task_from_project_subdirectory multiple_tasks_require_explicit_selection completed_and_absent_tasks
        stale_result_and_user_action doctor_without_connection_or_dependencies doctor_reads_existing_native_connection
-       maintenance_requires_an_installed_cli].each do |test|
+       stop_retries_when_recorded_runtime_is_gone maintenance_requires_an_installed_cli].each do |test|
       Dir.mktmpdir("orbit-cli-test-") do |tmp|
         @temp = tmp
         @project = File.join(tmp, "project")

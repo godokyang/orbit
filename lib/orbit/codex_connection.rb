@@ -57,6 +57,11 @@ module Orbit
     # the reachable app-server (for example an ordinary embedded TUI).
     class ConnectionError < Error; end
 
+    # The thread exists but has no user turn yet (created but never started).
+    # Binding is rejected until it is materialized; there is no execution to
+    # interrupt or observe.
+    class UnmaterializedThread < ConnectionError; end
+
     # The server answered a request with a JSON-RPC error. Code and message
     # are preserved; nothing is swallowed.
     class RPCError < Error
@@ -178,20 +183,25 @@ module Orbit
       ids
     end
 
-    def configured_model
+    def configured_model(cwd: @cwd)
       ensure_connected
-      request("config/read", "includeLayers" => false, "cwd" => @cwd).dig("config", "model")
+      request("config/read", "includeLayers" => false, "cwd" => cwd).dig("config", "model")
     end
 
     # Only the task runtime calls this after Root explicitly delegates a task.
-    # It creates an execution member; connection of Root never uses this path.
-    def create_member(model:)
+    # Root sessions pass their own cwd and disable the Orbit MCP they carry;
+    # a task-owned member app-server has no Orbit MCP configured and must not
+    # receive a partial disable override (that config is invalid without the
+    # full server definition). Member boundary stays workspace-write,
+    # approvalPolicy never.
+    def create_member(model:, cwd: @cwd, disable_orbit_mcp: true)
       ensure_connected
-      raise Error, "member creation requires a bound Root" if @thread_id.empty?
-      result = request("thread/start", "cwd" => @cwd, "model" => model,
-                       "approvalPolicy" => "never", "sandbox" => "workspace-write",
-                       "config" => { "mcp_servers.orbit.enabled" => false },
-                       "ephemeral" => false)
+      raise Error, "member creation requires a project directory" if cwd.to_s.empty?
+      params = { "cwd" => cwd, "model" => model,
+                 "approvalPolicy" => "never", "sandbox" => "workspace-write",
+                 "ephemeral" => false }
+      params["config"] = { "mcp_servers.orbit.enabled" => false } if disable_orbit_mcp
+      result = request("thread/start", params)
       result.fetch("thread").fetch("id")
     end
 
@@ -491,6 +501,11 @@ module Orbit
           "threadId" => @thread_id, "limit" => 1, "sortDirection" => "desc", "itemsView" => "summary"
         )
       rescue RPCError => e
+        if e.message.include?("not materialized yet")
+          raise UnmaterializedThread,
+                "thread #{@thread_id} has no user turn yet on this app-server; " \
+                "it cannot be bound before its first turn"
+        end
         raise ConnectionError,
               "thread #{@thread_id} does not expose turn history on this " \
               "app-server (ephemeral threads and threads not yet " \

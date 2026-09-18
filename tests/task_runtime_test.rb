@@ -77,6 +77,61 @@ class RuntimeChecker
   def stop! = true
 end
 
+class RuntimeCodexMemberConnection
+  attr_accessor :state_value, :stop_error
+
+  def initialize
+    @state_value = { "status" => "active", "last_turn_id" => nil, "last_turn_status" => nil, "observations" => [] }
+  end
+
+  def state = @state_value
+  def close = true
+
+  def stop!
+    raise @stop_error if @stop_error
+
+    { "confirmed" => true }
+  end
+end
+
+class RuntimeCodexHost
+  attr_accessor :alive
+  attr_reader :start_member_calls, :shutdown_calls
+
+  def initialize(record, member_connection)
+    @record, @member_connection = record, member_connection
+    @alive = true
+    @start_member_calls = []
+    @shutdown_calls = []
+  end
+
+  def start
+    { "kind" => "codex", "socket" => "/tmp/orbit-mbr-test/m.sock", "pid" => 42, "pgid" => 42,
+      "directory" => "/tmp/orbit-mbr-test" }
+  end
+
+  def create_member(_host, model: nil)
+    { "thread_id" => "codex-thread-1", "model" => model || "gpt-codex-side" }
+  end
+
+  def start_member(_host, thread_id, instructions)
+    persisted = JSON.parse(File.read(File.join(@record.path, "state.json")))["members"]
+                  .find { |member| member["thread_id"] == thread_id }
+    raise "member must be persisted before turn/start" unless persisted && persisted["status"] == "starting"
+
+    @start_member_calls << { "thread_id" => thread_id, "instructions" => instructions }
+  end
+
+  def connection_for(_host, _thread_id) = @member_connection
+  def alive?(_host) = @alive
+
+  def shutdown(host)
+    @shutdown_calls << host
+    @alive = false
+    { "confirmed" => true, "pgid" => host["pgid"] }
+  end
+end
+
 class RuntimeAdvisor
   attr_reader :calls
   attr_accessor :scores, :failure, :on_call
@@ -387,6 +442,83 @@ fixture do |root, record, _host, checker, _runtime|
   runtime.tick
   assert(record.state["status"] == "stop_unconfirmed", "partial cleanup cannot claim whole-task stop")
   assert(host.members.fetch("member-1").stop_calls == 1, "remaining members are still stopped")
+end
+
+# OpenCode Root delegation can create a task-owned Codex member: host and
+# member identity are persisted before turn/start, and the result returns
+# through the existing Root channel.
+fixture do |_root, record, host, checker, _runtime|
+  member_connection = RuntimeCodexMemberConnection.new
+  codex_host = RuntimeCodexHost.new(record, member_connection)
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, member_host: codex_host)
+  record.submit("delegate", "kind" => "codex", "text" => "Verify greet behavior")
+  runtime.tick(now: Time.now.to_f)
+  member = record.state.fetch("members").first
+  assert(member["kind"] == "codex" && member["thread_id"] == "codex-thread-1", "codex member is registered")
+  assert(record.state.dig("member_hosts", "codex", "pgid") == 42, "task-owned member host identity is persisted")
+  assert(codex_host.start_member_calls.length == 1, "the member turn starts on the task-owned host")
+  assert(member["model"] == "gpt-codex-side" && member["status"] == "working", "Codex-side model and state are recorded")
+
+  member_connection.state_value = { "status" => "idle", "last_turn_id" => "turn-1", "last_turn_status" => "completed",
+                                    "observations" => [{ "kind" => "agent_message", "text" => "member verified greet" }] }
+  runtime.tick(now: Time.now.to_f + 1)
+  completed = record.state.fetch("members").first
+  assert(completed["status"] == "completed" && completed["result"].first["text"] == "member verified greet",
+         "member result is read from the native session")
+  assert(host.messages.any? { |message| message.include?("execution member result") },
+         "member result returns to the original Root")
+end
+
+# An explicit stop retry reconnects a live Codex member host; a missing socket
+# only confirms when the recorded host process group no longer exists.
+fixture do |_root, record, host, _checker, _runtime|
+  state = record.state
+  state["connection"]["thread_id"] = "existing-root"
+  state["status"] = "running"
+  record.save(state)
+  member_connection = RuntimeCodexMemberConnection.new
+  codex_host = RuntimeCodexHost.new(record, member_connection)
+  reset = lambda do
+    current = record.state
+    current["status"] = "running"
+    current["members"] = [{ "kind" => "codex", "thread_id" => "codex-thread-9", "model" => "gpt-codex-side",
+                            "socket" => "/tmp/orbit-mbr-test/m.sock", "host" => "codex", "status" => "working" }]
+    current["member_hosts"] = { "codex" => { "kind" => "codex", "socket" => "/tmp/orbit-mbr-test/m.sock",
+                                             "pid" => 4242, "pgid" => 4242, "directory" => "/tmp/orbit-mbr-test" } }
+    record.save(current)
+  end
+
+  reset.call
+  result = Orbit::TaskRuntime.new(record: record, connection: host, checker: nil, member_host: codex_host)
+                              .retry_stop("User retried stop")
+  assert(result["status"] == "paused" && result.dig("member_host_shutdown", 0, "confirmed"),
+         "a live member host reconnects, stops and confirms host exit")
+  assert(codex_host.shutdown_calls.length == 1, "the confirmed retry closes the member host")
+
+  reset.call
+  member_connection.stop_error = "member socket refused"
+  codex_host.alive = true
+  result = Orbit::TaskRuntime.new(record: record, connection: host, checker: nil, member_host: codex_host)
+                              .retry_stop("User retried stop")
+  assert(result["status"] == "stop_unconfirmed" && codex_host.shutdown_calls.length == 1,
+         "a live host with an unreachable member stays unconfirmed and keeps the host for retry")
+
+  reset.call
+  codex_host.alive = false
+  result = Orbit::TaskRuntime.new(record: record, connection: host, checker: nil, member_host: codex_host)
+                              .retry_stop("User retried stop")
+  confirmation = result.fetch("member_stop_results").first.fetch("confirmation")
+  assert(result["status"] == "paused" && confirmation["host_exit_verified"],
+         "a missing socket with a dead recorded host process group is verified as stopped")
+
+  reset.call
+  codex_host.alive = true
+  member_connection.stop_error = Orbit::CodexConnection::UnmaterializedThread.new("no turn yet")
+  result = Orbit::TaskRuntime.new(record: record, connection: host, checker: nil, member_host: codex_host)
+                              .retry_stop("User retried stop")
+  confirmation = result.fetch("member_stop_results").first.fetch("confirmation")
+  assert(result["status"] == "paused" && confirmation["no_materialized_turn"],
+         "a member thread with no user turn has no execution to interrupt")
 end
 
 # Checker cleanup failure must not skip the user's requested execution stop.

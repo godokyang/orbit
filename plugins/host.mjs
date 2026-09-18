@@ -31,6 +31,7 @@ export const toolArgs = z => ({
         action: z.enum(['context', 'start', 'status', 'check', 'amend', 'dispute', 'stop', 'delegate']),
         task: z.string().optional(), basis: z.array(z.string()).optional(), message_id: z.string().optional(),
         review_model: z.string().optional(), model: z.string().optional(), member: z.string().optional(),
+        kind: z.enum(['native', 'codex']).optional(),
         text: z.string().optional(), check_in: z.number().int().positive().optional()
       });
 
@@ -101,6 +102,7 @@ export function createOrbitHost({ provider, project, dispatch, bind, reset }) {
         if (['amend', 'delegate'].includes(a.action)) {
           if (!a.text?.trim()) throw new Error('Provide the original amendment or delegated scope');
           args.push('--file', '-');
+          if (a.action === 'delegate' && a.kind) args.push('--kind', a.kind);
           if (a.action === 'delegate' && a.model) args.push('--model', a.model);
           if (a.action === 'delegate' && a.member) args.push('--member', a.member);
         } else if (a.text) args.push('--reason', a.text);

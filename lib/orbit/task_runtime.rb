@@ -8,18 +8,21 @@ require_relative "task_record"
 require_relative "workspace_snapshot"
 require_relative "connection"
 require_relative "jev_advisor"
+require_relative "codex_member_host"
 
 module Orbit
   class TaskRuntime
     TERMINAL = %w[complete paused needs_user failed stop_unconfirmed].freeze
 
-    def initialize(record:, connection:, checker:, advisor: nil)
+    def initialize(record:, connection:, checker:, advisor: nil, member_host: nil)
       @record, @connection, @checker = record, connection, checker
       @advisor = advisor
+      @member_host = member_host
       @state = record.state
       @state["findings"] ||= {}
       @state["sent_message_ids"] ||= []
       @state["members"] ||= []
+      @state["member_hosts"] ||= {}
       @member_connections = {}
       @state["last_user_message_id"] ||= @state.dig("instruction_source", "id")
       @interval = @state.fetch("review").fetch("interval_seconds", 300)
@@ -89,6 +92,13 @@ module Orbit
         ensure
           @connection.close
           @member_connections.each_value(&:close)
+        end
+        if %w[complete paused needs_user].include?(@state["status"])
+          begin
+            shutdown_member_hosts([])
+          rescue StandardError => error
+            @record.event("member_host_shutdown_error", "error" => error.message)
+          end
         end
         @state["finished_at"] = Time.now.utc.iso8601
         @state["elapsed_seconds"] = Time.now - Time.parse(@state.fetch("created_at"))
@@ -351,34 +361,91 @@ module Orbit
     end
 
     def delegate(command)
-      instructions = "You are an execution member for an Orbit task. Work only on the delegated scope in this project. " \
-                     "Follow project rules. Do not start Orbit, create other agents, commit, or push. " \
-                     "Report concrete results and verification to the Root. Stop your background commands before finishing.\n\n" \
-                     "Original task inputs:\n#{JSON.pretty_generate(@record.inputs(@state))}\n\n" \
-                     "Delegated scope:\n#{command.fetch('text')}"
-      if command["member"]
-        member = @state["members"].find { |entry| entry["thread_id"] == command["member"] }
-        raise ArgumentError, "member is not owned by this task" unless member
-        member["status"] = "working"
-        save
-        member_connection(member).send_message(instructions)
-      else
-        model = command["model"] || (@connection.default_member_model if @connection.respond_to?(:default_member_model)) || @state.dig("review", "model")
-        id = @connection.create_member(model: model)
-        member = { "thread_id" => id, "model" => model, "status" => "starting" }
-        @state["members"] << member
-        # Persist ownership before this member can start any model/tool work.
-        save
-        @connection.start_member(id, instructions)
-        member["status"] = "working"
-      end
-      @record.event("member_delegated", "thread_id" => member["thread_id"], "scope" => command.fetch("text"))
+      instructions = member_instructions(command.fetch("text"))
+      kind = command.fetch("kind", "native").to_s
+      member = if command["member"]
+                 attach_member(command.fetch("member"), instructions)
+               elsif kind == "codex"
+                 start_codex_member(command, instructions)
+               elsif kind.empty? || kind == "native"
+                 start_native_member(command, instructions)
+               else
+                 raise ArgumentError, "unsupported member kind #{kind.inspect}"
+               end
+      @record.event("member_delegated", "thread_id" => member["thread_id"], "kind" => member["kind"],
+                    "scope" => command.fetch("text"))
       save
+    end
+
+    def attach_member(thread_id, instructions)
+      member = @state["members"].find { |entry| entry["thread_id"] == thread_id }
+      raise ArgumentError, "member is not owned by this task" unless member
+
+      member["status"] = "working"
+      save
+      member_connection(member).send_message(instructions)
+      member
+    end
+
+    def start_native_member(command, instructions)
+      model = command["model"] || (@connection.default_member_model if @connection.respond_to?(:default_member_model)) || @state.dig("review", "model")
+      id = @connection.create_member(model: model)
+      member = { "kind" => "native", "thread_id" => id, "model" => model, "status" => "starting" }
+      @state["members"] << member
+      # Persist ownership before this member can start any model/tool work.
+      save
+      @connection.start_member(id, instructions)
+      member["status"] = "working"
+      member
+    end
+
+    # Cross-host path: this task process owns the Codex member app-server.
+    # The host record and the member identity are persisted before turn/start
+    # so an explicit stop retry can reconnect from the task record.
+    def start_codex_member(command, instructions)
+      host = codex_member_host
+      host_record = @state.fetch("member_hosts")["codex"]
+      unless host_record
+        host_record = host.start
+        @state["member_hosts"]["codex"] = host_record
+        @record.event("member_host_started", "kind" => "codex", "socket" => host_record["socket"],
+                      "pid" => host_record["pid"], "pgid" => host_record["pgid"])
+        save
+      end
+      created = host.create_member(host_record, model: command["model"])
+      member = {
+        "kind" => "codex", "thread_id" => created.fetch("thread_id"), "model" => created.fetch("model"),
+        "socket" => host_record.fetch("socket"), "host" => "codex", "status" => "starting",
+        "registered_at" => Time.now.utc.iso8601
+      }
+      @state["members"] << member
+      @record.event("member_registered", "kind" => "codex", "thread_id" => member["thread_id"],
+                    "socket" => member["socket"], "model" => member["model"])
+      save
+      host.start_member(host_record, member["thread_id"], instructions)
+      member["status"] = "working"
+      member
+    end
+
+    def member_instructions(scope)
+      "You are an execution member for an Orbit task. Work only on the delegated scope in this project. " \
+        "Follow project rules. Do not start Orbit, create other agents, commit, or push. " \
+        "Report concrete results and verification to the Root. Stop your background commands before finishing.\n\n" \
+        "Original task inputs:\n#{JSON.pretty_generate(@record.inputs(@state))}\n\n" \
+        "Delegated scope:\n#{scope}"
     end
 
     def member_connection(member)
       id = member.fetch("thread_id")
-      @member_connections[id] ||= @connection.member_connection(id)
+      @member_connections[id] ||= if member["kind"] == "codex"
+                                    codex_member_host.connection_for({ "socket" => member.fetch("socket") }, id)
+                                  else
+                                    @connection.member_connection(id)
+                                  end
+    end
+
+    def codex_member_host
+      @member_host ||= CodexMemberHost.new(project_root: @state.fetch("project_root"))
     end
 
     def collect_member_results
@@ -660,20 +727,74 @@ module Orbit
         failures << "Root: #{error.message}"
       end
       members = @state["members"].map do |member|
-        begin
-          result = member_connection(member).stop!
-          failures << "Member #{member['thread_id']} did not confirm actual stop" unless result["confirmed"] == true
-          member["stop_confirmation"] = result
-          { "thread_id" => member["thread_id"], "confirmation" => result }
-        rescue StandardError => error
-          failures << "Member #{member['thread_id']}: #{error.message}"
-          { "thread_id" => member["thread_id"], "error" => error.message }
+        if member["kind"] == "codex"
+          stop_codex_member(member, failures)
+        else
+          begin
+            result = member_connection(member).stop!
+            failures << "Member #{member['thread_id']} did not confirm actual stop" unless result["confirmed"] == true
+            member["stop_confirmation"] = result
+            { "thread_id" => member["thread_id"], "confirmation" => result }
+          rescue StandardError => error
+            failures << "Member #{member['thread_id']}: #{error.message}"
+            { "thread_id" => member["thread_id"], "error" => error.message }
+          end
         end
       end
       @state["member_stop_results"] = members
+      # The member host is closed only after every stop was confirmed; an
+      # unconfirmed stop keeps the recorded address for an explicit retry
+      # instead of inferring member exit from a missing socket.
+      @state["member_host_shutdown"] = shutdown_member_hosts(failures) if failures.empty?
       raise ArgumentError, failures.join("; ") unless failures.empty?
+
       confirmation["members"] = members unless members.empty?
       confirmation
+    end
+
+    # A missing socket is not stop evidence; the recorded host process group
+    # no longer existing is.
+    def stop_codex_member(member, failures)
+      result = member_connection(member).stop!
+      failures << "Member #{member['thread_id']} did not confirm actual stop" unless result["confirmed"] == true
+      member["stop_confirmation"] = result
+      { "thread_id" => member["thread_id"], "confirmation" => result }
+    rescue CodexConnection::UnmaterializedThread
+      evidence = {
+        "confirmed" => true, "no_materialized_turn" => true,
+        "scope" => "member thread has no user turn yet on the member host; no registered execution to interrupt"
+      }
+      member["stop_confirmation"] = evidence
+      { "thread_id" => member["thread_id"], "confirmation" => evidence }
+    rescue StandardError => error
+      if member_host_exited?(member)
+        evidence = {
+          "confirmed" => true, "host_exit_verified" => true,
+          "scope" => "recorded member app-server process group no longer exists; registered member execution cannot remain"
+        }
+        member["stop_confirmation"] = evidence
+        { "thread_id" => member["thread_id"], "confirmation" => evidence }
+      else
+        failures << "Member #{member['thread_id']}: #{error.message}; member host still present"
+        { "thread_id" => member["thread_id"], "error" => error.message }
+      end
+    end
+
+    def member_host_exited?(member)
+      host_record = @state.dig("member_hosts", member["host"]) || @state.dig("member_hosts", "codex")
+      return false unless host_record
+
+      !codex_member_host.alive?(host_record)
+    rescue StandardError
+      false
+    end
+
+    def shutdown_member_hosts(failures)
+      @state.fetch("member_hosts", {}).map do |kind, host_record|
+        outcome = codex_member_host.shutdown(host_record)
+        failures << "Member host #{kind} did not confirm process exit" unless outcome["confirmed"] == true
+        outcome.merge("kind" => kind)
+      end
     end
   end
 end

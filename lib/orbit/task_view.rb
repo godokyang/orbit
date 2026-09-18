@@ -71,6 +71,22 @@ module Orbit
       File.read(File.join(record.path, "instruction.txt")).gsub(/\s+/, " ").strip[0, 120]
     end
 
+    # A starting/running record whose recorded runtime process is gone cannot
+    # consume queued commands; stop treats it like an exited runtime.
+    def runtime_abandoned?(state)
+      return false unless %w[starting running].include?(state["status"])
+
+      pid = state["runtime_pid"]
+      return false unless pid.is_a?(Integer) && pid.positive?
+
+      Process.kill(0, pid)
+      false
+    rescue Errno::ESRCH
+      true
+    rescue SystemCallError
+      false
+    end
+
     def list(records)
       records.map do |record|
         state = record.state

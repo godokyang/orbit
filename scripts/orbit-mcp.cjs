@@ -25,6 +25,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [{
       review_model: { type: 'string', description: 'Already authorized Codex review model.' },
       model: { type: 'string', description: 'Already authorized execution member model; otherwise use the configured review model.' },
       member: { type: 'string', description: 'Owned member thread ID to reuse for a delegated follow-up.' },
+      kind: { type: 'string', enum: ['native', 'codex'], description: 'Execution member kind: native (same host as Root) or codex (task-owned Codex app-server; OpenCode Root path).' },
       basis: { type: 'array', items: { type: 'string' } },
       task: { type: 'string', description: 'task_directory returned by start.' },
       text: { type: 'string', description: 'Delegated scope, user amendment, dispute evidence, or stop reason.' },
@@ -78,6 +79,7 @@ server.setRequestHandler(CallToolRequestSchema, async request => {
       if (typeof a.text !== 'string' || !a.text.trim()) throw new Error('Provide the original user amendment or delegated scope.');
       args.push('--file', '-');
       input = a.text;
+      if (a.action === 'delegate' && a.kind) args.push('--kind', a.kind);
       if (a.action === 'delegate' && a.model) args.push('--model', a.model);
       if (a.action === 'delegate' && a.member) args.push('--member', a.member);
     } else if (a.text) args.push('--reason', a.text);
