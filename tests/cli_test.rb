@@ -8,6 +8,8 @@ require "socket"
 require_relative "../lib/orbit/task_record"
 require_relative "../lib/orbit/session_entry"
 require_relative "../lib/orbit/member_policy"
+require_relative "../lib/orbit/jev_advisor"
+require_relative "../lib/orbit/jev_setup"
 
 module CliTest
   ENTRY = File.expand_path("../scripts/orbit", __dir__)
@@ -17,9 +19,10 @@ module CliTest
     raise message unless value
   end
 
-  def cli(*args, cwd: @project, success: true, env: {})
+  def cli(*args, cwd: @project, success: true, env: {}, stdin_data: nil)
     base = { "CODEX_THREAD_ID" => nil, "ORBIT_CODEX_SOCKET" => nil, "XDG_CONFIG_HOME" => @temp }
-    out, err, status = Open3.capture3(base.merge(env), RbConfig.ruby, "--disable-gems", ENTRY, *args, chdir: cwd)
+    out, err, status = Open3.capture3(base.merge(env), RbConfig.ruby, "--disable-gems", ENTRY, *args,
+                                     chdir: cwd, stdin_data: stdin_data)
     assert(status.success? == success, "#{args.inspect}\n#{out}\n#{err}")
     out + err
   end
@@ -247,12 +250,32 @@ module CliTest
     assert(cli("start", "--help").include?("--provider"), "execution details are available in subcommand help")
   end
 
+  def jev_setup_exports_key_in_new_shell
+    env = { "HOME" => @temp, "TYPESAFE_API_KEY" => nil, "SHELL" => "/bin/zsh", "ZDOTDIR" => @temp }
+    output = cli("jev", "setup", env: env, stdin_data: "test-key\n")
+    path = File.join(@temp, "typesafe-ai", "env")
+    profile = File.join(@temp, ".zshrc")
+    assert(File.read(path).include?("export TYPESAFE_API_KEY=test-key") && File.stat(path).mode & 0o777 == 0o600,
+           "the TypeSafe environment file is private")
+    assert(File.read(profile).include?(path) && !File.read(profile).include?("test-key") &&
+           !File.exist?(File.join(@temp, "orbit", "typesafe-key")), "Orbit config and shell profile contain no key")
+    shell_out, shell_err, shell_status = Open3.capture3({ "HOME" => @temp, "ZDOTDIR" => @temp, "TYPESAFE_API_KEY" => nil },
+                                                        "zsh", "-ic", 'printf "%s" "$TYPESAFE_API_KEY"')
+    assert(shell_status.success? && shell_out == "test-key" && shell_err.empty? &&
+           Orbit::JevAdvisor.for_project(@project, env: { "TYPESAFE_API_KEY" => shell_out }),
+           "a new shell exports the key for the task runtime")
+    assert(!output.include?("test-key"), "the command does not print the key")
+    cli("jev", "setup", env: env, stdin_data: "\n", success: false)
+    assert(File.read(path).include?("test-key"), "empty input does not replace the existing key")
+  end
+
   def main
     %i[single_task_from_project_subdirectory multiple_tasks_require_explicit_selection completed_and_absent_tasks
        stale_result_and_user_action doctor_without_connection_or_dependencies doctor_reads_existing_native_connection
        stop_retries_when_recorded_runtime_is_gone codex_launch_approval_targets_the_registered_tool
        codex_launch_defaults_to_full_access doctor_reports_member_allowlist_and_gaps
-       delegate_checks_allowlist_before_queueing maintenance_requires_an_installed_cli].each do |test|
+       delegate_checks_allowlist_before_queueing maintenance_requires_an_installed_cli
+       jev_setup_exports_key_in_new_shell].each do |test|
       Dir.mktmpdir("orbit-cli-test-") do |tmp|
         @temp = tmp
         @project = File.join(tmp, "project")

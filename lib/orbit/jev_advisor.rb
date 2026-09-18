@@ -43,10 +43,12 @@ module Orbit
     BASIS_DOCUMENT_LIMIT = 3
 
     def self.for_project(project_root, env: ENV)
-      return nil if env["TYPESAFE_API_KEY"].to_s.empty?
       return nil if File.exist?(File.join(project_root, ".orbit", "jev-disabled"))
 
-      new(api_key: env["TYPESAFE_API_KEY"])
+      key = env["TYPESAFE_API_KEY"].to_s.strip
+      return nil if key.empty?
+
+      new(api_key: key)
     end
 
     def initialize(api_key:, endpoint: ENDPOINT)

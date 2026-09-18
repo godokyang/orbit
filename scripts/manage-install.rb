@@ -31,6 +31,11 @@ module OrbitInstall
     File.exist?(path) || File.symlink?(path)
   end
 
+  def executable(name)
+    ENV.fetch("PATH", "").split(File::PATH_SEPARATOR).map { |dir| File.join(dir, name) }
+       .find { |path| File.executable?(path) && !File.directory?(path) }
+  end
+
   def read_json(path)
     JSON.parse(File.read(path))
   end
@@ -157,10 +162,21 @@ module OrbitInstall
 
   def prerequisites!
     raise "Ruby >= 3.2 is required" if (RUBY_VERSION.split('.').map(&:to_i) <=> [3, 2]) < 0
-    raise "Node >= 18 is required" if capture("node", "-p", "process.versions.node").split('.').first.to_i < 18
-    %w[npm codex].each do |name|
-      raise "#{name} is required on PATH" unless ENV.fetch("PATH", "").split(File::PATH_SEPARATOR).any? { |p| File.executable?(File.join(p, name)) && !File.directory?(File.join(p, name)) }
+    missing = []
+    node = executable("node")
+    if node
+      begin
+        version = capture(node, "-p", "process.versions.node").strip
+        missing << "Node.js 18+：当前为 #{version}，请升级并加入 PATH" if version.split('.').first.to_i < 18
+      rescue StandardError => error
+        missing << "Node.js 18+：无法运行（#{error.message}），请检查安装和 PATH"
+      end
+    else
+      missing << "Node.js 18+：未在 PATH 中找到，请先安装"
     end
+    missing << "npm：未在 PATH 中找到，请安装 Node.js 附带的 npm" unless executable("npm")
+    missing << "Codex CLI：未在 PATH 中找到，请先安装并完成登录（独立检查需要）" unless executable("codex")
+    raise "缺少安装前置条件：\n- #{missing.join("\n- ")}\n安装后重新运行 Orbit 安装命令。" unless missing.empty?
   end
 
   def source_info(options)
@@ -318,7 +334,11 @@ module OrbitInstall
       puts "Install skill separately: npx skills install godokyang/orbit --skill orbit --global"
       puts "OpenCode: #{options[:opencode] || 'not linked (--no-opencode)'}"
       puts "OMP: #{options[:omp] || 'not linked (--no-omp)'}"
+      optional = { "OpenCode" => ["opencode", options[:opencode]], "OMP" => ["omp", options[:omp]] }
+      missing_hosts = optional.filter_map { |label, (command, directory)| label if directory && !executable(command) }
+      puts "可选 Coding Agent 未在 PATH 中找到：#{missing_hosts.join('、')}；只在使用对应入口前自行安装。" unless missing_hosts.empty?
       puts "Start OpenCode or OMP normally; running sessions load their extension on the next launch."
+      puts "运行 orbit doctor 查看依赖和扩展状态；模型登录及额度需在实际会话中验证。"
       puts "Details: orbit version --json"
       puts "Update: orbit update (skill: npx skills update orbit --global)."
       puts "Uninstall: orbit uninstall"

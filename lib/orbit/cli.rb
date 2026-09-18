@@ -2,6 +2,7 @@
 
 require "optparse"
 require "rbconfig"
+require "io/console"
 require_relative "version"
 require_relative "task_record"
 require_relative "task_runtime"
@@ -9,6 +10,7 @@ require_relative "codex_connection"
 require_relative "plugin_connection"
 require_relative "check_runner"
 require_relative "jev_advisor"
+require_relative "jev_setup"
 require_relative "member_policy"
 require_relative "session_entry"
 require_relative "task_view"
@@ -26,6 +28,7 @@ module Orbit
         orbit status [TASK]       查看当前项目任务，TASK 可用 ID 前缀或目录
         orbit stop [TASK]         停止当前项目任务；多任务须指定 TASK
         orbit doctor [TASK]       检查环境与已有会话连接
+        orbit jev setup           输入 TypeSafe key，配置新终端环境
         orbit update [--ref REF]  更新当前安装，沿用来源与安装目录
         orbit uninstall           卸载当前运行程序和原生连接扩展
         orbit version [--json]    查看版本与安装来源
@@ -40,6 +43,7 @@ module Orbit
       "status" => "orbit status [TASK] [--json]\n省略 TASK 时查当前项目；多任务列出 ID。没有待处理任务时显示最近结束记录。",
       "stop" => "orbit stop [TASK] [--reason TEXT] [--json]\n只定位唯一待处理任务；多任务先用 orbit status 查看，再传 ID。请求入队不代表停止已确认。",
       "doctor" => "orbit doctor [TASK] [--json]\n只读检查环境和扩展；通过当前 Codex 会话或所选已有任务验证连接，不调用模型，不验证登录或额度。",
+      "jev" => "orbit jev setup\n交互输入 TypeSafe key，配置 zsh／bash 新终端的 TYPESAFE_API_KEY；不写入 Orbit 配置。",
       "update" => "orbit update [--ref REF]\n先结束 Orbit 任务。默认沿用远程 ref 或本地源码目录；--ref 显式从 GitHub 选择版本。skill 用 npx skills update orbit --global 单独更新。",
       "uninstall" => "orbit uninstall\n先结束 Orbit 任务。卸载本命令所属运行安装，保留项目资料与独立 skill。",
       "version" => "orbit version [--json]",
@@ -83,6 +87,8 @@ module Orbit
         0
       when "doctor"
         doctor(argv)
+      when "jev"
+        setup_jev(argv)
       when "codex"
         SessionEntry.launch(argv)
       when "uninstall"
@@ -126,6 +132,21 @@ module Orbit
       else
         puts "当前项目有多个待处理任务：\n#{TaskView.list(records)}\n查看或停止一个任务：orbit status ID / orbit stop ID（ID 可用唯一前缀）。"
       end
+      0
+    end
+
+    def setup_jev(argv)
+      raise ArgumentError, "usage: orbit jev setup" unless argv == ["setup"]
+
+      warn "输入 TypeSafe key（输入时不显示）："
+      value = $stdin.tty? ? $stdin.noecho(&:gets) : $stdin.gets
+      warn if $stdin.tty?
+      raise ArgumentError, "未输入 TypeSafe key" unless value
+
+      result = JevSetup.configure(value)
+      puts "已配置新终端的 TYPESAFE_API_KEY；TypeSafe 环境文件：#{result.fetch('env_file')}（仅当前用户可读）。"
+      puts "重新打开终端后直接启动 Coding Agent；当前终端和已运行任务不会自动改变。"
+      warn "当前环境已有 TYPESAFE_API_KEY；新终端会优先沿用已有环境变量。" unless ENV["TYPESAFE_API_KEY"].to_s.empty?
       0
     end
 

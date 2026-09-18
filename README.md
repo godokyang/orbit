@@ -28,6 +28,7 @@ curl -fsSL https://raw.githubusercontent.com/godokyang/orbit/main/install.sh | s
 ```
 
 安装脚本会自动为 **zsh／bash 保存 PATH 配置**，重复安装不会重复添加，无需手动编辑配置文件。
+安装前会检查 Ruby、Node.js、npm 和 Codex CLI，缺失时列出需要处理的项目；安装后会提示未找到的可选 OpenCode／OMP 入口，并给出 `orbit doctor` 诊断命令。安装器不会替你安装这些外部工具。
 
 **安装成功后，重新打开一个终端**，执行下面的命令确认：
 
@@ -35,7 +36,7 @@ curl -fsSL https://raw.githubusercontent.com/godokyang/orbit/main/install.sh | s
 orbit --version
 ```
 
-应输出类似 `orbit 0.6.6` 的版本号。当前源码版本为 `0.6.6`；远程命令安装 GitHub 上所选提交的版本，未推送的本地提交不会出现在远程安装中。
+应输出类似 `orbit 0.6.7` 的版本号。当前源码版本为 `0.6.7`；远程命令安装 GitHub 上所选提交的版本，未推送的本地提交不会出现在远程安装中。
 
 如果想继续使用当前终端，执行安装结束时显示的 `export PATH=...` 命令即可。自动保存的配置会在以后新开终端、重启电脑后继续生效。其他 shell 或关闭自动配置的方法见[PATH 配置](docs/reference/usage-reference.md#path-配置)。
 
@@ -122,6 +123,14 @@ orbit status
 
 执行成员的允许名单保存在可选的 `~/.config/orbit/members.json`，只识别 `allowed_kinds`。文件不存在时默认允许 `codex、omp、opencode、kimi、cursor-agent、grok`；文件存在时完整采用其中列表，`"allowed_kinds": []` 表示禁止创建新成员。名单只表示授权：`kimi`、`cursor-agent`、`grok` 尚无受控适配器，不会被报成可调用；`orbit doctor` 会分别显示允许、可调用与缺口，修改名单不影响已在执行成员的停止与结果回收。
 
+例如只允许 Codex 和 OpenCode 成员时，将以下内容保存到该文件（使用 `XDG_CONFIG_HOME` 时保存到 `$XDG_CONFIG_HOME/orbit/members.json`）：
+
+```json
+{"allowed_kinds":["codex","opencode"]}
+```
+
+保存后运行 `orbit doctor` 查看名单与当前会话的可调用成员；无需自定义名单时不必创建文件。[进阶说明](docs/reference/usage-reference.md#jev-与成员名单配置)列出配置和验证步骤。
+
 Orbit 创建 Codex 执行成员时明确使用 full access，避免执行中反复审批；OpenCode 和 OMP 成员沿用 Root 的原生权限，Orbit 不改它们的权限配置。`orbit codex` 新会话同样默认 full access。你在启动命令里显式传入更严格的权限参数或配置时，以你的设置为准；恢复会话沿用 Codex 原生保存的权限。Orbit 不修改全局配置，检查者和裁定者仍保持只读。
 
 停止时可以在原生界面中断当前执行，或让 Agent 停止这项 Orbit 任务。也可另开终端执行：
@@ -155,9 +164,15 @@ export ORBIT_REVIEW_MODEL=gpt-6-astra
 
 ### 可选 Jev 检查调度
 
-在启动 Codex、OpenCode 或 OMP **之前**，让启动它的环境具有 `TYPESAFE_API_KEY`。配置一次后，从该环境启动的所有 Orbit 任务都会使用 Jev；不需要再设 Orbit 专用开关。已打开的会话和运行中的任务不会自动继承新变量。
+安装 Orbit 后，运行一次：
 
-启用后，Orbit 会把有界的原始要求、近期会话观察以及最多 4000 字符的 Git 差异摘录发送给 TypeSafe Jev。Jev 只判断何时值得唤起独立检查者；实际问题、完成与停止仍按 Orbit 的独立检查和控制规则处理。每秒运行循环不会每秒请求 Jev。缺 key 或服务不可用时沿用原检查流程，key 不写入任务记录。
+```bash
+orbit jev setup
+```
+
+按提示输入 TypeSafe key 并回车（输入时不显示），然后重新打开终端。在新终端启动 `orbit codex`、`opencode` 或 `omp`，新 Orbit 任务就会使用 Jev。命令将 key 写入仅当前用户可读的 TypeSafe 环境文件，并配置 zsh／bash 在启动时提供 `TYPESAFE_API_KEY`；Orbit 只从环境变量读取 key，不把它写进 Orbit 配置、项目或任务记录。已有环境变量优先，已运行的任务不会中途切换 key。路径、验证和项目关闭方法见[进阶说明](docs/reference/usage-reference.md#jev-与成员名单配置)。
+
+启用后，Orbit 会把有界的原始要求、指定依据摘录、有效修改、近期会话观察与产物差异摘要发送给 TypeSafe Jev。Jev 估计何时值得唤起独立检查者，以及是否可能有适合分工的子任务；实际检查、派发、完成与停止仍由 Orbit 和当前 Root 负责。每秒运行循环不会每秒请求 Jev。缺 key 或服务不可用时沿用原检查流程，key 不写入任务记录。
 
 若某个项目不应发送这些信息，在该项目运行 `mkdir -p .orbit && touch .orbit/jev-disabled`；移除此标记后，后续新任务会重新启用。项目的 `.orbit` 目录属于本地任务资料，不需要提交。
 
@@ -236,7 +251,7 @@ Codex 的 MCP 工具显示为 `orbit.task`；OpenCode 使用 `orbit`，OMP 的�
 
 ## 当前范围与更多文档
 
-当前源码版本 **0.6.6**，尚未发布 npm 包。Codex、OpenCode、OMP 的同宿主接入，以及 OpenCode Root → Codex 成员的跨宿主路径已有真实验收；其他跨宿主组合与 `kimi`、`cursor-agent`、`grok` 尚未接入，不列为可调用。Codex 执行成员与 `orbit codex` 新会话默认 full access，OpenCode／OMP 成员沿用 Root 原生权限；Codex 恢复会话的权限覆盖受 Codex 原生限制，见[验收记录](docs/reference/member-policy-acceptance-20260918.md)。pi 与 OMP 是不同项目，pi 等其他接入暂缓。
+当前源码版本 **0.6.7**，尚未发布 npm 包。Codex、OpenCode、OMP 的同宿主接入，以及 OpenCode Root → Codex 成员的跨宿主路径已有真实验收；其他跨宿主组合与 `kimi`、`cursor-agent`、`grok` 尚未接入，不列为可调用。Codex 执行成员与 `orbit codex` 新会话默认 full access，OpenCode／OMP 成员沿用 Root 原生权限；Codex 恢复会话的权限覆盖受 Codex 原生限制，见[验收记录](docs/reference/member-policy-acceptance-20260918.md)。pi 与 OMP 是不同项目，pi 等其他接入暂缓。
 
 - [进阶使用参考](docs/reference/usage-reference.md)：安装目录、profile、CLI 参数、集成和版本维护。
 - [Agent 使用说明](skills/orbit/SKILL.md)：调用时机、分工与纠偏职责。

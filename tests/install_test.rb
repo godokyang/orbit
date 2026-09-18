@@ -26,6 +26,17 @@ module InstallTest
     JSON.parse(File.read(path))
   end
 
+  def missing_prerequisites
+    Dir.mktmpdir("orbit-install-missing-") do |tmp|
+      script = 'begin; OrbitInstall.prerequisites!; rescue => error; warn error.message; exit 2; end'
+      _out, err, status = Open3.capture3({ "PATH" => tmp }, RbConfig.ruby, "--disable-gems", "-r",
+                                         File.join(ROOT, "scripts/manage-install.rb"), "-e", script)
+      assert(status.exitstatus == 2 && err.include?("Node.js 18+") && err.include?("npm") &&
+             err.include?("Codex CLI") && err.include?("重新运行 Orbit 安装命令"),
+             "missing prerequisites are listed with a next step before installation")
+    end
+  end
+
   def fixture
     Dir.mktmpdir("orbit-install-test-") do |tmp|
       @temp = tmp
@@ -246,6 +257,8 @@ module InstallTest
   end
 
   def main
+    missing_prerequisites
+    puts "INSTALL_TEST_PASS missing_prerequisites"
     %i[first_install successful_update failed_update uninstall_preserves_user_files shell_configuration].each do |test|
       fixture { send(test) }
       puts "INSTALL_TEST_PASS #{test}"

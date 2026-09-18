@@ -25,6 +25,14 @@
 
 已有未知命令包装、同名自定义扩展或无归属的安装目录时，安装器拒绝覆盖。先确认原入口由谁管理，通过对应工具卸载，或改用独立目录；不要直接覆盖自定义资料。
 
+### Jev 与成员名单配置
+
+运行 `orbit jev setup`，按提示输入 TypeSafe key 并回车。命令不回显 key，将它写入 `${XDG_CONFIG_HOME:-$HOME/.config}/typesafe-ai/env`（权限 `0600`），并在 zsh／bash 启动文件中追加加载该文件的语句；重复运行可替换旧 key。重新打开终端，再从该终端启动 Codex、OpenCode 或 OMP。Orbit 运行时只读取启动进程的 `TYPESAFE_API_KEY`，不读取 Orbit 配置文件；当前终端和已有任务不会自动改变。
+
+原有的 `TYPESAFE_API_KEY` 环境变量继续可用，存在时优先于环境文件；执行设置命令时会提示这一点。新任务发生 Jev 判断后，`orbit status --json` 中的 `jev.model` 与 `jev.scores` 表示请求成功；`jev.unavailable` 表示服务调用失败。需要对某个项目关闭外发时，在项目根目录创建 `.orbit/jev-disabled`；移除后，新任务恢复使用 Jev。不要把环境文件放进项目或提交到 Git。
+
+成员授权名单是另一项配置：默认使用 `codex、omp、opencode、kimi、cursor-agent、grok`，无需创建文件。要覆盖默认名单，在 `${XDG_CONFIG_HOME:-$HOME/.config}/orbit/members.json` 保存 JSON 对象，例如 `{"allowed_kinds":["codex","opencode"]}`；空数组禁止创建新成员。`orbit doctor` 显示名单来源、允许的 kind 和当前会话实际可调用的 kind。名单允许不代表已安装、已登录或已有受控适配器。
+
 ### PATH 配置
 
 安装成功后，脚本根据 `$SHELL` 自动配置当前安装的 bin 目录（包括自定义 `--bin-dir`）：

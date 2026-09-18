@@ -832,7 +832,8 @@ Dir.mktmpdir("orbit-jev-config-") do |root|
   assert(Orbit::JevAdvisor.for_project(root, env: {}).nil?, "no key keeps the existing scheduling path")
   Dir.mkdir(File.join(root, ".orbit"))
   File.write(File.join(root, ".orbit", "jev-disabled"), "")
-  assert(Orbit::JevAdvisor.for_project(root, env: env).nil?, "a project can disable external Jev calls")
+  assert(Orbit::JevAdvisor.for_project(root, env: env).nil?,
+         "a project can disable external Jev calls")
 end
 
 Dir.mktmpdir("orbit-jev-observation-") do |root|

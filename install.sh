@@ -29,6 +29,8 @@ if File.file?(entry) && !ref_index && !ENV.key?("ORBIT_REF")
 end
 begin
   Dir.mktmpdir("orbit-source-") do |tmp|
+    abort "orbit install: curl is required to download the release; install curl and retry" unless system("command -v curl >/dev/null 2>&1")
+    abort "orbit install: tar is required to unpack the release; install tar and retry" unless system("command -v tar >/dev/null 2>&1")
     fetch = lambda do |url, destination|
       raise "download failed: #{url}" unless system("curl", "-fsSL", "--retry", "2", "-o", destination, "--", url)
     end
