@@ -10,6 +10,7 @@ require "optparse"
 require "rbconfig"
 require "shellwords"
 require "time"
+require_relative "../lib/orbit/release_lease"
 
 module OrbitInstall
   FORMAT = "orbit-install-3"
@@ -237,6 +238,7 @@ module OrbitInstall
     paths = record.fetch("files").map { |path| safe_relative!(path) }
     directories = record.fetch("owned_directories")
     raise "unknown dependency directories" unless directories == %w[node_modules .npm-cache]
+    FileUtils.rm_rf(File.join(release, Orbit::ReleaseLease::DIRECTORY))
     parents = []
     paths.each do |relative|
       path = File.join(release, relative)
@@ -257,6 +259,25 @@ module OrbitInstall
 
   def remove_empty_directory(path)
     Dir.rmdir(path) if File.directory?(path) && !File.symlink?(path) && Dir.empty?(path)
+  end
+
+  # Retired releases are removed only when no running task or loaded host
+  # still holds a lease in them. A release kept now is retired again on the
+  # next install or uninstall, so cleanup catches up after those holders exit.
+  def cleanup_retired_releases(runtime, keep: nil)
+    Dir.glob(File.join(runtime, "releases", "*")).sort.each do |release|
+      next unless File.directory?(release) && !File.symlink?(release)
+      next if keep && File.expand_path(release) == File.expand_path(keep)
+
+      Orbit::ReleaseLease.prune_stale(release)
+      if Orbit::ReleaseLease.live?(release)
+        warn "Kept release in use: #{release}"
+        next
+      end
+      clean_release(release)
+    rescue StandardError => error
+      warn "Kept release #{release}: #{error.message}"
+    end
   end
 
   def configure_shell_path(options, home: Dir.home, shell: ENV["SHELL"], zdotdir: ENV["ZDOTDIR"])
@@ -356,7 +377,7 @@ module OrbitInstall
       end
     end
     begin
-      clean_release(previous) if previous
+      cleanup_retired_releases(runtime, keep: current_release(runtime))
     rescue StandardError => error
       warn "New version is active; old release cleanup needs attention: #{error.message}"
     end
@@ -366,6 +387,16 @@ module OrbitInstall
   def uninstall(options)
     raise "no owned installation at #{options[:runtime]}" unless options[:owner]
     runtime = options.fetch(:runtime)
+    leased = Dir.glob(File.join(runtime, "releases", "*")).select do |path|
+      next false unless File.directory?(path) && !File.symlink?(path)
+
+      Orbit::ReleaseLease.prune_stale(path)
+      Orbit::ReleaseLease.live?(path)
+    end
+    unless leased.empty?
+      raise "仍有进程使用 Orbit 安装（#{leased.map { |path| File.basename(path) }.join('、')}）；" \
+            "先结束相关任务和 Coding Agent 会话，再重试卸载。CLI 入口与安装记录未改动。"
+    end
     release = current_release(runtime)
     endpoints(options).each do |path, expected, kind|
       if matching?(path, expected, kind)
@@ -375,7 +406,7 @@ module OrbitInstall
       end
     end
     File.unlink(File.join(runtime, "current")) if release
-    clean_release(release) if release
+    cleanup_retired_releases(runtime)
     File.unlink(File.join(runtime, MARKER))
     remove_empty_directory(File.join(runtime, "releases"))
     remove_empty_directory(runtime)

@@ -6,6 +6,7 @@ require "tmpdir"
 require "fileutils"
 require_relative "codex_connection"
 require_relative "task_record"
+require_relative "release_lease"
 
 module Orbit
   # User-selected TUI entry. Orbit start still only binds the current session.
@@ -100,6 +101,9 @@ module Orbit
     end
 
     def launch(argv)
+      # This launcher and the host it starts resolve the MCP entry from this
+      # release for the whole session; the lease keeps an update from deleting it.
+      ReleaseLease.hold!
       if argv == ["--help"] || argv == ["-h"]
         puts "orbit codex [Codex options] [prompt]\norbit codex resume [session ID]\n\n" \
              "Open the Codex terminal UI on a local app-server owned by this launcher. " \

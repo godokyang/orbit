@@ -88,6 +88,21 @@ module CliTest
     assert(cli("status").include?("成员仍在执行"), "show the actual stop failure, not only the stop request reason")
   end
 
+  # A failed run may have confirmed that execution stopped; that is different
+  # from a failure whose stop result still needs verification.
+  def failed_stop_confirmation_is_reported
+    record = task("failed", error: "读取角色规则库失败")
+    text = cli("status")
+    assert(text.include?("运行失败，停止情况需核实") && text.include?("读取角色规则库失败"),
+           "a missing stop confirmation keeps the verification prompt")
+    record.save(record.state.merge("stop_confirmation" => { "confirmed" => false, "scope" => "原会话" }))
+    assert(cli("status").include?("运行失败，停止情况需核实"), "an explicit unconfirmed stop still needs verification")
+    record.save(record.state.merge("stop_confirmation" => { "confirmed" => true, "thread_id" => "root", "status_after" => "idle" }))
+    text = cli("status")
+    assert(text.include?("运行失败，停止已确认") && text.include?("请查看运行错误") && !text.include?("停止情况需核实"),
+           "a confirmed stop is reported as such instead of an unverified stop")
+  end
+
   def doctor_without_connection_or_dependencies
     report = JSON.parse(cli("doctor", "--json"))
     assert(report["environment_ready"] && report.dig("connection", "ready").nil? && !report["ready"], "installed dependencies do not prove a connection")
@@ -271,7 +286,8 @@ module CliTest
 
   def main
     %i[single_task_from_project_subdirectory multiple_tasks_require_explicit_selection completed_and_absent_tasks
-       stale_result_and_user_action doctor_without_connection_or_dependencies doctor_reads_existing_native_connection
+       stale_result_and_user_action failed_stop_confirmation_is_reported doctor_without_connection_or_dependencies
+       doctor_reads_existing_native_connection
        stop_retries_when_recorded_runtime_is_gone codex_launch_approval_targets_the_registered_tool
        codex_launch_defaults_to_full_access doctor_reports_member_allowlist_and_gaps
        delegate_checks_allowlist_before_queueing maintenance_requires_an_installed_cli

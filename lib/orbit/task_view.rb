@@ -71,6 +71,19 @@ module Orbit
       File.read(File.join(record.path, "instruction.txt")).gsub(/\s+/, " ").strip[0, 120]
     end
 
+    def stop_confirmed?(state)
+      state.dig("stop_confirmation", "confirmed") == true
+    end
+
+    # A failed run may still have confirmed that execution stopped. That is a
+    # different user action from a failure whose stop result is unknown.
+    def label(state)
+      status = state.fetch("status")
+      return "运行失败，停止已确认" if status == "failed" && stop_confirmed?(state)
+
+      LABELS.fetch(status, status)
+    end
+
     # A starting/running record whose recorded runtime process is gone cannot
     # consume queued commands; stop treats it like an exited runtime.
     def runtime_abandoned?(state)
@@ -90,14 +103,14 @@ module Orbit
     def list(records)
       records.map do |record|
         state = record.state
-        "#{state.fetch('id')}  #{LABELS.fetch(state['status'], state['status'])}  #{summary(record)}"
+        "#{state.fetch('id')}  #{label(state)}  #{summary(record)}"
       end.join("\n")
     end
 
     def format(record)
       state = record.state
       status = state.fetch("status")
-      lines = ["任务：#{summary(record)}", "状态：#{LABELS.fetch(status, status)}（#{status}）"]
+      lines = ["任务：#{summary(record)}", "状态：#{label(state)}（#{status}）"]
       check = state.fetch("checks", []).last
       if check
         qualifier = if check["stale"]
@@ -125,7 +138,9 @@ module Orbit
       basis = state["next_check_basis"]
       lines << "下次检查：#{next_check || '未安排'}#{basis ? "（依据：#{basis}）" : ''}"
       attention = case status
-                  when "needs_user", "failed", "stop_unconfirmed"
+                  when "failed"
+                    stop_confirmed?(state) ? "运行失败，停止已确认；请查看运行错误。" : "运行失败，停止情况需核实。"
+                  when "needs_user", "stop_unconfirmed"
                     state["stop_reason"] || state["error"] || "请核对任务错误及停止结果。"
                   else
                     "当前记录未要求用户处理"

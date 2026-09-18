@@ -71,7 +71,7 @@ Jev 只从启动 Coding Agent 时的 `TYPESAFE_API_KEY` 环境变量读取 key�
 - Codex 接入已加载在 Unix app-server 上、可读取历史的已有持久会话，通过 WebSocket 控制。OpenCode 通过官方插件持有的原生客户端接入当前会话，插件提供私有本地 socket 给任务进程；普通启动不需要用户指定端口或内部 ID。原文从原生用户消息读取，程序投递通过原生消息 metadata 标记，避免将纠正或成员回报当作新用户要求。不自动创建或恢复 Root，不用仅排队消息替代原生停止。
 - 停止确认覆盖该 Root 与本任务登记成员的当前 turn、各自 Codex 登记的后台终端和 Orbit 自有检查进程。关闭用户启动入口会尝试收尾该服务的任务和执行，无法确认时保留日志并说明。普通 Codex embedded TUI、脱离原生管理的进程及其他宿主尚未纳入该范围。OpenCode 停止覆盖本任务原生会话及其 shell 工具附属进程树，以原生 idle 且无活动工具确认；正常退出插件时先请求任务收尾再关闭私有通道。强杀宿主不自动恢复。
 - 已退出的 failed／stop_unconfirmed 任务仍接受用户显式 stop 重试，取得原运行锁和 Root 锁后仅做收尾，不重启执行。不能确认旧检查进程已退出时继续保留 stop_unconfirmed。
-- `.orbit/tasks/<id>/` 保存原文、依据版本、明确修改、固定副本、检查结果和状态。`complete` 表示独立检查及实际收尾均通过；`paused` / `needs_user` 表示已经确认停止；`stop_unconfirmed` 表示停止尚未得到确认；`failed` 仅表示运行错误，不能据此推断相关工作已停止。
+- `.orbit/tasks/<id>/` 保存原文、依据版本、明确修改、固定副本、检查结果和状态。`complete` 表示独立检查及实际收尾均通过；`paused` / `needs_user` 表示已经确认停止；`stop_unconfirmed` 表示停止尚未得到确认；`failed` 仅表示运行错误，不能据此推断相关工作已停止，停止是否确认以 `stop_confirmation.confirmed` 为准，status 分别显示停止已确认或需核实。
 - 当前支持用户明确的时间截止；token 预估仅用于复盘，未提供跨供应商消耗硬上限。读取不到的任务总消耗保留未知，不能将 Root 会话历史累计量当成本任务用量。
 
 ## OMP 原生接入
@@ -80,6 +80,6 @@ Jev 只从启动 Coding Agent 时的 `TYPESAFE_API_KEY` 环境变量读取 key�
 
 ## 用户查询与维护入口
 
-`status [TASK]` 默认显示可读摘要，`--json` 返回机器记录。省略任务时从当前项目定位；多个待处理候选列出选择项，`stop [TASK]` 不自动猜测。`failed` 与 `stop_unconfirmed` 不能视作已安全结束。显式任务目录或当前项目的唯一 ID 前缀都可使用。无待处理任务时查询可展示最近已结束记录，停止则说明无需停止。
+`status [TASK]` 默认显示可读摘要，`--json` 返回机器记录。省略任务时从当前项目定位；多个待处理候选列出选择项，`stop [TASK]` 不自动猜测。`failed` 与 `stop_unconfirmed` 都不能视作完成交付；只有 `stop_confirmation.confirmed=true` 的 `failed` 才显示停止已确认。显式任务目录或当前项目的唯一 ID 前缀都可使用。无待处理任务时查询可展示最近已结束记录，停止则说明无需停止。
 
 `doctor` 的环境和安装检查不代表会话已接入；只有通过已有原生接口读回实际会话后才报告连接成功，检查不调用模型。诊断同时显示成员名单的来源与允许项、当前 Root 下实际可调用的 kind，以及允许但无受控适配器的缺口。`update` 和 `uninstall` 只维护所属运行安装，skill 继续由 npx skills 管理，维护应在相关任务结束后执行。

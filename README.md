@@ -36,7 +36,7 @@ curl -fsSL https://raw.githubusercontent.com/godokyang/orbit/main/install.sh | s
 orbit --version
 ```
 
-应输出类似 `orbit 0.6.7` 的版本号。当前源码版本为 `0.6.7`；远程命令安装 GitHub 上所选提交的版本，未推送的本地提交不会出现在远程安装中。
+应输出类似 `orbit 0.6.8` 的版本号。当前源码版本为 `0.6.8`；远程命令安装 GitHub 上所选提交的版本，未推送的本地提交不会出现在远程安装中。
 
 如果想继续使用当前终端，执行安装结束时显示的 `export PATH=...` 命令即可。自动保存的配置会在以后新开终端、重启电脑后继续生效。其他 shell 或关闭自动配置的方法见[PATH 配置](docs/reference/usage-reference.md#path-配置)。
 
@@ -191,7 +191,7 @@ orbit jev setup
 
 ## 更新
 
-先结束正在运行的 Orbit 任务，再分别更新程序和 skill。
+程序和 skill 分别更新。新版本中运行的任务、`orbit codex` 会话或已加载宿主扩展会登记所用 release，更新时保留它；宿主在重开后加载新扩展。首次从未登记的旧版更新前，先结束旧任务和会话。
 
 ### 程序
 
@@ -199,7 +199,7 @@ orbit jev setup
 orbit update
 ```
 
-自动沿用本命令所属的安装目录与入口选择，CLI 和原生连接扩展一起更新；准备失败保留旧版。远程安装沿用原分支、标签或提交，本地安装沿用原源码目录（需先自行更新该源码，不自动 git pull）。本地来源安装可直接更新到本仓已提交的改动，不要求先推送；GitHub 来源只能取得已推送的提交。
+自动沿用本命令所属的安装目录与入口选择，CLI 和原生连接扩展一起更新；准备失败保留旧版。新版本运行中的任务、`orbit codex` 会话和已加载宿主扩展会在所用 release 内登记 pid lease，更新不会删除它们；持有者退出后的下一次安装清理旧 release。远程安装沿用原分支、标签或提交，本地安装沿用原源码目录（需先自行更新该源码，不自动 git pull）。本地来源安装可直接更新到本仓已提交的改动，不要求先推送；GitHub 来源只能取得已推送的提交。
 
 需要明确切换远程版本时使用 `orbit update --ref REF`，例如 `orbit update --ref main`。不再需要复制安装命令或填写 runtime 路径。
 
@@ -213,7 +213,7 @@ npx skills update orbit --global
 
 ## 卸载
 
-先停止 Orbit 任务。按本文目录安装时，分别卸载程序与 skill：
+先结束使用该安装的 Orbit 任务和 Coding Agent 会话；若仍有进程持有 release，卸载会拒绝且不改动原安装。按本文目录安装时，分别卸载程序与 skill：
 
 ```bash
 # 程序及原生连接扩展
@@ -251,7 +251,7 @@ Codex 的 MCP 工具显示为 `orbit.task`；OpenCode 使用 `orbit`，OMP 的�
 
 ## 当前范围与更多文档
 
-当前源码版本 **0.6.7**，尚未发布 npm 包。Codex、OpenCode、OMP 的同宿主接入，以及 OpenCode Root → Codex 成员的跨宿主路径已有真实验收；其他跨宿主组合与 `kimi`、`cursor-agent`、`grok` 尚未接入，不列为可调用。Codex 执行成员与 `orbit codex` 新会话默认 full access，OpenCode／OMP 成员沿用 Root 原生权限；Codex 恢复会话的权限覆盖受 Codex 原生限制，见[验收记录](docs/reference/member-policy-acceptance-20260918.md)。pi 与 OMP 是不同项目，pi 等其他接入暂缓。
+当前源码版本 **0.6.8**，尚未发布 npm 包。Codex、OpenCode、OMP 的同宿主接入，以及 OpenCode Root → Codex 成员的跨宿主路径已有真实验收；其他跨宿主组合与 `kimi`、`cursor-agent`、`grok` 尚未接入，不列为可调用。Codex 执行成员与 `orbit codex` 新会话默认 full access，OpenCode／OMP 成员沿用 Root 原生权限；Codex 恢复会话的权限覆盖受 Codex 原生限制，见[验收记录](docs/reference/member-policy-acceptance-20260918.md)。pi 与 OMP 是不同项目，pi 等其他接入暂缓。
 
 - [进阶使用参考](docs/reference/usage-reference.md)：安装目录、profile、CLI 参数、集成和版本维护。
 - [Agent 使用说明](skills/orbit/SKILL.md)：调用时机、分工与纠偏职责。

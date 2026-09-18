@@ -160,6 +160,54 @@ module InstallTest
     assert(!File.exist?(@shell_config), "update preserves the PATH opt-out")
   end
 
+  # A release referenced by a running task or loaded host must survive update;
+  # a later install removes it once its holders are gone.
+  def update_keeps_referenced_release
+    install
+    old = active
+    record = File.join(@temp, "fake task")
+    FileUtils.mkdir_p(record)
+    File.write(File.join(record, "state.json"), JSON.generate(
+      "connection" => { "provider" => "opencode", "socket" => File.join(@temp, "missing.sock") }
+    ))
+    task_pid = Process.spawn(File.join(@bin, "orbit"), "run", record, out: File::NULL, err: File::NULL)
+    Process.wait(task_pid)
+    leases = Dir.glob(File.join(old, ".leases/*.json"))
+    assert(leases.any? { |path| JSON.parse(File.read(path))["pid"] == task_pid },
+           "a task runtime records its release lease")
+    run("node", "--input-type=module", "-e", "await import('./plugins/host.mjs')", cwd: old)
+    assert(Dir.glob(File.join(old, ".leases/*.json")).length == 2,
+           "a loaded host records its release lease")
+    codex_pid = Process.spawn(File.join(@bin, "orbit"), "codex", in: File::NULL, out: File::NULL, err: File::NULL)
+    Process.wait(codex_pid)
+    assert(Dir.glob(File.join(old, ".leases/*.json")).any? { |path| JSON.parse(File.read(path))["pid"] == codex_pid },
+           "the Codex launcher records its release lease")
+
+    holder = Process.spawn(RbConfig.ruby, "--disable-gems", "-r", File.join(old, "lib/orbit/release_lease.rb"),
+                           "-e", "Orbit::ReleaseLease.hold!; sleep", out: File::NULL, err: File::NULL)
+    begin
+      50.times do
+        break if File.file?(File.join(old, ".leases", "#{holder}.json"))
+        sleep 0.1
+      end
+      assert(File.file?(File.join(old, ".leases", "#{holder}.json")), "test holder records a live lease")
+      bump
+      run(File.join(@bin, "orbit"), "update", cwd: "/")
+      assert(version["version"] == @updated_version, "update succeeds while a task or host holds the old release")
+      assert(File.file?(File.join(old, "scripts/orbit")), "a release in use survives update")
+    ensure
+      begin
+        Process.kill("TERM", holder)
+        Process.wait(holder)
+      rescue Errno::ESRCH, Errno::ECHILD
+        nil
+      end
+    end
+    bump
+    run(File.join(@bin, "orbit"), "update", cwd: "/")
+    assert(!File.exist?(old), "stale leases let a later update clean the retired release")
+  end
+
   def failed_update
     prepare_external_skills
     install
@@ -196,6 +244,17 @@ module InstallTest
     File.write(File.join(project, "task.json"), "keep task")
     File.write(File.join(@omp, "config.yml"), "user: keep\n")
     File.write(File.join(@opencode, "opencode.json"), '{"user":"keep"}')
+    Orbit::ReleaseLease.hold!(root: release, pid: Process.pid)
+    begin
+      _out, err, status = Open3.capture3(@env, File.join(@bin, "orbit"), "uninstall", chdir: "/")
+      assert(!status.success? && err.include?("仍有进程使用") && err.include?("安装记录未改动"),
+             "uninstall explains why a live release prevents removal")
+      assert(File.symlink?(File.join(@runtime, "current")) &&
+             File.file?(File.join(@runtime, OrbitInstall::MARKER)) &&
+             File.file?(File.join(@bin, "orbit")), "refused uninstall keeps the installation usable")
+    ensure
+      File.unlink(File.join(release, ".leases", "#{Process.pid}.json"))
+    end
     run(File.join(@bin, "orbit"), "uninstall", env: { "ORBIT_RUNTIME_DIR" => File.join(@temp, "other-runtime") }, cwd: "/")
     assert_external_skills
     assert(!File.exist?(File.join(@bin, "orbit")), "owned CLI wrapper removed")
@@ -259,7 +318,8 @@ module InstallTest
   def main
     missing_prerequisites
     puts "INSTALL_TEST_PASS missing_prerequisites"
-    %i[first_install successful_update failed_update uninstall_preserves_user_files shell_configuration].each do |test|
+    %i[first_install successful_update update_keeps_referenced_release failed_update uninstall_preserves_user_files
+       shell_configuration].each do |test|
       fixture { send(test) }
       puts "INSTALL_TEST_PASS #{test}"
     end

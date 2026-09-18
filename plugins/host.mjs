@@ -4,6 +4,9 @@ import path from 'node:path';
 import fs from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { holdReleaseLease } from './lease.mjs';
+
+holdReleaseLease();
 
 const cli = fileURLToPath(new URL('../scripts/orbit', import.meta.url));
 const terminal = new Set(['complete', 'paused', 'needs_user', 'failed', 'stop_unconfirmed']);

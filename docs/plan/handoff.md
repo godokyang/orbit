@@ -2,13 +2,17 @@
 
 用户指出当前多 Agent 协作、Herdr 可用成员发现、Jev 委派提示、状态可见性与真实安装仍未满足日常使用目标。2026-09-18 [独立审查及复核](../reference/project-review-20260918.md)确认：一次真实开发任务的 7 次已完成检查全部过期，Orbit 投递纠正为 0，检查用量记录为 4,246,313 tokens（含缓存口径）。按[用户结果补齐计划](user-outcome-completion-plan.md)执行到：切片 A 已实现并经受控路径、持续编辑任务和 0.6.2 新宿主会话验证；切片 B 已核对 Jev 输入边界、真实判断与额外消耗，完成 patch 升级与本机安装；切片 C 已按跨宿主原生成员路径实现并完成真实验收：OpenCode Root 显式 `kind: codex`，任务运行进程持有成员 app-server，结果回收、执行中中断、运行进程异常退出后的显式停止重试与会话保留分别取证；同宿主 `native` 委托保留，其他 kind 与 Herdr 控制未验证。切片 D 已实现有界 Jev 分工提示，但真实样本未触发提示，分工收益尚未验证。实际证据、用量与未覆盖范围见[检查回路与 Jev 实际验证](../reference/check-loop-acceptance-20260918.md)、[跨宿主成员验收](../reference/cross-host-member-acceptance-20260918.md)与[成员名单、权限及分工提示验收](../reference/member-policy-acceptance-20260918.md)。
 
+## 旧 release 保留与 failed 停止状态（2026-09-18，0.6.8）
+
+新版本的任务运行进程、`orbit codex` 会话与已加载宿主在 release 内登记 pid lease；更新保留由存活 lease 引用的旧 release，持有者退出后的下一次安装清理。卸载有存活 lease 时在移除入口和安装记录前拒绝，结束相关进程后可重试。首次从未登记 lease 的旧版升级前需结束旧任务和会话，不做兼容迁移。原失败任务 `30586614` 及已损坏的旧 Codex 会话不会由本修复恢复。`orbit status` 对 `failed` 按 `stop_confirmation.confirmed` 区分“运行失败，停止已确认”和“运行失败，停止情况需核实”。CLI 与安装回归覆盖新版本 lease 保留、陈旧 lease 后续清理、存活 lease 拒绝卸载和 `failed` 两种显示；本机未重新安装，真实升级核对留待下次安装。
+
 ## Jev 指定依据输入修正（2026-09-18）
 
 此前 Jev 的任务观察未包含指定依据文档；真实任务的 `TASK.md` 要求因此不在分工判断输入中。0.6.6 将最多三份指定依据的有界摘录及截断、省略标记加入同一次观察，合同和 ADR 已同步。OpenCode 宿主运行的完整 `npm test` 通过；随后从隔离任务 `99dd3e13` 构造的真实请求包含完整 592 字依据，TypeSafe 返回 `jev-1.13.0`、四项分数与 2,446 输入／74 输出 tokens。这证明新输入被 API 接受，不证明分工收益。下一次自然出现独立子任务的真实工作中核对提示、实际派发、结果集成与额外用量。
 
 ## Jev 一次性配置命令（2026-09-18）
 
-用户要求不再每次启动 Agent 前手动导出 key，同时保留 key 通过 `TYPESAFE_API_KEY` 传递且不写入 Orbit 配置的边界。0.6.7 新增 `orbit jev setup`：终端输入不回显，保存到 `${XDG_CONFIG_HOME:-$HOME/.config}/typesafe-ai/env`（0600），并配置 zsh／bash 新终端自动导出环境变量；Orbit 运行时只读环境变量。已有环境变量优先，项目关闭标记仍有效。CLI、合同、ADR 和用户文档已同步；验证状态以本次工作树与任务记录为准。未安装或推送此版本。
+用户要求不再每次启动 Agent 前手动导出 key，同时保留 key 通过 `TYPESAFE_API_KEY` 传递且不写入 Orbit 配置的边界。0.6.7 新增 `orbit jev setup`：终端输入不回显，保存到 `${XDG_CONFIG_HOME:-$HOME/.config}/typesafe-ai/env`（0600），并配置 zsh／bash 新终端自动导出环境变量；Orbit 运行时只读环境变量。已有环境变量优先，项目关闭标记仍有效。CLI、合同、ADR 和用户文档已同步；验证状态以任务记录为准。本机尚未重新安装包含此命令的新版。
 
 ## Codex 审批与 MCP 修正（2026-09-18）
 
@@ -37,9 +41,9 @@ Codex 执行成员与 `orbit codex` 新会话默认 full access，OpenCode／OMP
 
 跨宿主成员路径随后并入未提交改动并再次按 patch 升到 **0.6.3**（`content_digest 8df0acbf…`、`installed_at 2026-09-18T06:06:36Z`）。新宿主会话中的三个真实任务分别证明：Codex 成员结果回原 Root 并核验集成（`2c9569a2`）；执行中中断使 turn 与两个登记后台终端退出、宿主进程组退出确认（`f8a9da7d`）；运行进程 SIGKILL 后显式 `orbit stop` 从记录重连、停止并核对（`d8d03598`）；三个成员 rollout 与 Root 会话历史保留。验证中发现并修正三处接口缺口（成员宿主 MCP 覆盖、未物化成员线程的启动与停止、Darwin 僵尸进程组的退出核对）；两个真实失败任务由停止重试收尾为 `paused`。详见[跨宿主成员验收](../reference/cross-host-member-acceptance-20260918.md)。
 
-**已知顺序限制：** 任务运行期间安装会让运行中任务读取旧 release 失败（本仓任务 `30586614` 因规则库 `ENOENT` 记为 `failed`，停止已确认）。本轮不扩展热更新；使用顺序为结束任务→安装→重开宿主会话，见[当前限制](debt-ledger.md)。
+**更新与运行任务：** 运行中安装曾让运行任务读取旧 release 失败（本仓任务 `30586614` 因规则库 `ENOENT` 记为 `failed`，停止已确认）。新版本由 release lease 保留被引用的旧 release；首次从无 lease 的旧版升级仍须先结束任务和会话。已加载宿主重开后才加载新扩展，见[当前限制](debt-ledger.md)。
 
-本次未推送、未发布、未打标签；提交状态以 Git 为准。
+历史阶段的提交与推送状态以 Git 为准；本仓尚未发布 npm 包或打标签。
 
 ## Jev 接入（2026-09-18，源码待发布）
 

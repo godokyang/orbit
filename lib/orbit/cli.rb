@@ -15,6 +15,7 @@ require_relative "member_policy"
 require_relative "session_entry"
 require_relative "task_view"
 require_relative "diagnostics"
+require_relative "release_lease"
 
 module Orbit
   module CLI
@@ -44,8 +45,8 @@ module Orbit
       "stop" => "orbit stop [TASK] [--reason TEXT] [--json]\n只定位唯一待处理任务；多任务先用 orbit status 查看，再传 ID。请求入队不代表停止已确认。",
       "doctor" => "orbit doctor [TASK] [--json]\n只读检查环境和扩展；通过当前 Codex 会话或所选已有任务验证连接，不调用模型，不验证登录或额度。",
       "jev" => "orbit jev setup\n交互输入 TypeSafe key，配置 zsh／bash 新终端的 TYPESAFE_API_KEY；不写入 Orbit 配置。",
-      "update" => "orbit update [--ref REF]\n先结束 Orbit 任务。默认沿用远程 ref 或本地源码目录；--ref 显式从 GitHub 选择版本。skill 用 npx skills update orbit --global 单独更新。",
-      "uninstall" => "orbit uninstall\n先结束 Orbit 任务。卸载本命令所属运行安装，保留项目资料与独立 skill。",
+      "update" => "orbit update [--ref REF]\n更新当前安装，默认沿用远程 ref 或本地源码目录；--ref 显式从 GitHub 选择版本。新版本登记的运行任务与宿主引用的旧 release 会保留，待其退出后的下一次安装清理。skill 用 npx skills update orbit --global 单独更新。",
+      "uninstall" => "orbit uninstall\n先结束使用本安装的任务和 Coding Agent 会话；仍有存活 lease 时拒绝卸载且保留原安装。卸载保留项目资料与独立 skill。",
       "version" => "orbit version [--json]",
       "check" => "orbit check TASK_DIRECTORY",
       "amend" => "orbit amend TASK_DIRECTORY --file FILE|-",
@@ -279,6 +280,9 @@ module Orbit
     end
 
     def run_task(record)
+      # A task process resolves check rules and other files from its release
+      # for its whole lifetime; the lease keeps an update from deleting it.
+      ReleaseLease.hold!
       state = record.state
       connection = Connection.open(state.fetch("connection"))
       checker = CheckRunner.new(model: state.dig("review", "model"))
