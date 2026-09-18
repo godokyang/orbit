@@ -168,6 +168,8 @@ export ORBIT_REVIEW_MODEL=gpt-6-astra
 
 原生权限和其他启动参数继续按各工具的方式使用；Codex 参数接在 `orbit codex` 后面。Orbit 的检查模型与 OpenCode／OMP 的执行模型分别配置。
 
+`orbit codex` 只对 Orbit MCP 工具（`orbit.task`）在该入口启动的会话内预批准，不改变其他工具、shell 沙箱或全局审批策略；`approval_policy=never` 的会话也能通过原生 MCP 调用 Orbit。
+
 ## 更新
 
 先结束正在运行的 Orbit 任务，再分别更新程序和 skill。

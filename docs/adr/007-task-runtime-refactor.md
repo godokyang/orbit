@@ -121,3 +121,7 @@ Jev 的判断不取代固定产物上的独立检查及实际停止证据。程�
 用户要求 Root 能把已授权、实际可用的不同 Coding Agent 纳入分工；首条路径为 OpenCode Root 显式选择 `kind: codex`。任务运行进程为该任务启动并持有独立的 Codex app-server，以 `/tmp` 下的短控制 socket 提供原生接口；成员 thread 在 `turn/start` 前持久登记（kind、socket、宿主 PID／进程组、thread ID、模型和状态）。成员按项目目录创建，模型取自 Codex 自身配置或显式授权，沿用 `approvalPolicy: never`、`workspace-write` 且不加载 Orbit MCP，不沿用 OpenCode 的 provider／model 字符串。结果从成员原生会话读取并经 Root 现有通道回传。
 
 停止确认覆盖成员当前 turn、宿主跟踪的后台终端，随后关闭成员 app-server 并核对进程组退出；socket 消失本身不是停止证据，进程组不存在才是。运行进程异常退出而成员宿主仍存活时，记录保留可重连地址，显式 `stop` 重试从任务记录重连、停止并核对；证据不足保持 `stop_unconfirmed`。成员会话按原生记录保留，不要求终态后成员仍在线。Herdr／tmux 只可用于展示，不承担投递、结果或停止控制；同宿主 `delegate` 保留，不为跨宿主放宽沙箱、权限或停止证据，也不在本轮建设其他 kind、通用注册中心或热更新。真实验收要求分别证明结果回到原 Root、执行中中断与后台工作退出、运行进程异常退出后的显式停止重试，以及会话历史保留；验证事实见 [跨宿主成员验收](../reference/cross-host-member-acceptance-20260918.md)。
+
+## Codex 会话内 Orbit MCP 的审批与调用身份修正（2026-09-18）
+
+`orbit codex` 原先按服务名 `orbit` 写 per-tool 审批覆盖；Codex 只按实际工具名 `task` 匹配 `mcp_servers.orbit.tools.<tool>.approval_mode`，未匹配时回退默认 `auto`，对缺少只读标注的自定义 MCP 工具要求审批，`approval_policy=never` 会话因此收到 “MCP tool call requires approval, but approval policy is never”。修正为按真实工具名设置 `approve`：仅 `orbit.task` 在该入口启动的会话内预批准，其他工具、shell 沙箱、成员边界与全局配置不变。验证中发现 Codex 0.155 通过 `_meta.threadId` 传递调用方会话身份，MCP 桥接随后同时接受该键与旧的前缀键，`start` 才能绑定当前 Root；此前 `start` 因缺少身份失败。真实验证见 [Codex 审批与 MCP 调用验收](../reference/codex-approval-acceptance-20260918.md)。

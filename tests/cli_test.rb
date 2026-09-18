@@ -6,6 +6,7 @@ require "open3"
 require "rbconfig"
 require "socket"
 require_relative "../lib/orbit/task_record"
+require_relative "../lib/orbit/session_entry"
 
 module CliTest
   ENTRY = File.expand_path("../scripts/orbit", __dir__)
@@ -150,6 +151,21 @@ module CliTest
     worker&.join
   end
 
+  # The per-tool approval override must address the MCP tool's real name
+  # (`task`), not the server name; otherwise the default `auto` requires
+  # approval and approval_policy=never sessions cannot call the tool.
+  def codex_launch_approval_targets_the_registered_tool
+    mcp = File.expand_path("../scripts/orbit-mcp.cjs", __dir__)
+    tool_name = File.read(mcp)[/name:\s*'([^']+)',\s*\n\s*description:/, 1]
+    assert(tool_name, "the Orbit MCP registers exactly one tool name")
+    configuration = Orbit::SessionEntry.codex_configuration(mcp: mcp, socket: "/tmp/orbit-test.sock")
+    assert(configuration.include?("tools={#{tool_name}={approval_mode=\"approve\"}}"),
+           "the approval override targets the registered tool #{tool_name.inspect}")
+    assert(!configuration.include?("tools={orbit="), "the server name must not be used as a tool key")
+    assert(configuration.include?("mcp_servers.orbit={") && configuration.include?("ORBIT_CODEX_SOCKET"),
+           "the Orbit MCP server configuration is preserved")
+  end
+
   def maintenance_requires_an_installed_cli
     %w[update uninstall].each { |command| cli(command, success: false) }
     assert(cli("start", "--help").include?("--provider"), "execution details are available in subcommand help")
@@ -158,7 +174,8 @@ module CliTest
   def main
     %i[single_task_from_project_subdirectory multiple_tasks_require_explicit_selection completed_and_absent_tasks
        stale_result_and_user_action doctor_without_connection_or_dependencies doctor_reads_existing_native_connection
-       stop_retries_when_recorded_runtime_is_gone maintenance_requires_an_installed_cli].each do |test|
+       stop_retries_when_recorded_runtime_is_gone codex_launch_approval_targets_the_registered_tool
+       maintenance_requires_an_installed_cli].each do |test|
       Dir.mktmpdir("orbit-cli-test-") do |tmp|
         @temp = tmp
         @project = File.join(tmp, "project")

@@ -40,6 +40,17 @@ module Orbit
       report
     end
 
+    # Codex resolves per-tool MCP approval overrides by the actual tool name
+    # (`task`, as exposed by scripts/orbit-mcp.cjs), not the server name.
+    # `approve` means pre-approved by policy for this tool only; the default
+    # `auto` would require approval for a tool without read-only annotations,
+    # which an approval_policy=never session cannot grant.
+    def codex_configuration(mcp:, socket:)
+      "mcp_servers.orbit={command=\"node\",args=[#{JSON.generate(mcp)}]," \
+        "env={ORBIT_CODEX_SOCKET=#{JSON.generate(socket)}}," \
+        "tools={task={approval_mode=\"approve\"}}}"
+    end
+
     def launch(argv)
       if argv == ["--help"] || argv == ["-h"]
         puts "orbit codex [Codex options] [prompt]\norbit codex resume [session ID]\n\n" \
@@ -55,7 +66,7 @@ module Orbit
       directory = Dir.mktmpdir("orbit-host-", "/tmp")
       socket = File.join(directory, "control.sock")
       mcp = File.expand_path("../../scripts/orbit-mcp.cjs", __dir__)
-      configuration = ["-c", "mcp_servers.orbit={command=\"node\",args=[#{JSON.generate(mcp)}],env={ORBIT_CODEX_SOCKET=#{JSON.generate(socket)}},tools={orbit={approval_mode=\"approve\"}}}"]
+      configuration = ["-c", codex_configuration(mcp: mcp, socket: socket)]
       env = { "ORBIT_CODEX_SOCKET" => socket }
       log = File.join(directory, "server.log")
       server = Process.spawn(env, "codex", *configuration, "app-server", "--listen", "unix://#{socket}",

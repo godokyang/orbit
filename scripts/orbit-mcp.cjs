@@ -52,7 +52,9 @@ server.setRequestHandler(CallToolRequestSchema, async request => {
   const a = request.params.arguments || {};
   if (!actions.includes(a.action)) throw new Error('Unsupported Orbit action');
   const metadata = request.params._meta || {};
-  const hostThread = metadata['codex/thread-id'] || metadata['codex/threadId'];
+  // Codex sends the session id as plain `threadId` (mcp_tool_call.rs,
+  // MCP_TOOL_THREAD_ID_META_KEY); older transports used codex/-prefixed keys.
+  const hostThread = metadata['codex/thread-id'] || metadata['codex/threadId'] || metadata.threadId;
   const thread = hostThread || a.thread_id || process.env.CODEX_THREAD_ID;
   const env = { ...process.env };
   if (thread) env.CODEX_THREAD_ID = thread;

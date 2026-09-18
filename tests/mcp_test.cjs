@@ -27,8 +27,10 @@ const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio
       _meta: { 'codex/thread-id': 'different-root' }
     }), /does not belong/);
     assert.equal(fs.existsSync(path.join(task, 'inbox')), false);
+    // Current Codex sends the native identity as plain `threadId`; the
+    // legacy prefixed key must keep working for other clients.
     const result = await client.callTool({ name: 'task',
-      arguments: { action: 'check', task }, _meta: { 'codex/thread-id': 'own-root' }
+      arguments: { action: 'check', task }, _meta: { threadId: 'own-root' }
     });
     assert.equal(JSON.parse(result.content[0].text).status, 'queued');
     const commands = fs.readdirSync(path.join(task, 'inbox'));
