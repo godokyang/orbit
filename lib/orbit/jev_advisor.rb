@@ -38,6 +38,9 @@ module Orbit
 
     AMENDMENT_BUDGET = 8000
     AMENDMENT_TEXT_LIMIT = 1200
+    BASIS_BUDGET = 4000
+    BASIS_TEXT_LIMIT = 1500
+    BASIS_DOCUMENT_LIMIT = 3
 
     def self.for_project(project_root, env: ENV)
       return nil if env["TYPESAFE_API_KEY"].to_s.empty?
@@ -85,8 +88,11 @@ module Orbit
 
     def self.observation(inputs:, host:, members:, project_root:, artifact_digest:, elapsed_seconds:, member_options: nil)
       amendments, omitted = bounded_amendments(inputs.fetch("amendments", []))
+      basis, basis_omitted = bounded_basis(inputs.fetch("basis", []))
       {
         "instruction" => limit(inputs.fetch("instruction"), 4000),
+        "basis" => basis,
+        "basis_omitted" => basis_omitted,
         "amendments" => amendments,
         "amendments_omitted" => omitted,
         "member_options" => member_options,
@@ -127,6 +133,34 @@ module Orbit
                                    "missing earlier context is not evidence of going off track." }
                      end
       [selected, omitted_info]
+    end
+
+    def self.bounded_basis(documents)
+      remaining = BASIS_BUDGET
+      included = []
+      truncated_paths = []
+      documents.first(BASIS_DOCUMENT_LIMIT).each_with_index do |document, index|
+        path = document["path"] || File.basename(document.fetch("source", "basis-#{index + 1}"))
+        text = document.fetch("text").to_s
+        allowance = [BASIS_TEXT_LIMIT, remaining].min
+        truncated = text.length > allowance
+        excerpt = if truncated
+                    marker = "…[truncated]"
+                    text[0, allowance - marker.length] + marker
+                  else
+                    text
+                  end
+        included << { "path" => path, "text" => excerpt }
+        truncated_paths << path if truncated
+        remaining -= excerpt.length
+      end
+      omitted_count = documents.length - included.length
+      omitted_info = if omitted_count.positive? || !truncated_paths.empty?
+                       { "count" => omitted_count, "truncated_paths" => truncated_paths,
+                         "note" => "Specified task documents were truncated or omitted by the input budget; " \
+                                   "missing text is not evidence that a requirement is absent." }
+                     end
+      [included, omitted_info]
     end
 
     def self.observation_tail(observations)

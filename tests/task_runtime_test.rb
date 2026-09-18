@@ -840,7 +840,8 @@ Dir.mktmpdir("orbit-jev-observation-") do |root|
   observations << { "kind" => "command", "output" => "latest critical command failure" }
   amendments = 14.times.map { |index| { "text" => "decision-#{index}" } }
   state = Orbit::JevAdvisor.observation(
-    inputs: { "instruction" => "Fix the task", "amendments" => amendments },
+    inputs: { "instruction" => "Implement TASK.md", "basis" => [{ "path" => "basis/0-TASK.md",
+              "text" => "Implement the parser and the independent HTML renderer." }], "amendments" => amendments },
     host: { "status" => "active", "observations" => observations },
     members: 10.times.map { |index| { "status" => "done", "result" => "member-#{index}-" + ("y" * 10_000) } },
     project_root: root, artifact_digest: "digest", elapsed_seconds: 90
@@ -849,6 +850,8 @@ Dir.mktmpdir("orbit-jev-observation-") do |root|
   assert(recent.fetch("latest_entries_json").last.include?("latest critical command failure"), "newest event survives the Jev input bound")
   assert(recent.fetch("omitted_older_entries").positive?, "older omissions are explicit")
   assert(state.fetch("amendments").first == "decision-0", "earlier effective user decisions are available to Jev")
+  assert(state.fetch("basis").first.fetch("text").include?("independent HTML renderer") && state["basis_omitted"].nil?,
+         "a task defined in a basis document is available to Jev")
   assert(state.fetch("members").length == 5 && JSON.generate(state.fetch("members")).length < 6000,
          "member results remain bounded before leaving Orbit")
 
@@ -864,6 +867,22 @@ Dir.mktmpdir("orbit-jev-observation-") do |root|
   assert(bounded.dig("amendments_omitted", "count") == many.length - included.length &&
          bounded.dig("amendments_omitted", "included_range").end_with?("30"),
          "omitted amendment range is explicit instead of silently dropped")
+
+  long_basis = 5.times.map { |index| { "path" => "basis/#{index}-requirement.md",
+                                    "text" => "requirement-#{index}-" + ("b" * 5000) } }
+  bounded_basis = Orbit::JevAdvisor.observation(
+    inputs: { "instruction" => "Implement the attached requirements", "basis" => long_basis, "amendments" => [] },
+    host: { "status" => "active", "observations" => [] },
+    members: [], project_root: root, artifact_digest: "digest", elapsed_seconds: 90
+  )
+  excerpts = bounded_basis.fetch("basis")
+  assert(excerpts.sum { |entry| entry.fetch("text").length } <= Orbit::JevAdvisor::BASIS_BUDGET &&
+         excerpts.first.fetch("text").include?("requirement-0-") &&
+         excerpts.last.fetch("text").include?("requirement-2-"),
+         "specified documents remain identifiable within a bounded Jev request")
+  assert(bounded_basis.dig("basis_omitted", "count") == 2 &&
+         bounded_basis.dig("basis_omitted", "truncated_paths").length == 3,
+         "truncated and omitted task documents are explicit")
 end
 
 server = TCPServer.new("127.0.0.1", 0)

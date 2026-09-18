@@ -35,7 +35,7 @@ curl -fsSL https://raw.githubusercontent.com/godokyang/orbit/main/install.sh | s
 orbit --version
 ```
 
-应输出类似 `orbit 0.6.5` 的版本号。当前源码版本为 `0.6.5`；远程命令安装 GitHub 上所选提交的版本，未推送的本地提交不会出现在远程安装中。
+应输出类似 `orbit 0.6.6` 的版本号。当前源码版本为 `0.6.6`；远程命令安装 GitHub 上所选提交的版本，未推送的本地提交不会出现在远程安装中。
 
 如果想继续使用当前终端，执行安装结束时显示的 `export PATH=...` 命令即可。自动保存的配置会在以后新开终端、重启电脑后继续生效。其他 shell 或关闭自动配置的方法见[PATH 配置](docs/reference/usage-reference.md#path-配置)。
 
@@ -236,7 +236,7 @@ Codex 的 MCP 工具显示为 `orbit.task`；OpenCode 使用 `orbit`，OMP 的�
 
 ## 当前范围与更多文档
 
-当前源码版本 **0.6.5**，尚未发布 npm 包。Codex、OpenCode、OMP 的同宿主接入，以及 OpenCode Root → Codex 成员的跨宿主路径已有真实验收；其他跨宿主组合与 `kimi`、`cursor-agent`、`grok` 尚未接入，不列为可调用。Codex 执行成员与 `orbit codex` 新会话默认 full access，OpenCode／OMP 成员沿用 Root 原生权限；Codex 恢复会话的权限覆盖受 Codex 原生限制，见[验收记录](docs/reference/member-policy-acceptance-20260918.md)。pi 与 OMP 是不同项目，pi 等其他接入暂缓。
+当前源码版本 **0.6.6**，尚未发布 npm 包。Codex、OpenCode、OMP 的同宿主接入，以及 OpenCode Root → Codex 成员的跨宿主路径已有真实验收；其他跨宿主组合与 `kimi`、`cursor-agent`、`grok` 尚未接入，不列为可调用。Codex 执行成员与 `orbit codex` 新会话默认 full access，OpenCode／OMP 成员沿用 Root 原生权限；Codex 恢复会话的权限覆盖受 Codex 原生限制，见[验收记录](docs/reference/member-policy-acceptance-20260918.md)。pi 与 OMP 是不同项目，pi 等其他接入暂缓。
 
 - [进阶使用参考](docs/reference/usage-reference.md)：安装目录、profile、CLI 参数、集成和版本维护。
 - [Agent 使用说明](skills/orbit/SKILL.md)：调用时机、分工与纠偏职责。

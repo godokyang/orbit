@@ -2,6 +2,10 @@
 
 用户指出当前多 Agent 协作、Herdr 可用成员发现、Jev 委派提示、状态可见性与真实安装仍未满足日常使用目标。2026-09-18 [独立审查及复核](../reference/project-review-20260918.md)确认：一次真实开发任务的 7 次已完成检查全部过期，Orbit 投递纠正为 0，检查用量记录为 4,246,313 tokens（含缓存口径）。按[用户结果补齐计划](user-outcome-completion-plan.md)执行到：切片 A 已实现并经受控路径、持续编辑任务和 0.6.2 新宿主会话验证；切片 B 已核对 Jev 输入边界、真实判断与额外消耗，完成 patch 升级与本机安装；切片 C 已按跨宿主原生成员路径实现并完成真实验收：OpenCode Root 显式 `kind: codex`，任务运行进程持有成员 app-server，结果回收、执行中中断、运行进程异常退出后的显式停止重试与会话保留分别取证；同宿主 `native` 委托保留，其他 kind 与 Herdr 控制未验证。切片 D 已实现有界 Jev 分工提示，但真实样本未触发提示，分工收益尚未验证。实际证据、用量与未覆盖范围见[检查回路与 Jev 实际验证](../reference/check-loop-acceptance-20260918.md)、[跨宿主成员验收](../reference/cross-host-member-acceptance-20260918.md)与[成员名单、权限及分工提示验收](../reference/member-policy-acceptance-20260918.md)。
 
+## Jev 指定依据输入修正（2026-09-18）
+
+此前 Jev 的任务观察未包含指定依据文档；真实任务的 `TASK.md` 要求因此不在分工判断输入中。0.6.6 将最多三份指定依据的有界摘录及截断、省略标记加入同一次观察，合同和 ADR 已同步。OpenCode 宿主运行的完整 `npm test` 通过（日志 `/tmp/opencode/orbit-jev-basis-tests.log`）；本次可访问的记录没有新的真实 TypeSafe 请求结果，因此不把 API 接受新输入或分工收益列为已验证。下一次自然出现独立子任务的真实工作中核对提示、实际派发、结果集成与额外用量。
+
 ## Codex 审批与 MCP 修正（2026-09-18）
 
 用户报告 `approval_policy=never` 的 Codex 会话无法调用 `orbit.task`。根因是 `orbit codex` 的 per-tool 审批覆盖写成服务名 `orbit`，而 Codex 按真实工具名 `task` 匹配，默认 `auto` 在缺少只读标注时要求审批，`never` 会话被拒绝。修正为 `tools={task={approval_mode="approve"}}`；验证中另发现 Codex 0.155 通过 `_meta.threadId` 传递会话身份，MCP 桥接已同时接受该键与旧前缀键。按 patch 升到 **0.6.4** 并安装（`content_digest b9c129c0…`、`installed_at 2026-09-18T06:57:02Z`）；新 `orbit codex -a never` 会话完成 context → start → status → stop（任务 `paused`、停止确认），默认审批策略会话调用同样成功。README、ADR-007 与测试已同步，证据见 [Codex 审批与 MCP 调用验收](../reference/codex-approval-acceptance-20260918.md)。提交与推送状态以 Git 为准；未发布。
