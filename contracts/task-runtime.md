@@ -67,7 +67,7 @@ Jev 只从启动 Coding Agent 时的 `TYPESAFE_API_KEY` 环境变量读取 key�
 ## 当前接入与记录接口
 
 - CLI 提供 `doctor`、`jev setup`、`update`、`uninstall`、`codex`、`start`、`status`、`stop`、`check`、`amend`、`dispute`、`delegate`；任务控制命令写入任务 inbox，提交成功不代表动作已完成。`jev setup` 只配置新终端环境，不创建任务或调用模型；`run` 是任务进程内部入口。
-- 用户明确运行 `orbit codex` 时，入口创建本地 app-server 并运行 Codex TUI，按会话配置 Orbit MCP；仅自动批准该工具，不修改全局配置。新会话默认 full access；用户显式传入更严格的权限参数或配置时以用户为准，入口不静默丢弃。恢复会话沿用 Codex 原生行为：权限覆盖参数的实际结果按真实验证记录，未验证前不声称已修复。MCP 使用官方 SDK 并以原生调用身份限定任务归属，保留显式 ID 供缺少宿主元数据的客户端使用；这不是抵御同用户篡改的安全隔离层。
+- 用户明确运行 `orbit codex` 时，入口创建本地 app-server 并运行 Codex TUI，按会话配置 Orbit MCP；仅自动批准该工具，不修改全局配置。新会话默认 full access；只显式指定审批策略时仍补默认的 `danger-full-access` 沙箱，避免 `approval_policy=never` 与配置中的 `workspace-write` 意外组合；显式沙箱或组合权限模式优先，不静默丢弃。恢复会话沿用 Codex 原生行为：权限覆盖参数的实际结果按真实验证记录，未验证前不声称已修复。MCP 使用官方 SDK 并以原生调用身份限定任务归属，保留显式 ID 供缺少宿主元数据的客户端使用；这不是抵御同用户篡改的安全隔离层。
 - Codex 接入已加载在 Unix app-server 上、可读取历史的已有持久会话，通过 WebSocket 控制。OpenCode 通过官方插件持有的原生客户端接入当前会话，插件提供私有本地 socket 给任务进程；普通启动不需要用户指定端口或内部 ID。原文从原生用户消息读取，程序投递通过原生消息 metadata 标记，避免将纠正或成员回报当作新用户要求。不自动创建或恢复 Root，不用仅排队消息替代原生停止。
 - 停止确认覆盖该 Root 与本任务登记成员的当前 turn、各自 Codex 登记的后台终端和 Orbit 自有检查进程。关闭用户启动入口会尝试收尾该服务的任务和执行，无法确认时保留日志并说明。普通 Codex embedded TUI、脱离原生管理的进程及其他宿主尚未纳入该范围。OpenCode 停止覆盖本任务原生会话及其 shell 工具附属进程树，以原生 idle 且无活动工具确认；正常退出插件时先请求任务收尾再关闭私有通道。强杀宿主不自动恢复。
 - 已退出的 failed／stop_unconfirmed 任务仍接受用户显式 stop 重试，取得原运行锁和 Root 锁后仅做收尾，不重启执行。不能确认旧检查进程已退出时继续保留 stop_unconfirmed。

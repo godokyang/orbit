@@ -193,6 +193,10 @@ module CliTest
     assert(Orbit::SessionEntry.default_permission_args(["-s", "read-only"]) == [], "explicit sandbox option wins")
     assert(Orbit::SessionEntry.default_permission_args(["-c", 'sandbox_mode="workspace-write"']) == [],
            "explicit sandbox_mode config wins")
+    assert(Orbit::SessionEntry.default_permission_args(["-a", "never"]) == ["-s", "danger-full-access"],
+           "an approval-only override keeps the full-access sandbox default")
+    assert(Orbit::SessionEntry.default_permission_args(["-c", 'approval_policy="never"']) == ["-s", "danger-full-access"],
+           "approval_policy config does not silently restore workspace-write")
     assert(Orbit::SessionEntry.default_permission_args(["--dangerously-bypass-approvals-and-sandbox"]) == [],
            "explicit bypass options are kept untouched")
     assert(Orbit::SessionEntry.default_permission_args(["resume", "--last"]) == [],

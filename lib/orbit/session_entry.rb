@@ -68,10 +68,9 @@ module Orbit
       first_positional(argv) == "resume"
     end
 
-    # Explicit user permission options always win over the full-access
-    # default. Resume sessions keep Codex's saved permissions: Codex refuses
-    # to resume a task without preserving its selected permissions, so the
-    # launcher never injects permission overrides there.
+    # Explicit approval overrides only approval; explicit sandbox and combined
+    # permission modes choose their own sandbox. Resume sessions keep Codex's
+    # saved permissions, so the launcher never injects overrides there.
     def explicit_permissions?(argv)
       argv.each_with_index.any? do |arg, index|
         next true if PERMISSION_OPTIONS.include?(arg)
@@ -83,8 +82,22 @@ module Orbit
       end
     end
 
+    def explicit_sandbox?(argv)
+      argv.each_with_index.any? do |arg, index|
+        next true if %w[-s --sandbox --dangerously-bypass-approvals-and-sandbox --full-auto --approve-for-me].include?(arg)
+        next true if arg.start_with?("--sandbox=", "--full-auto=", "--approve-for-me=")
+        next true if arg.start_with?("-csandbox_mode=", "-c=sandbox_mode=", "--config=sandbox_mode=")
+        next true if ["-c", "--config"].include?(arg) && argv[index + 1].to_s.start_with?("sandbox_mode=")
+
+        false
+      end
+    end
+
     def default_permission_args(argv)
-      return [] if explicit_permissions?(argv) || resume_invocation?(argv)
+      return [] if resume_invocation?(argv) || explicit_sandbox?(argv)
+      # An approval-only override (for example -a never) must not silently
+      # restore Codex's configured workspace-write sandbox.
+      return ["-s", "danger-full-access"] if explicit_permissions?(argv)
 
       FULL_ACCESS_ARGS.dup
     end
