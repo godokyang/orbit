@@ -6,6 +6,9 @@ module Orbit
   # Read-only project selection and presentation; the runtime remains the writer.
   module TaskView
     SETTLED = %w[complete paused needs_user].freeze
+    STALE_REASONS = {
+      "artifact" => "产物变化", "input" => "输入变化", "host" => "Root 执行状态变化", "dispute" => "争议状态变化"
+    }.freeze
     LABELS = {
       "starting" => "正在接入", "running" => "执行中，尚未完成验收",
       "complete" => "独立检查及收尾通过", "paused" => "已暂停并确认停止",
@@ -81,13 +84,30 @@ module Orbit
       lines = ["任务：#{summary(record)}", "状态：#{LABELS.fetch(status, status)}（#{status}）"]
       check = state.fetch("checks", []).last
       if check
-        qualifier = check["stale"] ? "已过期，未采纳" : "最近检查记录，不代表当前产物已通过"
+        qualifier = if check["stale"]
+                      "已过期，未采纳"
+                    elsif check["kind"] == "process"
+                      "过程检查，不代表交付通过"
+                    else
+                      "最近检查记录，不代表当前产物已通过"
+                    end
+        reasons = Array(check["stale_reasons"]).map { |reason| STALE_REASONS.fetch(reason, reason) }
+        qualifier = "#{qualifier}；原因：#{reasons.join('、')}" if check["stale"] && !reasons.empty?
         lines << "最近检查：#{check.dig('result', 'verdict')} — #{check.dig('result', 'reason')}（#{qualifier}）"
       else
         lines << "最近检查：尚无检查结果"
       end
+      open_findings = state.fetch("findings", {}).values.count { |finding| finding["status"] == "open" }
+      recheck = state["recheck"]
+      pending = []
+      pending << "开放问题 #{open_findings} 条" if open_findings.positive?
+      if recheck
+        pending << "过期检查待重新核对 #{Array(recheck['findings']).length} 条（检查 ##{recheck['check']}）"
+      end
+      lines << "待处理问题：#{pending.empty? ? '无' : pending.join('；')}"
       next_check = %w[starting running].include?(status) ? state["next_check_at"] : nil
-      lines << "下次检查：#{next_check || '未安排'}"
+      basis = state["next_check_basis"]
+      lines << "下次检查：#{next_check || '未安排'}#{basis ? "（依据：#{basis}）" : ''}"
       attention = case status
                   when "needs_user", "failed", "stop_unconfirmed"
                     state["stop_reason"] || state["error"] || "请核对任务错误及停止结果。"

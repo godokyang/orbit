@@ -22,9 +22,9 @@ Orbit 是独立的任务执行辅助工具，适用于任意项目。它保存�
 
 需要执行成员时，即使代码量小，也先接入 Orbit，再用 `delegate`；否则成员结果与统一停止无法纳入同一任务。
 
-使用当前宿主提供的 `orbit` 工具（Codex 为 MCP，OpenCode／OMP 为原生扩展）；它提供 `context / start / status / check / amend / dispute / stop / delegate`。OMP 将扩展工具挂载到 `xd://orbit` 时，先用原生 `read` 读取该设备的说明与 JSON schema，再按原生设备协议写入参数调用，这与独立命名的工具是同一入口。普通 Codex 工作区沙箱中的 shell 不一定能访问控制 socket，不能用反复执行 shell 命令替代可用 MCP。
+使用当前宿主提供的 Orbit 工具：Codex MCP 为 `orbit.task`，OpenCode 原生工具为 `orbit`，OMP 为 `xd://orbit`。它们提供相同的 `context / start / status / check / amend / dispute / stop / delegate` 操作。OMP 先用原生 `read` 读取设备说明与 JSON schema，再按原生设备协议调用。普通 Codex 工作区沙箱中的 shell 不一定能访问控制 socket，不能用反复执行 shell 命令替代可用 MCP。
 
-1. 读取目标项目已有规则，确定用户原始要求。调用 `orbit` 工具的 `context` 检查当前会话，OpenCode／OMP 自动提供当前项目与会话，无需端口和 ID；Codex 宿主通常提供会话身份，确实缺少时从环境读取 `CODEX_THREAD_ID`，传入 `thread_id`，不要让用户查内部 ID。
+1. 读取目标项目已有规则，确定用户原始要求。调用当前宿主 Orbit 工具的 `context` 检查当前会话，OpenCode／OMP 自动提供当前项目与会话，无需端口和 ID；Codex 宿主通常提供会话身份，确实缺少时从环境读取 `CODEX_THREAD_ID`，传入 `thread_id`，不要让用户查内部 ID。
 2. 用 `start`；Codex 传 `project` 绝对路径，OpenCode／OMP 自动取当前项目；用户指定文档时传 `basis` 路径数组。不传 `message_id` 时读取最近原生用户消息；若最新只是“同意”，传实际包含执行要求的原始消息 ID。不要把自己的计划或摘要冒充用户原文。
 3. 检查模型优先使用已配置的 `ORBIT_REVIEW_MODEL`，否则 Codex 沿用当前会话配置，OpenCode／OMP 读取本机 Codex config.toml 的顶层模型；有明确角色配置时传 `review_model`。需要选型再读 [模型建议](references/model-selection.md)。不启用未经授权的新供应商。
 4. 保存返回的 `task_directory`，在下一正常工作节点用 `status` 和 `task` 核对实际接入，然后继续实现。`starting` 表示进程已创建；`queued` 表示动作已入队，均不代表完成。已有本任务时复用，不重复启动。确认已接入后主动简短告诉用户，无需其追问；仅有 `starting` 时说“正在接入”，不要提前声称受控。

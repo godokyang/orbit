@@ -20,13 +20,14 @@ const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio
   });
   try {
     await client.connect(transport);
+    assert.deepEqual((await client.listTools()).tools.map(tool => tool.name), ['task']);
     // Host identity wins over an argument claiming ownership of another task.
-    await assert.rejects(client.callTool({ name: 'orbit',
+    await assert.rejects(client.callTool({ name: 'task',
       arguments: { action: 'stop', task, thread_id: 'own-root' },
       _meta: { 'codex/thread-id': 'different-root' }
     }), /does not belong/);
     assert.equal(fs.existsSync(path.join(task, 'inbox')), false);
-    const result = await client.callTool({ name: 'orbit',
+    const result = await client.callTool({ name: 'task',
       arguments: { action: 'check', task }, _meta: { 'codex/thread-id': 'own-root' }
     });
     assert.equal(JSON.parse(result.content[0].text).status, 'queued');
@@ -34,7 +35,7 @@ const { StdioClientTransport } = require('@modelcontextprotocol/sdk/client/stdio
     assert.equal(commands.length, 1);
     assert.equal(JSON.parse(fs.readFileSync(path.join(task, 'inbox', commands[0]))).type, 'check');
     for (const action of ['status', 'stop']) {
-      const reply = await client.callTool({ name: 'orbit', arguments: { action, task }, _meta: { 'codex/thread-id': 'own-root' } });
+      const reply = await client.callTool({ name: 'task', arguments: { action, task }, _meta: { 'codex/thread-id': 'own-root' } });
       assert.equal(reply.isError, false);
       assert.equal(JSON.parse(reply.content[0].text).status, action === 'status' ? 'running' : 'queued');
     }

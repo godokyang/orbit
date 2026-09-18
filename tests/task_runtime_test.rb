@@ -1,7 +1,9 @@
 # frozen_string_literal: true
 
 require "tmpdir"
+require "socket"
 require_relative "../lib/orbit/task_runtime"
+require_relative "../lib/orbit/task_view"
 
 class RuntimeHost
   attr_reader :messages, :stop_calls
@@ -20,6 +22,11 @@ class RuntimeHost
   def state = @state.dup
   def connect! = self
   def close = true
+  def working(note)
+    @state["status"] = "active"
+    @state["observations"] = note
+  end
+
   def interrupt
     @state["status"] = "idle"
     @state["last_turn_status"] = "interrupted"
@@ -70,6 +77,23 @@ class RuntimeChecker
   def stop! = true
 end
 
+class RuntimeAdvisor
+  attr_reader :calls
+  attr_accessor :scores, :failure, :on_call
+
+  def initialize(scores)
+    @scores, @calls = scores, []
+  end
+
+  def assess(state:)
+    @calls << state
+    @on_call&.call
+    raise @failure if @failure
+
+    { "model" => "jev-test", "scores" => @scores, "usage" => { "input_tokens" => 10, "output_tokens" => 3 } }
+  end
+end
+
 def assert(value, message)
   raise "ASSERTION FAILED: #{message}" unless value
 end
@@ -79,13 +103,13 @@ def answer(verdict, findings: [], resolved: [])
     "resolved_ids" => resolved, "next_check_seconds" => 60 }
 end
 
-def fixture
+def fixture(interval: 60)
   Dir.mktmpdir("orbit-runtime-test-") do |root|
     File.write(File.join(root, "artifact.txt"), "first behavior")
     record = Orbit::TaskRecord.create(
       project_root: root, instruction: "Provide first and second behaviors.\n",
       source: { "id" => "original", "kind" => "native_user_message" },
-      connection: {}, review: { "interval_seconds" => 60 }, estimate: {}
+      connection: {}, review: { "interval_seconds" => interval }, estimate: {}
     )
     host, checker = RuntimeHost.new(root), RuntimeChecker.new
     yield root, record, host, checker, Orbit::TaskRuntime.new(record: record, connection: host, checker: checker)
@@ -129,6 +153,143 @@ fixture do |root, record, host, checker, runtime|
   assert(final["decisions"].length == 1, "adjudication reason is retained")
   assert(final["delivery_digest"] == Orbit::WorkspaceSnapshot.fingerprint(project_root: root), "approval binds final bytes")
   assert(File.read(File.join(record.path, "instruction.txt")) == "Provide first and second behaviors.\n", "original text is preserved")
+end
+
+# A stale correction is not applied to the old version and is not dropped:
+# it becomes a reconciliation clue, and the next non-stale check on the
+# current version delivers the correction without Root polling the record.
+fixture do |root, record, host, checker, runtime|
+  now = Time.now.to_f
+  runtime.tick(now: now)
+  File.write(File.join(root, "artifact.txt"), "changed while checking")
+  missing = { "id" => "missing", "requirement" => "second behavior", "evidence" => "absent in artifact", "action" => "implement second behavior" }
+  checker.result = answer("correct", findings: [missing])
+  runtime.tick(now: now + 1)
+  last = record.state.fetch("checks").last
+  assert(last["stale"] && last["stale_reasons"] == ["artifact"], "expiry records which version element changed")
+  assert(host.messages.empty?, "a stale correction must not reach the old version")
+  assert(record.state.dig("recheck", "findings", 0, "id") == "missing", "stale finding is kept as a reconciliation clue")
+  text = Orbit::TaskView.format(record)
+  assert(text.include?("产物变化") && text.include?("待重新核对") && text.include?("依据"),
+         "status shows expiry reason, pending items and next-check basis")
+
+  runtime.tick(now: now + 2)
+  assert(checker.calls.last[:context].dig("recheck", "findings", 0, "id") == "missing",
+         "the next check receives the pending clue, not only its id")
+  checker.result = answer("continue")
+  runtime.tick(now: now + 3)
+  assert(record.state.dig("recheck", "findings", 0, "id") == "missing",
+         "a check that neither reports nor withdraws the clue must not clear it")
+
+  record.submit("check")
+  runtime.tick(now: now + 4)
+  checker.result = answer("correct", findings: [missing])
+  runtime.tick(now: now + 5)
+  assert(host.messages.length == 1 && host.messages.first.include?("missing"),
+         "a clue confirmed on the current version is delivered automatically, without Root polling")
+  assert(record.state["recheck"].nil?, "an explicit confirmation clears the pending clue")
+end
+
+# A clue explicitly withdrawn on the current version is cleared without a
+# correction message.
+fixture do |root, record, host, checker, runtime|
+  now = Time.now.to_f
+  runtime.tick(now: now)
+  File.write(File.join(root, "artifact.txt"), "changed while checking")
+  clue = { "id" => "clue", "requirement" => "second behavior", "evidence" => "absent", "action" => "implement" }
+  checker.result = answer("correct", findings: [clue])
+  runtime.tick(now: now + 1)
+  runtime.tick(now: now + 2)
+  checker.result = answer("continue", resolved: ["clue"])
+  runtime.tick(now: now + 3)
+  assert(record.state["recheck"].nil? && host.messages.empty?,
+         "an explicit withdrawal clears the clue without a correction")
+end
+
+# Pending clues block completion until an artifact check confirms or
+# withdraws them; a complete verdict that ignores the clue is not accepted.
+fixture do |root, record, host, checker, runtime|
+  now = Time.now.to_f
+  runtime.tick(now: now)
+  File.write(File.join(root, "artifact.txt"), "changed while checking")
+  clue = { "id" => "clue", "requirement" => "second behavior", "evidence" => "absent", "action" => "implement" }
+  checker.result = answer("correct", findings: [clue])
+  runtime.tick(now: now + 1)
+  host.finish("delivered")
+  checker.result = answer("complete")
+  runtime.tick(now: now + 2)
+  checker.result = answer("complete")
+  runtime.tick(now: now + 3)
+  assert(record.state["status"] != "complete" && record.state["recheck"], "an unaddressed clue blocks completion")
+
+  record.submit("check")
+  runtime.tick(now: now + 4)
+  checker.result = answer("complete", resolved: ["clue"])
+  runtime.tick(now: now + 5)
+  assert(record.state["status"] == "complete" && record.state["recheck"].nil?,
+         "an explicit withdrawal lets completion proceed")
+end
+
+# Pending artifact clues belong only to the next artifact review: a process
+# check must neither receive, deliver, nor clear them.
+fixture(interval: 300) do |root, record, host, checker, _runtime|
+  advisor = RuntimeAdvisor.new("stuck" => 0.95, "off_track" => 0.1, "artifact_ready" => 0.1)
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor)
+  now = Time.now.to_f
+  runtime.tick(now: now)
+  host.working("progress")
+  File.write(File.join(root, "artifact.txt"), "changed while checking")
+  clue = { "id" => "clue", "requirement" => "second behavior", "evidence" => "absent", "action" => "implement" }
+  checker.result = answer("correct", findings: [clue])
+  runtime.tick(now: now + 1)
+  assert(record.state.dig("recheck", "findings", 0, "id") == "clue", "precondition: stale clue is pending")
+
+  runtime.tick(now: now + 10)
+  assert(checker.calls.last[:role] == "process_reviewer", "the suspected process issue starts a process check")
+  assert(checker.calls.last[:context]["recheck"].nil?, "a process check does not receive artifact clues")
+  process_finding = { "id" => "process-issue", "requirement" => "process", "evidence" => "repeated failure", "action" => "change approach" }
+  checker.result = answer("correct", findings: [process_finding])
+  runtime.tick(now: now + 11)
+  assert(record.state.dig("recheck", "findings", 0, "id") == "clue", "a process check cannot clear a pending artifact clue")
+  assert(host.messages.none? { |message| message.include?("clue") }, "a process check does not deliver the artifact clue")
+
+  host.finish("integrated")
+  checker.result = nil
+  runtime.tick(now: now + 12)
+  assert(checker.calls.last[:role] == "reviewer" && checker.calls.last[:context].dig("recheck", "findings", 0, "id") == "clue",
+         "the next artifact check receives the pending clue")
+  checker.result = answer("correct", findings: [clue])
+  runtime.tick(now: now + 13)
+  assert(record.state["recheck"].nil?, "the artifact check confirms and clears the clue")
+  assert(host.messages.count { |message| message.include?('"id": "clue"') } == 1,
+         "the clue correction is delivered exactly once")
+end
+
+# While Root is executing, a short checker-suggested next observation cannot
+# restart full checks before the agreed interval; an idle Root still honors it.
+fixture(interval: 300) do |_root, record, host, checker, runtime|
+  now = Time.now.to_f
+  runtime.tick(now: now)
+  host.working("Root is executing")
+  checker.result = answer("continue")
+  runtime.tick(now: now + 1)
+  assert(record.state.fetch("checks").last["stale_reasons"] == ["host"],
+         "host execution change alone is recorded as the expiry reason")
+  runtime.tick(now: now + 61)
+  assert(checker.calls.length == 1, "short checker suggestions do not restart full checks while Root executes")
+  runtime.tick(now: now + 310)
+  assert(checker.calls.length == 2, "the agreed interval still triggers the next full check")
+end
+
+fixture(interval: 300) do |_root, _record, _host, checker, runtime|
+  now = Time.now.to_f
+  runtime.tick(now: now)
+  checker.result = answer("continue")
+  runtime.tick(now: now + 1)
+  runtime.tick(now: now + 59)
+  assert(checker.calls.length == 1, "idle Root waits for the checker-suggested observation")
+  runtime.tick(now: now + 62)
+  assert(checker.calls.length == 2, "checker-suggested observation applies while Root is idle")
 end
 
 # Waiting does not wake Root or spend a model call. Only an explicit hard
@@ -284,6 +445,139 @@ fixture do |_root, record, _host, checker, _runtime|
   result = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker).run
   assert(result["status"] == "failed", "wrong-project attachment is rejected")
   assert(host.stop_calls.zero? && checker.calls.empty?, "rejected attachment has no execution authority")
+end
+
+# Jev can defer the early first-change review, but not the agreed full check.
+fixture do |root, record, host, checker, _runtime|
+  host.send_message("Working")
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1)
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor)
+  now = Time.now.to_f
+  runtime.tick(now: now + 1)
+  File.write(File.join(root, "artifact.txt"), "work in progress")
+  runtime.tick(now: now + 10)
+  assert(advisor.calls.length == 1 && checker.calls.empty?, "low readiness defers only the early file-change check")
+  runtime.tick(now: now + 61)
+  assert(checker.calls.length == 1 && checker.calls.last.fetch(:role) == "reviewer", "agreed full check still runs")
+end
+
+fixture do |_root, record, host, checker, _runtime|
+  host.send_message("Working")
+  advisor = RuntimeAdvisor.new("stuck" => 0.95, "off_track" => 0.1, "artifact_ready" => 0.1)
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor)
+  advisor.on_call = -> { runtime.request_stop }
+  now = Time.now.to_f
+  runtime.tick(now: now + 1)
+  runtime.tick(now: now + 10)
+  assert(record.state["status"] == "paused", "stop during Jev assessment wins")
+  assert(checker.calls.empty?, "an assessment finishing after stop cannot summon a checker")
+end
+
+# A changing host during the HTTP call must still respect the assessment debounce.
+fixture do |_root, _record, host, checker, _runtime|
+  host.send_message("Working")
+  advisor = RuntimeAdvisor.new("stuck" => 0.95, "off_track" => 0.1, "artifact_ready" => 0.1)
+  advisor.on_call = -> { host.finish("during-#{advisor.calls.length}"); host.send_message("New work during assessment") }
+  runtime = Orbit::TaskRuntime.new(record: _record, connection: host, checker: checker, advisor: advisor)
+  now = Time.now.to_f
+  runtime.tick(now: now + 10)
+  runtime.tick(now: now + 11)
+  runtime.tick(now: now + 29)
+  assert(advisor.calls.length == 1 && checker.calls.empty?, "changed observations cannot request Jev again each tick")
+  runtime.tick(now: now + 30)
+  assert(advisor.calls.length == 2, "changed observations may be reassessed after the debounce")
+end
+
+# Jev only summons a focused checker; its verdict cannot complete the task.
+fixture do |_root, record, host, checker, _runtime|
+  host.send_message("Working")
+  advisor = RuntimeAdvisor.new("stuck" => 0.95, "off_track" => 0.1, "artifact_ready" => 0.1)
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor)
+  now = Time.now.to_f
+  runtime.tick(now: now + 1)
+  runtime.tick(now: now + 10)
+  assert(checker.calls.last.fetch(:role) == "process_reviewer", "suspected stuckness gets process review")
+  checker.result = answer("complete")
+  runtime.tick(now: now + 11)
+  assert(record.state["status"] != "complete", "process review cannot approve delivery")
+  runtime.tick(now: now + 30)
+  assert(checker.calls.length == 1, "the same observation does not summon another checker")
+end
+
+# TypeSafe failure returns to the existing first-change path.
+fixture do |root, record, host, checker, _runtime|
+  host.send_message("Working")
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1)
+  advisor.failure = Orbit::JevAdvisor::Error.new("service unavailable")
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor)
+  now = Time.now.to_f
+  runtime.tick(now: now + 1)
+  File.write(File.join(root, "artifact.txt"), "changed despite service failure")
+  runtime.tick(now: now + 10)
+  assert(checker.calls.last.fetch(:role) == "reviewer", "failed Jev call falls back to full review")
+  assert(record.state.dig("jev", "unavailable") == "service unavailable", "failure is recorded")
+end
+
+Dir.mktmpdir("orbit-jev-config-") do |root|
+  env = { "TYPESAFE_API_KEY" => "test-key" }
+  assert(Orbit::JevAdvisor.for_project(root, env: env), "one global enable covers a project")
+  assert(Orbit::JevAdvisor.for_project(root, env: {}).nil?, "no key keeps the existing scheduling path")
+  Dir.mkdir(File.join(root, ".orbit"))
+  File.write(File.join(root, ".orbit", "jev-disabled"), "")
+  assert(Orbit::JevAdvisor.for_project(root, env: env).nil?, "a project can disable external Jev calls")
+end
+
+Dir.mktmpdir("orbit-jev-observation-") do |root|
+  observations = 8.times.map { |index| { "kind" => "command", "output" => "old-#{index}-" + ("x" * 1000) } }
+  observations << { "kind" => "command", "output" => "latest critical command failure" }
+  amendments = 14.times.map { |index| { "text" => "decision-#{index}" } }
+  state = Orbit::JevAdvisor.observation(
+    inputs: { "instruction" => "Fix the task", "amendments" => amendments },
+    host: { "status" => "active", "observations" => observations },
+    members: 10.times.map { |index| { "status" => "done", "result" => "member-#{index}-" + ("y" * 10_000) } },
+    project_root: root, artifact_digest: "digest", elapsed_seconds: 90
+  )
+  recent = state.fetch("recent_observations")
+  assert(recent.fetch("latest_entries_json").last.include?("latest critical command failure"), "newest event survives the Jev input bound")
+  assert(recent.fetch("omitted_older_entries").positive?, "older omissions are explicit")
+  assert(state.fetch("amendments").first == "decision-0", "earlier effective user decisions are available to Jev")
+  assert(state.fetch("members").length == 5 && JSON.generate(state.fetch("members")).length < 6000,
+         "member results remain bounded before leaving Orbit")
+
+  many = 30.times.map { |index| { "text" => "amendment-#{index}-" + ("z" * 1200) } }
+  bounded = Orbit::JevAdvisor.observation(
+    inputs: { "instruction" => "Fix the task", "amendments" => many },
+    host: { "status" => "active", "observations" => [] },
+    members: [], project_root: root, artifact_digest: "digest", elapsed_seconds: 90
+  )
+  included = bounded.fetch("amendments")
+  assert(included.length < many.length && included.last.include?("amendment-29"),
+         "the newest effective amendments are kept within the Jev input budget")
+  assert(bounded.dig("amendments_omitted", "count") == many.length - included.length &&
+         bounded.dig("amendments_omitted", "included_range").end_with?("30"),
+         "omitted amendment range is explicit instead of silently dropped")
+end
+
+server = TCPServer.new("127.0.0.1", 0)
+worker = Thread.new do
+  socket = server.accept
+  headers = +""
+  headers << socket.gets until headers.end_with?("\r\n\r\n")
+  length = headers[/Content-Length:\s*(\d+)/i, 1].to_i
+  socket.read(length)
+  body = '{"model":"jev-test","answers":null}'
+  socket.write("HTTP/1.1 200 OK\r\nContent-Length: #{body.bytesize}\r\nConnection: close\r\n\r\n#{body}")
+  socket.close
+end
+advisor = Orbit::JevAdvisor.new(api_key: "test-key", endpoint: URI("http://127.0.0.1:#{server.addr[1]}/v1/systemone"))
+begin
+  advisor.assess(state: { "instruction" => "test" })
+  raise "ASSERTION FAILED: malformed TypeSafe response must fail safely"
+rescue Orbit::JevAdvisor::Error
+  nil
+ensure
+  server.close
+  worker.join
 end
 
 puts "TASK_RUNTIME_TEST_PASS (deterministic, not real-model acceptance)"

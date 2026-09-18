@@ -8,6 +8,7 @@ require_relative "task_runtime"
 require_relative "codex_connection"
 require_relative "plugin_connection"
 require_relative "check_runner"
+require_relative "jev_advisor"
 require_relative "session_entry"
 require_relative "task_view"
 require_relative "diagnostics"
@@ -258,7 +259,8 @@ module Orbit
       state = record.state
       connection = Connection.open(state.fetch("connection"))
       checker = CheckRunner.new(model: state.dig("review", "model"))
-      runtime = TaskRuntime.new(record: record, connection: connection, checker: checker)
+      advisor = JevAdvisor.for_project(state.fetch("project_root"))
+      runtime = TaskRuntime.new(record: record, connection: connection, checker: checker, advisor: advisor)
       %w[INT TERM].each { |signal| Signal.trap(signal) { runtime.request_stop } }
       result = runtime.run
       puts JSON.generate({ "task_directory" => record.path, "status" => result.fetch("status") })

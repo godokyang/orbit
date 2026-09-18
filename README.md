@@ -149,6 +149,14 @@ export ORBIT_REVIEW_MODEL=gpt-6-astra
 
 示例模型须已在你的账户中可用。没有设置此变量时，Codex 接入沿用当前会话配置；OpenCode／OMP 从本机 Codex `config.toml` 顶层读取模型。使用 Codex profile 配置检查模型时，请显式设置这个变量。更多说明见[角色与模型建议](skills/orbit/references/model-selection.md)。
 
+### 可选 Jev 检查调度
+
+在启动 Codex、OpenCode 或 OMP **之前**，让启动它的环境具有 `TYPESAFE_API_KEY`。配置一次后，从该环境启动的所有 Orbit 任务都会使用 Jev；不需要再设 Orbit 专用开关。已打开的会话和运行中的任务不会自动继承新变量。
+
+启用后，Orbit 会把有界的原始要求、近期会话观察以及最多 4000 字符的 Git 差异摘录发送给 TypeSafe Jev。Jev 只判断何时值得唤起独立检查者；实际问题、完成与停止仍按 Orbit 的独立检查和控制规则处理。每秒运行循环不会每秒请求 Jev。缺 key 或服务不可用时沿用原检查流程，key 不写入任务记录。
+
+若某个项目不应发送这些信息，在该项目运行 `mkdir -p .orbit && touch .orbit/jev-disabled`；移除此标记后，后续新任务会重新启用。项目的 `.orbit` 目录属于本地任务资料，不需要提交。
+
 ### 恢复会话和选择模型
 
 下面的 `SESSION_ID` 换成要恢复的原生会话 ID；模型示例换成你已有的模型：
@@ -210,7 +218,7 @@ npx skills remove orbit --global
 
 先运行 `orbit doctor` 查看具体缺口。有唯一待处理任务时，它还会读取该任务的原生连接；多个任务可用 `orbit doctor ID` 选择。Codex 会话内优先验证当前会话，OpenCode／OMP 可让 Agent 调用 Orbit 工具的 `context` 核对本会话。扩展文件存在与会话已加载扩展分别报告，不根据安装文件猜测接入成功。
 
-OMP 的工具可能显示为 `xd://orbit`，由 Agent 按原生设备说明调用。
+Codex 的 MCP 工具显示为 `orbit.task`；OpenCode 使用 `orbit`，OMP 的工具可能显示为 `xd://orbit`，由 Agent 按原生设备说明调用。
 
 ### 可以只用 OpenCode 或 OMP，不安装 Codex 吗？
 

@@ -13,11 +13,11 @@
 | 程序和模型各负责什么、何时完成或停止 | [任务运行合同](../contracts/task-runtime.md) |
 | 独立检查返回什么 | [检查结果 schema](../contracts/check-result.schema.json) |
 | 开发本仓要遵守什么 | [AGENTS.md](../AGENTS.md)、[开发流程](agents/development-workflow.md) |
-| 当前做到哪里、还有什么工作 | [交接](plan/handoff.md)、[当前计划](plan/vision-completion-plan.md) |
+| 当前做到哪里、还有什么工作 | [交接](plan/handoff.md)、[用户结果补齐计划](plan/user-outcome-completion-plan.md)、[当前计划](plan/vision-completion-plan.md) |
 | 哪些能力尚不具备 | [当前限制](plan/debt-ledger.md) |
-| 最新项目检查发现什么 | [角色、协作与运行边界检查](reference/project-review-20260914.md) |
+| 最新项目检查发现什么 | [用户结果独立审查及复核](reference/project-review-20260918.md)、[角色、协作与运行边界检查](reference/project-review-20260914.md) |
 | 普通终端和现有会话如何落地、有哪些现成方案 | [用户流程交付计划](plan/user-experience-plan.md)、[现成方案调研](reference/existing-orchestrators-20260914.md) |
-| 实际验收证明了什么 | [底层真实验收](reference/orbit-runtime-acceptance-20260914.md)、[Codex 日常流程验收](reference/user-flow-acceptance-20260914.json)、[OpenCode 正式验收](reference/opencode-runtime-acceptance-20260914.json)、[OMP 正式验收](reference/omp-runtime-acceptance-20260914.json) |
+| 实际验收证明了什么 | [检查回路与 Jev 实际验证](reference/check-loop-acceptance-20260918.md)、[Jev 调度运行验收](reference/jev-runtime-acceptance-20260918.md)、[底层真实验收](reference/orbit-runtime-acceptance-20260914.md)、[Codex 日常流程验收](reference/user-flow-acceptance-20260914.json)、[OpenCode 正式验收](reference/opencode-runtime-acceptance-20260914.json)、[OMP 正式验收](reference/omp-runtime-acceptance-20260914.json) |
 | 过去哪些失误值得记住 | [工程经验](reference/engineering-lessons.md) |
 | Codex 如何加载项目规范 | [按需阅读的说明](reference/codex-agents-md-loading.md) |
 

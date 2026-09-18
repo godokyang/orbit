@@ -7,13 +7,15 @@ require "shellwords"
 require_relative "task_record"
 require_relative "workspace_snapshot"
 require_relative "connection"
+require_relative "jev_advisor"
 
 module Orbit
   class TaskRuntime
     TERMINAL = %w[complete paused needs_user failed stop_unconfirmed].freeze
 
-    def initialize(record:, connection:, checker:)
+    def initialize(record:, connection:, checker:, advisor: nil)
       @record, @connection, @checker = record, connection, checker
+      @advisor = advisor
       @state = record.state
       @state["findings"] ||= {}
       @state["sent_message_ids"] ||= []
@@ -22,10 +24,20 @@ module Orbit
       @state["last_user_message_id"] ||= @state.dig("instruction_source", "id")
       @interval = @state.fetch("review").fetch("interval_seconds", 300)
       @next_check = Time.now.to_f + @interval
+      @state["next_check_basis"] ||= "约定检查间隔"
       @running_check = nil
       @last_delivery_checked = nil
       @first_change_checked = false
       @stop_requested = false
+      @artifact_digest = nil
+      @last_artifact_probe_at = 0
+      @last_full_check_digest = nil
+      @jev_last_at = Time.now.to_f - 15
+      @jev_next_at = Time.now.to_f + 5
+      @jev_signature = nil
+      @jev_process_streak = 0
+      @jev_last_process_trigger = nil
+      @jev_unavailable = false
     end
 
     def run
@@ -38,6 +50,7 @@ module Orbit
           end
           @attached = true
           @initial_digest = WorkspaceSnapshot.fingerprint(project_root: @state.fetch("project_root"))
+          @artifact_digest = @initial_digest
           @state["status"] = "running"
           @state["runtime_pid"] = Process.pid
           @record.event("attached", "thread_id" => host.fetch("thread_id"))
@@ -157,14 +170,60 @@ module Orbit
         raise ArgumentError, "Root is unavailable: #{host['status']}; no automatic replacement"
       end
       delivery = host["status"] == "idle" && host["last_turn_status"] == "completed"
-      changed = !@first_change_checked && WorkspaceSnapshot.fingerprint(
-        project_root: @state.fetch("project_root")
-      ) != @initial_digest
-      return unless now >= @next_check || changed || (delivery && host["last_turn_id"] != @last_delivery_checked)
+      artifact_digest = @advisor ? probe_artifact(now) : nil
+      @initial_digest ||= artifact_digest if @advisor
+      changed = if @advisor
+                  !@first_change_checked && artifact_digest != @initial_digest
+                else
+                  !@first_change_checked && WorkspaceSnapshot.fingerprint(project_root: @state.fetch("project_root")) != @initial_digest
+                end
+      delivery_due = delivery && host["last_turn_id"] != @last_delivery_checked
+      if now >= @next_check || delivery_due
+        start_check(host, now)
+        @first_change_checked = true
+        @last_delivery_checked = host["last_turn_id"] if delivery
+        return
+      end
 
-      start_check(host, now)
-      @first_change_checked = true
-      @last_delivery_checked = host["last_turn_id"] if delivery
+      if @advisor
+        decision = assess_jev(host, artifact_digest, now)
+        if @stop_requested
+          stop("Runtime received an explicit stop request")
+          return
+        end
+        if decision
+          consume_commands
+          return if TERMINAL.include?(@state["status"])
+          return unless collect_amendments
+          latest_host = @connection.state
+          latest_digest = WorkspaceSnapshot.fingerprint(project_root: @state.fetch("project_root"))
+          if latest_host["interrupted"] || latest_host["status"] != host["status"] ||
+             host_digest(latest_host) != host_digest(host) || latest_digest != artifact_digest || now >= @next_check
+            @jev_next_at = now + 20
+            return
+          end
+        end
+        case decision
+        when :artifact
+          start_check(host, now)
+          @first_change_checked = true
+        when :process
+          start_check(host, now, kind: "process")
+        when :unavailable
+          if changed
+            start_check(host, now)
+            @first_change_checked = true
+          end
+        when nil
+          if @jev_unavailable && changed
+            start_check(host, now)
+            @first_change_checked = true
+          end
+        end
+      elsif changed
+        start_check(host, now)
+        @first_change_checked = true
+      end
     rescue WorkspaceSnapshot::UnstableError => error
       @state["observation_pending"] = { "reason" => error.message, "paths" => error.paths }
       save
@@ -172,9 +231,84 @@ module Orbit
 
     private
 
+    def probe_artifact(now)
+      if @artifact_digest.nil? || now - @last_artifact_probe_at >= 5
+        @artifact_digest = WorkspaceSnapshot.fingerprint(project_root: @state.fetch("project_root"))
+        @last_artifact_probe_at = now
+      end
+      @artifact_digest
+    end
+
+    def recent_events
+      path = File.join(@record.path, "events.jsonl")
+      return [] unless File.file?(path)
+
+      bytes = File.open(path, "rb") do |file|
+        file.seek(-[file.size, 16_384].min, IO::SEEK_END)
+        file.read
+      end
+      bytes.lines.last(12).filter_map do |line|
+        event = JSON.parse(line)
+        event.slice("at", "type", "status", "verdict", "stale", "role")
+      rescue JSON::ParserError
+        nil
+      end
+    end
+
+    def assess_jev(host, artifact_digest, now)
+      signature = Digest::SHA256.hexdigest(JSON.generate([
+        host.slice("status", "turn_id", "last_turn_id", "last_turn_status", "observations", "active_tools"),
+        artifact_digest, @record.input_digest(@state), @state["members"].map { |member| member.slice("thread_id", "status") }
+      ]))
+      return nil if now < @jev_next_at && (signature == @jev_signature || now - @jev_last_at < 20)
+
+      observation = JevAdvisor.observation(
+        inputs: @record.inputs(@state), host: host, members: @state["members"],
+        project_root: @state.fetch("project_root"), artifact_digest: artifact_digest,
+        elapsed_seconds: now - Time.parse(@state.fetch("created_at")).to_f
+      )
+      result = @advisor.assess(state: observation)
+      @jev_unavailable = false
+      @jev_last_at = now
+      @jev_next_at = now + 60
+      @jev_signature = signature
+      scores = result.fetch("scores")
+      @record.event("jev_assessed", "model" => result["model"], "scores" => scores, "usage" => result["usage"])
+      @state["jev"] = { "model" => result["model"], "scores" => scores, "usage" => result["usage"],
+                         "assessed_at" => Time.at(now).utc.iso8601 }
+      save
+
+      process_score = [scores.fetch("stuck"), scores.fetch("off_track")].max
+      @jev_process_streak = process_score >= 0.65 ? @jev_process_streak + 1 : 0
+      if scores.fetch("artifact_ready") >= 0.8 && artifact_digest != @initial_digest &&
+         artifact_digest != @last_full_check_digest
+        return :artifact
+      end
+      if (process_score >= 0.85 || @jev_process_streak >= 2) && signature != @jev_last_process_trigger
+        @jev_last_process_trigger = signature
+        return :process
+      end
+      nil
+    rescue JevAdvisor::Error => error
+      @jev_unavailable = true
+      @jev_last_at = now
+      @jev_next_at = now + 60
+      @jev_signature = signature
+      @jev_process_streak = 0
+      @record.event("jev_unavailable", "reason" => error.message)
+      @state["jev"] = { "unavailable" => error.message, "at" => Time.at(now).utc.iso8601 }
+      save
+      :unavailable
+    end
+
     def save
       @state["next_check_at"] = Time.at(@next_check).utc.iso8601
       @record.save(@state)
+    end
+
+    def schedule_check(at, basis)
+      @next_check = at
+      @state["next_check_basis"] = basis
     end
 
     def consume_commands
@@ -193,10 +327,10 @@ module Orbit
         when "delegate"
           delegate(command)
         when "check"
-          @next_check = 0
+          schedule_check(0, "用户请求的检查")
         when "dispute"
           @state["dispute"] = command.fetch("reason")
-          @next_check = 0
+          schedule_check(0, "用户请求的裁定")
         else
           @record.event("command_rejected", "reason" => "Unknown command #{command['type']}")
         end
@@ -213,7 +347,7 @@ module Orbit
         next unless member["status"] == "working"
         member_connection(member).send_message("The user amended the original task. Apply only changes relevant to your delegated scope:\n\n" + text)
       end
-      @next_check = 0
+      schedule_check(0, "用户修改后重新核对")
     end
 
     def delegate(command)
@@ -296,15 +430,16 @@ module Orbit
       true
     end
 
-    def start_check(host, now)
+    def start_check(host, now, kind: "artifact")
       number = @state.fetch("checks").length + 1
       directory = File.join(@record.path, "checks", number.to_s)
       snapshot = WorkspaceSnapshot.capture(
         project_root: @state.fetch("project_root"), destination: File.join(directory, "workspace")
       )
-      role = @state["dispute"] ? "adjudicator" : "reviewer"
+      role = @state["dispute"] ? "adjudicator" : kind == "process" ? "process_reviewer" : "reviewer"
+      clues = role == "reviewer" ? @state["recheck"] : nil
       scope = {
-        "number" => number, "role" => role, "snapshot" => snapshot,
+        "number" => number, "role" => role, "kind" => kind, "snapshot" => snapshot,
         "input_digest" => @record.input_digest(@state), "host_digest" => host_digest(host),
         "dispute" => @state["dispute"],
         "started_at" => Time.at(now).utc.iso8601
@@ -314,6 +449,7 @@ module Orbit
         directory: snapshot.fetch("snapshot_path"), inputs: @record.inputs(@state),
         context: {
           "root" => host, "findings" => @state.fetch("findings"),
+          "recent_events" => recent_events, "recheck" => clues,
           "execution_members" => @state["members"],
           "decisions" => @state.fetch("decisions"), "dispute" => @state["dispute"],
           "estimate" => @state.fetch("estimate"), "hard_deadline" => @state["hard_deadline"],
@@ -325,6 +461,7 @@ module Orbit
         }, output_dir: directory, role: role
       )
       @running_check = scope
+      @last_full_check_digest = snapshot.fetch("digest") if kind == "artifact"
       @state.delete("observation_pending")
       @record.event("check_started", "number" => number, "role" => role, "digest" => snapshot.fetch("digest"))
       save
@@ -339,25 +476,69 @@ module Orbit
       current_digest = WorkspaceSnapshot.fingerprint(project_root: @state.fetch("project_root"))
       @running_check = nil
       @check_result = nil
-      stale = current_digest != scope.dig("snapshot", "digest") ||
-              @record.input_digest(@state) != scope["input_digest"] || host_digest(host) != scope["host_digest"] ||
-              @state["dispute"] != scope["dispute"]
-      @state["checks"] << scope.slice("number", "role", "started_at").merge(
-        "result" => result, "stale" => stale, "finished_at" => Time.at(now).utc.iso8601,
+      stale_reasons = []
+      stale_reasons << "artifact" if current_digest != scope.dig("snapshot", "digest")
+      stale_reasons << "input" if @record.input_digest(@state) != scope["input_digest"]
+      stale_reasons << "host" if host_digest(host) != scope["host_digest"]
+      stale_reasons << "dispute" if @state["dispute"] != scope["dispute"]
+      stale = !stale_reasons.empty?
+      @state["checks"] << scope.slice("number", "role", "kind", "started_at").merge(
+        "result" => result, "stale" => stale, "stale_reasons" => stale_reasons,
+        "finished_at" => Time.at(now).utc.iso8601,
         "usage" => @checker.respond_to?(:usage) ? @checker.usage : nil
       )
-      @record.event("check_finished", "number" => scope["number"], "stale" => stale, "verdict" => result.fetch("verdict"))
-      @next_check = now + result.fetch("next_check_seconds")
+      @record.event("check_finished", "number" => scope["number"], "stale" => stale,
+                    "stale_reasons" => stale_reasons, "verdict" => result.fetch("verdict"))
+      if scope["kind"] == "artifact"
+        if host["status"] == "idle"
+          schedule_check(now + result.fetch("next_check_seconds"), "检查者建议的下次观察")
+        else
+          # A checker-suggested short restart plus continuous editing produced
+          # repeated stale full checks. The agreed interval is the floor while
+          # Root is executing; idle delivery still gets a fresh check.
+          schedule_check(now + [result.fetch("next_check_seconds"), @interval].max,
+                         "Root 执行中，完整检查间隔以约定时间为下限")
+        end
+      end
       if stale
         # A moving workspace cannot be approved or interrupted using an old
-        # finding. Observe its next agreed version; an idle delivery gets a
-        # prompt fresh check without asking Root to request one.
-        @next_check = now if host["status"] == "idle" || @state["dispute"]
+        # finding. Keep actionable stale findings as reconciliation clues; the
+        # next applicable check re-verifies them and corrections then reach
+        # Root without Root polling the task record.
+        if scope["role"] != "adjudicator" && %w[correct continue].include?(result.fetch("verdict")) &&
+           !result.fetch("findings").empty?
+          clues = @state.dig("recheck", "findings") || []
+          known = clues.map { |finding| finding["id"] }
+          added = result.fetch("findings").reject { |finding| known.include?(finding["id"]) }
+          @state["recheck"] = {
+            "check" => scope["number"], "at" => Time.at(now).utc.iso8601,
+            "findings" => clues + added.map { |finding| finding.slice("id", "requirement", "evidence", "action") }
+          }
+          @record.event("recheck_pending", "check" => scope["number"], "count" => added.length,
+                        "open_clues" => @state.dig("recheck", "findings").length)
+        end
+        schedule_check(now, "过期结论待新版本核对") if host["status"] == "idle" || @state["dispute"]
         save
         return
       end
 
-      result.fetch("resolved_ids").each do |id|
+      # A clue survives until a reviewer that judges the artifact explicitly
+      # reports it again (now a normal finding, delivered by the normal path)
+      # or withdraws it. Otherwise an unreported clue is not silently lost.
+      # Process checks do not judge artifact findings, so they never reconcile.
+      if @state["recheck"] && scope["role"] == "reviewer"
+        mentioned = result.fetch("resolved_ids") + result.fetch("findings").map { |finding| finding.fetch("id") }
+        remaining = @state["recheck"].fetch("findings", []).reject { |clue| mentioned.include?(clue["id"]) }
+        if remaining.empty?
+          @state.delete("recheck")
+        else
+          @state["recheck"]["findings"] = remaining
+          @state["recheck"]["at"] = Time.at(now).utc.iso8601
+          @record.event("recheck_kept", "check" => scope["number"], "count" => remaining.length,
+                        "ids" => remaining.map { |clue| clue["id"] })
+        end
+      end
+      (scope["kind"] == "process" ? [] : result.fetch("resolved_ids")).each do |id|
         finding = @state["findings"][id]
         next unless finding
 
@@ -380,8 +561,10 @@ module Orbit
       end
       case result.fetch("verdict")
       when "complete"
-        if host["status"] == "idle" && host["last_turn_status"] == "completed" &&
-           members_settled? &&
+        if scope["kind"] == "process"
+          @record.event("process_check_complete_ignored", "number" => scope["number"])
+        elsif host["status"] == "idle" && host["last_turn_status"] == "completed" &&
+           members_settled? && @state["recheck"].nil? &&
            @state["findings"].values.none? { |finding| finding["status"] == "open" }
           confirmation = confirmed_stop
           @state["stop_confirmation"] = confirmation
@@ -393,10 +576,13 @@ module Orbit
             @state["status"] = "complete"
             @state["delivery_digest"] = current_digest
           else
-            @next_check = now
+            schedule_check(now, "完成核对前版本变化，立即重新核对")
           end
         else
-          @state["observation_pending"] = { "reason" => "Completion needs an idle Root, settled execution members and all delivery findings resolved" }
+          @state["observation_pending"] = {
+            "reason" => "Completion needs an idle Root, settled execution members, " \
+                        "all delivery findings resolved and pending clues reconciled"
+          }
         end
       when "correct"
         send_correction(result)

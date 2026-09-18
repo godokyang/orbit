@@ -5,6 +5,9 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { OrbitPlugin } from '../plugins/opencode.mjs';
 
+// This native bridge test must not spend a developer's globally configured Jev key.
+delete process.env.TYPESAFE_API_KEY;
+
 // Exercise the installed-plugin contract through the real CLI/runtime and Ruby
 // connection. Native SDK responses are doubles; real model acceptance is separate.
 const project = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'orbit-opencode-test-')));

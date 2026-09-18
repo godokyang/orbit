@@ -6,6 +6,9 @@ import net from 'node:net';
 import { z } from 'zod';
 import { installOmpExtension } from '../plugins/omp-host.mjs';
 
+// This native bridge test must not spend a developer's globally configured Jev key.
+delete process.env.TYPESAFE_API_KEY;
+
 // Native SDK doubles exercise the actual private bridge and task process.
 // User behavior: original input, controlled members, amendments, real stop.
 const project = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'orbit-omp-test-')));

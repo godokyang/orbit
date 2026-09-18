@@ -14,7 +14,7 @@ const { version } = require('../package.json');
 const server = new Server({ name: 'orbit', version }, { capabilities: { tools: {} } });
 const actions = ['context', 'start', 'status', 'check', 'amend', 'dispute', 'stop', 'delegate'];
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [{
-  name: 'orbit',
+  name: 'task',
   description: 'Independent execution checks for your current coding session. Use the Orbit skill for appropriate tasks. context checks attachment; start binds the current session and original user message; task actions inspect or control an existing task. No Root is created or replaced.',
   inputSchema: { type: 'object', additionalProperties: false,
     properties: {
@@ -47,7 +47,7 @@ function run(args, env, input) {
 }
 
 server.setRequestHandler(CallToolRequestSchema, async request => {
-  if (request.params.name !== 'orbit') throw new Error('Unknown Orbit tool');
+  if (request.params.name !== 'task') throw new Error('Unknown Orbit tool');
   const a = request.params.arguments || {};
   if (!actions.includes(a.action)) throw new Error('Unsupported Orbit action');
   const metadata = request.params._meta || {};

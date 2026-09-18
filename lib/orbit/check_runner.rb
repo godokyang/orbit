@@ -32,7 +32,7 @@ module Orbit
       nil
     end
 
-    ROLES = %w[reviewer adjudicator].freeze
+    ROLES = %w[reviewer process_reviewer adjudicator].freeze
     VERDICTS = %w[continue correct pause complete needs_user].freeze
     FINDING_KEYS = %w[id requirement evidence action].freeze
     RESULT_KEYS = %w[verdict reason findings resolved_ids next_check_seconds].freeze
@@ -247,6 +247,15 @@ module Orbit
       unless basis.empty?
         parts << "## Named basis (verbatim)\n\n#{render_items(basis, 'Basis')}"
       end
+      recheck = context.is_a?(Hash) ? context["recheck"] : nil
+      if recheck.is_a?(Hash) && recheck["findings"].is_a?(Array) && !recheck["findings"].empty?
+        parts << "## Pending clues from a check that went stale\n\n" \
+                 "These findings were reported against an older version (check #{recheck['check']}) and were not " \
+                 "applied. Verify each clue against the current fixed snapshot: if it still holds, include it in " \
+                 "findings and reuse its id; if it no longer holds, list its id in resolved_ids and explain. Every " \
+                 "listed id must appear in either findings or resolved_ids; do not silently ignore a clue.\n\n" \
+                 "```json\n#{JSON.pretty_generate(recheck['findings'])}\n```"
+      end
       parts << "## Current execution context (program record)\n\n```json\n#{context_text}\n```"
       parts << "## Fixed artifact snapshot\n\n" \
                "Your working root is the fixed snapshot directory selected by --cd: a read-only copy of the " \
@@ -321,6 +330,15 @@ module Orbit
           "You may overturn the Root or the reviewer on a disputed point when the evidence supports it; list " \
           "the reviewed ids in resolved_ids and explain the decision in reason. Read the relevant AGENTS.md " \
           "files inside the fixed snapshot; project rules apply to your judgment too."
+      elsif role == "process_reviewer"
+        "You are the existing independent Orbit checker, focused on a suspected execution-process issue. " \
+          "Read the original instruction, amendments, recent host observations and events, and only the " \
+          "snapshot files needed to verify a concrete concern. Jev's probability is a scheduling signal, " \
+          "not evidence. Determine whether the Root is actually stuck or off track and give a specific " \
+          "correction only when supported by current evidence. Do not resolve prior artifact findings or " \
+          "declare the task complete; return continue when no actionable issue is established. Pause only " \
+          "for an authorization boundary or a concrete adjudicated correction that stays unimplemented. " \
+          "Work strictly read-only and follow relevant AGENTS.md rules in the fixed snapshot."
       else
         "You are an independent Orbit check session, separate from the Root session that produced the " \
           "artifact. Work strictly read-only: never modify the snapshot or the shared project. Judge the " \
