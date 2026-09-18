@@ -40,6 +40,54 @@ module Orbit
       report
     end
 
+    # Options whose following token is a value, used to locate the first
+    # positional (subcommand) without treating a value as one.
+    VALUE_OPTIONS = %w[-c --config -m --model -s --sandbox -a --ask-for-approval
+                       -C --cd --enable --disable -i --image -p --profile --remote].freeze
+    PERMISSION_OPTIONS = %w[-s --sandbox -a --ask-for-approval
+                            --dangerously-bypass-approvals-and-sandbox --full-auto --approve-for-me].freeze
+    PERMISSION_CONFIG_KEYS = %w[sandbox_mode approval_policy].freeze
+    FULL_ACCESS_ARGS = ["-s", "danger-full-access", "-a", "never"].freeze
+
+    def first_positional(argv)
+      skip_value = false
+      argv.each do |arg|
+        if skip_value
+          skip_value = false
+          next
+        end
+        return arg unless arg.start_with?("-")
+
+        skip_value = VALUE_OPTIONS.include?(arg)
+      end
+      nil
+    end
+
+    def resume_invocation?(argv)
+      first_positional(argv) == "resume"
+    end
+
+    # Explicit user permission options always win over the full-access
+    # default. Resume sessions keep Codex's saved permissions: Codex refuses
+    # to resume a task without preserving its selected permissions, so the
+    # launcher never injects permission overrides there.
+    def explicit_permissions?(argv)
+      argv.each_with_index.any? do |arg, index|
+        next true if PERMISSION_OPTIONS.include?(arg)
+        next true if arg.start_with?("--sandbox=", "--ask-for-approval=", "--full-auto=", "--approve-for-me=")
+        next true if PERMISSION_CONFIG_KEYS.any? { |key| arg.start_with?("-c#{key}=", "-c=#{key}=", "--config=#{key}=") }
+        next true if ["-c", "--config"].include?(arg) && PERMISSION_CONFIG_KEYS.any? { |key| argv[index + 1].to_s.start_with?("#{key}=") }
+
+        false
+      end
+    end
+
+    def default_permission_args(argv)
+      return [] if explicit_permissions?(argv) || resume_invocation?(argv)
+
+      FULL_ACCESS_ARGS.dup
+    end
+
     # Codex resolves per-tool MCP approval overrides by the actual tool name
     # (`task`, as exposed by scripts/orbit-mcp.cjs), not the server name.
     # `approve` means pre-approved by policy for this tool only; the default
@@ -55,7 +103,9 @@ module Orbit
       if argv == ["--help"] || argv == ["-h"]
         puts "orbit codex [Codex options] [prompt]\norbit codex resume [session ID]\n\n" \
              "Open the Codex terminal UI on a local app-server owned by this launcher. " \
-             "Works in an ordinary terminal, tmux or Herdr. Uses Codex model and permission settings. " \
+             "Works in an ordinary terminal, tmux or Herdr. New sessions default to full access; " \
+             "explicit permission options are kept, and resume keeps the session's saved permissions. " \
+             "Uses Codex model settings. " \
              "This entry does not start an Orbit task; the executing Agent uses the Orbit skill when appropriate."
         return 0
       end
@@ -80,7 +130,8 @@ module Orbit
         raise ArgumentError, "Codex app-server did not become ready; inspect #{log}" if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
         sleep 0.1
       end
-      tui = Process.spawn(env, "codex", *configuration, "--remote", "unix://#{socket}", *argv)
+      tui = Process.spawn(env, "codex", *configuration, *default_permission_args(argv),
+                          "--remote", "unix://#{socket}", *argv)
       _, status = Process.wait2(tui)
       status.exitstatus || 1
     ensure

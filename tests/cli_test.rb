@@ -7,6 +7,7 @@ require "rbconfig"
 require "socket"
 require_relative "../lib/orbit/task_record"
 require_relative "../lib/orbit/session_entry"
+require_relative "../lib/orbit/member_policy"
 
 module CliTest
   ENTRY = File.expand_path("../scripts/orbit", __dir__)
@@ -17,8 +18,8 @@ module CliTest
   end
 
   def cli(*args, cwd: @project, success: true, env: {})
-    out, err, status = Open3.capture3({ "CODEX_THREAD_ID" => nil, "ORBIT_CODEX_SOCKET" => nil }.merge(env),
-                                    RbConfig.ruby, "--disable-gems", ENTRY, *args, chdir: cwd)
+    base = { "CODEX_THREAD_ID" => nil, "ORBIT_CODEX_SOCKET" => nil, "XDG_CONFIG_HOME" => @temp }
+    out, err, status = Open3.capture3(base.merge(env), RbConfig.ruby, "--disable-gems", ENTRY, *args, chdir: cwd)
     assert(status.success? == success, "#{args.inspect}\n#{out}\n#{err}")
     out + err
   end
@@ -166,6 +167,81 @@ module CliTest
            "the Orbit MCP server configuration is preserved")
   end
 
+  # New Codex sessions default to full access; explicit stricter options win
+  # and resume keeps the session's saved permissions.
+  def codex_launch_defaults_to_full_access
+    full = ["-s", "danger-full-access", "-a", "never"]
+    assert(Orbit::SessionEntry.default_permission_args(["--model", "gpt-6"]) == full, "new sessions default to full access")
+    assert(Orbit::SessionEntry.default_permission_args(["-s", "read-only"]) == [], "explicit sandbox option wins")
+    assert(Orbit::SessionEntry.default_permission_args(["-c", 'sandbox_mode="workspace-write"']) == [],
+           "explicit sandbox_mode config wins")
+    assert(Orbit::SessionEntry.default_permission_args(["--dangerously-bypass-approvals-and-sandbox"]) == [],
+           "explicit bypass options are kept untouched")
+    assert(Orbit::SessionEntry.default_permission_args(["resume", "--last"]) == [],
+           "resume keeps the session's saved permissions")
+    assert(Orbit::SessionEntry.default_permission_args(["--model", "x", "resume", "--last"]) == [],
+           "a resume subcommand after options is still a resume")
+    assert(Orbit::SessionEntry.default_permission_args(["please resume the work"]) == full,
+           "a prompt mentioning resume is not a resume subcommand")
+  end
+
+  def doctor_reports_member_allowlist_and_gaps
+    report = JSON.parse(cli("doctor", "--json"))
+    members = report["members"]
+    assert(members["allowed_kinds"] == Orbit::MemberPolicy::DEFAULT_KINDS && members["callable_kinds"].nil?,
+           "default allowlist is reported without a session")
+    text = cli("doctor")
+    assert(text.include?("成员名单：") && text.include?("不可调用成员：kimi、cursor-agent、grok"),
+           "text shows allowed and unavailable kinds")
+
+    FileUtils.mkdir_p(File.join(@temp, "orbit"))
+    File.write(File.join(@temp, "orbit", "members.json"), JSON.generate("allowed_kinds" => %w[opencode kimi]))
+    record = task
+    report = JSON.parse(cli("doctor", record.path, "--json", success: false))
+    assert(report.dig("members", "allowed_kinds") == %w[opencode kimi] && report.dig("members", "source").end_with?("members.json"),
+           "an existing config fully overrides the default list")
+    assert(report.dig("members", "callable_kinds").nil? && report.dig("members", "connection_ready") == false,
+           "a failed session connection is not reported as callable")
+    assert(report.dig("members", "unavailable_kinds") == ["kimi"],
+           "adapter gaps are still reported without a verified session")
+    failed_text = cli("doctor", record.path, success: false)
+    assert(failed_text.include?("可调用成员：未验证") && !failed_text.include?("可调用成员：opencode"),
+           "doctor text does not claim callable kinds after a failed connection")
+
+    socket = record.state.dig("connection", "socket")
+    server = UNIXServer.new(socket)
+    worker = Thread.new do
+      2.times do
+        peer = server.accept
+        request = JSON.parse(peer.gets)
+        peer.puts(JSON.generate("result" => { "cwd" => File.realpath(@project), "status" => "idle" })) if request["method"] == "state"
+        peer.close
+      end
+    end
+    verified = JSON.parse(cli("doctor", record.path, "--json"))
+    assert(worker.join(3), "verified session reads native state")
+    assert(verified.dig("members", "connection_ready") == true && verified.dig("members", "callable_kinds") == [],
+           "a verified session reports callable kinds for its provider")
+  ensure
+    server&.close unless server&.closed?
+    worker&.kill if worker&.alive?
+    worker&.join
+  end
+
+  def delegate_checks_allowlist_before_queueing
+    record = task
+    FileUtils.mkdir_p(File.join(@temp, "orbit"))
+    File.write(File.join(@temp, "orbit", "members.json"), JSON.generate("allowed_kinds" => %w[kimi]))
+    text = cli("delegate", record.path, "--kind", "codex", "--file", "-", success: false)
+    assert(text.include?("not in allowed_kinds") && commands(record).empty?,
+           "a disallowed kind is rejected before queueing")
+
+    File.write(File.join(@temp, "orbit", "members.json"), JSON.generate("allowed_kinds" => %w[codex]))
+    text = cli("delegate", record.path, "--kind", "codex", "--file", "-", success: false)
+    assert(text.include?("no controlled adapter") && commands(record).empty?,
+           "an allowed kind without an adapter is rejected before queueing")
+  end
+
   def maintenance_requires_an_installed_cli
     %w[update uninstall].each { |command| cli(command, success: false) }
     assert(cli("start", "--help").include?("--provider"), "execution details are available in subcommand help")
@@ -175,7 +251,8 @@ module CliTest
     %i[single_task_from_project_subdirectory multiple_tasks_require_explicit_selection completed_and_absent_tasks
        stale_result_and_user_action doctor_without_connection_or_dependencies doctor_reads_existing_native_connection
        stop_retries_when_recorded_runtime_is_gone codex_launch_approval_targets_the_registered_tool
-       maintenance_requires_an_installed_cli].each do |test|
+       codex_launch_defaults_to_full_access doctor_reports_member_allowlist_and_gaps
+       delegate_checks_allowlist_before_queueing maintenance_requires_an_installed_cli].each do |test|
       Dir.mktmpdir("orbit-cli-test-") do |tmp|
         @temp = tmp
         @project = File.join(tmp, "project")

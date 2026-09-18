@@ -18,7 +18,8 @@ module CodexConnectionTest
     failures = []
     tests = [:test_connect_rejects_missing_socket_unloaded_and_historyless_threads,
              :test_state_and_busy_idle_message_routing,
-             :test_stop_reports_unconfirmed_terminals]
+             :test_stop_reports_unconfirmed_terminals,
+             :test_member_creation_defaults_to_full_access]
     tests.each do |test|
       Dir.mktmpdir do |tmp|
         send(test, tmp)
@@ -237,6 +238,36 @@ module CodexConnectionTest
     end
   end
 
+  # 4. Execution members default to full access without stalling on
+  # approval; explicit stricter values win. The task-owned host must not
+  # receive a partial Orbit MCP disable override.
+  def test_member_creation_defaults_to_full_access(tmp)
+    server = FakeCodexServer.new(tmp, "case-member", loaded: [THREAD_ID])
+    server.start
+    connection = Orbit::CodexConnection.new(socket: server.path, thread_id: THREAD_ID, bridge: BRIDGE).connect!
+    id = connection.create_member(model: "gpt-test", cwd: "/workspace/project", disable_orbit_mcp: false)
+    assert_equal("member-thread-1", id, "member thread id is returned")
+    params = server.last_request("thread/start").fetch("params")
+    assert_equal("danger-full-access", params["sandbox"], "members default to full access")
+    assert_equal("never", params["approvalPolicy"], "members never stall on approval")
+    assert_equal(false, params["ephemeral"], "member history is retained")
+    assert(!params.key?("config"), "task-owned hosts receive no partial Orbit MCP override")
+
+    connection.create_member(model: "gpt-test", cwd: "/workspace/project", disable_orbit_mcp: true,
+                             sandbox: "workspace-write", approval_policy: "on-request")
+    explicit = server.last_request("thread/start").fetch("params")
+    assert_equal("workspace-write", explicit["sandbox"], "explicit stricter sandbox wins")
+    assert_equal("on-request", explicit["approvalPolicy"], "explicit stricter approval policy wins")
+    assert_equal({ "mcp_servers.orbit.enabled" => false }, explicit["config"], "root-owned members still disable Orbit MCP")
+  ensure
+    begin
+      connection&.close
+    rescue StandardError
+      nil
+    end
+    server&.shutdown
+  end
+
   # Harness: spawns the REAL WebSocket fake app-server
   # (tests/helpers/codex_socket_server.cjs, `ws` over a Unix socket) and a
   # Ruby relay that answers frames through the same canned handler the
@@ -328,6 +359,8 @@ module CodexConnectionTest
           end
         when "turn/steer"
           { "turnId" => scenario_value("turns", []).first&.fetch("id", nil) }
+        when "thread/start"
+          { "thread" => { "id" => "member-thread-1", "status" => { "type" => "idle" } } }
         when "turn/start"
           { "turn" => { "id" => "turn-3", "status" => "inProgress", "items" => [] } }
         when "turn/interrupt"

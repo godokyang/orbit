@@ -37,7 +37,7 @@ Codex 没有 MCP 时，可在具有原生控制端点和相应访问权限的宿
 
 ## 必要分工
 
-Root 在用户授权和项目规则范围内决定是否需要执行成员，一个 Agent 足够就自己完成。需要时使用 `delegate`，传 `task` 和具体 `text`（范围、文件边界、验证和回报要求）；程序自动附上原始要求与已生效修改，创建本任务拥有的同宿主成员（Codex、OpenCode 或 OMP），结果自动回到当前 Root。`model` 可指定已授权模型，否则 Codex 成员沿用检查模型，OpenCode 成员沿用 Root 的原生供应商、模型和 variant；OMP 成员沿用 Root 的模型、thinking、项目与权限设置，只开放当前已启用的基础编码工具（read/write/edit/grep/glob/bash/python/lsp），不复制扩展、MCP 或委派工具；`member` 可复用本任务已有成员。在用户已允许的范围内可加 `kind: codex`，由 Orbit 为本任务启动并持有一个独立 Codex 成员宿主（跨宿主路径，当前支持 OpenCode Root）：先持久登记短控制 socket、宿主 PID／进程组和 thread ID 再启动，模型取自 Codex 自身配置或显式 `model`，沙箱与权限边界不变，结果仍回到当前 Root。Root 核验并集成结果，成员不再创建团队。OMP 的 `hub wait` 不等待 Orbit 回报；不要用它或 shell 等待成员。结束本轮后，Orbit 会把结果送回当前会话。
+Root 在用户授权和项目规则范围内决定是否需要执行成员，一个 Agent 足够就自己完成。需要时使用 `delegate`，传 `task` 和具体 `text`（范围、文件边界、验证和回报要求）；程序自动附上原始要求与已生效修改，默认创建本任务拥有的同宿主成员（Codex、OpenCode 或 OMP），结果自动回到当前 Root。Codex 执行成员默认 full access；OpenCode／OMP 成员沿用 Root 的原生权限。用户显式传入更严格权限时以用户为准。`model` 可指定已授权模型，否则 Codex 成员沿用检查模型，OpenCode 成员沿用 Root 的原生供应商、模型和 variant；OMP 成员沿用 Root 的模型、thinking、项目与权限设置，只开放当前已启用的基础编码工具（read/write/edit/grep/glob/bash/python/lsp），不复制扩展、MCP 或委派工具；`member` 可复用本任务已有成员。在用户已允许的范围内可加 `kind: codex`，由 Orbit 为本任务启动并持有一个独立 Codex 成员宿主（跨宿主路径，当前支持 OpenCode Root）：先持久登记短控制 socket、宿主 PID／进程组和 thread ID 再启动，模型取自 Codex 自身配置或显式 `model`，结果仍回到当前 Root。允许名单默认 `codex、omp、opencode、kimi、cursor-agent、grok`，可用 `~/.config/orbit/members.json` 覆盖；名单允许但无受控适配器的 kind 会被拒绝并说明原因，派发失败不会先创建宿主。Root 核验并集成结果，成员不再创建团队。Jev 可能偶尔提示“可能有适合独立分工的子任务”，它只是提醒：派发、kind 和子任务都由 Root 决定，Orbit 不自动派发。OMP 的 `hub wait` 不等待 Orbit 回报；不要用它或 shell 等待成员。结束本轮后，Orbit 会把结果送回当前会话。
 
 这条路径不需要额外终端窗口。Herdr、tmux 只影响展示；用户明确要求使用其他协作工具时按 [协作说明](references/agent-collaboration.md) 处理，不把外部成员说成已纳入 Orbit 的统一停止。
 

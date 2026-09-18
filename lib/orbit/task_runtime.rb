@@ -9,15 +9,18 @@ require_relative "workspace_snapshot"
 require_relative "connection"
 require_relative "jev_advisor"
 require_relative "codex_member_host"
+require_relative "member_policy"
 
 module Orbit
   class TaskRuntime
     TERMINAL = %w[complete paused needs_user failed stop_unconfirmed].freeze
+    DELEGATION_HINT_THRESHOLD = 0.8
 
-    def initialize(record:, connection:, checker:, advisor: nil, member_host: nil)
+    def initialize(record:, connection:, checker:, advisor: nil, member_host: nil, member_policy: nil)
       @record, @connection, @checker = record, connection, checker
       @advisor = advisor
       @member_host = member_host
+      @member_policy = member_policy
       @state = record.state
       @state["findings"] ||= {}
       @state["sent_message_ids"] ||= []
@@ -41,6 +44,7 @@ module Orbit
       @jev_process_streak = 0
       @jev_last_process_trigger = nil
       @jev_unavailable = false
+      @pending_hint = nil
     end
 
     def run
@@ -202,13 +206,15 @@ module Orbit
           return
         end
         if decision
+          # The check this assessment asked for wins over an advisory hint:
+          # a hint must never delay or interrupt it.
+          @pending_hint = nil
           consume_commands
           return if TERMINAL.include?(@state["status"])
           return unless collect_amendments
           latest_host = @connection.state
           latest_digest = WorkspaceSnapshot.fingerprint(project_root: @state.fetch("project_root"))
-          if latest_host["interrupted"] || latest_host["status"] != host["status"] ||
-             host_digest(latest_host) != host_digest(host) || latest_digest != artifact_digest || now >= @next_check
+          if observation_stale?(host, artifact_digest, latest_host, latest_digest, now)
             @jev_next_at = now + 20
             return
           end
@@ -229,6 +235,22 @@ module Orbit
             start_check(host, now)
             @first_change_checked = true
           end
+        end
+        # Hints use the same freshness re-check as check decisions; a hint
+        # that failed it is dropped rather than sent against an old state.
+        if @pending_hint
+          consume_commands
+          return if TERMINAL.include?(@state["status"])
+          return unless collect_amendments
+          latest_host = @connection.state
+          latest_digest = WorkspaceSnapshot.fingerprint(project_root: @state.fetch("project_root"))
+          if observation_stale?(host, artifact_digest, latest_host, latest_digest, now)
+            @jev_next_at = now + 20
+            @pending_hint = nil
+          else
+            deliver_pending_hint
+          end
+          return
         end
       elsif changed
         start_check(host, now)
@@ -275,7 +297,8 @@ module Orbit
       observation = JevAdvisor.observation(
         inputs: @record.inputs(@state), host: host, members: @state["members"],
         project_root: @state.fetch("project_root"), artifact_digest: artifact_digest,
-        elapsed_seconds: now - Time.parse(@state.fetch("created_at")).to_f
+        elapsed_seconds: now - Time.parse(@state.fetch("created_at")).to_f,
+        member_options: delegation_options
       )
       result = @advisor.assess(state: observation)
       @jev_unavailable = false
@@ -287,6 +310,7 @@ module Orbit
       @state["jev"] = { "model" => result["model"], "scores" => scores, "usage" => result["usage"],
                          "assessed_at" => Time.at(now).utc.iso8601 }
       save
+      prepare_hint(scores, now)
 
       process_score = [scores.fetch("stuck"), scores.fetch("off_track")].max
       @jev_process_streak = process_score >= 0.65 ? @jev_process_streak + 1 : 0
@@ -335,7 +359,13 @@ module Orbit
           sent = @connection.send_message("Orbit: the user explicitly amended this task:\n\n" + command.fetch("text"))
           @state["sent_message_ids"] << sent.fetch("id")
         when "delegate"
-          delegate(command)
+          begin
+            delegate(command)
+          rescue MemberPolicy::Error => error
+            @record.event("member_rejected", "kind" => command["kind"], "reason" => error.message)
+            sent = @connection.send_message("Orbit member delegation was rejected (not a new user instruction): #{error.message}")
+            @state["sent_message_ids"] << sent.fetch("id")
+          end
         when "check"
           schedule_check(0, "用户请求的检查")
         when "dispute"
@@ -360,20 +390,27 @@ module Orbit
       schedule_check(0, "用户修改后重新核对")
     end
 
+    # The allowlist and adapter checks run before any host or member is
+    # created. Reusing an already-registered member is not new creation and
+    # stays available even if the list changed.
     def delegate(command)
       instructions = member_instructions(command.fetch("text"))
-      kind = command.fetch("kind", "native").to_s
       member = if command["member"]
                  attach_member(command.fetch("member"), instructions)
-               elsif kind == "codex"
-                 start_codex_member(command, instructions)
-               elsif kind.empty? || kind == "native"
-                 start_native_member(command, instructions)
                else
-                 raise ArgumentError, "unsupported member kind #{kind.inspect}"
+                 provider = @state.dig("connection", "provider")
+                 kind = member_policy.resolve_kind(command.fetch("kind", "native"), provider)
+                 member_policy.check!(kind)
+                 adapter = MemberAdapters.require!(kind, provider)
+                 if adapter["adapter"] == "codex_host"
+                   start_codex_member(command, instructions)
+                 else
+                   start_native_member(command, instructions, kind)
+                 end
                end
       @record.event("member_delegated", "thread_id" => member["thread_id"], "kind" => member["kind"],
                     "scope" => command.fetch("text"))
+      mark_delegation_hint_followed(member)
       save
     end
 
@@ -387,10 +424,10 @@ module Orbit
       member
     end
 
-    def start_native_member(command, instructions)
+    def start_native_member(command, instructions, kind)
       model = command["model"] || (@connection.default_member_model if @connection.respond_to?(:default_member_model)) || @state.dig("review", "model")
       id = @connection.create_member(model: model)
-      member = { "kind" => "native", "thread_id" => id, "model" => model, "status" => "starting" }
+      member = { "kind" => kind, "adapter" => "same_host", "thread_id" => id, "model" => model, "status" => "starting" }
       @state["members"] << member
       # Persist ownership before this member can start any model/tool work.
       save
@@ -437,7 +474,7 @@ module Orbit
 
     def member_connection(member)
       id = member.fetch("thread_id")
-      @member_connections[id] ||= if member["kind"] == "codex"
+      @member_connections[id] ||= if member["host"] == "codex"
                                     codex_member_host.connection_for({ "socket" => member.fetch("socket") }, id)
                                   else
                                     @connection.member_connection(id)
@@ -446,6 +483,74 @@ module Orbit
 
     def codex_member_host
       @member_host ||= CodexMemberHost.new(project_root: @state.fetch("project_root"))
+    end
+
+    # The list is an authorization input that may change while a task runs;
+    # every dispatch re-reads it. An injected policy (tests) stays fixed.
+    def member_policy
+      @member_policy || MemberPolicy.load
+    end
+
+    def delegation_options
+      provider = @state.dig("connection", "provider")
+      allowed = member_policy.allowed_kinds
+      callable = MemberAdapters.callable_kinds(provider).select { |kind| allowed.include?(kind) }
+      { "allowed_kinds" => allowed, "callable_kinds" => callable,
+        "hint_sent" => !@state["delegation_hint"].nil? }
+    rescue MemberPolicy::Error => error
+      { "allowed_kinds" => nil, "callable_kinds" => [], "error" => error.message,
+        "hint_sent" => !@state["delegation_hint"].nil? }
+    end
+
+    # Jev hints are bounded to one per task, only when an allowed and
+    # actually callable member exists, and they are delivered only after the
+    # same freshness re-check used for check decisions. They never dispatch
+    # and never choose a kind; the Root decides.
+    def prepare_hint(scores, now)
+      return if @state["delegation_hint"]
+      return unless scores.fetch("delegatable", 0) >= DELEGATION_HINT_THRESHOLD
+
+      options = delegation_options
+      return if options["callable_kinds"].empty?
+
+      @pending_hint = {
+        "score" => scores.fetch("delegatable"), "callable_kinds" => options["callable_kinds"],
+        "at" => Time.at(now).utc.iso8601
+      }
+    end
+
+    def observation_stale?(host, artifact_digest, latest_host, latest_digest, now)
+      latest_host["interrupted"] || latest_host["status"] != host["status"] ||
+        host_digest(latest_host) != host_digest(host) || latest_digest != artifact_digest || now >= @next_check
+    end
+
+    def deliver_pending_hint
+      hint = @pending_hint
+      @pending_hint = nil
+      return unless hint
+
+      text = "Orbit delegation hint (not a new user instruction): Jev estimates this task may contain a bounded " \
+             "subtask suitable for an execution member (score #{hint['score']}). Callable kinds here: " \
+             "#{hint['callable_kinds'].join('、')}. You decide the subtask and whether to delegate; Orbit does not dispatch."
+      sent = @connection.send_message(text)
+      @state["sent_message_ids"] << sent.fetch("id")
+      @state["delegation_hint"] = hint.merge("message_id" => sent.fetch("id"))
+      @record.event("delegation_hint", "score" => hint["score"], "callable_kinds" => hint["callable_kinds"])
+      save
+    rescue StandardError => error
+      # A hint is advisory: delivery failure must not fail the task or
+      # interrupt any check decision.
+      @record.event("delegation_hint_failed", "error" => error.message)
+      save
+    end
+
+    def mark_delegation_hint_followed(member)
+      hint = @state["delegation_hint"]
+      return unless hint && !hint["followed"]
+
+      hint["followed"] = true
+      hint["followed_kind"] = member["kind"]
+      @record.event("delegation_hint_followed", "kind" => member["kind"], "thread_id" => member["thread_id"])
     end
 
     def collect_member_results
@@ -727,7 +832,7 @@ module Orbit
         failures << "Root: #{error.message}"
       end
       members = @state["members"].map do |member|
-        if member["kind"] == "codex"
+        if member["host"] == "codex"
           stop_codex_member(member, failures)
         else
           begin

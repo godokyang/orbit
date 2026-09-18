@@ -35,7 +35,7 @@ curl -fsSL https://raw.githubusercontent.com/godokyang/orbit/main/install.sh | s
 orbit --version
 ```
 
-应输出类似 `orbit 0.6.3` 的版本号。当前源码版本为 `0.6.3`；远程命令安装 GitHub 上所选提交的版本，未推送的本地提交不会出现在远程安装中。
+应输出类似 `orbit 0.6.5` 的版本号。当前源码版本为 `0.6.5`；远程命令安装 GitHub 上所选提交的版本，未推送的本地提交不会出现在远程安装中。
 
 如果想继续使用当前终端，执行安装结束时显示的 `export PATH=...` 命令即可。自动保存的配置会在以后新开终端、重启电脑后继续生效。其他 shell 或关闭自动配置的方法见[PATH 配置](docs/reference/usage-reference.md#path-配置)。
 
@@ -119,6 +119,10 @@ orbit status
 ### 4. 补充要求或停止
 
 补充要求时直接在原会话里说，Orbit 会记录新的用户要求。需要分工时，Agent 通过 Orbit 创建成员并集成结果，你不必另外开窗口组队。当前已验证 OpenCode Root 显式选择 `kind: codex`，让任务运行进程创建、回收和停止独立的 Codex 成员；其他跨宿主组合尚未验证。目标成员必须在本任务或项目规则中获得你的允许。
+
+执行成员的允许名单保存在可选的 `~/.config/orbit/members.json`，只识别 `allowed_kinds`。文件不存在时默认允许 `codex、omp、opencode、kimi、cursor-agent、grok`；文件存在时完整采用其中列表，`"allowed_kinds": []` 表示禁止创建新成员。名单只表示授权：`kimi`、`cursor-agent`、`grok` 尚无受控适配器，不会被报成可调用；`orbit doctor` 会分别显示允许、可调用与缺口，修改名单不影响已在执行成员的停止与结果回收。
+
+Orbit 创建 Codex 执行成员时明确使用 full access，避免执行中反复审批；OpenCode 和 OMP 成员沿用 Root 的原生权限，Orbit 不改它们的权限配置。`orbit codex` 新会话同样默认 full access。你在启动命令里显式传入更严格的权限参数或配置时，以你的设置为准；恢复会话沿用 Codex 原生保存的权限。Orbit 不修改全局配置，检查者和裁定者仍保持只读。
 
 停止时可以在原生界面中断当前执行，或让 Agent 停止这项 Orbit 任务。也可另开终端执行：
 
@@ -218,7 +222,7 @@ npx skills remove orbit --global
 
 先明确说“这次请使用 Orbit，并检查当前会话能否接入”。如果没有 Orbit 工具，检查是否使用了正确入口、是否在安装后重新启动，以及 skill／扩展是否装进当前配置目录。仅有 `orbit --version` 输出只能证明程序已安装。
 
-先运行 `orbit doctor` 查看具体缺口。有唯一待处理任务时，它还会读取该任务的原生连接；多个任务可用 `orbit doctor ID` 选择。Codex 会话内优先验证当前会话，OpenCode／OMP 可让 Agent 调用 Orbit 工具的 `context` 核对本会话。扩展文件存在与会话已加载扩展分别报告，不根据安装文件猜测接入成功。
+先运行 `orbit doctor` 查看具体缺口。有唯一待处理任务时，它还会读取该任务的原生连接；多个任务可用 `orbit doctor ID` 选择。诊断还会列出执行成员的允许名单、当前会话实际可调用的 kind，以及允许但无受控适配器的缺口。Codex 会话内优先验证当前会话，OpenCode／OMP 可让 Agent 调用 Orbit 工具的 `context` 核对本会话。扩展文件存在与会话已加载扩展分别报告，不根据安装文件猜测接入成功。
 
 Codex 的 MCP 工具显示为 `orbit.task`；OpenCode 使用 `orbit`，OMP 的工具可能显示为 `xd://orbit`，由 Agent 按原生设备说明调用。
 
@@ -232,7 +236,7 @@ Codex 的 MCP 工具显示为 `orbit.task`；OpenCode 使用 `orbit`，OMP 的�
 
 ## 当前范围与更多文档
 
-当前源码版本 **0.6.3**，尚未发布 npm 包。Codex、OpenCode、OMP 的同宿主接入，以及 OpenCode Root → Codex 成员的跨宿主路径已有真实验收；其他跨宿主组合尚未验证。pi 与 OMP 是不同项目，pi 等其他接入暂缓。
+当前源码版本 **0.6.5**，尚未发布 npm 包。Codex、OpenCode、OMP 的同宿主接入，以及 OpenCode Root → Codex 成员的跨宿主路径已有真实验收；其他跨宿主组合与 `kimi`、`cursor-agent`、`grok` 尚未接入，不列为可调用。Codex 执行成员与 `orbit codex` 新会话默认 full access，OpenCode／OMP 成员沿用 Root 原生权限；Codex 恢复会话的权限覆盖受 Codex 原生限制，见[验收记录](docs/reference/member-policy-acceptance-20260918.md)。pi 与 OMP 是不同项目，pi 等其他接入暂缓。
 
 - [进阶使用参考](docs/reference/usage-reference.md)：安装目录、profile、CLI 参数、集成和版本维护。
 - [Agent 使用说明](skills/orbit/SKILL.md)：调用时机、分工与纠偏职责。

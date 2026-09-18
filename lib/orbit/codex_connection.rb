@@ -192,13 +192,15 @@ module Orbit
     # Root sessions pass their own cwd and disable the Orbit MCP they carry;
     # a task-owned member app-server has no Orbit MCP configured and must not
     # receive a partial disable override (that config is invalid without the
-    # full server definition). Member boundary stays workspace-write,
-    # approvalPolicy never.
-    def create_member(model:, cwd: @cwd, disable_orbit_mcp: true)
+    # full server definition). Execution members default to full access so
+    # they do not stall on repeated approval; callers may pass stricter
+    # values explicitly.
+    def create_member(model:, cwd: @cwd, disable_orbit_mcp: true,
+                      approval_policy: "never", sandbox: "danger-full-access")
       ensure_connected
       raise Error, "member creation requires a project directory" if cwd.to_s.empty?
       params = { "cwd" => cwd, "model" => model,
-                 "approvalPolicy" => "never", "sandbox" => "workspace-write",
+                 "approvalPolicy" => approval_policy, "sandbox" => sandbox,
                  "ephemeral" => false }
       params["config"] = { "mcp_servers.orbit.enabled" => false } if disable_orbit_mcp
       result = request("thread/start", params)

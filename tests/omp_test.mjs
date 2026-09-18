@@ -8,6 +8,8 @@ import { installOmpExtension } from '../plugins/omp-host.mjs';
 
 // This native bridge test must not spend a developer's globally configured Jev key.
 delete process.env.TYPESAFE_API_KEY;
+// Never read the developer's real member allowlist.
+process.env.XDG_CONFIG_HOME = await fs.mkdtemp(path.join(os.tmpdir(), 'orbit-members-test-'));
 
 // Native SDK doubles exercise the actual private bridge and task process.
 // User behavior: original input, controlled members, amendments, real stop.

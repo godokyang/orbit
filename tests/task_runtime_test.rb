@@ -5,6 +5,9 @@ require "socket"
 require_relative "../lib/orbit/task_runtime"
 require_relative "../lib/orbit/task_view"
 
+# Runtime tests never read the developer's real ~/.config/orbit/members.json.
+ENV["XDG_CONFIG_HOME"] = Dir.mktmpdir("orbit-test-config-")
+
 class RuntimeHost
   attr_reader :messages, :stop_calls
   attr_accessor :confirmed
@@ -158,13 +161,17 @@ def answer(verdict, findings: [], resolved: [])
     "resolved_ids" => resolved, "next_check_seconds" => 60 }
 end
 
+def member_policy(allowed)
+  Orbit::MemberPolicy.new(allowed_kinds: allowed, source: "test", path: "/tmp/orbit-test-members.json")
+end
+
 def fixture(interval: 60)
   Dir.mktmpdir("orbit-runtime-test-") do |root|
     File.write(File.join(root, "artifact.txt"), "first behavior")
     record = Orbit::TaskRecord.create(
       project_root: root, instruction: "Provide first and second behaviors.\n",
       source: { "id" => "original", "kind" => "native_user_message" },
-      connection: {}, review: { "interval_seconds" => interval }, estimate: {}
+      connection: { "provider" => "opencode" }, review: { "interval_seconds" => interval }, estimate: {}
     )
     host, checker = RuntimeHost.new(root), RuntimeChecker.new
     yield root, record, host, checker, Orbit::TaskRuntime.new(record: record, connection: host, checker: checker)
@@ -259,6 +266,175 @@ fixture do |root, record, host, checker, runtime|
   runtime.tick(now: now + 3)
   assert(record.state["recheck"].nil? && host.messages.empty?,
          "an explicit withdrawal clears the clue without a correction")
+end
+
+Dir.mktmpdir("orbit-members-policy-") do |home|
+  default = Orbit::MemberPolicy.load(env: {}, home: home)
+  assert(default.allowed_kinds == Orbit::MemberPolicy::DEFAULT_KINDS, "missing file uses the six default kinds")
+  path = File.join(home, ".config", "orbit", "members.json")
+  FileUtils.mkdir_p(File.dirname(path))
+  File.write(path, JSON.generate("allowed_kinds" => %w[opencode kimi]))
+  loaded = Orbit::MemberPolicy.load(env: {}, home: home)
+  assert(loaded.allowed_kinds == %w[opencode kimi] && loaded.source == path, "an existing file fully overrides the default list")
+  File.write(path, JSON.generate("allowed_kinds" => []))
+  begin
+    Orbit::MemberPolicy.load(env: {}, home: home).check!("codex")
+    raise "ASSERTION FAILED: an empty allowlist must forbid new members"
+  rescue Orbit::MemberPolicy::NotAllowed
+    nil
+  end
+  File.write(path, '{"allowed_kinds":["opencode"],"extra":1}')
+  begin
+    Orbit::MemberPolicy.load(env: {}, home: home)
+    raise "ASSERTION FAILED: unknown config keys must be rejected"
+  rescue Orbit::MemberPolicy::Error
+    nil
+  end
+  File.write(path, "not json")
+  begin
+    Orbit::MemberPolicy.load(env: {}, home: home)
+    raise "ASSERTION FAILED: invalid JSON must be rejected"
+  rescue Orbit::MemberPolicy::Error
+    nil
+  end
+end
+
+policy = member_policy(%w[codex omp opencode kimi])
+assert(policy.resolve_kind("native", "opencode") == "opencode" && policy.resolve_kind(nil, "codex") == "codex",
+       "native resolves to the Root's actual kind before the allowlist check")
+assert(Orbit::MemberAdapters.resolve("codex", "opencode")["adapter"] == "codex_host",
+       "OpenCode Root to Codex member is the verified cross-host path")
+assert(Orbit::MemberAdapters.resolve("opencode", "opencode")["adapter"] == "same_host", "same-host opencode member")
+assert(Orbit::MemberAdapters.resolve("kimi", "opencode").nil?, "kimi has no controlled adapter")
+assert(Orbit::MemberAdapters.portably_callable_kinds.sort == %w[codex omp opencode], "only verified kinds are callable")
+begin
+  Orbit::MemberAdapters.require!("codex", "omp")
+  raise "ASSERTION FAILED: an OMP Root has no controlled codex adapter"
+rescue Orbit::MemberPolicy::NoAdapter => error
+  assert(error.message.include?("no controlled adapter"), "the adapter gap reason is specific")
+end
+
+# A disallowed kind is rejected before any host or member is created, and a
+# rejected delegation must not fail the task.
+fixture do |_root, record, host, checker, _runtime|
+  codex_host = RuntimeCodexHost.new(record, RuntimeCodexMemberConnection.new)
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker,
+                                   member_host: codex_host, member_policy: member_policy(["kimi"]))
+  record.submit("delegate", "kind" => "codex", "text" => "scoped work")
+  runtime.tick(now: Time.now.to_f)
+  assert(record.state["members"].empty?, "a disallowed kind creates no member")
+  assert(codex_host.start_member_calls.empty? && codex_host.shutdown_calls.empty?,
+         "no member host is started before the allowlist decision")
+  assert(!%w[failed stop_unconfirmed].include?(record.state["status"]) && record.state["error"].nil?,
+         "a rejected delegation does not fail the task")
+  assert(host.messages.last.to_s.include?("not in allowed_kinds"), "Root receives the specific rejection reason")
+end
+
+# Allowed kinds without a controlled adapter are reported as gaps before
+# anything is created and are never presented as callable.
+fixture do |_root, record, host, checker, _runtime|
+  state = record.state
+  state["connection"]["provider"] = "omp"
+  record.save(state)
+  codex_host = RuntimeCodexHost.new(record, RuntimeCodexMemberConnection.new)
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker,
+                                   member_host: codex_host, member_policy: member_policy(["codex"]))
+  record.submit("delegate", "kind" => "codex", "text" => "scoped work")
+  runtime.tick(now: Time.now.to_f)
+  assert(record.state["members"].empty? && codex_host.start_member_calls.empty?,
+         "an allowed kind without an adapter creates nothing")
+  assert(host.messages.last.to_s.include?("no controlled adapter"), "the adapter gap is reported")
+end
+
+# Jev's delegation probability only reaches Root when an allowed and actually
+# callable member exists; it is bounded to once per task and never dispatches.
+fixture do |root, record, _host, checker, _runtime|
+  host = RuntimeTeamHost.new(root)
+  host.working("progress")
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
+                                   member_policy: member_policy(%w[opencode kimi]))
+  now = Time.now.to_f
+  runtime.tick(now: now + 6)
+  assert(host.messages.count { |message| message.include?("delegation hint") } == 1, "one delegation hint is delivered")
+  assert(record.state.dig("delegation_hint", "score") == 0.9 &&
+         record.state.dig("delegation_hint", "callable_kinds") == ["opencode"],
+         "the hint signal and the allowed callable kinds are recorded")
+
+  host.working("more progress")
+  runtime.tick(now: now + 90)
+  assert(host.messages.count { |message| message.include?("delegation hint") } == 1, "the hint is not repeated")
+
+  record.submit("delegate", "kind" => "opencode", "text" => "bounded subtask")
+  runtime.tick(now: now + 91)
+  assert(record.state["members"].first && record.state.dig("delegation_hint", "followed") == true &&
+         record.state.dig("delegation_hint", "followed_kind") == "opencode",
+         "the Root's actual delegation is recorded")
+  assert(File.readlines(File.join(record.path, "events.jsonl")).any? { |line| line.include?("delegation_hint_followed") },
+         "the follow-up event is recorded")
+end
+
+fixture do |root, record, _host, checker, _runtime|
+  host = RuntimeTeamHost.new(root)
+  host.working("progress")
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.95)
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
+                                   member_policy: member_policy(["kimi"]))
+  runtime.tick(now: Time.now.to_f + 6)
+  assert(host.messages.none? { |message| message.include?("delegation hint") },
+         "no hint is sent without an allowed callable member")
+end
+
+# A check requested by the same Jev judgment wins: the advisory hint must
+# not interrupt or precede it.
+fixture(interval: 300) do |_root, record, host, checker, _runtime|
+  host.working("progress")
+  advisor = RuntimeAdvisor.new("stuck" => 0.95, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
+                                   member_policy: member_policy(%w[opencode]))
+  runtime.tick(now: Time.now.to_f + 6)
+  assert(checker.calls.last&.fetch(:role) == "process_reviewer", "the process check from this judgment starts")
+  assert(host.messages.none? { |message| message.include?("delegation hint") },
+         "the hint does not interrupt the process check")
+  assert(record.state["delegation_hint"].nil?, "no hint is recorded when a check wins")
+end
+
+# A hint is only delivered after the same freshness re-check as check
+# decisions; an observation that changed during the assessment drops it.
+fixture(interval: 300) do |root, record, host, checker, _runtime|
+  host.working("progress")
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
+  advisor.on_call = -> { File.write(File.join(root, "artifact.txt"), "changed during assessment") }
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
+                                   member_policy: member_policy(%w[opencode]))
+  now = Time.now.to_f
+  runtime.tick(now: now + 6)
+  assert(host.messages.none? { |message| message.include?("delegation hint") } && record.state["delegation_hint"].nil?,
+         "a hint against a changed observation is dropped")
+
+  advisor.on_call = nil
+  runtime.tick(now: now + 70)
+  assert(host.messages.count { |message| message.include?("delegation hint") } == 1,
+         "a later fresh assessment delivers the hint")
+end
+
+# A changed allowlist never blocks stopping an already-registered member.
+fixture do |root, record, _host, checker, _runtime|
+  team = RuntimeTeamHost.new(root)
+  runtime = Orbit::TaskRuntime.new(record: record, connection: team, checker: checker,
+                                   member_policy: member_policy(["opencode"]))
+  record.submit("delegate", "text" => "scoped work")
+  runtime.tick(now: Time.now.to_f)
+  member = record.state["members"].first
+  assert(member && member["kind"] == "opencode", "an allowed native member is created")
+  state = record.state
+  state["connection"]["thread_id"] = "existing-root"
+  record.save(state)
+  retry_runtime = Orbit::TaskRuntime.new(record: record, connection: team, checker: nil,
+                                         member_policy: member_policy([]))
+  result = retry_runtime.retry_stop("User retried stop")
+  assert(result["status"] == "paused" && team.members.fetch(member["thread_id"]).stop_calls == 1,
+         "an emptied allowlist does not block stopping a registered member")
 end
 
 # Pending clues block completion until an artifact check confirms or

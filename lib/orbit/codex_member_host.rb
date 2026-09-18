@@ -13,9 +13,9 @@ module Orbit
   # address stays short for the Unix socket limit (macOS); the app-server
   # runs in its own process group so process-group exit is verifiable.
   #
-  # This host never relaxes the member boundary: member creation stays on
-  # CodexConnection's `approvalPolicy: never` / `workspace-write` / no Orbit
-  # MCP path, and stop evidence is never inferred from a missing socket.
+  # This host never relaxes stop evidence: member creation stays on
+  # CodexConnection's `approvalPolicy: never` / `danger-full-access` / no
+  # Orbit MCP path, and stop is never inferred from a missing socket.
   class CodexMemberHost
     READY_TIMEOUT = 15.0
     SHUTDOWN_GRACE = 5.0

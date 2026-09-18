@@ -5,6 +5,7 @@ require_relative "version"
 require_relative "codex_connection"
 require_relative "plugin_connection"
 require_relative "check_runner"
+require_relative "member_policy"
 require_relative "../../scripts/manage-install"
 
 module Orbit
@@ -23,8 +24,44 @@ module Orbit
         "dependencies" => dependencies,
         "installation" => installation,
         "connection" => connection,
+        "members" => member_check(connection_record, connection: connection),
         "review_model" => model_check(connection),
         "credentials" => { "verified" => false, "detail" => "未请求模型；登录、模型可用性和额度未验证。" }
+      }
+    end
+
+    # Allowlist authorization vs actually controlled member paths. Allowed
+    # kinds without an adapter stay visible as unavailable; availability of
+    # an install/login never counts as authorization.
+    def member_check(connection_record, connection: nil)
+      policy = MemberPolicy.load
+      provider = connection_record&.dig("provider")
+      allowed = policy.allowed_kinds
+      portable = MemberAdapters.portably_callable_kinds
+      unadapted = allowed.reject { |kind| portable.include?(kind) }
+      # A failed or absent session connection proves nothing about which
+      # kinds that Root can call; never report them as callable.
+      unless provider && connection && connection["ready"] == true
+        return {
+          "allowed_kinds" => allowed, "source" => policy.source, "config_path" => policy.path,
+          "provider" => provider, "connection_ready" => provider ? connection&.dig("ready") == true : nil,
+          "callable_kinds" => nil, "unavailable_kinds" => unadapted, "unavailable_on_provider" => [],
+          "detail" => provider ? "会话连接失败，未验证当前 Root 可调用的成员 kind" : "未提供会话；可调用性需在具体 Root 会话中核对"
+        }
+      end
+
+      callable = MemberAdapters.callable_kinds(provider).select { |kind| allowed.include?(kind) }
+      other_root = (allowed & portable) - callable
+      {
+        "allowed_kinds" => allowed, "source" => policy.source, "config_path" => policy.path,
+        "provider" => provider, "connection_ready" => true, "callable_kinds" => callable,
+        "unavailable_kinds" => unadapted, "unavailable_on_provider" => other_root, "detail" => nil
+      }
+    rescue MemberPolicy::Error => error
+      {
+        "allowed_kinds" => nil, "source" => nil, "config_path" => MemberPolicy.config_path,
+        "provider" => connection_record&.dig("provider"), "callable_kinds" => nil,
+        "unavailable_kinds" => [], "unavailable_on_provider" => [], "error" => error.message
       }
     end
 
@@ -41,6 +78,27 @@ module Orbit
         lines << "    下一步：#{entry['next_step']}" if entry["next_step"]
       end
       lines << "下一步：#{installation['next_step']}" if installation["next_step"]
+      members = report["members"]
+      if members
+        if members["error"]
+          lines << "成员名单：读取失败：#{members['error']}"
+        else
+          lines << "成员名单：#{members['allowed_kinds'].empty? ? '（空，禁止创建新成员）' : members['allowed_kinds'].join('、')}（来源：#{members['source']}）"
+        end
+        if members["callable_kinds"]
+          lines << "可调用成员：#{members['callable_kinds'].empty? ? '无' : members['callable_kinds'].join('、')}（当前会话 provider：#{members['provider']}）"
+          unless Array(members["unavailable_on_provider"]).empty?
+            lines << "当前会话不可调用：#{members['unavailable_on_provider'].join('、')}（需对应 Root）"
+          end
+        elsif members["provider"]
+          lines << "可调用成员：未验证（#{members['detail'] || '会话未连接'}）"
+        else
+          lines << "可调用成员：未提供会话；已验证适配器：#{MemberAdapters.portably_callable_kinds.join('、')}"
+        end
+        unless Array(members["unavailable_kinds"]).empty?
+          lines << "不可调用成员：#{members['unavailable_kinds'].join('、')}（允许但无受控适配器）"
+        end
+      end
       connection = report.fetch("connection")
       lines << "会话连接：#{connection['detail']}"
       lines << "项目：#{connection['project']}" if connection["project"]

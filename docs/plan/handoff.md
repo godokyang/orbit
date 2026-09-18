@@ -1,10 +1,18 @@
 # Orbit 当前交接
 
-用户指出当前多 Agent 协作、Herdr 可用成员发现、Jev 委派提示、状态可见性与真实安装仍未满足日常使用目标。2026-09-18 [独立审查及复核](../reference/project-review-20260918.md)确认：一次真实开发任务的 7 次已完成检查全部过期，Orbit 投递纠正为 0，检查用量记录为 4,246,313 tokens（含缓存口径）。按[用户结果补齐计划](user-outcome-completion-plan.md)执行到：切片 A 已实现并经受控路径、持续编辑任务和 0.6.2 新宿主会话验证；切片 B 已核对 Jev 输入边界、真实判断与额外消耗，完成 patch 升级与本机安装；切片 C 已按跨宿主原生成员路径实现并完成真实验收：OpenCode Root 显式 `kind: codex`，任务运行进程持有成员 app-server，结果回收、执行中中断、运行进程异常退出后的显式停止重试与会话保留分别取证；同宿主 `native` 委托保留，其他 kind 与 Herdr 控制未验证。切片 D 未推进。实际证据、用量与未覆盖范围见[检查回路与 Jev 实际验证](../reference/check-loop-acceptance-20260918.md)与[跨宿主成员验收](../reference/cross-host-member-acceptance-20260918.md)。
+用户指出当前多 Agent 协作、Herdr 可用成员发现、Jev 委派提示、状态可见性与真实安装仍未满足日常使用目标。2026-09-18 [独立审查及复核](../reference/project-review-20260918.md)确认：一次真实开发任务的 7 次已完成检查全部过期，Orbit 投递纠正为 0，检查用量记录为 4,246,313 tokens（含缓存口径）。按[用户结果补齐计划](user-outcome-completion-plan.md)执行到：切片 A 已实现并经受控路径、持续编辑任务和 0.6.2 新宿主会话验证；切片 B 已核对 Jev 输入边界、真实判断与额外消耗，完成 patch 升级与本机安装；切片 C 已按跨宿主原生成员路径实现并完成真实验收：OpenCode Root 显式 `kind: codex`，任务运行进程持有成员 app-server，结果回收、执行中中断、运行进程异常退出后的显式停止重试与会话保留分别取证；同宿主 `native` 委托保留，其他 kind 与 Herdr 控制未验证。切片 D 已实现有界 Jev 分工提示，但真实样本未触发提示，分工收益尚未验证。实际证据、用量与未覆盖范围见[检查回路与 Jev 实际验证](../reference/check-loop-acceptance-20260918.md)、[跨宿主成员验收](../reference/cross-host-member-acceptance-20260918.md)与[成员名单、权限及分工提示验收](../reference/member-policy-acceptance-20260918.md)。
 
 ## Codex 审批与 MCP 修正（2026-09-18）
 
-用户报告 `approval_policy=never` 的 Codex 会话无法调用 `orbit.task`。根因是 `orbit codex` 的 per-tool 审批覆盖写成服务名 `orbit`，而 Codex 按真实工具名 `task` 匹配，默认 `auto` 在缺少只读标注时要求审批，`never` 会话被拒绝。修正为 `tools={task={approval_mode="approve"}}`；验证中另发现 Codex 0.155 通过 `_meta.threadId` 传递会话身份，MCP 桥接已同时接受该键与旧前缀键。按 patch 升到 **0.6.4** 并安装（`content_digest b9c129c0…`、`installed_at 2026-09-18T06:57:02Z`）；新 `orbit codex -a never` 会话完成 context → start → status → stop（任务 `paused`、停止确认），默认审批策略会话调用同样成功。README、ADR-007 与测试已同步，证据见 [Codex 审批与 MCP 调用验收](../reference/codex-approval-acceptance-20260918.md)。提交状态以 Git 为准；未推送、未发布。
+用户报告 `approval_policy=never` 的 Codex 会话无法调用 `orbit.task`。根因是 `orbit codex` 的 per-tool 审批覆盖写成服务名 `orbit`，而 Codex 按真实工具名 `task` 匹配，默认 `auto` 在缺少只读标注时要求审批，`never` 会话被拒绝。修正为 `tools={task={approval_mode="approve"}}`；验证中另发现 Codex 0.155 通过 `_meta.threadId` 传递会话身份，MCP 桥接已同时接受该键与旧前缀键。按 patch 升到 **0.6.4** 并安装（`content_digest b9c129c0…`、`installed_at 2026-09-18T06:57:02Z`）；新 `orbit codex -a never` 会话完成 context → start → status → stop（任务 `paused`、停止确认），默认审批策略会话调用同样成功。README、ADR-007 与测试已同步，证据见 [Codex 审批与 MCP 调用验收](../reference/codex-approval-acceptance-20260918.md)。提交与推送状态以 Git 为准；未发布。
+
+## 成员名单、full access 与 Jev 分工提示（2026-09-18）
+
+按用户授权实现最小成员允许名单：`~/.config/orbit/members.json` 只含 `allowed_kinds`，缺失时默认 `codex、omp、opencode、kimi、cursor-agent、grok`，存在时完整覆盖，空数组禁止新建；`native` 解析为 Root 实际 kind，派发前完成名单与适配器检查（失败给出具体原因且不创建宿主），名单变化不影响已登记成员的停止与回收。只声明已验证路径（同宿主 codex／opencode／omp、OpenCode Root → Codex）；`kimi` 等无适配器时显示不可调用，`orbit doctor` 分别列出允许／可调用／缺口。
+
+Codex 执行成员与 `orbit codex` 新会话默认 full access，OpenCode／OMP 成员沿用 Root 原生权限；显式更严格配置优先，检查者仍只读。真实任务 `975e4686`：名单拒绝与适配器缺口均在创建前生效；同宿主 OpenCode 成员与跨宿主 Codex 成员并行完成，Codex 成员成功在项目外写文件（无审批），结果回原 Root 并被集成，停止与成员宿主退出均确认；把名单改为空数组后停止仍确认两个已登记成员。恢复会话的权限覆盖受 Codex 原生限制（“Permission overrides are not supported when resuming a remote task”），已记录，不声称修复。
+
+切片 D 同步实现：Jev 新增 `delegatable` 概率，仅当存在允许且可调用成员时至多提示 Root 一次，不自动派发；提示在状态新鲜度复核后发送，同次判断触发的检查优先；真实 Jev 返回该分数，本样本低于阈值未提示，分工收益未验证。按 patch 升到 **0.6.5** 并安装（`content_digest e860c0da…`、`installed_at 2026-09-18T08:13:06Z`）；`npm test` 22 项通过。证据见 [成员名单与 full access 验收](../reference/member-policy-acceptance-20260918.md)。提交与推送状态以 Git 为准；未发布。
 
 ## 检查回路修正与验证（2026-09-18）
 
@@ -53,7 +61,7 @@
 - **OpenCode**：直接运行 `opencode`，保留原生恢复、模型和权限参数。
 - **Codex**：运行 `orbit codex` 或 `orbit codex resume SESSION_ID`；普通 embedded Codex 仍不自动热接入。
 - Root 就是当前负责用户整项任务的 Agent，不另建、不替换。需要成员的执行任务先接入再 delegate；其他合适的多步骤工作由共用 skill 主动判断，讨论和简单独立修改通常不启动。
-- 成员与 Root 同宿主。OMP 沿用 Root 模型、thinking、项目及有效权限，只开放 Root 当前启用的基础编码工具，不复制扩展、MCP 或再次派发。OpenCode 沿用 Root 模型、variant、Agent 和权限；Codex 默认沿用检查模型与工作区写入沙箱。均由 Root 核验集成结果。
+- 默认成员与 Root 同宿主；OpenCode Root 还可显式创建 `kind: codex` 跨宿主成员。OMP 沿用 Root 模型、thinking、项目及有效权限，只开放 Root 当前启用的基础编码工具，不复制扩展、MCP 或再次派发。OpenCode 沿用 Root 模型、variant、Agent 和权限；Codex 执行成员默认沿用检查模型并使用 full access。均由 Root 核验集成结果。
 - **检查者仍需要 Codex**。检查模型优先 `ORBIT_REVIEW_MODEL`；OMP／OpenCode 默认从 Codex config.toml 顶层读取，使用 Codex profile 时显式指定。已实测的执行模型为 `opencode-go/deepseek-v4.1-flash`，不要与 V4、Zen 或直連混用。
 
 推荐 runtime 目录 `~/.local/share/orbit/orbit`，CLI `~/.local/bin/orbit`；本机这套旧安装现已卸载。新版安装器只管理 CLI、OpenCode 插件和 OMP 扩展，skill 全部交给 npx skills。OMP 扩展采用 `PI_CODING_AGENT_DIR`、其次 `OMP_PROFILE` 对应的 agent 目录，默认 `~/.omp/agent`；OpenCode 遵循 `OPENCODE_CONFIG_DIR`。OMP 可原生读取 npx 安装的共享 `.agents/skills`，不需要专用 skill 安装路径。

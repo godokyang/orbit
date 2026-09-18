@@ -74,7 +74,7 @@ Grok、dsh、Cursor Agent 列为低优先级，仅在官方提供满足所需角
 
 2026-09-18 用户确认跨宿主成员应走原生控制：先验证 OpenCode Root 派发 Codex 成员这一条路径。此前 `delegate` 只创建 Root 同宿主成员；Herdr 的 Agent 列表与 pane 可用于发现或展示，但按键投递、屏幕读取与 pane 存在都不是 Orbit 的结果回收或停止证据。此前 Herdr OpenCode 实验暴露的脱管后台服务见[验证记录](../reference/check-loop-acceptance-20260918.md)，不通过要求成员避免启动后台服务来替代控制验证。
 
-跨宿主成员宿主由任务运行进程持有，记录短控制地址和进程归属以供异常退出后的显式停止重连；成员先登记再开始模型工作。当前同宿主成员的原生停止、后台工作核对和会话历史保留要求继续适用；停止成员后再关闭其宿主。首条路径只声明实际验收的 Codex 成员能力，不以支持 kind 数量为验收目标。目标模型从 Codex 侧选择，保留现有工作区写入沙箱与不升级权限。具体运行边界见[任务运行合同](../../contracts/task-runtime.md)，验证事实见[跨宿主成员验收](../reference/cross-host-member-acceptance-20260918.md)。
+跨宿主成员宿主由任务运行进程持有，记录短控制地址和进程归属以供异常退出后的显式停止重连；成员先登记再开始模型工作。当前同宿主成员的原生停止、后台工作核对和会话历史保留要求继续适用；停止成员后再关闭其宿主。首条路径只声明实际验收的 Codex 成员能力，不以支持 kind 数量为验收目标。目标模型从 Codex 侧选择；Codex 执行成员权限按下文“成员允许名单与 full access”的后续决定执行。具体运行边界见[任务运行合同](../../contracts/task-runtime.md)，验证事实见[跨宿主成员验收](../reference/cross-host-member-acceptance-20260918.md)。
 
 2026-09-14 后续授权的 OpenCode 最小实验已通过原生插件读取、同一会话纠偏、成员结果集成与事件触发的团队停止，见 [验证数据](../reference/opencode-probe-20260914.json)。这支持优先复用官方插件及原生客户端的接入方向；实验脚本尚未纳入生产 TaskRuntime，无端口完整控制与安装入口仍须落实，当前支持声明不变。
 
@@ -118,10 +118,21 @@ Jev 的判断不取代固定产物上的独立检查及实际停止证据。程�
 
 ## 跨宿主成员：OpenCode Root → Codex（2026-09-18）
 
-用户要求 Root 能把已授权、实际可用的不同 Coding Agent 纳入分工；首条路径为 OpenCode Root 显式选择 `kind: codex`。任务运行进程为该任务启动并持有独立的 Codex app-server，以 `/tmp` 下的短控制 socket 提供原生接口；成员 thread 在 `turn/start` 前持久登记（kind、socket、宿主 PID／进程组、thread ID、模型和状态）。成员按项目目录创建，模型取自 Codex 自身配置或显式授权，沿用 `approvalPolicy: never`、`workspace-write` 且不加载 Orbit MCP，不沿用 OpenCode 的 provider／model 字符串。结果从成员原生会话读取并经 Root 现有通道回传。
+用户要求 Root 能把已授权、实际可用的不同 Coding Agent 纳入分工；首条路径为 OpenCode Root 显式选择 `kind: codex`。任务运行进程为该任务启动并持有独立的 Codex app-server，以 `/tmp` 下的短控制 socket 提供原生接口；成员 thread 在 `turn/start` 前持久登记（kind、socket、宿主 PID／进程组、thread ID、模型和状态）。成员按项目目录创建，模型取自 Codex 自身配置或显式授权，沿用 `approvalPolicy: never`、`workspace-write`（默认权限随后由“成员允许名单与 full access”一节改为 full access）且不加载 Orbit MCP，不沿用 OpenCode 的 provider／model 字符串。结果从成员原生会话读取并经 Root 现有通道回传。
 
 停止确认覆盖成员当前 turn、宿主跟踪的后台终端，随后关闭成员 app-server 并核对进程组退出；socket 消失本身不是停止证据，进程组不存在才是。运行进程异常退出而成员宿主仍存活时，记录保留可重连地址，显式 `stop` 重试从任务记录重连、停止并核对；证据不足保持 `stop_unconfirmed`。成员会话按原生记录保留，不要求终态后成员仍在线。Herdr／tmux 只可用于展示，不承担投递、结果或停止控制；同宿主 `delegate` 保留，不为跨宿主放宽沙箱、权限或停止证据，也不在本轮建设其他 kind、通用注册中心或热更新。真实验收要求分别证明结果回到原 Root、执行中中断与后台工作退出、运行进程异常退出后的显式停止重试，以及会话历史保留；验证事实见 [跨宿主成员验收](../reference/cross-host-member-acceptance-20260918.md)。
 
 ## Codex 会话内 Orbit MCP 的审批与调用身份修正（2026-09-18）
 
 `orbit codex` 原先按服务名 `orbit` 写 per-tool 审批覆盖；Codex 只按实际工具名 `task` 匹配 `mcp_servers.orbit.tools.<tool>.approval_mode`，未匹配时回退默认 `auto`，对缺少只读标注的自定义 MCP 工具要求审批，`approval_policy=never` 会话因此收到 “MCP tool call requires approval, but approval policy is never”。修正为按真实工具名设置 `approve`：仅 `orbit.task` 在该入口启动的会话内预批准，其他工具、shell 沙箱、成员边界与全局配置不变。验证中发现 Codex 0.155 通过 `_meta.threadId` 传递调用方会话身份，MCP 桥接随后同时接受该键与旧的前缀键，`start` 才能绑定当前 Root；此前 `start` 因缺少身份失败。真实验证见 [Codex 审批与 MCP 调用验收](../reference/codex-approval-acceptance-20260918.md)。
+
+## 成员允许名单与 full access（2026-09-18）
+
+用户明确授权默认允许 `codex、omp、opencode、kimi、cursor-agent、grok`，并让 Orbit 新启动的执行 Agent 默认 full access，避免成员在受限沙箱内反复审批或执行失败；同时要求只声明实际接通的路径，不为凑齐 kind 写按键或屏幕解析。
+
+- 允许名单：可选 `~/.config/orbit/members.json` 只含 `allowed_kinds`。缺失时用默认六项，存在时完整覆盖，空数组禁止创建新成员；`native` 解析为 Root 实际 kind 后检查。派发前先检查名单与适配器，失败在创建任何宿主或成员之前给出具体原因；名单变化不影响已登记成员的停止与结果回收。
+- 适配器范围：只声明同宿主 Codex／OpenCode／OMP 成员与已验收的 OpenCode Root → Codex 成员；`kimi`、`cursor-agent`、`grok` 允许但无可调用适配器时表现为不可调用并说明缺口，不新增供应商适配器。`doctor` 显示允许、可调用与缺口。
+- 权限：Codex 执行成员明确设置 full access（`approvalPolicy: never` + `danger-full-access`）；OpenCode 成员沿用 Root 原生权限与模型配置，用户已确认其默认权限满足日常编码，Orbit 不修改该权限接线；OMP 成员沿用 Root 原生权限与工具集。`orbit codex` 新会话默认 full access。用户显式传入更严格的权限配置优先，入口不静默丢弃；不修改全局配置，不扩大检查者与裁定者的只读权限。Codex remote resume 的权限覆盖行为按真实验证记录（覆盖被拒绝），未验证不声明修复。分工提示在状态新鲜度复核后发送，同次判断触发的检查优先。
+- Jev 分工提示：在同一请求中增加“可能适合独立分工”的概率；只有存在允许且可调用的成员时至多提示 Root 一次，不自动派发、不选择 kind、不替代检查者。记录信号、实际派发与额外用量；无收益不增加阈值或路由。真实样本尚未触发提示，分工收益未验证。
+
+真实验收要求：名单允许与拒绝都在创建前生效；不支持 kind 不报成可调用；当前受控路径成员真实任务无反复审批、结果回 Root、停止确认；Codex 新会话与恢复分别核对；Jev 提示最多一次且不自动派发。验证事实见 [成员名单与 full access 验收](../reference/member-policy-acceptance-20260918.md)。

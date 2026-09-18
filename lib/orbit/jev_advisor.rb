@@ -26,6 +26,11 @@ module Orbit
         "type" => "noul",
         "instructions" => "Would a full independent review of the current artifact now likely provide useful, current feedback? Consider whether the agent is actively changing it and the review would quickly become stale.",
         "criteria" => { "true" => "A meaningful artifact checkpoint is available now", "false" => "The artifact is still too early or actively changing" }
+      },
+      "delegatable" => {
+        "type" => "noul",
+        "instructions" => "Is there likely a bounded, independent subtask that an authorized execution member could deliver now while the main agent continues? Count only separable work with a clear result; do not count trivial, overlapping or preference-only work, and do not assume a member is available.",
+        "criteria" => { "true" => "A concrete separable subtask is visible in the recent work", "false" => "Work is coupled, trivial or no separable subtask is visible" }
       }
     }.freeze
 
@@ -78,12 +83,13 @@ module Orbit
       raise Error, "TypeSafe assessment failed: #{error.class}"
     end
 
-    def self.observation(inputs:, host:, members:, project_root:, artifact_digest:, elapsed_seconds:)
+    def self.observation(inputs:, host:, members:, project_root:, artifact_digest:, elapsed_seconds:, member_options: nil)
       amendments, omitted = bounded_amendments(inputs.fetch("amendments", []))
       {
         "instruction" => limit(inputs.fetch("instruction"), 4000),
         "amendments" => amendments,
         "amendments_omitted" => omitted,
+        "member_options" => member_options,
         "host" => host.slice("status", "turn_id", "last_turn_id", "last_turn_status", "active_tools"),
         "recent_observations" => observation_tail(host["observations"]),
         "members" => members.last(5).map do |member|

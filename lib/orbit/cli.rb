@@ -9,6 +9,7 @@ require_relative "codex_connection"
 require_relative "plugin_connection"
 require_relative "check_runner"
 require_relative "jev_advisor"
+require_relative "member_policy"
 require_relative "session_entry"
 require_relative "task_view"
 require_relative "diagnostics"
@@ -105,7 +106,8 @@ module Orbit
       else
         raise ArgumentError, "unknown command #{command.inspect}; run orbit --help"
       end
-    rescue ArgumentError, OptionParser::ParseError, SystemCallError, Connection::Error, CheckRunner::Error, JSON::ParserError => error
+    rescue ArgumentError, OptionParser::ParseError, SystemCallError, Connection::Error, CheckRunner::Error,
+           MemberPolicy::Error, JSON::ParserError => error
       warn "orbit: #{error.message}"
       1
     end
@@ -281,6 +283,15 @@ module Orbit
       raise ArgumentError, "unexpected arguments" unless argv.empty?
       record = command == "stop" ? TaskView.single!(argument) : TaskRecord.new(argument || raise(ArgumentError, "task directory is required"))
       json = command != "stop" || options.delete("json")
+      # New members are checked against the allowlist and the verified
+      # adapters before anything is queued or created.
+      if command == "delegate" && options["member"].to_s.empty?
+        provider = record.state.dig("connection", "provider")
+        policy = MemberPolicy.load
+        kind = policy.resolve_kind(options["kind"] || "native", provider)
+        policy.check!(kind)
+        MemberAdapters.require!(kind, provider)
+      end
       if command == "stop" && retryable_stop?(record)
         state = record.state
         connection = Connection.open(state.fetch("connection"))

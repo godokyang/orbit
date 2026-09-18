@@ -4,6 +4,7 @@
 
 | 限制 | 当前影响 | 继续处理的条件 |
 | --- | --- | --- |
+| Codex 恢复会话不接受权限覆盖 | `orbit codex resume` 沿用会话保存的权限；显式权限覆盖被 Codex 拒绝（“Permission overrides are not supported when resuming a remote task”），恢复后无法通过启动参数获得 full access | 依赖 Codex 原生支持或用户在会话内用原生权限选择；新会话已默认 full access，不绕过限制、不丢弃用户参数 |
 | 更新安装清理上一 release | 已加载的宿主扩展和运行中任务仍引用旧 release；本次一次真实任务在安装后读取规则库失败（`failed`，停止已确认）。宿主会话重开后才加载新扩展 | 有真实热更新或保留旧 release 的需求后再设计并验证；当前按“结束任务→安装→重开宿主会话”使用，本轮不扩展安装器 |
 | 现有 Codex 嵌入式会话不能热接入 | orbit codex 已跑通日常入口和显式恢复原会话；普通已打开的 embedded TUI 仍缺少原生端点 | 用户明确停止当前工作后，从 orbit codex resume 恢复原会话；没有已验证接口时不自动迁移 |
 | 历史读取有前置条件 | 只接入已加载、具备历史读取能力的持久会话；ephemeral 或尚未物化的会话不可用 | 原生接口提供相应能力且有明确使用需求后再适配 |
@@ -19,6 +20,6 @@ Root 运行故障仅记录，不建设自动替换或恢复。新供应商、全
 
 观察程序报错会尝试收尾并如实记录；退出后仍可显式 stop 重试。不恢复模型执行。检查进程停止曾未确认时，必须核实登记进程组已不存在才能清除旧错误，证据不足继续保持未确认。
 
-OpenCode 1.18.30 的无端口正式接入、同一 Root 纠偏、成员集成、原生中断和正常退出收尾已验证，见 [验收记录](../reference/opencode-runtime-acceptance-20260914.json)。插件需在启动时加载；检查者仍使用 Codex，OpenCode 默认检查模型仅读取 Codex 顶层配置，使用 profile 的用户应显式指定 ORBIT_REVIEW_MODEL。尚不支持混合宿主成员，强杀宿主后不自动恢复。
+OpenCode 1.18.30 的无端口正式接入、同一 Root 纠偏、成员集成、原生中断和正常退出收尾已验证，见 [验收记录](../reference/opencode-runtime-acceptance-20260914.json)。插件需在启动时加载；检查者仍使用 Codex，OpenCode 默认检查模型仅读取 Codex 顶层配置，使用 profile 的用户应显式指定 ORBIT_REVIEW_MODEL。OpenCode Root → Codex 成员已接入并单独验收，其他跨宿主组合尚未接入；强杀宿主后不自动恢复。
 
 OMP 18.1.16 的普通入口、同一 Root 纠偏、成员集成、原生 Esc、恢复后正常退出已验证，见 [运行数据](../reference/omp-runtime-acceptance-20260914.json)。安装应用到所选 OMP agent/profile 目录；不会跨所有 profile 自动加载。成员只开放 Root 已启用的基础编码工具，不复制扩展、MCP 或再次委派。一次开发验收取消 Codex 检查进程组时收到 EPERM，任务如实保留 stop_unconfirmed；后续核对登记进程组已不存在，没有把失败记录改写成通过。
