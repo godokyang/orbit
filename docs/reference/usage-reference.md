@@ -125,7 +125,7 @@ status 默认输出可读文本；`--json` 返回单项原始 state，多个／�
 
 ### Codex 入口的权限与恢复
 
-`orbit codex` 新会话默认 full access，显式权限参数优先。恢复使用显式会话 ID 时，Orbit 按该会话记录的沙箱恢复（full 保持 full，受限保持受限；记录不可读时要求显式沙箱，不会降权继续）；显式沙箱参数经本入口持有的 app-server 生效，不传给会拒绝远程权限覆盖的远端 TUI；显式审批参数与 Codex 保存的审批策略不一致时在启动前报错，不会以其他权限继续。`resume --last` 由 Orbit 在当前项目的本地记录中解析为最新可恢复会话的 UUID，再按该会话恢复并把 UUID 交给 Codex，不会让它使用可能选中其他项目的全局 `--last`；当前项目没有匹配记录时要求显式会话 ID，选择器暂不支持。显式会话 ID 不受项目限制。
+`orbit codex` 的权限只有一个来源：本次启动命令解析出的策略，默认 full access。显式沙箱／审批参数按字段覆盖该策略（同一字段按出现顺序，后者生效）：`--dangerously-bypass-approvals-and-sandbox` 对应 `approval_policy=never` + `danger-full-access`，`--approve-for-me` 对应自动审批 + `workspace-write`（并设置 `approvals_reviewer=auto_review`）；两者都是组合权限选项，但语义不同。TUI 本身不接收权限覆盖参数；入口在本地 app-server 与 TUI 之间运行一个只服务本入口的透明代理，在 `thread/start`、`thread/fork`（用户线程、非 ephemeral）和 `thread/resume` 的请求边界把审批策略与沙箱原子改写为该策略，其余消息双向原样转发，app-server 的 `control.sock` 继续供 Orbit 控制、成员、检查者与停止链使用。因此界面内 `/new`、`/resume`、`/fork` 与首次启动得到同一权限，远端恢复不再被拒绝。`-p/--profile` 首版不支持：profile 的权限由 Codex 在界面侧解析，无法与单一策略共存，启动前会明确报错，不会静默忽略；`sandbox_workspace_write` 等其他权限形态未纳入改写。
 
 ### 接入已有会话
 

@@ -132,7 +132,47 @@ Jev 的判断不取代固定产物上的独立检查及实际停止证据。程�
 
 - 允许名单：可选 `~/.config/orbit/members.json` 只含 `allowed_kinds`。缺失时用默认六项，存在时完整覆盖，空数组禁止创建新成员；`native` 解析为 Root 实际 kind 后检查。派发前先检查名单与适配器，失败在创建任何宿主或成员之前给出具体原因；名单变化不影响已登记成员的停止与结果回收。
 - 适配器范围：只声明同宿主 Codex／OpenCode／OMP 成员与已验收的 OpenCode Root → Codex 成员；`kimi`、`cursor-agent`、`grok` 允许但无可调用适配器时表现为不可调用并说明缺口，不新增供应商适配器。`doctor` 显示允许、可调用与缺口。
-- 权限：Codex 执行成员明确设置 full access（`approvalPolicy: never` + `danger-full-access`）；OpenCode 成员沿用 Root 原生权限与模型配置，用户已确认其默认权限满足日常编码，Orbit 不修改该权限接线；OMP 成员沿用 Root 原生权限与工具集。`orbit codex` 新会话默认 full access；仅显式指定审批策略时仍补 `danger-full-access`，显式沙箱或组合权限模式优先，避免 `never` 与意外继承的 `workspace-write` 组合。不修改全局配置，不扩大检查者与裁定者的只读权限。恢复会话：full access 默认放在入口持有的 app-server 启动配置，显式 UUID 按线程记录恢复原沙箱（受限保持受限，记录不可读时启动前失败），显式权限选项经该 app-server 生效而不传给拒绝远程覆盖的 TUI；显式审批与保存值不一致时启动前明确规定失败；`--last` 由入口在该项目的本地记录内解析为最新可恢复会话的 UUID 后传给 TUI，无匹配记录时启动前失败；picker 暂不支持；显式 UUID 不受项目限制。未解决范围记入当前限制。分工提示在状态新鲜度复核后发送，同次判断触发的检查优先。
+- 权限：Codex 执行成员明确设置 full access（`approvalPolicy: never` + `danger-full-access`）；OpenCode 成员沿用 Root 原生权限与模型配置，用户已确认其默认权限满足日常编码，Orbit 不修改该权限接线；OMP 成员沿用 Root 原生权限与工具集。`orbit codex` 把本次启动的权限作为唯一策略：默认 full access，显式沙箱／审批参数按字段覆盖，TUI argv 不再携带权限覆盖参数；入口自有的透明代理在 `thread/start`、`thread/fork`（`threadSource=user` 非 ephemeral）与 `thread/resume` 的历史边界原子应用该策略，原生界面内 `/new`、`/resume`、`/fork` 与首次启动一致，系统／ephemeral 线程不改写。Orbit 控制、成员、检查者与停止链继续直连 `control.sock`。`-p/--profile` 首版明确拒绝，不新增 TOML 解析；其他权限形态不纳入改写。不修改全局配置，不扩大检查者与裁定者的只读权限。分工提示在状态新鲜度复核后发送，同次判断触发的检查优先。
 - Jev 分工提示：在同一请求中增加“可能适合独立分工”的概率；只有存在允许且可调用的成员时至多提示 Root 一次，不自动派发、不选择 kind、不替代检查者。记录信号、实际派发与额外用量；无收益不增加阈值或路由。真实样本尚未触发提示，分工收益未验证。
 
 真实验收要求：名单允许与拒绝都在创建前生效；不支持 kind 不报成可调用；当前受控路径成员真实任务无反复审批、结果回 Root、停止确认；Codex 新会话与恢复分别核对；Jev 提示最多一次且不自动派发。验证事实见 [成员名单与 full access 验收](../reference/member-policy-acceptance-20260918.md)。
+
+## `orbit codex` 权限的单一权威（2026-09-19，已实现并完成隔离真实验收）
+
+用户在 `orbit codex --dangerously-bypass-approvals-and-sandbox` 打开、显示 YOLO mode 的界面内使用 `/resume`，收到 Codex 的 “Permission overrides are not supported when resuming a remote task”。上一轮只处理了启动命令带 `resume` 的路径，覆盖不到界面内的原生会话操作。用户认定继续按命令逐条修补不可接受，要求从根上解决；本节记录经用户认可的决定与理由。问题定义见 [Codex 远端会话入口的权限边界问题](../plan/codex-remote-session-boundary-20260919.md)。
+
+### 根因
+
+Orbit 把“本次启动选定的权限”这一个意图同时交给两个主体：远端 TUI 的启动参数与入口持有的 app-server 配置，再在两者分歧或 Codex 拒绝其一的每条路径（新建、`resume UUID`、`--last`、picker、界面内 `/resume`、fork）分别修补。Codex 远端模式本身只有一个权限主体。按 Codex 0.155 源码核对（`codex-rs/tui/src/app_server_session.rs`、`tui/src/app/config_persistence.rs`、`tui/src/app/thread_routing.rs`、`tui/src/chatwidget/settings.rs`、`app-server/src/request_processors/thread_processor.rs`、`persisted_resume_settings.rs`、协议 `v2/thread.rs`）：
+
+- 远端 TUI 对 `thread/resume` 与继承式 `thread/fork` 不发送审批、沙箱和权限 profile，由 server 恢复保存的设置；TUI 带 CLI 权限覆盖，或选中的 profile 含审批／沙箱字段时，远端 resume 会被拒绝。隔离实测未复现“用户在界面内运行时改过权限就会被拒绝”，不把它列为根因。
+- 远端 TUI 的 `thread/start` 会把自己配置里的审批策略和沙箱发给 server，盖过 app-server 的 `-c` 配置；这是当前实现不得不同时给 TUI 传权限参数的来源。
+- server 恢复线程时只回填保存的审批策略、审批路由与命名 permission profile，不回填 legacy 沙箱。
+- server 提供 `thread/settings/update`（`approvalPolicy`、`sandboxPolicy` 或 `permissions`），对任意已加载线程生效，写入会话记录（后续恢复也会沿用），并广播 `thread/settings/updated`；TUI 收到后更新自己的权限配置与状态栏，之后每个 `turn/start` 发送更新后的审批策略，沙箱保持跟随 server。Orbit 现有控制连接已以 `experimentalApi` 初始化，可直接调用。
+
+### 已决定的原则
+
+1. 权限只有一个产品权威：同一次 `orbit codex` 启动选定的权限必须与状态栏和每一轮实际执行一致。
+2. 新建、`resume`、`--last`、picker、界面内 `/resume`、`/new` 与 fork 必须经过同一条生命周期规则，不能逐条增加特殊分支。
+3. 权限必须在 `thread/start`／`thread/resume`／`thread/fork` 的生命周期边界原子确定，并在首个 `turn/start` 前生效；用户在会话内显式改动权限后由 Codex 原生接管。
+4. Orbit MCP 仅预批准 `orbit.task`，不写全局配置，不扩大检查者与裁定者的只读权限；执行成员的权限决定不受本节影响。
+
+### 理由
+
+让用户把 full access 写进 `config.toml` 会把 Orbit 的默认扩散到用户所有 Codex 用法，并违背不写全局配置的边界。权限仍需由 Orbit 的本次入口选择，但必须通过一个覆盖所有线程生命周期操作且无首轮竞态的控制点实现。
+
+### 已否定的具体机制
+
+- 第二控制连接在隔离实测中没有收到 TUI 的 `thread/started`；轮询能发现线程，但属于事后观察。
+- 轮询发现后立即调用 `thread/settings/update` 仍输给 TUI 首轮 `turn/start`：首轮实际为 `on-request + danger-full-access`，第二轮才成为 `never + danger-full-access`。因此“每个线程更新一次”不满足首轮权限承诺。
+- app-server 提前创建带目标权限的空线程后，远端 TUI 无法恢复它，返回 `no rollout found`；不能用空线程预创建堵住竞态。
+- `-p` 指向含权限字段的 profile 也会触发远端恢复拒绝；仅剥离显式权限标志不完整。
+- 完整证据见 [Codex 远端会话入口的权限边界问题](../plan/codex-remote-session-boundary-20260919.md)。
+
+### 已验证的实现机制
+
+- Codex 的 `thread/start`、`thread/resume`、`thread/fork` 请求本身都接受 `approvalPolicy` 与 `sandbox`。隔离代理在请求进入 app-server 前原子改写这两个字段后，新建、终端恢复、界面内 picker、`/new` 与 `/fork` 均成功，状态栏与首轮 `turn_context` 一致为 `never + danger-full-access`。
+- 生产入口使用双 socket：Orbit 控制连接直接访问 app-server 的 `control.sock`；TUI 通过透明代理的 `tui.sock`。代理只影响本次用户界面，不改变成员、检查者与停止连接。
+- 新建和 fork 仅改写 `threadSource: "user"` 且非 ephemeral 的请求。实测的标题生成线程是 `threadSource: "system"`、`ephemeral: true`，过滤后保持原来的 read-only。resume 请求没有来源字段，只在 TUI 专用 socket 上统一处理。
+- TUI 不再接收直接权限标志；入口解析它们形成代理策略。`-p/--profile` 内含权限字段时，TUI 会在请求发出前拒绝远端 resume/fork，首版明确报不支持而不静默丢弃 profile；没有真实需求前不引入 TOML 解析或配置镜像。
+- 已按此实现：入口解析一次策略并移除 TUI argv 中的权限覆盖参数，TUI 连接 `tui.sock`，代理只改写用户线程生命周期请求；按目标 UUID 预测恢复设置、项目内替换 `--last`、picker 拒绝及保存沙箱推断的旧实现已删除，原生命令统一经过生命周期边界。隔离真实 TUI 结果见 [Codex 远端会话入口的权限边界问题](../plan/codex-remote-session-boundary-20260919.md) 的落地与验证一节。

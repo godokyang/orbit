@@ -4,7 +4,7 @@
 
 | 限制 | 当前影响 | 继续处理的条件 |
 | --- | --- | --- |
-| Codex 恢复会话的权限限制 | 远端 TUI 仍拒绝权限覆盖参数；`orbit codex` 已改为把 full access 默认放在入口持有的 app-server。显式 UUID 恢复按线程记录恢复沙箱（记录不可读时启动前失败并要求显式沙箱），显式沙箱生效；显式审批策略与 Codex 保存值不一致时启动前失败。`--last` 由入口在当前项目的本地记录内解析为最新可恢复会话的 UUID，无匹配记录时启动前失败；选择器暂不支持；显式 UUID 不受项目限制。不把可能选中其他项目的全局 `--last` 交给 Codex。其他直接 `codex --remote … resume` 仍受原生限制 | 需要 Codex 原生支持恢复时的线程设置更新；`--last` 仅限本入口记录的项目内解析，不建通用会话发现器 |
+| Codex TUI 的权限边界与 profile | `orbit codex` 已改为“单一策略 + TUI 专用透明代理”：界面内 `/new`、`/resume`、`/fork` 与首次启动得到同一权限，Orbit 控制仍直连 `control.sock`。剩余边界：`-p/--profile` 首版明确拒绝（未新增 TOML 解析）；`sandbox_workspace_write` 等未纳入改写的权限形态仍可能被 Codex 原生拒绝远端恢复；其他直接 `codex --remote … resume` 与本入口无关 | 出现真实 profile 需求时再评估配置解析或等待 Codex 原生支持；不扩大代理改写字段 |
 | 旧 release 清理时机 | 仍有存活 lease 的旧 release 保留到持有进程退出后的下一次安装；长期不更新的安装可能多保留一份 release 的磁盘占用 | 出现实际磁盘或发布需求时再做后台清理或显式清理入口 |
 | 现有 Codex 嵌入式会话不能热接入 | orbit codex 已跑通日常入口和显式恢复原会话；普通已打开的 embedded TUI 仍缺少原生端点 | 用户明确停止当前工作后，从 orbit codex resume 恢复原会话；没有已验证接口时不自动迁移 |
 | 历史读取有前置条件 | 只接入已加载、具备历史读取能力的持久会话；ephemeral 或尚未物化的会话不可用 | 原生接口提供相应能力且有明确使用需求后再适配 |

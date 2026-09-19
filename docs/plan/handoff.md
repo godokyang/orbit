@@ -2,6 +2,10 @@
 
 用户指出当前多 Agent 协作、Herdr 可用成员发现、Jev 委派提示、状态可见性与真实安装仍未满足日常使用目标。2026-09-18 [独立审查及复核](../reference/project-review-20260918.md)确认：一次真实开发任务的 7 次已完成检查全部过期，Orbit 投递纠正为 0，检查用量记录为 4,246,313 tokens（含缓存口径）。按[用户结果补齐计划](user-outcome-completion-plan.md)执行到：切片 A 已实现并经受控路径、持续编辑任务和 0.6.2 新宿主会话验证；切片 B 已核对 Jev 输入边界、真实判断与额外消耗，完成 patch 升级与本机安装；切片 C 已按跨宿主原生成员路径实现并完成真实验收：OpenCode Root 显式 `kind: codex`，任务运行进程持有成员 app-server，结果回收、执行中中断、运行进程异常退出后的显式停止重试与会话保留分别取证；同宿主 `native` 委托保留，其他 kind 与 Herdr 控制未验证。切片 D 已实现有界 Jev 分工提示，但真实样本未触发提示，分工收益尚未验证。实际证据、用量与未覆盖范围见[检查回路与 Jev 实际验证](../reference/check-loop-acceptance-20260918.md)、[跨宿主成员验收](../reference/cross-host-member-acceptance-20260918.md)与[成员名单、权限及分工提示验收](../reference/member-policy-acceptance-20260918.md)。
 
+## Codex TUI 权限边界修正（2026-09-19）
+
+`orbit codex` 把本次启动的权限解析成唯一策略，TUI argv 不再携带权限覆盖参数；入口新增只服务 TUI 的透明 WebSocket 代理 `tui.sock`，在 `thread/start`／`thread/fork`（`threadSource=user` 且非 ephemeral）与 `thread/resume` 进入 app-server 前原子改写 approvalPolicy／sandbox（`--approve-for-me` 另含 approvalsReviewer），系统／ephemeral 线程与其他消息原样转发。Orbit 控制、MCP、成员、检查者与停止链继续直连 `control.sock`，app-server 同时接收同一策略作为默认兜底。隔离真实 TUI 验证（独立 CODEX_HOME、临时项目、pty 驱动）：首次会话、界面内 `/new`、`/fork` 的新线程与 `/resume` 恢复后的下一轮，`turn_context` 均为 `never + danger-full-access`；全程无 “Permission overrides” 错误；控制连接在 TUI 运行期间可读；退出后 launcher 返回 0，未遗留代理进程或 host 目录。`-p/--profile` 首版明确拒绝（不新增 TOML 解析），`sandbox_workspace_write` 等其他权限形态不纳入改写。此前按 UUID 预测恢复目标、项目内替换 `--last`、picker 拒绝与保存沙箱推断的旧实现已删除。设计与机制证据见[Codex 远端会话入口的权限边界问题](codex-remote-session-boundary-20260919.md)。未提交、未升版。
+
 ## 旧 release 保留与 failed 停止状态（2026-09-18，0.6.8）
 
 新版本的任务运行进程、`orbit codex` 会话与已加载宿主在 release 内登记 pid lease；更新保留由存活 lease 引用的旧 release，持有者退出后的下一次安装清理。卸载有存活 lease 时在移除入口和安装记录前拒绝，结束相关进程后可重试。首次从未登记 lease 的旧版升级前需结束旧任务和会话，不做兼容迁移。原失败任务 `30586614` 及已损坏的旧 Codex 会话不会由本修复恢复。`orbit status` 对 `failed` 按 `stop_confirmation.confirmed` 区分“运行失败，停止已确认”和“运行失败，停止情况需核实”。CLI 与安装回归覆盖新版本 lease 保留、陈旧 lease 后续清理、存活 lease 拒绝卸载和 `failed` 两种显示；本机未重新安装，真实升级核对留待下次安装。
