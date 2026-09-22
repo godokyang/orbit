@@ -1,5 +1,19 @@
 # Orbit 当前交接
 
+## 执行协作与检查回路整体调优（2026-09-22，方向已冻结）
+
+Zeen Login 真实复盘确认的问题不止 JEV：任务只启动独立检查、执行成员为 0；实际产物和任务快照根位于不同 worktree；同一 finding 与相反裁定反复出现；13 次检查全部 stale 并记录约 962 万检查 tokens；排队、检查意见、整体终态和停止确认不够直观。JEV 另因 `TYPESAFE_API_KEY` 未进入当时的 Orbit MCP 子进程而没有运行，不能把零委派解释成 JEV 的低分判断。该历史记录不因后续修复改写。
+
+用户已冻结整体方向：执行与检查分轴显示；Root 对真实独立工作面评估并行收益并显式派发；工作区通过受控 rebind 改变；finding 和裁定按证据版本收敛；自动检查按 observation 去重合并并收缩输入；状态显示 workspace、成员、检查、JEV、finding 与用量；动态模型资料由 Root 按需检索并在有效期内复用。总实施方案见 [执行协作与检查回路整体调优计划](orbit-execution-review-optimization.md)，JEV prompt、阈值和模型证据接口见 [JEV 委派判断专项计划](jev-delegation-optimization.md)，事实证据见 [Zeen Login 使用复盘与 JEV 证据](../reference/zeen-login-orbit-experience-20260922.md)。
+
+实现与确定性回归已进入合同，隔离临时项目已真实跑通小任务负样本、JEV 两阶段提示、显式 Codex 成员、成员结果回收、真实 finding 修复，以及 worktree rebind 后旧检查按 workspace stale、新检查读取新 root。现行语义包括：`artifact_root` 与显式 rebind；Codex `env_vars` 只传 `TYPESAFE_API_KEY` 名称；JEV 第一阶段达到阈值后请求模型证据，`model-evidence` 写入缓存，第二阶段 `member_fit`／`parallel_gain` 过阈值才提示，不自动 `delegate`，已有活跃成员时暂停新自动提示；observation key 自动去重，手动请求可绕过但不能并发；旧进程遗留的同 key `in_flight` 在本进程没有 owned checker 时记 `check_abandoned_recovered` 并以新检查号重试一次；普通 stale 不立即重查，workspace stale 不迁移 finding 并为新 root 安排一次检查；同一 finding id 已 open 且证据未变化时记 `finding_repeat_ignored`、不再次纠正 Root，任一证据维度变化才重新投递；已 resolve 的同一 id 无新证据不重开；有效无 finding 的手动终检按版本唤醒 Root 一次并等待显式 stop；检查者程序上下文 64KiB；status 分层并按角色显示用量，未知不推算。真实记录见 [优化真实验收记录](../reference/orbit-optimization-acceptance-plan-20260922.md)。
+
+随后严格按项目级 `orbit-real-acceptance` Skill 复验真实拓扑：Controller 通过 Herdr 启动三个全新 `orbit codex` Root，再把用户需求交给 Root 自行运行 Orbit。小任务正确不委派，rebind 的旧 scope stale／新 scope 生效，真实 Codex 成员也完成结果回收与停止；但正向任务的最终 JEV 事件其实是 `delegation_declined`（`delegatable=0.91`、`member_fit=0.63`、`parallel_gain=0.40`），Root 却把阶段一分数误称为明确委派信号并自行 delegate。三条任务还都因 Root 轮询 `status` 产生 `host` stale；小任务和并行任务据 stale 终检停止，rebind 为得到有效结果跑了四次 reviewer。三条 reviewer 合计 `751,412` tokens。故“机械能力可用”与“工作流按预期执行”必须分开：当前严格复验不是全绿，优先修正最终建议信号的可见性与不会污染 freshness 的等待/唤醒机制。
+
+0.6.12 已按同一 Skill 追加 Herdr → 全新 `orbit codex` 真实复验。小任务和双工作面任务都在 manual check 后结束 turn，由 `finalization_notice` 自动唤醒；各只有一次 fresh reviewer，分别为 `76,393` 与 `75,585` input tokens。双工作面第一阶段 `delegatable=0.91`，第二阶段最终 `declined`，Root 明确区分候选分和最终决定，没有 delegate，也没有把它说成 Orbit 建议。in-flight rebind 的首次复验反向发现“check 后无条件结束 turn”与显式状态迁移冲突；等待纪律现只禁止为了等检查结论轮询，允许用最少查询确认用户要求动作的状态前置条件。最终样本以一次 status 确认旧 check 已 in flight，旧 scope 按 `workspace/artifact/input` stale，新 linked scope fresh，两次 reviewer input 合计 `284,580`，任务停止确认。完整路径、失败中间样本与 build digest 见[验收记录](../reference/orbit-optimization-acceptance-plan-20260922.md)。
+
+尚未具备，也不能勾成真实验收：程序不自动检测或暂停 `workspace_mismatch`；换新 finding id 的语义同义问题只靠检查者 prompt 复用 id；同版本 finding repeat/reopen 与 observation 去重的全部分支尚未逐一用真实模型强制复现；Codex Root 也不能仅凭 Herdr 可见 pane 调用任意 Flash 成员。真实检查 token 仍高，小任务一次约 8.7 万 input、双模块四次合计 34.45 万。文档口径版本 0.6.12；候选/最终决定、委派依据、artifact/process freshness 与等待指令的 0.6.12 复验结果以真实验收记录为准。
+
 用户指出当前多 Agent 协作、Herdr 可用成员发现、Jev 委派提示、状态可见性与真实安装仍未满足日常使用目标。2026-09-18 [独立审查及复核](../reference/project-review-20260918.md)确认：一次真实开发任务的 7 次已完成检查全部过期，Orbit 投递纠正为 0，检查用量记录为 4,246,313 tokens（含缓存口径）。按[用户结果补齐计划](user-outcome-completion-plan.md)执行到：切片 A 已实现并经受控路径、持续编辑任务和 0.6.2 新宿主会话验证；切片 B 已核对 Jev 输入边界、真实判断与额外消耗，完成 patch 升级与本机安装；切片 C 已按跨宿主原生成员路径实现并完成真实验收：OpenCode Root 显式 `kind: codex`，任务运行进程持有成员 app-server，结果回收、执行中中断、运行进程异常退出后的显式停止重试与会话保留分别取证；同宿主 `native` 委托保留，其他 kind 与 Herdr 控制未验证。切片 D 已实现有界 Jev 分工提示，但真实样本未触发提示，分工收益尚未验证。实际证据、用量与未覆盖范围见[检查回路与 Jev 实际验证](../reference/check-loop-acceptance-20260918.md)、[跨宿主成员验收](../reference/cross-host-member-acceptance-20260918.md)与[成员名单、权限及分工提示验收](../reference/member-policy-acceptance-20260918.md)。
 
 ## Codex TUI 权限边界修正（2026-09-19）

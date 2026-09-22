@@ -14,6 +14,8 @@ require_relative "jev_setup"
 require_relative "member_policy"
 require_relative "session_entry"
 require_relative "task_view"
+require_relative "workspace_binding"
+require_relative "model_evidence_cache"
 require_relative "diagnostics"
 require_relative "release_lease"
 
@@ -37,7 +39,7 @@ module Orbit
       OpenCode / OMP 继续直接运行 opencode / omp。
       skill 独立安装与维护：npx skills install godokyang/orbit --skill orbit --global
       具体参数：orbit <命令> --help；状态的机器输出：orbit status --json。
-      Agent 执行接口：start / check / amend / dispute / delegate（各自 --help）。
+      Agent 执行接口：start / check / amend / dispute / delegate / rebind-workspace / model-evidence（各自 --help）。
     TEXT
 
     COMMAND_HELP = {
@@ -52,6 +54,8 @@ module Orbit
       "amend" => "orbit amend TASK_DIRECTORY --file FILE|-",
       "dispute" => "orbit dispute TASK_DIRECTORY --reason TEXT",
       "delegate" => "orbit delegate TASK_DIRECTORY --file FILE|- [--kind codex] [--model MODEL] [--member THREAD_ID]",
+      "rebind-workspace" => "orbit rebind-workspace TASK_DIRECTORY PATH [--reason TEXT]\n把产物目录改到同一 Git 仓库中的工作区。命令入队后由任务进程记录来源、原因和历史；amend / dispute 的文字不会切换路径。",
+      "model-evidence" => "orbit model-evidence TASK_DIRECTORY --file FILE|-\n提交 Root 检索到的模型事实证据（JSON object 或 array）。Orbit 校验模型标识、来源 URL、取得时间、有效期和指标口径后原子写入用户级缓存，再通知任务进程重查；不修改用户要求，不保存网页正文或凭据。",
       "start" => <<~TEXT
         orbit start [--provider codex|opencode|omp] [--project DIR]
                     [--review-model MODEL] [--thread ID] [--socket PATH]
@@ -108,13 +112,17 @@ module Orbit
         run_task(task)
       when "status"
         status(argv)
+      when "rebind-workspace"
+        rebind_workspace(argv)
+      when "model-evidence"
+        model_evidence(argv)
       when "stop", "check", "amend", "dispute", "delegate"
         submit(command, argv)
       else
         raise ArgumentError, "unknown command #{command.inspect}; run orbit --help"
       end
     rescue ArgumentError, OptionParser::ParseError, SystemCallError, Connection::Error, CheckRunner::Error,
-           MemberPolicy::Error, JSON::ParserError => error
+           MemberPolicy::Error, WorkspaceBinding::Error, ModelEvidenceCache::Error, JSON::ParserError => error
       warn "orbit: #{error.message}"
       1
     end
@@ -287,11 +295,70 @@ module Orbit
       connection = Connection.open(state.fetch("connection"))
       checker = CheckRunner.new(model: state.dig("review", "model"))
       advisor = JevAdvisor.for_project(state.fetch("project_root"))
-      runtime = TaskRuntime.new(record: record, connection: connection, checker: checker, advisor: advisor)
+      runtime = TaskRuntime.new(record: record, connection: connection, checker: checker, advisor: advisor,
+                                evidence_cache: ModelEvidenceCache.new)
       %w[INT TERM].each { |signal| Signal.trap(signal) { runtime.request_stop } }
       result = runtime.run
       puts JSON.generate({ "task_directory" => record.path, "status" => result.fetch("status") })
       %w[complete paused needs_user].include?(result["status"]) ? 0 : 1
+    end
+
+    def rebind_workspace(argv)
+      options = {}
+      OptionParser.new do |parser|
+        parser.on("--reason TEXT") { |value| options["reason"] = value }
+      end.parse!(argv)
+      directory = argv.shift
+      path = argv.shift
+      raise ArgumentError, "usage: orbit rebind-workspace TASK_DIRECTORY PATH [--reason TEXT]" if directory.nil? || path.nil? || !argv.empty?
+
+      record = TaskRecord.new(directory)
+      if TaskRuntime::TERMINAL.include?(record.state["status"])
+        raise ArgumentError, "task process has ended; records are retained, no action was queued"
+      end
+
+      reason = options["reason"].to_s.strip
+      reason = "explicit workspace rebind" if reason.empty?
+      source = { "kind" => "cli", "command" => "rebind-workspace" }
+      current = record.state["workspace"]
+      current = WorkspaceBinding.bind(project_root: record.state.fetch("project_root")) unless current.is_a?(Hash)
+      canonical = WorkspaceBinding.rebind(current, artifact_root: path).fetch("artifact_root")
+      id = record.submit("rebind_workspace", "path" => canonical, "reason" => reason, "source" => source)
+      puts JSON.generate({ "task_directory" => record.path, "command_id" => id, "status" => "queued" })
+      0
+    end
+
+    def model_evidence(argv)
+      options = {}
+      OptionParser.new do |parser|
+        parser.on("--file FILE") { |value| options["file"] = value }
+      end.parse!(argv)
+      directory = argv.shift
+      raise ArgumentError, "usage: orbit model-evidence TASK_DIRECTORY --file FILE|-" if directory.nil? || !argv.empty?
+
+      # The record and its terminal state are resolved before the cache is
+      # touched, so a missing or finished task cannot leave new evidence.
+      record = TaskRecord.new(directory)
+      if TaskRuntime::TERMINAL.include?(record.state["status"])
+        raise ArgumentError, "task process has ended; records are retained, no action was queued"
+      end
+
+      payload = JSON.parse(read_input(options.fetch("file") { raise ArgumentError, "--file is required" }))
+      unless payload.is_a?(Hash) || (payload.is_a?(Array) && !payload.empty?)
+        raise ArgumentError, "model evidence must be one JSON object or a non-empty array of objects"
+      end
+
+      # Full validation and the atomic write happen before queueing; a
+      # rejected submission is never queued. The queue carries identity and
+      # status only, and the runtime re-reads the validated cache instead of
+      # trusting a copy of metrics, sources or page text.
+      entries = ModelEvidenceCache.new.record_all(payload)
+      summary = entries.map { |entry| entry.slice("provider", "model", "reasoning", "status") }
+      id = record.submit("model_evidence", "entries" => summary,
+                         "source" => { "kind" => "cli", "command" => "model-evidence" })
+      puts JSON.generate({ "task_directory" => record.path, "command_id" => id, "status" => "queued",
+                           "count" => entries.length, "identities" => summary.map { |entry| entry.slice("provider", "model", "reasoning") } })
+      0
     end
 
     def submit(command, argv)
@@ -337,7 +404,14 @@ module Orbit
         raise ArgumentError, "--reason is required"
       end
       id = record.submit(command, options)
-      puts(json ? JSON.generate({ "task_directory" => record.path, "command_id" => id, "status" => "queued" }) : "已提交停止请求，尚未确认停止。用 orbit status #{record.state.fetch('id')} 查看结果。")
+      payload = { "task_directory" => record.path, "command_id" => id, "status" => "queued" }
+      # A manual check is queued work. Unless the user already required an
+      # independent state change, the caller should end this turn; polling only
+      # to wait wastes a Root turn and creates another observation.
+      if command == "check"
+        payload["next_action"] = "若无用户已明确要求且不依赖检查结果的后续状态变更，结束当前轮次并等待 Orbit 通知；不要仅为等待检查结论而 sleep、poll 或 status"
+      end
+      puts(json ? JSON.generate(payload) : "已提交停止请求，尚未确认停止。用 orbit status #{record.state.fetch('id')} 查看结果。")
       0
     end
 

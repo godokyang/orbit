@@ -56,6 +56,7 @@ const sdk = { AgentRegistry: { global: () => ({ list: () => sessions.map(s => ({
   createAgentSession: async options => {
     created.push(options);
     const child = session(`member-${created.length}`);
+    child.sessionManager.getCwd = () => options.cwd;
     return { session: child, setToolUIContext: (ui, hasUI) => { assert.equal(ui, ctx.ui); assert.equal(hasUI, true); } };
   }
 };
@@ -86,6 +87,7 @@ try {
   await assert.rejects(request('state', { session: 'foreign' }), /not owned/);
   await tool({ action: 'delegate', task: started.task_directory, text: 'Verify only, do not edit.' });
   await waitFor(async () => (await record()).members[0]?.status === 'working');
+  assert.equal(created[0].cwd, project, 'execution member adopts the cwd supplied by Orbit');
   assert.equal(created[0].settings.approval, 'always-ask'); assert.notEqual(created[0].settings, settings);
   assert.deepEqual(created[0].toolNames, ['read', 'bash']); assert.equal(created[0].restrictToolNames, true);
   assert.equal(created[0].parentAgentId, 'root'); assert.equal(created[0].model, model);

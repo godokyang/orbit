@@ -97,9 +97,14 @@ export function installOmpExtension(pi, sdk) {
       case 'stop': return stop(entry);
       case 'create_member': {
         if (entry.root) throw new Error('Execution members cannot create a team');
+        if (typeof request.cwd !== 'string' || request.cwd.trim() === '') throw new Error('member creation requires a project directory');
+        let cwd;
+        try { cwd = await fs.realpath(request.cwd); }
+        catch { throw new Error(`member cwd does not exist: ${request.cwd}`); }
+        if (!(await fs.stat(cwd)).isDirectory()) throw new Error(`member cwd is not a directory: ${request.cwd}`);
         const model = currentContext.models.list().find(m => `${m.provider}/${m.id}` === request.model);
         if (!model) throw new Error('Requested member model is not available in the current OMP session');
-        const native = entry.session, cwd = native.sessionManager.getCwd();
+        const native = entry.session;
         const settings = await native.settings.cloneForCwd(cwd);
         const agentId = `orbit-${randomUUID()}`;
         const result = await sdk.createAgentSession({ cwd, agentDir: native.settings.getAgentDir(), settings,

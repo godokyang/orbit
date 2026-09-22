@@ -29,7 +29,8 @@ const client = { session: {
   status: async () => ({ data: { ...statuses } }),
   create: async ({ body }) => {
     const id = `member-${++seq}`;
-    sessions.set(id, { ...body, id, directory: project }); histories.set(id, []);
+    const directory = body.directory ? await fs.realpath(body.directory) : project;
+    sessions.set(id, { ...body, id, directory }); histories.set(id, []);
     return { data: sessions.get(id) };
   },
   promptAsync: async ({ path: { id }, body }) => {
@@ -74,6 +75,19 @@ try {
     rescue Orbit::Connection::Error => error
       raise unless error.message.include?('has not called Orbit')
     end
+    begin
+      connection.create_member(model: 'authorized/execution-model', cwd: '')
+      raise 'empty cwd accepted'
+    rescue Orbit::Connection::Error => error
+      raise unless error.message.include?('requires a project directory')
+    end
+    missing = File.join(record.fetch('project_root'), 'missing-member-cwd')
+    begin
+      connection.create_member(model: 'authorized/execution-model', cwd: missing)
+      raise 'missing cwd accepted'
+    rescue Orbit::Connection::Error => error
+      raise unless error.message.include?('does not exist')
+    end
   `);
   assert.deepEqual(prompts[0].body.model, selection); assert.equal(prompts[0].body.variant, 'high');
   await tool({ action: 'delegate', task: started.task_directory, text: 'Verify only; no modifications.' });
@@ -81,6 +95,7 @@ try {
   const member = (await state()).members[0];
   assert.equal(member.model, 'authorized/execution-model');
   assert.equal(sessions.get(member.thread_id).model.variant, 'high');
+  assert.equal(sessions.get(member.thread_id).directory, project);
   assert.equal(sessions.get(member.thread_id).agent, 'restricted-project-agent');
   assert.equal(prompts.find(p => p.id === member.thread_id).body.agent, 'restricted-project-agent');
   assert.deepEqual(sessions.get(member.thread_id).permission, [

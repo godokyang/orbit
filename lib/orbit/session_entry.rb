@@ -157,9 +157,16 @@ module Orbit
     # `approve` means pre-approved by policy for this tool only; the default
     # `auto` would require approval for a tool without read-only annotations,
     # which an approval_policy=never session cannot grant.
+    #
+    # Codex clears the environment for stdio MCP children and rebuilds it from
+    # an allowlist; env_vars forwards TYPESAFE_API_KEY by name, resolved from
+    # this launcher's environment at MCP spawn time, so the value never enters
+    # this config or the process command line. Only the launcher's own key is
+    # forwarded; nothing is faked when it is absent.
     def codex_configuration(mcp:, socket:)
+      env_vars = ENV["TYPESAFE_API_KEY"].to_s.strip.empty? ? "" : 'env_vars=["TYPESAFE_API_KEY"],'
       "mcp_servers.orbit={command=\"node\",args=[#{JSON.generate(mcp)}]," \
-        "env={ORBIT_CODEX_SOCKET=#{JSON.generate(socket)}}," \
+        "env={ORBIT_CODEX_SOCKET=#{JSON.generate(socket)}},#{env_vars}" \
         "tools={task={approval_mode=\"approve\"}}}"
     end
 

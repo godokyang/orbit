@@ -16,10 +16,24 @@ export const OrbitPlugin = async ({ client, directory }) => {
     return response.data;
   }
   const history = id => native('messages', { path: { id } });
+  async function memberDirectory(cwd) {
+    if (typeof cwd !== 'string' || cwd.trim() === '') throw new Error('member creation requires a project directory');
+    let resolved;
+    try { resolved = await fs.realpath(cwd); }
+    catch { throw new Error(`member cwd does not exist: ${cwd}`); }
+    if (!(await fs.stat(resolved)).isDirectory()) throw new Error(`member cwd is not a directory: ${cwd}`);
+    return resolved;
+  }
   async function session(id) {
     if (!allowed.has(id)) throw new Error('Session has not called Orbit on this host');
     const info = await native('get', { path: { id } });
-    if (await fs.realpath(info.directory) !== project) throw new Error('Session belongs to another project');
+    const directory = await fs.realpath(info.directory);
+    const member = members.get(id);
+    if (member) {
+      if (directory !== member.cwd) throw new Error('Execution member belongs to a different workspace');
+      return info;
+    }
+    if (directory !== project) throw new Error('Session belongs to another project');
     return info;
   }
   function userMessages(messages) {
@@ -92,15 +106,16 @@ export const OrbitPlugin = async ({ client, directory }) => {
       case 'stop': return stop(id);
       case 'create_member': {
         if (members.has(id)) throw new Error('Execution members cannot create a team');
+        const directory = await memberDirectory(request.cwd);
         const root = await session(id), selected = await model(id);
         const slash = request.model.indexOf('/');
         if (slash < 1) throw new Error('OpenCode member model must be provider/model');
         const memberModel = { providerID: request.model.slice(0, slash), id: request.model.slice(slash + 1) };
         if (`${selected.model.providerID}/${selected.model.modelID}` === request.model && selected.variant) memberModel.variant = selected.variant;
-        const member = await native('create', { body: { parentID: id, title: 'Orbit execution member', model: memberModel, agent: selected.agent,
+        const member = await native('create', { body: { parentID: id, directory, title: 'Orbit execution member', model: memberModel, agent: selected.agent,
           permission: [...(root.permission || []), { permission: 'task', pattern: '*', action: 'deny' }, { permission: 'orbit', pattern: '*', action: 'deny' }] } });
         allowed.add(member.id);
-        members.set(member.id, { root: id, model: memberModel, agent: selected.agent });
+        members.set(member.id, { root: id, cwd: directory, model: memberModel, agent: selected.agent });
         return member.id;
       }
       case 'start_member': {

@@ -12,7 +12,7 @@ const fs = require('node:fs');
 const { version } = require('../package.json');
 
 const server = new Server({ name: 'orbit', version }, { capabilities: { tools: {} } });
-const actions = ['context', 'start', 'status', 'check', 'amend', 'dispute', 'stop', 'delegate'];
+const actions = ['context', 'start', 'status', 'check', 'amend', 'dispute', 'stop', 'delegate', 'rebind_workspace', 'model_evidence'];
 server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [{
   name: 'task',
   description: 'Independent execution checks for your current coding session. Use the Orbit skill for appropriate tasks. context checks attachment; start binds the current session and original user message; task actions inspect or control an existing task. No Root is created or replaced.',
@@ -28,10 +28,17 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [{
       kind: { type: 'string', enum: ['native', 'codex'], description: 'Execution member kind: native (same host as Root) or codex (task-owned Codex app-server; OpenCode Root path).' },
       basis: { type: 'array', items: { type: 'string' } },
       task: { type: 'string', description: 'task_directory returned by start.' },
-      text: { type: 'string', description: 'Delegated scope, user amendment, dispute evidence, or stop reason.' },
+      text: { type: 'string', description: 'Delegated scope, user amendment, dispute evidence, stop reason, or rebind reason.' },
+      path: { type: 'string', description: 'Artifact workspace directory for rebind_workspace; must be a non-empty path.' },
+      evidence: { type: ['object', 'array'], items: { type: 'object' }, description: 'Model evidence JSON for model_evidence: one entry object or an array of entry objects (identity, status, sources, metrics). Never web page text.' },
       check_in: { type: 'integer', minimum: 1 }
     }, required: ['action'] }
 }] }));
+
+function isEvidence(value) {
+  if (Array.isArray(value)) return value.every(item => item && typeof item === 'object' && !Array.isArray(item));
+  return Boolean(value) && typeof value === 'object';
+}
 
 function run(args, env, input) {
   return new Promise((resolve, reject) => {
@@ -58,7 +65,7 @@ server.setRequestHandler(CallToolRequestSchema, async request => {
   const thread = hostThread || a.thread_id || process.env.CODEX_THREAD_ID;
   const env = { ...process.env };
   if (thread) env.CODEX_THREAD_ID = thread;
-  const args = [a.action === 'context' ? 'doctor' : a.action];
+  const args = [{ context: 'doctor', rebind_workspace: 'rebind-workspace', model_evidence: 'model-evidence' }[a.action] || a.action];
   if (['context', 'status', 'stop'].includes(a.action)) args.push('--json');
   let input;
   if (a.action === 'start') {
@@ -84,7 +91,19 @@ server.setRequestHandler(CallToolRequestSchema, async request => {
       if (a.action === 'delegate' && a.kind) args.push('--kind', a.kind);
       if (a.action === 'delegate' && a.model) args.push('--model', a.model);
       if (a.action === 'delegate' && a.member) args.push('--member', a.member);
-    } else if (a.text) args.push('--reason', a.text);
+    } else if (a.action === 'rebind_workspace') {
+      const workspace = typeof a.path === 'string' ? a.path.trim() : '';
+      if (!workspace) throw new Error('rebind_workspace requires a non-empty workspace path.');
+      args.push(workspace);
+      const reason = typeof a.text === 'string' ? a.text.trim() : '';
+      if (reason) args.push('--reason', reason);
+    } else if (a.action === 'model_evidence') {
+      if (!isEvidence(a.evidence)) throw new Error('model_evidence requires evidence as a JSON object or array of objects.');
+      args.push('--file', '-');
+      input = JSON.stringify(a.evidence);
+    } else if (a.text) {
+      args.push('--reason', a.text);
+    }
   }
   const result = await run(args, env, input);
   return { isError: result.code !== 0,

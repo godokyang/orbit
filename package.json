@@ -1,6 +1,6 @@
 {
   "name": "@godokyang/orbit",
-  "version": "0.6.10",
+  "version": "0.6.12",
   "description": "Independent task execution checks for existing coding sessions.",
   "bin": {
     "orbit": "scripts/orbit"
@@ -26,7 +26,7 @@
     "plugins"
   ],
   "scripts": {
-    "test": "npm run check:version && sh -n install.sh && sh -n uninstall.sh && ruby --disable-gems tests/workspace_snapshot_test.rb && ruby --disable-gems tests/task_runtime_test.rb && ruby --disable-gems tests/codex_connection_test.rb && node tests/mcp_test.cjs && node tests/codex_tui_proxy_test.cjs && node tests/opencode_test.mjs && node tests/omp_test.mjs && ruby --disable-gems tests/cli_test.rb && ruby --disable-gems tests/install_test.rb",
+    "test": "npm run check:version && sh -n install.sh && sh -n uninstall.sh && ruby --disable-gems tests/workspace_snapshot_test.rb && ruby --disable-gems tests/workspace_binding_test.rb && ruby --disable-gems tests/jev_advisor_test.rb && ruby --disable-gems tests/model_evidence_cache_test.rb && ruby --disable-gems tests/observation_key_test.rb && ruby --disable-gems tests/check_runner_context_test.rb && ruby --disable-gems tests/task_runtime_test.rb && ruby --disable-gems tests/codex_connection_test.rb && node tests/mcp_test.cjs && node tests/codex_tui_proxy_test.cjs && node tests/opencode_test.mjs && node tests/omp_test.mjs && ruby --disable-gems tests/cli_test.rb && ruby --disable-gems tests/install_test.rb",
     "check:version": "ruby --disable-gems scripts/check-version.rb"
   },
   "publishConfig": {

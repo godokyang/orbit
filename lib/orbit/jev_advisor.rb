@@ -29,8 +29,27 @@ module Orbit
       },
       "delegatable" => {
         "type" => "noul",
-        "instructions" => "Is there likely a bounded, independent subtask that an authorized execution member could deliver now while the main agent continues? Count only separable work with a clear result; do not count trivial, overlapping or preference-only work, and do not assume a member is available.",
-        "criteria" => { "true" => "A concrete separable subtask is visible in the recent work", "false" => "Work is coupled, trivial or no separable subtask is visible" }
+        "instructions" => "Is there likely a bounded, independent subtask in the effective task requirements or remaining work that an authorized execution member could deliver now while the main agent continues? Prioritize the instruction, basis and amendments over whether the main agent has already mentioned or started that subtask in recent activity. Explicit disjoint files, modules or acceptance surfaces are strong evidence. Count only separable work with a clear result; do not count trivial, overlapping, preference-only or dependency-blocked work. Member availability is enforced separately by the caller, so do not lower this task-structure probability merely because availability is unknown.",
+        "criteria" => { "true" => "The effective requirements or remaining work expose a concrete, substantive and separable subtask with its own result", "false" => "The remaining work is coupled, trivial, dependency-blocked or has no clear separable result" }
+      }
+    }.freeze
+
+    # Second-stage delegation judgment, asked only after the caller's own
+    # structural checks pass. Wording is frozen in
+    # docs/plan/jev-delegation-optimization.md; the caller supplies member
+    # options and the bounded evidence comparison inside state.
+    DELEGATION_QUESTIONS = {
+      "member_fit" => {
+        "type" => "noul",
+        "instructions" => "Given the callable member options and the supplied model evidence, is at least one member likely to meet the best bounded subtask's acceptance bar without enough rework to erase the benefit? Treat missing or stale evidence as unknown and do not infer capability from a model name alone. When Root and a candidate have the same validated provider, model and reasoning identity, treat that identity equality as direct evidence of capability parity; a shared unknown reasoning label is not a mismatch.",
+        "criteria" => { "true" => "A callable member is likely to meet the acceptance bar without rework erasing the benefit",
+                        "false" => "No member is likely to meet the bar, or missing or stale evidence leaves the fit unknown" }
+      },
+      "parallel_gain" => {
+        "type" => "noul",
+        "instructions" => "Given the remaining task dependencies and the supplied execution evidence, would delegating the best bounded subtask now likely shorten the overall critical path after handoff, expected rework, integration, shared-resource contention, and verification are included? Independent substantive surfaces can gain from concurrency even when Root and member use the same model. Output speed alone is not task completion speed.",
+        "criteria" => { "true" => "Delegating the best bounded subtask likely shortens the overall critical path once handoff, rework, integration, contention and verification are included",
+                        "false" => "Delegation is unlikely to shorten the critical path, or the evidence is insufficient" }
       }
     }.freeze
 
@@ -57,12 +76,27 @@ module Orbit
     end
 
     def assess(state:)
+      post_questions(state: state, questions: QUESTIONS)
+    end
+
+    # Second-stage delegation judgment. The caller supplies the full bounded
+    # state, including member options and the evidence comparison; the advisor
+    # only asks member_fit and parallel_gain. It does not gather evidence, read
+    # caches, or infer model names, and a missing key is the caller's fact to
+    # structure around, not something this stage fabricates.
+    def assess_delegation(state:)
+      post_questions(state: state, questions: DELEGATION_QUESTIONS)
+    end
+
+    private
+
+    def post_questions(state:, questions:)
       raise Error, "TYPESAFE_API_KEY is missing" if @api_key.empty?
 
       request = Net::HTTP::Post.new(@endpoint)
       request["Authorization"] = "Bearer #{@api_key}"
       request["Content-Type"] = "application/json"
-      request.body = JSON.generate("model" => MODEL, "state" => state, "questions" => QUESTIONS)
+      request.body = JSON.generate("model" => MODEL, "state" => state, "questions" => questions)
       response = Net::HTTP.start(@endpoint.host, @endpoint.port, use_ssl: @endpoint.scheme == "https",
                                  open_timeout: 3, read_timeout: 5, write_timeout: 3) do |http|
         http.request(request)
@@ -73,7 +107,7 @@ module Orbit
       raise Error, "invalid TypeSafe response" unless payload.is_a?(Hash) && payload["answers"].is_a?(Hash) &&
                                                       payload["model"].is_a?(String)
       answers = payload.fetch("answers")
-      scores = QUESTIONS.to_h do |name, _question|
+      scores = questions.to_h do |name, _question|
         answer = answers.fetch(name)
         raise Error, "invalid #{name} answer" unless answer.is_a?(Hash)
         value = answer.fetch("noul")

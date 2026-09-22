@@ -36,7 +36,7 @@ curl -fsSL https://raw.githubusercontent.com/godokyang/orbit/main/install.sh | s
 orbit --version
 ```
 
-应输出类似 `orbit 0.6.10` 的版本号。当前源码版本为 `0.6.10`；远程命令安装 GitHub 上所选提交的版本，未推送的本地提交不会出现在远程安装中。
+应输出类似 `orbit 0.6.12` 的版本号。当前源码版本为 `0.6.12`；远程命令安装 GitHub 上所选提交的版本，未推送的本地提交不会出现在远程安装中。
 
 如果想继续使用当前终端，执行安装结束时显示的 `export PATH=...` 命令即可。自动保存的配置会在以后新开终端、重启电脑后继续生效。其他 shell 或关闭自动配置的方法见[PATH 配置](docs/reference/usage-reference.md#path-配置)。
 
@@ -104,7 +104,7 @@ Agent 确认接入后应主动说明“已接入 Orbit，后续会独立检查�
 orbit status
 ```
 
-默认显示要求摘要、记录状态、最近检查、下次检查时间及用户需处理事项。只有一个待处理任务时自动定位；多个任务时列出 ID，使用 `orbit status ID` 查看其中一个，ID 可缩写为唯一前缀。没有待处理任务时显示最近已结束记录；程序读取使用 `orbit status --json`。
+`orbit status` 会区分执行成员 0／N、检查状态（queued／running／stale／verdict）、JEV 第一阶段候选分／第二阶段 decision／最终 hint、下一动作，以及按角色的 token。高 `delegatable` 不等于建议；只有当前签名的持久 `delegation_hint` 才是 Orbit 已送达的最终提示。成员状态会区分跟随 hint 与 Root 无 hint 显式派发。Root 会话累计单独标为非任务增量，不计入任务用量。检查 `queued` 或 `verdict(complete)` 都不是任务 `complete`。只有一个待处理任务时自动定位；多个任务时列出 ID，使用 `orbit status ID` 查看其中一个，ID 可缩写为唯一前缀。没有待处理任务时显示最近已结束记录；程序读取使用 `orbit status --json`。
 
 | 状态 | 含义 |
 | --- | --- |
@@ -119,7 +119,7 @@ orbit status
 
 ### 4. 补充要求或停止
 
-补充要求时直接在原会话里说，Orbit 会记录新的用户要求。需要分工时，Agent 通过 Orbit 创建成员并集成结果，你不必另外开窗口组队。当前已验证 OpenCode Root 显式选择 `kind: codex`，让任务运行进程创建、回收和停止独立的 Codex 成员；其他跨宿主组合尚未验证。目标成员必须在本任务或项目规则中获得你的允许。
+补充要求时直接在原会话里说，Orbit 会记录新的用户要求。切换同一仓库的另一个 worktree 时，使用显式 `orbit rebind-workspace`；`amend` 和 `dispute` 只追加检查输入或争议理由，不切换产物根。需要分工时，Agent 通过 Orbit 创建成员并集成结果，你不必另外开窗口组队。当前已验证 OpenCode Root 显式选择 `kind: codex`，让任务运行进程创建、回收和停止独立的 Codex 成员；其他跨宿主组合尚未验证。目标成员必须在本任务或项目规则中获得你的允许。
 
 执行成员的允许名单保存在可选的 `~/.config/orbit/members.json`，只识别 `allowed_kinds`。文件不存在时默认允许 `codex、omp、opencode、kimi、cursor-agent、grok`；文件存在时完整采用其中列表，`"allowed_kinds": []` 表示禁止创建新成员。名单只表示授权：`kimi`、`cursor-agent`、`grok` 尚无受控适配器，不会被报成可调用；`orbit doctor` 会分别显示允许、可调用与缺口，修改名单不影响已在执行成员的停止与结果回收。
 
@@ -172,7 +172,7 @@ orbit jev setup
 
 按提示输入 TypeSafe key 并回车（输入时不显示），然后重新打开终端。在新终端启动 `orbit codex`、`opencode` 或 `omp`，新 Orbit 任务就会使用 Jev。命令将 key 写入仅当前用户可读的 TypeSafe 环境文件，并配置 zsh／bash 在启动时提供 `TYPESAFE_API_KEY`；Orbit 只从环境变量读取 key，不把它写进 Orbit 配置、项目或任务记录。已有环境变量优先，已运行的任务不会中途切换 key。路径、验证和项目关闭方法见[进阶说明](docs/reference/usage-reference.md#jev-与成员名单配置)。
 
-启用后，Orbit 会把有界的原始要求、指定依据摘录、有效修改、近期会话观察与产物差异摘要发送给 TypeSafe Jev。Jev 估计何时值得唤起独立检查者，以及是否可能有适合分工的子任务；实际检查、派发、完成与停止仍由 Orbit 和当前 Root 负责。每秒运行循环不会每秒请求 Jev。缺 key 或服务不可用时沿用原检查流程，key 不写入任务记录。
+启用后，Orbit 把有界的任务观察发给 TypeSafe Jev。`delegatable` 只决定是否进入证据与第二阶段判断；`member_fit` 与 `parallel_gain` 形成 `recommended`／`declined`，过阈值并成功持久化 `delegation_hint` 后才提示，永不自动 `delegate`。Root 仍可无 hint 手动派发，但记录会明确标为 Root 决定。模型证据由 Root 联网检索后用 `orbit model-evidence` 提交，并按有效期缓存；Orbit 没有内置模型排行榜。检查输入有界，相同 observation 自动去重；产物检查不会因只读 `status` 或纯宿主 turn 变化而过期，过程检查仍核对宿主行为。手动 `check` 入队后，若没有用户预先明确且不依赖检查结果的状态变更，Root 结束当前轮次，Orbit 在需要动作时唤醒；不得仅为等待检查结论而轮询。实际检查、派发、完成与停止仍由 Orbit 和当前 Root 负责。每秒运行循环不会每秒请求 Jev。缺 key 或服务不可用时沿用原检查流程，key 不写入任务记录。
 
 若某个项目不应发送这些信息，在该项目运行 `mkdir -p .orbit && touch .orbit/jev-disabled`；移除此标记后，后续新任务会重新启用。项目的 `.orbit` 目录属于本地任务资料，不需要提交。
 
@@ -251,7 +251,7 @@ Codex 的 MCP 工具显示为 `orbit.task`；OpenCode 使用 `orbit`，OMP 的�
 
 ## 当前范围与更多文档
 
-当前源码版本 **0.6.10**，尚未发布 npm 包。Codex、OpenCode、OMP 的同宿主接入，以及 OpenCode Root → Codex 成员的跨宿主路径已有真实验收；其他跨宿主组合与 `kimi`、`cursor-agent`、`grok` 尚未接入，不列为可调用。Codex 执行成员与 `orbit codex` 默认 full access，OpenCode／OMP 成员沿用 Root 原生权限；`orbit codex` 的权限由入口代理在用户线程生命周期边界统一应用，界面内 `/new`、`/resume`、`/fork` 与首次启动一致；`-p/--profile` 暂不支持，其他权限形态与直接 `codex --remote … resume` 仍受 Codex 原生限制，见[当前限制](docs/plan/debt-ledger.md)。pi 与 OMP 是不同项目，pi 等其他接入暂缓。
+当前源码版本 **0.6.12**，尚未发布 npm 包。上面的 status 分层、显式 `rebind-workspace`、JEV 两阶段提示、模型证据缓存、有界检查与 observation 去重，以及“候选分／最终决定／Root override”分离，都是 0.6.12 的确定性实现。真实路径、已通过部分与仍有限制的部分见 [优化真实验收记录](docs/reference/orbit-optimization-acceptance-plan-20260922.md)。Codex、OpenCode、OMP 的同宿主接入，以及 OpenCode Root → Codex 成员的跨宿主路径已有真实验收；其他跨宿主组合与 `kimi`、`cursor-agent`、`grok` 尚未接入，不列为可调用。Codex 执行成员与 `orbit codex` 默认 full access，OpenCode／OMP 成员沿用 Root 原生权限；`orbit codex` 的权限由入口代理在用户线程生命周期边界统一应用，界面内 `/new`、`/resume`、`/fork` 与首次启动一致；`-p/--profile` 暂不支持，其他权限形态与直接 `codex --remote … resume` 仍受 Codex 原生限制，见[当前限制](docs/plan/debt-ledger.md)。pi 与 OMP 是不同项目，pi 等其他接入暂缓。
 
 - [进阶使用参考](docs/reference/usage-reference.md)：安装目录、profile、CLI 参数、集成和版本维护。
 - [Agent 使用说明](skills/orbit/SKILL.md)：调用时机、分工与纠偏职责。

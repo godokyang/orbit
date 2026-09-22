@@ -6,6 +6,7 @@ require "socket"
 require "tmpdir"
 
 require_relative "../lib/orbit/codex_connection"
+require_relative "../lib/orbit/session_entry"
 
 module CodexConnectionTest
   THREAD_ID = "t-1"
@@ -19,7 +20,8 @@ module CodexConnectionTest
     tests = [:test_connect_rejects_missing_socket_unloaded_and_historyless_threads,
              :test_state_and_busy_idle_message_routing,
              :test_stop_reports_unconfirmed_terminals,
-             :test_member_creation_defaults_to_full_access]
+             :test_member_creation_defaults_to_full_access,
+             :test_codex_configuration_forwards_typesafe_key_by_name]
     tests.each do |test|
       Dir.mktmpdir do |tmp|
         send(test, tmp)
@@ -266,6 +268,29 @@ module CodexConnectionTest
       nil
     end
     server&.shutdown
+  end
+
+  # 5. Codex clears the environment for stdio MCP children and rebuilds it
+  # from an allowlist, so the generated config must name TYPESAFE_API_KEY in
+  # env_vars when (and only when) the launching environment has it. The value
+  # never enters the config or the app-server command line; without a key
+  # nothing is forwarded and nothing is faked.
+  def test_codex_configuration_forwards_typesafe_key_by_name(tmp)
+    original = ENV["TYPESAFE_API_KEY"]
+    ENV["TYPESAFE_API_KEY"] = "config-probe-key"
+    config = Orbit::SessionEntry.codex_configuration(mcp: "/tmp/orbit-mcp.cjs", socket: "/tmp/orbit-test.sock")
+    assert(config.include?('env_vars=["TYPESAFE_API_KEY"]'), "the MCP child receives the key by name")
+    assert(!config.include?("config-probe-key"), "the key value never enters the config or command line")
+
+    ENV["TYPESAFE_API_KEY"] = "   "
+    blank = Orbit::SessionEntry.codex_configuration(mcp: "/tmp/orbit-mcp.cjs", socket: "/tmp/orbit-test.sock")
+    assert(!blank.include?("env_vars"), "a blank key is not forwarded")
+
+    ENV["TYPESAFE_API_KEY"] = nil
+    absent = Orbit::SessionEntry.codex_configuration(mcp: "/tmp/orbit-mcp.cjs", socket: "/tmp/orbit-test.sock")
+    assert(!absent.include?("env_vars"), "no key means env_vars stays out of the config")
+  ensure
+    ENV["TYPESAFE_API_KEY"] = original
   end
 
   # Harness: spawns the REAL WebSocket fake app-server

@@ -35,7 +35,9 @@ module Orbit
       result
     end
     def stop! = request("stop")
-    def create_member(model:) = request("create_member", "model" => model)
+    def create_member(model:, cwd:)
+      request("create_member", "model" => model, "cwd" => member_cwd(cwd))
+    end
     def start_member(id, instruction) = request("start_member", "member" => id, "text" => instruction)
 
     def member_connection(id)
@@ -56,6 +58,19 @@ module Orbit
     end
 
     private
+
+    def member_cwd(cwd)
+      raise Error, "member creation requires a project directory" if cwd.to_s.strip.empty?
+
+      directory = File.realpath(cwd.to_s)
+      raise Error, "member cwd is not a directory: #{cwd}" unless File.directory?(directory)
+
+      directory
+    rescue Errno::ENOENT
+      raise Error, "member cwd does not exist: #{cwd}"
+    rescue Errno::ENOTDIR
+      raise Error, "member cwd is not a directory: #{cwd}"
+    end
 
     def request(method, params = {})
       Timeout.timeout(@deadline) do

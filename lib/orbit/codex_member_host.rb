@@ -23,8 +23,8 @@ module Orbit
 
     class Error < StandardError; end
 
-    def initialize(project_root:, executable: "codex", env: {})
-      @project_root = File.realpath(project_root)
+    def initialize(cwd:, executable: "codex", env: {})
+      @cwd = File.realpath(cwd)
       @executable = executable
       @env = env
     end
@@ -56,14 +56,15 @@ module Orbit
     end
 
     # Creates one member thread with the Codex-side model (or the explicitly
-    # authorized one) and the project directory. Returns the resolved record.
-    def create_member(host, model: nil)
+    # authorized one) and the artifact directory passed as cwd.
+    def create_member(host, model: nil, cwd: @cwd)
+      directory = File.realpath(cwd)
       connection = connection_for(host, nil)
       begin
-        resolved = model.to_s.empty? ? connection.configured_model(cwd: @project_root) : model.to_s
+        resolved = model.to_s.empty? ? connection.configured_model(cwd: directory) : model.to_s
         raise Error, "Codex member model is unavailable from the Codex side" if resolved.empty?
 
-        thread_id = connection.create_member(model: resolved, cwd: @project_root, disable_orbit_mcp: false)
+        thread_id = connection.create_member(model: resolved, cwd: directory, disable_orbit_mcp: false)
         { "thread_id" => thread_id, "model" => resolved }
       ensure
         connection.close

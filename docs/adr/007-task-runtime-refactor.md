@@ -112,6 +112,30 @@ OpenCode 与 OMP 复用实际相同的私有通信通道及工具入口，宿主
 
 Jev 的判断不取代固定产物上的独立检查及实际停止证据。程序保留约定时间和 Root 交付时的完整检查，过程疑点交给同一检查角色作聚焦核查；无新证据不反复唤起。TypeSafe 不可用时恢复原调度。外发仅限有界任务内容（包括指定依据摘录）、近期观察与差异摘要；截断或省略显式标注，key 不进入任务记录。具体接口和状态以任务运行合同为准。
 
+## 执行协作与检查回路整体调优（2026-09-22，方向已冻结）
+
+Zeen Login 真实任务同时暴露了零执行成员、实际 worktree 与任务快照根不一致、相同 finding 和相反裁定反复出现、13 次检查全部 stale 且消耗约 962 万检查 tokens，以及排队／检查意见／任务终态不易区分。用户决定把这些问题作为一个整体处理，而不是只优化 JEV：执行与检查分成两条状态轴；工作区通过受控 rebind 改变，文字 amendment 不改变快照根；finding 和裁定按证据版本形成决策记忆；自动触发按 observation 去重合并；状态分别显示 workspace、成员、检查、JEV、finding 和用量。完整边界、实施切片和真实验收见 [Orbit 执行协作与检查回路整体调优计划](../plan/orbit-execution-review-optimization.md)。实现与确定性回归已进入合同，见下一节。四条真实路径验收尚未运行。程序仍不自动检测工作区声明冲突，也不把换了 id 的语义同义 finding 猜成同一问题。
+
+## 工作区、检查收敛与 Codex JEV 环境名（2026-09-22，已进入现行合同）
+
+新任务记录 `project_root` 与 `workspace`。`project_root` 继续负责授权、任务记录和 Root 会话归属；`artifact_root` 负责固定快照、指纹、Jev 变更摘要和新执行成员的工作目录，默认与项目根相同。显式 `rebind-workspace`（Codex MCP 动作为 `rebind_workspace`）只接受同一真实路径，或同一 Git 仓库中的另一个 worktree，并记录来源、原因和 history。`amend` 与 `dispute` 只追加检查输入或争议理由。在途检查若仍绑定旧产物目录，即使内容摘要相同也按 `workspace` 过期；这类 finding 不迁入待核对线索，新产物目录安排一次检查。其他过期不立即重查。自动检查按 observation key 去重，手动请求可绕过去重但不能并发。旧进程遗留的同 key `in_flight` 在本进程没有 owned checker 时记 `check_abandoned_recovered` 并以新检查号重试一次；本进程在途检查仍不并发。同一 finding id 已 open 且输入、产物目录、产物摘要和 requirement／evidence／action 都未变化时，重复报告记 `finding_repeat_ignored`，不再次纠正 Root；任一维度变化才重新投递。已 resolve 的同一 id 在这些证据都未变化时不重开。检查者程序上下文上限 64KiB。`status` 分层显示检查状态、下一动作和按角色用量，未知不推算。没有 `workspace` 的旧记录在只读 `status` 与 `stop` 时回退到 `project_root`。程序不自动检测绑定与声明的冲突，也不因此暂停检查。确定性回归已通过；四条真实路径验收未运行，见 [优化真实验收计划](../reference/orbit-optimization-acceptance-plan-20260922.md)。
+
+`orbit codex` 在启动环境已有 `TYPESAFE_API_KEY` 时，只把该名称写入 MCP 的 `env_vars`。值由 app-server 从启动环境解析。MCP 配置、命令行和诊断输出只出现变量名。这不追溯改变 Zeen Login 当时 MCP 子进程缺少该变量的记录。
+
+## JEV 委派判断与模型证据（2026-09-22，已进入现行合同）
+
+Zeen Login 真实任务表明，“Orbit 已接入检查”与“已启动执行成员”必须显式区分；该任务的 JEV 因 key 未进入 MCP 子进程而没有运行，不能把零成员解释为 JEV 判断结果。当时的单一 `delegatable` 信号不足以表示执行吞吐收益。用户决定将委派建议分成任务可拆性、成员质量适配和关键路径收益三层；程序核对成员可调用性、任务状态和观察新鲜度，Root 仍决定执行票、成员和是否派发，Orbit 不自动 `delegate`。
+
+模型速度、质量和费用是快速变化的外部事实，不进入 Orbit 发布包，也不要求用户维护配置。只有结构判断发现真实可委派面时，Root 才按实际 provider、model 和 reasoning effort 查询带来源、时间和有效期的证据；有效缓存跨任务复用，JEV 不联网，只接收压缩后的比较。输出 tokens/s 不能直接等同于任务耗时，判断必须计入交接、返工、集成、共享资源和验证。第一阶段 `delegatable` 达到 0.60 且存在可调用成员后，程序查询模型证据缓存；缺失时每个观察签名只请求一次，Root 用 `model-evidence` 提交。有效证据才问 `member_fit` 与 `parallel_gain`；两者分别不低于 0.55 和 0.50 才提示，且 Root 必须显式 `delegate`。同一观察签名至多提示一次，已有活跃执行成员时暂停新的自动提示。专项阈值、真实校准依据与 prompt 见 [JEV 委派判断专项计划](../plan/jev-delegation-optimization.md)。这是现行合同语义。
+
+严格 Herdr → `orbit codex` 复验发现 Root 会把第一阶段 `delegatable=0.91` 误称为最终建议，而真实第二阶段是 `parallel_gain=0.40` 与 `delegation_declined`。运行时因此新增按观察签名持久化的 `decision=recommended|declined|unavailable`；人类状态把候选分、第二阶段结果和已持久化 `delegation_hint` 分开。只有当前 input、artifact 与成员候选签名一致、且尚未跟随的 hint 能把一次显式派发记为 `basis=orbit_hint`；其他派发记为 `root_without_hint`，但不被禁止。basis 同时保存在成员记录和事件中，避免“成员确实运行”被误写成“Orbit 建议运行”。
+
+真实验收还暴露了手动终检的收尾缝隙：检查者正确地不替 Root 宣布产品任务完成，但 `continue` 配合极短 `next_check_seconds` 会让已完成的 Root 没有被唤醒、检查反复启动。现行规则是在有效手动终检无当前 finding、无待核对线索且成员已结束时，按输入和产物版本向 Root 发送一次 `finalization_notice`，要求 Root 自行确认实现和本地验证后显式停止；等待期间恢复约定检查间隔，不自动完成任务。
+
+0.6.12 首轮真实复验又发现：把“手动 check 后结束 turn”写成无条件规则，会阻断用户明确要求的 in-flight rebind 验收；只连续入队 check 与 rebind 又会因异步命令队列而让 rebind 先于 reviewer 真正启动。等待纪律因此只禁止为了等检查结论而 `status`／sleep／poll；若用户已经要求一个不依赖检查结果的状态变更（例如旧检查实际启动后立即 rebind），Root 可以用最少查询确认明确的状态前置条件，紧接执行动作，再结束本轮，不能把例外扩大为普通轮询。
+
+后续严格复验又证明 Root 为等待结果调用只读 `status` 会改变宿主观察摘要，使产物终检被记为 `host` stale，三条小型任务因此消耗 `751,412` reviewer tokens。产物 reviewer 现只按固定 snapshot 的 workspace、artifact、input、dispute 判断 freshness，纯 turn／status／观察变化不再使它过期；过程 reviewer 仍审查 Root 行为并保留 `host` stale。`check` 的机器响应要求 Root 结束当前 turn 等待唤醒。固定 snapshot 的 added／modified／deleted 路径另作为有界 `review_focus` 交给 reviewer：先看这些路径和直接依赖，但不得把它当范围限制。该改变先消除重复检查，再用真实模型衡量单次成本，不预先宣称节省额度。
+
 ## 检查回路的有效到达（2026-09-18）
 
 [独立审查及复核](../reference/project-review-20260918.md)确认：一次真实开发任务中 7 次已完成检查全部过期、自动投递纠正为 0，检查者自设 30–60 秒的下次观察时间与持续编辑叠加，产生重复完整检查。复核保持版本核对语义不变：过期结论不直接用于当前版本，也不能静默丢失。程序把过期检查中待纠正的问题记为待核对线索，在 Root 交付或下一次约定检查时对新版本重新核对，确认后自动送达 Root；检查完成时记录具体过期原因；Root 正在执行时，完整检查间隔以约定时间为下限，检查者建议不得使其更频繁。`orbit status` 显示最近检查是否过期、待处理问题与下次检查依据。具体范围与验证要求见[用户结果补齐计划](../plan/user-outcome-completion-plan.md)。

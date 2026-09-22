@@ -37,7 +37,7 @@ Codex 没有 MCP 时，可在具有原生控制端点和相应访问权限的宿
 
 ## 必要分工
 
-Root 在用户授权和项目规则范围内决定是否需要执行成员，一个 Agent 足够就自己完成。需要时使用 `delegate`，传 `task` 和具体 `text`（范围、文件边界、验证和回报要求）；程序自动附上原始要求与已生效修改，默认创建本任务拥有的同宿主成员（Codex、OpenCode 或 OMP），结果自动回到当前 Root。Codex 执行成员默认 full access；OpenCode／OMP 成员沿用 Root 的原生权限。用户显式传入更严格权限时以用户为准。`model` 可指定已授权模型，否则 Codex 成员沿用检查模型，OpenCode 成员沿用 Root 的原生供应商、模型和 variant；OMP 成员沿用 Root 的模型、thinking、项目与权限设置，只开放当前已启用的基础编码工具（read/write/edit/grep/glob/bash/python/lsp），不复制扩展、MCP 或委派工具；`member` 可复用本任务已有成员。在用户已允许的范围内可加 `kind: codex`，由 Orbit 为本任务启动并持有一个独立 Codex 成员宿主（跨宿主路径，当前支持 OpenCode Root）：先持久登记短控制 socket、宿主 PID／进程组和 thread ID 再启动，模型取自 Codex 自身配置或显式 `model`，结果仍回到当前 Root。允许名单默认 `codex、omp、opencode、kimi、cursor-agent、grok`，可用 `~/.config/orbit/members.json` 覆盖；名单允许但无受控适配器的 kind 会被拒绝并说明原因，派发失败不会先创建宿主。Root 核验并集成结果，成员不再创建团队。Jev 可能偶尔提示“可能有适合独立分工的子任务”，它只是提醒：派发、kind 和子任务都由 Root 决定，Orbit 不自动派发。OMP 的 `hub wait` 不等待 Orbit 回报；不要用它或 shell 等待成员。结束本轮后，Orbit 会把结果送回当前会话。
+Root 在用户授权和项目规则范围内决定是否需要执行成员，一个 Agent 足够就自己完成。需要时使用 `delegate`，传 `task` 和具体 `text`（范围、文件边界、验证和回报要求）；程序自动附上原始要求与已生效修改，默认创建本任务拥有的同宿主成员（Codex、OpenCode 或 OMP），结果自动回到当前 Root。Codex 执行成员默认 full access；OpenCode／OMP 成员沿用 Root 的原生权限。用户显式传入更严格权限时以用户为准。`model` 可指定已授权模型，否则 Codex 成员沿用检查模型，OpenCode 成员沿用 Root 的原生供应商、模型和 variant；OMP 成员沿用 Root 的模型、thinking、项目与权限设置，只开放当前已启用的基础编码工具（read/write/edit/grep/glob/bash/python/lsp），不复制扩展、MCP 或委派工具；`member` 可复用本任务已有成员。在用户已允许的范围内可加 `kind: codex`，由 Orbit 为本任务启动并持有一个独立 Codex 成员宿主（跨宿主路径，当前支持 OpenCode Root）：先持久登记短控制 socket、宿主 PID／进程组和 thread ID 再启动，模型取自 Codex 自身配置或显式 `model`，结果仍回到当前 Root。允许名单默认 `codex、omp、opencode、kimi、cursor-agent、grok`，可用 `~/.config/orbit/members.json` 覆盖；名单允许但无受控适配器的 kind 会被拒绝并说明原因，派发失败不会先创建宿主。Root 核验并集成结果，成员不再创建团队。Orbit 的最终委派建议只认任务记录里持久存在的 `delegation_hint`。第一阶段 `delegatable` 高分不是建议，不得称为建议，也不得据此 `delegate`。`decision` 为 `declined` 或 `unavailable`，以及没有持久 `delegation_hint`，都不是 Orbit 的最终委派建议。只有持久 `delegation_hint` 存在时，才可以说明 Orbit 最终建议委派，再由 Root 显式 `delegate`。没有 hint 时 Root 仍可自己显式委派，但必须称为 Root 在无 hint 时的显式委派，不能说成 Orbit 建议。派发、kind 和子任务都由 Root 决定，Orbit 不自动派发。OMP 的 `hub wait` 不等待 Orbit 回报；不要用它或 shell 等待成员。结束本轮后，Orbit 会把结果送回当前会话。
 
 这条路径不需要额外终端窗口。Herdr、tmux 只影响展示；用户明确要求使用其他协作工具时按 [协作说明](references/agent-collaboration.md) 处理，不把外部成员说成已纳入 Orbit 的统一停止。
 
@@ -45,7 +45,7 @@ Root 在用户授权和项目规则范围内决定是否需要执行成员，一
 
 工具的任务操作都传 `task`：`check` 请求独立核对；`dispute` 的 `text` 提供真实反证；`amend` 的 `text` 只传用户明确补充的原文；`stop` 停止整项受控任务。正常用户消息由程序观察并同步给活动成员，不需要重复手动 `amend`。
 
-收到检查纠正后对照原始要求修复；有真实争议才申请裁定。程序按事件和约定时间检查，无需 Root 持续轮询。首次间隔可用 `check_in` 设置，之后由检查者约定下次；预估与硬截止的 CLI 参数见 `orbit start --help`，不自行把估计变成硬限制。
+收到检查纠正后对照原始要求修复；有真实争议才申请裁定。程序按事件和约定时间检查，无需 Root 持续轮询。手动 `check` 入队后，如果没有用户已明确要求、且不依赖本次检查结果的后续状态变更，必须立即结束当前 turn；同一轮不能再调用 `status`，也不能 sleep 或轮询。唯一例外是执行已在用户要求中的状态变更，例如为了验证 stale 而在旧检查启动后紧接 `rebind-workspace`。若该动作明确要求“检查已 in flight”之类的状态前置条件，只用最少的 `status` 查询确认前置条件，确认后立即执行动作并结束本轮；不能借此等待检查结论。`check` 返回的 `next_action` 是等待约束，不得把例外扩大成普通轮询。有效检查结果会唤醒当前 Root；唤醒到达前不要仅为等待结论查询状态。首次间隔可用 `check_in` 设置，之后由检查者约定下次；预估与硬截止的 CLI 参数见 `orbit start --help`，不自行把估计变成硬限制。
 
 产物准备好后结束本轮并说明实际结果，让独立检查核对最终版本。此时尚未获得 `complete` 就说明“产物已准备好，等待独立检查”，不要把待检查说成完成；后续自然工作节点或用户查询时按实际状态报告检查结果。需要用户输入时说清具体缺口和停止情况，普通等待不反复播报，不为通知专门轮询或新增模型调用。不要在活跃轮次内持续等 `complete`。检查若发现遗漏，会唤起同一个 Root 继续修正；最终状态保存于任务记录，用户可在项目运行 `orbit status` 查询，工具调用仍使用明确的 `task`，不能把 Root 自己的完成声明当作独立验收通过。
 

@@ -5,6 +5,7 @@ require "digest"
 require "fileutils"
 require "securerandom"
 require "time"
+require_relative "workspace_binding"
 
 module Orbit
   # Task-local records. The runtime is the sole state writer; other clients
@@ -14,6 +15,7 @@ module Orbit
 
     def self.create(project_root:, instruction:, source:, connection:, review:, basis: [], estimate: {})
       root = File.realpath(project_root)
+      workspace = WorkspaceBinding.bind(project_root: root).merge("history" => [])
       path = File.join(root, ".orbit", "tasks", SecureRandom.uuid)
       FileUtils.mkdir_p(File.join(path, "inbox"), mode: 0o700)
       record = new(path)
@@ -29,6 +31,7 @@ module Orbit
       end
       record.save({
         "format" => "orbit-task-1", "id" => File.basename(path), "project_root" => root,
+        "workspace" => workspace,
         "created_at" => Time.now.utc.iso8601, "status" => "starting",
         "instruction_source" => source, "basis" => documents, "amendments" => [],
         "connection" => connection, "review" => review, "estimate" => estimate,
