@@ -1,28 +1,42 @@
 # Real acceptance scenarios
 
-Every scenario starts the same way: the external Controller uses Herdr to run the installed `orbit codex` command inside a temporary fixture repository, waits for that Codex Root to become idle, then sends the task as a user prompt. Use small fixtures whose expected behavior is obvious from their task file. Keep production and test surfaces disjoint so a member ticket is independently verifiable.
+Every scenario starts the same way: the external Controller uses Herdr to run the installed `orbit omp` command inside a temporary fixture repository, waits for that OMP Root to become idle, then sends the task as a user prompt. Use small fixtures whose expected behavior is obvious from their task file. Keep production and test surfaces disjoint so a member ticket is independently verifiable, and confirm the single-host layout first: plain `omp` loads no Orbit extension and only `orbit omp` provides the Orbit tool.
 
 The following do not satisfy a scenario on their own:
 
 - running unit tests or directly constructing `TaskRuntime`;
-- starting ordinary Codex with `herdr agent start --kind codex`;
-- calling Orbit MCP actions from the Controller instead of giving the requirement to the launched Root;
-- showing that an OMP/OpenCode/Cursor pane exists;
-- asking a helper Agent to implement the fixture outside the task-owned Orbit member path.
+- starting ordinary `omp` (or a Herdr ordinary-agent launch) instead of `orbit omp`;
+- calling Orbit's internal Ruby objects or CLI actions from the Controller instead of giving the requirement to the launched Root;
+- showing that a helper pane or ordinary OMP session exists;
+- asking a helper Agent to implement the fixture outside the native task/hub member path;
+- counting a check produced by an old-host or Codex checker, or by the Controller.
 
 ## One-file negative
 
 - One localized edit with one focused verification command.
-- Pass: JEV may assess structure, but there is no evidence request, final hint, or member.
+- Pass: JEV may assess structure, but there is no evidence request, no final hint, and no native `task` member dispatched or registered.
 - Record checker cost even when the implementation is tiny.
 
 ## Parallel positive
 
 - Two independent production modules with existing focused tests.
 - Root explicitly owns A; the only valid member ticket is complete B plus its focused test.
-- Pass: structural score reaches the current contract threshold; current model evidence is used; member-fit and parallel-gain reach their thresholds; exactly one hint is emitted before delegation; Root explicitly delegates; the member result returns; Root integrates and runs combined verification.
+- Pass: structural score reaches the current contract threshold; current model evidence is used; member-fit and parallel-gain reach their thresholds; exactly one hint is emitted before dispatch; Root explicitly dispatches through OMP-native `task`; Orbit registers the member before its model work; the result returns through the native `hub`; Root integrates and runs combined verification.
 - While a member is `starting` or `working`, no second automatic hint may be emitted.
 - A real checker defect must be corrected and resolved before stop. A no-finding manual final review should wake Root once to stop, not start a short recheck loop.
+
+## Independent OMP check provenance
+
+- Every counted check must run in a separate OMP process (not the Root process) against a fixed snapshot.
+- Record the snapshot fingerprint before and after the check; the check must not change it and must not join the execution team.
+- Pass: the check reports a role, verdict, stale reasons, and findings from the fixed snapshot; the reviewer can read only inside the snapshot.
+- An old-host or Codex checker proves nothing about the target path; label such runs as out of scope instead of passed.
+
+## Native interrupt and stop
+
+- Interrupt the OMP interface (native Esc) and, in a second run, exit normally.
+- Pass: the Root, every registered member, and their native background work actually end, with process/exit evidence recorded; sessions and context stay recoverable, and the task records a confirmed stop.
+- If exit evidence is incomplete, the task must stay `stop_unconfirmed`; do not rewrite it into a pass.
 
 ## Workspace rebind
 
@@ -46,4 +60,4 @@ The following do not satisfy a scenario on their own:
 
 ## Evidence status
 
-For every scenario label it `passed`, `failed`, `partially exercised`, or `unrun`. Also label whether the required Herdr → `orbit codex` → user requirement topology was proven. Never infer an unrun live path from unit tests or helper-Agent activity.
+For every scenario label it `passed`, `failed`, `partially exercised`, or `unrun`. Also label whether the required Herdr → `orbit omp` → user requirement topology was proven, and whether the check provenance was a separate OMP read-only session. Never infer an unrun live path from unit tests or helper-Agent activity.

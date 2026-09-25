@@ -52,6 +52,92 @@ module Orbit
       write("state.json", JSON.pretty_generate(value) + "\n")
     end
 
+    # Task-owned authoritative member list, written only by the OMP extension's
+    # synchronous registration gate (scripts/orbit-register-member). TaskRuntime
+    # reads this from its normal tick and from explicit stop retries after a
+    # crash, so actual member ids are rediscoverable without plugin memory.
+    # Deliberately a separate file from state.json: the runtime process is the
+    # sole state.json writer and must not race concurrent member registration.
+    # Raises on unreadable/corrupt content: a silently empty list would let a
+    # later registration overwrite real member ids, breaking crash retry and
+    # the registration gate. Callers must surface the failure, not swallow it.
+    def members
+      file = File.join(path, "members.json")
+      return [] unless File.exist?(file)
+
+      JSON.parse(File.read(file))
+    end
+
+    # Atomic, durable registration. Returns { "ok" => true, "member" => entry }
+    # (optionally with "event_error" when the audit event could not be appended)
+    # or { "ok" => false, "reason" => ..., "thread_id" => ... }. A duplicate
+    # member id is refused and never overwrites the existing record.
+    def register_member(member_id, requested_name:, status: "registered", model: nil, tool_call_id: nil, reason: nil, abort_confirmed: nil, now: Time.now.utc)
+      unless member_id.to_s.match?(/\Aorbit-[A-Za-z0-9-]+\z/)
+        return { "ok" => false, "reason" => "invalid_member_id", "thread_id" => member_id }
+      end
+      unless %w[registered refused].include?(status)
+        return { "ok" => false, "reason" => "invalid_status", "thread_id" => member_id }
+      end
+      if requested_name.to_s.strip.empty?
+        return { "ok" => false, "reason" => "missing_requested_name", "thread_id" => member_id }
+      end
+
+      with_members_lock do
+        list = members
+        if list.any? { |member| member["thread_id"] == member_id }
+          return { "ok" => false, "reason" => "duplicate_member_id", "thread_id" => member_id }
+        end
+
+        entry = {
+          "thread_id" => member_id, "requested_name" => requested_name, "status" => status,
+          "registered_at" => now.iso8601
+        }
+        entry["model"] = model if model
+        entry["tool_call_id"] = tool_call_id if tool_call_id
+        entry["reason"] = reason if reason
+        entry["abort_confirmed"] = abort_confirmed unless abort_confirmed.nil?
+        durable_write("members.json", JSON.pretty_generate(list + [entry]) + "\n")
+        result = { "ok" => true, "member" => entry }
+        begin
+          event(
+            status == "registered" ? "member_registered" : "member_registration_refused",
+            { "thread_id" => member_id, "requested_name" => requested_name, "status" => status }.tap do |details|
+              details["refusal_reason"] = reason if reason
+            end
+          )
+        rescue StandardError => error
+          # The member record IS durable at this point; never claim otherwise.
+          # Surface the audit-event failure so operators can reconcile events.jsonl.
+          result["event_error"] = "#{error.class}: #{error.message}"
+        end
+        result
+      end
+    rescue StandardError => error
+      { "ok" => false, "reason" => "#{error.class}: #{error.message}", "thread_id" => member_id }
+    end
+
+    # write() plus a directory fsync so the rename itself survives a crash.
+    # Used only for member registration; other write paths stay unchanged.
+    def durable_write(relative, bytes)
+      write(relative, bytes)
+      directory = File.open(path, File::RDONLY)
+      begin
+        directory.fsync
+      ensure
+        directory.close
+      end
+    end
+
+    def with_members_lock
+      File.open(File.join(path, "members.lock"), "w", 0o600) do |file|
+        file.flock(File::LOCK_EX)
+        yield
+      ensure
+        file.flock(File::LOCK_UN)
+      end
+    end
+
     def write(relative, bytes)
       destination = File.join(path, relative)
       FileUtils.mkdir_p(File.dirname(destination), mode: 0o700)
@@ -106,9 +192,24 @@ module Orbit
       id
     end
 
+    # Inbox files are written by Orbit clients. A malformed file (invalid JSON,
+    # not an object, or missing a command type) is rejected and removed with a
+    # command_rejected event instead of raising into the runtime loop.
     def commands
       Dir.glob(File.join(path, "inbox", "*.json")).sort.each do |file|
-        yield JSON.parse(File.read(file))
+        command = begin
+          JSON.parse(File.read(file))
+        rescue JSON::ParserError => error
+          event("command_rejected", "file" => File.basename(file),
+                "reason" => "malformed command JSON", "error" => error.message)
+          next
+        end
+        unless command.is_a?(Hash) && command["type"].is_a?(String) && !command["type"].strip.empty?
+          event("command_rejected", "file" => File.basename(file), "reason" => "command is missing a type")
+          next
+        end
+        yield command
+      ensure
         File.unlink(file)
       end
     end

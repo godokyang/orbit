@@ -18,6 +18,10 @@ module ModelEvidenceCacheTest
       test_unavailable_records(tmp)
       test_source_and_timestamp_validation(tmp)
       test_metric_and_field_validation(tmp)
+      test_cross_identity_comparison_metrics_are_rejected(tmp)
+      test_billing_route_identity_and_lookup(tmp)
+      test_route_metric_namespaces
+      test_legacy_route_less_entry_is_unknown(tmp)
       test_atomic_write_permissions_and_fail_closed(tmp)
       test_concurrent_writers_keep_every_entry(tmp)
       test_over_limit_write_is_rejected_without_touching_cache(tmp)
@@ -165,6 +169,23 @@ module ModelEvidenceCacheTest
     assert(!File.read(cache.path).include?("secret"), "credentials never reach the cache")
   end
 
+  # A `comparison.*` metric asserts how the submitter compares with another
+  # identity; it is not a measurement of this model and goes stale when either
+  # identity changes. Submission must reject it outright.
+  def test_cross_identity_comparison_metrics_are_rejected(tmp)
+    cache = cache_at(tmp, "comparison", -> { Time.utc(2026, 9, 22, 10) })
+    assert_raises(Orbit::ModelEvidenceCache::ValidationError, "cross-identity comparison metric rejected") do
+      cache.record(evidence("metrics" => {
+        "comparison.identity_offset" => { "value" => 0, "unit" => "n/a", "basis" => "Root and candidate are the same model" }
+      }))
+    end
+    assert(cache.lookup(provider: "opencode-go", model: "deepseek-v4.8", reasoning: "default").nil?,
+           "a rejected submission leaves the cache empty")
+    stored = cache.record(evidence)
+    assert_equal(120.5, stored.dig("metrics", "output_tokens_per_second", "value"),
+                 "plain per-model measurements still record")
+  end
+
   def test_atomic_write_permissions_and_fail_closed(tmp)
     cache = cache_at(tmp, "atomic", -> { Time.utc(2026, 9, 22, 10) })
     cache.record_all([evidence, evidence("model" => "gpt-6-astra")])
@@ -258,6 +279,61 @@ module ModelEvidenceCacheTest
         "output_tokens_per_second" => { "value" => 120.5, "unit" => "tokens/s", "basis" => "Artificial Analysis median" }
       }
     }.merge(overrides)
+  end
+
+  # Billing route is part of the identity: an omitted route means typed
+  # unknown, an explicit direct_api lookup selects only its own entry, and the
+  # two routes coexist for the same model.
+  def test_billing_route_identity_and_lookup(tmp)
+    now = Time.utc(2026, 9, 22, 10)
+    cache = cache_at(tmp, "routes", -> { now })
+    cache.record(evidence("billing_route" => "unknown"))
+    cache.record(evidence("billing_route" => "direct_api"))
+
+    unknown = cache.lookup(provider: "opencode-go", model: "deepseek-v4.8")
+    assert_equal("unknown", unknown["billing_route"], "an omitted route reads the typed unknown entry")
+    direct = cache.lookup(provider: "opencode-go", model: "deepseek-v4.8", billing_route: "direct_api")
+    assert_equal("direct_api", direct["billing_route"], "an explicit route selects its own entry")
+    assert_equal(2, cache.stored_entries.length, "distinct routes coexist as distinct identities")
+    assert_raises(Orbit::ModelEvidenceCache::ValidationError, "an untyped route is rejected") do
+      cache.record(evidence("billing_route" => "reseller"))
+    end
+  end
+
+  # The cost gate's fact namespace is route-specific: direct_api authorizes
+  # numeric cost.* facts, subscription_quota numeric quota.* facts, and the two
+  # never substitute. Unknown routes have no namespace at all.
+  def test_route_metric_namespaces
+    assert_equal("cost.", Orbit::ModelEvidenceCache.route_metric_prefix("direct_api"), "direct_api uses cost.*")
+    assert_equal("quota.", Orbit::ModelEvidenceCache.route_metric_prefix("subscription_quota"),
+                 "subscription_quota uses quota.*")
+    assert_equal(nil, Orbit::ModelEvidenceCache.route_metric_prefix("unknown"), "unknown has no fact namespace")
+
+    priced = { "metrics" => { "cost.output_peak" => { "value" => 1.2 },
+                              "quota.included_output_tokens" => { "value" => 5_000_000 } } }
+    assert(Orbit::ModelEvidenceCache.numeric_metric?(priced, "cost."), "numeric cost.* is recognized")
+    assert(Orbit::ModelEvidenceCache.numeric_metric?(priced, "quota."), "numeric quota.* is recognized")
+    assert(!Orbit::ModelEvidenceCache.numeric_metric?({ "metrics" => { "cost.note" => { "value" => "cheap" } } }, "cost."),
+           "a non-numeric fact never authorizes the gate")
+    assert(!Orbit::ModelEvidenceCache.numeric_metric?({ "metrics" => {} }, "quota."), "an empty metric set is not proof")
+  end
+
+  # Legacy stored entries without the field remain readable as unknown and are
+  # never accepted as direct_api proof.
+  def test_legacy_route_less_entry_is_unknown(tmp)
+    now = Time.utc(2026, 9, 22, 10)
+    cache = cache_at(tmp, "legacy", -> { now })
+    FileUtils.mkdir_p(File.dirname(cache.path))
+    File.write(cache.path, JSON.generate("schema_version" => Orbit::ModelEvidenceCache::SCHEMA_VERSION,
+                                         "entries" => [evidence.merge("valid_until" => "2026-09-29T09:00:00Z")]))
+    entry = cache.lookup(provider: "opencode-go", model: "deepseek-v4.8")
+    assert(entry, "a legacy entry is still readable")
+    assert_equal("unknown", Orbit::ModelEvidenceCache.billing_route(entry["billing_route"]),
+                 "a legacy entry reads as the typed unknown route")
+    assert_equal(nil, Orbit::ModelEvidenceCache.route_metric_prefix(entry["billing_route"]),
+                 "a legacy route-less entry has no cost-gate fact namespace")
+    assert_equal(nil, cache.lookup(provider: "opencode-go", model: "deepseek-v4.8", billing_route: "direct_api"),
+                 "a direct_api lookup never consumes a legacy route-less entry")
   end
 
   def cache_at(tmp, name, clock)

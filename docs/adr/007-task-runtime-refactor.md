@@ -1,6 +1,6 @@
 # ADR-007：独立任务运行与按需纠偏
 
-- 状态：Accepted，2026-09-14 用户授权实施；已完成两条冻结真实验收。
+- 状态：历史 ADR（Codex／OpenCode 多宿主时代，2026-09-14 用户授权实施，已完成其当时两条冻结真实验收）。**当前运行入口以 [ADR-008](008-omp-native-collaboration-base.md) 为准**：单宿主原版 OMP + `orbit omp` 显式入口、原生 task/hub 一层团队；本文中 Codex、OpenCode 及其跨宿主成员、检查者角色的宿主特定接入已退役，仅保留为历史事实与已验收证据索引。与宿主无关的检查、finding、工作区与停止语义已由现行合同继承并继续有效。
 - 依据：2026-09-13 至 2026-09-14 用户确认的独立任务运行、已有 Root、原文检查、真实停止与无兼容重构决定。
 
 主执行 Agent（Root）指当前接受用户要求、负责整项交付的 Coding Agent，通常沿用正在与用户对话的会话。它是职责名称，无需用户另建角色。
@@ -130,7 +130,7 @@ Zeen Login 真实任务表明，“Orbit 已接入检查”与“已启动执行
 
 严格 Herdr → `orbit codex` 复验发现 Root 会把第一阶段 `delegatable=0.91` 误称为最终建议，而真实第二阶段是 `parallel_gain=0.40` 与 `delegation_declined`。运行时因此新增按观察签名持久化的 `decision=recommended|declined|unavailable`；人类状态把候选分、第二阶段结果和已持久化 `delegation_hint` 分开。只有当前 input、artifact 与成员候选签名一致、且尚未跟随的 hint 能把一次显式派发记为 `basis=orbit_hint`；其他派发记为 `root_without_hint`，但不被禁止。basis 同时保存在成员记录和事件中，避免“成员确实运行”被误写成“Orbit 建议运行”。
 
-真实验收还暴露了手动终检的收尾缝隙：检查者正确地不替 Root 宣布产品任务完成，但 `continue` 配合极短 `next_check_seconds` 会让已完成的 Root 没有被唤醒、检查反复启动。现行规则是在有效手动终检无当前 finding、无待核对线索且成员已结束时，按输入和产物版本向 Root 发送一次 `finalization_notice`，要求 Root 自行确认实现和本地验证后显式停止；等待期间恢复约定检查间隔，不自动完成任务。
+真实验收还暴露了手动终检的收尾缝隙：检查者正确地不替 Root 宣布产品任务完成，但 `continue` 配合极短 `next_check_seconds` 会让已完成的 Root 没有被唤醒、检查反复启动。现行规则是在有效手动终检无当前 finding、无待核对线索且成员已结束时，按输入和产物版本向 Root 发送一次 `finalization_notice`，要求 Root 自行确认实现和本地验证后显式停止；Root 未完成一轮时偏好等其 turn 结束再通知，但按版本绑定的 pending 通知即使 Root 仍在 active/等待也必须在有界 60 秒内送达（v7 真实样本观察到 Root 等待期间通知无限期挂起）；送达 pending 不自动完成任务，显式停止仍等待 Root turn 收尾并核对当前状态。等待期间恢复约定检查间隔，不自动完成任务。
 
 0.6.12 首轮真实复验又发现：把“手动 check 后结束 turn”写成无条件规则，会阻断用户明确要求的 in-flight rebind 验收；只连续入队 check 与 rebind 又会因异步命令队列而让 rebind 先于 reviewer 真正启动。等待纪律因此只禁止为了等检查结论而 `status`／sleep／poll；若用户已经要求一个不依赖检查结果的状态变更（例如旧检查实际启动后立即 rebind），Root 可以用最少查询确认明确的状态前置条件，紧接执行动作，再结束本轮，不能把例外扩大为普通轮询。
 

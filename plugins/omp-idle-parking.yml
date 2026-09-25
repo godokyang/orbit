@@ -1,0 +1,10 @@
+# `orbit omp` process-local overlay. OMP merges it after the global and
+# project configuration and only for this process, so global/project config is
+# never rewritten. task.agentIdleTtlMs=0 keeps idle native members attached
+# until this process exits instead of parking them after the TTL, which is what
+# lets the member bridge verify a completed member's turn, attached jobs and
+# PIDs when Orbit stops it. The entry passes this file through PI_CONFIG_FILES
+# (appended after any pre-existing entries); an explicit user --config overlay
+# is still merged by OMP after environment overlays and keeps precedence.
+task:
+  agentIdleTtlMs: 0

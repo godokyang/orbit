@@ -4,6 +4,8 @@
 
 Orbit 可独立用于任何项目。你照常提出需求，当前 Agent 负责实现，Orbit 保存原始要求、检查实际产物、回传问题并核实完成。文档中的 **Root 就是这个与你对话、负责整项任务的 Agent**。
 
+当前版本为 OMP 单宿主架构（见 [ADR-008](docs/adr/008-omp-native-collaboration-base.md)）：用 `orbit omp` 启动原版 Oh My Pi，Root 通过 OMP 原生 `task/hub` 组建一层执行团队，Orbit 负责登记、观察、检查、纠偏与停止确认。版本号以 `orbit --version` 与 `package.json` 为准。
+
 [安装](#安装) · [开始使用](#开始使用) · [模型与启动参数](#模型与启动参数) · [更新](#更新) · [卸载](#卸载) · [常见问题](#常见问题)
 
 ## 安装
@@ -13,11 +15,10 @@ Orbit 可独立用于任何项目。你照常提出需求，当前 Agent 负责�
 | 需要什么 | 用途 |
 | --- | --- |
 | Ruby 3.2+、Node.js 18+、npm | 运行和安装 Orbit |
-| Codex CLI，已登录且有可用模型 | 执行独立检查；使用 OpenCode 或 OMP 时也需要 |
-| 你日常使用的 Codex、OpenCode 或 OMP | 执行项目任务，选择一个即可 |
-| curl、tar | 下载下面的安装包 |
+| Oh My Pi（`omp`），已配置可用模型 | 执行项目任务、执行成员与独立检查 |
+| curl、tar | 下载安装包 |
 
-先确保所选 Coding Agent 能正常对话。Orbit 不代替它们的安装、登录和模型配置。
+先确保 OMP 能正常对话、模型已配置。Orbit 不代替 OMP 的安装与模型配置。
 
 ### 2. 安装 CLI
 
@@ -27,60 +28,30 @@ Orbit 可独立用于任何项目。你照常提出需求，当前 Agent 负责�
 curl -fsSL https://raw.githubusercontent.com/godokyang/orbit/main/install.sh | sh
 ```
 
-安装脚本会自动为 **zsh／bash 保存 PATH 配置**，重复安装不会重复添加，无需手动编辑配置文件。
-安装前会检查 Ruby、Node.js、npm 和 Codex CLI，缺失时列出需要处理的项目；安装后会提示未找到的可选 OpenCode／OMP 入口，并给出 `orbit doctor` 诊断命令。安装器不会替你安装这些外部工具。
+安装脚本自动为 **zsh／bash 保存 PATH 配置**，重复安装不重复添加。安装前检查 Ruby、Node.js、npm；安装后可用 `orbit doctor` 诊断。**安装成功后重新打开终端**，执行 `orbit --version` 确认。
 
-**安装成功后，重新打开一个终端**，执行下面的命令确认：
-
-```bash
-orbit --version
-```
-
-应输出类似 `orbit 0.6.12` 的版本号。当前源码版本为 `0.6.12`；远程命令安装 GitHub 上所选提交的版本，未推送的本地提交不会出现在远程安装中。
-
-如果想继续使用当前终端，执行安装结束时显示的 `export PATH=...` 命令即可。自动保存的配置会在以后新开终端、重启电脑后继续生效。其他 shell 或关闭自动配置的方法见[PATH 配置](docs/reference/usage-reference.md#path-配置)。
-
-这一步安装 Orbit 程序及 OpenCode／OMP 运行所需的原生连接扩展，**不安装 skill**。扩展提供会话通信与控制能力；模型、权限配置保持原样。自定义目录和 OMP profile 见[安装选项](docs/reference/usage-reference.md#安装选项)。
-
-### 3. 安装 skill
-
-skill 告诉 Agent 何时使用 Orbit、如何执行和自检。交给 `npx skills` 安装：
-
-```bash
-npx skills install godokyang/orbit --skill orbit --global
-```
-
-按提示选择日常使用的 Coding Agent。全局安装后，各项目共用；也可省略 `--global`，只安装到当前项目。
-
-OMP 会读取共享的 `.agents/skills` 目录；skills CLI 暂无独立 OMP 选项时，选 Codex 即可同时写入共享目录，无需复制到 OMP。详见[skill 管理与 OMP](docs/reference/usage-reference.md#skill-管理与-omp)。
-
-两步完成后可运行 `orbit doctor` 检查依赖和扩展安装。普通终端没有可验证的会话时会明确显示“未验证”；安装通过不代表会话已经接入，也不验证模型登录和额度。
-
-**CLI 与 skill 两步都完成后，再启动 Coding Agent。** skill 能安装到更多 Agent，不代表这些 Agent 已具备 Orbit 执行接入；当前执行入口仍为 Codex、OpenCode、OMP。
+这一步安装 Orbit 程序及 OMP 运行所需的扩展。受控入口是 `orbit omp`（见下节）；普通 `omp` 不加载 Orbit。
 
 ## 开始使用
 
-### 1. 进入要做任务的项目
+### 1. 进入项目并用受控入口启动 OMP
 
-终端切换到你的项目目录，再选择一个入口：
+```bash
+cd 你的项目
+orbit omp
+```
 
-| 你使用的 Agent | 启动命令 |
-| --- | --- |
-| Codex | `orbit codex` |
-| OpenCode | `opencode` |
-| OMP（Oh My Pi） | `omp` |
-
-普通终端、tmux、Herdr 都用这套命令。安装前已经打开的会话，需要退出后恢复，才能加载 Orbit；具体恢复命令见下文。
+`orbit omp` 启动原版 OMP 并为本会话加载 Orbit 扩展；`--resume`、`--model`、profile、权限等 OMP 原生参数与退出码全部透传，例如 `orbit omp --resume SESSION_ID`、`orbit omp --model provider/id`。普通 `omp` 不是受控入口。普通终端、tmux、Herdr 均可使用。
 
 ### 2. 把需求告诉 Agent
 
-有需求文档时，直接说，例如：
+有需求文档时直接说，例如：
 
 > 按 docs/requirements.md 实现需求，完成必要验证，并说明实际完成情况。
 
-把路径换成你项目中真实存在的文件。涉及多个步骤、模块或执行成员的任务，Agent 应根据 skill 主动接入 Orbit；讨论、解释和简单独立修改通常不启动。你也可以明确说“这次请使用 Orbit”。
+涉及多个步骤、模块或执行成员的任务，Agent 按任务需要主动经 Orbit 工具接入（扩展已随 `orbit omp` 加载）；讨论、解释和简单独立修改通常不启动。也可以明确说"这次请使用 Orbit"。
 
-**第一次试用**可以在一个新建的空目录中启动 Agent，然后粘贴：
+**第一次试用**可在一个空目录中启动 `orbit omp`，然后粘贴：
 
 ```text
 请使用 Orbit 完成下面的任务：
@@ -92,19 +63,15 @@ OMP 会读取共享的 `.agents/skills` 目录；skills CLI 暂无独立 OMP 选
 4. 做必要验证，告知 Orbit 是否已接入，交付时说明实际检查状态。
 ```
 
-这会调用执行模型和独立检查模型，适合先确认自己的安装能正常运行。
+### 3. 确认接入与查看结果
 
-### 3. 确认已经接入并查看结果
-
-Agent 确认接入后应主动说明“已接入 Orbit，后续会独立检查”。交付时说明实际结果；独立检查尚未完成时应明确说“产物已准备好，等待检查”，不能提前宣布通过。
-
-在项目目录或其子目录另开终端查看：
+Agent 确认接入后应主动说明；交付时说明实际结果，检查未完成时明确说"产物已准备好，等待检查"。另开终端在项目目录执行：
 
 ```bash
 orbit status
 ```
 
-`orbit status` 会区分执行成员 0／N、检查状态（queued／running／stale／verdict）、JEV 第一阶段候选分／第二阶段 decision／最终 hint、下一动作，以及按角色的 token。高 `delegatable` 不等于建议；只有当前签名的持久 `delegation_hint` 才是 Orbit 已送达的最终提示。成员状态会区分跟随 hint 与 Root 无 hint 显式派发。Root 会话累计单独标为非任务增量，不计入任务用量。检查 `queued` 或 `verdict(complete)` 都不是任务 `complete`。只有一个待处理任务时自动定位；多个任务时列出 ID，使用 `orbit status ID` 查看其中一个，ID 可缩写为唯一前缀。没有待处理任务时显示最近已结束记录；程序读取使用 `orbit status --json`。
+`orbit status` 区分任务状态、执行协作（成员数与状态）、检查状态（queued／running／stale／verdict）、JEV 候选分与最终决定、下一动作与按角色用量。高 `delegatable` 不等于建议；只有当前签名的持久 `delegation_hint` 才是 Orbit 已送达的最终提示。`queued` 或 `verdict(complete)` 都不是任务 `complete`。多个待处理任务列出 ID，用 `orbit status ID` 查看，ID 可缩写。
 
 | 状态 | 含义 |
 | --- | --- |
@@ -112,37 +79,25 @@ orbit status
 | `complete` | 当前交付版本通过独立检查，相关执行已收尾 |
 | `paused` | 已暂停，并确认相关执行停止 |
 | `needs_user` | 需要用户补充信息或决定，相关执行已停止 |
-| `failed` | 运行出错，查看错误原因；不能据此推断已停止 |
+| `failed` | 运行出错；不能据此推断已停止 |
 | `stop_unconfirmed` | 已尝试停止，但仍未确认全部相关执行结束 |
 
-如果检查发现问题，纠正会回到**当前 Agent 会话**继续处理。Agent 说“代码写完了”与 Orbit 的 `complete` 是两个不同状态；无需你不停催它检查。
+检查发现问题时，纠正回到**当前会话**继续处理。
 
-### 4. 补充要求或停止
+### 4. 分工、补充要求与停止
 
-补充要求时直接在原会话里说，Orbit 会记录新的用户要求。切换同一仓库的另一个 worktree 时，使用显式 `orbit rebind-workspace`；`amend` 和 `dispute` 只追加检查输入或争议理由，不切换产物根。需要分工时，Agent 通过 Orbit 创建成员并集成结果，你不必另外开窗口组队。当前已验证 OpenCode Root 显式选择 `kind: codex`，让任务运行进程创建、回收和停止独立的 Codex 成员；其他跨宿主组合尚未验证。目标成员必须在本任务或项目规则中获得你的允许。
+需要分工时，Root 用 OMP 原生 `task` 派发成员、用 `hub` 通信与等待；成员只有一层（不能再派发），Orbit 在成员模型工作前登记其真实身份，结果自动回到 Root 由 Root 核验集成。你不必另外开窗口组队。
 
-执行成员的允许名单保存在可选的 `~/.config/orbit/members.json`，只识别 `allowed_kinds`。文件不存在时默认允许 `codex、omp、opencode、kimi、cursor-agent、grok`；文件存在时完整采用其中列表，`"allowed_kinds": []` 表示禁止创建新成员。名单只表示授权：`kimi`、`cursor-agent`、`grok` 尚无受控适配器，不会被报成可调用；`orbit doctor` 会分别显示允许、可调用与缺口，修改名单不影响已在执行成员的停止与结果回收。
+补充要求直接在原会话里说。切换同一仓库的另一个 worktree 使用显式 `orbit rebind-workspace`；`amend` 与 `dispute` 只追加检查输入或争议理由。
 
-例如只允许 Codex 和 OpenCode 成员时，将以下内容保存到该文件（使用 `XDG_CONFIG_HOME` 时保存到 `$XDG_CONFIG_HOME/orbit/members.json`）：
-
-```json
-{"allowed_kinds":["codex","opencode"]}
-```
-
-保存后运行 `orbit doctor` 查看名单与当前会话的可调用成员；无需自定义名单时不必创建文件。[进阶说明](docs/reference/usage-reference.md#jev-与成员名单配置)列出配置和验证步骤。
-
-Orbit 创建 Codex 执行成员时明确使用 full access，避免执行中反复审批；OpenCode 和 OMP 成员沿用 Root 的原生权限，Orbit 不改它们的权限配置。`orbit codex` 把本次启动的权限作为唯一策略：新会话默认 full access，显式沙箱或审批参数（含 `--dangerously-bypass-approvals-and-sandbox`、`--approve-for-me` 等组合模式）按字段覆盖。入口自有的本地代理在 TUI 内 `/new`、`/resume`、`/fork` 的线程生命周期边界原子应用该策略，TUI 本身不再携带权限覆盖参数，因此界面内恢复旧会话不会再报 “Permission overrides are not supported”，状态栏与实际执行一致；Orbit 控制、成员、检查者与停止链仍直连 app-server。`-p/--profile` 当前不支持（profile 的权限由 Codex 在界面侧解析，无法与单一策略共存），会在启动前明确报错。Orbit 不修改全局配置，检查者和裁定者仍保持只读。
-
-停止时可以在原生界面中断当前执行，或让 Agent 停止这项 Orbit 任务。也可另开终端执行：
+停止：在 OMP 界面中断当前执行，或另开终端执行：
 
 ```bash
 orbit stop
 orbit status
 ```
 
-多个待处理任务时不会默认停止任何一个；先查看列表，再用 `orbit stop ID` 选择。需要说明原因可加 `--reason "停止原因"`。
-
-`stop` 提示“已提交停止请求”只表示请求已排队，以后续实际状态为准。正常退出界面也会请求收尾；停止会保留会话、代码和任务记录。确认范围包括本任务登记的成员和原生管理的后台工作，外部未登记 Agent 不在其中。
+多个待处理任务不默认停止任何一个，先列表再 `orbit stop ID`。`stop` 提示"已提交停止请求"只表示请求已排队，以后续实际状态为准。停止保留会话、代码与任务记录；确认范围是 Root、本任务登记成员及其原生后台工作——外部未登记 Agent 不在其中，成员后台工作的退出以实际进程与作业结算为证。
 
 ## 模型与启动参数
 
@@ -150,110 +105,60 @@ orbit status
 
 | 角色 | 默认选择 |
 | --- | --- |
-| 当前执行 Agent（Root） | 你在 Codex、OpenCode 或 OMP 中选择的模型 |
-| 执行成员 | 同宿主 OpenCode／OMP 沿用 Root 模型；同宿主 Codex 沿用检查模型；OpenCode Root 创建的跨宿主 Codex 成员使用 Codex 自身配置或显式指定的已授权模型 |
-| 独立检查者、按需裁定者 | 使用本机 Codex CLI 的模型 |
+| Root | 你在 `orbit omp` 里选择的模型（OMP 原生配置） |
+| 执行成员 | 沿用 Root 的原生配置；也可在派发时指定 OMP 可用模型 |
+| 独立检查者、按需裁定者 | 另一独立只读 OMP 会话；模型由 OMP 配置与可用模型决定，Orbit 记录实际 provider/model |
 
-通常可以继续使用已有配置。要单独指定检查模型，在**启动 Agent 前**设置，例如：
-
-```bash
-export ORBIT_REVIEW_MODEL=gpt-6-astra
-```
-
-示例模型须已在你的账户中可用。没有设置此变量时，Codex 接入沿用当前会话配置；OpenCode／OMP 从本机 Codex `config.toml` 顶层读取模型。使用 Codex profile 配置检查模型时，请显式设置这个变量。更多说明见[角色与模型建议](skills/orbit/references/model-selection.md)。
+要单独指定检查模型，在启动任务时提供 OMP 可用的 `provider/id` 形式（例如经 Orbit 工具参数或 CLI 检查模型选项）；示例模型须已在你账户中可用。Orbit 不硬编码型号，也不把目录可见当作账号可用。
 
 ### 可选 Jev 检查调度
 
-安装 Orbit 后，运行一次：
+安装后运行一次：
 
 ```bash
 orbit jev setup
 ```
 
-按提示输入 TypeSafe key 并回车（输入时不显示），然后重新打开终端。在新终端启动 `orbit codex`、`opencode` 或 `omp`，新 Orbit 任务就会使用 Jev。命令将 key 写入仅当前用户可读的 TypeSafe 环境文件，并配置 zsh／bash 在启动时提供 `TYPESAFE_API_KEY`；Orbit 只从环境变量读取 key，不把它写进 Orbit 配置、项目或任务记录。已有环境变量优先，已运行的任务不会中途切换 key。路径、验证和项目关闭方法见[进阶说明](docs/reference/usage-reference.md#jev-与成员名单配置)。
+按提示输入 TypeSafe key（输入不显示）并重新打开终端。key 写入仅当前用户可读的 TypeSafe 环境文件，Orbit 只从 `TYPESAFE_API_KEY` 读取，不写入 Orbit 配置或任务记录。路径、验证与项目关闭方法见[进阶说明](docs/reference/usage-reference.md#jev-配置)。
 
-启用后，Orbit 把有界的任务观察发给 TypeSafe Jev。`delegatable` 只决定是否进入证据与第二阶段判断；`member_fit` 与 `parallel_gain` 形成 `recommended`／`declined`，过阈值并成功持久化 `delegation_hint` 后才提示，永不自动 `delegate`。Root 仍可无 hint 手动派发，但记录会明确标为 Root 决定。模型证据由 Root 联网检索后用 `orbit model-evidence` 提交，并按有效期缓存；Orbit 没有内置模型排行榜。检查输入有界，相同 observation 自动去重；产物检查不会因只读 `status` 或纯宿主 turn 变化而过期，过程检查仍核对宿主行为。手动 `check` 入队后，若没有用户预先明确且不依赖检查结果的状态变更，Root 结束当前轮次，Orbit 在需要动作时唤醒；不得仅为等待检查结论而轮询。实际检查、派发、完成与停止仍由 Orbit 和当前 Root 负责。每秒运行循环不会每秒请求 Jev。缺 key 或服务不可用时沿用原检查流程，key 不写入任务记录。
-
-若某个项目不应发送这些信息，在该项目运行 `mkdir -p .orbit && touch .orbit/jev-disabled`；移除此标记后，后续新任务会重新启用。项目的 `.orbit` 目录属于本地任务资料，不需要提交。
-
-### 恢复会话和选择模型
-
-下面的 `SESSION_ID` 换成要恢复的原生会话 ID；模型示例换成你已有的模型：
-
-| 用途 | Codex | OpenCode | OMP |
-| --- | --- | --- | --- |
-| 恢复会话 | `orbit codex resume SESSION_ID` | `opencode --session SESSION_ID` | `omp --resume SESSION_ID` |
-| 指定执行模型 | `orbit codex --model gpt-6-astra` | `opencode --model opencode-go/deepseek-v4.1-flash` | `omp --model opencode-go/deepseek-v4.1-flash` |
-
-原生权限和其他启动参数继续按各工具的方式使用；Codex 参数接在 `orbit codex` 后面。Orbit 的检查模型与 OpenCode／OMP 的执行模型分别配置。
-
-`orbit codex` 只对 Orbit MCP 工具（`orbit.task`）在该入口启动的会话内预批准，不改变其他工具、shell 沙箱或全局审批策略；`approval_policy=never` 的会话也能通过原生 MCP 调用 Orbit。
+启用后 Jev 给出"可能卡住／偏题／值得完整检查／可能适合分工"的概率；程序按概率与任务状态安排检查或提示 Root，不把概率当问题证据、完成结论或停止授权。分工建议分两阶段，只有持久化的 `delegation_hint` 送达后才算 Orbit 建议，Root 显式派发；派发记录区分跟随建议与 Root 自行决定。项目可用 `.orbit/jev-disabled` 关闭外发。
 
 ## 更新
-
-程序和 skill 分别更新。新版本中运行的任务、`orbit codex` 会话或已加载宿主扩展会登记所用 release，更新时保留它；宿主在重开后加载新扩展。首次从未登记的旧版更新前，先结束旧任务和会话。
-
-### 程序
 
 ```bash
 orbit update
 ```
 
-自动沿用本命令所属的安装目录与入口选择，CLI 和原生连接扩展一起更新；准备失败保留旧版。新版本运行中的任务、`orbit codex` 会话和已加载宿主扩展会在所用 release 内登记 pid lease，更新不会删除它们；持有者退出后的下一次安装清理旧 release。远程安装沿用原分支、标签或提交，本地安装沿用原源码目录（需先自行更新该源码，不自动 git pull）。本地来源安装可直接更新到本仓已提交的改动，不要求先推送；GitHub 来源只能取得已推送的提交。
-
-需要明确切换远程版本时使用 `orbit update --ref REF`，例如 `orbit update --ref main`。不再需要复制安装命令或填写 runtime 路径。
-
-### skill
-
-```bash
-npx skills update orbit --global
-```
-
-如果是项目安装，在那个项目中改用 `npx skills update orbit --project`。这一步不更新 CLI。skill 从 GitHub 安装时，需要先推送新内容才能从 GitHub 更新；本地开发可按[进阶说明](docs/reference/usage-reference.md#skill-管理与-omp)从本仓路径安装未推送的 skill。两步完成后重新打开 Coding Agent；`orbit version --json` 查看程序版本和来源，`npx skills list --global` 查看全局 skill。
+沿用本命令所属安装的目录与来源；准备失败保留旧版，运行中的任务与已加载扩展由 lease 保护。远程来源用 `orbit update --ref REF` 切换。更新后重开 `orbit omp` 会话加载新扩展。
 
 ## 卸载
 
-先结束使用该安装的 Orbit 任务和 Coding Agent 会话；若仍有进程持有 release，卸载会拒绝且不改动原安装。按本文目录安装时，分别卸载程序与 skill：
+先结束使用该安装的 Orbit 任务与 OMP 会话；仍有存活 lease 时卸载会拒绝。然后：
 
 ```bash
-# 程序及原生连接扩展
 orbit uninstall
-
-# 全局 skill
-npx skills remove orbit --global
 ```
 
-项目级 skill 则在对应项目执行 `npx skills remove orbit`。`orbit uninstall` 自动定位当前 CLI 所属的安装目录，自定义安装也无需填写 runtime 路径。
-
-卸载程序不会删除 npx 管理的 skill；卸载 skill 也不会删除程序。两者均不删除项目代码和 `.orbit` 任务记录。
+卸载不删除项目代码与 `.orbit` 任务记录。
 
 ## 常见问题
 
-### 已经开着普通 Codex，能直接接入吗？
+### 可以直接接管已打开的普通 `omp` 会话吗？
 
-目前不能直接接管这种会话。先结束或暂停当前工作，再使用 `orbit codex resume SESSION_ID` 恢复原会话；之后继续使用原上下文。OpenCode／OMP 的扩展也需要在启动时加载，安装后应退出并恢复会话。
+不能。退出后用 `orbit omp --resume SESSION_ID` 恢复同一会话，再开始任务；扩展在启动时加载。
 
-### Agent 没有主动使用 Orbit，怎么办？
+### Agent 没有主动使用 Orbit？
 
-先明确说“这次请使用 Orbit，并检查当前会话能否接入”。如果没有 Orbit 工具，检查是否使用了正确入口、是否在安装后重新启动，以及 skill／扩展是否装进当前配置目录。仅有 `orbit --version` 输出只能证明程序已安装。
+明确说"这次请使用 Orbit"。没有 Orbit 工具时，检查是否经 `orbit omp` 启动、安装后是否重开终端。先运行 `orbit doctor` 看缺口；OMP 中 Agent 经 `xd://orbit` 设备说明调用 Orbit 工具，可用 `context` 核对当前会话绑定。
 
-先运行 `orbit doctor` 查看具体缺口。有唯一待处理任务时，它还会读取该任务的原生连接；多个任务可用 `orbit doctor ID` 选择。诊断还会列出执行成员的允许名单、当前会话实际可调用的 kind，以及允许但无受控适配器的缺口。Codex 会话内优先验证当前会话，OpenCode／OMP 可让 Agent 调用 Orbit 工具的 `context` 核对本会话。扩展文件存在与会话已加载扩展分别报告，不根据安装文件猜测接入成功。
+### 要为每个项目安装一次、建团队或写规范吗？
 
-Codex 的 MCP 工具显示为 `orbit.task`；OpenCode 使用 `orbit`，OMP 的工具可能显示为 `xd://orbit`，由 Agent 按原生设备说明调用。
-
-### 可以只用 OpenCode 或 OMP，不安装 Codex 吗？
-
-目前不行。它们负责执行时，独立检查仍通过本机 Codex CLI。检查模型配置与登录也需要可用。
-
-### 要为每个项目安装一次程序、建立团队或写规范吗？
-
-完整程序通常安装一次即可。进入任意项目后，Orbit 读取该项目已有规则；成员由当前 Agent 按需要创建。不要求额外业务流程、团队或专门的 Orbit 需求表。
+程序通常安装一次即可。进入任意项目 `orbit omp` 启动；Orbit 读取项目已有规则，成员由 Root 按需要派发，不要求额外业务流程或 Orbit 需求表。
 
 ## 当前范围与更多文档
 
-当前源码版本 **0.6.12**，尚未发布 npm 包。上面的 status 分层、显式 `rebind-workspace`、JEV 两阶段提示、模型证据缓存、有界检查与 observation 去重，以及“候选分／最终决定／Root override”分离，都是 0.6.12 的确定性实现。真实路径、已通过部分与仍有限制的部分见 [优化真实验收记录](docs/reference/orbit-optimization-acceptance-plan-20260922.md)。Codex、OpenCode、OMP 的同宿主接入，以及 OpenCode Root → Codex 成员的跨宿主路径已有真实验收；其他跨宿主组合与 `kimi`、`cursor-agent`、`grok` 尚未接入，不列为可调用。Codex 执行成员与 `orbit codex` 默认 full access，OpenCode／OMP 成员沿用 Root 原生权限；`orbit codex` 的权限由入口代理在用户线程生命周期边界统一应用，界面内 `/new`、`/resume`、`/fork` 与首次启动一致；`-p/--profile` 暂不支持，其他权限形态与直接 `codex --remote … resume` 仍受 Codex 原生限制，见[当前限制](docs/plan/debt-ledger.md)。pi 与 OMP 是不同项目，pi 等其他接入暂缓。
+目标路径（`orbit omp` + 原生成员 + 独立 OMP 检查者）的端到端真实验收（M4）已通过：冻结 #1–#9 全部闭合（#5 经用户批准的组合证据，`finding_repeat_ignored` 未真实触发、仅确定性回归覆盖），证据矩阵见 [OMP 目标路径真实验收记录](docs/reference/omp-native-m4-acceptance-20260924.md)。验收针对已安装的 0.6.18（digest `06dba0f1…`，installed_at `2026-09-24T21:55:54Z`）；源码 0.7.0 尚未安装、尚未做真实验收。当前限制与跟踪项见 [当前限制](docs/plan/debt-ledger.md) 与[迁移总 TODO](docs/plan/omp-native-migration.md)；历史 Codex／OpenCode 时代的验收证据保留在 `docs/reference/` 备查。
 
 - [进阶使用参考](docs/reference/usage-reference.md)：安装目录、profile、CLI 参数、集成和版本维护。
-- [Agent 使用说明](skills/orbit/SKILL.md)：调用时机、分工与纠偏职责。
-- [真实验收](docs/reference/user-flow-acceptance-20260914.json)：Codex；另见 [OpenCode](docs/reference/opencode-runtime-acceptance-20260914.json)、[OMP](docs/reference/omp-runtime-acceptance-20260914.json) 与[跨宿主 Codex 成员](docs/reference/cross-host-member-acceptance-20260918.md)。
-- [当前限制](docs/plan/debt-ledger.md)与[文档索引](docs/README.md)：设计、开发规范和后续工作。
+- [设计决定](docs/adr/008-omp-native-collaboration-base.md)与[任务运行合同](contracts/task-runtime.md)。
+- [当前限制](docs/plan/debt-ledger.md)与[文档索引](docs/README.md)。

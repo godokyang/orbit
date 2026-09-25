@@ -26,7 +26,27 @@ module Orbit
 
     def state = request("state")
     def configured_model = request("model")
-    def default_member_model = configured_model
+    # No memoization: the delegation decision and its signature must reflect
+    # the current @task role/model/route resolution at each assessment.
+    def member_model_resolution
+      request("member_model")
+    end
+    def default_member_model
+      resolved = member_model_resolution
+      provider = resolved["provider"].to_s.strip
+      id = resolved["id"].to_s.strip
+      raise Error, "native task model is unresolved" if provider.empty? || id.empty?
+
+      "#{provider}/#{id}"
+    end
+    # Sanitized typed billing route from the host's resolved model endpoint
+    # (direct_api / subscription_quota / unknown). Older hosts return no field;
+    # nil stays unknown and the cost gate fails closed.
+    def default_member_route
+      resolved = member_model_resolution
+      route = resolved["billing_route"].to_s.strip
+      route.empty? ? nil : route
+    end
     def instruction_source_kind = "#{@provider}_user_message"
     def events = []
     def send_message(text)
@@ -35,14 +55,14 @@ module Orbit
       result
     end
     def stop! = request("stop")
-    def create_member(model:, cwd:)
-      request("create_member", "model" => model, "cwd" => member_cwd(cwd))
-    end
-    def start_member(id, instruction) = request("start_member", "member" => id, "text" => instruction)
-
-    def member_connection(id)
-      self.class.new(provider: @provider, socket: @socket, thread_id: id, deadline: @deadline).connect!
-    end
+    # Native task members are addressed by durable agent id. session stays the
+    # Root thread id so the plugin can check task ownership.
+    def member_state(id) = request("member_state", "id" => id)
+    def member_result(id) = request("member_result", "id" => id)
+    def send_member(id, text) = request("send_member", "id" => id, "text" => text)
+    def stop_member(id) = request("stop_member", "id" => id)
+    def native_member_roster = request("members")
+    def hub_events = request("hub_events")
 
     def user_message(id: nil)
       messages = request("messages")
@@ -58,19 +78,6 @@ module Orbit
     end
 
     private
-
-    def member_cwd(cwd)
-      raise Error, "member creation requires a project directory" if cwd.to_s.strip.empty?
-
-      directory = File.realpath(cwd.to_s)
-      raise Error, "member cwd is not a directory: #{cwd}" unless File.directory?(directory)
-
-      directory
-    rescue Errno::ENOENT
-      raise Error, "member cwd does not exist: #{cwd}"
-    rescue Errno::ENOTDIR
-      raise Error, "member cwd is not a directory: #{cwd}"
-    end
 
     def request(method, params = {})
       Timeout.timeout(@deadline) do

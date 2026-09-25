@@ -1,0 +1,56 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Internal synchronous member-registration entry for the OMP extension's
+# native task gate. The extension calls this (spawnSync) in the AgentRegistry
+# `registered` window — before the member can start any model work — so the
+# write must be fast, atomic and durable. TaskRuntime later reads the task's
+# members.json from its normal tick and from explicit stop retries after a
+# crash to rediscover actual member ids.
+#
+# Usage:
+#   orbit-register-member TASK_DIR --id orbit-... --requested orbit-...
+#     [--model provider/id] [--tool-call-id ID] [--status registered|refused]
+#     [--reason TEXT]
+#
+# Exit 0 and {"ok":true,...} on success; exit 1 and {"ok":false,...} on
+# refusal or any failure. Never overwrites an existing member id.
+
+require "json"
+require "optparse"
+require_relative "../lib/orbit/task_record"
+
+options = {}
+parser = OptionParser.new do |opts|
+  opts.on("--id ID") { |value| options[:id] = value }
+  opts.on("--requested NAME") { |value| options[:requested] = value }
+  opts.on("--model MODEL") { |value| options[:model] = value }
+  opts.on("--tool-call-id ID") { |value| options[:tool_call_id] = value }
+  opts.on("--status STATUS") { |value| options[:status] = value }
+  opts.on("--reason TEXT") { |value| options[:reason] = value }
+  opts.on("--abort-confirmed BOOL") { |value| options[:abort_confirmed] = value == "true" }
+end
+
+task_directory = parser.parse(ARGV).first
+if task_directory.to_s.empty? || options[:id].to_s.empty? || options[:requested].to_s.empty?
+  puts JSON.generate("ok" => false, "reason" => "usage: orbit-register-member TASK_DIR --id ID --requested NAME [--status registered|refused] [--model M] [--tool-call-id T] [--reason R]")
+  exit 1
+end
+
+unless File.file?(File.join(task_directory, "state.json"))
+  puts JSON.generate("ok" => false, "reason" => "not a task directory: #{task_directory}", "thread_id" => options[:id])
+  exit 1
+end
+
+record = Orbit::TaskRecord.new(task_directory)
+result = record.register_member(
+  options[:id],
+  requested_name: options[:requested],
+  status: options[:status] || "registered",
+  model: options[:model],
+  tool_call_id: options[:tool_call_id],
+  reason: options[:reason],
+  abort_confirmed: options[:abort_confirmed]
+)
+puts JSON.generate(result)
+exit(result["ok"] ? 0 : 1)

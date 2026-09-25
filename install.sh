@@ -14,9 +14,10 @@ require "rbconfig"
 abort "orbit install: Ruby >= 3.2 is required" if (RUBY_VERSION.split('.').map(&:to_i) <=> [3, 2]) < 0
 local = ARGV.shift
 if ARGV.include?("--help") || ARGV.include?("-h")
-  puts "Install/update Orbit CLI: sh install.sh [--bin-dir DIR] [--runtime-dir DIR] [--opencode-dir DIR | --no-opencode] [--omp-dir DIR | --no-omp] [--no-modify-path] [--ref REF]"
+  puts "Install/update Orbit CLI: sh install.sh [--bin-dir DIR] [--runtime-dir DIR] [--no-modify-path] [--ref REF]"
   puts "Local checkout by default; --ref (or ORBIT_REF) downloads one pinned GitHub commit. Remote default: main."
-  puts "Includes native connection extensions. Skill is managed separately: npx skills install godokyang/orbit --skill orbit --global"
+  puts "Single-host install: the CLI plus the explicit orbit omp entry; plain omp loads no Orbit extension."
+  puts "Owned global Orbit entries from an orbit-install-3 installation are cleaned up on switch."
   puts "Saves PATH for zsh/bash after installation. --no-modify-path disables this; --modify-path enables it again."
   exit
 end

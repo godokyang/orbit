@@ -1,0 +1,10 @@
+{
+  "name": "orbit-omp-reviewer",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Orbit independent OMP reviewer session runner. The SDK is pinned to the verified OMP version and installed into the release by install.sh.",
+  "dependencies": {
+    "@oh-my-pi/pi-coding-agent": "18.2.8"
+  }
+}

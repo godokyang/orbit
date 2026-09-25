@@ -9,8 +9,6 @@ require_relative "workspace_snapshot"
 require_relative "workspace_binding"
 require_relative "connection"
 require_relative "jev_advisor"
-require_relative "codex_member_host"
-require_relative "member_policy"
 require_relative "model_evidence_cache"
 require_relative "observation_key"
 
@@ -28,14 +26,24 @@ module Orbit
     # Real Jev calibration separated small handoff-negative fixtures
     # (0.45-0.48) from a substantive disjoint-module fixture (0.53).
     PARALLEL_GAIN_THRESHOLD = 0.50
+    # Cost joins the second stage only behind the fail-closed route/price gate.
+    # 0.50 is the minimal agreed threshold (no calibration evidence yet); the
+    # hard requirement is that an unknown route or price can never hint.
+    COST_APPROPRIATE_THRESHOLD = 0.50
     REVIEW_FOCUS_STATUSES = %w[added modified deleted].freeze
     REVIEW_FOCUS_LIMIT = 200
+    # A queued completion stop waits for the Root's delivery turn to finish;
+    # beyond this cap it stops immediately rather than waiting forever.
+    COMPLETION_STOP_TIMEOUT_SECONDS = 600
+    # A version-bound pending finalization notice waits for the Root turn when
+    # that happens sooner, but must still be delivered within this bound even
+    # if Root stays active/waiting (see contracts/task-runtime.md).
+    FINALIZATION_NOTICE_MAX_WAIT_SECONDS = 60
+    OMP_NATIVE_ADAPTER = "omp_native_task"
 
-    def initialize(record:, connection:, checker:, advisor: nil, member_host: nil, member_policy: nil, evidence_cache: nil)
+    def initialize(record:, connection:, checker:, advisor: nil, evidence_cache: nil)
       @record, @connection, @checker = record, connection, checker
       @advisor = advisor
-      @member_host = member_host
-      @member_policy = member_policy
       @evidence_cache = evidence_cache
       @state = record.state
       @state["findings"] ||= {}
@@ -45,11 +53,9 @@ module Orbit
       @state["evidence_requests"] ||= {}
       @state["evidence_gaps"] ||= {}
       @state["members"] ||= []
-      @state["member_hosts"] ||= {}
       @state["unknown_candidates"] ||= {}
       @state["check_observations"] ||= {}
       @state["finalization_notices"] ||= {}
-      @member_connections = {}
       @state["last_user_message_id"] ||= @state.dig("instruction_source", "id")
       @interval = @state.fetch("review").fetch("interval_seconds", 300)
       @next_check = Time.now.to_f + @interval
@@ -123,14 +129,6 @@ module Orbit
           record_cleanup_error(error)
         ensure
           @connection.close
-          @member_connections.each_value(&:close)
-        end
-        if %w[complete paused needs_user].include?(@state["status"])
-          begin
-            shutdown_member_hosts([])
-          rescue StandardError => error
-            @record.event("member_host_shutdown_error", "error" => error.message)
-          end
         end
         @state["finished_at"] = Time.now.utc.iso8601
         @state["elapsed_seconds"] = Time.now - Time.parse(@state.fetch("created_at"))
@@ -168,7 +166,6 @@ module Orbit
           stop(reason)
         ensure
           @connection.close
-          @member_connections.each_value(&:close)
         end
       end
       @state
@@ -178,13 +175,42 @@ module Orbit
     # checker doubles cannot turn these tests into real-model acceptance.
     def tick(now: Time.now.to_f)
       return if TERMINAL.include?(@state["status"])
+      reconcile_registered_members!
+      reject_legacy_members!
+      return if TERMINAL.include?(@state["status"])
       if @stop_requested
         stop("Runtime received an explicit stop request")
         return
       end
       deadline = @state["hard_deadline"]
       if deadline && now >= Time.parse(deadline).to_f
+        # An explicit user hard deadline always wins over a queued completion
+        # wait: it stops immediately and never records completion.
+        @state.delete("completion_stop_pending")
         stop("The user's explicit hard deadline was reached")
+        return
+      end
+      if (pending = @state["completion_stop_pending"])
+        host = begin
+          @connection.state
+        rescue Connection::Error
+          nil
+        end
+        idle_done = host && host["status"] == "idle" && host["last_turn_status"] == "completed"
+        interrupted = host && (host["interrupted"] ||
+                     (host["status"] == "idle" && host["last_turn_status"] == "interrupted"))
+        expired = now - Time.parse(pending.fetch("at")).to_f > COMPLETION_STOP_TIMEOUT_SECONDS
+        @state.delete("completion_stop_pending")
+        if idle_done
+          stop(pending.fetch("reason"), allow_complete: true)
+        elsif interrupted || expired
+          # The delivery turn aborted or the wait outlived its bound: this is
+          # an ordinary stop now, never a completion.
+          stop(pending.fetch("reason"))
+        else
+          @state["completion_stop_pending"] = pending
+          save # hold other observation until the delivery turn finishes
+        end
         return
       end
 
@@ -196,6 +222,9 @@ module Orbit
       consume_commands
       return if TERMINAL.include?(@state["status"])
       collect_member_results
+      consume_hub_events
+      retry_native_amendments
+      return if TERMINAL.include?(@state["status"])
       host = @connection.state
       @connection.events.each do |event|
         next unless event["method"] == "thread/tokenUsage/updated"
@@ -206,6 +235,11 @@ module Orbit
       if @running_check
         @check_result ||= @checker.poll
         finish_check(@check_result, host, now) if @check_result
+        return
+      end
+      if deliver_pending_finalization(host, now)
+        @last_delivery_checked = host["last_turn_id"]
+        save
         return
       end
       if %w[notLoaded systemError].include?(host["status"])
@@ -220,6 +254,23 @@ module Orbit
                   !@first_change_checked && fingerprint_artifact != @initial_digest
                 end
       delivery_due = delivery && host["last_turn_id"] != @last_delivery_checked
+      if delivery && (pending = @state["pending_correction"])
+        # A correction whose first delivery failed is retried exactly when the
+        # Root is observed idle again — but only while it still describes the
+        # current version; otherwise it is dropped and the next normal check
+        # speaks for the new version.
+        stale = pending["artifact_digest"] &&
+                (pending["artifact_root"] != artifact_root ||
+                 pending["artifact_digest"] != fingerprint_artifact ||
+                 pending["input_digest"] != @record.input_digest(@state))
+        if stale
+          @state.delete("pending_correction")
+          @record.event("correction_redelivery_stale", "check" => pending["check"])
+          save
+        else
+          deliver_correction_text(pending.fetch("text"), pending)
+        end
+      end
       if now >= @next_check || delivery_due
         scheduled = now >= @next_check
         cause = scheduled ? (@state["next_check_trigger"] || "timer") : "delivery"
@@ -347,6 +398,23 @@ module Orbit
                     "from" => entry["from"], "to" => entry["to"])
       reset_artifact_observation!
       schedule_check(0, "工作区重新绑定", trigger: "rebind")
+      # Root's OMP session cwd does not move with the artifact root: say so
+      # explicitly (never as a new user instruction). A failed notice must not
+      # lose the persisted rebind or fail the task.
+      cwd = begin
+        @connection.state.fetch("cwd", nil)
+      rescue Connection::Error
+        nil
+      end
+      notice = "Orbit workspace notice (not a new user instruction): the artifact root moved to #{entry['to']}. " \
+               "Your OMP session cwd has not moved#{cwd ? " (still #{cwd})" : ''}; " \
+               "all further task artifacts must be written under the new root."
+      begin
+        sent = @connection.send_message(notice)
+        @state["sent_message_ids"] << sent.fetch("id")
+      rescue Connection::Error => error
+        @record.event("workspace_rebind_notice_failed", "error" => error.message)
+      end
     rescue WorkspaceBinding::Error => error
       @record.event("workspace_rebind_rejected", "path" => command["path"], "reason" => error.message)
       sent = @connection.send_message("Orbit workspace rebind was rejected (not a new user instruction): #{error.message}")
@@ -461,21 +529,39 @@ module Orbit
           @record.event("command_rejected", "command_type" => command["type"], "reason" => "Task execution has stopped")
           next
         end
-        case command.fetch("type")
+        # Payload validation happens before dispatch so a malformed but typed
+        # command is rejected explicitly; internal KeyErrors from the handlers
+        # stay visible instead of being relabeled as command errors.
+        required = case command["type"]
+                   when "amend" then %w[text source]
+                   when "rebind_workspace" then %w[path]
+                   when "dispute" then %w[reason]
+                   else []
+                   end
+        missing = required.reject { |key| command.key?(key) && !command[key].nil? }
+        unless missing.empty?
+          @record.event("command_rejected", "command_type" => command["type"],
+                        "reason" => "Command is missing required fields: #{missing.join(', ')}")
+          next
+        end
+        case command["type"]
         when "stop"
-          stop(command.fetch("reason", "User requested stop"))
+          reason = command.fetch("reason", "User requested stop")
+          if command["complete"] == true && completion_notice_current?
+            # Deferred completion: aborting the Root turn now could cut the
+            # user's final summary. Queue the stop; the tick performs it once
+            # the current turn completed normally (bounded wait below),
+            # re-verifying the hand-off version at that point. Plain stops
+            # without the explicit completion intent take the ordinary path.
+            @state["completion_stop_pending"] = { "reason" => reason, "at" => Time.now.utc.iso8601 }
+            @record.event("completion_stop_queued", "reason" => reason)
+          else
+            stop(reason)
+          end
         when "amend"
           add_amendment(command.fetch("text"), command.fetch("source"))
           sent = @connection.send_message("Orbit: the user explicitly amended this task:\n\n" + command.fetch("text"))
           @state["sent_message_ids"] << sent.fetch("id")
-        when "delegate"
-          begin
-            delegate(command)
-          rescue MemberPolicy::Error => error
-            @record.event("member_rejected", "kind" => command["kind"], "reason" => error.message)
-            sent = @connection.send_message("Orbit member delegation was rejected (not a new user instruction): #{error.message}")
-            @state["sent_message_ids"] << sent.fetch("id")
-          end
         when "check"
           schedule_check(0, "用户请求的检查", trigger: "manual_check", manual: true)
         when "rebind_workspace"
@@ -498,127 +584,158 @@ module Orbit
       @state["amendments"] << { "path" => relative, "source" => source, "at" => Time.now.utc.iso8601 }
       @record.event("instruction_amended", "source" => source)
       @state["members"].each do |member|
-        next unless member["status"] == "working"
-        member_connection(member).send_message("The user amended the original task. Apply only changes relevant to your delegated scope:\n\n" + text)
+        next unless %w[working registered].include?(member["status"])
+        deliver_native_amendment(member, text, source) if member["adapter"] == OMP_NATIVE_ADAPTER
       end
       schedule_check(0, "用户修改后重新核对", trigger: "amendment")
     end
 
-    # The allowlist and adapter checks run before any host or member is
-    # created. Reusing an already-registered member is not new creation and
-    # stays available even if the list changed.
-    def delegate(command)
-      instructions = member_instructions(command.fetch("text"))
-      basis = delegation_basis
-      member = if command["member"]
-                 attach_member(command.fetch("member"), instructions)
-               else
-                 provider = @state.dig("connection", "provider")
-                 kind = member_policy.resolve_kind(command.fetch("kind", "native"), provider)
-                 member_policy.check!(kind)
-                 adapter = MemberAdapters.require!(kind, provider)
-                 if adapter["adapter"] == "codex_host"
-                   start_codex_member(command, instructions)
-                 else
-                   start_native_member(command, instructions, kind)
-                 end
-               end
-      member["delegation_basis"] = basis
-      @record.event("member_delegated", "thread_id" => member["thread_id"], "kind" => member["kind"],
-                    "scope" => command.fetch("text"), "basis" => basis)
-      if basis == "orbit_hint"
-        mark_delegation_hint_followed(member)
+    def omp_task?
+      @state.dig("connection", "provider") == "omp"
+    end
+
+    # Rediscover native task ids from the registration gate's members.json.
+    # This does not call the member bridge. A corrupt list is not treated as empty.
+    def reconcile_registered_members!
+      return unless omp_task?
+
+      listed = @record.members
+      validate_member_roster!(listed)
+      @state["members"] ||= []
+      changed = false
+      listed.each do |entry|
+        id = entry.fetch("thread_id")
+        next if @state["members"].any? { |member| member["thread_id"] == id }
+
+        member = {
+          "kind" => "omp", "adapter" => OMP_NATIVE_ADAPTER, "thread_id" => id,
+          "requested_name" => entry["requested_name"], "status" => entry.fetch("status"),
+          "registered_at" => entry["registered_at"]
+        }
+        member["model"] = entry["model"] if entry["model"]
+        member["tool_call_id"] = entry["tool_call_id"] if entry["tool_call_id"]
+        member["reason"] = entry["reason"] if entry["reason"]
+        if member["status"] == "registered"
+          member["delegation_basis"] = delegation_basis
+          mark_delegation_hint_followed(member) if member["delegation_basis"] == "orbit_hint"
+        end
+        @state["members"] << member
+        @record.event("native_member_reconciled", "thread_id" => id, "status" => member["status"],
+                      "basis" => member["delegation_basis"])
+        changed = true
+      end
+      save if changed
+    end
+
+    def deliver_native_amendment(member, text, source)
+      item = enqueue_native_amendment(member, text, source, nil)
+      send_queued_amendment(member, item)
+    end
+
+    def enqueue_native_amendment(member, text, source, error)
+      source_id = source.is_a?(Hash) ? source["id"].to_s : ""
+      source_id = "amendment-#{@state.fetch('amendments').length}" if source_id.empty?
+      queue = (@state["amendment_delivery_queue"] ||= [])
+      item = queue.find { |entry| entry["thread_id"] == member["thread_id"] && entry["source_id"] == source_id }
+      unless item
+        item = { "thread_id" => member["thread_id"], "source_id" => source_id, "text" => text, "attempts" => 0 }
+        queue << item
+      end
+      item["text"] = text
+      item["error"] = error if error
+      item
+    end
+
+    def retry_native_amendments
+      queue = @state["amendment_delivery_queue"]
+      return unless queue.is_a?(Array) && queue.any?
+
+      queue.dup.each do |item|
+        return if TERMINAL.include?(@state["status"])
+        member = @state["members"].find { |entry| entry["thread_id"] == item["thread_id"] }
+        unless member && %w[registered working starting].include?(member["status"])
+          stop("member #{item['thread_id']} ended before receiving amendment #{item['source_id']}", status: "needs_user")
+          return
+        end
+        send_queued_amendment(member, item)
+      end
+    end
+
+    def send_queued_amendment(member, item)
+      unless @connection.respond_to?(:send_member)
+        record_native_amendment_failure(member, item, "send_member unreachable")
+        return
+      end
+      @connection.send_member(member["thread_id"], "The user amended the original task. Apply only changes relevant to your delegated scope:\n\n#{item['text']}")
+      (@state["amendment_delivery_queue"] || []).delete(item)
+      member["amendment_delivery"] = "sent"
+      member.delete("amendment_error")
+      clear_amendment_error(item)
+      @record.event("member_amendment_sent", "thread_id" => member["thread_id"], "source_id" => item["source_id"])
+      save
+    rescue StandardError => error
+      record_native_amendment_failure(member, item, error.message)
+    end
+
+    def amendment_error_text(item, error)
+      "member #{item['thread_id']} did not receive the amendment #{item['source_id']}: #{error}"
+    end
+
+    def clear_amendment_error(item)
+      text = @state["error"].to_s
+      return unless text.include?(item["thread_id"].to_s) && text.include?("did not receive the amendment #{item['source_id']}")
+
+      remaining = Array(@state["amendment_delivery_queue"])
+      if remaining.empty?
+        @state.delete("error")
       else
-        @record.event("delegation_without_hint", "thread_id" => member["thread_id"], "kind" => member["kind"])
+        other = remaining.last
+        @state["error"] = amendment_error_text(other, other["error"])
       end
-      save
     end
 
-    def attach_member(thread_id, instructions)
-      member = @state["members"].find { |entry| entry["thread_id"] == thread_id }
-      raise ArgumentError, "member is not owned by this task" unless member
-
-      member["status"] = "working"
+    def record_native_amendment_failure(member, item, error)
+      changed = item["error"] != error || member["amendment_delivery"] != "pending"
+      item["error"] = error
+      member["amendment_delivery"] = "pending"
+      member["amendment_error"] = error
+      @state["error"] = amendment_error_text(item, error)
       save
-      member_connection(member).send_message(instructions)
-      member
-    end
+      return unless changed
 
-    def start_native_member(command, instructions, kind)
-      model = command["model"] || (@connection.default_member_model if @connection.respond_to?(:default_member_model)) || @state.dig("review", "model")
-      id = @connection.create_member(model: model, cwd: artifact_root)
-      member = { "kind" => kind, "adapter" => "same_host", "thread_id" => id, "model" => model, "status" => "starting" }
-      @state["members"] << member
-      # Persist ownership before this member can start any model/tool work.
-      save
-      @connection.start_member(id, instructions)
-      member["status"] = "working"
-      member
-    end
+      @record.event("member_amendment_failed", "thread_id" => member["thread_id"], "source_id" => item["source_id"], "error" => error)
+      return unless @connection.respond_to?(:send_message)
 
-    # Cross-host path: this task process owns the Codex member app-server.
-    # The host record and the member identity are persisted before turn/start
-    # so an explicit stop retry can reconnect from the task record.
-    def start_codex_member(command, instructions)
-      host = codex_member_host
-      host_record = @state.fetch("member_hosts")["codex"]
-      unless host_record
-        host_record = host.start
-        @state["member_hosts"]["codex"] = host_record
-        @record.event("member_host_started", "kind" => "codex", "socket" => host_record["socket"],
-                      "pid" => host_record["pid"], "pgid" => host_record["pgid"])
-        save
+      begin
+        @connection.send_message("Orbit could not deliver the user amendment to member #{member['thread_id']}: #{error}")
+      rescue StandardError => notify_error
+        @record.event("member_amendment_notify_failed", "thread_id" => member["thread_id"], "source_id" => item["source_id"], "error" => notify_error.message)
       end
-      created = host.create_member(host_record, model: command["model"], cwd: artifact_root)
-      member = {
-        "kind" => "codex", "thread_id" => created.fetch("thread_id"), "model" => created.fetch("model"),
-        "socket" => host_record.fetch("socket"), "host" => "codex", "status" => "starting",
-        "registered_at" => Time.now.utc.iso8601
-      }
-      @state["members"] << member
-      @record.event("member_registered", "kind" => "codex", "thread_id" => member["thread_id"],
-                    "socket" => member["socket"], "model" => member["model"])
-      save
-      host.start_member(host_record, member["thread_id"], instructions)
-      member["status"] = "working"
-      member
     end
 
-    def member_instructions(scope)
-      "You are an execution member for an Orbit task. Work only on the delegated scope in this project. " \
-        "Follow project rules. Do not start Orbit, create other agents, commit, or push. " \
-        "Report concrete results and verification to the Root. Stop your background commands before finishing.\n\n" \
-        "Original task inputs:\n#{JSON.pretty_generate(@record.inputs(@state))}\n\n" \
-        "Delegated scope:\n#{scope}"
-    end
-
-    def member_connection(member)
-      id = member.fetch("thread_id")
-      @member_connections[id] ||= if member["host"] == "codex"
-                                    codex_member_host.connection_for({ "socket" => member.fetch("socket") }, id)
-                                  else
-                                    @connection.member_connection(id)
-                                  end
-    end
-
-    def codex_member_host
-      @member_host ||= CodexMemberHost.new(cwd: artifact_root)
-    end
-
-    # The list is an authorization input that may change while a task runs;
-    # every dispatch re-reads it. An injected policy (tests) stays fixed.
-    def member_policy
-      @member_policy || MemberPolicy.load
+    def stop_omp_native_member(member, failures)
+      id = member["thread_id"]
+      unless @connection.respond_to?(:stop_member)
+        failures << "Member #{id}: native member stop bridge is unreachable"
+        return { "thread_id" => id, "error" => "native member stop bridge is unreachable", "registration_status" => member["status"] }
+      end
+      begin
+        result = @connection.stop_member(id)
+      rescue StandardError => error
+        failures << "Member #{id}: #{error.message}"
+        return { "thread_id" => id, "error" => error.message, "registration_status" => member["status"] }
+      end
+      confirmed = result.is_a?(Hash) && result["confirmed"] == true && result["active_tools_after"] == 0 && result["async_jobs_settled"] == true
+      unless confirmed
+        failures << "Member #{id}: stop_member did not confirm idle tools and reaped background work"
+        return { "thread_id" => id, "error" => "stop_member unconfirmed", "confirmation" => result, "registration_status" => member["status"] }
+      end
+      member["stop_confirmation"] = result
+      { "thread_id" => id, "confirmation" => result }
     end
 
     def delegation_options
-      provider = @state.dig("connection", "provider")
-      allowed = member_policy.allowed_kinds
-      callable = MemberAdapters.callable_kinds(provider).select { |kind| allowed.include?(kind) }
-      { "allowed_kinds" => allowed, "callable_kinds" => callable,
-        "hint_sent" => !@state["delegation_hint"].nil? }
-    rescue MemberPolicy::Error => error
-      { "allowed_kinds" => nil, "callable_kinds" => [], "error" => error.message,
+      { "allowed_kinds" => ["omp"], "callable_kinds" => ["omp"],
         "hint_sent" => !@state["delegation_hint"].nil? }
     end
 
@@ -628,7 +745,7 @@ module Orbit
     # identity plus the second-stage judgment.
     def stage_delegation(scores, artifact_digest, now)
       return unless scores.fetch("delegatable", 0) >= DELEGATION_HINT_THRESHOLD
-      return if @state["members"].any? { |member| %w[starting working].include?(member["status"]) }
+      return if @state["members"].any? { |member| member_blocks_new_hint?(member) }
 
       options = delegation_options
       return if options["callable_kinds"].empty?
@@ -637,8 +754,15 @@ module Orbit
       return if @state.dig("delegation_hints", signature)
       if (assessment = @state.dig("delegation_assessments", signature))
         scores = assessment["scores"]
+        # Recover only with fresh evidence: the lookup filters expired entries
+        # and route mismatches, so a stale, route-less or fact-less cache
+        # cannot resurrect a recommended assessment.
+        identities = evidence_identities(delegation_options)
+        entries = identities && evidence_states(identities)
         if scores.is_a?(Hash) && scores.fetch("member_fit", 0) >= MEMBER_FIT_THRESHOLD &&
-           scores.fetch("parallel_gain", 0) >= PARALLEL_GAIN_THRESHOLD
+           scores.fetch("parallel_gain", 0) >= PARALLEL_GAIN_THRESHOLD &&
+           scores.fetch("cost_appropriate", 0) >= COST_APPROPRIATE_THRESHOLD &&
+           entries && evidence_complete?(entries) && cost_route_verified?(entries)
           prepare_delegation_hint(scores, signature, now)
           @record.event("delegation_hint_recovered", "signature" => signature)
         end
@@ -658,19 +782,26 @@ module Orbit
                               "needed" => %w[speed quality cost local_samples],
                               "at" => Time.at(now).utc.iso8601 }
       elsif evidence_complete?(entries)
+        unless cost_route_verified?(entries)
+          record_cost_route_gap(signature, entries)
+          return
+        end
         run_delegation_assessment(identities, entries, signature, artifact_digest, now)
       else
         record_evidence_unavailable(signature, now)
       end
     end
 
-    # Input, artifact or candidate changes create a new signature and allow a
-    # new hint; transient host noise does not.
+    # Input, artifact, candidate identity/route or candidate changes create a
+    # new signature and allow a new hint; transient host noise does not. The
+    # resolved @task model and billing route are part of the signature so a
+    # changed role, model or route cannot reuse an old assessment or hint.
     def delegation_signature(artifact_digest, options)
       Digest::SHA256.hexdigest(JSON.generate([
         @record.input_digest(@state), artifact_digest,
         @state["members"].map { |member| member.slice("thread_id", "status") },
-        options["callable_kinds"]
+        options["callable_kinds"],
+        { "model" => native_member_model, "billing_route" => native_member_route }
       ]))
     end
 
@@ -688,13 +819,13 @@ module Orbit
       options.fetch("callable_kinds").each do |kind|
         if kind.to_s == provider
           # A same-host native candidate follows the connection's member
-          # default, which is the Root's configured model for same-host
-          # members. The kind stays on the identity for the Root message; the
-          # cache API only receives provider, model and reasoning.
+          # default, which is the OMP `@task` role resolution, not the Root
+          # session model. The kind stays on the identity for the Root message;
+          # the cache API only receives provider, model and reasoning.
           identity = split_model_identity(native_member_model, provider)
           return nil unless identity_usable?(identity)
 
-          candidates << identity.merge("kind" => kind)
+          candidates << identity.merge("kind" => kind, "billing_route" => native_member_route)
         else
           # No host is probed to discover a cross-host model identity. The
           # kind stays visible as an unknown candidate and never blocks the
@@ -727,6 +858,19 @@ module Orbit
       nil
     end
 
+    # Sanitized typed billing route resolved by the host for the native task
+    # model. An older host without the field, an unexpected value or a host
+    # error all stay `unknown`; the cost gate then fails closed.
+    def native_member_route
+      return "unknown" unless @connection.respond_to?(:default_member_route)
+
+      route = @connection.default_member_route.to_s.strip
+      ModelEvidenceCache::BILLING_ROUTES.include?(route) ? route : "unknown"
+    rescue StandardError => error
+      @native_route_error = "#{error.class}: #{error.message}"
+      "unknown"
+    end
+
     # "provider/model" is the only reliable split; a bare model id belongs to
     # the connection provider. Reasoning effort stays "unknown": hosts do not
     # expose it and model names are not evidence.
@@ -745,7 +889,8 @@ module Orbit
     def identity_usable?(identity)
       return false unless identity.is_a?(Hash)
 
-      evidence_cache.identity(provider: identity["provider"], model: identity["model"], reasoning: identity["reasoning"])
+      evidence_cache.identity(provider: identity["provider"], model: identity["model"], reasoning: identity["reasoning"],
+                              billing_route: identity["billing_route"])
       true
     rescue ModelEvidenceCache::Error
       false
@@ -776,8 +921,26 @@ module Orbit
       evidence_statuses(states).all? { |entry| entry["status"] == "evidence" }
     end
 
+    # A cost judgment needs the host to have resolved the candidate to a
+    # verified route AND the stored candidate entry to carry the same typed
+    # route plus that route's numeric fact namespace: `cost.*` on direct_api,
+    # `quota.*` on subscription_quota. Other routes, route mismatches,
+    # route-less (older) entries and entries without the required namespace
+    # all stay fail-closed: no second stage and no hint.
+    def cost_route_verified?(states)
+      route = native_member_route
+      prefix = ModelEvidenceCache.route_metric_prefix(route)
+      return false unless prefix
+
+      states.fetch("candidates").all? do |entry|
+        entry["status"] == "evidence" && entry["billing_route"] == route &&
+          ModelEvidenceCache.numeric_metric?(entry, prefix)
+      end
+    end
+
     def lookup_evidence(identity)
-      evidence_cache.lookup(provider: identity["provider"], model: identity["model"], reasoning: identity["reasoning"])
+      evidence_cache.lookup(provider: identity["provider"], model: identity["model"], reasoning: identity["reasoning"],
+                            billing_route: identity["billing_route"])
     end
 
     # Tests inject a temporary cache; production builds the user-level cache
@@ -795,7 +958,8 @@ module Orbit
       Array(command["entries"]).map do |entry|
         next nil unless entry.is_a?(Hash)
 
-        identity = evidence_cache.identity(provider: entry["provider"], model: entry["model"], reasoning: entry["reasoning"])
+        identity = evidence_cache.identity(provider: entry["provider"], model: entry["model"],
+                                            reasoning: entry["reasoning"], billing_route: entry["billing_route"])
         status = entry["status"].to_s
         next nil unless ModelEvidenceCache::STATUSES.include?(status)
 
@@ -806,7 +970,27 @@ module Orbit
     end
 
     def evidence_identity_key(identity)
-      [identity["provider"], identity["model"], identity["reasoning"]]
+      normalized = evidence_cache.identity(
+        provider: identity["provider"], model: identity["model"],
+        reasoning: identity["reasoning"], billing_route: identity["billing_route"]
+      )
+      normalized.values_at("provider", "model", "reasoning", "billing_route")
+    end
+
+    # A mismatch stays fail-closed: the note only tells the submitter which
+    # candidate route the pending request expects and what was submitted. It
+    # never relaxes identity matching and never sends an unsolicited message.
+    def evidence_mismatch_note(identities, submitted_keys)
+      details = identities.fetch("candidates").map do |identity|
+        expected = ModelEvidenceCache.billing_route(identity["billing_route"])
+        actual = submitted_keys.find do |key|
+          key[0] == identity["provider"] && key[1] == identity["model"] && key[2] == identity["reasoning"]
+        end
+        "#{identity['provider']}/#{identity['model']} billing_route must be #{expected}, " \
+          "submitted #{actual ? actual[3] : 'missing'}"
+      end
+      "evidence identities did not match the pending request; #{details.join('; ')}. " \
+        "Resubmit with the route shown in the Orbit request (omitted counts as unknown)."
     end
 
     # Root and a same-host candidate can share one identity; the CLI and the
@@ -842,10 +1026,33 @@ module Orbit
       identities = request.fetch("identities")
       submitted = submitted_evidence(command)
       unless submitted && evidence_set_matches?(submitted, identities)
+        submitted_keys = Array(submitted).map { |entry| evidence_identity_key(entry) }
+        expected_keys = requested_evidence_keys(identities)
         request["resolved"] = "mismatch"
-        @state["jev"] = (@state["jev"] || {}).merge("evidence_status" => "unknown")
-        @record.event("model_evidence_mismatch", "expected" => requested_evidence_keys(identities),
-                      "submitted" => Array(submitted).map { |entry| evidence_identity_key(entry) })
+        @state["jev"] = (@state["jev"] || {}).merge(
+          "evidence_status" => "mismatch",
+          "evidence_note" => evidence_mismatch_note(identities, submitted_keys)
+        )
+        @record.event("model_evidence_mismatch", "expected" => expected_keys, "submitted" => submitted_keys)
+        save
+        return
+      end
+
+      # The pending request may predate a @task change. Re-resolve now: a
+      # changed candidate identity, model or billing route makes the pending
+      # evidence stale for this assessment. Cache entries stay reusable under
+      # their own identity/route, and the next stage-one signature requests
+      # current evidence.
+      current = evidence_identities(delegation_options)
+      if current.nil? || requested_evidence_keys(current) != requested_evidence_keys(identities)
+        request["resolved"] = "stale"
+        @state["jev"] = (@state["jev"] || {}).merge(
+          "evidence_status" => "unknown",
+          "evidence_note" => "the resolved candidate identity or billing route changed while evidence was pending"
+        )
+        @record.event("model_evidence_stale",
+                      "requested" => requested_evidence_keys(identities),
+                      "current" => current ? requested_evidence_keys(current) : nil)
         save
         return
       end
@@ -869,12 +1076,15 @@ module Orbit
       end
 
       request["resolved"] = "used"
-      @state["jev"] = (@state["jev"] || {}).merge("evidence_status" => "used")
-      @state["jev"]["evidence"] = { "identities" => identities, "at" => Time.at(now).utc.iso8601 }
-      @record.event("model_evidence_used", "identities" => identities, "valid_until" => states.dig("root", "valid_until"))
       save
       artifact_digest = probe_artifact(now)
       signature = delegation_signature(artifact_digest, delegation_options)
+      unless cost_route_verified?(states)
+        request["resolved"] = "cost_unverified"
+        save
+        record_cost_route_gap(signature, states)
+        return
+      end
       run_delegation_assessment(identities, states, signature, artifact_digest, now)
     end
 
@@ -891,10 +1101,12 @@ module Orbit
         elapsed_seconds: now - Time.parse(@state.fetch("created_at")).to_f,
         member_options: delegation_options
       ).merge("model_evidence" => summary)
+      persist_delegation_evidence!(observation.fetch("model_evidence"), signature)
       result = @advisor.assess_delegation(state: observation)
       scores = result.fetch("scores")
       decision = if scores.fetch("member_fit", 0) >= MEMBER_FIT_THRESHOLD &&
-                    scores.fetch("parallel_gain", 0) >= PARALLEL_GAIN_THRESHOLD
+                    scores.fetch("parallel_gain", 0) >= PARALLEL_GAIN_THRESHOLD &&
+                    scores.fetch("cost_appropriate", 0) >= COST_APPROPRIATE_THRESHOLD
                    "recommended"
                  else
                    "declined"
@@ -933,12 +1145,33 @@ module Orbit
     # Bounded, JSON-safe summary of validated cache facts. Values keep their
     # submitted unit and basis; different units are never merged into a single
     # pseudo-precise score, and no web page text can reach this structure.
+    # Persist the exact summary embedded in the completed observation before
+    # JEV is called. A write failure raises and must not be turned into a
+    # second-stage attempt.
+    def persist_delegation_evidence!(summary, signature)
+      unless @state.dig("delegation_evidence", signature)
+        @record.event("model_evidence_used", "signature" => signature, "summary" => summary)
+        traced = { "signature" => signature, "summary" => summary, "at" => Time.now.utc.iso8601 }
+        (@state["delegation_evidence"] ||= {})[signature] = traced
+        @state["jev"] = (@state["jev"] || {}).merge("evidence_status" => "used", "evidence" => traced)
+      end
+      save
+    end
+
     def delegation_evidence_summary(identities, entries)
       entry_summary = lambda do |identity, entry|
+        metrics = entry["metrics"]
+        if metrics.is_a?(Hash)
+          # Legacy cache entries may still carry cross-identity comparison
+          # claims written before submission rejected them; never feed those
+          # into the second-stage judgment.
+          metrics = metrics.reject { |name, _| ModelEvidenceCache.comparison_metric?(name) }
+        end
         {
           "provider" => identity["provider"], "model" => identity["model"], "reasoning" => identity["reasoning"],
+          "billing_route" => identity["billing_route"] || "unknown",
           "status" => entry["status"], "retrieved_at" => entry["retrieved_at"], "valid_until" => entry["valid_until"],
-          "sources" => Array(entry["sources"]), "metrics" => entry["metrics"]
+          "sources" => Array(entry["sources"]), "metrics" => metrics
         }
       end
       {
@@ -946,12 +1179,13 @@ module Orbit
         "candidates" => identities.fetch("candidates").each_with_index.map do |identity, index|
           entry_summary.call(identity, entries.fetch("candidates").fetch(index))
         end,
-        "note" => "Validated cache facts only; unit and basis are preserved and no cross-unit score is fabricated."
+        "note" => "Structure-validated cache entries only; metric values, units and basis are submitter-provided " \
+                  "and not semantically verified; cross-identity comparison metrics are omitted."
       }
     end
 
-    # The automatic chain stops when an identity cannot be established. Root
-    # may still delegate manually; Orbit does not guess or probe hosts.
+    # The automatic chain stops when an identity cannot be established.
+    # Orbit does not guess or probe hosts.
     def record_evidence_gap(signature, options)
       return if @state.dig("evidence_gaps", signature)
 
@@ -981,6 +1215,53 @@ module Orbit
       save
     end
 
+    # The evidence set is complete, but it cannot authorize a cost judgment.
+    # This is terminal for the signature: no stage two and no hint. Structured
+    # per-candidate facts keep the reason auditable, including which numeric
+    # fact namespace the resolved route required.
+    def record_cost_route_gap(signature, states)
+      return if @state.dig("evidence_gaps", signature)
+
+      expected = ModelEvidenceCache.route_metric_prefix(native_member_route)
+      candidates = states.fetch("candidates").map do |entry|
+        {
+          "provider" => entry["provider"], "model" => entry["model"],
+          "billing_route" => entry["billing_route"] || "unknown",
+          "fact_present" => expected ? ModelEvidenceCache.numeric_metric?(entry, expected) : false
+        }
+      end
+      @state["evidence_gaps"][signature] = {
+        "reason" => "cost route or required fact is not verified for every compared candidate",
+        "host_billing_route" => native_member_route,
+        "expected_metric" => expected || "none",
+        "candidates" => candidates, "at" => Time.now.utc.iso8601
+      }
+      @state["jev"] = (@state["jev"] || {}).merge(
+        "evidence_status" => "incomplete",
+        "evidence_note" => "cost route or required fact is not verified; no automatic delegation hint"
+      )
+      @record.event("delegation_cost_unverified", "signature" => signature,
+                    "host_billing_route" => native_member_route, "expected_metric" => expected || "none",
+                    "candidates" => candidates)
+      save
+    end
+
+    # Bounded, non-secret view of the pending Orbit evidence request for the
+    # independent checkers: which model facts Orbit asked Root to research and
+    # how far that request got. It never includes submitted pages, URLs or
+    # credentials.
+    def pending_evidence_request_context
+      request = @state["evidence_request"]
+      return nil unless request.is_a?(Hash)
+
+      {
+        "identities" => request["identities"],
+        "needed" => request["needed"],
+        "at" => request["at"],
+        "resolved" => request["resolved"]
+      }
+    end
+
     # One bounded request per observation signature; repeated ticks do not
     # loop, and Orbit never browses for evidence itself.
     def deliver_pending_evidence
@@ -995,6 +1276,7 @@ module Orbit
         text << "- candidate (#{identity['kind']}): #{format_identity(identity)}\n"
       end
       text << "Needed per identity: speed, quality, cost and local samples, each with source URL, retrieved_at and validity.\n"
+      text << "For cost, include the typed billing_route from the resolved model endpoint (direct_api, subscription_quota or unknown) and that route's numeric facts: cost.* per-token prices for a verified direct_api route, quota.* plan/quota band facts for a verified subscription_quota route. The namespaces never substitute for each other, and a route-less entry cannot authorize a cost judgment.\n"
       text << "Submit one JSON object or an array with: orbit model-evidence #{@record.path} --file -\n"
       sent = @connection.send_message(text)
       @state["sent_message_ids"] << sent.fetch("id")
@@ -1014,7 +1296,9 @@ module Orbit
     def format_identity(identity)
       return "unknown" unless identity.is_a?(Hash)
 
-      "#{identity['provider']}/#{identity['model']} (reasoning: #{identity['reasoning']})"
+      text = "#{identity['provider']}/#{identity['model']} (reasoning: #{identity['reasoning']})"
+      route = identity["billing_route"].to_s
+      route.empty? ? text : "#{text} [billing_route: #{route}]"
     end
 
     def prepare_delegation_hint(scores, signature, now)
@@ -1026,6 +1310,7 @@ module Orbit
       @pending_hint = {
         "signature" => signature, "score" => @state.dig("jev", "scores", "delegatable"),
         "member_fit" => scores.fetch("member_fit"), "parallel_gain" => scores.fetch("parallel_gain"),
+        "cost_appropriate" => scores.fetch("cost_appropriate"),
         "callable_kinds" => options["callable_kinds"], "at" => Time.at(now).utc.iso8601
       }
     end
@@ -1039,18 +1324,17 @@ module Orbit
       hint = @pending_hint
       @pending_hint = nil
       return unless hint
+      return if @state["members"].any? { |member| member_blocks_new_hint?(member) }
       return if @state.dig("delegation_hints", hint.fetch("signature"))
 
-      text = "Orbit delegation hint (not a new user instruction): Jev judged that a bounded subtask could be delegated now " \
-             "(delegatable #{hint['score']}, member_fit #{hint['member_fit']}, parallel_gain #{hint['parallel_gain']}; " \
-             "callable kinds: #{hint['callable_kinds'].join('、')}). If you agree, form the full execution ticket and call " \
-             "delegate explicitly; Orbit does not dispatch."
+      text = delegation_hint_text(hint)
       sent = @connection.send_message(text)
       @state["sent_message_ids"] << sent.fetch("id")
       @state["delegation_hints"][hint.fetch("signature")] = hint.merge("message_id" => sent.fetch("id"))
       @state["delegation_hint"] = hint.merge("message_id" => sent.fetch("id"))
       @record.event("delegation_hint", "score" => hint["score"], "member_fit" => hint["member_fit"],
-                    "parallel_gain" => hint["parallel_gain"], "callable_kinds" => hint["callable_kinds"])
+                    "parallel_gain" => hint["parallel_gain"], "cost_appropriate" => hint["cost_appropriate"],
+                    "callable_kinds" => hint["callable_kinds"])
       save
     rescue StandardError => error
       # A hint is advisory: delivery failure must not fail the task or
@@ -1062,13 +1346,21 @@ module Orbit
     # A persisted, not-yet-followed hint for the current input, artifact and
     # member candidates is the only Orbit basis. An old hint must not label a
     # later explicit dispatch after those facts changed.
+    def delegation_hint_text(hint)
+      kinds = Array(hint["callable_kinds"]).join("、")
+      score = "Orbit delegation hint (not a new user instruction): Jev judged that a bounded subtask could be delegated now " \
+              "(delegatable #{hint['score']}, member_fit #{hint['member_fit']}, parallel_gain #{hint['parallel_gain']}, " \
+              "cost_appropriate #{hint['cost_appropriate']}; callable kinds: #{kinds}). "
+      score + "Dispatch one layer with native task; the registration gate records the actual id."
+    end
+
     def delegation_basis
       hint = @state["delegation_hint"]
       return "root_without_hint" unless hint.is_a?(Hash) && !hint.empty? && hint["followed"] != true
 
       signature = delegation_signature(fingerprint_artifact, delegation_options)
       hint["signature"] == signature ? "orbit_hint" : "root_without_hint"
-    rescue WorkspaceSnapshot::Error, MemberPolicy::Error
+    rescue WorkspaceSnapshot::Error
       "root_without_hint"
     end
 
@@ -1081,29 +1373,168 @@ module Orbit
       @record.event("delegation_hint_followed", "kind" => member["kind"], "thread_id" => member["thread_id"])
     end
 
+    # OMP 18.2.8 AgentRegistry.register defaults to running. idle is also the
+    # live-but-not-running state, so idle alone is not a finished task.
+    # markResultAccepted stamps lifecycle.acceptedAt; history.outputPath is the
+    # durable artifact. parked can be a later release of a finished ref.
+    def observe_omp_native_member(member)
+      return unless @connection.respond_to?(:member_state) && @connection.respond_to?(:member_result)
+      return if member["status"] == "refused"
+
+      observed = @connection.member_state(member["thread_id"])
+      if observed.is_a?(Hash) && observed["model"].is_a?(String) && !observed["model"].empty?
+        member["model"] = observed["model"]
+      end
+      registry_status = observed.is_a?(Hash) ? observed["registry_status"] : nil
+      result = @connection.member_result(member["thread_id"])
+      save if apply_native_member_observation!(member, registry_status, result, observed)
+    rescue StandardError => error
+      member["bridge_error"] = error.message
+      @record.event("native_member_bridge_failed", "thread_id" => member["thread_id"], "error" => error.message)
+      save
+    end
+
+    def apply_native_member_observation!(member, registry_status, result, observed = nil)
+      previous = member.slice("model", "result", "output_path", "registry_status", "accepted_at", "status", "result_delivery")
+      previous_status = member["status"]
+      previous_accepted = member["accepted_at"]
+      member["registry_status"] = registry_status if registry_status.is_a?(String) && !registry_status.empty?
+      accepted_at = native_accepted_at(observed) || native_accepted_at(result)
+      member["accepted_at"] = accepted_at if accepted_at
+      if result.is_a?(Hash)
+        if result["output_text"].is_a?(String) && !result["output_text"].empty?
+          member["result"] = result["output_text"]
+        end
+        copy_output_path(member, result["output_path"])
+      end
+      copy_output_path(member, observed["output_path"]) if observed.is_a?(Hash)
+      if member["registry_status"] == "aborted"
+        member["status"] = "failed"
+      elsif native_result_accepted?(member, observed)
+        member["status"] = "completed"
+      end
+      accepted_changed = member["accepted_at"] != previous_accepted
+      became_completed = member["status"] == "completed" && previous_status != "completed"
+      if became_completed || (member["status"] == "completed" && accepted_changed)
+        member["result_delivery"] = "native_task"
+        @record.event("member_result_recorded", "thread_id" => member["thread_id"],
+                      "status" => member["status"], "delivery" => "native_task",
+                      "accepted_at" => member["accepted_at"])
+      end
+      %w[model result output_path registry_status accepted_at status result_delivery].any? { |key| member[key] != previous[key] }
+    end
+
+    # acceptedAt is stamped only when the driver accepts the run. A later
+    # running/streaming ref has not accepted this observation.
+    def native_result_accepted?(member, observed)
+      return false unless member["accepted_at"]
+      return false if member["registry_status"] == "running"
+      return false if observed.is_a?(Hash) && observed["streaming"] == true
+
+      true
+    end
+
+    def native_accepted_at(source)
+      return nil unless source.is_a?(Hash)
+
+      lifecycle = source["lifecycle"]
+      value = lifecycle["acceptedAt"] || lifecycle["accepted_at"] if lifecycle.is_a?(Hash)
+      value ||= source["accepted_at"] || source["acceptedAt"]
+      value if value.is_a?(Numeric) || value.is_a?(String) && !value.empty?
+    end
+
+    def copy_output_path(member, path)
+      member["output_path"] = path if path.is_a?(String) && !path.empty?
+    end
+
+    def member_blocks_new_hint?(member)
+      return true if %w[starting working].include?(member["status"])
+      return false unless member["adapter"] == OMP_NATIVE_ADAPTER
+      return false if %w[completed failed refused].include?(member["status"])
+
+      true
+    end
+
+    def consume_hub_events
+      return unless omp_task? && @connection.respond_to?(:hub_events)
+
+      payload = @connection.hub_events
+      events = payload.is_a?(Hash) ? payload["events"] : nil
+      return unless events.is_a?(Array)
+
+      seen = @state["hub_seen_ids"] ||= []
+      changed = false
+      events.each do |event|
+        next unless event.is_a?(Hash)
+        id = event["id"].to_s
+        id = "seq-#{event['seq']}" if id.empty? && event["seq"]
+        next if id.empty? || seen.include?(id)
+
+        seen << id
+        summary = {
+          "id" => event["id"], "seq" => event["seq"], "kind" => event["kind"], "op" => event["op"],
+          "from" => event["from"], "to" => event["to"], "agent_id" => event["agent_id"],
+          "session_id" => event["session_id"], "await_reply" => event["await_reply"],
+          "message" => event["message"], "text" => event["text"], "ok" => event["ok"]
+        }
+        (@state["native_collaboration"] ||= []) << summary
+        @state["native_collaboration"] = @state["native_collaboration"].last(50)
+        @record.event("native_collaboration", summary)
+        changed = true
+      end
+      seen.shift while seen.length > 500
+      seqs = events.filter_map { |event| event["seq"] if event.is_a?(Hash) && event["seq"].is_a?(Integer) }
+      last = @state["hub_last_seq"]
+      gap = native_collaboration_observation_gap(last, seqs, payload["dropped_oldest"], payload["next_seq"])
+      if gap && @state["native_collaboration_observation_gap"] != gap
+        @state["native_collaboration_observation_gap"] = gap
+        @record.event("native_collaboration_observation_gap", gap)
+        changed = true
+      end
+      next_seq = payload["next_seq"]
+      unless next_seq.is_a?(Integer) && last && next_seq <= last
+        newest = seqs.max
+        @state["hub_last_seq"] = [last, newest].compact.max if newest && newest != last
+        changed = true if @state["hub_last_seq"] != last
+      end
+      save if changed
+    end
+
+    def native_collaboration_observation_gap(last, seqs, dropped, next_seq)
+      if last.nil?
+        first = seqs.first
+        return nil unless (first && first > 1) || dropped.to_i > 0
+
+        return { "status" => "possible_loss", "first_seq" => first, "dropped_oldest" => dropped.to_i }
+      end
+      if next_seq.is_a?(Integer) && next_seq <= last
+        return { "status" => "reset_unconfirmed", "last_seq" => last, "next_seq" => next_seq }
+      end
+      newer = seqs.find { |seq| seq > last }
+      return nil unless newer && newer > last + 1
+
+      { "status" => "confirmed_gap", "last_seq" => last, "first_new_seq" => newer, "next_seq" => next_seq }
+    end
+
     def collect_member_results
       @state["members"].each do |member|
-        next unless member["status"] == "working"
-        connection = member_connection(member)
-        state = connection.state
-        next unless state["status"] == "idle" && state["last_turn_id"] && state["last_turn_id"] != member["reported_turn"]
-
-        confirmation = connection.stop!
-        raise ArgumentError, "member did not confirm background execution stopped" unless confirmation["confirmed"]
-        member["status"] = state["last_turn_status"] == "completed" ? "completed" : "failed"
-        member["reported_turn"] = state["last_turn_id"]
-        member["result"] = state["observations"]
-        member["stop_confirmation"] = confirmation
-        sent = @connection.send_message("Orbit execution member result (not a new user requirement). " \
-          "Review and integrate against the original task; continue in this same Root session.\n\n" + JSON.pretty_generate(member))
-        @state["sent_message_ids"] << sent.fetch("id")
-        @record.event("member_result", "thread_id" => member["thread_id"], "status" => member["status"])
-        save
+        observe_omp_native_member(member) if member["adapter"] == OMP_NATIVE_ADAPTER
       end
     end
 
+    def reject_legacy_members!
+      legacy = @state["members"].reject { |member| member["adapter"] == OMP_NATIVE_ADAPTER }
+      return if legacy.empty? || TERMINAL.include?(@state["status"])
+
+      ids = legacy.map { |member| member["thread_id"] }
+      @record.event("legacy_member_rejected", "thread_ids" => ids, "reason" => "no migration path")
+      stop("legacy member records have no migration path: #{ids.join(', ')}", status: "needs_user")
+    end
+
     def members_settled?
-      @state["members"].all? { |member| %w[completed failed].include?(member["status"]) }
+      return false if Array(@state["amendment_delivery_queue"]).any?
+
+      @state["members"].all? { |member| %w[completed failed refused].include?(member["status"]) }
     end
 
     def collect_amendments
@@ -1121,8 +1552,11 @@ module Orbit
       end
       messages.each do |message|
         unless message["internal"] || @state["sent_message_ids"].include?(message.fetch("id"))
-          kind = @connection.respond_to?(:instruction_source_kind) ? @connection.instruction_source_kind : "codex_user_message"
-          add_amendment(message.fetch("text"), { "kind" => kind, "id" => message.fetch("id") })
+          unless @connection.respond_to?(:instruction_source_kind)
+            stop("Cannot record a user amendment: instruction source kind is unavailable", status: "needs_user")
+            return false
+          end
+          add_amendment(message.fetch("text"), { "kind" => @connection.instruction_source_kind, "id" => message.fetch("id") })
         end
         @state["last_user_message_id"] = message.fetch("id")
       end
@@ -1185,6 +1619,7 @@ module Orbit
           "recent_events" => recent_events, "recheck" => clues,
           "execution_members" => @state["members"],
           "decisions" => @state.fetch("decisions"), "dispute" => @state["dispute"],
+          "model_evidence_request" => pending_evidence_request_context,
           "estimate" => @state.fetch("estimate"), "hard_deadline" => @state["hard_deadline"],
           "elapsed_seconds" => now - Time.parse(@state.fetch("created_at")).to_f,
           "project_rules" => snapshot.fetch("project_rules"),
@@ -1372,61 +1807,66 @@ module Orbit
       end
       case result.fetch("verdict")
       when "complete"
+        # A checker verdict is not completion. Process and automatic checks
+        # are ignored. A qualified manual artifact review only wakes Root;
+        # complete is recorded later, after Root's explicit stop turn finishes.
         if scope["kind"] == "process"
           @record.event("process_check_complete_ignored", "number" => scope["number"])
-        elsif host["status"] == "idle" && host["last_turn_status"] == "completed" &&
-           members_settled? && @state["recheck"].nil? &&
-           @state["findings"].values.none? { |finding| finding["status"] == "open" }
-          confirmation = confirmed_stop
-          @state["stop_confirmation"] = confirmation
-          return unless collect_amendments
-          final_host = @connection.state
-          final_digest = fingerprint_artifact
-          host_stable = scope["kind"] == "artifact" || host_digest(final_host) == scope["host_digest"]
-          if final_digest == current_digest && @record.input_digest(@state) == scope["input_digest"] && host_stable
-            @state["status"] = "complete"
-            @state["delivery_digest"] = current_digest
-          else
-            schedule_check(now, "完成核对前版本变化，立即重新核对", trigger: "version_change")
-          end
-        else
+        elsif scope["manual"] != true
+          @record.event("automatic_check_complete_ignored", "number" => scope["number"], "kind" => scope["kind"])
+        elsif !(host["status"] == "idle" && host["last_turn_status"] == "completed" &&
+                members_settled? && @state["recheck"].nil? &&
+                @state["findings"].values.none? { |finding| finding["status"] == "open" })
           @state["observation_pending"] = {
             "reason" => "Completion needs an idle Root, settled execution members, " \
                         "all delivery findings resolved and pending clues reconciled"
           }
         end
       when "correct"
-        send_correction(result.merge("findings" => accepted_findings)) unless accepted_findings.empty?
+        send_correction(result.merge("findings" => accepted_findings), scope: scope, current_digest: current_digest) unless accepted_findings.empty?
       when "pause"
         stop(result.fetch("reason"))
       when "needs_user"
         stop(result.fetch("reason"), status: "needs_user")
       when "continue"
-        send_correction(result.merge("findings" => accepted_findings)) if host["status"] == "idle" && !accepted_findings.empty?
+        send_correction(result.merge("findings" => accepted_findings), scope: scope, current_digest: current_digest) if host["status"] == "idle" && !accepted_findings.empty?
       end
       save
     end
 
-    # A manual final review may legitimately return `continue`: the checker
-    # cannot declare the product task complete. Wake an idle Root once for the
-    # exact reviewed version so it can call stop, and prevent a one-second
-    # checker loop while that hand-off is pending.
+    # A valid manual reviewer conclusion (`continue`, `correct`, or `complete`
+    # with no current findings) cannot itself declare the product task complete.
+    # Wake an idle Root once for the exact reviewed version so it can call stop,
+    # and prevent a one-second checker loop while that hand-off is pending.
     def notify_finalization_ready(scope, result, host, current_digest, now)
       return unless scope["kind"] == "artifact" && scope["role"] == "reviewer" && scope["manual"]
-      return unless %w[continue correct].include?(result.fetch("verdict"))
+      return unless %w[continue correct complete].include?(result.fetch("verdict"))
       return unless result.fetch("findings").empty? && @state["recheck"].nil?
       return unless @state["findings"].values.none? { |finding| finding["status"] == "open" }
       return unless members_settled?
-      return unless host["status"] == "idle" && host["last_turn_status"] == "completed"
+      unless host["status"] == "idle" && host["last_turn_status"] == "completed"
+        queue_finalization_handoff(scope, current_digest, now)
+        return
+      end
 
+      send_finalization_notice(scope, current_digest, now)
+    end
+
+    # Sends one version-keyed finalization notice. The notice itself never
+    # completes the task; an explicit Root stop still waits for its final turn
+    # and rechecks artifact, input and members at stop time.
+    def send_finalization_notice(scope, current_digest, now)
       key = Digest::SHA256.hexdigest(JSON.generate([
         scope["artifact_root"], current_digest, scope["input_digest"]
       ]))
+      @state.delete("pending_finalization")
       unless @state["finalization_notices"][key]
         text = "Orbit final-check notice (not a new user instruction): the manual review of the current " \
                "artifact and task input is valid and no current findings remain. If implementation and local " \
-               "verification are complete, call Orbit stop now; Orbit does not infer task completion from the " \
-               "checker's verdict alone."
+               "verification are complete, call Orbit stop and finish your turn normally: Orbit queues the " \
+               "stop, lets this turn complete so your final summary to the user is fully delivered, then stops " \
+               "execution and records completion. Orbit does not infer task completion from the checker's " \
+               "verdict alone."
         sent = @connection.send_message(text)
         @state["sent_message_ids"] << sent.fetch("id")
         @state["finalization_notices"][key] = {
@@ -1438,17 +1878,151 @@ module Orbit
       schedule_check(now + @interval, "等待 Root 根据有效终检收尾", trigger: "finalization_wait")
     end
 
-    def send_correction(result)
+    # The reviewed version is fixed here. A later tick may deliver it once;
+    # a changed artifact, input, or workspace must not receive this notice.
+    # Repeated hand-offs for the SAME version keep the original timer so the
+    # bounded wait cannot be reset by another fresh manual check.
+    def queue_finalization_handoff(scope, current_digest, now)
+      existing = @state["pending_finalization"]
+      at = if existing.is_a?(Hash) &&
+             existing["artifact_root"] == scope["artifact_root"] &&
+             existing["artifact_digest"] == current_digest &&
+             existing["input_digest"] == scope["input_digest"]
+             existing["at"]
+           end
+      pending = {
+        "check" => scope["number"], "artifact_root" => scope["artifact_root"],
+        "artifact_digest" => current_digest, "input_digest" => scope["input_digest"],
+        "at" => at || Time.at(now).utc.iso8601
+      }
+      return if existing == pending
+
+      @state["pending_finalization"] = pending
+      @record.event("finalization_pending", "check" => scope["number"], "version" => current_digest)
+    end
+
+    def deliver_pending_finalization(host, now)
+      pending = @state["pending_finalization"]
+      return false unless pending.is_a?(Hash)
+      ready = host["status"] == "idle" && host["last_turn_status"] == "completed"
+      return false unless ready || finalization_wait_expired?(pending, now)
+      return false unless members_settled? && @state["recheck"].nil?
+      return false if @state["findings"].values.any? { |finding| finding["status"] == "open" }
+
+      current_digest = fingerprint_artifact
+      unless pending["artifact_root"] == artifact_root &&
+             pending["artifact_digest"] == current_digest &&
+             pending["input_digest"] == @record.input_digest(@state)
+        @state.delete("pending_finalization")
+        @record.event("finalization_pending_stale", "check" => pending["check"])
+        schedule_check(now, "完成核对前版本变化，立即重新核对", trigger: "version_change")
+        save
+        return false
+      end
+
+      scope = {
+        "kind" => "artifact", "role" => "reviewer", "manual" => true,
+        "number" => pending["check"], "artifact_root" => pending["artifact_root"],
+        "input_digest" => pending["input_digest"]
+      }
+      send_finalization_notice(scope, current_digest, now)
+      save
+      true
+    end
+
+    def finalization_wait_expired?(pending, now)
+      at = pending["at"].to_s
+      return true if at.empty?
+
+      now - Time.parse(at).to_f >= FINALIZATION_NOTICE_MAX_WAIT_SECONDS
+    rescue ArgumentError
+      true
+    end
+
+    def send_correction(result, scope:, current_digest:)
       entry = File.expand_path("../../scripts/orbit", __dir__)
       dispute = [entry, "dispute", @record.path, "--reason"].shelljoin
       text = "Orbit independent check (not a new user instruction):\n" + JSON.pretty_generate(result) +
              "\nWork against the original request. Correct relevant findings. For a real dispute, provide concrete contrary evidence using: #{dispute} 'reason and evidence'."
-      sent = @connection.send_message(text)
-      @state["sent_message_ids"] << sent.fetch("id")
-      @record.event("correction_sent", "id" => sent.fetch("id"))
+      deliver_correction_text(text,
+                              "check" => scope["number"], "artifact_root" => scope["artifact_root"],
+                              "artifact_digest" => current_digest, "input_digest" => scope["input_digest"])
     end
 
-    def stop(reason, status: "paused")
+    # A transient delivery failure (bridge hiccup, Root busy past the RPC
+    # window) must not fail the task: record it, keep the finding open, and
+    # redeliver when the Root is next observed idle — but only if the pending
+    # correction still describes the CURRENT version; a newer correction
+    # simply overwrites the pending entry.
+    def deliver_correction_text(text, versions = nil)
+      sent = @connection.send_message(text)
+      @state["sent_message_ids"] << sent.fetch("id")
+      @state.delete("pending_correction")
+      @record.event("correction_sent", "id" => sent.fetch("id"))
+    rescue Connection::Error => error
+      @state["pending_correction"] = (versions || {}).merge("text" => text)
+      @record.event("correction_delivery_failed", "error" => error.message)
+      save
+    end
+
+    def validate_member_roster!(listed)
+      raise ArgumentError, "members.json must be an array" unless listed.is_a?(Array)
+
+      seen = {}
+      listed.each_with_index do |entry, index|
+        unless entry.is_a?(Hash)
+          raise ArgumentError, "members.json entry #{index} is not an object"
+        end
+        id = entry["thread_id"]
+        unless id.is_a?(String) && !id.empty?
+          raise ArgumentError, "members.json entry #{index} is missing a thread_id"
+        end
+        raise ArgumentError, "members.json entry #{index} repeats thread_id #{id}" if seen[id]
+
+        seen[id] = true
+        name = entry["requested_name"]
+        unless name.is_a?(String) && !name.strip.empty?
+          raise ArgumentError, "members.json entry #{index} is missing requested_name"
+        end
+        unless %w[registered refused].include?(entry["status"])
+          raise ArgumentError, "members.json entry #{index} has an unknown status"
+        end
+      end
+    end
+
+    # An explicit Root stop COMMAND records complete instead of paused only when
+    # the hand-off version is still fully qualified: a finalization notice for
+    # the exact current artifact+input version exists, no open findings or
+    # pending clues remain, and members are settled. The notice itself was
+    # gated on an idle, completed Root; at stop time the Root is normally
+    # mid-turn because its own stop call is a turn, so the predicate only
+    # requires the connection to still be readable. Interrupts
+    # (@stop_requested) and post-crash stop retries (retry_stop) never take
+    # this path: they stay paused or stop_unconfirmed.
+    def completion_notice_current?
+      key = Digest::SHA256.hexdigest(JSON.generate([
+        artifact_root, fingerprint_artifact, @record.input_digest(@state)
+      ]))
+      notice = @state["finalization_notices"][key]
+      return nil unless notice
+      return nil unless @state["recheck"].nil?
+      return nil if @state["findings"].values.any? { |finding| finding["status"] == "open" }
+      return nil unless members_settled?
+
+      @connection.state # liveness only: the stop turn itself makes Root busy
+      notice
+    rescue Connection::Error
+      nil
+    end
+
+    def stop(reason, status: "paused", allow_complete: false)
+      roster_error = nil
+      begin
+        reconcile_registered_members!
+      rescue StandardError => error
+        roster_error = "#{error.class}: #{error.message}"
+        @record.event("members_unreadable", "error" => roster_error)
+      end
       checker_error = @state["cleanup_error"]
       begin
         @checker.stop! if @running_check
@@ -1457,20 +2031,36 @@ module Orbit
         record_cleanup_error(error)
       end
       @running_check = nil
-      confirmation = confirmed_stop
-      @state["execution_stop_confirmation"] = confirmation if checker_error
-      raise ArgumentError, "Checker stop unconfirmed: #{checker_error}" if checker_error
-      @state["stop_confirmation"] = confirmation
-      @state["status"] = status
-      @state["stop_reason"] = reason
-      @record.event("stopped", "reason" => reason, "confirmation" => confirmation)
-      save
-    rescue StandardError => error
-      @state["status"] = "stop_unconfirmed"
-      @state["stop_reason"] = reason
-      @state["error"] = error.message
-      @record.event("stop_unconfirmed", "reason" => reason, "error" => error.message)
-      save
+      confirmation = nil
+      begin
+        confirmation = confirmed_stop
+        raise ArgumentError, "Checker stop unconfirmed: #{checker_error}" if checker_error
+        raise ArgumentError, "members.json is not a reliable roster: #{roster_error}" if roster_error
+
+        @state["execution_stop_confirmation"] = confirmation if checker_error
+        @state["stop_confirmation"] = confirmation
+        final_status = status
+        notice = allow_complete && status == "paused" ? completion_notice_current? : nil
+        if notice
+          final_status = "complete"
+          @state["delivery_digest"] = fingerprint_artifact
+          @record.event("completed_via_finalized_stop", "check" => notice["check"])
+        end
+        @state["status"] = final_status
+        @state["stop_reason"] = reason
+        @record.event("stopped", "reason" => reason, "confirmation" => confirmation)
+        save
+      rescue StandardError => error
+        detail = error.message
+        if roster_error && !detail.include?("not a reliable roster")
+          detail = "members.json is not a reliable roster: #{roster_error}; #{detail}"
+        end
+        @state["status"] = "stop_unconfirmed"
+        @state["stop_reason"] = reason
+        @state["error"] = detail
+        @record.event("stop_unconfirmed", "reason" => reason, "error" => detail)
+        save
+      end
     end
 
     def record_cleanup_error(error)
@@ -1495,81 +2085,28 @@ module Orbit
 
     def confirmed_stop
       failures = []
+      # Root abort can drop the OMP registry session. Confirm native members
+      # from the live bridge first, then stop Root so a later retry is not the
+      # only chance to observe them.
+      native, others = @state["members"].partition { |member| member["adapter"] == OMP_NATIVE_ADAPTER }
+      native_results = native.map { |member| stop_omp_native_member(member, failures) }
+      other_results = others.map do |member|
+        failures << "Member #{member['thread_id']}: legacy member record has no migration path and was not stopped"
+        { "thread_id" => member["thread_id"], "error" => "legacy member record rejected", "registration_status" => member["status"] }
+      end
       begin
         confirmation = @connection.stop!
         failures << "Root did not confirm actual stop" unless confirmation["confirmed"] == true
       rescue StandardError => error
         failures << "Root: #{error.message}"
+        confirmation = nil
       end
-      members = @state["members"].map do |member|
-        if member["host"] == "codex"
-          stop_codex_member(member, failures)
-        else
-          begin
-            result = member_connection(member).stop!
-            failures << "Member #{member['thread_id']} did not confirm actual stop" unless result["confirmed"] == true
-            member["stop_confirmation"] = result
-            { "thread_id" => member["thread_id"], "confirmation" => result }
-          rescue StandardError => error
-            failures << "Member #{member['thread_id']}: #{error.message}"
-            { "thread_id" => member["thread_id"], "error" => error.message }
-          end
-        end
-      end
+      members = native_results + other_results
       @state["member_stop_results"] = members
-      # The member host is closed only after every stop was confirmed; an
-      # unconfirmed stop keeps the recorded address for an explicit retry
-      # instead of inferring member exit from a missing socket.
-      @state["member_host_shutdown"] = shutdown_member_hosts(failures) if failures.empty?
       raise ArgumentError, failures.join("; ") unless failures.empty?
 
       confirmation["members"] = members unless members.empty?
       confirmation
-    end
-
-    # A missing socket is not stop evidence; the recorded host process group
-    # no longer existing is.
-    def stop_codex_member(member, failures)
-      result = member_connection(member).stop!
-      failures << "Member #{member['thread_id']} did not confirm actual stop" unless result["confirmed"] == true
-      member["stop_confirmation"] = result
-      { "thread_id" => member["thread_id"], "confirmation" => result }
-    rescue CodexConnection::UnmaterializedThread
-      evidence = {
-        "confirmed" => true, "no_materialized_turn" => true,
-        "scope" => "member thread has no user turn yet on the member host; no registered execution to interrupt"
-      }
-      member["stop_confirmation"] = evidence
-      { "thread_id" => member["thread_id"], "confirmation" => evidence }
-    rescue StandardError => error
-      if member_host_exited?(member)
-        evidence = {
-          "confirmed" => true, "host_exit_verified" => true,
-          "scope" => "recorded member app-server process group no longer exists; registered member execution cannot remain"
-        }
-        member["stop_confirmation"] = evidence
-        { "thread_id" => member["thread_id"], "confirmation" => evidence }
-      else
-        failures << "Member #{member['thread_id']}: #{error.message}; member host still present"
-        { "thread_id" => member["thread_id"], "error" => error.message }
-      end
-    end
-
-    def member_host_exited?(member)
-      host_record = @state.dig("member_hosts", member["host"]) || @state.dig("member_hosts", "codex")
-      return false unless host_record
-
-      !codex_member_host.alive?(host_record)
-    rescue StandardError
-      false
-    end
-
-    def shutdown_member_hosts(failures)
-      @state.fetch("member_hosts", {}).map do |kind, host_record|
-        outcome = codex_member_host.shutdown(host_record)
-        failures << "Member host #{kind} did not confirm process exit" unless outcome["confirmed"] == true
-        outcome.merge("kind" => kind)
-      end
     end
   end
 end

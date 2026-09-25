@@ -27,6 +27,7 @@ class RuntimeHost
   def close = true
   def configured_model = "opencode-go/deepseek-v4.1-flash"
   def default_member_model = configured_model
+  def default_member_route = "direct_api"
   def working(note)
     @state["status"] = "active"
     @state["observations"] = [note]
@@ -40,15 +41,27 @@ class RuntimeHost
   def user_messages(after_id:) = []
 
   def send_message(text)
+    raise Orbit::Connection::Error, @fail_send_message if @fail_send_message.is_a?(String)
+
     @messages << text
     @state["status"] = "active"
     { "id" => "sent-#{@messages.length}" }
   end
 
+  attr_accessor :fail_send_message
+
   def stop!
     @stop_calls += 1
     { "confirmed" => @confirmed, "scope" => "deterministic host double" }
   end
+
+  def stop_member(id)
+    @member_stops ||= []
+    @member_stops << id
+    { "confirmed" => true, "active_tools_after" => 0, "async_jobs_settled" => true }
+  end
+
+  attr_reader :member_stops
 end
 
 class RuntimeTeamHost < RuntimeHost
@@ -147,7 +160,7 @@ class RuntimeAdvisor
   def initialize(scores)
     @scores, @calls = scores, []
     @delegation_calls = []
-    @delegation_scores = { "member_fit" => 0.8, "parallel_gain" => 0.75 }
+    @delegation_scores = { "member_fit" => 0.8, "parallel_gain" => 0.75, "cost_appropriate" => 0.8 }
   end
 
   def assess(state:)
@@ -191,12 +204,31 @@ def evidence_cache(root, entries = [])
   cache
 end
 
-def evidence_entry(model: "deepseek-v4.1-flash", provider: "opencode-go", reasoning: "unknown", status: "evidence")
+# The Root identity carries no billing route (unknown), so a complete
+# comparison needs one unknown-route entry for the Root and one explicit-route
+# entry for the candidate.
+def both_route_evidence(root, candidate_route: "direct_api", **entry_kwargs)
+  cache = evidence_cache(root)
+  cache.record(evidence_entry(billing_route: "unknown", **entry_kwargs))
+  cache.record(evidence_entry(billing_route: candidate_route, **entry_kwargs))
+  cache
+end
+
+def evidence_entry(model: "deepseek-v4.1-flash", provider: "opencode-go", reasoning: "unknown", status: "evidence",
+                   billing_route: "direct_api", priced: true, quota: false)
   base = { "provider" => provider, "model" => model, "reasoning" => reasoning, "status" => status,
-           "retrieved_at" => Time.now.utc.iso8601 }
+           "billing_route" => billing_route, "retrieved_at" => Time.now.utc.iso8601 }
   if status == "evidence"
-    base.merge("sources" => ["https://artificialanalysis.ai/models"],
-               "metrics" => { "output_tokens_per_second" => { "value" => 120.5, "unit" => "tokens/s", "basis" => "median" } })
+    metrics = { "output_tokens_per_second" => { "value" => 120.5, "unit" => "tokens/s", "basis" => "median" } }
+    if priced
+      metrics["cost.output_peak"] = { "value" => 1.2, "unit" => "USD per 1M tokens",
+                                      "basis" => "official DeepSeek API pricing page" }
+    end
+    if quota
+      metrics["quota.included_output_tokens"] = { "value" => 20_000_000, "unit" => "tokens per billing period",
+                                                  "basis" => "official coding-plan page" }
+    end
+    base.merge("sources" => ["https://artificialanalysis.ai/models"], "metrics" => metrics)
   else
     base.merge("reason" => "no comparable public benchmark found")
   end
@@ -208,7 +240,7 @@ def fixture(interval: 60)
     record = Orbit::TaskRecord.create(
       project_root: root, instruction: "Provide first and second behaviors.\n",
       source: { "id" => "original", "kind" => "native_user_message" },
-      connection: { "provider" => "opencode" }, review: { "interval_seconds" => interval }, estimate: {}
+      connection: { "provider" => "omp" }, review: { "interval_seconds" => interval }, estimate: {}
     )
     host, checker = RuntimeHost.new(root), RuntimeChecker.new
     yield root, record, host, checker, Orbit::TaskRuntime.new(record: record, connection: host, checker: checker)
@@ -250,10 +282,9 @@ fixture do |root, record, host, checker, runtime|
   checker.result = answer("complete", resolved: ["preference"])
   runtime.tick(now: now + 7)
   final = record.state
-  assert(final["status"] == "complete", "overturned false positive must not block valid completion")
+  assert(final["status"] != "complete", "an adjudicator verdict cannot complete the task")
   assert(final.dig("findings", "preference", "status") == "resolved", "retraction is retained")
   assert(final["decisions"].length == 1, "adjudication reason is retained")
-  assert(final["delivery_digest"] == Orbit::WorkspaceSnapshot.fingerprint(project_root: root), "approval binds final bytes")
   assert(File.read(File.join(record.path, "instruction.txt")) == "Provide first and second behaviors.\n", "original text is preserved")
 end
 
@@ -314,84 +345,6 @@ fixture do |root, record, host, checker, runtime|
          "an explicit withdrawal clears the clue without a correction")
 end
 
-Dir.mktmpdir("orbit-members-policy-") do |home|
-  default = Orbit::MemberPolicy.load(env: {}, home: home)
-  assert(default.allowed_kinds == Orbit::MemberPolicy::DEFAULT_KINDS, "missing file uses the six default kinds")
-  path = File.join(home, ".config", "orbit", "members.json")
-  FileUtils.mkdir_p(File.dirname(path))
-  File.write(path, JSON.generate("allowed_kinds" => %w[opencode kimi]))
-  loaded = Orbit::MemberPolicy.load(env: {}, home: home)
-  assert(loaded.allowed_kinds == %w[opencode kimi] && loaded.source == path, "an existing file fully overrides the default list")
-  File.write(path, JSON.generate("allowed_kinds" => []))
-  begin
-    Orbit::MemberPolicy.load(env: {}, home: home).check!("codex")
-    raise "ASSERTION FAILED: an empty allowlist must forbid new members"
-  rescue Orbit::MemberPolicy::NotAllowed
-    nil
-  end
-  File.write(path, '{"allowed_kinds":["opencode"],"extra":1}')
-  begin
-    Orbit::MemberPolicy.load(env: {}, home: home)
-    raise "ASSERTION FAILED: unknown config keys must be rejected"
-  rescue Orbit::MemberPolicy::Error
-    nil
-  end
-  File.write(path, "not json")
-  begin
-    Orbit::MemberPolicy.load(env: {}, home: home)
-    raise "ASSERTION FAILED: invalid JSON must be rejected"
-  rescue Orbit::MemberPolicy::Error
-    nil
-  end
-end
-
-policy = member_policy(%w[codex omp opencode kimi])
-assert(policy.resolve_kind("native", "opencode") == "opencode" && policy.resolve_kind(nil, "codex") == "codex",
-       "native resolves to the Root's actual kind before the allowlist check")
-assert(Orbit::MemberAdapters.resolve("codex", "opencode")["adapter"] == "codex_host",
-       "OpenCode Root to Codex member is the verified cross-host path")
-assert(Orbit::MemberAdapters.resolve("opencode", "opencode")["adapter"] == "same_host", "same-host opencode member")
-assert(Orbit::MemberAdapters.resolve("kimi", "opencode").nil?, "kimi has no controlled adapter")
-assert(Orbit::MemberAdapters.portably_callable_kinds.sort == %w[codex omp opencode], "only verified kinds are callable")
-begin
-  Orbit::MemberAdapters.require!("codex", "omp")
-  raise "ASSERTION FAILED: an OMP Root has no controlled codex adapter"
-rescue Orbit::MemberPolicy::NoAdapter => error
-  assert(error.message.include?("no controlled adapter"), "the adapter gap reason is specific")
-end
-
-# A disallowed kind is rejected before any host or member is created, and a
-# rejected delegation must not fail the task.
-fixture do |_root, record, host, checker, _runtime|
-  codex_host = RuntimeCodexHost.new(record, RuntimeCodexMemberConnection.new)
-  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker,
-                                   member_host: codex_host, member_policy: member_policy(["kimi"]))
-  record.submit("delegate", "kind" => "codex", "text" => "scoped work")
-  runtime.tick(now: Time.now.to_f)
-  assert(record.state["members"].empty?, "a disallowed kind creates no member")
-  assert(codex_host.start_member_calls.empty? && codex_host.shutdown_calls.empty?,
-         "no member host is started before the allowlist decision")
-  assert(!%w[failed stop_unconfirmed].include?(record.state["status"]) && record.state["error"].nil?,
-         "a rejected delegation does not fail the task")
-  assert(host.messages.last.to_s.include?("not in allowed_kinds"), "Root receives the specific rejection reason")
-end
-
-# Allowed kinds without a controlled adapter are reported as gaps before
-# anything is created and are never presented as callable.
-fixture do |_root, record, host, checker, _runtime|
-  state = record.state
-  state["connection"]["provider"] = "omp"
-  record.save(state)
-  codex_host = RuntimeCodexHost.new(record, RuntimeCodexMemberConnection.new)
-  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker,
-                                   member_host: codex_host, member_policy: member_policy(["codex"]))
-  record.submit("delegate", "kind" => "codex", "text" => "scoped work")
-  runtime.tick(now: Time.now.to_f)
-  assert(record.state["members"].empty? && codex_host.start_member_calls.empty?,
-         "an allowed kind without an adapter creates nothing")
-  assert(host.messages.last.to_s.include?("no controlled adapter"), "the adapter gap is reported")
-end
-
 # Delegation has two stages: the structural `delegatable` score only decides
 # whether model evidence is needed. A hint requires validated cache evidence
 # plus member_fit/parallel_gain and is bounded to once per observation
@@ -402,7 +355,7 @@ fixture(interval: 300) do |root, record, _host, checker, _runtime|
   advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.6)
   cache = evidence_cache(root)
   runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
-                                   member_policy: member_policy(%w[opencode kimi]), evidence_cache: cache)
+                                   evidence_cache: cache)
   now = Time.now.to_f
   assert(Orbit::TaskView.format(record).include?("JEV：未启用"), "status shows JEV disabled before any assessment")
   runtime.tick(now: now + 6)
@@ -432,10 +385,17 @@ fixture(interval: 300) do |root, record, _host, checker, _runtime|
          requested.dig("root", "model") == requested.dig("candidates", 0, "model") &&
          requested.dig("root", "reasoning") == requested.dig("candidates", 0, "reasoning"),
          "precondition: the same-host candidate shares the Root identity")
-  cache.record(evidence_entry)
-  # One deduped entry covers both the Root and the identical same-host
-  # candidate; a multiset comparison would reject the real CLI summary.
-  record.submit("model_evidence", "entries" => [evidence_entry.slice("provider", "model", "reasoning", "status")])
+  assert(requested.dig("candidates", 0, "billing_route") == "direct_api" &&
+         requested.dig("root", "billing_route").nil?,
+         "precondition: the candidate carries the host route while the Root stays route-less")
+  cache.record(evidence_entry(billing_route: "unknown"))
+  cache.record(evidence_entry(billing_route: "direct_api"))
+  # Distinct billing routes make the Root and candidate identities distinct;
+  # the submission must cover both.
+  submission = [evidence_entry(billing_route: "unknown"), evidence_entry(billing_route: "direct_api")]
+  record.submit("model_evidence", "entries" => submission.map do |entry|
+    entry.slice("provider", "model", "reasoning", "billing_route", "status")
+  end)
   runtime.tick(now: now + 71)
   assert(advisor.delegation_calls.length == 1, "submitted evidence triggers one second-stage judgment")
   summary = advisor.delegation_calls.first.fetch("model_evidence")
@@ -444,15 +404,24 @@ fixture(interval: 300) do |root, record, _host, checker, _runtime|
          !JSON.generate(summary).include?("<html"),
          "the bounded summary carries validated metrics and no web page text")
   hints = host.messages.select { |message| message.include?("delegation hint") }
-  assert(hints.length == 1 && hints.first.include?("delegate explicitly"),
-         "passing thresholds hint once and ask for an explicit delegate")
+  assert(hints.length == 1 && hints.first.include?("native task"),
+         "passing thresholds hint once and name the native task dispatch")
   assert(record.state.dig("delegation_hint", "member_fit") == 0.8 &&
          record.state.dig("delegation_hint", "parallel_gain") == 0.75 &&
+         record.state.dig("delegation_hint", "cost_appropriate") == 0.8 &&
          record.state.dig("delegation_hint", "signature"),
-         "the hint records both second-stage scores and its signature")
+         "the hint records all second-stage scores and its signature")
   assert(record.state.dig("jev", "delegation", "decision") == "recommended",
          "a passing second stage records decision recommended")
   assert(record.state.dig("jev", "evidence_status") == "used", "evidence use is recorded")
+  used = events(record).select { |event| event["type"] == "model_evidence_used" }
+  assert(used.length == 1 && used.first["summary"] == summary &&
+         used.first["summary"] == record.state.dig("jev", "evidence", "summary") &&
+         used.first.dig("summary", "root", "sources") == ["https://artificialanalysis.ai/models"] &&
+         used.first.dig("summary", "root", "metrics", "output_tokens_per_second", "basis") == "median",
+         "the submitted path records the same bounded summary and its signature")
+  assert(record.state.dig("jev", "evidence", "signature") == used.first["signature"],
+         "task state keeps the traced summary")
 
   host.working("still more progress")
   runtime.tick(now: now + 140)
@@ -462,13 +431,11 @@ fixture(interval: 300) do |root, record, _host, checker, _runtime|
   assert(record.state.dig("jev", "delegation", "usage") == { "input_tokens" => 20, "output_tokens" => 4 },
          "the latest second-stage usage stays readable with the delegation status")
 
-  record.submit("delegate", "kind" => "opencode", "text" => "bounded subtask")
+  record.register_member("orbit-hinted", requested_name: "hinted", status: "registered")
   runtime.tick(now: now + 141)
   assert(record.state["members"].first && record.state.dig("delegation_hint", "followed") == true &&
-         record.state.dig("delegation_hint", "followed_kind") == "opencode",
-         "the Root's actual delegation is recorded")
-  delegated = events(record).find { |event| event["type"] == "member_delegated" }
-  assert(delegated && delegated["basis"] == "orbit_hint", "a delegate that follows a hint records that basis")
+         record.state.dig("delegation_hint", "followed_kind") == "omp",
+         "the registration gate records the hinted native member")
   assert(record.state.dig("members", 0, "delegation_basis") == "orbit_hint",
          "the member keeps its delegation basis for status and review context")
   assert(File.readlines(File.join(record.path, "events.jsonl")).any? { |line| line.include?("delegation_hint_followed") },
@@ -507,9 +474,9 @@ fixture do |root, record, _host, checker, _runtime|
   host = RuntimeTeamHost.new(root)
   host.working("progress")
   advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
-  cache = evidence_cache(root, [evidence_entry])
+  cache = both_route_evidence(root)
   runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
-                                   member_policy: member_policy(%w[opencode]), evidence_cache: cache)
+                                   evidence_cache: cache)
   now = Time.now.to_f
   state = runtime.instance_variable_get(:@state)
   state["jev"] = { "scores" => { "delegatable" => 0.9 } }
@@ -523,12 +490,168 @@ fixture do |root, record, _host, checker, _runtime|
          "precondition: the passing assessment was persisted before delivery")
 
   replacement = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
-                                        member_policy: member_policy(%w[opencode]), evidence_cache: cache)
+                                   evidence_cache: cache)
   replacement.send(:stage_delegation, { "delegatable" => 0.9 }, digest, now + 1)
   replacement.send(:deliver_pending_hint)
   assert(host.messages.count { |message| message.include?("delegation hint") } == 1 &&
          record.state.dig("delegation_hints", signature),
          "the replacement runtime recovers and records exactly one hint")
+end
+
+# The cost gate is fail-closed: a route-less (legacy) cache entry cannot prove
+# cost, so the route-specific lookup misses and asks for route-bearing
+# evidence instead of judging or hinting.
+fixture(interval: 300) do |root, record, _host, checker, _runtime|
+  host = RuntimeTeamHost.new(root)
+  host.working("progress")
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
+                                   evidence_cache: evidence_cache(root, [evidence_entry(billing_route: "unknown")]))
+  runtime.tick(now: Time.now.to_f + 6)
+  assert(advisor.delegation_calls.empty?, "a route-less entry never reaches the second stage")
+  assert(record.state["delegation_hint"].nil? && host.messages.none? { |message| message.include?("delegation hint") },
+         "a route-less entry never hints")
+  assert(record.state.dig("jev", "evidence_status") == "requested",
+         "the route-specific lookup requests evidence instead of reusing the legacy entry")
+end
+
+# A host-resolved subscription/quota route without the route's numeric
+# `quota.*` facts cannot authorize a cost judgment; the gap is explicit and no
+# hint is sent.
+class RuntimeQuotaRouteHost < RuntimeTeamHost
+  def default_member_route = "subscription_quota"
+end
+
+fixture(interval: 300) do |root, record, _host, checker, _runtime|
+  host = RuntimeQuotaRouteHost.new(root)
+  host.working("progress")
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
+                                   evidence_cache: both_route_evidence(root, candidate_route: "subscription_quota"))
+  runtime.tick(now: Time.now.to_f + 6)
+  assert(advisor.delegation_calls.empty?, "a quota route without quota.* facts never reaches the second stage")
+  assert(record.state["delegation_hint"].nil? && host.messages.none? { |message| message.include?("delegation hint") },
+         "a quota route without quota.* facts never hints")
+  gap = record.state.fetch("evidence_gaps").values.find { |entry| entry["reason"].to_s.include?("cost route") }
+  assert(gap && gap["host_billing_route"] == "subscription_quota" &&
+         gap["expected_metric"] == "quota." &&
+         gap["candidates"].first["billing_route"] == "subscription_quota" && !gap["candidates"].first["fact_present"],
+         "the gap records the route and the expected fact namespace")
+  assert(File.readlines(File.join(record.path, "events.jsonl")).any? { |line| line.include?("delegation_cost_unverified") },
+         "the unverified cost route is recorded as an event")
+end
+
+# A host-resolved subscription/quota route with numeric `quota.*` facts passes
+# the gate, reaches the cost judgment and delivers the passing hint.
+fixture(interval: 300) do |root, record, _host, checker, _runtime|
+  host = RuntimeQuotaRouteHost.new(root)
+  host.working("progress")
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
+  advisor.delegation_scores = { "member_fit" => 0.8, "parallel_gain" => 0.75, "cost_appropriate" => 0.8 }
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
+                                   evidence_cache: both_route_evidence(root, candidate_route: "subscription_quota",
+                                                                      priced: false, quota: true))
+  runtime.tick(now: Time.now.to_f + 6)
+  assert(advisor.delegation_calls.length == 1, "a quota route with numeric quota.* facts reaches one cost judgment")
+  assert(record.state.dig("delegation_hint", "cost_appropriate") == 0.8 &&
+         record.state.dig("jev", "delegation", "decision") == "recommended" &&
+         host.messages.any? { |message| message.include?("delegation hint") },
+         "a passing quota-route judgment persists and delivers the hint")
+  hint_event = events(record).find { |event| event["type"] == "delegation_hint" }
+  assert(hint_event && hint_event["cost_appropriate"] == 0.8,
+         "the delivered hint event records the cost_appropriate score")
+end
+
+# A verified direct_api route with only quota.* facts stays fail-closed: the
+# fact namespace must match the route, never substitute for it.
+fixture(interval: 300) do |root, record, _host, checker, _runtime|
+  host = RuntimeTeamHost.new(root)
+  host.working("progress")
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
+                                   evidence_cache: both_route_evidence(root, priced: false, quota: true))
+  runtime.tick(now: Time.now.to_f + 6)
+  assert(advisor.delegation_calls.empty?, "a direct_api route without cost.* facts never reaches the second stage")
+  assert(record.state["delegation_hint"].nil?, "a direct_api route without cost.* facts never hints")
+  gap = record.state.fetch("evidence_gaps").values.find { |entry| entry["reason"].to_s.include?("cost route") }
+  assert(gap && gap["host_billing_route"] == "direct_api" && gap["expected_metric"] == "cost.",
+         "the gap names the route's expected cost.* namespace")
+end
+
+# A verified route without a price is still guesswork: no judgment, no hint.
+fixture(interval: 300) do |root, record, _host, checker, _runtime|
+  host = RuntimeTeamHost.new(root)
+  host.working("progress")
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
+                                   evidence_cache: both_route_evidence(root, priced: false))
+  runtime.tick(now: Time.now.to_f + 6)
+  assert(advisor.delegation_calls.empty?, "a price-less direct_api entry never reaches the second stage")
+  assert(record.state["delegation_hint"].nil?, "a price-less direct_api entry never hints")
+end
+
+# A verified direct_api route with a price still needs the cost score to pass.
+fixture(interval: 300) do |root, record, _host, checker, _runtime|
+  host = RuntimeTeamHost.new(root)
+  host.working("progress")
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
+  advisor.delegation_scores = { "member_fit" => 0.8, "parallel_gain" => 0.75, "cost_appropriate" => 0.4 }
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
+                                   evidence_cache: both_route_evidence(root))
+  runtime.tick(now: Time.now.to_f + 6)
+  assert(advisor.delegation_calls.length == 1, "route+price evidence reaches one cost judgment")
+  assert(record.state.dig("jev", "delegation", "decision") == "declined" &&
+         host.messages.none? { |message| message.include?("delegation hint") },
+         "a cost score below 0.50 declines without a hint")
+end
+
+# The signature carries the resolved candidate model and route, so a changed
+# @task route cannot reuse a stored assessment or hint.
+class RuntimeRouteSwitchHost < RuntimeTeamHost
+  attr_writer :route_value
+  def default_member_route = @route_value || "direct_api"
+end
+
+fixture do |root, record, _host, checker, _runtime|
+  host = RuntimeRouteSwitchHost.new(root)
+  host.working("progress")
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
+                                   evidence_cache: evidence_cache(root))
+  options = runtime.send(:delegation_options)
+  digest = Orbit::WorkspaceSnapshot.fingerprint(project_root: root)
+  direct = runtime.send(:delegation_signature, digest, options)
+  host.route_value = "subscription_quota"
+  quota = runtime.send(:delegation_signature, digest, options)
+  assert(direct != quota, "a changed resolved route changes the delegation signature")
+end
+
+# Evidence pending when the @task route changes is stale: the submission still
+# matches its original request, but it is not assessed under the new
+# candidate, and the cache entries remain reusable for their own route.
+fixture(interval: 300) do |root, record, _host, checker, _runtime|
+  host = RuntimeRouteSwitchHost.new(root)
+  host.working("progress")
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
+  cache = evidence_cache(root)
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
+                                   evidence_cache: cache)
+  runtime.tick(now: Time.now.to_f + 6)
+  assert(record.state.dig("jev", "evidence_status") == "requested", "precondition: evidence is pending")
+  host.route_value = "subscription_quota"
+  submission = [evidence_entry(billing_route: "unknown"), evidence_entry(billing_route: "direct_api")]
+  submission.each { |entry| cache.record(entry) }
+  record.submit("model_evidence", "entries" => submission.map do |entry|
+    entry.slice("provider", "model", "reasoning", "billing_route", "status")
+  end)
+  runtime.tick(now: Time.now.to_f + 7)
+  assert(advisor.delegation_calls.empty?, "a changed route leaves the pending evidence unassessed")
+  assert(record.state.dig("jev", "evidence_status") == "unknown" &&
+         host.messages.none? { |message| message.include?("delegation hint") },
+         "a changed route records unknown and never hints")
+  assert(File.readlines(File.join(record.path, "events.jsonl")).any? { |line| line.include?("model_evidence_stale") },
+         "the stale pending evidence is recorded")
+  assert(cache.stored_entries.length == 2, "cache entries stay reusable for their own routes")
 end
 
 # Evidence can be cached proactively, but without a task request it is not
@@ -549,8 +672,7 @@ fixture(interval: 300) do |root, record, _host, checker, _runtime|
   host.working("progress")
   advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
   runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
-                                   member_policy: member_policy(%w[opencode]),
-                                   evidence_cache: evidence_cache(root, [evidence_entry(status: "unavailable")]))
+                                                                      evidence_cache: both_route_evidence(root, status: "unavailable"))
   runtime.tick(now: Time.now.to_f + 6)
   assert(host.messages.none? { |message| message.include?("model evidence request") },
          "an unexpired unavailable is not re-requested")
@@ -559,10 +681,6 @@ fixture(interval: 300) do |root, record, _host, checker, _runtime|
   assert(record.state.dig("jev", "evidence_status") == "unavailable", "status shows the unavailable evidence")
   assert(Orbit::TaskView.format(record).include?("模型证据不可用"), "the view names the unavailable evidence")
 
-  record.submit("delegate", "kind" => "opencode", "text" => "manual bounded subtask")
-  runtime.tick(now: Time.now.to_f + 7)
-  assert(record.state["members"].first && record.state["members"].first["status"] == "working",
-         "manual delegation stays allowed without automatic evidence")
 end
 
 # A submission whose identities do not cover the pending comparison is a
@@ -575,24 +693,36 @@ fixture(interval: 300) do |root, record, _host, checker, _runtime|
   advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
   cache = evidence_cache(root)
   runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
-                                   member_policy: member_policy(%w[opencode]), evidence_cache: cache)
+                                   evidence_cache: cache)
   now = Time.now.to_f
   runtime.tick(now: now + 6)
   assert(host.messages.count { |message| message.include?("model evidence request") } == 1,
          "precondition: the comparison is requested")
 
   wrong = { "provider" => "openai", "model" => "gpt-6-astra", "reasoning" => "unknown", "status" => "evidence" }
-  record.submit("model_evidence", "entries" => [wrong])
+  candidate_unknown = evidence_entry(billing_route: "unknown")
+  record.submit("model_evidence", "entries" => [wrong,
+                                                candidate_unknown.slice("provider", "model", "reasoning", "billing_route", "status")])
   runtime.tick(now: now + 7)
-  assert(record.state.dig("jev", "evidence_status") == "unknown" && advisor.delegation_calls.empty?,
-         "a mismatched submission never reaches the second stage")
+  assert(record.state.dig("jev", "evidence_status") == "mismatch" && advisor.delegation_calls.empty?,
+         "a mismatched submission never reaches the second stage and records the mismatch status")
+  note = record.state.dig("jev", "evidence_note").to_s
+  assert(note.include?("deepseek-v4.1-flash billing_route must be direct_api") && note.include?("submitted unknown"),
+         "the mismatch note names the expected candidate route and the submitted route")
+  status_text = Orbit::TaskView.format(record)
+  assert(status_text.include?("提交的证据与待比较身份不一致") && status_text.include?("billing_route must be direct_api"),
+         "ordinary status surfaces the bounded mismatch correction note")
   assert(host.messages.none? { |message| message.include?("delegation hint") }, "a mismatch never hints")
   assert(File.readlines(File.join(record.path, "events.jsonl")).any? { |line| line.include?("model_evidence_mismatch") },
          "the mismatch is recorded")
 
-  unavailable = evidence_entry(status: "unavailable")
-  cache.record(unavailable)
-  record.submit("model_evidence", "entries" => [unavailable.slice("provider", "model", "reasoning", "status")])
+  root_unavailable = evidence_entry(status: "unavailable", billing_route: "unknown")
+  candidate_unavailable = evidence_entry(status: "unavailable")
+  cache.record(root_unavailable)
+  cache.record(candidate_unavailable)
+  record.submit("model_evidence", "entries" => [root_unavailable, candidate_unavailable].map do |entry|
+    entry.slice("provider", "model", "reasoning", "billing_route", "status")
+  end)
   runtime.tick(now: now + 8)
   assert(record.state.dig("jev", "evidence_status") == "unavailable",
          "a matching unavailable submission is recorded as unavailable, not incomplete")
@@ -608,7 +738,7 @@ fixture(interval: 300) do |root, record, _host, checker, _runtime|
   advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
   advisor.delegation_scores = { "member_fit" => 0.5, "parallel_gain" => 0.9 }
   runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
-                                   member_policy: member_policy(%w[opencode]), evidence_cache: evidence_cache(root, [evidence_entry]))
+                                   evidence_cache: both_route_evidence(root))
   runtime.tick(now: Time.now.to_f + 6)
   assert(advisor.delegation_calls.length == 1, "a cache hit runs the second stage without a request")
   assert(host.messages.none? { |message| message.include?("model evidence request") }, "a cache hit needs no request")
@@ -618,11 +748,6 @@ fixture(interval: 300) do |root, record, _host, checker, _runtime|
          "the declined judgment is recorded")
   assert(record.state.dig("jev", "delegation", "decision") == "declined",
          "a below-threshold second stage records decision declined")
-  record.submit("delegate", "text" => "still an explicit Root ticket")
-  runtime.tick(now: Time.now.to_f + 7)
-  assert(record.state["members"].length == 1, "a declined decision does not block manual delegation")
-  assert(events(record).find { |event| event["type"] == "member_delegated" }&.[]("basis") == "root_without_hint",
-         "a delegate without a hint records the Root basis")
 end
 
 # A second-stage service error is an explicit unavailable decision. It does
@@ -633,7 +758,7 @@ fixture(interval: 300) do |root, record, _host, checker, _runtime|
   advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
   advisor.delegation_failure = Orbit::JevAdvisor::Error.new("stage two down")
   runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
-                                   member_policy: member_policy(%w[opencode]), evidence_cache: evidence_cache(root, [evidence_entry]))
+                                   evidence_cache: both_route_evidence(root))
   runtime.tick(now: Time.now.to_f + 6)
   assert(record.state.dig("jev", "delegation", "decision") == "unavailable" &&
          record.state.dig("jev", "delegation", "status") == "unavailable",
@@ -643,34 +768,6 @@ fixture(interval: 300) do |root, record, _host, checker, _runtime|
          "the per-signature assessment keeps the unavailable decision")
   assert(record.state["delegation_hint"].nil? && host.messages.none? { |message| message.include?("delegation hint") },
          "an unavailable decision does not hint")
-  record.submit("delegate", "text" => "manual despite unavailable")
-  runtime.tick(now: Time.now.to_f + 7)
-  assert(record.state["members"].length == 1 &&
-         events(record).find { |event| event["type"] == "member_delegated" }&.[]("basis") == "root_without_hint",
-         "an unavailable decision still allows an explicit Root delegate")
-end
-
-# An unconsumed hint from an older observation is not the basis for a later
-# explicit delegate after the artifact changed.
-fixture do |root, record, _host, checker, _runtime|
-  host = RuntimeTeamHost.new(root)
-  host.working("progress")
-  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker,
-                                   member_policy: member_policy(%w[opencode]))
-  state = runtime.instance_variable_get(:@state)
-  state["delegation_hint"] = { "signature" => "older-observation", "followed" => false }
-  runtime.send(:save)
-  File.write(File.join(root, "artifact.txt"), "changed after the old hint")
-  record.submit("delegate", "kind" => "opencode", "text" => "explicit ticket after change")
-  runtime.tick(now: Time.now.to_f + 1)
-  delegated = events(record).find { |event| event["type"] == "member_delegated" }
-  assert(delegated && delegated["basis"] == "root_without_hint",
-         "a stale hint cannot become the basis of a later delegate")
-  assert(record.state.dig("members", 0, "delegation_basis") == "root_without_hint" &&
-         record.state.dig("delegation_hint", "followed") == false,
-         "the member basis is explicit and the old hint stays unconsumed")
-  assert(events(record).any? { |event| event["type"] == "delegation_without_hint" },
-         "the no-hint dispatch is independently auditable")
 end
 
 # Identities Orbit cannot establish stay unknown: no request, no hint, no host
@@ -685,7 +782,7 @@ fixture(interval: 300) do |root, record, _host, checker, _runtime|
   host.working("progress")
   advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
   runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
-                                   member_policy: member_policy(%w[opencode]), evidence_cache: evidence_cache(root, [evidence_entry]))
+                                   evidence_cache: evidence_cache(root, [evidence_entry]))
   runtime.tick(now: Time.now.to_f + 6)
   assert(host.messages.none? { |message| message.include?("model evidence request") } &&
          host.messages.none? { |message| message.include?("delegation hint") },
@@ -700,30 +797,37 @@ fixture(interval: 300) do |root, record, _host, checker, _runtime|
   host.working("progress")
   advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
   runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
-                                   member_policy: member_policy(%w[codex]), evidence_cache: evidence_cache(root, [evidence_entry]))
+                                   evidence_cache: evidence_cache(root))
   runtime.tick(now: Time.now.to_f + 6)
-  assert(record.state.dig("jev", "evidence_status") == "unknown",
-         "a cross-host candidate model stays unknown without probing its host")
-  assert(host.messages.none? { |message| message.include?("model evidence request") },
-         "no request is sent for an unknown candidate")
+  request = host.messages.find { |message| message.include?("model evidence request") }
+  assert(request && request.include?("- candidate (omp): opencode-go/deepseek-v4.1-flash"),
+         "the same-host candidate is compared with its kind")
+  assert(record.state.dig("jev", "evidence_status") == "requested", "the omp candidate requests evidence")
 end
 
-# A same-host native candidate is compared even when an unknown cross-host
-# kind is also callable; the cross-host kind is recorded but blocks nothing.
+# A cache hit uses the same bounded summary as a Root submission and records
+# it once. The trace is not a delegation hint.
 fixture(interval: 300) do |root, record, _host, checker, _runtime|
   host = RuntimeTeamHost.new(root)
   host.working("progress")
   advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
+  advisor.delegation_scores = { "member_fit" => 0.15, "parallel_gain" => 0.30 }
   runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
-                                   member_policy: member_policy(%w[opencode codex]), evidence_cache: evidence_cache(root))
+                                   evidence_cache: both_route_evidence(root))
   runtime.tick(now: Time.now.to_f + 6)
-  request = host.messages.find { |message| message.include?("model evidence request") }
-  assert(request && request.include?("- candidate (opencode): opencode-go/deepseek-v4.1-flash"),
-         "the same-host candidate is compared with its kind")
-  assert(record.state.dig("jev", "evidence_status") == "requested" &&
-         record.state.dig("unknown_candidates", "codex").is_a?(Hash),
-         "the unknown cross-host kind is recorded without blocking the comparison")
-  assert(!request.include?("codex"), "the cross-host kind is never probed or requested")
+  runtime.tick(now: Time.now.to_f + 70)
+  sent = advisor.delegation_calls
+  assert(sent.length == 1, "a cache hit reaches the second stage once")
+  used = events(record).select { |event| event["type"] == "model_evidence_used" }
+  assert(used.length == 1 && used.first["summary"] == sent.first["model_evidence"] &&
+         used.first["summary"] == record.state.dig("delegation_evidence", used.first["signature"], "summary"),
+         "the cache-hit summary saved before the judgment matches the observation")
+  assert(used.first.dig("summary", "root", "retrieved_at") &&
+         used.first.dig("summary", "candidates", 0, "metrics", "output_tokens_per_second", "basis") == "median",
+         "identity time and metric basis are kept")
+  assert(host.messages.none? { |message| message.include?("delegation hint") } &&
+         record.state["delegation_hint"].nil?,
+         "using evidence is not a final delegation hint")
 end
 
 fixture do |root, record, _host, checker, _runtime|
@@ -731,7 +835,7 @@ fixture do |root, record, _host, checker, _runtime|
   host.working("progress")
   advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.95)
   runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
-                                   member_policy: member_policy(["kimi"]))
+)
   runtime.tick(now: Time.now.to_f + 6)
   assert(host.messages.none? { |message| message.include?("delegation hint") },
          "no hint is sent without an allowed callable member")
@@ -743,13 +847,36 @@ fixture(interval: 300) do |root, record, host, checker, _runtime|
   host.working("progress")
   advisor = RuntimeAdvisor.new("stuck" => 0.95, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
   runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
-                                   member_policy: member_policy(%w[opencode]),
-                                   evidence_cache: evidence_cache(root, [evidence_entry]))
+                                                                      evidence_cache: both_route_evidence(root))
   runtime.tick(now: Time.now.to_f + 6)
   assert(checker.calls.last&.fetch(:role) == "process_reviewer", "the process check from this judgment starts")
   assert(host.messages.none? { |message| message.include?("delegation hint") },
          "the hint does not interrupt the process check")
   assert(record.state["delegation_hint"].nil?, "no hint is recorded when a check wins")
+end
+
+# Research responsive to a pending Orbit model-evidence request is authorized
+# workflow, and the process check receives the bounded request facts.
+fixture(interval: 300) do |root, record, host, checker, _runtime|
+  host.working("researching the requested model facts")
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
+                                   evidence_cache: evidence_cache(root))
+  now = Time.now.to_f
+  runtime.tick(now: now + 6)
+  request = record.state["evidence_request"]
+  assert(request.is_a?(Hash) && request["resolved"].nil?, "precondition: an evidence request is pending")
+  advisor.scores = { "stuck" => 0.95, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9 }
+  runtime.tick(now: now + 70)
+  process = checker.calls.last
+  assert(process && process[:role] == "process_reviewer", "precondition: the stuck signal started a process check")
+  fact = process[:context]["model_evidence_request"]
+  assert(fact.is_a?(Hash) && fact["identities"] == request["identities"] &&
+         fact["needed"] == request["needed"] && fact["at"] == request["at"] && fact["resolved"].nil?,
+         "the process check receives the bounded pending evidence request")
+  assert(fact.keys.sort == %w[at identities needed resolved] &&
+         !JSON.generate(fact).include?("sources") && !JSON.generate(fact).include?("http"),
+         "the pending request fact stays non-secret and bounded")
 end
 
 # A hint is only delivered after the same freshness re-check as check
@@ -759,8 +886,7 @@ fixture(interval: 300) do |root, record, host, checker, _runtime|
   advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
   advisor.on_call = -> { File.write(File.join(root, "artifact.txt"), "changed during assessment") }
   runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
-                                   member_policy: member_policy(%w[opencode]),
-                                   evidence_cache: evidence_cache(root, [evidence_entry]))
+                                                                      evidence_cache: both_route_evidence(root))
   now = Time.now.to_f
   runtime.tick(now: now + 6)
   assert(host.messages.none? { |message| message.include?("delegation hint") } && record.state["delegation_hint"].nil?,
@@ -772,24 +898,16 @@ fixture(interval: 300) do |root, record, host, checker, _runtime|
          "a later fresh assessment delivers the hint")
 end
 
-# A changed allowlist never blocks stopping an already-registered member.
-fixture do |root, record, _host, checker, _runtime|
-  team = RuntimeTeamHost.new(root)
-  runtime = Orbit::TaskRuntime.new(record: record, connection: team, checker: checker,
-                                   member_policy: member_policy(["opencode"]))
-  record.submit("delegate", "text" => "scoped work")
-  runtime.tick(now: Time.now.to_f)
-  member = record.state["members"].first
-  assert(member && member["kind"] == "opencode", "an allowed native member is created")
-  assert(team.member_cwds == [File.realpath(root)], "a native member is created in the artifact workspace")
+# A registered native member is stopped from the task record. There is no
+# allowlist left to exempt or block that stop.
+fixture do |_root, record, host, _checker, _runtime|
   state = record.state
   state["connection"]["thread_id"] = "existing-root"
+  state["members"] = [{ "adapter" => "omp_native_task", "thread_id" => "orbit-m1", "kind" => "omp", "status" => "registered" }]
   record.save(state)
-  retry_runtime = Orbit::TaskRuntime.new(record: record, connection: team, checker: nil,
-                                         member_policy: member_policy([]))
-  result = retry_runtime.retry_stop("User retried stop")
-  assert(result["status"] == "paused" && team.members.fetch(member["thread_id"]).stop_calls == 1,
-         "an emptied allowlist does not block stopping a registered member")
+  result = Orbit::TaskRuntime.new(record: record, connection: host, checker: nil).retry_stop("User retried stop")
+  assert(result["status"] == "paused" && host.member_stops == ["orbit-m1"],
+         "a registered native member is stopped from the task record")
 end
 
 # Pending clues block completion until an artifact check confirms or
@@ -812,8 +930,9 @@ fixture do |root, record, host, checker, runtime|
   runtime.tick(now: now + 4)
   checker.result = answer("complete", resolved: ["clue"])
   runtime.tick(now: now + 5)
-  assert(record.state["status"] == "complete" && record.state["recheck"].nil?,
-         "an explicit withdrawal lets completion proceed")
+  assert(record.state["status"] != "complete" && record.state["recheck"].nil?,
+         "withdrawing the clue qualifies the hand-off but does not complete the task")
+  assert(record.state["finalization_notices"].length == 1, "the manual complete verdict wakes Root")
 end
 
 # Pending artifact clues belong only to the next artifact review: a process
@@ -894,7 +1013,8 @@ fixture(interval: 300) do |root, record, host, checker, _runtime|
   finished = record.state.fetch("checks").last
   assert(finished["kind"] == "artifact" && finished["stale"] == false && !finished["stale_reasons"].include?("host"),
          "the artifact completion check ignores the host-only change")
-  assert(record.state["status"] == "complete", "the completion gate ignores the same host-only change")
+  assert(record.state["status"] != "complete" && record.state["finalization_notices"].empty?,
+         "an automatic complete verdict cannot finish the task or wake Root")
 end
 
 # The checker context receives only the snapshot's added, modified and deleted
@@ -947,6 +1067,80 @@ fixture(interval: 300) do |_root, record, host, checker, runtime|
   assert(checker.calls.length == 2, "a new delivered turn still starts a fresh check")
 end
 
+# A failed rebind notice must not lose the persisted rebind or fail the task.
+fixture do |root, record, host, checker, runtime|
+  Dir.mktmpdir("orbit-rebind-notice-") do |tmp|
+    linked = File.join(tmp, "linked")
+    git = lambda do |dir, *args|
+      ok = system("git", "-C", dir, "-c", "user.name=orbit-test", "-c", "user.email=orbit-test@example.com",
+                  "-c", "commit.gpgsign=false", *args, out: File::NULL, err: File::NULL)
+      raise "git #{args.join(' ')} failed in #{dir}" unless ok
+    end
+    git.call(root, "init", "-q")
+    File.write(File.join(root, "artifact.txt"), "same bytes")
+    git.call(root, "add", "-A")
+    git.call(root, "commit", "-q", "-m", "init")
+    git.call(root, "worktree", "add", "--detach", "-q", linked, "HEAD")
+
+    record.submit("rebind_workspace", "path" => linked, "reason" => "switch worktree",
+                  "source" => { "kind" => "cli", "command" => "rebind-workspace" })
+    host.fail_send_message = "omp connection: execution expired"
+    runtime.tick
+    assert(record.state.dig("workspace", "artifact_root") == File.realpath(linked),
+           "the rebind stays persisted when the notice delivery fails")
+    assert(record.state["status"] != "failed", "a failed notice does not fail the task")
+    assert(File.read(File.join(record.path, "events.jsonl")).include?("workspace_rebind_notice_failed"),
+           "the failed notice is auditable")
+  end
+end
+
+# A transient correction delivery failure must not fail the task (N2
+# regression): the failure is recorded, the finding stays open, and the
+# correction redelivers when the Root is next observed idle.
+fixture do |_root, record, host, checker, runtime|
+  now = Time.now.to_f
+  runtime.tick(now: now)
+  host.finish("delivered")
+  missing = { "id" => "CHK-001", "requirement" => "second behavior", "evidence" => "absent in artifact", "action" => "implement second behavior" }
+  checker.result = answer("correct", findings: [missing])
+  host.fail_send_message = "omp connection: execution expired"
+  runtime.tick(now: now + 1)
+  assert(record.state["status"] != "failed", "a transient delivery failure does not fail the task")
+  assert(record.state["pending_correction"] && record.state["findings"].values.any? { |f| f["status"] == "open" },
+         "the failed delivery is kept pending with the finding still open")
+  assert(File.read(File.join(record.path, "events.jsonl")).include?("correction_delivery_failed"),
+         "the delivery failure is auditable")
+  host.fail_send_message = nil
+  host.finish("delivered-again")
+  runtime.tick(now: now + 2)
+  assert(record.state["pending_correction"].nil? &&
+         File.read(File.join(record.path, "events.jsonl")).include?("correction_sent"),
+         "the pending correction redelivers on the next idle observation")
+end
+
+# A version change after a failed delivery retires the pending correction: it
+# must NOT be redelivered as advice for the new version.
+fixture do |root, record, host, checker, runtime|
+  now = Time.now.to_f
+  runtime.tick(now: now)
+  host.finish("delivered")
+  missing = { "id" => "CHK-001", "requirement" => "second behavior", "evidence" => "absent in artifact", "action" => "implement second behavior" }
+  checker.result = answer("correct", findings: [missing])
+  host.fail_send_message = "omp connection: execution expired"
+  runtime.tick(now: now + 1)
+  assert(record.state["pending_correction"], "precondition: a delivery failure leaves a pending correction")
+  File.write(File.join(root, "NEW.md"), "version changed before redelivery")
+  host.fail_send_message = nil
+  host.finish("delivered-again")
+  messages_before = host.messages.length
+  runtime.tick(now: now + 2)
+  assert(record.state["pending_correction"].nil?, "a stale pending correction is dropped")
+  assert(host.messages.length == messages_before,
+         "a stale pending correction is never redelivered as current-version advice")
+  assert(File.read(File.join(record.path, "events.jsonl")).include?("correction_redelivery_stale"),
+         "the stale drop is auditable")
+end
+
 # A valid manual final review wakes an idle Root exactly once so it can stop;
 # it does not accept `continue` as product completion or start a short loop.
 fixture do |_root, record, host, checker, runtime|
@@ -976,6 +1170,278 @@ fixture do |_root, record, host, checker, runtime|
   assert(host.stop_calls == 1, "hard boundary reaches host control")
 end
 
+# A manual reviewer complete verdict is only a hand-off. An automatic
+# complete verdict cannot finish the task. Completion still requires Root stop.
+fixture do |_root, record, host, checker, runtime|
+  now = Time.now.to_f
+  runtime.tick(now: now)
+  host.finish("delivered")
+  checker.result = answer("complete")
+  runtime.tick(now: now + 1)
+  assert(record.state["status"] != "complete" && record.state["finalization_notices"].empty?,
+         "an automatic complete verdict does not finish the task or notify Root")
+  assert(File.read(File.join(record.path, "events.jsonl")).include?("automatic_check_complete_ignored"),
+         "the ignored automatic complete verdict is auditable")
+
+  record.submit("check")
+  runtime.tick(now: now + 2)
+  checker.result = answer("complete")
+  runtime.tick(now: now + 3)
+  assert(record.state["status"] != "complete" && record.state["finalization_notices"].length == 1,
+         "a manual complete verdict wakes Root and does not declare completion")
+  assert(host.messages.any? { |message| message.include?("final-check notice") },
+         "the same finalization notice is used for a clean manual complete verdict")
+
+  host.working("delivering the final summary")
+  record.submit("stop", "reason" => "User requested stop", "complete" => true)
+  runtime.tick(now: now + 4)
+  host.finish("delivered")
+  runtime.tick(now: now + 5)
+  assert(record.state["status"] == "complete",
+         "Root's explicit stop after the notice records completion")
+  assert(File.read(File.join(record.path, "events.jsonl")).include?("completed_via_finalized_stop"),
+         "completion still goes through the finalized stop path")
+end
+
+# A manual complete that finishes while Root is still in a turn is kept
+# for that exact version and delivered once when the turn actually completes.
+fixture do |root, record, host, checker, runtime|
+  now = Time.now.to_f
+  host.working("still in the check turn")
+  record.submit("check")
+  runtime.tick(now: now)
+  checker.result = answer("complete")
+  runtime.tick(now: now + 1)
+  assert(record.state["status"] != "complete" && record.state["finalization_notices"].empty?,
+         "a busy Root does not receive the notice and is not marked complete")
+  assert(record.state["pending_finalization"], "the reviewed version is retained for one hand-off")
+  runtime.tick(now: now + 2)
+  assert(checker.calls.length == 1 && record.state["finalization_notices"].empty?,
+         "waiting for the turn does not start another model check")
+
+  host.finish("turn-done")
+  runtime.tick(now: now + 3)
+  assert(record.state["finalization_notices"].length == 1 && record.state["pending_finalization"].nil?,
+         "the same version is handed off once when Root is idle and completed")
+  assert(checker.calls.length == 1, "the deferred hand-off does not rerun the checker")
+  runtime.tick(now: now + 4)
+  assert(host.messages.count { |message| message.include?("final-check notice") } == 1,
+         "the deferred notice is not repeated")
+
+  File.write(File.join(root, "artifact.txt"), "changed after a later review")
+  host.working("editing again")
+  record.submit("check")
+  runtime.tick(now: now + 5)
+  checker.result = answer("complete")
+  runtime.tick(now: now + 6)
+  File.write(File.join(root, "artifact.txt"), "changed before the hand-off")
+  host.finish("edited")
+  runtime.tick(now: now + 7)
+  assert(record.state["finalization_notices"].length == 1,
+         "a changed artifact does not receive the old notice")
+  assert(File.read(File.join(record.path, "events.jsonl")).include?("finalization_pending_stale"),
+         "dropping the old hand-off is auditable")
+  assert(checker.calls.length == 3, "the new version is checked once under the existing version-change rule")
+end
+
+# A version-bound pending hand-off must still reach an active Root within the
+# bounded wait, and a repeated same-version hand-off must not reset the timer.
+fixture(interval: 300) do |root, record, host, checker, runtime|
+  now = Time.now.to_f
+  host.working("waiting without ending the turn")
+  record.submit("check")
+  runtime.tick(now: now)
+  checker.result = answer("continue")
+  runtime.tick(now: now + 1)
+  pending = record.state["pending_finalization"]
+  assert(pending && record.state["finalization_notices"].empty?,
+         "precondition: an active Root keeps the pending notice")
+
+  digest = Orbit::WorkspaceSnapshot.fingerprint(project_root: root)
+  runtime.send(:queue_finalization_handoff,
+               { "number" => 99, "artifact_root" => pending["artifact_root"],
+                 "input_digest" => pending["input_digest"] }, digest, now + 40)
+  assert(record.state.dig("pending_finalization", "at") == pending["at"],
+         "a repeated same-version hand-off preserves the original bounded-wait timer")
+
+  runtime.tick(now: now + 30)
+  assert(record.state["finalization_notices"].empty?,
+         "the notice still prefers the completed turn before the original bound")
+  runtime.tick(now: now + 61)
+  assert(record.state["finalization_notices"].length == 1 && record.state["pending_finalization"].nil?,
+         "the version-bound notice is delivered within the bound while Root stays active")
+  assert(host.messages.count { |message| message.include?("final-check notice") } == 1,
+         "the bounded fallback notice is sent exactly once")
+  assert(record.state["status"] != "complete", "the notice alone never completes the task")
+  runtime.tick(now: now + 120)
+  assert(host.messages.count { |message| message.include?("final-check notice") } == 1,
+         "later ticks do not repeat the delivered notice")
+end
+
+# An explicit Root stop after a valid finalization hand-off defers completion:
+# the stop is queued so the delivery turn finishes untouched, then the runtime
+# stops, re-verifies the hand-off version, and records complete.
+fixture do |_root, record, host, checker, runtime|
+  now = Time.now.to_f
+  record.submit("check")
+  runtime.tick(now: now)
+  checker.result = answer("continue")
+  runtime.tick(now: now + 1)
+  assert(record.state["finalization_notices"].length == 1,
+         "finalization hand-off recorded for the current version")
+  host.working("delivering the final summary")
+  record.submit("stop", "reason" => "User requested stop", "complete" => true)
+  runtime.tick(now: now + 2)
+  assert(!Orbit::TaskRuntime::TERMINAL.include?(record.state["status"]) && record.state["completion_stop_pending"],
+         "a qualified stop is queued while the delivery turn is still running")
+  host.finish("delivered")
+  runtime.tick(now: now + 3)
+  assert(record.state["status"] == "complete",
+         "once the delivery turn completes, the queued stop records complete")
+  assert(record.state["delivery_digest"] && record.state["stop_confirmation"]["confirmed"] == true,
+         "completion carries the delivery version and confirmed teardown evidence")
+  assert(File.read(File.join(record.path, "events.jsonl")).include?("completed_via_finalized_stop"),
+         "the completion path is auditable")
+end
+
+# The deferred completion stop is bounded: an idle observation never arrives,
+# the queue still stops the task instead of waiting forever.
+fixture do |_root, record, host, checker, runtime|
+  now = Time.now.to_f
+  record.submit("check")
+  runtime.tick(now: now)
+  checker.result = answer("continue")
+  runtime.tick(now: now + 1)
+  assert(record.state["finalization_notices"].length == 1, "finalization hand-off is qualified")
+  host.working("runaway delivery turn")
+  record.submit("stop", "reason" => "User requested stop", "complete" => true)
+  runtime.tick(now: now + 2)
+  runtime.tick(now: now + 2 + Orbit::TaskRuntime::COMPLETION_STOP_TIMEOUT_SECONDS + 1)
+  assert(record.state["status"] == "paused",
+         "beyond the cap the queued stop executes as an ordinary stop, never complete")
+end
+
+# An interrupted delivery turn is never a completion: the queued stop falls
+# back to the ordinary stop path.
+fixture do |_root, record, host, checker, runtime|
+  now = Time.now.to_f
+  record.submit("check")
+  runtime.tick(now: now)
+  checker.result = answer("continue")
+  runtime.tick(now: now + 1)
+  host.working("delivery attempt")
+  record.submit("stop", "reason" => "User requested stop", "complete" => true)
+  runtime.tick(now: now + 2)
+  host.interrupt
+  runtime.tick(now: now + 3)
+  assert(record.state["status"] == "paused",
+         "an interrupted delivery turn degrades the queued stop to an ordinary stop")
+end
+
+# A version change DURING the queued delivery turn also breaks the hand-off:
+# the turn may finish normally, but the stop re-verifies the version and must
+# record an ordinary stop, never completion, and leaves no delivery_digest.
+fixture do |root, record, host, checker, runtime|
+  now = Time.now.to_f
+  record.submit("check")
+  runtime.tick(now: now)
+  checker.result = answer("continue")
+  runtime.tick(now: now + 1)
+  assert(record.state["finalization_notices"].length == 1, "finalization hand-off is qualified")
+  host.working("delivery turn in progress")
+  record.submit("stop", "reason" => "User requested stop", "complete" => true)
+  runtime.tick(now: now + 2)
+  assert(record.state["completion_stop_pending"], "completion stop is queued")
+  File.write(File.join(root, "LATE.md"), "artifact changed during the delivery turn")
+  host.finish("delivered")
+  runtime.tick(now: now + 3)
+  assert(record.state["status"] == "paused",
+         "a version change during the queued turn stops ordinarily, never complete")
+  assert(record.state["delivery_digest"].nil?,
+         "no delivery version is recorded when the hand-off no longer matches")
+end
+
+# A plain stop without the explicit completion intent stays an immediate
+# ordinary stop even when a finalization hand-off is qualified.
+fixture do |_root, record, host, checker, runtime|
+  now = Time.now.to_f
+  record.submit("check")
+  runtime.tick(now: now)
+  checker.result = answer("continue")
+  runtime.tick(now: now + 1)
+  assert(record.state["finalization_notices"].length == 1, "finalization hand-off is qualified")
+  record.submit("stop", "reason" => "User requested stop")
+  runtime.tick(now: now + 2)
+  assert(record.state["status"] == "paused" && record.state["completion_stop_pending"].nil?,
+         "a plain CLI stop never takes the completion path")
+end
+
+# An explicit hard deadline preempts a queued completion wait: it stops
+# immediately as an ordinary stop instead of waiting out the delivery turn.
+fixture do |_root, record, host, checker, runtime|
+  now = Time.now.to_f
+  record.submit("check")
+  runtime.tick(now: now)
+  checker.result = answer("continue")
+  runtime.tick(now: now + 1)
+  state = record.state
+  state["hard_deadline"] = Time.at(now + 5).utc.iso8601
+  record.save(state)
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker)
+  host.working("slow delivery turn")
+  record.submit("stop", "reason" => "User requested stop", "complete" => true)
+  runtime.tick(now: now + 2)
+  assert(record.state["completion_stop_pending"], "completion stop is queued")
+  runtime.tick(now: now + 6)
+  assert(record.state["status"] == "paused",
+         "a reached hard deadline stops immediately and never records completion")
+end
+
+# The bridge-level interrupted flag also degrades a queued completion stop to
+# an ordinary stop, even without an idle/interrupted turn summary.
+fixture do |_root, record, host, checker, runtime|
+  now = Time.now.to_f
+  record.submit("check")
+  runtime.tick(now: now)
+  checker.result = answer("continue")
+  runtime.tick(now: now + 1)
+  host.working("delivery in progress")
+  record.submit("stop", "reason" => "User requested stop", "complete" => true)
+  runtime.tick(now: now + 2)
+  host.instance_variable_get(:@state)["interrupted"] = true
+  runtime.tick(now: now + 3)
+  assert(record.state["status"] == "paused",
+         "a bridge-level interrupt degrades the queued stop to an ordinary stop")
+end
+
+# A version change after the finalization notice keeps ordinary stop semantics:
+# the hand-off no longer describes the current artifact, so stop stays paused.
+fixture do |root, record, host, checker, runtime|
+  now = Time.now.to_f
+  record.submit("check")
+  runtime.tick(now: now)
+  checker.result = answer("continue")
+  runtime.tick(now: now + 1)
+  File.write(File.join(root, "NEW.md"), "version changed after the notice")
+  record.submit("stop", "reason" => "User requested stop")
+  runtime.tick(now: now + 2)
+  assert(record.state["status"] == "paused", "a version change after the notice keeps stop at paused")
+end
+
+# An interrupt is never a completion: even with a qualified finalization
+# hand-off, the internal stop-request path records paused.
+fixture do |_root, record, host, checker, runtime|
+  now = Time.now.to_f
+  record.submit("check")
+  runtime.tick(now: now)
+  checker.result = answer("continue")
+  runtime.tick(now: now + 1)
+  assert(record.state["finalization_notices"].length == 1, "finalization hand-off is qualified")
+  runtime.request_stop
+  runtime.tick(now: now + 2)
+  assert(record.state["status"] == "paused", "an interrupt after the notice stays paused, never complete")
+end
+
 # A queued amendment after stop must not start a new turn on the paused Root.
 fixture do |_root, record, host, checker, runtime|
   record.submit("stop", "reason" => "User stopped the task")
@@ -997,138 +1463,38 @@ fixture do |_root, record, host, checker, runtime|
   assert(host.messages.empty? && checker.calls.empty?, "stop signal precedes inbox delivery")
 end
 
-# Member output must reach Root for integration before final completion.
-fixture do |root, record, _host, checker, _runtime|
-  host = RuntimeTeamHost.new(root)
-  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker)
-  record.submit("delegate", "text" => "Implement second behavior")
-  now = Time.now.to_f
-  runtime.tick(now: now)
-  checker.result = answer("complete")
-  runtime.tick(now: now + 1)
-  assert(record.state["status"] != "complete", "active member prevents completion")
-  record.submit("amend", "text" => "Make second behavior uppercase", "source" => { "kind" => "explicit_text" })
-  runtime.tick(now: now + 2)
-  member = host.members.fetch("member-1")
-  assert(member.messages.last.include?("uppercase"), "user amendment reaches the active member")
-  member.finish("member-done")
-  runtime.tick(now: now + 3)
-  assert(host.messages.last.include?("execution member result"), "result reaches existing Root")
-  host.finish("integrated")
-  runtime.tick(now: now + 4)
-  checker.result = answer("complete")
-  runtime.tick(now: now + 5)
-  assert(record.state.fetch("checks").last["stale"] == false &&
-         !record.state.fetch("checks").last["stale_reasons"].include?("host"),
-         "an artifact check is not expired by the host turn that reports integration")
-  runtime.tick(now: now + 6)
-  checker.result = answer("complete")
-  runtime.tick(now: now + 7)
-  assert(record.state["status"] == "complete", "integrated result can complete after independent check")
-  assert(record.state.dig("stop_confirmation", "members", 0, "confirmation", "confirmed"), "completion confirms member cleanup")
-end
-
-# Interrupting Root through its native UI must also stop its execution members.
-fixture do |root, record, _host, checker, _runtime|
-  host = RuntimeTeamHost.new(root)
-  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker)
-  record.submit("delegate", "text" => "Run a bounded job")
-  runtime.tick
+# Interrupting Root through its native UI must also stop its native members.
+fixture do |_root, record, host, checker, runtime|
+  state = runtime.instance_variable_get(:@state)
+  state["members"] = [{ "adapter" => "omp_native_task", "thread_id" => "orbit-m1", "kind" => "omp", "status" => "registered" }]
+  record.save(state)
   host.interrupt
   runtime.tick
   assert(record.state["status"] == "paused", "native Root interruption pauses the whole task")
-  assert(host.members.fetch("member-1").stop_calls == 1, "member is stopped without relying on Root")
+  assert(host.member_stops == ["orbit-m1"], "member is stopped without relying on Root")
 end
 
 # A failed Root stop cannot prevent attempts to stop the remaining members.
-fixture do |root, record, _host, checker, _runtime|
-  host = RuntimeTeamHost.new(root)
-  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker)
-  record.submit("delegate", "text" => "Run a bounded job")
-  runtime.tick
+fixture do |_root, record, host, checker, runtime|
+  state = runtime.instance_variable_get(:@state)
+  state["members"] = [{ "adapter" => "omp_native_task", "thread_id" => "orbit-m1", "kind" => "omp", "status" => "registered" }]
+  record.save(state)
   host.confirmed = false
   record.submit("stop")
   runtime.tick
   assert(record.state["status"] == "stop_unconfirmed", "partial cleanup cannot claim whole-task stop")
-  assert(host.members.fetch("member-1").stop_calls == 1, "remaining members are still stopped")
+  assert(host.member_stops == ["orbit-m1"], "remaining members are still stopped")
 end
 
-# OpenCode Root delegation can create a task-owned Codex member: host and
-# member identity are persisted before turn/start, and the result returns
-# through the existing Root channel.
-fixture do |root, record, host, checker, _runtime|
-  member_connection = RuntimeCodexMemberConnection.new
-  codex_host = RuntimeCodexHost.new(record, member_connection)
-  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, member_host: codex_host)
-  record.submit("delegate", "kind" => "codex", "text" => "Verify greet behavior")
-  runtime.tick(now: Time.now.to_f)
-  member = record.state.fetch("members").first
-  assert(member["kind"] == "codex" && member["thread_id"] == "codex-thread-1", "codex member is registered")
-  assert(record.state.dig("member_hosts", "codex", "pgid") == 42, "task-owned member host identity is persisted")
-  assert(codex_host.start_member_calls.length == 1, "the member turn starts on the task-owned host")
-  assert(member["model"] == "gpt-codex-side" && member["status"] == "working", "Codex-side model and state are recorded")
-  assert(codex_host.member_cwd == File.realpath(root), "a codex member is created in the artifact workspace")
-
-  member_connection.state_value = { "status" => "idle", "last_turn_id" => "turn-1", "last_turn_status" => "completed",
-                                    "observations" => [{ "kind" => "agent_message", "text" => "member verified greet" }] }
-  runtime.tick(now: Time.now.to_f + 1)
-  completed = record.state.fetch("members").first
-  assert(completed["status"] == "completed" && completed["result"].first["text"] == "member verified greet",
-         "member result is read from the native session")
-  assert(host.messages.any? { |message| message.include?("execution member result") },
-         "member result returns to the original Root")
-end
-
-# An explicit stop retry reconnects a live Codex member host; a missing socket
-# only confirms when the recorded host process group no longer exists.
-fixture do |_root, record, host, _checker, _runtime|
-  state = record.state
-  state["connection"]["thread_id"] = "existing-root"
-  state["status"] = "running"
+fixture do |_root, record, host, checker, runtime|
+  state = runtime.instance_variable_get(:@state)
+  state["members"] = [{ "adapter" => "same_host", "thread_id" => "old-member", "kind" => "opencode", "status" => "working" }]
   record.save(state)
-  member_connection = RuntimeCodexMemberConnection.new
-  codex_host = RuntimeCodexHost.new(record, member_connection)
-  reset = lambda do
-    current = record.state
-    current["status"] = "running"
-    current["members"] = [{ "kind" => "codex", "thread_id" => "codex-thread-9", "model" => "gpt-codex-side",
-                            "socket" => "/tmp/orbit-mbr-test/m.sock", "host" => "codex", "status" => "working" }]
-    current["member_hosts"] = { "codex" => { "kind" => "codex", "socket" => "/tmp/orbit-mbr-test/m.sock",
-                                             "pid" => 4242, "pgid" => 4242, "directory" => "/tmp/orbit-mbr-test" } }
-    record.save(current)
-  end
-
-  reset.call
-  result = Orbit::TaskRuntime.new(record: record, connection: host, checker: nil, member_host: codex_host)
-                              .retry_stop("User retried stop")
-  assert(result["status"] == "paused" && result.dig("member_host_shutdown", 0, "confirmed"),
-         "a live member host reconnects, stops and confirms host exit")
-  assert(codex_host.shutdown_calls.length == 1, "the confirmed retry closes the member host")
-
-  reset.call
-  member_connection.stop_error = "member socket refused"
-  codex_host.alive = true
-  result = Orbit::TaskRuntime.new(record: record, connection: host, checker: nil, member_host: codex_host)
-                              .retry_stop("User retried stop")
-  assert(result["status"] == "stop_unconfirmed" && codex_host.shutdown_calls.length == 1,
-         "a live host with an unreachable member stays unconfirmed and keeps the host for retry")
-
-  reset.call
-  codex_host.alive = false
-  result = Orbit::TaskRuntime.new(record: record, connection: host, checker: nil, member_host: codex_host)
-                              .retry_stop("User retried stop")
-  confirmation = result.fetch("member_stop_results").first.fetch("confirmation")
-  assert(result["status"] == "paused" && confirmation["host_exit_verified"],
-         "a missing socket with a dead recorded host process group is verified as stopped")
-
-  reset.call
-  codex_host.alive = true
-  member_connection.stop_error = Orbit::CodexConnection::UnmaterializedThread.new("no turn yet")
-  result = Orbit::TaskRuntime.new(record: record, connection: host, checker: nil, member_host: codex_host)
-                              .retry_stop("User retried stop")
-  confirmation = result.fetch("member_stop_results").first.fetch("confirmation")
-  assert(result["status"] == "paused" && confirmation["no_materialized_turn"],
-         "a member thread with no user turn has no execution to interrupt")
+  runtime.tick
+  assert(record.state["status"] == "stop_unconfirmed", "a legacy member is not treated as stopped")
+  assert(record.state["error"].to_s.include?("no migration path"), record.state["error"].to_s)
+  assert(record.state["members"].first["status"] == "working", "the old record is not relabeled completed")
+  assert(Array(host.member_stops).empty?, "the removed host path is not called")
 end
 
 # Checker cleanup failure must not skip the user's requested execution stop.
@@ -1163,14 +1529,15 @@ fixture do |root, record, _host, checker, _runtime|
   state = record.state
   state["connection"]["thread_id"] = "existing-root"
   record.save(state)
-  host = RuntimeTeamHost.new(root)
+  host = RuntimeHost.new(root)
   host.confirmed = false
+  state["members"] = [{ "adapter" => "omp_native_task", "thread_id" => "orbit-m1", "kind" => "omp", "status" => "registered" }]
+  record.save(state)
   def checker.start(**args) = raise("checker could not start")
-  record.submit("delegate", "text" => "Perform scoped work")
   runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker)
   runtime.run
   assert(record.state["status"] == "stop_unconfirmed", "observer failure records unconfirmed cleanup")
-  assert(host.members.fetch("member-1").stop_calls == 1, "observer failure still stops the member")
+  assert(host.member_stops == ["orbit-m1"], "observer failure still stops the member")
   host.confirmed = true
   retry_runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: nil)
   result = retry_runtime.retry_stop("User retried stop")
@@ -1408,13 +1775,19 @@ Dir.mktmpdir("orbit-rebind-runtime-") do |tmp|
          history[0]["from"] == File.realpath(root) && history[0]["to"] == File.realpath(other),
          "rebind records source, reason and history")
   assert(File.read(File.join(record.path, "events.jsonl")).include?("workspace_rebound"), "rebind writes an event")
+  notice = host.messages.find { |message| message.include?("artifact root moved to") }
+  assert(notice && notice.include?(File.realpath(other)) && notice.include?("has not moved") &&
+         notice.include?("not a new user instruction") && notice.include?("under the new root"),
+         "Root is told the normalized new root, that the session cwd did not move, and where artifacts go")
 
   checker.result = answer("complete")
   runtime.tick(now: now + 2)
   last = record.state.fetch("checks").last
   assert(last["stale"] && last["stale_reasons"] == ["workspace"],
          "the same digest is still stale because the workspace changed")
-  assert(host.messages.empty? && record.state["status"] != "complete", "a stale old-workspace pass cannot complete the task")
+  assert(host.messages.length == 1 && host.messages.first.include?("artifact root moved to") &&
+         record.state["status"] != "complete",
+         "the stale old-worktree pass sends no correction or finalization (only the rebind notice) and cannot complete the task")
   assert(record.state["next_check_basis"] == "工作区重新绑定", "rebind schedules a check of the new workspace")
 
   checker.result = nil
@@ -1427,9 +1800,6 @@ Dir.mktmpdir("orbit-rebind-runtime-") do |tmp|
   assert(text.include?("产物目录：#{File.realpath(other)}") && text.include?("switch worktree") &&
          text.include?("工作区切换"), "status shows the artifact root, latest rebind and workspace expiry")
 
-  record.submit("delegate", "text" => "Continue in the linked worktree")
-  runtime.tick(now: now + 4)
-  assert(host.member_cwds == [File.realpath(other)], "a member created after rebind uses the artifact root as cwd")
 end
 
 # JEV's change summary follows the artifact workspace, not the project root.
@@ -1793,6 +2163,38 @@ fixture(interval: 300) do |_root, record, host, _checker, runtime|
          "the replacement runtime starts one check for the abandoned observation")
   assert(File.readlines(File.join(record.path, "events.jsonl")).any? { |line| line.include?("check_abandoned_recovered") },
          "the recovery is visible in the event record")
+end
+
+# Legacy cache entries written before comparison.* rejection can still reach
+# the second stage; the bounded summary must omit cross-identity claims and
+# state the real validation scope.
+fixture(interval: 300) do |root, record, _host, checker, _runtime|
+  host = RuntimeTeamHost.new(root)
+  host.working("progress")
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.6)
+  cache = evidence_cache(root)
+  # Both route identities must be present: the Root stays route-less (unknown)
+  # while the candidate's route is explicit. The legacy comparison.* metric
+  # stays on both entries to exercise summary filtering without relaxing the
+  # route gate.
+  legacy_root = evidence_entry(billing_route: "unknown")
+  legacy_candidate = evidence_entry(billing_route: "direct_api")
+  [legacy_root, legacy_candidate].each do |entry|
+    entry["valid_until"] = (Time.now.utc + 3600).iso8601
+    entry["metrics"]["comparison.identity_offset"] = { "value" => 0, "unit" => "n/a", "basis" => "same model" }
+  end
+  File.write(cache.path, JSON.pretty_generate("schema_version" => Orbit::ModelEvidenceCache::SCHEMA_VERSION,
+                                              "entries" => [legacy_root, legacy_candidate]))
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
+                                   evidence_cache: cache)
+  runtime.tick(now: Time.now.to_f + 6)
+  assert(advisor.delegation_calls.length == 1, "the legacy cached entry reaches one second-stage judgment")
+  summary = advisor.delegation_calls.first.fetch("model_evidence")
+  assert(summary.dig("root", "metrics").key?("output_tokens_per_second"), "real measurements are kept")
+  assert(!JSON.generate(summary).include?("comparison."), "legacy cross-identity comparison metrics are omitted")
+  assert(summary.fetch("note").include?("submitter-provided") &&
+         summary.fetch("note").include?("not semantically verified"),
+         "the note states structure-only validation")
 end
 
 puts "TASK_RUNTIME_TEST_PASS (deterministic, not real-model acceptance)"

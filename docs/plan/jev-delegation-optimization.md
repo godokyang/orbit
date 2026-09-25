@@ -35,8 +35,9 @@ Root 仍决定具体执行票、成员和是否调用 `delegate`。Orbit 不自�
 当前观察仍新鲜。JEV 只处理需要语义判断的三项概率：
 
 1. `delegatable`：现在是否存在边界清晰、结果明确、可与 Root 并行的独立执行票。
-2. `member_fit`：至少一个可调用成员是否可能以当前验收要求交付该执行票。
-3. `parallel_gain`：计入交接、返工和集成后，委派是否可能缩短整项任务的关键路径。
+2. `member_fit`：至少一个可调用成员，仅凭有界交接可以传递的信息，是否可能达到该有界子任务的验收线。评估时不假定交接已经发生，也不假定成员能看到 Root 上下文。模型身份相同不是能力相当的直接证据。交接、返工和集成的时间开销只计入 `parallel_gain`。
+3. `parallel_gain`：计入交接、返工、集成、共享资源争用与验证后，委派是否可能缩短整项任务的端到端关键路径（输出速度不等于任务完成速度）。
+4. `cost_appropriate`：仅按宿主确认的路由与带来源的提交价格或套餐额度资料（只做结构校验，不做语义核实），判断候选的粗档价格或额度对该有界子任务是否相称。`direct_api` 路由用 `cost.*` 按量价格事实，`subscription_quota` 路由用 `quota.*` 套餐/额度粗档事实，两者不互换、不折算为等价每 token 价。不换算货币、不与 Root 自己的计费路由比较、不按品牌排名；路由或事实缺失/过期视为 unknown，unknown 不是免费，不得抬高该分。
 
 首版提示条件冻结为：
 
@@ -44,7 +45,10 @@ Root 仍决定具体执行票、成员和是否调用 `delegate`。Orbit 不自�
 delegatable >= 0.60
 member_fit >= 0.55
 parallel_gain >= 0.50
+cost_appropriate >= 0.50   # 且通过计费路由 fail-closed 门
 ```
+
+`cost_appropriate` 门（2026-09-24 随源码落地，2026-09-25 按端点结构性证明修订；模型侧行为未验收）：阈值 0.50 为最小约定值（无校准证据）；硬要求是路由或事实未知时**永不提示**。原生成员路由由 OMP host 从解析出的 `@task` 端点（HTTPS host 与 path 前缀）与传输方式做结构性判定，**不按 provider 名称推断**（仅接受 HTTPS 端点，http 或自定义 scheme 一律 unknown）：`direct_api` 仅接受已验证的第一方按量端点（当前为 DeepSeek 官方 `https://api.deepseek.com`）；`subscription_quota` 仅接受已验证的第一方套餐端点（zhipu-coding-plan 官方 `https://open.bigmodel.cn` 的 `/api/coding/` 路径、kimi-code 官方 `https://api.kimi.com` 的 `/coding/` 路径）；两者都要求传输方式不是 `pi-native`。每个被比较候选的证据条目须在缓存有效期窗口内、`billing_route` 以类型化身份（provider/model/reasoning/route）匹配同一路由，并带对应命名空间的数值型事实：`direct_api` 用 `cost.*`，`subscription_quota` 用 `quota.*`（提交附来源 URL，Orbit 只校验结构与数值形态，不抓取 URL、不做语义核实）。其它 provider、自定义或未验证端点、unknown、无路由或无对应事实一律 fail closed，任务记 `cost route or required fact is not verified; no automatic delegation hint`。用户明确授权的原生派发不受此门影响。基于模型的 cost 门真实表现尚无真实样本验证。
 
 第一阶段门槛于 2026-09-22 用首组真实正负样本校准：明确包含两个独立工作面的任务首次得到 0.64，
 单文件小任务得到 0.18，并在后续观察中保持明显间隔，因此从未校准的 0.80 调为 0.60。它只决定是否值得
@@ -53,6 +57,8 @@ parallel_gain >= 0.50
 小任务分别为 `0.45/0.45` 与 `0.42/0.48`。因此 `member_fit` 从 0.75 调为 0.55，`parallel_gain` 从 0.70
 调为 0.50。三个维度不按同一量纲加权。任何硬条件不满足都不提示；
 一次判断只推荐一个边界最清晰、预期收益最高的完整执行票。JEV 不选择 `kind`，也不调用 `delegate`。
+
+2026-09-24 用户确认：分工建议必须同时考虑端到端完成时间与费用。时间仍只由 `parallel_gain` 判断。费用必须是有证据的粗档判断，不是叙述。用户举过的 Codex／Claude 与 GLM／Kimi 例子只是说明，不是固定档位。**费用门已随源码落地（三个定型问题 + `cost_appropriate >= 0.50` + 计费路由 fail-closed 门，见上）；基于模型的 cost 门真实表现尚未经真实样本验收**。计费路由 typed 身份（provider/model/reasoning/billing_route）已采纳；2026-09-25 产品决定：`direct_api`（数值 `cost.*`）与已验证 `subscription_quota`（数值 `quota.*`）都可授权 cost 门，路由按宿主解析端点 host+path 与传输方式证明，不按 provider 名称。
 
 ### JEV 问题文本
 
@@ -70,19 +76,19 @@ is enforced by the caller and must not lower this task-structure probability.
 
 member_fit:
 Given the callable member options and the supplied model evidence, is at least
-one member likely to meet the best bounded subtask's acceptance bar without
-enough rework to erase the benefit? Treat missing or stale evidence as unknown
-and do not infer capability from a model name alone. Matching validated Root
-and candidate identities are direct capability-parity evidence; a shared
-unknown reasoning label is not a mismatch.
+one member likely to meet the best bounded subtask's acceptance bar using only
+information that can be passed in a bounded handoff? Do not assume a handoff
+already exists, and do not assume the member can see Root's context. Do not
+treat a matching provider, model or reasoning identity as direct evidence of
+capability parity. Treat missing or stale evidence as unknown and do not infer
+capability from a model name alone. Handoff, rework and integration time
+overhead belong only to parallel_gain.
 
 parallel_gain:
 Given the remaining task dependencies and the supplied execution evidence,
 would delegating the best bounded subtask now likely shorten the overall critical path
 after handoff, expected rework, integration, shared-resource contention, and
-verification are included? Independent substantive surfaces can gain from
-concurrency even when Root and member use the same model. Output speed alone
-is not task completion speed.
+verification are included? Output speed alone is not task completion speed.
 ```
 
 JEV 输出概率，不输出硬编码综合分。质量通过预期返工影响有效耗时，token 和费用作为资源证据与约束，
@@ -104,8 +110,8 @@ Orbit 不维护内置模型画像，也不要求用户配置相对速度。Orbit
 4. Root 通过新增的 `model_evidence` 控制操作提交 JSON；CLI 对应
    `orbit model-evidence TASK_DIRECTORY --file FILE|-`。该操作只接受模型事实证据，不修改用户要求，不能复用 `amend`。
 5. 运行程序校验模型标识、指标口径、来源 URL、取得时间和有效期，原子更新用户级缓存，再从有效证据派生
-   Root 与候选成员的比较摘要，判断 `member_fit` 和 `parallel_gain`。
-6. 满足全部条件才发送最终委派提示；证据请求、检索失败、判断和最终提示分别记录，不能把前两者说成已委派。
+   Root 与候选成员的比较摘要，判断 `member_fit`、`parallel_gain` 与 `cost_appropriate`（价格或套餐额度只结构校验，不做语义核实）。
+6. 满足全部条件（含计费路由 fail-closed 门）才发送最终委派提示；证据请求、检索失败、判断和最终提示分别记录，不能把前两者说成已委派。
 
 来源优先级为：
 

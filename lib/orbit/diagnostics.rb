@@ -2,10 +2,9 @@
 
 require "open3"
 require_relative "version"
-require_relative "codex_connection"
 require_relative "plugin_connection"
 require_relative "check_runner"
-require_relative "member_policy"
+require_relative "omp_entry"
 require_relative "../../scripts/manage-install"
 
 module Orbit
@@ -23,46 +22,91 @@ module Orbit
         "environment_ready" => environment_ready,
         "dependencies" => dependencies,
         "installation" => installation,
+        "omp_entry" => omp_entry_check,
         "connection" => connection,
-        "members" => member_check(connection_record, connection: connection),
-        "review_model" => model_check(connection),
+        "checker" => checker_check(connection),
+        "migration" => migration_status,
         "credentials" => { "verified" => false, "detail" => "未请求模型；登录、模型可用性和额度未验证。" }
       }
     end
 
-    # Allowlist authorization vs actually controlled member paths. Allowed
-    # kinds without an adapter stay visible as unavailable; availability of
-    # an install/login never counts as authorization.
-    def member_check(connection_record, connection: nil)
-      policy = MemberPolicy.load
-      provider = connection_record&.dig("provider")
-      allowed = policy.allowed_kinds
-      portable = MemberAdapters.portably_callable_kinds
-      unadapted = allowed.reject { |kind| portable.include?(kind) }
-      # A failed or absent session connection proves nothing about which
-      # kinds that Root can call; never report them as callable.
-      unless provider && connection && connection["ready"] == true
-        return {
-          "allowed_kinds" => allowed, "source" => policy.source, "config_path" => policy.path,
-          "provider" => provider, "connection_ready" => provider ? connection&.dig("ready") == true : nil,
-          "callable_kinds" => nil, "unavailable_kinds" => unadapted, "unavailable_on_provider" => [],
-          "detail" => provider ? "会话连接失败，未验证当前 Root 可调用的成员 kind" : "未提供会话；可调用性需在具体 Root 会话中核对"
-        }
+    # The implemented single-host entry: orbit omp loads this release's
+    # extension for the selected session. Only the verified OMP version is
+    # accepted; a mismatch is reported here and refused at launch. This section
+    # states only what is wired today; the native task/hub team, registration
+    # gate and independent OMP checker are implemented alongside it, with the
+    # target-path end-to-end acceptance still in progress (see the migration
+    # status and docs/plan/omp-native-migration.md).
+    def omp_entry_check
+      extension = File.join(File.realpath(ROOT), "plugins/omp.mjs")
+      ready = File.file?(extension)
+      omp = executable("omp")
+      version = nil
+      version_error = nil
+      if omp
+        begin
+          version = OmpEntry.detected_version(omp)
+        rescue StandardError => error
+          version_error = error.message
+        end
       end
+      version_ready = version == OmpEntry::PINNED_OMP_VERSION
+      item = {
+        "entry" => "orbit omp",
+        "extension" => extension,
+        "extension_ready" => ready,
+        "omp_path" => omp,
+        "version" => version,
+        "pinned_version" => OmpEntry::PINNED_OMP_VERSION,
+        "version_ready" => version.nil? ? nil : version_ready
+      }
+      if omp.nil?
+        item["detail"] = ready ? "orbit omp 显式加载当前安装目录的扩展；普通 omp 不加载 Orbit 扩展。" : "Orbit 扩展缺失；orbit omp 无法加载。"
+        item["omp_next_step"] = "未在 PATH 中找到 omp；安装 Oh My Pi #{OmpEntry::PINNED_OMP_VERSION} 后使用 orbit omp。"
+      elsif version.nil?
+        item["detail"] = "无法确定 OMP 版本；orbit omp 会拒绝启动。"
+        item["version_next_step"] = version_error.to_s
+      elsif version_ready
+        item["detail"] = "orbit omp 显式加载当前安装目录的扩展；普通 omp 不加载 Orbit 扩展（OMP #{version} 已验证）。"
+      else
+        item["detail"] = "OMP #{version} 不在已验证范围（仅支持 #{OmpEntry::PINNED_OMP_VERSION}）；orbit omp 会拒绝启动。"
+        item["version_next_step"] = "安装受支持的 OMP 版本；更新 pin 需先按 ADR-008 复核接口并在隔离项目实跑。"
+      end
+      item["next_step"] = "用 install.sh 修复当前安装后重试 orbit omp。" unless ready
+      item
+    end
 
-      callable = MemberAdapters.callable_kinds(provider).select { |kind| allowed.include?(kind) }
-      other_root = (allowed & portable) - callable
+    def migration_status
       {
-        "allowed_kinds" => allowed, "source" => policy.source, "config_path" => policy.path,
-        "provider" => provider, "connection_ready" => true, "callable_kinds" => callable,
-        "unavailable_kinds" => unadapted, "unavailable_on_provider" => other_root, "detail" => nil
+        "phase" => "M4",
+        "detail" => "单宿主安装与 orbit omp 显式入口、原生 task/hub 执行成员（登记门、成员桥与协作观察）、独立 OMP 检查组件、旧宿主移除与合同同步均已实现；目标路径端到端真实验收进行中，未验收前不视为通过。"
       }
-    rescue MemberPolicy::Error => error
-      {
-        "allowed_kinds" => nil, "source" => nil, "config_path" => MemberPolicy.config_path,
-        "provider" => connection_record&.dig("provider"), "callable_kinds" => nil,
-        "unavailable_kinds" => [], "unavailable_on_provider" => [], "error" => error.message
+    end
+
+    # The independent check runs in a separate read-only OMP session. This
+    # section reports that component and the model it will use; it never
+    # presents another host's configuration as the checker.
+    def checker_check(connection)
+      model = ENV["ORBIT_REVIEW_MODEL"]
+      source = "ORBIT_REVIEW_MODEL"
+      if model.to_s.empty?
+        model = connection["configured_model"]
+        source = "当前 OMP 会话模型"
+      end
+      item = {
+        "component" => "omp-reviewer",
+        "status" => "active",
+        "detail" => "独立检查由单独的 OMP 只读会话执行（runners/omp-reviewer，固定快照）；不进入执行团队。"
       }
+      item["model"] = model
+      item["source"] = source
+      item["next_step"] = "显式设置 ORBIT_REVIEW_MODEL，或使用会话内的 provider/id 模型。" if model.to_s.empty?
+      item["connection_config_error"] = connection["model_error"] if connection["model_error"]
+      item
+    rescue StandardError => error
+      { "component" => "omp-reviewer", "status" => "active", "model" => nil,
+        "detail" => "读取检查模型失败：#{error.message}",
+        "next_step" => "显式设置 ORBIT_REVIEW_MODEL。" }
     end
 
     def format(report)
@@ -78,34 +122,23 @@ module Orbit
         lines << "    下一步：#{entry['next_step']}" if entry["next_step"]
       end
       lines << "下一步：#{installation['next_step']}" if installation["next_step"]
-      members = report["members"]
-      if members
-        if members["error"]
-          lines << "成员名单：读取失败：#{members['error']}"
-        else
-          lines << "成员名单：#{members['allowed_kinds'].empty? ? '（空，禁止创建新成员）' : members['allowed_kinds'].join('、')}（来源：#{members['source']}）"
-        end
-        if members["callable_kinds"]
-          lines << "可调用成员：#{members['callable_kinds'].empty? ? '无' : members['callable_kinds'].join('、')}（当前会话 provider：#{members['provider']}）"
-          unless Array(members["unavailable_on_provider"]).empty?
-            lines << "当前会话不可调用：#{members['unavailable_on_provider'].join('、')}（需对应 Root）"
-          end
-        elsif members["provider"]
-          lines << "可调用成员：未验证（#{members['detail'] || '会话未连接'}）"
-        else
-          lines << "可调用成员：未提供会话；已验证适配器：#{MemberAdapters.portably_callable_kinds.join('、')}"
-        end
-        unless Array(members["unavailable_kinds"]).empty?
-          lines << "不可调用成员：#{members['unavailable_kinds'].join('、')}（允许但无受控适配器）"
-        end
-      end
+      omp_entry = report.fetch("omp_entry")
+      lines << "OMP 显式入口：#{omp_entry['detail']}"
+      lines << "  版本：#{omp_entry['version'] || '未检测'}（支持：#{omp_entry['pinned_version']}）"
+      lines << "  下一步：#{omp_entry['version_next_step']}" if omp_entry["version_next_step"]
+      lines << "下一步：#{omp_entry['next_step']}" if omp_entry["next_step"]
+      lines << "下一步：#{omp_entry['omp_next_step']}" if omp_entry["omp_next_step"]
       connection = report.fetch("connection")
       lines << "会话连接：#{connection['detail']}"
       lines << "项目：#{connection['project']}" if connection["project"]
       lines << "下一步：#{connection['next_step']}" if connection["next_step"]
-      model = report.fetch("review_model")
-      lines << "检查模型：#{model['model'] || '未指定'}（#{model['detail']}）"
-      lines << "下一步：#{model['next_step']}" if model["next_step"]
+      checker = report.fetch("checker")
+      lines << "检查组件：#{checker['component']}（#{checker['status']}）"
+      lines << "  #{checker['detail']}"
+      lines << "  模型：#{checker['model'] || '未指定'}（来源：#{checker['source'] || '未指定'}）"
+      lines << "  下一步：#{checker['next_step']}" if checker["next_step"]
+      lines << "  连接配置错误：#{checker['connection_config_error']}" if checker["connection_config_error"]
+      lines << "迁移状态：#{report.fetch('migration').fetch('detail')}"
       lines << report.fetch("credentials").fetch("detail")
       lines.join("\n")
     end
@@ -129,60 +162,72 @@ module Orbit
       end
       checks << { "name" => "Node.js", "ready" => node_ready, "detail" => detail }
       checks.last["next_step"] = "安装 Node.js 18 或更新版本，并加入 PATH。" unless node_ready
-      %w[npm codex].each do |name|
+      %w[npm bun].each do |name|
         path = executable(name)
         item = { "name" => name, "ready" => !path.nil?, "detail" => path || "PATH 中未找到" }
-        item["next_step"] = "安装 #{name == 'codex' ? 'Codex CLI（独立检查需要）' : 'npm（随 Node.js 安装）'}，并加入 PATH。" unless path
+        unless path
+          item["next_step"] = name == "bun" ? "安装 bun >= 1.3.14（独立检查组件需要），并加入 PATH。" : "安装 npm（随 Node.js 安装），并加入 PATH。"
+        end
         checks << item
       end
-      checks << package_check(node_ready)
       checks
-    end
-
-    def package_check(node_ready)
-      item = { "name" => "运行包依赖", "ready" => false }
-      if node_ready
-        script = "require('ws'); require('@modelcontextprotocol/sdk/server/index.js'); " \
-                 "require('@modelcontextprotocol/sdk/server/stdio.js'); require('@modelcontextprotocol/sdk/types.js')"
-        _output, error, status = Open3.capture3("node", "-e", script, chdir: ROOT)
-        item.merge!("ready" => status.success?, "detail" => status.success? ? "ws 和 MCP SDK 可加载" : error.lines.first.to_s.strip)
-      else
-        item["detail"] = "Node.js 不可用，尚未检查 ws 和 MCP SDK"
-      end
-      item["next_step"] = "先修复 Node.js，再重新运行 install.sh；源码目录开发可运行 npm ci。" unless item["ready"]
-      item
-    rescue SystemCallError => error
-      item.merge("detail" => error.message, "next_step" => "重新运行 install.sh；源码目录开发可运行 npm ci。")
     end
 
     def installation_check
       root = File.realpath(ROOT)
       unless File.file?(File.join(root, OrbitInstall::RELEASE))
-        return { "kind" => "checkout", "ready" => nil, "detail" => "当前从源码目录运行，未核验全局安装或扩展。", "extensions" => [] }
+        return { "kind" => "checkout", "ready" => nil, "detail" => "当前从源码目录运行，未核验全局安装。", "extensions" => [] }
       end
       runtime = Orbit.installed_runtime
       owner = OrbitInstall.read_json(File.join(runtime, OrbitInstall::MARKER))
-      raise "安装记录格式不受支持" unless owner["format"] == OrbitInstall::FORMAT
-      entries = OrbitInstall.endpoints(runtime: runtime, bin: owner.fetch("bin_dir"), opencode: owner["opencode_dir"], omp: owner["omp_dir"])
-      extensions = entries.select { |_, _, kind| kind == :symlink }.map do |path, target, kind|
-        matched = OrbitInstall.matching?(path, target, kind) && File.file?(path)
-        name = File.basename(target, ".mjs")
-        item = { "name" => name, "path" => path, "ready" => matched,
-                 "detail" => matched ? "入口指向当前版本；是否已加载需验证会话连接" : "扩展入口缺失或未指向当前版本" }
-        item["next_step"] = "检查 #{path}，用 install.sh 修复后重新启动 #{name}。" unless matched
-        item
-      end
-      { "kind" => "installed", "ready" => extensions.all? { |item| item["ready"] }, "runtime" => runtime,
-        "detail" => "#{runtime}；只核验本安装登记的扩展，skill 由 npx skills 管理。", "extensions" => extensions }
+      raise "安装记录格式不受支持" unless OrbitInstall::SUPPORTED_FORMATS.include?(owner["format"])
+      entries = installation_entries(runtime: runtime, owner: owner)
+      { "kind" => "installed", "ready" => entries.all? { |item| item["ready"] }, "runtime" => runtime,
+        "detail" => "#{runtime}；单宿主安装只管理 CLI 与 orbit omp 显式入口。", "extensions" => entries }
     rescue StandardError => error
       { "kind" => "installed", "ready" => false, "detail" => error.message, "extensions" => [],
         "next_step" => "检查当前运行安装记录，再按 README 重新安装；doctor 不自动修改安装。" }
     end
 
+    # The CLI wrapper is the only installed entry. A format 3 installation
+    # recorded host directories; an owned leftover there means the switch has
+    # not completed, and an unowned same-named entry means plain `omp`
+    # passivity cannot be claimed either way.
+    def installation_entries(runtime:, owner:)
+      entries = []
+      path, expected, kind = OrbitInstall.endpoints(runtime: runtime, bin: owner.fetch("bin_dir")).first
+      matched = OrbitInstall.matching?(path, expected, kind)
+      entries << { "name" => "orbit CLI", "path" => path, "ready" => matched,
+                   "detail" => matched ? "入口指向当前版本" : "CLI 入口缺失或未指向当前版本" }
+      entries.last["next_step"] = "检查 #{path}，用 install.sh 修复。" unless matched
+
+      legacy_entries = []
+      if (directory = owner["omp_dir"])
+        legacy_entries << ["omp 全局扩展（旧）", File.join(directory, "extensions/orbit.js"), File.join(runtime, "current/plugins/omp.mjs")]
+      end
+      if (directory = owner["opencode_dir"])
+        legacy_entries << ["opencode 插件（旧）", File.join(directory, "plugins/orbit.js"), File.join(runtime, "current/plugins/opencode.mjs")]
+      end
+      legacy_entries.each do |name, legacy_path, legacy_target|
+        if OrbitInstall.matching?(legacy_path, legacy_target, :symlink)
+          entries << { "name" => name, "path" => legacy_path, "ready" => false,
+                       "detail" => "旧全局入口仍指向本安装；普通 omp 会加载 Orbit" }
+          entries.last["next_step"] = "重新运行 install.sh 清理 #{legacy_path}。"
+        elsif OrbitInstall.present?(legacy_path)
+          entries << { "name" => name, "path" => legacy_path, "ready" => false,
+                       "detail" => "存在同名但不是本安装创建的入口；普通 omp 是否加载 Orbit 未确认" }
+          entries.last["next_step"] = "检查 #{legacy_path} 并自行处理；Orbit 不会删除非本安装的入口。"
+        else
+          entries << { "name" => name, "path" => legacy_path, "ready" => true, "detail" => "已清理或不存在" }
+        end
+      end
+      entries
+    end
+
     def connection_check(record)
       unless record
         return { "ready" => nil, "detail" => "未验证（未提供已有会话）",
-                 "next_step" => "用 orbit codex、opencode 或 omp 启动，在会话中调用 Orbit context；已有任务可运行 orbit doctor TASK。" }
+                 "next_step" => "用 orbit omp 启动受控会话，在会话中调用 Orbit context；已有任务可运行 orbit doctor TASK。" }
       end
       result = record.slice("provider", "socket", "thread_id").merge("ready" => false)
       raise ArgumentError, "缺少已有会话 ID" if record["thread_id"].to_s.empty?
@@ -192,12 +237,10 @@ module Orbit
       project = state.fetch("cwd")
       raise Connection::Error, "原生接口未返回项目目录" if project.to_s.empty?
       result.merge!("ready" => true, "project" => project, "status" => state["status"], "detail" => "已通过原生接口读回已有会话")
-      if record.fetch("provider", "codex") == "codex"
-        begin
-          result["configured_model"] = connection.configured_model
-        rescue StandardError => error
-          result["model_error"] = error.message
-        end
+      begin
+        result["configured_model"] = connection.configured_model
+      rescue StandardError => error
+        result["model_error"] = error.message
       end
       result
     rescue StandardError => error
@@ -212,23 +255,5 @@ module Orbit
       end
     end
 
-    def model_check(connection)
-      model = ENV["ORBIT_REVIEW_MODEL"]
-      source = "ORBIT_REVIEW_MODEL"
-      if model.to_s.empty?
-        model = connection["configured_model"]
-        source = "当前 Codex 会话配置"
-      end
-      if model.to_s.empty?
-        model = CheckRunner.configured_model
-        source = "Codex 顶层配置；profile 请显式指定 ORBIT_REVIEW_MODEL"
-      end
-      item = { "model" => model, "detail" => source }
-      item["next_step"] = "设置 ORBIT_REVIEW_MODEL 为可用的 Codex 检查模型。" if model.to_s.empty?
-      item["connection_config_error"] = connection["model_error"] if connection["model_error"]
-      item
-    rescue StandardError => error
-      { "model" => nil, "detail" => "读取 Codex 配置失败：#{error.message}", "next_step" => "修复 Codex 配置或显式设置 ORBIT_REVIEW_MODEL。" }
-    end
   end
 end

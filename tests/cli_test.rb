@@ -6,8 +6,7 @@ require "open3"
 require "rbconfig"
 require "socket"
 require_relative "../lib/orbit/task_record"
-require_relative "../lib/orbit/session_entry"
-require_relative "../lib/orbit/member_policy"
+require_relative "../lib/orbit/omp_entry"
 require_relative "../lib/orbit/jev_advisor"
 require_relative "../lib/orbit/jev_setup"
 
@@ -20,7 +19,7 @@ module CliTest
   end
 
   def cli(*args, cwd: @project, success: true, env: {}, stdin_data: nil)
-    base = { "CODEX_THREAD_ID" => nil, "ORBIT_CODEX_SOCKET" => nil, "XDG_CONFIG_HOME" => @temp, "XDG_CACHE_HOME" => @temp }
+    base = { "XDG_CONFIG_HOME" => @temp, "XDG_CACHE_HOME" => @temp }
     out, err, status = Open3.capture3(base.merge(env), RbConfig.ruby, "--disable-gems", ENTRY, *args,
                                      chdir: cwd, stdin_data: stdin_data)
     assert(status.success? == success, "#{args.inspect}\n#{out}\n#{err}")
@@ -254,7 +253,7 @@ module CliTest
     record = task
     socket = record.state.dig("connection", "socket")
     server = worker = nil
-    %w[omp opencode].each do |provider|
+    %w[omp].each do |provider|
       record.save(record.state.merge("connection" => record.state["connection"].merge("provider" => provider)))
       server = UNIXServer.new(socket)
       requests = []
@@ -309,88 +308,56 @@ module CliTest
     worker&.join
   end
 
-  # The per-tool approval override must address the MCP tool's real name
-  # (`task`), not the server name; otherwise the default `auto` requires
-  # approval and approval_policy=never sessions cannot call the tool.
-  def codex_launch_approval_targets_the_registered_tool
-    mcp = File.expand_path("../scripts/orbit-mcp.cjs", __dir__)
-    tool_name = File.read(mcp)[/name:\s*'([^']+)',\s*\n\s*description:/, 1]
-    assert(tool_name, "the Orbit MCP registers exactly one tool name")
-    configuration = Orbit::SessionEntry.codex_configuration(mcp: mcp, socket: "/tmp/orbit-test.sock")
-    assert(configuration.include?("tools={#{tool_name}={approval_mode=\"approve\"}}"),
-           "the approval override targets the registered tool #{tool_name.inspect}")
-    assert(!configuration.include?("tools={orbit="), "the server name must not be used as a tool key")
-    assert(configuration.include?("mcp_servers.orbit={") && configuration.include?("ORBIT_CODEX_SOCKET"),
-           "the Orbit MCP server configuration is preserved")
-  end
-
-  # The TUI argv must never carry permission overrides; the launcher folds them
-  # into the single policy its lifecycle proxy applies (default full access,
-  # explicit options win per field).
-  def codex_launch_builds_one_permission_policy
-    full = { "approvalPolicy" => "never", "sandbox" => "danger-full-access" }
-    policy, kept = Orbit::SessionEntry.permission_policy(["--model", "gpt-6"])
-    assert(policy == full && kept == ["--model", "gpt-6"], "new sessions default to full access")
-
-    policy, kept = Orbit::SessionEntry.permission_policy(["resume", "abc", "--dangerously-bypass-approvals-and-sandbox", "-m", "gpt-6"])
-    assert(policy == full && kept == ["resume", "abc", "-m", "gpt-6"],
-           "resume permission flags move into the policy and out of the TUI argv")
-
-    policy, kept = Orbit::SessionEntry.permission_policy(["-s", "read-only"])
-    assert(policy == full.merge("sandbox" => "read-only") && kept.empty?, "an explicit sandbox overrides only the sandbox")
-
-    policy, = Orbit::SessionEntry.permission_policy(["-c", 'sandbox_mode="workspace-write"', "-a", "on-request"])
-    assert(policy == { "approvalPolicy" => "on-request", "sandbox" => "workspace-write" },
-           "config-form permission options are parsed like the flags")
-
-    policy, kept = Orbit::SessionEntry.permission_policy(["--approve-for-me", "-c", "mcp_servers.orbit.enabled=false"])
-    assert(policy == { "approvalPolicy" => "on-request", "sandbox" => "workspace-write", "approvalsReviewer" => "auto_review" },
-           "auto review keeps its reviewer routing in the policy")
-    assert(kept == ["-c", "mcp_servers.orbit.enabled=false"], "non-permission config stays with the TUI")
-
-    args = Orbit::SessionEntry.server_permission_args(full)
-    assert(args == ["-c", 'sandbox_mode="danger-full-access"', "-c", 'approval_policy="never"'],
-           "the app-server keeps the same policy as its default")
-  end
-
-  # v1 boundary: a profile can carry permission fields Codex resolves inside
-  # the TUI. Reject it explicitly instead of silently overriding or dropping it.
-  def codex_launch_rejects_profiles
-    [["-p", "work"], ["--profile", "work"], ["--profile=work"]].each do |argv|
-      assert(!Orbit::SessionEntry.permission_policy(argv).first.nil?, "profile argv still parses for the error path")
-      begin
-        Orbit::SessionEntry.reject_profile!(argv)
-        raise "a profile must be rejected before launch"
-      rescue ArgumentError => error
-        assert(error.message.include?("-p/--profile"), "the profile boundary is explained")
+  # An abnormal exit removes runtime_pid but leaves finished_at and a
+  # non-terminal status; stop must use the confirmed retry path instead of
+  # queueing a command no process remains to consume.
+  def stop_retries_when_runtime_exited_without_terminal_status
+    record = task("running", finished_at: "2026-09-24T17:07:33Z")
+    socket = record.state.dig("connection", "socket")
+    server = UNIXServer.new(socket)
+    worker = Thread.new do
+      2.times do
+        peer = server.accept
+        request = JSON.parse(peer.gets)
+        result = request["method"] == "state" ? { "cwd" => File.realpath(@project), "status" => "idle" } : { "confirmed" => true }
+        peer.puts(JSON.generate("result" => result))
+        peer.close
       end
     end
-    Orbit::SessionEntry.reject_profile!(["--model", "gpt-6"])
+    result = JSON.parse(cli("stop", record.path, "--json"))
+    assert(worker.join(3), "retry reconnects the recorded native Root")
+    assert(result["status"] == "paused", "a recorded exit without a terminal status still accepts an explicit confirmed stop")
+    assert(commands(record).empty?, "retry performs cleanup instead of queueing an unconsumed command")
+  ensure
+    server&.close unless server&.closed?
+    worker&.kill if worker&.alive?
+    worker&.join
   end
 
-  def doctor_reports_member_allowlist_and_gaps
+  def doctor_states_single_host_entry_and_omp_checker
     report = JSON.parse(cli("doctor", "--json"))
-    members = report["members"]
-    assert(members["allowed_kinds"] == Orbit::MemberPolicy::DEFAULT_KINDS && members["callable_kinds"].nil?,
-           "default allowlist is reported without a session")
+    assert(report.dig("omp_entry", "entry") == "orbit omp" && report.dig("omp_entry", "extension_ready"),
+           "doctor states the implemented explicit OMP entry")
+    assert(report.dig("omp_entry", "pinned_version") == Orbit::OmpEntry::PINNED_OMP_VERSION,
+           "doctor states the pinned OMP range")
+    if report.dig("omp_entry", "omp_path")
+      detected = report.dig("omp_entry", "version")
+      assert(report.dig("omp_entry", "version_ready") == (detected == Orbit::OmpEntry::PINNED_OMP_VERSION),
+             "doctor reports the detected OMP version against the pin")
+    end
+    assert(report.dig("checker", "component") == "omp-reviewer" && report.dig("checker", "status") == "active",
+           "doctor labels the single OMP checker as the active component")
+    assert(report.dig("migration", "phase") == "M4" && !report.key?("members") && !report.key?("review_model"),
+           "doctor does not advertise an old-host member roster as the single-host state")
     text = cli("doctor")
-    assert(text.include?("成员名单：") && text.include?("不可调用成员：kimi、cursor-agent、grok"),
-           "text shows allowed and unavailable kinds")
+    assert(text.include?("OMP 显式入口") && text.include?("检查组件：omp-reviewer（active）") && text.include?("迁移状态："),
+           "doctor text keeps the same single-host statement")
+    assert(!text.include?("成员名单") && !text.include?("不可调用成员"),
+           "doctor text no longer lists old-host member kinds")
 
-    FileUtils.mkdir_p(File.join(@temp, "orbit"))
-    File.write(File.join(@temp, "orbit", "members.json"), JSON.generate("allowed_kinds" => %w[opencode kimi]))
+    # An existing task still verifies its native connection; that does not
+    # change the migration statement.
     record = task
-    report = JSON.parse(cli("doctor", record.path, "--json", success: false))
-    assert(report.dig("members", "allowed_kinds") == %w[opencode kimi] && report.dig("members", "source").end_with?("members.json"),
-           "an existing config fully overrides the default list")
-    assert(report.dig("members", "callable_kinds").nil? && report.dig("members", "connection_ready") == false,
-           "a failed session connection is not reported as callable")
-    assert(report.dig("members", "unavailable_kinds") == ["kimi"],
-           "adapter gaps are still reported without a verified session")
-    failed_text = cli("doctor", record.path, success: false)
-    assert(failed_text.include?("可调用成员：未验证") && !failed_text.include?("可调用成员：opencode"),
-           "doctor text does not claim callable kinds after a failed connection")
-
     socket = record.state.dig("connection", "socket")
     server = UNIXServer.new(socket)
     worker = Thread.new do
@@ -403,26 +370,12 @@ module CliTest
     end
     verified = JSON.parse(cli("doctor", record.path, "--json"))
     assert(worker.join(3), "verified session reads native state")
-    assert(verified.dig("members", "connection_ready") == true && verified.dig("members", "callable_kinds") == [],
-           "a verified session reports callable kinds for its provider")
+    assert(verified.dig("connection", "ready") == true && verified.dig("migration", "phase") == "M4",
+           "a verified connection does not change the migration statement")
   ensure
     server&.close unless server&.closed?
     worker&.kill if worker&.alive?
     worker&.join
-  end
-
-  def delegate_checks_allowlist_before_queueing
-    record = task
-    FileUtils.mkdir_p(File.join(@temp, "orbit"))
-    File.write(File.join(@temp, "orbit", "members.json"), JSON.generate("allowed_kinds" => %w[kimi]))
-    text = cli("delegate", record.path, "--kind", "codex", "--file", "-", success: false)
-    assert(text.include?("not in allowed_kinds") && commands(record).empty?,
-           "a disallowed kind is rejected before queueing")
-
-    File.write(File.join(@temp, "orbit", "members.json"), JSON.generate("allowed_kinds" => %w[codex]))
-    text = cli("delegate", record.path, "--kind", "codex", "--file", "-", success: false)
-    assert(text.include?("no controlled adapter") && commands(record).empty?,
-           "an allowed kind without an adapter is rejected before queueing")
   end
 
   def rebind_workspace_queues_and_legacy_status_reads_project_root
@@ -477,18 +430,23 @@ module CliTest
   # dedicated control command that carries identity and status only.
   def model_evidence_caches_object_and_queues_dedicated_command
     record = task
+    help = cli("model-evidence", "--help")
+    assert(help.include?("billing_route") && help.include?("省略按 unknown"),
+           "the JSON example documents billing_route and the omission default")
     reply = JSON.parse(cli("model-evidence", record.path, "--file", "-", stdin_data: JSON.generate(evidence("model" => "deepseek-v4.8"))))
     assert(reply["status"] == "queued" && reply["count"] == 1 &&
-           reply["identities"] == [{ "provider" => "opencode-go", "model" => "deepseek-v4.8", "reasoning" => "default" }],
-           "the reply names the queued identity")
+           reply["identities"] == [{ "provider" => "opencode-go", "model" => "deepseek-v4.8", "reasoning" => "default",
+                                     "billing_route" => "unknown" }],
+           "the reply names the queued identity including the typed billing route")
     assert(!JSON.generate(reply).include?("metrics") && !JSON.generate(reply).include?("http"),
            "the reply does not echo metrics or source URLs")
 
     command = JSON.parse(File.read(commands(record).fetch(0)))
     assert(command["type"] == "model_evidence" && command.dig("source", "command") == "model-evidence" &&
-           command["entries"] == [{ "provider" => "opencode-go", "model" => "deepseek-v4.8", "reasoning" => "default", "status" => "evidence" }] &&
+           command["entries"] == [{ "provider" => "opencode-go", "model" => "deepseek-v4.8", "reasoning" => "default",
+                                    "billing_route" => "unknown", "status" => "evidence" }] &&
            !command.key?("text") && !command.key?("metrics"),
-           "the dedicated command carries identity and status, not the submitted body")
+           "the dedicated command carries the typed identity and status, not the submitted body")
     stored = JSON.parse(File.read(File.join(@temp, "orbit", "model-evidence-v1.json")))
     assert(stored.fetch("entries").length == 1 && stored.dig("entries", 0, "metrics", "output_tokens_per_second", "value") == 120.5,
            "the validated entry is cached for the runtime to re-read")
@@ -598,8 +556,8 @@ module CliTest
     reply = JSON.parse(cli("check", record.path))
     assert(reply["status"] == "queued" && reply["task_directory"] == record.path && !reply["command_id"].to_s.empty?,
            "check still queues")
-    assert(reply["next_action"] == "若无用户已明确要求且不依赖检查结果的后续状态变更，结束当前轮次并等待 Orbit 通知；不要仅为等待检查结论而 sleep、poll 或 status",
-           "check tells the caller to end the turn instead of polling")
+    assert(reply["next_action"] == "排队后结束当前轮次，等待检查者的 finalization_notice 或纠正；在收到之前不要把交付当作完成，也不要主动 stop（用户明确中断除外）。不要仅为等待检查结论而 sleep、poll 或 status",
+           "check tells the caller to end the turn and wait for the checker instead of stopping or polling")
     command = JSON.parse(File.read(commands(record).fetch(0)))
     assert(command["type"] == "check", "the queued command remains check")
     File.unlink(commands(record).fetch(0))
@@ -640,10 +598,10 @@ module CliTest
        status_usage_is_unknown_when_any_component_is_missing
        stale_result_and_user_action failed_stop_confirmation_is_reported doctor_without_connection_or_dependencies
        doctor_reads_existing_native_connection
-       stop_retries_when_recorded_runtime_is_gone codex_launch_approval_targets_the_registered_tool
-       codex_launch_builds_one_permission_policy codex_launch_rejects_profiles
-       doctor_reports_member_allowlist_and_gaps
-       delegate_checks_allowlist_before_queueing rebind_workspace_queues_and_legacy_status_reads_project_root
+       stop_retries_when_recorded_runtime_is_gone
+       stop_retries_when_runtime_exited_without_terminal_status
+       doctor_states_single_host_entry_and_omp_checker
+       rebind_workspace_queues_and_legacy_status_reads_project_root
        model_evidence_caches_object_and_queues_dedicated_command
        model_evidence_accepts_array_and_rejects_invalid_or_terminal
        status_separates_delegatable_score_from_final_decision

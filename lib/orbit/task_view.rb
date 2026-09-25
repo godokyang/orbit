@@ -86,12 +86,15 @@ module Orbit
     end
 
     # A starting/running record whose recorded runtime process is gone cannot
-    # consume queued commands; stop treats it like an exited runtime.
+    # consume queued commands; stop treats it like an exited runtime. An
+    # abnormal exit records finished_at and removes runtime_pid, so a recorded
+    # finish without a pid is also an exited runtime; without a recorded finish
+    # a missing pid may only mean the runtime is still starting.
     def runtime_abandoned?(state)
       return false unless %w[starting running].include?(state["status"])
 
       pid = state["runtime_pid"]
-      return false unless pid.is_a?(Integer) && pid.positive?
+      return !state["finished_at"].to_s.empty? unless pid.is_a?(Integer) && pid.positive?
 
       Process.kill(0, pid)
       false
@@ -141,6 +144,15 @@ module Orbit
         "unrequested" => "证据已缓存，但本任务没有待处理的证据请求"
       }[jev && jev["evidence_status"]]
       text += "；#{evidence}" if evidence
+      # Only the typed mismatch status surfaces its bounded correction note;
+      # other evidence statuses keep their generic label.
+      if jev.is_a?(Hash) && jev["evidence_status"] == "mismatch"
+        note = jev["evidence_note"].to_s.strip
+        unless note.empty?
+          note = "#{note[0, 200]}…[truncated]" if note.length > 200
+          text += "；#{note}"
+        end
+      end
       candidate = stage_one_candidate(jev)
       text += "；#{candidate}" if candidate
       outcome = delegation_outcome(state)

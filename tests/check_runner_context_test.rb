@@ -21,7 +21,7 @@ module CheckRunnerContextTest
   end
 
   def runner
-    @runner ||= Orbit::CheckRunner.new(model: "test-model", executable: "codex")
+    @runner ||= Orbit::CheckRunner.new(model: "test-model", executable: "stub-checker")
   end
 
   def compress(context)
@@ -66,7 +66,7 @@ module CheckRunnerContextTest
         "findings" => [{ "id" => "f-1", "requirement" => "ship a", "evidence" => "missing b", "action" => "add b" }]
       },
       "execution_members" => [{
-        "kind" => "codex", "adapter" => "codex_host", "thread_id" => "m-1", "model" => "gpt",
+        "kind" => "omp", "adapter" => "same_host", "thread_id" => "m-1", "model" => "gpt",
         "status" => "completed", "result" => [{ "kind" => "agent_message", "text" => "member done" }],
         "stop_confirmation" => { "confirmed" => true, "detail" => "y" * 300 },
         "socket" => "/tmp/member.sock"
@@ -161,7 +161,7 @@ module CheckRunnerContextTest
     end
     original = long_text("member-20", 2_500)
     context["execution_members"] = [{
-      "kind" => "codex", "adapter" => "codex_host", "host" => "codex", "thread_id" => "m-1", "model" => "gpt",
+      "kind" => "omp", "adapter" => "same_host", "host" => "omp", "thread_id" => "m-1", "model" => "gpt",
       "status" => "completed", "socket" => "/tmp/member.sock",
       "stop_confirmation" => { "confirmed" => true, "detail" => "y" * 200 },
       "result" => (1..19).map { |i| { "kind" => "command", "aggregated_output" => "run #{i}" } } +
@@ -174,7 +174,7 @@ module CheckRunnerContextTest
     check(record["decisions"].map { |decision| decision["check"] } == [8, 9, 10],
           "decisions keep the bounded newest tail")
     member = record.dig("execution_members", 0)
-    check(member["kind"] == "codex" && member["thread_id"] == "m-1" && member["status"] == "completed",
+    check(member["kind"] == "omp" && member["thread_id"] == "m-1" && member["status"] == "completed",
           "member identity and status are kept")
     check(member["stop_confirmed"] == true, "the member stop result is summarized")
     check(!member.key?("socket") && !member.key?("stop_confirmation"), "non-essential member fields are dropped")
@@ -265,7 +265,7 @@ module CheckRunnerContextTest
       end
     }
     context["execution_members"] = (1..30).map do |i|
-      { "kind" => "codex", "thread_id" => "m-#{i}", "status" => "completed",
+      { "kind" => "omp", "thread_id" => "m-#{i}", "status" => "completed",
         "result" => (1..15).map { |j| { "kind" => "command", "aggregated_output" => long_text("member-#{i}-#{j}", 2_000) } } }
     end
     context["decisions"] = (1..20).map do |i|
@@ -332,6 +332,19 @@ module CheckRunnerContextTest
     check(prompt.include?("Reuse the existing finding id"), "the reviewer prompt requires reusing the finding id")
     check(prompt.include?("do not re-raise a point"), "the reviewer prompt forbids re-raising settled points")
     check(prompt.include?("new evidence"), "the reviewer prompt requires new evidence for a settled point")
+
+    process_prompt = runner.send(
+      :build_prompt, snapshot: "/unused", inputs: { "instruction" => "do it" },
+      context: base_context.merge(
+        "model_evidence_request" => { "identities" => { "root" => { "provider" => "kimi-code" } },
+                                      "needed" => %w[speed], "at" => "2026-09-24T19:23:15Z", "resolved" => nil }
+      ),
+      role: "process_reviewer"
+    )
+    check(process_prompt.include?("pending model_evidence_request") &&
+          process_prompt.include?("authorized workflow") &&
+          process_prompt.include?("\"model_evidence_request\""),
+          "process review treats a pending evidence request as authorized and receives it bounded")
 
     context = base_context
     clue_evidence = "unique-clue-evidence-marker"

@@ -11,11 +11,14 @@ holdReleaseLease();
 const cli = fileURLToPath(new URL('../scripts/orbit', import.meta.url));
 const terminal = new Set(['complete', 'paused', 'needs_user', 'failed', 'stop_unconfirmed']);
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
-const guidance = 'Continue the authorized implementation. When your work is ready, report results and END YOUR TURN. Do not sleep or poll waiting for Orbit complete: the independent checker needs your turn to finish and will wake this same session if corrections are needed. Member results also return automatically.';
+const guidance = 'Continue the authorized implementation; do simple local edits yourself. When your work is ready, report results and END YOUR TURN — do not sleep or poll waiting for Orbit complete: the independent checker needs your turn to finish and will wake this same session if corrections are needed. If you requested a final check, end the turn and wait for the finalization_notice or corrections; do not stop the task just to deliver, unless the user explicitly asked to interrupt. Member results also return automatically. Later status/check/amend/dispute/stop calls must pass task: the task_directory returned by start; never write .orbit/inbox manually.';
 
 async function run(args, cwd, input = '') {
   return new Promise((resolve, reject) => {
-    const child = spawn('ruby', ['--disable-gems', cli, ...args], { cwd, stdio: ['pipe', 'pipe', 'pipe'] });
+    // The installer pins the verified Ruby in ORBIT_RUBY; fall back to PATH
+    // only for repository development runs.
+    const ruby = process.env.ORBIT_RUBY || 'ruby';
+    const child = spawn(ruby, ['--disable-gems', cli, ...args], { cwd, stdio: ['pipe', 'pipe', 'pipe'] });
     let out = '', err = '';
     child.stdout.on('data', chunk => { out += chunk; });
     child.stderr.on('data', chunk => { err += chunk; });
@@ -29,12 +32,12 @@ async function run(args, cwd, input = '') {
   });
 }
 
-export const toolDescription = 'For authorized implementation that needs execution members, start Orbit BEFORE delegating, even for small changes. Also use for multi-step fixes/refactoring needing independent checks. Read the Orbit skill. context identifies this exact session; start preserves original user input and named basis. Continue working; member results and corrections return automatically. When ready, report results and end your turn; do not poll waiting for complete. Do not start for discussion or simple local edits. Root is never replaced.';
+export const toolDescription = 'Start Orbit only for work that benefits from independent checks: multi-step changes, real parallel work surfaces, or fixes needing objective review. Simple single-file or local edits: just do them yourself, without dispatching members. If the user explicitly asks to use Orbit, still start Orbit for those small tasks — but do the work yourself and let the checker verify; no members. context identifies this exact session; start preserves original user input and named basis and returns a task_directory. Keep that task_directory: for status/check/amend/dispute/stop pass it back as task: <task_directory returned by start> to this Orbit tool — never write .orbit/inbox manually. Root dispatches members only through the native task tool (one level) when there is a genuine independent work surface — Root decides; JEV only advises, never blocks. Continue working; member results and corrections return automatically. When your work is ready, report results and end your turn; if you requested a final check, end the turn and wait for the Orbit finalization_notice or corrections — do not stop the task just to deliver, do not poll. For a normal delivery after that notice, call stop and finish the turn normally: Orbit queues the stop and completes it after your turn, so the final summary is fully delivered; the user explicitly asking to interrupt stops immediately. Do not start for discussion. Root is never replaced.';
 export const toolArgs = z => ({
-        action: z.enum(['context', 'start', 'status', 'check', 'amend', 'dispute', 'stop', 'delegate']),
-        task: z.string().optional(), basis: z.array(z.string()).optional(), message_id: z.string().optional(),
-        review_model: z.string().optional(), model: z.string().optional(), member: z.string().optional(),
-        kind: z.enum(['native', 'codex']).optional(),
+        action: z.enum(['context', 'start', 'status', 'check', 'amend', 'dispute', 'stop']),
+        task: z.string().optional().describe('Required for status/check/amend/dispute/stop: the exact task_directory string returned by action=start. Never write .orbit/inbox manually.'),
+        basis: z.array(z.string()).optional(), message_id: z.string().optional(),
+        review_model: z.string().optional(),
         text: z.string().optional(), check_in: z.number().int().positive().optional()
       });
 
@@ -98,16 +101,14 @@ export function createOrbitHost({ provider, project, dispatch, bind, reset }) {
           tasks.set(id, result);
           return JSON.stringify(result);
         }
-        if (!a.task) throw new Error('Use task_directory returned by start');
+        if (!a.task) throw new Error('This action needs the task: pass task: <task_directory returned by start> to the orbit tool (status/check/amend/dispute/stop all take it). Do NOT write .orbit/inbox manually.');
         await ownedTask(a.task, id);
         const args = [a.action, a.task];
         if (['status', 'stop'].includes(a.action)) args.push('--json');
-        if (['amend', 'delegate'].includes(a.action)) {
-          if (!a.text?.trim()) throw new Error('Provide the original amendment or delegated scope');
+        if (a.action === 'stop') args.push('--complete'); // Root-tool stop is a deliberate completion hand-off
+        if (a.action === 'amend') {
+          if (!a.text?.trim()) throw new Error('Provide the original amendment');
           args.push('--file', '-');
-          if (a.action === 'delegate' && a.kind) args.push('--kind', a.kind);
-          if (a.action === 'delegate' && a.model) args.push('--model', a.model);
-          if (a.action === 'delegate' && a.member) args.push('--member', a.member);
         } else if (a.text) args.push('--reason', a.text);
         const result = await run(args, project, a.text);
         if (a.action === 'status' && !terminal.has(result.status)) result.next_action = guidance;

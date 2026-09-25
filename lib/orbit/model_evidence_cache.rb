@@ -55,9 +55,21 @@ module Orbit
     CLOCK_SKEW_SECONDS = 300
     DEFAULT_REASONING = "default"
 
-    EVIDENCE_KEYS = %w[provider model reasoning status retrieved_at valid_until sources metrics].freeze
-    UNAVAILABLE_KEYS = %w[provider model reasoning status retrieved_at valid_until sources reason].freeze
+    EVIDENCE_KEYS = %w[provider model reasoning billing_route status retrieved_at valid_until sources metrics].freeze
+    UNAVAILABLE_KEYS = %w[provider model reasoning billing_route status retrieved_at valid_until sources reason].freeze
     METRIC_KEYS = %w[value unit basis].freeze
+
+    # Typed billing route identity; the runtime additionally compares this
+    # with the route derived from the resolved OMP model endpoint.
+    BILLING_ROUTES = %w[direct_api subscription_quota unknown].freeze
+    DEFAULT_BILLING_ROUTE = "unknown"
+
+    # Route-specific fact namespaces for the cost gate. A verified direct_api
+    # route is evidenced by numeric `cost.*` price facts; a verified
+    # subscription_quota route is evidenced by numeric `quota.*` plan/quota
+    # band facts. The two never substitute for each other, and other routes
+    # (unknown, custom) have no namespace and stay fail-closed.
+    ROUTE_METRIC_PREFIXES = { "direct_api" => "cost.", "subscription_quota" => "quota." }.freeze
 
     MAX_PROVIDER_LENGTH = 64
     MAX_MODEL_LENGTH = 200
@@ -100,6 +112,50 @@ module Orbit
       model.to_s.match?(FLOATING_ALIAS_PATTERN) ? FLOATING_ALIAS_TTL_SECONDS : VERSION_TTL_SECONDS
     end
 
+    # Metrics under this namespace assert how the submitter compares with
+    # another identity. The cache stores per-model measurements only:
+    # comparison claims depend on both identities and go stale when either one
+    # changes, so they are rejected at submission.
+    RESERVED_METRIC_NAMESPACE = "comparison"
+
+    def self.comparison_metric?(name)
+      name.to_s.split(".", 2).first.to_s.downcase == RESERVED_METRIC_NAMESPACE
+    end
+
+    # The only routes that authorize the cost gate. A route is a typed
+    # identity field, not a submitter metric: the runtime derives the candidate
+    # route from the resolved OMP model endpoint (host plus path prefix, plus
+    # transport) and requires the stored entry to carry the same route, so a
+    # self-claimed label alone never suffices and an older route-less entry can
+    # never become cost proof.
+    def self.billing_route(value)
+      text = value.to_s.strip
+      text = DEFAULT_BILLING_ROUTE if text.empty?
+      unless BILLING_ROUTES.include?(text)
+        raise ValidationError, "billing_route must be one of #{BILLING_ROUTES.join(', ')}"
+      end
+
+      text
+    end
+
+    # Namespace of the numeric fact that can authorize a cost judgment for the
+    # given typed route, or nil when the route has no verified namespace.
+    def self.route_metric_prefix(route)
+      ROUTE_METRIC_PREFIXES[route.to_s]
+    end
+
+    # True when the entry carries at least one numeric fact under the given
+    # namespace. Shape-only check: values, units and basis remain
+    # submitter-provided and are never semantically verified.
+    def self.numeric_metric?(entry, prefix)
+      return false unless entry.is_a?(Hash) && prefix.is_a?(String)
+
+      metrics = entry["metrics"]
+      metrics.is_a?(Hash) && metrics.any? do |name, metric|
+        name.to_s.start_with?(prefix) && metric.is_a?(Hash) && metric["value"].is_a?(Numeric)
+      end
+    end
+
     attr_reader :path
 
     def initialize(path: nil, clock: nil, env: ENV, home: nil)
@@ -109,20 +165,27 @@ module Orbit
     end
 
     # Normalized identity used as the cache key. An omitted reasoning effort
-    # means the provider default.
-    def identity(provider:, model:, reasoning: nil)
+    # means the provider default; an omitted or empty billing_route is the
+    # typed `unknown` value (legacy route-less entries read back as unknown).
+    def identity(provider:, model:, reasoning: nil, billing_route: nil)
       {
         "provider" => identifier(provider, "provider", MAX_PROVIDER_LENGTH),
         "model" => identifier(model, "model", MAX_MODEL_LENGTH),
-        "reasoning" => reasoning_effort(reasoning)
+        "reasoning" => reasoning_effort(reasoning),
+        "billing_route" => self.class.billing_route(billing_route)
       }
     end
 
     # Returns the stored entry while it is inside its validity window, even
     # when it records `unavailable` (the caller must not re-request those).
     # Missing, expired or malformed entries return nil.
-    def lookup(provider:, model:, reasoning: nil)
-      wanted = identity(provider: provider, model: model, reasoning: reasoning)
+    #
+    # Route-sensitive and strict: an omitted billing_route means the typed
+    # `unknown` identity (legacy route-less entries are compatible as
+    # unknown). It never wildcard-matches a direct_api entry, and callers that
+    # need a route-specific fact (the cost gate) pass that route explicitly.
+    def lookup(provider:, model:, reasoning: nil, billing_route: nil)
+      wanted = identity(provider: provider, model: model, reasoning: reasoning, billing_route: billing_route)
       entry = stored_entries.find { |candidate| stored_identity(candidate) == wanted }
       return nil unless entry
 
@@ -188,7 +251,8 @@ module Orbit
       unknown = entry.keys - (status == STATUS_EVIDENCE ? EVIDENCE_KEYS : UNAVAILABLE_KEYS)
       raise ValidationError, "unsupported model evidence fields: #{unknown.sort.join(', ')}" unless unknown.empty?
 
-      normalized = identity(provider: entry["provider"], model: entry["model"], reasoning: entry["reasoning"])
+      normalized = identity(provider: entry["provider"], model: entry["model"], reasoning: entry["reasoning"],
+                            billing_route: entry["billing_route"])
       retrieved_at = parse_time(entry["retrieved_at"])
       raise ValidationError, "retrieved_at must be an ISO-8601 timestamp with a zone" if retrieved_at.nil?
 
@@ -264,6 +328,11 @@ module Orbit
         unless key.length.between?(1, MAX_METRIC_NAME_LENGTH) && key.match?(METRIC_NAME_PATTERN)
           raise ValidationError, "metric names must be short identifiers: #{name.inspect}"
         end
+        if self.class.comparison_metric?(key)
+          raise ValidationError,
+                "metric #{key.inspect} is a cross-identity comparison; submit per-model measurements only " \
+                "(use status \"unavailable\" when a fact cannot be verified)"
+        end
 
         [key, normalize_metric(key, raw)]
       end
@@ -322,13 +391,14 @@ module Orbit
     def stored_identity(entry)
       return nil unless entry.is_a?(Hash) && STATUSES.include?(entry["status"])
 
-      identity(provider: entry["provider"], model: entry["model"], reasoning: entry["reasoning"])
+      identity(provider: entry["provider"], model: entry["model"], reasoning: entry["reasoning"],
+               billing_route: entry["billing_route"])
     rescue ValidationError
       nil
     end
 
     def entry_identity(entry)
-      entry.slice("provider", "model", "reasoning")
+      stored_identity(entry) || entry.slice("provider", "model", "reasoning", "billing_route")
     end
 
     def dedupe_by_identity(entries)

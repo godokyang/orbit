@@ -1,35 +1,35 @@
 # Orbit 任务运行合同
 
-状态：ADR-007 对应的现行运行合同。Codex、OpenCode 与 OMP 正式路径已验收，实际范围分别记录于 docs/reference/。只有经过实际接入验证的通道才能标记为受控；现有嵌入式会话不自动热接入。
+状态：现行运行合同（OMP 单宿主版，ADR-008）。Root 宿主为原版 OMP + Orbit 扩展的 `orbit omp` 显式入口；Root 通过 OMP 原生 `task/hub` 组建一层执行团队。已验收的历史路径（Codex、OpenCode、OMP 旧 SDK 成员）证据保留在 `docs/reference/`，不再是当前入口；目标路径的端到端真实验收（M4）已通过，冻结 #1–#9 全部闭合（#5 经用户批准的组合证据：纠偏收敛与过期拦截有真实任务证据，`finding_repeat_ignored` 未真实触发、仅确定性回归覆盖；#6 矛盾夹具的裁定内容不计），证据矩阵与保留边界见 `docs/reference/omp-native-m4-acceptance-20260924.md`。
 
 ## 角色与主动调用
 
-主执行 Agent（Root）是当前接受用户指令、负责整项交付的 Coding Agent，通常就是调用 Orbit 的会话。它负责实现和必要分工；Orbit 程序负责观察和控制，独立检查者负责检查实际产物，裁定者按需处理真实争议。新项目无需预设团队、额外角色或 Orbit 需求表。
+主执行 Agent（Root）是当前接受用户指令、负责整项交付的 OMP 会话，经 `orbit omp` 启动并加载 Orbit 扩展。它负责实现和必要分工；Orbit 程序负责观察和控制，独立检查者负责检查实际产物，裁定者按需处理真实争议。新项目无需预设团队、额外角色或 Orbit 需求表。
 
-用户已经授权执行、独立检查对任务有实际收益且已有接入能力时，Agent 可通过 skill 主动启动，无需用户点名 Orbit。讨论和只读问答不启动，简单局部修改通常直接完成；同一任务不重复启动。接入失败必须如实说明，不能用另建 Root 或仅排队消息假装原会话已受控。用户明确要求必须受控执行时，缺少接入能力不能按普通执行绕过。
+用户已经授权执行、独立检查对任务有实际收益且已接入时，Agent 通过宿主提供的 Orbit 工具主动启动任务；讨论和只读问答不启动，简单局部修改通常直接完成；同一任务不重复启动。接入失败必须如实说明，不能用另建 Root 或仅排队消息假装原会话已受控。用户明确要求必须受控执行时，缺少接入能力不能按普通执行绕过。
 
-Root 可用当前宿主提供且已授权的协作工具，按需复用或创建执行 Agent；Orbit 不额外授予权限，不绕过宿主和目标项目规则。Root 负责派发时传递有效要求与规则、协调资源、核验集成与成员收尾。成员不自行扩大范围或再派发，除非该职责已明确授予且宿主允许。检查者和裁定者不创建执行团队。
+Root 使用 OMP 原生 `task` 派发本任务拥有的执行成员，成员经原生 `hub` 通信、等待、唤醒与回报。团队保持一层：扩展在派发的 `tool_call` 门校验调用者必须是本会话已验证的主代理，成员会话的 `task` 调用被阻断，成员也不能以 Root 身份绑定或使用 Orbit（按 OMP 注册表的主代理身份校验）。Orbit 不额外授予权限，不绕过 OMP 和目标项目规则；成员沿用 Root 的原生权限与工具集。Root 负责派发时传递有效要求与规则、核验集成与成员收尾。
 
-Root 明确派发后，当前已接入路径通过 Root 所在宿主的原生接口（Codex、OpenCode 或 OMP）创建本任务拥有的执行成员；先持久记录成员 ID，再启动模型工作。程序附带原始要求和有效修改，向活动成员同步新要求，回收结果到同一 Root，由 Root 核验集成。成员使用已授权模型。Codex 执行成员默认以 `approvalPolicy: never`、`danger-full-access` 启动且不加载 Orbit MCP，避免执行中反复审批；OpenCode 成员沿用 Root 的原生权限与供应商、模型、variant（用户已确认其默认权限满足日常编码，Orbit 不修改该权限接线）；OMP 成员沿用 Root 的原生权限与工具集；成员禁止原生再次派发和调用 Orbit。用户显式传入更严格的权限配置优先；Orbit 不修改全局配置，也不扩大检查者与裁定者的只读权限。检查者与裁定者当前仍使用 Codex，不把执行宿主模型名当作 Codex 模型名。完成需要成员结束并确认后台命令收尾。通过其他工具创建的外部成员没有自动登记入口，不能宣称受到统一停止控制；Herdr／tmux 不是运行前提。
+## 成员登记（先登记、再模型工作，失败关闭）
 
-执行成员的允许名单由 `~/.config/orbit/members.json` 的 `allowed_kinds` 管理：文件不存在时使用默认 `codex、omp、opencode、kimi、cursor-agent、grok`；存在时完整采用文件内容，空数组禁止创建新成员。`native` 在派发时解析为 Root 的实际 kind 后再检查。名单只表达授权，不代表安装、登录或原生控制能力；允许但尚无受控适配器的 kind 不可调用并说明缺口。派发前先完成名单与适配器检查，失败给出具体原因，且不创建宿主或成员。名单变化不影响已登记成员的停止、结果回收与既有任务。
+每个原生执行成员的真实身份在其首个模型工作前持久登记，不满足则不发生模型工作：
 
-Root 在用户已允许的范围内可显式选择 `kind: codex`：程序为该任务启动并持有独立的 Codex 原生 app-server，先持久记录可重连的短控制 socket、宿主 PID／进程组和成员 thread ID，再 `turn/start`。成员在当前 `artifact_root` 创建，模型取自 Codex 自身配置或显式授权，不沿用 OpenCode 的 provider／model 字符串；沿用 `approvalPolicy: never` 与默认 full access 沙箱且不加载 Orbit MCP。结果从成员原生会话读取，经 Root 所在宿主的现有通道回传。停止确认覆盖成员当前 turn、宿主跟踪的后台终端和成员 app-server 进程组退出；socket 消失本身不证明成员已停止，记录中宿主进程组已不存在才是退出证据。成员宿主由任务运行进程持有并随确认停止关闭；运行进程异常退出后，显式 `stop` 重试从任务记录重连、停止并核对，证据不足保持 `stop_unconfirmed`。成员会话按原生记录保留，不要求终态后成员仍在线。Herdr／tmux 不承担成员投递、结果或停止控制，最多用于展示。
-
-已确认的跨宿主接入边界：成员 kind 必须由 Root 在用户授权范围内明确选择；安装、登录或 Herdr 列表不产生授权。Orbit 为跨宿主成员持有原生控制宿主，先记录 kind、成员身份、可重连的控制地址及宿主进程归属，再启动成员执行；目标模型和权限按成员宿主核对，不沿用 Root 宿主的模型标识。结果经原生会话读取后投递回原 Root。中断或终态收尾先确认成员当前执行与宿主管理的后台工作退出，再关闭成员宿主并核对其退出；会话历史和上下文保留。运行进程意外退出后，显式停止可以利用登记地址重连收尾；证据不足保持 `stop_unconfirmed`。目前已验收的范围仅是 OpenCode Root → Codex 成员，证据见[跨宿主成员验收](../docs/reference/cross-host-member-acceptance-20260918.md)。
+- Root 的 `task` 派发在扩展的 `tool_call` 门被拦截，每个 spawn 项被赋予请求名 `orbit-<uuid>`；派发未绑定已开始的 Orbit 任务、调用者不是已验证主代理、或注册门不可用时，派发被阻断。
+- OMP 的 AgentRegistry `registered` 事件在 `createAgentSession` 内同步发出，早于成员的首次 provider 请求。扩展在该窗口内同步调用登记入口（`scripts/orbit-register-member`），由 TaskRecord 以临时文件 + fsync + rename + **目录 fsync** 写入任务目录的 `members.json`（任务内权威成员清单）。写入成功才放行；写入失败、成员清单损坏、或实际注册 ID 与请求名漂移（分配器返回加后缀的重复 ID）时，扩展将注册表状态翻转为 `aborted`（终态）使会话创建失败，并在 `members.json` 记录 `refused`（含原因与 `abort_confirmed`）。阻断以 `setStatus` 返回真且读回 `aborted` 为证；无法确认阻断时不记录为干净拒绝。
+- 登记记录包含实际 `thread_id`、请求名、状态、实际模型（可得时）、工具调用 ID 与时间。TaskRuntime 的正常 tick 与异常退出后的显式 `stop` 重试都重读 `members.json` 重新发现全部实际成员 ID；不依赖插件内存或事件流。
 
 ## 输入与独立性
 
-- 一个任务对应一个授权项目根、一个产物工作区、已有主执行会话和一个 Orbit 进程。运行独立于任何外部业务流程，输入只需当前项目、原始执行要求及明确指定的依据。
+- 一个任务对应一个授权项目根、一个产物工作区、一个已接入的 Root 会话和一个 Orbit 运行进程。输入只需当前项目、原始执行要求及明确指定的依据。
 - 输入是用户原始执行指令及明确指定的依据文件。Agent 发起时从所绑定会话的指定用户消息读取原文；用户直接发起时可明确提供文本。不将 Root 摘要标记为用户原文。
 - 后续明确修改追加保存，检查使用最新有效输入。程序记录来源和版本；不要求模型手写摘要哈希、receipt 或 evidence 链。
 - 依据文件的内容保存在任务目录；项目内规则包含于实际产物快照。外部引用只读取明确给出的文件，不递归读取用户目录。
 
 ### 工作区绑定
 
-新任务同时保存 `project_root` 与 `workspace`。`project_root` 是授权、任务记录和 Root 会话所属目录。`workspace.artifact_root` 是产物目录，默认与 `project_root` 相同，并记录真实路径、Git common dir、worktree、HEAD 和绑定时间。固定快照、指纹、Jev 变更摘要，以及新执行成员的工作目录，都使用 `artifact_root`。检查者与裁定者仍只读该快照，不获得执行成员的权限。
+新任务同时保存 `project_root` 与 `workspace`。`project_root` 是授权、任务记录和 Root 会话所属目录。`workspace.artifact_root` 是产物目录，默认与 `project_root` 相同，并记录真实路径、Git common dir、worktree、HEAD 和绑定时间。固定快照、指纹、Jev 变更摘要以及新执行成员的工作目录都使用 `artifact_root`。检查者与裁定者仍只读该快照，不获得执行成员的权限。
 
-产物目录只在创建时的默认绑定，或显式 `rebind-workspace` 时改变。该命令接受同一真实路径，或同一 Git 仓库（相同 common dir）中的另一个 worktree；非 Git 的不同路径拒绝。CLI 与 Codex MCP 的 `rebind_workspace` 都只把该命令写入队列。任务进程记录来源、原因和 history，并按新的产物目录继续观察。终止任务拒绝。`amend` 与 `dispute` 只追加检查输入或争议理由。
+产物目录只在创建时的默认绑定，或显式 `rebind-workspace` 时改变。该命令接受同一真实路径，或同一 Git 仓库（相同 common dir）中的另一个 worktree；非 Git 的不同路径拒绝。CLI 与原生工具只把该命令写入队列。任务进程记录来源、原因和 history，并按新的产物目录继续观察。终止任务拒绝。`amend` 与 `dispute` 只追加检查输入或争议理由。
 
 在途检查记下当时的 `artifact_root`。完成时若与当前产物目录不同，即使内容摘要相同，也记为 `workspace` 过期。因工作区过期的 finding 不迁入待核对线索；程序为新的产物目录安排一次检查。其他原因的过期不因此立即重查。`status` 显示产物目录、绑定时间和最近一次重新绑定。没有 `workspace` 的旧记录，`status` 与 `stop` 把产物目录读作 `project_root`，并且不回写记录。程序不自动检测「声明的产物位置与绑定冲突」，也不因此暂停完整检查。
 
@@ -43,27 +43,39 @@ Root 在用户已允许的范围内可显式选择 `kind: codex`：程序为该�
 
 ### 可选 Jev 调度
 
-Jev 只从启动 Coding Agent 时的 `TYPESAFE_API_KEY` 环境变量读取 key，对新 Orbit 任务全局启用；`orbit jev setup` 可一次性输入 key，写入当前用户的 TypeSafe 环境文件并配置 zsh／bash 启动文件，使新终端自动提供该环境变量。key 不写入 Orbit 配置或任务记录；已有环境变量优先。当前终端和已运行任务不会被子命令改动。`orbit codex` 配置 Orbit MCP 时，仅在启动环境已有该变量时把名称写入 `env_vars`；值由 app-server 在拉起 MCP 时从启动环境解析。MCP 配置、命令行和诊断输出只出现变量名。启动环境没有该变量时，配置省略 `env_vars`。每个 Orbit 任务可以把有界的原始要求、指定依据摘录、有效修改、近期宿主观察和产物差异摘要交给 Jev。项目可以单独关闭该外发。Jev 返回“可能卡住”“可能偏题”“当前产物值得完整检查”以及“当前是否可能有适合独立分工的子任务”的概率；程序依据概率和当前任务状态安排独立检查者或提示 Root，不将概率当作问题证据、完成结论或停止授权。指定依据超出预算时明确标注截断与省略；有效修改超出预算时保留最新部分并明确标注被省略的范围，不把缺少的依据或更早修改当作需求不存在的证据。
+Jev 只从启动 Coding Agent 时的 `TYPESAFE_API_KEY` 环境变量读取 key，对新 Orbit 任务全局启用；`orbit jev setup` 可一次性输入 key，写入当前用户的 TypeSafe 环境文件并配置 zsh／bash 启动文件，使新终端自动提供该环境变量。key 不写入 Orbit 配置或任务记录；已有环境变量优先。当前终端和已运行任务不会被子命令改动。每个 Orbit 任务可以把有界的原始要求、指定依据摘录、有效修改、近期宿主观察和产物差异摘要交给 Jev。项目可以单独关闭该外发。Jev 返回"可能卡住""可能偏题""当前产物值得完整检查"以及"当前是否可能有适合独立分工的子任务"的概率；程序依据概率和当前任务状态安排独立检查者或提示 Root，不将概率当作问题证据、完成结论或停止授权。指定依据超出预算时明确标注截断与省略；有效修改超出预算时保留最新部分并明确标注被省略的范围，不把缺少的依据或更早修改当作需求不存在的证据。
 
-分工提示分两段，且只提示、不自动 `delegate`。第一阶段 `delegatable` 不低于 0.60，且存在名单允许并实际可调用的成员时，程序按宿主返回的 provider／model 查询模型证据缓存；宿主没有暴露的 reasoning 记为 `unknown`，不从名字猜测，也不为探测而启动跨宿主成员。缓存缺失或过期时，每个观察签名只向 Root 请求一次证据，口径为 speed、quality、cost、local_samples。Root 用 `model-evidence` 提交事实，该命令不是 `amend`。有效证据才进入第二阶段。`member_fit` 不低于 0.55 且 `parallel_gain` 不低于 0.50 时，才向 Root 发送建议；Root 必须显式 `delegate`。第二阶段按观察签名持久化 `decision=recommended|declined|unavailable`，但只有当前签名的 `delegation_hint` 成功持久化后才是 Root 可执行的 Orbit 建议；第一阶段高分和单独的 `decision=recommended` 都不能冒充已送达提示。显式委派记录 `basis=orbit_hint|root_without_hint`，并保存在成员记录中；旧签名、已跟随提示、declined 或 unavailable 后的手动委派均为 `root_without_hint`，仍然允许。身份未知、证据不可用或分数不足时不发最终提示，手动 `delegate` 仍然允许。同一观察签名至多提示一次；输入、产物或成员候选实质变化才形成新签名。已有成员处于 `starting` 或 `working` 时，不再运行新的自动委派二阶段判断或发送第二条提示；这不禁止 Root 手动派发。第二阶段高分评估若在提示投递前崩溃，新 runtime 会从持久 assessment 恢复并只投递一次 hint。没有 pending request 的 model_evidence 仍进入可复用缓存，但任务记 `evidence_status=unrequested` 与 `model_evidence_ignored`，不声称已消费。提示在状态新鲜度复核后发送，同次判断触发的检查优先。Jev 不派发、不选择 kind、不替代检查者。
+分工提示分两段，且只提示、不自动派发。第一阶段 `delegatable` 不低于 0.60 时，程序按 OMP 会话返回的 provider／model 查询模型证据缓存；原生 task 候选身份来自 `@task` 的解析结果（provider/id，不含 thinking 后缀），解析失败不回退为 Root 模型，也不发起证据请求或 hint。宿主没有暴露的 reasoning 记为 `unknown`。缓存缺失或过期时，每个观察签名只向 Root 请求一次证据，口径为 speed、quality、cost、local_samples；Root 用 `model-evidence` 提交事实。有效证据才进入第二阶段；任务记录保存本次实际交给 Jev 的有界摘要和来源，并带上对应观察签名，不复制网页全文或全局缓存。第二阶段询问三个定型问题：`member_fit`（有界交接可达验收线）、`parallel_gain`（计入交接、返工、集成、共享资源争用与验证后是否缩短端到端关键路径；输出速度不等于任务完成速度）、`cost_appropriate`（仅按宿主确认的路由与带来源的提交价格或套餐额度资料判断候选的粗档价格或额度对该有界子任务是否相称，资料只做结构校验、不做语义核实；未知路由或事实视为 unknown，unknown 不是免费，不得抬高该分）。`member_fit` 不低于 0.55、`parallel_gain` 不低于 0.50 且 `cost_appropriate` 不低于 0.50 时才向 Root 发送建议，且必须通过计费路由 fail-closed 门：原生成员路由由 OMP host 从解析出的 `@task` 端点（HTTPS host 与 path 前缀）和传输方式做结构性判定，不按 provider 名称推断（仅接受 HTTPS 端点，http 或自定义 scheme 一律 unknown）；`direct_api` 仅接受宿主解析到已验证的第一方按量端点（当前为 DeepSeek 官方 `https://api.deepseek.com`），`subscription_quota` 仅接受宿主解析到已验证的第一方套餐端点（当前为 zhipu-coding-plan 官方 `https://open.bigmodel.cn` 的 `/api/coding/` 路径与 kimi-code 官方 `https://api.kimi.com` 的 `/coding/` 路径），且两者都要求传输方式不是 `pi-native`。每个被比较候选的证据条目须在缓存有效期窗口内、`billing_route` 以类型化身份（provider/model/reasoning/route）匹配宿主判定的同一路由，并带有该路由对应命名空间的数值型事实（提交时附来源 URL）：`direct_api` 用 `cost.*` 按量价格事实，`subscription_quota` 用 `quota.*` 套餐/额度粗档事实，两者不互换、不折算为等价每 token 价，Orbit 只校验结构与数值形态，不抓取 URL、不做语义核实，freshness 仅指缓存有效期与身份匹配；其它 provider、自定义或未验证端点、unknown、无路由（旧条目）、传输为 `pi-native` 或缺少对应事实一律不自动提示。满足阈值但路由/事实未验证时记 `cost route or required fact is not verified; no automatic delegation hint`。Root 必须显式派发，用户明确授权的原生派发不受此门影响（记录 `basis=root_without_hint`）。基于模型的 cost 门行为（真实证据下的阈值表现）尚未经真实样本验证。第二阶段按观察签名持久化 `decision=recommended|declined|unavailable`，只有当前签名的 `delegation_hint` 成功持久化后才是 Root 可执行的 Orbit 建议。显式派发记录 `basis=orbit_hint|root_without_hint` 并保存在成员记录中。同一观察签名至多提示一次；已有活跃成员时暂停新的自动提示。
 
-明显的卡住／偏题信号，或连续出现的中等信号，可触发针对过程的独立检查；产物就绪信号可触发完整产物检查。过程检查只判断是否有需要 Root 纠正的具体问题，不能完成任务。自动检查按 observation key 去重：相同输入、产物目录、产物摘要、宿主状态、开放 finding 和检查种类已检查或正在检查时，不再自动启动。新 runtime 遇到旧进程遗留的同 key `in_flight`、且本进程没有 owned checker 时，记录 `check_abandoned_recovered` 并以新检查号重试一次，避免去重永久饿死。正常本进程在途检查仍不并发。用户手动请求可以绕过这次去重，但不能与已在进行的检查并发。有效的手动 reviewer 检查若当前无 finding、无待核对线索、成员已结束且 Root 已完成一轮，会针对同一输入与产物版本只发送一次 `finalization_notice`，请 Root 在自身实现与本地验证完成时显式 `stop`；Orbit 不把检查者的 `continue` 自动解释为任务完成，等待期间也不采用检查者给出的短间隔持续复检。用户请求、约定时间和 Root 交付仍触发完整检查。首次产物变化可等待 Jev 判断，但不得越过约定检查时间；Jev 缺失或调用失败时沿用原调度。每秒运行循环不等于每秒请求 Jev，请求只在有新观察或安静一段时间后进行，并合并短时间的重复变化。
+明显的卡住／偏题信号可触发过程检查；产物就绪信号可触发完整产物检查。过程检查只判断是否有需要 Root 纠正的具体问题，不能完成任务。自动检查按 observation key 去重；旧进程遗留的同 key `in_flight` 记 `check_abandoned_recovered` 并以新检查号重试一次。用户手动请求可绕过去重但不能与在途检查并发。有效的手动终检无当前 finding、无待核对线索、成员已结束且 Root 已完成一轮时，按输入与产物版本只发送一次 `finalization_notice`，请 Root 显式 `stop`；Root 未完成一轮时偏好等其 turn 结束再通知，但**按版本绑定的 pending 通知即使 Root 仍在 active/等待，也必须在有界 60 秒内送达**（v7 真实样本观察到 Root 等待期间通知无限期挂起）。送达 pending 通知**不自动完成任务**；Root 的显式 `stop` 仍须等待其 turn 收尾，并在停止时核对当前产物、输入与成员状态。等待期间不采用检查者给出的短间隔持续复检。`check` 的机器响应要求：没有用户预先明确、且不依赖检查结果的后续状态变更时，Root 结束当前 turn 并等待 Orbit 唤醒，不应仅为等待检查结论而 sleep、轮询或查询状态。
 
-交给检查者与裁定者的程序上下文有 64KiB 上限。原文、修改和指定依据不压缩。其余长文本保留有界前缀，并附上原文长度与 sha256；历史列表按限额保留较新的一段，省略范围显式标出。
+交给检查者与裁定者的程序上下文有 64KiB 上限。原文、修改和指定依据不压缩；其余长文本保留有界前缀并附原文长度与 sha256；历史列表按限额保留较新的一段，省略范围显式标出。
+
+## 原生协作观察（hub 与成员状态）
+
+扩展把本任务的原生协作记入进程内、按任务隔离的有界缓冲，供 TaskRuntime 轮询：
+
+- `hub_events` 返回 `{ events, dropped_oldest, next_seq, buffer_cap }`；每条事件带按任务单调无隙的 `seq` 与稳定 `id`，以及 `task_dir` 归属。事件含 hub 调用的真实 wire 内容（op/to/from/replyTo/message，来自 awaited `tool_call` 门）、hub 结果与原生 task 结果交付（含内容，均有界截断）。seq 跳变或 `dropped_oldest` 增长是该任务真实的 observation_gap 信号。
+- 该缓冲不是持久记录：OMP 进程退出即丢失，消费者须及时轮询；跨任务归属由 `task_dir` 保证，无绑定事件不归属任何任务。
+- 按实际成员 ID 可查 `member_state`（registry 状态、实际模型、会话是否存活、registry 生命周期 `acceptedAt/terminalAt`、`async_jobs` 快照）、`member_result`（持久产物路径与有界内容）、`send_member`（向成员投递用户修改，steer；仅任务 starting/running 时允许，失败如实上报）与 `stop_member`。
+- 已确认停止的成员不能再经原生 `hub` 被唤醒；任务非活动状态时对本任务成员的 hub 发送在工具门被拒绝。非 Orbit 成员与其他任务的流量不受影响。
 
 ## 观察与完成
 
 - 观察由程序在约定时间和可识别的执行结果节点触发，不依赖 Root 主动申请。等待只等待事件或时间，不调用模型。
 - 检查读取固定副本，允许 Root 同时工作；必要验证在隔离环境进行。文件内容、文件类型、可执行权限以及符号链接目标参与产物版本识别。
 - 旧版本上的纠正或完成结论应用前必须核对当前产物与输入。发生变化时重新检查相关变化，不能把旧问题直接当成新版本仍存在。
-- 检查完成时记录本次过期由产物、输入、宿主状态、工作区还是争议变化引起，供用户查询和复盘。产物检查判断固定 snapshot：纯 Root turn、只读 `status` 或观察记录变化不产生 `host` stale；workspace、artifact、input 与 dispute 仍按版本判断。过程检查以 Root 行为为检查对象，继续把宿主摘要变化记为 `host` stale。工作区过期的 finding 不迁入待核对线索。其他过期检查中仍可能有待纠正的问题：它不直接用于当前版本，也不静默丢弃，也不因此立即重查；程序记为待核对线索，在 Root 交付、下一次约定检查或用户请求时对新版本重新核对。核对确认仍成立的问题按普通纠正自动送达 Root，不要求 Root 轮询状态。
-- Root 正在执行时，检查者建议的下次观察时间不会让完整检查比约定间隔更频繁，以收敛持续编辑中的重复过期；Root 空闲时仍按检查者建议执行。用户请求、明确修改和 Root 交付触发的检查不受影响。
+- 检查完成时记录本次过期由产物、输入、宿主状态、工作区还是争议变化引起。产物检查判断固定 snapshot：纯 Root turn、只读 `status` 或观察记录变化不产生 `host` stale；workspace、artifact、input 与 dispute 仍按版本判断。过程检查以 Root 行为为检查对象，保留 `host` stale。工作区过期的 finding 不迁入待核对线索。其他过期检查中仍可能有待纠正的问题：记为待核对线索，在 Root 交付、下一次约定检查或用户请求时对新版本重新核对；核对确认仍成立的问题按普通纠正自动送达 Root，不要求 Root 轮询状态。
+- Root 正在执行时，检查者建议的下次观察时间不会让完整检查比约定间隔更频繁；Root 空闲时仍按检查者建议执行。用户请求、明确修改和 Root 交付触发的检查不受影响。
 - 完成必须对应 Root 已结束当前执行、实际交付版本通过独立检查、相关执行资源完成收尾。失败、未知、未检验和未停止分别如实记录。
+- 有效终检（当前版本的 manual reviewer 结论无遗留问题）后，Root 工具显式发起的完成意图（内部 complete 标记）把停止入队：程序等待 Root 当前 turn 正常结束（`completed`，用户最终交付完整送出）后执行实际停止并复核版本，全部合格记 `complete`；同一交付轮次被中断或等待超时，按普通停止记 `paused`／`stop_unconfirmed`，绝不记完成。普通 CLI stop、Esc/内部停止请求、硬截止与崩溃后的停止重试不走完成路径。
 
 ## 停止与资源
 
-- 最小暂停单位是承载相关工作的 Agent 当前执行；保留会话和上下文，确认关联后台动作实际停止。不得把仅发送中断请求或修改本地状态当成停止证据。
-- 同一会话混合多支线时一起暂停；其他独立会话不受影响。Orbit 控制明确绑定的 Root、本任务登记的执行成员（含由任务运行进程持有的跨宿主 Codex 成员 app-server）与自有检查进程。原生界面中断 Root 时，程序负责停止其登记成员；OpenCode／OMP 的中断请求持续有效，不被紧接着开始的活跃轮次掩盖，明确启动新任务时才重置；即使一个成员停止失败，仍尝试停止其余成员。
+- 最小暂停单位是承载相关工作的 Agent 当前执行；保留会话和上下文，确认关联后台动作实际停止。不得把仅发送中断请求、注册表标签或 `hub cancel` 回执当成停止证据。
+- Orbit 控制明确绑定的 Root、本任务登记的全部成员与自有检查进程。原生界面中断 Root 时，程序负责停止其登记成员；中断请求持续有效，不被紧接着开始的活跃轮次掩盖，明确启动新任务时才重置；即使一个成员停止失败，仍尝试停止其余成员。
+- 成员停止确认按实际观测分级：会话存活时经 abort、按 owner 取消并等待异步任务底层工作结算，且以观测到的在途工具数归零为证；成员的注册表会话已释放（完成后的 idle/park 处置）时，OMP 18.2.8 对处置完成没有公开信号，后台与进程退出不可证实——桥返回结构化证据且 `confirmed:false`，任务保持 `stop_unconfirmed`，不得把"已完成"或注册表 idle 充当退出证据。OMP 进程整体退出时，以进程与实际子进程退出为证据。
+- 已退出的 failed／stop_unconfirmed 任务接受用户显式 stop 重试，从任务记录（含 `members.json` 重新发现的成员 ID）重连收尾，不重启执行；证据不足继续保持 stop_unconfirmed。
 - 时间和消耗预估是参考，不产生默认硬门。实际消耗不可得时记未知。用户明确的硬上限单独记录；停止后对比预估与实际并解释可得偏差。
 - 不兼容旧 v2 命令、数据或门控。旧用户资料保留；旧运行代码、合同、解析器和模板已整体退役，不保留双轨。
 
@@ -72,24 +84,12 @@ Jev 只从启动 Coding Agent 时的 `TYPESAFE_API_KEY` 环境变量读取 key�
 1. 程序自主检查真实中间产物，独立模型从原始要求发现遗漏，现有 Root 修正，最终实际产物经独立复核通过。
 2. 明确边界触发后，实际相关执行和后台动作停止，会话上下文保留；以真实会话和进程结果证明。
 
-确定性测试验证接线与版本约束，不能替代上述真实模型与控制验证。
+确定性测试验证接线与版本约束，不能替代上述真实模型与控制验证。目标路径（`orbit omp` + 原生成员 + 独立 OMP 检查者）的端到端真实验收为 M4，已通过（冻结 #1–#9；#5 经用户批准的组合证据，保留边界见 `docs/reference/omp-native-m4-acceptance-20260924.md`）；此前各 M0/M1 切片的真实样本见 `docs/reference/omp-native-path-probe-20260924.md` 与 `docs/reference/` 下相应记录。
 
 ## 当前接入与记录接口
 
-- CLI 提供 `doctor`、`jev setup`、`update`、`uninstall`、`codex`、`start`、`status`、`stop`、`check`、`amend`、`dispute`、`delegate`、`rebind-workspace`、`model-evidence`；任务控制命令写入任务 inbox，提交成功不代表动作已完成。`check` 的机器响应明确要求：没有用户预先明确、且不依赖检查结果的后续状态变更时，Root 结束当前 turn 并等待 Orbit 唤醒，不应仅为等待检查结论而 sleep、轮询或查询状态；预先要求的状态变更及其明确状态前置条件可用最少查询确认后紧接执行，但不能借此等待结论。`model-evidence` 只接收模型事实并写入证据缓存，不修改用户要求，stdout 不回显网页正文。`jev setup` 只配置新终端环境，不创建任务或调用模型；`run` 是任务进程内部入口。
-- 用户明确运行 `orbit codex` 时，入口创建本地 app-server 并运行 Codex TUI，按会话配置 Orbit MCP；仅自动批准该工具，不修改全局配置。入口把本次启动的权限解析成唯一策略：默认 full access（`approval_policy=never` + `danger-full-access`），显式沙箱／审批参数（含 `--dangerously-bypass-approvals-and-sandbox`、`--approve-for-me` 等组合模式）按字段覆盖，且不再传给 TUI；TUI argv 不携带权限覆盖参数。TUI 只连接入口持有的透明代理 `tui.sock`，代理在用户线程生命周期请求（`thread/start`、`thread/fork` 且 `threadSource=user` 非 ephemeral；`thread/resume` 因仅来自该 socket）进入 app-server 前把 approvalPolicy／sandbox（按需 approvalsReviewer）原子改写为该策略，系统／ephemeral 线程与其他消息双向原样转发。Orbit 原生控制、MCP、成员、检查者与停止链继续直连 `control.sock`，app-server 同时接收同一策略作为默认兜底。`-p/--profile` 首版明确拒绝：profile 的权限由 Codex 在 TUI 侧解析，无法与单一策略共存，也不新增 TOML 解析；`sandbox_workspace_write` 等其他权限形态未纳入改写，仍受 Codex 原生远端恢复限制。恢复会话的权限结果按真实验证记录。MCP 使用官方 SDK 并以原生调用身份限定任务归属，保留显式 ID 供缺少宿主元数据的客户端使用；这不是抵御同用户篡改的安全隔离层。
-- Codex 接入已加载在 Unix app-server 上、可读取历史的已有持久会话，通过 WebSocket 控制。OpenCode 通过官方插件持有的原生客户端接入当前会话，插件提供私有本地 socket 给任务进程；普通启动不需要用户指定端口或内部 ID。原文从原生用户消息读取，程序投递通过原生消息 metadata 标记，避免将纠正或成员回报当作新用户要求。不自动创建或恢复 Root，不用仅排队消息替代原生停止。
-- 停止确认覆盖该 Root 与本任务登记成员的当前 turn、各自 Codex 登记的后台终端和 Orbit 自有检查进程。关闭用户启动入口会尝试收尾该服务的任务和执行，无法确认时保留日志并说明。普通 Codex embedded TUI、脱离原生管理的进程及其他宿主尚未纳入该范围。OpenCode 停止覆盖本任务原生会话及其 shell 工具附属进程树，以原生 idle 且无活动工具确认；正常退出插件时先请求任务收尾再关闭私有通道。强杀宿主不自动恢复。
-- 已退出的 failed／stop_unconfirmed 任务仍接受用户显式 stop 重试，取得原运行锁和 Root 锁后仅做收尾，不重启执行。不能确认旧检查进程已退出时继续保留 stop_unconfirmed。
-- `.orbit/tasks/<id>/` 保存原文、依据版本、明确修改、固定副本、检查结果和状态。`complete` 表示独立检查及实际收尾均通过；`paused` / `needs_user` 表示已经确认停止；`stop_unconfirmed` 表示停止尚未得到确认；`failed` 仅表示运行错误，不能据此推断相关工作已停止，停止是否确认以 `stop_confirmation.confirmed` 为准，status 分别显示停止已确认或需核实。
-- 当前支持用户明确的时间截止；token 预估仅用于复盘，未提供跨供应商消耗硬上限。读取不到的任务总消耗保留未知，不能将 Root 会话历史累计量当成本任务用量。
-
-## OMP 原生接入
-
-按 ADR-007，OMP 原生扩展绑定当前会话，使用原生 custom message 区分纠正与用户输入，执行成员具有本任务登记的独立原生身份。停止要求原生执行结束，并按各自 owner 等待异步任务底层工作结算；原生 cancelled 标签本身不是进程停止证明。原生 custom message 采用 steer，使正在等待工具的 Root 也能收到纠正或成员结果；消息标记不冒充用户输入。用户明确切换／分支／回退会话前收尾原任务，未确认停止则取消这次切换并保留原通道供重试；不自动创建、迁移或恢复 Root。OMP 18.1.16 已完成普通入口自主接入、同一 Root 纠偏、成员集成、原生 Esc 及恢复后正常退出的真实验收。具体范围和失败记录见 docs/reference/omp-runtime-acceptance-20260914.json。
-
-## 用户查询与维护入口
-
-`status [TASK]` 默认显示可读摘要，`--json` 返回机器记录。摘要分开显示任务状态、执行协作、JEV、检查状态和下一动作；JEV 把第一阶段候选分、第二阶段 decision 和最终持久 hint 分开表述，成员来源按 `delegation_basis` 显示，旧记录不从分数反推建议。检查状态来自在途观察、已安排的下次检查和最近 verdict／stale：`queued` 与 `verdict(complete)` 都不是任务 `complete`。用量按独立检查角色、JEV 第一阶段和委派第二阶段分列；缺值或聚合标为 incomplete 时显示未知，不用最近一次评估冒充累计，也不把 Root 会话累计量当成本任务量。省略任务时从当前项目定位；多个待处理候选列出选择项，`stop [TASK]` 不自动猜测。`failed` 与 `stop_unconfirmed` 都不能视作完成交付；只有 `stop_confirmation.confirmed=true` 的 `failed` 才显示停止已确认。显式任务目录或当前项目的唯一 ID 前缀都可使用。无待处理任务时查询可展示最近已结束记录，停止则说明无需停止。
-
-`doctor` 的环境和安装检查不代表会话已接入；只有通过已有原生接口读回实际会话后才报告连接成功，检查不调用模型。诊断同时显示成员名单的来源与允许项、当前 Root 下实际可调用的 kind，以及允许但无受控适配器的缺口。`update` 和 `uninstall` 只维护所属运行安装，skill 继续由 npx skills 管理，维护应在相关任务结束后执行。
+- 受控入口为 `orbit omp [OMP 原生参数]`：启动原版 OMP 并为该 Root 会话加载 Orbit 扩展，原生参数（`--resume`、`--model`、profile、权限等）与退出码透传。普通 `omp` 不接入 Orbit（安装切换见安装文档，切换完成前本机行为以实际安装为准）。命令面以安装版本的 `orbit --help` 为准。
+- 扩展经 OMP 原生工具面（`xd://orbit`）提供 Orbit 操作；程序投递经原生 custom message（steer），标记不冒充用户输入。用户明确切换／分支／回退会话前收尾原任务，未确认停止则取消这次切换并保留原通道供重试；不自动创建、迁移或恢复 Root。
+- `.orbit/tasks/<id>/` 保存原文、依据版本、明确修改、固定副本、检查结果、状态与权威成员清单 `members.json`。`complete` 表示独立检查及实际收尾均通过；`paused` / `needs_user` 表示已经确认停止；`stop_unconfirmed` 表示停止尚未得到确认；`failed` 仅表示运行错误，停止是否确认以 `stop_confirmation.confirmed` 为准。
+- 独立检查者使用另一个只读 OMP 会话（独立进程，非执行团队成员）读取固定快照；打包与只读边界见开发文档。检查者与裁定者的模型由 OMP 配置与可用模型决定，Orbit 记录实际 provider/model。
+- `status [TASK]` 默认显示可读摘要，`--json` 返回机器记录；摘要分开显示任务状态、执行协作、JEV、检查状态和下一动作。`doctor` 不调用模型；`update`/`uninstall` 只维护所属运行安装，维护应在相关任务结束后执行。

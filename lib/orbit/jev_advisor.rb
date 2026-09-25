@@ -41,15 +41,21 @@ module Orbit
     DELEGATION_QUESTIONS = {
       "member_fit" => {
         "type" => "noul",
-        "instructions" => "Given the callable member options and the supplied model evidence, is at least one member likely to meet the best bounded subtask's acceptance bar without enough rework to erase the benefit? Treat missing or stale evidence as unknown and do not infer capability from a model name alone. When Root and a candidate have the same validated provider, model and reasoning identity, treat that identity equality as direct evidence of capability parity; a shared unknown reasoning label is not a mismatch.",
-        "criteria" => { "true" => "A callable member is likely to meet the acceptance bar without rework erasing the benefit",
-                        "false" => "No member is likely to meet the bar, or missing or stale evidence leaves the fit unknown" }
+        "instructions" => "Given the callable member options and the supplied model evidence, is at least one member likely to meet the best bounded subtask's acceptance bar using only information that can be passed in a bounded handoff? Do not assume a handoff already exists, and do not assume the member can see Root's context. Do not treat a matching provider, model or reasoning identity as direct evidence of capability parity. Treat missing or stale evidence as unknown and do not infer capability from a model name alone. Handoff, rework and integration time overhead belong only to parallel_gain.",
+        "criteria" => { "true" => "A callable member is likely to meet the acceptance bar using only information that can be passed in a bounded handoff",
+                        "false" => "No member is likely to meet the acceptance bar from a bounded handoff, or missing or stale evidence leaves the fit unknown" }
       },
       "parallel_gain" => {
         "type" => "noul",
-        "instructions" => "Given the remaining task dependencies and the supplied execution evidence, would delegating the best bounded subtask now likely shorten the overall critical path after handoff, expected rework, integration, shared-resource contention, and verification are included? Independent substantive surfaces can gain from concurrency even when Root and member use the same model. Output speed alone is not task completion speed.",
+        "instructions" => "Given the remaining task dependencies and the supplied execution evidence, would delegating the best bounded subtask now likely shorten the overall critical path after handoff, expected rework, integration, shared-resource contention, and verification are included? Output speed alone is not task completion speed.",
         "criteria" => { "true" => "Delegating the best bounded subtask likely shortens the overall critical path once handoff, rework, integration, contention and verification are included",
                         "false" => "Delegation is unlikely to shorten the critical path, or the evidence is insufficient" }
+      },
+      "cost_appropriate" => {
+        "type" => "noul",
+        "instructions" => "Given the supplied route identity and submitter-provided price or quota-band evidence for the callable member option, is that coarse band proportionate to the best bounded subtask? Judge the candidate's coarse price or subscription/quota band against the size and value of that bounded subtask; the program checks that route and band facts are present, not the number against the vendor page. A direct-API route is evidenced by per-token cost facts; a subscription/quota route is evidenced by plan or quota-band facts, and those must never be read as per-token API prices. Do not convert currencies, compare it with the caller's own billing route, or rank providers by name or brand. Treat a missing or stale route or band fact as unknown; unknown cost is not free and must not raise this score.",
+        "criteria" => { "true" => "The submitted coarse price or quota band is proportionate for this bounded subtask",
+                        "false" => "The band is disproportionate for this bounded subtask, or the route or band evidence is unknown" }
       }
     }.freeze
 

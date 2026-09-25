@@ -6,12 +6,10 @@ require "time"
 require "fileutils"
 
 module Orbit
-  # R5b: one independent read-only check via the local Codex CLI.
-  #
-  # A CheckRunner owns at most one check process. `start` writes the review
-  # prompt and schema, then spawns `codex exec` in its own process group
-  # without blocking. `poll` returns nil while the process runs, or the
-  # schema-validated result object when it exits successfully. `stop!`
+  # Shared independent-check plumbing: prompt construction, bounded program
+  # context, schema validation, usage and process-group stop handling.
+  # OmpCheckRunner is the production subclass and owns the actual reviewer
+  # process. `stop!`
   # terminates only this runner's process group and confirms exit, keeping
   # diagnostics. `close` releases the run, stopping it first if needed.
   #
@@ -24,20 +22,6 @@ module Orbit
   # verdict are kept, unbounded accumulation is not. The original instruction,
   # amendments and named basis are separate prompt sections and stay verbatim.
   class CheckRunner
-    # Only the top-level Codex model is used as the review default. OpenCode
-    # provider/model IDs must never be passed to a Codex reviewer.
-    def self.configured_model
-      path = File.join(ENV.fetch("CODEX_HOME", File.join(Dir.home, ".codex")), "config.toml")
-      return nil unless File.file?(path)
-      File.foreach(path) do |line|
-        break if line.lstrip.start_with?("[")
-        match = line.match(/^\s*model\s*=\s*("(?:[^"\\]|\\.)*"|'[^']*')\s*(?:#.*)?$/)
-        next unless match
-        return match[1].start_with?("\"") ? JSON.parse(match[1]) : match[1][1...-1]
-      end
-      nil
-    end
-
     ROLES = %w[reviewer process_reviewer adjudicator].freeze
     VERDICTS = %w[continue correct pause complete needs_user].freeze
     FINDING_KEYS = %w[id requirement evidence action].freeze
@@ -99,7 +83,7 @@ module Orbit
                      :prompt_path, :events_path, :stderr_path, :last_message_path,
                      :started_at, keyword_init: true)
 
-    def initialize(model:, executable: "codex", schema: nil, stop_grace_seconds: DEFAULT_STOP_GRACE_SECONDS)
+    def initialize(model:, executable:, schema: nil, stop_grace_seconds: DEFAULT_STOP_GRACE_SECONDS)
       raise Error, "model is required (no automatic model fallback)" if model.to_s.strip.empty?
       raise Error, "executable is required" if executable.to_s.strip.empty?
       raise Error, "stop_grace_seconds must be a positive number" unless stop_grace_seconds.to_f.positive?
@@ -117,75 +101,6 @@ module Orbit
     end
 
     attr_reader :model, :executable
-
-    def start(directory:, inputs:, context:, output_dir:, role: "reviewer")
-      raise Error, "runner is closed" if @closed
-      if @run
-        raise Error, "this runner already has an active check" unless @result || @stopped
-
-        stop! if group_alive?
-        @run = @result = @failure = nil
-        @reaped = @stopped = false
-      end
-
-      role = role.to_s
-      raise Error, "role must be one of: #{ROLES.join(', ')}" unless ROLES.include?(role)
-      raise Error, "check schema not found: #{@schema}" unless File.file?(@schema)
-      raise Error, "codex executable is not available: #{@executable}" unless executable_available?
-
-      snapshot = validate_snapshot!(directory)
-      out = validate_output_dir!(output_dir, snapshot)
-      prompt = build_prompt(snapshot: snapshot, inputs: inputs, context: context, role: role)
-
-      prompt_path = File.join(out, "prompt.txt")
-      schema_copy = File.join(out, "check-result.schema.json")
-      last_message_path = File.join(out, "last-message.json")
-      events_path = File.join(out, "events.jsonl")
-      stderr_path = File.join(out, "stderr.log")
-
-      write_file(prompt_path, prompt)
-      FileUtils.cp(@schema, schema_copy)
-      File.unlink(last_message_path) if File.exist?(last_message_path)
-
-      argv = command_argv(snapshot: snapshot, schema_path: schema_copy, last_message_path: last_message_path)
-      pid = spawn_check(argv, snapshot, prompt_path, events_path, stderr_path)
-
-      run = Run.new(
-        pid: pid, pgid: pid, directory: snapshot, output_dir: out, role: role, model: @model,
-        schema_path: schema_copy, prompt_path: prompt_path, events_path: events_path,
-        stderr_path: stderr_path, last_message_path: last_message_path, started_at: Time.now.utc.iso8601
-      )
-      @run = run
-      begin
-        write_run_record(run)
-      rescue StandardError
-        stop!
-        raise
-      end
-      run
-    end
-
-    def poll
-      raise Error, "runner is closed" if @closed
-      raise Error, "no check run" unless @run
-      return @result if @result
-      raise @failure if @failure
-      raise Error, "check run was stopped; no result is available" if @stopped
-
-      status = wait_nonblock
-      if status.nil?
-        raise Error, "check process was reaped outside this runner" if @reaped
-
-        return nil
-      end
-
-      unless status.success?
-        @failure = Error.new(failure_message(status))
-        raise @failure
-      end
-      stop! if group_alive?
-      @result = load_result
-    end
 
     def stop!(grace: @stop_grace_seconds)
       raise Error, "runner is closed" if @closed
@@ -253,37 +168,6 @@ module Orbit
       raise Error, "output_dir is not usable: #{output_dir}"
     end
 
-    def command_argv(snapshot:, schema_path:, last_message_path:)
-      [
-        @executable, "exec",
-        "--cd", snapshot,
-        "--sandbox", "read-only",
-        "--ephemeral",
-        "--json",
-        "--output-schema", schema_path,
-        "--output-last-message", last_message_path,
-        "--model", @model,
-        "--skip-git-repo-check",
-        "-c", "approval_policy=never"
-      ]
-    end
-
-    def spawn_check(argv, snapshot, prompt_path, events_path, stderr_path)
-      events = nil
-      errors = nil
-      begin
-        events = File.open(events_path, "wb")
-        errors = File.open(stderr_path, "wb")
-        Process.spawn(*argv, in: prompt_path, out: events, err: errors,
-                      pgroup: true, chdir: snapshot, close_others: true)
-      rescue SystemCallError => e
-        raise Error, "cannot start check: #{e.class}: #{e.message}"
-      ensure
-        events&.close
-        errors&.close
-      end
-    end
-
     def build_prompt(snapshot:, inputs:, context:, role:)
       instruction = fetch_instruction(inputs)
       amendments = input_items(inputs, "amendments")
@@ -292,10 +176,6 @@ module Orbit
       context_text = render_context(program_context)
 
       parts = [role_prompt(role, focus: review_focus_present?(program_context))]
-      library = File.expand_path("../../skills/orbit/assets/rule-library", __dir__)
-      parts << "## Applicable Orbit role rules\n\n" + %w[shared/escalation-payload.md tasks/review.md].map do |relative|
-        File.read(File.join(library, relative))
-      end.join("\n\n")
       parts << "## Original instruction (verbatim)\n\n#{instruction}"
       unless amendments.empty?
         parts << "## Amendments (latest valid input, apply in order)\n\n#{render_items(amendments, 'Amendment')}"
@@ -694,6 +574,9 @@ module Orbit
           "correction only when supported by current evidence. Do not resolve prior artifact findings or " \
           "declare the task complete; return continue when no actionable issue is established. Pause only " \
           "for an authorization boundary or a concrete adjudicated correction that stays unimplemented. " \
+          "A pending model_evidence_request in the context is part of the authorized workflow: research " \
+          "responsive to it is relevant work, not off-track solely because the original user instruction " \
+          "did not mention it. Still judge concrete task progress. " \
           "Work strictly read-only and follow relevant AGENTS.md rules in the fixed snapshot."
       else
         prompt = "You are an independent Orbit check session, separate from the Root session that produced the " \
@@ -702,7 +585,10 @@ module Orbit
           "missing, wrong or extra; judge whether continuing the current work is worthwhile from the " \
           "instruction and concrete evidence. Do not require or run the full test suite, and do not treat " \
           "test counts or elapsed time as failure; name specific gaps that need isolated verification " \
-          "instead. Do not change requirements, do not invent acceptance criteria, and do not turn an " \
+          "instead. Verify every explicit input shape, field-count, validation or rejection rule against the " \
+          "code that enforces it: a rule the implementation does not actually enforce, including accepting " \
+          "the wrong shape or count or input that must be rejected, is a finding even when the provided " \
+          "tests pass. Do not change requirements, do not invent acceptance criteria, and do not turn an " \
           "engineering preference into a blocker. Read the relevant AGENTS.md files inside the fixed " \
           "snapshot; project rules apply to your judgment too. Only reuse a history finding id when it is " \
           "the same real problem. The program record is your decision memory: it carries prior decisions and " \
@@ -743,14 +629,6 @@ module Orbit
         "instruction, amendments and named basis require. review_focus is a priority clue, not a scope " \
         "limit: never ignore a requirement because its files are not listed, and never treat the listed " \
         "files as the only work to check."
-    end
-
-    def executable_available?
-      return File.executable?(@executable) if @executable.include?("/")
-
-      ENV.fetch("PATH", "").split(File::PATH_SEPARATOR).any? do |dir|
-        !dir.empty? && File.executable?(File.join(dir, @executable))
-      end
     end
 
     def write_run_record(run)
@@ -817,21 +695,6 @@ module Orbit
       nil
     rescue Errno::EPERM
       raise Error, "not permitted to signal check process group #{@run.pgid}"
-    end
-
-    def load_result
-      path = @run.last_message_path
-      raise Error, "check produced no final message: #{path}" unless File.file?(path)
-
-      text = File.read(path).strip
-      raise Error, "check final message is empty: #{path}" if text.empty?
-
-      begin
-        parsed = JSON.parse(text)
-      rescue JSON::ParserError
-        raise Error, "check final message is not valid JSON: #{path}"
-      end
-      validate_result(parsed)
     end
 
     def validate_result(value)
