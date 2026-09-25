@@ -15,7 +15,7 @@ module JevAdvisorTest
 
   MEMBER_FIT_TEXT = "Given the callable member options and the supplied model evidence, is at least one member likely to meet the best bounded subtask's acceptance bar using only information that can be passed in a bounded handoff? Do not assume a handoff already exists, and do not assume the member can see Root's context. Do not treat a matching provider, model or reasoning identity as direct evidence of capability parity. Treat missing or stale evidence as unknown and do not infer capability from a model name alone. Handoff, rework and integration time overhead belong only to parallel_gain."
   PARALLEL_GAIN_TEXT = "Given the remaining task dependencies and the supplied execution evidence, would delegating the best bounded subtask now likely shorten the overall critical path after handoff, expected rework, integration, shared-resource contention, and verification are included? Output speed alone is not task completion speed."
-  COST_APPROPRIATE_TEXT = "Given the supplied route identity and submitter-provided price or quota-band evidence for the callable member option, is that coarse band proportionate to the best bounded subtask? Judge the candidate's coarse price or subscription/quota band against the size and value of that bounded subtask; the program checks that route and band facts are present, not the number against the vendor page. A direct-API route is evidenced by per-token cost facts; a subscription/quota route is evidenced by plan or quota-band facts, and those must never be read as per-token API prices. Do not convert currencies, compare it with the caller's own billing route, or rank providers by name or brand. Treat a missing or stale route or band fact as unknown; unknown cost is not free and must not raise this score."
+  COST_APPROPRIATE_TEXT = "Given the submitter-provided coarse cost tier (low, medium, high, or unknown) with its source and confidence annotation for the callable member option, is that cost burden proportionate to the best bounded subtask? Judge the candidate's coarse price or subscription/quota burden tier against the size and value of the bounded subtask; the program checks only that a submitted tier carries a source and confidence annotation, not exact numbers against the vendor page. A clearly labeled low-confidence estimate from vendor or model positioning is acceptable evidence. Per-use API pricing and subscription quota must never be converted into a single fake per-token price or compared as if interchangeable. Do not convert currencies, compare it with the caller's own billing route, or rank providers by name or brand. Treat a missing, stale or unevaluated tier as unknown; unknown cost is not free and must not raise this score, and an unknown tier alone must not lower this score when the candidate already meets the quality and time bars. Any user-set hard budget is enforced separately by the calling program's runtime code, not by this question."
   DELEGATABLE_TEXT = "Is there likely a bounded, independent subtask in the effective task requirements or remaining work that an authorized execution member could deliver now while the main agent continues? Prioritize the instruction, basis and amendments over whether the main agent has already mentioned or started that subtask in recent activity. Explicit disjoint files, modules or acceptance surfaces are strong evidence. Count only separable work with a clear result; do not count trivial, overlapping, preference-only or dependency-blocked work. Member availability is enforced separately by the caller, so do not lower this task-structure probability merely because availability is unknown."
 
   def check(condition, message)
@@ -72,16 +72,20 @@ module JevAdvisorTest
   def run
     check_delegation_question_text
     check_stage_one_questions_unchanged
+    check_candidate_assessment_round_trip
     check_stage_one_request_and_parsing
     check_stage_two_request_state_and_parsing
     check_stages_ignore_each_others_answers
+    check_checker_quality_request_and_parsing
     check_stage_two_rejects_invalid_probabilities
     check_error_boundaries
     puts "JEV_ADVISOR_TEST_PASS (deterministic, local fixture only)"
   end
 
-  # The two second-stage questions exist, are single noul questions, and the
-  # wording matches docs/plan/jev-delegation-optimization.md exactly.
+  # The second-stage questions exist and are single noul questions. The
+  # member_fit and parallel_gain wording stays frozen with
+  # docs/plan/jev-delegation-optimization.md; cost_appropriate follows the
+  # ADR-009 coarse cost tiers.
   def check_delegation_question_text
     questions = Orbit::JevAdvisor::DELEGATION_QUESTIONS
     check(questions.keys.sort == %w[cost_appropriate member_fit parallel_gain],
@@ -93,13 +97,42 @@ module JevAdvisorTest
     check(questions["member_fit"]["instructions"] == MEMBER_FIT_TEXT, "member_fit wording matches the frozen plan text")
     check(questions["parallel_gain"]["instructions"] == PARALLEL_GAIN_TEXT, "parallel_gain wording matches the frozen plan text")
     check(questions["cost_appropriate"]["instructions"] == COST_APPROPRIATE_TEXT,
-          "cost_appropriate wording matches the reviewed dual-route text")
-    cost = questions["cost_appropriate"]["instructions"]
-    check(cost.include?("Do not convert currencies") &&
-          cost.include?("rank providers by name or brand") &&
-          cost.include?("must never be read as per-token API prices") &&
-          cost.include?("Treat a missing or stale route or band fact as unknown"),
-          "cost_appropriate keeps the no-conversion/no-brand and quota-not-price constraints")
+          "cost_appropriate wording matches the ADR-009 coarse-tier text")
+  end
+
+  # The per-candidate pool stage asks one quality-line and one time question
+  # per candidate, labels them by index, names agent+model in every
+  # instruction, and reshapes the answers per candidate.
+  def check_candidate_assessment_round_trip
+    answers = {
+      "candidate_0_quality" => noul(0.7), "candidate_0_time" => noul(0.6),
+      "candidate_1_quality" => noul(0.4), "candidate_1_time" => noul(0.55)
+    }
+    with_fixture([payload(answers)]) do |endpoint, requests|
+      candidates = [{ "provider" => "opencode-go", "model" => "deepseek-v4.1-flash", "agent" => "orbit-m-deepseek" },
+                    { "provider" => "zhipu", "model" => "glm-5", "agent" => "orbit-m-glm" }]
+      result = Orbit::JevAdvisor.new(api_key: "test-key", endpoint: endpoint)
+                                .assess_candidates(state: { "instruction" => "x" }, candidates: candidates)
+      sent = requests.first
+      check(sent["questions"].keys.sort ==
+            %w[candidate_0_quality candidate_0_time candidate_1_quality candidate_1_time],
+            "one quality and one time question per candidate, labeled by index")
+      blob = JSON.generate(sent["questions"])
+      check(blob.include?("agent orbit-m-deepseek") && blob.include?("model opencode-go/deepseek-v4.1-flash") &&
+            blob.include?("agent orbit-m-glm"),
+            "every instruction names its candidate agent and model")
+      quality = sent["questions"]["candidate_0_quality"]["instructions"]
+      time = sent["questions"]["candidate_1_time"]["instructions"]
+      check(quality.include?("brand name") && quality.include?("do not raise this score without sourced support") &&
+            quality.include?("Treat missing, stale or unsourced evidence as unknown"),
+            "the quality question forbids brand inference and unsourced raises")
+      check(time.include?("handoff, expected rework, integration, shared-resource contention and verification") &&
+            time.include?("Output speed alone is not task completion speed"),
+            "the time question includes the full end-to-end cost model")
+      check(result["scores"] == { "0" => { "quality" => 0.7, "time" => 0.6 },
+                                  "1" => { "quality" => 0.4, "time" => 0.55 } },
+            "scores are reshaped per candidate")
+    end
   end
 
   # Stage one keeps exactly the four scheduling questions; the calibrated
@@ -197,6 +230,38 @@ module JevAdvisorTest
   end
 
   # The shared poster keeps the existing error boundaries for both stages.
+  # The checker quality gate asks exactly one noul question per candidate and
+  # maps the answers back to provider/id. The caller supplies the task
+  # instruction and bounded cached evidence; the advisor adds nothing.
+  def check_checker_quality_request_and_parsing
+    state = {
+      "instruction" => "Add a login page",
+      "candidates" => [
+        { "model" => "p/one", "evidence" => { "status" => "evidence", "sources" => ["https://s"] } },
+        { "model" => "p/two", "evidence" => { "status" => "evidence", "sources" => ["https://s"] } }
+      ]
+    }
+    with_fixture([payload({ "quality_0" => noul(0.8), "quality_1" => noul(0.2), "time_0" => noul(0.7), "time_1" => noul(0.4) })]) do |endpoint, requests|
+      result = Orbit::JevAdvisor.new(api_key: "test-key", endpoint: endpoint).assess_checker_quality(
+        state: state, candidates: state["candidates"]
+      )
+      sent = requests.first
+      check(sent["questions"].keys.sort == %w[quality_0 quality_1 time_0 time_1],
+            "one bounded quality and one end-to-end time question per candidate in a single request")
+      check(sent["questions"].values.all? { |question| question["type"] == "noul" }, "each question is a single noul question")
+      check(sent["questions"]["time_0"]["instructions"].include?("end-to-end"),
+            "the time judgment asks for expected end-to-end check time including rework")
+      check(sent["state"] == state, "the caller's bounded state passes through")
+      check(result["scores"] == { "p/one" => { "quality" => 0.8, "time" => 0.7 },
+                                  "p/two" => { "quality" => 0.2, "time" => 0.4 } },
+            "quality and time answers map back to provider/id")
+    end
+
+    expect_error("no checker candidate is rejected before any request") do
+      Orbit::JevAdvisor.new(api_key: "test-key").assess_checker_quality(state: {}, candidates: [])
+    end
+  end
+
   def check_error_boundaries
     with_fixture([["500 Internal Server Error", payload(STAGE_TWO_ANSWERS)]]) do |endpoint, _requests|
       expect_error("an HTTP error stays a JevAdvisor::Error") do

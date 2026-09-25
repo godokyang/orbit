@@ -11,6 +11,7 @@
 | 上游 OMP 接口缺口 | 单成员编程 kill 需 `AgentLifecycleManager`（未从 SDK 导出）；`before_provider_request` 异常被吞、不能 fail-close；分配器对保留前缀应拒绝重复而非加后缀 | 按 ADR-008 决定 7 跟进上游；出现实证阻断时评估最小补丁，不预维护 fork |
 | 历史读取有前置条件 | 只接入已加载、具备历史读取能力的持久会话；ephemeral 或尚未物化的会话不可用 | 原生接口提供相应能力且有明确使用需求后再适配 |
 | 整次任务费用可能未知 | 检查 tokens 可记录，Root 会话累计量可能混入先前工作，尚无跨供应商费用总计和 token 硬上限 | 有真实用量来源与任务归属后轻量补齐；不阻塞主线或从耗时推算费用 |
+| 自动检查者选模的 JEV 消耗不在任务用量汇总内 | `orbit start` 在创建任务记录前调用 JEV 判定池内检查候选的质量，其 usage 与 monotonic 耗时记录在 `review.selection`（`usage`、`quality_elapsed_seconds`），但不进入 `state.usage` 的 `jev_stage1`/`jev_stage2`/`check_tokens`/`root_session_cumulative` 汇总；任务级 token 总数不含这部分 | 将选模消耗接入运行时用量汇总（TaskRuntime 侧）后移除该限制；在那之前，任务级 token 总数不声称覆盖自动选模调用 |
 | 真实路径验收仍有未覆盖分支 | finding 同版本 repeat/reopen 分支仍只有确定性回归（Pi 审计论证活回路结构性难触发，记为结构性未触发、不再排期）；observation 去重与目标路径检查回路（含成员+纠偏）已有端到端真实样本（#9 staged） | 不重复已跑路径；同版本重复分支维持确定性回归覆盖 |
 | 独立检查真实 token 成本仍高 | 历史复验已把重复检查明显收敛，但单次检查 input 仍在数万到数十万量级 | 继续采集 prompt 构成与供应商计费口径；任何压缩都须同时核对缺陷发现率、完整要求覆盖和 stale 行为 |
 | 工作区冲突不会自动暂停检查 | 程序不检测 Root 声明的产物位置是否与绑定冲突，也不因此暂停自动完整检查 | 有单独的检测与暂停设计并完成真实路径验收后，再从限制中移除 |

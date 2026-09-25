@@ -362,6 +362,7 @@ module Orbit
 
       check = recorded_checks(state).last
       return "idle" unless check
+      return "failed" if check["status"] == "failed"
       return "stale" if check["stale"] == true
 
       verdict = check.dig("result", "verdict")
@@ -374,10 +375,37 @@ module Orbit
                "（检查已排队，不是任务完成）"
              elsif activity == "verdict(complete)"
                "（检查结论，不是任务完成）"
+             elsif activity == "failed"
+               "（检查失败，未采纳；任务保持运行，等待显式指定检查模型后重试）"
              else
                ""
              end
       "检查状态：#{activity}#{note}"
+    end
+
+    # The model actually used for checks, from the recorded selection when
+    # present, else the frozen review.model.
+    def checker_model_line(state)
+      review = state["review"]
+      model = review.is_a?(Hash) ? (review.dig("selection", "model") || review["model"]) : nil
+      model.to_s.empty? ? nil : "检查模型：#{model}"
+    end
+
+    # ADR-009: after a real auth/quota failure the task stays alive but blocked
+    # until Root explicitly picks the next model. Failures never auto-retry or
+    # switch silently, so this is the line that says what action is needed.
+    def review_blocked_line(state)
+      review = state["review"]
+      blocked = review.is_a?(Hash) ? review["blocked"] : nil
+      return nil unless blocked.is_a?(Hash)
+
+      kind = blocked["failure_kind"] || blocked["kind"] || "unknown"
+      model = blocked["model"].to_s
+      model = "未知" if model.empty?
+      reason = blocked["reason"].to_s.strip
+      text = "检查阻塞：模型 #{model}（#{kind}）"
+      text += " — #{reason}" unless reason.empty?
+      "#{text}；用 orbit review-model 显式指定模型后重试"
     end
 
     def next_action_line(state)
@@ -444,10 +472,14 @@ module Orbit
                *([recent_delegation_event(state)].compact),
                "JEV：#{jev_status(state)}",
                check_activity_line(state),
+               *([checker_model_line(state)].compact),
+               *([review_blocked_line(state)].compact),
                next_action_line(state),
                *usage_lines(state)]
       check = state.fetch("checks", []).last
-      if check
+      if check && check["status"] == "failed"
+        lines << "最近检查：失败 — #{check['error']}（检查模型失败，未采纳；产物快照与成员保留）"
+      elsif check
         qualifier = if check["stale"]
                       "已过期，未采纳"
                     elsif check["kind"] == "process"

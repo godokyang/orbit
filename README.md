@@ -1,164 +1,120 @@
 # Orbit
 
-**让 Coding Agent 在执行任务时接受独立检查，发现遗漏后回到原会话修正。**
+**Orbit 用多 Agent 协作帮你完成开发任务：主 Agent 组织执行，独立 Agent 按需检查进展和成果，发现卡住、跑偏或漏项就回到原会话纠正，帮你减少等待、返工和不必要的 token 消耗。**
 
-Orbit 可独立用于任何项目。你照常提出需求，当前 Agent 负责实现，Orbit 保存原始要求、检查实际产物、回传问题并核实完成。文档中的 **Root 就是这个与你对话、负责整项任务的 Agent**。
+- **省时间：**适合并行的工作可交给其他 Agent，卡住或跑偏时尽早纠正，减少等待和事后返工。
+- **省 token 和模型额度：**避免重复检查；你可以从当前会话可选模型中维护候选池，建议分工时按质量、端到端时间和粗档费用比较，减少无收益的调用。
+- **交付更清楚：**独立核对实际成果，有遗漏就回原会话修；你能看到任务仍在执行、等待检查，还是已确认完成。
 
-当前版本为 OMP 单宿主架构（见 [ADR-008](docs/adr/008-omp-native-collaboration-base.md)）：用 `orbit omp` 启动原版 Oh My Pi，Root 通过 OMP 原生 `task/hub` 组建一层执行团队，Orbit 负责登记、观察、检查、纠偏与停止确认。版本号以 `orbit --version` 与 `package.json` 为准。
+例如你让 Agent 实现登录功能，不用自己盯着它是否卡住、是否漏了错误提示，也不用在几个 Agent 之间转述要求；你只和原 Agent 对话，并查看最终检查和任务状态。
 
-[安装](#安装) · [开始使用](#开始使用) · [模型与启动参数](#模型与启动参数) · [更新](#更新) · [卸载](#卸载) · [常见问题](#常见问题)
+卡住／偏航判断和分工建议需要[启用 Jev](docs/reference/usage-reference.md#jev-配置)。Orbit 不自动派发成员；时间和 token 的实际节省取决于任务，不能保证每项任务都比直接使用 OMP 更快或更省。
 
-## 安装
+## 三步开始
 
-### 1. 准备环境
+### 1. 准备并安装
 
-| 需要什么 | 用途 |
-| --- | --- |
-| Ruby 3.2+、Node.js 18+、npm | 运行和安装 Orbit |
-| Oh My Pi（`omp`），已配置可用模型 | 执行项目任务、执行成员与独立检查 |
-| curl、tar | 下载安装包 |
-
-先确保 OMP 能正常对话、模型已配置。Orbit 不代替 OMP 的安装与模型配置。
-
-### 2. 安装 CLI
-
-复制下面这一整行到终端执行；程序安装一次后，可用于其他项目：
+先准备 Ruby 3.2+、Node.js 18+、npm、Bun 1.3.14+，以及**已配置可用模型的 OMP 18.2.8**。远程安装还需要 `curl` 和 `tar`。当前 Orbit 只接受已验证的 OMP 18.2.8；版本不符时 `orbit omp` 会拒绝启动。
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/godokyang/orbit/main/install.sh | sh
 ```
 
-安装脚本自动为 **zsh／bash 保存 PATH 配置**，重复安装不重复添加。安装前检查 Ruby、Node.js、npm；安装后可用 `orbit doctor` 诊断。**安装成功后重新打开终端**，执行 `orbit --version` 确认。
+安装程序会为 zsh／bash 保存 PATH 配置。重新打开终端后运行：
 
-这一步安装 Orbit 程序及 OMP 运行所需的扩展。受控入口是 `orbit omp`（见下节）；普通 `omp` 不加载 Orbit。
+```bash
+orbit --version
+orbit doctor
+```
 
-## 开始使用
+要启用上面的卡住／偏航判断和分工建议，再运行 `orbit jev setup` 配置 TypeSafe key，并重新打开终端。未启用 Jev 时，任务记录和独立产物检查仍可使用。
 
-### 1. 进入项目并用受控入口启动 OMP
+程序只需安装一次，各项目共用。安装对外只创建 Orbit CLI 入口；扩展由 `orbit omp` 在启动该会话时加载，不写入 OMP 的全局扩展目录。
+
+### 2. 在项目里启动会话
 
 ```bash
 cd 你的项目
 orbit omp
 ```
 
-`orbit omp` 启动原版 OMP 并为本会话加载 Orbit 扩展；`--resume`、`--model`、profile、权限等 OMP 原生参数与退出码全部透传，例如 `orbit omp --resume SESSION_ID`、`orbit omp --model provider/id`。普通 `omp` 不是受控入口。普通终端、tmux、Herdr 均可使用。
+Orbit 基于原版 [Oh My Pi（OMP）](https://github.com/can1357/oh-my-pi)；`orbit omp` 只为本次会话加载扩展，普通 `omp` 不会接入。讨论和简单修改通常直接处理，值得独立检查的执行任务由当前 Agent 启动。
 
-### 2. 把需求告诉 Agent
+然后像平常一样提出需求，例如：“按 `docs/requirements.md` 实现功能，完成必要验证；这次请使用 Orbit，交付时说明独立检查结果。”
 
-有需求文档时直接说，例如：
+`orbit omp` 原样透传 OMP 的模型、profile、权限和恢复参数。例如 `orbit omp --model provider/id`，或 `orbit omp --resume SESSION_ID` 恢复已有会话。普通终端、tmux 和 Herdr 都可以使用。
 
-> 按 docs/requirements.md 实现需求，完成必要验证，并说明实际完成情况。
+### 3. 查看任务结果
 
-涉及多个步骤、模块或执行成员的任务，Agent 按任务需要主动经 Orbit 工具接入（扩展已随 `orbit omp` 加载）；讨论、解释和简单独立修改通常不启动。也可以明确说"这次请使用 Orbit"。
+Agent 会在会话中处理任务和检查。你可以在同一项目的另一个终端查看：
 
-**第一次试用**可在一个空目录中启动 `orbit omp`，然后粘贴：
+```bash
+orbit status
+```
+
+`complete` 表示当前版本已通过独立检查，相关执行也已确认收尾。检查仍在排队或运行时，产物可能已经写好，但任务还没有完成。发现问题后，当前会话会继续修正。`orbit status` 还会显示成员、检查与下一步；多个任务时用 `orbit status ID` 指定一项。
+
+## Orbit 如何协作
+
+| 角色 | 做什么 |
+| --- | --- |
+| 当前 OMP Agent（Root） | 对整项需求负责，写代码、决定是否分工、核验成员结果并交付 |
+| 执行成员 | 由 Root 通过 OMP 原生 `task/hub` 派发；成员不能再派发成员或另起 Orbit 任务 |
+| 独立检查者 | 在单独的只读 OMP 会话里检查实际产物，把具体问题送回 Root |
+| Orbit | 保存任务要求与状态，观察执行和检查，并确认停止结果 |
+
+你不需要预先建团队，也不需要为每个项目写 Orbit 专用规范。Root 可以自行完成任务；只有分工有实际收益时才派发成员。
+
+Root 和执行成员使用 OMP 中可用的模型；检查者使用独立 OMP 会话。可选的 [Jev 调度](docs/reference/usage-reference.md#jev-配置)根据卡住、偏航和产物进展信号安排检查，并权衡端到端时间与粗档费用后给出分工建议。Root 决定是否派发；Jev 的概率不代替独立检查的结论。
+
+**多模型选择（已实现并通过真实验收；池内自动正选择为 live 边界）：**你可以用会话内 `/orbit-models` 从当前 OMP 可选列表维护一个跨会话候选池。Orbit 只在候选池与当前会话可选列表的交集内比较：为执行成员给出模型建议，为独立检查者选模，按“质量先过线 → 端到端时间 → 粗档费用”排序，并记录实际使用的模型；不按品牌排序，也不引入精确 token／金额门槛。Root 始终显式派发成员，成员不能再派发成员或另起 Orbit 任务。完整链路（会话动态成员 Agent 定义与漂移核对、检查者失败后的显式重选）已实现，其中漂移核对与显式重选已有真实样本；池内自动（非显式）正选择仅由确定性测试覆盖——真实自动尝试因无候选通过质量线被正确拒绝，未取得 live 正样本。状态见 [ADR-009](docs/adr/009-user-selected-model-pool.md)、[交付 TODO](docs/plan/model-pool-delivery.md) 与[验收证据](docs/reference/model-pool-acceptance-20260925.md)。
+
+#### 选择候选模型（`/orbit-models`）
+
+在 `orbit omp` 会话里输入：
 
 ```text
-请使用 Orbit 完成下面的任务：
-
-1. 新增 greet.py，提供 greet(name) 函数，返回 Hello, <name>!。
-   去掉名字两端的空白；空名字抛出 ValueError。
-2. 支持 python3 greet.py Ada，打印 Hello, Ada!。
-3. 新增 USAGE.md，说明调用方式和空名字的处理。
-4. 做必要验证，告知 Orbit 是否已接入，交付时说明实际检查状态。
+/orbit-models                     # 列出当前会话可选模型与候选池状态
+/orbit-models add provider/id     # 加入当前会话可选列表中的一个模型
+/orbit-models remove provider/id  # 从候选池移除
 ```
 
-### 3. 确认接入与查看结果
+候选池跨会话保存，只保存模型标识，不保存凭据。池内但当前会话不可用的标识会标为不可用，可移除但不会因此启用。候选池为空时，检查者沿用现有默认模型行为，也不给执行成员模型建议；池非空却没有合格检查模型时，Orbit 不擅自使用池外默认模型，需要你显式指定。
 
-Agent 确认接入后应主动说明；交付时说明实际结果，检查未完成时明确说"产物已准备好，等待检查"。另开终端在项目目录执行：
+## 日常命令
 
-```bash
-orbit status
-```
-
-`orbit status` 区分任务状态、执行协作（成员数与状态）、检查状态（queued／running／stale／verdict）、JEV 候选分与最终决定、下一动作与按角色用量。高 `delegatable` 不等于建议；只有当前签名的持久 `delegation_hint` 才是 Orbit 已送达的最终提示。`queued` 或 `verdict(complete)` 都不是任务 `complete`。多个待处理任务列出 ID，用 `orbit status ID` 查看，ID 可缩写。
-
-| 状态 | 含义 |
+| 命令 | 用途 |
 | --- | --- |
-| `starting` / `running` | 正在启动或执行，还未完成验收 |
-| `complete` | 当前交付版本通过独立检查，相关执行已收尾 |
-| `paused` | 已暂停，并确认相关执行停止 |
-| `needs_user` | 需要用户补充信息或决定，相关执行已停止 |
-| `failed` | 运行出错；不能据此推断已停止 |
-| `stop_unconfirmed` | 已尝试停止，但仍未确认全部相关执行结束 |
+| `orbit omp` | 启动带 Orbit 扩展的 OMP 会话 |
+| `orbit status [ID]` | 查看任务、成员、检查和下一步 |
+| `orbit stop [ID]` | 请求停止任务；再用 `status` 确认结果 |
+| `orbit doctor` | 检查安装、环境与可验证的会话连接 |
+| `orbit update` | 更新这份安装；已有会话继续使用其启动时的版本 |
+| `orbit uninstall` | 卸载这份安装 |
 
-检查发现问题时，纠正回到**当前会话**继续处理。
+补充要求直接在原会话里说。需要从另一个 worktree 继续同一任务时，使用 `orbit rebind-workspace`；其他手动参数见[进阶使用参考](docs/reference/usage-reference.md)。
 
-### 4. 分工、补充要求与停止
-
-需要分工时，Root 用 OMP 原生 `task` 派发成员、用 `hub` 通信与等待；成员只有一层（不能再派发），Orbit 在成员模型工作前登记其真实身份，结果自动回到 Root 由 Root 核验集成。你不必另外开窗口组队。
-
-补充要求直接在原会话里说。切换同一仓库的另一个 worktree 使用显式 `orbit rebind-workspace`；`amend` 与 `dispute` 只追加检查输入或争议理由。
-
-停止：在 OMP 界面中断当前执行，或另开终端执行：
-
-```bash
-orbit stop
-orbit status
-```
-
-多个待处理任务不默认停止任何一个，先列表再 `orbit stop ID`。`stop` 提示"已提交停止请求"只表示请求已排队，以后续实际状态为准。停止保留会话、代码与任务记录；确认范围是 Root、本任务登记成员及其原生后台工作——外部未登记 Agent 不在其中，成员后台工作的退出以实际进程与作业结算为证。
-
-## 模型与启动参数
-
-### 谁使用什么模型
-
-| 角色 | 默认选择 |
-| --- | --- |
-| Root | 你在 `orbit omp` 里选择的模型（OMP 原生配置） |
-| 执行成员 | 沿用 Root 的原生配置；也可在派发时指定 OMP 可用模型 |
-| 独立检查者、按需裁定者 | 另一独立只读 OMP 会话；模型由 OMP 配置与可用模型决定，Orbit 记录实际 provider/model |
-
-要单独指定检查模型，在启动任务时提供 OMP 可用的 `provider/id` 形式（例如经 Orbit 工具参数或 CLI 检查模型选项）；示例模型须已在你账户中可用。Orbit 不硬编码型号，也不把目录可见当作账号可用。
-
-### 可选 Jev 检查调度
-
-安装后运行一次：
-
-```bash
-orbit jev setup
-```
-
-按提示输入 TypeSafe key（输入不显示）并重新打开终端。key 写入仅当前用户可读的 TypeSafe 环境文件，Orbit 只从 `TYPESAFE_API_KEY` 读取，不写入 Orbit 配置或任务记录。路径、验证与项目关闭方法见[进阶说明](docs/reference/usage-reference.md#jev-配置)。
-
-启用后 Jev 给出"可能卡住／偏题／值得完整检查／可能适合分工"的概率；程序按概率与任务状态安排检查或提示 Root，不把概率当问题证据、完成结论或停止授权。分工建议分两阶段，只有持久化的 `delegation_hint` 送达后才算 Orbit 建议，Root 显式派发；派发记录区分跟随建议与 Root 自行决定。项目可用 `.orbit/jev-disabled` 关闭外发。
-
-## 更新
-
-```bash
-orbit update
-```
-
-沿用本命令所属安装的目录与来源；准备失败保留旧版，运行中的任务与已加载扩展由 lease 保护。远程来源用 `orbit update --ref REF` 切换。更新后重开 `orbit omp` 会话加载新扩展。
-
-## 卸载
-
-先结束使用该安装的 Orbit 任务与 OMP 会话；仍有存活 lease 时卸载会拒绝。然后：
-
-```bash
-orbit uninstall
-```
-
-卸载不删除项目代码与 `.orbit` 任务记录。
+卸载前请结束使用该安装的任务和 OMP 会话。若仍有会话占用旧版本，卸载会拒绝并保留安装；卸载不会删除项目代码或 `.orbit` 任务记录。
 
 ## 常见问题
 
-### 可以直接接管已打开的普通 `omp` 会话吗？
+### 已打开的普通 `omp` 会话能直接接入吗？
 
-不能。退出后用 `orbit omp --resume SESSION_ID` 恢复同一会话，再开始任务；扩展在启动时加载。
+不能。退出后用 `orbit omp --resume SESSION_ID` 恢复；扩展在会话启动时加载。
 
-### Agent 没有主动使用 Orbit？
+### Agent 没有启动 Orbit 任务？
 
-明确说"这次请使用 Orbit"。没有 Orbit 工具时，检查是否经 `orbit omp` 启动、安装后是否重开终端。先运行 `orbit doctor` 看缺口；OMP 中 Agent 经 `xd://orbit` 设备说明调用 Orbit 工具，可用 `context` 核对当前会话绑定。
+明确说“这次请使用 Orbit”。如果会话里没有 Orbit 工具，先确认它由 `orbit omp` 启动，再运行 `orbit doctor` 检查安装和连接。
 
-### 要为每个项目安装一次、建团队或写规范吗？
+### `orbit status` 显示检查通过，任务就结束了吗？
 
-程序通常安装一次即可。进入任意项目 `orbit omp` 启动；Orbit 读取项目已有规则，成员由 Root 按需要派发，不要求额外业务流程或 Orbit 需求表。
+还要看任务状态。检查结果与执行收尾是两件事；只有任务状态为 `complete` 才表示都已完成。`stop_unconfirmed` 表示已经尝试停止，但尚未确认相关执行全部退出。完整状态说明见[进阶使用参考](docs/reference/usage-reference.md)。
 
-## 当前范围与更多文档
+## 当前范围与文档
 
-目标路径（`orbit omp` + 原生成员 + 独立 OMP 检查者）的端到端真实验收（M4）已通过：冻结 #1–#9 全部闭合（#5 经用户批准的组合证据，`finding_repeat_ignored` 未真实触发、仅确定性回归覆盖），证据矩阵见 [OMP 目标路径真实验收记录](docs/reference/omp-native-m4-acceptance-20260924.md)。验收针对已安装的 0.6.18（digest `06dba0f1…`，installed_at `2026-09-24T21:55:54Z`）；源码 0.7.0 尚未安装、尚未做真实验收。当前限制与跟踪项见 [当前限制](docs/plan/debt-ledger.md) 与[迁移总 TODO](docs/plan/omp-native-migration.md)；历史 Codex／OpenCode 时代的验收证据保留在 `docs/reference/` 备查。
+本仓源码版本为 **0.7.1**（由 0.7.0 升 patch，仅版本收尾）。`orbit omp`、原生执行成员与独立 OMP 检查者的端到端真实验收基于此前的 **0.6.18** 历史验收安装；ADR-009 选模真实验收在临时隔离安装的 **0.7.0** release 上取得（见[候选模型池真实验收](docs/reference/model-pool-acceptance-20260925.md)），0.7.1 尚无自身真实样本。本机当前没有已安装的 Orbit（`orbit` 不在 PATH，`~/.local/share/orbit/orbit` 与 `~/.local/bin/orbit` 均不存在），不把历史安装状态当作当前安装状态。[验收证据和边界](docs/reference/omp-native-m4-acceptance-20260924.md)单独记录。
 
-- [进阶使用参考](docs/reference/usage-reference.md)：安装目录、profile、CLI 参数、集成和版本维护。
-- [设计决定](docs/adr/008-omp-native-collaboration-base.md)与[任务运行合同](contracts/task-runtime.md)。
-- [当前限制](docs/plan/debt-ledger.md)与[文档索引](docs/README.md)。
+- [进阶使用参考](docs/reference/usage-reference.md)：安装选项、Jev、CLI 与维护。
+- [任务运行合同](contracts/task-runtime.md)与[设计决定](docs/adr/008-omp-native-collaboration-base.md)：角色、检查和停止语义。
+- [当前限制](docs/plan/debt-ledger.md)与[文档索引](docs/README.md)：已知边界和其他文档。
+- [模型候选池交付 TODO](docs/plan/model-pool-delivery.md)：ADR-009 的实现进度与未验证项。

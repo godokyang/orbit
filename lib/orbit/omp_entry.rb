@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
+require "fileutils"
 require "open3"
+require "tmpdir"
 require_relative "release_lease"
 
 module Orbit
@@ -27,6 +29,17 @@ module Orbit
     module_function
 
     EXTENSION = File.expand_path("../../plugins/omp.mjs", __dir__)
+    # Per-process extension root that carries the session's dynamic member
+    # agent definitions (ADR-009). OMP only discovers `<ext-root>/agents/*.md`
+    # for extension roots that resolve to a DIRECTORY; the Orbit extension
+    # itself is a file entrypoint and contributes no agent root. The entry
+    # therefore creates one private root per `orbit omp` launch, passes it
+    # before the Orbit extension via a second `-e`, and exposes it to the
+    # extension through ORBIT_SESSION_AGENT_ROOT. The root entry MUST be
+    # index.js: directory-typed -e paths only resolve index.ts/index.js.
+    SESSION_AGENT_TMP_PREFIX = "orbit-session-agents-"
+    SESSION_AGENT_ENTRY = "index.js"
+    JSON_MODULE_PACKAGE = "{\"type\":\"module\"}\n"
     # Process-local OMP overlay: task.agentIdleTtlMs=0 keeps completed native
     # members attached until this process exits, so the member bridge can
     # verify their turn, attached jobs and PIDs on an explicit stop instead of
@@ -42,8 +55,39 @@ module Orbit
 
     # The exact command line handed to the OS, kept separate from exec so the
     # passthrough contract can be asserted without replacing the test process.
-    def command(argv)
-      ["omp", "-e", EXTENSION, *argv]
+    # `session_agents` is the per-process dynamic agent root; when given it is
+    # passed before the Orbit extension so its `agents/` directory joins every
+    # execution-time agent discovery. Without it the shape is the historical
+    # two-entry form (tests and plain assertions).
+    def command(argv, session_agents: nil)
+      return ["omp", "-e", EXTENSION, *argv] unless session_agents
+
+      ["omp", "-e", session_agents, "-e", EXTENSION, *argv]
+    end
+
+    # Private per-session extension root: a directory containing only the
+    # required index.js entry and an empty agents/ directory. Nothing here is
+    # written into the project `.omp/agents` or the user's global agent
+    # directory (ADR-009 boundary). The extension rewrites agents/*.md at
+    # runtime; OMP re-discovers them on every native task execution.
+    #
+    # Cleanup is owned by the extension at session_shutdown (its own root
+    # only). Crash leftovers are NOT mtime-swept here: a quiet long-running
+    # session can go days without touching its root, and deleting by age
+    # would break a live session. Stray roots are left for explicit
+    # install-time/human cleanup.
+    def prepare_session_agent_root(tmpdir: Dir.tmpdir)
+      root = Dir.mktmpdir(SESSION_AGENT_TMP_PREFIX, tmpdir)
+      # Nearest-package.json module type decides how index.js is parsed. /tmp
+      # carries no package.json, so without this marker a host that resolves
+      # plain .js as CommonJS would fail on `export default` (Node-style CJS
+      # parse). No `omp.extensions` key is set: the loader only treats a
+      # non-empty manifest array as authoritative, so convention resolution
+      # still finds index.js.
+      File.write(File.join(root, "package.json"), JSON_MODULE_PACKAGE)
+      File.write(File.join(root, SESSION_AGENT_ENTRY), "export default function () {}\n")
+      FileUtils.mkdir_p(File.join(root, "agents"))
+      root
     end
 
     # The environment diff for the child process. PI_CONFIG_FILES is additive
@@ -90,7 +134,9 @@ module Orbit
       # that continues in this process image. A source checkout has no release
       # record and records nothing.
       ReleaseLease.hold!
-      exec(launch_env, *command(argv))
+      session_agents = prepare_session_agent_root
+      env = launch_env.merge("ORBIT_SESSION_AGENT_ROOT" => session_agents)
+      exec(env, *command(argv, session_agents: session_agents))
     rescue Errno::ENOENT
       raise ArgumentError, "omp was not found on PATH; install Oh My Pi first"
     end

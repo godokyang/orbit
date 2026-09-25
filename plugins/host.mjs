@@ -34,7 +34,7 @@ async function run(args, cwd, input = '') {
 
 export const toolDescription = 'Start Orbit only for work that benefits from independent checks: multi-step changes, real parallel work surfaces, or fixes needing objective review. Simple single-file or local edits: just do them yourself, without dispatching members. If the user explicitly asks to use Orbit, still start Orbit for those small tasks — but do the work yourself and let the checker verify; no members. context identifies this exact session; start preserves original user input and named basis and returns a task_directory. Keep that task_directory: for status/check/amend/dispute/stop pass it back as task: <task_directory returned by start> to this Orbit tool — never write .orbit/inbox manually. Root dispatches members only through the native task tool (one level) when there is a genuine independent work surface — Root decides; JEV only advises, never blocks. Continue working; member results and corrections return automatically. When your work is ready, report results and end your turn; if you requested a final check, end the turn and wait for the Orbit finalization_notice or corrections — do not stop the task just to deliver, do not poll. For a normal delivery after that notice, call stop and finish the turn normally: Orbit queues the stop and completes it after your turn, so the final summary is fully delivered; the user explicitly asking to interrupt stops immediately. Do not start for discussion. Root is never replaced.';
 export const toolArgs = z => ({
-        action: z.enum(['context', 'start', 'status', 'check', 'amend', 'dispute', 'stop']),
+        action: z.enum(['context', 'start', 'status', 'check', 'amend', 'dispute', 'stop', 'review-model']),
         task: z.string().optional().describe('Required for status/check/amend/dispute/stop: the exact task_directory string returned by action=start. Never write .orbit/inbox manually.'),
         basis: z.array(z.string()).optional(), message_id: z.string().optional(),
         review_model: z.string().optional(),
@@ -101,11 +101,16 @@ export function createOrbitHost({ provider, project, dispatch, bind, reset }) {
           tasks.set(id, result);
           return JSON.stringify(result);
         }
-        if (!a.task) throw new Error('This action needs the task: pass task: <task_directory returned by start> to the orbit tool (status/check/amend/dispute/stop all take it). Do NOT write .orbit/inbox manually.');
+        if (!a.task) throw new Error('This action needs the task: pass task: <task_directory returned by start> to the orbit tool (status/check/amend/dispute/stop/review-model all take it). Do NOT write .orbit/inbox manually.');
+        if (a.action === 'review-model' && (typeof a.review_model !== 'string' || !a.review_model.trim()))
+          throw new Error('review-model requires review_model: <provider/id> (Root reselection after a blocked check; never auto-retries or switches a check in flight)');
         await ownedTask(a.task, id);
         const args = [a.action, a.task];
         if (['status', 'stop'].includes(a.action)) args.push('--json');
         if (a.action === 'stop') args.push('--complete'); // Root-tool stop is a deliberate completion hand-off
+        if (a.action === 'review-model') {
+          args.push('--model', a.review_model.trim());
+        }
         if (a.action === 'amend') {
           if (!a.text?.trim()) throw new Error('Provide the original amendment');
           args.push('--file', '-');

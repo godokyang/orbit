@@ -35,8 +35,9 @@ module Orbit
     }.freeze
 
     # Second-stage delegation judgment, asked only after the caller's own
-    # structural checks pass. Wording is frozen in
-    # docs/plan/jev-delegation-optimization.md; the caller supplies member
+    # structural checks pass. The member_fit and parallel_gain wording is
+    # frozen in docs/plan/jev-delegation-optimization.md; cost_appropriate
+    # follows the ADR-009 coarse cost tiers. The caller supplies member
     # options and the bounded evidence comparison inside state.
     DELEGATION_QUESTIONS = {
       "member_fit" => {
@@ -53,13 +54,22 @@ module Orbit
       },
       "cost_appropriate" => {
         "type" => "noul",
-        "instructions" => "Given the supplied route identity and submitter-provided price or quota-band evidence for the callable member option, is that coarse band proportionate to the best bounded subtask? Judge the candidate's coarse price or subscription/quota band against the size and value of that bounded subtask; the program checks that route and band facts are present, not the number against the vendor page. A direct-API route is evidenced by per-token cost facts; a subscription/quota route is evidenced by plan or quota-band facts, and those must never be read as per-token API prices. Do not convert currencies, compare it with the caller's own billing route, or rank providers by name or brand. Treat a missing or stale route or band fact as unknown; unknown cost is not free and must not raise this score.",
-        "criteria" => { "true" => "The submitted coarse price or quota band is proportionate for this bounded subtask",
-                        "false" => "The band is disproportionate for this bounded subtask, or the route or band evidence is unknown" }
+        "instructions" => "Given the submitter-provided coarse cost tier (low, medium, high, or unknown) with its source and confidence annotation for the callable member option, is that cost burden proportionate to the best bounded subtask? Judge the candidate's coarse price or subscription/quota burden tier against the size and value of the bounded subtask; the program checks only that a submitted tier carries a source and confidence annotation, not exact numbers against the vendor page. A clearly labeled low-confidence estimate from vendor or model positioning is acceptable evidence. Per-use API pricing and subscription quota must never be converted into a single fake per-token price or compared as if interchangeable. Do not convert currencies, compare it with the caller's own billing route, or rank providers by name or brand. Treat a missing, stale or unevaluated tier as unknown; unknown cost is not free and must not raise this score, and an unknown tier alone must not lower this score when the candidate already meets the quality and time bars. Any user-set hard budget is enforced separately by the calling program's runtime code, not by this question.",
+        "criteria" => { "true" => "A known coarse cost tier is proportionate for this bounded subtask",
+                        "false" => "A known coarse cost tier is disproportionate for this bounded subtask" }
       }
     }.freeze
 
     class Error < StandardError; end
+
+    # Per-candidate ADR-009 §3 questions for the pool recommendation stage.
+    # Quality must clear the line from sourced evidence and the task
+    # requirements alone — never from a model, provider or brand name. Time
+    # must survive handoff, rework, integration, contention and verification.
+    # Cost tiers are program-read from validated cache entries, not judged
+    # here and never guessed by brand.
+    CANDIDATE_QUALITY_TEXT = "Is this candidate model likely to meet the best bounded subtask's acceptance bar using only information that can be passed in a bounded handoff, judged from the supplied sourced evidence for THIS candidate and the task requirements? Do not infer capability from the model, provider or brand name alone, and do not treat a matching identity with the caller as evidence of parity. Treat missing, stale or unsourced evidence as unknown and do not raise this score without sourced support."
+    CANDIDATE_TIME_TEXT = "Would delegating the best bounded subtask to THIS candidate now likely shorten the overall critical path once handoff, expected rework, integration, shared-resource contention and verification are included? Output speed alone is not task completion speed."
 
     AMENDMENT_BUDGET = 8000
     AMENDMENT_TEXT_LIMIT = 1200
@@ -92,6 +102,84 @@ module Orbit
     # structure around, not something this stage fabricates.
     def assess_delegation(state:)
       post_questions(state: state, questions: DELEGATION_QUESTIONS)
+    end
+
+    # Per-candidate pool judgment (ADR-009 §3): one quality-line and one
+    # end-to-end-time noul question per candidate, each labeled by index and
+    # naming the candidate's agent and model. Cost tiers are not asked here;
+    # the caller reads them from validated cache entries.
+    def assess_candidates(state:, candidates:)
+      questions = {}
+      candidates.each_with_index do |candidate, index|
+        label = "candidate #{index} (agent #{candidate['agent']}, model #{candidate['provider']}/#{candidate['model']}): "
+        questions["candidate_#{index}_quality"] = {
+          "type" => "noul",
+          "instructions" => label + CANDIDATE_QUALITY_TEXT,
+          "criteria" => { "true" => "This candidate is likely to meet the acceptance bar from a bounded handoff, supported by the supplied sourced evidence",
+                          "false" => "This candidate is unlikely to meet the bar, or the sourced evidence is missing, stale or insufficient" }
+        }
+        questions["candidate_#{index}_time"] = {
+          "type" => "noul",
+          "instructions" => label + CANDIDATE_TIME_TEXT,
+          "criteria" => { "true" => "Delegating to this candidate likely shortens the overall critical path once handoff, rework, integration, contention and verification are included",
+                          "false" => "Delegation to this candidate is unlikely to shorten the critical path, or the evidence is insufficient" }
+        }
+      end
+      result = post_questions(state: state, questions: questions)
+      scores = candidates.each_index.to_h do |index|
+        [index.to_s, { "quality" => result["scores"].fetch("candidate_#{index}_quality"),
+                       "time" => result["scores"].fetch("candidate_#{index}_time") }]
+      end
+      { "model" => result["model"], "scores" => scores, "usage" => result["usage"] }
+    end
+
+    # ADR-009 checker quality and time gate. The caller supplies the current
+    # task instruction and each candidate's already-bounded cached evidence;
+    # this asks two typed noul questions per candidate in one request — quality
+    # fit and expected end-to-end independent-check time including rework — and
+    # maps the answers back to provider/id. It does not read caches, infer from
+    # a model or provider name, and never treats a credential, a single
+    # benchmark number or output speed as capability or task time.
+    def assess_checker_quality(state:, candidates:)
+      list = Array(candidates)
+      raise Error, "at least one checker candidate is required" if list.empty?
+
+      questions = {}
+      list.each_with_index do |candidate, index|
+        model = candidate.fetch("model").to_s
+        questions["quality_#{index}"] = {
+          "type" => "noul",
+          "instructions" => "Checker candidate #{model}: given the current task instruction and this candidate's bounded cached model " \
+                            "evidence (sources and metrics such as quality and local_samples), is that evidence sufficient to judge the " \
+                            "model can meet the quality bar for an independent read-only review of this task's artifact? A credential, a " \
+                            "matching model or provider name, or a single benchmark number is not capability evidence. Missing, stale or empty " \
+                            "evidence is unknown. Answer true only when the supplied evidence is verifiable and specifically supports quality " \
+                            "for this kind of task.",
+          "criteria" => {
+            "true" => "Verifiable cached evidence supports quality for this kind of task",
+            "false" => "Evidence is missing, stale, unsupported or insufficient for this kind of task"
+          }
+        }
+        questions["time_#{index}"] = {
+          "type" => "noul",
+          "instructions" => "Checker candidate #{model}: given the current task artifact and this candidate's bounded evidence, would an " \
+                            "independent read-only check by this model most likely finish end-to-end quickly, counting the check itself, any " \
+                            "rework after a weak or failed earlier check, and Root's follow-up? Output tokens per second alone is not " \
+                            "end-to-end task time. Answer true only when the supplied evidence gives a concrete basis to expect a fast " \
+                            "end-to-end check; no basis is unknown.",
+          "criteria" => {
+            "true" => "Concrete evidence supports a fast end-to-end independent check including rework",
+            "false" => "No concrete basis, or the evidence suggests a slower end-to-end check"
+          }
+        }
+      end
+      result = post_questions(state: state, questions: questions)
+      scores = list.each_with_index.to_h do |candidate, index|
+        [candidate.fetch("model").to_s,
+         { "quality" => result.fetch("scores").fetch("quality_#{index}"),
+           "time" => result.fetch("scores").fetch("time_#{index}") }]
+      end
+      { "model" => result.fetch("model"), "scores" => scores, "usage" => result["usage"] }
     end
 
     private

@@ -193,13 +193,29 @@ module InstallTest
     _out, err, status = Open3.capture3({ "PATH" => stub + File::PATH_SEPARATOR + ENV.fetch("PATH"),
                                         "STUB_OUT" => recorded, "STUB_ENV" => exported, "PI_CONFIG_FILES" => nil },
                                        File.join(@bin, "orbit"), "omp", *args)
-    expected = ["-e", File.join(active, "plugins/omp.mjs"), *args]
+    lines = File.read(recorded).split("\n")
+    extension = File.join(active, "plugins/omp.mjs")
     overlay = File.join(active, "plugins/omp-idle-parking.yml")
     exported_overlay = File.read(exported).strip
-    assert(status.success? && File.read(recorded).split("\n") == expected &&
+    assert(status.success? &&
+           lines.length == args.length + 4 &&
+           lines[0] == "-e" && lines[2] == "-e" && lines[3] == extension &&
+           lines[1].include?(Orbit::OmpEntry::SESSION_AGENT_TMP_PREFIX) &&
+           lines[4..] == args &&
            File.file?(overlay) && File.file?(exported_overlay) &&
            File.realpath(exported_overlay) == File.realpath(overlay),
-           "installed orbit omp loads the release extension, keeps native arguments and exports the installed idle-parking overlay (#{err})")
+           "installed orbit omp loads the session agent root before the release extension, keeps native arguments and exports the installed idle-parking overlay (#{err})")
+    # The session agent root the entry created must be a loadable private root:
+    # valid module package marker, index.js entry and an agents directory. It is
+    # cleaned up here (the fixture never starts OMP, so no extension shutdown
+    # will run); production cleanup is the extension's session_shutdown path.
+    session_root = lines[1]
+    assert(File.directory?(session_root) && File.file?(File.join(session_root, "index.js")) &&
+           File.directory?(File.join(session_root, "agents")) &&
+           JSON.parse(File.read(File.join(session_root, "package.json"))) == { "type" => "module" },
+           "session agent root carries index.js, agents/ and a valid module package.json: #{session_root}")
+  ensure
+    FileUtils.remove_entry(session_root) if session_root && File.directory?(session_root)
   end
 
   def bump

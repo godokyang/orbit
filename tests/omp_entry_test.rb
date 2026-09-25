@@ -62,6 +62,38 @@ module OmpEntryTest
            "only the explicit Orbit extension is added; ambient extensions stay enabled")
   end
 
+  def command_with_session_agents_puts_the_session_root_first
+    argv = Orbit::OmpEntry.command(["--resume", "sess-1"], session_agents: "/tmp/orbit-session-agents-x")
+    assert(argv == ["omp", "-e", "/tmp/orbit-session-agents-x", "-e", Orbit::OmpEntry::EXTENSION, "--resume", "sess-1"],
+           "session agent root must come before the Orbit extension without a duplicate omp token")
+    assert(Orbit::OmpEntry.command(["hi"]) == ["omp", "-e", Orbit::OmpEntry::EXTENSION, "hi"],
+           "without a session root the historical shape is preserved")
+  end
+
+  def prepare_session_agent_root_creates_loadable_private_root
+    Dir.mktmpdir("orbit-entry-root-") do |tmp|
+      root = Orbit::OmpEntry.prepare_session_agent_root(tmpdir: tmp)
+      assert(File.file?(File.join(root, "index.js")), "index.js entry is required (index.mjs is not loaded)")
+      assert(File.directory?(File.join(root, "agents")), "agents directory exists")
+      assert(File.read(File.join(root, "package.json")) == Orbit::OmpEntry::JSON_MODULE_PACKAGE,
+             "package.json pins module parsing for the index.js entry")
+      require "json"
+      parsed = JSON.parse(File.read(File.join(root, "package.json")))
+      assert(parsed == { "type" => "module" }, "package.json must be valid JSON, got: #{File.read(File.join(root, 'package.json')).inspect}")
+      assert(File.read(File.join(root, "index.js")).include?("export default"),
+             "the entry is an ESM factory")
+      # Stale roots from other sessions must NOT be swept by age: a quiet
+      # long-running session can sit untouched for days.
+      stale = File.join(tmp, "#{Orbit::OmpEntry::SESSION_AGENT_TMP_PREFIX}old")
+      FileUtils.mkdir_p(stale)
+      past = Time.now.utc - (3 * 24 * 60 * 60)
+      FileUtils.touch(stale, mtime: past)
+      Orbit::OmpEntry.prepare_session_agent_root(tmpdir: tmp)
+      assert(File.directory?(stale), "another session's root must survive our preparation")
+      FileUtils.remove_entry(root)
+    end
+  end
+
   def idle_parking_overlay_only_sets_the_process_local_task_ttl
     overlay = Orbit::OmpEntry::IDLE_PARKING_OVERLAY
     assert(File.file?(overlay), "the idle-parking overlay ships with the entry")
@@ -89,7 +121,12 @@ module OmpEntryTest
       _stdout, stderr, status = Open3.capture3(env.merge("PI_CONFIG_FILES" => "/tmp/user.yml"),
                                                RbConfig.ruby, "--disable-gems", ENTRY, "omp", *argv)
       assert(status.success?, "the stub launch succeeds (#{stderr})")
-      assert(File.read(out).split("\n") == ["-e", Orbit::OmpEntry::EXTENSION, *argv],
+      lines = File.read(out).split("\n")
+      assert(lines[0] == "-e" && lines[2] == "-e" && lines[3] == Orbit::OmpEntry::EXTENSION,
+             "the session agent root precedes the Orbit extension: #{lines.inspect}")
+      assert(lines[1].include?(Orbit::OmpEntry::SESSION_AGENT_TMP_PREFIX) && File.file?(File.join(lines[1], "index.js")),
+             "a private session agent root with the index.js entry is passed: #{lines[1].inspect}")
+      assert(lines[4..] == argv,
              "every native flag, including the user's own --config and --profile, stays untouched")
       assert(File.read("#{out}.env").strip ==
                "/tmp/user.yml#{File::PATH_SEPARATOR}#{Orbit::OmpEntry::IDLE_PARKING_OVERLAY}",
@@ -130,8 +167,9 @@ module OmpEntryTest
       argv = ["--model", "openai/gpt-5.2", "--resume", "sess-1"]
       stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, "--disable-gems", ENTRY, "omp", *argv)
       assert(status.exitstatus == 23, "the native exit code is preserved (got #{status.exitstatus}: #{stderr})")
-      assert(File.read(out).split("\n") == ["-e", Orbit::OmpEntry::EXTENSION, *argv],
-             "the real entry launches omp with the explicit extension and the untouched argv")
+      lines = File.read(out).split("\n")
+      assert(lines[0] == "-e" && lines[2] == "-e" && lines[3] == Orbit::OmpEntry::EXTENSION && lines[4..] == argv,
+             "the real entry launches omp with the session root, the explicit extension and the untouched argv: #{lines.inspect}")
       assert(stdout.empty?, "the wrapper adds no output of its own")
     end
   end
@@ -140,14 +178,16 @@ module OmpEntryTest
     with_stub_omp(7) do |env, out|
       stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, "--disable-gems", ENTRY, "omp", "--help")
       assert(status.exitstatus == 7, "orbit omp --help reaches omp and keeps its exit code (got #{status.exitstatus}: #{stderr})")
-      assert(File.read(out).split("\n") == ["-e", Orbit::OmpEntry::EXTENSION, "--help"],
-             "the native --help is passed through untouched")
+      lines = File.read(out).split("\n")
+      assert(lines[0] == "-e" && lines[2] == "-e" && lines[3] == Orbit::OmpEntry::EXTENSION && lines[4] == "--help",
+             "the native --help is passed through untouched: #{lines.inspect}")
       assert(stdout.empty?, "the wrapper adds no help text of its own")
     end
     with_stub_omp(7) do |env, out|
       Open3.capture3(env, RbConfig.ruby, "--disable-gems", ENTRY, "omp", "-h")
-      assert(File.read(out).split("\n") == ["-e", Orbit::OmpEntry::EXTENSION, "-h"],
-             "the native -h is passed through too")
+      lines = File.read(out).split("\n")
+      assert(lines[0] == "-e" && lines[2] == "-e" && lines[3] == Orbit::OmpEntry::EXTENSION && lines[4] == "-h",
+             "the native -h is passed through too: #{lines.inspect}")
     end
     with_stub_omp(99) do |env, out|
       stdout, = Open3.capture3(env, RbConfig.ruby, "--disable-gems", ENTRY, "help", "omp")
@@ -161,6 +201,8 @@ module OmpEntryTest
     extension_is_the_repository_orbit_extension
     command_passes_native_arguments_and_the_explicit_extension
     command_keeps_other_extensions_enabled
+    command_with_session_agents_puts_the_session_root_first
+    prepare_session_agent_root_creates_loadable_private_root
     idle_parking_overlay_only_sets_the_process_local_task_ttl
     launch_env_appends_the_overlay_after_existing_config_files
     real_entry_exports_the_overlay_without_touching_native_flags

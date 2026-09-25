@@ -45,10 +45,10 @@ Root 仍决定具体执行票、成员和是否调用 `delegate`。Orbit 不自�
 delegatable >= 0.60
 member_fit >= 0.55
 parallel_gain >= 0.50
-cost_appropriate >= 0.50   # 且通过计费路由 fail-closed 门
+cost_appropriate >= 0.50   # 旧默认成员接口；2026-09-25 ADR-009 起池内路径只用粗档费用排序，不构成硬门
 ```
 
-`cost_appropriate` 门（2026-09-24 随源码落地，2026-09-25 按端点结构性证明修订；模型侧行为未验收）：阈值 0.50 为最小约定值（无校准证据）；硬要求是路由或事实未知时**永不提示**。原生成员路由由 OMP host 从解析出的 `@task` 端点（HTTPS host 与 path 前缀）与传输方式做结构性判定，**不按 provider 名称推断**（仅接受 HTTPS 端点，http 或自定义 scheme 一律 unknown）：`direct_api` 仅接受已验证的第一方按量端点（当前为 DeepSeek 官方 `https://api.deepseek.com`）；`subscription_quota` 仅接受已验证的第一方套餐端点（zhipu-coding-plan 官方 `https://open.bigmodel.cn` 的 `/api/coding/` 路径、kimi-code 官方 `https://api.kimi.com` 的 `/coding/` 路径）；两者都要求传输方式不是 `pi-native`。每个被比较候选的证据条目须在缓存有效期窗口内、`billing_route` 以类型化身份（provider/model/reasoning/route）匹配同一路由，并带对应命名空间的数值型事实：`direct_api` 用 `cost.*`，`subscription_quota` 用 `quota.*`（提交附来源 URL，Orbit 只校验结构与数值形态，不抓取 URL、不做语义核实）。其它 provider、自定义或未验证端点、unknown、无路由或无对应事实一律 fail closed，任务记 `cost route or required fact is not verified; no automatic delegation hint`。用户明确授权的原生派发不受此门影响。基于模型的 cost 门真实表现尚无真实样本验证。
+粗档费用（2026-09-24 随源码落地，2026-09-25 按 ADR-009 修订为纯排序口径；已通过真实验收）：池内执行候选先过质量线与端到端时间线，再按 time 分数（fast／medium／slow）与提交者在缓存中记录的、带来源的粗档 `cost_tier`（低／中／高与置信度）排序；`cost_tier` 缺失记为未知，未知不是免费，排在最后但**不构成自动拒绝的硬门**。旧接口（会话未暴露模型目录时的默认成员比较）保留 `cost_appropriate` 与 `cost.*`／`quota.*` 事实用于比较口径。两条路径都不按品牌或 provider 名称推断、不把按量 API 与订阅额度折算为统一每 token 价、不换算货币。路由的类型化身份（provider/model/reasoning/billing_route）与端点结构证明仍用于校验来源与身份匹配。本轮不增加费用硬预算机制；只有用户显式设置的 deadline 构成硬停止线。基于模型的费用表现（实际金额）未做独立验证，不影响粗档排序口径的验收。
 
 第一阶段门槛于 2026-09-22 用首组真实正负样本校准：明确包含两个独立工作面的任务首次得到 0.64，
 单文件小任务得到 0.18，并在后续观察中保持明显间隔，因此从未校准的 0.80 调为 0.60。它只决定是否值得
@@ -58,7 +58,11 @@ cost_appropriate >= 0.50   # 且通过计费路由 fail-closed 门
 调为 0.50。三个维度不按同一量纲加权。任何硬条件不满足都不提示；
 一次判断只推荐一个边界最清晰、预期收益最高的完整执行票。JEV 不选择 `kind`，也不调用 `delegate`。
 
-2026-09-24 用户确认：分工建议必须同时考虑端到端完成时间与费用。时间仍只由 `parallel_gain` 判断。费用必须是有证据的粗档判断，不是叙述。用户举过的 Codex／Claude 与 GLM／Kimi 例子只是说明，不是固定档位。**费用门已随源码落地（三个定型问题 + `cost_appropriate >= 0.50` + 计费路由 fail-closed 门，见上）；基于模型的 cost 门真实表现尚未经真实样本验收**。计费路由 typed 身份（provider/model/reasoning/billing_route）已采纳；2026-09-25 产品决定：`direct_api`（数值 `cost.*`）与已验证 `subscription_quota`（数值 `quota.*`）都可授权 cost 门，路由按宿主解析端点 host+path 与传输方式证明，不按 provider 名称。
+2026-09-24 用户确认：分工建议必须同时考虑端到端完成时间与费用。时间仍只由 `parallel_gain` 判断。费用必须是有证据的粗档判断，不是叙述。用户举过的 Codex／Claude 与 GLM／Kimi 例子只是说明，不是固定档位。**粗档费用排序已随源码落地（成员池路径用 `cost_tier`，旧路径用 `cost_appropriate` + typed 路由事实，见上）；基于模型的费用表现尚未经真实样本验收**。2026-09-25 ADR-009 产品决定：候选池与当前会话可选列表的交集优先，质量先过线、再过端到端时间线，随后按 time 分数与粗档费用排序；`cost_tier` 未知只影响排序，不构成自动拒绝；不按品牌或 provider 名称排名。本轮不增加费用硬预算机制。
+
+### 检查者选模（ADR-009）
+
+独立检查者与执行成员共用同一候选池，但还要通过检查者隔离环境的模型目录与凭据解析；主会话可选而隔离会话无法解析的模型不自动推荐给检查者。选模顺序为：候选池 ∩ 当前会话可选列表 → 质量线（JEV 对每个候选的 `quality`，阈值 0.55）→ 隔离可解析性 → 端到端时间档位（fast／medium／slow，用于排序，不设时间资格线）→ 粗档费用 → 优先与写代码模型不同的家族 → 池内顺序。用户显式 `--review-model`／`ORBIT_REVIEW_MODEL` 始终优先，可在池外并记录提示；候选池为空时检查者沿用现有默认模型行为；池非空却没有合格检查模型时报错要求显式指定，不擅自使用池外默认模型。检查已开始后不切换模型；真实认证或额度失败时保持任务运行并阻塞，等待 Root 用 `orbit review-model TASK --model provider/id` 显式重选，不自动重试或换模。选模的 JEV 消耗与单调耗时记录在 `review.selection`，当前不进入任务用量汇总（见[当前限制](debt-ledger.md)）。**选模规则与命令已随源码落地并通过真实验收；逐次检查前重选与失败后阻塞／重选的运行时接线已有真实失败路径样本；池内自动（非显式）正选择仅由确定性测试覆盖（live 尝试被质量线正确拒绝）。**
 
 ### JEV 问题文本
 
@@ -110,8 +114,8 @@ Orbit 不维护内置模型画像，也不要求用户配置相对速度。Orbit
 4. Root 通过新增的 `model_evidence` 控制操作提交 JSON；CLI 对应
    `orbit model-evidence TASK_DIRECTORY --file FILE|-`。该操作只接受模型事实证据，不修改用户要求，不能复用 `amend`。
 5. 运行程序校验模型标识、指标口径、来源 URL、取得时间和有效期，原子更新用户级缓存，再从有效证据派生
-   Root 与候选成员的比较摘要，判断 `member_fit`、`parallel_gain` 与 `cost_appropriate`（价格或套餐额度只结构校验，不做语义核实）。
-6. 满足全部条件（含计费路由 fail-closed 门）才发送最终委派提示；证据请求、检索失败、判断和最终提示分别记录，不能把前两者说成已委派。
+   Root 与候选成员的比较摘要，判断 `member_fit`、`parallel_gain` 与粗档费用（池路径读 `cost_tier`，旧路径读 `cost_appropriate`；价格或套餐额度只结构校验，不做语义核实）。
+6. 满足全部条件（含粗档费用判断）才发送最终委派提示；证据请求、检索失败、判断和最终提示分别记录，不能把前两者说成已委派。
 
 来源优先级为：
 
@@ -189,7 +193,7 @@ Orbit 不维护内置模型画像，也不要求用户配置相对速度。Orbit
 
 - 速度：优先使用本地同类任务墙钟数据；没有样本时使用公开端到端延迟与输出速度作为先验。
 - 质量：以首次验收通过率、返工次数／时间和相关 coding／agentic 评测表示，主要进入预期返工。
-- token／费用：记录 Root、JEV、成员和检查链可得的实际用量；用户硬预算是门槛，普通成本用于收益比较，
+- token／费用：记录 Root、JEV、成员和检查链可得的实际用量；本轮不增加费用硬预算机制，普通成本用于收益比较，
   不从墙钟时间推算缺失用量。
 
 ## 调用频率与状态

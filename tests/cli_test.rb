@@ -431,15 +431,19 @@ module CliTest
   def model_evidence_caches_object_and_queues_dedicated_command
     record = task
     help = cli("model-evidence", "--help")
-    assert(help.include?("billing_route") && help.include?("省略按 unknown"),
-           "the JSON example documents billing_route and the omission default")
-    reply = JSON.parse(cli("model-evidence", record.path, "--file", "-", stdin_data: JSON.generate(evidence("model" => "deepseek-v4.8"))))
+    assert(help.include?("billing_route") && help.include?("省略按 unknown") && help.include?("cost_tier"),
+           "the JSON example documents billing_route, the omission default and the optional coarse cost tier")
+    reply = JSON.parse(cli("model-evidence", record.path, "--file", "-", stdin_data: JSON.generate(
+      evidence("model" => "deepseek-v4.8", "cost_tier" => { "band" => "medium", "confidence" => "low",
+                                                            "basis" => "vendor list price band" })
+    )))
     assert(reply["status"] == "queued" && reply["count"] == 1 &&
            reply["identities"] == [{ "provider" => "opencode-go", "model" => "deepseek-v4.8", "reasoning" => "default",
                                      "billing_route" => "unknown" }],
            "the reply names the queued identity including the typed billing route")
-    assert(!JSON.generate(reply).include?("metrics") && !JSON.generate(reply).include?("http"),
-           "the reply does not echo metrics or source URLs")
+    assert(!JSON.generate(reply).include?("metrics") && !JSON.generate(reply).include?("http") &&
+           !JSON.generate(reply).include?("list price"),
+           "the reply does not echo metrics, source URLs or cost-tier text")
 
     command = JSON.parse(File.read(commands(record).fetch(0)))
     assert(command["type"] == "model_evidence" && command.dig("source", "command") == "model-evidence" &&
@@ -448,8 +452,9 @@ module CliTest
            !command.key?("text") && !command.key?("metrics"),
            "the dedicated command carries the typed identity and status, not the submitted body")
     stored = JSON.parse(File.read(File.join(@temp, "orbit", "model-evidence-v1.json")))
-    assert(stored.fetch("entries").length == 1 && stored.dig("entries", 0, "metrics", "output_tokens_per_second", "value") == 120.5,
-           "the validated entry is cached for the runtime to re-read")
+    assert(stored.fetch("entries").length == 1 && stored.dig("entries", 0, "metrics", "output_tokens_per_second", "value") == 120.5 &&
+           stored.dig("entries", 0, "cost_tier") == { "band" => "medium", "confidence" => "low", "basis" => "vendor list price band" },
+           "the validated entry and its optional coarse cost tier are cached for the runtime to re-read")
   end
 
   # A batch is validated as a whole; rejections and ended tasks write neither
@@ -479,6 +484,51 @@ module CliTest
     assert(terminal.include?("task process has ended") && commands(settled).empty?, "a terminal task is rejected before queueing")
     stored = JSON.parse(File.read(File.join(@temp, "orbit", "model-evidence-v1.json")))
     assert(stored.fetch("entries").length == 2, "rejected submissions leave the cache unchanged")
+  end
+
+  # ADR-009: after a real auth/quota failure the task stays alive but blocked,
+  # and only Root's explicit choice changes the next check model. The command
+  # queues that choice, never auto-retries, and refuses a finished task.
+  def review_model_queues_only_by_explicit_choice_and_status_shows_the_block
+    record = task
+    help = cli("review-model", "--help")
+    assert(help.include?("provider/id") && help.include?("候选池外") && help.include?("任务结束记录不再接受"),
+           "the review-model help states the explicit-choice contract")
+
+    missing = cli("review-model", record.path, success: false)
+    invalid = cli("review-model", record.path, "--model", "glm-5.2", success: false)
+    assert(missing.include?("usage: orbit review-model") && invalid.include?("provider/id") && commands(record).empty?,
+           "a missing or invalid model is rejected before queueing")
+
+    reply = JSON.parse(cli("review-model", record.path, "--model", "zenmux/x-ai/grok-4.7", "--reason", "auth 失败后改用"))
+    assert(reply["status"] == "queued" && reply["model"] == "zenmux/x-ai/grok-4.7" && !reply["command_id"].to_s.empty?,
+           "an explicit model is queued with the chosen identity")
+    command = JSON.parse(File.read(commands(record).fetch(0)))
+    assert(command["type"] == "review_model" && command["model"] == "zenmux/x-ai/grok-4.7" &&
+           command["reason"] == "auth 失败后改用" && command.dig("source", "command") == "review-model",
+           "the inbox command carries the explicit model and reason")
+    File.unlink(commands(record).fetch(0))
+
+    settled = task("complete")
+    terminal = cli("review-model", settled.path, "--model", "zenmux/x-ai/grok-4.7", success: false)
+    assert(terminal.include?("task process has ended") && commands(settled).empty?,
+           "a terminal task rejects a model change no process would apply")
+
+    blocked = task("running",
+                   "review" => {
+                     "model" => "zhipu-coding-plan/glm-5.2",
+                     "selection" => { "model" => "zenmux/x-ai/grok-4.7" },
+                     "blocked" => { "model" => "zenmux/x-ai/grok-4.7", "kind" => "check_failed",
+                                    "failure_kind" => "auth_or_quota", "reason" => "provider returned 401" }
+                   },
+                   "checks" => [{ "status" => "failed", "error" => "provider returned 401" }])
+    text = cli("status", blocked.path)
+    assert(text.include?("检查模型：zenmux/x-ai/grok-4.7"), "status shows the model actually used for checks")
+    assert(text.include?("检查阻塞：模型 zenmux/x-ai/grok-4.7（auth_or_quota）") &&
+           text.include?("provider returned 401") && text.include?("orbit review-model"),
+           "status shows the block and the explicit recovery action")
+    assert(text.include?("最近检查：失败 — provider returned 401") && text.include?("任务保持运行"),
+           "status shows the failed check as not adopted")
   end
 
   def jev_state(decision: nil, delegatable: 0.91, member_fit: 0.63, parallel_gain: 0.40)
@@ -567,6 +617,53 @@ module CliTest
            "other submit responses stay compatible")
   end
 
+  # The OMP extension bridge reuses the shared pool file: list/add/remove each
+  # print one JSON document, and an id whose remainder contains a slash is kept
+  # intact across separate CLI invocations.
+  def model_candidates_bridge_round_trips_and_keeps_ids_with_slashes
+    assert(JSON.parse(cli("model-candidates", "list")) == { "models" => [] }, "an empty pool lists as an empty JSON array")
+
+    assert(JSON.parse(cli("model-candidates", "add", "zhipu-coding-plan/glm-5.2")) ==
+           { "models" => ["zhipu-coding-plan/glm-5.2"] }, "add prints the resulting pool")
+    added = JSON.parse(cli("model-candidates", "add", "zenmux/x-ai/grok-4.7"))
+    assert(added == { "models" => ["zhipu-coding-plan/glm-5.2", "zenmux/x-ai/grok-4.7"] },
+           "a multi-segment id is stored and printed intact")
+    assert(JSON.parse(cli("model-candidates", "list")) == added, "a separate invocation reads the persisted pool")
+
+    secret = "sk-credential-sentinel"
+    output = cli("model-candidates", "remove", "zenmux/x-ai/grok-4.7", env: { "OPENCODE_GO_API_KEY" => secret })
+    assert(JSON.parse(output) == { "models" => ["zhipu-coding-plan/glm-5.2"] }, "remove prints the remaining pool")
+    assert(!output.include?(secret), "the bridge never echoes an ambient credential")
+
+    path = File.join(@temp, "orbit", "model-candidates.json")
+    document = JSON.parse(File.read(path))
+    assert(document.keys.sort == %w[models schema_version] && document["schema_version"] == "orbit-model-candidates-v1" &&
+           document["models"] == ["zhipu-coding-plan/glm-5.2"],
+           "the bridge reuses the versioned pool file and stores no extra fields")
+  end
+
+  # Rejections exit non-zero, leave the pool untouched, and never print the
+  # rejected value; a successful call writes only JSON to stdout.
+  def model_candidates_bridge_fails_closed_without_echoing_input
+    cli("model-candidates", "add", "provider/good")
+    path = File.join(@temp, "orbit", "model-candidates.json")
+    before = File.read(path)
+
+    secret = "sk-pasted-by-mistake"
+    rejected = cli("model-candidates", "add", secret, success: false)
+    assert(rejected.include?("provider/id") && !rejected.include?(secret),
+           "a malformed argument is rejected without echoing the pasted value")
+    assert(File.read(path) == before, "a rejected add leaves the pool unchanged")
+    assert(cli("model-candidates", "frobnicate", success: false).include?("usage:"), "an unknown subcommand is rejected")
+    assert(cli("model-candidates", "add", success: false).include?("required"), "a missing model argument is rejected")
+
+    out, err, status = Open3.capture3({ "XDG_CONFIG_HOME" => @temp, "XDG_CACHE_HOME" => @temp },
+                                      RbConfig.ruby, "--disable-gems", ENTRY, "model-candidates", "list",
+                                      chdir: @project)
+    assert(status.success? && err.empty? && JSON.parse(out) == { "models" => ["provider/good"] },
+           "a successful bridge call writes only the JSON document to stdout")
+  end
+
   def maintenance_requires_an_installed_cli
     %w[update uninstall].each { |command| cli(command, success: false) }
     assert(cli("start", "--help").include?("--provider"), "execution details are available in subcommand help")
@@ -604,8 +701,11 @@ module CliTest
        rebind_workspace_queues_and_legacy_status_reads_project_root
        model_evidence_caches_object_and_queues_dedicated_command
        model_evidence_accepts_array_and_rejects_invalid_or_terminal
+       review_model_queues_only_by_explicit_choice_and_status_shows_the_block
        status_separates_delegatable_score_from_final_decision
        check_next_action_ends_the_turn
+       model_candidates_bridge_round_trips_and_keeps_ids_with_slashes
+       model_candidates_bridge_fails_closed_without_echoing_input
        maintenance_requires_an_installed_cli
        jev_setup_exports_key_in_new_shell].each do |test|
       Dir.mktmpdir("orbit-cli-test-") do |tmp|

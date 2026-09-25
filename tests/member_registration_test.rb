@@ -100,6 +100,53 @@ begin
   unconfirmed = rediscovery.members.find { |member| member["thread_id"] == "orbit-b" }
   assert(unconfirmed["abort_confirmed"] == false, "unconfirmed abort must be explicit for TaskRuntime")
 
+  # ADR-009 model drift: dedicated update path on an already-registered member.
+  # It must NOT go through register_member (duplicate_member_id refusal) and
+  # must keep the original registration entry intact. Fresh record: the shared
+  # `record` above deliberately has a corrupt members.json at this point.
+  driftrec = record_for(@project)
+  drift = driftrec.register_member("orbit-drift", requested_name: "orbit-drift", model: "stub/m1")
+  assert(drift["ok"], "drift fixture registration failed: #{drift.inspect}")
+  recorded = driftrec.record_member_model_drift("orbit-drift", expected: "stub/m1", actual: "stub/m2",
+    abort_attempted: true, abort_confirmed: false)
+  assert(recorded["ok"], "drift record failed: #{recorded.inspect}")
+  entry = driftrec.members.find { |member| member["thread_id"] == "orbit-drift" }
+  assert(entry["status"] == "registered", "drift must not rewrite the registration status: #{entry.inspect}")
+  assert(entry["model"] == "stub/m1", "original pinned model must survive: #{entry.inspect}")
+  assert(entry["model_drift"]["expected"] == "stub/m1" && entry["model_drift"]["actual"] == "stub/m2", "drift block wrong: #{entry.inspect}")
+  assert(entry["model_drift"]["abort_attempted"] == true, "abort_attempted must be persisted: #{entry.inspect}")
+  assert(entry["model_drift"]["abort_confirmed"] == false, "unconfirmable abort must be explicit: #{entry.inspect}")
+  assert(entry["model_drift"]["recorded_at"].is_a?(String), "recorded_at missing: #{entry.inspect}")
+  # Slashed model ids (e.g. zenmux/x-ai/grok-4.7) are valid identifiers.
+  slashed = driftrec.record_member_model_drift("orbit-drift", expected: "zenmux/x-ai/grok-4.7", actual: "stub/m2")
+  assert(slashed["ok"], "slashed id must be accepted: #{slashed.inspect}")
+  bad_ident = driftrec.record_member_model_drift("orbit-drift", expected: "nostroke", actual: "stub/m2")
+  refute(bad_ident["ok"], "identifier without provider/id shape must be refused")
+  assert(bad_ident["reason"] == "invalid_model_identifier", "wrong identifier reason: #{bad_ident.inspect}")
+  blank_ident = driftrec.record_member_model_drift("orbit-drift", expected: nil, actual: "stub/m2")
+  refute(blank_ident["ok"], "nil identifier must be refused")
+  drift_events = File.readlines(File.join(driftrec.path, "events.jsonl")).map { |line| JSON.parse(line) }
+  assert(drift_events.any? { |event| event["type"] == "member_model_drift" && event["thread_id"] == "orbit-drift" && event["expected"] == "stub/m1" && event["actual"] == "stub/m2" }, "member_model_drift event missing: #{drift_events.inspect}")
+  # Re-registration after drift must still be refused as a duplicate.
+  redup = driftrec.register_member("orbit-drift", requested_name: "orbit-drift", status: "refused")
+  refute(redup["ok"], "drift must not enable a second registration")
+  assert(redup["reason"] == "duplicate_member_id", "wrong post-drift duplicate reason: #{redup.inspect}")
+  # Unknown member drift is refused, never fabricates membership.
+  stranger = driftrec.record_member_model_drift("orbit-never-registered", expected: "a/b", actual: "c/d")
+  refute(stranger["ok"], "drift for unknown member must be refused")
+  assert(stranger["reason"] == "unknown_member_id", "wrong unknown-member reason: #{stranger.inspect}")
+  assert(driftrec.members.none? { |member| member["thread_id"] == "orbit-never-registered" }, "unknown drift must not create a member")
+
+  # Script-level drift entry (same interface the extension spawns).
+  out, _err, status = Open3.capture3(RbConfig.ruby, "--disable-gems", ENTRY, clean.path, "--event", "model_drift", "--id", "orbit-cli", "--expected", "stub/m1", "--actual", "stub/m9")
+  assert(status.success?, "entry drift failed: #{out}")
+  parsed = JSON.parse(out.lines.last)
+  assert(parsed["ok"], "entry drift must report ok: #{parsed.inspect}")
+  cli_entry = clean.members.find { |member| member["thread_id"] == "orbit-cli" }
+  assert(cli_entry["model_drift"]["actual"] == "stub/m9", "entry drift not persisted: #{cli_entry.inspect}")
+  _out, _err, bad_status = Open3.capture3(RbConfig.ruby, "--disable-gems", ENTRY, clean.path, "--event", "model_drift", "--id", "orbit-ghost", "--expected", "a/b", "--actual", "c/d")
+  refute(bad_status.success?, "entry drift for unknown member must exit non-zero")
+
   puts "member_registration_test: PASS"
 ensure
   FileUtils.remove_entry(@temp)

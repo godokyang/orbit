@@ -12,9 +12,12 @@
 #   orbit-register-member TASK_DIR --id orbit-... --requested orbit-...
 #     [--model provider/id] [--tool-call-id ID] [--status registered|refused]
 #     [--reason TEXT]
+#   orbit-register-member TASK_DIR --event model_drift --id orbit-...
+#     --expected provider/id --actual provider/id
 #
 # Exit 0 and {"ok":true,...} on success; exit 1 and {"ok":false,...} on
-# refusal or any failure. Never overwrites an existing member id.
+# refusal or any failure. Never overwrites an existing member id; model drift
+# is recorded on the already-registered member, not as a second registration.
 
 require "json"
 require "optparse"
@@ -29,11 +32,16 @@ parser = OptionParser.new do |opts|
   opts.on("--status STATUS") { |value| options[:status] = value }
   opts.on("--reason TEXT") { |value| options[:reason] = value }
   opts.on("--abort-confirmed BOOL") { |value| options[:abort_confirmed] = value == "true" }
+  opts.on("--event EVENT") { |value| options[:event] = value }
+  opts.on("--expected MODEL") { |value| options[:expected] = value }
+  opts.on("--actual MODEL") { |value| options[:actual] = value }
+  opts.on("--abort-attempted BOOL") { |value| options[:abort_attempted] = value == "true" }
+  opts.on("--abort-confirmed BOOL") { |value| options[:abort_confirmed] = value == "true" }
 end
 
 task_directory = parser.parse(ARGV).first
-if task_directory.to_s.empty? || options[:id].to_s.empty? || options[:requested].to_s.empty?
-  puts JSON.generate("ok" => false, "reason" => "usage: orbit-register-member TASK_DIR --id ID --requested NAME [--status registered|refused] [--model M] [--tool-call-id T] [--reason R]")
+if task_directory.to_s.empty? || options[:id].to_s.empty?
+  puts JSON.generate("ok" => false, "reason" => "usage: orbit-register-member TASK_DIR --id ID [--requested NAME] [--status registered|refused] [--model M] [--tool-call-id T] [--reason R] | --event model_drift --expected E --actual A")
   exit 1
 end
 
@@ -43,6 +51,19 @@ unless File.file?(File.join(task_directory, "state.json"))
 end
 
 record = Orbit::TaskRecord.new(task_directory)
+
+if options[:event] == "model_drift"
+  result = record.record_member_model_drift(options[:id], expected: options[:expected], actual: options[:actual],
+    abort_attempted: options[:abort_attempted], abort_confirmed: options[:abort_confirmed])
+  puts JSON.generate(result)
+  exit(result["ok"] ? 0 : 1)
+end
+
+if options[:requested].to_s.empty?
+  puts JSON.generate("ok" => false, "reason" => "usage: orbit-register-member TASK_DIR --id ID --requested NAME ...")
+  exit 1
+end
+
 result = record.register_member(
   options[:id],
   requested_name: options[:requested],

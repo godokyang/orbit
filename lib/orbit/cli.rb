@@ -15,12 +15,23 @@ require_relative "omp_entry"
 require_relative "task_view"
 require_relative "workspace_binding"
 require_relative "model_evidence_cache"
+require_relative "model_candidate_pool"
+require_relative "checker_model_selection"
+require_relative "checker_model_selector"
 require_relative "diagnostics"
 require_relative "release_lease"
 
 module Orbit
   module CLI
     module_function
+
+    # A checker model is `provider/id`; the id may itself contain slashes
+    # (e.g. zenmux/x-ai/grok-4.7), matching the pool and OmpCheckRunner.
+    CHECKER_MODEL_PATTERN = %r{\A[^\s/]+/[^\s]+\z}
+
+    # Selection thresholds, bounded traceability limits and the shared selector
+    # live in CheckerModelSelector (ADR-009); this module only keeps the model
+    # identifier shape used by `start`, `build_checker` and `review-model`.
 
     HELP = <<~TEXT
       Orbit — 执行期间的独立检查与纠偏
@@ -37,7 +48,7 @@ module Orbit
 
       OMP 用 orbit omp 启动受控会话，普通 omp 不加载 Orbit 扩展。
       具体参数：orbit <命令> --help（omp 用 orbit help omp）；状态的机器输出：orbit status --json。
-      Agent 执行接口：start / check / amend / dispute / rebind-workspace / model-evidence（各自 --help）。
+      Agent 执行接口：start / check / amend / dispute / rebind-workspace / model-evidence / model-candidates / review-model（各自 --help）。
     TEXT
 
     COMMAND_HELP = {
@@ -62,12 +73,22 @@ module Orbit
             "status":"evidence","retrieved_at":"<ISO8601，含时区>",
             "valid_until":"<ISO8601，可省略；不得超过该模型标识的有效期>",
             "sources":["https://<真实来源 URL>"],
-            "metrics":{"<指标名>":{"value":0,"unit":"<单位>","basis":"<测量口径与样本说明>"}}}]
+            "metrics":{"<指标名>":{"value":0,"unit":"<单位>","basis":"<测量口径与样本说明>"}},
+            "cost_tier":{"band":"low|medium|high","confidence":"low|medium|high","basis":"<档位依据，非空>"}}]
         约束：sources 为 1–5 个绝对 http(s) URL（不带凭据）；metrics 为命名对象，value 为有限数字，unit/basis 为文本；retrieved_at 不能是未来时间；billing_route 必须与请求中该身份的标注一致（省略按 unknown 处理，unknown 不会匹配 direct_api 候选）。
+        cost_tier 为可选粗档费用：按价格或套餐额度的负担档位表达，复用同一 sources 与 entry 有效期，由 billing_route 区分按量 API 与订阅套餐额度，不折算成统一的每 token 价格，也不替代 metrics 中的数值事实。band 与 confidence 只能是 low/medium/high，basis 为非空说明；省略该字段即未知，未知不是免费。
         无法取得证据时用 status "unavailable" 并给出 reason（不得编造证据）：
           [{"provider":"…","model":"…","reasoning":"…","billing_route":"<请求中该身份标注的 route>",
             "status":"unavailable","retrieved_at":"…","reason":"<为什么无法取得>"}]
         Orbit 校验后原子写入用户级缓存并通知任务进程重查。
+      TEXT
+      "review-model" => "orbit review-model TASK_DIRECTORY --model provider/id [--reason TEXT]\n检查因认证/额度等真实失败阻塞后，由 Root 显式指定下一次检查使用的模型并重试；不自动重试，也不在检查进行中切换。指定模型可在候选池外，会记录提示；任务结束记录不再接受。",
+      "model-candidates" => <<~TEXT,
+        orbit model-candidates list
+        orbit model-candidates add <provider/id>
+        orbit model-candidates remove <provider/id>
+        内部桥：读写用户长期候选池（provider/id，id 可含斜杠）。每次 stdout 输出一行 JSON {"models":[...]}；
+        出错时非零退出且只输出错误信息，不输出凭据、账号或连接配置。
       TEXT
       "start" => <<~TEXT
         orbit start [--provider omp] [--project DIR]
@@ -138,13 +159,17 @@ module Orbit
         rebind_workspace(argv)
       when "model-evidence"
         model_evidence(argv)
+      when "model-candidates"
+        model_candidates(argv)
+      when "review-model"
+        review_model(argv)
       when "stop", "check", "amend", "dispute"
         submit(command, argv)
       else
         raise ArgumentError, "unknown command #{command.inspect}; run orbit --help"
       end
     rescue ArgumentError, OptionParser::ParseError, SystemCallError, Connection::Error, CheckRunner::Error,
-           WorkspaceBinding::Error, ModelEvidenceCache::Error, JSON::ParserError => error
+           WorkspaceBinding::Error, ModelEvidenceCache::Error, ModelCandidatePool::Error, JSON::ParserError => error
       warn "orbit: #{error.message}"
       1
     end
@@ -263,7 +288,6 @@ module Orbit
         unless File.realpath(connection.state.fetch("cwd")) == File.realpath(options[:project])
           raise ArgumentError, "Root session belongs to a different project"
         end
-        options[:model] = resolve_review_model(options[:model], connection)
         if options[:prompt_file]
           instruction = read_input(options[:prompt_file])
           source = { "kind" => "explicit_text", "file" => options[:prompt_file] }
@@ -273,6 +297,7 @@ module Orbit
           instruction = message.fetch("text")
           source = { "kind" => connection.instruction_source_kind, "id" => message.fetch("id") }
         end
+        options[:model], options[:selection] = select_checker_model(options[:model], connection, options[:project], instruction)
       ensure
         connection.close
       end
@@ -281,7 +306,7 @@ module Orbit
       record = TaskRecord.create(
         project_root: options[:project], instruction: instruction, source: source,
         connection: connection_record,
-        review: { "model" => options[:model], "interval_seconds" => options[:interval] },
+        review: { "model" => options[:model], "interval_seconds" => options[:interval], "selection" => options[:selection] },
         basis: options[:basis], estimate: options[:estimate]
       )
       state = record.state
@@ -303,21 +328,56 @@ module Orbit
       end
     end
 
-    def resolve_review_model(explicit, connection)
-      model = explicit.to_s.strip
-      model = connection.configured_model.to_s.strip if model.empty?
-      unless model.match?(%r{\A[^/\s]+/[^/\s]+\z})
-        raise ArgumentError, "OMP review model must be provider/id from the session, --review-model, or ORBIT_REVIEW_MODEL"
+    # ADR-009 selection is shared with TaskRuntime so that `orbit start` and
+    # every later check apply exactly the same rules (pool ∩ session catalog,
+    # verifiable JEV quality gate, isolated resolvability, then time/cost/family
+    # order). See CheckerModelSelector for the full contract.
+    def select_checker_model(explicit, connection, project, instruction)
+      CheckerModelSelector.new(connection: connection, project_root: project)
+                          .select(explicit: explicit, instruction: instruction, selected_for: "start")
+    end
+
+    # ADR-009: after a real auth/quota failure the task stays alive but blocked,
+    # and only Root may pick the model used by the next check. This command
+    # queues that explicit choice; the running task process applies it before
+    # the next check and never switches a check in flight. An explicit model may
+    # be outside the pool, and that is recorded with a notice. No --auto: there
+    # is no silent retry or automatic reselection after a failure.
+    def review_model(argv)
+      options = {}
+      OptionParser.new do |parser|
+        parser.on("--model MODEL") { |value| options["model"] = value }
+        parser.on("--reason TEXT") { |value| options["reason"] = value }
+      end.parse!(argv)
+      directory = argv.shift
+      if directory.nil? || !argv.empty?
+        raise ArgumentError, "usage: orbit review-model TASK_DIRECTORY --model provider/id [--reason TEXT]"
       end
 
-      model
+      model = options["model"].to_s.strip
+      raise ArgumentError, "usage: orbit review-model TASK_DIRECTORY --model provider/id [--reason TEXT]" if model.empty?
+      raise ArgumentError, "OMP review model must be provider/id" unless model.match?(CHECKER_MODEL_PATTERN)
+
+      # Resolve the record and its terminal state before queueing, so a missing
+      # or finished task never accepts a model change no process will apply.
+      record = TaskRecord.new(directory)
+      if TaskRuntime::TERMINAL.include?(record.state["status"])
+        raise ArgumentError, "task process has ended; records are retained, no action was queued"
+      end
+
+      reason = options["reason"].to_s.strip
+      reason = "explicit checker model after a failed check" if reason.empty?
+      id = record.submit("review_model", "model" => model, "reason" => reason,
+                         "source" => { "kind" => "cli", "command" => "review-model" })
+      puts JSON.generate({ "task_directory" => record.path, "command_id" => id, "status" => "queued", "model" => model })
+      0
     end
 
     def build_checker(state)
       raise ArgumentError, "unsupported session provider" unless state.dig("connection", "provider") == "omp"
 
       model = state.dig("review", "model").to_s
-      raise ArgumentError, "OMP review model must be provider/id" unless model.match?(%r{\A[^/\s]+/[^/\s]+\z})
+      raise ArgumentError, "OMP review model must be provider/id" unless model.match?(CHECKER_MODEL_PATTERN)
 
       OmpCheckRunner.new(model: model)
     end
@@ -396,6 +456,37 @@ module Orbit
       puts JSON.generate({ "task_directory" => record.path, "command_id" => id, "status" => "queued",
                            "count" => entries.length,
                            "identities" => summary.map { |entry| entry.slice("provider", "model", "reasoning", "billing_route") } })
+      0
+    end
+
+    # Internal bridge for the `orbit omp` extension: read and edit the shared
+    # model candidate pool (ADR-009), reusing ModelCandidatePool instead of a
+    # second store. Each call prints one JSON document to stdout; failures go
+    # through the top-level handler, exit non-zero and never print credentials.
+    def model_candidates(argv)
+      subcommand = argv.shift
+      case subcommand
+      when "list"
+        raise ArgumentError, "usage: orbit model-candidates list" unless argv.empty?
+
+        report_model_candidates(ModelCandidatePool.new.read)
+      when "add"
+        model = required_argument!(argv, "provider/id")
+        raise ArgumentError, "usage: orbit model-candidates add <provider/id>" unless argv.empty?
+
+        report_model_candidates(ModelCandidatePool.new.add(model))
+      when "remove"
+        model = required_argument!(argv, "provider/id")
+        raise ArgumentError, "usage: orbit model-candidates remove <provider/id>" unless argv.empty?
+
+        report_model_candidates(ModelCandidatePool.new.remove(model))
+      else
+        raise ArgumentError, "usage: orbit model-candidates list|add <provider/id>|remove <provider/id>"
+      end
+    end
+
+    def report_model_candidates(models)
+      puts JSON.generate("models" => models)
       0
     end
 

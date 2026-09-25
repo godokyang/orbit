@@ -55,9 +55,17 @@ module Orbit
     CLOCK_SKEW_SECONDS = 300
     DEFAULT_REASONING = "default"
 
-    EVIDENCE_KEYS = %w[provider model reasoning billing_route status retrieved_at valid_until sources metrics].freeze
+    EVIDENCE_KEYS = %w[provider model reasoning billing_route status retrieved_at valid_until sources metrics cost_tier].freeze
     UNAVAILABLE_KEYS = %w[provider model reasoning billing_route status retrieved_at valid_until sources reason].freeze
     METRIC_KEYS = %w[value unit basis].freeze
+
+    # Optional coarse cost tier on an evidence entry. It expresses the burden
+    # band of a route's price or plan/quota, not a normalized per-token price:
+    # direct_api and subscription_quota stay distinct via billing_route, and the
+    # band is never mixed into one comparable number. Omitting it means unknown;
+    # unknown is not free.
+    COST_TIER_KEYS = %w[band confidence basis].freeze
+    COST_TIER_VALUES = %w[low medium high].freeze
 
     # Typed billing route identity; the runtime additionally compares this
     # with the route derived from the resolved OMP model endpoint.
@@ -80,6 +88,7 @@ module Orbit
     MAX_METRIC_NAME_LENGTH = 64
     MAX_UNIT_LENGTH = 32
     MAX_BASIS_LENGTH = 300
+    MAX_COST_TIER_BASIS_LENGTH = 300
     MAX_REASON_LENGTH = 500
     MAX_ENTRY_BYTES = 16 * 1024
     MAX_FILE_BYTES = 512 * 1024
@@ -274,6 +283,8 @@ module Orbit
       if status == STATUS_EVIDENCE
         normalized["sources"] = normalize_sources(entry["sources"], required: true)
         normalized["metrics"] = normalize_metrics(entry["metrics"])
+        tier = normalize_cost_tier(entry["cost_tier"])
+        normalized["cost_tier"] = tier if tier
       else
         sources = normalize_sources(entry["sources"], required: false)
         normalized["sources"] = sources if sources
@@ -355,6 +366,36 @@ module Orbit
         "unit" => validate_text(fields["unit"], "metric #{name} unit", MAX_UNIT_LENGTH),
         "basis" => validate_text(fields["basis"], "metric #{name} basis", MAX_BASIS_LENGTH)
       }
+    end
+
+    # Optional; nil means the entry carries no cost tier (unknown). A present
+    # tier must be a closed object so a submitter cannot smuggle a normalized
+    # per-token price or other extra material into the cache.
+    def normalize_cost_tier(value)
+      return nil if value.nil?
+
+      unless value.is_a?(Hash) && !value.empty?
+        raise ValidationError, "cost_tier must be an object with band, confidence and basis"
+      end
+
+      fields = stringify(value)
+      unknown = fields.keys - COST_TIER_KEYS
+      raise ValidationError, "unsupported cost_tier fields: #{unknown.sort.join(', ')}" unless unknown.empty?
+
+      {
+        "band" => cost_tier_value(fields["band"], "band"),
+        "confidence" => cost_tier_value(fields["confidence"], "confidence"),
+        "basis" => validate_text(fields["basis"], "cost_tier basis", MAX_COST_TIER_BASIS_LENGTH)
+      }
+    end
+
+    def cost_tier_value(value, field)
+      text = value.to_s.strip
+      unless COST_TIER_VALUES.include?(text)
+        raise ValidationError, "cost_tier #{field} must be one of #{COST_TIER_VALUES.join(', ')}"
+      end
+
+      text
     end
 
     def validate_text(value, field, max)

@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
 import { z } from 'zod';
-import { installOmpExtension } from '../plugins/omp-host.mjs';
+import { installOmpExtension, agentNameFor } from '../plugins/omp-host.mjs';
 import { execSync } from 'node:child_process';
 
 // The installer pins the verified Ruby via ORBIT_RUBY; exercise that branch so
@@ -71,6 +71,7 @@ const ctx = { cwd: project, sessionManager: root.sessionManager, models: { list:
 const memberCtx = { cwd: project, sessionManager: memberSession.sessionManager, models: { list: () => [model] }, hasUI: true,
   ui: { notify: () => {} } };
 const pi = { zod: z, registerTool: tool => { definition = tool; },
+  registerCommand: () => {},
   on: (name, handler) => { (events[name] ||= []).push(handler); } };
 const sdk = { MAIN_AGENT_ID: mainAgentId,
   AgentRegistry: { global: () => registry, onChange: undefined, get: undefined },
@@ -96,6 +97,15 @@ const request = async (method, extra = {}) => {
 };
 
 try {
+  // ADR-009 fixture env (read at install time): a private session agent root
+  // and a stub pool CLI, so generated-agent dispatch can re-sync the pool.
+  const agentRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'orbit-sess-gate-'));
+  await fs.mkdir(path.join(agentRoot, 'agents'), { recursive: true });
+  process.env.ORBIT_SESSION_AGENT_ROOT = agentRoot;
+  const poolStub = path.join(agentRoot, 'pool.sh');
+  await fs.writeFile(poolStub, '#!/bin/sh\nprintf \'{"models":["glm/x"]}\\n\'\n');
+  await fs.chmod(poolStub, 0o755);
+  process.env.ORBIT_CLI_BIN = poolStub;
   installOmpExtension(pi, sdk);
   await emit("session_start", {}, ctx);
 
@@ -253,6 +263,10 @@ try {
   const mstop = await request('stop_member', { id: revised.input.name });
   assert.equal(mstop.confirmed, true);
   assert.equal(mstop.async_jobs_settled, true);
+  // stop_member is idempotent over verified confirmations: a repeat call must
+  // return the cached result (the live session evidence is gone by then).
+  const mstopAgain = await request('stop_member', { id: revised.input.name });
+  assert.equal(mstopAgain.confirmed, true, 'repeat stop must return the cached verified confirmation');
   await assert.rejects(() => request('member_state', { id: 'orbit-outsider' }), /not owned/);
 
   // 3. Drift: allocator returned a suffixed duplicate -> aborted + refused record.
@@ -269,6 +283,69 @@ try {
   // Cleanup: the same id registering again (revival) must be ignored, not re-recorded.
   registryListener({ type: 'registered', ref: { id: driftedId, kind: 'sub', parentId: mainAgentId, status: 'running', session: null, sessionFile: null, history: {}, activity: null } });
   assert.equal((await membersFile()).filter(m => m.thread_id === driftedId).length, 1);
+
+  // 3b. Model drift (ADR-009): dispatch through a generated agent name pins an
+  //     expected pool model. If the model resolved at the registration window
+  //     already differs (task.agentModelOverrides wins), the member is aborted
+  //     and the drift recorded on the existing entry — the registration
+  //     boundary provably precedes any member provider work. A re-bound child
+  //     factory then still sees the shared member state (the 2026-09-25 real
+  //     probe showed closure-scoped maps leave the child hook blind).
+  const pinnedAgent = agentNameFor('glm/x');
+  const modelDriftCall = await emit('tool_call', { toolName: 'task', toolCallId: 'call-md', input: { agent: pinnedAgent, task: 'drift probe' } }, ctx);
+  assert.ok(!modelDriftCall.block, `pinned dispatch must pass the gate: ${JSON.stringify(modelDriftCall)}`);
+  const modelDriftRef = { id: modelDriftCall.input.name, kind: 'sub', parentId: mainAgentId, status: 'running',
+    session: { ...memberSession, sessionId: 'drift-sess-1', model: { provider: 'zhipu', id: 'other' } },
+    sessionFile: null, history: {}, activity: null };
+  extraRefs.push(modelDriftRef);
+  registryListener({ type: 'registered', ref: modelDriftRef });
+  const driftModelEntry = (await membersFile()).find(m => m.thread_id === modelDriftCall.input.name);
+  assert.equal(driftModelEntry.status, 'registered', 'original registration survives the drift record');
+  assert.equal(driftModelEntry.model_drift.expected, 'glm/x');
+  assert.equal(driftModelEntry.model_drift.actual, 'zhipu/other');
+  assert.equal(driftModelEntry.model_drift.abort_attempted, true);
+  assert.ok(setStatuses.some(([id, s]) => id === modelDriftCall.input.name && s === 'aborted'), 'drifted member must be aborted at registration');
+  // Rebind visibility: a second (child-rebound) factory instance fires
+  // before_provider_request for the same member with the drifted model. The
+  // shared module state must make it abort WITHOUT recording a second drift.
+  const childEvents = {};
+  const childPi = { zod: z, registerTool: () => {}, registerCommand: () => {}, on: (n, h) => { (childEvents[n] ||= []).push(h); } };
+  installOmpExtension(childPi, { MAIN_AGENT_ID: mainAgentId, AgentRegistry: { global: () => registry }, isUserInterruptAbort: () => false });
+  let childAborted = false;
+  const childCtx = { cwd: project, sessionManager: { getSessionId: () => 'drift-sess-1' },
+    models: { list: () => [model] }, model: { provider: 'zhipu', id: 'other' },
+    abort: () => { childAborted = true; }, ui: { notify: () => {} }, hasUI: true };
+  for (const h of childEvents.before_provider_request || []) await h({ payload: {} }, childCtx);
+  assert.ok(childAborted, 're-bound child hook must abort a drifted member via shared module state');
+  assert.equal((await membersFile()).filter(m => m.thread_id === modelDriftCall.input.name && m.model_drift).length, 1,
+    'child hook must not duplicate the drift record');
+
+  // 3c. attachSession has NO registry event: a member registered with a null
+  //     session is attached silently later. The (re-bound) child's
+  //     before_provider_request must capture the live session into the shared
+  //     retained map — this is the OMP 18.2.8 lifecycle the real 2026-09-25
+  //     probes exposed.
+  process.env.ORBIT_CLI_BIN = poolStub; // gate re-syncs the pool on orbit-m-* dispatch
+  const lateCall = await emit('tool_call', { toolName: 'task', toolCallId: 'call-late', input: { agent: pinnedAgent, task: 'late attach' } }, ctx);
+  assert.ok(!lateCall.block, `pinned dispatch must pass the gate: ${JSON.stringify(lateCall)}`);
+  const lateRef = { id: lateCall.input.name, kind: 'sub', parentId: mainAgentId, status: 'running', session: null, sessionFile: null, history: {}, activity: null };
+  extraRefs.push(lateRef);
+  registryListener({ type: 'registered', ref: lateRef }); // session null: nothing to retain yet
+  const lateSession = { ...memberSession, sessionId: 'late-sess', model: { provider: 'zhipu', id: 'other' } };
+  lateRef.session = lateSession; // silent attachSession — no registry event
+  const lateChildEvents = {};
+  const latePi = { zod: z, registerTool: () => {}, registerCommand: () => {}, on: (n, h) => { (lateChildEvents[n] ||= []).push(h); } };
+  installOmpExtension(latePi, { MAIN_AGENT_ID: mainAgentId, AgentRegistry: { global: () => registry }, isUserInterruptAbort: () => false });
+  let lateAborted = false;
+  const lateCtx = { cwd: project, sessionManager: { getSessionId: () => 'late-sess' },
+    models: { list: () => [model] }, model: { provider: 'zhipu', id: 'other' },
+    abort: () => { lateAborted = true; }, ui: { notify: () => {} }, hasUI: true };
+  for (const h of lateChildEvents.before_provider_request || []) await h({ payload: {} }, lateCtx);
+  assert.ok(lateAborted, 'hook must abort the drifted member');
+  const lateState = await request('member_state', { id: lateCall.input.name });
+  assert.equal(lateState.retained_session_seen, true, 'silent attach must be captured into the shared retained map');
+  await fs.rm(agentRoot, { recursive: true, force: true });
+  delete process.env.ORBIT_CLI_BIN;
 
   // 4. Write failure (corrupt members list): aborted, list not overwritten.
   const failCall = await emit("tool_call", { toolName: 'task', toolCallId: 'call-3', input: { task: 'third' } }, ctx);
@@ -295,7 +372,7 @@ try {
   //    the gate, registration is impossible, so dispatch must be refused.
   const brokenEvents = {};
   const noChangeRegistry = { list: () => [rootRef], get: id => registry.get(id), setStatus: () => true };
-  const brokenPi = { zod: z, registerTool: () => {}, on: (n, h) => { (brokenEvents[n] ||= []).push(h); } };
+  const brokenPi = { zod: z, registerTool: () => {}, registerCommand: () => {}, on: (n, h) => { (brokenEvents[n] ||= []).push(h); } };
   installOmpExtension(brokenPi, { MAIN_AGENT_ID: mainAgentId, AgentRegistry: { global: () => noChangeRegistry }, isUserInterruptAbort: () => false });
   const brokenEmit = async (name, ...args) => {
     let result;

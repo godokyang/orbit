@@ -1,6 +1,6 @@
 # Orbit 文档入口
 
-当前源码版本文字：**0.7.0**（未安装、尚未做 0.7.0 真实任务验收；本机单宿主安装仍为 0.6.18，digest `06dba0f1…`，installed_at `2026-09-24T21:55:54Z`，此前真实验收均在该安装上取得）。本文说明怎么用、为什么这样设计、怎么开发，以及实际验证到哪里。已结束的工单、旧协议和重复快照通过 Git 查阅，不再作为执行队列。
+当前源码版本文字：**0.7.1**（由 0.7.0 升 patch，仅版本收尾；尚无自身真实样本）。0.6.18（digest `06dba0f1…`，installed_at `2026-09-24T21:55:54Z`）只是历史验收安装，旧 OMP M4 真实验收在该安装上取得；ADR-009 选模真实验收在临时隔离安装的 0.7.0 release 上取得。本机当前没有已安装的 Orbit（`orbit` 不在 PATH，`~/.local/share/orbit/orbit` 与 `~/.local/bin/orbit` 均不存在）。本文说明怎么用、为什么这样设计、怎么开发，以及实际验证到哪里。已结束的工单、旧协议和重复快照通过 Git 查阅，不再作为执行队列。
 
 | 要解决的问题 | 阅读入口 |
 | --- | --- |
@@ -9,16 +9,16 @@
 | Agent 何时自行调用 Orbit | [任务运行合同](../contracts/task-runtime.md)（角色与主动调用） |
 | 如何在隔离项目真实验收 Orbit | [Orbit 开发专用真实验收 skill](../.agents/skills/orbit-real-acceptance/SKILL.md)、[OMP 目标路径真实验收记录](reference/omp-native-m4-acceptance-20260924.md) |
 | Root 如何派发成员、使用 Herdr 和收尾 | [任务运行合同](../contracts/task-runtime.md)、[单一 OMP 改版总 TODO](plan/omp-native-migration.md) |
-| 为什么采用当前设计、下一版决定了什么 | [历史 ADR-007](adr/007-task-runtime-refactor.md)、[当前 OMP 单宿主 ADR-008](adr/008-omp-native-collaboration-base.md)、[OMP 路径验证](reference/omp-native-path-probe-20260924.md) |
+| 为什么采用当前设计、下一版决定了什么 | [历史 ADR-007](adr/007-task-runtime-refactor.md)、[当前 OMP 单宿主 ADR-008](adr/008-omp-native-collaboration-base.md)、[候选模型池 ADR-009（已实现并验收）](adr/009-user-selected-model-pool.md)、[OMP 路径验证](reference/omp-native-path-probe-20260924.md) |
 | 程序和模型各负责什么、何时完成或停止 | [任务运行合同](../contracts/task-runtime.md) |
 | 独立检查返回什么 | [检查结果 schema](../contracts/check-result.schema.json) |
 | 开发本仓要遵守什么 | [AGENTS.md](../AGENTS.md)、[开发流程](agents/development-workflow.md) |
-| 当前做到哪里、还有什么工作 | [交接](plan/handoff.md)、[单一 OMP 改版总 TODO](plan/omp-native-migration.md)、[执行协作与检查回路整体调优计划](plan/orbit-execution-review-optimization.md)、[JEV 委派判断专项计划](plan/jev-delegation-optimization.md)、[用户结果补齐计划](plan/user-outcome-completion-plan.md)、[当前计划](plan/vision-completion-plan.md) |
+| 当前做到哪里、还有什么工作 | [交接](plan/handoff.md)、[单一 OMP 改版总 TODO](plan/omp-native-migration.md)、[模型候选池交付 TODO](plan/model-pool-delivery.md)、[执行协作与检查回路整体调优计划](plan/orbit-execution-review-optimization.md)、[JEV 委派判断专项计划](plan/jev-delegation-optimization.md)、[用户结果补齐计划](plan/user-outcome-completion-plan.md)、[当前计划](plan/vision-completion-plan.md) |
 | 哪些能力尚不具备 | [当前限制](plan/debt-ledger.md) |
 | 最新项目检查发现什么 | [用户结果独立审查及复核](reference/project-review-20260918.md)、[角色、协作与运行边界检查](reference/project-review-20260914.md) |
 | 真实任务中的 Orbit 与 JEV 表现 | [Zeen Login 使用复盘与 JEV 证据](reference/zeen-login-orbit-experience-20260922.md) |
 | 普通终端和现有会话如何落地、有哪些现成方案 | [用户流程交付计划](plan/user-experience-plan.md)、[现成方案调研](reference/existing-orchestrators-20260914.md) |
-| 实际验收证明了什么 | [检查回路与 Jev 实际验证](reference/check-loop-acceptance-20260918.md)、[跨宿主成员验收](reference/cross-host-member-acceptance-20260918.md)、[Jev 调度运行验收](reference/jev-runtime-acceptance-20260918.md)、[底层真实验收](reference/orbit-runtime-acceptance-20260914.md)、[Codex 日常流程验收](reference/user-flow-acceptance-20260914.json)、[OpenCode 正式验收](reference/opencode-runtime-acceptance-20260914.json)、[OMP 正式验收](reference/omp-runtime-acceptance-20260914.json) |
+| 实际验收证明了什么 | [检查回路与 Jev 实际验证](reference/check-loop-acceptance-20260918.md)、[跨宿主成员验收](reference/cross-host-member-acceptance-20260918.md)、[Jev 调度运行验收](reference/jev-runtime-acceptance-20260918.md)、[底层真实验收](reference/orbit-runtime-acceptance-20260914.md)、[Codex 日常流程验收](reference/user-flow-acceptance-20260914.json)、[OpenCode 正式验收](reference/opencode-runtime-acceptance-20260914.json)、[OMP 正式验收](reference/omp-runtime-acceptance-20260914.json)、[候选模型池真实验收](reference/model-pool-acceptance-20260925.md) |
 | 优化后的真实路径怎么验收、已经跑到哪里 | [优化真实验收记录](reference/orbit-optimization-acceptance-plan-20260922.md) |
 | 过去哪些失误值得记住 | [工程经验](reference/engineering-lessons.md) |
 | 历史：Codex 如何加载项目规范 | [按需阅读的说明](reference/codex-agents-md-loading.md)（旧宿主证据） |

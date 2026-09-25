@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "json"
+require "tmpdir"
 require_relative "check_runner"
 
 module Orbit
@@ -16,6 +17,158 @@ module Orbit
       ["bun", REVIEWER]
     end
 
+    # A model identifier is a provider plus a non-empty id. The id may itself
+    # contain slashes (e.g. zenmux/x-ai/grok-4.7), matching the reviewer's own
+    # `[provider, ...rest] = spec.split("/")` / `rest.join("/")` split.
+    # Whitespace is never allowed in either part.
+    MODEL_ID = %r{\A[^\s/]+/[^\s]+\z}
+
+    # A failing check is classified so the caller can keep the task alive and
+    # blocked for Root's explicit reselection. A structured evidence["error"]
+    # with a known kind wins; otherwise a bounded heuristic over the evidence
+    # problems and the failure text labels it and is marked "heuristic" so it is
+    # auditable, never proof. Unknown failures are "unavailable" and still block.
+    FAILURE_KINDS = %w[auth_or_quota unavailable invalid_result].freeze
+    AUTH_OR_QUOTA_PATTERN = /(?:\b40[13]\b|\b429\b|unauthor|forbidden|quota|rate[ _-]?limit|insufficient|out of credit|balance|payment|billing|no[ _-]?access)/i
+    # A local probe only reads a catalog and the OMP token store; it can run a
+    # credential command per distinct provider. Bound it so a stuck `omp token`
+    # cannot hold the selection loop.
+    PROBE_TIMEOUT_SECONDS = 60
+
+    # Local-only availability probe for the independent checker's isolated
+    # profile. For each candidate "provider/id" it asks the isolated catalog
+    # (ModelRegistry.find) and OMP's own provider credential resolver, without
+    # starting a session or sending a model request. It returns identifiers and
+    # structured reasons only; a resolved token is never returned or written.
+    #
+    # models: array of "provider/id" identifiers.
+    # Returns { "resolvable" => ["provider/id", ...],
+    #           "unresolvable" => [{ "model" => "provider/id", "reason" => "..." }, ...] }.
+    # Any reviewer or configuration failure raises Error; it is never reported
+    # as an empty-but-successful probe.
+    def self.probe_models(models:, command: nil, timeout: PROBE_TIMEOUT_SECONDS)
+      launcher = (command || default_command).map(&:to_s)
+      raise Error, "omp reviewer command is required" if launcher.empty? || launcher.first.empty?
+
+      specs = Array(models).map { |model| model.to_s.strip }.reject(&:empty?).uniq
+      raise Error, "at least one model is required" if specs.empty?
+
+      Dir.mktmpdir("orbit-model-probe-") do |root|
+        profile = File.join(root, "profile")
+        FileUtils.mkdir_p(profile)
+        File.chmod(0o700, profile)
+        out = File.join(root, "evidence.json")
+        stderr_path = File.join(root, "stderr.log")
+        config_path = File.join(root, "request.json")
+        File.write(config_path, JSON.generate(
+                                "profile" => profile, "out" => out, "probe_models" => specs.join(",")
+                              ))
+
+        status = run_probe(launcher, config_path, profile, root, stderr_path, timeout)
+        evidence = parse_probe_evidence(out)
+        unless status.success? && evidence.is_a?(Hash) && evidence["ok"] == true
+          raise Error, "model probe failed: #{probe_failure_text(status, evidence, stderr_path)}"
+        end
+
+        normalize_probe(evidence["probe_models"])
+      end
+    end
+
+    def self.run_probe(launcher, config_path, profile, cwd, stderr_path, timeout)
+      env = ENV.to_h
+      env["OMP_PROFILE"] = nil
+      env["PI_CODING_AGENT_DIR"] = profile
+      errors = File.open(stderr_path, "wb")
+      pid = Process.spawn(env, *launcher, "--config", config_path,
+                          in: File::NULL, out: errors, err: [:child, :out],
+                          pgroup: true, chdir: cwd, close_others: true)
+      wait_probe(pid, timeout)
+    rescue SystemCallError => error
+      raise Error, "cannot start model probe: #{error.class}: #{error.message}"
+    ensure
+      errors&.close
+    end
+    private_class_method :run_probe
+
+    def self.wait_probe(pid, timeout)
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout.to_f
+      loop do
+        result = Process.waitpid2(pid, Process::WNOHANG)
+        return result.last if result
+        if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+          kill_probe(pid)
+          raise Error, "model probe timed out after #{timeout} seconds"
+        end
+
+        sleep 0.05
+      end
+    rescue Errno::ECHILD
+      raise Error, "model probe process was reaped outside this probe"
+    end
+    private_class_method :wait_probe
+
+    def self.kill_probe(pid, grace: 2)
+      signal_probe(pid, "TERM")
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + grace
+      loop do
+        return if Process.waitpid2(pid, Process::WNOHANG)
+        break if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+
+        sleep 0.05
+      end
+      signal_probe(pid, "KILL")
+      Process.waitpid2(pid)
+    rescue Errno::ECHILD
+      nil
+    end
+    private_class_method :kill_probe
+
+    def self.signal_probe(pid, signal)
+      Process.kill(signal, -pid)
+    rescue Errno::ESRCH
+      nil
+    end
+    private_class_method :signal_probe
+
+    def self.parse_probe_evidence(path)
+      return nil unless File.file?(path)
+
+      JSON.parse(File.read(path))
+    rescue JSON::ParserError
+      nil
+    end
+    private_class_method :parse_probe_evidence
+
+    def self.probe_failure_text(status, evidence, stderr_path)
+      parts = [status ? "exit #{status.exitstatus || "signal #{status.termsig}"}" : "no process status"]
+      problems = evidence.is_a?(Hash) ? evidence["problems"] : nil
+      parts << "evidence problems: #{problems.join('; ')}" if problems.is_a?(Array) && !problems.empty?
+      details = File.file?(stderr_path) ? File.read(stderr_path).to_s.strip : ""
+      parts << "stderr: #{details[0, 4096]}" unless details.empty?
+      parts.join("\n")
+    end
+    private_class_method :probe_failure_text
+
+    def self.normalize_probe(raw)
+      raise Error, "model probe returned no result" unless raw.is_a?(Hash)
+
+      resolvable = Array(raw["resolvable"]).filter_map do |item|
+        model = item.is_a?(Hash) ? item["model"] : item
+        text = model.to_s.strip
+        text if text.match?(MODEL_ID)
+      end
+      unresolvable = Array(raw["unresolvable"]).filter_map do |item|
+        next unless item.is_a?(Hash)
+
+        model = item["model"].to_s.strip
+        next if model.empty?
+
+        { "model" => model, "reason" => item["reason"].to_s.strip }
+      end
+      { "resolvable" => resolvable.uniq, "unresolvable" => unresolvable }
+    end
+    private_class_method :normalize_probe
+
     def initialize(model:, command: nil, schema: nil, stop_grace_seconds: DEFAULT_STOP_GRACE_SECONDS)
       launcher = command || self.class.default_command
       raise Error, "omp reviewer command is required" if launcher.empty? || launcher.first.to_s.empty?
@@ -25,9 +178,11 @@ module Orbit
       @evidence = nil
       @usage = nil
       @actual_model = nil
+      @failure_kind = nil
+      @failure_basis = nil
     end
 
-    attr_reader :actual_model, :evidence
+    attr_reader :actual_model, :evidence, :failure, :failure_kind, :failure_basis
 
     # Judgment rules that role_prompt does not already state, plus the actual session tools.
     def build_prompt(snapshot:, inputs:, context:, role:)
@@ -70,10 +225,26 @@ module Orbit
       parts.join("\n\n")
     end
 
+    # Switches the model used by the next check. Only allowed when no check is
+    # in flight: before the first start, after poll returned a result, or after
+    # stop! confirmed exit. A started check that has neither a result nor a stop
+    # is in flight and rejects the switch, so a running reviewer never changes
+    # model mid-check. The runner still never picks a model on its own; the
+    # caller passes a user-confirmed provider/id, whose id may contain slashes.
+    def select_model!(value)
+      raise Error, "runner is closed" if @closed
+
+      model = value.to_s.strip
+      raise Error, "checker model must be provider/id (the id may contain slashes)" unless model.match?(MODEL_ID)
+      raise Error, "cannot change the check model while a check is in flight" if in_flight?
+
+      @model = model
+    end
+
     def start(directory:, inputs:, context:, output_dir:, role: "reviewer")
       raise Error, "runner is closed" if @closed
       if @run
-        raise Error, "this runner already has an active check" unless @result || @stopped
+        raise Error, "this runner already has an active check" unless @result || @stopped || @failure
 
         stop! if group_alive?
         reset_run!
@@ -139,16 +310,21 @@ module Orbit
       @evidence = parsed if parsed.is_a?(Hash)
       unless status.success? && @evidence.is_a?(Hash) && @evidence["ok"] == true
         @failure = Error.new(failure_text(status, @evidence))
+        @failure_kind, @failure_basis = classify_failure(@evidence)
         raise @failure
       end
       unless fingerprint_held?(@evidence)
         @failure = Error.new("snapshot fingerprint missing or changed")
+        @failure_kind = "invalid_result"
+        @failure_basis = "structural"
         raise @failure
       end
       begin
         @result = validate_result(@evidence["result"])
       rescue Error => error
         @failure = error
+        @failure_kind = "invalid_result"
+        @failure_basis = "structural"
         raise
       end
       @actual_model = @evidence["model"] if @evidence["model"].is_a?(String) && !@evidence["model"].empty?
@@ -175,7 +351,17 @@ module Orbit
 
     def reset_run!
       @run = @result = @failure = @evidence = @usage = @actual_model = nil
+      @failure_kind = @failure_basis = nil
       @reaped = @stopped = false
+    end
+
+    # A check process is in flight until it has produced a result, been stopped,
+    # or failed. A failed run is over: the process has exited, so the caller may
+    # switch models and start the next check. This is what lets a task stay alive
+    # (blocked) after an auth/quota failure and retry on Root's explicit model
+    # instead of terminating.
+    def in_flight?
+      @run && !@result && !@stopped && !@failure
     end
 
     def command_available?
@@ -254,9 +440,32 @@ module Orbit
 
     def failure_text(status, evidence)
       parts = [failure_message(status)]
-      problems = evidence.is_a?(Hash) ? evidence["problems"] : nil
-      parts << "evidence problems: #{problems.join('; ')}" if problems.is_a?(Array) && !problems.empty?
+      problems = (Array(evidence.is_a?(Hash) ? evidence["problems"] : nil) +
+                  Array(evidence.is_a?(Hash) ? evidence["contract_problems"] : nil)).map(&:to_s).reject(&:empty?).uniq
+      parts << "evidence problems: #{problems.join('; ')}" unless problems.empty?
       parts.join("\n")
+    end
+
+    def classify_failure(evidence)
+      structured = evidence.is_a?(Hash) ? evidence["error"] : nil
+      if structured.is_a?(Hash)
+        kind = structured["kind"].to_s.strip
+        return [kind, "structured"] if FAILURE_KINDS.include?(kind)
+      end
+
+      # A run whose returned result failed the check-result contract (for
+      # example a parseable result with next_check_seconds=0) means the model
+      # did respond and produced structurally invalid output. That is never an
+      # availability failure, so it is classified from the evidence contract
+      # before the text heuristic.
+      contract = evidence.is_a?(Hash) ? evidence["contract_problems"] : nil
+      return ["invalid_result", "structural"] if contract.is_a?(Array) && !contract.empty?
+
+      problems = evidence.is_a?(Hash) ? Array(evidence["problems"]).join(" ") : ""
+      text = "#{problems} #{@failure && @failure.message}"
+      return ["auth_or_quota", "heuristic"] if text.match?(AUTH_OR_QUOTA_PATTERN)
+
+      ["unavailable", "heuristic"]
     end
   end
 end

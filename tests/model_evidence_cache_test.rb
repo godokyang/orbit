@@ -21,6 +21,7 @@ module ModelEvidenceCacheTest
       test_cross_identity_comparison_metrics_are_rejected(tmp)
       test_billing_route_identity_and_lookup(tmp)
       test_route_metric_namespaces
+      test_cost_tier_validation_and_route_scope(tmp)
       test_legacy_route_less_entry_is_unknown(tmp)
       test_atomic_write_permissions_and_fail_closed(tmp)
       test_concurrent_writers_keep_every_entry(tmp)
@@ -316,6 +317,52 @@ module ModelEvidenceCacheTest
     assert(!Orbit::ModelEvidenceCache.numeric_metric?({ "metrics" => { "cost.note" => { "value" => "cheap" } } }, "cost."),
            "a non-numeric fact never authorizes the gate")
     assert(!Orbit::ModelEvidenceCache.numeric_metric?({ "metrics" => {} }, "quota."), "an empty metric set is not proof")
+  end
+
+  # ADR-009: an optional coarse cost tier can be submitted without an exact
+  # per-token price. It stays scoped to the existing billing_route identity and
+  # is never normalized into one comparable per-token number; omitting it is
+  # unknown, and unknown is not free.
+  def test_cost_tier_validation_and_route_scope(tmp)
+    now = Time.utc(2026, 9, 22, 10)
+    cache = cache_at(tmp, "cost_tier", -> { now })
+    direct_tier = { "band" => "high", "confidence" => "low", "basis" => "vendor pay-as-you-go list price" }
+    direct = cache.record(evidence("billing_route" => "direct_api", "cost_tier" => direct_tier))
+    assert_equal(direct_tier, direct["cost_tier"], "a valid coarse tier is stored verbatim")
+    assert(!direct["cost_tier"].key?("usd_per_mtok"), "no normalized per-token price is derived")
+
+    quota = cache.record(evidence("billing_route" => "subscription_quota",
+                                  "cost_tier" => { "band" => "low", "confidence" => "medium",
+                                                   "basis" => "included coding-plan quota" }))
+    assert_equal("low", quota["cost_tier"]["band"], "the subscription tier is stored on its own identity")
+    assert_equal("high", cache.lookup(provider: "opencode-go", model: "deepseek-v4.8",
+                                      billing_route: "direct_api")["cost_tier"]["band"],
+                 "the direct_api tier is not mixed with the subscription_quota tier")
+    assert_equal("low", cache.lookup(provider: "opencode-go", model: "deepseek-v4.8",
+                                     billing_route: "subscription_quota")["cost_tier"]["band"],
+                 "the two routes keep distinct tiers")
+
+    omitted = cache.record(evidence("model" => "gpt-6-astra"))
+    assert(!omitted.key?("cost_tier"), "an omitted tier stays absent (unknown), not a fabricated default")
+
+    rejected = [
+      ["invalid band", { "band" => "free", "confidence" => "low", "basis" => "guess" }],
+      ["invalid confidence", { "band" => "low", "confidence" => "sure", "basis" => "guess" }],
+      ["missing basis", { "band" => "low", "confidence" => "low" }],
+      ["blank basis", { "band" => "low", "confidence" => "low", "basis" => "  " }],
+      ["extra field", { "band" => "low", "confidence" => "low", "basis" => "ok", "usd_per_mtok" => 0.5 }],
+      ["non-object", "low"]
+    ]
+    rejected.each do |label, tier|
+      assert_raises(Orbit::ModelEvidenceCache::ValidationError, "rejects cost_tier #{label}") do
+        cache.record(evidence("model" => "candidate", "cost_tier" => tier))
+      end
+    end
+    assert_raises(Orbit::ModelEvidenceCache::ValidationError, "cost_tier on unavailable is rejected") do
+      cache.record("provider" => "kimi", "model" => "kimi-k3", "status" => "unavailable",
+                   "retrieved_at" => "2026-09-22T09:00:00Z", "reason" => "no quote",
+                   "cost_tier" => { "band" => "low", "confidence" => "low", "basis" => "guess" })
+    end
   end
 
   # Legacy stored entries without the field remain readable as unknown and are

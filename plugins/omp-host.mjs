@@ -1,7 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createOrbitHost, toolArgs, toolDescription } from './host.mjs';
 
@@ -11,17 +11,65 @@ const textOf = content => typeof content === 'string' ? content : (content || []
 // Overridable in tests; production resolves next to this file.
 const registerMemberBin = process.env.ORBIT_REGISTER_MEMBER_BIN
   || fileURLToPath(new URL('../scripts/orbit-register-member', import.meta.url));
+// Pool edits must run THIS release's CLI, never whatever `orbit` happens to
+// be first on PATH (an older install would write a stale schema/format).
+// Same release-anchored, ruby-invoked shape as the member registration entry.
+const orbitCliBin = fileURLToPath(new URL('../scripts/orbit', import.meta.url));
+const rubyBin = () => process.env.ORBIT_RUBY || 'ruby';
+
+// Generated member agent namespace (ADR-009). Readable slug plus a stable
+// short hash: distinct identifiers that collide after non-alphanumeric
+// folding (e.g. `provider/a.b` vs `provider/a-b`) must never share one agent
+// name, or the mapping would silently dispatch the wrong pinned model.
+export const AGENT_NAME_PREFIX = 'orbit-m-';
+export function agentNameFor(model) {
+  const slug = model.replace(/[^A-Za-z0-9_-]+/g, '-');
+  const hash = createHash('sha1').update(model).digest('hex').slice(0, 8);
+  return `${AGENT_NAME_PREFIX}${slug}-${hash}`;
+}
+
+// Process-wide member state, deliberately MODULE-scoped: OMP's task executor
+// re-binds every extension factory against each child session runtime
+// (packages/coding-agent/src/task/executor.ts ~508-519), so a closure-scoped
+// map is invisible to a re-bound child handler — the real 2026-09-25 drift
+// probe showed the child-side before_provider_request matching nothing and
+// staying silent while an override-drifted member ran to completion. The
+// AgentRegistry itself is process-global; these mirrors must be too.
+const nativeMemberIds = new Set();
+const memberTasks = new Map();
+const memberExpectedModels = new Map();
+const memberDriftReported = new Set();
+const memberActiveTools = new Map(); // member agent id -> Set of in-flight tool call ids (observed)
+// Verified stop confirmations keyed by member id. stop_member must be
+// idempotent: TaskRuntime retries and follow-up stops re-query a member whose
+// retained session has already been disposed, and re-confirmation is
+// impossible once the evidence (live session / retained reference) is gone.
+// Returning the cached VERIFIED result repeats no inference; stoppedMembers
+// independently keeps native hub wake blocked.
+const memberStopConfirmations = new Map();
+// Member sessions retained by member id until a CONFIRMED stop, captured at
+// whichever seam sees the attached session first: the AgentRegistry
+// `registered` window when the session is already attached, or the member's
+// `before_provider_request` hook after OMP's silent attachSession (which
+// emits no registry event, agent-registry.ts ~290-304). Either way the
+// capture provably precedes member provider dispatch. OMP 18.2.8 can detach
+// (park/abort) the registry ref with no public dispose-completion signal, so
+// the retained reference lets stop_member make REAL observations (busy
+// flags, tracked active tools, owner-scoped async-job reaping, idempotent
+// dispose) instead of inferring from a tombstone. Entries are removed only
+// on confirmed stop.
+const memberRetainedSessions = new Map();
 
 // The SDK is supplied by OMP itself, including in its standalone binary.
 export function installOmpExtension(pi, sdk) {
   const entries = new Map();
-  // Requested spawn name -> { taskDir, toolCallId }. The registry gate matches
-  // registered ids against this map: exact match is the expected identity, a
-  // suffixed match (`<name>-2`) is allocator drift and must be refused.
+  // Requested spawn name -> { taskDir, toolCallId, expectedModel }. The
+  // registry gate matches registered ids against this map: exact match is the
+  // expected identity, a suffixed match (`<name>-2`) is allocator drift and
+  // must be refused. Member id/task/expected-model maps themselves live at
+  // module scope: the OMP child runtime re-binds this factory per subagent,
+  // and closure state would be invisible to a re-bound child handler.
   const requestedNames = new Map();
-  const nativeMemberIds = new Set();
-  const memberTasks = new Map();    // member agent id -> task directory (ownership check for member_* ops)
-  const memberActiveTools = new Map(); // member agent id -> Set of in-flight tool call ids (observed)
   const stoppedMembers = new Set(); // member ids whose stop was CONFIRMED via the live-session path
   const taskDirs = new Map();       // root session id -> task directory (bound via orbit start/context)
   const collabEvents = [];          // native hub traffic + native task results (bounded, readable via dispatch)
@@ -29,6 +77,73 @@ export function installOmpExtension(pi, sdk) {
   const collabSeqByTask = new Map();    // task_dir -> last assigned seq (per-task, gap-free)
   const collabDroppedByTask = new Map(); // task_dir -> count of dropped oldest events
   let host, currentContext, registryHookInstalled;
+
+  // --- ADR-009: user-selected model pool + session-isolated member agents ---
+  // The pool only constrains what Orbit recommends. Root may still dispatch
+  // any native agent explicitly (including out-of-pool ones); only dispatches
+  // through OUR generated `orbit-m-*` agent names carry a pinned model that
+  // must survive override/auth-fallback resolution.
+  const sessionAgentRoot = process.env.ORBIT_SESSION_AGENT_ROOT || null;
+  const sessionAgents = new Map();        // generated agent name -> 'provider/id' (per bound instance; rebuilt on sync)
+  const poolBin = () => process.env.ORBIT_CLI_BIN || orbitCliBin;
+  const poolArgv = args => (process.env.ORBIT_CLI_BIN ? [poolBin(), ['model-candidates', ...args]] : [rubyBin(), ['--disable-gems', poolBin(), 'model-candidates', ...args]]);
+  const runPoolCli = args => {
+    try {
+      const [bin, argv] = poolArgv(args);
+      const run = spawnSync(bin, argv, { encoding: 'utf8', timeout: 15000, maxBuffer: 1024 * 1024 });
+      if (run.status !== 0 || !run.stdout) return { ok: false, reason: ((run.stderr || run.error?.message || `exit ${run.status}`) || 'no output').trim().slice(0, 200) };
+      const parsed = JSON.parse(run.stdout.trim().split('\n').at(-1));
+      return { ok: true, models: Array.isArray(parsed?.models) ? parsed.models.filter(m => typeof m === 'string') : [] };
+    } catch (error) {
+      return { ok: false, reason: String(error?.message || error).slice(0, 200) };
+    }
+  };
+  // Rewrite the session agent root from pool ∩ ctx.models.list(). Files are
+  // re-read by OMP on every native task execution (resolveEffectiveSubagentPolicy
+  // rediscovers agents), so runtime edits are picked up without a restart.
+  // Nothing is written to project `.omp/agents` or the user agent directory.
+  async function syncSessionAgents(ctx) {
+    if (!sessionAgentRoot) return { ok: false, reason: 'ORBIT_SESSION_AGENT_ROOT is not set; dynamic member agents need the orbit omp entry' };
+    const pool = runPoolCli(['list']);
+    if (!pool.ok) return { ok: false, reason: `model pool unreadable: ${pool.reason}` };
+    let available = [];
+    try { available = (ctx.models?.list?.() ?? []).map(m => `${m.provider}/${m.id}`); } catch { available = []; }
+    const availableSet = new Set(available);
+    const desired = new Map();
+    for (const model of pool.models) {
+      if (!availableSet.has(model)) continue; // session intersection only (ADR-009)
+      desired.set(agentNameFor(model), model);
+    }
+    const agentsDir = path.join(sessionAgentRoot, 'agents');
+    await fs.mkdir(agentsDir, { recursive: true });
+    for (const existing of await fs.readdir(agentsDir).catch(() => [])) {
+      if (!existing.startsWith(AGENT_NAME_PREFIX) || !existing.endsWith('.md')) continue;
+      if (!desired.has(existing.slice(0, -'.md'.length))) await fs.rm(path.join(agentsDir, existing), { force: true });
+    }
+    for (const [name, model] of desired) {
+      const file = path.join(agentsDir, `${name}.md`);
+      const body = ['---',
+        `name: ${name}`,
+        `description: Orbit member agent pinned to ${model} (generated for this session only)`,
+        `model: ${model}`,
+        'spawns: ""',
+        '---', '',
+        `You are an Orbit execution member. Your model is fixed to ${model} for this run.`,
+        'Report results to Root through the native hub tool; you cannot dispatch further tasks.', '',
+      ].join('\n');
+      if ((await fs.readFile(file, 'utf8').catch(() => null)) === body) continue;
+      // Atomic replace: a concurrent native task re-discovery re-reads this
+      // directory, and a half-written frontmatter must never be observed.
+      const tmp = path.join(agentsDir, `.${name}.${process.pid}.tmp`);
+      await fs.writeFile(tmp, body);
+      await fs.rename(tmp, file);
+    }
+    // In-flight members keep their resolved model: OMP only re-reads these
+    // files when a NEW spawn is prefighted, never for a running session.
+    sessionAgents.clear();
+    for (const [name, model] of desired) sessionAgents.set(name, model);
+    return { ok: true, agents: [...desired].map(([name, model]) => ({ name, model })) };
+  }
 
   // Observable record of native collaboration. Root hub traffic is captured by
   // the awaited tool_call/tool_result hooks; member-origin hub traffic is
@@ -146,7 +261,11 @@ export function installOmpExtension(pi, sdk) {
       if (!pending && !drifted) return; // not one of ours (e.g. revived agent)
       const taskDir = pending?.taskDir ?? requestedNames.get(base)?.taskDir;
       if (!taskDir) return;
-      if (ref.session) trackMemberTools(ref.id, ref.session);
+      if (ref.session) {
+        trackMemberTools(ref.id, ref.session);
+        // Retain for observable stop confirmation after registry detachment.
+        memberRetainedSessions.set(ref.id, ref.session);
+      }
       if (drifted) {
         refuseMember(ref.id, taskDir, base, 'id_drift');
         return;
@@ -158,7 +277,27 @@ export function installOmpExtension(pi, sdk) {
       if (result.ok) {
         nativeMemberIds.add(ref.id);
         memberTasks.set(ref.id, taskDir);
+        if (pending.expectedModel) memberExpectedModels.set(ref.id, pending.expectedModel);
         requestedNames.delete(ref.id);
+        // ADR-009 fail-closed model gate. The AgentRegistry `registered`
+        // window provably precedes any member provider work, and the resolved
+        // model is observable on the ref here: if task.agentModelOverrides
+        // (or any other resolution) already changed the final model away from
+        // the pinned pool model, record the drift durably and abort the
+        // member NOW. The before_provider_request backstop alone is NOT a
+        // proven suppression seam (real drift probe 2026-09-25: override to
+        // grok-4.6 ran to completion with zero hook evidence), so the
+        // registration boundary is the enforced gate.
+        if (pending.expectedModel && ref.session?.model) {
+          const actual = `${ref.session.model.provider}/${ref.session.model.id}`;
+          if (actual !== pending.expectedModel && !memberDriftReported.has(ref.id)) {
+            memberDriftReported.add(ref.id);
+            const abortConfirmed = signalAbort(ref.id);
+            const recorded = recordModelDrift(taskDir, { id: ref.id, expected: pending.expectedModel, actual, abortConfirmed });
+            process.stderr.write(`Orbit: member ${ref.id} model drift at registration (${pending.expectedModel} -> ${actual}); ` +
+              `drift record: ${recorded.ok ? 'ok' : recorded.reason}; abort confirmed: ${abortConfirmed}\n`);
+          }
+        }
       } else {
         // Duplicate or unreadable member list: never let model work proceed
         // under an identity Orbit did not durably record.
@@ -414,6 +553,7 @@ export function installOmpExtension(pi, sdk) {
         if (!session) return { id: ref.id, registry_status: ref.status, streaming: null, model: ref.history?.resolvedModel ?? null,
           activity: ref.activity ?? null, session_id: null, session_file: ref.sessionFile, output_path: ref.history?.outputPath ?? null,
           active_tools: null, async_jobs: null, session_attached: false,
+          retained_session_seen: memberRetainedSessions.has(ref.id),
           lifecycle: ref.lifecycle ?? null };
         return { id: ref.id, registry_status: ref.status, streaming: session.isStreaming === true,
           model: session.model ? `${session.model.provider}/${session.model.id}` : (ref.history?.resolvedModel ?? null),
@@ -421,7 +561,7 @@ export function installOmpExtension(pi, sdk) {
           output_path: ref.history?.outputPath ?? null,
           active_tools: memberActiveTools.has(ref.id) ? memberActiveTools.get(ref.id).size : null,
           async_jobs: session.getAsyncJobSnapshot ? session.getAsyncJobSnapshot() : null,
-          session_attached: true, lifecycle: ref.lifecycle ?? null,
+          session_attached: true, retained_session_seen: memberRetainedSessions.has(ref.id), lifecycle: ref.lifecycle ?? null,
           last_delivery_error: memberDeliveryErrors.get(ref.id) ?? null };
       case 'member_result': {
         const outputPath = ref.history?.outputPath ?? null;
@@ -438,7 +578,62 @@ export function installOmpExtension(pi, sdk) {
         return deliverCustomMessage(session, request.text, message => memberDeliveryErrors.set(ref.id, message));
       }
       case 'stop_member': {
+        const cached = memberStopConfirmations.get(ref.id);
+        if (cached) return cached;
         if (!session) {
+          // Registration-retained session (captured in the AgentRegistry
+          // `registered` window): OMP may have detached the registry ref
+          // (park/abort) with no public dispose-completion signal, but the
+          // retained reference is the exact session object. AgentSession
+          // dispose() is idempotent with a shared settled promise
+          // (agent-session.ts ~4710, issue #4080) and drains the owned
+          // AsyncJobManager, so awaiting it here is a REAL disposal barrier,
+          // safe to run concurrently with OMP's own lifecycle. Confirm only
+          // from these observations — never from the tombstone alone.
+          const retained = memberRetainedSessions.get(ref.id);
+          let retainedError = null;
+          if (retained) {
+            try {
+              const busyFlags = s => s.isStreaming || s.isCompacting || s.isBashRunning || s.isEvalRunning || s.hasPendingAsyncWork?.();
+              if (busyFlags(retained)) await retained.abort({ goalReason: 'internal' }).catch(() => {});
+              const manager = retained.asyncJobManager;
+              const owner = retained.getAgentId ? retained.getAgentId() : ref.id;
+              if (manager && owner) {
+                manager.cancelAll({ ownerId: owner });
+                const reaped = await manager.cancelAndReapOwnerJobs(owner, Date.now() + 5000);
+                if (!reaped.settled) throw new Error(`retained member background processes did not settle for ${ref.id}`);
+              }
+              // dispose() is idempotent with a shared settled promise
+              // (agent-session.ts ~4710): even if OMP already started
+              // disposing, awaiting it is the completion barrier, not a
+              // reason to skip. It can still return with an active run
+              // timed out, so busy flags are verified AFTER the await.
+              await retained.dispose();
+              if (busyFlags(retained))
+                throw new Error(`retained member still busy after dispose for ${ref.id}`);
+              // Tool state must be OBSERVED at zero; an untracked member can
+              // never be confirmed (a null measurement is unknown, not zero).
+              const measured = memberActiveTools.has(ref.id) ? memberActiveTools.get(ref.id).size : null;
+              if (measured !== 0)
+                throw new Error(`retained member tool state unconfirmed for ${ref.id} (active_tools=${measured === null ? 'unobserved' : measured})`);
+              memberRetainedSessions.delete(ref.id);
+              memberActiveTools.delete(ref.id);
+              stoppedMembers.add(ref.id);
+              const confirmation = { confirmed: true, id: ref.id,
+                scope: 'Retained member session (captured before provider dispatch, from the attached member session): turn abort, owner-scoped async-job cancel+reap, idempotent session dispose, and post-dispose busy/tool observation; registry ref was already detached',
+                registry_status: ref.status, status_after: 'disposed', active_tools_after: measured,
+                async_jobs_settled: true };
+              memberStopConfirmations.set(ref.id, confirmation);
+              return confirmation;
+            } catch (error) {
+              // Observability, not inference: the exact reason the retained
+              // session could not confirm travels with the structured
+              // unconfirmed evidence (OMP plugin stderr is not always
+              // reachable by operators).
+              retainedError = error.message;
+              process.stderr.write(`Orbit: retained-session stop for ${ref.id} could not confirm: ${error.message}\n`);
+            }
+          }
           // The member's session is gone. In 18.2.8, park()/release() detach
           // the session and set status first, then dispose asynchronously
           // (registry/agent-lifecycle.ts:310-319, :474-489) with no public
@@ -454,7 +649,8 @@ export function installOmpExtension(pi, sdk) {
               ? `member result was accepted, but its session is disposed (status ${ref.status}) and OMP 18.2.8 disposes parked/released sessions asynchronously with no public completion signal; background/process exit is unverifiable from the registry`
               : `member has no live session (status ${ref.status}); stop cannot be confirmed without a session or a dispose-completion signal`,
             evidence: { registry_status: ref.status, lifecycle,
-                        output_path: ref.history?.outputPath ?? null, session_file: ref.sessionFile },
+                        output_path: ref.history?.outputPath ?? null, session_file: ref.sessionFile,
+                        retained_stop_attempt: retainedError },
             async_jobs_settled: null };
         }
         const manager = session.asyncJobManager, owner = session.getAgentId ? session.getAgentId() : ref.id;
@@ -478,10 +674,12 @@ export function installOmpExtension(pi, sdk) {
             if (measured !== 0)
               throw new Error(`OMP member tool state unconfirmed for ${ref.id} (active_tools=${measured === null ? 'unobserved' : measured})`);
             stoppedMembers.add(ref.id);
-            return { confirmed: true, id: ref.id,
+            const liveConfirmation = { confirmed: true, id: ref.id,
               scope: 'Member turn, attached shell processes and owner-scoped async jobs; no unmanaged detached work',
               registry_status: sdk.AgentRegistry.global().get(ref.id)?.status ?? null,
               status_after: busyFlags(session) ? 'active' : 'idle', active_tools_after: measured, async_jobs_settled: true };
+            memberStopConfirmations.set(ref.id, liveConfirmation);
+            return liveConfirmation;
           }
           await pause(100);
         }
@@ -542,6 +740,32 @@ export function installOmpExtension(pi, sdk) {
       case 'messages': return messages(entry);
       case 'model': return `${entry.session.model.provider}/${entry.session.model.id}`;
       case 'member_model': return memberModel();
+      // ADR-009 bridge for the Ruby runtime side: the live model catalog plus
+      // the dispatchable agent mapping. `agents` maps `provider/id` -> the
+      // generated session agent name for candidates that are BOTH in the pool
+      // AND selectable in this session right now; consumers must not re-derive
+      // the name in Ruby (the slug+hash stays JS-internal). `families` is a
+      // per-call comparison token, never persisted.
+      case 'model_catalog': {
+        if (!currentContext?.models) throw new Error('model catalog is unavailable before the extension context is initialized');
+        // Another Orbit session may have edited the shared pool since our last
+        // sync; the catalog MUST reflect the pool now. Fail closed: a stale
+        // or unrefreshable mapping is never reported as current.
+        const sync = await syncSessionAgents(currentContext);
+        if (!sync.ok) throw new Error(`model catalog is stale: pool re-sync failed (${sync.reason})`);
+        let available = [];
+        try { available = currentContext.models.list() ?? []; } catch { available = []; }
+        const families = {};
+        for (const m of available) {
+          const key = `${m.provider}/${m.id}`;
+          try { families[key] = currentContext.models.family?.(m) ?? null; } catch { families[key] = null; }
+        }
+        const current = currentContext.models.current?.() ?? null;
+        const agents = {};
+        for (const [name, model] of sessionAgents) agents[model] = name;
+        return { current: current ? `${current.provider}/${current.id}` : null,
+                 available: available.map(m => `${m.provider}/${m.id}`), families, agents };
+      }
       case 'send': return send(entry, request.text);
       case 'stop': return stop(entry);
       // Simple readable interface for TaskRuntime wiring (M1.x): the native
@@ -575,6 +799,11 @@ export function installOmpExtension(pi, sdk) {
     if (host) { await host.close({ requireConfirmation }); host = undefined; }
     for (const entry of entries.values()) entry.unsubscribe();
     entries.clear();
+    // NOTE: the per-session agent root is intentionally NOT removed here.
+    // close() also runs on session_before_switch/branch/tree, where the same
+    // OMP process keeps running and the root must survive for the next
+    // session_start re-sync. Removal happens only on the real process-level
+    // session_shutdown (see below).
   }
 
   // Native task gate: intercept Root's model-issued task dispatches, assign the
@@ -597,14 +826,103 @@ export function installOmpExtension(pi, sdk) {
     if (!bound.ok) return { block: true, reason: bound.reason };
     const taskDir = bound.taskDir;
     const items = Array.isArray(input.tasks) && input.tasks.length ? input.tasks : [input];
+    // Refresh the pool before validating generated-agent dispatches: another
+    // Orbit session may have edited it since our last sync. Only dispatches
+    // through our namespace require the refresh; plain native dispatches are
+    // unaffected by pool state (in-flight members never switch models).
+    let syncError = null;
+    if (items.some(item => item && typeof item === 'object' && typeof item.agent === 'string'
+      && item.agent.trim().startsWith(AGENT_NAME_PREFIX))) {
+      const sync = await syncSessionAgents(ctx);
+      if (!sync.ok) syncError = sync.reason;
+    }
     for (const item of items) {
       if (!item || typeof item !== 'object') continue;
+      // ADR-009: dispatches through our generated agent names pin a model.
+      // Out-of-pool/native agents are untouched (pool limits recommendations
+      // only), but a stale generated name must not silently resolve to a
+      // different or unknown agent.
+      const itemAgent = typeof item.agent === 'string' ? item.agent.trim() : '';
+      let expectedModel = null;
+      if (itemAgent.startsWith(AGENT_NAME_PREFIX)) {
+        if (syncError)
+          return { block: true, reason: `candidate agents are stale (pool re-sync failed: ${syncError}); refusing to dispatch ${itemAgent} on a possibly outdated mapping` };
+        expectedModel = sessionAgents.get(itemAgent) ?? null;
+        if (!expectedModel)
+          return { block: true, reason: `${itemAgent} is not a live session candidate agent (pool changed?); re-run /orbit-models and dispatch again` };
+      }
       const requested = `orbit-${randomUUID()}`;
       item.name = requested;
-      requestedNames.set(requested, { taskDir, toolCallId: event.toolCallId ?? null });
+      requestedNames.set(requested, { taskDir, toolCallId: event.toolCallId ?? null, expectedModel });
     }
     return { input };
   });
+  // ADR-009 model drift block. `task.agentModelOverrides`, frontmatter and
+  // auth fallback all resolve BEFORE the first provider request; OMP's
+  // before_provider_request hook fires per request with that final model
+  // (the sdk wiring runs auth fallback and role reclaim first), so a member
+  // whose pinned pool model was overridden/fallen back is caught here, before
+  // its first real request is dispatched. The drift is recorded through the
+  // DEDICATED model-drift entry (`--event model_drift`), which updates the
+  // already-registered member — never a second register_member, which the
+  // record refuses as duplicate_member_id.
+  // RELIABILITY LIMIT (explicit blocker, not proven): the hook can only
+  // REPLACE the payload; handler throws are swallowed by OMP, so ctx.abort()
+  // is the only suppression available, and live verification that the abort
+  // reliably prevents the in-flight request (incl. retry-fallback switches
+  // mid-run) is still pending. Until then this is best-effort drift evidence
+  // + abort, never reported as a proven gate.
+  function recordModelDrift(taskDir, { id, expected, actual, abortConfirmed }) {
+    try {
+      const ruby = process.env.ORBIT_RUBY || 'ruby';
+      const run = spawnSync(ruby, ['--disable-gems', registerMemberBin, taskDir, '--event', 'model_drift',
+        '--id', id, '--expected', expected, '--actual', actual,
+        '--abort-attempted', 'true', '--abort-confirmed', abortConfirmed ? 'true' : 'false'],
+        { encoding: 'utf8', timeout: 15000, maxBuffer: 1024 * 1024 });
+      if (run.status !== 0 || !run.stdout) return { ok: false, reason: (run.stderr || `exit ${run.status}`).trim().slice(0, 300) };
+      return JSON.parse(run.stdout.trim().split('\n').at(-1));
+    } catch (error) {
+      return { ok: false, reason: String(error?.message || error).slice(0, 300) };
+    }
+  }
+  pi.on('before_provider_request', async (event, ctx) => {
+    let sessionId = null;
+    try { sessionId = ctx.sessionManager?.getSessionId?.() ?? null; } catch { /* unowned */ }
+    if (!sessionId) return event.payload;
+    const agentId = agentIdFor(sessionId);
+    if (!agentId || !nativeMemberIds.has(agentId)) return event.payload;
+    // OMP 18.2.8 emits `registered` with ref.session still null and attaches
+    // the session later with NO registry event (agent-registry.ts ~290-304).
+    // This hook fires with the session live and before provider dispatch, so
+    // capture it into the shared retained map (and start tool tracking) for a
+    // real stop-confirmation barrier even when the registration window never
+    // saw the session.
+    try {
+      const ref = sdk.AgentRegistry.global().get(agentId);
+      if (ref?.session) {
+        memberRetainedSessions.set(agentId, ref.session);
+        trackMemberTools(agentId, ref.session);
+      }
+    } catch { /* observation only; never block the request path */ }
+    const expected = memberExpectedModels.get(agentId);
+    if (!expected) return event.payload;
+    const model = ctx.model;
+    const actual = model ? `${model.provider}/${model.id}` : null;
+    if (!actual || actual === expected) return event.payload;
+    if (!memberDriftReported.has(agentId)) {
+      memberDriftReported.add(agentId);
+      const taskDir = memberTasks.get(agentId);
+      // Only the registry flip is confirmable; ctx.abort() has no public
+      // completion signal and is recorded as attempted-only.
+      const abortConfirmed = signalAbort(agentId);
+      const recorded = recordModelDrift(taskDir, { id: agentId, expected, actual, abortConfirmed });
+      process.stderr.write(`Orbit: member ${agentId} model drift (${expected} -> ${actual}); ` +
+        `drift record: ${recorded.ok ? 'ok' : recorded.reason}; member abort attempted\n`);
+    }
+    try { ctx.abort?.(); } catch { /* abort is advisory */ }
+    return event.payload;
+  });
+
   // Native collaboration observation (M1.1): hub call intents carry the wire
   // content (op/to/from/message) at tool_call time; results carry what came
   // back. This is real observed traffic, not a start-boundary stub.
@@ -661,8 +979,97 @@ export function installOmpExtension(pi, sdk) {
       return { content: [{ type: 'text', text }], details: {} };
     }
   });
-  pi.on('session_start', (_event, ctx) => { rootFor(ctx); subscribeRegistryGate(); });
-  pi.on('session_shutdown', () => close());
+  pi.registerCommand('orbit-models', {
+    description: 'List or edit the ADR-009 model candidate pool for this session',
+    handler: async (args, ctx) => {
+      const [sub, model] = (args || '').trim().split(/\s+/).filter(Boolean);
+      const notify = (text, level = 'info') => { try { ctx.ui.notify(text, level); } catch { process.stderr.write(`${text}\n`); } };
+      try {
+        if (sub === 'add') {
+          if (!model) return notify('usage: /orbit-models add <provider/id>', 'warning');
+          // ADR-009: candidates are picked from THIS session's selectable
+          // list; adding anything else would persist an identifier the user
+          // never saw as available here.
+          let available = [];
+          try { available = (ctx.models?.list?.() ?? []).map(m => `${m.provider}/${m.id}`); } catch { available = []; }
+          if (!available.includes(model))
+            return notify(`${model} is not selectable in this session (see the list above). ` +
+              'Only models from the current session list can enter the pool; stale entries can still be removed.', 'warning');
+          const result = runPoolCli(['add', model]);
+          if (!result.ok) return notify(`model-candidates add failed: ${result.reason}`, 'error');
+          const sync = await syncSessionAgents(ctx);
+          return notify(`Added ${model}. ` +
+            (sync.ok ? `Live session agents: ${sync.agents.map(a => `${a.name} -> ${a.model}`).join(', ') || 'none (pool empty or nothing selectable here)'}` : sync.reason),
+            sync.ok ? 'info' : 'warning');
+        }
+        if (sub === 'remove') {
+          if (!model) return notify('usage: /orbit-models remove <provider/id>', 'warning');
+          const result = runPoolCli(['remove', model]);
+          if (!result.ok) return notify(`model-candidates remove failed: ${result.reason}`, 'error');
+          await syncSessionAgents(ctx);
+          return notify(`Removed ${model}.`, 'info');
+        }
+        if (sub) return notify('usage: /orbit-models [add|remove <provider/id>]', 'warning');
+        const pool = runPoolCli(['list']);
+        if (!pool.ok) return notify(`model pool unreadable: ${pool.reason}`, 'error');
+        const poolSet = new Set(pool.models);
+        let available = [];
+        try { available = (ctx.models?.list?.() ?? []).map(m => `${m.provider}/${m.id}`); } catch { available = []; }
+        const inPool = available.filter(id => poolSet.has(id));
+        const notInPool = available.filter(id => !poolSet.has(id));
+        const stale = pool.models.filter(id => !available.includes(id));
+        const lines = [
+          'Model candidate pool (ADR-009). Selectable in this session:',
+          ...inPool.map(id => `  [in pool]  ${id}`),
+          ...notInPool.map(id => `  [addable]  ${id}`),
+          ...(stale.length ? ['In pool but NOT selectable in this session (kept; removable):', ...stale.map(id => `  [stale]    ${id}`)] : []),
+          'Commands:',
+          '  /orbit-models add <provider/id>    (only IDs marked [addable])',
+          '  /orbit-models remove <provider/id>',
+          'Root 显式派发池外原生 Agent 不受此池限制。',
+        ];
+        notify(lines.join('\n'));
+        await syncSessionAgents(ctx);
+      } catch (error) {
+        notify(`/orbit-models failed: ${error?.message || error}`, 'error');
+      }
+    },
+  });
+  function isMainSession(sessionId) {
+    try {
+      const ref = sdk.AgentRegistry.global().list().find(r => r.session?.sessionId === sessionId);
+      return Boolean(ref?.session) && ref.id === sdk.MAIN_AGENT_ID && ref.kind === 'main';
+    } catch { return false; }
+  }
+  pi.on('session_start', (_event, ctx) => {
+    // Re-bound child runtimes also fire session_start (OMP re-binds factories
+    // per subagent). Only the process main agent may bind Orbit; member
+    // sessions skip binding — their hooks (drift guard) are installed at
+    // factory scope — instead of throwing through the child dispatch loop,
+    // which could disable the extension exactly where the guard must run.
+    let sessionId = null;
+    try { sessionId = ctx.sessionManager?.getSessionId?.() ?? null; } catch { /* unowned */ }
+    if (!isMainSession(sessionId)) return;
+    rootFor(ctx);
+    subscribeRegistryGate();
+    // Best-effort: materialize pool ∩ session into the private agent root so
+    // generated agents are dispatchable immediately after startup.
+    syncSessionAgents(ctx).catch(() => {});
+  });
+  pi.on('session_shutdown', async (_event, ctx) => {
+    // Fires PER SESSION. Re-bound CHILD runtimes dispose independently; they
+    // must neither tear down the Root host nor delete the shared session
+    // agent root — only the process main session's shutdown does that.
+    let sessionId = null;
+    try { sessionId = ctx?.sessionManager?.getSessionId?.() ?? null; } catch { /* unowned */ }
+    if (!isMainSession(sessionId)) return;
+    await close();
+    // Process-level shutdown only (never on child dispose or on switch/branch/
+    // tree): remove our own root. Stray roots from crashed sessions are left
+    // for explicit install-time/human cleanup — a quiet long-running session
+    // can legitimately sit untouched, so age sweeping is unsafe.
+    if (sessionAgentRoot) await fs.rm(sessionAgentRoot, { recursive: true, force: true }).catch(() => {});
+  });
   for (const event of ['session_before_switch', 'session_before_branch', 'session_before_tree']) pi.on(event, async () => {
     try { await close(true); }
     catch (error) { currentContext?.ui.notify(error.message, 'error'); return { cancel: true }; }

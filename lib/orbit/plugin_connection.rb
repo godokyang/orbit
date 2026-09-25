@@ -26,6 +26,43 @@ module Orbit
 
     def state = request("state")
     def configured_model = request("model")
+
+    # ADR-009 session catalog: the models OMP considers selectable in this
+    # session (`ctx.models.list()`), the current writing model, the ephemeral
+    # family map used only for family-diversity comparison, and the ephemeral
+    # Agent-name map (`agents`, provider/id => non-empty OMP Agent name) that
+    # TaskRuntime can use directly instead of recomputing names in Ruby. Ids may
+    # contain slashes (provider/id, the id may include `/`). The raw host value
+    # is not trusted: malformed ids, empty families and empty agent names are
+    # dropped. This reads no credentials.
+    def model_catalog
+      raw = request("model_catalog")
+      raise Error, "native model catalog is malformed" unless raw.is_a?(Hash)
+
+      families = {}
+      if raw["families"].is_a?(Hash)
+        raw["families"].each do |model, family|
+          id = catalog_identifier(model)
+          name = family.to_s.strip
+          families[id] = name if id && !name.empty?
+        end
+      end
+      agents = {}
+      if raw["agents"].is_a?(Hash)
+        raw["agents"].each do |model, agent|
+          id = catalog_identifier(model)
+          name = agent.to_s.strip
+          agents[id] = name if id && !name.empty?
+        end
+      end
+      {
+        "current" => catalog_identifier(raw["current"]),
+        "available" => Array(raw["available"]).filter_map { |model| catalog_identifier(model) }.uniq,
+        "families" => families,
+        "agents" => agents
+      }
+    end
+
     # No memoization: the delegation decision and its signature must reflect
     # the current @task role/model/route resolution at each assessment.
     def member_model_resolution
@@ -78,6 +115,14 @@ module Orbit
     end
 
     private
+
+    # provider/id with no whitespace; the id may itself contain slashes.
+    CATALOG_IDENTIFIER = %r{\A[^\s/]+/[^\s]+\z}
+
+    def catalog_identifier(value)
+      text = value.to_s.strip
+      text.match?(CATALOG_IDENTIFIER) ? text : nil
+    end
 
     def request(method, params = {})
       Timeout.timeout(@deadline) do

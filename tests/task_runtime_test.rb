@@ -154,12 +154,13 @@ class RuntimeCodexHost
 end
 
 class RuntimeAdvisor
-  attr_reader :calls, :delegation_calls
-  attr_accessor :scores, :failure, :on_call, :delegation_scores, :delegation_failure
+  attr_reader :calls, :delegation_calls, :candidate_calls
+  attr_accessor :scores, :failure, :on_call, :delegation_scores, :delegation_failure, :candidate_scores
 
   def initialize(scores)
     @scores, @calls = scores, []
     @delegation_calls = []
+    @candidate_calls = []
     @delegation_scores = { "member_fit" => 0.8, "parallel_gain" => 0.75, "cost_appropriate" => 0.8 }
   end
 
@@ -176,6 +177,11 @@ class RuntimeAdvisor
     raise @delegation_failure if @delegation_failure
 
     { "model" => "jev-test", "scores" => @delegation_scores, "usage" => { "input_tokens" => 20, "output_tokens" => 4 } }
+  end
+
+  def assess_candidates(state:, candidates:)
+    @candidate_calls << { "state" => state, "candidates" => candidates }
+    { "model" => "jev-test", "scores" => @candidate_scores, "usage" => { "input_tokens" => 30, "output_tokens" => 5 } }
   end
 end
 
@@ -363,7 +369,9 @@ fixture(interval: 300) do |root, record, _host, checker, _runtime|
   assert(requests.length == 1, "one evidence request is sent for the observation")
   assert(requests.first.include?("opencode-go/deepseek-v4.1-flash") &&
          requests.first.include?("orbit model-evidence #{record.path} --file -") &&
-         requests.first.include?("speed, quality, cost and local samples"),
+         requests.first.include?("speed, quality, cost and local samples") &&
+         requests.first.include?("coarse cost_tier") &&
+         requests.first.include?("an explicit unknown is acceptable"),
          "the request lists the identity, the needed facts and the dedicated command")
   assert(host.messages.none? { |message| message.include?("delegation hint") },
          "the structural stage never hints directly")
@@ -409,8 +417,9 @@ fixture(interval: 300) do |root, record, _host, checker, _runtime|
   assert(record.state.dig("delegation_hint", "member_fit") == 0.8 &&
          record.state.dig("delegation_hint", "parallel_gain") == 0.75 &&
          record.state.dig("delegation_hint", "cost_appropriate") == 0.8 &&
+         record.state.dig("delegation_hint", "cost_basis") == "coarse_tier" &&
          record.state.dig("delegation_hint", "signature"),
-         "the hint records all second-stage scores and its signature")
+         "the hint records all second-stage scores, its cost basis and signature")
   assert(record.state.dig("jev", "delegation", "decision") == "recommended",
          "a passing second stage records decision recommended")
   assert(record.state.dig("jev", "evidence_status") == "used", "evidence use is recorded")
@@ -515,9 +524,10 @@ fixture(interval: 300) do |root, record, _host, checker, _runtime|
          "the route-specific lookup requests evidence instead of reusing the legacy entry")
 end
 
-# A host-resolved subscription/quota route without the route's numeric
-# `quota.*` facts cannot authorize a cost judgment; the gap is explicit and no
-# hint is sent.
+# ADR-009 coarse cost semantics: without numeric cost facts the cost basis
+# is unknown. Even a low recorded cost score must not by itself suppress a
+# hint that already passed the quality and time bars, and the hint displays
+# the unknown tier instead of reading it as free.
 class RuntimeQuotaRouteHost < RuntimeTeamHost
   def default_member_route = "subscription_quota"
 end
@@ -526,23 +536,27 @@ fixture(interval: 300) do |root, record, _host, checker, _runtime|
   host = RuntimeQuotaRouteHost.new(root)
   host.working("progress")
   advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
+  advisor.delegation_scores = { "member_fit" => 0.8, "parallel_gain" => 0.75, "cost_appropriate" => 0.3 }
   runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
-                                   evidence_cache: both_route_evidence(root, candidate_route: "subscription_quota"))
+                                   evidence_cache: both_route_evidence(root, candidate_route: "subscription_quota",
+                                                                      priced: false))
   runtime.tick(now: Time.now.to_f + 6)
-  assert(advisor.delegation_calls.empty?, "a quota route without quota.* facts never reaches the second stage")
-  assert(record.state["delegation_hint"].nil? && host.messages.none? { |message| message.include?("delegation hint") },
-         "a quota route without quota.* facts never hints")
-  gap = record.state.fetch("evidence_gaps").values.find { |entry| entry["reason"].to_s.include?("cost route") }
-  assert(gap && gap["host_billing_route"] == "subscription_quota" &&
-         gap["expected_metric"] == "quota." &&
-         gap["candidates"].first["billing_route"] == "subscription_quota" && !gap["candidates"].first["fact_present"],
-         "the gap records the route and the expected fact namespace")
-  assert(File.readlines(File.join(record.path, "events.jsonl")).any? { |line| line.include?("delegation_cost_unverified") },
-         "the unverified cost route is recorded as an event")
+  assert(advisor.delegation_calls.length == 1, "an unknown cost basis still reaches the second stage")
+  assert(record.state.dig("jev", "delegation", "decision") == "recommended" &&
+         record.state.dig("jev", "delegation", "cost_basis") == "unknown",
+         "a low cost score on an unknown basis does not suppress the passing recommendation")
+  hint = host.messages.find { |message| message.include?("delegation hint") }
+  assert(hint && hint.include?("cost tier unknown") && hint.include?("unknown cost is not free"),
+         "the hint displays the unknown cost tier instead of reading it as free")
+  assert(record.state.dig("delegation_hint", "cost_basis") == "unknown" &&
+         record.state.dig("delegation_hint", "cost_appropriate") == 0.3,
+         "the hint record keeps the ungated cost score and its unknown basis")
+  assert(File.readlines(File.join(record.path, "events.jsonl")).none? { |line| line.include?("delegation_cost_unverified") },
+         "the removed route/fact gate records no unverified-cost events")
 end
 
-# A host-resolved subscription/quota route with numeric `quota.*` facts passes
-# the gate, reaches the cost judgment and delivers the passing hint.
+# Numeric `quota.*` facts make a known coarse tier: the cost judgment runs
+# and a passing score delivers the hint with its recorded basis.
 fixture(interval: 300) do |root, record, _host, checker, _runtime|
   host = RuntimeQuotaRouteHost.new(root)
   host.working("progress")
@@ -552,42 +566,36 @@ fixture(interval: 300) do |root, record, _host, checker, _runtime|
                                    evidence_cache: both_route_evidence(root, candidate_route: "subscription_quota",
                                                                       priced: false, quota: true))
   runtime.tick(now: Time.now.to_f + 6)
-  assert(advisor.delegation_calls.length == 1, "a quota route with numeric quota.* facts reaches one cost judgment")
+  assert(advisor.delegation_calls.length == 1, "quota.* numeric facts make a known coarse tier that reaches one cost judgment")
   assert(record.state.dig("delegation_hint", "cost_appropriate") == 0.8 &&
+         record.state.dig("delegation_hint", "cost_basis") == "coarse_tier" &&
          record.state.dig("jev", "delegation", "decision") == "recommended" &&
          host.messages.any? { |message| message.include?("delegation hint") },
-         "a passing quota-route judgment persists and delivers the hint")
+         "a passing known-tier judgment persists and delivers the hint")
   hint_event = events(record).find { |event| event["type"] == "delegation_hint" }
-  assert(hint_event && hint_event["cost_appropriate"] == 0.8,
-         "the delivered hint event records the cost_appropriate score")
+  assert(hint_event && hint_event["cost_appropriate"] == 0.8 && hint_event["cost_basis"] == "coarse_tier",
+         "the delivered hint event records the cost score and its known basis")
 end
 
-# A verified direct_api route with only quota.* facts stays fail-closed: the
-# fact namespace must match the route, never substitute for it.
+# `quota.*` facts on a direct_api route are not cost facts for that route:
+# the billing modes never mix, so the basis is unknown and a passing
+# recommendation is not suppressed, while the quota facts are never read as
+# API prices.
 fixture(interval: 300) do |root, record, _host, checker, _runtime|
   host = RuntimeTeamHost.new(root)
   host.working("progress")
   advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
+  advisor.delegation_scores = { "member_fit" => 0.8, "parallel_gain" => 0.75, "cost_appropriate" => 0.4 }
   runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
                                    evidence_cache: both_route_evidence(root, priced: false, quota: true))
   runtime.tick(now: Time.now.to_f + 6)
-  assert(advisor.delegation_calls.empty?, "a direct_api route without cost.* facts never reaches the second stage")
-  assert(record.state["delegation_hint"].nil?, "a direct_api route without cost.* facts never hints")
-  gap = record.state.fetch("evidence_gaps").values.find { |entry| entry["reason"].to_s.include?("cost route") }
-  assert(gap && gap["host_billing_route"] == "direct_api" && gap["expected_metric"] == "cost.",
-         "the gap names the route's expected cost.* namespace")
-end
-
-# A verified route without a price is still guesswork: no judgment, no hint.
-fixture(interval: 300) do |root, record, _host, checker, _runtime|
-  host = RuntimeTeamHost.new(root)
-  host.working("progress")
-  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
-  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
-                                   evidence_cache: both_route_evidence(root, priced: false))
-  runtime.tick(now: Time.now.to_f + 6)
-  assert(advisor.delegation_calls.empty?, "a price-less direct_api entry never reaches the second stage")
-  assert(record.state["delegation_hint"].nil?, "a price-less direct_api entry never hints")
+  assert(advisor.delegation_calls.length == 1, "namespace-mismatched facts still reach the cost judgment")
+  assert(record.state.dig("jev", "delegation", "cost_basis") == "unknown" &&
+         record.state.dig("jev", "delegation", "decision") == "recommended",
+         "quota facts on a direct_api route make an unknown, not known, cost basis")
+  hint = host.messages.find { |message| message.include?("delegation hint") }
+  assert(hint && hint.include?("cost tier unknown"),
+         "the hint still ships and displays the unknown tier")
 end
 
 # A verified direct_api route with a price still needs the cost score to pass.
@@ -652,6 +660,446 @@ fixture(interval: 300) do |root, record, _host, checker, _runtime|
   assert(File.readlines(File.join(record.path, "events.jsonl")).any? { |line| line.include?("model_evidence_stale") },
          "the stale pending evidence is recorded")
   assert(cache.stored_entries.length == 2, "cache entries stay reusable for their own routes")
+end
+
+# ADR-009 first candidate wiring: pool ∩ session-available ∩ agent names
+# replaces the default member as the automatic candidate source on hosts
+# exposing a model catalog. Root's own model is excluded from automatic
+# multi-agent recommendation. Evidence requests carry model+agent, but until
+# per-candidate quality/time judgment lands the round is held at
+# pending_candidates — no generalized delegation hint, no specific model
+# recommendation. Explicit native dispatch stays allowed and registered.
+class RuntimePoolHost < RuntimeTeamHost
+  attr_accessor :catalog
+
+  def initialize(root)
+    super
+    @catalog = { "current" => "openai/gpt-6-astra",
+                 "available" => %w[openai/gpt-6-astra opencode-go/deepseek-v4.1-flash zhipu/glm-5],
+                 "agents" => { "opencode-go/deepseek-v4.1-flash" => "orbit-m-deepseek",
+                               "zhipu/glm-5" => "orbit-m-glm" } }
+  end
+
+  def model_catalog = @catalog
+  def configured_model = "openai/gpt-6-astra"
+  def default_member_model = "opencode-go/deepseek-v4.1-flash"
+  def default_member_route = "direct_api"
+end
+
+class StubCandidatePool
+  attr_accessor :models
+
+  def initialize(models)
+    @models = models
+  end
+
+  def read = @models
+end
+
+fixture(interval: 300) do |root, record, _host, checker, _runtime|
+  host = RuntimePoolHost.new(root)
+  host.working("progress")
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
+  cache = evidence_cache(root)
+  pool = StubCandidatePool.new(["opencode-go/deepseek-v4.1-flash", "openai/gpt-6-astra", "qwen/qwen4-max"])
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
+                                   evidence_cache: cache, candidate_pool: pool)
+  now = Time.now.to_f
+  runtime.tick(now: now + 6)
+  request = host.messages.find { |message| message.include?("model evidence request") }
+  assert(request && request.include?("- candidate (omp): opencode-go/deepseek-v4.1-flash") &&
+         request.include?("orbit-m-deepseek") && request.include?("openai/gpt-6-astra"),
+         "the request names the pooled candidate with its agent plus the root")
+  assert(request.scan("- candidate").length == 1 && !request.include?("qwen/qwen4-max"),
+         "unavailable models and the Root's own model are excluded from candidates")
+
+  cache.record(evidence_entry(provider: "openai", model: "gpt-6-astra", billing_route: "unknown"))
+  deepseek = evidence_entry(billing_route: "direct_api")
+  deepseek["cost_tier"] = { "band" => "low", "confidence" => "medium", "basis" => "official pricing page" }
+  cache.record(deepseek)
+  submission = [evidence_entry(provider: "openai", model: "gpt-6-astra", billing_route: "unknown"),
+                evidence_entry(billing_route: "direct_api")]
+  record.submit("model_evidence", "entries" => submission.map do |entry|
+    entry.slice("provider", "model", "reasoning", "billing_route", "status")
+  end)
+  advisor.candidate_scores = { "0" => { "quality" => 0.8, "time" => 0.7 } }
+  runtime.tick(now: now + 7)
+  assert(advisor.delegation_calls.empty? && advisor.candidate_calls.length == 1,
+         "the pool path runs one per-candidate judgment and never the whole-group questions")
+  evidence_to_jev = advisor.candidate_calls.first.dig("state", "model_evidence")
+  assert(evidence_to_jev.dig("candidates", 0, "cost_tier", "band") == "low" &&
+         evidence_to_jev.dig("candidates", 0, "sources") == ["https://artificialanalysis.ai/models"],
+         "the validated cost tier, sources and validity reach the judgment with the metrics")
+  assert(record.state.dig("jev", "delegation", "decision") == "recommended" &&
+         record.state.dig("jev", "delegation", "recommendation", "first", "agent") == "orbit-m-deepseek" &&
+         record.state.dig("jev", "delegation", "recommendation", "first", "cost_band") == "low",
+         "the recommendation names the first choice with its agent and verified cost band")
+  message = host.messages.find { |text| text.include?("Orbit model recommendation") }
+  assert(message && message.include?("First choice: orbit-m-deepseek") &&
+         message.include?("model opencode-go/deepseek-v4.1-flash") &&
+         message.include?("cost tier low"),
+         "the delivered message names agent+model with quality, time and cost reasons")
+  assert(host.messages.none? { |text| text.include?("Orbit delegation hint") },
+         "the pool path never falls back to the old generalized hint")
+  log = File.readlines(File.join(record.path, "events.jsonl"))
+  assert(log.any? { |line| line.include?("delegation_recommendation") } &&
+         log.any? { |line| line.include?("delegation_recommendation_delivered") },
+         "the recommendation and its delivery are recorded as events")
+
+  record.register_member("orbit-explicit1", requested_name: "explicit1", status: "registered")
+  runtime.tick(now: now + 8)
+  member = record.state["members"].first
+  assert(member && member["status"] == "registered" && member["delegation_basis"] == "orbit_hint" &&
+         record.state.dig("delegation_hint", "followed") == true,
+         "Root's explicit dispatch follows the recommendation and records the orbit_hint basis")
+end
+
+# ADR-009 §3 quality line: a candidate whose sourced evidence does not
+# clear the quality bar stays pending — it is never recommended, and with no
+# qualified candidate there is no recommendation message at all.
+fixture(interval: 300) do |root, record, _host, checker, _runtime|
+  host = RuntimePoolHost.new(root)
+  host.working("progress")
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
+  advisor.candidate_scores = { "0" => { "quality" => 0.3, "time" => 0.8 } }
+  cache = evidence_cache(root)
+  cache.record(evidence_entry(provider: "openai", model: "gpt-6-astra", billing_route: "unknown"))
+  cache.record(evidence_entry(billing_route: "direct_api"))
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
+                                   evidence_cache: cache,
+                                   candidate_pool: StubCandidatePool.new(["opencode-go/deepseek-v4.1-flash"]))
+  runtime.tick(now: Time.now.to_f + 6)
+  assert(advisor.candidate_calls.length == 1 &&
+         record.state.dig("jev", "delegation", "decision") == "pending_candidates" &&
+         record.state.dig("jev", "delegation", "candidates", 0, "status") == "pending_quality",
+         "a candidate below the sourced quality line is recorded as pending, not recommended")
+  assert(host.messages.none? { |message| message.include?("Orbit model recommendation") } &&
+         record.state["delegation_hint"].nil?,
+         "no recommendation is sent or recorded when no candidate qualifies")
+end
+
+# Convergence for the real re-submission path: a pending_candidates round
+# judged on thin evidence re-opens when Root later submits richer validated
+# evidence against the still-pending request, and only then — an unchanged
+# re-submission never re-runs the judgment.
+fixture(interval: 300) do |root, record, _host, checker, _runtime|
+  host = RuntimePoolHost.new(root)
+  host.working("progress")
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
+  cache = evidence_cache(root)
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
+                                   evidence_cache: cache,
+                                   candidate_pool: StubCandidatePool.new(["opencode-go/deepseek-v4.1-flash"]))
+  now = Time.now.to_f
+  runtime.tick(now: now + 6)
+  assert(host.messages.any? { |message| message.include?("model evidence request") },
+         "precondition: the thin-evidence round went through a real request")
+
+  thin = [evidence_entry(provider: "openai", model: "gpt-6-astra", billing_route: "unknown"),
+          evidence_entry(billing_route: "direct_api")]
+  thin.each { |entry| cache.record(entry) }
+  record.submit("model_evidence", "entries" => thin.map do |entry|
+    entry.slice("provider", "model", "reasoning", "billing_route", "status")
+  end)
+  advisor.candidate_scores = { "0" => { "quality" => 0.3, "time" => 0.8 } }
+  runtime.tick(now: now + 7)
+  assert(advisor.candidate_calls.length == 1 &&
+         record.state.dig("jev", "delegation", "decision") == "pending_candidates" &&
+         record.state.dig("jev", "delegation", "candidates", 0, "status") == "pending_quality",
+         "precondition: the thin round ends pending_candidates below the quality line")
+
+  rich = evidence_entry(billing_route: "direct_api")
+  rich["cost_tier"] = { "band" => "low", "confidence" => "medium", "basis" => "official pricing page" }
+  cache.record(rich)
+  record.submit("model_evidence", "entries" => thin.map do |entry|
+    entry.slice("provider", "model", "reasoning", "billing_route", "status")
+  end)
+  advisor.candidate_scores = { "0" => { "quality" => 0.8, "time" => 0.7 } }
+  runtime.tick(now: now + 8)
+  assert(advisor.candidate_calls.length == 2 &&
+         record.state.dig("jev", "delegation", "decision") == "recommended" &&
+         record.state.dig("jev", "delegation", "recommendation", "first", "agent") == "orbit-m-deepseek" &&
+         host.messages.any? { |message| message.include?("First choice: orbit-m-deepseek") },
+         "changed validated evidence re-opens the pending round and recommends")
+  assert(File.readlines(File.join(record.path, "events.jsonl")).any? { |line| line.include?("delegation_assessment_reopened") },
+         "the re-open is recorded as an event")
+
+  record.submit("model_evidence", "entries" => thin.map do |entry|
+    entry.slice("provider", "model", "reasoning", "billing_route", "status")
+  end)
+  runtime.tick(now: now + 9)
+  assert(advisor.candidate_calls.length == 2 &&
+         record.state.dig("jev", "delegation", "decision") == "recommended",
+         "an unchanged re-submission never re-runs the judgment")
+end
+
+# ADR-009 §4 checker model integration: selection happens only before a
+# new check, an in-flight check never switches, an undecided selection
+# blocks without snapshots or selector hammering, and a pool change affects
+# exactly the next check.
+class RuntimeSelectingChecker
+  attr_reader :calls, :selected_models
+  attr_accessor :result, :failure_message
+
+  def initialize
+    @calls = []
+    @selected_models = []
+  end
+
+  def start(**args)
+    @calls << args
+  end
+
+  def poll
+    raise Orbit::CheckRunner::Error, @failure_message if @failure_message
+
+    @result
+  end
+
+  def stop! = true
+  def failure_kind = @failure_message ? "auth_or_quota" : nil
+  def failure_basis = @failure_message ? "structured" : nil
+
+  def select_model!(model)
+    @selected_models << model
+  end
+end
+
+class StubCheckerSelector
+  attr_accessor :model, :error, :signature, :snapshot_value
+  attr_reader :calls
+
+  def initialize(model, signature = "sig-1")
+    @model = model
+    @signature = signature
+    @snapshot_value = "snap-1"
+    @calls = []
+  end
+
+  def snapshot(instruction:)
+    @snapshot_value
+  end
+
+  def select(explicit:, instruction:, previous:, selected_for:)
+    @calls << { "role" => selected_for, "instruction" => instruction }
+    raise Orbit::CheckerModelSelector::Error, @error if @error
+
+    explicit_text = explicit.to_s
+    chosen = explicit_text.empty? ? @model : explicit_text
+    [chosen, { "source" => explicit_text.empty? ? "candidate_pool" : "explicit",
+               "model" => chosen, "signature" => @signature, "selected_for" => selected_for }]
+  end
+end
+
+fixture do |root, record, _host, _checker, _runtime|
+  host = RuntimeTeamHost.new(root)
+  pool = StubCandidatePool.new(["zhipu/glm-5"])
+  selector = StubCheckerSelector.new("zhipu/glm-5")
+  checker = RuntimeSelectingChecker.new
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker,
+                                   candidate_pool: pool, checker_selector: selector)
+  now = Time.now.to_f
+  selector.error = "no candidate pool model passed the JEV quality line"
+  runtime.tick(now: now)
+  assert(checker.calls.empty? && record.state.fetch("checks").empty? &&
+         record.state.dig("review", "blocked", "type") == "selection_undecided",
+         "an undecided selection blocks without starting a check or building a snapshot")
+  runtime.tick(now: now + 1)
+  assert(checker.calls.empty? && selector.calls.length == 1 &&
+         host.messages.count { |text| text.include?("orbit review-model") } == 1,
+         "the blocked state neither re-runs the selector nor repeats the notice")
+
+  selector.error = nil
+  selector.signature = "sig-2"
+  selector.snapshot_value = "snap-2" # catalog/evidence changed outside the pool
+  runtime.tick(now: now + 2)
+  assert(checker.calls.length == 1 && checker.selected_models == ["zhipu/glm-5"] &&
+         record.state.dig("review", "selection", "model") == "zhipu/glm-5" &&
+         record.state.dig("review", "blocked").nil?,
+         "a changed selection snapshot (catalog or evidence) clears the undecided block and the next check uses the fresh selection")
+
+  selector.model = "openai/gpt-6-astra"
+  runtime.tick(now: now + 3)
+  assert(checker.calls.length == 1 && checker.selected_models == ["zhipu/glm-5"],
+         "an in-flight check never switches its model")
+
+  checker.result = answer("complete")
+  runtime.tick(now: now + 4)
+  record.submit("check")
+  runtime.tick(now: now + 5)
+  assert(checker.calls.length == 2 && checker.selected_models.last == "openai/gpt-6-astra" &&
+         record.state.dig("review", "model") == "openai/gpt-6-astra",
+         "the next check after the pool change runs on the new selection")
+
+  runtime.send(:add_amendment, "Add a login page.", { "kind" => "test", "id" => "amend-1" })
+  checker.result = answer("complete")
+  runtime.tick(now: now + 6)
+  record.submit("check")
+  runtime.tick(now: now + 7)
+  assert(checker.calls.length == 3 &&
+         selector.calls.last["instruction"].include?("Provide first and second behaviors.") &&
+         selector.calls.last["instruction"].include?("Add a login page.") &&
+         selector.calls.last["instruction"].include?("--- amendment ---"),
+         "an amendment reaches the next selection inside the effective instruction (Q20)")
+end
+
+# A real check failure records a failed check, keeps the running task with
+# its members, blocks automatic checks, and Root's explicit review-model
+# clears the block and starts a fresh check that recovers.
+fixture do |root, record, _host, _checker, _runtime|
+  host = RuntimeTeamHost.new(root)
+  selector = StubCheckerSelector.new("zhipu/glm-5")
+  checker = RuntimeSelectingChecker.new
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker,
+                                   candidate_pool: StubCandidatePool.new(["zhipu/glm-5"]),
+                                   checker_selector: selector)
+  now = Time.now.to_f
+  runtime.tick(now: now)
+  assert(checker.calls.length == 1, "precondition: a check is in flight")
+  checker.failure_message = "OMP reviewer exited 1: 401 invalid api key"
+  runtime.tick(now: now + 1)
+  assert(!Orbit::TaskRuntime::TERMINAL.include?(record.state["status"]) && record.state["error"].nil?,
+         "a failed check is a blocked checker, not a failed task")
+  failed = record.state.fetch("checks").last
+  assert(failed["failed"] && failed.dig("result", "verdict") == "check_failed" &&
+         failed.dig("result", "failure_kind") == "auth_or_quota" &&
+         record.state.dig("review", "blocked", "type") == "check_failure" &&
+         record.state.dig("review", "blocked", "model") == "zhipu/glm-5",
+         "the failure is recorded as a failed check with its kind and model")
+  assert(Orbit::TaskView.format(record).include?("检查阻塞：模型 zhipu/glm-5"),
+         "orbit status surfaces the blocked checker line")
+  notice = host.messages.find { |text| text.include?("orbit review-model") }
+  assert(notice && notice.include?("--model") && notice.include?(record.path) &&
+         notice.include?("does not retry"),
+         "Root is told in English to explicitly re-select via review-model")
+
+  runtime.tick(now: now + 400)
+  assert(checker.calls.length == 1, "blocked automatic checks neither start nor snapshot")
+
+  record.submit("review_model", "model" => "openai/gpt-6-astra", "reason" => "auth failed")
+  runtime.tick(now: now + 401)
+  recorded = events(record).find { |event| event["type"] == "review_model_recorded" }
+  assert(record.state.dig("review", "explicit_model") == "openai/gpt-6-astra" &&
+         recorded && recorded["in_pool"] == false &&
+         recorded["notice"] == "explicit review model is outside the candidate pool" &&
+         record.state.dig("review", "blocked").nil?,
+         "the explicit model is pinned with an out-of-pool notice and clears the block")
+  assert(checker.calls.length == 2 && checker.selected_models.last == "openai/gpt-6-astra",
+         "a fresh check starts immediately on the explicit model")
+
+  checker.failure_message = nil
+  checker.result = answer("complete")
+  runtime.tick(now: now + 402)
+  assert(record.state.fetch("checks").last.dig("result", "verdict") == "complete",
+         "checks recover after the explicit re-selection")
+end
+
+# Q17 (ADR-009): an empty pool (or an empty session intersection) produces no
+# member recommendation at all, and a pool change must invalidate old
+# signatures so stale recommendations cannot survive.
+fixture(interval: 300) do |root, record, _host, checker, _runtime|
+  host = RuntimePoolHost.new(root)
+  host.working("progress")
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
+  pool = StubCandidatePool.new([])
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
+                                   evidence_cache: evidence_cache(root), candidate_pool: pool)
+  now = Time.now.to_f
+  runtime.tick(now: now + 6)
+  assert(host.messages.none? { |message| message.include?("model evidence request") } &&
+         host.messages.none? { |message| message.include?("delegation hint") } &&
+         advisor.delegation_calls.empty?,
+         "an empty pool recommends nothing: no request, no judgment, no hint")
+  assert(record.state.dig("jev", "delegation", "decision") == "no_candidates" &&
+         record.state.dig("jev", "evidence_note").to_s.include?("Q17"),
+         "the Q17 no-recommendation reason is recorded")
+
+  options = runtime.send(:delegation_options)
+  digest = Orbit::WorkspaceSnapshot.fingerprint(project_root: root)
+  empty_signature = runtime.send(:delegation_signature, digest, options)
+  pool.models = ["opencode-go/deepseek-v4.1-flash"]
+  filled_signature = runtime.send(:delegation_signature, digest, options)
+  assert(empty_signature != filled_signature,
+         "a pool change changes the delegation signature and invalidates old recommendations")
+end
+
+# ADR-009 model drift: OMP records `model_drift` on a registered member
+# when the final model differs from the resolved candidate. The runtime
+# fails the member on its next reconcile, never accepts a later native
+# result as a completion, invalidates the stale hint, stops the drifted
+# session and asks Root to explicitly re-select — it never switches models
+# itself.
+class RuntimeDriftHost < RuntimeTeamHost
+  attr_reader :stopped_ids
+
+  def initialize(root)
+    super
+    @stopped_ids = []
+    # Before the drift is written the member is an ordinary running native
+    # member with no accepted result; the accepted/idle observation is only
+    # switched on afterwards to prove the drift veto blocks completion.
+    @native_state = { "registry_status" => "running", "model" => "openai/gpt-6-astra" }
+    @native_result = {}
+  end
+
+  def accept_drifted_result
+    @native_state = { "registry_status" => "idle", "model" => "openai/gpt-6-astra",
+                      "lifecycle" => { "acceptedAt" => 1 } }
+    @native_result = { "output_text" => "work produced by the drifted model" }
+  end
+
+  def member_state(_id) = @native_state
+  def member_result(_id) = @native_result
+
+  def stop_member(id)
+    @stopped_ids << id
+    { "confirmed" => true, "active_tools_after" => 0, "async_jobs_settled" => true }
+  end
+end
+
+fixture(interval: 300) do |root, record, _host, checker, _runtime|
+  host = RuntimeDriftHost.new(root)
+  host.working("progress")
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker)
+  now = Time.now.to_f
+  record.register_member("orbit-drift1", requested_name: "drift1", status: "registered")
+  runtime.tick(now: now)
+  member = record.state["members"].first
+  assert(member && member["status"] == "registered" && member["delegation_basis"] == "root_without_hint",
+         "precondition: the member reconciles normally before any drift")
+
+  state = runtime.instance_variable_get(:@state)
+  state["delegation_hint"] = { "signature" => "stale", "followed" => false }
+  record.record_member_model_drift("orbit-drift1", expected: "opencode-go/deepseek-v4.1-flash",
+                                                   actual: "openai/gpt-6-astra",
+                                  abort_attempted: true, abort_confirmed: false)
+  host.accept_drifted_result
+  runtime.tick(now: now + 1)
+  member = record.state["members"].first
+  assert(member["status"] == "failed" &&
+         member.dig("model_drift", "expected") == "opencode-go/deepseek-v4.1-flash" &&
+         member.dig("model_drift", "actual") == "openai/gpt-6-astra" &&
+         member.dig("model_drift", "abort_confirmed") == false,
+         "the drift is persisted and the member is failed, not registered")
+  assert(host.stopped_ids == ["orbit-drift1"] && member["drift_stop"] == "confirmed",
+         "the drifted session is stop-confirmed before more unauthorized work")
+  notice = host.messages.find { |message| message.include?("model drift") }
+  assert(notice && notice.include?("re-select") && notice.include?("orbit-drift1"),
+         "Root is told to explicitly re-select; Orbit does not switch models itself")
+  assert(state.dig("delegation_hint", "invalid_reason") == "model_drift" &&
+         runtime.send(:delegation_basis) == "root_without_hint",
+         "the stale hint is invalidated and cannot label later dispatches")
+  assert(runtime.send(:member_blocks_new_hint?, member),
+         "an unresolved drift blocks new automatic hints")
+
+  runtime.tick(now: now + 2)
+  member = record.state["members"].first
+  assert(member["status"] == "failed" && member["result"].nil? &&
+         events(record).none? { |event| event["type"] == "member_result_recorded" },
+         "an accepted native result from the drifted model never completes the member")
+  assert(host.messages.count { |message| message.include?("model drift") } == 1 &&
+         host.stopped_ids.length == 1,
+         "the drift handling is idempotent across ticks")
 end
 
 # Evidence can be cached proactively, but without a task request it is not

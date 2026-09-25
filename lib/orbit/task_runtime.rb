@@ -10,6 +10,9 @@ require_relative "workspace_binding"
 require_relative "connection"
 require_relative "jev_advisor"
 require_relative "model_evidence_cache"
+require_relative "model_candidate_pool"
+require_relative "checker_model_selector"
+require_relative "check_runner"
 require_relative "observation_key"
 
 module Orbit
@@ -26,9 +29,13 @@ module Orbit
     # Real Jev calibration separated small handoff-negative fixtures
     # (0.45-0.48) from a substantive disjoint-module fixture (0.53).
     PARALLEL_GAIN_THRESHOLD = 0.50
-    # Cost joins the second stage only behind the fail-closed route/price gate.
-    # 0.50 is the minimal agreed threshold (no calibration evidence yet); the
-    # hard requirement is that an unknown route or price can never hint.
+    # ADR-009 coarse cost semantics: this threshold gates only when the
+    # compared candidates carry route-typed numeric cost/quota facts (a known
+    # coarse tier). With an unknown cost basis the score is recorded and displayed
+    # but never gates alone, and unknown is never read as free; existing
+    # explicit hard constraints such as the deadline keep working unchanged,
+    # and this slice adds no cost budget mechanism. 0.50 is the
+    # minimal agreed threshold (no calibration evidence yet).
     COST_APPROPRIATE_THRESHOLD = 0.50
     REVIEW_FOCUS_STATUSES = %w[added modified deleted].freeze
     REVIEW_FOCUS_LIMIT = 200
@@ -40,11 +47,17 @@ module Orbit
     # if Root stays active/waiting (see contracts/task-runtime.md).
     FINALIZATION_NOTICE_MAX_WAIT_SECONDS = 60
     OMP_NATIVE_ADAPTER = "omp_native_task"
+    # Verified coarse cost bands rank after known bands (ADR-009 §3):
+    # unknown is never free, but never blocks on its own.
+    COST_BAND_ORDER = { "low" => 0, "medium" => 1, "high" => 2 }.freeze
 
-    def initialize(record:, connection:, checker:, advisor: nil, evidence_cache: nil)
+    def initialize(record:, connection:, checker:, advisor: nil, evidence_cache: nil, candidate_pool: nil,
+                   checker_selector: nil)
       @record, @connection, @checker = record, connection, checker
       @advisor = advisor
       @evidence_cache = evidence_cache
+      @candidate_pool = candidate_pool
+      @checker_selector = checker_selector
       @state = record.state
       @state["findings"] ||= {}
       @state["sent_message_ids"] ||= []
@@ -233,7 +246,17 @@ module Orbit
       end
       return unless collect_amendments
       if @running_check
-        @check_result ||= @checker.poll
+        begin
+          @check_result ||= @checker.poll
+        rescue CheckRunner::Error => error
+          # A real runner failure (auth/quota/unknown) is a failed check, not
+          # a failed task: the record stays alive, automatic checks pause and
+          # Root must explicitly re-select the checker model. Only the
+          # checker's own error family is caught; program errors keep the
+          # existing runtime failure path.
+          handle_check_failure(error, now)
+          return
+        end
         finish_check(@check_result, host, now) if @check_result
         return
       end
@@ -536,6 +559,7 @@ module Orbit
                    when "amend" then %w[text source]
                    when "rebind_workspace" then %w[path]
                    when "dispute" then %w[reason]
+                   when "review_model" then %w[model]
                    else []
                    end
         missing = required.reject { |key| command.key?(key) && !command[key].nil? }
@@ -568,6 +592,8 @@ module Orbit
           rebind_workspace(command)
         when "model_evidence"
           apply_model_evidence(command, now: Time.now.to_f)
+        when "review_model"
+          apply_review_model(command, Time.now.to_f)
         when "dispute"
           @state["dispute"] = command.fetch("reason")
           schedule_check(0, "用户请求的裁定", trigger: "manual_dispute", manual: true)
@@ -605,7 +631,11 @@ module Orbit
       changed = false
       listed.each do |entry|
         id = entry.fetch("thread_id")
-        next if @state["members"].any? { |member| member["thread_id"] == id }
+        if (existing = @state["members"].find { |member| member["thread_id"] == id })
+          changed = true if absorb_member_model_drift(existing, entry["model_drift"])
+          changed = true if ensure_drift_notified(existing)
+          next
+        end
 
         member = {
           "kind" => "omp", "adapter" => OMP_NATIVE_ADAPTER, "thread_id" => id,
@@ -615,16 +645,88 @@ module Orbit
         member["model"] = entry["model"] if entry["model"]
         member["tool_call_id"] = entry["tool_call_id"] if entry["tool_call_id"]
         member["reason"] = entry["reason"] if entry["reason"]
-        if member["status"] == "registered"
+        drift = entry["model_drift"]
+        if drift
+          # A dispatch that never ran the authorized model never earns the
+          # hint basis, even when drift is already on disk at first sight.
+          member["delegation_basis"] = "root_without_hint"
+        elsif member["status"] == "registered"
           member["delegation_basis"] = delegation_basis
           mark_delegation_hint_followed(member) if member["delegation_basis"] == "orbit_hint"
         end
         @state["members"] << member
         @record.event("native_member_reconciled", "thread_id" => id, "status" => member["status"],
                       "basis" => member["delegation_basis"])
-        changed = true
+        changed = true if absorb_member_model_drift(member, drift)
       end
       save if changed
+    end
+
+    # ADR-009 model drift, shape as written to members.json
+    # ({expected, actual, recorded_at, abort_attempted?, abort_confirmed?};
+    # extra OMP fields are preserved as-is because the final schema is not
+    # settled): the member's final model differs from the resolved
+    # candidate, so the dispatch never ran the authorized model. The member
+    # is failed, its result can never complete or count as success, the
+    # stale hint is invalidated, and Root must explicitly re-select; Orbit
+    # never switches models automatically. One handling per member: later
+    # drift rewrites on disk do not re-notify or re-stop.
+    def absorb_member_model_drift(member, drift)
+      return false unless drift.is_a?(Hash)
+      return false if member["model_drift"]
+
+      member["model_drift"] = drift
+      member["status"] = "failed"
+      member["error"] = "model drift: expected #{drift['expected']}, actual #{drift['actual']}"
+      member["result_delivery"] = "refused_model_drift"
+      hint = @state["delegation_hint"]
+      if hint.is_a?(Hash) && hint["invalid_reason"].nil?
+        hint["invalid_reason"] = "model_drift"
+        hint["invalidated_at"] = Time.now.utc.iso8601
+      end
+      outcome = attempt_drifted_member_stop(member)
+      member["drift_stop"] = outcome
+      notify_model_drift(member, outcome)
+      @record.event("member_model_drift_absorbed", "thread_id" => member["thread_id"],
+                    "expected" => drift["expected"], "actual" => drift["actual"],
+                    "abort_attempted" => drift["abort_attempted"], "abort_confirmed" => drift["abort_confirmed"],
+                    "stop" => outcome)
+      true
+    end
+
+    # Stop the drifted session before more unauthorized model work happens.
+    # The outcome is recorded honestly; an unconfirmed stop never fails the
+    # observer and is surfaced to Root in the drift notice.
+    def attempt_drifted_member_stop(member)
+      return "not_attempted" unless @connection.respond_to?(:stop_member)
+
+      failures = []
+      stop_omp_native_member(member, failures)
+      failures.empty? ? "confirmed" : "unconfirmed: #{failures.join('; ')}"
+    rescue StandardError => error
+      "unconfirmed: #{error.class}: #{error.message}"
+    end
+
+    def notify_model_drift(member, stop_outcome)
+      text = "Orbit model drift (not a new user instruction): member #{member['thread_id']} was expected to run " \
+             "#{member.dig('model_drift', 'expected')} but members.json records #{member.dig('model_drift', 'actual')}. " \
+             "Its result will not be accepted and the previous delegation hint is invalidated. " \
+             "Explicitly re-select or re-dispatch the member model; Orbit does not switch models automatically. " \
+             "Drifted member stop: #{stop_outcome}."
+      sent = @connection.send_message(text)
+      @state["sent_message_ids"] << sent.fetch("id")
+      member["drift_notified"] = true
+    rescue StandardError => error
+      @record.event("member_model_drift_notify_failed", "thread_id" => member["thread_id"], "error" => error.message)
+    end
+
+    # A notification that failed to deliver retries on later reconciles; a
+    # delivered one never repeats.
+    def ensure_drift_notified(member)
+      return false unless member["model_drift"] && !member["drift_notified"]
+
+      notify_model_drift(member, member["drift_stop"] || "not_attempted")
+      member["drift_notified"] == true
     end
 
     def deliver_native_amendment(member, text, source)
@@ -752,18 +854,22 @@ module Orbit
 
       signature = delegation_signature(artifact_digest, options)
       return if @state.dig("delegation_hints", signature)
-      if (assessment = @state.dig("delegation_assessments", signature))
+      candidates = member_candidates
+      if candidates == []
+        record_pool_gap(signature, now)
+        return
+      end
+      return if candidates && @state.dig("delegation_assessments", signature)
+      if candidates.nil? && (assessment = @state.dig("delegation_assessments", signature))
         scores = assessment["scores"]
-        # Recover only with fresh evidence: the lookup filters expired entries
-        # and route mismatches, so a stale, route-less or fact-less cache
-        # cannot resurrect a recommended assessment.
+        # Recover only with fresh evidence: the lookup filters expired
+        # entries, and the decision helper re-derives the cost basis from the
+        # fresh entries, so a stale cache cannot resurrect a recommendation.
         identities = evidence_identities(delegation_options)
         entries = identities && evidence_states(identities)
-        if scores.is_a?(Hash) && scores.fetch("member_fit", 0) >= MEMBER_FIT_THRESHOLD &&
-           scores.fetch("parallel_gain", 0) >= PARALLEL_GAIN_THRESHOLD &&
-           scores.fetch("cost_appropriate", 0) >= COST_APPROPRIATE_THRESHOLD &&
-           entries && evidence_complete?(entries) && cost_route_verified?(entries)
-          prepare_delegation_hint(scores, signature, now)
+        if scores.is_a?(Hash) && entries && evidence_complete?(entries) &&
+           delegation_recommended?(scores, entries)
+          prepare_delegation_hint(scores, signature, now, cost_basis: cost_basis(entries))
           @record.event("delegation_hint_recovered", "signature" => signature)
         end
         return
@@ -782,27 +888,242 @@ module Orbit
                               "needed" => %w[speed quality cost local_samples],
                               "at" => Time.at(now).utc.iso8601 }
       elsif evidence_complete?(entries)
-        unless cost_route_verified?(entries)
-          record_cost_route_gap(signature, entries)
-          return
-        end
-        run_delegation_assessment(identities, entries, signature, artifact_digest, now)
+        assess_or_hold(identities, entries, signature, artifact_digest, now)
       else
         record_evidence_unavailable(signature, now)
       end
+    end
+
+    # ADR-009 first candidate wiring. `nil` means the host exposes no model
+    # catalog (an older extension) and the legacy default-member comparison
+    # keeps running; that seam is removed with per-model ranking.
+    def member_candidates
+      return nil unless @connection.respond_to?(:model_catalog)
+
+      catalog = @connection.model_catalog
+      return [] unless catalog.is_a?(Hash)
+
+      available = Array(catalog["available"])
+      agents = catalog["agents"].is_a?(Hash) ? catalog["agents"] : {}
+      current = catalog["current"].to_s
+      Array(candidate_pool.read).select do |model|
+        available.include?(model) && agents.key?(model) && model != current
+      end.map { |model| { "model" => model, "agent" => agents[model] } }
+    rescue StandardError => error
+      @candidate_pool_error = "#{error.class}: #{error.message}"
+      []
+    end
+
+    # Tests inject a stub; production builds the user-level pool on first
+    # use so a task without Jev never reads the pool file.
+    def candidate_pool
+      @candidate_pool ||= ModelCandidatePool.new
+    end
+
+    # Q17 (ADR-009): with no pooled candidate available in this session there
+    # is no member model recommendation. The checker keeps its existing
+    # default-model behavior and Root's explicit native dispatch remains
+    # allowed and registered as usual.
+    def record_pool_gap(signature, now)
+      return if @state.dig("evidence_gaps", signature)
+
+      reason = if @candidate_pool_error
+                 "candidate pool could not be read (#{@candidate_pool_error})"
+               else
+                 "no pooled candidate is available in this session (ADR-009 Q17); no member model recommendation"
+               end
+      @state["evidence_gaps"][signature] = { "reason" => reason, "at" => Time.at(now).utc.iso8601 }
+      @state["jev"] = (@state["jev"] || {}).merge(
+        "evidence_status" => "no_candidates", "evidence_note" => reason,
+        "delegation" => { "status" => "no_candidates", "decision" => "no_candidates",
+                          "reason" => reason, "at" => Time.at(now).utc.iso8601 }
+      )
+      @record.event("member_candidates_empty", "signature" => signature, "reason" => reason)
+      save
+    end
+
+    # Pool candidates reach the evidence machinery (identities, agent names,
+    # requests, signature), but until the per-candidate quality and
+    # end-to-end-time judgment is wired no generalized delegation hint is
+    # sent and the whole-group three-score judgment is never presented as a
+    # specific model recommendation. The round is held as pending; the next
+    # segment activates concrete first/backup choices.
+    # Convergence for thin-evidence pending rounds: a later
+    # `orbit model-evidence` submission against the still-pending request can
+    # re-open a pending_candidates round, but only when the newly effective
+    # validated evidence summary actually differs from what that round
+    # consumed. Unchanged submissions and ticks without submissions never
+    # re-run the judgment; with no pending request the CLI path stays ignored
+    # by the existing protocol.
+    def reopen_pending_on_evidence_change(identities, states, signature)
+      assessment = @state.dig("delegation_assessments", signature)
+      return unless assessment.is_a?(Hash) && assessment["decision"] == "pending_candidates"
+
+      consumed = @state.dig("delegation_evidence", signature, "summary")
+      return unless consumed.is_a?(Hash)
+      return if delegation_evidence_summary(identities, states) == consumed
+
+      @state["delegation_assessments"].delete(signature)
+      @state["delegation_evidence"]&.delete(signature)
+      @record.event("delegation_assessment_reopened", "signature" => signature,
+                    "reason" => "validated evidence changed after a pending_candidates round")
+      save
+    end
+
+    def assess_or_hold(identities, entries, signature, artifact_digest, now)
+      candidates = member_candidates
+      if candidates.nil?
+        run_delegation_assessment(identities, entries, signature, artifact_digest, now)
+      else
+        run_candidate_assessment(identities, entries, signature, artifact_digest, now)
+      end
+    end
+
+    # Verified coarse cost tier read from the validated cache entry
+    # (ADR-009 §3). The band comes from the submitter's sourced cost_tier,
+    # never from a model or brand name; an entry without a tier is
+    # `unknown` — never free, but never a blocker on its own. On the pool
+    # path this replaces the numeric-namespace-only cost check.
+    def candidate_cost_band(entry)
+      band = entry.is_a?(Hash) ? entry.dig("cost_tier", "band") : nil
+      %w[low medium high].include?(band) ? band : "unknown"
+    end
+
+    # ADR-009 §3 pool recommendation stage. Every candidate first clears an
+    # independent quality line judged from its own sourced, valid evidence
+    # and the task requirements; survivors are compared on end-to-end time
+    # (handoff, rework, integration, contention and verification included)
+    # and on the program-read verified cost tier. The output names agent+model
+    # with reasons and Root dispatches explicitly; nothing here dispatches or
+    # switches models. No candidate clears the lines → pending_candidates.
+    def run_candidate_assessment(identities, entries, signature, artifact_digest, now)
+      return unless @advisor
+      return if @state.dig("delegation_assessments", signature)
+
+      summary = delegation_evidence_summary(identities, entries)
+      observation = JevAdvisor.observation(
+        inputs: @record.inputs(@state), host: @connection.state, members: @state["members"],
+        project_root: artifact_root, artifact_digest: artifact_digest,
+        elapsed_seconds: now - Time.parse(@state.fetch("created_at")).to_f,
+        member_options: delegation_options
+      ).merge("model_evidence" => summary, "pool_candidates" => identities.fetch("candidates"))
+      persist_delegation_evidence!(observation.fetch("model_evidence"), signature)
+      result = @advisor.assess_candidates(state: observation, candidates: identities.fetch("candidates"))
+      scores = result.fetch("scores")
+      evaluated = identities.fetch("candidates").each_with_index.map do |identity, index|
+        judgment = scores.fetch(index.to_s)
+        entry = entries.fetch("candidates").fetch(index)
+        status = if judgment.fetch("quality") < MEMBER_FIT_THRESHOLD
+                   "pending_quality"
+                 elsif judgment.fetch("time") < PARALLEL_GAIN_THRESHOLD
+                   "declined_time"
+                 else
+                   "qualified"
+                 end
+        { "agent" => identity["agent"], "model" => "#{identity['provider']}/#{identity['model']}",
+          "quality" => judgment.fetch("quality"), "time" => judgment.fetch("time"),
+          "cost_band" => candidate_cost_band(entry), "status" => status }
+      end
+      qualified = evaluated.select { |candidate| candidate["status"] == "qualified" }
+                           .sort_by { |candidate| [-candidate["time"], COST_BAND_ORDER.fetch(candidate["cost_band"], 3)] }
+      if qualified.empty?
+        @state["delegation_assessments"][signature] = {
+          "decision" => "pending_candidates", "candidates" => evaluated,
+          "model" => result["model"], "at" => Time.at(now).utc.iso8601
+        }
+        @state["jev"] = (@state["jev"] || {}).merge(
+          "delegation" => { "status" => "pending_candidates", "decision" => "pending_candidates",
+                            "candidates" => evaluated,
+                            "reason" => "no pooled candidate cleared the sourced quality line and the end-to-end time line",
+                            "at" => Time.at(now).utc.iso8601 }
+        )
+        @record.event("delegation_pending_candidates", "signature" => signature, "candidates" => evaluated)
+        save
+        return
+      end
+      first, *rest = qualified
+      recommendation = { "first" => first, "backups" => rest.first(2), "candidates" => evaluated,
+                         "at" => Time.at(now).utc.iso8601 }
+      @state["delegation_assessments"][signature] = {
+        "decision" => "recommended", "recommendation" => recommendation,
+        "model" => result["model"], "at" => Time.at(now).utc.iso8601 }
+      @state["jev"] = (@state["jev"] || {}).merge(
+        "delegation" => { "status" => "assessed", "decision" => "recommended",
+                          "recommendation" => { "first" => first, "backups" => recommendation["backups"] },
+                          "candidates" => evaluated, "usage" => result["usage"],
+                          "at" => Time.at(now).utc.iso8601 }
+      )
+      accumulate_jev_usage("jev_stage2", result["usage"])
+      @record.event("delegation_recommendation", "signature" => signature,
+                    "first" => first, "backups" => recommendation["backups"], "candidates" => evaluated)
+      prepare_candidate_recommendation(first, recommendation["backups"], evaluated, signature, now)
+      save
+    rescue JevAdvisor::Error => error
+      @state["delegation_assessments"][signature] = {
+        "error" => error.message, "decision" => "unavailable", "at" => Time.at(now).utc.iso8601
+      }
+      @state["jev"] = (@state["jev"] || {}).merge(
+        "delegation" => { "status" => "unavailable", "decision" => "unavailable", "reason" => error.message,
+                          "at" => Time.at(now).utc.iso8601 }
+      )
+      @record.event("delegation_unavailable", "reason" => error.message)
+      save
+    end
+
+    def prepare_candidate_recommendation(first, backups, evaluated, signature, now)
+      return if @state.dig("delegation_hints", signature)
+
+      options = delegation_options
+      return if options["callable_kinds"].empty?
+
+      @pending_hint = {
+        "signature" => signature, "score" => @state.dig("jev", "scores", "delegatable"),
+        "recommendation" => { "first" => first, "backups" => backups, "candidates" => evaluated },
+        "callable_kinds" => options["callable_kinds"], "at" => Time.at(now).utc.iso8601
+      }
+    end
+
+    # The pool recommendation message names agent+model with reasons and
+    # leaves dispatch to Root; it never claims a dispatch or a model switch.
+    def candidate_recommendation_text(hint)
+      recommendation = hint.fetch("recommendation")
+      describe = lambda do |candidate|
+        "#{candidate['agent']} (model #{candidate['model']}; quality #{candidate['quality']}, " \
+        "end-to-end time #{candidate['time']}, cost tier #{candidate['cost_band']})"
+      end
+      lines = +"Orbit model recommendation (not a new user instruction): Jev judged a bounded subtask delegable now.\n"
+      lines << "First choice: #{describe.call(recommendation.fetch('first'))}\n"
+      backups = recommendation.fetch("backups")
+      lines << "Backups: #{backups.map { |candidate| describe.call(candidate) }.join('; ')}\n" unless backups.empty?
+      others = recommendation.fetch("candidates").reject { |candidate| candidate["status"] == "qualified" }
+      unless others.empty?
+        lines << "Not recommended now: #{others.map { |candidate| "#{candidate['agent']} (#{candidate['status']})" }.join('; ')}\n"
+      end
+      lines << "Dispatch explicitly with native task using the agent name; the registration gate records the actual id and model."
+      lines
     end
 
     # Input, artifact, candidate identity/route or candidate changes create a
     # new signature and allow a new hint; transient host noise does not. The
     # resolved @task model and billing route are part of the signature so a
     # changed role, model or route cannot reuse an old assessment or hint.
+    # Pool sessions additionally bind the exact ordered candidates (model +
+    # agent), so a pool change invalidates old recommendations.
     def delegation_signature(artifact_digest, options)
       Digest::SHA256.hexdigest(JSON.generate([
         @record.input_digest(@state), artifact_digest,
         @state["members"].map { |member| member.slice("thread_id", "status") },
         options["callable_kinds"],
-        { "model" => native_member_model, "billing_route" => native_member_route }
+        { "model" => native_member_model, "billing_route" => native_member_route },
+        pool_candidates_signature_component
       ]))
+    end
+
+    # nil keeps the legacy signature shape for catalog-less hosts.
+    def pool_candidates_signature_component
+      return nil unless @connection.respond_to?(:model_catalog)
+
+      member_candidates
     end
 
     # Every compared identity must be reliable. Reasoning effort and variants
@@ -816,16 +1137,31 @@ module Orbit
       return nil unless identity_usable?(root)
 
       candidates = []
+      pool = member_candidates
       options.fetch("callable_kinds").each do |kind|
         if kind.to_s == provider
-          # A same-host native candidate follows the connection's member
-          # default, which is the OMP `@task` role resolution, not the Root
-          # session model. The kind stays on the identity for the Root message;
-          # the cache API only receives provider, model and reasoning.
-          identity = split_model_identity(native_member_model, provider)
-          return nil unless identity_usable?(identity)
+          if pool
+            # ADR-009 pool candidates replace the default member on catalog
+            # hosts; each carries its session agent name. Per-model billing
+            # routes are not resolved yet — the host's member route is used
+            # until per-model ranking lands.
+            pool.each do |candidate|
+              identity = split_model_identity(candidate["model"], provider)
+              next unless identity_usable?(identity)
 
-          candidates << identity.merge("kind" => kind, "billing_route" => native_member_route)
+              candidates << identity.merge("kind" => kind, "billing_route" => native_member_route,
+                                           "agent" => candidate["agent"])
+            end
+          else
+            # A same-host native candidate follows the connection's member
+            # default, which is the OMP `@task` role resolution, not the Root
+            # session model. The kind stays on the identity for the Root message;
+            # the cache API only receives provider, model and reasoning.
+            identity = split_model_identity(native_member_model, provider)
+            return nil unless identity_usable?(identity)
+
+            candidates << identity.merge("kind" => kind, "billing_route" => native_member_route)
+          end
         else
           # No host is probed to discover a cross-host model identity. The
           # kind stays visible as an unknown candidate and never blocks the
@@ -921,21 +1257,37 @@ module Orbit
       evidence_statuses(states).all? { |entry| entry["status"] == "evidence" }
     end
 
-    # A cost judgment needs the host to have resolved the candidate to a
-    # verified route AND the stored candidate entry to carry the same typed
-    # route plus that route's numeric fact namespace: `cost.*` on direct_api,
-    # `quota.*` on subscription_quota. Other routes, route mismatches,
-    # route-less (older) entries and entries without the required namespace
-    # all stay fail-closed: no second stage and no hint.
-    def cost_route_verified?(states)
+    # ADR-009 coarse cost basis. `coarse_tier` means every compared candidate
+    # carries numeric facts in the namespace of its typed billing route:
+    # `cost.*` on direct_api, `quota.*` on subscription_quota. The two
+    # billing modes are never mixed or converted, so facts from the other
+    # namespace, an unknown route or a route mismatch never count as known.
+    # Anything less is `unknown`: the cost score is still recorded and
+    # displayed, never read as free, and never the sole reason to suppress a
+    # recommendation that passed the quality and time bars. Sourced coarse
+    # tier estimates beyond these route-typed facts arrive with the later
+    # ADR-009 evidence work.
+    def cost_basis(states)
       route = native_member_route
       prefix = ModelEvidenceCache.route_metric_prefix(route)
-      return false unless prefix
-
-      states.fetch("candidates").all? do |entry|
+      known = prefix && states.fetch("candidates").all? do |entry|
         entry["status"] == "evidence" && entry["billing_route"] == route &&
           ModelEvidenceCache.numeric_metric?(entry, prefix)
       end
+      known ? "coarse_tier" : "unknown"
+    end
+
+    # Quality and end-to-end time always gate. Cost gates only on a known
+    # coarse tier: an unknown basis keeps the recorded score out of the
+    # decision so it cannot alone suppress a passing recommendation, while a
+    # known tier whose cost judgment fails still declines. Existing explicit
+    # hard constraints (for example the deadline) keep working unchanged;
+    # this slice adds no cost budget mechanism.
+    def delegation_recommended?(scores, entries)
+      return false unless scores.fetch("member_fit", 0) >= MEMBER_FIT_THRESHOLD
+      return false unless scores.fetch("parallel_gain", 0) >= PARALLEL_GAIN_THRESHOLD
+
+      cost_basis(entries) == "unknown" || scores.fetch("cost_appropriate", 0) >= COST_APPROPRIATE_THRESHOLD
     end
 
     def lookup_evidence(identity)
@@ -1079,13 +1431,8 @@ module Orbit
       save
       artifact_digest = probe_artifact(now)
       signature = delegation_signature(artifact_digest, delegation_options)
-      unless cost_route_verified?(states)
-        request["resolved"] = "cost_unverified"
-        save
-        record_cost_route_gap(signature, states)
-        return
-      end
-      run_delegation_assessment(identities, states, signature, artifact_digest, now)
+      reopen_pending_on_evidence_change(identities, states, signature)
+      assess_or_hold(identities, states, signature, artifact_digest, now)
     end
 
     # Second stage: consumes only validated cache facts and the bounded task
@@ -1104,28 +1451,23 @@ module Orbit
       persist_delegation_evidence!(observation.fetch("model_evidence"), signature)
       result = @advisor.assess_delegation(state: observation)
       scores = result.fetch("scores")
-      decision = if scores.fetch("member_fit", 0) >= MEMBER_FIT_THRESHOLD &&
-                    scores.fetch("parallel_gain", 0) >= PARALLEL_GAIN_THRESHOLD &&
-                    scores.fetch("cost_appropriate", 0) >= COST_APPROPRIATE_THRESHOLD
-                   "recommended"
-                 else
-                   "declined"
-                 end
+      basis = cost_basis(entries)
+      decision = delegation_recommended?(scores, entries) ? "recommended" : "declined"
       @state["delegation_assessments"][signature] = {
         "scores" => scores, "model" => result["model"], "decision" => decision,
-        "at" => Time.at(now).utc.iso8601
+        "cost_basis" => basis, "at" => Time.at(now).utc.iso8601
       }
       @state["jev"] = (@state["jev"] || {}).merge(
         "delegation" => { "status" => "assessed", "decision" => decision, "scores" => scores,
-                          "usage" => result["usage"], "at" => Time.at(now).utc.iso8601 }
+                          "cost_basis" => basis, "usage" => result["usage"], "at" => Time.at(now).utc.iso8601 }
       )
       accumulate_jev_usage("jev_stage2", result["usage"])
       @record.event("delegation_assessed", "model" => result["model"], "scores" => scores,
-                    "usage" => result["usage"], "decision" => decision)
+                    "usage" => result["usage"], "decision" => decision, "cost_basis" => basis)
       if decision == "recommended"
-        prepare_delegation_hint(scores, signature, now)
+        prepare_delegation_hint(scores, signature, now, cost_basis: basis)
       else
-        @record.event("delegation_declined", "scores" => scores, "decision" => decision)
+        @record.event("delegation_declined", "scores" => scores, "decision" => decision, "cost_basis" => basis)
       end
       save
     rescue JevAdvisor::Error => error
@@ -1167,12 +1509,16 @@ module Orbit
           # into the second-stage judgment.
           metrics = metrics.reject { |name, _| ModelEvidenceCache.comparison_metric?(name) }
         end
-        {
+        summary = {
           "provider" => identity["provider"], "model" => identity["model"], "reasoning" => identity["reasoning"],
           "billing_route" => identity["billing_route"] || "unknown",
           "status" => entry["status"], "retrieved_at" => entry["retrieved_at"], "valid_until" => entry["valid_until"],
           "sources" => Array(entry["sources"]), "metrics" => metrics
         }
+        # The validated coarse tier rides with the entry so Jev and the audit
+        # trail see the sourced band, its confidence and its basis.
+        summary["cost_tier"] = entry["cost_tier"] if entry["cost_tier"].is_a?(Hash)
+        summary
       end
       {
         "root" => entry_summary.call(identities.fetch("root"), entries.fetch("root")),
@@ -1215,37 +1561,6 @@ module Orbit
       save
     end
 
-    # The evidence set is complete, but it cannot authorize a cost judgment.
-    # This is terminal for the signature: no stage two and no hint. Structured
-    # per-candidate facts keep the reason auditable, including which numeric
-    # fact namespace the resolved route required.
-    def record_cost_route_gap(signature, states)
-      return if @state.dig("evidence_gaps", signature)
-
-      expected = ModelEvidenceCache.route_metric_prefix(native_member_route)
-      candidates = states.fetch("candidates").map do |entry|
-        {
-          "provider" => entry["provider"], "model" => entry["model"],
-          "billing_route" => entry["billing_route"] || "unknown",
-          "fact_present" => expected ? ModelEvidenceCache.numeric_metric?(entry, expected) : false
-        }
-      end
-      @state["evidence_gaps"][signature] = {
-        "reason" => "cost route or required fact is not verified for every compared candidate",
-        "host_billing_route" => native_member_route,
-        "expected_metric" => expected || "none",
-        "candidates" => candidates, "at" => Time.now.utc.iso8601
-      }
-      @state["jev"] = (@state["jev"] || {}).merge(
-        "evidence_status" => "incomplete",
-        "evidence_note" => "cost route or required fact is not verified; no automatic delegation hint"
-      )
-      @record.event("delegation_cost_unverified", "signature" => signature,
-                    "host_billing_route" => native_member_route, "expected_metric" => expected || "none",
-                    "candidates" => candidates)
-      save
-    end
-
     # Bounded, non-secret view of the pending Orbit evidence request for the
     # independent checkers: which model facts Orbit asked Root to research and
     # how far that request got. It never includes submitted pages, URLs or
@@ -1273,10 +1588,11 @@ module Orbit
       text = +"Orbit model evidence request (not a new user instruction): before judging delegation, Jev needs public model facts.\n"
       text << "Compare:\n- root: #{format_identity(pending.dig('identities', 'root'))}\n"
       pending.dig("identities", "candidates").each do |identity|
-        text << "- candidate (#{identity['kind']}): #{format_identity(identity)}\n"
+        agent = identity["agent"] ? " [agent: #{identity['agent']}]" : ""
+        text << "- candidate (#{identity['kind']}): #{format_identity(identity)}#{agent}\n"
       end
-      text << "Needed per identity: speed, quality, cost and local samples, each with source URL, retrieved_at and validity.\n"
-      text << "For cost, include the typed billing_route from the resolved model endpoint (direct_api, subscription_quota or unknown) and that route's numeric facts: cost.* per-token prices for a verified direct_api route, quota.* plan/quota band facts for a verified subscription_quota route. The namespaces never substitute for each other, and a route-less entry cannot authorize a cost judgment.\n"
+      text << "Needed per identity: speed, quality, cost and local samples, each with source URL, retrieved_at and validity; cost may arrive as route-matched numeric facts or as the coarse cost_tier below, and an explicit unknown is acceptable.\n"
+      text << "For cost, submit what the evidence schema accepts: route-matched numeric metrics — cost.* per-token prices for a direct_api route, quota.* plan/quota band facts for a subscription_quota route — and/or the optional coarse cost_tier object {band: low|medium|high, confidence: low|medium|high, basis: <non-empty rationale>}. The tier expresses the price or quota burden band, reuses this entry's sources and validity, keeps billing_route distinguishing per-use API from subscription quota, and never converts either into a single per-token price or replaces the numeric facts. Omitting all cost facts records the cost as unknown: unknown does not by itself block the recommendation and is never treated as free.\n"
       text << "Submit one JSON object or an array with: orbit model-evidence #{@record.path} --file -\n"
       sent = @connection.send_message(text)
       @state["sent_message_ids"] << sent.fetch("id")
@@ -1301,7 +1617,7 @@ module Orbit
       route.empty? ? text : "#{text} [billing_route: #{route}]"
     end
 
-    def prepare_delegation_hint(scores, signature, now)
+    def prepare_delegation_hint(scores, signature, now, cost_basis:)
       return if @state.dig("delegation_hints", signature)
 
       options = delegation_options
@@ -1310,7 +1626,7 @@ module Orbit
       @pending_hint = {
         "signature" => signature, "score" => @state.dig("jev", "scores", "delegatable"),
         "member_fit" => scores.fetch("member_fit"), "parallel_gain" => scores.fetch("parallel_gain"),
-        "cost_appropriate" => scores.fetch("cost_appropriate"),
+        "cost_appropriate" => scores.fetch("cost_appropriate"), "cost_basis" => cost_basis,
         "callable_kinds" => options["callable_kinds"], "at" => Time.at(now).utc.iso8601
       }
     end
@@ -1327,14 +1643,19 @@ module Orbit
       return if @state["members"].any? { |member| member_blocks_new_hint?(member) }
       return if @state.dig("delegation_hints", hint.fetch("signature"))
 
-      text = delegation_hint_text(hint)
+      text = hint["recommendation"] ? candidate_recommendation_text(hint) : delegation_hint_text(hint)
       sent = @connection.send_message(text)
       @state["sent_message_ids"] << sent.fetch("id")
       @state["delegation_hints"][hint.fetch("signature")] = hint.merge("message_id" => sent.fetch("id"))
       @state["delegation_hint"] = hint.merge("message_id" => sent.fetch("id"))
-      @record.event("delegation_hint", "score" => hint["score"], "member_fit" => hint["member_fit"],
-                    "parallel_gain" => hint["parallel_gain"], "cost_appropriate" => hint["cost_appropriate"],
-                    "callable_kinds" => hint["callable_kinds"])
+      if hint["recommendation"]
+        @record.event("delegation_recommendation_delivered", "signature" => hint["signature"],
+                      "first" => hint["recommendation"]["first"], "backups" => hint["recommendation"]["backups"])
+      else
+        @record.event("delegation_hint", "score" => hint["score"], "member_fit" => hint["member_fit"],
+                      "parallel_gain" => hint["parallel_gain"], "cost_appropriate" => hint["cost_appropriate"],
+                      "cost_basis" => hint["cost_basis"], "callable_kinds" => hint["callable_kinds"])
+      end
       save
     rescue StandardError => error
       # A hint is advisory: delivery failure must not fail the task or
@@ -1348,15 +1669,22 @@ module Orbit
     # later explicit dispatch after those facts changed.
     def delegation_hint_text(hint)
       kinds = Array(hint["callable_kinds"]).join("、")
+      cost = if hint["cost_basis"] == "unknown"
+               "cost tier unknown (cost_appropriate #{hint['cost_appropriate']} recorded but not gating; " \
+               "unknown cost is not free)"
+             else
+               "cost_appropriate #{hint['cost_appropriate']} (coarse-tier cost facts on file)"
+             end
       score = "Orbit delegation hint (not a new user instruction): Jev judged that a bounded subtask could be delegated now " \
               "(delegatable #{hint['score']}, member_fit #{hint['member_fit']}, parallel_gain #{hint['parallel_gain']}, " \
-              "cost_appropriate #{hint['cost_appropriate']}; callable kinds: #{kinds}). "
+              "#{cost}; callable kinds: #{kinds}). "
       score + "Dispatch one layer with native task; the registration gate records the actual id."
     end
 
     def delegation_basis
       hint = @state["delegation_hint"]
       return "root_without_hint" unless hint.is_a?(Hash) && !hint.empty? && hint["followed"] != true
+      return "root_without_hint" if hint["invalid_reason"]
 
       signature = delegation_signature(fingerprint_artifact, delegation_options)
       hint["signature"] == signature ? "orbit_hint" : "root_without_hint"
@@ -1380,6 +1708,9 @@ module Orbit
     def observe_omp_native_member(member)
       return unless @connection.respond_to?(:member_state) && @connection.respond_to?(:member_result)
       return if member["status"] == "refused"
+      # Model drift is a hard veto (ADR-009): a drifted member is never
+      # observed into a result or a completion transition.
+      return if member["model_drift"]
 
       observed = @connection.member_state(member["thread_id"])
       if observed.is_a?(Hash) && observed["model"].is_a?(String) && !observed["model"].empty?
@@ -1395,6 +1726,11 @@ module Orbit
     end
 
     def apply_native_member_observation!(member, registry_status, result, observed = nil)
+      # The drift veto lives here too, not only in the caller: whatever
+      # later feeds this method, a drifted member can never become completed
+      # or record a success delivery.
+      return false if member["model_drift"]
+
       previous = member.slice("model", "result", "output_path", "registry_status", "accepted_at", "status", "result_delivery")
       previous_status = member["status"]
       previous_accepted = member["accepted_at"]
@@ -1448,6 +1784,9 @@ module Orbit
     end
 
     def member_blocks_new_hint?(member)
+      # An unresolved drift blocks new automatic hints: Root must explicitly
+      # re-select; Orbit neither switches models nor re-hints on its own.
+      return true if member["model_drift"]
       return true if %w[starting working].include?(member["status"])
       return false unless member["adapter"] == OMP_NATIVE_ADAPTER
       return false if %w[completed failed refused].include?(member["status"])
@@ -1566,6 +1905,21 @@ module Orbit
 
     def start_check(host, now, kind: "artifact", trigger:, manual: false)
       role = @state["dispute"] ? "adjudicator" : kind == "process" ? "process_reviewer" : "reviewer"
+      if (block = @state.dig("review", "blocked"))
+        if block["type"] == "selection_undecided" && block_signature_changed?(block)
+          @state["review"].delete("blocked")
+          @record.event("checker_model_block_cleared",
+                        "reason" => "selection inputs changed (pool, catalog or valid evidence)")
+        elsif !manual
+          # Blocked automatic checks neither select, snapshot nor start; the
+          # reschedule keeps the timer from hammering the selector each tick.
+          schedule_check(now + @interval, "检查模型阻塞：等待 orbit review-model 显式重选", trigger: "timer")
+          return false
+        end
+      end
+      if @checker.respond_to?(:select_model!)
+        return false unless apply_checker_selection!(role, now)
+      end
       digest = fingerprint_artifact
       key = ObservationKey.build(
         input_digest: @record.input_digest(@state), artifact_root: artifact_root, artifact_digest: digest,
@@ -1640,6 +1994,163 @@ module Orbit
       @record.event("check_started", "number" => number, "role" => role, "digest" => snapshot.fetch("digest"))
       save
       true
+    end
+
+    # Tests inject a stub; production builds the real selector on first use.
+    def checker_selector
+      @checker_selector ||= CheckerModelSelector.new(
+        connection: @connection, project_root: @state.fetch("project_root"),
+        pool: candidate_pool, evidence_cache: evidence_cache, advisor: @advisor
+      )
+    end
+
+    # ADR-009 §4: before each new independent check, re-read the pool ∩ the
+    # session-isolated checker catalog and update the model/selection; an
+    # in-flight check is never switched (the runner also refuses mid-check).
+    # The selector's own signature reuse keeps unchanged retries from
+    # repeating the JEV quality judgment.
+    def apply_checker_selection!(role, now)
+      previous = @state.dig("review", "selection")
+      model, selection = checker_selector.select(
+        explicit: @state.dig("review", "explicit_model"),
+        instruction: effective_checker_instruction,
+        previous: previous,
+        selected_for: role
+      )
+      if previous.nil? || previous["model"] != model || previous["signature"] != selection["signature"]
+        @state["review"]["selection"] = selection
+        @state["review"]["model"] = model if model && !model.to_s.empty?
+        @record.event("checker_model_selected", "model" => model, "source" => selection["source"],
+                      "selected_for" => role)
+      end
+      @checker.select_model!(model) if model && !model.to_s.empty?
+      save
+      true
+    rescue CheckerModelSelector::Error => error
+      # Pool non-empty but nothing qualifies: stop auto-selecting (ADR-009
+      # §4), never fall back to a pool-out default, and ask Root for an
+      # explicit model.
+      @state["review"]["blocked"] = { "type" => "selection_undecided", "reason" => error.message,
+                                     "signature" => checker_selection_snapshot,
+                                     "at" => Time.at(now).utc.iso8601 }
+      @record.event("checker_model_blocked", "type" => "selection_undecided", "reason" => error.message)
+      notify_checker_block(error.message)
+      save
+      false
+    end
+
+    # Q20: the checker selection judges the currently effective task, so the
+    # original instruction and every recorded amendment pass complete with
+    # explicit separators (never compressed); a revision changes the selector
+    # signature and therefore the next selection.
+    def effective_checker_instruction
+      inputs = @record.inputs(@state)
+      parts = [inputs.fetch("instruction")]
+      inputs.fetch("amendments", []).each { |amendment| parts << amendment.fetch("text") }
+      parts.join("\n\n--- amendment ---\n\n")
+    end
+
+    # A real check failure (auth, quota or unknown) is recorded as a failed
+    # check. The task keeps running with its snapshot and members; new
+    # automatic checks are blocked until Root explicitly re-selects the
+    # checker model, and nothing retries or switches models on its own.
+    def handle_check_failure(error, now)
+      scope = @running_check
+      @running_check = nil
+      @check_result = nil
+      kind = @checker.respond_to?(:failure_kind) ? @checker.failure_kind : "unavailable"
+      basis = @checker.respond_to?(:failure_basis) ? @checker.failure_basis : "unknown"
+      @state.fetch("checks") << scope.slice("number", "role", "kind", "started_at", "observation_key",
+                                            "trigger_cause", "manual").merge(
+        "result" => { "verdict" => "check_failed", "error" => error.message,
+                      "failure_kind" => kind, "failure_basis" => basis },
+        "failed" => true, "stale" => false,
+        "finished_at" => Time.at(now).utc.iso8601,
+        "usage" => @checker.respond_to?(:usage) ? @checker.usage : nil
+      )
+      observation = @state.fetch("check_observations")[scope["observation_key"]]
+      if observation
+        observation["status"] = "failed"
+        observation["finished_at"] = Time.at(now).utc.iso8601
+      end
+      @state["review"]["blocked"] = {
+        "type" => "check_failure", "reason" => error.message,
+        "failure_kind" => kind, "failure_basis" => basis,
+        "model" => @state.dig("review", "model"), "at" => Time.at(now).utc.iso8601
+      }
+      @record.event("check_failed", "number" => scope["number"], "error" => error.message,
+                    "failure_kind" => kind, "failure_basis" => basis)
+      @record.event("checker_model_blocked", "type" => "check_failure", "failure_kind" => kind)
+      notify_checker_block("the independent check failed (model #{@state.dig('review', 'model')}, " \
+                           "failure kind #{kind}): #{error.message}")
+      save
+    end
+
+    def notify_checker_block(reason)
+      text = "Orbit checker model blocked (not a new user instruction): #{reason}. " \
+             "The task stays running with its snapshot and members; automatic checks are paused. " \
+             "Explicitly run: orbit review-model #{@record.path} --model provider/id to choose the next checker model. " \
+             "Orbit does not retry the failed check or switch models automatically."
+      sent = @connection.send_message(text)
+      @state["sent_message_ids"] << sent.fetch("id")
+    rescue StandardError => error
+      @record.event("checker_block_notify_failed", "error" => error.message)
+    end
+
+    # Root explicitly chose the next checker model (ADR-009 §4). The choice
+    # is pinned for the task, an out-of-pool model is recorded with a notice,
+    # the block clears and a fresh check for this task runs immediately. No
+    # retry or switch happens automatically.
+    def apply_review_model(command, now)
+      model = command.fetch("model").to_s.strip
+      unless model.match?(%r{\A[^\s/]+/[^\s]+\z})
+        @record.event("review_model_rejected", "reason" => "model must be provider/id")
+        return
+      end
+      pool = safe_pool_read
+      in_pool = pool.nil? || pool.empty? || pool.include?(model)
+      @state["review"]["explicit_model"] = model
+      notice = in_pool ? nil : "explicit review model is outside the candidate pool"
+      if @state.dig("review", "blocked")
+        @state["review"].delete("blocked")
+        @record.event("checker_model_block_cleared", "reason" => "explicit review model recorded")
+      end
+      @record.event("review_model_recorded", "model" => model, "reason" => command["reason"].to_s,
+                    "in_pool" => in_pool, "notice" => notice)
+      # Manual so the retry is never displaced by timers and is not deduped
+      # against the failed observation it replaces.
+      schedule_check(now, "显式重选检查模型", trigger: "review_model", manual: true)
+      save
+    end
+
+    def safe_pool_read
+      Array(candidate_pool.read)
+    rescue StandardError
+      nil
+    end
+
+    # OpenCode specified CheckerModelSelector#snapshot(instruction:) as the
+    # JEV-free signature over the pool, session catalog, valid evidence and
+    # the effective instruction; it is not on disk yet, so this narrow
+    # adapter falls back to the selector's internal prepare() signature (the
+    # same source) until the public method lands. Nil keeps the block closed.
+    def checker_selection_snapshot
+      selector = checker_selector
+      return selector.snapshot(instruction: effective_checker_instruction) if selector.respond_to?(:snapshot)
+
+      prepared = selector.send(:prepare, effective_checker_instruction)
+      prepared.is_a?(Hash) ? prepared["signature"] : nil
+    rescue StandardError
+      nil
+    end
+
+    # An undecided block re-tries exactly when the selection inputs changed:
+    # new pool contents, a changed session catalog, newly valid evidence or a
+    # revised instruction. A check_failure block never auto-clears; only an
+    # explicit review-model does that.
+    def block_signature_changed?(block)
+      current = checker_selection_snapshot
+      current.is_a?(String) && block["signature"].is_a?(String) && current != block["signature"]
     end
 
     def host_digest(host)

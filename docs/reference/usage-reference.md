@@ -119,6 +119,26 @@ orbit stop TASK_DIRECTORY --reason "停止原因" --json
 
 这些控制操作返回 `queued` 表示入队，不能据此判断已完成或已停止。直接在原会话补充的用户消息由 Orbit 观察，不需要再手动提交相同 amendment。
 
+### 候选模型池与检查者显式重选（ADR-009）
+
+在 `orbit omp` 会话内维护候选池：
+
+```text
+/orbit-models                     # 列出当前会话可选模型、候选池与状态
+/orbit-models add provider/id     # 只能加入当前会话可选列表中的模型
+/orbit-models remove provider/id  # 移除；池内但当前不可用的标识标为不可用，可移除但不会因此启用
+```
+
+候选池保存在用户级配置，跨会话共用，只保存模型标识，不保存凭据。Orbit 只在该池与「当前会话可选列表」的交集内比较：为执行成员给出模型建议，为独立检查者选模，按质量先过线、端到端时间、粗档费用排序，并记录实际模型；不按品牌排序。候选池为空时检查者沿用现有默认模型行为，池非空却没有合格检查模型时要求显式指定，不擅自使用池外默认模型。Root 始终显式派发成员，成员不能再派发成员。
+
+检查者在真实认证或额度失败后，任务保持运行并阻塞，需要你显式指定下一次检查使用的模型：
+
+```bash
+orbit review-model TASK_DIRECTORY --model provider/id --reason "认证失败后改用"
+```
+
+指定模型可在候选池外，会记录池外提示；命令只入队，不自动重试、不在检查进行中切换。**状态：选模规则与 `review-model` 命令已随源码落地并通过真实验收；运行时在每次检查前重选、失败后阻塞与显式重选的端到端接线已有真实失败路径样本。池内自动（非显式）正选择仅由确定性测试覆盖（真实自动尝试因无候选通过质量线被正确拒绝，未取得 live 正样本）。** 进度见[模型候选池交付 TODO](../plan/model-pool-delivery.md)。
+
 ### 模型证据提交（model-evidence）
 
 当 Orbit/JEV 要求模型证据时，Root 从一手来源检索事实后用 `orbit model-evidence TASK_DIRECTORY --file FILE|-` 提交（一个 JSON object 或 array）。`provider`/`model`/`reasoning` 必须与请求中的身份完全一致；不写网页正文或凭据，不伪造来源或指标。

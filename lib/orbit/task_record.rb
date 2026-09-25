@@ -117,6 +117,51 @@ module Orbit
       { "ok" => false, "reason" => "#{error.class}: #{error.message}", "thread_id" => member_id }
     end
 
+    # Dedicated model-drift record for an ALREADY REGISTERED member (ADR-009):
+    # override/auth-fallback resolution changed the member's final model
+    # between dispatch and its first provider request. This is NOT a second
+    # registration — register_member refuses duplicate ids — but an update to
+    # the existing entry plus an audit event, under the same members lock and
+    # durable-write discipline. The original registration stays authoritative;
+    # `model_drift` is denormalized onto the member so TaskRuntime sees it on
+    # its normal members.json read without parsing the event log. A drift for
+    # an unknown member id is refused: silently accepting one would let a
+    # non-member fabricate task membership.
+    def record_member_model_drift(member_id, expected:, actual:, abort_attempted: nil, abort_confirmed: nil, now: Time.now.utc)
+      pattern = %r{\A[^\s/]+/[^\s]+\z}
+      unless expected.to_s.match?(pattern) && actual.to_s.match?(pattern)
+        return { "ok" => false, "reason" => "invalid_model_identifier", "thread_id" => member_id }
+      end
+      with_members_lock do
+        list = members
+        index = list.index { |member| member["thread_id"] == member_id }
+        unless index
+          return { "ok" => false, "reason" => "unknown_member_id", "thread_id" => member_id }
+        end
+
+        # abort evidence is recorded honestly: `abort_attempted` says the
+        # extension fired the abort path; `abort_confirmed` is TRUE only when
+        # the registry flip read back `aborted`. ctx.abort() itself has no
+        # public completion signal, so it never produces confirmed:true on
+        # its own. TaskRuntime must treat a member with model_drift as failed
+        # regardless — never as a successfully registered member.
+        drift = { "expected" => expected, "actual" => actual, "recorded_at" => now.iso8601 }
+        drift["abort_attempted"] = abort_attempted unless abort_attempted.nil?
+        drift["abort_confirmed"] = abort_confirmed unless abort_confirmed.nil?
+        list[index] = { **list[index], "model_drift" => drift }
+        durable_write("members.json", JSON.pretty_generate(list) + "\n")
+        result = { "ok" => true, "thread_id" => member_id, "model_drift" => drift }
+        begin
+          event("member_model_drift", { "thread_id" => member_id, "expected" => expected, "actual" => actual })
+        rescue StandardError => error
+          result["event_error"] = "#{error.class}: #{error.message}"
+        end
+        result
+      end
+    rescue StandardError => error
+      { "ok" => false, "reason" => "#{error.class}: #{error.message}", "thread_id" => member_id }
+    end
+
     # write() plus a directory fsync so the rename itself survives a crash.
     # Used only for member registration; other write paths stay unchanged.
     def durable_write(relative, bytes)
