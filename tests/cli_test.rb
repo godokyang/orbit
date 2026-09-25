@@ -6,6 +6,7 @@ require "open3"
 require "rbconfig"
 require "socket"
 require_relative "../lib/orbit/task_record"
+require_relative "../lib/orbit/task_runtime"
 require_relative "../lib/orbit/omp_entry"
 require_relative "../lib/orbit/jev_advisor"
 require_relative "../lib/orbit/jev_setup"
@@ -145,6 +146,17 @@ module CliTest
     assert(text.include?("检查状态：stale") && text.include?("下一动作：等待 Root"),
            "open findings wait for Root when no rebind or queue is recorded")
     assert(!text.include?("下一动作：重新绑定工作区"), "a stale check without a workspace reason is not a rebind")
+
+    record.save(record.state.merge(
+      "status" => "paused", "stop_reason" => "交付完成", "checks" => [], "findings" => {},
+      "completion_invalidation" => { "reason" => "no_current_finalization_notice",
+                                     "detail" => "no finalization notice exists for the current artifact and input version",
+                                     "at" => "2026-09-25T12:00:00Z" }
+    ))
+    text = cli("status", record.path)
+    assert(text.include?("完成复核：未通过（no_current_finalization_notice）") &&
+           text.include?("已完成停止，但完成复核未通过") && text.include?("不代表该版本已通过独立终检"),
+           "a refused completion is shown as unfinished instead of echoing the stop reason claim")
   end
 
   def status_usage_sums_known_roles_and_excludes_root_cumulative
@@ -313,6 +325,10 @@ module CliTest
   # queueing a command no process remains to consume.
   def stop_retries_when_runtime_exited_without_terminal_status
     record = task("running", finished_at: "2026-09-24T17:07:33Z")
+    refused = JSON.parse(cli("stop", record.path, "--complete", "--json"))
+    assert(refused["status"] == "rejected" && refused["reason"] == "runtime_unavailable" &&
+           refused["next_action"].include?("orbit stop") && commands(record).empty?,
+           "a completion intent on a gone runtime is refused and points at the explicit ordinary stop")
     socket = record.state.dig("connection", "socket")
     server = UNIXServer.new(socket)
     worker = Thread.new do
@@ -332,6 +348,63 @@ module CliTest
     server&.close unless server&.closed?
     worker&.kill if worker&.alive?
     worker&.join
+  end
+
+  # A completion intent is adjudicated synchronously before anything is queued;
+  # a plain stop keeps the ordinary pause path and a current notice queues the
+  # hand-off for the runtime recheck.
+  def completion_stop_requires_a_current_notice
+    record = task("running")
+    rejected = JSON.parse(cli("stop", record.path, "--complete", "--json"))
+    assert(rejected["status"] == "rejected" && rejected["reason"] == "no_current_finalization_notice",
+           "a completion without a current notice is refused with its machine reason")
+    assert(rejected["next_action"] == Orbit::TaskRuntime::COMPLETION_REFUSAL_NEXT_ACTION,
+           "the refusal carries the one next action that can still qualify the hand-off")
+    assert(commands(record).empty? && record.state["status"] == "running" &&
+           File.read(File.join(record.path, "events.jsonl")).include?("completion_stop_rejected"),
+           "a refused completion queues nothing, changes no state, and is auditable")
+
+    state = record.state
+    key = Digest::SHA256.hexdigest(JSON.generate([
+      state.fetch("project_root"),
+      Orbit::WorkspaceSnapshot.fingerprint(project_root: state.fetch("project_root")), record.input_digest(state)
+    ]))
+    qualified = state.merge("finalization_notices" => { key => { "check" => 1, "at" => "2026-09-25T00:00:00Z" } })
+    record.save(qualified)
+    accepted = JSON.parse(cli("stop", record.path, "--complete", "--json"))
+    fresh = commands(record)
+    assert(accepted["status"] == "queued" && fresh.length == 1 && JSON.parse(File.read(fresh.first))["complete"] == true,
+           "a completion backed by the current notice is queued for the runtime recheck")
+
+    plain = JSON.parse(cli("stop", record.path, "--json"))
+    added = commands(record) - fresh
+    assert(plain["status"] == "queued" && added.length == 1 && JSON.parse(File.read(added.first))["complete"].nil?,
+           "a plain stop without the marker stays the ordinary pause path")
+
+    { "open_findings" => { "findings" => { "gap" => { "status" => "open" } } },
+      "pending_clue_recheck" => { "recheck" => { "check" => 1, "findings" => [{ "id" => "clue" }] } },
+      "checker_cleanup_unverified" => { "cleanup_error" => "Checker stop unconfirmed" } }.each do |code, extra|
+      record.save(qualified.merge(extra))
+      reply = JSON.parse(cli("stop", record.path, "--complete", "--json"))
+      assert(reply["reason"] == code && reply["next_action"] == Orbit::TaskRuntime.completion_next_action(code),
+             "#{code} refuses with its own next action")
+    end
+
+    # A blocker outranks the missing notice: a Zeen-like task with an open
+    # finding and no current notice is told to fix first, not to re-check.
+    record.save(state.merge("findings" => { "gap" => { "status" => "open" } }))
+    mixed = JSON.parse(cli("stop", record.path, "--complete", "--json"))
+    assert(mixed["reason"] == "open_findings" &&
+           mixed["next_action"] == Orbit::TaskRuntime.completion_next_action("open_findings"),
+           "open findings outrank the missing notice and point at the fix")
+
+    # Runtime-emitted codes (bridge/roster failures) must not fall back to the
+    # missing-notice guidance: re-checking cannot repair them.
+    { "root_bridge_unavailable" => "Root", "members_unreadable" => "members.json",
+      "members_registered_during_stop" => "停止未确认" }.each do |code, marker|
+      action = Orbit::TaskRuntime.completion_next_action(code)
+      assert(action.include?(marker), "#{code} carries its own next action")
+    end
   end
 
   def doctor_states_single_host_entry_and_omp_checker
@@ -697,6 +770,7 @@ module CliTest
        doctor_reads_existing_native_connection
        stop_retries_when_recorded_runtime_is_gone
        stop_retries_when_runtime_exited_without_terminal_status
+       completion_stop_requires_a_current_notice
        doctor_states_single_host_entry_and_omp_checker
        rebind_workspace_queues_and_legacy_status_reads_project_root
        model_evidence_caches_object_and_queues_dedicated_command

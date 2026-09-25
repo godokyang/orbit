@@ -32,12 +32,13 @@ async function run(args, cwd, input = '') {
   });
 }
 
-export const toolDescription = 'Start Orbit only for work that benefits from independent checks: multi-step changes, real parallel work surfaces, or fixes needing objective review. Simple single-file or local edits: just do them yourself, without dispatching members. If the user explicitly asks to use Orbit, still start Orbit for those small tasks — but do the work yourself and let the checker verify; no members. context identifies this exact session; start preserves original user input and named basis and returns a task_directory. Keep that task_directory: for status/check/amend/dispute/stop pass it back as task: <task_directory returned by start> to this Orbit tool — never write .orbit/inbox manually. Root dispatches members only through the native task tool (one level) when there is a genuine independent work surface — Root decides; JEV only advises, never blocks. Continue working; member results and corrections return automatically. When your work is ready, report results and end your turn; if you requested a final check, end the turn and wait for the Orbit finalization_notice or corrections — do not stop the task just to deliver, do not poll. For a normal delivery after that notice, call stop and finish the turn normally: Orbit queues the stop and completes it after your turn, so the final summary is fully delivered; the user explicitly asking to interrupt stops immediately. Do not start for discussion. Root is never replaced.';
+export const toolDescription = 'Start Orbit only for work that benefits from independent checks: multi-step changes, real parallel work surfaces, or fixes needing objective review. Simple single-file or local edits: just do them yourself, without dispatching members. If the user explicitly asks to use Orbit, still start Orbit for those small tasks — but do the work yourself and let the checker verify; no members. context identifies this exact session; start preserves original user input and named basis and returns a task_directory. Keep that task_directory: for status/check/amend/dispute/stop pass it back as task: <task_directory returned by start> to this Orbit tool — never write .orbit/inbox manually. Root dispatches members only through the native task tool (one level) when there is a genuine independent work surface — Root decides; JEV only advises, never blocks. Continue working; member results and corrections return automatically. When your work is ready, report results and end your turn; if you requested a final check, end the turn and wait for the Orbit finalization_notice or corrections — do not stop the task just to deliver, do not poll. For a normal delivery after that notice, call stop with intent=complete (the default) and finish the turn normally: the Orbit completion gate adjudicates that intent, and when the current version has no valid finalization_notice it refuses with the required next action instead of quietly pausing the task. Reserve intent=pause for a user-requested interruption. An accepted stop is queued and completed after your turn, so the final summary is fully delivered. Do not start for discussion. Root is never replaced.';
 export const toolArgs = z => ({
         action: z.enum(['context', 'start', 'status', 'check', 'amend', 'dispute', 'stop', 'review-model']),
         task: z.string().optional().describe('Required for status/check/amend/dispute/stop: the exact task_directory string returned by action=start. Never write .orbit/inbox manually.'),
         basis: z.array(z.string()).optional(), message_id: z.string().optional(),
         review_model: z.string().optional(),
+        intent: z.enum(['complete', 'pause']).optional().describe('stop only. complete (default) is the deliberate post-finalization completion hand-off, adjudicated by the Ruby completion gate; pause is an explicit user interruption and takes the ordinary pause path.'),
         text: z.string().optional(), check_in: z.number().int().positive().optional()
       });
 
@@ -107,7 +108,12 @@ export function createOrbitHost({ provider, project, dispatch, bind, reset }) {
         await ownedTask(a.task, id);
         const args = [a.action, a.task];
         if (['status', 'stop'].includes(a.action)) args.push('--json');
-        if (a.action === 'stop') args.push('--complete'); // Root-tool stop is a deliberate completion hand-off
+        // Root-tool stop is a deliberate completion hand-off by default. An
+        // explicit pause intent is a user interruption and must take the
+        // ordinary pause path (no --complete), never the completion gate. The
+        // plugin never adjudicates completion itself: the Ruby gate decides and
+        // returns a structured result (exit 0), which run() passes through.
+        if (a.action === 'stop' && a.intent !== 'pause') args.push('--complete');
         if (a.action === 'review-model') {
           args.push('--model', a.review_model.trim());
         }
@@ -119,6 +125,17 @@ export function createOrbitHost({ provider, project, dispatch, bind, reset }) {
         if (a.action === 'status' && !terminal.has(result.status)) result.next_action = guidance;
         return JSON.stringify(result);
       },
+    // Whether THIS process currently owns the durable record, using the same
+    // (provider, socket, thread_id) test as ownedTask. After an OMP restart the
+    // old record's socket is gone, so this is false: callers must not imply the
+    // task is under control, and must not silently rebind it.
+    async ownsTask(taskDir, id) {
+      if (!socket) return false;
+      try {
+        const value = JSON.parse(await fs.readFile(path.join(await fs.realpath(taskDir), 'state.json'), 'utf8'));
+        return value.connection?.provider === provider && value.connection?.socket === socket && value.connection?.thread_id === id;
+      } catch { return false; }
+    },
     async close({ requireConfirmation = false } = {}) {
       closing = true;
       const failures = [];

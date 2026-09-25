@@ -42,6 +42,33 @@ module Orbit
     # A queued completion stop waits for the Root's delivery turn to finish;
     # beyond this cap it stops immediately rather than waiting forever.
     COMPLETION_STOP_TIMEOUT_SECONDS = 600
+    # The one next action per refusal code, shared by the CLI receipt and the
+    # runtime wake-up: a missing notice is fixed by a final check, while a
+    # failing precondition must be resolved first (a clean-up that cannot be
+    # verified or an unsettled member never qualifies by re-checking alone).
+    RUNTIME_UNAVAILABLE_REASON = "runtime_unavailable"
+    COMPLETION_NEXT_ACTIONS = {
+      "no_current_finalization_notice" => "在最终交付版本上请求一次手动检查（Orbit 工具 action=check）并结束当前轮次，" \
+                                           "等待 finalization_notice 或纠正；收到当前版本的 notice 后再用完成意图停止。",
+      "open_findings" => "先按已送达的纠正修正开放问题；在新版本上请求一次手动检查并结束当前轮次，" \
+                          "收到 notice 后再用完成意图停止。",
+      "pending_clue_recheck" => "先让待核对线索在新版本上完成核对（交付或结束本轮等待下次检查）；" \
+                                 "核对结论送达后再请求手动检查并用完成意图停止。",
+      "members_not_settled" => "先结束执行成员（停止成员或收齐结果）；成员结算后再请求手动检查并用完成意图停止。",
+      "checker_cleanup_unverified" => "先重试并核实上一次检查进程确已退出（该路径以普通停止收尾本任务）；" \
+                                       "此后本任务不再补做终检与完成，仍需交付该版本则另开新任务复检。",
+      "root_bridge_unavailable" => "Root 会话或桥接当时不可读，本次完成未生效、任务继续运行；" \
+                                    "确认 Root 会话可用后重试完成意图，必要时先请求一次手动检查。",
+      "members_unreadable" => "先恢复可读的 members.json 成员名单再重试完成意图；若改用普通停止收尾，" \
+                               "本任务不再补做终检与完成，仍需交付该版本则另开新任务复检。",
+      "members_registered_during_stop" => "停止期间新登记的成员尚未停止（本任务已是停止未确认）：" \
+                                           "先重试普通停止并核实这些成员退出；本任务不再补做终检与完成，仍需交付则另开新任务复检。",
+      "preconditions_unverifiable" => "当前无法核对完成前置条件（产物指纹或记录不可读）；确认产物目录可读后重试，" \
+                                       "必要时发一次普通停止。",
+      "runtime_unavailable" => "如需清理，直接发一次普通停止（orbit stop，不带完成意图）：它仍走已确认的停止与成员收尾；" \
+                                "不要用完成意图，也不要为此新建任务。"
+    }.freeze
+    COMPLETION_REFUSAL_NEXT_ACTION = COMPLETION_NEXT_ACTIONS.fetch("no_current_finalization_notice")
     # A version-bound pending finalization notice waits for the Root turn when
     # that happens sooner, but must still be delivered within this bound even
     # if Root stays active/waiting (see contracts/task-runtime.md).
@@ -165,6 +192,56 @@ module Orbit
       @stop_requested = true
     end
 
+    # Completion hand-off preconditions on durable state alone. The CLI runs in
+    # its own process and can only read the record, so it refuses a completion
+    # request before queueing anything with this same predicate; the runtime
+    # re-evaluates it before tearing a task down. Returns [notice_key, nil, nil]
+    # when the hand-off may proceed, [nil, code, detail] when it must be refused.
+    def completion_gate
+      cleanup = @state["cleanup_error"].to_s.strip
+      unless cleanup.empty?
+        return [nil, "checker_cleanup_unverified",
+                "an unverified checker cleanup is recorded: #{cleanup}"]
+      end
+
+      open = @state["findings"].values.select { |finding| finding["status"] == "open" }.map { |finding| finding["id"] }
+      return [nil, "open_findings", "open findings remain: #{open.join(', ')}"] unless open.empty?
+      unless @state["recheck"].nil?
+        return [nil, "pending_clue_recheck", "an independent recheck of a pending clue is still outstanding"]
+      end
+      return [nil, "members_not_settled", "registered members are not settled yet"] unless members_settled?
+
+      # Blockers outrank the missing notice: a task with an open finding and no
+      # current notice must be told to fix first, not to re-check an unchanged
+      # version (contracts/task-runtime.md: the refusal names the reason and its
+      # own next action). The version key is computed last, after the cheap
+      # blockers, because it walks the artifact workspace.
+      key = completion_notice_key
+      unless @state["finalization_notices"][key]
+        return [nil, "no_current_finalization_notice",
+                "no finalization notice exists for the current artifact and input version"]
+      end
+
+      [key, nil, nil]
+    rescue StandardError => error
+      [nil, "preconditions_unverifiable",
+       "the completion preconditions could not be verified (#{error.class}: #{error.message})"]
+    end
+
+    # Synchronous CLI gate: [code, detail] when a completion request must be
+    # refused, nil when it may proceed. Never inspects the bridge, so a refusal
+    # is decided from the durable record the Root's own stop call reads.
+    def self.completion_refusal(record)
+      _key, code, detail = new(record: record, connection: nil, checker: nil).completion_gate
+      code ? [code, detail] : nil
+    end
+
+    # The refusal's next action for a code, shared by the CLI receipt and the
+    # runtime wake-up; unknown codes fall back to the final-check guidance.
+    def self.completion_next_action(code)
+      COMPLETION_NEXT_ACTIONS.fetch(code.to_s, COMPLETION_REFUSAL_NEXT_ACTION)
+    end
+
     # Explicit cleanup after the observer has exited; never resumes execution.
     # Locks prevent an old record from stopping a newer task on the same Root.
     def retry_stop(reason)
@@ -215,6 +292,9 @@ module Orbit
         expired = now - Time.parse(pending.fetch("at")).to_f > COMPLETION_STOP_TIMEOUT_SECONDS
         @state.delete("completion_stop_pending")
         if idle_done
+          # The delivery turn finished; `stop` adjudicates the hand-off once
+          # more before teardown and records a refusal (keeping the task
+          # running) when the notice no longer matches the delivered version.
           stop(pending.fetch("reason"), allow_complete: true)
         elsif interrupted || expired
           # The delivery turn aborted or the wait outlived its bound: this is
@@ -571,15 +651,24 @@ module Orbit
         case command["type"]
         when "stop"
           reason = command.fetch("reason", "User requested stop")
-          if command["complete"] == true && completion_notice_current?
-            # Deferred completion: aborting the Root turn now could cut the
-            # user's final summary. Queue the stop; the tick performs it once
-            # the current turn completed normally (bounded wait below),
-            # re-verifying the hand-off version at that point. Plain stops
-            # without the explicit completion intent take the ordinary path.
-            @state["completion_stop_pending"] = { "reason" => reason, "at" => Time.now.utc.iso8601 }
-            @record.event("completion_stop_queued", "reason" => reason)
+          if command["complete"] == true
+            if completion_notice_current?
+              # Deferred completion: aborting the Root turn now could cut the
+              # user's final summary. Queue the stop; the tick performs it once
+              # the current turn completed normally (bounded wait below),
+              # re-verifying the hand-off version at that point.
+              @state["completion_stop_pending"] = { "reason" => reason, "at" => Time.now.utc.iso8601 }
+              @record.event("completion_stop_queued", "reason" => reason)
+            else
+              # The CLI gate accepted this hand-off; the record stopped
+              # qualifying before the runtime consumed it (version, clue,
+              # finding or member change). Keep the task running and report the
+              # refusal -- never record an ordinary pause in its place.
+              reject_completion_handoff(reason)
+            end
           else
+            # Plain stops without the explicit completion intent take the
+            # ordinary path.
             stop(reason)
           end
         when "amend"
@@ -2507,22 +2596,68 @@ module Orbit
     # pending clues remain, and members are settled. The notice itself was
     # gated on an idle, completed Root; at stop time the Root is normally
     # mid-turn because its own stop call is a turn, so the predicate only
-    # requires the connection to still be readable. Interrupts
-    # (@stop_requested) and post-crash stop retries (retry_stop) never take
-    # this path: they stay paused or stop_unconfirmed.
-    def completion_notice_current?
-      key = Digest::SHA256.hexdigest(JSON.generate([
+    # requires the connection to still be readable. `completion_gate` holds the
+    # durable half so the CLI refuses with the same verdict before queueing;
+    # a queued hand-off that no longer qualifies is reported, never paused.
+    # Interrupts (@stop_requested) and post-crash stop retries (retry_stop)
+    # never take this path: they stay paused or stop_unconfirmed.
+    def completion_notice_key
+      Digest::SHA256.hexdigest(JSON.generate([
         artifact_root, fingerprint_artifact, @record.input_digest(@state)
       ]))
-      notice = @state["finalization_notices"][key]
-      return nil unless notice
-      return nil unless @state["recheck"].nil?
-      return nil if @state["findings"].values.any? { |finding| finding["status"] == "open" }
-      return nil unless members_settled?
+    end
+
+    def completion_notice_current?
+      key, = completion_gate
+      return nil unless key
 
       @connection.state # liveness only: the stop turn itself makes Root busy
-      notice
+      @state["finalization_notices"][key]
     rescue Connection::Error
+      nil
+    end
+
+    # A queued completion hand-off no longer qualifies: the delivery version,
+    # the clue/finding memory or the member roster changed while the delivery
+    # turn finished. Keep the task running, record the refusal, and wake Root
+    # with the next action when the bridge is up -- never record an ordinary
+    # pause in place of the completion the user asked for.
+    def reject_completion_handoff(reason, code: nil, detail: nil)
+      if code.nil?
+        key, code, detail = completion_gate
+        if key
+          code = "root_bridge_unavailable"
+          detail = "the Root connection was not readable when the hand-off was adjudicated"
+        end
+      end
+      @state.delete("completion_stop_pending")
+      recent = Array(@state["completion_rejections"])
+      @state["completion_rejections"] = (recent + [{
+        "reason" => code, "detail" => detail, "stop_reason" => reason, "at" => Time.now.utc.iso8601
+      }]).last(5)
+      @record.event("completion_stop_rejected", "source" => "runtime", "reason" => code, "detail" => detail)
+      begin
+        sent = @connection.send_message("Orbit: the completion hand-off was refused (#{code}): #{detail} " \
+                                        "#{self.class.completion_next_action(code)} Do not stop the task to deliver.")
+        @state["sent_message_ids"] << sent.fetch("id")
+        @record.event("completion_rejection_delivered", "id" => sent.fetch("id"))
+      rescue Connection::Error => error
+        @record.event("completion_rejection_undelivered", "error" => error.message)
+      end
+      save
+      nil
+    end
+
+    # Thread ids in the authoritative roster that the stop never accounted for:
+    # registrations that landed while the task was being torn down, so
+    # confirmed_stop (which stops the roster reconciled at stop entry) never
+    # stopped them. Refused registrations never did model work and do not
+    # count. Returns nil when the roster cannot be read.
+    def members_unaccounted_after_teardown
+      known = @state["members"].map { |member| member["thread_id"] }
+      @record.members.reject { |entry| entry["status"] == "refused" }
+             .map { |entry| entry["thread_id"] } - known
+    rescue StandardError
       nil
     end
 
@@ -2534,6 +2669,23 @@ module Orbit
         roster_error = "#{error.class}: #{error.message}"
         @record.event("members_unreadable", "error" => roster_error)
       end
+      # A completion hand-off is adjudicated on the refreshed roster and before
+      # anything is torn down. `reconcile_registered_members!` above is the
+      # authority: a member registered after the final check would otherwise
+      # still pass `members_settled?` against the stale state roster and be
+      # recorded complete. An unreadable roster cannot qualify either. Both
+      # keep the task running and report the refusal instead of pausing it.
+      notice = nil
+      if allow_complete && status == "paused"
+        if roster_error
+          return reject_completion_handoff(reason, code: "members_unreadable",
+                                                   detail: "the member roster could not be read: #{roster_error}")
+        end
+
+        notice = completion_notice_current?
+        return reject_completion_handoff(reason) if notice.nil?
+      end
+
       checker_error = @state["cleanup_error"]
       begin
         @checker.stop! if @running_check
@@ -2551,15 +2703,67 @@ module Orbit
         @state["execution_stop_confirmation"] = confirmation if checker_error
         @state["stop_confirmation"] = confirmation
         final_status = status
-        notice = allow_complete && status == "paused" ? completion_notice_current? : nil
         if notice
-          final_status = "complete"
-          @state["delivery_digest"] = fingerprint_artifact
-          @record.event("completed_via_finalized_stop", "check" => notice["check"])
+          # Teardown can outlive the hand-off check above (member stops wait for
+          # in-flight work), so version and roster are checked once more. This
+          # recheck is deliberately bridge-free: the resources are already
+          # stopped, so asking the stopped Root's bridge could turn a valid
+          # completion into a pause on a transient failure. Only durable state
+          # (version, clues, findings, member roster) can invalidate the
+          # hand-off here; the stop evidence is the recorded confirmation. A
+          # hand-off that no longer matches is recorded as an ordinary stop with
+          # an explicit reason -- never as completion, and never as if the task
+          # were still running.
+          key, code, detail = completion_gate
+          unaccounted = nil
+          if key
+            unaccounted = members_unaccounted_after_teardown
+            if unaccounted.nil?
+              key = nil
+              code = "members_unreadable"
+              detail = "the member roster could not be re-read after teardown"
+            elsif !unaccounted.empty?
+              key = nil
+              code = "members_registered_during_stop"
+              detail = "members registered while the task stopped were never stopped: #{unaccounted.join(', ')}"
+            end
+          end
+          if key
+            @state.delete("completion_invalidation")
+            final_status = "complete"
+            @state["delivery_digest"] = fingerprint_artifact
+            @record.event("completed_via_finalized_stop", "check" => @state.dig("finalization_notices", key, "check"))
+          else
+            # An unaccounted member was never stopped, so the stop itself is not
+            # confirmed: that records an unconfirmed stop, not a confirmed pause.
+            if %w[members_unreadable members_registered_during_stop].include?(code)
+              final_status = "stop_unconfirmed"
+              # Overall confirmation must not stay true while a member is
+              # unaccounted for; keep the verified parts (Root plus the members
+              # the stop actually covered) as the execution-scope evidence.
+              partial = @state["stop_confirmation"] || {}
+              @state["execution_stop_confirmation"] = partial
+              @state["stop_confirmation"] = partial.merge("confirmed" => false, "reason" => code,
+                                                          "unaccounted_members" => Array(unaccounted))
+            end
+            @state["completion_invalidation"] = { "reason" => code, "detail" => detail,
+                                                  "at" => Time.now.utc.iso8601 }
+            @record.event("completion_invalidated_after_stop", "reason" => code, "detail" => detail)
+          end
         end
         @state["status"] = final_status
         @state["stop_reason"] = reason
-        @record.event("stopped", "reason" => reason, "confirmation" => confirmation)
+        if final_status == "stop_unconfirmed" && @state["completion_invalidation"]
+          # The Root turn itself was verified, but the stop as a whole is not:
+          # the event must not carry a false overall confirmation.
+          @record.event("stop_unconfirmed", "reason" => reason,
+                        "error" => @state.dig("completion_invalidation", "reason"),
+                        "detail" => @state.dig("completion_invalidation", "detail"),
+                        "unaccounted_members" => Array(@state.dig("stop_confirmation", "unaccounted_members")),
+                        "verified_root_confirmation" => @state["execution_stop_confirmation"])
+        else
+          @record.event("stopped", "reason" => reason, "confirmation" => confirmation)
+        end
         save
       rescue StandardError => error
         detail = error.message

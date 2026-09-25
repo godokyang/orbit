@@ -504,6 +504,29 @@ module Orbit
       raise ArgumentError, "unexpected arguments" unless argv.empty?
       record = command == "stop" ? TaskView.single!(argument) : TaskRecord.new(argument || raise(ArgumentError, "task directory is required"))
       json = command != "stop" || options.delete("json")
+      # A completion intent is adjudicated synchronously, before anything is
+      # queued and before the cleanup retry: the record keeps running and the
+      # caller gets a structured receipt (exit 0) with the one next action. A
+      # record whose runtime is gone (or already failed) cannot be completed at
+      # all -- only an explicit ordinary stop can clean it up -- so it is never
+      # silently recorded paused through retry_stop. A plain stop keeps that
+      # retry path untouched.
+      if command == "stop" && options["complete"] == true
+        refusal = if retryable_stop?(record)
+                    [TaskRuntime::RUNTIME_UNAVAILABLE_REASON,
+                     "the recorded task runtime is gone or already failed; an explicit ordinary stop performs the confirmed cleanup"]
+                  elsif !TaskRuntime::TERMINAL.include?(record.state["status"])
+                    TaskRuntime.completion_refusal(record)
+                  end
+        if refusal
+          code, detail = refusal
+          record.event("completion_stop_rejected", "source" => "cli", "reason" => code, "detail" => detail)
+          payload = { "task_directory" => record.path, "status" => "rejected", "reason" => code, "detail" => detail,
+                      "next_action" => TaskRuntime.completion_next_action(code) }
+          puts(json ? JSON.generate(payload) : "完成请求未被接受：#{detail}\n#{payload['next_action']}")
+          return 0
+        end
+      end
       if command == "stop" && retryable_stop?(record)
         state = record.state
         connection = Connection.open(state.fetch("connection"))

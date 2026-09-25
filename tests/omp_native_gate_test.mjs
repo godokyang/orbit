@@ -17,7 +17,7 @@ delete process.env.TYPESAFE_API_KEY;
 process.env.XDG_CONFIG_HOME = await fs.mkdtemp(path.join(os.tmpdir(), 'orbit-gate-test-'));
 
 const project = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'orbit-gate-')));
-const events = {}, sessions = [];
+let events = {}; const sessions = [];
 const model = { provider: 'glm', id: 'x' };
 const mainAgentId = 'Main';
 const aborted = [], setStatuses = [];
@@ -136,6 +136,8 @@ try {
     const statePath = path.join(started.task_directory, 'state.json');
     const fixture = JSON.parse(await fs.readFile(statePath, 'utf8'));
     fixture.status = 'running';
+    // Pin a LIVE sentinel pid: a running task whose runtime is available.
+    fixture.runtime_pid = process.pid;
     await fs.writeFile(statePath, JSON.stringify(fixture));
   }
 
@@ -550,6 +552,115 @@ try {
       root.sendCustomMessage = originalSend;
       root.isStreaming = originalStreaming;
       delete process.env.ORBIT_DELIVERY_ACK_MS;
+    }
+  }
+
+  // 12. Per-turn bound-task status: an active bound task injects a short
+  //     record-derived status; a terminal task only refreshes the status line,
+  //     never an unowned or dead-runtime record shown as controlled.
+  {
+    const statusCalls = [];
+    const statusCtx = { ...ctx, ui: { notify: () => {}, setStatus: (key, value) => statusCalls.push([key, value]) } };
+    const setState = async patch =>
+      fs.writeFile(path.join(started.task_directory, 'state.json'), JSON.stringify({ ...(await taskState()), ...patch }));
+    const statusTurn = async prompt => {
+      const out = await emit('before_agent_start', { prompt, systemPrompt: ['BASE'] }, statusCtx);
+      return out ? out.systemPrompt.join('\n') : '';
+    };
+    const injected = await emit('before_agent_start', { prompt: 'next user turn', systemPrompt: ['BASE'] }, statusCtx);
+    assert.ok(injected?.systemPrompt?.some(part => part.includes('[orbit-task-status]')), 'an active bound task must inject a marked per-turn status block');
+    const block = injected.systemPrompt.join('\n');
+    assert.ok(block.includes((await taskState()).id), 'the block must carry the task id');
+    assert.ok(block.includes('执行中') && block.includes('intent=pause'), 'a running task reads as 执行中 with the interrupt intent');
+    assert.ok(statusCalls.some(([key, value]) => key === 'orbit' && String(value).includes('执行中')), 'setStatus must show the phase');
+    // A record whose control socket is not this host's is what an OMP restart
+    // leaves: shown as unowned, never controlled (the tool would refuse it).
+    const boundConnection = (await taskState()).connection;
+    await setState({ connection: { ...boundConnection, socket: path.join(os.tmpdir(), 'orbit-gone-control.sock') } });
+    const staleText = await statusTurn('after crash');
+    assert.ok(staleText.includes('未接管') && staleText.includes('被拒绝') && staleText.includes(started.task_directory), 'an unowned record warns tool calls are refused and gives the cleanup directory');
+    assert.ok(!staleText.includes('intent=pause'), 'the unowned block gives no normal stop directive');
+    assert.ok(statusCalls.some(([key, value]) => key === 'orbit' && String(value).includes('未接管')), 'setStatus must mark the unowned record');
+    // Owned but dead runtime: the socket matches this host, the recorded runtime is gone.
+    const { runtime_pid: savedPid, finished_at: savedFinished } = await taskState();
+    await setState({ connection: boundConnection, runtime_pid: null, finished_at: new Date().toISOString() });
+    const lostText = await statusTurn('runtime died');
+    assert.ok(lostText.includes('运行时已失联') && lostText.includes('停止重试'), 'a dead runtime reads as lost and points at the stop retry');
+    assert.ok(!lostText.includes('intent=pause'), 'the abandoned block gives no normal stop directive');
+    assert.ok(statusCalls.some(([key, value]) => key === 'orbit' && String(value).includes('运行时已失联')), 'setStatus must mark the dead runtime');
+    // Terminal task: the status line refreshes but no per-turn block is injected.
+    await setState({ runtime_pid: savedPid, finished_at: savedFinished, status: 'paused' });
+    assert.equal(await statusTurn('next'), '', 'a terminal task injects no system prompt block');
+    assert.ok(statusCalls.some(([key, value]) => key === 'orbit' && String(value).includes('已暂停')), 'a paused task still refreshes the status line');
+    await setState({ status: 'running' });
+  }
+
+  // 12b. Restart recovery: a fresh instance (no in-memory binding) recovers the
+  //      record by (provider, thread_id) for display, but presents it as unowned
+  //      and never rebinds it (the tool would refuse every action).
+  {
+    const savedRoot = process.env.ORBIT_SESSION_AGENT_ROOT;
+    delete process.env.ORBIT_SESSION_AGENT_ROOT; // recovery must not trigger a pool sync spawn
+    const recoveryEvents = {};
+    const recoveryPi = { zod: z, registerTool: () => {}, registerCommand: () => {}, on: (n, h) => { (recoveryEvents[n] ||= []).push(h); } };
+    installOmpExtension(recoveryPi, { MAIN_AGENT_ID: mainAgentId, AgentRegistry: { global: () => registry }, isUserInterruptAbort: () => false });
+    const savedEvents = events;
+    events = recoveryEvents;
+    try {
+      const recoveryStatus = [];
+      const recoveryCtx = { ...ctx, ui: { notify: () => {}, setStatus: (key, value) => recoveryStatus.push([key, value]) } };
+      await emit('session_start', {}, recoveryCtx);
+      const recovered = await emit('before_agent_start', { prompt: 'after resume', systemPrompt: ['BASE'] }, recoveryCtx);
+      assert.ok(recovered?.systemPrompt?.some(part => part.includes('[orbit-task-status]')), 'record-based recovery must inject status after a restart with no in-memory binding');
+      const recoveredText = recovered.systemPrompt.join('\n');
+      assert.ok(recoveredText.includes((await taskState()).id), 'recovery must resolve the same durable task record');
+      assert.ok(recoveredText.includes('未接管') && recoveredText.includes('被拒绝') && recoveredText.includes(started.task_directory), 'a recovered record stays unowned, warns tool calls are refused, and gives the cleanup directory');
+      assert.ok(!recoveredText.includes('intent=pause'), 'recovery must not give the normal stop directive');
+      assert.ok(recoveryStatus.some(([key, value]) => key === 'orbit' && String(value).includes('未接管')), 'setStatus must mark the recovered record unowned');
+    } finally {
+      events = savedEvents;
+      if (savedRoot) process.env.ORBIT_SESSION_AGENT_ROOT = savedRoot;
+    }
+  }
+
+  // 13. Root-tool stop intent: a completion intent (the default) carries
+  //     --complete for the Ruby gate to adjudicate; an explicit pause never does.
+  //     An exit-0 structured refusal passes through unchanged and changes no record.
+  {
+    const stubDir = await fs.mkdtemp(path.join(os.tmpdir(), 'orbit-stop-stub-'));
+    const stub = path.join(stubDir, 'fake-ruby.mjs');
+    const log = path.join(stubDir, 'args.json');
+    await fs.writeFile(stub, `#!/usr/bin/env node
+import fs from 'node:fs';
+fs.writeFileSync(process.env.ORBIT_STOP_STUB_LOG, JSON.stringify(process.argv.slice(2)));
+process.stdout.write((process.env.ORBIT_STOP_STUB_RESULT || '{"status":"queued"}') + '\\n');
+`);
+    await fs.chmod(stub, 0o755);
+    const savedRuby = process.env.ORBIT_RUBY;
+    try {
+      process.env.ORBIT_RUBY = stub;
+      process.env.ORBIT_STOP_STUB_LOG = log;
+      const stopArgs = async () => JSON.parse(await fs.readFile(log, 'utf8'));
+      delete process.env.ORBIT_STOP_STUB_RESULT;
+      await tool({ action: 'stop', task: started.task_directory, intent: 'pause', text: 'user interrupt' });
+      const paused = await stopArgs();
+      assert.ok(!paused.includes('--complete') && paused.includes('--reason'), 'pause keeps the reason, never --complete');
+
+      await tool({ action: 'stop', task: started.task_directory, intent: 'complete' });
+      assert.ok((await stopArgs()).includes('--complete'), 'complete intent carries --complete to the Ruby gate');
+
+      await tool({ action: 'stop', task: started.task_directory });
+      assert.ok((await stopArgs()).includes('--complete'), 'stop intent defaults to complete');
+      process.env.ORBIT_STOP_STUB_RESULT = JSON.stringify({ task_directory: started.task_directory, status: 'rejected',
+        reason: 'no_current_finalization_notice', next_action: 'request a final check and end the turn' });
+      const refused = await tool({ action: 'stop', task: started.task_directory, intent: 'complete' });
+      assert.ok(refused.status === 'rejected' && refused.next_action, 'an exit-0 structured refusal passes through unchanged with its next_action');
+      assert.equal((await taskState()).status, 'running', 'a refused completion changes no record');
+    } finally {
+      if (savedRuby === undefined) delete process.env.ORBIT_RUBY; else process.env.ORBIT_RUBY = savedRuby;
+      delete process.env.ORBIT_STOP_STUB_LOG;
+      delete process.env.ORBIT_STOP_STUB_RESULT;
+      await fs.rm(stubDir, { recursive: true, force: true });
     }
   }
 

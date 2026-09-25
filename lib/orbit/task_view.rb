@@ -412,6 +412,23 @@ module Orbit
       "下一动作：#{next_action(state)}"
     end
 
+    # A completion hand-off that failed its post-teardown check leaves an
+    # ordinary stop whose stop_reason may still claim the delivery completed.
+    # Name the invalidation explicitly so the record can never be read as an
+    # accepted completion (contracts/task-runtime.md, 2026-09-25).
+    def completion_invalidation_line(state)
+      invalidation = state["completion_invalidation"]
+      return nil unless invalidation.is_a?(Hash)
+
+      reason = invalidation["reason"].to_s
+      reason = "unknown" if reason.empty?
+      text = "完成复核：未通过（#{reason}）"
+      detail = invalidation["detail"].to_s.strip
+      text += " — #{detail}" unless detail.empty?
+      text += "，记录于 #{invalidation['at']}" if invalidation["at"]
+      "#{text}；本次停止按普通停止记录，不代表该版本已通过独立终检"
+    end
+
     def next_action(state)
       status = state["status"]
       return "需要用户处理" if %w[needs_user stop_unconfirmed].include?(status)
@@ -465,6 +482,7 @@ module Orbit
       state = record.state
       status = state.fetch("status")
       lines = ["任务：#{summary(record)}", "状态：#{label(state)}（#{status}）",
+               *([completion_invalidation_line(state)].compact),
                "产物目录：#{artifact_root(state)}",
                "绑定时间：#{state.dig('workspace', 'bound_at') || '未单独记录'}",
                "最近重新绑定：#{latest_rebind(state)}",
@@ -511,6 +529,16 @@ module Orbit
                     stop_confirmed?(state) ? "运行失败，停止已确认；请查看运行错误。" : "运行失败，停止情况需核实。"
                   when "needs_user", "stop_unconfirmed"
                     state["stop_reason"] || state["error"] || "请核对任务错误及停止结果。"
+                  when "paused"
+                    if state["completion_invalidation"].is_a?(Hash)
+                      reason = state.dig("completion_invalidation", "reason").to_s
+                      reason = "unknown" if reason.empty?
+                      claim = state["stop_reason"].to_s.strip
+                      "已完成停止，但完成复核未通过（#{reason}）" +
+                        (claim.empty? ? "。" : "；原停止说明「#{claim}」不代表该版本已通过独立终检。")
+                    else
+                      "当前记录未要求用户处理"
+                    end
                   else
                     "当前记录未要求用户处理"
                   end

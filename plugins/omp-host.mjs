@@ -72,6 +72,7 @@ export function installOmpExtension(pi, sdk) {
   const requestedNames = new Map();
   const stoppedMembers = new Set(); // member ids whose stop was CONFIRMED via the live-session path
   const taskDirs = new Map();       // root session id -> task directory (bound via orbit start/context)
+  const statusBoundTasks = new Map(); // root session id -> task directory recovered from durable records (status display only)
   const collabEvents = [];          // native hub traffic + native task results (bounded, readable via dispatch)
   const COLLAB_CAP = 500;
   const collabSeqByTask = new Map();    // task_dir -> last assigned seq (per-task, gap-free)
@@ -365,6 +366,165 @@ export function installOmpExtension(pi, sdk) {
       return { ok: false, reason: 'The bound Orbit task is not active for this Root; start a new Orbit task before delegating' };
     }
     return { ok: true, taskDir };
+  }
+  // --- Per-turn bound-task status (Zeen review steps 2/3) -------------------
+  // The Root binding lives in process memory (taskDirs). After an OMP restart
+  // or `--resume` (same session id: session-manager.ts header.id), it is
+  // recovered from the durable task record by (provider, thread_id); the short
+  // status is re-derived from state.json every user turn, never persisted as a
+  // second state source. Display only: it does not adjudicate completion or
+  // override the checker.
+  const STATUS_MARKER = '[orbit-task-status]';
+  const activeState = state => state && (state.status === 'starting' || state.status === 'running');
+  const stopConfirmed = state => state?.stop_confirmation?.confirmed === true;
+  const openFindings = state => {
+    const findings = state?.findings;
+    return findings && typeof findings === 'object'
+      ? Object.values(findings).filter(finding => finding && finding.status === 'open').length : 0;
+  };
+  const recheckClues = state => Array.isArray(state?.recheck?.findings) ? state.recheck.findings.length : 0;
+  const noticeCount = state => {
+    const notices = state?.finalization_notices;
+    return notices && typeof notices === 'object' ? Object.keys(notices).length : 0;
+  };
+  // Mirrors TaskView.runtime_abandoned?: a starting/running record whose
+  // recorded runtime process is gone cannot consume queued commands. A recorded
+  // finish without a positive pid is an exited runtime; without a recorded
+  // finish a missing pid may only mean the runtime is still starting.
+  function runtimeAbandoned(state) {
+    if (!activeState(state)) return false;
+    const pid = state?.runtime_pid;
+    const finished = typeof state?.finished_at === 'string' && state.finished_at.length > 0;
+    if (!(Number.isInteger(pid) && pid > 0)) return finished;
+    try { process.kill(pid, 0); return false; }
+    catch (error) { return error?.code === 'ESRCH'; }
+  }
+  function phaseLabel(state) {
+    switch (state.status) {
+      case 'complete': return '已完成（独立检查与收尾通过）';
+      case 'paused': return '已暂停（已确认停止）';
+      case 'needs_user': return '需用户处理（已确认停止）';
+      case 'stop_unconfirmed': return '停止未确认';
+      case 'failed': return stopConfirmed(state) ? '运行失败（停止已确认）' : '运行失败（停止待核实）';
+      default: break;
+    }
+    // A live status can outlive its runtime process. Never present that as an
+    // execution phase: only the socket check plus a live runtime is control.
+    if (runtimeAbandoned(state)) return '运行时已失联（记录显示执行中）';
+    if (state.completion_stop_pending) return '可收尾（完成停止已排队，等待本轮结束）';
+    if (openFindings(state) > 0) return '待纠正（有开放问题）';
+    if (state.pending_finalization) return '待终检通知送达';
+    // A stored notice can outlive the version it was issued for, and state.json
+    // carries no current fingerprint; only the stop program gate can decide
+    // whether the current version still qualifies. Never claim it is current.
+    if (noticeCount(state) > 0) return '曾有终检通知（当前版本待 stop 程序门核验）';
+    return '执行中（尚未收到终检通知）';
+  }
+  // Mirrors TaskView.next_action for display only. The durable record stays the
+  // authority; this never decides completion.
+  function nextActionLabel(state) {
+    if (state.status === 'needs_user' || state.status === 'stop_unconfirmed') return '需要用户处理';
+    if (state.status === 'failed') return stopConfirmed(state) ? '运行失败，停止已确认' : '运行失败，需核实停止';
+    if (!activeState(state)) return null;
+    const lastCheck = Array.isArray(state.checks) ? state.checks.filter(c => c && typeof c === 'object').at(-1) : null;
+    if (state.next_check_trigger === 'rebind' || state.next_check_basis === '工作区重新绑定'
+      || (lastCheck && Array.isArray(lastCheck.stale_reasons) && lastCheck.stale_reasons.includes('workspace'))) return '重新绑定工作区';
+    if (state.next_check_manual === true) return '手动检查已排队';
+    const queued = (typeof state.next_check_at === 'string' && state.next_check_at) || (typeof state.next_check_trigger === 'string' && state.next_check_trigger);
+    if (openFindings(state) > 0 || recheckClues(state) > 0 || !queued) return '等待 Root';
+    return queued ? '检查已安排' : '无';
+  }
+  function phaseDirective(state) {
+    if (state.completion_stop_pending) return '完成停止已排队：正常结束本轮即可，不要重复 stop。';
+    if (openFindings(state) > 0 || recheckClues(state) > 0) return '仍有待处理问题：修正后继续，不要宣称完成或 stop。';
+    if (state.pending_finalization) return '终检通知待送达：结束本轮并等待 Orbit 唤醒，不要轮询。';
+    if (noticeCount(state) > 0)
+      return '曾有终检通知：它不保证对应当前版本；交付未再变化时可 orbit stop（intent 默认 complete）交由程序门核验，被拒绝就按 next_action 重检；产物/输入已变则先重检。仅用户要求中断时用 intent=pause。';
+    return '尚未收到终检通知：交付就绪后请求一次手动终检并结束本轮；收到 finalization_notice 再 stop。仅用户要求中断时用 intent=pause。';
+  }
+  function statusBlock(state) {
+    const counts = [];
+    if (openFindings(state) > 0) counts.push(`开放问题 ${openFindings(state)}`);
+    if (recheckClues(state) > 0) counts.push(`待重新核对 ${recheckClues(state)}`);
+    if (noticeCount(state) > 0) counts.push('曾有终检通知（是否对应当前版本由 stop 程序门核验）');
+    const next = nextActionLabel(state);
+    return [
+      `${STATUS_MARKER} Orbit 任务 ${state.id}：${phaseLabel(state)}`,
+      counts.length ? counts.join('；') : '开放问题 0；尚无终检通知',
+      ...(next && next !== '无' ? [`下一动作：${next}`] : []),
+      phaseDirective(state),
+    ].join('\n');
+  }
+  // A record that outlived the host connection that created it (OMP restart or
+  // crash) is display-only. Every Orbit tool call on it is refused by the
+  // ownership check, so the block must never imply control and must send the
+  // user to an explicit, out-of-session cleanup instead of a stop.
+  function unownedBlock(state, taskDir) {
+    return [
+      `${STATUS_MARKER} Orbit 任务 ${state.id}：记录显示「${phaseLabel(state)}」，但属于上一次 OMP 运行`,
+      '本会话未接管该任务的连接：经本会话的 orbit status/check/amend/dispute/stop 都会因所有权不符被拒绝。不要据旧记录直接 stop，也不要假设它仍在受控。',
+      `处理：在终端用 orbit status "${taskDir}" --json 查明状态；若确认结束，用 orbit stop "${taskDir}" --reason "..." --json（运行时已退出时会走停止重试）；要继续工作请重新 orbit start 开新任务。`,
+    ].join('\n');
+  }
+  // Owned record whose runtime process is gone: the connection is ours, but
+  // there is nothing to execute. Cleanup is a stop retry, never execution.
+  function abandonedBlock(state, taskDir) {
+    return [
+      `${STATUS_MARKER} Orbit 任务 ${state.id}：运行时已失联（记录仍显示「执行中」，但记录的运行时进程已不在）`,
+      '本会话虽持有该任务记录，但运行时已退出：不会处理检查或完成。不要继续执行指引，也不要把旧记录当作完成。',
+      `清理：在本会话调用 orbit 工具 stop（task 传 "${taskDir}"；intent 默认即可，运行时已退出会走停止重试，只确认停止、不会完成）；需要继续工作请重新 start 开新任务。`,
+    ].join('\n');
+  }
+  function withStatusBlock(systemPrompt, block) {
+    const base = Array.isArray(systemPrompt) ? systemPrompt : [];
+    return [...base.filter(part => !(typeof part === 'string' && part.includes(STATUS_MARKER))), block];
+  }
+  function applyStatus(ctx, label) {
+    if (typeof ctx?.ui?.setStatus !== 'function') return;
+    try { ctx.ui.setStatus('orbit', label); } catch { /* headless/RPC: no-op */ }
+  }
+  async function exists(file) { try { await fs.stat(file); return true; } catch { return false; } }
+  // Mirrors TaskView.project: the nearest ancestor carrying .orbit, else .git.
+  async function projectRootFor(cwd) {
+    if (!cwd) return null;
+    let dir = await fs.realpath(cwd).catch(() => cwd);
+    for (;;) {
+      if (await exists(path.join(dir, '.orbit'))) return dir;
+      if (await exists(path.join(dir, '.git'))) return dir;
+      const parent = path.dirname(dir);
+      if (parent === dir) return null;
+      dir = parent;
+    }
+  }
+  async function readRecordState(taskDir) {
+    try {
+      const state = JSON.parse(await fs.readFile(path.join(taskDir, 'state.json'), 'utf8'));
+      return state && state.format === 'orbit-task-1' ? state : null;
+    } catch { return null; }
+  }
+  async function resolveBoundTask(sessionId, cwd) {
+    const known = taskDirs.get(sessionId) ?? statusBoundTasks.get(sessionId);
+    if (known) {
+      const state = await readRecordState(known);
+      if (state && state.connection?.provider === 'omp' && state.connection?.thread_id === sessionId) return { taskDir: known, state };
+      statusBoundTasks.delete(sessionId);
+      if (taskDirs.get(sessionId) === known) taskDirs.delete(sessionId);
+    }
+    const project = await projectRootFor(cwd);
+    if (!project) return null;
+    let best = null;
+    for (const name of await fs.readdir(path.join(project, '.orbit', 'tasks')).catch(() => [])) {
+      const taskDir = path.join(project, '.orbit', 'tasks', name);
+      const state = await readRecordState(taskDir);
+      if (!state || state.connection?.provider !== 'omp' || state.connection?.thread_id !== sessionId) continue;
+      if (!best) { best = { taskDir, state }; continue; }
+      const better = (activeState(state) && !activeState(best.state))
+        || (activeState(state) === activeState(best.state) && String(state.created_at || '') > String(best.state.created_at || ''));
+      if (better) best = { taskDir, state };
+    }
+    if (!best) return null;
+    statusBoundTasks.set(sessionId, best.taskDir);
+    return best;
   }
   // Member read/stop operations must survive terminal task states: an
   // explicit stop retry after stop_unconfirmed (or a failed runtime) still
@@ -1041,6 +1201,39 @@ export function installOmpExtension(pi, sdk) {
       return Boolean(ref?.session) && ref.id === sdk.MAIN_AGENT_ID && ref.kind === 'main';
     } catch { return false; }
   }
+  // Per user turn, an already-bound task gets a short status derived from the
+  // durable record (fresh every turn, no polling). Terminal/unbound sessions
+  // only refresh the status line. This hook does not create tasks, dispatch
+  // members, or gate completion — the Ruby completion gate remains the
+  // authority.
+  pi.on('before_agent_start', async (event, ctx) => {
+    let sessionId = null;
+    try { sessionId = ctx?.sessionManager?.getSessionId?.() ?? null; } catch { /* unowned */ }
+    if (!sessionId || !isMainSession(sessionId)) return;
+    try {
+      const bound = await resolveBoundTask(sessionId, ctx.cwd);
+      if (!bound) { applyStatus(ctx, undefined); return; }
+      // Control requires BOTH this process owning the record's control socket
+      // AND a live recorded runtime. A record can read 'running' while its
+      // socket is stale (OMP restart) or its runtime_pid is dead (crash/
+      // abnormal exit). Only the both-true case gets execution guidance; the
+      // others get conservative cleanup/stop-retry text. Never rebind the old
+      // task; continuing means a new orbit start.
+      const owned = host ? await host.ownsTask(bound.taskDir, sessionId) : false;
+      const abandoned = runtimeAbandoned(bound.state);
+      if (!owned || abandoned) {
+        applyStatus(ctx, `Orbit：${owned ? '' : '未接管 · '}${phaseLabel(bound.state)}`);
+        if (!activeState(bound.state)) return;
+        const block = owned && abandoned
+          ? abandonedBlock(bound.state, bound.taskDir)
+          : unownedBlock(bound.state, bound.taskDir);
+        return { systemPrompt: withStatusBlock(event?.systemPrompt, block) };
+      }
+      applyStatus(ctx, `Orbit：${phaseLabel(bound.state)}`);
+      if (!activeState(bound.state)) return;
+      return { systemPrompt: withStatusBlock(event?.systemPrompt, statusBlock(bound.state)) };
+    } catch { return; }
+  });
   pi.on('session_start', (_event, ctx) => {
     // Re-bound child runtimes also fire session_start (OMP re-binds factories
     // per subagent). Only the process main agent may bind Orbit; member

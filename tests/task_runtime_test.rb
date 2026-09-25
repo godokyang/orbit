@@ -198,6 +198,23 @@ def answer(verdict, findings: [], resolved: [])
     "resolved_ids" => resolved, "next_check_seconds" => 60 }
 end
 
+# Shared completion-hand-off preamble: qualified notice, delivery turn in
+# progress, queued completion stop, then the turn finishing. Returns its tick.
+def qualified_handoff!(record, host, checker, runtime)
+  now = Time.now.to_f
+  record.submit("check")
+  runtime.tick(now: now)
+  checker.result = answer("continue")
+  runtime.tick(now: now + 1)
+  assert(record.state["finalization_notices"].length == 1, "finalization hand-off is qualified")
+  host.working("delivery turn in progress")
+  record.submit("stop", "reason" => "User requested stop", "complete" => true)
+  runtime.tick(now: now + 2)
+  assert(record.state["completion_stop_pending"], "completion stop is queued")
+  host.finish("delivered")
+  now + 3
+end
+
 def member_policy(allowed)
   Orbit::MemberPolicy.new(allowed_kinds: allowed, source: "test", path: "/tmp/orbit-test-members.json")
 end
@@ -1787,26 +1804,104 @@ fixture do |_root, record, host, checker, runtime|
 end
 
 # A version change DURING the queued delivery turn also breaks the hand-off:
-# the turn may finish normally, but the stop re-verifies the version and must
-# record an ordinary stop, never completion, and leaves no delivery_digest.
+# the turn may finish normally, but the stop adjudicates again and must refuse
+# -- never complete, never silently recorded as an ordinary pause. The task
+# keeps running, the refusal is recorded, and Root is woken with the next action.
 fixture do |root, record, host, checker, runtime|
-  now = Time.now.to_f
-  record.submit("check")
-  runtime.tick(now: now)
-  checker.result = answer("continue")
-  runtime.tick(now: now + 1)
-  assert(record.state["finalization_notices"].length == 1, "finalization hand-off is qualified")
-  host.working("delivery turn in progress")
-  record.submit("stop", "reason" => "User requested stop", "complete" => true)
-  runtime.tick(now: now + 2)
-  assert(record.state["completion_stop_pending"], "completion stop is queued")
+  at = qualified_handoff!(record, host, checker, runtime)
   File.write(File.join(root, "LATE.md"), "artifact changed during the delivery turn")
-  host.finish("delivered")
-  runtime.tick(now: now + 3)
-  assert(record.state["status"] == "paused",
-         "a version change during the queued turn stops ordinarily, never complete")
-  assert(record.state["delivery_digest"].nil?,
-         "no delivery version is recorded when the hand-off no longer matches")
+  before = record.state["status"]
+  runtime.tick(now: at)
+  assert(record.state["status"] == before && !Orbit::TaskRuntime::TERMINAL.include?(before) &&
+         record.state["delivery_digest"].nil? && record.state["completion_stop_pending"].nil?,
+         "a version change during the queued turn keeps the task running and records no delivery")
+  assert(record.state.dig("completion_rejections", 0, "reason") == "no_current_finalization_notice" &&
+         events(record).any? { |event| event["type"] == "completion_stop_rejected" },
+         "the refusal records why the hand-off no longer qualifies")
+  assert(host.messages.any? { |message| message.include?("hand-off was refused") && message.include?("手动检查") },
+         "Root is woken with the next action instead of being left to guess")
+end
+
+# A member registered after the final check refuses the completion hand-off:
+# the stop reconciles the authoritative roster before adjudicating, so a state
+# roster that has not caught up can never record an unsettled member complete.
+# An unreadable roster cannot qualify either.
+fixture do |_root, record, host, checker, runtime|
+  at = qualified_handoff!(record, host, checker, runtime)
+  assert(record.state["members"].empty?, "the state roster has not seen the late member yet")
+  record.register_member("orbit-m-late", requested_name: "orbit-m-late")
+  runtime.tick(now: at)
+  assert(!Orbit::TaskRuntime::TERMINAL.include?(record.state["status"]) &&
+         record.state.dig("completion_rejections", 0, "reason") == "members_not_settled",
+         "a member registered after the final check refuses the hand-off")
+  assert(host.messages.any? { |message| message.include?("members_not_settled") && message.include?("成员结算") },
+         "the runtime wake-up uses the member-specific next action, not the final-check fallback")
+  File.write(File.join(record.path, "members.json"), "{ not a roster")
+  runtime.send(:stop, "User requested stop", allow_complete: true)
+  assert(!Orbit::TaskRuntime::TERMINAL.include?(record.state["status"]) &&
+         record.state["completion_rejections"].last["reason"] == "members_unreadable",
+         "an unreadable member roster refuses the hand-off instead of completing")
+end
+
+# Teardown can outlive the hand-off check (member stops wait for in-flight
+# work). A version change inside that window records an ordinary stop with an
+# explicit reason -- never completion, and never as if the task were running.
+fixture do |root, record, host, checker, runtime|
+  at = qualified_handoff!(record, host, checker, runtime)
+  original_stop = host.method(:stop!)
+  host.define_singleton_method(:stop!) do
+    File.write(File.join(root, "DURING-TEARDOWN.md"), "artifact changed while the task stopped")
+    original_stop.call
+  end
+  runtime.tick(now: at)
+  assert(record.state["status"] == "paused" && record.state["delivery_digest"].nil? &&
+         record.state["stop_confirmation"]["confirmed"] == true,
+         "a hand-off invalidated during teardown records a confirmed ordinary stop, never completion")
+  assert(record.state.dig("completion_invalidation", "reason") == "no_current_finalization_notice" &&
+         events(record).any? { |event| event["type"] == "completion_invalidated_after_stop" } &&
+         record.state["completion_stop_pending"].nil?,
+         "the invalidation is durable and auditable")
+end
+
+# A member that lands in the authoritative roster while the task is being torn
+# down was never stopped; the post-teardown re-read must refuse completion and
+# record an unconfirmed stop, never a confirmed pause.
+fixture do |_root, record, host, checker, runtime|
+  at = qualified_handoff!(record, host, checker, runtime)
+  original_stop = host.method(:stop!)
+  host.define_singleton_method(:stop!) do
+    record.register_member("orbit-m-during-stop", requested_name: "orbit-m-during-stop")
+    original_stop.call
+  end
+  runtime.tick(now: at)
+  assert(record.state["status"] == "stop_unconfirmed" &&
+         record.state.dig("completion_invalidation", "reason") == "members_registered_during_stop" &&
+         record.state["completion_invalidation"]["detail"].include?("orbit-m-during-stop"),
+         "a member registered during teardown is never completed and is named as an unconfirmed stop")
+  assert(record.state["stop_confirmation"]["confirmed"] != true &&
+         record.state.dig("execution_stop_confirmation", "confirmed") == true &&
+         record.state["stop_confirmation"]["unaccounted_members"] == ["orbit-m-during-stop"],
+         "the overall confirmation is false while the verified Root/member part is preserved")
+  assert(events(record).any? { |event| event["type"] == "stop_unconfirmed" &&
+                                       event["unaccounted_members"] == ["orbit-m-during-stop"] } &&
+         events(record).none? { |event| event["type"] == "stopped" },
+         "the event log records the unconfirmed stop instead of a confirmed one")
+end
+
+# The post-teardown recheck must not ask the stopped Root's bridge: a transient
+# failure there would turn a valid completion into a pause. Once the resources
+# are stopped, only durable state can invalidate the hand-off.
+fixture do |_root, record, host, checker, runtime|
+  at = qualified_handoff!(record, host, checker, runtime)
+  original_stop = host.method(:stop!)
+  host.define_singleton_method(:stop!) do
+    result = original_stop.call
+    define_singleton_method(:state) { raise Orbit::Connection::Error, "bridge is gone after stop" }
+    result
+  end
+  runtime.tick(now: at)
+  assert(record.state["status"] == "complete" && record.state["completion_invalidation"].nil?,
+         "an unreachable bridge after teardown cannot turn a valid completion into a pause")
 end
 
 # A plain stop without the explicit completion intent stays an immediate
