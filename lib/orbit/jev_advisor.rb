@@ -322,9 +322,30 @@ module Orbit
     end
 
     def self.git_read(root, args, limit)
-      IO.popen(["git", "-C", root, *args], err: File::NULL) { |io| io.read(limit) }.to_s
+      bytes = IO.popen(["git", "-C", root, *args], err: File::NULL) { |io| io.read(limit) }.to_s
+      utf8_excerpt(bytes)
     rescue Errno::ENOENT, IOError, SystemCallError
       ""
+    end
+
+    # IO#read(limit) returns raw bytes, so the byte budget can cut the last
+    # UTF-8 character in half; JSON generation then rejects the whole payload
+    # (the observed `TypeSafe assessment failed: JSON::GeneratorError`). Drop
+    # only that incomplete trailing sequence (at most three bytes) so the
+    # excerpt ends on a character boundary within the same byte budget. Bytes
+    # before the cut stay untouched, and genuinely invalid content beyond the
+    # boundary is not silently replaced: the string is left invalid so the
+    # caller's existing fail-closed degradation applies.
+    def self.utf8_excerpt(bytes)
+      text = +bytes # unfrozen, so re-tagging as UTF-8 costs no copy
+      text.force_encoding(Encoding::UTF_8)
+      return text if text.valid_encoding?
+
+      1.upto(3) do |dropped|
+        candidate = text.byteslice(0, text.bytesize - dropped)
+        return candidate if candidate&.valid_encoding?
+      end
+      text
     end
   end
 end

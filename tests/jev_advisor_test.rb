@@ -69,6 +69,22 @@ module JevAdvisorTest
     true
   end
 
+  GIT_IDENTITY = ["-c", "user.name=Orbit test", "-c", "user.email=orbit@example.invalid",
+                  "-c", "commit.gpgsign=false", "-c", "core.hooksPath=/dev/null"].freeze
+
+  def git(root, *args)
+    ok = system("git", "-C", root, *args, out: File::NULL, err: File::NULL)
+    raise "git #{args.join(' ')} failed in #{root}" unless ok
+  end
+
+  def commit(root)
+    git(root, *GIT_IDENTITY, "commit", "-qm", "fixture")
+  end
+
+  def git_bytes(root, *args)
+    IO.popen(["git", "-C", root, *args], err: File::NULL) { |io| io.read }.to_s.b
+  end
+
   def run
     check_delegation_question_text
     check_stage_one_questions_unchanged
@@ -78,6 +94,7 @@ module JevAdvisorTest
     check_stages_ignore_each_others_answers
     check_checker_quality_request_and_parsing
     check_stage_two_rejects_invalid_probabilities
+    check_git_excerpt_utf8_boundary
     check_error_boundaries
     puts "JEV_ADVISOR_TEST_PASS (deterministic, local fixture only)"
   end
@@ -259,6 +276,77 @@ module JevAdvisorTest
 
     expect_error("no checker candidate is rejected before any request") do
       Orbit::JevAdvisor.new(api_key: "test-key").assess_checker_quality(state: {}, candidates: [])
+    end
+  end
+
+  # Real git output is read as raw bytes under a byte budget, so the budget
+  # can cut a multibyte character in half. That invalid UTF-8 used to make
+  # JSON.generate raise and degrade every assessment to
+  # "TypeSafe assessment failed: JSON::GeneratorError" (Zeen task
+  # e337c16d). The excerpt must stay valid UTF-8 within the same byte budget
+  # and remain byte-identical before the cut; genuinely invalid bytes beyond
+  # the cut must still fail closed instead of being silently replaced.
+  def check_git_excerpt_utf8_boundary
+    Dir.mktmpdir("orbit-jev-cjk") do |root|
+      git(root, "init", "-q")
+      File.write(File.join(root, "notes.md"), "short\n")
+      git(root, "add", "-A")
+      commit(root)
+
+      body = "中文页面走查记录，逐条说明修改原因与验收方式。\n"
+      filler = ""
+      raw = nil
+      3.times do
+        File.write(File.join(root, "notes.md"), filler + (body * 300))
+        raw = git_bytes(root, "diff", "--no-ext-diff", "--no-textconv", "--unified=0", "HEAD", "--")
+        head = raw.byteslice(0, 4000).dup.force_encoding(Encoding::UTF_8)
+        break unless head.valid_encoding?
+
+        filler = "x#{filler}" # shift the byte alignment of the cut and re-diff
+      end
+      check(raw.bytesize > 4000 && !raw.byteslice(0, 4000).dup.force_encoding(Encoding::UTF_8).valid_encoding?,
+            "the fixture reproduces the real byte-budget cut through a multibyte character")
+
+      state = Orbit::JevAdvisor.observation(
+        inputs: { "instruction" => "orbit" }, host: { "status" => "running", "observations" => [] },
+        members: [], project_root: root, artifact_digest: "sha256:fixture", elapsed_seconds: 6
+      )
+      excerpt = state["changes"]["diff_excerpt"]
+      check(excerpt.encoding == Encoding::UTF_8 && excerpt.valid_encoding?,
+            "the git excerpt is valid UTF-8 after the byte-budget cut")
+      check(excerpt.bytesize.between?(3997, 4000) && excerpt.include?("中文"),
+            "the excerpt keeps the byte budget and the cut content; only the split character is dropped")
+      check(raw.start_with?(excerpt.b), "the excerpt is byte-identical to the git output before the cut")
+      check(state["changes"]["status"] == " M notes.md\n", "an untruncated git read still passes through unchanged")
+
+      with_fixture([payload(STAGE_ONE_ANSWERS)]) do |endpoint, requests|
+        result = Orbit::JevAdvisor.new(api_key: "test-key", endpoint: endpoint).assess(state: state)
+        check(result["scores"]["delegatable"] == 0.9,
+              "a diff cut at the byte budget no longer degrades the assessment to JSON::GeneratorError")
+        check(requests.first["state"]["changes"]["diff_excerpt"].valid_encoding?,
+              "the assessment request carries the excerpt as valid JSON text")
+      end
+    end
+
+    Dir.mktmpdir("orbit-jev-bytes") do |root|
+      git(root, "init", "-q")
+      File.write(File.join(root, "legacy.txt"), "ascii\n")
+      git(root, "add", "-A")
+      commit(root)
+      File.binwrite(File.join(root, "legacy.txt"), ("legacy \xFF\xFE row\n".b * 400))
+
+      raw = git_bytes(root, "diff", "--no-ext-diff", "--no-textconv", "--unified=0", "HEAD", "--")
+      state = Orbit::JevAdvisor.observation(
+        inputs: { "instruction" => "orbit" }, host: { "status" => "running", "observations" => [] },
+        members: [], project_root: root, artifact_digest: "sha256:fixture", elapsed_seconds: 6
+      )
+      excerpt = state["changes"]["diff_excerpt"]
+      check(excerpt.b == raw.byteslice(0, 4000) && !excerpt.valid_encoding?,
+            "invalid bytes inside the git output are preserved, not silently replaced or dropped")
+      expect_error("content that is invalid beyond the cut still degrades Jev instead of being scrubbed") do
+        Orbit::JevAdvisor.new(api_key: "test-key", endpoint: URI("http://127.0.0.1:1/v1/systemone"))
+                          .assess(state: state)
+      end
     end
   end
 

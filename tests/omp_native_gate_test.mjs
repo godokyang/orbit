@@ -664,6 +664,76 @@ process.stdout.write((process.env.ORBIT_STOP_STUB_RESULT || '{"status":"queued"}
     }
   }
 
+  // 14. Same-turn status refresh (Zeen 2026-09-25 regression): a successful
+  //     start must show the NEW task's real state immediately, in the same
+  //     turn, not only at the next user turn. A rejected start must refresh
+  //     nothing, so it can never present a task that was not accepted.
+  {
+    const statusCalls = [];
+    const startCtx = { ...ctx, ui: { notify: () => {}, setStatus: (key, value) => statusCalls.push([key, value]) } };
+    const stubDir = await fs.mkdtemp(path.join(os.tmpdir(), 'orbit-start-stub-'));
+    const stub = path.join(stubDir, 'fake-ruby.mjs');
+    // Emulates the real `orbit start` result shape: it creates a durable record
+    // whose connection is the control socket that THIS host passed on the
+    // command line, so ownership is decided exactly as in production.
+    await fs.writeFile(stub, `#!/usr/bin/env node
+import fs from 'node:fs';
+import path from 'node:path';
+const argv = process.argv.slice(2);
+const flags = {};
+for (let i = 0; i < argv.length; i++) if (argv[i].startsWith('--')) flags[argv[i]] = argv[i + 1];
+if (process.env.ORBIT_START_STUB_FAIL) { process.stderr.write('start refused for test\\n'); process.exit(1); }
+const id = 'stub-' + Date.now() + '-' + Math.random().toString(16).slice(2);
+const dir = path.join(flags['--project'], '.orbit', 'tasks', id);
+fs.mkdirSync(dir, { recursive: true });
+fs.writeFileSync(path.join(dir, 'state.json'), JSON.stringify({
+  format: 'orbit-task-1', id, project_root: flags['--project'],
+  created_at: new Date().toISOString(), status: 'running',
+  connection: { provider: 'omp', socket: flags['--socket'], thread_id: flags['--thread'] }
+}));
+process.stdout.write(JSON.stringify({ task_directory: dir, status: 'starting' }) + '\\n');
+`);
+    await fs.chmod(stub, 0o755);
+    const savedRuby = process.env.ORBIT_RUBY;
+    let newDir = null;
+    try {
+      // The old bound task is terminal: the turn's status line reads ITS state.
+      const statePath = path.join(started.task_directory, 'state.json');
+      const fixture = JSON.parse(await fs.readFile(statePath, 'utf8'));
+      fixture.status = 'paused';
+      await fs.writeFile(statePath, JSON.stringify(fixture));
+      await emit('before_agent_start', { prompt: 'same turn', systemPrompt: ['BASE'] }, startCtx);
+      assert.ok(statusCalls.some(([key, value]) => key === 'orbit' && String(value).includes('已暂停')),
+        'the status line must first show the previous paused task');
+
+      // A successful start in the SAME turn must immediately show the new task.
+      process.env.ORBIT_RUBY = stub;
+      statusCalls.length = 0;
+      const started2 = await tool({ action: 'start', message_id: 'original' }, startCtx);
+      newDir = started2.task_directory;
+      assert.notEqual(newDir, started.task_directory, 'a successful start creates a new task record');
+      assert.ok(statusCalls.some(([key, value]) => key === 'orbit' && String(value).includes('执行中')),
+        'a successful start must refresh the status line to the new task in the same turn');
+      assert.ok(!statusCalls.some(([key, value]) => key === 'orbit' && String(value).includes('已暂停')),
+        'the previous paused label must not survive a successful start');
+
+      // A rejected start must refresh nothing: no phantom takeover.
+      const newState = JSON.parse(await fs.readFile(path.join(newDir, 'state.json'), 'utf8'));
+      newState.status = 'paused'; // make the new task terminal so start re-runs the CLI
+      await fs.writeFile(path.join(newDir, 'state.json'), JSON.stringify(newState));
+      process.env.ORBIT_START_STUB_FAIL = '1';
+      statusCalls.length = 0;
+      await assert.rejects(() => tool({ action: 'start', message_id: 'original' }, startCtx), /start refused/);
+      assert.equal(statusCalls.length, 0, 'a rejected start must not refresh or report a takeover');
+      delete process.env.ORBIT_START_STUB_FAIL;
+    } finally {
+      delete process.env.ORBIT_START_STUB_FAIL;
+      if (savedRuby === undefined) delete process.env.ORBIT_RUBY; else process.env.ORBIT_RUBY = savedRuby;
+      if (newDir) await fs.rm(newDir, { recursive: true, force: true });
+      await fs.rm(stubDir, { recursive: true, force: true });
+    }
+  }
+
   console.log('omp_native_gate_test: PASS');
 } catch (error) {
   console.error(error);

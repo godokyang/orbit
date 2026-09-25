@@ -526,6 +526,28 @@ export function installOmpExtension(pi, sdk) {
     statusBoundTasks.set(sessionId, best.taskDir);
     return best;
   }
+  // Re-derive the per-session status line from the durable record. Shared by
+  // the per-turn hook and the orbit tool: a task started (or changed) by a tool
+  // call must be reflected in THIS turn, not only at the next user turn
+  // (Zeen 2026-09-25: after a successful start the bar still read the previous
+  // paused task until the following turn). Display only — it never adjudicates
+  // completion, rebinds an unowned record, or overrides the checker. Returns
+  // null when there is no resolvable record, so callers can preserve their
+  // no-block behavior.
+  async function refreshStatus(ctx, sessionId) {
+    try {
+      const bound = await resolveBoundTask(sessionId, ctx?.cwd);
+      if (!bound) { applyStatus(ctx, undefined); return null; }
+      const owned = host ? await host.ownsTask(bound.taskDir, sessionId) : false;
+      const abandoned = runtimeAbandoned(bound.state);
+      if (!owned || abandoned) {
+        applyStatus(ctx, `Orbit：${owned ? '' : '未接管 · '}${phaseLabel(bound.state)}`);
+        return { bound, owned, abandoned };
+      }
+      applyStatus(ctx, `Orbit：${phaseLabel(bound.state)}`);
+      return { bound, owned, abandoned };
+    } catch { return null; }
+  }
   // Member read/stop operations must survive terminal task states: an
   // explicit stop retry after stop_unconfirmed (or a failed runtime) still
   // needs member_state/member_result/stop_member by durable id. Unlike the
@@ -1136,6 +1158,11 @@ export function installOmpExtension(pi, sdk) {
         const result = JSON.parse(text);
         if (typeof result.task_directory === 'string') taskDirs.set(entry.id, result.task_directory);
       } catch { /* non-JSON results carry no task binding */ }
+      // A successful start (or any state-changing action) must show its real
+      // status in THIS turn: the per-turn hook only refreshes at the next user
+      // turn. A failed/rejected call throws above and refreshes nothing, so it
+      // never presents a task that was not actually accepted.
+      await refreshStatus(ctx, entry.id);
       return { content: [{ type: 'text', text }], details: {} };
     }
   });
@@ -1210,29 +1237,24 @@ export function installOmpExtension(pi, sdk) {
     let sessionId = null;
     try { sessionId = ctx?.sessionManager?.getSessionId?.() ?? null; } catch { /* unowned */ }
     if (!sessionId || !isMainSession(sessionId)) return;
-    try {
-      const bound = await resolveBoundTask(sessionId, ctx.cwd);
-      if (!bound) { applyStatus(ctx, undefined); return; }
-      // Control requires BOTH this process owning the record's control socket
-      // AND a live recorded runtime. A record can read 'running' while its
-      // socket is stale (OMP restart) or its runtime_pid is dead (crash/
-      // abnormal exit). Only the both-true case gets execution guidance; the
-      // others get conservative cleanup/stop-retry text. Never rebind the old
-      // task; continuing means a new orbit start.
-      const owned = host ? await host.ownsTask(bound.taskDir, sessionId) : false;
-      const abandoned = runtimeAbandoned(bound.state);
-      if (!owned || abandoned) {
-        applyStatus(ctx, `Orbit：${owned ? '' : '未接管 · '}${phaseLabel(bound.state)}`);
-        if (!activeState(bound.state)) return;
-        const block = owned && abandoned
-          ? abandonedBlock(bound.state, bound.taskDir)
-          : unownedBlock(bound.state, bound.taskDir);
-        return { systemPrompt: withStatusBlock(event?.systemPrompt, block) };
-      }
-      applyStatus(ctx, `Orbit：${phaseLabel(bound.state)}`);
+    // Control requires BOTH this process owning the record's control socket
+    // AND a live recorded runtime. A record can read 'running' while its
+    // socket is stale (OMP restart) or its runtime_pid is dead (crash/
+    // abnormal exit). Only the both-true case gets execution guidance; the
+    // others get conservative cleanup/stop-retry text. Never rebind the old
+    // task; continuing means a new orbit start.
+    const resolved = await refreshStatus(ctx, sessionId);
+    if (!resolved) return;
+    const { bound, owned, abandoned } = resolved;
+    if (!owned || abandoned) {
       if (!activeState(bound.state)) return;
-      return { systemPrompt: withStatusBlock(event?.systemPrompt, statusBlock(bound.state)) };
-    } catch { return; }
+      const block = owned && abandoned
+        ? abandonedBlock(bound.state, bound.taskDir)
+        : unownedBlock(bound.state, bound.taskDir);
+      return { systemPrompt: withStatusBlock(event?.systemPrompt, block) };
+    }
+    if (!activeState(bound.state)) return;
+    return { systemPrompt: withStatusBlock(event?.systemPrompt, statusBlock(bound.state)) };
   });
   pi.on('session_start', (_event, ctx) => {
     // Re-bound child runtimes also fire session_start (OMP re-binds factories
