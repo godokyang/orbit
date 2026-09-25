@@ -1,6 +1,6 @@
 # Orbit OMP 接入修复验收记录（2026-09-25）
 
-来源：过程诊断与实施复盘 [Zeen 页面走查任务中的 Orbit 流程](zeen-page-capture-orbit-process-review-20260925.md)（长期保留）。本文只记录隔离 `orbit omp` 真实验收事实，不改变产品语义，不把历史 Zeen 任务判为 `complete`。**所有隔离任务已停止**，最终状态以各任务 `state.json` 为准；本文不把 Root 自述当作机器事实，自述处均标注来源。事件时间均为 UTC；目录 mtime 为本机时间（UTC+8）。**本记录的三套安装均为 `0.7.1` 构建；当前源码已升至 `0.7.2`（`package.json` 与 `npm-shrinkwrap.json`），本机尚未安装 0.7.2、也未对 0.7.2 做真实验收。因此本文是 0.7.1 的历史验收证据，不代表 0.7.2 已验收或已安装。**
+来源：过程诊断与实施复盘 [Zeen 页面走查任务中的 Orbit 流程](zeen-page-capture-orbit-process-review-20260925.md)（长期保留）。本文只记录隔离 `orbit omp` 真实验收事实，不改变产品语义，不把历史 Zeen 任务判为 `complete`。**所有隔离任务已停止**，最终状态以各任务 `state.json` 为准；本文不把 Root 自述当作机器事实，自述处均标注来源。事件时间均为 UTC；目录 mtime 为本机时间（UTC+8）。**本记录的三套安装均为 `0.7.1` 构建，是 0.7.1 的历史验收证据。当前源码与安装均已为 `0.7.2`（首个源码提交 `9bb24735dd797b621f5b1b1dff983348d5110a67`，release `636cef887383e5f2f818a6c3`，`content_digest 5812d5cdf71f070a135de512d22780ccb4f8717f31806bda4670ae9e85ce4cbe`，`installed_at 2026-09-25T15:59:42Z`）；0.7.2 未另跑真实模型任务，因此本文的十个真实任务结论不替代 0.7.2 的独立真实模型验收。**
 
 ## 安装构建 digest
 
@@ -14,7 +14,7 @@
 
 - 共同项（三套安装均为 `0.7.1` 构建）：版本 `0.7.1`；source commit `1cee2166654cce28b3f961223330ee9c4c3a0478`（`dirty: true`）；入口 `~/.local/bin/orbit` → `~/.local/share/orbit/orbit/current`；OMP `18.2.8`（`lib/orbit/omp_entry.rb` `PINNED_OMP_VERSION`）。
 - 三套 digest 各不相同：旧→中间，最新代码审核修改了**完成拒绝的判定优先级**与**三个原因码的下一动作**（`lib/orbit/task_runtime.rb` 的 `completion_gate` 顺序与 `COMPLETION_NEXT_ACTIONS`）；中间→最终，只改了根 `README.md`“当前范围与文档”段落的文案（`git diff --stat README.md`：1 行增/1 行删，**未改代码**），随后 `sh install.sh` 重装为 `e0e1e336…`。当时 `orbit version --json` 返回 `version 0.7.1`、`content_digest e0e1e336…`、`installed_at 2026-09-25T15:34:53Z`（该命令**不返回 release 字段**）；release id `d4f7194c…` 取自 `.orbit-release.json` 所在的 release 目录名。
-- **第 1–8 个任务运行在旧 build 上，不对应当前 0.7.2 源码**：旧 build 在安装时与当时工作区一致，但工作区此后有多次代码改动（含后续的 0.7.2 版本提升），因此**不能说它与当前 0.7.2 源码逐字节相同**。第 9 个 `final_gate` 回归的是中间 build `417a0ff4…`；第 10 个 `final2` 回归的是**本次验收最终 build `e0e1e336…`**。
+- **第 1–8 个任务运行在旧 build 上，不对应当前 0.7.2 源码（`9bb24735…`）**：旧 build 在安装时与当时工作区一致，但工作区此后有多次代码改动（含后续的 0.7.2 版本提升），因此**不能说它与当前 0.7.2 源码逐字节相同**。第 9 个 `final_gate` 回归的是中间 build `417a0ff4…`；第 10 个 `final2` 回归的是**本次验收最终 build `e0e1e336…`**。
 - 三套 build 的 source commit 相同（`1cee216…`，`dirty: true`），差异来自工作区未提交改动，**不能以 commit 区分三套 build**。
 
 ## 验收环境与记录位置
