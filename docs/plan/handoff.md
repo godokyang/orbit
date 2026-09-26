@@ -1,6 +1,6 @@
 # Orbit 当前交接
 
-## 最新状态（源码 0.7.6，2026-09-27）
+## 最新状态（源码 0.7.7，仅补丁版本递增；功能来自 0.7.6，2026-09-27）
 
 - **入口缺证据的启动死结已在源码修复，尚未安装到既有 OMP 会话。** 候选池与缓存事实无同标识匹配时，错误列出当前会话可选候选；已核对的 `messages` 与 `openai-codex` Responses 请求会在当前模型请求收到失败原因、原生消息 ID 与仅用于恢复的动作，不再先 `abort` 掉 Root 回合。Root 可以先用 `orbit model-evidence --file FILE|-` 在无任务目录时提交真实来源事实，再对原消息显式 `start`；无证据或 JEV 不过线仍不自动选模。显式检查模型的首次 `start` 在建任务前探测隔离目录及凭据，不可解析则不创建任务。无法安全识别的请求体仍通知并中止，见[限制](debt-ledger.md)。
 - **本轮验证边界：**`npm test` 通过（含新入口恢复、无任务证据缓存与显式检查模型预检）；入口在包含 assistant 工具回合后的重复请求又运行聚焦回归并通过。隔离缓存下实际源码 CLI 无任务提交返回 `status=cached`，缓存含提交的测试身份后已删除临时目录。OMP 18.3.2 二进制的 Responses onPayload 接缝由源码/二进制核对，当前工作区的新扩展尚未在真实 `orbit omp` 会话中完成模型驱动验收，不能说隔壁旧会话已修复；尚未安装当前源码。核心语义见[合同](../../contracts/task-runtime.md)、[ADR-008](../adr/008-omp-native-collaboration-base.md)、[ADR-009](../adr/009-user-selected-model-pool.md)。
