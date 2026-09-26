@@ -123,7 +123,9 @@ orbit model-candidates list       # 终端查看候选池
 
 ## 当前范围与文档
 
-本仓源码版本为 **0.7.3**（由 0.7.2 升 patch，含两处 bugfix：OMP 会话内成功 `start` 后同回合刷新任务状态栏；JEV 摘要 UTF-8 截断导致的序列化失败）。`orbit omp`、原生执行成员与独立 OMP 检查者的端到端真实验收在 **0.7.1** 上取得：其前的 **0.6.18** 是历史验收安装，ADR-009 选模真实验收在临时隔离安装的 **0.7.0** release 上取得（见[候选模型池真实验收](docs/reference/model-pool-acceptance-20260925.md)）。0.7.1 的隔离真实任务中，第九个 `final_gate` 跑在中间构建上、第十个 `final2` 跑在最终 0.7.1 构建上，两者均 `complete` 并确认停止；完成硬门、显式暂停、原生 Esc 中断与检查纠偏收尾已有真实证据，`delegation_hint` 派发正样本留作后续独立目标（`parallel` 为 `root_without_hint`，不标通过）。**0.7.2** 的 Zeen UI 任务在启动后出现 JEV 序列化故障并确认暂停，未取得该版本的完整真实模型验收。**0.7.3** 的两处修复属源码与确定性验证（完整 `npm test`、打包与 diff check），不声称已通过真实模型验收。安装或更新到本版本用 `sh install.sh`，安装选项与维护见[进阶使用参考](docs/reference/usage-reference.md)。验收事实与保留边界见 [Orbit OMP 接入验收记录](docs/reference/orbit-omp-access-acceptance-20260925.md)，历史证据见[验收证据](docs/reference/omp-native-m4-acceptance-20260924.md)。
+本仓源码版本为 **0.7.7**（由 0.7.6 递增补丁号）；本机日常安装版仍为 0.7.5，尚未安装当前源码。任务证据导出与入口恢复的实现及验收边界见[当前交接](docs/plan/handoff.md)。
+
+历史：**0.7.3** 由 0.7.2 升 patch，含两处 bugfix：OMP 会话内成功 `start` 后同回合刷新任务状态栏；JEV 摘要 UTF-8 截断导致的序列化失败。`orbit omp`、原生执行成员与独立 OMP 检查者的端到端真实验收在 **0.7.1** 上取得：其前的 **0.6.18** 是历史验收安装，ADR-009 选模真实验收在临时隔离安装的 **0.7.0** release 上取得（见[候选模型池真实验收](docs/reference/model-pool-acceptance-20260925.md)）。0.7.1 的隔离真实任务中，第九个 `final_gate` 跑在中间构建上、第十个 `final2` 跑在最终 0.7.1 构建上，两者均 `complete` 并确认停止；完成硬门、显式暂停、原生 Esc 中断与检查纠偏收尾已有真实证据，`delegation_hint` 派发正样本留作后续独立目标（`parallel` 为 `root_without_hint`，不标通过）。**0.7.2** 的 Zeen UI 任务在启动后出现 JEV 序列化故障并确认暂停，未取得该版本的完整真实模型验收。**0.7.3** 的两处修复属源码与确定性验证（完整 `npm test`、打包与 diff check），不声称已通过真实模型验收。安装或更新 Orbit 使用 `sh install.sh`，安装选项与维护见[进阶使用参考](docs/reference/usage-reference.md)。验收事实与保留边界见 [Orbit OMP 接入验收记录](docs/reference/orbit-omp-access-acceptance-20260925.md)，历史证据见[验收证据](docs/reference/omp-native-m4-acceptance-20260924.md)。
 
 - [进阶使用参考](docs/reference/usage-reference.md)：安装选项、Jev、CLI 与维护。
 - [任务运行合同](contracts/task-runtime.md)与[设计决定](docs/adr/008-omp-native-collaboration-base.md)：角色、检查和停止语义。
