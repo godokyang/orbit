@@ -112,7 +112,7 @@ module CheckerModelSelectorTest
 
   def explicit_outside_pool_is_used_with_a_notice_and_no_judgment
     advisor = FakeAdvisor.new({})
-    probe = FakeProbe.new([])
+    probe = FakeProbe.new(["openai/gpt-x"])
     model, selection = silence do
       selector(pool: ["a/one"], catalog: nil, entries: [], advisor: advisor, probe: probe)
         .select(explicit: "openai/gpt-x", instruction: "build it")
@@ -121,7 +121,20 @@ module CheckerModelSelectorTest
     assert(selection["source"] == "explicit" && selection["in_pool"] == false,
            "an outside-pool explicit model is recorded as such")
     assert(selection["notice"].to_s.include?("outside the candidate pool"), "the notice is recorded")
-    assert(advisor.calls.zero? && probe.calls.zero?, "no JEV or probe runs for an explicit model")
+    assert(advisor.calls.zero? && probe.calls == 1 && probe.models == ["openai/gpt-x"],
+           "an explicit start probes the isolated checker without calling JEV")
+  end
+
+  def explicit_model_missing_from_isolated_catalog_is_rejected
+    advisor = FakeAdvisor.new({})
+    probe = FakeProbe.new([])
+    error = assert_raises do
+      selector(pool: ["a/one"], catalog: nil, entries: [], advisor: advisor, probe: probe)
+        .select(explicit: "openai/gpt-x", instruction: "build it")
+    end
+    assert(error.message.include?("unavailable") && probe.models == ["openai/gpt-x"],
+           "a model absent from the isolated checker fails before task creation")
+    assert(advisor.calls.zero?, "an explicit selection never calls JEV")
   end
 
   def empty_pool_keeps_the_session_default
@@ -174,13 +187,16 @@ module CheckerModelSelectorTest
   end
 
   def no_valid_evidence_is_undecided_not_a_silent_default
+    advisor = FakeAdvisor.new({})
     error = assert_raises do
       selector(pool: ["a/one"], catalog: catalog_for(["a/one"]), entries: [],
-               advisor: FakeAdvisor.new({}), probe: FakeProbe.new(["a/one"]))
+               advisor: advisor, probe: FakeProbe.new(["a/one"]))
         .select(explicit: nil, instruction: "build it")
     end
-    assert(error.message.include?("valid cached quality evidence"), "the missing-evidence reason is named")
-    assert(error.message.include?("--review-model"), "the explicit-model instruction is appended")
+    assert(error.message.include?("valid cached quality evidence") && error.message.include?("a/one"),
+           "the missing-evidence reason names the model that Root can investigate")
+    assert(error.message.include?("--review-model") && advisor.calls.zero?,
+           "JEV is not called without evidence; an explicit model remains available")
   end
 
   def catalog_for(available)
@@ -191,6 +207,7 @@ module CheckerModelSelectorTest
 
   def main
     %w[explicit_outside_pool_is_used_with_a_notice_and_no_judgment
+       explicit_model_missing_from_isolated_catalog_is_rejected
        empty_pool_keeps_the_session_default
        unchanged_input_reuses_the_recorded_decision
        changed_pool_reselects_before_the_next_check

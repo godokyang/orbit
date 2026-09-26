@@ -1,6 +1,14 @@
 # Orbit 当前交接
 
-## 当前状态（源码 0.7.4、本机 `orbit --version` 为 0.7.4，2026-09-26）
+## 最新状态（源码 0.7.6，2026-09-27）
+
+- **入口缺证据的启动死结已在源码修复，尚未安装到既有 OMP 会话。** 候选池与缓存事实无同标识匹配时，错误列出当前会话可选候选；已核对的 `messages` 与 `openai-codex` Responses 请求会在当前模型请求收到失败原因、原生消息 ID 与仅用于恢复的动作，不再先 `abort` 掉 Root 回合。Root 可以先用 `orbit model-evidence --file FILE|-` 在无任务目录时提交真实来源事实，再对原消息显式 `start`；无证据或 JEV 不过线仍不自动选模。显式检查模型的首次 `start` 在建任务前探测隔离目录及凭据，不可解析则不创建任务。无法安全识别的请求体仍通知并中止，见[限制](debt-ledger.md)。
+- **本轮验证边界：**`npm test` 通过（含新入口恢复、无任务证据缓存与显式检查模型预检）；入口在包含 assistant 工具回合后的重复请求又运行聚焦回归并通过。隔离缓存下实际源码 CLI 无任务提交返回 `status=cached`，缓存含提交的测试身份后已删除临时目录。OMP 18.3.2 二进制的 Responses onPayload 接缝由源码/二进制核对，当前工作区的新扩展尚未在真实 `orbit omp` 会话中完成模型驱动验收，不能说隔壁旧会话已修复；尚未安装当前源码。核心语义见[合同](../../contracts/task-runtime.md)、[ADR-008](../adr/008-omp-native-collaboration-base.md)、[ADR-009](../adr/009-user-selected-model-pool.md)。
+
+- **任务证据与主动导出已在源码接线，尚未安装本次改动。** `.orbit/tasks/<id>/collaboration.jsonl` 在原生事件发生时记录可归属的派发输入、模型身份、`task/hub` 通信及缺口；`events.jsonl` 关联检查、finding、纠偏 ID 和产物版本。`orbit export TASK --output FILE` 生成本地单任务 tar.gz，含事实时间线、检查快照、可安全定位的 OMP 会话片段、文件摘要与缺失清单；运行中只代表导出时刻，不上传、不调用模型、不改变完成门。见[合同](../../contracts/task-runtime.md#本地任务证据与主动导出)、[ADR-008 增补](../adr/008-omp-native-collaboration-base.md)及[实施记录](../reference/task-evidence-export-20260926.md)。
+- **已观察验证：**源码 CLI 已对运行中任务实际导出归档并读取 `manifest.json`/`timeline.jsonl`；其源会话使用安装版旧扩展，协作日志缺失在清单中标记，不能宣称新扩展已有真实 OMP 会话验收。最终 `npm test`（含新插件专项）通过；`npm pack --dry-run --json` 通过且含 52 文件，`git diff --check` 通过。已安装 `orbit --version` 为 0.7.5，但不含当前工作区修改；以下 0.7.4 与更早段落是历史快照。
+
+## 历史快照（源码 0.7.4、本机 `orbit --version` 当时为 0.7.4，2026-09-26）
 
 - **本次授权的 OMP 接入回路与模型选择方案已落地于源码，尚未安装本次改动：**`before_provider_request` 以原生用户消息 ID 在 Root 首个模型请求前判定入口；明确受控请求自动建任务、明确讨论不建任务，不确定或 Jev 不可用留给 Root。`JudgmentRequest`／`JudgmentResult`、TypeSafe 适配器与入口校准已接入；任务内判断记录 provider／实际模型／问题集版本与用量。原生 Ask 跳过有一次恢复提醒，重复开放 finding 有行动升级，`stop_unconfirmed` 有诊断及显式重试；`/orbit-models` 现为 TUI 搜索多选和一次原子保存。隔离 OMP 18.3.2 已真实观察 TUI 多选/取消、明确受控请求建任务和只读讨论不建任务；短 `--print` 任务退出为 `paused` 且停止已确认，不视作完整交付。Root Ask 跳过与 Jev 自动启动正例本轮未在真实宿主重现，确定性回归覆盖。证据边界见[方案](orbit-omp-flow-and-model-picker-proposal-20260926.md)、[合同](../../contracts/task-runtime.md)、[ADR-008](../adr/008-omp-native-collaboration-base.md)及 [ADR-009](../adr/009-user-selected-model-pool.md)。后续旧安装号与 M4 样本段落是历史快照，不能当作本机当前安装记录。
 

@@ -132,6 +132,9 @@ module Orbit
           @artifact_digest = @initial_digest
           @state["status"] = "running"
           @state["runtime_pid"] = Process.pid
+          if host["session_file"].is_a?(String) && !host["session_file"].empty?
+            @state["root_session_file"] = host["session_file"]
+          end
           @record.event("attached", "thread_id" => host.fetch("thread_id"))
           if @state.delete("needs_initial_delivery")
             sent = @connection.send_message("Orbit task: execute the following user-provided original instruction.\n\n" + @record.inputs(@state).fetch("instruction"))
@@ -313,6 +316,13 @@ module Orbit
       end
 
       host = @connection.state
+      if host["session_file"].is_a?(String) && !host["session_file"].empty? &&
+         @state["root_session_file"] != host["session_file"]
+        @state["root_session_file"] = host["session_file"]
+        @record.event("root_session_located", "thread_id" => host["thread_id"],
+                      "session_file" => host["session_file"])
+        save
+      end
       if host["interrupted"] || (host["status"] == "idle" && host["last_turn_status"] == "interrupted")
         stop("The user interrupted the Root turn")
         return
@@ -374,7 +384,9 @@ module Orbit
                  pending["input_digest"] != @record.input_digest(@state))
         if stale
           @state.delete("pending_correction")
-          @record.event("correction_redelivery_stale", "check" => pending["check"])
+          @record.event("correction_redelivery_stale", "check" => pending["check"],
+                        "finding_ids" => pending["finding_ids"], "artifact_digest" => pending["artifact_digest"],
+                        "input_digest" => pending["input_digest"])
           save
         else
           deliver_correction_text(pending.fetch("text"), pending)
@@ -751,7 +763,8 @@ module Orbit
         end
         @state["members"] << member
         @record.event("native_member_reconciled", "thread_id" => id, "status" => member["status"],
-                      "basis" => member["delegation_basis"])
+                      "requested_name" => member["requested_name"], "tool_call_id" => member["tool_call_id"],
+                      "model" => member["model"], "basis" => member["delegation_basis"])
         changed = true if absorb_member_model_drift(member, drift)
       end
       save if changed
@@ -1827,7 +1840,8 @@ module Orbit
       # or record a success delivery.
       return false if member["model_drift"]
 
-      previous = member.slice("model", "result", "output_path", "registry_status", "accepted_at", "status", "result_delivery")
+      previous = member.slice("model", "result", "output_path", "session_file",
+                              "registry_status", "accepted_at", "status", "result_delivery")
       previous_status = member["status"]
       previous_accepted = member["accepted_at"]
       member["registry_status"] = registry_status if registry_status.is_a?(String) && !registry_status.empty?
@@ -1840,6 +1854,9 @@ module Orbit
         copy_output_path(member, result["output_path"])
       end
       copy_output_path(member, observed["output_path"]) if observed.is_a?(Hash)
+      if observed.is_a?(Hash) && observed["session_file"].is_a?(String) && !observed["session_file"].empty?
+        member["session_file"] = observed["session_file"]
+      end
       if member["registry_status"] == "aborted"
         member["status"] = "failed"
       elsif native_result_accepted?(member, observed)
@@ -1853,7 +1870,7 @@ module Orbit
                       "status" => member["status"], "delivery" => "native_task",
                       "accepted_at" => member["accepted_at"])
       end
-      %w[model result output_path registry_status accepted_at status result_delivery].any? { |key| member[key] != previous[key] }
+      %w[model result output_path session_file registry_status accepted_at status result_delivery].any? { |key| member[key] != previous[key] }
     end
 
     # acceptedAt is stamped only when the driver accepts the run. A later
@@ -2094,7 +2111,10 @@ module Orbit
       }
       @last_full_check_digest = snapshot.fetch("digest") if kind == "artifact"
       @state.delete("observation_pending")
-      @record.event("check_started", "number" => number, "role" => role, "digest" => snapshot.fetch("digest"))
+      @record.event("check_started", "number" => number, "role" => role, "kind" => kind,
+                    "trigger" => trigger, "manual" => manual, "model" => @state.dig("review", "model"),
+                    "artifact_root" => artifact_root, "artifact_digest" => snapshot.fetch("digest"),
+                    "input_digest" => scope["input_digest"])
       save
       true
     end
@@ -2304,7 +2324,10 @@ module Orbit
         observation["finished_at"] = Time.at(now).utc.iso8601
       end
       @record.event("check_finished", "number" => scope["number"], "stale" => stale,
-                    "stale_reasons" => stale_reasons, "verdict" => result.fetch("verdict"))
+                    "stale_reasons" => stale_reasons, "verdict" => result.fetch("verdict"),
+                    "reason" => result.fetch("reason"), "finding_ids" => result.fetch("findings").map { |finding| finding.fetch("id") },
+                    "resolved_ids" => result.fetch("resolved_ids"), "artifact_digest" => scope.dig("snapshot", "digest"),
+                    "input_digest" => scope["input_digest"])
       if scope["kind"] == "artifact"
         if host["status"] == "idle"
           schedule_check(now + result.fetch("next_check_seconds"), "检查者建议的下次观察",
@@ -2371,6 +2394,9 @@ module Orbit
         finding["resolution_root"] = scope["artifact_root"]
         finding["resolution_version"] = current_digest
         finding["resolution_input"] = scope["input_digest"]
+        @record.event("finding_resolved", "id" => id, "check" => scope["number"],
+                      "reason" => result.fetch("reason"), "artifact_digest" => current_digest,
+                      "input_digest" => scope["input_digest"])
       end
       accepted_findings = []
       result.fetch("findings").each do |finding|
@@ -2411,6 +2437,8 @@ module Orbit
           "current_reports" => 1
         )
         accepted_findings << finding
+        @record.event("finding_recorded", "check" => scope["number"], "finding" => finding,
+                      "artifact_digest" => current_digest, "input_digest" => scope["input_digest"])
       end
       notify_finalization_ready(scope, result, host, current_digest, now)
       if scope["role"] == "adjudicator"
@@ -2569,7 +2597,8 @@ module Orbit
       lines << "请当前助手按原要求处理后重新检查；若检查结论有误，用 Orbit dispute 提交具体反证。"
       text = lines.join("\n")
       deliver_correction_text(text,
-                              "check" => scope["number"], "artifact_root" => scope["artifact_root"],
+                              "check" => scope["number"], "finding_ids" => findings.map { |finding| finding.fetch("id") },
+                              "artifact_root" => scope["artifact_root"],
                               "artifact_digest" => current_digest, "input_digest" => scope["input_digest"])
     end
 
@@ -2582,10 +2611,10 @@ module Orbit
       sent = @connection.send_message(text)
       @state["sent_message_ids"] << sent.fetch("id")
       @state.delete("pending_correction")
-      @record.event("correction_sent", "id" => sent.fetch("id"))
+      @record.event("correction_sent", { "id" => sent.fetch("id") }.merge(versions || {}))
     rescue Connection::Error => error
       @state["pending_correction"] = (versions || {}).merge("text" => text)
-      @record.event("correction_delivery_failed", "error" => error.message)
+      @record.event("correction_delivery_failed", { "error" => error.message }.merge(versions || {}))
       save
     end
 

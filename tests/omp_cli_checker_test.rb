@@ -41,6 +41,17 @@ module OmpCliCheckerTest
     Orbit::Connection.define_singleton_method(:open, original_open)
   end
 
+  def with_probe(resolvable: true)
+    original = Orbit::OmpCheckRunner.method(:probe_models)
+    Orbit::OmpCheckRunner.define_singleton_method(:probe_models) do |models:, **_kwargs|
+      { "resolvable" => resolvable ? models : [],
+        "unresolvable" => resolvable ? [] : models.map { |model| { "model" => model, "reason" => "model not in isolated catalog" } } }
+    end
+    yield
+  ensure
+    Orbit::OmpCheckRunner.define_singleton_method(:probe_models, original)
+  end
+
   def start_omp(project, prompt, env: {}, review_model: nil)
     argv = ["start", "--provider", "omp", "--project", project, "--thread", "root-session",
             "--socket", File.join(project, "unused.sock"), "--prompt-file", prompt, "--foreground"]
@@ -83,8 +94,8 @@ module OmpCliCheckerTest
       File.write(prompt, "Implement sum.\n")
       marker = File.join(tmp, "checker-class.txt")
       connection = fake_connection(File.realpath(project), "other-provider/other-model")
-      status = with_stubs(connection, marker) do
-        start_omp(project, prompt, review_model: "zhipu-coding-plan/glm-5.2")
+      status = with_probe do
+        with_stubs(connection, marker) { start_omp(project, prompt, review_model: "zhipu-coding-plan/glm-5.2") }
       end
       assert(status == 0 && File.read(marker) == "Orbit::OmpCheckRunner", "an explicit model still uses the OMP checker")
       state = JSON.parse(File.read(Dir.glob(File.join(project, ".orbit/tasks/*/state.json")).fetch(0)))
@@ -103,7 +114,7 @@ module OmpCliCheckerTest
       previous = ENV["ORBIT_REVIEW_MODEL"]
       ENV["ORBIT_REVIEW_MODEL"] = "zhipu-coding-plan/glm-5.2"
       begin
-        status = with_stubs(connection, marker) { start_omp(project, prompt) }
+        status = with_probe { with_stubs(connection, marker) { start_omp(project, prompt) } }
         state = JSON.parse(File.read(Dir.glob(File.join(project, ".orbit/tasks/*/state.json")).fetch(0)))
         assert(status == 0 && state.dig("review", "model") == "zhipu-coding-plan/glm-5.2",
                "ORBIT_REVIEW_MODEL overrides the session model and still selects the OMP checker")
@@ -219,8 +230,8 @@ module OmpCliCheckerTest
                                "models" => ["pool/one"]))
       marker = File.join(tmp, "checker-class.txt")
       connection = fake_connection(File.realpath(project), "root/model")
-      status = with_stubs(connection, marker) do
-        start_omp(project, prompt, review_model: "zhipu-coding-plan/glm-5.2")
+      status = with_probe do
+        with_stubs(connection, marker) { start_omp(project, prompt, review_model: "zhipu-coding-plan/glm-5.2") }
       end
       state = JSON.parse(File.read(Dir.glob(File.join(project, ".orbit/tasks/*/state.json")).fetch(0)))
       assert(status == 0 && state.dig("review", "model") == "zhipu-coding-plan/glm-5.2",
@@ -228,6 +239,23 @@ module OmpCliCheckerTest
       assert(state.dig("review", "selection", "source") == "explicit" &&
              state.dig("review", "selection", "notice").to_s.include?("outside the candidate pool"),
              "the out-of-pool explicit choice is recorded with a notice")
+    end
+  end
+
+  def explicit_model_unavailable_in_isolated_profile_does_not_start
+    Dir.mktmpdir("orbit-omp-cli-") do |tmp|
+      project = File.join(tmp, "project")
+      FileUtils.mkdir_p(project)
+      prompt = File.join(tmp, "prompt.txt")
+      File.write(prompt, "Implement sum.\n")
+      connection = fake_connection(File.realpath(project), "root/model")
+      status = with_probe(resolvable: false) do
+        with_stubs(connection, File.join(tmp, "unused.txt")) do
+          start_omp(project, prompt, review_model: "openai-codex/gpt-6-sol")
+        end
+      end
+      assert(status == 1 && Dir.glob(File.join(project, ".orbit/tasks/*")).empty?,
+             "a model absent from the isolated checker cannot create a task")
     end
   end
 
@@ -250,6 +278,7 @@ module OmpCliCheckerTest
     environment_review_model_overrides_the_session_model
     a_nonempty_pool_requires_an_explicit_model
     explicit_model_overrides_a_nonempty_pool_and_is_allowed_outside_it
+    explicit_model_unavailable_in_isolated_profile_does_not_start
     candidate_pool_auto_selects_a_jev_qualified_model
     a_model_without_provider_does_not_start
     puts "PASS omp cli checker wiring"

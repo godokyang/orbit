@@ -10,6 +10,7 @@ require_relative "../lib/orbit/task_runtime"
 require_relative "../lib/orbit/omp_entry"
 require_relative "../lib/orbit/jev_advisor"
 require_relative "../lib/orbit/jev_setup"
+require_relative "../lib/orbit/model_evidence_cache"
 
 module CliTest
   ENTRY = File.expand_path("../scripts/orbit", __dir__)
@@ -538,6 +539,42 @@ module CliTest
     assert(stored.fetch("entries").length == 2, "rejected submissions leave the cache unchanged")
   end
 
+  # Bootstrap: model selection can block on an empty cache before any
+  # TaskRecord exists. The taskless form writes the same user cache the
+  # selector reads, an invalid batch leaves it byte-identical, and the
+  # task-bound mode keeps queueing against that same cache afterwards.
+  def model_evidence_taskless_submission_writes_cache_without_a_task
+    help = cli("model-evidence", "--help")
+    assert(help.include?("[TASK_DIRECTORY]") && help.include?('status "cached"'),
+           "the help documents the optional task directory and the cache-only status")
+
+    reply = JSON.parse(cli("model-evidence", "--file", "-", stdin_data: JSON.generate(evidence)))
+    assert(reply == { "status" => "cached", "count" => 1,
+                      "identities" => [{ "provider" => "opencode-go", "model" => "deepseek-v4.8", "reasoning" => "default",
+                                         "billing_route" => "unknown" }] },
+           "a taskless submission reports a cache-only write, not a queued command")
+    assert(JSON.parse(cli("status", "--json"))["tasks"].empty?, "no task record is manufactured")
+
+    cache = File.join(@temp, "orbit", "model-evidence-v1.json")
+    readable = Orbit::ModelEvidenceCache.new(env: { "XDG_CACHE_HOME" => @temp })
+    assert(readable.lookup(provider: "opencode-go", model: "deepseek-v4.8").dig("metrics", "output_tokens_per_second", "value") == 120.5,
+           "the selector's own read path finds the taskless fact inside its validity window")
+
+    before = File.read(cache)
+    invalid = cli("model-evidence", "--file", "-",
+                  stdin_data: JSON.generate(evidence("model" => "kimi-k3").merge("reason" => "not evidence")), success: false)
+    assert(invalid.include?("unsupported model evidence fields") && File.read(cache) == before,
+           "an invalid taskless batch is rejected and leaves the cache untouched")
+
+    record = task
+    queued = JSON.parse(cli("model-evidence", record.path, "--file", "-",
+                            stdin_data: JSON.generate(evidence("provider" => "openai", "model" => "gpt-6-astra"))))
+    command = JSON.parse(File.read(commands(record).fetch(0)))
+    assert(queued["status"] == "queued" && command["type"] == "model_evidence" &&
+           JSON.parse(File.read(cache)).fetch("entries").length == 2,
+           "the task-bound mode still queues against the same cache without dropping the taskless fact")
+  end
+
   # ADR-009: after a real auth/quota failure the task stays alive but blocked,
   # and only Root's explicit choice changes the next check model. The command
   # queues that choice, never auto-retries, and refuses a finished task.
@@ -763,6 +800,7 @@ module CliTest
        rebind_workspace_queues_and_legacy_status_reads_project_root
        model_evidence_caches_object_and_queues_dedicated_command
        model_evidence_accepts_array_and_rejects_invalid_or_terminal
+       model_evidence_taskless_submission_writes_cache_without_a_task
        review_model_queues_only_by_explicit_choice_and_status_shows_the_block
        status_separates_delegatable_score_from_final_decision
        model_candidates_bridge_round_trips_and_keeps_ids_with_slashes

@@ -1605,6 +1605,12 @@ fixture do |_root, record, host, checker, runtime|
   assert(record.state["pending_correction"].nil? &&
          File.read(File.join(record.path, "events.jsonl")).include?("correction_sent"),
          "the pending correction redelivers on the next idle observation")
+  sent = events(record).find { |event| event["type"] == "correction_sent" }
+  observed = events(record).find { |event| event["type"] == "finding_recorded" }
+  assert(sent["check"] == observed["check"] && sent["finding_ids"] == ["CHK-001"] &&
+         observed.dig("finding", "evidence") == "absent in artifact" &&
+         sent["artifact_digest"] == observed["artifact_digest"],
+         "a retried correction remains attributable to its original finding and artifact version")
 end
 
 # A version change after a failed delivery retires the pending correction: it

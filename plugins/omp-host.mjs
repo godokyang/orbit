@@ -81,6 +81,186 @@ function rememberAskArgs(event) {
   if (askCallArgs.size > ASK_CACHE_CAP) askCallArgs.delete(askCallArgs.keys().next().value);
 }
 
+// --- Durable task-local collaboration evidence (collaboration.jsonl) -------
+// The per-session collab buffer is bounded (COLLAB_CAP) and lives only as
+// long as the OMP process, so evidence observed before a TaskRuntime poll —
+// or beyond the buffer cap — was silently lost. Every ATTRIBUTED observation
+// is therefore also appended, at observation time, to
+// <task_dir>/collaboration.jsonl (mode 0600, same discipline as
+// TaskRecord's events.jsonl but a separate file: TaskRuntime appends to
+// events.jsonl on its own ticks, and two independent appenders must not
+// interleave in one file). MODULE scope, like the member maps above: OMP
+// re-binds the extension factory per child session, and the per-task
+// sequence plus one file handle per task must be shared process-wide or
+// re-bound closures would write competing counters into the same file.
+// The append is fire-and-forget and serialized per task: observation must
+// never block or fail native work. Write failures are never swallowed —
+// once writing recovers they surface as an explicit persistence_gap line
+// (and a bounded-buffer event) carrying the lost count and time window.
+const COLLAB_FILENAME = 'collaboration.jsonl';
+const COLLAB_BUFFER_TEXT_CAP = 2000;
+// Long string payloads stay full-length in the durable file (original
+// decision-relevant inputs/results) but keep the historical bounded shape
+// inside the in-process bridge buffer the TaskRuntime polls.
+const COLLAB_BOUNDED_FIELDS = ['message', 'text', 'task', 'context', 'prompt', 'description', 'question'];
+function boundedCollabEntry(entry) {
+  let copy = entry;
+  for (const field of COLLAB_BOUNDED_FIELDS) {
+    const value = copy[field];
+    if (typeof value === 'string' && value.length > COLLAB_BUFFER_TEXT_CAP) {
+      if (copy === entry) copy = { ...entry };
+      copy[field] = value.slice(0, COLLAB_BUFFER_TEXT_CAP);
+    }
+  }
+  return copy;
+}
+
+const collabWriters = new Map(); // task_dir -> { handle, queue, seq, lost }
+// Observations that could not be attributed to any task when they happened,
+// counted per session so the task that later binds that session can learn
+// how much pre-association traffic exists. The CONTENT is never written
+// anywhere: an unattributable event must not leak into any task's file.
+const unattributedBySession = new Map();
+const UNATTRIBUTED_SESSION_CAP = 512;
+// Last durably recorded model identity per task/role/agent, so a model that
+// does not change between provider requests is recorded once, not per
+// request. Actual resolved identity stays authoritative in members.json and
+// the runtime; these are observations only.
+const modelIdentitySeen = new Map();
+
+function collabWriterFor(taskDir) {
+  let writer = collabWriters.get(taskDir);
+  if (!writer) {
+    writer = { handle: null, queue: Promise.resolve(), seq: 0, lost: null, prepared: false };
+    collabWriters.set(taskDir, writer);
+  }
+  return writer;
+}
+
+async function collabWriteLine(writer, taskDir, line) {
+  if (!writer.handle) {
+    writer.handle = await fs.open(path.join(taskDir, COLLAB_FILENAME), 'a', 0o600);
+    // 0600 governs creation only; normalize a pre-existing file too.
+    await writer.handle.chmod(0o600);
+  }
+  await writer.handle.writeFile(JSON.stringify(line) + '\n');
+}
+
+// First-touch preparation for a task's evidence file. The per-task sequence
+// must stay monotonic across an OMP restart/resume on the same task
+// directory: resume from the LAST parseable sequenced line instead of
+// restarting at 0. A crash can leave a partial trailing line or malformed
+// region; it is surfaced as an explicit persistence_gap episode (reusing
+// the drain's gap machinery) and left intact — never overwritten, never
+// silently assumed zero.
+async function collabPrepare(writer, taskDir) {
+  writer.prepared = false;
+  const file = path.join(taskDir, COLLAB_FILENAME);
+  let raw;
+  try { raw = await fs.readFile(file, 'utf8'); }
+  catch (error) {
+    if (error?.code === 'ENOENT') { writer.prepared = true; return; } // no file yet
+    throw error; // surfaced as a persistence gap by the drain error path
+  }
+  const partial = raw.length > 0 && !raw.endsWith('\n');
+  const physical = (partial ? raw + '\n' : raw).split('\n');
+  if (physical.at(-1) === '') physical.pop();
+  let lastSeq = null;
+  let skipped = 0;
+  for (let index = physical.length - 1; index >= 0; index--) {
+    let parsed = null;
+    try { parsed = JSON.parse(physical[index]); } catch { parsed = null; }
+    if (parsed && typeof parsed === 'object' && Number.isInteger(parsed.seq)) { lastSeq = parsed.seq; break; }
+    skipped += 1;
+  }
+  if (lastSeq !== null) writer.seq = lastSeq;
+  if (partial || skipped > 0) {
+    writer.lost = writer.lost ?? { count: skipped, first_at: Date.now(), last_at: Date.now(),
+      reason: lastSeq === null
+        ? `existing ${COLLAB_FILENAME} has no parseable sequenced line; numbering restarted at 0 with ${skipped} unparseable line(s) left intact`
+        : `${skipped} malformed/partial line(s) skipped while resuming the durable sequence after a restart; they were left intact` };
+  }
+  // Open the handle here so a partial trailing fragment is terminated
+  // BEFORE any appended line can merge into it.
+  if (writer.handle) await writer.handle.close();
+  writer.handle = null;
+  writer.handle = await fs.open(file, 'a', 0o600);
+  await writer.handle.chmod(0o600);
+  if (partial) await writer.handle.write('\n');
+  writer.prepared = true;
+}
+
+// The gap line documents a loss EPISODE: how many observations, over what
+// time range, and the exact failure. Sequence numbers are committed only
+// when a line lands, so a lost observation consumes no sequence and the
+// persisted numbering is contiguous by construction — the gap line is the
+// explicit marker, never a silent hole.
+function collabGapLine(lost, taskDir, atMs, seq) {
+  return { seq, at: new Date(atMs).toISOString(), at_ms: atMs,
+    kind: 'persistence_gap', task_dir: taskDir, session_id: null, agent_id: null,
+    lost_count: lost.count,
+    first_lost_at: new Date(lost.first_at).toISOString(), last_lost_at: new Date(lost.last_at).toISOString(),
+    reason: lost.reason };
+}
+
+// One serialized drain turn: recover any pending loss episode with a gap
+// line, then append the observation. `onGap` runs at most once per episode
+// (the transition into a lost state) so a persistently broken sink cannot
+// loop; the callback must not itself persist, or a failing mirror would
+// recurse. The queue chain never rejects.
+async function drainCollab(writer, taskDir, line, onGap) {
+  try {
+    if (!writer.prepared) await collabPrepare(writer, taskDir);
+    if (writer.lost) {
+      const gapSeq = writer.seq + 1;
+      await collabWriteLine(writer, taskDir, collabGapLine(writer.lost, taskDir, Date.now(), gapSeq));
+      writer.seq = gapSeq;
+      writer.lost = null;
+    }
+    line.seq = writer.seq + 1;
+    await collabWriteLine(writer, taskDir, line);
+    writer.seq = line.seq;
+  } catch (error) {
+    const reason = `collaboration.jsonl append failed: ${String(error?.message || error).slice(0, 200)}`;
+    if (writer.lost) {
+      writer.lost.count += 1;
+      writer.lost.last_at = Date.now();
+      writer.lost.reason = reason;
+    } else {
+      writer.lost = { count: 1, first_at: Date.now(), last_at: Date.now(), reason };
+      try { onGap?.(writer.lost, taskDir); } catch { /* the mirror must not break the chain */ }
+    }
+  }
+}
+
+// Fire-and-forget durable append.
+function persistCollabLine(taskDir, line, onGap) {
+  const writer = collabWriterFor(taskDir);
+  writer.queue = writer.queue.then(() => drainCollab(writer, taskDir, line, onGap));
+}
+
+// Process-level shutdown only (never on child dispose or session switch):
+// flush the queue, make one last attempt at recording an unresolved loss
+// episode, and close the handles.
+async function closeCollabWriters() {
+  await Promise.allSettled([...collabWriters.entries()].map(async ([taskDir, writer]) => {
+    await writer.queue.catch(() => {});
+    if (!writer.prepared) {
+      try { await collabPrepare(writer, taskDir); } catch { /* the gap attempt below surfaces it */ }
+    }
+    if (writer.lost) {
+      try {
+        const gapSeq = writer.seq + 1;
+        await collabWriteLine(writer, taskDir, collabGapLine(writer.lost, taskDir, Date.now(), gapSeq));
+        writer.seq = gapSeq;
+        writer.lost = null;
+      } catch { /* left to the exporter's missing-evidence reconciliation */ }
+    }
+    try { await writer.handle?.close(); } catch { /* best effort */ }
+    writer.handle = null;
+  }));
+}
+
 // --- ADR-009 keyboard multi-select picker (proposal B, 2026-09-26) --------
 // Pure component over ctx.ui.custom(): no OMP imports, no IO. The extension
 // command supplies entries (session-available first, pooled-but-unavailable
@@ -257,6 +437,120 @@ export function createModelPicker({ entries, snapshot, commit, done, listRows = 
   return { render, handleInput, dispose() { closed = true; }, debugId: 'orbit-model-picker' };
 }
 
+// --- Automatic-entry failure: current-turn recovery instruction -----------
+// The automatic entry path below can fail before any TaskRecord exists — the
+// live case is the ADR-009 checker selector failing closed when no candidate
+// pool model has valid cached quality evidence. The historical response
+// (notify + deliverAs:'aside' + ctx.abort()) trapped Root: verified against
+// installed omp/18.3.2, an aside sent while the session is streaming is only
+// QUEUED for a later turn (session sendCustomMessage -> queueAside), and
+// ctx.abort() cancels the in-flight provider request — so the turn that
+// needed the instruction died before ever seeing it, no task existed, the
+// same message was never reclassified (prestartSeen), and Root had no
+// permitted next action. The one seam PROVEN to reach the current model
+// request is this hook's RETURN VALUE: the agent runtime wires
+// before_provider_request as the provider `onPayload` filter and its return
+// value replaces the request body actually sent (emitBeforeProviderRequest
+// `if (u !== undefined) n = u`; the anthropic, openai-completions,
+// bedrock-converse and openai-codex Responses paths — both its websocket
+// `response.create` send and the SSE fallback — all honor it). So on failure
+// the recovery instruction is appended to the request's trailing user
+// content and the turn is NOT aborted: Root reads the failure, its exact
+// reason and the approved recovery flow in THIS request. The injection is
+// payload-only and never persists to the session, so every later provider
+// request of the same turn must carry it again until Root recovers (an
+// explicit start binds a task) or a newer user message supersedes it.
+// Request shapes this release cannot confidently mutate keep the old
+// fail-closed trap (aside + abort).
+function entryRecoveryInstruction(reason, messageId) {
+  return [
+    '[orbit-entry-failed] 本条消息的 Orbit 自动入口启动失败，没有创建任何 Orbit 任务。',
+    `失败原因：${reason}`,
+    '本轮不要开始用户请求的普通执行；同一条消息不会被自动重试或重新判定，也不要等待自动恢复。',
+    '按以下步骤恢复（按顺序执行）：',
+    '1. 若失败原因是候选模型缺少有效质量证据（失败原因会列出具体 provider/id）：为列出的候选收集带来源的真实证据（来源必须是可核查的 http(s) 地址；禁止编造评分、指标或来源），用无任务命令 orbit model-evidence --file FILE|- 把证据写入同一个证据缓存（- 表示从 stdin 读取）。',
+    '2. 失败原因是其他问题时，先诊断并解决该问题本身（不要绕过或忽略失败原因），再执行第 3 步。',
+    `3. 显式调用 orbit 工具启动原始任务：action=start，message_id="${messageId}"（这就是本条原始用户消息；Orbit 会按原文使用它，不要改写、复述或替换）。`,
+    '4. 若 start 报告这条消息已有 Orbit 任务（already has an Orbit task），改用返回的 task_directory 调用 orbit status 继续，不要重复创建任务。',
+    '在 start 成功之前：不要执行用户请求的普通工作，也不要把未启动当作已受控向用户报告。',
+  ].join('\n');
+}
+
+// Returns a NEW request payload with `text` appended to the trailing user
+// turn — merged into the last message when it already has the user role (so
+// strict-alternation providers such as Bedrock Converse never see two
+// consecutive user turns), appended as a new user message otherwise — or
+// null when the payload is not a shape this release can confidently mutate
+// (caller then keeps the fail-closed abort path). Handled shapes are the
+// ones observed in real OMP provider payloads: `messages` arrays with string
+// content (openai-completions), {type:'text', text} blocks (anthropic /
+// openai parts) and bare {text} blocks (bedrock-converse); and Responses
+// bodies (openai-codex) whose `input` item list gets the exact user-message
+// item OMP's own Responses finalizer appends (verified in omp/18.3.2:
+// e.input = [...a, { type: "message", role: "user", content:
+// [{ type: "input_text", text }] }]). The input payload is never mutated.
+export function appendInstructionToPayload(payload, text) {
+  if (payload && typeof payload === 'object' && Array.isArray(payload.input) && !Array.isArray(payload.messages))
+    return appendToResponsesInput(payload, text);
+  return appendToMessagesPayload(payload, text);
+}
+
+// Assistant-side Responses call items must be followed by their own outputs
+// (a user message in between is rejected by the API), so those tails defer
+// to the fail-closed path instead.
+const RESPONSES_CALL_ITEMS = new Set(['function_call', 'custom_tool_call', 'computer_call', 'reasoning',
+  'shell_call', 'apply_patch_call', 'local_shell_call']);
+function appendToResponsesInput(payload, text) {
+  const items = payload.input;
+  if (items.length === 0) return null;
+  const last = items[items.length - 1];
+  if (!last || typeof last !== 'object' || Array.isArray(last)) return null;
+  const messageLike = last.type === 'message' || (last.type === undefined && typeof last.role === 'string');
+  if (messageLike && last.role === 'user') {
+    if (typeof last.content === 'string')
+      return { ...payload, input: [...items.slice(0, -1), { ...last, content: last.content ? `${last.content}\n\n${text}` : text }] };
+    if (Array.isArray(last.content))
+      return { ...payload, input: [...items.slice(0, -1), { ...last, content: [...last.content, { type: 'input_text', text }] }] };
+    return null;
+  }
+  if (RESPONSES_CALL_ITEMS.has(last.type)) return null;
+  return { ...payload, input: [...items, { type: 'message', role: 'user', content: [{ type: 'input_text', text }] }] };
+}
+
+function appendToMessagesPayload(payload, text) {
+  const messages = payload && typeof payload === 'object' && Array.isArray(payload.messages) ? payload.messages : null;
+  if (!messages || messages.length === 0) return null;
+  const last = messages[messages.length - 1];
+  if (!last || typeof last !== 'object' || typeof last.role !== 'string') return null;
+  // An assistant turn ending in tool_use must be answered by tool results,
+  // never by a fresh user message (anthropic rejects that outright).
+  if (last.role !== 'user' && Array.isArray(last.content)
+    && last.content.some(part => part && typeof part === 'object' && part.type === 'tool_use')) return null;
+  const blockFor = content => {
+    const withText = content.find(part => part && typeof part === 'object' && typeof part.text === 'string');
+    if (withText) return withText.type === 'text' ? { type: 'text', text } : { text };
+    return content.some(part => part && typeof part === 'object' && typeof part.type === 'string')
+      ? { type: 'text', text } : null;
+  };
+  let message;
+  if (last.role === 'user') {
+    if (typeof last.content === 'string') {
+      message = { ...last, content: last.content ? `${last.content}\n\n${text}` : text };
+    } else if (Array.isArray(last.content) && last.content.length > 0) {
+      const block = blockFor(last.content);
+      if (!block) return null;
+      message = { ...last, content: [...last.content, block] };
+    } else return null;
+  } else if (typeof last.content === 'string') {
+    message = { role: 'user', content: text };
+  } else if (Array.isArray(last.content) && last.content.length > 0) {
+    const block = blockFor(last.content);
+    if (!block) return null;
+    message = { role: 'user', content: [block] };
+  } else return null;
+  return { ...payload, messages: [...messages.slice(0, -1), message] };
+}
+
 // The SDK is supplied by OMP itself, including in its standalone binary.
 export function installOmpExtension(pi, sdk) {
   const entries = new Map();
@@ -275,7 +569,7 @@ export function installOmpExtension(pi, sdk) {
   const collabSeqByTask = new Map();    // task_dir -> last assigned seq (per-task, gap-free)
   const collabDroppedByTask = new Map(); // task_dir -> count of dropped oldest events
   let lastKnownPool = null; // last successful pool read (status display only; never a second pool state)
-   let host, currentContext, registryHookInstalled;
+  let host, currentContext, registryHookInstalled;
 
   // --- ADR-009: user-selected model pool + session-isolated member agents ---
   // The pool only constrains what Orbit recommends. Root may still dispatch
@@ -353,17 +647,14 @@ export function installOmpExtension(pi, sdk) {
   // hub_call captures the wire intent (op/recipient/body); hub_result and
   // task_result capture what actually came back. Every entry is tagged with
   // the owning task directory (Root sessions via their binding, member
-  // sessions via memberTasks) so a bounded buffer can never mix tasks.
-  function observeCollab(entry) {
-    entry.id = null;
-    entry.seq = null;
-    entry.task_dir = taskDirs.get(entry.session_id) ?? (entry.agent_id ? memberTasks.get(entry.agent_id) : undefined) ?? null;
-    if (entry.task_dir) {
-      const seq = (collabSeqByTask.get(entry.task_dir) ?? 0) + 1;
-      collabSeqByTask.set(entry.task_dir, seq);
-      entry.seq = seq;
-      entry.id = `collab-${seq}`;
-    }
+  // sessions via memberTasks) so a bounded buffer can never mix tasks — and
+  // attribution is decided HERE, before anything is persisted: an event with
+  // no resolvable task is never written to any task's durable file.
+  // Attributed entries are appended to <task_dir>/collaboration.jsonl at
+  // observation time (module-scope writer above) with an ISO `at` timestamp
+  // and a monotonic per-task durable sequence, independent of the bounded
+  // buffer sequence the TaskRuntime polls.
+  function pushBounded(entry) {
     collabEvents.push(entry);
     if (collabEvents.length > COLLAB_CAP) {
       const dropped = collabEvents.splice(0, collabEvents.length - COLLAB_CAP);
@@ -371,6 +662,79 @@ export function installOmpExtension(pi, sdk) {
         if (item.task_dir) collabDroppedByTask.set(item.task_dir, (collabDroppedByTask.get(item.task_dir) ?? 0) + 1);
       }
     }
+  }
+  // Durable append for an entry whose task_dir is already known. The line
+  // keeps the ORIGINAL untruncated payload; only the bounded buffer copy is
+  // capped. A failing append surfaces once per loss episode as a
+  // persistence_gap buffer event (never re-persisted, so a broken sink
+  // cannot loop); the durable gap line itself is written by the writer on
+  // recovery or at shutdown.
+  function queueCollabPersist(entry) {
+    const taskDir = entry.task_dir;
+    const observedAt = typeof entry.at === 'number' ? entry.at : Date.now();
+    const line = { at: new Date(observedAt).toISOString(), at_ms: observedAt };
+    for (const [key, value] of Object.entries(entry)) {
+      if (key !== 'id' && key !== 'seq' && key !== 'at' && key !== 'task_dir') line[key] = value;
+    }
+    line.task_dir = taskDir;
+    persistCollabLine(taskDir, line, (lost, dir) => {
+      const seq = (collabSeqByTask.get(dir) ?? 0) + 1;
+      collabSeqByTask.set(dir, seq);
+      pushBounded({ kind: 'persistence_gap', at: Date.now(), session_id: null, agent_id: null,
+        task_dir: dir, seq, id: `collab-${seq}`, lost_count: lost.count, reason: lost.reason });
+    });
+  }
+  function recordCollabFor(taskDir, entry) {
+    entry.task_dir = taskDir;
+    const seq = (collabSeqByTask.get(taskDir) ?? 0) + 1;
+    collabSeqByTask.set(taskDir, seq);
+    entry.seq = seq;
+    entry.id = `collab-${seq}`;
+    queueCollabPersist(entry);
+    pushBounded(boundedCollabEntry(entry));
+  }
+  function observeCollab(entry) {
+    entry.id = null;
+    entry.seq = null;
+    entry.task_dir = taskDirs.get(entry.session_id) ?? (entry.agent_id ? memberTasks.get(entry.agent_id) : undefined) ?? null;
+    if (entry.task_dir) {
+      recordCollabFor(entry.task_dir, entry);
+      return;
+    }
+    // Unattributable right now. Counted per session (bounded) so the task
+    // that later binds this session learns the observation gap explicitly;
+    // the content itself is deliberately dropped — never attributed
+    // retroactively, never written into a foreign task's file.
+    if (typeof entry.session_id === 'string' && entry.session_id) {
+      if (unattributedBySession.size >= UNATTRIBUTED_SESSION_CAP) unattributedBySession.delete(unattributedBySession.keys().next().value);
+      unattributedBySession.set(entry.session_id, (unattributedBySession.get(entry.session_id) ?? 0) + 1);
+    }
+    pushBounded(boundedCollabEntry(entry));
+  }
+  // Called at every seam that newly attributes a session to a task (orbit
+  // start binding, member registration). Pre-association observations from
+  // that session become an explicit, dated gap line instead of silence.
+  function noteAssociation(sessionId, taskDir) {
+    if (typeof sessionId !== 'string' || !sessionId || !taskDir) return;
+    const lost = unattributedBySession.get(sessionId);
+    if (!lost) return;
+    unattributedBySession.delete(sessionId);
+    recordCollabFor(taskDir, { kind: 'persistence_gap', at: Date.now(), session_id: sessionId, agent_id: null,
+      reason: 'observations existed before this session was attributed to the task; their content was never attributable and is not recorded',
+      lost_count: lost });
+  }
+  // Per-task actual model identity, observed only where it is real: member
+  // registration / member provider requests / Root provider requests on a
+  // bound session. `provider/id` strings only — no auth material, no request
+  // payload. The authoritative resolved identity stays in members.json and
+  // the runtime; recorded once per identity change.
+  function noteModelIdentity({ taskDir, role, agentId, sessionId, model, requestedModel }) {
+    if (!taskDir || !model) return;
+    const key = `${taskDir}\n${role}\n${agentId ?? sessionId ?? ''}`;
+    if (modelIdentitySeen.get(key) === model) return;
+    modelIdentitySeen.set(key, model);
+    recordCollabFor(taskDir, { kind: 'model_identity', at: Date.now(), session_id: sessionId ?? null,
+      agent_id: agentId ?? null, role, model, requested_model: requestedModel ?? null });
   }
 
   // --- Native Ask interruption observation (proposal A, 2026-09-26) -------
@@ -429,7 +793,7 @@ export function installOmpExtension(pi, sdk) {
           observeCollab({ kind: 'hub_call', at: Date.now(), session_id: session.sessionId ?? null, agent_id: id,
             tool_call_id: event.toolCallId ?? null, op: input.op ?? null, to: input.to ?? null, from: input.from ?? null,
             reply_to: input.replyTo ?? null, await_reply: input.await === true,
-            message: typeof input.message === 'string' ? input.message.slice(0, 2000) : null });
+            message: typeof input.message === 'string' ? input.message : null });
         }
       }
       if (event.type === 'tool_execution_end') {
@@ -446,7 +810,7 @@ export function installOmpExtension(pi, sdk) {
           }
           observeCollab({ kind: 'hub_result', at: Date.now(), session_id: session.sessionId ?? null, agent_id: id,
             tool_call_id: event.toolCallId ?? null, ok: event.isError === false,
-            text: text ? text.slice(0, 2000) : null });
+            text: text ?? null });
         }
       }
     });
@@ -533,6 +897,13 @@ export function installOmpExtension(pi, sdk) {
         memberTasks.set(ref.id, taskDir);
         if (pending.expectedModel) memberExpectedModels.set(ref.id, pending.expectedModel);
         requestedNames.delete(ref.id);
+        // Durably attribute the member session from this moment on, and
+        // record the actual model identity observed at registration
+        // (provider/id only; members.json stays the authority).
+        noteAssociation(ref.session?.sessionId ?? null, taskDir);
+        noteModelIdentity({ taskDir, role: 'member', agentId: ref.id, sessionId: ref.session?.sessionId ?? null,
+          model: ref.session?.model ? `${ref.session.model.provider}/${ref.session.model.id}` : null,
+          requestedModel: pending.expectedModel ?? null });
         // ADR-009 fail-closed model gate. The AgentRegistry `registered`
         // window provably precedes any member provider work, and the resolved
         // model is observable on the ref here: if task.agentModelOverrides
@@ -883,6 +1254,17 @@ export function installOmpExtension(pi, sdk) {
       return [];
     }).filter(m => m.text.trim());
   }
+  // Root OMP session file path from the main AgentRegistry ref, when the
+  // ref exposes one: a durable REFERENCE only (never session content), so
+  // TaskRuntime can record which native session file belongs to this task
+  // for safe task-scoped export. Lazily looked up per state() RPC; null
+  // when the registry surface or the ref has no file.
+  function sessionFileFor(sessionId) {
+    try {
+      const ref = sdk.AgentRegistry.global().list().find(r => r.session?.sessionId === sessionId);
+      return typeof ref?.sessionFile === 'string' && ref.sessionFile ? ref.sessionFile : null;
+    } catch { return null; }
+  }
   function state(entry) {
     const session = entry.session;
     const branch = session.sessionManager.getBranch();
@@ -896,7 +1278,7 @@ export function installOmpExtension(pi, sdk) {
       turn_id: busy ? last?.id : null, last_turn_id: last?.id || (entry.error ? 'delivery-error' : null),
       last_turn_status: entry.interrupted ? 'interrupted' : busy ? 'inProgress' : entry.error || ['error', 'aborted'].includes(message?.stopReason) ? 'failed' : last ? 'completed' : null,
       observations: entry.error ? [...observations, { kind: 'error', text: entry.error }] : observations,
-      active_tools: entry.activeTools.size, async_jobs: session.getAsyncJobSnapshot() };
+      active_tools: entry.activeTools.size, async_jobs: session.getAsyncJobSnapshot(), session_file: sessionFileFor(entry.id) };
   }
   function memberRoster() {
     let refs = [];
@@ -1284,6 +1666,7 @@ export function installOmpExtension(pi, sdk) {
     for (const entry of entries.values()) entry.unsubscribe();
     entries.clear();
     prestartSeen.clear();
+    entryRecovery.clear();
     // NOTE: the per-session agent root is intentionally NOT removed here.
     // close() also runs on session_before_switch/branch/tree, where the same
     // OMP process keeps running and the root must survive for the next
@@ -1321,6 +1704,13 @@ export function installOmpExtension(pi, sdk) {
       const sync = await syncSessionAgents(ctx);
       if (!sync.ok) syncError = sync.reason;
     }
+    // Decision-relevant dispatch evidence: the ORIGINAL item input as issued
+    // by the model (captured before `item.name` is rewritten to the
+    // Orbit-assigned requested name), the explicitly supplied model and an
+    // explicit rationale field only — never an inferred motivation. Entries are
+    // recorded only when the WHOLE call passes the gate and actually
+    // dispatches; a blocked call is not a dispatch.
+    const dispatches = [];
     for (const item of items) {
       if (!item || typeof item !== 'object') continue;
       // ADR-009: dispatches through our generated agent names pin a model.
@@ -1337,11 +1727,35 @@ export function installOmpExtension(pi, sdk) {
           return { block: true, reason: `${itemAgent} is not a live session candidate agent (pool changed?); re-run /orbit-models and dispatch again` };
       }
       const requested = `orbit-${randomUUID()}`;
+      const rationale = explicitDispatchRationale(item);
+      dispatches.push({ kind: 'task_dispatch', at: Date.now(), session_id: sessionId, agent_id: caller,
+        tool_call_id: event.toolCallId ?? null,
+        input_name: typeof item.name === 'string' && item.name.trim() ? item.name : null,
+        agent: itemAgent || null,
+        model: typeof item.model === 'string' && item.model.trim() ? item.model : null,
+        pinned_model: expectedModel,
+        effort: typeof item.effort === 'string' && item.effort.trim() ? item.effort : null,
+        task: typeof item.task === 'string' ? item.task : null,
+        context: typeof input.context === 'string' ? input.context : null,
+        rationale,
+        rationale_source: rationale ? 'dispatch_input' : 'unrecorded',
+        requested_name: requested });
       item.name = requested;
       requestedNames.set(requested, { taskDir, toolCallId: event.toolCallId ?? null, expectedModel });
     }
+    for (const dispatch of dispatches) observeCollab(dispatch);
     return { input };
   });
+  // An explicit rationale is recorded only when the model supplied one as
+  // part of the dispatch input; Orbit never infers or attributes motivation
+  // (e.g. never turns a Jev delegation hint into the Root's reason).
+  function explicitDispatchRationale(item) {
+    for (const field of ['rationale', 'why', 'reason']) {
+      const value = item?.[field];
+      if (typeof value === 'string' && value.trim()) return value;
+    }
+    return null;
+  }
   // ADR-009 model drift block. `task.agentModelOverrides`, frontmatter and
   // auth fallback all resolve BEFORE the first provider request; OMP's
   // before_provider_request hook fires per request with that final model
@@ -1389,6 +1803,15 @@ export function installOmpExtension(pi, sdk) {
         trackMemberTools(agentId, ref.session);
       }
     } catch { /* observation only; never block the request path */ }
+    // Provider-request identity observation (before the pinned-model early
+    // return, so unpinned members are covered too): the ACTUAL resolved
+    // model at dispatch time, provider/id only. Deduplicated per identity
+    // change; never blocks the request path.
+    try {
+      const requestModel = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : null;
+      noteModelIdentity({ taskDir: memberTasks.get(agentId), role: 'member', agentId, sessionId,
+        model: requestModel, requestedModel: memberExpectedModels.get(agentId) ?? null });
+    } catch { /* observation only */ }
     const expected = memberExpectedModels.get(agentId);
     if (!expected) return event.payload;
     const model = ctx.model;
@@ -1411,11 +1834,52 @@ export function installOmpExtension(pi, sdk) {
   // OMP 18.3.2 persists and awaits message_end before this hook, which still
   // precedes the first provider request. Never use prompt text as an identity.
   const prestartSeen = new Set();
+  // session id -> { key, instruction } while a failed automatic entry is
+  // awaiting Root's explicit recovery in this same turn. The instruction is
+  // payload-only, so it must ride along on every later provider request of
+  // the turn; it is dropped when a task becomes bound (recovery done) or a
+  // newer user message supersedes it.
+  const entryRecovery = new Map();
   pi.on('before_provider_request', async (event, ctx) => {
     let sessionId = null;
     try { sessionId = ctx.sessionManager?.getSessionId?.() ?? null; } catch { /* unowned */ }
     if (!sessionId || !isMainSession(sessionId)) return event.payload;
+    // Root model identity for an ALREADY-BOUND task, observed at provider
+    // request (provider/id only, deduplicated per identity change). A cheap
+    // map lookup for unbound sessions; the binding created later in this
+    // handler or by the orbit tool records its own identity note.
+    try {
+      const boundDir = taskDirs.get(sessionId);
+      if (boundDir && ctx.model)
+        noteModelIdentity({ taskDir: boundDir, role: 'root', agentId: sdk.MAIN_AGENT_ID, sessionId,
+          model: `${ctx.model.provider}/${ctx.model.id}` });
+    } catch { /* observation only */ }
     const branch = ctx.sessionManager.getBranch();
+    const pending = entryRecovery.get(sessionId);
+    if (pending) {
+      // Tool turns add assistant messages after the native user message.
+      // Keep the recovery attached across those requests without treating an
+      // unrelated assistant-only turn as a fresh user entry.
+      let latestUserId = null;
+      for (let index = branch.length - 1; index >= 0; index--) {
+        const item = branch[index];
+        if (item.type === 'message' && item.message?.role === 'user' && item.message.attribution !== 'agent') {
+          latestUserId = item.id;
+          break;
+        }
+      }
+      if (pending.key === `${sessionId}:${latestUserId}`) {
+        const bound = await resolveBoundTask(sessionId, ctx.cwd);
+        if (bound && activeState(bound.state)) { entryRecovery.delete(sessionId); return event.payload; }
+        const injected = appendInstructionToPayload(event.payload, pending.instruction);
+        if (injected) return injected;
+        pi.sendMessage({ customType: 'orbit-entry', content: pending.instruction, attribution: 'agent' },
+          { deliverAs: 'aside' });
+        try { ctx.abort?.(); } catch { /* the host may already be stopping */ }
+        return event.payload;
+      }
+      entryRecovery.delete(sessionId);
+    }
     let user = null;
     for (let index = branch.length - 1; index >= 0; index--) {
       const item = branch[index];
@@ -1439,18 +1903,37 @@ export function installOmpExtension(pi, sdk) {
         const started = JSON.parse(await host.execute({ action: 'start', message_id: user.id,
           entry_file: decision.entry_file }, ctx));
         taskDirs.set(sessionId, started.task_directory);
+        noteAssociation(sessionId, started.task_directory);
+        noteModelIdentity({ taskDir: started.task_directory, role: 'root', agentId: sdk.MAIN_AGENT_ID, sessionId,
+          model: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : null });
         await refreshStatus(ctx, sessionId);
       } else if (decision.decision === 'root_decides' && decision.prompt) {
         pi.sendMessage({ customType: 'orbit-entry', content: decision.prompt, attribution: 'agent' },
           { deliverAs: 'aside' });
       }
     } catch (error) {
-      const message = `Orbit 入口未能启动受控任务：${error?.message || error}。请停止本轮普通执行，检查原因后显式调用 orbit start；不能把未启动当作已受控。`;
-      try { ctx.ui?.notify(message, 'error'); } catch { process.stderr.write(`${message}\n`); }
-      pi.sendMessage({ customType: 'orbit-entry', content: message, attribution: 'agent' },
+      const reason = String(error?.message || error);
+      const instruction = entryRecoveryInstruction(reason, user.id);
+      entryRecovery.set(sessionId, { key, instruction });
+      const injected = appendInstructionToPayload(event.payload, instruction);
+      if (injected) {
+        // PROVEN current-request delivery (see appendInstructionToPayload):
+        // this hook's return value replaces the request body this turn's
+        // model answers, so Root reads the failure, its reason and the
+        // recovery steps now. Aborting here would cancel the very request
+        // carrying the instruction — the old trap — and the queued aside
+        // would only re-deliver it after the turn; both are skipped.
+        try { ctx.ui?.notify(`Orbit 自动入口启动失败，未创建任务（${reason.slice(0, 200)}）；恢复指令已并入本轮模型请求。`, 'error'); }
+        catch { process.stderr.write(`${instruction}\n`); }
+        return injected;
+      }
+      // Unrecognized request shape: cannot prove the instruction reaches the
+      // current model request, so the fail-closed trap stays. A specifically
+      // requested controlled run must not silently continue as ordinary work
+      // after its start preflight failed.
+      try { ctx.ui?.notify(instruction, 'error'); } catch { process.stderr.write(`${instruction}\n`); }
+      pi.sendMessage({ customType: 'orbit-entry', content: instruction, attribution: 'agent' },
         { deliverAs: 'aside' });
-      // A specifically requested controlled run must not silently continue as
-      // ordinary work after its start preflight failed.
       try { ctx.abort?.(); } catch { /* the host may already be stopping */ }
     }
     return event.payload;
@@ -1467,7 +1950,7 @@ export function installOmpExtension(pi, sdk) {
       agent_id: agentIdFor(sessionId), tool_call_id: event.toolCallId ?? null,
       op: input.op ?? null, to: input.to ?? null, from: input.from ?? null,
       reply_to: input.replyTo ?? null, await_reply: input.await === true,
-      message: typeof input.message === 'string' ? input.message.slice(0, 2000) : null });
+      message: typeof input.message === 'string' ? input.message : null });
     // Stop stability: a member Orbit confirmed stopped, or one addressed
     // while its task is no longer active, must not be re-woken through the
     // native hub. Only applies to this task's registered members.
@@ -1486,7 +1969,7 @@ export function installOmpExtension(pi, sdk) {
   pi.on('tool_result', async (event, ctx) => {
     if (event.toolName === 'hub') {
       const text = Array.isArray(event.content)
-        ? event.content.filter(p => p.type === 'text').map(p => p.text).join(' ').slice(0, 2000) : null;
+        ? event.content.filter(p => p.type === 'text').map(p => p.text).join(' ') : null;
       observeCollab({ kind: 'hub_result', at: Date.now(), session_id: ctx.sessionManager.getSessionId(),
         agent_id: agentIdFor(ctx.sessionManager.getSessionId()), tool_call_id: event.toolCallId ?? null,
         ok: event.isError === false, text });
@@ -1494,7 +1977,7 @@ export function installOmpExtension(pi, sdk) {
     }
     if (event.toolName === 'task') {
       const text = Array.isArray(event.content)
-        ? event.content.filter(p => p.type === 'text').map(p => p.text).join(' ').slice(0, 2000) : null;
+        ? event.content.filter(p => p.type === 'text').map(p => p.text).join(' ') : null;
       observeCollab({ kind: 'task_result', at: Date.now(), session_id: ctx.sessionManager.getSessionId(),
         agent_id: agentIdFor(ctx.sessionManager.getSessionId()), tool_call_id: event.toolCallId ?? null,
         ok: event.isError === false, text });
@@ -1507,7 +1990,16 @@ export function installOmpExtension(pi, sdk) {
       const text = await host.execute(args, ctx);
       try {
         const result = JSON.parse(text);
-        if (typeof result.task_directory === 'string') taskDirs.set(entry.id, result.task_directory);
+        if (typeof result.task_directory === 'string') {
+          taskDirs.set(entry.id, result.task_directory);
+          // An explicit start that succeeded completes entry recovery: later
+          // provider requests of this turn must not carry the stale
+          // "[entry failed, start it]" instruction anymore.
+          entryRecovery.delete(entry.id);
+          noteAssociation(entry.id, result.task_directory);
+          noteModelIdentity({ taskDir: result.task_directory, role: 'root', agentId: sdk.MAIN_AGENT_ID, sessionId: entry.id,
+            model: entry.session?.model ? `${entry.session.model.provider}/${entry.session.model.id}` : null });
+        }
       } catch { /* non-JSON results carry no task binding */ }
       // A successful start (or any state-changing action) must show its real
       // status in THIS turn: the per-turn hook only refreshes at the next user
@@ -1689,6 +2181,12 @@ export function installOmpExtension(pi, sdk) {
     try { sessionId = ctx?.sessionManager?.getSessionId?.() ?? null; } catch { /* unowned */ }
     if (!isMainSession(sessionId)) return;
     await close();
+    // Flush durable collaboration evidence: drain per-task queues, make one
+    // final attempt at recording an unresolved persistence-gap episode, and
+    // close the 0600 append handles. A hard crash can still lose the
+    // unflushed tail; the exporter's missing-evidence reconciliation covers
+    // that instead of a fabricated continuous record.
+    await closeCollabWriters();
     // Process-level shutdown only (never on child dispose or on switch/branch/
     // tree): remove our own root. Stray roots from crashed sessions are left
     // for explicit install-time/human cleanup — a quiet long-running session

@@ -87,6 +87,20 @@ module Orbit
 
     def explicit_selection(model, selected_for)
       raise Error, "OMP review model must be provider/id from the session, --review-model, or ORBIT_REVIEW_MODEL" unless model.match?(OmpCheckRunner::MODEL_ID)
+      if selected_for == "start"
+        availability = begin
+          @probe.call([model])
+        rescue StandardError => error
+          raise Error, "explicit review model could not be checked in the isolated profile (#{error.class}); choose another --review-model provider/id"
+        end
+        unless availability.is_a?(Hash) && Array(availability["resolvable"]).include?(model)
+          failures = availability.is_a?(Hash) ? availability["unresolvable"] : nil
+          reason = Array(failures).find { |item| item.is_a?(Hash) && item["model"] == model }
+          detail = reason && reason["reason"].to_s.strip
+          detail = "not resolvable in the isolated profile" if detail.nil? || detail.empty?
+          raise Error, "explicit review model #{model} is unavailable (#{detail.slice(0, 200)}); choose another --review-model provider/id"
+        end
+      end
 
       pool = @pool.read
       in_pool = pool.empty? || pool.include?(model)
@@ -184,7 +198,9 @@ module Orbit
 
       evidence = prepared["evidence"]
       judged = prepared["models"].select { |candidate| evidence.key?(candidate) }
-      raise undecided("no candidate pool model has valid cached quality evidence") if judged.empty?
+      if judged.empty?
+        raise undecided("no candidate pool model has valid cached quality evidence (#{prepared['models'].join(', ')})")
+      end
 
       advisor = resolved_advisor
       raise undecided("the JEV quality judgment is unavailable") if advisor.nil?

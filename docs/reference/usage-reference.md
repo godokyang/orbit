@@ -78,6 +78,8 @@ orbit uninstall
 
 status 默认输出可读文本；`--json` 返回单项原始 state，多个／没有候选时返回 `{ "tasks": [...] }`。stop 默认说明入队和后续查询方式，`--json` 返回机器结果，供扩展桥与自动化集成使用。
 
+`orbit export TASK --output FILE` 在用户指定的位置生成单任务本地证据包（可在运行中或结束后执行）；TASK 为任务目录或当前项目唯一 ID 前缀。包内包括按时间排列的事实记录、成员与检查证据、可安全归属的原生会话材料以及无法取得的证据清单；运行中包仅代表导出时刻。不会上传、调用模型或改变任务状态；请检查包内任务指令、项目快照和会话内容后再自愿分享。`orbit status` 和现有终检仍是任务完成的权威依据，复盘文件不作缺陷判定。
+
 `orbit doctor [TASK] [--json]` 不调用模型，不修改安装。依赖、扩展安装、连接和模型配置分别报告；`connection.ready: null` 表示没有可验证的会话，`false` 表示验证失败。只有环境通过且真实连接成功才有顶层 `ready: true`，并不代表模型登录或额度可用。无连接上下文时纯环境检查通过可返回退出码 0；发现环境、安装或连接错误返回 2。多个任务不自动选择连接，传 TASK 或在目标会话调用原生工具。
 
 默认 `orbit --help` 展示日常入口；`orbit start --help` 等子命令展示执行参数。
@@ -133,6 +135,8 @@ orbit model-candidates list       # 命令行查看；add/remove 可用于脚本
 
 候选池保存在用户级配置，跨会话共用，只保存模型标识，不保存凭据。Orbit 只在该池与「当前会话可选列表」的交集内比较：为执行成员给出模型建议，为独立检查者选模，按质量先过线、端到端时间、粗档费用排序，并记录实际模型；不按品牌排序。候选池为空时检查者沿用现有默认模型行为，池非空却没有合格检查模型时要求显式指定，不擅自使用池外默认模型。Root 始终显式派发成员，成员不能再派发成员。
 
+池非空且自动入口提示「没有有效缓存质量证据」时，**任务尚未创建，JEV 尚未给检查模型评分**。Root 在当前回合核对提示中的会话可选 `provider/id`，从一手来源补充相同标识的事实，再对**原用户消息**显式调用 Orbit `start`；补齐事实只使质量判断可执行，不保证过线。不能凭相近型号复用事实，也不能将尚未启动当作已受控。若拿不到证据或评分不过线，Root 可显式选检查模型，不能静默使用池外默认值。
+
 检查者在真实认证或额度失败后，任务保持运行并阻塞，需要你显式指定下一次检查使用的模型：
 
 ```bash
@@ -143,12 +147,20 @@ orbit review-model TASK_DIRECTORY --model provider/id --reason "认证失败后�
 
 ### 模型证据提交（model-evidence）
 
-当 Orbit/JEV 要求模型证据时，Root 从一手来源检索事实后用 `orbit model-evidence TASK_DIRECTORY --file FILE|-` 提交（一个 JSON object 或 array）。`provider`/`model`/`reasoning` 必须与请求中的身份完全一致；不写网页正文或凭据，不伪造来源或指标。
+Root 从一手来源检索模型事实，提交一个 JSON object 或 array。已有任务使用 `orbit model-evidence TASK_DIRECTORY --file FILE|-`，`provider`/`model`/`reasoning` 与请求身份完全一致；建任务前按候选池中准确的 `provider/model` 身份填写。不写网页正文或凭据，不伪造来源或指标。
+
+还未创建任务时，用同一格式直接写入用户级缓存，不需要虚构 `TASK_DIRECTORY`：
+
+```bash
+orbit model-evidence --file ./model-facts.json
+```
+
+这一模式仅校验并缓存，不创建任务、不入队任务命令；有任务目录时保留原有提交与通知行为。显式 `start --review-model provider/id` 在创建任务前检查该模型是否能在隔离检查者的目录和凭据中解析；探测不发送模型请求，不能保证额度或实际检查结果。
 
 占位结构（尖括号处替换为真实结果；`valid_until` 可省略，不得超过该模型标识的有效期）：
 
 ```json
-[{"provider":"<请求的 provider>","model":"<请求的 model>","reasoning":"<请求的 reasoning>",
+[{"provider":"<候选的 provider>","model":"<候选的 model>","reasoning":"<实际 reasoning>",
   "status":"evidence","retrieved_at":"<ISO8601，含时区>",
   "valid_until":"<ISO8601>",
   "sources":["https://<真实来源 URL>"],
@@ -161,7 +173,7 @@ orbit review-model TASK_DIRECTORY --model provider/id --reason "认证失败后�
 [{"provider":"…","model":"…","reasoning":"…","status":"unavailable","retrieved_at":"…","reason":"<为什么无法取得>"}]
 ```
 
-Orbit 校验后原子写入用户级缓存并通知任务进程重查；缓存按模型标识的有效期使用，过期后重新检索。具体字段限制以 `orbit model-evidence --help` 与校验错误为准。
+Orbit 校验后原子写入用户级缓存；仅带任务目录时还通知该任务进程重查。缓存按模型标识的有效期使用，过期后重新检索。具体字段限制以 `orbit model-evidence --help` 与校验错误为准。
 
 ### 时间和用量
 

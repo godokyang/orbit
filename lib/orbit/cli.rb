@@ -6,6 +6,7 @@ require "io/console"
 require_relative "version"
 require_relative "task_record"
 require_relative "task_runtime"
+require_relative "task_evidence"
 require_relative "plugin_connection"
 require_relative "check_runner"
 require_relative "omp_check_runner"
@@ -41,6 +42,7 @@ module Orbit
         orbit omp [原生参数]       启动原版 OMP 并加载 Orbit 扩展；普通 omp 不接入
         orbit status [TASK]       查看当前项目任务，TASK 可用 ID 前缀或目录
         orbit stop [TASK]         停止当前项目任务；多任务须指定 TASK
+        orbit export TASK --output FILE  打包任务证据为本地自足归档（不上传）
         orbit doctor [TASK]       检查环境与已有会话连接
         orbit jev setup           输入 TypeSafe key，配置新终端环境
         orbit update [--ref REF]  更新当前安装，沿用来源与安装目录
@@ -60,16 +62,17 @@ module Orbit
       "jev" => "orbit jev setup\n交互输入 TypeSafe key，配置 zsh／bash 新终端的 TYPESAFE_API_KEY；不写入 Orbit 配置。",
       "update" => "orbit update [--ref REF]\n更新当前安装，默认沿用远程 ref 或本地源码目录；--ref 显式从 GitHub 选择版本。新版本登记的运行任务与宿主引用的旧 release 会保留，待其退出后的下一次安装清理。",
       "uninstall" => "orbit uninstall\n先结束使用本安装的任务和 Coding Agent 会话；仍有存活 lease 时拒绝卸载且保留原安装。卸载会清掉本安装拥有的旧全局入口，保留项目资料。",
+      "export" => "orbit export TASK --output FILE\n把一个任务的本地证据打包成单个 tar.gz：导出时的 state、事实时间线（events.jsonl 与协作记录 collaboration.jsonl 按时间合并并标注来源、行号与缺口）、检查快照与产物、basis/amendments、含 sha256 的文件清单与缺失清单。只读导出：不上传、不调用模型、不改变任务状态或完成门；运行中任务按导出时刻截取并标注在途与未定检查。TASK 为任务目录或唯一 ID 前缀；--output 不能位于任务目录内部。归档内 manifest.json 说明全部内容与未包含项。",
       "version" => "orbit version [--json]",
       "check" => "orbit check TASK_DIRECTORY",
       "amend" => "orbit amend TASK_DIRECTORY --file FILE|-",
       "dispute" => "orbit dispute TASK_DIRECTORY --reason TEXT",
       "rebind-workspace" => "orbit rebind-workspace TASK_DIRECTORY PATH [--reason TEXT]\n把产物目录改到同一 Git 仓库中的工作区。命令入队后由任务进程记录来源、原因和历史；amend / dispute 的文字不会切换路径。",
       "model-evidence" => <<~TEXT,
-        orbit model-evidence TASK_DIRECTORY --file FILE|-
-        提交 Root 检索到的模型事实证据（一个 JSON object 或 array）。provider/model/reasoning 必须与请求中的身份完全一致；不写网页正文或凭据，不伪造来源或指标。
+        orbit model-evidence [TASK_DIRECTORY] --file FILE|-
+        提交 Root 从一手来源检索的模型事实证据（一个 JSON object 或 array）。建任务前按当前候选池的准确 provider/model 填写；已有任务按请求中的 provider/model/reasoning 身份填写。不写网页正文或凭据，不伪造来源或指标。
         占位结构（尖括号处必须替换为真实检索结果）：
-          [{"provider":"<请求的 provider>","model":"<请求的 model>","reasoning":"<请求的 reasoning>",
+          [{"provider":"<候选的 provider>","model":"<候选的 model>","reasoning":"<实际 reasoning>",
             "billing_route":"<请求中该身份标注的 route：direct_api|subscription_quota|unknown>",
             "status":"evidence","retrieved_at":"<ISO8601，含时区>",
             "valid_until":"<ISO8601，可省略；不得超过该模型标识的有效期>",
@@ -81,7 +84,7 @@ module Orbit
         无法取得证据时用 status "unavailable" 并给出 reason（不得编造证据）：
           [{"provider":"…","model":"…","reasoning":"…","billing_route":"<请求中该身份标注的 route>",
             "status":"unavailable","retrieved_at":"…","reason":"<为什么无法取得>"}]
-        Orbit 校验后原子写入用户级缓存并通知任务进程重查。
+        Orbit 校验后原子写入用户级缓存：带 TASK_DIRECTORY 时同时向任务进程入队重查命令（status "queued"）；省略任务目录时仅写缓存、不建任务不入队（status "cached"），供 Root 在 orbit start 之前先行提交事实。
       TEXT
       "review-model" => "orbit review-model TASK_DIRECTORY --model provider/id [--reason TEXT]\n检查因认证/额度等真实失败阻塞后，由 Root 显式指定下一次检查使用的模型并重试；不自动重试，也不在检查进行中切换。指定模型可在候选池外，会记录提示；任务结束记录不再接受。",
       "model-candidates" => <<~TEXT,
@@ -178,12 +181,14 @@ module Orbit
         review_model(argv)
       when "stop", "check", "amend", "dispute"
         submit(command, argv)
+      when "export"
+        export(argv)
       else
         raise ArgumentError, "unknown command #{command.inspect}; run orbit --help"
       end
     rescue ArgumentError, OptionParser::ParseError, SystemCallError, Connection::Error, CheckRunner::Error,
            WorkspaceBinding::Error, ModelEvidenceCache::Error, ModelCandidatePool::Error, JSON::ParserError,
-           PrestartClassifier::Error, PrestartLedger::Error, JevAdvisor::Error => error
+           PrestartClassifier::Error, PrestartLedger::Error, JevAdvisor::Error, TaskEvidence::Error => error
       warn "orbit: #{error.message}"
       1
     end
@@ -530,13 +535,22 @@ module Orbit
         parser.on("--file FILE") { |value| options["file"] = value }
       end.parse!(argv)
       directory = argv.shift
-      raise ArgumentError, "usage: orbit model-evidence TASK_DIRECTORY --file FILE|-" if directory.nil? || !argv.empty?
+      taskless = directory.nil? && argv.empty?
+      raise ArgumentError, "usage: orbit model-evidence [TASK_DIRECTORY] --file FILE|-" unless taskless || (directory && argv.empty?)
 
-      # The record and its terminal state are resolved before the cache is
-      # touched, so a missing or finished task cannot leave new evidence.
-      record = TaskRecord.new(directory)
-      if TaskRuntime::TERMINAL.include?(record.state["status"])
-        raise ArgumentError, "task process has ended; records are retained, no action was queued"
+      # Taskless mode serves the bootstrap case: model selection can block
+      # before a TaskRecord exists when the cache holds no candidate facts,
+      # so Root submits the sourced facts to the same user-level cache the
+      # selector reads before starting the original message. No task is
+      # created and nothing is queued.
+      record = nil
+      unless taskless
+        # The record and its terminal state are resolved before the cache is
+        # touched, so a missing or finished task cannot leave new evidence.
+        record = TaskRecord.new(directory)
+        if TaskRuntime::TERMINAL.include?(record.state["status"])
+          raise ArgumentError, "task process has ended; records are retained, no action was queued"
+        end
       end
 
       payload = JSON.parse(read_input(options.fetch("file") { raise ArgumentError, "--file is required" }))
@@ -551,12 +565,17 @@ module Orbit
       # sources or page text; dropping billing_route would make every
       # direct_api submission look like an unknown-route mismatch.
       entries = ModelEvidenceCache.new.record_all(payload)
+      identities = entries.map { |entry| entry.slice("provider", "model", "reasoning", "billing_route") }
+      if taskless
+        puts JSON.generate({ "status" => "cached", "count" => entries.length, "identities" => identities })
+        return 0
+      end
+
       summary = entries.map { |entry| entry.slice("provider", "model", "reasoning", "billing_route", "status") }
       id = record.submit("model_evidence", "entries" => summary,
                          "source" => { "kind" => "cli", "command" => "model-evidence" })
       puts JSON.generate({ "task_directory" => record.path, "command_id" => id, "status" => "queued",
-                           "count" => entries.length,
-                           "identities" => summary.map { |entry| entry.slice("provider", "model", "reasoning", "billing_route") } })
+                           "count" => entries.length, "identities" => identities })
       0
     end
 
@@ -684,6 +703,27 @@ module Orbit
       return false unless %w[starting running].include?(status)
 
       TaskView.runtime_abandoned?(record.state)
+    end
+
+    # User-invoked, local-only evidence export:
+    # resolves one task, refuses unsafe destinations, and leaves the task record
+    # untouched. All completeness facts live in the archive's manifest.json.
+    def export(argv)
+      output = nil
+      OptionParser.new { |parser| parser.on("--output FILE") { |value| output = value } }.parse!(argv)
+      argument = argv.shift
+      if argument.nil? || !argv.empty? || output.to_s.strip.empty?
+        raise ArgumentError, "usage: orbit export TASK --output FILE"
+      end
+
+      matches = TaskView.select(argument)
+      raise ArgumentError, "找不到任务 #{argument}；在项目中运行 orbit status 查看任务。" if matches.empty?
+      if matches.length > 1
+        raise ArgumentError, "存在多个任务，请指定任务 ID 或目录：\n#{TaskView.list(matches)}"
+      end
+
+      puts JSON.generate(TaskEvidence.export(record: matches.first, output: output))
+      0
     end
 
     def read_input(file)

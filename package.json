@@ -1,6 +1,6 @@
 {
   "name": "@godokyang/orbit",
-  "version": "0.7.5",
+  "version": "0.7.6",
   "description": "Independent task execution checks for existing coding sessions.",
   "bin": {
     "orbit": "scripts/orbit"
@@ -26,7 +26,7 @@
     "runners/omp-reviewer/package.json"
   ],
   "scripts": {
-    "test": "npm run check:version && sh -n install.sh && sh -n uninstall.sh && ruby --disable-gems tests/workspace_snapshot_test.rb && ruby --disable-gems tests/workspace_binding_test.rb && ruby --disable-gems tests/jev_advisor_test.rb && ruby --disable-gems tests/judgment_test.rb && ruby --disable-gems tests/prestart_test.rb && ruby --disable-gems tests/model_evidence_cache_test.rb && ruby --disable-gems tests/model_candidate_pool_test.rb && ruby --disable-gems tests/checker_model_selection_test.rb && ruby --disable-gems tests/checker_model_selector_test.rb && ruby --disable-gems tests/plugin_connection_test.rb && ruby --disable-gems tests/observation_key_test.rb && ruby --disable-gems tests/check_runner_context_test.rb && ruby --disable-gems tests/task_runtime_test.rb && node tests/omp_native_gate_test.mjs && node tests/omp_session_agents_test.mjs && node tests/omp_model_picker_test.mjs && bun test runners/omp-reviewer/json-recovery.test.ts runners/omp-reviewer/model-probe.test.ts && ruby --disable-gems tests/omp_entry_test.rb && ruby --disable-gems tests/member_registration_test.rb && ruby --disable-gems tests/inbox_command_test.rb && ruby --disable-gems tests/omp_native_member_test.rb && ruby --disable-gems tests/omp_check_runner_test.rb && ruby --disable-gems tests/omp_cli_checker_test.rb && ruby --disable-gems tests/cli_test.rb && ruby --disable-gems tests/install_test.rb",
+    "test": "npm run check:version && sh -n install.sh && sh -n uninstall.sh && ruby --disable-gems tests/workspace_snapshot_test.rb && ruby --disable-gems tests/workspace_binding_test.rb && ruby --disable-gems tests/jev_advisor_test.rb && ruby --disable-gems tests/judgment_test.rb && ruby --disable-gems tests/prestart_test.rb && ruby --disable-gems tests/model_evidence_cache_test.rb && ruby --disable-gems tests/model_candidate_pool_test.rb && ruby --disable-gems tests/checker_model_selection_test.rb && ruby --disable-gems tests/checker_model_selector_test.rb && ruby --disable-gems tests/plugin_connection_test.rb && ruby --disable-gems tests/observation_key_test.rb && ruby --disable-gems tests/check_runner_context_test.rb && ruby --disable-gems tests/task_runtime_test.rb && node tests/omp_native_gate_test.mjs && node tests/omp_entry_recovery_test.mjs && node tests/omp_collab_evidence_test.mjs && node tests/omp_session_agents_test.mjs && node tests/omp_model_picker_test.mjs && bun test runners/omp-reviewer/json-recovery.test.ts runners/omp-reviewer/model-probe.test.ts && ruby --disable-gems tests/omp_entry_test.rb && ruby --disable-gems tests/member_registration_test.rb && ruby --disable-gems tests/inbox_command_test.rb && ruby --disable-gems tests/omp_native_member_test.rb && ruby --disable-gems tests/omp_check_runner_test.rb && ruby --disable-gems tests/omp_cli_checker_test.rb && ruby --disable-gems tests/task_evidence_export_test.rb && ruby --disable-gems tests/cli_test.rb && ruby --disable-gems tests/install_test.rb",
     "check:version": "ruby --disable-gems scripts/check-version.rb"
   },
   "publishConfig": {
