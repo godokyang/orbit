@@ -14,11 +14,8 @@ module Orbit
   # extension. Native flags (--model, --resume, --profile, permissions, help,
   # messages), terminal behavior and the exit code all pass through unchanged.
   #
-  # Only the OMP version verified with this extension is accepted. Adopting a
-  # new version has to follow ADR-008: recheck the extension hooks, task/hub,
-  # model resolution and the stop path in an isolated project, then move the
-  # pin; until then a mismatched CLI is refused instead of being presented as
-  # supported.
+  # OMP 18.2.8 is the minimum accepted CLI version. Newer versions pass the
+  # version gate; this check does not claim their runtime paths were verified.
   #
   # The launcher also exports one process-local PI_CONFIG_FILES overlay that
   # keeps idle native members attached for this process (see
@@ -48,7 +45,9 @@ module Orbit
     # environment overlays, so a user config file keeps precedence.
     IDLE_PARKING_OVERLAY = File.expand_path("../../plugins/omp-idle-parking.yml", __dir__)
 
-    PINNED_OMP_VERSION = "18.2.8"
+    MINIMUM_OMP_VERSION = "18.2.8"
+    # Keep the old constant for callers that already read the version floor.
+    PINNED_OMP_VERSION = MINIMUM_OMP_VERSION
     # The independent reviewer runner installs exactly this SDK release; the
     # installer verifies it inside the staged release before the switch.
     PINNED_SDK_VERSION = "18.2.8"
@@ -103,8 +102,7 @@ module Orbit
       { "PI_CONFIG_FILES" => value }
     end
 
-    # `omp --version` prints `omp/18.2.8`; anything unparseable is an error,
-    # not a silent pass.
+    # `omp --version` prints `omp/18.2.8`; anything unparseable is an error.
     def detected_version(executable = "omp")
       out, err, status = Open3.capture3(executable, "--version")
       unless status.success?
@@ -117,6 +115,10 @@ module Orbit
       match[1]
     end
 
+    def supported_version?(version)
+      (version.split(".").map(&:to_i) <=> MINIMUM_OMP_VERSION.split(".").map(&:to_i)) >= 0
+    end
+
     def launch(argv)
       raise ArgumentError, "Orbit OMP extension is missing: #{EXTENSION}" unless File.file?(EXTENSION)
       unless File.file?(IDLE_PARKING_OVERLAY)
@@ -124,10 +126,9 @@ module Orbit
       end
 
       version = detected_version
-      unless version == PINNED_OMP_VERSION
+      unless supported_version?(version)
         raise ArgumentError,
-              "OMP #{version} 不在当前已验证范围：Orbit 只支持 OMP #{PINNED_OMP_VERSION}，orbit omp 拒绝启动未验证版本。" \
-              "更新 OMP 前先按 ADR-008 在隔离项目复核扩展钩子、task/hub、模型解析与停止路径，再更新 pin。"
+              "OMP #{version} 低于最低支持版本 #{MINIMUM_OMP_VERSION}，orbit omp 拒绝启动。请升级 OMP。"
       end
 
       # exec keeps the pid, so the lease written here covers the OMP process

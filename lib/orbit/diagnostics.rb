@@ -31,9 +31,9 @@ module Orbit
     end
 
     # The implemented single-host entry: orbit omp loads this release's
-    # extension for the selected session. Only the verified OMP version is
-    # accepted; a mismatch is reported here and refused at launch. This section
-    # states only what is wired today; the native task/hub team, registration
+    # extension for the selected session. OMP versions below the floor are
+    # refused at launch. This section states only what is wired today; the
+    # native task/hub team, registration
     # gate and independent OMP checker are implemented alongside it, with the
     # target-path end-to-end acceptance still in progress (see the migration
     # status and docs/plan/omp-native-migration.md).
@@ -50,27 +50,29 @@ module Orbit
           version_error = error.message
         end
       end
-      version_ready = version == OmpEntry::PINNED_OMP_VERSION
+      version_ready = version && OmpEntry.supported_version?(version)
       item = {
         "entry" => "orbit omp",
         "extension" => extension,
         "extension_ready" => ready,
         "omp_path" => omp,
         "version" => version,
+        "minimum_version" => OmpEntry::MINIMUM_OMP_VERSION,
+        # Preserve the old doctor field for callers; its value is now the floor.
         "pinned_version" => OmpEntry::PINNED_OMP_VERSION,
         "version_ready" => version.nil? ? nil : version_ready
       }
       if omp.nil?
         item["detail"] = ready ? "orbit omp 显式加载当前安装目录的扩展；普通 omp 不加载 Orbit 扩展。" : "Orbit 扩展缺失；orbit omp 无法加载。"
-        item["omp_next_step"] = "未在 PATH 中找到 omp；安装 Oh My Pi #{OmpEntry::PINNED_OMP_VERSION} 后使用 orbit omp。"
+        item["omp_next_step"] = "未在 PATH 中找到 omp；安装 Oh My Pi #{OmpEntry::MINIMUM_OMP_VERSION} 或更新版本后使用 orbit omp。"
       elsif version.nil?
         item["detail"] = "无法确定 OMP 版本；orbit omp 会拒绝启动。"
         item["version_next_step"] = version_error.to_s
       elsif version_ready
-        item["detail"] = "orbit omp 显式加载当前安装目录的扩展；普通 omp 不加载 Orbit 扩展（OMP #{version} 已验证）。"
+        item["detail"] = "orbit omp 显式加载当前安装目录的扩展；普通 omp 不加载 Orbit 扩展（OMP #{version} 满足最低版本要求）。"
       else
-        item["detail"] = "OMP #{version} 不在已验证范围（仅支持 #{OmpEntry::PINNED_OMP_VERSION}）；orbit omp 会拒绝启动。"
-        item["version_next_step"] = "安装受支持的 OMP 版本；更新 pin 需先按 ADR-008 复核接口并在隔离项目实跑。"
+        item["detail"] = "OMP #{version} 低于最低支持版本 #{OmpEntry::MINIMUM_OMP_VERSION}；orbit omp 会拒绝启动。"
+        item["version_next_step"] = "升级到 OMP #{OmpEntry::MINIMUM_OMP_VERSION} 或更新版本。"
       end
       item["next_step"] = "用 install.sh 修复当前安装后重试 orbit omp。" unless ready
       item
@@ -124,7 +126,7 @@ module Orbit
       lines << "下一步：#{installation['next_step']}" if installation["next_step"]
       omp_entry = report.fetch("omp_entry")
       lines << "OMP 显式入口：#{omp_entry['detail']}"
-      lines << "  版本：#{omp_entry['version'] || '未检测'}（支持：#{omp_entry['pinned_version']}）"
+      lines << "  版本：#{omp_entry['version'] || '未检测'}（最低：#{omp_entry['minimum_version']}）"
       lines << "  下一步：#{omp_entry['version_next_step']}" if omp_entry["version_next_step"]
       lines << "下一步：#{omp_entry['next_step']}" if omp_entry["next_step"]
       lines << "下一步：#{omp_entry['omp_next_step']}" if omp_entry["omp_next_step"]

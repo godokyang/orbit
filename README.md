@@ -14,7 +14,7 @@
 
 ### 1. 准备并安装
 
-先准备 Ruby 3.2+、Node.js 18+、npm、Bun 1.3.14+，以及**已配置可用模型的 OMP 18.2.8**。远程安装还需要 `curl` 和 `tar`。当前 Orbit 只接受已验证的 OMP 18.2.8；版本不符时 `orbit omp` 会拒绝启动。
+先准备 Ruby 3.2+、Node.js 18+、npm、Bun 1.3.14+，以及**已配置可用模型的 OMP 18.2.8 或更新版本**。远程安装还需要 `curl` 和 `tar`。`orbit omp` 只拒绝低于 18.2.8 或无法识别版本的 OMP；更高版本通过版本门不代表其全部运行路径已单独验收。
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/godokyang/orbit/main/install.sh | sh

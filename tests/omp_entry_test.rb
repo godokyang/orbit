@@ -134,13 +134,22 @@ module OmpEntryTest
     end
   end
 
-  def mismatched_native_version_is_refused
-    with_stub_omp(0, version: "omp/18.3.0") do |env, out|
+  def older_native_version_is_refused
+    with_stub_omp(0, version: "omp/18.2.7") do |env, out|
       _stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, "--disable-gems", ENTRY, "omp", "--model", "x")
-      assert(status.exitstatus == 1, "a mismatched OMP version is refused")
-      assert(stderr.include?("18.3.0") && stderr.include?(Orbit::OmpEntry::PINNED_OMP_VERSION) && stderr.include?("拒绝"),
-             "the refusal names the detected and pinned versions")
+      assert(status.exitstatus == 1, "an older OMP version is refused")
+      assert(stderr.include?("18.2.7") && stderr.include?(Orbit::OmpEntry::MINIMUM_OMP_VERSION) && stderr.include?("拒绝"),
+             "the refusal names the detected and minimum versions")
       assert(!File.exist?(out), "a refused launch never starts omp")
+    end
+  end
+
+  def newer_native_versions_pass_the_version_gate
+    %w[18.3.2 18.10.0].each do |version|
+      with_stub_omp(0, version: "omp/#{version}") do |env, out|
+        _stdout, stderr, status = Open3.capture3(env, RbConfig.ruby, "--disable-gems", ENTRY, "omp", "--version")
+        assert(status.success? && File.exist?(out), "OMP #{version} passes the gate (#{stderr})")
+      end
     end
   end
 
@@ -158,7 +167,7 @@ module OmpEntryTest
                                                "-r", File.expand_path("../lib/orbit/omp_entry.rb", __dir__),
                                                "-e", "puts Orbit::OmpEntry.detected_version")
       assert(status.success? && stdout.strip == Orbit::OmpEntry::PINNED_OMP_VERSION,
-             "omp/18.2.8 is parsed to the pinned version")
+             "omp/18.2.8 is parsed to the minimum version")
     end
   end
 
@@ -206,7 +215,8 @@ module OmpEntryTest
     idle_parking_overlay_only_sets_the_process_local_task_ttl
     launch_env_appends_the_overlay_after_existing_config_files
     real_entry_exports_the_overlay_without_touching_native_flags
-    mismatched_native_version_is_refused
+    older_native_version_is_refused
+    newer_native_versions_pass_the_version_gate
     unparseable_native_version_is_refused
     detected_version_parses_the_omp_cli_output
     exit_code_is_preserved_through_the_real_entry

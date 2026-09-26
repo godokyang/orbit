@@ -411,12 +411,13 @@ module CliTest
     report = JSON.parse(cli("doctor", "--json"))
     assert(report.dig("omp_entry", "entry") == "orbit omp" && report.dig("omp_entry", "extension_ready"),
            "doctor states the implemented explicit OMP entry")
-    assert(report.dig("omp_entry", "pinned_version") == Orbit::OmpEntry::PINNED_OMP_VERSION,
-           "doctor states the pinned OMP range")
+    assert(report.dig("omp_entry", "minimum_version") == Orbit::OmpEntry::MINIMUM_OMP_VERSION &&
+           report.dig("omp_entry", "pinned_version") == Orbit::OmpEntry::MINIMUM_OMP_VERSION,
+           "doctor states the minimum OMP version and preserves the existing field")
     if report.dig("omp_entry", "omp_path")
       detected = report.dig("omp_entry", "version")
-      assert(report.dig("omp_entry", "version_ready") == (detected == Orbit::OmpEntry::PINNED_OMP_VERSION),
-             "doctor reports the detected OMP version against the pin")
+      assert(report.dig("omp_entry", "version_ready") == (detected && Orbit::OmpEntry.supported_version?(detected)),
+             "doctor reports the detected OMP version against the minimum")
     end
     assert(report.dig("checker", "component") == "omp-reviewer" && report.dig("checker", "status") == "active",
            "doctor labels the single OMP checker as the active component")
