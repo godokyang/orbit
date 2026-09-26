@@ -12,6 +12,7 @@ require_relative "omp_check_runner"
 require_relative "jev_advisor"
 require_relative "jev_setup"
 require_relative "omp_entry"
+require_relative "prestart"
 require_relative "task_view"
 require_relative "workspace_binding"
 require_relative "model_evidence_cache"
@@ -87,10 +88,13 @@ module Orbit
         orbit model-candidates list
         orbit model-candidates add <provider/id>
         orbit model-candidates remove <provider/id>
+        orbit model-candidates apply-delta --base LIST --add LIST --remove LIST
         内部桥：读写用户长期候选池（provider/id，id 可含斜杠）。每次 stdout 输出一行 JSON {"models":[...]}；
         出错时非零退出且只输出错误信息，不输出凭据、账号或连接配置。
+        apply-delta 供扩展多选界面一次提交净增删差量：LIST 为逗号分隔的 provider/id；base 为打开界面时的池快照，
+        任一差量 ID 的入池状态与快照不同则整体拒绝（退出 1），不覆盖其他会话对不同 ID 的修改。
       TEXT
-      "start" => <<~TEXT
+      "start" => <<~TEXT,
         orbit start [--provider omp] [--project DIR]
                     [--review-model MODEL] [--thread ID] [--socket PATH]
                     [--message-id ID | --prompt-file FILE|-] [--basis FILE]
@@ -102,6 +106,13 @@ module Orbit
         检查模型：默认取当前 OMP 会话的 provider/id；--review-model 或 ORBIT_REVIEW_MODEL 优先。
         --check-in 首次默认 300 秒，后续由检查者约定；预估不是硬上限。
         只有用户明确设置的 --deadline 才形成截止。--foreground 在当前终端运行任务进程。
+      TEXT
+      "entry" => <<~TEXT,
+        orbit entry --provider omp --project DIR --thread ID --socket PATH --message-id ID
+        Internal bridge for the OMP extension's pre-start hook: classify the latest unbound native
+        user message (by its native message id) into start / no_start / root_decides. Never creates
+        a task; decision "start" tells the caller to use the normal start path with the returned
+        entry file. One JSON object on stdout; idempotent per message id.
       TEXT
     }.freeze
 
@@ -148,6 +159,8 @@ module Orbit
         update(argv)
       when "start"
         start(argv)
+      when "entry"
+        entry(argv)
       when "run"
         task = TaskRecord.new(required_argument!(argv, "task directory"))
         raise ArgumentError, "unexpected arguments" unless argv.empty?
@@ -169,7 +182,8 @@ module Orbit
         raise ArgumentError, "unknown command #{command.inspect}; run orbit --help"
       end
     rescue ArgumentError, OptionParser::ParseError, SystemCallError, Connection::Error, CheckRunner::Error,
-           WorkspaceBinding::Error, ModelEvidenceCache::Error, ModelCandidatePool::Error, JSON::ParserError => error
+           WorkspaceBinding::Error, ModelEvidenceCache::Error, ModelCandidatePool::Error, JSON::ParserError,
+           PrestartClassifier::Error, PrestartLedger::Error, JevAdvisor::Error => error
       warn "orbit: #{error.message}"
       1
     end
@@ -270,6 +284,7 @@ module Orbit
         opts.on("--estimate-tokens N", Integer) { |value| options[:estimate]["tokens"] = value }
         opts.on("--deadline ISO8601") { |value| options[:deadline] = Time.iso8601(value).utc.iso8601 }
         opts.on("--foreground") { options[:foreground] = true }
+        opts.on("--entry-file FILE") { |value| options[:entry_file] = value }
       end
       parser.parse!(argv)
       raise ArgumentError, "unexpected arguments: #{argv.join(' ')}" unless argv.empty?
@@ -277,6 +292,7 @@ module Orbit
       raise ArgumentError, "--socket is required" if options[:socket].to_s.empty?
       raise ArgumentError, "--check-in must be positive" unless options[:interval].positive?
       raise ArgumentError, "choose --message-id or --prompt-file" if options[:message_id] && options[:prompt_file]
+      entry_document = entry_trace(options[:entry_file]) if options[:entry_file]
       if options[:estimate].values.compact.any? { |value| !value.positive? || !value.finite? }
         raise ArgumentError, "estimates must be positive finite numbers"
       end
@@ -296,6 +312,11 @@ module Orbit
           raise ArgumentError, "the selected native user message was not found" unless message
           instruction = message.fetch("text")
           source = { "kind" => connection.instruction_source_kind, "id" => message.fetch("id") }
+          if entry_document && (entry_document["decision"] != "start" || entry_document["message_id"] != message.fetch("id"))
+            raise ArgumentError, "entry decision does not authorize this native message"
+          end
+          previous = PrestartLedger.new(File.realpath(options[:project])).task_for(message.fetch("id"))
+          raise ArgumentError, "this native message already has an Orbit task: #{previous}" if previous
         end
         options[:model], options[:selection] = select_checker_model(options[:model], connection, options[:project], instruction)
       ensure
@@ -311,6 +332,10 @@ module Orbit
       )
       state = record.state
       state["hard_deadline"] = options[:deadline] if options[:deadline]
+      # The pre-start entry decision that led here (orbit entry → extension
+      # start): stored verbatim so the task record carries its own trace of
+      # why the entry path started it.
+      state["entry"] = entry_document if entry_document
       state["needs_initial_delivery"] = true if options[:prompt_file]
       record.save(state)
       if options[:foreground]
@@ -326,6 +351,82 @@ module Orbit
         puts JSON.generate({ "task_directory" => record.path, "status" => "starting", "pid" => pid })
         0
       end
+    end
+
+    # Internal bridge for the OMP extension's pre-start hook
+    # (before_provider_request, main session, no bound task). Reads the native
+    # user message by its id through the same socket protocol as `start`,
+    # classifies it once per message id and reports what the caller should do.
+    # This command never creates a task and never dispatches members; a
+    # "start" decision instructs the caller to use the normal start path with
+    # the returned entry file so the task record keeps its own trace.
+    def entry(argv)
+      options = { project: Dir.pwd, provider: "omp", thread: nil, socket: nil, message_id: nil }
+      OptionParser.new do |opts|
+        opts.on("--project DIR") { |value| options[:project] = value }
+        opts.on("--provider NAME", %w[omp]) { |value| options[:provider] = value }
+        opts.on("--thread ID") { |value| options[:thread] = value }
+        opts.on("--socket PATH") { |value| options[:socket] = value }
+        opts.on("--message-id ID") { |value| options[:message_id] = value }
+      end.parse!(argv)
+      raise ArgumentError, "unexpected arguments: #{argv.join(' ')}" unless argv.empty?
+      raise ArgumentError, "--thread is required" if options[:thread].to_s.empty?
+      raise ArgumentError, "--socket is required" if options[:socket].to_s.empty?
+      raise ArgumentError, "--message-id is required" if options[:message_id].to_s.empty?
+
+      project = File.realpath(options[:project])
+      connection_record = { "provider" => options[:provider], "socket" => File.expand_path(options[:socket]),
+                            "thread_id" => options[:thread] }
+      ledger = PrestartLedger.new(project)
+      connection = Connection.open(connection_record)
+      begin
+        connection.connect!
+        unless File.realpath(connection.state.fetch("cwd")) == project
+          raise ArgumentError, "Root session belongs to a different project"
+        end
+        message = connection.user_message(id: options[:message_id])
+        raise ArgumentError, "the selected native user message was not found" unless message
+
+        message_id = message.fetch("id")
+        task_directory = ledger.task_for(message_id)
+        previous = ledger.lookup(message_id)
+        if previous || task_directory
+          # Idempotence: the same native message is classified and started at
+          # most once. An existing task wins over any recorded decision.
+          puts JSON.generate(
+            "schema_version" => 1, "message_id" => message_id, "decision" => "duplicate",
+            "previous_decision" => previous && previous["decision"], "task_directory" => task_directory,
+            "reason" => "this native message was already classified or already has an Orbit task"
+          )
+          return 0
+        end
+
+        classifier = PrestartClassifier.new(project_root: project)
+        decision = classifier.decide(message.fetch("text"))
+        document = decision.merge(
+          "message_id" => message_id, "at" => Time.now.utc.iso8601,
+          "prompt_excerpt" => classifier.excerpt(message.fetch("text"))
+        )
+        entry_file = ledger.record(message_id, document)
+        document["entry_file"] = entry_file if document["decision"] == "start"
+        if document["decision"] == "root_decides"
+          document["prompt"] = "本条入口判定不确定（#{decision.fetch('reason')}）；是否启动 Orbit 由 Root 显式决定，" \
+                               "确认值得独立检查后用 orbit 工具 start。"
+        end
+        puts JSON.generate(document)
+        0
+      ensure
+        connection.close
+      end
+    end
+
+    # Loads and validates the entry trace document for `start --entry-file`.
+    def entry_trace(path)
+      document = JSON.parse(read_input(path))
+      raise ArgumentError, "the entry file must be one JSON object" unless document.is_a?(Hash)
+      raise ArgumentError, "the entry file has no decision" unless document["decision"].is_a?(String)
+
+      document
     end
 
     # ADR-009 selection is shared with TaskRuntime so that `orbit start` and
@@ -478,10 +579,26 @@ module Orbit
       when "remove"
         model = required_argument!(argv, "provider/id")
         raise ArgumentError, "usage: orbit model-candidates remove <provider/id>" unless argv.empty?
-
         report_model_candidates(ModelCandidatePool.new.remove(model))
+      when "apply-delta"
+        # One atomic net-delta commit for the extension's multi-select picker:
+        # `base` is the snapshot the caller took when its picker opened, and
+        # identifiers are comma-separated (a provider/id never contains a
+        # comma). A same-ID change since the snapshot refuses the whole commit
+        # (exit 1 via the top-level handler) instead of overwriting it.
+        options = { "base" => [], "add" => [], "remove" => [] }
+        OptionParser.new do |parser|
+          options.each_key do |flag|
+            parser.on("--#{flag} LIST") { |value| options[flag] = value.split(",") }
+          end
+        end.parse!(argv)
+        raise ArgumentError, "usage: orbit model-candidates apply-delta --base LIST --add LIST --remove LIST" unless argv.empty?
+
+        report_model_candidates(ModelCandidatePool.new.apply_delta(
+                                  base: options.fetch("base"), add: options.fetch("add"), remove: options.fetch("remove")
+                                ))
       else
-        raise ArgumentError, "usage: orbit model-candidates list|add <provider/id>|remove <provider/id>"
+        raise ArgumentError, "usage: orbit model-candidates list|add <provider/id>|remove <provider/id>|apply-delta --base LIST --add LIST --remove LIST"
       end
     end
 

@@ -97,12 +97,65 @@ module Orbit
       end
     end
 
+    class ConflictError < Error
+      attr_reader :conflicts
+
+      def initialize(conflicts)
+        @conflicts = conflicts.freeze
+        super("model candidate pool changed since the snapshot for: #{conflicts.sort.join(', ')}; " \
+              "refresh the list and commit again")
+      end
+    end
+
+    # Applies ONE net add/remove delta computed against `base`, the caller's
+    # opening snapshot of the pool, in a single lock/read/write so a multi-
+    # select commit is atomic: every identifier lands or none does. Edits other
+    # sessions made to DIFFERENT identifiers in the meantime are preserved.
+    # If any identifier this delta touches changed pool membership since the
+    # snapshot (another session added an id this caller is adding, or removed
+    # one it is removing), the whole commit is refused as ConflictError with
+    # the conflicting identifiers — never silently overwritten. The caller
+    # then re-reads the pool and re-selects.
+    #
+    # `base` may be empty (the pool was empty when the snapshot was taken);
+    # `add`/`remove` must be disjoint, `add` must name identifiers absent from
+    # `base` and `remove` identifiers present in it. An entirely empty delta
+    # is a read-only no-op. Returns the resulting pool.
+    def apply_delta(base:, add: [], remove: [])
+      base_models = normalize_list(base)
+      additions = normalize_list(add)
+      removals = normalize_list(remove)
+      raise ValidationError, "a model candidate cannot be both added and removed in one delta" unless (additions & removals).empty?
+      raise ValidationError, "delta additions must not be in the snapshot pool" unless (additions & base_models).empty?
+      raise ValidationError, "delta removals must be in the snapshot pool" unless (removals - base_models).empty?
+      return read if additions.empty? && removals.empty?
+
+      base_members = base_models.to_h { |model| [model, true] }
+      with_lock do
+        current = stored_models
+        current_members = current.to_h { |model| [model, true] }
+        conflicts = (additions | removals).select { |model| current_members.key?(model) != base_members.key?(model) }
+        raise ConflictError, conflicts unless conflicts.empty?
+
+        kept = current.reject { |model| removals.include?(model) }
+        pending = additions.reject { |model| kept.include?(model) }
+        pending.empty? && kept == current ? current : write(kept + pending)
+      end
+    end
+
     private
 
     def normalize(models)
       list = models.is_a?(Array) ? models : [models]
       raise ValidationError, "at least one model candidate is required" if list.empty?
 
+      normalize_list(list)
+    end
+
+    # Same identifier normalization, but an empty list is allowed: a delta's
+    # snapshot side may legitimately be the empty pool.
+    def normalize_list(models)
+      list = models.is_a?(Array) ? models : [models]
       list.map { |model| validate_identifier(model) }.uniq
     end
 

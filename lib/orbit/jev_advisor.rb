@@ -5,12 +5,19 @@ require "json"
 require "net/http"
 require "uri"
 
+require_relative "judgment"
+require_relative "type_safe_judgment"
+
 module Orbit
   # A bounded semantic observation. Jev supplies probabilities; TaskRuntime
-  # owns every check, correction and stop decision.
+  # owns every check, correction and stop decision. All external judgment
+  # calls go through the unified JudgmentRequest/JudgmentResult model
+  # (ADR-008 2026-09-26 supplement): the TypeSafe adapter owns transport and
+  # response mapping only, and these public methods keep their existing
+  # signatures and result shapes so calibrated callers are unchanged.
   class JevAdvisor
-    ENDPOINT = URI("https://api.typesafe.ai/v1/systemone")
-    MODEL = "jev-latest"
+    ENDPOINT = TypeSafeJudgment::ENDPOINT
+    MODEL = TypeSafeJudgment::DEFAULT_MODEL
     QUESTIONS = {
       "stuck" => {
         "type" => "noul",
@@ -32,6 +39,16 @@ module Orbit
         "instructions" => "Is there likely a bounded, independent subtask in the effective task requirements or remaining work that an authorized execution member could deliver now while the main agent continues? Prioritize the instruction, basis and amendments over whether the main agent has already mentioned or started that subtask in recent activity. Explicit disjoint files, modules or acceptance surfaces are strong evidence. Count only separable work with a clear result; do not count trivial, overlapping, preference-only or dependency-blocked work. Member availability is enforced separately by the caller, so do not lower this task-structure probability merely because availability is unknown.",
         "criteria" => { "true" => "The effective requirements or remaining work expose a concrete, substantive and separable subtask with its own result", "false" => "The remaining work is coupled, trivial, dependency-blocked or has no clear separable result" }
       }
+    }.freeze
+
+    # Question-set versions for traceability; the wording above is frozen
+    # with docs/plan/jev-delegation-optimization.md and ADR-009. Bump on any
+    # wording change so recorded judgments stay interpretable.
+    QUESTION_SET_VERSIONS = {
+      "observation" => "jev-observation-1",
+      "delegation" => "jev-delegation-1",
+      "candidates" => "jev-candidates-1",
+      "checker_quality" => "jev-checker-quality-1"
     }.freeze
 
     # Second-stage delegation judgment, asked only after the caller's own
@@ -91,8 +108,16 @@ module Orbit
       @endpoint = endpoint
     end
 
+    # Provider-level judgment channel with this advisor's credentials and an
+    # explicitly chosen model; the calibrated entry gate pins a versioned id
+    # instead of the in-task jev-latest alias.
+    def judgment_provider(model: MODEL)
+      TypeSafeJudgment.new(api_key: @api_key, endpoint: @endpoint, model: model)
+    end
+
     def assess(state:)
-      post_questions(state: state, questions: QUESTIONS)
+      post_questions(state: state, questions: QUESTIONS,
+                     question_set_version: QUESTION_SET_VERSIONS.fetch("observation"))
     end
 
     # Second-stage delegation judgment. The caller supplies the full bounded
@@ -101,7 +126,8 @@ module Orbit
     # caches, or infer model names, and a missing key is the caller's fact to
     # structure around, not something this stage fabricates.
     def assess_delegation(state:)
-      post_questions(state: state, questions: DELEGATION_QUESTIONS)
+      post_questions(state: state, questions: DELEGATION_QUESTIONS,
+                     question_set_version: QUESTION_SET_VERSIONS.fetch("delegation"))
     end
 
     # Per-candidate pool judgment (ADR-009 §3): one quality-line and one
@@ -125,12 +151,13 @@ module Orbit
                           "false" => "Delegation to this candidate is unlikely to shorten the critical path, or the evidence is insufficient" }
         }
       end
-      result = post_questions(state: state, questions: questions)
+      result = post_questions(state: state, questions: questions,
+                              question_set_version: QUESTION_SET_VERSIONS.fetch("candidates"))
       scores = candidates.each_index.to_h do |index|
         [index.to_s, { "quality" => result["scores"].fetch("candidate_#{index}_quality"),
                        "time" => result["scores"].fetch("candidate_#{index}_time") }]
       end
-      { "model" => result["model"], "scores" => scores, "usage" => result["usage"] }
+      result.merge("scores" => scores)
     end
 
     # ADR-009 checker quality and time gate. The caller supplies the current
@@ -173,47 +200,56 @@ module Orbit
           }
         }
       end
-      result = post_questions(state: state, questions: questions)
+      result = post_questions(state: state, questions: questions,
+                              question_set_version: QUESTION_SET_VERSIONS.fetch("checker_quality"))
       scores = list.each_with_index.to_h do |candidate, index|
         [candidate.fetch("model").to_s,
          { "quality" => result.fetch("scores").fetch("quality_#{index}"),
            "time" => result.fetch("scores").fetch("time_#{index}") }]
       end
-      { "model" => result.fetch("model"), "scores" => scores, "usage" => result["usage"] }
+      result.merge("scores" => scores)
     end
 
     private
 
-    def post_questions(state:, questions:)
-      raise Error, "TYPESAFE_API_KEY is missing" if @api_key.empty?
+    # Unified-model poster: builds a JudgmentRequest, judges through the
+    # TypeSafe adapter, validates completeness against the requested ids and
+    # re-raises as JevAdvisor::Error on any unavailable result so existing
+    # fail-closed callers keep their behavior. The wire format and the frozen
+    # question wording are unchanged.
+    def post_questions(state:, questions:, question_set_version:)
+      request = JudgmentRequest.new(
+        state: state, questions: self.class.model_questions(questions),
+        question_set_version: question_set_version, provider: TypeSafeJudgment::PROVIDER, model: MODEL
+      )
+      result = judgment_provider.judge(request)
+      raise Error, result.error if result.unavailable?
+      raise Error, "the judgment did not answer every requested question" unless result.complete_for?(request)
 
-      request = Net::HTTP::Post.new(@endpoint)
-      request["Authorization"] = "Bearer #{@api_key}"
-      request["Content-Type"] = "application/json"
-      request.body = JSON.generate("model" => MODEL, "state" => state, "questions" => questions)
-      response = Net::HTTP.start(@endpoint.host, @endpoint.port, use_ssl: @endpoint.scheme == "https",
-                                 open_timeout: 3, read_timeout: 5, write_timeout: 3) do |http|
-        http.request(request)
-      end
-      raise Error, "TypeSafe HTTP #{response.code}" unless response.is_a?(Net::HTTPSuccess)
-
-      payload = JSON.parse(response.body)
-      raise Error, "invalid TypeSafe response" unless payload.is_a?(Hash) && payload["answers"].is_a?(Hash) &&
-                                                      payload["model"].is_a?(String)
-      answers = payload.fetch("answers")
-      scores = questions.to_h do |name, _question|
-        answer = answers.fetch(name)
-        raise Error, "invalid #{name} answer" unless answer.is_a?(Hash)
-        value = answer.fetch("noul")
-        raise Error, "invalid #{name} answer" unless answer["type"] == "noul" && value.is_a?(Numeric) && value.finite? && value.between?(0, 1)
-
-        [name, value]
-      end
-      { "model" => payload.fetch("model"), "scores" => scores, "usage" => payload["usage"] }
+      {
+        "provider" => result.provider, "model" => result.actual_model,
+        "question_set_version" => question_set_version,
+        "scores" => questions.to_h { |name, _question| [name, result.probability_true(name)] },
+        "usage" => result.usage
+      }
     rescue Error
       raise
+    rescue JudgmentRequest::Error, JudgmentResult::Error, TypeSafeJudgment::Error => error
+      raise Error, error.message
     rescue StandardError => error
       raise Error, "TypeSafe assessment failed: #{error.class}"
+    end
+
+    # The frozen question constants use the TypeSafe wire shape
+    # (type/instructions/criteria); the unified model carries the same wording
+    # as instruction/true_criterion/false_criterion and the adapter maps it
+    # back, byte-identically, on the wire.
+    def self.model_questions(questions)
+      questions.to_h do |id, question|
+        [id, { "instruction" => question.fetch("instructions"),
+               "true_criterion" => question.fetch("criteria").fetch("true"),
+               "false_criterion" => question.fetch("criteria").fetch("false") }]
+      end
     end
 
     def self.observation(inputs:, host:, members:, project_root:, artifact_digest:, elapsed_seconds:, member_options: nil)

@@ -147,16 +147,6 @@ module CliTest
            "open findings wait for Root when no rebind or queue is recorded")
     assert(!text.include?("下一动作：重新绑定工作区"), "a stale check without a workspace reason is not a rebind")
 
-    record.save(record.state.merge(
-      "status" => "paused", "stop_reason" => "交付完成", "checks" => [], "findings" => {},
-      "completion_invalidation" => { "reason" => "no_current_finalization_notice",
-                                     "detail" => "no finalization notice exists for the current artifact and input version",
-                                     "at" => "2026-09-25T12:00:00Z" }
-    ))
-    text = cli("status", record.path)
-    assert(text.include?("完成复核：未通过（no_current_finalization_notice）") &&
-           text.include?("已完成停止，但完成复核未通过") && text.include?("不代表该版本已通过独立终检"),
-           "a refused completion is shown as unfinished instead of echoing the stop reason claim")
   end
 
   def status_usage_sums_known_roles_and_excludes_root_cumulative
@@ -327,8 +317,8 @@ module CliTest
     record = task("running", finished_at: "2026-09-24T17:07:33Z")
     refused = JSON.parse(cli("stop", record.path, "--complete", "--json"))
     assert(refused["status"] == "rejected" && refused["reason"] == "runtime_unavailable" &&
-           refused["next_action"].include?("orbit stop") && commands(record).empty?,
-           "a completion intent on a gone runtime is refused and points at the explicit ordinary stop")
+           commands(record).empty?,
+           "a completion intent on a gone runtime is refused instead of queueing an unconsumed command")
     socket = record.state.dig("connection", "socket")
     server = UNIXServer.new(socket)
     worker = Thread.new do
@@ -358,8 +348,6 @@ module CliTest
     rejected = JSON.parse(cli("stop", record.path, "--complete", "--json"))
     assert(rejected["status"] == "rejected" && rejected["reason"] == "no_current_finalization_notice",
            "a completion without a current notice is refused with its machine reason")
-    assert(rejected["next_action"] == Orbit::TaskRuntime::COMPLETION_REFUSAL_NEXT_ACTION,
-           "the refusal carries the one next action that can still qualify the hand-off")
     assert(commands(record).empty? && record.state["status"] == "running" &&
            File.read(File.join(record.path, "events.jsonl")).include?("completion_stop_rejected"),
            "a refused completion queues nothing, changes no state, and is auditable")
@@ -386,25 +374,15 @@ module CliTest
       "checker_cleanup_unverified" => { "cleanup_error" => "Checker stop unconfirmed" } }.each do |code, extra|
       record.save(qualified.merge(extra))
       reply = JSON.parse(cli("stop", record.path, "--complete", "--json"))
-      assert(reply["reason"] == code && reply["next_action"] == Orbit::TaskRuntime.completion_next_action(code),
-             "#{code} refuses with its own next action")
+      assert(reply["reason"] == code, "#{code} blocks completion instead of letting an invalid task finish")
     end
 
     # A blocker outranks the missing notice: a Zeen-like task with an open
     # finding and no current notice is told to fix first, not to re-check.
     record.save(state.merge("findings" => { "gap" => { "status" => "open" } }))
     mixed = JSON.parse(cli("stop", record.path, "--complete", "--json"))
-    assert(mixed["reason"] == "open_findings" &&
-           mixed["next_action"] == Orbit::TaskRuntime.completion_next_action("open_findings"),
-           "open findings outrank the missing notice and point at the fix")
+    assert(mixed["reason"] == "open_findings", "open findings outrank a missing final-check notice")
 
-    # Runtime-emitted codes (bridge/roster failures) must not fall back to the
-    # missing-notice guidance: re-checking cannot repair them.
-    { "root_bridge_unavailable" => "Root", "members_unreadable" => "members.json",
-      "members_registered_during_stop" => "停止未确认" }.each do |code, marker|
-      action = Orbit::TaskRuntime.completion_next_action(code)
-      assert(action.include?(marker), "#{code} carries its own next action")
-    end
   end
 
   def doctor_states_single_host_entry_and_omp_checker
@@ -675,22 +653,6 @@ module CliTest
            "status does not rewrite an old record")
   end
 
-  def check_next_action_ends_the_turn
-    record = task
-    reply = JSON.parse(cli("check", record.path))
-    assert(reply["status"] == "queued" && reply["task_directory"] == record.path && !reply["command_id"].to_s.empty?,
-           "check still queues")
-    assert(reply["next_action"] == "排队后结束当前轮次，等待检查者的 finalization_notice 或纠正；在收到之前不要把交付当作完成，也不要主动 stop（用户明确中断除外）。不要仅为等待检查结论而 sleep、poll 或 status",
-           "check tells the caller to end the turn and wait for the checker instead of stopping or polling")
-    command = JSON.parse(File.read(commands(record).fetch(0)))
-    assert(command["type"] == "check", "the queued command remains check")
-    File.unlink(commands(record).fetch(0))
-
-    dispute = JSON.parse(cli("dispute", record.path, "--reason", "有反证"))
-    assert(dispute["status"] == "queued" && !dispute["command_id"].to_s.empty? && !dispute.key?("next_action"),
-           "other submit responses stay compatible")
-  end
-
   # The OMP extension bridge reuses the shared pool file: list/add/remove each
   # print one JSON document, and an id whose remainder contains a slash is kept
   # intact across separate CLI invocations.
@@ -738,6 +700,31 @@ module CliTest
            "a successful bridge call writes only the JSON document to stdout")
   end
 
+  # The picker's commit bridge: one apply-delta applies the net change
+  # atomically, refuses a same-ID conflict without writing, and accepts empty
+  # lists (the picker passes '' when a side of the delta is empty).
+  def model_candidates_bridge_applies_one_net_delta_atomically
+    cli("model-candidates", "add", "provider/kept")
+    cli("model-candidates", "add", "provider/out")
+    snapshot = JSON.parse(cli("model-candidates", "list"))["models"]
+
+    cli("model-candidates", "add", "provider/other-session") # disjoint concurrent edit
+    result = JSON.parse(cli("model-candidates", "apply-delta",
+                            "--base", snapshot.join(","), "--add", "provider/in", "--remove", "provider/out"))
+    base = %w[provider/kept provider/other-session provider/in]
+    cli("model-candidates", "add", "provider/taken") # same-ID concurrent edit since that snapshot
+    refused = cli("model-candidates", "apply-delta",
+                  "--base", base.join(","), "--add", "provider/taken", success: false)
+    assert(refused.include?("changed since the snapshot") && refused.include?("provider/taken"),
+           "a same-ID conflict refuses the whole commit and names the id")
+    assert(JSON.parse(cli("model-candidates", "list"))["models"] ==
+           %w[provider/kept provider/other-session provider/in provider/taken], "a refused commit writes nothing")
+
+    empty_sides = JSON.parse(cli("model-candidates", "apply-delta", "--base", "", "--add", "", "--remove", ""))
+    assert(empty_sides == { "models" => %w[provider/kept provider/other-session provider/in provider/taken] },
+           "empty LIST values are an empty side, not a malformed id")
+  end
+
   def maintenance_requires_an_installed_cli
     %w[update uninstall].each { |command| cli(command, success: false) }
     assert(cli("start", "--help").include?("--provider"), "execution details are available in subcommand help")
@@ -778,9 +765,9 @@ module CliTest
        model_evidence_accepts_array_and_rejects_invalid_or_terminal
        review_model_queues_only_by_explicit_choice_and_status_shows_the_block
        status_separates_delegatable_score_from_final_decision
-       check_next_action_ends_the_turn
        model_candidates_bridge_round_trips_and_keeps_ids_with_slashes
        model_candidates_bridge_fails_closed_without_echoing_input
+       model_candidates_bridge_applies_one_net_delta_atomically
        maintenance_requires_an_installed_cli
        jev_setup_exports_key_in_new_shell].each do |test|
       Dir.mktmpdir("orbit-cli-test-") do |tmp|

@@ -60,6 +60,203 @@ const memberStopConfirmations = new Map();
 // on confirmed stop.
 const memberRetainedSessions = new Map();
 
+// Native ask call observation, also MODULE-scoped for the same re-binding
+// reason: question excerpts are cached from the tool_execution_start events
+// of the SAME session that later reports the skip, but the subscriptions that
+// see them can be installed by different extension closures (root remember()
+// vs a re-bound child trackMemberTools backstop). Bounded FIFOs: a long
+// session must not accumulate unbounded ask-call state.
+const askCallArgs = new Map();      // tool call id -> bounded question excerpt
+const askEmittedEvents = new Set(); // tool call ids already emitted (once-only)
+const ASK_CACHE_CAP = 200;
+function rememberAskArgs(event) {
+  if (event.toolName !== 'ask' || typeof event.toolCallId !== 'string') return;
+  const questions = event.args?.questions;
+  if (!Array.isArray(questions) || !questions.length) return;
+  const texts = questions
+    .filter(question => question && typeof question.question === 'string' && question.question.trim())
+    .map(question => question.question.trim());
+  if (!texts.length) return;
+  askCallArgs.set(event.toolCallId, texts.join(' / ').slice(0, 200));
+  if (askCallArgs.size > ASK_CACHE_CAP) askCallArgs.delete(askCallArgs.keys().next().value);
+}
+
+// --- ADR-009 keyboard multi-select picker (proposal B, 2026-09-26) --------
+// Pure component over ctx.ui.custom(): no OMP imports, no IO. The extension
+// command supplies entries (session-available first, pooled-but-unavailable
+// last), the opening snapshot and an async commit; the component owns search,
+// cursor/scroll, checkbox state and the ONE Enter-driven net-delta submit.
+// Space on an unavailable row can only uncheck (stale pool entries are
+// removable, never addable); Esc closes without writing; a failed commit
+// keeps the selection on screen with the error so nothing must be re-picked.
+const PICKER_MAX_QUERY = 64;
+const PICKER_LIST_ROWS = 12;
+
+// Raw terminal data -> canonical key. Covers the legacy sequences OMP's TUI
+// forwards plus the kitty CSI-u forms for the bound keys; anything else is
+// ignored (returns null) so unknown escapes can never corrupt the query.
+export function decodePickerKey(data) {
+  if (typeof data !== 'string' || !data.length) return null;
+  switch (data) {
+    case '\r': case '\n': return 'enter';
+    case ' ': return 'space';
+    case '\x7f': case '\b': return 'backspace';
+    case '\x1b': case '\x03': return 'escape'; // bare Esc; ctrl+c cancels like Esc
+    case '\x1b[A': case '\x1bOA': return 'up';
+    case '\x1b[B': case '\x1bOB': return 'down';
+    case '\x1b[5~': return 'pageUp';
+    case '\x1b[6~': return 'pageDown';
+    default: break;
+  }
+  const kitty = data.match(/^\x1b\[(\d+)(?::\d+)?u$/);
+  if (kitty) {
+    return { 13: 'enter', 32: 'space', 27: 'escape', 127: 'backspace' }[Number(kitty[1])] ?? null;
+  }
+  if (data.length === 1) {
+    const code = data.charCodeAt(0);
+    return code >= 0x20 && code <= 0x7e ? `text:${data}` : null;
+  }
+  return null;
+}
+
+// Case-insensitive subsequence match: typing glm52 finds zhipu/glm-5.2 the
+// way OMP's own model picker narrows by provider/id.
+function pickerQueryMatches(id, query) {
+  const wanted = query.toLowerCase();
+  let at = 0;
+  for (const ch of id.toLowerCase()) {
+    if (ch === wanted[at]) at++;
+    if (at === wanted.length) return true;
+  }
+  return at === wanted.length;
+}
+
+// The net delta Enter submits: adds are unchecked rows that are selectable
+// RIGHT NOW; removals are snapshot rows the user unchecked (available or
+// stale alike — stale entries only ever leave the pool).
+export function pickerNetDelta(entries, snapshot, selected) {
+  const available = new Set(entries.filter(entry => entry.available).map(entry => entry.id));
+  const add = [...selected].filter(id => !snapshot.has(id) && available.has(id));
+  const remove = [...snapshot].filter(id => !selected.has(id));
+  return { add, remove };
+}
+
+export function createModelPicker({ entries, snapshot, commit, done, listRows = PICKER_LIST_ROWS }) {
+  const rowFor = new Map(entries.map(entry => [entry.id, { id: entry.id, available: entry.available === true }]));
+  let current = [...rowFor.values()];
+  let selected = new Set([...snapshot].filter(id => rowFor.has(id)));
+  let base = new Set(snapshot);
+  let query = '';
+  let cursor = 0;
+  let scroll = 0;
+  let notice = null;
+  let error = null;
+  let committing = false;
+  let closed = false;
+  const finish = result => { if (!closed) { closed = true; done(result); } };
+
+  const filtered = () => query ? current.filter(entry => pickerQueryMatches(entry.id, query)) : current;
+  const clampCursor = () => {
+    const rows = filtered();
+    if (!rows.length) { cursor = 0; scroll = 0; return; }
+    cursor = Math.min(cursor, rows.length - 1);
+    if (cursor < scroll) scroll = cursor;
+    if (cursor >= scroll + listRows) scroll = cursor - listRows + 1;
+  };
+
+  function render(width) {
+    const rows = filtered();
+    const availableCount = current.filter(entry => entry.available).length;
+    const delta = pickerNetDelta(current, base, selected);
+    const head = [
+      `候选模型池 · 已选 ${selected.size} / 当前可选 ${availableCount}` +
+        (delta.add.length || delta.remove.length
+          ? ` · 本次待新增 ${delta.add.length} 待移出 ${delta.remove.length}` : ''),
+      `搜索: ${query || '（输入即过滤）'}`,
+    ];
+    const body = [];
+    if (rows.length) {
+      const start = Math.max(0, scroll);
+      const stop = Math.min(rows.length, start + listRows);
+      for (let index = start; index < stop; index++) {
+        const entry = rows[index];
+        const mark = selected.has(entry.id) ? '[x]' : '[ ]';
+        const pointer = index === cursor ? '>' : ' ';
+        const tag = entry.available ? '' : '  · 当前不可选，仅可移出';
+        body.push(`${pointer} ${mark} ${entry.id}${tag}`);
+      }
+      if (rows.length > stop) body.push(`  … 还有 ${rows.length - stop} 项（继续 ↓）`);
+      if (start > 0) body.unshift(`  … 以上还有 ${start} 项（继续 ↑）`);
+    } else {
+      body.push(query ? '（无匹配模型；Backspace 删词后重试）' : '（当前会话没有可选模型）');
+    }
+    const statusLine = error ? `保存失败：${error}` : notice ? `提示：${notice}` : null;
+    const footer = [
+      '↑/↓ 移动  Space 勾选/取消  Backspace 删除搜索  Enter 保存  Esc 取消',
+      ...(statusLine ? [statusLine] : []),
+    ];
+    return [...head, ...body, ...footer].map(line => line.length > width ? line.slice(0, width - 1) + '…' : line);
+  }
+
+  async function submit() {
+    const delta = pickerNetDelta(current, base, selected);
+    if (!delta.add.length && !delta.remove.length) return finish({ status: 'noop' });
+    committing = true;
+    error = null;
+    notice = '正在保存……';
+    try {
+      // The snapshot this delta was computed against travels WITH the commit:
+      // after a failure-refresh the picker's base may differ from the pool
+      // state at open, and the pool must compare against exactly what the
+      // user saw when they pressed Enter.
+      const result = await commit({ add: delta.add, remove: delta.remove, base: [...base] });
+      if (result && result.ok) return finish({ status: 'committed', add: delta.add, remove: delta.remove, models: result.models });
+      error = (result && result.error) || '保存失败（未知原因）';
+      if (result && Array.isArray(result.entries)) {
+        rowFor.clear();
+        for (const entry of result.entries) rowFor.set(entry.id, { id: entry.id, available: entry.available === true });
+        current = [...rowFor.values()];
+        selected = new Set([...selected].filter(id => rowFor.has(id)));
+      }
+      if (result && Array.isArray(result.snapshot)) base = new Set(result.snapshot);
+    } catch (failure) {
+      error = String(failure?.message || failure);
+    } finally {
+      committing = false;
+      notice = null;
+      clampCursor();
+    }
+  }
+
+  function handleInput(data) {
+    const key = decodePickerKey(data);
+    if (!key || closed || committing) return;
+    if (key === 'escape') return finish({ status: 'cancelled' });
+    if (key === 'enter') { void submit(); return; }
+    if (key === 'backspace') { query = query.slice(0, -1); error = null; notice = null; clampCursor(); return; }
+    if (key.startsWith('text:')) {
+      if (query.length < PICKER_MAX_QUERY) { query += key.slice(5); error = null; notice = null; clampCursor(); }
+      return;
+    }
+    const rows = filtered();
+    if (!rows.length) return;
+    if (key === 'up' || key === 'down') {
+      cursor = (cursor + (key === 'up' ? -1 : 1) + rows.length) % rows.length;
+    } else if (key === 'pageUp' || key === 'pageDown') {
+      const step = Math.max(1, listRows - 1);
+      cursor = Math.min(rows.length - 1, Math.max(0, cursor + (key === 'pageUp' ? -step : step)));
+    } else if (key === 'space') {
+      const entry = rows[cursor];
+      if (selected.has(entry.id)) { selected.delete(entry.id); error = null; notice = null; }
+      else if (entry.available) { selected.add(entry.id); error = null; notice = null; }
+      else { notice = `${entry.id} 当前不可选，只能移出，不能新增`; }
+    }
+    clampCursor();
+  }
+
+  return { render, handleInput, dispose() { closed = true; }, debugId: 'orbit-model-picker' };
+}
+
 // The SDK is supplied by OMP itself, including in its standalone binary.
 export function installOmpExtension(pi, sdk) {
   const entries = new Map();
@@ -77,7 +274,8 @@ export function installOmpExtension(pi, sdk) {
   const COLLAB_CAP = 500;
   const collabSeqByTask = new Map();    // task_dir -> last assigned seq (per-task, gap-free)
   const collabDroppedByTask = new Map(); // task_dir -> count of dropped oldest events
-  let host, currentContext, registryHookInstalled;
+  let lastKnownPool = null; // last successful pool read (status display only; never a second pool state)
+   let host, currentContext, registryHookInstalled;
 
   // --- ADR-009: user-selected model pool + session-isolated member agents ---
   // The pool only constrains what Orbit recommends. Root may still dispatch
@@ -94,7 +292,9 @@ export function installOmpExtension(pi, sdk) {
       const run = spawnSync(bin, argv, { encoding: 'utf8', timeout: 15000, maxBuffer: 1024 * 1024 });
       if (run.status !== 0 || !run.stdout) return { ok: false, reason: ((run.stderr || run.error?.message || `exit ${run.status}`) || 'no output').trim().slice(0, 200) };
       const parsed = JSON.parse(run.stdout.trim().split('\n').at(-1));
-      return { ok: true, models: Array.isArray(parsed?.models) ? parsed.models.filter(m => typeof m === 'string') : [] };
+      const models = Array.isArray(parsed?.models) ? parsed.models.filter(m => typeof m === 'string') : [];
+      lastKnownPool = models;
+      return { ok: true, models };
     } catch (error) {
       return { ok: false, reason: String(error?.message || error).slice(0, 200) };
     }
@@ -173,6 +373,49 @@ export function installOmpExtension(pi, sdk) {
     }
   }
 
+  // --- Native Ask interruption observation (proposal A, 2026-09-26) -------
+  // Verified against installed omp/18.3.2 (same surface as 18.2.8): when a
+  // pending message must be serviced, the agent loop synthesizes
+  // tool_execution_end events for calls the model emitted but never ran,
+  // with result.details.source 'interrupt_skipped' — {__synthetic:true,
+  // executed:false} when the call never invoked, {__interrupted:true,
+  // execution:'started'} when it was interrupted after start — and content
+  // text starting 'Skipped due to <reason>.'. The extension tool_result hook
+  // does NOT run for these (no execute happened), so the session event stream
+  // is the only reliable seam; both the Root and member subscriptions below
+  // already ride it. Recorded ONLY for the native ask tool (name 'ask') and
+  // only into the task-scoped collab buffer, so unbound sessions never
+  // surface. ask_resolved marks a later non-error ask end from the same
+  // agent: the runtime clears that agent's pending interrupts on it (a new
+  // ask has a new call id; per-ask granularity is not observable upstream).
+  // Orbit never answers or re-sends the question itself.
+  function askSkippedSource(result) {
+    const text = Array.isArray(result?.content)
+      ? (result.content.find(part => part && part.type === 'text' && typeof part.text === 'string')?.text ?? '') : '';
+    const match = typeof text === 'string' ? text.match(/^Skipped due to (.+?)\./) : null;
+    return match ? match[1].slice(0, 120) : null;
+  }
+  const isInterruptSkip = details => details?.source === 'interrupt_skipped'
+    && (details.__synthetic === true || (details.__interrupted === true && details.execution === 'started'));
+  function observeAskEnd(event, sessionId, agentId) {
+    if (event.toolName !== 'ask' || typeof event.toolCallId !== 'string') return;
+    const question = askCallArgs.get(event.toolCallId) ?? null;
+    askCallArgs.delete(event.toolCallId);
+    if (askEmittedEvents.has(event.toolCallId)) return;
+    if (event.isError === true && isInterruptSkip(event.result?.details)) {
+      askEmittedEvents.add(event.toolCallId);
+      observeCollab({ kind: 'ask_interrupted', at: Date.now(), session_id: sessionId, agent_id: agentId,
+        tool_call_id: event.toolCallId, question, skipped_source: askSkippedSource(event.result),
+        started: event.result?.details?.__interrupted === true });
+      return;
+    }
+    if (event.isError !== true) {
+      askEmittedEvents.add(event.toolCallId);
+      observeCollab({ kind: 'ask_resolved', at: Date.now(), session_id: sessionId, agent_id: agentId,
+        tool_call_id: event.toolCallId });
+    }
+  }
+
   function trackMemberTools(id, session) {
     if (memberActiveTools.has(id) || typeof session?.subscribe !== 'function') return;
     const active = new Set();
@@ -180,6 +423,7 @@ export function installOmpExtension(pi, sdk) {
     session.subscribe(event => {
       if (event.type === 'tool_execution_start') {
         active.add(event.toolCallId);
+        rememberAskArgs(event);
         if (event.toolName === 'hub' && memberTasks.has(id)) {
           const input = event.args || {};
           observeCollab({ kind: 'hub_call', at: Date.now(), session_id: session.sessionId ?? null, agent_id: id,
@@ -190,6 +434,7 @@ export function installOmpExtension(pi, sdk) {
       }
       if (event.type === 'tool_execution_end') {
         active.delete(event.toolCallId);
+        observeAskEnd(event, session.sessionId ?? null, id);
         if (event.toolName === 'hub' && memberTasks.has(id)) {
           const result = event.result;
           let text = null;
@@ -212,8 +457,16 @@ export function installOmpExtension(pi, sdk) {
     if (entries.has(id)) return entries.get(id);
     const entry = { id, session, activeTools: new Set(), pending: 0, interrupted: false };
     entry.unsubscribe = session.subscribe(event => {
-      if (event.type === 'tool_execution_start') entry.activeTools.add(event.toolCallId);
-      if (event.type === 'tool_execution_end') entry.activeTools.delete(event.toolCallId);
+      if (event.type === 'tool_execution_start') {
+        entry.activeTools.add(event.toolCallId);
+        rememberAskArgs(event);
+      }
+      if (event.type === 'tool_execution_end') {
+        entry.activeTools.delete(event.toolCallId);
+        // Ask observation only: the registry lookup is deliberately lazy so a
+        // normal tool end never pays for it.
+        if (event.toolName === 'ask') observeAskEnd(event, id, agentIdFor(id));
+      }
       if (event.type === 'message_end' && event.message.role === 'assistant' && sdk.isUserInterruptAbort(event.message)) entry.interrupted = true;
     });
     entries.set(id, entry);
@@ -404,21 +657,20 @@ export function installOmpExtension(pi, sdk) {
       case 'complete': return '已完成（独立检查与收尾通过）';
       case 'paused': return '已暂停（已确认停止）';
       case 'needs_user': return '需用户处理（已确认停止）';
-      case 'stop_unconfirmed': return '停止未确认';
+      case 'stop_unconfirmed': return '任务是否已停止还无法确认';
       case 'failed': return stopConfirmed(state) ? '运行失败（停止已确认）' : '运行失败（停止待核实）';
       default: break;
     }
     // A live status can outlive its runtime process. Never present that as an
     // execution phase: only the socket check plus a live runtime is control.
-    if (runtimeAbandoned(state)) return '运行时已失联（记录显示执行中）';
-    if (state.completion_stop_pending) return '可收尾（完成停止已排队，等待本轮结束）';
-    if (openFindings(state) > 0) return '待纠正（有开放问题）';
-    if (state.pending_finalization) return '待终检通知送达';
-    // A stored notice can outlive the version it was issued for, and state.json
-    // carries no current fingerprint; only the stop program gate can decide
-    // whether the current version still qualifies. Never claim it is current.
-    if (noticeCount(state) > 0) return '曾有终检通知（当前版本待 stop 程序门核验）';
-    return '执行中（尚未收到终检通知）';
+    if (runtimeAbandoned(state)) return '任务处理进程已退出，状态待清理';
+    if (state.completion_stop_pending) return '正在结束任务（等待当前回复结束）';
+    if (openFindings(state) > 0 || recheckClues(state) > 0) return '检查仍有待处理问题，尚未完成';
+    if (state.pending_finalization) return '最终检查已结束，等待结果通知';
+    // A stored notice can outlive the version it was issued for. Only the
+    // completion gate can decide whether the current files still qualify.
+    if (noticeCount(state) > 0) return '曾收到检查通过通知，任务尚未完成';
+    return '执行中，尚未完成最终检查';
   }
   // Mirrors TaskView.next_action for display only. The durable record stays the
   // authority; this never decides completion.
@@ -426,31 +678,81 @@ export function installOmpExtension(pi, sdk) {
     if (state.status === 'needs_user' || state.status === 'stop_unconfirmed') return '需要用户处理';
     if (state.status === 'failed') return stopConfirmed(state) ? '运行失败，停止已确认' : '运行失败，需核实停止';
     if (!activeState(state)) return null;
+    if (state.completion_stop_pending) return '等待当前回复结束，再确认任务是否完成';
     const lastCheck = Array.isArray(state.checks) ? state.checks.filter(c => c && typeof c === 'object').at(-1) : null;
     if (state.next_check_trigger === 'rebind' || state.next_check_basis === '工作区重新绑定'
       || (lastCheck && Array.isArray(lastCheck.stale_reasons) && lastCheck.stale_reasons.includes('workspace'))) return '重新绑定工作区';
-    if (state.next_check_manual === true) return '手动检查已排队';
+    if (state.next_check_manual === true) return '等待本次检查';
+    if (state.pending_finalization) return '等待最终检查结果通知';
+    if (openFindings(state) > 0 || recheckClues(state) > 0) return '等待当前助手处理检查问题';
+    if (noticeCount(state) > 0) return '当前助手核对是否有新改动，再申请完成或重新检查';
     const queued = (typeof state.next_check_at === 'string' && state.next_check_at) || (typeof state.next_check_trigger === 'string' && state.next_check_trigger);
-    if (openFindings(state) > 0 || recheckClues(state) > 0 || !queued) return '等待 Root';
-    return queued ? '检查已安排' : '无';
+    if (!queued) return '等待当前助手完成工作';
+    return '等待已安排的检查';
   }
   function phaseDirective(state) {
-    if (state.completion_stop_pending) return '完成停止已排队：正常结束本轮即可，不要重复 stop。';
-    if (openFindings(state) > 0 || recheckClues(state) > 0) return '仍有待处理问题：修正后继续，不要宣称完成或 stop。';
-    if (state.pending_finalization) return '终检通知待送达：结束本轮并等待 Orbit 唤醒，不要轮询。';
+    if (state.completion_stop_pending) return '结束任务的请求已提交。当前助手正常结束本轮回复；Orbit 随后核对并确认结果，不要重复提交。';
+    if (openFindings(state) > 0 || recheckClues(state) > 0) return '检查还有问题。当前助手先修正或核对，再重新检查；现在不能报告任务完成。';
+    if (state.pending_finalization) return '最终检查已结束，结果还在发送。当前助手结束本轮并等待通知，不必反复查询。';
     if (noticeCount(state) > 0)
-      return '曾有终检通知：它不保证对应当前版本；交付未再变化时可 orbit stop（intent 默认 complete）交由程序门核验，被拒绝就按 next_action 重检；产物/输入已变则先重检。仅用户要求中断时用 intent=pause。';
-    return '尚未收到终检通知：交付就绪后请求一次手动终检并结束本轮；收到 finalization_notice 再 stop。仅用户要求中断时用 intent=pause。';
+      return '此前收到过检查通过的通知，但之后文件或要求可能已变化，任务尚未完成。若没有新改动、实现也已验证，当前助手调用 orbit stop 申请完成；Orbit 会再次核对。若有新改动，先重新检查；申请被拒绝时按返回的原因处理。用户只要求暂停时不要申请完成。';
+    return '还没有收到最终检查通过的通知。当前助手完成工作并验证后，请求最终检查并结束本轮；收到结果再申请完成。用户要求暂停时按暂停处理。';
+  }
+  // Pending native-Ask interruptions (contract with TaskRuntime, 2026-09-26):
+  // an entry is pending while it has NO cleared_at, regardless of reminded_at
+  // (there is a legitimate window between recording and the one-shot reminder
+  // delivery). Orbit never answers or re-sends the question; Root re-issues
+  // the native ask if it is still needed.
+  function askInterruptLine(state) {
+    const interrupts = state.ask_interrupts;
+    if (!interrupts || typeof interrupts !== 'object') return null;
+    const pending = Object.values(interrupts)
+      .filter(entry => entry && typeof entry === 'object' && entry.cleared_at == null);
+    if (!pending.length) return null;
+    const sample = pending.find(entry => typeof entry.tool_call_id === 'string') ?? pending[0];
+    const reference = typeof sample.tool_call_id === 'string' ? `（参考编号 ${sample.tool_call_id.slice(0, 8)}）` : '';
+    return `有 ${pending.length} 个向用户提的问题被中断，尚未得到回答${reference}。当前助手若仍需要答案，请重新提问；Orbit 不会代答或自动重发。`;
+  }
+  // Collaboration state line (proposal item 4): members come from the durable
+  // record; the candidate pool is the process-local last-known read (no
+  // per-turn CLI spawn) and is omitted entirely when no read ever succeeded —
+  // never guessed. JEV text mirrors TaskView.jev_status wording.
+  function collaborationLine(state) {
+    const parts = [];
+    const memberCount = Array.isArray(state.members) ? state.members.length : 0;
+    parts.push(memberCount > 0 ? `已有 ${memberCount} 个协作成员` : '尚无协作成员');
+    if (Array.isArray(lastKnownPool))
+      parts.push(lastKnownPool.length > 0 ? `备选模型 ${lastKnownPool.length} 个` : '尚未选择备选模型');
+    const jev = state.jev;
+    if (jev && typeof jev === 'object') {
+      if (jev.status === 'unavailable') parts.push('自动评估暂时不可用');
+      else if (jev.evidence_status === 'requested') parts.push('等待当前助手补充模型资料');
+      else if (jev.evidence_status === 'used') parts.push('已参考模型资料');
+      else if (jev.evidence_status === 'incomplete') parts.push('模型资料不完整，暂不提供分工建议');
+      else if (jev.evidence_status === 'unavailable') parts.push('模型资料暂不可用');
+      else if (jev.evidence_status === 'mismatch') parts.push('提交资料与候选模型不符');
+      else if (jev.evidence_status === 'unknown') parts.push('无法识别待比较的模型');
+      else if (jev.evidence_status === 'unrequested') parts.push('尚未请求本次模型资料');
+      else if (typeof jev.evidence_status === 'string' && jev.evidence_status)
+        parts.push('模型资料状态需核对');
+      const decision = jev.delegation && typeof jev.delegation === 'object' ? jev.delegation.decision : null;
+      if (decision === 'declined') parts.push('目前不建议分工');
+      else if (decision === 'recommended')
+        parts.push(state.delegation_hint && Object.keys(state.delegation_hint).length
+          ? '有可供当前助手参考的分工建议' : '分工建议尚未保存，不能据此派发');
+    }
+    return parts.length ? `协作：${parts.join('；')}` : null;
   }
   function statusBlock(state) {
     const counts = [];
-    if (openFindings(state) > 0) counts.push(`开放问题 ${openFindings(state)}`);
-    if (recheckClues(state) > 0) counts.push(`待重新核对 ${recheckClues(state)}`);
-    if (noticeCount(state) > 0) counts.push('曾有终检通知（是否对应当前版本由 stop 程序门核验）');
+    if (openFindings(state) > 0) counts.push(`待解决问题 ${openFindings(state)} 个`);
+    if (recheckClues(state) > 0) counts.push(`待重新核对 ${recheckClues(state)} 个`);
     const next = nextActionLabel(state);
+    const context = [askInterruptLine(state), collaborationLine(state)].filter(Boolean);
     return [
       `${STATUS_MARKER} Orbit 任务 ${state.id}：${phaseLabel(state)}`,
-      counts.length ? counts.join('；') : '开放问题 0；尚无终检通知',
+      counts.length ? counts.join('；') : '当前未记录待解决的问题',
+      ...(context.length ? [context.join('；')] : []),
       ...(next && next !== '无' ? [`下一动作：${next}`] : []),
       phaseDirective(state),
     ].join('\n');
@@ -461,18 +763,18 @@ export function installOmpExtension(pi, sdk) {
   // user to an explicit, out-of-session cleanup instead of a stop.
   function unownedBlock(state, taskDir) {
     return [
-      `${STATUS_MARKER} Orbit 任务 ${state.id}：记录显示「${phaseLabel(state)}」，但属于上一次 OMP 运行`,
-      '本会话未接管该任务的连接：经本会话的 orbit status/check/amend/dispute/stop 都会因所有权不符被拒绝。不要据旧记录直接 stop，也不要假设它仍在受控。',
-      `处理：在终端用 orbit status "${taskDir}" --json 查明状态；若确认结束，用 orbit stop "${taskDir}" --reason "..." --json（运行时已退出时会走停止重试）；要继续工作请重新 orbit start 开新任务。`,
+      `${STATUS_MARKER} Orbit 任务 ${state.id}：来自上一次 OMP 会话，本会话不能控制`,
+      '当前会话不能继续检查或停止这个旧任务，也不能凭旧记录判断它已经完成。',
+      `请当前 Agent 在终端用 orbit status "${taskDir}" 查看实际状态；确需停止时用 orbit stop "${taskDir}" 清理。若要继续工作，请新建任务。`,
     ].join('\n');
   }
   // Owned record whose runtime process is gone: the connection is ours, but
   // there is nothing to execute. Cleanup is a stop retry, never execution.
   function abandonedBlock(state, taskDir) {
     return [
-      `${STATUS_MARKER} Orbit 任务 ${state.id}：运行时已失联（记录仍显示「执行中」，但记录的运行时进程已不在）`,
-      '本会话虽持有该任务记录，但运行时已退出：不会处理检查或完成。不要继续执行指引，也不要把旧记录当作完成。',
-      `清理：在本会话调用 orbit 工具 stop（task 传 "${taskDir}"；intent 默认即可，运行时已退出会走停止重试，只确认停止、不会完成）；需要继续工作请重新 start 开新任务。`,
+      `${STATUS_MARKER} Orbit 任务 ${state.id}：处理任务的进程已退出，尚未确认完成`,
+      '记录仍显示在执行，但任务进程已退出，不会继续检查或自动完成。',
+      `请当前 Agent 在终端运行 orbit stop "${taskDir}" 清理并确认停止；若要继续工作，请新建任务。`,
     ].join('\n');
   }
   function withStatusBlock(systemPrompt, block) {
@@ -981,6 +1283,7 @@ export function installOmpExtension(pi, sdk) {
     if (host) { await host.close({ requireConfirmation }); host = undefined; }
     for (const entry of entries.values()) entry.unsubscribe();
     entries.clear();
+    prestartSeen.clear();
     // NOTE: the per-session agent root is intentionally NOT removed here.
     // close() also runs on session_before_switch/branch/tree, where the same
     // OMP process keeps running and the root must survive for the next
@@ -1104,6 +1407,54 @@ export function installOmpExtension(pi, sdk) {
     try { ctx.abort?.(); } catch { /* abort is advisory */ }
     return event.payload;
   });
+  // The current native user entry is not persisted yet at before_agent_start.
+  // OMP 18.3.2 persists and awaits message_end before this hook, which still
+  // precedes the first provider request. Never use prompt text as an identity.
+  const prestartSeen = new Set();
+  pi.on('before_provider_request', async (event, ctx) => {
+    let sessionId = null;
+    try { sessionId = ctx.sessionManager?.getSessionId?.() ?? null; } catch { /* unowned */ }
+    if (!sessionId || !isMainSession(sessionId)) return event.payload;
+    const branch = ctx.sessionManager.getBranch();
+    let user = null;
+    for (let index = branch.length - 1; index >= 0; index--) {
+      const item = branch[index];
+      if (item.type !== 'message') continue;
+      if (item.message?.role === 'assistant') break;
+      if (item.message?.role === 'user' && item.message.attribution !== 'agent') {
+        user = item;
+        break;
+      }
+    }
+    if (!user?.id || !textOf(user.message.content).trim()) return event.payload;
+    const key = `${sessionId}:${user.id}`;
+    if (prestartSeen.has(key)) return event.payload;
+    prestartSeen.add(key);
+    try {
+      const bound = await resolveBoundTask(sessionId, ctx.cwd);
+      if (bound && activeState(bound.state)) return event.payload;
+      await connect(ctx);
+      const decision = await host.entry(user.id, ctx);
+      if (decision.decision === 'start') {
+        const started = JSON.parse(await host.execute({ action: 'start', message_id: user.id,
+          entry_file: decision.entry_file }, ctx));
+        taskDirs.set(sessionId, started.task_directory);
+        await refreshStatus(ctx, sessionId);
+      } else if (decision.decision === 'root_decides' && decision.prompt) {
+        pi.sendMessage({ customType: 'orbit-entry', content: decision.prompt, attribution: 'agent' },
+          { deliverAs: 'aside' });
+      }
+    } catch (error) {
+      const message = `Orbit 入口未能启动受控任务：${error?.message || error}。请停止本轮普通执行，检查原因后显式调用 orbit start；不能把未启动当作已受控。`;
+      try { ctx.ui?.notify(message, 'error'); } catch { process.stderr.write(`${message}\n`); }
+      pi.sendMessage({ customType: 'orbit-entry', content: message, attribution: 'agent' },
+        { deliverAs: 'aside' });
+      // A specifically requested controlled run must not silently continue as
+      // ordinary work after its start preflight failed.
+      try { ctx.abort?.(); } catch { /* the host may already be stopping */ }
+    }
+    return event.payload;
+  });
 
   // Native collaboration observation (M1.1): hub call intents carry the wire
   // content (op/to/from/message) at tool_call time; results carry what came
@@ -1167,7 +1518,7 @@ export function installOmpExtension(pi, sdk) {
     }
   });
   pi.registerCommand('orbit-models', {
-    description: 'List or edit the ADR-009 model candidate pool for this session',
+    description: 'Searchable keyboard multi-select for the ADR-009 model candidate pool: type to filter, Space toggles, Enter saves ONE net delta atomically, Esc cancels; add/remove subcommands remain for headless and script use',
     handler: async (args, ctx) => {
       const [sub, model] = (args || '').trim().split(/\s+/).filter(Boolean);
       const notify = (text, level = 'info') => { try { ctx.ui.notify(text, level); } catch { process.stderr.write(`${text}\n`); } };
@@ -1199,24 +1550,83 @@ export function installOmpExtension(pi, sdk) {
         if (sub) return notify('usage: /orbit-models [add|remove <provider/id>]', 'warning');
         const pool = runPoolCli(['list']);
         if (!pool.ok) return notify(`model pool unreadable: ${pool.reason}`, 'error');
-        const poolSet = new Set(pool.models);
-        let available = [];
-        try { available = (ctx.models?.list?.() ?? []).map(m => `${m.provider}/${m.id}`); } catch { available = []; }
-        const inPool = available.filter(id => poolSet.has(id));
-        const notInPool = available.filter(id => !poolSet.has(id));
-        const stale = pool.models.filter(id => !available.includes(id));
-        const lines = [
-          'Model candidate pool (ADR-009). Selectable in this session:',
-          ...inPool.map(id => `  [in pool]  ${id}`),
-          ...notInPool.map(id => `  [addable]  ${id}`),
-          ...(stale.length ? ['In pool but NOT selectable in this session (kept; removable):', ...stale.map(id => `  [stale]    ${id}`)] : []),
-          'Commands:',
-          '  /orbit-models add <provider/id>    (only IDs marked [addable])',
-          '  /orbit-models remove <provider/id>',
-          'Root 显式派发池外原生 Agent 不受此池限制。',
-        ];
-        notify(lines.join('\n'));
-        await syncSessionAgents(ctx);
+        const sessionModelIds = () => {
+          try { return (ctx.models?.list?.() ?? []).map(m => `${m.provider}/${m.id}`); } catch { return []; }
+        };
+        const poolEntries = (poolModels, available) => {
+          const listed = new Set(available);
+          const entries = available.map(id => ({ id, available: true }));
+          for (const id of poolModels) if (!listed.has(id)) entries.push({ id, available: false });
+          return entries;
+        };
+        // Legacy/headless surface: no UI (or a UI that cannot host custom
+        // components) still gets the plain text list and per-item commands.
+        const textListing = available => {
+          const poolSet = new Set(pool.models);
+          const stale = pool.models.filter(id => !available.includes(id));
+          return [
+            'Model candidate pool (ADR-009). Selectable in this session:',
+            ...available.filter(id => poolSet.has(id)).map(id => `  [in pool]  ${id}`),
+            ...available.filter(id => !poolSet.has(id)).map(id => `  [addable]  ${id}`),
+            ...(stale.length ? ['In pool but NOT selectable in this session (kept; removable):', ...stale.map(id => `  [stale]    ${id}`)] : []),
+            'Commands:',
+            '  /orbit-models add <provider/id>    (only IDs marked [addable])',
+            '  /orbit-models remove <provider/id>',
+            'Root 显式派发池外原生 Agent 不受此池限制。',
+          ].join('\n');
+        };
+        if (typeof ctx.ui?.custom !== 'function') {
+          notify(textListing(sessionModelIds()));
+          await syncSessionAgents(ctx);
+          return;
+        }
+        // One Enter = one net-delta commit (proposal B): the session's
+        // selectable list is re-read AT COMMIT TIME; a would-be add that is
+        // no longer selectable is refused with a refreshed view and nothing
+        // written; the pool applies the delta under its cross-process lock
+        // with same-ID conflict refusal, so different-ID concurrent edits by
+        // other sessions are preserved. Any failure hands the refreshed
+        // entries + snapshot back so the picker keeps the remaining
+        // selection for an immediate retry instead of forcing a re-pick.
+        const commitPoolDelta = async ({ add, remove, base }) => {
+          const availableNow = sessionModelIds();
+          const poolNow = runPoolCli(['list']);
+          if (!poolNow.ok) return { ok: false, error: `model pool unreadable: ${poolNow.reason}` };
+          const availableSet = new Set(availableNow);
+          const staleAdds = add.filter(id => !availableSet.has(id));
+          if (staleAdds.length)
+            return { ok: false, error: `待新增模型已不在当前会话可选列表：${staleAdds.join('、')}；列表已刷新，请重新确认`,
+              entries: poolEntries(poolNow.models, availableNow), snapshot: poolNow.models };
+          const applied = runPoolCli(['apply-delta',
+            '--base', base.join(','), '--add', add.join(','), '--remove', remove.join(',')]);
+          if (!applied.ok)
+            return { ok: false, error: `提交被拒绝：${applied.reason}`,
+              entries: poolEntries(poolNow.models, availableNow), snapshot: poolNow.models };
+          return { ok: true, models: applied.models };
+        };
+        // RPC mode's custom() resolves undefined without showing anything
+        // (verified in 18.3.2): any non-object outcome falls back to text.
+        let outcome = null;
+        try {
+          outcome = await ctx.ui.custom((_tui, _theme, _keybindings, done) =>
+            createModelPicker({ entries: poolEntries(pool.models, sessionModelIds()), snapshot: pool.models, done, commit: commitPoolDelta }));
+        } catch (error) {
+          notify(`picker unavailable (${error?.message || error}); falling back to the text list`, 'warning');
+        }
+        if (!outcome || typeof outcome !== 'object') {
+          notify(textListing(sessionModelIds()));
+          await syncSessionAgents(ctx);
+          return;
+        }
+        if (outcome.status === 'committed') {
+          const sync = await syncSessionAgents(ctx);
+          const listing = (outcome.models ?? []).join(', ');
+          return notify(`已保存候选池：${listing || '（空）'}。` + (sync.ok
+            ? ` 本会话 Agent：${sync.agents.map(a => `${a.name} -> ${a.model}`).join(', ') || '无（池为空或本会话无可选模型）'}`
+            : ` Agent 同步失败：${sync.reason}`), sync.ok ? 'info' : 'warning');
+        }
+        if (outcome.status === 'noop') return notify('没有净变化，未写入候选池。', 'info');
+        return notify('已取消：候选池未修改。', 'info');
       } catch (error) {
         notify(`/orbit-models failed: ${error?.message || error}`, 'error');
       }

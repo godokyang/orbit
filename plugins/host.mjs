@@ -81,6 +81,13 @@ export function createOrbitHost({ provider, project, dispatch, bind, reset }) {
       throw new Error('Task does not belong to the current Root on this host');
     return value;
   }
+  async function entry(messageId, context) {
+    if (closing) throw new Error('Agent host is closing');
+    const id = await bind(context);
+    await listen();
+    return run(['entry', '--provider', provider, '--project', project, '--thread', id,
+      '--socket', socket, '--message-id', messageId], project);
+  }
   return {
       async execute(a, context) {
         if (closing) throw new Error('Agent host is closing');
@@ -96,6 +103,7 @@ export function createOrbitHost({ provider, project, dispatch, bind, reset }) {
           if (!original) throw new Error('No original native user message found');
           const args = ['start', '--provider', provider, '--project', project, '--thread', id, '--socket', socket, '--message-id', original.id];
           if (a.review_model) args.push('--review-model', a.review_model);
+          if (a.entry_file) args.push('--entry-file', a.entry_file);
           if (a.check_in) args.push('--check-in', String(a.check_in));
           for (const file of a.basis || []) args.push('--basis', path.resolve(project, file));
           const result = { ...await run(args, project), next_action: guidance };
@@ -125,6 +133,7 @@ export function createOrbitHost({ provider, project, dispatch, bind, reset }) {
         if (a.action === 'status' && !terminal.has(result.status)) result.next_action = guidance;
         return JSON.stringify(result);
       },
+    entry,
     // Whether THIS process currently owns the durable record, using the same
     // (provider, socket, thread_id) test as ownedTask. After an OMP restart the
     // old record's socket is gone, so this is false: callers must not imply the

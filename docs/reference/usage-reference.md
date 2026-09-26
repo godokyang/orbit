@@ -25,7 +25,9 @@
 
 运行 `orbit jev setup`，按提示输入 TypeSafe key 并回车。命令不回显 key，将它写入 `${XDG_CONFIG_HOME:-$HOME/.config}/typesafe-ai/env`（权限 `0600`），并在 zsh／bash 启动文件中追加加载该文件的语句；重复运行可替换旧 key。重新打开终端，再从该终端启动 `orbit omp`。Orbit 运行时只读取启动进程的 `TYPESAFE_API_KEY`，不读取 Orbit 配置文件；当前终端和已有任务不会自动改变。
 
-原有的 `TYPESAFE_API_KEY` 环境变量继续可用，存在时优先于环境文件。新任务发生 Jev 判断后，`orbit status --json` 中的 `jev.model` 与 `jev.scores` 表示请求成功；`jev.unavailable` 表示服务调用失败。需要对某个项目关闭外发时，在项目根目录创建 `.orbit/jev-disabled`；移除后，新任务恢复使用 Jev。不要把环境文件放进项目或提交到 Git。
+原有的 `TYPESAFE_API_KEY` 环境变量继续可用，存在时优先于环境文件。新任务发生 Jev 判断后，`orbit status --json` 的 `jev.provider`、`jev.model`、`jev.question_set_version`、`jev.scores` 和 `jev.usage` 记录该次判断的来源、版本、概率及可得用量；`jev.unavailable` 表示服务调用失败。任务内既有问题使用 `jev-latest`，入口自动判定固定 `jev-1.13.0`，不是把任务内派发概率当作启动概率。需要对某个项目关闭外发时，在项目根目录创建 `.orbit/jev-disabled`；没有 key、服务不可用或禁用外发时，入口不自动启动，交 Root 显式决定。移除标记后，新请求才恢复使用 Jev。不要把环境文件放进项目或提交到 Git。
+
+入口判定以 OMP 原生用户消息 ID 去重；明确要求 Orbit 受控执行会启动任务，明确讨论／只读问答不启动。其余请求仅在执行授权概率 ≥ 0.80 且独立检查收益概率 ≥ 0.70 时自动启动；当前门槛来自有限的真实请求样本，不保证所有任务表达方式都能自动识别。项目可在 `.orbit/jev-entry.json` 指定已校准的入口阈值；切换 provider／模型必须重新校准，不能因判断失败静默回退。`orbit status --json` 的 `entry` 保留判定来源；入口自动启动不等于自动派发成员。
 
 执行成员由 Root 经 OMP 原生 `task` 派发，不再有按宿主 kind 的允许名单；成员一层、沿用 Root 原生权限。
 
@@ -121,12 +123,12 @@ orbit stop TASK_DIRECTORY --reason "停止原因" --json
 
 ### 候选模型池与检查者显式重选（ADR-009）
 
-在 `orbit omp` 会话内维护候选池：
+在交互式 `orbit omp` 会话输入 `/orbit-models` 打开搜索多选：直接输入文字过滤 `provider/id`，↑/↓ 移动，Space 勾选，Enter 一次保存净变化，Esc 取消。当前不可选但已入池的旧标识可移出，不能新增；可选列表不证明已验证可调用或有额度。提交前若可选列表变化或同一 ID 被另一会话修改，界面提示刷新，不覆盖对方的修改。无 UI 时裸命令显示文字列表；逐项命令和脚本入口保留：
 
 ```text
-/orbit-models                     # 列出当前会话可选模型、候选池与状态
 /orbit-models add provider/id     # 只能加入当前会话可选列表中的模型
-/orbit-models remove provider/id  # 移除；池内但当前不可用的标识标为不可用，可移除但不会因此启用
+/orbit-models remove provider/id  # 可移除池内但当前不可选的旧标识
+orbit model-candidates list       # 命令行查看；add/remove 可用于脚本
 ```
 
 候选池保存在用户级配置，跨会话共用，只保存模型标识，不保存凭据。Orbit 只在该池与「当前会话可选列表」的交集内比较：为执行成员给出模型建议，为独立检查者选模，按质量先过线、端到端时间、粗档费用排序，并记录实际模型；不按品牌排序。候选池为空时检查者沿用现有默认模型行为，池非空却没有合格检查模型时要求显式指定，不擅自使用池外默认模型。Root 始终显式派发成员，成员不能再派发成员。

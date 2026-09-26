@@ -50,7 +50,8 @@ module CheckerModelSelectorTest
       @calls += 1
       @state = state
       @candidates = candidates
-      { "scores" => @scores, "usage" => { "input" => 7, "output" => 3 } }
+      { "provider" => "typesafe", "model" => "jev-test", "question_set_version" => "jev-checker-quality-1",
+        "scores" => @scores, "usage" => { "input" => 7, "output" => 3 } }
     end
     attr_reader :state, :candidates
   end
@@ -139,6 +140,9 @@ module CheckerModelSelectorTest
                      advisor: advisor, probe: probe)
     model, first = built.select(explicit: nil, instruction: "build it")
     assert(model == "a/one" && first["source"] == "candidate_pool", "the first selection judges and records")
+    assert(first["judgment_provider"] == "typesafe" && first["judgment_model"] == "jev-test" &&
+           first["question_set_version"] == "jev-checker-quality-1" && first.dig("usage", "input") == 7,
+           "the recorded checker decision retains judgment provenance and usage")
     again, second = built.select(explicit: nil, instruction: "build it", previous: first)
     assert(again == "a/one" && second == first, "an unchanged input returns the recorded decision")
     assert(advisor.calls == 1 && probe.calls == 1, "no second JEV call or probe when nothing changed")

@@ -121,6 +121,52 @@ module ModelCandidatePoolTest
     assert_equal(0o600, File.stat("#{path}.lock").mode & 0o777, "the lock file is private")
   end
 
+  # One picker Enter = one apply_delta: the add and the removal land together,
+  # a different-ID edit made by another session since the snapshot survives,
+  # and a same-ID membership change refuses the WHOLE commit (nothing written)
+  # instead of silently overwriting the other session's choice.
+  def test_apply_delta_commits_net_changes_and_refuses_same_id_conflicts(tmp)
+    path = File.join(tmp, "delta", "model-candidates.json")
+    pool = Orbit::ModelCandidatePool.new(path: path, env: {})
+    pool.add(["provider/a", "provider/b"])
+
+    other = Orbit::ModelCandidatePool.new(path: path, env: {})
+    other.add("provider/other") # concurrent session, disjoint id, since snapshot
+
+    result = pool.apply_delta(base: ["provider/a", "provider/b"],
+                              add: ["provider/c"], remove: ["provider/b"])
+    assert_equal(["provider/a", "provider/other", "provider/c"], result,
+                 "one call applies add and remove while the other session's different-ID add survives")
+
+    # Same-ID conflict: another session added the id this delta also adds.
+    other.add("provider/taken")
+    error = assert_raises(Orbit::ModelCandidatePool::ConflictError) do
+      pool.apply_delta(base: result, add: ["provider/taken"])
+    end
+    assert_equal(["provider/taken"], error.conflicts, "the conflicting id is reported for refresh")
+    assert_equal(["provider/a", "provider/other", "provider/c", "provider/taken"],
+                 Orbit::ModelCandidatePool.new(path: path, env: {}).read,
+                 "a refused commit writes nothing")
+
+    # Same-ID conflict on removal: another session removed the id first.
+    other.remove("provider/a")
+    assert_raises(Orbit::ModelCandidatePool::ConflictError) do
+      pool.apply_delta(base: ["provider/a", "provider/other", "provider/c", "provider/taken"], remove: ["provider/a"])
+    end
+    assert_equal(["provider/other", "provider/c", "provider/taken"],
+                 Orbit::ModelCandidatePool.new(path: path, env: {}).read,
+                 "the pool keeps the other session's removal")
+
+    # An empty delta is a read-only no-op; a delta contradicting its own
+    # snapshot is a caller bug, never a write.
+    assert_equal(Orbit::ModelCandidatePool.new(path: path, env: {}).read,
+                 pool.apply_delta(base: [], add: [], remove: []),
+                 "an empty delta returns the current pool unchanged")
+    assert_raises(Orbit::ModelCandidatePool::ValidationError) { pool.apply_delta(base: [], add: ["provider/x"], remove: ["provider/x"]) }
+    assert_raises(Orbit::ModelCandidatePool::ValidationError) { pool.apply_delta(base: ["provider/x"], add: ["provider/x"]) }
+    assert_raises(Orbit::ModelCandidatePool::ValidationError) { pool.apply_delta(base: [], remove: ["provider/x"]) }
+  end
+
   def assert(condition, message)
     @assertions += 1
     raise("assertion failed: #{message}") unless condition
@@ -134,8 +180,8 @@ module ModelCandidatePoolTest
     @assertions += 1
     begin
       yield
-    rescue error_class
-      return
+    rescue error_class => captured
+      return captured
     end
     raise("assertion failed: expected #{message}")
   end

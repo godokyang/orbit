@@ -42,31 +42,29 @@ module Orbit
     # A queued completion stop waits for the Root's delivery turn to finish;
     # beyond this cap it stops immediately rather than waiting forever.
     COMPLETION_STOP_TIMEOUT_SECONDS = 600
+    # The same open finding reported by this many consecutive effective,
+    # current-input checks without any binding change (proposal 2026-09-26
+    # item 2) means the delivered correction is not moving Root: the finding
+    # is escalated once in the durable record with an action prompt --
+    # fix and re-check, dispute with evidence, or hand the product call to
+    # the user. Count alone never closes a finding or stops a task.
+    REPEAT_FINDING_ESCALATION_REPORTS = 2
     # The one next action per refusal code, shared by the CLI receipt and the
     # runtime wake-up: a missing notice is fixed by a final check, while a
     # failing precondition must be resolved first (a clean-up that cannot be
     # verified or an unsettled member never qualifies by re-checking alone).
     RUNTIME_UNAVAILABLE_REASON = "runtime_unavailable"
     COMPLETION_NEXT_ACTIONS = {
-      "no_current_finalization_notice" => "在最终交付版本上请求一次手动检查（Orbit 工具 action=check）并结束当前轮次，" \
-                                           "等待 finalization_notice 或纠正；收到当前版本的 notice 后再用完成意图停止。",
-      "open_findings" => "先按已送达的纠正修正开放问题；在新版本上请求一次手动检查并结束当前轮次，" \
-                          "收到 notice 后再用完成意图停止。",
-      "pending_clue_recheck" => "先让待核对线索在新版本上完成核对（交付或结束本轮等待下次检查）；" \
-                                 "核对结论送达后再请求手动检查并用完成意图停止。",
-      "members_not_settled" => "先结束执行成员（停止成员或收齐结果）；成员结算后再请求手动检查并用完成意图停止。",
-      "checker_cleanup_unverified" => "先重试并核实上一次检查进程确已退出（该路径以普通停止收尾本任务）；" \
-                                       "此后本任务不再补做终检与完成，仍需交付该版本则另开新任务复检。",
-      "root_bridge_unavailable" => "Root 会话或桥接当时不可读，本次完成未生效、任务继续运行；" \
-                                    "确认 Root 会话可用后重试完成意图，必要时先请求一次手动检查。",
-      "members_unreadable" => "先恢复可读的 members.json 成员名单再重试完成意图；若改用普通停止收尾，" \
-                               "本任务不再补做终检与完成，仍需交付该版本则另开新任务复检。",
-      "members_registered_during_stop" => "停止期间新登记的成员尚未停止（本任务已是停止未确认）：" \
-                                           "先重试普通停止并核实这些成员退出；本任务不再补做终检与完成，仍需交付则另开新任务复检。",
-      "preconditions_unverifiable" => "当前无法核对完成前置条件（产物指纹或记录不可读）；确认产物目录可读后重试，" \
-                                       "必要时发一次普通停止。",
-      "runtime_unavailable" => "如需清理，直接发一次普通停止（orbit stop，不带完成意图）：它仍走已确认的停止与成员收尾；" \
-                                "不要用完成意图，也不要为此新建任务。"
+      "no_current_finalization_notice" => "当前文件或要求还没有通过对应的最终检查。请当前助手请求一次最终检查，结束本轮并等待结果；确认通过后再申请完成。",
+      "open_findings" => "检查还有未解决的问题。请当前助手修正后重新请求最终检查，收到通过通知再申请完成。",
+      "pending_clue_recheck" => "有之前发现的问题尚待重新核对。请当前助手等核对结果，再对最终交付版本请求检查；通过后再申请完成。",
+      "members_not_settled" => "还有协作成员在工作或结果未收齐。请当前助手先完成成员收尾，再请求最终检查和申请完成。",
+      "checker_cleanup_unverified" => "上一次检查进程是否退出还无法确认。先核实并清理；本任务只能按普通停止收尾，若仍需交付，请另建任务检查。",
+      "root_bridge_unavailable" => "当前助手的会话暂时无法核实，本次申请未生效。连接恢复后重新申请完成；如文件或要求有变化，先重新检查。",
+      "members_unreadable" => "协作成员名单暂时读不到。请先恢复名单，再申请完成；若只能普通停止，之后需要另建任务检查才能交付。",
+      "members_registered_during_stop" => "结束过程中又出现协作成员，还无法确认全部停止。先重试普通停止并确认成员已退出；要交付需另建任务检查。",
+      "preconditions_unverifiable" => "当前文件或任务记录暂时无法读取，Orbit 不能确认完成。请恢复读取后重试，必要时申请普通停止。",
+      "runtime_unavailable" => "任务运行进程已不可用。若要清理，请申请普通停止；不能将本任务标为完成，也无需新建任务来清理。"
     }.freeze
     COMPLETION_REFUSAL_NEXT_ACTION = COMPLETION_NEXT_ACTIONS.fetch("no_current_finalization_notice")
     # A version-bound pending finalization notice waits for the Root turn when
@@ -182,6 +180,7 @@ module Orbit
           "correction_messages" => @state.fetch("sent_message_ids").length,
           "note" => "Check usage is measured separately. Root session totals can include earlier work; task-wide tokens remain unknown without a baseline."
         }
+        mark_terminal_ask_interrupts!
         @state.delete("runtime_pid")
         save
       end
@@ -252,6 +251,12 @@ module Orbit
           rescue Connection::Error
             # confirmed_stop must still attempt every registered member.
           end
+          # Re-read the session and roster state first: the record must show
+          # what was already stopped before this retry (an already-confirmed
+          # member or an idle Root is not re-interrupted), and an unreachable
+          # bridge is recorded as a fact instead of surfacing only as a stop
+          # failure string.
+          refresh_stop_retry_probe
           verify_prior_check_exit
           stop(reason)
         ensure
@@ -340,6 +345,7 @@ module Orbit
         finish_check(@check_result, host, now) if @check_result
         return
       end
+      deliver_pending_ask_reminders(host, now)
       if deliver_pending_finalization(host, now)
         @last_delivery_checked = host["last_turn_id"]
         save
@@ -563,10 +569,10 @@ module Orbit
       @jev_next_at = now + 60
       @jev_signature = signature
       scores = result.fetch("scores")
-      @record.event("jev_assessed", "model" => result["model"], "scores" => scores, "usage" => result["usage"])
+      judgment = result.slice("provider", "model", "question_set_version", "usage")
+      @record.event("jev_assessed", judgment.merge("scores" => scores))
       @state["jev"] = (@state["jev"].is_a?(Hash) ? @state["jev"] : {}).merge(
-        "status" => "assessed", "model" => result["model"], "scores" => scores, "usage" => result["usage"],
-        "assessed_at" => Time.at(now).utc.iso8601
+        judgment.merge("status" => "assessed", "scores" => scores, "assessed_at" => Time.at(now).utc.iso8601)
       )
       accumulate_jev_usage("jev_stage1", result["usage"])
       save
@@ -1115,36 +1121,36 @@ module Orbit
       end
       qualified = evaluated.select { |candidate| candidate["status"] == "qualified" }
                            .sort_by { |candidate| [-candidate["time"], COST_BAND_ORDER.fetch(candidate["cost_band"], 3)] }
+      judgment = result.slice("provider", "model", "question_set_version", "usage")
       if qualified.empty?
-        @state["delegation_assessments"][signature] = {
-          "decision" => "pending_candidates", "candidates" => evaluated,
-          "model" => result["model"], "at" => Time.at(now).utc.iso8601
-        }
-        @state["jev"] = (@state["jev"] || {}).merge(
-          "delegation" => { "status" => "pending_candidates", "decision" => "pending_candidates",
-                            "candidates" => evaluated,
-                            "reason" => "no pooled candidate cleared the sourced quality line and the end-to-end time line",
-                            "at" => Time.at(now).utc.iso8601 }
+        @state["delegation_assessments"][signature] = judgment.merge(
+          "decision" => "pending_candidates", "candidates" => evaluated, "at" => Time.at(now).utc.iso8601
         )
-        @record.event("delegation_pending_candidates", "signature" => signature, "candidates" => evaluated)
+        @state["jev"] = (@state["jev"] || {}).merge(
+          "delegation" => judgment.merge("status" => "pending_candidates", "decision" => "pending_candidates",
+                                         "candidates" => evaluated,
+                                         "reason" => "no pooled candidate cleared the sourced quality line and the end-to-end time line",
+                                         "at" => Time.at(now).utc.iso8601)
+        )
+        @record.event("delegation_pending_candidates", judgment.merge("signature" => signature, "candidates" => evaluated))
         save
         return
       end
       first, *rest = qualified
       recommendation = { "first" => first, "backups" => rest.first(2), "candidates" => evaluated,
                          "at" => Time.at(now).utc.iso8601 }
-      @state["delegation_assessments"][signature] = {
-        "decision" => "recommended", "recommendation" => recommendation,
-        "model" => result["model"], "at" => Time.at(now).utc.iso8601 }
+      @state["delegation_assessments"][signature] = judgment.merge(
+        "decision" => "recommended", "recommendation" => recommendation, "at" => Time.at(now).utc.iso8601
+      )
       @state["jev"] = (@state["jev"] || {}).merge(
-        "delegation" => { "status" => "assessed", "decision" => "recommended",
-                          "recommendation" => { "first" => first, "backups" => recommendation["backups"] },
-                          "candidates" => evaluated, "usage" => result["usage"],
-                          "at" => Time.at(now).utc.iso8601 }
+        "delegation" => judgment.merge("status" => "assessed", "decision" => "recommended",
+                                       "recommendation" => { "first" => first, "backups" => recommendation["backups"] },
+                                       "candidates" => evaluated, "at" => Time.at(now).utc.iso8601)
       )
       accumulate_jev_usage("jev_stage2", result["usage"])
-      @record.event("delegation_recommendation", "signature" => signature,
-                    "first" => first, "backups" => recommendation["backups"], "candidates" => evaluated)
+      @record.event("delegation_recommendation", judgment.merge(
+        "signature" => signature, "first" => first, "backups" => recommendation["backups"], "candidates" => evaluated
+      ))
       prepare_candidate_recommendation(first, recommendation["backups"], evaluated, signature, now)
       save
     rescue JevAdvisor::Error => error
@@ -1540,23 +1546,24 @@ module Orbit
       persist_delegation_evidence!(observation.fetch("model_evidence"), signature)
       result = @advisor.assess_delegation(state: observation)
       scores = result.fetch("scores")
+      judgment = result.slice("provider", "model", "question_set_version", "usage")
       basis = cost_basis(entries)
       decision = delegation_recommended?(scores, entries) ? "recommended" : "declined"
-      @state["delegation_assessments"][signature] = {
-        "scores" => scores, "model" => result["model"], "decision" => decision,
-        "cost_basis" => basis, "at" => Time.at(now).utc.iso8601
-      }
+      @state["delegation_assessments"][signature] = judgment.merge(
+        "scores" => scores, "decision" => decision, "cost_basis" => basis, "at" => Time.at(now).utc.iso8601
+      )
       @state["jev"] = (@state["jev"] || {}).merge(
-        "delegation" => { "status" => "assessed", "decision" => decision, "scores" => scores,
-                          "cost_basis" => basis, "usage" => result["usage"], "at" => Time.at(now).utc.iso8601 }
+        "delegation" => judgment.merge("status" => "assessed", "decision" => decision, "scores" => scores,
+                                       "cost_basis" => basis, "at" => Time.at(now).utc.iso8601)
       )
       accumulate_jev_usage("jev_stage2", result["usage"])
-      @record.event("delegation_assessed", "model" => result["model"], "scores" => scores,
-                    "usage" => result["usage"], "decision" => decision, "cost_basis" => basis)
+      @record.event("delegation_assessed", judgment.merge(
+        "scores" => scores, "decision" => decision, "cost_basis" => basis
+      ))
       if decision == "recommended"
         prepare_delegation_hint(scores, signature, now, cost_basis: basis)
       else
-        @record.event("delegation_declined", "scores" => scores, "decision" => decision, "cost_basis" => basis)
+        @record.event("delegation_declined", judgment.merge("scores" => scores, "decision" => decision, "cost_basis" => basis))
       end
       save
     rescue JevAdvisor::Error => error
@@ -1899,16 +1906,23 @@ module Orbit
         next if id.empty? || seen.include?(id)
 
         seen << id
-        summary = {
-          "id" => event["id"], "seq" => event["seq"], "kind" => event["kind"], "op" => event["op"],
-          "from" => event["from"], "to" => event["to"], "agent_id" => event["agent_id"],
-          "session_id" => event["session_id"], "await_reply" => event["await_reply"],
-          "message" => event["message"], "text" => event["text"], "ok" => event["ok"]
-        }
-        (@state["native_collaboration"] ||= []) << summary
-        @state["native_collaboration"] = @state["native_collaboration"].last(50)
-        @record.event("native_collaboration", summary)
-        changed = true
+        case event["kind"]
+        when "ask_interrupted"
+          changed = true if record_ask_interrupt(event)
+        when "ask_resolved"
+          changed = true if resolve_ask_interrupts(event)
+        else
+          summary = {
+            "id" => event["id"], "seq" => event["seq"], "kind" => event["kind"], "op" => event["op"],
+            "from" => event["from"], "to" => event["to"], "agent_id" => event["agent_id"],
+            "session_id" => event["session_id"], "await_reply" => event["await_reply"],
+            "message" => event["message"], "text" => event["text"], "ok" => event["ok"]
+          }
+          (@state["native_collaboration"] ||= []) << summary
+          @state["native_collaboration"] = @state["native_collaboration"].last(50)
+          @record.event("native_collaboration", summary)
+          changed = true
+        end
       end
       seen.shift while seen.length > 500
       seqs = events.filter_map { |event| event["seq"] if event.is_a?(Hash) && event["seq"].is_a?(Integer) }
@@ -2366,8 +2380,11 @@ module Orbit
            previous["observed_version"] == current_digest &&
            previous["observed_input"] == scope["input_digest"] &&
            %w[requirement evidence action].all? { |field| previous[field] == finding[field] }
+          reports = previous["current_reports"].to_i + 1
+          previous["current_reports"] = reports
           @record.event("finding_repeat_ignored", "id" => finding.fetch("id"),
                         "reason" => "Already open on the same root, artifact, input, and finding text")
+          escalate_repeated_finding(previous, reports, scope, now) if reports >= REPEAT_FINDING_ESCALATION_REPORTS
           next
         end
         # A resolved finding may only be reopened by new evidence: the task
@@ -2387,7 +2404,11 @@ module Orbit
         @state["findings"][finding.fetch("id")] = finding.merge(
           "status" => "open", "check" => scope["number"],
           "observed_root" => scope["artifact_root"], "observed_version" => current_digest,
-          "observed_input" => scope["input_digest"]
+          "observed_input" => scope["input_digest"],
+          # A changed binding is a new report cycle: the correction is
+          # re-delivered and the repeat counter starts over, so an escalation
+          # may only follow after the changed evidence again fails to move.
+          "current_reports" => 1
         )
         accepted_findings << finding
       end
@@ -2461,12 +2482,10 @@ module Orbit
       ]))
       @state.delete("pending_finalization")
       unless @state["finalization_notices"][key]
-        text = "Orbit final-check notice (not a new user instruction): the manual review of the current " \
-               "artifact and task input is valid and no current findings remain. If implementation and local " \
-               "verification are complete, call Orbit stop and finish your turn normally: Orbit queues the " \
-               "stop, lets this turn complete so your final summary to the user is fully delivered, then stops " \
-               "execution and records completion. Orbit does not infer task completion from the checker's " \
-               "verdict alone."
+        text = "Orbit 最终检查通知（不是用户的新要求）：这次检查没有发现待解决的问题，但任务尚未完成。" \
+               "如果实现和本地验证已经完成，当前助手请调用 Orbit stop 申请完成，再正常结束本轮回复。" \
+               "Orbit 会在回复结束后核对当前文件、要求和协作成员，确认停止后才记录完成；" \
+               "若检查后又有改动，先重新检查。不要只凭这条通知宣称任务完成。"
         sent = @connection.send_message(text)
         @state["sent_message_ids"] << sent.fetch("id")
         @state["finalization_notices"][key] = {
@@ -2540,10 +2559,15 @@ module Orbit
     end
 
     def send_correction(result, scope:, current_digest:)
-      entry = File.expand_path("../../scripts/orbit", __dir__)
-      dispute = [entry, "dispute", @record.path, "--reason"].shelljoin
-      text = "Orbit independent check (not a new user instruction):\n" + JSON.pretty_generate(result) +
-             "\nWork against the original request. Correct relevant findings. For a real dispute, provide concrete contrary evidence using: #{dispute} 'reason and evidence'."
+      findings = result.fetch("findings")
+      lines = ["Orbit 独立检查：发现 #{findings.length} 个待处理问题。任务尚未完成；这不是用户的新要求。"]
+      findings.each_with_index do |finding, index|
+        lines << "问题 #{index + 1}（编号 #{finding.fetch('id')}）：#{finding.fetch('requirement')}"
+        lines << "依据：#{finding.fetch('evidence')}"
+        lines << "建议处理：#{finding.fetch('action')}"
+      end
+      lines << "请当前助手按原要求处理后重新检查；若检查结论有误，用 Orbit dispute 提交具体反证。"
+      text = lines.join("\n")
       deliver_correction_text(text,
                               "check" => scope["number"], "artifact_root" => scope["artifact_root"],
                               "artifact_digest" => current_digest, "input_digest" => scope["input_digest"])
@@ -2637,8 +2661,8 @@ module Orbit
       }]).last(5)
       @record.event("completion_stop_rejected", "source" => "runtime", "reason" => code, "detail" => detail)
       begin
-        sent = @connection.send_message("Orbit: the completion hand-off was refused (#{code}): #{detail} " \
-                                        "#{self.class.completion_next_action(code)} Do not stop the task to deliver.")
+        sent = @connection.send_message("Orbit 还不能确认任务完成。#{self.class.completion_next_action(code)}" \
+                                        "当前任务仍需处理，不要按已完成交付。")
         @state["sent_message_ids"] << sent.fetch("id")
         @record.event("completion_rejection_delivered", "id" => sent.fetch("id"))
       rescue Connection::Error => error
@@ -2694,9 +2718,15 @@ module Orbit
         record_cleanup_error(error)
       end
       @running_check = nil
+      # Structured stop diagnostics: every phase records what it actually
+      # observed, so an unconfirmed stop names the phase that failed with its
+      # own evidence instead of only a joined error string.
+      diagnostics = stop_diagnostics_frame(reason)
+      diagnostics["roster_error"] = roster_error
+      diagnostics["checker_cleanup_error"] = checker_error
       confirmation = nil
       begin
-        confirmation = confirmed_stop
+        confirmation = confirmed_stop(diagnostics)
         raise ArgumentError, "Checker stop unconfirmed: #{checker_error}" if checker_error
         raise ArgumentError, "members.json is not a reliable roster: #{roster_error}" if roster_error
 
@@ -2745,6 +2775,13 @@ module Orbit
               @state["execution_stop_confirmation"] = partial
               @state["stop_confirmation"] = partial.merge("confirmed" => false, "reason" => code,
                                                           "unaccounted_members" => Array(unaccounted))
+              # The stop attempt itself succeeded; the unconfirmed verdict comes
+              # from the post-teardown roster check. Keep that distinction in
+              # the diagnostics (root ok, stop not confirmed overall).
+              diagnostics["confirmed"] = false
+              diagnostics["reason_code"] = code
+              diagnostics["unaccounted_members"] = Array(unaccounted)
+              @state["stop_diagnostics"] = diagnostics
             end
             @state["completion_invalidation"] = { "reason" => code, "detail" => detail,
                                                   "at" => Time.now.utc.iso8601 }
@@ -2753,6 +2790,11 @@ module Orbit
         end
         @state["status"] = final_status
         @state["stop_reason"] = reason
+        # A confirmed stop leaves no stale failure diagnostics behind; the
+        # invalidation path above keeps its frame (final_status is
+        # stop_unconfirmed there).
+        @state.delete("stop_diagnostics") unless final_status == "stop_unconfirmed"
+        mark_terminal_ask_interrupts!
         if final_status == "stop_unconfirmed" && @state["completion_invalidation"]
           # The Root turn itself was verified, but the stop as a whole is not:
           # the event must not carry a false overall confirmation.
@@ -2770,10 +2812,12 @@ module Orbit
         if roster_error && !detail.include?("not a reliable roster")
           detail = "members.json is not a reliable roster: #{roster_error}; #{detail}"
         end
+        finalize_unconfirmed_stop_diagnostics(diagnostics, detail)
         @state["status"] = "stop_unconfirmed"
         @state["stop_reason"] = reason
         @state["error"] = detail
         @record.event("stop_unconfirmed", "reason" => reason, "error" => detail)
+        mark_terminal_ask_interrupts!
         save
       end
     end
@@ -2798,23 +2842,47 @@ module Orbit
       nil
     end
 
-    def confirmed_stop
+    def confirmed_stop(diagnostics)
       failures = []
       # Root abort can drop the OMP registry session. Confirm native members
       # from the live bridge first, then stop Root so a later retry is not the
       # only chance to observe them.
       native, others = @state["members"].partition { |member| member["adapter"] == OMP_NATIVE_ADAPTER }
-      native_results = native.map { |member| stop_omp_native_member(member, failures) }
+      native_results = native.map do |member|
+        if member.dig("stop_confirmation", "confirmed") == true
+          # Already verified by an earlier stop (a drift stop or a previous
+          # attempt): re-requesting could only re-interrupt an already stopped
+          # member, and a bridge that lost its registry state (host restart)
+          # can no longer re-confirm it. Reuse the recorded evidence.
+          result = { "thread_id" => member["thread_id"], "confirmation" => member["stop_confirmation"],
+                     "reused_prior_confirmation" => true }
+          diagnostics["members"] << { "thread_id" => member["thread_id"], "ok" => true,
+                                      "reused_prior_confirmation" => true }
+        else
+          result = stop_omp_native_member(member, failures)
+          error = result["error"]
+          entry = { "thread_id" => result["thread_id"], "ok" => error.nil? }
+          entry["error"] = error if error
+          entry["registration_status"] = result["registration_status"] if result["registration_status"]
+          diagnostics["members"] << entry
+        end
+        result
+      end
       other_results = others.map do |member|
         failures << "Member #{member['thread_id']}: legacy member record has no migration path and was not stopped"
+        diagnostics["members"] << { "thread_id" => member["thread_id"], "ok" => false,
+                                    "error" => "legacy member record rejected",
+                                    "registration_status" => member["status"] }
         { "thread_id" => member["thread_id"], "error" => "legacy member record rejected", "registration_status" => member["status"] }
       end
       begin
         confirmation = @connection.stop!
+        diagnostics["root"] = { "ok" => confirmation["confirmed"] == true, "confirmation" => confirmation }
         failures << "Root did not confirm actual stop" unless confirmation["confirmed"] == true
       rescue StandardError => error
         failures << "Root: #{error.message}"
         confirmation = nil
+        diagnostics["root"] = { "ok" => false, "error" => error.message }
       end
       members = native_results + other_results
       @state["member_stop_results"] = members
@@ -2822,6 +2890,221 @@ module Orbit
 
       confirmation["members"] = members unless members.empty?
       confirmation
+    end
+
+    # A fresh structured frame per stop attempt. `members` and `root` are
+    # filled by the stop itself; the frame is persisted when the stop stays
+    # unconfirmed and deleted when a later attempt confirms.
+    def stop_diagnostics_frame(reason)
+      { "at" => Time.now.utc.iso8601, "reason" => reason.to_s, "members" => [], "root" => {} }
+    end
+
+    # The attempt raised: persist the frame with the failure detail and keep
+    # whatever evidence the phases did observe. A Root turn that the bridge
+    # actually confirmed stays visible as execution-scope evidence, but the
+    # overall stop_confirmation is never true when the stop as a whole failed.
+    def finalize_unconfirmed_stop_diagnostics(diagnostics, detail)
+      diagnostics["confirmed"] = false
+      diagnostics["failures"] = detail
+      root = diagnostics["root"] || {}
+      if root["ok"] && root["confirmation"].is_a?(Hash)
+        @state["execution_stop_confirmation"] = root["confirmation"]
+        @state["stop_confirmation"] = root["confirmation"].merge("confirmed" => false,
+                                                                "reason" => "stop_failed", "failures" => detail)
+      else
+        @state["stop_confirmation"] = { "confirmed" => false, "reason" => "stop_failed", "failures" => detail }
+      end
+      @state["stop_diagnostics"] = diagnostics
+    end
+
+    # The explicit stop retry re-reads the live session and roster state
+    # before touching anything: the durable record then shows what was
+    # already stopped before the retry, and an unreachable bridge is a
+    # recorded fact instead of only a stop failure string.
+    def refresh_stop_retry_probe
+      probe = { "at" => Time.now.utc.iso8601 }
+      begin
+        # Prefer the connect handshake's own observation: it is the fresh
+        # pre-stop session read without a second round-trip between connect
+        # and stop. Doubles without the memo fall back to a direct read.
+        host = @connection.connect_state if @connection.respond_to?(:connect_state)
+        host = @connection.state if host.nil?
+        probe["root"] = if host.is_a?(Hash)
+                          { "reachable" => true, "status" => host["status"],
+                            "active_tools" => host["active_tools"], "interrupted" => host["interrupted"] }
+                        else
+                          { "reachable" => true, "status" => nil }
+                        end
+      rescue StandardError => error
+        probe["root"] = { "reachable" => false, "error" => "#{error.class}: #{error.message}" }
+      end
+      probe["members"] = @state["members"].map do |member|
+        entry = { "thread_id" => member["thread_id"] }
+        if member.dig("stop_confirmation", "confirmed") == true
+          entry["already_confirmed"] = true
+        elsif @connection.respond_to?(:member_state)
+          begin
+            state = @connection.member_state(member["thread_id"])
+            if state.is_a?(Hash)
+              entry["registry_status"] = state["registry_status"]
+              entry["active_tools"] = state["active_tools"]
+              entry["session_attached"] = state["session_attached"]
+            end
+          rescue StandardError => error
+            entry["error"] = error.message
+          end
+        end
+        entry
+      end
+      @state["stop_retry_probe"] = probe
+    end
+
+    # A native `ask` call the host skipped before the user could answer
+    # (interrupt_skipped). Recorded once per call id; the reminder asks Root
+    # to re-issue the ask itself -- Orbit never answers for the user and
+    # never resends the question.
+    def record_ask_interrupt(event)
+      call_id = event["tool_call_id"].to_s
+      return false if call_id.empty?
+
+      seen_at = ask_event_time(event)
+      interrupts = @state["ask_interrupts"] ||= {}
+      if (existing = interrupts[call_id])
+        return false if existing["last_seen_at"] == seen_at
+
+        existing["last_seen_at"] = seen_at
+        return true
+      end
+      interrupts[call_id] = {
+        "tool_call_id" => call_id,
+        "agent_id" => event["agent_id"],
+        "session_id" => event["session_id"],
+        "question" => event["question"].to_s[0, 200],
+        "skipped_source" => event["skipped_source"],
+        "started" => event["started"] == true,
+        "at" => seen_at,
+        "last_seen_at" => seen_at
+      }
+      @record.event("ask_interrupt_recorded", "tool_call_id" => call_id,
+                    "agent_id" => event["agent_id"], "skipped_source" => event["skipped_source"])
+      true
+    end
+
+    # The plugin reports JS epoch milliseconds; the durable record keeps
+    # ISO-8601 UTC like the rest of the task state.
+    def ask_event_time(event)
+      at = event["at"]
+      return Time.at(at / 1000.0).utc.iso8601 if at.is_a?(Numeric)
+
+      at.is_a?(String) && !at.empty? ? at : Time.now.utc.iso8601
+    end
+
+    # A later non-synthetic, non-error `ask` result from the same agent: the
+    # question was re-issued and answered, so that agent's pending interrupts
+    # are resolved. A new ask carries a new call id, so by-agent is the finest
+    # observable granularity; partial re-asks are not distinguishable.
+    def resolve_ask_interrupts(event)
+      agent_id = event["agent_id"]
+      return false unless agent_id.is_a?(String) && !agent_id.empty?
+
+      pending = (@state["ask_interrupts"] || {}).values
+                     .select { |entry| entry["cleared_at"].nil? && entry["agent_id"] == agent_id }
+      return false if pending.empty?
+
+      at = ask_event_time(event)
+      pending.each do |entry|
+        entry["cleared_at"] = at
+        entry["cleared_by"] = "ask_succeeded"
+      end
+      @record.event("ask_interrupt_cleared", "agent_id" => agent_id,
+                    "resolved_tool_call_id" => event["tool_call_id"], "count" => pending.length)
+      true
+    end
+
+    # One bounded reminder for recorded ask interrupts, delivered only when
+    # the Root turn is observably safe (idle, no active tools, not
+    # interrupted): a steer message arriving while an exclusive `ask` is
+    # pending is exactly what skipped the original question, so the reminder
+    # itself must never interrupt a new one.
+    def deliver_pending_ask_reminders(host, now)
+      pending = (@state["ask_interrupts"] || {}).values
+                    .select { |entry| entry["cleared_at"].nil? && entry["reminded_at"].nil? }
+      return false if pending.empty?
+      return false unless host.is_a?(Hash) && host["status"] == "idle" &&
+                          host["active_tools"].to_i.zero? && !host["interrupted"]
+
+      calls = pending.first(3).map do |entry|
+        owner = entry["agent_id"] ? " (agent #{entry['agent_id']})" : ""
+        question = entry["question"].to_s.empty? ? "question not captured" : "\"#{entry['question']}\""
+        "ask #{entry['tool_call_id']}#{owner}: #{question} (skipped due to #{entry['skipped_source'] || 'an interrupt'})"
+      end
+      more = pending.length > 3 ? " ... and #{pending.length - 3} more" : ""
+      text = "Orbit ask-interrupt notice (not a new user instruction): #{pending.length} native ask call(s) " \
+             "were skipped by the host before the user could answer: #{calls.join('; ')}#{more}. " \
+             "If a question is still needed, re-issue the native ask when idle; Orbit does not answer for " \
+             "the user and does not resend the question."
+      sent = @connection.send_message(text)
+      @state["sent_message_ids"] << sent.fetch("id")
+      at = Time.at(now).utc.iso8601
+      pending.each do |entry|
+        entry["reminded_at"] = at
+        entry["reminder_message_id"] = sent.fetch("id")
+      end
+      @record.event("ask_reminder_delivered", "count" => pending.length, "id" => sent.fetch("id"))
+      save
+      true
+    rescue Connection::Error => error
+      @record.event("ask_reminder_undelivered", "error" => error.message)
+      false
+    end
+
+    # Terminal task states close every still-pending ask interrupt: the
+    # reminder is only actionable while the task can still steer Root.
+    def mark_terminal_ask_interrupts!
+      interrupts = @state["ask_interrupts"]
+      return unless interrupts.is_a?(Hash)
+
+      at = Time.now.utc.iso8601
+      interrupts.each_value do |entry|
+        next unless entry.is_a?(Hash) && entry["cleared_at"].nil?
+
+        entry["cleared_at"] = at
+        entry["cleared_by"] = "task_terminal"
+      end
+    end
+
+    # Two effective, current-input checks reported the same open finding
+    # without any binding change: the suppressed repeat is escalated once
+    # with a bounded action prompt. It names the finding and the concrete
+    # next actions -- fix and re-check, dispute with evidence, or hand the
+    # product decision to the user -- and never re-sends the correction.
+    # A delivery failure leaves escalated_at unset so the next effective
+    # report retries the prompt.
+    def escalate_repeated_finding(finding, reports, scope, now)
+      return if finding["escalated_at"]
+      return unless deliver_repeated_finding_prompt(finding, reports)
+
+      finding["escalated_at"] = Time.at(now).utc.iso8601
+      finding["escalated_reports"] = reports
+      finding["escalated_check"] = scope["number"]
+      @record.event("finding_repeat_escalated", "id" => finding.fetch("id"),
+                    "reports" => reports, "check" => scope["number"])
+    end
+
+    def deliver_repeated_finding_prompt(finding, reports)
+      evidence = finding["evidence"].to_s
+      excerpt = evidence.length > 120 ? "#{evidence[0, 120]}..." : evidence
+      text = "Orbit repeated-finding notice (not a new user instruction): finding #{finding.fetch('id')} is " \
+             "still open after #{reports} effective checks on the same artifact, input and evidence " \
+             "(latest evidence: #{excerpt}); the original correction is not re-sent. Next action: fix it " \
+             "and request a check, or dispute with concrete evidence, or hand the underlying product " \
+             "decision to the user. Orbit does not close findings by count."
+      sent = @connection.send_message(text)
+      @state["sent_message_ids"] << sent.fetch("id")
+      true
+    rescue Connection::Error => error
+      @record.event("finding_escalation_notify_failed", "id" => finding.fetch("id"), "error" => error.message)
+      false
     end
   end
 end

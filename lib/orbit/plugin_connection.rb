@@ -18,8 +18,16 @@ module Orbit
     end
 
     def connect!
-      @cwd = state.fetch("cwd")
+      @connect_state = state
+      @cwd = @connect_state.fetch("cwd")
       self
+    end
+
+    # The full session state observed by the connect handshake. The explicit
+    # stop retry uses it as its pre-stop session re-read instead of issuing a
+    # second request between connect and stop.
+    def connect_state
+      @connect_state
     end
 
     def close; end

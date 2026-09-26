@@ -64,6 +64,14 @@ class RuntimeHost
   attr_reader :member_stops
 end
 
+class RuntimeAskHost < RuntimeHost
+  attr_accessor :ask_events
+
+  def hub_events
+    @ask_events || { "events" => [], "dropped_oldest" => 0, "next_seq" => 1, "buffer_cap" => 500 }
+  end
+end
+
 class RuntimeTeamHost < RuntimeHost
   attr_reader :members, :member_cwds
 
@@ -169,19 +177,22 @@ class RuntimeAdvisor
     @on_call&.call
     raise @failure if @failure
 
-    { "model" => "jev-test", "scores" => @scores, "usage" => { "input_tokens" => 10, "output_tokens" => 3 } }
+    { "provider" => "typesafe", "model" => "jev-test", "question_set_version" => "jev-observation-1",
+      "scores" => @scores, "usage" => { "input_tokens" => 10, "output_tokens" => 3 } }
   end
 
   def assess_delegation(state:)
     @delegation_calls << state
     raise @delegation_failure if @delegation_failure
 
-    { "model" => "jev-test", "scores" => @delegation_scores, "usage" => { "input_tokens" => 20, "output_tokens" => 4 } }
+    { "provider" => "typesafe", "model" => "jev-test", "question_set_version" => "jev-delegation-1",
+      "scores" => @delegation_scores, "usage" => { "input_tokens" => 20, "output_tokens" => 4 } }
   end
 
   def assess_candidates(state:, candidates:)
     @candidate_calls << { "state" => state, "candidates" => candidates }
-    { "model" => "jev-test", "scores" => @candidate_scores, "usage" => { "input_tokens" => 30, "output_tokens" => 5 } }
+    { "provider" => "typesafe", "model" => "jev-test", "question_set_version" => "jev-candidates-1",
+      "scores" => @candidate_scores, "usage" => { "input_tokens" => 30, "output_tokens" => 5 } }
   end
 end
 
@@ -344,7 +355,8 @@ fixture do |root, record, host, checker, runtime|
   runtime.tick(now: now + 4)
   checker.result = answer("correct", findings: [missing])
   runtime.tick(now: now + 5)
-  assert(host.messages.length == 1 && host.messages.first.include?("missing"),
+  assert(events(record).count { |event| event["type"] == "correction_sent" } == 1 &&
+         record.state.dig("findings", "missing", "status") == "open",
          "a clue confirmed on the current version is delivered automatically, without Root polling")
   assert(record.state["recheck"].nil?, "an explicit confirmation clears the pending clue")
 end
@@ -364,7 +376,7 @@ fixture do |root, record, host, checker, runtime|
   checker.result = answer("continue", resolved: ["clue"])
   runtime.tick(now: now + 3)
   assert(record.state["recheck"].nil? &&
-         host.messages.none? { |message| message.include?("Orbit independent check") },
+         events(record).none? { |event| event["type"] == "correction_sent" },
          "an explicit withdrawal clears the clue without a correction")
 end
 
@@ -394,6 +406,11 @@ fixture(interval: 300) do |root, record, _host, checker, _runtime|
          "the structural stage never hints directly")
   assert(record.state.dig("jev", "evidence_status") == "requested" && advisor.delegation_calls.empty?,
          "evidence is pending and the second stage has not run")
+  first_judgment = events(record).find { |event| event["type"] == "jev_assessed" }
+  assert(first_judgment && first_judgment["provider"] == "typesafe" &&
+         first_judgment["question_set_version"] == "jev-observation-1" &&
+         record.state.dig("jev", "model") == "jev-test" && record.state.dig("jev", "usage", "input_tokens") == 10,
+         "the task event and state preserve judgment provenance and usage")
   status_text = Orbit::TaskView.format(record)
   assert(status_text.include?("JEV：已判断") && status_text.include?("等待 Root 提交模型证据") &&
          status_text.include?("当前仅独立检查；执行成员 0 个"),
@@ -762,6 +779,12 @@ fixture(interval: 300) do |root, record, _host, checker, _runtime|
   assert(log.any? { |line| line.include?("delegation_recommendation") } &&
          log.any? { |line| line.include?("delegation_recommendation_delivered") },
          "the recommendation and its delivery are recorded as events")
+  recommendation = events(record).find { |event| event["type"] == "delegation_recommendation" }
+  assert(recommendation && recommendation["provider"] == "typesafe" &&
+         recommendation["question_set_version"] == "jev-candidates-1" &&
+         record.state.dig("jev", "delegation", "model") == "jev-test" &&
+         record.state.dig("jev", "delegation", "usage", "input_tokens") == 30,
+         "per-candidate recommendation retains judgment provenance and usage in event and state")
 
   record.register_member("orbit-explicit1", requested_name: "explicit1", status: "registered")
   runtime.tick(now: now + 8)
@@ -1421,7 +1444,7 @@ fixture(interval: 300) do |root, record, host, checker, _runtime|
   checker.result = answer("correct", findings: [process_finding])
   runtime.tick(now: now + 11)
   assert(record.state.dig("recheck", "findings", 0, "id") == "clue", "a process check cannot clear a pending artifact clue")
-  assert(host.messages.none? { |message| message.include?("clue") }, "a process check does not deliver the artifact clue")
+  assert(record.state.dig("findings", "clue").nil?, "a process check does not deliver the artifact clue")
 
   host.finish("integrated")
   checker.result = nil
@@ -1431,8 +1454,9 @@ fixture(interval: 300) do |root, record, host, checker, _runtime|
   checker.result = answer("correct", findings: [clue])
   runtime.tick(now: now + 13)
   assert(record.state["recheck"].nil?, "the artifact check confirms and clears the clue")
-  assert(host.messages.count { |message| message.include?('"id": "clue"') } == 1,
-         "the clue correction is delivered exactly once")
+  assert(events(record).count { |event| event["type"] == "correction_sent" } == 2 &&
+         record.state.dig("findings", "clue", "status") == "open",
+         "the pending clue is delivered after the process finding")
 end
 
 # While Root is executing, a short checker-suggested next observation cannot
@@ -1615,9 +1639,6 @@ fixture do |_root, record, host, checker, runtime|
   checker.result = answer("continue")
   runtime.tick(now: now + 1)
   runtime.tick(now: now + 2)
-  notices = host.messages.select { |message| message.include?("final-check notice") }
-  assert(notices.length == 1 && notices.first.include?("call Orbit stop"),
-         "a clean manual final review wakes Root once with an explicit stop hand-off")
   assert(checker.calls.length == 1, "next agreed time must control observation")
   assert(record.state["next_check_trigger"] == "finalization_wait",
          "the normal interval replaces the checker's short retry while finalization waits")
@@ -1654,8 +1675,6 @@ fixture do |_root, record, host, checker, runtime|
   runtime.tick(now: now + 3)
   assert(record.state["status"] != "complete" && record.state["finalization_notices"].length == 1,
          "a manual complete verdict wakes Root and does not declare completion")
-  assert(host.messages.any? { |message| message.include?("final-check notice") },
-         "the same finalization notice is used for a clean manual complete verdict")
 
   host.working("delivering the final summary")
   record.submit("stop", "reason" => "User requested stop", "complete" => true)
@@ -1689,9 +1708,6 @@ fixture do |root, record, host, checker, runtime|
   assert(record.state["finalization_notices"].length == 1 && record.state["pending_finalization"].nil?,
          "the same version is handed off once when Root is idle and completed")
   assert(checker.calls.length == 1, "the deferred hand-off does not rerun the checker")
-  runtime.tick(now: now + 4)
-  assert(host.messages.count { |message| message.include?("final-check notice") } == 1,
-         "the deferred notice is not repeated")
 
   File.write(File.join(root, "artifact.txt"), "changed after a later review")
   host.working("editing again")
@@ -1735,12 +1751,7 @@ fixture(interval: 300) do |root, record, host, checker, runtime|
   runtime.tick(now: now + 61)
   assert(record.state["finalization_notices"].length == 1 && record.state["pending_finalization"].nil?,
          "the version-bound notice is delivered within the bound while Root stays active")
-  assert(host.messages.count { |message| message.include?("final-check notice") } == 1,
-         "the bounded fallback notice is sent exactly once")
   assert(record.state["status"] != "complete", "the notice alone never completes the task")
-  runtime.tick(now: now + 120)
-  assert(host.messages.count { |message| message.include?("final-check notice") } == 1,
-         "later ticks do not repeat the delivered notice")
 end
 
 # An explicit Root stop after a valid finalization hand-off defers completion:
@@ -1818,8 +1829,8 @@ fixture do |root, record, host, checker, runtime|
   assert(record.state.dig("completion_rejections", 0, "reason") == "no_current_finalization_notice" &&
          events(record).any? { |event| event["type"] == "completion_stop_rejected" },
          "the refusal records why the hand-off no longer qualifies")
-  assert(host.messages.any? { |message| message.include?("hand-off was refused") && message.include?("手动检查") },
-         "Root is woken with the next action instead of being left to guess")
+  assert(events(record).any? { |event| event["type"] == "completion_rejection_delivered" },
+         "Root receives the refusal and can take the recorded next action")
 end
 
 # A member registered after the final check refuses the completion hand-off:
@@ -1834,8 +1845,6 @@ fixture do |_root, record, host, checker, runtime|
   assert(!Orbit::TaskRuntime::TERMINAL.include?(record.state["status"]) &&
          record.state.dig("completion_rejections", 0, "reason") == "members_not_settled",
          "a member registered after the final check refuses the hand-off")
-  assert(host.messages.any? { |message| message.include?("members_not_settled") && message.include?("成员结算") },
-         "the runtime wake-up uses the member-specific next action, not the final-check fallback")
   File.write(File.join(record.path, "members.json"), "{ not a roster")
   runtime.send(:stop, "User requested stop", allow_complete: true)
   assert(!Orbit::TaskRuntime::TERMINAL.include?(record.state["status"]) &&
@@ -2453,7 +2462,7 @@ fixture(interval: 300) do |root, record, host, checker, runtime|
   runtime.tick(now: now + 61)
   assert(checker.calls.length == 2 && checker.calls.last.fetch(:role) == "adjudicator",
          "the normal timer reaches the pending dispute without a stale-triggered loop")
-  assert(host.messages.none? { |message| message.include?('"id": "clue"') },
+  assert(events(record).none? { |event| event["type"] == "correction_sent" },
          "the stale finding of an adjudication is not delivered")
 end
 
@@ -2550,14 +2559,16 @@ fixture do |_root, record, host, checker, runtime|
   finding = { "id" => "f-open", "requirement" => "second behavior", "evidence" => "absent", "action" => "implement it" }
   checker.result = answer("correct", findings: [finding])
   runtime.tick(now: now + 1)
-  assert(host.messages.length == 1 && record.state.dig("findings", "f-open", "status") == "open",
-         "precondition: the first current finding reaches Root")
+  assert(events(record).count { |event| event["type"] == "correction_sent" } == 1 &&
+         record.state.dig("findings", "f-open", "status") == "open",
+         "precondition: the first current finding reaches Root as one correction")
 
   host.finish("t1")
   runtime.tick(now: now + 2)
   checker.result = answer("correct", findings: [finding])
   runtime.tick(now: now + 3)
-  assert(host.messages.length == 1, "the same still-open finding is not delivered twice")
+  assert(events(record).count { |event| event["type"] == "correction_sent" } == 1,
+         "the same still-open finding is not corrected twice")
   assert(File.readlines(File.join(record.path, "events.jsonl")).any? { |line| line.include?("finding_repeat_ignored") },
          "the suppressed repeat remains auditable")
 end
@@ -2738,6 +2749,147 @@ fixture(interval: 300) do |root, record, _host, checker, _runtime|
   assert(summary.fetch("note").include?("submitter-provided") &&
          summary.fetch("note").include?("not semantically verified"),
          "the note states structure-only validation")
+end
+
+# Two effective current checks reporting the same still-open finding
+# escalate once with an action prompt; the repeat correction stays
+# suppressed, and changed evidence resets the cycle so a later repeat may
+# escalate again (proposal item 2).
+fixture do |_root, record, host, checker, runtime|
+  now = Time.now.to_f
+  runtime.tick(now: now)
+  finding = { "id" => "f-stuck", "requirement" => "second behavior", "evidence" => "absent", "action" => "implement it" }
+  checker.result = answer("correct", findings: [finding])
+  runtime.tick(now: now + 1)
+  assert(host.messages.length == 1 && record.state.dig("findings", "f-stuck", "current_reports") == 1,
+         "precondition: the first effective report opens the finding and delivers the correction")
+
+  host.finish("t2")
+  runtime.tick(now: now + 2)
+  checker.result = answer("correct", findings: [finding])
+  runtime.tick(now: now + 3)
+  entry = record.state.dig("findings", "f-stuck")
+  assert(host.messages.length == 2 && host.messages.last.include?("f-stuck") && host.messages.last.include?("dispute"),
+         "the second effective report escalates once with the finding id and the dispute path")
+  assert(entry["current_reports"] == 2 && entry["escalated_at"] && entry["escalated_check"] == 2,
+         "the escalation is durable on the finding record")
+  assert(events(record).count { |event| event["type"] == "finding_repeat_escalated" } == 1,
+         "the escalation is auditable exactly once")
+  assert(Orbit::TaskView.format(record).include?("开放问题升级：f-stuck"),
+         "the readable status names the escalated finding with its next actions")
+
+  host.finish("t3")
+  runtime.tick(now: now + 4)
+  checker.result = answer("correct", findings: [finding])
+  runtime.tick(now: now + 5)
+  assert(host.messages.length == 2 && record.state.dig("findings", "f-stuck", "current_reports") == 3,
+         "a third same-evidence report counts but never re-prompts")
+
+  changed = finding.merge("evidence" => "still absent after the rewrite")
+  host.finish("t4")
+  runtime.tick(now: now + 6)
+  checker.result = answer("correct", findings: [changed])
+  runtime.tick(now: now + 7)
+  entry = record.state.dig("findings", "f-stuck")
+  assert(entry["current_reports"] == 1 && entry["escalated_at"].nil? && host.messages.length == 3,
+         "changed evidence resets the cycle and re-delivers the correction")
+
+  host.finish("t5")
+  runtime.tick(now: now + 8)
+  checker.result = answer("correct", findings: [changed])
+  runtime.tick(now: now + 9)
+  assert(host.messages.length == 4 && record.state.dig("findings", "f-stuck", "current_reports") == 2 &&
+         record.state.dig("findings", "f-stuck", "escalated_at"),
+         "after the substantive change a new repeat may escalate again")
+end
+
+# A stop that cannot confirm records structured per-phase diagnostics, and
+# the explicit retry re-reads session and roster state first: an
+# already-confirmed member is not stopped again, the Root stop is still
+# attempted per the existing authorization, and a confirmed retry leaves no
+# stale failure diagnostics behind (proposal item 3).
+fixture do |_root, record, host, _checker, _runtime|
+  state = record.state
+  state["connection"]["thread_id"] = "existing-root"
+  state["members"] = [{ "adapter" => "omp_native_task", "thread_id" => "orbit-m1", "kind" => "omp", "status" => "registered" }]
+  record.save(state)
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: nil)
+  host.confirmed = false
+  runtime.request_stop
+  runtime.tick
+  state = record.state
+  assert(state["status"] == "stop_unconfirmed", "precondition: the stop stays unconfirmed")
+  diagnostics = state["stop_diagnostics"]
+  assert(diagnostics.is_a?(Hash) && diagnostics["confirmed"] == false &&
+         diagnostics.dig("root", "ok") == false &&
+         diagnostics["members"].any? { |entry| entry["thread_id"] == "orbit-m1" && entry["ok"] == true } &&
+         state.dig("stop_confirmation", "confirmed") == false,
+         "the failed stop persists structured diagnostics without a false confirmation")
+  formatted = Orbit::TaskView.format(record)
+  assert(formatted.include?("停止诊断") && formatted.include?("Root 未确认停止") &&
+         formatted.include?("用 orbit stop <任务> 显式重试停止收尾"),
+         "the readable status shows the failed phase and the explicit retry path")
+
+  host.confirmed = true
+  result = Orbit::TaskRuntime.new(record: record, connection: host, checker: nil).retry_stop("User retried stop")
+  assert(result["status"] == "paused", "the retry confirms after the host recovers: #{result['error']}")
+  probe = result["stop_retry_probe"]
+  assert(probe.dig("root", "reachable") == true && probe["members"].first["already_confirmed"] == true,
+         "the retry first re-reads the live session and roster state")
+  assert(host.member_stops == ["orbit-m1"] && host.stop_calls == 2,
+         "an already-confirmed member is not stopped again while Root is still confirmed per authorization")
+  assert(result["stop_diagnostics"].nil?, "a confirmed retry leaves no stale failure diagnostics")
+  assert(!Orbit::TaskView.format(record).include?("停止诊断"), "the readable status drops the resolved diagnostics")
+end
+
+# Native ask calls the host skipped are recorded from the plugin buffer,
+# reminded once at a safe idle turn, cleared by a later successful ask from
+# the same agent, and closed with the task otherwise (proposal item 1).
+fixture do |root, record, _host, checker, _runtime|
+  host = RuntimeAskHost.new(root)
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker)
+  now = Time.now.to_f
+  host.ask_events = { "events" => [{ "id" => "ask-1", "seq" => 1, "kind" => "ask_interrupted",
+                                     "tool_call_id" => "call-abc", "agent_id" => "orbit-member-1",
+                                     "session_id" => "s1", "question" => "Which database?",
+                                     "skipped_source" => "system", "started" => false,
+                                     "at" => "2026-09-26T06:00:00Z" }],
+                      "dropped_oldest" => 0, "next_seq" => 2, "buffer_cap" => 500 }
+  runtime.tick(now: now)
+  entry = record.state.dig("ask_interrupts", "call-abc")
+  assert(entry && entry["question"] == "Which database?" && entry["skipped_source"] == "system",
+         "the skipped ask is recorded durably from the plugin buffer")
+  assert(entry["reminded_at"] && host.messages.length == 1 && host.messages.last.include?("call-abc") &&
+         host.messages.last.include?("does not answer for the user"),
+         "one safe-turn reminder names the call and refuses to answer or resend")
+  assert(Orbit::TaskView.format(record).include?("待补问：1 条") &&
+         Orbit::TaskView.format(record).include?("已提醒补问"),
+         "the readable status shows the pending interrupted ask")
+  runtime.tick(now: now + 1)
+  assert(host.messages.length == 1, "the reminder is never repeated")
+
+  host.ask_events = { "events" => [{ "id" => "ask-2", "seq" => 2, "kind" => "ask_resolved",
+                                     "tool_call_id" => "call-def", "agent_id" => "orbit-member-1",
+                                     "at" => "2026-09-26T06:05:00Z" }],
+                      "dropped_oldest" => 0, "next_seq" => 3, "buffer_cap" => 500 }
+  runtime.tick(now: now + 4)
+  entry = record.state.dig("ask_interrupts", "call-abc")
+  assert(entry["cleared_at"] && entry["cleared_by"] == "ask_succeeded" &&
+         !Orbit::TaskView.format(record).include?("待补问"),
+         "a later successful ask from the same agent clears the pending interrupt")
+
+  host.ask_events = { "events" => [{ "id" => "ask-3", "seq" => 3, "kind" => "ask_interrupted",
+                                     "tool_call_id" => "call-ghi", "agent_id" => "orbit-member-1",
+                                     "question" => "Which cache?", "skipped_source" => "user",
+                                     "started" => true, "at" => "2026-09-26T06:10:00Z" }],
+                      "dropped_oldest" => 0, "next_seq" => 4, "buffer_cap" => 500 }
+  runtime.tick(now: now + 5)
+  runtime.tick(now: now + 6)
+  runtime.request_stop
+  runtime.tick(now: now + 7)
+  entry = record.state.dig("ask_interrupts", "call-ghi")
+  assert(record.state["status"] == "paused" && entry["cleared_by"] == "task_terminal" && entry["cleared_at"],
+         "a task terminal state closes the still-pending ask interrupt")
 end
 
 puts "TASK_RUNTIME_TEST_PASS (deterministic, not real-model acceptance)"

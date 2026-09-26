@@ -233,6 +233,9 @@ module Orbit
         "quality_sources" => Array(selected_evidence["sources"]).first(MAX_SOURCES),
         "quality_evidence_valid_until" => selected_evidence["valid_until"],
         "quality_elapsed_seconds" => elapsed,
+        "judgment_provider" => judgment["provider"],
+        "judgment_model" => judgment["model"],
+        "question_set_version" => judgment["question_set_version"],
         # Recorded for audit only: this JEV call runs before TaskRecord exists
         # or outside the runtime's own usage buckets, so it is not part of the
         # task's jev_stage1/jev_stage2/check_tokens aggregates (see the debt

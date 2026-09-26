@@ -420,23 +420,39 @@ module Orbit
       invalidation = state["completion_invalidation"]
       return nil unless invalidation.is_a?(Hash)
 
-      reason = invalidation["reason"].to_s
-      reason = "unknown" if reason.empty?
-      text = "完成复核：未通过（#{reason}）"
-      detail = invalidation["detail"].to_s.strip
-      text += " — #{detail}" unless detail.empty?
-      text += "，记录于 #{invalidation['at']}" if invalidation["at"]
-      "#{text}；本次停止按普通停止记录，不代表该版本已通过独立终检"
+      if state["status"] == "stop_unconfirmed" || !stop_confirmed?(state)
+        "完成核对未通过：任务是否已停止还无法确认，也不能当作已完成。" \
+          "请先重试停止；若仍需交付，请创建新任务重新检查。"
+      else
+        "完成核对未通过：这次只确认任务停止，不能确认交付已完成。" \
+          "若仍需交付，请创建新任务，对最终版本重新检查。"
+      end
     end
 
     def next_action(state)
       status = state["status"]
-      return "需要用户处理" if %w[needs_user stop_unconfirmed].include?(status)
+      if status == "stop_unconfirmed"
+        return "用 orbit stop <任务> 显式重试停止收尾：重试前会重新读取会话与任务状态，" \
+               "已确认停止的资源不重复打断；证据不足时保持停止未确认，不当作已停止"
+      end
+      return "需要用户处理" if status == "needs_user"
       if status == "failed"
-        return stop_confirmed?(state) ? "运行失败，停止已确认" : "运行失败，需核实停止"
+        return stop_confirmed?(state) ? "运行失败，停止已确认" : "运行失败，需核实停止：用 orbit stop <任务> 显式重试收尾"
+      end
+      if %w[starting running].include?(status) && state["completion_stop_pending"]
+        return "等待当前助手结束回复，Orbit 随后核对是否完成"
       end
       return "重新绑定工作区" if rebind_action?(state)
       return "手动检查已排队" if manual_check_queued?(state)
+      notices = state["finalization_notices"]
+      if %w[starting running].include?(status) && notices.is_a?(Hash) && !notices.empty?
+        findings = state["findings"]
+        open = findings.is_a?(Hash) && findings.each_value.any? { |finding| finding.is_a?(Hash) && finding["status"] == "open" }
+        clues = state.dig("recheck", "findings")
+        unless open || (clues.is_a?(Array) && !clues.empty?)
+          return "当前助手核对检查后是否有新改动；无改动时申请完成，否则重新检查"
+        end
+      end
       return "等待 Root" if waiting_for_root?(state)
       return "检查已安排" if review_queued?(state)
 
@@ -476,6 +492,85 @@ module Orbit
       open = findings.is_a?(Hash) && findings.each_value.any? { |finding| finding.is_a?(Hash) && finding["status"] == "open" }
       clues = state.dig("recheck", "findings")
       open || (clues.is_a?(Array) && !clues.empty?) || !review_queued?(state)
+    end
+
+    # Open findings whose repeat was escalated: after two effective,
+    # current-input checks without a binding change the status names the
+    # finding, its latest evidence and the concrete next actions instead of
+    # only a count (proposal 2026-09-26 item 2).
+    def escalated_finding_lines(state)
+      findings = state["findings"]
+      return [] unless findings.is_a?(Hash)
+
+      findings.values.filter_map do |finding|
+        next unless finding.is_a?(Hash) && finding["status"] == "open" && finding["escalated_at"]
+
+        evidence = finding["evidence"].to_s
+        evidence = evidence.length > 120 ? "#{evidence[0, 120]}…" : evidence
+        reports = finding["current_reports"] || finding["escalated_reports"]
+        "开放问题升级：#{finding['id']} 已连续 #{reports} 次有效检查仍开放" \
+          "（最近检查 ##{finding['escalated_check']}，证据：#{evidence}）——下一动作：修复后重检；" \
+          "或按现有 dispute 流程附证据反驳；属于产品口径的交给用户。Orbit 不按次数自动关闭或停止任务。"
+      end
+    end
+
+    # Native ask calls the host skipped before the user could answer. Pending
+    # means recorded and not cleared; reminded_at only says the one-shot
+    # reminder went out. Orbit never answers for the user and never resends
+    # the question.
+    def pending_ask_interrupt_lines(state)
+      interrupts = state["ask_interrupts"]
+      return [] unless interrupts.is_a?(Hash) && %w[starting running].include?(state["status"])
+
+      pending = interrupts.values.select { |entry| entry.is_a?(Hash) && entry["cleared_at"].nil? }
+      return [] if pending.empty?
+
+      detail = pending.first(2).map do |entry|
+        owner = entry["agent_id"] ? "成员 #{entry['agent_id']}" : "Root"
+        state_note = entry["reminded_at"] ? "已提醒补问" : "待安全回合提醒"
+        "#{owner} 的 ask #{entry['tool_call_id']}（被 #{entry['skipped_source'] || '中断'} 打断，#{state_note}）"
+      end
+      more = pending.length > 2 ? "；另有 #{pending.length - 2} 条" : ""
+      ["待补问：#{pending.length} 条原生提问被打断未获答复——#{detail.join('；')}#{more}。" \
+        "Orbit 不代答、不重发提问；问题仍需要时由 Root 在空闲回合重新发起原生 Ask。"]
+    end
+
+    # Structured per-phase stop diagnostics for an unconfirmed stop: which
+    # phase failed (roster read, checker cleanup, member stops, Root stop),
+    # what the retry probe saw, and what remains unaccounted. Never reads a
+    # partial confirmation as a confirmed stop.
+    def stop_diagnostics_lines(state)
+      diagnostics = state["stop_diagnostics"]
+      return [] unless diagnostics.is_a?(Hash)
+
+      phases = []
+      phases << "成员名单不可读（#{diagnostics['roster_error']}）" if diagnostics["roster_error"]
+      phases << "检查进程清理未核实（#{diagnostics['checker_cleanup_error']}）" if diagnostics["checker_cleanup_error"]
+      failed_members = Array(diagnostics["members"]).select { |entry| entry.is_a?(Hash) && entry["ok"] == false }
+      unless failed_members.empty?
+        phases << "成员停止未确认 #{failed_members.length} 个（#{failed_members.map { |entry| entry['thread_id'] }.join('、')}）"
+      end
+      root = diagnostics["root"].is_a?(Hash) ? diagnostics["root"] : {}
+      phases << if root["error"]
+                  "Root 停止请求失败（#{root['error']}）"
+                elsif root["ok"] != true
+                  "Root 未确认停止"
+                else
+                  "Root 已确认停止（整体停止仍未确认）"
+                end
+      lines = ["停止诊断（#{diagnostics['at']}）：#{phases.join('；')}"]
+      lines << "停止失败明细：#{diagnostics['failures']}" if diagnostics["failures"]
+      unaccounted = Array(diagnostics["unaccounted_members"])
+      lines << "停止未覆盖成员：#{unaccounted.join('、')}" unless unaccounted.empty?
+      probe = state["stop_retry_probe"]
+      if probe.is_a?(Hash) && (root_probe = probe["root"].is_a?(Hash) ? probe["root"] : nil)
+        if root_probe["reachable"] == false
+          lines << "上次停止重试时 Root 桥接不可达（#{root_probe['error']}）：无法取得停止证据，保持停止未确认。"
+        elsif root_probe["status"] == "idle"
+          lines << "上次停止重试前 Root 已空闲：重试只做确认收尾，未重复打断。"
+        end
+      end
+      lines
     end
 
     def format(record)
@@ -519,6 +614,8 @@ module Orbit
         pending << "过期检查待重新核对 #{Array(recheck['findings']).length} 条（检查 ##{recheck['check']}）"
       end
       lines << "待处理问题：#{pending.empty? ? '无' : pending.join('；')}"
+      lines.concat(escalated_finding_lines(state))
+      lines.concat(pending_ask_interrupt_lines(state))
       decisions = Array(state["decisions"]).count { |decision| decision.is_a?(Hash) }
       lines << "裁定记录：#{decisions} 条"
       next_check = %w[starting running].include?(status) ? state["next_check_at"] : nil
@@ -531,11 +628,7 @@ module Orbit
                     state["stop_reason"] || state["error"] || "请核对任务错误及停止结果。"
                   when "paused"
                     if state["completion_invalidation"].is_a?(Hash)
-                      reason = state.dig("completion_invalidation", "reason").to_s
-                      reason = "unknown" if reason.empty?
-                      claim = state["stop_reason"].to_s.strip
-                      "已完成停止，但完成复核未通过（#{reason}）" +
-                        (claim.empty? ? "。" : "；原停止说明「#{claim}」不代表该版本已通过独立终检。")
+                      "本次只确认停止，不代表任务完成；若仍需交付，请创建新任务重新检查。"
                     else
                       "当前记录未要求用户处理"
                     end
@@ -545,6 +638,7 @@ module Orbit
       lines << "用户处理：#{attention}"
       lines << "运行错误：#{state['error']}" if state["error"]
       lines << "停止错误：#{state['cleanup_error']}" if state["cleanup_error"]
+      lines.concat(stop_diagnostics_lines(state))
       lines << "观察说明：#{state.dig('observation_pending', 'reason')}" if state["observation_pending"]
       lines << "任务 ID：#{state.fetch('id')}"
       lines.join("\n")

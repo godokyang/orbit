@@ -149,6 +149,10 @@ module JevAdvisorTest
       check(result["scores"] == { "0" => { "quality" => 0.7, "time" => 0.6 },
                                   "1" => { "quality" => 0.4, "time" => 0.55 } },
             "scores are reshaped per candidate")
+      check(result["provider"] == "typesafe" &&
+            result["question_set_version"] == Orbit::JevAdvisor::QUESTION_SET_VERSIONS.fetch("candidates") &&
+            result["model"].to_s.length.positive?,
+            "per-candidate scores retain the actual judgment provider, model and question set version")
     end
   end
 
