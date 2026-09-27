@@ -54,9 +54,11 @@ function session(id, branch = []) {
 }
 const root = session('root', [{ type: 'message', id: 'original', message: { role: 'user', content: 'Original requirement.' } }]);
 const root2 = session('root2', [{ type: 'message', id: 'original2', message: { role: 'user', content: 'Second requirement.' } }]);
-const root3 = session('root3', [{ type: 'message', id: 'original3', message: { role: 'user', content: 'Third requirement.' } }]);
+const root3 = session('root3', [{ type: 'message', id: 'original3', message: { role: 'user',
+  content: 'Third requirement.\nOrbit authorization: review_model=openai-codex/gpt-5.6-sol' } }]);
 delete root3.model; // no observable model at binding -> no durable write until traffic
-const root4 = session('root4', [{ type: 'message', id: 'original4', message: { role: 'user', content: 'Fourth requirement.' } }]);
+const root4 = session('root4', [{ type: 'message', id: 'original4', message: { role: 'user',
+  content: 'Fourth requirement.\nOrbit authorization: review_model=openai-codex/gpt-5.6-sol' } }]);
 delete root4.model; // same as root3: no durable line at binding
 const rootRef = { id: mainAgentId, kind: 'main', parentId: null, status: 'running', session: root, sessionFile: '/tmp/root.jsonl', history: {}, activity: null };
 const registry = {
@@ -65,7 +67,9 @@ const registry = {
   onChange: listener => { registryListener = listener; return () => { registryListener = null; }; },
   setStatus: () => true,
 };
-const ctxFor = s => ({ cwd: project, sessionManager: s.sessionManager, models: { list: () => [model] }, hasUI: true, ui: { notify: () => {} } });
+const ctxFor = s => ({ cwd: project, sessionManager: s.sessionManager,
+  models: { list: () => [model], resolve: spec => spec === '@task' ? model : undefined },
+  hasUI: true, ui: { notify: () => {} } });
 const ctx = ctxFor(root);
 const pi = { zod: z, registerTool: tool => { definition = tool; }, registerCommand: () => {},
   on: (name, handler) => { (events[name] ||= []).push(handler); } };
@@ -120,11 +124,15 @@ try {
 
   const taskDir = await startTask(ctx, 'original');
   await waitFor(async () => (await collabLines(taskDir)).length >= 2, 'association gap + root identity');
+  const poolStub = path.join(agentRoot, 'pool.sh');
+  await fs.writeFile(poolStub, '#!/bin/sh\nprintf \'{"models":["glm/x"]}\\n\'\n');
+  await fs.chmod(poolStub, 0o755);
+  process.env.ORBIT_CLI_BIN = poolStub;
 
   // Task dispatch evidence: original item input (name/model/task/rationale as
   // explicitly supplied) captured before the gate rewrites the name.
   const dispatch = await emit('tool_call', { toolName: 'task', toolCallId: 'call-dispatch',
-    input: { agent: 'scout', name: 'member-a', model: 'zhipu/glm-5.2', task: 'Check the limits', why: 'explicit delegation rationale' } }, ctx);
+    input: { agent: 'task', name: 'member-a', model: 'glm/x', task: 'Check the limits', why: 'explicit delegation rationale' } }, ctx);
   assert.ok(!dispatch.block, `dispatch must pass the gate: ${JSON.stringify(dispatch)}`);
   const memberSession = session('member-live');
   const memberRef = { id: dispatch.input.name, kind: 'sub', parentId: mainAgentId, status: 'running',
@@ -184,8 +192,8 @@ try {
   assert.equal(rootIdentity.model, 'glm/x', 'root actual model identity is recorded');
   const dispatchLine = lines.find(l => l.kind === 'task_dispatch');
   assert.equal(dispatchLine.input_name, 'member-a', 'original requested name is kept');
-  assert.equal(dispatchLine.agent, 'scout');
-  assert.equal(dispatchLine.model, 'zhipu/glm-5.2', 'explicitly requested model is kept');
+  assert.equal(dispatchLine.agent, 'task');
+  assert.equal(dispatchLine.model, 'glm/x', 'explicitly requested model is kept');
   assert.equal(dispatchLine.rationale, 'explicit delegation rationale', 'explicit rationale is kept');
   assert.equal(dispatchLine.rationale_source, 'dispatch_input', 'the reason is marked as dispatch-supplied');
   assert.equal(dispatchLine.task, 'Check the limits');
@@ -203,7 +211,7 @@ try {
   await emit('tool_call', { toolName: 'hub', toolCallId: 'other-task', input: { op: 'send', to: 'nobody', message: 'other task traffic' } }, ctxFor(root2));
   await waitFor(async () => (await collabLines(taskDir2)).some(l => l.tool_call_id === 'other-task'), 'task2 durable line');
   const noReason = await emit('tool_call', { toolName: 'task', toolCallId: 'no-reason',
-    input: { agent: 'scout', task: 'Inspect task two' } }, ctxFor(root2));
+    input: { agent: 'task', task: 'Inspect task two' } }, ctxFor(root2));
   assert.ok(!noReason.block);
   const missingReason = await waitFor(async () => (await collabLines(taskDir2))
     .find(l => l.kind === 'task_dispatch' && l.tool_call_id === 'no-reason'), 'unrecorded reason');

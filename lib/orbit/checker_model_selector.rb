@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "digest"
+require "fileutils"
 require "json"
 require "time"
 require_relative "checker_model_selection"
@@ -13,27 +14,22 @@ module Orbit
   # ADR-009 checker-model selection, shared by `orbit start` (first check) and
   # TaskRuntime (before every later check).
   #
-  # Selection rules are unchanged from the original CLI implementation:
-  #
-  #   * an explicit model (--review-model / ORBIT_REVIEW_MODEL) always wins,
-  #     even outside the pool, and is recorded with an out-of-pool notice;
+  # An explicit model verified against a native user message by CLI/TaskRuntime
+  # may be outside the pool; a tool argument alone cannot reach this branch.
   #   * an empty pool keeps the existing session default;
-  #   * a non-empty pool is intersected with the session catalog, each
-  #     candidate's unexpired ModelEvidenceCache facts are judged for quality
-  #     by JEV, then only qualified candidates are probed for isolated
-  #     resolvability and ordered by time, coarse cost and family.
-  #
-  # Missing evidence, an unavailable service or nothing qualifying leave the
-  # decision undecided (raise) instead of silently using a pool-outside
-  # default; undecided errors carry per-candidate diagnostics that were
-  # actually checked (ADR-009 2026-09-27 supplement). Credential/catalog
-  # resolvability is never quality. `candidate_statuses` exposes the same
-  # read-only per-candidate facts for the candidate UX without probing or
-  # judging anything.
+  #   * a non-empty pool is intersected with the session catalog and every
+  #     candidate is probed in the isolated checker profile;
+  #   * JEV ranks candidates with valid task-relevant facts, but missing facts,
+  #     low scores or unavailable judgment never exclude a runnable pool model.
+  # If none can run, report which candidates failed; do not use an unapproved
+  # model outside the pool. `candidate_statuses` remains read-only and does not
+  # probe or judge.
   class CheckerModelSelector
     # Startup argument errors keep the same class family the CLI already
     # handled, and every message ends with the explicit-model instruction.
     Error = Class.new(ArgumentError)
+    # A preference boundary only; a lower score never forbids a runnable pool
+    # model from doing a real independent check.
 
     QUALITY_THRESHOLD = 0.55
     TIME_FAST_THRESHOLD = 0.66
@@ -149,19 +145,19 @@ module Orbit
     end
 
     def explicit_selection(model, selected_for)
-      raise Error, "OMP review model must be provider/id from the session, --review-model, or ORBIT_REVIEW_MODEL" unless model.match?(OmpCheckRunner::MODEL_ID)
+      raise Error, "OMP review model must be provider/id" unless model.match?(OmpCheckRunner::MODEL_ID)
       if selected_for == "start"
         availability = begin
           @probe.call([model])
         rescue StandardError => error
-          raise Error, "explicit review model could not be checked in the isolated profile (#{error.class}); choose another --review-model provider/id"
+          raise Error, "explicit review model could not be checked in the isolated profile (#{error.class}); ask the native user to choose another exact provider/id"
         end
         unless availability.is_a?(Hash) && Array(availability["resolvable"]).include?(model)
           failures = availability.is_a?(Hash) ? availability["unresolvable"] : nil
           reason = Array(failures).find { |item| item.is_a?(Hash) && item["model"] == model }
           detail = reason && reason["reason"].to_s.strip
           detail = "not resolvable in the isolated profile" if detail.nil? || detail.empty?
-          raise Error, "explicit review model #{model} is unavailable (#{detail.slice(0, 200)}); choose another --review-model provider/id"
+          raise Error, "explicit review model #{model} is unavailable (#{detail.slice(0, 200)}); ask the native user to choose another exact provider/id"
         end
       end
 
@@ -209,21 +205,26 @@ module Orbit
       end
       # nil (unreadable) stays distinguishable from [] (empty): diagnostics
       # must report an unreadable cache as such, never as "absent" evidence.
-      evidence = CheckerModelSelection.cached_evidence(models: models, entries: entries, now: @clock.call)
+      checked_at = @clock.call
+      evidence = CheckerModelSelection.cached_evidence(models: models, entries: entries, now: checked_at)
+      evidence_statuses = models.to_h do |model|
+        [model, entries.is_a?(Array) ?
+          CheckerModelSelection.evidence_status(model: model, entries: entries, now: checked_at)["status"] : "unknown"]
+      end
       {
         "pool" => pool, "pool_empty" => false, "catalog" => catalog, "models" => models,
         "evidence" => evidence, "default_model" => nil, "instruction" => instruction.to_s,
         # Raw entries feed the undecided diagnostics (absent/expired/unavailable
         # per exact identity); the judged `evidence` above keeps only valid
         # entries, which cannot distinguish why a candidate has none.
-        "entries" => entries,
-        "signature" => signature(pool, catalog, evidence, instruction, nil)
+        "entries" => entries, "evidence_statuses" => evidence_statuses,
+        "signature" => signature(pool, catalog, evidence, instruction, nil, evidence_statuses)
       }
     rescue ModelCandidatePool::Error
       raise Error, "the candidate pool could not be read"
     end
 
-    def signature(pool, catalog, evidence, instruction, default_model)
+    def signature(pool, catalog, evidence, instruction, default_model, evidence_statuses = {})
       catalog_view =
         if catalog.is_a?(Hash)
           { "current" => catalog["current"].to_s,
@@ -231,15 +232,16 @@ module Orbit
             "families" => catalog["families"].is_a?(Hash) ? catalog["families"].sort_by { |key, _| key.to_s }.to_h : {} }
         end
       Digest::SHA256.hexdigest(JSON.generate([
-        "orbit-checker-selection-signature-v1",
+        "orbit-checker-selection-signature-v2",
         pool, catalog_view, evidence.sort_by { |key, _| key.to_s }.to_h,
-        default_model.to_s, instruction.to_s.scrub
+        evidence_statuses, default_model.to_s, instruction.to_s.scrub
       ]))
     end
 
     def reusable?(previous, prepared)
       return false unless previous.is_a?(Hash)
       return false if previous["source"] == "explicit"
+      return false unless previous["version"] == CheckerModelSelection::DECISION_VERSION
       return false unless previous["signature"].is_a?(String) && previous["signature"] == prepared["signature"]
 
       model = previous["model"].to_s
@@ -251,7 +253,7 @@ module Orbit
     def empty_pool_selection(prepared, selected_for)
       model = prepared["default_model"].to_s
       unless model.match?(OmpCheckRunner::MODEL_ID)
-        raise Error, "OMP review model must be provider/id from the session, --review-model, or ORBIT_REVIEW_MODEL"
+        raise Error, "OMP session default review model must be provider/id"
       end
 
       [model, { "source" => "session_default", "model" => model,
@@ -263,98 +265,103 @@ module Orbit
     def auto_select(prepared, selected_for)
       catalog = prepared["catalog"]
       unless catalog.is_a?(Hash)
-        raise undecided("the OMP session model catalog is unavailable",
-                        detail: ["pool candidates #{listed(prepared['pool'])} were not checked against the session catalog"])
+        raise failed_selection(prepared, "the OMP session model catalog is unavailable",
+                               detail: ["pool candidates #{listed(prepared['pool'])} were not checked against the session catalog"])
       end
       if prepared["models"].empty?
-        raise undecided("no candidate pool model is available in this session",
-                        detail: ["not in this session catalog: #{listed(prepared['pool'])}"])
+        raise failed_selection(prepared, "no candidate pool model is available in this session",
+                               detail: ["not in this session catalog: #{listed(prepared['pool'])}"])
       end
 
       evidence = prepared["evidence"]
       judged = prepared["models"].select { |candidate| evidence.key?(candidate) }
-      if judged.empty?
-        if prepared["entries"].nil?
-          raise undecided("the model evidence cache could not be read",
-                          detail: ["candidates #{listed(prepared['models'])} were not evidence-checked"])
+      judgment = nil
+      judgment_state = nil
+      judgment_error = nil
+      elapsed = nil
+      if judged.any?
+        advisor = resolved_advisor
+        if advisor
+          judgment_state = quality_state(prepared, evidence, judged)
+          started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          begin
+            judgment = advisor.assess_checker_quality(
+              state: judgment_state,
+              candidates: judged.map { |candidate| { "model" => candidate, "evidence" => evidence[candidate] } }
+            )
+          rescue StandardError => error
+            judgment_error = "JEV task-fit judgment failed (#{error.class})"
+          ensure
+            elapsed = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).round(3)
+          end
+        else
+          judgment_error = "JEV task-fit judgment unavailable"
         end
-        # Per-candidate precise reasons instead of one collapsed "no
-        # evidence": absent for the exact identity (with the near-variant
-        # identities the cache actually holds), expired, reported
-        # unavailable, or structurally invalid.
-        raise undecided("no candidate pool model has valid cached quality evidence",
-                        detail: evidence_lines(prepared["models"], prepared["entries"]),
-                        extra: "submit first-hand facts with `orbit model-evidence --file FILE|-` for the exact identities above")
       end
 
-      advisor = resolved_advisor
-      raise undecided("the JEV quality judgment is unavailable",
-                      detail: ["evidence-backed candidates ready: #{listed(judged)}"]) if advisor.nil?
+      scores = judgment ? judgment.fetch("scores") : {}
+      quality = scores.each_with_object({}) do |(candidate, score), out|
+        next unless score["quality"].to_f >= QUALITY_THRESHOLD
 
-
-      started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-      judgment = begin
-        advisor.assess_checker_quality(
-          state: quality_state(prepared, evidence, judged),
-          candidates: judged.map { |candidate| { "model" => candidate, "evidence" => evidence[candidate] } }
-        )
-      rescue StandardError => error
-        raise undecided("the JEV quality judgment failed (#{error.class})")
+        out[candidate] = { "verdict" => "qualified", "source" => "jev:checker_task_fit",
+                           "score" => score["quality"] }
       end
-      elapsed = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).round(3)
-
-      scores = judgment.fetch("scores")
-      quality = scores.select { |_candidate, score| score["quality"].to_f >= QUALITY_THRESHOLD }
-                      .to_h { |candidate, score| [candidate, { "verdict" => "qualified", "source" => "jev:checker_quality", "score" => score["quality"] }] }
-      if quality.empty?
-        raise undecided("no candidate pool model passed the JEV quality line",
-                        detail: judged.map { |candidate| "#{candidate} scored #{scores.dig(candidate, 'quality')} (threshold #{QUALITY_THRESHOLD})" })
-      end
-
       time_cost = judged.each_with_object({}) do |candidate, out|
+        next unless scores.key?(candidate)
+
         tiers = { "time" => time_tier(scores.dig(candidate, "time")) }
         band = evidence.dig(candidate, "cost_tier", "band")
         tiers["cost"] = band if band
         out[candidate] = tiers
       end
-
       availability = begin
-        @probe.call(quality.keys)
+        @probe.call(prepared["models"])
       rescue StandardError => error
-        raise undecided("qualified pool models could not be checked in the isolated profile (#{error.class})",
-                        detail: ["quality-qualified: #{listed(quality.keys)}"])
+        raise failed_selection(prepared, "pool models could not be checked in the isolated profile (#{error.class})",
+                               detail: ["pool candidates #{listed(prepared['models'])}; no model was proven runnable"],
+                               judgment: judgment, judgment_state: judgment_state, judgment_error: judgment_error)
       end
-      resolvable = availability.fetch("resolvable")
       decision = CheckerModelSelection.choose(
-        pool: prepared["pool"], catalog: catalog, quality: quality, resolvable: resolvable, time_cost: time_cost
+        pool: prepared["pool"], catalog: catalog, quality: quality,
+        resolvable: availability.fetch("resolvable"), time_cost: time_cost,
+        fit_scores: scores.transform_values { |score| score["quality"] }
       )
       if decision["model"].nil?
-        raise undecided("no checker model could be selected from the candidate pool (#{decision['reason']})",
-                        detail: probe_lines(availability, quality.keys))
+        raise failed_selection(prepared, "no runnable checker model in the candidate pool (#{decision['reason']})",
+                               detail: probe_lines(availability, prepared["models"]),
+                               judgment: judgment, judgment_state: judgment_state, judgment_error: judgment_error,
+                               availability: availability)
       end
 
       chosen = decision["model"]
-      selected_evidence = evidence.fetch(chosen)
-      [chosen, decision.merge(
-        "source" => "candidate_pool",
-        "quality_score" => quality.fetch(chosen)["score"],
-        "time_score" => scores.dig(chosen, "time"),
-        "time_tier" => time_cost.dig(chosen, "time"),
+      selected_evidence = evidence[chosen]
+      runnable = Array(availability["resolvable"])
+      evidence_needed = prepared["models"].filter_map do |candidate|
+        next unless runnable.include?(candidate) && !evidence.key?(candidate)
+
+        status = prepared["evidence_statuses"][candidate]
+        { "model" => candidate, "status" => status } if %w[absent expired invalid].include?(status)
+      end
+      unscored = prepared["models"] - scores.keys
+      selection = decision.merge(
+        "source" => "candidate_pool", "quality_score" => scores.dig(chosen, "quality"),
+        "time_score" => scores.dig(chosen, "time"), "time_tier" => time_cost.dig(chosen, "time"),
         "cost_tier" => evidence.dig(chosen, "cost_tier"),
-        "quality_sources" => Array(selected_evidence["sources"]).first(MAX_SOURCES),
-        "quality_evidence_valid_until" => selected_evidence["valid_until"],
+        "quality_sources" => Array(selected_evidence&.[]("sources")).first(MAX_SOURCES),
+        "quality_evidence_valid_until" => selected_evidence&.[]("valid_until"),
         "quality_elapsed_seconds" => elapsed,
-        "judgment_provider" => judgment["provider"],
-        "judgment_model" => judgment["model"],
-        "question_set_version" => judgment["question_set_version"],
-        # Recorded for audit only: this JEV call runs before TaskRecord exists
-        # or outside the runtime's own usage buckets, so it is not part of the
-        # task's jev_stage1/jev_stage2/check_tokens aggregates (see the debt
-        # ledger); task-wide token totals do not include it.
-        "usage" => bounded_usage(judgment["usage"]),
+        "judgment_provider" => judgment&.[]("provider"), "judgment_model" => judgment&.[]("model"),
+        "question_set_version" => judgment_state && JevAdvisor::QUESTION_SET_VERSIONS.fetch("checker_quality"),
+        "judgment_error" => judgment_error,
+        "task_fit_scores" => scores, "unscored_candidates" => unscored,
+        "evidence_needed" => evidence_needed,
+        "judgment_state" => judgment_state,
+        # A startup JEV call precedes TaskRecord; retain its usage separately.
+        "usage" => bounded_usage(judgment&.[]("usage")),
         "selected_for" => selected_for, "selected_at" => now_iso,
         "signature" => prepared["signature"]
-      )]
+      )
+      [chosen, selection]
     end
 
     def resolved_advisor
@@ -394,17 +401,37 @@ module Orbit
       kept
     end
 
-    # `detail` lines and `extra` next steps keep the undecided error
-    # actionable: per-candidate reasons that were actually checked, the
-    # evidence submission path when evidence is the blocker, and the explicit
-    # model instruction every undecided error ends with (ADR-009 2026-09-27
-    # supplement). One line: the message reaches Root through the start error,
-    # the blocked-state reason and checker notifications.
+    # A start that fails before TaskRecord exists still needs an inspectable
+    # judgment/probe trace. The local project log contains the actual bounded
+    # state sent to JEV and its structured response, never a guessed score.
+    def failed_selection(prepared, reason, detail:, judgment: nil, judgment_state: nil,
+                         judgment_error: nil, availability: nil)
+      error = undecided(reason, detail: detail)
+      path = File.join(@project_root, ".orbit", "checker-selection-failures.jsonl")
+      trace = {
+        "at" => now_iso, "reason" => reason, "instruction" => prepared["instruction"],
+        "pool" => prepared["pool"], "session_candidates" => prepared["models"],
+        "question_set_version" => judgment_state && JevAdvisor::QUESTION_SET_VERSIONS.fetch("checker_quality"),
+        "judgment_state" => judgment_state, "judgment" => judgment,
+        "judgment_error" => judgment_error, "isolated_probe" => availability
+      }
+      FileUtils.mkdir_p(File.dirname(path))
+      File.open(path, File::WRONLY | File::CREAT | File::APPEND, 0o600) do |file|
+        file.flock(File::LOCK_EX)
+        file.write("#{JSON.generate(trace)}\n")
+        file.flush
+        file.fsync
+      end
+      Error.new("#{error.message}; selection trace: #{path}")
+    rescue SystemCallError, JSON::GeneratorError => failure
+      Error.new("#{error.message}; local selection trace could not be saved (#{failure.class})")
+    end
+
     def undecided(reason, detail: [], extra: nil)
       parts = [reason]
       parts << "(#{detail.join('; ')})" unless detail.empty?
       parts << extra if extra
-      parts << "pass --review-model provider/id to choose explicitly"
+      parts << "check candidate pool and isolated checker availability; an outside-pool choice requires the native user's exact Orbit authorization: review_model=provider/id"
       Error.new(parts.join("; "))
     end
 

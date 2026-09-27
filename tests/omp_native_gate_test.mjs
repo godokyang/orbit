@@ -225,6 +225,42 @@ try {
   await assert.rejects(() => request('member_model'), /unresolved/);
   assert.equal(await request('model'), 'glm/x', 'a failed task-role lookup does not replace the Root model');
   delete ctx.models.resolve;
+  // Generic task resolves outside the live pool. Root's explicit model
+  // parameter cannot authorize it; only a later native user message can.
+  const outside = { provider: 'zhipu-coding-plan', id: 'glm-5.2' };
+  ctx.models.resolve = () => outside;
+  const denied = await emit('tool_call', { toolName: 'task', toolCallId: 'pool-denied',
+    input: { agent: 'task', model: 'zhipu-coding-plan/glm-5.2', task: 'work' } }, ctx);
+  assert.equal(denied.block, true);
+  assert.match(denied.reason, /outside the candidate pool/);
+  const rootBranch = root.sessionManager.getBranch();
+  rootBranch.push({ type: 'message', id: 'quoted-grant',
+    message: { role: 'user', content: '```text\nOrbit authorization: member_model=zhipu-coding-plan/glm-5.2\n```' } });
+  const quoted = await emit('tool_call', { toolName: 'task', toolCallId: 'quoted-grant-denied',
+    input: { agent: 'task', task: 'work without authorization' } }, ctx);
+  assert.equal(quoted.block, true, 'a code sample cannot authorize an outside member');
+  rootBranch.pop();
+  rootBranch.push({ type: 'message', id: 'member-grant',
+    message: { role: 'user', content: 'Orbit authorization: member_model=zhipu-coding-plan/glm-5.2' } });
+  const allowed = await emit('tool_call', { toolName: 'task', toolCallId: 'user-authorized',
+    input: { agent: 'task', task: 'work authorized by the user' } }, ctx);
+  assert.ok(allowed.input && !allowed.block, 'the exact native user choice allows the outside model');
+  const outsideRef = { id: allowed.input.name, kind: 'sub', parentId: mainAgentId, status: 'idle',
+    session: session('user-chosen-member'), sessionFile: null, history: {}, activity: null };
+  outsideRef.session.model = outside;
+  extraRefs.push(outsideRef);
+  registryListener({ type: 'registered', ref: outsideRef });
+  assert.equal((await membersFile()).find(m => m.thread_id === outsideRef.id).model,
+    'zhipu-coding-plan/glm-5.2', 'the authorized outside member reaches real registration with the exact model');
+  const dispatchLog = (await fs.readFile(path.join(started.task_directory, 'collaboration.jsonl'), 'utf8'))
+    .split('\n').filter(Boolean).map(line => JSON.parse(line)).find(entry => entry.tool_call_id === 'user-authorized');
+  assert.equal(dispatchLog?.authorization?.message_id, 'member-grant', 'authorization traces to the native user message');
+  assert.match(dispatchLog.notice, /outside the candidate pool/, 'the pool exception is visibly marked');
+  rootBranch.pop();
+  const deniedAgain = await emit('tool_call', { toolName: 'task', toolCallId: 'after-grant',
+    input: { agent: 'task', task: 'new dispatch without user authorization' } }, ctx);
+  assert.equal(deniedAgain.block, true, 'no authorization is inferred from an earlier tool argument');
+  ctx.models.resolve = () => model;
 
   // 2. Happy path: requested name is assigned; registered window writes the
   //    durable record BEFORE the member can stream.
@@ -249,12 +285,12 @@ try {
   extraRefs.push(liveRef);
   registryListener({ type: 'registered', ref: liveRef });
   const members = await membersFile();
-  assert.equal(members.length, 1);
-  assert.equal(members[0].thread_id, revised.input.name);
-  assert.equal(members[0]['requested_name'], revised.input.name);
-  assert.equal(members[0].status, 'registered');
-  assert.equal(members[0].model, 'glm/x');
-  assert.equal(members[0]['tool_call_id'], 'call-1');
+  assert.equal(members.length, 2);
+  const poolMember = members.find(m => m.thread_id === revised.input.name);
+  assert.equal(poolMember['requested_name'], revised.input.name);
+  assert.equal(poolMember.status, 'registered');
+  assert.equal(poolMember.model, 'glm/x');
+  assert.equal(poolMember['tool_call_id'], 'call-1');
 
   // Bridge: query by ACTUAL agent id.
   const roster = await request('members');
@@ -350,8 +386,7 @@ try {
   assert.ok(lateAborted, 'hook must abort the drifted member');
   const lateState = await request('member_state', { id: lateCall.input.name });
   assert.equal(lateState.retained_session_seen, true, 'silent attach must be captured into the shared retained map');
-  await fs.rm(agentRoot, { recursive: true, force: true });
-  delete process.env.ORBIT_CLI_BIN;
+  // Keep the fixture pool live for the remaining generic @task gate probes.
 
   // 4. Write failure (corrupt members list): aborted, list not overwritten.
   const failCall = await emit("tool_call", { toolName: 'task', toolCallId: 'call-3', input: { task: 'third' } }, ctx);
@@ -492,6 +527,8 @@ try {
     assert.equal(parkedState.session_attached, false);
     assert.equal(parkedState.lifecycle.acceptedAt, 2);
   }
+  await fs.rm(agentRoot, { recursive: true, force: true });
+  delete process.env.ORBIT_CLI_BIN;
 
   // 11. Correction/finalization delivery ACK state machine, modeled on OMP
   //    18.2.8 #dispatchCustomMessage: streaming steer-queue resolves fast;

@@ -1,14 +1,13 @@
 # frozen_string_literal: true
 
 require "stringio"
+require "tmpdir"
 require "time"
 require_relative "../lib/orbit/checker_model_selector"
 
-# ADR-009 checker-model selection shared by `orbit start` and TaskRuntime.
-# These tests cover the decision rules that matter to a running task: an
-# explicit model is frozen, an empty pool keeps the session default, an
-# unchanged input reuses the recorded decision without another JEV call, a
-# changed pool reselects, and undecided never silently falls back.
+# Explicit selection still requires native-user authorization at the CLI.
+# Automated selection stays in the pool and uses a runnable candidate even
+# when task-fit scores or evidence are unavailable.
 module CheckerModelSelectorTest
   module_function
 
@@ -50,7 +49,7 @@ module CheckerModelSelectorTest
       @calls += 1
       @state = state
       @candidates = candidates
-      { "provider" => "typesafe", "model" => "jev-test", "question_set_version" => "jev-checker-quality-1",
+      { "provider" => "typesafe", "model" => "jev-test", "question_set_version" => "jev-checker-task-fit-1",
         "scores" => @scores, "usage" => { "input" => 7, "output" => 3 } }
     end
     attr_reader :state, :candidates
@@ -102,9 +101,9 @@ module CheckerModelSelectorTest
     value
   end
 
-  def selector(pool:, catalog:, entries:, advisor:, probe:, default_model: "session/default")
+  def selector(pool:, catalog:, entries:, advisor:, probe:, default_model: "session/default", project_root: "/tmp")
     Orbit::CheckerModelSelector.new(
-      connection: FakeConnection.new(catalog, default_model), project_root: "/tmp",
+      connection: FakeConnection.new(catalog, default_model), project_root: project_root,
       pool: FakePool.new(pool), evidence_cache: FakeEvidence.new(entries),
       advisor: advisor, probe: probe, clock: -> { Time.utc(2026, 9, 25) }
     )
@@ -154,7 +153,9 @@ module CheckerModelSelectorTest
     model, first = built.select(explicit: nil, instruction: "build it")
     assert(model == "a/one" && first["source"] == "candidate_pool", "the first selection judges and records")
     assert(first["judgment_provider"] == "typesafe" && first["judgment_model"] == "jev-test" &&
-           first["question_set_version"] == "jev-checker-quality-1" && first.dig("usage", "input") == 7,
+           first["question_set_version"] == "jev-checker-task-fit-1" && first.dig("usage", "input") == 7 &&
+           first.dig("task_fit_scores", "a/one", "quality") == 0.9 &&
+           first.dig("judgment_state", "instruction") == "build it",
            "the recorded checker decision retains judgment provenance and usage")
     again, second = built.select(explicit: nil, instruction: "build it", previous: first)
     assert(again == "a/one" && second == first, "an unchanged input returns the recorded decision")
@@ -186,50 +187,129 @@ module CheckerModelSelectorTest
            "the JEV time tier and quality score are recorded")
   end
 
-  def no_valid_evidence_is_undecided_not_a_silent_default
+  def no_valid_evidence_still_selects_a_runnable_pool_model
     advisor = FakeAdvisor.new({})
-    error = assert_raises do
-      selector(pool: ["a/one"], catalog: catalog_for(["a/one"]), entries: [],
-               advisor: advisor, probe: FakeProbe.new(["a/one"]))
-        .select(explicit: nil, instruction: "build it")
-    end
-    assert(error.message.include?("valid cached quality evidence") && error.message.include?("a/one"),
-           "the missing-evidence reason names the model that Root can investigate")
-    assert(error.message.include?("--review-model") && advisor.calls.zero?,
-           "JEV is not called without evidence; an explicit model remains available")
+    model, selection = selector(pool: ["a/one"], catalog: catalog_for(["a/one"]), entries: [],
+                                advisor: advisor, probe: FakeProbe.new(["a/one"]))
+                       .select(explicit: nil, instruction: "build it")
+    assert(model == "a/one" && selection["selection_tier"] == "fallback" &&
+           selection["quality_score"].nil? && selection["unscored_candidates"] == ["a/one"] &&
+           selection["evidence_needed"] == [{ "model" => "a/one", "status" => "absent" }],
+           "a runnable model still starts and tells Root exactly which model needs real evidence")
+    assert(advisor.calls.zero?, "Jev is not asked to guess without candidate evidence")
   end
 
-
-  # ADR-009 2026-09-27 supplement: undecided errors and the read-only status
-  # listing report per-candidate facts that were actually checked — the
-  # recurring second-task failure was evidence for a near-variant identity
-  # collapsed into one unactionable "no evidence".
-  def undecided_error_lists_precise_evidence_reasons_per_identity
+  def near_variant_evidence_does_not_fabricate_a_score
     advisor = FakeAdvisor.new({})
-    near_variant = entry("kimi-code/k3")
-    error = assert_raises do
-      selector(pool: ["kimi-code/k3-256k"], catalog: catalog_for(["kimi-code/k3-256k"]),
-               entries: [near_variant], advisor: advisor, probe: FakeProbe.new(["kimi-code/k3-256k"]))
-        .select(explicit: nil, instruction: "build it")
-    end
-    assert(error.message.include?("kimi-code/k3-256k: absent") &&
-           error.message.include?("the cache holds kimi-code/k3 under provider kimi-code"),
-           "the absent candidate names its exact identity and the near variant actually held: #{error.message}")
-    assert(error.message.include?("orbit model-evidence --file FILE|-") &&
-           error.message.include?("--review-model provider/id"),
-           "both recovery paths are stated")
-    assert(advisor.calls.zero?, "no JEV call without evidence")
+    model, selection = selector(pool: ["kimi-code/k3-256k"], catalog: catalog_for(["kimi-code/k3-256k"]),
+                                entries: [entry("kimi-code/k3")], advisor: advisor,
+                                probe: FakeProbe.new(["kimi-code/k3-256k"]))
+                       .select(explicit: nil, instruction: "build it")
+    assert(model == "kimi-code/k3-256k" && selection["task_fit_scores"].empty? &&
+           selection["quality_sources"].empty? && advisor.calls.zero? &&
+           selection["evidence_needed"] == [{ "model" => "kimi-code/k3-256k", "status" => "absent" }],
+           "near-variant evidence is not transferred, and Root is asked for the exact candidate")
   end
 
-  def quality_line_failure_names_each_score
-    advisor = FakeAdvisor.new({ "a/one" => { "quality" => 0.42, "time" => 0.9 } })
-    error = assert_raises do
-      selector(pool: ["a/one"], catalog: catalog_for(["a/one"]), entries: [entry("a/one")],
-               advisor: advisor, probe: FakeProbe.new(["a/one"]))
-        .select(explicit: nil, instruction: "build it")
+  def submitted_checker_evidence_rejudges_before_the_next_check
+    advisor = FakeAdvisor.new({ "a/one" => { "quality" => 0.9, "time" => 0.8 } })
+    entries = []
+    built = selector(pool: ["a/one"], catalog: catalog_for(["a/one"]), entries: entries,
+                     advisor: advisor, probe: FakeProbe.new(["a/one"]))
+    model, initial = built.select(explicit: nil, instruction: "build it")
+    entries << entry("a/one")
+    updated_model, updated = built.select(explicit: nil, instruction: "build it",
+                                          previous: initial, selected_for: "before_check")
+    assert(model == updated_model && initial["evidence_needed"].length == 1 &&
+           updated["evidence_needed"].empty? && updated["selection_tier"] == "preferred" &&
+           updated["quality_score"] == 0.9 && updated["selected_for"] == "before_check" &&
+           advisor.calls == 1,
+           "Root's new exact evidence replaces the earlier fallback with a fresh judgment before review")
+  end
+
+  def root_unavailable_evidence_answer_closes_the_request_without_a_fake_score
+    entries = []
+    advisor = FakeAdvisor.new({})
+    built = selector(pool: ["a/one"], catalog: catalog_for(["a/one"]), entries: entries,
+                     advisor: advisor, probe: FakeProbe.new(["a/one"]))
+    _, initial = built.select(explicit: nil, instruction: "build it")
+    entries << entry("a/one").merge("status" => "unavailable", "reason" => "no verified source")
+    model, updated = built.select(explicit: nil, instruction: "build it",
+                                  previous: initial, selected_for: "before_check")
+    assert(model == "a/one" && initial["evidence_needed"].length == 1 &&
+           updated["evidence_needed"].empty? && updated["quality_score"].nil? &&
+           initial["signature"] != updated["signature"] && advisor.calls.zero?,
+           "an honest unavailable reply stops requesting facts without claiming model quality")
+  end
+
+  def only_runnable_candidates_with_missing_or_expired_facts_request_root_research
+    pool = %w[a/unresolvable b/expired c/valid]
+    advisor = FakeAdvisor.new({ "c/valid" => { "quality" => 0.9, "time" => 0.8 } })
+    model, selection = selector(pool: pool, catalog: catalog_for(pool),
+                                entries: [entry("b/expired", valid_until: "2026-09-20T00:00:00Z"),
+                                          entry("c/valid")],
+                                advisor: advisor, probe: FakeProbe.new(%w[b/expired c/valid]))
+                       .select(explicit: nil, instruction: "build it")
+    assert(model == "c/valid" && selection["selection_tier"] == "preferred" &&
+           selection["evidence_needed"] == [{ "model" => "b/expired", "status" => "expired" }],
+           "Root is asked only for missing or expired facts that could change the runnable pool ordering")
+  end
+
+  def low_score_selects_without_claiming_verified_quality
+    advisor = FakeAdvisor.new({ "kimi-code/k3-256k" => { "quality" => 0.03, "time" => 0.4 } })
+    probe = FakeProbe.new(["kimi-code/k3-256k"])
+    model, selection = selector(pool: ["kimi-code/k3-256k"], catalog: catalog_for(["kimi-code/k3-256k"]),
+                                entries: [entry("kimi-code/k3-256k")], advisor: advisor, probe: probe)
+                       .select(explicit: nil, instruction: "implement approved plan")
+    assert(model == "kimi-code/k3-256k" && selection["quality_score"] == 0.03 &&
+           selection["selection_tier"] == "fallback" && selection["notice"].include?("未经证实"),
+           "the reported 0.03 task-fit score ranks a runnable pooled checker, never blocks entry")
+    assert(probe.models == ["kimi-code/k3-256k"] && selection.dig("judgment_state", "instruction") == "implement approved plan",
+           "the actual scored input and independent checker probe remain inspectable")
+  end
+
+  def unavailable_task_fit_judgment_uses_pool_order
+    advisor = Object.new
+    advisor.define_singleton_method(:assess_checker_quality) { |**_args| raise "JEV unavailable" }
+    pool = %w[a/first b/second]
+    model, selection = selector(pool: pool, catalog: catalog_for(pool),
+                                entries: pool.map { |candidate| entry(candidate) },
+                                advisor: advisor, probe: FakeProbe.new(pool))
+                       .select(explicit: nil, instruction: "build it")
+    assert(model == "a/first" && selection["selection_tier"] == "fallback" &&
+           selection["quality_score"].nil? && selection["judgment_error"].include?("failed"),
+           "a JEV outage never invents a score or forces a user to supply an outside-pool model")
+  end
+
+  def unresolvable_preferred_model_falls_through_to_a_runnable_pool_model
+    advisor = FakeAdvisor.new({ "a/preferred" => { "quality" => 0.9, "time" => 0.9 },
+                                "b/fallback" => { "quality" => 0.03, "time" => 0.4 } })
+    probe = FakeProbe.new(["b/fallback"])
+    model, selection = selector(pool: %w[a/preferred b/fallback], catalog: catalog_for(%w[a/preferred b/fallback]),
+                                entries: [entry("a/preferred"), entry("b/fallback")], advisor: advisor, probe: probe)
+                       .select(explicit: nil, instruction: "build it")
+    assert(model == "b/fallback" && selection["selection_tier"] == "fallback" &&
+           selection.dig("task_fit_scores", "a/preferred", "quality") == 0.9 &&
+           probe.models == %w[a/preferred b/fallback],
+           "a high score does not block a lower-scored model when only the latter can run")
+  end
+
+  def no_runnable_pool_model_records_the_failed_judgment
+    Dir.mktmpdir("orbit-selection-") do |project|
+      advisor = FakeAdvisor.new({ "a/one" => { "quality" => 0.03, "time" => 0.4 } })
+      probe = FakeProbe.new([])
+      error = assert_raises do
+        selector(pool: ["a/one"], catalog: catalog_for(["a/one"]), entries: [entry("a/one")],
+                 advisor: advisor, probe: probe, project_root: project)
+          .select(explicit: nil, instruction: "build it")
+      end
+      trace = JSON.parse(File.read(File.join(project, ".orbit", "checker-selection-failures.jsonl")))
+      assert(error.message.include?("no runnable checker model") &&
+             trace.dig("judgment", "scores", "a/one", "quality") == 0.03 &&
+             trace.dig("judgment_state", "instruction") == "build it" &&
+             trace["session_candidates"] == ["a/one"],
+             "a genuinely unresolvable pool fails with the exact scored input and response saved locally")
     end
-    assert(error.message.include?("a/one scored 0.42") && error.message.include?("threshold 0.55"),
-           "the below-threshold score is named per candidate: #{error.message}")
   end
 
   def candidate_statuses_are_read_only_and_precise
@@ -265,9 +345,15 @@ module CheckerModelSelectorTest
        unchanged_input_reuses_the_recorded_decision
        changed_pool_reselects_before_the_next_check
        end_to_end_time_orders_the_qualified_candidates
-       no_valid_evidence_is_undecided_not_a_silent_default
-       undecided_error_lists_precise_evidence_reasons_per_identity
-       quality_line_failure_names_each_score
+       no_valid_evidence_still_selects_a_runnable_pool_model
+       near_variant_evidence_does_not_fabricate_a_score
+       low_score_selects_without_claiming_verified_quality
+       unavailable_task_fit_judgment_uses_pool_order
+       submitted_checker_evidence_rejudges_before_the_next_check
+       root_unavailable_evidence_answer_closes_the_request_without_a_fake_score
+       only_runnable_candidates_with_missing_or_expired_facts_request_root_research
+       unresolvable_preferred_model_falls_through_to_a_runnable_pool_model
+       no_runnable_pool_model_records_the_failed_judgment
        candidate_statuses_are_read_only_and_precise].each do |test|
       send(test)
       puts "CHECKER_MODEL_SELECTOR_TEST_PASS #{test}"

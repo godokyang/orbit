@@ -4,29 +4,13 @@ require "time"
 require "uri"
 
 module Orbit
-  # Pure checker-model selection for ADR-009.
-  #
-  # Given the user's long-lived candidate pool, the current OMP session catalog,
-  # the isolated checker's resolve-only probe result, caller-supplied quality
-  # verdicts and optional time/cost tiers, decide the model for the next
-  # independent check.
-  #
-  # Order of narrowing (ADR-009 §3/§4):
-  #
-  #   1. pool ∩ current session catalog;
-  #   2. must have a verifiable quality verdict (the quality line comes first);
-  #   3. must resolve in the checker's isolated profile;
-  #   4. among the survivors, prefer the best available end-to-end time tier,
-  #      then the coarse cost tier, then a different model family as a same-level
-  #      preference, then pool order.
-  #
-  # Credential/catalog resolvability is not quality. A model with no verifiable
-  # quality verdict stays "待评估" and is never auto-picked; if nothing passes
-  # the quality gate the decision is undecided and the caller must have Root
-  # specify a model explicitly. The module never fabricates quality, time or
-  # cost facts; when time/cost tiers are missing it records the gap instead.
+  # Pool and session identity are mandatory; the isolated checker's resolve
+  # probe determines which pool models can actually run. Task-fit judgments
+  # prioritize candidates when available, but an inconclusive or unavailable
+  # judgment never turns a runnable, user-pooled model into an unusable one.
+  # Missing facts remain unknown rather than fabricated quality evidence.
   module CheckerModelSelection
-    DECISION_VERSION = "orbit-checker-selection-v1"
+    DECISION_VERSION = "orbit-checker-selection-v3"
 
     NO_TIME_COST_EVIDENCE = "no time/cost facts were available and none were invented"
 
@@ -63,13 +47,6 @@ module Orbit
 
       available = normalize(catalog["available"])
       normalize(pool).select { |model| available.include?(model) }
-    end
-
-    # pool ∩ catalog ∩ quality-qualified. This is the quality line: anything
-    # without a verifiable verdict is excluded and stays "待评估".
-    def qualified_candidates(pool:, catalog:, quality:)
-      qualified = qualified_models(quality)
-      pool_candidates(pool: pool, catalog: catalog).select { |model| qualified.include?(model) }
     end
 
     # Bounded, per-candidate cache evidence for the JEV quality judgment. Only
@@ -149,12 +126,10 @@ module Orbit
       { "status" => "invalid", "detail" => "cached entries for this exact identity failed structural validation" }
     end
 
-    # pool: ordered provider/id strings from ModelCandidatePool#read.
-    # catalog: { "current" =>, "available" => [...], "families" => {id=>family} } or nil.
-    # quality: Hash of provider/id => verdict entry, or nil.
-    # resolvable: provider/id strings the isolated probe resolved.
-    # time_cost: optional Hash model => { "time" =>, "cost" => } coarse tiers.
-    def choose(pool:, catalog:, quality:, resolvable:, time_cost: nil)
+    # Quality verdicts are preferences, not permission to run a pooled model.
+    # With no positive fit signal, use the highest scored runnable candidate;
+    # with no score at all, retain the user's pool order.
+    def choose(pool:, catalog:, quality:, resolvable:, time_cost: nil, fit_scores: nil)
       ordered = normalize(pool)
       return undecided("empty_pool") if ordered.empty?
       return undecided("session_catalog_unavailable") unless catalog.is_a?(Hash)
@@ -162,20 +137,37 @@ module Orbit
       in_session = pool_candidates(pool: ordered, catalog: catalog)
       return undecided("no_pool_model_in_session") if in_session.empty?
 
-      qualified = qualified_candidates(pool: ordered, catalog: catalog, quality: quality)
-      return undecided("no_verifiable_quality_evidence") if qualified.empty?
-
       resolved = normalize(resolvable)
-      eligible = qualified.select { |model| resolved.include?(model) }
-      return undecided("qualified_pool_models_unresolvable_in_checker") if eligible.empty?
+      runnable = in_session.select { |model| resolved.include?(model) }
+      return undecided("pool_models_unresolvable_in_checker") if runnable.empty?
+
+      qualified = qualified_models(quality)
+      preferred = runnable.select { |model| qualified.include?(model) }
+      if preferred.empty?
+        scored = runnable.select { |model| fit_scores.is_a?(Hash) && fit_scores[model].is_a?(Numeric) }
+        chosen = if scored.empty?
+                   runnable.first
+                 else
+                   index = runnable.each_with_index.to_h
+                   scored.max_by { |model| [fit_scores.fetch(model), -index.fetch(model)] }
+                 end
+        basis = scored.empty? ? "pool_order_unknown_fit" : "highest_available_task_fit"
+        return {
+          "model" => chosen, "basis" => basis, "candidates" => runnable,
+          "selection_tier" => "fallback", "notice" => "候选池降级选择：独立检查模型质量未经证实",
+          "reason" => scored.empty? ? "No task-fit judgment available; selected first runnable model in pool order" :
+                                      "No positive task-fit signal among runnable pool models; selected highest available score",
+          "version" => DECISION_VERSION
+        }
+      end
 
       families = catalog["families"].is_a?(Hash) ? catalog["families"] : {}
       writing_family = families[catalog["current"].to_s.strip].to_s.strip
-      cross_candidates = eligible.select do |model|
+      cross_candidates = preferred.select do |model|
         family = families[model].to_s.strip
         !writing_family.empty? && !family.empty? && family != writing_family
       end
-      chosen = order_by_time_cost(eligible, families, writing_family, time_cost).first
+      chosen = order_by_time_cost(preferred, families, writing_family, time_cost).first
       chosen_family = families[chosen].to_s.strip
       chosen_cross = !writing_family.empty? && !chosen_family.empty? && chosen_family != writing_family
       basis = if chosen_cross
@@ -189,9 +181,9 @@ module Orbit
               end
       {
         "model" => chosen,
-        "reason" => "#{basis}: selected a quality-qualified resolvable pool model; #{ordering_note(eligible, time_cost)}",
-        "basis" => basis, "candidates" => eligible,
-        "evidence_gap" => time_cost_gap(eligible, time_cost), "version" => DECISION_VERSION
+        "reason" => "#{basis}: selected a runnable pool model with a positive task-fit signal; #{ordering_note(preferred, time_cost)}",
+        "basis" => basis, "candidates" => preferred, "selection_tier" => "preferred",
+        "evidence_gap" => time_cost_gap(preferred, time_cost), "version" => DECISION_VERSION
       }
     end
 

@@ -146,20 +146,19 @@ try {
   assert.equal(JSON.parse(submission.stdout).status, 'cached');
 
   // 4. Explicit recovery on the SAME original message is permitted and makes
-  // real progress: no duplicate-task refusal (none was created), the cached
-  // evidence is consumed, and the next gate (JEV) fails closed with its own
-  // actionable reason instead of the bootstrap deadlock repeating.
+  // real progress: no duplicate-task refusal (none was created). Cached evidence
+  // cannot make a model missing from the isolated catalog runnable.
   await assert.rejects(() => tool({ action: 'start', message_id: 'original' }), error => {
     assert.doesNotMatch(error.message, /already has an Orbit task/, 'no task existed, retry must not be refused');
-    assert.match(error.message, /JEV quality judgment is unavailable/, 'next gate fails closed with its real reason');
+    assert.match(error.message, /no runnable checker model in the candidate pool/, 'the isolated catalog, not the JEV score, blocks entry');
     return true;
   });
   assert.deepEqual(await taskDirectories(), [], 'still no TaskRecord: no duplicate task');
 
   // 4b. The real failing provider shape end-to-end: a NEW message whose
-  // automatic entry fails (JEV gate now) on an openai-codex Responses body
-  // gets the recovery instruction injected into `input` — no abort, no
-  // aside, exactly like the messages-array transports.
+  // automatic entry still fails on isolated model availability in an openai-codex
+  // Responses body gets the recovery instruction injected into `input` — no
+  // abort, no aside, exactly like the messages-array transports.
   root.sessionManager.getBranch().push({ type: 'message', id: 'third', message: { role: 'user', content: originalText } });
   const codexFirst = await emit('before_provider_request', { payload: {
     type: 'response.create', model: 'openai-codex/gpt-6-sol', store: false, stream: true,

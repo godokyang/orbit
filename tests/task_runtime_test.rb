@@ -422,6 +422,13 @@ fixture(interval: 300) do |root, record, _host, checker, _runtime|
   assert(host.messages.count { |message| message.include?("model evidence request") } == 1,
          "repeated ticks do not loop the evidence request")
   assert(advisor.delegation_calls.empty?, "missing evidence never reaches the second stage")
+  File.write(File.join(root, "artifact.txt"), "a new artifact version")
+  host.working("substantive artifact update")
+  runtime.tick(now: now + 140)
+  assert(events(record).count { |event| event["type"] == "jev_assessed" } >= 2 &&
+         host.messages.count { |message| message.include?("model evidence request") } == 1,
+         "new work is still assessed, but the unchanged model facts are requested only once")
+
 
   requested = record.state.dig("evidence_request", "identities")
   assert(requested.dig("root", "provider") == requested.dig("candidates", 0, "provider") &&
@@ -940,7 +947,7 @@ fixture do |root, record, _host, _checker, _runtime|
   runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker,
                                    candidate_pool: pool, checker_selector: selector)
   now = Time.now.to_f
-  selector.error = "no candidate pool model passed the JEV quality line"
+  selector.error = "no runnable checker model in the candidate pool"
   runtime.tick(now: now)
   assert(checker.calls.empty? && record.state.fetch("checks").empty? &&
          record.state.dig("review", "blocked", "type") == "selection_undecided",
@@ -990,6 +997,11 @@ end
 # clears the block and starts a fresh check that recovers.
 fixture do |root, record, _host, _checker, _runtime|
   host = RuntimeTeamHost.new(root)
+  record.save(record.state.merge("instruction_source" => { "kind" => "omp_user_message", "id" => "m1" }))
+  native_grant = { "id" => "m2", "text" => "Orbit authorization: review_model=openai/gpt-6-astra",
+                   "internal" => false }
+  host.define_singleton_method(:user_message) { |id: nil| id == "m2" ? native_grant : nil }
+  host.define_singleton_method(:user_messages) { |after_id:| after_id == "m1" ? [native_grant] : [] }
   selector = StubCheckerSelector.new("zhipu/glm-5")
   checker = RuntimeSelectingChecker.new
   runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker,
@@ -1010,15 +1022,23 @@ fixture do |root, record, _host, _checker, _runtime|
          "the failure is recorded as a failed check with its kind and model")
   assert(Orbit::TaskView.format(record).include?("检查阻塞：模型 zhipu/glm-5"),
          "orbit status surfaces the blocked checker line")
-  notice = host.messages.find { |text| text.include?("orbit review-model") }
-  assert(notice && notice.include?("--model") && notice.include?(record.path) &&
-         notice.include?("does not retry"),
-         "Root is told in English to explicitly re-select via review-model")
 
   runtime.tick(now: now + 400)
   assert(checker.calls.length == 1, "blocked automatic checks neither start nor snapshot")
 
-  record.submit("review_model", "model" => "openai/gpt-6-astra", "reason" => "auth failed")
+  record.submit("check")
+  host.finish("delivered after failed checker")
+  runtime.tick(now: now + 400.25)
+  assert(checker.calls.length == 1 && record.state.fetch("checks").length == 1,
+         "a second manual check cannot spend another snapshot on the same blocked model")
+
+  record.submit("review_model", "model" => "openai/gpt-6-astra", "reason" => "Root tool only")
+  runtime.tick(now: now + 400.5)
+  assert(checker.calls.length == 1 && record.state.dig("review", "blocked", "type") == "check_failure",
+         "the runtime rejects a forged Root-only selection without unblocking the failed check")
+  record.submit("review_model", "model" => "openai/gpt-6-astra", "reason" => "auth failed",
+                "authorization" => { "kind" => "native_user_message", "message_id" => "m2",
+                                     "model" => "openai/gpt-6-astra", "scope" => "task" })
   runtime.tick(now: now + 401)
   recorded = events(record).find { |event| event["type"] == "review_model_recorded" }
   assert(record.state.dig("review", "explicit_model") == "openai/gpt-6-astra" &&
@@ -1153,6 +1173,21 @@ fixture do |_root, record, _host, _checker, runtime|
          "an unsolicited evidence submission is not described as used")
   assert(File.readlines(File.join(record.path, "events.jsonl")).any? { |line| line.include?("model_evidence_ignored") },
          "the ignored task submission remains auditable while the cache stays reusable")
+end
+
+# Checker-specific facts may be submitted with a task path too; they are
+# cached for the next check, not discarded as an unsolicited member hint.
+fixture do |_root, record, _host, _checker, runtime|
+  runtime.instance_variable_get(:@state)["review"]["selection"] = {
+    "source" => "candidate_pool",
+    "evidence_needed" => [{ "model" => "opencode-go/deepseek-v4.1-flash", "status" => "absent" }]
+  }
+  record.submit("model_evidence", "entries" => [evidence_entry.slice("provider", "model", "reasoning", "status")])
+  runtime.tick(now: Time.now.to_f)
+  assert(events(record).any? { |event| event["type"] == "checker_model_evidence_submitted" &&
+                               event["models"] == ["opencode-go/deepseek-v4.1-flash"] } &&
+         events(record).none? { |event| event["type"] == "model_evidence_ignored" },
+         "an exact checker evidence reply is acknowledged, not incorrectly reported as ignored")
 end
 
 # A recorded `unavailable` is a real answer: no new request, no second stage,

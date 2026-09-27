@@ -388,17 +388,23 @@ module Orbit
       "检查状态：#{activity}#{note}"
     end
 
-    # The model actually used for checks, from the recorded selection when
-    # present, else the frozen review.model.
+    # The chosen checker is visible even when selection had to fall back to a
+    # runnable pool model without a positive task-fit signal.
     def checker_model_line(state)
       review = state["review"]
-      model = review.is_a?(Hash) ? (review.dig("selection", "model") || review["model"]) : nil
-      model.to_s.empty? ? nil : "检查模型：#{model}"
+      selection = review.is_a?(Hash) ? review["selection"] : nil
+      model = selection.is_a?(Hash) ? (selection["model"] || review["model"]) : review&.[]("model")
+      return nil if model.to_s.empty?
+
+      text = "检查模型：#{model}"
+      if selection.is_a?(Hash) && selection["selection_tier"] == "fallback"
+        text += "；候选池降级选择（检查质量未经证实；#{selection['basis']}）"
+      end
+      text
     end
 
-    # ADR-009: after a real auth/quota failure the task stays alive but blocked
-    # until Root explicitly picks the next model. Failures never auto-retry or
-    # switch silently, so this is the line that says what action is needed.
+    # A failed checker keeps the task alive and prevents repeated checks on
+    # the unusable model; only the user's native exact choice can unblock it.
     def review_blocked_line(state)
       review = state["review"]
       blocked = review.is_a?(Hash) ? review["blocked"] : nil
@@ -410,7 +416,7 @@ module Orbit
       reason = blocked["reason"].to_s.strip
       text = "检查阻塞：模型 #{model}（#{kind}）"
       text += " — #{reason}" unless reason.empty?
-      "#{text}；用 orbit review-model 显式指定模型后重试"
+      "#{text}；请用户在原生消息中发送 Orbit authorization: review_model=provider/id，再用 orbit review-model 记录该精确选择"
     end
 
     def completion_readiness_line(state)

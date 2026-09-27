@@ -32,27 +32,38 @@ async function run(args, cwd, input = '') {
   });
 }
 
-export const toolDescription = 'Start Orbit only for work that benefits from independent checks: multi-step changes, real parallel work surfaces, or fixes needing objective review. Simple single-file or local edits: just do them yourself, without dispatching members. If the user explicitly asks to use Orbit, still start Orbit for those small tasks — but do the work yourself and let the checker verify; no members. context identifies this exact session and reports the remembered checker model for this session, if any; start preserves original user input and named basis and returns a task_directory. start with review_model plus remember_review_model=true keeps that checker model for the rest of this OMP session (later starts reuse it, still re-validated each start; forget-review-model clears it; never inherited by another session). Keep that task_directory: for status/check/amend/dispute/stop pass it back as task: <task_directory returned by start> to this Orbit tool — never write .orbit/inbox manually. Root dispatches members only through the native task tool (one level) when there is a genuine independent work surface — Root decides, JEV only advises, never blocks. Continue working; member results and corrections return automatically. Once work is verified, call action=check with task for a manual final check, include the actual delivery result in your visible final reply and end your turn. Orbit waits for that completed reply before checking; automatic checks do not send finalization_notice. Wait for the notice or corrections without polling. After a valid notice, call stop with intent=complete (the default) and finish the turn normally: the completion gate adjudicates that intent and refuses with the next action when no current notice exists. Reserve intent=pause for a user-requested interruption. An accepted stop is queued and completed after your turn, so the final summary is fully delivered. Do not start for discussion. Root is never replaced.';
+export const toolDescription = 'Start Orbit for multi-step work or when the user requests it; do local one-file edits yourself. Automatic checker selection stays within runnable candidate-pool models. JEV task-fit scores rank models but never block a runnable pool candidate; missing evidence or low scores select a pooled checker with an unverified-quality notice. Only a native user message with a standalone Orbit authorization: review_model=provider/id or Orbit authorization: review_model_session=provider/id may choose an explicit checker; your review_model tool argument alone is NOT authorization. Never supply a model to bypass a failed automatic selection; if no pool model can run, report the task is uncontrolled unless the user explicitly chooses an authorized alternative. A session-scoped user choice may be remembered and is re-probed each task; forget-review-model clears it. Controlled native task members must use a live pool model; @task outside the pool requires the exact native user directive Orbit authorization: member_model=provider/id. Root decides whether to delegate genuine independent work; JEV only advises. start preserves the original native user instruction and returns task_directory; pass that exact directory as task for status/check/amend/dispute/stop and never write .orbit/inbox manually. After verification call action=check for a manual final check, deliver the actual result in your visible reply, and END YOUR TURN. Wait for corrections or the finalization_notice without polling. After a valid notice call stop with intent=complete; use intent=pause only for a user-requested interruption. A queued stop completes after your turn; Root is never replaced.';
 export const toolArgs = z => ({
         action: z.enum(['context', 'start', 'status', 'check', 'amend', 'dispute', 'stop', 'review-model', 'forget-review-model']),
         task: z.string().optional().describe('Required for status/check/amend/dispute/stop: the exact task_directory string returned by action=start. Never write .orbit/inbox manually.'),
-        basis: z.array(z.string()).optional(), message_id: z.string().optional(),
-        review_model: z.string().optional(),
-        remember_review_model: z.boolean().optional().describe('start only, together with review_model: remember that checker model for the rest of this OMP session. Later starts without review_model reuse it (re-validated, credentials re-probed on every start) until action=forget-review-model clears it. A start without review_model never changes or creates the remembered choice.'),
+        basis: z.array(z.string()).optional(), message_id: z.string().optional().describe('Native user message id: selects the original instruction for start or the exact user authorization for review-model. A tool-provided id alone does not grant model use.'),
+        review_model: z.string().optional().describe('Exact provider/id explicitly chosen by a native user; the CLI verifies that message before any checker model is used.'),
+        remember_review_model: z.boolean().optional().describe('start only: session memory requires the native user directive Orbit authorization: review_model_session=provider/id. Root cannot grant a session pin using this flag alone.'),
         intent: z.enum(['complete', 'pause']).optional().describe('stop only. complete (default) is the deliberate post-finalization completion hand-off, adjudicated by the Ruby completion gate; pause is an explicit user interruption and takes the ordinary pause path.'),
         text: z.string().optional(), check_in: z.number().int().positive().optional()
       });
+function userReviewModel(text) {
+  let fenced = false, choice = null;
+  for (const line of (text || '').split(/\r?\n/)) {
+    if (/^\s*(```|~~~)/.test(line)) { fenced = !fenced; continue; }
+    if (fenced) continue;
+    const match = /^Orbit authorization: review_model(_session)?=([^\s/]+\/[^\s]+)$/.exec(line);
+    if (!match) continue;
+    const next = { model: match[2], scope: match[1] ? 'session' : 'task' };
+    if (choice && (choice.model !== next.model || choice.scope !== next.scope))
+      throw new Error('Conflicting review model choices in native user message');
+    choice = next;
+  }
+  return choice;
+}
 
 // Shared transport and task operations for native plugin hosts. Each adapter
 // supplies only its real session operations and native invocation identity.
 export function createOrbitHost({ provider, project, dispatch, bind, reset }) {
   const tasks = new Map();
-  // Session-remembered checker model (user opt-in via start with
-  // remember_review_model): lives ONLY in this plugin process's memory,
-  // keyed by the bound session id, so it never crosses OMP processes or
-  // sessions and dies with this host. A remembered model is re-validated by
-  // the CLI on every start that uses it (explicit --review-model probing),
-  // and pool changes never overwrite it because explicit selection wins.
+  // Only the Ruby CLI's verified native-user authorization can create a
+  // session pin. The map carries its message id as well as the model; a Root
+  // tool argument alone is never a grant. Pins die with this host process.
   const reviewModels = new Map();
   let host, socket, setup, closing = false;
   async function listen() {
@@ -101,9 +112,9 @@ export function createOrbitHost({ provider, project, dispatch, bind, reset }) {
         if (closing) throw new Error('Agent host is closing');
         const id = await bind(context);
         await listen();
-        if (a.action === 'context') return JSON.stringify({ ready: true, provider, project, thread_id: id, task_directory: tasks.get(id)?.task_directory || null, session_review_model: reviewModels.get(id) || null });
+        if (a.action === 'context') return JSON.stringify({ ready: true, provider, project, thread_id: id, task_directory: tasks.get(id)?.task_directory || null, session_review_model: reviewModels.get(id)?.model || null });
         if (a.action === 'forget-review-model') {
-          const previous = reviewModels.get(id) || null;
+          const previous = reviewModels.get(id)?.model || null;
           reviewModels.delete(id);
           return JSON.stringify({ status: 'cleared', session_review_model: null, previously: previous });
         }
@@ -118,13 +129,14 @@ export function createOrbitHost({ provider, project, dispatch, bind, reset }) {
                 const selected = state.review?.model;
                 if (a.review_model.trim() !== selected)
                   throw new Error(`Task already active with checker ${selected || 'unknown'}; use action 'review-model' on that task to change its checker`);
-                // The pre-start hook can create an explicit Orbit task before
-                // Root gets to call start with remember_review_model. Accept
-                // the opt-in only for the model actually selected by that
-                // task, rather than silently returning without pinning it.
-                if (a.remember_review_model === true) reviewModels.set(id, selected);
+                const grant = state.review?.selection?.authorization;
+                if (a.remember_review_model === true) {
+                  if (grant?.scope !== 'session' || grant.model !== selected)
+                    throw new Error('Only a native user message with Orbit authorization: review_model_session=<provider/id> can pin the checker for this session');
+                  reviewModels.set(id, { model: selected, message_id: grant.message_id });
+                }
               }
-              return JSON.stringify({ ...previous, session_review_model: reviewModels.get(id) || null,
+              return JSON.stringify({ ...previous, session_review_model: reviewModels.get(id)?.model || null,
                 existing_task: true });
             }
           }
@@ -132,14 +144,21 @@ export function createOrbitHost({ provider, project, dispatch, bind, reset }) {
           const users = (await dispatch({ method: 'messages', session: id })).filter(m => !m.internal);
           const original = a.message_id ? users.find(m => m.id === a.message_id || m.item_id === a.message_id) : users.at(-1);
           if (!original) throw new Error('No original native user message found');
+          const direct = userReviewModel(original.text);
+          const laterGrant = a.review_model && !direct
+            ? users.slice(users.indexOf(original) + 1).findLast(message => userReviewModel(message.text))
+            : null;
+          const userChoice = direct || (laterGrant && userReviewModel(laterGrant.text));
+          const chosen = a.review_model?.trim() || direct?.model;
+          if (a.review_model && userChoice && chosen !== userChoice.model)
+            throw new Error('review_model conflicts with the native user model choice');
+          if (a.remember_review_model === true && (userChoice?.scope !== 'session' || userChoice.model !== chosen))
+            throw new Error('Only a native user message with Orbit authorization: review_model_session=<provider/id> can pin the checker for this session');
           const args = ['start', '--provider', provider, '--project', project, '--thread', id, '--socket', socket, '--message-id', original.id];
-          // A remembered model reaches the CLI as an ordinary explicit
-          // --review-model, so every start re-validates the provider/id and
-          // re-probes the isolated checker credentials; a plain explicit
-          // review_model (no remember flag) is a one-off and never changes
-          // the remembered choice.
-          const remembered = !a.review_model && reviewModels.get(id);
-          if (a.review_model || remembered) args.push('--review-model', (a.review_model || remembered).trim());
+          const remembered = !chosen && reviewModels.get(id);
+          if (chosen || remembered) args.push('--review-model', chosen || remembered.model);
+          if (laterGrant) args.push('--review-authorization-message', laterGrant.id);
+          if (remembered) args.push('--review-authorization-message', remembered.message_id);
           if (a.entry_file) args.push('--entry-file', a.entry_file);
           if (a.check_in) args.push('--check-in', String(a.check_in));
           for (const file of a.basis || []) args.push('--basis', path.resolve(project, file));
@@ -148,19 +167,26 @@ export function createOrbitHost({ provider, project, dispatch, bind, reset }) {
             result = { ...await run(args, project), next_action: guidance };
           } catch (error) {
             if (remembered) {
-              throw new Error(`${error.message}; ${remembered} is the checker model remembered for this OMP session — retry start with an explicit review_model for a one-off choice, or clear it with action 'forget-review-model'`);
+              throw new Error(`${error.message}; ${remembered.model} is the checker model remembered for this OMP session — retry start with an explicitly user-authorized one-off review_model, or clear it with action 'forget-review-model'`);
             }
             throw error;
           }
-          if (a.remember_review_model === true) reviewModels.set(id, a.review_model.trim());
-          if (reviewModels.has(id)) result.session_review_model = reviewModels.get(id);
+          if (chosen) {
+            const state = await ownedTask(result.task_directory, id);
+            const grant = state.review?.selection?.authorization;
+            if (a.remember_review_model === true && (grant?.scope !== 'session' || grant.model !== chosen))
+              throw new Error('Only a native user message with Orbit authorization: review_model_session=<provider/id> can pin the checker for this session');
+            if (grant?.scope === 'session' && grant.model === chosen)
+              reviewModels.set(id, { model: grant.model, message_id: grant.message_id });
+          }
+          if (reviewModels.has(id)) result.session_review_model = reviewModels.get(id).model;
           if (remembered) result.remembered_review_model = true;
           tasks.set(id, result);
           return JSON.stringify(result);
         }
         if (!a.task) throw new Error('This action needs the task: pass task: <task_directory returned by start> to the orbit tool (status/check/amend/dispute/stop/review-model all take it). Do NOT write .orbit/inbox manually.');
         if (a.action === 'review-model' && (typeof a.review_model !== 'string' || !a.review_model.trim()))
-          throw new Error('review-model requires review_model: <provider/id> (Root reselection after a blocked check; never auto-retries or switches a check in flight)');
+          throw new Error('review-model requires the exact native user-authorized review_model: <provider/id>; it never auto-retries or switches a check in flight');
         await ownedTask(a.task, id);
         const args = [a.action, a.task];
         if (['status', 'stop'].includes(a.action)) args.push('--json');
@@ -172,6 +198,7 @@ export function createOrbitHost({ provider, project, dispatch, bind, reset }) {
         if (a.action === 'stop' && a.intent !== 'pause') args.push('--complete');
         if (a.action === 'review-model') {
           args.push('--model', a.review_model.trim());
+          if (a.message_id) args.push('--authorization-message-id', a.message_id);
         }
         if (a.action === 'amend') {
           if (!a.text?.trim()) throw new Error('Provide the original amendment');

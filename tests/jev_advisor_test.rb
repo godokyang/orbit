@@ -250,10 +250,9 @@ module JevAdvisorTest
     end
   end
 
-  # The shared poster keeps the existing error boundaries for both stages.
-  # The checker quality gate asks exactly one noul question per candidate and
-  # maps the answers back to provider/id. The caller supplies the task
-  # instruction and bounded cached evidence; the advisor adds nothing.
+  # Task-fit is a narrow question, not whether an evidence file is complete.
+  # The caller withholds candidates with no valid facts; unknown fit is not
+  # converted into a negative capability judgment.
   def check_checker_quality_request_and_parsing
     state = {
       "instruction" => "Add a login page",
@@ -270,6 +269,13 @@ module JevAdvisorTest
       check(sent["questions"].keys.sort == %w[quality_0 quality_1 time_0 time_1],
             "one bounded quality and one end-to-end time question per candidate in a single request")
       check(sent["questions"].values.all? { |question| question["type"] == "noul" }, "each question is a single noul question")
+      quality = sent["questions"]["quality_0"]
+      check(quality["instructions"].include?("independent read-only review") &&
+            quality["instructions"].include?("Insufficient evidence is uncertainty") &&
+            !quality["criteria"]["false"].include?("missing"),
+            "the question judges task fit without classifying absent evidence as incapability")
+      check(result["question_set_version"] == "jev-checker-task-fit-1",
+            "changed task-fit semantics use a new question set version")
       check(sent["questions"]["time_0"]["instructions"].include?("end-to-end"),
             "the time judgment asks for expected end-to-end check time including rework")
       check(sent["state"] == state, "the caller's bounded state passes through")

@@ -12,6 +12,7 @@ require_relative "jev_advisor"
 require_relative "model_evidence_cache"
 require_relative "model_candidate_pool"
 require_relative "checker_model_selector"
+require_relative "model_authorization"
 require_relative "check_runner"
 require_relative "git_remote_evidence"
 require_relative "observation_key"
@@ -1051,9 +1052,15 @@ module Orbit
 
       entries = evidence_states(identities)
       if entries.nil?
-        @pending_evidence = { "signature" => signature, "identities" => identities,
-                              "needed" => %w[speed quality cost local_samples],
-                              "at" => Time.at(now).utc.iso8601 }
+        needed = %w[speed quality cost local_samples]
+        if (prior = open_evidence_request(identities, needed))
+          @state["evidence_request"] = prior
+          @state["jev"] = (@state["jev"] || {}).merge("evidence_status" => "requested")
+          save
+        else
+          @pending_evidence = { "signature" => signature, "identities" => identities,
+                                "needed" => needed, "at" => Time.at(now).utc.iso8601 }
+        end
       elsif evidence_complete?(entries)
         assess_or_hold(identities, entries, signature, artifact_digest, now)
       else
@@ -1536,6 +1543,16 @@ module Orbit
       @record.event("model_evidence_submitted", "entries" => Array(command["entries"]).length)
       request = @state["evidence_request"]
       unless request.is_a?(Hash)
+        needed = Array(@state.dig("review", "selection", "evidence_needed")).filter_map do |item|
+          item["model"] if item.is_a?(Hash)
+        end
+        submitted = submitted_evidence(command)
+        if !submitted.empty? && submitted.all? { |entry| entry && needed.include?("#{entry['provider']}/#{entry['model']}") }
+          @record.event("checker_model_evidence_submitted",
+                        "models" => submitted.map { |entry| "#{entry['provider']}/#{entry['model']}" }.uniq)
+          save
+          return
+        end
         @state["jev"] = (@state["jev"] || {}).merge("evidence_status" => "unrequested")
         @record.event("model_evidence_ignored", "reason" => "no pending evidence request")
         save
@@ -1745,13 +1762,26 @@ module Orbit
       }
     end
 
+    # A changed artifact needs a fresh judgment, not another identical
+    # public-facts request. A successful submission that later expires may
+    # request the same facts again; an unresolved request remains visible.
+    def open_evidence_request(identities, needed)
+      keys = requested_evidence_keys(identities).sort
+      @state["evidence_requests"].values.reverse.find do |request|
+        request.is_a?(Hash) && request["resolved"] != "used" &&
+          request["needed"] == needed &&
+          requested_evidence_keys(request.fetch("identities")).sort == keys
+      end
+    end
+
     # One bounded request per observation signature; repeated ticks do not
     # loop, and Orbit never browses for evidence itself.
     def deliver_pending_evidence
       pending = @pending_evidence
       @pending_evidence = nil
       return unless pending
-      return if @state.dig("evidence_requests", pending.fetch("signature"))
+      return if @state.dig("evidence_requests", pending.fetch("signature")) ||
+                open_evidence_request(pending.fetch("identities"), pending.fetch("needed"))
 
       text = +"Orbit model evidence request (not a new user instruction): before judging delegation, Jev needs public model facts.\n"
       text << "Compare:\n- root: #{format_identity(pending.dig('identities', 'root'))}\n"
@@ -2089,10 +2119,14 @@ module Orbit
           @state["review"].delete("blocked")
           @record.event("checker_model_block_cleared",
                         "reason" => "selection inputs changed (pool, catalog or valid evidence)")
-        elsif !manual
-          # Blocked automatic checks neither select, snapshot nor start; the
-          # reschedule keeps the timer from hammering the selector each tick.
-          schedule_check(now + @interval, "检查模型阻塞：等待 orbit review-model 显式重选", trigger: "timer")
+        else
+          # A manual check bypasses observation dedup, not a failed or still
+          # undecided checker model. Replaying that same model only pays for
+          # another doomed snapshot; the user's authorized re-selection starts
+          # the next check itself and leaves manual finalization available.
+          @record.event("check_request_blocked", "type" => block["type"], "manual" => manual) if manual
+          @state["next_check_manual"] = false
+          schedule_check(now + @interval, "检查模型阻塞：等待用户授权的新检查模型", trigger: "timer")
           return false
         end
       end
@@ -2201,11 +2235,15 @@ module Orbit
         previous: previous,
         selected_for: role
       )
-      if previous.nil? || previous["model"] != model || previous["signature"] != selection["signature"]
+      if selection["source"] == "explicit" && @state.dig("review", "explicit_authorization")
+        selection["authorization"] = @state.dig("review", "explicit_authorization")
+      end
+      if previous.nil? || previous["model"] != model || previous["signature"] != selection["signature"] ||
+         previous["version"] != selection["version"]
         @state["review"]["selection"] = selection
         @state["review"]["model"] = model if model && !model.to_s.empty?
         @record.event("checker_model_selected", "model" => model, "source" => selection["source"],
-                      "selected_for" => role)
+                      "selected_for" => role, "selection" => selection)
         if selection["source"] == "candidate_pool" && selection["usage"].is_a?(Hash) &&
            previous&.[]("selected_at") != selection["selected_at"]
           accumulate_jev_usage("jev_checker_selection", selection["usage"])
@@ -2215,9 +2253,8 @@ module Orbit
       save
       true
     rescue CheckerModelSelector::Error => error
-      # Pool non-empty but nothing qualifies: stop auto-selecting (ADR-009
-      # §4), never fall back to a pool-out default, and ask Root for an
-      # explicit model.
+      # No pool model could be proven runnable in the isolated checker. Never
+      # interpret an absent task-fit score as permission to use a pool-out model.
       @state["review"]["blocked"] = { "type" => "selection_undecided", "reason" => error.message,
                                      "signature" => checker_selection_snapshot,
                                      "at" => Time.at(now).utc.iso8601 }
@@ -2276,8 +2313,9 @@ module Orbit
 
     def notify_checker_block(reason)
       text = "Orbit checker model blocked (not a new user instruction): #{reason}. " \
-             "The task stays running with its snapshot and members; automatic checks are paused. " \
-             "Explicitly run: orbit review-model #{@record.path} --model provider/id to choose the next checker model. " \
+             "The task stays running with its snapshot and members; automatic and repeated manual checks are paused. " \
+             "Ask the native user to send the standalone Orbit authorization: review_model=provider/id, " \
+             "then run orbit review-model #{@record.path} --model provider/id for that exact user choice. " \
              "Orbit does not retry the failed check or switch models automatically."
       sent = @connection.send_message(text)
       @state["sent_message_ids"] << sent.fetch("id")
@@ -2295,16 +2333,27 @@ module Orbit
         @record.event("review_model_rejected", "reason" => "model must be provider/id")
         return
       end
+      claimed = command["authorization"]
+      begin
+        actual = ModelAuthorization.verify(connection: @connection,
+          instruction_id: @state.dig("instruction_source", "id"),
+          message_id: claimed.is_a?(Hash) ? claimed["message_id"] : nil, model: model)
+        raise ArgumentError, "review model authorization source mismatch" unless actual == claimed
+      rescue StandardError => error
+        @record.event("review_model_rejected", "reason" => error.message)
+        return
+      end
       pool = safe_pool_read
       in_pool = pool.nil? || pool.empty? || pool.include?(model)
       @state["review"]["explicit_model"] = model
+      @state["review"]["explicit_authorization"] = actual
       notice = in_pool ? nil : "explicit review model is outside the candidate pool"
       if @state.dig("review", "blocked")
         @state["review"].delete("blocked")
         @record.event("checker_model_block_cleared", "reason" => "explicit review model recorded")
       end
       @record.event("review_model_recorded", "model" => model, "reason" => command["reason"].to_s,
-                    "in_pool" => in_pool, "notice" => notice)
+                    "in_pool" => in_pool, "notice" => notice, "authorization" => actual)
       # Manual so the retry is never displaced by timers and is not deduped
       # against the failed observation it replaces.
       schedule_check(now, "显式重选检查模型", trigger: "review_model", manual: true)

@@ -447,7 +447,7 @@ export function createModelPicker({ entries, snapshot, commit, done, listRows = 
 // --- Automatic-entry failure: current-turn recovery instruction -----------
 // The automatic entry path below can fail before any TaskRecord exists — the
 // live case is the ADR-009 checker selector failing closed when no candidate
-// pool model has valid cached quality evidence. The historical response
+// pool model is runnable in the isolated profile. The historical response
 // (notify + deliverAs:'aside' + ctx.abort()) trapped Root: verified against
 // installed omp/18.3.2, an aside sent while the session is streaming is only
 // QUEUED for a later turn (session sendCustomMessage -> queueAside), and
@@ -478,14 +478,24 @@ function entryRecoveryInstruction(reason, messageId, explicit) {
   if (!explicit) return [
     ...intro,
     '这是非显式的自动受控候选，本次工作未受 Orbit 监督。可以按原要求普通执行并向用户说明未受控；不要声称独立检查或完成门已经启动。',
-    '如希望改用受控任务：先用 orbit model-evidence --file FILE|- 提交同一 provider/id 的可核查证据，或在 orbit start 显式指定 review_model；',
+    '如希望改用受控任务：先核对候选池与隔离检查者是否有可运行的同一 provider/id；仅缺证据时由 Root 核查一手来源并提交 orbit model-evidence --file FILE|-。池外型号只能由用户亲自发送独立一行 Orbit authorization: review_model=provider/id，Root 不得自行选择。',
     `然后对原始消息调用 Orbit action=start，message_id="${messageId}"。选模失败不会自动重试；不想受控则无需补证据。`,
   ].join('\n');
   return [
     ...intro,
     '用户明确要求 Orbit 受控：本轮不要以普通执行替代。请修复失败原因后对原始消息显式启动；不要将未启动当作已受控。',
-    '证据缺失时只提交同一 provider/id 的真实来源事实：orbit model-evidence --file FILE|-；也可由用户显式指定 review_model，不能伪造资料或借用近似型号。',
+    '证据缺失时只提交同一 provider/id 的真实来源事实：orbit model-evidence --file FILE|-；仅用户可在原生消息中独立一行指定 Orbit authorization: review_model=provider/id，不能伪造资料、借用近似型号或由 Root 自选。',
     `显式调用 Orbit action=start，message_id="${messageId}"；已有任务则用返回的 task_directory 继续。`,
+  ].join('\n');
+}
+
+function checkerEvidenceInstruction(started) {
+  const missing = Array.isArray(started.evidence_needed) ? started.evidence_needed : [];
+  if (!missing.length) return null;
+  return [
+    '[orbit-model-evidence-needed] Orbit 程序提示（不是新的用户要求）：受控任务已启动，已选择可运行的池内检查者。',
+    `以下可运行池内型号缺少有效的精确身份资料：${missing.map(item => `${item.model} (${item.status})`).join('、')}。`,
+    started.evidence_action,
   ].join('\n');
 }
 
@@ -584,11 +594,9 @@ export function installOmpExtension(pi, sdk) {
   let lastKnownPool = null; // last successful pool read (status display only; never a second pool state)
   let host, currentContext, registryHookInstalled;
 
-  // --- ADR-009: user-selected model pool + session-isolated member agents ---
-  // The pool only constrains what Orbit recommends. Root may still dispatch
-  // any native agent explicitly (including out-of-pool ones); only dispatches
-  // through OUR generated `orbit-m-*` agent names carry a pinned model that
-  // must survive override/auth-fallback resolution.
+  // Every controlled member must resolve to an exact pool model before
+  // dispatch, unless a native user message authorizes that exact exception.
+  // Generated agents remain pinned; generic @task is checked separately.
   const sessionAgentRoot = process.env.ORBIT_SESSION_AGENT_ROOT || null;
   const sessionAgents = new Map();        // generated agent name -> 'provider/id' (per bound instance; rebuilt on sync)
   const poolBin = () => process.env.ORBIT_CLI_BIN || orbitCliBin;
@@ -1018,7 +1026,7 @@ export function installOmpExtension(pi, sdk) {
       taskDirs.delete(sessionId);
       return { ok: false, reason: 'The bound Orbit task is not active for this Root; start a new Orbit task before delegating' };
     }
-    return { ok: true, taskDir };
+    return { ok: true, taskDir, state };
   }
   // --- Per-turn bound-task status (Zeen review steps 2/3) -------------------
   // The Root binding lives in process memory (taskDirs). After an OMP restart
@@ -1295,6 +1303,27 @@ export function installOmpExtension(pi, sdk) {
         return [{ id: item.details?.orbitMessage || item.id, item_id: item.id, text: textOf(item.content), internal: true }];
       return [];
     }).filter(m => m.text.trim());
+  }
+  function memberAuthorization(entry, instructionId, model) {
+    if (!instructionId) return null; // --prompt-file is not a native user message
+    const branch = messages(entry);
+    const start = branch.findIndex(message => !message.internal && message.id === instructionId);
+    if (start < 0) return null;
+    const directive = `Orbit authorization: member_model=${model}`;
+    // A literal, standalone directive in this task's original native user
+    // message (or a later native user amendment); Root's tool input is not
+    // authorization. Ignore fenced/quoted examples rather than upgrading
+    // task text into a grant.
+    for (const message of branch.slice(start)) {
+      if (message.internal) continue;
+      let fenced = false;
+      for (const line of message.text.split(/\r?\n/)) {
+        if (/^\s*(```|~~~)/.test(line)) { fenced = !fenced; continue; }
+        if (!fenced && line === directive)
+          return { kind: 'native_user_message', message_id: message.id, model, scope: 'task' };
+      }
+    }
+    return null;
   }
   // Root OMP session file path from the main AgentRegistry ref, when the
   // ref exposes one: a durable REFERENCE only (never session content), so
@@ -1753,16 +1782,16 @@ export function installOmpExtension(pi, sdk) {
       return { block: true, reason: 'Orbit member registration gate is unavailable in this OMP session; refusing task dispatch' };
     const taskDir = bound.taskDir;
     const items = Array.isArray(input.tasks) && input.tasks.length ? input.tasks : [input];
-    // Refresh the pool before validating generated-agent dispatches: another
-    // Orbit session may have edited it since our last sync. Only dispatches
-    // through our namespace require the refresh; plain native dispatches are
-    // unaffected by pool state (in-flight members never switch models).
-    let syncError = null;
-    if (items.some(item => item && typeof item === 'object' && typeof item.agent === 'string'
-      && item.agent.trim().startsWith(AGENT_NAME_PREFIX))) {
-      const sync = await syncSessionAgents(ctx);
-      if (!sync.ok) syncError = sync.reason;
-    }
+    // Refresh the pool for EVERY controlled dispatch. A stale/unknown pool
+    // cannot make a generic @task member safe by omission.
+    const generated = items.some(item => typeof item?.agent === 'string'
+      && item.agent.trim().startsWith(AGENT_NAME_PREFIX));
+    const sync = generated ? await syncSessionAgents(ctx) : runPoolCli(['list']);
+    if (!sync.ok)
+      return { block: true, reason: `candidate pool is unavailable (${sync.reason}); refusing controlled member dispatch` };
+    const pool = new Set(generated ? lastKnownPool : sync.models);
+    const instructionId = bound.state.instruction_source?.kind === 'omp_user_message'
+      ? bound.state.instruction_source.id : null;
     // Decision-relevant dispatch evidence: the ORIGINAL item input as issued
     // by the model (captured before `item.name` is rewritten to the
     // Orbit-assigned requested name), the explicitly supplied model and an
@@ -1772,18 +1801,30 @@ export function installOmpExtension(pi, sdk) {
     const dispatches = [];
     for (const item of items) {
       if (!item || typeof item !== 'object') continue;
-      // ADR-009: dispatches through our generated agent names pin a model.
-      // Out-of-pool/native agents are untouched (pool limits recommendations
-      // only), but a stale generated name must not silently resolve to a
-      // different or unknown agent.
+      // Unpinned custom agents may carry frontmatter/overrides that cannot be
+      // resolved before dispatch. Use a generated candidate or the verified
+      // @task role instead; the registration gate still catches later drift.
       const itemAgent = typeof item.agent === 'string' ? item.agent.trim() : '';
-      let expectedModel = null;
+      let expectedModel, authorization = null;
       if (itemAgent.startsWith(AGENT_NAME_PREFIX)) {
-        if (syncError)
-          return { block: true, reason: `candidate agents are stale (pool re-sync failed: ${syncError}); refusing to dispatch ${itemAgent} on a possibly outdated mapping` };
-        expectedModel = sessionAgents.get(itemAgent) ?? null;
+        expectedModel = sessionAgents.get(itemAgent);
         if (!expectedModel)
           return { block: true, reason: `${itemAgent} is not a live session candidate agent (pool changed?); re-run /orbit-models and dispatch again` };
+      } else if (!itemAgent || itemAgent === 'task') {
+        try {
+          const resolved = ctx.models?.resolve?.('@task');
+          if (!resolved?.provider || !resolved?.id) throw new Error('unresolved @task');
+          expectedModel = `${resolved.provider}/${resolved.id}`;
+        } catch {
+          return { block: true, reason: 'Native @task model cannot be resolved before dispatch; choose a live Orbit candidate agent' };
+        }
+        if (!pool.has(expectedModel)) {
+          authorization = memberAuthorization(owned(sessionId), instructionId, expectedModel);
+          if (!authorization)
+            return { block: true, reason: `Native @task resolves to ${expectedModel} outside the candidate pool; only the user's exact Orbit authorization: member_model=${expectedModel} permits this exception` };
+        }
+      } else {
+        return { block: true, reason: `Native agent ${itemAgent} has no verifiable pre-dispatch model; use a live Orbit candidate or @task` };
       }
       const requested = `orbit-${randomUUID()}`;
       const rationale = explicitDispatchRationale(item);
@@ -1792,7 +1833,8 @@ export function installOmpExtension(pi, sdk) {
         input_name: typeof item.name === 'string' && item.name.trim() ? item.name : null,
         agent: itemAgent || null,
         model: typeof item.model === 'string' && item.model.trim() ? item.model : null,
-        pinned_model: expectedModel,
+        pinned_model: expectedModel, authorization,
+        notice: authorization ? `User-authorized member ${expectedModel} outside the candidate pool` : null,
         effort: typeof item.effort === 'string' && item.effort.trim() ? item.effort : null,
         task: typeof item.task === 'string' ? item.task : null,
         context: typeof input.context === 'string' ? input.context : null,
@@ -1802,7 +1844,13 @@ export function installOmpExtension(pi, sdk) {
       item.name = requested;
       requestedNames.set(requested, { taskDir, toolCallId: event.toolCallId ?? null, expectedModel });
     }
-    for (const dispatch of dispatches) observeCollab(dispatch);
+    for (const dispatch of dispatches) {
+      observeCollab(dispatch);
+      if (dispatch.authorization) {
+        try { ctx.ui?.notify(dispatch.notice, 'warning'); }
+        catch { process.stderr.write(`Orbit: ${dispatch.notice}\n`); }
+      }
+    }
     return { input };
   });
   // An explicit rationale is recorded only when the model supplied one as
@@ -1965,6 +2013,13 @@ export function installOmpExtension(pi, sdk) {
         noteModelIdentity({ taskDir: started.task_directory, role: 'root', agentId: sdk.MAIN_AGENT_ID, sessionId,
           model: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : null });
         await refreshStatus(ctx, sessionId);
+        const evidenceInstruction = checkerEvidenceInstruction(started);
+        if (evidenceInstruction) {
+          const injected = appendInstructionToPayload(event.payload, evidenceInstruction);
+          if (injected) return injected;
+          pi.sendMessage({ customType: 'orbit-model-evidence', content: evidenceInstruction, attribution: 'agent' },
+            { deliverAs: 'aside' });
+        }
       } else if (decision.decision === 'root_decides' && decision.prompt) {
         pi.sendMessage({ customType: 'orbit-entry', content: decision.prompt, attribution: 'agent' },
           { deliverAs: 'aside' });
@@ -2128,11 +2183,11 @@ export function installOmpExtension(pi, sdk) {
             ...available.filter(id => !poolSet.has(id)).map(id => `  [addable]  ${id}`),
             ...(stale.length ? ['In pool but NOT selectable in this session (kept; removable):', ...stale.map(id => `  [stale]    ${id} · 证据 ${statusByModel.get(id)?.evidence_status ?? '未知'}`)] : []),
             ...(modelStatus.ok ? [] : [`证据诊断不可用：${modelStatus.reason}`]),
-            '质量：未判断；检查者隔离目录/凭据：未探测。缺证据请从一手来源提交 orbit model-evidence --file FILE|-；也可在 start 显式指定 review_model。',
+            '质量：未判断；检查者隔离目录/凭据：未探测。缺证据请从一手来源提交 orbit model-evidence --file FILE|-；若仍需显式检查者，请用户亲自发送独立一行 Orbit authorization: review_model=provider/id。',
             'Commands:',
             '  /orbit-models add <provider/id>    (only IDs marked [addable])',
             '  /orbit-models remove <provider/id>',
-            'Root 显式派发池外原生 Agent 不受此池限制。',
+            '受控通用 task 派发默认限池内；精确池外型号须用户原生消息独立一行 Orbit authorization: member_model=provider/id。',
             `当前 Root：${ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : '未知'}；低成本会话请自行指定 orbit omp --model <provider/id>，Orbit 不暗中切换模型。`,
           ].join('\n');
         };

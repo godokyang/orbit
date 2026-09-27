@@ -48,7 +48,7 @@ module Orbit
       "observation" => "jev-observation-1",
       "delegation" => "jev-delegation-1",
       "candidates" => "jev-candidates-1",
-      "checker_quality" => "jev-checker-quality-1"
+      "checker_quality" => "jev-checker-task-fit-1"
     }.freeze
 
     # Second-stage delegation judgment, asked only after the caller's own
@@ -160,13 +160,10 @@ module Orbit
       result.merge("scores" => scores)
     end
 
-    # ADR-009 checker quality and time gate. The caller supplies the current
-    # task instruction and each candidate's already-bounded cached evidence;
-    # this asks two typed noul questions per candidate in one request — quality
-    # fit and expected end-to-end independent-check time including rework — and
-    # maps the answers back to provider/id. It does not read caches, infer from
-    # a model or provider name, and never treats a credential, a single
-    # benchmark number or output speed as capability or task time.
+    # Task-specific independent-review fit and expected end-to-end check time.
+    # Only candidates with valid, bounded facts are judged. Missing facts stay
+    # unscored in the selector, not a negative capability verdict. Noul answers
+    # rank runnable pool models; they cannot certify a model's quality.
     def assess_checker_quality(state:, candidates:)
       list = Array(candidates)
       raise Error, "at least one checker candidate is required" if list.empty?
@@ -176,15 +173,14 @@ module Orbit
         model = candidate.fetch("model").to_s
         questions["quality_#{index}"] = {
           "type" => "noul",
-          "instructions" => "Checker candidate #{model}: given the current task instruction and this candidate's bounded cached model " \
-                            "evidence (sources and metrics such as quality and local_samples), is that evidence sufficient to judge the " \
-                            "model can meet the quality bar for an independent read-only review of this task's artifact? A credential, a " \
-                            "matching model or provider name, or a single benchmark number is not capability evidence. Missing, stale or empty " \
-                            "evidence is unknown. Answer true only when the supplied evidence is verifiable and specifically supports quality " \
-                            "for this kind of task.",
+          "instructions" => "Checker candidate #{model}: considering the current task instruction and this candidate's bounded " \
+                            "cached evidence, would this model likely provide a useful independent read-only review of this task's " \
+                            "artifact and catch substantive mistakes? Judge fit for this task, not whether its evidence file is complete. " \
+                            "A credential, model or provider name, or a single benchmark number alone cannot establish capability. " \
+                            "Insufficient evidence is uncertainty, not proof that the model is incapable.",
           "criteria" => {
-            "true" => "Verifiable cached evidence supports quality for this kind of task",
-            "false" => "Evidence is missing, stale, unsupported or insufficient for this kind of task"
+            "true" => "Task-relevant evidence supports a useful independent review",
+            "false" => "Task-relevant evidence indicates this model is poorly suited to the review"
           }
         }
         questions["time_#{index}"] = {

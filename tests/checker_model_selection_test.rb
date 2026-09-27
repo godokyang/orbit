@@ -2,12 +2,9 @@
 
 require_relative "../lib/orbit/checker_model_selection"
 
-# ADR-009 structural selection: the pool, session catalog and isolated probe
-# narrow candidates, but the quality line comes first. Credential
-# resolvability is not quality: without verifiable evidence nothing is
-# auto-picked and the caller must ask Root for an explicit model. With
-# qualified candidates, end-to-end time then coarse cost then family diversity
-# then pool order decide, and no time/cost facts are invented.
+# A non-empty pool with a runnable checker must choose one. A task-fit signal
+# prioritizes scored candidates; uncertainty uses pool order, never the
+# session default. Only a catalog/probe failure leaves selection unresolved.
 module CheckerModelSelectionTest
   module_function
 
@@ -31,25 +28,14 @@ module CheckerModelSelectionTest
            "an empty pool leaves selection to the existing default")
   end
 
-  def resolvability_alone_is_not_quality
+  def no_task_fit_score_selects_a_runnable_pool_model
+    pool = %w[p/first p/second]
     decision = Orbit::CheckerModelSelection.choose(
-      pool: ["p/one"], catalog: catalog(["p/one"]), quality: nil, resolvable: ["p/one"]
+      pool: pool, catalog: catalog(pool), quality: nil, resolvable: ["p/second"]
     )
-    assert(decision["model"].nil? && decision["reason"] == "no_verifiable_quality_evidence",
-           "a resolvable credential is not treated as quality, so nothing is auto-selected")
-
-    unsourced = { "p/one" => { "verdict" => "qualified" } }
-    decision = Orbit::CheckerModelSelection.choose(
-      pool: ["p/one"], catalog: catalog(["p/one"]), quality: unsourced, resolvable: ["p/one"]
-    )
-    assert(decision["model"].nil? && decision["reason"] == "no_verifiable_quality_evidence",
-           "a qualification without a source is not verifiable evidence")
-
-    unevaluated = { "p/one" => { "verdict" => "unevaluated", "source" => "https://example.test/quality" } }
-    decision = Orbit::CheckerModelSelection.choose(
-      pool: ["p/one"], catalog: catalog(["p/one"]), quality: unevaluated, resolvable: ["p/one"]
-    )
-    assert(decision["model"].nil?, "an unevaluated model stays pending and is not auto-picked")
+    assert(decision["model"] == "p/second" && decision["selection_tier"] == "fallback" &&
+           decision["basis"] == "pool_order_unknown_fit" && decision["notice"].include?("未经证实"),
+           "unknown quality still selects the runnable pool model, without claiming it passed a quality test")
   end
 
   def prefers_a_different_family_then_pool_order
@@ -70,37 +56,47 @@ module CheckerModelSelectionTest
            "with no other family the user's pool order is kept")
   end
 
-  def unqualified_models_are_excluded_before_family_and_probe
-    families = { "root/model" => "rf", "p/unqualified" => "of", "p/qualified" => "rf" }
+  def positive_fit_precedes_unscored_pool_models
+    pool = %w[p/unknown p/positive]
     decision = Orbit::CheckerModelSelection.choose(
-      pool: ["p/unqualified", "p/qualified"], catalog: catalog(["p/unqualified", "p/qualified"], families),
-      quality: qualified("p/qualified"), resolvable: ["p/unqualified", "p/qualified"]
+      pool: pool, catalog: catalog(pool), quality: qualified("p/positive"), resolvable: pool
     )
-    assert(decision["model"] == "p/qualified" && decision["candidates"] == ["p/qualified"],
-           "an unqualified model is excluded even when it is cross-family and resolvable")
-    assert(Orbit::CheckerModelSelection.qualified_candidates(
-             pool: ["p/unqualified"], catalog: catalog(["p/unqualified"]), quality: qualified("p/qualified")
-           ).empty?, "the quality line is applied before the probe")
+    assert(decision["model"] == "p/positive" && decision["selection_tier"] == "preferred",
+           "a positive task-fit signal takes priority when both pool models can run")
   end
 
-  def qualified_but_unresolvable_is_undecided
+  def unavailable_first_choice_falls_through_without_leaving_the_pool
+    pool = %w[p/positive p/fallback]
     decision = Orbit::CheckerModelSelection.choose(
-      pool: ["p/one"], catalog: catalog(["p/one"]), quality: qualified("p/one"), resolvable: []
+      pool: pool, catalog: catalog(pool), quality: qualified("p/positive"),
+      resolvable: ["p/fallback"], fit_scores: { "p/positive" => 0.9, "p/fallback" => 0.03 }
     )
-    assert(decision["model"].nil? && decision["reason"] == "qualified_pool_models_unresolvable_in_checker",
-           "a qualified model the isolated checker cannot resolve is not used")
+    assert(decision["model"] == "p/fallback" && decision["selection_tier"] == "fallback",
+           "an unusable preferred model cannot block a runnable lower-scored pool model")
 
+    none = Orbit::CheckerModelSelection.choose(
+      pool: pool, catalog: catalog(pool), quality: qualified("p/positive"), resolvable: []
+    )
+    assert(none["model"].nil? && none["reason"] == "pool_models_unresolvable_in_checker",
+           "a model cannot be invented if none of the pool can run")
+  end
+
+  def low_fit_scores_choose_highest_runnable_candidate
+    pool = %w[p/first p/better]
+    decision = Orbit::CheckerModelSelection.choose(
+      pool: pool, catalog: catalog(pool), quality: {}, resolvable: pool,
+      fit_scores: { "p/first" => 0.03, "p/better" => 0.42 }
+    )
+    assert(decision["model"] == "p/better" && decision["basis"] == "highest_available_task_fit",
+           "below-threshold fit scores rank runnable pool models rather than blocking the task")
+  end
+
+  def unavailable_catalog_does_not_guess_pool_membership
     decision = Orbit::CheckerModelSelection.choose(
       pool: ["p/one"], catalog: nil, quality: qualified("p/one"), resolvable: ["p/one"]
     )
     assert(decision["model"].nil? && decision["reason"] == "session_catalog_unavailable",
-           "an unavailable session catalog does not silently reuse a pool entry")
-
-    decision = Orbit::CheckerModelSelection.choose(
-      pool: ["p/one"], catalog: catalog(["p/two"]), quality: qualified("p/one"), resolvable: ["p/one"]
-    )
-    assert(decision["model"].nil? && decision["reason"] == "no_pool_model_in_session",
-           "only the intersection of pool and session catalog is eligible")
+           "an unavailable session catalog does not authorize an unknown model")
   end
 
   def never_invents_evidence
@@ -236,10 +232,12 @@ module CheckerModelSelectionTest
 
   def run
     empty_pool_leaves_the_existing_default
-    resolvability_alone_is_not_quality
+    no_task_fit_score_selects_a_runnable_pool_model
     prefers_a_different_family_then_pool_order
-    unqualified_models_are_excluded_before_family_and_probe
-    qualified_but_unresolvable_is_undecided
+    positive_fit_precedes_unscored_pool_models
+    unavailable_first_choice_falls_through_without_leaving_the_pool
+    low_fit_scores_choose_highest_runnable_candidate
+    unavailable_catalog_does_not_guess_pool_membership
     never_invents_evidence
     cached_evidence_is_bounded_and_expiry_checked
     cached_evidence_rejects_malformed_entries

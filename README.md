@@ -71,15 +71,15 @@ Agent 验证并交付结果时应对当前任务调用 Orbit `check` 请求手�
 
 你不需要预先建团队，也不需要为每个项目写 Orbit 专用规范。Root 可以自行完成任务；只有分工有实际收益时才派发成员。
 
-Root 和执行成员使用 OMP 中可用的模型；检查者使用独立 OMP 会话。可选的 [Jev 调度](docs/reference/usage-reference.md#jev-配置)根据卡住、偏航和产物进展信号安排检查，并权衡端到端时间与粗档费用后给出分工建议。Root 决定是否派发；Jev 的概率不代替独立检查的结论。
+Root 和执行成员使用 OMP 中可用的模型；受控任务的通用成员默认必须是当前候选池模型，池外需真实用户按精确 `provider/id` 授权。检查者使用独立 OMP 会话。可选的 [Jev 调度](docs/reference/usage-reference.md#jev-配置)按卡住、偏航和产物进展信号安排检查，权衡端到端时间与粗档费用给出分工建议；Root 决定是否派发，Jev 概率不代替独立检查结论。
 
-**多模型选择（已实现并通过真实验收；池内自动正选择为 live 边界）：**你可以用会话内 `/orbit-models` 从当前 OMP 可选列表维护一个跨会话候选池。Orbit 只在候选池与当前会话可选列表的交集内比较：为执行成员给出模型建议，为独立检查者选模，按“质量先过线 → 端到端时间 → 粗档费用”排序，并记录实际使用的模型；不按品牌排序，也不引入精确 token／金额门槛。Root 始终显式派发成员，成员不能再派发成员或另起 Orbit 任务。完整链路（会话动态成员 Agent 定义与漂移核对、检查者失败后的显式重选）已实现，其中漂移核对与显式重选已有真实样本；池内自动（非显式）正选择仅由确定性测试覆盖——真实自动尝试因无候选通过质量线被正确拒绝，未取得 live 正样本。状态见 [ADR-009](docs/adr/009-user-selected-model-pool.md)、[交付 TODO](docs/plan/model-pool-delivery.md) 与[验收证据](docs/reference/model-pool-acceptance-20260925.md)。
+**多模型选择：**会话内 `/orbit-models` 从当前 OMP 可选列表维护跨会话候选池。执行成员建议保留原有质量门；**独立检查者不同**：池非空时从当前会话可选且隔离检查环境可运行的池内模型选一个，Jev 当前任务适配分用于优先排序，分数低或缺证据时仍选可运行池内型号并提示“检查质量未经证实”。对可运行但缺精确型号资料的候选，Orbit 同时列出型号请 Root 从一手来源补证；查不到就如实记不可得，不要求用户购买或指定池外模型。若池内无一可运行则报错，不偷偷选池外型号；选中不等于独立检查或完成门通过。历史质量硬门拒绝样本不能充当本规则的真实验收。状态见[合同](contracts/task-runtime.md)、[ADR-009](docs/adr/009-user-selected-model-pool.md)及[交接](docs/plan/handoff.md)。
 
 #### 选择候选模型（`/orbit-models`）
 
 在交互式 `orbit omp` 会话里输入 `/orbit-models`，直接输入文字按 `provider/id` 搜索；↑/↓ 移动，Space 勾选或取消，Enter 一次保存本次净变化，Esc 取消。当前会话不可选但已入池的旧标识仍保留在列表，可勾掉移出，不能新增。列表仅表示当前会话可选择，不保证模型已验证可调用或有额度。
 
-池内模型旁的证据标签只来自**精确 `provider/id` 身份**的本地缓存，过期／缺失会明确标出；「质量未判断」「隔离检查者未探测」不表示通过了质量线或可用凭据。无 UI 时 `/orbit-models` 文字列表也显示诊断；命令行 `orbit model-status --project DIR` 只读候选池和证据，不发起 JEV 或模型探测。一次显式 `start` 可选 `remember_review_model: true`，仅在**本 OMP 会话**的后续任务复用检查模型，每个新任务仍做隔离预检；`forget-review-model` 可清除。不选则不继承，不改变全局候选池。
+池内证据标签只来自**精确 `provider/id` 身份**的本地缓存，过期／缺失会明确标出；「质量未判断」「隔离检查者未探测」不代表质量或凭据已验证，但也不阻止后续在启动时挑选一个实际可运行的池内检查者。`orbit model-status --project DIR` 只读候选池与证据，不运行 Jev 或隔离探针；真实启动返回 `evidence_needed`（仅列可运行且缺证据的精确型号），Root 用 `orbit model-evidence --file -` 补交真实资料，也可带当前任务目录提交对应检查者事实；无法核实可提交 `status=unavailable`。新增有效资料在下一次独立检查前重新判断；真实选模的逐型号判断随任务状态保存，无可运行型号的失败保存在项目 `.orbit/checker-selection-failures.jsonl`。显式池外检查模型仍须用户在原生会话发送独立一行 `Orbit authorization: review_model=provider/id`；会话沿用须 `Orbit authorization: review_model_session=provider/id`，逐次做来源与隔离预检。Root 自行传 `review_model`／`remember_review_model: true` 不构成授权；用法见[使用参考](docs/reference/usage-reference.md#候选模型池与检查者显式重选adr-009)。
 
 无交互界面或需要脚本操作时，继续使用：
 
@@ -89,9 +89,9 @@ Root 和执行成员使用 OMP 中可用的模型；检查者使用独立 OMP �
 orbit model-candidates list       # 终端查看候选池
 ```
 
-候选池跨会话保存，只保存模型标识，不保存凭据。批量保存会拒绝同一模型的并发冲突，不覆盖其他会话对不同模型的修改；出现冲突时刷新界面再选。池内但当前会话不可选的标识可移除但不会因此启用。候选池为空时，检查者沿用现有默认模型行为，也不给执行成员模型建议；池非空却没有合格检查模型时，Orbit 不擅自使用池外默认模型，需要你显式指定。
+候选池跨会话保存，只保存模型标识，不保存凭据。批量保存拒绝同一模型的并发冲突，不覆盖其他会话对不同模型的修改；池内但当前会话不可选的标识可移除但不会因此启用。池空时检查者沿用当前会话默认模型、不给成员模型建议，但受控通用 `task` 池外仍须用户原生消息中独立一行 `Orbit authorization: member_model=provider/id`。池非空却没有任何当前会话可选、隔离检查环境可运行的检查型号时，自动启动失败关闭。
 
-新候选模型缺少同标识的质量事实时，Orbit 不让 JEV 凭模型名称评分，也不会把未启动的请求当作受控任务。Root 可从一手来源查证后用 `orbit model-evidence --file FILE` 在建任务前写入缓存，再对原用户消息显式启动；若仍无合格检查模型，需显式指定。显式检查模型在建任务前先核对隔离检查者的模型目录与凭据，实际请求或额度仍可能失败。操作和证据格式见[进阶使用参考](docs/reference/usage-reference.md#模型证据提交model-evidence)。
+新候选模型缺少同标识的质量事实时，Orbit 不让 Jev 凭模型名称评分；可运行池内型号仍可降级选择，不把选中说成终检通过。Root 可从一手来源查证后用 `orbit model-evidence --file FILE` 在建任务前写入缓存，再对原用户消息显式启动；任务已启动时按上方 `evidence_needed` 补交并于下次独立检查前重评。无可运行的池内型号时只接受用户真实消息中的精确显式授权，不由 Root 自选。显式检查模型在建任务前预检隔离目录与凭据，实际请求或额度仍可能失败。操作见[进阶使用参考](docs/reference/usage-reference.md#模型证据提交model-evidence)。
 
 ## 日常命令
 
@@ -101,6 +101,7 @@ orbit model-candidates list       # 终端查看候选池
 | `orbit status [ID]` | 查看任务、成员、检查和下一步 |
 | `orbit stop [ID]` | 请求停止任务；再用 `status` 确认结果 |
 | `orbit export TASK --output FILE` | 本地导出单任务证据包，供你选择是否交给开发者分析 |
+| `orbit session-summary --thread ID` | 只读汇总本项目同一原生 OMP 会话的任务与检查；缺失和费用未知如实保留 |
 | `orbit doctor` | 检查安装、环境与可验证的会话连接 |
 | `orbit update` | 更新这份安装；已有会话继续使用其启动时的版本 |
 | `orbit uninstall` | 卸载这份安装 |

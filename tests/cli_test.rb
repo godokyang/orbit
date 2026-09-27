@@ -582,27 +582,47 @@ module CliTest
            "the task-bound mode still queues against the same cache without dropping the taskless fact")
   end
 
-  # ADR-009: after a real auth/quota failure the task stays alive but blocked,
-  # and only Root's explicit choice changes the next check model. The command
-  # queues that choice, never auto-retries, and refuses a finished task.
+  # A blocked checker only resumes when the same native session supplies an
+  # exact user authorization. Root's --model parameter alone is insufficient.
   def review_model_queues_only_by_explicit_choice_and_status_shows_the_block
     record = task
-    help = cli("review-model", "--help")
-    assert(help.include?("provider/id") && help.include?("候选池外") && help.include?("任务结束记录不再接受"),
-           "the review-model help states the explicit-choice contract")
 
     missing = cli("review-model", record.path, success: false)
     invalid = cli("review-model", record.path, "--model", "glm-5.2", success: false)
-    assert(missing.include?("usage: orbit review-model") && invalid.include?("provider/id") && commands(record).empty?,
-           "a missing or invalid model is rejected before queueing")
+    assert(missing.include?("provider/id") && invalid.include?("provider/id") && commands(record).empty?,
+           "missing or non-qualified model IDs cannot enqueue a review change")
 
+    record.save(record.state.merge("instruction_source" => { "kind" => "omp_user_message", "id" => "m1" }))
+    granted = false
+    server = UNIXServer.new(record.state.dig("connection", "socket"))
+    worker = Thread.new do
+      loop do
+        peer = server.accept
+        request = JSON.parse(peer.gets)
+        messages = [{ "id" => "m1", "text" => "Implement the task", "internal" => false }]
+        if granted
+          messages << { "id" => "m2", "text" => "Orbit authorization: review_model=zenmux/x-ai/grok-4.7",
+                        "internal" => false }
+        end
+        result = request["method"] == "state" ? { "cwd" => File.realpath(@project), "status" => "idle" } : messages
+        peer.puts(JSON.generate("result" => result))
+        peer.close
+      rescue IOError, SystemCallError
+        break
+      end
+    end
+    denied = cli("review-model", record.path, "--model", "zenmux/x-ai/grok-4.7", success: false)
+    assert(denied.include?("native user did not authorize") && commands(record).empty?,
+           "Root's model argument without a native user grant does not enqueue a retry")
+    granted = true
     reply = JSON.parse(cli("review-model", record.path, "--model", "zenmux/x-ai/grok-4.7", "--reason", "auth 失败后改用"))
-    assert(reply["status"] == "queued" && reply["model"] == "zenmux/x-ai/grok-4.7" && !reply["command_id"].to_s.empty?,
-           "an explicit model is queued with the chosen identity")
+    assert(reply["status"] == "queued" && reply["model"] == "zenmux/x-ai/grok-4.7",
+           "the user's later exact model grant queues the next check")
     command = JSON.parse(File.read(commands(record).fetch(0)))
     assert(command["type"] == "review_model" && command["model"] == "zenmux/x-ai/grok-4.7" &&
-           command["reason"] == "auth 失败后改用" && command.dig("source", "command") == "review-model",
-           "the inbox command carries the explicit model and reason")
+           command.dig("authorization", "message_id") == "m2" &&
+           command.dig("authorization", "scope") == "task",
+           "the queued choice records the native user message rather than the Root tool")
     File.unlink(commands(record).fetch(0))
 
     settled = task("complete")
@@ -614,10 +634,14 @@ module CliTest
                    "review" => {
                      "model" => "zhipu-coding-plan/glm-5.2",
                      "selection" => { "model" => "zenmux/x-ai/grok-4.7" },
-                     "blocked" => { "model" => "zenmux/x-ai/grok-4.7", "kind" => "check_failed",
+                     "blocked" => { "model" => "zenmux/x-ai/grok-4.7", "type" => "check_failure",
                                     "failure_kind" => "auth_or_quota", "reason" => "provider returned 401" }
                    },
                    "checks" => [{ "status" => "failed", "error" => "provider returned 401" }])
+    check = JSON.parse(cli("check", blocked.path))
+    assert(check["status"] == "rejected" && check["reason"] == "checker_model_blocked" &&
+           check["next_action"].include?("native user") && commands(blocked).empty?,
+           "an unavailable checker rejects repeated manual checks before queueing work")
     text = cli("status", blocked.path)
     assert(text.include?("检查模型：zenmux/x-ai/grok-4.7"), "status shows the model actually used for checks")
     assert(text.include?("检查阻塞：模型 zenmux/x-ai/grok-4.7（auth_or_quota）") &&
@@ -625,6 +649,10 @@ module CliTest
            "status shows the block and the explicit recovery action")
     assert(text.include?("最近检查：失败 — provider returned 401") && text.include?("任务保持运行"),
            "status shows the failed check as not adopted")
+  ensure
+    worker&.kill if worker&.alive?
+    server&.close unless server&.closed?
+    worker&.join
   end
 
   def jev_state(decision: nil, delegatable: 0.91, member_fit: 0.63, parallel_gain: 0.40)
@@ -793,6 +821,44 @@ module CliTest
     assert(File.read(path).include?("test-key"), "empty input does not replace the existing key")
   end
 
+  def session_summary_separates_check_facts_from_missing_evidence
+    first = task("complete")
+    second = task("running")
+    unrelated = task("paused")
+    unrelated.save(unrelated.state.merge("connection" => unrelated.state.fetch("connection").merge("thread_id" => "other")))
+    first.save(first.state.merge("checks" => [
+      { "stale" => true, "manual" => false, "usage" => { "input_tokens" => 8, "output_tokens" => 2 },
+        "result" => { "findings" => [{ "id" => "F1" }] } },
+      { "manual" => true, "usage" => nil, "result" => { "findings" => [{ "id" => "F1" }] } }
+    ]))
+    second.save(second.state.merge("checks" => [
+      { "kind" => "process", "usage" => { "input_tokens" => 5, "output_tokens" => 5 } }
+    ]))
+    2.times { first.event("jev_assessed") }
+    first.event("correction_sent")
+    first.event("check_failed")
+    before = File.read(File.join(second.path, "state.json"))
+    report = JSON.parse(cli("session-summary", "--thread", "root"))
+    assert(report.fetch("tasks").map { |row| row["id"] }.sort == [first, second].map { |item| item.state["id"] }.sort &&
+           report.dig("counts", "checks") == 3 && report.dig("counts", "stale_checks") == 1 &&
+           report.dig("counts", "process_checks") == 1 && report.dig("counts", "findings") == 1,
+           "the report aggregates only this native session and counts task-scoped findings once")
+    assert(report.dig("counts", "jev_assessments").nil? &&
+           report.dig("counts", "correction_sent").nil? &&
+           report.dig("usage", "checker_tokens_observed") == 20 &&
+           report.dig("usage", "checker_tokens_complete") == false &&
+           report.dig("usage", "task_total_tokens").nil? &&
+           report.fetch("tasks").all? { |row| row["collaboration_log"] == "missing" } &&
+           File.read(File.join(second.path, "state.json")) == before,
+           "missing logs and unreported token usage remain unknown without changing task evidence")
+    second.event("jev_assessed")
+    complete = JSON.parse(cli("session-summary", "--thread", "root"))
+    assert(complete.dig("counts", "jev_assessments") == 3 &&
+           complete.dig("counts", "correction_sent") == 1 &&
+           complete.dig("counts", "failed_checks") == 1,
+           "once both event streams exist the independent Jev, delivery and failure counts are known")
+  end
+
   def main
     %i[single_task_from_project_subdirectory multiple_tasks_require_explicit_selection completed_and_absent_tasks
        status_separates_check_activity_from_task_completion
@@ -809,6 +875,7 @@ module CliTest
        model_evidence_accepts_array_and_rejects_invalid_or_terminal
        model_evidence_taskless_submission_writes_cache_without_a_task
        review_model_queues_only_by_explicit_choice_and_status_shows_the_block
+       session_summary_separates_check_facts_from_missing_evidence
        status_separates_delegatable_score_from_final_decision
        model_candidates_bridge_round_trips_and_keeps_ids_with_slashes
        model_candidates_bridge_fails_closed_without_echoing_input
