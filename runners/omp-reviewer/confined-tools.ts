@@ -86,7 +86,7 @@ export function createConfinedTools(snapshotRoot: string) {
 		name: "read",
 		label: "Read (snapshot)",
 		description:
-			"Read a text file, or list a directory, inside the fixed review snapshot. Paths are relative to the snapshot root; URLs, internal URIs and paths outside the snapshot are rejected.",
+			"Read a text file, or list a directory, inside the fixed review snapshot. File results report exact byte length, final line ending and actual text lines; a terminal LF does not create an extra empty line. Paths are relative to the snapshot root; URLs, internal URIs and paths outside the snapshot are rejected.",
 		parameters: z.object({
 			path: z.string(),
 			offset: z.number().optional(),
@@ -103,11 +103,15 @@ export function createConfinedTools(snapshotRoot: string) {
 				return text(names.join("\n"), { path: path.relative(root, target) || "." });
 			}
 			if (stat.size > MAX_FILE_BYTES) throw new Error(`file too large to read: ${params.path}`);
-			const lines = readFileSync(target, "utf8").split("\n");
+			const content = readFileSync(target, "utf8");
+			const lines = content.length === 0 ? [] : content.split("\n");
+			if (content.endsWith("\n")) lines.pop();
 			const start = Math.max(1, Math.floor(params.offset ?? 1));
 			const limit = Math.min(MAX_READ_LINES, Math.max(1, Math.floor(params.limit ?? MAX_READ_LINES)));
 			const slice = lines.slice(start - 1, start - 1 + limit).map((line, index) => `${start + index}|${line}`);
-			return text(slice.join("\n"), { path: path.relative(root, target), lines: lines.length });
+			const finalNewline = content.endsWith("\r\n") ? "CRLF" : content.endsWith("\n") ? "LF" : "none";
+			return text([`[bytes=${stat.size}; final_newline=${finalNewline}; actual_lines=${lines.length}]`, ...slice].join("\n"),
+				{ path: path.relative(root, target), lines: lines.length, bytes: stat.size, final_newline: finalNewline });
 		},
 	};
 
@@ -148,11 +152,12 @@ export function createConfinedTools(snapshotRoot: string) {
 			for (const file of walk(base)) {
 				if (filter && !filter.match(file.rel)) continue;
 				if (statSync(file.abs).size > MAX_FILE_BYTES) continue;
-				const lines = readFileSync(file.abs, "utf8").split("\n");
+				const content = readFileSync(file.abs, "utf8");
+				const lines = content.length === 0 ? [] : content.split("\n");
+				if (content.endsWith("\n")) lines.pop();
 				lines.forEach((line, index) => {
 					if (hits.length < MAX_RESULTS && regex.test(line)) hits.push(`${file.rel}:${index + 1}: ${line}`);
 				});
-				if (hits.length >= MAX_RESULTS) break;
 			}
 			return text(hits.join("\n") || "(no matches)", { count: hits.length });
 		},

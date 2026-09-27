@@ -204,9 +204,10 @@ def assert(value, message)
   raise "ASSERTION FAILED: #{message}" unless value
 end
 
-def answer(verdict, findings: [], resolved: [])
+def answer(verdict, findings: [], resolved: [], delivery_ready: true, delivery_reason: "Finished deliverable is inspectable")
   { "verdict" => verdict, "reason" => "Concrete fixture evidence", "findings" => findings,
-    "resolved_ids" => resolved, "next_check_seconds" => 60 }
+    "resolved_ids" => resolved, "next_check_seconds" => 60,
+    "delivery" => { "ready" => delivery_ready, "reason" => delivery_reason } }
 end
 
 # Shared completion-hand-off preamble: qualified notice, delivery turn in
@@ -966,6 +967,7 @@ fixture do |root, record, _host, _checker, _runtime|
   checker.result = answer("complete")
   runtime.tick(now: now + 4)
   record.submit("check")
+  host.finish("delivered before manual selection")
   runtime.tick(now: now + 5)
   assert(checker.calls.length == 2 && checker.selected_models.last == "openai/gpt-6-astra" &&
          record.state.dig("review", "model") == "openai/gpt-6-astra",
@@ -1355,6 +1357,8 @@ fixture(interval: 300) do |root, record, host, checker, _runtime|
   request = record.state["evidence_request"]
   assert(request.is_a?(Hash) && request["resolved"].nil?, "precondition: an evidence request is pending")
   advisor.scores = { "stuck" => 0.95, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9 }
+  host.finish("research-turn")
+  host.working("a new execution turn after researching")
   runtime.tick(now: now + 70)
   process = checker.calls.last
   assert(process && process[:role] == "process_reviewer", "precondition: the stuck signal started a process check")
@@ -1459,8 +1463,8 @@ fixture(interval: 300) do |root, record, host, checker, _runtime|
          "the pending clue is delivered after the process finding")
 end
 
-# While Root is executing, a short checker-suggested next observation cannot
-# restart full checks before the agreed interval; an idle Root still honors it.
+# While Root executes, neither a short checker suggestion nor the elapsed
+# interval triggers another unchanged full check. A completed turn does.
 fixture(interval: 300) do |_root, record, host, checker, runtime|
   now = Time.now.to_f
   runtime.tick(now: now)
@@ -1473,7 +1477,10 @@ fixture(interval: 300) do |_root, record, host, checker, runtime|
   runtime.tick(now: now + 61)
   assert(checker.calls.length == 1, "short checker suggestions do not restart full checks while Root executes")
   runtime.tick(now: now + 310)
-  assert(checker.calls.length == 2, "the agreed interval still triggers the next full check")
+  assert(checker.calls.length == 1, "an unchanged timer does not trigger a full check during Root execution")
+  host.finish("new-delivery")
+  runtime.tick(now: now + 311)
+  assert(checker.calls.length == 2, "a completed Root turn triggers a fresh observation")
 end
 
 # A process check still expires when only the host digest changes. An artifact
@@ -1693,51 +1700,35 @@ fixture do |_root, record, host, checker, runtime|
          "completion still goes through the finalized stop path")
 end
 
-# A manual complete that finishes while Root is still in a turn is kept
-# for that exact version and delivered once when the turn actually completes.
-fixture do |root, record, host, checker, runtime|
+
+# A manual final check queued during the Root's delivery turn must inspect
+# the actual completed reply, rather than spending a check on an in-progress,
+# empty agent_message and rejecting an otherwise complete artifact.
+fixture do |_root, record, host, checker, runtime|
   now = Time.now.to_f
-  host.working("still in the check turn")
+  host.working("writing the final delivery")
   record.submit("check")
   runtime.tick(now: now)
-  checker.result = answer("complete")
+  assert(checker.calls.empty? && record.state["next_check_manual"] == true,
+         "manual final check waits while Root's answer is still in progress")
+  host.finish("actual final answer")
   runtime.tick(now: now + 1)
-  assert(record.state["status"] != "complete" && record.state["finalization_notices"].empty?,
-         "a busy Root does not receive the notice and is not marked complete")
-  assert(record.state["pending_finalization"], "the reviewed version is retained for one hand-off")
-  runtime.tick(now: now + 2)
-  assert(checker.calls.length == 1 && record.state["finalization_notices"].empty?,
-         "waiting for the turn does not start another model check")
-
-  host.finish("turn-done")
-  runtime.tick(now: now + 3)
-  assert(record.state["finalization_notices"].length == 1 && record.state["pending_finalization"].nil?,
-         "the same version is handed off once when Root is idle and completed")
-  assert(checker.calls.length == 1, "the deferred hand-off does not rerun the checker")
-
-  File.write(File.join(root, "artifact.txt"), "changed after a later review")
-  host.working("editing again")
-  record.submit("check")
-  runtime.tick(now: now + 5)
+  assert(checker.calls.length == 1 && record.state["check_observations"].values.last["manual"] == true,
+         "the queued manual check starts on Root's completed delivery")
   checker.result = answer("complete")
-  runtime.tick(now: now + 6)
-  File.write(File.join(root, "artifact.txt"), "changed before the hand-off")
-  host.finish("edited")
-  runtime.tick(now: now + 7)
+  runtime.tick(now: now + 2)
   assert(record.state["finalization_notices"].length == 1,
-         "a changed artifact does not receive the old notice")
-  assert(File.read(File.join(record.path, "events.jsonl")).include?("finalization_pending_stale"),
-         "dropping the old hand-off is auditable")
-  assert(checker.calls.length == 3, "the new version is checked once under the existing version-change rule")
+         "the delivered answer can receive one valid completion notice")
 end
 
 # A version-bound pending hand-off must still reach an active Root within the
 # bounded wait, and a repeated same-version hand-off must not reset the timer.
 fixture(interval: 300) do |root, record, host, checker, runtime|
   now = Time.now.to_f
-  host.working("waiting without ending the turn")
+  host.finish("delivered")
   record.submit("check")
   runtime.tick(now: now)
+  host.working("waiting without ending the next turn")
   checker.result = answer("continue")
   runtime.tick(now: now + 1)
   pending = record.state["pending_finalization"]
@@ -2114,7 +2105,8 @@ fixture do |_root, record, _host, checker, _runtime|
   assert(host.stop_calls.zero? && checker.calls.empty?, "rejected attachment has no execution authority")
 end
 
-# Jev can defer the early first-change review, but not the agreed full check.
+# Jev can defer an early first-change review; an unchanged timer while Root
+# executes does not pay for a full check, but a completed turn still does.
 fixture do |root, record, host, checker, _runtime|
   host.send_message("Working")
   advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1)
@@ -2125,7 +2117,11 @@ fixture do |root, record, host, checker, _runtime|
   runtime.tick(now: now + 10)
   assert(advisor.calls.length == 1 && checker.calls.empty?, "low readiness defers only the early file-change check")
   runtime.tick(now: now + 61)
-  assert(checker.calls.length == 1 && checker.calls.last.fetch(:role) == "reviewer", "agreed full check still runs")
+  assert(checker.calls.empty?, "pure elapsed time does not launch a full check while Root is active")
+  host.finish("completed-artifact")
+  runtime.tick(now: now + 62)
+  assert(checker.calls.length == 1 && checker.calls.last.fetch(:role) == "reviewer",
+         "completed Root work triggers the deferred artifact check")
 end
 
 fixture do |_root, record, host, checker, _runtime|
@@ -2529,7 +2525,7 @@ end
 
 # A user-requested check bypasses the completed-observation dedup and re-runs
 # the same observation; queued manual checks still run one at a time.
-fixture(interval: 300) do |_root, record, _host, checker, runtime|
+fixture(interval: 300) do |_root, record, host, checker, runtime|
   now = Time.now.to_f
   runtime.tick(now: now)
   checker.result = answer("continue")
@@ -2549,6 +2545,7 @@ fixture(interval: 300) do |_root, record, _host, checker, runtime|
          "a queued manual check waits while one check is in flight")
   checker.result = answer("continue")
   runtime.tick(now: now + 4)
+  host.finish("delivered after the preceding check")
   runtime.tick(now: now + 5)
   assert(checker.calls.length == 3, "the queued manual request runs after the first check finishes")
   queued = record.state.fetch("check_observations").values.last
@@ -2896,6 +2893,53 @@ fixture do |root, record, _host, checker, _runtime|
   entry = record.state.dig("ask_interrupts", "call-ghi")
   assert(record.state["status"] == "paused" && entry["cleared_by"] == "task_terminal" && entry["cleared_at"],
          "a task terminal state closes the still-pending ask interrupt")
+end
+
+# An unrelated native user turn remains outside the checked instruction until
+# the user explicitly assigns it to this task.
+fixture do |_root, record, host, checker, runtime|
+  original_digest = record.input_digest(record.state)
+  host.define_singleton_method(:user_messages) do |after_id:|
+    after_id == "original" ? [{ "id" => "new-question", "text" => "How does another project work?" }] : []
+  end
+  runtime.tick
+  assert(record.state["amendments"].empty? &&
+         record.input_digest(record.state) == original_digest &&
+         record.state["unassigned_user_message_id"] == "new-question",
+         "an unassigned native question cannot silently expand this task")
+  host.finish("after-question")
+  record.submit("amend", "text" => "Include the second behavior",
+                "source" => { "kind" => "explicit_text" })
+  runtime.tick
+  assert(record.state["amendments"].length == 1 &&
+         record.input_digest(record.state) != original_digest &&
+         record.state["unassigned_user_message_id"].nil?,
+         "only explicit amend changes the checked requirements")
+end
+
+# A clean continue verdict does not imply that a promised answer was delivered.
+# Root must actually finish the response before a later independent check can
+# issue a completion notice.
+fixture do |_root, record, host, checker, runtime|
+  now = Time.now.to_f
+  record.submit("check")
+  runtime.tick(now: now)
+  checker.result = answer("continue", delivery_ready: false,
+                          delivery_reason: "Root has not delivered the final answer")
+  runtime.tick(now: now + 1)
+  assert(record.state["finalization_notices"].empty? &&
+         record.state.dig("completion_readiness", "status") == "not_ready" &&
+         host.messages.any? { |message| message.include?("Root has not delivered") },
+         "a no-finding check without a delivered answer keeps Root working")
+  host.finish("actual final answer")
+  record.submit("check")
+  runtime.tick(now: now + 2)
+  checker.result = answer("continue", delivery_ready: true,
+                          delivery_reason: "Observed the Root's completed final answer")
+  runtime.tick(now: now + 3)
+  assert(record.state["finalization_notices"].length == 1 &&
+         record.state.dig("completion_readiness", "status") == "ready",
+         "an independent current check after delivery may issue the notice")
 end
 
 puts "TASK_RUNTIME_TEST_PASS (deterministic, not real-model acceptance)"

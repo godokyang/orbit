@@ -1,12 +1,11 @@
 # Orbit 当前交接
 
-## 最新状态（源码 0.7.7，仅补丁版本递增；功能来自 0.7.6，2026-09-27）
+## 最新状态（源码 0.7.7，2026-09-27）
 
-- **入口缺证据的启动死结已在源码修复，尚未安装到既有 OMP 会话。** 候选池与缓存事实无同标识匹配时，错误列出当前会话可选候选；已核对的 `messages` 与 `openai-codex` Responses 请求会在当前模型请求收到失败原因、原生消息 ID 与仅用于恢复的动作，不再先 `abort` 掉 Root 回合。Root 可以先用 `orbit model-evidence --file FILE|-` 在无任务目录时提交真实来源事实，再对原消息显式 `start`；无证据或 JEV 不过线仍不自动选模。显式检查模型的首次 `start` 在建任务前探测隔离目录及凭据，不可解析则不创建任务。无法安全识别的请求体仍通知并中止，见[限制](debt-ledger.md)。
-- **本轮验证边界：**`npm test` 通过（含新入口恢复、无任务证据缓存与显式检查模型预检）；入口在包含 assistant 工具回合后的重复请求又运行聚焦回归并通过。隔离缓存下实际源码 CLI 无任务提交返回 `status=cached`，缓存含提交的测试身份后已删除临时目录。OMP 18.3.2 二进制的 Responses onPayload 接缝由源码/二进制核对，当前工作区的新扩展尚未在真实 `orbit omp` 会话中完成模型驱动验收，不能说隔壁旧会话已修复；尚未安装当前源码。核心语义见[合同](../../contracts/task-runtime.md)、[ADR-008](../adr/008-omp-native-collaboration-base.md)、[ADR-009](../adr/009-user-selected-model-pool.md)。
-
-- **任务证据与主动导出已在源码接线，尚未安装本次改动。** `.orbit/tasks/<id>/collaboration.jsonl` 在原生事件发生时记录可归属的派发输入、模型身份、`task/hub` 通信及缺口；`events.jsonl` 关联检查、finding、纠偏 ID 和产物版本。`orbit export TASK --output FILE` 生成本地单任务 tar.gz，含事实时间线、检查快照、可安全定位的 OMP 会话片段、文件摘要与缺失清单；运行中只代表导出时刻，不上传、不调用模型、不改变完成门。见[合同](../../contracts/task-runtime.md#本地任务证据与主动导出)、[ADR-008 增补](../adr/008-omp-native-collaboration-base.md)及[实施记录](../reference/task-evidence-export-20260926.md)。
-- **已观察验证：**源码 CLI 已对运行中任务实际导出归档并读取 `manifest.json`/`timeline.jsonl`；其源会话使用安装版旧扩展，协作日志缺失在清单中标记，不能宣称新扩展已有真实 OMP 会话验收。最终 `npm test`（含新插件专项）通过；`npm pack --dry-run --json` 通过且含 52 文件，`git diff --check` 通过。已安装 `orbit --version` 为 0.7.5，但不含当前工作区修改；以下 0.7.4 与更早段落是历史快照。
+- 用户确认的运行体验与成本计划已落实于合同、ADR-008／009、源码、检查 schema、使用说明和确定性回归；[隔离 OMP 实测记录](../reference/orbit-runtime-fix-acceptance-20260927.md)载明可核对任务目录、各阶段耗时/检查用量和未验证边界。入口明确/自动/讨论分流、逐候选精确证据诊断、同会话显式检查模型记忆和逐次重验、手动交付终检、当前版本完成就绪/失效状态、独立提问不暗改任务、远端引用只读核验与检查成本归属均已实施。live 发现并修复检查者结尾换行误读、非显式入口反复提醒、检查在途的错误状态栏提示，以及把前一任务的既有未跟踪文件误作本任务新增的检查者归因。
+- **真实闭环：**同一全新 OMP 18.3.2 会话中两项独立受控任务均完成一次自动检查和一次手动终检、有效通知、Root `stop(intent=complete)`、`stop_confirmation.confirmed=true`；第二项不重传 `review_model` 而沿用会话授权，并实际提交/推送隔离 bare remote，程序核对远端 `origin/main` 等于本地 HEAD。新候选的非显式多模块任务 TypeSafe 评分授权 0.94／检查收益 0.91 后选模因精确身份证据缺失失败，Root 收到一次可见“未受控”警告并普通完成 4/4 用例；低收益单行修改（收益 0.68 < 0.80）没有自动建任务。先前分阶段推送夹具因未把后续授权记录为 `amend` 最终停在 `needs_user`，**不**计成功；该样本的远端不一致与错误换行 finding/申诉已如实记录。
+- **安装边界：**本次最终隔离安装 0.7.7，`content_digest=930e8379f0ec430a4b61b92d13bd57175b51c9d14982f717d4a1d10ab767c647`，源码 commit `57c827d1499ee5d367ba224719f4f69723c77b96` 但安装时 dirty，目录 `/tmp/orbit-live-acceptance-wAlxtU/`。本机日常 `orbit --version` 后续实测为 0.7.6（2026-09-26 16:19 UTC 安装），现有旧 OMP 会话不会热更新；未发版、未推送生产远端、未自动购买模型额度。Root 任务 token 与钱数未知；两项连续受控任务各 2 次检查，49253／58513 checker tokens；最终旧未跟踪文件夹具 2 次检查共 36035 tokens，不能把不同任务对比当作精确节省率。池内自动正选择和低成本成员自动委派仍无这次新构建的 live 正样本；不借近似型号数据做能力声明。
+- **验证：**最后代码改动后完整 `npm test` 再次通过（含版本与锁文件一致性、Ruby／Node／Bun 回归），`npm pack --dry-run --json` 通过且为 55 个文件，`git diff --check` 通过；在途状态栏的 live 暴露缺陷已补消费端回归。没有把隔离安装误称为日常安装；入口、状态、清除记忆/跨会话、远端未知及不一致的关键支路还有确定性回归。使用详情见[使用参考](../reference/usage-reference.md)，语义以[运行合同](../../contracts/task-runtime.md)为准。
 
 ## 历史快照（源码 0.7.4、本机 `orbit --version` 当时为 0.7.4，2026-09-26）
 
@@ -25,10 +24,10 @@
 
 ## 当前怎么用
 
-- 受控会话：在项目目录运行 `orbit omp`，原生 `--resume`、`--model`、profile 与权限参数原样交给 OMP。Root 用原生 `task` 派发成员，Orbit 负责登记、观察、检查与停止确认。
-- 查询与维护：`orbit status` / `orbit stop` / `orbit doctor`；`orbit update` / `orbit uninstall` 只管理本安装。检查模型取当前 OMP 会话的 provider/id，或显式 `ORBIT_REVIEW_MODEL`。
-- 模型候选池（ADR-009）：会话内 `/orbit-models` 搜索多选维护跨会话池，逐项 add/remove 保留；原有检查者显式重选、成员漂移检测及池内自动正选择的 live 边界见[历史验收证据](../reference/model-pool-acceptance-20260925.md)。本次 TUI 正交互实测不等于检查者池内自动正选择通过。
-- 安装位置（默认）：runtime `~/.local/share/orbit/orbit`，CLI `~/.local/bin/orbit`；本机 `orbit --version` 为 0.7.4，但本次源码尚未安装。仍有存活 lease 时卸载会拒绝并保留完整安装；旧 0.7.3 安装摘要见上方历史段落。
+- 受控会话：在项目目录运行 `orbit omp`，原生 `--resume`、`--model`、profile 与权限参数原样交给 OMP。Root 用原生 `task` 派发成员，Orbit 负责登记、观察、检查与停止确认；没有活跃任务时原生 `task` 可普通执行，但不享有 Orbit 监督。
+- 查询与维护：`orbit status` / `orbit stop` / `orbit doctor`；`orbit update` / `orbit uninstall` 只管理当前安装。终检前 Root 使用工具 `Orbit action=check` 并结束本轮，收到有效通知后再 `action=stop, intent=complete`；CLI `orbit stop` 只是普通暂停。
+- 模型候选池：会话内 `/orbit-models` 搜索多选维护跨会话池，逐项证据状态和精确身份可在 UI 或 `orbit model-status` 只读查看；显式 `review_model` 可选会话内记住并逐任务重新预检。既有检查者显式重选、成员漂移及池内自动正选择的历史边界见[候选池验收](../reference/model-pool-acceptance-20260925.md)；本轮新增真实诊断与连续任务见[本轮记录](../reference/orbit-runtime-fix-acceptance-20260927.md)。
+- 安装位置（默认）：runtime `~/.local/share/orbit/orbit`，CLI `~/.local/bin/orbit`；本机日常 `orbit --version` 后续实测为 0.7.6，**不含**本轮隔离安装的 0.7.7 修复。仍有存活 lease 时卸载会拒绝并保留完整安装。
 
 ## 历史（已结束阶段，按需从链接与 Git 查阅）
 

@@ -51,7 +51,7 @@ module Orbit
 
       OMP 用 orbit omp 启动受控会话，普通 omp 不加载 Orbit 扩展。
       具体参数：orbit <命令> --help（omp 用 orbit help omp）；状态的机器输出：orbit status --json。
-      Agent 执行接口：start / check / amend / dispute / rebind-workspace / model-evidence / model-candidates / review-model（各自 --help）。
+      Agent 执行接口：start / check / amend / dispute / rebind-workspace / model-evidence / model-candidates / model-status / review-model（各自 --help）。
     TEXT
 
     COMMAND_HELP = {
@@ -96,6 +96,11 @@ module Orbit
         出错时非零退出且只输出错误信息，不输出凭据、账号或连接配置。
         apply-delta 供扩展多选界面一次提交净增删差量：LIST 为逗号分隔的 provider/id；base 为打开界面时的池快照，
         任一差量 ID 的入池状态与快照不同则整体拒绝（退出 1），不覆盖其他会话对不同 ID 的修改。
+      TEXT
+      "model-status" => <<~TEXT,
+        orbit model-status [--project DIR] [--thread ID --socket PATH]
+        只读诊断：当前长期候选池逐项状态——是否在本 OMP 会话可选目录（需 --thread/--socket）、精确身份的缓存证据是有效／缺失／过期／无法取得还是结构无效，以及质量判定与隔离环境解析的“未探测”标记。不调用 JEV、不探测隔离环境、不建任务、不写文件。
+        stdout 输出一行 JSON（pool_empty、session_catalog、evidence_cache、candidates[]，缺省会话时 default_model 为当前会话模型）。候选池为空时保持现有语义：无候选项，仅报会话默认模型。
       TEXT
       "start" => <<~TEXT,
         orbit start [--provider omp] [--project DIR]
@@ -177,6 +182,8 @@ module Orbit
         model_evidence(argv)
       when "model-candidates"
         model_candidates(argv)
+      when "model-status"
+        model_status(argv)
       when "review-model"
         review_model(argv)
       when "stop", "check", "amend", "dispute"
@@ -623,6 +630,47 @@ module Orbit
 
     def report_model_candidates(models)
       puts JSON.generate("models" => models)
+      0
+    end
+
+    # Read-only per-candidate diagnostics (ADR-009 2026-09-27 supplement)
+    # for the candidate UX and for Root explaining a blocked start: pool
+    # membership in the session catalog (when a session is given) and the
+    # cached evidence status per exact identity. Never probes the isolated
+    # checker profile, never calls JEV, never creates a task and never
+    # writes anything. Without --thread/--socket the session catalog is
+    # reported "not_provided" rather than guessed.
+    def model_status(argv)
+      options = { project: Dir.pwd, provider: "omp", thread: nil, socket: nil }
+      OptionParser.new do |parser|
+        parser.on("--project DIR") { |value| options[:project] = value }
+        parser.on("--provider NAME", %w[omp]) { |value| options[:provider] = value }
+        parser.on("--thread ID") { |value| options[:thread] = value }
+        parser.on("--socket PATH") { |value| options[:socket] = value }
+      end.parse!(argv)
+      raise ArgumentError, "unexpected arguments: #{argv.join(' ')}" unless argv.empty?
+      if options[:thread].to_s.empty? != options[:socket].to_s.empty?
+        raise ArgumentError, "--thread and --socket must be given together"
+      end
+
+      report =
+        if options[:thread] && options[:socket]
+          record = { "provider" => options[:provider], "socket" => File.expand_path(options[:socket]),
+                     "thread_id" => options[:thread] }
+          opened = Connection.open(record)
+          begin
+            opened.connect!
+            unless File.realpath(opened.state.fetch("cwd")) == File.realpath(options[:project])
+              raise ArgumentError, "Root session belongs to a different project"
+            end
+            CheckerModelSelector.new(connection: opened, project_root: options[:project]).candidate_statuses
+          ensure
+            opened.close
+          end
+        else
+          CheckerModelSelector.new(connection: nil, project_root: options[:project]).candidate_statuses
+        end
+      puts JSON.generate(report)
       0
     end
 

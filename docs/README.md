@@ -1,6 +1,6 @@
 # Orbit 文档入口
 
-当前源码版本：**0.7.7**（仅递增补丁号；2026-09-27 入口缺证据恢复、建任务前证据提交与显式检查模型预检，以及此前任务证据记录与导出，均尚未安装到本机日常 Orbit；已安装版为 0.7.5，不代表包含当前工作区改动）。当前进度与验收边界见[交接](plan/handoff.md)，任务证据功能的实施记录见[参考材料](reference/task-evidence-export-20260926.md)；历史 0.7.1–0.7.4 记录不代表本次源码的真实验收。
+当前源码版本：**0.7.7**（仅递增补丁号；运行体验与成本问题修复已在隔离 OMP 18.3.2 中对新候选构建实测，本机日常安装仍为 0.7.5，不能把隔离验收等同于已更新日常 Orbit）。当前进度与验收边界见[交接](plan/handoff.md)、[本轮隔离 OMP 验收](reference/orbit-runtime-fix-acceptance-20260927.md)；任务证据功能的先前实施记录见[参考材料](reference/task-evidence-export-20260926.md)。
 
 | 要解决的问题 | 阅读入口 |
 | --- | --- |
@@ -20,7 +20,7 @@
 | Zeen 走查暴露的过程缺口、修复实施与 OMP 接入验收 | [Zeen 过程诊断与实施复盘](reference/zeen-page-capture-orbit-process-review-20260925.md)、[Orbit OMP 接入验收记录](reference/orbit-omp-access-acceptance-20260925.md) |
 | 真实任务中的 Orbit 与 JEV 表现 | [Zeen Login 使用复盘与 JEV 证据](reference/zeen-login-orbit-experience-20260922.md) |
 | 普通终端和现有会话如何落地、有哪些现成方案 | [用户流程交付计划](plan/user-experience-plan.md)、[现成方案调研](reference/existing-orchestrators-20260914.md) |
-| 实际验收证明了什么 | [检查回路与 Jev 实际验证](reference/check-loop-acceptance-20260918.md)、[跨宿主成员验收](reference/cross-host-member-acceptance-20260918.md)、[Jev 调度运行验收](reference/jev-runtime-acceptance-20260918.md)、[底层真实验收](reference/orbit-runtime-acceptance-20260914.md)、[Codex 日常流程验收](reference/user-flow-acceptance-20260914.json)、[OpenCode 正式验收](reference/opencode-runtime-acceptance-20260914.json)、[OMP 正式验收](reference/omp-runtime-acceptance-20260914.json)、[候选模型池真实验收](reference/model-pool-acceptance-20260925.md) |
+| 实际验收证明了什么 | [本轮运行体验与成本修复：隔离 OMP 验收](reference/orbit-runtime-fix-acceptance-20260927.md)、[检查回路与 Jev 实际验证](reference/check-loop-acceptance-20260918.md)、[跨宿主成员验收](reference/cross-host-member-acceptance-20260918.md)、[Jev 调度运行验收](reference/jev-runtime-acceptance-20260918.md)、[底层真实验收](reference/orbit-runtime-acceptance-20260914.md)、[Codex 日常流程验收](reference/user-flow-acceptance-20260914.json)、[OpenCode 正式验收](reference/opencode-runtime-acceptance-20260914.json)、[OMP 正式验收](reference/omp-runtime-acceptance-20260914.json)、[候选模型池真实验收](reference/model-pool-acceptance-20260925.md) |
 | 优化后的真实路径怎么验收、已经跑到哪里 | [优化真实验收记录](reference/orbit-optimization-acceptance-plan-20260922.md) |
 | 过去哪些失误值得记住 | [工程经验](reference/engineering-lessons.md) |
 | 历史：Codex 如何加载项目规范 | [按需阅读的说明](reference/codex-agents-md-loading.md)（旧宿主证据） |

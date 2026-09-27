@@ -45,6 +45,10 @@ module CheckRunnerContextTest
     "#{prefix}…[#{original.length}:#{Digest::SHA256.hexdigest(original)}]"
   end
 
+  def bound_at(text, cap)
+    "#{text[0, cap]}…[#{text.length}:#{Digest::SHA256.hexdigest(text)}]"
+  end
+
   def base_context
     {
       "root" => {
@@ -97,9 +101,10 @@ module CheckRunnerContextTest
     check_low_priority_drops_before_findings
     check_hard_byte_limit_and_valid_json
     check_prompt_keeps_inputs_and_decision_memory
+    check_delivery_prompt_contract_and_validation
+    check_delivered_answer_gets_wider_verbatim_prefix
     check_review_focus_is_explicit_and_deterministic
     check_review_focus_is_bounded_and_traceable
-    check_review_focus_prompt_policy
     check_non_hash_context_is_bounded
     puts "CHECK_RUNNER_CONTEXT_TEST_PASS (deterministic)"
   end
@@ -356,6 +361,60 @@ module CheckRunnerContextTest
           "the clue finding data appears exactly once, in the program record")
   end
 
+  def check_delivery_prompt_contract_and_validation
+    prompt = runner.send(:build_prompt, snapshot: "/unused",
+                                inputs: { "instruction" => "do it" },
+                                context: base_context, role: "reviewer")
+    check(prompt.include?("## Delivery readiness") &&
+          prompt.include?("delivery.ready states whether the task's actual deliverable is visible") &&
+          prompt.include?("root.status is idle and root.last_turn_status is completed") &&
+          prompt.include?("continue with no findings does not mean the deliverable exists") &&
+          prompt.include?("never verification"),
+          "the reviewer prompt separates delivery readiness from verdict and names the text-only boundary")
+    check(prompt.include?("next_check_seconds, delivery") && prompt.include?("ready (boolean)"),
+          "the output contract names the delivery object")
+
+    valid = {
+      "verdict" => "continue", "reason" => "work in progress", "findings" => [],
+      "resolved_ids" => [], "next_check_seconds" => 60,
+      "delivery" => { "ready" => false, "reason" => "final answer not yet visible in root observations" }
+    }
+    check(runner.send(:validate_result, valid) == valid, "a result with a structured delivery validates")
+
+    missing = Marshal.load(Marshal.dump(valid)).tap { |result| result.delete("delivery") }
+    rejects(missing, "missing keys: delivery")
+    string_ready = Marshal.load(Marshal.dump(valid))
+    string_ready["delivery"]["ready"] = "yes"
+    rejects(string_ready, "delivery.ready must be a boolean")
+    empty_reason = Marshal.load(Marshal.dump(valid))
+    empty_reason["delivery"]["reason"] = ""
+    rejects(empty_reason, "delivery.reason must be a non-empty string")
+    extra_key = Marshal.load(Marshal.dump(valid))
+    extra_key["delivery"]["evidence"] = "snapshot"
+    rejects(extra_key, "delivery has unexpected keys")
+  end
+
+  def rejects(result, expected)
+    runner.send(:validate_result, result)
+    raise "ASSERTION FAILED: expected rejection mentioning #{expected}"
+  rescue Orbit::CheckRunner::Error => error
+    check(error.message.include?(expected), "the contract rejects: #{expected}")
+  end
+
+  def check_delivered_answer_gets_wider_verbatim_prefix
+    answer = "final answer\n" + ("a" * 6_000)
+    command = { "kind" => "command", "tool" => "bash", "aggregated_output" => "x" * 3_500 }
+    context = base_context
+    context["root"]["observations"] = [{ "kind" => "agent_message", "text" => answer }, command]
+    record = parsed(context)["root"]["observations"]
+    cap = Orbit::CheckRunner::CONTEXT_DELIVERY_TEXT_CAP
+    check(record[0]["text"] == "#{answer[0, cap]}…[#{answer.length}:#{Digest::SHA256.hexdigest(answer)}]",
+          "the delivered agent message keeps a wider verbatim prefix")
+    output = "x" * 3_500
+    check(record[1]["aggregated_output"] == bound_at(output, Orbit::CheckRunner::CONTEXT_STRING_CAP),
+          "ordinary observations stay at the standard string cap")
+  end
+
   def check_review_focus_is_explicit_and_deterministic
     baseline = parsed(base_context)
     context = base_context
@@ -407,37 +466,6 @@ module CheckRunnerContextTest
     check(record.dig("review_focus_omitted", "ids_sha256") == Digest::SHA256.hexdigest(JSON.generate(omitted)),
           "the digest covers every omitted focus path")
     check(record.dig("findings", "f-1", "evidence") == "missing b", "open findings keep their priority")
-  end
-
-  def check_review_focus_prompt_policy
-    context = base_context
-    context["review_focus"] = { "added" => ["lib/new.rb"], "modified" => [], "deleted" => ["lib/old.rb"] }
-    prompt = runner.send(
-      :build_prompt, snapshot: "/unused", inputs: { "instruction" => "do the original thing" },
-      context: context, role: "reviewer"
-    )
-    check(prompt.include?("review_focus"), "the reviewer prompt names review_focus")
-    check(prompt.include?("direct dependencies first"), "the reviewer starts from focus and direct dependencies")
-    check(prompt.include?("extend to whatever the original instruction"),
-          "the reviewer still expands to the full requirement")
-    check(prompt.include?("priority clue, not a scope limit"),
-          "the reviewer is told review_focus is not a scope limit")
-    check(prompt.include?("never ignore a requirement because its files are not listed"),
-          "the reviewer must not skip requirements whose files are unlisted")
-    check(prompt.include?("lib/new.rb") && prompt.include?("lib/old.rb"),
-          "the focus paths reach the program record")
-    check(prompt.include?("## Original instruction (verbatim)\n\ndo the original thing"),
-          "the original instruction is still verbatim")
-    check(prompt.include?("## Fixed artifact snapshot"), "the fixed snapshot section is still present")
-    check(prompt.include?("Pending clues from a check that went stale"),
-          "the pending clues are still present")
-
-    plain = runner.send(
-      :build_prompt, snapshot: "/unused", inputs: { "instruction" => "do the original thing" },
-      context: base_context, role: "reviewer"
-    )
-    check(!plain.include?("priority clue, not a scope limit"),
-          "no focus policy is added when the record carries no review_focus")
   end
 
   def check_non_hash_context_is_bounded

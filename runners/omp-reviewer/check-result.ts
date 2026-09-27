@@ -1,10 +1,13 @@
 const VERDICTS = ["continue", "correct", "pause", "complete", "needs_user"];
-const RESULT_KEYS = ["verdict", "reason", "findings", "resolved_ids", "next_check_seconds"];
+const RESULT_KEYS = ["verdict", "reason", "findings", "resolved_ids", "next_check_seconds", "delivery"];
 const FINDING_KEYS = ["action", "evidence", "id", "requirement"];
+const DELIVERY_KEYS = ["ready", "reason"];
 
 // Contract validation for the final JSON object of an independent check run,
 // mirroring contracts/check-result.schema.json (additionalProperties: false,
-// non-empty strings, positive integer next_check_seconds).
+// non-empty strings, positive integer next_check_seconds, and the required
+// structured delivery judgment: exactly ready (boolean) + reason (non-empty
+// string), separate from verdict and findings).
 export function validateCheckResult(value: unknown): string[] {
 	if (typeof value !== "object" || value === null || Array.isArray(value)) return ["check result must be a JSON object"];
 	const record = value as Record<string, unknown>;
@@ -33,6 +36,19 @@ export function validateCheckResult(value: unknown): string[] {
 	}
 	if (!Number.isInteger(record.next_check_seconds) || (record.next_check_seconds as number) <= 0) {
 		problems.push("next_check_seconds must be a positive integer");
+	}
+	const delivery = record.delivery;
+	if (typeof delivery !== "object" || delivery === null || Array.isArray(delivery)) {
+		problems.push(`delivery must be an object with exactly: ${DELIVERY_KEYS.join(", ")}`);
+	} else {
+		const deliveryKeys = Object.keys(delivery);
+		const deliveryExtra = deliveryKeys.filter(key => !DELIVERY_KEYS.includes(key));
+		const deliveryMissing = DELIVERY_KEYS.filter(key => !deliveryKeys.includes(key));
+		if (deliveryExtra.length) problems.push(`delivery has unexpected keys: ${deliveryExtra.join(", ")}`);
+		if (deliveryMissing.length) problems.push(`delivery is missing keys: ${deliveryMissing.join(", ")}`);
+		if (typeof (delivery as Record<string, unknown>).ready !== "boolean") problems.push("delivery.ready must be a boolean");
+		const reason = (delivery as Record<string, unknown>).reason;
+		if (typeof reason !== "string" || reason === "") problems.push("delivery.reason must be a non-empty string");
 	}
 	return problems;
 }

@@ -13,6 +13,7 @@ require_relative "model_evidence_cache"
 require_relative "model_candidate_pool"
 require_relative "checker_model_selector"
 require_relative "check_runner"
+require_relative "git_remote_evidence"
 require_relative "observation_key"
 
 module Orbit
@@ -94,6 +95,13 @@ module Orbit
       @state["unknown_candidates"] ||= {}
       @state["check_observations"] ||= {}
       @state["finalization_notices"] ||= {}
+      @state["completion_readiness"] ||= { "status" => "waiting", "reason" => "尚无当前版本的有效终检" }
+      @state["usage"] ||= { "tokens" => nil }
+      @state["usage"]["jev_entry"] ||= @state.dig("entry", "trace", "usage") if @state["entry"]
+      initial_selection = @state.dig("review", "selection")
+      if initial_selection.is_a?(Hash) && initial_selection["source"] == "candidate_pool"
+        @state["usage"]["jev_checker_selection"] ||= initial_selection["usage"]
+      end
       @state["last_user_message_id"] ||= @state.dig("instruction_source", "id")
       @interval = @state.fetch("review").fetch("interval_seconds", 300)
       @next_check = Time.now.to_f + @interval
@@ -219,9 +227,11 @@ module Orbit
       # own next action). The version key is computed last, after the cheap
       # blockers, because it walks the artifact workspace.
       key = completion_notice_key
-      unless @state["finalization_notices"][key]
+      readiness = @state["completion_readiness"]
+      unless @state["finalization_notices"][key] && readiness.is_a?(Hash) &&
+             %w[ready queued].include?(readiness["status"]) && readiness["notice_key"] == key
         return [nil, "no_current_finalization_notice",
-                "no finalization notice exists for the current artifact and input version"]
+                "no delivery-ready finalization notice exists for the current artifact and input version"]
       end
 
       [key, nil, nil]
@@ -340,6 +350,7 @@ module Orbit
         @state["usage"]["root_session_cumulative"] = event.dig("params", "tokenUsage", "total")
       end
       return unless collect_amendments
+      refresh_completion_readiness!(now)
       if @running_check
         begin
           @check_result ||= @checker.poll
@@ -393,7 +404,23 @@ module Orbit
         end
       end
       if now >= @next_check || delivery_due
-        scheduled = now >= @next_check
+        if !delivery_due && @state["next_check_manual"] != true &&
+           %w[timer checker_interval finalization_wait].include?(@state["next_check_trigger"]) &&
+           host["status"] != "idle"
+          schedule_check(now + @interval, "Root 工作中，纯定时检查延后", trigger: "timer")
+          save
+          return
+        end
+        # A manual final check must see the Root's completed delivery, not a
+        # snapshot taken mid-reply with an empty agent_message. Keep the
+        # request queued until that turn finishes; automatic observations may
+        # still run while Root works.
+        if @state["next_check_trigger"] == "manual_check" && !delivery
+          schedule_check(now + 1, "等待 Root 实际交付后终检", trigger: "manual_check", manual: true)
+          save
+          return
+        end
+        scheduled = now >= @next_check || (delivery_due && @state["next_check_manual"] == true)
         cause = scheduled ? (@state["next_check_trigger"] || "timer") : "delivery"
         manual = scheduled && @state["next_check_manual"] == true
         @first_change_checked = true if start_check(host, now, trigger: cause, manual: manual)
@@ -474,6 +501,34 @@ module Orbit
       @artifact_digest
     end
 
+    # The runtime, not the UI, owns the version comparison. Only a version
+    # with a pending/issued notice needs a periodic fingerprint; an invalid
+    # notice stays invalid until a new independent manual check qualifies.
+    def refresh_completion_readiness!(now)
+      ready = @state["completion_readiness"]
+      return unless ready.is_a?(Hash) && %w[waiting ready].include?(ready["status"])
+      return unless ready["artifact_digest"]
+
+      input_changed = ready["input_digest"] != @record.input_digest(@state)
+      workspace_changed = ready["artifact_root"] != artifact_root
+      artifact_changed = !workspace_changed && ready["artifact_digest"] != probe_artifact(now)
+      notice_missing = ready["status"] == "ready" && !@state["finalization_notices"].key?(ready["notice_key"])
+      return unless input_changed || workspace_changed || artifact_changed || notice_missing
+
+      reason = if input_changed then "任务要求已修订"
+               elsif workspace_changed then "产物工作区已改变"
+               elsif artifact_changed then "终检后的产物已改变"
+               else "当前检查通知已失效"
+               end
+      @state["completion_readiness"] = { "status" => "invalidated", "reason" => reason }
+      if (pending = @state.delete("pending_finalization"))
+        @record.event("finalization_pending_stale", "check" => pending["check"], "reason" => reason)
+      end
+      schedule_check(now, "完成核对前版本变化，立即重新核对", trigger: "version_change")
+      @record.event("finalization_notice_invalidated", "reason" => reason)
+      save
+    end
+
     # Checks, fingerprints and new members read the artifact workspace.
     # project_root remains the authorization and task-record directory.
     def artifact_root
@@ -515,6 +570,7 @@ module Orbit
         "at" => updated.fetch("bound_at")
       }
       @state["workspace"] = updated.merge("history" => Array(current["history"]) + [entry])
+      @state["completion_readiness"] = { "status" => "invalidated", "reason" => "产物工作区已重新绑定" }
       @record.event("workspace_rebound", "source" => source, "reason" => reason,
                     "from" => entry["from"], "to" => entry["to"])
       reset_artifact_observation!
@@ -560,15 +616,13 @@ module Orbit
 
     def assess_jev(host, artifact_digest, now)
       signature = Digest::SHA256.hexdigest(JSON.generate([
-        host.slice("status", "turn_id", "last_turn_id", "last_turn_status", "observations", "active_tools"),
+        host.slice("status", "turn_id", "last_turn_id", "last_turn_status", "active_tools"),
         artifact_digest, @record.input_digest(@state), @state["members"].map { |member| member.slice("thread_id", "status") }
       ]))
-      # Honor the scheduled cooldown even when ordinary host observations
-      # change. Scope/member commands explicitly pull @jev_next_at forward;
-      # status, sleep and other progress noise must not cause a full Jev call
-      # every ~20 seconds.
-      return nil if now < @jev_next_at
-
+      # Time and noisy progress counters do not constitute a new observation.
+      # Preserve the cooldown for actual changes, but never pay twice for an
+      # unchanged observation (including after an unavailable judgment).
+      return nil if now < @jev_next_at || signature == @jev_signature
       observation = JevAdvisor.observation(
         inputs: @record.inputs(@state), host: host, members: @state["members"],
         project_root: artifact_root, artifact_digest: artifact_digest,
@@ -676,6 +730,9 @@ module Orbit
               # the current turn completed normally (bounded wait below),
               # re-verifying the hand-off version at that point.
               @state["completion_stop_pending"] = { "reason" => reason, "at" => Time.now.utc.iso8601 }
+              @state["completion_readiness"] = @state.fetch("completion_readiness").merge(
+                "status" => "queued", "reason" => "完成申请已入队，等待当前回复结束"
+              )
               @record.event("completion_stop_queued", "reason" => reason)
             else
               # The CLI gate accepted this hand-off; the record stopped
@@ -691,6 +748,7 @@ module Orbit
           end
         when "amend"
           add_amendment(command.fetch("text"), command.fetch("source"))
+          @state.delete("unassigned_user_message_id")
           sent = @connection.send_message("Orbit: the user explicitly amended this task:\n\n" + command.fetch("text"))
           @state["sent_message_ids"] << sent.fetch("id")
         when "check"
@@ -716,6 +774,7 @@ module Orbit
       @record.write(relative, text)
       @state["amendments"] << { "path" => relative, "source" => source, "at" => Time.now.utc.iso8601 }
       @record.event("instruction_amended", "source" => source)
+      @state["completion_readiness"] = { "status" => "invalidated", "reason" => "任务要求已显式修订" }
       @state["members"].each do |member|
         next unless %w[working registered].include?(member["status"])
         deliver_native_amendment(member, text, source) if member["adapter"] == OMP_NATIVE_ADAPTER
@@ -2011,15 +2070,15 @@ module Orbit
       end
       messages.each do |message|
         unless message["internal"] || @state["sent_message_ids"].include?(message.fetch("id"))
-          unless @connection.respond_to?(:instruction_source_kind)
-            stop("Cannot record a user amendment: instruction source kind is unavailable", status: "needs_user")
-            return false
-          end
-          add_amendment(message.fetch("text"), { "kind" => @connection.instruction_source_kind, "id" => message.fetch("id") })
+          # A new question is not an amendment. Only the explicit amend
+          # command changes the checked input; leave the native message in
+          # the Root session for it to assign to this task or handle separately.
+          @state["unassigned_user_message_id"] = message.fetch("id")
+          @record.event("user_message_unassigned", "message_id" => message.fetch("id"))
         end
         @state["last_user_message_id"] = message.fetch("id")
       end
-      save
+      save unless messages.empty?
       true
     end
 
@@ -2097,6 +2156,8 @@ module Orbit
           "estimate" => @state.fetch("estimate"), "hard_deadline" => @state["hard_deadline"],
           "elapsed_seconds" => now - Time.parse(@state.fetch("created_at")).to_f,
           "project_rules" => snapshot.fetch("project_rules"),
+          "git_remote" => GitRemoteEvidence.capture(workspace: artifact_root,
+                                                      instruction: effective_checker_instruction),
           "review_focus" => review_focus(snapshot.fetch("manifest")),
           "uncopied_entries" => snapshot.fetch("manifest").select do |entry|
             %w[gitlink other].include?(entry["kind"]) || entry["materialized"] == false
@@ -2145,6 +2206,10 @@ module Orbit
         @state["review"]["model"] = model if model && !model.to_s.empty?
         @record.event("checker_model_selected", "model" => model, "source" => selection["source"],
                       "selected_for" => role)
+        if selection["source"] == "candidate_pool" && selection["usage"].is_a?(Hash) &&
+           previous&.[]("selected_at") != selection["selected_at"]
+          accumulate_jev_usage("jev_checker_selection", selection["usage"])
+        end
       end
       @checker.select_model!(model) if model && !model.to_s.empty?
       save
@@ -2286,8 +2351,9 @@ module Orbit
       scope["kind"] != "artifact" && host_digest(host) != scope["host_digest"]
     end
 
-    # Added, modified and deleted paths from the fixed snapshot. Tracked and
-    # present entries are not a review focus. Each list is capped and sorted.
+    # Git working-tree added/modified/deleted statuses in the fixed snapshot,
+    # not differences from task start: pre-existing untracked files are "added".
+    # Tracked and present entries are not a review focus. Each list is capped.
     def review_focus(manifest)
       groups = REVIEW_FOCUS_STATUSES.to_h { |status| [status, []] }
       Array(manifest).each do |entry|
@@ -2485,12 +2551,24 @@ module Orbit
 
     # A valid manual reviewer conclusion (`continue`, `correct`, or `complete`
     # with no current findings) cannot itself declare the product task complete.
-    # Wake an idle Root once for the exact reviewed version so it can call stop,
-    # and prevent a one-second checker loop while that hand-off is pending.
+    # Delivery readiness is a separate, explicit checker decision. A clean
+    # finding list must never validate a response that is still to be written.
     def notify_finalization_ready(scope, result, host, current_digest, now)
       return unless scope["kind"] == "artifact" && scope["role"] == "reviewer" && scope["manual"]
       return unless %w[continue correct complete].include?(result.fetch("verdict"))
       return unless result.fetch("findings").empty? && @state["recheck"].nil?
+      delivery = result.fetch("delivery")
+      unless delivery.fetch("ready")
+        reason = delivery.fetch("reason")
+        @state["completion_readiness"] = { "status" => "not_ready", "reason" => reason,
+                                           "input_digest" => scope["input_digest"],
+                                           "artifact_root" => scope["artifact_root"],
+                                           "artifact_digest" => current_digest }
+        @record.event("delivery_not_ready", "check" => scope["number"], "reason" => reason)
+        sent = @connection.send_message("Orbit 独立检查尚未确认可交付（不是用户新要求）：#{reason}。请先完成实际答复或产物，然后对最终版本重新请求检查；不要申请完成。")
+        @state["sent_message_ids"] << sent.fetch("id")
+        return
+      end
       return unless @state["findings"].values.none? { |finding| finding["status"] == "open" }
       return unless members_settled?
       unless host["status"] == "idle" && host["last_turn_status"] == "completed"
@@ -2508,6 +2586,11 @@ module Orbit
       key = Digest::SHA256.hexdigest(JSON.generate([
         scope["artifact_root"], current_digest, scope["input_digest"]
       ]))
+      @state["completion_readiness"] = {
+        "status" => "ready", "reason" => "当前版本可申请完成",
+        "artifact_root" => scope["artifact_root"], "artifact_digest" => current_digest,
+        "input_digest" => scope["input_digest"], "notice_key" => key
+      }
       @state.delete("pending_finalization")
       unless @state["finalization_notices"][key]
         text = "Orbit 最终检查通知（不是用户的新要求）：这次检查没有发现待解决的问题，但任务尚未完成。" \
@@ -2541,6 +2624,11 @@ module Orbit
         "check" => scope["number"], "artifact_root" => scope["artifact_root"],
         "artifact_digest" => current_digest, "input_digest" => scope["input_digest"],
         "at" => at || Time.at(now).utc.iso8601
+      }
+      @state["completion_readiness"] = {
+        "status" => "waiting", "reason" => "最终检查已就绪，等待通知送达",
+        "artifact_root" => scope["artifact_root"], "artifact_digest" => current_digest,
+        "input_digest" => scope["input_digest"]
       }
       return if existing == pending
 
@@ -2684,6 +2772,15 @@ module Orbit
         end
       end
       @state.delete("completion_stop_pending")
+      if code == "root_bridge_unavailable"
+        @state["completion_readiness"] = @state.fetch("completion_readiness").merge(
+          "status" => "ready", "reason" => self.class.completion_next_action(code)
+        )
+      else
+        @state["completion_readiness"] = {
+          "status" => "invalidated", "reason" => "#{code}：#{self.class.completion_next_action(code)}"
+        }
+      end
       recent = Array(@state["completion_rejections"])
       @state["completion_rejections"] = (recent + [{
         "reason" => code, "detail" => detail, "stop_reason" => reason, "at" => Time.now.utc.iso8601

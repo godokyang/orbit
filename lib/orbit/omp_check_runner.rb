@@ -211,16 +211,21 @@ module Orbit
       parts << "## Current execution context (program record)\n\n" \
                "This record is deterministic and bounded. The original instruction, amendments and named basis " \
                "above are complete and are not compressed.\n\n```json\n#{context_text}\n```"
+      parts << delivery_rules_note
       parts << "## Fixed artifact snapshot\n\n" \
                "You are a separate OMP process, not a member of the execution team. " \
-               "Use the SDK read/grep/glob tools on the fixed snapshot. " \
+               "Use the SDK read/grep/glob tools on the fixed snapshot. Confined read reports exact file bytes, " \
+               "final_newline and actual_lines; grep only matches actual lines. For exact content or newline " \
+               "requirements, use those file facts rather than interpreting a rendered terminal blank line " \
+               "or trusting the Root's summary. " \
                "The original workspace is not your working directory and is not writable from this session. " \
                "Judge the snapshot files, not a model plan or summary."
       parts << "## Output\n\n" \
                "Return JSON matching these fields and nothing else: verdict, reason, findings, " \
-               "resolved_ids, next_check_seconds. verdict is one of: #{VERDICTS.join(', ')}. " \
-               "findings is a list of objects with id, requirement, evidence, action. " \
+               "resolved_ids, next_check_seconds, delivery. verdict is one of: #{VERDICTS.join(', ')}. " \
+               "Each findings object has exactly id, requirement, evidence and action — no severity or extra keys. " \
                "resolved_ids is a list of strings. next_check_seconds is a positive integer. " \
+               "delivery is an object with ready (boolean) and reason (non-empty string). " \
                "No markdown and no code fences."
       parts.join("\n\n")
     end

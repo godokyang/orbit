@@ -93,8 +93,8 @@ module PrestartTest
 
   def check_uncertain_uses_built_in_calibration
     with_project do |project, _home|
-      # No .orbit/jev-entry.json: the built-in default applies (Root-directed
-      # calibration from three labeled real requests; conservative).
+      # No project override: the built-in gate reflects real short-task
+      # false positives without matching on their wording.
       advisor, spy = classifier(project, [answered(0.95, 0.9)])
       decision = advisor.decide("implement the login page and verify it end to end")
       assert(decision["decision"] == "start", "a clear positive auto-starts under the built-in calibration")
@@ -104,9 +104,9 @@ module PrestartTest
       advisor, spy = classifier(project, [answered(0.79, 0.9)])
       assert(advisor.decide("implement the login page")["decision"] == "root_decides",
              "below the 0.80 authorization threshold stays with Root")
-      advisor, spy = classifier(project, [answered(0.9, 0.69)])
-      assert(advisor.decide("implement the login page")["decision"] == "root_decides",
-             "below the 0.70 benefit threshold stays with Root")
+      advisor, spy = classifier(project, [answered(0.9, 0.74)])
+      assert(advisor.decide("change the version and push")["decision"] == "root_decides",
+             "an observed low-benefit short task stays outside automatic Orbit review")
 
       advisor, spy = classifier(project)
       decision = advisor.decide("implement the login page")

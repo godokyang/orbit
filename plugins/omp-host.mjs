@@ -322,7 +322,9 @@ export function pickerNetDelta(entries, snapshot, selected) {
 }
 
 export function createModelPicker({ entries, snapshot, commit, done, listRows = PICKER_LIST_ROWS }) {
-  const rowFor = new Map(entries.map(entry => [entry.id, { id: entry.id, available: entry.available === true }]));
+  const rowFor = new Map(entries.map(entry => [entry.id, {
+    id: entry.id, available: entry.available === true, evidenceStatus: entry.evidenceStatus,
+  }]));
   let current = [...rowFor.values()];
   let selected = new Set([...snapshot].filter(id => rowFor.has(id)));
   let base = new Set(snapshot);
@@ -363,7 +365,8 @@ export function createModelPicker({ entries, snapshot, commit, done, listRows = 
         const mark = selected.has(entry.id) ? '[x]' : '[ ]';
         const pointer = index === cursor ? '>' : ' ';
         const tag = entry.available ? '' : '  · 当前不可选，仅可移出';
-        body.push(`${pointer} ${mark} ${entry.id}${tag}`);
+        const evidence = entry.evidenceStatus ? `  · 证据 ${entry.evidenceStatus}` : '';
+        body.push(`${pointer} ${mark} ${entry.id}${tag}${evidence}`);
       }
       if (rows.length > stop) body.push(`  … 还有 ${rows.length - stop} 项（继续 ↓）`);
       if (start > 0) body.unshift(`  … 以上还有 ${start} 项（继续 ↑）`);
@@ -373,6 +376,8 @@ export function createModelPicker({ entries, snapshot, commit, done, listRows = 
     const statusLine = error ? `保存失败：${error}` : notice ? `提示：${notice}` : null;
     const footer = [
       '↑/↓ 移动  Space 勾选/取消  Backspace 删除搜索  Enter 保存  Esc 取消',
+      'Root 模型由 OMP 原生 --model 选择；本候选池不切换当前 Root。',
+      '缺证据：orbit model-evidence --file FILE|-；质量与隔离环境尚未探测。',
       ...(statusLine ? [statusLine] : []),
     ];
     return [...head, ...body, ...footer].map(line => line.length > width ? line.slice(0, width - 1) + '…' : line);
@@ -394,7 +399,9 @@ export function createModelPicker({ entries, snapshot, commit, done, listRows = 
       error = (result && result.error) || '保存失败（未知原因）';
       if (result && Array.isArray(result.entries)) {
         rowFor.clear();
-        for (const entry of result.entries) rowFor.set(entry.id, { id: entry.id, available: entry.available === true });
+        for (const entry of result.entries) rowFor.set(entry.id, {
+          id: entry.id, available: entry.available === true, evidenceStatus: entry.evidenceStatus,
+        });
         current = [...rowFor.values()];
         selected = new Set([...selected].filter(id => rowFor.has(id)));
       }
@@ -457,22 +464,28 @@ export function createModelPicker({ entries, snapshot, commit, done, listRows = 
 // the recovery instruction is appended to the request's trailing user
 // content and the turn is NOT aborted: Root reads the failure, its exact
 // reason and the approved recovery flow in THIS request. The injection is
-// payload-only and never persists to the session, so every later provider
-// request of the same turn must carry it again until Root recovers (an
-// explicit start binds a task) or a newer user message supersedes it.
+// payload-only and never persists to the session. Explicit requests carry
+// the recovery instruction across later provider requests until Root starts
+// a task or a newer message supersedes it. Non-explicit failures notify once:
+// repeating the warning after every tool call distracts Root from ordinary work.
 // Request shapes this release cannot confidently mutate keep the old
 // fail-closed trap (aside + abort).
-function entryRecoveryInstruction(reason, messageId) {
-  return [
-    '[orbit-entry-failed] 本条消息的 Orbit 自动入口启动失败，没有创建任何 Orbit 任务。',
+function entryRecoveryInstruction(reason, messageId, explicit) {
+  const intro = [
+    '[orbit-entry-failed] 本条消息的 Orbit 入口启动失败，没有创建 Orbit 任务。',
     `失败原因：${reason}`,
-    '本轮不要开始用户请求的普通执行；同一条消息不会被自动重试或重新判定，也不要等待自动恢复。',
-    '按以下步骤恢复（按顺序执行）：',
-    '1. 若失败原因是候选模型缺少有效质量证据（失败原因会列出具体 provider/id）：为列出的候选收集带来源的真实证据（来源必须是可核查的 http(s) 地址；禁止编造评分、指标或来源），用无任务命令 orbit model-evidence --file FILE|- 把证据写入同一个证据缓存（- 表示从 stdin 读取）。',
-    '2. 失败原因是其他问题时，先诊断并解决该问题本身（不要绕过或忽略失败原因），再执行第 3 步。',
-    `3. 显式调用 orbit 工具启动原始任务：action=start，message_id="${messageId}"（这就是本条原始用户消息；Orbit 会按原文使用它，不要改写、复述或替换）。`,
-    '4. 若 start 报告这条消息已有 Orbit 任务（already has an Orbit task），改用返回的 task_directory 调用 orbit status 继续，不要重复创建任务。',
-    '在 start 成功之前：不要执行用户请求的普通工作，也不要把未启动当作已受控向用户报告。',
+  ];
+  if (!explicit) return [
+    ...intro,
+    '这是非显式的自动受控候选，本次工作未受 Orbit 监督。可以按原要求普通执行并向用户说明未受控；不要声称独立检查或完成门已经启动。',
+    '如希望改用受控任务：先用 orbit model-evidence --file FILE|- 提交同一 provider/id 的可核查证据，或在 orbit start 显式指定 review_model；',
+    `然后对原始消息调用 Orbit action=start，message_id="${messageId}"。选模失败不会自动重试；不想受控则无需补证据。`,
+  ].join('\n');
+  return [
+    ...intro,
+    '用户明确要求 Orbit 受控：本轮不要以普通执行替代。请修复失败原因后对原始消息显式启动；不要将未启动当作已受控。',
+    '证据缺失时只提交同一 provider/id 的真实来源事实：orbit model-evidence --file FILE|-；也可由用户显式指定 review_model，不能伪造资料或借用近似型号。',
+    `显式调用 Orbit action=start，message_id="${messageId}"；已有任务则用返回的 task_directory 继续。`,
   ].join('\n');
 }
 
@@ -589,6 +602,21 @@ export function installOmpExtension(pi, sdk) {
       const models = Array.isArray(parsed?.models) ? parsed.models.filter(m => typeof m === 'string') : [];
       lastKnownPool = models;
       return { ok: true, models };
+    } catch (error) {
+      return { ok: false, reason: String(error?.message || error).slice(0, 200) };
+    }
+  };
+  // Read-only exact-identity cache facts; session availability is supplied by
+  // ctx.models.list() and neither quality nor isolated credentials are probed.
+  const runModelStatusCli = project => {
+    try {
+      const argv = ['model-status', '--project', project];
+      const run = process.env.ORBIT_CLI_BIN
+        ? spawnSync(poolBin(), argv, { encoding: 'utf8', timeout: 15000, maxBuffer: 1024 * 1024 })
+        : spawnSync(rubyBin(), ['--disable-gems', poolBin(), ...argv],
+          { encoding: 'utf8', timeout: 15000, maxBuffer: 1024 * 1024 });
+      if (run.status !== 0 || !run.stdout) return { ok: false, reason: (run.stderr || run.error?.message || `exit ${run.status}`).trim().slice(0, 200) };
+      return { ok: true, report: JSON.parse(run.stdout.trim().split('\n').at(-1)) };
     } catch (error) {
       return { ok: false, reason: String(error?.message || error).slice(0, 200) };
     }
@@ -972,6 +1000,7 @@ export function installOmpExtension(pi, sdk) {
     if (requestedNames.has(base)) requestedNames.delete(base);
   }
   const ACTIVE = new Set(['starting', 'running']);
+  const uncontrolledDispatchNotified = new Set();
   // A binding is only usable while the task it names is still active and still
   // belongs to this Root session. Unknown or terminal states, other providers,
   // and stale bindings are all refused (and cleared), so members never
@@ -1007,9 +1036,14 @@ export function installOmpExtension(pi, sdk) {
       ? Object.values(findings).filter(finding => finding && finding.status === 'open').length : 0;
   };
   const recheckClues = state => Array.isArray(state?.recheck?.findings) ? state.recheck.findings.length : 0;
-  const noticeCount = state => {
-    const notices = state?.finalization_notices;
-    return notices && typeof notices === 'object' ? Object.keys(notices).length : 0;
+  const readiness = state => state?.completion_readiness && typeof state.completion_readiness === 'object'
+    ? state.completion_readiness : { status: 'waiting', reason: '尚无当前版本的有效终检' };
+  const checkInFlight = state => {
+    const observations = state?.check_observations;
+    if (!observations || typeof observations !== 'object') return false;
+    for (const key in observations)
+      if (Object.hasOwn(observations, key) && observations[key]?.status === 'in_flight') return true;
+    return false;
   };
   // Mirrors TaskView.runtime_abandoned?: a starting/running record whose
   // recorded runtime process is gone cannot consume queued commands. A recorded
@@ -1025,49 +1059,56 @@ export function installOmpExtension(pi, sdk) {
   }
   function phaseLabel(state) {
     switch (state.status) {
-      case 'complete': return '已完成（独立检查与收尾通过）';
+      case 'complete': return '已完成（独立检查与停止确认）';
       case 'paused': return '已暂停（已确认停止）';
       case 'needs_user': return '需用户处理（已确认停止）';
-      case 'stop_unconfirmed': return '任务是否已停止还无法确认';
+      case 'stop_unconfirmed': return '停止确认中：尚不可称完成';
       case 'failed': return stopConfirmed(state) ? '运行失败（停止已确认）' : '运行失败（停止待核实）';
       default: break;
     }
-    // A live status can outlive its runtime process. Never present that as an
-    // execution phase: only the socket check plus a live runtime is control.
-    if (runtimeAbandoned(state)) return '任务处理进程已退出，状态待清理';
-    if (state.completion_stop_pending) return '正在结束任务（等待当前回复结束）';
-    if (openFindings(state) > 0 || recheckClues(state) > 0) return '检查仍有待处理问题，尚未完成';
-    if (state.pending_finalization) return '最终检查已结束，等待结果通知';
-    // A stored notice can outlive the version it was issued for. Only the
-    // completion gate can decide whether the current files still qualify.
-    if (noticeCount(state) > 0) return '曾收到检查通过通知，任务尚未完成';
-    return '执行中，尚未完成最终检查';
+    if (runtimeAbandoned(state)) return '任务处理进程已退出，须清理';
+    if (state.completion_stop_pending) return '完成申请已入队，结束本轮';
+    if (openFindings(state) > 0 || recheckClues(state) > 0) return '检查仍有待处理问题';
+    const current = readiness(state);
+    if (current.status === 'invalidated') return `通知失效，须重检：${current.reason}`;
+    if (state.pending_finalization) return '等待当前版本检查通知';
+    if (current.status === 'ready') return '可申请完成：当前助手调用 Orbit stop(intent=complete)';
+    if (state.next_check_manual === true) return '等待手动终检，任务尚未完成';
+    if (checkInFlight(state)) return '独立检查进行中，等待结果';
+    const lastCheck = Array.isArray(state.checks) ? state.checks.at(-1) : null;
+    if (lastCheck && !lastCheck.finished_at) return '独立检查进行中，任务尚未完成';
+    if (current.status === 'not_ready') return `尚未就绪：${current.reason}`;
+    return '尚无有效终检：工作完成后当前助手调用 Orbit check；任务尚未完成';
   }
-  // Mirrors TaskView.next_action for display only. The durable record stays the
-  // authority; this never decides completion.
+  // Display only: the Ruby completion gate remains authoritative.
   function nextActionLabel(state) {
-    if (state.status === 'needs_user' || state.status === 'stop_unconfirmed') return '需要用户处理';
+    if (state.status === 'needs_user' || state.status === 'stop_unconfirmed') return '需要用户处理或重试停止确认';
     if (state.status === 'failed') return stopConfirmed(state) ? '运行失败，停止已确认' : '运行失败，需核实停止';
     if (!activeState(state)) return null;
-    if (state.completion_stop_pending) return '等待当前回复结束，再确认任务是否完成';
+    if (runtimeAbandoned(state)) return '运行进程已退出，显式普通 stop 清理；不能申请完成';
+    if (state.completion_stop_pending) return '结束本轮回复，等待 Orbit 确认停止';
     const lastCheck = Array.isArray(state.checks) ? state.checks.filter(c => c && typeof c === 'object').at(-1) : null;
     if (state.next_check_trigger === 'rebind' || state.next_check_basis === '工作区重新绑定'
-      || (lastCheck && Array.isArray(lastCheck.stale_reasons) && lastCheck.stale_reasons.includes('workspace'))) return '重新绑定工作区';
-    if (state.next_check_manual === true) return '等待本次检查';
-    if (state.pending_finalization) return '等待最终检查结果通知';
-    if (openFindings(state) > 0 || recheckClues(state) > 0) return '等待当前助手处理检查问题';
-    if (noticeCount(state) > 0) return '当前助手核对是否有新改动，再申请完成或重新检查';
-    const queued = (typeof state.next_check_at === 'string' && state.next_check_at) || (typeof state.next_check_trigger === 'string' && state.next_check_trigger);
-    if (!queued) return '等待当前助手完成工作';
-    return '等待已安排的检查';
+      || (lastCheck && Array.isArray(lastCheck.stale_reasons) && lastCheck.stale_reasons.includes('workspace'))) return '重新绑定工作区并重检';
+    if (state.next_check_manual === true || state.pending_finalization) return '结束本轮，等待检查或通知';
+    if (checkInFlight(state)) return '等待独立检查结果，不要再次请求';
+    if (openFindings(state) > 0 || recheckClues(state) > 0) return '当前助手处理检查问题，再重检';
+    const current = readiness(state);
+    if (current.status === 'ready') return '当前助手调用 Orbit stop(intent=complete)，结束本轮';
+    if (current.status === 'invalidated') return `当前通知已失效（${current.reason}），先重检`;
+    if (current.status === 'not_ready') return `补齐实际交付（${current.reason}），再重检`;
+    return '完成实际工作后调用 Orbit action=check 请求手动终检';
   }
   function phaseDirective(state) {
-    if (state.completion_stop_pending) return '结束任务的请求已提交。当前助手正常结束本轮回复；Orbit 随后核对并确认结果，不要重复提交。';
-    if (openFindings(state) > 0 || recheckClues(state) > 0) return '检查还有问题。当前助手先修正或核对，再重新检查；现在不能报告任务完成。';
-    if (state.pending_finalization) return '最终检查已结束，结果还在发送。当前助手结束本轮并等待通知，不必反复查询。';
-    if (noticeCount(state) > 0)
-      return '此前收到过检查通过的通知，但之后文件或要求可能已变化，任务尚未完成。若没有新改动、实现也已验证，当前助手调用 orbit stop 申请完成；Orbit 会再次核对。若有新改动，先重新检查；申请被拒绝时按返回的原因处理。用户只要求暂停时不要申请完成。';
-    return '还没有收到最终检查通过的通知。当前助手完成工作并验证后，请求最终检查并结束本轮；收到结果再申请完成。用户要求暂停时按暂停处理。';
+    if (state.completion_stop_pending) return '完成申请已入队。当前助手结束本轮，Orbit 才能核对产物、输入、成员及实际停止；不要重复申请。';
+    if (openFindings(state) > 0 || recheckClues(state) > 0) return '先修正或核对检查问题，再请求最终检查；现在不能报告任务完成。';
+    if (state.pending_finalization) return '当前版本的最终检查已就绪，等待通知；结束本轮，不要轮询。';
+    if (checkInFlight(state)) return '独立检查进行中；结束本轮并等待结果或纠正，不要再次请求检查，也不要称任务已完成。';
+    const current = readiness(state);
+    if (current.status === 'ready') return '当前终检已就绪但任务尚未完成。当前助手现在调用 Orbit 工具 action=stop, intent=complete, task=<当前任务目录>，再正常结束本轮；普通 CLI orbit stop 仅暂停。被拒绝时按原因处理，不假称完成。';
+    if (current.status === 'invalidated') return `检查通知已失效：${current.reason}。先在当前产物与要求上重新请求终检；旧通知不能用于完成申请。`;
+    if (current.status === 'not_ready') return `独立检查未确认可交付：${current.reason}。先产生可核验的实际答复或产物，再请求最终检查。`;
+    return '当前助手完成工作并实际验证，调用 Orbit action=check, task=<当前任务目录> 请求手动终检；在本轮回复中交付可核验结果并结束，终检会等待回复完成后开始。自动检查通过不会自动发完成通知。';
   }
   // Pending native-Ask interruptions (contract with TaskRuntime, 2026-09-26):
   // an entry is pending while it has NO cleared_at, regardless of reminded_at
@@ -1126,6 +1167,7 @@ export function installOmpExtension(pi, sdk) {
       ...(context.length ? [context.join('；')] : []),
       ...(next && next !== '无' ? [`下一动作：${next}`] : []),
       phaseDirective(state),
+      '新用户消息不自动修改旧任务：明确修订时调用 Orbit amend；独立问题按独立请求处理，必要时先确认归属。',
     ].join('\n');
   }
   // A record that outlived the host connection that created it (OMP restart or
@@ -1688,10 +1730,27 @@ export function installOmpExtension(pi, sdk) {
     if (process.env.ORBIT_GATE_DEBUG) process.stderr.write(`Orbit gate: tool_call task caller=${caller ?? 'unresolved'} session=${sessionId}\n`);
     if (caller !== sdk.MAIN_AGENT_ID)
       return { block: true, reason: caller ? 'Execution members cannot dispatch tasks (one-level delegation)' : 'Task dispatch refused: caller identity is not the verified Root' };
+    const bound = await boundTask(sessionId);
+    if (!bound.ok) {
+      if (bound.reason.includes('unreadable'))
+        return { block: true, reason: bound.reason };
+      if (entryRecovery.get(sessionId)?.explicit)
+        return { block: true, reason: 'The explicitly requested Orbit task has not started; native delegation cannot replace controlled execution' };
+      const existing = await resolveBoundTask(sessionId, ctx.cwd);
+      if (existing && activeState(existing.state))
+        return { block: true, reason: 'An active Orbit task is not owned by this Root connection; finish or clean it up before delegating' };
+      const nativeItems = Array.isArray(input.tasks) && input.tasks.length ? input.tasks : [input];
+      if (nativeItems.some(item => typeof item?.agent === 'string' && item.agent.startsWith(AGENT_NAME_PREFIX)))
+        return { block: true, reason: 'Orbit-generated candidate agents require an active Orbit task; use a native OMP agent for unsupervised delegation' };
+      if (!uncontrolledDispatchNotified.has(sessionId)) {
+        uncontrolledDispatchNotified.add(sessionId);
+        try { ctx.ui?.notify('原生 OMP task 未绑定 Orbit：不登记成员、不做独立检查，也不由 Orbit 确认停止。', 'warning'); }
+        catch { process.stderr.write('Native OMP task is not supervised by Orbit.\n'); }
+      }
+      return; // Native OMP retains its own one-level team and permissions.
+    }
     if (!subscribeRegistryGate())
       return { block: true, reason: 'Orbit member registration gate is unavailable in this OMP session; refusing task dispatch' };
-    const bound = await boundTask(sessionId);
-    if (!bound.ok) return { block: true, reason: bound.reason };
     const taskDir = bound.taskDir;
     const items = Array.isArray(input.tasks) && input.tasks.length ? input.tasks : [input];
     // Refresh the pool before validating generated-agent dispatches: another
@@ -1834,11 +1893,9 @@ export function installOmpExtension(pi, sdk) {
   // OMP 18.3.2 persists and awaits message_end before this hook, which still
   // precedes the first provider request. Never use prompt text as an identity.
   const prestartSeen = new Set();
-  // session id -> { key, instruction } while a failed automatic entry is
-  // awaiting Root's explicit recovery in this same turn. The instruction is
-  // payload-only, so it must ride along on every later provider request of
-  // the turn; it is dropped when a task becomes bound (recovery done) or a
-  // newer user message supersedes it.
+  // session id -> { key, instruction } for failed EXPLICIT entries awaiting
+  // Root's recovery. Non-explicit failures get one current-request warning
+  // and then proceed without Orbit supervision.
   const entryRecovery = new Map();
   pi.on('before_provider_request', async (event, ctx) => {
     let sessionId = null;
@@ -1894,11 +1951,12 @@ export function installOmpExtension(pi, sdk) {
     const key = `${sessionId}:${user.id}`;
     if (prestartSeen.has(key)) return event.payload;
     prestartSeen.add(key);
+    let decision = null;
     try {
       const bound = await resolveBoundTask(sessionId, ctx.cwd);
       if (bound && activeState(bound.state)) return event.payload;
       await connect(ctx);
-      const decision = await host.entry(user.id, ctx);
+      decision = await host.entry(user.id, ctx);
       if (decision.decision === 'start') {
         const started = JSON.parse(await host.execute({ action: 'start', message_id: user.id,
           entry_file: decision.entry_file }, ctx));
@@ -1913,8 +1971,9 @@ export function installOmpExtension(pi, sdk) {
       }
     } catch (error) {
       const reason = String(error?.message || error);
-      const instruction = entryRecoveryInstruction(reason, user.id);
-      entryRecovery.set(sessionId, { key, instruction });
+      const explicit = decision?.classification !== 'uncertain';
+      const instruction = entryRecoveryInstruction(reason, user.id, explicit);
+      if (explicit) entryRecovery.set(sessionId, { key, instruction, explicit });
       const injected = appendInstructionToPayload(event.payload, instruction);
       if (injected) {
         // PROVEN current-request delivery (see appendInstructionToPayload):
@@ -1923,7 +1982,7 @@ export function installOmpExtension(pi, sdk) {
         // recovery steps now. Aborting here would cancel the very request
         // carrying the instruction — the old trap — and the queued aside
         // would only re-deliver it after the turn; both are skipped.
-        try { ctx.ui?.notify(`Orbit 自动入口启动失败，未创建任务（${reason.slice(0, 200)}）；恢复指令已并入本轮模型请求。`, 'error'); }
+        try { ctx.ui?.notify(`Orbit 入口启动失败，未创建任务（${reason.slice(0, 200)}）；${decision?.classification === 'uncertain' ? '本次不受 Orbit 监督，可普通执行' : '显式受控请求仍需恢复'}。`, decision?.classification === 'uncertain' ? 'warning' : 'error'); }
         catch { process.stderr.write(`${instruction}\n`); }
         return injected;
       }
@@ -2042,13 +2101,20 @@ export function installOmpExtension(pi, sdk) {
         if (sub) return notify('usage: /orbit-models [add|remove <provider/id>]', 'warning');
         const pool = runPoolCli(['list']);
         if (!pool.ok) return notify(`model pool unreadable: ${pool.reason}`, 'error');
+        const modelStatus = runModelStatusCli(ctx.cwd);
+        const reportedCandidates = modelStatus.ok && Array.isArray(modelStatus.report?.candidates)
+          ? modelStatus.report.candidates : [];
+        const statusByModel = new Map(reportedCandidates.map(candidate => [candidate.model, candidate]));
         const sessionModelIds = () => {
           try { return (ctx.models?.list?.() ?? []).map(m => `${m.provider}/${m.id}`); } catch { return []; }
         };
         const poolEntries = (poolModels, available) => {
           const listed = new Set(available);
-          const entries = available.map(id => ({ id, available: true }));
-          for (const id of poolModels) if (!listed.has(id)) entries.push({ id, available: false });
+          const entries = available.map(id => ({
+            id, available: true, evidenceStatus: poolModels.includes(id) ? statusByModel.get(id)?.evidence_status ?? '未知' : undefined,
+          }));
+          for (const id of poolModels) if (!listed.has(id))
+            entries.push({ id, available: false, evidenceStatus: statusByModel.get(id)?.evidence_status ?? '未知' });
           return entries;
         };
         // Legacy/headless surface: no UI (or a UI that cannot host custom
@@ -2058,13 +2124,16 @@ export function installOmpExtension(pi, sdk) {
           const stale = pool.models.filter(id => !available.includes(id));
           return [
             'Model candidate pool (ADR-009). Selectable in this session:',
-            ...available.filter(id => poolSet.has(id)).map(id => `  [in pool]  ${id}`),
+            ...available.filter(id => poolSet.has(id)).map(id => `  [in pool]  ${id} · 证据 ${statusByModel.get(id)?.evidence_status ?? '未知'}${statusByModel.get(id)?.evidence_detail ? `（${statusByModel.get(id).evidence_detail}）` : ''}`),
             ...available.filter(id => !poolSet.has(id)).map(id => `  [addable]  ${id}`),
-            ...(stale.length ? ['In pool but NOT selectable in this session (kept; removable):', ...stale.map(id => `  [stale]    ${id}`)] : []),
+            ...(stale.length ? ['In pool but NOT selectable in this session (kept; removable):', ...stale.map(id => `  [stale]    ${id} · 证据 ${statusByModel.get(id)?.evidence_status ?? '未知'}`)] : []),
+            ...(modelStatus.ok ? [] : [`证据诊断不可用：${modelStatus.reason}`]),
+            '质量：未判断；检查者隔离目录/凭据：未探测。缺证据请从一手来源提交 orbit model-evidence --file FILE|-；也可在 start 显式指定 review_model。',
             'Commands:',
             '  /orbit-models add <provider/id>    (only IDs marked [addable])',
             '  /orbit-models remove <provider/id>',
             'Root 显式派发池外原生 Agent 不受此池限制。',
+            `当前 Root：${ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : '未知'}；低成本会话请自行指定 orbit omp --model <provider/id>，Orbit 不暗中切换模型。`,
           ].join('\n');
         };
         if (typeof ctx.ui?.custom !== 'function') {

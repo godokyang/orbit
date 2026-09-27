@@ -4,7 +4,7 @@ import { recoverTrailingJsonObject } from "./json-recovery";
 import { validateCheckResult } from "./check-result";
 
 // Exact key set of contracts/check-result.schema.json (additionalProperties: false).
-const RESULT = '{"verdict":"continue","reason":"all requirements verified","findings":[],"resolved_ids":[],"next_check_seconds":300}';
+const RESULT = '{"verdict":"continue","reason":"all requirements verified","findings":[],"resolved_ids":[],"next_check_seconds":300,"delivery":{"ready":true,"reason":"delivered answer is visible in the program record"}}';
 
 function recoverAndValidate(text: string): unknown {
 	const recovered = recoverTrailingJsonObject(text);
@@ -42,6 +42,6 @@ test("rejects anything that is not a contract-valid trailing object", () => {
 	assert.equal(recoverAndValidate(`prefix {"a":`), undefined, "unbalanced braces stay fail-closed");
 	assert.equal(recoverAndValidate(`prose {"x":"y"} tail`), undefined, "text after the trailing object is rejected");
 	// A trailing object with the wrong shape must not fall back to an earlier object.
-	const badRole = '{"role":"reviewer","verdict":"continue","reason":"x","findings":[],"resolved_ids":[],"next_check_seconds":300}';
+	const badRole = '{"role":"reviewer","verdict":"continue","reason":"x","findings":[],"resolved_ids":[],"next_check_seconds":300,"delivery":{"ready":true,"reason":"r"}}';
 	assert.equal(recoverAndValidate(`prose {"a":1}\n${badRole}`), undefined, "an invalid trailing object fails the result contract");
 });

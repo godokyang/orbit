@@ -214,24 +214,24 @@ module Orbit
     end
   end
 
-  # Calibrated entry-gate configuration. The built-in default below comes from
-  # the first three labeled REAL request originals (2026-09-26, pinned
-  # jev-1.13.0): positives 0.95/0.90 and 0.55/0.75, discussion negative
-  # 0.07/0.67 (execution_authorized/independent_check_benefit). Three samples
-  # are tiny: the thresholds are deliberately conservative so only clear
-  # authorization auto-starts (0.95 passes, the softer 0.55 positive stays
-  # with Root, the negative never starts). `.orbit/jev-entry.json` overrides
-  # the built-in explicitly; `.orbit/jev-disabled` still stops all outbound.
-  # A versioned model id is always required — an alias such as "jev-latest"
-  # would let a silent upstream upgrade change the calibrated thresholds.
+  # Entry gate calibration uses the first three labeled real requests plus
+  # three later short version-and-push requests: their independent-check
+  # benefit scores were 0.74, 0.72, and 0.49, yet the user explicitly judged
+  # this class too cheap for automatic Orbit review. Raising the benefit gate
+  # to 0.80 keeps these observed false positives out without matching on a
+  # filename or task wording; clear explicit Orbit requests still bypass the
+  # automatic gate. The small, related sample remains a calibration limit.
+  # `.orbit/jev-entry.json` overrides the built-in explicitly;
+  # `.orbit/jev-disabled` still stops all outbound. Only versioned model IDs
+  # can use this calibration — an alias could drift its question semantics.
   module EntryCalibration
     MODEL_PATTERN = /\Ajev-\d+(\.\d+)*(-[0-9A-Za-z.\-]+)?\z/
     THRESHOLD_QUESTIONS = %w[execution_authorized independent_check_benefit].freeze
     BUILT_IN = {
       "model" => "jev-1.13.0",
-      "thresholds" => { "execution_authorized" => 0.80, "independent_check_benefit" => 0.70 },
-      "calibrated_samples" => 3,
-      "source" => "built-in default calibrated 2026-09-26 on three labeled real requests (tiny sample; conservative)"
+      "thresholds" => { "execution_authorized" => 0.80, "independent_check_benefit" => 0.80 },
+      "calibrated_samples" => 6,
+      "source" => "built-in gate calibrated 2026-09-27 on three initial and three observed short-task requests (limited sample)"
     }.freeze
 
     def self.load(project_root)

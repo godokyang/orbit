@@ -144,8 +144,8 @@ module CliTest
       "findings" => { "gap" => { "status" => "open" } }
     ))
     text = cli("status", record.path)
-    assert(text.include?("检查状态：stale") && text.include?("下一动作：等待 Root"),
-           "open findings wait for Root when no rebind or queue is recorded")
+    assert(text.include?("检查状态：stale") && text.include?("待处理问题：开放问题 1 条"),
+           "a stale check retains its still-open finding")
     assert(!text.include?("下一动作：重新绑定工作区"), "a stale check without a workspace reason is not a rebind")
 
   end
@@ -358,7 +358,14 @@ module CliTest
       state.fetch("project_root"),
       Orbit::WorkspaceSnapshot.fingerprint(project_root: state.fetch("project_root")), record.input_digest(state)
     ]))
-    qualified = state.merge("finalization_notices" => { key => { "check" => 1, "at" => "2026-09-25T00:00:00Z" } })
+    qualified = state.merge(
+      "finalization_notices" => { key => { "check" => 1, "at" => "2026-09-25T00:00:00Z" } },
+      "completion_readiness" => {
+        "status" => "ready", "artifact_root" => state.fetch("project_root"),
+        "artifact_digest" => Orbit::WorkspaceSnapshot.fingerprint(project_root: state.fetch("project_root")),
+        "input_digest" => record.input_digest(state), "notice_key" => key
+      }
+    )
     record.save(qualified)
     accepted = JSON.parse(cli("stop", record.path, "--complete", "--json"))
     fresh = commands(record)

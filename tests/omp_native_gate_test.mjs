@@ -20,7 +20,7 @@ const project = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'orbit
 let events = {}; const sessions = [];
 const model = { provider: 'glm', id: 'x' };
 const mainAgentId = 'Main';
-const aborted = [], setStatuses = [];
+const aborted = [], setStatuses = [], warnings = [];
 let registryListener, definition, started;
 // The extension registers several handlers per event name (task gate + hub
 // observation on tool_call); keep them all and dispatch in order.
@@ -67,7 +67,7 @@ const registry = {
   setStatus: (id, status) => { setStatuses.push([id, status]); const ref = registry.get(id); if (ref) ref.status = status; return true; }
 };
 const ctx = { cwd: project, sessionManager: root.sessionManager, models: { list: () => [model] }, hasUI: true,
-  ui: { notify: () => {} } };
+  ui: { notify: (message, level) => warnings.push({ message, level }) } };
 const memberCtx = { cwd: project, sessionManager: memberSession.sessionManager, models: { list: () => [model] }, hasUI: true,
   ui: { notify: () => {} } };
 const pi = { zod: z, registerTool: tool => { definition = tool; },
@@ -109,10 +109,14 @@ try {
   installOmpExtension(pi, sdk);
   await emit("session_start", {}, ctx);
 
-  // 1. Fail-closed before Orbit start: task dispatch is refused.
+  // A verified Root without an active Orbit task may use native OMP task.
+  // The call remains unsupervised and must not be registered as an Orbit member.
   const unbound = await emit("tool_call", { toolName: "task", toolCallId: "pre-start", input: { task: "x" } }, ctx);
-  assert.equal(unbound.block, true, 'task before orbit start must be blocked');
-  assert.match(unbound.reason, /Start Orbit/);
+  assert.equal(unbound, undefined, 'unbound native delegation stays available');
+  assert.equal(warnings.filter(item => item.level === 'warning' && item.message.includes('未绑定 Orbit')).length, 1,
+    'the Root sees that this native task is not independently checked by Orbit');
+  await emit("tool_call", { toolName: "task", toolCallId: "second-unbound", input: { task: "y" } }, ctx);
+  assert.equal(warnings.length, 1, 'the unsupervised warning is shown once per session');
 
   // 1b. Actions without task must name the exact handoff, not invite inbox guessing.
   await assert.rejects(
@@ -370,8 +374,8 @@ try {
   //    Pending names live until the registered window or a refusal.
   await emit("tool_call", { toolName: 'task', toolCallId: 'call-4', input: { task: 'fourth' } }, ctx);
 
-  // 7. Fail closed when the registry event surface is unavailable: without
-  //    the gate, registration is impossible, so dispatch must be refused.
+  // 7. A second host instance without task ownership cannot dispatch into
+  // the first instance's active Orbit task; missing registry support stays blocked.
   const brokenEvents = {};
   const noChangeRegistry = { list: () => [rootRef], get: id => registry.get(id), setStatus: () => true };
   const brokenPi = { zod: z, registerTool: () => {}, registerCommand: () => {}, on: (n, h) => { (brokenEvents[n] ||= []).push(h); } };
@@ -386,8 +390,8 @@ try {
   };
   await brokenEmit('session_start', {}, ctx);
   const gated = await brokenEmit('tool_call', { toolName: 'task', toolCallId: 'broken', input: { task: 'x' } }, ctx);
-  assert.equal(gated.block, true, 'task dispatch must fail closed without the registration gate');
-  assert.match(gated.reason, /registration gate is unavailable/);
+  assert.equal(gated.block, true, 'an active task owned by another host cannot accept dispatch');
+  assert.match(gated.reason, /active Orbit task is not owned/);
   const unknownCaller = await emit("tool_call", { toolName: 'task', toolCallId: 'unknown', input: { task: 'x' } },
     { cwd: project, sessionManager: { getSessionId: () => 'ghost-session' }, models: { list: () => [model] }, hasUI: true, ui: { notify: () => {} } });
   assert.equal(unknownCaller.block, true, 'unresolvable caller must not dispatch');
@@ -573,6 +577,17 @@ try {
     assert.ok(block.includes((await taskState()).id), 'the block must carry the task id');
     const activeStatus = statusCalls.at(-1);
     assert.equal(activeStatus?.[0], 'orbit', 'an active task refreshes the OMP status line');
+    // A manual check starts after Root's completed reply; the durable record
+    // has an in-flight observation but no longer has next_check_manual=true.
+    // Do not invite another check while the independent reviewer is running.
+    await setState({ check_observations: { final: { status: 'in_flight', manual: true } },
+      next_check_manual: false, next_check_trigger: 'manual_check',
+      completion_readiness: { status: 'waiting', reason: '尚无当前版本的有效终检' } });
+    const checkingText = await statusTurn('review in progress');
+    assert.match(statusCalls.at(-1)?.[1], /独立检查进行中/, 'status bar shows the live review rather than asking for another check');
+    assert.match(checkingText, /等待独立检查结果/, 'Root gets an actionable wait instruction');
+    assert.doesNotMatch(checkingText, /调用 Orbit action=check/, 'in-flight review must not request a duplicate manual check');
+    await setState({ check_observations: {}, next_check_trigger: 'timer' });
     // A record whose control socket is not this host's is what an OMP restart
     // leaves: shown as unowned, never controlled (the tool would refuse it).
     const boundConnection = (await taskState()).connection;
@@ -713,8 +728,8 @@ process.stdout.write(JSON.stringify({ task_directory: dir, status: 'starting' })
       const started2 = await tool({ action: 'start', message_id: 'original' }, startCtx);
       newDir = started2.task_directory;
       assert.notEqual(newDir, started.task_directory, 'a successful start creates a new task record');
-      assert.ok(statusCalls.some(([key, value]) => key === 'orbit' && String(value).includes('执行中')),
-        'a successful start must refresh the status line to the new task in the same turn');
+      assert.ok(statusCalls.some(([key, value]) => key === 'orbit' && String(value).includes('任务尚未完成')),
+        'a successful start must refresh the status line to an active, not-yet-complete task in the same turn');
       assert.ok(!statusCalls.some(([key, value]) => key === 'orbit' && String(value).includes('已暂停')),
         'the previous paused label must not survive a successful start');
 

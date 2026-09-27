@@ -90,11 +90,11 @@ module CheckerModelSelectorTest
     $stderr = original
   end
 
-  def entry(model, cost_band: nil)
+  def entry(model, cost_band: nil, valid_until: "2026-12-01T00:00:00Z")
     provider, id = model.split("/", 2)
     value = {
       "provider" => provider, "model" => id, "reasoning" => "default", "status" => "evidence",
-      "retrieved_at" => "2026-09-01T00:00:00Z", "valid_until" => "2026-12-01T00:00:00Z",
+      "retrieved_at" => "2026-09-01T00:00:00Z", "valid_until" => valid_until,
       "sources" => ["https://example.com/facts"],
       "metrics" => { "quality_reasoning" => { "value" => 1, "unit" => "bool", "basis" => "local sample" } }
     }
@@ -199,6 +199,59 @@ module CheckerModelSelectorTest
            "JEV is not called without evidence; an explicit model remains available")
   end
 
+
+  # ADR-009 2026-09-27 supplement: undecided errors and the read-only status
+  # listing report per-candidate facts that were actually checked — the
+  # recurring second-task failure was evidence for a near-variant identity
+  # collapsed into one unactionable "no evidence".
+  def undecided_error_lists_precise_evidence_reasons_per_identity
+    advisor = FakeAdvisor.new({})
+    near_variant = entry("kimi-code/k3")
+    error = assert_raises do
+      selector(pool: ["kimi-code/k3-256k"], catalog: catalog_for(["kimi-code/k3-256k"]),
+               entries: [near_variant], advisor: advisor, probe: FakeProbe.new(["kimi-code/k3-256k"]))
+        .select(explicit: nil, instruction: "build it")
+    end
+    assert(error.message.include?("kimi-code/k3-256k: absent") &&
+           error.message.include?("the cache holds kimi-code/k3 under provider kimi-code"),
+           "the absent candidate names its exact identity and the near variant actually held: #{error.message}")
+    assert(error.message.include?("orbit model-evidence --file FILE|-") &&
+           error.message.include?("--review-model provider/id"),
+           "both recovery paths are stated")
+    assert(advisor.calls.zero?, "no JEV call without evidence")
+  end
+
+  def quality_line_failure_names_each_score
+    advisor = FakeAdvisor.new({ "a/one" => { "quality" => 0.42, "time" => 0.9 } })
+    error = assert_raises do
+      selector(pool: ["a/one"], catalog: catalog_for(["a/one"]), entries: [entry("a/one")],
+               advisor: advisor, probe: FakeProbe.new(["a/one"]))
+        .select(explicit: nil, instruction: "build it")
+    end
+    assert(error.message.include?("a/one scored 0.42") && error.message.include?("threshold 0.55"),
+           "the below-threshold score is named per candidate: #{error.message}")
+  end
+
+  def candidate_statuses_are_read_only_and_precise
+    advisor = FakeAdvisor.new({})
+    probe = FakeProbe.new([])
+    built = selector(pool: ["a/valid", "a/stale", "a/absent"], catalog: nil,
+                     entries: [entry("a/valid"), entry("a/stale", valid_until: "2026-09-20T00:00:00Z")],
+                     advisor: advisor, probe: probe)
+    report = built.candidate_statuses
+    by_model = report["candidates"].to_h { |candidate| [candidate["model"], candidate] }
+    assert(report["session_catalog"] == "unavailable" && by_model["a/valid"]["in_session"].nil?,
+           "an unavailable catalog leaves membership unchecked, not guessed")
+    assert(by_model["a/valid"]["evidence_status"] == "valid" &&
+           by_model["a/stale"]["evidence_status"] == "expired" &&
+           by_model["a/stale"]["evidence_detail"].to_s.include?("2026-09-20") &&
+           by_model["a/absent"]["evidence_status"] == "absent",
+           "per-candidate evidence facts are precise")
+    assert(report["candidates"].all? { |candidate| candidate["quality"] == "not_judged" && candidate["isolated_probe"] == "not_probed" },
+           "listing never judges or probes; unknown candidates stay unprobed")
+    assert(advisor.calls.zero? && probe.calls.zero?, "the status listing is side-effect free")
+  end
+
   def catalog_for(available)
     { "current" => "session/default", "available" => available,
       "families" => available.to_h { |model| [model, "fam-#{model.split('/').first}"] }
@@ -212,7 +265,10 @@ module CheckerModelSelectorTest
        unchanged_input_reuses_the_recorded_decision
        changed_pool_reselects_before_the_next_check
        end_to_end_time_orders_the_qualified_candidates
-       no_valid_evidence_is_undecided_not_a_silent_default].each do |test|
+       no_valid_evidence_is_undecided_not_a_silent_default
+       undecided_error_lists_precise_evidence_reasons_per_identity
+       quality_line_failure_names_each_score
+       candidate_statuses_are_read_only_and_precise].each do |test|
       send(test)
       puts "CHECKER_MODEL_SELECTOR_TEST_PASS #{test}"
     end

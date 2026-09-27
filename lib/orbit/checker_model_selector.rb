@@ -24,14 +24,12 @@ module Orbit
   #     resolvability and ordered by time, coarse cost and family.
   #
   # Missing evidence, an unavailable service or nothing qualifying leave the
-  # decision undecided (raise) instead of silently using a pool-outside default.
-  # Credential/catalog resolvability is never quality.
-  #
-  # A cheap `signature` (pool contents, session catalog, validated evidence and
-  # the effective instruction) lets a caller reuse the previous decision without
-  # another JEV call when nothing that can change it has changed. A changed pool
-  # still affects the next check; an in-flight check never changes model (the
-  # caller only reselects before starting a new one).
+  # decision undecided (raise) instead of silently using a pool-outside
+  # default; undecided errors carry per-candidate diagnostics that were
+  # actually checked (ADR-009 2026-09-27 supplement). Credential/catalog
+  # resolvability is never quality. `candidate_statuses` exposes the same
+  # read-only per-candidate facts for the candidate UX without probing or
+  # judging anything.
   class CheckerModelSelector
     # Startup argument errors keep the same class family the CLI already
     # handled, and every message ends with the explicit-model instruction.
@@ -42,6 +40,9 @@ module Orbit
     TIME_MEDIUM_THRESHOLD = 0.33
     MAX_SOURCES = 3
     MAX_USAGE_BYTES = 512
+    # Per-candidate diagnostics list at most this many models; a larger pool
+    # is summarized with "+N more" instead of burying the next-step text.
+    MAX_DIAGNOSTIC_MODELS = 8
 
     def initialize(connection:, project_root:, pool: ModelCandidatePool.new,
                    evidence_cache: ModelEvidenceCache.new, advisor: nil, probe: nil,
@@ -73,6 +74,68 @@ module Orbit
       return empty_pool_selection(prepared, selected_for) if prepared["pool_empty"]
 
       auto_select(prepared, selected_for)
+    end
+
+    # Read-only, side-effect-free per-candidate diagnostics for the candidate
+    # UX (`orbit model-status`, the /orbit-models surface and undecided
+    # errors): pool membership in the current session catalog and the cached
+    # evidence status per exact identity. It never probes the isolated
+    # checker profile and never calls JEV — candidates are only probed and
+    # judged when a selection is actually attempted — so unjudged fields are
+    # reported as "not_judged"/"not_probed" instead of a guess. An unreadable
+    # cache is reported as such, never as "absent".
+    def candidate_statuses
+      pool = @pool.read
+      entries = begin
+        @evidence_cache.stored_entries
+      rescue StandardError
+        nil
+      end
+      now = @clock.call
+      catalog = if @connection.nil?
+                  nil
+                else
+                  begin
+                    @connection.model_catalog
+                  rescue StandardError
+                    nil
+                  end
+                end
+      available = catalog.is_a?(Hash) ? catalog["available"] : nil
+      candidates = pool.map do |model|
+        evidence =
+          if entries.nil?
+            { "status" => "unknown", "detail" => "the evidence cache could not be read" }
+          else
+            CheckerModelSelection.evidence_status(model: model, entries: entries, now: now)
+          end
+        entry = {
+          "model" => model,
+          "in_session" => available.nil? ? nil : Array(available).include?(model),
+          "evidence_status" => evidence["status"],
+          "quality" => "not_judged",
+          "isolated_probe" => "not_probed"
+        }
+        entry["evidence_detail"] = evidence["detail"] if evidence["detail"]
+        entry
+      end
+      report = {
+        "pool_empty" => pool.empty?,
+        "session_catalog" => @connection.nil? ? "not_provided" : (catalog.is_a?(Hash) ? "available" : "unavailable"),
+        "evidence_cache" => entries.nil? ? "unavailable" : "available",
+        "candidates" => candidates,
+        "generated_at" => now.utc.iso8601
+      }
+      if pool.empty?
+        report["default_model"] = begin
+          @connection.configured_model.to_s.strip
+        rescue StandardError
+          ""
+        end
+      end
+      report
+    rescue ModelCandidatePool::Error
+      raise Error, "the candidate pool could not be read"
     end
 
     private
@@ -142,12 +205,18 @@ module Orbit
       entries = begin
         @evidence_cache.stored_entries
       rescue StandardError
-        []
+        nil
       end
+      # nil (unreadable) stays distinguishable from [] (empty): diagnostics
+      # must report an unreadable cache as such, never as "absent" evidence.
       evidence = CheckerModelSelection.cached_evidence(models: models, entries: entries, now: @clock.call)
       {
         "pool" => pool, "pool_empty" => false, "catalog" => catalog, "models" => models,
         "evidence" => evidence, "default_model" => nil, "instruction" => instruction.to_s,
+        # Raw entries feed the undecided diagnostics (absent/expired/unavailable
+        # per exact identity); the judged `evidence` above keeps only valid
+        # entries, which cannot distinguish why a candidate has none.
+        "entries" => entries,
         "signature" => signature(pool, catalog, evidence, instruction, nil)
       }
     rescue ModelCandidatePool::Error
@@ -193,17 +262,35 @@ module Orbit
 
     def auto_select(prepared, selected_for)
       catalog = prepared["catalog"]
-      raise undecided("the OMP session model catalog is unavailable") unless catalog.is_a?(Hash)
-      raise undecided("no candidate pool model is available in this session") if prepared["models"].empty?
+      unless catalog.is_a?(Hash)
+        raise undecided("the OMP session model catalog is unavailable",
+                        detail: ["pool candidates #{listed(prepared['pool'])} were not checked against the session catalog"])
+      end
+      if prepared["models"].empty?
+        raise undecided("no candidate pool model is available in this session",
+                        detail: ["not in this session catalog: #{listed(prepared['pool'])}"])
+      end
 
       evidence = prepared["evidence"]
       judged = prepared["models"].select { |candidate| evidence.key?(candidate) }
       if judged.empty?
-        raise undecided("no candidate pool model has valid cached quality evidence (#{prepared['models'].join(', ')})")
+        if prepared["entries"].nil?
+          raise undecided("the model evidence cache could not be read",
+                          detail: ["candidates #{listed(prepared['models'])} were not evidence-checked"])
+        end
+        # Per-candidate precise reasons instead of one collapsed "no
+        # evidence": absent for the exact identity (with the near-variant
+        # identities the cache actually holds), expired, reported
+        # unavailable, or structurally invalid.
+        raise undecided("no candidate pool model has valid cached quality evidence",
+                        detail: evidence_lines(prepared["models"], prepared["entries"]),
+                        extra: "submit first-hand facts with `orbit model-evidence --file FILE|-` for the exact identities above")
       end
 
       advisor = resolved_advisor
-      raise undecided("the JEV quality judgment is unavailable") if advisor.nil?
+      raise undecided("the JEV quality judgment is unavailable",
+                      detail: ["evidence-backed candidates ready: #{listed(judged)}"]) if advisor.nil?
+
 
       started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
       judgment = begin
@@ -219,7 +306,10 @@ module Orbit
       scores = judgment.fetch("scores")
       quality = scores.select { |_candidate, score| score["quality"].to_f >= QUALITY_THRESHOLD }
                       .to_h { |candidate, score| [candidate, { "verdict" => "qualified", "source" => "jev:checker_quality", "score" => score["quality"] }] }
-      raise undecided("no candidate pool model passed the JEV quality line") if quality.empty?
+      if quality.empty?
+        raise undecided("no candidate pool model passed the JEV quality line",
+                        detail: judged.map { |candidate| "#{candidate} scored #{scores.dig(candidate, 'quality')} (threshold #{QUALITY_THRESHOLD})" })
+      end
 
       time_cost = judged.each_with_object({}) do |candidate, out|
         tiers = { "time" => time_tier(scores.dig(candidate, "time")) }
@@ -228,15 +318,20 @@ module Orbit
         out[candidate] = tiers
       end
 
-      resolvable = begin
-        @probe.call(quality.keys).fetch("resolvable")
+      availability = begin
+        @probe.call(quality.keys)
       rescue StandardError => error
-        raise undecided("qualified pool models could not be checked in the isolated profile (#{error.class})")
+        raise undecided("qualified pool models could not be checked in the isolated profile (#{error.class})",
+                        detail: ["quality-qualified: #{listed(quality.keys)}"])
       end
+      resolvable = availability.fetch("resolvable")
       decision = CheckerModelSelection.choose(
         pool: prepared["pool"], catalog: catalog, quality: quality, resolvable: resolvable, time_cost: time_cost
       )
-      raise undecided("no checker model could be selected from the candidate pool (#{decision['reason']})") if decision["model"].nil?
+      if decision["model"].nil?
+        raise undecided("no checker model could be selected from the candidate pool (#{decision['reason']})",
+                        detail: probe_lines(availability, quality.keys))
+      end
 
       chosen = decision["model"]
       selected_evidence = evidence.fetch(chosen)
@@ -299,8 +394,47 @@ module Orbit
       kept
     end
 
-    def undecided(reason)
-      Error.new("#{reason}; pass --review-model provider/id to choose explicitly")
+    # `detail` lines and `extra` next steps keep the undecided error
+    # actionable: per-candidate reasons that were actually checked, the
+    # evidence submission path when evidence is the blocker, and the explicit
+    # model instruction every undecided error ends with (ADR-009 2026-09-27
+    # supplement). One line: the message reaches Root through the start error,
+    # the blocked-state reason and checker notifications.
+    def undecided(reason, detail: [], extra: nil)
+      parts = [reason]
+      parts << "(#{detail.join('; ')})" unless detail.empty?
+      parts << extra if extra
+      parts << "pass --review-model provider/id to choose explicitly"
+      Error.new(parts.join("; "))
+    end
+
+    # Candidate lists in diagnostics are bounded; "+N more" keeps a large pool
+    # from burying the instruction.
+    def listed(models, cap = MAX_DIAGNOSTIC_MODELS)
+      items = Array(models).first(cap).map(&:to_s)
+      overflow = Array(models).length - items.length
+      overflow.positive? ? "#{items.join(', ')} (+#{overflow} more)" : items.join(", ")
+    end
+
+    def evidence_lines(models, entries)
+      now = @clock.call
+      lines = Array(models).first(MAX_DIAGNOSTIC_MODELS).map do |model|
+        status = CheckerModelSelection.evidence_status(model: model, entries: entries, now: now)
+        detail = status["detail"].to_s.strip
+        detail.empty? ? "#{model}: #{status['status']}" : "#{model}: #{status['status']} (#{detail})"
+      end
+      overflow = Array(models).length - lines.length
+      lines << "+#{overflow} more" if overflow.positive?
+      lines
+    end
+
+    def probe_lines(availability, models)
+      reasons = Array(availability.is_a?(Hash) ? availability["unresolvable"] : nil)
+                  .each_with_object({}) { |item, out| out[item["model"]] = item["reason"].to_s if item.is_a?(Hash) && !item["reason"].to_s.empty? }
+      Array(models).first(MAX_DIAGNOSTIC_MODELS).map do |model|
+        reason = reasons[model]
+        reason ? "#{model}: not resolvable in the isolated checker profile (#{reason.slice(0, 200)})" : "#{model}: resolvable"
+      end
     end
 
     def now_iso

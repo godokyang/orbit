@@ -97,8 +97,10 @@ module OmpCheckRunnerTest
       result = {
         "verdict" => "correct", "reason" => "empty sum is undefined",
         "findings" => [{ "id" => "sum", "requirement" => "return 0", "evidence" => "src/sum.js:2", "action" => "return 0" }],
-        "resolved_ids" => [], "next_check_seconds" => mode == "invalid" ? 0 : 30
+        "resolved_ids" => [], "next_check_seconds" => mode == "invalid" ? 0 : 30,
+        "delivery" => { "ready" => false, "reason" => "final answer is not visible in the program record" }
       }
+      result["delivery"] = { "ready" => "yes", "reason" => "" } if mode == "invalid_delivery"
       File.write(config.fetch("out"), JSON.generate(
         "ok" => true, "result" => result, "model" => "zhipu-coding-plan/glm-5.2",
         "usage" => [{ "input" => 3140, "output" => 291, "cacheRead" => 2944 }],
@@ -151,7 +153,8 @@ module OmpCheckRunnerTest
       argv = JSON.parse(File.read(File.join(output, "argv.json")))
       child_env = JSON.parse(File.read(File.join(output, "child-env.json")))
       run = JSON.parse(File.read(File.join(output, "run.json")))
-      assert(result["verdict"] == "correct" && result["findings"].first["id"] == "sum", "schema-valid result is returned")
+      assert(result["delivery"] == { "ready" => false, "reason" => "final answer is not visible in the program record" },
+             "the structured delivery judgment is returned verbatim for the completion gate")
       assert(prompt.include?("Make sum return 0 for an empty array.") && prompt.include?("adjudicator"),
              "the prompt is the adjudicator session prompt, not a fixture stub")
       assert_omp_prompt(prompt)
@@ -183,6 +186,11 @@ module OmpCheckRunnerTest
     assert(prompt.include?("did it only partly") && prompt.include?("verifiable") &&
            prompt.include?("does not reopen") && prompt.include?("not the artifact"),
            "the retained check rules stay in the prompt")
+    assert(prompt.include?("## Delivery readiness") &&
+           prompt.include?("delivery.ready states whether the task's actual deliverable is visible") &&
+           prompt.include?("never verification") &&
+           prompt.include?("root.status is idle and root.last_turn_status is completed"),
+           "the prompt carries the structured delivery-readiness rules, including text-only answers and git facts")
   end
 
   def reviewer_prompt_uses_the_same_independent_session_facts
@@ -217,6 +225,26 @@ module OmpCheckRunnerTest
         raised = error.message.include?("next_check_seconds")
       end
       assert(raised, "an invalid check result is not returned as a pass")
+    ensure
+      ENV.delete("ORBIT_FAKE_CHECK")
+      check.close
+      FileUtils.remove_entry(root)
+    end
+
+    root, snapshot, output = fixture
+    check = runner(write_fake(root))
+    ENV["ORBIT_FAKE_CHECK"] = "invalid_delivery"
+    begin
+      check.start(directory: snapshot, inputs: inputs, context: {}, output_dir: output, role: "reviewer")
+      raised = false
+      begin
+        wait_result(check)
+      rescue Orbit::CheckRunner::Error => error
+        raised = error.message.include?("delivery")
+      end
+      assert(raised, "a malformed delivery judgment is a contract failure, never an implicit ready")
+      assert(check.failure_kind == "invalid_result" && check.failure_basis == "structural",
+             "a malformed delivery is invalid_result/structural")
     ensure
       ENV.delete("ORBIT_FAKE_CHECK")
       check.close

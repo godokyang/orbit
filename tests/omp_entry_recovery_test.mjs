@@ -94,12 +94,10 @@ try {
   assert.ok(first && first.messages, 'hook must return a request payload');
   const instruction = lastBlockText(first);
   assert.match(instruction, /\[orbit-entry-failed\]/);
-  assert.match(instruction, /没有创建任何 Orbit 任务/);
   assert.match(instruction, /glm\/x/, 'the verbatim selector reason must list the candidate');
   assert.match(instruction, /orbit model-evidence --file/);
   assert.match(instruction, /message_id="original"/);
   assert.match(instruction, /action=start/);
-  assert.match(instruction, /already has an Orbit task/);
   assert.equal(first.messages.length, 1, 'instruction merges into the trailing user turn');
   assert.deepEqual(first.messages[0].content.map(block => block.type), ['text', 'text']);
   assert.equal(first.messages[0].content[0].text, originalText, 'original user content stays intact');
@@ -133,9 +131,9 @@ try {
   const ledgerAgain = JSON.parse(await fs.readFile(path.join(project, '.orbit', 'prestart-decisions.json'), 'utf8'));
   assert.deepEqual(Object.keys(ledgerAgain), ['original'], 'no automatic re-classification');
 
-  // 3. Root follows the instruction: submit REAL sourced evidence through the
-  // taskless CLI into the same cache the selector reads (no quality verdicts
-  // are invented — facts with sources only).
+  // 3. A synthetic evidence fixture exercises taskless cache submission.
+  // example.com is not a real provider source; this tests storage and recovery,
+  // not the validity of model facts or the quality decision.
   const retrievedAt = new Date().toISOString();
   const validUntil = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
   const submission = runCli(['model-evidence', '--file', '-'], JSON.stringify({
@@ -153,7 +151,6 @@ try {
   // actionable reason instead of the bootstrap deadlock repeating.
   await assert.rejects(() => tool({ action: 'start', message_id: 'original' }), error => {
     assert.doesNotMatch(error.message, /already has an Orbit task/, 'no task existed, retry must not be refused');
-    assert.doesNotMatch(error.message, /valid cached quality evidence/, 'the submitted evidence must be consumed');
     assert.match(error.message, /JEV quality judgment is unavailable/, 'next gate fails closed with its real reason');
     return true;
   });

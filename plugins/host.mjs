@@ -11,7 +11,7 @@ holdReleaseLease();
 const cli = fileURLToPath(new URL('../scripts/orbit', import.meta.url));
 const terminal = new Set(['complete', 'paused', 'needs_user', 'failed', 'stop_unconfirmed']);
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
-const guidance = 'Continue the authorized implementation; do simple local edits yourself. When your work is ready, report results and END YOUR TURN — do not sleep or poll waiting for Orbit complete: the independent checker needs your turn to finish and will wake this same session if corrections are needed. If you requested a final check, end the turn and wait for the finalization_notice or corrections; do not stop the task just to deliver, unless the user explicitly asked to interrupt. Member results also return automatically. Later status/check/amend/dispute/stop calls must pass task: the task_directory returned by start; never write .orbit/inbox manually.';
+const guidance = 'Continue the authorized implementation; do simple local edits yourself. Once the artifact is verified, call Orbit action=check with task: the task_directory returned by start to request the manual final check. Give the actual delivery result in your visible reply and END YOUR TURN. Orbit waits for that completed reply before starting the manual final check; automatic checks never issue a finalization_notice. Wait for that notice or corrections without sleeping or polling. On a valid notice call stop with intent=complete, then finish your reply; do not stop merely to deliver unless the user explicitly asked to interrupt. Member results return automatically. Later status/check/amend/dispute/stop calls must pass the task_directory as task; never write .orbit/inbox manually.';
 
 async function run(args, cwd, input = '') {
   return new Promise((resolve, reject) => {
@@ -32,12 +32,13 @@ async function run(args, cwd, input = '') {
   });
 }
 
-export const toolDescription = 'Start Orbit only for work that benefits from independent checks: multi-step changes, real parallel work surfaces, or fixes needing objective review. Simple single-file or local edits: just do them yourself, without dispatching members. If the user explicitly asks to use Orbit, still start Orbit for those small tasks — but do the work yourself and let the checker verify; no members. context identifies this exact session; start preserves original user input and named basis and returns a task_directory. Keep that task_directory: for status/check/amend/dispute/stop pass it back as task: <task_directory returned by start> to this Orbit tool — never write .orbit/inbox manually. Root dispatches members only through the native task tool (one level) when there is a genuine independent work surface — Root decides; JEV only advises, never blocks. Continue working; member results and corrections return automatically. When your work is ready, report results and end your turn; if you requested a final check, end the turn and wait for the Orbit finalization_notice or corrections — do not stop the task just to deliver, do not poll. For a normal delivery after that notice, call stop with intent=complete (the default) and finish the turn normally: the Orbit completion gate adjudicates that intent, and when the current version has no valid finalization_notice it refuses with the required next action instead of quietly pausing the task. Reserve intent=pause for a user-requested interruption. An accepted stop is queued and completed after your turn, so the final summary is fully delivered. Do not start for discussion. Root is never replaced.';
+export const toolDescription = 'Start Orbit only for work that benefits from independent checks: multi-step changes, real parallel work surfaces, or fixes needing objective review. Simple single-file or local edits: just do them yourself, without dispatching members. If the user explicitly asks to use Orbit, still start Orbit for those small tasks — but do the work yourself and let the checker verify; no members. context identifies this exact session and reports the remembered checker model for this session, if any; start preserves original user input and named basis and returns a task_directory. start with review_model plus remember_review_model=true keeps that checker model for the rest of this OMP session (later starts reuse it, still re-validated each start; forget-review-model clears it; never inherited by another session). Keep that task_directory: for status/check/amend/dispute/stop pass it back as task: <task_directory returned by start> to this Orbit tool — never write .orbit/inbox manually. Root dispatches members only through the native task tool (one level) when there is a genuine independent work surface — Root decides, JEV only advises, never blocks. Continue working; member results and corrections return automatically. Once work is verified, call action=check with task for a manual final check, include the actual delivery result in your visible final reply and end your turn. Orbit waits for that completed reply before checking; automatic checks do not send finalization_notice. Wait for the notice or corrections without polling. After a valid notice, call stop with intent=complete (the default) and finish the turn normally: the completion gate adjudicates that intent and refuses with the next action when no current notice exists. Reserve intent=pause for a user-requested interruption. An accepted stop is queued and completed after your turn, so the final summary is fully delivered. Do not start for discussion. Root is never replaced.';
 export const toolArgs = z => ({
-        action: z.enum(['context', 'start', 'status', 'check', 'amend', 'dispute', 'stop', 'review-model']),
+        action: z.enum(['context', 'start', 'status', 'check', 'amend', 'dispute', 'stop', 'review-model', 'forget-review-model']),
         task: z.string().optional().describe('Required for status/check/amend/dispute/stop: the exact task_directory string returned by action=start. Never write .orbit/inbox manually.'),
         basis: z.array(z.string()).optional(), message_id: z.string().optional(),
         review_model: z.string().optional(),
+        remember_review_model: z.boolean().optional().describe('start only, together with review_model: remember that checker model for the rest of this OMP session. Later starts without review_model reuse it (re-validated, credentials re-probed on every start) until action=forget-review-model clears it. A start without review_model never changes or creates the remembered choice.'),
         intent: z.enum(['complete', 'pause']).optional().describe('stop only. complete (default) is the deliberate post-finalization completion hand-off, adjudicated by the Ruby completion gate; pause is an explicit user interruption and takes the ordinary pause path.'),
         text: z.string().optional(), check_in: z.number().int().positive().optional()
       });
@@ -46,6 +47,13 @@ export const toolArgs = z => ({
 // supplies only its real session operations and native invocation identity.
 export function createOrbitHost({ provider, project, dispatch, bind, reset }) {
   const tasks = new Map();
+  // Session-remembered checker model (user opt-in via start with
+  // remember_review_model): lives ONLY in this plugin process's memory,
+  // keyed by the bound session id, so it never crosses OMP processes or
+  // sessions and dies with this host. A remembered model is re-validated by
+  // the CLI on every start that uses it (explicit --review-model probing),
+  // and pool changes never overwrite it because explicit selection wins.
+  const reviewModels = new Map();
   let host, socket, setup, closing = false;
   async function listen() {
     if (setup) return setup;
@@ -93,20 +101,60 @@ export function createOrbitHost({ provider, project, dispatch, bind, reset }) {
         if (closing) throw new Error('Agent host is closing');
         const id = await bind(context);
         await listen();
-        if (a.action === 'context') return JSON.stringify({ ready: true, provider, project, thread_id: id, task_directory: tasks.get(id)?.task_directory || null });
+        if (a.action === 'context') return JSON.stringify({ ready: true, provider, project, thread_id: id, task_directory: tasks.get(id)?.task_directory || null, session_review_model: reviewModels.get(id) || null });
+        if (a.action === 'forget-review-model') {
+          const previous = reviewModels.get(id) || null;
+          reviewModels.delete(id);
+          return JSON.stringify({ status: 'cleared', session_review_model: null, previously: previous });
+        }
         if (a.action === 'start') {
+          if (a.remember_review_model === true && (typeof a.review_model !== 'string' || !a.review_model.trim()))
+            throw new Error('remember_review_model requires review_model: <provider/id> (it remembers that checker model for this OMP session)');
           const previous = tasks.get(id);
-          if (previous && !terminal.has((await ownedTask(previous.task_directory, id)).status)) return JSON.stringify(previous);
+          if (previous) {
+            const state = await ownedTask(previous.task_directory, id);
+            if (!terminal.has(state.status)) {
+              if (a.review_model) {
+                const selected = state.review?.model;
+                if (a.review_model.trim() !== selected)
+                  throw new Error(`Task already active with checker ${selected || 'unknown'}; use action 'review-model' on that task to change its checker`);
+                // The pre-start hook can create an explicit Orbit task before
+                // Root gets to call start with remember_review_model. Accept
+                // the opt-in only for the model actually selected by that
+                // task, rather than silently returning without pinning it.
+                if (a.remember_review_model === true) reviewModels.set(id, selected);
+              }
+              return JSON.stringify({ ...previous, session_review_model: reviewModels.get(id) || null,
+                existing_task: true });
+            }
+          }
           reset(id);
           const users = (await dispatch({ method: 'messages', session: id })).filter(m => !m.internal);
           const original = a.message_id ? users.find(m => m.id === a.message_id || m.item_id === a.message_id) : users.at(-1);
           if (!original) throw new Error('No original native user message found');
           const args = ['start', '--provider', provider, '--project', project, '--thread', id, '--socket', socket, '--message-id', original.id];
-          if (a.review_model) args.push('--review-model', a.review_model);
+          // A remembered model reaches the CLI as an ordinary explicit
+          // --review-model, so every start re-validates the provider/id and
+          // re-probes the isolated checker credentials; a plain explicit
+          // review_model (no remember flag) is a one-off and never changes
+          // the remembered choice.
+          const remembered = !a.review_model && reviewModels.get(id);
+          if (a.review_model || remembered) args.push('--review-model', (a.review_model || remembered).trim());
           if (a.entry_file) args.push('--entry-file', a.entry_file);
           if (a.check_in) args.push('--check-in', String(a.check_in));
           for (const file of a.basis || []) args.push('--basis', path.resolve(project, file));
-          const result = { ...await run(args, project), next_action: guidance };
+          let result;
+          try {
+            result = { ...await run(args, project), next_action: guidance };
+          } catch (error) {
+            if (remembered) {
+              throw new Error(`${error.message}; ${remembered} is the checker model remembered for this OMP session — retry start with an explicit review_model for a one-off choice, or clear it with action 'forget-review-model'`);
+            }
+            throw error;
+          }
+          if (a.remember_review_model === true) reviewModels.set(id, a.review_model.trim());
+          if (reviewModels.has(id)) result.session_review_model = reviewModels.get(id);
+          if (remembered) result.remembered_review_model = true;
           tasks.set(id, result);
           return JSON.stringify(result);
         }

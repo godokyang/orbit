@@ -513,10 +513,12 @@ module OrbitInstall
       if executable("omp")
         begin
           detected = Orbit::OmpEntry.detected_version
-          if detected == Orbit::OmpEntry::PINNED_OMP_VERSION
-            puts "OMP CLI: #{detected} (verified range)."
+          if !Orbit::OmpEntry.supported_version?(detected)
+            warn "OMP CLI #{detected} is below the minimum #{Orbit::OmpEntry::MINIMUM_OMP_VERSION}; orbit omp will refuse to start."
+          elsif detected == Orbit::OmpEntry::MINIMUM_OMP_VERSION
+            puts "OMP CLI: #{detected} (minimum verified release)."
           else
-            warn "OMP CLI #{detected} is outside the verified range (#{Orbit::OmpEntry::PINNED_OMP_VERSION}); orbit omp will refuse to start."
+            puts "OMP CLI: #{detected} (accepted by the version gate; newer runtime paths are not separately verified)."
           end
         rescue StandardError => error
           warn "OMP CLI version could not be verified: #{error.message}"

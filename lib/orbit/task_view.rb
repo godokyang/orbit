@@ -286,6 +286,9 @@ module Orbit
         lines << "独立检查未标注角色：未知"
       end
       [
+        ["入口 JEV", state["entry"] ? jev_stage_usage(state, "jev_entry", state.dig("entry", "trace", "usage")) : [0, 0]],
+        ["检查选模 JEV", state.dig("review", "selection", "source") == "candidate_pool" ||
+          state.dig("usage", "jev_checker_selection") ? jev_stage_usage(state, "jev_checker_selection", state.dig("review", "selection", "usage")) : [0, 0]],
         ["JEV 第一阶段", jev_stage_usage(state, "jev_stage1", state.dig("jev", "usage"))],
         ["JEV 委派第二阶段", jev_stage_usage(state, "jev_stage2", state.dig("jev", "delegation", "usage"))]
       ].each do |label, pair|
@@ -299,6 +302,8 @@ module Orbit
           lines << "#{label}：未知"
         end
       end
+      lines << "Root 本任务：未知（会话累计不能归属本次任务）"
+      lines << "OMP 执行成员：#{Array(state['members']).empty? ? '无（0 tokens）' : '未知（未取得成员任务级 tokens）'}"
       lines << "Root 会话累计：#{root_session_cumulative(state)}（非任务增量）"
       lines << if complete
                  "可核算总计：#{usage_amount([input_total, output_total])}（不含 Root 会话累计）"
@@ -408,6 +413,29 @@ module Orbit
       "#{text}；用 orbit review-model 显式指定模型后重试"
     end
 
+    def completion_readiness_line(state)
+      return "完成状态：已完成并确认停止" if state["status"] == "complete"
+      return "完成状态：停止确认中，不得称为完成" if state["status"] == "stop_unconfirmed"
+      return nil unless %w[starting running].include?(state["status"])
+
+      if state["completion_stop_pending"]
+        return "完成状态：完成申请已入队；当前助手结束本轮后才核实停止"
+      end
+      ready = state["completion_readiness"]
+      status = ready.is_a?(Hash) ? ready["status"] : "waiting"
+      reason = ready.is_a?(Hash) ? ready["reason"].to_s : ""
+      case status
+      when "ready"
+        "完成状态：当前版本可申请完成；当前助手调用 Orbit 工具 action=stop, intent=complete, task=<任务目录>；普通 CLI orbit stop 仅暂停"
+      when "invalidated"
+        "完成状态：通知失效，须重检（#{reason}）"
+      when "not_ready"
+        "完成状态：尚不可交付（#{reason}）；完成实际答复或产物后重检"
+      else
+        "完成状态：等待检查或有效通知，尚未完成"
+      end
+    end
+
     def next_action_line(state)
       "下一动作：#{next_action(state)}"
     end
@@ -444,14 +472,15 @@ module Orbit
       end
       return "重新绑定工作区" if rebind_action?(state)
       return "手动检查已排队" if manual_check_queued?(state)
-      notices = state["finalization_notices"]
-      if %w[starting running].include?(status) && notices.is_a?(Hash) && !notices.empty?
-        findings = state["findings"]
-        open = findings.is_a?(Hash) && findings.each_value.any? { |finding| finding.is_a?(Hash) && finding["status"] == "open" }
-        clues = state.dig("recheck", "findings")
-        unless open || (clues.is_a?(Array) && !clues.empty?)
-          return "当前助手核对检查后是否有新改动；无改动时申请完成，否则重新检查"
-        end
+      findings = state["findings"]
+      open = findings.is_a?(Hash) && findings.each_value.any? { |finding| finding.is_a?(Hash) && finding["status"] == "open" }
+      clues = state.dig("recheck", "findings")
+      return "先处理检查问题，再请求终检" if open || (clues.is_a?(Array) && !clues.empty?)
+      ready = state["completion_readiness"]
+      if ready.is_a?(Hash)
+        return "当前助手调用 Orbit stop(intent=complete) 并结束本轮" if ready["status"] == "ready"
+        return "通知失效：#{ready['reason']}；先重检" if ready["status"] == "invalidated"
+        return "补齐实际交付：#{ready['reason']}；再重检" if ready["status"] == "not_ready"
       end
       return "等待 Root" if waiting_for_root?(state)
       return "检查已安排" if review_queued?(state)
@@ -587,6 +616,7 @@ module Orbit
                check_activity_line(state),
                *([checker_model_line(state)].compact),
                *([review_blocked_line(state)].compact),
+               *([completion_readiness_line(state)].compact),
                next_action_line(state),
                *usage_lines(state)]
       check = state.fetch("checks", []).last

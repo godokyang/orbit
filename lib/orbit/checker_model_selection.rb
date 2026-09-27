@@ -93,6 +93,62 @@ module Orbit
       end
     end
 
+    # Read-only classification of one candidate's cached evidence for
+    # diagnostics (ADR-009 2026-09-27 supplement). Only the exact
+    # provider/model identity counts; the recurring failure is evidence
+    # submitted for a near-variant identity (kimi-code/k3 for
+    # kimi-code/k3-256k), so a factual list of same-provider identities held
+    # in the cache is part of the "absent" detail. Statuses report what was
+    # actually checked and never guess:
+    #
+    #   valid       an exact-identity entry passes every structural rule and
+    #               is inside its validity window (same test the selector
+    #               applies when judging)
+    #   expired     exact-identity entries exist and every parseable expiry
+    #               is in the past (newest expiry reported)
+    #   unavailable Root reported evidence could not be obtained (reason kept)
+    #   invalid     entries exist but fail structural validation
+    #   absent      no exact-identity entry at all
+    def evidence_status(model:, entries:, now:, max_related: 3)
+      provider, id = model.split("/", 2)
+      exact = []
+      related = []
+      Array(entries).each do |entry|
+        next unless entry.is_a?(Hash) && entry["provider"].to_s == provider
+
+        if entry["model"].to_s == id
+          exact << entry
+        else
+          identity = "#{entry['provider']}/#{entry['model']}"
+          related << identity if related.length < max_related && !related.include?(identity)
+        end
+      end
+      if exact.empty?
+        detail = if related.empty?
+                   "no cached entry for this exact identity"
+                 else
+                   "no cached entry for this exact identity; the cache holds #{related.join(', ')} under provider #{provider}"
+                 end
+        return { "status" => "absent", "detail" => detail }
+      end
+      return { "status" => "valid", "detail" => nil } if exact.any? { |entry| valid_evidence_entry?(entry, now) }
+
+      newest_expired = exact.filter_map { |entry| parse_timestamp(entry["valid_until"]) }
+                            .select { |time| time <= now }.max
+      if newest_expired
+        return { "status" => "expired", "detail" => "evidence for this exact identity expired #{newest_expired.utc.iso8601}" }
+      end
+
+      unavailable = exact.find { |entry| entry["status"] == "unavailable" }
+      if unavailable
+        reason = unavailable["reason"].to_s.strip
+        reason = "no reason recorded" if reason.empty?
+        return { "status" => "unavailable", "detail" => "reported unavailable: #{reason.slice(0, 200)}" }
+      end
+
+      { "status" => "invalid", "detail" => "cached entries for this exact identity failed structural validation" }
+    end
+
     # pool: ordered provider/id strings from ModelCandidatePool#read.
     # catalog: { "current" =>, "available" => [...], "families" => {id=>family} } or nil.
     # quality: Hash of provider/id => verdict entry, or nil.

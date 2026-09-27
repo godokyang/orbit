@@ -25,7 +25,8 @@ module Orbit
     ROLES = %w[reviewer process_reviewer adjudicator].freeze
     VERDICTS = %w[continue correct pause complete needs_user].freeze
     FINDING_KEYS = %w[id requirement evidence action].freeze
-    RESULT_KEYS = %w[verdict reason findings resolved_ids next_check_seconds].freeze
+    RESULT_KEYS = %w[verdict reason findings resolved_ids next_check_seconds delivery].freeze
+    DELIVERY_KEYS = %w[ready reason].freeze
     DEFAULT_STOP_GRACE_SECONDS = 5
 
     # Program-context compression. An independent check judges the current
@@ -36,6 +37,11 @@ module Orbit
     # amendments and named basis are never compressed.
     CONTEXT_BYTE_LIMIT = 65_536
     CONTEXT_STRING_CAP = 2_000
+    # The Root's actually delivered final answer (root observations entry with
+    # kind agent_message) is the checker's primary delivery evidence for
+    # text-only tasks, so it gets a wider verbatim prefix than ordinary
+    # history strings. Still bounded: prefix plus original length and sha256.
+    CONTEXT_DELIVERY_TEXT_CAP = 4_000
     CONTEXT_EVENT_CAP = 500
     CONTEXT_MEMBER_RESULT_CAP = 600
     CONTEXT_CAPS = {
@@ -205,11 +211,13 @@ module Orbit
                "delivered workspace plus project rules. The original workspace is not your input. Do not write " \
                "anywhere. If a command would modify a repository, do not run it; report the concrete gap that " \
                "needs isolated verification instead."
+      parts << delivery_rules_note
       parts << "## Output\n\n" \
                "Return exactly one JSON object matching the attached output schema: verdict, reason, findings, " \
-               "resolved_ids, next_check_seconds. verdict is one of: #{VERDICTS.join(', ')}. findings is a list " \
+               "resolved_ids, next_check_seconds, delivery. verdict is one of: #{VERDICTS.join(', ')}. findings is a list " \
                "of objects with id, requirement, evidence, action. resolved_ids is a list of strings. " \
-               "next_check_seconds is a positive integer. No markdown, no code fences, no extra text."
+               "next_check_seconds is a positive integer. delivery is an object with ready (boolean) and reason " \
+               "(non-empty string). No markdown, no code fences, no extra text."
       parts.join("\n\n")
     end
 
@@ -332,11 +340,21 @@ module Orbit
 
       root.each_with_object({}) do |(key, value), compressed|
         compressed[key] = if key == "observations" && value.is_a?(Array)
-                            recent_tail(value, caps[:root_observation_limit]).map { |entry| bound_value(entry, caps) }
+                            recent_tail(value, caps[:root_observation_limit]).map { |entry| bound_observation(entry, caps) }
                           else
                             bound_value(value, caps)
                           end
       end
+    end
+
+    # The newest agent_message observation is the Root's actually delivered
+    # answer text and the checker's delivery evidence for text-only tasks, so
+    # it keeps a wider verbatim prefix; every other observation stays at the
+    # ordinary string cap.
+    def bound_observation(entry, caps)
+      return bound_value(entry, caps) unless entry.is_a?(Hash) && entry["kind"] == "agent_message"
+
+      bound_value(entry, caps, string_cap: [caps[:string_cap], CONTEXT_DELIVERY_TEXT_CAP].max)
     end
 
     # review_focus is a priority clue, not history: the runtime's bounded
@@ -564,7 +582,9 @@ module Orbit
           "evidence and issue an executable conclusion within the original goal and authorization. Do not " \
           "vote, do not require the parties to agree, and do not change requirements, acceptance or scope. " \
           "You may overturn the Root or the reviewer on a disputed point when the evidence supports it; list " \
-          "the reviewed ids in resolved_ids and explain the decision in reason. Read the relevant AGENTS.md " \
+          "reviewed ids in resolved_ids and explain the decision in reason. delivery.ready only states " \
+          "whether the task's actual deliverable is visible to you at inspection time; if you cannot " \
+          "inspect it, ready is false with the reason. Read the relevant AGENTS.md " \
           "files inside the fixed snapshot; project rules apply to your judgment too."
       elsif role == "process_reviewer"
         "You are the existing independent Orbit checker, focused on a suspected execution-process issue. " \
@@ -576,7 +596,9 @@ module Orbit
           "for an authorization boundary or a concrete adjudicated correction that stays unimplemented. " \
           "A pending model_evidence_request in the context is part of the authorized workflow: research " \
           "responsive to it is relevant work, not off-track solely because the original user instruction " \
-          "did not mention it. Still judge concrete task progress. " \
+          "did not mention it. Still judge concrete task progress. delivery.ready only states whether " \
+          "the task's actual deliverable is visible to you at inspection time; if you cannot inspect it, " \
+          "ready is false with the reason. " \
           "Work strictly read-only and follow relevant AGENTS.md rules in the fixed snapshot."
       else
         prompt = "You are an independent Orbit check session, separate from the Root session that produced the " \
@@ -597,7 +619,16 @@ module Orbit
           "the check input or concrete new evidence differs from what that decision saw; the same point on " \
           "unchanged artifact, input and evidence is not a new finding. If a finding or a previously " \
           "withdrawn conclusion no longer applies, list its id in resolved_ids and explain in reason; a " \
-          "finding withdrawn by an independent adjudication is not an unresolved problem. Verdict rules: " \
+          "finding withdrawn by an independent adjudication is not an unresolved problem. Delivery rules: " \
+          "delivery.ready is a separate judgment from verdict and findings, and states only whether the " \
+          "task's actual deliverable is visible to you and satisfies what the instruction says must be " \
+          "delivered. Never derive it from verdict: continue with no findings is not delivery readiness, " \
+          "and a Root claim, plan or promise inside the record is not a delivered answer. For a task whose " \
+          "deliverable is an answer rather than files, the delivered answer is the Root's final assistant " \
+          "message: judge delivery only from the actual agent_message text in the program record's root " \
+          "observations, and only when root.status is idle and root.last_turn_status is completed — while " \
+          "Root is executing, the newest message is partial output, not a delivered answer, and ready must " \
+          "be false with the reason naming what is not yet delivered. Verdict rules: " \
           "complete only when the instruction is actually satisfied and known problems are resolved. While Root " \
           "is still executing, never " \
           "declare complete; use correct when an actionable current finding needs attention, otherwise " \
@@ -624,11 +655,41 @@ module Orbit
     end
 
     def review_focus_note
-      "The program record's review_focus lists the paths the fixed snapshot added, modified or deleted. " \
-        "Check those paths and their direct dependencies first, then extend to whatever the original " \
-        "instruction, amendments and named basis require. review_focus is a priority clue, not a scope " \
-        "limit: never ignore a requirement because its files are not listed, and never treat the listed " \
-        "files as the only work to check."
+      "The program record's review_focus lists the fixed snapshot's Git working-tree paths by " \
+        "their current status against the index/HEAD; added also includes untracked files that " \
+        "may predate this Orbit task. It is NOT a diff against task start and does not prove Root " \
+        "created, modified or deleted a listed path during this task. Check the paths and their " \
+        "direct dependencies first, then all original requirements, amendments and named basis. " \
+        "Attribute an extra change to this task only with task-scoped action or baseline evidence; " \
+        "do not demand removal of a pre-existing untracked file based on review_focus alone."
+    end
+
+    # Structured delivery-readiness guidance, separate from the verdict rules
+    # in role_prompt. Kept as its own prompt section because the program's
+    # completion gate consumes result.delivery independently of the verdict.
+    # The git_remote facts note only applies when the program record carries
+    # them; nothing here invents remote evidence.
+    def delivery_rules_note
+      "## Delivery readiness\n\n" \
+        "You must also return delivery: an object with ready (boolean) and reason (non-empty string). " \
+        "delivery.ready states whether the task's actual deliverable is visible to you at inspection " \
+        "time and satisfies what the instruction says must be delivered; it is separate from verdict and " \
+        "findings. ready=true always names the concrete evidence you inspected: the delivered artifact in " \
+        "the fixed snapshot for file deliverables, or the Root's actually delivered final answer text " \
+        "visible in the program record for answer deliverables. Never set ready=true from a Root claim, " \
+        "plan or promise, and never from verdict alone: continue with no findings does not mean the " \
+        "deliverable exists. For an answer deliverable, judge only the agent_message text in root " \
+        "observations, and only when root.status is idle and root.last_turn_status is completed; a " \
+        "bounded prefix (…[length:sha256]) is verbatim evidence of what was delivered, but a part you " \
+        "cannot see cannot be confirmed. If the deliverable is not visible — Root still executing, the " \
+        "final answer not yet produced, or only an interim message present — ready must be false and " \
+        "reason must state exactly what is missing. For a requirement that work be pushed to a remote, " \
+        "the program record's git_remote facts are captured read-only by the program: status verified " \
+        "means the local HEAD equals the remote reference, mismatch means the remote reference differs, " \
+        "unknown means it could not be verified (network, configuration, or the instruction does not " \
+        "require remote delivery). Those are the only remote facts you may use: a Root report of a push " \
+        "is never verification. With such a requirement, ready requires git_remote.status to be " \
+        "verified; on mismatch or unknown, ready must be false and reason must cite the actual status."
     end
 
     def write_run_record(run)
@@ -712,6 +773,7 @@ module Orbit
         problems << "reason must be a non-empty string"
       end
       problems.concat(validate_findings(value["findings"]))
+      problems.concat(validate_delivery(value["delivery"]))
       unless value["resolved_ids"].is_a?(Array) && value["resolved_ids"].all? { |id| id.is_a?(String) && !id.empty? }
         problems << "resolved_ids must be an array of non-empty strings"
       end
@@ -740,6 +802,25 @@ module Orbit
           end
         end
       end
+    end
+
+    # delivery is the structured readiness judgment the completion gate reads
+    # (result["delivery"]["ready"/"reason"]): exactly those two keys, a real
+    # boolean, and a non-empty reason. A missing or malformed delivery is a
+    # contract failure, never an implicit ready.
+    def validate_delivery(delivery)
+      return ["delivery must be an object with exactly: #{DELIVERY_KEYS.join(', ')}"] unless delivery.is_a?(Hash)
+
+      problems = []
+      extra = delivery.keys - DELIVERY_KEYS
+      missing = DELIVERY_KEYS - delivery.keys
+      problems << "delivery has unexpected keys: #{extra.join(', ')}" unless extra.empty?
+      problems << "delivery is missing keys: #{missing.join(', ')}" unless missing.empty?
+      problems << "delivery.ready must be a boolean" unless delivery["ready"] == true || delivery["ready"] == false
+      unless delivery["reason"].is_a?(String) && !delivery["reason"].empty?
+        problems << "delivery.reason must be a non-empty string"
+      end
+      problems
     end
 
     def failure_message(status)

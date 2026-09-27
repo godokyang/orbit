@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require "json"
+require "stringio"
 require "tmpdir"
 require "fileutils"
 require_relative "../lib/orbit/cli"
@@ -272,6 +273,57 @@ module OmpCliCheckerTest
     end
   end
 
+
+  # ADR-009 2026-09-27 supplement: `orbit model-status` is the read-only
+  # candidate UX — precise per-identity evidence facts, no probes, no JEV,
+  # no task. The recurring second-task failure (evidence held for a
+  # near-variant identity) must surface as an actionable exact identity.
+  def model_status_reports_precise_candidate_diagnostics
+    Dir.mktmpdir("orbit-model-status-") do |tmp|
+      project = File.join(tmp, "project")
+      FileUtils.mkdir_p(project)
+      xdg = File.join(tmp, "xdg-config")
+      FileUtils.mkdir_p(File.join(xdg, "orbit"))
+      File.write(File.join(xdg, "orbit", "model-candidates.json"),
+                 JSON.generate("schema_version" => "orbit-model-candidates-v1",
+                               "models" => ["kimi-code/k3-256k"]))
+      cache_path = File.join(tmp, "xdg-cache", "orbit", "model-evidence-v1.json")
+      Orbit::ModelEvidenceCache.new(path: cache_path).record_all([{
+        "provider" => "kimi-code", "model" => "k3", "billing_route" => "unknown", "status" => "evidence",
+        "retrieved_at" => Time.now.utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "sources" => ["https://example.test/models/kimi-k3"],
+        "metrics" => { "quality.score" => { "value" => 9.0, "unit" => "score", "basis" => "vendor benchmark" } }
+      }])
+      report = nil
+      previous = ENV["XDG_CONFIG_HOME"]
+      previous_cache = ENV["XDG_CACHE_HOME"]
+      ENV["XDG_CONFIG_HOME"] = xdg
+      ENV["XDG_CACHE_HOME"] = File.join(tmp, "xdg-cache")
+      begin
+        stdout = StringIO.new
+        original_stdout = $stdout
+        $stdout = stdout
+        begin
+          Orbit::CLI.run(["model-status", "--project", project])
+        ensure
+          $stdout = original_stdout
+        end
+        report = JSON.parse(stdout.string)
+      ensure
+        previous ? ENV["XDG_CONFIG_HOME"] = previous : ENV.delete("XDG_CONFIG_HOME")
+        previous_cache ? ENV["XDG_CACHE_HOME"] = previous_cache : ENV.delete("XDG_CACHE_HOME")
+      end
+      candidate = report.fetch("candidates").fetch(0)
+      assert(candidate["model"] == "kimi-code/k3-256k" && candidate["evidence_status"] == "absent" &&
+             candidate["evidence_detail"].include?("the cache holds kimi-code/k3 under provider kimi-code"),
+             "the near-variant evidence mismatch is named with the exact identity")
+      assert(report["session_catalog"] == "not_provided" && candidate["in_session"].nil? &&
+             candidate["quality"] == "not_judged" && candidate["isolated_probe"] == "not_probed",
+             "nothing is guessed: unprovided session and unjudged candidates are marked as such")
+      assert(Dir.glob(File.join(project, ".orbit/tasks/*")).empty?, "the read-only listing creates no task")
+    end
+  end
+
   def run
     omp_start_uses_session_model_and_run_task_selects_omp_checker
     explicit_review_model_overrides_the_session_model
@@ -281,6 +333,7 @@ module OmpCliCheckerTest
     explicit_model_unavailable_in_isolated_profile_does_not_start
     candidate_pool_auto_selects_a_jev_qualified_model
     a_model_without_provider_does_not_start
+    model_status_reports_precise_candidate_diagnostics
     puts "PASS omp cli checker wiring"
   end
 end
