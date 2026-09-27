@@ -75,6 +75,7 @@ const pi = { zod: z, registerTool: tool => { definition = tool; },
   on: (name, handler) => { (events[name] ||= []).push(handler); } };
 const sdk = { MAIN_AGENT_ID: mainAgentId,
   AgentRegistry: { global: () => registry, onChange: undefined, get: undefined },
+  getAgentDir: () => process.env.PI_CODING_AGENT_DIR,
   isUserInterruptAbort: () => false };
 
 const tool = async (args, context = ctx) => JSON.parse((await definition.execute('call', args, null, null, context)).content[0].text);
@@ -101,6 +102,21 @@ try {
   // and a stub pool CLI, so generated-agent dispatch can re-sync the pool.
   const agentRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'orbit-sess-gate-'));
   await fs.mkdir(path.join(agentRoot, 'agents'), { recursive: true });
+  // The real isolated preflight reads the parent OMP store. Supply a local
+  // provider with a config credential; no model request or network is made.
+  process.env.PI_CODING_AGENT_DIR = agentRoot;
+  await fs.writeFile(path.join(agentRoot, 'models.yml'), `providers:
+  glm:
+    baseUrl: https://example.invalid/v1
+    apiKey: fixture-key
+    api: openai-completions
+    models:
+      - id: x
+        name: Fixture GLM
+        input: [text]
+        contextWindow: 128000
+        maxTokens: 8192
+`);
   process.env.ORBIT_SESSION_AGENT_ROOT = agentRoot;
   const poolStub = path.join(agentRoot, 'pool.sh');
   await fs.writeFile(poolStub, '#!/bin/sh\nprintf \'{"models":["glm/x"]}\\n\'\n');
@@ -144,6 +160,8 @@ try {
     fixture.runtime_pid = process.pid;
     await fs.writeFile(statePath, JSON.stringify(fixture));
   }
+  assert.equal((await request('model_catalog')).agent_dir, agentRoot,
+    'the catalog carries the host-resolved agent directory for isolated profile credentials');
 
   // Root session model and the native task role are different identities.
   // Billing route is a structural proof from the resolved endpoint (host plus
@@ -225,41 +243,59 @@ try {
   await assert.rejects(() => request('member_model'), /unresolved/);
   assert.equal(await request('model'), 'glm/x', 'a failed task-role lookup does not replace the Root model');
   delete ctx.models.resolve;
-  // Generic task resolves outside the live pool. Root's explicit model
-  // parameter cannot authorize it; only a later native user message can.
+  // Generic task resolves OUTSIDE the live pool (pool stub holds only
+  // glm/x). Under the model-usage boundary ruling the pool is a preference
+  // surface, not an authorization list: a known effective model dispatches
+  // with no user directive, registers with the exact identity, and records
+  // no phantom authorization metadata.
   const outside = { provider: 'zhipu-coding-plan', id: 'glm-5.2' };
   ctx.models.resolve = () => outside;
-  const denied = await emit('tool_call', { toolName: 'task', toolCallId: 'pool-denied',
+  const allowed = await emit('tool_call', { toolName: 'task', toolCallId: 'outside-allowed',
     input: { agent: 'task', model: 'zhipu-coding-plan/glm-5.2', task: 'work' } }, ctx);
-  assert.equal(denied.block, true);
-  assert.match(denied.reason, /outside the candidate pool/);
-  const rootBranch = root.sessionManager.getBranch();
-  rootBranch.push({ type: 'message', id: 'quoted-grant',
-    message: { role: 'user', content: '```text\nOrbit authorization: member_model=zhipu-coding-plan/glm-5.2\n```' } });
-  const quoted = await emit('tool_call', { toolName: 'task', toolCallId: 'quoted-grant-denied',
-    input: { agent: 'task', task: 'work without authorization' } }, ctx);
-  assert.equal(quoted.block, true, 'a code sample cannot authorize an outside member');
-  rootBranch.pop();
-  rootBranch.push({ type: 'message', id: 'member-grant',
-    message: { role: 'user', content: 'Orbit authorization: member_model=zhipu-coding-plan/glm-5.2' } });
-  const allowed = await emit('tool_call', { toolName: 'task', toolCallId: 'user-authorized',
-    input: { agent: 'task', task: 'work authorized by the user' } }, ctx);
-  assert.ok(allowed.input && !allowed.block, 'the exact native user choice allows the outside model');
+  assert.ok(allowed.input && !allowed.block, 'a known pool-outside @task model dispatches without user authorization');
   const outsideRef = { id: allowed.input.name, kind: 'sub', parentId: mainAgentId, status: 'idle',
     session: session('user-chosen-member'), sessionFile: null, history: {}, activity: null };
   outsideRef.session.model = outside;
   extraRefs.push(outsideRef);
   registryListener({ type: 'registered', ref: outsideRef });
   assert.equal((await membersFile()).find(m => m.thread_id === outsideRef.id).model,
-    'zhipu-coding-plan/glm-5.2', 'the authorized outside member reaches real registration with the exact model');
+    'zhipu-coding-plan/glm-5.2', 'the pool-outside member reaches real registration with the exact model');
   const dispatchLog = (await fs.readFile(path.join(started.task_directory, 'collaboration.jsonl'), 'utf8'))
-    .split('\n').filter(Boolean).map(line => JSON.parse(line)).find(entry => entry.tool_call_id === 'user-authorized');
-  assert.equal(dispatchLog?.authorization?.message_id, 'member-grant', 'authorization traces to the native user message');
-  assert.match(dispatchLog.notice, /outside the candidate pool/, 'the pool exception is visibly marked');
-  rootBranch.pop();
-  const deniedAgain = await emit('tool_call', { toolName: 'task', toolCallId: 'after-grant',
-    input: { agent: 'task', task: 'new dispatch without user authorization' } }, ctx);
-  assert.equal(deniedAgain.block, true, 'no authorization is inferred from an earlier tool argument');
+    .split('\n').filter(Boolean).map(line => JSON.parse(line)).find(entry => entry.tool_call_id === 'outside-allowed');
+  assert.equal(dispatchLog?.pinned_model, 'zhipu-coding-plan/glm-5.2', 'dispatch evidence pins the resolved identity');
+  assert.equal('authorization' in dispatchLog, false, 'no phantom user authorization is recorded');
+  assert.equal(dispatchLog.notice, undefined, 'no pool-exception notice is recorded');
+  // Drift on the generic path: an actual member model that differs from the
+  // pinned @task identity is aborted and recorded, never silently accepted.
+  const driftOutside = await emit('tool_call', { toolName: 'task', toolCallId: 'outside-drift',
+    input: { agent: 'task', task: 'drift work' } }, ctx);
+  const driftOutsideRef = { id: driftOutside.input.name, kind: 'sub', parentId: mainAgentId, status: 'running',
+    session: session('outside-drift-session'), sessionFile: null, history: {}, activity: null };
+  driftOutsideRef.session.model = { provider: 'zenmux', id: 'x-ai/grok-4.6' };
+  extraRefs.push(driftOutsideRef);
+  registryListener({ type: 'registered', ref: driftOutsideRef });
+  const driftOutsideEntry = (await membersFile()).find(m => m.thread_id === driftOutside.input.name);
+  assert.equal(driftOutsideEntry.model_drift.expected, 'zhipu-coding-plan/glm-5.2', 'drift records the pinned @task identity');
+  assert.equal(driftOutsideEntry.model_drift.actual, 'zenmux/x-ai/grok-4.6', 'drift records the actual member model');
+  assert.ok(setStatuses.some(([id, s]) => id === driftOutside.input.name && s === 'aborted'),
+    'a drifted pool-outside member must be aborted at registration');
+  // An empty candidate pool never blocks a known-model generic dispatch:
+  // the gate reads no pool at all for @task items.
+  const emptyPoolStub = path.join(agentRoot, 'pool-empty.sh');
+  await fs.writeFile(emptyPoolStub, '#!/bin/sh\nprintf \'{"models":[]}\\n\'\n');
+  await fs.chmod(emptyPoolStub, 0o755);
+  const savedCliBin = process.env.ORBIT_CLI_BIN;
+  process.env.ORBIT_CLI_BIN = emptyPoolStub;
+  const emptyPool = await emit('tool_call', { toolName: 'task', toolCallId: 'empty-pool',
+    input: { agent: 'task', task: 'work' } }, ctx);
+  assert.ok(emptyPool.input && !emptyPool.block, 'an empty candidate pool does not block a known-model @task dispatch');
+  process.env.ORBIT_CLI_BIN = savedCliBin;
+  // Unknown effective model stays rejected.
+  ctx.models.resolve = () => undefined;
+  const unknown = await emit('tool_call', { toolName: 'task', toolCallId: 'unresolved-model',
+    input: { agent: 'task', task: 'work' } }, ctx);
+  assert.equal(unknown.block, true, 'an unresolvable @task model must be rejected');
+  assert.match(unknown.reason, /cannot be resolved/);
   ctx.models.resolve = () => model;
 
   // 2. Happy path: requested name is assigned; registered window writes the
@@ -285,7 +321,7 @@ try {
   extraRefs.push(liveRef);
   registryListener({ type: 'registered', ref: liveRef });
   const members = await membersFile();
-  assert.equal(members.length, 2);
+  assert.equal(members.length, 3); // outside + drifted-outside + this pool member
   const poolMember = members.find(m => m.thread_id === revised.input.name);
   assert.equal(poolMember['requested_name'], revised.input.name);
   assert.equal(poolMember.status, 'registered');

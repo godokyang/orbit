@@ -160,6 +160,24 @@ console.log('picker component flows: PASS');
 const project = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'orbit-picker-cmd-')));
 const agentRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'orbit-picker-agents-'));
 await fs.mkdir(path.join(agentRoot, 'agents'), { recursive: true });
+process.env.PI_CODING_AGENT_DIR = agentRoot;
+await fs.writeFile(path.join(agentRoot, 'models.yml'), `providers:
+  zhipu:
+    baseUrl: https://example.invalid/v1
+    apiKey: fixture-key
+    api: openai-completions
+    models:
+      - id: glm-5.2
+        name: Fixture GLM 5.2
+        input: [text]
+        contextWindow: 128000
+        maxTokens: 8192
+      - id: glm-4.7
+        name: Fixture GLM 4.7
+        input: [text]
+        contextWindow: 128000
+        maxTokens: 8192
+`);
 process.env.ORBIT_SESSION_AGENT_ROOT = agentRoot;
 delete process.env.ORBIT_CLI_BIN;
 

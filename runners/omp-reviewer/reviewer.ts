@@ -3,8 +3,13 @@
 //   bun reviewer.ts --config request.json
 //   bun reviewer.ts --snapshot DIR --profile DIR --out FILE [--prompt FILE] [--model provider/id]
 //
-// The profile must be a fresh directory and PI_CODING_AGENT_DIR must equal it.
-// OMP_PROFILE must be unset. Credentials, when a model is requested, stay in
+// The profile must be a fresh directory and PI_CODING_AGENT_DIR must equal it;
+// OMP_PROFILE/PI_PROFILE must be unset. Session state stays confined to that
+// profile, while the model catalog and credentials come from the parent OMP
+// session's own agent dir (source_agent_* fields): the same models.yml, model
+// cache, settings and auth storage the host session uses, resolved through
+// OMP's official discoverAuthStorage/ModelRegistry path. No second login, no
+// credential copies: tokens live only inside OMP's own storage and process
 // memory. Without --model this process does not call a model; a confinement
 // probe is not a check result.
 import { execFileSync } from "node:child_process";
@@ -12,19 +17,21 @@ import { fileURLToPath } from "node:url";
 import { lstatSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { recoverTrailingJsonObject } from "./json-recovery";
-import { parseProbeModels, probeModelAvailability } from "./model-probe";
+import { parseProbeModels, probeModelAvailability, type CredentialAvailability } from "./model-probe";
 import { validateCheckResult } from "./check-result";
 import {
 	AgentRegistry,
 	createAgentSession,
 	discoverAuthStorage,
+	isAuthenticated,
 	ModelRegistry,
 	SessionManager,
 	Settings,
+	type AuthStorage,
 } from "@oh-my-pi/pi-coding-agent";
+import { getBaseConfigRoot, getModelDbPath, getProfileRootDir, resolveProfileEnv } from "@oh-my-pi/pi-utils";
 import { createConfinedTools } from "./confined-tools.ts";
 
-const PINNED_SDK = "18.2.8";
 const REVIEW_TOOLS = ["read", "grep", "glob"];
 const FORBIDDEN_TOOLS = ["write", "edit", "bash", "eval", "task", "hub", "todo", "ask", "web_search", "browser", "lsp", "ast_edit", "notebook", "checkpoint", "rewind", "goal", "manage_skill", "learn"];
 
@@ -34,7 +41,6 @@ type Request = {
 	out?: string;
 	prompt?: string;
 	model?: string;
-	token_provider?: string;
 	probe_models?: string;
 	probe_outside?: string;
 	probe_inside?: string;
@@ -42,6 +48,16 @@ type Request = {
 	probe_symlink_file?: string;
 	probe_symlink_dir?: string;
 	probe_secret?: string;
+	// Parent OMP session inputs captured by the launcher before it confined
+	// this process. Plain paths and profile names only — never credentials.
+	source_agent_dir?: string;
+	source_pi_coding_agent_dir?: string;
+	source_omp_profile?: string;
+	source_pi_profile?: string;
+	source_project_dir?: string;
+	// Reviewer SDK version the install verified; falls back to this runner's
+	// own package.json dependency when absent (manual runs).
+	sdk_version?: string;
 };
 
 function arg(name: string): string | undefined {
@@ -61,7 +77,6 @@ function loadRequest(): Request {
 		out: arg("out"),
 		prompt: arg("prompt"),
 		model: arg("model"),
-		token_provider: arg("token-provider"),
 		probe_models: arg("probe-models"),
 		probe_outside: arg("probe-outside"),
 		probe_inside: arg("probe-inside"),
@@ -69,6 +84,12 @@ function loadRequest(): Request {
 		probe_symlink_file: arg("probe-symlink-file"),
 		probe_symlink_dir: arg("probe-symlink-dir"),
 		probe_secret: arg("probe-secret"),
+		source_agent_dir: arg("source-agent-dir"),
+		source_pi_coding_agent_dir: arg("source-pi-coding-agent-dir"),
+		source_omp_profile: arg("source-omp-profile"),
+		source_pi_profile: arg("source-pi-profile"),
+		source_project_dir: arg("source-project-dir"),
+		sdk_version: arg("sdk-version"),
 	};
 	return {
 		...fromFile,
@@ -82,6 +103,15 @@ function sdkVersion(): string {
 	// package that actually satisfied the import, next to this file.
 	const pkg = path.join(path.dirname(fileURLToPath(import.meta.url)), "node_modules", "@oh-my-pi", "pi-coding-agent", "package.json");
 	return JSON.parse(readFileSync(pkg, "utf8")).version;
+}
+
+function expectedSdkVersion(request: Request): string {
+	const fromRequest = request.sdk_version?.trim();
+	if (fromRequest) return fromRequest;
+	const pkg = path.join(path.dirname(fileURLToPath(import.meta.url)), "package.json");
+	const declared = JSON.parse(readFileSync(pkg, "utf8"))?.dependencies?.["@oh-my-pi/pi-coding-agent"];
+	if (typeof declared !== "string" || !declared.trim()) throw new Error("cannot determine the expected reviewer SDK version");
+	return declared.trim();
 }
 
 function fingerprint(root: string): string {
@@ -112,11 +142,6 @@ function agentsFile(snapshot: string): Array<{ path: string; content: string }> 
 	}
 }
 
-// Availability-only credential resolver for the model probe. It runs OMP's own
-// provider token command with the user's ambient environment (the isolated
-// profile dir is removed), caches the result per provider, and returns only a
-// boolean plus a structured reason. The resolved token is read to test
-// presence and immediately discarded — it is never returned or written.
 // Structured failure kinds matching lib/orbit/omp_check_runner.rb FAILURE_KINDS.
 // A ReviewerFailure is written to evidence.error.kind so the Ruby side can use
 // the "structured" basis directly instead of the heuristic text pattern.
@@ -128,21 +153,78 @@ class ReviewerFailure extends Error {
 	}
 }
 
-function credentialResolver(): (provider: string) => { ok: boolean; reason?: string } {
-	const cache = new Map<string, { ok: boolean; reason?: string }>();
-	const { PI_CODING_AGENT_DIR: _profile, ...userEnv } = process.env;
-	return provider => {
-		const cached = cache.get(provider);
-		if (cached) return cached;
-		let result: { ok: boolean; reason?: string };
+function boundedReason(text: string): string {
+	return text.replace(/\s+/g, " ").trim().slice(0, 200);
+}
+
+// The parent OMP session's effective agent dir, resolved from the env inputs
+// the launcher captured before confining this process. Mirrors pi-utils'
+// DirResolver precedence: a named profile (OMP_PROFILE > PI_PROFILE) derives
+// its own agent dir and ignores PI_CODING_AGENT_DIR; default mode honors a
+// non-profile PI_CODING_AGENT_DIR override; otherwise the base config root's
+// agent dir. Invalid names resolve to the default, like the SDK's own safe
+// module-load path.
+function sourceProfileName(request: Request): string | undefined {
+	try {
+		return resolveProfileEnv(request.source_omp_profile, request.source_pi_profile);
+	} catch {
+		return undefined;
+	}
+}
+
+function resolveSourceAgentDir(request: Request): string {
+	if (request.source_agent_dir?.trim()) return path.resolve(request.source_agent_dir);
+	const profile = sourceProfileName(request);
+	if (profile) return path.join(getProfileRootDir(profile), "agent");
+	let piProfile: string | undefined;
+	try {
+		piProfile = resolveProfileEnv(undefined, request.source_pi_profile);
+	} catch {
+		piProfile = undefined;
+	}
+	const profileDerived = piProfile ? path.join(getProfileRootDir(piProfile), "agent") : undefined;
+	const override = request.source_pi_coding_agent_dir?.trim();
+	if (override && path.resolve(override) !== profileDerived) return path.resolve(override);
+	return path.join(getBaseConfigRoot(), "agent");
+}
+
+// Build the catalog and credential store from the parent OMP session's agent
+// dir with the exact formula createAgentSession uses for a host session:
+// read-only settings (no writes to the user's config), discoverAuthStorage
+// (local SQLite or the configured broker — OMP's own store), the source
+// models.yml and model-cache database, then the same cache-first refresh the
+// host session performs. One resolution path for the probe and the real
+// check; credentials never leave OMP's storage.
+async function buildSourceCatalog(request: Request, sourceAgentDir: string): Promise<{ authStorage: AuthStorage; modelRegistry: ModelRegistry }> {
+	const settings = await Settings.loadReadOnly({
+		cwd: request.source_project_dir ? path.resolve(request.source_project_dir) : process.cwd(),
+		agentDir: sourceAgentDir,
+	});
+	const authStorage = await discoverAuthStorage(sourceAgentDir);
+	const modelRegistry = new ModelRegistry(authStorage, path.join(sourceAgentDir, "models.yml"), {
+		settings,
+		cacheDbPath: getModelDbPath(sourceAgentDir),
+	});
+	await modelRegistry.refresh("online-if-uncached");
+	return { authStorage, modelRegistry };
+}
+
+// Availability-only credential resolution for the probe: OMP's own per-model
+// resolver (the same call the real check's session makes at request time),
+// returning a boolean plus a bounded structured reason. The resolved key is
+// read to test presence and immediately discarded — never returned or written.
+function credentialResolver(modelRegistry: ModelRegistry): (provider: string, id: string) => Promise<CredentialAvailability> {
+	return async (provider, id) => {
+		const model = modelRegistry.find(provider, id);
+		if (!model) return { ok: false, reason: "model not in OMP source catalog" };
 		try {
-			const token = execFileSync("omp", ["token", provider], { encoding: "utf8", env: userEnv }).trim();
-			result = token ? { ok: true } : { ok: false, reason: `no credential for ${provider}` };
-		} catch {
-			result = { ok: false, reason: `credential resolution failed for ${provider}` };
+			const key = await modelRegistry.getApiKey(model);
+			if (isAuthenticated(key)) return { ok: true };
+			return { ok: false, reason: `no credential for ${provider}` };
+		} catch (error) {
+			const message = error instanceof Error ? error.message : String(error);
+			return { ok: false, reason: `credential resolution failed for ${provider}: ${boundedReason(message)}` };
 		}
-		cache.set(provider, result);
-		return result;
 	};
 }
 
@@ -157,6 +239,7 @@ const evidence: Record<string, unknown> = {
 	usage: null,
 };
 let exitCode = 1;
+let openAuthStorage: AuthStorage | undefined;
 
 try {
 	const probeSpecs = parseProbeModels(request.probe_models);
@@ -169,21 +252,43 @@ try {
 	if (snapshot) evidence.snapshot = snapshot;
 	evidence.profile = profile;
 	evidence.out = out;
-	if (process.env.PI_CODING_AGENT_DIR !== profile || process.env.OMP_PROFILE) {
-		throw new Error("run with PI_CODING_AGENT_DIR=<profile> and without OMP_PROFILE");
+	if (process.env.PI_CODING_AGENT_DIR !== profile || process.env.OMP_PROFILE || process.env.PI_PROFILE) {
+		throw new Error("run with PI_CODING_AGENT_DIR=<profile> and without OMP_PROFILE/PI_PROFILE");
 	}
 	if (snapshot && (within(snapshot, out) || within(snapshot, profile))) throw new Error("profile and out must stay outside the snapshot");
 	const version = sdkVersion();
 	evidence.sdk_version = version;
-	if (version !== PINNED_SDK) throw new Error(`SDK ${version} is not the pinned ${PINNED_SDK}`);
+	const expectedSdk = expectedSdkVersion(request);
+	if (version !== expectedSdk) throw new Error(`SDK ${version} does not match the expected reviewer SDK ${expectedSdk}`);
 	const modeCount = [request.model, request.probe_outside, probeMode].filter(Boolean).length;
 	if (modeCount === 0) throw new Error("pass --model for a check, a confinement probe, or --probe-models; none is a pass by itself");
 	if (modeCount > 1) throw new Error("use exactly one of --model, --probe-outside, or --probe-models");
 	if (probeMode && probeSpecs.length === 0) throw new Error("--probe-models requires at least one provider/id");
 
 	if (snapshot) evidence.fingerprint_before = fingerprint(snapshot);
-	const authStorage = await discoverAuthStorage(profile);
-	const modelRegistry = new ModelRegistry(authStorage);
+	const usesSourceCatalog = Boolean(request.model) || probeMode;
+	let authStorage: AuthStorage;
+	let modelRegistry: ModelRegistry;
+	if (usesSourceCatalog) {
+		const sourceAgentDir = resolveSourceAgentDir(request);
+		if (!path.isAbsolute(sourceAgentDir) || sourceAgentDir === profile) {
+			throw new Error(`invalid source agent dir: ${sourceAgentDir}`);
+		}
+		let stat;
+		try {
+			stat = lstatSync(sourceAgentDir);
+		} catch {
+			throw new Error(`source agent dir is not accessible: ${sourceAgentDir}`);
+		}
+		if (!stat.isDirectory()) throw new Error(`source agent dir is not a directory: ${sourceAgentDir}`);
+		evidence.source_agent_dir = sourceAgentDir;
+		({ authStorage, modelRegistry } = await buildSourceCatalog(request, sourceAgentDir));
+		openAuthStorage = authStorage;
+	} else {
+		authStorage = await discoverAuthStorage(profile);
+		modelRegistry = new ModelRegistry(authStorage);
+		openAuthStorage = authStorage;
+	}
 	let model;
 	if (request.model) {
 		if (!request.prompt) throw new Error("model requires a prompt file");
@@ -192,17 +297,23 @@ try {
 		if (!provider || !id) throw new Error("model must be provider/id");
 		model = modelRegistry.find(provider, id);
 		if (!model) throw new ReviewerFailure(`model not in catalog: ${request.model}`, "unavailable");
-		const { PI_CODING_AGENT_DIR: _profile, ...userEnv } = process.env;
-		const key = execFileSync("omp", ["token", request.token_provider ?? provider], { encoding: "utf8", env: userEnv }).trim();
-		if (!key) throw new ReviewerFailure(`no credential for ${request.token_provider ?? provider}`, "auth_or_quota");
-		authStorage.setRuntimeApiKey(provider, key);
+		// Fail fast on missing credentials with the same structured kind the
+		// runtime uses, resolved through OMP's own store. The key is discarded;
+		// the session below resolves its own fresh credential per request.
+		try {
+			const key = await modelRegistry.getApiKey(model);
+			if (!isAuthenticated(key)) throw new ReviewerFailure(`no credential for ${provider}`, "auth_or_quota");
+		} catch (error) {
+			if (error instanceof ReviewerFailure) throw error;
+			throw new ReviewerFailure(`credential resolution failed for ${provider}: ${boundedReason(error instanceof Error ? error.message : String(error))}`, "auth_or_quota");
+		}
 	}
 
 	if (probeMode) {
-		evidence.probe_models = probeModelAvailability(
+		evidence.probe_models = await probeModelAvailability(
 			probeSpecs,
 			(provider, id) => modelRegistry.find(provider, id) !== undefined,
-			credentialResolver(),
+			credentialResolver(modelRegistry),
 		);
 	} else if (snapshot !== undefined) {
 		const agentRegistry = new AgentRegistry();
@@ -351,6 +462,7 @@ try {
 				evidence.result = contractProblems.length === 0 ? result : null;
 				evidence.contract_problems = contractProblems;
 				if (!evidence.model) problems.push("session did not report an actual provider/model");
+				else if (evidence.model !== request.model) problems.push(`model drift: requested ${request.model}, session resolved ${evidence.model}`);
 			}
 		} finally {
 			await session.dispose();
@@ -369,6 +481,12 @@ try {
 		evidence.error = { kind: error.kind, detail: error.message };
 	}
 	if (stack) console.error(stack);
+}
+
+try {
+	openAuthStorage?.close();
+} catch {
+	// Closing OMP's own store is best-effort; the process exits right after.
 }
 
 evidence.problems = problems;

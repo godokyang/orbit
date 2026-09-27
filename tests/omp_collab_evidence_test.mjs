@@ -17,20 +17,24 @@ import { installOmpExtension } from '../plugins/omp-host.mjs';
 process.env.ORBIT_RUBY = process.env.ORBIT_RUBY || execSync('which ruby').toString().trim();
 delete process.env.ORBIT_CLI_BIN;
 process.env.XDG_CONFIG_HOME = await fs.mkdtemp(path.join(os.tmpdir(), 'orbit-collab-xdg-'));
-// The start CLI resolves the review model through the live model catalog,
-// which re-syncs the session agent root (fresh temp: empty pool, session
-// default) — same fixture shape as the other omp plugin tests.
+// The isolated preflight reads the same model store as this OMP session.
+// A local provider with a config credential makes the fixture offline.
 const agentRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'orbit-collab-agents-'));
 await fs.mkdir(path.join(agentRoot, 'agents'), { recursive: true });
+process.env.PI_CODING_AGENT_DIR = agentRoot;
 process.env.ORBIT_SESSION_AGENT_ROOT = agentRoot;
-// Explicit checker startup probes the isolated catalog and credential resolver.
-// The fixture never makes a model request, so a scoped token command suffices.
-const tokenBin = path.join(agentRoot, 'bin');
-await fs.mkdir(tokenBin);
-const tokenCommand = path.join(tokenBin, 'omp');
-await fs.writeFile(tokenCommand, '#!/bin/sh\n[ "$1" = token ] || exit 1\nprintf "fixture-token\\n"\n');
-await fs.chmod(tokenCommand, 0o755);
-process.env.PATH = `${tokenBin}:${process.env.PATH}`;
+await fs.writeFile(path.join(agentRoot, 'models.yml'), `providers:
+  glm:
+    baseUrl: https://example.invalid/v1
+    apiKey: fixture-key
+    api: openai-completions
+    models:
+      - id: x
+        name: Fixture GLM
+        input: [text]
+        contextWindow: 128000
+        maxTokens: 8192
+`);
 
 const project = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'orbit-collab-')));
 const model = { provider: 'glm', id: 'x' };
@@ -54,11 +58,9 @@ function session(id, branch = []) {
 }
 const root = session('root', [{ type: 'message', id: 'original', message: { role: 'user', content: 'Original requirement.' } }]);
 const root2 = session('root2', [{ type: 'message', id: 'original2', message: { role: 'user', content: 'Second requirement.' } }]);
-const root3 = session('root3', [{ type: 'message', id: 'original3', message: { role: 'user',
-  content: 'Third requirement.\nOrbit authorization: review_model=openai-codex/gpt-5.6-sol' } }]);
+const root3 = session('root3', [{ type: 'message', id: 'original3', message: { role: 'user', content: 'Third requirement.' } }]);
 delete root3.model; // no observable model at binding -> no durable write until traffic
-const root4 = session('root4', [{ type: 'message', id: 'original4', message: { role: 'user',
-  content: 'Fourth requirement.\nOrbit authorization: review_model=openai-codex/gpt-5.6-sol' } }]);
+const root4 = session('root4', [{ type: 'message', id: 'original4', message: { role: 'user', content: 'Fourth requirement.' } }]);
 delete root4.model; // same as root3: no durable line at binding
 const rootRef = { id: mainAgentId, kind: 'main', parentId: null, status: 'running', session: root, sessionFile: '/tmp/root.jsonl', history: {}, activity: null };
 const registry = {
@@ -225,10 +227,9 @@ try {
   // the lost sequence range before the next event.
   rootRef.session = root3;
   const ctx3 = ctxFor(root3);
-  // Explicit --review-model: with an empty candidate pool the start CLI
-  // would otherwise need this session's model (absent on purpose, so no
-  // durable line lands before the read-only window).
-  const taskDir3 = await startTask(ctx3, 'original3', 'openai-codex/gpt-5.6-sol');
+  // No observable Root model: specify the same local model explicitly, so
+  // no identity line lands before the read-only window.
+  const taskDir3 = await startTask(ctx3, 'original3', 'glm/x');
   await fs.chmod(taskDir3, 0o500);
   await emit('tool_call', { toolName: 'hub', toolCallId: 'gap-1', input: { op: 'send', to: 'nobody', message: 'lost one' } }, ctx3);
   await emit('tool_call', { toolName: 'hub', toolCallId: 'gap-2', input: { op: 'send', to: 'nobody', message: 'lost two' } }, ctx3);
@@ -255,7 +256,7 @@ try {
   // as an explicit gap — never an overwrite, never a restart at 0.
   rootRef.session = root4;
   const ctx4 = ctxFor(root4);
-  const taskDir4 = await startTask(ctx4, 'original4', 'openai-codex/gpt-5.6-sol');
+  const taskDir4 = await startTask(ctx4, 'original4', 'glm/x');
   const seeded = JSON.stringify({ seq: 7, at: '2026-09-26T00:00:00.000Z', at_ms: 0, kind: 'hub_result',
     task_dir: taskDir4, session_id: 'previous-process', agent_id: null, ok: true, text: 'earlier run' }) + '\n';
   const fragment = '{"seq":8,"kind":"hub_call","mess'; // no trailing newline

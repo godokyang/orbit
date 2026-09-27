@@ -11,22 +11,11 @@ require_relative "model_evidence_cache"
 require_relative "omp_check_runner"
 
 module Orbit
-  # ADR-009 checker-model selection, shared by `orbit start` (first check) and
-  # TaskRuntime (before every later check).
-  #
-  # An explicit model verified against a native user message by CLI/TaskRuntime
-  # may be outside the pool; a tool argument alone cannot reach this branch.
-  #   * an empty pool keeps the existing session default;
-  #   * a non-empty pool is intersected with the session catalog and every
-  #     candidate is probed in the isolated checker profile;
-  #   * JEV ranks candidates with valid task-relevant facts, but missing facts,
-  #     low scores or unavailable judgment never exclude a runnable pool model.
-  # If none can run, report which candidates failed; do not use an unapproved
-  # model outside the pool. `candidate_statuses` remains read-only and does not
-  # probe or judge.
+  # Shared by start and every subsequent independent check. OMP supplies
+  # model availability; the pool is preferred, not a permission boundary.
+  # JEV task-fit ranks candidates with verified facts. Low or unknown fit
+  # never turns a runnable model into an authorization failure.
   class CheckerModelSelector
-    # Startup argument errors keep the same class family the CLI already
-    # handled, and every message ends with the explicit-model instruction.
     Error = Class.new(ArgumentError)
     # A preference boundary only; a lower score never forbids a runnable pool
     # model from doing a real independent check.
@@ -48,26 +37,29 @@ module Orbit
       @pool = pool
       @evidence_cache = evidence_cache
       @advisor = advisor
-      @probe = probe || ->(models) { OmpCheckRunner.probe_models(models: models) }
+      @probe = probe || ->(models, source_agent_dir:, source_project_dir:) {
+        OmpCheckRunner.probe_models(models: models, source_agent_dir: source_agent_dir,
+                                    source_project_dir: source_project_dir)
+      }
       @clock = clock || -> { Time.now.utc }
     end
 
-    # Returns [model, selection]. `explicit` non-nil is frozen for the task;
-    # `previous` is the last recorded review.selection (nil on the first call).
-    def select(explicit:, instruction:, previous: nil, selected_for: "start")
+    # `excluded` contains models whose real check failed on this input and
+    # artifact version. An explicit Root choice is pinned until it fails.
+    def select(explicit:, instruction:, previous: nil, selected_for: "start", excluded: [])
+      excluded = Array(excluded).map(&:to_s).uniq
       text = explicit.to_s.strip
-      unless text.empty?
+      if !text.empty? && !excluded.include?(text)
         return [previous["model"], previous] if same_explicit?(previous, text)
 
-        return [text, explicit_selection(text, selected_for)]
+        return explicit_selection(text, instruction, selected_for)
       end
-      if pinned_explicit?(previous)
+      if pinned_explicit?(previous) && !excluded.include?(previous["model"])
         return [previous["model"], previous]
       end
 
-      prepared = prepare(instruction)
+      prepared = prepare(instruction, excluded: excluded)
       return [previous["model"], previous] if reusable?(previous, prepared)
-      return empty_pool_selection(prepared, selected_for) if prepared["pool_empty"]
 
       auto_select(prepared, selected_for)
     end
@@ -144,97 +136,69 @@ module Orbit
       previous.is_a?(Hash) && previous["source"] == "explicit" && !previous["model"].to_s.empty?
     end
 
-    def explicit_selection(model, selected_for)
+    def explicit_selection(model, instruction, selected_for)
       raise Error, "OMP review model must be provider/id" unless model.match?(OmpCheckRunner::MODEL_ID)
-      if selected_for == "start"
-        availability = begin
-          @probe.call([model])
-        rescue StandardError => error
-          raise Error, "explicit review model could not be checked in the isolated profile (#{error.class}); ask the native user to choose another exact provider/id"
-        end
-        unless availability.is_a?(Hash) && Array(availability["resolvable"]).include?(model)
-          failures = availability.is_a?(Hash) ? availability["unresolvable"] : nil
-          reason = Array(failures).find { |item| item.is_a?(Hash) && item["model"] == model }
-          detail = reason && reason["reason"].to_s.strip
-          detail = "not resolvable in the isolated profile" if detail.nil? || detail.empty?
-          raise Error, "explicit review model #{model} is unavailable (#{detail.slice(0, 200)}); ask the native user to choose another exact provider/id"
-        end
-      end
 
-      pool = @pool.read
-      in_pool = pool.empty? || pool.include?(model)
-      selection = {
-        "source" => "explicit", "model" => model, "in_pool" => in_pool,
-        "version" => CheckerModelSelection::DECISION_VERSION,
-        "selected_for" => selected_for, "selected_at" => now_iso
-      }
-      unless in_pool
-        selection["notice"] = "explicit review model is outside the candidate pool"
-        warn "orbit: explicit review model #{model} is outside the candidate pool; using it as given"
+      prepared = prepare(instruction)
+      unless Array(prepared.dig("catalog", "available")).include?(model)
+        raise Error, "Root-selected review model #{model} is not available in this OMP session"
       end
-      selection
-    rescue ModelCandidatePool::Error
-      raise Error, "the candidate pool could not be read"
+      prepared["models"] = [model]
+      prepared["choice_source"] = "explicit"
+      prepared["signature"] = signature(prepared["pool"], prepared["catalog"], prepared["evidence"],
+                                         instruction, prepared["evidence_statuses"], [model])
+      selected, selection = auto_select(prepared, selected_for)
+      selection["in_pool"] = prepared["pool"].include?(model)
+      [selected, selection]
     end
 
-    def prepare(instruction)
+    def prepare(instruction, excluded: [])
       pool = @pool.read
-      if pool.empty?
-        default_model = begin
-          @connection.configured_model.to_s.strip
-        rescue StandardError
-          ""
-        end
-        return {
-          "pool" => pool, "pool_empty" => true, "catalog" => nil, "models" => [],
-          "evidence" => {}, "default_model" => default_model, "instruction" => instruction.to_s,
-          "signature" => signature(pool, nil, {}, instruction, default_model)
-        }
-      end
-
       catalog = begin
         @connection.model_catalog
       rescue StandardError
         nil
       end
-      models = CheckerModelSelection.pool_candidates(pool: pool, catalog: catalog)
+      available = Array(catalog&.[]("available")).select { |model| model.is_a?(String) &&
+        model.match?(OmpCheckRunner::MODEL_ID) }.uniq
+      current = catalog&.[]("current")
+      available = [current, *available.reject { |model| model == current }] if available.include?(current)
+      preferred = pool.select { |model| available.include?(model) && !excluded.include?(model) }
+      models = preferred.empty? ? available.reject { |model| excluded.include?(model) } : preferred
       entries = begin
         @evidence_cache.stored_entries
       rescue StandardError
         nil
       end
-      # nil (unreadable) stays distinguishable from [] (empty): diagnostics
-      # must report an unreadable cache as such, never as "absent" evidence.
       checked_at = @clock.call
-      evidence = CheckerModelSelection.cached_evidence(models: models, entries: entries, now: checked_at)
-      evidence_statuses = models.to_h do |model|
+      evidence = CheckerModelSelection.cached_evidence(models: available, entries: entries, now: checked_at)
+      evidence_statuses = available.to_h do |model|
         [model, entries.is_a?(Array) ?
           CheckerModelSelection.evidence_status(model: model, entries: entries, now: checked_at)["status"] : "unknown"]
       end
       {
-        "pool" => pool, "pool_empty" => false, "catalog" => catalog, "models" => models,
-        "evidence" => evidence, "default_model" => nil, "instruction" => instruction.to_s,
-        # Raw entries feed the undecided diagnostics (absent/expired/unavailable
-        # per exact identity); the judged `evidence` above keeps only valid
-        # entries, which cannot distinguish why a candidate has none.
-        "entries" => entries, "evidence_statuses" => evidence_statuses,
-        "signature" => signature(pool, catalog, evidence, instruction, nil, evidence_statuses)
+        "pool" => pool, "catalog" => catalog, "models" => models, "preferred" => preferred,
+        "available" => available, "excluded" => excluded, "evidence" => evidence,
+        "agent_dir" => catalog&.[]("agent_dir"),
+        "instruction" => instruction.to_s, "entries" => entries, "evidence_statuses" => evidence_statuses,
+        "signature" => signature(pool, catalog, evidence, instruction, evidence_statuses, excluded)
       }
     rescue ModelCandidatePool::Error
       raise Error, "the candidate pool could not be read"
     end
 
-    def signature(pool, catalog, evidence, instruction, default_model, evidence_statuses = {})
+    def signature(pool, catalog, evidence, instruction, evidence_statuses = {}, excluded = [])
       catalog_view =
         if catalog.is_a?(Hash)
           { "current" => catalog["current"].to_s,
+            "agent_dir" => catalog["agent_dir"].to_s,
             "available" => Array(catalog["available"]).map(&:to_s).sort,
             "families" => catalog["families"].is_a?(Hash) ? catalog["families"].sort_by { |key, _| key.to_s }.to_h : {} }
         end
       Digest::SHA256.hexdigest(JSON.generate([
-        "orbit-checker-selection-signature-v2",
+        "orbit-checker-selection-signature-v3",
         pool, catalog_view, evidence.sort_by { |key, _| key.to_s }.to_h,
-        evidence_statuses, default_model.to_s, instruction.to_s.scrub
+        evidence_statuses, instruction.to_s.scrub, excluded.sort
       ]))
     end
 
@@ -247,34 +211,51 @@ module Orbit
       model = previous["model"].to_s
       return false if model.empty?
 
-      prepared["pool_empty"] || prepared["models"].include?(model)
-    end
-
-    def empty_pool_selection(prepared, selected_for)
-      model = prepared["default_model"].to_s
-      unless model.match?(OmpCheckRunner::MODEL_ID)
-        raise Error, "OMP session default review model must be provider/id"
-      end
-
-      [model, { "source" => "session_default", "model" => model,
-                "version" => CheckerModelSelection::DECISION_VERSION,
-                "selected_for" => selected_for, "selected_at" => now_iso,
-                "signature" => prepared["signature"] }]
+      prepared["models"].include?(model) && !prepared["excluded"].include?(model)
     end
 
     def auto_select(prepared, selected_for)
       catalog = prepared["catalog"]
       unless catalog.is_a?(Hash)
         raise failed_selection(prepared, "the OMP session model catalog is unavailable",
-                               detail: ["pool candidates #{listed(prepared['pool'])} were not checked against the session catalog"])
+                               detail: ["no OMP model can be verified without its current catalog"])
       end
       if prepared["models"].empty?
-        raise failed_selection(prepared, "no candidate pool model is available in this session",
-                               detail: ["not in this session catalog: #{listed(prepared['pool'])}"])
+        raise failed_selection(prepared, "no unused OMP model is available in this session",
+                               detail: prepared["excluded"].empty? ? [] : ["already tried: #{listed(prepared['excluded'])}"])
       end
 
+      availability = begin
+        @probe.call(prepared["models"], source_agent_dir: prepared["agent_dir"], source_project_dir: @project_root)
+      rescue StandardError => error
+        raise failed_selection(prepared, "OMP models could not be checked in the isolated profile (#{error.class})",
+                               detail: ["candidates #{listed(prepared['models'])}; no model was proven runnable"])
+      end
+      if Array(availability["resolvable"]).empty? && prepared["choice_source"] != "explicit" &&
+         prepared["preferred"].any?
+        # The pool is a preference, not a permission boundary. Probe the
+        # remaining OMP models only when no preferred model is runnable.
+        fallback = prepared["available"] - prepared["preferred"] - prepared["excluded"]
+        unless fallback.empty?
+          extra = begin
+            @probe.call(fallback, source_agent_dir: prepared["agent_dir"], source_project_dir: @project_root)
+          rescue StandardError => error
+            raise failed_selection(prepared, "OMP fallback models could not be checked (#{error.class})",
+                                   detail: probe_lines(availability, prepared["models"]), availability: availability)
+          end
+          availability = { "resolvable" => Array(extra["resolvable"]),
+                           "unresolvable" => Array(availability["unresolvable"]) + Array(extra["unresolvable"]) }
+          prepared["models"] = fallback
+        end
+      end
+      source = prepared["choice_source"] || (prepared["models"].any? { |model| prepared["pool"].include?(model) } &&
+        Array(availability["resolvable"]).any? { |model| prepared["pool"].include?(model) } ?
+        "candidate_pool" : "omp_session")
+
       evidence = prepared["evidence"]
-      judged = prepared["models"].select { |candidate| evidence.key?(candidate) }
+      judged = prepared["models"].select do |candidate|
+        evidence.key?(candidate) && Array(availability["resolvable"]).include?(candidate)
+      end
       judgment = nil
       judgment_state = nil
       judgment_error = nil
@@ -314,20 +295,13 @@ module Orbit
         tiers["cost"] = band if band
         out[candidate] = tiers
       end
-      availability = begin
-        @probe.call(prepared["models"])
-      rescue StandardError => error
-        raise failed_selection(prepared, "pool models could not be checked in the isolated profile (#{error.class})",
-                               detail: ["pool candidates #{listed(prepared['models'])}; no model was proven runnable"],
-                               judgment: judgment, judgment_state: judgment_state, judgment_error: judgment_error)
-      end
       decision = CheckerModelSelection.choose(
-        pool: prepared["pool"], catalog: catalog, quality: quality,
+        pool: prepared["models"], catalog: catalog, quality: quality,
         resolvable: availability.fetch("resolvable"), time_cost: time_cost,
         fit_scores: scores.transform_values { |score| score["quality"] }
       )
       if decision["model"].nil?
-        raise failed_selection(prepared, "no runnable checker model in the candidate pool (#{decision['reason']})",
+        raise failed_selection(prepared, "no unused runnable OMP checker model (#{decision['reason']})",
                                detail: probe_lines(availability, prepared["models"]),
                                judgment: judgment, judgment_state: judgment_state, judgment_error: judgment_error,
                                availability: availability)
@@ -338,13 +312,15 @@ module Orbit
       runnable = Array(availability["resolvable"])
       evidence_needed = prepared["models"].filter_map do |candidate|
         next unless runnable.include?(candidate) && !evidence.key?(candidate)
+        next if source != "candidate_pool" && candidate != chosen
 
         status = prepared["evidence_statuses"][candidate]
         { "model" => candidate, "status" => status } if %w[absent expired invalid].include?(status)
       end
       unscored = prepared["models"] - scores.keys
       selection = decision.merge(
-        "source" => "candidate_pool", "quality_score" => scores.dig(chosen, "quality"),
+        "source" => source, "model" => chosen, "quality_score" => scores.dig(chosen, "quality"),
+        "source_agent_dir" => prepared["agent_dir"],
         "time_score" => scores.dig(chosen, "time"), "time_tier" => time_cost.dig(chosen, "time"),
         "cost_tier" => evidence.dig(chosen, "cost_tier"),
         "quality_sources" => Array(selected_evidence&.[]("sources")).first(MAX_SOURCES),
@@ -431,7 +407,7 @@ module Orbit
       parts = [reason]
       parts << "(#{detail.join('; ')})" unless detail.empty?
       parts << extra if extra
-      parts << "check candidate pool and isolated checker availability; an outside-pool choice requires the native user's exact Orbit authorization: review_model=provider/id"
+      parts << "check OMP model availability and isolated checker credentials; Root may select any resolvable OMP model"
       Error.new(parts.join("; "))
     end
 

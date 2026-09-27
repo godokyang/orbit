@@ -21,7 +21,6 @@ require_relative "model_evidence_cache"
 require_relative "model_candidate_pool"
 require_relative "checker_model_selection"
 require_relative "checker_model_selector"
-require_relative "model_authorization"
 require_relative "diagnostics"
 require_relative "release_lease"
 
@@ -90,7 +89,7 @@ module Orbit
             "status":"unavailable","retrieved_at":"…","reason":"<为什么无法取得>"}]
         Orbit 校验后原子写入用户级缓存：带 TASK_DIRECTORY 时同时向任务进程入队（status "queued"），精确命中当前检查者缺口则确认补证，否则按执行成员的请求身份核对；省略任务目录时只写缓存（status "cached"），适用于建任务前及运行中的检查者补证。下次独立检查开始前会重新读取、判断池内选模；不自动中断在途检查。
       TEXT
-      "review-model" => "orbit review-model TASK_DIRECTORY --model provider/id [--authorization-message-id ID] [--reason TEXT]\n仅在同一原生 OMP 会话中用户明确写入独立一行 Orbit authorization: review_model=provider/id（或 review_model_session=provider/id）后接受；默认核对最新原生用户消息。Root 自传 --model 不构成授权。任务结束记录不接受；不会自动重试或切换在途检查。池外型号会标注。",
+      "review-model" => "orbit review-model TASK_DIRECTORY --model provider/id [--reason TEXT]\nRoot 可从当前 OMP 可用目录指定检查模型；任务进程在下一次检查前再次核对隔离目录与凭据。已结束任务不接受；在途检查不切换。池外选择记录来源，不要求用户逐型号授权。",
       "model-candidates" => <<~TEXT,
         orbit model-candidates list
         orbit model-candidates add <provider/id>
@@ -104,19 +103,18 @@ module Orbit
       "model-status" => <<~TEXT,
         orbit model-status [--project DIR] [--thread ID --socket PATH]
         只读诊断：当前长期候选池逐项状态——是否在本 OMP 会话可选目录（需 --thread/--socket）、精确身份的缓存证据是有效／缺失／过期／无法取得还是结构无效，以及质量判定与隔离环境解析的“未探测”标记。不调用 JEV、不探测隔离环境、不建任务、不写文件。
-        stdout 输出一行 JSON（pool_empty、session_catalog、evidence_cache、candidates[]，缺省会话时 default_model 为当前会话模型）。候选池为空时保持现有语义：无候选项，仅报会话默认模型。
+        stdout 输出一行 JSON（pool_empty、session_catalog、evidence_cache、candidates[]，无候选池时报告 OMP 会话当前型号；实际检查从 OMP 可用目录选并预检）。
       TEXT
       "start" => <<~TEXT,
         orbit start [--provider omp] [--project DIR]
-                    [--review-model MODEL] [--review-authorization-message ID]
+                    [--review-model MODEL]
                     [--thread ID] [--socket PATH] [--message-id ID | --prompt-file FILE|-] [--basis FILE]
                     [--check-in SECONDS] [--estimate-minutes N] [--estimate-tokens N]
                     [--deadline ISO8601] [--foreground]
         仅绑定已有可控 OMP 会话，不创建或替换主执行 Agent。
         project 默认为当前目录；thread 与 socket 来自当前受控 OMP 会话。
         原文来自指定或最近的原生用户消息；--basis 可重复，--prompt-file - 从 stdin 读取。
-        候选池非空时在其中自动选可运行检查模型；JEV 任务适配分只影响优先顺序，低分或缺证据仍会选池内可运行模型并标明检查质量未证实。对可运行却缺失／过期精确资料的型号，start 返回 evidence_needed 与 Root 补证步骤；Root 从一手来源核实后使用 orbit model-evidence --file - 提交，无来源时如实记录 unavailable。池空沿用会话默认模型。精确显式型号须由原生用户消息单独一行 Orbit authorization: review_model=provider/id 授权。
-        会话沿用须由原生用户消息单独一行 Orbit authorization: review_model_session=provider/id 授权；复用时 --review-authorization-message 指向该消息。Root 参数和 ORBIT_REVIEW_MODEL 环境变量本身均不能授权。
+        候选池有可运行型号时优先池内选模；池空或池内均不可运行时从 OMP 当前会话目录选。JEV 当前任务适配分影响顺序，低分或缺证据仍可选可运行型号并标记质量未证实。start 返回 evidence_needed 时由 Root 从一手来源核实后用 orbit model-evidence --file - 提交；无法取得如实记录 unavailable。Root 也可用 --review-model 指定 OMP 可用型号，不要求原生用户逐型号授权；所有选择均预检隔离检查者目录与凭据。
         --check-in 首次默认 300 秒，后续由检查者约定；预估不是硬上限。
         只有用户明确设置的 --deadline 才形成截止。--foreground 在当前终端运行任务进程。
       TEXT
@@ -307,7 +305,6 @@ module Orbit
         opts.on("--thread ID") { |value| options[:thread] = value }
         opts.on("--socket PATH") { |value| options[:socket] = value }
         opts.on("--review-model MODEL") { |value| options[:model] = value }
-        opts.on("--review-authorization-message ID") { |value| options[:review_authorization_id] = value }
         opts.on("--message-id ID") { |value| options[:message_id] = value }
         opts.on("--prompt-file FILE") { |value| options[:prompt_file] = value }
         opts.on("--basis FILE") { |value| options[:basis] << value }
@@ -350,19 +347,7 @@ module Orbit
           previous = PrestartLedger.new(File.realpath(options[:project])).task_for(message.fetch("id"))
           raise ArgumentError, "this native message already has an Orbit task: #{previous}" if previous
         end
-        if source["id"] && (choice = ModelAuthorization.choice(instruction))
-          if options[:model] && options[:model] != choice.fetch("model")
-            raise ArgumentError, "review model conflicts with the native user's exact choice"
-          end
-          options[:model] ||= choice.fetch("model")
-        end
-        authorization = if options[:model]
-                          ModelAuthorization.verify(connection: connection, instruction_id: source["id"],
-                                                    message_id: options[:review_authorization_id] || source["id"],
-                                                    model: options[:model])
-                        end
         options[:model], options[:selection] = select_checker_model(options[:model], connection, options[:project], instruction)
-        options[:selection]["authorization"] = authorization if authorization
       ensure
         connection.close
       end
@@ -391,10 +376,10 @@ module Orbit
       response["notice"] = options[:selection]["notice"] if options[:selection]["notice"]
       if options[:selection]["evidence_needed"]&.any?
         response["evidence_needed"] = options[:selection]["evidence_needed"]
-        response["evidence_action"] = "Root: 先核查上述可运行池内精确型号的一手资料，" \
+        response["evidence_action"] = "Root: 先核查上述可运行精确型号的一手资料，" \
                                       "再用 orbit model-evidence --file - 提交真实事实（检查者补证不传任务目录；" \
                                       "provider/model 按 provider/id 分开填写，reasoning 未知可省略）。" \
-                                      "无法取得时如实提交 status=unavailable，不编造证据或自行改选池外型号。"
+                                      "无法取得时如实提交 status=unavailable，不编造证据或把近似型号当成同一模型。"
       end
       if options[:foreground]
         puts JSON.generate(response)
@@ -496,43 +481,38 @@ module Orbit
                           .select(explicit: explicit, instruction: instruction, selected_for: "start")
     end
 
-    # A real user choice is verified against the bound native OMP conversation
-    # both before queueing and again by the task runtime. A Root tool argument
-    # does not unblock a failed checker on its own; no automatic retry occurs.
+    # Root may choose any model in the current OMP catalog. This command
+    # preflights availability before queueing; the runtime rechecks before
+    # starting a new independent review.
     def review_model(argv)
       options = {}
       OptionParser.new do |parser|
         parser.on("--model MODEL") { |value| options["model"] = value }
         parser.on("--reason TEXT") { |value| options["reason"] = value }
-        parser.on("--authorization-message-id ID") { |value| options["authorization_message_id"] = value }
       end.parse!(argv)
       directory = argv.shift
-      if directory.nil? || !argv.empty?
-        raise ArgumentError, "usage: orbit review-model TASK_DIRECTORY --model provider/id [--authorization-message-id ID]"
-      end
+      raise ArgumentError, "usage: orbit review-model TASK_DIRECTORY --model provider/id" if directory.nil? || !argv.empty?
 
       model = options["model"].to_s.strip
       raise ArgumentError, "OMP review model must be provider/id" unless model.match?(CHECKER_MODEL_PATTERN)
       record = TaskRecord.new(directory)
       state = record.state
-      if TaskRuntime::TERMINAL.include?(state["status"])
-        raise ArgumentError, "task process has ended; records are retained, no action was queued"
-      end
+      raise ArgumentError, "task process has ended; records are retained" if TaskRuntime::TERMINAL.include?(state["status"])
+
       connection = Connection.open(state.fetch("connection"))
       begin
         connection.connect!
         raise ArgumentError, "Root session belongs to a different project" unless
           File.realpath(connection.state.fetch("cwd")) == state.fetch("project_root")
-        message = connection.user_message(id: options["authorization_message_id"])
-        authorization = ModelAuthorization.verify(connection: connection,
-          instruction_id: state.dig("instruction_source", "id"), message_id: message && message["id"], model: model)
+        CheckerModelSelector.new(connection: connection, project_root: state.fetch("project_root"))
+                            .select(explicit: model, instruction: record.inputs(state).fetch("instruction"),
+                                    selected_for: "review_model")
       ensure
         connection.close
       end
       reason = options["reason"].to_s.strip
-      reason = "user-authorized checker model after a failed check" if reason.empty?
-      id = record.submit("review_model", "model" => model, "reason" => reason,
-                         "authorization" => authorization)
+      reason = "Root selected another OMP checker model" if reason.empty?
+      id = record.submit("review_model", "model" => model, "reason" => reason)
       puts JSON.generate({ "task_directory" => record.path, "command_id" => id, "status" => "queued", "model" => model })
       0
     end
@@ -543,7 +523,8 @@ module Orbit
       model = state.dig("review", "model").to_s
       raise ArgumentError, "OMP review model must be provider/id" unless model.match?(CHECKER_MODEL_PATTERN)
 
-      OmpCheckRunner.new(model: model)
+      OmpCheckRunner.new(model: model, source_agent_dir: state.dig("review", "selection", "source_agent_dir"),
+                         source_project_dir: state.fetch("project_root"))
     end
 
     def run_task(record)
@@ -772,10 +753,10 @@ module Orbit
       if TaskRuntime::TERMINAL.include?(record.state["status"])
         raise ArgumentError, "task process has ended; records are retained, no action was queued"
       end
-      if command == "check" && record.state.dig("review", "blocked", "type") == "check_failure"
+      if command == "check" && %w[check_failure selection_undecided].include?(record.state.dig("review", "blocked", "type"))
         payload = {
           "task_directory" => record.path, "status" => "rejected", "reason" => "checker_model_blocked",
-          "next_action" => "Ask the native user to send Orbit authorization: review_model=provider/id, then run orbit review-model TASK_DIRECTORY --model provider/id; wait for the replacement check before requesting a final manual check"
+          "next_action" => "No runnable OMP checker remains. Root can inspect OMP availability and run orbit review-model TASK_DIRECTORY --model provider/id after credentials or models change"
         }
         puts JSON.generate(payload)
         return 0

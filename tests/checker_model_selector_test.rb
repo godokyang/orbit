@@ -5,9 +5,8 @@ require "tmpdir"
 require "time"
 require_relative "../lib/orbit/checker_model_selector"
 
-# Explicit selection still requires native-user authorization at the CLI.
-# Automated selection stays in the pool and uses a runnable candidate even
-# when task-fit scores or evidence are unavailable.
+# OMP availability permits models; the pool is preference. JEV still ranks
+# current-task fit and unknown/low scores remain an explicitly marked fallback.
 module CheckerModelSelectorTest
   module_function
 
@@ -56,17 +55,21 @@ module CheckerModelSelectorTest
   end
 
   class FakeProbe
-    attr_reader :calls, :models
+    attr_reader :calls, :models, :source_agent_dir, :source_project_dir
 
     def initialize(resolvable)
       @resolvable = resolvable
       @calls = 0
     end
 
-    def call(models)
+    def call(models, source_agent_dir: nil, source_project_dir: nil)
       @calls += 1
       @models = models
-      { "resolvable" => @resolvable }
+      @source_agent_dir = source_agent_dir
+      @source_project_dir = source_project_dir
+      { "resolvable" => models.select { |model| @resolvable.include?(model) },
+        "unresolvable" => models.reject { |model| @resolvable.include?(model) }
+                               .map { |model| { "model" => model, "reason" => "unavailable" } } }
     end
   end
 
@@ -109,40 +112,53 @@ module CheckerModelSelectorTest
     )
   end
 
-  def explicit_outside_pool_is_used_with_a_notice_and_no_judgment
-    advisor = FakeAdvisor.new({})
+  def root_selected_model_is_probed_and_jev_ranked_without_user_grant
+    advisor = FakeAdvisor.new({ "openai/gpt-x" => { "quality" => 0.9, "time" => 0.8 } })
     probe = FakeProbe.new(["openai/gpt-x"])
-    model, selection = silence do
-      selector(pool: ["a/one"], catalog: nil, entries: [], advisor: advisor, probe: probe)
-        .select(explicit: "openai/gpt-x", instruction: "build it")
-    end
-    assert(model == "openai/gpt-x", "an explicit model is used as given")
-    assert(selection["source"] == "explicit" && selection["in_pool"] == false,
-           "an outside-pool explicit model is recorded as such")
-    assert(selection["notice"].to_s.include?("outside the candidate pool"), "the notice is recorded")
-    assert(advisor.calls.zero? && probe.calls == 1 && probe.models == ["openai/gpt-x"],
-           "an explicit start probes the isolated checker without calling JEV")
+    model, selection = selector(pool: ["a/one"], catalog: catalog_for(["a/one", "openai/gpt-x"]),
+                                entries: [entry("openai/gpt-x")], advisor: advisor, probe: probe)
+                       .select(explicit: "openai/gpt-x", instruction: "build it")
+    assert(model == "openai/gpt-x" && selection["source"] == "explicit" && selection["in_pool"] == false,
+           "Root may choose a current OMP model outside the preference pool")
+    assert(selection["quality_score"] == 0.9 && advisor.calls == 1 &&
+           probe.models == ["openai/gpt-x"], "Root's choice retains JEV task-fit and isolated preflight")
   end
 
-  def explicit_model_missing_from_isolated_catalog_is_rejected
-    advisor = FakeAdvisor.new({})
-    probe = FakeProbe.new([])
-    error = assert_raises do
-      selector(pool: ["a/one"], catalog: nil, entries: [], advisor: advisor, probe: probe)
-        .select(explicit: "openai/gpt-x", instruction: "build it")
+  def root_selected_model_must_be_omp_available_and_checker_resolvable
+    Dir.mktmpdir("orbit-root-model-") do |project|
+      advisor = FakeAdvisor.new({})
+      probe = FakeProbe.new([])
+      built = selector(pool: ["a/one"], catalog: catalog_for(["a/one", "openai/gpt-x"]),
+                       entries: [], advisor: advisor, probe: probe, project_root: project)
+      error = assert_raises { built.select(explicit: "openai/gpt-x", instruction: "build it") }
+      assert(error.message.include?("no unused runnable") && probe.models == ["openai/gpt-x"],
+             "a Root choice absent from the isolated reviewer cannot start")
+      error = assert_raises { built.select(explicit: "other/missing", instruction: "build it") }
+      assert(error.message.include?("not available in this OMP session"),
+             "Root cannot invent a model outside the OMP catalog")
     end
-    assert(error.message.include?("unavailable") && probe.models == ["openai/gpt-x"],
-           "a model absent from the isolated checker fails before task creation")
-    assert(advisor.calls.zero?, "an explicit selection never calls JEV")
   end
 
-  def empty_pool_keeps_the_session_default
+  def empty_pool_uses_omp_catalog_and_checks_availability
     advisor = FakeAdvisor.new({})
-    model, selection = selector(pool: [], catalog: nil, entries: [], advisor: advisor,
-                                probe: FakeProbe.new([])).select(explicit: nil, instruction: "x")
-    assert(model == "session/default" && selection["source"] == "session_default",
-           "an empty pool keeps the session default")
-    assert(advisor.calls.zero?, "the empty-pool path does not call JEV")
+    model, selection = selector(pool: [], catalog: catalog_for(["session/default", "other/second"]),
+                                entries: [], advisor: advisor, probe: FakeProbe.new(["session/default"]))
+                       .select(explicit: nil, instruction: "x")
+    assert(model == "session/default" && selection["source"] == "omp_session" &&
+           selection["selection_tier"] == "fallback", "no pool still selects a real runnable OMP model")
+    assert(advisor.calls.zero?, "no verified evidence means Jev does not invent a score")
+  end
+
+  def profile_agent_directory_is_used_by_preflight_and_recorded_for_the_check
+    source = "/tmp/omp-profile-agent"
+    probe = FakeProbe.new(["profile/model"])
+    catalog = catalog_for(["profile/model"]).merge("agent_dir" => source)
+    _, selection = selector(pool: [], catalog: catalog, entries: [],
+                            advisor: FakeAdvisor.new({}), probe: probe)
+                   .select(explicit: nil, instruction: "review")
+    assert(probe.source_agent_dir == source && selection["source_agent_dir"] == source &&
+           probe.source_project_dir == "/tmp",
+           "the host's active --profile and project directory bind isolated model resolution")
   end
 
   def unchanged_input_reuses_the_recorded_decision
@@ -289,9 +305,33 @@ module CheckerModelSelectorTest
                                 entries: [entry("a/preferred"), entry("b/fallback")], advisor: advisor, probe: probe)
                        .select(explicit: nil, instruction: "build it")
     assert(model == "b/fallback" && selection["selection_tier"] == "fallback" &&
-           selection.dig("task_fit_scores", "a/preferred", "quality") == 0.9 &&
+           advisor.state["candidates"].map { |item| item["model"] } == ["b/fallback"] &&
            probe.models == %w[a/preferred b/fallback],
-           "a high score does not block a lower-scored model when only the latter can run")
+           "JEV judges only runnable candidates; a high but unusable model cannot block a fallback")
+  end
+
+  def unusable_pool_falls_back_to_omp_and_keeps_jev_ranking
+    advisor = FakeAdvisor.new({ "root/model" => { "quality" => 0.9, "time" => 0.8 } })
+    probe = FakeProbe.new(["root/model"])
+    model, selection = selector(pool: ["pool/unusable"],
+                                catalog: catalog_for(["pool/unusable", "root/model"]),
+                                entries: [entry("root/model")], advisor: advisor, probe: probe)
+                       .select(explicit: nil, instruction: "review this change")
+    assert(model == "root/model" && selection["source"] == "omp_session" &&
+           selection["quality_score"] == 0.9 && advisor.calls == 1,
+           "unrunnable pool preference falls back to another OMP model with JEV fit preserved")
+  end
+
+  def failed_model_is_excluded_from_the_next_check
+    pool = %w[pool/first pool/second]
+    built = selector(pool: pool, catalog: catalog_for(pool), entries: [],
+                     advisor: FakeAdvisor.new({}), probe: FakeProbe.new(pool))
+    first, previous = built.select(explicit: nil, instruction: "review")
+    next_model, selection = built.select(explicit: nil, instruction: "review",
+                                        previous: previous, excluded: [first], selected_for: "before_check")
+    assert(first == "pool/first" && next_model == "pool/second" &&
+           selection["signature"] != previous["signature"],
+           "a failed check cannot be replayed on the same model and changes the selection signature")
   end
 
   def no_runnable_pool_model_records_the_failed_judgment
@@ -304,11 +344,10 @@ module CheckerModelSelectorTest
           .select(explicit: nil, instruction: "build it")
       end
       trace = JSON.parse(File.read(File.join(project, ".orbit", "checker-selection-failures.jsonl")))
-      assert(error.message.include?("no runnable checker model") &&
-             trace.dig("judgment", "scores", "a/one", "quality") == 0.03 &&
-             trace.dig("judgment_state", "instruction") == "build it" &&
-             trace["session_candidates"] == ["a/one"],
-             "a genuinely unresolvable pool fails with the exact scored input and response saved locally")
+      assert(error.message.include?("no unused runnable") &&
+             trace["session_candidates"] == ["a/one"] &&
+             trace.dig("isolated_probe", "resolvable") == [],
+             "all unavailable models fail with the actual probe outcome, not an invented Jev score")
     end
   end
 
@@ -339,9 +378,10 @@ module CheckerModelSelectorTest
   end
 
   def main
-    %w[explicit_outside_pool_is_used_with_a_notice_and_no_judgment
-       explicit_model_missing_from_isolated_catalog_is_rejected
-       empty_pool_keeps_the_session_default
+    %w[root_selected_model_is_probed_and_jev_ranked_without_user_grant
+       root_selected_model_must_be_omp_available_and_checker_resolvable
+       empty_pool_uses_omp_catalog_and_checks_availability
+       profile_agent_directory_is_used_by_preflight_and_recorded_for_the_check
        unchanged_input_reuses_the_recorded_decision
        changed_pool_reselects_before_the_next_check
        end_to_end_time_orders_the_qualified_candidates
@@ -354,6 +394,8 @@ module CheckerModelSelectorTest
        only_runnable_candidates_with_missing_or_expired_facts_request_root_research
        unresolvable_preferred_model_falls_through_to_a_runnable_pool_model
        no_runnable_pool_model_records_the_failed_judgment
+       unusable_pool_falls_back_to_omp_and_keeps_jev_ranking
+       failed_model_is_excluded_from_the_next_check
        candidate_statuses_are_read_only_and_precise].each do |test|
       send(test)
       puts "CHECKER_MODEL_SELECTOR_TEST_PASS #{test}"

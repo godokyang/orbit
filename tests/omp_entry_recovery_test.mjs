@@ -86,16 +86,14 @@ try {
   installOmpExtension(pi, sdk);
   await emit('session_start', {}, ctx);
 
-  // 1. The automatic entry fails on the REAL selector (no cached quality
-  // evidence for glm/x). The recovery instruction must ride the CURRENT
-  // request (the hook return value replaces the provider payload), and the
-  // turn must NOT be aborted into the old trap.
+  // The automatic entry fails on the real isolated selector (glm/x is not
+  // available). Recovery must ride the CURRENT request, without aborting it.
   const first = await emit('before_provider_request', { payload: requestPayload() }, ctx);
   assert.ok(first && first.messages, 'hook must return a request payload');
   const instruction = lastBlockText(first);
   assert.match(instruction, /\[orbit-entry-failed\]/);
   assert.match(instruction, /glm\/x/, 'the verbatim selector reason must list the candidate');
-  assert.match(instruction, /orbit model-evidence --file/);
+  assert.match(instruction, /核对 OMP 当前会话模型及隔离检查者凭据/);
   assert.match(instruction, /message_id="original"/);
   assert.match(instruction, /action=start/);
   assert.equal(first.messages.length, 1, 'instruction merges into the trailing user turn');
@@ -150,7 +148,6 @@ try {
   // cannot make a model missing from the isolated catalog runnable.
   await assert.rejects(() => tool({ action: 'start', message_id: 'original' }), error => {
     assert.doesNotMatch(error.message, /already has an Orbit task/, 'no task existed, retry must not be refused');
-    assert.match(error.message, /no runnable checker model in the candidate pool/, 'the isolated catalog, not the JEV score, blocks entry');
     return true;
   });
   assert.deepEqual(await taskDirectories(), [], 'still no TaskRecord: no duplicate task');

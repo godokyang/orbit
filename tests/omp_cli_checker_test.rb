@@ -6,8 +6,7 @@ require "tmpdir"
 require "fileutils"
 require_relative "../lib/orbit/cli"
 
-# Wiring only: OMP start selects the session model, and run_task builds
-# OmpCheckRunner. TaskRuntime#run is not the product loop.
+# OMP catalog selection, JEV ranking and the real checker runner wiring.
 module OmpCliCheckerTest
   module_function
 
@@ -15,14 +14,14 @@ module OmpCliCheckerTest
     raise message unless value
   end
 
-  def fake_connection(cwd, model, user_text = nil)
+  def fake_connection(cwd, model, user_text = nil, available: nil)
     connection = Object.new
     connection.define_singleton_method(:connect!) { self }
     connection.define_singleton_method(:close) { nil }
     connection.define_singleton_method(:state) { { "cwd" => cwd, "status" => "idle" } }
     connection.define_singleton_method(:configured_model) { model }
     connection.define_singleton_method(:model_catalog) do
-      { "current" => model, "available" => [], "families" => {} }
+      { "current" => model, "available" => available || [model], "families" => {} }
     end
     connection.define_singleton_method(:instruction_source_kind) { "omp_user_message" }
     connection.define_singleton_method(:user_message) do |id: nil|
@@ -57,12 +56,11 @@ module OmpCliCheckerTest
     Orbit::OmpCheckRunner.define_singleton_method(:probe_models, original)
   end
 
-  def start_omp(project, prompt, env: {}, review_model: nil, native: false, message_id: "m1", authorization_id: nil)
+  def start_omp(project, prompt, env: {}, review_model: nil, native: false, message_id: "m1")
     argv = ["start", "--provider", "omp", "--project", project, "--thread", "root-session",
             "--socket", File.join(project, "unused.sock"), native ? "--message-id" : "--prompt-file",
             native ? message_id : prompt, "--foreground"]
     argv.insert(3, "--review-model", review_model) if review_model
-    argv.concat(["--review-authorization-message", authorization_id]) if authorization_id
     previous = ENV["XDG_CONFIG_HOME"]
     previous_cache = ENV["XDG_CACHE_HOME"]
     ENV["XDG_CONFIG_HOME"] = File.join(File.dirname(project), "xdg-config")
@@ -85,14 +83,14 @@ module OmpCliCheckerTest
       marker = File.join(tmp, "checker-class.txt")
       chosen = "zhipu-coding-plan/glm-5.2"
       connection = fake_connection(File.realpath(project), "other-provider/other-model",
-                                   "Implement sum.\nOrbit authorization: review_model=#{chosen}")
+                                   "Implement sum.", available: ["other-provider/other-model", chosen])
       status = with_probe do
-        with_stubs(connection, marker) { start_omp(project, prompt, native: true) }
+        with_stubs(connection, marker) { start_omp(project, prompt, native: true, review_model: chosen) }
       end
       state = JSON.parse(File.read(Dir.glob(File.join(project, ".orbit/tasks/*/state.json")).fetch(0)))
       assert(status == 0 && state.dig("review", "model") == chosen &&
-             state.dig("review", "selection", "authorization", "message_id") == "m1",
-             "a native user choice binds the exact model and message id")
+             state.dig("review", "selection", "source") == "explicit",
+             "Root selects a current OMP model without a user directive")
     end
   end
 
@@ -178,71 +176,6 @@ module OmpCliCheckerTest
     end
   end
 
-  def a_session_choice_requires_the_original_native_user_message_on_each_task
-    Dir.mktmpdir("orbit-review-session-") do |tmp|
-      project = File.join(tmp, "project")
-      FileUtils.mkdir_p(project)
-      prompt = File.join(tmp, "prompt.txt")
-      File.write(prompt, "unused")
-      model = "zhipu-coding-plan/glm-5.2"
-      connection = fake_connection(File.realpath(project), "root/model")
-      messages = [
-        { "id" => "m1", "text" => "First task\nOrbit authorization: review_model_session=#{model}",
-          "internal" => false },
-        { "id" => "m2", "text" => "Second task", "internal" => false }
-      ]
-      connection.define_singleton_method(:user_message) do |id: nil|
-        id ? messages.find { |message| message["id"] == id } : messages.last
-      end
-      with_probe do
-        with_stubs(connection, File.join(tmp, "unused.txt")) do
-          assert(start_omp(project, prompt, native: true) == 0, "first task uses the user's session-scoped choice")
-          assert(start_omp(project, prompt, native: true, message_id: "m2",
-                           review_model: model, authorization_id: "m1") == 0,
-                 "second task can reuse the same native user's session-scoped choice")
-        end
-      end
-      states = Dir.glob(File.join(project, ".orbit/tasks/*/state.json")).map { |file| JSON.parse(File.read(file)) }
-      assert(states.length == 2 &&
-             states.all? { |state| state.dig("review", "selection", "authorization") ==
-               { "kind" => "native_user_message", "message_id" => "m1", "model" => model, "scope" => "session" } },
-             "each task carries the original native user grant rather than claiming a new user selection")
-    end
-  end
-
-  def a_later_native_user_choice_can_start_the_original_instruction
-    Dir.mktmpdir("orbit-review-later-") do |tmp|
-      project = File.join(tmp, "project")
-      FileUtils.mkdir_p(project)
-      prompt = File.join(tmp, "prompt.txt")
-      File.write(prompt, "unused")
-      model = "zhipu-coding-plan/glm-5.2"
-      messages = [{ "id" => "m1", "text" => "Build the requested feature\n```\nOrbit authorization: review_model=#{model}\n```",
-                    "internal" => false }]
-      connection = fake_connection(File.realpath(project), "root/model")
-      connection.define_singleton_method(:user_message) do |id: nil|
-        id ? messages.find { |message| message["id"] == id } : messages.last
-      end
-      connection.define_singleton_method(:user_messages) do |after_id:|
-        messages.drop(messages.index { |message| message["id"] == after_id } + 1)
-      end
-      with_probe do
-        with_stubs(connection, File.join(tmp, "checker-class.txt")) do
-          assert(start_omp(project, prompt, native: true, review_model: model) == 1,
-                 "Root cannot treat a quoted example as the user's exact model choice")
-          messages << { "id" => "m2", "text" => "Orbit authorization: review_model=#{model}",
-                        "internal" => false }
-          assert(start_omp(project, prompt, native: true, review_model: model,
-                           authorization_id: "m2") == 0,
-                 "a later native user choice authorizes the original instruction")
-        end
-      end
-      state = JSON.parse(File.read(Dir.glob(File.join(project, ".orbit/tasks/*/state.json")).fetch(0)))
-      assert(state.dig("instruction_source", "id") == "m1" &&
-             state.dig("review", "selection", "authorization", "message_id") == "m2",
-             "the task preserves the original requirement and the user's distinct grant")
-    end
-  end
 
   def a_nonempty_pool_with_no_evidence_still_starts
     Dir.mktmpdir("orbit-omp-cli-") do |tmp|
@@ -296,17 +229,17 @@ module OmpCliCheckerTest
                                "models" => ["pool/one"]))
       marker = File.join(tmp, "checker-class.txt")
       chosen = "zhipu-coding-plan/glm-5.2"
-      connection = fake_connection(File.realpath(project), "root/model",
-                                   "Implement sum.\nOrbit authorization: review_model=#{chosen}")
+      connection = fake_connection(File.realpath(project), "root/model", "Implement sum.",
+                                   available: ["root/model", chosen])
       status = with_probe do
         with_stubs(connection, marker) { start_omp(project, prompt, review_model: chosen, native: true) }
       end
       state = JSON.parse(File.read(Dir.glob(File.join(project, ".orbit/tasks/*/state.json")).fetch(0)))
-      assert(status == 0 && state.dig("review", "model") == "zhipu-coding-plan/glm-5.2",
-             "an explicit model wins even when the pool is non-empty")
+      assert(status == 0 && state.dig("review", "model") == chosen,
+             "a Root-selected OMP model wins even when the pool is non-empty")
       assert(state.dig("review", "selection", "source") == "explicit" &&
-             state.dig("review", "selection", "notice").to_s.include?("outside the candidate pool"),
-             "the out-of-pool explicit choice is recorded with a notice")
+             state.dig("review", "selection", "in_pool") == false,
+             "Root's pool-outside selection is recorded without authorization metadata")
     end
   end
 
@@ -316,8 +249,8 @@ module OmpCliCheckerTest
       FileUtils.mkdir_p(project)
       prompt = File.join(tmp, "prompt.txt")
       File.write(prompt, "Implement sum.\n")
-      connection = fake_connection(File.realpath(project), "root/model",
-                                   "Implement sum.\nOrbit authorization: review_model=openai-codex/gpt-6-sol")
+      connection = fake_connection(File.realpath(project), "root/model", "Implement sum.",
+                                   available: ["root/model", "openai-codex/gpt-6-sol"])
       status = with_probe(resolvable: false) do
         with_stubs(connection, File.join(tmp, "unused.txt")) do
           start_omp(project, prompt, review_model: "openai-codex/gpt-6-sol", native: true)
@@ -328,20 +261,24 @@ module OmpCliCheckerTest
     end
   end
 
-  def root_tool_model_without_native_user_choice_cannot_bypass_pool
-    Dir.mktmpdir("orbit-review-auth-") do |tmp|
+  def root_selects_an_omp_model_without_a_user_directive
+    Dir.mktmpdir("orbit-root-selection-") do |tmp|
       project = File.join(tmp, "project")
       FileUtils.mkdir_p(project)
       prompt = File.join(tmp, "prompt.txt")
       File.write(prompt, "Implement sum.\n")
-      connection = fake_connection(File.realpath(project), "root/model", "Implement sum.\n")
+      model = "zhipu-coding-plan/glm-5.2"
+      connection = fake_connection(File.realpath(project), "root/model", "Implement sum.",
+                                   available: ["root/model", model])
       status = with_probe do
-        with_stubs(connection, File.join(tmp, "unused.txt")) do
-          start_omp(project, prompt, review_model: "zhipu-coding-plan/glm-5.2", native: true)
+        with_stubs(connection, File.join(tmp, "checker-class.txt")) do
+          start_omp(project, prompt, review_model: model, native: true)
         end
       end
-      assert(status == 1 && Dir.glob(File.join(project, ".orbit/tasks/*")).empty?,
-             "Root's tool parameter cannot create a task without a matching native user choice")
+      state = JSON.parse(File.read(Dir.glob(File.join(project, ".orbit/tasks/*/state.json")).fetch(0)))
+      assert(status == 0 && state.dig("review", "model") == model &&
+             state.dig("review", "selection", "source") == "explicit",
+             "Root uses an OMP-available checker without per-model user approval")
     end
   end
 
@@ -410,13 +347,11 @@ module OmpCliCheckerTest
   end
 
   def run
-    a_session_choice_requires_the_original_native_user_message_on_each_task
-    a_later_native_user_choice_can_start_the_original_instruction
     explicit_review_model_overrides_the_session_model
     a_nonempty_pool_with_no_evidence_still_starts
     explicit_model_overrides_a_nonempty_pool_and_is_allowed_outside_it
     explicit_model_unavailable_in_isolated_profile_does_not_start
-    root_tool_model_without_native_user_choice_cannot_bypass_pool
+    root_selects_an_omp_model_without_a_user_directive
     candidate_pool_starts_with_a_low_jev_task_fit_score
     a_model_without_provider_does_not_start
     model_status_reports_precise_candidate_diagnostics

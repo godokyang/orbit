@@ -398,13 +398,12 @@ module Orbit
 
       text = "检查模型：#{model}"
       if selection.is_a?(Hash) && selection["selection_tier"] == "fallback"
-        text += "；候选池降级选择（检查质量未经证实；#{selection['basis']}）"
+        text += "；降级选择（检查质量未经证实；#{selection['basis']}）"
       end
       text
     end
 
-    # A failed checker keeps the task alive and prevents repeated checks on
-    # the unusable model; only the user's native exact choice can unblock it.
+    # A failed checker remains visible; exhausted models block completion.
     def review_blocked_line(state)
       review = state["review"]
       blocked = review.is_a?(Hash) ? review["blocked"] : nil
@@ -416,7 +415,7 @@ module Orbit
       reason = blocked["reason"].to_s.strip
       text = "检查阻塞：模型 #{model}（#{kind}）"
       text += " — #{reason}" unless reason.empty?
-      "#{text}；请用户在原生消息中发送 Orbit authorization: review_model=provider/id，再用 orbit review-model 记录该精确选择"
+      "#{text}；Root 可核对 OMP 可用型号并用 orbit review-model 重选；未取得有效独立检查不得申请完成"
     end
 
     def completion_readiness_line(state)

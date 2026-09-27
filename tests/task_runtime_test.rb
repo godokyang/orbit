@@ -928,13 +928,15 @@ class StubCheckerSelector
     @snapshot_value
   end
 
-  def select(explicit:, instruction:, previous:, selected_for:)
-    @calls << { "role" => selected_for, "instruction" => instruction }
+  def select(explicit:, instruction:, previous: nil, selected_for:, excluded: [])
+    @calls << { "role" => selected_for, "instruction" => instruction, "excluded" => excluded }
     raise Orbit::CheckerModelSelector::Error, @error if @error
 
-    explicit_text = explicit.to_s
-    chosen = explicit_text.empty? ? @model : explicit_text
-    [chosen, { "source" => explicit_text.empty? ? "candidate_pool" : "explicit",
+    choices = [explicit, @model, "openai/gpt-6-astra"].compact.map(&:to_s).reject(&:empty?).uniq
+    chosen = choices.find { |model| !excluded.include?(model) }
+    raise Orbit::CheckerModelSelector::Error, "no unused model" unless chosen
+
+    [chosen, { "source" => chosen == explicit ? "explicit" : "candidate_pool",
                "model" => chosen, "signature" => @signature, "selected_for" => selected_for }]
   end
 end
@@ -992,16 +994,10 @@ fixture do |root, record, _host, _checker, _runtime|
          "an amendment reaches the next selection inside the effective instruction (Q20)")
 end
 
-# A real check failure records a failed check, keeps the running task with
-# its members, blocks automatic checks, and Root's explicit review-model
-# clears the block and starts a fresh check that recovers.
+# A real failure is preserved, the next OMP model checks the same version,
+# and only exhausted candidates block. Root can choose again after repair.
 fixture do |root, record, _host, _checker, _runtime|
   host = RuntimeTeamHost.new(root)
-  record.save(record.state.merge("instruction_source" => { "kind" => "omp_user_message", "id" => "m1" }))
-  native_grant = { "id" => "m2", "text" => "Orbit authorization: review_model=openai/gpt-6-astra",
-                   "internal" => false }
-  host.define_singleton_method(:user_message) { |id: nil| id == "m2" ? native_grant : nil }
-  host.define_singleton_method(:user_messages) { |after_id:| after_id == "m1" ? [native_grant] : [] }
   selector = StubCheckerSelector.new("zhipu/glm-5")
   checker = RuntimeSelectingChecker.new
   runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker,
@@ -1012,48 +1008,38 @@ fixture do |root, record, _host, _checker, _runtime|
   assert(checker.calls.length == 1, "precondition: a check is in flight")
   checker.failure_message = "OMP reviewer exited 1: 401 invalid api key"
   runtime.tick(now: now + 1)
-  assert(!Orbit::TaskRuntime::TERMINAL.include?(record.state["status"]) && record.state["error"].nil?,
-         "a failed check is a blocked checker, not a failed task")
   failed = record.state.fetch("checks").last
   assert(failed["failed"] && failed.dig("result", "verdict") == "check_failed" &&
          failed.dig("result", "failure_kind") == "auth_or_quota" &&
-         record.state.dig("review", "blocked", "type") == "check_failure" &&
-         record.state.dig("review", "blocked", "model") == "zhipu/glm-5",
-         "the failure is recorded as a failed check with its kind and model")
-  assert(Orbit::TaskView.format(record).include?("检查阻塞：模型 zhipu/glm-5"),
-         "orbit status surfaces the blocked checker line")
-
-  runtime.tick(now: now + 400)
-  assert(checker.calls.length == 1, "blocked automatic checks neither start nor snapshot")
-
-  record.submit("check")
-  host.finish("delivered after failed checker")
-  runtime.tick(now: now + 400.25)
-  assert(checker.calls.length == 1 && record.state.fetch("checks").length == 1,
-         "a second manual check cannot spend another snapshot on the same blocked model")
-
-  record.submit("review_model", "model" => "openai/gpt-6-astra", "reason" => "Root tool only")
-  runtime.tick(now: now + 400.5)
-  assert(checker.calls.length == 1 && record.state.dig("review", "blocked", "type") == "check_failure",
-         "the runtime rejects a forged Root-only selection without unblocking the failed check")
-  record.submit("review_model", "model" => "openai/gpt-6-astra", "reason" => "auth failed",
-                "authorization" => { "kind" => "native_user_message", "message_id" => "m2",
-                                     "model" => "openai/gpt-6-astra", "scope" => "task" })
-  runtime.tick(now: now + 401)
-  recorded = events(record).find { |event| event["type"] == "review_model_recorded" }
-  assert(record.state.dig("review", "explicit_model") == "openai/gpt-6-astra" &&
-         recorded && recorded["in_pool"] == false &&
-         recorded["notice"] == "explicit review model is outside the candidate pool" &&
+         record.state.dig("review", "failed_models", "models") == ["zhipu/glm-5"] &&
          record.state.dig("review", "blocked").nil?,
-         "the explicit model is pinned with an out-of-pool notice and clears the block")
-  assert(checker.calls.length == 2 && checker.selected_models.last == "openai/gpt-6-astra",
-         "a fresh check starts immediately on the explicit model")
+         "the failed check is retained and its model excluded, without failing the task")
 
   checker.failure_message = nil
+  runtime.tick(now: now + 2)
+  assert(checker.calls.length == 2 && checker.selected_models.last == "openai/gpt-6-astra" &&
+         selector.calls.last["excluded"] == ["zhipu/glm-5"],
+         "a different OMP model is tried automatically without a user directive")
   checker.result = answer("complete")
-  runtime.tick(now: now + 402)
-  assert(record.state.fetch("checks").last.dig("result", "verdict") == "complete",
-         "checks recover after the explicit re-selection")
+  runtime.tick(now: now + 3)
+  assert(record.state.fetch("checks").last.dig("result", "verdict") == "complete" &&
+         record.state.fetch("checks").first["failed"],
+         "the successful replacement check does not erase the failed attempt")
+
+  record.submit("check")
+  host.finish("delivered final answer")
+  runtime.tick(now: now + 4)
+  checker.failure_message = "provider returned 429"
+  runtime.tick(now: now + 5)
+  runtime.tick(now: now + 6)
+  assert(record.state.dig("review", "blocked", "type") == "selection_undecided" &&
+         checker.calls.length == 3, "all failed candidates block without replaying the same model")
+  record.submit("review_model", "model" => "zhipu/glm-5", "reason" => "Root repaired credentials")
+  checker.failure_message = nil
+  runtime.tick(now: now + 7)
+  assert(checker.calls.length == 4 && record.state.dig("review", "blocked").nil? &&
+         record.state.dig("review", "model") == "zhipu/glm-5",
+         "Root can choose an available model after repairing credentials without user authorization")
 end
 
 # Q17 (ADR-009): an empty pool (or an empty session intersection) produces no

@@ -71,15 +71,15 @@ Agent 验证并交付结果时应对当前任务调用 Orbit `check` 请求手�
 
 你不需要预先建团队，也不需要为每个项目写 Orbit 专用规范。Root 可以自行完成任务；只有分工有实际收益时才派发成员。
 
-Root 和执行成员使用 OMP 中可用的模型；受控任务的通用成员默认必须是当前候选池模型，池外需真实用户按精确 `provider/id` 授权。检查者使用独立 OMP 会话。可选的 [Jev 调度](docs/reference/usage-reference.md#jev-配置)按卡住、偏航和产物进展信号安排检查，权衡端到端时间与粗档费用给出分工建议；Root 决定是否派发，Jev 概率不代替独立检查结论。
+Root 和执行成员使用当前 OMP 会话可用的模型；候选池优先影响自动建议与检查者选型，不是权限名单。通用成员使用 OMP 实际解析的 `@task` 型号，Root 决定是否派发；Jev 的分工建议不自动派发。检查者在隔离只读 OMP 会话中复用用户已有模型配置与凭据，Jev 依据当前任务适配性排序，实际检查结果才是完成门的依据。
 
-**多模型选择：**会话内 `/orbit-models` 从当前 OMP 可选列表维护跨会话候选池。执行成员建议保留原有质量门；**独立检查者不同**：池非空时从当前会话可选且隔离检查环境可运行的池内模型选一个，Jev 当前任务适配分用于优先排序，分数低或缺证据时仍选可运行池内型号并提示“检查质量未经证实”。对可运行但缺精确型号资料的候选，Orbit 同时列出型号请 Root 从一手来源补证；查不到就如实记不可得，不要求用户购买或指定池外模型。若池内无一可运行则报错，不偷偷选池外型号；选中不等于独立检查或完成门通过。历史质量硬门拒绝样本不能充当本规则的真实验收。状态见[合同](contracts/task-runtime.md)、[ADR-009](docs/adr/009-user-selected-model-pool.md)及[交接](docs/plan/handoff.md)。
+**多模型选择：**会话内 `/orbit-models` 从当前 OMP 可选列表维护跨会话候选池。检查者优先预检池内可用型号，池空或池内均不可运行时继续从 OMP 当前可用目录中选择；Root 可显式指定可运行型号，无须用户逐型号授权。缺精确事实时标记“检查质量未经证实”，不把型号可选或凭据预检说成实际请求成功。检查失败后 Orbit 在当前产物版本内有界尝试不同可运行型号；全失败则保留证据并阻塞完成，由 Root 检查 OMP 配置并重新选择。状态见[合同](contracts/task-runtime.md)、[ADR-009](docs/adr/009-user-selected-model-pool.md)及[交接](docs/plan/handoff.md)。
 
 #### 选择候选模型（`/orbit-models`）
 
 在交互式 `orbit omp` 会话里输入 `/orbit-models`，直接输入文字按 `provider/id` 搜索；↑/↓ 移动，Space 勾选或取消，Enter 一次保存本次净变化，Esc 取消。当前会话不可选但已入池的旧标识仍保留在列表，可勾掉移出，不能新增。列表仅表示当前会话可选择，不保证模型已验证可调用或有额度。
 
-池内证据标签只来自**精确 `provider/id` 身份**的本地缓存，过期／缺失会明确标出；「质量未判断」「隔离检查者未探测」不代表质量或凭据已验证，但也不阻止后续在启动时挑选一个实际可运行的池内检查者。`orbit model-status --project DIR` 只读候选池与证据，不运行 Jev 或隔离探针；真实启动返回 `evidence_needed`（仅列可运行且缺证据的精确型号），Root 用 `orbit model-evidence --file -` 补交真实资料，也可带当前任务目录提交对应检查者事实；无法核实可提交 `status=unavailable`。新增有效资料在下一次独立检查前重新判断；真实选模的逐型号判断随任务状态保存，无可运行型号的失败保存在项目 `.orbit/checker-selection-failures.jsonl`。显式池外检查模型仍须用户在原生会话发送独立一行 `Orbit authorization: review_model=provider/id`；会话沿用须 `Orbit authorization: review_model_session=provider/id`，逐次做来源与隔离预检。Root 自行传 `review_model`／`remember_review_model: true` 不构成授权；用法见[使用参考](docs/reference/usage-reference.md#候选模型池与检查者显式重选adr-009)。
+池内证据标签只来自**精确 `provider/id` 身份**的本地缓存，过期／缺失会明确标出；「质量未判断」「隔离检查者未探测」不代表质量或凭据已验证。`orbit model-status --project DIR` 只读候选池与证据，不运行 Jev 或隔离探针；真实启动返回 `evidence_needed`，Root 用 `orbit model-evidence --file -` 补交一手资料，也可带当前任务目录提交对应检查者事实；无法核实可提交 `status=unavailable`。新增有效资料在下一次独立检查前重新判断；逐型号判断随任务状态保存，无可运行型号的失败保存在项目 `.orbit/checker-selection-failures.jsonl`。Root 可在启动时传 `review_model` 或在任务中执行 `orbit review-model TASK_DIRECTORY --model provider/id`；用法见[使用参考](docs/reference/usage-reference.md#候选模型池与检查者重选adr-009)。
 
 无交互界面或需要脚本操作时，继续使用：
 
@@ -89,9 +89,9 @@ Root 和执行成员使用 OMP 中可用的模型；受控任务的通用成员�
 orbit model-candidates list       # 终端查看候选池
 ```
 
-候选池跨会话保存，只保存模型标识，不保存凭据。批量保存拒绝同一模型的并发冲突，不覆盖其他会话对不同模型的修改；池内但当前会话不可选的标识可移除但不会因此启用。池空时检查者沿用当前会话默认模型、不给成员模型建议，但受控通用 `task` 池外仍须用户原生消息中独立一行 `Orbit authorization: member_model=provider/id`。池非空却没有任何当前会话可选、隔离检查环境可运行的检查型号时，自动启动失败关闭。
+候选池跨会话保存，只保存模型标识，不保存凭据。批量保存拒绝同一模型的并发冲突，不覆盖其他会话对不同模型的修改；池内但当前会话不可选的标识可移除但不会因此启用。池空时不生成自动成员建议，Root 仍可使用当前 OMP 可解析的通用 `task`；检查者从 OMP 可用目录选择。池非空却没有可运行检查型号时同样回退到 OMP 目录；全部不可运行才阻塞受控启动。
 
-新候选模型缺少同标识的质量事实时，Orbit 不让 Jev 凭模型名称评分；可运行池内型号仍可降级选择，不把选中说成终检通过。Root 可从一手来源查证后用 `orbit model-evidence --file FILE` 在建任务前写入缓存，再对原用户消息显式启动；任务已启动时按上方 `evidence_needed` 补交并于下次独立检查前重评。无可运行的池内型号时只接受用户真实消息中的精确显式授权，不由 Root 自选。显式检查模型在建任务前预检隔离目录与凭据，实际请求或额度仍可能失败。操作见[进阶使用参考](docs/reference/usage-reference.md#模型证据提交model-evidence)。
+缺同标识质量事实时，Orbit 不让 Jev 凭模型名称评分；可运行型号降级选择后仍需真实独立检查。Root 可从一手来源查证后用 `orbit model-evidence --file FILE` 更新缓存；不能核实则记录不可得。Root 显式检查模型在建任务前预检隔离目录与凭据，实际请求或额度仍可能失败。操作见[进阶使用参考](docs/reference/usage-reference.md#模型证据提交model-evidence)。
 
 ## 日常命令
 

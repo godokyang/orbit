@@ -582,29 +582,25 @@ module CliTest
            "the task-bound mode still queues against the same cache without dropping the taskless fact")
   end
 
-  # A blocked checker only resumes when the same native session supplies an
-  # exact user authorization. Root's --model parameter alone is insufficient.
-  def review_model_queues_only_by_explicit_choice_and_status_shows_the_block
+  # Root may select OMP-accessible models; an absent catalog identity still
+  # cannot be queued as a checker.
+  def review_model_checks_omp_catalog_and_status_shows_the_block
     record = task
-
     missing = cli("review-model", record.path, success: false)
     invalid = cli("review-model", record.path, "--model", "glm-5.2", success: false)
     assert(missing.include?("provider/id") && invalid.include?("provider/id") && commands(record).empty?,
-           "missing or non-qualified model IDs cannot enqueue a review change")
+           "missing or malformed IDs never enqueue a check")
 
-    record.save(record.state.merge("instruction_source" => { "kind" => "omp_user_message", "id" => "m1" }))
-    granted = false
     server = UNIXServer.new(record.state.dig("connection", "socket"))
     worker = Thread.new do
       loop do
         peer = server.accept
         request = JSON.parse(peer.gets)
-        messages = [{ "id" => "m1", "text" => "Implement the task", "internal" => false }]
-        if granted
-          messages << { "id" => "m2", "text" => "Orbit authorization: review_model=zenmux/x-ai/grok-4.7",
-                        "internal" => false }
-        end
-        result = request["method"] == "state" ? { "cwd" => File.realpath(@project), "status" => "idle" } : messages
+        result = case request["method"]
+                 when "state" then { "cwd" => File.realpath(@project), "status" => "idle" }
+                 when "model_catalog" then { "current" => "root/model", "available" => ["root/model"], "families" => {} }
+                 else []
+                 end
         peer.puts(JSON.generate("result" => result))
         peer.close
       rescue IOError, SystemCallError
@@ -612,18 +608,8 @@ module CliTest
       end
     end
     denied = cli("review-model", record.path, "--model", "zenmux/x-ai/grok-4.7", success: false)
-    assert(denied.include?("native user did not authorize") && commands(record).empty?,
-           "Root's model argument without a native user grant does not enqueue a retry")
-    granted = true
-    reply = JSON.parse(cli("review-model", record.path, "--model", "zenmux/x-ai/grok-4.7", "--reason", "auth 失败后改用"))
-    assert(reply["status"] == "queued" && reply["model"] == "zenmux/x-ai/grok-4.7",
-           "the user's later exact model grant queues the next check")
-    command = JSON.parse(File.read(commands(record).fetch(0)))
-    assert(command["type"] == "review_model" && command["model"] == "zenmux/x-ai/grok-4.7" &&
-           command.dig("authorization", "message_id") == "m2" &&
-           command.dig("authorization", "scope") == "task",
-           "the queued choice records the native user message rather than the Root tool")
-    File.unlink(commands(record).fetch(0))
+    assert(denied.include?("not available in this OMP session") && commands(record).empty?,
+           "a model outside OMP's actual catalog cannot be queued by Root")
 
     settled = task("complete")
     terminal = cli("review-model", settled.path, "--model", "zenmux/x-ai/grok-4.7", success: false)
@@ -640,7 +626,7 @@ module CliTest
                    "checks" => [{ "status" => "failed", "error" => "provider returned 401" }])
     check = JSON.parse(cli("check", blocked.path))
     assert(check["status"] == "rejected" && check["reason"] == "checker_model_blocked" &&
-           check["next_action"].include?("native user") && commands(blocked).empty?,
+           check["next_action"].include?("Root can inspect OMP availability") && commands(blocked).empty?,
            "an unavailable checker rejects repeated manual checks before queueing work")
     text = cli("status", blocked.path)
     assert(text.include?("检查模型：zenmux/x-ai/grok-4.7"), "status shows the model actually used for checks")
@@ -874,7 +860,7 @@ module CliTest
        model_evidence_caches_object_and_queues_dedicated_command
        model_evidence_accepts_array_and_rejects_invalid_or_terminal
        model_evidence_taskless_submission_writes_cache_without_a_task
-       review_model_queues_only_by_explicit_choice_and_status_shows_the_block
+       review_model_checks_omp_catalog_and_status_shows_the_block
        session_summary_separates_check_facts_from_missing_evidence
        status_separates_delegatable_score_from_final_decision
        model_candidates_bridge_round_trips_and_keeps_ids_with_slashes

@@ -48,9 +48,9 @@ module Orbit
     MINIMUM_OMP_VERSION = "18.2.8"
     # Keep the old constant for callers that already read the version floor.
     PINNED_OMP_VERSION = MINIMUM_OMP_VERSION
-    # The independent reviewer runner installs exactly this SDK release; the
-    # installer verifies it inside the staged release before the switch.
-    PINNED_SDK_VERSION = "18.2.8"
+    # Source bundle's locked SDK. The installer aligns the staged reviewer
+    # with the detected host OMP version when OMP is already installed.
+    PINNED_SDK_VERSION = "18.3.4"
 
     # The exact command line handed to the OS, kept separate from exec so the
     # passthrough contract can be asserted without replacing the test process.

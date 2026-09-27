@@ -1,6 +1,6 @@
 # Orbit 文档入口
 
-当前源码版本：**0.7.8**；新增受控成员候选池门、原生用户检查者授权和只读跨任务汇总已落地，确定性测试通过，新增路径的隔离实机验证以本轮审计记录为准。旧的运行体验与成本修复在隔离 OMP 18.3.2 中实测，本机日常安装此前实测为 0.7.6，不能把旧安装或旧夹具的显式选模当成新增授权门的验收。状态与边界见[交接](plan/handoff.md)、[本轮审计](plan/orbit-session-audit-draft-20260927.md)和[先前运行体验验收](reference/orbit-runtime-fix-acceptance-20260927.md)。
+当前源码版本：**0.7.9**（未发布）；候选池作为选型偏好，检查者使用当前 OMP 模型配置与凭据，池内均不可运行时回退 OMP 可用目录，真实检查失败后有界换用未失败型号；通用 `@task` 不再由候选池或逐型号用户授权阻断。当前源码的验证边界见[交接](plan/handoff.md)，先前安装与验收仍按各自版本和样本解读，不能移作本次修复的真实闭环证明。
 
 | 要解决的问题 | 阅读入口 |
 | --- | --- |
@@ -9,7 +9,7 @@
 | Agent 何时自行调用 Orbit | [任务运行合同](../contracts/task-runtime.md)（角色与主动调用） |
 | 如何在隔离项目真实验收 Orbit | [Orbit 开发专用真实验收 skill](../.agents/skills/orbit-real-acceptance/SKILL.md)、[OMP 目标路径真实验收记录](reference/omp-native-m4-acceptance-20260924.md) |
 | Root 如何派发成员、使用 Herdr 和收尾 | [任务运行合同](../contracts/task-runtime.md)、[单一 OMP 改版总 TODO](plan/omp-native-migration.md) |
-| 为什么采用当前设计、哪些新增授权已实现 | [历史 ADR-007](adr/007-task-runtime-refactor.md)、[当前 OMP 单宿主 ADR-008](adr/008-omp-native-collaboration-base.md)、[候选模型池与用户授权 ADR-009](adr/009-user-selected-model-pool.md)、[OMP 路径验证](reference/omp-native-path-probe-20260924.md) |
+| 为什么采用当前设计、旧授权规则如何废止 | [历史 ADR-007](adr/007-task-runtime-refactor.md)、[当前 OMP 单宿主 ADR-008](adr/008-omp-native-collaboration-base.md)、[候选池偏好与旧授权裁决 ADR-009](adr/009-user-selected-model-pool.md)、[OMP 路径验证](reference/omp-native-path-probe-20260924.md) |
 | 程序和模型各负责什么、何时完成或停止 | [任务运行合同](../contracts/task-runtime.md) |
 | 如何本地记录、汇总和导出任务证据 | [任务运行合同](../contracts/task-runtime.md#本地任务证据与主动导出)、[进阶使用参考](reference/usage-reference.md#日常查询与诊断)、[实施与验证记录](reference/task-evidence-export-20260926.md) |
 | 独立检查返回什么 | [检查结果 schema](../contracts/check-result.schema.json) |

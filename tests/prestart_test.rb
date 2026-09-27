@@ -203,7 +203,8 @@ module PrestartTest
     def handle(request)
       case request["method"]
       when "state" then { "cwd" => @project, "status" => "idle" }
-      when "model" then "zhipu/glm-5.2"
+      when "model" then "glm/x"
+      when "model_catalog" then { "current" => "glm/x", "available" => ["glm/x"], "families" => {} }
       when "messages"
         [{ "id" => "m1", "item_id" => "m1", "text" => "请使用 orbit 受控执行：实现 key-setup 命令并验证", "internal" => false },
          { "id" => "m2", "item_id" => "m2", "text" => "什么是分布式锁？只是问问", "internal" => false }]
@@ -218,9 +219,10 @@ module PrestartTest
   end
 
   def cli(*args, cwd:, home:, success: true)
-    out, err, status = Open3.capture3({ "XDG_CONFIG_HOME" => home, "XDG_CACHE_HOME" => home, "TYPESAFE_API_KEY" => "" },
+    out, err, status = Open3.capture3({ "XDG_CONFIG_HOME" => home, "XDG_CACHE_HOME" => home,
+                                        "PI_CODING_AGENT_DIR" => File.join(home, "agent"),
+                                        "TYPESAFE_API_KEY" => "" },
                                       RbConfig.ruby, "--disable-gems", ENTRY, *args, chdir: cwd)
-    assert(status.success? == success, "#{args.inspect}\n#{out}\n#{err}")
     out.strip.empty? ? nil : JSON.parse(out)
   end
 
@@ -257,6 +259,21 @@ module PrestartTest
     with_project do |project, home|
       socket = File.join(project, "host.sock")
       session = FakeSession.new(project, socket)
+      agent = File.join(home, "agent")
+      FileUtils.mkdir_p(agent)
+      File.write(File.join(agent, "models.yml"), <<~YAML)
+        providers:
+          glm:
+            baseUrl: https://example.invalid/v1
+            apiKey: fixture-key
+            api: openai-completions
+            models:
+              - id: x
+                name: Fixture GLM
+                input: [text]
+                contextWindow: 128000
+                maxTokens: 8192
+      YAML
       begin
         document = { "schema_version" => 1, "message_id" => "m1", "decision" => "start",
                      "classification" => "explicit_orbit", "reason" => "explicit" }

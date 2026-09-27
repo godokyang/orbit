@@ -30,23 +30,61 @@ module Orbit
     # auditable, never proof. Unknown failures are "unavailable" and still block.
     FAILURE_KINDS = %w[auth_or_quota unavailable invalid_result].freeze
     AUTH_OR_QUOTA_PATTERN = /(?:\b40[13]\b|\b429\b|unauthor|forbidden|quota|rate[ _-]?limit|insufficient|out of credit|balance|payment|billing|no[ _-]?access)/i
-    # A local probe only reads a catalog and the OMP token store; it can run a
-    # credential command per distinct provider. Bound it so a stuck `omp token`
-    # cannot hold the selection loop.
+    # A local probe only reads OMP's own catalog, model cache and credential
+    # store; it can run one resolution per distinct model. Bound it so a stuck
+    # resolver cannot hold the selection loop.
     PROBE_TIMEOUT_SECONDS = 60
 
-    # Local-only availability probe for the independent checker's isolated
-    # profile. For each candidate "provider/id" it asks the isolated catalog
-    # (ModelRegistry.find) and OMP's own provider credential resolver, without
-    # starting a session or sending a model request. It returns identifiers and
-    # structured reasons only; a resolved token is never returned or written.
+    # Parent OMP session inputs captured before the child env is confined.
+    # Plain paths and profile names only — never credentials. The reviewer
+    # resolves the parent's effective agent dir from these with OMP's own
+    # pi-utils precedence, so its catalog and credential resolution follow the
+    # same source the host session uses instead of a second login.
+    def self.source_session_fields
+      fields = {
+        "source_pi_coding_agent_dir" => ENV["PI_CODING_AGENT_DIR"],
+        "source_omp_profile" => ENV["OMP_PROFILE"],
+        "source_pi_profile" => ENV["PI_PROFILE"]
+      }.compact
+      project_dir = begin
+        Dir.pwd
+      rescue StandardError
+        nil
+      end
+      fields["source_project_dir"] = project_dir if project_dir && File.directory?(project_dir)
+      fields
+    end
+
+    # The reviewer SDK version this runner tree declares (the pin the
+    # installer verifies against), so the child fails closed on drift between
+    # the launched runner and its installed SDK without hardcoding a version
+    # here. Falls back to the install-time pin, then to omitting the field
+    # (the child then checks against its own package.json declaration).
+    def self.reviewer_sdk_version
+      package = File.expand_path("../../runners/omp-reviewer/package.json", __dir__)
+      declared = JSON.parse(File.read(package))["dependencies"]&.fetch("@oh-my-pi/pi-coding-agent", nil)
+      return declared if declared.is_a?(String) && !declared.empty?
+
+      require_relative "omp_entry"
+      Orbit::OmpEntry::PINNED_SDK_VERSION
+    rescue StandardError
+      nil
+    end
+
+    # Local-only availability probe for the independent checker. For each
+    # candidate "provider/id" it asks the parent OMP session's own catalog,
+    # model cache and credential store — resolved through OMP's official
+    # ModelRegistry/auth-storage path — without starting a session or sending
+    # a model request. It returns identifiers and structured reasons only; a
+    # resolved token is never returned or written.
     #
     # models: array of "provider/id" identifiers.
     # Returns { "resolvable" => ["provider/id", ...],
     #           "unresolvable" => [{ "model" => "provider/id", "reason" => "..." }, ...] }.
     # Any reviewer or configuration failure raises Error; it is never reported
     # as an empty-but-successful probe.
-    def self.probe_models(models:, command: nil, timeout: PROBE_TIMEOUT_SECONDS)
+    def self.probe_models(models:, command: nil, timeout: PROBE_TIMEOUT_SECONDS, source_agent_dir: nil,
+                          source_project_dir: nil)
       launcher = (command || default_command).map(&:to_s)
       raise Error, "omp reviewer command is required" if launcher.empty? || launcher.first.empty?
 
@@ -60,9 +98,13 @@ module Orbit
         out = File.join(root, "evidence.json")
         stderr_path = File.join(root, "stderr.log")
         config_path = File.join(root, "request.json")
-        File.write(config_path, JSON.generate(
-                                "profile" => profile, "out" => out, "probe_models" => specs.join(",")
-                              ))
+        request = { "profile" => profile, "out" => out, "probe_models" => specs.join(",") }
+                     .merge(source_session_fields)
+        request["source_agent_dir"] = source_agent_dir if source_agent_dir
+        request["source_project_dir"] = source_project_dir if source_project_dir
+        sdk = reviewer_sdk_version
+        request["sdk_version"] = sdk if sdk
+        File.write(config_path, JSON.generate(request))
 
         status = run_probe(launcher, config_path, profile, root, stderr_path, timeout)
         evidence = parse_probe_evidence(out)
@@ -77,6 +119,7 @@ module Orbit
     def self.run_probe(launcher, config_path, profile, cwd, stderr_path, timeout)
       env = ENV.to_h
       env["OMP_PROFILE"] = nil
+      env["PI_PROFILE"] = nil
       env["PI_CODING_AGENT_DIR"] = profile
       errors = File.open(stderr_path, "wb")
       pid = Process.spawn(env, *launcher, "--config", config_path,
@@ -169,12 +212,15 @@ module Orbit
     end
     private_class_method :normalize_probe
 
-    def initialize(model:, command: nil, schema: nil, stop_grace_seconds: DEFAULT_STOP_GRACE_SECONDS)
+    def initialize(model:, command: nil, schema: nil, stop_grace_seconds: DEFAULT_STOP_GRACE_SECONDS,
+                   source_agent_dir: nil, source_project_dir: nil)
       launcher = command || self.class.default_command
       raise Error, "omp reviewer command is required" if launcher.empty? || launcher.first.to_s.empty?
 
       super(model: model, executable: launcher.first.to_s, schema: schema, stop_grace_seconds: stop_grace_seconds)
       @command = launcher.map(&:to_s)
+      @source_agent_dir = source_agent_dir
+      @source_project_dir = source_project_dir
       @evidence = nil
       @usage = nil
       @actual_model = nil
@@ -234,8 +280,8 @@ module Orbit
     # in flight: before the first start, after poll returned a result, or after
     # stop! confirmed exit. A started check that has neither a result nor a stop
     # is in flight and rejects the switch, so a running reviewer never changes
-    # model mid-check. The runner still never picks a model on its own; the
-    # caller passes a user-confirmed provider/id, whose id may contain slashes.
+    # model mid-check. The runner never picks a model on its own; the caller
+    # passes a verified OMP provider/id, whose id may contain slashes.
     def select_model!(value)
       raise Error, "runner is closed" if @closed
 
@@ -273,13 +319,18 @@ module Orbit
       write_file(prompt_path, prompt)
       FileUtils.cp(@schema, schema_copy)
       File.unlink(evidence_path) if File.exist?(evidence_path)
-      write_file(config_path, JSON.generate(
+      request = {
         "snapshot" => snapshot,
         "profile" => profile,
         "out" => evidence_path,
         "prompt" => prompt_path,
         "model" => @model
-      ))
+      }.merge(self.class.source_session_fields)
+      request["source_agent_dir"] = @source_agent_dir if @source_agent_dir
+      request["source_project_dir"] = @source_project_dir if @source_project_dir
+      sdk = self.class.reviewer_sdk_version
+      request["sdk_version"] = sdk if sdk
+      write_file(config_path, JSON.generate(request))
 
       pid = spawn_reviewer(config_path, profile, out, stderr_path)
       run = Run.new(
@@ -381,6 +432,7 @@ module Orbit
     def spawn_reviewer(config_path, profile, out, stderr_path)
       env = ENV.to_h
       env["OMP_PROFILE"] = nil
+      env["PI_PROFILE"] = nil
       env["PI_CODING_AGENT_DIR"] = profile
       errors = nil
       begin

@@ -10,7 +10,7 @@ module Orbit
   # judgment never turns a runnable, user-pooled model into an unusable one.
   # Missing facts remain unknown rather than fabricated quality evidence.
   module CheckerModelSelection
-    DECISION_VERSION = "orbit-checker-selection-v3"
+    DECISION_VERSION = "orbit-checker-selection-v4"
 
     NO_TIME_COST_EVIDENCE = "no time/cost facts were available and none were invented"
 

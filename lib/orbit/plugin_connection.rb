@@ -46,6 +46,10 @@ module Orbit
     def model_catalog
       raw = request("model_catalog")
       raise Error, "native model catalog is malformed" unless raw.is_a?(Hash)
+      agent_dir = raw["agent_dir"]
+      if agent_dir && (!agent_dir.is_a?(String) || !agent_dir.start_with?("/") || !File.directory?(agent_dir))
+        raise Error, "native model catalog agent directory is unavailable"
+      end
 
       families = {}
       if raw["families"].is_a?(Hash)
@@ -67,7 +71,8 @@ module Orbit
         "current" => catalog_identifier(raw["current"]),
         "available" => Array(raw["available"]).filter_map { |model| catalog_identifier(model) }.uniq,
         "families" => families,
-        "agents" => agents
+        "agents" => agents,
+        "agent_dir" => agent_dir
       }
     end
 

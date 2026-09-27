@@ -293,9 +293,10 @@ module OrbitInstall
     run("node", "--check", "plugins/omp.mjs", chdir: stage)
     run("node", "--input-type=module", "-e", "import('./plugins/omp-host.mjs')", chdir: stage)
     verify_member_registration_entry!(stage)
-    install_reviewer_bundle!(stage)
+    reviewer_sdk_version = install_reviewer_bundle!(stage)
     record = { "format" => FORMAT, "version" => package.fetch("version"), "source" => source_record,
                "content_digest" => digest.hexdigest, "installed_at" => Time.now.utc.iso8601,
+               "reviewer_sdk_version" => reviewer_sdk_version,
                "files" => paths, "owned_directories" => OWNED_DIRECTORIES }
     atomic_write(File.join(stage, RELEASE), JSON.pretty_generate(record) + "\n")
     record
@@ -320,24 +321,36 @@ module OrbitInstall
     raise "member registration entry is not runnable: #{err.to_s.strip}"
   end
 
-  # The independent reviewer runs on a pinned SDK. It installs into the staged
-  # release, never into the CLI's own dependencies, and the installed version
-  # is verified before the release can become active. Any failure here aborts
-  # preparation, so the previous release stays active.
+  # The checker must use the host's OMP SDK to see the same bundled model
+  # catalog. A host installed after Orbit can use the locked source version
+  # until the next update; an existing host is aligned in the staged release.
+  # Any failure aborts preparation without switching the active release.
   def install_reviewer_bundle!(stage)
     runner = File.join(stage, "runners", "omp-reviewer")
     required = %w[package.json bun.lock reviewer.ts].map { |name| File.join(runner, name) }
     missing = required.reject { |path| File.file?(path) }
     raise "reviewer bundle is incomplete: #{missing.join(', ')}" unless missing.empty?
 
-    run("bun", "install", "--frozen-lockfile", chdir: runner, env: { "BUN_INSTALL_CACHE_DIR" => File.join(stage, ".bun-cache") })
+    omp = executable("omp")
+    version = omp ? Orbit::OmpEntry.detected_version(omp) : Orbit::OmpEntry::PINNED_SDK_VERSION
+    raise "OMP #{version} is older than #{Orbit::OmpEntry::MINIMUM_OMP_VERSION}" unless Orbit::OmpEntry.supported_version?(version)
+
+    dependencies = read_json(File.join(runner, "package.json")).fetch("dependencies")
+    env = { "BUN_INSTALL_CACHE_DIR" => File.join(stage, ".bun-cache") }
+    if dependencies.fetch("@oh-my-pi/pi-coding-agent") == version && dependencies.fetch("@oh-my-pi/pi-utils") == version
+      run("bun", "install", "--frozen-lockfile", chdir: runner, env: env)
+    else
+      run("bun", "add", "--exact", "@oh-my-pi/pi-coding-agent@#{version}", "@oh-my-pi/pi-utils@#{version}",
+          chdir: runner, env: env)
+    end
     package = File.join(runner, "node_modules", "@oh-my-pi", "pi-coding-agent", "package.json")
     raise "reviewer SDK was not installed: #{package}" unless File.file?(package)
 
-    version = read_json(package)["version"]
-    return if version == Orbit::OmpEntry::PINNED_SDK_VERSION
+    installed = read_json(package)["version"]
+    declared = read_json(File.join(runner, "package.json")).dig("dependencies", "@oh-my-pi/pi-coding-agent")
+    return version if installed == version && declared == version
 
-    raise "reviewer SDK version #{version.inspect} does not match the pinned #{Orbit::OmpEntry::PINNED_SDK_VERSION}"
+    raise "reviewer SDK version #{installed.inspect} (declared #{declared.inspect}) does not match host OMP #{version}"
   end
 
   def current_release(runtime)

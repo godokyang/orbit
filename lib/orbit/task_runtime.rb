@@ -12,7 +12,6 @@ require_relative "jev_advisor"
 require_relative "model_evidence_cache"
 require_relative "model_candidate_pool"
 require_relative "checker_model_selector"
-require_relative "model_authorization"
 require_relative "check_runner"
 require_relative "git_remote_evidence"
 require_relative "observation_key"
@@ -356,11 +355,8 @@ module Orbit
         begin
           @check_result ||= @checker.poll
         rescue CheckRunner::Error => error
-          # A real runner failure (auth/quota/unknown) is a failed check, not
-          # a failed task: the record stays alive, automatic checks pause and
-          # Root must explicitly re-select the checker model. Only the
-          # checker's own error family is caught; program errors keep the
-          # existing runtime failure path.
+          # A failed check is recorded, then another unused OMP model may
+          # check the same input and artifact. Program errors remain fatal.
           handle_check_failure(error, now)
           return
         end
@@ -2114,28 +2110,29 @@ module Orbit
 
     def start_check(host, now, kind: "artifact", trigger:, manual: false)
       role = @state["dispute"] ? "adjudicator" : kind == "process" ? "process_reviewer" : "reviewer"
+      digest = fingerprint_artifact
+      input_digest = @record.input_digest(@state)
+      failed = @state.dig("review", "failed_models")
+      if failed && (failed["artifact_digest"] != digest || failed["input_digest"] != input_digest)
+        @state["review"].delete("failed_models")
+        @state["review"].delete("blocked")
+      end
       if (block = @state.dig("review", "blocked"))
         if block["type"] == "selection_undecided" && block_signature_changed?(block)
           @state["review"].delete("blocked")
-          @record.event("checker_model_block_cleared",
-                        "reason" => "selection inputs changed (pool, catalog or valid evidence)")
+          @record.event("checker_model_block_cleared", "reason" => "selection inputs changed")
         else
-          # A manual check bypasses observation dedup, not a failed or still
-          # undecided checker model. Replaying that same model only pays for
-          # another doomed snapshot; the user's authorized re-selection starts
-          # the next check itself and leaves manual finalization available.
           @record.event("check_request_blocked", "type" => block["type"], "manual" => manual) if manual
           @state["next_check_manual"] = false
-          schedule_check(now + @interval, "检查模型阻塞：等待用户授权的新检查模型", trigger: "timer")
+          schedule_check(now + @interval, "检查模型不可用：等待 OMP 模型状态变化或 Root 重选", trigger: "timer")
           return false
         end
       end
       if @checker.respond_to?(:select_model!)
         return false unless apply_checker_selection!(role, now)
       end
-      digest = fingerprint_artifact
       key = ObservationKey.build(
-        input_digest: @record.input_digest(@state), artifact_root: artifact_root, artifact_digest: digest,
+        input_digest: input_digest, artifact_root: artifact_root, artifact_digest: digest,
         host: host, findings: @state.fetch("findings"), dispute: @state["dispute"],
         trigger: { "kind" => kind, "role" => role }
       )
@@ -2150,7 +2147,7 @@ module Orbit
         @record.event("check_abandoned_recovered", "key" => key, "check" => prior["check"])
         prior = nil
       end
-      if !manual && prior
+      if !manual && trigger != "model_fallback" && prior
         # The same observation was already checked or is being checked: do not
         # pay for another model call. The agreed interval replaces the due
         # timer so an unchanged observation cannot retry every tick.
@@ -2173,8 +2170,7 @@ module Orbit
       scope = {
         "number" => number, "role" => role, "kind" => kind, "artifact_root" => artifact_root,
         "observation_key" => key, "trigger_cause" => trigger, "manual" => manual,
-        "snapshot" => snapshot,
-        "input_digest" => @record.input_digest(@state), "host_digest" => host_digest(host),
+        "snapshot" => snapshot, "input_digest" => input_digest, "host_digest" => host_digest(host),
         "dispute" => @state["dispute"],
         "started_at" => Time.at(now).utc.iso8601
       }
@@ -2222,29 +2218,25 @@ module Orbit
       )
     end
 
-    # ADR-009 §4: before each new independent check, re-read the pool ∩ the
-    # session-isolated checker catalog and update the model/selection; an
-    # in-flight check is never switched (the runner also refuses mid-check).
-    # The selector's own signature reuse keeps unchanged retries from
-    # repeating the JEV quality judgment.
+    # Before each new independent check, prefer the runnable pool intersection
+    # and fall back to the OMP session catalog when needed. An in-flight check
+    # never switches models; the selector signature reuses unchanged judgments.
     def apply_checker_selection!(role, now)
       previous = @state.dig("review", "selection")
       model, selection = checker_selector.select(
         explicit: @state.dig("review", "explicit_model"),
         instruction: effective_checker_instruction,
         previous: previous,
-        selected_for: role
+        selected_for: role,
+        excluded: Array(@state.dig("review", "failed_models", "models"))
       )
-      if selection["source"] == "explicit" && @state.dig("review", "explicit_authorization")
-        selection["authorization"] = @state.dig("review", "explicit_authorization")
-      end
       if previous.nil? || previous["model"] != model || previous["signature"] != selection["signature"] ||
          previous["version"] != selection["version"]
         @state["review"]["selection"] = selection
         @state["review"]["model"] = model if model && !model.to_s.empty?
         @record.event("checker_model_selected", "model" => model, "source" => selection["source"],
                       "selected_for" => role, "selection" => selection)
-        if selection["source"] == "candidate_pool" && selection["usage"].is_a?(Hash) &&
+        if selection["usage"].is_a?(Hash) &&
            previous&.[]("selected_at") != selection["selected_at"]
           accumulate_jev_usage("jev_checker_selection", selection["usage"])
         end
@@ -2253,8 +2245,7 @@ module Orbit
       save
       true
     rescue CheckerModelSelector::Error => error
-      # No pool model could be proven runnable in the isolated checker. Never
-      # interpret an absent task-fit score as permission to use a pool-out model.
+      # No OMP model remains after availability and failed-attempt checks.
       @state["review"]["blocked"] = { "type" => "selection_undecided", "reason" => error.message,
                                      "signature" => checker_selection_snapshot,
                                      "at" => Time.at(now).utc.iso8601 }
@@ -2275,10 +2266,8 @@ module Orbit
       parts.join("\n\n--- amendment ---\n\n")
     end
 
-    # A real check failure (auth, quota or unknown) is recorded as a failed
-    # check. The task keeps running with its snapshot and members; new
-    # automatic checks are blocked until Root explicitly re-selects the
-    # checker model, and nothing retries or switches models on its own.
+    # A real check failure remains visible. Only the next unused, runnable
+    # model may retry this input and artifact; exhausted candidates block.
     def handle_check_failure(error, now)
       scope = @running_check
       @running_check = nil
@@ -2298,79 +2287,58 @@ module Orbit
         observation["status"] = "failed"
         observation["finished_at"] = Time.at(now).utc.iso8601
       end
-      @state["review"]["blocked"] = {
-        "type" => "check_failure", "reason" => error.message,
-        "failure_kind" => kind, "failure_basis" => basis,
-        "model" => @state.dig("review", "model"), "at" => Time.at(now).utc.iso8601
+      failed = @state["review"]["failed_models"] ||= {
+        "input_digest" => scope.fetch("input_digest"),
+        "artifact_digest" => scope.dig("snapshot", "digest"), "models" => []
       }
-      @record.event("check_failed", "number" => scope["number"], "error" => error.message,
-                    "failure_kind" => kind, "failure_basis" => basis)
-      @record.event("checker_model_blocked", "type" => "check_failure", "failure_kind" => kind)
-      notify_checker_block("the independent check failed (model #{@state.dig('review', 'model')}, " \
-                           "failure kind #{kind}): #{error.message}")
+      failed["models"] << @state.dig("review", "model") unless failed["models"].include?(@state.dig("review", "model"))
+      @record.event("check_failed", "number" => scope["number"], "model" => @state.dig("review", "model"),
+                    "error" => error.message, "failure_kind" => kind, "failure_basis" => basis)
+      schedule_check(now, "检查失败后尝试其他 OMP 型号", trigger: "model_fallback", manual: scope["manual"])
       save
     end
 
     def notify_checker_block(reason)
-      text = "Orbit checker model blocked (not a new user instruction): #{reason}. " \
-             "The task stays running with its snapshot and members; automatic and repeated manual checks are paused. " \
-             "Ask the native user to send the standalone Orbit authorization: review_model=provider/id, " \
-             "then run orbit review-model #{@record.path} --model provider/id for that exact user choice. " \
-             "Orbit does not retry the failed check or switch models automatically."
+      text = "Orbit independent checker has no remaining runnable OMP model (not a new user instruction): #{reason}. " \
+             "The task stays running and no failed check counts as a final review. " \
+             "Root can inspect OMP model availability and use orbit review-model #{@record.path} --model provider/id " \
+             "after credentials or models change; otherwise report the blockage."
       sent = @connection.send_message(text)
       @state["sent_message_ids"] << sent.fetch("id")
     rescue StandardError => error
       @record.event("checker_block_notify_failed", "error" => error.message)
     end
 
-    # Root explicitly chose the next checker model (ADR-009 §4). The choice
-    # is pinned for the task, an out-of-pool model is recorded with a notice,
-    # the block clears and a fresh check for this task runs immediately. No
-    # retry or switch happens automatically.
+    # A Root-selected OMP model is checked again by the runtime before it
+    # replaces a blocked model; an in-flight checker is never switched.
     def apply_review_model(command, now)
       model = command.fetch("model").to_s.strip
       unless model.match?(%r{\A[^\s/]+/[^\s]+\z})
         @record.event("review_model_rejected", "reason" => "model must be provider/id")
         return
       end
-      claimed = command["authorization"]
       begin
-        actual = ModelAuthorization.verify(connection: @connection,
-          instruction_id: @state.dig("instruction_source", "id"),
-          message_id: claimed.is_a?(Hash) ? claimed["message_id"] : nil, model: model)
-        raise ArgumentError, "review model authorization source mismatch" unless actual == claimed
-      rescue StandardError => error
-        @record.event("review_model_rejected", "reason" => error.message)
+        _, selection = checker_selector.select(explicit: model,
+          instruction: effective_checker_instruction, selected_for: "review_model")
+      rescue CheckerModelSelector::Error => error
+        @record.event("review_model_rejected", "model" => model, "reason" => error.message)
         return
       end
-      pool = safe_pool_read
-      in_pool = pool.nil? || pool.empty? || pool.include?(model)
       @state["review"]["explicit_model"] = model
-      @state["review"]["explicit_authorization"] = actual
-      notice = in_pool ? nil : "explicit review model is outside the candidate pool"
+      @state["review"]["model"] = model
+      @state["review"].delete("failed_models")
       if @state.dig("review", "blocked")
         @state["review"].delete("blocked")
-        @record.event("checker_model_block_cleared", "reason" => "explicit review model recorded")
+        @record.event("checker_model_block_cleared", "reason" => "Root selected an available OMP model")
       end
       @record.event("review_model_recorded", "model" => model, "reason" => command["reason"].to_s,
-                    "in_pool" => in_pool, "notice" => notice, "authorization" => actual)
-      # Manual so the retry is never displaced by timers and is not deduped
-      # against the failed observation it replaces.
-      schedule_check(now, "显式重选检查模型", trigger: "review_model", manual: true)
+                    "in_pool" => selection["in_pool"])
+      schedule_check(now, "Root 重选 OMP 检查模型", trigger: "review_model", manual: true)
       save
     end
 
-    def safe_pool_read
-      Array(candidate_pool.read)
-    rescue StandardError
-      nil
-    end
-
-    # OpenCode specified CheckerModelSelector#snapshot(instruction:) as the
-    # JEV-free signature over the pool, session catalog, valid evidence and
-    # the effective instruction; it is not on disk yet, so this narrow
-    # adapter falls back to the selector's internal prepare() signature (the
-    # same source) until the public method lands. Nil keeps the block closed.
+    # A JEV-free signature over pool, OMP catalog, evidence and instruction.
+    # Selection blocks only reopen when inputs change, not on a timer.
     def checker_selection_snapshot
       selector = checker_selector
       return selector.snapshot(instruction: effective_checker_instruction) if selector.respond_to?(:snapshot)
@@ -2381,10 +2349,7 @@ module Orbit
       nil
     end
 
-    # An undecided block re-tries exactly when the selection inputs changed:
-    # new pool contents, a changed session catalog, newly valid evidence or a
-    # revised instruction. A check_failure block never auto-clears; only an
-    # explicit review-model does that.
+    # An undecided block is reconsidered only when a selection input changes.
     def block_signature_changed?(block)
       current = checker_selection_snapshot
       current.is_a?(String) && block["signature"].is_a?(String) && current != block["signature"]

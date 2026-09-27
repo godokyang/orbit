@@ -8,18 +8,20 @@ test("parseProbeModels splits, trims and drops blanks", () => {
 	assert.deepEqual(parseProbeModels(""), []);
 });
 
-test("probeModelAvailability separates catalog and credential failures and never returns a token", () => {
+test("probeModelAvailability resolves each model through OMP's own per-model resolver", async () => {
 	const credentialCalls: string[] = [];
 	const credentials = new Map([
-		["good", { ok: true }],
-		["nokey", { ok: false, reason: "no credential for nokey" }],
+		["good/model", { ok: true }],
+		["good/x-ai/grok-4.7", { ok: true }],
+		["good/other", { ok: true }],
+		["nokey/model", { ok: false, reason: "no credential for nokey" }],
 	]);
-	const result = probeModelAvailability(
+	const result = await probeModelAvailability(
 		["good/model", "good/x-ai/grok-4.7", "nokey/model", "gone/model", "notamodel", "good/model", "good/other"],
 		(provider, id) => provider === "good" || (provider !== "gone" && id === "model"),
-		provider => {
-			credentialCalls.push(provider);
-			return credentials.get(provider) ?? { ok: false, reason: "unexpected provider" };
+		async (provider, id) => {
+			credentialCalls.push(`${provider}/${id}`);
+			return credentials.get(`${provider}/${id}`) ?? { ok: false, reason: "unexpected model" };
 		},
 	);
 	// A model id may itself contain slashes (e.g. good/x-ai/grok-4.7): the
@@ -27,14 +29,29 @@ test("probeModelAvailability separates catalog and credential failures and never
 	assert.deepEqual(result.resolvable, ["good/model", "good/x-ai/grok-4.7", "good/other"]);
 	assert.deepEqual(result.unresolvable, [
 		{ model: "nokey/model", reason: "no credential for nokey" },
-		{ model: "gone/model", reason: "model not in isolated catalog" },
+		{ model: "gone/model", reason: "model not in OMP source catalog" },
 		{ model: "notamodel", reason: "model must be provider/id" },
 	]);
-	// A provider is resolved at most once, regardless of how many of its models are probed.
-	assert.deepEqual(credentialCalls, ["good", "nokey"]);
-	// The result carries identifiers and reasons only; a token can never appear.
-	for (const entry of [...result.resolvable, ...result.unresolvable.map(item => item.reason)]) {
-		assert.equal(typeof entry, "string");
+	// Resolution is per unique model — the exact granularity the real check's
+	// session uses at request time — and duplicates never re-resolve.
+	assert.deepEqual(credentialCalls, ["good/model", "good/x-ai/grok-4.7", "nokey/model", "good/other"]);
+});
+
+test("probeModelAvailability propagates a resolver crash instead of dropping the model", async () => {
+	// The reviewer's resolver converts expected credential failures into
+	// structured reasons; an unexpected crash escaping it must not silently
+	// shrink the candidate list, so the pure function rethrows.
+	let thrown: unknown;
+	try {
+		await probeModelAvailability(
+			["broken/model"],
+			() => true,
+			async () => {
+				throw new Error("OAuth refresh failed for broken");
+			},
+		);
+	} catch (error) {
+		thrown = error;
 	}
-	assert.equal(JSON.stringify(result).includes("secret-token"), false);
+	assert.ok(thrown instanceof Error && thrown.message === "OAuth refresh failed for broken");
 });

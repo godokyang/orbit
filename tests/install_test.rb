@@ -37,9 +37,9 @@ module InstallTest
     end
   end
 
-  # bun installs the pinned reviewer SDK inside the staged release. The fixture
-  # records the expected invocation and creates the SDK layout without network
-  # access; version drift and install failures stay reachable in regression.
+  # The fixture installs a declared SDK version without network access. When
+  # the host version differs from the source lock, it mirrors bun add's staged
+  # manifest update and records the exact host SDK version.
   def write_fixture_bun(directory)
     FileUtils.mkdir_p(directory)
     bun = File.join(directory, "bun")
@@ -49,7 +49,12 @@ module InstallTest
         printf '%s\\n' "${ORBIT_FIXTURE_BUN_VERSION:-1.3.14}"
         exit 0
       fi
-      if [ "$1" != "install" ] || [ "$2" != "--frozen-lockfile" ]; then
+      if [ "$1" = install ] && [ "$2" = --frozen-lockfile ]; then
+        version=#{Orbit::OmpEntry::PINNED_SDK_VERSION}
+      elif [ "$1" = add ] && [ "$2" = --exact ]; then
+        version="${3##*@}"
+        node -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync("package.json")); p.dependencies["@oh-my-pi/pi-coding-agent"]=process.argv[1]; p.dependencies["@oh-my-pi/pi-utils"]=process.argv[1]; fs.writeFileSync("package.json",JSON.stringify(p))' "$version"
+      else
         echo "fixture bun: unexpected arguments: $*" >&2
         exit 2
       fi
@@ -58,10 +63,16 @@ module InstallTest
         exit 3
       fi
       mkdir -p node_modules/@oh-my-pi/pi-coding-agent || exit 1
-      printf '{"name":"@oh-my-pi/pi-coding-agent","version":"%s"}\\n' "${ORBIT_FIXTURE_SDK_VERSION:-18.2.8}" > node_modules/@oh-my-pi/pi-coding-agent/package.json
+      printf '{"name":"@oh-my-pi/pi-coding-agent","version":"%s"}\\n' "${ORBIT_FIXTURE_SDK_VERSION:-$version}" > node_modules/@oh-my-pi/pi-coding-agent/package.json
       exit 0
     SH
     File.chmod(0o755, bun)
+    omp = File.join(directory, "omp")
+    File.write(omp, <<~SH)
+      #!/bin/sh
+      printf 'omp/%s\\n' "${ORBIT_FIXTURE_OMP_VERSION:-#{Orbit::OmpEntry::PINNED_SDK_VERSION}}"
+    SH
+    File.chmod(0o755, omp)
   end
 
   def fixture
@@ -425,8 +436,19 @@ module InstallTest
     assert(Dir.glob(File.join(@runtime, ".prepare-*"), File::FNM_DOTMATCH).empty?, "failed preparation cleaned")
   end
 
-  # A reviewer SDK that does not match the pin aborts preparation; the old
-  # release and its pinned SDK stay active.
+  def reviewer_tracks_host_version
+    install(env: { "ORBIT_FIXTURE_OMP_VERSION" => Orbit::OmpEntry::MINIMUM_OMP_VERSION })
+    release = active
+    sdk = json(File.join(release, "runners/omp-reviewer/node_modules/@oh-my-pi/pi-coding-agent/package.json"))
+    declared = json(File.join(release, "runners/omp-reviewer/package.json"))
+    record = json(File.join(release, OrbitInstall::RELEASE))
+    expected = Orbit::OmpEntry::MINIMUM_OMP_VERSION
+    assert(sdk["version"] == expected && declared.dig("dependencies", "@oh-my-pi/pi-coding-agent") == expected &&
+           declared.dig("dependencies", "@oh-my-pi/pi-utils") == expected && record["reviewer_sdk_version"] == expected,
+           "the staged reviewer matches the installed host rather than the source SDK lock")
+  end
+
+  # A reviewer SDK mismatch aborts preparation without changing the release.
   def reviewer_sdk_version_mismatch_keeps_old_release
     install
     before = version
@@ -434,7 +456,7 @@ module InstallTest
     bump
     _out, err, status = Open3.capture3(@env.merge("ORBIT_FIXTURE_SDK_VERSION" => "18.3.0"),
                                        File.join(@bin, "orbit"), "update", chdir: "/")
-    assert(!status.success? && err.include?("does not match the pinned"),
+    assert(!status.success? && err.include?("does not match host OMP"),
            "a drifted reviewer SDK aborts the update (#{err})")
     assert(version == before && active == old, "the previous release stays active with the pinned SDK")
     sdk = File.join(old, "runners/omp-reviewer/node_modules/@oh-my-pi/pi-coding-agent/package.json")
@@ -605,7 +627,7 @@ module InstallTest
     missing_prerequisites
     puts "INSTALL_TEST_PASS missing_prerequisites"
     %i[first_install successful_update old_wrapper_update update_keeps_referenced_release failed_update
-       reviewer_sdk_version_mismatch_keeps_old_release reviewer_install_failure_keeps_old_release
+       reviewer_tracks_host_version reviewer_sdk_version_mismatch_keeps_old_release reviewer_install_failure_keeps_old_release
        failed_legacy_cleanup_keeps_old_version upgrade_keeps_unowned_orbit_entry_and_reports_uncertainty
        uninstall_preserves_user_files shell_configuration].each do |test|
       fixture { send(test) }
