@@ -2,7 +2,7 @@
 
 状态：现行运行合同，按当前源码 0.7.10 核对。以 OMP 单宿主 [ADR-008](../docs/adr/008-omp-native-collaboration-base.md)和候选池 [ADR-009](../docs/adr/009-user-selected-model-pool.md)为依据；Root 通过原生 `task/hub` 组建一层执行团队。当前实现与验证边界见[交接](../docs/plan/handoff.md)。
 
-用户认可的[混合模型交付主方案](../docs/plan/mixed-model-delivery-proposal.md)提出去时间评分、任务相关能力先验和真实路由 token 成本等目标，尚未改造本合同所描述的现行行为。旧宿主、M4 和不同构建的验收仅按各自版本证明相应事实，不提供额外授权或覆盖本合同。
+用户已授权完整实现[混合模型交付主方案](../docs/plan/mixed-model-delivery-proposal.md)。本次替换的判断、成本、交接与调用归属语义见 [ADR-009 §6](../docs/adr/009-user-selected-model-pool.md#6-已采纳的替换决定与实现接缝实施中)；下文未注明本次变更的选型描述仍是 0.7.10 基线，不作为新策略依据。接线、校准和真实验收进度见[当前计划](../docs/plan/vision-completion-plan.md)，不能提前宣称新行为已上线。旧宿主、M4 和不同构建的验收仅按各自版本证明相应事实，不提供额外授权或覆盖本合同。
 
 ## 角色与主动调用
 
@@ -66,6 +66,8 @@ Jev 的首个判断 provider 是 TypeSafe 的 `https://api.typesafe.ai/v1/system
 
 **统一判断数据模型与 provider 适配（源码已实现）：** Orbit 的外部判断调用通过自有 `JudgmentRequest`／`JudgmentResult` 携带有界 `state`、稳定问题 ID、真假标准、数据模型及问题集版本；按 ID 消费经校验的有限 `[0,1]` `probability_true`。未回答完整、服务失败或不可映射时返回带结构化原因的 `unavailable`，不使用部分答案触发自动动作。TypeSafe 适配器负责鉴权、HTTP 与原生响应映射；池内成员 `jev-candidates-1` 的证据门、阈值与失败路径不变，检查者问题集因新模型级先验升至 `jev-checker-task-fit-2` 并须按新输入解释与校准。新增 provider／模型必须显式选择、针对会触发自动动作的判断分别校准；不能将自由文本、自报置信度或未经验证的新服务分数套入 Jev 门槛，不能在失败时静默换服务。凭据不进入任务记录，判断 provider 不等同于 OMP 执行／检查模型候选池。
 判断记录同时保留 `question_set_version`、实际 provider／模型及可得用量：入口写入消息级账本与任务 `entry`；任务内观察、成员建议和检查者质量判断分别写入其实际事件／状态或检查模型选择记录，避免问题集或模型变化后把历史概率当作同一种分数。判断失败不以旧分数触发新动作。
+
+本次判断回执变更（工作区已接线，未作为新安装构建交付）：`unavailable` 的答案仍为空、不能触发自动动作；服务响应中实际返回且可校验的模型身份和用量独立保留，包括 HTTP 错误、缺答案或非法概率响应。没有返回的身份或用量保持未知，不以请求型号、零消耗或部分答案补齐。公共 Jev 错误附带该回执，入口 trace、runtime 第一／二阶段状态与事件、检查者选择记录保留其身份与用量；失败用量参与累计，缺失标 incomplete，池内 pending 判断也累计且推荐分支不重复计。完整调用归属和整次结算仍须按 ADR-009 §6 接通并验收。
 
 当前 TypeSafe 实现只从启动 Coding Agent 时的 `TYPESAFE_API_KEY` 环境变量读取 key，对新 Orbit 任务全局启用；`orbit jev setup` 可一次性输入 key，写入当前用户的 TypeSafe 环境文件并配置 zsh／bash 启动文件，使新终端自动提供该环境变量。key 不写入 Orbit 配置或任务记录；已有环境变量优先。当前终端和已运行任务不会被子命令改动。每个 Orbit 任务可以把有界的原始要求、指定依据摘录、有效修改、近期宿主观察和产物差异摘要交给 Jev。项目可以单独关闭该外发。Jev 返回"可能卡住""可能偏题""当前产物值得完整检查"以及"当前是否可能有适合独立分工的子任务"的概率；程序依据概率和当前任务状态安排独立检查者或提示 Root，不将概率当作问题证据、完成结论或停止授权。指定依据超出预算时明确标注截断与省略；有效修改超出预算时保留最新部分并明确标注被省略的范围，不把缺少的依据或更早修改当作需求不存在的证据。
 `orbit openrouter setup` 单独交互输入 OpenRouter key，私有环境文件只供新 zsh／bash 终端加载，已有 `OPENROUTER_API_KEY` 环境变量优先；不借用 TypeSafe 或 OMP 的 key，也不修改当前终端与运行中的会话。setup 仅保存凭据，不代表接口鉴权或模型覆盖已经核实。

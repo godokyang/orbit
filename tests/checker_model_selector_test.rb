@@ -389,7 +389,13 @@ module CheckerModelSelectorTest
 
   def unavailable_task_fit_judgment_uses_pool_order
     advisor = Object.new
-    advisor.define_singleton_method(:assess_checker_quality) { |**_args| raise "JEV unavailable" }
+    receipt = Orbit::JudgmentResult.unavailable(
+      provider: "typesafe", reason: "JEV unavailable", actual_model: "jev-failure-fixture",
+      usage: { "input_tokens" => 17, "output_tokens" => 2 }
+    ).to_h.merge("question_set_version" => Orbit::JevAdvisor::QUESTION_SET_VERSIONS["checker_quality"])
+    advisor.define_singleton_method(:assess_checker_quality) do |**_args|
+      raise Orbit::JevAdvisor::Error.new("JEV unavailable", receipt: receipt)
+    end
     pool = %w[a/first b/second]
     model, selection = selector(pool: pool, catalog: catalog_for(pool),
                                 entries: pool.map { |candidate| entry(candidate) },
@@ -398,6 +404,9 @@ module CheckerModelSelectorTest
     assert(model == "a/first" && selection["selection_tier"] == "fallback" &&
            selection["quality_score"].nil? && selection["judgment_error"].include?("failed"),
            "a JEV outage never invents a score or forces a user to supply an outside-pool model")
+    assert(selection["judgment_model"] == "jev-failure-fixture" && selection["usage"] == receipt["usage"] &&
+           selection["task_fit_scores"].empty?,
+           "failed checker selection keeps its real consumption without actionable task-fit scores")
   end
 
   def unresolvable_preferred_model_falls_through_to_a_runnable_pool_model

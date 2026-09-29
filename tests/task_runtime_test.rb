@@ -1038,6 +1038,9 @@ fixture(interval: 300) do |root, record, _host, checker, _runtime|
   assert(host.messages.none? { |message| message.include?("Orbit model recommendation") } &&
          record.state["delegation_hint"].nil?,
          "no recommendation is sent or recorded when no candidate qualifies")
+  assert(record.state.dig("usage", "jev_stage2", "input_tokens") == 30 &&
+         record.state.dig("usage", "jev_stage2", "output_tokens") == 5,
+         "a paid pending_candidates judgment is included even when it produces no recommendation")
 end
 
 # Convergence for the real re-submission path: a pending_candidates round
@@ -1661,7 +1664,11 @@ fixture(interval: 300) do |root, record, _host, checker, _runtime|
   host = RuntimeTeamHost.new(root)
   host.working("progress")
   advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
-  advisor.delegation_failure = Orbit::JevAdvisor::Error.new("stage two down")
+  receipt = Orbit::JudgmentResult.unavailable(
+    provider: "typesafe", reason: "stage two down", actual_model: "jev-failure-fixture",
+    usage: { "input_tokens" => 21, "output_tokens" => 4 }
+  ).to_h.merge("question_set_version" => "jev-delegation-1")
+  advisor.delegation_failure = Orbit::JevAdvisor::Error.new("stage two down", receipt: receipt)
   runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
                                    evidence_cache: both_route_evidence(root))
   runtime.tick(now: Time.now.to_f + 6)
@@ -1673,6 +1680,10 @@ fixture(interval: 300) do |root, record, _host, checker, _runtime|
          "the per-signature assessment keeps the unavailable decision")
   assert(record.state["delegation_hint"].nil? && host.messages.none? { |message| message.include?("delegation hint") },
          "an unavailable decision does not hint")
+  assert(assessment["model"] == "jev-failure-fixture" &&
+         record.state.dig("usage", "jev_stage2", "input_tokens") == 21 &&
+         events(record).find { |event| event["type"] == "delegation_unavailable" },
+         "failed second-stage usage and the actual identity are retained without recommending")
 end
 
 # Identities Orbit cannot establish stay unknown: no request, no hint, no host
@@ -2612,7 +2623,11 @@ end
 fixture do |root, record, host, checker, _runtime|
   host.send_message("Working")
   advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1)
-  advisor.failure = Orbit::JevAdvisor::Error.new("service unavailable")
+  receipt = Orbit::JudgmentResult.unavailable(
+    provider: "typesafe", reason: "service unavailable", actual_model: "jev-failure-fixture",
+    usage: { "input_tokens" => 11, "output_tokens" => 2 }
+  ).to_h.merge("question_set_version" => "jev-observation-1")
+  advisor.failure = Orbit::JevAdvisor::Error.new("service unavailable", receipt: receipt)
   runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor)
   now = Time.now.to_f
   runtime.tick(now: now + 1)
@@ -2621,6 +2636,9 @@ fixture do |root, record, host, checker, _runtime|
   assert(checker.calls.last.fetch(:role) == "reviewer", "failed Jev call falls back to full review")
   assert(record.state.dig("jev", "unavailable") == "service unavailable", "failure is recorded")
   assert(Orbit::TaskView.format(record).include?("JEV：不可用（service unavailable）"), "status shows JEV unavailable with its reason")
+  assert(record.state.dig("jev", "model") == "jev-failure-fixture" &&
+         record.state.dig("usage", "jev_stage1", "input_tokens") == 11,
+         "first-stage failure retains its actual model and reported consumption")
 end
 
 Dir.mktmpdir("orbit-jev-config-") do |root|

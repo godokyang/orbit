@@ -32,29 +32,37 @@ module Orbit
     attr_reader :model
 
     def judge(request)
+      payload = nil
       raise Error, "TYPESAFE_API_KEY is missing" if @api_key.empty?
 
       response = post(request.state, wire_questions(request))
-      payload = JSON.parse(response.body)
+      begin
+        payload = JSON.parse(response.body)
+      rescue JSON::ParserError
+        reason = response.is_a?(Net::HTTPSuccess) ? "invalid TypeSafe response JSON" : "TypeSafe HTTP #{response.code}"
+        return unavailable(reason)
+      end
+      return unavailable("TypeSafe HTTP #{response.code}", payload: payload) unless response.is_a?(Net::HTTPSuccess)
+
       unless payload.is_a?(Hash) && payload["answers"].is_a?(Hash) && payload["model"].is_a?(String) && !payload["model"].empty?
-        return unavailable("invalid TypeSafe response shape")
+        return unavailable("invalid TypeSafe response shape", payload: payload)
       end
 
       answers = {}
       request.questions.each_key do |id|
         answer = payload.fetch("answers")[id]
-        return unavailable("missing or invalid #{id} answer") unless valid_answer?(answer)
+        return unavailable("missing or invalid #{id} answer", payload: payload) unless valid_answer?(answer)
 
         answers[id] = { "probability_true" => answer.fetch("noul") }
       end
       JudgmentResult.answered(answers: answers, provider: PROVIDER,
                               actual_model: payload.fetch("model"), usage: payload["usage"])
     rescue Error => error
-      unavailable(error.message)
+      unavailable(error.message, payload: payload)
     rescue JudgmentResult::Error => error
-      unavailable(error.message)
+      unavailable(error.message, payload: payload)
     rescue StandardError => error
-      unavailable("TypeSafe assessment failed: #{error.class}")
+      unavailable("TypeSafe assessment failed: #{error.class}", payload: payload)
     end
 
     private
@@ -68,8 +76,6 @@ module Orbit
                                  open_timeout: 3, read_timeout: 5, write_timeout: 3) do |http|
         http.request(request)
       end
-      raise Error, "TypeSafe HTTP #{response.code}" unless response.is_a?(Net::HTTPSuccess)
-
       response
     end
 
@@ -89,8 +95,12 @@ module Orbit
         answer["noul"].is_a?(Numeric) && answer["noul"].finite? && answer["noul"].between?(0, 1)
     end
 
-    def unavailable(reason)
-      JudgmentResult.unavailable(provider: PROVIDER, reason: reason)
+    def unavailable(reason, payload: nil)
+      facts = payload.is_a?(Hash) ? payload : {}
+      actual_model = facts["model"]
+      actual_model = nil unless actual_model.is_a?(String) && !actual_model.strip.empty?
+      JudgmentResult.unavailable(provider: PROVIDER, reason: reason,
+                                 actual_model: actual_model, usage: facts["usage"])
     end
   end
 end

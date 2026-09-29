@@ -88,10 +88,14 @@ module Orbit
       new("answered", scores, provider, actual_model, bounded_usage(usage), nil)
     end
 
-    def self.unavailable(provider:, reason:, actual_model: nil)
+    def self.unavailable(provider:, reason:, actual_model: nil, usage: nil)
       raise Error, "unavailable results need a non-empty reason" unless reason.is_a?(String) && !reason.strip.empty?
 
-      new("unavailable", {}, provider, actual_model, nil, reason)
+      unless actual_model.nil? || (actual_model.is_a?(String) && !actual_model.strip.empty?)
+        raise Error, "actual_model must be a non-empty string when reported"
+      end
+
+      new("unavailable", {}, provider, actual_model, bounded_usage(usage), reason)
     end
 
     def initialize(status, answers, provider, actual_model, usage, error)
@@ -137,7 +141,8 @@ module Orbit
     def self.bounded_usage(usage)
       return nil unless usage.is_a?(Hash) && !usage.empty?
 
-      usage.select { |_key, value| value.is_a?(Numeric) && value.finite? }
+      usable = usage.select { |_key, value| value.is_a?(Numeric) && value.finite? && value >= 0 }
+      usable.empty? ? nil : usable
     end
   end
 end

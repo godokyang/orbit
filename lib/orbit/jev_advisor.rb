@@ -77,7 +77,21 @@ module Orbit
       }
     }.freeze
 
-    class Error < StandardError; end
+    class Error < StandardError
+      attr_reader :receipt
+
+      def initialize(message = nil, receipt: nil)
+        @receipt = receipt
+        super(message)
+      end
+
+      def judgment
+        facts = receipt.is_a?(Hash) ? receipt : {}
+        source = facts["source"].is_a?(Hash) ? facts["source"] : {}
+        { "provider" => source["provider"], "model" => source["actual_model"],
+          "question_set_version" => facts["question_set_version"], "usage" => facts["usage"] }
+      end
+    end
 
     # Per-candidate ADR-009 §3 questions for the pool recommendation stage.
     # Quality must clear the line from sourced evidence and the task
@@ -222,8 +236,18 @@ module Orbit
         question_set_version: question_set_version, provider: TypeSafeJudgment::PROVIDER, model: MODEL
       )
       result = judgment_provider.judge(request)
-      raise Error, result.error if result.unavailable?
-      raise Error, "the judgment did not answer every requested question" unless result.complete_for?(request)
+      unless result.complete_for?(request)
+        failure = if result.unavailable?
+                    result
+                  else
+                    JudgmentResult.unavailable(
+                      provider: result.provider, reason: "the judgment did not answer every requested question",
+                      actual_model: result.actual_model, usage: result.usage
+                    )
+                  end
+        receipt = failure.to_h.merge("question_set_version" => question_set_version)
+        raise Error.new(failure.error, receipt: receipt)
+      end
 
       {
         "provider" => result.provider, "model" => result.actual_model,

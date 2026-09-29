@@ -180,7 +180,9 @@ module Orbit
                                     question_set_version: QUESTION_SET_VERSION, provider: "typesafe", model: model)
       result = provider.judge(request)
       if result.unavailable?
-        return outcome("uncertain", "root_decides", "entry judgment unavailable: #{result.error}")
+        return outcome("uncertain", "root_decides", "entry judgment unavailable: #{result.error}",
+                       provider: result.provider, actual_model: result.actual_model,
+                       usage: result.usage, calibration: calibration)
       end
 
       probabilities = result.answers.transform_values { |value| { "probability_true" => value } }
@@ -244,10 +246,11 @@ module Orbit
     def outcome(classification, decision, reason, probabilities: nil, provider: nil,
                 actual_model: nil, usage: nil, calibration: nil)
       trace = { "rule_version" => RULE_VERSION }
-      if probabilities
+      if provider
         trace.merge!("question_set_version" => QUESTION_SET_VERSION, "provider" => provider,
-                     "actual_model" => actual_model, "probabilities" => probabilities,
+                     "actual_model" => actual_model,
                      "thresholds" => calibration.fetch("thresholds"))
+        trace["probabilities"] = probabilities if probabilities
         trace["usage"] = usage if usage
       end
       {

@@ -327,6 +327,7 @@ module Orbit
             )
           rescue StandardError => error
             judgment_error = "JEV task-fit judgment failed (#{error.class})"
+            judgment = error.judgment.merge("scores" => {}) if error.is_a?(JevAdvisor::Error)
           ensure
             elapsed = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - started).round(3)
           end

@@ -675,9 +675,10 @@ module Orbit
       @jev_next_at = now + 60
       @jev_signature = signature
       @jev_process_streak = 0
-      @record.event("jev_unavailable", "reason" => error.message)
+      judgment = consume_jev_failure(error, "jev_stage1")
+      @record.event("jev_unavailable", judgment.merge("reason" => error.message))
       @state["jev"] = (@state["jev"].is_a?(Hash) ? @state["jev"] : {}).merge(
-        "status" => "unavailable", "unavailable" => error.message, "at" => Time.at(now).utc.iso8601
+        judgment.merge("status" => "unavailable", "unavailable" => error.message, "at" => Time.at(now).utc.iso8601)
       )
       save
       :unavailable
@@ -699,6 +700,12 @@ module Orbit
       aggregate["input_tokens"] = (aggregate["input_tokens"] || 0) + input if input.is_a?(Integer)
       aggregate["output_tokens"] = (aggregate["output_tokens"] || 0) + output if output.is_a?(Integer)
       aggregate["incomplete"] = true unless input.is_a?(Integer) && output.is_a?(Integer)
+    end
+
+    def consume_jev_failure(error, bucket)
+      judgment = error.judgment
+      accumulate_jev_usage(bucket, judgment["usage"])
+      judgment
     end
 
     def schedule_check(at, basis, trigger:, manual: false)
@@ -1324,6 +1331,7 @@ module Orbit
       qualified = evaluated.select { |candidate| candidate["status"] == "qualified" }
                            .sort_by { |candidate| [-candidate["time"], COST_BAND_ORDER.fetch(candidate["cost_band"], 3)] }
       judgment = result.slice("provider", "model", "question_set_version", "usage")
+      accumulate_jev_usage("jev_stage2", result["usage"])
       if qualified.empty?
         @state["delegation_assessments"][signature] = judgment.merge(
           "decision" => "pending_candidates", "candidates" => evaluated, "at" => Time.at(now).utc.iso8601
@@ -1354,21 +1362,21 @@ module Orbit
                                        "recommendation" => { "first" => first, "backups" => recommendation["backups"] },
                                        "candidates" => evaluated, "at" => Time.at(now).utc.iso8601)
       )
-      accumulate_jev_usage("jev_stage2", result["usage"])
       @record.event("delegation_recommendation", judgment.merge(
         "signature" => signature, "first" => first, "backups" => recommendation["backups"], "candidates" => evaluated
       ))
       prepare_candidate_recommendation(first, recommendation["backups"], evaluated, signature, now)
       save
     rescue JevAdvisor::Error => error
-      @state["delegation_assessments"][signature] = {
+      judgment = consume_jev_failure(error, "jev_stage2")
+      @state["delegation_assessments"][signature] = judgment.merge(
         "error" => error.message, "decision" => "unavailable", "at" => Time.at(now).utc.iso8601
-      }
-      @state["jev"] = (@state["jev"] || {}).merge(
-        "delegation" => { "status" => "unavailable", "decision" => "unavailable", "reason" => error.message,
-                          "at" => Time.at(now).utc.iso8601 }
       )
-      @record.event("delegation_unavailable", "reason" => error.message)
+      @state["jev"] = (@state["jev"] || {}).merge(
+        "delegation" => judgment.merge("status" => "unavailable", "decision" => "unavailable", "reason" => error.message,
+                                       "at" => Time.at(now).utc.iso8601)
+      )
+      @record.event("delegation_unavailable", judgment.merge("reason" => error.message))
       save
     end
 
@@ -1917,14 +1925,15 @@ module Orbit
     rescue JevAdvisor::Error => error
       # The second stage is attempted at most once per observation signature,
       # including failures, so a service error cannot become a tick loop.
-      @state["delegation_assessments"][signature] = {
+      judgment = consume_jev_failure(error, "jev_stage2")
+      @state["delegation_assessments"][signature] = judgment.merge(
         "error" => error.message, "decision" => "unavailable", "at" => Time.at(now).utc.iso8601
-      }
-      @state["jev"] = (@state["jev"] || {}).merge(
-        "delegation" => { "status" => "unavailable", "decision" => "unavailable", "reason" => error.message,
-                          "at" => Time.at(now).utc.iso8601 }
       )
-      @record.event("delegation_unavailable", "reason" => error.message)
+      @state["jev"] = (@state["jev"] || {}).merge(
+        "delegation" => judgment.merge("status" => "unavailable", "decision" => "unavailable", "reason" => error.message,
+                                       "at" => Time.at(now).utc.iso8601)
+      )
+      @record.event("delegation_unavailable", judgment.merge("reason" => error.message))
       save
     end
 
