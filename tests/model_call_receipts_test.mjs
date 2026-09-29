@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { ledgerReceipt, mintCallId, modelCallReceipts, pendingCallReceipt, syncCallReceipts } from '../plugins/model-call-receipts.mjs';
+import { accountScopeKey, credentialIdOf, ledgerReceipt, matchAccountIdentity, mintCallId, modelCallReceipts, pendingCallReceipt, syncCallReceipts } from '../plugins/model-call-receipts.mjs';
 
 // Shared-module surface: the Node host and the Bun reviewer use the same pure
 // computation, and the local invocation id is a real boundary uuid.
@@ -128,5 +128,59 @@ import { ledgerReceipt, mintCallId, modelCallReceipts, pendingCallReceipt, syncC
 	assert.equal(ledgerReceipt(unobserved, { role: 'member', phase: 'execute' }), null);
 	assert.equal(ledgerReceipt(null, { role: 'member', phase: 'execute' }), null);
 }
+
+// --- Credential row and keyless account identity -------------------------
+// Three scripted accounts; the row that served the message is the only one
+// whose identity may be attached. The SDK's list is in stable storage order,
+// so a first-item or session-pin fallback would pick acct-first here.
+const accounts = [
+	{ credentialId: 91, accountId: 'acct-first', email: 'first@example.test' },
+	{ credentialId: 42, accountId: 'acct-second', orgId: 'org-second' },
+	{ credentialId: 42, accountId: 'acct-duplicate' },
+];
+
+// (1) exact match on the credential row, never the first list item.
+const matched = matchAccountIdentity(accounts, 42);
+assert.equal(matched, undefined, 'a duplicated credential row is ambiguous and stays unknown');
+assert.equal(credentialIdOf({ credentialId: 91 }), 91);
+assert.deepEqual(matchAccountIdentity([{ credentialId: 91, accountId: 'acct-first', email: 'first@example.test' }], 91),
+	{ account_id: 'acct-first' }, 'only the keyless identity fields are carried, never email');
+assert.equal(accountScopeKey('zhipu', { account_id: 'acct-first' }), 'zhipu|acct-first|-|-');
+assert.equal(accountScopeKey('zhipu', undefined), null);
+
+const [served] = modelCallReceipts([{ call_id: 'orbit-call-acct-1', message: {
+	role: 'assistant', provider: 'zhipu', model: 'glm-5.2', stopReason: 'stop', credentialId: 91,
+	usage: { input: 10, output: 2, cacheRead: 0 },
+} }], 'glm-5.2', () => matchAccountIdentity([{ credentialId: 91, accountId: 'acct-first', orgId: 'org-a' }], 91)).calls;
+assert.deepEqual([served.credential_id, served.account_id, served.org_id, served.project_id, served.account_identity_source],
+	[91, 'acct-first', 'org-a', undefined, 'oauth_accounts_by_credential_id'],
+	'the receipt carries the serving row and only its keyless identity');
+assert.equal(served.account_scope, 'zhipu|acct-first|org-a|-');
+const servedEntry = ledgerReceipt(served, { role: 'member', phase: 'execute' });
+assert.equal(servedEntry.credential_id, 91);
+assert.equal(servedEntry.account_id, 'acct-first');
+assert.equal(servedEntry.account_identity_source, 'oauth_accounts_by_credential_id');
+
+// (2) a message without a credential row keeps null and an unknown identity.
+const [external] = modelCallReceipts([{ call_id: 'orbit-call-acct-2', message: {
+	role: 'assistant', provider: 'zhipu', model: 'glm-5.2', stopReason: 'stop',
+	usage: { input: 3, output: 1, cacheRead: 0 },
+} }], 'glm-5.2', () => ({ account_id: 'must-not-be-used' })).calls;
+assert.equal(external.credential_id, null, 'an unreported credential row stays null');
+assert.equal(external.account_id, undefined, 'no identity is attached without a credential row');
+assert.equal(external.account_scope, undefined);
+assert.equal(ledgerReceipt(external, { role: 'member', phase: 'execute' }).credential_id, null);
+
+// (3) a resolver that misses or throws leaves the call recorded and unknown,
+//     and the failed call keeps its own real usage fields unchanged.
+const [failed] = modelCallReceipts([{ call_id: 'orbit-call-acct-3', message: {
+	role: 'assistant', provider: 'zhipu', model: 'glm-5.2', stopReason: 'error', errorMessage: 'boom',
+	credentialId: 7, usage: { input: 900, output: 0, cacheRead: 100 },
+} }], 'glm-5.2', () => { throw new Error('resolver unavailable'); }).calls;
+assert.equal(failed.credential_id, 7, 'the reported row is kept even when the lookup fails');
+assert.equal(failed.account_id, undefined);
+assert.deepEqual({ input: failed.input, cacheRead: failed.cacheRead, reasoning: failed.reasoningTokens },
+	{ input: 900, cacheRead: 100, reasoning: undefined },
+	'usage categories keep their own reported fields, separately');
 
 console.log('model_call_receipts_test.mjs: all shared-receipt checks passed');

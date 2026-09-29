@@ -41,10 +41,11 @@ module Orbit
       new(document, now: now)
     end
 
-    # Cost comparison is only claimed for two priced estimates over the same
-    # account scope in the same currency. Everything else — quota rules,
-    # unknown price, missing usage composition, different currency or account
-    # scope — is indeterminate and names the blocker. Amounts are arithmetic
+    # Each estimate must already be priced for its own verified account and
+    # conditions. Cash amounts in the same currency can then be compared across
+    # routes/accounts; requiring one shared account would prevent comparing
+    # different providers. Quota rules, missing usage and different currencies
+    # remain indeterminate. Amounts are arithmetic
     # over the stated usage, not bills and not budget claims.
     def self.compare(first, second)
       blockers = { "first" => first, "second" => second }.filter_map do |label, estimate|
@@ -55,9 +56,6 @@ module Orbit
       end
       if blockers.empty? && first["currency"] != second["currency"]
         blockers << "different currencies are not comparable: #{first['currency']} vs #{second['currency']}"
-      end
-      if blockers.empty? && first["account_scope"] != second["account_scope"]
-        blockers << "different account scopes are not comparable: #{first['account_scope']} vs #{second['account_scope']}"
       end
       if blockers.any?
         return { "verdict" => "indeterminate", "reasons" => blockers, "first" => first, "second" => second,
@@ -73,7 +71,8 @@ module Orbit
                 else
                   "second_cheaper"
                 end
-      { "verdict" => verdict, "currency" => first["currency"], "account_scope" => first["account_scope"],
+      { "verdict" => verdict, "currency" => first["currency"],
+        "account_scopes" => [first["account_scope"], second["account_scope"]],
         "first_amount" => first["amount"], "second_amount" => second["amount"],
         "usage_sources" => [first["usage_source"], second["usage_source"]],
         "note" => "amounts are arithmetic estimates over the stated usage, not bills or budget claims" }

@@ -165,7 +165,7 @@ module ModelQualityPolicyTest
       "checker_task_fit" => Orbit::ModelQualityPolicy::CHECKER_TASK_FIT_TEXT
     ))
     assert(templates["handoff_fit"]["criteria"]["false"] == Orbit::ModelQualityPolicy::HANDOFF_FALSE &&
-           templates["versions"]["candidates"] == "jev-candidates-2" &&
+           templates["versions"]["candidates"] == Orbit::ModelQualityPolicy::CANDIDATE_QUESTION_SET &&
            policy.question_digest == Digest::SHA256.hexdigest(JSON.generate(templates)) &&
            policy.question_digest != texts_only,
            "the question digest covers criteria and versions, not only the four bodies")

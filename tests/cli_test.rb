@@ -40,6 +40,28 @@ module CliTest
     Dir.glob(File.join(record.path, "inbox/*.json"))
   end
 
+  def route_forecast_is_scoped_and_never_consumption
+    record = task
+    payload = { "scope" => "review", "candidates" => {
+      "zhipu/glm-5.2" => { "route" => { "provider" => "zhipu", "model" => "glm-5.2",
+        "reasoning" => "unknown", "billing_route" => "direct_api" }, "account_scope" => "verified-account",
+        "plan" => nil, "prediction" => { "kind" => "declared_workload", "usage" => { "input" => 1000, "output" => 200 },
+          "basis" => "scripted bounded workload assumption", "applies_to" => "this review" } }
+    } }
+    before = File.binread(File.join(record.path, "state.json"))
+    response = JSON.parse(cli("route-resources", "forecast", record.path, "--file", "-",
+                              stdin_data: JSON.generate(payload)))
+    path = File.join(record.path, "route-cost-inputs.json")
+    assert(response["ok"] && response.dig("forecast", "task_id") == record.state["id"] &&
+           File.stat(path).mode & 0o777 == 0o600 && File.binread(File.join(record.path, "state.json")) == before &&
+           commands(record).empty? && !File.exist?(File.join(record.path, "resource-calls.json")),
+           "a forecast is private scoped input; it does not record consumption, dispatch or alter task state")
+    record.save(record.state.merge("status" => "complete"))
+    retained = File.binread(path)
+    cli("route-resources", "forecast", record.path, "--file", "-", stdin_data: JSON.generate(payload), success: false)
+    assert(File.binread(path) == retained, "settled tasks refuse a new forecast")
+  end
+
   def single_task_from_project_subdirectory
     record = task
     child = File.join(@project, "src/deep")
@@ -256,6 +278,44 @@ module CliTest
     assert(text.include?("可核算总计：未知（缺少 独立检查 reviewer、独立检查 process_reviewer、独立检查未标注角色、JEV 委派第二阶段）"),
            "the total names every missing component")
     assert(!text.include?("可核算总计：输入"), "a partial or root figure is not promoted to the task total")
+  end
+
+  def status_reads_late_final_receipts_without_changing_terminal_state
+    record = task("complete", stop_confirmation: { "confirmed" => true },
+                  usage: { "resource_calls" => { "call_count" => 0 } })
+    original = File.binread(File.join(record.path, "state.json"))
+    ledger = Orbit::ResourceCallLedger.new(task_path: record.path, task_id: record.state.fetch("id"))
+    ledger.record(call_id: "late-final-call", role: "root", phase: "root_execution", status: "completed",
+                  provider: "fixture", actual_model: "actual", usage: { "input" => 41, "output" => 7 },
+                  usage_units: { "input" => "token", "output" => "token" }, usage_source: "native_message")
+    visible = JSON.parse(cli("status", record.path, "--json"))
+    assert(visible["status"] == "complete" && visible.dig("stop_confirmation", "confirmed") == true,
+           "a late receipt does not reopen execution or revoke confirmed stop")
+    assert(visible.dig("usage", "resource_calls", "call_count") == 1, "the display reads the final ledger instead of cached zero calls")
+    text = cli("status", record.path)
+    assert(text.include?("input 41 token") && text.include?("output 7 token"), "final reported categories are visible without being summed")
+    summary = JSON.parse(cli("session-summary", "--thread", "root"))
+    assert(summary["tasks"].first.dig("resource_calls", "call_count") == 1, "session summary includes the same finalized task ledger")
+    assert(File.binread(File.join(record.path, "state.json")) == original && commands(record).empty?,
+           "queries do not mutate authoritative state or queue execution")
+  end
+
+  def status_exposes_pending_and_corrupt_accounting_as_unknown
+    record = task("paused", usage: { "resource_calls" => { "call_count" => 0 } })
+    File.write(File.join(record.path, "native-model-calls.json"), JSON.generate(
+      "schema_version" => "orbit-native-model-calls-v1", "task_id" => record.state.fetch("id"),
+      "calls" => { "pending-call" => { "finalized" => false } }, "gaps" => []))
+    pending = JSON.parse(cli("status", record.path, "--json"))
+    assert(pending.dig("usage", "native_call_observations", "pending_calls") == 1,
+           "an observed pending invocation remains unknown after task stop")
+    assert(cli("status", record.path).include?("原生调用尚无最终用量：1"), "pending usage is never displayed as zero consumption")
+    original = File.binread(File.join(record.path, "state.json"))
+    File.write(File.join(record.path, "resource-calls.json"), "{corrupt")
+    broken = JSON.parse(cli("status", record.path, "--json"))
+    assert(broken.dig("usage", "resource_calls", "coverage") == "unreadable" &&
+           broken.dig("usage", "resource_calls", "call_count").nil?, "a corrupt ledger has no asserted count")
+    assert(cli("status", record.path).include?("已记录调用：未知"), "read failures are visible without stale totals")
+    assert(File.binread(File.join(record.path, "state.json")) == original, "the display never repairs or overwrites accounting evidence")
   end
 
   def stale_result_and_user_action
@@ -906,6 +966,9 @@ module CliTest
        terminal_status_never_prompts_recheck_of_stopped_tasks
        status_usage_sums_known_roles_and_excludes_root_cumulative
        status_usage_is_unknown_when_any_component_is_missing
+       status_reads_late_final_receipts_without_changing_terminal_state
+       status_exposes_pending_and_corrupt_accounting_as_unknown
+       route_forecast_is_scoped_and_never_consumption
        stale_result_and_user_action failed_stop_confirmation_is_reported doctor_without_connection_or_dependencies
        doctor_reads_existing_native_connection
        stop_retries_when_recorded_runtime_is_gone

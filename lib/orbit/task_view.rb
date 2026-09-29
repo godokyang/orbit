@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "task_record"
+require_relative "resource_call_ledger"
 
 module Orbit
   # Read-only project selection and presentation; the runtime remains the writer.
@@ -17,6 +18,41 @@ module Orbit
       "stop_unconfirmed" => "停止尚未确认"
     }.freeze
     module_function
+
+    # Read the finalized ledger at display time: its last receipt may arrive
+    # after the execution runtime exits. This detached projection never writes
+    # task state or changes completion/stop facts.
+    def current_state(record)
+      state = record.state
+      ledger = ResourceCallLedger.new(task_path: record.path, task_id: state.fetch("id"))
+      native_files = %w[native-model-calls.json native-model-call-gaps.jsonl].any? do |name|
+        File.file?(File.join(record.path, name))
+      end
+      return state unless File.file?(ledger.path) || native_files || state.dig("usage", "resource_calls")
+
+      state["usage"] ||= {}
+      raise ResourceCallLedger::Error, "recorded call ledger is missing; cached totals cannot be verified" if
+        !File.file?(ledger.path) && state.dig("usage", "resource_calls") &&
+        state.dig("usage", "resource_calls", "call_count") != 0
+
+      state["usage"]["resource_calls"] = ledger.summary
+      coverage = ledger.native_coverage
+      state["usage"]["native_call_observations"] = coverage
+      gaps = (state["usage"]["resource_call_gaps"] ||= {})
+      notes = coverage["gaps"].dup
+      notes << "#{coverage['pending_calls']} native calls have no final usage receipt" if coverage["pending_calls"].positive?
+      gaps.delete("native_execution")
+      gaps["native_execution"] = notes.uniq.join("; ").slice(0, 1000) unless notes.empty?
+      state
+    rescue ResourceCallLedger::Error, SystemCallError => error
+      state["usage"] ||= {}
+      state["usage"]["resource_calls"] = {
+        "schema_version" => ResourceCallLedger::SCHEMA_VERSION, "coverage" => "unreadable",
+        "call_count" => nil, "unknown_usage_calls" => nil, "partial_usage_calls" => nil, "groups" => []
+      }
+      (state["usage"]["resource_call_gaps"] ||= {})["resource_ledger"] = error.message
+      state
+    end
 
     def project(cwd = Dir.pwd)
       directory = File.realpath(cwd)
@@ -336,7 +372,9 @@ module Orbit
     end
 
     def resource_usage_lines(state, calls)
-      lines = ["已记录调用：#{calls['call_count']}；缺用量回执：#{calls['unknown_usage_calls']}；部分用量：#{calls.fetch('partial_usage_calls', 0)}"]
+      lines = ["已记录调用：#{calls['call_count'] || '未知'}；缺用量回执：#{calls['unknown_usage_calls'] || '未知'}；部分用量：#{calls.fetch('partial_usage_calls', 0) || '未知'}"]
+      pending = state.dig("usage", "native_call_observations", "pending_calls")
+      lines << "原生调用尚无最终用量：#{pending}；消耗未知，未计为零" if pending.to_i.positive?
       roles = { "root" => "Root", "member" => "执行成员", "judgment" => "JEV 判断",
                 "checker" => "独立检查", "arbiter" => "裁定" }
       groups = Array(calls["groups"])
@@ -736,7 +774,7 @@ module Orbit
     end
 
     def format(record)
-      state = record.state
+      state = current_state(record)
       status = state.fetch("status")
       lines = ["任务：#{summary(record)}", "状态：#{label(state)}（#{status}）",
                *([completion_invalidation_line(state)].compact),

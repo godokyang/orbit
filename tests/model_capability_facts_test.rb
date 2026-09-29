@@ -23,6 +23,8 @@ module ModelCapabilityFactsTest
       test_eligibility_projection(tmp)
       test_precise_evidence_and_catalog_presented_together(tmp)
       test_benchmark_value_conflict_holds_and_presents_both(tmp)
+      test_all_variant_divergence_holds_without_promoting_one(tmp)
+      test_partial_variant_divergence_stays_a_contrast(tmp)
       test_minor_divergence_is_contrast_without_hold(tmp)
       test_unavailable_record_is_contrast_not_covered(tmp)
       test_time_sample_and_resource_fields_never_enter_projection(tmp)
@@ -188,6 +190,63 @@ module ModelCapabilityFactsTest
     assert_equal("unknown", entry.fetch("measurement_date_status"), "the unknown measurement date is explicit")
     assert_equal(nil, entry.fetch("method_version"), "no method version is invented")
     assert_equal("not_required", result.dig("measurement_date", "status"), "no date requirement was stated")
+  end
+
+  # Every separately reported variant is compared against the exact value. When
+  # all of them disagree the hold covers the whole model; none is promoted,
+  # averaged or dropped, and each keeps its own label and date.
+  def test_all_variant_divergence_holds_without_promoting_one(tmp)
+    facts = projection(tmp, "variant-conflict",
+                       rows: [row("example/coder", variants: [
+                         { "label" => "Coder (max)", "coding_index" => 62.0 },
+                         { "label" => "Coder (low)", "coding_index" => 58.0 }
+                       ])],
+                       map: [mapping("model" => "coder", "openrouter_id" => "example/coder",
+                                     "canonical_slug" => "example/coder")],
+                       evidence: [evidence("model" => "coder", "metrics" => { "coding_index" => metric(30.0) })])
+    result = facts.candidate_facts(identity: identity("example", "coder"),
+                                   task: { "relevant_indices" => ["coding_index"] }, project_root: tmp)
+    assert_equal(nil, result.dig("catalog", "prior", "coding_index"),
+                 "a multi-variant prior never promotes one variant to a single value")
+    assert_equal(1, result.fetch("conflicts").length, "the divergence is flagged once for the model")
+    conflict = result.fetch("conflicts").first
+    assert_equal("potential_benchmark_variant_conflict", conflict.fetch("type"),
+                 "the divergence is a variant-level potential conflict lead")
+    assert_equal("root_review", conflict.fetch("resolution"), "resolution stays Root review")
+    assert_equal([["Coder (max)", 62.0, 30.0], ["Coder (low)", 58.0, 30.0]],
+                 conflict.fetch("variants").map { |side| [side["catalog_display_name"], side["catalog_value"],
+                                                          side["evidence_value"]] },
+                 "every reported variant and the exact value stay visible with their labels")
+    assert(conflict.fetch("variants").all? { |side| side["catalog_fetched_at"] && side["evidence_retrieved_at"] },
+           "both sides keep their dates")
+    assert_equal(true, result.fetch("recommendation_hold"), "an unresolved variant conflict holds the candidate")
+    assert(result.fetch("hold_reason").include?("Root 复核"), "the hold reason names Root review")
+  end
+
+  # When only some variants disagree, the result is a contrast: the actual
+  # reasoning is unknown, so nothing is declared resolved.
+  def test_partial_variant_divergence_stays_a_contrast(tmp)
+    facts = projection(tmp, "variant-partial",
+                       rows: [row("example/coder", variants: [
+                         { "label" => "Coder (max)", "coding_index" => 62.0 },
+                         { "label" => "Coder (low)", "coding_index" => 31.0 }
+                       ])],
+                       map: [mapping("model" => "coder", "openrouter_id" => "example/coder",
+                                     "canonical_slug" => "example/coder")],
+                       evidence: [evidence("model" => "coder", "metrics" => { "coding_index" => metric(30.0) })])
+    result = facts.candidate_facts(identity: identity("example", "coder"),
+                                   task: { "relevant_indices" => ["coding_index"] }, project_root: tmp)
+    assert_equal(0, result.fetch("conflicts").length, "a partial divergence is not a resolved conflict")
+    contrast = result.fetch("contrasts").find { |item| item["type"] == "benchmark_variant_divergence_unresolved" }
+    assert(contrast, "the partial divergence is presented as an unresolved contrast")
+    assert_equal(1, contrast.fetch("divergent_variant_count"), "the diverging variant is counted")
+    assert_equal(2, contrast.fetch("variant_count"), "all reported variants stay visible")
+    assert_equal([["Coder (max)", 62.0], ["Coder (low)", 31.0]],
+                 contrast.fetch("variants").map { |side| [side["catalog_display_name"], side["catalog_value"]] },
+                 "both variants keep their own labels and values")
+    assert(contrast.fetch("note").include?("无法判定") && contrast.fetch("note").include?("未知"),
+           "the contrast says the real reasoning is unknown and the divergence is not resolved")
+    assert_equal(false, result.fetch("recommendation_hold"), "a contrast never holds the recommendation")
   end
 
   def test_benchmark_value_conflict_holds_and_presents_both(tmp)
@@ -359,8 +418,11 @@ module ModelCapabilityFactsTest
   def projection(tmp, name, env: {}, rows:, map:, evidence: [], raw_evidence: [], refresh: true)
     home = File.join(tmp, "home-#{name}")
     base_env = { "HOME" => home, "OPENROUTER_API_KEY" => "or-test-key-1" }.merge(env)
-    http = FakeHttp.new([[200, JSON.generate({ "data" => rows, "links" => { "next" => nil },
-                                               "total_count" => rows.length })]])
+    catalogue, benchmark_rows = split_rows(rows)
+    http = FakeHttp.new([[200, JSON.generate({ "data" => catalogue, "links" => { "next" => nil },
+                                               "total_count" => catalogue.length })],
+                         [200, JSON.generate({ "data" => benchmark_rows,
+                                               "meta" => { "as_of" => "2026-06-03T12:00:00Z", "version" => "v1" } })]])
     overview = Orbit::OpenRouterModelOverview.new(env: base_env, home: home, clock: -> { NOW },
                                                   cache_path: File.join(tmp, name, "overview.json"),
                                                   map_path: File.join(tmp, name, "map.json"),
@@ -389,13 +451,36 @@ module ModelCapabilityFactsTest
     Orbit::ModelCapabilityFacts.new(overview: overview, evidence_cache: cache)
   end
 
-  def row(id, slug: id, coding: 50.0, agentic: 40.0, intelligence: nil, context: 8192)
+  # The fixture DSL answers one question per model: which Artificial Analysis
+  # indices describe it. The real APIs split that across two endpoints, so the
+  # helper below converts one fixture row into the catalogue row plus the
+  # benchmark row that the module must join.
+  def row(id, slug: id, coding: 50.0, agentic: 40.0, intelligence: nil, context: 8192, variants: nil)
     { "id" => id, "canonical_slug" => slug, "name" => "Model", "description" => "Bounded description.",
       "context_length" => context,
       "supported_parameters" => ["tools"],
       "architecture" => { "input_modalities" => ["text"], "output_modalities" => ["text"], "tokenizer" => "Other" },
-      "benchmarks" => { "artificial_analysis" => { "coding_index" => coding, "agentic_index" => agentic,
-                                                  "intelligence_index" => intelligence } } }
+      "benchmarks" => { "artificial_analysis" => variants || { "coding_index" => coding, "agentic_index" => agentic,
+                                                               "intelligence_index" => intelligence } } }
+  end
+
+  # One fixture row becomes one catalogue row plus one benchmark row per
+  # separately reported variant, in the two real endpoint shapes.
+  def split_rows(rows)
+    catalogue = []
+    benchmarks = []
+    rows.each do |row|
+      scores = row.fetch("benchmarks").fetch("artificial_analysis")
+      catalogue << row.reject { |key, _| key == "benchmarks" }
+      variants = scores.is_a?(Array) ? scores : [{ "label" => "#{row.fetch('id')} default" }.merge(scores)]
+      variants.each do |variant|
+        benchmark = { "source" => "artificial-analysis", "model_permaslug" => row.fetch("canonical_slug"),
+                      "display_name" => variant["label"] || "#{row.fetch('id')} variant",
+                      "pricing" => { "prompt" => "0.000001" } }
+        benchmarks << variant.reject { |key, _| key == "label" }.merge(benchmark)
+      end
+    end
+    [catalogue, benchmarks]
   end
 
   def mapping(overrides = {})

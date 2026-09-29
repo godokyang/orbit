@@ -62,12 +62,18 @@ module Orbit
   # prior is projected only when the caller names relevant benchmark indices;
   # an unclassified task receives facts without guessing that it is coding.
   class OpenRouterModelOverview
-    SCHEMA_VERSION = "orbit-openrouter-model-overview-v2"
+    SCHEMA_VERSION = "orbit-openrouter-model-overview-v3"
     MAP_SCHEMA_VERSION = "orbit-openrouter-model-map-v1"
     CACHE_DIRECTORY = "orbit"
-    FILE_NAME = "openrouter-model-overview-v2.json"
+    FILE_NAME = "openrouter-model-overview-v3.json"
 
     MODELS_URL = "https://openrouter.ai/api/v1/models"
+    # The authoritative benchmark source is a separate endpoint: the model
+    # catalogue carries no Artificial Analysis indices at all.
+    BENCHMARKS_URL = "https://openrouter.ai/api/v1/benchmarks?source=artificial-analysis"
+    BENCHMARK_FILTER = "artificial-analysis"
+    MAX_BENCHMARK_ROWS = 5000
+    MAX_VARIANTS = 8
     BENCHMARK_SOURCE = "https://artificialanalysis.ai"
 
     TTL_SECONDS = 72 * 60 * 60
@@ -102,7 +108,8 @@ module Orbit
     BENCHMARK_KEYS = %w[coding_index agentic_index intelligence_index].freeze
     PRIOR_KEYS = %w[id canonical_slug context_length architecture supported_parameters fetched_at sources
                     reasoning_note mapping_identity measurement_date measurement_date_status measurement_note
-                    method_version relevant_indices capability_scope].freeze
+                    method_version relevant_indices capability_scope benchmark_variants
+                    benchmark_display_name benchmark_as_of].freeze
 
     STATUS_FRESH = "fresh"
     STATUS_STALE = "stale"
@@ -224,12 +231,20 @@ module Orbit
       record = document.fetch("models")[entry.fetch("openrouter_id")]
       return { "status" => STATUS_UNAVAILABLE, "prior" => nil } unless record.is_a?(Hash)
       return { "status" => STATUS_UNAVAILABLE, "prior" => nil } unless record["canonical_slug"] == entry.fetch("canonical_slug")
-      return { "status" => STATUS_UNAVAILABLE, "prior" => nil } unless record["id"] == entry.fetch("openrouter_id") &&
-        BENCHMARK_KEYS.all? { |key| record[key].nil? || valid_index?(record[key]) }
+      return { "status" => STATUS_UNAVAILABLE, "prior" => nil } unless record["id"] == entry.fetch("openrouter_id")
 
-      available = BENCHMARK_KEYS.select { |key| valid_index?(record[key]) }
+      variants = benchmark_variants(document, record)
+      available = BENCHMARK_KEYS.select { |key| variants.any? { |variant| valid_index?(variant[key]) } }
       selected = indices.uniq & available
-      facts = record.slice("id", "canonical_slug", *BENCHMARK_KEYS).merge(
+      # A single measured variant can carry its scores at the top level; several
+      # variants of the same model stay separate. Neither the highest nor an
+      # average is ever promoted, and no OMP reasoning level is mapped.
+      singular = variants.length == 1 ? variants.first : nil
+      facts = record.slice("id", "canonical_slug").merge(
+        (singular ? BENCHMARK_KEYS.to_h { |key| [key, singular[key]] }.compact : {}),
+        "benchmark_variants" => variants,
+        "benchmark_display_name" => singular && singular["display_name"],
+        "benchmark_as_of" => document.dig("benchmark_meta", "as_of"),
         "context_length" => integer_or_nil(record["context_length"]),
         "architecture" => architecture(record["architecture"]),
         "supported_parameters" => parameter_list(record["supported_parameters"]),
@@ -313,7 +328,8 @@ module Orbit
 
     def snapshot_current?(document)
       return false unless document.is_a?(Hash) && document["schema_version"] == SCHEMA_VERSION
-      return false unless document["models"].is_a?(Hash) && document["key_digest"].is_a?(String)
+      return false unless document["models"].is_a?(Hash) && document["benchmarks"].is_a?(Hash) &&
+                          document["key_digest"].is_a?(String)
 
       fetched_at = parse_time(document["fetched_at"])
       return false if fetched_at.nil? || now >= fetched_at + TTL_SECONDS
@@ -324,7 +340,8 @@ module Orbit
 
     def fresh_status(document)
       { "status" => STATUS_FRESH, "fetched_at" => document.fetch("fetched_at"),
-        "model_count" => document.fetch("models").length }
+        "model_count" => document.fetch("models").length,
+        "benchmark_count" => document.fetch("benchmarks", {}).values.sum(&:length) }
     end
 
     def backoff_remaining(attempt)
@@ -379,13 +396,79 @@ module Orbit
           if total.is_a?(Integer) && seen < total
             raise Error, "OpenRouter 响应不完整：#{seen}/#{total} 项且无下一页"
           end
+          benchmarks, benchmark_meta = fetch_benchmarks
           return { "schema_version" => SCHEMA_VERSION, "key_digest" => key_digest,
                    "fetched_at" => format_time(now), "source" => MODELS_URL, "models" => models,
+                   "benchmarks" => benchmarks, "benchmark_source" => BENCHMARKS_URL,
+                   "benchmark_meta" => benchmark_meta,
                    "last_attempt" => { "at" => format_time(now), "outcome" => "ok", "error" => nil } }
         end
         url = resolve_next(follow)
       end
       raise Error, "OpenRouter 分页未在 #{MAX_PAGES} 页内结束"
+    end
+
+    # The second request of the same snapshot. Only rows whose own `source` is
+    # artificial-analysis are kept, keyed by their exact model_permaslug, with
+    # each row's own display_name and indices. `pricing` and every other field
+    # are dropped: they are not capability facts and never become cost.
+    def fetch_benchmarks
+      status, body = perform_get(BENCHMARKS_URL)
+      raise Error, "OpenRouter 基准请求失败：HTTP #{status}" unless status == 200
+
+      parsed = begin
+        JSON.parse(body)
+      rescue JSON::ParserError
+        raise Error, "OpenRouter 基准响应不是有效 JSON"
+      end
+      raise Error, "OpenRouter 基准响应缺少数据" unless parsed.is_a?(Hash) && parsed["data"].is_a?(Array)
+
+      rows = {}
+      count = 0
+      parsed.fetch("data").each do |item|
+        row = benchmark_row(item)
+        next if row.nil?
+
+        count += 1
+        raise Error, "OpenRouter 基准目录超过 #{MAX_BENCHMARK_ROWS} 项" if count > MAX_BENCHMARK_ROWS
+
+        list = (rows[row.fetch("permaslug")] ||= [])
+        list << row if list.length < MAX_VARIANTS
+      end
+      meta = parsed["meta"].is_a?(Hash) ? parsed["meta"] : {}
+      [rows, { "as_of" => optional_timestamp(meta["as_of"]), "version" => bounded_string(meta["version"], 64),
+               "source_url" => bounded_string(meta["source_url"], 512), "source" => BENCHMARK_FILTER }]
+    end
+
+    # One benchmark row for one benchmark variant of one model. Unknown sources
+    # are not capability facts here, and a row with no usable index is skipped
+    # rather than carried as a zero.
+    def benchmark_row(item)
+      raise Error, "OpenRouter 基准条目结构无效" unless item.is_a?(Hash)
+      return nil unless item["source"] == BENCHMARK_FILTER
+
+      permaslug = item["model_permaslug"]
+      return nil unless permaslug.is_a?(String) && !permaslug.empty? && permaslug.length <= 200 &&
+                        permaslug.match?(SLUG_PATTERN)
+
+      indices = BENCHMARK_KEYS.to_h do |key|
+        value = item[key]
+        next [key, nil] if value.nil?
+        raise Error, "OpenRouter 基准 #{permaslug} 的 #{key} 不是有效数值" unless valid_index?(value)
+
+        [key, value.to_f]
+      end
+      return nil if indices.values.compact.empty?
+
+      indices.merge("permaslug" => permaslug,
+                    "display_name" => bounded_string(item["display_name"], MAX_NAME_LENGTH))
+    end
+
+    def optional_timestamp(value)
+      text = value.to_s.strip
+      return nil if text.empty? || !text.match?(TIMESTAMP_PATTERN)
+
+      parse_time(text).nil? ? nil : text
     end
 
     def perform_get(url)
@@ -456,10 +539,7 @@ module Orbit
         "description" => bounded_string(item["description"], MAX_DESCRIPTION_LENGTH),
         "context_length" => integer_or_nil(item["context_length"]),
         "architecture" => architecture(item["architecture"]),
-        "supported_parameters" => parameter_list(item["supported_parameters"]),
-        "coding_index" => index_or_nil(item, "coding_index"),
-        "agentic_index" => index_or_nil(item, "agentic_index"),
-        "intelligence_index" => index_or_nil(item, "intelligence_index")
+        "supported_parameters" => parameter_list(item["supported_parameters"])
       }
     end
 
@@ -492,26 +572,22 @@ module Orbit
       value.uniq
     end
 
-    def valid_index?(value)
-      value.is_a?(Numeric) && value.finite?
+    # Exact join only: the benchmark row's own model_permaslug must equal this
+    # catalogue row's canonical_slug, or that row's exact id, and both lookups
+    # must agree. No suffix stripping, no neighbouring version, no route
+    # rewriting, and no invented variant.
+    def benchmark_variants(document, record)
+      table = document.is_a?(Hash) && document["benchmarks"].is_a?(Hash) ? document["benchmarks"] : {}
+      by_slug = table[record.fetch("canonical_slug")]
+      by_id = table[record.fetch("id")]
+      return [] if by_slug.nil? && by_id.nil?
+      return by_slug || by_id if by_slug.nil? || by_id.nil?
+
+      by_slug == by_id ? by_slug : []
     end
 
-    def index_or_nil(item, key)
-      benchmarks = item["benchmarks"]
-      return nil if benchmarks.nil?
-      raise Error, "OpenRouter 模型 #{item['id']} 的 benchmarks 结构无效" unless benchmarks.is_a?(Hash)
-
-      scores = benchmarks["artificial_analysis"]
-      return nil if scores.nil?
-      raise Error, "OpenRouter 模型 #{item['id']} 的基准结构无效" unless scores.is_a?(Hash)
-
-      value = scores[key]
-      return nil if value.nil?
-      unless value.is_a?(Numeric) && value.finite?
-        raise Error, "OpenRouter 模型 #{item['id']} 的 #{key} 不是有效数值"
-      end
-
-      value.to_f
+    def valid_index?(value)
+      value.is_a?(Numeric) && value.finite?
     end
 
     def bounded_string(value, limit)
@@ -630,7 +706,10 @@ module Orbit
     end
 
     def prior_sources(entry)
-      (entry.fetch("sources") + [MODELS_URL, BENCHMARK_SOURCE]).uniq.first(MAX_SOURCES)
+      # The audited first-party sources, the catalogue endpoint, the benchmark
+      # endpoint and the benchmark source site: the reader must be able to see
+      # which measured endpoint a carried index came from.
+      (entry.fetch("sources") + [MODELS_URL, BENCHMARKS_URL, BENCHMARK_SOURCE]).uniq.first(MAX_SOURCES)
     end
 
     def reasoning_note(requested:, entry:)

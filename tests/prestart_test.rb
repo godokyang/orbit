@@ -50,7 +50,12 @@ module PrestartTest
 
   def classifier(project, spy_results = [])
     spy = ProviderSpy.new(spy_results)
-    [Orbit::PrestartClassifier.new(project_root: project, provider_for: ->(_model) { spy }), spy]
+    loader = lambda do
+      path = File.join(project, ".orbit", "jev-entry.json")
+      File.file?(path) ? Orbit::EntryCalibration.validate(JSON.parse(File.read(path))) : nil
+    end
+    [Orbit::PrestartClassifier.new(project_root: project, provider_for: ->(_model) { spy },
+                                  calibration_loader: loader), spy]
   end
 
   # These scripted releases test binding and branching, not live calibration.
@@ -271,6 +276,30 @@ module PrestartTest
     end
   end
 
+  def check_reviewed_profile_does_not_pay_outside_scope
+    with_project do |project, _home|
+      document = calibration_document
+      document["release"]["profile"] = Orbit::EntryCalibration::SUPPORTED_PROFILE
+      release = Orbit::EntryCalibration.validate(document)
+      spy = ProviderSpy.new([answered(0.99, 0.99)])
+      advisor = Orbit::PrestartClassifier.new(project_root: project, provider_for: ->(_) { spy },
+                                              calibration_loader: -> { release })
+      long_request = "Implement and verify the storage module. " * 300
+      assert(advisor.decide(long_request)["decision"] == "root_decides" && spy.requests.empty?,
+             "a truncated request is outside the reviewed entry profile and pays no judgment")
+      Dir.mktmpdir do |non_git|
+        other = Orbit::PrestartClassifier.new(project_root: non_git, provider_for: ->(_) { spy },
+                                              calibration_loader: -> { release })
+        assert(other.decide("Implement and verify the storage module.")["decision"] == "root_decides" && spy.requests.empty?,
+               "a non-Git request is outside the reviewed entry profile and pays no judgment")
+        assert(other.decide("Use Orbit to run the storage implementation.")["decision"] == "start",
+               "an explicit controlled request still enters the ordinary start preflight")
+      end
+      assert(advisor.decide("Implement and verify the storage module.")["decision"] == "start" && spy.requests.length == 1,
+             "a bounded Git request uses the reviewed semantic judgment")
+    end
+  end
+
   # A fake native session socket serving the same protocol as the extension
   # host bridge: state, then messages with the two fixture user entries.
   class FakeSession
@@ -401,6 +430,7 @@ module PrestartTest
     check_calibrated_judgment_thresholds
     check_imperative_requests_reach_calibrated_judgment
     check_disabled_project_never_calls_out
+    check_reviewed_profile_does_not_pay_outside_scope
     check_entry_cli_idempotence_and_trace
     check_start_embeds_entry_trace
     puts "PRESTART_TEST_PASS (deterministic, local fixture only)"

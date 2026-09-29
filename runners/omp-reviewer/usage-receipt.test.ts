@@ -16,6 +16,7 @@ test("a boundary receipt keeps identity only and stays pending", () => {
 		call_id: "orbit-call-p1",
 		origin: "local_provider_invocation",
 		usage_status: "pending",
+		credential_id: null,
 		provider: "openrouter",
 		model: "zhipu-coding-plan/glm-5.2",
 		requested_model: "zhipu-coding-plan/glm-5.2",
@@ -96,6 +97,7 @@ test("a completed turn keeps the local invocation id, provider id, models and ca
 			call_id: "orbit-call-1",
 			origin: "local_provider_invocation",
 			usage_status: "reported",
+			credential_id: null,
 			provider_response_id: "req_abc",
 			provider: "openrouter",
 			model: "zhipu-coding-plan/glm-5.2",
@@ -155,7 +157,8 @@ test("a failed call without usable usage keeps its identity and an unknown statu
 		"orbit-call-4: the provider reported no complete usage (input, output, cacheRead unknown); the call is kept with usage_status=unknown",
 	]);
 	expect(report.calls).toEqual([
-		{ call_id: "orbit-call-4", origin: "local_provider_invocation", usage_status: "unknown", model: "zhipu-coding-plan/glm-5.2", stop_reason: "error" },
+		{ call_id: "orbit-call-4", origin: "local_provider_invocation", usage_status: "unknown",
+			credential_id: null, model: "zhipu-coding-plan/glm-5.2", stop_reason: "error" },
 	]);
 });
 

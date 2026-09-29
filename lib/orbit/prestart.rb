@@ -6,6 +6,7 @@ require "time"
 
 require_relative "jev_advisor"
 require_relative "judgment"
+require_relative "workspace_binding"
 
 module Orbit
   # Bounded pre-start entry classification for the latest native user message
@@ -29,7 +30,7 @@ module Orbit
     RULE_VERSION = "orbit-entry-rules-3"
     QUESTION_SET_VERSION = "orbit-entry-3"
     INPUT_VERSION = "orbit-entry-input-2"
-    DECISION_VERSION = "orbit-entry-decision-1"
+    DECISION_VERSION = "orbit-entry-decision-2"
     CALIBRATION_RELATIVE_PATH = ".orbit/jev-entry.json"
     PROMPT_BUDGET = 8000
     EXCERPT_LIMIT = 300
@@ -186,6 +187,12 @@ module Orbit
                        "entry judgment thresholds are not calibrated with real request samples; Root decides explicitly")
       end
 
+      if calibration.dig("release", "profile") == EntryCalibration::SUPPORTED_PROFILE &&
+          (text.to_s.length > PROMPT_BUDGET || !WorkspaceBinding.identify(@project_root)["git"])
+        return outcome("uncertain", "root_decides",
+                       "this reviewed entry profile covers untruncated requests in a Git workspace; Root decides outside it")
+      end
+
       model = calibration.fetch("model")
       provider = resolved_provider(model)
       if provider.nil?
@@ -271,7 +278,7 @@ module Orbit
     end
 
     def load_calibration
-      @calibration_loader&.call || EntryCalibration.load(@project_root)
+      @calibration_loader ? @calibration_loader.call : EntryCalibration.load(@project_root)
     end
 
     def outcome(classification, decision, reason, probabilities: nil, provider: nil,
@@ -308,6 +315,7 @@ module Orbit
     MAX_BYTES = 256 * 1024
     MAX_SAMPLES = 64
     SAMPLE_KINDS = %w[positive negative failure missing_evidence].freeze
+    SUPPORTED_PROFILE = "git_untruncated_request_v1"
 
     def self.binding
       { "schema_version" => SCHEMA_VERSION,
@@ -356,6 +364,9 @@ module Orbit
              end
         return "entry calibration needs its scope, review and release reason"
       end
+      if release.key?("profile") && release["profile"] != SUPPORTED_PROFILE
+        return "entry calibration has an unsupported observable profile"
+      end
       Time.iso8601(release.fetch("reviewed_at"))
 
       samples = data["samples"]
@@ -370,7 +381,7 @@ module Orbit
       end
 
       { "model" => model, "thresholds" => thresholds,
-        "release" => release.slice("reason", "scope", "reviewed_by", "reviewed_at").merge(
+        "release" => release.slice("reason", "scope", "profile", "reviewed_by", "reviewed_at").merge(
           binding.merge("sample_count" => samples.length,
                         "sample_digest" => Digest::SHA256.hexdigest(JSON.generate(samples)))
         ) }

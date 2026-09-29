@@ -22,6 +22,7 @@ module RouteResourceStoreTest
       test_import_is_validated_atomic_and_auditable
       test_selection_is_exact_newest_and_valid
       test_report_prices_attributed_calls_and_keeps_unknowns
+      test_report_uses_actual_account_and_refuses_conflicting_context
       test_script_speaks_one_json_object
     end
     puts("ROUTE_RESOURCE_STORE_TEST_PASS assertions=#{@assertions}")
@@ -85,6 +86,25 @@ module RouteResourceStoreTest
                   usage: usage, usage_status: usage_status, usage_source: "native_message",
                   started_at: started_at, completed_at: completed_at,
                   usage_units: (usage || {}).keys.to_h { |key| [key, "token"] })
+  end
+
+  def test_report_uses_actual_account_and_refuses_conflicting_context
+    built = store("actual-account")
+    built.import(fact(account_scope: "served-account", plan: nil))
+    dir = task_dir("actual-account-task")
+    ledger(dir).record(call_id: "served-call", role: "root", phase: "execute", status: "completed",
+      provider: "zhipu", actual_model: "glm-5.2", reasoning: "unknown", billing_route: "direct_api",
+      usage: { "input" => 1000, "output" => 200 }, usage_source: "native_message",
+      account_scope: "served-account", credential_id: 7, account_id: "account-7",
+      account_identity_source: "oauth_accounts_by_credential_id",
+      started_at: "2026-09-29T11:00:00Z", completed_at: "2026-09-29T11:01:00Z")
+    row = built.report(task_path: dir).fetch("calls").first
+    assert(row["cost"] && row["account_scope"] == "served-account" && row["credential_id"] == 7,
+           "the final call's actual account is consumed without a caller account map")
+    conflicting = built.report(task_path: dir, account_scope: "preferred-account").fetch("calls").first
+    assert(conflicting["cost"].nil? && conflicting["gap"].include?("conflicts") &&
+           conflicting["account_scope"] == "served-account",
+           "a preferred or stale caller account cannot overwrite the account that served the call")
   end
 
   def test_import_is_validated_atomic_and_auditable

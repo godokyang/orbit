@@ -10,6 +10,7 @@ require_relative "model_candidate_pool"
 require_relative "model_capability_facts"
 require_relative "model_evidence_cache"
 require_relative "model_quality_policy"
+require_relative "route_cost_inputs"
 require_relative "observation_key"
 require_relative "omp_check_runner"
 require_relative "openrouter_model_overview"
@@ -55,7 +56,7 @@ module Orbit
 
     def initialize(connection:, project_root:, pool: ModelCandidatePool.new,
                    evidence_cache: ModelEvidenceCache.new, advisor: nil, probe: nil,
-                   clock: nil, overview: nil, release: UNSET, facts: nil)
+                   clock: nil, overview: nil, release: UNSET, facts: nil, route_cost_inputs: nil)
       @connection = connection
       @project_root = project_root
       @pool = pool
@@ -73,6 +74,9 @@ module Orbit
                                     source_project_dir: source_project_dir)
       }
       @clock = clock || -> { Time.now.utc }
+      # Production default: the task-scoped RouteCostInputs builder. An
+      # explicit route_costs argument (tests) always wins over it.
+      @route_cost_inputs = route_cost_inputs
     end
 
     # `excluded` contains models whose real check failed on this input and
@@ -191,6 +195,7 @@ module Orbit
     end
 
     def prepare(instruction, excluded: [], state: {}, route_costs: nil)
+      route_costs = default_route_costs if route_costs.nil?
       pool = @pool.read
       catalog = model_catalog
       available = Array(catalog&.[]("available")).select { |model| model.is_a?(String) &&
@@ -235,6 +240,17 @@ module Orbit
       }.tap { |prepared| prepared["signature"] = signature(prepared) }
     rescue ModelCandidatePool::Error
       raise Error, "the candidate pool could not be read"
+    end
+
+    # The production route-cost source: the task-scoped inputs file bound to
+    # the current review (task record digest and artifact_root). Any binding
+    # or credibility failure yields {} - cost stays unknown and quality
+    # judgment continues; an explicitly injected route_costs argument (tests)
+    # bypasses this entirely.
+    def default_route_costs
+      @route_cost_inputs&.build(scope: "review")
+    rescue RouteCostInputs::Error
+      nil
     end
 
     # The canonical selection-input material. It carries every substantive
@@ -588,6 +604,7 @@ module Orbit
         "question_set_version" => judgment&.[]("question_set_version"),
         "judgment_error" => judgment_error,
         "release" => release_binding(prepared["release"]),
+        "route_cost_inputs" => prepared["route_costs"],
         "calibration_note" => [prepared["release_note"], gate_note].compact.join("; ").then { |note| note.empty? ? nil : note },
         "requirements_error" => prepared["requirements_error"],
         "task_fit_scores" => scores, "unscored_candidates" => unscored,

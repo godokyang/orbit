@@ -88,10 +88,19 @@ const memberCtx = { cwd: project, sessionManager: memberSession.sessionManager, 
 const pi = { zod: z, registerTool: tool => { definition = tool; },
   registerCommand: () => {},
   on: (name, handler) => { (events[name] ||= []).push(handler); } };
+let discoverCtxThrows = false;
 const sdk = { MAIN_AGENT_ID: mainAgentId,
   AgentRegistry: { global: () => registry, onChange: undefined, get: undefined },
   getAgentDir: () => process.env.PI_CODING_AGENT_DIR,
-  isUserInterruptAbort: () => false };
+  isUserInterruptAbort: () => false,
+  // Scriptable stand-in for the SDK's public context-file discovery; the
+  // host rebuilds a rebound member's project instructions from it.
+  discoverContextFiles: async cwd => {
+    if (discoverCtxThrows) throw new Error('discovery-unavailable');
+    if (cwd !== project) return [];
+    return [{ path: '/user-config/AGENTS.md', content: 'USER-LEVEL-RULE' },
+      { path: path.join(project, 'AGENTS.md'), content: 'NEW-PROJECT-RULE', depth: 0 }];
+  } };
 
 const tool = async (args, context = ctx) => JSON.parse((await definition.execute('call', args, null, null, context)).content[0].text);
 const taskState = async () => JSON.parse(await fs.readFile(path.join(started.task_directory, 'state.json'), 'utf8'));
@@ -459,6 +468,148 @@ try {
   assert.equal(poolMember.status, 'registered');
   assert.equal(poolMember.model, 'glm/x');
   assert.equal(poolMember['tool_call_id'], 'call-1');
+
+  // 2c. Workspace rebind (real runtime cwd): the Root session cwd is never
+  //     compared or mutated; the member child session cwd is set to the
+  //     unit's current artifact_root at the registration window and verified
+  //     by read-back. A member whose cwd cannot reach it never binds.
+  {
+    const elsewhere = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'orbit-member-cwd-')));
+    // (a) Pre-dispatch: a Root session running from a DIFFERENT real cwd (the
+    // post-rebind situation) is not blocked on cwd; only the declared
+    // workspace must be real.
+    const reboundCall = await emit('tool_call', { toolName: 'task', toolCallId: 'call-rebind',
+      input: { task: 'rebound member work' } }, { ...ctx, cwd: elsewhere });
+    assert.ok(!reboundCall.block, `post-rebind dispatch must not compare Root cwd: ${JSON.stringify(reboundCall)}`);
+
+    // (b) Registration sets the child session's real cwd to artifact_root and
+    // binds; Root's own session cwd is untouched.
+    let memberCwd = elsewhere;
+    let refreshSeen = 0;
+    const reboundListeners = new Set();
+    const reboundSession = { sessionId: 'rebind-sess', model, isStreaming: false,
+      sessionManager: { getSessionId: () => 'rebind-sess', getCwd: () => memberCwd,
+        setCwdWithoutRelocation: next => { memberCwd = path.resolve(next); }, getBranch: () => [] },
+      getAgentId: () => reboundCall.input.name,
+      hasPendingAsyncWork: () => false, getAsyncJobSnapshot: () => ({ running: [] }),
+      subscribe: listener => { reboundListeners.add(listener); return () => reboundListeners.delete(listener); },
+      refreshSkillsAndCommands: async () => { refreshSeen += 1; },
+      abort: async () => {},
+      asyncJobManager: { cancelAll: () => {}, cancelAndReapOwnerJobs: async () => ({ settled: true }) } };
+    const reboundRef = { id: reboundCall.input.name, kind: 'sub', parentId: mainAgentId, status: 'running',
+      session: reboundSession, sessionFile: null, history: {}, activity: null };
+    extraRefs.push(reboundRef);
+    registryListener({ type: 'registered', ref: reboundRef });
+    assert.equal(memberCwd, project, 'member session cwd must become the unit artifact_root');
+    assert.equal(root.sessionManager.getCwd(), project, 'Root session cwd is never mutated');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.ok(refreshSeen >= 1, 'skills/commands metadata realign is requested best-effort after the cwd change');
+    const reboundUnits = await tool({ action: 'work-unit', task: started.task_directory, operation: 'list' });
+    assert.equal(reboundUnits.units.find(item => item.member_id === reboundRef.id)?.status, 'bound',
+      'a member whose cwd reached artifact_root binds normally');
+    const reboundStop = await request('stop_member', { id: reboundRef.id });
+    assert.equal(reboundStop.confirmed, true);
+
+    // (c) Fail-closed: the child cwd cannot be set (runtime refuses) -> the
+    // member is aborted, never binds, and its tool gate stays closed.
+    const stuckCall = await emit('tool_call', { toolName: 'task', toolCallId: 'call-stuck',
+      input: { task: 'stuck member work' } }, ctx);
+    assert.ok(!stuckCall.block, JSON.stringify(stuckCall));
+    const stuckSession = { sessionId: 'stuck-sess', model, isStreaming: false,
+      sessionManager: { getSessionId: () => 'stuck-sess', getCwd: () => elsewhere,
+        setCwdWithoutRelocation: () => { throw new Error('cwd locked'); }, getBranch: () => [] },
+      getAgentId: () => stuckCall.input.name,
+      hasPendingAsyncWork: () => false, getAsyncJobSnapshot: () => ({ running: [] }),
+      subscribe: () => () => {},
+      abort: async () => {},
+      asyncJobManager: { cancelAll: () => {}, cancelAndReapOwnerJobs: async () => ({ settled: true }) } };
+    const stuckRef = { id: stuckCall.input.name, kind: 'sub', parentId: mainAgentId, status: 'running',
+      session: stuckSession, sessionFile: null, history: {}, activity: null };
+    extraRefs.push(stuckRef);
+    registryListener({ type: 'registered', ref: stuckRef });
+    assert.ok(setStatuses.some(([id, status]) => id === stuckRef.id && status === 'aborted'),
+      'a member without the real workspace cwd is aborted at registration');
+    const stuckUnits = await tool({ action: 'work-unit', task: started.task_directory, operation: 'list' });
+    assert.equal(stuckUnits.units.some(item => item.member_id === stuckRef.id), false,
+      'a member without the real workspace cwd never binds');
+    const stuckTool = await emit('tool_call', { toolName: 'write', toolCallId: 'stuck-write',
+      input: { path: 'src/x.txt', content: 'x' } },
+      { ...memberCtx, sessionManager: { ...memberCtx.sessionManager, getSessionId: () => 'stuck-sess' } });
+    assert.equal(stuckTool.block, true, 'an unbound member keeps its tool gate closed');
+    await fs.rm(elsewhere, { recursive: true, force: true });
+  }
+
+  // 2d. Rebound project context: the member's FIRST prompt already carries
+  //     the real artifact_root instructions; the spawn-time project rules are
+  //     gone; user-level rules and every other prompt part survive untouched.
+  //     A discovery failure is durably recorded and aborts preparation.
+  {
+    const ctxCall = await emit('tool_call', { toolName: 'task', toolCallId: 'call-ctx', input: { task: 'context member work' } }, ctx);
+    assert.ok(!ctxCall.block, JSON.stringify(ctxCall));
+    const elsewhere = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'orbit-ctx-cwd-')));
+    let ctxMemberCwd = elsewhere;
+    const ctxSession = { sessionId: 'ctx-sess', model, isStreaming: false,
+      sessionManager: { getSessionId: () => 'ctx-sess', getCwd: () => ctxMemberCwd,
+        setCwdWithoutRelocation: next => { ctxMemberCwd = path.resolve(next); }, getBranch: () => [] },
+      getAgentId: () => ctxCall.input.name,
+      hasPendingAsyncWork: () => false, getAsyncJobSnapshot: () => ({ running: [] }),
+      subscribe: () => () => {}, abort: async () => {},
+      asyncJobManager: { cancelAll: () => {}, cancelAndReapOwnerJobs: async () => ({ settled: true }) } };
+    const ctxRef = { id: ctxCall.input.name, kind: 'sub', parentId: mainAgentId, status: 'running',
+      session: ctxSession, sessionFile: null, history: {}, activity: null };
+    extraRefs.push(ctxRef);
+    registryListener({ type: 'registered', ref: ctxRef });
+    assert.equal(ctxMemberCwd, project, 'registration applies the real workspace cwd first');
+    let contextAborts = 0;
+    const ctxMemberCtx = { ...memberCtx, abort: () => { contextAborts += 1; },
+      sessionManager: { ...memberCtx.sessionManager, getSessionId: () => 'ctx-sess' } };
+
+    const startEvent = { prompt: 'ORIGINAL-USER-REQUEST',
+      systemPrompt: ['BASE-PART',
+        `intro\n<file path="/old/project/AGENTS.md">\nOLD-PROJECT-RULE\n</file>\noutro`,
+        'tail-part'] };
+    const replaced = await emit('before_agent_start', startEvent, ctxMemberCtx);
+    assert.ok(replaced?.systemPrompt, 'the first pre-request hook already rebuilds the project context');
+    const joined = replaced.systemPrompt.join('\n');
+    assert.ok(!joined.includes('OLD-PROJECT-RULE'), 'spawn-time project rules are removed');
+    assert.ok(joined.includes('NEW-PROJECT-RULE'), 'real artifact_root instructions are present');
+    assert.ok(joined.includes('USER-LEVEL-RULE'), 'user-level rules survive');
+    assert.ok(joined.includes('intro') && joined.includes('outro') && joined.includes('BASE-PART') && joined.includes('tail-part'),
+      'wrappers and every other prompt part stay untouched');
+    assert.equal(replaced.prompt, undefined, 'the user request text is never rewritten');
+    // Root's own preparation is never rewritten.
+    const rootStart = await emit('before_agent_start', { prompt: 'root turn',
+      systemPrompt: ['<file path="/old/project/AGENTS.md">\nOLD-PROJECT-RULE\n</file>'] }, ctx);
+    assert.ok(!rootStart?.systemPrompt || (rootStart.systemPrompt.join('\n').includes('OLD-PROJECT-RULE') &&
+      !rootStart.systemPrompt.join('\n').includes('NEW-PROJECT-RULE')),
+      'Root system prompt context entries are never rewritten');
+
+    // Discovery failure: durably recorded, the prompt is refused outright
+    // and the member tool gate closes — no round runs on stale instructions,
+    // no first-round-run/second-round-repair.
+    discoverCtxThrows = true;
+    const failed = await emit('before_agent_start', { prompt: 'again',
+      systemPrompt: ['<file path="/old/project/AGENTS.md">\nOLD-PROJECT-RULE\n</file>'] }, ctxMemberCtx);
+    assert.equal(contextAborts, 1, 'a failed discovery cancels actual prompt preparation through the public abort API');
+    assert.ok(setStatuses.some(([id, status]) => id === ctxRef.id && status === 'aborted'),
+      'the registered member is also marked aborted');
+    assert.ok(!failed?.systemPrompt, 'a refused prompt is never rewritten');
+    await emit('before_provider_request', { payload: {} }, ctxMemberCtx);
+    assert.equal(contextAborts, 2, 'a blocked member also aborts a later provider continuation');
+    const blockedTool = await emit('tool_call', { toolName: 'read', toolCallId: 'ctx-tool-1', input: { path: 'x' } }, ctxMemberCtx);
+    assert.equal(blockedTool?.block, true, 'the member tool gate stays closed while context is blocked');
+    discoverCtxThrows = false;
+    const collab = await fs.readFile(path.join(started.task_directory, 'collaboration.jsonl'), 'utf8');
+    assert.ok(collab.includes('work_unit_context_failed'), 'the context failure is durably recorded');
+    // A later successful preparation clears the block and applies the real
+    // context for that round.
+    const recovered = await emit('before_agent_start', { prompt: 'again',
+      systemPrompt: ['intro\n<file path="/old/project/AGENTS.md">\nOLD-PROJECT-RULE\n</file>\noutro'] }, ctxMemberCtx);
+    assert.ok(recovered?.systemPrompt?.join('\n').includes('NEW-PROJECT-RULE'),
+      'a later successful preparation clears the block and applies the real context');
+    await request('stop_member', { id: ctxRef.id });
+    await fs.rm(elsewhere, { recursive: true, force: true });
+  }
 
   // Bridge: query by ACTUAL agent id.
   const roster = await request('members');

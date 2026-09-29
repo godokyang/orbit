@@ -26,6 +26,7 @@ require_relative "diagnostics"
 require_relative "release_lease"
 require_relative "work_unit"
 require_relative "route_resource_store"
+require_relative "route_cost_inputs"
 
 module Orbit
   module CLI
@@ -103,10 +104,11 @@ module Orbit
         单元绑定当前要求版本和实际产物工作区；修订／重新绑定使旧单元不能继续派发或登记 accepted。本命令只记录单元，不派发或登记成员。实际派发须另经原生宿主绑定，Root 不能通过本命令伪造派发。accepted 是 Root 核验记录，不替代独立最终检查或停止确认。已结束任务仅可 read/list。
       TEXT
       "route-resources" => <<~TEXT,
-        orbit route-resources import|list|report [TASK_DIRECTORY] [--project DIR] [--file FILE|-]
+        orbit route-resources import|list|report|forecast [TASK_DIRECTORY] [--project DIR] [--file FILE|-]
 
         import 读取一个或一组完整 RouteResourceFacts，保存来源、核验窗口、实际路由、账号／计划、币种及原单位；--file 必需。结构验证不证明来源真实，提交者须核对一手依据。
-        list 只读显示当前项目私有事实；可用 --file 提供精确过滤字段。report 需要任务目录，可用 --file 提供实际观察的 account_scope／plan（也可逐路由映射）。不提供即未知，不从价格文档反填账号。
+        list 只读显示当前项目私有事实；可用 --file 提供精确过滤字段。report 需要任务目录，优先使用逐调用实际账户；可用 --file 补充实际观察的 account_scope／plan（也可逐路由映射），与回执冲突时保持未知，不从价格文档反填账号。
+        forecast 需要活动任务目录及 --file，输入 {"scope":"member|review","work_unit_id":"成员单元 id；review 省略","candidates":{"provider/model":{"route":{"provider":"…","model":"…","reasoning":"unknown","billing_route":"direct_api"},"account_scope":"已核实账户","plan":null,"prediction":{"kind":"declared_workload","usage":{"input":1000,"output":200},"basis":"明确的工作量假设，示例数字不可直接沿用","applies_to":"本单元或本次检查"}}}}。similar_unit 还需可追溯 reference_call_ids；不代替实测用量。预测绑定当前要求和工作区，修订后失效；仅使用已导入的可信本路由价格参与选型，缺失继续按质量依据选择。
         金额只核算有实际调用时刻及完整用量构成的已归属调用；额度保留原规则，不换算金额。OpenRouter 目录报价不能作为 OMP 价格，未知不等于免费，不增加硬预算。
       TEXT
       "model-candidates" => <<~TEXT,
@@ -226,7 +228,7 @@ module Orbit
     rescue ArgumentError, OptionParser::ParseError, SystemCallError, Connection::Error, CheckRunner::Error,
            WorkspaceBinding::Error, ModelEvidenceCache::Error, ModelCandidatePool::Error, JSON::ParserError,
            PrestartClassifier::Error, PrestartLedger::Error, JevAdvisor::Error, TaskEvidence::Error, WorkUnitStore::Error,
-           RouteResourceStore::Error, RouteResourceFacts::Error, ResourceCallLedger::Error => error
+           RouteResourceStore::Error, RouteResourceFacts::Error, ResourceCallLedger::Error, RouteCostInputs::Error => error
       warn "orbit: #{error.message}"
       1
     end
@@ -237,7 +239,8 @@ module Orbit
       raise ArgumentError, "usage: orbit status [TASK] [--json]" if argv.length > 1
       records = TaskView.select(argv.first, settled: true)
       if json
-        puts JSON.pretty_generate(records.length == 1 ? records.first.state : { "tasks" => records.map(&:state) })
+        puts JSON.pretty_generate(records.length == 1 ? TaskView.current_state(records.first) :
+                                  { "tasks" => records.map { |record| TaskView.current_state(record) } })
       elsif records.empty?
         puts "当前项目还没有 Orbit 任务。进入项目，向 Agent 提出执行要求即可。"
       elsif records.length == 1
@@ -561,11 +564,11 @@ module Orbit
         parser.on("--file FILE") { |value| options[:file] = value }
       end.parse!(argv)
       action, directory = argv.shift, argv.shift
-      unless %w[import list report].include?(action) && argv.empty? && (action == "report" || directory.nil?)
-        raise ArgumentError, "usage: orbit route-resources import|list|report [TASK_DIRECTORY] [--project DIR] [--file FILE|-]"
+      unless %w[import list report forecast].include?(action) && argv.empty? && (%w[report forecast].include?(action) || directory.nil?)
+        raise ArgumentError, "usage: orbit route-resources import|list|report|forecast [TASK_DIRECTORY] [--project DIR] [--file FILE|-]"
       end
-      record = TaskRecord.new(directory) if action == "report" && directory
-      raise ArgumentError, "report needs a task directory" if action == "report" && !record
+      record = TaskRecord.new(directory) if %w[report forecast].include?(action) && directory
+      raise ArgumentError, "#{action} needs a task directory" if %w[report forecast].include?(action) && !record
 
       root = File.realpath(options[:project] || record&.state&.fetch("project_root") || TaskView.project(Dir.pwd))
       store = RouteResourceStore.new(project_root: root)
@@ -580,6 +583,13 @@ module Orbit
                when "report"
                  raise ArgumentError, "actual resource context must be an object" unless payload.is_a?(Hash)
                  store.report(task_path: record.path, account_scope: payload["account_scope"], plan: payload["plan"])
+               when "forecast"
+                 raise ArgumentError, "forecast needs --file FILE|-" unless options[:file]
+                 raise ArgumentError, "forecast must be an object" unless payload.is_a?(Hash)
+                 raise ArgumentError, "settled tasks cannot accept a new forecast" if TaskRuntime::TERMINAL.include?(record.state["status"])
+                 { "forecast" => RouteCostInputs.new(record: record, store: store).record_inputs(
+                     scope: payload["scope"], candidates: payload["candidates"], work_unit_id: payload["work_unit_id"]),
+                   "note" => "bounded prediction only; no measured consumption or budget guarantee" }
                end
       puts JSON.generate(result.merge("ok" => true))
       0

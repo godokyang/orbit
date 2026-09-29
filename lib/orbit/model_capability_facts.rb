@@ -409,6 +409,41 @@ module Orbit
       end
     end
 
+    # Every separately reported catalog value for one task index. Each variant
+    # keeps its own display_name; a single-variant prior stays exactly one
+    # candidate, so its original one-comparison behavior is unchanged. No
+    # highest or average value is ever invented.
+    def benchmark_candidates(prior, index)
+      variants = Array(prior["benchmark_variants"]).select do |variant|
+        variant.is_a?(Hash) && variant[index].is_a?(Numeric)
+      end
+      unless variants.empty?
+        return variants.map do |variant|
+          { "value" => variant[index].to_f, "display_name" => variant["display_name"] }
+        end
+      end
+
+      value = prior[index]
+      value.is_a?(Numeric) ? [{ "value" => value.to_f, "display_name" => prior["benchmark_display_name"] }] : []
+    end
+
+    def benchmark_side(index:, candidate:, recorded:, evidence:, prior:, evidence_value:, divergence:)
+      {
+        "index" => index,
+        "catalog_value" => candidate.fetch("value"),
+        "catalog_display_name" => candidate["display_name"],
+        "catalog_fetched_at" => prior["fetched_at"],
+        "catalog_measurement_date_status" => prior["measurement_date_status"],
+        "catalog_benchmark_as_of" => prior["benchmark_as_of"],
+        "evidence_value" => evidence_value,
+        "evidence_unit" => recorded["unit"],
+        "evidence_basis" => recorded["basis"],
+        "evidence_retrieved_at" => evidence.fetch("retrieved_at"),
+        "divergence" => divergence,
+        "measurement_note" => "测量单位、方法版本、测量日期与实际 reasoning 归属未核实"
+      }
+    end
+
     # Substantive conflicts (hold + root review) vs contrasts (simultaneous
     # presentation, not auto-contradiction). Nothing is resolved by source
     # name; both sides always keep their values, scope and dates.
@@ -434,38 +469,79 @@ module Orbit
 
       metrics = evidence["metrics"].is_a?(Hash) ? evidence["metrics"] : {}
       task.fetch("relevant_indices").each do |index|
-        catalog_value = prior[index]
         recorded = metrics[index]
-        next unless catalog_value.is_a?(Numeric) && recorded.is_a?(Hash) && recorded["value"].is_a?(Numeric)
+        next unless recorded.is_a?(Hash) && recorded["value"].is_a?(Numeric)
+
+        candidates = benchmark_candidates(prior, index)
+        next if candidates.empty?
 
         evidence_value = recorded["value"]
-        divergence = (evidence_value - catalog_value).abs
-        relative = divergence / [catalog_value.abs, 1.0].max
-        side = {
-          "index" => index,
-          "catalog_value" => catalog_value,
-          "catalog_fetched_at" => prior["fetched_at"],
-          "catalog_measurement_date_status" => prior["measurement_date_status"],
-          "evidence_value" => evidence_value,
-          "evidence_unit" => recorded["unit"],
-          "evidence_basis" => recorded["basis"],
-          "evidence_retrieved_at" => evidence.fetch("retrieved_at")
-        }
-        if relative > CONFLICT_RELATIVE_DIVERGENCE && divergence > CONFLICT_ABSOLUTE_FLOOR
-          conflicts << side.merge(
-            "type" => "potential_benchmark_conflict",
+        judged = candidates.map do |candidate|
+          divergence = (evidence_value - candidate.fetch("value")).abs
+          [candidate, divergence, divergence / [candidate.fetch("value").abs, 1.0].max]
+        end
+        sides = judged.map do |candidate, divergence, _relative|
+          benchmark_side(index: index, candidate: candidate, recorded: recorded, evidence: evidence,
+                         prior: prior, evidence_value: evidence_value, divergence: divergence)
+        end
+        exceeds = judged.each_with_index.select do |(_candidate, divergence, relative), _position|
+          relative > CONFLICT_RELATIVE_DIVERGENCE && divergence > CONFLICT_ABSOLUTE_FLOOR
+        end.map { |_entry, position| position }
+
+        if judged.length == 1
+          side = sides.first
+          if exceeds.any?
+            conflicts << side.merge(
+              "type" => "potential_benchmark_conflict",
+              "question_catalog" => CATALOG_QUESTION,
+              "question_evidence" => EVIDENCE_QUESTION,
+              "resolution" => "root_review",
+              "note" => "同名指标与目录值分歧超过阈值；两次测量的单位、方法版本与测量日期不明，分歧本身不证明任何一方失真——这是供 Root 复核的潜在冲突线索，不是测量真伪裁定"
+            )
+          elsif judged.first[1].positive?
+            contrasts << side.merge(
+              "type" => "same_index_minor_divergence",
+              "question_catalog" => CATALOG_QUESTION,
+              "question_evidence" => EVIDENCE_QUESTION,
+              "note" => "同名指标两次测量存在阈值内差异；同时呈现，不视为矛盾"
+            )
+          end
+        elsif exceeds.length == judged.length
+          # Every separately reported variant disagrees with the exact value.
+          # No variant is selected, averaged or promoted: all of them are shown
+          # with their own labels and the hold stays for Root review.
+          conflicts << {
+            "type" => "potential_benchmark_variant_conflict",
+            "index" => index,
+            "variants" => sides,
+            "variant_count" => sides.length,
             "question_catalog" => CATALOG_QUESTION,
             "question_evidence" => EVIDENCE_QUESTION,
             "resolution" => "root_review",
-            "note" => "同名指标与目录值分歧超过阈值；两次测量的单位、方法版本与测量日期不明，分歧本身不证明任何一方失真——这是供 Root 复核的潜在冲突线索，不是测量真伪裁定"
-          )
-        elsif divergence.positive?
-          contrasts << side.merge(
-            "type" => "same_index_minor_divergence",
+            "note" => "该模型报告的每个基准变体都与精确值分歧超过阈值；变体各自的单位、方法版本、测量日期与实际 reasoning 归属不明，无法判定哪一变体对应本 OMP 路由——供 Root 复核，这不是测量真伪或变体归属的裁定"
+          }
+        elsif exceeds.any?
+          contrasts << {
+            "type" => "benchmark_variant_divergence_unresolved",
+            "index" => index,
+            "variants" => sides,
+            "divergent_variant_count" => exceeds.length,
+            "variant_count" => sides.length,
             "question_catalog" => CATALOG_QUESTION,
             "question_evidence" => EVIDENCE_QUESTION,
-            "note" => "同名指标两次测量存在阈值内差异；同时呈现，不视为矛盾"
-          )
+            "note" => "部分基准变体与精确值分歧超过阈值，其余变体在阈值内；实际 reasoning 归属未知，无法判定分歧是否已解决——双方变体并列呈现，不视为矛盾已解决，也不据此暂停推荐"
+          }
+        else
+          judged.each_with_index do |(candidate, divergence, _relative), position|
+            next unless divergence.positive?
+
+            contrasts << sides[position].merge(
+              "type" => "same_index_minor_divergence",
+              "question_catalog" => CATALOG_QUESTION,
+              "question_evidence" => EVIDENCE_QUESTION,
+              "note" => "同名指标两次测量存在阈值内差异；同时呈现，不视为矛盾"
+            )
+          end
         end
       end
       [conflicts, contrasts]

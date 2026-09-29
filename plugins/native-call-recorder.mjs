@@ -5,7 +5,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { mintCallId, pendingCallReceipt, modelCallReceipts, ledgerReceipt } from './model-call-receipts.mjs';
+import { mintCallId, pendingCallReceipt, modelCallReceipts, ledgerReceipt, matchAccountIdentity } from './model-call-receipts.mjs';
 
 const writers = new Map();
 const observed = new WeakMap();
@@ -82,6 +82,22 @@ function publish(taskDir, call, gap) {
     .catch(error => persistenceGap(taskDir, writer, error, call?.receipt.call_id));
 }
 
+// The keyless account identity of the credential row that actually served one
+// observed message boundary, or undefined. It reads the SDK's own stored
+// account list for the provider and matches the reported row id exactly: no
+// network, no token refresh, no oauth.access/resolve, no email or secret, and
+// never the first list item or the session pin.
+function accountIdentityFor(session, message) {
+  const credentialId = Number.isInteger(message?.credentialId) ? message.credentialId : undefined;
+  const provider = typeof message?.provider === 'string' && message.provider.length > 0 ? message.provider : undefined;
+  if (credentialId === undefined || !provider) return undefined;
+  try {
+    return matchAccountIdentity(session?.modelRegistry?.authStorage?.oauth?.accounts?.(provider), credentialId);
+  } catch {
+    return undefined;
+  }
+}
+
 export function observeNativeCalls(session, context) {
   if (observed.has(session)) return;
   let pending = null;
@@ -106,7 +122,8 @@ export function observeNativeCalls(session, context) {
       }
       const call = pending;
       pending = null;
-      const result = modelCallReceipts([{ call_id: call.receipt.call_id, message: event.message }], call.meta.requestedModel);
+      const result = modelCallReceipts([{ call_id: call.receipt.call_id, message: event.message }],
+        call.meta.requestedModel, message => accountIdentityFor(session, message));
       const receipt = result.calls[0];
       // Session configuration is only the executed OMP identity fallback. It
       // never fills the upstream supplier's unreported identity.

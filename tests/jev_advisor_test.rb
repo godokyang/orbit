@@ -135,8 +135,14 @@ module JevAdvisorTest
             "one task-fit question per candidate and no time question")
       blob = JSON.generate(sent["questions"])
       check(blob.include?("agent orbit-m-deepseek") && blob.include?("model opencode-go/deepseek-v4.1-flash") &&
-            blob.include?("agent orbit-m-glm") && blob.include?("Serial handoff is allowed"),
+            blob.include?("agent orbit-m-glm") && blob.include?("Serial handoff is valid"),
             "every instruction names its candidate and allows a serial handoff")
+      full_model_questions = Orbit::ModelQualityPolicy.candidate_questions([
+        { "agent" => "task", "model" => "kimi-code/k3-256k", "identity" => { "provider" => "kimi-code" } },
+        { "agent" => "task", "provider" => "kimi-code", "model" => "kimi-code/k3-256k" }
+      ])
+      check(full_model_questions.values.all? { |question| question["instructions"].include?("model kimi-code/k3-256k)") },
+            "the actual full model id is named once with and without a top-level provider")
       check(!blob.include?("critical path") && !blob.include?("candidate_0_time"),
             "the candidate set has no end-to-end time question")
       context = sent.dig("state", "task_context")
@@ -146,7 +152,7 @@ module JevAdvisorTest
             "candidate judgment input drops speed and elapsed time")
       check(result["scores"] == { "0" => { "quality" => 0.7 }, "1" => { "quality" => 0.4 } },
             "task-fit answers map to quality and do not include time")
-      check(result["question_set_version"] == "jev-candidates-2" && result["status"] == "answered" &&
+      check(result["question_set_version"] == Orbit::ModelQualityPolicy::CANDIDATE_QUESTION_SET && result["status"] == "answered" &&
             result["requested_model"] == "jev-latest" && result["call_id"].match?(/\Aorbit-judgment-/),
             "the receipt keeps call id, requested model and answered status")
     end
@@ -273,7 +279,7 @@ module JevAdvisorTest
             "checker task fit does not ask a time question even when exact evidence is present")
       check(result["scores"] == { "p/one" => { "quality" => 0.8 }, "p/two" => { "quality" => 0.2 } },
             "quality answers map back to provider/id and omit time")
-      check(result["question_set_version"] == "jev-checker-task-fit-3", "checker questions use the new set version")
+      check(result["question_set_version"] == Orbit::ModelQualityPolicy::CHECKER_QUESTION_SET, "checker questions use the new set version")
     end
 
     expect_error("no checker candidate is rejected before any request") do

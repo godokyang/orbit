@@ -110,12 +110,61 @@ function omitUnreported(receipt) {
 // initializes usage to zeros before the request, and those zeros are not a
 // provider report, so no count is read here at all and `usage_status` stays
 // "pending" until a message_end supplies a real report.
+// A stored credential row id when the SDK reported one, else null. The id is
+// the row that actually served this attempt; a session pin is a preference and
+// is never substituted for it, and no id is ever manufactured here.
+export function credentialIdOf(message) {
+	const value = message?.credentialId;
+	return Number.isInteger(value) && value >= 0 ? value : null;
+}
+
+// The keyless account identity of exactly one credential row, matched by that
+// row id. The SDK's stored account list is in stable storage order and may hold
+// several accounts and several org-scoped subscriptions, so only a single exact
+// match is accepted: a miss, a duplicate id or a malformed entry stays unknown
+// instead of falling back to the first list item or to a session pin.
+// Keep only the keyless identity fields, each a non-empty string. Nothing else
+// (email, tokens, provider extras) can travel out of an account summary.
+function cleanIdentity(value) {
+	if (!value || typeof value !== "object") return undefined;
+	const identity = {};
+	for (const field of ["account_id", "org_id", "project_id"]) {
+		const text = typeof value[field] === "string" ? value[field].trim() : "";
+		if (text.length > 0) identity[field] = text;
+	}
+	return Object.keys(identity).length > 0 ? identity : undefined;
+}
+
+export function matchAccountIdentity(accounts, credentialId) {
+	if (!Number.isInteger(credentialId) || !Array.isArray(accounts)) return undefined;
+	const matches = accounts.filter(account => account && account.credentialId === credentialId);
+	if (matches.length !== 1) return undefined;
+	return cleanIdentity(Object.fromEntries(
+		[["account_id", "accountId"], ["org_id", "orgId"], ["project_id", "projectId"]]
+			.map(([field, key]) => [field, matches[0][key]])));
+}
+
+// Stable scope key for one account identity: the provider plus the identity
+// fields that were actually observed. No digest, no email, no secret, and no
+// value invented for an unreported field.
+export function accountScopeKey(provider, identity) {
+	const parts = ["account_id", "org_id", "project_id"].map(field => identity?.[field] ?? "-");
+	if (parts.every(part => part === "-")) return null;
+	return `${provider ?? "-"}|${parts.join("|")}`;
+}
+
 export function pendingCallReceipt(call) {
 	const message = call.message ?? {};
 	return omitUnreported({
 		call_id: call.call_id,
 		origin: "local_provider_invocation",
 		usage_status: "pending",
+		credential_id: credentialIdOf(message),
+		account_id: call.account?.account_id,
+		org_id: call.account?.org_id,
+		project_id: call.account?.project_id,
+		account_identity_source: call.account ? "oauth_accounts_by_credential_id" : undefined,
+		account_scope: call.account ? accountScopeKey(optionalString(message.provider), call.account) : undefined,
 		provider: optionalString(message.provider),
 		// The executed OMP configuration; the session identity is a fallback for
 		// the turn's own model, never a substitute for the upstream model.
@@ -128,8 +177,8 @@ export function pendingCallReceipt(call) {
 // observed call keeps one entry under one id from boundary to result: a pending
 // entry is replaced by its report in place, and a boundary that never produced
 // a result keeps its pending entry and its own gap.
-export function syncCallReceipts(existing, turns, requestedModel) {
-	const report = modelCallReceipts(turns, requestedModel);
+export function syncCallReceipts(existing, turns, requestedModel, accountFor) {
+	const report = modelCallReceipts(turns, requestedModel, accountFor);
 	const finalized = new Map();
 	const unkeyed = [];
 	for (const call of report.calls) {
@@ -161,7 +210,11 @@ export function syncCallReceipts(existing, turns, requestedModel) {
 	return { calls, gaps };
 }
 
-export function modelCallReceipts(turns, requestedModel) {
+// `accountFor` is an optional caller-supplied, side-effect-free lookup
+// (message) => { account_id?, org_id?, project_id? }. It resolves the account
+// identity from the same final message boundary; this module only carries what
+// it returns and never performs the lookup itself.
+export function modelCallReceipts(turns, requestedModel, accountFor) {
 	const calls = [];
 	const gaps = [];
 	if (turns.length === 0) {
@@ -182,10 +235,27 @@ export function modelCallReceipts(turns, requestedModel) {
 		}
 
 		const completedAt = typeof message.completedAt === "number" ? message.completedAt : message.timestamp;
+		const credentialId = credentialIdOf(message);
+		// A failing or malformed account lookup is unknown identity: the call is
+		// still recorded with its reported credential row and usage.
+		let identity;
+		if (credentialId !== null && typeof accountFor === "function") {
+			try {
+				identity = cleanIdentity(accountFor(message, credentialId));
+			} catch {
+				identity = undefined;
+			}
+		}
 		const receipt = {
 			call_id: turn.call_id,
 			origin: turn.call_id === null ? undefined : "local_provider_invocation",
 			usage_status: missing.length === 0 ? "reported" : "unknown",
+			credential_id: credentialId,
+			account_id: identity?.account_id,
+			org_id: identity?.org_id,
+			project_id: identity?.project_id,
+			account_identity_source: identity ? "oauth_accounts_by_credential_id" : undefined,
+			account_scope: identity ? accountScopeKey(optionalString(message.provider) ?? optionalString(requestedModel), identity) : undefined,
 			provider_response_id: optionalString(message.responseId),
 			provider: optionalString(message.provider),
 			// The executed OMP configuration, not the upstream supplier's model;
@@ -263,6 +333,12 @@ export function ledgerReceipt(call, meta) {
 		attempt_id: optionalString(meta?.session_id),
 		member_id: optionalString(meta?.agent_id),
 		work_unit_id: optionalString(meta?.work_unit_id),
+		credential_id: Number.isInteger(call.credential_id) ? call.credential_id : null,
+		account_id: optionalString(call.account_id),
+		org_id: optionalString(call.org_id),
+		project_id: optionalString(call.project_id),
+		account_identity_source: optionalString(call.account_identity_source),
+		account_scope: optionalString(call.account_scope),
 		provider_response_id: optionalString(call.provider_response_id),
 		upstream_provider: optionalString(call.upstream_provider),
 		upstream_model: optionalString(call.upstream_model),

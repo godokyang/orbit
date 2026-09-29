@@ -372,13 +372,51 @@ module MemberModelSelectorTest
            "an unavailable catalog keeps unknown facts and leaves the native choice to Root without paying a judgment")
   end
 
+  def provider_model_forecasts_price_the_actual_native_agent
+    pool = %w[a/one b/two]
+    catalog = catalog_for(pool, agents: { "a/one" => "orbit-agent-a", "b/two" => "orbit-agent-b" })
+    catalog["routes"] = pool.to_h { |model| [model, "direct_api"] }
+    entries = pool.map { |model| entry(model).merge("billing_route" => "direct_api") }
+    advisor = FakeAdvisor.new(delegation: { "handoff_fit" => 0.9, "member_task_fit" => 0.9 },
+                              candidates: { "0" => 0.9, "1" => 0.9 })
+    built = selector(pool: pool, catalog: catalog, entries: entries, advisor: advisor, release: release_for)
+    costs = pool.each_with_index.to_h do |model, index|
+      provider, id = model.split("/", 2)
+      route = { "provider" => provider, "model" => id, "reasoning" => "unknown", "billing_route" => "direct_api" }
+      fact = { "schema_version" => Orbit::RouteResourceFacts::SCHEMA_VERSION, "scope" => "omp_route", "route" => route,
+        "source" => { "kind" => "first_party_pricing", "reference" => "https://example.test/prices",
+                      "detail" => "deterministic fixture", "verifier" => "test fixture" },
+        "verification" => { "retrieved_at" => "2026-09-01T00:00:00Z", "valid_until" => "2026-12-01T00:00:00Z" },
+        "effective" => { "from" => "2026-09-01T00:00:00Z", "until" => nil },
+        "applicability" => { "account_scope" => "fixture account", "plan" => nil, "conditions" => "fixture price" },
+        "currency" => "USD", "categories" => {
+          "input" => { "unit" => "token", "price" => 0.5, "per" => 1_000_000 },
+          "output" => { "unit" => "token", "price" => index.zero? ? 2 : 0.2, "per" => 1_000_000 } } }
+      [model, { "fact" => fact, "observed_route" => route, "account_scope" => "fixture account",
+                "usage" => { "input" => 1000, "output" => 200 }, "at" => "2026-09-29T12:00:00Z",
+                "usage_source" => "prediction:declared_workload",
+                "prediction" => { "kind" => "declared_workload", "basis" => "bounded stated workload",
+                                  "applies_to" => "unit-1" } }]
+    end
+    result = built.assess(state: state, work_unit: work_unit, route_costs: costs)
+    assert(result.dig("recommendation", "first") == "orbit-agent-b" &&
+           result.dig("order", "cost_comparison") == "heuristic",
+           "provider/model forecast keys drive the corresponding agent choice after the quality gate")
+    estimate = result.dig("order", "cost_estimates", "orbit-agent-b")
+    assert(estimate.dig("route", "provider") == "b" &&
+           estimate.dig("source_fact", "source", "verifier") == "test fixture" &&
+           estimate.dig("prediction", "basis") == "bounded stated workload" && result["route_cost_inputs"] == costs,
+           "the decision retains the exact price snapshot and forecast basis for later audit")
+  end
+
   def main
     %w[candidates_need_host_agents_and_an_empty_pool_uses_one_real_native_resolution
        a_matching_release_pays_two_judgments_and_orders_the_candidates
        insufficient_delegation_signal_stops_before_the_candidate_judgment
        a_failed_judgment_keeps_its_real_receipt_and_never_fabricates_success
        an_unchanged_assessment_is_reused_and_a_real_change_is_not
-       a_stale_work_unit_and_a_broken_catalog_never_pass_as_verified].each do |test|
+       a_stale_work_unit_and_a_broken_catalog_never_pass_as_verified
+       provider_model_forecasts_price_the_actual_native_agent].each do |test|
       send(test)
       puts "MEMBER_MODEL_SELECTOR_TEST_PASS #{test}"
     end

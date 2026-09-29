@@ -32,7 +32,14 @@ import {
 } from "@oh-my-pi/pi-coding-agent";
 import { getBaseConfigRoot, getModelDbPath, getProfileRootDir, resolveProfileEnv } from "@oh-my-pi/pi-utils";
 import { createConfinedTools } from "./confined-tools.ts";
-import { pendingCallReceipt, syncCallReceipts, type ModelCallReceipt, type ModelCallTurn } from "./usage-receipt.ts";
+import {
+	matchAccountIdentity,
+	pendingCallReceipt,
+	syncCallReceipts,
+	type AccountIdentity,
+	type ModelCallReceipt,
+	type ModelCallTurn,
+} from "./usage-receipt.ts";
 
 const REVIEW_TOOLS = ["read", "grep", "glob"];
 const FORBIDDEN_TOOLS = ["write", "edit", "bash", "eval", "task", "hub", "todo", "ask", "web_search", "browser", "lsp", "ast_edit", "notebook", "checkpoint", "rewind", "goal", "manage_skill", "learn"];
@@ -486,8 +493,24 @@ try {
 				evidence.model = session.model ? `${session.model.provider}/${session.model.id}` : null;
 				const sessionLabel = session.model ? `${session.model.provider}/${session.model.id}` : undefined;
 				let receipts: ModelCallReceipt[] = [];
+				// The keyless account identity of the credential row that served this
+				// boundary, matched exactly from the SDK's own stored account list: no
+				// network, no refresh, no oauth.access, no email or secret, and never
+				// the first list item or the session pin.
+				const accountIdentityFor = (message: unknown): AccountIdentity | undefined => {
+					const credentialId = (message as { credentialId?: unknown })?.credentialId;
+					const provider = (message as { provider?: unknown })?.provider;
+					if (!Number.isInteger(credentialId) || typeof provider !== "string" || provider.length === 0) return undefined;
+					try {
+						const accounts = (session.modelRegistry as { authStorage?: { oauth?: { accounts?: (p: string) => unknown } } })
+							?.authStorage?.oauth?.accounts?.(provider);
+						return matchAccountIdentity(accounts, credentialId as number);
+					} catch {
+						return undefined;
+					}
+				};
 				const syncUsage = () => {
-					const report = syncCallReceipts(receipts, turns, request.model);
+					const report = syncCallReceipts(receipts, turns, request.model, accountIdentityFor);
 					receipts = report.calls;
 					evidence.usage = receipts.length > 0 ? receipts : null;
 					evidence.usage_gaps = report.gaps;
@@ -506,7 +529,8 @@ try {
 					if (event.type === "message_start") {
 						const callId = `orbit-call-${randomUUID()}`;
 						invocationIds.set(message, callId);
-						receipts.push(pendingCallReceipt({ call_id: callId, message, requested_model: request.model, session_model: sessionLabel }));
+						receipts.push(pendingCallReceipt({ call_id: callId, message, requested_model: request.model,
+							session_model: sessionLabel, account: accountIdentityFor(message) }));
 						syncUsage();
 						persistEvidence();
 						return;

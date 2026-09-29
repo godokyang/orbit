@@ -156,7 +156,7 @@ module Orbit
       calls = ledger.calls
       rows = calls.map { |call| price_call(call, account_scope: account_scope, plan: plan) }
       recorded = calls.length
-      native = native_coverage(task_path, task_id || File.basename(task_path))
+      native = ledger.native_coverage
       native_unknown = native["pending_calls"].positive? || !native["gaps"].empty?
       {
         "store" => { "path" => @path, "facts" => read_entries.length },
@@ -187,49 +187,28 @@ module Orbit
 
     private
 
-    def native_coverage(task_path, task_id)
-      coverage = { "calls_observed" => nil, "pending_calls" => 0, "gaps" => [] }
-      observations = File.join(task_path, "native-model-calls.json")
-      if File.file?(observations)
-        document = JSON.parse(File.read(observations))
-        unless document.is_a?(Hash) && document["schema_version"] == "orbit-native-model-calls-v1" &&
-               document["task_id"] == task_id && document["calls"].is_a?(Hash) && document["gaps"].is_a?(Array) &&
-               document["calls"].values.all? { |call| call.is_a?(Hash) }
-          raise Error, "native call observations are corrupt or foreign"
-        end
-        coverage["calls_observed"] = document["calls"].length
-        coverage["pending_calls"] = document["calls"].values.count { |call| call["finalized"] != true }
-        coverage["gaps"] = document["gaps"].map(&:to_s)
-      end
-      failures = File.join(task_path, "native-model-call-gaps.jsonl")
-      if File.file?(failures)
-        File.foreach(failures) do |line|
-          entry = JSON.parse(line)
-          raise Error, "native receipt persistence gap is malformed" unless entry.is_a?(Hash) && entry["reason"].is_a?(String)
-
-          coverage["gaps"] << entry["reason"]
-        end
-      end
-      coverage["gaps"].uniq!
-      coverage
-    rescue JSON::ParserError, SystemCallError, Error => error
-      coverage["gaps"] << error.message
-      coverage
-    end
-
     def price_call(call, account_scope:, plan:)
       identity_fields = call["actual_identity"] || {}
       route = { "provider" => identity_fields["provider"], "model" => identity_fields["model"],
                 "reasoning" => identity_fields["reasoning"], "billing_route" => identity_fields["billing_route"] }
-      account_scope = observed_for(account_scope, route)
-      plan = observed_for(plan, route)
+      supplied_scope = observed_for(account_scope, route)
+      supplied_plan = observed_for(plan, route)
+      recorded_scope = call["account_scope"]
+      recorded_plan = call["plan"]
+      account_scope = unstated?(recorded_scope) ? supplied_scope : recorded_scope
+      plan = recorded_plan.nil? ? supplied_plan : recorded_plan
       row = { "call_id" => call["call_id"], "role" => call["role"], "phase" => call["phase"],
               "status" => call["status"], "attempt_id" => call["attempt_id"],
               "requested_model" => call["requested_model"], "actual_identity" => identity_fields,
               "usage_status" => call["usage_status"], "usage_source" => call["usage_source"],
               "usage" => call["usage"], "recorded_at" => call["recorded_at"],
               "account_scope" => account_scope, "plan" => plan,
+              "account_identity" => call["account_identity"], "credential_id" => call["credential_id"],
               "route_fact" => nil, "estimate" => nil, "cost" => nil, "quota" => nil, "gap" => nil }
+      if (!unstated?(recorded_scope) && !supplied_scope.nil? && supplied_scope != recorded_scope) ||
+         (!recorded_plan.nil? && !supplied_plan.nil? && supplied_plan != recorded_plan)
+        return row.merge("gap" => "supplied resource context conflicts with the actual call's account or plan")
+      end
       moment = call_time(call["started_at"])
       if moment.nil?
         return row.merge("gap" => "the call has no recorded start time; a recording time never stands in for it")

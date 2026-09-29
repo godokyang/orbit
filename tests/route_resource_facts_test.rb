@@ -194,6 +194,15 @@ module RouteResourceFactsTest
                                          usage: { "input" => 1000, "cache_read" => 0, "output" => 1000 })
     )
     check(other_currency["verdict"] == "indeterminate", "different currencies are never compared in money")
+
+    second_account = fact("applicability" => { "account_scope" => "other-account", "plan" => nil })
+      .estimate(route: route(), account_scope: "other-account", at: at,
+                usage: { "input" => 1000, "cache_read" => 0, "output" => 1000 })
+    cross_account = Orbit::RouteResourceFacts.compare(first.estimate(
+      route: route(), account_scope: scope, at: at,
+      usage: { "input" => 1000, "cache_read" => 0, "output" => 1000 }), second_account)
+    check(cross_account["verdict"] != "indeterminate" && cross_account["account_scopes"] == [scope, "other-account"],
+          "cash in one currency is comparable after each account's applicability has been verified")
   end
 
   def check_invalid_fact_is_refused

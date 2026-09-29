@@ -1,0 +1,496 @@
+{
+  "schema_version": "orbit-entry-calibration-v2",
+  "rule_version": "orbit-entry-rules-3",
+  "question_set_version": "orbit-entry-3",
+  "question_digest": "3a300501e042781e015725f8434be221f09b4e6c735c3d3ad40645f787f8c295",
+  "input_version": "orbit-entry-input-2",
+  "decision_version": "orbit-entry-decision-2",
+  "model": "jev-1.13.0",
+  "thresholds": {
+    "execution_authorized": 0.85,
+    "delegation_value": 0.65,
+    "supervision_value": 0.65
+  },
+  "samples": [
+    {
+      "id": "clean-implementation",
+      "kind": "positive",
+      "mode": "model_backed",
+      "state": {
+        "input_version": "orbit-entry-input-2",
+        "instruction": "Implement CSV import with duplicate-id rejection and preservation of valid rows, integrate it with the CLI, and verify valid, malformed and duplicate input.",
+        "instruction_truncated": false,
+        "git": {
+          "status": "",
+          "diff_excerpt": ""
+        }
+      },
+      "judgment": {
+        "schema_version": 1,
+        "status": "answered",
+        "source": {
+          "provider": "typesafe",
+          "actual_model": "jev-1.13.0"
+        },
+        "answers": {
+          "execution_authorized": {
+            "probability_true": 0.93
+          },
+          "delegation_value": {
+            "probability_true": 0.77
+          },
+          "supervision_value": {
+            "probability_true": 0.66
+          }
+        },
+        "usage": {
+          "input_tokens": 786,
+          "output_tokens": 63
+        },
+        "call_id": "orbit-judgment-f9f4b887-d697-4064-b831-78fce830122d"
+      },
+      "expected_decision": "start",
+      "requested_model": "jev-1.13.0",
+      "questions": {
+        "execution_authorized": {
+          "instruction": "Does the user's current message ask the agent to carry out concrete work or deliver a verifiable result now? Direct commands and polite action requests such as 'can you fix this' authorize the requested work without permission words. A requested read-only audit with a report is work. Discussion, hypothetical options, quoted commands, product mentions and code examples do not authorize their contents. A bare 'continue' without an attributable earlier requirement is insufficient; do not infer a goal from Git changes.",
+          "true_criterion": "The current user request authorizes concrete work or a verifiable deliverable now",
+          "false_criterion": "The message only discusses or quotes work, or the requested work cannot be attributed to an authorized requirement"
+        },
+        "delegation_value": {
+          "instruction": "Does this request contain substantive work with a bounded result and handoff that a suitable execution member could perform instead of part of Root's work? Serial handoff can qualify; Root need not continue another task in parallel. Consider necessary context, dependencies, integration and verification. Do not infer member capability from its name, require every model to have local success samples, predict elapsed time or assume token or cash savings. Candidate availability, fit and real route resources are evaluated separately when selecting a member.",
+          "true_criterion": "Substantive bounded work could replace part of Root's execution through a practical handoff",
+          "false_criterion": "Work is trivial, overlapping, lacks a usable handoff or cannot yet satisfy its dependencies"
+        },
+        "supervision_value": {
+          "instruction": "Would persistent requirements, scope control and independent verification provide material value for this requested deliverable by detecting omissions, unsupported claims, drift, boundary violations or forgotten constraints? A single execution surface or a read-only audit report can qualify. Conceptual discussion and low-risk reversible edits with clear program verification usually do not. Do not judge by model speed, elapsed time or the need for parallel work.",
+          "true_criterion": "The deliverable has substantive verification or scope risks that controlled supervision could help address",
+          "false_criterion": "There is no requested deliverable, or supervision adds little value over direct verifiable work"
+        }
+      },
+      "evidence_file": "clean-implementation.json",
+      "evaluation_stage": "calibration",
+      "passed": true
+    },
+    {
+      "id": "clean-audit",
+      "kind": "positive",
+      "mode": "model_backed",
+      "state": {
+        "input_version": "orbit-entry-input-2",
+        "instruction": "Audit the transaction parser read-only and deliver an independent report covering malformed input, unsafe paths and data loss. Give file and test evidence for each finding.",
+        "instruction_truncated": false,
+        "git": {
+          "status": "",
+          "diff_excerpt": ""
+        }
+      },
+      "judgment": {
+        "schema_version": 1,
+        "status": "answered",
+        "source": {
+          "provider": "typesafe",
+          "actual_model": "jev-1.13.0"
+        },
+        "answers": {
+          "execution_authorized": {
+            "probability_true": 0.96
+          },
+          "delegation_value": {
+            "probability_true": 0.78
+          },
+          "supervision_value": {
+            "probability_true": 0.82
+          }
+        },
+        "usage": {
+          "input_tokens": 788,
+          "output_tokens": 63
+        },
+        "call_id": "orbit-judgment-d0cbc7eb-f08a-41d5-a8f8-1f0b1780d579"
+      },
+      "expected_decision": "start",
+      "requested_model": "jev-1.13.0",
+      "questions": {
+        "execution_authorized": {
+          "instruction": "Does the user's current message ask the agent to carry out concrete work or deliver a verifiable result now? Direct commands and polite action requests such as 'can you fix this' authorize the requested work without permission words. A requested read-only audit with a report is work. Discussion, hypothetical options, quoted commands, product mentions and code examples do not authorize their contents. A bare 'continue' without an attributable earlier requirement is insufficient; do not infer a goal from Git changes.",
+          "true_criterion": "The current user request authorizes concrete work or a verifiable deliverable now",
+          "false_criterion": "The message only discusses or quotes work, or the requested work cannot be attributed to an authorized requirement"
+        },
+        "delegation_value": {
+          "instruction": "Does this request contain substantive work with a bounded result and handoff that a suitable execution member could perform instead of part of Root's work? Serial handoff can qualify; Root need not continue another task in parallel. Consider necessary context, dependencies, integration and verification. Do not infer member capability from its name, require every model to have local success samples, predict elapsed time or assume token or cash savings. Candidate availability, fit and real route resources are evaluated separately when selecting a member.",
+          "true_criterion": "Substantive bounded work could replace part of Root's execution through a practical handoff",
+          "false_criterion": "Work is trivial, overlapping, lacks a usable handoff or cannot yet satisfy its dependencies"
+        },
+        "supervision_value": {
+          "instruction": "Would persistent requirements, scope control and independent verification provide material value for this requested deliverable by detecting omissions, unsupported claims, drift, boundary violations or forgotten constraints? A single execution surface or a read-only audit report can qualify. Conceptual discussion and low-risk reversible edits with clear program verification usually do not. Do not judge by model speed, elapsed time or the need for parallel work.",
+          "true_criterion": "The deliverable has substantive verification or scope risks that controlled supervision could help address",
+          "false_criterion": "There is no requested deliverable, or supervision adds little value over direct verifiable work"
+        }
+      },
+      "evidence_file": "clean-audit.json",
+      "evaluation_stage": "calibration",
+      "passed": true
+    },
+    {
+      "id": "clean-small",
+      "kind": "negative",
+      "mode": "model_backed",
+      "state": {
+        "input_version": "orbit-entry-input-2",
+        "instruction": "Change the title in README.md from Data import CLI to Record import CLI and verify the diff contains only that title.",
+        "instruction_truncated": false,
+        "git": {
+          "status": "",
+          "diff_excerpt": ""
+        }
+      },
+      "judgment": {
+        "schema_version": 1,
+        "status": "answered",
+        "source": {
+          "provider": "typesafe",
+          "actual_model": "jev-1.13.0"
+        },
+        "answers": {
+          "execution_authorized": {
+            "probability_true": 0.94
+          },
+          "delegation_value": {
+            "probability_true": 0.34
+          },
+          "supervision_value": {
+            "probability_true": 0.15
+          }
+        },
+        "usage": {
+          "input_tokens": 781,
+          "output_tokens": 63
+        },
+        "call_id": "orbit-judgment-af98ddcf-93e1-4f90-8bd3-5e08551df1ed"
+      },
+      "expected_decision": "root_decides",
+      "requested_model": "jev-1.13.0",
+      "questions": {
+        "execution_authorized": {
+          "instruction": "Does the user's current message ask the agent to carry out concrete work or deliver a verifiable result now? Direct commands and polite action requests such as 'can you fix this' authorize the requested work without permission words. A requested read-only audit with a report is work. Discussion, hypothetical options, quoted commands, product mentions and code examples do not authorize their contents. A bare 'continue' without an attributable earlier requirement is insufficient; do not infer a goal from Git changes.",
+          "true_criterion": "The current user request authorizes concrete work or a verifiable deliverable now",
+          "false_criterion": "The message only discusses or quotes work, or the requested work cannot be attributed to an authorized requirement"
+        },
+        "delegation_value": {
+          "instruction": "Does this request contain substantive work with a bounded result and handoff that a suitable execution member could perform instead of part of Root's work? Serial handoff can qualify; Root need not continue another task in parallel. Consider necessary context, dependencies, integration and verification. Do not infer member capability from its name, require every model to have local success samples, predict elapsed time or assume token or cash savings. Candidate availability, fit and real route resources are evaluated separately when selecting a member.",
+          "true_criterion": "Substantive bounded work could replace part of Root's execution through a practical handoff",
+          "false_criterion": "Work is trivial, overlapping, lacks a usable handoff or cannot yet satisfy its dependencies"
+        },
+        "supervision_value": {
+          "instruction": "Would persistent requirements, scope control and independent verification provide material value for this requested deliverable by detecting omissions, unsupported claims, drift, boundary violations or forgotten constraints? A single execution surface or a read-only audit report can qualify. Conceptual discussion and low-risk reversible edits with clear program verification usually do not. Do not judge by model speed, elapsed time or the need for parallel work.",
+          "true_criterion": "The deliverable has substantive verification or scope risks that controlled supervision could help address",
+          "false_criterion": "There is no requested deliverable, or supervision adds little value over direct verifiable work"
+        }
+      },
+      "evidence_file": "clean-small.json",
+      "evaluation_stage": "calibration",
+      "passed": true
+    },
+    {
+      "id": "clean-discussion",
+      "kind": "negative",
+      "mode": "model_backed",
+      "state": {
+        "input_version": "orbit-entry-input-2",
+        "instruction": "Explain whether serial delegation could help this project. Do not edit files or start work.",
+        "instruction_truncated": false,
+        "git": {
+          "status": "",
+          "diff_excerpt": ""
+        }
+      },
+      "judgment": {
+        "schema_version": 1,
+        "status": "answered",
+        "source": {
+          "provider": "typesafe",
+          "actual_model": "jev-1.13.0"
+        },
+        "answers": {
+          "execution_authorized": {
+            "probability_true": 0.16
+          },
+          "delegation_value": {
+            "probability_true": 0.27
+          },
+          "supervision_value": {
+            "probability_true": 0.3
+          }
+        },
+        "usage": {
+          "input_tokens": 776,
+          "output_tokens": 63
+        },
+        "call_id": "orbit-judgment-f68a9ca2-d924-4043-9716-eb0b97f4003a"
+      },
+      "expected_decision": "root_decides",
+      "requested_model": "jev-1.13.0",
+      "questions": {
+        "execution_authorized": {
+          "instruction": "Does the user's current message ask the agent to carry out concrete work or deliver a verifiable result now? Direct commands and polite action requests such as 'can you fix this' authorize the requested work without permission words. A requested read-only audit with a report is work. Discussion, hypothetical options, quoted commands, product mentions and code examples do not authorize their contents. A bare 'continue' without an attributable earlier requirement is insufficient; do not infer a goal from Git changes.",
+          "true_criterion": "The current user request authorizes concrete work or a verifiable deliverable now",
+          "false_criterion": "The message only discusses or quotes work, or the requested work cannot be attributed to an authorized requirement"
+        },
+        "delegation_value": {
+          "instruction": "Does this request contain substantive work with a bounded result and handoff that a suitable execution member could perform instead of part of Root's work? Serial handoff can qualify; Root need not continue another task in parallel. Consider necessary context, dependencies, integration and verification. Do not infer member capability from its name, require every model to have local success samples, predict elapsed time or assume token or cash savings. Candidate availability, fit and real route resources are evaluated separately when selecting a member.",
+          "true_criterion": "Substantive bounded work could replace part of Root's execution through a practical handoff",
+          "false_criterion": "Work is trivial, overlapping, lacks a usable handoff or cannot yet satisfy its dependencies"
+        },
+        "supervision_value": {
+          "instruction": "Would persistent requirements, scope control and independent verification provide material value for this requested deliverable by detecting omissions, unsupported claims, drift, boundary violations or forgotten constraints? A single execution surface or a read-only audit report can qualify. Conceptual discussion and low-risk reversible edits with clear program verification usually do not. Do not judge by model speed, elapsed time or the need for parallel work.",
+          "true_criterion": "The deliverable has substantive verification or scope risks that controlled supervision could help address",
+          "false_criterion": "There is no requested deliverable, or supervision adds little value over direct verifiable work"
+        }
+      },
+      "evidence_file": "clean-discussion.json",
+      "evaluation_stage": "calibration",
+      "passed": true
+    },
+    {
+      "id": "clean-missing",
+      "kind": "missing_evidence",
+      "mode": "model_backed",
+      "state": {
+        "input_version": "orbit-entry-input-2",
+        "instruction": "Continue.",
+        "instruction_truncated": false,
+        "git": {
+          "status": "",
+          "diff_excerpt": ""
+        }
+      },
+      "judgment": {
+        "schema_version": 1,
+        "status": "answered",
+        "source": {
+          "provider": "typesafe",
+          "actual_model": "jev-1.13.0"
+        },
+        "answers": {
+          "execution_authorized": {
+            "probability_true": 0.06
+          },
+          "delegation_value": {
+            "probability_true": 0.14
+          },
+          "supervision_value": {
+            "probability_true": 0.26
+          }
+        },
+        "usage": {
+          "input_tokens": 760,
+          "output_tokens": 63
+        },
+        "call_id": "orbit-judgment-34ff3cfe-397c-4b9e-a268-7f2e3fb3a63c"
+      },
+      "expected_decision": "root_decides",
+      "requested_model": "jev-1.13.0",
+      "questions": {
+        "execution_authorized": {
+          "instruction": "Does the user's current message ask the agent to carry out concrete work or deliver a verifiable result now? Direct commands and polite action requests such as 'can you fix this' authorize the requested work without permission words. A requested read-only audit with a report is work. Discussion, hypothetical options, quoted commands, product mentions and code examples do not authorize their contents. A bare 'continue' without an attributable earlier requirement is insufficient; do not infer a goal from Git changes.",
+          "true_criterion": "The current user request authorizes concrete work or a verifiable deliverable now",
+          "false_criterion": "The message only discusses or quotes work, or the requested work cannot be attributed to an authorized requirement"
+        },
+        "delegation_value": {
+          "instruction": "Does this request contain substantive work with a bounded result and handoff that a suitable execution member could perform instead of part of Root's work? Serial handoff can qualify; Root need not continue another task in parallel. Consider necessary context, dependencies, integration and verification. Do not infer member capability from its name, require every model to have local success samples, predict elapsed time or assume token or cash savings. Candidate availability, fit and real route resources are evaluated separately when selecting a member.",
+          "true_criterion": "Substantive bounded work could replace part of Root's execution through a practical handoff",
+          "false_criterion": "Work is trivial, overlapping, lacks a usable handoff or cannot yet satisfy its dependencies"
+        },
+        "supervision_value": {
+          "instruction": "Would persistent requirements, scope control and independent verification provide material value for this requested deliverable by detecting omissions, unsupported claims, drift, boundary violations or forgotten constraints? A single execution surface or a read-only audit report can qualify. Conceptual discussion and low-risk reversible edits with clear program verification usually do not. Do not judge by model speed, elapsed time or the need for parallel work.",
+          "true_criterion": "The deliverable has substantive verification or scope risks that controlled supervision could help address",
+          "false_criterion": "There is no requested deliverable, or supervision adds little value over direct verifiable work"
+        }
+      },
+      "evidence_file": "clean-missing.json",
+      "evaluation_stage": "calibration",
+      "passed": true
+    },
+    {
+      "id": "clean-failure",
+      "kind": "failure",
+      "mode": "model_backed",
+      "state": {
+        "input_version": "orbit-entry-input-2",
+        "instruction": "Implement the CLI and storage feature with restart persistence and integration tests.",
+        "instruction_truncated": false,
+        "git": {
+          "status": "",
+          "diff_excerpt": ""
+        }
+      },
+      "judgment": {
+        "schema_version": 1,
+        "status": "unavailable",
+        "source": {
+          "provider": "typesafe"
+        },
+        "error": "TypeSafe HTTP 401",
+        "call_id": "orbit-judgment-e2af479e-9521-4ac9-bef0-48776174c610"
+      },
+      "expected_decision": "root_decides",
+      "requested_model": "jev-1.13.0",
+      "questions": {
+        "execution_authorized": {
+          "instruction": "Does the user's current message ask the agent to carry out concrete work or deliver a verifiable result now? Direct commands and polite action requests such as 'can you fix this' authorize the requested work without permission words. A requested read-only audit with a report is work. Discussion, hypothetical options, quoted commands, product mentions and code examples do not authorize their contents. A bare 'continue' without an attributable earlier requirement is insufficient; do not infer a goal from Git changes.",
+          "true_criterion": "The current user request authorizes concrete work or a verifiable deliverable now",
+          "false_criterion": "The message only discusses or quotes work, or the requested work cannot be attributed to an authorized requirement"
+        },
+        "delegation_value": {
+          "instruction": "Does this request contain substantive work with a bounded result and handoff that a suitable execution member could perform instead of part of Root's work? Serial handoff can qualify; Root need not continue another task in parallel. Consider necessary context, dependencies, integration and verification. Do not infer member capability from its name, require every model to have local success samples, predict elapsed time or assume token or cash savings. Candidate availability, fit and real route resources are evaluated separately when selecting a member.",
+          "true_criterion": "Substantive bounded work could replace part of Root's execution through a practical handoff",
+          "false_criterion": "Work is trivial, overlapping, lacks a usable handoff or cannot yet satisfy its dependencies"
+        },
+        "supervision_value": {
+          "instruction": "Would persistent requirements, scope control and independent verification provide material value for this requested deliverable by detecting omissions, unsupported claims, drift, boundary violations or forgotten constraints? A single execution surface or a read-only audit report can qualify. Conceptual discussion and low-risk reversible edits with clear program verification usually do not. Do not judge by model speed, elapsed time or the need for parallel work.",
+          "true_criterion": "The deliverable has substantive verification or scope risks that controlled supervision could help address",
+          "false_criterion": "There is no requested deliverable, or supervision adds little value over direct verifiable work"
+        }
+      },
+      "evidence_file": "clean-failure.json",
+      "evaluation_stage": "calibration",
+      "passed": true
+    },
+    {
+      "id": "clean-holdout-serial",
+      "kind": "positive",
+      "mode": "model_backed",
+      "state": {
+        "input_version": "orbit-entry-input-2",
+        "instruction": "Build a JSON persistence module for add and complete operations, then integrate the CLI after that storage handoff. Verify fresh-process persistence, unknown-id no-write and corrupted JSON diagnostics.",
+        "instruction_truncated": false,
+        "git": {
+          "status": "",
+          "diff_excerpt": ""
+        }
+      },
+      "judgment": {
+        "schema_version": 1,
+        "status": "answered",
+        "source": {
+          "provider": "typesafe",
+          "actual_model": "jev-1.13.0"
+        },
+        "answers": {
+          "execution_authorized": {
+            "probability_true": 0.93
+          },
+          "delegation_value": {
+            "probability_true": 0.8
+          },
+          "supervision_value": {
+            "probability_true": 0.82
+          }
+        },
+        "usage": {
+          "input_tokens": 793,
+          "output_tokens": 63
+        },
+        "call_id": "orbit-judgment-d9f89643-aa27-49c6-bc78-86b4b996e3a9"
+      },
+      "expected_decision": "start",
+      "requested_model": "jev-1.13.0",
+      "questions": {
+        "execution_authorized": {
+          "instruction": "Does the user's current message ask the agent to carry out concrete work or deliver a verifiable result now? Direct commands and polite action requests such as 'can you fix this' authorize the requested work without permission words. A requested read-only audit with a report is work. Discussion, hypothetical options, quoted commands, product mentions and code examples do not authorize their contents. A bare 'continue' without an attributable earlier requirement is insufficient; do not infer a goal from Git changes.",
+          "true_criterion": "The current user request authorizes concrete work or a verifiable deliverable now",
+          "false_criterion": "The message only discusses or quotes work, or the requested work cannot be attributed to an authorized requirement"
+        },
+        "delegation_value": {
+          "instruction": "Does this request contain substantive work with a bounded result and handoff that a suitable execution member could perform instead of part of Root's work? Serial handoff can qualify; Root need not continue another task in parallel. Consider necessary context, dependencies, integration and verification. Do not infer member capability from its name, require every model to have local success samples, predict elapsed time or assume token or cash savings. Candidate availability, fit and real route resources are evaluated separately when selecting a member.",
+          "true_criterion": "Substantive bounded work could replace part of Root's execution through a practical handoff",
+          "false_criterion": "Work is trivial, overlapping, lacks a usable handoff or cannot yet satisfy its dependencies"
+        },
+        "supervision_value": {
+          "instruction": "Would persistent requirements, scope control and independent verification provide material value for this requested deliverable by detecting omissions, unsupported claims, drift, boundary violations or forgotten constraints? A single execution surface or a read-only audit report can qualify. Conceptual discussion and low-risk reversible edits with clear program verification usually do not. Do not judge by model speed, elapsed time or the need for parallel work.",
+          "true_criterion": "The deliverable has substantive verification or scope risks that controlled supervision could help address",
+          "false_criterion": "There is no requested deliverable, or supervision adds little value over direct verifiable work"
+        }
+      },
+      "evidence_file": "clean-holdout-serial.json",
+      "evaluation_stage": "holdout",
+      "passed": true
+    },
+    {
+      "id": "clean-holdout-local",
+      "kind": "negative",
+      "mode": "model_backed",
+      "state": {
+        "input_version": "orbit-entry-input-2",
+        "instruction": "Rename the sample variable in .env.example and check that the diff changes only that spelling.",
+        "instruction_truncated": false,
+        "git": {
+          "status": "",
+          "diff_excerpt": ""
+        }
+      },
+      "judgment": {
+        "schema_version": 1,
+        "status": "answered",
+        "source": {
+          "provider": "typesafe",
+          "actual_model": "jev-1.13.0"
+        },
+        "answers": {
+          "execution_authorized": {
+            "probability_true": 0.87
+          },
+          "delegation_value": {
+            "probability_true": 0.39
+          },
+          "supervision_value": {
+            "probability_true": 0.18
+          }
+        },
+        "usage": {
+          "input_tokens": 776,
+          "output_tokens": 63
+        },
+        "call_id": "orbit-judgment-6115efe0-eace-46db-9da6-55a407cf91e7"
+      },
+      "expected_decision": "root_decides",
+      "requested_model": "jev-1.13.0",
+      "questions": {
+        "execution_authorized": {
+          "instruction": "Does the user's current message ask the agent to carry out concrete work or deliver a verifiable result now? Direct commands and polite action requests such as 'can you fix this' authorize the requested work without permission words. A requested read-only audit with a report is work. Discussion, hypothetical options, quoted commands, product mentions and code examples do not authorize their contents. A bare 'continue' without an attributable earlier requirement is insufficient; do not infer a goal from Git changes.",
+          "true_criterion": "The current user request authorizes concrete work or a verifiable deliverable now",
+          "false_criterion": "The message only discusses or quotes work, or the requested work cannot be attributed to an authorized requirement"
+        },
+        "delegation_value": {
+          "instruction": "Does this request contain substantive work with a bounded result and handoff that a suitable execution member could perform instead of part of Root's work? Serial handoff can qualify; Root need not continue another task in parallel. Consider necessary context, dependencies, integration and verification. Do not infer member capability from its name, require every model to have local success samples, predict elapsed time or assume token or cash savings. Candidate availability, fit and real route resources are evaluated separately when selecting a member.",
+          "true_criterion": "Substantive bounded work could replace part of Root's execution through a practical handoff",
+          "false_criterion": "Work is trivial, overlapping, lacks a usable handoff or cannot yet satisfy its dependencies"
+        },
+        "supervision_value": {
+          "instruction": "Would persistent requirements, scope control and independent verification provide material value for this requested deliverable by detecting omissions, unsupported claims, drift, boundary violations or forgotten constraints? A single execution surface or a read-only audit report can qualify. Conceptual discussion and low-risk reversible edits with clear program verification usually do not. Do not judge by model speed, elapsed time or the need for parallel work.",
+          "true_criterion": "The deliverable has substantive verification or scope risks that controlled supervision could help address",
+          "false_criterion": "There is no requested deliverable, or supervision adds little value over direct verifiable work"
+        }
+      },
+      "evidence_file": "clean-holdout-local.json",
+      "evaluation_stage": "holdout",
+      "passed": true
+    }
+  ],
+  "release": {
+    "reason": "Clean production-shaped Git input; eight pre-labeled actual Jev calls with unchanged thresholds, including two evaluation holdouts and actual HTTP401 failure. Evaluates entry heuristics only, not future model reliability. Decision v2 restricts the identical question/input judgments to observable Git/untruncated input before any paid call; thresholds unchanged.",
+    "scope": "bounded Git implementation and auditable read-only delivery requests; other domains unvalidated; deterministic entry rules precede semantic residual judgment",
+    "reviewed_by": "Independent OMP review w1Y:p1C (reported zenmux/deepseek/deepseek-v4-flash), integrated by Codex",
+    "reviewed_at": "2026-09-29T14:33:28Z",
+    "profile": "git_untruncated_request_v1"
+  },
+  "source_binding": {
+    "schema_version": "orbit-entry-calibration-v2",
+    "rule_version": "orbit-entry-rules-3",
+    "question_set_version": "orbit-entry-3",
+    "question_digest": "3a300501e042781e015725f8434be221f09b4e6c735c3d3ad40645f787f8c295",
+    "input_version": "orbit-entry-input-2",
+    "decision_version": "orbit-entry-decision-1"
+  }
+}

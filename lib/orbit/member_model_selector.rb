@@ -6,6 +6,7 @@ require_relative "jev_advisor"
 require_relative "model_capability_facts"
 require_relative "model_evidence_cache"
 require_relative "model_quality_policy"
+require_relative "route_cost_inputs"
 require_relative "observation_key"
 require_relative "openrouter_model_overview"
 
@@ -33,7 +34,7 @@ module Orbit
     MAX_TEXT = 300
 
     def initialize(connection:, project_root:, pool:, evidence_cache:, advisor:,
-                   overview: nil, release: UNSET)
+                   overview: nil, release: UNSET, route_cost_inputs: nil)
       @connection = connection
       @project_root = project_root
       @pool = pool
@@ -46,6 +47,9 @@ module Orbit
       @release_note = if @release_injected && !release.nil? && !release.is_a?(Hash)
                         "an injected release must be a validated calibration hash"
                       end
+      # Production default: the task-scoped RouteCostInputs builder. An
+      # explicit route_costs argument (tests) always wins over it.
+      @route_cost_inputs = route_cost_inputs
     end
 
     # `state` is the actual task-record context (inputs, workspace, input_digest)
@@ -74,6 +78,7 @@ module Orbit
       catalog, catalog_error = model_catalog
       pool, pool_note = candidate_pool
       unit = unit_view(work_unit)
+      route_costs = default_route_costs(unit) if route_costs.nil?
 
       state_digest = digest_field(state)
       stale = !unit["input_digest"].nil? && !state_digest.nil? && unit["input_digest"] != state_digest
@@ -88,6 +93,20 @@ module Orbit
         "stale" => stale, "candidates" => candidates, "selection_note" => selection_note,
         "release" => release, "release_note" => release_note, "route_costs" => route_costs
       }.tap { |prepared| prepared["signature"] = signature(prepared) }
+    end
+
+    # The production route-cost source: the task-scoped inputs file bound to
+    # this exact work unit. Any binding or credibility failure yields {} -
+    # cost stays unknown and quality judgment continues; an explicitly
+    # injected route_costs argument (tests) bypasses this entirely.
+    def default_route_costs(unit)
+      builder = @route_cost_inputs
+      return nil unless builder && unit["id"].is_a?(String)
+
+      builder.build(scope: "member", work_unit_id: unit["id"],
+                    artifact_root: unit["artifact_root"], input_digest: unit["input_digest"])
+    rescue RouteCostInputs::Error
+      nil
     end
 
     # Pool members are only usable when the session catalog can both resolve the
@@ -371,6 +390,7 @@ module Orbit
         "recommendation" => { "first" => nil, "backups" => [] }, "judgments" => [],
         "judgment_state" => nil, "input_digest" => prepared["input_digest"], "stale" => prepared["stale"],
         "dependencies" => prepared["unit"]["dependencies"],
+        "route_cost_inputs" => prepared["route_costs"],
         "release" => release_binding(prepared["release"]), "decision" => "facts_only", "reason" => nil }
     end
 
@@ -410,8 +430,15 @@ module Orbit
                             "reason" => candidates_call["receipt"]["error"] || "the per-candidate judgment failed")
       end
 
+      costs = prepared["route_costs"]
+      # The recorded producer keys by exact provider/model; ranking selects
+      # native agent ids. Bind those two identities through this actual
+      # candidate list, retaining the source inputs in the assessment.
+      costs = prepared["candidates"].to_h do |item|
+        [item["agent"], costs[item["model"]] || costs[item["agent"]]]
+      end if costs.is_a?(Hash)
       order = ModelQualityPolicy.order(signals(prepared, candidates_call["receipt"]), release: release,
-                                       route_costs: prepared["route_costs"], state: projection,
+                                       route_costs: costs, state: projection,
                                        judgment: candidates_call["receipt"])
       ordered = Array(order["ordered_ids"])
       first = order["positive"] ? ordered.first : nil

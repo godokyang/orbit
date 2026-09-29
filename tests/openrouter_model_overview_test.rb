@@ -25,7 +25,10 @@ module OpenRouterModelOverviewTest
       test_mapping_identity_validation_and_prior_bounds(tmp)
       test_lookup_target_alias_drift_and_benchmark_gates(tmp)
       test_task_indices_and_unknown_measurement_date(tmp)
-      test_v1_snapshot_is_not_reused_as_v2(tmp)
+      test_old_snapshot_is_not_reused_as_v3(tmp)
+      test_benchmark_join_is_exact_and_keeps_variants_separate(tmp)
+      test_unverifiable_benchmark_matches_supply_no_prior(tmp)
+      test_benchmark_failure_never_stores_half_a_snapshot(tmp)
       test_pagination_completeness(tmp)
       test_status_diagnostics_are_read_only(tmp)
       test_mapping_provenance(tmp)
@@ -84,7 +87,9 @@ module OpenRouterModelOverviewTest
     FileUtils.mkdir_p(File.join(project, ".orbit"))
     File.write(File.join(project, ".env"), "OPENROUTER_API_KEY=or-dotenv-key\n")
 
-    configured = overview(tmp, "gate", http: FakeHttp.new([[200, models_body([row("deepseek/deepseek-v4.1-flash")])]]))
+    configured = overview(tmp, "gate", http: FakeHttp.new([
+                             [200, models_body([row("deepseek/deepseek-v4.1-flash")])],
+                             [200, benchmarks_body([variant("deepseek/deepseek-v4.1-flash")])]]))
     write_map(configured.map_path, [mapping])
     assert_equal("fresh", configured.refresh(project_root: project).fetch("status"), "a configured key fetches once")
     assert_equal("fresh", configured.lookup(model: "opencode-go/deepseek-v4.1-flash", project_root: project).fetch("status"),
@@ -105,8 +110,9 @@ module OpenRouterModelOverviewTest
   def test_first_fetch_reuse_ttl_and_single_refresh(tmp)
     project = tmp
     now = NOW
-    http = FakeHttp.new([[200, models_body([row("moonshotai/kimi-k3", slug: "moonshotai/kimi-k3-20260715")])],
-                         [200, models_body([row("moonshotai/kimi-k3", slug: "moonshotai/kimi-k3-20260715")])]])
+    response = [[200, models_body([row("moonshotai/kimi-k3", slug: "moonshotai/kimi-k3-20260715")])],
+                [200, benchmarks_body([variant("moonshotai/kimi-k3-20260715")])]]
+    http = FakeHttp.new(response + response)
     instance = overview(tmp, "ttl", clock: -> { now }, http: http)
     assert_equal("fresh", instance.refresh(project_root: project).fetch("status"), "the first fetch stores a snapshot")
 
@@ -114,13 +120,15 @@ module OpenRouterModelOverviewTest
     assert_equal("fresh", instance.refresh(project_root: project).fetch("status"), "inside 72h the snapshot is reused")
     assert_equal("fresh", overview(tmp, "ttl", clock: -> { now }, http: FakeHttp.new([]))
                     .refresh(project_root: project).fetch("status"), "a second process reuses the snapshot")
-    assert_equal(1, http.requests.length, "the lock coordinates concurrent tasks into one fetch")
+    assert_equal(2, http.requests.length, "one refresh is exactly one catalogue plus one benchmark request")
+    assert(http.requests.map { |request| request["url"] }.any? { |url| url.include?("/benchmarks?source=artificial-analysis") },
+           "the benchmark source is requested separately from the catalogue")
 
     now = NOW + 72 * 60 * 60 + 1
     assert_equal("stale", instance.lookup(model: "moonshotai/kimi-k3", project_root: project).fetch("status"),
                  "an expired snapshot is not a prior")
     assert_equal("fresh", instance.refresh(project_root: project).fetch("status"), "expiry triggers a refetch")
-    assert_equal(2, http.requests.length, "lookup stayed offline and expiry fetched exactly once")
+    assert_equal(4, http.requests.length, "lookup stayed offline and expiry fetched exactly once")
 
     content = File.read(instance.cache_path)
     assert(!content.include?("or-test-key-1") && File.stat(instance.cache_path).mode & 0o777 == 0o600,
@@ -130,7 +138,8 @@ module OpenRouterModelOverviewTest
   def test_http_failure_backoff_and_new_key_recovery(tmp)
     project = tmp
     http = FakeHttp.new([[401, '{"error":{"message":"invalid key"}}'],
-                         [200, models_body([row("deepseek/deepseek-v4.1-flash")])]])
+                         [200, models_body([row("deepseek/deepseek-v4.1-flash")])],
+                         [200, benchmarks_body([variant("deepseek/deepseek-v4.1-flash")])]])
     broken = overview(tmp, "auth", clock: -> { NOW }, http: http)
     write_map(broken.map_path, [mapping])
     result = broken.refresh(project_root: project)
@@ -153,8 +162,10 @@ module OpenRouterModelOverviewTest
 
   def test_mapping_identity_validation_and_prior_bounds(tmp)
     project = tmp
-    http = FakeHttp.new([[200, models_body([row("deepseek/deepseek-v4.1-flash", coding: 56.2, agentic: nil),
-                                            row("moonshotai/kimi-k3", slug: "moonshotai/kimi-k3-20260715")])]])
+    http = FakeHttp.new([[200, models_body([row("deepseek/deepseek-v4.1-flash"),
+                                            row("moonshotai/kimi-k3", slug: "moonshotai/kimi-k3-20260715")])],
+                         [200, benchmarks_body([variant("deepseek/deepseek-v4.1-flash", coding: 56.2, agentic: nil),
+                                                variant("moonshotai/kimi-k3-20260715", coding: 76.2)])]])
     instance = overview(tmp, "maps", http: http)
     instance.refresh(project_root: project)
 
@@ -187,12 +198,15 @@ module OpenRouterModelOverviewTest
   def test_lookup_target_alias_drift_and_benchmark_gates(tmp)
     project = tmp
     rows = [
-      row("moonshotai/kimi-k3", slug: "moonshotai/kimi-k3-20260715", coding: 76.2, agentic: 50.0),
-      row("zhipu/glm-5.3-flashx", coding: nil, agentic: nil),
+      row("moonshotai/kimi-k3", slug: "moonshotai/kimi-k3-20260715"),
+      row("zhipu/glm-5.3-flashx"),
       row("deepseek/deepseek-v4.1-flash"),
       row("~deepseek/deepseek-v4-flash-latest", slug: "deepseek/deepseek-v4-flash")
     ]
-    instance = overview(tmp, "gates", http: FakeHttp.new([[200, models_body(rows)]]))
+    instance = overview(tmp, "gates", http: FakeHttp.new([
+                          [200, models_body(rows)],
+                          [200, benchmarks_body([variant("moonshotai/kimi-k3-20260715", coding: 76.2, agentic: 50.0),
+                                                 variant("deepseek/deepseek-v4.1-flash")])]]))
     write_map(instance.map_path, [
       mapping("provider" => "kimi-code", "model" => "k3-256k", "openrouter_id" => "moonshotai/kimi-k3",
               "canonical_slug" => "moonshotai/kimi-k3-20260715"),
@@ -217,9 +231,12 @@ module OpenRouterModelOverviewTest
   end
 
   def test_task_indices_and_unknown_measurement_date(tmp)
-    rows = [row("example/agentic-only", coding: nil, agentic: 17.0),
-            row("example/analysis-only", coding: nil, agentic: nil, intelligence: 31.0)]
-    instance = overview(tmp, "task-indices", http: FakeHttp.new([[200, models_body(rows)]]))
+    rows = [row("example/agentic-only"), row("example/analysis-only")]
+    instance = overview(tmp, "task-indices", http: FakeHttp.new([
+                          [200, models_body(rows)],
+                          [200, benchmarks_body([variant("example/agentic-only", coding: nil, agentic: 17.0),
+                                                 variant("example/analysis-only", coding: nil, agentic: nil,
+                                                         intelligence: 31.0)])]]))
     write_map(instance.map_path, rows.map do |model|
       mapping("provider" => "example", "model" => model["id"].split("/", 2).last,
               "openrouter_id" => model["id"], "canonical_slug" => model["canonical_slug"])
@@ -252,9 +269,10 @@ module OpenRouterModelOverviewTest
     assert(dated["facts"], "facts remain visible when task qualification fails")
   end
 
-  def test_v1_snapshot_is_not_reused_as_v2(tmp)
-    http = FakeHttp.new([[200, models_body([row("deepseek/deepseek-v4.1-flash")])],
-                         [200, models_body([row("deepseek/deepseek-v4.1-flash", intelligence: 23.0)])]])
+  def test_old_snapshot_is_not_reused_as_v3(tmp)
+    response = [[200, models_body([row("deepseek/deepseek-v4.1-flash")])],
+                [200, benchmarks_body([variant("deepseek/deepseek-v4.1-flash", intelligence: 23.0)])]]
+    http = FakeHttp.new(response + response)
     instance = overview(tmp, "schema-change", http: http)
     write_map(instance.map_path, [mapping])
     instance.refresh(project_root: tmp)
@@ -264,7 +282,7 @@ module OpenRouterModelOverviewTest
     assert_equal("stale", instance.lookup(model: "opencode-go/deepseek-v4.1-flash", project_root: tmp)["status"],
                  "old snapshots are not promoted into the intelligence-aware schema")
     instance.refresh(project_root: tmp)
-    assert_equal(2, http.requests.length, "the new schema requires a real refresh instead of invented old fields")
+    assert_equal(4, http.requests.length, "the new schema requires a real refresh instead of invented old fields")
     assert_equal(23.0, instance.lookup(model: "opencode-go/deepseek-v4.1-flash", project_root: tmp).dig("facts", "intelligence_index"),
                  "the refreshed schema keeps the new index as a fact")
   end
@@ -272,7 +290,8 @@ module OpenRouterModelOverviewTest
   def test_pagination_completeness(tmp)
     project = tmp
     http = FakeHttp.new([[200, models_body([row("a/one"), row("a/two")], next_link: "/api/v1/models?offset=2", total_count: 3)],
-                         [200, models_body([row("a/three")], total_count: 3)]])
+                         [200, models_body([row("a/three")], total_count: 3)],
+                         [200, benchmarks_body([variant("a/one")])]])
     instance = overview(tmp, "pages", http: http)
     assert_equal(3, instance.refresh(project_root: project).fetch("model_count"),
                  "pagination links are followed to the full snapshot")
@@ -284,9 +303,122 @@ module OpenRouterModelOverviewTest
     assert_equal("error", offsite.refresh(project_root: project).fetch("status"), "off-site pagination links are refused")
   end
 
+  # The benchmark join is exact and shape-preserving: the row's own
+  # model_permaslug must equal the catalogue row's canonical_slug or its exact
+  # id, one measured variant may carry top-level scores, several variants stay
+  # separate, and this endpoint's pricing never becomes a stored fact.
+  def test_benchmark_join_is_exact_and_keeps_variants_separate(tmp)
+    project = tmp
+    http = FakeHttp.new([
+      [200, models_body([row("a/one", slug: "a/one-20260101"),
+                         row("a/two", slug: "a/two-20260101"),
+                         row("a/four", slug: "a/four-20260101"),
+                         row("a/five", slug: "a/five-20260101")])],
+      [200, benchmarks_body([variant("a/one-20260101", display_name: "One", coding: 61.5, agentic: nil, intelligence: 55.0),
+                             variant("a/two-20260101", display_name: "Two (max)", coding: 70.0),
+                             variant("a/two-20260101", display_name: "Two (low)", coding: 64.0),
+                             variant("a/five", display_name: "By id", coding: 66.0),
+                             variant("a/four-20260101", display_name: "Arena", coding: 98.0, source: "design-arena")])]
+    ])
+    instance = overview(tmp, "join", http: http)
+    write_map(instance.map_path, [mapping("provider" => "a", "model" => "one", "openrouter_id" => "a/one",
+                                          "canonical_slug" => "a/one-20260101", "sources" => ["https://a.example/one"]),
+                                  mapping("provider" => "a", "model" => "two", "openrouter_id" => "a/two",
+                                          "canonical_slug" => "a/two-20260101", "sources" => ["https://a.example/two"]),
+                                  mapping("provider" => "a", "model" => "four", "openrouter_id" => "a/four",
+                                          "canonical_slug" => "a/four-20260101", "sources" => ["https://a.example/four"]),
+                                  mapping("provider" => "a", "model" => "five", "openrouter_id" => "a/five",
+                                          "canonical_slug" => "a/five-20260101", "sources" => ["https://a.example/five"])])
+    instance.refresh(project_root: project)
+
+    one = instance.lookup(model: "a/one", project_root: project,
+                          indices: %w[coding_index agentic_index intelligence_index])
+    assert_equal("fresh", one["status"], "one exact benchmark row resolves through its canonical slug")
+    assert_equal(61.5, one.dig("prior", "coding_index"), "a single measured variant carries its own score")
+    assert_equal("One", one.dig("prior", "benchmark_display_name"), "the variant that supplied the score is named")
+    assert_equal(%w[coding_index intelligence_index], one.dig("prior", "relevant_indices"),
+                 "an index missing from that variant is not supplied as a score")
+    assert(one.dig("prior", "benchmark_variants").none? { |entry| entry.key?("pricing") },
+           "benchmark pricing is never stored as a capability fact")
+    assert_equal("2026-06-03T12:00:00Z", one.dig("prior", "benchmark_as_of"),
+                 "the dataset snapshot date is carried as a dataset fact, not a measurement date")
+    assert_equal("unknown", one.dig("prior", "measurement_date_status"), "the measurement date stays unknown")
+
+    two = instance.lookup(model: "a/two", project_root: project, indices: ["coding_index"])
+    assert_equal(nil, two.dig("prior", "coding_index"),
+                 "several reasoning variants are never collapsed to a highest or average score")
+    assert_equal([["Two (max)", 70.0], ["Two (low)", 64.0]],
+                 two.dig("prior", "benchmark_variants").map { |entry| [entry["display_name"], entry["coding_index"]] },
+                 "each variant keeps its own display_name and index")
+
+    five = instance.lookup(model: "a/five", project_root: project, indices: ["coding_index"])
+    assert_equal("fresh", five["status"], "a benchmark row keyed by the catalogue row's exact id resolves")
+    assert_equal(66.0, five.dig("prior", "coding_index"), "that exact-id match supplies its own measured variant")
+
+    four = instance.lookup(model: "a/four", project_root: project, indices: ["coding_index"])
+    assert_equal("no_benchmark", four["status"], "a non-artificial-analysis source never supplies these indices")
+  end
+
+  # An unverifiable join is a gap, not a guess: suffixed, neighbouring-version
+  # and ambiguous matches supply no prior, and both lookups agreeing on one key
+  # is required.
+  def test_unverifiable_benchmark_matches_supply_no_prior(tmp)
+    project = tmp
+    http = FakeHttp.new([
+      [200, models_body([row("b/one", slug: "b/one-20260101"),
+                         row("b/two", slug: "b/two-20260101"),
+                         row("b/three", slug: "b/three-20260101")])],
+      [200, benchmarks_body([variant("b/one-20260101-preview", display_name: "Preview", coding: 71.0),
+                             variant("b/one-20260102", display_name: "Next", coding: 72.0),
+                             variant("b/two-20260101", display_name: "Two", coding: 65.0),
+                             variant("b/three-20260101", display_name: "By slug", coding: 74.0),
+                             variant("b/three", display_name: "By id", coding: 75.0)])]
+    ])
+    instance = overview(tmp, "join-gaps", http: http)
+    write_map(instance.map_path, [mapping("provider" => "b", "model" => "one", "openrouter_id" => "b/one",
+                                          "canonical_slug" => "b/one-20260101", "sources" => ["https://b.example/one"]),
+                                  mapping("provider" => "b", "model" => "two", "openrouter_id" => "b/two",
+                                          "canonical_slug" => "b/two-20260101", "sources" => ["https://b.example/two"]),
+                                  mapping("provider" => "b", "model" => "three", "openrouter_id" => "b/three",
+                                          "canonical_slug" => "b/three-20260101", "sources" => ["https://b.example/three"])])
+    instance.refresh(project_root: project)
+
+    one = instance.lookup(model: "b/one", project_root: project, indices: ["coding_index"])
+    assert_equal("no_benchmark", one["status"], "a suffixed or neighbouring-version slug never supplies the index")
+    assert_equal([], one.dig("facts", "benchmark_variants"), "no variant is invented for an unverified match")
+    assert_equal(nil, one["prior"], "a gap is not a score")
+
+    two = instance.lookup(model: "b/two", project_root: project, indices: ["coding_index"])
+    assert_equal("fresh", two["status"], "an exact canonical-slug match still resolves next to a gap")
+    assert_equal(65.0, two.dig("prior", "coding_index"), "the matching row keeps its own measured variant")
+
+    three = instance.lookup(model: "b/three", project_root: project, indices: ["coding_index"])
+    assert_equal("no_benchmark", three["status"],
+                 "two exact keys pointing at different rows are ambiguous and supply no prior")
+    assert_equal([], three.dig("facts", "benchmark_variants"), "an ambiguous join invents no variant")
+  end
+
+  # Both requests belong to one snapshot: a benchmark failure leaves the previous
+  # snapshot untouched instead of storing half a document.
+  def test_benchmark_failure_never_stores_half_a_snapshot(tmp)
+    project = tmp
+    http = FakeHttp.new([[200, models_body([row("deepseek/deepseek-v4.1-flash")])],
+                         [429, "too many requests"]])
+    instance = overview(tmp, "bench-half", http: http)
+    write_map(instance.map_path, [mapping])
+    result = instance.refresh(project_root: project)
+    assert_equal("error", result.fetch("status"), "a benchmark failure fails the whole refresh")
+    assert(result.fetch("error").include?("429"), "the failure reason names the real status")
+    assert(!File.exist?(instance.cache_path) || JSON.parse(File.read(instance.cache_path))["models"].nil?,
+           "no half snapshot is written")
+    assert_equal("stale", instance.lookup(model: "opencode-go/deepseek-v4.1-flash", project_root: project)["status"],
+                 "a failed refresh leaves no prior")
+  end
+
   def test_status_diagnostics_are_read_only(tmp)
     project = tmp
-    http = FakeHttp.new([[200, models_body([row("deepseek/deepseek-v4.1-flash")])]])
+    http = FakeHttp.new([[200, models_body([row("deepseek/deepseek-v4.1-flash")])],
+                         [200, benchmarks_body([variant("deepseek/deepseek-v4.1-flash")])]])
     instance = overview(tmp, "diag", http: http)
     write_map(instance.map_path, [mapping])
 
@@ -295,7 +427,7 @@ module OpenRouterModelOverviewTest
     assert_equal("fresh", report.fetch("status"), "a current snapshot reports fresh")
     assert_equal("https://openrouter.ai/api/v1/models", report.fetch("source"), "the catalog source is reported")
     assert_equal("ok", report.fetch("last_attempt"), "the last attempt outcome is reported")
-    assert(report.values.none? { |value| value.to_s.include?("or-test-key-1") } && http.requests.length == 1,
+    assert(report.values.none? { |value| value.to_s.include?("or-test-key-1") } && http.requests.length == 2,
            "diagnostics are key-free and never fetch")
 
     rotated = overview(tmp, "diag", env: { "OPENROUTER_API_KEY" => "or-test-key-2" }, http: FakeHttp.new([]))
@@ -312,7 +444,8 @@ module OpenRouterModelOverviewTest
 
   def test_mapping_provenance(tmp)
     project = File.join(tmp, "project-provenance")
-    http = FakeHttp.new([[200, models_body([row("deepseek/deepseek-v4.1-flash")])]])
+    http = FakeHttp.new([[200, models_body([row("deepseek/deepseek-v4.1-flash")])],
+                         [200, benchmarks_body([variant("deepseek/deepseek-v4.1-flash")])]])
     instance = overview(tmp, "provenance", http: http)
     write_map(instance.map_path, [mapping])
     instance.refresh(project_root: project)
@@ -348,18 +481,30 @@ module OpenRouterModelOverviewTest
                                        http_get: http || FakeHttp.new([]))
   end
 
-  def row(id, slug: id, coding: 50.0, agentic: 40.0, intelligence: nil)
+  # The real catalogue row shape: this endpoint carries no benchmark indices.
+  def row(id, slug: id)
     { "id" => id, "canonical_slug" => slug, "name" => "Model", "description" => "Bounded description.",
       "context_length" => 8192,
       "supported_parameters" => ["tools"],
-      "architecture" => { "input_modalities" => ["text"], "output_modalities" => ["text"], "tokenizer" => "Other" },
-      "benchmarks" => { "artificial_analysis" => { "coding_index" => coding, "agentic_index" => agentic,
-                                                  "intelligence_index" => intelligence } } }
+      "architecture" => { "input_modalities" => ["text"], "output_modalities" => ["text"], "tokenizer" => "Other" } }
   end
 
   def models_body(rows, next_link: nil, total_count: nil)
     JSON.generate({ "data" => rows, "links" => { "next" => next_link },
                     "total_count" => total_count.nil? ? rows.length : total_count })
+  end
+
+  # One row of the separate Artificial Analysis endpoint, with the variant's own
+  # display_name and a pricing block the module must never store.
+  def variant(slug, display_name: "Variant", coding: 50.0, agentic: 40.0, intelligence: nil,
+              source: "artificial-analysis")
+    { "source" => source, "model_permaslug" => slug, "display_name" => display_name,
+      "coding_index" => coding, "agentic_index" => agentic, "intelligence_index" => intelligence,
+      "pricing" => { "prompt" => "0.000001", "completion" => "0.000002" } }
+  end
+
+  def benchmarks_body(rows, as_of: "2026-06-03T12:00:00Z")
+    JSON.generate({ "data" => rows, "meta" => { "as_of" => as_of, "version" => "v1", "source_url" => nil } })
   end
 
   def write_map(path, entries)

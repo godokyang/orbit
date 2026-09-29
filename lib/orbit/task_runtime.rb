@@ -17,6 +17,7 @@ require_relative "git_remote_evidence"
 require_relative "task_git_evidence"
 require_relative "observation_key"
 require_relative "resource_call_ledger"
+require_relative "route_cost_inputs"
 require_relative "work_unit"
 require_relative "member_model_selector"
 
@@ -1176,7 +1177,18 @@ module Orbit
     def member_selector
       @member_selector ||= MemberModelSelector.new(
         connection: @connection, project_root: @state.fetch("project_root"),
-        pool: candidate_pool, evidence_cache: evidence_cache, advisor: @advisor
+        pool: candidate_pool, evidence_cache: evidence_cache, advisor: @advisor,
+        route_cost_inputs: route_cost_inputs
+      )
+    end
+
+    # One task-scoped builder shared by both selectors. It reads only this
+    # task's inputs file and prices candidates from the project route store,
+    # so a whole-project or other-task prediction can never stand in for this
+    # unit's future calls.
+    def route_cost_inputs
+      @route_cost_inputs ||= RouteCostInputs.new(
+        record: @record, store: RouteResourceStore.new(project_root: @state.fetch("project_root"))
       )
     end
 
@@ -1765,7 +1777,8 @@ module Orbit
     def checker_selector
       @checker_selector ||= CheckerModelSelector.new(
         connection: @connection, project_root: @state.fetch("project_root"),
-        pool: candidate_pool, evidence_cache: evidence_cache, advisor: @advisor
+        pool: candidate_pool, evidence_cache: evidence_cache, advisor: @advisor,
+        route_cost_inputs: route_cost_inputs
       )
     end
 

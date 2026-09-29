@@ -1,5 +1,5 @@
 import fs from 'node:fs/promises';
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
@@ -948,10 +948,60 @@ export function installOmpExtension(pi, sdk) {
     if (!entry || entry.session.sessionId !== id) throw new Error('Session is not owned by this Orbit host');
     return entry;
   }
+  // Sets the member's real runtime cwd to the unit's current artifact_root
+  // (Root's own session cwd is never touched). The SDK reads
+  // sessionManager.getCwd() live for every tool context and hook ctx, so one
+  // synchronous mutation at the registration/bind window — which provably
+  // precedes member provider work — covers every later tool call. Read-back
+  // verification is mandatory: a member whose cwd cannot reach the declared
+  // workspace stays unbound and its tool gate stays closed.
+  //
+  // Refresh limit (installed OMP 18.3.4, verified against primary src):
+  // refreshSkillsAndCommands re-discovers skills, commands and prompt
+  // metadata for the new cwd, but AGENTS.md context files are discovered
+  // only at session creation (CreateAgentSessionOptions.contextFiles) and no
+  // public seam reloads them; Settings.reloadForCwd covers settings only.
+  // A member of a rebound workspace therefore keeps the spawn-time AGENTS
+  // context — this host applies the real tool-execution cwd and does not
+  // claim a context-file refresh it cannot perform.
+  function applyMemberWorkspace(id, session) {
+    const pending = memberWorkUnits.get(id);
+    if (!pending) return { ok: false, reason: 'actual dispatch has no Orbit work unit' };
+    if (pending.workspaceRoot) {
+      return session?.sessionManager?.getCwd?.() === pending.workspaceRoot
+        ? { ok: true }
+        : { ok: false, reason: 'member session cwd drifted from the work unit artifact_root' };
+    }
+    const report = runWorkUnit(pending.taskDir, 'read', { id: pending.unitId });
+    if (!report.ok || !report.unit?.artifact_root)
+      return { ok: false, reason: report.reason || 'work unit is unreadable' };
+    let real;
+    try { real = realpathSync(report.unit.artifact_root); } catch {
+      return { ok: false, reason: `work unit artifact_root is not a real workspace: ${report.unit.artifact_root}` };
+    }
+    const manager = session?.sessionManager;
+    if (manager?.getCwd?.() !== real) {
+      if (typeof manager?.setCwdWithoutRelocation !== 'function')
+        return { ok: false, reason: 'this OMP runtime cannot set the member session cwd' };
+      try { manager.setCwdWithoutRelocation(real); } catch (error) {
+        return { ok: false, reason: `member session cwd could not be set: ${String(error?.message || error).slice(0, 200)}` };
+      }
+      if (manager.getCwd?.() !== real)
+        return { ok: false, reason: 'member session cwd did not reach the work unit artifact_root' };
+    }
+    pending.workspaceRoot = real;
+    // Best-effort skills/commands/prompt-metadata realign (AGENTS limit above);
+    // it never blocks the binding window.
+    try { Promise.resolve(session.refreshSkillsAndCommands?.()).catch(() => {}); } catch { /* observation only */ }
+    observeCollab({ kind: 'work_unit_workspace_applied', task_dir: pending.taskDir, agent_id: id,
+      work_unit_id: pending.unitId, artifact_root: real, at: Date.now() });
+    return { ok: true };
+  }
   function bindMemberWorkUnit(id, actualModel) {
     const pending = memberWorkUnits.get(id);
     if (!pending) return { ok: false, reason: 'actual dispatch has no Orbit work unit' };
     if (pending.bound) return { ok: true };
+    if (!pending.workspaceRoot) return { ok: false, reason: 'member session cwd is not the current unit artifact_root' };
     if (!actualModel) return { ok: false, reason: 'actual member model is not observable yet' };
     if (actualModel !== pending.expectedModel) return { ok: false, reason: 'actual member model differs from the dispatched model' };
     const result = runWorkUnit(pending.taskDir, 'bind', {
@@ -1009,6 +1059,19 @@ export function installOmpExtension(pi, sdk) {
         noteModelIdentity({ taskDir, role: 'member', agentId: ref.id, sessionId: ref.session?.sessionId ?? null,
           model: ref.session?.model ? `${ref.session.model.provider}/${ref.session.model.id}` : null,
           requestedModel: pending.expectedModel ?? null });
+        // The real runtime cwd must equal the current unit artifact_root
+        // before any provider work (Root's cwd never changes). Failure leaves
+        // the member unbound with its tool gate closed.
+        if (ref.session) {
+          const workspace = applyMemberWorkspace(ref.id, ref.session);
+          if (!workspace.ok) {
+            const aborted = signalAbort(ref.id);
+            observeCollab({ kind: 'work_unit_binding_failed', task_dir: taskDir, agent_id: ref.id,
+              work_unit_id: pending.unitId, reason: workspace.reason, abort_confirmed: aborted, at: Date.now() });
+            process.stderr.write(`Orbit: member ${ref.id} workspace binding failed: ${workspace.reason}; abort confirmed: ${aborted}\n`);
+            return;
+          }
+        }
         // ADR-009 fail-closed model gate. The AgentRegistry `registered`
         // window provably precedes any member provider work, and the resolved
         // model is observable on the ref here: if task.agentModelOverrides
@@ -1980,9 +2043,14 @@ export function installOmpExtension(pi, sdk) {
       // Orbit rebind. Use the declared workspace; isolation is not a sandbox.
       if (input.isolated === true || item.isolated === true)
         return { block: true, reason: 'An Orbit unit must run in its declared artifact_root; native isolated worktrees require an explicit workspace rebind' };
-      const actualCwd = await fs.realpath(ctx.cwd).catch(() => null);
-      if (!actualCwd || actualCwd !== unit.artifact_root)
-        return { block: true, reason: `Native task cwd does not match work unit ${unitId} artifact_root` };
+      // The Root session's own cwd is not the member's workspace and is never
+      // compared to it: after a workspace rebind it legitimately differs. The
+      // child session cwd is set and verified at the registration/bind window
+      // (applyMemberWorkspace); here the declared workspace only needs to be
+      // a real directory.
+      const artifactRoot = await fs.realpath(unit.artifact_root).catch(() => null);
+      if (!artifactRoot)
+        return { block: true, reason: `Work unit ${unitId} artifact_root is not a real workspace; rebind the workspace or declare a valid unit before dispatch` };
       selectedUnits.add(unitId);
       const hint = bound.state.delegation_hint;
       const models = hint?.recommendation
@@ -2061,12 +2129,121 @@ export function installOmpExtension(pi, sdk) {
       return { ok: false, reason: String(error?.message || error).slice(0, 300) };
     }
   }
+
+  // Rendered context-file entries inside the SDK system prompt parts. The
+  // entry format `<file path="...">...</file>` is stable across the bundled
+  // prompt variants (verified against installed OMP 18.3.4: both the
+  // <project-context> and <repo-rules> wrappers use it); the wrapper itself
+  // varies by model and is deliberately left untouched.
+  const CONTEXT_FILE_ENTRY = /<file path="[^"]*">\n[\s\S]*?\n<\/file>/g;
+  // A rebound member must not keep the spawn-time project instructions: the
+  // session's real cwd is already the unit artifact_root, but AGENTS context
+  // files are discovered only at session creation. The public
+  // before_agent_start hook (systemPrompt replace policy, chained in order)
+  // fires before the member's first request and every later preparation, so
+  // the context-file entries are rebuilt there from the SDK's own public
+  // discovery (discoverContextFiles) rooted at the current artifact_root.
+  // Only the file-entry set changes: user requirements, the member's task
+  // prompt, wrappers and every other part stay as they are — this context is
+  // instruction text, never a new authorization. A discovery failure is
+  // recorded durably and aborts preparation instead of running stale rules.
+  // One durable line per distinct gap per member: this hook fires at every
+  // prompt preparation, so repeat failures must not flood the evidence file.
+  const memberContextGaps = new Set();
+  // Members whose project context could not be rebuilt for the current round.
+  // A blocked member never runs a round on stale spawn-time instructions:
+  // prompt preparation is aborted, the provider gate aborts and the member
+  // tool gate stays closed until a later preparation succeeds — no first
+  // round on old context with a second-round repair.
+  const memberContextBlocked = new Set();
+  const noteContextGap = (agentId, binding, reason) => {
+    const key = `${agentId}:${reason}`;
+    if (memberContextGaps.has(key)) return;
+    memberContextGaps.add(key);
+    observeCollab({ kind: 'work_unit_context_failed', task_dir: binding?.taskDir ?? null,
+      agent_id: agentId, work_unit_id: binding?.unitId ?? null,
+      reason: String(reason).slice(0, 300), at: Date.now() });
+  };
+  pi.on('before_agent_start', async (event, ctx) => {
+    let sessionId = null;
+    try { sessionId = ctx.sessionManager?.getSessionId?.() ?? null; } catch { /* unowned */ }
+    if (!sessionId) return;
+    const agentId = agentIdFor(sessionId);
+    if (!agentId || !nativeMemberIds.has(agentId)) return;
+    const refuse = reason => {
+      memberContextBlocked.add(agentId);
+      noteContextGap(agentId, memberWorkUnits.get(agentId), reason);
+      signalAbort(agentId);
+      try { ctx.abort?.(); } catch { /* abort is advisory; the gates stay closed */ }
+      // before_agent_start has no block result in the public SDK. abort()
+      // invalidates promptGeneration synchronously; AgentSession checks it
+      // after this hook and discards preparation before any model request.
+      // Keep the independent provider/tool barriers for later continuations.
+      return undefined;
+    };
+    // A registration without a session does not mean there is no session at
+    // prompt time: attachSession emits no event, but the executor attaches
+    // before session.prompt. Use the actually attached session NOW to bind
+    // the real workspace before judging the context.
+    let binding = memberWorkUnits.get(agentId);
+    if (!binding?.workspaceRoot) {
+      let attached = null;
+      try { attached = sdk.AgentRegistry.global().get(agentId)?.session ?? null; } catch { attached = null; }
+      if (attached) {
+        const workspace = applyMemberWorkspace(agentId, attached);
+        if (!workspace.ok) return refuse(workspace.reason);
+        binding = memberWorkUnits.get(agentId);
+      }
+    }
+    if (typeof sdk.discoverContextFiles !== 'function')
+      return refuse('discoverContextFiles unavailable on the injected sdk');
+    if (!Array.isArray(event.systemPrompt))
+      return refuse('non-array systemPrompt: context entries not locatable');
+    const root = binding?.workspaceRoot;
+    if (!root) return refuse('workspace_root_not_bound_before_prompt');
+    let files;
+    try { files = await sdk.discoverContextFiles(root); } catch (error) {
+      return refuse(error?.message || error);
+    }
+    if (!Array.isArray(files))
+      return refuse('discoverContextFiles returned a non-array result');
+    const entries = files.map(file =>
+      `<file path="${file.path}">\n${typeof file.content === 'string' ? file.content : ''}\n</file>`).join('\n');
+    let found = false;
+    const replaced = event.systemPrompt.map(part => {
+      if (typeof part !== 'string' || !part.includes('<file path="')) return part;
+      let inserted = false;
+      return part.replace(CONTEXT_FILE_ENTRY, () => {
+        if (inserted) return '';
+        inserted = true;
+        found = true;
+        return entries;
+      });
+    });
+    // A prompt variant without a rendered context region carries no stale
+    // project instructions to remove; the real workspace instructions are
+    // still appended as their own clearly-marked part so they take effect.
+    if (!found && entries) replaced.push(`Project instructions discovered from the current workspace:\n${entries}`);
+    // This round carries the real workspace context (or provably needs none):
+    // the member is applicable again.
+    memberContextBlocked.delete(agentId);
+    if (!found && !entries) return;
+    return { systemPrompt: replaced };
+  });
   pi.on('before_provider_request', async (event, ctx) => {
     let sessionId = null;
     try { sessionId = ctx.sessionManager?.getSessionId?.() ?? null; } catch { /* unowned */ }
     if (!sessionId) return event.payload;
     const agentId = agentIdFor(sessionId);
     if (!agentId || !nativeMemberIds.has(agentId)) return event.payload;
+    // A member whose project context could not be rebuilt never starts a
+    // round on stale spawn-time instructions: abort and keep the gates
+    // closed until a before_agent_start preparation succeeds.
+    if (memberContextBlocked.has(agentId)) {
+      signalAbort(agentId);
+      try { ctx.abort?.(); } catch { /* abort is advisory; the member tool gate stays closed */ }
+      return event.payload;
+    }
     // OMP 18.2.8 emits `registered` with ref.session still null and attaches
     // the session later with NO registry event (agent-registry.ts ~290-304).
     // This hook fires with the session live and before provider dispatch, so
@@ -2080,6 +2257,23 @@ export function installOmpExtension(pi, sdk) {
         trackMemberTools(agentId, ref.session);
       }
     } catch { /* observation only; never block the request path */ }
+    // Late-attach workspace window: when the registration event saw no live
+    // session, the real runtime cwd is applied here instead — still before the
+    // member's first provider request. A member whose cwd cannot reach the
+    // current unit artifact_root is aborted and stays unbound; it must not
+    // reach a provider under an unknown workspace.
+    let workspaceSession = null;
+    try { workspaceSession = sdk.AgentRegistry.global().get(agentId)?.session ?? null; } catch { workspaceSession = null; }
+    if (workspaceSession) {
+      const workspace = applyMemberWorkspace(agentId, workspaceSession);
+      if (!workspace.ok) {
+        signalAbort(agentId);
+        try { ctx.abort?.(); } catch { /* the member tool gate remains closed */ }
+        observeCollab({ kind: 'work_unit_binding_failed', task_dir: memberTasks.get(agentId), agent_id: agentId,
+          work_unit_id: memberWorkUnits.get(agentId)?.unitId ?? null, reason: workspace.reason, at: Date.now() });
+        return event.payload;
+      }
+    }
     // Provider-request identity observation (before the pinned-model early
     // return, so unpinned members are covered too): the ACTUAL resolved
     // model at dispatch time, provider/id only. Deduplicated per identity
@@ -2245,6 +2439,8 @@ export function installOmpExtension(pi, sdk) {
     if (!nativeMemberIds.has(agentId)) return;
     const binding = memberWorkUnits.get(agentId);
     if (!binding?.bound) return { block: true, reason: 'Orbit member has no actual bound work unit; stop; Root must reconcile the host binding-failure record' };
+    if (memberContextBlocked.has(agentId))
+      return { block: true, reason: 'Orbit member project context is not rebuilt for the current round; stop; Root must reconcile or redispatch' };
     const report = runWorkUnit(binding.taskDir, 'read', { id: binding.unitId });
     const unit = report.unit;
     let state;

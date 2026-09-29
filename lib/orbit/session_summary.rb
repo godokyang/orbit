@@ -20,7 +20,7 @@ module Orbit
         state = JSON.parse(File.read(file))
         next unless state["format"] == "orbit-task-1" && state["project_root"] == root &&
                     state.dig("connection", "thread_id") == thread
-        summarize(dir, state)
+        summarize(dir, TaskView.current_state(TaskRecord.new(dir)))
       end.sort_by { |task| [task.fetch("created_at"), task.fetch("id")] }
       counts = %w[checks stale_checks manual_checks process_checks failed_checks jev_assessments
                   correction_sent findings members model_evidence_requests].to_h do |key|
@@ -63,7 +63,10 @@ module Orbit
                             .filter_map { |finding| finding["id"] }.uniq.length,
         "members" => Array(state["members"]).length,
         "checker_tokens_observed" => known,
-        "checker_tokens_complete" => checks.all? { |check| !TaskView.token_pair(check["usage"]).nil? } }
+        "checker_tokens_complete" => checks.all? { |check| !TaskView.token_pair(check["usage"]).nil? },
+        "resource_calls" => state.dig("usage", "resource_calls"),
+        "resource_call_gaps" => state.dig("usage", "resource_call_gaps"),
+        "native_call_observations" => state.dig("usage", "native_call_observations") }
     end
   end
 end

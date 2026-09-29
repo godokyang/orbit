@@ -5,8 +5,16 @@
 // receipts exactly once; this wrapper only keeps the reviewer's TypeScript
 // import path and export surface stable. See the .mjs for the identity,
 // usage-status, category-relationship and no-fabrication contract.
-export { modelCallReceipts, pendingCallReceipt, syncCallReceipts } from "../../plugins/model-call-receipts.mjs";
+export {
+	modelCallReceipts,
+	pendingCallReceipt,
+	syncCallReceipts,
+	credentialIdOf,
+	matchAccountIdentity,
+	accountScopeKey,
+} from "../../plugins/model-call-receipts.mjs";
 export type {
+	AccountIdentity,
 	LedgerReceiptMeta,
 	ModelCallReceipt,
 	ModelCallTurn,

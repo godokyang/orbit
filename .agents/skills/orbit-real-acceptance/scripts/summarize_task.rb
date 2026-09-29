@@ -28,6 +28,9 @@ summary = {
   "created_at" => state["created_at"],
   "workspace" => state["workspace"],
   "jev" => state["jev"],
+  "member_selections" => state["member_selections"],
+  "delegation_hint" => state["delegation_hint"],
+  "checker_selection" => state.dig("review", "selection"),
   "usage" => state["usage"],
   "members" => state.fetch("members", []).map do |member|
     member.slice("kind", "adapter", "thread_id", "model", "status", "reported_turn", "stop_confirmation")
@@ -47,9 +50,10 @@ summary = {
   "event_counts" => events.group_by { |event| event["type"] }.transform_values(&:length),
   "timeline" => events.filter_map do |event|
     next unless %w[jev_assessed evidence_requested delegation_assessed delegation_hint delegation_hint_followed
+                   member_selection_assessed delegation_recommendation_delivered checker_model_selected
                    member_result check_started check_finished correction_sent finalization_notice workspace_rebound stopped].include?(event["type"])
 
-    event.slice("at", "type", "number", "check", "score", "member_fit", "parallel_gain",
+    event.slice("at", "type", "number", "check", "score", "work_unit_id", "selection", "hint",
                 "thread_id", "status", "stale", "stale_reasons", "reason")
   end
 }

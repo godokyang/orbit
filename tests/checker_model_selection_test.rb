@@ -150,67 +150,51 @@ module CheckerModelSelectionTest
            "no fabricated cost ranking words")
   end
 
-  def cached_evidence_is_bounded_and_expiry_checked
+  # Mirror ModelEvidenceCache#lookup: an entry whose only measurements are
+  # legacy time/speed/local-sample signals (plus a historical cost_tier field)
+  # has no quality fact left and must never read valid (审计 C04/C06).
+  def time_only_evidence_never_reads_valid
     now = Time.utc(2026, 9, 25, 12, 0, 0)
-    metrics = {
-      "quality_reasoning" => { "value" => 9.0, "unit" => "score", "basis" => "vendor" },
-      "swe_bench_pro" => { "value" => 10.0, "unit" => "score", "basis" => "vendor" },
-      "code_arena_rank" => { "value" => 3.0, "unit" => "rank", "basis" => "vendor" },
-      "local_sample_latency_ms" => { "value" => 800.0, "unit" => "ms", "basis" => "local sample" }
-    }
-    20.times { |index| metrics["sample_#{index}"] = { "value" => index, "unit" => "u", "basis" => "b" } }
-    sources = (1..5).map { |index| "https://example.test/source-#{index}" }
-    entries = [
-      { "provider" => "pool", "model" => "one", "status" => "evidence", "retrieved_at" => "2026-09-25T10:00:00Z",
-        "valid_until" => "2026-09-26T10:00:00Z", "sources" => sources, "metrics" => metrics,
-        "cost_tier" => { "band" => "low", "confidence" => "medium", "basis" => "provider plan comparison" } },
-      { "provider" => "pool", "model" => "one", "status" => "evidence", "retrieved_at" => "2026-09-24T10:00:00Z",
-        "valid_until" => "2026-09-25T11:00:00Z", "sources" => ["https://example.test/old"],
-        "metrics" => { "quality_old" => { "value" => 1.0, "unit" => "u", "basis" => "b" } } },
-      { "provider" => "pool", "model" => "two", "status" => "unavailable", "retrieved_at" => "2026-09-25T10:00:00Z",
-        "valid_until" => "2026-09-26T10:00:00Z", "reason" => "no data" },
-      { "provider" => "pool", "model" => "three", "status" => "evidence", "retrieved_at" => "2026-09-20T10:00:00Z",
-        "valid_until" => "2026-09-21T10:00:00Z", "sources" => ["https://example.test/x"],
-        "metrics" => { "quality_x" => { "value" => 1.0, "unit" => "u", "basis" => "b" } } }
-    ]
-    entries.each { |entry| entry["reasoning"] = "unknown"; entry["billing_route"] = "unknown" }
-    bounded = Orbit::CheckerModelSelection.cached_evidence(models: %w[pool/one pool/two pool/three], entries: entries, now: now)
-    assert(bounded.keys == ["pool/one"], "only the unexpired evidence entry is used")
-    assert(bounded["pool/one"]["sources"] == sources, "the validated sources are passed through")
-    kept = bounded["pool/one"]["metrics"]
-    assert(kept.length == 24, "all validated metrics within the cache limit are passed through")
-    assert(%w[quality_reasoning swe_bench_pro code_arena_rank local_sample_latency_ms].all? { |name| kept.key?(name) },
-           "real quality/local-sample names survive; no wrong prefix allowlist drops them")
-    assert(!kept.key?("quality_old"), "the newest unexpired entry wins")
-    assert(bounded["pool/one"]["cost_tier"] == { "band" => "low", "confidence" => "medium", "basis" => "provider plan comparison" },
-           "a validated coarse tier stays on the cached fact and is not rewritten into a token price")
+    base = { "status" => "evidence", "retrieved_at" => "2026-09-25T10:00:00Z",
+             "valid_until" => "2026-09-26T10:00:00Z", "sources" => ["https://example.test/a"] }
+    time_only = base.merge(
+      "metrics" => { "local_sample_latency_ms" => { "value" => 800.0, "unit" => "ms", "basis" => "local sample" } },
+      "cost_tier" => { "band" => "low", "confidence" => "medium", "basis" => "provider plan comparison" }
+    )
+    assert(!Orbit::CheckerModelSelection.valid_evidence_entry?(time_only, now),
+           "a time-only record with a cost_tier is not a quality fact")
+
+    price_only = base.merge("metrics" => { "cost.per_million" => { "value" => 2.5, "unit" => "usd", "basis" => "listing" } })
+    assert(!Orbit::CheckerModelSelection.valid_evidence_entry?(price_only, now),
+           "a price fact alone is not a quality fact")
   end
 
-  def cached_evidence_rejects_malformed_entries
+  # A historical entry mixing legacy signals with real quality measurements
+  # stays usable: only the remaining legal quality metrics are consumed, and
+  # they still must pass the full structural rules.
+  def mixed_legacy_facts_consume_only_the_remaining_quality
     now = Time.utc(2026, 9, 25, 12, 0, 0)
-    good = { "value" => 9.0, "unit" => "score", "basis" => "vendor" }
-    base = { "provider" => "pool", "reasoning" => "unknown", "billing_route" => "unknown",
-             "status" => "evidence", "retrieved_at" => "2026-09-25T10:00:00Z",
-             "valid_until" => "2026-09-26T10:00:00Z", "sources" => ["https://example.test/a"],
-             "metrics" => { "quality_reasoning" => good } }
-    entries = [
-      base.merge("model" => "nosources", "sources" => []),
-      base.merge("model" => "badurl", "sources" => ["ftp://example.test/a"]),
-      base.merge("model" => "relative", "sources" => ["/not-absolute"]),
-      base.merge("model" => "novalue", "metrics" => { "quality_reasoning" => { "value" => nil, "unit" => "score", "basis" => "vendor" } }),
-      base.merge("model" => "nobasis", "metrics" => { "quality_reasoning" => { "value" => 9.0, "unit" => "score" } }),
-      base.merge("model" => "future", "retrieved_at" => "2026-09-27T10:00:00Z"),
-      base.merge("model" => "badtimestamp", "retrieved_at" => "yesterday"),
-      base.merge("model" => "expired", "valid_until" => "2026-09-25T11:00:00Z"),
-      base.merge("model" => "comparison", "metrics" => { "comparison.vs_other" => good }),
-      base.merge("model" => "badcost", "cost_tier" => { "band" => "cheap", "confidence" => "medium", "basis" => "x" }),
-      base.merge("model" => "ok")
-    ]
-    models = %w[pool/nosources pool/badurl pool/relative pool/novalue pool/nobasis pool/future
-                pool/badtimestamp pool/expired pool/comparison pool/badcost pool/ok]
-    bounded = Orbit::CheckerModelSelection.cached_evidence(models: models, entries: entries, now: now)
-    assert(bounded.keys == ["pool/ok"],
-           "a hand-edited entry without valid sources, values, timestamps or names is never handed to JEV")
+    quality = { "value" => 9.0, "unit" => "score", "basis" => "vendor" }
+    base = { "status" => "evidence", "retrieved_at" => "2026-09-25T10:00:00Z",
+             "valid_until" => "2026-09-26T10:00:00Z", "sources" => ["https://example.test/a"] }
+    mixed = base.merge(
+      "metrics" => { "quality_reasoning" => quality,
+                     "local_sample_latency_ms" => { "value" => 800.0, "unit" => "ms", "basis" => "local sample" } },
+      "cost_tier" => { "band" => "nonsense", "confidence" => "nonsense" }
+    )
+    assert(Orbit::CheckerModelSelection.valid_evidence_entry?(mixed, now),
+           "remaining legal quality survives; the legacy tier field is ignored, not validated")
+
+    broken_quality = base.merge(
+      "metrics" => { "quality_reasoning" => { "value" => 9.0, "unit" => "score" },
+                     "elapsed_seconds" => { "value" => 3.0, "unit" => "s", "basis" => "timer" } }
+    )
+    assert(!Orbit::CheckerModelSelection.valid_evidence_entry?(broken_quality, now),
+           "a structurally broken remaining metric still drops the whole entry")
+
+    comparison = base.merge("metrics" => { "comparison.vs_other" => quality })
+    assert(!Orbit::CheckerModelSelection.valid_evidence_entry?(comparison, now),
+           "cross-identity comparison claims are never a per-model quality fact")
   end
 
   def time_tiers_do_not_order_and_released_route_cost_can
@@ -265,9 +249,9 @@ module CheckerModelSelectionTest
     unavailable_first_choice_falls_through_without_leaving_the_pool
     low_fit_scores_choose_highest_runnable_candidate
     unavailable_catalog_does_not_guess_pool_membership
+    time_only_evidence_never_reads_valid
+    mixed_legacy_facts_consume_only_the_remaining_quality
     never_invents_evidence
-    cached_evidence_is_bounded_and_expiry_checked
-    cached_evidence_rejects_malformed_entries
     time_tiers_do_not_order_and_released_route_cost_can
     unknown_route_cost_does_not_promote_or_drop
     puts "CHECKER_MODEL_SELECTION_TEST_PASS"

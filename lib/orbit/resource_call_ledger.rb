@@ -36,6 +36,9 @@ module Orbit
     # price settlement — that uses a verified route fact with its own category
     # definitions.
     RELATIONSHIPS = %w[not_inferred source_declared].freeze
+    # The only verified source of a keyless account identity for a call: the
+    # SDK's stored OAuth account list, matched by the exact credential row id.
+    ACCOUNT_IDENTITY_SOURCES = %w[oauth_accounts_by_credential_id].freeze
     # Where a call id came from. A local id minted at the observed provider call
     # boundary is a real invocation label, not a provider id; the provider's own
     # id is kept separately when it exists.
@@ -67,7 +70,9 @@ module Orbit
                question_set_version: nil, error: nil, category_relationships: "not_inferred",
                relationship_note: nil, call_id_origin: nil, provider_response_id: nil,
                upstream_provider: nil, upstream_model: nil, usage_status: nil,
-               started_at: nil, completed_at: nil)
+               started_at: nil, completed_at: nil,
+               credential_id: nil, account_id: nil, org_id: nil, project_id: nil,
+               account_scope: nil, plan: nil, account_identity_source: nil)
       reported, usage_note = normalized_usage(usage)
       completeness = usage_status || (reported.nil? ? "unknown" : (usage_note ? "partial" : "reported"))
       completeness = "unknown" if reported.nil?
@@ -95,6 +100,21 @@ module Orbit
         "upstream_identity" => {
           "provider" => optional_text(upstream_provider), "model" => optional_text(upstream_model)
         },
+        # The stored credential row that actually served this call, when the SDK
+        # reported one, plus the keyless account identity resolved from that row.
+        # A session pin is a preference and is never used as attribution; a
+        # missing row (external key or unknown) stays nil and the identity stays
+        # unknown. No email, token or secret is ever recorded here.
+        "credential_id" => credential_number(credential_id),
+        "account_identity" => {
+          "account_id" => optional_text(account_id), "org_id" => optional_text(org_id),
+          "project_id" => optional_text(project_id),
+          "source" => account_identity_source.nil? ? nil : enum(account_identity_source, ACCOUNT_IDENTITY_SOURCES, "account identity source")
+        },
+        # Only a reliable observation is stored: an account scope the caller
+        # actually observed, and an observed plan. Neither is derived from a
+        # provider name or from a quota window.
+        "account_scope" => optional_text(account_scope), "plan" => optional_text(plan),
         "member_id" => optional_text(member_id), "work_unit_id" => optional_text(work_unit_id),
         "question_set_version" => optional_text(question_set_version), "error" => optional_text(error, MAX_ERROR),
         # Actual invocation observations, never the time this receipt was saved.
@@ -182,6 +202,10 @@ module Orbit
                                             incomplete: receipt["usage_status"] == "unknown"),
         member_id: receipt["member_id"], work_unit_id: receipt["work_unit_id"],
         attempt_id: receipt["attempt_id"], error: receipt["error"],
+        credential_id: receipt["credential_id"], account_id: receipt["account_id"],
+        org_id: receipt["org_id"], project_id: receipt["project_id"],
+        account_scope: receipt["account_scope"], plan: receipt["plan"],
+        account_identity_source: receipt["account_identity_source"],
         # The provider's own field names are stored as reported. The caller may
         # attach the source definition it used; it still never authorises a
         # derived total or price settlement here.
@@ -197,6 +221,39 @@ module Orbit
     # detached copy; mutating it never changes the ledger.
     def calls
       JSON.parse(JSON.generate(read.fetch("calls").values))
+    end
+
+    # Invocation coverage is separate from finalized accounting. Readers can
+    # refresh it after runtime exit without changing execution or state.json.
+    def native_coverage
+      coverage = { "calls_observed" => nil, "pending_calls" => 0, "gaps" => [] }
+      task_path = File.dirname(@path)
+      observations = File.join(task_path, "native-model-calls.json")
+      if File.file?(observations)
+        document = JSON.parse(File.read(observations))
+        unless document.is_a?(Hash) && document["schema_version"] == "orbit-native-model-calls-v1" &&
+               document["task_id"] == @task_id && document["calls"].is_a?(Hash) && document["gaps"].is_a?(Array) &&
+               document["calls"].values.all? { |call| call.is_a?(Hash) }
+          raise Error, "native call observations are corrupt or foreign"
+        end
+        coverage["calls_observed"] = document["calls"].length
+        coverage["pending_calls"] = document["calls"].values.count { |call| call["finalized"] != true }
+        coverage["gaps"] = document["gaps"].map(&:to_s)
+      end
+      failures = File.join(task_path, "native-model-call-gaps.jsonl")
+      if File.file?(failures)
+        File.foreach(failures) do |line|
+          entry = JSON.parse(line)
+          raise Error, "native receipt persistence gap is malformed" unless entry.is_a?(Hash) && entry["reason"].is_a?(String)
+
+          coverage["gaps"] << entry["reason"]
+        end
+      end
+      coverage["gaps"].uniq!
+      coverage
+    rescue JSON::ParserError, SystemCallError, Error => error
+      coverage["gaps"] << error.message
+      coverage
     end
 
     # Aggregates only matching roles, phases, execution identities, sources and
@@ -234,12 +291,25 @@ module Orbit
         "call_id_origins" => calls.filter_map { |call| call["call_id_origin"] }.tally,
         "calls_without_call_id_origin" => calls.count { |call| call["call_id_origin"].nil? },
         "unknown_upstream_model_calls" => calls.count { |call| call.dig("upstream_identity", "model").nil? },
+        "calls_with_credential_id" => calls.count { |call| call["credential_id"].is_a?(Integer) },
+        "unknown_account_identity_calls" => calls.count { |call| call.dig("account_identity", "account_id").nil? &&
+                                                             call.dig("account_identity", "org_id").nil? &&
+                                                             call.dig("account_identity", "project_id").nil? },
         "groups" => groups, "cost" => nil, "quota_consumption" => nil,
         "note" => "reported fields are never summed across categories; cost and quota stay unknown here"
       }
     end
 
     private
+
+    # A stored credential row id is a non-negative integer, or unknown. It is
+    # never filled in from a session pin or a list position.
+    def credential_number(value)
+      return nil if value.nil?
+      raise Error, "credential id must be a nonnegative integer" unless value.is_a?(Integer) && value >= 0
+
+      value
+    end
 
     def judgment_status(value)
       case value
@@ -297,6 +367,14 @@ module Orbit
                           (call["relationship_note"].is_a?(String) && call["relationship_note"].length <= MAX_TEXT)
       return false if call["attempt_id"] && !(call["attempt_id"].is_a?(String) && call["attempt_id"].length <= MAX_TEXT)
       return false if call["call_id_origin"] && !CALL_ID_ORIGINS.include?(call["call_id_origin"])
+      return false if call["credential_id"] && !(call["credential_id"].is_a?(Integer) && call["credential_id"] >= 0)
+      return false unless call["account_identity"].is_a?(Hash)
+      return false if call.dig("account_identity", "source") && !ACCOUNT_IDENTITY_SOURCES.include?(call.dig("account_identity", "source"))
+      %w[account_scope plan].each do |field|
+        next if call[field].nil?
+
+        return false unless call[field].is_a?(String) && call[field].length <= MAX_TEXT
+      end
       return false unless call["upstream_identity"].is_a?(Hash)
       return false unless observed_time(call["started_at"]) == call["started_at"] &&
                           observed_time(call["completed_at"]) == call["completed_at"]

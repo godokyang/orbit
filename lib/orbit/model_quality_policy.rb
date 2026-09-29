@@ -31,9 +31,9 @@ module Orbit
     INPUT_VERSION = "jev-selection-input-2"
     DECISION_VERSION = "orbit-quality-decision-2"
     OBSERVATION_QUESTION_SET = "jev-observation-2"
-    DELEGATION_QUESTION_SET = "jev-delegation-2"
-    CANDIDATE_QUESTION_SET = "jev-candidates-2"
-    CHECKER_QUESTION_SET = "jev-checker-task-fit-3"
+    DELEGATION_QUESTION_SET = "jev-delegation-4"
+    CANDIDATE_QUESTION_SET = "jev-candidates-4"
+    CHECKER_QUESTION_SET = "jev-checker-task-fit-5"
     SCHEMA_VERSION = "orbit-selection-calibration-v2"
     DEFAULT_PATH = File.join(__dir__, "data", "jev-selection-calibration.json")
     SUPPORTED_PROFILE = "bounded_git_delivery_v1"
@@ -58,16 +58,16 @@ module Orbit
     MAX_TEXT = 4000
 
     HANDOFF_TEXT = "Is there a bounded work unit in the effective requirements or remaining work that an authorized member could deliver by handoff, including a serial handoff where the main agent waits and then integrates? Do not require simultaneous work on another surface. Use the instruction, basis, amendments and any supplied work unit; do not invent a work unit that is not in the input. Count only a clear result whose dependencies the handoff can satisfy. Do not count trivial, overlapping, preference-only or dependency-blocked work. Do not use speed, latency, elapsed time, tokens per second or price. Member availability is enforced separately, so unknown availability does not lower this probability."
-    MEMBER_TASK_FIT_TEXT = "Given the callable member options, each option's exact sourced evidence, and any separately labeled model-level catalog prior: is at least one member likely to meet the work unit's acceptance bar using only information that can be passed in a bounded handoff? A catalog prior may carry coding, agentic or intelligence with its catalog id, measurement limits and dates. It is an input to this judgment. Do not add it to your probability, average it with exact evidence, or treat an index as this task's measured success rate. Exact evidence and the catalog prior answer different questions; if they conflict, task fit is not established. Do not infer capability from a model, provider or brand name, or from an identity matching the caller. Missing, stale or unsourced support is unknown, not incapacity and not a positive signal. Do not judge speed, latency or price."
-    CANDIDATE_TASK_FIT_TEXT = "Is THIS candidate likely to meet the work unit's acceptance bar using only information that can be passed in a bounded handoff, judged from this candidate's exact sourced evidence, any separately labeled model-level catalog prior, and the task requirements? Serial handoff is allowed. A catalog prior may carry coding, agentic or intelligence with its catalog id, measurement limits and dates. Do not add that prior to your probability, average it with exact evidence, or treat an index as this task's measured success rate. If exact evidence and the catalog prior conflict, task fit is not established. Do not infer capability from the model, provider or brand name, or from an identity matching the caller. Missing, stale or unsourced support is unknown, not incapacity and not a positive signal. Do not judge speed, latency or price."
-    CHECKER_TASK_FIT_TEXT = "Would this checker model likely provide a useful independent read-only review of the current task and catch substantive mistakes, judged from the supplied exact sourced facts and any separately labeled model-level catalog prior? The catalog prior is not proof of this OMP route's reasoning variant or price. Do not add it to your probability or average it with exact evidence. A single benchmark number, model name or provider name cannot establish task fit. Insufficient evidence is uncertainty, not incapacity. Do not judge speed, latency or end-to-end duration."
+    MEMBER_TASK_FIT_TEXT = "Do the supplied task-related quality facts support including at least one callable member as a reasonable option for this bounded, verifiable work unit? Judge the relationship between the work and each option's sourced exact evidence or labeled model-level catalog prior. A relevant mapped catalog prior can support an initial handoff without exact-route success samples. Record unknown reasoning variants and measurement dates as limitations; they do not by themselves erase model-level support. An observed unmet task requirement or unresolved relevant conflict prevents positive support. This judges an evidence-supported option, not future delivery success or a reliability certificate. Do not infer capability from names, add indices to the answer, or judge speed or price."
+    CANDIDATE_TASK_FIT_TEXT = "Do the supplied task-related quality facts support including THIS candidate as a reasonable option for the bounded, verifiable work unit? Judge the relationship between the work and this candidate's sourced exact evidence or labeled model-level catalog prior. A relevant mapped catalog prior can support an initial handoff without exact-route success samples. Serial handoff is valid. Unknown reasoning variants and measurement dates remain limitations; they do not by themselves erase model-level support. An observed unmet task requirement or unresolved relevant conflict prevents positive support. This judges an evidence-supported option, not future delivery success or a reliability certificate. Do not infer capability from names, add indices to the answer, or judge speed or price."
+    CHECKER_TASK_FIT_TEXT = "Do the supplied task-related quality facts support including THIS checker as a reasonable option for independent read-only review of the bounded current task? Judge the relationship between the review requirements and sourced exact evidence or a labeled model-level catalog prior. Relevant mapped coding, agentic or intelligence facts may support an initial review without exact-route success samples. Unknown reasoning variants and measurement dates remain limitations. An observed unmet review requirement or unresolved relevant conflict prevents positive support. This judges an evidence-supported review option, not future defect detection or a reliability certificate. Do not infer capability from names, add indices to the answer, or judge speed or price."
 
     HANDOFF_TRUE = "The input describes a concrete work unit with its own result that can be handed off serially or while other work continues"
     HANDOFF_FALSE = "The remaining work is coupled, trivial, dependency-blocked, or no bounded handoff is described"
-    FIT_TRUE = "The supplied facts support task fit for this work unit without treating a catalog index as a measured success rate"
-    FIT_FALSE = "The supplied facts do not support task fit, they conflict, or the support is missing, stale or unsourced"
-    CHECKER_TRUE = "The supplied facts and this task's requirements support a useful independent review"
-    CHECKER_FALSE = "The supplied facts do not support task fit, they conflict, or they show this model is poorly suited"
+    FIT_TRUE = "Usable task-related catalog evidence or exact sourced quality evidence supports a reasonable handoff for this bounded, verifiable work unit. Exact route success samples are optional; this is a heuristic, not a reliability certificate."
+    FIT_FALSE = "Neither usable task-related catalog support nor exact sourced quality support is supplied, relevant sources conflict, or an observed capability cannot meet the task. Missing exact route evidence alone does not establish this outcome."
+    CHECKER_TRUE = "Usable task-related catalog evidence or exact sourced quality evidence supports a useful independent review of this bounded task. Exact route success samples are optional; this is a heuristic, not a reliability certificate."
+    CHECKER_FALSE = "Neither usable task-related catalog support nor exact sourced quality support is supplied, relevant sources conflict, or the model cannot review this task. Missing exact route evidence alone does not establish this outcome."
 
     PRIOR_KEYS = %w[model_overview_prior catalog_prior overview_prior].freeze
     EVIDENCE_KEYS = %w[evidence exact_evidence].freeze
@@ -122,9 +122,10 @@ module Orbit
     def candidate_questions(candidates)
       Array(candidates).each_with_index.to_h do |candidate, index|
         agent = candidate.is_a?(Hash) ? candidate["agent"] : nil
-        provider = candidate.is_a?(Hash) ? candidate["provider"] : nil
+        provider = candidate.is_a?(Hash) ? (candidate["provider"] || candidate.dig("identity", "provider")) : nil
         model = candidate.is_a?(Hash) ? candidate["model"] : nil
-        label = "candidate #{index} (agent #{agent}, model #{provider}/#{model}): "
+        model_id = provider.to_s.empty? || model.to_s.start_with?("#{provider}/") ? model : "#{provider}/#{model}"
+        label = "candidate #{index} (agent #{agent}, model #{model_id}): "
         ["candidate_#{index}_task_fit", noul_question(label + CANDIDATE_TASK_FIT_TEXT, FIT_TRUE, FIT_FALSE)]
       end
     end
@@ -481,7 +482,7 @@ module Orbit
                              usage_source: value["usage_source"] || "recorded_calls", at: at)
       return [nil, "route estimate is #{result['status']}: #{result['reason']}"] unless result["status"] == "priced"
 
-      [result, nil]
+      [result.merge("source_fact" => fact.document, "prediction" => value["prediction"]), nil]
     rescue RouteResourceFacts::Error, ArgumentError => error
       [nil, "route fact did not validate: #{error.message}"]
     end
@@ -489,7 +490,8 @@ module Orbit
     def order_result(items, positive:, basis:, cost_comparison:, reason:, cost_notes: [], positive_ids: [], cost_estimates: {})
       visible = cost_estimates.filter_map do |id, estimate|
         next unless estimate.is_a?(Hash) && estimate["status"] == "priced"
-        [id, estimate.slice("status", "amount", "currency", "account_scope", "route", "valid_at", "usage_source", "categories")]
+        [id, estimate.slice("status", "amount", "currency", "account_scope", "route", "valid_at", "usage_source", "categories",
+                            "source_fact", "prediction")]
       end.to_h
       { "version" => DECISION_VERSION, "positive" => positive, "basis" => basis,
         "ordered_ids" => items.map { |item| item["id"] }, "positive_ids" => positive_ids,

@@ -1,6 +1,6 @@
 # Real acceptance scenarios
 
-Every scenario starts the same way: the external Controller uses Herdr to run the installed `orbit omp` command inside a temporary fixture repository, waits for that OMP Root to become idle, then sends the task as a user prompt. Use small fixtures whose expected behavior is obvious from their task file. Keep production and test surfaces disjoint so a member ticket is independently verifiable, and confirm the single-host layout first: plain `omp` loads no Orbit extension and only `orbit omp` provides the Orbit tool.
+Every scenario starts the same way: the external Controller uses Herdr to run the installed `orbit omp` command inside a temporary fixture repository, waits for that OMP Root to become idle, then sends the task as a user prompt. Use small fixtures whose expected behavior is obvious from their task file. A member owns a bounded verifiable result; serial handoff followed by Root integration is valid. Confirm the single-host layout first: plain `omp` loads no Orbit extension and only `orbit omp` provides the Orbit tool.
 
 The following do not satisfy a scenario on their own:
 
@@ -17,11 +17,12 @@ The following do not satisfy a scenario on their own:
 - Pass: JEV may assess structure, but there is no evidence request, no final hint, and no native `task` member dispatched or registered.
 - Record checker cost even when the implementation is tiny.
 
-## Parallel positive
+## Bounded handoff positive
 
-- Two independent production modules with existing focused tests.
-- Root explicitly owns A; the only valid member ticket is complete B plus its focused test.
-- Pass: structural score reaches the current contract threshold; current model evidence is used; member-fit and parallel-gain reach their thresholds; exactly one hint is emitted before dispatch; Root explicitly dispatches through OMP-native `task`; Orbit registers the member before its model work; the result returns through the native `hub`; Root integrates and runs combined verification.
+- A bounded production module and a Root integration responsibility with focused verification. Dependencies can make the handoff serial.
+- Root retains integration responsibility; the member ticket contains its result, allowed scope, dependencies, acceptance and escalation conditions, bound to the current request and artifact root.
+- Pass for the recommendation path: a reviewed calibration matches the real task profile and actual Jev model/question/input versions; current relevant quality facts support handoff and candidate fit; a final hint identifies the unit and candidate before dispatch. Root autonomously dispatches through OMP-native `task`; Orbit registers the member before its model work; the result returns through the native `hub`; Root integrates and runs combined verification. No speed or parallel-gain score is used.
+- Facts-only Root self-selection can prove dispatch and collection mechanics, but does not pass the reviewed recommendation criterion. Missing cost does not require extra user permission and is never reported as free.
 - While a member is `starting` or `working`, no second automatic hint may be emitted.
 - A real checker defect must be corrected and resolved before stop. A no-finding manual final review should wake Root once to stop, not start a short recheck loop.
 
