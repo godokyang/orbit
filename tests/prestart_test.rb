@@ -53,19 +53,41 @@ module PrestartTest
     [Orbit::PrestartClassifier.new(project_root: project, provider_for: ->(_model) { spy }), spy]
   end
 
-  def calibrated(project, thresholds = { "execution_authorized" => 0.8, "independent_check_benefit" => 0.7 })
-    FileUtils.mkdir_p(File.join(project, ".orbit"))
-    File.write(File.join(project, ".orbit", "jev-entry.json"), JSON.generate(
-      "model" => "jev-1.13.0", "thresholds" => thresholds, "calibrated_samples" => 3
-    ))
+  # These scripted releases test binding and branching, not live calibration.
+  def calibration_document(thresholds = { "execution_authorized" => 0.8, "delegation_value" => 0.7, "supervision_value" => 0.7 })
+    cases = [
+      ["serial", "positive", "Implement the bounded module after receiving its interface.", answered(0.99, 0.01, delegation: 0.99)],
+      ["audit", "positive", "Deliver a read-only audit report against the stated requirements.", answered(0.99, 0.99)],
+      ["discussion", "negative", "Explain what this module does.", answered(0.01, 0.99, delegation: 0.99)],
+      ["failed", "failure", "Implement the module.", Orbit::JudgmentResult.unavailable(provider: "typesafe", reason: "scripted HTTP failure")],
+      ["unknown", "missing_evidence", "Continue without an attributable original requirement.", answered(0.01, 0.01)]
+    ]
+    Orbit::EntryCalibration.binding.merge(
+      "model" => "jev-1.13.0", "thresholds" => thresholds,
+      "release" => { "reason" => "Scripted fixture only; never installed as real release evidence",
+                     "scope" => "entry fixture", "reviewed_by" => "test fixture", "reviewed_at" => "2026-09-29T00:00:00Z" },
+      "samples" => cases.map do |id, kind, instruction, judgment|
+        { "id" => id, "kind" => kind, "mode" => "model_backed",
+          "expected_decision" => kind == "positive" ? "start" : "root_decides",
+          "state" => { "input_version" => Orbit::PrestartClassifier::INPUT_VERSION,
+                       "instruction" => instruction, "instruction_truncated" => false, "git" => {} },
+          "judgment" => judgment.to_h }
+      end
+    )
   end
 
-  def answered(authorized, benefit)
+  def calibrated(project, thresholds = { "execution_authorized" => 0.8, "delegation_value" => 0.7, "supervision_value" => 0.7 })
+    FileUtils.mkdir_p(File.join(project, ".orbit"))
+    File.write(File.join(project, ".orbit", "jev-entry.json"), JSON.generate(calibration_document(thresholds)))
+  end
+
+  def answered(authorized, benefit, delegation: 0.01, model: "jev-1.13.0")
     Orbit::JudgmentResult.answered(
       answers: {
         "execution_authorized" => { "probability_true" => authorized },
-        "independent_check_benefit" => { "probability_true" => benefit }
-      }, provider: "typesafe", actual_model: "jev-1.13.0"
+        "delegation_value" => { "probability_true" => delegation },
+        "supervision_value" => { "probability_true" => benefit }
+      }, provider: "typesafe", actual_model: model
     )
   end
 
@@ -105,12 +127,24 @@ module PrestartTest
            "an explicit refusal to use Orbit cannot enter either automatic start path")
     assert(klass.classify("不用Orbit，完成这个改动") == "orbit_opt_out",
            "a direct refusal without a second 用 also bypasses automatic start")
+    assert(klass.classify("不要用‘Orbit’，完成这个改动") == "orbit_opt_out",
+           "quoting the product name cannot hide the user's opt-out")
+    assert(klass.classify('不要用“Orbit”，完成这个改动') == "orbit_opt_out",
+           "quoting the product name alone cannot hide the user's opt-out")
+    assert(klass.classify("Don't use Orbit and don't change unrelated files; implement this feature.") == "orbit_opt_out",
+           "English opt-out and apostrophes cannot be swallowed as quoted commands")
     assert(klass.classify("怎么用orbit实现登录页？") == "discussion",
            "asking how to use orbit for real work is a question, not authorization")
     assert(klass.classify("如何理解“记得用 Orbit 完成这次修改”这句话？") == "discussion",
            "quoting the instrument instruction in a question does not start work")
     assert(klass.classify("什么是分布式锁？只是问问") == "discussion", "a read-only question never starts")
     assert(klass.classify("解释一下这段代码的结构，不要修改") == "discussion", "an explicit read-only request never starts")
+    ["解释这句：用 Orbit 启动任务", "解释『使用 Orbit 受控执行』的意思",
+     "Explain 'use Orbit to execute this'", "请解释下面的例子：\n```\n使用 Orbit 受控执行\n```"].each do |text|
+      assert(klass.classify(text) == "discussion", "quoted instructions cannot enter the direct controlled path")
+    end
+    assert(klass.classify("请只读审计 lib 并交付缺陷报告，不要修改文件").nil?,
+           "a read-only audit deliverable is eligible for judgment rather than dismissed as discussion")
     assert(klass.classify("解释一下这段代码的结构然后修复它").nil?,
            "a discussion lead with real work stays uncertain")
     assert(klass.classify("请修复解析器，但不要修改其他文件").nil?,
@@ -119,30 +153,18 @@ module PrestartTest
     assert(klass.classify("   ") == "discussion", "an empty message is not work")
   end
 
-  def check_uncertain_uses_built_in_calibration
+  def check_uncalibrated_requests_stay_with_root
     with_project do |project, _home|
-      # No project override: the built-in gate reflects real short-task
-      # false positives without matching on their wording.
       advisor, spy = classifier(project, [answered(0.95, 0.9)])
       decision = advisor.decide("implement the login page and verify it end to end")
-      assert(decision["decision"] == "start", "a clear positive auto-starts under the built-in calibration")
-      assert(spy.requests.length == 1 && spy.requests.first.model == Orbit::EntryCalibration::BUILT_IN.fetch("model"),
-             "the built-in default pins the calibrated versioned model")
-
-      advisor, spy = classifier(project, [answered(0.79, 0.9)])
-      assert(advisor.decide("implement the login page")["decision"] == "root_decides",
-             "below the 0.80 authorization threshold stays with Root")
-      advisor, spy = classifier(project, [answered(0.9, 0.74)])
-      assert(advisor.decide("change the version and push")["decision"] == "root_decides",
-             "an observed low-benefit short task stays outside automatic Orbit review")
-
-      advisor, spy = classifier(project)
-      decision = advisor.decide("implement the login page")
-      assert(decision["decision"] == "root_decides" && decision["reason"].include?("unavailable") &&
-             spy.requests.length == 1, "an unavailable judgment fails closed to Root")
+      assert(decision["decision"] == "root_decides" && spy.requests.empty?,
+             "an uncalibrated new question cannot use old thresholds or call the provider for an automatic action")
 
       decision = advisor.decide("请使用 orbit 受控执行：实现 X")
       assert(decision["decision"] == "start", "the explicit path still starts without any judgment")
+      decision = advisor.decide("继续")
+      assert(decision["classification"] == "unattributed_continuation" && decision["decision"] == "root_decides" &&
+             spy.requests.empty?, "an unbound continuation does not invent an earlier requirement")
     end
   end
 
@@ -151,10 +173,14 @@ module PrestartTest
       FileUtils.mkdir_p(File.join(project, ".orbit"))
       file = File.join(project, ".orbit", "jev-entry.json")
       {
-        "an alias model" => { "model" => "jev-latest", "thresholds" => { "execution_authorized" => 0.8, "independent_check_benefit" => 0.7 }, "calibrated_samples" => 5 },
-        "zero thresholds" => { "model" => "jev-1.13.0", "thresholds" => { "execution_authorized" => 0.0, "independent_check_benefit" => 0.7 }, "calibrated_samples" => 5 },
-        "missing threshold question" => { "model" => "jev-1.13.0", "thresholds" => { "execution_authorized" => 0.8 }, "calibrated_samples" => 5 },
-        "no sample count" => { "model" => "jev-1.13.0", "thresholds" => { "execution_authorized" => 0.8, "independent_check_benefit" => 0.7 } }
+        "legacy count-only release" => { "model" => "jev-1.13.0", "calibrated_samples" => 6 },
+        "an alias model" => calibration_document.merge("model" => "jev-latest"),
+        "different question content" => calibration_document.merge("question_digest" => "old-digest"),
+        "different input projection" => calibration_document.merge("input_version" => "old-input"),
+        "zero thresholds" => calibration_document.merge("thresholds" => { "execution_authorized" => 0.0 }),
+        "missing failure evidence" => calibration_document.merge("samples" => calibration_document["samples"].reject { |sample| sample["kind"] == "failure" }),
+        "no release reason" => calibration_document.merge("release" => {}),
+        "unsupported labels" => calibration_document.merge("thresholds" => { "execution_authorized" => 1.0, "delegation_value" => 1.0, "supervision_value" => 1.0 })
       }.each do |label, document|
         File.write(file, JSON.generate(document))
         advisor, spy = classifier(project)
@@ -178,9 +204,18 @@ module PrestartTest
       assert(spy.requests.length == 1 && spy.requests.first.model == "jev-1.13.0",
              "the judgment uses the pinned versioned model")
       trace = decision.fetch("trace")
-      assert(trace["question_set_version"] == "orbit-entry-2" && trace["actual_model"] == "jev-1.13.0" &&
+      assert(trace["question_set_version"] == "orbit-entry-3" && trace["actual_model"] == "jev-1.13.0" &&
              trace.dig("probabilities", "execution_authorized", "probability_true") == 0.9,
-             "the trace records the question set, actual model and probabilities")
+             "the trace records the new question set, actual model and probabilities")
+      assert(trace["question_digest"] == Orbit::PrestartClassifier::QUESTION_DIGEST && trace.dig("calibration", "sample_count") == 5,
+             "the automatic decision retains the release and content binding")
+      advisor, spy = classifier(project, [answered(0.95, 0.01, delegation: 0.9)])
+      assert(advisor.decide("implement the module after the interface is fixed")["decision"] == "start",
+             "serial handoff alone can provide entry value without independent supervision")
+      advisor, spy = classifier(project, [answered(0.95, 0.9, model: "jev-1.14.0")])
+      decision = advisor.decide("deliver a read-only audit report")
+      assert(decision["decision"] == "root_decides" && decision.dig("trace", "actual_model") == "jev-1.14.0" &&
+             !decision["trace"].key?("probabilities"), "a changed actual model cannot inherit the release")
 
       advisor, spy = classifier(project, [answered(0.95, 0.4)])
       decision = advisor.decide("implement the login page and verify it end to end")
@@ -196,7 +231,7 @@ module PrestartTest
 
   # Kickoff ②: plain imperative execution requests without an orbit mention
   # must reach the calibrated judgment path; the revised execution_authorized
-  # question (orbit-entry-2) counts a direct imperative order as
+  # question (orbit-entry-3) counts a direct imperative order as
   # authorization. Scripted spy scores keep this deterministic — the real
   # model's scores are verified live by Root, not asserted here.
   def check_imperative_requests_reach_calibrated_judgment
@@ -210,12 +245,12 @@ module PrestartTest
       assert(advisor.decide("别用orbit，完成这一项")["decision"] == "no_start" && spy.requests.empty?,
              "the user's Orbit opt-out overrides even otherwise qualifying automatic work")
 
-      calibrated(project, { "execution_authorized" => 0.8, "independent_check_benefit" => 0.8 })
+      calibrated(project, { "execution_authorized" => 0.8, "delegation_value" => 0.8, "supervision_value" => 0.8 })
       advisor, spy = classifier(project, [answered(0.81, 0.84)])
       decision = advisor.decide(request)
       assert(decision["decision"] == "start" && spy.requests.length == 1 &&
-             spy.requests.first.question_set_version == "orbit-entry-2",
-             "an imperative request clearing both unchanged thresholds auto-starts under the revised question set")
+             spy.requests.first.question_set_version == "orbit-entry-3",
+             "an imperative request uses the current released three-question set")
 
       advisor, spy = classifier(project, [answered(0.69, 0.84)])
       decision = advisor.decide(request)
@@ -361,7 +396,7 @@ module PrestartTest
 
   def run
     check_classification_boundaries
-    check_uncertain_uses_built_in_calibration
+    check_uncalibrated_requests_stay_with_root
     check_invalid_calibration_fails_closed
     check_calibrated_judgment_thresholds
     check_imperative_requests_reach_calibrated_judgment

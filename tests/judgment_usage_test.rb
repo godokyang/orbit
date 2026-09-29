@@ -129,7 +129,7 @@ module JudgmentUsageTest
     classifier = Orbit::PrestartClassifier.new(
       project_root: "/unused-scripted-fixture", provider_for: ->(_model) { provider },
       calibration_loader: -> { { "model" => "jev-requested", "thresholds" =>
-        { "execution_authorized" => 0.8, "independent_check_benefit" => 0.8 } } }
+        { "execution_authorized" => 0.8, "delegation_value" => 0.8, "supervision_value" => 0.8 } } }
     )
     decision = classifier.decide("Implement the requested feature and verify the deliverable.")
     check(decision["decision"] == "root_decides" && !decision["trace"].key?("probabilities"),

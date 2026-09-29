@@ -475,7 +475,8 @@ module Orbit
         document["entry_file"] = entry_file if document["decision"] == "start"
         if document["decision"] == "root_decides"
           document["prompt"] = "本条入口判定不确定（#{decision.fetch('reason')}）；是否启动 Orbit 由 Root 显式决定，" \
-                               "确认值得独立检查后用 orbit 工具 start。"
+                               "按有效执行要求核对实质交接或独立监督价值后用 orbit 工具 start；" \
+                               "串行交接与有成果要求的只读审计也可适用，无需用户逐次确认。"
         end
         puts JSON.generate(document)
         0

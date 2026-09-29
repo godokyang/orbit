@@ -1,6 +1,8 @@
 # frozen_string_literal: true
 
 require "json"
+require "digest"
+require "time"
 
 require_relative "jev_advisor"
 require_relative "judgment"
@@ -22,34 +24,38 @@ module Orbit
   # the uncertain path fails closed to an explicit Root decision with one
   # short prompt.
   class PrestartClassifier
-    SCHEMA_VERSION = 1
+    SCHEMA_VERSION = 2
     # Deterministic classification rules; bump when wording or patterns move.
-    RULE_VERSION = "orbit-entry-rules-2"
-    QUESTION_SET_VERSION = "orbit-entry-2"
+    RULE_VERSION = "orbit-entry-rules-3"
+    QUESTION_SET_VERSION = "orbit-entry-3"
+    INPUT_VERSION = "orbit-entry-input-2"
+    DECISION_VERSION = "orbit-entry-decision-1"
     CALIBRATION_RELATIVE_PATH = ".orbit/jev-entry.json"
     PROMPT_BUDGET = 8000
     EXCERPT_LIMIT = 300
 
     # Entry judgment questions (binary). Wording follows the contract; thresholds
     # come only from a calibrated configuration and are never invented here.
-    # orbit-entry-2 revises execution_authorized after the recorded miss on a
-    # plain imperative request (「补做 S1 的全程序终检…」 scored 0.69 and was
-    # started manually by Root 42s later, kickoff ②): a direct imperative
-    # order to the agent authorizes execution even without permission words.
-    # independent_check_benefit is unchanged — its observed scores separated
-    # the recorded samples correctly; thresholds stay with the calibration.
+    # Entry value has two independent paths: bounded handoff OR supervision.
+    # No model speed, duration or presumed price appears in these questions.
     ENTRY_QUESTIONS = {
       "execution_authorized" => {
-        "instruction" => "Has the user asked the agent to actually carry out this request now, rather than merely discussing, comparing or asking about options? A direct imperative order to do concrete work — such as an instruction to build, redo, complete, review or close something — authorizes execution even when it never says \"authorize\", \"go ahead\" or \"you may\". A question, a hypothetical, a request for an opinion or an explanation is not authorization to execute.",
-        "true_criterion" => "The message instructs the agent to actually do this work now, including a plain imperative order",
-        "false_criterion" => "The message discusses, asks about or compares options without instructing the agent to execute now"
+        "instruction" => "Does the user's current message ask the agent to carry out concrete work or deliver a verifiable result now? Direct commands and polite action requests such as 'can you fix this' authorize the requested work without permission words. A requested read-only audit with a report is work. Discussion, hypothetical options, quoted commands, product mentions and code examples do not authorize their contents. A bare 'continue' without an attributable earlier requirement is insufficient; do not infer a goal from Git changes.",
+        "true_criterion" => "The current user request authorizes concrete work or a verifiable deliverable now",
+        "false_criterion" => "The message only discusses or quotes work, or the requested work cannot be attributed to an authorized requirement"
       },
-      "independent_check_benefit" => {
-        "instruction" => "Would an independent review of the resulting artifact against this request likely provide real value for this request? Trivial, purely informational or read-only requests gain nothing from an artifact review.",
-        "true_criterion" => "An independent artifact review would likely find real omissions or errors for this request",
-        "false_criterion" => "The request is read-only, trivial or has no meaningful artifact to review"
+      "delegation_value" => {
+        "instruction" => "Does this request contain substantive work with a bounded result and handoff that a suitable execution member could perform instead of part of Root's work? Serial handoff can qualify; Root need not continue another task in parallel. Consider necessary context, dependencies, integration and verification. Do not infer member capability from its name, require every model to have local success samples, predict elapsed time or assume token or cash savings. Candidate availability, fit and real route resources are evaluated separately when selecting a member.",
+        "true_criterion" => "Substantive bounded work could replace part of Root's execution through a practical handoff",
+        "false_criterion" => "Work is trivial, overlapping, lacks a usable handoff or cannot yet satisfy its dependencies"
+      },
+      "supervision_value" => {
+        "instruction" => "Would persistent requirements, scope control and independent verification provide material value for this requested deliverable by detecting omissions, unsupported claims, drift, boundary violations or forgotten constraints? A single execution surface or a read-only audit report can qualify. Conceptual discussion and low-risk reversible edits with clear program verification usually do not. Do not judge by model speed, elapsed time or the need for parallel work.",
+        "true_criterion" => "The deliverable has substantive verification or scope risks that controlled supervision could help address",
+        "false_criterion" => "There is no requested deliverable, or supervision adds little value over direct verifiable work"
       }
     }.freeze
+    QUESTION_DIGEST = Digest::SHA256.hexdigest(JSON.generate(ENTRY_QUESTIONS)).freeze
 
     # High-precision markers only: a false "explicit" starts a task nobody
     # asked for, so the word orbit alone is never enough and neither is an
@@ -85,22 +91,24 @@ module Orbit
 
     # A message that forbids Orbit use is a user opt-out: do not send it
     # through the automatic gate even if the requested work would qualify.
-    PROHIBITED_ORBIT_USE =
-      /(?:(?:不要|别|无需|不再|别再)[ \t]*(?:再|来)?[ \t]*(?:用|使用)|不用)[ \t]*[^\p{P}\n]{0,10}?orbit(?![A-Za-z0-9_.-])/i.freeze
+    PROHIBITED_ORBIT_USE = Regexp.union(
+      /(?:(?:不要|别|无需|不再|别再)[ \t]*(?:再|来)?[ \t]*(?:用|使用)|不用)[ \t]*[^\p{P}\n]{0,10}?orbit(?![A-Za-z0-9_.-])/i,
+      /\b(?:don['’]t|do[ \t]+not|never)[ \t]+(?:use|run)[ \t]+orbit(?![A-Za-z0-9_.-])/i
+    ).freeze
 
     # Execution verbs that turn a leading "explain …" into real work.
     EXECUTION_MARKERS = [
-      /修复|实现|修改|创建|添加|删除|重构|部署|完成|交付|写[一个个]|跑[一一]|执行/,
-      /\b(implement|fix|modify|create|add|delete|remove|refactor|deploy|write|build|migrate)\b/i
+      /修复|实现|修改|创建|添加|删除|重构|部署|完成|交付|写[一个个]|跑[一一]|执行|审计|复核|审查|核验/,
+      /\b(implement|fix|modify|create|add|delete|remove|refactor|deploy|write|build|migrate|audit|review|verify)\b/i
     ].freeze
 
     # A clearly-discussion message asks an interrogative question or asks for
     # read-only treatment. A question mark alone is NOT sufficient, and a
     # polite request phrased as a question is left uncertain, not discussion.
     DISCUSSION_LEADS = [
-      /^(what|why|how|when|who|where|which|explain|clarify|describe)\b/i,
+      /^(?:please[ \t]+)?(what|why|how|when|who|where|which|explain|clarify|describe)\b/i,
       /^(什么|为什么|为何|怎么(?:理解|用)|怎样(?:理解|用)|如何(?:理解|用)|哪个|哪些|是否|是不是|有没有)/,
-      /^(解释|说明|介绍|帮我理解)/
+      /^(?:请|麻烦)?[ \t]*(解释|说明|介绍|帮我理解)/
     ].freeze
     READ_ONLY_MARKERS = [
       /(不要|别|无需|不用|不需要)[^。！？\n]{0,12}(修改|改动|改变|执行|运行|写入|创建|动)/,
@@ -109,6 +117,7 @@ module Orbit
       /(仅供参考|只是问问|只是想(了解|知道|问一下))/
     ].freeze
     READ_ONLY_REGEX = Regexp.union(*READ_ONLY_MARKERS)
+    CONTINUATION_ONLY = /\A(?:请)?\s*(?:继续|接着|继续吧|continue|resume|go on)\s*[。.!！]?\z/i.freeze
 
     class Error < StandardError; end
 
@@ -126,13 +135,18 @@ module Orbit
     # Deterministic first pass: "explicit_orbit" enters the controlled start
     # path directly; "discussion" never starts; nil means uncertain.
     def classify(text)
-      prompt = text.to_s
+      # Only the user's surrounding instruction is eligible for the direct
+      # rule path. The full original remains in the semantic input and ledger.
+      prompt = intent_text(text)
       return "discussion" if prompt.strip.empty?
       return "orbit_opt_out" if PROHIBITED_ORBIT_USE.match?(prompt)
+      return "unattributed_continuation" if CONTINUATION_ONLY.match?(prompt)
+
+      compact = prompt.gsub(/\s+/, " ").strip
+      return "discussion" if discussion_lead?(compact)
 
       return "explicit_orbit" if explicit_request?(prompt)
 
-      compact = prompt.gsub(/\s+/, " ").strip
       remaining = compact.gsub(READ_ONLY_REGEX, "") if READ_ONLY_REGEX.match?(compact)
       if discussion_lead?(compact)
         "discussion"
@@ -150,6 +164,9 @@ module Orbit
         outcome("orbit_opt_out", "no_start", "the user explicitly requested not to use Orbit")
       when "discussion"
         outcome("discussion", "no_start", "clear discussion or read-only question")
+      when "unattributed_continuation"
+        outcome("unattributed_continuation", "root_decides",
+                "no active task or attributable original requirement was provided; Root must resolve the continuation")
       else
         decide_uncertain(text)
       end
@@ -186,15 +203,18 @@ module Orbit
       end
 
       probabilities = result.answers.transform_values { |value| { "probability_true" => value } }
-      passed = calibration.fetch("thresholds").all? do |question_id, threshold|
-        result.probability_true(question_id) >= threshold
+      unless result.complete_for?(request) && result.provider == request.provider && result.actual_model == model
+        return outcome("uncertain", "root_decides", "entry judgment is incomplete or the actual model differs from calibration",
+                       provider: result.provider, actual_model: result.actual_model,
+                       usage: result.usage, calibration: calibration)
       end
+      passed = EntryCalibration.passes?(result.answers, calibration.fetch("thresholds"))
       if passed
-        outcome("uncertain", "start", "calibrated entry judgment cleared both thresholds",
+        outcome("uncertain", "start", "calibrated entry judgment supports execution and delegation or supervision",
                 probabilities: probabilities, provider: result.provider, actual_model: result.actual_model,
                 usage: result.usage, calibration: calibration)
       else
-        outcome("uncertain", "root_decides", "calibrated entry judgment did not clear both thresholds",
+        outcome("uncertain", "root_decides", "calibrated entry judgment did not clear execution and either value path",
                 probabilities: probabilities, provider: result.provider, actual_model: result.actual_model,
                 usage: result.usage, calibration: calibration)
       end
@@ -213,6 +233,12 @@ module Orbit
       EXECUTION_MARKERS.none? { |pattern| pattern.match?(compact) }
     end
 
+    def intent_text(text)
+      text.to_s.gsub(/"\s*orbit\s*"|'\s*orbit\s*'|“\s*orbit\s*”|‘\s*orbit\s*’|「\s*orbit\s*」|『\s*orbit\s*』/i, "Orbit")
+          .gsub(/```.*?(?:```|\z)/m, " ")
+          .gsub(/`[^`\n]*`|“[^”]*”|‘[^’]*’|「[^」]*」|『[^』]*』|"[^"\n]*"|(?<!\w)'(?:[^'\n]|(?<=\w)'(?=\w))*'(?!\w)/m, " ")
+    end
+
     # The direct controlled path: a high-precision explicit request, or an
     # orbit-as-instrument mention that the same message pairs with real
     # execution content. A message forbidding orbit use never takes it.
@@ -226,6 +252,7 @@ module Orbit
 
     def entry_state(text)
       {
+        "input_version" => INPUT_VERSION,
         "instruction" => JevAdvisor.limit(text.to_s, PROMPT_BUDGET),
         "instruction_truncated" => text.to_s.length > PROMPT_BUDGET,
         "git" => JevAdvisor.git_changes(@project_root)
@@ -245,11 +272,13 @@ module Orbit
 
     def outcome(classification, decision, reason, probabilities: nil, provider: nil,
                 actual_model: nil, usage: nil, calibration: nil)
-      trace = { "rule_version" => RULE_VERSION }
+      trace = { "rule_version" => RULE_VERSION, "input_version" => INPUT_VERSION,
+                "decision_version" => DECISION_VERSION }
       if provider
         trace.merge!("question_set_version" => QUESTION_SET_VERSION, "provider" => provider,
                      "actual_model" => actual_model,
-                     "thresholds" => calibration.fetch("thresholds"))
+                     "thresholds" => calibration.fetch("thresholds"),
+                     "question_digest" => QUESTION_DIGEST, "calibration" => calibration["release"])
         trace["probabilities"] = probabilities if probabilities
         trace["usage"] = usage if usage
       end
@@ -260,59 +289,120 @@ module Orbit
     end
   end
 
-  # Entry gate calibration uses the first three labeled real requests plus
-  # three later short version-and-push requests: their independent-check
-  # benefit scores were 0.74, 0.72, and 0.49, yet the user explicitly judged
-  # this class too cheap for automatic Orbit review. Raising the benefit gate
-  # to 0.80 keeps these observed false positives out without matching on a
-  # filename or task wording; clear explicit Orbit requests still bypass the
-  # automatic gate. The small, related sample remains a calibration limit.
-  # 2026-09-28 (kickoff ②): the execution_authorized question wording was
-  # revised under question set orbit-entry-2 because the plain imperative
-  # request「补做 S1 的全程序终检…」scored 0.69/0.84 and never auto-started
-  # while Root started it manually 42s later. Thresholds stay at 0.80/0.80 —
-  # no blanket lowering; the revised wording must be re-verified on labeled
-  # positives and negatives in real sessions before its recall is claimed.
-  # `.orbit/jev-entry.json` overrides the built-in explicitly;
-  # `.orbit/jev-disabled` still stops all outbound. Only versioned model IDs
-  # can use this calibration — an alias could drift its question semantics.
+  # A release belongs to this exact question/input/decision definition and
+  # service-reported model, not to a sample count or a previous entry gate.
+  # Real release evidence is reviewed and retained with the configuration;
+  # this structural validator cannot prove that a submitted log is genuine.
+  # No built-in release is supplied until the new live calibration is done.
   module EntryCalibration
+    SCHEMA_VERSION = "orbit-entry-calibration-v2"
     MODEL_PATTERN = /\Ajev-\d+(\.\d+)*(-[0-9A-Za-z.\-]+)?\z/
-    THRESHOLD_QUESTIONS = %w[execution_authorized independent_check_benefit].freeze
-    BUILT_IN = {
-      "model" => "jev-1.13.0",
-      "thresholds" => { "execution_authorized" => 0.80, "independent_check_benefit" => 0.80 },
-      "calibrated_samples" => 6,
-      "source" => "built-in gate calibrated 2026-09-27 on three initial and three observed short-task requests; " \
-                  "execution_authorized wording revised 2026-09-28 under orbit-entry-2, thresholds unchanged pending live re-evaluation (limited sample)"
-    }.freeze
+    THRESHOLD_QUESTIONS = PrestartClassifier::ENTRY_QUESTIONS.keys.freeze
+    DEFAULT_PATH = File.join(__dir__, "data", "jev-entry-calibration.json")
+    MAX_BYTES = 256 * 1024
+    MAX_SAMPLES = 64
+    SAMPLE_KINDS = %w[positive negative failure missing_evidence].freeze
+
+    def self.binding
+      { "schema_version" => SCHEMA_VERSION,
+        "rule_version" => PrestartClassifier::RULE_VERSION,
+        "question_set_version" => PrestartClassifier::QUESTION_SET_VERSION,
+        "question_digest" => PrestartClassifier::QUESTION_DIGEST,
+        "input_version" => PrestartClassifier::INPUT_VERSION,
+        "decision_version" => PrestartClassifier::DECISION_VERSION }
+    end
+
+    def self.passes?(scores, thresholds)
+      scores.fetch("execution_authorized") >= thresholds.fetch("execution_authorized") &&
+        (scores.fetch("delegation_value") >= thresholds.fetch("delegation_value") ||
+         scores.fetch("supervision_value") >= thresholds.fetch("supervision_value"))
+    end
 
     def self.load(project_root)
       file = File.join(project_root, PrestartClassifier::CALIBRATION_RELATIVE_PATH)
-      return BUILT_IN unless File.file?(file)
+      file = DEFAULT_PATH unless File.file?(file)
+      return nil unless File.file?(file)
+      return "entry calibration exceeds the bounded release size" if File.size(file) > MAX_BYTES
 
-      data = JSON.parse(File.read(file))
+      validate(JSON.parse(File.read(file, MAX_BYTES + 1)))
+    rescue JSON::ParserError, SystemCallError
+      "entry calibration file is unreadable or not valid JSON"
+    end
+
+    def self.validate(data)
       return "entry calibration must be a JSON object" unless data.is_a?(Hash)
-      unless data["calibrated_samples"].is_a?(Integer) && data["calibrated_samples"].positive?
-        return "entry calibration needs a positive calibrated_samples count from real requests"
+      unless binding.all? { |key, value| data[key] == value }
+        return "entry calibration does not match the current rules, questions, input and decision versions"
       end
 
       model = data["model"].to_s
       return "entry calibration model must be a versioned id; aliases like jev-latest are rejected" unless model.match?(MODEL_PATTERN)
 
       thresholds = data["thresholds"]
-      unless thresholds.is_a?(Hash) && THRESHOLD_QUESTIONS.all? { |question| thresholds[question].is_a?(Numeric) }
-        return "entry calibration thresholds must cover #{THRESHOLD_QUESTIONS.join(' and ')}"
+      unless thresholds.is_a?(Hash) && thresholds.keys.sort == THRESHOLD_QUESTIONS.sort &&
+             thresholds.values.all? { |value| value.is_a?(Numeric) && value.finite? && value.positive? && value <= 1 }
+        return "entry calibration needs exactly the current finite thresholds in (0, 1]"
       end
 
-      thresholds.each_value do |value|
-        return "entry calibration thresholds must be finite numbers in (0, 1]" unless value.finite? && value.positive? && value <= 1
+      release = data["release"]
+      unless release.is_a?(Hash) && %w[reason scope reviewed_by reviewed_at].all? do |field|
+               release[field].is_a?(String) && !release[field].strip.empty? && release[field].length <= 1000
+             end
+        return "entry calibration needs its scope, review and release reason"
+      end
+      Time.iso8601(release.fetch("reviewed_at"))
+
+      samples = data["samples"]
+      unless samples.is_a?(Array) && samples.length.between?(SAMPLE_KINDS.length, MAX_SAMPLES) &&
+             (SAMPLE_KINDS - samples.filter_map { |sample| sample["kind"] if sample.is_a?(Hash) }).empty?
+        return "entry calibration needs labeled positive, negative, failure and missing-evidence samples"
+      end
+      ids = samples.map { |sample| sample.is_a?(Hash) && sample["id"] }
+      unless ids.all? { |id| id.is_a?(String) && !id.strip.empty? } && ids.uniq.length == ids.length &&
+             samples.all? { |sample| valid_sample?(sample, model, thresholds) }
+        return "entry calibration samples do not support the released model and decision rule"
       end
 
-      { "model" => model, "thresholds" => thresholds.slice(*THRESHOLD_QUESTIONS),
-        "calibrated_samples" => data["calibrated_samples"] }
-    rescue JSON::ParserError, SystemCallError
-      "entry calibration file is unreadable or not valid JSON"
+      { "model" => model, "thresholds" => thresholds,
+        "release" => release.slice("reason", "scope", "reviewed_by", "reviewed_at").merge(
+          binding.merge("sample_count" => samples.length,
+                        "sample_digest" => Digest::SHA256.hexdigest(JSON.generate(samples)))
+        ) }
+    rescue ArgumentError
+      "entry calibration has an invalid review date"
+    end
+
+    def self.valid_sample?(sample, model, thresholds)
+      return false unless SAMPLE_KINDS.include?(sample["kind"]) && sample["mode"] == "model_backed"
+      state = sample["state"]
+      return false unless state.is_a?(Hash) && state["input_version"] == PrestartClassifier::INPUT_VERSION &&
+                          state["instruction"].is_a?(String) && !state["instruction"].strip.empty? &&
+                          state["instruction"].length <= PrestartClassifier::PROMPT_BUDGET &&
+                          [true, false].include?(state["instruction_truncated"]) && state["git"].is_a?(Hash)
+
+      judgment = sample["judgment"]
+      return false unless judgment.is_a?(Hash) && judgment["schema_version"] == JudgmentResult::SCHEMA_VERSION &&
+                          judgment["source"].is_a?(Hash) && judgment.dig("source", "provider") == "typesafe"
+      actual_model = judgment.dig("source", "actual_model")
+      expected = sample["kind"] == "positive" ? "start" : "root_decides"
+      return false unless sample["expected_decision"] == expected
+      if sample["kind"] == "failure"
+        return judgment["status"] == "unavailable" && [nil, model].include?(actual_model) &&
+               (judgment["answers"].nil? || judgment["answers"] == {}) &&
+               judgment["error"].is_a?(String) && !judgment["error"].empty?
+      end
+      return false unless judgment["status"] == "answered" && actual_model == model
+
+      answers = judgment["answers"]
+      return false unless answers.is_a?(Hash)
+      scores = THRESHOLD_QUESTIONS.to_h do |question|
+        answer = answers[question]
+        value = answer.is_a?(Hash) ? answer["probability_true"] : nil
+        return false unless value.is_a?(Numeric) && value.finite? && value.between?(0, 1)
+
+        [question, value]
+      end
+      passes?(scores, thresholds) == (expected == "start")
     end
   end
 
