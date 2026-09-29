@@ -24,6 +24,8 @@ module OpenRouterModelOverviewTest
       test_http_failure_backoff_and_new_key_recovery(tmp)
       test_mapping_identity_validation_and_prior_bounds(tmp)
       test_lookup_target_alias_drift_and_benchmark_gates(tmp)
+      test_task_indices_and_unknown_measurement_date(tmp)
+      test_v1_snapshot_is_not_reused_as_v2(tmp)
       test_pagination_completeness(tmp)
       test_status_diagnostics_are_read_only(tmp)
     end
@@ -161,9 +163,10 @@ module OpenRouterModelOverviewTest
               "openrouter_id" => "moonshotai/kimi-k3", "canonical_slug" => "moonshotai/kimi-k3-20260715"),
       mapping("model" => "no-sources", "sources" => []),
     ])
-    prior = instance.lookup(model: "opencode-go/deepseek-v4.1-flash", project_root: project).fetch("prior")
+    prior = instance.lookup(model: "opencode-go/deepseek-v4.1-flash", project_root: project,
+                            indices: %w[coding_index agentic_index]).fetch("prior")
     assert_equal(56.2, prior.fetch("coding_index"), "the coding index is carried through")
-    assert_equal(nil, prior.fetch("agentic_index"), "a null agentic index stays null")
+    assert_equal(false, prior.key?("agentic_index"), "an unavailable requested index is not supplied as a score")
     assert(prior.fetch("sources").length <= 5 &&
            prior.fetch("sources").include?("https://vendor.example/deepseek-v4.1-flash") &&
            prior.fetch("sources").include?("https://openrouter.ai/api/v1/models") &&
@@ -201,7 +204,7 @@ module OpenRouterModelOverviewTest
     ])
     instance.refresh(project_root: project)
 
-    kimi = instance.lookup(model: "kimi-code/k3-256k", project_root: project)
+    kimi = instance.lookup(model: "kimi-code/k3-256k", project_root: project, indices: ["coding_index"])
     assert_equal("fresh", kimi.fetch("status"), "the mapped canonical row resolves through its real catalog id")
     assert_equal(76.2, kimi.fetch("prior").fetch("coding_index"), "the audited coding index is carried through")
     assert_equal("no_benchmark", instance.lookup(model: "zhipu-coding-plan/glm-5.3-flashx", project_root: project).fetch("status"),
@@ -210,6 +213,59 @@ module OpenRouterModelOverviewTest
                  "a tilde alias row is skipped and never resolves a mapping")
     assert_equal("unavailable", instance.lookup(model: "opencode-go/drifted", project_root: project).fetch("status"),
                  "canonical drift suspends the mapping instead of silently re-pointing it")
+  end
+
+  def test_task_indices_and_unknown_measurement_date(tmp)
+    rows = [row("example/agentic-only", coding: nil, agentic: 17.0),
+            row("example/analysis-only", coding: nil, agentic: nil, intelligence: 31.0)]
+    instance = overview(tmp, "task-indices", http: FakeHttp.new([[200, models_body(rows)]]))
+    write_map(instance.map_path, rows.map do |model|
+      mapping("provider" => "example", "model" => model["id"].split("/", 2).last,
+              "openrouter_id" => model["id"], "canonical_slug" => model["canonical_slug"])
+    end)
+    instance.refresh(project_root: tmp)
+    facts_only = instance.lookup(model: "example/agentic-only", project_root: tmp)
+    assert_equal("fresh", facts_only["status"], "agentic-only data is not blocked by null coding")
+    assert_equal(nil, facts_only["prior"], "an unclassified task gets facts without a guessed quality prior")
+    facts = facts_only.fetch("facts")
+    assert_equal("example/agentic-only", facts["id"], "the real catalog id is retained")
+    assert_equal(8192, facts["context_length"], "catalog context remains a catalog fact")
+    assert_equal(["text"], facts.dig("architecture", "input_modalities"), "input modality facts are retained")
+    assert_equal(["tools"], facts["supported_parameters"], "supported parameters remain catalog facts")
+    assert_equal(nil, facts["measurement_date"], "fetch time is never substituted for benchmark measurement time")
+    assert_equal("unknown", facts["measurement_date_status"], "measurement freshness is explicitly unknown")
+
+    agentic = instance.lookup(model: "example/agentic-only", project_root: tmp, indices: ["agentic_index"])
+    assert_equal(17.0, agentic.dig("prior", "agentic_index"), "the requested agentic index can form a weak task prior")
+    assert_equal(["agentic_index"], agentic.dig("prior", "relevant_indices"), "the projection records the requested task index")
+    assert_equal("no_benchmark", instance.lookup(model: "example/agentic-only", project_root: tmp,
+                                                  indices: ["coding_index"])["status"],
+                 "agentic does not silently fill a missing coding requirement")
+    analysis = instance.lookup(model: "example/analysis-only", project_root: tmp, indices: ["intelligence_index"])
+    assert_equal(31.0, analysis.dig("prior", "intelligence_index"), "intelligence is normalized and can be explicitly selected")
+    assert_equal(false, analysis["prior"].key?("coding_index"), "intelligence never becomes coding")
+    dated = instance.lookup(model: "example/agentic-only", project_root: tmp, indices: ["agentic_index"],
+                            require_measurement_date: true)
+    assert_equal("measurement_date_unknown", dated["status"], "an explicit measurement-date requirement cannot pass on fetch time")
+    assert_equal(nil, dated["prior"], "unknown measurement date withholds the task prior when a date is required")
+    assert(dated["facts"], "facts remain visible when task qualification fails")
+  end
+
+  def test_v1_snapshot_is_not_reused_as_v2(tmp)
+    http = FakeHttp.new([[200, models_body([row("deepseek/deepseek-v4.1-flash")])],
+                         [200, models_body([row("deepseek/deepseek-v4.1-flash", intelligence: 23.0)])]])
+    instance = overview(tmp, "schema-change", http: http)
+    write_map(instance.map_path, [mapping])
+    instance.refresh(project_root: tmp)
+    old = JSON.parse(File.read(instance.cache_path))
+    old["schema_version"] = "orbit-openrouter-model-overview-v1"
+    File.write(instance.cache_path, JSON.generate(old))
+    assert_equal("stale", instance.lookup(model: "opencode-go/deepseek-v4.1-flash", project_root: tmp)["status"],
+                 "old snapshots are not promoted into the intelligence-aware schema")
+    instance.refresh(project_root: tmp)
+    assert_equal(2, http.requests.length, "the new schema requires a real refresh instead of invented old fields")
+    assert_equal(23.0, instance.lookup(model: "opencode-go/deepseek-v4.1-flash", project_root: tmp).dig("facts", "intelligence_index"),
+                 "the refreshed schema keeps the new index as a fact")
   end
 
   def test_pagination_completeness(tmp)
@@ -262,11 +318,13 @@ module OpenRouterModelOverviewTest
                                        http_get: http || FakeHttp.new([]))
   end
 
-  def row(id, slug: id, coding: 50.0, agentic: 40.0)
+  def row(id, slug: id, coding: 50.0, agentic: 40.0, intelligence: nil)
     { "id" => id, "canonical_slug" => slug, "name" => "Model", "description" => "Bounded description.",
       "context_length" => 8192,
+      "supported_parameters" => ["tools"],
       "architecture" => { "input_modalities" => ["text"], "output_modalities" => ["text"], "tokenizer" => "Other" },
-      "benchmarks" => { "artificial_analysis" => { "coding_index" => coding, "agentic_index" => agentic } } }
+      "benchmarks" => { "artificial_analysis" => { "coding_index" => coding, "agentic_index" => agentic,
+                                                  "intelligence_index" => intelligence } } }
   end
 
   def models_body(rows, next_link: nil, total_count: nil)

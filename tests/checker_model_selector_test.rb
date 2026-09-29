@@ -489,6 +489,21 @@ module CheckerModelSelectorTest
                             .merge("session/default" => "fam-session") }
   end
 
+  def unclassified_overview_facts_do_not_auto_score
+    facts = { "id" => "example/catalog-model", "coding_index" => 17.0,
+              "context_length" => 8192, "measurement_date_status" => "unknown" }
+    overview = FakeOverview.new("a/one" => { "status" => "fresh", "facts" => facts, "prior" => nil })
+    advisor = FakeAdvisor.new("a/one" => { "quality" => 0.99, "time" => 0.99 })
+    built = selector(pool: ["a/one"], catalog: catalog_for(["a/one"]), entries: [],
+                     advisor: advisor, probe: FakeProbe.new(["a/one"]), overview: overview)
+    model, selection = built.select(explicit: nil, instruction: "deliver the requested audit")
+    assert(model == "a/one" && selection["selection_tier"] == "fallback" && advisor.calls.zero?,
+           "facts without task-selected indices do not become an automatic task-fit judgment")
+    report = built.candidate_statuses
+    assert(report.dig("candidates", 0, "model_overview_facts") == facts && advisor.calls.zero?,
+           "read-only diagnostics retain catalog facts for Root's own decision")
+  end
+
   def main
     %w[root_selected_model_is_probed_and_jev_ranked_without_user_grant
        root_selected_model_must_be_omp_available_and_checker_resolvable
@@ -511,6 +526,7 @@ module CheckerModelSelectorTest
        no_runnable_pool_model_records_the_failed_judgment
        unusable_pool_falls_back_to_omp_and_keeps_jev_ranking
        failed_model_is_excluded_from_the_next_check
+       unclassified_overview_facts_do_not_auto_score
        candidate_statuses_are_read_only_and_precise].each do |test|
       send(test)
       puts "CHECKER_MODEL_SELECTOR_TEST_PASS #{test}"

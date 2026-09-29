@@ -112,7 +112,9 @@ module Orbit
           "isolated_probe" => "not_probed"
         }
         entry["evidence_detail"] = evidence["detail"] if evidence["detail"]
-        entry["model_overview"] = overview_state(model)["status"]
+        overview = overview_state(model)
+        entry["model_overview"] = overview["status"]
+        entry["model_overview_facts"] = overview["facts"] if overview["facts"]
         entry
       end
       report = {

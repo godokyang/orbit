@@ -9,7 +9,7 @@ require "uri"
 
 module Orbit
   # Optional user-level snapshot of the public OpenRouter model catalog,
-  # consumed as a sourced-but-weak prior for checker quality ordering
+  # available as bounded model facts and task-selected weak quality priors
   # (docs/reference/openrouter-model-mapping-audit.md). It is not an inference
   # route, not a substitute for the TypeSafe key and never proof that a
   # candidate matches the task: a coding index is a third-party Artificial
@@ -58,15 +58,14 @@ module Orbit
   # explicitly labeled as such.
   #
   # #lookup is pure local read-only: no HTTP, no writes, no locking. It
-  # returns {"status" => ..., "prior" => ...} where prior (fresh snapshots
-  # with a verified mapping and a non-null coding_index only) is bounded to
-  # canonical_slug, coding_index, agentic_index, fetched_at, sources and
-  # reasoning_note.
+  # returns bounded catalog facts after exact identity matching. A quality
+  # prior is projected only when the caller names relevant benchmark indices;
+  # an unclassified task receives facts without guessing that it is coding.
   class OpenRouterModelOverview
-    SCHEMA_VERSION = "orbit-openrouter-model-overview-v1"
+    SCHEMA_VERSION = "orbit-openrouter-model-overview-v2"
     MAP_SCHEMA_VERSION = "orbit-openrouter-model-map-v1"
     CACHE_DIRECTORY = "orbit"
-    FILE_NAME = "openrouter-model-overview-v1.json"
+    FILE_NAME = "openrouter-model-overview-v2.json"
 
     MODELS_URL = "https://openrouter.ai/api/v1/models"
     BENCHMARK_SOURCE = "https://artificialanalysis.ai"
@@ -100,12 +99,16 @@ module Orbit
 
     BILLING_ROUTES = %w[direct_api subscription_quota unknown].freeze
     MAP_ENTRY_KEYS = %w[provider model reasoning billing_route openrouter_id canonical_slug sources verified_at verified_by].freeze
-    PRIOR_KEYS = %w[canonical_slug coding_index agentic_index fetched_at sources reasoning_note].freeze
+    BENCHMARK_KEYS = %w[coding_index agentic_index intelligence_index].freeze
+    PRIOR_KEYS = %w[id canonical_slug context_length architecture supported_parameters fetched_at sources
+                    reasoning_note mapping_identity measurement_date measurement_date_status measurement_note
+                    method_version relevant_indices capability_scope].freeze
 
     STATUS_FRESH = "fresh"
     STATUS_STALE = "stale"
     STATUS_UNMAPPED = "unmapped"
     STATUS_NO_BENCHMARK = "no_benchmark"
+    STATUS_MEASUREMENT_UNKNOWN = "measurement_date_unknown"
     STATUS_NOT_CONFIGURED = "not_configured"
     STATUS_DISABLED = "disabled"
     STATUS_UNAVAILABLE = "unavailable"
@@ -196,9 +199,16 @@ module Orbit
     # ("provider/model" plus reasoning/billing_route). Returns
     # {"status" => ..., "prior" => ...} with the statuses STATUS_FRESH,
     # STATUS_STALE, STATUS_UNMAPPED, STATUS_NO_BENCHMARK,
-    # STATUS_NOT_CONFIGURED, STATUS_DISABLED and STATUS_UNAVAILABLE. `prior`
-    # is non-nil only for "fresh" and is bounded to PRIOR_KEYS.
-    def lookup(model:, reasoning: "unknown", billing_route: "unknown", project_root:)
+    # STATUS_MEASUREMENT_UNKNOWN, STATUS_NOT_CONFIGURED, STATUS_DISABLED and
+    # STATUS_UNAVAILABLE. `facts` can remain visible without an eligible prior;
+    # a fresh `prior` contains PRIOR_KEYS and the explicitly selected indices.
+    def lookup(model:, reasoning: "unknown", billing_route: "unknown", project_root:, indices: [], require_measurement_date: false)
+      unless indices.is_a?(Array) && (indices - BENCHMARK_KEYS).empty?
+        raise Error, "任务指标必须明确选自 coding_index、agentic_index、intelligence_index"
+      end
+      unless [true, false].include?(require_measurement_date)
+        raise Error, "基准测量日期要求必须是布尔值"
+      end
       return { "status" => STATUS_DISABLED, "prior" => nil } if project_disabled?(project_root)
       return { "status" => STATUS_NOT_CONFIGURED, "prior" => nil } if @api_key.empty?
 
@@ -214,17 +224,29 @@ module Orbit
       record = document.fetch("models")[entry.fetch("openrouter_id")]
       return { "status" => STATUS_UNAVAILABLE, "prior" => nil } unless record.is_a?(Hash)
       return { "status" => STATUS_UNAVAILABLE, "prior" => nil } unless record["canonical_slug"] == entry.fetch("canonical_slug")
+      return { "status" => STATUS_UNAVAILABLE, "prior" => nil } unless record["id"] == entry.fetch("openrouter_id") &&
+        BENCHMARK_KEYS.all? { |key| record[key].nil? || valid_index?(record[key]) }
 
-      coding = record["coding_index"]
-      return { "status" => STATUS_NO_BENCHMARK, "prior" => nil } unless coding.is_a?(Numeric)
-
-      { "status" => STATUS_FRESH,
-        "prior" => { "canonical_slug" => entry.fetch("canonical_slug"),
-                     "coding_index" => coding,
-                     "agentic_index" => record["agentic_index"].is_a?(Numeric) ? record["agentic_index"] : nil,
-                     "fetched_at" => document.fetch("fetched_at"),
-                     "sources" => prior_sources(entry),
-                     "reasoning_note" => reasoning_note(requested: normalize_reasoning(reasoning), entry: entry) } }
+      available = BENCHMARK_KEYS.select { |key| valid_index?(record[key]) }
+      selected = indices.uniq & available
+      facts = record.slice("id", "canonical_slug", *BENCHMARK_KEYS).merge(
+        "context_length" => integer_or_nil(record["context_length"]),
+        "architecture" => architecture(record["architecture"]),
+        "supported_parameters" => parameter_list(record["supported_parameters"]),
+        "capability_scope" => "model_catalog",
+        "fetched_at" => document.fetch("fetched_at"), "sources" => prior_sources(entry),
+        "reasoning_note" => reasoning_note(requested: normalize_reasoning(reasoning), entry: entry),
+        "mapping_identity" => entry.slice("provider", "model", "reasoning", "billing_route"),
+        "measurement_date" => nil, "measurement_date_status" => "unknown", "method_version" => nil,
+        "measurement_note" => "抓取 72 小时有效期不代表基准测量日期；测量日期与方法版本未获可核验来源"
+      )
+      prior = selected.empty? ? nil : facts.slice(*PRIOR_KEYS, *selected).merge("relevant_indices" => selected)
+      status = available.empty? || (indices.any? && selected.empty?) ? STATUS_NO_BENCHMARK : STATUS_FRESH
+      if prior && require_measurement_date
+        prior = nil
+        status = STATUS_MEASUREMENT_UNKNOWN
+      end
+      { "status" => status, "facts" => facts, "prior" => prior }
     end
 
     # Read-only diagnostics for `orbit model-status`: never contacts the
@@ -274,6 +296,7 @@ module Orbit
 
       fetched_at = parse_time(document["fetched_at"])
       return false if fetched_at.nil? || now >= fetched_at + TTL_SECONDS
+      return false if fetched_at > now + CLOCK_SKEW_SECONDS
 
       document["key_digest"] == key_digest
     end
@@ -406,13 +429,16 @@ module Orbit
       raise Error, "OpenRouter 模型目录超过 #{MAX_MODELS} 项" if models.length >= MAX_MODELS && !models.key?(id)
 
       models[id] = {
+        "id" => id,
         "canonical_slug" => slug,
         "name" => bounded_string(item["name"], MAX_NAME_LENGTH),
         "description" => bounded_string(item["description"], MAX_DESCRIPTION_LENGTH),
         "context_length" => integer_or_nil(item["context_length"]),
         "architecture" => architecture(item["architecture"]),
+        "supported_parameters" => parameter_list(item["supported_parameters"]),
         "coding_index" => index_or_nil(item, "coding_index"),
-        "agentic_index" => index_or_nil(item, "agentic_index")
+        "agentic_index" => index_or_nil(item, "agentic_index"),
+        "intelligence_index" => index_or_nil(item, "intelligence_index")
       }
     end
 
@@ -430,9 +456,23 @@ module Orbit
       raise Error, "OpenRouter 模型模态列表过长" if value.length > MAX_MODALITIES
 
       value.each do |entry|
-        raise Error, "OpenRouter 模型模态项无效" unless entry.is_a?(String) && !entry.match?(CONTROL_CHARS)
+        raise Error, "OpenRouter 模型模态项无效" unless entry.is_a?(String) && entry.length <= 64 && !entry.match?(CONTROL_CHARS)
       end
       value
+    end
+
+    def parameter_list(value)
+      return nil if value.nil?
+      unless value.is_a?(Array) && value.length <= 64 &&
+             value.all? { |entry| entry.is_a?(String) && entry.length <= 64 && !entry.match?(CONTROL_CHARS) }
+        raise Error, "OpenRouter 模型支持参数结构无效"
+      end
+
+      value.uniq
+    end
+
+    def valid_index?(value)
+      value.is_a?(Numeric) && value.finite?
     end
 
     def index_or_nil(item, key)
