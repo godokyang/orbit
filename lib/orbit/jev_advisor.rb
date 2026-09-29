@@ -6,6 +6,7 @@ require "net/http"
 require "uri"
 
 require_relative "judgment"
+require_relative "model_quality_policy"
 require_relative "type_safe_judgment"
 
 module Orbit
@@ -13,8 +14,9 @@ module Orbit
   # owns every check, correction and stop decision. All external judgment
   # calls go through the unified JudgmentRequest/JudgmentResult model
   # (ADR-008 2026-09-26 supplement): the TypeSafe adapter owns transport and
-  # response mapping only, and these public methods keep their existing
-  # signatures and result shapes so calibrated callers are unchanged.
+  # response mapping only. Selection questions and their score keys are the
+  # ModelQualityPolicy versions; stuck, off_track and artifact_ready keep
+  # their previous wording. Check and stop gates are not decided here.
   class JevAdvisor
     ENDPOINT = TypeSafeJudgment::ENDPOINT
     MODEL = TypeSafeJudgment::DEFAULT_MODEL
@@ -34,48 +36,16 @@ module Orbit
         "instructions" => "Would a full independent review of the current artifact now likely provide useful, current feedback? Consider whether the agent is actively changing it and the review would quickly become stale.",
         "criteria" => { "true" => "A meaningful artifact checkpoint is available now", "false" => "The artifact is still too early or actively changing" }
       },
-      "delegatable" => {
-        "type" => "noul",
-        "instructions" => "Is there likely a bounded, independent subtask in the effective task requirements or remaining work that an authorized execution member could deliver now while the main agent continues? Prioritize the instruction, basis and amendments over whether the main agent has already mentioned or started that subtask in recent activity. Explicit disjoint files, modules or acceptance surfaces are strong evidence. Count only separable work with a clear result; do not count trivial, overlapping, preference-only or dependency-blocked work. Member availability is enforced separately by the caller, so do not lower this task-structure probability merely because availability is unknown.",
-        "criteria" => { "true" => "The effective requirements or remaining work expose a concrete, substantive and separable subtask with its own result", "false" => "The remaining work is coupled, trivial, dependency-blocked or has no clear separable result" }
-      }
     }.freeze
 
-    # Question-set versions for traceability; the wording above is frozen
-    # with contracts/task-runtime.md and ADR-009. Bump on any
-    # wording change so recorded judgments stay interpretable.
-    QUESTION_SET_VERSIONS = {
-      "observation" => "jev-observation-1",
-      "delegation" => "jev-delegation-1",
-      "candidates" => "jev-candidates-1",
-      "checker_quality" => "jev-checker-task-fit-2"
-    }.freeze
+    # Runtime supervision is separate from model selection. Bounded handoff
+    # and member fit are judged over explicit work-unit facts below.
+    QUESTION_SET_VERSIONS = ModelQualityPolicy::QUESTION_SET_VERSIONS
 
-    # Second-stage delegation judgment, asked only after the caller's own
-    # structural checks pass. The member_fit and parallel_gain wording is
-    # frozen in contracts/task-runtime.md; cost_appropriate
-    # follows the ADR-009 coarse cost tiers. The caller supplies member
-    # options and the bounded evidence comparison inside state.
-    DELEGATION_QUESTIONS = {
-      "member_fit" => {
-        "type" => "noul",
-        "instructions" => "Given the callable member options and the supplied model evidence, is at least one member likely to meet the best bounded subtask's acceptance bar using only information that can be passed in a bounded handoff? Do not assume a handoff already exists, and do not assume the member can see Root's context. Do not treat a matching provider, model or reasoning identity as direct evidence of capability parity. Treat missing or stale evidence as unknown and do not infer capability from a model name alone. Handoff, rework and integration time overhead belong only to parallel_gain.",
-        "criteria" => { "true" => "A callable member is likely to meet the acceptance bar using only information that can be passed in a bounded handoff",
-                        "false" => "No member is likely to meet the acceptance bar from a bounded handoff, or missing or stale evidence leaves the fit unknown" }
-      },
-      "parallel_gain" => {
-        "type" => "noul",
-        "instructions" => "Given the remaining task dependencies and the supplied execution evidence, would delegating the best bounded subtask now likely shorten the overall critical path after handoff, expected rework, integration, shared-resource contention, and verification are included? Output speed alone is not task completion speed.",
-        "criteria" => { "true" => "Delegating the best bounded subtask likely shortens the overall critical path once handoff, rework, integration, contention and verification are included",
-                        "false" => "Delegation is unlikely to shorten the critical path, or the evidence is insufficient" }
-      },
-      "cost_appropriate" => {
-        "type" => "noul",
-        "instructions" => "Given the submitter-provided coarse cost tier (low, medium, high, or unknown) with its source and confidence annotation for the callable member option, is that cost burden proportionate to the best bounded subtask? Judge the candidate's coarse price or subscription/quota burden tier against the size and value of the bounded subtask; the program checks only that a submitted tier carries a source and confidence annotation, not exact numbers against the vendor page. A clearly labeled low-confidence estimate from vendor or model positioning is acceptable evidence. Per-use API pricing and subscription quota must never be converted into a single fake per-token price or compared as if interchangeable. Do not convert currencies, compare it with the caller's own billing route, or rank providers by name or brand. Treat a missing, stale or unevaluated tier as unknown; unknown cost is not free and must not raise this score, and an unknown tier alone must not lower this score when the candidate already meets the quality and time bars. Any user-set hard budget is enforced separately by the calling program's runtime code, not by this question.",
-        "criteria" => { "true" => "A known coarse cost tier is proportionate for this bounded subtask",
-                        "false" => "A known coarse cost tier is disproportionate for this bounded subtask" }
-      }
-    }.freeze
+    # No-pool second stage. handoff_fit allows a serial handoff. member_task_fit
+    # reads exact evidence and a catalog prior as separate inputs. There is no
+    # time question and no coarse cost question; route cost stays in the policy.
+    DELEGATION_QUESTIONS = ModelQualityPolicy.delegation_questions.freeze
 
     class Error < StandardError
       attr_reader :receipt
@@ -89,18 +59,11 @@ module Orbit
         facts = receipt.is_a?(Hash) ? receipt : {}
         source = facts["source"].is_a?(Hash) ? facts["source"] : {}
         { "provider" => source["provider"], "model" => source["actual_model"],
-          "question_set_version" => facts["question_set_version"], "usage" => facts["usage"] }
+          "question_set_version" => facts["question_set_version"], "usage" => facts["usage"],
+          "call_id" => facts["call_id"], "requested_model" => facts["requested_model"],
+          "status" => "unavailable", "error" => facts["error"] }
       end
     end
-
-    # Per-candidate ADR-009 §3 questions for the pool recommendation stage.
-    # Quality must clear the line from sourced evidence and the task
-    # requirements alone — never from a model, provider or brand name. Time
-    # must survive handoff, rework, integration, contention and verification.
-    # Cost tiers are program-read from validated cache entries, not judged
-    # here and never guessed by brand.
-    CANDIDATE_QUALITY_TEXT = "Is this candidate model likely to meet the best bounded subtask's acceptance bar using only information that can be passed in a bounded handoff, judged from the supplied sourced evidence for THIS candidate and the task requirements? Do not infer capability from the model, provider or brand name alone, and do not treat a matching identity with the caller as evidence of parity. Treat missing, stale or unsourced evidence as unknown and do not raise this score without sourced support."
-    CANDIDATE_TIME_TEXT = "Would delegating the best bounded subtask to THIS candidate now likely shorten the overall critical path once handoff, expected rework, integration, shared-resource contention and verification are included? Output speed alone is not task completion speed."
 
     AMENDMENT_BUDGET = 8000
     AMENDMENT_TEXT_LIMIT = 1200
@@ -114,18 +77,20 @@ module Orbit
       key = env["TYPESAFE_API_KEY"].to_s.strip
       return nil if key.empty?
 
-      new(api_key: key)
+      release = ModelQualityPolicy.load
+      new(api_key: key, model: release.is_a?(Hash) ? release.fetch("model") : MODEL)
     end
 
-    def initialize(api_key:, endpoint: ENDPOINT)
+    def initialize(api_key:, endpoint: ENDPOINT, model: MODEL)
       @api_key = api_key.to_s
       @endpoint = endpoint
+      @model = model
     end
 
     # Provider-level judgment channel with this advisor's credentials and an
     # explicitly chosen model; the calibrated entry gate pins a versioned id
     # instead of the in-task jev-latest alias.
-    def judgment_provider(model: MODEL)
+    def judgment_provider(model: @model)
       TypeSafeJudgment.new(api_key: @api_key, endpoint: @endpoint, model: model)
     end
 
@@ -134,91 +99,39 @@ module Orbit
                      question_set_version: QUESTION_SET_VERSIONS.fetch("observation"))
     end
 
-    # Second-stage delegation judgment. The caller supplies the full bounded
-    # state, including member options and the evidence comparison; the advisor
-    # only asks member_fit and parallel_gain. It does not gather evidence, read
-    # caches, or infer model names, and a missing key is the caller's fact to
-    # structure around, not something this stage fabricates.
+    # No-pool second stage. Asks handoff_fit and member_task_fit only. The
+    # state is projected first so speed, elapsed time and coarse price are not
+    # selection inputs. The advisor does not gather evidence or invent facts.
     def assess_delegation(state:)
-      post_questions(state: state, questions: DELEGATION_QUESTIONS,
+      post_questions(state: ModelQualityPolicy.project_selection_state(state), questions: DELEGATION_QUESTIONS,
                      question_set_version: QUESTION_SET_VERSIONS.fetch("delegation"))
     end
 
-    # Per-candidate pool judgment (ADR-009 §3): one quality-line and one
-    # end-to-end-time noul question per candidate, each labeled by index and
-    # naming the candidate's agent and model. Cost tiers are not asked here;
-    # the caller reads them from validated cache entries.
+    # Per-candidate task fit. The returned quality key is the new task-fit
+    # probability. There is no time score. Speed and coarse price are removed
+    # from the state before the question is sent.
     def assess_candidates(state:, candidates:)
-      questions = {}
-      candidates.each_with_index do |candidate, index|
-        label = "candidate #{index} (agent #{candidate['agent']}, model #{candidate['provider']}/#{candidate['model']}): "
-        questions["candidate_#{index}_quality"] = {
-          "type" => "noul",
-          "instructions" => label + CANDIDATE_QUALITY_TEXT,
-          "criteria" => { "true" => "This candidate is likely to meet the acceptance bar from a bounded handoff, supported by the supplied sourced evidence",
-                          "false" => "This candidate is unlikely to meet the bar, or the sourced evidence is missing, stale or insufficient" }
-        }
-        questions["candidate_#{index}_time"] = {
-          "type" => "noul",
-          "instructions" => label + CANDIDATE_TIME_TEXT,
-          "criteria" => { "true" => "Delegating to this candidate likely shortens the overall critical path once handoff, rework, integration, contention and verification are included",
-                          "false" => "Delegation to this candidate is unlikely to shorten the critical path, or the evidence is insufficient" }
-        }
-      end
-      result = post_questions(state: state, questions: questions,
+      questions = ModelQualityPolicy.candidate_questions(candidates)
+      result = post_questions(state: ModelQualityPolicy.project_selection_state(state), questions: questions,
                               question_set_version: QUESTION_SET_VERSIONS.fetch("candidates"))
       scores = candidates.each_index.to_h do |index|
-        [index.to_s, { "quality" => result["scores"].fetch("candidate_#{index}_quality"),
-                       "time" => result["scores"].fetch("candidate_#{index}_time") }]
+        [index.to_s, { "quality" => result["scores"].fetch("candidate_#{index}_task_fit") }]
       end
       result.merge("scores" => scores)
     end
 
-    # Exact route facts can support quality and end-to-end check time. A
-    # separately sourced OpenRouter model overview is only a weak quality
-    # prior: it says nothing about this route's check duration or quota.
-    # Questions and answer shapes change with the evidence source, so this
-    # version must be calibrated independently of jev-checker-task-fit-1.
+    # Checker task fit only. Exact evidence and a catalog prior both stay in
+    # the projected input; neither is added to the probability, and no time
+    # score is returned.
     def assess_checker_quality(state:, candidates:)
       list = Array(candidates)
       raise Error, "at least one checker candidate is required" if list.empty?
 
-      questions = {}
-      list.each_with_index do |candidate, index|
-        model = candidate.fetch("model").to_s
-        questions["quality_#{index}"] = {
-          "type" => "noul",
-          "instructions" => "Checker candidate #{model}: considering the current task instruction and the supplied " \
-                            "sourced facts, would this model likely provide a useful independent read-only review " \
-                            "and catch substantive mistakes? Exact route evidence and a model_overview_prior are different: " \
-                            "the latter is a model-level benchmark via OpenRouter, not proof of this OMP route's " \
-                            "reasoning variant, speed or price. A single benchmark number, model or provider name alone " \
-                            "cannot establish task fit. Insufficient evidence is uncertainty, not proof of incapability.",
-          "criteria" => {
-            "true" => "The supplied facts and this task's requirements support a useful independent review",
-            "false" => "The supplied facts do not support task fit, or show this model is poorly suited"
-          }
-        }
-        next unless candidate["evidence"].is_a?(Hash)
-
-        questions["time_#{index}"] = {
-          "type" => "noul",
-          "instructions" => "Checker candidate #{model}: given the current task artifact and this candidate's bounded " \
-                            "exact evidence, would an independent read-only check likely finish end-to-end quickly, " \
-                            "including the check, possible rework and Root's follow-up? Output speed is not " \
-                            "end-to-end task time. Answer true only on a concrete basis; no basis is unknown.",
-          "criteria" => {
-            "true" => "Concrete evidence supports a fast end-to-end independent check including rework",
-            "false" => "No concrete basis, or the evidence suggests a slower end-to-end check"
-          }
-        }
-      end
-      result = post_questions(state: state, questions: questions,
+      questions = ModelQualityPolicy.checker_questions(list)
+      result = post_questions(state: ModelQualityPolicy.project_selection_state(state), questions: questions,
                               question_set_version: QUESTION_SET_VERSIONS.fetch("checker_quality"))
       scores = list.each_with_index.to_h do |candidate, index|
-        [candidate.fetch("model").to_s,
-         { "quality" => result.fetch("scores").fetch("quality_#{index}"),
-           "time" => candidate["evidence"].is_a?(Hash) ? result.fetch("scores").fetch("time_#{index}") : nil }]
+        [candidate.fetch("model").to_s, { "quality" => result.fetch("scores").fetch("quality_#{index}") }]
       end
       result.merge("scores" => scores)
     end
@@ -233,7 +146,7 @@ module Orbit
     def post_questions(state:, questions:, question_set_version:)
       request = JudgmentRequest.new(
         state: state, questions: self.class.model_questions(questions),
-        question_set_version: question_set_version, provider: TypeSafeJudgment::PROVIDER, model: MODEL
+        question_set_version: question_set_version, provider: TypeSafeJudgment::PROVIDER, model: @model
       )
       result = judgment_provider.judge(request)
       unless result.complete_for?(request)
@@ -245,7 +158,8 @@ module Orbit
                       actual_model: result.actual_model, usage: result.usage
                     )
                   end
-        receipt = failure.to_h.merge("question_set_version" => question_set_version)
+        failure = failure.with_call_id(result.call_id) if result.call_id && !failure.call_id
+        receipt = failure.to_h.merge("question_set_version" => question_set_version, "requested_model" => @model)
         raise Error.new(failure.error, receipt: receipt)
       end
 
@@ -253,7 +167,8 @@ module Orbit
         "provider" => result.provider, "model" => result.actual_model,
         "question_set_version" => question_set_version,
         "scores" => questions.to_h { |name, _question| [name, result.probability_true(name)] },
-        "usage" => result.usage
+        "usage" => result.usage, "call_id" => result.call_id, "requested_model" => @model, "status" => result.status,
+        "input_version" => state.is_a?(Hash) ? state["input_version"] : nil
       }
     rescue Error
       raise

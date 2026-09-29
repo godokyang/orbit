@@ -1,9 +1,12 @@
 import fs from 'node:fs/promises';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createOrbitHost, toolArgs, toolDescription } from './host.mjs';
+import { validateMemberTool } from './work-unit-scope.mjs';
+import { observeNativeCalls, flushNativeCalls } from './native-call-recorder.mjs';
 
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const textOf = content => typeof content === 'string' ? content : (content || []).filter(p => p.type === 'text').map(p => p.text).join('\n');
@@ -11,11 +14,30 @@ const textOf = content => typeof content === 'string' ? content : (content || []
 // Overridable in tests; production resolves next to this file.
 const registerMemberBin = process.env.ORBIT_REGISTER_MEMBER_BIN
   || fileURLToPath(new URL('../scripts/orbit-register-member', import.meta.url));
+const workUnitBin = fileURLToPath(new URL('../scripts/orbit-work-unit', import.meta.url));
 // Pool edits must run THIS release's CLI, never whatever `orbit` happens to
 // be first on PATH (an older install would write a stale schema/format).
 // Same release-anchored, ruby-invoked shape as the member registration entry.
 const orbitCliBin = fileURLToPath(new URL('../scripts/orbit', import.meta.url));
 const rubyBin = () => process.env.ORBIT_RUBY || 'ruby';
+
+function runWorkUnit(taskDir, action, payload = {}) {
+  try {
+    const run = spawnSync(rubyBin(), ['--disable-gems', workUnitBin, taskDir, action],
+      { input: JSON.stringify(payload), encoding: 'utf8', timeout: 15000, maxBuffer: 1024 * 1024 });
+    const result = run.stdout && JSON.parse(run.stdout.trim().split('\n').at(-1));
+    if (run.status === 0 && result?.ok === true) return result;
+    return { ok: false, reason: result?.reason || (run.stderr || run.error?.message || `exit ${run.status}`).trim().slice(0, 300) };
+  } catch (error) { return { ok: false, reason: String(error?.message || error).slice(0, 300) }; }
+}
+
+// Native task has no extra permission fields. A standalone marker in its
+// task/context names the durable handoff; full context is injected below.
+function dispatchUnitId(item, context) {
+  const markers = [item.task, context].filter(value => typeof value === 'string')
+    .flatMap(value => [...value.matchAll(/^\s*orbit-unit:\s*(wu-[0-9a-f]{16})\s*$/gm)].map(match => match[1]));
+  return markers.length && new Set(markers).size === 1 ? markers[0] : null;
+}
 
 // Generated member agent namespace (ADR-009). Readable slug plus a stable
 // short hash: distinct identifiers that collide after non-alphanumeric
@@ -37,6 +59,8 @@ export function agentNameFor(model) {
 // AgentRegistry itself is process-global; these mirrors must be too.
 const nativeMemberIds = new Set();
 const memberTasks = new Map();
+// Shared with child extension closures; bind only an actually observed model.
+const memberWorkUnits = new Map();
 const memberExpectedModels = new Map();
 const memberDriftReported = new Set();
 const memberActiveTools = new Map(); // member agent id -> Set of in-flight tool call ids (observed)
@@ -662,6 +686,7 @@ export function installOmpExtension(pi, sdk) {
         `name: ${name}`,
         `description: Orbit member agent pinned to ${model} (generated for this session only)`,
         `model: ${model}`,
+        'tools: [read, write, edit, bash, grep, glob, hub]',
         'spawns: ""',
         '---', '',
         `You are an Orbit execution member. Your model is fixed to ${model} for this run.`,
@@ -824,6 +849,7 @@ export function installOmpExtension(pi, sdk) {
     if (memberActiveTools.has(id) || typeof session?.subscribe !== 'function') return;
     const active = new Set();
     memberActiveTools.set(id, active);
+    observeNativeCalls(session, () => nativeCallContext(session));
     const agentWrites = new Set();
     session.subscribe(event => {
       if (event.type === 'tool_execution_start') {
@@ -880,7 +906,25 @@ export function installOmpExtension(pi, sdk) {
       if (event.type === 'message_end' && event.message.role === 'assistant' && sdk.isUserInterruptAbort(event.message)) entry.interrupted = true;
     });
     entries.set(id, entry);
+    observeNativeCalls(session, () => nativeCallContext(session));
     return entry;
+  }
+  function nativeCallContext(session) {
+    const agentId = agentIdFor(session.sessionId), member = memberTasks.has(agentId);
+    if (!member && agentId !== sdk.MAIN_AGENT_ID) return null;
+    const taskDir = member ? memberTasks.get(agentId) : taskDirs.get(session.sessionId);
+    if (!taskDir) return null;
+    let state;
+    try {
+      state = JSON.parse(readFileSync(path.join(taskDir, 'state.json'), 'utf8'));
+      if (!ACTIVE.has(state.status)) return null;
+    } catch { return null; }
+    const model = session.model;
+    return { taskDir, projectRoot: state.project_root, role: member ? 'member' : 'root', agentId,
+      workUnitId: memberWorkUnits.get(agentId)?.bound ? memberWorkUnits.get(agentId).unitId : undefined,
+      actualProvider: model?.provider, actualModelId: model?.id,
+      actualModel: model?.provider && model?.id ? `${model.provider}/${model.id}` : undefined,
+      requestedModel: memberExpectedModels.get(agentId), billingRoute: billingRoute(model) };
   }
   function agentIdFor(sessionId) {
     try {
@@ -903,6 +947,19 @@ export function installOmpExtension(pi, sdk) {
     const entry = entries.get(id);
     if (!entry || entry.session.sessionId !== id) throw new Error('Session is not owned by this Orbit host');
     return entry;
+  }
+  function bindMemberWorkUnit(id, actualModel) {
+    const pending = memberWorkUnits.get(id);
+    if (!pending) return { ok: false, reason: 'actual dispatch has no Orbit work unit' };
+    if (pending.bound) return { ok: true };
+    if (!actualModel) return { ok: false, reason: 'actual member model is not observable yet' };
+    if (actualModel !== pending.expectedModel) return { ok: false, reason: 'actual member model differs from the dispatched model' };
+    const result = runWorkUnit(pending.taskDir, 'bind', {
+      id: pending.unitId, member_id: id, tool_call_id: pending.toolCallId,
+      model: actualModel, ...(pending.hint || {})
+    });
+    if (result.ok) pending.bound = true;
+    return result;
   }
   // Returns true only when the registration gate is actually installed. A
   // missing registry event surface means member registration is impossible;
@@ -941,6 +998,8 @@ export function installOmpExtension(pi, sdk) {
       if (result.ok) {
         nativeMemberIds.add(ref.id);
         memberTasks.set(ref.id, taskDir);
+        memberWorkUnits.set(ref.id, { taskDir, unitId: pending.unitId, toolCallId: pending.toolCallId,
+          expectedModel: pending.expectedModel, hint: pending.hint, bound: false });
         if (pending.expectedModel) memberExpectedModels.set(ref.id, pending.expectedModel);
         requestedNames.delete(ref.id);
         // Durably attribute the member session from this moment on, and
@@ -967,7 +1026,21 @@ export function installOmpExtension(pi, sdk) {
             const recorded = recordModelDrift(taskDir, { id: ref.id, expected: pending.expectedModel, actual, abortConfirmed });
             process.stderr.write(`Orbit: member ${ref.id} model drift at registration (${pending.expectedModel} -> ${actual}); ` +
               `drift record: ${recorded.ok ? 'ok' : recorded.reason}; abort confirmed: ${abortConfirmed}\n`);
+          } else if (actual === pending.expectedModel) {
+            const binding = bindMemberWorkUnit(ref.id, actual);
+            if (!binding.ok) {
+              const aborted = signalAbort(ref.id);
+              process.stderr.write(`Orbit: member ${ref.id} work-unit binding failed: ${binding.reason}; abort confirmed: ${aborted}\n`);
+              observeCollab({ kind: 'work_unit_binding_failed', task_dir: taskDir, agent_id: ref.id,
+                work_unit_id: pending.unitId, reason: binding.reason, abort_confirmed: aborted, at: Date.now() });
+            }
           }
+        } else {
+          // Some OMP versions attachSession after the registry notification.
+          // Never label the declared model as observed at that earlier seam.
+          observeCollab({ kind: 'work_unit_binding_pending', task_dir: taskDir, agent_id: ref.id,
+            work_unit_id: pending.unitId, reason: 'actual session model is not observable at registration', at: Date.now() });
+          if (ref.session) signalAbort(ref.id); // attached but unresolved is not runnable
         }
       } else {
         // Duplicate or unreadable member list: never let model work proceed
@@ -1198,6 +1271,10 @@ export function installOmpExtension(pi, sdk) {
       ...(context.length ? [context.join('；')] : []),
       ...(next && next !== '无' ? [`下一动作：${next}`] : []),
       phaseDirective(state),
+      ...(activeState(state) ? [
+        '原生 task 派发前，用 Orbit work-unit declare 保存本次目标、有效要求、范围、验收及升级条件；在每个 task 文本中单独写一行 orbit-unit: <返回的wu-id>。',
+        '工具仅限单元允许范围；成员不能改 Orbit／Git 内部记录、访问外部工具或二次派发。通过 hub 向 Root 回报；Root 核验实际结果后 finish accepted/rejected/failed。失败历史保留，依赖只在 accepted 后继续；无需用户逐次安排。',
+      ] : []),
       '新用户消息不自动修改旧任务：明确修订时调用 Orbit amend；独立问题按独立请求处理，必要时先确认归属。',
     ].join('\n');
   }
@@ -1476,9 +1553,12 @@ export function installOmpExtension(pi, sdk) {
       throw new Error(`OMP background processes did not settle for ${entry.id}`);
     for (let n = 0; n < 50; n++) {
       const after = state(entry);
-      if (after.status === 'idle' && after.active_tools === 0) return { confirmed: true, thread_id: entry.id,
+      if (after.status === 'idle' && after.active_tools === 0) {
+        await flushNativeCalls(taskDirs.get(entry.id));
+        return { confirmed: true, thread_id: entry.id,
         scope: 'Native session execution, attached shell processes and owner-scoped async jobs; no unmanaged detached work',
         native_owner: owner, status_after: after.status, active_tools_after: 0, async_jobs_settled: true };
+      }
       await pause(100);
     }
     throw new Error(`OMP execution did not stop for ${entry.id}`);
@@ -1582,6 +1662,7 @@ export function installOmpExtension(pi, sdk) {
                 registry_status: ref.status, status_after: 'disposed', active_tools_after: measured,
                 async_jobs_settled: true };
               memberStopConfirmations.set(ref.id, confirmation);
+              await flushNativeCalls(memberTasks.get(ref.id));
               return confirmation;
             } catch (error) {
               // Observability, not inference: the exact reason the retained
@@ -1637,6 +1718,7 @@ export function installOmpExtension(pi, sdk) {
               registry_status: sdk.AgentRegistry.global().get(ref.id)?.status ?? null,
               status_after: busyFlags(session) ? 'active' : 'idle', active_tools_after: measured, async_jobs_settled: true };
             memberStopConfirmations.set(ref.id, liveConfirmation);
+            await flushNativeCalls(memberTasks.get(ref.id));
             return liveConfirmation;
           }
           await pause(100);
@@ -1715,12 +1797,11 @@ export function installOmpExtension(pi, sdk) {
         try { available = currentContext.models.list() ?? []; } catch { available = []; }
         const agents = {};
         for (const [name, model] of sessionAgents) agents[model] = name;
-        const families = {}, routes = {};
+        const families = {}, routes = {}, limits = {};
         let taskModel;
         for (const m of available) {
           const key = `${m.provider}/${m.id}`;
           try { families[key] = currentContext.models.family?.(m) ?? null; } catch { families[key] = null; }
-          if (!Object.hasOwn(agents, key)) continue;
           let resolved;
           try { resolved = currentContext.models.resolve?.(key); } catch { /* no exact resolution */ }
           if (`${resolved?.provider}/${resolved?.id}` !== key) {
@@ -1730,10 +1811,26 @@ export function installOmpExtension(pi, sdk) {
             resolved = `${taskModel?.provider}/${taskModel?.id}` === key ? taskModel : null;
           }
           routes[key] = billingRoute(resolved);
+          if (resolved) {
+            // These are the exact OMP registry's configured execution limits,
+            // not OpenRouter's potentially larger model-level description.
+            // Never serialize endpoints, credentials or catalog price fields.
+            limits[key] = {
+              source: 'omp_model_registry',
+              context_window: Number.isSafeInteger(resolved.contextWindow) && resolved.contextWindow > 0
+                ? resolved.contextWindow : null,
+              input_modalities: Array.isArray(resolved.input)
+                ? resolved.input.filter(value => value === 'text' || value === 'image') : [],
+              output_modalities: !resolved.kind || resolved.kind === 'chat' ? ['text'] : [],
+              // SDK 18.3.4: false is the sole unsupported signal; an omitted
+              // supportsTools permits native tools (pi-catalog/types.ts).
+              supports_tools: resolved.supportsTools !== false
+            };
+          }
         }
         const current = currentContext.models.current?.() ?? null;
         return { current: current ? `${current.provider}/${current.id}` : null,
-                 available: available.map(m => `${m.provider}/${m.id}`), families, agents, routes,
+                 available: available.map(m => `${m.provider}/${m.id}`), families, agents, routes, limits,
                  agent_dir: typeof sdk.getAgentDir === 'function' ? sdk.getAgentDir() : null };
       }
       case 'send': return send(entry, request.text);
@@ -1766,6 +1863,7 @@ export function installOmpExtension(pi, sdk) {
     return entry;
   }
   async function close(requireConfirmation = false) {
+    await flushNativeCalls();
     if (host) { await host.close({ requireConfirmation }); host = undefined; }
     for (const entry of entries.values()) entry.unsubscribe();
     entries.clear();
@@ -1828,8 +1926,15 @@ export function installOmpExtension(pi, sdk) {
     // recorded only when the WHOLE call passes the gate and actually
     // dispatches; a blocked call is not a dispatch.
     const dispatches = [];
+    const staged = [];
+    const unitReport = runWorkUnit(taskDir, 'list');
+    if (!unitReport.ok) return { block: true, reason: `Orbit work units are unreadable: ${unitReport.reason}` };
+    const units = Array.isArray(unitReport.units) ? unitReport.units : [];
+    const selectedUnits = new Set();
+    if (typeof event.toolCallId !== 'string' || !event.toolCallId)
+      return { block: true, reason: 'Controlled task needs an actual native tool call id' };
     for (const item of items) {
-      if (!item || typeof item !== 'object') continue;
+      if (!item || typeof item !== 'object') return { block: true, reason: 'Invalid controlled task item' };
       // Unpinned custom agents may carry frontmatter/overrides that cannot be
       // resolved before dispatch. Use a generated candidate or the verified
       // @task role instead; the registration gate still catches later drift.
@@ -1862,6 +1967,32 @@ export function installOmpExtension(pi, sdk) {
       } else {
         return { block: true, reason: `Native agent ${itemAgent} has no verifiable pre-dispatch model; use a live Orbit candidate or @task` };
       }
+      const unitId = dispatchUnitId(item, input.context);
+      const unit = units.find(candidate => candidate.id === unitId);
+      if (!unit) return { block: true, reason: 'Declare an Orbit work-unit, then put a standalone orbit-unit: wu-... line in each native task text' };
+      if (selectedUnits.has(unitId)) return { block: true, reason: `Work unit ${unitId} cannot be dispatched twice in one call` };
+      if (!['declared', 'rejected', 'failed'].includes(unit.status) ||
+          unit.input_digest !== unitReport.task_input_digest || unit.artifact_root !== unitReport.artifact_root)
+        return { block: true, reason: `Work unit ${unitId} is already bound/accepted or has stale requirements/workspace; declare or finish the correct unit` };
+      if (!Array.isArray(unit.dependencies) || unit.dependencies.some(id => !units.some(dep => dep.id === id && dep.status === 'accepted')))
+        return { block: true, reason: `Work unit ${unitId} has unaccepted dependencies` };
+      // Native isolated worktrees change the actual artifact root without an
+      // Orbit rebind. Use the declared workspace; isolation is not a sandbox.
+      if (input.isolated === true || item.isolated === true)
+        return { block: true, reason: 'An Orbit unit must run in its declared artifact_root; native isolated worktrees require an explicit workspace rebind' };
+      const actualCwd = await fs.realpath(ctx.cwd).catch(() => null);
+      if (!actualCwd || actualCwd !== unit.artifact_root)
+        return { block: true, reason: `Native task cwd does not match work unit ${unitId} artifact_root` };
+      selectedUnits.add(unitId);
+      const hint = bound.state.delegation_hint;
+      const models = hint?.recommendation
+        ? [hint.recommendation.first, ...(hint.recommendation.backups || [])].filter(Boolean).map(candidate => candidate.model) : [];
+      const matchedHint = hint?.version === 'orbit-member-selection-v1' && !hint.followed && !hint.invalid_reason &&
+        hint.work_unit_id === unitId && hint.input_digest === unit.input_digest && hint.artifact_root === unit.artifact_root &&
+        hint.dispatch_attempt === unit.dispatches.length + 1 && hint.user_boundary === bound.state.last_user_message_id &&
+        typeof hint.signature === 'string' && typeof hint.message_id === 'string' &&
+        bound.state.member_selections?.[unitId]?.signature === hint.signature && models.includes(expectedModel);
+      const hintBinding = matchedHint ? { hint_signature: hint.signature, hint_message_id: hint.message_id } : null;
       const requested = `orbit-${randomUUID()}`;
       const rationale = explicitDispatchRationale(item);
       dispatches.push({ kind: 'task_dispatch', at: Date.now(), session_id: sessionId, agent_id: caller,
@@ -1875,9 +2006,18 @@ export function installOmpExtension(pi, sdk) {
         context: typeof input.context === 'string' ? input.context : null,
         rationale,
         rationale_source: rationale ? 'dispatch_input' : 'unrecorded',
-        requested_name: requested });
+        requested_name: requested, work_unit_id: unitId,
+        hint_signature: hintBinding?.hint_signature ?? null, hint_message_id: hintBinding?.hint_message_id ?? null });
+      staged.push({ item, requested, expectedModel, unit, hint: hintBinding });
+    }
+    // Stage the whole batch first: rejection cannot leave partial requested
+    // names or rewritten items that a later unrelated registration could use.
+    for (const { item, requested, expectedModel, unit, hint } of staged) {
       item.name = requested;
-      requestedNames.set(requested, { taskDir, toolCallId: event.toolCallId ?? null, expectedModel });
+      // Native task.tools mounts named eval tools; it is NOT a restriction
+      // list. Scope is enforced at the child tool entrance, not through it.
+      item.task = `${item.task}\n\n[Orbit durable work unit]\n${JSON.stringify(unit)}\nReport results to Root through hub; Root verifies and records finish. This record is context, not permission to expand the original request.`;
+      requestedNames.set(requested, { taskDir, toolCallId: event.toolCallId, expectedModel, unitId: unit.id, hint });
     }
     for (const dispatch of dispatches) observeCollab(dispatch);
 
@@ -1953,7 +2093,20 @@ export function installOmpExtension(pi, sdk) {
     if (!expected) return event.payload;
     const model = ctx.model;
     const actual = model ? `${model.provider}/${model.id}` : null;
-    if (!actual || actual === expected) return event.payload;
+    if (actual === expected) {
+      const binding = bindMemberWorkUnit(agentId, actual);
+      if (!binding.ok) {
+        signalAbort(agentId);
+        try { ctx.abort?.(); } catch { /* member tool gate remains closed */ }
+        process.stderr.write(`Orbit: refusing unbound member ${agentId}: ${binding.reason}\n`);
+      }
+      return event.payload;
+    }
+    if (!actual) {
+      signalAbort(agentId);
+      try { ctx.abort?.(); } catch { /* no actual identity, no tools */ }
+      return event.payload;
+    }
     if (!memberDriftReported.has(agentId)) {
       memberDriftReported.add(agentId);
       const taskDir = memberTasks.get(agentId);
@@ -2081,6 +2234,33 @@ export function installOmpExtension(pi, sdk) {
       try { ctx.abort?.(); } catch { /* the host may already be stopping */ }
     }
     return event.payload;
+  });
+
+  // Child extension factories share the actual unit map. Every native tool
+  // passes this entrance: the handoff declaration is never treated as a
+  // permission until its real member/call/model binding has succeeded.
+  pi.on('tool_call', async (event, ctx) => {
+    const sessionId = ctx.sessionManager.getSessionId();
+    const agentId = agentIdFor(sessionId);
+    if (!nativeMemberIds.has(agentId)) return;
+    const binding = memberWorkUnits.get(agentId);
+    if (!binding?.bound) return { block: true, reason: 'Orbit member has no actual bound work unit; stop; Root must reconcile the host binding-failure record' };
+    const report = runWorkUnit(binding.taskDir, 'read', { id: binding.unitId });
+    const unit = report.unit;
+    let state;
+    try { state = JSON.parse(await fs.readFile(path.join(binding.taskDir, 'state.json'), 'utf8')); }
+    catch { return { block: true, reason: 'Orbit member task state is unreadable' }; }
+    if (!ACTIVE.has(state.status) || !report.ok || !unit || unit.status !== 'bound' ||
+        unit.member_id !== agentId || unit.tool_call_id !== binding.toolCallId ||
+        unit.input_digest !== report.task_input_digest || unit.artifact_root !== report.artifact_root ||
+        unit.model !== memberExpectedModels.get(agentId) || memberDriftReported.has(agentId))
+      return { block: true, reason: 'Orbit work unit is finished, stale, drifted or belongs to another actual member; stop and let Root reconcile the result' };
+    const result = await validateMemberTool(unit, { toolName: event.toolName, input: event.input,
+      cwd: ctx.cwd, rootAgentId: sdk.MAIN_AGENT_ID });
+    if (result?.block) observeCollab({ kind: 'work_unit_tool_blocked', task_dir: binding.taskDir,
+      session_id: sessionId, agent_id: agentId, work_unit_id: unit.id,
+      tool_call_id: event.toolCallId, tool: event.toolName, reason: result.reason, at: Date.now() });
+    return result;
   });
 
   // Native peer messages use either `hub` or `write agent://<peer>`.

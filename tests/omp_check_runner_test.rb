@@ -71,23 +71,35 @@ module OmpCheckRunnerTest
       failure = ENV["ORBIT_FAKE_CHECK"]
       if %w[fail_auth fail_quota_heuristic fail_unknown fail_contract].include?(failure)
         payload = {
-          "ok" => false, "review_ran" => false,
+          "ok" => false, "review_ran" => false, "attempt_id" => "orbit-check-attempt-#{failure}",
           "fingerprint_before" => "sha256:fixed", "fingerprint_after" => "sha256:fixed"
         }
         case failure
         when "fail_auth"
           payload["error"] = { "kind" => "auth_or_quota", "message" => "provider returned 401" }
           payload["problems"] = ["401 unauthorized"]
+          # A rejected request can still have been metered before it failed, and
+          # a metered turn the provider did not identify is a call-level gap.
+          payload["model"] = "zenmux/x-ai/grok-4.7"
+          payload["usage"] = [{ "provider" => "zenmux", "model" => "x-ai/grok-4.7",
+                                "input" => 120, "output" => 3, "cacheRead" => 4096 }]
+          payload["usage_gaps"] = ["model call 1: no provider call boundary was observed for this response, so this call has no invocation id"]
         when "fail_quota_heuristic"
           payload["problems"] = ["429 rate limit exceeded"]
         when "fail_contract"
           payload["review_ran"] = true
           payload["model"] = "zenmux/x-ai/grok-4.7"
+          payload["usage"] = [{ "call_id" => "orbit-call-contract-1", "origin" => "local_provider_invocation",
+                                "provider_response_id" => "req_9", "provider" => "zenmux",
+                                "model" => "zenmux/x-ai/grok-4.7", "requested_model" => "zenmux/x-ai/grok-4.7",
+                                "input" => 500, "output" => 40, "cacheRead" => 0 }]
+          payload["usage_gaps"] = []
           payload["problems"] = ["next_check_seconds must be a positive integer"]
           payload["contract_problems"] = ["next_check_seconds must be a positive integer"]
           payload["result"] = nil
         else
           payload["problems"] = ["model request failed"]
+          payload["usage_gaps"] = ["no assistant turn completed for this check attempt, so no provider usage was reported"]
         end
         File.write(config.fetch("out"), JSON.generate(payload))
         exit 1
@@ -103,7 +115,12 @@ module OmpCheckRunnerTest
       result["delivery"] = { "ready" => "yes", "reason" => "" } if mode == "invalid_delivery"
       File.write(config.fetch("out"), JSON.generate(
         "ok" => true, "result" => result, "model" => "zhipu-coding-plan/glm-5.2",
-        "usage" => [{ "input" => 3140, "output" => 291, "cacheRead" => 2944 }],
+        "attempt_id" => "orbit-check-attempt-1",
+        "usage" => [{ "call_id" => "orbit-call-pass-1", "origin" => "local_provider_invocation",
+                      "usage_status" => "reported", "provider_response_id" => "req_pass_1", "provider" => "zhipu",
+                      "model" => "glm-5.2", "requested_model" => "glm-5.2", "stop_reason" => "end",
+                      "input" => 3140, "output" => 291, "cacheRead" => 2944 }],
+        "usage_gaps" => [],
         "fingerprint_before" => "sha256:fixed",
         "fingerprint_after" => mode == "mismatch" ? "sha256:changed" : "sha256:fixed",
         "review_ran" => true, "problems" => []
@@ -162,10 +179,21 @@ module OmpCheckRunnerTest
              "the child receives the fixed snapshot and the explicit OMP model")
       assert(!argv.join(" ").include?("codex") && run["executable"] != "codex", "codex exec is not launched")
       assert(check.actual_model == "zhipu-coding-plan/glm-5.2", "actual model is recovered from evidence")
-      assert(check.usage == {
-               "input" => 3140, "cacheRead" => 2944, "output" => 291,
-               "input_tokens" => 6084, "output_tokens" => 291, "total_tokens" => 6375
-             }, "cacheRead is kept separate and included in the tokens TaskRuntime sums")
+      assert(check.attempt_id == "orbit-check-attempt-1", "the check attempt id is recovered from evidence")
+      assert(check.usage["input"] == 3140 && check.usage["cacheRead"] == 2944 && check.usage["output"] == 291,
+             "the real sample split is preserved")
+      assert(check.usage["input_tokens"] + check.usage["output_tokens"] == 6375 && check.usage["total_tokens"] == 6375,
+             "cacheRead is included in the tokens TaskRuntime sums")
+      assert(check.usage["usage_status"] == "reported" && check.usage["incomplete"] == false &&
+             check.usage.dig("coverage", "cacheRead", "missing_calls") == 0,
+             "a fully reported attempt is marked reported with full per-field coverage")
+      assert(check.usage["calls"] == [{ "call_id" => "orbit-call-pass-1", "origin" => "local_provider_invocation",
+                                        "usage_status" => "reported", "provider_response_id" => "req_pass_1",
+                                        "provider" => "zhipu", "model" => "glm-5.2",
+                                        "requested_model" => "glm-5.2", "stop_reason" => "end",
+                                        "input" => 3140, "output" => 291, "cacheRead" => 2944 }],
+             "each model call keeps its own invocation id, provider id, models and original categories")
+      assert(check.usage["gaps"] == [], "a fully reported attempt has no call-level gap")
       assert(check.evidence["fingerprint_before"] == "sha256:fixed", "snapshot fingerprints are recoverable")
       assert(child_env["PI_CODING_AGENT_DIR"] == request["profile"] && child_env["OMP_PROFILE_set"] == false,
              "the child gets a private profile and not OMP_PROFILE")
@@ -282,8 +310,27 @@ module OmpCheckRunnerTest
     assert(usage["input_tokens"] + usage["output_tokens"] == 17843 && usage["total_tokens"] == 17843,
            "TaskRuntime's input_tokens + output_tokens includes cacheRead and matches the sample total")
     assert(!usage.key?("cost"), "directory price is not copied or invented")
-    assert(Orbit::OmpCheckRunner.normalize_usage([{ "input" => 1, "output" => 1 }]).nil?,
-           "missing cacheRead stays unknown instead of being treated as free")
+    assert(usage["calls"].length == 3 && usage["calls"].none? { |call| call.key?("call_id") },
+           "a call without an observed boundary keeps no invented invocation id and no origin")
+    assert(!usage.key?("reasoningTokens") && !usage.key?("cacheWrite"),
+           "a category only some calls reported stays unknown for the attempt instead of being completed with zeros")
+    partial = Orbit::OmpCheckRunner.normalize_usage([{ "input" => 1, "output" => 1 }])
+    assert(partial["usage_status"] == "unknown" && partial["incomplete"] == true &&
+           !partial.key?("input_tokens") &&
+           partial.dig("coverage", "cacheRead", "missing_calls") == 1 &&
+           partial["calls"].length == 1 && partial["calls"].first["input"] == 1,
+           "a call missing a field is still kept, the missing field is reported, and the legacy pair is omitted " \
+           "when it cannot be formed as integers")
+
+    reported = [
+      { "call_id" => "resp-1", "reasoningTokens" => 400, "input" => 10, "output" => 1000, "cacheRead" => 0 },
+      { "call_id" => "resp-2", "reasoningTokens" => 100, "input" => 20, "output" => 500, "cacheRead" => 5 }
+    ]
+    both = Orbit::OmpCheckRunner.normalize_usage(reported)
+    assert(both["reasoningTokens"] == 500 && both["output"] == 1500,
+           "reasoning is preserved under its own provider name and never folded into output")
+    assert(both["calls"].map { |call| call["call_id"] } == %w[resp-1 resp-2],
+           "each model call keeps its own provider-reported id")
   end
 
   def stops_the_process_group
@@ -292,6 +339,7 @@ module OmpCheckRunnerTest
     ENV["ORBIT_FAKE_CHECK"] = "sleep"
     begin
       run = check.start(directory: snapshot, inputs: inputs, context: {}, output_dir: output, role: "reviewer")
+      assert(!check.receipts_finalized?, "a live reviewer snapshot can still change")
       check.stop!
       gone = false
       begin
@@ -300,6 +348,7 @@ module OmpCheckRunnerTest
         gone = true
       end
       assert(gone && run.pgid == run.pid, "stop! confirms the reviewer process group has exited")
+      assert(check.receipts_finalized?, "confirmed exit seals the pending call receipts")
     ensure
       ENV.delete("ORBIT_FAKE_CHECK")
       check.close
@@ -479,6 +528,49 @@ module OmpCheckRunnerTest
     end
   end
 
+  def retains_reported_usage_and_identity_from_a_failed_check
+    root, snapshot, output = fixture
+    check = runner(write_fake(root))
+    begin
+      ENV["ORBIT_FAKE_CHECK"] = "fail_auth"
+      check.start(directory: snapshot, inputs: inputs, context: {}, output_dir: output, role: "reviewer")
+      begin
+        wait_result(check)
+      rescue Orbit::CheckRunner::Error
+        nil
+      end
+      assert(check.usage.is_a?(Hash) && check.usage["input_tokens"] == 4216 && check.usage["output_tokens"] == 3,
+             "a metered failure keeps the reported usage instead of reading as zero consumption")
+      assert(check.actual_model == "zenmux/x-ai/grok-4.7",
+             "a failed call still reports the model that actually ran, not the requested one")
+      assert(check.attempt_id == "orbit-check-attempt-fail_auth",
+             "a failed attempt carries its own id so a retry is attributed separately")
+      assert(check.usage["calls"] == [{ "provider" => "zenmux", "model" => "x-ai/grok-4.7",
+                                        "input" => 120, "output" => 3, "cacheRead" => 4096 }],
+             "an unobserved boundary keeps the measured usage and no invented invocation id")
+      assert(check.usage["gaps"] == ["model call 1: no provider call boundary was observed for this response, so this call has no invocation id"],
+             "the call-level gap is reported explicitly instead of being zeroed")
+
+      unmetered = File.join(root, "output-unmetered")
+      ENV["ORBIT_FAKE_CHECK"] = "fail_unknown"
+      check.start(directory: snapshot, inputs: inputs, context: {}, output_dir: unmetered, role: "reviewer")
+      begin
+        wait_result(check)
+      rescue Orbit::CheckRunner::Error
+        nil
+      end
+      assert(check.usage.nil? && check.usage_gaps.length == 1,
+             "a failure with no reported usage stays unknown and keeps the gap instead of a zero amount")
+      assert(check.actual_model.nil?, "a failure without a reported model stays unknown")
+      assert(check.attempt_id == "orbit-check-attempt-fail_unknown",
+             "the retry keeps its own attempt id instead of the id of the attempt it replaced")
+    ensure
+      ENV.delete("ORBIT_FAKE_CHECK")
+      check.close
+      FileUtils.remove_entry(root)
+    end
+  end
+
   def classifies_a_contract_failure_as_invalid_result
     root, snapshot, output = fixture
     check = runner(write_fake(root))
@@ -509,6 +601,7 @@ module OmpCheckRunnerTest
     stops_the_process_group
     selects_model_for_the_next_check_and_refuses_while_in_flight
     recovers_after_a_classified_failure_without_terminating
+    retains_reported_usage_and_identity_from_a_failed_check
     classifies_a_contract_failure_as_invalid_result
     probe_reports_models_with_reasons_and_no_token
     probe_fails_closed_on_reviewer_error

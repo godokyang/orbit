@@ -169,7 +169,7 @@ module Orbit
       score = format_score(jev.dig("scores", "delegatable"))
       return nil unless score
 
-      "第一阶段候选分 delegatable #{score}（不是委派建议）"
+      "历史第一阶段候选分 delegatable #{score}（不是委派建议，不用于新版推荐）"
     end
 
     # `decision` is the runtime's final stage-two result. Records written
@@ -181,22 +181,40 @@ module Orbit
       hint = delegation_hint(state)
       return nil unless delegation.is_a?(Hash) || hint
 
+      version = delegation&.[]("question_set_version") || hint&.[]("question_set_version")
+      if %w[jev-delegation-1 jev-candidates-1].include?(version) ||
+         (version.nil? && (delegation_score(delegation, hint, "parallel_gain") ||
+                          delegation_score(delegation, hint, "member_fit")))
+        return "历史委派判断（#{version || '未注明版本'}）：#{delegation&.[]('decision') || '未记录决定'}；不用于新版自动推荐"
+      end
+
       scores = delegation_score_text(delegation, hint)
       case delegation.is_a?(Hash) ? delegation["decision"] : nil
       when "recommended"
-        if hint
-          "最终建议委派#{scores}"
+        if hint && !hint["invalid_reason"]
+          unit = hint["work_unit_id"]
+          "最终建议委派#{unit ? "（工作单元 #{unit}）" : ""}#{scores}"
+        elsif hint && hint["invalid_reason"]
+          "此前推荐已失效（#{hint['invalid_reason']}），不能用于当前派发"
         else
           "第二阶段达到建议门槛，但 delegation_hint 尚未持久化，不能视为可执行建议#{scores}"
         end
       when "pending_candidates"
-        "有据候选尚未同时达到质量与整体耗时门槛；无资料候选未评分，暂无委派建议"
+        "候选任务质量依据尚未支持正向推荐；缺事实者未评分，Root 可自主选择"
+      when "facts_only"
+        "仅显示候选事实（#{delegation['reason'].to_s[0, 180]}）；Root 可自主选择"
+      when "uncalibrated"
+        "新质量判断尚未校准放行；已显示事实，Root 可自主选择"
+      when "conflict_review"
+        "候选质量事实存在待复核冲突；Root 核对来源后决定"
       when "no_candidates"
         "候选池不可用或本会话没有可用成员，暂无委派建议"
-      when "declined"
+      when "not_recommended", "declined"
         "最终不建议委派#{scores}"
       when "unavailable"
         "最终建议不可用#{scores}"
+      when "stale"
+        "工作单元已不对应当前要求，不能复用推荐"
       else
         if hint
           "旧记录没有 decision；持久 delegation_hint 才是当时的最终建议#{scores}"
@@ -212,12 +230,8 @@ module Orbit
     end
 
     def delegation_score_text(delegation, hint)
-      fit = format_score(delegation_score(delegation, hint, "member_fit"))
-      gain = format_score(delegation_score(delegation, hint, "parallel_gain"))
-      parts = []
-      parts << "member_fit #{fit}" if fit
-      parts << "parallel_gain #{gain}" if gain
-      parts.empty? ? "" : "（#{parts.join('，')}）"
+      quality = format_score(delegation_score(delegation, hint, "quality"))
+      quality ? "（任务质量判断 #{quality}）" : ""
     end
 
     def delegation_score(delegation, hint, key)
@@ -267,6 +281,9 @@ module Orbit
     # Sums only recorded integer input/output pairs. A missing field stays
     # unknown; Root's session cumulative is never treated as this task's usage.
     def usage_lines(state)
+      calls = state.dig("usage", "resource_calls")
+      return resource_usage_lines(state, calls) if calls.is_a?(Hash)
+
       lines = []
       missing = []
       input_total = 0
@@ -315,6 +332,35 @@ module Orbit
                else
                  "可核算总计：未知（缺少 #{missing.join('、')}）"
                end
+      lines
+    end
+
+    def resource_usage_lines(state, calls)
+      lines = ["已记录调用：#{calls['call_count']}；缺用量回执：#{calls['unknown_usage_calls']}；部分用量：#{calls.fetch('partial_usage_calls', 0)}"]
+      roles = { "root" => "Root", "member" => "执行成员", "judgment" => "JEV 判断",
+                "checker" => "独立检查", "arbiter" => "裁定" }
+      groups = Array(calls["groups"])
+      groups.first(30).each do |group|
+        identity = group["actual_identity"] || {}
+        model = identity["model"] || "实际型号未知"
+        fields = (group["usage_fields"] || {}).first(8).map do |name, field|
+          amount = field["reported_sum"].nil? ? "未知" : field["reported_sum"]
+          missing = field["missing_calls"].to_i
+          "#{name} #{amount} #{field['unit']}#{missing.positive? ? "（#{missing} 次缺失）" : ''}"
+        end
+        lines << "#{roles.fetch(group['role'], group['role'])} #{group['phase']} #{model}：#{fields.empty? ? '未知' : fields.join('，')}"
+      end
+      lines << "其余 #{groups.length - 30} 组用量见详细记录" if groups.length > 30
+      lines << "仅展示已有调用回执；输入、输出、缓存和推理分类保持原定义，不合成未知总量"
+      gaps = state.dig("usage", "resource_call_gaps")
+      lines << "部分调用归属或记录缺失，未计为零" if gaps.is_a?(Hash) && gaps.any?
+      %w[root member checker arbiter].each do |role|
+        next if groups.any? { |group| group["role"] == role }
+        next if role == "member" && Array(state["members"]).empty?
+
+        lines << "#{roles.fetch(role)} 本任务用量：未知（尚无可归属调用回执）"
+      end
+      lines << "本次费用／额度消耗：未知（尚无可核验结算）"
       lines
     end
 
@@ -418,7 +464,7 @@ module Orbit
         text += "；降级选择（检查质量未经证实；#{selection['basis']}）"
       end
       if selection.is_a?(Hash) && selection["quality_basis"] == "model_overview_prior"
-        text += "；仅据模型级质量先验排序（当前路由与推理变体未核实，端到端时间未知）"
+        text += "；模型级质量先验（不证明当前路由与推理变体适配）"
       end
       text
     end

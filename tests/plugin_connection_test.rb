@@ -40,7 +40,10 @@ module PluginConnectionTest
       "families" => { "zenmux/x-ai/grok-4.7" => "x", "junk" => "y", "provider/nocred" => "  " },
       "agents" => { "zenmux/x-ai/grok-4.7" => "orbit-m-1", "junk" => "orbit-m-2", "provider/nocred" => "  " },
       "routes" => { "zenmux/x-ai/grok-4.7" => "unknown", "provider/nocred" => "subscription_quota",
-                    "junk" => "direct_api", "provider/invalid" => "free" }
+                    "junk" => "direct_api", "provider/invalid" => "free" },
+      "limits" => { "provider/nocred" => { "source" => "omp_model_registry", "context_window" => 262144,
+        "input_modalities" => ["text", "token", "image"], "output_modalities" => ["text"], "supports_tools" => true,
+        "baseUrl" => "https://private.example", "cost" => { "input" => 0 } } }
     }
     with_server(result) do |connection, requests|
       catalog = connection.model_catalog
@@ -56,6 +59,10 @@ module PluginConnectionTest
       assert(catalog["routes"] == { "zenmux/x-ai/grok-4.7" => "unknown",
                                     "provider/nocred" => "subscription_quota" },
              "only proven, typed per-model routes cross the socket boundary")
+      assert(catalog.dig("limits", "provider/nocred", "context_window") == 262144 &&
+             catalog.dig("limits", "provider/nocred", "input_modalities") == %w[text image] &&
+             !catalog["limits"]["provider/nocred"].key?("baseUrl") && !catalog["limits"]["provider/nocred"].key?("cost"),
+             "actual route limits cross the bridge without endpoints or guessed prices")
     end
   end
 

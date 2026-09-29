@@ -34,11 +34,13 @@ async function run(args, cwd, input = '') {
 
 export const toolDescription = 'Start Orbit for multi-step work or when the user requests it; do local one-file edits yourself. Orbit prefers runnable models in the OMP candidate pool; if none run, Root can use another OMP-accessible model. JEV task-fit ranks suitable checkers but low or missing scores do not block a runnable model. No per-model user authorization is required. After a failed check Orbit records the failure and tries an unused runnable OMP model; never treat a failed check as a pass. Root may choose review_model from the current OMP catalog. Independent checks and confirmed completion remain required.';
 export const toolArgs = z => ({
-        action: z.enum(['context', 'start', 'status', 'check', 'amend', 'dispute', 'stop', 'review-model']),
+        action: z.enum(['context', 'start', 'status', 'check', 'amend', 'dispute', 'stop', 'review-model', 'work-unit']),
         task: z.string().optional().describe('Required for status/check/amend/dispute/stop/review-model: the exact task_directory returned by start.'),
         basis: z.array(z.string()).optional(), message_id: z.string().optional().describe('Native user message id selecting the original instruction for start.'),
         review_model: z.string().optional().describe('Optional Root-selected provider/id from the current OMP model catalog.'),
         intent: z.enum(['complete', 'pause']).optional().describe('stop only: complete (default) requires the actual finalization gate; pause is an explicit interruption.'),
+        operation: z.enum(['declare', 'read', 'list', 'finish']).optional().describe('work-unit operation; declare records a bounded handoff, finish records Root verification.'),
+        work_unit: z.record(z.string(), z.unknown()).optional().describe('work-unit payload: declare uses spec with objective, requirement references, scope paths/tools/commands, acceptance, escalation and optional context/decisions/dependencies/model_requirements; read/finish use id. Finish also needs status/result/verification.'),
         text: z.string().optional(), check_in: z.number().int().positive().optional()
       });
 
@@ -122,6 +124,10 @@ export function createOrbitHost({ provider, project, dispatch, bind, reset }) {
         if (a.action === 'review-model' && (typeof a.review_model !== 'string' || !a.review_model.trim()))
           throw new Error('review-model requires a Root-selected provider/id from the current OMP catalog');
         await ownedTask(a.task, id);
+        if (a.action === 'work-unit') {
+          return JSON.stringify(await run(['work-unit', a.task, a.operation || 'declare', '--file', '-'], project,
+            JSON.stringify(a.work_unit || {})));
+        }
         const args = [a.action, a.task];
         if (['status', 'stop'].includes(a.action)) args.push('--json');
         // Root-tool stop is a deliberate completion hand-off by default. An

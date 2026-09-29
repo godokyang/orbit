@@ -95,7 +95,7 @@ module OmpCliCheckerTest
   end
 
 
-  def candidate_pool_starts_with_a_low_jev_task_fit_score
+  def candidate_pool_starts_with_unreviewed_task_fit
     Dir.mktmpdir("orbit-omp-cli-") do |tmp|
       project = File.join(tmp, "project")
       FileUtils.mkdir_p(project)
@@ -111,8 +111,7 @@ module OmpCliCheckerTest
         "status" => "evidence",
         "retrieved_at" => Time.now.utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "sources" => ["https://example.test/models/pool-one"],
-        "metrics" => { "quality.score" => { "value" => 9.0, "unit" => "score", "basis" => "vendor benchmark" } },
-        "cost_tier" => { "band" => "low", "confidence" => "medium", "basis" => "provider plan comparison" }
+        "metrics" => { "quality.score" => { "value" => 9.0, "unit" => "score", "basis" => "vendor benchmark" } }
       }])
       marker = File.join(tmp, "checker-class.txt")
       connection = fake_connection(File.realpath(project), "root/model")
@@ -126,7 +125,7 @@ module OmpCliCheckerTest
         seen_instruction = state["instruction"]
         sleep(0.02)
         { "model" => "jev-test",
-          "scores" => candidates.to_h { |c| [c["model"], { "quality" => 0.03, "time" => 0.8 }] },
+          "scores" => candidates.to_h { |c| [c["model"], { "quality" => 0.03 }] },
           "usage" => { "total_tokens" => 42, "note" => "ignored non-numeric" } }
       end
       original_for_project = Orbit::JevAdvisor.method(:for_project)
@@ -139,37 +138,22 @@ module OmpCliCheckerTest
         status = with_stubs(connection, marker) { start_omp(project, prompt) }
         state = JSON.parse(File.read(Dir.glob(File.join(project, ".orbit/tasks/*/state.json")).fetch(0)))
         assert(status == 0 && state.dig("review", "model") == "pool/one",
-               "a 0.03 task-fit score does not block starting with a runnable pool model")
+               "a runnable pool model starts without a reviewed task-fit release")
         selection = state.dig("review", "selection")
-        assert(selection["source"] == "candidate_pool" &&
-               selection["selection_tier"] == "fallback" &&
-               selection["basis"] == "highest_available_task_fit" &&
-               selection["evidence_needed"] == [] &&
+        assert(selection["source"] == "candidate_pool" && selection["selection_tier"] == "fallback" &&
+               selection["basis"] == "pool_order_unreleased" && selection["evidence_needed"] == [] &&
                Orbit::TaskView.checker_model_line(state).include?("检查质量未经证实"),
-               "a low score with valid evidence must not ask Root to re-fetch already available facts")
-        assert(selection["quality_score"] == 0.03 &&
-               selection.dig("task_fit_scores", "pool/one", "quality") == 0.03 &&
-               selection.dig("judgment_state", "instruction").include?("TAIL-SENTINEL-END"),
-               "the actual task-fit input and per-model answer are saved with the task")
+               "unreviewed facts keep the runnable candidate and do not ask for available evidence again")
+        assert(selection["task_fit_scores"].empty? && seen_instruction.nil? && selection["usage"].nil? &&
+               !selection.key?("time_score") && !selection.key?("time_tier") && !selection.key?("cost_tier"),
+               "without a release/profile the checker judgment is not paid or replaced by legacy scores")
+        assert(selection["quality_sources"].is_a?(Array) && !selection["quality_sources"].empty? &&
+               selection["quality_evidence_valid_until"].to_s.include?("T"),
+               "sourced facts and their validity remain visible even though quality is unreviewed")
         events = File.readlines(Dir.glob(File.join(project, ".orbit/tasks/*/events.jsonl")).fetch(0))
                      .map { |line| JSON.parse(line) }
         selected = events.find { |event| event["type"] == "checker_model_selected" }
-        assert(selected.dig("selection", "task_fit_scores", "pool/one", "quality") == 0.03,
-               "the original scored selection survives later in-task re-selection in the event log")
-        assert(selection["time_score"] == 0.8 && %w[fast medium slow].include?(selection["time_tier"]),
-               "the JEV end-to-end time judgment and its coarse tier are recorded")
-        assert(selection["cost_tier"] == { "band" => "low", "confidence" => "medium", "basis" => "provider plan comparison" },
-               "the verified coarse cost tier behind the ordering is recorded without a per-token price")
-        assert(selection["quality_sources"].is_a?(Array) && !selection["quality_sources"].empty?,
-               "the cache sources behind the quality verdict are recorded (bounded, no credentials)")
-        assert(selection["quality_evidence_valid_until"].to_s.include?("T"),
-               "the validity of the quality evidence is recorded")
-        assert(selection["usage"] == { "total_tokens" => 42 },
-               "only numeric JEV usage counters are recorded, never text or credentials")
-        assert(selection["quality_elapsed_seconds"].is_a?(Numeric) && selection["quality_elapsed_seconds"] >= 0.01,
-               "the JEV quality judgment's monotonic elapsed time is recorded")
-        assert(seen_instruction.to_s.include?("TAIL-SENTINEL-END"),
-               "the full instruction reaches JEV; it is not silently truncated")
+        assert(selected.dig("selection", "basis") == "pool_order_unreleased", "the original fallback selection remains auditable")
       ensure
         Orbit::JevAdvisor.define_singleton_method(:for_project, original_for_project)
         Orbit::OmpCheckRunner.define_singleton_method(:probe_models, original_probe)
@@ -207,7 +191,7 @@ module OmpCliCheckerTest
       start_response = JSON.parse(output.string.lines.first)
       state = JSON.parse(File.read(Dir.glob(File.join(project, ".orbit/tasks/*/state.json")).fetch(0)))
       assert(status == 0 && state.dig("review", "model") == "pool/one" &&
-             state.dig("review", "selection", "basis") == "pool_order_unknown_fit",
+             state.dig("review", "selection", "basis") == "pool_order_unreleased",
              "an unknown task fit uses a runnable pool model, not the outside default or user selection")
       assert(start_response["evidence_needed"] == [{ "model" => "pool/one", "reasoning" => "unknown",
                                                       "billing_route" => "unknown", "status" => "absent" }] &&
@@ -355,7 +339,7 @@ module OmpCliCheckerTest
     explicit_model_overrides_a_nonempty_pool_and_is_allowed_outside_it
     explicit_model_unavailable_in_isolated_profile_does_not_start
     root_selects_an_omp_model_without_a_user_directive
-    candidate_pool_starts_with_a_low_jev_task_fit_score
+    candidate_pool_starts_with_unreviewed_task_fit
     a_model_without_provider_does_not_start
     model_status_reports_precise_candidate_diagnostics
     puts "PASS omp cli checker selection"

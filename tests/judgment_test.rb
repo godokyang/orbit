@@ -150,11 +150,12 @@ module JudgmentTest
   end
 
   def check_jev_advisor_carries_model_metadata
-    answers = { "stuck" => noul(0.1), "off_track" => noul(0.2), "artifact_ready" => noul(0.3), "delegatable" => noul(0.4) }
+    answers = { "stuck" => noul(0.1), "off_track" => noul(0.2), "artifact_ready" => noul(0.3) }
     with_fixture([payload(answers)]) do |endpoint, _requests|
       result = Orbit::JevAdvisor.new(api_key: "test-key", endpoint: endpoint).assess(state: { "instruction" => "x" })
-      check(result["provider"] == "typesafe" && result["question_set_version"] == "jev-observation-1" &&
-            result["scores"] == { "stuck" => 0.1, "off_track" => 0.2, "artifact_ready" => 0.3, "delegatable" => 0.4 },
+      check(result["provider"] == "typesafe" &&
+            result["question_set_version"] == Orbit::ModelQualityPolicy::QUESTION_SET_VERSIONS.fetch("observation") &&
+            result["scores"] == { "stuck" => 0.1, "off_track" => 0.2, "artifact_ready" => 0.3 },
             "JevAdvisor results expose the unified provider and question set version without changing scores")
     end
   end

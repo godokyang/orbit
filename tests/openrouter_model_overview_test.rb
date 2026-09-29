@@ -28,6 +28,7 @@ module OpenRouterModelOverviewTest
       test_v1_snapshot_is_not_reused_as_v2(tmp)
       test_pagination_completeness(tmp)
       test_status_diagnostics_are_read_only(tmp)
+      test_mapping_provenance(tmp)
     end
     puts("OPENROUTER_MODEL_OVERVIEW_TEST_PASS assertions=#{@assertions}")
   end
@@ -307,6 +308,35 @@ module OpenRouterModelOverviewTest
     report = failing.status(project_root: project)
     assert_equal("error", report.fetch("last_attempt"), "a failed attempt is reported")
     assert(report.fetch("last_error").include?("429"), "the last failure is visible without the key")
+  end
+
+  def test_mapping_provenance(tmp)
+    project = File.join(tmp, "project-provenance")
+    http = FakeHttp.new([[200, models_body([row("deepseek/deepseek-v4.1-flash")])]])
+    instance = overview(tmp, "provenance", http: http)
+    write_map(instance.map_path, [mapping])
+    instance.refresh(project_root: project)
+
+    provenance = instance.mapping_provenance(model: "opencode-go/deepseek-v4.1-flash", project_root: project)
+    assert_equal("2026-09-28T00:00:00Z", provenance.fetch("verified_at"), "the mapping review date is queryable")
+    assert_equal("Root", provenance.fetch("verified_by"), "the mapping reviewer is queryable")
+    assert_equal(["https://vendor.example/deepseek-v4.1-flash"], provenance.fetch("sources"),
+                 "the mapping first-party sources are queryable")
+    assert_equal("unknown", provenance.dig("mapping_identity", "billing_route"), "provenance keeps the exact identity")
+    assert_equal(nil, instance.mapping_provenance(model: "opencode-go/stranger", project_root: project),
+                 "an unmapped identity has no provenance")
+    assert_equal(nil, instance.mapping_provenance(model: "opencode-go/deepseek-v4.1-flash",
+                                                  billing_route: "direct_api", project_root: project),
+                 "provenance follows the same exact route matching as lookup")
+
+    keyless = overview(tmp, "provenance-keyless", env: { "OPENROUTER_API_KEY" => nil }, http: FakeHttp.new([]))
+    assert_equal(nil, keyless.mapping_provenance(model: "opencode-go/deepseek-v4.1-flash", project_root: project),
+                 "no key closes the provenance gate")
+
+    FileUtils.mkdir_p(File.join(project, ".orbit"))
+    File.write(File.join(project, ".orbit", "jev-disabled"), "")
+    assert_equal(nil, instance.mapping_provenance(model: "opencode-go/deepseek-v4.1-flash", project_root: project),
+                 "a disabled project closes the provenance gate")
   end
 
   def overview(tmp, name, env: {}, clock: nil, http: nil)

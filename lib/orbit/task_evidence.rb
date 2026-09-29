@@ -28,7 +28,7 @@ module Orbit
   # size while being packaged abort the export instead of corrupting it.
   module TaskEvidence
     ARCHIVE_FORMAT = "orbit-task-evidence-export-1"
-    LOCK_FILES = %w[runtime.lock members.lock].freeze
+    LOCK_FILES = %w[runtime.lock members.lock work-units.lock resource-calls.json.lock].freeze
     SQLITE_LIVE_SUFFIXES = %w[-shm -wal].freeze
     # TaskRuntime event types whose archive-side check directory is linked into
     # timeline entries (fact association only, no defect judgment).

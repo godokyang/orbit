@@ -1,5 +1,7 @@
 # frozen_string_literal: true
 
+require "securerandom"
+
 module Orbit
   # Unified external-judgment data model (ADR-008 2026-09-26 supplement;
   # contracts/task-runtime.md「统一判断数据模型与 provider 适配」). Business
@@ -63,7 +65,7 @@ module Orbit
     SCHEMA_VERSION = 1
     class Error < StandardError; end
 
-    attr_reader :status, :answers, :provider, :actual_model, :usage, :error
+    attr_reader :status, :answers, :provider, :actual_model, :usage, :error, :call_id
 
     # `answers` maps question ids to {"probability_true" => 0..1}. Validation
     # happens here, not in the adapters: Orbit owns result validation and every
@@ -98,14 +100,23 @@ module Orbit
       new("unavailable", {}, provider, actual_model, bounded_usage(usage), reason)
     end
 
-    def initialize(status, answers, provider, actual_model, usage, error)
+    def initialize(status, answers, provider, actual_model, usage, error, call_id = nil)
       @status = status
       @answers = answers
       @provider = provider
       @actual_model = actual_model
       @usage = usage
       @error = error
+      @call_id = call_id
       freeze
+    end
+
+    def with_call_id(id)
+      unless id.is_a?(String) && id.match?(/\Aorbit-judgment-[a-f0-9-]{36}\z/)
+        raise Error, "judgment call id must identify a local request"
+      end
+
+      self.class.new(status, answers, provider, actual_model, usage, error, id)
     end
 
     def answered? = status == "answered"
@@ -133,6 +144,7 @@ module Orbit
       result["answers"] = answers.transform_values { |value| { "probability_true" => value } } if answered?
       result["usage"] = usage if usage
       result["error"] = error if unavailable?
+      result["call_id"] = call_id if call_id
       result
     end
 

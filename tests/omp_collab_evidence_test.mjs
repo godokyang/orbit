@@ -133,8 +133,14 @@ try {
 
   // Task dispatch evidence: original item input (name/model/task/rationale as
   // explicitly supplied) captured before the gate rewrites the name.
+  const declareUnit = async (dir, context, objective) => (await tool({ action: 'work-unit', task: dir,
+    operation: 'declare', work_unit: { spec: { objective, requirements: ['original user request'],
+      allowed_paths: ['src'], allowed_tools: ['read'], allowed_commands: [],
+      acceptance: 'Check the delegated facts', escalation: 'Report missing evidence to Root' } } }, context)).unit;
+  const dispatchUnit = await declareUnit(taskDir, ctx, 'Check the limits');
+  const originalTask = `Check the limits\norbit-unit: ${dispatchUnit.id}`;
   const dispatch = await emit('tool_call', { toolName: 'task', toolCallId: 'call-dispatch',
-    input: { agent: 'task', name: 'member-a', model: 'glm/x', task: 'Check the limits', why: 'explicit delegation rationale' } }, ctx);
+    input: { agent: 'task', name: 'member-a', model: 'glm/x', task: originalTask, why: 'explicit delegation rationale' } }, ctx);
   assert.ok(!dispatch.block, `dispatch must pass the gate: ${JSON.stringify(dispatch)}`);
   const memberSession = session('member-live');
   const memberRef = { id: dispatch.input.name, kind: 'sub', parentId: mainAgentId, status: 'running',
@@ -224,7 +230,7 @@ try {
   assert.equal(dispatchLine.model, 'glm/x', 'explicitly requested model is kept');
   assert.equal(dispatchLine.rationale, 'explicit delegation rationale', 'explicit rationale is kept');
   assert.equal(dispatchLine.rationale_source, 'dispatch_input', 'the reason is marked as dispatch-supplied');
-  assert.equal(dispatchLine.task, 'Check the limits');
+  assert.equal(dispatchLine.task, originalTask, 'the complete native input is preserved before adding the durable handoff');
   assert.equal(dispatchLine.requested_name, dispatch.input.name);
   const memberIdentity = lines.find(l => l.kind === 'model_identity' && l.role === 'member');
   assert.equal(memberIdentity.agent_id, dispatch.input.name);
@@ -262,7 +268,7 @@ try {
   await emit('tool_call', { toolName: 'hub', toolCallId: 'other-task', input: { op: 'send', to: 'nobody', message: 'other task traffic' } }, ctxFor(root2));
   await waitFor(async () => (await collabLines(taskDir2)).some(l => l.tool_call_id === 'other-task'), 'task2 durable line');
   const noReason = await emit('tool_call', { toolName: 'task', toolCallId: 'no-reason',
-    input: { agent: 'task', task: 'Inspect task two' } }, ctxFor(root2));
+    input: { agent: 'task', task: `Inspect task two\norbit-unit: ${(await declareUnit(taskDir2, ctxFor(root2), 'Inspect task two')).id}` } }, ctxFor(root2));
   assert.ok(!noReason.block);
   const missingReason = await waitFor(async () => (await collabLines(taskDir2))
     .find(l => l.kind === 'task_dispatch' && l.tool_call_id === 'no-reason'), 'unrecorded reason');

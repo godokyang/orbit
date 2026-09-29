@@ -32,6 +32,15 @@ module Orbit
     attr_reader :model
 
     def judge(request)
+      # One id per provider invocation, including failures. Retrying the same
+      # semantic request is another possible charge, never the same receipt.
+      id = "orbit-judgment-#{SecureRandom.uuid}"
+      perform_judgment(request).with_call_id(id)
+    end
+
+    private
+
+    def perform_judgment(request)
       payload = nil
       raise Error, "TYPESAFE_API_KEY is missing" if @api_key.empty?
 
@@ -64,8 +73,6 @@ module Orbit
     rescue StandardError => error
       unavailable("TypeSafe assessment failed: #{error.class}", payload: payload)
     end
-
-    private
 
     def post(state, questions)
       request = Net::HTTP::Post.new(@endpoint)

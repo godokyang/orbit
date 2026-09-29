@@ -249,6 +249,27 @@ module Orbit
       { "status" => status, "facts" => facts, "prior" => prior }
     end
 
+    # Read-only provenance of the audited mapping entry an identity resolves
+    # to: the mapping's own verification date, reviewer and first-party
+    # sources, kept distinct from the snapshot fetch date and from the
+    # (unknown) benchmark measurement date. Returns nil behind the same
+    # disabled/not-configured gates as #lookup and whenever the identity is
+    # unmapped; performs no network I/O and no writes.
+    def mapping_provenance(model:, reasoning: "unknown", billing_route: "unknown", project_root:)
+      return nil if project_disabled?(project_root)
+      return nil if @api_key.empty?
+      return nil unless model.to_s.match?(MODEL_PATTERN)
+
+      provider, model_id = model.to_s.split("/", 2)
+      entry = mapping_for(provider: provider, model: model_id,
+                          reasoning: normalize_reasoning(reasoning), billing_route: billing_route)
+      return nil unless entry
+
+      { "mapping_identity" => entry.slice("provider", "model", "reasoning", "billing_route"),
+        "verified_at" => entry.fetch("verified_at"), "verified_by" => entry.fetch("verified_by"),
+        "sources" => entry.fetch("sources") }
+    end
+
     # Read-only diagnostics for `orbit model-status`: never contacts the
     # network, never writes, and reads the cache only behind the same
     # disabled/not-configured gates as #lookup. Returns a key-free Hash:

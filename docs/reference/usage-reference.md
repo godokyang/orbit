@@ -1,6 +1,6 @@
 # Orbit 进阶使用参考
 
-首次安装和日常使用见 [README](../../README.md)。本文用于自定义安装、维护、手动 CLI 操作和其他工具集成。
+首次安装和日常使用见 [README](../../README.md)。本文用于自定义安装、维护、手动 CLI 操作和其他工具集成。当前仓库在实施混合目标；以下新入口、选型与工作单元属于工作区接线，未冻结新安装构建。package 仍为 0.7.10，安装事实以 version 输出为准，未完成项见[当前计划](../plan/vision-completion-plan.md)。
 
 ## 安装选项
 
@@ -39,7 +39,7 @@ Root 可在无活动 Orbit 任务时使用 OMP 原生 `task`：不建立 Orbit �
 
 Orbit 随版本发布 `provider/model/reasoning/billing_route` → OpenRouter 目录 `id` 与 `canonical_slug` 成对映射，用户可在 `${XDG_CONFIG_HOME:-$HOME/.config}/orbit/openrouter-model-map.json` 显式提供带核实者、时间、厂商资料和目标 OpenRouter URL 的覆盖项；未核实的映射无效，不靠近似型号自动配对。[六候选审计](openrouter-model-mapping-audit.md)中四条模型版本对应有据，完整 reasoning／实际计费路由仍需核对；**审计抓取当日仅 `kimi-code/k3-256k` 一条有非空 coding 指数**，不是所有后续目录的实时覆盖结论。另两项版本未核实，不能凑数。Artificial Analysis 指数来自 OpenRouter 模型目录，只是型号级质量先验，不证明实际路由、推理档位、价格或额度。
 
-完整混合模型目标实施中的工作区已使用 overview-v2：保存目录 ID、上下文／模态、支持参数及可得 coding／agentic／intelligence；不复用旧 v1，agentic-only 不被通用 coding 门挡住。查询默认只显示事实，明确选择任务相关指标才提供先验；缺 coding 不用其他指数补成编码证据。当前测量日期和方法版本未知，72 小时只表示抓取有效期；任务要求已知测量日期时不给先验。目录上限与工具声明不替代实际路由／宿主能力。成员和新版检查者任务指标接线、校准与真实验收仍在推进，既有未分类检查者消费者只接收事实、不自动评分；该中间态不表示最终功能缩减，也不是 0.7.10 安装版已上线。下文原 `jev-checker-task-fit-2` 排序仅记录尚待退出的旧路径。
+完整混合模型目标实施中的工作区已使用 overview-v2：保存目录 ID、上下文／模态、支持参数及可得 coding／agentic／intelligence；不复用旧 v1，agentic-only 不被通用 coding 门挡住。查询默认只显示事实，明确选择任务相关指标才提供先验；缺 coding 不用其他指数补成编码证据。当前测量日期和方法版本未知，72 小时只表示抓取有效期；任务要求已知测量日期时不给先验。目录上限与工具声明不替代实际路由／宿主能力。成员和新版检查者任务指标已接工作区，校准与真实验收仍在推进；未分类消费者只接收事实、不自动评分。旧 `jev-checker-task-fit-2` 按历史版本解释，不进入新排序；当前接线不代表 0.7.10 安装版已上线。
 
 覆盖文件与随包 [`lib/orbit/data/openrouter-model-map.json`](../../lib/orbit/data/openrouter-model-map.json) 同格式：顶层 `schema_version="orbit-openrouter-model-map-v1"`、`entries` 数组；每项**恰好**含 `provider`、`model`、`reasoning`、`billing_route`、`openrouter_id`、`canonical_slug`、`sources`（1–5 个无凭据的绝对网页 URL）、`verified_at`（ISO 8601 UTC）、`verified_by`。`openrouter_id` 是目录实际行的 `id`，可与日期后缀的 `canonical_slug` 不同；`~…-latest` 别名不可作目标。程序校验结构、目标行和 canonical 漂移，但**不能代用户阅读网页来确认厂商版本事实**；提交覆盖前由 Root／用户审核资料。不需要覆盖已核实的默认项。
 
@@ -154,14 +154,15 @@ orbit model-status --project DIR  # 只读精确身份的证据诊断；无会�
 
 候选池保存在用户级配置，跨会话共用，只保存型号，不保存凭据。检查者优先从池与当前 OMP 会话可用目录的交集中预检；池中无可运行型号或池空时，从 OMP 当前会话可用型号中继续筛选，Root 也可显式指定可用检查者。**受控任务的成员**有可用池内 Agent 时，通用 `agent="task"` 若解析为池外 OMP 默认型号会被拒绝并列出可用 Agent；Root 可直接派池内 Agent，即使 Jev 尚待补证。池空或当前无可用池内 Agent 才放行可解析的 OMP 默认。Root 想派默认型号可通过 `/orbit-models` 把它加入池；无需额外用户逐型号授权。非受控 OMP 会话不受此门约束，成员实际型号漂移仍被拒绝。Jev 只给建议，Root 自选不冒充推荐。
 
-执行成员的逐候选二阶段若记录 `pending_candidates`，表示有据候选未同时达到质量和**整项端到端时间**门，缺证据者没有被评分或推荐；`no_candidates` 表示候选池不可用或本会话没有可用成员。这些都不是派发审批：Root 可自行选择池内 Agent，记为无 hint 派发；有可用池内 Agent 时不能靠通用 `@task` 绕到池外默认。`delegatable` 仅是第一阶段的候选分，不是最终建议。
+新版成员选择针对 Root 声明的有界工作单元，保留目标、要求引用、上下文／决定、范围、验收、依赖和升级条件。单元绑定当前输入与实际产物根；未满足依赖不派发建议，修订或工作区重绑定后不能采纳旧结果。Root 可通过 Orbit 工具或 `orbit work-unit` 声明与核验；工作区已接真实宿主 bind 和逐工具范围校验。Root 的原生 task 文本须以独立行引用 `orbit-unit: wu-...`；未知／过期单元或真实模型失配拒绝派发或工具执行。macOS 声明命令还经系统沙盒；没有已验证沙盒的平台由 Root 执行必要核验，不能默许成员无约束运行。实际自主闭环仍待新安装构建验收。
 
-`delegation_recommendation` 是已持久化的逐候选判断，只有后续 `delegation_recommendation_delivered` 与任务的 `delegation_hint` 才表示建议真正送达。Root 的只读工具进度使当次投递作废时，同一原生**用户消息**、未跨新的用户消息边界、相同产物和精确候选、原始来源证据仍有效且没有成员，Orbit 会在新的完整宿主观察上尝试送达一次；Root 为同一请求启动下一次助手模型 turn 不会单独抹掉判断。Orbit 不自动派发。Root 如决定接受，使用建议列出的原生 Agent 显式派发有界工作，自己继续另一工作面；先更改输入、产物或候选后再派发不沿用旧建议的归因，状态记为 `root_without_hint`。
+成员与检查者同时取得精确证据和目录先验，相关 coding／agentic／intelligence 明确来自任务需求，不默认猜编码。目录能力与实际 SDK 路由 limits 分开；上下文／模态／工具要求未知或不满足、同指标潜在冲突以及明确测量日期要求未满足时，候选暂停自动正向建议，交 Root 复核。任务质量指数不与 Jev 分数相加；不是模型可靠性证书。
 
-检查者选型保留 Jev 当前任务适配判断：有精确有效事实的可运行候选优先据此进入评分；配置 OpenRouter 时，精确事实缺失而存在有来源、未过期、已核实映射且 coding 非空的候选也可获得**弱模型级质量先验**进入 `jev-checker-task-fit-2`，只比较质量，不用基准编造本路由端到端时间／费用；缺测或身份未核实保持未评分。正向信号优先，时间／费用只看精确资料，再按家族和候选顺序比较；全低分选最高分，无评分按顺序降级，标记“检查质量未经证实”。仅凭概述选中时显示当前路由与推理变体未核实、端到端时间未知；OMP 会话可选与本地预检仅说明可尝试，不等于真实模型请求成功或检查通过。Root 指定的模型仍须属于当前 OMP 目录并通过隔离预检，也保留 Jev 判断结果。成功任务的 `review.selection` 记录选择来源、实际输入、逐型号分数、未评分身份、基准来源／局限及降级原因。
-先验分数只影响**降级候选之间的排序**，不会仅因超过 0.55 就把本路由标为质量已证实；无手工精确资料时 `selection_tier=fallback`、状态中显示“检查质量未经证实”，并继续向 Root 请求精确身份事实。
+问题采用 delegation-2／candidates-2／checker-task-fit-3、selection-input-2／quality-decision-2。真正校准放行、实际 task profile、provider／型号／input／qset 匹配后才作正向建议；未放行只显示事实并保留可运行选项，不因未知费用阻断 Root。新分派不使用速度、时间、关键路径缩短或粗费用档，运行超时／TTL／停止计时保留。旧 delegatable／0.55／0.50 按历史版本解释。
 
-检查者的隔离目录目前不能证明 reasoning effort 或计费路由，故 `start.evidence_needed` 明确请求 `provider/id, reasoning=unknown, billing_route=unknown`；精确事实缺失／过期时 Root 可从一手来源用 `orbit model-evidence --file -` 补证。省略 reasoning 会归为 `default`，不是同一身份；旧 default 缓存和不同路由资料不会作为检查者质量事实。查不到如实记 `status=unavailable`。证据不是可运行型号的启动硬门；新有效事实在下一次检查前重新评分，不中断在途检查。无可运行型号时，项目本地 `.orbit/checker-selection-failures.jsonl` 留存实际探针与判断。
+`member_selection_assessed` 是保存的判断；`delegation_recommendation_delivered` 和持久 delegation_hint 才表示已经送达。Root 自主经原生 task 使用候选，串行交接也合法。只有实际工作单元、成员、调用、型号及目标派发尝试，连同实际 bind 留存的已送达提示签名／message ID，都匹配才记为采纳；旧失败调用、同型号或相邻时间不能领取下一轮建议归因。Root 自选记为 root_without_hint。
+
+检查者始终先核对隔离只读环境可解析性，未放行不支付选型判断；缺事实不要求用户补完整池。质量未证实的可运行型号仍可降级，显式选模不跳过独立检查、手动终检或停止核对。模型级先验不证明本路由／推理档位／额度或价格，当前接线的真实效果尚未验收。
 
 独立检查者沿用 OMP 模型配置与凭据解析，仍在独立只读会话中读取固定快照。认证、额度或结果校验失败会留下失败检查记录，Orbit 在**检查结束后**从尚未尝试的可运行型号中按池优先和 Jev 次序有界重试；所有型号失败才阻塞，不把失败当终检。Root 修复环境后可从 OMP 当前可用型号中重选：
 
@@ -173,37 +174,35 @@ orbit review-model TASK_DIRECTORY --model provider/id --reason "检查者凭据�
 
 ### 模型证据提交（model-evidence）
 
-Root 从一手来源检索模型事实，提交一个 JSON object 或 array。执行成员的任务内请求使用 `orbit model-evidence TASK_DIRECTORY --file FILE|-`，`provider`／`model`／`reasoning`／`billing_route` 与请求逐字段一致：请求若写 `reasoning: unknown` 须显式填写，省略表示 provider default，不能合并；池内一名候选的有效证据即可独立判断，其他仍未评分。检查者按 `start.evidence_needed` 的 `model` 拆成 provider 与 model，并显式提交其 `reasoning: unknown`、`billing_route: unknown`；优先不传任务目录，也可携任务目录确认精确匹配的检查者事实。价格、上下文窗口或 tokens/s 单独不证明任务质量／整项端到端时间；缺少可靠来源可如实记录 `unavailable`。不写网页正文或凭据，不伪造来源或指标。
-
-池内 Agent 的 `billing_route` 按该**候选型号**在当前 OMP 会话可解析的端点与传输核对；通用 `@task` 的路由不能代填另一型号。宿主不能证明路由时请求保留 `unknown`，不能因为公开 API 有按量价格就推定当前 OMP 按量计费。若成员的路由可证明为 `subscription_quota`／`direct_api`，但检查者隔离目录只能标记 `unknown`，即使 `provider/id` 相同也是**两条不同证据身份**；分别按各自请求提交，不能为减少补证次数跨路由复用。路由变化后须重新核对该候选证据。
-
-还未创建任务时，用同一格式直接写入用户级缓存，不需要虚构 `TASK_DIRECTORY`：
+Root 从一手来源核实任务质量事实，按真实 provider／model／reasoning／billing_route 提交一个 JSON object 或 array；不要求 Root 与全池同时补证。unknown 与 provider default、不同计费路由不互换，不为命中 lookup 改路由。主会话的配置解析不证明独立检查进程的服务端身份或账号；不能证明的字段如实未知。
 
 ```bash
 orbit model-evidence --file ./model-facts.json
+orbit model-evidence TASK_DIRECTORY --file ./model-facts.json
 ```
 
-无任务目录模式仅校验并缓存，不创建任务、不入队任务命令；携带当前任务目录时，匹配检查者缺口的提交记录为检查者补证，下一次检查前重评，执行成员的请求仍按原有身份门处理。显式 `start --review-model provider/id` 在创建任务前检查该模型是否能在隔离检查者的目录和凭据中解析；探测不发送模型请求，不能保证额度或实际检查结果。
+无任务目录仅校验／缓存，不创建任务；带目录通知下一次判断重读事实，不中断在途检查。来源和数据须真实，无法取得可记 unavailable；提交不等于自动推荐、派发或完成。
 
-占位结构（尖括号处替换为真实结果；`valid_until` 可省略，不得超过该模型标识的有效期）：
+质量 entry 示例（替换尖括号；测量日期／方法版本未知时省略，不用抓取日期填补）：
 
 ```json
-[{"provider":"<候选的 provider>","model":"<候选的 model>","reasoning":"<实际 reasoning>",
-  "status":"evidence","retrieved_at":"<ISO8601，含时区>",
-  "valid_until":"<ISO8601>",
-  "sources":["https://<真实来源 URL>"],
-  "metrics":{"<指标名>":{"value":0,"unit":"<单位>","basis":"<测量口径与样本说明>"}}}]
+[{"provider":"<真实 provider>","model":"<真实 model>","reasoning":"<实际档位或 unknown>",
+  "billing_route":"<实际 direct_api|subscription_quota|unknown>",
+  "status":"evidence","retrieved_at":"<含时区 ISO8601>",
+  "sources":["https://<一手来源>"],
+  "metrics":{"<任务相关质量指标>":{"value":0,"unit":"<单位>","basis":"<测量口径>"}},
+  "measured_at":"<含时区实际测量时间>","method_version":"<真实方法版本>"}]
 ```
 
-约束：`sources` 为 1–5 个绝对 http(s) URL（不带凭据）；`metrics` 为命名对象，每项 `value` 为有限数字、`unit` 与 `basis` 为文本；`retrieved_at` 不能是未来时间。`metrics` 只写该模型自身的测量事实，不写比较或身份断言：`comparison.*` 这类跨身份指标会被拒绝；既有缓存中的此类指标也不会进入二阶段摘要（摘要 note 只声明结构校验、指标由提交者提供）。无法取得证据时提交 `status: "unavailable"` 并给出 `reason`，不得编造证据：
+sources 为 1–5 个无凭据绝对 http(s) URL；value 有限数字，unit／basis 文本；valid_until 可省略且受型号标识有效期约束。measured_at 不得晚于 retrieved_at；抓取时效不等于测量时效。新写不接收速度／时间／local_samples／comparison 指标、cost_tier 或 cost.／quota.；历史原文保留，旧字段不进入当前质量判断，剥离后没有质量指标的记录不当命中。具体约束见 `orbit model-evidence --help`。
 
-```json
-[{"provider":"…","model":"…","reasoning":"…","status":"unavailable","retrieved_at":"…","reason":"<为什么无法取得>"}]
-```
-
-Orbit 校验后原子写入用户级缓存；仅带任务目录时还通知该任务进程重查。缓存按模型标识的有效期使用，过期后重新检索。具体字段限制以 `orbit model-evidence --help` 与校验错误为准。
+本路由价格与订阅规则走独立可信资源流，不能用 OpenRouter 报价或粗档代替；没有可信输入／输出／缓存构成时，交叉单价不能给出总成本高低。价格、用量、账户／计划可比条件不足均保持未知；不折算假账单、不承诺预算内、不新增硬预算门。
 
 ### 时间和用量
+
+工作区新增 `orbit route-resources import --project DIR --file FILE` 导入带真实来源、适用身份／账户／计划、有效期、币种和单位的路由事实；`list` 只读查阅。`orbit route-resources report TASK_DIRECTORY --file FILE` 的输入是实际观察到的 `account_scope` 和 `plan`（可按精确路由映射）；省略时保持未知，不从价格事实反推用户账户。该入口不请求模型或建立预算门，不能用目录报价或 SDK 自报金额替代可信来源，当前选择消费者和真实来源验收仍未完成。
+
+Root／成员原生调用回执按实际边界独立计账，字段分别保留，不能把 input、缓存、reasoning 和 total 无条件相加。pending 和写入失败明确显示覆盖缺口；停止后晚到 final 可以继续写入账本，不改变任务终态。资源报告仅汇总可归属记录，按币种和实际账户分开；订阅仅展示原规则，不折算金额或未知消耗。这些工作区行为没有作为 0.7.10 新安装构建交付。
 
 | 参数 | 含义 |
 | --- | --- |

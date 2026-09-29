@@ -5,7 +5,8 @@ import path from 'node:path';
 import net from 'node:net';
 import { z } from 'zod';
 import { installOmpExtension, agentNameFor } from '../plugins/omp-host.mjs';
-import { execSync } from 'node:child_process';
+import { observeNativeCalls, flushNativeCalls } from '../plugins/native-call-recorder.mjs';
+import { execSync, spawnSync } from 'node:child_process';
 
 // The installer pins the verified Ruby via ORBIT_RUBY; exercise that branch so
 // extension children (CLI spawns, member registration) use the same interpreter.
@@ -25,6 +26,19 @@ let registryListener, definition, started;
 // The extension registers several handlers per event name (task gate + hub
 // observation on tool_call); keep them all and dispatch in order.
 const emit = async (name, ...args) => {
+  // Controlled native fixtures carry real durable handoffs. This does not
+  // invoke a model and does not stand in for autonomous acceptance.
+  const [event, context] = args;
+  if (started?.task_directory && name === 'tool_call' && event?.toolName === 'task' &&
+      context?.sessionManager?.getSessionId() === 'root' && !event.fixture_no_unit &&
+      ['starting', 'running'].includes((await taskState()).status)) {
+    const unit = await tool({ action: 'work-unit', task: started.task_directory, operation: 'declare', work_unit: {
+      spec: { objective: event.input.task || 'Native member fixture', requirements: ['original request'],
+        allowed_paths: ['src'], allowed_tools: ['read', 'write'], allowed_commands: [],
+        acceptance: 'Fixture scope is honored', escalation: 'Report failed binding to Root' }
+    } });
+    event.input = { ...event.input, task: `${event.input.task}\norbit-unit: ${unit.unit.id}` };
+  }
   let result;
   for (const handler of events[name] || []) {
     const value = await handler(...args);
@@ -40,6 +54,7 @@ function session(id, branch = []) {
     getAgentId: () => id,
     hasPendingAsyncWork: () => false, getAsyncJobSnapshot: () => ({ running: [] }),
     subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener); },
+    emitNative: event => Promise.all([...listeners].map(listener => listener(event))),
     sendCustomMessage: async (message, options) => {
       assert.equal(options.deliverAs, 'steer');
       branch.push({ type: 'custom_message', id: `native-${branch.length}`, ...message });
@@ -162,6 +177,22 @@ try {
   }
   assert.equal((await request('model_catalog')).agent_dir, agentRoot,
     'the catalog carries the host-resolved agent directory for isolated profile credentials');
+  const declared = await tool({ action: 'work-unit', task: started.task_directory, operation: 'declare', work_unit: {
+    spec: { objective: 'Deliver a bounded module', requirements: ['original request'],
+      allowed_paths: ['src'], allowed_tools: ['read', 'write'], allowed_commands: [],
+      acceptance: 'Module behavior passes its check', escalation: 'Report missing input to Root',
+      model_requirements: { relevant_indices: ['coding_index'] } }
+  } });
+  assert.equal(declared.unit.status, 'declared', 'Root can durably declare a handoff through the actual Orbit tool');
+  const units = await tool({ action: 'work-unit', task: started.task_directory, operation: 'list' });
+  assert.equal(units.units[0].id, declared.unit.id, 'the host/CLI unit API reads the same durable store');
+  const missingUnit = await emit('tool_call', { toolName: 'task', toolCallId: 'no-unit',
+    fixture_no_unit: true, input: { agent: agentNameFor('glm/x'), task: 'No handoff' } }, ctx);
+  assert.equal(missingUnit.block, true, 'controlled execution cannot bypass the durable handoff');
+  assert.match(missingUnit.reason, /work-unit/);
+  await assert.rejects(() => tool({ action: 'work-unit', task: started.task_directory, operation: 'finish',
+    work_unit: { id: declared.unit.id, status: 'accepted', result: 'done', verification: 'self-report' } }),
+    /only a bound unit can finish/, 'declaring and self-reporting cannot fabricate a native dispatch');
 
   // Root session model and the native task role are different identities.
   // Billing route is a structural proof from the resolved endpoint (host plus
@@ -175,6 +206,22 @@ try {
     'the verified zhipu coding-plan endpoint is subscription_quota');
   assert.equal((await request('model_catalog')).routes['glm/x'], 'unknown',
     'the pool Agent does not inherit the unrelated @task subscription route');
+  ctx.models.list = () => [model, { provider: 'kimi-code', id: 'k3-256k' }];
+  ctx.models.resolve = spec => spec === 'kimi-code/k3-256k'
+    ? { provider: 'kimi-code', id: 'k3-256k', baseUrl: 'https://api.kimi.com/coding/v1',
+        contextWindow: 262144, input: ['text', 'image'], cost: { input: 999 }, apiKey: 'private-key' }
+    : undefined;
+  const routeCatalog = await request('model_catalog');
+  assert.equal(routeCatalog.routes['kimi-code/k3-256k'], 'subscription_quota',
+    'a non-pooled checker also receives its exact resolved route');
+  assert.deepEqual(routeCatalog.limits['kimi-code/k3-256k'], {
+    source: 'omp_model_registry', context_window: 262144, input_modalities: ['text', 'image'],
+    output_modalities: ['text'], supports_tools: true
+  }, 'the configured route limit crosses the bridge; omitted supportsTools permits SDK native tools');
+  assert.equal(JSON.stringify(routeCatalog).includes('private-key'), false, 'model credentials never cross the catalog bridge');
+  assert.equal(Object.hasOwn(routeCatalog.limits['kimi-code/k3-256k'], 'cost'), false,
+    'catalog prices are never represented as verified route costs');
+  ctx.models.list = () => [model];
   ctx.models.resolve = spec => spec === '@task'
     ? { provider: 'zhipu-coding-plan', id: 'glm-5.2', baseUrl: 'https://open.bigmodel.cn/api/paas/v4' }
     : undefined;
@@ -324,6 +371,87 @@ try {
     sessionFile: '/tmp/live.jsonl', history: { outputPath: '/tmp/live.md', resolvedModel: 'glm/x' }, activity: 'working' };
   extraRefs.push(liveRef);
   registryListener({ type: 'registered', ref: liveRef });
+  {
+    const boundUnits = await tool({ action: 'work-unit', task: started.task_directory, operation: 'list' });
+    const unit = boundUnits.units.find(item => item.member_id === liveRef.id);
+    assert.equal(unit.status, 'bound');
+    assert.equal(unit.tool_call_id, 'call-1');
+    assert.equal(unit.model, 'glm/x', 'the registration binds the actually observed model');
+    assert.equal(unit.dispatches.length, 1);
+    const actualMemberCtx = { ...memberCtx, sessionManager: { ...memberCtx.sessionManager, getSessionId: () => 'member-live' } };
+    const escaped = await emit('tool_call', { toolName: 'write', toolCallId: 'outside-write',
+      input: { path: '../outside.txt', content: 'bad' } }, actualMemberCtx);
+    assert.equal(escaped.block, true, 'the real extension entrance rejects a path outside the member scope');
+    // Model-shaped SDK events are scripted here; they verify the real host
+    // subscriptions and durable accounting path, not model-backed acceptance.
+    await root.emitNative({ type: 'message_start', message: { role: 'assistant', provider: 'glm', model: 'x' } });
+    await root.emitNative({ type: 'message_end', message: { role: 'assistant', provider: 'glm', model: 'x',
+      stopReason: 'stop', usage: { input: 21, output: 4, cacheRead: 0, cacheWrite: 0 } } });
+    for (const listener of liveMemberListeners)
+      await listener({ type: 'message_start', message: { role: 'assistant', provider: 'glm', model: 'x' } });
+    for (const listener of liveMemberListeners)
+      await listener({ type: 'message_end', message: { role: 'assistant', provider: 'glm', model: 'x',
+        stopReason: 'error', errorMessage: 'scripted failure', usage: { input: 17, output: 0, cacheRead: 0 } } });
+    await flushNativeCalls(started.task_directory);
+    const observations = JSON.parse(await fs.readFile(path.join(started.task_directory, 'native-model-calls.json'), 'utf8'));
+    const receipts = Object.values(observations.calls);
+    assert.equal(receipts.length, 2);
+    assert.equal(receipts.find(call => call.meta.role === 'member').ledger_receipt.work_unit_id, unit.id);
+    assert.equal(receipts.find(call => call.meta.role === 'member').ledger_receipt.status, 'failed');
+    assert.deepEqual(receipts.find(call => call.meta.role === 'member').ledger_receipt.usage, { input: 17 });
+    assert.ok(receipts.every(call => call.finalized && call.started_at && call.ledger_receipt.completed_at));
+    assert.equal((await fs.stat(path.join(started.task_directory, 'native-model-calls.json'))).mode & 0o777, 0o600);
+    const directlyRecorded = JSON.parse(await fs.readFile(path.join(started.task_directory, 'resource-calls.json'), 'utf8'));
+    assert.equal(Object.keys(directlyRecorded.calls).length, 2, 'actual final observations persist without a runtime tick');
+    const accounting = spawnSync(process.env.ORBIT_RUBY, ['--disable-gems', '-Ilib', '-rorbit/task_runtime', '-e',
+      'record = Orbit::TaskRecord.new(ARGV[0]); runtime = Orbit::TaskRuntime.allocate; runtime.instance_variable_set(:@record, record); runtime.instance_variable_set(:@state, record.state); 2.times { runtime.send(:capture_native_calls) }; puts JSON.generate(runtime.send(:resource_call_ledger).calls)',
+      started.task_directory], { cwd: process.cwd(), encoding: 'utf8' });
+    assert.equal(accounting.status, 0, accounting.stderr);
+    const accounted = JSON.parse(accounting.stdout);
+    assert.equal(accounted.length, 2, 're-reading the native sidecar never double-counts a call');
+    assert.equal(accounted.find(call => call.role === 'root').usage.input, 21);
+    assert.equal(accounted.find(call => call.role === 'member').usage_status, 'partial');
+    assert.ok(accounted.every(call => call.actual_identity.reasoning === null), 'an unreported reasoning setting stays absent');
+
+    // A stop never seals a pending observation into an immutable unknown row.
+    // A final SDK response can arrive while the Root session remains alive.
+    await root.emitNative({ type: 'message_start', message: { role: 'assistant', provider: 'glm', model: 'x' } });
+    await flushNativeCalls(started.task_directory);
+    const savedState = await taskState();
+    await fs.writeFile(path.join(started.task_directory, 'state.json'), JSON.stringify({ ...savedState, status: 'paused' }));
+    const pendingAccounting = spawnSync(process.env.ORBIT_RUBY, ['--disable-gems', '-Ilib', '-rorbit/task_runtime', '-e',
+      'record = Orbit::TaskRecord.new(ARGV[0]); runtime = Orbit::TaskRuntime.allocate; runtime.instance_variable_set(:@record, record); runtime.instance_variable_set(:@state, record.state); runtime.send(:capture_native_calls); puts JSON.generate({calls: runtime.send(:resource_call_ledger).calls, gaps: runtime.instance_variable_get(:@state).dig("usage", "resource_call_gaps")})',
+      started.task_directory], { cwd: process.cwd(), encoding: 'utf8' });
+    assert.equal(pendingAccounting.status, 0, pendingAccounting.stderr);
+    assert.equal(JSON.parse(pendingAccounting.stdout).calls.length, 2, 'a pending call is never sealed or counted as zero');
+    assert.match(JSON.parse(pendingAccounting.stdout).gaps.native_execution, /final usage is pending/);
+    await root.emitNative({ type: 'message_end', message: { role: 'assistant', provider: 'glm', model: 'x',
+      stopReason: 'stop', usage: { input: 31, output: 7, cacheRead: 0, cacheWrite: 0 } } });
+    await flushNativeCalls(started.task_directory);
+    const lateRecorded = Object.values(JSON.parse(await fs.readFile(path.join(started.task_directory, 'resource-calls.json'), 'utf8')).calls);
+    assert.equal(lateRecorded.length, 3, 'late final usage is recorded after runtime termination without reopening the task');
+    assert.equal(lateRecorded.find(call => call.usage?.input === 31).usage.output, 7);
+    assert.equal((await taskState()).status, 'paused', 'host accounting never overwrites runtime-owned task state');
+    await fs.writeFile(path.join(started.task_directory, 'state.json'), JSON.stringify(savedState));
+
+    const corruptDir = path.join(project, '.orbit', 'tasks', 'corrupt-native-receipt');
+    await fs.mkdir(corruptDir);
+    await fs.writeFile(path.join(corruptDir, 'state.json'), JSON.stringify({ ...savedState,
+      id: path.basename(corruptDir), status: 'paused' }));
+    await fs.writeFile(path.join(corruptDir, 'native-model-calls.json'), '{corrupt');
+    const corruptSession = session('corrupt-native-receipt');
+    observeNativeCalls(corruptSession, () => ({ taskDir: corruptDir, projectRoot: project,
+      role: 'root', actualProvider: 'glm', actualModelId: 'x', actualModel: 'glm/x', billingRoute: 'unknown' }));
+    await corruptSession.emitNative({ type: 'message_start', message: { role: 'assistant' } });
+    await corruptSession.emitNative({ type: 'message_end', message: { role: 'assistant', provider: 'glm', model: 'x',
+      stopReason: 'stop', usage: { input: 9, output: 2, cacheRead: 0, cacheWrite: 0 } } });
+    await flushNativeCalls(corruptDir);
+    assert.match(await fs.readFile(path.join(corruptDir, 'native-model-call-gaps.jsonl'), 'utf8'), /persistence failed/);
+    assert.equal((await fs.stat(path.join(corruptDir, 'native-model-call-gaps.jsonl'))).mode & 0o777, 0o600);
+    assert.equal(Object.keys(JSON.parse(await fs.readFile(path.join(corruptDir, 'resource-calls.json'), 'utf8')).calls).length, 1,
+      'sidecar corruption remains visible while independently preserving the final receipt');
+    await fs.rm(corruptDir, { recursive: true, force: true });
+  }
   const members = await membersFile();
   assert.equal(members.length, 2); // drifted in-pool member plus this pool member
   const poolMember = members.find(m => m.thread_id === revised.input.name);

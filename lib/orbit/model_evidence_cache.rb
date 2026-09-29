@@ -20,6 +20,16 @@ module Orbit
   #   status "evidence":         sources[] plus metrics{name => {value, unit, basis}}
   #   status "unavailable":      reason
   #   retrieved_at, valid_until  UTC ISO-8601 validity window
+  #   measured_at, method_version  optional quality measurement date and method
+  #
+  # This cache holds capability facts only. Selection inputs that are not
+  # measurements of this model are rejected at submission: a time, speed or
+  # local-sample metric (审计 C04) and any `cost.*`/`quota.*` price fact — route
+  # prices live in the independent RouteResourceFacts layer and never stand in
+  # for task quality. The `comparison` namespace stays rejected as before.
+  # Historical entries already on disk keep their old fields; `lookup` strips
+  # them before re-validating the current quality fields, and an entry whose
+  # meaningful measurements are all legacy is not a quality hit.
   #
   # `lookup` returns the stored entry inside its validity window and `nil`
   # when it is missing, expired or malformed. A concrete model version is
@@ -55,29 +65,23 @@ module Orbit
     CLOCK_SKEW_SECONDS = 300
     DEFAULT_REASONING = "default"
 
-    EVIDENCE_KEYS = %w[provider model reasoning billing_route status retrieved_at valid_until sources metrics cost_tier].freeze
+    EVIDENCE_KEYS = %w[provider model reasoning billing_route status retrieved_at valid_until sources metrics
+                       measured_at method_version].freeze
     UNAVAILABLE_KEYS = %w[provider model reasoning billing_route status retrieved_at valid_until sources reason].freeze
     METRIC_KEYS = %w[value unit basis].freeze
-
-    # Optional coarse cost tier on an evidence entry. It expresses the burden
-    # band of a route's price or plan/quota, not a normalized per-token price:
-    # direct_api and subscription_quota stay distinct via billing_route, and the
-    # band is never mixed into one comparable number. Omitting it means unknown;
-    # unknown is not free.
-    COST_TIER_KEYS = %w[band confidence basis].freeze
-    COST_TIER_VALUES = %w[low medium high].freeze
 
     # Typed billing route identity; the runtime additionally compares this
     # with the route derived from the resolved OMP model endpoint.
     BILLING_ROUTES = %w[direct_api subscription_quota unknown].freeze
     DEFAULT_BILLING_ROUTE = "unknown"
 
-    # Route-specific fact namespaces for the cost gate. A verified direct_api
-    # route is evidenced by numeric `cost.*` price facts; a verified
-    # subscription_quota route is evidenced by numeric `quota.*` plan/quota
-    # band facts. The two never substitute for each other, and other routes
-    # (unknown, custom) have no namespace and stay fail-closed.
-    ROUTE_METRIC_PREFIXES = { "direct_api" => "cost.", "subscription_quota" => "quota." }.freeze
+    # Selection inputs that are not this model's capability measurement. A time
+    # or speed signal and a local success sample never enter a new quality fact
+    # (审计 C04), and route prices belong to RouteResourceFacts rather than to a
+    # task-quality metric. Legacy fields already on disk are stripped on read.
+    LEGACY_SELECTION_METRIC = /speed|latency|elapsed|duration|ttft|throughput|tokens_per_second|per_second|seconds|local_sample|time|wall_clock|critical_path|parallel_gain|end_to_end|e2e/i
+    RESOURCE_METRIC_NAMESPACE = /\A(?:cost|quota)\./i
+    LEGACY_ENTRY_FIELDS = %w[cost_tier].freeze
 
     MAX_PROVIDER_LENGTH = 64
     MAX_MODEL_LENGTH = 200
@@ -88,7 +92,7 @@ module Orbit
     MAX_METRIC_NAME_LENGTH = 64
     MAX_UNIT_LENGTH = 32
     MAX_BASIS_LENGTH = 300
-    MAX_COST_TIER_BASIS_LENGTH = 300
+    MAX_METHOD_VERSION_LENGTH = 120
     MAX_REASON_LENGTH = 500
     MAX_ENTRY_BYTES = 16 * 1024
     MAX_FILE_BYTES = 512 * 1024
@@ -131,12 +135,9 @@ module Orbit
       name.to_s.split(".", 2).first.to_s.downcase == RESERVED_METRIC_NAMESPACE
     end
 
-    # The only routes that authorize the cost gate. A route is a typed
-    # identity field, not a submitter metric: the runtime derives the candidate
-    # route from the resolved OMP model endpoint (host plus path prefix, plus
-    # transport) and requires the stored entry to carry the same route, so a
-    # self-claimed label alone never suffices and an older route-less entry can
-    # never become cost proof.
+    # A route is an exact identity field, not a price claim. Only the current
+    # resolved OMP model endpoint/transport can establish it. This quality cache
+    # never authorizes cost comparison; RouteResourceFacts owns that data.
     def self.billing_route(value)
       text = value.to_s.strip
       text = DEFAULT_BILLING_ROUTE if text.empty?
@@ -147,22 +148,15 @@ module Orbit
       text
     end
 
-    # Namespace of the numeric fact that can authorize a cost judgment for the
-    # given typed route, or nil when the route has no verified namespace.
-    def self.route_metric_prefix(route)
-      ROUTE_METRIC_PREFIXES[route.to_s]
+    # True for a metric name that carries a time, speed or local-sample signal.
+    def self.legacy_selection_metric?(name)
+      name.to_s.match?(LEGACY_SELECTION_METRIC)
     end
 
-    # True when the entry carries at least one numeric fact under the given
-    # namespace. Shape-only check: values, units and basis remain
-    # submitter-provided and are never semantically verified.
-    def self.numeric_metric?(entry, prefix)
-      return false unless entry.is_a?(Hash) && prefix.is_a?(String)
-
-      metrics = entry["metrics"]
-      metrics.is_a?(Hash) && metrics.any? do |name, metric|
-        name.to_s.start_with?(prefix) && metric.is_a?(Hash) && metric["value"].is_a?(Numeric)
-      end
+    # True for a price or plan/quota fact. Those are resource facts, not model
+    # capability measurements, and never enter this cache.
+    def self.resource_metric?(name)
+      name.to_s.match?(RESOURCE_METRIC_NAMESPACE)
     end
 
     attr_reader :path
@@ -201,7 +195,18 @@ module Orbit
       expires_at = parse_time(entry["valid_until"])
       return nil if expires_at.nil? || now >= expires_at
 
-      entry
+      # Disk contents may have been edited after submission. Consumers of a
+      # capability fact must apply the same source, date and metric validation
+      # as a new submission, rather than trust only its identity and expiry.
+      # Historical entries keep whatever they were stored with; the legacy
+      # selection and price fields are stripped here and the remaining quality
+      # fields are validated in full. An entry with no meaningful measurement
+      # left after stripping is not a quality hit.
+      begin
+        normalize_entry(strip_legacy_fields(entry))
+      rescue ValidationError
+        nil
+      end
     end
 
     def stored_entries
@@ -283,8 +288,12 @@ module Orbit
       if status == STATUS_EVIDENCE
         normalized["sources"] = normalize_sources(entry["sources"], required: true)
         normalized["metrics"] = normalize_metrics(entry["metrics"])
-        tier = normalize_cost_tier(entry["cost_tier"])
-        normalized["cost_tier"] = tier if tier
+        normalized["measured_at"] = measured_at(entry["measured_at"], retrieved_at) if entry.key?("measured_at") &&
+                                                                                        !entry["measured_at"].nil?
+        version = entry["method_version"]
+        unless version.nil?
+          normalized["method_version"] = validate_text(version, "method_version", MAX_METHOD_VERSION_LENGTH)
+        end
       else
         sources = normalize_sources(entry["sources"], required: false)
         normalized["sources"] = sources if sources
@@ -344,6 +353,16 @@ module Orbit
                 "metric #{key.inspect} is a cross-identity comparison; submit per-model measurements only " \
                 "(use status \"unavailable\" when a fact cannot be verified)"
         end
+        if self.class.legacy_selection_metric?(key)
+          raise ValidationError,
+                "metric #{key.inspect} carries a time, speed or local-sample signal; it is not a capability " \
+                "measurement and is not a selection input (审计 C04)"
+        end
+        if self.class.resource_metric?(key)
+          raise ValidationError,
+                "metric #{key.inspect} is a price or quota fact; route resource facts belong to " \
+                "RouteResourceFacts and never stand in for task quality"
+        end
 
         [key, normalize_metric(key, raw)]
       end
@@ -368,34 +387,31 @@ module Orbit
       }
     end
 
-    # Optional; nil means the entry carries no cost tier (unknown). A present
-    # tier must be a closed object so a submitter cannot smuggle a normalized
-    # per-token price or other extra material into the cache.
-    def normalize_cost_tier(value)
-      return nil if value.nil?
+    # Optional measurement date of the reported quality values. It must be a
+    # zoned ISO-8601 timestamp no later than the retrieval that recorded it; an
+    # omitted date stays unknown and the fetch date never substitutes for it.
+    def measured_at(value, retrieved_at)
+      time = parse_time(value)
+      raise ValidationError, "measured_at must be an ISO-8601 timestamp with a zone" if time.nil?
+      raise ValidationError, "measured_at cannot be after retrieved_at" if time > retrieved_at
 
-      unless value.is_a?(Hash) && !value.empty?
-        raise ValidationError, "cost_tier must be an object with band, confidence and basis"
-      end
-
-      fields = stringify(value)
-      unknown = fields.keys - COST_TIER_KEYS
-      raise ValidationError, "unsupported cost_tier fields: #{unknown.sort.join(', ')}" unless unknown.empty?
-
-      {
-        "band" => cost_tier_value(fields["band"], "band"),
-        "confidence" => cost_tier_value(fields["confidence"], "confidence"),
-        "basis" => validate_text(fields["basis"], "cost_tier basis", MAX_COST_TIER_BASIS_LENGTH)
-      }
+      format_time(time)
     end
 
-    def cost_tier_value(value, field)
-      text = value.to_s.strip
-      unless COST_TIER_VALUES.include?(text)
-        raise ValidationError, "cost_tier #{field} must be one of #{COST_TIER_VALUES.join(', ')}"
-      end
+    # Historical entries keep their stored fields; this read-side view drops the
+    # fields that are no longer capability evidence so the remainder can be
+    # validated as a current quality fact.
+    def strip_legacy_fields(entry)
+      return entry unless entry.is_a?(Hash)
 
-      text
+      stripped = entry.reject { |key, _| LEGACY_ENTRY_FIELDS.include?(key.to_s) }
+      metrics = stripped["metrics"]
+      return stripped unless metrics.is_a?(Hash)
+
+      remaining = metrics.reject do |name, _|
+        self.class.legacy_selection_metric?(name) || self.class.resource_metric?(name)
+      end
+      stripped.merge("metrics" => remaining)
     end
 
     def validate_text(value, field, max)

@@ -74,12 +74,30 @@ module Orbit
           routes[id] = route if id && %w[direct_api subscription_quota unknown].include?(route)
         end
       end
+      limits = {}
+      if raw["limits"].is_a?(Hash)
+        raw["limits"].each do |model, value|
+          id = catalog_identifier(model)
+          next unless id && value.is_a?(Hash) && value["source"] == "omp_model_registry"
+
+          window = value["context_window"]
+          tools = value["supports_tools"]
+          limits[id] = {
+            "source" => "omp_model_registry",
+            "context_window" => window.is_a?(Integer) && window.positive? ? window : nil,
+            "input_modalities" => Array(value["input_modalities"]).select { |item| %w[text image].include?(item) }.uniq,
+            "output_modalities" => Array(value["output_modalities"]).select { |item| item == "text" }.uniq,
+            "supports_tools" => [true, false].include?(tools) ? tools : nil
+          }
+        end
+      end
       {
         "current" => catalog_identifier(raw["current"]),
         "available" => Array(raw["available"]).filter_map { |model| catalog_identifier(model) }.uniq,
         "families" => families,
         "agents" => agents,
         "routes" => routes,
+        "limits" => limits,
         "agent_dir" => agent_dir
       }
     end

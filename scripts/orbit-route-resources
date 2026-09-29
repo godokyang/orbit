@@ -1,0 +1,107 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Internal route-resource entry for the Orbit host seam. One JSON object on
+# stdin, exactly one JSON object on stdout; any failure exits 1 with
+# {"ok":false,"error":...}.
+#
+# Facts persist through RouteResourceStore (project-private
+# .orbit/route-resources.json, own lock, temp+fsync+rename, 0600). This script
+# never invents a price, never touches credentials or execution endpoints and
+# applies no budget or confirmation gate.
+#
+# Usage (stdin JSON):
+#   {"action":"import","project_root":"/abs","facts":{...}|[...]}
+#   {"action":"list","project_root":"/abs","scope":...,"route":...,
+#    "account_scope":...,"plan":...,"source_kind":...}
+#   {"action":"report","project_root":"/abs","task_path":"/abs/.orbit/tasks/<id>",
+#    "task_id":...,"account_scope":...,"plan":...,"at":...}
+#   {"action":"record_call","project_root":"/abs","task_path":"/abs/.orbit/tasks/<id>",
+#    "role":"root"|"member","receipt":<final SDK invocation receipt>}
+#
+# Success:
+#   {"ok":true,"stored":N,"kept_existing":N,"facts":[...]}          (import)
+#   {"ok":true,"facts":[...]}                                        (list)
+#   {"ok":true,"report":{...}}                                       (report)
+
+require "json"
+require "time"
+
+require_relative "../lib/orbit/route_resource_store"
+require_relative "../lib/orbit/task_record"
+
+def emit(document)
+  puts JSON.generate(document)
+end
+
+def fail(error)
+  emit("ok" => false, "error" => error.to_s)
+  exit 1
+end
+
+request =
+  begin
+    JSON.parse($stdin.read)
+  rescue JSON::ParserError => error
+    fail("request is not valid JSON (#{error.class})")
+  end
+fail("request must be a JSON object") unless request.is_a?(Hash)
+
+project_root = request["project_root"].to_s.strip
+fail("project_root is required") if project_root.empty?
+
+begin
+  store = Orbit::RouteResourceStore.new(project_root: project_root)
+  at =
+    begin
+      request["at"].nil? ? nil : Time.iso8601(request["at"].to_s)
+    rescue ArgumentError
+      fail("at must be an ISO-8601 timestamp with a zone")
+    end
+
+  case request["action"].to_s
+  when "record_call"
+    # Host-only final invocation receipt. This remains usable after a task's
+    # runtime exits, and never mutates its authoritative state.json.
+    task = Orbit::TaskRecord.new(request.fetch("task_path"))
+    state = task.state
+    fail("task identity or project binding mismatch") unless
+      state["id"] == File.basename(task.path) && File.realpath(state.fetch("project_root")) == File.realpath(project_root)
+    role = request["role"]
+    fail("native execution role must be root or member") unless %w[root member].include?(role)
+    receipt = request.fetch("receipt")
+    fail("final native invocation receipt required") unless receipt.is_a?(Hash) && receipt["role"] == role &&
+      receipt["origin"] == "local_provider_invocation" && receipt["usage_source"] == "native_message"
+    if role == "member"
+      fail("native member is not registered to this task") unless task.members.any? { |member| member["thread_id"] == receipt["member_id"] }
+    elsif receipt["member_id"] || receipt["work_unit_id"]
+      fail("a Root invocation must not claim member work-unit identity")
+    end
+    ledger = Orbit::ResourceCallLedger.new(task_path: task.path, task_id: state["id"])
+    stored = ledger.record_check(receipt, role: role, phase: "#{role}_execution")
+    emit("ok" => true, "stored" => stored)
+  when "import"
+    result = store.import(request.fetch("facts") { fail("facts is required for import") })
+    emit("ok" => true, "stored" => result["stored"].length, "kept_existing" => result["kept_existing"].length,
+         "count" => result["count"], "facts" => result["stored"])
+  when "list"
+    emit("ok" => true,
+         "facts" => store.list(scope: request["scope"], route: request["route"],
+                               account_scope: request["account_scope"], plan: request["plan"],
+                               source_kind: request["source_kind"]))
+  when "report"
+    task_path = request["task_path"].to_s.strip
+    fail("task_path is required for report") if task_path.empty?
+
+    emit("ok" => true,
+         "report" => store.report(task_path: task_path, task_id: request["task_id"],
+                                 account_scope: request["account_scope"], plan: request["plan"], at: at))
+  else
+    fail("unknown action #{request['action'].inspect}; use import, list, report or record_call")
+  end
+rescue Orbit::RouteResourceStore::Error, Orbit::RouteResourceFacts::Error,
+       Orbit::ResourceCallLedger::Error, KeyError, ArgumentError => error
+  fail("#{error.class}: #{error.message}")
+rescue SystemCallError => error
+  fail("#{error.class}: route resource operation failed")
+end

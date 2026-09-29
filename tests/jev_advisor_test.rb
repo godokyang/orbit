@@ -13,10 +13,8 @@ require_relative "../lib/orbit/jev_advisor"
 module JevAdvisorTest
   module_function
 
-  MEMBER_FIT_TEXT = "Given the callable member options and the supplied model evidence, is at least one member likely to meet the best bounded subtask's acceptance bar using only information that can be passed in a bounded handoff? Do not assume a handoff already exists, and do not assume the member can see Root's context. Do not treat a matching provider, model or reasoning identity as direct evidence of capability parity. Treat missing or stale evidence as unknown and do not infer capability from a model name alone. Handoff, rework and integration time overhead belong only to parallel_gain."
-  PARALLEL_GAIN_TEXT = "Given the remaining task dependencies and the supplied execution evidence, would delegating the best bounded subtask now likely shorten the overall critical path after handoff, expected rework, integration, shared-resource contention, and verification are included? Output speed alone is not task completion speed."
-  COST_APPROPRIATE_TEXT = "Given the submitter-provided coarse cost tier (low, medium, high, or unknown) with its source and confidence annotation for the callable member option, is that cost burden proportionate to the best bounded subtask? Judge the candidate's coarse price or subscription/quota burden tier against the size and value of the bounded subtask; the program checks only that a submitted tier carries a source and confidence annotation, not exact numbers against the vendor page. A clearly labeled low-confidence estimate from vendor or model positioning is acceptable evidence. Per-use API pricing and subscription quota must never be converted into a single fake per-token price or compared as if interchangeable. Do not convert currencies, compare it with the caller's own billing route, or rank providers by name or brand. Treat a missing, stale or unevaluated tier as unknown; unknown cost is not free and must not raise this score, and an unknown tier alone must not lower this score when the candidate already meets the quality and time bars. Any user-set hard budget is enforced separately by the calling program's runtime code, not by this question."
-  DELEGATABLE_TEXT = "Is there likely a bounded, independent subtask in the effective task requirements or remaining work that an authorized execution member could deliver now while the main agent continues? Prioritize the instruction, basis and amendments over whether the main agent has already mentioned or started that subtask in recent activity. Explicit disjoint files, modules or acceptance surfaces are strong evidence. Count only separable work with a clear result; do not count trivial, overlapping, preference-only or dependency-blocked work. Member availability is enforced separately by the caller, so do not lower this task-structure probability merely because availability is unknown."
+  HANDOFF_TEXT = Orbit::ModelQualityPolicy::HANDOFF_TEXT
+  MEMBER_TASK_FIT_TEXT = Orbit::ModelQualityPolicy::MEMBER_TASK_FIT_TEXT
 
   def check(condition, message)
     raise "ASSERTION FAILED: #{message}" unless condition
@@ -36,7 +34,7 @@ module JevAdvisorTest
     "stuck" => noul(0.1), "off_track" => noul(0.2),
     "artifact_ready" => noul(0.3), "delegatable" => noul(0.9)
   }.freeze
-  STAGE_TWO_ANSWERS = { "member_fit" => noul(0.8), "parallel_gain" => noul(0.7), "cost_appropriate" => noul(0.6) }.freeze
+  STAGE_TWO_ANSWERS = { "handoff_fit" => noul(0.8), "member_task_fit" => noul(0.7) }.freeze
   ALL_ANSWERS = STAGE_ONE_ANSWERS.merge(STAGE_TWO_ANSWERS).freeze
 
   # Serves one HTTP response per entry (String = 200 body, [status, body]
@@ -100,83 +98,86 @@ module JevAdvisorTest
     puts "JEV_ADVISOR_TEST_PASS (deterministic, local fixture only)"
   end
 
-  # The second-stage questions exist and are single noul questions. The
-  # member_fit and parallel_gain wording stays frozen with
-  # contracts/task-runtime.md; cost_appropriate follows the
-  # ADR-009 coarse cost tiers.
+  # Stage two asks serial handoff and member task fit. Time and coarse cost
+  # questions are gone, and the wording is the selection policy text.
   def check_delegation_question_text
     questions = Orbit::JevAdvisor::DELEGATION_QUESTIONS
-    check(questions.keys.sort == %w[cost_appropriate member_fit parallel_gain],
-          "stage two asks exactly member_fit, parallel_gain and cost_appropriate")
-    %w[member_fit parallel_gain cost_appropriate].each do |name|
+    check(questions.keys.sort == %w[handoff_fit member_task_fit],
+          "stage two asks handoff_fit and member_task_fit")
+    %w[handoff_fit member_task_fit].each do |name|
       check(questions[name]["type"] == "noul", "#{name} is a single noul question")
       check(questions[name]["criteria"].keys.sort == %w[false true], "#{name} keeps the shared question shape")
     end
-    check(questions["member_fit"]["instructions"] == MEMBER_FIT_TEXT, "member_fit wording matches the frozen plan text")
-    check(questions["parallel_gain"]["instructions"] == PARALLEL_GAIN_TEXT, "parallel_gain wording matches the frozen plan text")
-    check(questions["cost_appropriate"]["instructions"] == COST_APPROPRIATE_TEXT,
-          "cost_appropriate wording matches the ADR-009 coarse-tier text")
+    check(questions["handoff_fit"]["instructions"] == HANDOFF_TEXT, "handoff_fit allows a serial handoff")
+    check(questions["handoff_fit"]["instructions"].include?("serial handoff") &&
+          !questions["handoff_fit"]["instructions"].include?("critical path"),
+          "handoff_fit does not ask for a shorter critical path")
+    check(questions["member_task_fit"]["instructions"] == MEMBER_TASK_FIT_TEXT,
+          "member_task_fit is the policy question")
+    blob = questions.values.map { |question| question["instructions"] }.join("\n")
+    check(!blob.include?("coarse cost") && !blob.include?("parallel_gain"),
+          "stage two does not ask a coarse cost or parallel-time question")
   end
 
-  # The per-candidate pool stage asks one quality-line and one time question
-  # per candidate, labels them by index, names agent+model in every
-  # instruction, and reshapes the answers per candidate.
+  # One task-fit question per candidate. The result keeps a quality key and
+  # drops the time key. Speed in the caller state is not sent.
   def check_candidate_assessment_round_trip
-    answers = {
-      "candidate_0_quality" => noul(0.7), "candidate_0_time" => noul(0.6),
-      "candidate_1_quality" => noul(0.4), "candidate_1_time" => noul(0.55)
-    }
+    answers = { "candidate_0_task_fit" => noul(0.7), "candidate_1_task_fit" => noul(0.4) }
+    state = { "instruction" => "Ship the login page", "elapsed_seconds" => 40,
+              "comparison" => { "speed_ratio" => 3.48 } }
     with_fixture([payload(answers)]) do |endpoint, requests|
       candidates = [{ "provider" => "opencode-go", "model" => "deepseek-v4.1-flash", "agent" => "orbit-m-deepseek" },
                     { "provider" => "zhipu", "model" => "glm-5", "agent" => "orbit-m-glm" }]
       result = Orbit::JevAdvisor.new(api_key: "test-key", endpoint: endpoint)
-                                .assess_candidates(state: { "instruction" => "x" }, candidates: candidates)
+                                .assess_candidates(state: state, candidates: candidates)
       sent = requests.first
-      check(sent["questions"].keys.sort ==
-            %w[candidate_0_quality candidate_0_time candidate_1_quality candidate_1_time],
-            "one quality and one time question per candidate, labeled by index")
+      check(sent["questions"].keys.sort == %w[candidate_0_task_fit candidate_1_task_fit],
+            "one task-fit question per candidate and no time question")
       blob = JSON.generate(sent["questions"])
       check(blob.include?("agent orbit-m-deepseek") && blob.include?("model opencode-go/deepseek-v4.1-flash") &&
-            blob.include?("agent orbit-m-glm"),
-            "every instruction names its candidate agent and model")
-      quality = sent["questions"]["candidate_0_quality"]["instructions"]
-      time = sent["questions"]["candidate_1_time"]["instructions"]
-      check(quality.include?("brand name") && quality.include?("do not raise this score without sourced support") &&
-            quality.include?("Treat missing, stale or unsourced evidence as unknown"),
-            "the quality question forbids brand inference and unsourced raises")
-      check(time.include?("handoff, expected rework, integration, shared-resource contention and verification") &&
-            time.include?("Output speed alone is not task completion speed"),
-            "the time question includes the full end-to-end cost model")
-      check(result["scores"] == { "0" => { "quality" => 0.7, "time" => 0.6 },
-                                  "1" => { "quality" => 0.4, "time" => 0.55 } },
-            "scores are reshaped per candidate")
-      check(result["provider"] == "typesafe" &&
-            result["question_set_version"] == Orbit::JevAdvisor::QUESTION_SET_VERSIONS.fetch("candidates") &&
-            result["model"].to_s.length.positive?,
-            "per-candidate scores retain the actual judgment provider, model and question set version")
+            blob.include?("agent orbit-m-glm") && blob.include?("Serial handoff is allowed"),
+            "every instruction names its candidate and allows a serial handoff")
+      check(!blob.include?("critical path") && !blob.include?("candidate_0_time"),
+            "the candidate set has no end-to-end time question")
+      context = sent.dig("state", "task_context")
+      check(sent["state"]["input_version"] == Orbit::ModelQualityPolicy::INPUT_VERSION &&
+            !context.key?("elapsed_seconds") && !context.key?("comparison") &&
+            sent["state"]["omitted_from_judgment"].include?("elapsed_seconds"),
+            "candidate judgment input drops speed and elapsed time")
+      check(result["scores"] == { "0" => { "quality" => 0.7 }, "1" => { "quality" => 0.4 } },
+            "task-fit answers map to quality and do not include time")
+      check(result["question_set_version"] == "jev-candidates-2" && result["status"] == "answered" &&
+            result["requested_model"] == "jev-latest" && result["call_id"].match?(/\Aorbit-judgment-/),
+            "the receipt keeps call id, requested model and answered status")
     end
   end
 
-  # Stage one keeps exactly the four scheduling questions; the calibrated
-  # delegatable wording stays synchronized with the plan.
+  # Scheduling questions stay. The old delegatable key is not asked, so the
+  # runtime's 0.6 gate cannot consume the new serial handoff wording.
   def check_stage_one_questions_unchanged
     questions = Orbit::JevAdvisor::QUESTIONS
-    check(questions.keys.sort == %w[artifact_ready delegatable off_track stuck], "stage one keeps its four questions only")
-    check(questions["delegatable"]["instructions"] == DELEGATABLE_TEXT, "stage one delegatable wording matches the calibrated plan")
+    check(questions.keys.sort == %w[artifact_ready off_track stuck], "stage one keeps the three scheduling questions")
+    check(!questions.key?("delegatable"), "stage one does not ask the old delegatable question")
+    check(questions["stuck"]["instructions"].include?("Do not infer this from elapsed time alone"),
+          "stuck still refuses an elapsed-only inference")
+    check(Orbit::JevAdvisor::QUESTION_SET_VERSIONS.fetch("observation") == "jev-observation-2",
+          "the observation set version records removal of the old handoff question")
+    check(Orbit::JevAdvisor::DELEGATION_QUESTIONS["handoff_fit"]["instructions"] == HANDOFF_TEXT,
+          "serial handoff is the delegation question")
   end
 
   def check_stage_one_request_and_parsing
     with_fixture([payload(STAGE_ONE_ANSWERS)]) do |endpoint, requests|
       result = Orbit::JevAdvisor.new(api_key: "test-key", endpoint: endpoint).assess(state: { "instruction" => "stage one" })
       sent = requests.first
-      check(sent["questions"].keys.sort == %w[artifact_ready delegatable off_track stuck],
-            "stage one sends only its own four questions")
-      check(!sent["questions"].key?("member_fit") && !sent["questions"].key?("parallel_gain"),
-            "stage one does not ask the delegation questions")
+      check(sent["questions"].keys.sort == %w[artifact_ready off_track stuck],
+            "stage one sends only its three scheduling questions")
+      check(!sent["questions"].key?("delegatable") && !sent["questions"].key?("handoff_fit"),
+            "stage one does not ask the handoff question")
       check(sent["state"] == { "instruction" => "stage one" } && sent["model"] == "jev-latest",
             "the caller's bounded state passes through unchanged")
-      check(result["scores"] == { "stuck" => 0.1, "off_track" => 0.2, "artifact_ready" => 0.3, "delegatable" => 0.9 },
-            "stage one parses exactly its own answers")
+      check(result["scores"] == { "stuck" => 0.1, "off_track" => 0.2, "artifact_ready" => 0.3 },
+            "stage one parses exactly its own answers and ignores a delegatable answer")
       check(result["model"] == "jev-test" && result["usage"] == { "input_tokens" => 12 }, "model and usage are returned")
     end
   end
@@ -197,10 +198,14 @@ module JevAdvisorTest
     with_fixture([payload(STAGE_TWO_ANSWERS)]) do |endpoint, requests|
       result = Orbit::JevAdvisor.new(api_key: "test-key", endpoint: endpoint).assess_delegation(state: state)
       sent = requests.first
-      check(sent["questions"].keys.sort == %w[cost_appropriate member_fit parallel_gain],
-            "stage two sends only its own three questions")
-      check(sent["state"] == state, "stage two consumes the caller's bounded state verbatim; it fabricates nothing")
-      check(result["scores"] == { "member_fit" => 0.8, "parallel_gain" => 0.7, "cost_appropriate" => 0.6 },
+      check(sent["questions"].keys.sort == %w[handoff_fit member_task_fit],
+            "stage two sends handoff_fit and member_task_fit")
+      context = sent.dig("state", "task_context")
+      check(sent["state"]["input_version"] == Orbit::ModelQualityPolicy::INPUT_VERSION &&
+            context["instruction"] == "Ship the login page" && !context.key?("comparison") &&
+            sent["state"]["omitted_from_judgment"].include?("comparison"),
+            "stage two drops speed, coarse comparison and local-sample counts")
+      check(result["scores"] == { "handoff_fit" => 0.8, "member_task_fit" => 0.7 },
             "stage two parses exactly its own answers")
     end
   end
@@ -212,20 +217,18 @@ module JevAdvisorTest
       advisor = Orbit::JevAdvisor.new(api_key: "test-key", endpoint: endpoint)
       one = advisor.assess(state: { "instruction" => "stage one" })
       two = advisor.assess_delegation(state: { "instruction" => "stage two" })
-      check(one["scores"].keys.sort == %w[artifact_ready delegatable off_track stuck],
+      check(one["scores"].keys.sort == %w[artifact_ready off_track stuck],
             "stage one scores contain only stage one answers")
-      check(two["scores"].keys.sort == %w[cost_appropriate member_fit parallel_gain],
+      check(two["scores"].keys.sort == %w[handoff_fit member_task_fit],
             "stage two scores contain only stage two answers")
     end
   end
 
   def check_stage_two_rejects_invalid_probabilities
     cases = {
-      "out of range" => { "member_fit" => noul(1.5), "parallel_gain" => noul(0.7), "cost_appropriate" => noul(0.6) },
-      "non numeric" => { "member_fit" => { "type" => "noul", "noul" => "high" }, "parallel_gain" => noul(0.7),
-                         "cost_appropriate" => noul(0.6) },
-      "wrong answer type" => { "member_fit" => { "type" => "bool", "noul" => 0.8 }, "parallel_gain" => noul(0.7),
-                               "cost_appropriate" => noul(0.6) }
+      "out of range" => { "handoff_fit" => noul(1.5), "member_task_fit" => noul(0.7) },
+      "non numeric" => { "handoff_fit" => { "type" => "noul", "noul" => "high" }, "member_task_fit" => noul(0.7) },
+      "wrong answer type" => { "handoff_fit" => { "type" => "bool", "noul" => 0.8 }, "member_task_fit" => noul(0.7) }
     }
     entries = cases.values.map { |answers| payload(answers) }
     with_fixture(entries) do |endpoint, _requests|
@@ -237,14 +240,14 @@ module JevAdvisorTest
       end
     end
 
-    infinite = '{"model":"jev-test","answers":{"member_fit":{"type":"noul","noul":1e999},"parallel_gain":{"type":"noul","noul":0.7},"cost_appropriate":{"type":"noul","noul":0.6}}}'
+    infinite = '{"model":"jev-test","answers":{"handoff_fit":{"type":"noul","noul":1e999},"member_task_fit":{"type":"noul","noul":0.7}}}'
     with_fixture([infinite]) do |endpoint, _requests|
       expect_error("stage two rejects a non-finite probability") do
         Orbit::JevAdvisor.new(api_key: "test-key", endpoint: endpoint).assess_delegation(state: { "instruction" => "x" })
       end
     end
 
-    with_fixture([payload({ "member_fit" => noul(0.8), "cost_appropriate" => noul(0.6) })]) do |endpoint, _requests|
+    with_fixture([payload({ "handoff_fit" => noul(0.8) })]) do |endpoint, _requests|
       expect_error("stage two rejects a missing answer") do
         Orbit::JevAdvisor.new(api_key: "test-key", endpoint: endpoint).assess_delegation(state: { "instruction" => "x" })
       end
@@ -261,16 +264,16 @@ module JevAdvisorTest
         { "model" => "p/two", "evidence" => { "status" => "evidence", "sources" => ["https://s"] } }
       ]
     }
-    with_fixture([payload({ "quality_0" => noul(0.8), "quality_1" => noul(0.2), "time_0" => noul(0.7), "time_1" => noul(0.4) })]) do |endpoint, requests|
+    with_fixture([payload({ "quality_0" => noul(0.8), "quality_1" => noul(0.2) })]) do |endpoint, requests|
       result = Orbit::JevAdvisor.new(api_key: "test-key", endpoint: endpoint).assess_checker_quality(
         state: state, candidates: state["candidates"]
       )
       sent = requests.first
-      check(sent["questions"].keys.sort == %w[quality_0 quality_1 time_0 time_1],
-            "exact route evidence can support separate quality and time assessments")
-      check(result["scores"] == { "p/one" => { "quality" => 0.8, "time" => 0.7 },
-                                  "p/two" => { "quality" => 0.2, "time" => 0.4 } },
-            "quality and time answers map back to provider/id")
+      check(sent["questions"].keys.sort == %w[quality_0 quality_1],
+            "checker task fit does not ask a time question even when exact evidence is present")
+      check(result["scores"] == { "p/one" => { "quality" => 0.8 }, "p/two" => { "quality" => 0.2 } },
+            "quality answers map back to provider/id and omit time")
+      check(result["question_set_version"] == "jev-checker-task-fit-3", "checker questions use the new set version")
     end
 
     expect_error("no checker candidate is rejected before any request") do
@@ -288,9 +291,11 @@ module JevAdvisorTest
       result = Orbit::JevAdvisor.new(api_key: "test-key", endpoint: endpoint).assess_checker_quality(
         state: state, candidates: state["candidates"]
       )
-      check(requests.first["questions"].keys == ["quality_0"] &&
-            result["scores"] == { "kimi-code/k3-256k" => { "quality" => 0.63, "time" => nil } },
-            "model-level coding benchmarks can inform checker fit but cannot generate a route-specific time verdict")
+      sent = requests.first
+      prior = sent.dig("state", "catalog_priors", 0)
+      check(sent["questions"].keys == ["quality_0"] && !result["scores"]["kimi-code/k3-256k"].key?("time") &&
+            prior["coding_index"] == 76.2 && prior["not_a_weighted_input"] == true,
+            "a catalog prior is a labeled input and does not create a time score or a weighted total")
     end
   end
 
@@ -336,7 +341,7 @@ module JevAdvisorTest
 
       with_fixture([payload(STAGE_ONE_ANSWERS)]) do |endpoint, requests|
         result = Orbit::JevAdvisor.new(api_key: "test-key", endpoint: endpoint).assess(state: state)
-        check(result["scores"]["delegatable"] == 0.9,
+        check(result["scores"]["stuck"] == 0.1,
               "a diff cut at the byte budget no longer degrades the assessment to JSON::GeneratorError")
         check(requests.first["state"]["changes"]["diff_excerpt"].valid_encoding?,
               "the assessment request carries the excerpt as valid JSON text")

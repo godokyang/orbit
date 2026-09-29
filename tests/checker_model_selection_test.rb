@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative "../lib/orbit/checker_model_selection"
+require_relative "../lib/orbit/model_quality_policy"
 
 # A non-empty pool with a runnable checker must choose one. A task-fit signal
 # prioritizes scored candidates; uncertainty uses pool order, never the
@@ -20,6 +21,51 @@ module CheckerModelSelectionTest
     models.to_h { |model| [model, { "verdict" => "qualified", "source" => "https://example.test/quality" }] }
   end
 
+  def scored(pairs)
+    pairs.to_h { |model, score| [model, { "verdict" => "qualified", "source" => "jev:checker_task_fit", "score" => score }] }
+  end
+
+  # Scripted policy binding; it is not a real calibration release.
+  def reviewed_release
+    policy = Orbit::ModelQualityPolicy
+    policy.binding.merge(
+      "model" => "jev-1.13", "provider" => "typesafe", "scope" => policy::SUPPORTED_PROFILE,
+      "thresholds" => { "candidate_task_fit" => 0.70, "checker_task_fit" => 0.72, "handoff_fit" => 0.74, "member_task_fit" => 0.71 },
+      "structural_validation" => "passed", "allows_positive_ranking" => true, "proves_samples_real" => false
+    )
+  end
+
+  def selection_state
+    Orbit::ModelQualityPolicy.project_selection_state(
+      "instruction" => "Review the CLI", "review_role" => "reviewer", "acceptance" => ["CLI rejection paths pass"],
+      "workspace" => { "project" => { "git" => true }, "artifact_root" => "/fixture/project" }
+    )
+  end
+
+  def actual_judgment
+    { "status" => "answered", "provider" => "typesafe", "model" => "jev-1.13",
+      "input_version" => Orbit::ModelQualityPolicy::INPUT_VERSION,
+      "question_set_version" => Orbit::ModelQualityPolicy::CHECKER_QUESTION_SET }
+  end
+
+  def route_quote(output_tokens)
+    identity = { "provider" => "zhipu", "model" => "glm-5.2", "reasoning" => "unknown", "billing_route" => "direct_api" }
+    { "fact" => {
+        "schema_version" => Orbit::RouteResourceFacts::SCHEMA_VERSION, "scope" => "omp_route", "route" => identity,
+        "source" => { "kind" => "first_party_pricing", "detail" => "provider price list section 3",
+                      "verifier" => "orbit maintainer", "reference" => "https://example.test/pricing" },
+        "verification" => { "retrieved_at" => "2026-09-28T00:00:00Z", "valid_until" => "2026-10-05T00:00:00Z" },
+        "effective" => { "from" => "2026-08-01T00:00:00Z", "until" => nil },
+        "applicability" => { "account_scope" => "provider account acct-1", "plan" => "pay as you go",
+                             "conditions" => "standard list price" },
+        "currency" => "USD",
+        "categories" => { "input" => { "unit" => "token", "price" => 0.6, "per" => 1_000_000 },
+                          "output" => { "unit" => "token", "price" => 2.2, "per" => 1_000_000 } }
+      },
+      "observed_route" => identity, "usage" => { "input" => 1_000, "output" => output_tokens },
+      "account_scope" => "provider account acct-1", "at" => "2026-09-29T12:00:00Z" }
+  end
+
   def empty_pool_leaves_the_existing_default
     decision = Orbit::CheckerModelSelection.choose(
       pool: [], catalog: catalog(["p/one"]), quality: qualified("p/one"), resolvable: []
@@ -34,35 +80,28 @@ module CheckerModelSelectionTest
       pool: pool, catalog: catalog(pool), quality: nil, resolvable: ["p/second"]
     )
     assert(decision["model"] == "p/second" && decision["selection_tier"] == "fallback" &&
-           decision["basis"] == "pool_order_unknown_fit" && decision["notice"].include?("未经证实"),
+           decision["basis"] == "pool_order_unreleased" && decision["notice"].include?("未经证实"),
            "unknown quality still selects the runnable pool model, without claiming it passed a quality test")
   end
 
-  def prefers_a_different_family_then_pool_order
+  def family_name_does_not_reorder_an_unreleased_pool
     families = { "root/model" => "root-family", "p/shared" => "root-family", "p/other" => "other-family" }
     decision = Orbit::CheckerModelSelection.choose(
       pool: ["p/shared", "p/other"], catalog: catalog(["p/shared", "p/other"], families),
       quality: qualified("p/shared", "p/other"), resolvable: ["p/shared", "p/other"]
     )
-    assert(decision["model"] == "p/other" && decision["basis"] == "different_family",
-           "family preference compares only qualified candidates")
-
-    same = { "root/model" => "root-family", "p/shared" => "root-family", "p/other" => "root-family" }
-    decision = Orbit::CheckerModelSelection.choose(
-      pool: ["p/shared", "p/other"], catalog: catalog(["p/shared", "p/other"], same),
-      quality: qualified("p/shared", "p/other"), resolvable: ["p/shared", "p/other"]
-    )
-    assert(decision["model"] == "p/shared" && decision["basis"] == "pool_order_no_other_family",
-           "with no other family the user's pool order is kept")
+    assert(decision["model"] == "p/shared" && decision["basis"] == "pool_order_unreleased" &&
+           decision["selection_tier"] == "fallback",
+           "a different family is not a released task-fit signal")
   end
 
-  def positive_fit_precedes_unscored_pool_models
+  def unreleased_verdict_does_not_precede_pool_order
     pool = %w[p/unknown p/positive]
     decision = Orbit::CheckerModelSelection.choose(
-      pool: pool, catalog: catalog(pool), quality: qualified("p/positive"), resolvable: pool
+      pool: pool, catalog: catalog(pool), quality: scored("p/positive" => 0.99), resolvable: pool
     )
-    assert(decision["model"] == "p/positive" && decision["selection_tier"] == "preferred",
-           "a positive task-fit signal takes priority when both pool models can run")
+    assert(decision["model"] == "p/unknown" && decision["selection_tier"] == "fallback",
+           "an unreleased high score does not jump the pool order")
   end
 
   def unavailable_first_choice_falls_through_without_leaving_the_pool
@@ -87,8 +126,8 @@ module CheckerModelSelectionTest
       pool: pool, catalog: catalog(pool), quality: {}, resolvable: pool,
       fit_scores: { "p/first" => 0.03, "p/better" => 0.42 }
     )
-    assert(decision["model"] == "p/better" && decision["basis"] == "highest_available_task_fit",
-           "below-threshold fit scores rank runnable pool models rather than blocking the task")
+    assert(decision["model"] == "p/first" && decision["basis"] == "pool_order_unreleased",
+           "unreleased fit scores do not rank runnable models; the task still gets the first runnable one")
   end
 
   def unavailable_catalog_does_not_guess_pool_membership
@@ -104,10 +143,11 @@ module CheckerModelSelectionTest
       pool: ["p/one"], catalog: catalog(["p/one"], { "root/model" => "rf", "p/one" => "rf" }),
       quality: qualified("p/one"), resolvable: ["p/one"]
     )
-    assert(decision["reason"].include?("no time/cost facts"),
-           "the selection states time/cost facts are absent instead of claiming them")
-    assert(!decision.to_s.downcase.include?("best") && !decision.to_s.downcase.include?("cheap"),
-           "no fabricated quality or cost ranking words")
+    assert(decision["reason"].include?("no reviewed release") &&
+           !decision["reason"].downcase.include?("time"),
+           "the selection does not invent a time or cost ranking")
+    assert(!decision.to_s.downcase.include?("cheap"),
+           "no fabricated cost ranking words")
   end
 
   def cached_evidence_is_bounded_and_expiry_checked
@@ -143,7 +183,7 @@ module CheckerModelSelectionTest
            "real quality/local-sample names survive; no wrong prefix allowlist drops them")
     assert(!kept.key?("quality_old"), "the newest unexpired entry wins")
     assert(bounded["pool/one"]["cost_tier"] == { "band" => "low", "confidence" => "medium", "basis" => "provider plan comparison" },
-           "a validated coarse cost tier is passed through for ordering, not normalized to a per-token price")
+           "a validated coarse tier stays on the cached fact and is not rewritten into a token price")
   end
 
   def cached_evidence_rejects_malformed_entries
@@ -173,78 +213,63 @@ module CheckerModelSelectionTest
            "a hand-edited entry without valid sources, values, timestamps or names is never handed to JEV")
   end
 
-  def time_cost_tiers_order_within_family_and_record_the_gap
-    families = { "root/model" => "rf", "p/a" => "rf", "p/b" => "rf" }
+  def time_tiers_do_not_order_and_released_route_cost_can
     pool = %w[p/a p/b]
-    # ADR-009: after the quality line, compare end-to-end time first, then cost.
-    tiers = { "p/a" => { "time" => "fast", "cost" => "high" }, "p/b" => { "time" => "slow", "cost" => "low" } }
-    decision = Orbit::CheckerModelSelection.choose(
-      pool: pool, catalog: catalog(pool, families), quality: qualified("p/a", "p/b"),
-      resolvable: pool, time_cost: tiers
-    )
-    assert(decision["model"] == "p/a" && decision["evidence_gap"].nil?,
-           "faster end-to-end time wins before coarse cost within a family")
-    assert(decision["reason"].include?("time") && !decision["reason"].include?("no time/cost facts"),
-           "the reason reports the time/cost evidence actually used, not a missing-facts claim")
+    raised = false
+    begin
+      Orbit::CheckerModelSelection.choose(
+        pool: pool, catalog: catalog(pool), quality: scored("p/a" => 0.91, "p/b" => 0.91),
+        resolvable: pool, time_cost: { "p/a" => { "time" => "fast" } }, release: reviewed_release
+      )
+    rescue ArgumentError
+      raised = true
+    end
+    assert(raised, "time_cost is not a selection argument")
 
-    equal_time = { "p/a" => { "time" => "fast", "cost" => "high" }, "p/b" => { "time" => "fast", "cost" => "low" } }
-    decision = Orbit::CheckerModelSelection.choose(
-      pool: pool, catalog: catalog(pool, families), quality: qualified("p/a", "p/b"),
-      resolvable: pool, time_cost: equal_time
+    released = Orbit::CheckerModelSelection.choose(
+      pool: pool, catalog: catalog(pool), quality: scored("p/a" => 0.91, "p/b" => 0.91),
+      resolvable: pool, release: reviewed_release, state: selection_state, judgment: actual_judgment,
+      route_costs: { "p/a" => route_quote(1_000_000), "p/b" => route_quote(1_000) }
     )
-    assert(decision["model"] == "p/b", "coarse cost breaks a time tie")
+    assert(released["model"] == "p/b" && released["basis"] == "released_task_fit_then_route_cost_heuristic" &&
+           released["selection_tier"] == "preferred",
+           "equal released task fit then uses the lower validated route estimate")
 
-    decision = Orbit::CheckerModelSelection.choose(
-      pool: pool, catalog: catalog(pool, families), quality: qualified("p/a", "p/b"), resolvable: pool
+    higher = Orbit::CheckerModelSelection.choose(
+      pool: pool, catalog: catalog(pool), quality: scored("p/a" => 0.95, "p/b" => 0.80),
+      resolvable: pool, release: reviewed_release, state: selection_state, judgment: actual_judgment,
+      route_costs: { "p/a" => route_quote(1_000_000), "p/b" => route_quote(1_000) }
     )
-    assert(decision["model"] == "p/a" && decision["evidence_gap"].include?("no time/cost evidence"),
-           "without tiers the pool order is kept and the gap is recorded")
+    assert(higher["model"] == "p/b" && higher["basis"] == "released_task_fit_then_route_cost_heuristic",
+           "both clear the released task-fit bar; credible route resource estimates can guide preference")
   end
 
-  def total_time_precedes_family_and_missing_cost_is_a_gap
-    families = { "root/model" => "rf", "p/shared" => "rf", "p/other" => "of" }
-    pool = %w[p/shared p/other]
-    # ADR-009: end-to-end time comes before family; a different family is only a
-    # same-level preference. The same-family model is faster here, so it wins.
-    tiers = { "p/shared" => { "time" => "fast", "cost" => "high" },
-              "p/other" => { "time" => "slow", "cost" => "low" } }
+  def unknown_route_cost_does_not_promote_or_drop
+    pool = %w[p/known p/unknown]
     decision = Orbit::CheckerModelSelection.choose(
-      pool: pool, catalog: catalog(pool, families), quality: qualified(*pool),
-      resolvable: pool, time_cost: tiers
+      pool: pool, catalog: catalog(pool), quality: scored("p/known" => 0.91, "p/unknown" => 0.91),
+      resolvable: pool, release: reviewed_release, state: selection_state, judgment: actual_judgment,
+      route_costs: { "p/known" => route_quote(1_000) }
     )
-    assert(decision["model"] == "p/shared" && decision["basis"] == "faster_or_cheaper_same_family",
-           "end-to-end time beats family preference; family is only a same-level tie-break")
-
-    tie = { "p/shared" => { "time" => "fast", "cost" => "low" },
-            "p/other" => { "time" => "fast", "cost" => "low" } }
-    decision = Orbit::CheckerModelSelection.choose(
-      pool: pool, catalog: catalog(pool, families), quality: qualified(*pool), resolvable: pool, time_cost: tie
-    )
-    assert(decision["model"] == "p/other" && decision["basis"] == "different_family",
-           "at equal time and cost the different family is preferred")
-
-    partial = { "p/shared" => { "time" => "fast" }, "p/other" => { "time" => "slow", "cost" => "low" } }
-    decision = Orbit::CheckerModelSelection.choose(
-      pool: pool, catalog: catalog(pool, families), quality: qualified(*pool), resolvable: pool, time_cost: partial
-    )
-    assert(decision["model"] == "p/shared", "time still orders when one cost tier is unknown")
-    assert(decision["evidence_gap"].include?("missing"),
-           "a missing cost tier is recorded as a gap, not treated as free")
+    assert(decision["model"] == "p/known" && decision["cost_comparison"] == "unknown",
+           "a missing route cost does not move that candidate ahead of pool order")
+    assert(decision["candidates"].include?("p/unknown"),
+           "unknown route cost does not drop the other released candidate")
   end
 
   def run
     empty_pool_leaves_the_existing_default
     no_task_fit_score_selects_a_runnable_pool_model
-    prefers_a_different_family_then_pool_order
-    positive_fit_precedes_unscored_pool_models
+    family_name_does_not_reorder_an_unreleased_pool
+    unreleased_verdict_does_not_precede_pool_order
     unavailable_first_choice_falls_through_without_leaving_the_pool
     low_fit_scores_choose_highest_runnable_candidate
     unavailable_catalog_does_not_guess_pool_membership
     never_invents_evidence
     cached_evidence_is_bounded_and_expiry_checked
     cached_evidence_rejects_malformed_entries
-    time_cost_tiers_order_within_family_and_record_the_gap
-    total_time_precedes_family_and_missing_cost_is_a_gap
+    time_tiers_do_not_order_and_released_route_cost_can
+    unknown_route_cost_does_not_promote_or_drop
     puts "CHECKER_MODEL_SELECTION_TEST_PASS"
   end
 end

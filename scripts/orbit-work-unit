@@ -1,0 +1,82 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Internal synchronous work-unit entry for the OMP extension's host seam.
+# One JSON object on stdin, exactly one JSON object on stdout; failures exit 1
+# with {"ok":false,"reason":...}. Units persist through WorkUnitStore
+# (work-units.json, own lock, temp+fsync+rename); this script never writes
+# state.json — the runtime is its sole writer.
+#
+# Usage:
+#   orbit-work-unit TASK_DIR declare   < {"spec": {objective, requirements, ...}}
+#   orbit-work-unit TASK_DIR read      < {"id": "wu-..."}
+#   orbit-work-unit TASK_DIR list      < {}
+#   orbit-work-unit TASK_DIR bind      < {"id": "wu-...", "member_id": "...", "tool_call_id": "...", "model": "..."}
+#   orbit-work-unit TASK_DIR finish    < {"id": "wu-...", "status": "accepted|rejected|failed", "result": "...", "verification": "..."}
+#
+# Success: {"ok":true,"unit":{...}} or {"ok":true,"units":[...]} (list),
+# {"ok":true,"unit":null} when read misses.
+
+require "json"
+
+require_relative "../lib/orbit/task_record"
+require_relative "../lib/orbit/work_unit"
+
+def fail(reason)
+  puts JSON.generate("ok" => false, "reason" => reason)
+  exit 1
+end
+
+task_directory = ARGV[0].to_s
+action = ARGV[1].to_s
+if task_directory.empty? || !%w[declare read list bind finish].include?(action) || ARGV.length != 2
+  fail "usage: orbit-work-unit TASK_DIR declare|read|list|bind|finish < JSON on stdin"
+end
+unless File.file?(File.join(task_directory, "state.json"))
+  fail "not a task directory: #{task_directory}"
+end
+
+begin
+  payload = JSON.parse($stdin.read)
+rescue JSON::ParserError
+  fail "stdin must be one JSON object"
+end
+fail "stdin must be one JSON object" unless payload.is_a?(Hash)
+
+record = Orbit::TaskRecord.new(task_directory)
+store = Orbit::WorkUnitStore.new(record)
+context = { "task_input_digest" => record.input_digest,
+            "artifact_root" => record.state.dig("workspace", "artifact_root") }
+
+begin
+  case action
+  when "declare"
+    fail "declare needs a \"spec\" object" unless payload["spec"].is_a?(Hash)
+
+    puts JSON.generate("ok" => true, "unit" => store.declare(payload["spec"]))
+  when "read"
+    fail "read needs an \"id\"" unless payload["id"].is_a?(String)
+
+    puts JSON.generate(context.merge("ok" => true, "unit" => store.read(payload["id"])))
+  when "list"
+    puts JSON.generate(context.merge("ok" => true, "units" => store.list))
+  when "bind"
+    %w[id member_id tool_call_id model].each do |key|
+      fail "bind needs \"#{key}\"" unless payload[key].is_a?(String) && !payload[key].empty?
+    end
+
+    puts JSON.generate("ok" => true, "unit" => store.bind(payload["id"], member_id: payload["member_id"],
+                                                          tool_call_id: payload["tool_call_id"], model: payload["model"],
+                                                          hint_signature: payload["hint_signature"],
+                                                          hint_message_id: payload["hint_message_id"]))
+  when "finish"
+    %w[id status result verification].each do |key|
+      fail "finish needs \"#{key}\"" unless payload[key].is_a?(String) && !payload[key].empty?
+    end
+
+    puts JSON.generate("ok" => true, "unit" => store.finish(payload["id"], status: payload["status"],
+                                                            result: payload["result"], verification: payload["verification"]))
+  end
+rescue Orbit::WorkUnitStore::Error => failure
+  fail failure.message
+end

@@ -20,8 +20,10 @@ module ModelEvidenceCacheTest
       test_metric_and_field_validation(tmp)
       test_cross_identity_comparison_metrics_are_rejected(tmp)
       test_billing_route_identity_and_lookup(tmp)
-      test_route_metric_namespaces
-      test_cost_tier_validation_and_route_scope(tmp)
+      test_legacy_selection_and_resource_metrics_are_rejected(tmp)
+      test_cost_tier_is_no_longer_a_capability_fact(tmp)
+      test_quality_measurement_date_and_method(tmp)
+      test_legacy_history_is_stripped_on_read(tmp)
       test_legacy_route_less_entry_is_unknown(tmp)
       test_atomic_write_permissions_and_fail_closed(tmp)
       test_concurrent_writers_keep_every_entry(tmp)
@@ -57,8 +59,8 @@ module ModelEvidenceCacheTest
 
     hit = cache.lookup(provider: "opencode-go", model: "deepseek-v4.8", reasoning: "default")
     assert_equal("evidence", hit["status"], "evidence is stored")
-    assert_equal(120.5, hit.dig("metrics", "output_tokens_per_second", "value"), "metric value preserved")
-    assert_equal("tokens/s", hit.dig("metrics", "output_tokens_per_second", "unit"), "metric unit preserved")
+    assert_equal(0.8, hit.dig("metrics", "quality_reasoning", "value"), "metric value preserved")
+    assert_equal("score", hit.dig("metrics", "quality_reasoning", "unit"), "metric unit preserved")
     assert_equal(hit, cache.lookup(provider: "opencode-go", model: "deepseek-v4.8"), "omitted reasoning uses default")
     assert(cache.lookup(provider: "opencode-go", model: "deepseek-v4.8", reasoning: "max").nil?, "reasoning change misses")
     assert(cache.lookup(provider: "openai", model: "deepseek-v4.8").nil?, "provider change misses")
@@ -183,8 +185,8 @@ module ModelEvidenceCacheTest
     assert(cache.lookup(provider: "opencode-go", model: "deepseek-v4.8", reasoning: "default").nil?,
            "a rejected submission leaves the cache empty")
     stored = cache.record(evidence)
-    assert_equal(120.5, stored.dig("metrics", "output_tokens_per_second", "value"),
-                 "plain per-model measurements still record")
+    assert_equal(0.8, stored.dig("metrics", "quality_reasoning", "value"),
+                 "plain per-model quality measurements still record")
   end
 
   def test_atomic_write_permissions_and_fail_closed(tmp)
@@ -277,7 +279,7 @@ module ModelEvidenceCacheTest
       "retrieved_at" => "2026-09-22T09:00:00Z",
       "sources" => ["https://artificialanalysis.ai/models"],
       "metrics" => {
-        "output_tokens_per_second" => { "value" => 120.5, "unit" => "tokens/s", "basis" => "Artificial Analysis median" }
+        "quality_reasoning" => { "value" => 0.8, "unit" => "score", "basis" => "Artificial Analysis median" }
       }
     }.merge(overrides)
   end
@@ -301,72 +303,121 @@ module ModelEvidenceCacheTest
     end
   end
 
-  # The cost gate's fact namespace is route-specific: direct_api authorizes
-  # numeric cost.* facts, subscription_quota numeric quota.* facts, and the two
-  # never substitute. Unknown routes have no namespace at all.
-  def test_route_metric_namespaces
-    assert_equal("cost.", Orbit::ModelEvidenceCache.route_metric_prefix("direct_api"), "direct_api uses cost.*")
-    assert_equal("quota.", Orbit::ModelEvidenceCache.route_metric_prefix("subscription_quota"),
-                 "subscription_quota uses quota.*")
-    assert_equal(nil, Orbit::ModelEvidenceCache.route_metric_prefix("unknown"), "unknown has no fact namespace")
-
-    priced = { "metrics" => { "cost.output_peak" => { "value" => 1.2 },
-                              "quota.included_output_tokens" => { "value" => 5_000_000 } } }
-    assert(Orbit::ModelEvidenceCache.numeric_metric?(priced, "cost."), "numeric cost.* is recognized")
-    assert(Orbit::ModelEvidenceCache.numeric_metric?(priced, "quota."), "numeric quota.* is recognized")
-    assert(!Orbit::ModelEvidenceCache.numeric_metric?({ "metrics" => { "cost.note" => { "value" => "cheap" } } }, "cost."),
-           "a non-numeric fact never authorizes the gate")
-    assert(!Orbit::ModelEvidenceCache.numeric_metric?({ "metrics" => {} }, "quota."), "an empty metric set is not proof")
+  # 审计 C04: a time, speed or local-sample metric and a route price are not
+  # capability measurements of this model. Route prices live in the independent
+  # RouteResourceFacts layer; submitting them here is rejected outright.
+  def test_legacy_selection_and_resource_metrics_are_rejected(tmp)
+    cache = cache_at(tmp, "legacy-metrics", -> { Time.utc(2026, 9, 22, 10) })
+    %w[speed.tokens_per_second latency_ms elapsed_seconds local_sample_latency_ms end_to_end_seconds
+       throughput tokens_per_second].each do |name|
+      assert_raises(Orbit::ModelEvidenceCache::ValidationError, "rejects metric #{name}") do
+        cache.record(evidence("metrics" => { name => { "value" => 1.0, "unit" => "u", "basis" => "vendor" } }))
+      end
+    end
+    %w[cost.input_price cost.output_price quota.included_tokens quota.monthly_allowance].each do |name|
+      assert_raises(Orbit::ModelEvidenceCache::ValidationError, "rejects price metric #{name}") do
+        cache.record(evidence("metrics" => { name => { "value" => 1.0, "unit" => "USD", "basis" => "vendor" } }))
+      end
+    end
+    assert(!File.exist?(cache.path), "rejected submissions never create the cache")
+    assert(Orbit::ModelEvidenceCache.legacy_selection_metric?("local_sample_latency_ms") &&
+           Orbit::ModelEvidenceCache.legacy_selection_metric?("end_to_end_seconds") &&
+           !Orbit::ModelEvidenceCache.legacy_selection_metric?("quality_reasoning") &&
+           Orbit::ModelEvidenceCache.resource_metric?("quota.monthly_allowance") &&
+           !Orbit::ModelEvidenceCache.resource_metric?("coding_index"),
+           "the submission gate names exactly the legacy selection and price fields")
   end
 
-  # ADR-009: an optional coarse cost tier can be submitted without an exact
-  # per-token price. It stays scoped to the existing billing_route identity and
-  # is never normalized into one comparable per-token number; omitting it is
-  # unknown, and unknown is not free.
-  def test_cost_tier_validation_and_route_scope(tmp)
-    now = Time.utc(2026, 9, 22, 10)
-    cache = cache_at(tmp, "cost_tier", -> { now })
-    direct_tier = { "band" => "high", "confidence" => "low", "basis" => "vendor pay-as-you-go list price" }
-    direct = cache.record(evidence("billing_route" => "direct_api", "cost_tier" => direct_tier))
-    assert_equal(direct_tier, direct["cost_tier"], "a valid coarse tier is stored verbatim")
-    assert(!direct["cost_tier"].key?("usd_per_mtok"), "no normalized per-token price is derived")
-
-    quota = cache.record(evidence("billing_route" => "subscription_quota",
-                                  "cost_tier" => { "band" => "low", "confidence" => "medium",
-                                                   "basis" => "included coding-plan quota" }))
-    assert_equal("low", quota["cost_tier"]["band"], "the subscription tier is stored on its own identity")
-    assert_equal("high", cache.lookup(provider: "opencode-go", model: "deepseek-v4.8",
-                                      billing_route: "direct_api")["cost_tier"]["band"],
-                 "the direct_api tier is not mixed with the subscription_quota tier")
-    assert_equal("low", cache.lookup(provider: "opencode-go", model: "deepseek-v4.8",
-                                     billing_route: "subscription_quota")["cost_tier"]["band"],
-                 "the two routes keep distinct tiers")
-
-    omitted = cache.record(evidence("model" => "gpt-6-astra"))
-    assert(!omitted.key?("cost_tier"), "an omitted tier stays absent (unknown), not a fabricated default")
-
-    rejected = [
-      ["invalid band", { "band" => "free", "confidence" => "low", "basis" => "guess" }],
-      ["invalid confidence", { "band" => "low", "confidence" => "sure", "basis" => "guess" }],
-      ["missing basis", { "band" => "low", "confidence" => "low" }],
-      ["blank basis", { "band" => "low", "confidence" => "low", "basis" => "  " }],
-      ["extra field", { "band" => "low", "confidence" => "low", "basis" => "ok", "usd_per_mtok" => 0.5 }],
-      ["non-object", "low"]
-    ]
-    rejected.each do |label, tier|
-      assert_raises(Orbit::ModelEvidenceCache::ValidationError, "rejects cost_tier #{label}") do
-        cache.record(evidence("model" => "candidate", "cost_tier" => tier))
-      end
+  # The old coarse cost tier and its numeric cost gate are gone: a price is a
+  # resource fact, so a submission carrying one is refused rather than stored as
+  # evidence of model quality.
+  def test_cost_tier_is_no_longer_a_capability_fact(tmp)
+    cache = cache_at(tmp, "no-cost-tier", -> { Time.utc(2026, 9, 22, 10) })
+    assert_raises(Orbit::ModelEvidenceCache::ValidationError, "cost_tier is no longer accepted") do
+      cache.record(evidence("cost_tier" => { "band" => "high", "confidence" => "low", "basis" => "vendor list" }))
     end
     assert_raises(Orbit::ModelEvidenceCache::ValidationError, "cost_tier on unavailable is rejected") do
       cache.record("provider" => "kimi", "model" => "kimi-k3", "status" => "unavailable",
                    "retrieved_at" => "2026-09-22T09:00:00Z", "reason" => "no quote",
                    "cost_tier" => { "band" => "low", "confidence" => "low", "basis" => "guess" })
     end
+    assert(!Orbit::ModelEvidenceCache.respond_to?(:numeric_metric?) &&
+           !Orbit::ModelEvidenceCache.respond_to?(:route_metric_prefix),
+           "the old numeric cost gate is removed rather than kept as a compatibility layer")
+    stored = cache.record(evidence)
+    assert(!stored.key?("cost_tier"), "no tier is derived or defaulted")
   end
 
-  # Legacy stored entries without the field remain readable as unknown and are
-  # never accepted as direct_api proof.
+  # A quality entry may carry the measurement date of its values and the method
+  # version that produced them. Both are optional; an omitted one stays unknown
+  # and the retrieval date never substitutes for a measurement date.
+  def test_quality_measurement_date_and_method(tmp)
+    cache = cache_at(tmp, "measured", -> { Time.utc(2026, 9, 22, 10) })
+    stored = cache.record(evidence("measured_at" => "2026-09-20T00:00:00Z", "method_version" => "aa-intelligence-2026-08"))
+    assert_equal("2026-09-20T00:00:00Z", stored["measured_at"], "the measurement date is stored as submitted")
+    assert_equal("aa-intelligence-2026-08", stored["method_version"], "the method version is stored as submitted")
+    same_instant = cache.record(evidence("model" => "same-instant", "measured_at" => "2026-09-22T09:00:00Z"))
+    assert_equal("2026-09-22T09:00:00Z", same_instant["measured_at"], "a measurement at the retrieval instant is allowed")
+
+    omitted = cache.record(evidence("model" => "no-date"))
+    assert(!omitted.key?("measured_at") && !omitted.key?("method_version"),
+           "an omitted date or method stays unknown instead of being defaulted")
+
+    rejected = [
+      ["measured_at after retrieved_at", evidence("model" => "late", "measured_at" => "2026-09-22T09:00:01Z")],
+      ["measured_at in the future", evidence("model" => "future", "measured_at" => "2026-09-23T00:00:00Z")],
+      ["measured_at without a zone", evidence("model" => "nozone", "measured_at" => "2026-09-20 00:00:00")],
+      ["blank method_version", evidence("model" => "blank", "method_version" => "  ")],
+      ["method_version too long", evidence("model" => "long", "method_version" => "v" * 200)]
+    ]
+    rejected.each do |label, payload|
+      assert_raises(Orbit::ModelEvidenceCache::ValidationError, "rejects #{label}") { cache.record(payload) }
+    end
+  end
+
+  # History stays exactly as stored; the read path strips the fields that are no
+  # longer capability evidence and then validates the remaining quality fields in
+  # full. An entry with nothing meaningful left is not a quality hit.
+  def test_legacy_history_is_stripped_on_read(tmp)
+    path = File.join(tmp, "history", "cache", "model-evidence-v1.json")
+    FileUtils.mkdir_p(File.dirname(path))
+    base = { "provider" => "legacy", "reasoning" => "unknown", "billing_route" => "unknown",
+             "status" => "evidence", "retrieved_at" => "2026-09-22T09:00:00Z",
+             "valid_until" => "2026-09-29T09:00:00Z", "sources" => ["https://vendor.example/evidence"] }
+    kept = base.merge("model" => "mixed", "metrics" => {
+      "quality_reasoning" => { "value" => 0.7, "unit" => "score", "basis" => "vendor" },
+      "output_tokens_per_second" => { "value" => 120.0, "unit" => "tok/s", "basis" => "vendor" },
+      "cost.input_price" => { "value" => 0.8, "unit" => "USD/Mtok", "basis" => "vendor" }
+    }, "cost_tier" => { "band" => "low", "confidence" => "low", "basis" => "legacy tier" })
+    legacy_only = base.merge("model" => "legacy-only", "metrics" => {
+      "local_sample_latency_ms" => { "value" => 300.0, "unit" => "ms", "basis" => "local sample" }
+    })
+    broken = base.merge("model" => "broken", "sources" => ["not-a-url"],
+                        "metrics" => { "quality_reasoning" => { "value" => 0.7, "unit" => "score", "basis" => "vendor" } })
+    File.write(path, JSON.pretty_generate("schema_version" => Orbit::ModelEvidenceCache::SCHEMA_VERSION,
+                                          "entries" => [kept, legacy_only, broken]))
+    cache = Orbit::ModelEvidenceCache.new(path: path, clock: -> { Time.utc(2026, 9, 22, 10) })
+
+    entry = cache.lookup(provider: "legacy", model: "mixed", reasoning: "unknown")
+    assert_equal(["quality_reasoning"], entry["metrics"].keys,
+                 "legacy time and price metrics are stripped before the remaining fact is validated")
+    assert(!entry.key?("cost_tier"), "a legacy cost tier is stripped on read")
+    assert_equal("2026-09-22T09:00:00Z", entry["retrieved_at"], "the remaining quality fact keeps its own dates")
+    assert_equal(3, cache.stored_entries.length, "the stored history itself is unchanged")
+    assert(cache.stored_entries.first.key?("cost_tier") &&
+           cache.stored_entries.first.dig("metrics", "output_tokens_per_second").is_a?(Hash),
+           "raw history keeps its legacy fields for audit")
+    assert(cache.lookup(provider: "legacy", model: "legacy-only", reasoning: "unknown").nil?,
+           "an entry with no meaningful measurement left is not a quality hit")
+    assert(cache.lookup(provider: "legacy", model: "broken", reasoning: "unknown").nil?,
+           "stripping never skips validating the remaining sources and dates")
+    assert(cache.lookup(provider: "legacy", model: "mixed", reasoning: "unknown")
+                 .dig("metrics", "quality_reasoning", "value") == 0.7,
+           "a historical entry with a meaningful measurement is still a quality hit")
+  end
+
+  # Legacy stored entries without the route field remain readable as the typed
+  # unknown identity and are never accepted as direct_api facts.
   def test_legacy_route_less_entry_is_unknown(tmp)
     now = Time.utc(2026, 9, 22, 10)
     cache = cache_at(tmp, "legacy", -> { now })
@@ -377,10 +428,13 @@ module ModelEvidenceCacheTest
     assert(entry, "a legacy entry is still readable")
     assert_equal("unknown", Orbit::ModelEvidenceCache.billing_route(entry["billing_route"]),
                  "a legacy entry reads as the typed unknown route")
-    assert_equal(nil, Orbit::ModelEvidenceCache.route_metric_prefix(entry["billing_route"]),
-                 "a legacy route-less entry has no cost-gate fact namespace")
     assert_equal(nil, cache.lookup(provider: "opencode-go", model: "deepseek-v4.8", billing_route: "direct_api"),
                  "a direct_api lookup never consumes a legacy route-less entry")
+    changed = evidence.merge("valid_until" => "2026-09-29T09:00:00Z", "sources" => ["file:///unverified"])
+    File.write(cache.path, JSON.generate("schema_version" => Orbit::ModelEvidenceCache::SCHEMA_VERSION,
+                                         "entries" => [changed]))
+    assert_equal(nil, cache.lookup(provider: "opencode-go", model: "deepseek-v4.8"),
+                 "an edited cache cannot bypass source validation at read time")
   end
 
   def cache_at(tmp, name, clock)

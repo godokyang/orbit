@@ -8,7 +8,7 @@
 
 例如你让 Agent 实现登录功能，不用自己盯着它是否卡住、是否漏了错误提示，也不用在几个 Agent 之间转述要求；你只和原 Agent 对话，并查看最终检查和任务状态。
 
-卡住／偏航判断和分工建议需要[启用 Jev](docs/reference/usage-reference.md#jev-配置)。Orbit 不自动派发成员；现有有限样本不能证明所有任务都能节省额度或可靠交付。认可的新方向是任务相关质量与可信 OMP 路由 token 成本；当前源码仍有时间评分和粗费用档位，改造尚未完成，详见[主方案与代码审计](docs/plan/mixed-model-delivery-code-audit.md)。
+卡住／偏航判断和分工建议需要[启用 Jev](docs/reference/usage-reference.md#jev-配置)。成员自主派发由 Root 经原生 task 发出，Jev 提供分派参考。当前工作区已替换选型时间和粗费用门，按任务质量及可信 OMP 路由 token 资源判断；宿主单元绑定、权限、成本流、校准及真实验收仍未闭合，未交付新安装构建。现有有限样本不证明所有任务都省额度或可靠交付，详见[主方案与代码审计](docs/plan/mixed-model-delivery-code-audit.md)。
 
 ## 三步开始
 
@@ -75,7 +75,7 @@ Agent 验证并交付结果时应对当前任务调用 Orbit `check` 请求手�
 
 Root 和执行成员使用当前 OMP 会话可用的模型；候选池内可用 Agent 是受控成员的派发范围，Jev 的分工建议不自动派发。池内已有精确身份证据的候选分别评估，缺失／不可得者保持未评分，不拖住有据候选，也不能无证据推荐。Root 可以在补证待答时自行显式选择池内 Agent，记录为自己的决定；独立检查者可用池内型号即使缺证也可运行，但标记质量未经证实。
 
-例如 OMP 的 `modelRoles.task` 为池外 `zhipu-coding-plan/glm-5.2`，受控任务有可用池内 Agent 时调用通用 `agent="task"` **会被拒绝并列出可选 Agent**，不会静默派给 GLM5.2；池空或无可用 Agent 才继续使用可解析的 OMP 默认。Root 可用 `/orbit-models` 显式加入所需型号后派发。第一阶段高分、补证请求均不是 Jev 的最终推荐：若希望按 Jev 选模，提交至少一名候选有来源、身份精确的质量与整项端到端时间资料，再核对实际送达的提示；没有推荐时可自己完成或显式选池内成员，不把自选冒充 Jev 推荐。检查者补证的 `reasoning`／`billing_route` 均明确为 `unknown`；不能把旧 `default` 缓存或不同计费路由当作同一身份。
+例如 OMP 的 `modelRoles.task` 为池外 `zhipu-coding-plan/glm-5.2`，受控任务有可用池内 Agent 时调用通用 `agent="task"` **会被拒绝并列出可选 Agent**，不会静默派给 GLM5.2；池空或无可用 Agent 才继续使用可解析的 OMP 默认。Root 可用 `/orbit-models` 显式加入所需型号后派发。Jev 正向参考须匹配真实校准放行及具体工作单元，补证或分数不是派发事实。没有推荐时 Root 仍可自己完成或选池内成员；采纳需实际单元、成员、调用、型号和派发尝试匹配已送达提示。补证逐候选核对真实 reasoning／billing_route，未知如实 unknown；default 缓存和另一计费路由不能互换。当前工作区新行为的安装与真实验收进度见[当前计划](docs/plan/vision-completion-plan.md)。
 
 **多模型选择：**会话内 `/orbit-models` 从当前 OMP 可选列表维护跨会话候选池。检查者优先预检池内可用型号，池空或池内均不可运行时继续从 OMP 当前可用目录中选择；Root 可显式指定可运行型号，无须用户逐型号授权。缺精确事实时标记“检查质量未经证实”，不把型号可选或凭据预检说成实际请求成功。检查失败后 Orbit 在当前产物版本内有界尝试不同可运行型号；全失败则保留证据并阻塞完成，由 Root 检查 OMP 配置并重新选择。状态见[合同](contracts/task-runtime.md)、[ADR-009](docs/adr/009-user-selected-model-pool.md)及[交接](docs/plan/handoff.md)。
 

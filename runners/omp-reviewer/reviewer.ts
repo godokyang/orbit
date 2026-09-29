@@ -13,8 +13,9 @@
 // memory. Without --model this process does not call a model; a confinement
 // probe is not a check result.
 import { execFileSync } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { lstatSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
+import { lstatSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { recoverTrailingJsonObject } from "./json-recovery";
 import { parseProbeModels, probeModelAvailability, type CredentialAvailability } from "./model-probe";
@@ -31,6 +32,7 @@ import {
 } from "@oh-my-pi/pi-coding-agent";
 import { getBaseConfigRoot, getModelDbPath, getProfileRootDir, resolveProfileEnv } from "@oh-my-pi/pi-utils";
 import { createConfinedTools } from "./confined-tools.ts";
+import { pendingCallReceipt, syncCallReceipts, type ModelCallReceipt, type ModelCallTurn } from "./usage-receipt.ts";
 
 const REVIEW_TOOLS = ["read", "grep", "glob"];
 const FORBIDDEN_TOOLS = ["write", "edit", "bash", "eval", "task", "hub", "todo", "ask", "web_search", "browser", "lsp", "ast_edit", "notebook", "checkpoint", "rewind", "goal", "manage_skill", "learn"];
@@ -41,6 +43,9 @@ type Request = {
 	out?: string;
 	prompt?: string;
 	model?: string;
+	// Launcher-supplied check-attempt id. It names this reviewer process, not
+	// the model calls inside it; without one this process mints its own.
+	attempt_id?: string;
 	probe_models?: string;
 	probe_outside?: string;
 	probe_inside?: string;
@@ -77,6 +82,7 @@ function loadRequest(): Request {
 		out: arg("out"),
 		prompt: arg("prompt"),
 		model: arg("model"),
+		attempt_id: arg("attempt-id"),
 		probe_models: arg("probe-models"),
 		probe_outside: arg("probe-outside"),
 		probe_inside: arg("probe-inside"),
@@ -126,6 +132,45 @@ function fingerprint(root: string): string {
 function within(root: string, candidate: string): boolean {
 	const relative = path.relative(root, candidate);
 	return relative === "" || (!relative.startsWith("..") && !path.isAbsolute(relative));
+}
+
+// The evidence path is written only where the final write is allowed: never
+// inside the fixed snapshot, and only when an output file was requested.
+function evidencePath(current: Request): string | undefined {
+	if (!current.out) return undefined;
+	if (current.snapshot && within(path.resolve(current.snapshot), path.resolve(current.out))) return undefined;
+
+	return current.out;
+}
+
+// Temp file plus rename, so a reader of an in-flight attempt never sees half a
+// document. Returns false instead of throwing: a write that cannot happen must
+// not decide the check's verdict.
+function writeEvidenceAtomically(target: string, payload: unknown): boolean {
+	const temporary = `${target}.${process.pid}.tmp`;
+	try {
+		writeFileSync(temporary, JSON.stringify(payload, null, 2));
+		renameSync(temporary, target);
+		return true;
+	} catch {
+		try {
+			unlinkSync(temporary);
+		} catch {
+			// The leftovers sit next to the evidence file and carry no verdict.
+		}
+		return false;
+	}
+}
+
+// Persists the evidence as it currently stands. This runs when a provider call
+// boundary is observed, so an interrupted attempt still shows its call ids and
+// an explicit pending status instead of leaving no receipt at all.
+function persistEvidence(): void {
+	const target = evidencePath(request);
+	if (!target) return;
+	if (!writeEvidenceAtomically(target, evidence) && evidence.evidence_write_failed !== true) {
+		evidence.evidence_write_failed = true;
+	}
 }
 
 
@@ -230,13 +275,22 @@ function credentialResolver(modelRegistry: ModelRegistry): (provider: string, id
 
 const request = loadRequest();
 const problems: string[] = [];
+// One id per reviewer process. It identifies this check attempt only: the model
+// calls inside it carry their own provider-reported ids, and this attempt id
+// never substitutes for one that is missing.
+const requestedAttemptId = request.attempt_id;
+if (requestedAttemptId !== undefined && !/^[\x20-\x7e]{1,200}$/.test(requestedAttemptId)) {
+	throw new Error("attempt_id must be 1-200 printable characters");
+}
 const evidence: Record<string, unknown> = {
+	attempt_id: requestedAttemptId ?? `orbit-check-${randomUUID()}`,
 	ok: false,
 	review_ran: false,
 	probe_ran: false,
 	result: null,
 	model: null,
 	usage: null,
+	usage_gaps: [],
 };
 let exitCode = 1;
 let openAuthStorage: AuthStorage | undefined;
@@ -354,6 +408,7 @@ try {
 			skipPythonPreflight: true,
 		});
 
+		let syncReviewUsage: (() => void) | undefined;
 		try {
 			const active = session.getActiveToolNames().sort();
 			const forbidden = FORBIDDEN_TOOLS.filter(name => session.getToolByName(name) !== undefined);
@@ -424,9 +479,41 @@ try {
 
 			if (request.model && toolProblems.length === 0) {
 				evidence.review_ran = true;
-				const usage: unknown[] = [];
+				const turns: ModelCallTurn[] = [];
+				// The identity is captured before the request so a failed call
+				// still names the model that actually ran, instead of falling
+				// back to the requested name or to nothing.
+				evidence.model = session.model ? `${session.model.provider}/${session.model.id}` : null;
+				const sessionLabel = session.model ? `${session.model.provider}/${session.model.id}` : undefined;
+				let receipts: ModelCallReceipt[] = [];
+				const syncUsage = () => {
+					const report = syncCallReceipts(receipts, turns, request.model);
+					receipts = report.calls;
+					evidence.usage = receipts.length > 0 ? receipts : null;
+					evidence.usage_gaps = report.gaps;
+				};
+				syncReviewUsage = syncUsage;
+				// The agent loop turns the first provider `start` of every response
+				// into `message_start`, so that is the real call boundary: mint the
+				// local invocation id there, persist its in-flight receipt, and reuse
+				// the same id for that response's end or failure. The id is never
+				// derived afterwards from time and never from the check attempt id.
+				const invocationIds = new Map<object, string>();
 				session.subscribe(event => {
-					if (event.type === "message_end" && event.message.role === "assistant") usage.push(event.message.usage);
+					if (event.type !== "message_start" && event.type !== "message_end") return;
+					const message = event.message;
+					if (message.role !== "assistant") return;
+					if (event.type === "message_start") {
+						const callId = `orbit-call-${randomUUID()}`;
+						invocationIds.set(message, callId);
+						receipts.push(pendingCallReceipt({ call_id: callId, message, requested_model: request.model, session_model: sessionLabel }));
+						syncUsage();
+						persistEvidence();
+						return;
+					}
+					turns.push({ call_id: invocationIds.get(message) ?? null, message });
+					syncUsage();
+					persistEvidence();
 				});
 				const prompt = readFileSync(request.prompt!, "utf8");
 				await session.prompt(prompt);
@@ -456,8 +543,6 @@ try {
 					? [`final message is not valid JSON${parseError ? `: ${parseError}` : ""}`]
 					: validateCheckResult(result);
 				problems.push(...contractProblems);
-				evidence.model = session.model ? `${session.model.provider}/${session.model.id}` : null;
-				evidence.usage = usage;
 				evidence.raw_text = text;
 				evidence.result = contractProblems.length === 0 ? result : null;
 				evidence.contract_problems = contractProblems;
@@ -465,6 +550,12 @@ try {
 				else if (evidence.model !== request.model) problems.push(`model drift: requested ${request.model}, session resolved ${evidence.model}`);
 			}
 		} finally {
+			// Receipts are kept on every path, including a failed or
+			// contract-invalid run: a metered call is never reported as zero, a
+			// call that never produced a result keeps its pending entry, and a
+			// call the provider did not identify or meter is named in usage_gaps
+			// instead of being invented.
+			syncReviewUsage?.();
 			await session.dispose();
 		}
 	}

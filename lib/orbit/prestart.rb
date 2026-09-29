@@ -199,24 +199,28 @@ module Orbit
       if result.unavailable?
         return outcome("uncertain", "root_decides", "entry judgment unavailable: #{result.error}",
                        provider: result.provider, actual_model: result.actual_model,
-                       usage: result.usage, calibration: calibration)
+                       usage: result.usage, calibration: calibration, call_id: result.call_id,
+                       judgment_status: result.status, requested_model: model)
       end
 
       probabilities = result.answers.transform_values { |value| { "probability_true" => value } }
       unless result.complete_for?(request) && result.provider == request.provider && result.actual_model == model
         return outcome("uncertain", "root_decides", "entry judgment is incomplete or the actual model differs from calibration",
                        provider: result.provider, actual_model: result.actual_model,
-                       usage: result.usage, calibration: calibration)
+                       usage: result.usage, calibration: calibration, call_id: result.call_id,
+                       judgment_status: result.status, requested_model: model)
       end
       passed = EntryCalibration.passes?(result.answers, calibration.fetch("thresholds"))
       if passed
         outcome("uncertain", "start", "calibrated entry judgment supports execution and delegation or supervision",
                 probabilities: probabilities, provider: result.provider, actual_model: result.actual_model,
-                usage: result.usage, calibration: calibration)
+                usage: result.usage, calibration: calibration, call_id: result.call_id,
+                judgment_status: result.status, requested_model: model)
       else
         outcome("uncertain", "root_decides", "calibrated entry judgment did not clear execution and either value path",
                 probabilities: probabilities, provider: result.provider, actual_model: result.actual_model,
-                usage: result.usage, calibration: calibration)
+                usage: result.usage, calibration: calibration, call_id: result.call_id,
+                judgment_status: result.status, requested_model: model)
       end
     rescue JudgmentRequest::Error, JudgmentResult::Error => error
       outcome("uncertain", "root_decides", "entry judgment failed: #{error.message}")
@@ -271,12 +275,14 @@ module Orbit
     end
 
     def outcome(classification, decision, reason, probabilities: nil, provider: nil,
-                actual_model: nil, usage: nil, calibration: nil)
+                actual_model: nil, usage: nil, calibration: nil, call_id: nil,
+                judgment_status: nil, requested_model: nil)
       trace = { "rule_version" => RULE_VERSION, "input_version" => INPUT_VERSION,
                 "decision_version" => DECISION_VERSION }
       if provider
         trace.merge!("question_set_version" => QUESTION_SET_VERSION, "provider" => provider,
                      "actual_model" => actual_model,
+                     "call_id" => call_id, "judgment_status" => judgment_status, "requested_model" => requested_model,
                      "thresholds" => calibration.fetch("thresholds"),
                      "question_digest" => QUESTION_DIGEST, "calibration" => calibration["release"])
         trace["probabilities"] = probabilities if probabilities

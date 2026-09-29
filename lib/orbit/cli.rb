@@ -24,6 +24,8 @@ require_relative "checker_model_selection"
 require_relative "checker_model_selector"
 require_relative "diagnostics"
 require_relative "release_lease"
+require_relative "work_unit"
+require_relative "route_resource_store"
 
 module Orbit
   module CLI
@@ -55,7 +57,7 @@ module Orbit
 
       OMP 用 orbit omp 启动受控会话，普通 omp 不加载 Orbit 扩展。
       具体参数：orbit <命令> --help（omp 用 orbit help omp）；状态的机器输出：orbit status --json。
-      Agent 执行接口：start / check / amend / dispute / rebind-workspace / model-evidence / model-candidates / model-status / review-model（各自 --help）。
+      Agent 执行接口：start / check / amend / dispute / rebind-workspace / work-unit / route-resources / model-evidence / model-candidates / model-status / review-model（各自 --help）。
     TEXT
 
     COMMAND_HELP = {
@@ -76,23 +78,37 @@ module Orbit
       "rebind-workspace" => "orbit rebind-workspace TASK_DIRECTORY PATH [--reason TEXT]\n把产物目录改到同一 Git 仓库中的工作区。命令入队后由任务进程记录来源、原因和历史；amend / dispute 的文字不会切换路径。",
       "model-evidence" => <<~TEXT,
         orbit model-evidence [TASK_DIRECTORY] --file FILE|-
-        提交 Root 从一手来源检索的模型事实证据（一个 JSON object 或 array）。检查者补证按 start.evidence_needed 中的完整身份提交 provider、model、reasoning 与 billing_route；当前隔离模型目录不能证明 reasoning／route，故两者均为 "unknown"，不得省略 reasoning（省略表示 provider 默认档），也不得借用其它计费路由的资料。检查者可不传 TASK_DIRECTORY；传入当前任务目录时确认精确匹配的检查者事实并在下次检查前重选。执行成员的任务内请求逐字段复制请求列出的身份并传 TASK_DIRECTORY；一个有据候选即可独立判断，其他候选仍未评分。不写网页正文或凭据，不伪造来源或指标。
+        提交 Root 从一手来源核实的任务相关模型质量事实（一个 JSON object 或 array），也可先写缓存。逐候选采用真实 provider、model、reasoning 与 billing_route；必须与实际 OMP 路由匹配，不得改成另一条路由取数。缺失身份或测量日期如实未知；省略 reasoning 表示 provider 默认档，与显式 unknown 不同。一个候选的事实不要求 Root 或全池同时补齐；提交事实不代表 Jev 已推荐或成员已派发。
         占位结构（尖括号处必须替换为真实检索结果）：
-          [{"provider":"<候选的 provider>","model":"<候选的 model>","reasoning":"<实际 reasoning>",
-            "billing_route":"<核实的 route；成员任务须与请求一致：direct_api|subscription_quota|unknown>",
+          [{"provider":"<真实 provider>","model":"<真实 model>","reasoning":"<实际档位或 unknown>",
+            "billing_route":"<实际 direct_api|subscription_quota|unknown>",
             "status":"evidence","retrieved_at":"<ISO8601，含时区>",
-            "valid_until":"<ISO8601，可省略；不得超过该模型标识的有效期>",
-            "sources":["https://<真实来源 URL>"],
-            "metrics":{"<指标名>":{"value":0,"unit":"<单位>","basis":"<测量口径与样本说明>"}},
-            "cost_tier":{"band":"low|medium|high","confidence":"low|medium|high","basis":"<档位依据，非空>"}}]
-        约束：sources 为 1–5 个绝对 http(s) URL（不带凭据）；metrics 为命名对象，value 为有限数字，unit/basis 为文本；retrieved_at 不能是未来时间。执行成员和检查者的 reasoning 与 billing_route 必须与请求身份逐字段一致：省略 reasoning 表示 provider 默认档，不能匹配请求中的 unknown；省略 route 按 unknown 处理，不能匹配 direct_api 或 subscription_quota。
-        cost_tier 为可选粗档费用：按价格或套餐额度的负担档位表达，复用同一 sources 与 entry 有效期，由 billing_route 区分按量 API 与订阅套餐额度，不折算成统一的每 token 价格，也不替代 metrics 中的数值事实。band 与 confidence 只能是 low/medium/high，basis 为非空说明；省略该字段即未知，未知不是免费。
+            "valid_until":"<ISO8601，可省略，受型号有效期约束>",
+            "sources":["https://<一手来源 URL>"],
+            "metrics":{"<任务相关质量指标>":{"value":0,"unit":"<单位>","basis":"<测量口径>"}},
+            "measured_at":"<实际测量时间，可未知省略>","method_version":"<方法版本，可未知省略>"}]
+        sources 为 1–5 个无凭据的绝对 http(s) URL；指标 value 为有限数字，unit/basis 为文本。抓取时效不代表测量时效，measured_at 不能晚于 retrieved_at；未知日期不能用抓取日期填补。
+        新补证不接收速度、时间、local_samples 或粗费用 cost_tier；本路由价格与订阅规则由独立资源事实流核验，OpenRouter 报价不能冒充 OMP 价格。缺少可信 token 构成时，不由交叉输入／输出单价判总成本；未知不等于免费。
         无法取得证据时用 status "unavailable" 并给出 reason（不得编造证据）：
           [{"provider":"…","model":"…","reasoning":"…","billing_route":"<已核实的 route 或任务请求标注>",
             "status":"unavailable","retrieved_at":"…","reason":"<为什么无法取得>"}]
-        Orbit 校验后原子写入用户级缓存：带 TASK_DIRECTORY 时同时向任务进程入队（status "queued"），精确命中当前检查者缺口则确认补证，否则按执行成员的请求身份核对；省略任务目录时只写缓存（status "cached"），适用于建任务前及运行中的检查者补证。下次独立检查开始前会重新读取、判断池内选模；不自动中断在途检查。
+        校验后原子写入用户级缓存：带 TASK_DIRECTORY 时向任务进程入队（status "queued"），省略时只写缓存（status "cached"）。后续成员／检查者判断重新读取精确身份事实；不改实际路由，不中断在途检查。精确证据与目录先验同时呈现，有冲突交 Root 复核；未校准只显示事实，不能自动正向推荐。
       TEXT
       "review-model" => "orbit review-model TASK_DIRECTORY --model provider/id [--reason TEXT]\nRoot 可从当前 OMP 可用目录指定检查模型；任务进程在下一次检查前再次核对隔离目录与凭据。已结束任务不接受；在途检查不切换。池外选择记录来源，不要求用户逐型号授权。",
+      "work-unit" => <<~TEXT,
+        orbit work-unit TASK_DIRECTORY declare|read|list|finish --file FILE|-
+        Root 持久记录可交接工作单元；read/list 只读，declare/finish 不修改原始用户要求。
+        declare 输入 {"spec":{"objective":"目标","requirements":["有效要求引用"],"allowed_paths":["路径"],"allowed_tools":["工具名"],"allowed_commands":["完整命令"],"acceptance":"验收方式","escalation":"何时停止并报 Root"}}，可加 context、decisions、dependencies 和任务相关 model_requirements。
+        read 输入 {"id":"wu-…"}，list 输入 {}；finish 输入 {"id":"wu-…","status":"accepted|rejected|failed","result":"实际结果","verification":"实际核验证据"}。
+        单元绑定当前要求版本和实际产物工作区；修订／重新绑定使旧单元不能继续派发或登记 accepted。本命令只记录单元，不派发或登记成员。实际派发须另经原生宿主绑定，Root 不能通过本命令伪造派发。accepted 是 Root 核验记录，不替代独立最终检查或停止确认。已结束任务仅可 read/list。
+      TEXT
+      "route-resources" => <<~TEXT,
+        orbit route-resources import|list|report [TASK_DIRECTORY] [--project DIR] [--file FILE|-]
+
+        import 读取一个或一组完整 RouteResourceFacts，保存来源、核验窗口、实际路由、账号／计划、币种及原单位；--file 必需。结构验证不证明来源真实，提交者须核对一手依据。
+        list 只读显示当前项目私有事实；可用 --file 提供精确过滤字段。report 需要任务目录，可用 --file 提供实际观察的 account_scope／plan（也可逐路由映射）。不提供即未知，不从价格文档反填账号。
+        金额只核算有实际调用时刻及完整用量构成的已归属调用；额度保留原规则，不换算金额。OpenRouter 目录报价不能作为 OMP 价格，未知不等于免费，不增加硬预算。
+      TEXT
       "model-candidates" => <<~TEXT,
         orbit model-candidates list
         orbit model-candidates add <provider/id>
@@ -117,7 +133,7 @@ module Orbit
         仅绑定已有可控 OMP 会话，不创建或替换主执行 Agent。
         project 默认为当前目录；thread 与 socket 来自当前受控 OMP 会话。
         原文来自指定或最近的原生用户消息；--basis 可重复，--prompt-file - 从 stdin 读取。
-        候选池有可运行型号时优先池内选模；池空或池内均不可运行时从 OMP 当前会话目录选。JEV 当前任务适配分影响顺序，低分或缺证据仍可选可运行型号并标记质量未证实。start 返回 evidence_needed 时由 Root 从一手来源核实后用 orbit model-evidence --file - 提交；无法取得如实记录 unavailable。Root 也可用 --review-model 指定 OMP 可用型号，不要求原生用户逐型号授权；所有选择均预检隔离检查者目录与凭据。
+        候选池有可运行型号时优先池内选模；池空或池内均不可运行时从 OMP 当前会话目录选。经真实任务校准并匹配实际输入／题义／Jev 型号的质量判断才可正向推荐；未放行时呈现事实并保留可运行候选。start 尚无工作单元上下文时不猜验收。model-evidence 可补充精确质量事实；无法取得如实记录 unavailable。Root 也可用 --review-model 指定 OMP 可用型号，不要求原生用户逐型号授权；所有选择均预检隔离检查者目录与凭据。
         --check-in 首次默认 300 秒，后续由检查者约定；预估不是硬上限。
         只有用户明确设置的 --deadline 才形成截止。--foreground 在当前终端运行任务进程。
       TEXT
@@ -196,6 +212,10 @@ module Orbit
         model_status(argv)
       when "review-model"
         review_model(argv)
+      when "work-unit"
+        work_unit(argv)
+      when "route-resources"
+        route_resources(argv)
       when "stop", "check", "amend", "dispute"
         submit(command, argv)
       when "export"
@@ -205,7 +225,8 @@ module Orbit
       end
     rescue ArgumentError, OptionParser::ParseError, SystemCallError, Connection::Error, CheckRunner::Error,
            WorkspaceBinding::Error, ModelEvidenceCache::Error, ModelCandidatePool::Error, JSON::ParserError,
-           PrestartClassifier::Error, PrestartLedger::Error, JevAdvisor::Error, TaskEvidence::Error => error
+           PrestartClassifier::Error, PrestartLedger::Error, JevAdvisor::Error, TaskEvidence::Error, WorkUnitStore::Error,
+           RouteResourceStore::Error, RouteResourceFacts::Error, ResourceCallLedger::Error => error
       warn "orbit: #{error.message}"
       1
     end
@@ -496,7 +517,7 @@ module Orbit
 
     # ADR-009 selection is shared with TaskRuntime so that `orbit start` and
     # every later check apply exactly the same rules (pool ∩ session catalog,
-    # verifiable JEV quality gate, isolated resolvability, then time/cost/family
+    # reviewed task-fit judgment and actual model facts, then isolated resolvability
     # order). See CheckerModelSelector for the full contract.
     def select_checker_model(explicit, connection, project, instruction)
       CheckerModelSelector.new(connection: connection, project_root: project)
@@ -506,6 +527,64 @@ module Orbit
     # Root may choose any model in the current OMP catalog. This command
     # preflights availability before queueing; the runtime rechecks before
     # starting a new independent review.
+    def work_unit(argv)
+      options = { file: "-" }
+      OptionParser.new { |parser| parser.on("--file FILE") { |value| options[:file] = value } }.parse!(argv)
+      directory, operation = argv
+      unless argv.length == 2 && %w[declare read list finish].include?(operation)
+        raise ArgumentError, "usage: orbit work-unit TASK_DIRECTORY declare|read|list|finish --file FILE|-"
+      end
+      record = TaskRecord.new(File.realpath(directory))
+      if %w[declare finish].include?(operation) && TaskRuntime::TERMINAL.include?(record.state["status"])
+        raise ArgumentError, "task process has ended; work units are retained read-only"
+      end
+      payload = JSON.parse(read_input(options[:file]))
+      raise ArgumentError, "work-unit input must be one JSON object" unless payload.is_a?(Hash)
+
+      store = WorkUnitStore.new(record)
+      result = case operation
+               when "declare" then { "unit" => store.declare(payload["spec"]) }
+               when "read" then { "unit" => store.read(payload["id"]) }
+               when "list" then { "units" => store.list }
+               when "finish"
+                 { "unit" => store.finish(payload["id"], status: payload["status"], result: payload["result"],
+                                           verification: payload["verification"]) }
+               end
+      puts JSON.generate(result.merge("ok" => true, "task_directory" => record.path))
+      0
+    end
+
+    def route_resources(argv)
+      options = {}
+      OptionParser.new do |parser|
+        parser.on("--project DIR") { |value| options[:project] = value }
+        parser.on("--file FILE") { |value| options[:file] = value }
+      end.parse!(argv)
+      action, directory = argv.shift, argv.shift
+      unless %w[import list report].include?(action) && argv.empty? && (action == "report" || directory.nil?)
+        raise ArgumentError, "usage: orbit route-resources import|list|report [TASK_DIRECTORY] [--project DIR] [--file FILE|-]"
+      end
+      record = TaskRecord.new(directory) if action == "report" && directory
+      raise ArgumentError, "report needs a task directory" if action == "report" && !record
+
+      root = File.realpath(options[:project] || record&.state&.fetch("project_root") || TaskView.project(Dir.pwd))
+      store = RouteResourceStore.new(project_root: root)
+      payload = options[:file] ? JSON.parse(read_input(options[:file])) : {}
+      result = case action
+               when "import"
+                 raise ArgumentError, "import needs --file FILE|-" unless options[:file]
+                 store.import(payload)
+               when "list"
+                 raise ArgumentError, "filters must be an object" unless payload.is_a?(Hash)
+                 { "facts" => store.list(**payload.slice("scope", "route", "account_scope", "plan", "source_kind").transform_keys(&:to_sym)) }
+               when "report"
+                 raise ArgumentError, "actual resource context must be an object" unless payload.is_a?(Hash)
+                 store.report(task_path: record.path, account_scope: payload["account_scope"], plan: payload["plan"])
+               end
+      puts JSON.generate(result.merge("ok" => true))
+      0
+    end
+
     def review_model(argv)
       options = {}
       OptionParser.new do |parser|

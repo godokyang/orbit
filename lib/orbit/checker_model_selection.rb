@@ -3,16 +3,16 @@
 require "time"
 require "uri"
 
+require_relative "model_quality_policy"
+
 module Orbit
   # Pool and session identity are mandatory; the isolated checker's resolve
-  # probe determines which pool models can actually run. Task-fit judgments
-  # prioritize candidates when available, but an inconclusive or unavailable
-  # judgment never turns a runnable, user-pooled model into an unusable one.
-  # Missing facts remain unknown rather than fabricated quality evidence.
+  # probe determines which pool models can actually run. A released task-fit
+  # signal can prioritize a runnable model. Without that release, pool order
+  # is the fallback and is not a quality or cost ranking. Unknown route cost
+  # does not remove a runnable model. Time and coarse tiers are not inputs.
   module CheckerModelSelection
-    DECISION_VERSION = "orbit-checker-selection-v5"
-
-    NO_TIME_COST_EVIDENCE = "no time/cost facts were available and none were invented"
+    DECISION_VERSION = "orbit-checker-selection-v6"
 
     # Bounded evidence handed to the JEV quality judgment. ModelEvidenceCache
     # validates every field at submission time and caps an entry at MAX_METRICS
@@ -33,9 +33,6 @@ module Orbit
     EVIDENCE_METRIC_NAME_PATTERN = /\A[A-Za-z][A-Za-z0-9_.-]*\z/
     EVIDENCE_TIMESTAMP_PATTERN = /\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})\z/
     EVIDENCE_CONTROL_CHARS = /[\x00-\x1F\x7F]/
-
-    COST_RANK = { "low" => 0, "medium" => 1, "high" => 2 }.freeze
-    TIME_RANK = { "fast" => 0, "medium" => 1, "slow" => 2 }.freeze
 
     module_function
 
@@ -132,10 +129,10 @@ module Orbit
       { "status" => "invalid", "detail" => "cached entries for this exact identity failed structural validation" }
     end
 
-    # Quality verdicts are preferences, not permission to run a pooled model.
-    # With no positive fit signal, use the highest scored runnable candidate;
-    # with no score at all, retain the user's pool order.
-    def choose(pool:, catalog:, quality:, resolvable:, time_cost: nil, fit_scores: nil)
+    # A released checker task-fit signal for this task scope sets the preferred
+    # order. route_costs are RouteResourceFacts estimates. Time and coarse tiers
+    # are not arguments and do not affect the order.
+    def choose(pool:, catalog:, quality:, resolvable:, fit_scores: nil, route_costs: nil, release: nil, state: nil, judgment: nil)
       ordered = normalize(pool)
       return undecided("empty_pool") if ordered.empty?
       return undecided("session_catalog_unavailable") unless catalog.is_a?(Hash)
@@ -147,111 +144,32 @@ module Orbit
       runnable = in_session.select { |model| resolved.include?(model) }
       return undecided("pool_models_unresolvable_in_checker") if runnable.empty?
 
-      qualified = qualified_models(quality)
-      preferred = runnable.select { |model| qualified.include?(model) }
-      if preferred.empty?
-        scored = runnable.select { |model| fit_scores.is_a?(Hash) && fit_scores[model].is_a?(Numeric) }
-        chosen = if scored.empty?
-                   runnable.first
-                 else
-                   index = runnable.each_with_index.to_h
-                   scored.max_by { |model| [fit_scores.fetch(model), -index.fetch(model)] }
-                 end
-        basis = scored.empty? ? "pool_order_unknown_fit" : "highest_available_task_fit"
+      scores = quality.is_a?(Hash) ? quality : {}
+      signals = runnable.map do |model|
+        entry = scores[model]
+        value = entry.is_a?(Hash) && entry["score"].is_a?(Numeric) ? entry["score"] : nil
+        value = fit_scores[model] if value.nil? && fit_scores.is_a?(Hash) && fit_scores[model].is_a?(Numeric)
+        { "id" => model, "quality" => value, "question" => "checker_task_fit",
+          "identity" => entry.is_a?(Hash) ? entry["identity"] : nil,
+          "recommendation_hold" => entry.is_a?(Hash) && entry["recommendation_hold"] == true }
+      end
+      ranking = ModelQualityPolicy.order(signals, release: release, route_costs: route_costs, state: state, judgment: judgment)
+      if ranking["positive"]
+        chosen = ranking["ordered_ids"].first
         return {
-          "model" => chosen, "basis" => basis, "candidates" => runnable,
-          "selection_tier" => "fallback", "notice" => "候选池降级选择：独立检查模型质量未经证实",
-          "reason" => scored.empty? ? "No task-fit judgment available; selected first runnable model in pool order" :
-                                      "No positive task-fit signal among runnable pool models; selected highest available score",
-          "version" => DECISION_VERSION
+          "model" => chosen, "basis" => ranking["basis"], "candidates" => ranking["positive_ids"],
+          "selection_tier" => "preferred", "version" => DECISION_VERSION,
+          "cost_comparison" => ranking["cost_comparison"],
+          "reason" => "#{ranking["basis"]}: #{ranking["reason"]}."
         }
       end
 
-      families = catalog["families"].is_a?(Hash) ? catalog["families"] : {}
-      writing_family = families[catalog["current"].to_s.strip].to_s.strip
-      cross_candidates = preferred.select do |model|
-        family = families[model].to_s.strip
-        !writing_family.empty? && !family.empty? && family != writing_family
-      end
-      chosen = order_by_time_cost(preferred, families, writing_family, time_cost).first
-      chosen_family = families[chosen].to_s.strip
-      chosen_cross = !writing_family.empty? && !chosen_family.empty? && chosen_family != writing_family
-      basis = if chosen_cross
-                "different_family"
-              elsif !cross_candidates.empty?
-                "faster_or_cheaper_same_family"
-              elsif writing_family.empty?
-                "pool_order_writing_family_unknown"
-              else
-                "pool_order_no_other_family"
-              end
       {
-        "model" => chosen,
-        "reason" => "#{basis}: selected a runnable pool model with a positive task-fit signal; #{ordering_note(preferred, time_cost)}",
-        "basis" => basis, "candidates" => preferred, "selection_tier" => "preferred",
-        "evidence_gap" => time_cost_gap(preferred, time_cost), "version" => DECISION_VERSION
+        "model" => runnable.first, "basis" => "pool_order_unreleased", "candidates" => runnable,
+        "selection_tier" => "fallback", "notice" => "候选池降级选择：独立检查模型质量未经证实",
+        "version" => DECISION_VERSION, "cost_comparison" => "not_applied",
+        "reason" => ranking["reason"]
       }
-    end
-
-    # A model qualifies only with an explicit, sourced verdict. Credentials,
-    # catalog membership and an anonymous id are not quality evidence.
-    def qualified_models(quality)
-      return [] unless quality.is_a?(Hash)
-
-      quality.filter_map do |model, entry|
-        id = model.to_s.strip
-        id if !id.empty? && qualification?(entry)
-      end
-    end
-
-    def qualification?(entry)
-      return false unless entry.is_a?(Hash)
-      return false if entry["source"].to_s.strip.empty?
-
-      entry["qualified"] == true || entry["verdict"].to_s == "qualified"
-    end
-
-    # ADR-009 order after the quality line: end-to-end time first, then coarse
-    # cost, then a different model family as a same-level preference, then the
-    # user's pool order. A lower time/cost rank is better; missing tiers sort
-    # last but never remove a quality-qualified candidate.
-    def order_by_time_cost(eligible, families, writing_family, time_cost)
-      index = eligible.each_with_index.to_h
-      eligible.sort_by.with_index do |model, position|
-        tiers = time_cost.is_a?(Hash) && time_cost[model].is_a?(Hash) ? time_cost[model] : {}
-        family = families[model].to_s.strip
-        family_rank = !writing_family.empty? && !family.empty? && family != writing_family ? 0 : 1
-        [TIME_RANK.fetch(tiers["time"], 9), COST_RANK.fetch(tiers["cost"], 9), family_rank, index[model] || position]
-      end
-    end
-
-    # The reason must describe the evidence actually used: complete time and
-    # cost tiers, a partial set, or none at all (never claiming facts that were
-    # not supplied).
-    def ordering_note(eligible, time_cost)
-      return NO_TIME_COST_EVIDENCE unless time_cost.is_a?(Hash) && !time_cost.empty?
-
-      times = eligible.count { |model| time_cost[model].is_a?(Hash) && time_cost[model]["time"] }
-      costs = eligible.count { |model| time_cost[model].is_a?(Hash) && time_cost[model]["cost"] }
-      return "ordered by end-to-end time then coarse cost" if times == eligible.length && costs == eligible.length
-      return "ordered by end-to-end time; no coarse cost tiers were available" if times == eligible.length && costs.zero?
-
-      "ordered by end-to-end time then coarse cost where known " \
-        "(#{times} of #{eligible.length} had time, #{costs} had cost)"
-    end
-
-    def time_cost_gap(eligible, time_cost)
-      unless time_cost.is_a?(Hash)
-        return "no time/cost evidence for #{eligible.length} of #{eligible.length} qualified candidates"
-      end
-
-      missing = eligible.count do |model|
-        tiers = time_cost[model]
-        !tiers.is_a?(Hash) || tiers["time"].nil? || tiers["cost"].nil?
-      end
-      return nil if missing.zero?
-
-      "time or cost evidence missing for #{missing} of #{eligible.length} qualified candidates"
     end
 
     # Mirror ModelEvidenceCache's submission-time rules for an entry with
@@ -270,8 +188,8 @@ module Orbit
     end
 
     # The optional coarse tier must be absent or a structurally valid
-    # {band, confidence, basis}; anything else is dropped with the entry so a
-    # hand-edited tier never reaches ordering.
+    # {band, confidence, basis}. A hand-edited tier drops the entry. A valid
+    # coarse tier may remain on the cached fact and is not a route-cost rank.
     def valid_cost_tier?(tier)
       return true if tier.nil?
       return false unless tier.is_a?(Hash)

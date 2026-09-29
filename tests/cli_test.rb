@@ -529,7 +529,7 @@ module CliTest
       "provider" => "opencode-go", "model" => "deepseek-v4.8", "reasoning" => "default", "status" => "evidence",
       "retrieved_at" => (Time.now.utc - 60).strftime("%Y-%m-%dT%H:%M:%SZ"),
       "sources" => ["https://artificialanalysis.ai/models"],
-      "metrics" => { "output_tokens_per_second" => { "value" => 120.5, "unit" => "tokens/s", "basis" => "public benchmark median" } }
+      "metrics" => { "coding_index" => { "value" => 50.5, "unit" => "index", "basis" => "scripted task-quality measurement" } }
     }
     if overrides["status"] == "unavailable"
       entry = entry.slice("provider", "model", "reasoning", "status", "retrieved_at")
@@ -543,8 +543,8 @@ module CliTest
   def model_evidence_caches_object_and_queues_dedicated_command
     record = task
     reply = JSON.parse(cli("model-evidence", record.path, "--file", "-", stdin_data: JSON.generate(
-      evidence("model" => "deepseek-v4.8", "cost_tier" => { "band" => "medium", "confidence" => "low",
-                                                            "basis" => "vendor list price band" })
+      evidence("model" => "deepseek-v4.8", "measured_at" => (Time.now.utc - 120).iso8601,
+               "method_version" => "scripted-method-1")
     )))
     assert(reply["status"] == "queued" && reply["count"] == 1 &&
            reply["identities"] == [{ "provider" => "opencode-go", "model" => "deepseek-v4.8", "reasoning" => "default",
@@ -561,9 +561,10 @@ module CliTest
            !command.key?("text") && !command.key?("metrics"),
            "the dedicated command carries the typed identity and status, not the submitted body")
     stored = JSON.parse(File.read(File.join(@temp, "orbit", "model-evidence-v1.json")))
-    assert(stored.fetch("entries").length == 1 && stored.dig("entries", 0, "metrics", "output_tokens_per_second", "value") == 120.5 &&
-           stored.dig("entries", 0, "cost_tier") == { "band" => "medium", "confidence" => "low", "basis" => "vendor list price band" },
-           "the validated entry and its optional coarse cost tier are cached for the runtime to re-read")
+    assert(stored.fetch("entries").length == 1 && stored.dig("entries", 0, "metrics", "coding_index", "value") == 50.5 &&
+           stored.dig("entries", 0, "method_version") == "scripted-method-1" &&
+           stored.dig("entries", 0, "measured_at").is_a?(String) && !stored.fetch("entries").first.key?("cost_tier"),
+           "the sourced quality, measurement date and method remain distinct from obsolete costs")
   end
 
   # A batch is validated as a whole; rejections and ended tasks write neither
@@ -613,7 +614,7 @@ module CliTest
 
     cache = File.join(@temp, "orbit", "model-evidence-v1.json")
     readable = Orbit::ModelEvidenceCache.new(env: { "XDG_CACHE_HOME" => @temp })
-    assert(readable.lookup(provider: "opencode-go", model: "deepseek-v4.8").dig("metrics", "output_tokens_per_second", "value") == 120.5,
+    assert(readable.lookup(provider: "opencode-go", model: "deepseek-v4.8").dig("metrics", "coding_index", "value") == 50.5,
            "the selector's own read path finds the taskless fact inside its validity window")
 
     before = File.read(cache)
@@ -690,10 +691,10 @@ module CliTest
     worker&.join
   end
 
-  def jev_state(decision: nil, delegatable: 0.91, member_fit: 0.63, parallel_gain: 0.40)
+  def jev_state(decision: nil, delegatable: 0.91, quality: 0.63)
     delegation = {
-      "status" => "assessed",
-      "scores" => { "member_fit" => member_fit, "parallel_gain" => parallel_gain }
+      "status" => "assessed", "question_set_version" => "jev-candidates-2",
+      "scores" => { "quality" => quality }
     }
     delegation["decision"] = decision if decision
     {
@@ -718,8 +719,8 @@ module CliTest
     candidate = declined_jev[/第一阶段候选分[^；]*/].to_s
     assert(candidate.include?("delegatable 0.91") && candidate.include?("不是委派建议"),
            "a high delegatable score stays a candidate, not a recommendation")
-    assert(declined_jev.include?("最终不建议委派") && declined_jev.include?("member_fit 0.63") &&
-           declined_jev.include?("parallel_gain 0.40") && !declined_jev.include?("最终建议委派"),
+    assert(declined_jev.include?("最终不建议委派") && declined_jev.include?("任务质量判断 0.63") &&
+           !declined_jev.include?("parallel_gain") && !declined_jev.include?("最终建议委派"),
            "declined is the final recommendation even when delegatable is high")
     assert(declined_text.include?("Root 在无 hint 时显式委派") &&
            declined_text.include?("最近事件：Root 在无 hint 时显式委派") &&
@@ -727,31 +728,36 @@ module CliTest
            "members without a hint are an explicit Root delegation")
 
     recommended = task("running",
-                       "jev" => jev_state(decision: "recommended", member_fit: 0.80, parallel_gain: 0.75),
-                       "delegation_hint" => { "followed" => true, "member_fit" => 0.80, "parallel_gain" => 0.75 },
+                       "jev" => jev_state(decision: "recommended", quality: 0.80),
+                       "delegation_hint" => { "followed" => true, "quality" => 0.80 },
                        "members" => [{ "thread_id" => "member-2", "status" => "working" }])
     recommended_text = cli("status", recommended.path)
     recommended_jev = jev_line(recommended_text)
-    assert(recommended_jev.include?("最终建议委派") && recommended_jev.include?("member_fit 0.80") &&
-           recommended_jev.include?("parallel_gain 0.75") && !recommended_jev.include?("最终不建议委派") &&
+    assert(recommended_jev.include?("最终建议委派") && recommended_jev.include?("任务质量判断 0.80") &&
+           !recommended_jev.include?("parallel_gain") && !recommended_jev.include?("最终不建议委派") &&
            !recommended_jev.include?("不能从分数"),
-           "recommended names the final delegation advice and both stage-two scores")
+           "recommended names the final delegation advice and task quality without a time score")
     assert(recommended_text.include?("执行成员由 Orbit hint 后产生") &&
            recommended_text.include?("最近事件：执行成员由 Orbit hint 后产生"),
            "a followed hint is the recorded member source")
 
-    pending_hint = task("running", "jev" => jev_state(decision: "recommended", member_fit: 0.80, parallel_gain: 0.75))
+    pending_hint = task("running", "jev" => jev_state(decision: "recommended", quality: 0.80))
     pending_jev = jev_line(cli("status", pending_hint.path))
     assert(pending_jev.include?("delegation_hint 尚未持久化") &&
            pending_jev.include?("不能视为可执行建议") && !pending_jev.include?("最终建议委派"),
            "a recommended score is not actionable before the final hint is persisted")
 
-    legacy = task("running", "jev" => jev_state(delegatable: 0.91, member_fit: 0.80, parallel_gain: 0.70))
+    legacy_jev_state = jev_state
+    legacy_jev_state["delegation"] = {
+      "status" => "assessed", "question_set_version" => "jev-delegation-1",
+      "scores" => { "member_fit" => 0.80, "parallel_gain" => 0.70 }
+    }
+    legacy = task("running", "jev" => legacy_jev_state)
     legacy_text = cli("status", legacy.path)
     legacy_jev = jev_line(legacy_text)
     assert(legacy_jev.include?("delegatable 0.91") && legacy_jev.include?("不是委派建议") &&
-           legacy_jev.include?("旧记录没有 decision，不能从分数视为最终建议") &&
-           legacy_jev.include?("member_fit 0.80") && legacy_jev.include?("parallel_gain 0.70") &&
+           legacy_jev.include?("历史委派判断（jev-delegation-1）") && legacy_jev.include?("不用于新版自动推荐") &&
+           !legacy_jev.include?("member_fit 0.80") && !legacy_jev.include?("parallel_gain 0.70") &&
            !legacy_jev.include?("最终建议委派") && !legacy_jev.include?("最终不建议委派"),
            "an old record without decision does not promote scores into a recommendation")
     assert(!legacy_text.include?("最近事件"), "no member source is invented when there are no members")

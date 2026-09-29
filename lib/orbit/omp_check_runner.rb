@@ -34,6 +34,15 @@ module Orbit
     # store; it can run one resolution per distinct model. Bound it so a stuck
     # resolver cannot hold the selection loop.
     PROBE_TIMEOUT_SECONDS = 60
+    # Provider receipt fields preserved per model call, and the provider usage
+    # categories preserved per attempt only when every call reported them.
+    # `call_id` is Orbit's local id for the observed provider call boundary and
+    # `provider_response_id` is the provider's own id when it reported one; an
+    # absent upstream model stays absent instead of borrowing the executed id.
+    CALL_FIELDS = %w[call_id origin usage_status provider_response_id provider model requested_model
+                     upstream_provider upstream_model stop_reason completed_at].freeze
+    CATEGORY_FIELDS = %w[cacheWrite reasoningTokens totalTokens].freeze
+    BUCKETS = %w[input output cacheRead].freeze
 
     # Parent OMP session inputs captured before the child env is confined.
     # Plain paths and profile names only — never credentials. The reviewer
@@ -364,6 +373,11 @@ module Orbit
       stop! if group_alive?
       parsed = read_evidence
       @evidence = parsed if parsed.is_a?(Hash)
+      # A failed or contract-invalid run can still carry the model that ran and
+      # whatever usage the provider metered. Retain both before any raise so a
+      # measured failure is recorded as measured, never as zero, and an
+      # unmeasured one stays unknown.
+      retain_receipt_facts
       unless status.success? && @evidence.is_a?(Hash) && @evidence["ok"] == true
         @failure = Error.new(failure_text(status, @evidence))
         @failure_kind, @failure_basis = classify_failure(@evidence)
@@ -384,7 +398,7 @@ module Orbit
         raise
       end
       @actual_model = @evidence["model"] if @evidence["model"].is_a?(String) && !@evidence["model"].empty?
-      @usage = normalize_usage(@evidence["usage"])
+      @usage ||= normalized_check_usage
       @result
     end
 
@@ -392,7 +406,62 @@ module Orbit
       @usage
     end
 
+    # In-flight snapshots can replace a pending receipt with the same call id.
+    # Only a confirmed process-group exit seals that snapshot for accounting.
+    def receipts_finalized?
+      !!(@run && @reaped && !group_alive?)
+    end
+
+    # A stopped reviewer may have persisted call receipts before its final
+    # verdict. Read them after teardown without treating that checkpoint as a
+    # successful review or losing the original stop confirmation/error.
+    def stop!(**options)
+      super(**options)
+    ensure
+      begin
+        parsed = read_evidence if @run
+        if parsed.is_a?(Hash)
+          @evidence = parsed
+          @usage = normalized_check_usage
+          retain_receipt_facts
+        end
+      rescue SystemCallError => error
+        @receipt_read_failure = "stopped reviewer receipts could not be read (#{error.class})"
+      end
+    end
+
+    # The reviewer's id for this check attempt. It names the attempt, not the
+    # model calls inside it: those carry ids from observed call boundaries,
+    # independently of whether a provider returned its own response id.
+    def attempt_id
+      @evidence.is_a?(Hash) && @evidence["attempt_id"].is_a?(String) ? @evidence["attempt_id"] : nil
+    end
+
+    # Call-level gaps reported by the reviewer. A gap is never a zero amount:
+    # the caller must surface it or record an unknown, and `usage` stays nil
+    # when nothing was measured so it cannot be summed as if it were free.
+    def usage_gaps
+      (@evidence.is_a?(Hash) ? receipt_gaps : []) + Array(@receipt_read_failure)
+    end
+
     private
+
+    def retain_receipt_facts
+      return unless @evidence.is_a?(Hash)
+
+      model = @evidence["model"]
+      @actual_model = model if model.is_a?(String) && !model.empty?
+      @usage ||= normalized_check_usage
+    end
+
+    def normalized_check_usage
+      usage = self.class.normalize_usage(@evidence["usage"])
+      usage && usage.merge("gaps" => receipt_gaps)
+    end
+
+    def receipt_gaps
+      @evidence["usage_gaps"].is_a?(Array) ? @evidence["usage_gaps"].select { |gap| gap.is_a?(String) } : []
+    end
 
     def retained_check_rules
       "## Check rules\n\n" \
@@ -408,6 +477,7 @@ module Orbit
     def reset_run!
       @run = @result = @failure = @evidence = @usage = @actual_model = nil
       @failure_kind = @failure_basis = nil
+      @receipt_read_failure = nil
       @reaped = @stopped = false
     end
 
@@ -465,34 +535,83 @@ module Orbit
       self.class.normalize_usage(raw)
     end
 
-    # TaskRuntime sums input_tokens + output_tokens and does not read cacheRead.
-    # input_tokens therefore includes measured cacheRead so that sum is the
-    # sample total. The raw split stays beside it. Missing cache is unknown,
-    # not free. Cost is not copied or guessed.
+    # Provider-reported usage for one check attempt, kept per model call.
+    #
+    # Every reported call is kept in `calls`, including a failed or partially
+    # reported one, and `coverage` states per field how many calls reported it
+    # and how many did not. `usage_status` is "reported" only when every call
+    # reported input, output and cacheRead; otherwise it is "unknown" and
+    # `incomplete` is set, so a partial sum is never read as a complete one.
+    #
+    # The legacy pair input_tokens + output_tokens is unchanged for complete
+    # data (input_tokens includes measured cacheRead) and is omitted when it
+    # cannot be formed as integers, so no consumer meets nil arithmetic. Other
+    # provider categories are preserved under the provider's own names only when
+    # every call of the attempt reported them.
+    #
+    # Category relationships come from the pinned OMP SDK Usage contract
+    # (@oh-my-pi/pi-catalog 18.3.4 `dist/types/types.d.ts`): input is non-cached
+    # input, cacheRead/cacheWrite are separate prompt-cache buckets,
+    # reasoningTokens is a subset of output, and totalTokens additionally covers
+    # provider-side orchestration; a field a provider does not expose stays
+    # undefined (unknown, not zero). Nothing is inferred here, and the preserved
+    # categories must never be added together. Cost is never copied or guessed
+    # from directory prices.
     def self.normalize_usage(raw)
       items = case raw
               when Array then raw
               when Hash then [raw]
               else return nil
               end
-      return nil if items.empty? || items.any? { |item| !item.is_a?(Hash) }
+      items = items.select { |item| item.is_a?(Hash) }
+      return nil if items.empty?
 
-      inputs = items.map { |item| item["input"] }
-      caches = items.map { |item| item["cacheRead"] }
-      outputs = items.map { |item| item["output"] }
-      return nil unless [inputs, caches, outputs].all? { |values| values.all? { |value| value.is_a?(Integer) && value >= 0 } }
-
-      input = inputs.sum
-      cache_read = caches.sum
-      output = outputs.sum
-      {
-        "input" => input,
-        "cacheRead" => cache_read,
-        "output" => output,
-        "input_tokens" => input + cache_read,
-        "output_tokens" => output,
-        "total_tokens" => input + cache_read + output
+      coverage = (BUCKETS + CATEGORY_FIELDS).to_h do |field|
+        values = items.filter_map { |item| item[field] if item[field].is_a?(Integer) && item[field] >= 0 }
+        [field, { "reported_sum" => values.empty? ? nil : values.sum, "reported_calls" => values.length,
+                  "missing_calls" => items.length - values.length }]
+      end
+      complete = BUCKETS.all? { |field| coverage[field]["missing_calls"].zero? }
+      usage = {
+        "usage_status" => complete ? "reported" : "unknown", "incomplete" => !complete,
+        "calls" => items.map { |item| call_receipt(item) }, "coverage" => coverage,
+        "derived_usage_fields" => %w[input_tokens output_tokens total_tokens],
+        "derived_note" => "legacy reference totals from reported SDK buckets; original call fields and coverage govern resource accounting"
       }
+      BUCKETS.each do |field|
+        summed = coverage[field]["reported_sum"]
+        usage[field] = summed unless summed.nil?
+      end
+      # A preserved category exists only when every call reported it; a partially
+      # reported one is visible in `coverage` instead of being completed with
+      # zeros.
+      CATEGORY_FIELDS.each do |field|
+        entry = coverage[field]
+        usage[field] = entry["reported_sum"] if entry["missing_calls"].zero? && !entry["reported_sum"].nil?
+      end
+      input = usage["input"]
+      cache_read = usage["cacheRead"]
+      output = usage["output"]
+      if complete
+        usage["input_tokens"] = input + cache_read
+        usage["output_tokens"] = output
+        usage["total_tokens"] = usage["input_tokens"] + output
+      end
+      usage
+    end
+
+    # One model call's own receipt. A field the provider did not report stays
+    # absent: an absent id, status or category is a gap the caller must report,
+    # not a zero and not the attempt's id.
+    def self.call_receipt(item)
+      receipt = CALL_FIELDS.each_with_object({}) do |field, kept|
+        value = item[field]
+        kept[field] = value if value.is_a?(String) && !value.empty?
+      end
+      (BUCKETS + CATEGORY_FIELDS).each do |field|
+        receipt[field] = item[field] if item[field].is_a?(Integer) && item[field] >= 0
+      end
+      receipt
     end
 
     def failure_text(status, evidence)

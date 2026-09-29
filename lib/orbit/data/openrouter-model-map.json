@@ -17,6 +17,21 @@
       "verified_by": "Orbit official-source review"
     },
     {
+      "provider": "kimi-code",
+      "model": "k3-256k",
+      "reasoning": "unknown",
+      "billing_route": "subscription_quota",
+      "openrouter_id": "moonshotai/kimi-k3",
+      "canonical_slug": "moonshotai/kimi-k3-20260715",
+      "sources": [
+        "https://www.kimi.com/code/docs/en/kimi-code/models.html",
+        "https://www.kimi.com/en/blog/kimi-k3",
+        "https://openrouter.ai/moonshotai/kimi-k3"
+      ],
+      "verified_at": "2026-09-29T10:57:26Z",
+      "verified_by": "Orbit official-source review + host structural route proof"
+    },
+    {
       "provider": "opencode-go",
       "model": "deepseek-v4.1-flash",
       "reasoning": "unknown",

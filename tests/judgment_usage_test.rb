@@ -53,6 +53,8 @@ module JudgmentUsageTest
           "the service-reported model and consumption survive a failed judgment")
     check(result.to_h["source"]["actual_model"] == "jev-actual" && result.to_h["usage"] == result.usage,
           "the failure receipt exposes facts to downstream accounting")
+    check(result.call_id.to_s.start_with?("orbit-judgment-") && result.to_h["call_id"] == result.call_id,
+          "failed invocation identity remains available for deduplicated accounting")
   end
 
   def check_invalid_answers_keep_consumption
@@ -102,6 +104,13 @@ module JudgmentUsageTest
           "a valid complete response still supplies the judgment")
     check(result.actual_model == "jev-actual" && result.usage["input_tokens"] == 123,
           "successful consumption is retained unchanged")
+    response = Net::HTTPOK.new("1.1", "200", "fixture")
+    response.define_singleton_method(:body) { JSON.generate(reported("fit" => { "type" => "noul", "noul" => 0.8 })) }
+    provider = ScriptedProvider.new(response)
+    same_request = request
+    first, retry_result = provider.judge(same_request), provider.judge(same_request)
+    check(first.call_id != retry_result.call_id && first.usage == retry_result.usage,
+          "retrying the same semantic request produces a distinct potentially paid invocation")
   end
 
   def check_advisor_exposes_failed_receipt
@@ -119,6 +128,8 @@ module JudgmentUsageTest
       check(error.receipt["usage"] == response.usage && error.receipt.dig("source", "actual_model") == "jev-actual" &&
             error.receipt["question_set_version"] == Orbit::JevAdvisor::QUESTION_SET_VERSIONS["observation"],
             "callers can persist failed consumption with its actual model and question version")
+      check(error.judgment["call_id"] == response.call_id && error.judgment["requested_model"] == Orbit::JevAdvisor::MODEL,
+            "the advisor preserves invocation identity and separates requested from actual models")
     end
   end
 
@@ -136,6 +147,8 @@ module JudgmentUsageTest
           "an unavailable entry judgment cannot start a task or expose partial probabilities")
     check(decision.dig("trace", "actual_model") == "jev-actual" && decision.dig("trace", "usage") == response.usage,
           "the entry ledger receives the real failed consumption without guessing the requested model")
+    check(decision.dig("trace", "call_id") == response.call_id && decision.dig("trace", "judgment_status") == "unavailable",
+          "entry consumption retains the invocation identity and failed outcome")
   end
 
   def run

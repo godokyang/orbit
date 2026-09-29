@@ -163,11 +163,22 @@ module OmpNativeMemberTest
 
   def records_hint_follow_for_a_reconciled_native_task
     root, record, _host, runtime = open_task
-    signature = runtime.send(:delegation_signature, runtime.send(:fingerprint_artifact), runtime.send(:delegation_options))
+    store = Orbit::WorkUnitStore.new(record)
+    unit = store.declare("objective" => "Deliver native scoped work", "requirements" => ["original"],
+                         "allowed_paths" => ["artifact.txt"], "allowed_tools" => ["read"],
+                         "acceptance" => "Root checks actual native output", "escalation" => "Report missing evidence to Root")
+    signature = "scripted-current-unit-selection"
+    model = "zhipu-coding-plan/glm-5.2"
     state = runtime.instance_variable_get(:@state)
-    state["delegation_hint"] = { "signature" => signature, "followed" => false, "kind" => "omp" }
+    state["delegation_hint"] = { "version" => Orbit::MemberModelSelector::VERSION,
+      "signature" => signature, "message_id" => "sent-hint", "followed" => false,
+      "work_unit_id" => unit["id"], "input_digest" => unit["input_digest"], "artifact_root" => unit["artifact_root"],
+      "user_boundary" => state["last_user_message_id"], "dispatch_attempt" => 1,
+      "recommendation" => { "first" => { "model" => model }, "backups" => [] } }
     record.save(state)
-    register(record, "orbit-hinted")
+    register(record, "orbit-hinted", model: model, tool_call_id: "native-task-hinted")
+    store.bind(unit["id"], member_id: "orbit-hinted", tool_call_id: "native-task-hinted", model: model,
+               hint_signature: signature, hint_message_id: "sent-hint")
     runtime.tick(now: Time.now.to_f)
     member = record.state["members"].find { |entry| entry["thread_id"] == "orbit-hinted" }
     assert(member["delegation_basis"] == "orbit_hint", "a current hint is the basis of the native task")
@@ -296,7 +307,6 @@ module OmpNativeMemberTest
     member = record.state["members"].find { |entry| entry["thread_id"] == "orbit-idle" }
     assert(member["status"] == "registered", "idle without acceptedAt or outputPath is not finished")
     assert(runtime.send(:members_settled?) == false, "an unsettled native member blocks finalization")
-    assert(runtime.send(:member_blocks_new_hint?, member), "registered without terminal evidence stays active for hints")
   ensure
     FileUtils.remove_entry(root) if root
   end
