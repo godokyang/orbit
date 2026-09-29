@@ -1,6 +1,8 @@
 # Orbit OMP 接入修复验收记录（2026-09-25）
 
-来源：过程诊断与实施复盘 [Zeen 页面走查任务中的 Orbit 流程](zeen-page-capture-orbit-process-review-20260925.md)（长期保留）。本文只记录隔离 `orbit omp` 真实验收事实，不改变产品语义，不把历史 Zeen 任务判为 `complete`。**所有隔离任务已停止**，最终状态以各任务 `state.json` 为准；本文不把 Root 自述当作机器事实，自述处均标注来源。事件时间均为 UTC；目录 mtime 为本机时间（UTC+8）。**本记录的三套安装均为 `0.7.1` 构建，是 0.7.1 的历史验收证据。当前源码与安装均已为 `0.7.2`（首个源码提交 `9bb24735dd797b621f5b1b1dff983348d5110a67`，release `636cef887383e5f2f818a6c3`，`content_digest 5812d5cdf71f070a135de512d22780ccb4f8717f31806bda4670ae9e85ce4cbe`，`installed_at 2026-09-25T15:59:42Z`）；0.7.2 未另跑真实模型任务，因此本文的十个真实任务结论不替代 0.7.2 的独立真实模型验收。**
+> 类型：历史证据／研究，按标题及正文记录的日期、版本和配置解读。下文“当前”“本轮”及旧规则不代表现行行为或授权；当前状态见[交接](../plan/handoff.md)，现行语义见[任务合同](../../contracts/task-runtime.md)。
+
+来源：过程诊断与实施复盘 [Zeen 页面走查任务中的 Orbit 流程](zeen-page-capture-orbit-process-review-20260925.md)（长期保留）。本文只记录隔离 `orbit omp` 真实验收事实，不改变产品语义，不把历史 Zeen 任务判为 `complete`。**所有隔离任务已停止**，最终状态以各任务 `state.json` 为准；本文不把 Root 自述当作机器事实，自述处均标注来源。事件时间均为 UTC；目录 mtime 为本机时间（UTC+8）。**本记录的三套安装均为 `0.7.1` 构建，是 0.7.1 的历史验收证据。当时后续源码与安装均已为 `0.7.2`（首个源码提交 `9bb24735dd797b621f5b1b1dff983348d5110a67`，release `636cef887383e5f2f818a6c3`，`content_digest 5812d5cdf71f070a135de512d22780ccb4f8717f31806bda4670ae9e85ce4cbe`，`installed_at 2026-09-25T15:59:42Z`）；0.7.2 未另跑真实模型任务，因此本文的十个真实任务结论不替代 0.7.2 的独立真实模型验收。**
 
 ## 安装构建 digest
 

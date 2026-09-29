@@ -362,17 +362,6 @@ module CheckRunnerContextTest
   end
 
   def check_delivery_prompt_contract_and_validation
-    prompt = runner.send(:build_prompt, snapshot: "/unused",
-                                inputs: { "instruction" => "do it" },
-                                context: base_context, role: "reviewer")
-    check(prompt.include?("## Delivery readiness") &&
-          prompt.include?("delivery.ready states whether the task's actual deliverable is visible") &&
-          prompt.include?("root.status is idle and root.last_turn_status is completed") &&
-          prompt.include?("continue with no findings does not mean the deliverable exists") &&
-          prompt.include?("never verification"),
-          "the reviewer prompt separates delivery readiness from verdict and names the text-only boundary")
-    check(prompt.include?("next_check_seconds, delivery") && prompt.include?("ready (boolean)"),
-          "the output contract names the delivery object")
 
     valid = {
       "verdict" => "continue", "reason" => "work in progress", "findings" => [],

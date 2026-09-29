@@ -67,11 +67,19 @@ module Orbit
           agents[id] = name if id && !name.empty?
         end
       end
+      routes = {}
+      if raw["routes"].is_a?(Hash)
+        raw["routes"].each do |model, route|
+          id = catalog_identifier(model)
+          routes[id] = route if id && %w[direct_api subscription_quota unknown].include?(route)
+        end
+      end
       {
         "current" => catalog_identifier(raw["current"]),
         "available" => Array(raw["available"]).filter_map { |model| catalog_identifier(model) }.uniq,
         "families" => families,
         "agents" => agents,
+        "routes" => routes,
         "agent_dir" => agent_dir
       }
     end

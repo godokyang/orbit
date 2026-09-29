@@ -1,5 +1,7 @@
 # Codex 审批与 MCP 调用验收（2026-09-18）
 
+> 类型：历史证据／研究，按标题及正文记录的日期、版本和配置解读。下文“当前”“本轮”及旧规则不代表现行行为或授权；当前状态见[交接](../plan/handoff.md)，现行语义见[任务合同](../../contracts/task-runtime.md)。
+
 本文记录修复 “`approval_policy=never` 的 Codex 会话无法调用 Orbit MCP” 的实际证据、根因与边界。源码基线为提交 `fa2f76d`；本机最终安装 0.6.4（`content_digest b9c129c0…`、`installed_at 2026-09-18T06:57:02Z`），Codex `0.155.0`。
 
 ## 根因

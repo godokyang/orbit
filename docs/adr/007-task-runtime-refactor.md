@@ -1,5 +1,7 @@
 # ADR-007：独立任务运行与按需纠偏
 
+> 历史 ADR：下文“当前”“现行”及各补充决定均按各节日期解读，不能用于当前执行。现行规则见[合同](../../contracts/task-runtime.md)、[ADR-008](008-omp-native-collaboration-base.md)和[ADR-009](009-user-selected-model-pool.md)。
+
 - 状态：历史 ADR（Codex／OpenCode 多宿主时代，2026-09-14 用户授权实施，已完成其当时两条冻结真实验收）。**当前运行入口以 [ADR-008](008-omp-native-collaboration-base.md) 为准**：单宿主原版 OMP + `orbit omp` 显式入口、原生 task/hub 一层团队；本文中 Codex、OpenCode 及其跨宿主成员、检查者角色的宿主特定接入已退役，仅保留为历史事实与已验收证据索引。与宿主无关的检查、finding、工作区与停止语义已由现行合同继承并继续有效。
 - 依据：2026-09-13 至 2026-09-14 用户确认的独立任务运行、已有 Root、原文检查、真实停止与无兼容重构决定。
 
@@ -114,11 +116,11 @@ Jev 的判断不取代固定产物上的独立检查及实际停止证据。程�
 
 ## 执行协作与检查回路整体调优（2026-09-22，方向已冻结）
 
-Zeen Login 真实任务同时暴露了零执行成员、实际 worktree 与任务快照根不一致、相同 finding 和相反裁定反复出现、13 次检查全部 stale 且消耗约 962 万检查 tokens，以及排队／检查意见／任务终态不易区分。用户决定把这些问题作为一个整体处理，而不是只优化 JEV：执行与检查分成两条状态轴；工作区通过受控 rebind 改变，文字 amendment 不改变快照根；finding 和裁定按证据版本形成决策记忆；自动触发按 observation 去重合并；状态分别显示 workspace、成员、检查、JEV、finding 和用量。完整边界、实施切片和真实验收见 [Orbit 执行协作与检查回路整体调优计划](../plan/orbit-execution-review-optimization.md)。实现与确定性回归已进入合同，见下一节。四条真实路径验收尚未运行。程序仍不自动检测工作区声明冲突，也不把换了 id 的语义同义 finding 猜成同一问题。
+Zeen Login 真实任务同时暴露了零执行成员、实际 worktree 与任务快照根不一致、相同 finding 和相反裁定反复出现、13 次检查全部 stale 且消耗约 962 万检查 tokens，以及排队／检查意见／任务终态不易区分。用户决定把这些问题作为一个整体处理，而不是只优化 JEV：执行与检查分成两条状态轴；工作区通过受控 rebind 改变，文字 amendment 不改变快照根；finding 和裁定按证据版本形成决策记忆；自动触发按 observation 去重合并；状态分别显示 workspace、成员、检查、JEV、finding 和用量。完整边界、实施切片和真实验收见 [Orbit 执行协作与检查回路整体调优计划](../reference/orbit-optimization-acceptance-20260922.md)。实现与确定性回归已进入合同，见下一节。四条真实路径验收尚未运行。程序仍不自动检测工作区声明冲突，也不把换了 id 的语义同义 finding 猜成同一问题。
 
 ## 工作区、检查收敛与 Codex JEV 环境名（2026-09-22，已进入现行合同）
 
-新任务记录 `project_root` 与 `workspace`。`project_root` 继续负责授权、任务记录和 Root 会话归属；`artifact_root` 负责固定快照、指纹、Jev 变更摘要和新执行成员的工作目录，默认与项目根相同。显式 `rebind-workspace`（Codex MCP 动作为 `rebind_workspace`）只接受同一真实路径，或同一 Git 仓库中的另一个 worktree，并记录来源、原因和 history。`amend` 与 `dispute` 只追加检查输入或争议理由。在途检查若仍绑定旧产物目录，即使内容摘要相同也按 `workspace` 过期；这类 finding 不迁入待核对线索，新产物目录安排一次检查。其他过期不立即重查。自动检查按 observation key 去重，手动请求可绕过去重但不能并发。旧进程遗留的同 key `in_flight` 在本进程没有 owned checker 时记 `check_abandoned_recovered` 并以新检查号重试一次；本进程在途检查仍不并发。同一 finding id 已 open 且输入、产物目录、产物摘要和 requirement／evidence／action 都未变化时，重复报告记 `finding_repeat_ignored`，不再次纠正 Root；任一维度变化才重新投递。已 resolve 的同一 id 在这些证据都未变化时不重开。检查者程序上下文上限 64KiB。`status` 分层显示检查状态、下一动作和按角色用量，未知不推算。没有 `workspace` 的旧记录在只读 `status` 与 `stop` 时回退到 `project_root`。程序不自动检测绑定与声明的冲突，也不因此暂停检查。确定性回归已通过；四条真实路径验收未运行，见 [优化真实验收计划](../reference/orbit-optimization-acceptance-plan-20260922.md)。
+新任务记录 `project_root` 与 `workspace`。`project_root` 继续负责授权、任务记录和 Root 会话归属；`artifact_root` 负责固定快照、指纹、Jev 变更摘要和新执行成员的工作目录，默认与项目根相同。显式 `rebind-workspace`（Codex MCP 动作为 `rebind_workspace`）只接受同一真实路径，或同一 Git 仓库中的另一个 worktree，并记录来源、原因和 history。`amend` 与 `dispute` 只追加检查输入或争议理由。在途检查若仍绑定旧产物目录，即使内容摘要相同也按 `workspace` 过期；这类 finding 不迁入待核对线索，新产物目录安排一次检查。其他过期不立即重查。自动检查按 observation key 去重，手动请求可绕过去重但不能并发。旧进程遗留的同 key `in_flight` 在本进程没有 owned checker 时记 `check_abandoned_recovered` 并以新检查号重试一次；本进程在途检查仍不并发。同一 finding id 已 open 且输入、产物目录、产物摘要和 requirement／evidence／action 都未变化时，重复报告记 `finding_repeat_ignored`，不再次纠正 Root；任一维度变化才重新投递。已 resolve 的同一 id 在这些证据都未变化时不重开。检查者程序上下文上限 64KiB。`status` 分层显示检查状态、下一动作和按角色用量，未知不推算。没有 `workspace` 的旧记录在只读 `status` 与 `stop` 时回退到 `project_root`。程序不自动检测绑定与声明的冲突，也不因此暂停检查。确定性回归已通过；四条真实路径验收未运行，见 [优化真实验收计划](../reference/orbit-optimization-acceptance-20260922.md)。
 
 `orbit codex` 在启动环境已有 `TYPESAFE_API_KEY` 时，只把该名称写入 MCP 的 `env_vars`。值由 app-server 从启动环境解析。MCP 配置、命令行和诊断输出只出现变量名。这不追溯改变 Zeen Login 当时 MCP 子进程缺少该变量的记录。
 
@@ -126,7 +128,7 @@ Zeen Login 真实任务同时暴露了零执行成员、实际 worktree 与任�
 
 Zeen Login 真实任务表明，“Orbit 已接入检查”与“已启动执行成员”必须显式区分；该任务的 JEV 因 key 未进入 MCP 子进程而没有运行，不能把零成员解释为 JEV 判断结果。当时的单一 `delegatable` 信号不足以表示执行吞吐收益。用户决定将委派建议分成任务可拆性、成员质量适配和关键路径收益三层；程序核对成员可调用性、任务状态和观察新鲜度，Root 仍决定执行票、成员和是否派发，Orbit 不自动 `delegate`。
 
-模型速度、质量和费用是快速变化的外部事实，不进入 Orbit 发布包，也不要求用户维护配置。只有结构判断发现真实可委派面时，Root 才按实际 provider、model 和 reasoning effort 查询带来源、时间和有效期的证据；有效缓存跨任务复用，JEV 不联网，只接收压缩后的比较。输出 tokens/s 不能直接等同于任务耗时，判断必须计入交接、返工、集成、共享资源和验证。第一阶段 `delegatable` 达到 0.60 且存在可调用成员后，程序查询模型证据缓存；缺失时每个观察签名只请求一次，Root 用 `model-evidence` 提交。有效证据才问 `member_fit` 与 `parallel_gain`；两者分别不低于 0.55 和 0.50 才提示，且 Root 必须显式 `delegate`。同一观察签名至多提示一次，已有活跃执行成员时暂停新的自动提示。专项阈值、真实校准依据与 prompt 见 [JEV 委派判断专项计划](../plan/jev-delegation-optimization.md)。这是现行合同语义。
+模型速度、质量和费用是快速变化的外部事实，不进入 Orbit 发布包，也不要求用户维护配置。只有结构判断发现真实可委派面时，Root 才按实际 provider、model 和 reasoning effort 查询带来源、时间和有效期的证据；有效缓存跨任务复用，JEV 不联网，只接收压缩后的比较。输出 tokens/s 不能直接等同于任务耗时，判断必须计入交接、返工、集成、共享资源和验证。第一阶段 `delegatable` 达到 0.60 且存在可调用成员后，程序查询模型证据缓存；缺失时每个观察签名只请求一次，Root 用 `model-evidence` 提交。有效证据才问 `member_fit` 与 `parallel_gain`；两者分别不低于 0.55 和 0.50 才提示，且 Root 必须显式 `delegate`。同一观察签名至多提示一次，已有活跃执行成员时暂停新的自动提示。专项阈值、真实校准依据与 prompt 见 [JEV 委派判断专项计划](../../contracts/task-runtime.md)。这是现行合同语义。
 
 严格 Herdr → `orbit codex` 复验发现 Root 会把第一阶段 `delegatable=0.91` 误称为最终建议，而真实第二阶段是 `parallel_gain=0.40` 与 `delegation_declined`。运行时因此新增按观察签名持久化的 `decision=recommended|declined|unavailable`；人类状态把候选分、第二阶段结果和已持久化 `delegation_hint` 分开。只有当前 input、artifact 与成员候选签名一致、且尚未跟随的 hint 能把一次显式派发记为 `basis=orbit_hint`；其他派发记为 `root_without_hint`，但不被禁止。basis 同时保存在成员记录和事件中，避免“成员确实运行”被误写成“Orbit 建议运行”。
 
@@ -138,7 +140,7 @@ Zeen Login 真实任务表明，“Orbit 已接入检查”与“已启动执行
 
 ## 检查回路的有效到达（2026-09-18）
 
-[独立审查及复核](../reference/project-review-20260918.md)确认：一次真实开发任务中 7 次已完成检查全部过期、自动投递纠正为 0，检查者自设 30–60 秒的下次观察时间与持续编辑叠加，产生重复完整检查。复核保持版本核对语义不变：过期结论不直接用于当前版本，也不能静默丢失。程序把过期检查中待纠正的问题记为待核对线索，在 Root 交付或下一次约定检查时对新版本重新核对，确认后自动送达 Root；检查完成时记录具体过期原因；Root 正在执行时，完整检查间隔以约定时间为下限，检查者建议不得使其更频繁。`orbit status` 显示最近检查是否过期、待处理问题与下次检查依据。具体范围与验证要求见[用户结果补齐计划](../plan/user-outcome-completion-plan.md)。
+[独立审查及复核](../reference/project-review-20260918.md)确认：一次真实开发任务中 7 次已完成检查全部过期、自动投递纠正为 0，检查者自设 30–60 秒的下次观察时间与持续编辑叠加，产生重复完整检查。复核保持版本核对语义不变：过期结论不直接用于当前版本，也不能静默丢失。程序把过期检查中待纠正的问题记为待核对线索，在 Root 交付或下一次约定检查时对新版本重新核对，确认后自动送达 Root；检查完成时记录具体过期原因；Root 正在执行时，完整检查间隔以约定时间为下限，检查者建议不得使其更频繁。`orbit status` 显示最近检查是否过期、待处理问题与下次检查依据。具体范围与验证要求见[用户结果补齐计划](../reference/check-loop-acceptance-20260918.md)。
 
 ## 跨宿主成员：OpenCode Root → Codex（2026-09-18）
 
@@ -163,7 +165,7 @@ Zeen Login 真实任务表明，“Orbit 已接入检查”与“已启动执行
 
 ## `orbit codex` 权限的单一权威（2026-09-19，已实现并完成隔离真实验收）
 
-用户在 `orbit codex --dangerously-bypass-approvals-and-sandbox` 打开、显示 YOLO mode 的界面内使用 `/resume`，收到 Codex 的 “Permission overrides are not supported when resuming a remote task”。上一轮只处理了启动命令带 `resume` 的路径，覆盖不到界面内的原生会话操作。用户认定继续按命令逐条修补不可接受，要求从根上解决；本节记录经用户认可的决定与理由。问题定义见 [Codex 远端会话入口的权限边界问题](../plan/codex-remote-session-boundary-20260919.md)。
+用户在 `orbit codex --dangerously-bypass-approvals-and-sandbox` 打开、显示 YOLO mode 的界面内使用 `/resume`，收到 Codex 的 “Permission overrides are not supported when resuming a remote task”。上一轮只处理了启动命令带 `resume` 的路径，覆盖不到界面内的原生会话操作。用户认定继续按命令逐条修补不可接受，要求从根上解决；本节记录经用户认可的决定与理由。问题定义见 [Codex 远端会话入口的权限边界问题](../reference/codex-remote-session-boundary-20260919.md)。
 
 ### 根因
 
@@ -191,7 +193,7 @@ Orbit 把“本次启动选定的权限”这一个意图同时交给两个主�
 - 轮询发现后立即调用 `thread/settings/update` 仍输给 TUI 首轮 `turn/start`：首轮实际为 `on-request + danger-full-access`，第二轮才成为 `never + danger-full-access`。因此“每个线程更新一次”不满足首轮权限承诺。
 - app-server 提前创建带目标权限的空线程后，远端 TUI 无法恢复它，返回 `no rollout found`；不能用空线程预创建堵住竞态。
 - `-p` 指向含权限字段的 profile 也会触发远端恢复拒绝；仅剥离显式权限标志不完整。
-- 完整证据见 [Codex 远端会话入口的权限边界问题](../plan/codex-remote-session-boundary-20260919.md)。
+- 完整证据见 [Codex 远端会话入口的权限边界问题](../reference/codex-remote-session-boundary-20260919.md)。
 
 ### 已验证的实现机制
 
@@ -199,7 +201,7 @@ Orbit 把“本次启动选定的权限”这一个意图同时交给两个主�
 - 生产入口使用双 socket：Orbit 控制连接直接访问 app-server 的 `control.sock`；TUI 通过透明代理的 `tui.sock`。代理只影响本次用户界面，不改变成员、检查者与停止连接。
 - 新建和 fork 仅改写 `threadSource: "user"` 且非 ephemeral 的请求。实测的标题生成线程是 `threadSource: "system"`、`ephemeral: true`，过滤后保持原来的 read-only。resume 请求没有来源字段，只在 TUI 专用 socket 上统一处理。
 - TUI 不再接收直接权限标志；入口解析它们形成代理策略。`-p/--profile` 内含权限字段时，TUI 会在请求发出前拒绝远端 resume/fork，首版明确报不支持而不静默丢弃 profile；没有真实需求前不引入 TOML 解析或配置镜像。
-- 已按此实现：入口解析一次策略并移除 TUI argv 中的权限覆盖参数，TUI 连接 `tui.sock`，代理只改写用户线程生命周期请求；按目标 UUID 预测恢复设置、项目内替换 `--last`、picker 拒绝及保存沙箱推断的旧实现已删除，原生命令统一经过生命周期边界。隔离真实 TUI 结果见 [Codex 远端会话入口的权限边界问题](../plan/codex-remote-session-boundary-20260919.md) 的落地与验证一节。
+- 已按此实现：入口解析一次策略并移除 TUI argv 中的权限覆盖参数，TUI 连接 `tui.sock`，代理只改写用户线程生命周期请求；按目标 UUID 预测恢复设置、项目内替换 `--last`、picker 拒绝及保存沙箱推断的旧实现已删除，原生命令统一经过生命周期边界。隔离真实 TUI 结果见 [Codex 远端会话入口的权限边界问题](../reference/codex-remote-session-boundary-20260919.md) 的落地与验证一节。
 
 ## 收尾完成门、每轮状态摘要与接入边界（2026-09-25，已进入现行合同）
 

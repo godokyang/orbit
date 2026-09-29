@@ -323,7 +323,8 @@ export function pickerNetDelta(entries, snapshot, selected) {
 
 export function createModelPicker({ entries, snapshot, commit, done, listRows = PICKER_LIST_ROWS }) {
   const rowFor = new Map(entries.map(entry => [entry.id, {
-    id: entry.id, available: entry.available === true, evidenceStatus: entry.evidenceStatus,
+    id: entry.id, available: entry.available === true,
+    evidenceStatus: entry.evidenceStatus, overviewStatus: entry.overviewStatus,
   }]));
   let current = [...rowFor.values()];
   let selected = new Set([...snapshot].filter(id => rowFor.has(id)));
@@ -366,7 +367,8 @@ export function createModelPicker({ entries, snapshot, commit, done, listRows = 
         const pointer = index === cursor ? '>' : ' ';
         const tag = entry.available ? '' : '  · 当前不可选，仅可移出';
         const evidence = entry.evidenceStatus ? `  · 证据 ${entry.evidenceStatus}` : '';
-        body.push(`${pointer} ${mark} ${entry.id}${tag}${evidence}`);
+        const overview = entry.overviewStatus ? `  · 概述 ${entry.overviewStatus}` : '';
+        body.push(`${pointer} ${mark} ${entry.id}${tag}${evidence}${overview}`);
       }
       if (rows.length > stop) body.push(`  … 还有 ${rows.length - stop} 项（继续 ↓）`);
       if (start > 0) body.unshift(`  … 以上还有 ${start} 项（继续 ↑）`);
@@ -400,7 +402,8 @@ export function createModelPicker({ entries, snapshot, commit, done, listRows = 
       if (result && Array.isArray(result.entries)) {
         rowFor.clear();
         for (const entry of result.entries) rowFor.set(entry.id, {
-          id: entry.id, available: entry.available === true, evidenceStatus: entry.evidenceStatus,
+          id: entry.id, available: entry.available === true,
+          evidenceStatus: entry.evidenceStatus, overviewStatus: entry.overviewStatus,
         });
         current = [...rowFor.values()];
         selected = new Set([...selected].filter(id => rowFor.has(id)));
@@ -588,6 +591,7 @@ export function installOmpExtension(pi, sdk) {
   const taskDirs = new Map();       // root session id -> task directory (bound via orbit start/context)
   const statusBoundTasks = new Map(); // root session id -> task directory recovered from durable records (status display only)
   const collabEvents = [];          // native hub traffic + native task results (bounded, readable via dispatch)
+  const rootAgentWrites = new Set(); // in-flight OMP `write agent://...` calls awaiting their result
   const COLLAB_CAP = 500;
   const collabSeqByTask = new Map();    // task_dir -> last assigned seq (per-task, gap-free)
   const collabDroppedByTask = new Map(); // task_dir -> count of dropped oldest events
@@ -677,12 +681,11 @@ export function installOmpExtension(pi, sdk) {
     return { ok: true, agents: [...desired].map(([name, model]) => ({ name, model })) };
   }
 
-  // Observable record of native collaboration. Root hub traffic is captured by
-  // the awaited tool_call/tool_result hooks; member-origin hub traffic is
-  // captured by the member session's tool_execution_start/end subscription
-  // (member start fires after the tool gate, so it is observation only).
-  // hub_call captures the wire intent (op/recipient/body); hub_result and
-  // task_result capture what actually came back. Every entry is tagged with
+  // Native collaboration: OMP 18.3.4 sends peer messages through both the
+  // `hub` tool and `write agent://<peer>`; member session subscriptions observe
+  // each form. Root hub traffic uses the awaited tool hooks below. hub_call
+  // records wire intent; hub_result and task_result record actual returns.
+  // Every entry is tagged with
   // the owning task directory (Root sessions via their binding, member
   // sessions via memberTasks) so a bounded buffer can never mix tasks — and
   // attribution is decided HERE, before anything is persisted: an event with
@@ -821,22 +824,28 @@ export function installOmpExtension(pi, sdk) {
     if (memberActiveTools.has(id) || typeof session?.subscribe !== 'function') return;
     const active = new Set();
     memberActiveTools.set(id, active);
+    const agentWrites = new Set();
     session.subscribe(event => {
       if (event.type === 'tool_execution_start') {
         active.add(event.toolCallId);
         rememberAskArgs(event);
-        if (event.toolName === 'hub' && memberTasks.has(id)) {
+        const peerWrite = event.toolName === 'write' && typeof event.args?.path === 'string'
+          && event.args.path.startsWith('agent://');
+        if (peerWrite) agentWrites.add(event.toolCallId);
+        if ((event.toolName === 'hub' || peerWrite) && memberTasks.has(id)) {
           const input = event.args || {};
           observeCollab({ kind: 'hub_call', at: Date.now(), session_id: session.sessionId ?? null, agent_id: id,
-            tool_call_id: event.toolCallId ?? null, op: input.op ?? null, to: input.to ?? null, from: input.from ?? null,
-            reply_to: input.replyTo ?? null, await_reply: input.await === true,
-            message: typeof input.message === 'string' ? input.message : null });
+            tool_call_id: event.toolCallId ?? null, op: peerWrite ? 'send' : input.op ?? null,
+            to: peerWrite ? input.path.slice('agent://'.length) : input.to ?? null, from: input.from ?? null,
+            reply_to: peerWrite ? null : input.replyTo ?? null, await_reply: peerWrite ? false : input.await === true,
+            message: typeof (peerWrite ? input.content : input.message) === 'string'
+              ? (peerWrite ? input.content : input.message) : null });
         }
       }
       if (event.type === 'tool_execution_end') {
         active.delete(event.toolCallId);
         observeAskEnd(event, session.sessionId ?? null, id);
-        if (event.toolName === 'hub' && memberTasks.has(id)) {
+        if ((event.toolName === 'hub' || (event.toolName === 'write' && agentWrites.delete(event.toolCallId))) && memberTasks.has(id)) {
           const result = event.result;
           let text = null;
           if (typeof result === 'string') {
@@ -1066,28 +1075,39 @@ export function installOmpExtension(pi, sdk) {
     try { process.kill(pid, 0); return false; }
     catch (error) { return error?.code === 'ESRCH'; }
   }
+  // User-facing phase for the OMP status bar (kickoff ⑤): state, why, and
+  // whether the user must act. Operator commands stay in nextActionLabel and
+  // phaseDirective (the Root-injected block), never here.
+  const bounded = (text, max) => {
+    const value = String(text ?? '').trim();
+    return value.length > max ? `${value.slice(0, max)}…` : value;
+  };
   function phaseLabel(state) {
     switch (state.status) {
-      case 'complete': return '已完成（独立检查与停止确认）';
-      case 'paused': return '已暂停（已确认停止）';
-      case 'needs_user': return '需用户处理（已确认停止）';
-      case 'stop_unconfirmed': return '停止确认中：尚不可称完成';
+      case 'complete': return '已完成（独立检查与停止确认；用户无需操作）';
+      case 'paused': return '已暂停（已确认停止；若仍需交付请新建任务）';
+      case 'needs_user': {
+        const why = [state.stop_reason, state.error].find(v => typeof v === 'string' && v.trim());
+        return why ? `需用户处理（已确认停止）：${bounded(why, 40)}` : '需用户处理（已确认停止）';
+      }
+      case 'stop_unconfirmed': return '停止尚未确认：尚不可称完成（须重试停止收尾）';
       case 'failed': return stopConfirmed(state) ? '运行失败（停止已确认）' : '运行失败（停止待核实）';
       default: break;
     }
     if (runtimeAbandoned(state)) return '任务处理进程已退出，须清理';
-    if (state.completion_stop_pending) return '完成申请已入队，结束本轮';
-    if (openFindings(state) > 0 || recheckClues(state) > 0) return '检查仍有待处理问题';
+    if (state.completion_stop_pending) return '完成申请已入队，等待核对（用户无需操作）';
+    if (openFindings(state) > 0 || recheckClues(state) > 0) return '检查仍有待处理问题（由助手继续处理，用户无需操作）';
     const current = readiness(state);
-    if (current.status === 'invalidated') return `通知失效，须重检：${current.reason}`;
-    if (state.pending_finalization) return '等待当前版本检查通知';
-    if (current.status === 'ready') return '可申请完成：当前助手调用 Orbit stop(intent=complete)';
-    if (state.next_check_manual === true) return '等待手动终检，任务尚未完成';
-    if (checkInFlight(state)) return '独立检查进行中，等待结果';
+    if (current.status === 'invalidated') return `检查通知已失效（${bounded(current.reason, 40)}）：待助手重新终检，用户无需操作`;
+    if (current.status === 'review_needed') return '先前不可交付理由已推翻：待助手手动终检（用户无需操作）';
+    if (state.pending_finalization) return '等待当前版本检查通知（用户无需操作）';
+    if (current.status === 'ready') return '可申请完成：停止收尾由助手完成（用户无需操作）';
+    if (state.next_check_manual === true) return '等待手动终检（由助手请求），任务尚未完成';
+    if (checkInFlight(state)) return '独立检查进行中，等待结果（用户无需操作）';
     const lastCheck = Array.isArray(state.checks) ? state.checks.at(-1) : null;
-    if (lastCheck && !lastCheck.finished_at) return '独立检查进行中，任务尚未完成';
-    if (current.status === 'not_ready') return `尚未就绪：${current.reason}`;
-    return '尚无有效终检：工作完成后当前助手调用 Orbit check；任务尚未完成';
+    if (lastCheck && !lastCheck.finished_at) return '独立检查进行中，任务尚未完成（用户无需操作）';
+    if (current.status === 'not_ready') return `尚未就绪（${bounded(current.reason, 40)}）：由助手补齐交付，任务尚未完成`;
+    return '尚无有效终检：由助手完成工作并请求终检；任务尚未完成';
   }
   // Display only: the Ruby completion gate remains authoritative.
   function nextActionLabel(state) {
@@ -1104,8 +1124,9 @@ export function installOmpExtension(pi, sdk) {
     if (openFindings(state) > 0 || recheckClues(state) > 0) return '当前助手处理检查问题，再重检';
     const current = readiness(state);
     if (current.status === 'ready') return '当前助手调用 Orbit stop(intent=complete)，结束本轮';
-    if (current.status === 'invalidated') return `当前通知已失效（${current.reason}），先重检`;
-    if (current.status === 'not_ready') return `补齐实际交付（${current.reason}），再重检`;
+    if (current.status === 'invalidated') return `当前通知已失效（${current.reason}）：仍需当前版本的有效手动终检`;
+    if (current.status === 'review_needed') return '先前不可交付理由已推翻；当前助手请求新一轮手动终检';
+    if (current.status === 'not_ready') return `补齐实际交付（${current.reason}），再请求一次有效手动终检（自动检查通过不替代终检）`;
     return '完成实际工作后调用 Orbit action=check 请求手动终检';
   }
   function phaseDirective(state) {
@@ -1115,8 +1136,9 @@ export function installOmpExtension(pi, sdk) {
     if (checkInFlight(state)) return '独立检查进行中；结束本轮并等待结果或纠正，不要再次请求检查，也不要称任务已完成。';
     const current = readiness(state);
     if (current.status === 'ready') return '当前终检已就绪但任务尚未完成。当前助手现在调用 Orbit 工具 action=stop, intent=complete, task=<当前任务目录>，再正常结束本轮；普通 CLI orbit stop 仅暂停。被拒绝时按原因处理，不假称完成。';
-    if (current.status === 'invalidated') return `检查通知已失效：${current.reason}。先在当前产物与要求上重新请求终检；旧通知不能用于完成申请。`;
-    if (current.status === 'not_ready') return `独立检查未确认可交付：${current.reason}。先产生可核验的实际答复或产物，再请求最终检查。`;
+    if (current.status === 'invalidated') return `检查通知已失效：${current.reason}。先在当前产物与要求上重新请求手动终检；旧通知不能用于完成申请，自动检查通过也不能替代。`;
+    if (current.status === 'review_needed') return '裁定或后续独立检查已确认旧不可交付理由不成立；当前助手须在当前版本请求新的有效手动终检，自动检查和裁定均不发完成通知。';
+    if (current.status === 'not_ready') return `独立检查未确认可交付：${current.reason}。先产生可核验的实际答复或产物，再请求新的有效手动终检。`;
     return '当前助手完成工作并实际验证，调用 Orbit action=check, task=<当前任务目录> 请求手动终检；在本轮回复中交付可核验结果并结束，终检会等待回复完成后开始。自动检查通过不会自动发完成通知。';
   }
   // Pending native-Ask interruptions (contract with TaskRuntime, 2026-09-26):
@@ -1319,14 +1341,33 @@ export function installOmpExtension(pi, sdk) {
   function state(entry) {
     const session = entry.session;
     const branch = session.sessionManager.getBranch();
-    const last = branch.filter(e => e.type === 'message' && e.message.role === 'assistant').at(-1);
+    let lastIndex = -1;
+    let lastUserBeforeLastAssistant = null;
+    for (let i = branch.length - 1; i >= 0; i--) {
+      const item = branch[i];
+      if (lastIndex < 0) {
+        if (item.type === 'message' && item.message.role === 'assistant') lastIndex = i;
+      } else if (item.type === 'message' && item.message.role === 'user') {
+        lastUserBeforeLastAssistant = item.id;
+        break;
+      }
+    }
+    const last = branch[lastIndex];
     const busy = session.isStreaming || session.isCompacting || session.isBashRunning || session.isEvalRunning || session.hasPendingAsyncWork() || entry.pending > 0;
     const message = last?.message;
-    const observations = last ? [{ kind: 'agent_message', text: textOf(message.content) }, ...branch.slice(branch.indexOf(last) + 1)
-      .filter(e => e.type === 'message' && e.message.role === 'toolResult').map(e => ({ kind: 'command', tool: e.message.toolName,
-        status: e.message.isError ? 'failed' : 'completed', aggregated_output: textOf(e.message.content).slice(0, 2000) }))] : [];
+    const observations = last ? [{ kind: 'agent_message', text: textOf(message.content) }] : [];
+    for (let i = lastIndex + 1; i < branch.length && last; i++) {
+      const item = branch[i];
+      if (item.type === 'message' && item.message.role === 'toolResult') {
+        observations.push({ kind: 'command', tool: item.message.toolName,
+          status: item.message.isError ? 'failed' : 'completed', aggregated_output: textOf(item.message.content).slice(0, 2000) });
+      }
+    }
+    // The nearest native user before the last assistant is the origin of
+    // last_turn_id once that turn completes. Orbit injections are not users.
     return { thread_id: entry.id, cwd: session.sessionManager.getCwd(), status: busy ? 'active' : 'idle', interrupted: entry.interrupted,
       turn_id: busy ? last?.id : null, last_turn_id: last?.id || (entry.error ? 'delivery-error' : null),
+      last_turn_user_message_id: lastUserBeforeLastAssistant,
       last_turn_status: entry.interrupted ? 'interrupted' : busy ? 'inProgress' : entry.error || ['error', 'aborted'].includes(message?.stopReason) ? 'failed' : last ? 'completed' : null,
       observations: entry.error ? [...observations, { kind: 'error', text: entry.error }] : observations,
       active_tools: entry.activeTools.size, async_jobs: session.getAsyncJobSnapshot(), session_file: sessionFileFor(entry.id) };
@@ -1672,16 +1713,27 @@ export function installOmpExtension(pi, sdk) {
         if (!sync.ok) throw new Error(`model catalog is stale: pool re-sync failed (${sync.reason})`);
         let available = [];
         try { available = currentContext.models.list() ?? []; } catch { available = []; }
-        const families = {};
+        const agents = {};
+        for (const [name, model] of sessionAgents) agents[model] = name;
+        const families = {}, routes = {};
+        let taskModel;
         for (const m of available) {
           const key = `${m.provider}/${m.id}`;
           try { families[key] = currentContext.models.family?.(m) ?? null; } catch { families[key] = null; }
+          if (!Object.hasOwn(agents, key)) continue;
+          let resolved;
+          try { resolved = currentContext.models.resolve?.(key); } catch { /* no exact resolution */ }
+          if (`${resolved?.provider}/${resolved?.id}` !== key) {
+            if (taskModel === undefined) {
+              try { taskModel = currentContext.models.resolve?.('@task') ?? null; } catch { taskModel = null; }
+            }
+            resolved = `${taskModel?.provider}/${taskModel?.id}` === key ? taskModel : null;
+          }
+          routes[key] = billingRoute(resolved);
         }
         const current = currentContext.models.current?.() ?? null;
-        const agents = {};
-        for (const [name, model] of sessionAgents) agents[model] = name;
         return { current: current ? `${current.provider}/${current.id}` : null,
-                 available: available.map(m => `${m.provider}/${m.id}`), families, agents,
+                 available: available.map(m => `${m.provider}/${m.id}`), families, agents, routes,
                  agent_dir: typeof sdk.getAgentDir === 'function' ? sdk.getAgentDir() : null };
       }
       case 'send': return send(entry, request.text);
@@ -1763,18 +1815,12 @@ export function installOmpExtension(pi, sdk) {
       return { block: true, reason: 'Orbit member registration gate is unavailable in this OMP session; refusing task dispatch' };
     const taskDir = bound.taskDir;
     const items = Array.isArray(input.tasks) && input.tasks.length ? input.tasks : [input];
-    // Generated candidate agents are pool-backed: their name -> model mapping
-    // must be live before dispatch. The pool is a preference surface, never an
-    // authorization list — a generic @task dispatch resolves the session
-    // task-role model directly and reads no pool, so a stale, empty or
-    // unreadable pool cannot block it (contract: model usage boundary).
-    const generated = items.some(item => typeof item?.agent === 'string'
-      && item.agent.trim().startsWith(AGENT_NAME_PREFIX));
-    if (generated) {
-      const sync = await syncSessionAgents(ctx);
-      if (!sync.ok)
-        return { block: true, reason: `candidate pool is unavailable (${sync.reason}); refusing generated member dispatch` };
-    }
+    // A controlled dispatch must observe the current pool, even for the
+    // generic @task role. Otherwise OMP's default role silently wins over a
+    // nonempty pool and a pending Jev evidence request.
+    const sync = await syncSessionAgents(ctx);
+    if (!sync.ok)
+      return { block: true, reason: `candidate pool is unavailable (${sync.reason}); refusing controlled member dispatch` };
     // Decision-relevant dispatch evidence: the ORIGINAL item input as issued
     // by the model (captured before `item.name` is rewritten to the
     // Orbit-assigned requested name), the explicitly supplied model and an
@@ -1794,15 +1840,22 @@ export function installOmpExtension(pi, sdk) {
         if (!expectedModel)
           return { block: true, reason: `${itemAgent} is not a live session candidate agent (pool changed?); re-run /orbit-models and dispatch again` };
       } else if (!itemAgent || itemAgent === 'task') {
-        // The effective model must be KNOWN before dispatch: the resolved
-        // @task identity is pinned as the expected member model and verified
-        // again at registration and the first provider request. Pool
-        // membership is not required — no per-model user authorization
-        // exists anymore (contract: model usage boundary).
+        // A pool-backed generic role is safe, but an out-of-pool default
+        // must not bypass the user's controlled-task member preference.
+        // Non-Orbit OMP sessions keep native @task behavior.
         try {
           const resolved = ctx.models?.resolve?.('@task');
           if (!resolved?.provider || !resolved?.id) throw new Error('unresolved @task');
           expectedModel = `${resolved.provider}/${resolved.id}`;
+          if (sync.agents.length && !sync.agents.some(candidate => candidate.model === expectedModel)) {
+            const choices = sync.agents.map(candidate => `${candidate.name} (${candidate.model})`).join(', ');
+            const request = bound.state.evidence_request;
+            const evidenceAction = request?.identities?.candidates?.length &&
+              !['used', 'unavailable', 'deferred', 'stale'].includes(request.resolved)
+              ? ` Jev is awaiting exact candidate facts: submit sourced evidence with orbit model-evidence ${taskDir} --file -, or continue with an available pool agent without claiming a Jev recommendation.`
+              : '';
+            return { block: true, reason: `OMP @task resolves to ${expectedModel}, outside the available Orbit candidate pool; use a generated pool agent: ${choices}.${evidenceAction}` };
+          }
         } catch {
           return { block: true, reason: 'Native @task model cannot be resolved before dispatch; choose a live Orbit candidate agent' };
         }
@@ -2030,35 +2083,44 @@ export function installOmpExtension(pi, sdk) {
     return event.payload;
   });
 
-  // Native collaboration observation (M1.1): hub call intents carry the wire
-  // content (op/to/from/message) at tool_call time; results carry what came
-  // back. This is real observed traffic, not a start-boundary stub.
+  // Native peer messages use either `hub` or `write agent://<peer>`.
+  // Both routes record their wire intent and result and respect member stop.
   pi.on('tool_call', async (event, ctx) => {
-    if (event.toolName !== 'hub') return;
+    const peerWrite = event.toolName === 'write' && typeof event.input?.path === 'string'
+      && event.input.path.startsWith('agent://');
+    if (event.toolName !== 'hub' && !peerWrite) return;
     const sessionId = ctx.sessionManager.getSessionId();
+    // Member sessions are observed through trackMemberTools; the global hook
+    // also fires for them, but must not duplicate their durable hub events.
+    if (memberTasks.has(agentIdFor(sessionId))) return;
     const input = event.input || {};
+    const op = peerWrite ? 'send' : input.op;
+    const to = peerWrite ? input.path.slice('agent://'.length) : input.to;
     observeCollab({ kind: 'hub_call', at: Date.now(), session_id: sessionId,
       agent_id: agentIdFor(sessionId), tool_call_id: event.toolCallId ?? null,
-      op: input.op ?? null, to: input.to ?? null, from: input.from ?? null,
-      reply_to: input.replyTo ?? null, await_reply: input.await === true,
-      message: typeof input.message === 'string' ? input.message : null });
-    // Stop stability: a member Orbit confirmed stopped, or one addressed
-    // while its task is no longer active, must not be re-woken through the
-    // native hub. Only applies to this task's registered members.
-    if (input.op === 'send' && typeof input.to === 'string' && memberTasks.has(input.to)) {
-      if (stoppedMembers.has(input.to))
-        return { block: true, reason: `member ${input.to} was stopped for this Orbit task; refusing to wake it` };
+      op: op ?? null, to: to ?? null, from: input.from ?? null,
+      reply_to: peerWrite ? null : input.replyTo ?? null, await_reply: peerWrite ? false : input.await === true,
+      message: typeof (peerWrite ? input.content : input.message) === 'string'
+        ? (peerWrite ? input.content : input.message) : null });
+    // A stopped member must not be woken by either native peer-send route.
+    if (op === 'send' && typeof to === 'string' && memberTasks.has(to)) {
+      if (stoppedMembers.has(to))
+        return { block: true, reason: `member ${to} was stopped for this Orbit task; refusing to wake it` };
       try {
-        const state = JSON.parse(await fs.readFile(path.join(memberTasks.get(input.to), 'state.json'), 'utf8'));
+        const state = JSON.parse(await fs.readFile(path.join(memberTasks.get(to), 'state.json'), 'utf8'));
         if (!ACTIVE.has(state.status))
-          return { block: true, reason: `Orbit task is ${state.status}; refusing to wake member ${input.to}` };
+          return { block: true, reason: `Orbit task is ${state.status}; refusing to wake member ${to}` };
       } catch {
         return { block: true, reason: 'Orbit task state unreadable; refusing to wake a registered member' };
       }
     }
+    if (peerWrite) rootAgentWrites.add(event.toolCallId);
   });
   pi.on('tool_result', async (event, ctx) => {
-    if (event.toolName === 'hub') {
+    if (event.toolName !== 'hub' && event.toolName !== 'task' &&
+        !(event.toolName === 'write' && rootAgentWrites.has(event.toolCallId))) return;
+    if (memberTasks.has(agentIdFor(ctx.sessionManager.getSessionId()))) return;
+    if (event.toolName === 'hub' || (event.toolName === 'write' && rootAgentWrites.delete(event.toolCallId))) {
       const text = Array.isArray(event.content)
         ? event.content.filter(p => p.type === 'text').map(p => p.text).join(' ') : null;
       observeCollab({ kind: 'hub_result', at: Date.now(), session_id: ctx.sessionManager.getSessionId(),
@@ -2143,10 +2205,13 @@ export function installOmpExtension(pi, sdk) {
         const poolEntries = (poolModels, available) => {
           const listed = new Set(available);
           const entries = available.map(id => ({
-            id, available: true, evidenceStatus: poolModels.includes(id) ? statusByModel.get(id)?.evidence_status ?? '未知' : undefined,
+            id, available: true,
+            evidenceStatus: poolModels.includes(id) ? statusByModel.get(id)?.evidence_status ?? '未知' : undefined,
+            overviewStatus: poolModels.includes(id) ? statusByModel.get(id)?.model_overview : undefined,
           }));
           for (const id of poolModels) if (!listed.has(id))
-            entries.push({ id, available: false, evidenceStatus: statusByModel.get(id)?.evidence_status ?? '未知' });
+            entries.push({ id, available: false, evidenceStatus: statusByModel.get(id)?.evidence_status ?? '未知',
+              overviewStatus: statusByModel.get(id)?.model_overview });
           return entries;
         };
         // Legacy/headless surface: no UI (or a UI that cannot host custom
@@ -2156,9 +2221,9 @@ export function installOmpExtension(pi, sdk) {
           const stale = pool.models.filter(id => !available.includes(id));
           return [
             'Model candidate pool (ADR-009). Selectable in this session:',
-            ...available.filter(id => poolSet.has(id)).map(id => `  [in pool]  ${id} · 证据 ${statusByModel.get(id)?.evidence_status ?? '未知'}${statusByModel.get(id)?.evidence_detail ? `（${statusByModel.get(id).evidence_detail}）` : ''}`),
+            ...available.filter(id => poolSet.has(id)).map(id => `  [in pool]  ${id} · 证据 ${statusByModel.get(id)?.evidence_status ?? '未知'} · 概述 ${statusByModel.get(id)?.model_overview ?? '未知'}${statusByModel.get(id)?.evidence_detail ? `（${statusByModel.get(id).evidence_detail}）` : ''}`),
             ...available.filter(id => !poolSet.has(id)).map(id => `  [addable]  ${id}`),
-            ...(stale.length ? ['In pool but NOT selectable in this session (kept; removable):', ...stale.map(id => `  [stale]    ${id} · 证据 ${statusByModel.get(id)?.evidence_status ?? '未知'}`)] : []),
+            ...(stale.length ? ['In pool but NOT selectable in this session (kept; removable):', ...stale.map(id => `  [stale]    ${id} · 证据 ${statusByModel.get(id)?.evidence_status ?? '未知'} · 概述 ${statusByModel.get(id)?.model_overview ?? '未知'}`)] : []),
             ...(modelStatus.ok ? [] : [`证据诊断不可用：${modelStatus.reason}`]),
             '质量：未判断；检查者隔离目录/凭据：未探测。缺证据请从一手来源提交 orbit model-evidence --file FILE|-；Root 可直接选择 OMP 可用且隔离检查者可解析的型号。',
             'Commands:',

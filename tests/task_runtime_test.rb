@@ -163,7 +163,7 @@ end
 
 class RuntimeAdvisor
   attr_reader :calls, :delegation_calls, :candidate_calls
-  attr_accessor :scores, :failure, :on_call, :delegation_scores, :delegation_failure, :candidate_scores
+  attr_accessor :scores, :failure, :on_call, :on_candidate_call, :delegation_scores, :delegation_failure, :candidate_scores
 
   def initialize(scores)
     @scores, @calls = scores, []
@@ -191,6 +191,7 @@ class RuntimeAdvisor
 
   def assess_candidates(state:, candidates:)
     @candidate_calls << { "state" => state, "candidates" => candidates }
+    @on_candidate_call&.call
     { "provider" => "typesafe", "model" => "jev-test", "question_set_version" => "jev-candidates-1",
       "scores" => @candidate_scores, "usage" => { "input_tokens" => 30, "output_tokens" => 5 } }
   end
@@ -399,10 +400,11 @@ fixture(interval: 300) do |root, record, _host, checker, _runtime|
   assert(requests.length == 1, "one evidence request is sent for the observation")
   assert(requests.first.include?("opencode-go/deepseek-v4.1-flash") &&
          requests.first.include?("orbit model-evidence #{record.path} --file -") &&
-         requests.first.include?("speed, quality, cost and local samples") &&
-         requests.first.include?("coarse cost_tier") &&
-         requests.first.include?("an explicit unknown is acceptable"),
-         "the request lists the identity, the needed facts and the dedicated command")
+         requests.first.include?("Legacy comparison needs the Root and every listed member identity") &&
+         requests.first.include?("sourced task-relevant quality and end-to-end time") &&
+         requests.first.include?("a sourced cost_tier") &&
+         requests.first.include?("status=unavailable"),
+         "the legacy comparison asks for all exact identities and real task-relevant facts")
   assert(host.messages.none? { |message| message.include?("delegation hint") },
          "the structural stage never hints directly")
   assert(record.state.dig("jev", "evidence_status") == "requested" && advisor.delegation_calls.empty?,
@@ -719,7 +721,9 @@ class RuntimePoolHost < RuntimeTeamHost
     @catalog = { "current" => "openai/gpt-6-astra",
                  "available" => %w[openai/gpt-6-astra opencode-go/deepseek-v4.1-flash zhipu/glm-5],
                  "agents" => { "opencode-go/deepseek-v4.1-flash" => "orbit-m-deepseek",
-                               "zhipu/glm-5" => "orbit-m-glm" } }
+                               "zhipu/glm-5" => "orbit-m-glm" },
+                 "routes" => { "opencode-go/deepseek-v4.1-flash" => "direct_api",
+                               "zhipu/glm-5" => "unknown" } }
   end
 
   def model_catalog = @catalog
@@ -738,6 +742,106 @@ class StubCandidatePool
   def read = @models
 end
 
+# A pool Agent may use a different provider endpoint from the generic @task
+# role, even when its model name matches. Never borrow @task's route to reuse
+# unrelated cached facts or build a recommendation on false cost provenance.
+fixture(interval: 300) do |root, record, _host, checker, _runtime|
+  host = RuntimePoolHost.new(root)
+  host.catalog.delete("routes")
+  host.working("catalog work")
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
+                                   evidence_cache: evidence_cache(root, [evidence_entry(billing_route: "direct_api")]),
+                                   candidate_pool: StubCandidatePool.new(["opencode-go/deepseek-v4.1-flash"]))
+  runtime.tick(now: Time.now.to_f + 6)
+  identity = record.state.dig("evidence_request", "identities", "candidates", 0)
+  assert(identity && identity["billing_route"] == "unknown" && advisor.candidate_calls.empty?,
+         "a pool candidate without per-model route proof cannot inherit @task direct_api facts")
+  before = runtime.send(:delegation_signature, "same-artifact", { "callable_kinds" => ["omp"] })
+  host.catalog["routes"] = { "opencode-go/deepseek-v4.1-flash" => "direct_api" }
+  after = runtime.send(:delegation_signature, "same-artifact", { "callable_kinds" => ["omp"] })
+  assert(before != after, "a verified candidate route change invalidates its old evidence decision")
+end
+
+# Jev may finish while Root is still using tools. The unchanged task can
+# still request exact model facts; a changing observation alone must not
+# strand the candidate before its per-model judgment.
+fixture(interval: 300) do |root, record, _host, checker, _runtime|
+  host = RuntimePoolHost.new(root)
+  host.working("reading requirements")
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
+  advisor.on_call = -> { host.working("reading catalog while Jev responds") }
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
+                                   evidence_cache: evidence_cache(root),
+                                   candidate_pool: StubCandidatePool.new(["opencode-go/deepseek-v4.1-flash"]))
+  runtime.tick(now: Time.now.to_f + 6)
+  assert(host.messages.any? { |message| message.include?("model evidence request") } &&
+         record.state.dig("jev", "evidence_status") == "requested",
+         "tool progress cannot erase a current model-fact request before Root can act on it")
+  assert(record.state["delegation_hints"].empty?, "requesting facts is not a stale delegation hint")
+end
+
+# Root can investigate one promising candidate first; the remaining exact
+# identities stay pending without forcing five simultaneous vendor studies.
+# Only the sourced candidate may become a recommendation.
+fixture(interval: 300) do |root, record, _host, checker, _runtime|
+  host = RuntimePoolHost.new(root)
+  host.working("independent modules")
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
+  advisor.candidate_scores = { "0" => { "quality" => 0.8, "time" => 0.7 } }
+  cache = evidence_cache(root)
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
+                                   evidence_cache: cache,
+                                   candidate_pool: StubCandidatePool.new(["opencode-go/deepseek-v4.1-flash", "zhipu/glm-5"]))
+  now = Time.now.to_f
+  runtime.tick(now: now + 6)
+  assert(record.state.dig("evidence_request", "identities", "candidates").length == 2,
+         "both exact missing candidates are visible before the first reply")
+
+  sourced = evidence_entry(billing_route: "direct_api")
+  cache.record(sourced)
+  record.submit("model_evidence", "entries" => [sourced.slice("provider", "model", "reasoning", "billing_route", "status")])
+  runtime.tick(now: now + 7)
+  assert(advisor.candidate_calls.length == 1 &&
+         record.state.dig("jev", "delegation", "decision") == "recommended" &&
+         record.state.dig("jev", "delegation", "recommendation", "first", "model") == "opencode-go/deepseek-v4.1-flash",
+         "one sourced candidate can be judged and recommended while another stays unscored")
+  assert(record.state.dig("jev", "delegation", "candidates").any? do |candidate|
+    candidate["model"] == "zhipu/glm-5" && candidate["status"] == "pending_evidence"
+  end, "the second candidate cannot be recommended without evidence")
+end
+
+# A late evidence reply cannot judge already-delegated work as if it were
+# still available. The validated facts remain cached for later task versions.
+fixture(interval: 300) do |root, record, _host, checker, _runtime|
+  host = RuntimePoolHost.new(root)
+  host.working("working on independent modules")
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
+  advisor.candidate_scores = { "0" => { "quality" => 0.8, "time" => 0.7 } }
+  cache = evidence_cache(root)
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
+                                   evidence_cache: cache,
+                                   candidate_pool: StubCandidatePool.new(["opencode-go/deepseek-v4.1-flash"]))
+  now = Time.now.to_f
+  runtime.tick(now: now + 6)
+  assert(record.state["evidence_request"].is_a?(Hash), "Jev initially requests exact candidate facts")
+
+  record.register_member("orbit-already-working", requested_name: "already-working")
+  runtime.tick(now: now + 7)
+  assert(record.state["members"].first["status"] == "registered", "Root already dispatched a real member")
+
+  evidence = evidence_entry(billing_route: "direct_api")
+  cache.record(evidence)
+  record.submit("model_evidence", "entries" => [evidence.slice("provider", "model", "reasoning", "billing_route", "status")])
+  runtime.tick(now: now + 8)
+  assert(advisor.candidate_calls.empty? && record.state["delegation_assessments"].empty? &&
+         record.state["delegation_hints"].empty?, "late facts cannot score or recommend already-delegated work")
+  assert(record.state.dig("evidence_request", "resolved") == "deferred" &&
+         record.state.dig("jev", "evidence_status") == "deferred" &&
+         events(record).any? { |event| event["type"] == "model_evidence_deferred" },
+         "the facts remain cached but the abandoned recommendation is explicitly recorded")
+end
+
 fixture(interval: 300) do |root, record, _host, checker, _runtime|
   host = RuntimePoolHost.new(root)
   host.working("progress")
@@ -749,21 +853,19 @@ fixture(interval: 300) do |root, record, _host, checker, _runtime|
   now = Time.now.to_f
   runtime.tick(now: now + 6)
   request = host.messages.find { |message| message.include?("model evidence request") }
-  assert(request && request.include?("- candidate (omp): opencode-go/deepseek-v4.1-flash") &&
-         request.include?("orbit-m-deepseek") && request.include?("openai/gpt-6-astra"),
-         "the request names the pooled candidate with its agent plus the root")
-  assert(request.scan("- candidate").length == 1 && !request.include?("qwen/qwen4-max"),
-         "unavailable models and the Root's own model are excluded from candidates")
+  assert(request && request.include?("- orbit-m-deepseek") &&
+         request.include?("opencode-go/deepseek-v4.1-flash") &&
+         request.include?("submit \"reasoning\":\"unknown\" explicitly") &&
+         request.include?("Generic agent=task uses OMP @task model"),
+         "the request leads with a selectable pool Agent, exact identity and default-model caveat")
+  assert(request.scan("- orbit-m").length == 1 && !request.include?("qwen/qwen4-max") &&
+         !request.include?("- root:") && !request.include?("openai/gpt-6-astra"),
+         "unavailable models and Root's own model are excluded from the missing-facts list")
 
-  cache.record(evidence_entry(provider: "openai", model: "gpt-6-astra", billing_route: "unknown"))
   deepseek = evidence_entry(billing_route: "direct_api")
   deepseek["cost_tier"] = { "band" => "low", "confidence" => "medium", "basis" => "official pricing page" }
   cache.record(deepseek)
-  submission = [evidence_entry(provider: "openai", model: "gpt-6-astra", billing_route: "unknown"),
-                evidence_entry(billing_route: "direct_api")]
-  record.submit("model_evidence", "entries" => submission.map do |entry|
-    entry.slice("provider", "model", "reasoning", "billing_route", "status")
-  end)
+  record.submit("model_evidence", "entries" => [deepseek.slice("provider", "model", "reasoning", "billing_route", "status")])
   advisor.candidate_scores = { "0" => { "quality" => 0.8, "time" => 0.7 } }
   runtime.tick(now: now + 7)
   assert(advisor.delegation_calls.empty? && advisor.candidate_calls.length == 1,
@@ -794,12 +896,124 @@ fixture(interval: 300) do |root, record, _host, checker, _runtime|
          record.state.dig("jev", "delegation", "usage", "input_tokens") == 30,
          "per-candidate recommendation retains judgment provenance and usage in event and state")
 
-  record.register_member("orbit-explicit1", requested_name: "explicit1", status: "registered")
+  record.register_member("orbit-explicit1", requested_name: "explicit1", status: "registered",
+                         model: "opencode-go/deepseek-v4.1-flash")
   runtime.tick(now: now + 8)
   member = record.state["members"].first
   assert(member && member["status"] == "registered" && member["delegation_basis"] == "orbit_hint" &&
          record.state.dig("delegation_hint", "followed") == true,
          "Root's explicit dispatch follows the recommendation and records the orbit_hint basis")
+end
+
+# A valid Jev hint is not a blanket endorsement of an unpinned generic task.
+# The native member must actually run one of the recommended models.
+fixture(interval: 300) do |root, record, _host, checker, _runtime|
+  host = RuntimePoolHost.new(root)
+  host.working("working on two independent modules")
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
+  advisor.candidate_scores = { "0" => { "quality" => 0.8, "time" => 0.7 } }
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
+                                   evidence_cache: evidence_cache(root, [evidence_entry(billing_route: "direct_api")]),
+                                   candidate_pool: StubCandidatePool.new(["opencode-go/deepseek-v4.1-flash"]))
+  now = Time.now.to_f
+  runtime.tick(now: now + 6)
+  assert(record.state.dig("delegation_hint", "recommendation", "first", "model") == "opencode-go/deepseek-v4.1-flash",
+         "precondition: the Root received a concrete model recommendation")
+  record.register_member("orbit-default-task", requested_name: "default-task", status: "registered",
+                         model: "zhipu/glm-5")
+  runtime.tick(now: now + 7)
+  assert(record.state.dig("members", 0, "delegation_basis") == "root_without_hint" &&
+         record.state.dig("delegation_hint", "followed") != true &&
+         events(record).none? { |event| event["type"] == "delegation_hint_followed" },
+         "a different actual member model cannot count as Jev-guided dispatch")
+end
+
+# OMP can register a member before exposing its resolved model. In that case
+# the hint is attributed only after the native model becomes observable.
+fixture(interval: 300) do |root, record, _host, checker, _runtime|
+  host = RuntimePoolHost.new(root)
+  host.working("working on two independent modules")
+  observed_model = nil
+  host.define_singleton_method(:member_state) do |_id|
+    { "registry_status" => "running", "model" => observed_model }
+  end
+  host.define_singleton_method(:member_result) { |_id| {} }
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
+  advisor.candidate_scores = { "0" => { "quality" => 0.8, "time" => 0.7 } }
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
+                                   evidence_cache: evidence_cache(root, [evidence_entry(billing_route: "direct_api")]),
+                                   candidate_pool: StubCandidatePool.new(["opencode-go/deepseek-v4.1-flash"]))
+  now = Time.now.to_f
+  runtime.tick(now: now + 6)
+  record.register_member("orbit-late-model", requested_name: "late-model", status: "registered")
+  runtime.tick(now: now + 7)
+  assert(record.state.dig("delegation_hint", "followed") != true &&
+         events(record).none? { |event| event["type"] == "delegation_hint_followed" },
+         "registration alone does not prove the model matched the hint")
+  observed_model = "opencode-go/deepseek-v4.1-flash"
+  runtime.tick(now: now + 8)
+  assert(record.state.dig("members", 0, "delegation_basis") == "orbit_hint" &&
+         record.state.dig("delegation_hint", "followed") == true &&
+         events(record).count { |event| event["type"] == "delegation_hint_followed" } == 1,
+         "observing the recommended model completes the hint attribution exactly once")
+end
+
+# A stage-two recommendation may be committed before OMP reports the native
+# user id, while Root reads another file. The id can appear with a different
+# assistant turn id on the next tick. Tool progress invalidates immediate
+# delivery, not a sourced decision for the same user message.
+fixture(interval: 300) do |root, record, _host, checker, _runtime|
+  host = RuntimePoolHost.new(root)
+  host.working("reading requirements")
+  host.instance_variable_get(:@state)["last_turn_user_message_id"] = nil
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
+  advisor.candidate_scores = { "0" => { "quality" => 0.8, "time" => 0.7 } }
+  advisor.on_candidate_call = -> {
+    host.working("reading tests while Jev responds")
+    host.instance_variable_get(:@state).merge!("turn_id" => "second-assistant-turn",
+                                               "last_turn_id" => "second-assistant-turn",
+                                               "last_turn_status" => "inProgress",
+                                               "last_turn_user_message_id" => record.state.dig("instruction_source", "id"))
+  }
+  cache = evidence_cache(root, [evidence_entry(billing_route: "direct_api")])
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
+                                   evidence_cache: cache,
+                                   candidate_pool: StubCandidatePool.new(["opencode-go/deepseek-v4.1-flash"]))
+  now = Time.now.to_f
+  runtime.tick(now: now + 6)
+  assert(record.state.dig("jev", "delegation", "decision") == "recommended" &&
+         record.state["delegation_hints"].empty? &&
+         host.messages.none? { |text| text.include?("Orbit model recommendation") },
+         "changing host progress suppresses immediate delivery, but keeps the sourced decision")
+  runtime.tick(now: now + 7)
+  assert(host.messages.count { |text| text.include?("Orbit model recommendation") } == 1 &&
+         advisor.candidate_calls.length == 1 &&
+         events(record).count { |event| event["type"] == "delegation_recommendation_delivered" } == 1,
+         "the same native user message recovers once after Root starts another assistant turn")
+  runtime.tick(now: now + 8)
+  assert(host.messages.count { |text| text.include?("Orbit model recommendation") } == 1,
+         "a delivered recommendation is not repeated")
+end
+
+# A different native user message cannot inherit a recommendation from the
+# previous question even if task input and candidate evidence did not change.
+fixture(interval: 300) do |root, record, _host, checker, _runtime|
+  host = RuntimePoolHost.new(root)
+  host.working("reading requirements")
+  host.instance_variable_get(:@state)["last_turn_user_message_id"] = record.state.dig("instruction_source", "id")
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
+  advisor.candidate_scores = { "0" => { "quality" => 0.8, "time" => 0.7 } }
+  advisor.on_candidate_call = -> { host.working("new tool progress") }
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
+                                   evidence_cache: evidence_cache(root, [evidence_entry(billing_route: "direct_api")]),
+                                   candidate_pool: StubCandidatePool.new(["opencode-go/deepseek-v4.1-flash"]))
+  now = Time.now.to_f
+  runtime.tick(now: now + 6)
+  host.instance_variable_get(:@state)["last_turn_user_message_id"] = "unrelated-question"
+  runtime.tick(now: now + 7)
+  assert(record.state["delegation_hints"].empty? &&
+         host.messages.none? { |text| text.include?("Orbit model recommendation") },
+         "the prior user message's recommendation is not delivered into another question")
 end
 
 # ADR-009 §3 quality line: a candidate whose sourced evidence does not
@@ -843,8 +1057,7 @@ fixture(interval: 300) do |root, record, _host, checker, _runtime|
   assert(host.messages.any? { |message| message.include?("model evidence request") },
          "precondition: the thin-evidence round went through a real request")
 
-  thin = [evidence_entry(provider: "openai", model: "gpt-6-astra", billing_route: "unknown"),
-          evidence_entry(billing_route: "direct_api")]
+  thin = [evidence_entry(billing_route: "direct_api")]
   thin.each { |entry| cache.record(entry) }
   record.submit("model_evidence", "entries" => thin.map do |entry|
     entry.slice("provider", "model", "reasoning", "billing_route", "status")
@@ -879,6 +1092,117 @@ fixture(interval: 300) do |root, record, _host, checker, _runtime|
   assert(advisor.candidate_calls.length == 2 &&
          record.state.dig("jev", "delegation", "decision") == "recommended",
          "an unchanged re-submission never re-runs the judgment")
+end
+
+# Kickoff ③ / usage-analysis §6.1 item 1 (identity): a member request carries
+# reasoning "unknown"; the cache treats an omitted reasoning as the provider
+# default, which is a different identity and is never silently equated. An
+# omitted submission mismatches with the real differing field named
+# (reasoning, not billing_route), and an explicit "unknown" submission passes
+# through to the per-candidate judgment.
+fixture(interval: 300) do |root, record, _host, checker, _runtime|
+  host = RuntimePoolHost.new(root)
+  host.working("progress")
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
+  cache = evidence_cache(root)
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
+                                   evidence_cache: cache,
+                                   candidate_pool: StubCandidatePool.new(["opencode-go/deepseek-v4.1-flash"]))
+  now = Time.now.to_f
+  runtime.tick(now: now + 6)
+  requested = record.state.dig("evidence_request", "identities")
+  assert(requested && requested.dig("candidates", 0, "reasoning") == "unknown" && requested["root"].nil?,
+         "precondition: the request carries reasoning unknown and no root identity")
+
+  omitted = evidence_entry(billing_route: "direct_api")
+  omitted.delete("reasoning")
+  cache.record(omitted)
+  record.submit("model_evidence", "entries" => [omitted.slice("provider", "model", "reasoning", "billing_route", "status")])
+  runtime.tick(now: now + 7)
+  note = record.state.dig("jev", "evidence_note").to_s
+  assert(record.state.dig("jev", "evidence_status") == "mismatch" && advisor.candidate_calls.empty?,
+         "an omitted reasoning is the provider default and cannot match the unknown request")
+  assert(note.include?("reasoning must be unknown, submitted default") && !note.include?("billing_route must be"),
+         "the mismatch note points at the real differing field (reasoning), not the route")
+
+  explicit = evidence_entry(billing_route: "direct_api")
+  cache.record(explicit)
+  record.submit("model_evidence", "entries" => [explicit.slice("provider", "model", "reasoning", "billing_route", "status")])
+  advisor.candidate_scores = { "0" => { "quality" => 0.8, "time" => 0.7 } }
+  runtime.tick(now: now + 8)
+  assert(advisor.candidate_calls.length == 1 &&
+         record.state.dig("jev", "delegation", "decision") == "recommended",
+         "an explicit reasoning unknown submission enters the per-candidate judgment and can recommend")
+end
+
+# Kickoff ③ / usage-analysis §6.1 item 2 (unavailable candidate): an
+# unexpired `unavailable` candidate never holds the sourced candidates
+# hostage, is never re-requested and never recommended; a pool with no
+# evaluable candidate at all fails closed without calling Jev or requesting
+# anything.
+fixture(interval: 300) do |root, record, _host, checker, _runtime|
+  host = RuntimePoolHost.new(root)
+  host.working("progress")
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
+  advisor.candidate_scores = { "0" => { "quality" => 0.8, "time" => 0.7 } }
+  cache = evidence_cache(root)
+  cache.record(evidence_entry(billing_route: "direct_api"))
+  cache.record(evidence_entry(provider: "zhipu", model: "glm-5", billing_route: "unknown", status: "unavailable"))
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
+                                   evidence_cache: cache,
+                                   candidate_pool: StubCandidatePool.new(%w[opencode-go/deepseek-v4.1-flash zhipu/glm-5]))
+  now = Time.now.to_f
+  runtime.tick(now: now + 6)
+  assert(advisor.candidate_calls.length == 1 &&
+         advisor.candidate_calls.first["candidates"].length == 1 &&
+         advisor.candidate_calls.first["candidates"].first["model"] == "deepseek-v4.1-flash",
+         "only the sourced candidate is judged; the unavailable one does not block it")
+  candidates = record.state.dig("jev", "delegation", "candidates")
+  assert(candidates.map { |candidate| [candidate["model"], candidate["status"]] }.sort ==
+         [["opencode-go/deepseek-v4.1-flash", "qualified"], ["zhipu/glm-5", "pending_unavailable"]],
+         "the unavailable candidate stays pending and unscored in the record: #{candidates.inspect}")
+  assert(record.state.dig("jev", "delegation", "decision") == "recommended" &&
+         record.state.dig("jev", "delegation", "recommendation", "first", "model") == "opencode-go/deepseek-v4.1-flash" &&
+         host.messages.any? { |message| message.include?("Orbit model recommendation") },
+         "the sourced candidate is recommended despite the unavailable one")
+  assert(host.messages.none? { |message| message.include?("model evidence request") },
+         "an unexpired unavailable is a real answer and is never re-requested")
+
+  cache.record(evidence_entry(status: "unavailable"))
+  File.write(File.join(root, "artifact.txt"), "a new artifact version")
+  host.working("new artifact round")
+  runtime.tick(now: now + 70)
+  assert(advisor.candidate_calls.length == 1 &&
+         record.state.dig("jev", "evidence_status") == "unavailable" &&
+         host.messages.none? { |message| message.include?("model evidence request") } &&
+         host.messages.count { |message| message.include?("Orbit model recommendation") } == 1,
+         "a pool with no evaluable candidate fails closed: no judgment, no request, no new recommendation")
+end
+
+# When a sourced model qualifies, an unscored pool member cannot hold it
+# hostage or force a second vendor investigation before dispatch.
+fixture(interval: 300) do |root, record, _host, checker, _runtime|
+  host = RuntimePoolHost.new(root)
+  host.working("progress")
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
+  advisor.candidate_scores = { "0" => { "quality" => 0.8, "time" => 0.7 } }
+  cache = evidence_cache(root)
+  cache.record(evidence_entry(billing_route: "direct_api"))
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
+                                   evidence_cache: cache,
+                                   candidate_pool: StubCandidatePool.new(%w[opencode-go/deepseek-v4.1-flash zhipu/glm-5]))
+  now = Time.now.to_f
+  runtime.tick(now: now + 6)
+  assert(advisor.candidate_calls.length == 1 &&
+         record.state.dig("jev", "delegation", "decision") == "recommended",
+         "the sourced candidate is judged and recommended without waiting for the missing one")
+  candidates = record.state.dig("jev", "delegation", "candidates")
+  assert(candidates.any? { |candidate| candidate["model"] == "zhipu/glm-5" && candidate["status"] == "pending_evidence" &&
+                                    candidate["quality"].nil? },
+         "the missing candidate stays pending with null scores and no recommendation")
+  message = host.messages.find { |text| text.include?("Orbit model recommendation") }
+  assert(message && message.include?("pending_evidence") && message.include?("never recommended"),
+         "the recommendation text marks unscored pending candidates")
 end
 
 # ADR-009 §4 checker model integration: selection happens only before a
@@ -1166,14 +1490,83 @@ end
 fixture do |_root, record, _host, _checker, runtime|
   runtime.instance_variable_get(:@state)["review"]["selection"] = {
     "source" => "candidate_pool",
-    "evidence_needed" => [{ "model" => "opencode-go/deepseek-v4.1-flash", "status" => "absent" }]
+    "evidence_needed" => [{ "model" => "opencode-go/deepseek-v4.1-flash", "reasoning" => "unknown",
+                            "billing_route" => "unknown", "status" => "absent" }]
   }
-  record.submit("model_evidence", "entries" => [evidence_entry.slice("provider", "model", "reasoning", "status")])
+  wrong_route = evidence_entry.slice("provider", "model", "reasoning", "billing_route", "status")
+  record.submit("model_evidence", "entries" => [wrong_route])
+  runtime.tick(now: Time.now.to_f)
+  assert(events(record).none? { |event| event["type"] == "checker_model_evidence_submitted" },
+         "a member's direct API evidence cannot satisfy the checker's unknown-route request")
+  exact = evidence_entry(billing_route: "unknown").slice("provider", "model", "reasoning", "billing_route", "status")
+  record.submit("model_evidence", "entries" => [exact])
   runtime.tick(now: Time.now.to_f)
   assert(events(record).any? { |event| event["type"] == "checker_model_evidence_submitted" &&
                                event["models"] == ["opencode-go/deepseek-v4.1-flash"] } &&
-         events(record).none? { |event| event["type"] == "model_evidence_ignored" },
-         "an exact checker evidence reply is acknowledged, not incorrectly reported as ignored")
+         events(record).count { |event| event["type"] == "model_evidence_ignored" } == 1,
+         "only the exact checker identity is acknowledged; mismatched-route facts stay unrequested")
+end
+
+# A task can request member evidence and checker evidence at the same time.
+# The checker's unknown route must not poison the member's direct-API request;
+# a later mixed reply still evaluates only the exact member identity.
+fixture(interval: 300) do |root, record, _host, checker, _runtime|
+  host = RuntimePoolHost.new(root)
+  host.working("progress")
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1, "delegatable" => 0.9)
+  cache = evidence_cache(root)
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor,
+                                   evidence_cache: cache,
+                                   candidate_pool: StubCandidatePool.new(["opencode-go/deepseek-v4.1-flash"]))
+  now = Time.now.to_f
+  runtime.tick(now: now + 6)
+  assert(record.state.dig("evidence_request", "identities", "candidates", 0, "billing_route") == "direct_api",
+         "precondition: the member request has a route distinct from the checker")
+  runtime.instance_variable_get(:@state)["review"]["selection"] = {
+    "evidence_needed" => [{ "model" => "opencode-go/deepseek-v4.1-flash", "reasoning" => "unknown",
+                            "billing_route" => "unknown", "status" => "absent" }]
+  }
+  checker_entry = evidence_entry(billing_route: "unknown").slice("provider", "model", "reasoning", "billing_route", "status")
+  record.submit("model_evidence", "entries" => [checker_entry])
+  runtime.tick(now: now + 7)
+  assert(record.state.dig("evidence_request", "resolved").nil? &&
+         events(record).count { |event| event["type"] == "checker_model_evidence_submitted" } == 1 &&
+         events(record).none? { |event| event["type"] == "model_evidence_mismatch" } &&
+         advisor.candidate_calls.empty?,
+         "checker-only facts are acknowledged without invalidating pending member evidence")
+
+  member_entry = evidence_entry(billing_route: "direct_api")
+  cache.record(member_entry)
+  advisor.candidate_scores = { "0" => { "quality" => 0.8, "time" => 0.7 } }
+  record.submit("model_evidence", "entries" =>
+    [checker_entry, member_entry.slice("provider", "model", "reasoning", "billing_route", "status")])
+  runtime.tick(now: now + 8)
+  assert(record.state.dig("evidence_request", "resolved") == "used" &&
+         events(record).count { |event| event["type"] == "checker_model_evidence_submitted" } == 2 &&
+         events(record).none? { |event| event["type"] == "model_evidence_mismatch" } &&
+         advisor.candidate_calls.length == 1,
+         "a mixed checker/member submission judges only the member fact, keeping both acknowledgments")
+end
+
+
+# Existing task records have model-only checker requests. They accept a new
+# explicit unknown submission, not a cached provider-default fact.
+fixture do |_root, record, _host, _checker, runtime|
+  runtime.instance_variable_get(:@state)["review"]["selection"] = {
+    "evidence_needed" => [{ "model" => "opencode-go/deepseek-v4.1-flash", "status" => "absent" }]
+  }
+  default_entry = evidence_entry(reasoning: "default", billing_route: "unknown")
+  record.submit("model_evidence", "entries" =>
+    [default_entry.slice("provider", "model", "reasoning", "billing_route", "status")])
+  runtime.tick(now: Time.now.to_f)
+  assert(events(record).none? { |event| event["type"] == "checker_model_evidence_submitted" },
+         "an old model-only request must not silently reuse provider-default facts")
+  unknown_entry = evidence_entry(billing_route: "unknown")
+  record.submit("model_evidence", "entries" =>
+    [unknown_entry.slice("provider", "model", "reasoning", "billing_route", "status")])
+  runtime.tick(now: Time.now.to_f)
+  assert(events(record).count { |event| event["type"] == "checker_model_evidence_submitted" } == 1,
+         "an in-flight legacy checker request accepts newly submitted exact unknown facts")
 end
 
 # A recorded `unavailable` is a real answer: no new request, no second stage,
@@ -1218,8 +1611,9 @@ fixture(interval: 300) do |root, record, _host, checker, _runtime|
   assert(record.state.dig("jev", "evidence_status") == "mismatch" && advisor.delegation_calls.empty?,
          "a mismatched submission never reaches the second stage and records the mismatch status")
   note = record.state.dig("jev", "evidence_note").to_s
-  assert(note.include?("deepseek-v4.1-flash billing_route must be direct_api") && note.include?("submitted unknown"),
-         "the mismatch note names the expected candidate route and the submitted route")
+  assert(note.include?("opencode-go/deepseek-v4.1-flash: billing_route must be direct_api, submitted unknown") &&
+         note.include?("unrequested identities were submitted: openai/gpt-6-astra"),
+         "the mismatch note names the differing field and value for the requested identity plus the unrequested extra")
   status_text = Orbit::TaskView.format(record)
   assert(status_text.include?("提交的证据与待比较身份不一致") && status_text.include?("billing_route must be direct_api"),
          "ordinary status surfaces the bounded mismatch correction note")
@@ -1571,7 +1965,7 @@ end
 fixture(interval: 300) do |_root, record, host, checker, runtime|
   now = Time.now.to_f
   runtime.tick(now: now)
-  checker.result = answer("continue")
+  checker.result = answer("continue", delivery_ready: false)
   runtime.tick(now: now + 1)
   runtime.tick(now: now + 59)
   assert(checker.calls.length == 1, "idle Root waits for the checker-suggested observation")
@@ -1696,7 +2090,7 @@ fixture do |_root, record, host, checker, runtime|
   now = Time.now.to_f
   runtime.tick(now: now)
   host.finish("delivered")
-  checker.result = answer("complete")
+  checker.result = answer("complete", delivery_ready: false)
   runtime.tick(now: now + 1)
   assert(record.state["status"] != "complete" && record.state["finalization_notices"].empty?,
          "an automatic complete verdict does not finish the task or notify Root")
@@ -1719,6 +2113,31 @@ fixture do |_root, record, host, checker, runtime|
          "Root's explicit stop after the notice records completion")
   assert(File.read(File.join(record.path, "events.jsonl")).include?("completed_via_finalized_stop"),
          "completion still goes through the finalized stop path")
+end
+
+# A delivered answer that receives a clean automatic artifact check still
+# needs a separate manual final review. The running Root must be woken to ask
+# for it, once per version, rather than silently leaving the task open.
+fixture do |_root, record, host, checker, runtime|
+  now = Time.now.to_f
+  host.finish("delivered")
+  runtime.tick(now: now)
+  checker.result = answer("complete")
+  runtime.tick(now: now + 1)
+  assert(host.messages.one? { |message| message.include?("action=check") } &&
+         record.state["status"] != "complete" && record.state["finalization_notices"].empty?,
+         "a clean automatic review prompts the Root for manual review without granting completion")
+  assert(events(record).any? { |event| event["type"] == "manual_final_check_reminded" },
+         "the one-time reminder has an auditable version")
+
+  host.finish("reminder-acknowledged")
+  record.submit("check")
+  runtime.tick(now: now + 2)
+  checker.result = answer("complete")
+  runtime.tick(now: now + 3)
+  assert(record.state["finalization_notices"].length == 1 &&
+         host.messages.count { |message| message.include?("action=check") } == 1,
+         "the manual reviewer, not the automatic pass, wakes finalization without repeating the reminder")
 end
 
 
@@ -2549,7 +2968,7 @@ end
 fixture(interval: 300) do |_root, record, host, checker, runtime|
   now = Time.now.to_f
   runtime.tick(now: now)
-  checker.result = answer("continue")
+  checker.result = answer("continue", delivery_ready: false)
   runtime.tick(now: now + 1)
   assert(record.state.fetch("checks").length == 1, "precondition: the observation was checked once")
 
@@ -2618,6 +3037,7 @@ fixture do |root, record, host, checker, runtime|
          resolved["resolution_root"] == File.realpath(root) && resolved["resolution_version"].is_a?(String) &&
          resolved["resolution_input"].is_a?(String),
          "a resolved finding keeps role, check, reason, root, artifact version and input version")
+  messages_before_recheck = host.messages.length
 
   host.finish("t2")
   runtime.tick(now: now + 4)
@@ -2627,7 +3047,7 @@ fixture do |root, record, host, checker, runtime|
          "the same finding text on the same versions is not reopened")
   assert(File.readlines(File.join(record.path, "events.jsonl")).any? { |line| line.include?("finding_reopen_ignored") },
          "the ignored re-raise is recorded")
-  assert(host.messages.length == 1, "an ignored re-raise does not re-notify Root")
+  assert(host.messages.length == messages_before_recheck, "an ignored re-raise does not re-notify Root")
 end
 
 # Any real evidence dimension reopens a resolved finding: changed artifact
@@ -2961,6 +3381,118 @@ fixture do |_root, record, host, checker, runtime|
   assert(record.state["finalization_notices"].length == 1 &&
          record.state.dig("completion_readiness", "status") == "ready",
          "an independent current check after delivery may issue the notice")
+end
+
+# An independent question must not replace an earlier task delivery or make
+# the same fixed artifact pay for another automatic check. Manual review still
+# sees the task-related answer and is never suppressed by this attribution.
+fixture do |root, record, host, checker, runtime|
+  now = Time.now.to_f
+  host.instance_variable_get(:@state)["last_turn_user_message_id"] = "original"
+  host.instance_variable_get(:@state)["observations"] = [
+    { "kind" => "agent_message", "text" => "Delivered artifact.txt for the original task" }
+  ]
+  runtime.tick(now: now)
+  assert(checker.calls.length == 1, "the task's own completed reply can start an automatic check")
+  checker.result = answer("continue")
+  runtime.tick(now: now + 1)
+
+  host.define_singleton_method(:user_messages) do |after_id:|
+    after_id == "original" ? [{ "id" => "ux-question", "text" => "How does the unrelated UX work?" }] : []
+  end
+  host.finish("unrelated-turn")
+  host.instance_variable_get(:@state)["last_turn_user_message_id"] = "ux-question"
+  host.instance_variable_get(:@state)["observations"] = [
+    { "kind" => "agent_message", "text" => "An unrelated UX answer" }
+  ]
+  runtime.tick(now: now + 2)
+  runtime.tick(now: now + 62)
+  assert(checker.calls.length == 1,
+         "an unrelated reply and the next unchanged timer do not create another automatic review")
+  record.submit("check")
+  runtime.tick(now: now + 63)
+  reviewed = checker.calls.last.fetch(:context)
+  assert(checker.calls.length == 2 && reviewed.dig("root", "last_turn_task_attributed") == false &&
+         reviewed.dig("task_delivery", "text") == "Delivered artifact.txt for the original task",
+         "a manual review remains available and preserves the original task answer")
+  checker.result = answer("complete")
+  runtime.tick(now: now + 64)
+  assert(record.state["finalization_notices"].length == 1,
+         "a qualified manual check still sends a version-bound finalization notice")
+end
+
+# A check-request acknowledgement is a task-attributed Root reply, but it must
+# not replace a substantive delivery from the same frozen input and artifact.
+fixture do |_root, record, host, checker, runtime|
+  now = Time.now.to_f
+  host.instance_variable_get(:@state)["last_turn_user_message_id"] = "original"
+  host.instance_variable_get(:@state)["observations"] = [
+    { "kind" => "agent_message", "text" => "Delivered category routes and invoice examples, tests passed; no known limits." }
+  ]
+  runtime.tick(now: now)
+  checker.result = answer("complete")
+  runtime.tick(now: now + 1)
+  reminder_id = record.state.fetch("sent_message_ids").last
+  assert(reminder_id && host.messages.any? { |message| message.include?("手动终检") },
+         "the clean automatic review prompts a version-bound manual check")
+
+  host.finish("queued-manual-check")
+  host.instance_variable_get(:@state)["last_turn_user_message_id"] = reminder_id
+  host.instance_variable_get(:@state)["observations"] = [
+    { "kind" => "agent_message", "text" => "Manual check queued; waiting for the reviewer." }
+  ]
+  record.submit("check")
+  runtime.tick(now: now + 2)
+  delivery = checker.calls.last.fetch(:context).fetch("task_delivery")
+  assert(delivery["text"] == "Manual check queued; waiting for the reviewer." &&
+         delivery.fetch("prior_turns").last["text"].include?("Delivered category routes and invoice examples"),
+         "a queued check does not erase the earlier delivered answer on the same version")
+end
+
+# An overturned not_ready conclusion is retired from durable state, without
+# treating an adjudicator or a subsequent automatic check as a final review.
+fixture do |_root, record, host, checker, runtime|
+  now = Time.now.to_f
+  record.submit("check")
+  runtime.tick(now: now)
+  checker.result = answer("continue", delivery_ready: false,
+                          delivery_reason: "No deliverable exists for this instruction")
+  runtime.tick(now: now + 1)
+  assert(record.state.dig("completion_readiness", "status") == "not_ready",
+         "the initial manual review identifies an unready deliverable")
+  host.finish("dispute-turn")
+  record.submit("dispute", "reason" => "The committed artifact is present")
+  runtime.tick(now: now + 2)
+  checker.result = answer("complete", delivery_ready: true,
+                          delivery_reason: "Read the delivered artifact in the fixed snapshot")
+  runtime.tick(now: now + 3)
+  status = record.state
+  assert(status.dig("completion_readiness", "status") == "review_needed" &&
+         status["finalization_notices"].empty? &&
+         !Orbit::TaskView.next_action(status).include?("No deliverable"),
+         "the current adjudication retires the false reason but does not approve completion")
+  record.submit("check")
+  runtime.tick(now: now + 4)
+  checker.result = answer("complete")
+  runtime.tick(now: now + 5)
+  assert(record.state.dig("completion_readiness", "status") == "ready" &&
+         record.state["finalization_notices"].length == 1,
+         "only a later current manual reviewer can issue a completion hand-off")
+end
+
+fixture do |_root, record, _host, checker, runtime|
+  now = Time.now.to_f
+  record.submit("check")
+  runtime.tick(now: now)
+  checker.result = answer("continue", delivery_ready: false, delivery_reason: "Not delivered yet")
+  runtime.tick(now: now + 1)
+  record.submit("stop", "reason" => "Ordinary pause")
+  runtime.tick(now: now + 2)
+  state = record.state
+  action = Orbit::TaskView.next_action(state)
+  assert(state["status"] == "paused" && action.include?("不能对已停止任务重检") &&
+         action.include?("创建新任务"),
+         "an ordinary paused task cannot ask for a check even without an adjudication")
 end
 
 puts "TASK_RUNTIME_TEST_PASS (deterministic, not real-model acceptance)"

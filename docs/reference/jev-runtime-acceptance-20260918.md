@@ -1,5 +1,7 @@
 # Jev 调度运行验收（2026-09-18）
 
+> 类型：历史证据／研究，按标题及正文记录的日期、版本和配置解读。下文“当前”“本轮”及旧规则不代表现行行为或授权；当前状态见[交接](../plan/handoff.md)，现行语义见[任务合同](../../contracts/task-runtime.md)。
+
 ## 已验证
 
 - 登录 shell 中已配置的 `TYPESAFE_API_KEY` 可直接调用 TypeSafe System One；两次真实请求均返回三个 Noul 判断，响应模型为 `jev-1.13.0`。未在记录中保存 key。

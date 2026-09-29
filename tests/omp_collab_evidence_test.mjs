@@ -144,14 +144,33 @@ try {
   registryListener({ type: 'registered', ref: memberRef });
   await waitFor(async () => (await collabLines(taskDir)).some(l => l.kind === 'task_dispatch' && l.requested_name === dispatch.input.name), 'task_dispatch line');
 
-  // Member hub traffic through the member session subscription: untruncated
-  // in the file, truncated in the bounded bridge buffer.
+  // Member peer traffic through the session subscription: both the legacy
+  // hub tool and actual OMP `write agent://Main` are durable and task-scoped.
   for (const listener of memberSession.listeners) {
     await listener({ type: 'tool_execution_start', toolCallId: 'member-hub-1', toolName: 'hub',
       args: { op: 'send', to: mainAgentId, message: 'm'.repeat(3000) } });
     await listener({ type: 'tool_execution_end', toolCallId: 'member-hub-1', toolName: 'hub',
       result: { content: [{ type: 'text', text: 'member reply' }] }, isError: false });
+    await listener({ type: 'tool_execution_start', toolCallId: 'member-peer-write', toolName: 'write',
+      args: { path: 'agent://Main', content: 'B delivered: 11 invoice tests pass' } });
+    await emit('tool_call', { toolName: 'write', toolCallId: 'member-peer-write',
+      input: { path: 'agent://Main', content: 'B delivered: 11 invoice tests pass' } }, ctxFor(memberSession));
+    await listener({ type: 'tool_execution_end', toolCallId: 'member-peer-write', toolName: 'write',
+      result: { content: [{ type: 'text', text: 'Delivered to Main.' }],
+        details: { message: { op: 'send', from: memberRef.id, to: mainAgentId,
+          receipts: [{ to: mainAgentId, outcome: 'injected' }] } } }, isError: false });
+    await emit('tool_result', { toolName: 'write', toolCallId: 'member-peer-write', isError: false,
+      content: [{ type: 'text', text: 'Delivered to Main.' }] }, ctxFor(memberSession));
+    await listener({ type: 'tool_execution_start', toolCallId: 'ordinary-write', toolName: 'write',
+      args: { path: 'src/invoice.js', content: 'not a peer message' } });
+    await listener({ type: 'tool_execution_end', toolCallId: 'ordinary-write', toolName: 'write',
+      result: { content: [{ type: 'text', text: 'Wrote file' }] }, isError: false });
   }
+  const rootPeer = await emit('tool_call', { toolName: 'write', toolCallId: 'root-peer-write',
+    input: { path: `agent://${memberRef.id}`, content: 'Review new invoice edge' } }, ctx);
+  assert.ok(!rootPeer?.block, 'Root can use the native peer-write route while the task is active');
+  await emit('tool_result', { toolName: 'write', toolCallId: 'root-peer-write', isError: false,
+    content: [{ type: 'text', text: 'Delivered to member.' }] }, ctx);
   await emit('tool_result', { toolName: 'task', toolCallId: 'call-dispatch', isError: false,
     content: [{ type: 'text', text: 'member-a finished' }] }, ctx);
   await waitFor(async () => (await collabLines(taskDir)).some(l => l.kind === 'task_result'), 'task_result line');
@@ -166,6 +185,13 @@ try {
   // Root session file reference: path only, straight from the registry ref.
   const rootState = await request(taskDir, 'state', { session: 'root' });
   assert.equal(rootState.session_file, rootRef.sessionFile, 'state exposes the main ref session file path');
+  // Bounded delivery-attribution origin (kickoff ⑥): the nearest native user
+  // message id preceding the last assistant turn — null while no assistant
+  // turn exists, then the user message that turn answers.
+  assert.equal(rootState.last_turn_user_message_id, null, 'no assistant turn yet: origin stays null');
+  root.sessionManager.getBranch().push({ type: 'message', id: 'reply-1', message: { role: 'assistant', content: 'working' } });
+  const withTurn = await request(taskDir, 'state', { session: 'root' });
+  assert.equal(withTurn.last_turn_user_message_id, 'original', 'the last assistant turn names the native user message it answers');
 
   // Rollover: more attributed observations than the 500-entry buffer cap.
   for (let n = 0; n < 520; n++)
@@ -205,6 +231,29 @@ try {
   assert.equal(memberIdentity.model, 'glm/x', 'member actual model at registration is recorded');
   const memberCall = lines.find(l => l.kind === 'hub_call' && l.tool_call_id === 'member-hub-1');
   assert.equal(memberCall.message.length, 3000, 'durable payload is untruncated');
+  const peerWrite = lines.find(l => l.kind === 'hub_call' && l.tool_call_id === 'member-peer-write');
+  const peerReceipt = lines.find(l => l.kind === 'hub_result' && l.tool_call_id === 'member-peer-write');
+  assert.equal(peerWrite.to, mainAgentId);
+  assert.equal(peerWrite.message, 'B delivered: 11 invoice tests pass');
+  assert.equal(peerReceipt.ok, true);
+  assert.equal(peerReceipt.text, 'Delivered to Main.');
+  assert.equal(lines.filter(l => l.tool_call_id === 'member-peer-write' && l.kind === 'hub_call').length, 1,
+    'one member write is observed once despite both native event surfaces firing');
+  assert.equal(lines.filter(l => l.tool_call_id === 'member-peer-write' && l.kind === 'hub_result').length, 1,
+    'one member receipt is observed once despite both native event surfaces firing');
+  const rootPeerCall = lines.find(l => l.kind === 'hub_call' && l.tool_call_id === 'root-peer-write');
+  const rootPeerResult = lines.find(l => l.kind === 'hub_result' && l.tool_call_id === 'root-peer-write');
+  assert.equal(rootPeerCall.to, memberRef.id);
+  assert.equal(rootPeerCall.message, 'Review new invoice edge');
+  assert.equal(rootPeerResult.text, 'Delivered to member.');
+  const firstStatePath = path.join(taskDir, 'state.json');
+  const firstState = JSON.parse(await fs.readFile(firstStatePath, 'utf8'));
+  firstState.status = 'paused';
+  await fs.writeFile(firstStatePath, JSON.stringify(firstState));
+  const blockedPeer = await emit('tool_call', { toolName: 'write', toolCallId: 'stopped-peer-write',
+    input: { path: `agent://${memberRef.id}`, content: 'Must not wake' } }, ctx);
+  assert.equal(blockedPeer.block, true, 'native peer write cannot wake a member after its Orbit task stops');
+  assert.ok(!lines.some(l => l.tool_call_id === 'ordinary-write'), 'ordinary file writes are not peer messages');
   assert.ok(!lines.some(l => l.text === 'early ack' || l.message === 'early one'), 'unattributed pre-association content never lands in the file');
 
   // Second task, second session: attribution must not leak across tasks.

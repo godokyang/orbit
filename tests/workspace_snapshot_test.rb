@@ -6,6 +6,7 @@ require "json"
 require "tmpdir"
 
 require_relative "../lib/orbit/workspace_snapshot"
+require_relative "../lib/orbit/task_git_evidence"
 
 module WorkspaceSnapshotTest
   module_function
@@ -18,8 +19,28 @@ module WorkspaceSnapshotTest
       test_exclusions_and_external_symlinks(tmp)
       test_non_git_project_by_content(tmp)
       test_destination_boundaries(tmp)
+      test_committed_paths_between_bound_and_fixed_snapshots(tmp)
     end
     puts("WORKSPACE_SNAPSHOT_TEST_PASS assertions=#{@assertions}")
+  end
+
+  def test_committed_paths_between_bound_and_fixed_snapshots(tmp)
+    root = project(tmp, "committed-path-clues")
+    init_git(root)
+    write(root, "README.md", "baseline")
+    commit(root, "baseline")
+    bound = Orbit::WorkspaceSnapshot.capture(project_root: root, destination: File.join(tmp, "bound-copy"))
+
+    write(root, "docs/delivered.md", "actual deliverable")
+    commit(root, "deliver")
+    write(root, "scratch.txt", "uncommitted unrelated work")
+    fixed = Orbit::WorkspaceSnapshot.capture(project_root: root, destination: File.join(tmp, "committed-path-fixed-copy"))
+    evidence = Orbit::TaskGitEvidence.capture(workspace: root, baseline_head: bound.fetch("git_head"),
+                                              snapshot_head: fixed.fetch("git_head"))
+    assert_equal("available", evidence["status"], "baseline ancestry supplies committed review clues")
+    assert_equal(["docs/delivered.md"], evidence["changed_paths"], "committed deliverable is visible")
+    assert(!evidence["changed_paths"].include?("scratch.txt"), "uncommitted work is not called a commit")
+    assert(!evidence["truncated"], "a short committed path list is complete")
   end
 
   def test_dirty_new_deleted_and_rules(tmp)

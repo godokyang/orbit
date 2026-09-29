@@ -1,6 +1,6 @@
 # Orbit 工程经验
 
-本页提取自旧 Alpha 问题、测试失控事故及重构挑战记录，保留值得防止再次发生的错误。它不新增产品门控、测试配额或验收任务；当前规则以 [开发规范](../../AGENTS.md)、[开发流程](../agents/development-workflow.md) 和 [ADR-007](../adr/007-task-runtime-refactor.md) 为准。
+本页提取自旧 Alpha 问题、测试失控事故及重构挑战记录，保留值得防止再次发生的错误。它不新增产品门控、测试配额或验收任务；当前规则以 [开发规范](../../AGENTS.md)、[开发流程](../agents/development-workflow.md) 和 [现行任务合同](../../contracts/task-runtime.md)及 [ADR-008](../adr/008-omp-native-collaboration-base.md)／[ADR-009](../adr/009-user-selected-model-pool.md) 为准。
 
 | 已遇到的问题 | 应保留的教训 |
 | --- | --- |

@@ -38,7 +38,9 @@ module PluginConnectionTest
       "current" => "root/model",
       "available" => ["zenmux/x-ai/grok-4.7", "not-a-model", "provider/nocred"],
       "families" => { "zenmux/x-ai/grok-4.7" => "x", "junk" => "y", "provider/nocred" => "  " },
-      "agents" => { "zenmux/x-ai/grok-4.7" => "orbit-m-1", "junk" => "orbit-m-2", "provider/nocred" => "  " }
+      "agents" => { "zenmux/x-ai/grok-4.7" => "orbit-m-1", "junk" => "orbit-m-2", "provider/nocred" => "  " },
+      "routes" => { "zenmux/x-ai/grok-4.7" => "unknown", "provider/nocred" => "subscription_quota",
+                    "junk" => "direct_api", "provider/invalid" => "free" }
     }
     with_server(result) do |connection, requests|
       catalog = connection.model_catalog
@@ -51,6 +53,9 @@ module PluginConnectionTest
              "families drop malformed ids and empty family names")
       assert(catalog["agents"] == { "zenmux/x-ai/grok-4.7" => "orbit-m-1" },
              "agents keep only valid provider/id keys with a non-empty Agent name")
+      assert(catalog["routes"] == { "zenmux/x-ai/grok-4.7" => "unknown",
+                                    "provider/nocred" => "subscription_quota" },
+             "only proven, typed per-model routes cross the socket boundary")
     end
   end
 

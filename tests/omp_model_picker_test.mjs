@@ -79,6 +79,15 @@ assert.equal(decodePickerKey(''), null);
   assert.equal(outcome.status, 'committed');
 }
 
+{
+  const picker = createModelPicker({
+    entries: [{ id: 'kimi-code/k3-256k', available: true, evidenceStatus: 'absent', overviewStatus: 'fresh' }],
+    snapshot: ['kimi-code/k3-256k'], commit: async () => ({ ok: true }), done: () => {},
+  });
+  assert.match(picker.render(120).join('\n'), /kimi-code\/k3-256k.*证据 absent.*概述 fresh/,
+    'a missing exact route fact and a fresh weak model overview remain visibly distinct');
+}
+
 // 3. Esc cancels without any write; a no-change Enter closes as noop.
 {
   const commits = [];

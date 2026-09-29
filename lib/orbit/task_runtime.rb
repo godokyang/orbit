@@ -14,6 +14,7 @@ require_relative "model_candidate_pool"
 require_relative "checker_model_selector"
 require_relative "check_runner"
 require_relative "git_remote_evidence"
+require_relative "task_git_evidence"
 require_relative "observation_key"
 
 module Orbit
@@ -76,6 +77,9 @@ module Orbit
     # Verified coarse cost bands rank after known bands (ADR-009 §3):
     # unknown is never free, but never blocks on its own.
     COST_BAND_ORDER = { "low" => 0, "medium" => 1, "high" => 2 }.freeze
+    # The public-facts fields every model-evidence request asks for, per
+    # identity. An explicit unknown is acceptable for any of them.
+    EVIDENCE_NEEDED_FIELDS = %w[speed quality cost local_samples].freeze
 
     def initialize(record:, connection:, checker:, advisor: nil, evidence_cache: nil, candidate_pool: nil,
                    checker_selector: nil)
@@ -380,7 +384,8 @@ module Orbit
                 else
                   !@first_change_checked && fingerprint_artifact != @initial_digest
                 end
-      delivery_due = delivery && host["last_turn_id"] != @last_delivery_checked
+      record_task_delivery(host) if delivery
+      delivery_due = delivery && task_turn_attributed?(host) && host["last_turn_id"] != @last_delivery_checked
       if delivery && (pending = @state["pending_correction"])
         # A correction whose first delivery failed is retried exactly when the
         # Root is observed idle again — but only while it still describes the
@@ -429,6 +434,7 @@ module Orbit
 
       if @advisor
         decision = assess_jev(host, artifact_digest, now)
+        recover_candidate_recommendation(host, artifact_digest, now) if decision.nil? && @pending_hint.nil?
         if @stop_requested
           stop("Runtime received an explicit stop request")
           return
@@ -462,8 +468,9 @@ module Orbit
             @first_change_checked = true if start_check(host, now, trigger: "change")
           end
         end
-        # Hints use the same freshness re-check as check decisions; a hint
-        # that failed it is dropped rather than sent against an old state.
+        # Hints require a fresh full host observation. Evidence requests are
+        # safe across tool-progress changes only while the task, version,
+        # candidate identities, members and native user turn stay unchanged.
         if @pending_hint || @pending_evidence
           consume_commands
           return if TERMINAL.include?(@state["status"])
@@ -471,9 +478,18 @@ module Orbit
           latest_host = @connection.state
           latest_digest = fingerprint_artifact
           if observation_stale?(host, artifact_digest, latest_host, latest_digest, now)
-            @jev_next_at = [@jev_next_at, now + 20].max
-            @pending_hint = nil
-            @pending_evidence = nil
+            if @pending_evidence && !@pending_hint &&
+               latest_host["status"] == host["status"] &&
+               latest_host["last_turn_id"] == host["last_turn_id"] &&
+               latest_host["last_turn_status"] == host["last_turn_status"] &&
+               !latest_host["interrupted"] && now < @next_check &&
+               @pending_evidence["signature"] == delegation_signature(latest_digest, delegation_options)
+              deliver_pending_evidence
+            else
+              @jev_next_at = [@jev_next_at, now + 20].max
+              @pending_hint = nil
+              @pending_evidence = nil
+            end
           else
             deliver_pending_evidence
             deliver_pending_hint
@@ -498,12 +514,12 @@ module Orbit
       @artifact_digest
     end
 
-    # The runtime, not the UI, owns the version comparison. Only a version
-    # with a pending/issued notice needs a periodic fingerprint; an invalid
-    # notice stays invalid until a new independent manual check qualifies.
+    # The runtime, not the UI, owns version binding. A reviewer that overturns
+    # an obsolete not_ready reason still cannot issue completion: the new
+    # review_needed state waits for a qualified manual final check.
     def refresh_completion_readiness!(now)
       ready = @state["completion_readiness"]
-      return unless ready.is_a?(Hash) && %w[waiting ready].include?(ready["status"])
+      return unless ready.is_a?(Hash) && %w[waiting ready review_needed].include?(ready["status"])
       return unless ready["artifact_digest"]
 
       input_changed = ready["input_digest"] != @record.input_digest(@state)
@@ -514,7 +530,7 @@ module Orbit
 
       reason = if input_changed then "任务要求已修订"
                elsif workspace_changed then "产物工作区已改变"
-               elsif artifact_changed then "终检后的产物已改变"
+               elsif artifact_changed then ready["status"] == "review_needed" ? "待终检的产物已改变" : "终检后的产物已改变"
                else "当前检查通知已失效"
                end
       @state["completion_readiness"] = { "status" => "invalidated", "reason" => reason }
@@ -522,7 +538,8 @@ module Orbit
         @record.event("finalization_pending_stale", "check" => pending["check"], "reason" => reason)
       end
       schedule_check(now, "完成核对前版本变化，立即重新核对", trigger: "version_change")
-      @record.event("finalization_notice_invalidated", "reason" => reason)
+      @record.event(ready["status"] == "review_needed" ? "review_readiness_invalidated" : "finalization_notice_invalidated",
+                    "reason" => reason)
       save
     end
 
@@ -639,7 +656,7 @@ module Orbit
       )
       accumulate_jev_usage("jev_stage1", result["usage"])
       save
-      stage_delegation(scores, artifact_digest, now)
+      stage_delegation(scores, artifact_digest, now, host: host)
 
       process_score = [scores.fetch("stuck"), scores.fetch("off_track")].max
       @jev_process_streak = process_score >= 0.65 ? @jev_process_streak + 1 : 0
@@ -814,7 +831,9 @@ module Orbit
           # hint basis, even when drift is already on disk at first sight.
           member["delegation_basis"] = "root_without_hint"
         elsif member["status"] == "registered"
-          member["delegation_basis"] = delegation_basis
+          hint = current_delegation_hint
+          member["pending_hint_signature"] = hint["signature"] if hint&.dig("recommendation") && !member["model"]
+          member["delegation_basis"] = delegation_basis(member, hint: hint)
           mark_delegation_hint_followed(member) if member["delegation_basis"] == "orbit_hint"
         end
         @state["members"] << member
@@ -1007,9 +1026,10 @@ module Orbit
 
     # First stage (JEV delegation plan): the structural `delegatable` score
     # only decides whether the comparison needs model evidence. It never
-    # prepares a hint; a hint requires cached `evidence` for every compared
-    # identity plus the second-stage judgment.
-    def stage_delegation(scores, artifact_digest, now)
+    # prepares a hint by itself: a hint requires the second-stage judgment on
+    # valid cached evidence — every compared identity on the catalog-less
+    # legacy path, the sourced candidates on the pool path.
+    def stage_delegation(scores, artifact_digest, now, host: nil)
       return unless scores.fetch("delegatable", 0) >= DELEGATION_HINT_THRESHOLD
       return if @state["members"].any? { |member| member_blocks_new_hint?(member) }
 
@@ -1046,22 +1066,132 @@ module Orbit
         return
       end
 
-      entries = evidence_states(identities)
-      if entries.nil?
-        needed = %w[speed quality cost local_samples]
-        if (prior = open_evidence_request(identities, needed))
-          @state["evidence_request"] = prior
-          @state["jev"] = (@state["jev"] || {}).merge("evidence_status" => "requested")
-          save
+      if candidates.nil?
+        # Catalog-less host: the legacy whole-group comparison still requires
+        # valid evidence for the Root and every compared identity before its
+        # second-stage questions run.
+        entries = evidence_states(identities)
+        if entries.nil?
+          open_or_queue_evidence_request(identities, EVIDENCE_NEEDED_FIELDS, signature, now)
+        elsif evidence_complete?(entries)
+          run_delegation_assessment(identities, entries, signature, artifact_digest, now)
         else
-          @pending_evidence = { "signature" => signature, "identities" => identities,
-                                "needed" => needed, "at" => Time.at(now).utc.iso8601 }
+          record_evidence_unavailable(signature, now)
         end
-      elsif evidence_complete?(entries)
-        assess_or_hold(identities, entries, signature, artifact_digest, now)
       else
-        record_evidence_unavailable(signature, now)
+        evaluate_pool_delegation(identities, signature, artifact_digest, now, host: host)
       end
+    end
+
+    # A full host change can cancel delivery after judgment was persisted.
+    # Native OMP may not report the user id until the first assistant turn
+    # settles, and Root may start another assistant turn for the same message.
+    # Use the already observed user-message boundary until its id is available;
+    # the full-observation check still gates the actual send.
+    def recover_candidate_recommendation(host, artifact_digest, now)
+      return if @state["members"].any? { |member| member_blocks_new_hint?(member) }
+      return unless @state.dig("jev", "scores", "delegatable").to_f >= DELEGATION_HINT_THRESHOLD
+
+      options = delegation_options
+      return if options["callable_kinds"].empty?
+
+      signature = delegation_signature(artifact_digest, options)
+      return if @state.dig("delegation_hints", signature)
+
+      assessment = @state.dig("delegation_assessments", signature)
+      return unless assessment.is_a?(Hash) && assessment["decision"] == "recommended"
+      return unless assessment["host_status"] == host["status"]
+      return unless assessment["user_boundary"] == @state["last_user_message_id"]
+      return unless assessment["user_message_id"] == (host["last_turn_user_message_id"] || @state["last_user_message_id"])
+
+      identities = evidence_identities(options)
+      return unless identities && member_candidates&.any?
+
+      view = pool_evidence_view(identities)
+      return unless view && pool_evidence_summary(view) == @state.dig("delegation_evidence", signature, "summary")
+
+      recommendation = assessment["recommendation"]
+      return unless recommendation.is_a?(Hash) && recommendation["first"].is_a?(Hash)
+
+      prepare_candidate_recommendation(recommendation["first"], recommendation["backups"],
+                                       recommendation["candidates"], signature, now)
+    end
+
+    # One bounded request per observation signature; repeated ticks do not
+    # loop, and Orbit never browses for evidence itself. A prior unresolved
+    # request for the same identity set and facts is re-activated instead of
+    # duplicated.
+    def open_or_queue_evidence_request(identities, needed, signature, now)
+      if (prior = open_evidence_request(identities, needed))
+        @state["evidence_request"] = prior
+        @state["jev"] = (@state["jev"] || {}).merge("evidence_status" => "requested")
+        save
+      else
+        @pending_evidence = { "signature" => signature, "identities" => identities,
+                              "needed" => needed, "at" => Time.at(now).utc.iso8601 }
+      end
+    end
+
+    # ADR-009 §3 pool path. Candidates are judged per identity: a sourced,
+    # valid candidate is evaluated even when other pool candidates are missing
+    # or record `unavailable` — those stay pending, never receive a
+    # recommendation and never hold the sourced candidates hostage. The only
+    # identities requested are the actually missing ones (an unexpired
+    # `unavailable` is a real answer, not a gap). With no evaluable candidate
+    # the round fails closed: it requests the real gaps, or records the pool
+    # unavailable when every candidate is an unexpired `unavailable`.
+    def evaluate_pool_delegation(identities, signature, artifact_digest, now, view: nil, host: nil)
+      view ||= pool_evidence_view(identities)
+      return if view.nil?
+
+      if view.fetch("evidenced").empty?
+        if view.fetch("missing").any?
+          open_or_queue_evidence_request(pool_request_identities(view), EVIDENCE_NEEDED_FIELDS, signature, now)
+        else
+          record_evidence_unavailable(signature, now)
+        end
+        return
+      end
+      run_candidate_assessment(view, signature, artifact_digest, now, host: host)
+      # A qualified candidate is enough: do not delay a real recommendation
+      # to make Root research every other model in a large pool.
+      return if @state.dig("delegation_assessments", signature, "decision") == "recommended"
+
+      if view.fetch("missing").any?
+        open_or_queue_evidence_request(pool_request_identities(view), EVIDENCE_NEEDED_FIELDS, signature, now)
+      end
+    end
+
+    # Live per-candidate cache view for the pool path. Root's evidence is
+    # optional context here: the per-candidate questions judge each candidate
+    # only from its own sourced evidence and the task requirements, so Root's
+    # entry rides along in the summary when present but is neither requested
+    # nor a gate on this path. The catalog-less legacy comparison keeps
+    # requiring it (see evidence_states).
+    def pool_evidence_view(identities)
+      root_entry = lookup_evidence(identities.fetch("root"))
+      evidenced, missing, unavailable = [], [], []
+      identities.fetch("candidates").each do |identity|
+        entry = lookup_evidence(identity)
+        if entry.nil?
+          missing << identity
+        elsif entry["status"] == ModelEvidenceCache::STATUS_EVIDENCE
+          evidenced << { "identity" => identity, "entry" => entry }
+        else
+          unavailable << { "identity" => identity, "entry" => entry }
+        end
+      end
+      { "root_identity" => identities.fetch("root"), "root" => root_entry,
+        "evidenced" => evidenced, "missing" => missing, "unavailable" => unavailable }
+    rescue ModelEvidenceCache::Error => error
+      @record.event("model_evidence_cache_error", "reason" => error.message)
+      nil
+    end
+
+    # The pool evidence request covers only the identities that are actually
+    # missing; the Root identity is not part of a pool request.
+    def pool_request_identities(view)
+      { "root" => nil, "candidates" => view.fetch("missing") }
     end
 
     # ADR-009 first candidate wiring. `nil` means the host exposes no model
@@ -1075,10 +1205,13 @@ module Orbit
 
       available = Array(catalog["available"])
       agents = catalog["agents"].is_a?(Hash) ? catalog["agents"] : {}
+      routes = catalog["routes"].is_a?(Hash) ? catalog["routes"] : {}
       current = catalog["current"].to_s
       Array(candidate_pool.read).select do |model|
         available.include?(model) && agents.key?(model) && model != current
-      end.map { |model| { "model" => model, "agent" => agents[model] } }
+      end.map do |model|
+        { "model" => model, "agent" => agents[model], "billing_route" => routes.fetch(model, "unknown") }
+      end
     rescue StandardError => error
       @candidate_pool_error = "#{error.class}: #{error.message}"
       []
@@ -1112,41 +1245,28 @@ module Orbit
       save
     end
 
-    # Pool candidates reach the evidence machinery (identities, agent names,
-    # requests, signature), but until the per-candidate quality and
-    # end-to-end-time judgment is wired no generalized delegation hint is
-    # sent and the whole-group three-score judgment is never presented as a
-    # specific model recommendation. The round is held as pending; the next
-    # segment activates concrete first/backup choices.
     # Convergence for thin-evidence pending rounds: a later
     # `orbit model-evidence` submission against the still-pending request can
     # re-open a pending_candidates round, but only when the newly effective
     # validated evidence summary actually differs from what that round
     # consumed. Unchanged submissions and ticks without submissions never
     # re-run the judgment; with no pending request the CLI path stays ignored
-    # by the existing protocol.
-    def reopen_pending_on_evidence_change(identities, states, signature)
+    # by the existing protocol. A recommended or declined round is never
+    # reopened — one observation signature keeps at most one judgment and one
+    # hint.
+    def reopen_pending_on_evidence_change(summary, signature)
       assessment = @state.dig("delegation_assessments", signature)
       return unless assessment.is_a?(Hash) && assessment["decision"] == "pending_candidates"
 
       consumed = @state.dig("delegation_evidence", signature, "summary")
       return unless consumed.is_a?(Hash)
-      return if delegation_evidence_summary(identities, states) == consumed
+      return if summary == consumed
 
       @state["delegation_assessments"].delete(signature)
       @state["delegation_evidence"]&.delete(signature)
       @record.event("delegation_assessment_reopened", "signature" => signature,
                     "reason" => "validated evidence changed after a pending_candidates round")
       save
-    end
-
-    def assess_or_hold(identities, entries, signature, artifact_digest, now)
-      candidates = member_candidates
-      if candidates.nil?
-        run_delegation_assessment(identities, entries, signature, artifact_digest, now)
-      else
-        run_candidate_assessment(identities, entries, signature, artifact_digest, now)
-      end
     end
 
     # Verified coarse cost tier read from the validated cache entry
@@ -1159,30 +1279,36 @@ module Orbit
       %w[low medium high].include?(band) ? band : "unknown"
     end
 
-    # ADR-009 §3 pool recommendation stage. Every candidate first clears an
-    # independent quality line judged from its own sourced, valid evidence
-    # and the task requirements; survivors are compared on end-to-end time
-    # (handoff, rework, integration, contention and verification included)
-    # and on the program-read verified cost tier. The output names agent+model
-    # with reasons and Root dispatches explicitly; nothing here dispatches or
-    # switches models. No candidate clears the lines → pending_candidates.
-    def run_candidate_assessment(identities, entries, signature, artifact_digest, now)
+    # ADR-009 §3 pool recommendation stage. Every evidenced candidate first
+    # clears an independent quality line judged from its own sourced, valid
+    # evidence and the task requirements; survivors are compared on
+    # end-to-end time (handoff, rework, integration, contention and
+    # verification included) and on the program-read verified cost tier.
+    # Candidates without valid evidence stay pending and unscored — they are
+    # never recommended and do not block the evidenced candidates. The output
+    # names agent+model with reasons and Root dispatches explicitly; nothing
+    # here dispatches or switches models. No candidate clears the lines →
+    # pending_candidates.
+    def run_candidate_assessment(view, signature, artifact_digest, now, host: nil)
       return unless @advisor
       return if @state.dig("delegation_assessments", signature)
 
-      summary = delegation_evidence_summary(identities, entries)
+      evidenced = view.fetch("evidenced")
+      return if evidenced.empty?
+
+      summary = pool_evidence_summary(view)
       observation = JevAdvisor.observation(
         inputs: @record.inputs(@state), host: @connection.state, members: @state["members"],
         project_root: artifact_root, artifact_digest: artifact_digest,
         elapsed_seconds: now - Time.parse(@state.fetch("created_at")).to_f,
         member_options: delegation_options
-      ).merge("model_evidence" => summary, "pool_candidates" => identities.fetch("candidates"))
-      persist_delegation_evidence!(observation.fetch("model_evidence"), signature)
-      result = @advisor.assess_candidates(state: observation, candidates: identities.fetch("candidates"))
+      ).merge("model_evidence" => summary, "pool_candidates" => evidenced.map { |item| item["identity"] })
+      persist_delegation_evidence!(summary, signature)
+      result = @advisor.assess_candidates(state: observation, candidates: evidenced.map { |item| item["identity"] })
       scores = result.fetch("scores")
-      evaluated = identities.fetch("candidates").each_with_index.map do |identity, index|
+      evaluated = evidenced.each_with_index.map do |item, index|
         judgment = scores.fetch(index.to_s)
-        entry = entries.fetch("candidates").fetch(index)
+        identity = item["identity"]
         status = if judgment.fetch("quality") < MEMBER_FIT_THRESHOLD
                    "pending_quality"
                  elsif judgment.fetch("time") < PARALLEL_GAIN_THRESHOLD
@@ -1192,8 +1318,9 @@ module Orbit
                  end
         { "agent" => identity["agent"], "model" => "#{identity['provider']}/#{identity['model']}",
           "quality" => judgment.fetch("quality"), "time" => judgment.fetch("time"),
-          "cost_band" => candidate_cost_band(entry), "status" => status }
+          "cost_band" => candidate_cost_band(item["entry"]), "status" => status }
       end
+      evaluated.concat(pending_pool_candidates(view))
       qualified = evaluated.select { |candidate| candidate["status"] == "qualified" }
                            .sort_by { |candidate| [-candidate["time"], COST_BAND_ORDER.fetch(candidate["cost_band"], 3)] }
       judgment = result.slice("provider", "model", "question_set_version", "usage")
@@ -1204,7 +1331,8 @@ module Orbit
         @state["jev"] = (@state["jev"] || {}).merge(
           "delegation" => judgment.merge("status" => "pending_candidates", "decision" => "pending_candidates",
                                          "candidates" => evaluated,
-                                         "reason" => "no pooled candidate cleared the sourced quality line and the end-to-end time line",
+                                         "reason" => "no pooled candidate cleared the sourced quality line and the " \
+                                                    "end-to-end time line; candidates without valid evidence stay pending and unscored",
                                          "at" => Time.at(now).utc.iso8601)
         )
         @record.event("delegation_pending_candidates", judgment.merge("signature" => signature, "candidates" => evaluated))
@@ -1215,7 +1343,11 @@ module Orbit
       recommendation = { "first" => first, "backups" => rest.first(2), "candidates" => evaluated,
                          "at" => Time.at(now).utc.iso8601 }
       @state["delegation_assessments"][signature] = judgment.merge(
-        "decision" => "recommended", "recommendation" => recommendation, "at" => Time.at(now).utc.iso8601
+        "decision" => "recommended", "recommendation" => recommendation,
+        "host_status" => host && host["status"],
+        "user_message_id" => host&.dig("last_turn_user_message_id") || @state["last_user_message_id"],
+        "user_boundary" => @state["last_user_message_id"],
+        "at" => Time.at(now).utc.iso8601
       )
       @state["jev"] = (@state["jev"] || {}).merge(
         "delegation" => judgment.merge("status" => "assessed", "decision" => "recommended",
@@ -1238,6 +1370,36 @@ module Orbit
       )
       @record.event("delegation_unavailable", "reason" => error.message)
       save
+    end
+
+    # Unscored pool candidates in the evaluated record: missing evidence
+    # stays requestable, an unexpired `unavailable` is a real answer. Both
+    # carry null scores and can never reach the qualified set.
+    def pending_pool_candidates(view)
+      pending = view.fetch("missing").map { |identity| [identity, "pending_evidence"] } +
+                view.fetch("unavailable").map { |item| [item.fetch("identity"), "pending_unavailable"] }
+      pending.map do |identity, status|
+        { "agent" => identity["agent"], "model" => "#{identity['provider']}/#{identity['model']}",
+          "quality" => nil, "time" => nil, "cost_band" => "unknown", "status" => status }
+      end
+    end
+
+    # Bounded summary of the pool facts a per-candidate judgment consumed:
+    # the evidenced candidates' validated entries, the pending (unscored)
+    # identities, and Root's entry only as optional context. Values keep
+    # their submitted unit and basis; different units are never merged into
+    # a single pseudo-precise score, and no web page text can reach this
+    # structure.
+    def pool_evidence_summary(view)
+      root_entry = view["root"]
+      {
+        "root" => root_entry && evidence_entry_summary(view.fetch("root_identity"), root_entry),
+        "candidates" => view.fetch("evidenced").map { |item| evidence_entry_summary(item["identity"], item["entry"]) },
+        "pending" => pending_pool_candidates(view),
+        "note" => "Pool candidates are judged only from their own sourced, valid cache entries; candidates " \
+                  "without valid evidence stay pending and unscored. Metric values, units and basis are " \
+                  "submitter-provided and not semantically verified; cross-identity comparison metrics are omitted."
+      }
     end
 
     def prepare_candidate_recommendation(first, backups, evaluated, signature, now)
@@ -1267,9 +1429,16 @@ module Orbit
       lines << "Backups: #{backups.map { |candidate| describe.call(candidate) }.join('; ')}\n" unless backups.empty?
       others = recommendation.fetch("candidates").reject { |candidate| candidate["status"] == "qualified" }
       unless others.empty?
-        lines << "Not recommended now: #{others.map { |candidate| "#{candidate['agent']} (#{candidate['status']})" }.join('; ')}\n"
+        lines << "Not recommended now: #{others.map { |candidate| "#{candidate['agent'] || candidate['model']} (#{candidate['status']})" }.join('; ')}\n"
       end
-      lines << "Dispatch explicitly with native task using the agent name; the registration gate records the actual id and model."
+      if others.any? { |candidate| %w[pending_evidence pending_unavailable].include?(candidate["status"]) }
+        lines << "Pending candidates were not scored (missing or unavailable evidence); they are never recommended " \
+                 "and do not block this one. Missing identities can still be submitted with orbit model-evidence.\n"
+      end
+      lines << "Choose one bounded, independently verifiable work surface from the user's instruction; " \
+               "continue a separate surface yourself, then integrate and verify both. " \
+               "If no clear independent surface exists, decline the suggestion. " \
+               "Dispatch explicitly with native task using the agent name; the registration gate records the actual id and model."
       lines
     end
 
@@ -1297,10 +1466,14 @@ module Orbit
     end
 
     # Every compared identity must be reliable. Reasoning effort and variants
-    # are never guessed (the host does not expose them here), and cross-host
-    # member models are not probed. Only a same-host native candidate is taken
-    # into the automatic comparison; other callable kinds are recorded as
-    # unknown candidates without blocking it.
+    # are never guessed (the host does not expose them here) and `unknown` is
+    # never normalized to the provider default — they are different cache
+    # identities. Cross-host member models are not probed. Only a same-host
+    # native candidate is taken into the automatic comparison; other callable
+    # kinds are recorded as unknown candidates without blocking it. The Root
+    # identity stays a structural gate; its evidence is consumed by the
+    # legacy comparison, while the pool path treats it as optional context
+    # (see pool_evidence_view).
     def evidence_identities(options)
       provider = @state.dig("connection", "provider").to_s
       root = split_model_identity(root_model, provider)
@@ -1311,15 +1484,14 @@ module Orbit
       options.fetch("callable_kinds").each do |kind|
         if kind.to_s == provider
           if pool
-            # ADR-009 pool candidates replace the default member on catalog
-            # hosts; each carries its session agent name. Per-model billing
-            # routes are not resolved yet — the host's member route is used
-            # until per-model ranking lands.
+            # Each generated Agent has its own resolved provider endpoint.
+            # The @task default is unrelated when the pool selects another
+            # model; missing route proof remains unknown, never inherited.
             pool.each do |candidate|
               identity = split_model_identity(candidate["model"], provider)
               next unless identity_usable?(identity)
 
-              candidates << identity.merge("kind" => kind, "billing_route" => native_member_route,
+              candidates << identity.merge("kind" => kind, "billing_route" => candidate["billing_route"],
                                            "agent" => candidate["agent"])
             end
           else
@@ -1378,8 +1550,10 @@ module Orbit
     end
 
     # "provider/model" is the only reliable split; a bare model id belongs to
-    # the connection provider. Reasoning effort stays "unknown": hosts do not
-    # expose it and model names are not evidence.
+    # the connection provider. Reasoning effort stays the explicit value
+    # "unknown": hosts do not expose it and model names are not evidence, so
+    # an unproven equivalence never turns unknown into the provider default —
+    # submissions must carry reasoning "unknown" for these requests.
     def split_model_identity(value, default_provider)
       text = value.to_s.strip
       return nil if text.empty?
@@ -1402,10 +1576,12 @@ module Orbit
       false
     end
 
-    # Re-reads the user-level cache. A missing or expired lookup needs a
-    # request; an unexpired `unavailable` entry is a real answer and must not
-    # be re-requested. Only valid `evidence` for every compared identity
-    # reaches the second stage.
+    # Re-reads the user-level cache for the catalog-less legacy comparison,
+    # which needs every compared identity. A missing or expired lookup needs
+    # a request; an unexpired `unavailable` entry is a real answer and must
+    # not be re-requested. Only valid `evidence` for every compared identity
+    # reaches that second stage. The pool path resolves candidates
+    # individually instead (pool_evidence_view).
     def evidence_states(identities)
       root = lookup_evidence(identities.fetch("root"))
       return nil unless root
@@ -1499,53 +1675,86 @@ module Orbit
       normalized.values_at("provider", "model", "reasoning", "billing_route")
     end
 
-    # A mismatch stays fail-closed: the note only tells the submitter which
-    # candidate route the pending request expects and what was submitted. It
-    # never relaxes identity matching and never sends an unsolicited message.
+    # A mismatch stays fail-closed: the note names the fields that actually
+    # differ for each requested identity (reasoning, billing_route) or that
+    # no entry was submitted for it, plus any unrequested extras. It never
+    # relaxes identity matching and never sends an unsolicited message.
     def evidence_mismatch_note(identities, submitted_keys)
-      details = identities.fetch("candidates").map do |identity|
-        expected = ModelEvidenceCache.billing_route(identity["billing_route"])
-        actual = submitted_keys.find do |key|
-          key[0] == identity["provider"] && key[1] == identity["model"] && key[2] == identity["reasoning"]
+      keys = Array(submitted_keys).uniq
+      details = [identities["root"], *identities.fetch("candidates")].compact.filter_map do |identity|
+        wanted = evidence_identity_key(identity)
+        name = "#{wanted[0]}/#{wanted[1]}"
+        next nil if keys.include?(wanted)
+
+        same_model = keys.select { |key| key[0] == wanted[0] && key[1] == wanted[1] }
+        if same_model.empty?
+          "#{name}: no entry submitted for this identity (expected reasoning #{wanted[2]}, billing_route #{wanted[3]})"
+        else
+          differences = same_model.map do |key|
+            [].tap do |fields|
+              fields << "reasoning must be #{wanted[2]}, submitted #{key[2]}" if key[2] != wanted[2]
+              fields << "billing_route must be #{wanted[3]}, submitted #{key[3]}" if key[3] != wanted[3]
+            end.join("; ")
+          end
+          "#{name}: #{differences.join(' | ')}"
         end
-        "#{identity['provider']}/#{identity['model']} billing_route must be #{expected}, " \
-          "submitted #{actual ? actual[3] : 'missing'}"
       end
-      "evidence identities did not match the pending request; #{details.join('; ')}. " \
-        "Resubmit with the route shown in the Orbit request (omitted counts as unknown)."
+      note = +"evidence identities did not match the pending request"
+      note << "; #{details.join('; ')}" unless details.empty?
+      extras = keys - requested_evidence_keys(identities)
+      unless extras.empty?
+        note << "; unrequested identities were submitted: " \
+                "#{extras.map { |key| "#{key[0]}/#{key[1]} (reasoning #{key[2]}, billing_route #{key[3]})" }.join(', ')}"
+      end
+      note << ". Resubmit each identity exactly as shown in the Orbit request: an omitted reasoning field means the " \
+              "provider default and is a different identity, while an explicit \"unknown\" is the expected value when " \
+              "the request shows reasoning: unknown; the billing_route must match the one shown."
+      note
     end
 
     # Root and a same-host candidate can share one identity; the CLI and the
-    # cache store it once, so coverage is an identity set, not a multiset.
+    # cache store it once, so coverage is an identity set, not a multiset. A
+    # pool-path request carries no Root identity (nil is skipped).
     def requested_evidence_keys(identities)
-      [identities.fetch("root"), *identities.fetch("candidates")].map { |identity| evidence_identity_key(identity) }.uniq
+      [identities["root"], *identities.fetch("candidates")].compact
+                                                        .map { |identity| evidence_identity_key(identity) }.uniq
     end
 
-    # Coverage and extras are compared as identity sets: the CLI dedupes one
-    # identity submitted twice, and a same-host candidate can share the Root's
-    # identity.
+    # The pool stage judges candidates independently: one or more exact
+    # requested identities can be submitted first. The legacy root-vs-member
+    # comparison still requires its complete set.
     def evidence_set_matches?(submitted, identities)
-      submitted.map { |entry| evidence_identity_key(entry) }.uniq.sort == requested_evidence_keys(identities).sort
+      keys = submitted.map { |entry| evidence_identity_key(entry) }.uniq
+      expected = requested_evidence_keys(identities)
+      identities["root"].nil? ? keys.any? && (keys - expected).empty? : keys.sort == expected.sort
     end
 
-    # Root submitted model facts through the dedicated CLI command; the CLI
-    # already validated and cached them. The submitted set must cover exactly
-    # the pending comparison — no missing identity, no extras. Then the cache
-    # is re-read: `unavailable` is a real answer, missing or expired facts
-    # stay incomplete, and only valid `evidence` for every compared identity
-    # reaches the second stage. None of the other outcomes call JEV, hint
-    # automatically or trigger another request loop.
+    # The CLI has validated and cached each submitted fact. A pool-path reply
+    # may answer any nonempty subset of the exact request; remaining models
+    # stay unscored, and a later request can target only those still missing.
+    # Invalid or unrelated identities cannot be used to make a recommendation.
+    # The legacy whole-comparison path still needs the entire identity set.
     def apply_model_evidence(command, now:)
       @record.event("model_evidence_submitted", "entries" => Array(command["entries"]).length)
+      submitted = submitted_evidence(command)
+      needed = Array(@state.dig("review", "selection", "evidence_needed")).select { |item| item.is_a?(Hash) }
+      checker_entries = submitted.select do |entry|
+        entry && needed.any? { |item|
+          item["model"] == "#{entry['provider']}/#{entry['model']}" &&
+            # Existing in-flight tasks stored provider/id only; a newly
+            # submitted unknown identity may answer one, but default never can.
+            item.fetch("reasoning", "unknown") == entry["reasoning"] &&
+            item.fetch("billing_route", "unknown") == entry["billing_route"]
+        }
+      end
+      if checker_entries.any?
+        @record.event("checker_model_evidence_submitted",
+                      "models" => checker_entries.map { |entry| "#{entry['provider']}/#{entry['model']}" }.uniq)
+      end
+
       request = @state["evidence_request"]
       unless request.is_a?(Hash)
-        needed = Array(@state.dig("review", "selection", "evidence_needed")).filter_map do |item|
-          item["model"] if item.is_a?(Hash)
-        end
-        submitted = submitted_evidence(command)
-        if !submitted.empty? && submitted.all? { |entry| entry && needed.include?("#{entry['provider']}/#{entry['model']}") }
-          @record.event("checker_model_evidence_submitted",
-                        "models" => submitted.map { |entry| "#{entry['provider']}/#{entry['model']}" }.uniq)
+        if checker_entries.any? && checker_entries.length == submitted.length
           save
           return
         end
@@ -1556,63 +1765,117 @@ module Orbit
       end
 
       identities = request.fetch("identities")
-      submitted = submitted_evidence(command)
-      unless submitted && evidence_set_matches?(submitted, identities)
-        submitted_keys = Array(submitted).map { |entry| evidence_identity_key(entry) }
-        expected_keys = requested_evidence_keys(identities)
+      requested_keys = requested_evidence_keys(identities)
+      # One CLI array may contain both a requested member fact and a checker
+      # fact. Only a checker-only identity is excluded from the member gate;
+      # a fact that matches both requests must satisfy both.
+      submitted = submitted.reject do |entry|
+        checker_entries.include?(entry) &&
+          (%w[used unavailable deferred stale].include?(request["resolved"]) ||
+           !requested_keys.include?(evidence_identity_key(entry)))
+      end
+      if submitted.empty? && checker_entries.any?
+        save
+        return
+      end
+      unless submitted.all? && evidence_set_matches?(submitted, identities)
+        submitted_keys = submitted.filter_map { |entry| evidence_identity_key(entry) if entry }
         request["resolved"] = "mismatch"
         @state["jev"] = (@state["jev"] || {}).merge(
           "evidence_status" => "mismatch",
           "evidence_note" => evidence_mismatch_note(identities, submitted_keys)
         )
-        @record.event("model_evidence_mismatch", "expected" => expected_keys, "submitted" => submitted_keys)
+        @record.event("model_evidence_mismatch", "expected" => requested_keys, "submitted" => submitted_keys)
         save
         return
       end
 
-      # The pending request may predate a @task change. Re-resolve now: a
-      # changed candidate identity, model or billing route makes the pending
-      # evidence stale for this assessment. Cache entries stay reusable under
-      # their own identity/route, and the next stage-one signature requests
-      # current evidence.
+      # The pending request may predate a @task or pool change. Re-resolve
+      # now: a requested identity that is no longer current makes the pending
+      # evidence stale for this assessment. A pool-path request covers only
+      # the identities that were actually missing, so it stays fresh while
+      # every requested identity is still current; the legacy
+      # whole-comparison request still requires an exact identity set.
+      # Cache entries stay reusable under their own identity/route, and the
+      # next stage-one signature requests current evidence.
       current = evidence_identities(delegation_options)
-      if current.nil? || requested_evidence_keys(current) != requested_evidence_keys(identities)
+      requested_keys = requested_evidence_keys(identities)
+      current_keys = current ? requested_evidence_keys(current) : nil
+      stale = if identities["root"].nil?
+                current_keys.nil? || !(requested_keys - current_keys).empty?
+              else
+                current_keys.nil? || current_keys != requested_keys
+              end
+      if stale
         request["resolved"] = "stale"
         @state["jev"] = (@state["jev"] || {}).merge(
           "evidence_status" => "unknown",
           "evidence_note" => "the resolved candidate identity or billing route changed while evidence was pending"
         )
         @record.event("model_evidence_stale",
-                      "requested" => requested_evidence_keys(identities),
-                      "current" => current ? requested_evidence_keys(current) : nil)
+                      "requested" => requested_keys,
+                      "current" => current_keys)
         save
         return
       end
 
-      states = evidence_states(identities)
-      if submitted.any? { |entry| entry["status"] == "unavailable" } ||
-         (states && evidence_statuses(states).any? { |entry| entry["status"] == "unavailable" })
-        request["resolved"] = "unavailable"
-        @state["jev"] = (@state["jev"] || {}).merge("evidence_status" => "unavailable")
-        @record.event("model_evidence_unavailable", "reason" => "a compared identity records unavailable")
+      # The request may have reached Root before it dispatched a member.
+      # Cache the exact facts, but do not judge work that a member has since
+      # started: that second-stage decision cannot produce a valid new hint.
+      if @state["members"].any? { |member| member_blocks_new_hint?(member) }
+        request["resolved"] = "deferred"
+        @state["jev"] = (@state["jev"] || {}).merge(
+          "evidence_status" => "deferred",
+          "evidence_note" => "member work started before the model evidence reply; no new delegation assessment"
+        )
+        @record.event("model_evidence_deferred", "reason" => "member work started before candidate assessment")
         save
         return
       end
 
-      unless states && evidence_complete?(states)
-        request["resolved"] = "incomplete"
-        @state["jev"] = (@state["jev"] || {}).merge("evidence_status" => "incomplete")
-        @record.event("model_evidence_incomplete", "identities" => identities)
+      if member_candidates.nil?
+        states = evidence_states(identities)
+        if submitted.any? { |entry| entry["status"] == "unavailable" } ||
+           (states && evidence_statuses(states).any? { |entry| entry["status"] == "unavailable" })
+          request["resolved"] = "unavailable"
+          @state["jev"] = (@state["jev"] || {}).merge("evidence_status" => "unavailable")
+          @record.event("model_evidence_unavailable", "reason" => "a compared identity records unavailable")
+          save
+          return
+        end
+
+        unless states && evidence_complete?(states)
+          request["resolved"] = "incomplete"
+          @state["jev"] = (@state["jev"] || {}).merge("evidence_status" => "incomplete")
+          @record.event("model_evidence_incomplete", "identities" => identities)
+          save
+          return
+        end
+
+        request["resolved"] = "used"
         save
+        artifact_digest = probe_artifact(now)
+        signature = delegation_signature(artifact_digest, delegation_options)
+        reopen_pending_on_evidence_change(delegation_evidence_summary(identities, states), signature)
+        run_delegation_assessment(identities, states, signature, artifact_digest, now)
         return
       end
 
-      request["resolved"] = "used"
+      # Keep dispatch gated while Jev evaluates the newly supplied identity.
+      # Once the judgment is durable, a valid hint (or an honest decline) can
+      # inform the Root's next explicit choice; the other candidates remain
+      # unscored and are requested only if no candidate qualified.
+      request["resolved"] = "assessing"
       save
       artifact_digest = probe_artifact(now)
       signature = delegation_signature(artifact_digest, delegation_options)
-      reopen_pending_on_evidence_change(identities, states, signature)
-      assess_or_hold(identities, states, signature, artifact_digest, now)
+      view = pool_evidence_view(current)
+      if view
+        reopen_pending_on_evidence_change(pool_evidence_summary(view), signature)
+        evaluate_pool_delegation(current, signature, artifact_digest, now, view: view)
+      end
+      request["resolved"] = submitted.any? { |entry| entry["status"] == "unavailable" } ? "unavailable" : "used"
+      save
     end
 
     # Second stage: consumes only validated cache facts and the bounded task
@@ -1682,33 +1945,38 @@ module Orbit
     end
 
     def delegation_evidence_summary(identities, entries)
-      entry_summary = lambda do |identity, entry|
-        metrics = entry["metrics"]
-        if metrics.is_a?(Hash)
-          # Legacy cache entries may still carry cross-identity comparison
-          # claims written before submission rejected them; never feed those
-          # into the second-stage judgment.
-          metrics = metrics.reject { |name, _| ModelEvidenceCache.comparison_metric?(name) }
-        end
-        summary = {
-          "provider" => identity["provider"], "model" => identity["model"], "reasoning" => identity["reasoning"],
-          "billing_route" => identity["billing_route"] || "unknown",
-          "status" => entry["status"], "retrieved_at" => entry["retrieved_at"], "valid_until" => entry["valid_until"],
-          "sources" => Array(entry["sources"]), "metrics" => metrics
-        }
-        # The validated coarse tier rides with the entry so Jev and the audit
-        # trail see the sourced band, its confidence and its basis.
-        summary["cost_tier"] = entry["cost_tier"] if entry["cost_tier"].is_a?(Hash)
-        summary
-      end
       {
-        "root" => entry_summary.call(identities.fetch("root"), entries.fetch("root")),
+        "root" => evidence_entry_summary(identities.fetch("root"), entries.fetch("root")),
         "candidates" => identities.fetch("candidates").each_with_index.map do |identity, index|
-          entry_summary.call(identity, entries.fetch("candidates").fetch(index))
+          evidence_entry_summary(identity, entries.fetch("candidates").fetch(index))
         end,
         "note" => "Structure-validated cache entries only; metric values, units and basis are submitter-provided " \
                   "and not semantically verified; cross-identity comparison metrics are omitted."
       }
+    end
+
+    # One identity's bounded, JSON-safe summary of its validated cache entry.
+    # Values keep their submitted unit and basis; different units are never
+    # merged into a single pseudo-precise score, and no web page text can
+    # reach this structure.
+    def evidence_entry_summary(identity, entry)
+      metrics = entry["metrics"]
+      if metrics.is_a?(Hash)
+        # Legacy cache entries may still carry cross-identity comparison
+        # claims written before submission rejected them; never feed those
+        # into a second-stage judgment.
+        metrics = metrics.reject { |name, _| ModelEvidenceCache.comparison_metric?(name) }
+      end
+      summary = {
+        "provider" => identity["provider"], "model" => identity["model"], "reasoning" => identity["reasoning"],
+        "billing_route" => identity["billing_route"] || "unknown",
+        "status" => entry["status"], "retrieved_at" => entry["retrieved_at"], "valid_until" => entry["valid_until"],
+        "sources" => Array(entry["sources"]), "metrics" => metrics
+      }
+      # The validated coarse tier rides with the entry so Jev and the audit
+      # trail see the sourced band, its confidence and its basis.
+      summary["cost_tier"] = entry["cost_tier"] if entry["cost_tier"].is_a?(Hash)
+      summary
     end
 
     # The automatic chain stops when an identity cannot be established.
@@ -1764,7 +2032,7 @@ module Orbit
     def open_evidence_request(identities, needed)
       keys = requested_evidence_keys(identities).sort
       @state["evidence_requests"].values.reverse.find do |request|
-        request.is_a?(Hash) && request["resolved"] != "used" &&
+        request.is_a?(Hash) && !%w[used deferred].include?(request["resolved"]) &&
           request["needed"] == needed &&
           requested_evidence_keys(request.fetch("identities")).sort == keys
       end
@@ -1779,15 +2047,42 @@ module Orbit
       return if @state.dig("evidence_requests", pending.fetch("signature")) ||
                 open_evidence_request(pending.fetch("identities"), pending.fetch("needed"))
 
-      text = +"Orbit model evidence request (not a new user instruction): before judging delegation, Jev needs public model facts.\n"
-      text << "Compare:\n- root: #{format_identity(pending.dig('identities', 'root'))}\n"
-      pending.dig("identities", "candidates").each do |identity|
-        agent = identity["agent"] ? " [agent: #{identity['agent']}]" : ""
-        text << "- candidate (#{identity['kind']}): #{format_identity(identity)}#{agent}\n"
+      text = +"Orbit model evidence request (not a new user instruction). Jev has not selected or authorized a member model.\n"
+      root = pending.dig("identities", "root")
+      if root
+        text << "Compare:\n- root: #{format_identity(root)}\n"
+      else
+        text << "Pool Agents awaiting task-relevant facts (other available choices: /orbit-models):\n"
       end
-      text << "Needed per identity: speed, quality, cost and local samples, each with source URL, retrieved_at and validity; cost may arrive as route-matched numeric facts or as the coarse cost_tier below, and an explicit unknown is acceptable.\n"
-      text << "For cost, submit what the evidence schema accepts: route-matched numeric metrics — cost.* per-token prices for a direct_api route, quota.* plan/quota band facts for a subscription_quota route — and/or the optional coarse cost_tier object {band: low|medium|high, confidence: low|medium|high, basis: <non-empty rationale>}. The tier expresses the price or quota burden band, reuses this entry's sources and validity, keeps billing_route distinguishing per-use API from subscription quota, and never converts either into a single per-token price or replaces the numeric facts. Omitting all cost facts records the cost as unknown: unknown does not by itself block the recommendation and is never treated as free.\n"
-      text << "Submit one JSON object or an array with: orbit model-evidence #{@record.path} --file -\n"
+      pending.dig("identities", "candidates").each do |identity|
+        agent = identity["agent"] ? "#{identity['agent']}: " : "candidate (#{identity['kind']}): "
+        text << "- #{agent}#{format_identity(identity)}\n"
+      end
+      text << (root ? "Legacy comparison needs the Root and every listed member identity; submit all exact identities together. " :
+                      "Submit any one candidate first; each exact pool identity is judged independently. ")
+      text << "Copy reasoning and billing_route as shown: omission means provider default/unknown route, NOT " \
+              "reasoning: unknown. When the request shows reasoning: unknown, submit \"reasoning\":\"unknown\" explicitly.\n"
+      text << "Needed: sourced task-relevant quality and end-to-end time (member work, handoff, rework, Root integration and verification), " \
+              "plus speed, cost or local samples when verifiable; each metric needs a real source URL, retrieval time and validity. " \
+              "Do not treat context window, pricing, or tokens/s alone as evidence of quality or end-to-end time. " \
+              "For unavailable facts, submit status=unavailable with the reason; never invent metrics.\n"
+      text << "Cost may use route-matched cost.* (direct_api) or quota.* (subscription_quota), or a sourced cost_tier " \
+              "{band: low|medium|high, confidence: low|medium|high, basis: explanation}. Unknown cost is not free; " \
+              "do not equate subscription quota with per-token API pricing.\n"
+      default_model = @connection.respond_to?(:default_member_model) ? native_member_model.to_s : ""
+      default_role = default_model.empty? ? "the current OMP @task role model" : "OMP @task model #{default_model}"
+      text << "A high delegatable score or this request is not a Jev recommendation. Continue your own work. "
+      if root
+        text << "Generic agent=task uses #{default_role}; no current pool Agent list is available. " \
+                "Only a delivered delegation_hint can justify saying Jev recommended a model.\n"
+      else
+        text << "You can select an available pool Agent without waiting for Jev; record that as your choice, not as a Jev hint. " \
+                "Generic agent=task uses #{default_role}; when that model is outside an available candidate pool, " \
+                "controlled dispatch rejects it and lists the selectable pool Agents. " \
+                "Only a delivered delegation_hint can justify saying Jev recommended a model.\n"
+      end
+      text << "Submit #{root ? 'a complete JSON array' : 'one JSON object or a partial array'}: " \
+              "orbit model-evidence #{@record.path} --file -\n"
       sent = @connection.send_message(text)
       @state["sent_message_ids"] << sent.fetch("id")
       @state["evidence_requests"][pending.fetch("signature")] = {
@@ -1875,15 +2170,45 @@ module Orbit
       score + "Dispatch one layer with native task; the registration gate records the actual id."
     end
 
-    def delegation_basis
+    def current_delegation_hint
       hint = @state["delegation_hint"]
-      return "root_without_hint" unless hint.is_a?(Hash) && !hint.empty? && hint["followed"] != true
-      return "root_without_hint" if hint["invalid_reason"]
+      return nil unless hint.is_a?(Hash) && !hint.empty? && hint["followed"] != true && !hint["invalid_reason"]
 
       signature = delegation_signature(fingerprint_artifact, delegation_options)
-      hint["signature"] == signature ? "orbit_hint" : "root_without_hint"
+      hint if hint["signature"] == signature
     rescue WorkspaceSnapshot::Error
-      "root_without_hint"
+      nil
+    end
+
+    def recommended_member_model?(hint, model)
+      return false unless model.is_a?(String) && !model.empty?
+
+      recommendation = hint["recommendation"]
+      first = recommendation["first"]
+      return true if first.is_a?(Hash) && first["model"] == model
+
+      Array(recommendation["backups"]).any? { |candidate| candidate.is_a?(Hash) && candidate["model"] == model }
+    end
+
+    def delegation_basis(member = nil, hint: current_delegation_hint)
+      return "root_without_hint" unless hint
+      return "root_without_hint" if hint["recommendation"] && !recommended_member_model?(hint, member&.dig("model"))
+
+      "orbit_hint"
+    end
+
+    def confirm_pending_member_hint(member)
+      signature = member["pending_hint_signature"]
+      return false unless signature && member["model"].is_a?(String) && !member["model"].empty?
+
+      member.delete("pending_hint_signature")
+      hint = @state["delegation_hint"]
+      if hint.is_a?(Hash) && hint["signature"] == signature && hint["followed"] != true &&
+         !hint["invalid_reason"] && recommended_member_model?(hint, member["model"]) && !member["model_drift"]
+        member["delegation_basis"] = "orbit_hint"
+        mark_delegation_hint_followed(member)
+      end
+      true
     end
 
     def mark_delegation_hint_followed(member)
@@ -1892,7 +2217,8 @@ module Orbit
 
       hint["followed"] = true
       hint["followed_kind"] = member["kind"]
-      @record.event("delegation_hint_followed", "kind" => member["kind"], "thread_id" => member["thread_id"])
+      @record.event("delegation_hint_followed", "kind" => member["kind"], "thread_id" => member["thread_id"],
+                    "model" => member["model"])
     end
 
     # OMP 18.2.8 AgentRegistry.register defaults to running. idle is also the
@@ -1912,7 +2238,9 @@ module Orbit
       end
       registry_status = observed.is_a?(Hash) ? observed["registry_status"] : nil
       result = @connection.member_result(member["thread_id"])
-      save if apply_native_member_observation!(member, registry_status, result, observed)
+      observed_change = apply_native_member_observation!(member, registry_status, result, observed)
+      hint_change = confirm_pending_member_hint(member)
+      save if observed_change || hint_change
     rescue StandardError => error
       member["bridge_error"] = error.message
       @record.event("native_member_bridge_failed", "thread_id" => member["thread_id"], "error" => error.message)
@@ -2108,6 +2436,64 @@ module Orbit
       true
     end
 
+    # A native reply to another user question does not become this task's
+    # delivery. Older host doubles omit the origin field; the installed OMP
+    # bridge supplies it, and an unprovable origin is never auto-attributed.
+    def task_turn_attributed?(host)
+      return true unless host.key?("last_turn_user_message_id")
+
+      id = host["last_turn_user_message_id"]
+      return false if id.nil?
+
+      id == @state.dig("instruction_source", "id") ||
+        @state.fetch("sent_message_ids").include?(id) ||
+        @state.fetch("amendments").any? { |amendment| amendment.dig("source", "id") == id }
+    end
+
+    def record_task_delivery(host)
+      return unless task_turn_attributed?(host) && host["last_turn_id"]
+      return if @state.dig("task_delivery", "turn_id") == host["last_turn_id"]
+
+      text = Array(host["observations"]).reverse.find { |entry| entry.is_a?(Hash) && entry["kind"] == "agent_message" }
+      answer = text && text["text"].to_s
+      input_digest = @record.input_digest(@state)
+      digest = fingerprint_artifact
+      previous = @state["task_delivery"]
+      prior_turns = if previous.is_a?(Hash) && previous["input_digest"] == input_digest &&
+                       previous["artifact_root"] == artifact_root && previous["artifact_digest"] == digest
+                      (Array(previous["prior_turns"]) + [previous.slice("turn_id", "text")]).last(3)
+                    else
+                      []
+                    end
+      @state["task_delivery"] = {
+        "turn_id" => host["last_turn_id"], "input_digest" => input_digest,
+        "artifact_root" => artifact_root, "artifact_digest" => digest,
+        "observation" => ObservationKey.host_material(host), "prior_turns" => prior_turns,
+        "text" => answer && "#{answer[0, 4000]}#{answer.length > 4000 ? "…[#{answer.length}:#{Digest::SHA256.hexdigest(answer)}]" : ""}"
+      }
+      save
+    end
+
+    def task_observation_host(host, input_digest)
+      delivery = @state["task_delivery"]
+      return host unless delivery.is_a?(Hash) && delivery["input_digest"] == input_digest &&
+                         delivery["artifact_root"] == artifact_root &&
+                         delivery["observation"].is_a?(Hash)
+
+      observed = delivery["observation"]
+      { "status" => host["status"], "last_turn_id" => observed["last_turn_id"],
+        "last_turn_status" => observed["last_turn_status"], "observations" => observed["observations"] }
+    end
+
+    def task_delivery_for(snapshot, input_digest)
+      delivery = @state["task_delivery"]
+      return nil unless delivery.is_a?(Hash) && delivery["input_digest"] == input_digest &&
+                        delivery["artifact_root"] == artifact_root &&
+                        delivery["artifact_digest"] == snapshot["digest"]
+
+      delivery.slice("turn_id", "text", "prior_turns", "input_digest", "artifact_digest")
+    end
+
     def start_check(host, now, kind: "artifact", trigger:, manual: false)
       role = @state["dispute"] ? "adjudicator" : kind == "process" ? "process_reviewer" : "reviewer"
       digest = fingerprint_artifact
@@ -2133,7 +2519,8 @@ module Orbit
       end
       key = ObservationKey.build(
         input_digest: input_digest, artifact_root: artifact_root, artifact_digest: digest,
-        host: host, findings: @state.fetch("findings"), dispute: @state["dispute"],
+        host: kind == "artifact" ? task_observation_host(host, input_digest) : host,
+        findings: @state.fetch("findings"), dispute: @state["dispute"],
         trigger: { "kind" => kind, "role" => role }
       )
       prior = @state.fetch("check_observations")[key]
@@ -2167,6 +2554,10 @@ module Orbit
         project_root: artifact_root, destination: File.join(directory, "workspace")
       )
       clues = role == "reviewer" ? @state["recheck"] : nil
+      task_git = kind == "artifact" ? TaskGitEvidence.capture(
+        workspace: artifact_root, baseline_head: @state.dig("workspace", "artifact", "head"),
+        snapshot_head: snapshot["git_head"]
+      ) : nil
       scope = {
         "number" => number, "role" => role, "kind" => kind, "artifact_root" => artifact_root,
         "observation_key" => key, "trigger_cause" => trigger, "manual" => manual,
@@ -2178,7 +2569,9 @@ module Orbit
       @checker.start(
         directory: snapshot.fetch("snapshot_path"), inputs: @record.inputs(@state),
         context: {
-          "root" => host, "findings" => @state.fetch("findings"),
+          "root" => host.merge("last_turn_task_attributed" => task_turn_attributed?(host)),
+          "task_delivery" => task_delivery_for(snapshot, input_digest),
+          "task_git" => task_git, "findings" => @state.fetch("findings"),
           "recent_events" => recent_events, "recheck" => clues,
           "execution_members" => @state["members"],
           "decisions" => @state.fetch("decisions"), "dispute" => @state["dispute"],
@@ -2521,6 +2914,8 @@ module Orbit
                       "artifact_digest" => current_digest, "input_digest" => scope["input_digest"])
       end
       notify_finalization_ready(scope, result, host, current_digest, now)
+      remind_manual_final_check(scope, result, host, current_digest, now)
+      retire_overturned_readiness(scope, result, current_digest)
       if scope["role"] == "adjudicator"
         # The decision binds the exact versions it judged so later checks can
         # tell reopened evidence from re-raised wording; `result` stays for
@@ -2561,6 +2956,61 @@ module Orbit
         send_correction(result.merge("findings" => accepted_findings), scope: scope, current_digest: current_digest) if host["status"] == "idle" && !accepted_findings.empty?
       end
       save
+    end
+
+    # The current fixed artifact can disprove an older manual not_ready
+    # conclusion. Retire that reason in durable state, but never grant a
+    # finalization notice from an adjudicator or an automatic reviewer.
+    def retire_overturned_readiness(scope, result, current_digest)
+      ready = @state["completion_readiness"]
+      return unless ready.is_a?(Hash) && ready["status"] == "not_ready"
+      return unless scope["kind"] == "artifact" && ready["input_digest"] == scope["input_digest"] &&
+                    ready["artifact_root"] == scope["artifact_root"] &&
+                    ready["artifact_digest"] == current_digest
+      return unless %w[complete continue].include?(result.fetch("verdict")) &&
+                    result.fetch("delivery").fetch("ready") && result.fetch("findings").empty? &&
+                    @state["recheck"].nil? &&
+                    @state["findings"].values.none? { |finding| finding["status"] == "open" }
+
+      origin = scope["role"] == "adjudicator" ? "争议裁定" : "后续独立检查"
+      @state["completion_readiness"] = {
+        "status" => "review_needed", "reason" => "#{origin}确认交付已存在；仍须当前版本的有效手动终检",
+        "artifact_root" => scope["artifact_root"], "artifact_digest" => current_digest,
+        "input_digest" => scope["input_digest"]
+      }
+      @record.event("delivery_not_ready_overturned", "check" => scope["number"],
+                    "role" => scope["role"], "artifact_digest" => current_digest,
+                    "input_digest" => scope["input_digest"])
+    end
+
+    # A clean automatic review can confirm the current delivery is inspectable,
+    # but never grants completion. Wake an idle Root once per version to request
+    # the required manual final check instead of leaving a delivered task
+    # running indefinitely. Findings and unfinished member work take priority.
+    def remind_manual_final_check(scope, result, host, current_digest, now)
+      return unless scope["kind"] == "artifact" && scope["role"] == "reviewer" && !scope["manual"]
+      return unless %w[continue complete].include?(result.fetch("verdict"))
+      return unless result.fetch("findings").empty? && result.fetch("delivery").fetch("ready")
+      return unless @state["recheck"].nil? && @state["findings"].values.none? { |finding| finding["status"] == "open" }
+      return unless members_settled? && host["status"] == "idle" && host["last_turn_status"] == "completed"
+      return if @state["next_check_manual"] || @state["pending_finalization"]
+
+      delivery = @state["task_delivery"]
+      return unless delivery.is_a?(Hash) && delivery["input_digest"] == scope["input_digest"] &&
+                    delivery["artifact_root"] == scope["artifact_root"] &&
+                    delivery["artifact_digest"] == current_digest
+
+      key = Digest::SHA256.hexdigest(JSON.generate([scope["artifact_root"], scope["input_digest"], current_digest]))
+      @state["manual_check_reminders"] ||= {}
+      return if @state["manual_check_reminders"][key]
+
+      sent = @connection.send_message("Orbit 过程检查未发现当前交付缺口，但这不是手动终检，也不是任务完成。" \
+                                      "请当前助手调用 Orbit action=check, task=<当前任务目录>，结束本轮等待独立终检；" \
+                                      "收到有效通知后再申请停止。无需用户重复催办。")
+      @state["sent_message_ids"] << sent.fetch("id")
+      @state["manual_check_reminders"][key] = { "check" => scope["number"], "message_id" => sent.fetch("id"),
+                                                "at" => Time.at(now).utc.iso8601 }
+      @record.event("manual_final_check_reminded", "check" => scope["number"], "version" => current_digest)
     end
 
     # A valid manual reviewer conclusion (`continue`, `correct`, or `complete`
@@ -2608,7 +3058,8 @@ module Orbit
       @state.delete("pending_finalization")
       unless @state["finalization_notices"][key]
         text = "Orbit 最终检查通知（不是用户的新要求）：这次检查没有发现待解决的问题，但任务尚未完成。" \
-               "如果实现和本地验证已经完成，当前助手请调用 Orbit stop 申请完成，再正常结束本轮回复。" \
+               "如果实现和本地验证已经完成，当前助手请调用本会话的 Orbit 工具 action=stop, intent=complete, task=<当前任务目录>，再正常结束本轮回复。" \
+               "不要运行 shell/CLI 的 orbit stop：它只会暂停任务，已暂停任务不能再申请完成。" \
                "Orbit 会在回复结束后核对当前文件、要求和协作成员，确认停止后才记录完成；" \
                "若检查后又有改动，先重新检查。不要只凭这条通知宣称任务完成。"
         sent = @connection.send_message(text)

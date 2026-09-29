@@ -107,7 +107,8 @@ module OmpCliCheckerTest
                  JSON.generate("schema_version" => "orbit-model-candidates-v1", "models" => ["pool/one"]))
       cache_path = File.join(tmp, "xdg-cache", "orbit", "model-evidence-v1.json")
       Orbit::ModelEvidenceCache.new(path: cache_path).record_all([{
-        "provider" => "pool", "model" => "one", "billing_route" => "unknown", "status" => "evidence",
+        "provider" => "pool", "model" => "one", "reasoning" => "unknown", "billing_route" => "unknown",
+        "status" => "evidence",
         "retrieved_at" => Time.now.utc.strftime("%Y-%m-%dT%H:%M:%SZ"),
         "sources" => ["https://example.test/models/pool-one"],
         "metrics" => { "quality.score" => { "value" => 9.0, "unit" => "score", "basis" => "vendor benchmark" } },
@@ -124,7 +125,7 @@ module OmpCliCheckerTest
       fake_advisor.define_singleton_method(:assess_checker_quality) do |state:, candidates:|
         seen_instruction = state["instruction"]
         sleep(0.02)
-        { "model" => "jev-test", "question_set_version" => "jev-checker-task-fit-1",
+        { "model" => "jev-test",
           "scores" => candidates.to_h { |c| [c["model"], { "quality" => 0.03, "time" => 0.8 }] },
           "usage" => { "total_tokens" => 42, "note" => "ignored non-numeric" } }
       end
@@ -208,11 +209,12 @@ module OmpCliCheckerTest
       assert(status == 0 && state.dig("review", "model") == "pool/one" &&
              state.dig("review", "selection", "basis") == "pool_order_unknown_fit",
              "an unknown task fit uses a runnable pool model, not the outside default or user selection")
-      assert(start_response["evidence_needed"] == [{ "model" => "pool/one", "status" => "absent" }] &&
+      assert(start_response["evidence_needed"] == [{ "model" => "pool/one", "reasoning" => "unknown",
+                                                      "billing_route" => "unknown", "status" => "absent" }] &&
              start_response["evidence_action"].include?("orbit model-evidence --file -") &&
              start_response["evidence_action"].include?("不传任务目录") &&
-             start_response["evidence_action"].include?("reasoning 未知可省略"),
-             "start asks Root to obtain exact facts with the checker-specific taskless submission")
+             start_response["evidence_action"].include?("显式提交 reasoning: unknown"),
+             "start requires the checker's exact unknown identity, not the provider default")
     end
   end
 
@@ -336,9 +338,10 @@ module OmpCliCheckerTest
         previous_cache ? ENV["XDG_CACHE_HOME"] = previous_cache : ENV.delete("XDG_CACHE_HOME")
       end
       candidate = report.fetch("candidates").fetch(0)
-      assert(candidate["model"] == "kimi-code/k3-256k" && candidate["evidence_status"] == "absent" &&
-             candidate["evidence_detail"].include?("the cache holds kimi-code/k3 under provider kimi-code"),
-             "the near-variant evidence mismatch is named with the exact identity")
+      assert(candidate["model"] == "kimi-code/k3-256k" && candidate["reasoning"] == "unknown" &&
+             candidate["billing_route"] == "unknown" && candidate["evidence_status"] == "absent" &&
+             candidate["evidence_detail"].include?("kimi-code/k3 (reasoning: default, billing_route: unknown)"),
+             "the near-variant and provider-default mismatch are named without treating them as checker evidence")
       assert(report["session_catalog"] == "not_provided" && candidate["in_session"].nil? &&
              candidate["quality"] == "not_judged" && candidate["isolated_probe"] == "not_probed",
              "nothing is guessed: unprovided session and unjudged candidates are marked as such")

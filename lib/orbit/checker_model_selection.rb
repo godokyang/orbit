@@ -10,7 +10,7 @@ module Orbit
   # judgment never turns a runnable, user-pooled model into an unusable one.
   # Missing facts remain unknown rather than fabricated quality evidence.
   module CheckerModelSelection
-    DECISION_VERSION = "orbit-checker-selection-v4"
+    DECISION_VERSION = "orbit-checker-selection-v5"
 
     NO_TIME_COST_EVIDENCE = "no time/cost facts were available and none were invented"
 
@@ -49,19 +49,18 @@ module Orbit
       normalize(pool).select { |model| available.include?(model) }
     end
 
-    # Bounded, per-candidate cache evidence for the JEV quality judgment. Only
-    # entries that match the exact provider/model and pass the structural rules
-    # below (valid status, timestamps, sources and metrics) are used; the newest
-    # retrieved_at wins. Returns { model => bounded evidence }. It never invents
-    # facts and never reads or returns credentials.
+    # A checker catalog exposes provider/id but not reasoning effort or billing
+    # route. Use the explicit unknown identity, never a provider-default entry
+    # or another billing route, until that information is actually observable.
+    # Returns { model => bounded evidence }. It never invents facts or
+    # credentials.
     def cached_evidence(models:, entries:, now:, max_sources: EVIDENCE_MAX_SOURCES, max_metrics: EVIDENCE_MAX_METRICS)
       return {} unless entries.is_a?(Array)
 
       normalize(models).each_with_object({}) do |model, out|
         provider, id = model.split("/", 2)
         candidates = entries.select do |entry|
-          entry.is_a?(Hash) && entry["provider"].to_s == provider && entry["model"].to_s == id &&
-            valid_evidence_entry?(entry, now)
+          exact_identity?(entry, provider, id) && valid_evidence_entry?(entry, now)
         end
         next if candidates.empty?
 
@@ -70,13 +69,15 @@ module Orbit
       end
     end
 
+    def exact_identity?(entry, provider, id)
+      entry.is_a?(Hash) && entry["provider"] == provider && entry["model"] == id &&
+        entry["reasoning"] == "unknown" && entry.fetch("billing_route", "unknown") == "unknown"
+    end
+
     # Read-only classification of one candidate's cached evidence for
-    # diagnostics (ADR-009 2026-09-27 supplement). Only the exact
-    # provider/model identity counts; the recurring failure is evidence
-    # submitted for a near-variant identity (kimi-code/k3 for
-    # kimi-code/k3-256k), so a factual list of same-provider identities held
-    # in the cache is part of the "absent" detail. Statuses report what was
-    # actually checked and never guess:
+    # diagnostics. A matching provider/model with another reasoning or route
+    # is related evidence, not valid evidence for the unknown checker identity.
+    # Statuses report what was actually checked:
     #
     #   valid       an exact-identity entry passes every structural rule and
     #               is inside its validity window (same test the selector
@@ -89,22 +90,27 @@ module Orbit
     def evidence_status(model:, entries:, now:, max_related: 3)
       provider, id = model.split("/", 2)
       exact = []
-      related = []
+      same_model = []
+      other_models = []
       Array(entries).each do |entry|
-        next unless entry.is_a?(Hash) && entry["provider"].to_s == provider
+        next unless entry.is_a?(Hash) && entry["provider"] == provider
 
-        if entry["model"].to_s == id
+        if exact_identity?(entry, provider, id)
           exact << entry
         else
-          identity = "#{entry['provider']}/#{entry['model']}"
+          identity = "#{entry['provider']}/#{entry['model']} " \
+                     "(reasoning: #{entry.fetch('reasoning', 'default')}, billing_route: #{entry.fetch('billing_route', 'unknown')})"
+          related = entry["model"] == id ? same_model : other_models
           related << identity if related.length < max_related && !related.include?(identity)
         end
       end
+      related = (same_model + other_models).first(max_related)
       if exact.empty?
         detail = if related.empty?
-                   "no cached entry for this exact identity"
+                   "no cached entry for this exact identity (reasoning: unknown, billing_route: unknown)"
                  else
-                   "no cached entry for this exact identity; the cache holds #{related.join(', ')} under provider #{provider}"
+                   "no cached entry for this exact identity (reasoning: unknown, billing_route: unknown); " \
+                     "the cache holds #{related.join(', ')} under provider #{provider}"
                  end
         return { "status" => "absent", "detail" => detail }
       end

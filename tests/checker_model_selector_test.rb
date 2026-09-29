@@ -4,6 +4,7 @@ require "stringio"
 require "tmpdir"
 require "time"
 require_relative "../lib/orbit/checker_model_selector"
+require_relative "../lib/orbit/task_view"
 
 # OMP availability permits models; the pool is preference. JEV still ranks
 # current-task fit and unknown/low scores remain an explicitly marked fallback.
@@ -35,6 +36,28 @@ module CheckerModelSelectorTest
       entries
     end
   end
+  class FakeOverview
+    attr_reader :refreshes
+
+    def initialize(states = {})
+      @states = states
+      @refreshes = 0
+    end
+
+    def refresh(project_root:)
+      @refreshes += 1
+      { "status" => "fresh" }
+    end
+
+    def status(project_root:)
+      { "status" => @states.values.any? { |entry| entry["status"] == "fresh" } ? "fresh" : "not_configured" }
+    end
+
+    def lookup(model:, reasoning:, billing_route:, project_root:)
+      @states.fetch(model, { "status" => "not_configured" })
+    end
+  end
+
 
   class FakeAdvisor
     attr_reader :calls
@@ -48,7 +71,7 @@ module CheckerModelSelectorTest
       @calls += 1
       @state = state
       @candidates = candidates
-      { "provider" => "typesafe", "model" => "jev-test", "question_set_version" => "jev-checker-task-fit-1",
+      { "provider" => "typesafe", "model" => "jev-test",
         "scores" => @scores, "usage" => { "input" => 7, "output" => 3 } }
     end
     attr_reader :state, :candidates
@@ -95,7 +118,8 @@ module CheckerModelSelectorTest
   def entry(model, cost_band: nil, valid_until: "2026-12-01T00:00:00Z")
     provider, id = model.split("/", 2)
     value = {
-      "provider" => provider, "model" => id, "reasoning" => "default", "status" => "evidence",
+      "provider" => provider, "model" => id, "reasoning" => "unknown", "billing_route" => "unknown",
+      "status" => "evidence",
       "retrieved_at" => "2026-09-01T00:00:00Z", "valid_until" => valid_until,
       "sources" => ["https://example.com/facts"],
       "metrics" => { "quality_reasoning" => { "value" => 1, "unit" => "bool", "basis" => "local sample" } }
@@ -104,11 +128,12 @@ module CheckerModelSelectorTest
     value
   end
 
-  def selector(pool:, catalog:, entries:, advisor:, probe:, default_model: "session/default", project_root: "/tmp")
+  def selector(pool:, catalog:, entries:, advisor:, probe:, default_model: "session/default", project_root: "/tmp",
+               overview: FakeOverview.new)
     Orbit::CheckerModelSelector.new(
       connection: FakeConnection.new(catalog, default_model), project_root: project_root,
       pool: FakePool.new(pool), evidence_cache: FakeEvidence.new(entries),
-      advisor: advisor, probe: probe, clock: -> { Time.utc(2026, 9, 25) }
+      advisor: advisor, probe: probe, clock: -> { Time.utc(2026, 9, 25) }, overview: overview
     )
   end
 
@@ -169,7 +194,7 @@ module CheckerModelSelectorTest
     model, first = built.select(explicit: nil, instruction: "build it")
     assert(model == "a/one" && first["source"] == "candidate_pool", "the first selection judges and records")
     assert(first["judgment_provider"] == "typesafe" && first["judgment_model"] == "jev-test" &&
-           first["question_set_version"] == "jev-checker-task-fit-1" && first.dig("usage", "input") == 7 &&
+           first.dig("usage", "input") == 7 &&
            first.dig("task_fit_scores", "a/one", "quality") == 0.9 &&
            first.dig("judgment_state", "instruction") == "build it",
            "the recorded checker decision retains judgment provenance and usage")
@@ -210,9 +235,85 @@ module CheckerModelSelectorTest
                        .select(explicit: nil, instruction: "build it")
     assert(model == "a/one" && selection["selection_tier"] == "fallback" &&
            selection["quality_score"].nil? && selection["unscored_candidates"] == ["a/one"] &&
-           selection["evidence_needed"] == [{ "model" => "a/one", "status" => "absent" }],
+           selection["evidence_needed"] == [{ "model" => "a/one", "reasoning" => "unknown",
+                                               "billing_route" => "unknown", "status" => "absent" }],
            "a runnable model still starts and tells Root exactly which model needs real evidence")
     assert(advisor.calls.zero?, "Jev is not asked to guess without candidate evidence")
+  end
+
+  def mapped_overview_ranks_a_runnable_checker_without_claiming_route_time
+    prior = { "canonical_slug" => "moonshotai/kimi-k3-20260715",
+              "coding_index" => 76.2, "agentic_index" => 50.0,
+              "fetched_at" => "2026-09-25T00:00:00Z",
+              "sources" => ["https://www.kimi.com/code/docs/en/kimi-code/models.html"],
+              "reasoning_note" => "推理变体未核实" }
+    overview = FakeOverview.new("kimi-code/k3-256k" => { "status" => "fresh", "prior" => prior })
+    advisor = FakeAdvisor.new("kimi-code/k3-256k" => { "quality" => 0.82, "time" => 0.99 })
+    models = ["a/unmapped", "kimi-code/k3-256k"]
+    built = selector(pool: models, catalog: catalog_for(models), entries: [],
+                     advisor: advisor, probe: FakeProbe.new(models), overview: overview)
+    chosen, selection = built.select(explicit: nil, instruction: "Review a bounded coding change")
+    assert(chosen == "kimi-code/k3-256k" && selection["quality_basis"] == "model_overview_prior" &&
+           selection["quality_score"] == 0.82 && selection["time_score"].nil? &&
+           selection["selection_tier"] == "fallback" &&
+           selection["time_tier"].nil? && selection["cost_tier"].nil?,
+           "a sourced model-level quality prior can improve checker order without inventing route time or cost")
+    assert(Orbit::TaskView.checker_model_line("review" => { "model" => chosen, "selection" => selection })
+                  .include?("当前路由与推理变体未核实，端到端时间未知"),
+           "the user-facing checker status identifies the model-level prior's route and time limits")
+    assert(advisor.candidates == [{ "model" => "kimi-code/k3-256k", "model_overview_prior" => prior }] &&
+           selection["evidence_needed"].map { |request| request["model"] } == models,
+           "Jev receives only the mapped prior; missing exact route facts still reach Root")
+    before = overview.refreshes
+    status = built.candidate_statuses
+    coverage = status["candidates"].to_h { |item| [item["model"], item] }
+    assert(overview.refreshes == before && status.dig("model_overview", "status") == "fresh" &&
+           coverage.dig("kimi-code/k3-256k", "model_overview") == "fresh",
+           "read-only status exposes overview coverage and external-fetch state without another API refresh")
+  end
+
+  def exact_checker_facts_take_precedence_over_a_model_level_prior
+    prior = { "canonical_slug" => "moonshotai/kimi-k3-20260715",
+              "coding_index" => 76.2, "agentic_index" => 50.0, "fetched_at" => "2026-09-25T00:00:00Z",
+              "sources" => ["https://www.kimi.com/code/docs/en/kimi-code/models.html"],
+              "reasoning_note" => "推理变体未核实" }
+    model = "kimi-code/k3-256k"
+    advisor = FakeAdvisor.new(model => { "quality" => 0.91, "time" => 0.75 })
+    _, selection = selector(pool: [model], catalog: catalog_for([model]), entries: [entry(model)],
+                            advisor: advisor, probe: FakeProbe.new([model]),
+                            overview: FakeOverview.new(model => { "status" => "fresh", "prior" => prior }))
+                   .select(explicit: nil, instruction: "Review the change")
+    assert(advisor.candidates.first.key?("evidence") &&
+           !advisor.candidates.first.key?("model_overview_prior") &&
+           selection["quality_basis"] == "exact_model_evidence" &&
+           selection["time_tier"] == "fast" && selection["evidence_needed"].empty?,
+           "valid exact route facts alone determine Jev input and keep their time/cost semantics")
+  end
+
+  def checker_rejects_default_reasoning_and_another_billing_route
+    entries = %w[a/older a/nearby a/other].map { |model| entry(model) }
+    entries << entry("a/one").merge("reasoning" => "default")
+    entries << entry("a/one").merge("billing_route" => "direct_api")
+    advisor = FakeAdvisor.new({ "a/one" => { "quality" => 0.9, "time" => 0.8 } })
+    built = selector(pool: ["a/one"], catalog: catalog_for(["a/one"]), entries: entries,
+                     advisor: advisor, probe: FakeProbe.new(["a/one"]))
+    model, initial = built.select(explicit: nil, instruction: "build it")
+    assert(model == "a/one" && initial["selection_tier"] == "fallback" &&
+           initial["evidence_needed"] == [{ "model" => "a/one", "reasoning" => "unknown",
+                                            "billing_route" => "unknown", "status" => "absent" }] &&
+           advisor.calls.zero?,
+           "other reasoning and billing routes do not supply checker quality evidence")
+    status = built.candidate_statuses["candidates"].first
+    assert(status["evidence_status"] == "absent" &&
+           status["evidence_detail"].include?("a/one (reasoning: default, billing_route: unknown)") &&
+           status["evidence_detail"].include?("a/one (reasoning: unknown, billing_route: direct_api)"),
+           "read-only diagnostics show the same-model identity mismatch ahead of unrelated cached models")
+
+    entries << entry("a/one")
+    _, updated = built.select(explicit: nil, instruction: "build it", previous: initial, selected_for: "before_check")
+    assert(updated["selection_tier"] == "preferred" && updated["quality_score"] == 0.9 &&
+           updated["evidence_needed"].empty? && advisor.calls == 1,
+           "a sourced fact under the requested identity is judged before the next check")
   end
 
   def near_variant_evidence_does_not_fabricate_a_score
@@ -223,7 +324,8 @@ module CheckerModelSelectorTest
                        .select(explicit: nil, instruction: "build it")
     assert(model == "kimi-code/k3-256k" && selection["task_fit_scores"].empty? &&
            selection["quality_sources"].empty? && advisor.calls.zero? &&
-           selection["evidence_needed"] == [{ "model" => "kimi-code/k3-256k", "status" => "absent" }],
+           selection["evidence_needed"] == [{ "model" => "kimi-code/k3-256k", "reasoning" => "unknown",
+                                               "billing_route" => "unknown", "status" => "absent" }],
            "near-variant evidence is not transferred, and Root is asked for the exact candidate")
   end
 
@@ -267,7 +369,8 @@ module CheckerModelSelectorTest
                                 advisor: advisor, probe: FakeProbe.new(%w[b/expired c/valid]))
                        .select(explicit: nil, instruction: "build it")
     assert(model == "c/valid" && selection["selection_tier"] == "preferred" &&
-           selection["evidence_needed"] == [{ "model" => "b/expired", "status" => "expired" }],
+           selection["evidence_needed"] == [{ "model" => "b/expired", "reasoning" => "unknown",
+                                               "billing_route" => "unknown", "status" => "expired" }],
            "Root is asked only for missing or expired facts that could change the runnable pool ordering")
   end
 
@@ -386,6 +489,9 @@ module CheckerModelSelectorTest
        changed_pool_reselects_before_the_next_check
        end_to_end_time_orders_the_qualified_candidates
        no_valid_evidence_still_selects_a_runnable_pool_model
+       mapped_overview_ranks_a_runnable_checker_without_claiming_route_time
+       exact_checker_facts_take_precedence_over_a_model_level_prior
+       checker_rejects_default_reasoning_and_another_billing_route
        near_variant_evidence_does_not_fabricate_a_score
        low_score_selects_without_claiming_verified_quality
        unavailable_task_fit_judgment_uses_pool_order

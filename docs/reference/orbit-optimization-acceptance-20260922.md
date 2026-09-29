@@ -1,5 +1,7 @@
 # Orbit 优化真实验收计划（2026-09-22）
 
+> 类型：历史证据／研究，按标题及正文记录的日期、版本和配置解读。下文“当前”“本轮”及旧规则不代表现行行为或授权；当前状态见[交接](../plan/handoff.md)，现行语义见[任务合同](../../contracts/task-runtime.md)。
+
 状态：**已运行主链路、小任务与 worktree 路径，并追加严格的 Herdr → `orbit codex` 复验；0.6.12 针对“误读 JEV 最终结论、终检轮询导致 stale、rebind 等待冲突”的复验通过，未覆盖分支仍单列，不把整份矩阵写成全绿**。早期任务位于 `/tmp/orbit-real-acceptance-byaSzI`，0.6.11 严格 Skill 复验位于 `/tmp/orbit-skill-retest-Dm4AwQ`，0.6.12 复验位于 `/tmp/orbit-0.6.12-real-xfUmZe`，均未在 Orbit 仓库自举。
 
 现行语义以 [任务运行合同](../../contracts/task-runtime.md) 为准。实现与确定性回归已经完成；本文件只证明真实路径有没有跑过。

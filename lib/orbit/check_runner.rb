@@ -69,8 +69,8 @@ module Orbit
       "decision findings dropped"
     ].freeze
     CONTEXT_KEYS = %w[
-      root review_focus findings recent_events recheck execution_members decisions dispute estimate hard_deadline
-      elapsed_seconds project_rules uncopied_entries
+      root task_delivery task_git review_focus findings recent_events recheck execution_members decisions dispute
+      estimate hard_deadline elapsed_seconds project_rules uncopied_entries
     ].freeze
     CONTEXT_FINDING_FIELDS = %w[id requirement evidence action status check].freeze
     # review_focus is a current-input clue from the fixed snapshot diff, not
@@ -300,6 +300,9 @@ module Orbit
 
     def build_compressed_context(context, caps, level)
       compressed = { "root" => compress_root(context["root"], caps) }
+      compressed["task_delivery"] = bound_value(context["task_delivery"], caps,
+                                                  string_cap: [caps[:string_cap], CONTEXT_DELIVERY_TEXT_CAP].max)
+      compressed["task_git"] = compress_task_git(context["task_git"], caps)
       focus, focus_omitted = compress_review_focus(context["review_focus"], caps)
       unless focus.nil?
         compressed["review_focus"] = focus
@@ -347,14 +350,23 @@ module Orbit
       end
     end
 
-    # The newest agent_message observation is the Root's actually delivered
-    # answer text and the checker's delivery evidence for text-only tasks, so
-    # it keeps a wider verbatim prefix; every other observation stays at the
-    # ordinary string cap.
+    # Agent messages are potential delivery evidence for text-only tasks. A
+    # later unrelated turn is not task delivery; the runtime supplies the
+    # version-matched task_delivery separately when available.
     def bound_observation(entry, caps)
       return bound_value(entry, caps) unless entry.is_a?(Hash) && entry["kind"] == "agent_message"
 
       bound_value(entry, caps, string_cap: [caps[:string_cap], CONTEXT_DELIVERY_TEXT_CAP].max)
+    end
+
+    def compress_task_git(evidence, caps)
+      return bound_value(evidence, caps) unless evidence.is_a?(Hash) && evidence["changed_paths"].is_a?(Array)
+
+      bounded = bound_value(evidence.reject { |key, _| key == "changed_paths" }, caps)
+      paths = evidence["changed_paths"]
+      bounded["changed_paths"] = paths.first(caps[:list_limit]).map { |path| bound_value(path, caps) }
+      bounded["truncated"] = true if paths.length > caps[:list_limit]
+      bounded
     end
 
     # review_focus is a priority clue, not history: the runtime's bounded
@@ -623,12 +635,20 @@ module Orbit
           "delivery.ready is a separate judgment from verdict and findings, and states only whether the " \
           "task's actual deliverable is visible to you and satisfies what the instruction says must be " \
           "delivered. Never derive it from verdict: continue with no findings is not delivery readiness, " \
-          "and a Root claim, plan or promise inside the record is not a delivered answer. For a task whose " \
-          "deliverable is an answer rather than files, the delivered answer is the Root's final assistant " \
-          "message: judge delivery only from the actual agent_message text in the program record's root " \
-          "observations, and only when root.status is idle and root.last_turn_status is completed — while " \
-          "Root is executing, the newest message is partial output, not a delivered answer, and ready must " \
-          "be false with the reason naming what is not yet delivered. Verdict rules: " \
+          "and a Root claim, plan or promise inside the record is not a delivered answer. A recent Root " \
+          "turn may answer an unrelated user message: when root.last_turn_task_attributed is false, its " \
+          "agent_message is NOT this task's delivery. For an answer-only task, use a version-matched " \
+          "task_delivery when supplied. Its prior_turns are earlier completed task replies for the same " \
+          "instruction and artifact, oldest first; a later check-queue acknowledgement alone does not " \
+          "withdraw an earlier delivered answer. A later substantive correction may supersede it. If no " \
+          "task_delivery is available, use the latest completed task-related agent_message only if the " \
+          "Root turn is attributed to this task. Judge answer delivery only while root.status is idle " \
+          "and root.last_turn_status is completed. While Root executes, the newest message is partial " \
+          "output, not a delivered answer, and ready must be false. For file tasks, task_git, when available, " \
+          "lists bounded committed-path clues " \
+          "between the task baseline and snapshot HEAD; it can include unrelated commits and proves no " \
+          "ownership. Check the committed snapshot files and the full instruction, not just " \
+          "review_focus, which contains only current working-tree changes. Verdict rules: " \
           "complete only when the instruction is actually satisfied and known problems are resolved. While Root " \
           "is still executing, never " \
           "declare complete; use correct when an actionable current finding needs attention, otherwise " \
@@ -675,15 +695,19 @@ module Orbit
         "delivery.ready states whether the task's actual deliverable is visible to you at inspection " \
         "time and satisfies what the instruction says must be delivered; it is separate from verdict and " \
         "findings. ready=true always names the concrete evidence you inspected: the delivered artifact in " \
-        "the fixed snapshot for file deliverables, or the Root's actually delivered final answer text " \
+        "the fixed snapshot for file deliverables, or an actually delivered task-related Root answer " \
         "visible in the program record for answer deliverables. Never set ready=true from a Root claim, " \
         "plan or promise, and never from verdict alone: continue with no findings does not mean the " \
-        "deliverable exists. For an answer deliverable, judge only the agent_message text in root " \
-        "observations, and only when root.status is idle and root.last_turn_status is completed; a " \
-        "bounded prefix (…[length:sha256]) is verbatim evidence of what was delivered, but a part you " \
-        "cannot see cannot be confirmed. If the deliverable is not visible — Root still executing, the " \
-        "final answer not yet produced, or only an interim message present — ready must be false and " \
-        "reason must state exactly what is missing. For a requirement that work be pushed to a remote, " \
+        "deliverable exists. For an answer deliverable, judge the version-matched task_delivery when " \
+        "present; prior_turns are earlier completed replies for this exact instruction and artifact. " \
+        "A later check-queue acknowledgement alone does not withdraw an earlier delivered answer; a " \
+        "substantive correction may supersede it. Otherwise use the latest agent_message in root " \
+        "observations ONLY when root.last_turn_task_attributed is true. An answer to an unassigned " \
+        "user message is not this task's delivery. Judge readiness only when root.status is idle and root.last_turn_status is " \
+        "completed; a bounded prefix (…[length:sha256]) is verbatim evidence of " \
+        "what was delivered, but unseen text cannot be confirmed. If the deliverable is not visible — " \
+        "Root still executing, no task-related answer, or only an interim message — ready must be false " \
+        "and reason must state exactly what is missing. For a requirement that work be pushed to a remote, " \
         "the program record's git_remote facts are captured read-only by the program: status verified " \
         "means the local HEAD equals the remote reference, mismatch means the remote reference differs, " \
         "unknown means it could not be verified (network, configuration, or the instruction does not " \

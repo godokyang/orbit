@@ -81,6 +81,34 @@ module PrestartTest
            "an explicit English orbit request takes the direct path")
     assert(klass.classify("fix the orbit bug in parser.rb and add tests").nil?,
            "an orbit mention inside other work stays uncertain")
+    # Recorded misses (kickoff ①): both real Zeen requests missed the direct
+    # path and needed the user to remind or Root to start manually.
+    assert(klass.classify("可以，直接执行，直到所有任务完成，记得用orbit") == "explicit_orbit",
+           "an instrument reminder paired with a real execution order takes the direct path")
+    assert(klass.classify("请完成登录页并验证，记得用 Orbit") == "explicit_orbit",
+           "an imperative completion request with an Orbit instrument reminder starts directly")
+    assert(klass.classify("请把 NOTICE.md 中的旧句改成新句，记得用 Orbit 完成这次修改、核对文件内容并交付结果。") == "explicit_orbit",
+           "an instrument reminder followed by complete-this-work is a direct request, not a score-dependent candidate")
+    assert(klass.classify("用已更新的 Orbit 启动一条新任务，完成独立终检") == "explicit_orbit",
+           "an orbit start-up request with words between 用 and orbit still takes the direct path")
+    # Negative boundary from the same kickoff: discussion, same-name files,
+    # status-only asks, bare reminders and prohibitions never start directly.
+    assert(klass.classify("怎么理解 orbit 的受控模式？") == "discussion",
+           "discussing orbit's design never takes the direct path")
+    assert(klass.classify("修复名为 orbit 的文件").nil?,
+           "work on an orbit-named file stays off the direct path")
+    assert(klass.classify("先别动，只告诉我 orbit 当前的任务状态") == "discussion",
+           "a status-only ask never starts")
+    assert(klass.classify("下次记得用orbit").nil?,
+           "a bare orbit reminder without execution content stays off the direct path")
+    assert(klass.classify("别用orbit，这次直接做") == "orbit_opt_out",
+           "an explicit refusal to use Orbit cannot enter either automatic start path")
+    assert(klass.classify("不用Orbit，完成这个改动") == "orbit_opt_out",
+           "a direct refusal without a second 用 also bypasses automatic start")
+    assert(klass.classify("怎么用orbit实现登录页？") == "discussion",
+           "asking how to use orbit for real work is a question, not authorization")
+    assert(klass.classify("如何理解“记得用 Orbit 完成这次修改”这句话？") == "discussion",
+           "quoting the instrument instruction in a question does not start work")
     assert(klass.classify("什么是分布式锁？只是问问") == "discussion", "a read-only question never starts")
     assert(klass.classify("解释一下这段代码的结构，不要修改") == "discussion", "an explicit read-only request never starts")
     assert(klass.classify("解释一下这段代码的结构然后修复它").nil?,
@@ -150,7 +178,7 @@ module PrestartTest
       assert(spy.requests.length == 1 && spy.requests.first.model == "jev-1.13.0",
              "the judgment uses the pinned versioned model")
       trace = decision.fetch("trace")
-      assert(trace["question_set_version"] == "orbit-entry-1" && trace["actual_model"] == "jev-1.13.0" &&
+      assert(trace["question_set_version"] == "orbit-entry-2" && trace["actual_model"] == "jev-1.13.0" &&
              trace.dig("probabilities", "execution_authorized", "probability_true") == 0.9,
              "the trace records the question set, actual model and probabilities")
 
@@ -163,6 +191,36 @@ module PrestartTest
       decision = advisor.decide("implement the login page and verify it end to end")
       assert(decision["decision"] == "root_decides" && decision["reason"].include?("unavailable") &&
              spy.requests.length == 1, "an unavailable judgment fails closed to Root")
+    end
+  end
+
+  # Kickoff ②: plain imperative execution requests without an orbit mention
+  # must reach the calibrated judgment path; the revised execution_authorized
+  # question (orbit-entry-2) counts a direct imperative order as
+  # authorization. Scripted spy scores keep this deterministic — the real
+  # model's scores are verified live by Root, not asserted here.
+  def check_imperative_requests_reach_calibrated_judgment
+    with_project do |project, _home|
+      request = "补做 S1 的全程序终检：复核 W1/W2/G0/V1/R1 后再关闭 S1"
+      klass = Orbit::PrestartClassifier.new(project_root: Dir.pwd)
+      assert(klass.classify(request).nil?,
+             "a plain imperative request without an orbit mention reaches the calibrated judgment path")
+
+      advisor, spy = classifier(project, [answered(0.99, 0.99)])
+      assert(advisor.decide("别用orbit，完成这一项")["decision"] == "no_start" && spy.requests.empty?,
+             "the user's Orbit opt-out overrides even otherwise qualifying automatic work")
+
+      calibrated(project, { "execution_authorized" => 0.8, "independent_check_benefit" => 0.8 })
+      advisor, spy = classifier(project, [answered(0.81, 0.84)])
+      decision = advisor.decide(request)
+      assert(decision["decision"] == "start" && spy.requests.length == 1 &&
+             spy.requests.first.question_set_version == "orbit-entry-2",
+             "an imperative request clearing both unchanged thresholds auto-starts under the revised question set")
+
+      advisor, spy = classifier(project, [answered(0.69, 0.84)])
+      decision = advisor.decide(request)
+      assert(decision["decision"] == "root_decides" && decision["reason"].include?("did not clear"),
+             "an imperative request below the unchanged thresholds still fails closed to Root")
     end
   end
 
@@ -306,6 +364,7 @@ module PrestartTest
     check_uncertain_uses_built_in_calibration
     check_invalid_calibration_fails_closed
     check_calibrated_judgment_thresholds
+    check_imperative_requests_reach_calibrated_judgment
     check_disabled_project_never_calls_out
     check_entry_cli_idempotence_and_trace
     check_start_embeds_entry_trace

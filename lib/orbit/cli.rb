@@ -12,6 +12,7 @@ require_relative "check_runner"
 require_relative "omp_check_runner"
 require_relative "jev_advisor"
 require_relative "jev_setup"
+require_relative "openrouter_setup"
 require_relative "omp_entry"
 require_relative "prestart"
 require_relative "task_view"
@@ -47,6 +48,7 @@ module Orbit
         orbit export TASK --output FILE  打包任务证据为本地自足归档（不上传）
         orbit doctor [TASK]       检查环境与已有会话连接
         orbit jev setup           输入 TypeSafe key，配置新终端环境
+        orbit openrouter setup  输入 OpenRouter API key，配置新终端环境（可选）
         orbit update [--ref REF]  更新当前安装，沿用来源与安装目录
         orbit uninstall           卸载当前运行程序
         orbit version [--json]    查看版本与安装来源
@@ -63,6 +65,7 @@ module Orbit
       "stop" => "orbit stop [TASK] [--reason TEXT] [--json]\n只定位唯一待处理任务；多任务先用 orbit status 查看，再传 ID。请求入队不代表停止已确认。",
       "doctor" => "orbit doctor [TASK] [--json]\n只读检查环境、安装和已有任务记录；通过所选已有任务或当前会话验证连接，不调用模型，不验证登录或额度。",
       "jev" => "orbit jev setup\n交互输入 TypeSafe key，配置 zsh／bash 新终端的 TYPESAFE_API_KEY；不写入 Orbit 配置。",
+      "openrouter" => "orbit openrouter setup\n交互输入 OpenRouter API key（无回显），写入 ${XDG_CONFIG_HOME:-$HOME/.config}/openrouter/env（0600，仅当前用户可读），并为 zsh／bash 新终端加入受环境变量优先级保护的加载语句；已有 OPENROUTER_API_KEY 的终端优先沿用。仅保存凭据：不验证 API、不代表任一模型已有基准覆盖；不读取项目 .env，不借用 TYPESAFE_API_KEY，不打印密钥。",
       "update" => "orbit update [--ref REF]\n更新当前安装，默认沿用远程 ref 或本地源码目录；--ref 显式从 GitHub 选择版本。新版本登记的运行任务与宿主引用的旧 release 会保留，待其退出后的下一次安装清理。",
       "uninstall" => "orbit uninstall\n先结束使用本安装的任务和 Coding Agent 会话；仍有存活 lease 时拒绝卸载且保留原安装。卸载会清掉本安装拥有的旧全局入口，保留项目资料。",
       "export" => "orbit export TASK --output FILE\n把一个任务的本地证据打包成单个 tar.gz：导出时的 state、事实时间线（events.jsonl 与协作记录 collaboration.jsonl 按时间合并并标注来源、行号与缺口）、检查快照与产物、basis/amendments、含 sha256 的文件清单与缺失清单。只读导出：不上传、不调用模型、不改变任务状态或完成门；运行中任务按导出时刻截取并标注在途与未定检查。TASK 为任务目录或唯一 ID 前缀；--output 不能位于任务目录内部。归档内 manifest.json 说明全部内容与未包含项。",
@@ -73,7 +76,7 @@ module Orbit
       "rebind-workspace" => "orbit rebind-workspace TASK_DIRECTORY PATH [--reason TEXT]\n把产物目录改到同一 Git 仓库中的工作区。命令入队后由任务进程记录来源、原因和历史；amend / dispute 的文字不会切换路径。",
       "model-evidence" => <<~TEXT,
         orbit model-evidence [TASK_DIRECTORY] --file FILE|-
-        提交 Root 从一手来源检索的模型事实证据（一个 JSON object 或 array）。检查者补证按 start.evidence_needed 中精确 provider/id 拆成 provider 和 model，可省略 TASK_DIRECTORY；传入当前任务目录时确认对应检查者事实并在下次检查前重选，reasoning 未知可省略，billing_route 只填核实过的路由。执行成员的任务内请求另按请求中的 provider/model/reasoning/route 身份填写并传 TASK_DIRECTORY。不写网页正文或凭据，不伪造来源或指标。
+        提交 Root 从一手来源检索的模型事实证据（一个 JSON object 或 array）。检查者补证按 start.evidence_needed 中的完整身份提交 provider、model、reasoning 与 billing_route；当前隔离模型目录不能证明 reasoning／route，故两者均为 "unknown"，不得省略 reasoning（省略表示 provider 默认档），也不得借用其它计费路由的资料。检查者可不传 TASK_DIRECTORY；传入当前任务目录时确认精确匹配的检查者事实并在下次检查前重选。执行成员的任务内请求逐字段复制请求列出的身份并传 TASK_DIRECTORY；一个有据候选即可独立判断，其他候选仍未评分。不写网页正文或凭据，不伪造来源或指标。
         占位结构（尖括号处必须替换为真实检索结果）：
           [{"provider":"<候选的 provider>","model":"<候选的 model>","reasoning":"<实际 reasoning>",
             "billing_route":"<核实的 route；成员任务须与请求一致：direct_api|subscription_quota|unknown>",
@@ -82,7 +85,7 @@ module Orbit
             "sources":["https://<真实来源 URL>"],
             "metrics":{"<指标名>":{"value":0,"unit":"<单位>","basis":"<测量口径与样本说明>"}},
             "cost_tier":{"band":"low|medium|high","confidence":"low|medium|high","basis":"<档位依据，非空>"}}]
-        约束：sources 为 1–5 个绝对 http(s) URL（不带凭据）；metrics 为命名对象，value 为有限数字，unit/basis 为文本；retrieved_at 不能是未来时间。执行成员的 billing_route 必须与请求身份一致（省略按 unknown 处理，unknown 不匹配 direct_api）；检查者补证仅填写核实过的 route，未知可省略。
+        约束：sources 为 1–5 个绝对 http(s) URL（不带凭据）；metrics 为命名对象，value 为有限数字，unit/basis 为文本；retrieved_at 不能是未来时间。执行成员和检查者的 reasoning 与 billing_route 必须与请求身份逐字段一致：省略 reasoning 表示 provider 默认档，不能匹配请求中的 unknown；省略 route 按 unknown 处理，不能匹配 direct_api 或 subscription_quota。
         cost_tier 为可选粗档费用：按价格或套餐额度的负担档位表达，复用同一 sources 与 entry 有效期，由 billing_route 区分按量 API 与订阅套餐额度，不折算成统一的每 token 价格，也不替代 metrics 中的数值事实。band 与 confidence 只能是 low/medium/high，basis 为非空说明；省略该字段即未知，未知不是免费。
         无法取得证据时用 status "unavailable" 并给出 reason（不得编造证据）：
           [{"provider":"…","model":"…","reasoning":"…","billing_route":"<已核实的 route 或任务请求标注>",
@@ -159,6 +162,8 @@ module Orbit
         doctor(argv)
       when "jev"
         setup_jev(argv)
+      when "openrouter"
+        setup_openrouter(argv)
       when "omp"
         OmpEntry.launch(argv)
       when "uninstall"
@@ -246,6 +251,22 @@ module Orbit
       puts "已配置新终端的 TYPESAFE_API_KEY；TypeSafe 环境文件：#{result.fetch('env_file')}（仅当前用户可读）。"
       puts "重新打开终端后直接启动 Coding Agent；当前终端和已运行任务不会自动改变。"
       warn "当前环境已有 TYPESAFE_API_KEY；新终端会优先沿用已有环境变量。" unless ENV["TYPESAFE_API_KEY"].to_s.empty?
+      0
+    end
+
+    def setup_openrouter(argv)
+      raise ArgumentError, "usage: orbit openrouter setup" unless argv == ["setup"]
+
+      warn "输入 OpenRouter API key（输入时不显示）："
+      value = $stdin.tty? ? $stdin.noecho(&:gets) : $stdin.gets
+      warn if $stdin.tty?
+      raise ArgumentError, "未输入 OpenRouter API key" unless value
+
+      result = OpenRouterSetup.configure(value)
+      puts "已配置新终端的 OPENROUTER_API_KEY；OpenRouter 环境文件：#{result.fetch('env_file')}（仅当前用户可读）。"
+      puts "重新打开终端后从该终端启动 Coding Agent；当前终端和已运行任务不会自动改变。"
+      puts "仅保存凭据：不代表 API 已认证，也不代表任一候选模型已有基准覆盖。"
+      warn "当前环境已有 OPENROUTER_API_KEY；新终端会优先沿用已有环境变量。" unless ENV["OPENROUTER_API_KEY"].to_s.empty?
       0
     end
 
@@ -378,8 +399,8 @@ module Orbit
         response["evidence_needed"] = options[:selection]["evidence_needed"]
         response["evidence_action"] = "Root: 先核查上述可运行精确型号的一手资料，" \
                                       "再用 orbit model-evidence --file - 提交真实事实（检查者补证不传任务目录；" \
-                                      "provider/model 按 provider/id 分开填写，reasoning 未知可省略）。" \
-                                      "无法取得时如实提交 status=unavailable，不编造证据或把近似型号当成同一模型。"
+                                      "按 evidence_needed 的 model 拆成 provider/model，并显式提交 reasoning: unknown、billing_route: unknown）。" \
+                                      "省略 reasoning 会变成 default，不能匹配；无法取得时如实提交 status=unavailable，不编造证据或借近似型号／其它计费路由。"
       end
       if options[:foreground]
         puts JSON.generate(response)

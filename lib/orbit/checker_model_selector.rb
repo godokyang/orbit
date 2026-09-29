@@ -8,6 +8,7 @@ require_relative "checker_model_selection"
 require_relative "jev_advisor"
 require_relative "model_candidate_pool"
 require_relative "model_evidence_cache"
+require_relative "openrouter_model_overview"
 require_relative "omp_check_runner"
 
 module Orbit
@@ -31,12 +32,13 @@ module Orbit
 
     def initialize(connection:, project_root:, pool: ModelCandidatePool.new,
                    evidence_cache: ModelEvidenceCache.new, advisor: nil, probe: nil,
-                   clock: nil)
+                   clock: nil, overview: nil)
       @connection = connection
       @project_root = project_root
       @pool = pool
       @evidence_cache = evidence_cache
       @advisor = advisor
+      @overview = overview || OpenRouterModelOverview.new
       @probe = probe || ->(models, source_agent_dir:, source_project_dir:) {
         OmpCheckRunner.probe_models(models: models, source_agent_dir: source_agent_dir,
                                     source_project_dir: source_project_dir)
@@ -47,6 +49,9 @@ module Orbit
     # `excluded` contains models whose real check failed on this input and
     # artifact version. An explicit Root choice is pinned until it fails.
     def select(explicit:, instruction:, previous: nil, selected_for: "start", excluded: [])
+      # The only network opportunity is before the selection/Jev path. A
+      # failed optional refresh never prevents a runnable checker from starting.
+      @overview_refresh = refresh_overview
       excluded = Array(excluded).map(&:to_s).uniq
       text = explicit.to_s.strip
       if !text.empty? && !excluded.include?(text)
@@ -99,12 +104,15 @@ module Orbit
           end
         entry = {
           "model" => model,
+          "reasoning" => "unknown",
+          "billing_route" => "unknown",
           "in_session" => available.nil? ? nil : Array(available).include?(model),
           "evidence_status" => evidence["status"],
           "quality" => "not_judged",
           "isolated_probe" => "not_probed"
         }
         entry["evidence_detail"] = evidence["detail"] if evidence["detail"]
+        entry["model_overview"] = overview_state(model)["status"]
         entry
       end
       report = {
@@ -112,6 +120,7 @@ module Orbit
         "session_catalog" => @connection.nil? ? "not_provided" : (catalog.is_a?(Hash) ? "available" : "unavailable"),
         "evidence_cache" => entries.nil? ? "unavailable" : "available",
         "candidates" => candidates,
+        "model_overview" => overview_diagnostics,
         "generated_at" => now.utc.iso8601
       }
       if pool.empty?
@@ -146,7 +155,8 @@ module Orbit
       prepared["models"] = [model]
       prepared["choice_source"] = "explicit"
       prepared["signature"] = signature(prepared["pool"], prepared["catalog"], prepared["evidence"],
-                                         instruction, prepared["evidence_statuses"], [model])
+                                         instruction, prepared["evidence_statuses"], [model],
+                                         prepared["overview_states"])
       selected, selection = auto_select(prepared, selected_for)
       selection["in_pool"] = prepared["pool"].include?(model)
       [selected, selection]
@@ -176,18 +186,24 @@ module Orbit
         [model, entries.is_a?(Array) ?
           CheckerModelSelection.evidence_status(model: model, entries: entries, now: checked_at)["status"] : "unknown"]
       end
+      overview_states = models.to_h { |model| [model, overview_state(model)] }
+      overview_priors = overview_states.each_with_object({}) do |(model, state), out|
+        out[model] = state["prior"] if !evidence.key?(model) && state["status"] == "fresh" &&
+                                       state["prior"].is_a?(Hash)
+      end
       {
         "pool" => pool, "catalog" => catalog, "models" => models, "preferred" => preferred,
         "available" => available, "excluded" => excluded, "evidence" => evidence,
+        "overview_states" => overview_states, "overview_priors" => overview_priors,
         "agent_dir" => catalog&.[]("agent_dir"),
         "instruction" => instruction.to_s, "entries" => entries, "evidence_statuses" => evidence_statuses,
-        "signature" => signature(pool, catalog, evidence, instruction, evidence_statuses, excluded)
+        "signature" => signature(pool, catalog, evidence, instruction, evidence_statuses, excluded, overview_states)
       }
     rescue ModelCandidatePool::Error
       raise Error, "the candidate pool could not be read"
     end
 
-    def signature(pool, catalog, evidence, instruction, evidence_statuses = {}, excluded = [])
+    def signature(pool, catalog, evidence, instruction, evidence_statuses = {}, excluded = [], overview_states = {})
       catalog_view =
         if catalog.is_a?(Hash)
           { "current" => catalog["current"].to_s,
@@ -196,10 +212,41 @@ module Orbit
             "families" => catalog["families"].is_a?(Hash) ? catalog["families"].sort_by { |key, _| key.to_s }.to_h : {} }
         end
       Digest::SHA256.hexdigest(JSON.generate([
-        "orbit-checker-selection-signature-v3",
+        "orbit-checker-selection-signature-v5",
         pool, catalog_view, evidence.sort_by { |key, _| key.to_s }.to_h,
+        overview_states.sort_by { |key, _| key.to_s }.to_h,
         evidence_statuses, instruction.to_s.scrub, excluded.sort
       ]))
+    end
+
+    def refresh_overview
+      @overview.refresh(project_root: @project_root)
+    rescue StandardError
+      { "status" => "error" }
+    end
+
+    def overview_state(model)
+      @overview.lookup(model: model, reasoning: "unknown", billing_route: "unknown",
+                       project_root: @project_root)
+    rescue StandardError
+      { "status" => "unavailable" }
+    end
+
+    def judgment_candidate(prepared, model)
+      entry = { "model" => model }
+      if prepared["evidence"].key?(model)
+        entry["evidence"] = prepared["evidence"][model]
+      else
+        entry["model_overview_prior"] = prepared["overview_priors"][model]
+      end
+
+      entry
+    end
+
+    def overview_diagnostics
+      @overview.status(project_root: @project_root)
+    rescue StandardError
+      { "status" => "unavailable" }
     end
 
     def reusable?(previous, prepared)
@@ -246,6 +293,13 @@ module Orbit
           availability = { "resolvable" => Array(extra["resolvable"]),
                            "unresolvable" => Array(availability["unresolvable"]) + Array(extra["unresolvable"]) }
           prepared["models"] = fallback
+          fallback.each do |model|
+            state = overview_state(model)
+            prepared["overview_states"][model] = state
+            if !prepared["evidence"].key?(model) && state["status"] == "fresh" && state["prior"].is_a?(Hash)
+              prepared["overview_priors"][model] = state["prior"]
+            end
+          end
         end
       end
       source = prepared["choice_source"] || (prepared["models"].any? { |model| prepared["pool"].include?(model) } &&
@@ -254,7 +308,8 @@ module Orbit
 
       evidence = prepared["evidence"]
       judged = prepared["models"].select do |candidate|
-        evidence.key?(candidate) && Array(availability["resolvable"]).include?(candidate)
+        (evidence.key?(candidate) || prepared["overview_priors"].key?(candidate)) &&
+          Array(availability["resolvable"]).include?(candidate)
       end
       judgment = nil
       judgment_state = nil
@@ -263,12 +318,12 @@ module Orbit
       if judged.any?
         advisor = resolved_advisor
         if advisor
-          judgment_state = quality_state(prepared, evidence, judged)
+          judgment_state = quality_state(prepared, judged)
           started = Process.clock_gettime(Process::CLOCK_MONOTONIC)
           begin
             judgment = advisor.assess_checker_quality(
               state: judgment_state,
-              candidates: judged.map { |candidate| { "model" => candidate, "evidence" => evidence[candidate] } }
+              candidates: judged.map { |candidate| judgment_candidate(prepared, candidate) }
             )
           rescue StandardError => error
             judgment_error = "JEV task-fit judgment failed (#{error.class})"
@@ -282,18 +337,21 @@ module Orbit
 
       scores = judgment ? judgment.fetch("scores") : {}
       quality = scores.each_with_object({}) do |(candidate, score), out|
-        next unless score["quality"].to_f >= QUALITY_THRESHOLD
+        # A model-level benchmark may rank uncertain checkers, but cannot on
+        # its own verify this OMP route's quality above the exact-fact line.
+        next unless evidence.key?(candidate) && score["quality"].to_f >= QUALITY_THRESHOLD
 
         out[candidate] = { "verdict" => "qualified", "source" => "jev:checker_task_fit",
                            "score" => score["quality"] }
       end
       time_cost = judged.each_with_object({}) do |candidate, out|
-        next unless scores.key?(candidate)
+        next unless scores.key?(candidate) && evidence.key?(candidate)
 
-        tiers = { "time" => time_tier(scores.dig(candidate, "time")) }
+        tiers = {}
+        tiers["time"] = time_tier(scores.dig(candidate, "time")) if scores.dig(candidate, "time")
         band = evidence.dig(candidate, "cost_tier", "band")
         tiers["cost"] = band if band
-        out[candidate] = tiers
+        out[candidate] = tiers unless tiers.empty?
       end
       decision = CheckerModelSelection.choose(
         pool: prepared["models"], catalog: catalog, quality: quality,
@@ -309,22 +367,28 @@ module Orbit
 
       chosen = decision["model"]
       selected_evidence = evidence[chosen]
+      selected_prior = prepared["overview_priors"][chosen]
       runnable = Array(availability["resolvable"])
       evidence_needed = prepared["models"].filter_map do |candidate|
         next unless runnable.include?(candidate) && !evidence.key?(candidate)
         next if source != "candidate_pool" && candidate != chosen
 
         status = prepared["evidence_statuses"][candidate]
-        { "model" => candidate, "status" => status } if %w[absent expired invalid].include?(status)
+        { "model" => candidate, "reasoning" => "unknown", "billing_route" => "unknown",
+          "status" => status } if %w[absent expired invalid].include?(status)
       end
       unscored = prepared["models"] - scores.keys
       selection = decision.merge(
         "source" => source, "model" => chosen, "quality_score" => scores.dig(chosen, "quality"),
         "source_agent_dir" => prepared["agent_dir"],
-        "time_score" => scores.dig(chosen, "time"), "time_tier" => time_cost.dig(chosen, "time"),
+        "time_score" => selected_evidence && scores.dig(chosen, "time"), "time_tier" => time_cost.dig(chosen, "time"),
         "cost_tier" => evidence.dig(chosen, "cost_tier"),
-        "quality_sources" => Array(selected_evidence&.[]("sources")).first(MAX_SOURCES),
+        "quality_basis" => selected_evidence ? "exact_model_evidence" : (selected_prior ? "model_overview_prior" : "unknown"),
+        "quality_sources" => Array(selected_evidence&.[]("sources") || selected_prior&.[]("sources")).first(MAX_SOURCES),
         "quality_evidence_valid_until" => selected_evidence&.[]("valid_until"),
+        "model_overview_status" => prepared.dig("overview_states", chosen, "status"),
+        "model_overview_prior" => selected_prior,
+        "model_overview_refresh" => @overview_refresh,
         "quality_elapsed_seconds" => elapsed,
         "judgment_provider" => judgment&.[]("provider"), "judgment_model" => judgment&.[]("model"),
         "question_set_version" => judgment_state && JevAdvisor::QUESTION_SET_VERSIONS.fetch("checker_quality"),
@@ -353,10 +417,10 @@ module Orbit
     # The original instruction plus the full candidate evidence is passed
     # complete; the contract forbids compressing the requirement, and a
     # silently truncated task text would make JEV judge the wrong task.
-    def quality_state(prepared, evidence, judged)
+    def quality_state(prepared, judged)
       {
         "instruction" => prepared["instruction"].to_s,
-        "candidates" => judged.map { |candidate| { "model" => candidate, "evidence" => evidence[candidate] } }
+        "candidates" => judged.map { |candidate| judgment_candidate(prepared, candidate) }
       }
     end
 

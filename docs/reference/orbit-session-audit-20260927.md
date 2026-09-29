@@ -1,5 +1,7 @@
 # Orbit 本会话流程盘点（临时记录，2026-09-27）
 
+> 类型：历史证据／研究，按标题及正文记录的日期、版本和配置解读。下文“当前”“本轮”及旧规则不代表现行行为或授权；当前状态见[交接](../plan/handoff.md)，现行语义见[任务合同](../../contracts/task-runtime.md)。
+
 本文件是排查记录，不是产品合同、已批准计划或发布验收结论；审计范围与统计口径以以下原始记录为准。
 
 ## 本轮新增独立夹具检查者池内降级真实闭环
@@ -35,7 +37,7 @@ Root 实际访问 `z.ai/subscribe`、`zcode.z.ai/en/docs/configuration`、`z.ai/
 
 本次审计尝试在**不传显式评审模型**的情况下新建受控任务，当前安装返回 `no candidate pool model passed the JEV quality line`，所以没有新任务或新的实际成员；也没有为完成这份只读盘点绕过候选池。后文第四次 `task` 委派尝试因此同样被现有任务已结束的门拒绝。这个失败说明此次调查本身不属于上表的三项受控任务，不能以本临时报告冒充新一轮独立检查通过。
 
-当前已有的**原始事实**是逐任务的 `.orbit/tasks/<id>/state.json`、`events.jsonl`、`members.json`、有记录时的 `collaboration.jsonl`、`checks/` 与原生 OMP 会话文件。`orbit status TASK --json` 查询单任务状态，`orbit export TASK --output FILE` 由用户主动生成单任务本地证据包，不上传；[使用参考](../reference/usage-reference.md#日常查询与诊断)、[导出记录](../reference/task-evidence-export-20260926.md)说明证据与隐私边界。仓内只读脚本 `.agents/skills/orbit-real-acceptance/scripts/summarize_task.rb TASK_DIR` 可汇总单任务检查／事件；**没有发现**现成跨任务、跨 OMP 会话的一键「复盘结论」文档或自动成本账单。以下数字是对上述三项原始 JSON/JSONL 按 session ID 聚合，不把状态的最近一次 Jev 评分当作全部次数。
+当前已有的**原始事实**是逐任务的 `.orbit/tasks/<id>/state.json`、`events.jsonl`、`members.json`、有记录时的 `collaboration.jsonl`、`checks/` 与原生 OMP 会话文件。`orbit status TASK --json` 查询单任务状态，`orbit export TASK --output FILE` 由用户主动生成单任务本地证据包，不上传；[使用参考](usage-reference.md#日常查询与诊断)、[导出记录](task-evidence-export-20260926.md)说明证据与隐私边界。仓内只读脚本 `.agents/skills/orbit-real-acceptance/scripts/summarize_task.rb TASK_DIR` 可汇总单任务检查／事件；**没有发现**现成跨任务、跨 OMP 会话的一键「复盘结论」文档或自动成本账单。以下数字是对上述三项原始 JSON/JSONL 按 session ID 聚合，不把状态的最近一次 Jev 评分当作全部次数。
 
 ## 三项任务的实际次数
 
@@ -71,18 +73,18 @@ Root 实际访问 `z.ai/subscribe`、`zcode.z.ai/en/docs/configuration`、`z.ai/
 
 当前用户级候选池 `~/.config/orbit/model-candidates.json` 不包含 `zhipu-coding-plan/glm-5.2`。第二批开始前，`c293…/events.jsonl` 17:26 的 `model_evidence_needed.identities.candidates` 明列 5 个可派发池内模型（当前池的第六项是 Root 模型，按规则排除），**没有 GLM-5.2**；17:28 的 `collaboration.jsonl` 两条 `task_dispatch` 却均为 `agent="task", model=null, pinned_model=null`，两条 `model_identity` 随后显示实际运行的是 GLM-5.2。这 **2 个成员**可直接证明在当时走了池外默认角色。第一批的两名成员也实际是 GLM-5.2、原生工具参数同样未指定模型，且 13:52 的评审选模状态记录 GLM-5.2 `in_pool=false`，但**没有第一批 13:18 的候选池快照**，不能把当前池配置或晚 34 分钟的记录冒充当时的直接证明。第一批派发前 Jev `delegatable=0.30`，第二批派发前为 0.64 但仅请求候选证据、没有最终推荐；两批均未经过池内成员质量推荐。
 
-当时已安装 0.7.6 的 `plugins/omp-host.mjs:1698-1745` 只对池生成的 `orbit-m-*` Agent 刷新／校验模型映射，原生 `agent="task"` 不核对候选池，`expectedModel=null`；同版 `lib/orbit/task_runtime.rb:732-770` 只事后登记模型和 `root_without_hint`。这不是 Orbit 自动推荐了池外模型，而是**没有模型选择的通用派发由 OMP 默认角色落到池外模型且没有池外告警**。当时的[任务合同](../../contracts/task-runtime.md#可选-jev-调度)和 [ADR-009](../adr/009-user-selected-model-pool.md#决定)允许 Root 原生派发不受推荐池影响，但 Root **没有指定 GLM 模型**，不能称为用户明确授权。此段是 0.7.6 安装的历史观测；后续源码改动见下节，不改写已有证据。
+当时已安装 0.7.6 的 `plugins/omp-host.mjs:1698-1745` 只对池生成的 `orbit-m-*` Agent 刷新／校验模型映射，原生 `agent="task"` 不核对候选池，`expectedModel=null`；同版 `lib/orbit/task_runtime.rb:732-770` 只事后登记模型和 `root_without_hint`。这不是 Orbit 自动推荐了池外模型，而是**没有模型选择的通用派发由 OMP 默认角色落到池外模型且没有池外告警**。当时的[任务合同](../../contracts/task-runtime.md#可选-jev-调度)和 [ADR-009](../adr/009-user-selected-model-pool.md)允许 Root 原生派发不受推荐池影响，但 Root **没有指定 GLM 模型**，不能称为用户明确授权。此段是 0.7.6 安装的历史观测；后续源码改动见下节，不改写已有证据。
 
-默认模型的直接来源：本机现行 `~/.omp/agent/config.yml:6` 配置 `modelRoles.task: zhipu-coding-plan/glm-5.2`，2026-09-24 的[角色映射记录](../reference/model-cost-tier-analysis-20260924.md#本机-omp-入口)也记有相同值；`plugins/omp-host.mjs` 的 `memberModel()` 读取 `models.resolve('@task')`。这解释了 Root 只填 `agent="task"` 时为何四名成员实际落到 GLM-5.2，而不是 Jev 从池里选中了它。当前配置和旧记录不构成每次派发时配置文件未变的快照；实际模型以当时成员身份事件为准。
+默认模型的直接来源：本机现行 `~/.omp/agent/config.yml:6` 配置 `modelRoles.task: zhipu-coding-plan/glm-5.2`，2026-09-24 的角色映射记录（旧材料已移除；历史从 Git 查阅）也记有相同值；`plugins/omp-host.mjs` 的 `memberModel()` 读取 `models.resolve('@task')`。这解释了 Root 只填 `agent="task"` 时为何四名成员实际落到 GLM-5.2，而不是 Jev 从池里选中了它。当前配置和旧记录不构成每次派发时配置文件未变的快照；实际模型以当时成员身份事件为准。
 
 ## 可优化处（观察 → 建议；不是本临时文档授权实施）
 
-1. **优先处理成员池外默认派发及验收授权归属。** 两次通用 `task` 派发产生四名 GLM-5.2 成员，至少第二批两人明确不在当时候选列表；现有允许原生派发的设计不等于用户明确选了该模型。固定 `review_model` 的隔离测试也只能算评审流程闭环；真实用户未指定的型号不能标记为用户选择。模型 `source=explicit` 只记录工具入参，缺少能证明来自哪条真实用户指令的授权来源。池内自动正选择尚无本次构建 live 正例；按[本轮隔离验收](../reference/orbit-runtime-fix-acceptance-20260927.md)单列未验证，不用临时指定模型补洞。
+1. **优先处理成员池外默认派发及验收授权归属。** 两次通用 `task` 派发产生四名 GLM-5.2 成员，至少第二批两人明确不在当时候选列表；现有允许原生派发的设计不等于用户明确选了该模型。固定 `review_model` 的隔离测试也只能算评审流程闭环；真实用户未指定的型号不能标记为用户选择。模型 `source=explicit` 只记录工具入参，缺少能证明来自哪条真实用户指令的授权来源。池内自动正选择尚无本次构建 live 正例；按[本轮隔离验收](orbit-runtime-fix-acceptance-20260927.md)单列未验证，不用临时指定模型补洞。
 2. **让重复缺证据提示不淹没任务。** 计划任务 `model_evidence_needed` **33 次**，模型身份及所需字段完全相同、提交证据 0 次。0.7.6 运行时 `delegation_signature` 包含产物摘要，变化后为同一身份生成新的请求签名；任务执行期间对真实变化重算可以保留，但面向 Root 的「请补这组公共模型事实」应按精确身份＋所需字段＋有效期去重，发生身份／要求改变才再次提示。这里是有证据的重复打扰，不等于省钱幅度已经测得。
 3. **区分观察频率与有价值的卡住核实。** 167 次 Jev 任务观察没有一次达到过程检查门槛。已安装 0.7.5／0.7.6 的观察签名还包含可变的 `host.observations`；源码 0.7.7 的相应签名已去掉该噪声字段并要求可辨认变化后再评估，但本会话的 167 次来自旧安装，**不能凭静态代码推断升级后的节省量**。复验须使用明确内容摘要的新隔离构建和相同任务型的事件计数；不要自动升级日常安装。
 4. **减少对持续变化的快照反复评审。** 18 次检查有 9 次失效、3 次失败，且计划任务一次检查缓存读量很大。将工作的自动计时检查与「Root 已交付的最终手动检查」分开计数；对真正仍在变化的产物按现有状态／签名延后完整计时检查，而不跳过用户需要的终检。源码 0.7.7 的此类节流已有实现，仍须与旧版同口径实测，不能把不同夹具的 token 比值宣称节省率；结果 JSON 无效与目录不可用应按故障恢复而非产物纠偏统计。
 5. **保留可追溯记录，不默认做自动复盘。** 现有 `status --json`、`export`、本地汇总脚本足以回溯一项任务，但缺跨任务 session ID 汇总和清晰的「纠偏通知 vs finding vs Jev 卡住评分」口径。先把汇总口径固定在只读报告；导出可能包含任务指令与原生会话内容，继续由用户指定路径并主动分享，不自动上传或调用模型生成缺陷结论。
-6. **区分本会话记录缺口与既有运行限制，不做旧日志兼容或回填。** 第一项任务发生在 `collaboration.jsonl` 接入之前，缺少该文件仅表示无法证明每条原生协作消息都已持久化；旧任务按已有证据读取／导出，并如实标明缺失，不合成历史事件、不增加旧格式适配层。更一般地，异常退出前未完成的异步事件写入可能丢失可恢复证据。用户显式覆盖配置使成员 park 后，OMP 缺少 dispose 完成信号，后台退出只能保持 `stop_unconfirmed`，不能拿成员已完成或 registry idle 充作确认。这两项是[当前限制台账](debt-ledger.md)中的残余边界，**不是**本次四名成员已观察到的停止失败；不能仅靠本次完整停止记录宣布限制解除。
+6. **区分本会话记录缺口与既有运行限制，不做旧日志兼容或回填。** 第一项任务发生在 `collaboration.jsonl` 接入之前，缺少该文件仅表示无法证明每条原生协作消息都已持久化；旧任务按已有证据读取／导出，并如实标明缺失，不合成历史事件、不增加旧格式适配层。更一般地，异常退出前未完成的异步事件写入可能丢失可恢复证据。用户显式覆盖配置使成员 park 后，OMP 缺少 dispose 完成信号，后台退出只能保持 `stop_unconfirmed`，不能拿成员已完成或 registry idle 充作确认。这两项是[当前限制台账](../plan/debt-ledger.md)中的残余边界，**不是**本次四名成员已观察到的停止失败；不能仅靠本次完整停止记录宣布限制解除。
 
 ## 实施后复核（源码 0.7.7；旧会话不热更新）
 
@@ -90,7 +92,7 @@ Root 实际访问 `z.ai/subscribe`、`zcode.z.ai/en/docs/configuration`、`z.ai/
 - `lib/orbit/model_authorization.rb`、CLI、TaskRuntime 和 OMP 工具面将显式检查者型号绑定到真实用户消息的精确 `review_model=provider/id` 或会话范围 `review_model_session=provider/id`，缺来源拒绝并保留诊断；Root 自传 `review_model`、环境变量、旧的 `source=explicit` 均不够。会话沿用逐任务再核消息与隔离环境，不把先前夹具控制者消息当作本次用户的授权。前述旧显式选模的流程闭环仍是历史事实，**不是新增来源门或池内自动正选择的真实成功样本**。
 - 同一证据身份集合和所需字段的提示不再随产物/宿主观察变化重复提交；证据有效性变化后再允许请求。Jev 的周期无新事实不反复评分与 Root 活跃时纯定时完整检查节流在本次源码改动前已存在；本轮不伪造升级后的节省率，不影响手动终检。
 - 已实际运行 `scripts/orbit session-summary --thread 01a0dc8e-eb6b-759f-954b-19119841e45f --project .`：汇总 **3** 项旧任务、**18** 次检查（失效 **9**、失败 **3**、`manual=true` **7**）、Jev 观察 **167**、过程检查 **0**、纠偏投递 **2**、finding **6**、成员 **4**、证据请求 **33**；第一项协作日志列为 `missing`，不会倒填。检查者已记录 **5,789,542 tokens**，有失败项 `usage=null`，所以 `checker_tokens_complete=false`，Root／成员／任务总量／金额均 `null`。只读报告和旧人工审计一致，不把它称作发布成本账单。
-- 实施后曾运行完整 `npm test`，随后用户可见诊断、后续用户授权消息与检查阻塞门再改动；以本轮最后一次完整测试及新隔离安装为最终证据。新增门仍需隔离原生路径分别检验无授权拒绝、精确原生用户授权、池内派发与会话记忆；缺合格精确型号事实时保持自动质量线失败关闭，不借旧会话的固定型号绕过。异常落盘与 park/dispose 的上游限制不变，见[限制台账](debt-ledger.md)。
+- 实施后曾运行完整 `npm test`，随后用户可见诊断、后续用户授权消息与检查阻塞门再改动；以本轮最后一次完整测试及新隔离安装为最终证据。新增门仍需隔离原生路径分别检验无授权拒绝、精确原生用户授权、池内派发与会话记忆；缺合格精确型号事实时保持自动质量线失败关闭，不借旧会话的固定型号绕过。异常落盘与 park/dispose 的上游限制不变，见[限制台账](../plan/debt-ledger.md)。
 
 ## 隔离实机尝试：单文件负例暴露检查者目录不一致
 
@@ -112,4 +114,4 @@ Root 实际访问 `z.ai/subscribe`、`zcode.z.ai/en/docs/configuration`、`z.ai/
 
 ## 本次验收边界与门禁
 
-修复后 `npm test` 完整通过（Ruby／Node／Bun、安装回归及版本锁文件）；`npm pack --dry-run --json` 共 **57** 文件，含 `model_authorization.rb`、`session_summary.rb` 与运行时；`git diff --check` 通过。真实路径已证明通用 `@task` 无授权池外拒绝、失败后第二次手动检查同步拒绝、单项目同会话汇总与停止确认；**未证明**用户精确授权下的池外成员正路径、池内成员注册与真实模型工作、池内合格质量模型自动正选择、用户选定检查模型的会话记忆及可用独立检查者最终 finding／通知／`complete`。当前配置的空池默认模型在检查者 SDK 目录不可用，且本次原生用户没有指定检查者型号；不自行补 `review_model` 或给候选编造精确证据。park/dispose 与异常退出前未落盘证据仍按[限制台账](debt-ledger.md)报告。Skill 目录只提供 `summarize_task.rb`，没有独立 validator 脚本可执行；已运行该汇总器核对两个真实任务的状态、检查和停止。
+修复后 `npm test` 完整通过（Ruby／Node／Bun、安装回归及版本锁文件）；`npm pack --dry-run --json` 共 **57** 文件，含 `model_authorization.rb`、`session_summary.rb` 与运行时；`git diff --check` 通过。真实路径已证明通用 `@task` 无授权池外拒绝、失败后第二次手动检查同步拒绝、单项目同会话汇总与停止确认；**未证明**用户精确授权下的池外成员正路径、池内成员注册与真实模型工作、池内合格质量模型自动正选择、用户选定检查模型的会话记忆及可用独立检查者最终 finding／通知／`complete`。当前配置的空池默认模型在检查者 SDK 目录不可用，且本次原生用户没有指定检查者型号；不自行补 `review_model` 或给候选编造精确证据。park/dispose 与异常退出前未落盘证据仍按[限制台账](../plan/debt-ledger.md)报告。Skill 目录只提供 `summarize_task.rb`，没有独立 validator 脚本可执行；已运行该汇总器核对两个真实任务的状态、检查和停止。

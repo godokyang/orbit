@@ -1,39 +1,32 @@
 # Orbit 文档入口
 
-当前源码版本：**0.7.9**（未发布）；候选池作为选型偏好，检查者使用当前 OMP 模型配置与凭据，池内均不可运行时回退 OMP 可用目录，真实检查失败后有界换用未失败型号；通用 `@task` 不再由候选池或逐型号用户授权阻断。当前源码的验证边界见[交接](plan/handoff.md)，先前安装与验收仍按各自版本和样本解读，不能移作本次修复的真实闭环证明。
+文档分清三件事：当前产品行为、认可但尚未实现的目标、特定构建的历史证据。源码版本从 `package.json` 读取；用户安装版须核对 `orbit version --json`，不能由源码或旧验收报告推断。
 
-| 要解决的问题 | 阅读入口 |
+## 当前阅读入口
+
+| 需要了解什么 | 权威入口与边界 |
 | --- | --- |
-| 怎么安装和开始任务 | [仓库 README](../README.md) |
-| 自定义安装、skill 管理和 CLI 参数 | [进阶使用参考](reference/usage-reference.md) |
-| Agent 何时自行调用 Orbit | [任务运行合同](../contracts/task-runtime.md)（角色与主动调用） |
-| 如何在隔离项目真实验收 Orbit | [Orbit 开发专用真实验收 skill](../.agents/skills/orbit-real-acceptance/SKILL.md)、[OMP 目标路径真实验收记录](reference/omp-native-m4-acceptance-20260924.md) |
-| Root 如何派发成员、使用 Herdr 和收尾 | [任务运行合同](../contracts/task-runtime.md)、[单一 OMP 改版总 TODO](plan/omp-native-migration.md) |
-| 为什么采用当前设计、旧授权规则如何废止 | [历史 ADR-007](adr/007-task-runtime-refactor.md)、[当前 OMP 单宿主 ADR-008](adr/008-omp-native-collaboration-base.md)、[候选池偏好与旧授权裁决 ADR-009](adr/009-user-selected-model-pool.md)、[OMP 路径验证](reference/omp-native-path-probe-20260924.md) |
-| 程序和模型各负责什么、何时完成或停止 | [任务运行合同](../contracts/task-runtime.md) |
-| 如何本地记录、汇总和导出任务证据 | [任务运行合同](../contracts/task-runtime.md#本地任务证据与主动导出)、[进阶使用参考](reference/usage-reference.md#日常查询与诊断)、[实施与验证记录](reference/task-evidence-export-20260926.md) |
-| 独立检查返回什么 | [检查结果 schema](../contracts/check-result.schema.json) |
-| 开发本仓要遵守什么 | [AGENTS.md](../AGENTS.md)、[开发流程](agents/development-workflow.md) |
-| 当前做到哪里、还有什么工作 | [交接](plan/handoff.md)、[单一 OMP 改版总 TODO](plan/omp-native-migration.md)、[模型候选池交付 TODO](plan/model-pool-delivery.md)、[执行协作与检查回路整体调优计划](plan/orbit-execution-review-optimization.md)、[JEV 委派判断专项计划](plan/jev-delegation-optimization.md)、[用户结果补齐计划](plan/user-outcome-completion-plan.md)、[当前计划](plan/vision-completion-plan.md) |
-| 哪些能力尚不具备 | [当前限制](plan/debt-ledger.md) |
-| 最新项目检查发现什么 | [用户结果独立审查及复核](reference/project-review-20260918.md)、[角色、协作与运行边界检查](reference/project-review-20260914.md) |
-| Zeen 走查暴露的过程缺口、修复实施与 OMP 接入验收 | [Zeen 过程诊断与实施复盘](reference/zeen-page-capture-orbit-process-review-20260925.md)、[Orbit OMP 接入验收记录](reference/orbit-omp-access-acceptance-20260925.md) |
-| 真实任务中的 Orbit 与 JEV 表现 | [Zeen Login 使用复盘与 JEV 证据](reference/zeen-login-orbit-experience-20260922.md) |
-| 普通终端和现有会话如何落地、有哪些现成方案 | [用户流程交付计划](plan/user-experience-plan.md)、[现成方案调研](reference/existing-orchestrators-20260914.md) |
-| 实际验收证明了什么 | [本轮运行体验与成本修复：隔离 OMP 验收](reference/orbit-runtime-fix-acceptance-20260927.md)、[检查回路与 Jev 实际验证](reference/check-loop-acceptance-20260918.md)、[跨宿主成员验收](reference/cross-host-member-acceptance-20260918.md)、[Jev 调度运行验收](reference/jev-runtime-acceptance-20260918.md)、[底层真实验收](reference/orbit-runtime-acceptance-20260914.md)、[Codex 日常流程验收](reference/user-flow-acceptance-20260914.json)、[OpenCode 正式验收](reference/opencode-runtime-acceptance-20260914.json)、[OMP 正式验收](reference/omp-runtime-acceptance-20260914.json)、[候选模型池真实验收](reference/model-pool-acceptance-20260925.md) |
-| 优化后的真实路径怎么验收、已经跑到哪里 | [优化真实验收记录](reference/orbit-optimization-acceptance-plan-20260922.md) |
-| 过去哪些失误值得记住 | [工程经验](reference/engineering-lessons.md) |
-| 历史：Codex 如何加载项目规范 | [按需阅读的说明](reference/codex-agents-md-loading.md)（旧宿主证据） |
+| 安装和使用 | [README](../README.md)、[进阶使用参考](reference/usage-reference.md)；只说明已接线行为 |
+| 当前任务、模型、检查、完成与停止语义 | [任务运行合同](../contracts/task-runtime.md)、[检查结果 schema](../contracts/check-result.schema.json)、[ADR-008](adr/008-omp-native-collaboration-base.md)、[ADR-009](adr/009-user-selected-model-pool.md) |
+| 开发纪律、范围与验证方式 | [AGENTS.md](../AGENTS.md)、[开发流程](agents/development-workflow.md)；这些文件不产生产品运行事实 |
+| 当前源码交付状态和证据边界 | [交接](plan/handoff.md)、[当前限制](plan/debt-ledger.md) |
+| 有限顶级模型资源下的产品方向 | 用户认可的[混合模型交付主方案](plan/mixed-model-delivery-proposal.md)；其中目标不等于当前能力 |
+| 已实现、需要调整和需要删除的内容 | [逐项代码审计](plan/mixed-model-delivery-code-audit.md)；每项对应主方案条款 |
+| 推进顺序 | [当前计划](plan/vision-completion-plan.md)；引用主方案和审计，不再复制旧实施队列 |
+| 可选 OpenRouter 设置与覆盖 | [使用说明](reference/usage-reference.md#openrouter-模型概述自愿启用)、[映射来源审计](reference/openrouter-model-mapping-audit.md)；模型版本对应不证明实际 OMP 计费路由 |
+| 如何做真实模型验收 | [专用验收 skill](../.agents/skills/orbit-real-acceptance/SKILL.md)；确定性测试不能替代真实闭环 |
 
-## 各类文档的职责
+## 历史证据与研究
 
-- `contracts/` 与 ADR 定义产品语义；当前运行为 OMP 单宿主（ADR-008），历史路径（Codex、OpenCode、OMP 旧 SDK 成员）证据保留在 `docs/reference/`，不再是当前入口。修改设计先改这里，不通过开发规范绕过产品行为。工作区绑定、成员登记与 `task/hub` 协作、JEV 候选分／最终 decision／持久 hint、派发 basis、产物与过程检查分开的 freshness、observation 去重、finding 绑定、终检收尾和 status 分层已写入合同；冻结 #9 目标路径端到端已通过（0.6.17 staged `0bc4ec93`）；M4 已整体闭合——冻结 #1–#9 全部通过（#5 为用户批准的组合证据 PASS：同版本重复纠正由确定性回归证明、纠偏收敛与过期拦截有真实任务证据，`finding_repeat_ignored` 未真实触发已注明；#6 机械回路 PASS，矛盾夹具内容不计）；合同中的"待验"标注不得当作已验收。
-- 根 `AGENTS.md` 与 `docs/agents/` 约束开发 Orbit 的 Agent，不产生产品运行事实。
-- `docs/plan/` 保存当前状态、范围与已知限制；已完成的工作不保留为待办，不复制合同正文。
-- `docs/reference/` 保存验证事实、经验与参考资料，不独立增加验收或授权要求。
+`reference/` 中带日期的报告与 JSON 是特定构建、配置或调查的记录。正文中的“当前”“本轮”和授权规则均按记录日期理解，不指导现行执行；失败、未测分支及组合证据例外继续保留。无日期的使用参考和工程经验各有其明确用途，不作为额外产品合同。
 
-独立检查者的提示与只读边界随实现维护（`lib/orbit/omp_check_runner.rb` 与 `runners/omp-reviewer/`），不复制到本目录。使用和开发 Orbit 所需的说明均在本仓；外部参考资料按需读取，外部项目规范不全局安装。
+| 记录 | 可以证明的范围 |
+| --- | --- |
+| [Zeen 体验验收](reference/zeen-orbit-experience-acceptance-20260928.md)及[用户反馈](reference/zeen-mobile-ui-orbit-user-feedback-20260928.md) | 各冻结构建的入口、成员、检查、状态结果；不将 R25/R28 倒推为 0.7.10 新方向的验收 |
+| [会话与源码审计](reference/orbit-session-audit-20260927.md) | 当时的池外默认派发、检查失败和降级闭环，保留版本及夹具区别 |
+| [候选池验收](reference/model-pool-acceptance-20260925.md)、[OMP 接入验收](reference/orbit-omp-access-acceptance-20260925.md) | 早期版本的选模、漂移、纠偏和完成；旧门控结论已不等于现行规则 |
+| [OMP 原生迁移验收](reference/omp-native-m4-acceptance-20260924.md) | 已结束 M4 的九项判定、冻结定义及例外；不重开迁移票 |
+| [执行检查优化验收](reference/orbit-optimization-acceptance-20260922.md) | 多宿主时代的实验及失败边界 |
+| [ADR-007](adr/007-task-runtime-refactor.md) | 已退役多宿主架构的理由与历史决定；现行裁决见 ADR-008/009 |
 
-## 历史怎么查
-
-需要溯源时使用 `git log --all -- <路径>`，再用 `git show <提交>:<路径>` 读取当时正文。历史描述不作为现在时指令。失效文档在结论已归入现行正文后可删除，并同步清理引用；不为了归档再复制一份。
+其余历史研究与验收按日期在 `reference/` 查阅。已被合同、决策或证据报告吸收的实施票不保留为另一套现行规则；旧正文从 Git 历史查阅。新方向写主方案，实现差距写审计，当前行为改合同及对应 ADR，验收结果写带构建身份的证据报告。

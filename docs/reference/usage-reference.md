@@ -27,9 +27,19 @@
 
 原有的 `TYPESAFE_API_KEY` 环境变量继续可用，存在时优先于环境文件。新任务发生 Jev 判断后，`orbit status --json` 的 `jev.provider`、`jev.model`、`jev.question_set_version`、`jev.scores` 和 `jev.usage` 记录该次判断的来源、版本、概率及可得用量；`jev.unavailable` 表示服务调用失败。任务内既有问题使用 `jev-latest`，入口自动判定固定 `jev-1.13.0`，不是把任务内派发概率当作启动概率。需要对某个项目关闭外发时，在项目根目录创建 `.orbit/jev-disabled`；没有 key、服务不可用或禁用外发时，入口不自动启动，交 Root 显式决定。移除标记后，新请求才恢复使用 Jev。不要把环境文件放进项目或提交到 Git。
 
-入口判定以 OMP 原生用户消息 ID 去重；明确要求 Orbit 受控执行会尝试启动任务，明确讨论／只读问答不启动。其余请求仅在执行授权概率 ≥ 0.80 且独立检查收益概率 ≥ 0.80 时自动启动；当前门槛来自六条实际标注请求，其中短版本任务的收益 0.74／0.72 曾误入旧阈值，不保证所有表达方式都能自动识别。项目可在 `.orbit/jev-entry.json` 指定已校准的入口阈值；切换 provider／模型必须重新校准，不能因判断失败静默回退。`orbit status --json` 的 `entry` 保留判定来源；入口自动启动不等于自动派发成员。**显式受控启动失败保持失败关闭，不得改成普通执行；仅非显式的自动候选失败时可告知用户本次不受 Orbit 监督并继续普通请求。**
+入口判定以 OMP 原生用户消息 ID 去重；明确要求 Orbit 受控执行（包括本条执行命令中的「记得用 Orbit」）会尝试启动任务，明确拒绝使用 Orbit、明确讨论／只读问答不启动。其余请求即使没有 Orbit 字样，也仅在执行授权概率 ≥ 0.80 且独立检查收益概率 ≥ 0.80 时自动启动；`orbit-entry-2` 将直接命令 Agent 完成具体工作视为执行授权问题的正例题义。既有门槛来自六条旧题义的实际标注请求，其中短版本任务的收益 0.74／0.72 曾误入旧阈值；新题义的召回和误启须按事先标注正负例重复实跑，不能借旧样本保证所有表达都能识别。项目可在 `.orbit/jev-entry.json` 指定已校准的入口阈值；切换 provider／模型必须重新校准，不能因判断失败静默回退。`orbit status --json` 的 `entry` 保留判定来源；入口自动启动不等于自动派发成员。**显式受控启动失败保持失败关闭，不得改成普通执行；仅非显式的自动候选失败时可告知用户本次不受 Orbit 监督并继续普通请求。**
 
 Root 可在无活动 Orbit 任务时使用 OMP 原生 `task`：不建立 Orbit 成员记录、独立检查或停止确认；会话给出未受控提示。已有活动任务仍受成员登记门约束，非所属任务、未知调用者和成员二次派发不得借此绕过。Root 的执行模型由 `orbit omp --model provider/id` 原生选择，Orbit 不在小任务中暗换模型。
+
+### OpenRouter 模型概述（自愿启用）
+
+安装不询问 OpenRouter key；需要独立检查者在缺精确事实时参考有来源的模型级质量基准，可运行 `orbit openrouter setup`，在**不回显**的交互提示中输入 key。命令只写当前用户私有环境文件 `${XDG_CONFIG_HOME:-$HOME/.config}/openrouter/env`（权限 `0600`）并让新 zsh／bash 终端加载；启动进程已有 `OPENROUTER_API_KEY` 时优先，当前终端或已运行的 Orbit 任务不会自动获取新 key。setup 不验证鉴权。不要把 key 置于命令参数、项目文件或 Git；不借用 `TYPESAFE_API_KEY`、`OPENCODE_API_KEY` 等其他凭据。
+
+新终端启动 `orbit omp` 后，若项目没有 `.orbit/jev-disabled` 且存在 `OPENROUTER_API_KEY`，选检查模型前才会向 OpenRouter 官方 `/api/v1/models` 发送带认证头的目录 GET；不发送任务描述、代码或对话。私有用户级成功快照在 72 小时内复用；断网、认证失败、限流或无新基准不会阻止已有检查者降级路径。项目禁用或去掉环境变量后不联网，旧快照也不再提供先验。`orbit model-status --project DIR` 是**只读**诊断，显示是否启用、最近抓取结果与逐候选 `fresh`／`stale`／`unmapped`／`no_benchmark`／`not_configured` 等状态，不借此刷新或探测模型；请先在真实环境取得授权再启用外发。
+
+Orbit 随版本仅发布经第一方版本核实的完整 `provider/model/reasoning/billing_route` → OpenRouter 目录 `id` 与 `canonical_slug` 成对映射，用户可在 `${XDG_CONFIG_HOME:-$HOME/.config}/orbit/openrouter-model-map.json` 显式提供带核实者、时间、厂商资料和目标 OpenRouter URL 的覆盖项；未核实的映射无效，不靠近似型号自动配对。[六候选审计](openrouter-model-mapping-audit.md)中四条映射有据，**目前仅 `kimi-code/k3-256k` 一条有非空 coding 指数**；另两项版本未核实，不能凑数。Artificial Analysis 指数来自 OpenRouter 模型目录，只是型号级质量先验，推理变体和本 OMP 路由的速度、价格、额度、端到端检查耗时仍未知。现有精确手工证据优先，池内执行成员不消费此先验；分工仍需本地端到端事实及 Jev 原质量／时间门。
+
+覆盖文件与随包 [`lib/orbit/data/openrouter-model-map.json`](../../lib/orbit/data/openrouter-model-map.json) 同格式：顶层 `schema_version="orbit-openrouter-model-map-v1"`、`entries` 数组；每项**恰好**含 `provider`、`model`、`reasoning`、`billing_route`、`openrouter_id`、`canonical_slug`、`sources`（1–5 个无凭据的绝对网页 URL）、`verified_at`（ISO 8601 UTC）、`verified_by`。`openrouter_id` 是目录实际行的 `id`，可与日期后缀的 `canonical_slug` 不同；`~…-latest` 别名不可作目标。程序校验结构、目标行和 canonical 漂移，但**不能代用户阅读网页来确认厂商版本事实**；提交覆盖前由 Root／用户审核资料。不需要覆盖已核实的默认项。
 
 ### PATH 配置
 
@@ -76,7 +86,7 @@ orbit uninstall
 
 `orbit status [TASK]`、`orbit stop [TASK]` 从当前目录向上寻找最近的 `.orbit` 项目，到独立 Git 项目边界停止。TASK 可为目录或当前项目唯一 ID 前缀。省略时优先待处理记录（包括 failed / stop_unconfirmed）；多个候选列出供选择，停止不猜测。仅 status 在无待处理记录时显示最近结束的一项。
 
-status 默认输出可读文本；`--json` 返回单项原始 state，多个／没有候选时返回 `{ "tasks": [...] }`。stop 默认说明入队和后续查询方式，`--json` 返回机器结果，供扩展桥与自动化集成使用。
+status 默认输出可读文本；`--json` 返回单项原始 state，多个／没有候选时返回 `{ "tasks": [...] }`。终态的文本「下次检查：未安排」不再附上停止前遗留的待收尾／待重检依据，即使 `--json` 仍保留原始审计字段。stop 默认说明入队和后续查询方式，`--json` 返回机器结果，供扩展桥与自动化集成使用。
 
 `orbit export TASK --output FILE` 在用户指定的位置生成单任务本地证据包（可在运行中或结束后执行）；TASK 为任务目录或当前项目唯一 ID 前缀。包内包括按时间排列的事实记录、成员与检查证据、可安全归属的原生会话材料以及无法取得的证据清单；运行中包仅代表导出时刻。不会上传、调用模型或改变任务状态；请检查包内任务指令、项目快照和会话内容后再自愿分享。`orbit status` 和现有终检仍是任务完成的权威依据，复盘文件不作缺陷判定。
 
@@ -121,15 +131,17 @@ orbit dispute TASK_DIRECTORY --reason "具体争议与反证"
 orbit stop TASK_DIRECTORY --reason "停止原因" --json
 ```
 
-`check` 请求一次独立检查；`amend` 只提交用户补充要求的原文；`dispute` 提交真实反证。任务内分工由 Root 在会话内经原生 `task` 派发（Orbit 在成员模型工作前完成登记）；`orbit delegate` 命令面以安装版本 `--help` 为准。结果由 Root 核验并集成。
+`check` 请求一次独立检查；`amend` 只提交用户补充要求的原文；`dispute` 提交真实反证。任务内分工由 Root 在会话内经原生 `task` 派发（Orbit 在成员模型工作前完成登记）；`orbit delegate` 命令面以安装版本 `--help` 为准。成员通过 OMP 原生 `hub` 或 `write agent://Main` 把结果发给 Root，Root 核验并集成；任务内协作记录区分消息调用、送达结果和自动 `task` 回执，不能凭「已生成成员」判定交付。
 
 这些控制操作返回 `queued` 表示入队，不能据此判断已完成或已停止。原会话中的新用户消息不自动修订正在运行的旧任务；确认属于旧任务时由 Root 显式 `amend`，新问题按独立请求处理。
 
 最终检查同时给出 `delivery.ready` 与具体理由，和 finding／`verdict` 分开：`continue` 且零问题不表示实际答复已经送出。Root 在实际验证后调用 Orbit `action=check, task=<任务目录>`，在本轮回复中交付可核验结果并结束；手动终检若在回复过程中入队，等该轮交付完成才开始。自动检查即使判定 `complete` 也不会发完成通知，不能只等待自动检查唤醒。纯文字结果须先在 Root 已完成的回复中可见，修订文件后旧通知失效；推送要求另以只读、限时的 Git 远端引用对比当前 HEAD，远端不可达或目标不明确时记未验证，不接受 Root 自报。状态区分等待检查、当前版本可申请完成、完成申请已入队、通知失效、停止确认中；只有在本会话 Orbit 工具中显式 `stop(intent=complete)` 且最终停止确认后才能记 `complete`，普通 CLI `orbit stop` 始终只是暂停。
 
+状态中的「自动检查已安排」表示尚未开始（可能因 Root 正在工作而延期），不是检查在途或任务完成；「独立检查进行中」只在检查者已启动时显示。终检可见同一输入与产物版本最近至多四条已完成且可归属的 Root 回复：手动检查入队后的简短等待回执不撤销此前的实际交付；后续实质修订仍须核对，修改输入或产物后不能沿用旧答复。检查者只能根据固定快照、已交付内容和真实验证作结论。
+
 ### 候选模型池与检查者重选（ADR-009）
 
-在交互式 `orbit omp` 会话输入 `/orbit-models` 打开搜索多选：直接输入文字过滤 `provider/id`，↑/↓ 移动，Space 勾选，Enter 一次保存净变化，Esc 取消。当前不可选但已入池的旧标识可移出，不能新增。列表逐项展示当前会话可选性与精确身份的证据状态（缺失、过期、不可用或有效）；**质量未判断、隔离检查者未探测**不代表已验证质量、认证或额度，也不等于池内模型不能被实际启动探针选择。无 UI 时文字列表仍给出诊断；`orbit model-status --project DIR` 只读池和用户级证据缓存，不发起 JEV 或模型探测。提交前若可选列表变化或同一 ID 被另一会话修改，界面提示刷新，不覆盖对方的修改。逐项命令和脚本入口保留：
+在交互式 `orbit omp` 会话输入 `/orbit-models` 打开搜索多选：直接输入文字过滤 `provider/id`，↑/↓ 移动，Space 勾选，Enter 一次保存净变化，Esc 取消。当前不可选但已入池的旧标识可移出，不能新增。列表逐项展示当前会话可选性、精确身份的证据状态（缺失、过期、不可用或有效）及可选模型概述状态；**质量未判断、隔离检查者未探测**不代表已验证质量、认证或额度，也不等于池内模型不能被实际启动探针选择。无 UI 时文字列表仍给出诊断；`orbit model-status --project DIR` 只读池、用户级证据及概述快照，不发起 JEV、OpenRouter 刷新或模型探测。提交前若可选列表变化或同一 ID 被另一会话修改，界面提示刷新，不覆盖对方的修改。逐项命令和脚本入口保留：
 
 ```text
 /orbit-models add provider/id     # 只能加入当前会话可选列表中的模型
@@ -138,11 +150,16 @@ orbit model-candidates list       # 命令行查看；add/remove 可用于脚本
 orbit model-status --project DIR  # 只读精确身份的证据诊断；无会话时可选性未知
 ```
 
-候选池保存在用户级配置，跨会话共用，只保存型号，不保存凭据。它是**优先范围，不是授权名单**：Orbit 先从池与当前 OMP 会话可用目录的交集中预检隔离检查者；池中无可运行型号或池空时，从 OMP 当前会话可用型号中继续筛选，Root 也可显式指定当前会话可用型号。通用原生 `task` 派发使用 OMP 解析的准确型号，无须模型入池或用户逐型号授权；成员实际型号漂移仍被拒绝。Jev 的执行成员收益判断只给建议，Root 决定是否派发。
+候选池保存在用户级配置，跨会话共用，只保存型号，不保存凭据。检查者优先从池与当前 OMP 会话可用目录的交集中预检；池中无可运行型号或池空时，从 OMP 当前会话可用型号中继续筛选，Root 也可显式指定可用检查者。**受控任务的成员**有可用池内 Agent 时，通用 `agent="task"` 若解析为池外 OMP 默认型号会被拒绝并列出可用 Agent；Root 可直接派池内 Agent，即使 Jev 尚待补证。池空或当前无可用池内 Agent 才放行可解析的 OMP 默认。Root 想派默认型号可通过 `/orbit-models` 把它加入池；无需额外用户逐型号授权。非受控 OMP 会话不受此门约束，成员实际型号漂移仍被拒绝。Jev 只给建议，Root 自选不冒充推荐。
 
-检查者选型保留 Jev 当前任务适配判断：有精确有效事实的可运行候选进入评分，正向信号优先，再比较端到端时间、粗档费用、家族和候选顺序；全低分选最高分，无评分按顺序降级，标记“检查质量未经证实”。OMP 会话可选与本地预检仅说明可尝试，不等于真实模型请求成功或检查通过；Root 指定的模型仍须属于当前 OMP 目录并通过隔离预检，也保留 Jev 判断结果。成功任务的 `review.selection` 记录选择来源、实际输入、逐型号分数、未评分身份和降级原因。
+执行成员的逐候选二阶段若记录 `pending_candidates`，表示有据候选未同时达到质量和**整项端到端时间**门，缺证据者没有被评分或推荐；`no_candidates` 表示候选池不可用或本会话没有可用成员。这些都不是派发审批：Root 可自行选择池内 Agent，记为无 hint 派发；有可用池内 Agent 时不能靠通用 `@task` 绕到池外默认。`delegatable` 仅是第一阶段的候选分，不是最终建议。
 
-精确身份资料缺失／过期时，`start.evidence_needed` 请求 Root 在有一手来源时用 `orbit model-evidence --file -` 补证；查不到如实记 `status=unavailable`。证据不是可运行型号的启动硬门，不借近似型号编造。新有效证据在下一次检查前重新评分，不中断在途检查。无可运行型号时，项目本地 `.orbit/checker-selection-failures.jsonl` 留存实际探针与判断；无法建任务应告知 Root 具体失败，而非要求用户发送型号授权行。
+`delegation_recommendation` 是已持久化的逐候选判断，只有后续 `delegation_recommendation_delivered` 与任务的 `delegation_hint` 才表示建议真正送达。Root 的只读工具进度使当次投递作废时，同一原生**用户消息**、未跨新的用户消息边界、相同产物和精确候选、原始来源证据仍有效且没有成员，Orbit 会在新的完整宿主观察上尝试送达一次；Root 为同一请求启动下一次助手模型 turn 不会单独抹掉判断。Orbit 不自动派发。Root 如决定接受，使用建议列出的原生 Agent 显式派发有界工作，自己继续另一工作面；先更改输入、产物或候选后再派发不沿用旧建议的归因，状态记为 `root_without_hint`。
+
+检查者选型保留 Jev 当前任务适配判断：有精确有效事实的可运行候选优先据此进入评分；配置 OpenRouter 时，精确事实缺失而存在有来源、未过期、已核实映射且 coding 非空的候选也可获得**弱模型级质量先验**进入 `jev-checker-task-fit-2`，只比较质量，不用基准编造本路由端到端时间／费用；缺测或身份未核实保持未评分。正向信号优先，时间／费用只看精确资料，再按家族和候选顺序比较；全低分选最高分，无评分按顺序降级，标记“检查质量未经证实”。仅凭概述选中时显示当前路由与推理变体未核实、端到端时间未知；OMP 会话可选与本地预检仅说明可尝试，不等于真实模型请求成功或检查通过。Root 指定的模型仍须属于当前 OMP 目录并通过隔离预检，也保留 Jev 判断结果。成功任务的 `review.selection` 记录选择来源、实际输入、逐型号分数、未评分身份、基准来源／局限及降级原因。
+先验分数只影响**降级候选之间的排序**，不会仅因超过 0.55 就把本路由标为质量已证实；无手工精确资料时 `selection_tier=fallback`、状态中显示“检查质量未经证实”，并继续向 Root 请求精确身份事实。
+
+检查者的隔离目录目前不能证明 reasoning effort 或计费路由，故 `start.evidence_needed` 明确请求 `provider/id, reasoning=unknown, billing_route=unknown`；精确事实缺失／过期时 Root 可从一手来源用 `orbit model-evidence --file -` 补证。省略 reasoning 会归为 `default`，不是同一身份；旧 default 缓存和不同路由资料不会作为检查者质量事实。查不到如实记 `status=unavailable`。证据不是可运行型号的启动硬门；新有效事实在下一次检查前重新评分，不中断在途检查。无可运行型号时，项目本地 `.orbit/checker-selection-failures.jsonl` 留存实际探针与判断。
 
 独立检查者沿用 OMP 模型配置与凭据解析，仍在独立只读会话中读取固定快照。认证、额度或结果校验失败会留下失败检查记录，Orbit 在**检查结束后**从尚未尝试的可运行型号中按池优先和 Jev 次序有界重试；所有型号失败才阻塞，不把失败当终检。Root 修复环境后可从 OMP 当前可用型号中重选：
 
@@ -154,7 +171,9 @@ orbit review-model TASK_DIRECTORY --model provider/id --reason "检查者凭据�
 
 ### 模型证据提交（model-evidence）
 
-Root 从一手来源检索模型事实，提交一个 JSON object 或 array。执行成员的任务内请求使用 `orbit model-evidence TASK_DIRECTORY --file FILE|-`，`provider`/`model`/`reasoning` 与请求身份完全一致；检查者缺证据按 `start.evidence_needed` 中精确的 `provider/id` 拆为 `provider` 和 `model`，`reasoning` 未知可省略，优先不传任务目录，也可携当前任务目录提交匹配的检查者事实。建任务前按候选池中准确的 `provider/model` 身份填写。不写网页正文或凭据，不伪造来源或指标。
+Root 从一手来源检索模型事实，提交一个 JSON object 或 array。执行成员的任务内请求使用 `orbit model-evidence TASK_DIRECTORY --file FILE|-`，`provider`／`model`／`reasoning`／`billing_route` 与请求逐字段一致：请求若写 `reasoning: unknown` 须显式填写，省略表示 provider default，不能合并；池内一名候选的有效证据即可独立判断，其他仍未评分。检查者按 `start.evidence_needed` 的 `model` 拆成 provider 与 model，并显式提交其 `reasoning: unknown`、`billing_route: unknown`；优先不传任务目录，也可携任务目录确认精确匹配的检查者事实。价格、上下文窗口或 tokens/s 单独不证明任务质量／整项端到端时间；缺少可靠来源可如实记录 `unavailable`。不写网页正文或凭据，不伪造来源或指标。
+
+池内 Agent 的 `billing_route` 按该**候选型号**在当前 OMP 会话可解析的端点与传输核对；通用 `@task` 的路由不能代填另一型号。宿主不能证明路由时请求保留 `unknown`，不能因为公开 API 有按量价格就推定当前 OMP 按量计费。若成员的路由可证明为 `subscription_quota`／`direct_api`，但检查者隔离目录只能标记 `unknown`，即使 `provider/id` 相同也是**两条不同证据身份**；分别按各自请求提交，不能为减少补证次数跨路由复用。路由变化后须重新核对该候选证据。
 
 还未创建任务时，用同一格式直接写入用户级缓存，不需要虚构 `TASK_DIRECTORY`：
 

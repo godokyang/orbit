@@ -2,7 +2,7 @@
 
 > 本文件约束在本仓库工作的开发 Agent。核心目标：**正确、高质量、可维护地完成用户任务**，防止协作、测试或协议操作偏离交付目标。
 >
-> 本文件及 `docs/agents/` 是**开发 Orbit 的客户端纪律**，不产生 Orbit 产品运行事实。产品语义由 `contracts/task-runtime.md` 与 ADR-007 定义，实际会话、检查和停止结果由运行程序记录。用户明确指令优先；改变产品语义时先处理对应合同和决策，不用开发规范伪造完成或停止。
+> 本文件及 `docs/agents/` 是**开发 Orbit 的客户端纪律**，不产生 Orbit 产品运行事实。产品语义由 `contracts/task-runtime.md` 与 ADR-008/009 定义，实际会话、检查和停止结果由运行程序记录。用户明确指令优先；改变产品语义时先处理对应合同和决策，不用开发规范伪造完成或停止。
 
 ## 按需加载（动手前先读）
 
@@ -12,7 +12,7 @@
 - 开始方案评估、实现、验证或协作前，读取 [docs/agents/development-workflow.md](docs/agents/development-workflow.md)，按其中任务类型选择直接处理或协作。只放链接不算已加载；派发时按该文传递相关规则与当前授权。
 - 承接交付任务前，先读 [docs/plan/handoff.md](docs/plan/handoff.md) 与 [当前计划](docs/plan/vision-completion-plan.md)。用户新要求涉及既有决定时明确差异后再修改权威正文；已结束的旧阶段不是待办，历史按需从 Git 查阅。
 - 动 `lib/` 或 `contracts/` 前，查 [docs/plan/debt-ledger.md](docs/plan/debt-ledger.md)：有意推迟的项目及其解除条件都在那里。
-- 现行语义以 `contracts/task-runtime.md`、检查结果 schema 与 `docs/adr/007-task-runtime-refactor.md` 为准。散文与合同冲突时以合同为准。
+- 现行语义以 `contracts/task-runtime.md`、检查结果 schema 与 `docs/adr/008-omp-native-collaboration-base.md`、`docs/adr/009-user-selected-model-pool.md` 为准。散文与合同冲突时以合同为准。
 - 外部项目资料只按当前任务需要读取，不产生本仓执行规则，也不是使用或开发 Orbit 的前置条件。不自动加载外部项目规范或执行其专用命令。
 
 同一上下文已读且未变的规则不重复全量加载；任务范围变化时只补相关来源。恢复会话时核对当前有效版本和未完成事实。

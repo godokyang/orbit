@@ -8,7 +8,7 @@ require_relative "judgment"
 module Orbit
   # Bounded pre-start entry classification for the latest native user message
   # of a session that has no bound Orbit task (ADR-008 2026-09-26 supplement;
-  # contracts/task-runtime.md「已确认、待实现：启动前 JEV 入口判定」).
+  # contracts/task-runtime.md「角色与主动调用」).
   #
   # The classifier answers one question per native message id — should this
   # request enter the controlled start path now? — and it never creates a
@@ -24,20 +24,25 @@ module Orbit
   class PrestartClassifier
     SCHEMA_VERSION = 1
     # Deterministic classification rules; bump when wording or patterns move.
-    RULE_VERSION = "orbit-entry-rules-1"
-    QUESTION_SET_VERSION = "orbit-entry-1"
+    RULE_VERSION = "orbit-entry-rules-2"
+    QUESTION_SET_VERSION = "orbit-entry-2"
     CALIBRATION_RELATIVE_PATH = ".orbit/jev-entry.json"
     PROMPT_BUDGET = 8000
     EXCERPT_LIMIT = 300
 
-    # Entry judgment questions (first version, binary only). Wording follows
-    # the contract; thresholds come only from a calibrated configuration and
-    # are never invented here.
+    # Entry judgment questions (binary). Wording follows the contract; thresholds
+    # come only from a calibrated configuration and are never invented here.
+    # orbit-entry-2 revises execution_authorized after the recorded miss on a
+    # plain imperative request (「补做 S1 的全程序终检…」 scored 0.69 and was
+    # started manually by Root 42s later, kickoff ②): a direct imperative
+    # order to the agent authorizes execution even without permission words.
+    # independent_check_benefit is unchanged — its observed scores separated
+    # the recorded samples correctly; thresholds stay with the calibration.
     ENTRY_QUESTIONS = {
       "execution_authorized" => {
-        "instruction" => "Has the user already authorized executing this request now, rather than merely discussing, comparing or asking about options? A question, a hypothetical, a request for an opinion or an explanation is not authorization to execute.",
-        "true_criterion" => "The message asks for this work to actually be done now",
-        "false_criterion" => "The message discusses, asks about or compares options without authorizing execution now"
+        "instruction" => "Has the user asked the agent to actually carry out this request now, rather than merely discussing, comparing or asking about options? A direct imperative order to do concrete work — such as an instruction to build, redo, complete, review or close something — authorizes execution even when it never says \"authorize\", \"go ahead\" or \"you may\". A question, a hypothetical, a request for an opinion or an explanation is not authorization to execute.",
+        "true_criterion" => "The message instructs the agent to actually do this work now, including a plain imperative order",
+        "false_criterion" => "The message discusses, asks about or compares options without instructing the agent to execute now"
       },
       "independent_check_benefit" => {
         "instruction" => "Would an independent review of the resulting artifact against this request likely provide real value for this request? Trivial, purely informational or read-only requests gain nothing from an artifact review.",
@@ -49,22 +54,43 @@ module Orbit
     # High-precision markers only: a false "explicit" starts a task nobody
     # asked for, so the word orbit alone is never enough and neither is an
     # orbit mention inside other work ("fix the orbit bug in parser.rb").
+    # A bounded run of non-punctuation between 用/使用 and orbit admits real
+    # requests like「用已更新的 Orbit 启动…」(kickoff ①) without letting a
+    # filename ("用orbit.rb 导出") through — the verb must still directly
+    # follow orbit.
     EXPLICIT_PATTERNS = [
       /orbit[ \t]*受控/i,
       /\borbit[- ]controlled\b/i,
-      /用[ \t]*orbit[ \t]*(来)?[ \t]*(启动|开始|创建|开|建|跑)/i,
-      /使用[ \t]*orbit[ \t]*(来)?[ \t]*(启动|开始|创建|开|建|跑|受控|控制|执行)/i,
+      /用[ \t]*[^\p{P}\n]{0,10}?orbit[ \t]*(?:来)?[ \t]*(?:启动|开始|创建|开|建|跑)/i,
+      /使用[ \t]*[^\p{P}\n]{0,10}?orbit[ \t]*(?:来)?[ \t]*(?:启动|开始|创建|开|建|跑|受控|控制|执行)/i,
       /^(?:请|麻烦|帮我)?[ \t]*(?:用|使用)[ \t]*orbit[ \t]*(?:来[ \t]*)?完成(?!了?[吗么])/i,
+      /(?:\A|[，,；;\n])[ \t]*(?:记得|请)[ \t]*(?:用|使用)[ \t]*orbit[ \t]*(?:来[ \t]*)?完成(?!了?[吗么])/i,
       /交给[ \t]*orbit/i,
-      /orbit[ \t]*(启动|创建|开)[ \t]*一[个條]?[ \t]*任务/i,
+      /orbit[ \t]*(?:启动|创建|开)[ \t]*一[\p{Han}]{0,8}?任务/i,
       /\b(start|create|open|begin)[ \t]+an?[ \t]+orbit[ \t]+task\b/i,
       /\buse[ \t]+orbit[ \t]+to[ \t]+(start|run|execute|control)\b/i,
       /\brun[ \t]+this[ \t]+([a-z]+[ \t]+)?under[ \t]+orbit\b/i
     ].freeze
 
+    # Orbit named as the instrument at a clause boundary —「记得用orbit」,
+    # 「……，用orbit」— counts as explicit ONLY when the same message carries
+    # real execution content (kickoff ①: 「可以，直接执行，直到所有任务完成，
+    # 记得用orbit」 scored 0.94/0.74 and never reached the direct path). A
+    # bare reminder ("下次记得用orbit"), a question about using orbit or a
+    # filename never does: the boundary lookahead excludes "." and "," and
+    # the lookbehinds keep 怎么/如何/怎样 questions out.
+    INSTRUMENT_PATTERNS = [
+      /(?<!怎么)(?<!如何)(?<!怎样)(?:用|使用)[ \t]*[^\p{P}\n]{0,10}?orbit(?=[ \t\n]*(?:[，。！？；：、?!;]|$))/i
+    ].freeze
+
+    # A message that forbids Orbit use is a user opt-out: do not send it
+    # through the automatic gate even if the requested work would qualify.
+    PROHIBITED_ORBIT_USE =
+      /(?:(?:不要|别|无需|不再|别再)[ \t]*(?:再|来)?[ \t]*(?:用|使用)|不用)[ \t]*[^\p{P}\n]{0,10}?orbit(?![A-Za-z0-9_.-])/i.freeze
+
     # Execution verbs that turn a leading "explain …" into real work.
     EXECUTION_MARKERS = [
-      /修复|实现|修改|创建|添加|删除|重构|部署|写[一个个]|跑[一一]|执行/,
+      /修复|实现|修改|创建|添加|删除|重构|部署|完成|交付|写[一个个]|跑[一一]|执行/,
       /\b(implement|fix|modify|create|add|delete|remove|refactor|deploy|write|build|migrate)\b/i
     ].freeze
 
@@ -102,8 +128,9 @@ module Orbit
     def classify(text)
       prompt = text.to_s
       return "discussion" if prompt.strip.empty?
+      return "orbit_opt_out" if PROHIBITED_ORBIT_USE.match?(prompt)
 
-      return "explicit_orbit" if EXPLICIT_PATTERNS.any? { |pattern| pattern.match?(prompt) }
+      return "explicit_orbit" if explicit_request?(prompt)
 
       compact = prompt.gsub(/\s+/, " ").strip
       remaining = compact.gsub(READ_ONLY_REGEX, "") if READ_ONLY_REGEX.match?(compact)
@@ -119,6 +146,8 @@ module Orbit
       case classify(text)
       when "explicit_orbit"
         outcome("explicit_orbit", "start", "the user explicitly requested Orbit-controlled execution")
+      when "orbit_opt_out"
+        outcome("orbit_opt_out", "no_start", "the user explicitly requested not to use Orbit")
       when "discussion"
         outcome("discussion", "no_start", "clear discussion or read-only question")
       else
@@ -175,8 +204,22 @@ module Orbit
 
     def discussion_lead?(compact)
       return false unless DISCUSSION_LEADS.any? { |pattern| pattern.match?(compact) }
+      # "How to use Orbit to complete X?" is still a how-to question. The
+      # embedded outcome verb does not turn an interrogative into an order.
+      return true if /\A(?:怎么|如何|怎样)(?:理解|用)/.match?(compact)
 
       EXECUTION_MARKERS.none? { |pattern| pattern.match?(compact) }
+    end
+
+    # The direct controlled path: a high-precision explicit request, or an
+    # orbit-as-instrument mention that the same message pairs with real
+    # execution content. A message forbidding orbit use never takes it.
+    def explicit_request?(prompt)
+      return false if PROHIBITED_ORBIT_USE.match?(prompt)
+      return true if EXPLICIT_PATTERNS.any? { |pattern| pattern.match?(prompt) }
+
+      INSTRUMENT_PATTERNS.any? { |pattern| pattern.match?(prompt) } &&
+        EXECUTION_MARKERS.any? { |pattern| pattern.match?(prompt) }
     end
 
     def entry_state(text)
@@ -221,6 +264,12 @@ module Orbit
   # to 0.80 keeps these observed false positives out without matching on a
   # filename or task wording; clear explicit Orbit requests still bypass the
   # automatic gate. The small, related sample remains a calibration limit.
+  # 2026-09-28 (kickoff ②): the execution_authorized question wording was
+  # revised under question set orbit-entry-2 because the plain imperative
+  # request「补做 S1 的全程序终检…」scored 0.69/0.84 and never auto-started
+  # while Root started it manually 42s later. Thresholds stay at 0.80/0.80 —
+  # no blanket lowering; the revised wording must be re-verified on labeled
+  # positives and negatives in real sessions before its recall is claimed.
   # `.orbit/jev-entry.json` overrides the built-in explicitly;
   # `.orbit/jev-disabled` still stops all outbound. Only versioned model IDs
   # can use this calibration — an alias could drift its question semantics.
@@ -231,7 +280,8 @@ module Orbit
       "model" => "jev-1.13.0",
       "thresholds" => { "execution_authorized" => 0.80, "independent_check_benefit" => 0.80 },
       "calibrated_samples" => 6,
-      "source" => "built-in gate calibrated 2026-09-27 on three initial and three observed short-task requests (limited sample)"
+      "source" => "built-in gate calibrated 2026-09-27 on three initial and three observed short-task requests; " \
+                  "execution_authorized wording revised 2026-09-28 under orbit-entry-2, thresholds unchanged pending live re-evaluation (limited sample)"
     }.freeze
 
     def self.load(project_root)

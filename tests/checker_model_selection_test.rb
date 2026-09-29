@@ -133,6 +133,7 @@ module CheckerModelSelectionTest
         "valid_until" => "2026-09-21T10:00:00Z", "sources" => ["https://example.test/x"],
         "metrics" => { "quality_x" => { "value" => 1.0, "unit" => "u", "basis" => "b" } } }
     ]
+    entries.each { |entry| entry["reasoning"] = "unknown"; entry["billing_route"] = "unknown" }
     bounded = Orbit::CheckerModelSelection.cached_evidence(models: %w[pool/one pool/two pool/three], entries: entries, now: now)
     assert(bounded.keys == ["pool/one"], "only the unexpired evidence entry is used")
     assert(bounded["pool/one"]["sources"] == sources, "the validated sources are passed through")
@@ -148,7 +149,8 @@ module CheckerModelSelectionTest
   def cached_evidence_rejects_malformed_entries
     now = Time.utc(2026, 9, 25, 12, 0, 0)
     good = { "value" => 9.0, "unit" => "score", "basis" => "vendor" }
-    base = { "provider" => "pool", "status" => "evidence", "retrieved_at" => "2026-09-25T10:00:00Z",
+    base = { "provider" => "pool", "reasoning" => "unknown", "billing_route" => "unknown",
+             "status" => "evidence", "retrieved_at" => "2026-09-25T10:00:00Z",
              "valid_until" => "2026-09-26T10:00:00Z", "sources" => ["https://example.test/a"],
              "metrics" => { "quality_reasoning" => good } }
     entries = [

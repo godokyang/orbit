@@ -1,5 +1,7 @@
 # Zeen Login 任务中的 Orbit 使用复盘与 JEV 证据（2026-09-22）
 
+> 类型：历史证据／研究，按标题及正文记录的日期、版本和配置解读。下文“当前”“本轮”及旧规则不代表现行行为或授权；当前状态见[交接](../plan/handoff.md)，现行语义见[任务合同](../../contracts/task-runtime.md)。
+
 ## 结论
 
 这次任务使用了 Orbit 的任务记录、独立检查和争议裁定，但没有启动执行成员，因此准确状态是：
@@ -134,7 +136,7 @@ Orbit 的独立检查者和裁定者确实是另外的 Agent，但它们不承�
 - 同一 finding id 已 open 且证据未变化时记 `finding_repeat_ignored`，不再次纠正 Root；任一证据维度变化才重新投递。已 resolve 的同一 id 无新证据不重开。
 - status 分层和按角色用量；未知不推算。
 
-仍然没有：绑定冲突的自动检测与暂停；程序对换新 finding id 的语义同义问题不做猜测。四条真实路径验收未运行，见 [优化真实验收计划](orbit-optimization-acceptance-plan-20260922.md)。
+仍然没有：绑定冲突的自动检测与暂停；程序对换新 finding id 的语义同义问题不做猜测。四条真实路径验收未运行，见 [优化真实验收计划](orbit-optimization-acceptance-20260922.md)。
 
 原后续项的当前位置：
 

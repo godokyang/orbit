@@ -88,7 +88,9 @@ module InstallTest
       @fixture_bin = File.join(tmp, "fixture-bin")
       write_fixture_bun(@fixture_bin)
       @env = { "SHELL" => "/bin/zsh", "ZDOTDIR" => @shell_config, "PATH" => @fixture_bin + File::PATH_SEPARATOR + ENV.fetch("PATH", ""),
-               "ORBIT_REF" => nil, "ORBIT_RUNTIME_DIR" => nil, "ORBIT_INSTALL_DIR" => nil, "ORBIT_SKILL_DIR" => @skills, "OPENCODE_CONFIG_DIR" => @opencode, "PI_CODING_AGENT_DIR" => @omp }
+               "ORBIT_REF" => nil, "ORBIT_RUNTIME_DIR" => nil, "ORBIT_INSTALL_DIR" => nil, "ORBIT_SKILL_DIR" => @skills, "OPENCODE_CONFIG_DIR" => @opencode, "PI_CODING_AGENT_DIR" => @omp,
+               "GIT_CONFIG_COUNT" => "2", "GIT_CONFIG_KEY_0" => "maintenance.auto", "GIT_CONFIG_VALUE_0" => "false",
+               "GIT_CONFIG_KEY_1" => "gc.auto", "GIT_CONFIG_VALUE_1" => "0" }
       files = JSON.parse(run("npm", "pack", "--dry-run", "--json", "--ignore-scripts", cwd: ROOT))[0]["files"]
       files.each do |file|
         dest = File.join(@source, file.fetch("path"))

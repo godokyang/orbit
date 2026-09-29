@@ -173,6 +173,8 @@ try {
   const memberModel = await request('member_model');
   assert.deepEqual(memberModel, { provider: 'zhipu-coding-plan', id: 'glm-5.2', billing_route: 'subscription_quota' },
     'the verified zhipu coding-plan endpoint is subscription_quota');
+  assert.equal((await request('model_catalog')).routes['glm/x'], 'unknown',
+    'the pool Agent does not inherit the unrelated @task subscription route');
   ctx.models.resolve = spec => spec === '@task'
     ? { provider: 'zhipu-coding-plan', id: 'glm-5.2', baseUrl: 'https://open.bigmodel.cn/api/paas/v4' }
     : undefined;
@@ -243,30 +245,33 @@ try {
   await assert.rejects(() => request('member_model'), /unresolved/);
   assert.equal(await request('model'), 'glm/x', 'a failed task-role lookup does not replace the Root model');
   delete ctx.models.resolve;
-  // Generic task resolves OUTSIDE the live pool (pool stub holds only
-  // glm/x). Under the model-usage boundary ruling the pool is a preference
-  // surface, not an authorization list: a known effective model dispatches
-  // with no user directive, registers with the exact identity, and records
-  // no phantom authorization metadata.
-  const outside = { provider: 'zhipu-coding-plan', id: 'glm-5.2' };
-  ctx.models.resolve = () => outside;
-  const allowed = await emit('tool_call', { toolName: 'task', toolCallId: 'outside-allowed',
-    input: { agent: 'task', model: 'zhipu-coding-plan/glm-5.2', task: 'work' } }, ctx);
-  assert.ok(allowed.input && !allowed.block, 'a known pool-outside @task model dispatches without user authorization');
-  const outsideRef = { id: allowed.input.name, kind: 'sub', parentId: mainAgentId, status: 'idle',
-    session: session('user-chosen-member'), sessionFile: null, history: {}, activity: null };
-  outsideRef.session.model = outside;
-  extraRefs.push(outsideRef);
-  registryListener({ type: 'registered', ref: outsideRef });
-  assert.equal((await membersFile()).find(m => m.thread_id === outsideRef.id).model,
-    'zhipu-coding-plan/glm-5.2', 'the pool-outside member reaches real registration with the exact model');
-  const dispatchLog = (await fs.readFile(path.join(started.task_directory, 'collaboration.jsonl'), 'utf8'))
-    .split('\n').filter(Boolean).map(line => JSON.parse(line)).find(entry => entry.tool_call_id === 'outside-allowed');
-  assert.equal(dispatchLog?.pinned_model, 'zhipu-coding-plan/glm-5.2', 'dispatch evidence pins the resolved identity');
-  assert.equal('authorization' in dispatchLog, false, 'no phantom user authorization is recorded');
-  assert.equal(dispatchLog.notice, undefined, 'no pool-exception notice is recorded');
-  // Drift on the generic path: an actual member model that differs from the
-  // pinned @task identity is aborted and recorded, never silently accepted.
+  // Missing quality facts do not make a pool member unusable. Root can
+  // explicitly choose it without pretending Jev recommended it.
+  const pendingStatePath = path.join(started.task_directory, 'state.json');
+  const pendingState = await taskState();
+  pendingState.evidence_request = {
+    identities: { root: null, candidates: [{ provider: 'glm', model: 'x', reasoning: 'unknown', billing_route: 'unknown' }] },
+    needed: ['quality', 'speed', 'local_samples'], at: new Date().toISOString()
+  };
+  await fs.writeFile(pendingStatePath, JSON.stringify(pendingState));
+  const premature = await emit('tool_call', { toolName: 'task', toolCallId: 'evidence-unanswered',
+    input: { agent: agentNameFor('glm/x'), task: 'member work' } }, ctx);
+  assert.ok(premature.input && !premature.block,
+    'a pool-backed member remains available while Jev still needs exact model facts');
+
+  // With a live pool member, generic @task must not silently resolve to a
+  // different default model. The Root must name a pool Agent explicitly.
+  ctx.models.resolve = () => ({ provider: 'zhipu-coding-plan', id: 'glm-5.2' });
+  const poolBypass = await emit('tool_call', { toolName: 'task', toolCallId: 'pool-bypass',
+    input: { agent: 'task', task: 'member work' } }, ctx);
+  assert.equal(poolBypass.block, true, 'a pool-outside default model cannot bypass a nonempty controlled pool');
+  assert.match(poolBypass.reason, new RegExp(agentNameFor('glm/x')));
+  assert.match(poolBypass.reason, /orbit model-evidence/);
+  pendingState.evidence_request.resolved = 'used';
+  await fs.writeFile(pendingStatePath, JSON.stringify(pendingState));
+  ctx.models.resolve = () => model;
+  // Drift on the in-pool generic path: an actual member model that differs
+  // from the pinned @task identity is aborted, never silently accepted.
   const driftOutside = await emit('tool_call', { toolName: 'task', toolCallId: 'outside-drift',
     input: { agent: 'task', task: 'drift work' } }, ctx);
   const driftOutsideRef = { id: driftOutside.input.name, kind: 'sub', parentId: mainAgentId, status: 'running',
@@ -275,12 +280,11 @@ try {
   extraRefs.push(driftOutsideRef);
   registryListener({ type: 'registered', ref: driftOutsideRef });
   const driftOutsideEntry = (await membersFile()).find(m => m.thread_id === driftOutside.input.name);
-  assert.equal(driftOutsideEntry.model_drift.expected, 'zhipu-coding-plan/glm-5.2', 'drift records the pinned @task identity');
+  assert.equal(driftOutsideEntry.model_drift.expected, 'glm/x', 'drift records the pinned in-pool @task identity');
   assert.equal(driftOutsideEntry.model_drift.actual, 'zenmux/x-ai/grok-4.6', 'drift records the actual member model');
   assert.ok(setStatuses.some(([id, s]) => id === driftOutside.input.name && s === 'aborted'),
-    'a drifted pool-outside member must be aborted at registration');
-  // An empty candidate pool never blocks a known-model generic dispatch:
-  // the gate reads no pool at all for @task items.
+    'a drifted in-pool member must be aborted at registration');
+  // The empty-pool case still permits the native default task model.
   const emptyPoolStub = path.join(agentRoot, 'pool-empty.sh');
   await fs.writeFile(emptyPoolStub, '#!/bin/sh\nprintf \'{"models":[]}\\n\'\n');
   await fs.chmod(emptyPoolStub, 0o755);
@@ -321,7 +325,7 @@ try {
   extraRefs.push(liveRef);
   registryListener({ type: 'registered', ref: liveRef });
   const members = await membersFile();
-  assert.equal(members.length, 3); // outside + drifted-outside + this pool member
+  assert.equal(members.length, 2); // drifted in-pool member plus this pool member
   const poolMember = members.find(m => m.thread_id === revised.input.name);
   assert.equal(poolMember['requested_name'], revised.input.name);
   assert.equal(poolMember.status, 'registered');
@@ -661,6 +665,23 @@ try {
     assert.match(checkingText, /等待独立检查结果/, 'Root gets an actionable wait instruction');
     assert.doesNotMatch(checkingText, /调用 Orbit action=check/, 'in-flight review must not request a duplicate manual check');
     await setState({ check_observations: {}, next_check_trigger: 'timer' });
+    // Kickoff ④/⑤: an invalidated notice on a RUNNING task asks only for a
+    // new valid manual final check; the user bar names no user work.
+    await setState({ completion_readiness: { status: 'invalidated', reason: '产物在通知后变化' } });
+    const invalidatedText = await statusTurn('notice invalidated');
+    assert.match(statusCalls.at(-1)?.[1], /检查通知已失效.*用户无需操作/,
+      'the bar explains the invalidated notice without assigning the user work');
+    assert.match(invalidatedText, /仍需当前版本的有效手动终检/,
+      'Root is told a new valid manual final check is required, not a repeat of the old notice');
+    // Kickoff ④: a paused task advises a new task on the bar and injects no
+    // block that could ask the stopped record for a re-check.
+    await setState({ status: 'paused', stop_confirmation: { confirmed: true } });
+    assert.equal(await statusTurn('after ordinary stop'), '', 'a paused task injects no system prompt block');
+    assert.match(statusCalls.at(-1)?.[1], /已暂停.*若仍需交付请新建任务/,
+      'the paused bar advises a new task instead of a re-check');
+    assert.doesNotMatch(statusCalls.at(-1)?.[1], /重检|补齐/,
+      'the paused bar never asks the stopped task for artifacts or another check');
+    await setState({ status: 'running', stop_confirmation: null, completion_readiness: { status: 'waiting', reason: '尚无当前版本的有效终检' } });
     // A record whose control socket is not this host's is what an OMP restart
     // leaves: shown as unowned, never controlled (the tool would refuse it).
     const boundConnection = (await taskState()).connection;

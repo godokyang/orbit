@@ -1,5 +1,7 @@
 # Zeen 页面走查任务中的 Orbit 流程：过程诊断与实施复盘（2026-09-25）
 
+> 类型：历史证据／研究，按标题及正文记录的日期、版本和配置解读。下文“当前”“本轮”及旧规则不代表现行行为或授权；当前状态见[交接](../plan/handoff.md)，现行语义见[任务合同](../../contracts/task-runtime.md)。
+
 > 2026-09-25；长期过程复盘，不是产品合同。用户已确认按本文收敛的范围实施，并要求使用 Goal：Root 负责编排和审核，Orbit 工作区同 pane 组的 OMP、Pi、OpenCode 执行具体工作。本文不修改 Zeen，也不把该任务判为 Orbit `complete`。合同与 ADR 已按本文更新，Ruby 完成硬门与 OMP 插件接入已实现（工作区提交前）；真实验收进行中，完成结论与保留边界见 [Orbit OMP 接入验收记录](orbit-omp-access-acceptance-20260925.md)。本文长期保留当时的 Zeen 过程诊断、Herdr Projects 对照与 OMP 18.2.8 源码依据。
 
 ## 本轮实施追踪（2026-09-25 已授权）

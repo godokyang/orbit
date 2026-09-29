@@ -1,0 +1,65 @@
+{
+  "schema_version": "orbit-openrouter-model-map-v1",
+  "entries": [
+    {
+      "provider": "kimi-code",
+      "model": "k3-256k",
+      "reasoning": "unknown",
+      "billing_route": "unknown",
+      "openrouter_id": "moonshotai/kimi-k3",
+      "canonical_slug": "moonshotai/kimi-k3-20260715",
+      "sources": [
+        "https://www.kimi.com/code/docs/en/kimi-code/models.html",
+        "https://www.kimi.com/en/blog/kimi-k3",
+        "https://openrouter.ai/moonshotai/kimi-k3"
+      ],
+      "verified_at": "2026-09-29T06:08:51Z",
+      "verified_by": "Orbit official-source review"
+    },
+    {
+      "provider": "opencode-go",
+      "model": "deepseek-v4.1-flash",
+      "reasoning": "unknown",
+      "billing_route": "unknown",
+      "openrouter_id": "deepseek/deepseek-v4.1-flash",
+      "canonical_slug": "deepseek/deepseek-v4.1-flash-20260910",
+      "sources": [
+        "https://opencode.ai/docs/go/",
+        "https://www.deepseek.com/en/news/deepseek-v4-1-flash/",
+        "https://openrouter.ai/deepseek/deepseek-v4.1-flash"
+      ],
+      "verified_at": "2026-09-29T06:08:51Z",
+      "verified_by": "Orbit official-source review"
+    },
+    {
+      "provider": "zenmux",
+      "model": "deepseek/deepseek-v4.1-flash",
+      "reasoning": "unknown",
+      "billing_route": "unknown",
+      "openrouter_id": "deepseek/deepseek-v4.1-flash",
+      "canonical_slug": "deepseek/deepseek-v4.1-flash-20260910",
+      "sources": [
+        "https://zenmux.ai/deepseek/deepseek-v4.1-flash",
+        "https://www.deepseek.com/en/news/deepseek-v4-1-flash/",
+        "https://openrouter.ai/deepseek/deepseek-v4.1-flash"
+      ],
+      "verified_at": "2026-09-29T06:08:51Z",
+      "verified_by": "Orbit official-source review"
+    },
+    {
+      "provider": "openai-codex",
+      "model": "gpt-6-sol",
+      "reasoning": "unknown",
+      "billing_route": "unknown",
+      "openrouter_id": "openai/gpt-6-sol",
+      "canonical_slug": "openai/gpt-6-sol-20260922",
+      "sources": [
+        "https://developers.openai.com/api/docs/models/gpt-6-sol",
+        "https://developers.openai.com/api/docs/changelog",
+        "https://openrouter.ai/openai/gpt-6-sol"
+      ],
+      "verified_at": "2026-09-29T06:08:51Z",
+      "verified_by": "Orbit official-source review"
+    }
+  ]
+}

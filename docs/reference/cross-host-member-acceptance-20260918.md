@@ -1,6 +1,8 @@
 # 跨宿主成员验收：OpenCode Root → Codex（2026-09-18）
 
-本文记录[用户结果补齐计划](../plan/user-outcome-completion-plan.md)切片 C 的真实运行证据。它只声明本次实际核对过的路径与能力，不把其他 kind、Herdr 控制或未登记进程算作受控。
+> 类型：历史证据／研究，按标题及正文记录的日期、版本和配置解读。下文“当前”“本轮”及旧规则不代表现行行为或授权；当前状态见[交接](../plan/handoff.md)，现行语义见[任务合同](../../contracts/task-runtime.md)。
+
+本文记录[用户结果补齐计划](check-loop-acceptance-20260918.md)切片 C 的真实运行证据。它只声明本次实际核对过的路径与能力，不把其他 kind、Herdr 控制或未登记进程算作受控。
 
 ## 环境与边界
 

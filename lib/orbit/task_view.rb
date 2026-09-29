@@ -137,6 +137,7 @@ module Orbit
       evidence = {
         "requested" => "等待 Root 提交模型证据",
         "used" => "已使用模型证据",
+        "deferred" => "模型事实已缓存；执行成员已开始工作，不再对本轮分工评分或生成新建议",
         "incomplete" => "证据不完整，未自动提示",
         "unavailable" => "模型证据不可用，未自动提示",
         "mismatch" => "提交的证据与待比较身份不一致，未自动提示",
@@ -188,6 +189,10 @@ module Orbit
         else
           "第二阶段达到建议门槛，但 delegation_hint 尚未持久化，不能视为可执行建议#{scores}"
         end
+      when "pending_candidates"
+        "有据候选尚未同时达到质量与整体耗时门槛；无资料候选未评分，暂无委派建议"
+      when "no_candidates"
+        "候选池不可用或本会话没有可用成员，暂无委派建议"
       when "declined"
         "最终不建议委派#{scores}"
       when "unavailable"
@@ -374,18 +379,30 @@ module Orbit
       verdict.is_a?(String) && !verdict.empty? ? "verdict(#{verdict})" : "idle"
     end
 
+    # User-readable check scope (kickoff ⑤): what the check activity is, and
+    # whether the user must do anything. Internal verdict tokens stay only as
+    # the verdict value itself, never as the state name.
     def check_activity_line(state)
       activity = check_activity(state)
-      note = if activity == "queued"
-               "（检查已排队，不是任务完成）"
-             elsif activity == "verdict(complete)"
-               "（检查结论，不是任务完成）"
-             elsif activity == "failed"
-               "（检查失败，未采纳；任务保持运行，等待显式指定检查模型后重试）"
-             else
-               ""
-             end
-      "检查状态：#{activity}#{note}"
+      case activity
+      when "running"
+        "检查状态：独立检查进行中（等待结果即可，无需重复请求检查）"
+      when "queued"
+        if %w[starting running].include?(state["status"]) && state["next_check_manual"] == true
+          "检查状态：手动终检已排队（不是任务完成）"
+        else
+          "检查状态：自动检查已安排（尚未开始，任务未完成）"
+        end
+      when "failed"
+        "检查状态：最近检查失败（未采纳；任务保持运行，等待显式指定检查模型后重试）"
+      when "stale"
+        "检查状态：最近检查已过期（未采纳）"
+      when "idle"
+        "检查状态：尚无检查结果"
+      else
+        verdict = activity[/\Averdict\((.*)\)\z/, 1]
+        "检查状态：最近检查结论 #{verdict}（检查结论，不是任务完成）"
+      end
     end
 
     # The chosen checker is visible even when selection had to fall back to a
@@ -399,6 +416,9 @@ module Orbit
       text = "检查模型：#{model}"
       if selection.is_a?(Hash) && selection["selection_tier"] == "fallback"
         text += "；降级选择（检查质量未经证实；#{selection['basis']}）"
+      end
+      if selection.is_a?(Hash) && selection["quality_basis"] == "model_overview_prior"
+        text += "；仅据模型级质量先验排序（当前路由与推理变体未核实，端到端时间未知）"
       end
       text
     end
@@ -433,9 +453,11 @@ module Orbit
       when "ready"
         "完成状态：当前版本可申请完成；当前助手调用 Orbit 工具 action=stop, intent=complete, task=<任务目录>；普通 CLI orbit stop 仅暂停"
       when "invalidated"
-        "完成状态：通知失效，须重检（#{reason}）"
+        "完成状态：此前的检查通知已失效（#{reason}）；自动检查通过不能替代，仍需当前版本的有效手动终检"
+      when "review_needed"
+        "完成状态：#{reason}；裁定或自动检查结论不代替手动终检"
       when "not_ready"
-        "完成状态：尚不可交付（#{reason}）；完成实际答复或产物后重检"
+        "完成状态：尚不可交付（#{reason}）；补齐实际答复或产物后，仍需当前版本的有效手动终检（自动检查通过不替代终检）"
       else
         "完成状态：等待检查或有效通知，尚未完成"
       end
@@ -472,7 +494,15 @@ module Orbit
       if status == "failed"
         return stop_confirmed?(state) ? "运行失败，停止已确认" : "运行失败，需核实停止：用 orbit stop <任务> 显式重试收尾"
       end
-      if %w[starting running].include?(status) && state["completion_stop_pending"]
+      # Terminal precedence (kickoff ④): a stopped task is never asked to
+      # re-check, deliver artifacts, or apply completion. Leftover readiness
+      # reasons and open findings on a settled record describe history, not
+      # next actions; a paused record cannot consume a check request. An
+      # adjudicator or auto `complete` check never becomes a finalization
+      # notice, so it can never flip these into completion advice either.
+      return "无" if status == "complete"
+      return "已暂停：不能对已停止任务重检或申请完成；若仍需交付，请创建新任务" if status == "paused"
+      if state["completion_stop_pending"]
         return "等待当前助手结束回复，Orbit 随后核对是否完成"
       end
       return "重新绑定工作区" if rebind_action?(state)
@@ -484,10 +514,11 @@ module Orbit
       ready = state["completion_readiness"]
       if ready.is_a?(Hash)
         return "当前助手调用 Orbit stop(intent=complete) 并结束本轮" if ready["status"] == "ready"
-        return "通知失效：#{ready['reason']}；先重检" if ready["status"] == "invalidated"
-        return "补齐实际交付：#{ready['reason']}；再重检" if ready["status"] == "not_ready"
+        return "通知失效：#{ready['reason']}；仍需当前版本的有效手动终检" if ready["status"] == "invalidated"
+        return "由当前助手在最终版本上申请手动终检；先前不可交付理由已被新证据推翻" if ready["status"] == "review_needed"
+        return "补齐实际交付：#{ready['reason']}；再请求一次有效手动终检（自动检查通过不替代终检）" if ready["status"] == "not_ready"
       end
-      return "等待 Root" if waiting_for_root?(state)
+      return "等待当前助手（Root）继续执行" if waiting_for_root?(state)
       return "检查已安排" if review_queued?(state)
 
       "无"
@@ -607,11 +638,63 @@ module Orbit
       lines
     end
 
+    # The user-facing triad (kickoff ⑤): current state, why, and whether the
+    # user must act now. Work the assistant can do itself (requesting checks,
+    # handling findings, supplying model evidence) is labeled "由助手继续处理"
+    # instead of handing the user an internal command; operator commands stay
+    # in next_action and the expanded diagnostics below.
+    def user_attention(state)
+      status = state["status"]
+      case status
+      when "complete"
+        "任务已完成：独立检查与停止确认均通过；无需用户操作。"
+      when "paused"
+        if state["completion_invalidation"].is_a?(Hash)
+          "任务已停止：本次停止只确认收尾，不能确认交付已完成；无需用户操作。若仍需该交付，请创建新任务重新检查。"
+        else
+          "任务已停止并确认停止；无需用户操作。已停止的任务不能重检或申请完成；若仍需该交付，请创建新任务。"
+        end
+      when "needs_user"
+        reason = attention_reason(state)
+        "需要用户处理：#{reason}。该任务已停止；按上述原因处理后，若仍需交付请创建新任务。"
+      when "stop_unconfirmed"
+        reason = attention_reason(state)
+        "停止尚未确认：#{reason}。需要重试停止收尾（orbit stop <任务>）后任务才算干净停止。"
+      when "failed"
+        if stop_confirmed?(state)
+          "运行失败，停止已确认；无需用户操作。请查看下方运行错误，若仍需交付请创建新任务。"
+        else
+          "运行失败，且停止情况需核实：需要重试停止收尾（orbit stop <任务>）。"
+        end
+      else
+        running_user_attention(state)
+      end
+    end
+
+    def attention_reason(state)
+      reason = [state["stop_reason"], state["error"]].find { |value| value.is_a?(String) && !value.strip.empty? }
+      reason || "记录未写明具体原因，请查看任务记录"
+    end
+
+    def running_user_attention(state)
+      ready = state["completion_readiness"]
+      if state["completion_stop_pending"]
+        "任务执行中：完成申请已入队，Orbit 正在核对停止；等待结果，无需用户操作。"
+      elsif ready.is_a?(Hash) && ready["status"] == "ready"
+        "当前版本可申请完成：停止收尾由助手完成；无需用户操作。"
+      elsif check_in_flight?(state) || manual_check_queued?(state)
+        "任务执行中：独立检查进行中或已排队，等待结果即可；无需用户操作。"
+      else
+        "任务执行中：执行、检查与修复由助手继续处理；需要你提供材料或做决定时，任务会明确停为「需要用户处理」。"
+      end
+    end
+
     def format(record)
       state = record.state
       status = state.fetch("status")
       lines = ["任务：#{summary(record)}", "状态：#{label(state)}（#{status}）",
                *([completion_invalidation_line(state)].compact),
+               "用户处理：#{user_attention(state)}",
                "产物目录：#{artifact_root(state)}",
                "绑定时间：#{state.dig('workspace', 'bound_at') || '未单独记录'}",
                "最近重新绑定：#{latest_rebind(state)}",
@@ -632,6 +715,8 @@ module Orbit
                       "已过期，未采纳"
                     elsif check["kind"] == "process"
                       "过程检查，不代表交付通过"
+                    elsif check["role"] == "adjudicator"
+                      "争议裁定记录，不是交付终检通过"
                     else
                       "最近检查记录，不代表当前产物已通过"
                     end
@@ -654,23 +739,8 @@ module Orbit
       decisions = Array(state["decisions"]).count { |decision| decision.is_a?(Hash) }
       lines << "裁定记录：#{decisions} 条"
       next_check = %w[starting running].include?(status) ? state["next_check_at"] : nil
-      basis = state["next_check_basis"]
+      basis = state["next_check_basis"] if %w[starting running].include?(status)
       lines << "下次检查：#{next_check || '未安排'}#{basis ? "（依据：#{basis}）" : ''}"
-      attention = case status
-                  when "failed"
-                    stop_confirmed?(state) ? "运行失败，停止已确认；请查看运行错误。" : "运行失败，停止情况需核实。"
-                  when "needs_user", "stop_unconfirmed"
-                    state["stop_reason"] || state["error"] || "请核对任务错误及停止结果。"
-                  when "paused"
-                    if state["completion_invalidation"].is_a?(Hash)
-                      "本次只确认停止，不代表任务完成；若仍需交付，请创建新任务重新检查。"
-                    else
-                      "当前记录未要求用户处理"
-                    end
-                  else
-                    "当前记录未要求用户处理"
-                  end
-      lines << "用户处理：#{attention}"
       lines << "运行错误：#{state['error']}" if state["error"]
       lines << "停止错误：#{state['cleanup_error']}" if state["cleanup_error"]
       lines.concat(stop_diagnostics_lines(state))

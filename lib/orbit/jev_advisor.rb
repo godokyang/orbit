@@ -42,18 +42,18 @@ module Orbit
     }.freeze
 
     # Question-set versions for traceability; the wording above is frozen
-    # with docs/plan/jev-delegation-optimization.md and ADR-009. Bump on any
+    # with contracts/task-runtime.md and ADR-009. Bump on any
     # wording change so recorded judgments stay interpretable.
     QUESTION_SET_VERSIONS = {
       "observation" => "jev-observation-1",
       "delegation" => "jev-delegation-1",
       "candidates" => "jev-candidates-1",
-      "checker_quality" => "jev-checker-task-fit-1"
+      "checker_quality" => "jev-checker-task-fit-2"
     }.freeze
 
     # Second-stage delegation judgment, asked only after the caller's own
     # structural checks pass. The member_fit and parallel_gain wording is
-    # frozen in docs/plan/jev-delegation-optimization.md; cost_appropriate
+    # frozen in contracts/task-runtime.md; cost_appropriate
     # follows the ADR-009 coarse cost tiers. The caller supplies member
     # options and the bounded evidence comparison inside state.
     DELEGATION_QUESTIONS = {
@@ -160,10 +160,11 @@ module Orbit
       result.merge("scores" => scores)
     end
 
-    # Task-specific independent-review fit and expected end-to-end check time.
-    # Only candidates with valid, bounded facts are judged. Missing facts stay
-    # unscored in the selector, not a negative capability verdict. Noul answers
-    # rank runnable pool models; they cannot certify a model's quality.
+    # Exact route facts can support quality and end-to-end check time. A
+    # separately sourced OpenRouter model overview is only a weak quality
+    # prior: it says nothing about this route's check duration or quota.
+    # Questions and answer shapes change with the evidence source, so this
+    # version must be calibrated independently of jev-checker-task-fit-1.
     def assess_checker_quality(state:, candidates:)
       list = Array(candidates)
       raise Error, "at least one checker candidate is required" if list.empty?
@@ -173,23 +174,25 @@ module Orbit
         model = candidate.fetch("model").to_s
         questions["quality_#{index}"] = {
           "type" => "noul",
-          "instructions" => "Checker candidate #{model}: considering the current task instruction and this candidate's bounded " \
-                            "cached evidence, would this model likely provide a useful independent read-only review of this task's " \
-                            "artifact and catch substantive mistakes? Judge fit for this task, not whether its evidence file is complete. " \
-                            "A credential, model or provider name, or a single benchmark number alone cannot establish capability. " \
-                            "Insufficient evidence is uncertainty, not proof that the model is incapable.",
+          "instructions" => "Checker candidate #{model}: considering the current task instruction and the supplied " \
+                            "sourced facts, would this model likely provide a useful independent read-only review " \
+                            "and catch substantive mistakes? Exact route evidence and a model_overview_prior are different: " \
+                            "the latter is a model-level benchmark via OpenRouter, not proof of this OMP route's " \
+                            "reasoning variant, speed or price. A single benchmark number, model or provider name alone " \
+                            "cannot establish task fit. Insufficient evidence is uncertainty, not proof of incapability.",
           "criteria" => {
-            "true" => "Task-relevant evidence supports a useful independent review",
-            "false" => "Task-relevant evidence indicates this model is poorly suited to the review"
+            "true" => "The supplied facts and this task's requirements support a useful independent review",
+            "false" => "The supplied facts do not support task fit, or show this model is poorly suited"
           }
         }
+        next unless candidate["evidence"].is_a?(Hash)
+
         questions["time_#{index}"] = {
           "type" => "noul",
-          "instructions" => "Checker candidate #{model}: given the current task artifact and this candidate's bounded evidence, would an " \
-                            "independent read-only check by this model most likely finish end-to-end quickly, counting the check itself, any " \
-                            "rework after a weak or failed earlier check, and Root's follow-up? Output tokens per second alone is not " \
-                            "end-to-end task time. Answer true only when the supplied evidence gives a concrete basis to expect a fast " \
-                            "end-to-end check; no basis is unknown.",
+          "instructions" => "Checker candidate #{model}: given the current task artifact and this candidate's bounded " \
+                            "exact evidence, would an independent read-only check likely finish end-to-end quickly, " \
+                            "including the check, possible rework and Root's follow-up? Output speed is not " \
+                            "end-to-end task time. Answer true only on a concrete basis; no basis is unknown.",
           "criteria" => {
             "true" => "Concrete evidence supports a fast end-to-end independent check including rework",
             "false" => "No concrete basis, or the evidence suggests a slower end-to-end check"
@@ -201,7 +204,7 @@ module Orbit
       scores = list.each_with_index.to_h do |candidate, index|
         [candidate.fetch("model").to_s,
          { "quality" => result.fetch("scores").fetch("quality_#{index}"),
-           "time" => result.fetch("scores").fetch("time_#{index}") }]
+           "time" => candidate["evidence"].is_a?(Hash) ? result.fetch("scores").fetch("time_#{index}") : nil }]
       end
       result.merge("scores" => scores)
     end
@@ -211,8 +214,8 @@ module Orbit
     # Unified-model poster: builds a JudgmentRequest, judges through the
     # TypeSafe adapter, validates completeness against the requested ids and
     # re-raises as JevAdvisor::Error on any unavailable result so existing
-    # fail-closed callers keep their behavior. The wire format and the frozen
-    # question wording are unchanged.
+    # fail-closed callers keep their behavior. Checker question changes use a
+    # distinct version while retaining the same validated wire shape.
     def post_questions(state:, questions:, question_set_version:)
       request = JudgmentRequest.new(
         state: state, questions: self.class.model_questions(questions),

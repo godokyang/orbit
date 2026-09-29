@@ -1,5 +1,7 @@
 # 成员允许名单、full access 与 Jev 分工提示验收（2026-09-18）
 
+> 类型：历史证据／研究，按标题及正文记录的日期、版本和配置解读。下文“当前”“本轮”及旧规则不代表现行行为或授权；当前状态见[交接](../plan/handoff.md)，现行语义见[任务合同](../../contracts/task-runtime.md)。
+
 本文记录最小成员允许名单、Codex 执行成员和 `orbit codex` 新会话默认 full access，以及切片 D 有界 Jev 分工提示的开发侧验证。OpenCode／OMP 成员沿用 Root 原生权限。验证时的源码基线为提交 `f51d537` 之上的未提交改动；本机安装 0.6.5（`content_digest e860c0da…`、`installed_at 2026-09-18T08:13:06Z`），Codex `0.155.0`。
 
 ## 允许名单

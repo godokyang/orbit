@@ -93,6 +93,7 @@ module JevAdvisorTest
     check_stage_two_request_state_and_parsing
     check_stages_ignore_each_others_answers
     check_checker_quality_request_and_parsing
+    check_checker_overview_prior_has_no_time_verdict
     check_stage_two_rejects_invalid_probabilities
     check_git_excerpt_utf8_boundary
     check_error_boundaries
@@ -101,7 +102,7 @@ module JevAdvisorTest
 
   # The second-stage questions exist and are single noul questions. The
   # member_fit and parallel_gain wording stays frozen with
-  # docs/plan/jev-delegation-optimization.md; cost_appropriate follows the
+  # contracts/task-runtime.md; cost_appropriate follows the
   # ADR-009 coarse cost tiers.
   def check_delegation_question_text
     questions = Orbit::JevAdvisor::DELEGATION_QUESTIONS
@@ -250,9 +251,8 @@ module JevAdvisorTest
     end
   end
 
-  # Task-fit is a narrow question, not whether an evidence file is complete.
-  # The caller withholds candidates with no valid facts; unknown fit is not
-  # converted into a negative capability judgment.
+  # Exact route evidence permits task-fit and time judgments; an overview
+  # prior is not a route-specific time sample.
   def check_checker_quality_request_and_parsing
     state = {
       "instruction" => "Add a login page",
@@ -267,18 +267,7 @@ module JevAdvisorTest
       )
       sent = requests.first
       check(sent["questions"].keys.sort == %w[quality_0 quality_1 time_0 time_1],
-            "one bounded quality and one end-to-end time question per candidate in a single request")
-      check(sent["questions"].values.all? { |question| question["type"] == "noul" }, "each question is a single noul question")
-      quality = sent["questions"]["quality_0"]
-      check(quality["instructions"].include?("independent read-only review") &&
-            quality["instructions"].include?("Insufficient evidence is uncertainty") &&
-            !quality["criteria"]["false"].include?("missing"),
-            "the question judges task fit without classifying absent evidence as incapability")
-      check(result["question_set_version"] == "jev-checker-task-fit-1",
-            "changed task-fit semantics use a new question set version")
-      check(sent["questions"]["time_0"]["instructions"].include?("end-to-end"),
-            "the time judgment asks for expected end-to-end check time including rework")
-      check(sent["state"] == state, "the caller's bounded state passes through")
+            "exact route evidence can support separate quality and time assessments")
       check(result["scores"] == { "p/one" => { "quality" => 0.8, "time" => 0.7 },
                                   "p/two" => { "quality" => 0.2, "time" => 0.4 } },
             "quality and time answers map back to provider/id")
@@ -286,6 +275,22 @@ module JevAdvisorTest
 
     expect_error("no checker candidate is rejected before any request") do
       Orbit::JevAdvisor.new(api_key: "test-key").assess_checker_quality(state: {}, candidates: [])
+    end
+  end
+
+  def check_checker_overview_prior_has_no_time_verdict
+    prior = { "canonical_slug" => "moonshotai/kimi-k3-20260715", "coding_index" => 76.2,
+              "agentic_index" => 50.0, "reasoning_note" => "推理变体未核实",
+              "sources" => ["https://www.kimi.com/code/docs/en/kimi-code/models.html"] }
+    state = { "instruction" => "Review a small coding fix",
+              "candidates" => [{ "model" => "kimi-code/k3-256k", "model_overview_prior" => prior }] }
+    with_fixture([payload({ "quality_0" => noul(0.63) })]) do |endpoint, requests|
+      result = Orbit::JevAdvisor.new(api_key: "test-key", endpoint: endpoint).assess_checker_quality(
+        state: state, candidates: state["candidates"]
+      )
+      check(requests.first["questions"].keys == ["quality_0"] &&
+            result["scores"] == { "kimi-code/k3-256k" => { "quality" => 0.63, "time" => nil } },
+            "model-level coding benchmarks can inform checker fit but cannot generate a route-specific time verdict")
     end
   end
 

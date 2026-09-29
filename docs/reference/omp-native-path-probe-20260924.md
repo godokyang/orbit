@@ -1,6 +1,8 @@
 # OMP 原生协作路径验证记录（2026-09-24）
 
-本记录对应 [ADR-008](../adr/008-omp-native-collaboration-base.md) 与[冻结的路径验证条件](../plan/omp-native-path-probe.md)。使用原版 OMP 18.2.8、隔离临时项目和 profile、已配置的 `zhipu-coding-plan/glm-5.2` 实跑。Root 审核接缝与证据；同一 Herdr tab 的 OMP、OpenCode、Cursor Agent 分别实现原生协作探针、CLI 入口和独立检查者探针。没有迁移正式运行程序、修改全局安装、发布或推送。
+> 类型：历史证据／研究，按标题及正文记录的日期、版本和配置解读。下文“当前”“本轮”及旧规则不代表现行行为或授权；当前状态见[交接](../plan/handoff.md)，现行语义见[任务合同](../../contracts/task-runtime.md)。
+
+本记录对应 [ADR-008](../adr/008-omp-native-collaboration-base.md) 与[冻结的路径验证条件](omp-native-path-probe-20260924.md)。使用原版 OMP 18.2.8、隔离临时项目和 profile、已配置的 `zhipu-coding-plan/glm-5.2` 实跑。Root 审核接缝与证据；同一 Herdr tab 的 OMP、OpenCode、Cursor Agent 分别实现原生协作探针、CLI 入口和独立检查者探针。没有迁移正式运行程序、修改全局安装、发布或推送。
 
 ## 验证结果
 

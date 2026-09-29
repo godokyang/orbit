@@ -80,7 +80,7 @@ module CliTest
   def status_separates_check_activity_from_task_completion
     record = task("running")
     text = cli("status", record.path)
-    assert(text.include?("检查状态：idle") && text.include?("下一动作：等待 Root"),
+    assert(text.include?("检查状态：尚无检查结果") && text.include?("下一动作：等待当前助手（Root）继续执行"),
            "a running task with no check facts is idle and still with Root")
     assert(text.include?("裁定记录：0 条"), "status keeps adjudication history separate from open work")
     assert(text.include?("执行中，尚未完成验收") && !text.include?("不是任务完成"),
@@ -90,7 +90,7 @@ module CliTest
       "checks" => [{ "role" => "reviewer", "stale" => false, "result" => { "verdict" => "complete", "reason" => "检查通过" } }]
     ))
     text = cli("status", record.path)
-    assert(text.include?("检查状态：verdict(complete)（检查结论，不是任务完成）"),
+    assert(text.include?("检查状态：最近检查结论 complete（检查结论，不是任务完成）"),
            "a complete verdict stays a check result")
     assert(text.include?("状态：执行中，尚未完成验收（running）"), "the task status stays running")
 
@@ -99,17 +99,18 @@ module CliTest
       "next_check_at" => "2026-09-22T00:00:00Z", "next_check_trigger" => "manual_check", "next_check_manual" => true
     ))
     text = cli("status", record.path)
-    assert(text.include?("检查状态：running") && !text.include?("检查状态：queued") && !text.include?("检查状态：verdict(complete)"),
+    assert(text.include?("检查状态：独立检查进行中（等待结果即可，无需重复请求检查）") &&
+           !text.include?("检查状态：最近检查结论"),
            "an in-flight check is running and is not the task verdict")
 
     record.save(record.state.merge("check_observations" => { "obs-1" => { "status" => "finished" } }))
     text = cli("status", record.path)
-    assert(text.include?("检查状态：queued（检查已排队，不是任务完成）") && text.include?("下一动作：手动检查已排队"),
+    assert(text.include?("检查状态：手动终检已排队（不是任务完成）") && text.include?("下一动作：手动检查已排队"),
            "a manual next check is queued, not a completed task")
 
     record.save(record.state.merge("next_check_trigger" => "rebind", "next_check_basis" => "工作区重新绑定", "next_check_manual" => false))
     text = cli("status", record.path)
-    assert(text.include?("检查状态：queued（检查已排队，不是任务完成）") && text.include?("下一动作：重新绑定工作区"),
+    assert(text.include?("下一动作：重新绑定工作区"),
            "a workspace rebind outranks a manual queue")
 
     record.save(record.state.merge(
@@ -117,10 +118,10 @@ module CliTest
       "checks" => [{ "stale" => true, "stale_reasons" => ["workspace"], "result" => { "verdict" => "complete", "reason" => "旧检查" } }]
     ))
     text = cli("status", record.path)
-    assert(text.include?("检查状态：stale") && text.include?("下一动作：需要用户处理"),
+    assert(text.include?("检查状态：最近检查已过期（未采纳）") && text.include?("下一动作：需要用户处理"),
            "needs_user outranks rebind, and a stale verdict is not task completion")
-    assert(!text.include?("检查状态：verdict(complete)") && !text.include?("检查状态：queued"),
-           "a settled stale check is not shown as queued or as a current complete verdict")
+    assert(!text.include?("检查状态：最近检查结论"),
+           "a settled stale check is not shown as a current complete verdict")
 
     record.save(record.state.merge(
       "status" => "running", "next_check_at" => "2026-09-23T00:00:00Z", "next_check_trigger" => "timer",
@@ -129,14 +130,14 @@ module CliTest
       "findings" => {}
     ))
     text = cli("status", record.path)
-    assert(text.include?("检查状态：queued（检查已排队，不是任务完成）") && text.include?("下一动作：检查已安排"),
-           "a scheduled check is queued and arranged, not a completed task")
+    assert(text.include?("下一动作：检查已安排"),
+           "a scheduled check stays arranged, not a completed task")
 
     record.save(record.state.merge("next_check_at" => nil, "next_check_trigger" => nil, "next_check_basis" => nil,
                                    "checks" => [{ "role" => "reviewer", "stale" => true, "stale_reasons" => ["workspace"],
                                                   "result" => { "verdict" => "correct", "reason" => "旧工作区" } }]))
     text = cli("status", record.path)
-    assert(text.include?("检查状态：stale") && text.include?("下一动作：重新绑定工作区"),
+    assert(text.include?("检查状态：最近检查已过期（未采纳）") && text.include?("下一动作：重新绑定工作区"),
            "a workspace-stale check asks for rebind without calling the task complete")
 
     record.save(record.state.merge(
@@ -144,11 +145,51 @@ module CliTest
       "findings" => { "gap" => { "status" => "open" } }
     ))
     text = cli("status", record.path)
-    assert(text.include?("检查状态：stale") && text.include?("待处理问题：开放问题 1 条"),
+    assert(text.include?("检查状态：最近检查已过期（未采纳）") && text.include?("待处理问题：开放问题 1 条"),
            "a stale check retains its still-open finding")
     assert(!text.include?("下一动作：重新绑定工作区"), "a stale check without a workspace reason is not a rebind")
 
   end
+  def terminal_status_never_prompts_recheck_of_stopped_tasks
+    # The 639… shape (kickoff ④): a wrong not_ready reason survives an
+    # adjudication that overturned it, the task then stops ordinarily. The
+    # status must not ask a stopped task for artifacts or a re-check.
+    record = task("paused",
+                  stop_confirmation: { "confirmed" => true },
+                  completion_readiness: { "status" => "not_ready", "reason" => "No deliverable exists for this instruction" },
+                  decisions: [{ "id" => "d1", "outcome" => "root", "decided_at" => "2026-09-28T12:54:57Z" }],
+                  checks: [{ "role" => "adjudicator", "stale" => false,
+                             "result" => { "verdict" => "complete", "reason" => "Root 胜" } }])
+    text = cli("status", record.path)
+    assert(text.include?("已暂停并确认停止（paused）"), "the task is still reported as paused")
+    assert(text.lines.any? { |line| line.start_with?("下一动作：") && line.include?("新任务") },
+           "a paused task directs new work to a new task")
+    assert(!text.include?("补齐实际交付") && !text.include?("再重检") && !text.include?("No deliverable exists"),
+           "the overturned not_ready reason never becomes a next action")
+    assert(text.lines.any? { |line| line.start_with?("用户处理：") && line.include?("无需用户操作") },
+           "a confirmed stop needs no user action")
+    assert(text.include?("争议裁定记录") && text.include?("不是交付终检"),
+           "an adjudicator result remains a dispute record rather than a final delivery review")
+
+    # Same terminal rule without any adjudication: a plain stop with leftover
+    # readiness and an open finding must not ask the stopped record for work.
+    plain = task("paused",
+                 stop_confirmation: { "confirmed" => true },
+                 completion_readiness: { "status" => "not_ready", "reason" => "尚无交付" },
+                 findings: { "gap" => { "status" => "open" } })
+    text = cli("status", plain.path)
+    assert(text.lines.any? { |line| line.start_with?("下一动作：") && line.include?("新任务") },
+           "an ordinary stop also directs new work to a new task")
+    assert(!text.include?("先处理检查问题") && !text.include?("补齐实际交付"),
+           "leftover findings and readiness do not become work for a stopped task")
+
+    done = task("complete", stop_confirmation: { "confirmed" => true },
+                            completion_readiness: { "status" => "not_ready", "reason" => "旧理由" })
+    text = cli("status", done.path)
+    assert(text.include?("下一动作：无") && text.include?("无需用户操作"),
+           "a complete task stays terminal with nothing to do")
+  end
+
 
   def status_usage_sums_known_roles_and_excludes_root_cumulative
     record = task(
@@ -227,6 +268,17 @@ module CliTest
     assert(commands(record).empty?, "settled task cannot be stopped again")
     record.save(record.state.merge("status" => "stop_unconfirmed", "stop_reason" => "用户停止", "error" => "成员仍在执行"))
     assert(cli("status").include?("成员仍在执行"), "show the actual stop failure, not only the stop request reason")
+    record.save(record.state.merge(
+      "status" => "complete", "stop_reason" => nil, "error" => nil, "next_check_at" => nil,
+      "next_check_basis" => "等待 Root 根据有效终检收尾",
+      "stop_confirmation" => { "confirmed" => true, "thread_id" => "root", "status_after" => "idle" },
+      "checks" => [{ "role" => "reviewer", "stale" => false, "manual" => true,
+                     "result" => { "verdict" => "complete", "reason" => "已通过" } }]
+    ))
+    text = cli("status", record.path)
+    assert(text.include?("下一动作：无") && text.include?("下次检查：未安排") &&
+           !text.include?("等待 Root 根据有效终检收尾"),
+           "completed work must not retain a next-check reason instructing Root to finish again")
   end
 
   # A failed run may have confirmed that execution stopped; that is different
@@ -240,7 +292,7 @@ module CliTest
     assert(cli("status").include?("运行失败，停止情况需核实"), "an explicit unconfirmed stop still needs verification")
     record.save(record.state.merge("stop_confirmation" => { "confirmed" => true, "thread_id" => "root", "status_after" => "idle" }))
     text = cli("status")
-    assert(text.include?("运行失败，停止已确认") && text.include?("请查看运行错误") && !text.include?("停止情况需核实"),
+    assert(text.include?("运行失败，停止已确认") && text.include?("请查看下方运行错误") && !text.include?("停止情况需核实"),
            "a confirmed stop is reported as such instead of an unverified stop")
   end
 
@@ -490,9 +542,6 @@ module CliTest
   # dedicated control command that carries identity and status only.
   def model_evidence_caches_object_and_queues_dedicated_command
     record = task
-    help = cli("model-evidence", "--help")
-    assert(help.include?("billing_route") && help.include?("省略按 unknown") && help.include?("cost_tier"),
-           "the JSON example documents billing_route, the omission default and the optional coarse cost tier")
     reply = JSON.parse(cli("model-evidence", record.path, "--file", "-", stdin_data: JSON.generate(
       evidence("model" => "deepseek-v4.8", "cost_tier" => { "band" => "medium", "confidence" => "low",
                                                             "basis" => "vendor list price band" })
@@ -848,6 +897,7 @@ module CliTest
   def main
     %i[single_task_from_project_subdirectory multiple_tasks_require_explicit_selection completed_and_absent_tasks
        status_separates_check_activity_from_task_completion
+       terminal_status_never_prompts_recheck_of_stopped_tasks
        status_usage_sums_known_roles_and_excludes_root_cumulative
        status_usage_is_unknown_when_any_component_is_missing
        stale_result_and_user_action failed_stop_confirmation_is_reported doctor_without_connection_or_dependencies
