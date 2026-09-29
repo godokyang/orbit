@@ -65,11 +65,12 @@ export function validateCheckResult(value: unknown): string[] {
 				const seen = new Set<string>();
 				for (const item of c.items) {
 					if (typeof item !== "object" || item === null || Array.isArray(item) ||
-						Object.keys(item).sort().join() !== "evidence,requirement,status") {
-						problems.push("each coverage item must contain exactly requirement, status and evidence");
+						!["evidence,requirement,status", "evidence,requirement,scope,status"].includes(Object.keys(item).sort().join())) {
+						problems.push("each coverage item must contain requirement, status, evidence and optional scope");
 						continue;
 					}
 					const requirement = item.requirement;
+					if (!["delivery", "lifecycle"].includes(item.scope === undefined ? "delivery" : item.scope)) problems.push("coverage scope must be delivery or lifecycle");
 					if (typeof requirement !== "string" || !requirement.trim() || requirement.length > 300) {
 						problems.push("coverage requirement must be a non-empty string of at most 300 characters");
 					} else {

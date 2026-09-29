@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { modelCallReceipts, pendingCallReceipt, syncCallReceipts } from "./usage-receipt";
+import { createCallBoundaryBinder, modelCallReceipts, pendingCallReceipt, syncCallReceipts } from "./usage-receipt";
 
 // In-flight receipts. A call boundary is persisted before its result exists, so
 // an interrupted attempt still has an attributable call and never shows the
@@ -207,4 +207,71 @@ test("absent categories stay absent and reasoning is never folded into output", 
 	expect(call.reasoningTokens).toBe(80);
 	expect("cacheWrite" in call).toBe(false);
 	expect("totalTokens" in call).toBe(false);
+});
+
+// Regression for frozen SUT cae67791 check1: SDK 18.3.4 hands message_start and
+// message_end two DIFFERENT snapshot objects (agent-loop.ts:398-407), so an
+// object-keyed map left every start pending and every end id-less. Stream-order
+// pairing binds the end to its real call boundary; an end with no open start
+// still gets no id — nothing is manufactured from adjacency.
+test("an end carrying a replaced message object still binds its call boundary", () => {
+	const binder = createCallBoundaryBinder();
+	const usage = { input: 0, output: 0, cacheRead: 0 };
+	// Two responses stream sequentially; each event carries its own clone.
+	binder.bindStart("orbit-call-a");
+	binder.bindStart("orbit-call-b");
+	const endA = { call_id: binder.bindEnd(), message: { role: "assistant", responseId: "req_a", provider: "openrouter",
+		model: "zhipu-coding-plan/glm-5.2", stopReason: "stop", usage: { input: 10, output: 5, cacheRead: 2 } } };
+	const endB = { call_id: binder.bindEnd(), message: { role: "assistant", responseId: "req_b", provider: "openrouter",
+		model: "zhipu-coding-plan/glm-5.2", stopReason: "stop", usage: { input: 20, output: 6, cacheRead: 3 } } };
+	expect(endA.call_id).toBe("orbit-call-a");
+	expect(endB.call_id).toBe("orbit-call-b");
+	expect(binder.bindEnd()).toBeNull();
+
+	const pendings = ["orbit-call-a", "orbit-call-b"].map(call_id =>
+		pendingCallReceipt({ call_id, requested_model: "zhipu-coding-plan/glm-5.2",
+			message: { role: "assistant", provider: "openrouter", model: "zhipu-coding-plan/glm-5.2", usage } }));
+	const report = syncCallReceipts(pendings, [endA, endB], "zhipu-coding-plan/glm-5.2");
+	expect(report.calls.map(call => call.call_id)).toEqual(["orbit-call-a", "orbit-call-b"]);
+	expect(report.calls.every(call => call.usage_status === "reported")).toBe(true);
+	expect(report.gaps).toEqual([]);
+});
+
+// Regression for the same SUT: syncCallReceipts replays the full turn log on
+// every event, and carrying unkeyed receipts as existing state appended them
+// again on every sync (one provider response id appeared six times). The
+// reviewer now carries only keyed receipts as state; the recomputation
+// regenerates unkeyed rows identically, so repeated syncs are idempotent and
+// a genuinely unended start stays pending with its gap.
+test("repeated sync over the same turns stays idempotent", () => {
+	const stillOpen = pendingCallReceipt({ call_id: "orbit-call-c", requested_model: "zhipu-coding-plan/glm-5.2",
+		message: { role: "assistant", provider: "openrouter", model: "zhipu-coding-plan/glm-5.2",
+			usage: { input: 0, output: 0, cacheRead: 0 } } });
+	const turns = [
+		{ call_id: "orbit-call-done", message: { role: "assistant", responseId: "req_done", provider: "openrouter",
+			model: "zhipu-coding-plan/glm-5.2", stopReason: "stop", usage: { input: 30, output: 7, cacheRead: 4 } } },
+		// An end whose start was never observed: unkeyed, kept with its gap.
+		{ call_id: null, message: { role: "assistant", responseId: "req_lone", provider: "openrouter",
+			model: "zhipu-coding-plan/glm-5.2", stopReason: "stop", usage: { input: 40, output: 8, cacheRead: 5 } } },
+	];
+	let receipts = [stillOpen,
+		pendingCallReceipt({ call_id: "orbit-call-done", requested_model: "zhipu-coding-plan/glm-5.2",
+			message: { role: "assistant", provider: "openrouter", model: "zhipu-coding-plan/glm-5.2",
+				usage: { input: 0, output: 0, cacheRead: 0 } } })];
+	let first;
+	for (let sync = 0; sync < 3; sync += 1) {
+		const keyed = receipts.filter(receipt => receipt.call_id !== null);
+		const report = syncCallReceipts(keyed, turns, "zhipu-coding-plan/glm-5.2");
+		receipts = report.calls;
+		if (sync === 0) first = report;
+	}
+	expect(receipts.length).toBe(first.calls.length);
+	expect(receipts.filter(call => call.provider_response_id === "req_lone").length).toBe(1);
+	expect(receipts.filter(call => call.provider_response_id === "req_done").length).toBe(1);
+	const pending = receipts.find(call => call.call_id === "orbit-call-c");
+	expect(pending.usage_status).toBe("pending");
+	expect(first.gaps).toEqual([
+		"model call 2: no provider call boundary was observed for this response, so this call has no invocation id",
+		"orbit-call-c: the provider call started but no result was observed; usage is pending, not measured",
+	]);
 });

@@ -33,6 +33,7 @@ import {
 import { getBaseConfigRoot, getModelDbPath, getProfileRootDir, resolveProfileEnv } from "@oh-my-pi/pi-utils";
 import { createConfinedTools } from "./confined-tools.ts";
 import {
+	createCallBoundaryBinder,
 	matchAccountIdentity,
 	pendingCallReceipt,
 	syncCallReceipts,
@@ -510,7 +511,14 @@ try {
 					}
 				};
 				const syncUsage = () => {
-					const report = syncCallReceipts(receipts, turns, request.model, accountIdentityFor);
+					// Replayed turns must not grow the list: unkeyed receipts are
+					// recomputed from the full turn log on every sync, so only
+					// keyed receipts are carried as existing state. The
+					// recomputation is deterministic, so an unkeyed row is
+					// regenerated identically instead of appended again (frozen
+					// SUT cae67791 check1: one response id appeared six times).
+					const keyed = receipts.filter(receipt => receipt.call_id !== null);
+					const report = syncCallReceipts(keyed, turns, request.model, accountIdentityFor);
 					receipts = report.calls;
 					evidence.usage = receipts.length > 0 ? receipts : null;
 					evidence.usage_gaps = report.gaps;
@@ -521,21 +529,26 @@ try {
 				// local invocation id there, persist its in-flight receipt, and reuse
 				// the same id for that response's end or failure. The id is never
 				// derived afterwards from time and never from the check attempt id.
-				const invocationIds = new Map<object, string>();
+				// SDK 18.3.4 clones the message for each event
+				// (snapshotAssistantMessage, agent-loop.ts:398), so the end's object
+				// is never the start's: pairing runs by stream order via
+				// createCallBoundaryBinder, and an end without an open start keeps
+				// call_id null and its gap rather than a manufactured id.
+				const boundaryBinder = createCallBoundaryBinder();
 				session.subscribe(event => {
 					if (event.type !== "message_start" && event.type !== "message_end") return;
 					const message = event.message;
 					if (message.role !== "assistant") return;
 					if (event.type === "message_start") {
 						const callId = `orbit-call-${randomUUID()}`;
-						invocationIds.set(message, callId);
+						boundaryBinder.bindStart(callId);
 						receipts.push(pendingCallReceipt({ call_id: callId, message, requested_model: request.model,
 							session_model: sessionLabel, account: accountIdentityFor(message) }));
 						syncUsage();
 						persistEvidence();
 						return;
 					}
-					turns.push({ call_id: invocationIds.get(message) ?? null, message });
+					turns.push({ call_id: boundaryBinder.bindEnd(), message });
 					syncUsage();
 					persistEvidence();
 				});

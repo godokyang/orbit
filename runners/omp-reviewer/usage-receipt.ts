@@ -13,6 +13,28 @@ export {
 	matchAccountIdentity,
 	accountScopeKey,
 } from "../../plugins/model-call-receipts.mjs";
+
+// Pairs assistant message_start/message_end from one session's event stream
+// by actual stream order, not by message object identity. SDK 18.3.4 evidence
+// (@oh-my-pi/pi-agent-core src/agent-loop.ts): every streamed response emits
+// exactly one assistant message_start at the provider stream `start` event
+// (:2311) and exactly one message_end at finalization (:2229, :2507), and
+// each event carries a FRESH snapshotAssistantMessage clone (:398-407), so an
+// object-keyed map never joins the pair (frozen SUT cae67791 check1: real
+// starts stayed pending while their ends arrived without a call id).
+// Responses are sequential in one session's stream, so an end binds the
+// oldest still-open start. An end with no open start genuinely lacks an
+// observed boundary: it returns null and the caller keeps the gap — no id is
+// manufactured from adjacency or time.
+export function createCallBoundaryBinder(): { bindStart: (callId: string) => void; bindEnd: () => string | null } {
+	const open: string[] = [];
+	return {
+		bindStart: callId => {
+			open.push(callId);
+		},
+		bindEnd: () => open.shift() ?? null,
+	};
+}
 export type {
 	AccountIdentity,
 	LedgerReceiptMeta,

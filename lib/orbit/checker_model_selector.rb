@@ -346,12 +346,11 @@ module Orbit
     # projection can say whether the actual route meets an explicit requirement —
     # a catalog row never stands in for the actual limit.
     def project_facts(identities, state, catalog)
-      facts = facts_for(identities, task_requirements(state), catalog)
-      failure = facts.values.filter_map { |fact| fact["projection_error"] }.first
-      return [facts, nil] if failure.nil?
-
+      requirements = @facts.normalize_requirements(task_requirements(state))
+      [facts_for(identities, requirements, catalog), nil]
+    rescue ModelCapabilityFacts::Error => error
       [facts_for(identities, {}, catalog),
-       "recorded model requirements were dropped (#{failure}); candidates were projected with facts only"]
+       "recorded model requirements were dropped (#{error.message}); candidates were projected with facts only"]
     end
 
     def facts_for(identities, requirements, catalog)

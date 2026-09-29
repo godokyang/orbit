@@ -33,6 +33,12 @@ try {
   assert.equal((await gate('fetch', { url: 'https://example.com' })).block, true);
   assert.equal((await gate('hub', { op: 'send', to: 'Main', message: 'result' })).input.to, 'Main');
   assert.equal((await gate('hub', { op: 'send', to: 'another-member', message: 'expand scope' })).block, true);
+  // A bound member can end its lifecycle through the native result return,
+  // while re-dispatch and other resource tools stay blocked.
+  assert.equal((await gate('yield', { data: { summary: 'parser done' } })).input.data.summary, 'parser done');
+  assert.equal((await gate('yield', { error: 'cannot complete' })).input.error, 'cannot complete');
+  assert.equal((await gate('task', { tasks: [{ agent: 'task', task: 'x', solutionSpace: 'y' }] })).block, true);
+  assert.equal((await gate('eval', { code: 'process.env' })).block, true);
   console.log('WORK_UNIT_SCOPE_TEST_PASS native_tools_and_paths');
 
   const write = 'printf allowed > src/allowed.txt'; unit.scope.allowed_commands.push(write);

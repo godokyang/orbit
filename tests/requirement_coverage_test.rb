@@ -163,7 +163,29 @@ module RequirementCoverageTest
     complete_verified_coverage_releases_the_current_binding
     revisions_stale_records_and_process_checks_never_release
     missing_corrupt_and_invalid_never_count
+    future_lifecycle_does_not_create_a_delivery_cycle
     puts "REQUIREMENT_COVERAGE_TEST_PASS"
+  end
+
+  # A real reviewer could not verify "stop after this final check" before
+  # the stop. Keep that obligation visible; do not require a future event as
+  # pre-delivery evidence, and do not turn past test execution into lifecycle.
+  def future_lifecycle_does_not_create_a_delivery_cycle
+    with_coverage do |store|
+      report = coverage()
+      report["items"] << { "requirement" => "Stop after the final check",
+        "scope" => "lifecycle", "status" => "unverified", "evidence" => "Future runtime stop" }
+      store.record(check_id: "c1", kind: "artifact", role: "reviewer", coverage: report, **binding)
+      state = store.status(**binding)
+      assert(state["ready"] && state["verified"] == 2 && state["lifecycle_items"] == 1,
+        "future stop stays visible without claiming it already happened")
+      report["items"][0]["status"] = "unverified"
+      store.record(check_id: "c2", kind: "artifact", role: "reviewer", coverage: report, **binding)
+      assert(!store.status(**binding)["ready"], "actual test execution remains a delivery requirement")
+      report["items"] = [report["items"].last]
+      store.record(check_id: "c3", kind: "artifact", role: "reviewer", coverage: report, **binding)
+      assert(!store.status(**binding)["ready"], "lifecycle-only assertions cannot grant delivery coverage")
+    end
   end
 end
 

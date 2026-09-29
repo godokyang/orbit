@@ -116,6 +116,13 @@
               "evidence": {
                 "type": "string",
                 "maxLength": 1000
+              },
+              "scope": {
+                "enum": [
+                  "delivery",
+                  "lifecycle"
+                ],
+                "description": "Delivery requirements, including actual tests, must be verified; future final-check, closing-report and confirmed-stop obligations remain listed and are verified by runtime lifecycle gates. Missing scope keeps the earlier delivery-only interpretation."
               }
             }
           }

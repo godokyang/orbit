@@ -101,6 +101,12 @@ export async function validateMemberTool(unit, { toolName, input, rootAgentId })
       if (input.op === 'send' && input.to === rootAgentId) return { input };
       throw new Error('members may only send their result to the owning Root');
     }
+    // Native result submission (SDK tools/yield.ts): the subagent's terminal
+    // or incremental result return carries only data/error/type, spawns
+    // nothing and touches no path. It is the member's lifecycle end, not a
+    // resource entrance, so it is allowed for any bound member regardless of
+    // the unit's allowed_tools; `task` re-dispatch stays blocked below.
+    if (toolName === 'yield') return { input };
     if (toolName === 'write' && typeof input.path === 'string' && input.path.startsWith('agent://')) {
       if (input.path === `agent://${rootAgentId}`) return { input };
       throw new Error('member peer writes may only report to the owning Root');

@@ -70,7 +70,7 @@ module Orbit
       "decision findings dropped"
     ].freeze
     CONTEXT_KEYS = %w[
-      root task_delivery task_git review_focus findings recent_events recheck execution_members decisions dispute
+      root root_verifications task_delivery task_git review_focus findings recent_events recheck execution_members decisions dispute
       estimate hard_deadline elapsed_seconds project_rules uncopied_entries
     ].freeze
     CONTEXT_FINDING_FIELDS = %w[id requirement evidence action status check].freeze
@@ -302,6 +302,17 @@ module Orbit
 
     def build_compressed_context(context, caps, level)
       compressed = { "root" => compress_root(context["root"], caps) }
+      if context["root_verifications"].is_a?(Array)
+        compressed["root_verifications"] = recent_tail(context["root_verifications"], [caps[:list_limit], 32].min).map do |receipt|
+          bounded = bound_value(receipt, caps)
+          next bounded unless receipt.is_a?(Hash)
+
+          %w[command script output].each do |field|
+            bounded["#{field}_truncated"] = true if receipt[field].is_a?(String) && bounded[field] != receipt[field]
+          end
+          bounded
+        end
+      end
       compressed["task_delivery"] = bound_value(context["task_delivery"], caps,
                                                   string_cap: [caps[:string_cap], CONTEXT_DELIVERY_TEXT_CAP].max)
       compressed["task_git"] = compress_task_git(context["task_git"], caps)
@@ -693,15 +704,26 @@ module Orbit
     # them; nothing here invents remote evidence.
     def requirement_coverage_note
       "## Requirement coverage\n\n" \
-        "Return coverage with exactly complete (boolean) and items (1..64 entries). Each item has exactly " \
-        "requirement (distinct non-empty text, at most 300 characters), status (verified or unverified), " \
+        "Return coverage with exactly complete (boolean) and items (1..64 entries). Each item has " \
+        "requirement (distinct non-empty text, at most 300 characters), scope (delivery or lifecycle), status (verified or unverified), " \
         "and evidence (at most 1000 characters; verified needs concrete non-empty evidence). Enumerate each " \
         "requirement from the original instruction, effective amendments and named basis, including referenced " \
         "specification files in the fixed snapshot. complete=true means you have enumerated them all; do not " \
         "silently omit requirements. Mark unread, untested or otherwise unsupported requirements unverified " \
-        "and explain the gap. Empty findings, Root claims and Jev calibration are not coverage. Identify " \
+        "and explain the gap. delivery covers artifacts, integration, requested test execution and answer content. " \
+        "lifecycle covers only this final review, the subsequent completion/confirmed stop and the subsequent " \
+        "closing report; keep those obligations listed, but do not claim future events already happened. " \
+        "The runtime separately verifies its manual finalization notice, closing turn and actual stop. " \
+        "Only delivery items must be verified before that sequence can start. Test execution is never lifecycle. " \
+        "Empty findings, Root claims and Jev calibration are not coverage. Identify " \
         "the file facts you actually read and distinguish them from attributed verification receipts: your " \
-        "read-only session cannot run tests. Local unit evidence does not replace whole-task integration. " \
+        "read-only session cannot run tests. The program's root_verifications, when present, are actual native " \
+        "tool receipts: retain their original identities and bindings, inspect artifact_matches and input_matches, " \
+        "and assess whether the command and reported exit/output support this requirement. Missing, failed, " \
+        "truncated or artifact-mismatched receipts cannot prove an executed successful test. An input mismatch " \
+        "is historical evidence: compare the changed requirements, never relabel it as a current-input run. " \
+        "Do not trust a Root-written log or basis statement as program-attested execution. " \
+        "Local unit evidence does not replace whole-task integration. " \
         "Process checks and adjudication may report their limited scope but cannot grant delivery coverage. " \
         "If the scope cannot be completely enumerated within the output bound, complete=false. Missing or " \
         "incomplete coverage cannot grant final completion."
@@ -874,8 +896,8 @@ module Orbit
       return problems + ["coverage.items must contain 1..64 entries"] unless items.is_a?(Array) && items.length.between?(1, 64)
       requirements = []
       items.each_with_index do |item, index|
-        unless item.is_a?(Hash) && item.keys.sort == %w[evidence requirement status]
-          problems << "coverage.items[#{index}] must contain exactly requirement, status and evidence"
+        unless item.is_a?(Hash) && [ %w[evidence requirement status], %w[evidence requirement scope status] ].include?(item.keys.sort)
+          problems << "coverage.items[#{index}] must contain requirement, status, evidence and optional scope"
           next
         end
         requirement, evidence = item.values_at("requirement", "evidence")
@@ -883,6 +905,7 @@ module Orbit
           problems << "coverage.items[#{index}].requirement must be a non-empty string of at most 300 characters"
         end
         requirements << requirement
+        problems << "coverage.items[#{index}].scope must be delivery or lifecycle" unless %w[delivery lifecycle].include?(item.fetch("scope", "delivery"))
         problems << "coverage.items[#{index}].status must be verified or unverified" unless %w[verified unverified].include?(item["status"])
         unless evidence.is_a?(String) && evidence.length <= 1000 && (item["status"] != "verified" || !evidence.strip.empty?)
           problems << "coverage.items[#{index}].evidence must fit its status and the 1000-character bound"

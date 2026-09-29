@@ -40,7 +40,7 @@ export const toolArgs = z => ({
         review_model: z.string().optional().describe('Optional Root-selected provider/id from the current OMP model catalog.'),
         intent: z.enum(['complete', 'pause']).optional().describe('stop only: complete (default) requires the actual finalization gate; pause is an explicit interruption.'),
         operation: z.enum(['declare', 'read', 'list', 'finish']).optional().describe('work-unit operation; declare records a bounded handoff, finish records Root verification.'),
-        work_unit: z.record(z.string(), z.unknown()).optional().describe('work-unit payload: declare uses spec with objective, requirement references, scope paths/tools/commands, acceptance, escalation and optional context/decisions/dependencies/model_requirements; read/finish use id. Finish also needs status/result/verification.'),
+        work_unit: z.record(z.string(), z.unknown()).optional().describe('declare payload: {spec:{objective,requirements,allowed_paths,allowed_tools,allowed_commands,acceptance,escalation}}. Paths/tools/commands are flat allowed_* fields inside spec, never nested scope. Optional spec fields: context,decisions,dependencies,model_requirements. read/finish use id; finish also needs status,result,verification.'),
         text: z.string().optional(), check_in: z.number().int().positive().optional()
       });
 

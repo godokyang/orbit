@@ -92,6 +92,12 @@ module Orbit
       @evidence_cache = evidence_cache
     end
 
+    # Validate task requirements separately from individual model identities:
+    # a malformed catalog identity must not invalidate the whole task's needs.
+    def normalize_requirements(task)
+      normalize_task(task)
+    end
+
     # Bounded projection for one candidate identity. `identity` carries the
     # four explicit identity fields; `task` carries the explicit task
     # requirements. Returns the Hash documented above.

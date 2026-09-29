@@ -791,7 +791,7 @@ module Orbit
       coverage = state["requirement_coverage"]
       return "要求覆盖：历史记录未提供逐项覆盖" unless state["coverage_required"] || coverage
       return "要求覆盖：尚未取得完整逐项证据" unless coverage.is_a?(Hash)
-      return "要求覆盖：当前版本 #{coverage['verified']} 项已核验（检查者枚举完整）" if coverage["ready"]
+      return "要求覆盖：当前版本 #{coverage['verified']} 项交付要求已核验（检查者枚举完整；生命周期另经终检与停止门核实）" if coverage["ready"]
 
       "要求覆盖：尚未确认 — #{coverage['gap'] || '有未核验要求或枚举不完整'}"
     end

@@ -625,6 +625,16 @@ module CheckerModelSelectorTest
            with_requirements["quality_basis"] == "model_overview_prior",
            "only the task record's explicit indices turn a catalog fact into a prior")
 
+    mixed_catalog_advisor = FakeAdvisor.new({ model => { "quality" => 0.8 } })
+    _, mixed_catalog = selector(pool: [model], catalog: catalog_for([model, "other/-invalid-identity"]), entries: [],
+                               advisor: mixed_catalog_advisor, probe: FakeProbe.new([model]), overview: overview,
+                               release: release_for)
+                      .select(explicit: nil, instruction: "review",
+                              state: task_state(requirements: { "relevant_indices" => ["coding_index"] }))
+    assert(mixed_catalog_advisor.calls == 1 && mixed_catalog["requirements_error"].nil? &&
+           mixed_catalog["quality_basis"] == "model_overview_prior",
+           "a malformed unrelated catalog identity cannot downgrade valid task requirements or suppress Jev")
+
     _, plain = selector(pool: [model], catalog: catalog_for([model]), entries: [],
                         advisor: FakeAdvisor.new({}), probe: FakeProbe.new([model]), overview: overview)
                .select(explicit: nil, instruction: "review", state: task_state)

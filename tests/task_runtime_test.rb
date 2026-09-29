@@ -287,6 +287,42 @@ def fixture(interval: 60)
   end
 end
 
+# Only the owning Root's native tool receipt reaches an independent check.
+# Later artifact changes invalidate it without rewriting its original input.
+fixture do |root, record, host, checker, _runtime|
+  now = Time.now.to_f
+  state = record.state
+  state["connection"]["thread_id"] = "existing-root"
+  record.save(state)
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker)
+  artifact_root = state.fetch("workspace").fetch("artifact_root")
+  receipt = { "source" => "omp_native_tool_result", "task_directory" => record.path,
+    "root_session_id" => "existing-root", "tool_call_id" => "test-call", "tool" => "bash",
+    "command" => "npm test", "execution_cwd" => root, "input_digest" => record.input_digest(record.state),
+    "artifact_root" => artifact_root, "artifact_root_at_completion" => artifact_root, "fingerprint_status" => "ok",
+    "artifact_digest" => Orbit::WorkspaceSnapshot.fingerprint(project_root: root),
+    "status" => "completed", "exit_code" => 0, "output" => "8 tests passed" }
+  host.instance_variable_get(:@state)["root_verifications"] = [receipt,
+    receipt.merge("task_directory" => "/another-task"), receipt.merge("root_session_id" => "another-root")]
+  record.submit("check")
+  runtime.tick(now: now)
+  context = checker.calls.last.fetch(:context)
+  receipts = context.fetch("root_verifications")
+  assert(receipts.length == 1 && receipts[0]["artifact_matches"] && receipts[0]["input_matches"],
+         "current, native, owned execution is supplied once with exact version matches")
+  assert(!context.fetch("root").key?("root_verifications"), "raw receipts are not duplicated in Root context")
+  checker.result = answer("continue")
+  runtime.tick(now: now + 1)
+  File.write(File.join(root, "artifact.txt"), "changed after tests")
+  host.finish("changed")
+  host.instance_variable_get(:@state)["root_verifications"] = [receipt]
+  record.submit("check")
+  runtime.tick(now: now + 2)
+  historical = checker.calls.last.fetch(:context).fetch("root_verifications").first
+  assert(!historical["artifact_matches"] && historical["input_digest"] == receipt["input_digest"],
+         "tests from an earlier artifact stay historical; their binding is never retagged")
+end
+
 # A changed artifact invalidates an old pass. A current finding is corrected;
 # a later false positive can be independently overturned without a vote.
 fixture do |root, record, host, checker, runtime|
@@ -863,6 +899,26 @@ end
 
 # A registered native member is stopped from the task record. There is no
 # allowlist left to exempt or block that stop.
+fixture do |_root, record, host, checker, runtime|
+  now = Time.now.to_f
+  native = { "registry_status" => "idle", "streaming" => false }
+  host.define_singleton_method(:member_state) { |_id| native }
+  host.define_singleton_method(:member_result) { |_id| { "output_text" => "returned result" } }
+  record.register_member("orbit-handoff", requested_name: "handoff", status: "registered")
+  record.submit("check")
+  runtime.tick(now: now)
+  checker.result = answer("complete")
+  runtime.tick(now: now + 1)
+  assert(record.state["pending_finalization"] && record.state["finalization_notices"].empty?,
+         "a qualified review waits for native acceptance rather than treating idle or returned prose as completion")
+  native["lifecycle"] = { "acceptedAt" => 1 }
+  runtime.tick(now: now + 2)
+  runtime.tick(now: now + 3)
+  assert(record.state["members"].first["status"] == "completed" &&
+         record.state["finalization_notices"].length == 1 && checker.calls.length == 1,
+         "later native acceptance sends one same-version notice without buying a duplicate final review")
+end
+
 fixture do |_root, record, host, _checker, _runtime|
   state = record.state
   state["connection"]["thread_id"] = "existing-root"
@@ -2456,6 +2512,9 @@ fixture do |_root, record, host, checker, runtime|
   assert(record.state["finalization_notices"].empty? &&
          events(record).any? { |event| event["type"] == "requirement_coverage_unverified" },
          "finding-free delivery cannot release unverified requirements")
+  assert(record.state.dig("completion_readiness", "status") == "not_ready" &&
+         record.state.dig("completion_readiness", "check") == 1,
+         "the same review cannot immediately overturn its own unverified coverage")
   host.finish("first and second behaviors delivered")
   record.submit("check")
   runtime.tick(now: now + 2)

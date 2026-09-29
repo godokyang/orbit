@@ -1,0 +1,61 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# Internal read-only binding entry for the OMP extension's Root verification
+# receipts (ticket D-ROOT-VERIFICATIONS). The extension calls this (spawnSync)
+# at a Root bash/eval tool start (input identity) and again at completion
+# (artifact fingerprint), so a receipt pins the requirement/input digest of
+# the moment the command STARTED and the artifact digest of the moment it
+# ENDED — a mid-run amend or rebind can never make an old command look like
+# evidence for a new requirement or a new root.
+#
+# Usage:
+#   orbit-root-binding TASK_DIR [--no-fingerprint]
+#
+# Exit 0 with one JSON object:
+#   {"ok":true,"artifact_root":"...","input_digest":"...",
+#    "artifact_digest":"..."|null,"fingerprint_status":"ok"|"unknown"|"skipped"}
+# A fingerprint failure is reported as "unknown" with a null digest: the
+# caller must keep the gap, never construct a match from it. --no-fingerprint
+# is for the start-time call, which only pins input identity. Exit 1 when the
+# task itself cannot be read; this script never writes anything.
+
+require "json"
+require_relative "../lib/orbit/task_record"
+require_relative "../lib/orbit/workspace_snapshot"
+
+task_dir = ARGV[0]
+if task_dir.to_s.empty?
+  warn "usage: orbit-root-binding TASK_DIR [--no-fingerprint]"
+  exit 1
+end
+
+record = Orbit::TaskRecord.new(task_dir)
+state = record.state
+workspace = state["workspace"].is_a?(Hash) ? state["workspace"] : {}
+artifact_root = workspace["artifact_root"]
+input_digest = record.input_digest(state)
+
+artifact_digest = nil
+fingerprint_status = "skipped"
+unless ARGV.include?("--no-fingerprint")
+  if artifact_root.to_s.empty?
+    fingerprint_status = "unknown"
+  else
+    begin
+      artifact_digest = Orbit::WorkspaceSnapshot.fingerprint(project_root: artifact_root)
+      fingerprint_status = "ok"
+    rescue StandardError
+      artifact_digest = nil
+      fingerprint_status = "unknown"
+    end
+  end
+end
+
+puts JSON.generate({
+  ok: true,
+  artifact_root: artifact_root,
+  input_digest: input_digest,
+  artifact_digest: artifact_digest,
+  fingerprint_status: fingerprint_status
+})

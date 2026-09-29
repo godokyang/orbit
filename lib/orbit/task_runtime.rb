@@ -1745,8 +1745,10 @@ module Orbit
       @checker.start(
         directory: snapshot.fetch("snapshot_path"), inputs: @record.inputs(@state),
         context: {
-          "root" => host.merge("last_turn_task_attributed" => task_turn_attributed?(host)),
+          "root" => host.reject { |key, _| key == "root_verifications" }
+                        .merge("last_turn_task_attributed" => task_turn_attributed?(host)),
           "task_delivery" => task_delivery_for(snapshot, input_digest),
+          "root_verifications" => root_verifications_for(host, snapshot, input_digest),
           "task_git" => task_git, "findings" => @state.fetch("findings"),
           "recent_events" => recent_events, "recheck" => clues,
           "execution_members" => @state["members"],
@@ -1995,6 +1997,29 @@ module Orbit
         artifact_digest: fingerprint_artifact, artifact_root: artifact_root)
     end
 
+    # These facts come from the owning native session's tool callbacks, not
+    # from a Root-authored proof file. Keep the original binding even after
+    # amendments; the current review compares relevance without rewriting it.
+    def root_verifications_for(host, snapshot, input_digest)
+      Array(host["root_verifications"]).last(32).filter_map do |receipt|
+        next unless receipt.is_a?(Hash) && receipt["source"] == "omp_native_tool_result" &&
+          receipt["task_directory"] == @record.path &&
+          receipt["root_session_id"] == @state.dig("connection", "thread_id")
+
+        cwd_matches = begin
+          File.realpath(receipt["execution_cwd"].to_s) == artifact_root
+        rescue SystemCallError
+          false
+        end
+        receipt.merge(
+          "artifact_matches" => cwd_matches && receipt["artifact_root"] == artifact_root &&
+            receipt["artifact_root_at_completion"] == artifact_root && receipt["fingerprint_status"] == "ok" &&
+            receipt["artifact_digest"] == snapshot.fetch("digest"),
+          "input_matches" => receipt["input_digest"] == input_digest
+        )
+      end
+    end
+
     def record_requirement_coverage(scope, result, stale)
       coverage = result["coverage"] || { "complete" => false, "items" => [
         { "requirement" => "Original instruction and effective amendments", "status" => "unverified",
@@ -2209,6 +2234,7 @@ module Orbit
     def retire_overturned_readiness(scope, result, current_digest)
       ready = @state["completion_readiness"]
       return unless ready.is_a?(Hash) && ready["status"] == "not_ready"
+      return if ready["check"] == scope["number"]
       return unless scope["kind"] == "artifact" && ready["input_digest"] == scope["input_digest"] &&
                     ready["artifact_root"] == scope["artifact_root"] &&
                     ready["artifact_digest"] == current_digest
@@ -2269,7 +2295,7 @@ module Orbit
       delivery = result.fetch("delivery")
       unless delivery.fetch("ready")
         reason = delivery.fetch("reason")
-        @state["completion_readiness"] = { "status" => "not_ready", "reason" => reason,
+        @state["completion_readiness"] = { "status" => "not_ready", "reason" => reason, "check" => scope["number"],
                                            "input_digest" => scope["input_digest"],
                                            "artifact_root" => scope["artifact_root"],
                                            "artifact_digest" => current_digest }
@@ -2280,7 +2306,7 @@ module Orbit
       end
       coverage = requirement_coverage_status if @state["coverage_required"]
       if coverage && !coverage["ready"]
-        @state["completion_readiness"] = { "status" => "not_ready", "reason" => coverage["gap"],
+        @state["completion_readiness"] = { "status" => "not_ready", "reason" => coverage["gap"], "check" => scope["number"],
           "input_digest" => scope["input_digest"], "artifact_root" => scope["artifact_root"],
           "artifact_digest" => current_digest, "coverage" => coverage }
         @record.event("requirement_coverage_unverified", "check" => scope["number"], "reason" => coverage["gap"])
@@ -2289,8 +2315,7 @@ module Orbit
         return
       end
       return unless @state["findings"].values.none? { |finding| finding["status"] == "open" }
-      return unless members_settled?
-      unless host["status"] == "idle" && host["last_turn_status"] == "completed"
+      unless members_settled? && host["status"] == "idle" && host["last_turn_status"] == "completed"
         queue_finalization_handoff(scope, current_digest, now)
         return
       end

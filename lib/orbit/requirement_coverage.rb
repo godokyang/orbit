@@ -16,20 +16,25 @@ module Orbit
   # `complete` only means the CHECKER claims it enumerated every requirement;
   # it is never inferred from an empty finding list. `ready` requires the
   # latest current (non-stale, exactly version-matched) ARTIFACT-scope
-  # REVIEWER record to be complete with every item verified; a newer failing
+  # REVIEWER record to enumerate every requirement and verify delivery items;
+  # future lifecycle obligations remain recorded and use the runtime's actual
+  # final-check/stop gates instead of requiring their outcome before they run.
+  # A newer failing
   # or partial artifact review of the same version overrides an earlier pass,
   # and process checks never grant, replace or erase delivery coverage.
   # Stale records remain as history but never release the current version. The
   # program never fabricates local verification receipts, and a Jev sample is
   # not outcome coverage.
   class RequirementCoverage
-    SCHEMA_VERSION = "orbit-requirement-coverage-1"
+    SCHEMA_VERSION = "orbit-requirement-coverage-2"
+    LEGACY_SCHEMA_VERSION = "orbit-requirement-coverage-1"
     FILE_NAME = "requirement-coverage.json"
     LOCK_NAME = "requirement-coverage.lock"
     ELIGIBLE_KIND = "artifact"
     ELIGIBLE_ROLE = "reviewer"
     KINDS = %w[artifact process].freeze
     ITEM_STATUSES = %w[verified unverified].freeze
+    ITEM_SCOPES = %w[delivery lifecycle].freeze
     MAX_BYTES = 2 * 1024 * 1024
     MAX_RECORDS = 256
     MAX_ITEMS = 64
@@ -90,15 +95,18 @@ module Orbit
       return gap("no artifact-review coverage record for this input, artifact and root version") if current.nil?
 
       items = current["coverage"]["items"]
-      verified = items.count { |item| item["status"] == "verified" }
+      delivery = items.select { |item| item.fetch("scope", "delivery") == "delivery" }
+      verified = delivery.count { |item| item["status"] == "verified" }
       base = {
         "current" => true, "complete" => current["coverage"]["complete"],
         "kind" => current["kind"], "role" => current["role"],
         "check_id" => current["check_id"], "recorded_at" => current["recorded_at"],
-        "verified" => verified, "unverified" => items.length - verified, "items" => items
+        "verified" => verified, "unverified" => delivery.length - verified, "items" => items,
+        "lifecycle_items" => items.length - delivery.length
       }
       return base.merge("ready" => false, "gap" => "the checker did not claim complete requirement enumeration") unless current["coverage"]["complete"]
-      return base.merge("ready" => false, "gap" => "#{items.length - verified} requirement(s) remain unverified") unless items.length == verified
+      return base.merge("ready" => false, "gap" => "no delivery requirements were enumerated") if delivery.empty?
+      return base.merge("ready" => false, "gap" => "#{delivery.length - verified} delivery requirement(s) remain unverified") unless delivery.length == verified
 
       base.merge("ready" => true, "gap" => nil)
     end
@@ -123,7 +131,11 @@ module Orbit
       seen = {}
       cleaned = items.map do |item|
         raise Error, "each coverage item must be an object" unless item.is_a?(Hash)
-        raise Error, "each item must contain exactly requirement, status and evidence" unless item.keys.sort == %w[evidence requirement status]
+        unless [ %w[evidence requirement status], %w[evidence requirement scope status] ].include?(item.keys.sort)
+          raise Error, "each item must contain requirement, status, evidence and optional scope"
+        end
+        scope = item.fetch("scope", "delivery")
+        raise Error, "item scope must be delivery or lifecycle" unless ITEM_SCOPES.include?(scope)
         raise Error, "requirement and evidence must be strings" unless item["requirement"].is_a?(String) && item["evidence"].is_a?(String)
 
         requirement = item["requirement"].to_s.strip
@@ -140,7 +152,7 @@ module Orbit
         raise Error, "evidence must be at most #{MAX_TEXT} characters" if evidence.length > MAX_TEXT
         raise Error, "a verified item needs its evidence" if status == "verified" && evidence.strip.empty?
 
-        { "requirement" => requirement, "status" => status, "evidence" => evidence }
+        { "requirement" => requirement, "scope" => scope, "status" => status, "evidence" => evidence }
       end
       { "complete" => coverage["complete"], "items" => cleaned }
     end
@@ -157,7 +169,9 @@ module Orbit
       raise Error, "coverage file exceeds #{MAX_BYTES} bytes" if File.size(path) > MAX_BYTES
 
       document = JSON.parse(File.read(path))
-      unless document.is_a?(Hash) && document["schema_version"] == SCHEMA_VERSION && document["records"].is_a?(Array)
+      # Earlier records without scope keep their original all-items gate:
+      # none is reclassified or made verified by the new lifecycle split.
+      unless document.is_a?(Hash) && [SCHEMA_VERSION, LEGACY_SCHEMA_VERSION].include?(document["schema_version"]) && document["records"].is_a?(Array)
         raise Error, "coverage file does not match #{SCHEMA_VERSION}"
       end
 

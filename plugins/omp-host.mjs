@@ -1,10 +1,11 @@
 import fs from 'node:fs/promises';
-import { readFileSync, realpathSync } from 'node:fs';
+import { readFileSync, realpathSync, watchFile, unwatchFile } from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createOrbitHost, toolArgs, toolDescription } from './host.mjs';
+import { captureStart, buildReceipt, appendReceipt, readReceipts } from './root-verifications.mjs';
 import { validateMemberTool } from './work-unit-scope.mjs';
 import { observeNativeCalls, flushNativeCalls } from './native-call-recorder.mjs';
 
@@ -15,6 +16,10 @@ const textOf = content => typeof content === 'string' ? content : (content || []
 const registerMemberBin = process.env.ORBIT_REGISTER_MEMBER_BIN
   || fileURLToPath(new URL('../scripts/orbit-register-member', import.meta.url));
 const workUnitBin = fileURLToPath(new URL('../scripts/orbit-work-unit', import.meta.url));
+// Same release-anchored, ruby-invoked shape for the read-only binding helper
+// that pins a Root receipt's input identity (start) and artifact digest (end).
+const rootBindingBin = process.env.ORBIT_ROOT_BINDING_BIN
+  || fileURLToPath(new URL('../scripts/orbit-root-binding', import.meta.url));
 // Pool edits must run THIS release's CLI, never whatever `orbit` happens to
 // be first on PATH (an older install would write a stale schema/format).
 // Same release-anchored, ruby-invoked shape as the member registration entry.
@@ -845,6 +850,67 @@ export function installOmpExtension(pi, sdk) {
     }
   }
 
+  // --- Root execution verification receipts (ticket D-ROOT-VERIFICATIONS) --
+  // Facts only, captured from real Root tool_execution_start/end events and
+  // the read-only scripts/orbit-root-binding helper. The input identity
+  // (artifact_root + input_digest) is pinned at tool START so a mid-run
+  // amend/rebind can never make an old command look like evidence for a new
+  // requirement or a new root; the artifact fingerprint is captured at
+  // completion. No TTL cache and no JS-side "current" verdict: matching
+  // against the current snapshot/input is the Ruby start_check's job.
+  // Members are never captured here — remember() is the main session only.
+  const rootVerifyStarts = new Map(); // toolCallId -> pinned start record
+  const ROOT_VERIFY_STARTS_CAP = 256;
+  function readRootBinding(taskDir, { fingerprint = true } = {}) {
+    const argv = ['--disable-gems', rootBindingBin, taskDir];
+    if (!fingerprint) argv.push('--no-fingerprint');
+    const run = spawnSync(rubyBin(), argv, { encoding: 'utf8', timeout: 30000, maxBuffer: 1024 * 1024 });
+    if (run.error || run.status !== 0) return null;
+    try {
+      const value = JSON.parse(run.stdout);
+      return value && value.ok === true ? value : null;
+    } catch { return null; }
+  }
+  function observeRootVerifyStart(event, session) {
+    if (event.toolName !== 'bash' && event.toolName !== 'eval') return;
+    if (typeof event.toolCallId !== 'string') return;
+    if (rootVerifyStarts.size >= ROOT_VERIFY_STARTS_CAP) rootVerifyStarts.delete(rootVerifyStarts.keys().next().value);
+    let sessionCwd = null;
+    try { sessionCwd = session.sessionManager?.getCwd?.() ?? null; } catch { sessionCwd = null; }
+    const start = captureStart(event, { sessionCwd });
+    if (!start) return;
+    const taskDir = taskDirs.get(session.sessionId);
+    start.task_directory = taskDir ?? null;
+    start.root_session_id = session.sessionId ?? null;
+    const binding = taskDir ? readRootBinding(taskDir, { fingerprint: false }) : null;
+    if (binding) {
+      start.artifact_root = binding.artifact_root ?? null;
+      start.input_digest = binding.input_digest ?? null;
+    } else {
+      // Explicit gap: no bound task or unreadable binding at start — the
+      // receipt keeps the execution fact but grants no input identity.
+      start.binding_status = 'unknown';
+    }
+    rootVerifyStarts.set(event.toolCallId, start);
+  }
+  function observeRootVerifyEnd(event, session) {
+    if (event.toolName !== 'bash' && event.toolName !== 'eval') return;
+    const start = typeof event.toolCallId === 'string' ? rootVerifyStarts.get(event.toolCallId) ?? null : null;
+    if (typeof event.toolCallId === 'string') rootVerifyStarts.delete(event.toolCallId);
+    // Keep the START owner when a new task is bound while the command runs.
+    // A command started outside a task is never assigned to a later task.
+    const taskDir = start ? start.task_directory : taskDirs.get(session.sessionId);
+    if (!taskDir) return; // unattributable: never write into a foreign task
+    const endBinding = readRootBinding(taskDir); // null = explicit gap
+    const receipt = buildReceipt({ event, start, endBinding,
+      taskDirectory: taskDir, rootSessionId: session.sessionId });
+    if (!receipt) return; // synthetic interrupt replay: nothing executed
+    const error = appendReceipt(taskDir, receipt);
+    if (error) recordCollabFor(taskDir, { kind: 'verification_persist_failed', at: Date.now(),
+      session_id: session.sessionId ?? null, agent_id: null, tool_call_id: event.toolCallId ?? null,
+      reason: String(error?.message || error).slice(0, 200) });
+  }
+
   function trackMemberTools(id, session) {
     if (memberActiveTools.has(id) || typeof session?.subscribe !== 'function') return;
     const active = new Set();
@@ -896,9 +962,11 @@ export function installOmpExtension(pi, sdk) {
       if (event.type === 'tool_execution_start') {
         entry.activeTools.add(event.toolCallId);
         rememberAskArgs(event);
+        observeRootVerifyStart(event, session);
       }
       if (event.type === 'tool_execution_end') {
         entry.activeTools.delete(event.toolCallId);
+        observeRootVerifyEnd(event, session);
         // Ask observation only: the registry lookup is deliberately lazy so a
         // normal tool end never pays for it.
         if (event.toolName === 'ask') observeAskEnd(event, id, agentIdFor(id));
@@ -958,12 +1026,9 @@ export function installOmpExtension(pi, sdk) {
   //
   // Refresh limit (installed OMP 18.3.4, verified against primary src):
   // refreshSkillsAndCommands re-discovers skills, commands and prompt
-  // metadata for the new cwd, but AGENTS.md context files are discovered
-  // only at session creation (CreateAgentSessionOptions.contextFiles) and no
-  // public seam reloads them; Settings.reloadForCwd covers settings only.
-  // A member of a rebound workspace therefore keeps the spawn-time AGENTS
-  // context — this host applies the real tool-execution cwd and does not
-  // claim a context-file refresh it cannot perform.
+  // metadata for the new cwd. The before_agent_start hook below separately
+  // discovers the bound workspace's AGENTS.md files and replaces the native
+  // context; ctx.abort() stops the turn when that binding cannot be applied.
   function applyMemberWorkspace(id, session) {
     const pending = memberWorkUnits.get(id);
     if (!pending) return { ok: false, reason: 'actual dispatch has no Orbit work unit' };
@@ -1269,7 +1334,7 @@ export function installOmpExtension(pi, sdk) {
     if (state.completion_stop_pending) return '完成申请已入队。当前助手结束本轮，Orbit 才能核对产物、输入、成员及实际停止；不要重复申请。';
     if (openFindings(state) > 0 || recheckClues(state) > 0) return '先修正或核对检查问题，再请求最终检查；现在不能报告任务完成。';
     if (state.pending_finalization) return '当前版本的最终检查已就绪，等待通知；结束本轮，不要轮询。';
-    if (checkInFlight(state)) return '独立检查进行中；结束本轮并等待结果或纠正，不要再次请求检查，也不要称任务已完成。';
+    if (checkInFlight(state)) return '独立检查进行中；直接结束本轮，通知会唤醒当前助手。不要调用 wait、轮询状态、查询 CLI 帮助或重复请求检查，也不要称任务已完成。';
     const current = readiness(state);
     if (current.status === 'ready') return '当前终检已就绪但任务尚未完成。当前助手现在调用 Orbit 工具 action=stop, intent=complete, task=<当前任务目录>，再正常结束本轮；普通 CLI orbit stop 仅暂停。被拒绝时按原因处理，不假称完成。';
     if (current.status === 'invalidated') return `检查通知已失效：${current.reason}。先在当前产物与要求上重新请求手动终检；旧通知不能用于完成申请，自动检查通过也不能替代。`;
@@ -1337,6 +1402,7 @@ export function installOmpExtension(pi, sdk) {
       ...(activeState(state) ? [
         '原生 task 派发前，用 Orbit work-unit declare 保存本次目标、有效要求、范围、验收及升级条件；在每个 task 文本中单独写一行 orbit-unit: <返回的wu-id>。',
         '工具仅限单元允许范围；成员不能改 Orbit／Git 内部记录、访问外部工具或二次派发。通过 hub 向 Root 回报；Root 核验实际结果后 finish accepted/rejected/failed。失败历史保留，依赖只在 accepted 后继续；无需用户逐次安排。',
+        '识别到有界交接即可先 declare 工作单元供 Jev 评估并开始派发，无需 Root 先补证或全池校准完成；是否派发仍由 Root 自主决定。',
       ] : []),
       '新用户消息不自动修改旧任务：明确修订时调用 Orbit amend；独立问题按独立请求处理，必要时先确认归属。',
     ].join('\n');
@@ -1420,10 +1486,27 @@ export function installOmpExtension(pi, sdk) {
   // completion, rebinds an unowned record, or overrides the checker. Returns
   // null when there is no resolvable record, so callers can preserve their
   // no-block behavior.
+  let statusWatch = null;
+  function stopStatusWatch() {
+    if (statusWatch) unwatchFile(statusWatch.file, statusWatch.listener);
+    statusWatch = null;
+  }
+  function watchStatus(taskDir, ctx, sessionId) {
+    if (typeof ctx?.ui?.setStatus !== 'function') return;
+    const file = path.join(taskDir, 'state.json');
+    if (statusWatch?.file === file && statusWatch.ctx === ctx) return;
+    stopStatusWatch();
+    const listener = () => { refreshStatus(ctx, sessionId).catch(() => {}); };
+    statusWatch = { file, ctx, listener };
+    // Display only. Runtime completion after the closing turn must update the
+    // idle pane without paying for another model turn or a status tool call.
+    watchFile(file, { persistent: false, interval: 1000 }, listener);
+  }
   async function refreshStatus(ctx, sessionId) {
     try {
       const bound = await resolveBoundTask(sessionId, ctx?.cwd);
-      if (!bound) { applyStatus(ctx, undefined); return null; }
+      if (!bound) { stopStatusWatch(); applyStatus(ctx, undefined); return null; }
+      watchStatus(bound.taskDir, ctx, sessionId);
       const owned = host ? await host.ownsTask(bound.taskDir, sessionId) : false;
       const abandoned = runtimeAbandoned(bound.state);
       if (!owned || abandoned) {
@@ -1478,6 +1561,12 @@ export function installOmpExtension(pi, sdk) {
       return typeof ref?.sessionFile === 'string' && ref.sessionFile ? ref.sessionFile : null;
     } catch { return null; }
   }
+  // Raw durable receipts of the Root session's own bound task; empty when
+  // the session has no bound task (never another task's or member's file).
+  function rootVerificationsFor(sessionId) {
+    const taskDir = taskDirs.get(sessionId);
+    return taskDir ? readReceipts(taskDir) : [];
+  }
   function state(entry) {
     const session = entry.session;
     const branch = session.sessionManager.getBranch();
@@ -1510,7 +1599,13 @@ export function installOmpExtension(pi, sdk) {
       last_turn_user_message_id: lastUserBeforeLastAssistant,
       last_turn_status: entry.interrupted ? 'interrupted' : busy ? 'inProgress' : entry.error || ['error', 'aborted'].includes(message?.stopReason) ? 'failed' : last ? 'completed' : null,
       observations: entry.error ? [...observations, { kind: 'error', text: entry.error }] : observations,
-      active_tools: entry.activeTools.size, async_jobs: session.getAsyncJobSnapshot(), session_file: sessionFileFor(entry.id) };
+      active_tools: entry.activeTools.size, async_jobs: session.getAsyncJobSnapshot(), session_file: sessionFileFor(entry.id),
+      // Facts captured from this Root session's own real tool executions for
+      // its bound task only (receipts live in <task_dir>/root-verifications.jsonl,
+      // so they survive later assistant messages and are never mixed across
+      // tasks or members). Raw facts as stored — the Ruby start_check computes
+      // artifact_matches/input_matches against its own snapshot and input.
+      root_verifications: rootVerificationsFor(entry.id) };
   }
   function memberRoster() {
     let refs = [];
@@ -1642,7 +1737,13 @@ export function installOmpExtension(pi, sdk) {
   //     jobs and REAPS them; a settle timeout throws instead of reporting
   //     success. Parked/never-started members (no live session) error.
   async function memberDispatch(request) {
-    const ref = sdk.AgentRegistry.global().get(request.id);
+    // Native /exit can unregister the child before Orbit's shutdown hook.
+    // Only stop may use our exact retained session (or an already verified
+    // stop receipt); reads/sends still require a live registry identity.
+    const registered = sdk.AgentRegistry.global().get(request.id);
+    const retainedStop = request.method === 'stop_member' && nativeMemberIds.has(request.id) &&
+      (memberRetainedSessions.has(request.id) || memberStopConfirmations.has(request.id));
+    const ref = registered ?? (retainedStop ? { id: request.id, status: null, session: null } : null);
     if (!ref || !nativeMemberIds.has(ref.id))
       throw new Error(`member is not owned by this task: ${request.id}`);
     const requireActive = request.method === 'send_member';
@@ -1926,6 +2027,7 @@ export function installOmpExtension(pi, sdk) {
     return entry;
   }
   async function close(requireConfirmation = false) {
+    stopStatusWatch();
     await flushNativeCalls();
     if (host) { await host.close({ requireConfirmation }); host = undefined; }
     for (const entry of entries.values()) entry.unsubscribe();

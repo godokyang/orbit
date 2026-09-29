@@ -102,6 +102,7 @@ module CheckRunnerContextTest
     check_hard_byte_limit_and_valid_json
     check_prompt_keeps_inputs_and_decision_memory
     check_delivery_prompt_contract_and_validation
+    check_verification_truncation_is_explicit
     check_delivered_answer_gets_wider_verbatim_prefix
     check_review_focus_is_explicit_and_deterministic
     check_review_focus_is_bounded_and_traceable
@@ -388,6 +389,19 @@ module CheckRunnerContextTest
     raise "ASSERTION FAILED: expected rejection mentioning #{expected}"
   rescue Orbit::CheckRunner::Error => error
     check(error.message.include?(expected), "the contract rejects: #{expected}")
+  end
+
+  def check_verification_truncation_is_explicit
+    context = base_context
+    context["root_verifications"] = [{ "tool_call_id" => "actual-tests", "command" => "npm test",
+      "exit_code" => 0, "artifact_matches" => true, "input_matches" => false,
+      "output" => long_text("tests", 4_000), "output_truncated" => false }]
+    receipt = parsed(context).fetch("root_verifications").first
+    check(receipt["output_truncated"] == true && receipt["output"].include?("…["),
+          "context compression cannot silently turn partial tool output into complete test evidence")
+    check(receipt["tool_call_id"] == "actual-tests" && receipt["input_matches"] == false &&
+          receipt["artifact_matches"] == true && receipt["exit_code"] == 0,
+          "receipt identity, version flags and actual exit survive compression")
   end
 
   def check_delivered_answer_gets_wider_verbatim_prefix

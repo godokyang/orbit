@@ -827,6 +827,28 @@ try {
     await fs.writeFile(statePath, JSON.stringify(fixture));
   }
 
+  // Native /exit unregisters members before the extension's shutdown hook.
+  // The exact retained session remains a disposal barrier, never a bare-id pass.
+  {
+    const call = await emit('tool_call', { toolName: 'task', toolCallId: 'call-unregistered', input: { task: 'exit member' } }, ctx);
+    let disposals = 0;
+    const session = { sessionId: 'exit-member-session', isStreaming: false,
+      subscribe: () => () => {}, hasPendingAsyncWork: () => false,
+      dispose: async () => { disposals++; },
+      model: { provider: 'glm', id: 'x' } };
+    const ref = { id: call.input.name, kind: 'sub', parentId: mainAgentId,
+      status: 'idle', session, history: {} };
+    extraRefs.push(ref);
+    registryListener({ type: 'registered', ref });
+    extraRefs.splice(extraRefs.indexOf(ref), 1);
+    const confirmation = await request('stop_member', { id: ref.id });
+    assert.equal(confirmation.confirmed, true);
+    assert.equal(confirmation.active_tools_after, 0);
+    assert.equal(disposals, 1, 'missing registry identity still awaits actual session disposal');
+    assert.equal((await request('stop_member', { id: ref.id })).confirmed, true);
+    await assert.rejects(() => request('stop_member', { id: 'orbit-foreign' }), /not owned/);
+  }
+
   // 10. A member whose session is disposed (park path) cannot be confirmed:
   //     structured evidence, confirmed:false, never "completed" as proof.
   {
@@ -952,6 +974,11 @@ try {
       'the bar explains the invalidated notice without assigning the user work');
     assert.match(invalidatedText, /仍需当前版本的有效手动终检/,
       'Root is told a new valid manual final check is required, not a repeat of the old notice');
+    await setState({ status: 'complete', stop_confirmation: { confirmed: true } });
+    for (let n = 0; n < 30 && !statusCalls.at(-1)?.[1]?.includes('已完成'); n++)
+      await new Promise(resolve => setTimeout(resolve, 100));
+    assert.match(statusCalls.at(-1)?.[1], /已完成/,
+      'completion after the final turn updates the idle pane without another model turn or tool call');
     // Kickoff ④: a paused task advises a new task on the bar and injects no
     // block that could ask the stopped record for a re-check.
     await setState({ status: 'paused', stop_confirmation: { confirmed: true } });

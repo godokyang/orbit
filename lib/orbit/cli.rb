@@ -885,7 +885,7 @@ module Orbit
       # independent state change, the caller should end this turn; polling only
       # to wait wastes a Root turn and creates another observation.
       if command == "check"
-        payload["next_action"] = "排队后结束当前轮次，等待检查者的 finalization_notice 或纠正；在收到之前不要把交付当作完成，也不要主动 stop（用户明确中断除外）。不要仅为等待检查结论而 sleep、poll 或 status"
+        payload["next_action"] = "排队后直接结束当前轮次，检查者的 finalization_notice 或纠正会唤醒当前助手；不要为等待结论调用 wait、sleep、poll、status 或查询 CLI 帮助。在收到之前不要把交付当作完成，也不要主动 stop（用户明确中断除外）。"
       end
       puts(json ? JSON.generate(payload) : "已提交停止请求，尚未确认停止。用 orbit status #{record.state.fetch('id')} 查看结果。")
       0
