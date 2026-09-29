@@ -41,19 +41,27 @@
 
 ## 本次源码修复与验证边界
 
-源码升为 0.7.12，尚待冻结安装及新任务实测：放行成员 native yield 生命周期入口；覆盖 scope-2 区分交付和后续检查／停止，测试执行仍属交付；真实 Root 工具 start/end 生成私有验证回执，钉住 start 要求／任务与 end 产物，检查者消费当前版本匹配、失败和截断事实，不信自写日志；检查者消息副本使用真实串行调用边界关联用量；同次未核验不能立即被自身退休逻辑翻掉，合格手动检查可等待成员实际接受后发一次通知；registry 已移除时仅凭精确 retained session 的实际取消、回收、dispose 与工具观测确认停止；无关坏目录身份不再清空所有检查者任务要求；完成后的闲置 pane 状态随耐久记录更新。
+源码升为 0.7.12，提交 `a1f9291a65bc2cf830c0e8ab745b75049db925b8` 并支持安装：2026-09-29T16:38:36Z，dirty=false，content digest `3f3446eb02ef794c917f5affc11d74d137f68d4167467fe78346543d92880613`。新任务尚在实测：放行成员 native yield 生命周期入口；覆盖 scope-2 区分交付和后续检查／停止，测试执行仍属交付；真实 Root 工具 start/end 生成私有验证回执，钉住 start 要求／任务与 end 产物，检查者消费当前版本匹配、失败和截断事实，不信自写日志；检查者消息副本使用真实串行调用边界关联用量；同次未核验不能立即被自身退休逻辑翻掉，合格手动检查可等待成员实际接受后发一次通知；registry 已移除时仅凭精确 retained session 的实际取消、回收、dispose 与工具观测确认停止；无关坏目录身份不再清空所有检查者任务要求；完成后的闲置 pane 状态随耐久记录更新。
 
 B 独立静态核对去时间的七个面并通过；B 独立复核验证回执两端，指出身份失配已修及中断 replay 的真实 started 变体已保留为 interrupted；C 独立定位 finalization 阻断并复核原门未弱化、同次 readiness 修复、retained stop 屏障，相关回归通过。源码接线和脚本验证不是新安装真实完成证明。
+
+0.7.12 第一轮新任务 `327bba74-e1e5-4e2b-807f-f4e64bf540a4` 使用独立种子 `mixed-fixed/`，Herdr pane `w1Y:p1K` 的真实 `orbit omp` Root PID 49091，session `01a0ee0c-5a1f-7273-bf2b-af4fb46b578a`，安装 digest 如上。原始要求允许 Root 自行决定解析模块是否交接；Root 再次自行实现，没有原生成员或委派 hint。因此这轮验证了可信检查和终止，不证明自主派发。Root 原生 `npm test` 工具回执为 completed／exit 0，当前要求和固定产物均匹配，输出 8/8；失败的早期 eval 冒烟回执仍保留，Root 后来用正确的 Node 可执行文件重跑通过。独立 OMP 检查者在固定快照上消费这些原生回执，覆盖记录为 scope-2，交付项全部 verified、未来终检／停止及最终说明作为 lifecycle 保留 unverified；一次终检无 finding、一次 finalization_notice，Root 通过本会话工具请求 complete，程序最终 `complete` 且 `stop_confirmation.confirmed=true`、活动工具零、异步工作已收尾。Controller 在产物副本重放未改的原始八项 8/8；原测试 SHA256 仍为 `5e3161e3fadf9588b4a0269a8fd50b3fd99430e932105b74a5dc2e33114d27fd`。原生 `/exit` 后 Root PID 49091 和 MCP PID 49122／49157 均消失，pane 关闭。原始汇总在 `/private/tmp/orbit-mixed-live-c8n233cn/mixed-fixed-proof.json`，副本测试在 `/private/tmp/orbit-mixed-fixed-evaluation-Z69NPy/result.txt`。
+
+这轮资源账本记录 50 次已报告调用：Root 37 次，input 75957／output 9322／cacheRead 977792；检查者 5 次，input 20950／output 11255／cacheRead 57600；其余 8 次为 Jev 判断。检查者 5 个调用 ID 唯一、无 usage gap。reasoning 属于 output 子集；这些数字不构成 OMP 现金或订阅额度价格，实际结算仍未知。该轮 Root 的已报告用量仍高于旗舰基线，不能宣称节省。
+
+0.7.12 第二轮 `eff5140f-4226-478d-ae13-5fcfcc808c7b` 在独立种子 `mixed-fixed-dispatch/`、Herdr `w1Y:p1M` 运行，Root PID 60535／session `01a0ee14-8462-70ec-9212-941abda7e96c`。这次用户要求明确让解析模块由成员实现，Root 自定接口和型号：Jev delegation-4／candidates-4 给出绑定 `wu-a1b30f9df99d49c6` 的正向 hint，Root 跟随建议派出池内 opencode-go/deepseek-v4.1-flash 的原生 task 成员 `orbit-5eaf0dd9-efbc-427f-b5ad-82eb4819df23`，程序先登记并绑定工作单元。成员两次实际 yield／hub 结果均被记录，第二次是在 Root 提出解析器精简修订后；SDK 原生 accepted_at 更新至 `1790701025206`，工作单元为 accepted。Root 的 `src/cli.js` 实际 require 并调用成员交付的 `src/csv.js`，负责金额、错误和 README；初次 `npm test` 失败及当时旧产物指纹仍保留，修订后同一原始八项 8/8，通过的原生 `npm test` 回执在终检快照中 `artifact_matches`／`input_matches` 均为真。独立 OMP 一次固定快照终检无 finding（verdict `continue`，未来生命周期项未预称完成），scope-2 交付覆盖 ready；一次 finalization_notice 后 Root 调用本会话完成停止。程序最终 `complete`，Root 与该成员均 `stop_confirmation.confirmed=true`、活动工具零、异步工作已结清。随后原生 `/exit` 后 Root PID 60535 与 MCP PID 60567／60602 消失，完成与成员停止确认未回退，pane 关闭。Controller 在副本重放未改的原始八项 8/8，测试 SHA256 与种子一致。原始摘要在 `/private/tmp/orbit-mixed-live-c8n233cn/mixed-fixed-dispatch-proof.json`，副本测试在 `/private/tmp/orbit-mixed-fixed-dispatch-evaluation-ak9grL/result.txt`。
+
+第二轮资源账本共 79 次已报告调用：Root 39 次，input 73719／output 8678／cacheRead 1015936；成员 23 次，input 32229／output 24059／cacheRead 526208；检查者 4 次，input 22487／output 9484／cacheRead 65280；Jev 13 次。检查者调用 ID 均可归属、无 usage gap。账本没有可核验 OMP 现金／额度结算源，本轮同样不能宣称预算内或节省旗舰资源。明确模块交接的机械闭环及正常结束通过；Root 面对允许自行实现的普通需求仍连续两次选择自行完成，自主派发策略是否达到用户期待尚未证实。
 
 ## 未闭合矩阵
 
 | 必需项 | 当前状态 |
 | --- | --- |
-| 当前版本能力事实→Jev hint→Root 自主原生派发→hub 回收→集成 | 0.7.11 第二轮已发生，成员交付集成并通过固定 8 项；需求明确要求模块交接，普通需求的自主选择仍待新构建 |
-| 独立 OMP 固定快照、逐要求覆盖、真实 finding 纠偏、手动终检 | 两轮独立固定快照已运行；真实 finding 纠偏及 0.7.12 可信测试回执／生命周期覆盖仍待验收 |
+| 当前版本能力事实→Jev hint→Root 自主原生派发→hub 回收→集成 | 0.7.12 第二轮在明确模块交接要求下完整通过，成员两次 yield 后 accepted，Root 集成并验收；普通需求的自主策略仍待证明 |
+| 独立 OMP 固定快照、逐要求覆盖、真实 finding 纠偏、手动终检 | 0.7.12 两轮可信 Root 测试回执、scope-2 覆盖、各一次无 finding 手动终检及完成停止通过；真实 finding 纠偏仍待验收 |
 | 在途旧根检查→显式 rebind→workspace stale→新根检查 | 未运行 |
-| 有成员与背景工作时的 native Esc 及正常退出／确认停止 | 0.7.11 有成员正常退出失败，程序记 stop_unconfirmed；物理进程已结束。修复后正常退出和在途 Esc 仍待重测 |
-| 同质量交付下旗舰资源、其他消耗、返工与用户介入比较 | 三份产物在副本重放同一冻结 8 项均通过；当前混合试跑旗舰消耗明显高于基线，不能宣称节省；完整独立同质评价待闭合 |
+| 有成员与背景工作时的 native Esc 及正常退出／确认停止 | 0.7.11 有成员正常退出失败；0.7.12 第二轮成员完成／Root 停止均已确认，原生 /exit 后进程退出且状态不回退；在途成员／背景工作的 Esc 仍待重测 |
+| 同质量交付下旗舰资源、其他消耗、返工与用户介入比较 | 五份产物在副本重放同一冻结 8 项均通过；当前混合试跑旗舰消耗高于基线，不能宣称节省；完整独立同质评价待闭合 |
 | OpenRouter 正式基准认证抓取及实际消费者 | 匿名实测401，等待本机私有 key；公共页校准不是此接口成功证据 |
 
-本轮负例、旗舰对照和两轮混合 Root 进程均已结束。用户要求整理界面后，开发 B/C/D/E 及自有 F/G pane 均已在正常退出、核对进程后关闭；之后出现的 H/J pane 归属未确认，未操作。种子、原始会话、独立报告及证据目录保留至完整验收收尾；不推送或发布。Goal 保持 active。
+本轮负例、旗舰对照、0.7.11 两轮混合及 0.7.12 两轮 Root 进程均已结束。用户要求整理界面后，开发 B/C/D/E、自有 F/G、空闲未接任务的 H/J 及已完成的 K/M pane 均已正常退出、核对进程后关闭；当前界面只保留主 pane。种子、原始会话、独立报告及证据目录保留至完整验收收尾；不推送或发布。Goal 保持 active。
