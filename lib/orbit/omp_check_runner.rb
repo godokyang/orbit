@@ -267,6 +267,7 @@ module Orbit
                "This record is deterministic and bounded. The original instruction, amendments and named basis " \
                "above are complete and are not compressed.\n\n```json\n#{context_text}\n```"
       parts << delivery_rules_note
+      parts << requirement_coverage_note
       parts << "## Fixed artifact snapshot\n\n" \
                "You are a separate OMP process, not a member of the execution team. " \
                "Use the SDK read/grep/glob tools on the fixed snapshot. Confined read reports exact file bytes, " \
@@ -277,7 +278,7 @@ module Orbit
                "Judge the snapshot files, not a model plan or summary."
       parts << "## Output\n\n" \
                "Return JSON matching these fields and nothing else: verdict, reason, findings, " \
-               "resolved_ids, next_check_seconds, delivery. verdict is one of: #{VERDICTS.join(', ')}. " \
+               "resolved_ids, next_check_seconds, delivery, coverage. verdict is one of: #{VERDICTS.join(', ')}. " \
                "Each findings object has exactly id, requirement, evidence and action — no severity or extra keys. " \
                "resolved_ids is a list of strings. next_check_seconds is a positive integer. " \
                "delivery is an object with ready (boolean) and reason (non-empty string). " \

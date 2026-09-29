@@ -66,6 +66,7 @@ module Orbit
         "checker_tokens_complete" => checks.all? { |check| !TaskView.token_pair(check["usage"]).nil? },
         "resource_calls" => state.dig("usage", "resource_calls"),
         "resource_call_gaps" => state.dig("usage", "resource_call_gaps"),
+        "requirement_coverage" => state["requirement_coverage"],
         "native_call_observations" => state.dig("usage", "native_call_observations") }
     end
   end

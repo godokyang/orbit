@@ -55,3 +55,14 @@ test("delivery is never implicit: a bare legacy result fails the contract", () =
 	};
 	assert.ok(validateCheckResult(legacy).some(p => p.includes("delivery")), "the old five-field result is not valid");
 });
+
+test("coverage preserves unverified requirements and requires evidence for verified ones", () => {
+	const result = baseResult();
+	result.coverage = { complete: true, items: [
+		{ requirement: "aggregate exact cents", status: "verified", evidence: "src/cli.js uses integer cents" },
+		{ requirement: "reject partial output", status: "unverified", evidence: "invalid-row behavior not inspected" },
+	] };
+	assert.deepEqual(validateCheckResult(result), [], "unverified is a valid report of missing evidence");
+	(result.coverage as { items: { evidence: string }[] }).items[0].evidence = "";
+	assert.ok(validateCheckResult(result).some(p => p.includes("coverage evidence")), "a verified assertion needs evidence");
+});

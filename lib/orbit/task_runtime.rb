@@ -19,6 +19,7 @@ require_relative "observation_key"
 require_relative "resource_call_ledger"
 require_relative "route_cost_inputs"
 require_relative "work_unit"
+require_relative "requirement_coverage"
 require_relative "member_model_selector"
 
 module Orbit
@@ -46,6 +47,7 @@ module Orbit
       "open_findings" => "检查还有未解决的问题。请当前助手修正后重新请求最终检查，收到通过通知再申请完成。",
       "pending_clue_recheck" => "有之前发现的问题尚待重新核对。请当前助手等核对结果，再对最终交付版本请求检查；通过后再申请完成。",
       "members_not_settled" => "还有协作成员在工作或结果未收齐。请当前助手先完成成员收尾，再请求最终检查和申请完成。",
+      "requirement_coverage_unverified" => "仍有要求未核验或覆盖记录不可用。请当前助手补齐实际证据，对当前版本请求一次完整独立终检；不能凭无 finding 申请完成。",
       "checker_cleanup_unverified" => "上一次检查进程是否退出还无法确认。先核实并清理；本任务只能按普通停止收尾，若仍需交付，请另建任务检查。",
       "root_bridge_unavailable" => "当前助手的会话暂时无法核实，本次申请未生效。连接恢复后重新申请完成；如文件或要求有变化，先重新检查。",
       "members_unreadable" => "协作成员名单暂时读不到。请先恢复名单，再申请完成；若只能普通停止，之后需要另建任务检查才能交付。",
@@ -225,6 +227,11 @@ module Orbit
              %w[ready queued].include?(readiness["status"]) && readiness["notice_key"] == key
         return [nil, "no_current_finalization_notice",
                 "no delivery-ready finalization notice exists for the current artifact and input version"]
+      end
+
+      coverage = requirement_coverage_status if @state["coverage_required"]
+      if coverage && !coverage["ready"]
+        return [nil, "requirement_coverage_unverified", coverage["gap"]]
       end
 
       [key, nil, nil]
@@ -1758,6 +1765,9 @@ module Orbit
         }, output_dir: directory, role: role
       )
       @running_check = scope
+      # Resumed historical tasks adopt the new gate only when they actually
+      # run a current check; old completed records are not retroactively passed.
+      @state["coverage_required"] = true
       @state["next_check_manual"] = false
       @state["check_observations"][key] = {
         "status" => "in_flight", "check" => number, "stale" => nil,
@@ -1978,6 +1988,31 @@ module Orbit
       groups.transform_values { |paths| paths.uniq.sort.first(REVIEW_FOCUS_LIMIT) }
     end
 
+    def requirement_coverage_status
+      return { "ready" => false, "gap" => @state["requirement_coverage_error"] } if @state["requirement_coverage_error"]
+
+      RequirementCoverage.new(record: @record).status(input_digest: @record.input_digest(@state),
+        artifact_digest: fingerprint_artifact, artifact_root: artifact_root)
+    end
+
+    def record_requirement_coverage(scope, result, stale)
+      coverage = result["coverage"] || { "complete" => false, "items" => [
+        { "requirement" => "Original instruction and effective amendments", "status" => "unverified",
+          "evidence" => "The checker did not report requirement coverage." }
+      ] }
+      RequirementCoverage.new(record: @record).record(check_id: scope["number"].to_s,
+        role: scope["role"], kind: scope["kind"], coverage: coverage, stale: stale,
+        input_digest: scope["input_digest"], artifact_digest: scope.dig("snapshot", "digest"),
+        artifact_root: scope["artifact_root"])
+      if scope["kind"] == "artifact" && scope["role"] == "reviewer" && !stale
+        @state.delete("requirement_coverage_error")
+        @state["requirement_coverage"] = requirement_coverage_status
+      end
+    rescue RequirementCoverage::Error, SystemCallError => error
+      @state["requirement_coverage_error"] = error.message if scope["kind"] == "artifact" && scope["role"] == "reviewer"
+      @record.event("requirement_coverage_write_failed", "check" => scope["number"], "reason" => error.message)
+    end
+
     def finish_check(result, host, now)
       scope = @running_check
       capture_check_calls(scope)
@@ -1993,9 +2028,12 @@ module Orbit
       stale = !stale_reasons.empty?
       @state["checks"] << scope.slice("number", "role", "kind", "started_at", "observation_key", "trigger_cause", "manual").merge(
         "result" => result, "stale" => stale, "stale_reasons" => stale_reasons,
+        "artifact_root" => scope["artifact_root"], "artifact_digest" => scope.dig("snapshot", "digest"),
+        "input_digest" => scope["input_digest"],
         "finished_at" => Time.at(now).utc.iso8601,
         "usage" => @checker.respond_to?(:usage) ? @checker.usage : nil
       )
+      record_requirement_coverage(scope, result, stale)
       observation = @state.fetch("check_observations")[scope["observation_key"]]
       if observation
         observation["status"] = "finished"
@@ -2240,6 +2278,16 @@ module Orbit
         @state["sent_message_ids"] << sent.fetch("id")
         return
       end
+      coverage = requirement_coverage_status if @state["coverage_required"]
+      if coverage && !coverage["ready"]
+        @state["completion_readiness"] = { "status" => "not_ready", "reason" => coverage["gap"],
+          "input_digest" => scope["input_digest"], "artifact_root" => scope["artifact_root"],
+          "artifact_digest" => current_digest, "coverage" => coverage }
+        @record.event("requirement_coverage_unverified", "check" => scope["number"], "reason" => coverage["gap"])
+        sent = @connection.send_message("Orbit 逐要求覆盖尚未确认（不是用户新要求）：#{coverage['gap']}。请补齐实际证据并重新请求完整终检；不要申请完成。")
+        @state["sent_message_ids"] << sent.fetch("id")
+        return
+      end
       return unless @state["findings"].values.none? { |finding| finding["status"] == "open" }
       return unless members_settled?
       unless host["status"] == "idle" && host["last_turn_status"] == "completed"
@@ -2254,6 +2302,7 @@ module Orbit
     # completes the task; an explicit Root stop still waits for its final turn
     # and rechecks artifact, input and members at stop time.
     def send_finalization_notice(scope, current_digest, now)
+      return if @state["coverage_required"] && !requirement_coverage_status["ready"]
       key = Digest::SHA256.hexdigest(JSON.generate([
         scope["artifact_root"], current_digest, scope["input_digest"]
       ]))

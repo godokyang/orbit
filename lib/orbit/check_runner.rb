@@ -26,6 +26,7 @@ module Orbit
     VERDICTS = %w[continue correct pause complete needs_user].freeze
     FINDING_KEYS = %w[id requirement evidence action].freeze
     RESULT_KEYS = %w[verdict reason findings resolved_ids next_check_seconds delivery].freeze
+    OPTIONAL_RESULT_KEYS = %w[coverage].freeze
     DELIVERY_KEYS = %w[ready reason].freeze
     DEFAULT_STOP_GRACE_SECONDS = 5
 
@@ -212,9 +213,10 @@ module Orbit
                "anywhere. If a command would modify a repository, do not run it; report the concrete gap that " \
                "needs isolated verification instead."
       parts << delivery_rules_note
+      parts << requirement_coverage_note
       parts << "## Output\n\n" \
                "Return exactly one JSON object matching the attached output schema: verdict, reason, findings, " \
-               "resolved_ids, next_check_seconds, delivery. verdict is one of: #{VERDICTS.join(', ')}. findings is a list " \
+               "resolved_ids, next_check_seconds, delivery, coverage. verdict is one of: #{VERDICTS.join(', ')}. findings is a list " \
                "of objects with id, requirement, evidence, action. resolved_ids is a list of strings. " \
                "next_check_seconds is a positive integer. delivery is an object with ready (boolean) and reason " \
                "(non-empty string). No markdown, no code fences, no extra text."
@@ -689,6 +691,22 @@ module Orbit
     # completion gate consumes result.delivery independently of the verdict.
     # The git_remote facts note only applies when the program record carries
     # them; nothing here invents remote evidence.
+    def requirement_coverage_note
+      "## Requirement coverage\n\n" \
+        "Return coverage with exactly complete (boolean) and items (1..64 entries). Each item has exactly " \
+        "requirement (distinct non-empty text, at most 300 characters), status (verified or unverified), " \
+        "and evidence (at most 1000 characters; verified needs concrete non-empty evidence). Enumerate each " \
+        "requirement from the original instruction, effective amendments and named basis, including referenced " \
+        "specification files in the fixed snapshot. complete=true means you have enumerated them all; do not " \
+        "silently omit requirements. Mark unread, untested or otherwise unsupported requirements unverified " \
+        "and explain the gap. Empty findings, Root claims and Jev calibration are not coverage. Identify " \
+        "the file facts you actually read and distinguish them from attributed verification receipts: your " \
+        "read-only session cannot run tests. Local unit evidence does not replace whole-task integration. " \
+        "Process checks and adjudication may report their limited scope but cannot grant delivery coverage. " \
+        "If the scope cannot be completely enumerated within the output bound, complete=false. Missing or " \
+        "incomplete coverage cannot grant final completion."
+    end
+
     def delivery_rules_note
       "## Delivery readiness\n\n" \
         "You must also return delivery: an object with ready (boolean) and reason (non-empty string). " \
@@ -788,7 +806,7 @@ module Orbit
         raise Error, "check result must be a JSON object, got #{value.class}"
       end
 
-      extra = value.keys - RESULT_KEYS
+      extra = value.keys - RESULT_KEYS - OPTIONAL_RESULT_KEYS
       missing = RESULT_KEYS - value.keys
       problems << "unexpected keys: #{extra.join(', ')}" unless extra.empty?
       problems << "missing keys: #{missing.join(', ')}" unless missing.empty?
@@ -798,6 +816,7 @@ module Orbit
       end
       problems.concat(validate_findings(value["findings"]))
       problems.concat(validate_delivery(value["delivery"]))
+      problems.concat(validate_coverage(value["coverage"])) if value.key?("coverage")
       unless value["resolved_ids"].is_a?(Array) && value["resolved_ids"].all? { |id| id.is_a?(String) && !id.empty? }
         problems << "resolved_ids must be an array of non-empty strings"
       end
@@ -844,6 +863,32 @@ module Orbit
       unless delivery["reason"].is_a?(String) && !delivery["reason"].empty?
         problems << "delivery.reason must be a non-empty string"
       end
+      problems
+    end
+
+    def validate_coverage(value)
+      return ["coverage must contain exactly complete and items"] unless value.is_a?(Hash) && value.keys.sort == %w[complete items]
+      problems = []
+      problems << "coverage.complete must be a boolean" unless [true, false].include?(value["complete"])
+      items = value["items"]
+      return problems + ["coverage.items must contain 1..64 entries"] unless items.is_a?(Array) && items.length.between?(1, 64)
+      requirements = []
+      items.each_with_index do |item, index|
+        unless item.is_a?(Hash) && item.keys.sort == %w[evidence requirement status]
+          problems << "coverage.items[#{index}] must contain exactly requirement, status and evidence"
+          next
+        end
+        requirement, evidence = item.values_at("requirement", "evidence")
+        unless requirement.is_a?(String) && !requirement.strip.empty? && requirement.length <= 300
+          problems << "coverage.items[#{index}].requirement must be a non-empty string of at most 300 characters"
+        end
+        requirements << requirement
+        problems << "coverage.items[#{index}].status must be verified or unverified" unless %w[verified unverified].include?(item["status"])
+        unless evidence.is_a?(String) && evidence.length <= 1000 && (item["status"] != "verified" || !evidence.strip.empty?)
+          problems << "coverage.items[#{index}].evidence must fit its status and the 1000-character bound"
+        end
+      end
+      problems << "coverage contains duplicate requirements" unless requirements.map { |item| item.to_s.strip }.uniq.length == requirements.length
       problems
     end
 

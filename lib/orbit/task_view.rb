@@ -2,6 +2,8 @@
 
 require_relative "task_record"
 require_relative "resource_call_ledger"
+require_relative "requirement_coverage"
+require_relative "workspace_snapshot"
 
 module Orbit
   # Read-only project selection and presentation; the runtime remains the writer.
@@ -24,6 +26,18 @@ module Orbit
     # task state or changes completion/stop facts.
     def current_state(record)
       state = record.state
+      if state["coverage_required"] && (state["requirement_coverage"] || File.file?(File.join(record.path, RequirementCoverage::FILE_NAME)))
+        state["requirement_coverage"] = begin
+          if state["requirement_coverage_error"]
+            { "ready" => false, "current" => false, "gap" => state["requirement_coverage_error"] }
+          else
+            RequirementCoverage.new(record: record).status(input_digest: record.input_digest(state),
+              artifact_digest: WorkspaceSnapshot.fingerprint(project_root: artifact_root(state)), artifact_root: artifact_root(state))
+          end
+        rescue WorkspaceSnapshot::Error, SystemCallError => error
+          { "ready" => false, "current" => false, "gap" => error.message }
+        end
+      end
       ledger = ResourceCallLedger.new(task_path: record.path, task_id: state.fetch("id"))
       native_files = %w[native-model-calls.json native-model-call-gaps.jsonl].any? do |name|
         File.file?(File.join(record.path, name))
@@ -773,6 +787,15 @@ module Orbit
       end
     end
 
+    def requirement_coverage_line(state)
+      coverage = state["requirement_coverage"]
+      return "要求覆盖：历史记录未提供逐项覆盖" unless state["coverage_required"] || coverage
+      return "要求覆盖：尚未取得完整逐项证据" unless coverage.is_a?(Hash)
+      return "要求覆盖：当前版本 #{coverage['verified']} 项已核验（检查者枚举完整）" if coverage["ready"]
+
+      "要求覆盖：尚未确认 — #{coverage['gap'] || '有未核验要求或枚举不完整'}"
+    end
+
     def format(record)
       state = current_state(record)
       status = state.fetch("status")
@@ -789,6 +812,7 @@ module Orbit
                *([checker_model_line(state)].compact),
                *([review_blocked_line(state)].compact),
                *([completion_readiness_line(state)].compact),
+               requirement_coverage_line(state),
                next_action_line(state),
                *usage_lines(state)]
       check = state.fetch("checks", []).last

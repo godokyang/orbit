@@ -209,6 +209,10 @@ def answer(verdict, findings: [], resolved: [], delivery_ready: true, delivery_r
   { "verdict" => verdict, "reason" => "Concrete fixture evidence", "findings" => findings,
     "resolved_ids" => resolved, "next_check_seconds" => 60,
     "delivery" => { "ready" => delivery_ready, "reason" => delivery_reason } }
+    .merge("coverage" => { "complete" => true, "items" => [
+      { "requirement" => "Fixture deliverable", "status" => delivery_ready ? "verified" : "unverified",
+        "evidence" => delivery_reason }
+    ] })
 end
 
 # Shared completion-hand-off preamble: qualified notice, delivery turn in
@@ -2435,6 +2439,35 @@ fixture do |_root, record, host, checker, runtime|
   assert(record.state["finalization_notices"].length == 1 &&
          record.state.dig("completion_readiness", "status") == "ready",
          "an independent current check after delivery may issue the notice")
+end
+
+# A delivery-ready, finding-free report cannot silently cover an unverified
+# requirement. A later full report qualifies; corrupting its durable coverage
+# then makes the completion gate refuse without manufacturing a pass.
+fixture do |_root, record, host, checker, runtime|
+  now = Time.now.to_f
+  record.submit("check")
+  runtime.tick(now: now)
+  incomplete = answer("continue")
+  incomplete["coverage"]["items"] << { "requirement" => "Second behavior", "status" => "unverified",
+                                         "evidence" => "No attributable verification is available" }
+  checker.result = incomplete
+  runtime.tick(now: now + 1)
+  assert(record.state["finalization_notices"].empty? &&
+         events(record).any? { |event| event["type"] == "requirement_coverage_unverified" },
+         "finding-free delivery cannot release unverified requirements")
+  host.finish("first and second behaviors delivered")
+  record.submit("check")
+  runtime.tick(now: now + 2)
+  checker.result = answer("continue")
+  runtime.tick(now: now + 3)
+  assert(record.state["finalization_notices"].length == 1 && runtime.completion_gate[1].nil? &&
+         Orbit::TaskView.format(record).include?("要求覆盖：当前版本"),
+         "a current full independent report may qualify for completion")
+  File.write(File.join(record.path, Orbit::RequirementCoverage::FILE_NAME), '{"records":[{}]}')
+  assert(runtime.completion_gate[1] == "requirement_coverage_unverified" &&
+         Orbit::TaskView.format(record).include?("要求覆盖：尚未确认"),
+         "unreadable coverage never reuses the old ready assertion")
 end
 
 # An independent question must not replace an earlier task delivery or make

@@ -35,7 +35,7 @@ module Orbit
         "created_at" => Time.now.utc.iso8601, "status" => "starting",
         "instruction_source" => source, "basis" => documents, "amendments" => [],
         "connection" => connection, "review" => review, "estimate" => estimate,
-        "checks" => [], "decisions" => [], "usage" => { "tokens" => nil }
+        "checks" => [], "decisions" => [], "coverage_required" => true, "usage" => { "tokens" => nil }
       })
       record
     end

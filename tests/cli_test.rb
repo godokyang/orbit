@@ -479,6 +479,11 @@ module CliTest
       }
     )
     record.save(qualified)
+    Orbit::RequirementCoverage.new(record: record).record(check_id: "1", kind: "artifact", role: "reviewer",
+      coverage: { "complete" => true, "items" => [
+        { "requirement" => "实现用户要求并完成验证", "status" => "verified", "evidence" => "Scripted current fixture validation" }
+      ] }, input_digest: record.input_digest(qualified), artifact_digest: qualified.dig("completion_readiness", "artifact_digest"),
+      artifact_root: qualified.fetch("project_root"))
     accepted = JSON.parse(cli("stop", record.path, "--complete", "--json"))
     fresh = commands(record)
     assert(accepted["status"] == "queued" && fresh.length == 1 && JSON.parse(File.read(fresh.first))["complete"] == true,
