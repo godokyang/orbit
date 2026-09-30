@@ -68,8 +68,11 @@ module Orbit
     FILE_NAME = "openrouter-model-overview-v3.json"
 
     MODELS_URL = "https://openrouter.ai/api/v1/models"
-    # The authoritative benchmark source is a separate endpoint: the model
-    # catalogue carries no Artificial Analysis indices at all.
+    # The authoritative benchmark source for this snapshot is the separate
+    # endpoint below. The live catalogue now also embeds an
+    # `artificial_analysis` object on some rows (observed 2026-09 on the
+    # public catalogue); this code does not consume it - the dedicated
+    # endpoint stays the only benchmark input.
     BENCHMARKS_URL = "https://openrouter.ai/api/v1/benchmarks?source=artificial-analysis"
     BENCHMARK_FILTER = "artificial-analysis"
     MAX_BENCHMARK_ROWS = 5000
@@ -706,10 +709,11 @@ module Orbit
     end
 
     def prior_sources(entry)
-      # The audited first-party sources, the catalogue endpoint, the benchmark
-      # endpoint and the benchmark source site: the reader must be able to see
-      # which measured endpoint a carried index came from.
-      (entry.fetch("sources") + [MODELS_URL, BENCHMARKS_URL, BENCHMARK_SOURCE]).uniq.first(MAX_SOURCES)
+      # Benchmark provenance is guaranteed first: truncation must never drop
+      # the measured site or the dedicated endpoint a carried index came from.
+      # The audited mapping sources and then the catalogue endpoint fill the
+      # remaining bound; the cap itself is unchanged.
+      ([BENCHMARK_SOURCE, BENCHMARKS_URL] + entry.fetch("sources") + [MODELS_URL]).uniq.first(MAX_SOURCES)
     end
 
     def reasoning_note(requested:, entry:)

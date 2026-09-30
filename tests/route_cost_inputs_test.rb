@@ -258,10 +258,73 @@ module RouteCostInputsTest
     end
   end
 
+  # Production receipts pass through ResourceCallLedger#record_check without a
+  # reasoning field: the ledger keeps it nil (unreported), while the forecast
+  # route carries the typed "unknown". Reference verification must reconcile
+  # exactly that representation gap with the full reported usage categories
+  # intact; a reported concrete effort must still never match "unknown".
+  def native_receipts_without_reasoning_verify_against_unknown
+    with_task do |_root, record, store, inputs|
+      store.import([fact_document("glm-5.2", 2.2)])
+      units = Orbit::WorkUnitStore.new(record)
+      unit = units.declare("objective" => "build it", "acceptance" => "tests pass",
+                           "escalation" => "stop and report", "requirements" => ["instruction"],
+                           "allowed_paths" => ["lib/"])
+      units.bind(unit.fetch("id"), member_id: "orbit-m1", tool_call_id: "tc-1", model: "zhipu/glm-5.2")
+      units.finish(unit.fetch("id"), status: "accepted", result: "done", verification: "tests pass")
+      ledger = Orbit::ResourceCallLedger.new(task_path: record.path, task_id: File.basename(record.path),
+                                             clock: -> { NOW })
+      usage = { "input" => 10, "output" => 5, "cacheRead" => 0 }
+      ledger.record_check({ "call_id" => "native-member-1", "status" => "completed",
+                            "provider" => "zhipu", "actual_model" => "glm-5.2",
+                            "billing_route" => "direct_api", "usage" => usage,
+                            "usage_source" => "native_message",
+                            "member_id" => "orbit-m1", "work_unit_id" => unit.fetch("id") },
+                          phase: "member_execution", role: "member")
+      stored = ledger.calls.find { |call| call["call_id"] == "native-member-1" }
+      assert(stored.dig("actual_identity", "reasoning").nil? && stored["usage_status"] == "reported" &&
+             stored["usage"] == usage,
+             "a native receipt without a reasoning field keeps it nil and loses no usage category")
+
+      forecast = { "kind" => "similar_unit", "usage" => usage,
+                   "basis" => "same-shape unit of this task", "applies_to" => "this work unit only",
+                   "reference_call_ids" => ["native-member-1"] }
+      inputs.record_inputs(scope: "member", work_unit_id: unit.fetch("id"),
+                           candidates: { "zhipu/glm-5.2" => candidate("glm-5.2", forecast) })
+      member_args = { scope: "member", work_unit_id: unit.fetch("id"),
+                      artifact_root: unit["artifact_root"], input_digest: unit["input_digest"] }
+      built = inputs.build(**member_args)
+      assert(built.dig("zhipu/glm-5.2", "usage_source") == "prediction:similar_unit" &&
+             built.dig("zhipu/glm-5.2", "usage") == usage,
+             "an unreported receipt reasoning reconciles with the typed unknown, categories intact")
+
+      ledger.record_check({ "call_id" => "native-checker-1", "status" => "completed",
+                            "provider" => "zhipu", "actual_model" => "glm-5.2",
+                            "billing_route" => "direct_api", "usage" => usage,
+                            "usage_source" => "native_message" },
+                          phase: "check", role: "checker")
+      inputs.record_inputs(scope: "review", candidates: {
+        "zhipu/glm-5.2" => candidate("glm-5.2", forecast.merge("applies_to" => "this review only",
+                                                               "reference_call_ids" => ["native-checker-1"])) })
+      assert(inputs.build(scope: "review").dig("zhipu/glm-5.2", "usage_source") == "prediction:similar_unit",
+             "a checker receipt without a reasoning field verifies for the review scope too")
+
+      ledger.record(call_id: "concrete-1", role: "member", phase: "exec", status: "completed",
+                    provider: "zhipu", actual_model: "glm-5.2", reasoning: "high",
+                    billing_route: "direct_api", usage: usage,
+                    usage_source: "provider_response", member_id: "orbit-m1", work_unit_id: unit.fetch("id"))
+      inputs.record_inputs(scope: "member", work_unit_id: unit.fetch("id"),
+                           candidates: { "zhipu/glm-5.2" => candidate("glm-5.2", forecast.merge("reference_call_ids" => ["concrete-1"])) })
+      assert(inputs.build(**member_args).empty?,
+             "a reported concrete effort still conflicts with unknown instead of folding into it")
+    end
+  end
+
   def run
     declared_workload_is_conditional_only
     broken_binding_degrades_to_unknown
     unverifiable_references_and_facts_stay_unknown
+    native_receipts_without_reasoning_verify_against_unknown
     puts "ROUTE_COST_INPUTS_TEST_PASS"
   end
 end

@@ -132,7 +132,7 @@ orbit model-candidates list       # 终端查看候选池
 
 ## 当前范围与文档
 
-当前源码版本为 **0.7.10**；发布和用户安装状态另行核对 `orbit version --json`。当前实现、未完成项与真实验收边界见[交接](docs/plan/handoff.md)。安装或更新使用 `sh install.sh`，选项见使用参考。
+当前源码版本以 `package.json` 为准；发布和用户安装状态另行核对 `orbit version --json`。当前实现、未完成项与真实验收边界见[交接](docs/plan/handoff.md)。安装或更新使用 `sh install.sh`，选项见使用参考。
 
 - [进阶使用参考](docs/reference/usage-reference.md)：安装选项、Jev、OpenRouter、CLI 与维护。
 - [任务运行合同](contracts/task-runtime.md)、[ADR-008](docs/adr/008-omp-native-collaboration-base.md)和[ADR-009](docs/adr/009-user-selected-model-pool.md)：当前角色、选模、检查与停止语义。

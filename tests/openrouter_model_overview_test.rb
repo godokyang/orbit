@@ -32,6 +32,7 @@ module OpenRouterModelOverviewTest
       test_pagination_completeness(tmp)
       test_status_diagnostics_are_read_only(tmp)
       test_mapping_provenance(tmp)
+      test_prior_sources_keep_benchmark_provenance_under_the_cap(tmp)
     end
     puts("OPENROUTER_MODEL_OVERVIEW_TEST_PASS assertions=#{@assertions}")
   end
@@ -472,6 +473,28 @@ module OpenRouterModelOverviewTest
                  "a disabled project closes the provenance gate")
   end
 
+  # With a full five-source audited mapping the unbounded list would exceed
+  # MAX_SOURCES; the measured benchmark site and its dedicated endpoint must
+  # survive truncation ahead of mapping sources and the catalogue endpoint.
+  def test_prior_sources_keep_benchmark_provenance_under_the_cap(tmp)
+    project = tmp
+    http = FakeHttp.new([[200, models_body([row("deepseek/deepseek-v4.1-flash")])],
+                         [200, benchmarks_body([variant("deepseek/deepseek-v4.1-flash", coding: 56.2)])]])
+    instance = overview(tmp, "capped-sources", http: http)
+    instance.refresh(project_root: project)
+    write_map(instance.map_path, [mapping("sources" => (1..5).map { |n| "https://vendor.example/source-#{n}" })])
+
+    prior = instance.lookup(model: "opencode-go/deepseek-v4.1-flash", project_root: project,
+                            indices: %w[coding_index]).fetch("prior")
+    sources = prior.fetch("sources")
+    assert(sources.length <= 5 &&
+           sources.include?("https://artificialanalysis.ai") &&
+           sources.include?("https://openrouter.ai/api/v1/benchmarks?source=artificial-analysis"),
+           "the benchmark source and dedicated endpoint survive the source cap")
+    assert(sources.include?("https://vendor.example/source-1"),
+           "audited mapping sources still fill the remaining bound")
+  end
+
   def overview(tmp, name, env: {}, clock: nil, http: nil)
     home = File.join(tmp, "home-#{name}")
     Orbit::OpenRouterModelOverview.new(env: { "HOME" => home, "OPENROUTER_API_KEY" => "or-test-key-1" }.merge(env),
@@ -481,7 +504,9 @@ module OpenRouterModelOverviewTest
                                        http_get: http || FakeHttp.new([]))
   end
 
-  # The real catalogue row shape: this endpoint carries no benchmark indices.
+  # A catalogue row shape without benchmark indices. The live catalogue now
+  # embeds an `artificial_analysis` object on some rows; the fixture omits it
+  # because this code never consumes catalogue-carried indices.
   def row(id, slug: id)
     { "id" => id, "canonical_slug" => slug, "name" => "Model", "description" => "Bounded description.",
       "context_length" => 8192,

@@ -13,9 +13,11 @@ module Orbit
   # verifiable account_scope/plan and a bounded usage composition for THIS
   # unit or review only. `similar_unit` is a traceable forecast whose
   # reference call ids are verified against THIS task's ResourceCallLedger
-  # (completed, same role, exact same four-key identity and reported usage;
-  # member scope also requires attribution to the actual accepted member and
-  # model of a WorkUnitStore record). Its usage tuple must be the per-category
+  # (completed, same role, exact same four-key identity and reported usage -
+  # with a receipt's unreported reasoning read as the typed "unknown" at that
+  # comparison only; member scope also requires attribution to the actual
+  # accepted member and model of a WorkUnitStore record). Its usage tuple
+  # must be the per-category
   # mean of those calls, so a reference cannot launder an invented token mix; it is never a
   # settlement; `declared_workload` is Root's stated assumption, never
   # disguised as measured usage or used for automatic cost ordering. Tokens
@@ -199,7 +201,8 @@ module Orbit
         identity = call.is_a?(Hash) ? call["actual_identity"] : nil
         next unless call && call["status"] == "completed" && call["role"] == SCOPE_ROLES.fetch(scope)
         next unless identity.is_a?(Hash) &&
-                    %w[provider model reasoning billing_route].all? { |key| identity[key] == route[key] }
+                    %w[provider model billing_route].all? { |key| identity[key] == route[key] } &&
+                    receipt_reasoning(identity) == route["reasoning"]
         if accepted
           unit = accepted[call["work_unit_id"]]
           next unless unit && !call["member_id"].to_s.empty? && unit["member_id"] == call["member_id"] &&
@@ -220,6 +223,16 @@ module Orbit
       end
     rescue ResourceCallLedger::Error, WorkUnitStore::Error
       false
+    end
+
+    # Native receipts carry no reasoning declaration, so the ledger stores the
+    # field nil (unreported). At this comparison only, that absence is the
+    # typed "unknown" the forecast route declares; a reported concrete effort
+    # still must match exactly and never folds into unknown. The stored
+    # receipt itself is unchanged - this reconciles representations, it does
+    # not manufacture a ledger fact.
+    def receipt_reasoning(identity)
+      identity["reasoning"] || "unknown"
     end
 
     def validate_candidates(candidates)
