@@ -395,6 +395,10 @@ try {
 				"autolearn.enabled": false,
 				"checkpoint.enabled": false,
 				"goal.enabled": false,
+				// Provider-error turns skip SDK auto-retry here; Orbit's
+				// existing bounded model reselection handles failures. Isolated
+				// checker/adjudicator sessions only.
+				"retry.enabled": false,
 			}),
 			sessionManager: SessionManager.create(snapshot, path.join(profile, "sessions")),
 			toolNames: REVIEW_TOOLS,
