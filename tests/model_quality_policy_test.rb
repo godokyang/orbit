@@ -188,6 +188,10 @@ module ModelQualityPolicyTest
     assert(chosen["ordered_ids"] == %w[cheap dear] && chosen["positive_ids"] == %w[cheap dear] &&
            chosen["basis"] == "released_task_fit_then_route_cost_heuristic",
            "both clear the reviewed task-fit bar; credible cost guides the resource preference")
+    alone = rank([fit("dear", 0.95)], release: reviewed,
+                 route_costs: { "dear" => route_quote(1_000_000) })
+    assert(alone["basis"] == "released_task_fit" && alone["cost_comparison"] != "heuristic",
+           "one positive candidate has an estimate but no cost comparison")
     below = rank([fit("dear", 0.95), fit("cheap", 0.1)], release: reviewed,
                  route_costs: { "cheap" => route_quote(1) })
     assert(below["ordered_ids"] == %w[dear cheap] && below["positive_ids"] == ["dear"],

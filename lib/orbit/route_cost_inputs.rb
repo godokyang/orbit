@@ -13,10 +13,13 @@ module Orbit
   # verifiable account_scope/plan and a bounded usage composition for THIS
   # unit or review only. `similar_unit` is a traceable forecast whose
   # reference call ids are verified against THIS task's ResourceCallLedger
-  # (completed, same role, exact same four-key identity; member scope also
-  # requires attribution to an accepted WorkUnitStore record) and is never a
+  # (completed, same role, exact same four-key identity and reported usage;
+  # member scope also requires attribution to an accepted WorkUnitStore
+  # record). Its usage tuple must be the per-category mean of those calls, so
+  # a reference cannot launder an invented token mix; it is never a
   # settlement; `declared_workload` is Root's stated assumption, never
-  # disguised as measured usage. Tokens are never invented here; both kinds
+  # disguised as measured usage or used for automatic cost ordering. Tokens
+  # are never invented here; both kinds
   # report usage_source "prediction:*" and keep basis/applies_to/references
   # on the built input, so the recorded selection shows the forecast's basis,
   # applicability scope and uncertainty instead of a bare usage hash.
@@ -177,26 +180,37 @@ module Orbit
 
     # A similar-unit forecast is credible only when every referenced call is
     # in THIS task's ledger: completed, recorded under the role this scope
-    # dispatches, the exact same four-key identity as the candidate, and (for
-    # member scope) attributed to an accepted work unit. No cross-task scans.
+    # dispatches, the exact same four-key identity as the candidate, complete
+    # reported usage with the same categories, and (for member scope)
+    # attributed to an accepted work unit. The stated tuple must be the mean
+    # of those samples. No cross-task scans or invented token mixes.
     def references_verified?(prediction, route, scope)
       ids = prediction["reference_call_ids"]
       return true unless prediction["kind"] == "similar_unit"
 
       calls = ResourceCallLedger.new(task_path: @record.path, task_id: File.basename(@record.path),
                                      clock: @clock).calls
-      accepted = nil
-      ids.all? do |id|
+      accepted = scope == "member" ? WorkUnitStore.new(@record).list.select { |unit| unit["status"] == "accepted" }
+                                                 .map { |unit| unit["id"] } : nil
+      samples = ids.filter_map do |id|
         call = calls.find { |entry| entry["call_id"] == id }
         identity = call.is_a?(Hash) ? call["actual_identity"] : nil
-        next false unless call && call["status"] == "completed" && call["role"] == SCOPE_ROLES.fetch(scope)
-        next false unless identity.is_a?(Hash) &&
-                          %w[provider model reasoning billing_route].all? { |key| identity[key] == route[key] }
-        next true unless scope == "member"
+        next unless call && call["status"] == "completed" && call["role"] == SCOPE_ROLES.fetch(scope)
+        next unless identity.is_a?(Hash) &&
+                    %w[provider model reasoning billing_route].all? { |key| identity[key] == route[key] }
+        next if accepted && !accepted.include?(call["work_unit_id"])
 
-        accepted ||= WorkUnitStore.new(@record).list.select { |unit| unit["status"] == "accepted" }
-                                  .map { |unit| unit["id"] }
-        call["work_unit_id"].is_a?(String) && accepted.include?(call["work_unit_id"])
+        usage = call["usage"]
+        next unless call["usage_status"] == "reported" && usage.is_a?(Hash) &&
+                    usage.keys.sort == prediction["usage"].keys.sort
+
+        usage
+      end
+      return false unless samples.length == ids.length
+
+      prediction["usage"].all? do |name, count|
+        mean = samples.sum { |usage| usage.fetch(name) }.to_f / samples.length
+        (count.to_f - mean).abs <= 1e-9 * [1.0, mean.abs].max
       end
     rescue ResourceCallLedger::Error, WorkUnitStore::Error
       false
@@ -245,6 +259,7 @@ module Orbit
       references = prediction["reference_call_ids"]
       if prediction["kind"] == "similar_unit"
         references.is_a?(Array) && references.length.between?(1, MAX_REFERENCES) &&
+          references.uniq.length == references.length &&
           references.all? { |id| id.is_a?(String) && !id.strip.empty? }
       else
         references.nil?

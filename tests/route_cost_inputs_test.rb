@@ -41,8 +41,8 @@ module RouteCostInputsTest
                         "output" => { "unit" => "token", "price" => output_price, "per" => 1_000_000 } } }
   end
 
-  def prediction(kind, output, references = nil)
-    base = { "kind" => kind, "usage" => { "input" => 1_000, "output" => output },
+  def prediction(kind, output, references = nil, input: 1_000)
+    base = { "kind" => kind, "usage" => { "input" => input, "output" => output },
              "basis" => "same-shape unit of this task", "applies_to" => "this work unit only" }
     references ? base.merge("reference_call_ids" => references) : base
   end
@@ -84,10 +84,9 @@ module RouteCostInputsTest
     )
   end
 
-  # A credible recorded composition prices both released candidates and the
-  # cheaper one orders first; the forecast's basis and applicability stay
-  # visible on the built input instead of being dropped after `usage`.
-  def trusted_prediction_orders_released_candidates
+  # A Root-declared composition can show conditional amounts, but without an
+  # attributed sample it cannot order candidates by total cost.
+  def declared_workload_is_conditional_only
     with_task do |_root, record, store, inputs|
       store.import([fact_document("glm-5.2", 2.2), fact_document("glm-5.2x", 0.2)])
       inputs.record_inputs(scope: "review", candidates: {
@@ -111,12 +110,12 @@ module RouteCostInputsTest
       end
       ranking = Orbit::ModelQualityPolicy.order(signals, release: policy_release, route_costs: built,
                                                 state: policy_state, judgment: policy_judgment)
-      assert(ranking["basis"] == "released_task_fit_then_route_cost_heuristic" &&
-             ranking["ordered_ids"].first == "zhipu/glm-5.2x",
-             "equal released quality then prefers the lower verified route estimate")
+      assert(ranking["basis"] == "released_task_fit" && ranking["cost_comparison"] == "incomparable" &&
+             ranking["ordered_ids"].first == "zhipu/glm-5.2",
+             "a declared token mix does not become an automatic cheaper-model claim")
       assert(ranking.dig("cost_estimates", "zhipu/glm-5.2x", "amount") <
              ranking.dig("cost_estimates", "zhipu/glm-5.2", "amount"),
-             "the estimate amounts reflect the imported prices over the stated usage")
+             "conditional estimate amounts remain visible for Root to assess")
     end
   end
 
@@ -198,10 +197,36 @@ module RouteCostInputsTest
                     usage_source: "provider_response", member_id: "orbit-m1", work_unit_id: unit.fetch("id"))
       inputs.record_inputs(scope: "member", work_unit_id: unit.fetch("id"),
                            candidates: { "zhipu/glm-5.2" => candidate("glm-5.2", prediction("similar_unit", 100, ["real-2"])) })
+      assert(inputs.build(**args).empty?, "a real reference cannot launder an invented token mix")
+      inputs.record_inputs(scope: "member", work_unit_id: unit.fetch("id"),
+                           candidates: { "zhipu/glm-5.2" => candidate("glm-5.2", prediction("similar_unit", 5, ["real-2"], input: 10)) })
       built = inputs.build(**args)
       assert(built.dig("zhipu/glm-5.2", "usage_source") == "prediction:similar_unit" &&
              built.dig("zhipu/glm-5.2", "prediction", "reference_call_ids") == ["real-2"],
              "a completed same-identity call on an accepted unit makes the forecast credible")
+
+      # A second accepted same-role sample keeps the positive comparison path
+      # real: policy may prefer the cheaper route only after both compositions
+      # are tied to reported calls, not to Root-stated estimates.
+      store.import(fact_document("glm-5.2x", 0.2))
+      other = units.declare("objective" => "build another bounded part", "acceptance" => "tests pass",
+                            "escalation" => "stop and report", "requirements" => ["instruction"],
+                            "allowed_paths" => ["lib/"])
+      units.bind(other.fetch("id"), member_id: "orbit-m2", tool_call_id: "tc-2", model: "zhipu/glm-5.2x")
+      units.finish(other.fetch("id"), status: "accepted", result: "done", verification: "tests pass")
+      ledger.record(call_id: "real-3", role: "member", phase: "exec", status: "completed",
+                    provider: "zhipu", actual_model: "glm-5.2x", reasoning: "unknown",
+                    billing_route: "direct_api", usage: { "input" => 10, "output" => 5 },
+                    usage_source: "provider_response", member_id: "orbit-m2", work_unit_id: other.fetch("id"))
+      inputs.record_inputs(scope: "member", work_unit_id: unit.fetch("id"), candidates: {
+        "zhipu/glm-5.2" => candidate("glm-5.2", prediction("similar_unit", 5, ["real-2"], input: 10)),
+        "zhipu/glm-5.2x" => candidate("glm-5.2x", prediction("similar_unit", 5, ["real-3"], input: 10))
+      })
+      compared = Orbit::ModelQualityPolicy.order(
+        %w[zhipu/glm-5.2 zhipu/glm-5.2x].map { |model| { "id" => model, "quality" => 0.9, "question" => "checker_task_fit" } },
+        release: policy_release, route_costs: inputs.build(**args), state: policy_state, judgment: policy_judgment)
+      assert(compared["cost_comparison"] == "heuristic" && compared["ordered_ids"].first == "zhipu/glm-5.2x",
+             "verified historical usage and route facts can still guide a released cost comparison")
 
       expired = fact_document("glm-5.2", 2.2).merge(
         "verification" => { "retrieved_at" => "2026-09-01T00:00:00Z", "valid_until" => "2026-09-02T00:00:00Z" })
@@ -215,7 +240,7 @@ module RouteCostInputsTest
   end
 
   def run
-    trusted_prediction_orders_released_candidates
+    declared_workload_is_conditional_only
     broken_binding_degrades_to_unknown
     unverifiable_references_and_facts_stay_unknown
     puts "ROUTE_COST_INPUTS_TEST_PASS"

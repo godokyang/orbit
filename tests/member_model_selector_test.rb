@@ -399,9 +399,9 @@ module MemberModelSelectorTest
                                   "applies_to" => "unit-1" } }]
     end
     result = built.assess(state: state, work_unit: work_unit, route_costs: costs)
-    assert(result.dig("recommendation", "first") == "orbit-agent-b" &&
-           result.dig("order", "cost_comparison") == "heuristic",
-           "provider/model forecast keys drive the corresponding agent choice after the quality gate")
+    assert(result.dig("recommendation", "first") == "orbit-agent-a" &&
+           result.dig("order", "cost_comparison") == "incomparable",
+           "an unmeasured Root forecast does not override the quality-order tie")
     estimate = result.dig("order", "cost_estimates", "orbit-agent-b")
     assert(estimate.dig("route", "provider") == "b" &&
            estimate.dig("source_fact", "source", "verifier") == "test fixture" &&

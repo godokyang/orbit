@@ -321,7 +321,9 @@ module Orbit
       order_result(ranked + tail, positive: true, basis: basis, cost_comparison: comparison,
                    cost_notes: relation["notes"], positive_ids: ranked.map { |item| item["id"] },
                    cost_estimates: relation["estimates"],
-                   reason: "released task-fit signal; comparable route estimates prefer lower resource cost, without treating a probability as measured reliability")
+                   reason: relation["comparable"] ?
+                     "released task-fit signal; comparable route estimates prefer lower resource cost, without treating a probability as measured reliability" :
+                     "released task-fit signal; route costs are not comparable, so task fit determines the order")
     end
 
     def ranking_release(release)
@@ -448,15 +450,24 @@ module Orbit
     def cost_relation(items, route_costs)
       estimates = {}
       notes = []
+      comparison_eligible = true
       items.each do |item|
-        estimate, note = resolve_route_cost(route_costs[item["id"]])
+        input = route_costs[item["id"]]
+        estimate, note = resolve_route_cost(input)
         if estimate && item["identity"].is_a?(Hash) && estimate["route"] != item["identity"]
           estimate, note = nil, "priced route does not match this candidate identity"
+        end
+        # A Root-declared token mix is an explicit what-if estimate, not
+        # attributable usage. Keep its arithmetic visible, but do not turn it
+        # into an automatic preference between crossed input/output prices.
+        if estimate && input.is_a?(Hash) && input.dig("prediction", "kind") == "declared_workload"
+          comparison_eligible = false
+          note = "declared workload has no attributed usage sample; estimate is conditional only"
         end
         estimates[item["id"]] = estimate
         notes << "#{item['id']}: #{note}" if note
       end
-      comparable = items.combination(2).all? do |left, right|
+      comparable = comparison_eligible && items.length > 1 && items.combination(2).all? do |left, right|
         RouteResourceFacts.compare(estimates[left["id"]], estimates[right["id"]])["verdict"] != "indeterminate"
       end
       comparable &&= items.all? { |item| estimates[item["id"]].is_a?(Hash) && estimates[item["id"]]["status"] == "priced" }
