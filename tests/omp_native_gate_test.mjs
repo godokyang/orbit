@@ -184,6 +184,64 @@ try {
     fixture.runtime_pid = process.pid;
     await fs.writeFile(statePath, JSON.stringify(fixture));
   }
+  // 1c. Implementation-bootstrap guidance. A controlled task that has no work
+  // unit must learn it in the FIRST provider payload the model answers — the
+  // entry advisory cannot cover this because an explicit request never runs the
+  // entry-3 judgment. An unextendable payload stays pending, the next reachable
+  // window delivers once, and the task never repeats it.
+  const bootWindow = { payload: { messages: [{ role: 'user', content: 'Original requirement.' }] } };
+  // The bound system prompt carries only the regular status guidance: the
+  // bootstrap never rides both the system prompt and the payload of one
+  // request; the extensible payload is its only channel.
+  const unitlessTurn = await emit('before_agent_start', { prompt: 'next', systemPrompt: ['BASE'] }, ctx);
+  assert.ok(!(unitlessTurn?.systemPrompt ?? []).join('\n').includes('[orbit-bootstrap]'),
+    'the bound system prompt never carries the work-unit bootstrap');
+  const unextendable = await emit('before_provider_request', { payload: { messages: [] } }, ctx);
+  assert.ok(!JSON.stringify(unextendable ?? {}).includes('[orbit-bootstrap]'),
+    'a payload the injector cannot extend stays pending instead of reporting success');
+  const booted = await emit('before_provider_request', bootWindow, ctx);
+  const bootedText = (booted?.payload ?? booted)?.messages?.at(-1)?.content;
+  assert.ok(typeof bootedText === 'string' && bootedText.includes('[orbit-bootstrap]'),
+    'the first extendable payload carries the work-unit bootstrap for a task with no unit');
+  const repeated = await emit('before_provider_request',
+    { payload: { messages: [{ role: 'user', content: 'second window' }] } }, ctx);
+  assert.ok(!JSON.stringify(repeated ?? {}).includes('[orbit-bootstrap]'),
+    'the bootstrap is task-scoped and never repeats');
+  const straySession = session('no-task-session', []);
+  const strayCtx = { ...ctx, sessionManager: straySession.sessionManager };
+  const stray = await emit('before_provider_request',
+    { payload: { messages: [{ role: 'user', content: 'uncontrolled request' }] } }, strayCtx);
+  assert.ok(!JSON.stringify(stray ?? {}).includes('[orbit-bootstrap]'),
+    'an uncontrolled session is never given the bootstrap');
+  // The factual pre-edit observation: what unit state existed before Root's
+  // first explicit artifact edit, with the real tool_call_id, recorded once.
+  const collabPath = path.join(started.task_directory, 'collaboration.jsonl');
+  const collabEntries = async () => {
+    const raw = await fs.readFile(collabPath, 'utf8').catch(() => '');
+    return raw.split('\n').filter(Boolean).map(line => JSON.parse(line));
+  };
+  const waitFor = async predicate => {
+    for (let n = 0; n < 20; n++) {
+      const entries = await collabEntries();
+      if (predicate(entries)) return entries;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    return collabEntries();
+  };
+  await emit('tool_call', { toolName: 'edit', toolCallId: 'root-edit-1', input: { path: 'src/parse.js' } }, ctx);
+  const observed = (await waitFor(entries => entries.some(e => e.kind === 'unit_state_before_edit')))
+    .filter(e => e.kind === 'unit_state_before_edit');
+  assert.equal(observed.length, 1, 'the first Root artifact edit records one unit-state observation');
+  assert.equal(observed[0].tool_call_id, 'root-edit-1', 'the observation keeps the real tool_call_id');
+  assert.ok(['declared', 'none', 'unknown'].includes(observed[0].work_unit_state),
+    'the observation states the observed unit state instead of guessing');
+  assert.equal(Object.hasOwn(observed[0], 'delegation'), false, 'the observation never infers a delegation refusal');
+  await emit('tool_call', { toolName: 'edit', toolCallId: 'root-edit-2', input: { path: 'src/parse.js' } }, ctx);
+  assert.equal((await collabEntries()).filter(e => e.kind === 'unit_state_before_edit').length, 1,
+    'the pre-edit observation is recorded once per task');
+  await emit('tool_call', { toolName: 'bash', toolCallId: 'root-shell-1', input: { command: 'echo x > src/parse.js' } }, ctx);
+  assert.equal((await collabEntries()).filter(e => e.kind === 'unit_state_before_edit').length, 1,
+    'a shell command is never read as an artifact edit');
   assert.equal((await request('model_catalog')).agent_dir, agentRoot,
     'the catalog carries the host-resolved agent directory for isolated profile credentials');
   const declared = await tool({ action: 'work-unit', task: started.task_directory, operation: 'declare', work_unit: {
@@ -1396,6 +1454,8 @@ process.exit(run.status ?? 1);
       const injected = (out?.payload ?? out)?.messages?.at(-1)?.content;
       assert.ok(typeof injected === 'string' && injected.includes('[orbit-entry-advisory]'),
         'the auto entry start injects the advisory into the CURRENT provider request payload');
+      assert.ok(typeof injected === 'string' && injected.includes('[orbit-bootstrap]'),
+        'the SAME auto request also carries the work-unit bootstrap — the advisory never returns ahead of it');
       assert.ok(injected.includes('0.85') && injected.includes('0.65'),
         'the auto-path advisory carries the measured fact');
       const newDir = (await fs.readdir(tasksRoot)).find(dir => !beforeDirs.has(dir));
@@ -1469,6 +1529,8 @@ process.exit(run.status ?? 1);
       const retryContent = (retryOut?.payload ?? retryOut)?.messages?.at(-1)?.content;
       assert.ok(typeof retryContent === 'string' && retryContent.includes('[orbit-entry-advisory]'),
         'a no-user tool-turn request still gets the pending advisory (manual same-turn window)');
+      assert.ok(typeof retryContent === 'string' && retryContent.includes('[orbit-bootstrap]'),
+        'the pending bootstrap travels in the same retried payload as the advisory');
       const thirdOut = await emit('before_provider_request',
         { payload: { messages: [{ role: 'user', content: 'third window' }] } }, autoCtx2);
       const thirdContent = (thirdOut?.payload ?? thirdOut)?.messages?.at(-1)?.content;

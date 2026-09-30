@@ -1,58 +1,77 @@
 # Orbit 当前交接
 
-最后核对：2026-09-30。**当前支持安装 0.7.21**（clean commit `fffabf801b430b61aa11d58f86f99960bdd9c8aa`，content digest `ae9ce431ead61d3bb61eb04c5050a7408ef2faf0cdbd42d02e5127512cd7d4fd`，2026-09-30T11:21:07Z 安装，`orbit version --json` 一致；未发布；OMP 与 reviewer 18.3.4 未升级）。唯一组合回归 run2 `npm test` exit 0（`/private/tmp/orbit-regression-0.7.21/report.json`）。**源码已提交并安装，业务闭环尚未验收**：普通阶段已结束，仅修改解析模块且未建任务；请求 02 已提交，任务 `8e411be9` 于 11:27:42Z 保存接管边界（`prior_scope unknown`、真实原生消息 `b4d56978`、私有快照六文件与普通阶段结束一致，Controller 记录 `takeover-boundary-observation.json`），**已实机 complete 并 confirmed stop（11:44:53Z，active_tools 0／background settled）**；普通阶段仅改 `src/parse.js` 并由 Root 真实原生冒烟验证。**成员=0：本运行不含自主成员派发，也不构成对照或节省证据**；`prior_scope` 追加与 Go 映射接线（五文件）**未安装**，与本次运行证据分开记录；后验见 `controller-records/postmortem-8e411be9.json`（原件 SHA 前后一致）。此前支持安装依次为 0.7.20（clean `1618b81`，digest `08472661…`，08:58:27Z）、0.7.19（`0faf1ce8…`）、0.7.18、0.7.17 与 0.7.12／`a1f9291`；原始身份记录见 `/private/tmp/orbit-takeover-fixture-1D6DEl/controller-records/installed-version-0.7.21.json`。
+最后核对：2026-09-30，bootstrap 修复复核与选型实现推进后更新。Goal **未完成**；本页是当前交接入口，历史运行从既有 reference、Git 和下面原始目录查阅，不重开已经结束的票。
 
-## 0.7.20 已交付（本版组合，未发布）
+## 目标与用户决定
 
-- 成员结算修订（[合同](../../contracts/task-runtime.md)“成员结算（2026-09-30 修订）”：原生本派发结果含真实 error、精确 work-unit 核验、`acceptedAt` 不伪盖、缺证一次通知 Root）；自选成员 `work_unit_id` 归属接缝经 Q 独立复核 PASS（`resolve_member_unit_id` 按精确 thread_id＋tool_call_id 取该单元最新派发）。
-- history-gap 检查历史（S 定版，Q 静态审 PASS；其回放是**控制器确定性重放**，不是新 Orbit 实测）、root_without_hint 恢复、未知生效日成本存档（显式 `unknown`：archive／list／report）。
-- 组合验证：唯一一次组合 full npm test exit 0（123 PASS，`/private/tmp/orbit-regression-0.7.20/npm-test.log`），pack dry-run 83 files，逐文件 hash 运行前后一致。
-- 本版内容**不等于**完整目标验收：见下节与 W1—W10。
+完整实现并真实验收[混合模型交付主方案](mixed-model-delivery-proposal.md)，按[附属代码审计](mixed-model-delivery-code-audit.md)逐项闭合，完成条件见[当前计划 W1—W10](vision-completion-plan.md)。有限顶级模型资源下保持交付质量，让其他模型承担合适工作，减少用户介入。模型仍会幻觉、偏移、越界、遗忘；系统靠可验证任务、权限、回执、独立检查及纠正控制这些风险，不承诺模型绝不出错。
 
-## 0.7.20 安装后已实测
+- 一次完整交付，不设硬预算。选型删除速度、时间和本地耗时评分；运行计时、缓存时效及停止控制不是选型信号。
+- `orbit omp` 就是启动命令。`explicit_orbit` 是内部请求分类，不是另一启动需求。普通业务请求须自主进入合适的受控／协作路径，不依赖用户再次说“用 Orbit”或逐次安排成员。
+- OpenRouter 给任务相关能力先验，Jev 给任务判断；未校准不能自动正向推荐。OpenRouter 价格不是 OMP 价格；未知费用、用量、额度归属保持未知。
+- Codex 编排、集成和审核；复用用户授权的 Herdr OMP 执行者，不自动换内部子 Agent。源码／合同语义改动同步权威文件。
+- 本地提交及必要收尾已授权，不推送、发布、购买额度或升级 OMP。失败证据不改判。
 
-- **provider 错误分类**：真实 Go 429／K3 403／FlashX 403 的分类与 reviewer 会话原件一致（`auth_or_quota`）；Go 429 不再记为无效 JSON，errored turn 即使 final message 合法也不授结果。
-- **paired 对照**（baseline＝plain OMP 18.3.4，mixed＝installed orbit omp 0.7.20；冻结 8 项测试与 6 项探针**每臂只跑一次**）：两臂 **8/8 与 6/6 全通过**，按冻结外部标准质量无可检出差异；混合臂 **members=0**，未 exercise 成员替代路径；顶级模型 GPT-6-sol 总量 mixed 376410 vs baseline 289685（**约 +30%**，root 单侧约 +7.9%，其余来自独立检查链）；用户介入两臂均为 0。自动检查 1—6 共用**同一 observation**，2—5 是同一观察上的**有界失败重选**而非重复观察；check5 的 126455 token 为真实消耗、零接受产出（其完整结论因单条需求文本超 300 字符被 schema 拒绝）。证据 `/private/tmp/orbit-reconcile-acceptance-ucWZ9UmM/controller-records/paired-comparison.json`。
-- **成本事实**：隔离项目内 `route-resources import` exit 0（显式未知生效日事实存档）、缺标记的缺生效日导入 exit 1、`list` 显示 `effective.unknown=true`、两份真实台账副本 `report` exit 0 且 `cash []`／`cost_complete=false`（107／111 次调用）。**未知生效日永不覆盖调用、永不参与定价或自动排序**；`cash` 空只表示未知，不是 0 成本。证据 `/private/tmp/orbit-resource-unknown-final-akE3Nz/controller-records/live-cli-verification.json`。
+## 精确版本与工作区
 
-## 未闭合与下一版
+- **安装 0.7.21**：`orbit version --json` 已复核，clean source `fffabf801b430b61aa11d58f86f99960bdd9c8aa`；digest `ae9ce431ead61d3bb61eb04c5050a7408ef2faf0cdbd42d02e5127512cd7d4fd`，2026-09-30T11:21:07Z 安装。OMP／reviewer 18.3.4，没有按 UI 更新提示升级。
+- **HEAD 源码 0.7.22，已本地提交、未安装**：`1893fd7d281167cbe066d536ce70667f3899f50c`，包含 takeover 声明追加、Go 路由结构匹配及精确映射、范围说明与相关测试。其唯一组合 full `npm test` exit 0，pack／version／validator 通过；129 个源／测试／打包文件前后 SHA 一致。证据 `/private/tmp/orbit-regression-0.7.22/report.json`。这次 full 不覆盖下面后来产生的修改。
+- **工作区 0.7.23，组合验证已通过、待本票提交安装（安装仍 0.7.21）**：选型决策升 `orbit-quality-decision-3`（不可比时过门候选保持稳定池序，不称质量／费用优势）＋ member v2／checker v7＋policy 回归测试＋合同选型句＋bootstrap 修复增量；`npm version patch` 同步 package 与 shrinkwrap。**组合 full／pack／validator／version／diff-check 全部 exit 0**：证据 `/private/tmp/orbit-regression-0.7.23-gu0Ouq/`（report.json＋原始 exit/log/packjson），Root 已直接核验并逐文件复算 pre/post/current 129 个 SHA 完全一致；S 跑完已停票，无 npm 测试残留。**decision-3 放行已重签**：Root 2026-09-30T13:57:50Z 独立审核（w1Y:p1A）；policy 实现者是 Q，Root 只独立审核与重签、不是实施者；17 个真实样本逐字保留（`JSON.stringify(samples)` SHA256 `5a30130a022abd2bc1b35a6ebe61c2ea4fe0e750cafbb0d23d6d51de973d03cc`，共享 call_id 原样，非 17 次新调用、未新 API 校准，仅证门不证跨候选排序）；结构 load 通过，旧 -2 副本明确不匹配（临时副本验证）。
 
-- **0.7.20 成员复测已结束为 paused，停止确认通过，非业务完成**：任务 `1d977642` 首成员真实 Go 429，替补成员获原生接受，Root 的 `node --test` 原生回执为 8/8；Root 用 `amend` 补验证文字后，旧失败成员因输入版本变化被撤销结算，阻止最终完成。另查明检查上下文压缩只留下最近控制 URI 写入，遗漏同版本测试回执。Controller 原生退出后 Root／成员／后台工作确认结束；原件未改，后验见 `/private/tmp/orbit-member-settlement-live-6tGQlP/controller-records/postmortem.json` 与补充调查。
-- **0.7.21 源码已提交并安装（`fffabf80`／`ae9ce431…`／11:21:07Z），唯一组合回归 run2 exit 0；业务闭环尚未验收**：接管与入口提示已并入主仓并通过相关测试与独立审查；需求文本容量 300→1000 通过相关验证与独立审；执行终结与新版本证据资格分离、修改通知来源及验证回执压缩选择修复均已完成并通过相关验证与 Q 审。回归证据 `/private/tmp/orbit-regression-0.7.21/report.json`：run2 exit 0（末尾 `INSTALL_TEST_PASS shell_configuration`；126 只是 PASS 标记行数，不是测试数量）、pack dry-run 83 files／422028 B、`check:version` 与 skill validator exit 0、**129 个源/测试/打包文件 run2 前后 SHA 相同**；首次 full 的 exit 1 与中间 fixture 失败日志保留，**只修既有 `judgment_usage_test` 夹具到生产校准形状，未放宽生产门**。源码与脚本结果不能改写上述真实失败为通过。
-- 账户范围与实际扣减桶、本路由现金成本、同质量对照中的成员路径与效果仍未闭合；W1—W10 全部未勾选、Goal 保持 active、经济收益尚未证明。
-- 历史失败保留、不改判：0.7.18 任务 `02a5eda7` 仍为 **partial／paused**（两成员 `registered`／idle、无 `accepted_at`、`pending_finalization` 未通知，**非业务完成**；停时 registry ref 移除导致的 bridge 读失败是次生症状），根因原件 `/private/tmp/orbit-member-positive-N0ghF3bI/controller-records/finalization-gap-analysis.json`；0.7.18 首轮 `1216aeef` 完成但 `findings={}`（结构化 finding 生命周期未 exercise、members=0、账本 36 次含两次显式 unknown）；0.7.17 起后台任务三因（hashline `edit` 方言被键白名单拒绝、首个成员真实 Go 429、hint 归因缺陷）源码已修，**其路径的 p26 实机复测已完成并保留为负例**：替补成员真实 native accepted、Root 集成后 `node --test` 8/8（交付证据），但失败首派被 `10:00:33` 修订撤销后该成员停在 `registered`（未结算、`pending_finalization` 未送达），任务终态 **paused ＋ confirmed stop**；**不记完整闭环通过**，也不把这次明确 fixture 派发当作普通自主或经济证据；0.7.11 两轮暴露的 native yield／成员退出与测试证据缺口不按源码修复重标通过。
+启动增量冻结 SHA256：
 
-## 0.7.10 已交付基线
+| 文件 | SHA256 |
+| --- | --- |
+| `plugins/omp-host.mjs` | `fdbffecb67ede14a3b50bd3fc5b2ef31fc70a73ed7661516b9534b9cd11433ff` |
+| `contracts/task-runtime.md` | `cfb554d07a6ef0c95ec5c9a8114a84fe1012cf49bd67b4aa51448ed04718459d` |
+| `tests/omp_native_gate_test.mjs` | `b0c7ad25b7e00a26d16093198127bff6fbc95def22e9181843ffafbc9617a28` |
 
-- `orbit omp` 是唯一受控宿主入口，使用原版 OMP 的一层 `task/hub` 团队；Root 可自主调用原生工具派发，无需用户逐次安排；当前 Orbit 程序不直接发起 task 或替换 Root。普通 `omp` 不接入。
-- 保存原始要求和显式修订、工作区绑定与固定快照；登记成员实际身份并拦截可观测漂移；独立只读检查、finding 纠正、当前版本手动终检与完成停止核对已存在。`stop_unconfirmed` 继续表示停止不可确认。
-- 候选池持久保存型号，与当前会话目录取交集。有可用池内成员 Agent 的受控任务，不能用通用 `@task` 静默绕到池外默认型号；Root 可自主选池内 Agent。逐型号原生消息授权门与旧会话型号授权记忆已撤销。
-- 检查者先取可运行池内候选，池空或池内都不可运行时可用 OMP 目录；隔离目录及凭据解析只证明可尝试。精确事实缺失或 Jev 低分允许明确降级，实际检查失败留证并在未尝试的可运行候选中有界重试，全部失败才阻塞。
-- 可选 OpenRouter setup、0600 私有凭据、72 小时目录快照、经来源审计的模型版本映射、检查者弱质量先验及降级已接线。无 key 或项目禁用不外发也不消费旧概述缓存；独立检查安全门仍在。映射不证明 reasoning 与实际 billing route 已核实。
-- 任务证据本地落盘及导出、会话汇总、用户状态提示、已归属交付回复的有界保留已存在；日志或用量不完整时如实记录未知。
+该增量在首个可扩展 provider 请求中给受控 Root 工作单元引导（不依赖入口概率，显式与自动入口一致；未受控会话与成员不注入），合并注入、不可扩展保持待发、事实记录首次明确编辑前的单元状态；没有直接程序派发、扩大权限或更改质量排序。前轮独立审查的两项缺口（advisory 早退出吞掉同窗 bootstrap、system 与 payload 同句重复）已修复并复核；已知剩余边界：sent 集合仅进程内，OMP 重启后活动任务会重注入一次（幂等指引，接受）。gate 绿不等于组合回归或实机验收。上表为 bootstrap 三文件冻结值（合同行含选型句修改）；bootstrap 与 policy 均已冻结，不再写入。
 
-运行语义以[合同](../../contracts/task-runtime.md)、[ADR-008](../adr/008-omp-native-collaboration-base.md)及[ADR-009](../adr/009-user-selected-model-pool.md)为准。该已交付基线包含旧时间／粗费用选型；不将历史分数用于新版放行。
+## 最小链路的最新事实
 
-## 已认可方向与未完成工作
+1. **真实 Jev API 一次调用成功**：`/private/tmp/orbit-minimal-dispatch-jev/` 原包／回包，HTTP 200，实际 `jev-1.13.0`，`jev-delegation-4`／`jev-selection-input-2`；handoff_fit 0.95、member_task_fit 0.20，input 1647／output 40。该输入没有候选和先验，不能据此判派发失败，也不是派发证明。不要重复同一诊断付费调用。
+2. **installed 0.7.21 最小明确交接链已 complete＋confirmed stop**：任务 `26935a3e-fe59-4c74-a2ec-9bc89a272c83`，目录 `/private/tmp/orbit-minimal-chain-PbtkHC/product/.orbit/tasks/26935a3e-fe59-4c74-a2ec-9bc89a272c83`。工作单元 `wu-da565586044f6c8c` 先声明；实际成员 `zenmux/deepseek/deepseek-v4.1-flash` 派发并 accepted；Root 核验固定九例（一个测试组 pass 1／fail 0）；独立 reviewer 同型号、另一进程，终检 complete／coverage complete；Root 与成员停止确认 active_tools 0、async_jobs_settled true。README／package／test 三份固定材料 SHA 未变，全局候选池 SHA 未变。
+3. 上述新事实观察保存于 `/private/tmp/orbit-minimal-chain-PbtkHC/controller/handoff-observation.json`；原始 work-units／collaboration／root-verifications／check evidence 仍需新 Root 在需要时核对，不仅相信摘要。
+4. **此轮明确要求交接，且只有一个隔离池候选**，只证明该最小机械链可工作；不证明普通需求自主派发、完整池选型、纠正分支或节省资源。启动增量没用于此轮。资源账本尚未完整后验汇总，不能承诺收益。
 
-用户认可[混合模型交付主方案](mixed-model-delivery-proposal.md)，并要求[逐项代码审计](mixed-model-delivery-code-audit.md)。用户补充要求完整目标一次交付，不需要硬预算；现有 Root 自主派发须保留并完善。当前目标是有限顶级模型资源下的同质量交付和更少用户介入；以下差距仍未闭合：
+## 自主派发真正缺口与资源风险
 
-- 新入口“执行授权且具备委派价值或监督价值”已有有限校准放行，仍需补齐当前构建的入口与派发验收；适用域外保持未验证（有限 Git 放行见[有限校准](../reference/mixed-model-calibration-20260929.md)）。
-- 成员与检查者消费任务相关、无时间信号的能力事实；agentic-only 资格、intelligence 覆盖、真实路由与冲突呈现、测量日期资格。
-- 所有选型路径、检查者排序、补证、CLI 与说明中时间评分已退出新路径；状态／说明的历史显示按旧版本解释。
-- 实际 OMP 路由价格与额度规则、币种与单位、Root／成员／检查者可归属 token 用量；账户范围与实际扣减桶仍未知。
-- 新质量问题的代表性真实样本、失败与缺证样本，以及自动正向推荐的放行依据；旧 0.55／0.50 不能直接移用。
-- 接管（takeover）与 entry advisory 已合入工作区，仍需新版安装后的真实验收；串行交接、分层核验和必要旗舰升级的真实效果验收，同次闭合完整目标。
+- 只读调查 `/private/tmp/orbit-autonomous-dispatch-audit/autonomous-dispatch-evidence.json`：0.7.20 没有 entry advisory 实现；0.7.21 fresh 显式请求没有触发其概率前提。两次都在实现前没有工作单元，后一次推荐出现于实现后的 provenance 单元。**不能说 Root 忽略了已送达的派发指导，也不能说 Jev 服务一直不工作**。
+- 宿主 `before_agent_start` 发生在自动建任务之前，而首次 `before_provider_request` 建任务后原来只尝试概率条件下的 advisory。这是启动接缝的具体缺口；S 增量已修复并复核通过，**待安装与普通请求实测**。
+- 质量正向过门后，可信可比成本分支按成本优先；成本未知／不可比分支决策语义已改并实现（实现者 Q）：过门候选保持调用方稳定输入（池）序，不称便宜或可靠，未知不免费。decision-3 放行由 Root 独立审核后重签（证据边界见上节）；组合验证已全绿，**生效以本票安装与后续普通请求实测为准**。池顺序不等于便宜；升版本并审计放行绑定、不重标旧分数的约束保持。
+- Q 已完成最小链资源后验 `/private/tmp/orbit-minimal-chain-PbtkHC/controller/resource-post-audit.json`（36 调用全 reported、call_id 唯一、checker 两账本一致、reasoningTokens 子集未另加；billing 全 unknown、未推费用）。该摘要只汇总账本，**不证明普通派发或任何收益**，不推翻下节负例。
 
-**当前主 TODO（按只读取证纠正）**：生产 Jev 一次最小调用 → 明确单元并走真实 native 派发／回收 → 修普通与显式入口在实现前的路由／关键事件 → 核心链通过后才做更大任务与资源对照。取证结论：0.7.20 无 advisory 代码、0.7.21 fresh 显式入口未触发 advisory、两次运行在实现前都没有 unit，**不能归因 Root 忽略**；Jev API 与具体单元判断曾成功，须与“自主派发未 ready”分开记录。0.7.22 增量 full 已绿但未提交／未安装，安装仍 0.7.21。
+## 必须保留的负例
 
-当前执行者：Q（`p1Q` 只读审查，含 takeover delta 局部 PASS）、R（`p1R` 源码／回归／安装）、S（`p1S` 事实／fixture／docs），Codex 负责编排与审核；p26 的 Controller 实机观察**已完成并保留负例**，被测 Root 自行执行任务。旧 B／C／D／E 已结束，其独有事实归入既有 reference 与 Git 历史。已结束的实施票不留在计划目录；旧正文通过 Git 查阅。[限制清单](debt-ledger.md)只保留现存缺口。
+- installed 0.7.20 配对 `/private/tmp/orbit-reconcile-acceptance-ucWZ9UmM/controller-records/paired-comparison.json`：两臂固定 8 测试／6 探针通过，mixed **members=0**，全部 GPT-6-sol 角色总量 376410 vs 289685，**约 +30%**；Root 单侧约 +7.9%。不宣称节省。多次检查属于同一 observation 的有界失败重选，包含真实额度／权限失败和非法结果。
+- 0.7.20 成员负例任务 `1d977642`，`/private/tmp/orbit-member-settlement-live-6tGQlP/controller-records/postmortem.json`：Go 429 后替补真实 accepted、Root 8/8，但 amend 引起旧失败成员结算撤销而阻止完成；最终 paused＋confirmed stop，非业务完成。21 源码修复不能重标旧实测。
+- 0.7.21 takeover 任务 `8e411be9`，`/private/tmp/orbit-takeover-fixture-1D6DEl/controller-records/postmortem-8e411be9.json`：真实 complete＋confirmed stop，**members=0**；多个真实 provider 故障后 Zenmux 检查成功。该轮不是成员自主或收益证明。
+- 更早失败／部分完成继续留在[本次验收](../reference/mixed-model-real-acceptance-20260929.md)及 Git。不重跑已经有效且未受新改动影响的检查。
 
-## 验收边界
+## 现场资源与所有权
 
-- OMP 原生迁移 M4 已结束；九项判定、#5 用户批准的组合证据例外，以及停止/裁定内容的限制见[历史报告](../reference/omp-native-m4-acceptance-20260924.md)。它不是新方向的验收。
-- Zeen 0.7.9 冻结构建的 R25/R28 等真实样本见[体验验收](../reference/zeen-orbit-experience-acceptance-20260928.md)。入口自动启动、成员实际运行、Jev 推荐到成员交付分别判定，不能互相替代。
-- 缺证据池内检查者降级的独立真实闭环，以及 `absent→valid` 后 Jev 0.54 仍降级的样本见[会话审计](../reference/orbit-session-audit-20260927.md)。当时任务内补证的误归因后续源码有确定性修正，未另作该修正后的实机复验。
-- OpenRouter 映射来源审计和少量真实 Jev 请求不等于成员选型、去时间门、本路由成本或新题义通过验收；不能由旧报告推断当前安装的能力。
-- 测试不能替代新安装实机闭环；0.7.20 的组合回归与 hash 稳定性只证明该构建的确定性行为，当前实际范围见[当前计划](vision-completion-plan.md)。
-- 正式基准 API 匿名实测 401 的历史保留、不重标；基准语义测量日期仍 unknown（只有快照级 as_of），与账户凭据／实际扣减归属分列，不合并。
+2026-09-30 本次 Herdr live 发现如下；恢复时重新发现，不凭 pane 名判断可用：
+
+| Pane | 角色与当前状态 |
+| --- | --- |
+| `w1Y:p1A` | 当前 Codex Root；新会话需明确接替编排，避免两个 Root 同时写／派发 |
+| `w1Y:p1S` | S，DeepSeek Flash；bootstrap 增量交付后经原生 Esc 停写；0.7.23 组合 full／pack 已由其跑完并停票（gu0Ouq），无 npm 测试残留，idle |
+| `w1Y:p1Q` | Q，GLM；bootstrap F1/F2 复核、选型排序审查、phone fixture 准备、policy decision-3 实现、最小链资源后验均已完成并停写，idle |
+| `w1Y:p1R` | R，当前 Grok；本轮报告工作区工具不可用，已明确停票（fixture 无文件产物，由 Q 接手），不再重试或写源码，idle；不能默认可用 |
+| `w1Y:p26` | `minchain21` 被测 Root，已业务完成，idle；不是开发写者。实际进程 PID 49647 已不存在（本轮复核，未执行 kill），checker 记录 PID 63787 早已不存在 |
+
+最小 fixture 保存 controller／request／session 在 product 之外。其 Root 会话当前 PID 49647 已不存在，本轮未执行 kill（进程表不证明退出原因）；无派生进程需停，原件按需后验核对。不要 kill 通用 OMP／Herdr，不批量删除临时目录；Q/R/S 是用户提供的执行者，不关闭它们。
+
+`/private/tmp/orbit-reconcile-pair2-6Caerb` 已准备但**未启动**。先修并真实验证核心自主链，再用冻结标准作对照，不绕回大任务刷测试。
+
+## 新 Root 的顺序
+
+1. 读取本页、主方案／代码审计／W1—W10、开发规则；核对 live 工作区与 installed identity，继承已有授权。
+2. 复用最小链成功和 Jev API 证据；收好本轮原件、处理空闲测试进程。不要重复提交此前业务 prompt。
+3. bootstrap 修复与 policy decision-3 均已冻结；0.7.23 组合验证全绿（gu0Ouq，Root 复算 129 SHA）；本交付票执行本地提交＋`sh install.sh`，证据存 `/private/tmp/orbit-release-0.7.23-delivery/`。旧 22 full 不覆盖后来增量。
+4. 安装放行后启动已备 phone fixture（`/private/tmp/orbit-ordinary-phone-1XOIXp/`，seed `f59f7d0`，固定 9 测试，请求原文不提 Orbit，沿用用户真实全池，**未启动**）：普通业务请求、不要求用户显式交接，验证实现前 unit／或有据的 Root 自行决定，随后真实推荐、native task、登记、成员回传、Root 集成。若断链，先定位到具体事件和原因再修，不重复大任务。
+5. 闭合质量充分后分派与旗舰升级、可信路由成本／实际用量归属、错误控制、finding 纠正、当前版本手动终检与实际停止；新版问题／决策校准绑定保持真实。
+6. 核心路径通过后再完成冻结的同质量 Top／混合资源对照，报告全部角色和未知量，按主方案 §11.3 调整负收益路径。逐项闭合 W1—W10、文档、收尾和本地提交后才 complete。
+
+当前没有新的用户审批前置；不要把所有模型可靠性证明、外部发票或全型号认证另加成验收门。用户的 Goal 会话迁移不等于已完成或重新获得一份可以无限重复旧失败的资源额度。

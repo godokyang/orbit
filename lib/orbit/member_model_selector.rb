@@ -25,7 +25,7 @@ module Orbit
   # rejects a candidate, and there is no budget, time, brand or local-success
   # gate here.
   class MemberModelSelector
-    VERSION = "orbit-member-selection-v1"
+    VERSION = "orbit-member-selection-v2"
     # Distinguishes "no release injected" (production: read the reviewed file)
     # from an injected release, including an injected nil.
     UNSET = Object.new

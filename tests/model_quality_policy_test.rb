@@ -268,6 +268,18 @@ module ModelQualityPolicyTest
     assert(mismatch["cost_comparison"] == "incomparable", "a price cannot be borrowed from another execution identity")
   end
 
+  def unknown_cost_keeps_pool_order_among_gated_candidates
+    reviewed = release
+    ranked = rank([fit("pooled", 0.70), fit("flagship", 0.95),
+                   fit("held", 0.99).merge("recommendation_hold" => true), fit("below", 0.10)], release: reviewed)
+    assert(ranked["ordered_ids"] == %w[pooled flagship held below] && ranked["positive_ids"] == %w[pooled flagship],
+           "without comparable costs the gated candidates keep the input pool order: the lower-scored pooled model stays ahead of the higher score")
+    assert(ranked["basis"] == "released_task_fit" && ranked["cost_comparison"] == "unknown",
+           "the incomparable branch is reported as pool order, not a cost or quality verdict")
+    assert(ranked["reason"].include?("pool order") && !ranked["reason"].include?("task fit determines the order"),
+           "the reason states the stable pool order without presenting task fit as an ordering advantage")
+  end
+
   def projection_keeps_prior_and_exact_facts_apart
     projected = Orbit::ModelQualityPolicy.project_selection_state(
       "instruction" => "Add the login page",
@@ -326,6 +338,7 @@ module ModelQualityPolicyTest
     released_bar_then_credible_cost
     actual_profile_model_and_question_binding
     unknown_crossed_and_non_route_prices_do_not_reorder
+    unknown_cost_keeps_pool_order_among_gated_candidates
     projection_keeps_prior_and_exact_facts_apart
     puts "MODEL_QUALITY_POLICY_TEST_PASS"
   end

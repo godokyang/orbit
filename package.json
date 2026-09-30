@@ -1,6 +1,6 @@
 {
   "name": "@godokyang/orbit",
-  "version": "0.7.22",
+  "version": "0.7.23",
   "description": "Independent task execution checks for existing coding sessions.",
   "bin": {
     "orbit": "scripts/orbit"

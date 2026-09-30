@@ -13,7 +13,7 @@ module Orbit
   # is the fallback and is not a quality or cost ranking. Unknown route cost
   # does not remove a runnable model. Time and coarse tiers are not inputs.
   module CheckerModelSelection
-    DECISION_VERSION = "orbit-checker-selection-v6"
+    DECISION_VERSION = "orbit-checker-selection-v7"
 
     # Structural evidence rules shared with CheckerModelSelector#precise_status.
     # ModelEvidenceCache validates every field at submission time, but

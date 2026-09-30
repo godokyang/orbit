@@ -1522,18 +1522,73 @@ export function installOmpExtension(pi, sdk) {
       '若识别到有界子任务，可先用 Orbit work-unit declare 供两阶段评估再决定是否派发，' +
       '也可说明选择自行实施的依据——是否分工由 Root 自主决定。';
   }
-  // Inject the advisory into the CURRENT provider payload (the request being
-  // answered right now): the auto entry start happens inside this hook, so
-  // this is the first reachable window — before_agent_start runs before the
-  // task exists. A payload shape the injector cannot extend stays pending
-  // (no sent mark, no abort) and the next reachable window tries again.
-  function injectEntryAdvisory(payload, state, taskDir) {
-    if (!payload || entryAdvisorySent.has(taskDir)) return null;
-    const line = entryDelegationAdvisory(state, taskDir);
-    if (!line) return null;
-    const injected = appendInstructionToPayload(payload, line);
-    if (injected) entryAdvisorySent.add(taskDir);
-    return injected;
+  // A newly controlled task must learn, in the FIRST request the model actually
+  // answers, that a work unit comes before implementation. The entry advisory
+  // above depends on the entry-3 judgment (a calibrated delegation probability),
+  // so a task started by an explicit request — which never runs that judgment —
+  // received no guidance, and Root began editing with no unit and therefore no
+  // candidate to dispatch. This bootstrap depends on no probability: it fires
+  // for any controlled active task whose work-unit store is still empty, is
+  // task-scoped, is marked sent only after a successful injection, and leaves an
+  // unextendable payload pending for the next reachable window.
+  const bootstrapSent = new Set();
+  const BOOTSTRAP_LINE = '[orbit-bootstrap] 本任务已受控但尚无工作单元：开始实现前先用 Orbit work-unit declare ' +
+    '保存目标、有效要求、范围、验收与升级条件（并在原生 task 文本中写一行 orbit-unit: <wu-id>），' +
+    '或说明自行实施的依据——是否派发由 Root 自主决定。';
+
+  // declared / none / unknown, read from the task's own durable store only.
+  function workUnitState(taskDir) {
+    try {
+      const units = JSON.parse(readFileSync(path.join(taskDir, 'work-units.json'), 'utf8'));
+      return units?.units && Object.keys(units.units).length > 0 ? 'declared' : 'none';
+    } catch (error) {
+      return error?.code === 'ENOENT' ? 'none' : 'unknown';
+    }
+  }
+  function bootstrapGuidance(state, taskDir) {
+    if (!state || !taskDir || bootstrapSent.has(taskDir) || !activeState(state)) return null;
+    return workUnitState(taskDir) === 'none' ? BOOTSTRAP_LINE : null;
+  }
+  // Both first-request guidance lines travel in ONE append to the CURRENT
+  // provider payload (the request being answered right now): the auto entry
+  // start happens inside this hook, so this window is the first reachable one —
+  // before_agent_start runs before the task exists. Appending them separately
+  // would be payload-safe too (appendInstructionToPayload never mutates), but
+  // two returns raced: a successful advisory's early return dropped the
+  // bootstrap from the auto-start payload. Each line marks its own sent set
+  // only after this shared append succeeded, so an unextendable payload leaves
+  // both pending (no sent mark, no abort) for the next reachable window and
+  // claims no delivery.
+  function injectEntryGuidance(payload, state, taskDir) {
+    if (!payload) return null;
+    const advisory = entryAdvisorySent.has(taskDir) ? null : entryDelegationAdvisory(state, taskDir);
+    const bootstrap = bootstrapSent.has(taskDir) ? null : bootstrapGuidance(state, taskDir);
+    if (!advisory && !bootstrap) return null;
+    const injected = appendInstructionToPayload(payload, [advisory, bootstrap].filter(Boolean).join('\n\n'));
+    if (!injected) return null;
+    if (advisory) entryAdvisorySent.add(taskDir);
+    if (bootstrap) bootstrapSent.add(taskDir);
+    return { payload: injected, bootstrap: Boolean(bootstrap) };
+  }
+  // One factual, bounded record: instruction digest and the real identities it
+  // was bound to. No credentials, no payload text, and no claim about what the
+  // model understood.
+  function bootstrapFacts(taskDir, state, ctx, kind, extra = {}) {
+    let instructionDigest = null;
+    try {
+      instructionDigest = `sha256:${createHash('sha256').update(readFileSync(path.join(taskDir, 'instruction.txt'))).digest('hex')}`;
+    } catch { /* unknown */ }
+    return {
+      kind, at: Date.now(),
+      session_id: ctx?.sessionManager?.getSessionId?.() ?? null,
+      task_dir: taskDir, task_id: state?.id ?? null,
+      native_user_message_id: state?.instruction_source?.id ?? null,
+      instruction_digest: instructionDigest, input_digest: null,
+      artifact_root: state?.workspace?.artifact_root ?? null,
+      model: ctx?.model ? `${ctx.model.provider}/${ctx.model.id}` : null,
+      work_unit_state: workUnitState(taskDir),
+      ...extra,
+    };
   }
   // Program-visible execution already present in this Root branch before the
   // current native user message: an assistant message carrying at least one
@@ -2661,10 +2716,14 @@ export function installOmpExtension(pi, sdk) {
     try {
       const boundNow = await resolveBoundTask(sessionId, ctx.cwd);
       if (boundNow && activeState(boundNow.state)) {
-        const injected = injectEntryAdvisory(event.payload, boundNow.state, boundNow.taskDir);
-        if (injected) return injected;
+        const guidance = injectEntryGuidance(event.payload, boundNow.state, boundNow.taskDir);
+        if (guidance) {
+          if (guidance.bootstrap) recordCollabFor(boundNow.taskDir, bootstrapFacts(boundNow.taskDir, boundNow.state, ctx,
+            'bootstrap_guidance', { via: 'provider_payload' }));
+          return guidance.payload;
+        }
       }
-    } catch { /* advisory only; never block the request path */ }
+    } catch { /* guidance only; never block the request path */ }
     let user = null;
     let userIndex = -1;
     for (let index = branch.length - 1; index >= 0; index--) {
@@ -2715,9 +2774,13 @@ export function installOmpExtension(pi, sdk) {
         // (before_agent_start on the next turn) instead of aborting anything.
         try {
           const state = JSON.parse(await fs.readFile(path.join(started.task_directory, 'state.json'), 'utf8'));
-          const injected = injectEntryAdvisory(event.payload, state, started.task_directory);
-          if (injected) return injected;
-        } catch { /* advisory is optional; never block the start path */ }
+          const guidance = injectEntryGuidance(event.payload, state, started.task_directory);
+          if (guidance) {
+            if (guidance.bootstrap) recordCollabFor(started.task_directory, bootstrapFacts(started.task_directory, state, ctx,
+              'bootstrap_guidance', { via: 'provider_payload' }));
+            return guidance.payload;
+          }
+        } catch { /* guidance is optional; never block the start path */ }
       } else if (decision.decision === 'root_decides' && decision.prompt) {
         pi.sendMessage({ customType: 'orbit-entry', content: decision.prompt, attribution: 'agent' },
           { deliverAs: 'aside' });
@@ -2754,6 +2817,28 @@ export function installOmpExtension(pi, sdk) {
   // Child extension factories share the actual unit map. Every native tool
   // passes this entrance: the handoff declaration is never treated as a
   // permission until its real member/call/model binding has succeeded.
+  // One factual line before Root's first explicit artifact edit: was a work
+  // unit already declared for this task? Only the real artifact tools count —
+  // shell commands are never read as artifact edits — and the record states
+  // only what was observed (declared / none / unknown) with the real
+  // tool_call_id. No delegation refusal is inferred from it.
+  const unitPreEditNoted = new Set();
+  pi.on('tool_call', async (event, ctx) => {
+    if (!['write', 'edit', 'ast_edit'].includes(event?.toolName)) return;
+    let sessionId = null;
+    try { sessionId = ctx?.sessionManager?.getSessionId?.() ?? null; } catch { return; }
+    if (!sessionId || !isMainSession(sessionId)) return;
+    if (memberTasks.has(agentIdFor(sessionId))) return;
+    let bound = null;
+    try { bound = await resolveBoundTask(sessionId, ctx?.cwd); } catch { bound = null; }
+    if (!bound || !activeState(bound.state) || unitPreEditNoted.has(bound.taskDir)) return;
+    unitPreEditNoted.add(bound.taskDir);
+    recordCollabFor(bound.taskDir, bootstrapFacts(bound.taskDir, bound.state, ctx, 'unit_state_before_edit', {
+      tool: event.toolName,
+      tool_call_id: typeof event.toolCallId === 'string' ? event.toolCallId : null,
+    }));
+  });
+
   pi.on('tool_call', async (event, ctx) => {
     const sessionId = ctx.sessionManager.getSessionId();
     const agentId = agentIdFor(sessionId);
@@ -3026,7 +3111,13 @@ export function installOmpExtension(pi, sdk) {
     const block = statusBlock(bound.state);
     const advisory = entryDelegationAdvisory(bound.state, bound.taskDir);
     if (advisory) entryAdvisorySent.add(bound.taskDir);
-    return { systemPrompt: withStatusBlock(event?.systemPrompt, advisory ? `${block}\n${advisory}` : block) };
+    // Only the regular status guidance (and the advisory, deduplicated by its
+    // own sent set) rides the system prompt. The work-unit bootstrap is NOT
+    // carried here: it belongs to the extensible provider payload path alone,
+    // so one request never sees the same sentence twice.
+    const parts = [block];
+    if (advisory) parts.push(advisory);
+    return { systemPrompt: withStatusBlock(event?.systemPrompt, parts.join('\n')) };
   });
   pi.on('session_start', (_event, ctx) => {
     // Re-bound child runtimes also fire session_start (OMP re-binds factories

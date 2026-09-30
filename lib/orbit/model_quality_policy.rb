@@ -29,7 +29,7 @@ module Orbit
   #   Route cost inputs retain the audited fact and usage composition.
   module ModelQualityPolicy
     INPUT_VERSION = "jev-selection-input-2"
-    DECISION_VERSION = "orbit-quality-decision-2"
+    DECISION_VERSION = "orbit-quality-decision-3"
     OBSERVATION_QUESTION_SET = "jev-observation-2"
     DELEGATION_QUESTION_SET = "jev-delegation-4"
     CANDIDATE_QUESTION_SET = "jev-candidates-4"
@@ -273,7 +273,9 @@ module Orbit
 
     # Clear the released task-fit bar, then use comparable route estimates.
     # Tiny probability differences are not a reliability certificate. Without
-    # comparable estimates the judgment is a heuristic preference only.
+    # comparable estimates the gated candidates keep the caller's stable input
+    # (pool) order — a user preference, never a quality or cost advantage —
+    # and an unknown cost is neither free nor a reason to drop a candidate.
     def order(candidates, release: nil, route_costs: nil, state: nil, judgment: nil)
       list = Array(candidates).each_with_index.map { |candidate, index| annotate(candidate, index) }
       active = activated_release(release: release, judgment: judgment, state: state)
@@ -307,7 +309,7 @@ module Orbit
       ranked = positives.sort_by do |item|
         estimate = relation["estimates"][item["id"]]
         cost_key = relation["comparable"] && estimate ? estimate["amount"] : 0
-        relation["comparable"] ? [cost_key, -item["quality"], item["index"]] : [-item["quality"], item["index"]]
+        relation["comparable"] ? [cost_key, -item["quality"], item["index"]] : [item["index"]]
       end
       tail = list.reject { |item| item["positive"] }.sort_by { |item| item["index"] }
       basis = relation["comparable"] ? "released_task_fit_then_route_cost_heuristic" : "released_task_fit"
@@ -321,9 +323,9 @@ module Orbit
       order_result(ranked + tail, positive: true, basis: basis, cost_comparison: comparison,
                    cost_notes: relation["notes"], positive_ids: ranked.map { |item| item["id"] },
                    cost_estimates: relation["estimates"],
-                   reason: relation["comparable"] ?
-                     "released task-fit signal; comparable route estimates prefer lower resource cost, without treating a probability as measured reliability" :
-                     "released task-fit signal; route costs are not comparable, so task fit determines the order")
+        reason: relation["comparable"] ?
+          "released task-fit signal; comparable route estimates prefer lower resource cost, without treating a probability as measured reliability" :
+          "released task-fit signal; route costs are not comparable, so gated candidates keep the caller's stable input pool order — a preference, not a quality or cost advantage, and unknown cost is not free")
     end
 
     def ranking_release(release)
