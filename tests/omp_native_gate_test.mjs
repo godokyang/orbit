@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { fileURLToPath } from 'node:url';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -478,6 +480,161 @@ try {
     assert.equal(bound.dispatches[0].hint_message_id, 'gate-hint-msg',
       'the bound dispatch carries the hint message id');
   }
+  // 1f-pre. Program-initiated Root integration selection (contract: 程序发起的
+  // Root integration 阶段选择). Runs on the FIRST task BEFORE its first
+  // root-model tool selection so no real tool history can illegitimately
+  // block the path. Version triples are REAL digests from
+  // scripts/orbit-root-binding (an intentional workspace marker change makes
+  // each new version); the program path fresh-syncs the pool itself. All
+  // fixture state/ledger/collab/pool/model changes are save/restored.
+  {
+    const gpt = { provider: 'openai-codex', id: 'gpt-6-sol' };
+    const originalSetModel = pi.setModel;
+    const originalList = ctx.models.list;
+    const originalResolve = ctx.models.resolve;
+    const originalRootModel = root.model;
+    const originalPool = await fs.readFile(poolStub, 'utf8');
+    const savedState = await taskState();
+    const statePath = path.join(started.task_directory, 'state.json');
+    const ledgerPath = path.join(started.task_directory, 'resource-calls.json');
+    const collabPath = path.join(started.task_directory, 'collaboration.jsonl');
+    const savedLedger = await fs.readFile(ledgerPath, 'utf8').catch(() => '');
+    const savedCollab = await fs.readFile(collabPath, 'utf8').catch(() => '');
+    const setModelCalls = [];
+    let falseSdkCalls = 0;
+    const markerFile = path.join(project, 'prog-version-marker.tmp');
+    const bindingOf = async () => {
+      const run = spawnSync(process.env.ORBIT_RUBY, ['--disable-gems',
+        path.join(fileURLToPath(new URL('..', import.meta.url)), 'scripts', 'orbit-root-binding'), started.task_directory],
+        { encoding: 'utf8', timeout: 30000 });
+      assert.equal(run.status, 0, run.stderr);
+      const value = JSON.parse(run.stdout);
+      assert.equal(value.ok, true, 'real root binding required');
+      assert.equal(value.fingerprint_status, 'ok', 'a real fingerprint required');
+      return value;
+    };
+    const bumpVersion = async tag => {
+      await fs.writeFile(markerFile, `version ${tag}\n`);
+      return bindingOf();
+    };
+    const writeProgState = (buggy, fixed, suffix, extra = {}) => {
+      const td = { artifact_root: fixed.artifact_root, input_digest: fixed.input_digest,
+        artifact_digest: fixed.artifact_digest };
+      const reminderKey = createHash('sha256')
+        .update(JSON.stringify([td.artifact_root, td.input_digest, td.artifact_digest])).digest('hex');
+      const checks = [
+        { number: 1, kind: 'artifact', role: 'reviewer', manual: false, stale: false,
+          input_digest: td.input_digest, artifact_root: td.artifact_root, artifact_digest: buggy.artifact_digest,
+          result: { verdict: 'correct', findings: [{ id: 'money-bug' }], delivery: { ready: true } },
+          usage: { calls: [{ provider: 'openai-codex', model: 'gpt-6-sol', call_id: `call-find-a-${suffix}` },
+            { provider: 'openai-codex', model: 'gpt-6-sol', call_id: `call-find-b-${suffix}` }] } },
+        { number: 2, kind: 'artifact', role: 'reviewer', manual: false, stale: false,
+          input_digest: td.input_digest, artifact_root: td.artifact_root, artifact_digest: td.artifact_digest,
+          result: { verdict: 'complete', findings: [], resolved_ids: ['money-bug'], delivery: { ready: true } },
+          usage: { calls: [] } },
+      ];
+      return fs.writeFile(statePath, JSON.stringify({ ...savedState, status: 'running',
+        task_delivery: td, checks,
+        findings: { 'money-bug': { id: 'money-bug', status: 'resolved', check: 1, resolution_check: 2,
+          observed_input: td.input_digest, observed_root: td.artifact_root, observed_version: buggy.artifact_digest,
+          resolution_input: td.input_digest, resolution_root: td.artifact_root, resolution_version: td.artifact_digest } },
+        manual_check_reminders: { [reminderKey]: { check: 2, message_id: 'm1', at: '2026-10-01T00:00:00Z' } },
+        members: [], recheck: null, next_check_manual: false, ...extra }));
+    };
+    const writeLedger = suffix => fs.writeFile(ledgerPath, JSON.stringify({
+      schema_version: 'orbit-resource-calls-v1', task_id: savedState.id, calls: {
+        [`call-find-a-${suffix}`]: { call_id: `call-find-a-${suffix}`, task_id: savedState.id,
+          status: 'completed', role: 'checker', actual_identity: { provider: 'openai-codex', model: 'gpt-6-sol' } },
+        [`call-find-b-${suffix}`]: { call_id: `call-find-b-${suffix}`, task_id: savedState.id,
+          status: 'completed', role: 'checker', actual_identity: { provider: 'openai-codex', model: 'gpt-6-sol' } } } }));
+    try {
+      await fs.writeFile(poolStub, '#!/bin/sh\nprintf \'{"models":["glm/x","openai-codex/gpt-6-sol"]}\n\'\n');
+      ctx.models.list = () => [model, gpt];
+      ctx.models.resolve = spec => spec === 'openai-codex/gpt-6-sol' ? gpt
+        : spec === 'glm/x' ? model : undefined;
+      pi.setModel = async m => { setModelCalls.push(`${m.provider}/${m.id}`); root.model = m; return true; };
+      // (a) Positive: real resolved finding + real reminder -> ONE program
+      // switch (the program path fresh-syncs the pool itself), separate
+      // record kind, no fake tool call id, full provenance, guidance rides.
+      const buggy = await bumpVersion('buggy');
+      const fixed = await bumpVersion('fixed');
+      await writeProgState(buggy, fixed, 1);
+      await writeLedger(1);
+      const turn1 = await emit('before_agent_start', { prompt: 'integration turn', systemPrompt: ['BASE'] }, ctx);
+      assert.equal(setModelCalls.length, 1, `one program switch expected, got ${JSON.stringify(setModelCalls)}`);
+      assert.equal(setModelCalls[0], 'openai-codex/gpt-6-sol');
+      assert.equal(root.model, gpt, 'the fixture root model actually switched');
+      const progRecord = (await fs.readFile(collabPath, 'utf8')).split('\n').filter(Boolean)
+        .map(l => JSON.parse(l)).find(e => e.kind === 'root_integration_model_selected');
+      assert.ok(progRecord, 'a program-origin record exists');
+      assert.equal(progRecord.origin, 'program');
+      assert.equal(progRecord.tool_call_id, null, 'program records never fake a Root tool call id');
+      assert.equal(progRecord.to, 'openai-codex/gpt-6-sol');
+      assert.equal(progRecord.phase, 'integration');
+      assert.deepEqual(progRecord.finding_ids, ['money-bug']);
+      assert.deepEqual(progRecord.detecting_call_ids, ['call-find-a-1', 'call-find-b-1']);
+      assert.equal(progRecord.version_triple.artifact_digest, fixed.artifact_digest);
+      assert.match(turn1.systemPrompt.join(''), /integration 阶段/, 'guidance rides the status prompt');
+      // (b) Prepare-loop rerun: no second switch; a queued manual final
+      // suppresses the cached guidance (idempotency and guidance differ).
+      const turn2 = await emit('before_agent_start', { prompt: 'rerun', systemPrompt: ['BASE'] }, ctx);
+      assert.equal(setModelCalls.length, 1, 'the rerun never switches twice');
+      assert.match(turn2.systemPrompt.join(''), /integration 阶段/, 'guidance persists on the rerun');
+      await writeProgState(buggy, fixed, 1, { next_check_manual: true });
+      const turn3 = await emit('before_agent_start', { prompt: 'manual window', systemPrompt: ['BASE'] }, ctx);
+      assert.equal(setModelCalls.length, 1, 'no new switch while the manual window is queued');
+      assert.ok(!turn3.systemPrompt.join('').includes('integration 阶段'),
+        'the guidance stops asking for work once the manual final has queued');
+      // (c) Ledger mismatch on a fresh REAL version: no attempt at all.
+      const v2 = await bumpVersion('v2');
+      await writeProgState(buggy, v2, 2);
+      await fs.writeFile(ledgerPath, JSON.stringify({ schema_version: 'orbit-resource-calls-v1', task_id: savedState.id, calls: {} }));
+      await emit('before_agent_start', { prompt: 'ledger mismatch', systemPrompt: ['BASE'] }, ctx);
+      assert.equal(setModelCalls.length, 1, 'a missing ledger row refuses without an attempt');
+      // (d) SDK false on a fresh REAL version with the current model restored
+      // to a non-target: one classified attempt (own false-call counter),
+      // never retried, no phase granted.
+      root.model = originalRootModel;
+      const v3 = await bumpVersion('v3');
+      await writeProgState(buggy, v3, 3);
+      await writeLedger(3);
+      pi.setModel = async () => { falseSdkCalls += 1; return false; };
+      await emit('before_agent_start', { prompt: 'sdk false', systemPrompt: ['BASE'] }, ctx);
+      await emit('before_agent_start', { prompt: 'sdk false retry', systemPrompt: ['BASE'] }, ctx);
+      assert.equal(falseSdkCalls, 1, 'the unconfirmed switch is attempted once and never retried');
+      const falseRecord = (await fs.readFile(collabPath, 'utf8')).split('\n').filter(Boolean)
+        .map(l => JSON.parse(l)).filter(e => e.kind === 'root_integration_model_selected' && e.ok === false).pop();
+      assert.ok(falseRecord && falseRecord.error.includes('without confirming'),
+        'the SDK failure is classified and recorded');
+      assert.equal(falseRecord.version_triple.artifact_digest, v3.artifact_digest);
+      assert.equal(root.model, originalRootModel, 'no fake rollback: the model stays as it was');
+      // (e) Root tool selection priority: after a confirmed tool switch on
+      // this task, a fresh REAL version never auto-switches again.
+      pi.setModel = async m => { setModelCalls.push(`${m.provider}/${m.id}`); root.model = m; return true; };
+      const beforeTool = setModelCalls.length;
+      const toolSwitch = await tool({ action: 'root-model', task: started.task_directory,
+        root_model: 'glm/x', phase: 'diagnosis', text: 'root prefers its own choice' });
+      assert.equal(toolSwitch.ok, true, 'the Root tool switch succeeds');
+      const v4 = await bumpVersion('v4');
+      await writeProgState(buggy, v4, 4);
+      await writeLedger(4);
+      await emit('before_agent_start', { prompt: 'after tool selection', systemPrompt: ['BASE'] }, ctx);
+      assert.equal(setModelCalls.length, beforeTool + 1,
+        'a confirmed Root tool selection conservatively blocks later program attempts');
+    } finally {
+      pi.setModel = originalSetModel;
+      ctx.models.list = originalList;
+      if (originalResolve) ctx.models.resolve = originalResolve; else delete ctx.models.resolve;
+      root.model = originalRootModel;
+      await fs.writeFile(poolStub, originalPool);
+      await fs.writeFile(statePath, JSON.stringify(savedState));
+      if (savedLedger === '') await fs.rm(ledgerPath, { force: true });
+      else await fs.writeFile(ledgerPath, savedLedger);
+      await fs.writeFile(collabPath, savedCollab);
+      await fs.rm(markerFile, { force: true });
+    }
+  }
+
   // 1f. Root-stage model selection (action=root-model). Self-contained local
   // fixture: the block saves and restores pool/list/resolve/model/setModel;
   // provides BOTH glm/x and kimi-code/k3-256k locally; two DIFFERENT exact
@@ -899,6 +1056,7 @@ try {
       await fs.writeFile(path.join(started.task_directory, 'state.json'), JSON.stringify(savedState));
     }
   }
+
   const members = await membersFile();
   assert.equal(members.length, 3); // drifted in-pool member, this pool member, and the 1e hint-bound member
   const poolMember = members.find(m => m.thread_id === revised.input.name);

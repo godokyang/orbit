@@ -1015,9 +1015,25 @@ export function installOmpExtension(pi, sdk) {
         // normal tool end never pays for it.
         if (event.toolName === 'ask') observeAskEnd(event, id, agentIdFor(id));
       }
+      if (event.type === 'model_changed') {
+        // Public AgentSession event (subscribe) — model_changed has no
+        // extension-facing hook. A change while rootModelInFlight is set was
+        // caused by the orbit tool or the program switch; anything else is an
+        // external explicit selection (native /model, UI) and conservatively
+        // wins over program auto-selection.
+        if (rootModelInFlight.has(id)) ownModelSwitches.set(id, (ownModelSwitches.get(id) || 0) + 1);
+        else externalModelChange.set(id, true);
+      }
       if (event.type === 'message_end' && event.message.role === 'assistant' && sdk.isUserInterruptAbort(event.message)) entry.interrupted = true;
     });
     entries.set(id, entry);
+    // Durable model_change baseline at attach time: the launch entry already
+    // exists here, so any later durable entry this process did not cause (see
+    // the model_changed handler above) is an external explicit selection.
+    try {
+      const count = session.sessionManager?.getBranch?.().filter(e => e && e.type === 'model_change').length;
+      modelChangeBaseline.set(id, typeof count === 'number' ? count : -1);
+    } catch { modelChangeBaseline.set(id, -1); } // -1 = unknown -> never auto-select
     observeNativeCalls(session, () => nativeCallContext(session));
     return entry;
   }
@@ -1286,6 +1302,9 @@ export function installOmpExtension(pi, sdk) {
     if (!ACTIVE.has(state.status) || state.connection?.provider !== 'omp' || state.connection?.thread_id !== sessionId) {
       taskDirs.delete(sessionId);
       rootPhaseByTask.delete(taskDir);
+      rootToolSelectedByTask.delete(taskDir);
+      for (const key of rootIntegrationAttempts.keys()) if (key.startsWith(JSON.stringify([taskDir]).slice(0, -1) + ','))
+        rootIntegrationAttempts.delete(key);
       return { ok: false, reason: 'The bound Orbit task is not active for this Root; start a new Orbit task before delegating' };
     }
     return { ok: true, taskDir, state };
@@ -1802,7 +1821,11 @@ export function installOmpExtension(pi, sdk) {
       const state = await readRecordState(known);
       if (state && state.connection?.provider === 'omp' && state.connection?.thread_id === sessionId) return { taskDir: known, state };
       statusBoundTasks.delete(sessionId);
-      if (taskDirs.get(sessionId) === known) { taskDirs.delete(sessionId); rootPhaseByTask.delete(known); }
+      if (taskDirs.get(sessionId) === known) {
+        taskDirs.delete(sessionId); rootPhaseByTask.delete(known); rootToolSelectedByTask.delete(known);
+        for (const key of rootIntegrationAttempts.keys()) if (key.startsWith(JSON.stringify([known]).slice(0, -1) + ','))
+          rootIntegrationAttempts.delete(key);
+      }
     }
     const project = await projectRootFor(cwd);
     if (!project) return null;
@@ -2424,6 +2447,16 @@ export function installOmpExtension(pi, sdk) {
     entries.clear();
     prestartSeen.clear();
     entryRecovery.clear();
+    // Pure in-memory selection state follows the same entry lifecycle: a
+    // branch/resume creates a fresh entry for the same sessionId, and a stale
+    // own-switch count would swallow same-ID native /model durable entries.
+    // Persistent ledgers and agent roots are NOT touched (see note below).
+    rootPhaseByTask.clear();
+    rootIntegrationAttempts.clear();
+    modelChangeBaseline.clear();
+    ownModelSwitches.clear();
+    externalModelChange.clear();
+    rootToolSelectedByTask.clear();
     // NOTE: the per-session agent root is intentionally NOT removed here.
     // close() also runs on session_before_switch/branch/tree, where the same
     // OMP process keeps running and the root must survive for the next
@@ -3109,6 +3142,23 @@ export function installOmpExtension(pi, sdk) {
   // this task session. Keyed by taskDir (canonical owned path), set only on a
   // confirmed switch, cleared when the session re-binds or the task ends.
   const rootPhaseByTask = new Map();
+  // Program-initiated Root integration selection (contract: 程序发起的 Root
+  // integration 阶段选择). One attempt per (taskDir,input,artifactRoot,
+  // artifactDigest); the value records the classified outcome so a repeat hook
+  // fire (SDK prepare-loop rerun) never switches twice and the guidance can
+  // keep riding the status block until the manual final queues.
+  const rootIntegrationAttempts = new Map();
+  // User/Root selection priority: durable model_change baseline per session
+  // (captured at first observation, AFTER the launch entry exists), our own
+  // switch count while rootModelInFlight was set, and a live flag from the
+  // public session subscribe (model_changed has no extension-facing hook).
+  const modelChangeBaseline = new Map();
+  const ownModelSwitches = new Map();
+  const externalModelChange = new Map();
+  // Tasks where the ROOT TOOL path confirmed a model selection: conservative
+  // per-task priority over any later program attempt (the program's own
+  // switch sets rootPhaseByTask for attribution but never this set).
+  const rootToolSelectedByTask = new Set();
   async function handleRootModel(args, entry, ctx, toolCallId) {
     const sessionId = entry.id;
     // Trusted log destination starts null and is set only after ownership is
@@ -3159,25 +3209,58 @@ export function installOmpExtension(pi, sdk) {
     if (bound.state.next_check_manual === true)
       return reject('the task is waiting on its manual final check window; wait for its notice');
     // The catalog resolves only through the CURRENT pool∩session intersection;
-    // no guessed targets, no cached lists.
+    // no guessed targets, no cached lists. The listing branch stays here (it
+    // is tool-only); the shared switch core below is reused verbatim by the
+    // program-initiated integration selection.
     const sync = await syncSessionAgents(ctx);
     if (!sync.ok) return reject(`model catalog is stale: pool re-sync failed (${sync.reason})`);
-    // The intersection is the synced session-agent set (pool ∩ session
-    // catalog), NOT ctx.models.list() (which is the full session catalog and
-    // would allow out-of-pool targets). Same set for listing and selection.
     const exact = [...new Set(sessionAgents.values())];
     if (!args.root_model || !args.root_model.trim())
       return { ok: true, listing_only: true, available: exact, note: 'pass root_model with one of these exact provider/id values plus phase and text' };
     const target = args.root_model.trim();
-    if (!exact.includes(target))
-      return reject(`root_model ${target} is not in the current pool ∩ OMP catalog`, { available: exact });
     if (!args.phase) return reject('phase is required (execution | integration | diagnosis)');
     if (typeof args.text !== 'string' || !args.text.trim())
       return reject('text (a non-empty selection reason) is required');
-    if (rootModelInFlight.has(sessionId)) return reject('another root-model selection is already in progress for this session');
+    return performRootModelSwitch({ entry, ctx, boundDir, target, phase: args.phase, reason: args.text,
+      origin: 'tool', toolCallId });
+  }
+
+  // Shared switch core used by BOTH the Root `root-model` tool action and the
+  // program-initiated integration selection: same public pi.setModel chain,
+  // same pool∩catalog + exact resolve + in-flight latch + API check, same
+  // record shape. `origin` selects the record kind ('tool' keeps
+  // root_model_selection with the real tool_call_id; 'program' uses the
+  // separate kind with tool_call_id=null and never fakes a Root tool call).
+  async function performRootModelSwitch({ entry, ctx, boundDir, target, phase, reason, origin, toolCallId = null, provenance = {} }) {
+    const sessionId = entry.id;
+    const recordSwitch = (extra) => {
+      const payload = {
+        kind: origin === 'program' ? 'root_integration_model_selected' : 'root_model_selection',
+        at: Date.now(), session_id: sessionId, agent_id: sdk.MAIN_AGENT_ID,
+        origin, tool_call_id: origin === 'program' ? null : (typeof toolCallId === 'string' ? toolCallId : null),
+        task_dir: boundDir, to: target, phase: phase ?? null,
+        reason: typeof reason === 'string' ? reason.slice(0, 300) : null,
+        ...provenance, ...extra,
+      };
+      try { recordCollabFor(boundDir, payload); } catch { /* record only */ }
+      return payload;
+    };
+    // Every classified refusal from the shared core leaves the same bounded,
+    // owned-log evidence the tool path always produced — never a silent skip.
+    const rejectSwitch = (error, extra = {}) => {
+      recordSwitch({ ok: false, error, ...extra });
+      return { ok: false, error, ...extra };
+    };
+    // The intersection is the synced session-agent set (pool ∩ session
+    // catalog), NOT ctx.models.list() (which is the full session catalog and
+    // would allow out-of-pool targets). Same set for listing and selection.
+    const exact = [...new Set(sessionAgents.values())];
+    if (!target || !exact.includes(target))
+      return rejectSwitch(`target ${target} is not in the current pool ∩ OMP catalog`, { available: exact });
+    if (rootModelInFlight.has(sessionId)) return rejectSwitch('another root-model selection is already in progress for this session');
     // API availability first: a missing surface must not consume the latch.
     if (typeof pi.setModel !== 'function')
-      return reject('pi.setModel is not available in this extension API surface');
+      return rejectSwitch('pi.setModel is not available in this extension API surface');
     // Capture the model identity BEFORE any switch attempt: reading
     // entry.session.model after setModel would record `to` as `from`.
     const originalFrom = entry.session?.model ? `${entry.session.model.provider}/${entry.session.model.id}` : null;
@@ -3186,15 +3269,15 @@ export function installOmpExtension(pi, sdk) {
     // same session starts with a different (or absent) phase entry, and a
     // native /model change resets the actual model — both correctly allow a
     // fresh selection without any extra state machine.
-    if (originalFrom === target && rootPhaseByTask.get(boundDir) === args.phase)
-      return reject('this exact model and phase is already active for this task');
+    if (originalFrom === target && rootPhaseByTask.get(boundDir) === phase)
+      return rejectSwitch('this exact model and phase is already active for this task');
     // The SDK needs the fully resolved Model. Catalog list entries may be
     // partial ModelInfo shapes; resolve the exact provider/id and require the
     // resolved identity to match — never guess from a list element or @task.
     let model;
     try { model = ctx.models?.resolve?.(target) ?? null; } catch { model = null; }
     if (!model || `${model.provider}/${model.id}` !== target)
-      return reject('target model could not be resolved to its exact provider/id in the current session');
+      return rejectSwitch('target model could not be resolved to its exact provider/id in the current session');
     rootModelInFlight.add(sessionId);
     let switched = false;
     const nowModel = () => entry.session?.model ? `${entry.session.model.provider}/${entry.session.model.id}` : null;
@@ -3204,15 +3287,243 @@ export function installOmpExtension(pi, sdk) {
       // A classified, bounded record only: no raw SDK error strings (they can
       // carry provider payloads). The actually observable current model is
       // recorded — never a claimed rollback or success.
-      return reject('sdk_error', { original_from: originalFrom, actual_model_after: nowModel() });
+      return rejectSwitch('sdk_error', { from: originalFrom, actual_model_after: nowModel() });
     } finally {
       rootModelInFlight.delete(sessionId);
     }
     if (switched !== true)
-      return reject('pi.setModel returned without confirming the switch', { original_from: originalFrom, actual_model_after: nowModel() });
-    rootPhaseByTask.set(boundDir, args.phase);
-    const result = record({ ok: true, switched: true, canonical_task_dir: boundDir, original_from: originalFrom, actual_model_after: nowModel() });
-    return { ok: true, switched: true, from: result.from, to: target, phase: args.phase };
+      return rejectSwitch('pi.setModel returned without confirming the switch', { from: originalFrom, actual_model_after: nowModel() });
+    // A true return is only a CONFIGURATION success. The phase (and the
+    // success record) are granted only when the live session model actually
+    // reads back as the exact target; anything else stays a classified gap.
+    const liveAfter = nowModel();
+    if (liveAfter !== target)
+      return rejectSwitch('switch not verified on the live session model', { from: originalFrom, actual_model_after: liveAfter });
+    rootPhaseByTask.set(boundDir, phase);
+    if (origin === 'tool') rootToolSelectedByTask.add(boundDir);
+    recordSwitch({ ok: true, switched: true, from: originalFrom, actual_model_after: liveAfter });
+    return { ok: true, switched: true, from: originalFrom, to: target, phase };
+  }
+
+  // Program-initiated Root integration selection (contract: 程序发起的 Root
+  // integration 阶段选择, 已采纳待接线). All gates reuse existing read-side
+  // state and wait discipline; cheap screens run before the fingerprint probe.
+  // Returns the classified outcome (also cached in rootIntegrationAttempts so
+  // the SDK prepare-loop rerun never switches twice) plus guidance text when a
+  // switch succeeded for the current version triple.
+  async function considerProgramIntegrationSwitch(entry, ctx, bound, sessionId) {
+    const state = bound.state;
+    const td = state.task_delivery;
+    if (!td || typeof td !== 'object'
+        || typeof td.artifact_root !== 'string' || typeof td.input_digest !== 'string' || typeof td.artifact_digest !== 'string')
+      return { attempted: false, reason: 'no_current_task_delivery' };
+    const attemptKey = JSON.stringify([bound.taskDir, td.input_digest, td.artifact_root, td.artifact_digest]);
+    const prior = rootIntegrationAttempts.get(attemptKey);
+    if (prior) {
+      // Idempotency (never re-attempt) and guidance (only while the CURRENT
+      // turn is still a valid integration turn) are separate. The cached
+      // outcome only suppresses a REPEATED API attempt; the guidance is
+      // re-derived from the CURRENT wait gates, the live session model and
+      // declared phase, a fresh binding fingerprint, and any later Root tool
+      // or external selection — a stale target is never presented as "selected
+      // for this turn" and no work is demanded during a wait window.
+      const obs = state.check_observations;
+      const waitOrBusy = state.pending_finalization || state.completion_stop_pending
+        || state.next_check_manual === true || state.recheck
+        || (obs && typeof obs === 'object'
+            && Object.values(obs).some(o => o && typeof o === 'object' && o.status === 'in_flight'))
+        || Object.values(state.findings || {}).some(f => f && f.status === 'open');
+      const liveModel = entry.session?.model ? `${entry.session.model.provider}/${entry.session.model.id}` : null;
+      const targetStillLive = prior.ok === true && prior.to === liveModel
+        && rootPhaseByTask.get(bound.taskDir) === 'integration';
+      const bindingNow = readRootBinding(bound.taskDir);
+      const tripleStillCurrent = !!bindingNow && bindingNow.fingerprint_status === 'ok'
+        && bindingNow.artifact_root === td.artifact_root && bindingNow.input_digest === td.input_digest
+        && bindingNow.artifact_digest === td.artifact_digest;
+      if (waitOrBusy || !targetStillLive || !tripleStillCurrent || externalModelChange.get(sessionId))
+        return { ...prior, guidance: undefined };
+      return prior;
+    }
+    // Idempotency slot is consumed ONLY by an actual switch attempt (success
+    // or classified failure): precondition screens below can mature later
+    // (reminder arrival, member settle, busy clear) and must stay re-checkable.
+    const finish = (outcome) => { if (outcome.attempted === true) rootIntegrationAttempts.set(attemptKey, outcome); return outcome; };
+    // Root tool selection on this task conservatively wins (any confirmed
+    // switch in this process, regardless of version).
+    if (rootToolSelectedByTask.has(bound.taskDir)) return finish({ attempted: false, reason: 'root_tool_already_selected' });
+    // Wait discipline: identical gates to the root-model tool.
+    const observations = state.check_observations;
+    if (observations && typeof observations === 'object'
+        && Object.values(observations).some(o => o && typeof o === 'object' && o.status === 'in_flight'))
+      return finish({ attempted: false, reason: 'independent_check_in_flight' });
+    if (state.pending_finalization || state.completion_stop_pending || state.next_check_manual === true)
+      return finish({ attempted: false, reason: 'manual_final_or_stop_queued' });
+    if (state.recheck) return finish({ attempted: false, reason: 'recheck_scheduled' });
+    const findings = Object.values(state.findings || {});
+    if (findings.some(f => f && f.status === 'open')) return finish({ attempted: false, reason: 'open_finding' });
+    // The reminder must be the REAL record for exactly the current triple.
+    const reminderKey = createHash('sha256')
+      .update(JSON.stringify([td.artifact_root, td.input_digest, td.artifact_digest])).digest('hex');
+    const reminder = (state.manual_check_reminders || {})[reminderKey];
+    if (!reminder || typeof reminder.check !== 'number') return finish({ attempted: false, reason: 'no_matching_manual_check_reminder' });
+    const reminderCheck = (state.checks || [])[reminder.check - 1];
+    if (!reminderCheck || reminderCheck.stale || reminderCheck.manual || reminderCheck.role !== 'reviewer'
+        || reminderCheck.kind !== 'artifact' || !['complete', 'continue'].includes(reminderCheck?.result?.verdict)
+        || reminderCheck?.result?.delivery?.ready !== true
+        || reminderCheck.input_digest !== td.input_digest || reminderCheck.artifact_root !== td.artifact_root
+        || reminderCheck.artifact_digest !== td.artifact_digest)
+      return finish({ attempted: false, reason: 'reminder_check_scope_mismatch' });
+    // Root must actually be at rest: live tools, native streaming, and
+    // owner-scoped async jobs. The turn this hook prepares is NOT counted as
+    // old-turn work — activeTools only holds started-and-unfinished tools.
+    if (entry.activeTools.size > 0) return finish({ attempted: false, reason: 'root_tools_in_flight' });
+    if (entry.session?.isStreaming === true) return finish({ attempted: false, reason: 'root_streaming' });
+    let asyncSnapshot = null;
+    try { asyncSnapshot = typeof entry.session?.getAsyncJobSnapshot === 'function' ? entry.session.getAsyncJobSnapshot() : null; }
+    catch { asyncSnapshot = null; }
+    if (!asyncSnapshot || !Array.isArray(asyncSnapshot.running))
+      return finish({ attempted: false, reason: 'async_job_state_unknown' });
+    if (asyncSnapshot.running.length > 0) return finish({ attempted: false, reason: 'owner_async_jobs_running' });
+    // Members settled: the runtime's own rule (terminal member statuses, no
+    // queued amendment delivery).
+    if (!Array.isArray(state.members))
+      return finish({ attempted: false, reason: 'members_state_unknown' });
+    if (!state.members.every(m => m && ['completed', 'failed', 'refused', 'rejected'].includes(m.status)))
+      return finish({ attempted: false, reason: 'members_not_settled' });
+    if (Array.isArray(state.amendment_delivery_queue) && state.amendment_delivery_queue.length)
+      return finish({ attempted: false, reason: 'amendments_queued' });
+    // External explicit model selection conservatively wins: live flag from
+    // the public session subscribe, or durable model_change entries beyond
+    // the baseline that this process did not cause. Baseline is captured at
+    // first observation (after the launch entry exists); unknown -> skip.
+    if (externalModelChange.get(sessionId)) return finish({ attempted: false, reason: 'external_model_change_observed' });
+    let branchChanges = null;
+    try {
+      branchChanges = entry.session?.sessionManager?.getBranch?.().filter(e => e && e.type === 'model_change').length ?? null;
+    } catch { branchChanges = null; }
+    const baseline = modelChangeBaseline.get(sessionId);
+    if (branchChanges === null || typeof baseline !== 'number' || baseline < 0)
+      return finish({ attempted: false, reason: 'model_change_baseline_unknown' });
+    if (branchChanges < baseline) return finish({ attempted: false, reason: 'model_change_history_rewound' });
+    if (branchChanges - baseline - (ownModelSwitches.get(sessionId) || 0) > 0)
+      return finish({ attempted: false, reason: 'external_model_change_recorded' });
+    // Provenance: only the checks that ACTUALLY found a resolved finding for
+    // the current triple. No state.review.model, no ranking, no time-based
+    // inference; ledger cross-check by exact call_id.
+    let ledger = null;
+    try {
+      // Same-task verification goes through the ledger document's own scope
+      // fields (ResourceCallLedger#read/valid_row shape): a known schema
+      // version, the CURRENT task id at the top level, and per-row exact
+      // call_id + task_id. A foreign or unknown document is a classified
+      // skip — a file merely sitting in this directory proves nothing.
+      const document = JSON.parse(await fs.readFile(path.join(bound.taskDir, 'resource-calls.json'), 'utf8'));
+      if (typeof state.id !== 'string' || !state.id
+          || document.schema_version !== 'orbit-resource-calls-v1'
+          || document.task_id !== state.id
+          || !document.calls || typeof document.calls !== 'object' || Array.isArray(document.calls))
+        return finish({ attempted: false, reason: 'ledger_scope_unknown_or_foreign' });
+      ledger = document.calls;
+    } catch { return finish({ attempted: false, reason: 'ledger_unreadable' }); }
+    const resolvedForCurrent = findings.filter(f => f && typeof f === 'object' && f.status === 'resolved'
+      && f.observed_input === td.input_digest && f.observed_root === td.artifact_root
+      && f.resolution_input === td.input_digest && f.resolution_root === td.artifact_root
+      && f.resolution_version === td.artifact_digest
+      && typeof f.check === 'number' && typeof f.resolution_check === 'number');
+    const targets = new Map();
+    const INDEPENDENT_ROLES = ['reviewer', 'adjudicator'];
+    for (const f of resolvedForCurrent) {
+      const raiseCheck = (state.checks || [])[f.check - 1];
+      const resolveCheck = (state.checks || [])[f.resolution_check - 1];
+      if (!raiseCheck || raiseCheck.stale || !resolveCheck || resolveCheck.stale)
+        return finish({ attempted: false, reason: 'finding_check_stale_or_missing' });
+      // Raising check scope must match the finding's OBSERVED triple (the
+      // buggy version), and it must actually contain the finding id.
+      if (!INDEPENDENT_ROLES.includes(raiseCheck.role) || raiseCheck.kind !== 'artifact'
+          || raiseCheck.input_digest !== f.observed_input || raiseCheck.artifact_root !== f.observed_root
+          || typeof f.observed_version !== 'string' || raiseCheck.artifact_digest !== f.observed_version)
+        return finish({ attempted: false, reason: 'raising_check_scope_mismatch' });
+      const raising = Array.isArray(raiseCheck?.result?.findings)
+        && raiseCheck.result.findings.some(x => x && (x.id === f.id || x === f.id));
+      if (!raising) return finish({ attempted: false, reason: 'finding_not_in_raising_check_result' });
+      // Resolution check scope must match the finding's RESOLUTION triple (the
+      // fixed version) and its real result must carry the finding as resolved.
+      if (!INDEPENDENT_ROLES.includes(resolveCheck.role) || resolveCheck.kind !== 'artifact'
+          || resolveCheck.input_digest !== f.resolution_input || resolveCheck.artifact_root !== f.resolution_root
+          || resolveCheck.artifact_digest !== f.resolution_version
+          || !['complete', 'continue', 'correct'].includes(resolveCheck?.result?.verdict)
+          || !Array.isArray(resolveCheck?.result?.resolved_ids) || !resolveCheck.result.resolved_ids.includes(f.id))
+        return finish({ attempted: false, reason: 'resolution_check_scope_mismatch' });
+      const calls = raiseCheck?.usage?.calls;
+      if (!Array.isArray(calls) || !calls.length) return finish({ attempted: false, reason: 'raising_check_has_no_calls' });
+      const models = new Set();
+      for (const c of calls) {
+        if (!c || typeof c.provider !== 'string' || typeof c.model !== 'string' || typeof c.call_id !== 'string')
+          return finish({ attempted: false, reason: 'raising_call_shape_invalid' });
+        const row = ledger[c.call_id];
+        if (!row || row.call_id !== c.call_id || row.task_id !== state.id
+            || row.status !== 'completed' || row.role !== 'checker'
+            || row.actual_identity?.provider !== c.provider || row.actual_identity?.model !== c.model)
+          return finish({ attempted: false, reason: 'raising_call_ledger_mismatch' });
+        models.add(`${c.provider}/${c.model}`);
+      }
+      if (models.size !== 1) return finish({ attempted: false, reason: 'raising_identity_ambiguous' });
+      const target = models.values().next().value;
+      const priorEntry = targets.get(target) || { findingIds: [], callIds: [] };
+      targets.set(target, { findingIds: [...priorEntry.findingIds, f.id],
+        callIds: [...priorEntry.callIds, ...calls.map(c => c.call_id)] });
+    }
+    if (targets.size === 0) return finish({ attempted: false, reason: 'no_resolved_finding_for_current_triple' });
+    if (targets.size > 1) return finish({ attempted: false, reason: 'multiple_finding_models_no_ranking' });
+    const target = targets.keys().next().value;
+    const { findingIds, callIds } = targets.get(target);
+    // Target must differ from the live current Root model.
+    const currentModel = entry.session?.model ? `${entry.session.model.provider}/${entry.session.model.id}` : null;
+    if (target === currentModel) return finish({ attempted: false, reason: 'finding_model_already_root' });
+    // readRootBinding fingerprint gate: unknown/stale/amend/rebind refuse.
+    const binding = readRootBinding(bound.taskDir);
+    if (!binding || binding.fingerprint_status !== 'ok'
+        || binding.artifact_root !== td.artifact_root || binding.input_digest !== td.input_digest
+        || binding.artifact_digest !== td.artifact_digest)
+      return finish({ attempted: false, reason: 'root_binding_fingerprint_mismatch' });
+    // Fresh pool∩catalog re-sync AFTER the screens mature and BEFORE the
+    // final binding/ownership/wait re-verification: a sessionAgents cache
+    // left by an earlier tool call must never authorize a target the user
+    // has since removed from their pool. A failed re-sync is a classified
+    // skip of this evaluation (no idempotency slot consumed).
+    const freshSync = await syncSessionAgents(ctx);
+    if (!freshSync.ok) return finish({ attempted: false, reason: 'pool_resync_failed' });
+    // Bounded re-verification after every await (ledger read, screens): the
+    // task must still be the same owned active binding with the same wait
+    // gates clear — a terminal transition, rebind, or queued manual during
+    // evaluation aborts the attempt without consuming the idempotency slot.
+    const rebind = await resolveBoundTask(sessionId, ctx?.cwd).catch(() => null);
+    let stillOwned = false;
+    try { stillOwned = !!rebind && rebind.taskDir === bound.taskDir && await host.ownsTask(rebind.taskDir, sessionId) === true; } catch { stillOwned = false; }
+    const rs = stillOwned ? rebind.state : null;
+    const bindingFinal = readRootBinding(bound.taskDir);
+    const tripleAuthoritative = !!bindingFinal && bindingFinal.fingerprint_status === 'ok'
+      && bindingFinal.artifact_root === td.artifact_root && bindingFinal.input_digest === td.input_digest
+      && bindingFinal.artifact_digest === td.artifact_digest;
+    if (!rs || !activeState(rs) || runtimeAbandoned(rs)
+        || (rs.check_observations && typeof rs.check_observations === 'object'
+            && Object.values(rs.check_observations).some(o => o && typeof o === 'object' && o.status === 'in_flight'))
+        || rs.pending_finalization || rs.completion_stop_pending || rs.next_check_manual === true
+        || rs.recheck || Object.values(rs.findings || {}).some(f => f && f.status === 'open')
+        || !tripleAuthoritative
+        || rootToolSelectedByTask.has(bound.taskDir) || externalModelChange.get(sessionId))
+      return finish({ attempted: false, reason: 'state_changed_during_evaluation' });
+    const outcome = { attempted: true, ...(await performRootModelSwitch({ entry, ctx, boundDir: bound.taskDir, target,
+      phase: 'integration',
+      reason: `program integration selection: finding(s) ${findingIds.join(',')} found by ${target}`,
+      origin: 'program',
+      provenance: { finding_ids: findingIds, detecting_call_ids: callIds,
+        raising_check_of_first_finding: resolvedForCurrent[0].check,
+        resolution_check_of_first_finding: resolvedForCurrent[0].resolution_check, reminder_check: reminder.check,
+        detecting_model: target,
+        version_triple: { artifact_root: td.artifact_root, input_digest: td.input_digest, artifact_digest: td.artifact_digest } } })) };
+    if (outcome.ok === true) outcome.guidance = `程序来源提示：本任务已有手动终检提醒（已核查的独立检查来源），且已核查的独立检查发现并确认修复的真实缺陷（${findingIds.join(',')}，逐项来源与回执见 root_integration_model_selected 记录）由 ${target} 发现——程序已为本回合选择该型号承担 integration 阶段（仅此一次，配置已选择；真实调用以下一回执为准）。请在手动终检前按当前原始要求与规格核对整个交付，按风险做必要可执行验证并修复（不限先前缺陷）；task_delivery 与 Root verifications 归属不变。`;
+    return finish(outcome);
   }
 
   pi.registerTool({ name: 'orbit', label: 'Orbit', description: toolDescription, parameters: pi.zod.object(toolArgs(pi.zod)),
@@ -3409,6 +3720,21 @@ export function installOmpExtension(pi, sdk) {
       return { systemPrompt: withStatusBlock(event?.systemPrompt, block) };
     }
     if (!activeState(bound.state)) return;
+    // Program-initiated integration selection (contract: 程序发起的 Root
+    // integration 阶段选择). Runs AFTER the owned/live determination, BEFORE
+    // status guidance assembly. The switch itself goes through the same
+    // performRootModelSwitch core; the SDK's overrideIsCurrent re-runs the
+    // prepare loop after a setModel refreshed the base, so this handler still
+    // returns the regular status shape below and the next handler invocation
+    // sees the rebuilt prompt. The attempt map makes the rerun a no-op.
+    let integrationGuidance = null;
+    try {
+      const entry = entries.get(sessionId);
+      if (entry) {
+        const outcome = await considerProgramIntegrationSwitch(entry, ctx, bound, sessionId);
+        if (outcome && typeof outcome.guidance === 'string') integrationGuidance = outcome.guidance;
+      }
+    } catch { /* classified outcomes only; never block the turn */ }
     const block = statusBlock(bound.state);
     const advisory = entryDelegationAdvisory(bound.state, bound.taskDir);
     if (advisory) entryAdvisorySent.add(bound.taskDir);
@@ -3418,6 +3744,7 @@ export function installOmpExtension(pi, sdk) {
     // so one request never sees the same sentence twice.
     const parts = [block];
     if (advisory) parts.push(advisory);
+    if (integrationGuidance) parts.push(integrationGuidance);
     return { systemPrompt: withStatusBlock(event?.systemPrompt, parts.join('\n')) };
   });
   pi.on('session_start', (_event, ctx) => {
