@@ -104,3 +104,9 @@ Root 同日观察（Kimi K3 coding 76.2/agentic 50；`deepseek/deepseek-v4-flash
 10. OpenCode Go 官方目录与限额：https://opencode.ai/docs/go/
 11. OpenCode Zen 模型目录：https://opencode.ai/docs/en/zen/ 及公共端点 https://opencode.ai/zen/v1/models
 12. ZenMux 官方模型页 deepseek-v4.1-flash：https://zenmux.ai/deepseek/deepseek-v4.1-flash
+
+## 2026-09-30 追加：Go subscription_quota 条目 verified_by 短标签化（0.7.26）
+
+- 修复事实：该条目原 `verified_by` 为 412 字符长说明，超过 loader `MAX_VERIFIED_BY_LENGTH=64`，被 `normalize_map_entry` 静默丢弃（真实 loader 修前 5/6、修后 6/6，`/private/tmp/orbit-b06-hostfix/loader-{before,after}-isolated.txt`）。0.7.26 改为 48 字符短标签 `Orbit official-source review + Go endpoint audit`；四键、来源、核实时间、canonical 均未动，schema/校验零放宽。
+- **从 verified_by 移出的限定理由（以要点保留，非逐字原文；来源/实际日期不新编）**：同 provider/model/OpenRouter 身份（`opencode-go/deepseek-v4.1-flash`＝`deepseek/deepseek-v4.1-flash`）与既有 unknown 路由条目一致；Go 订阅端点 `https://opencode.ai/zen/go/v1/` 由第一方 console 文档与 18.3.4 `pi-catalog` 默认（结构路由证明）钉住；**本 variant 无 route-specific 质量样本**——选择只能复用既有模型级先验并展示该限制。
+- 边界：短标签不是新的外部审计；新映射命中不构成费用事实或专属 route 质量证明；pair4（0.7.25 试验）judgment_state 中该四键 `catalog.status=unmapped` 属修前行为，不重标。

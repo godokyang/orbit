@@ -1,6 +1,6 @@
 # Orbit 当前交接
 
-最后核对：2026-09-30（0.7.25 已提交安装、pair3 终态入档、pair4 mixed 观察中）。Goal **未完成**；本页是当前交接入口，历史运行从既有 reference、Git 和下面原始目录查阅，不重开已经结束的票。
+最后核对：2026-09-30（0.7.26 已提交安装、pair4 两臂终态入档、对照与外评完成）。Goal **未完成**；本页是当前交接入口，历史运行从既有 reference、Git 和下面原始目录查阅，不重开已经结束的票。
 
 ## 目标与用户决定
 
@@ -14,8 +14,8 @@
 
 ## 精确版本与工作区
 
-- **安装 0.7.25（当前生效）**：`orbit version --json` 已复核，clean source `7f572e87a63faa530c82a96c8586316c23f48d3c`（dirty false）；digest `0e0deba496544c4d05db1ac6f1317c44c64564e7ae2f3108774b5dacc7ade933`，installed_at `2026-09-30T16:44:03Z`（安装窗口 `16:43:47Z → 16:44:06Z`，`install.exit`=0，单次）。OMP／reviewer **18.3.4 未升级**。原件 `/private/tmp/orbit-release-0.7.25-delivery/`（`before.json`／`postcommit.json`／`after.json`／`install.{log,exit}`）；**83 个 pack 随包文件与当前提交源逐字节全匹配**（mismatch=[]；docs/tests 不在 npm pack 分发清单内，如实不记失配）。提交 `7f572e8`（恰好 11 文件：A/B 修复 8 文件＋host.mjs 三处 work-unit 必填文案＋package/shrinkwrap，+346/−9）。**组合验证**：178 个 git-tracked 文件全量冻结 pre/post 一致；恢复 run 的权威 `npm-test-recovery.exit=0`（wrapper 前台 `$?`，172 行日志 120 PASS 0 fail、尾 `INSTALL_TEST_PASS`）；`check:version`／`pack`／`diff-check` exit 0；validator（正确绝对路径 skill-creator 脚本，uv run）"Skill is valid!" exit 0。**第一次全量退出无法验证**（kqueue 原件未存 e.flags，data=3 无法排除 EV_ERROR/errno 情形；SIGQUIT 未证，原因未知——见 `orbit-native-handoff-025-combined/kqueue-decode-correction.json`）；证据目录 `/private/tmp/orbit-native-handoff-025-combined/`。
-- **上一版历史（不再生效）**：安装 0.7.24（`59eb7e7`，digest `02067f58…`，15:32:10Z）；安装 0.7.23（`5d5a497`，digest `919d5f87…`）；安装 0.7.21（`fffabf80`，digest `ae9ce431…`）。各版结论只在各自构建与场景内有效。
+- **安装 0.7.26（当前生效）**：`orbit version --json` 已复核，clean source `b7401a2f3f7a015a9cab8dec11a93d56cf9b2b3a`（dirty false）；digest `2314ec03b7f857207ab42b08ea3cbe2be61321cd5ef70860b862d82aa175d5a2`，installed_at `2026-09-30T19:59:55Z`（窗口 `19:59:42Z→19:59:58Z`，单次 install exit 0）。提交 `b7401a2` 恰 4 文件（Go 订阅映射 verified_by 短标签修复＋host.mjs work-unit 类型 help 文案）。83 pack 文件对 installed release 字节 SHA 全一致；installed release loader 实测 accepted:6（修前 5）。组合验证：full 前台 wrapper 权威 `npm-test.exit=0`（19:51:26Z→19:54:39Z）、check:version/pack/validator/diff-check exit 0；ALL 178 tracked＋83 pack 逐 path 对 **tested-pre（升版后第二段冻结）** 一致——before-bump pre（19:51:07Z，0.7.25/dirty2）与 tested-pre（19:51:40Z，dirty4）两段边界如实，版本差异发生在 full 前；metadata 更正（pass_markers 227→实际 literal 127 等）见 `orbit-regression-0.7.26-k7Ar/metadata-corrections.json`。原件 `/private/tmp/orbit-release-0.7.26-delivery/`。**全面回归通过≠新的真实模型验收或收益证明**。
+- **上一版历史**：0.7.25（`7f572e8`，`0e0deba4…`，16:44:03Z）；0.7.24（`59eb7e7`）；0.7.23（`5d5a497`）；0.7.21（`fffabf80`）。
 - **0.7.23 组合验证（提交前，已通过）**：full／pack／validator／version／diff-check 全部 exit 0，129 个源／测试／打包文件逐文件 SHA 一致（非仅汇总断言）；证据 `/private/tmp/orbit-regression-0.7.23-gu0Ouq/`。该目录内 `run.out` 是宿主 `setsid` 不可用的**启动失败原始记录**（当时未执行 npm），不是测试失败；`run-recovery.out` 才是本次 full。**decision-3 放行重签**：Root 2026-09-30T13:57:50Z 独立审核（审核者 w1Y:p1A，实现者为 Q）；17 个真实样本逐字保留（samples SHA256 `5a30130a022abd2bc1b35a6ebe61c2ea4fe0e750cafbb0d23d6d51de973d03cc`，共享 call_id、非 17 次新调用、未新 API 校准）；结构 load 通过，旧 -2 副本明确不匹配。
 
 启动增量冻结 SHA256：
@@ -94,22 +94,22 @@
 | --- | --- |
 | `w1Y:p1A` | 当前 Codex Root；新会话需明确接替编排，避免两个 Root 同时写／派发 |
 | `w1Y:p1S` | S，DeepSeek Flash；policy 增量实现（含 F-1 修复）由其执行，402 reject_no_credit 后已停写释放路径；后续 0.7.24/0.7.25 的实现、提交与安装由 Q 承接，idle |
-| `w1Y:p1Q` | Q，GLM；0.7.24/0.7.25 实现/提交/安装执行者与 policy 预部署审 PASS＋F-1 增量复核 PASS、SDK 委派偏置只读调查；现持 pair4 mixed Controller 票（观察中），不写产品源码（当前文档同步写者） |
+| `w1Y:p1Q` | Q，GLM；0.7.24–0.7.26 实现/提交/安装/文档执行者（policy 实现、Seam A/B、pair4 两臂 Controller、0.7.26 最小修复与交付）；当前进行阶段二只读 54 项最终要求审计，不写产品源码 |
 | `w1Y:p1R` | R，当前 Grok；本轮报告工作区工具不可用，已明确停票（fixture 无文件产物，由 Q 接手），不再重试或写源码，idle；不能默认可用 |
 | `w1Y:p27` | `ordinaryphone23`（installed 0.7.23 普通请求 SUT，任务 `01f4925b` complete＋confirmed stop）：**已原生退出并关闭**，pid 87232 经 ps 实测不存在；其 cleanup 记录可由 Q 复用 |
-| `w1Y:p26` | 复用 pane：pair2 `reconcile23core`、pair3 `reconcile24core` 均已原生退出（pid 实测消失、pane 回 shell）。**pair4 mixed 臂运行中**：`reconcile25core`，pid **36581**（MCP 36613/36727）、release `a39256d24e1c840e2f126b9d`（0.7.25），任务 `028437c2-bd4b-4429-aa6b-88b9e6e19018`；pair4 根 `/private/tmp/orbit-reconcile-pair4-iW4p7Z`，`FROZEN-SOURCE.json`＋`controller-records/launch-current.json`（16:49:51Z） |
+| `w1Y:p26` | 复用 pane：pair2/3/4 各轮 SUT 均已原生退出（pid 实测消失）；**当前回 shell zsh 33047**，空闲可复用；用户 Q/S/R pane 不关闭 |
 
 各 fixture 都把 controller／request／session 保存在 product 之外。phone、旧 minchain21 与 pair2 mixed 的 Root 会话**均已退出**，相关 pid 经 ps 实测不存在，未执行 kill。不要 kill 通用 OMP／Herdr，不批量删除临时目录；Q/R/S 是用户提供的执行者，不关闭它们。**Root 的检查范围**：installed identity（`orbit version --json`）、release-delivery 原件、policy gate／Q 审记录、pair3 `FROZEN-SOURCE.json` 与后续该轮的 launch／state／ledger 原件；不以本页摘要替代原件。
 
-pair2 状态：mixed 臂已完成（complete＋confirmed stop）但 `members=0`，不构成自主派发证明；其 baseline 未启动。pair3：mixed 已终态（见上节），非成功成员交付；baseline 未授权。pair4：mixed 已由 Root 授权启动（028437c2，观察中——见 `launch-current.json`，只报已读阶段），baseline 未授权，资源对照未做。
+pair2：mixed 终态（members=0，不构成自主派发证明）、baseline 未启动。pair3：mixed 终态（非成功成员交付）、baseline 未启动。pair4：**两臂终态入档**（mixed 全链真实、B 未触发；baseline plain 完成；对照与外评完成、结论为负——该任务未证明节省），资源对照已做一轮、结果不重标。
 
 ## 新 Root 的顺序
 
 1. 读取本页、主方案／代码审计／W1—W10、开发规则；核对 live 工作区与 installed identity，继承已有授权。
 2. 复用最小链成功、Jev API 证据与最小链资源后验；收好本轮原件（release-delivery、gu0Ouq、ordinary-phone、pair2 terminal-audit）。pair2 mixed 已结束：**进程已退出，pane 回 shell 并保留**；除按需后验外不要重启该轮、不要删其原件。不要重复提交此前业务 prompt。
-3. 安装已完成（installed 0.7.25，`7f572e8`；`sh install.sh` exit 0 单次；release-delivery 原件）；不再重复安装、不重跑组合验证、不升级 OMP（18.3.4）。旧 full 不覆盖本轮增量。
-4. **当前优先闭合真实自主验收**（不因此缩掉其余 W 项）：pair4 mixed 臂运行中（`reconcile25core`，任务 `028437c2`），针对 0.7.25 两修复（同代 v2 hint 绑定、same-unit 失败重派）的 fresh 复验；只报已读原件事实；**不得称成功成员交付，直到实际接受、checks 与停止证据出现**；baseline 未授权；不诱导派发。判据仍是实际推荐→native task→登记→成员回传→Root 集成。
-5. 闭合质量充分后分派与旗舰升级、可信路由成本／实际用量归属、错误控制、finding 纠正、当前版本手动终检与实际停止；decision-3 的“过门后稳定池序”已由 pair3 selection 真实触发（K3 0.66／Zen 0.70 过门、first 仍 K3），**hint 采纳链在 0.7.25 Seam A 修复前不可达**（pair3 v2 hint 未采纳不冒称）；pair4 正在复验该链；政策修复不替代这些验收，也不勾选 W 项。
-6. 核心路径通过后再完成冻结的同质量 Top／混合资源对照，报告全部角色和未知量，按主方案 §11.3 调整负收益路径。逐项闭合 W1—W10、文档、收尾和本地提交后才 complete。
+3. 安装已完成（installed 0.7.26，`b7401a2`；单次 install exit 0；release-delivery 原件）；不再重复安装、不重跑组合验证、不升级 OMP（18.3.4）。旧 full 不覆盖后续增量。
+4. **pair4 两臂已完成（终态入档）**：mixed（0.7.25）真实同代 v2 hint→native K3 派发→注册先于模型工作→accepted→Root 集成（node --test 8/0 两次回执＋smoke）→manual final checker#2 只读（coverage verified 5/0）→complete＋confirmed stop 17:02:54Z＋原生 exit（36581/36613/36727 消失）；B（same-unit 失败自动释放）未触发，**不冒称 passed**。baseline（plain 18.3.4，session 01a0f352…）业务 final 17:23:54Z（13 回执）＋外评 8/6 各一次 exit 0＋原生 exit（72133/72162/72250 消失）。对照数字（旗舰 input 34746 vs 27442；output 5940 vs 6061；cacheRead 571392 vs 227328；total 612078 vs 260831；26 vs 13 calls）与全部其他角色、未知费用**分列于 paired-comparison＋correction**；负结论（14 项质量无可检出差异、该任务未证明节省）不重标。每臂业务 prompt 仅 1 次；Controller 观察/外评/exit 分列不计作被测干预。baseline reasoning 10 known/3 missing、mixed root 21 known/5 missing（原件事实）；account 41 known/16 unknown 不泛称。下一优先：最终逐项审计与负收益路径决策闭合（Root 主导）。
+5. 闭合质量充分后分派与旗舰升级、可信路由成本／实际用量归属、错误控制、finding 纠正、当前版本手动终检与实际停止；decision-3 的“过门后稳定池序”已由 pair3 selection 真实触发（首次 15:46:30Z K3 .66/Zen .67；最新 15:49:51Z K3 .66/Zen .70）；hint 采纳链在 0.7.25 Seam A 修复前不可达（该轮未证），**pair4 已证机械链（采纳→派发→交付→终检→停止）**；政策修复不替代这些验收，也不勾选 W 项。
+6. **冻结同质量对照已完成一轮且为负**（pair4：旗舰 totalTokens +134.665% 分类描述、质量无可检出差异；不宣称节省）——按主方案 §11.3 需要据此调整负收益路径（Root 主导决策），不是“通过后再完成对照”。逐项闭合 W1—W10（Root 裁定）、文档、收尾和本地提交后才 complete。
 
 当前没有新的用户审批前置；不要把所有模型可靠性证明、外部发票或全型号认证另加成验收门。用户的 Goal 会话迁移不等于已完成或重新获得一份可以无限重复旧失败的资源额度。
