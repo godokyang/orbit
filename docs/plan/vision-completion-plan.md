@@ -4,9 +4,9 @@
 
 ## 当前交付
 
-用户已认可启动 prompt 并明确要求以 Goal 模式开始完整实现。Goal 已激活，目标是主方案全部必要行为与真实验收同次闭合，不设硬预算。Codex 总编排与审核，已复用同一 Herdr 布局中的四个 OMP 执行者；开发团队和被测 Orbit 原生团队分别记录。当前源码 package 为 0.7.17（未发布、未安装），最近支持安装构建仍为 0.7.12；不提前宣称新源码已验收上线。
+用户已认可启动 prompt 并明确要求以 Goal 模式开始完整实现。Goal 已激活，目标是主方案全部必要行为与真实验收同次闭合，不设硬预算。Codex 总编排与审核，已复用同一 Herdr 布局中的四个 OMP 执行者；开发团队和被测 Orbit 原生团队分别记录。当前源码 package 为 0.7.17，已安装 clean 构建（commit `4a00ba702bbb90053d0a56ebd3b25062fd5a7811`，digest `4b3e6f40b0186f40fe5aa1dfc9418eeb1a15086966a434cb5c57c970a6d46e3c`，2026-09-30T03:24:03Z 安装），未发布；不因安装宣称完整目标已验收。
 
-主方案 §1.3 和逐项审计是冻结范围。内部实现依赖不是分期发布；自主派发的真实失败、资源归属、独立完成与停止是验收必需项。基线本地提交为 `4ce0b3a`、`8e3f0da`；0.7.11 检查点 `1ffec49` 保存覆盖门及之前有限校准、成本数据流、基准双接口、有效上下文和终态用量；两轮真实运行暴露交付证据、native yield 与正常退出缺陷。修复提交 `a1f9291` 已安装，0.7.12 新任务实测中。
+主方案 §1.3 和逐项审计是冻结范围。内部实现依赖不是分期发布；自主派发的真实失败、资源归属、独立完成与停止是验收必需项。基线本地提交为 `4ce0b3a`、`8e3f0da`；0.7.11 检查点 `1ffec49` 保存覆盖门及之前有限校准、成本数据流、基准双接口、有效上下文和终态用量；两轮真实运行暴露交付证据、native yield 与正常退出缺陷。修复提交 `a1f9291` 已安装并完成 0.7.12 真实实测（历史，不重标）；0.7.17 已安装，本轮真实路径与开放问题见下。
 
 ## 编排与文件所有权
 
@@ -46,7 +46,7 @@
 
 ## 真实验收当前状态
 
-[本次验收](../reference/mixed-model-real-acceptance-20260929.md)及 JSON 记录新 Herdr 入口、安装 digest、精确任务与原始用量。当前支持安装 0.7.12／`a1f9291`，digest `3f3446eb02ef794c917f5affc11d74d137f68d4167467fe78346543d92880613`，安装时源码 clean；此前 0.7.11／`1ffec49` 的 digest `7a9c57577866fb8e4308367330e53ec10c089b344e37cccffa05b3011101b07c`。普通 omp 旗舰对照和 orbit omp 负例分开，开发 B/C/D/E 不算被测成员。
+[本次验收](../reference/mixed-model-real-acceptance-20260929.md)及 JSON 记录新 Herdr 入口、安装 digest、精确任务与原始用量。当前支持安装 0.7.17（源码 clean `4a00ba70…`，digest `4b3e6f40b0186f40fe5aa1dfc9418eeb1a15086966a434cb5c57c970a6d46e3c`，2026-09-30T03:24:03Z）；此前支持安装为 0.7.12／`a1f9291`，digest `3f3446eb02ef794c917f5affc11d74d137f68d4167467fe78346543d92880613`，安装时源码 clean；此前 0.7.11／`1ffec49` 的 digest `7a9c57577866fb8e4308367330e53ec10c089b344e37cccffa05b3011101b07c`。普通 omp 旗舰对照和 orbit omp 负例分开，开发 B/C/D/E 不算被测成员。
 
 - 负例 passed：实际一行修改和验证，当前 Jev 价值门未过，未建立任务／hint／原生成员；正常退出及派生进程结束已确认。
 - 旗舰对照：独立完成 CSV，冻结八项 8/8；十八次 SDK 分类用量和退出留证，C 独立按规范静态核对及额外本地探针通过。
@@ -59,10 +59,12 @@
 - 原始 0.7.12 会话显示，自行完成轮被首轮 `[orbit-model-evidence-needed]` 提示引向 Kimi／GLM 一手资料研究，虽已选到可运行降级检查者、无执行成员；提示还硬写 `billing_route: unknown`，与 `evidence_needed` 的真实 `subscription_quota` 冲突。0.7.13 源码删除这条自动注入，保留可选精确补证响应并要求逐候选保留真实四键。定向 CLI 测试、JS 语法和打包检查通过；完整 npm test 在沙盒 TCP bind `EPERM`、宿主 JS 测试在 Unix socket `EPERM` 处停止，不宣称新源码回归或真实降耗已证明。
 - 0.7.14 源码修正 F03：`declared_workload` 仍可展示按可信本路由价格算出的条件性金额，但无可归属用量样本时不能自动比较总成本或改变质量排序；`similar_unit` 的 token 分类构成必须等于可归属完成回执的逐类均值，真实引用不能掩盖任意预测数字。仅一个正向候选时也不宣称发生费用比较。定向成本／成员／检查者选型测试通过；当时完整回归待环境恢复（2026-09-30 已恢复，后续版本全量通过），真实派发效果仍待新安装构建验证。
 - 0.7.15 源码修正 D02／D06／D09：工作单元每次 finish 的结果和核验绑定对应派发记录，重派及换模保留历史；现有 Jev 投影与原生成员交接继续传递这些字段。工作单元、两阶段选择输入及资源定向测试通过；不宣称真实失败升级已验收。
-- 0.7.16 源码修正 F03／D09：历史成员成本样本除单元最终 accepted 外，还须匹配实际被接受的成员和型号；前次调用正常返回但结果被拒绝，不能因后续换人成功获得成功样本资格，实际消耗仍留账。新增回归先复现旧代码误放行，再验证修复；成本／选择／工作单元／账本定向测试通过。执行环境权限已恢复，0.7.16 完整 npm test exit 0、pack dry-run 与 diff 检查通过，原始日志在 /private/tmp/orbit-regression-0.7.16；仍未安装或真实派发验收。0.7.17 源码修正：原生 record_check 回执不携带 reasoning、账本存 nil，similar_unit 引用核验仅在比较处把该缺失对齐类型化 unknown（不回写账本、具体已报告档位仍精确匹配），并修正 prior_sources 被 MAX_SOURCES=5 截断时丢失 artificialanalysis.ai——基准实测站点与专用端点优先保留；复现旧失败后修复，完整 npm test exit 0（日志 /private/tmp/orbit-regression-0.7.17）、pack dry-run 与 diff 检查通过，未安装。
+- 0.7.16 源码修正 F03／D09：历史成员成本样本除单元最终 accepted 外，还须匹配实际被接受的成员和型号；前次调用正常返回但结果被拒绝，不能因后续换人成功获得成功样本资格，实际消耗仍留账。新增回归先复现旧代码误放行，再验证修复；成本／选择／工作单元／账本定向测试通过。执行环境权限已恢复，0.7.16 完整 npm test exit 0、pack dry-run 与 diff 检查通过，原始日志在 /private/tmp/orbit-regression-0.7.16；仍未安装或真实派发验收。0.7.17 源码修正：原生 record_check 回执不携带 reasoning、账本存 nil，similar_unit 引用核验仅在比较处把该缺失对齐类型化 unknown（不回写账本、具体已报告档位仍精确匹配），并修正 prior_sources 被 MAX_SOURCES=5 截断时丢失 artificialanalysis.ai——基准实测站点与专用端点优先保留；复现旧失败后修复，完整 npm test exit 0（日志 /private/tmp/orbit-regression-0.7.17）、pack dry-run 与 diff 检查通过，当时未安装（注：该构建 0.7.17 后来已安装，见下文 2026-09-30 真实路径段）。
 - 用户要求清理界面后，已结束的 B/C/D/E、自有 F/G、空闲未接任务的 H/J 及验收 K/M/N 均已关闭。重绑定准备轮 `w1Y:p1P` 的 Orbit 任务先前已 confirmed stop；随后 Herdr 允许向空闲 pane 输入，Controller 发送原生 `/exit`、待 OMP 返回 shell 后发送 `exit`，`herdr pane list` 确认该 pane 消失，界面只剩主 pane。执行环境曾拒绝 Herdr 的 `pane split`／`process-info`／`close`（`Operation not permitted`），为当时历史失败记录；权限现已恢复（0.7.16／0.7.17 完整 npm test exit 0 期间含 socket 绑定测试通过）。已准备的独立 linked-worktree 夹具 `/private/tmp/orbit-rebind-live-pshm82xn/` 确认两目录同属 Git `40fd207`、原始八项测试 SHA256 同为 `5e3161e3fadf9588b4a0269a8fd50b3fd99430e932105b74a5dc2e33114d27fd`、初始各仅 4/8 通过且尚未实现交付。夹具准备不等于重绑定通过。
 
-OpenRouter 正式基准匿名请求曾实际 HTTP401，该历史保留不重标。项目 `.env` 现已提供 `OPENROUTER_API_KEY`，经源码双接口实测 HTTP200、刷新 446 个非 alias 行，key-free 证据在 /private/tmp/orbit-or-verify/verification.json；不借用其他供应商凭据。实际 consumer、新安装构建真实闭环、候选完整身份／冲突／未知测量日期资格及可信价格／计划来源仍需实际核验。OpenCode Go 官方资料允许套餐额度用尽后以 Zen 余额回退，单靠端点不能证明逐调用额度归属；此前受限执行环境的 ego-browser bootstrap 失败记录保留，未改账户或价格事实。
+OpenRouter 正式基准匿名请求曾实际 HTTP401，该历史保留不重标。项目 `.env` 现已提供 `OPENROUTER_API_KEY`，经源码双接口实测 HTTP200、刷新 446 个非 alias 行，key-free 证据在 /private/tmp/orbit-or-verify/verification.json；不借用其他供应商凭据。checker 与 member 两侧 facts 消费各有实证（member 侧目录事实消费已有实证（后台任务 `0f4b306f-7fb5-4d48-be34-15b804b36a07` 成员选择阶段，4/6 候选随真实 Jev 输入送达；详情见验收报告与 JSON）；member 推荐采纳与成功交付、完整真实身份与覆盖仍待证）；基准语义测量日期单独一项仍 unknown（无逐模型测量日期，只有快照级 as_of）；第一方价格／计划事实已按其适用条件留证，账户凭据与实际扣减归属是另一项未知，两者不合并；新安装构建真实闭环与候选完整身份／冲突资格仍需实际核验。OpenCode Go 官方资料允许套餐额度用尽后以 Zen 余额回退，单靠端点不能证明逐调用额度归属；此前受限执行环境的 ego-browser bootstrap 失败记录保留，未改账户或价格事实。
+
+2026-09-30 0.7.17 已安装构建的真实路径（同一内容 digest `4b3e6f40…`）：logstat 两臂同质产品对照在冻结 8 项黑盒测试与 6 项冻结探针上均 8/8 与 6/6 通过（exit 0）；Root 逐类用量（input/output/cacheRead）为 baseline 23060/4904/150528、mixed 23782/4971/458112，mixed 更高，**不是节省**，member 未派发（members=0）；混合臂 Root 经 `xd://orbit` 设备调用控制面 4 次（read 协议 + write context/check/stop），两次自动唤醒注入驱动手动终检与完成申请，账本 root 25 笔与会话 25 条逐类相等。在途旧根 rebind：确认旧根 reviewer 真在途（独立 pid 98639）后排队 rebind+amend，1 秒后 `workspace_rebound`，新根检查 5/6 complete 且终态 stop 确认；**旧检查自身失败（无效 JSON）：旧检查 1 于 03:32:15Z 启动（reviewer 进程 03:32:20Z），重绑定 03:32:22Z 生效，该检查 03:33:13Z 记 `check_failed`、`stale` 为 null：该旧检查自身失败、未得到正常的 stale 结果，因此 workspace-stale-on-completion 语义未验证**；同模型连续 4 次检查者终态消息失败作为环境／模型稳健性观察报告 Root。一行修改负例单列、未与 rebind 路径混用。后台预览任务：paused 中断停止 + stop_confirmation 确认（Root 与两名成员），/exit 后原 PID 26548/26665/26773 与 preview 33443 均不存在、pane 关闭，**业务交付仍未完成**。新开放问题：后台任务三因已确认：① K3 成员的 `edit` 走 hashline `{i,input}` 方言，被 `work-unit-scope.mjs` 的键白名单投影拒绝（edit input 被拒已定位，R 修复中，0.7.18 未落地）；② 首个成员收到 provider HTTP 429 `Go usage limit exceeded` 被判 rejected（provider 额度，非 Orbit 缺陷）；③ **hint 采纳归因根因已确认**：`task_runtime.rb` 的 `collect_amendments` 将本任务 `sent_message_ids` 中的内部提示推进 `last_user_message_id`，使自身提示的 `user_boundary` 失效（宿主门与 `current_delegation_hint` 都要求两者相等）；03:43:28Z 首次 hint 本可匹配（模型／单元／输入／产物均对）却未绑定；R 正在修复内部提示推进用户边界的问题，0.7.18 尚未落地，修复后由 Q 复核。work-unit dispatch bind 记录真实存在（不是未绑定派发）；W1—W10 仍未勾选，Goal 保持 active，经济收益尚未证明。价格事实只按第一方适用条件记录，账户凭据与实际扣减保持 unknown，不用 SDK／目录价格冒充结算。
 
 ## 下一动作
 
