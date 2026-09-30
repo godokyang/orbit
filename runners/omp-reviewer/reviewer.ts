@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 import { lstatSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { recoverTrailingJsonObject } from "./json-recovery";
+import { providerErrorFact } from "./provider-error.ts";
 import { parseProbeModels, probeModelAvailability, type CredentialAvailability } from "./model-probe";
 import { validateCheckResult } from "./check-result";
 import {
@@ -556,6 +557,17 @@ try {
 				await session.prompt(prompt);
 				const last = [...session.messages].reverse().find(message => message.role === "assistant");
 				const text = (last?.content ?? []).filter((part: { type: string }) => part.type === "text").map((part: { text: string }) => part.text).join("");
+				// A mid-session provider failure arrives as an assistant turn with
+				// stopReason "error" and the provider's own error fields (pi-ai
+				// public surface). It fails the check before any contract parsing:
+				// even a trailing contract-valid JSON in such a turn is leftover
+				// content, never a verdict. raw_text, result and the usage
+				// receipts/gaps are still recorded as-is below.
+				const providerError = providerErrorFact(last);
+				if (providerError) {
+					evidence.error = { kind: providerError.kind, detail: providerError.detail };
+					problems.push(`provider error: ${providerError.detail}`);
+				}
 				let result: unknown;
 				let parseError: string | undefined;
 				try {

@@ -5,6 +5,7 @@
   "type": "module",
   "description": "Orbit independent OMP reviewer session runner. The SDK is pinned to the verified OMP version and installed into the release by install.sh.",
   "dependencies": {
+    "@oh-my-pi/pi-ai": "18.3.4",
     "@oh-my-pi/pi-coding-agent": "18.3.4",
     "@oh-my-pi/pi-utils": "18.3.4"
   }
