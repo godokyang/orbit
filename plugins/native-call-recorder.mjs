@@ -131,7 +131,11 @@ export function observeNativeCalls(session, context) {
       receipt.model ||= call.meta.actualModelId;
       const sameModel = receipt.model === call.meta.actualModel ||
         `${receipt.provider}/${receipt.model}` === call.meta.actualModel;
-      const row = ledgerReceipt(receipt, { role: call.meta.role, phase: `${call.meta.role}_execution`,
+      // The Root phase is the intent declared at the model_change and captured
+      // into meta at message_start; the switch tool's own old-model call keeps
+      // its original phase, the next new-model call carries the declared one.
+      // Members are unaffected and always stay member_execution.
+      const row = ledgerReceipt(receipt, { role: call.meta.role, phase: call.meta.phase ?? `${call.meta.role}_execution`,
         session_id: session.sessionId, agent_id: call.meta.role === 'member' ? call.meta.agentId : undefined,
         work_unit_id: call.meta.workUnitId, route: sameModel ? call.meta.billingRoute : 'unknown' });
       row.started_at = call.started_at;

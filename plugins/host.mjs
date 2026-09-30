@@ -32,12 +32,15 @@ async function run(args, cwd, input = '') {
   });
 }
 
-export const toolDescription = 'Start Orbit for multi-step work or when the user requests it; do local one-file edits yourself. Use takeover only to bring an already-executed requirement under supervision, stating why; the earlier execution is never recognized as controlled. Orbit prefers runnable models in the OMP candidate pool; if none run, Root can use another OMP-accessible model. JEV task-fit ranks suitable checkers but low or missing scores do not block a runnable model. No per-model user authorization is required. After a failed check Orbit records the failure and tries an unused runnable OMP model; never treat a failed check as a pass. Root may choose review_model from the current OMP catalog. Independent checks and confirmed completion remain required.';
+export const toolDescription = 'Start Orbit for multi-step work or when the user requests it; do local one-file edits yourself. Use takeover only to bring an already-executed requirement under supervision, stating why; the earlier execution is never recognized as controlled. Orbit prefers runnable models in the OMP candidate pool; if none run, Root can use another OMP-accessible model. JEV task-fit ranks suitable checkers but low or missing scores do not block a runnable model. No per-model user authorization is required. After a failed check Orbit records the failure and tries an unused runnable OMP model; never treat a failed check as a pass. Root may choose review_model from the current OMP catalog. For necessary integration or diagnosis after bounded delivery, Root may also select a stronger stage model via action root-model (pool∩catalog exact provider/id, phase, reason) — optional, never required per task. Independent checks and confirmed completion remain required.';
 export const toolArgs = z => ({
-        action: z.enum(['context', 'start', 'status', 'check', 'amend', 'dispute', 'stop', 'review-model', 'work-unit']),
-        task: z.string().optional().describe('Required for status/check/amend/dispute/stop/work-unit/review-model: the exact task_directory returned by start.'),
+        action: z.enum(['context', 'start', 'status', 'check', 'amend', 'dispute', 'stop', 'review-model', 'work-unit', 'root-model']),
+        task: z.string().optional().describe('Required for status/check/amend/dispute/stop/work-unit/review-model/root-model: the exact task_directory returned by start.'),
         basis: z.array(z.string()).optional(), message_id: z.string().optional().describe('Native user message id selecting the original instruction for start.'),
         review_model: z.string().optional().describe('Optional Root-selected provider/id from the current OMP model catalog.'),
+        root_model: z.string().optional().describe('root-model only: exact provider/id from the CURRENT user pool ∩ OMP catalog for this session. The action can be called without it to list the exact IDs now available.'),
+        phase: z.enum(['execution', 'integration', 'diagnosis']).optional().describe('root-model only: which stage the selected model is for. An intent declaration, not a capability measurement.'),
+
         intent: z.enum(['complete', 'pause']).optional().describe('stop only: complete (default) requires the actual finalization gate; pause is an explicit interruption.'),
         operation: z.enum(['declare', 'read', 'list', 'finish']).optional().describe('work-unit operation; declare records a bounded handoff, finish records Root verification.'),
         work_unit: z.record(z.string(), z.unknown()).optional().describe('declare payload types: {spec:{objective:non-empty string, requirements:non-empty string[], allowed_paths/allowed_tools/allowed_commands:string[] (at least one non-empty), acceptance:non-empty string, escalation:non-empty string, optional context:string, decisions:string[], dependencies:string[] of existing unit ids}}. Paths/tools/commands are flat allowed_* fields inside spec, never nested scope. allowed_paths is the member\'s entire accessible path set (read and write share it): read-only specs/tests/dependencies must be listed there too, or their necessary facts go into context; it grants no automatic read-only protection. allowed_commands must be complete commands, matched verbatim — never prefixes. Remaining optional spec field: model_requirements (object). read/finish use id; finish also needs status,result,verification.'),
@@ -143,9 +146,15 @@ export function createOrbitHost({ provider, project, dispatch, bind, reset }) {
           tasks.set(id, result);
           return JSON.stringify(result);
         }
-        if (!a.task) throw new Error('This action needs the task: pass task: <task_directory returned by start> to the orbit tool (status/check/amend/dispute/stop/work-unit/review-model all take it). Do NOT write .orbit/inbox manually.');
+        if (!a.task) throw new Error('This action needs the task: pass task: <task_directory returned by start> to the orbit tool (status/check/amend/dispute/stop/work-unit/review-model/root-model all take it). Do NOT write .orbit/inbox manually.');
         if (a.action === 'review-model' && (typeof a.review_model !== 'string' || !a.review_model.trim()))
-          throw new Error('review-model requires a Root-selected provider/id from the current OMP catalog');
+          throw new Error('review-model requires a Root-selected provider/id from the current OMP model catalog');
+        if (a.action === 'root-model') {
+          // The host validates ownership only; the native side owns the pool
+          // ∩ catalog check, the real setModel call, and the factual record.
+          await ownedTask(a.task, id);
+          return null; // native dispatch handles this action
+        }
         await ownedTask(a.task, id);
         if (a.action === 'work-unit') {
           return JSON.stringify(await run(['work-unit', a.task, a.operation || 'declare', '--file', '-'], project,

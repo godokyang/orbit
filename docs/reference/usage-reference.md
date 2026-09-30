@@ -174,6 +174,19 @@ orbit review-model TASK_DIRECTORY --model provider/id --reason "检查者凭据�
 
 该命令入队前核对当前 OMP 会话与隔离环境，任务进程在真正开始检查前再核对；在途检查不会切换。同一失败型号不能靠重复 `check` 绕过阻塞。Root 使用 Orbit 工具 `start` 的 `review_model` 参数也只接受经上述可用性核对的 OMP 型号。没有有效独立终检时，不称任务已完成；需要中断则按用户指令普通暂停并确认停止。
 
+Root 在受控会话中需要自己换用不同精确型号时（例如硬性 provider 错误需换型号诊断），使用 Orbit 工具的 `root-model` 动作——**这是 OMP 工具动作，不是新的 CLI 命令**：
+
+```text
+orbit 工具调用: { action: "root-model", task: TASK_DIRECTORY }
+              # 不带 root_model 时列出当前池 ∩ OMP 目录的精确 provider/id
+orbit 工具调用: { action: "root-model", task: TASK_DIRECTORY,
+                  root_model: "provider/id",   # 如 "provider-a/model-x"，从上面列出的可选 ID 中选
+                  phase: "diagnosis",          # execution | integration | diagnosis
+                  text: "选择理由" }            # 非空原因，写入事实记录
+```
+
+目标必须同时在候选池与当前 OMP 目录中并精确解析；`from`／`to` 按切换前后的真实身份记录。**配置选择回执本身不证明实际调用身份**——实际身份由切换后后续 native assistant 调用回执（`resource-calls.json` 中的 `actual_identity.provider`／`actual_identity.model`；`actual_model` 只是中间 receipt 字段）证明，该阶段归属适用于切换后的后续调用，不局限仅一次。在途独立检查、排队的手动终检或完成停止窗口内拒绝切换。同型号同阶段重复请求被拒；原生 `/model` 切换后可重新选择。这不是给检查者重选型号的入口（那用 `orbit review-model`）。
+
 ### 模型证据提交（model-evidence）
 
 Root 从一手来源核实任务质量事实，按真实 provider／model／reasoning／billing_route 提交一个 JSON object 或 array；不要求 Root 与全池同时补证。unknown 与 provider default、不同计费路由不互换，不为命中 lookup 改路由。主会话的配置解析不证明独立检查进程的服务端身份或账号；不能证明的字段如实未知。

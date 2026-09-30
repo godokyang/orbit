@@ -1032,7 +1032,12 @@ export function installOmpExtension(pi, sdk) {
       if (!ACTIVE.has(state.status)) return null;
     } catch { return null; }
     const model = session.model;
+    // The Root phase is an intent declaration captured at message_start; it
+    // rides the recorder meta so the switch's own (old-model) call stays in
+    // its original phase and only the next new-model call carries the phase.
+    const rootPhase = member ? undefined : rootPhaseByTask.get(taskDir);
     return { taskDir, projectRoot: state.project_root, role: member ? 'member' : 'root', agentId,
+      ...(rootPhase ? { phase: rootPhase } : {}),
       workUnitId: memberWorkUnits.get(agentId)?.bound ? memberWorkUnits.get(agentId).unitId : undefined,
       actualProvider: model?.provider, actualModelId: model?.id,
       actualModel: model?.provider && model?.id ? `${model.provider}/${model.id}` : undefined,
@@ -1280,6 +1285,7 @@ export function installOmpExtension(pi, sdk) {
     }
     if (!ACTIVE.has(state.status) || state.connection?.provider !== 'omp' || state.connection?.thread_id !== sessionId) {
       taskDirs.delete(sessionId);
+      rootPhaseByTask.delete(taskDir);
       return { ok: false, reason: 'The bound Orbit task is not active for this Root; start a new Orbit task before delegating' };
     }
     return { ok: true, taskDir, state };
@@ -1796,7 +1802,7 @@ export function installOmpExtension(pi, sdk) {
       const state = await readRecordState(known);
       if (state && state.connection?.provider === 'omp' && state.connection?.thread_id === sessionId) return { taskDir: known, state };
       statusBoundTasks.delete(sessionId);
-      if (taskDirs.get(sessionId) === known) taskDirs.delete(sessionId);
+      if (taskDirs.get(sessionId) === known) { taskDirs.delete(sessionId); rootPhaseByTask.delete(known); }
     }
     const project = await projectRootFor(cwd);
     if (!project) return null;
@@ -3092,10 +3098,136 @@ export function installOmpExtension(pi, sdk) {
     }
   });
 
+  // Root-stage model selection (action=root-model). Ownership was already
+  // verified by the shared host; this closure owns the pool∩catalog check,
+  // the public pi.setModel call, and one small factual record per attempt.
+  // No credentials, no raw provider payloads, no rollback guessing; the
+  // actual identity after the switch is proven by the next native assistant
+  // receipt, never by this return value.
+  const rootModelInFlight = new Set();
+  // The declared Root phase for the NEXT and subsequent provider calls of
+  // this task session. Keyed by taskDir (canonical owned path), set only on a
+  // confirmed switch, cleared when the session re-binds or the task ends.
+  const rootPhaseByTask = new Map();
+  async function handleRootModel(args, entry, ctx, toolCallId) {
+    const sessionId = entry.id;
+    // Trusted log destination starts null and is set only after ownership is
+    // re-verified; an early reject never writes to a caller-supplied path.
+    let boundDir = null;
+    const record = (extra) => {
+      const payload = {
+        kind: 'root_model_selection', at: Date.now(), session_id: sessionId,
+        agent_id: sdk.MAIN_AGENT_ID,
+        task_dir: (extra.canonical_task_dir ?? null),
+        tool_call_id: typeof toolCallId === 'string' ? toolCallId : null,
+        from: extra.original_from ?? null,
+        actual_model_after: extra.actual_model_after ?? undefined,
+        to: args.root_model ?? null, phase: args.phase ?? null,
+        reason: typeof args.text === 'string' ? args.text.slice(0, 300) : null,
+        ...extra,
+      };
+      try { if (payload.task_dir) recordCollabFor(payload.task_dir, payload); } catch { /* record only */ }
+      return payload;
+    };
+    const reject = (error, extra = {}) => { record({ ok: false, error, canonical_task_dir: boundDir ?? null, ...extra }); return { ok: false, error }; };
+    // Bind the real task now: re-resolve, re-verify ownership+activity+runtime
+    // so a foreign or stale task_dir is never used as a log destination.
+    let bound;
+    try { bound = await resolveBoundTask(sessionId, ctx?.cwd); }
+    catch { return reject('task binding could not be verified'); }
+    // resolveBoundTask is a display-grade lookup (provider/thread match only).
+    // A trusted log destination requires REAL ownership: the current process
+    // must hold this task's control socket AND the caller's path must resolve
+    // to the same canonical directory we would write to.
+    let controlOwned = false;
+    try { controlOwned = !!bound && await host.ownsTask(bound.taskDir, sessionId) === true; } catch { controlOwned = false; }
+    if (!bound || !controlOwned || !args.task || bound.taskDir !== args.task)
+      return reject('task is not owned by the current host session');
+    boundDir = bound.taskDir; // ONLY after successful ownership and exact task match
+    if (!activeState(bound.state)) return reject('task is not active');
+    if (runtimeAbandoned(bound.state)) return reject('task runtime is no longer running');
+    // Waiting discipline: an in-flight independent check or a queued manual
+    // finalization means the Root should yield, not switch mid-verification.
+    // Real shapes: state.check_observations[*].status === 'in_flight' and
+    // state.pending_finalization (queued manual final), per task_runtime.
+    const observations = bound.state.check_observations;
+    if (observations && typeof observations === 'object'
+        && Object.values(observations).some(o => o && typeof o === 'object' && o.status === 'in_flight'))
+      return reject('an independent check is in flight; wait for its notice');
+    if (bound.state.pending_finalization || bound.state.completion_stop_pending)
+      return reject('a manual final check or completion stop is queued; wait for its notice');
+    if (bound.state.next_check_manual === true)
+      return reject('the task is waiting on its manual final check window; wait for its notice');
+    // The catalog resolves only through the CURRENT pool∩session intersection;
+    // no guessed targets, no cached lists.
+    const sync = await syncSessionAgents(ctx);
+    if (!sync.ok) return reject(`model catalog is stale: pool re-sync failed (${sync.reason})`);
+    // The intersection is the synced session-agent set (pool ∩ session
+    // catalog), NOT ctx.models.list() (which is the full session catalog and
+    // would allow out-of-pool targets). Same set for listing and selection.
+    const exact = [...new Set(sessionAgents.values())];
+    if (!args.root_model || !args.root_model.trim())
+      return { ok: true, listing_only: true, available: exact, note: 'pass root_model with one of these exact provider/id values plus phase and text' };
+    const target = args.root_model.trim();
+    if (!exact.includes(target))
+      return reject(`root_model ${target} is not in the current pool ∩ OMP catalog`, { available: exact });
+    if (!args.phase) return reject('phase is required (execution | integration | diagnosis)');
+    if (typeof args.text !== 'string' || !args.text.trim())
+      return reject('text (a non-empty selection reason) is required');
+    if (rootModelInFlight.has(sessionId)) return reject('another root-model selection is already in progress for this session');
+    // API availability first: a missing surface must not consume the latch.
+    if (typeof pi.setModel !== 'function')
+      return reject('pi.setModel is not available in this extension API surface');
+    // Capture the model identity BEFORE any switch attempt: reading
+    // entry.session.model after setModel would record `to` as `from`.
+    const originalFrom = entry.session?.model ? `${entry.session.model.provider}/${entry.session.model.id}` : null;
+    // Duplicate = the ACTUAL current model already IS the target AND this
+    // task's declared phase already IS the requested phase. A new task in the
+    // same session starts with a different (or absent) phase entry, and a
+    // native /model change resets the actual model — both correctly allow a
+    // fresh selection without any extra state machine.
+    if (originalFrom === target && rootPhaseByTask.get(boundDir) === args.phase)
+      return reject('this exact model and phase is already active for this task');
+    // The SDK needs the fully resolved Model. Catalog list entries may be
+    // partial ModelInfo shapes; resolve the exact provider/id and require the
+    // resolved identity to match — never guess from a list element or @task.
+    let model;
+    try { model = ctx.models?.resolve?.(target) ?? null; } catch { model = null; }
+    if (!model || `${model.provider}/${model.id}` !== target)
+      return reject('target model could not be resolved to its exact provider/id in the current session');
+    rootModelInFlight.add(sessionId);
+    let switched = false;
+    const nowModel = () => entry.session?.model ? `${entry.session.model.provider}/${entry.session.model.id}` : null;
+    try {
+      switched = await pi.setModel(model);
+    } catch {
+      // A classified, bounded record only: no raw SDK error strings (they can
+      // carry provider payloads). The actually observable current model is
+      // recorded — never a claimed rollback or success.
+      return reject('sdk_error', { original_from: originalFrom, actual_model_after: nowModel() });
+    } finally {
+      rootModelInFlight.delete(sessionId);
+    }
+    if (switched !== true)
+      return reject('pi.setModel returned without confirming the switch', { original_from: originalFrom, actual_model_after: nowModel() });
+    rootPhaseByTask.set(boundDir, args.phase);
+    const result = record({ ok: true, switched: true, canonical_task_dir: boundDir, original_from: originalFrom, actual_model_after: nowModel() });
+    return { ok: true, switched: true, from: result.from, to: target, phase: args.phase };
+  }
+
   pi.registerTool({ name: 'orbit', label: 'Orbit', description: toolDescription, parameters: pi.zod.object(toolArgs(pi.zod)),
     async execute(_id, args, _signal, _update, ctx) {
       const entry = await connect(ctx);
-      const text = await host.execute(args, ctx);
+      let text;
+      if (args?.action === 'root-model') {
+        // The shared host already verified task ownership; this branch owns
+        // the pool∩catalog check, the public pi.setModel call, and the small
+        // factual record. A null from host.execute means "native dispatch".
+        await host.execute(args, ctx);
+        text = JSON.stringify(await handleRootModel(args, entry, ctx, typeof _id === 'string' ? _id : null));
+      } else {
+        text = await host.execute(args, ctx);
+      }
       try {
         const result = JSON.parse(text);
         if (typeof result.task_directory === 'string') {

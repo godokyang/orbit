@@ -478,6 +478,70 @@ try {
     assert.equal(bound.dispatches[0].hint_message_id, 'gate-hint-msg',
       'the bound dispatch carries the hint message id');
   }
+  // 1f. Root-stage model selection (action=root-model). Self-contained local
+  // fixture: the block saves and restores pool/list/resolve/model/setModel;
+  // provides BOTH glm/x and kimi-code/k3-256k locally; two DIFFERENT exact
+  // targets (glm/x -> k3 -> glm/x) with real from/to, pool-out and repeat
+  // rejects, and the fixture root.model actually switches. Ownership of the
+  // trusted log destination (host.ownsTask before boundDir assignment) is a
+  // static handler boundary, asserted here only through the success path.
+  {
+    const k3 = { provider: 'kimi-code', id: 'k3-256k' };
+    const originalSetModel = pi.setModel;
+    const originalList = ctx.models.list;
+    const originalResolve = ctx.models.resolve;
+    const originalRootModel = root.model;
+    const originalPool = await fs.readFile(poolStub, 'utf8');
+    const setModelCalls = [];
+    try {
+      await fs.writeFile(poolStub, '#!/bin/sh\nprintf \'{"models":["glm/x","kimi-code/k3-256k"]}\n\'\n');
+      ctx.models.list = () => [model, k3];
+      ctx.models.resolve = spec =>
+        spec === 'kimi-code/k3-256k' ? k3 : spec === 'glm/x' ? model : undefined;
+      pi.setModel = async m => { setModelCalls.push(`${m.provider}/${m.id}`); root.model = m; return true; };
+      const collab = async () => {
+        const text = await fs.readFile(path.join(started.task_directory, 'collaboration.jsonl'), 'utf8')
+          .catch(() => '');
+        return text.split('\n').filter(Boolean).map(l => JSON.parse(l));
+      };
+      const entries = async kind => (await collab()).filter(e => e.kind === kind);
+      const listing = await tool({ action: 'root-model', task: started.task_directory });
+      assert.ok(listing.ok && Array.isArray(listing.available) && listing.available.includes('glm/x')
+        && listing.available.includes('kimi-code/k3-256k'),
+        'without root_model the action lists both exact pool∩catalog IDs');
+      const sw1 = await tool({ action: 'root-model', task: started.task_directory,
+        root_model: 'kimi-code/k3-256k', phase: 'diagnosis', text: 'hard provider error diagnosis' });
+      assert.ok(sw1.ok === true, `first switch must succeed, got: ${JSON.stringify(sw1)}`);
+      assert.equal(sw1.from, 'glm/x', 'from is the PRE-switch identity');
+      assert.equal(sw1.to, 'kimi-code/k3-256k');
+      assert.equal(root.model, k3, 'the fixture root model actually switched');
+      const sw2 = await tool({ action: 'root-model', task: started.task_directory,
+        root_model: 'glm/x', phase: 'integration', text: 'acceptance integration of the fix' });
+      assert.ok(sw2.ok === true, `second switch must succeed, got: ${JSON.stringify(sw2)}`);
+      assert.equal(sw2.from, 'kimi-code/k3-256k', 'the second switch sees the new current identity');
+      assert.equal(sw2.to, 'glm/x');
+      const repeat = await tool({ action: 'root-model', task: started.task_directory,
+        root_model: 'glm/x', phase: 'integration', text: 'same again' });
+      assert.equal(repeat.ok, false, 'the same model and phase is already active for this task');
+      const outOfPool = await tool({ action: 'root-model', task: started.task_directory,
+        root_model: 'not-a-pool/model', phase: 'integration', text: 'x' });
+      assert.equal(outOfPool.ok, false, 'an out-of-pool target is rejected');
+      assert.equal(setModelCalls.length, 2, 'pi.setModel called exactly once per confirmed switch');
+      const records = await entries('root_model_selection');
+      const successes = records.filter(r => r.ok === true);
+      assert.equal(successes.length, 2, 'two success records');
+      assert.ok(successes[0].from === 'glm/x' && successes[0].to === 'kimi-code/k3-256k');
+      assert.ok(successes[1].from === 'kimi-code/k3-256k' && successes[1].to === 'glm/x');
+      assert.ok(!records.some(r => r.task_dir && !r.task_dir.includes(started.task_directory)),
+        'no record was written to a foreign task dir');
+    } finally {
+      pi.setModel = originalSetModel;
+      ctx.models.list = originalList;
+      if (originalResolve) ctx.models.resolve = originalResolve; else delete ctx.models.resolve;
+      root.model = originalRootModel;
+      await fs.writeFile(poolStub, originalPool);
+    }
+  }
   const missingUnit = await emit('tool_call', { toolName: 'task', toolCallId: 'no-unit',
     fixture_no_unit: true, input: { agent: agentNameFor('glm/x'), task: 'No handoff' } }, ctx);
   assert.equal(missingUnit.block, true, 'controlled execution cannot bypass the durable handoff');
@@ -768,6 +832,72 @@ try {
     assert.equal(Object.keys(JSON.parse(await fs.readFile(path.join(corruptDir, 'resource-calls.json'), 'utf8')).calls).length, 1,
       'sidecar corruption remains visible while independently preserving the final receipt');
     await fs.rm(corruptDir, { recursive: true, force: true });
+  }
+  // 2b-2. Root model switch boundary: the OLD model's in-flight call keeps
+  // its original identity; only the NEXT new-model call carries the declared
+  // phase. Rejection: in-flight check or next_check_manual blocks the switch.
+  {
+    const k3 = { provider: 'kimi-code', id: 'k3-256k' };
+    const originalSetModel = pi.setModel;
+    const originalList = ctx.models.list;
+    const originalResolve = ctx.models.resolve;
+    const originalRootModel = root.model;
+    const originalPool = await fs.readFile(poolStub, 'utf8');
+    const savedState = await taskState();
+    const setModelCalls = [];
+    try {
+      await fs.writeFile(poolStub, '#!/bin/sh\nprintf \'{"models":["glm/x","kimi-code/k3-256k"]}\n\'\n');
+      ctx.models.list = () => [model, k3];
+      ctx.models.resolve = spec =>
+        spec === 'kimi-code/k3-256k' ? k3 : spec === 'glm/x' ? model : undefined;
+      pi.setModel = async m => { setModelCalls.push(`${m.provider}/${m.id}`); root.model = m; return true; };
+      // Start an old-model call.
+      await root.emitNative({ type: 'message_start', message: { role: 'assistant', provider: 'glm', model: 'x' } });
+      // Switch mid-call via the Root tool.
+      const sw = await tool({ action: 'root-model', task: started.task_directory,
+        root_model: 'kimi-code/k3-256k', phase: 'diagnosis', text: 'hard error diagnosis' });
+      assert.ok(sw.ok === true, `switch must succeed, got: ${JSON.stringify(sw)}`);
+      // The old model's message_end still arrives with its original identity.
+      await root.emitNative({ type: 'message_end', message: { role: 'assistant', provider: 'glm', model: 'x',
+        stopReason: 'stop', usage: { input: 5, output: 1, cacheRead: 0, cacheWrite: 0 } } });
+      // The NEXT call uses the new model and carries the declared phase.
+      await root.emitNative({ type: 'message_start', message: { role: 'assistant', provider: 'kimi-code', model: 'k3-256k' } });
+      await root.emitNative({ type: 'message_end', message: { role: 'assistant', provider: 'kimi-code', model: 'k3-256k',
+        stopReason: 'stop', usage: { input: 7, output: 2, cacheRead: 0, cacheWrite: 0 } } });
+      await flushNativeCalls(started.task_directory);
+      const calls = Object.values(JSON.parse(await fs.readFile(path.join(started.task_directory, 'resource-calls.json'), 'utf8')).calls);
+      const oldCall = calls.find(c => c.usage && c.usage.input === 5);
+      const newCall = calls.find(c => c.usage && c.usage.input === 7);
+      assert.ok(oldCall, 'the old-model call was recorded');
+      assert.ok(newCall, 'the new-model call was recorded');
+      assert.equal(oldCall.actual_identity && oldCall.actual_identity.model, 'x',
+        'the old call keeps its original identity');
+      assert.equal(oldCall.phase, 'integration', 'the old call keeps its original phase attribution');
+      assert.equal(newCall.actual_identity && newCall.actual_identity.model, 'k3-256k',
+        'the new call carries the new identity');
+      assert.equal(newCall.phase, 'diagnosis', 'the new call carries the declared phase');
+      // Rejection: in-flight check window blocks the switch.
+      setModelCalls.length = 0;
+      await fs.writeFile(path.join(started.task_directory, 'state.json'),
+        JSON.stringify({ ...savedState, check_observations: { obs1: { status: 'in_flight', check: 99 } } }));
+      const inFlightReject = await tool({ action: 'root-model', task: started.task_directory,
+        root_model: 'glm/x', phase: 'integration', text: 'blocked by in-flight check' });
+      assert.equal(inFlightReject.ok, false, 'an in-flight check blocks the switch');
+      // Rejection: next_check_manual blocks the switch.
+      await fs.writeFile(path.join(started.task_directory, 'state.json'),
+        JSON.stringify({ ...savedState, next_check_manual: true }));
+      const manualReject = await tool({ action: 'root-model', task: started.task_directory,
+        root_model: 'glm/x', phase: 'integration', text: 'blocked by manual window' });
+      assert.equal(manualReject.ok, false, 'a manual final check window blocks the switch');
+      assert.equal(setModelCalls.length, 0, 'no setModel call was made during rejections');
+    } finally {
+      pi.setModel = originalSetModel;
+      ctx.models.list = originalList;
+      if (originalResolve) ctx.models.resolve = originalResolve; else delete ctx.models.resolve;
+      root.model = originalRootModel;
+      await fs.writeFile(poolStub, originalPool);
+      await fs.writeFile(path.join(started.task_directory, 'state.json'), JSON.stringify(savedState));
+    }
   }
   const members = await membersFile();
   assert.equal(members.length, 3); // drifted in-pool member, this pool member, and the 1e hint-bound member

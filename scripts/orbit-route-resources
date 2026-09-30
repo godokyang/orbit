@@ -78,7 +78,9 @@ begin
       fail("a Root invocation must not claim member work-unit identity")
     end
     ledger = Orbit::ResourceCallLedger.new(task_path: task.path, task_id: state["id"])
-    stored = ledger.record_check(receipt, role: role, phase: "#{role}_execution")
+    # The recorder's receipt already carries the final phase: the Root-declared
+    # phase for a root-model switch's next call, or role_execution otherwise.
+    stored = ledger.record_check(receipt, role: role, phase: receipt["phase"] || "#{role}_execution")
     emit("ok" => true, "stored" => stored)
   when "import"
     result = store.import(request.fetch("facts") { fail("facts is required for import") })

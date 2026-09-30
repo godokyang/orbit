@@ -937,7 +937,10 @@ module Orbit
           next
         end
         begin
-          resource_call_ledger.record_check(receipt, phase: "#{meta['role']}_execution", role: meta["role"])
+          # The recorder's ledger_receipt already carries the final phase: the
+          # Root-declared phase for a root-model switch's next call, or
+          # role_execution otherwise. Trust it; fall back only if absent.
+          resource_call_ledger.record_check(receipt, phase: receipt["phase"] || "#{meta['role']}_execution", role: meta["role"])
         rescue ResourceCallLedger::Error => error
           gaps << "#{id}: #{error.message}"
         end
