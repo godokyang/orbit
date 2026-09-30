@@ -14,9 +14,9 @@ module Orbit
   # unit or review only. `similar_unit` is a traceable forecast whose
   # reference call ids are verified against THIS task's ResourceCallLedger
   # (completed, same role, exact same four-key identity and reported usage;
-  # member scope also requires attribution to an accepted WorkUnitStore
-  # record). Its usage tuple must be the per-category mean of those calls, so
-  # a reference cannot launder an invented token mix; it is never a
+  # member scope also requires attribution to the actual accepted member and
+  # model of a WorkUnitStore record). Its usage tuple must be the per-category
+  # mean of those calls, so a reference cannot launder an invented token mix; it is never a
   # settlement; `declared_workload` is Root's stated assumption, never
   # disguised as measured usage or used for automatic cost ordering. Tokens
   # are never invented here; both kinds
@@ -182,8 +182,10 @@ module Orbit
     # in THIS task's ledger: completed, recorded under the role this scope
     # dispatches, the exact same four-key identity as the candidate, complete
     # reported usage with the same categories, and (for member scope)
-    # attributed to an accepted work unit. The stated tuple must be the mean
-    # of those samples. No cross-task scans or invented token mixes.
+    # attributed to the actual accepted member/model of a work unit. A later
+    # accepted replacement never gives earlier rejected calls that status.
+    # The stated tuple must be the mean of those samples. No cross-task scans
+    # or invented token mixes.
     def references_verified?(prediction, route, scope)
       ids = prediction["reference_call_ids"]
       return true unless prediction["kind"] == "similar_unit"
@@ -191,14 +193,18 @@ module Orbit
       calls = ResourceCallLedger.new(task_path: @record.path, task_id: File.basename(@record.path),
                                      clock: @clock).calls
       accepted = scope == "member" ? WorkUnitStore.new(@record).list.select { |unit| unit["status"] == "accepted" }
-                                                 .map { |unit| unit["id"] } : nil
+                                                 .to_h { |unit| [unit["id"], unit] } : nil
       samples = ids.filter_map do |id|
         call = calls.find { |entry| entry["call_id"] == id }
         identity = call.is_a?(Hash) ? call["actual_identity"] : nil
         next unless call && call["status"] == "completed" && call["role"] == SCOPE_ROLES.fetch(scope)
         next unless identity.is_a?(Hash) &&
                     %w[provider model reasoning billing_route].all? { |key| identity[key] == route[key] }
-        next if accepted && !accepted.include?(call["work_unit_id"])
+        if accepted
+          unit = accepted[call["work_unit_id"]]
+          next unless unit && !call["member_id"].to_s.empty? && unit["member_id"] == call["member_id"] &&
+                      unit["model"] == "#{route['provider']}/#{route['model']}"
+        end
 
         usage = call["usage"]
         next unless call["usage_status"] == "reported" && usage.is_a?(Hash) &&

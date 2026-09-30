@@ -228,6 +228,25 @@ module RouteCostInputsTest
       assert(compared["cost_comparison"] == "heuristic" && compared["ordered_ids"].first == "zhipu/glm-5.2x",
              "verified historical usage and route facts can still guide a released cost comparison")
 
+      retry_unit = units.declare("objective" => "complete the retried part", "acceptance" => "tests pass",
+                                 "escalation" => "stop and report", "requirements" => ["instruction"],
+                                 "allowed_paths" => ["lib/"])
+      units.bind(retry_unit.fetch("id"), member_id: "orbit-rejected", tool_call_id: "tc-rejected", model: "zhipu/glm-5.2")
+      ledger.record(call_id: "rejected-result", role: "member", phase: "exec", status: "completed",
+                    provider: "zhipu", actual_model: "glm-5.2", reasoning: "unknown",
+                    billing_route: "direct_api", usage: { "input" => 10, "output" => 5 },
+                    usage_source: "provider_response", member_id: "orbit-rejected", work_unit_id: retry_unit.fetch("id"))
+      units.finish(retry_unit.fetch("id"), status: "rejected", result: "missing behavior", verification: "acceptance failed")
+      units.bind(retry_unit.fetch("id"), member_id: "orbit-replacement", tool_call_id: "tc-replacement", model: "zhipu/glm-5.2x")
+      units.finish(retry_unit.fetch("id"), status: "accepted", result: "fixed", verification: "acceptance passed")
+      inputs.record_inputs(scope: "member", work_unit_id: unit.fetch("id"), candidates: {
+        "zhipu/glm-5.2" => candidate("glm-5.2", prediction("similar_unit", 5, ["rejected-result"], input: 10))
+      })
+      assert(inputs.build(**args).empty?,
+             "a later accepted replacement cannot turn a rejected member's calls into accepted historical samples")
+      assert(ledger.calls.any? { |call| call["call_id"] == "rejected-result" && call.dig("usage", "input") == 10 },
+             "excluding a rejected result from predictions must not erase its actual consumption")
+
       expired = fact_document("glm-5.2", 2.2).merge(
         "verification" => { "retrieved_at" => "2026-09-01T00:00:00Z", "valid_until" => "2026-09-02T00:00:00Z" })
       Dir.mktmpdir do |other|
