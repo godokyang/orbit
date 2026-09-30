@@ -202,7 +202,7 @@ sources 为 1–5 个无凭据绝对 http(s) URL；value 有限数字，unit／b
 
 ### 时间和用量
 
-工作区新增 `orbit route-resources import --project DIR --file FILE` 导入带真实来源、适用身份／账户／计划、有效期、币种和单位的路由事实；`list` 只读查阅。`report TASK_DIRECTORY` 优先使用逐调用实际 SDK credential/account 观察；可用 `--file FILE` 补已核实的账户／计划上下文，与实际观察矛盾时保持未知，不从价格反推账户。该入口不请求模型或建立预算门，不能用目录报价或 SDK 自报金额替代可信来源。安装 0.7.20 已用隔离 CLI 实测：显式未知生效日的事实可 `import`／`list`（`effective.unknown=true`），缺标记的缺生效日导入仍被拒绝，两份真实台账副本 `report` 全部 unknown、`cash []`；**未知生效日永不覆盖调用、永不参与定价或自动排序**，`cash` 为空只表示未知。
+工作区新增 `orbit route-resources import --project DIR --file FILE` 导入带真实来源、适用身份／账户／计划、有效期、币种和单位的路由事实；`list` 只读查阅。`report TASK_DIRECTORY` 优先使用逐调用实际 SDK credential/account 观察；可用 `--file FILE` 补已核实的账户／计划上下文，与实际观察矛盾时保持未知，不从价格反推账户。该入口不请求模型或建立预算门，不能用目录报价或 SDK 自报金额替代可信来源。安装的 0.7.20 已用隔离 CLI 实测（当前安装 0.7.21 保留同一语义）：显式未知生效日的事实可 `import`／`list`（`effective.unknown=true`），缺标记的缺生效日导入仍被拒绝，两份真实台账副本 `report` 全部 unknown、`cash []`；**未知生效日永不覆盖调用、永不参与定价或自动排序**，`cash` 为空只表示未知。
 
 `orbit route-resources forecast TASK_DIRECTORY --file FILE` 保存当前单元或检查范围的预测构成，私有记录绑定当前要求和产物根。JSON 顶层是 `scope`（member／review）、成员范围的 `work_unit_id` 和按 provider/model 索引的 `candidates`；每项包含真实四键 `route`、已核实 `account_scope`／`plan` 及 `prediction`。预测种类 `declared_workload` 明确是 Root 的有界工作量假设：可展示条件性金额，缺少可归属用量样本时不参与自动费用排序。`similar_unit` 还需本任务已完成、同身份／角色且用量完整的 `reference_call_ids`，成员引用须来自已接受单元的实际成员和型号，不能因替换成员后来成功而将此前拒绝结果算成已接受样本；填写的分类和数字必须等于这些回执逐类均值，否则该候选成本未知。原生回执未报告 reasoning 时账本保持缺失，引用核验仅在该比较处按类型化 `unknown` 对齐；已报告的具体档位仍精确匹配，不回写账本。保留 `usage` 原分类、`basis` 和 `applies_to`；它不是实际消耗或预算保证，不能沿用帮助示例的数字。修订或重绑定后失效，缺可信价格／用量时成本未知，Root 继续按质量和现有事实派发。
 

@@ -138,7 +138,7 @@ Controller 在六份已完成产物的副本上，额外重放同一组八个从
 
 本追加只记录事实并区分三类证据（**源码/静态**、**mock/脚本**、**live 实机**），不重开已结束阶段，也不改写任何原件或把失败结论改为通过。
 
-### 0.7.21 工作区源码（dirty；唯一组合 full run2 exit 0；未提交／未安装）
+### 0.7.21 已提交并安装（`fffabf80`／digest `ae9ce431…`／2026-09-30T11:21:07Z；唯一组合 full run2 exit 0；实机验收进行中、尚无结论）
 
 | 项目 | 事实 | 证据类别 |
 | --- | --- | --- |
@@ -148,7 +148,7 @@ Controller 在六份已完成产物的副本上，额外重放同一组八个从
 | 需求文本容量 300→1000 | `contracts/check-result.schema.json`、`runner check-result.ts`、`lib/orbit/check_runner.rb`、`lib/orbit/requirement_coverage.rb` 同界；真实被拒原件在本地校验可接纳；**缺证、重复、>1000 字符仍被拒**。`complete:false` 本身是合法的可解析结果（不是 JSON 拒收）；当前 delivery 未核验时不授 ready。不能把任何 false 或伪造的 complete 都说成“被 JSON 拒绝” | 源码 + 静态审 |
 | 验证回执压缩选择（S） | `lib/orbit/check_runner.rb` `c39968f3…`、`tests/check_runner_context_test.rb` `23254c9a…`；相关 suite exit 0（退化 caps 下交付给检查者的 JSON 保留当前执行回执、失败条与省略计数）；反向副本验证旧 `recent_tail` 会失败。Q 二次审 PASS（其 PASS 路径已发出） | 源码 + 静态审 |
 
-以上均为**源码或脚本证据**，没有用它们替代实机验收。**0.7.21 唯一组合回归已完成**：run2 `npm test` **exit 0**（日志 `/private/tmp/orbit-regression-0.7.21/npm-test-run2.log`，末尾 `INSTALL_TEST_PASS shell_configuration`；126 只是 PASS 标记行数、不是测试数量）；同次 `npm pack --dry-run` 83 files／422028 B、`check:version` 与 skill validator exit 0；**129 个源/测试/打包文件 run2 前后 SHA 相同**（`hash-compare.diff` 为空）。首次 full 的 `exit 1` 与中间 `judgment_usage_test` fixture 失败日志**全部保留**；修复**只改既有测试夹具到生产校准形状**（`tests/judgment_usage_test.rb` `78b744e2…`），**未放宽任何生产门**。该组合**尚未提交、尚未安装**（安装仍为 0.7.20）。
+以上均为**源码或脚本证据**，没有用它们替代实机验收。**0.7.21 唯一组合回归已完成**：run2 `npm test` **exit 0**（日志 `/private/tmp/orbit-regression-0.7.21/npm-test-run2.log`，末尾 `INSTALL_TEST_PASS shell_configuration`；126 只是 PASS 标记行数、不是测试数量）；同次 `npm pack --dry-run` 83 files／422028 B、`check:version` 与 skill validator exit 0；**129 个源/测试/打包文件 run2 前后 SHA 相同**（`hash-compare.diff` 为空）。首次 full 的 `exit 1` 与中间 `judgment_usage_test` fixture 失败日志**全部保留**；修复**只改既有测试夹具到生产校准形状**（`tests/judgment_usage_test.rb` `78b744e2…`），**未放宽任何生产门**。该组合已由 Root 本地提交 `fffabf801b430b61aa11d58f86f99960bdd9c8aa` 并经 `sh install.sh` 真实 exit 0 安装（`orbit version --json`：0.7.21、dirty=false、digest `ae9ce431…`、11:21:07Z；原始身份记录 `/private/tmp/orbit-takeover-fixture-1D6DEl/controller-records/installed-version-0.7.21.json`）。**本版实机验收进行中、尚无结论**：新安装的 0.7.21 Root 已从可用 shell 启动，普通阶段已结束，仅修改解析模块且未建任务；请求 02 已提交，任务 `8e411be9` 于 11:27:42Z 保存接管边界，六文件与普通阶段结束时一致（Controller 记录 `takeover-boundary-observation.json`）。
 
 ### 0.7.20 真实成员运行（任务 `1d977642-e478-4553-9959-7bc1a7381c9b`）——保留为负例
 
@@ -160,4 +160,4 @@ Controller 在六份已完成产物的副本上，额外重放同一组八个从
 
 ### 待办（下一步，不扩范围）
 
-0.7.21 组合回归与打包已完成；下一步本地提交、支持安装，再用已备好的临时项目跑自动接管／真实成员交付与确认停止，以及不带强制派发的 paired 对照。W1—W10 依据证据仍未完整闭合，本追加不主张完整 Goal。
+0.7.21 已提交（`fffabf80`）并经 `sh install.sh` exit 0 安装；下一步用已备好的临时项目完成自动接管／真实成员交付与确认停止的实机验收（接管边界已核对，完整交付仍在运行、尚无结论），以及不带强制派发的 paired 对照。W1—W10 依据证据仍未完整闭合，本追加不主张完整 Goal。
