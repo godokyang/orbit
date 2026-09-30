@@ -1599,13 +1599,19 @@ module Orbit
         return false
       end
       messages.each do |message|
-        unless message["internal"] || @state["sent_message_ids"].include?(message.fetch("id"))
-          # A new question is not an amendment. Only the explicit amend
-          # command changes the checked input; leave the native message in
-          # the Root session for it to assign to this task or handle separately.
-          @state["unassigned_user_message_id"] = message.fetch("id")
-          @record.event("user_message_unassigned", "message_id" => message.fetch("id"))
-        end
+        # Only a real user message moves the user boundary. Messages Orbit
+        # itself delivered (initial instruction, hints, steers) are precisely
+        # recorded in sent_message_ids or flagged internal by the host; moving
+        # the boundary past them would invalidate the very hint whose delivery
+        # caused the scan. Skipped messages are re-seen by later scans and
+        # skipped again, so no separate scan cursor is needed.
+        internal = message["internal"] || @state["sent_message_ids"].include?(message.fetch("id"))
+        next if internal
+        # A new question is not an amendment. Only the explicit amend
+        # command changes the checked input; leave the native message in
+        # the Root session for it to assign to this task or handle separately.
+        @state["unassigned_user_message_id"] = message.fetch("id")
+        @record.event("user_message_unassigned", "message_id" => message.fetch("id"))
         @state["last_user_message_id"] = message.fetch("id")
       end
       save unless messages.empty?

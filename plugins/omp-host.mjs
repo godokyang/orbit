@@ -6,7 +6,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createOrbitHost, toolArgs, toolDescription } from './host.mjs';
 import { captureStart, buildReceipt, appendReceipt, readReceipts } from './root-verifications.mjs';
-import { validateMemberTool } from './work-unit-scope.mjs';
+import { validateMemberTool, createEditProjection } from './work-unit-scope.mjs';
 import { observeNativeCalls, flushNativeCalls } from './native-call-recorder.mjs';
 
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -2541,7 +2541,11 @@ export function installOmpExtension(pi, sdk) {
         unit.model !== memberExpectedModels.get(agentId) || memberDriftReported.has(agentId))
       return { block: true, reason: 'Orbit work unit is finished, stale, drifted or belongs to another actual member; stop and let Root reconcile the result' };
     const result = await validateMemberTool(unit, { toolName: event.toolName, input: event.input,
-      cwd: ctx.cwd, rootAgentId: sdk.MAIN_AGENT_ID });
+      cwd: ctx.cwd, rootAgentId: sdk.MAIN_AGENT_ID,
+      // The projector comes from the host's own SDK with this session's actual
+      // model, so the scope gate sees exactly the targets the member's native
+      // edit tool would write (every dialect, incl. move/rename destinations).
+      editTargets: event.toolName === 'edit' ? createEditProjection(sdk, ctx.model) : undefined });
     if (result?.block) observeCollab({ kind: 'work_unit_tool_blocked', task_dir: binding.taskDir,
       session_id: sessionId, agent_id: agentId, work_unit_id: unit.id,
       tool_call_id: event.toolCallId, tool: event.toolName, reason: result.reason, at: Date.now() });

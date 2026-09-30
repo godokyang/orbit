@@ -4,13 +4,16 @@ import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
 import { spawn } from 'node:child_process';
-import { validateMemberTool } from '../plugins/work-unit-scope.mjs';
+import { validateMemberTool, createEditProjection } from '../plugins/work-unit-scope.mjs';
 
 const project = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "orbit-scope-'quote-")));
 const outside = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'orbit-scope-outside-')));
 const unit = { artifact_root: project, scope: { allowed_paths: ['src'],
   allowed_tools: ['read', 'write', 'edit', 'grep', 'glob', 'bash'], allowed_commands: [] } };
-const gate = (toolName, input) => validateMemberTool(unit, { toolName, input, rootAgentId: 'Main' });
+const gate = (toolName, input, extra = {}) => validateMemberTool(unit, { toolName, input, rootAgentId: 'Main', ...extra });
+// Contract-fixture projection: stands in for the host's real native
+// editInspect projector; the scope gate must check every listed target.
+const projected = (targets, cwd = project) => ({ editTargets: async () => targets, cwd });
 const execute = input => new Promise(resolve => {
   const child = spawn('/bin/sh', ['-c', input.command], { cwd: input.cwd, stdio: ['ignore', 'pipe', 'pipe'] });
   let stdout = '', stderr = '';
@@ -28,6 +31,39 @@ try {
     assert.equal((await gate('read', { path: value })).block, true, value);
   assert.equal((await gate('edit', { path: 'src/new.js', input: 'unprojected alternate format' })).block, true);
   assert.equal((await gate('edit', { path: 'src/new.js', edits: [{ rename: '../bad', diff: 'x' }] })).block, true);
+  const hashline = { i: 'Implementing formatGreeting body', input: '[src/new.js#AAAA]\nPUT 1.:\n+line\n' };
+  const passed = await gate('edit', hashline, projected(['src/new.js']));
+  assert.equal(passed.block, undefined);
+  assert.equal(passed.input.input, hashline.input, 'a projected payload passes through unchanged');
+  assert.equal((await gate('edit', hashline, projected(['src/new.js', 'src/second.js']))).block, undefined,
+    'every section target inside the allowed paths is accepted');
+  for (const targets of [['../escape.txt'], [path.join(outside, 'secret.txt')], ['src/escape/secret.txt'], ['.orbit/state.json']])
+    assert.equal((await gate('edit', hashline, projected(targets))).block, true, JSON.stringify(targets));
+  assert.equal((await gate('edit', hashline, projected(['src/a.js', '../b.js']))).block, true,
+    'a move/rename destination outside the allowed paths is refused');
+  assert.equal((await gate('edit', hashline, projected(['src/a.js', 'src/b.js']))).block, undefined,
+    'a move/rename destination inside the allowed paths is accepted');
+  assert.equal((await gate('edit', hashline, projected(undefined))).block, true,
+    'an unprojected payload stays refused');
+  assert.equal((await gate('edit', hashline, projected(['new.js'], path.join(project, 'src')))).block, undefined,
+    'projected relative paths resolve against the actual member execution cwd');
+  assert.equal((await gate('edit', hashline, projected(['new.js'], outside))).block, true,
+    'a member cwd outside the work-unit root is refused');
+  // The projector factory resolves the mode with the same provider-qualified
+  // model identity the native session reports (provider/id), so
+  // provider-scoped edit.modelVariants apply exactly as in the real tool.
+  const seen = { model: undefined, mode: undefined };
+  const fakeSdk = { settings: {}, EditTool: class {
+    constructor(session) { seen.model = session.getActiveModelString(); }
+    get mode() { return 'hashline'; }
+  } };
+  const projector = createEditProjection(fakeSdk, { provider: 'kimi-code', id: 'k3-256k' },
+    async () => (mode, argsJson) => { seen.mode = mode; return { paths: ['src/new.js'], entries: [], fileOps: [] }; });
+  assert.equal((await gate('edit', hashline, { editTargets: projector, cwd: project })).block, undefined);
+  assert.equal(seen.model, 'kimi-code/k3-256k', 'mode resolution receives the provider-qualified model identity');
+  assert.equal(seen.mode, 'hashline', 'the member session mode reaches the native projection');
+  assert.equal(createEditProjection({}, { provider: 'a', id: 'b' }), undefined,
+    'an SDK without the native edit tool stays fail-closed');
   assert.equal((await gate('glob', { path: 'src', pattern: '../*' })).block, true);
   assert.equal((await gate('grep', { path: 'src', pattern: 'secret' })).block, true, 'search cannot traverse the descendant escape symlink');
   assert.equal((await gate('fetch', { url: 'https://example.com' })).block, true);

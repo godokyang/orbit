@@ -64,6 +64,33 @@ class RuntimeHost
   attr_reader :member_stops
 end
 
+# Serves this task's own sent messages back exactly like the native host
+# serves Orbit custom messages (internal: true), so collect_amendments sees
+# the same readback a real Root session produces after a hint delivery.
+class RuntimeBoundaryHost < RuntimeHost
+  def initialize(root)
+    super
+    @thread_messages = [{ "id" => "original", "internal" => false, "text" => "original instruction" }]
+  end
+
+  def send_message(text)
+    sent = super
+    @thread_messages << { "id" => sent.fetch("id"), "internal" => true, "text" => text }
+    sent
+  end
+
+  def post_user_message(text)
+    message = { "id" => "user-#{@thread_messages.length + 1}", "internal" => false, "text" => text }
+    @thread_messages << message
+    message
+  end
+
+  def user_messages(after_id:)
+    index = @thread_messages.index { |message| message["id"] == after_id }
+    index ? @thread_messages.drop(index + 1) : []
+  end
+end
+
 class RuntimeAskHost < RuntimeHost
   attr_accessor :ask_events
 
@@ -274,7 +301,7 @@ def evidence_entry(model: "deepseek-v4.1-flash", provider: "opencode-go", reason
   end
 end
 
-def fixture(interval: 60)
+def fixture(interval: 60, host_class: RuntimeHost)
   Dir.mktmpdir("orbit-runtime-test-") do |root|
     File.write(File.join(root, "artifact.txt"), "first behavior")
     record = Orbit::TaskRecord.create(
@@ -282,7 +309,7 @@ def fixture(interval: 60)
       source: { "id" => "original", "kind" => "native_user_message" },
       connection: { "provider" => "omp" }, review: { "interval_seconds" => interval }, estimate: {}
     )
-    host, checker = RuntimeHost.new(root), RuntimeChecker.new
+    host, checker = host_class.new(root), RuntimeChecker.new
     yield root, record, host, checker, Orbit::TaskRuntime.new(record: record, connection: host, checker: checker)
   end
 end
@@ -569,6 +596,86 @@ fixture(interval: 300) do |root, record, host, checker, _runtime|
          runtime.send(:delegation_basis, member) == "root_without_hint" &&
          record.state.dig("delegation_hint", "followed") != true,
          "the previous dispatch cannot follow advice for a new attempt before that attempt actually binds")
+end
+
+# A delivered hint is served back by the native host as this task's own
+# internal message. Scanning that readback must not move the real user
+# boundary: the unchanged input/artifact reuses the same selection without
+# paying a second two-phase judgment, no duplicate hint is delivered, and
+# the actually bound member still follows the advice.
+fixture(interval: 300, host_class: RuntimeBoundaryHost) do |root, record, host, checker, _runtime|
+  host.working("progress")
+  unit = declared_unit(record)
+  selector = RuntimeMemberSelector.new
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1)
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor, member_selector: selector)
+  now = Time.now.to_f
+  runtime.tick(now: now + 6)
+  hint = record.state["delegation_hint"]
+  assert(hint && hint["message_id"] && record.state["sent_message_ids"].include?(hint["message_id"]),
+         "the delivered hint is this task's own recorded message")
+  boundary = record.state["last_user_message_id"]
+  runtime.tick(now: now + 7)
+  assert(record.state["last_user_message_id"] == boundary,
+         "the hint's own readback never moves the real user boundary")
+  assert(runtime.send(:resource_call_ledger).calls.length == 2,
+         "same actual input/artifact with only the internal hint readback pays no second two-phase judgment")
+  assert(host.messages.length == 1, "the unchanged selection delivers no duplicate hint")
+  assert(events(record).none? { |event| event["type"] == "user_message_unassigned" },
+         "the internal readback is never mistaken for a user amendment")
+  member = { "thread_id" => "orbit-boundary-member", "tool_call_id" => "boundary-call",
+             "model" => "opencode-go/deepseek-v4.1-flash" }
+  Orbit::WorkUnitStore.new(record).bind(unit["id"], member_id: member["thread_id"], tool_call_id: member["tool_call_id"],
+                                      model: member["model"], hint_signature: hint["signature"], hint_message_id: hint["message_id"])
+  assert(runtime.send(:delegation_basis, member) == "orbit_hint",
+         "a hint delivered by Orbit itself stays attributable to the actual dispatch")
+end
+
+# A real new user message still moves the boundary: the delivered hint stops
+# being attributable and the next assessment round may be paid again.
+fixture(interval: 300, host_class: RuntimeBoundaryHost) do |root, record, host, checker, _runtime|
+  host.working("progress")
+  unit = declared_unit(record)
+  selector = RuntimeMemberSelector.new
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1)
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor, member_selector: selector)
+  now = Time.now.to_f
+  runtime.tick(now: now + 6)
+  hint = record.state["delegation_hint"]
+  assert(hint && hint["user_boundary"] == record.state["last_user_message_id"],
+         "hint delivered against the pre-revision boundary")
+  posted = host.post_user_message("改:第二个行为改为问候全名")
+  runtime.tick(now: now + 7)
+  assert(record.state["last_user_message_id"] == posted["id"] &&
+         record.state["unassigned_user_message_id"] == posted["id"],
+         "the real user message moves the boundary and stays an unassigned amendment")
+  assert(runtime.send(:resource_call_ledger).calls.length == 4,
+         "a real user boundary move allows a fresh paid two-phase assessment")
+  member = { "thread_id" => "orbit-revised-member", "tool_call_id" => "revised-call",
+             "model" => "opencode-go/deepseek-v4.1-flash" }
+  Orbit::WorkUnitStore.new(record).bind(unit["id"], member_id: member["thread_id"], tool_call_id: member["tool_call_id"],
+                                      model: member["model"], hint_signature: hint["signature"], hint_message_id: hint["message_id"])
+  assert(runtime.send(:delegation_basis, member) == "root_without_hint",
+         "a hint from before a real user boundary move cannot attribute the dispatch")
+end
+
+# Repeated scans over only internal readbacks are idempotent: the boundary
+# stays put, nothing is reclassified as a user message and no further
+# judgment or hint is produced.
+fixture(interval: 300, host_class: RuntimeBoundaryHost) do |root, record, host, checker, _runtime|
+  host.working("progress")
+  declared_unit(record)
+  selector = RuntimeMemberSelector.new
+  advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1)
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor, member_selector: selector)
+  now = Time.now.to_f
+  runtime.tick(now: now + 6)
+  boundary = record.state["last_user_message_id"]
+  3.times { |round| runtime.tick(now: now + 7 + round) }
+  assert(record.state["last_user_message_id"] == boundary && host.messages.length == 1 &&
+         runtime.send(:resource_call_ledger).calls.length == 2 &&
+         events(record).none? { |event| event["type"] == "user_message_unassigned" },
+         "repeated internal readback scans never loop into new boundaries, judgments or hints")
 end
 
 # Unreviewed production selection never pays for member fit or recommends;

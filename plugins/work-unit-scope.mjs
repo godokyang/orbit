@@ -27,16 +27,68 @@ async function canonical(target) {
   }
 }
 
-async function scopedPath(value, root, allowed) {
+async function scopedPath(value, root, allowed, base = root) {
   if (typeof value !== 'string' || !value || value.includes('\0') || value.startsWith('~') ||
       /^[A-Za-z][A-Za-z0-9+.-]*:/.test(value) || value.split(/[\\/]/).includes('..'))
     throw new Error('path is not a bounded workspace path');
-  const lexical = path.resolve(root, value);
+  const lexical = path.resolve(base, value);
   const real = await canonical(lexical);
   if (!within(root, lexical) || !within(root, real) || protectedPath(lexical) || protectedPath(real) ||
-      !allowed.some(base => within(base, lexical) && within(base, real)))
+      !allowed.some(entry => within(entry, lexical) && within(entry, real)))
     throw new Error('path is outside the allowed work-unit paths');
   return real;
+}
+
+// Loads the public pi-natives editInspect the native edit tool projects with,
+// anchored at the release's own bundled SDK dependency tree
+// (runners/omp-reviewer, pinned @oh-my-pi/pi-coding-agent 18.3.4 with the
+// matching pi-natives 18.3.4). The release layout ships no node_modules next
+// to plugins/, so bare specifier resolution would either fail or silently
+// pick a different copy; this anchor always names the exact versioned tree
+// the release was built against. Unavailable → null, and callers fail closed.
+let editInspectLoader;
+function loadEditInspect() {
+  return editInspectLoader ||= (async () => {
+    try {
+      const anchored = new URL('../runners/omp-reviewer/node_modules/@oh-my-pi/pi-natives/native/index.js', import.meta.url);
+      const mod = await import(anchored);
+      return typeof mod.editInspect === 'function' ? mod.editInspect : null;
+    } catch { return null; }
+  })();
+}
+
+// Builds the edit-target projector for one member session from the host's own
+// SDK. The mode resolves exactly as that session's native EditTool resolves
+// it: same live settings, and the same provider-qualified active model string
+// (`${provider}/${id}`, the SDK's formatModelString semantics) this session
+// reports for the tool call. The projection is the native editInspect that
+// tool itself uses. The result covers every dialect the SDK supports
+// (replace, patch, apply_patch, hashline, sloppy) and lists every written
+// path: section targets plus move/rename destinations. An unparseable or
+// target-less payload projects nothing and is refused.
+export function createEditProjection(sdk, model, loadInspect = loadEditInspect) {
+  if (typeof sdk?.EditTool !== 'function') return undefined;
+  let mode;
+  try {
+    mode = new sdk.EditTool({
+      settings: sdk.settings,
+      getActiveModelString: () => (model ? `${model.provider}/${model.id}` : undefined),
+    }).mode;
+  } catch { return undefined; }
+  return async input => {
+    const inspect = await loadInspect();
+    if (typeof inspect !== 'function') return undefined;
+    let inspection;
+    try { inspection = inspect(mode, JSON.stringify(input ?? {})); } catch { return undefined; }
+    const base = inspection?.entries?.length ? inspection.entries.map(entry => entry.path) : (inspection?.paths ?? []);
+    const targets = [...base];
+    for (const op of inspection?.fileOps ?? []) {
+      if (typeof op.path === 'string') targets.push(op.path);
+      if (op.kind === 'move' && typeof op.to === 'string') targets.push(op.to);
+    }
+    const unique = [...new Set(targets)];
+    return unique.length ? unique : undefined;
+  };
 }
 
 async function safeSearchBase(base) {
@@ -92,7 +144,7 @@ function availableSandbox() {
   return (sandboxReady = probe.status === 0);
 }
 
-export async function validateMemberTool(unit, { toolName, input, rootAgentId }) {
+export async function validateMemberTool(unit, { toolName, input, rootAgentId, editTargets, cwd }) {
   try {
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('invalid native tool input');
     // A currently bound member can report to the owning Root. Peer wakeups and hub
@@ -138,9 +190,23 @@ export async function validateMemberTool(unit, { toolName, input, rootAgentId })
     }
     const result = { ...input };
     if (toolName === 'edit') {
-      // The verified SDK replace/patch form exposes every target. Other native
-      // edit syntaxes are refused until they have a complete target projection;
-      // a member can use scoped write or ask Root, never a partial path scan.
+      if (editTargets) {
+        // Complete projection from the host's own native edit machinery (same
+        // mode, same settings): every written path, section targets plus
+        // move/rename destinations. Unknown or target-less forms stay refused;
+        // a member can use scoped write or ask Root, never a partial path scan.
+        const targets = await editTargets(input);
+        if (!targets) throw new Error('this edit form exposes no complete target paths; use a scoped write or report to Root');
+        // Projected relative paths resolve against the member session's actual
+        // execution cwd, exactly where the native edit tool will resolve them;
+        // the payload itself is passed through unchanged.
+        const execBase = await canonical(cwd || root);
+        if (!within(root, execBase)) throw new Error('member execution cwd is outside the work-unit artifact root');
+        for (const target of targets) await scopedPath(target, root, allowed, execBase);
+        return { input };
+      }
+      // Fallback when the host SDK exposes no projection: only the verified
+      // replace/patch key form is accepted, every target scope-checked.
       if (typeof input.path !== 'string') throw new Error('this edit form exposes no complete target paths; use a scoped write or report to Root');
       if (Object.keys(input).some(key => !['path', 'old_string', 'new_string', 'replace_all', 'edits'].includes(key)))
         throw new Error('edit contains an unprojected input form');
