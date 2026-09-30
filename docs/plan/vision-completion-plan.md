@@ -58,7 +58,7 @@
 - 同质产品复测显示 0.7.12 自行完成／明确交接两轮 Root input 分别约为独立旗舰基线 3.05／2.96 倍，cacheRead 约为 3.49／3.63 倍；成员、检查者与 Jev 另有消耗，真实 OMP 现金／额度成本未知。这是当前 CSV 样本的负收益信号，不能把成员派出视为已证明节省；W9 尚需不同任务与完整比较。
 - 用户要求清理界面后，已结束的 B/C/D/E、自有 F/G、空闲未接任务的 H/J 及验收 K/M/N 均已关闭。重绑定准备轮 `w1Y:p1P` 的 Orbit 任务先前已 confirmed stop；随后 Herdr 允许向空闲 pane 输入，Controller 发送原生 `/exit`、待 OMP 返回 shell 后发送 `exit`，`herdr pane list` 确认该 pane 消失，界面只剩主 pane。当前执行环境仍拒绝 Herdr 的 `pane split`／`process-info`／`close`（`Operation not permitted`）；已准备新的独立 linked-worktree 夹具 `/private/tmp/orbit-rebind-live-pshm82xn/`，但尚不能启动新验收 pane，不能把夹具准备写成重绑定通过。
 
-OpenRouter 正式基准匿名请求实际 HTTP401；当前无 key，已异步请用户在本机私有 setup 配置，未获回复不假定可用。公开 models 460 项及公共页校准不是认证基准成功证据；不借用其他供应商凭据。真实目录覆盖、候选完整身份／冲突／未知测量日期资格及可信价格／计划来源仍需实际核验。
+OpenRouter 正式基准匿名请求实际 HTTP401；当前无 key，已异步请用户在本机私有 setup 配置，未获回复不假定可用。公开 models 460 项及公共页校准不是认证基准成功证据；不借用其他供应商凭据。真实目录覆盖、候选完整身份／冲突／未知测量日期资格及可信价格／计划来源仍需实际核验。OpenCode Go 官方资料允许套餐额度用尽后以 Zen 余额回退，单靠端点不能证明逐调用额度归属；当前受限执行环境的 ego-browser bootstrap 失败，无法只读核对私有账户设置，未改账户或价格事实。
 
 ## 下一动作
 
