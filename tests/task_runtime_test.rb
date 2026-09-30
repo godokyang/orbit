@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require "json"
 require "tmpdir"
 require "socket"
 require_relative "../lib/orbit/task_runtime"
@@ -2746,6 +2747,428 @@ fixture do |_root, record, _host, checker, runtime|
   assert(state["status"] == "paused" && action.include?("不能对已停止任务重检") &&
          action.include?("创建新任务"),
          "an ordinary paused task cannot ask for a check even without an adjudication")
+end
+
+# --- Member settlement contract (2026-09-30, 02a5eda7 regression) ---
+# These fixtures cover the ranked settlement sources: dispatch-verdict
+# completion with real native delivery, native turn error, business rejection,
+# and the bounded wrap-up notice. None of them test real-model acceptance.
+
+def settlement_member!(record, host, root, member_id:, output: nil, tool_call_id: nil, model: nil)
+  output_path = output ? File.join(root, "member-output-#{member_id}.md") : nil
+  File.write(output_path, "native task output\n") if output_path
+  states = host.instance_variable_get(:@orbit_test_member_states) ||
+           host.instance_variable_set(:@orbit_test_member_states, {})
+  results = host.instance_variable_get(:@orbit_test_member_results) ||
+            host.instance_variable_set(:@orbit_test_member_results, {})
+  states[member_id] = { "registry_status" => "idle", "streaming" => false, "active_tools" => 0,
+                        "session_attached" => true, "lifecycle" => {}, "last_turn_error" => nil }
+  results[member_id] = { "output_path" => output_path, "output_text" => output_path ? "native task output" : nil,
+                         "output_mtime" => output_path ? (Time.now.utc + 1).iso8601 : nil,
+                         "output_size" => output_path ? File.size(output_path) : nil }
+  host.define_singleton_method(:member_state) do |id|
+    (instance_variable_get(:@orbit_test_member_states) || {})[id]
+  end
+  host.define_singleton_method(:member_result) do |id|
+    (instance_variable_get(:@orbit_test_member_results) || {})[id] ||
+      { "output_path" => nil, "output_text" => nil, "output_mtime" => nil, "output_size" => nil }
+  end
+  record.register_member(member_id, requested_name: member_id.sub("orbit-", "req-"),
+                         tool_call_id: tool_call_id, model: model)
+  (record.state["members"] || []).find { |member| member["thread_id"] == member_id }
+end
+
+def bind_unit!(record, runtime, member_id:, call_id:, status:, result: "delivered")
+  units = Orbit::WorkUnitStore.new(record)
+  unit = units.declare("objective" => "implement behavior", "acceptance" => "fixture checks",
+                       "escalation" => "ask root", "requirements" => ["original"],
+                       "allowed_paths" => ["src/"], "allowed_tools" => ["bash"])
+  units.bind(unit["id"], member_id: member_id, tool_call_id: call_id,
+             model: "zenmux/deepseek/deepseek-v4.1-flash")
+  units.finish(unit["id"], status: status, result: result,
+               verification: "fixture verification evidence") if status
+  state = runtime.instance_variable_get(:@state)
+  member = Array(state["members"]).find { |entry| entry["thread_id"] == member_id }
+  member["work_unit_id"] = unit["id"]
+  member["tool_call_id"] = call_id
+  record.save(state)
+  unit
+end
+
+# 02a5eda7 member 2 path: the Root-accepted dispatch with a real fresh native
+# output settles the member completed without any SDK acceptedAt, and the
+# finalization notice that stalled in the real session actually goes out.
+fixture do |root, record, host, checker, runtime|
+  now = Time.now.to_f
+  settlement_member!(record, host, root, member_id: "orbit-m-acc", output: true)
+  record.submit("check")
+  runtime.tick(now: now) # reconcile brings the member in; the manual check starts this tick
+  bind_unit!(record, runtime, member_id: "orbit-m-acc", call_id: "call-acc", status: "accepted")
+  checker.result = answer("complete")
+  runtime.tick(now: now + 1) # settle from current facts, then finish the manual check
+  member = record.state["members"].first
+  assert(member["status"] == "completed" && member["result_delivery"] == "work_unit_acceptance" &&
+         member["accepted_at"].nil? && member.dig("settlement_basis", "source") == "work_unit_acceptance",
+         "a Root-accepted current dispatch with real native delivery settles completed without SDK acceptedAt")
+  assert(record.state["finalization_notices"].length == 1 &&
+         record.state.dig("completion_readiness", "status") == "ready",
+         "the settled member no longer blocks the finalization notice (02a5eda7 stall)")
+end
+
+# 02a5eda7 member 1 path: a real native turn error (the frozen 429) settles
+# failed directly from the structured SDK fact, not from Root prose or idle.
+fixture do |root, record, host, _checker, runtime|
+  now = Time.now.to_f
+  settlement_member!(record, host, root, member_id: "orbit-m-err", output: false)
+  runtime.tick(now: now)
+  bind_unit!(record, runtime, member_id: "orbit-m-err", call_id: "call-err", status: "rejected",
+             result: "no code delivered")
+  native_state = host.member_state("orbit-m-err")
+  native_state["last_turn_error"] = { "stop_reason" => "error", "at" => (Time.now.utc + 1).iso8601,
+                                      "error_status" => 429,
+                                      "error_message" => "429 Go usage limit exceeded" }
+  runtime.tick(now: now + 1)
+  member = record.state["members"].first
+  assert(member["status"] == "failed" && member["result_delivery"] == "native_turn_error" &&
+         member["error"].include?("native turn error") && member["error"].include?("429"),
+         "a current structured native turn error settles failed without waiting for Root to phrase it")
+end
+
+# Business rejection: a Root-rejected dispatch with real native output and no
+# current native error settles `rejected` — never mislabelled as a failure.
+fixture do |root, record, host, checker, runtime|
+  now = Time.now.to_f
+  settlement_member!(record, host, root, member_id: "orbit-m-rej", output: true)
+  runtime.tick(now: now)
+  bind_unit!(record, runtime, member_id: "orbit-m-rej", call_id: "call-rej", status: "rejected",
+             result: "wrong output shape")
+  runtime.tick(now: now + 1)
+  member = record.state["members"].first
+  assert(member["status"] == "rejected" && member["result_delivery"] == "work_unit_rejected" &&
+         member["error"].nil?,
+         "a business rejection with real native output settles rejected, not failed")
+  assert(runtime.send(:members_settled?), "a rejected member counts as settled")
+end
+
+# No provable delivery, no settlement: an accepted verdict without a fresh
+# native output keeps the member registered and the finalization queued.
+fixture do |root, record, host, checker, runtime|
+  now = Time.now.to_f
+  settlement_member!(record, host, root, member_id: "orbit-m-none", output: false)
+  record.submit("check")
+  runtime.tick(now: now)
+  bind_unit!(record, runtime, member_id: "orbit-m-none", call_id: "call-none", status: "accepted")
+  checker.result = answer("complete")
+  runtime.tick(now: now + 1)
+  runtime.tick(now: now + 2)
+  member = record.state["members"].first
+  assert(member["status"] == "registered",
+         "no real native delivery means no settlement, whatever the unit verdict says")
+  assert(record.state["pending_finalization"] && record.state["finalization_notices"].empty?,
+         "the unprovable member keeps the finalization queued (fail-closed)")
+end
+
+# A turn error older than the dispatch binding is stale evidence and never
+# settles the member.
+fixture do |root, record, host, _checker, runtime|
+  now = Time.now.to_f
+  settlement_member!(record, host, root, member_id: "orbit-m-old", output: false)
+  runtime.tick(now: now)
+  bind_unit!(record, runtime, member_id: "orbit-m-old", call_id: "call-old", status: "rejected")
+  native_state = host.member_state("orbit-m-old")
+  native_state["last_turn_error"] = { "stop_reason" => "error",
+                                      "at" => (Time.now.utc - 10).iso8601,
+                                      "error_status" => 500, "error_message" => "old crash" }
+  runtime.tick(now: now + 1)
+  assert(record.state["members"].first["status"] == "registered",
+         "a pre-dispatch turn error is stale and must not fail the member")
+end
+
+# Settlement is current: a real new turn invalidates a completed settlement,
+# and the same finished dispatch cannot reborn it after the member goes idle
+# again — only a new Root finish or native acceptance can.
+fixture do |root, record, host, _checker, runtime|
+  now = Time.now.to_f
+  settlement_member!(record, host, root, member_id: "orbit-m-live", output: true)
+  runtime.tick(now: now)
+  bind_unit!(record, runtime, member_id: "orbit-m-live", call_id: "call-live", status: "accepted")
+  runtime.tick(now: now + 1)
+  assert(record.state["members"].first["status"] == "completed", "precondition: settled completed")
+  native_state = host.member_state("orbit-m-live")
+  native_state["streaming"] = true
+  runtime.tick(now: now + 2)
+  member = record.state["members"].first
+  assert(member["status"] == "registered" && member["accepted_at"].nil? &&
+         Array(member["settlement_history"]).any? { |entry| entry["reasons"] == ["new_turn_observed"] },
+         "a real new turn invalidates the old settlement and clears the native acceptance")
+  native_state["streaming"] = false
+  runtime.tick(now: now + 3)
+  assert(record.state["members"].first["status"] == "registered",
+         "the same finished dispatch cannot settle the new turn (no old-verdict revival)")
+end
+
+# F3: past the finalization wait limit with an unprovable member, exactly one
+# explicit Root wrap-up notice goes out; the task is neither completed nor
+# degraded by the timer, and the notice never repeats.
+fixture do |_root, record, host, checker, runtime|
+  now = Time.now.to_f
+  record.register_member("orbit-m-stuck", requested_name: "req-stuck")
+  record.submit("check")
+  runtime.tick(now: now)
+  checker.result = answer("complete")
+  runtime.tick(now: now + 1)
+  assert(record.state["pending_finalization"] && record.state["members"].first["status"] == "registered",
+         "precondition: a registered member without any dispatch fact queues the finalization")
+  state = runtime.instance_variable_get(:@state)
+  state["pending_finalization"]["at"] = (Time.now.utc - 120).iso8601
+  record.save(state)
+  runtime.tick(now: now + 2)
+  wrapup = host.messages.find { |message| message.include?("成员结算无法证实") }
+  assert(wrapup && wrapup.include?("orbit-m-stuck") && wrapup.include?("不是任务完成"),
+         "one explicit wrap-up notice names the unprovable member and is not a completion")
+  runtime.tick(now: now + 3)
+  runtime.tick(now: now + 4)
+  assert(host.messages.count { |message| message.include?("成员结算无法证实") } == 1,
+         "the wrap-up notice is sent exactly once per pending version")
+  assert(record.state["status"] != "needs_user" && record.state["status"] != "stop_unconfirmed" &&
+         record.state["status"] != "complete" && !record.state["finalization_notices"].any?,
+         "the timer never completes, degrades or stops the task by itself")
+end
+
+# Root gap 1: after a failed settlement, a real later successful turn must
+# clear the stale native error (explicitly observed null), not re-fail the
+# member from the old 429 fact.
+fixture do |root, record, host, _checker, runtime|
+  now = Time.now.to_f
+  settlement_member!(record, host, root, member_id: "orbit-m-recover", output: false)
+  runtime.tick(now: now)
+  bind_unit!(record, runtime, member_id: "orbit-m-recover", call_id: "call-rec", status: "rejected",
+             result: "no code delivered")
+  host.member_state("orbit-m-recover")["last_turn_error"] =
+    { "stop_reason" => "error", "at" => (Time.now.utc + 1).iso8601,
+      "error_status" => 429, "error_message" => "429 Go usage limit exceeded" }
+  runtime.tick(now: now + 1)
+  assert(record.state["members"].first["status"] == "failed", "precondition: the 429 settles failed")
+  host.member_state("orbit-m-recover")["streaming"] = true
+  runtime.tick(now: now + 2)
+  assert(record.state["members"].first["status"] == "registered", "the retry turn invalidates the failure")
+  host.member_state("orbit-m-recover")["streaming"] = false
+  host.member_state("orbit-m-recover")["last_turn_error"] = nil
+  runtime.tick(now: now + 3)
+  member = record.state["members"].first
+  assert(member["last_turn_error"].nil? && member["status"] == "registered",
+         "an explicitly observed non-error turn clears the stale error and never re-fails the member")
+end
+
+# Root gap 2: missing or malformed time evidence never affirms a current
+# turn/dispatch — unknown stamps must fail closed, not settle.
+fixture do |root, record, host, _checker, runtime|
+  now = Time.now.to_f
+  settlement_member!(record, host, root, member_id: "orbit-m-badtime", output: false)
+  settlement_member!(record, host, root, member_id: "orbit-m-badmtime", output: true)
+  runtime.tick(now: now)
+  bind_unit!(record, runtime, member_id: "orbit-m-badtime", call_id: "call-badt", status: "rejected")
+  bind_unit!(record, runtime, member_id: "orbit-m-badmtime", call_id: "call-badm", status: "accepted")
+  host.member_state("orbit-m-badtime")["last_turn_error"] =
+    { "stop_reason" => "error", "at" => "not-a-time",
+      "error_status" => 429, "error_message" => "429 Go usage limit exceeded" }
+  host.instance_variable_get(:@orbit_test_member_results)["orbit-m-badmtime"]["output_mtime"] = "not-a-time"
+  runtime.tick(now: now + 1)
+  statuses = record.state["members"].map { |member| [member["thread_id"], member["status"]] }.to_h
+  assert(statuses == { "orbit-m-badtime" => "registered", "orbit-m-badmtime" => "registered" },
+         "unparseable turn time and unparseable delivery mtime both stay unsettled (fail-closed)")
+end
+
+# Root gap 3: an invalidated native acceptedAt must not be revived by the same
+# stored lifecycle value on later ticks, while a genuinely new acceptance is
+# still allowed. SDK acceptedAt is a millisecond epoch number.
+fixture do |root, record, host, _checker, runtime|
+  now = Time.now.to_f
+  settlement_member!(record, host, root, member_id: "orbit-m-native", output: false)
+  runtime.tick(now: now)
+  accepted_ms = (Time.now.to_f * 1000).round
+  host.member_state("orbit-m-native")["lifecycle"] = { "acceptedAt" => accepted_ms }
+  runtime.tick(now: now + 1)
+  member = record.state["members"].first
+  assert(member["status"] == "completed" && member["accepted_at"] == accepted_ms,
+         "precondition: the native acceptance settles completed")
+  host.member_state("orbit-m-native")["streaming"] = true
+  runtime.tick(now: now + 2)
+  member = record.state["members"].first
+  assert(member["status"] == "registered" && member["accepted_at"].nil? &&
+         Array(member["settlement_history"]).any? { |entry| entry["accepted_at"] == accepted_ms },
+         "the new turn invalidates the native settlement and records it as history")
+  host.member_state("orbit-m-native")["streaming"] = false
+  runtime.tick(now: now + 3)
+  runtime.tick(now: now + 4)
+  assert(record.state["members"].first["status"] == "registered",
+         "the same stored acceptedAt value cannot revive the invalidated settlement")
+  host.member_state("orbit-m-native")["lifecycle"] = { "acceptedAt" => accepted_ms + 60_000 }
+  runtime.tick(now: now + 5)
+  assert(record.state["members"].first["status"] == "completed",
+         "a genuinely new native acceptance settles again")
+end
+
+# Root gap 4: a unit declared against an older input version can never settle
+# the member, whatever its dispatch says.
+fixture do |root, record, host, _checker, runtime|
+  now = Time.now.to_f
+  settlement_member!(record, host, root, member_id: "orbit-m-stale", output: true)
+  runtime.tick(now: now)
+  bind_unit!(record, runtime, member_id: "orbit-m-stale", call_id: "call-stale", status: "accepted")
+  record.submit("amend", "text" => "A later correction", "source" => { "kind" => "explicit_text" })
+  runtime.tick(now: now + 1)
+  assert(record.state["members"].first["status"] == "registered",
+         "a stale-input unit (version moved after the finish) never auto-settles the member")
+end
+
+# History-gap ticket (35f925ba): the independent checker receives a bounded,
+# program-computed `check_history`. Its anchor is the EARLIEST VALID artifact
+# review of the CURRENT input on the real artifact ROOT, keeping its own
+# historical artifact digest — the pre-implementation check ran before the fix,
+# so matching the current digest would evict exactly the check the checker
+# needs. Failed and stale checks are never promoted, omissions stay counted,
+# and no old finding is imported as a clue.
+fixture do |root, record, host, checker, _runtime|
+  now = Time.now.to_f
+  state = record.state
+  artifact_root = state.dig("workspace", "artifact_root")
+  artifact_digest = Orbit::WorkspaceSnapshot.fingerprint(project_root: root)
+  record.write("amendments/1.txt", "Add the second behavior.\n")
+  state["amendments"] = [{ "path" => "amendments/1.txt", "source" => { "kind" => "explicit_text" },
+                           "at" => "2026-09-30T05:09:00Z" }]
+  record.save(state)
+  state = record.state
+  input_digest = record.input_digest(state)
+  base = { "role" => "reviewer", "kind" => "artifact", "artifact_root" => artifact_root,
+           "input_digest" => input_digest, "started_at" => "2026-09-30T05:00:00Z",
+           "finished_at" => "2026-09-30T05:00:30Z", "stale" => false, "stale_reasons" => [],
+           "result" => { "verdict" => "continue" } }
+  stale_digest = "sha256:precheck-artifact"
+  checks = [base.merge("number" => 1, "artifact_digest" => stale_digest, "failed" => true,
+                       "result" => { "verdict" => "check_failed", "failure_kind" => "unavailable" })]
+  checks << base.merge("number" => 2, "artifact_digest" => stale_digest,
+                       "result" => { "verdict" => "continue" })
+  checks << base.merge("number" => 3, "artifact_digest" => artifact_digest, "stale" => true,
+                       "stale_reasons" => ["workspace"], "result" => { "verdict" => "correct" })
+  (4..11).each { |number| checks << base.merge("number" => number, "artifact_digest" => artifact_digest) }
+  checks << base.merge("number" => 12, "artifact_digest" => artifact_digest, "failed" => true,
+                       "result" => { "verdict" => "check_failed", "failure_kind" => "provider_error" })
+  state["checks"] = checks
+  record.save(state)
+  record.submit("check")
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker)
+  runtime.tick(now: now)
+  context = checker.calls.last.fetch(:context)
+  history = context.fetch("check_history")
+  assert(history["eligibility"].include?("not current completion eligibility"),
+         "check history states it is history, not current completion eligibility")
+  assert(history["anchor"] && history["anchor"]["number"] == 2,
+         "the anchor is the earliest VALID check on the current input and root, not a tail or digest pick")
+  assert(history["anchor"]["artifact_digest"] == stale_digest,
+         "the anchor keeps its OWN historical artifact digest instead of the current one")
+  assert(history["anchor"]["anchor_basis"].include?("real artifact root"),
+         "the anchor states why it was chosen and that it grants no completion eligibility")
+  assert(history["omitted_numbers"].include?(1) && history["omitted_numbers"].include?(3),
+         "a failed and a stale check are omitted from the anchor, not promoted to it")
+  assert(history["total_checks"] == 12, "the full check count stays visible")
+  assert(history["recent"].length <= 6, "the recent window is bounded")
+  assert(history["omitted_count"] >= 5, "omissions are counted, never silently absent")
+  failed = history["recent"].find { |entry| entry["number"] == 12 }
+  assert(failed && failed["terminal"] == "failed" && failed["failure_kind"] == "provider_error",
+         "a failed check keeps its terminal state and failure kind")
+  identity_keys = %w[number role kind artifact_root input_digest artifact_digest started_at finished_at
+                     stale stale_reasons terminal failure_kind anchor_basis]
+  assert((history["recent"] + [history["anchor"]]).all? { |entry| (entry.keys - identity_keys).empty? },
+         "projected checks carry identity and outcome keys only")
+  assert(!JSON.generate(history).include?("findings"),
+         "no old finding is imported through check history")
+  assert(context.fetch("findings").empty? && context["recheck"].nil?,
+         "history facts never become pending clues")
+end
+
+# A failed check recorded before the identity slice existed recovers its
+# identity from its own checks/<n>/scope.json instead of losing it.
+fixture do |root, record, host, checker, _runtime|
+  state = record.state
+  artifact_root = state.dig("workspace", "artifact_root")
+  artifact_digest = Orbit::WorkspaceSnapshot.fingerprint(project_root: root)
+  input_digest = record.input_digest(state)
+  dir = File.join(record.path, "checks", "5")
+  FileUtils.mkdir_p(dir)
+  File.write(File.join(dir, "scope.json"), JSON.generate(
+    "number" => 5, "role" => "reviewer", "kind" => "artifact", "artifact_root" => artifact_root,
+    "input_digest" => input_digest, "snapshot" => { "digest" => artifact_digest }))
+  state["checks"] = [{ "number" => 5, "role" => "reviewer", "kind" => "artifact",
+                       "started_at" => "2026-09-30T05:05:00Z", "finished_at" => "2026-09-30T05:05:10Z",
+                       "failed" => true, "stale" => false,
+                       "result" => { "verdict" => "check_failed", "failure_kind" => "unavailable" } }]
+  record.save(state)
+  record.submit("check")
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker)
+  runtime.tick(now: Time.now.to_f)
+  entry = checker.calls.last.fetch(:context).fetch("check_history").fetch("recent").find { |item| item["number"] == 5 }
+  assert(entry && entry["input_digest"] == input_digest && entry["artifact_digest"] == artifact_digest,
+         "a legacy failed check recovers its identity from its own scope.json")
+end
+
+
+# Root self-selected dispatch path (root_without_hint, real 02a5eda7 Zenmux
+# member): the durable unit carries the exact member/call binding and an
+# accepted finish, while the member record itself never gets a unit
+# association. Nothing is hand-stuffed; settlement restores it from the
+# durable record.
+fixture do |root, record, host, _checker, runtime|
+  now = Time.now.to_f
+  call_id = "call-self-1"
+  settlement_member!(record, host, root, member_id: "orbit-m-self", output: true,
+                     tool_call_id: call_id, model: "zenmux/deepseek/deepseek-v4.1-flash")
+  units = Orbit::WorkUnitStore.new(record)
+  unit = units.declare("objective" => "parse.js", "acceptance" => "node smoke",
+                       "escalation" => "ask root", "requirements" => ["original"],
+                       "allowed_paths" => ["src/"], "allowed_tools" => ["bash"])
+  units.bind(unit["id"], member_id: "orbit-m-self", tool_call_id: call_id,
+             model: "zenmux/deepseek/deepseek-v4.1-flash")
+  units.finish(unit["id"], status: "accepted", result: "src/parse.js delivered",
+               verification: "node assertions passed")
+  runtime.tick(now: now)
+  member = record.state["members"].first
+  assert(member["work_unit_id"].nil?,
+         "precondition: the member record never carried a unit association (Root self-selected)")
+  assert(member["status"] == "completed" && member["result_delivery"] == "work_unit_acceptance" &&
+         member.dig("settlement_basis", "tool_call_id") == call_id,
+         "the durable exact member/call binding restores the association and settles the real root_without_hint path")
+end
+
+# Ambiguity and model mismatch are never attributed: two units claiming the
+# same member/call, or a dispatch model differing from the observed member
+# model, leave the member unsettled.
+fixture do |root, record, host, _checker, runtime|
+  now = Time.now.to_f
+  call_a = "call-amb"
+  settlement_member!(record, host, root, member_id: "orbit-m-amb", output: true,
+                     tool_call_id: call_a, model: "zenmux/deepseek/deepseek-v4.1-flash")
+  settlement_member!(record, host, root, member_id: "orbit-m-mm", output: true,
+                     tool_call_id: "call-mm", model: "zenmux/deepseek/deepseek-v4.1-flash")
+  units = Orbit::WorkUnitStore.new(record)
+  2.times do |i|
+    unit = units.declare("objective" => "duplicate #{i}", "acceptance" => "fixture",
+                         "escalation" => "ask root", "requirements" => ["original"],
+                         "allowed_paths" => ["src/"], "allowed_tools" => ["bash"])
+    units.bind(unit["id"], member_id: "orbit-m-amb", tool_call_id: call_a,
+               model: "zenmux/deepseek/deepseek-v4.1-flash")
+    units.finish(unit["id"], status: "accepted", result: "duplicate", verification: "fixture evidence")
+  end
+  unit = units.declare("objective" => "model mismatch", "acceptance" => "fixture",
+                       "escalation" => "ask root", "requirements" => ["original"],
+                       "allowed_paths" => ["src/"], "allowed_tools" => ["bash"])
+  units.bind(unit["id"], member_id: "orbit-m-mm", tool_call_id: "call-mm",
+             model: "opencode-go/deepseek-v4.1-flash")
+  units.finish(unit["id"], status: "accepted", result: "mismatch", verification: "fixture evidence")
+  runtime.tick(now: now)
+  statuses = record.state["members"].map { |member| [member["thread_id"], member["status"]] }.to_h
+  assert(statuses == { "orbit-m-amb" => "registered", "orbit-m-mm" => "registered" },
+         "ambiguous or model-mismatched durable matches stay unresolved (no heuristic attribution)")
 end
 
 puts "TASK_RUNTIME_TEST_PASS (deterministic, not real-model acceptance)"

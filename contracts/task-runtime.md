@@ -1,6 +1,6 @@
 # Orbit 任务运行合同
 
-状态：有效运行语义，混合目标实施中。package 仍标记 0.7.10，当前工作区改动未冻结为新安装构建。以 OMP 单宿主 [ADR-008](../docs/adr/008-omp-native-collaboration-base.md)和候选池 [ADR-009](../docs/adr/009-user-selected-model-pool.md)为依据；Root 通过原生 `task/hub` 组建一层执行团队。当前实现与验证边界见[交接](../docs/plan/handoff.md)。
+状态：有效运行语义，混合目标实施中。源码版本从 `package.json` 读取；实际安装以 `orbit version --json` 的版本、commit、dirty 与内容摘要及[交接](../docs/plan/handoff.md)为准。混合模型的实施进度与真实安装验收分别记录，不提前宣称任何未来构建已经安装或验收。以 OMP 单宿主 [ADR-008](../docs/adr/008-omp-native-collaboration-base.md)和候选池 [ADR-009](../docs/adr/009-user-selected-model-pool.md)为依据；Root 通过原生 `task/hub` 组建一层执行团队。当前实现与验证边界见[交接](../docs/plan/handoff.md)。
 
 用户已授权完整实现[混合模型交付主方案](../docs/plan/mixed-model-delivery-proposal.md)。本次替换的判断、成本、交接与调用归属语义见 [ADR-009 §6](../docs/adr/009-user-selected-model-pool.md#6-已采纳的替换决定与实现接缝实施中)；下文的新入口与选型记录本次替换语义；旧基线按 Git 和带构建身份的历史证据查阅，不作为新策略依据。接线、校准和真实验收进度见[当前计划](../docs/plan/vision-completion-plan.md)，不能提前宣称新行为已上线。旧宿主、M4 和不同构建的验收仅按各自版本证明相应事实，不提供额外授权或覆盖本合同。
 
@@ -93,14 +93,14 @@ Jev 的首个判断 provider 是 TypeSafe 的 `https://api.typesafe.ai/v1/system
 
 **受控成员模型边界（2026-09-29 修订）：**Root 决定是否分工，Jev 只给建议、不自动派发。每次受控原生 `task` 调用前按本会话最新候选池与 OMP 可选目录生成原生 Agent；池内 Agent 可在补证待答时由 Root 自行显式选择，不假称 Jev 推荐。通用 `agent="task"` 或省略 agent 则先解析当前 `@task` 的精确 `provider/id`：存在可用池内 Agent 且默认型号不在其中时**拒绝**受控派发，明确列出可用 Agent 和待补证动作；池空或无可用池内 Agent 才可保留已解析的 OMP 默认角色，不能静默把有池任务交给池外默认。普通非受控 OMP 会话不受此门约束；Root 如确要使用默认型号，可通过 `/orbit-models` 把其纳入可用候选后再派发，不能靠虚构 Jev 建议绕过。模型无法解析、Agent 已不在本会话池中或注册／首次模型请求时实际型号漂移，仍拒绝并说明下一动作；登记派发不等于模型身份、成员交付或停止已获证实。
 
-精确质量补证是可选事实补充，四键身份必须逐候选来自真实路由；unknown 与 provider default、不同 billing route 不互换，不为命中 lookup 改路由。新补证字段退出时间／速度／local_samples／cost_tier，测量日期与检索日期分开；历史记录保留但旧指标不进入当前选型。目录报价不进入 OMP 结算，资源事实来自独立可信路由数据流。检查者 reasoning 或实际 route 不可证明时保持 unknown，主会话的 SDK 解析不证明独立进程的服务端配置或账户。补证触发下一次新判断，不中断在途检查、不给已执行工作追荐。
+精确质量补证是可选事实补充，四键身份必须逐候选来自真实路由；unknown 与 provider default、不同 billing route 不互换，不为命中 lookup 改路由。新补证字段退出时间／速度／local_samples／cost_tier，测量日期与检索日期分开；历史记录保留但旧指标不进入当前选型。目录报价不进入 OMP 结算，资源事实来自独立可信路由数据流。资源事实的发布生效日未知时，只允许以显式 unknown 标记存档：该事实可列出但覆盖不了任何调用、永不参与定价或成本推荐，绝不用页面更新时间、最后更新日期或检索时间顶替发布生效日；没有该显式标记而缺生效日的导入仍被拒绝。检查者 reasoning 或实际 route 不可证明时保持 unknown，主会话的 SDK 解析不证明独立进程的服务端配置或账户。补证触发下一次新判断，不中断在途检查、不给已执行工作追荐。
 
 明显的卡住／偏题信号可触发过程检查；产物就绪信号可触发完整产物检查。过程检查只判断是否有需要 Root 纠正的具体问题，不能完成任务。周期 Jev 仅在可辨认的任务状态、输入、成员或产物变化时调用模型，不因时间流逝且没有新事实反复判断；Root 工作中不因纯定时重复完整检查。自动检查按 observation key 去重；旧进程遗留的同 key `in_flight` 记 `check_abandoned_recovered` 并以新检查号重试一次。用户手动请求可绕过去重但不能与在途检查并发。**无 finding 不等于交付就绪**：独立检查须结构化标记当前交付是否就绪及未就绪理由，只有有效的手动终检明确就绪、无当前 finding／待核对线索、成员已结束且 Root 已完成一轮时，按输入与产物版本发送一次 `finalization_notice`。纯文字交付要先形成可供检查的实际答复；不能用尚待未来交付的承诺领取终检通过。Root 未完成一轮时偏好等其 turn 结束再通知，但**按版本绑定的 pending 通知即使 Root 仍在 active/等待，也必须在有界 60 秒内送达**。送达 pending 通知**不自动完成任务**；Root 的显式完成意图仍须等待其 turn 收尾，并在停止时核对当前产物、输入与成员状态。等待期间不采用检查者给出的短间隔持续复检。`check` 的机器响应要求：没有用户预先明确、且不依赖检查结果的后续状态变更时，Root 结束当前 turn 并等待 Orbit 唤醒，不应仅为等待检查结论而 sleep、轮询或查询状态。检查者只能核验终检当下可见的答复／产物；完成申请后的最终措辞仍受版本门与 Root 的交付责任约束。
 当前版本的自动产物检查若确认已实际交付、无 finding／待核对线索且成员结束，只能按版本**至多提醒 Root 一次**主动请求手动终检；不发 `finalization_notice`，不把自动检查提升为手动检查，也不代 Root 申请停止。真实用户消息、输入或产物改变后沿原版本门重新核验。
 
 检查模型在隔离目录不可用、认证、额度或结果校验失败时先保存失败证据；检查结束后在当前 OMP 会话可选且隔离环境已核对的剩余型号中按池优先、Jev 适配顺序有界重试，同一输入和产物版本不重复尝试失败型号，不在途切换。没有剩余可运行型号才阻塞；**失败阻塞的同一模型不允许用重复手动 `check` 绕过阻塞**，CLI 和运行时均拒绝。候选池、目录、凭据或有效证据等选择输入改变时可重新评估；Root 也可通过 `review-model` 选择 OMP 可用型号并触发新检查，无须新用户型号授权。手动检查绕过去重不绕过失败门；没有有效独立终检时不得假称任务已完成，可按用户明确要求普通暂停并核对停止确认。
 
-交给检查者与裁定者的程序上下文有 64KiB 上限。原文、修改和指定依据不压缩；其余长文本保留有界前缀并附原文长度与 sha256；历史列表按限额保留较新的一段，省略范围显式标出。
+交给检查者与裁定者的程序上下文有 64KiB 上限。原文、修改和指定依据不压缩；其余长文本保留有界前缀并附原文长度与 sha256；历史列表按限额保留较新的一段，省略范围显式标出。程序另按现有 `state.checks` 计算一个有界 `check_history`：**当前 input 与真实产物根**对应的**最早有效 artifact reviewer 检查**为锚点（role=reviewer／kind=artifact、非 failed 非 stale、其自身 `artifact_digest` 作为历史保留；修复或任何编辑都会改变产物摘要，故锚点不按当前摘要匹配，也不授予当前完成资格），其后是限额内的较新窗口，每条只含检查身份（number／role／kind／产物根／输入与产物摘要／开始与结束时间／终态／stale 原因／failure_kind），省略项以计数与编号显式列出，重要锚点不被单纯尾部窗口淘汰后谎称不存在；它只是历史事实，不授予当前完成资格，也不把旧版本 finding 导入待核对线索。
 
 ## 原生协作观察（hub 与成员状态）
 
@@ -108,13 +108,15 @@ Jev 的首个判断 provider 是 TypeSafe 的 `https://api.typesafe.ai/v1/system
 
 - `hub_events` 返回 `{ events, dropped_oldest, next_seq, buffer_cap }`；每条事件带按任务单调无隙的 `seq` 与稳定 `id`，以及 `task_dir` 归属。事件含原生 `hub` 或 OMP `write agent://<peer>` 的真实消息意图（op/to/from/message；Root 来自 awaited `tool_call` 门、成员来自所属会话的工具开始事件）、实际工具结果和原生 `task` 结果。缓冲内消息有界截断，同任务 `collaboration.jsonl` 按观察顺序保存未截断的原文和实际回执；调用意图不等于成功送达。seq 跳变或 `dropped_oldest` 增长是该任务真实的 observation_gap 信号。
 - 有界缓冲在 OMP 进程退出时丢失；任务目录的独立协作记录保留已归属事件。无绑定事件不追认给后来的任务，持久写入失败标明 gap，消费者仍须及时轮询。
-- 按实际成员 ID 可查 `member_state`（registry 状态、实际模型、会话是否存活、registry 生命周期 `acceptedAt/terminalAt`、`async_jobs` 快照）、`member_result`（持久产物路径与有界内容）、`send_member`（向成员投递用户修改，steer；仅任务 starting/running 时允许，失败如实上报）与 `stop_member`。
+- 按实际成员 ID 可查 `member_state`（registry 状态、实际模型、会话是否存活、registry 生命周期 `acceptedAt/terminalAt`、`async_jobs` 快照、当前分支末条 assistant 为错误回合时的结构化原生错误事实 `last_turn_error`）、`member_result`（持久产物路径与有界内容）、`send_member`（向成员投递用户修改，steer；仅任务 starting/running 时允许，失败如实上报）与 `stop_member`。SDK 注册表 ref 被移除后，`member_state`／`member_result` 以注册窗口保留的身份、`history`（持久输出路径、解析型号）、`lifecycle` 快照与保留会话继续只读服务，不因 ref 消失丢失已观测终态；任务所有权校验与停止屏障不因此放宽，无存活会话的成员不可 `send_member`。
+- **成员结算（2026-09-30 修订）：**成员终态集合为 `completed`／`failed`／`refused`／`rejected`，来源分级、互不冒充。原生接受：SDK 注册表 `lifecycle.acceptedAt`（仅成员经 yield 交卷路径产生；毫秒 epoch 数值或 ISO 字符串按原生单位解析）保持原生事实记入 `accepted_at`，不得伪造；已被失效结算的同一 acceptedAt 值不得再次结算。本派发核验完成：成员当前绑定的最新 dispatch（实际成员 ID 与 tool_call 精确匹配当前尝试，且该单元输入摘要与产物根仍为当前版本；成员记录未带单元关联时按同一精确身份从耐久单元记录唯一恢复，歧义或型号不符不恢复，不得按相似型号、时间或相邻事件归因）经 Root `accepted`，且该派发有真实原生交付——本派发绑定后写入的持久输出文件、大小或内容非空、结果文本经该文件读取——且当前无 running/streaming、在途工具为零、后台状态按完成门处理，记 `completed`、`result_delivery=work_unit_acceptance`。时间证据（回合时间、绑定时间、文件 mtime）缺失或不可解析时不视为当前，不据此结算。原生失败：桥暴露本回合真实 provider／原生错误（当前分支末条 assistant 的 `stopReason=error` 结构化字段；显式 null 表示已观察的最近回合非错误，清除旧事实；字段缺失才是未知），且该回合身份不早于本派发绑定，且回合与工具已结束，直接记 `failed` 并保存原生字段；不以 Root 文字、返回文本或 idle 推断失败。业务拒收：Root `rejected`／`failed` 且有真实原生输出、执行已结束、无当前原生错误，记 `rejected`；这不是原生失败，不记 provider error；成员无任何可归因原生事实时保持未结算。模型漂移仍是硬否决，优先于一切结算。结算必须当前：成员再现真实新轮（running/streaming/在途工具）、其绑定派发身份或单元版本变化、或出现更新的原生回合错误时，旧结算立即失效回到未结算（历史保留在事件与 `settlement_history`）；重派／新回合不得借用旧验收，SDK 按轮次清除的 lifecycle 不跨轮恢复。
 - 已确认停止的成员不能再经原生 `hub` 或 `write agent://<member>` 被唤醒；任务非活动状态时对本任务成员的两种发送在工具门被拒绝。非 Orbit 成员与其他任务的流量不受影响。
+- 终检就绪的 `pending_finalization` 等待成员结算有界：超过等待上限、版本仍有效（产物与输入摘要未变）而成员结算仍不可证实时，程序对该版本只发一次明确的 Root 收尾通知，列出未结算成员与各自缺失的事实，请 Root 显式结束成员／单元后再申请完成；不自动置 `needs_user`／`stop_unconfirmed`，不按时间推断失败，不停止任何进程，成员结算门、独立终检与真实停止门均不绕过。
 
 ## 观察与完成
 
 - 新建任务，以及实际开始新版检查的活动旧任务，要求逐项覆盖证据：独立检查输出 `coverage={complete,items}`，每项保存 `requirement`、`scope=delivery|lifecycle`、`status=verified|unverified` 与具体 `evidence`。`complete` 只表示检查者已枚举原始要求、有效修订及指定依据中的全部要求；它不是程序证明。未读材料、未核验项或压缩缺口必须显式 `unverified`，不能从无 finding、Root 自述或 Jev 分数推导已覆盖。
-- 覆盖 v2 的 `delivery` 包含产物、集成、要求执行的测试及回答内容；`lifecycle` 仅包含当前终检及其后的完成／确认停止／结束报告。后者仍留存，不声称未来事件已发生，其资格由程序的手动终检、当前回复结束及实际停止门核实；不能要求停止前先证明停止，也不能把测试执行改归生命周期绕过证据。旧项缺 scope 仍按 delivery 解释，不自动移除旧缺口。宿主验证回执保存实际工具执行、当时输入／产物／根及来源；检查者不得把 Root 自写日志或声明冒充程序观测的执行。
+- 覆盖 v2 的 `delivery` 包含产物、集成、要求执行的测试及回答内容；`lifecycle` 仅包含当前终检及其后的完成／确认停止／结束报告。后者仍留存，不声称未来事件已发生，其资格由程序的手动终检、当前回复结束及实际停止门核实；不能要求停止前先证明停止，也不能把测试执行改归生命周期绕过证据。旧项缺 scope 仍按 delivery 解释，不自动移除旧缺口。宿主验证回执保存实际工具执行、当时输入／产物／根及来源；检查者不得把 Root 自写日志或声明冒充程序观测的执行。Root 的文件工具（edit／write）也进入同一回执类：只记真实开始／结束时间、身份与绑定摘要及有界目标路径元数据，**不保存写入内容、patch／diff、脚本正文或工具结果正文（回执 `output` 保持 null）**；未观测到开始保持 unknown，未证明可解析的目标方言（如 hashline）保持 unknown 而不手写猜测解析；控制地址（`agent://`、`xd://` 等）记为路由目标，不冒充文件变更；“观测到一次文件工具调用”不等于字节已改变，`isError=false` 也不能当作已写入证据。
 - 程序把覆盖绑定实际检查号、角色／kind、输入摘要、固定产物摘要及真实产物根，持久写入私有 `requirement-coverage.json`；过期记录只作历史，过程检查／裁定不产生交付覆盖资格。同版本最新产物 reviewer 的不完整或未核验结果不能被旧通过覆盖。局部程序回执或工作单元通过可作为有范围的证据，最终仍需整体枚举与集成核查；检查者只读工具不能执行测试，须区分自己读到的事实与 Root 实际回执。
 - 新任务只有当前产物 reviewer 明确完整枚举、交付项至少一条且全部 verified，才可产生手动终检就绪通知并通过完成复核；生命周期仍由程序的独立门核实。缺覆盖、损坏或写入失败保持 `requirement_coverage_unverified`，不编造通过；普通停止仍可收尾。新任务保存 `coverage_required=true`，旧记录缺字段的历史完成不追认成新覆盖，导出保留缺口。覆盖不改变执行权限或用户要求。
 - 观察由程序在约定时间和可识别的执行结果节点触发，不依赖 Root 主动申请。等待只等待事件或时间，不调用模型。

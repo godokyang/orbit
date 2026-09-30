@@ -17,9 +17,13 @@ module Orbit
   # A missing price, a missing usage composition, an unverified billing route or
   # account scope, a lapsed verification snapshot and an unstated start of
   # effectiveness are all unknown: never zero, never "always valid", never
-  # applied backwards to an older call, and never a cheaper candidate. Structural
-  # validation only checks that these fields exist and are well formed; it does
-  # not prove any claimed source is genuine.
+  # applied backwards to an older call, and never a cheaper candidate. A reading
+  # whose publisher states no effective date may still be archived, but only with
+  # an explicit `"effective": {"from": null, "until": null, "unknown": true}`
+  # marker: such a fact covers no moment, never prices, never ranks and never has
+  # a reading time substituted for the publisher's date. Structural validation
+  # only checks that these fields exist and are well formed; it does not prove any
+  # claimed source is genuine.
   class RouteResourceFacts
     SCHEMA_VERSION = "orbit-route-resource-facts-v1"
     # omp_route and judgment_service are the routes Orbit actually calls.
@@ -105,6 +109,8 @@ module Orbit
     # trusted before re-checking and cannot prove the price did not change
     # inside it.
     def effective_at?(at = nil)
+      return false if effective_unknown?
+
       moment = at || @now || Time.now.utc
       from = Time.iso8601(effective.fetch("from"))
       until_time = effective["until"] && Time.iso8601(effective["until"])
@@ -112,6 +118,10 @@ module Orbit
 
       until_time.nil? || moment < until_time
     end
+
+    # A fact whose publisher effective date is unknown carries no date coverage
+    # at all: it may be archived and listed, but no call date falls inside it.
+    def effective_unknown? = effective["unknown"] == true
 
     def snapshot_valid_at?(at = nil)
       moment = at || @now || Time.now.utc
@@ -170,6 +180,10 @@ module Orbit
 
         return unknown("verification_snapshot_expired",
                        "the verification snapshot lapsed before the call; it is a re-check window, not proof the price stayed unchanged")
+      end
+      if effective_unknown?
+        return unknown("price_effective_unknown",
+                       "the publisher's effective date is unknown, so this reading covers no call and never prices")
       end
       unless effective_at?(moment)
         return unknown("price_effective_window",
@@ -333,6 +347,18 @@ module Orbit
     # the provider published no end date.
     def validate_effective(effective)
       raise Error, "effective dates are required and must state when the rule took effect" unless effective.is_a?(Hash)
+
+      unknown = effective["unknown"]
+      unless unknown.nil? || unknown == true
+        raise Error, "effective.unknown must be true when stated"
+      end
+      if unknown == true
+        unless effective["from"].nil? && effective["until"].nil?
+          raise Error, "an explicit unknown effective date must not carry a from or until date"
+        end
+
+        return { "from" => nil, "until" => nil, "unknown" => true }
+      end
       raise Error, "effective.from must state when the rule took effect" if effective["from"].nil?
 
       from = timestamp(effective["from"], "effective from")

@@ -25,6 +25,23 @@ require_relative "member_model_selector"
 module Orbit
   class TaskRuntime
     TERMINAL = %w[complete paused needs_user failed stop_unconfirmed].freeze
+
+    # Settled member vocabulary. `rejected` is a business rejection backed by
+    # real native output — never a native failure; see the task-runtime
+    # contract section 成员结算 for the ranked settlement sources.
+    MEMBER_SETTLED = %w[completed failed refused rejected].freeze
+
+    # Bounded program-computed check history handed to an independent check.
+    # The checker sees check IDENTITY (number/role/kind/root/input/artifact
+    # digests, start/finish, terminal outcome, stale reasons, failure kind) for
+    # the anchor — the earliest valid artifact review of the current input on the
+    # real artifact root, whatever its historical artifact digest — plus a
+    # bounded recent window. Omissions stay visible as counts, and these are history facts:
+    # they never grant current completion eligibility and no old finding is
+    # imported into the pending clues.
+    CHECK_HISTORY_RECENT = 6
+    CHECK_HISTORY_OMITTED_LIMIT = 20
+    CHECK_HISTORY_AMENDMENT_LIMIT = 5
     REVIEW_FOCUS_STATUSES = %w[added modified deleted].freeze
     REVIEW_FOCUS_LIMIT = 200
     # A queued completion stop waits for the Root's delivery turn to finish;
@@ -611,6 +628,93 @@ module Orbit
       rescue JSON::ParserError
         nil
       end
+    end
+
+    # Bounded, program-computed check history for the independent checker: the
+    # anchor is the EARLIEST valid independent artifact review of the current
+    # INPUT on the real artifact ROOT, keeping its own historical
+    # artifact_digest (so a checked-then-edited artifact never evicts the
+    # pre-implementation check), plus a bounded recent window. Everything
+    # omitted is counted and listed, so absence is never silently claimed.
+    def check_history_for(snapshot)
+      checks = Array(@state["checks"])
+      input_digest = @record.input_digest(@state)
+      artifact_digest = snapshot.fetch("digest")
+      anchor = checks.find { |entry| history_anchor?(entry, input_digest) }
+      recent = checks.last(CHECK_HISTORY_RECENT)
+      kept = ([anchor] + recent).compact.uniq { |entry| entry["number"] }
+      omitted = checks.reject { |entry| kept.any? { |entry_kept| entry_kept["number"] == entry["number"] } }
+      {
+        "eligibility" => "history facts only; not current completion eligibility",
+        "current_input_digest" => input_digest, "current_artifact_digest" => artifact_digest,
+        "total_checks" => checks.length,
+        "anchor" => anchor && projected_check(anchor).merge(
+          "anchor_basis" => "earliest valid artifact review of the current input on the real artifact root; " \
+                            "its own artifact_digest is historical and grants no current completion eligibility"
+        ),
+        "recent" => recent.map { |entry| projected_check(entry) },
+        "omitted_count" => omitted.length,
+        "omitted_numbers" => omitted.last(CHECK_HISTORY_OMITTED_LIMIT).map { |entry| entry["number"] },
+        # The per-check input_digest above IS the version timeline; the amendment
+        # entry itself is part of Record#inputs, so embedding a digest inside it
+        # would be self-referential.
+        "amendments" => Array(@state["amendments"]).last(CHECK_HISTORY_AMENDMENT_LIMIT).map do |amendment|
+          { "at" => amendment["at"], "path" => amendment["path"], "source" => amendment["source"] }
+        end
+      }
+    end
+
+    # The anchor is the EARLIEST valid independent artifact review of the CURRENT
+    # input on the REAL artifact root, regardless of how many later checks
+    # changed the artifact digest: a fix (or any edit) always changes the digest,
+    # so matching the current digest would drop the pre-implementation check the
+    # checker needs. The anchor keeps its OWN historical artifact_digest as a
+    # historical fact — it never grants current completion eligibility — and a
+    # failed or stale check is never promoted to anchor.
+    def history_anchor?(entry, input_digest)
+      return false unless entry.is_a?(Hash)
+      return false unless entry["role"] == "reviewer" && entry["kind"] == "artifact"
+      return false if entry["failed"] == true || entry["stale"] == true
+
+      identity = check_identity(entry)
+      identity["input_digest"] == input_digest && identity["artifact_root"] == artifact_root
+    end
+
+    # One check's durable identity, falling back to its own checks/<n>/scope.json
+    # when it was recorded before the identity slice existed.
+    def check_identity(entry)
+      identity = entry.slice("artifact_root", "input_digest", "artifact_digest")
+      return identity if identity.values_at("artifact_root", "input_digest", "artifact_digest").none?(&:nil?)
+
+      check_scope_identity(entry["number"]).merge(identity) { |_key, fallback, value| value || fallback }
+    end
+
+    # One check's identity/outcome facts. Failed checks recorded before the
+    # identity slice existed fall back to their own checks/<n>/scope.json.
+    def projected_check(entry)
+      identity = check_identity(entry)
+      {
+        "number" => entry["number"], "role" => entry["role"], "kind" => entry["kind"],
+        "artifact_root" => identity["artifact_root"], "input_digest" => identity["input_digest"],
+        "artifact_digest" => identity["artifact_digest"],
+        "started_at" => entry["started_at"], "finished_at" => entry["finished_at"],
+        "stale" => entry["stale"], "stale_reasons" => Array(entry["stale_reasons"]),
+        "terminal" => entry["failed"] ? "failed" : entry["stale"] ? "stale" : entry.dig("result", "verdict"),
+        "failure_kind" => entry.dig("result", "failure_kind")
+      }
+    end
+
+    def check_scope_identity(number)
+      return {} if number.nil?
+
+      path = File.join(@record.path, "checks", number.to_s, "scope.json")
+      return {} unless File.file?(path)
+
+      scope = JSON.parse(File.read(path))
+      { "artifact_root" => scope["artifact_root"], "input_digest" => scope["input_digest"],
+        "artifact_digest" => scope.dig("snapshot", "digest") }
+    rescue JSON::ParserError, SystemCallError
+      {}
     end
 
     def assess_jev(host, artifact_digest, now)
@@ -1430,7 +1534,8 @@ module Orbit
       return false if member["model_drift"]
 
       previous = member.slice("model", "result", "output_path", "session_file",
-                              "registry_status", "accepted_at", "status", "result_delivery")
+                              "registry_status", "accepted_at", "status", "result_delivery",
+                              "last_turn_error", "settlement_basis", "settlement_history", "error")
       previous_status = member["status"]
       previous_accepted = member["accepted_at"]
       member["registry_status"] = registry_status if registry_status.is_a?(String) && !registry_status.empty?
@@ -1446,28 +1551,47 @@ module Orbit
       if observed.is_a?(Hash) && observed["session_file"].is_a?(String) && !observed["session_file"].empty?
         member["session_file"] = observed["session_file"]
       end
+      if observed.is_a?(Hash) && observed.key?("last_turn_error")
+        # Observed state, not a partial report: an explicit null means the
+        # branch's latest assistant turn is NOT an error, so the stale fact
+        # must be cleared. Only a missing key means unknown (keep old).
+        fresh_error = observed["last_turn_error"]
+        member["last_turn_error"] = fresh_error.is_a?(Hash) ? fresh_error : nil
+      end
+      # A settled member that shows a real new turn, a re-bound dispatch or a
+      # newer turn error loses its settlement first: settlement is always
+      # current, and a re-dispatch or new turn never borrows an old verdict.
+      invalidate_member_settlement!(member, observed)
       if member["registry_status"] == "aborted"
         member["status"] = "failed"
       elsif native_result_accepted?(member, observed)
         member["status"] = "completed"
+      else
+        settle_member_from_current_dispatch(member, observed, result)
       end
       accepted_changed = member["accepted_at"] != previous_accepted
       became_completed = member["status"] == "completed" && previous_status != "completed"
       if became_completed || (member["status"] == "completed" && accepted_changed)
-        member["result_delivery"] = "native_task"
+        member["result_delivery"] ||= "native_task"
         @record.event("member_result_recorded", "thread_id" => member["thread_id"],
-                      "status" => member["status"], "delivery" => "native_task",
+                      "status" => member["status"], "delivery" => member["result_delivery"],
                       "accepted_at" => member["accepted_at"])
       end
-      %w[model result output_path session_file registry_status accepted_at status result_delivery].any? { |key| member[key] != previous[key] }
+      %w[model result output_path session_file registry_status accepted_at status result_delivery
+         last_turn_error settlement_basis settlement_history error].any? { |key| member[key] != previous[key] }
     end
 
     # acceptedAt is stamped only when the driver accepts the run. A later
-    # running/streaming ref has not accepted this observation.
+    # running/streaming ref has not accepted this observation. An acceptedAt
+    # identical to an already invalidated settlement is that same stale native
+    # fact (detached snapshot / stored lifecycle), never a new acceptance.
     def native_result_accepted?(member, observed)
       return false unless member["accepted_at"]
       return false if member["registry_status"] == "running"
       return false if observed.is_a?(Hash) && observed["streaming"] == true
+      return false if Array(member["settlement_history"]).any? do |entry|
+        entry.is_a?(Hash) && entry["accepted_at"] == member["accepted_at"]
+      end
 
       true
     end
@@ -1491,8 +1615,241 @@ module Orbit
       return true if member["model_drift"]
       return true if %w[starting working].include?(member["status"])
       return false unless member["adapter"] == OMP_NATIVE_ADAPTER
-      return false if %w[completed failed refused].include?(member["status"])
+      return false if MEMBER_SETTLED.include?(member["status"])
 
+      true
+    end
+
+    # Settlement invalidation: an already settled member that shows a real new
+    # turn (running/streaming/in-flight tools), a newer native turn error, or
+    # whose bound dispatch identity changed (re-bind) is no longer settled.
+    # The old settlement moves to settlement_history; native accepted_at is
+    # kept there as history because the SDK clears lifecycle per run.
+    def invalidate_member_settlement!(member, observed)
+      return false unless MEMBER_SETTLED.include?(member["status"])
+
+      reasons = []
+      if member["registry_status"] == "running" ||
+         (observed.is_a?(Hash) && (observed["streaming"] == true ||
+          (observed["active_tools"].is_a?(Integer) && observed["active_tools"] > 0)))
+        reasons << "new_turn_observed"
+      end
+      basis = member["settlement_basis"]
+      settled_at = basis.is_a?(Hash) ? basis["settled_at"] : member["accepted_at"]
+      error = current_native_turn_error(member)
+      error_at = time_value(error.is_a?(Hash) ? error["at"] : nil)
+      settled_epoch = time_value(settled_at)
+      if error_at && settled_epoch && error_at > settled_epoch
+        reasons << "newer_turn_error"
+      end
+      if basis.is_a?(Hash) && basis["tool_call_id"]
+        # A re-bound/attempt-changed unit — or a unit whose input version or
+        # artifact root moved on — can no longer vouch for the old verdict.
+        dispatch = current_member_dispatch(member)
+        if dispatch.nil? || dispatch["tool_call_id"] != basis["tool_call_id"] ||
+           dispatch["finished_at"] != basis["finished_at"]
+          reasons << "dispatch_changed"
+        end
+      end
+      return false if reasons.empty?
+
+      (member["settlement_history"] ||= []) << {
+        "source" => basis.is_a?(Hash) ? basis["source"] : (member["accepted_at"] ? "native_accepted_at" : member["result_delivery"]),
+        "tool_call_id" => basis.is_a?(Hash) ? basis["tool_call_id"] : member["tool_call_id"],
+        "finished_at" => basis.is_a?(Hash) ? basis["finished_at"] : nil,
+        "accepted_at" => member["accepted_at"], "result_delivery" => member["result_delivery"],
+        "invalidated_at" => Time.now.utc.iso8601, "reasons" => reasons
+      }
+      member["settlement_basis"] = nil
+      member["accepted_at"] = nil
+      member["result_delivery"] = nil
+      member["status"] = "registered"
+      @record.event("member_settlement_invalidated", "thread_id" => member["thread_id"], "reasons" => reasons)
+      true
+    end
+
+    # Cross-source time ordering. SDK registry milestones are milliseconds
+    # since epoch (Date.now()); ISO 8601 strings may or may not carry
+    # fractional seconds, so string forms never compare lexicographically.
+    # Unparseable values return nil — callers must treat unknown as "cannot
+    # affirm current", never as passing.
+    def time_value(value)
+      case value
+      when Numeric then value / 1000.0
+      when String then Time.parse(value).to_f unless value.empty?
+      end
+    rescue ArgumentError
+      nil
+    end
+
+    # Restores the member's current unit association from the durable
+    # work-unit records when the member record never carried one: Root
+    # self-selected dispatches are not hint-followed, so nothing ever syncs
+    # `work_unit_id` (real 02a5eda7 Zenmux member). Exact identity only — the
+    # same actual member id AND tool call as the unit's LATEST dispatch, on
+    # the current input version and artifact root. A dispatch/member model
+    # mismatch inside that identity is drift, and an ambiguous match (more
+    # than one unit) stays unresolved; never attributed by similar model,
+    # time proximity or adjacent events.
+    def resolve_member_unit_id(member)
+      return nil if member["model_drift"]
+      thread = member["thread_id"].to_s
+      call = member["tool_call_id"].to_s
+      return nil if thread.empty? || call.empty?
+
+      current_input = @record.input_digest(@state)
+      matches = work_units.list.select do |unit|
+        next false unless unit.is_a?(Hash)
+        next false unless unit["input_digest"] == current_input && unit["artifact_root"] == artifact_root
+        latest = Array(unit["dispatches"]).last
+        next false unless latest.is_a?(Hash) && latest["member_id"] == thread && latest["tool_call_id"] == call
+        dispatch_model = latest["model"].to_s
+        member_model = member["model"].to_s
+        next false if !dispatch_model.empty? && !member_model.empty? && dispatch_model != member_model
+
+        true
+      end
+      matches.length == 1 ? matches.first["id"] : nil
+    rescue WorkUnitStore::Error
+      nil
+    end
+
+    # The member's current dispatch attempt: the latest dispatch of its bound
+    # work unit, matched by actual member id and tool call. An older attempt
+    # (re-bound unit) or another member's attempt is never current, and a
+    # unit declared against an older input version or a different artifact
+    # root can never settle the current attempt.
+    def current_member_dispatch(member)
+      unit_id = member["work_unit_id"].to_s
+      unit_id = resolve_member_unit_id(member).to_s if unit_id.empty?
+      call = member["tool_call_id"].to_s
+      return nil if unit_id.empty? || call.empty?
+
+      unit = work_units.read(unit_id)
+      return nil unless unit.is_a?(Hash)
+      return nil unless unit["input_digest"] == @record.input_digest(@state)
+      return nil unless unit["artifact_root"] == artifact_root
+
+      latest = Array(unit["dispatches"]).last
+      return nil unless latest.is_a?(Hash) && latest["member_id"] == member["thread_id"] &&
+                        latest["tool_call_id"] == call
+
+      latest
+    rescue WorkUnitStore::Error
+      nil
+    end
+
+    # Execution-settled means no real work in flight: not running, not
+    # streaming, no observed tools. A live session with an unknown tool count
+    # is not provably settled; a detached ref has no in-flight tools to wait
+    # on (the stop barrier remains the async-job authority).
+    def member_execution_settled?(member, observed)
+      return false if member["registry_status"] == "running"
+
+      observed = {} unless observed.is_a?(Hash)
+      return false if observed["streaming"] == true
+      tools = observed["active_tools"]
+      return false if tools.is_a?(Integer) && tools > 0
+      return false if tools.nil? && observed["session_attached"] == true
+
+      true
+    end
+
+    # A real native error fact for the member's current turn: the bridge's
+    # structured last_turn_error whose turn is not older than the dispatch
+    # binding (or the member registration when no dispatch exists).
+    def current_native_turn_error(member, dispatch = nil)
+      error = member["last_turn_error"]
+      return nil unless error.is_a?(Hash) && error["stop_reason"] == "error"
+
+      at = error["at"]
+      floor = dispatch.is_a?(Hash) ? dispatch["bound_at"] : member["registered_at"]
+      at_epoch = time_value(at)
+      floor_epoch = time_value(floor)
+      # Unknown or malformed time evidence never affirms a current turn:
+      # only two parseable stamps ordered as current qualify.
+      return nil unless at_epoch && floor_epoch
+      return nil if at_epoch < floor_epoch
+
+      error
+    end
+
+    # Real native delivery for THIS dispatch: the member's persisted task
+    # output, keyed to the dispatch by the file's real mtime. Result text is
+    # read from that same file by the bridge, so the freshness rule is
+    # uniform; without a fresh file there is no provable delivery.
+    def current_dispatch_delivery(result, dispatch)
+      return nil unless result.is_a?(Hash) && dispatch.is_a?(Hash)
+
+      path = result["output_path"]
+      mtime = result["output_mtime"]
+      size = result["output_size"]
+      text = result["output_text"]
+      return nil unless path.is_a?(String) && !path.empty? && mtime.is_a?(String) && !mtime.empty?
+      bound = dispatch["bound_at"]
+      bound_epoch = time_value(bound)
+      mtime_epoch = time_value(mtime)
+      # Freshness must be provable: a missing or malformed stamp cannot
+      # affirm that the persisted output belongs to this dispatch.
+      return nil unless bound_epoch && mtime_epoch
+      return nil if mtime_epoch < bound_epoch
+      return nil unless (size.is_a?(Integer) && size > 0) || (text.is_a?(String) && !text.empty?)
+
+      { "output_path" => path, "output_mtime" => mtime }
+    end
+
+    # Ranked settlement from current facts (contract 成员结算): a real native
+    # turn error settles failed without waiting for Root to phrase an error;
+    # a Root-accepted current dispatch with real native delivery settles
+    # completed; a Root-rejected/failed dispatch with real native output and
+    # no current native error settles rejected (business rejection, never a
+    # native failure). Anything unprovable stays registered.
+    def settle_member_from_current_dispatch(member, observed, result)
+      return false unless member["status"] == "registered"
+
+      dispatch = current_member_dispatch(member)
+      return false unless dispatch.is_a?(Hash)
+      return false unless member_execution_settled?(member, observed)
+
+      error = current_native_turn_error(member, dispatch)
+      if error
+        detail = ["native turn error"]
+        detail << "HTTP #{error['error_status']}" if error["error_status"].is_a?(Integer)
+        detail << error["error_message"].to_s
+        member["status"] = "failed"
+        member["error"] = detail.join(": ").strip[0, 300]
+        member["result_delivery"] = "native_turn_error"
+        member["settlement_basis"] = { "source" => "native_turn_error",
+                                       "tool_call_id" => dispatch["tool_call_id"],
+                                       "finished_at" => dispatch["finished_at"],
+                                       "settled_at" => Time.now.utc.iso8601, "error" => error }
+        @record.event("member_settled", "thread_id" => member["thread_id"], "status" => "failed",
+                      "source" => "native_turn_error", "tool_call_id" => dispatch["tool_call_id"])
+        return true
+      end
+
+      return false unless WorkUnitStore::FINISH_STATUSES.include?(dispatch["status"])
+
+      # A settlement invalidated by a real new turn must not be reborn from
+      # the same finished dispatch: without a NEW Root finish or a new native
+      # acceptance, the old verdict cannot settle the member's current turn.
+      return false if Array(member["settlement_history"]).any? do |entry|
+        entry.is_a?(Hash) && entry["tool_call_id"] == dispatch["tool_call_id"] &&
+          entry["finished_at"] == dispatch["finished_at"] &&
+          Array(entry["reasons"]).include?("new_turn_observed")
+      end
+
+      delivery = current_dispatch_delivery(result, dispatch)
+      return false unless delivery
+
+      member["status"] = dispatch["status"] == "accepted" ? "completed" : "rejected"
+      member["result_delivery"] = dispatch["status"] == "accepted" ? "work_unit_acceptance" : "work_unit_rejected"
+      member["settlement_basis"] = { "source" => member["result_delivery"],
+                                     "tool_call_id" => dispatch["tool_call_id"],
+                                     "finished_at" => dispatch["finished_at"],
+                                     "settled_at" => Time.now.utc.iso8601, "delivery" => delivery }
+      @record.event("member_settled", "thread_id" => member["thread_id"], "status" => member["status"],
+                    "source" => member["result_delivery"], "tool_call_id" => dispatch["tool_call_id"])
       true
     end
 
@@ -1582,7 +1939,7 @@ module Orbit
     def members_settled?
       return false if Array(@state["amendment_delivery_queue"]).any?
 
-      @state["members"].all? { |member| %w[completed failed refused].include?(member["status"]) }
+      @state["members"].all? { |member| MEMBER_SETTLED.include?(member["status"]) }
     end
 
     def collect_amendments
@@ -1756,7 +2113,7 @@ module Orbit
           "task_delivery" => task_delivery_for(snapshot, input_digest),
           "root_verifications" => root_verifications_for(host, snapshot, input_digest),
           "task_git" => task_git, "findings" => @state.fetch("findings"),
-          "recent_events" => recent_events, "recheck" => clues,
+          "recent_events" => recent_events, "check_history" => check_history_for(snapshot), "recheck" => clues,
           "execution_members" => @state["members"],
           "decisions" => @state.fetch("decisions"), "dispute" => @state["dispute"],
           "model_selection" => @state.dig("jev", "delegation"),
@@ -1891,7 +2248,8 @@ module Orbit
       kind = @checker.respond_to?(:failure_kind) ? @checker.failure_kind : "unavailable"
       basis = @checker.respond_to?(:failure_basis) ? @checker.failure_basis : "unknown"
       @state.fetch("checks") << scope.slice("number", "role", "kind", "started_at", "observation_key",
-                                            "trigger_cause", "manual").merge(
+                                            "trigger_cause", "manual", "artifact_root", "input_digest").merge(
+        "artifact_digest" => scope.dig("snapshot", "digest"),
         "result" => { "verdict" => "check_failed", "error" => error.message,
                       "failure_kind" => kind, "failure_basis" => basis },
         "failed" => true, "stale" => false,
@@ -2393,7 +2751,10 @@ module Orbit
       return false unless pending.is_a?(Hash)
       ready = host["status"] == "idle" && host["last_turn_status"] == "completed"
       return false unless ready || finalization_wait_expired?(pending, now)
-      return false unless members_settled? && @state["recheck"].nil?
+      unless members_settled? && @state["recheck"].nil?
+        remind_finalization_wrapup(pending, now) if finalization_wait_expired?(pending, now)
+        return false
+      end
       return false if @state["findings"].values.any? { |finding| finding["status"] == "open" }
 
       current_digest = fingerprint_artifact
@@ -2424,6 +2785,45 @@ module Orbit
       now - Time.parse(at).to_f >= FINALIZATION_NOTICE_MAX_WAIT_SECONDS
     rescue ArgumentError
       true
+    end
+
+    # One explicit Root wrap-up notice per valid pending version when member
+    # settlement stays unprovable past the wait limit. This never marks the
+    # task complete, never infers failure from time, never stops anything and
+    # never turns into needs_user/stop_unconfirmed on its own; it names the
+    # unsettled members and the exact missing facts so Root can close out
+    # explicitly. A stale pending version is left to the normal version-change
+    # recheck path above.
+    def remind_finalization_wrapup(pending, now)
+      current_digest = fingerprint_artifact
+      return unless pending["artifact_root"] == artifact_root &&
+                    pending["artifact_digest"] == current_digest &&
+                    pending["input_digest"] == @record.input_digest(@state)
+
+      key = Digest::SHA256.hexdigest(JSON.generate([pending["artifact_root"], current_digest, pending["input_digest"]]))
+      notices = @state["finalization_wrapup_notices"] ||= {}
+      return if notices[key]
+
+      unsettled = @state["members"].reject { |member| MEMBER_SETTLED.include?(member["status"]) }
+      return if unsettled.empty?
+
+      details = unsettled.map do |member|
+        missing = []
+        missing << "原生接受(acceptedAt)" unless member["accepted_at"]
+        missing << "当前派发终裁" unless current_member_dispatch(member)&.dig("status")
+        missing << "可归因原生交付或错误事实" unless member["last_turn_error"].is_a?(Hash) || member["output_path"]
+        "#{member['thread_id']}(status=#{member['status']}, 缺: #{missing.join('/')})"
+      end
+      sent = @connection.send_message(
+        "Orbit 当前版本终检已就绪，但成员结算无法证实：#{details.join('；')}。" \
+        "这不是任务完成，也不是失败判定。请显式结束相关成员/工作单元（或修正后重新终检）再申请完成；" \
+        "程序不会据此自动判失败、降级或停止任何成员。")
+      @state["sent_message_ids"] << sent.fetch("id")
+      notices[key] = { "at" => Time.at(now).utc.iso8601, "check" => pending["check"],
+                       "members" => unsettled.map { |member| member["thread_id"] } }
+      @record.event("finalization_wrapup_reminded", "check" => pending["check"],
+                    "members" => notices[key]["members"])
+      save
     end
 
     def send_correction(result, scope:, current_digest:)

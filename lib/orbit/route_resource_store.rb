@@ -22,7 +22,9 @@ module Orbit
   # Selection is exact: scope plus the four-key execution identity plus account
   # scope and plan, then the newest reading whose effective window and
   # verification snapshot cover the moment being priced. Nothing is matched by
-  # model name, neighbouring version, provider or price similarity.
+  # model name, neighbouring version, provider or price similarity. A fact
+  # archived with an explicit unknown effective date is listed and auditable but
+  # covers no moment, so it is never selected and never priced.
   #
   # The report prices actual ledger calls, one by one, in the fact's own
   # currency or quota unit. A call with no verified fact, an unverified account

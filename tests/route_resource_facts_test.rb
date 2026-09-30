@@ -205,6 +205,20 @@ module RouteResourceFactsTest
           "cash in one currency is comparable after each account's applicability has been verified")
   end
 
+  def check_explicit_unknown_effective_date_never_covers_or_prices
+    archived = fact("effective" => { "from" => nil, "until" => nil, "unknown" => true })
+    check(archived.effective_unknown? && archived.effective["unknown"] == true && archived.effective["from"].nil?,
+          "a publisher with no effective date is archived with an explicit unknown marker, and no invented date")
+    [Time.utc(2026, 8, 1), at, Time.utc(2027, 1, 1)].each do |moment|
+      check(archived.effective_at?(moment) == false,
+            "an explicitly unknown effective date covers no moment, including #{moment.utc.iso8601}")
+    end
+    result = archived.estimate(route: route(), account_scope: scope, at: at,
+                               usage: { "input" => 1000, "cache_read" => 500, "output" => 200 })
+    check(result["status"] == "unknown" && result["reason"] == "price_effective_unknown" && result["amount"].nil?,
+          "an archived fact with an unknown effective date never prices a call")
+  end
+
   def check_invalid_fact_is_refused
     [
       [document("source" => { "kind" => "model_reputation", "detail" => "brand impression",
@@ -212,6 +226,8 @@ module RouteResourceFactsTest
       [document("source" => { "kind" => "first_party_pricing", "detail" => "page" }), "verifier"],
       [document("verification" => { "retrieved_at" => "2026-09-28T00:00:00Z" }), "valid_until"],
       [document("effective" => { "until" => nil }), "effective.from"],
+      [document("effective" => { "from" => "2026-08-01T00:00:00Z", "unknown" => true }), "must not carry"],
+      [document("effective" => { "unknown" => false, "from" => "2026-08-01T00:00:00Z" }), "must be true"],
       [document("applicability" => { "plan" => "pay as you go" }), "account scope"],
       [document("categories" => {}), "priced category"]
     ].each do |doc, expected|
@@ -236,6 +252,7 @@ module RouteResourceFactsTest
     check_quota_rules_are_not_consumption
     check_crossed_prices_without_composition_are_indeterminate
     check_invalid_fact_is_refused
+    check_explicit_unknown_effective_date_never_covers_or_prices
     puts "PASS route resource facts"
   end
 end

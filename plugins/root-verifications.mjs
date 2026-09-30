@@ -32,6 +32,15 @@ import path from 'node:path';
 import os from 'node:os';
 
 export const VERIFY_FILENAME = 'root-verifications.jsonl';
+// Tools whose real tool_execution_start/end events produce a durable receipt.
+// bash/eval carry an execution status; edit/write are FILE-tool observations:
+// they record identity, binding and a bounded target list only — never the
+// written content, the patch/diff or any script body. Observing a completed
+// file tool call is NOT proof that bytes changed.
+export const CAPTURED_TOOLS = ['bash', 'eval', 'edit', 'write'];
+// Bounded target metadata for file tools.
+export const FILE_TARGET_CAP = 8;
+export const FILE_TARGET_LENGTH_CAP = 512;
 // Per-string payload bound for durable receipts; the flag next to each
 // field records whether truncation happened. Missing data stays null.
 export const TEXT_CAP = 4000;
@@ -59,6 +68,37 @@ function resultText(result) {
   return null;
 }
 
+function boundTargets(values) {
+  const out = [];
+  for (const value of values) {
+    if (typeof value !== 'string' || !value) continue;
+    const bounded = value.length > FILE_TARGET_LENGTH_CAP ? value.slice(0, FILE_TARGET_LENGTH_CAP) : value;
+    if (!out.includes(bounded)) out.push(bounded);
+    if (out.length >= FILE_TARGET_CAP) break;
+  }
+  return out;
+}
+
+// A control address (agent://, xd://, ...) is a routing target, not a file.
+function isControlUri(value) {
+  return typeof value === 'string' && /^[a-z][a-z0-9+.-]*:\/\//i.test(value);
+}
+
+// Target metadata for a file tool call. Only a plain string `path` is
+// projected. The hashline `{i, input}` dialect is deliberately NOT hand-parsed
+// here: its targets stay unknown rather than guessed, and its body is never
+// captured.
+function fileTargets(args) {
+  const candidate = typeof args?.path === 'string' && args.path ? args.path : null;
+  if (candidate === null) {
+    return { targets: null, targets_status: 'unknown', control_targets: [] };
+  }
+  if (isControlUri(candidate)) {
+    return { targets: null, targets_status: 'control_uri', control_targets: boundTargets([candidate]) };
+  }
+  return { targets: boundTargets([candidate]), targets_status: 'path', control_targets: [] };
+}
+
 // Start-side fact capture. `sessionCwd` is the Root session's real cwd at
 // the moment of the tool start (sessionManager.getCwd()); a bash args.cwd is
 // resolved against it exactly like the SDK does (resolveToCwd semantics:
@@ -66,9 +106,11 @@ function resultText(result) {
 // used as a stand-in for the execution cwd.
 export function captureStart(event, { sessionCwd = null } = {}) {
   const tool = event?.toolName;
-  if (tool !== 'bash' && tool !== 'eval') return null;
+  if (!CAPTURED_TOOLS.includes(tool)) return null;
   const args = event.args && typeof event.args === 'object' ? event.args : {};
-  const rawText = tool === 'bash' ? args.command : args.code;
+  const isFileTool = tool === 'edit' || tool === 'write';
+  // File tools never contribute a captured body: no content, no patch, no script.
+  const rawText = tool === 'bash' ? args.command : tool === 'eval' ? args.code : null;
   let executionCwd = sessionCwd;
   if (tool === 'bash' && typeof args.cwd === 'string' && args.cwd) {
     let cwd = args.cwd;
@@ -79,10 +121,20 @@ export function captureStart(event, { sessionCwd = null } = {}) {
     else if (/^\/+$/u.test(cwd)) executionCwd = sessionCwd;
     else executionCwd = sessionCwd ? path.resolve(sessionCwd, cwd) : path.isAbsolute(cwd) ? cwd : null;
   }
+  const observedAt = Date.now();
   return {
     tool,
     text: typeof rawText === 'string' ? rawText : null,
     executionCwd,
+    // Program-local observation of the REAL tool_execution_start event. This is
+    // the moment the program saw the start event, not an SDK-reported field:
+    // the SDK start event carries no such timestamp. It is what makes it
+    // possible to say "the tool started after check N returned"; without a
+    // start event the receipt keeps start_observed: false and null instead.
+    start_observed_at: new Date(observedAt).toISOString(),
+    start_observed_at_ms: observedAt,
+    start_observed_at_source: 'program_local_event_observation',
+    ...(isFileTool ? fileTargets(args) : {}),
     // Filled by the caller from the read-only binding helper at start time;
     // binding_status 'unknown' marks an explicit gap, never a guess.
     artifact_root: null,
@@ -99,7 +151,8 @@ export function captureStart(event, { sessionCwd = null } = {}) {
 export function buildReceipt({ event, start, endBinding, taskDirectory = null, rootSessionId = null }) {
   if (!event || event.type !== 'tool_execution_end') return null;
   const tool = event.toolName;
-  if (tool !== 'bash' && tool !== 'eval') return null;
+  if (!CAPTURED_TOOLS.includes(tool)) return null;
+  const isFileTool = tool === 'edit' || tool === 'write';
   const details = event.result && typeof event.result === 'object' ? event.result.details : null;
   const interrupted = details?.source === 'interrupt_skipped';
   if (interrupted && details.execution !== 'started') return null;
@@ -107,7 +160,9 @@ export function buildReceipt({ event, start, endBinding, taskDirectory = null, r
   const asyncExec = !!(details && typeof details === 'object' && details.async);
   let exitCode = null;
   let exitCodeSource = 'unknown';
-  if (tool === 'bash') {
+  if (isFileTool) {
+    exitCodeSource = 'not_applicable';
+  } else if (tool === 'bash') {
     if (typeof details?.exitCode === 'number') {
       exitCode = details.exitCode;
       exitCodeSource = 'reported';
@@ -116,7 +171,9 @@ export function buildReceipt({ event, start, endBinding, taskDirectory = null, r
       exitCodeSource = 'sdk_terminal_success_contract';
     }
   }
-  const output = boundedText(resultText(event.result));
+  // File tools record NO result body: an edit result can carry the applied
+  // patch and a write result its content, so the receipt keeps metadata only.
+  const output = isFileTool ? { text: null, truncated: false } : boundedText(resultText(event.result));
   const input = boundedText(start?.text ?? null);
   const now = Date.now();
   const receipt = {
@@ -126,6 +183,9 @@ export function buildReceipt({ event, start, endBinding, taskDirectory = null, r
     root_session_id: start?.root_session_id ?? rootSessionId,
     at: new Date(now).toISOString(),
     at_ms: now,
+    start_observed_at: start?.start_observed_at ?? null,
+    start_observed_at_ms: start?.start_observed_at_ms ?? null,
+    start_observed_at_source: start?.start_observed_at_source ?? null,
     tool_call_id: typeof event.toolCallId === 'string' ? event.toolCallId : null,
     tool,
     status: interrupted ? 'interrupted' : isError ? 'failed' : 'completed',
@@ -145,9 +205,20 @@ export function buildReceipt({ event, start, endBinding, taskDirectory = null, r
   if (tool === 'bash') {
     receipt.command = input.text;
     receipt.command_truncated = input.truncated;
-  } else {
+  } else if (tool === 'eval') {
     receipt.script = input.text;
     receipt.script_truncated = input.truncated;
+  } else {
+    // File tool: identity + bounded targets only. The result status is the
+    // tool result, NOT a statement that the file's bytes changed, and no
+    // content or diff is ever stored.
+    receipt.targets = start?.targets ?? null;
+    receipt.targets_status = start?.targets_status ?? 'unknown';
+    receipt.control_targets = start?.control_targets ?? [];
+    receipt.effect = 'file_tool_call_observed_not_bytes_changed';
+    receipt.content_saved = false;
+    receipt.diff_saved = false;
+    receipt.output_saved = false;
   }
   if (!start) receipt.start_observed = false;
   if (start?.binding_status === 'unknown' || !endBinding) receipt.binding_status = 'unknown';

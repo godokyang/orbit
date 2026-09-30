@@ -4,7 +4,7 @@
 
 ## 当前交付
 
-用户已认可启动 prompt 并明确要求以 Goal 模式开始完整实现。Goal 已激活，目标是主方案全部必要行为与真实验收同次闭合，不设硬预算。Codex 总编排与审核，已复用同一 Herdr 布局中的四个 OMP 执行者；开发团队和被测 Orbit 原生团队分别记录。当前源码 package 为 0.7.19，已安装 clean 构建（commit `0faf1ce8f723f89059cc01054bd7ce5014a5587c`，digest `80b33374dbdad0154eb61fca0401414d77ba734b0b39ad70a14c09be88d74844`，2026-09-30T06:14:55Z 安装；OMP 18.3.4 未升级），未发布；不因安装宣称完整目标已验收。此前支持安装依次为 0.7.18（clean `90433694…`）与 0.7.17（clean `4a00ba70…`）。
+用户已认可启动 prompt 并明确要求以 Goal 模式开始完整实现。Goal 已激活，目标是主方案全部必要行为与真实验收同次闭合，不设硬预算。Codex 总编排与审核，已复用同一 Herdr 布局中的四个 OMP 执行者；开发团队和被测 Orbit 原生团队分别记录。当前源码 package 为 **0.7.20（待安装、未发布）**；**支持安装仍为 0.7.19** clean 构建（commit `0faf1ce8f723f89059cc01054bd7ce5014a5587c`，digest `80b33374dbdad0154eb61fca0401414d77ba734b0b39ad70a14c09be88d74844`，2026-09-30T06:14:55Z 安装；OMP 18.3.4 未升级）。包内标记不代表已安装行为，实际安装元数据待真实安装后另写一次；不因安装宣称完整目标已验收。此前支持安装依次为 0.7.18（clean `90433694…`）与 0.7.17（clean `4a00ba70…`）。
 
 主方案 §1.3 和逐项审计是冻结范围。内部实现依赖不是分期发布；自主派发的真实失败、资源归属、独立完成与停止是验收必需项。基线本地提交为 `4ce0b3a`、`8e3f0da`；0.7.11 检查点 `1ffec49` 保存覆盖门及之前有限校准、成本数据流、基准双接口、有效上下文和终态用量；两轮真实运行暴露交付证据、native yield 与正常退出缺陷。修复提交 `a1f9291` 已安装并完成 0.7.12 真实实测（历史，不重标）；0.7.17 已安装，本轮真实路径与开放问题见下。
 
@@ -14,9 +14,9 @@
 
 | 执行者 | 完整工作面 | 计划主要所有权 | 当前状态 |
 | --- | --- | --- | --- |
-| Q（`p1Q`） | 只读独立审查与外部探针 | 只读；不改源码、不改 fixture | 进行中：0.7.19 修复的 5 文件逻辑审查 PASS（`/private/tmp/orbit-reviewer-429-fix/review-q.json`，runner lock 一行同步、frozen 真实安装 exit 0）；reconcile 准备态的独立审查与 P1—P6 探针已写 `/private/tmp/orbit-reconcile-acceptance-ucWZ9UmM/controller/independent-review-and-probes.json` |
-| R（`p1R`） | 源码修复、回归与安装 | 源码与运行元数据 | 进行中：0.7.19 真实 provider 错误分类修复已装入（full npm test exit 0，日志 `/private/tmp/orbit-reviewer-429-fix/npm-test.log`）；已交付 02a5eda7 根因只读报告（成员结算不随工作单元终裁、`members_settled?` 阻断 pending 通知且无超时出口；停止时 bridge 读失败属次生），R 报告的 F1—F3 只是候选，Root 实施票**不采**“终裁单独置 completed／failed”，方向为多事实结算（原生本派发结果／真实 error＋精确 work-unit 核验＋真实执行就绪；`acceptedAt` 不伪盖；缺证一次通知 Root、不自动 needs_user／stop_unconfirmed／失败）；**修复未落地，R 实施、Q 待独立审核** |
-| S（`p1S`） | 事实收集、fixture 与文档 | `/private/tmp` fixture 与六份 docs | 进行中：reconcile 两臂准备与冻结、member-positive/rebind/finding-order 终态事实归档 |
+| Q（`p1Q`） | 只读独立审查与外部探针 | 只读；不改源码、不改 fixture | 进行中：0.7.19 修复的 5 文件逻辑审查 PASS（`/private/tmp/orbit-reviewer-429-fix/review-q.json`）；0.7.19 修复逻辑与组合接缝复核 PASS（`independent-review-combined-frozen.json`，含自选成员 `work_unit_id` 接缝）；reconcile 准备态的独立审查与 P1—P6 探针已写 `/private/tmp/orbit-reconcile-acceptance-ucWZ9UmM/controller/independent-review-and-probes.json`；**当前只读审剩余缺口** |
+| R（`p1R`） | 源码修复、回归与安装 | 源码与运行元数据 | 进行中：0.7.19 真实 provider 错误分类修复已装入（full npm test exit 0，日志 `/private/tmp/orbit-reviewer-429-fix/npm-test.log`）；已交付 02a5eda7 根因只读报告（成员结算不随工作单元终裁、`members_settled?` 阻断 pending 通知且无超时出口；停止时 bridge 读失败属次生），R 报告的 F1—F3 只是候选，Root 实施票**不采**“终裁单独置 completed／failed”，方向为多事实结算（原生本派发结果／真实 error＋精确 work-unit 核验＋真实执行就绪；`acceptedAt` 不伪盖；缺证一次通知 Root、不自动 needs_user／stop_unconfirmed／失败）；**多事实结算语义已写入合同（2026-09-30 修订）**；S 定版（8 文件）经 Q 独立审 PASS 后集成，组合 9 文件在先前定版上 8 条相关套件 exit 0。**源码已集成**（主仓含成本表示补丁，4 个成本文件与 S frozen SHA 一致；合同保留两轮逻辑）；自选成员 `work_unit_id` 接缝经 Q 独立复核 PASS（`task_runtime.rb` `c01a2df3…`、`task_runtime_test.rb` `b1c957b7…`、合同 `568edd7e…`）但**未实测**；**R 当前跑唯一组合 full npm**，package 已 bump 0.7.20、**未安装**（支持安装仍 0.7.19） |
+| S（`p1S`） | 事实收集、fixture 与文档 | `/private/tmp` fixture 与六份 docs | 进行中：reconcile 两臂准备与冻结、member-positive/rebind/finding-order 终态事实归档；路由资源事实报告经 Root 复核撤回两处不成立推断（Go 事实的生效日、日期门结论）后重做并冻结（0 条可导入、10 条字段级阻塞、三份真实台账证据；该报告无独立 PASS，独立 PASS 属 history-gap 源码定版），随后按 0.7.19 源码修正六份文档；成本表示补丁（显式未知生效日 archive／list，永不覆盖／定价／排序）已由 R 集成进源码、未安装。**当前进行七份文档同步（不含源码／合同／主方案）** |
 | Codex | 编排、集成与审核 | 当前代码与文档 | 编排三个执行者并审核其回执；不声称接管全部体力代码实现 |
 
 已结束的 pane 不再占用界面；被测 Orbit 原生团队与开发执行者分别计证。无需人为占满四个席位，也不将他们替换为内部 Codex 子 Agent。
@@ -47,6 +47,9 @@
 
 [本次验收](../reference/mixed-model-real-acceptance-20260929.md)及 JSON 记录新 Herdr 入口、安装 digest、精确任务与原始用量。当前支持安装 0.7.19（源码 clean `0faf1ce8…`，digest `80b33374…`，2026-09-30T06:14:55Z；OMP 18.3.4 未升级）；此前依次为 0.7.18（clean `90433694…`，05:02:32Z）与 0.7.17（clean `4a00ba70…`）；此前支持安装为 0.7.12／`a1f9291`，digest `3f3446eb02ef794c917f5affc11d74d137f68d4167467fe78346543d92880613`，安装时源码 clean；此前 0.7.11／`1ffec49` 的 digest `7a9c57577866fb8e4308367330e53ec10c089b344e37cccffa05b3011101b07c`。普通 omp 旗舰对照和 orbit omp 负例分开，开发 B/C/D/E 不算被测成员。
 
+- **history-gap 组合**：S 定版通过 Q 静态审（`/private/tmp/orbit-history-gap-c4Qfwfly/controller-records/independent-review-s-fixed.json`，PASS；其回放是**控制器确定性重放**，不是新 Orbit 实测），已并入；相关套件已通过，0.7.20 组合完整 `npm test` exit 0（`/private/tmp/orbit-regression-0.7.20/npm-test.log`），未装实测。自选成员的 `work_unit_id` 关联缺失已由 R 精确恢复，并经 **Q 独立复核 PASS**（`task_runtime.rb` sha256 `c01a2df3…`、`task_runtime_test.rb` `b1c957b7…`、合同 `568edd7e…`、`final-integrated.patch` `8347fa0b…`；`resolve_member_unit_id` 按精确 thread_id＋tool_call_id 取该单元最新派发，要求 input_digest 与 artifact_root 均为当前，模型不符即漂移不匹配、歧义为 nil，绝不按相似型号或时间接近归属），**未安装、未实测**；**源码回归不当作新构建真实验收通过**。
+- **reconcile 两臂（2026-09-30）**：baseline 臂用 plain OMP 18.3.4（非 Orbit 验收），有效轮真实 8/8（最终回执 `node --test 8/8`；终端观测 `controller-records/baseline-terminal-observation.json`，开局冻结探针回放 2/6 通过对应未实现起点 `harness-smoke-baseline.json`；一次 Controller 提示错误轮单列不合并）；mixed 臂已备**未跑**（`controller-records/mixed-launch-plan.json` status=prepared, NOT launched，等待合并修复复核、全量回归、clean commit 与新安装构建）。
+- **真实成本报告仍全为 unknown（2026-09-30）**：对三份真实台账运行 `route-resources report`（store 为空）得 107／111／41 次调用全部 unknown、`cash=[]`；`02a5eda7` 的 gap 分为 37（无已核实事实，codex）、37（缺账户范围，zenmux 36＋opencode-go 1）、33（缺开始时间，typesafe 27＋kimi-code 5＋opencode-go 1）。第一方价格／计划资料存在，但页面未给发布生效日，事实因此 0 条可落盘，未用目录价或推断日期补账。
 - 负例 passed：实际一行修改和验证，当前 Jev 价值门未过，未建立任务／hint／原生成员；正常退出及派生进程结束已确认。
 - 旗舰对照：独立完成 CSV，冻结八项 8/8；十八次 SDK 分类用量和退出留证，C 独立按规范静态核对及额外本地探针通过。
 - 第一混合轮 `cae67791-af23-4058-8096-30d18b24f7f6` 自行完成，固定八项通过；独立终检、程序 complete／confirmed stop 及原生退出留证，但无成员派发。第二轮 `b410702f-039a-4a83-9365-7a67c8a1fd83` 的当前 Jev hint→原生成员→hub→Root 集成发生，固定八项通过；需求明确要求交接，普通自主选择仍待证明。七次 yield 被拦导致成员无 acceptedAt，终检后仍未通知；原生退出实际进程结束，但程序 stop_unconfirmed，不能算通过。

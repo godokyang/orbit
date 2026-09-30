@@ -6,6 +6,8 @@
 
 用户已认可主文档；形成本文时的授权是审视代码并新增附属文档。本文记录该次审视的现状和后续建议，不替代产品语义文件。后续文档整理只修正阅读入口与引用，不把这些建议写成已实施。后续用户补充明确完整目标一次交付、不设硬预算；实施步骤按依赖拆分，不将关键目标另推下一期，也不把“可以调整架构”解释为必须重写底层。
 
+**阅读口径**：A01—F10 各表的状态标签是 2026-09-29 在原审视基线（`0.7.10`／`323408b` 工作区）上的初审判定，属历史快照。判断现行行为请以下方“当前实现对应表”（按**安装** `0.7.19`／`0faf1ce` 源码逐项核对；源码 package 已升至 `0.7.20` 待安装，已集成但未安装的补丁在行内单独注明）与[合同](../../contracts/task-runtime.md)、ADR-008/009 为准；例如 F01、F03、F04 的“未实现／新增”不代表今天没有成本数据流，W1—W10 也不能因某条接线完成就机械勾选。
+
 本次 Goal 已获实现授权。下表保留原审计基线；以下实施进度单列，不能把一处修复当整项验收通过。已采纳的替换语义见 [ADR-009 §6](../adr/009-user-selected-model-pool.md#6-已采纳的替换决定与实现接缝实施中)。
 
 | 项目 | 本次工作区进度 | 尚未闭合 |
@@ -40,6 +42,28 @@ E04（§7、§11.2）覆盖接线在 `1ffec49`／0.7.11 安装后实测。两轮
 | 架构选项／待验证 | 主文档允许探索，但收益或宿主能力尚未证明；不是立即重构任务 |
 
 “删除”主要指删除旧选择规则、问题及其活跃消费者，不是删除所有包含时间的代码，也不是抹除旧判断记录。
+
+### 当前实现对应表（按安装 `0.7.19`／`0faf1ce` 源码核对，2026-09-30）
+
+本表只说明**源码接线现状**，不是完成条件已证明；未列出的验收（新安装真实闭环、同质量对照、成员结算收尾）仍以[当前计划](vision-completion-plan.md)为准，W1—W10 保持未勾选。
+
+| 审计项 | 快照状态（2026-09-29） | 安装 0.7.19 源码现状 | 源码证据 | 仍未闭合 |
+| --- | --- | --- | --- | --- |
+| A02—A05、C05—C06 | 旧规则／部分实现 | 入口改为 `execution_authorized` ＋ `delegation_value`／`supervision_value` 两条收益路径，任一过门；引文、裸继续不猜目标；题义版本 `orbit-entry-3`，有限默认放行限声明的 Git／有界交付域 | [prestart.rb](../../lib/orbit/prestart.rb) 入口问题与判门（第 42 行起、332 行） | 域外泛化与新安装真实闭环未证明 |
+| B02 | 未实现／新增 | 成员链已消费目录先验（与检查者同一 overview 实例） | [member_model_selector.rb](../../lib/orbit/member_model_selector.rb)（`@overview`、`model_overview_prior`） | 真实采纳、交付归属与完整身份未验收 |
+| B05、B06 | 部分实现／调整 | 检查者身份按宿主已解析路由推导：`identity_for(catalog, model)` 取 `catalog["routes"][model]`，缺失或非枚举值才回落 `unknown`，`reasoning` 暂无声明时保持 `unknown`；`lookup` 仍按四字段精确匹配（不是固定查 `unknown/unknown`） | [checker_model_selector.rb](../../lib/orbit/checker_model_selector.rb) `identity_for`（第 323 行起）／`lookup`、[openrouter-model-map.json](../../lib/orbit/data/openrouter-model-map.json)（5 条路由条目） | 缺口在映射覆盖率与逐调用真实计费桶，不在查询方式 |
+| B07、B09 | 旧规则／未实现 | 三个指数（coding／agentic／intelligence）都可作为任务相关事实，无 coding 通用准入门；缺失指标如实缺口 | [openrouter_model_overview.rb](../../lib/orbit/openrouter_model_overview.rb)（`BENCHMARK_KEYS`、`lookup(indices:)`） | 只有快照级 `as_of`，无逐模型测量日期 |
+| B10、B11 | 部分实现／未实现 | 先验携带 `measurement_date(_status)`、`benchmark_as_of`、`conflicts`／`hold_reason`，日期未知与潜在冲突分别标注 | overview `PRIOR_KEYS`；[model_capability_facts.rb](../../lib/orbit/model_capability_facts.rb) `evidence_relations` | 冲突的真实呈现与放行资格待实机 |
+| C01、C02、C04 | 旧规则／删除 | 时间与粗费用问题、排序键退出新路径；旧键只出现在排除表和历史显示分支 | [model_quality_policy.rb](../../lib/orbit/model_quality_policy.rb)（已删 score keys、`OMITTED_STATE_KEYS`）、[model_evidence_cache.rb](../../lib/orbit/model_evidence_cache.rb)（`LEGACY_SELECTION_METRIC`）、`cli.rb` 补证文案；[task_view.rb](../../lib/orbit/task_view.rb) 旧版本分支显式标注“不用于新版自动推荐” | 说明／状态的历史显示仍需按旧版本解释 |
+| C03 | 旧规则／删除 | 生产链未见无目录整组 fallback 的调用方 | `connection.rb`／`member_model_selector.rb` 检索无命中 | 宿主升级时复核 |
+| D02、D03 | 部分实现／旧规则 | 工作单元记录与串行交接进入选择输入；不再要求并行另一工作面 | [work_unit.rb](../../lib/orbit/work_unit.rb)、`model_quality_policy.rb` 的交接题义 | 真实失败升级未验收 |
+| E04 | 未实现／新增 | 覆盖门已接线：`coverage_required` 与逐项 requirement 状态参与终检资格 | [task_runtime.rb](../../lib/orbit/task_runtime.rb)（`requirement_coverage_status`）、[requirement_coverage.rb](../../lib/orbit/requirement_coverage.rb) | 真实任务的覆盖质量待验 |
+| E06 | 已实现／保留 | 完成门仍要求成员 settled；`members_settled?` 对 `02a5eda7`（两名成员 registered／idle、无 `accepted_at`）为 false，故该任务等待通知被阻断。**这是该样本的成员结算缺口，不是全局恒 false**：无成员任务 `1216aeef` 真实完成并有 confirmed stop | `task_runtime.rb` `members_settled?`／`completion_gate` | 多事实结算语义已写入合同（2026-09-30 修订）；实现已并入，自选成员 unit 归属接缝经 Q 独立复核 PASS，但**未安装、未实测**（无 0.7.20 安装） |
+| F01、F03、F07 | 未实现／新增 | 已接路由资源事实结构、预测生产者与消费者、诚实 unknown 与缺证记录；源码另集成显式未知生效日的 archive／list（未安装，不覆盖／不定价／不排序） | [route_resource_facts.rb](../../lib/orbit/route_resource_facts.rb)、[route_resource_store.rb](../../lib/orbit/route_resource_store.rb)、[route_cost_inputs.rb](../../lib/orbit/route_cost_inputs.rb)、`session_summary.rb` | 当前抓取的资料无发布生效日（另有账户范围、已核实路由各自未闭合）⇒ 0 条事实可落盘；schema 本身允许价格事实落盘，三项数据缺口任一未闭合即不可用；不得用“最后更新”顶替生效日 |
+| F04、F05、F06 | 未实现／部分实现 | 逐调用账本已接，pending 不封账、失败与晚到用量尽量保留 | [resource_call_ledger.rb](../../lib/orbit/resource_call_ledger.rb)、`task_runtime.rb` 的 `accumulate_jev_usage` 与回执路径 | 真实失败链用量仍可能未知 |
+| F08 | 范围已明确 | 不新增硬预算或费用停止门（用户已明确不需要） | — | 保持 |
+| F09、F10 | 未实现／源码可确认 | 同质量对照仍未完成；reconcile baseline 臂真实 8/8 属 plain OMP 基线，mixed 臂未跑 | [当前计划](vision-completion-plan.md) 真实验收段 | 未证明节省；0.7.10 不得描述成已上线全部新行为 |
+
 
 ## 2. 什么时候唤起 Orbit
 

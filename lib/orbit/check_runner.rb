@@ -37,6 +37,9 @@ module Orbit
     # newest tail, and the rendered JSON is hard-capped. Instruction,
     # amendments and named basis are never compressed.
     CONTEXT_BYTE_LIMIT = 65_536
+    # Bounded check-history window kept in the program context (the anchor is
+    # always kept in addition, even when it is older than this window).
+    CHECK_HISTORY_RECENT_CAP = 6
     CONTEXT_STRING_CAP = 2_000
     # The Root's actually delivered final answer (root observations entry with
     # kind agent_message) is the checker's primary delivery evidence for
@@ -70,7 +73,7 @@ module Orbit
       "decision findings dropped"
     ].freeze
     CONTEXT_KEYS = %w[
-      root root_verifications task_delivery task_git review_focus findings recent_events recheck execution_members decisions dispute
+      root root_verifications task_delivery task_git review_focus findings recent_events check_history recheck execution_members decisions dispute
       estimate hard_deadline elapsed_seconds project_rules uncopied_entries
     ].freeze
     CONTEXT_FINDING_FIELDS = %w[id requirement evidence action status check].freeze
@@ -203,9 +206,16 @@ module Orbit
       parts << "## Current execution context (program record)\n\n" \
                "This record is deterministic and bounded: long strings keep a prefix plus " \
                "`…[original length:sha256]`, growing lists keep their newest entries, and " \
-               "context_compression, findings_omitted, recheck_omitted and review_focus_omitted " \
-               "record what was trimmed. The original instruction, amendments and named basis " \
-               "above are complete and are not compressed.\n\n" \
+               "context_compression, findings_omitted, recheck_omitted, review_focus_omitted and " \
+               "check_history.recent_omitted record what was trimmed. The original instruction, amendments " \
+               "and named basis above are complete and are not compressed.\n\n" \
+               "`check_history` lists program-computed facts about earlier checks on this task: the anchor is " \
+               "the EARLIEST valid artifact review of the CURRENT input on the real artifact root — it keeps its own " \
+               "historical artifact_digest (any edit changes the current digest, so an edited artifact never evicts " \
+               "it), failed or stale checks are never promoted, and it grants no current completion eligibility — " \
+               "followed by a bounded recent window; omitted checks remain counted in omitted_count/omitted_numbers. These are " \
+               "history facts only — they never grant current completion eligibility, and no finding from an " \
+               "older version is imported as a pending clue.\n\n" \
                "```json\n#{context_text}\n```"
       parts << "## Fixed artifact snapshot\n\n" \
                "Your working root is the fixed snapshot directory selected by --cd: a read-only copy of the " \
@@ -300,6 +310,30 @@ module Orbit
       { "context_compression" => "program context omitted: it did not fit in #{CONTEXT_BYTE_LIMIT} bytes" }
     end
 
+    # Bounded check-history projection. The current-input anchor and a bounded
+    # recent window survive; everything dropped is reported as a count, so an
+    # important older check is never silently replaced by a bare absence.
+    def compress_check_history(history, caps)
+      return nil unless history.is_a?(Hash)
+
+      limit = [caps[:list_limit], CHECK_HISTORY_RECENT_CAP].min
+      recent = Array(history["recent"])
+      kept = recent.last(limit)
+      compressed = {
+        "eligibility" => history["eligibility"],
+        "current_input_digest" => history["current_input_digest"],
+        "current_artifact_digest" => history["current_artifact_digest"],
+        "total_checks" => history["total_checks"],
+        "anchor" => history["anchor"] && bound_value(history["anchor"], caps),
+        "recent" => kept.map { |entry| bound_value(entry, caps) },
+        "omitted_count" => history["omitted_count"],
+        "omitted_numbers" => Array(history["omitted_numbers"]).last(limit),
+        "amendments" => Array(history["amendments"]).last(limit).map { |entry| bound_value(entry, caps) }
+      }
+      compressed["recent_omitted"] = recent.length - kept.length if recent.length > kept.length
+      compressed
+    end
+
     def build_compressed_context(context, caps, level)
       compressed = { "root" => compress_root(context["root"], caps) }
       if context["root_verifications"].is_a?(Array)
@@ -328,6 +362,8 @@ module Orbit
       compressed["recent_events"] = events.map do |event|
         bound_value(event, caps, string_cap: [caps[:string_cap], CONTEXT_EVENT_CAP].min)
       end
+      history = compress_check_history(context["check_history"], caps)
+      compressed["check_history"] = history if history
       recheck, recheck_omitted = compress_recheck(context["recheck"], caps)
       compressed["recheck"] = recheck
       compressed["recheck_omitted"] = recheck_omitted if recheck_omitted
@@ -341,7 +377,9 @@ module Orbit
       compressed["elapsed_seconds"] = context["elapsed_seconds"]
       compressed["project_rules"] = bound_rule_paths(context["project_rules"], 500)
       compressed["uncopied_entries"] = level.zero? ? bound_value(context["uncopied_entries"], caps) : []
-      (context.keys - CONTEXT_KEYS).each { |key| compressed[key] = bound_value(context[key], caps) }
+      (context.keys - CONTEXT_KEYS - ["check_history"]).each do |key|
+        compressed[key] = bound_value(context[key], caps)
+      end
       if level.positive? || caps != CONTEXT_CAPS
         compressed["context_compression"] = {
           "string_cap" => caps[:string_cap],

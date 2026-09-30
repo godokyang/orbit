@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createOrbitHost, toolArgs, toolDescription } from './host.mjs';
-import { captureStart, buildReceipt, appendReceipt, readReceipts } from './root-verifications.mjs';
+import { captureStart, buildReceipt, appendReceipt, readReceipts, CAPTURED_TOOLS } from './root-verifications.mjs';
 import { validateMemberTool, createEditProjection } from './work-unit-scope.mjs';
 import { observeNativeCalls, flushNativeCalls } from './native-call-recorder.mjs';
 
@@ -88,6 +88,58 @@ const memberStopConfirmations = new Map();
 // dispose) instead of inferring from a tombstone. Entries are removed only
 // on confirmed stop.
 const memberRetainedSessions = new Map();
+
+// Last-known registry snapshot per member id, captured while the ref was still
+// readable. When OMP detaches/unregisters a finished member's ref, read-side
+// member_state/member_result fall back to this snapshot so an already
+// observed terminal fact (status, lifecycle, persisted output path, resolved
+// model) does not disappear with the ref. Read-only: a member with neither a
+// live ref nor a snapshot is still "not owned"; stop_member keeps its own
+// retained-session barrier, and send_member never uses this surface.
+const memberRetainedSnapshots = new Map();
+
+function captureMemberSnapshot(id, ref) {
+  try {
+    if (!id || !ref) return;
+    memberRetainedSnapshots.set(id, {
+      status: ref.status ?? null,
+      lifecycle: ref.lifecycle ?? null,
+      activity: ref.activity ?? null,
+      sessionFile: ref.sessionFile ?? null,
+      history: ref.history ? { outputPath: ref.history.outputPath ?? null, resolvedModel: ref.history.resolvedModel ?? null } : null,
+      capturedAt: new Date().toISOString(),
+    });
+  } catch { /* observation only */ }
+}
+
+// The member's CURRENT native turn error fact, from the SDK's own session
+// objects (sessionManager branch), not from prose: the branch's LAST
+// assistant message ending in stopReason "error". Bounded and structured;
+// a newer non-error turn yields null, so a stale error never masquerades as
+// current.
+function lastTurnError(session) {
+  try {
+    const branch = session?.sessionManager?.getBranch?.() ?? [];
+    for (let i = branch.length - 1; i >= 0; i--) {
+      const item = branch[i];
+      if (item?.type !== 'message' || item.message?.role !== 'assistant') continue;
+      const message = item.message;
+      if (message.stopReason !== 'error') return null;
+      const errorMessage = typeof message.errorMessage === 'string' ? message.errorMessage : '';
+      return {
+        message_id: item.id ?? null,
+        at: item.timestamp ?? null,
+        stop_reason: 'error',
+        error_status: typeof message.errorStatus === 'number' ? message.errorStatus : null,
+        error_id: message.errorId ?? null,
+        error_message: errorMessage.replace(/\s+/g, ' ').trim().slice(0, 200),
+        provider: message.provider ?? null,
+        model: message.model ?? null,
+      };
+    }
+  } catch { /* observation only */ }
+  return null;
+}
 
 // Native ask call observation, also MODULE-scoped for the same re-binding
 // reason: question excerpts are cached from the tool_execution_start events
@@ -862,7 +914,9 @@ export function installOmpExtension(pi, sdk) {
     } catch { return null; }
   }
   function observeRootVerifyStart(event, session) {
-    if (event.toolName !== 'bash' && event.toolName !== 'eval') return;
+    // bash/eval plus Root file tools (edit/write): the latter add identity and
+    // bounded target metadata only, never content or a diff.
+    if (!CAPTURED_TOOLS.includes(event.toolName)) return;
     if (typeof event.toolCallId !== 'string') return;
     if (rootVerifyStarts.size >= ROOT_VERIFY_STARTS_CAP) rootVerifyStarts.delete(rootVerifyStarts.keys().next().value);
     let sessionCwd = null;
@@ -884,7 +938,7 @@ export function installOmpExtension(pi, sdk) {
     rootVerifyStarts.set(event.toolCallId, start);
   }
   function observeRootVerifyEnd(event, session) {
-    if (event.toolName !== 'bash' && event.toolName !== 'eval') return;
+    if (!CAPTURED_TOOLS.includes(event.toolName)) return;
     const start = typeof event.toolCallId === 'string' ? rootVerifyStarts.get(event.toolCallId) ?? null : null;
     if (typeof event.toolCallId === 'string') rootVerifyStarts.delete(event.toolCallId);
     // Keep the START owner when a new task is bound while the command runs.
@@ -1092,6 +1146,7 @@ export function installOmpExtension(pi, sdk) {
         // Retain for observable stop confirmation after registry detachment.
         memberRetainedSessions.set(ref.id, ref.session);
       }
+      captureMemberSnapshot(ref.id, ref);
       if (drifted) {
         refuseMember(ref.id, taskDir, base, 'id_drift');
         return;
@@ -1716,9 +1771,11 @@ export function installOmpExtension(pi, sdk) {
   // as recorded in the task's members.json. Shapes:
   //   member_state  { id } ->
   //     { id, registry_status, streaming, model, activity, session_id,
-  //       session_file, output_path, active_tools, async_jobs }
+  //       session_file, output_path, active_tools, async_jobs,
+  //       session_attached, retained_snapshot, lifecycle, last_turn_error }
   //   member_result { id } ->
-  //     { id, registry_status, output_path, output_text (bounded 2000 chars) }
+  //     { id, registry_status, output_path, output_text (bounded 2000 chars),
+  //       output_mtime, output_size }
   //   send_member   { id, text } -> { id, action: 'native_custom_message' }
   //     (steer custom message; reaches waiting members like Root corrections)
   //   stop_member   { id } ->
@@ -1726,14 +1783,31 @@ export function installOmpExtension(pi, sdk) {
   //       async_jobs_settled }  — aborts the turn, cancels owner-scoped async
   //     jobs and REAPS them; a settle timeout throws instead of reporting
   //     success. Parked/never-started members (no live session) error.
+  // A detached registry ref is read-served from the last readable snapshot
+  // (member_state/member_result only); last_turn_error is the SDK session's
+  // own structured last assistant error turn, never prose-based.
   async function memberDispatch(request) {
     // Native /exit can unregister the child before Orbit's shutdown hook.
-    // Only stop may use our exact retained session (or an already verified
-    // stop receipt); reads/sends still require a live registry identity.
+    // stop_member may use our exact retained session (or an already verified
+    // stop receipt); reads fall back to a retained read-only snapshot, and
+    // send_member still requires a live registry identity.
     const registered = sdk.AgentRegistry.global().get(request.id);
+    if (registered) captureMemberSnapshot(request.id, registered);
     const retainedStop = request.method === 'stop_member' && nativeMemberIds.has(request.id) &&
       (memberRetainedSessions.has(request.id) || memberStopConfirmations.has(request.id));
-    const ref = registered ?? (retainedStop ? { id: request.id, status: null, session: null } : null);
+    // Read-side retention: a finished member's registry ref can be detached
+    // (native /exit, park/abort) with no public signal. member_state and
+    // member_result fall back to the last READABLE snapshot so an already
+    // observed terminal fact (status, lifecycle, persisted output) does not
+    // vanish with the ref. Reads are read-only: ownership (nativeMemberIds +
+    // memberTaskFor) and the stop barrier keep their exact rules, and
+    // send_member still requires a live session.
+    const retainedRead = (request.method === 'member_state' || request.method === 'member_result') &&
+      nativeMemberIds.has(request.id) && memberRetainedSnapshots.has(request.id);
+    const snapshot = retainedRead ? memberRetainedSnapshots.get(request.id) : null;
+    const ref = registered ?? (retainedStop ? { id: request.id, status: null, session: null }
+      : (snapshot ? { id: request.id, status: snapshot.status, session: null, lifecycle: snapshot.lifecycle,
+          activity: snapshot.activity, sessionFile: snapshot.sessionFile, history: snapshot.history } : null));
     if (!ref || !nativeMemberIds.has(ref.id))
       throw new Error(`member is not owned by this task: ${request.id}`);
     const requireActive = request.method === 'send_member';
@@ -1742,27 +1816,50 @@ export function installOmpExtension(pi, sdk) {
     const session = ref.session;
     switch (request.method) {
       case 'member_state':
-        if (!session) return { id: ref.id, registry_status: ref.status, streaming: null, model: ref.history?.resolvedModel ?? null,
-          activity: ref.activity ?? null, session_id: null, session_file: ref.sessionFile, output_path: ref.history?.outputPath ?? null,
-          active_tools: null, async_jobs: null, session_attached: false,
-          retained_session_seen: memberRetainedSessions.has(ref.id),
-          lifecycle: ref.lifecycle ?? null };
+        if (!session) {
+          const retainedSession = memberRetainedSessions.get(ref.id) ?? null;
+          const observed = { id: ref.id, registry_status: ref.status,
+            streaming: retainedSession?.isStreaming === true ? true : null,
+            model: ref.history?.resolvedModel ?? null,
+            activity: ref.activity ?? null, session_id: null, session_file: ref.sessionFile,
+            output_path: ref.history?.outputPath ?? null,
+            active_tools: null, async_jobs: null, session_attached: false,
+            retained_session_seen: Boolean(retainedSession), retained_snapshot: retainedRead,
+            lifecycle: ref.lifecycle ?? null };
+          // No live session and no retained one means the turn error is
+          // UNKNOWN, not absent: omit the key so the runtime keeps its last
+          // observed fact instead of treating unknown as "no error".
+          if (retainedSession) observed.last_turn_error = lastTurnError(retainedSession);
+          return observed;
+        }
         return { id: ref.id, registry_status: ref.status, streaming: session.isStreaming === true,
           model: session.model ? `${session.model.provider}/${session.model.id}` : (ref.history?.resolvedModel ?? null),
           activity: ref.activity ?? null, session_id: session.sessionId, session_file: ref.sessionFile,
           output_path: ref.history?.outputPath ?? null,
           active_tools: memberActiveTools.has(ref.id) ? memberActiveTools.get(ref.id).size : null,
           async_jobs: session.getAsyncJobSnapshot ? session.getAsyncJobSnapshot() : null,
-          session_attached: true, retained_session_seen: memberRetainedSessions.has(ref.id), lifecycle: ref.lifecycle ?? null,
-          last_delivery_error: memberDeliveryErrors.get(ref.id) ?? null };
+          session_attached: true, retained_session_seen: memberRetainedSessions.has(ref.id),
+          retained_snapshot: retainedRead, lifecycle: ref.lifecycle ?? null,
+          last_delivery_error: memberDeliveryErrors.get(ref.id) ?? null,
+          last_turn_error: lastTurnError(session) };
       case 'member_result': {
         const outputPath = ref.history?.outputPath ?? null;
         let outputText = null;
+        let outputMtime = null;
+        let outputSize = null;
         if (outputPath) {
-          try { outputText = (await fs.readFile(outputPath, 'utf8')).slice(0, 2000); }
-          catch { outputText = null; }
+          try {
+            const [text, stats] = await Promise.all([
+              fs.readFile(outputPath, 'utf8'),
+              fs.stat(outputPath),
+            ]);
+            outputText = text.slice(0, 2000);
+            outputMtime = stats.mtime.toISOString();
+            outputSize = stats.size;
+          } catch { outputText = null; }
         }
-        return { id: ref.id, registry_status: ref.status, output_path: outputPath, output_text: outputText };
+        return { id: ref.id, registry_status: ref.status, output_path: outputPath, output_text: outputText,
+          output_mtime: outputMtime, output_size: outputSize };
       }
       case 'send_member': {
         if (!session) throw new Error(`member session is not live: ${ref.id}`);
@@ -2348,6 +2445,7 @@ export function installOmpExtension(pi, sdk) {
         memberRetainedSessions.set(agentId, ref.session);
         trackMemberTools(agentId, ref.session);
       }
+      captureMemberSnapshot(agentId, ref);
     } catch { /* observation only; never block the request path */ }
     // Late-attach workspace window: when the registration event saw no live
     // session, the real runtime cwd is applied here instead — still before the

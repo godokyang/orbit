@@ -107,6 +107,7 @@ module CheckRunnerContextTest
     check_review_focus_is_explicit_and_deterministic
     check_review_focus_is_bounded_and_traceable
     check_non_hash_context_is_bounded
+    check_check_history_stays_bounded_and_traceable
     puts "CHECK_RUNNER_CONTEXT_TEST_PASS (deterministic)"
   end
 
@@ -469,6 +470,44 @@ module CheckRunnerContextTest
     check(record.dig("review_focus_omitted", "ids_sha256") == Digest::SHA256.hexdigest(JSON.generate(omitted)),
           "the digest covers every omitted focus path")
     check(record.dig("findings", "f-1", "evidence") == "missing b", "open findings keep their priority")
+  end
+
+  # History-gap ticket: the check-history channel survives compression, keeps
+  # the current-input anchor, and reports what it dropped instead of hiding it.
+  def check_check_history_stays_bounded_and_traceable
+    recent = (3..12).map { |number| { "number" => number, "role" => "reviewer", "kind" => "artifact" } }
+    context = base_context.merge("check_history" => {
+      "eligibility" => "history facts only; not current completion eligibility",
+      "current_input_digest" => "sha256:in", "current_artifact_digest" => "sha256:art",
+      "total_checks" => 41,
+      "anchor" => { "number" => 2, "terminal" => "stale", "stale_reasons" => ["workspace"] },
+      "recent" => recent, "omitted_count" => 35, "omitted_numbers" => [1, 2],
+      "amendments" => [{ "at" => "2026-09-30T05:10:00Z", "input_digest_after" => "sha256:a" }]
+    })
+    record = parsed(context).fetch("check_history")
+    check(record["anchor"]["number"] == 2, "the current-input anchor survives context compression")
+    check(record["recent"].last["number"] == 12 && record["recent"].length <= 6,
+          "the recent window stays bounded and keeps the newest entries")
+    check(record["recent_omitted"] == recent.length - record["recent"].length,
+          "dropped recent entries are counted, never silently absent")
+    check(record["omitted_count"] == 35 && record["omitted_numbers"] == [1, 2],
+          "the omission facts stay traceable after compression")
+    check(record["eligibility"].include?("not current completion eligibility"),
+          "the channel keeps its history-only disclaimer")
+    check(JSON.generate(compress(context)).bytesize <= Orbit::CheckRunner::CONTEXT_BYTE_LIMIT,
+          "the check-history channel stays inside the 64KiB cap")
+    over = base_context.merge("check_history" => {
+      "eligibility" => "history facts only; not current completion eligibility",
+      "current_input_digest" => "sha256:in", "current_artifact_digest" => "sha256:art", "total_checks" => 999,
+      "anchor" => { "number" => 1, "terminal" => "stale" },
+      "recent" => (1..200).map { |number| { "number" => number, "evidence" => long_text("h#{number}", 2_000) } },
+      "omitted_count" => 800, "omitted_numbers" => (1..20).to_a, "amendments" => []
+    })
+    rendered = JSON.generate(compress(over))
+    check(rendered.bytesize <= Orbit::CheckRunner::CONTEXT_BYTE_LIMIT && JSON.parse(rendered),
+          "a huge check history still yields valid JSON inside the cap")
+    check(JSON.parse(rendered).dig("check_history", "anchor", "number") == 1,
+          "even under pressure the anchor is not dropped before the recent tail")
   end
 
   def check_non_hash_context_is_bounded

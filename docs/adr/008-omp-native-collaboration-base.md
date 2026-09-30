@@ -46,6 +46,11 @@ Orbit 自建的执行成员没有直接使用 OMP 的 `task/hub` 协作，成员
 
 Orbit 不在任务结束后自动调模型作缺陷分析，不上传 `.orbit`，也不让独立交付检查者读取任务记录取代固定快照；用户自愿分享单任务证据包后，开发者另行分析。运行中可主动截取导出，不将该时间点的材料称为完整任务结论。原因是事实采集与产品缺陷归因的证据标准不同：先确保可复核，再由拿到资料的一方判断。
 
+## 2026-09-30 补充记录：成员结算语义已定（合同已写，未安装实测）
+
+- **成员结算不随工作单元终裁驱动**：0.7.18 真实任务 `02a5eda7` 显示，成员原生正常返回与真实 provider 错误（Go 429）都停在 `status=registered`／`registry_status=idle`、无 `accepted_at`；Root 对工作单元的 accept／reject 裁决不驱动 runtime 的成员结算，`members_settled?` 恒 false，故完成门要求的“成员已结算”无法满足、`pending_finalization` 通知被阻断且无超时出口。R 的只读根因报告（`/private/tmp/orbit-member-positive-N0ghF3bI/controller-records/finalization-gap-analysis.json`）中的 F1—F3 只是候选；Root 实施票不采用“终裁单独置 completed／failed”，决定采用**多事实结算**（原生本派发结果与真实 error、精确 work-unit 核验、真实执行就绪分别取证，`accepted_at` 不伪盖；缺证时一次通知 Root，不自动 `needs_user`／`stop_unconfirmed`／失败）。该语义**已写入[任务运行合同](../../contracts/task-runtime.md)的“成员结算（2026-09-30 修订）”**，不是待决候选。
+- 状态：语义已定、合同已写，实现已并入且自选成员 unit 归属接缝经 Q 独立复核 PASS，但**未安装、未实测**（当前无 0.7.20 安装）。本节只记录该决定与状态，不改变任何运行规则；语义冲突时以[合同](../../contracts/task-runtime.md)为准。
+
 ## 迁移阶段的事实缺口关闭记录（历史证据）
 
 - 成员实际身份在模型工作前持久登记：已闭合（M0）。扩展在原生 `task` 的 `tool_call` 门赋予请求名，在 AgentRegistry `registered` 窗口内经 TaskRecord 原子+目录 fsync 写入任务 `members.json`；写失败或 ID 漂移以注册表终态翻转阻断，成员不发生模型工作；真实正负样本见 [OMP 原生路径验证记录](../reference/omp-native-path-probe-20260924.md)。

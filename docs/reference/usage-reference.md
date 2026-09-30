@@ -1,6 +1,6 @@
 # Orbit 进阶使用参考
 
-首次安装和日常使用见 [README](../../README.md)。本文用于自定义安装、维护、手动 CLI 操作和其他工具集成。当前仓库在实施混合目标；以下新入口、选型与工作单元属于工作区接线，未冻结新安装构建。package 仍为 0.7.10，安装事实以 version 输出为准，未完成项见[当前计划](../plan/vision-completion-plan.md)。
+首次安装和日常使用见 [README](../../README.md)。本文用于自定义安装、维护、手动 CLI 操作和其他工具集成。当前仓库在实施混合目标；本文按当前源码说明入口、选型与工作单元。源码版本从 `package.json` 读取，安装事实以 `orbit version --json` 为准，未完成项见[当前计划](../plan/vision-completion-plan.md)。
 
 ## 安装选项
 
@@ -33,11 +33,11 @@ Root 可在无活动 Orbit 任务时使用 OMP 原生 `task`：不建立 Orbit �
 
 ### OpenRouter 模型概述（自愿启用）
 
-安装不询问 OpenRouter key；需要独立检查者在缺精确事实时参考有来源的模型级质量基准，可运行 `orbit openrouter setup`，在**不回显**的交互提示中输入 key。命令只写当前用户私有环境文件 `${XDG_CONFIG_HOME:-$HOME/.config}/openrouter/env`（权限 `0600`）并让新 zsh／bash 终端加载；启动进程已有 `OPENROUTER_API_KEY` 时优先，当前终端或已运行的 Orbit 任务不会自动获取新 key。setup 不验证鉴权。不要把 key 置于命令参数、项目文件或 Git；不借用 `TYPESAFE_API_KEY`、`OPENCODE_API_KEY` 等其他凭据。
+安装不询问 OpenRouter key；需要成员或独立检查者在缺精确事实时参考有来源的模型级质量基准，可运行 `orbit openrouter setup`，在**不回显**的交互提示中输入 key。先验按任务点名的相关指标（coding／agentic／intelligence）给出，只在该型号有已核实映射、且快照在该指标上有非空数值时成立；可用候选数随候选池与映射／快照数据变化，不固定写死；快照抓取日期不是基准测量日期。命令只写当前用户私有环境文件 `${XDG_CONFIG_HOME:-$HOME/.config}/openrouter/env`（权限 `0600`）并让新 zsh／bash 终端加载；启动进程已有 `OPENROUTER_API_KEY` 时优先，当前终端或已运行的 Orbit 任务不会自动获取新 key。setup 不验证鉴权。不要把 key 置于命令参数、项目文件或 Git；不借用 `TYPESAFE_API_KEY`、`OPENCODE_API_KEY` 等其他凭据。
 
 新终端启动 `orbit omp` 后，若项目没有 `.orbit/jev-disabled` 且存在 `OPENROUTER_API_KEY`，选模准备阶段可请求 OpenRouter 官方 `/api/v1/models` 元数据和 `/api/v1/benchmarks?source=artificial-analysis` 基准；只发送认证头及来源筛选，不发送任务描述、代码或对话。私有用户级成功快照在 72 小时内复用，两来源均成功才发布新快照；断网、认证失败、限流或无新基准不会阻止检查者降级路径。项目禁用或去掉环境变量后不联网，旧快照也不再提供先验。`orbit model-status --project DIR` 是**只读**诊断，显示是否启用、最近抓取结果与逐候选状态，不借此刷新或探测模型。
 
-Orbit 随版本发布 `provider/model/reasoning/billing_route` → OpenRouter 目录 `id` 与 `canonical_slug` 成对映射，用户可在 `${XDG_CONFIG_HOME:-$HOME/.config}/orbit/openrouter-model-map.json` 显式提供经来源核实的覆盖项；未核实映射无效，不靠近似型号自动配对。[六候选审计](openrouter-model-mapping-audit.md)中的四条版本对应不证明完整 reasoning、实际计费路由或实时指数覆盖；当前 K3 quota 映射仍逐次核对真实宿主路由。实抓 `/models` 不含能力指数，Artificial Analysis 数值从独立基准接口取得，再按实际 permaslug 精确关联；不把模型页的旧观察当新 API 覆盖结论。它们只是型号级质量先验，不证明实际路由、推理档位、价格或额度。
+Orbit 随版本发布 `provider/model/reasoning/billing_route` → OpenRouter 目录 `id` 与 `canonical_slug` 成对映射，用户可在 `${XDG_CONFIG_HOME:-$HOME/.config}/orbit/openrouter-model-map.json` 显式提供经来源核实的覆盖项；未核实映射无效，不靠近似型号自动配对。[映射来源审计](openrouter-model-mapping-audit.md)记录的历史版本对应不证明完整 reasoning、实际计费路由或实时指数覆盖；当前随包映射为 5 条路由条目（4 个 provider/model 身份，K3 占 2 条计费路由），逐次核对真实宿主路由。实抓 `/models` 不含能力指数，Artificial Analysis 数值从独立基准接口取得，再按实际 permaslug 精确关联；不把模型页的旧观察当新 API 覆盖结论。它们只是型号级质量先验，不证明实际路由、推理档位、价格或额度。
 
 完整混合模型目标实施中的工作区已使用 overview-v3：保存目录 ID、上下文／模态、支持参数及可得 coding／agentic／intelligence；不复用旧 v1／v2，agentic-only 不被通用 coding 门挡住。查询默认只显示事实，明确选择任务相关指标才提供先验；缺 coding 不用其他指数补成编码证据。当前测量日期和方法版本未知，72 小时只表示抓取有效期；任务要求已知测量日期时不给先验。目录上限与工具声明不替代实际路由／宿主能力。成员和新版检查者任务指标已接工作区，校准与真实验收仍在推进；未分类消费者只接收事实、不自动评分。旧 `jev-checker-task-fit-2` 按历史版本解释，不进入新排序；当前接线不代表 0.7.10 安装版已上线。
 
@@ -198,7 +198,7 @@ orbit model-evidence TASK_DIRECTORY --file ./model-facts.json
 
 sources 为 1–5 个无凭据绝对 http(s) URL；value 有限数字，unit／basis 文本；valid_until 可省略且受型号标识有效期约束。measured_at 不得晚于 retrieved_at；抓取时效不等于测量时效。新写不接收速度／时间／local_samples／comparison 指标、cost_tier 或 cost.／quota.；历史原文保留，旧字段不进入当前质量判断，剥离后没有质量指标的记录不当命中。具体约束见 `orbit model-evidence --help`。
 
-本路由价格与订阅规则走独立可信资源流，不能用 OpenRouter 报价或粗档代替；没有可信输入／输出／缓存构成时，交叉单价不能给出总成本高低。价格、用量、账户／计划可比条件不足均保持未知；不折算假账单、不承诺预算内、不新增硬预算门。
+本路由价格与订阅规则走独立可信资源流，不能用 OpenRouter 报价或粗档代替；没有可信输入／输出／缓存构成时，交叉单价不能给出总成本高低。价格、用量、账户／计划可比条件不足均保持未知；不折算假账单、不承诺预算内、不新增硬预算门。第一方页面未给发布生效日时，不得用页面“最后更新”日期顶替生效日：该事实保持未知、不参与定价（截至 2026-09-30，本路由成本事实因此 0 条可落盘；被抽查的三份真实台账 `02a5eda7`／`35f925ba`／`cfe88a93` 报告的每一笔均为 unknown，不外推到全部账目）。schema 并不禁止价格事实落盘：当前抓取资料的发布生效日、账户范围与已核实路由分别未闭合，任一未闭合即不可用。安装的 0.7.19 仍拒绝缺生效日的导入；已集成进源码的补丁（**未安装**）允许以显式 `unknown` 标记把这类真实来源存档并列出，但它不覆盖任何调用、不定价、不参与自动排序。报告里 `cash` 为空或 priced 为 0 只表示**未知**，不是 0 成本。
 
 ### 时间和用量
 

@@ -20,6 +20,7 @@ module RouteResourceStoreTest
     Dir.mktmpdir("orbit-route-resources-") do |tmp|
       @tmp = tmp
       test_import_is_validated_atomic_and_auditable
+      test_unknown_effective_fact_is_archived_but_never_selected_or_priced
       test_selection_is_exact_newest_and_valid
       test_report_prices_attributed_calls_and_keeps_unknowns
       test_report_uses_actual_account_and_refuses_conflicting_context
@@ -86,6 +87,33 @@ module RouteResourceStoreTest
                   usage: usage, usage_status: usage_status, usage_source: "native_message",
                   started_at: started_at, completed_at: completed_at,
                   usage_units: (usage || {}).keys.to_h { |key| [key, "token"] })
+  end
+
+  def test_unknown_effective_fact_is_archived_but_never_selected_or_priced
+    built = store("unknown-effective")
+    unknown_effective = fact.merge("effective" => { "from" => nil, "until" => nil, "unknown" => true })
+    assert_equal(1, built.import(unknown_effective)["count"], "a real reading with no publisher date is archived, not refused")
+    listed = built.list.first
+    assert_equal(true, listed.dig("effective", "unknown"), "list exposes the explicit unknown effective status")
+    assert_equal(nil, listed.dig("effective", "from"), "no date is invented for the archived reading")
+    check_time = Time.utc(2026, 9, 29, 12)
+    assert_equal(nil, built.select(scope: "omp_route", route: route(), account_scope: "acct-1", plan: "payg", at: check_time),
+                 "an unknown effective date selects nothing, even inside the verification window")
+
+    known = fact(route: route(model: "glm-5.3"))
+    built.import(known)
+    assert(built.select(scope: "omp_route", route: route(model: "glm-5.3"), account_scope: "acct-1", plan: "payg",
+                        at: check_time),
+           "a different identity with a known effective date still selects: unknown-effective is not generalized")
+
+    dir = task_dir("unknown-effective-task")
+    record_call(ledger(dir), "call-1", model: "glm-5.2", usage: { "input" => 1000, "output" => 200 })
+    report = built.report(task_path: dir, account_scope: "acct-1", plan: "payg")
+    row = report.fetch("calls").first
+    assert(row["cost"].nil? && row["estimate"].nil? && row["gap"].include?("no verified resource fact"),
+           "the archived reading never prices the call: the row stays unknown with a named gap")
+    assert_equal(0, report.dig("coverage", "calls_priced"), "an archived unknown-effective fact is not a priced call")
+    assert_equal([], report["cash"], "no cash is summed from an unknown effective date")
   end
 
   def test_report_uses_actual_account_and_refuses_conflicting_context
