@@ -6,7 +6,7 @@
 
 用户已认可主文档；形成本文时的授权是审视代码并新增附属文档。本文记录该次审视的现状和后续建议，不替代产品语义文件。后续文档整理只修正阅读入口与引用，不把这些建议写成已实施。后续用户补充明确完整目标一次交付、不设硬预算；实施步骤按依赖拆分，不将关键目标另推下一期，也不把“可以调整架构”解释为必须重写底层。
 
-**阅读口径**：A01—F10 各表的状态标签是 2026-09-29 在原审视基线（`0.7.10`／`323408b` 工作区）上的初审判定，属历史快照。判断现行行为请以下方“当前实现对应表”（按**安装** `0.7.21`／`fffabf80` 源码逐项核对；快照标签仍是 2026-09-29 初审。接管／entry advisory 已并入 0.7.21 且自动接管已实机跑通一轮（`8e411be9` complete＋confirmed stop，成员=0）；**未安装增量**：`prior_scope` 追加（`takeover-scope`）与 Go 精确映射——当前随包映射共 6 条、覆盖 4 个模型身份）与[合同](../../contracts/task-runtime.md)、ADR-008/009 为准；例如 F01、F03、F04 的“未实现／新增”不代表今天没有成本数据流，W1—W10 也不能因某条接线完成就机械勾选。
+**阅读口径**：A01—F10 各表的状态标签是 2026-09-29 在原审视基线（`0.7.10`／`323408b` 工作区）上的初审判定，属历史快照，保留原样、不按今天重写。判断现行行为以下方“当前实现对应表”（按 **installed `0.7.23`／`5d5a497`** 复核，2026-09-30）与[合同](../../contracts/task-runtime.md)、ADR-008/009 为准；例如 F01、F03、F04 的“未实现／新增”不代表今天没有成本数据流，W1—W10 也不能因某条接线完成就机械勾选。历史实机轮次（0.7.20／0.7.21 的负例与最小链）仍按各自构建解释，不因本版已安装而改判。
 
 本次 Goal 已获实现授权。下表保留原审计基线；以下实施进度单列，不能把一处修复当整项验收通过。已采纳的替换语义见 [ADR-009 §6](../adr/009-user-selected-model-pool.md#6-已采纳的替换决定与实现接缝实施中)。
 
@@ -39,26 +39,35 @@ E04（§7、§11.2）覆盖接线随 `1ffec49`／0.7.11 与 `a1f9291`／0.7.12 �
 
 “删除”主要指删除旧选择规则、问题及其活跃消费者，不是删除所有包含时间的代码，也不是抹除旧判断记录。
 
-### 当前实现对应表（按安装 `0.7.21`／`fffabf80` 源码核对，2026-09-30）
+### 当前实现对应表（按 installed `0.7.23`／`5d5a497` 复核，2026-09-30）
 
-本表只说明**源码接线现状**，不是完成条件已证明；未列出的验收（新安装真实闭环、同质量对照、成员结算收尾）仍以[当前计划](vision-completion-plan.md)为准，W1—W10 保持未勾选。
+本表只说明**源码接线现状**，不是完成条件已证明。原 2026-09-29 初审表与上表保留历史口径；未列出的验收仍以[当前计划](vision-completion-plan.md)为准，W1—W10 保持未勾选。
 
-| 审计项 | 快照状态（2026-09-29） | 安装 0.7.21 源码现状 | 源码证据 | 仍未闭合 |
+| 审计项 | 快照状态（2026-09-29） | installed `0.7.23` 源码现状（2026-09-30 复核） | 源码证据 | 仍未闭合 |
 | --- | --- | --- | --- | --- |
-| A02—A05、C05—C06 | 旧规则／部分实现 | 入口改为 `execution_authorized` ＋ `delegation_value`／`supervision_value` 两条收益路径，任一过门；引文、裸继续不猜目标；题义版本 `orbit-entry-3`，有限默认放行限声明的 Git／有界交付域 | [prestart.rb](../../lib/orbit/prestart.rb) 入口问题与判门（第 42 行起、332 行） | 域外泛化与新安装真实闭环未证明 |
+| A02—A05、C05—C06 | 旧规则／部分实现 | 入口改为 `execution_authorized` ＋ `delegation_value`／`supervision_value` 两条收益路径，任一过门；引文、裸继续不猜目标；题义版本 `orbit-entry-3`，有限默认放行限声明的 Git／有界交付域 | [prestart.rb](../../lib/orbit/prestart.rb) 入口问题与判门（第 42 行起、332 行） | 域外泛化未证明；installed 0.7.23 普通请求任务 `01f4925b` 已走 `uncertain → start`（jev-1.13.0）并完成，但 `members=0`，不构成自主委派证据 |
 | B02 | 未实现／新增 | 成员链已消费目录先验（与检查者同一 overview 实例） | [member_model_selector.rb](../../lib/orbit/member_model_selector.rb)（`@overview`、`model_overview_prior`） | 真实采纳、交付归属与完整身份未验收 |
-| B05、B06 | 部分实现／调整 | 检查者身份按宿主已解析路由推导：`identity_for(catalog, model)` 取 `catalog["routes"][model]`，缺失或非枚举值才回落 `unknown`，`reasoning` 暂无声明时保持 `unknown`；`lookup` 仍按四字段精确匹配（不是固定查 `unknown/unknown`） | [checker_model_selector.rb](../../lib/orbit/checker_model_selector.rb) `identity_for`（第 323 行起）／`lookup`、[openrouter-model-map.json](../../lib/orbit/data/openrouter-model-map.json)（5 条路由条目） | 缺口在映射覆盖率与逐调用真实计费桶，不在查询方式 |
+| B05、B06 | 部分实现／调整 | 检查者身份按宿主已解析路由推导：`identity_for(catalog, model)` 取 `catalog["routes"][model]`，缺失或非枚举值才回落 `unknown`，`reasoning` 暂无声明时保持 `unknown`；`lookup` 仍按四字段精确匹配（不是固定查 `unknown/unknown`） | [checker_model_selector.rb](../../lib/orbit/checker_model_selector.rb) `identity_for`（第 323 行起）／`lookup`、[openrouter-model-map.json](../../lib/orbit/data/openrouter-model-map.json)（6 条路由条目、覆盖 4 个模型身份） | 缺口在映射覆盖率与逐调用真实计费桶，不在查询方式 |
 | B07、B09 | 旧规则／未实现 | 三个指数（coding／agentic／intelligence）都可作为任务相关事实，无 coding 通用准入门；缺失指标如实缺口 | [openrouter_model_overview.rb](../../lib/orbit/openrouter_model_overview.rb)（`BENCHMARK_KEYS`、`lookup(indices:)`） | 只有快照级 `as_of`，无逐模型测量日期 |
 | B10、B11 | 部分实现／未实现 | 先验携带 `measurement_date(_status)`、`benchmark_as_of`、`conflicts`／`hold_reason`，日期未知与潜在冲突分别标注 | overview `PRIOR_KEYS`；[model_capability_facts.rb](../../lib/orbit/model_capability_facts.rb) `evidence_relations` | 冲突的真实呈现与放行资格待实机 |
 | C01、C02、C04 | 旧规则／删除 | 时间与粗费用问题、排序键退出新路径；旧键只出现在排除表和历史显示分支 | [model_quality_policy.rb](../../lib/orbit/model_quality_policy.rb)（已删 score keys、`OMITTED_STATE_KEYS`）、[model_evidence_cache.rb](../../lib/orbit/model_evidence_cache.rb)（`LEGACY_SELECTION_METRIC`）、`cli.rb` 补证文案；[task_view.rb](../../lib/orbit/task_view.rb) 旧版本分支显式标注“不用于新版自动推荐” | 说明／状态的历史显示仍需按旧版本解释 |
 | C03 | 旧规则／删除 | 生产链未见无目录整组 fallback 的调用方 | `connection.rb`／`member_model_selector.rb` 检索无命中 | 宿主升级时复核 |
 | D02、D03 | 部分实现／旧规则 | 工作单元记录与串行交接进入选择输入；不再要求并行另一工作面 | [work_unit.rb](../../lib/orbit/work_unit.rb)、`model_quality_policy.rb` 的交接题义 | 真实失败升级未验收 |
 | E04 | 未实现／新增 | 覆盖门已接线：`coverage_required` 与逐项 requirement 状态参与终检资格 | [task_runtime.rb](../../lib/orbit/task_runtime.rb)（`requirement_coverage_status`）、[requirement_coverage.rb](../../lib/orbit/requirement_coverage.rb) | 真实任务的覆盖质量待验 |
-| E06 | 已实现／保留 | 完成门仍要求成员 settled；`members_settled?` 对 `02a5eda7`（两名成员 registered／idle、无 `accepted_at`）为 false（**该样本缺口，非全局恒 false**；无成员任务 `1216aeef` 正常完成并有 confirmed stop） | `task_runtime.rb` `members_settled?`／`completion_gate` | 成员结算修订已随 0.7.20 装入，但**正常成员结算路径未获真实验收**（p26 实机已完成并保留为负例） |
+| E06 | 已实现／保留 | 完成门仍要求成员 settled；`members_settled?` 对 `02a5eda7`（两名成员 registered／idle、无 `accepted_at`）为 false（**该样本缺口，非全局恒 false**；无成员任务 `1216aeef` 正常完成并有 confirmed stop） | `task_runtime.rb` `members_settled?`／`completion_gate` | 成员结算机械路径已由 installed 0.7.21 明确交接任务 `26935a3e` 的 accepted＋hint 采纳＋complete＋confirmed stop 证明；**普通全池自主委派仍未验**，p26 等负例按原记录保留不改判 |
 | F01、F03、F07 | 未实现／新增 | 路由资源事实结构、预测生产者与消费者、诚实 unknown 与缺证记录；**安装 0.7.20 已实测**显式未知生效日的 archive／list／report（隔离 CLI：import exit 0、缺标记 exit 1、report exit 0 且 `cash []`） | [route_resource_facts.rb](../../lib/orbit/route_resource_facts.rb)、[route_resource_store.rb](../../lib/orbit/route_resource_store.rb)、[route_cost_inputs.rb](../../lib/orbit/route_cost_inputs.rb) | 未知生效日的事实永不覆盖／定价／自动排序；账户范围与实际扣减桶仍未知，本路由现金成本仍不可判 |
 | F04、F05、F06 | 未实现／部分实现 | 逐调用账本已接，pending 不封账、失败与晚到用量尽量保留 | [resource_call_ledger.rb](../../lib/orbit/resource_call_ledger.rb)、`task_runtime.rb` 的 `accumulate_jev_usage` 与回执路径 | 真实失败链用量仍可能未知 |
 | F08 | 范围已明确 | 不新增硬预算或费用停止门（用户已明确不需要） | — | 保持 |
 | F09、F10 | 未实现／源码可确认 | installed 0.7.20 paired 对照已跑：冻结 8 项测试与 6 项探针两臂各 8/8、6/6 通过，质量无可检出差异；顶级模型总量约 +30%、用户介入两臂均 0；混合臂 members=0 | [当前计划](vision-completion-plan.md) 真实验收段 | 单任务对、未 exercise 成员替代路径，不证明节省；0.7.10 仍不得描述成已上线全部新行为 |
+
+**2026-09-30 复核补充（installed `0.7.23`／`5d5a497`，只补有限事实，不改上表历史口径）**
+
+- 安装身份：0.7.23，commit `5d5a497`、dirty false、digest `919d5f87…`、14:17:32Z 安装（原件 `/private/tmp/orbit-release-0.7.23-delivery/`）；提交前组合验证 full／pack／validator／version／diff-check 全 exit 0、129 文件逐文件 SHA 一致（`/private/tmp/orbit-regression-0.7.23-gu0Ouq/`）。
+- 版本标签：selection 决策 `orbit-quality-decision-3`、member `orbit-member-selection-v2`、checker `orbit-checker-selection-v7`、checker signature `v8`；旧 `-2`／`v1`／`v6` 记录按旧版本解释、不改写。
+- 普通请求实测：任务 `01f4925b` 走入口 `uncertain → start`、首个载荷带 bootstrap、首次编辑前单元 `none`、Root 自行实施、检查 3 次（1 次 provider 失败／2、3 完成、findings 0）、外部 copy 固定 9 例 exit 0、`complete`＋`confirmed stop`；`members=0`，**不证明自主委派**。选择 basis `pool_order_unreleased`：**任务在放行 profile 内且有真实付费判断**（2 次 `jev_checker_selection` `answered`，`judgment_model jev-1.13.0`、decision-3），但**无候选过 0.6 门**（唯一有分候选 0.55），故降级池序——**只证明降级，不证明 decision-3 过门后的排序；也不是域外任务**。
+- pair2 mixed 臂该轮已完成：`w1Y:p26`（pid 27206，installed 0.7.23），任务 `d623e8b1`，`created_at 2026-09-30T14:35:19Z`，终态 `complete`＋`stop_confirmation.confirmed`（`finalization_notice`→`completed_via_finalized_stop`→`stopped`）；原生消息 `8eec046e`、入口 delegation 0.83、bootstrap `via: provider_payload`、首次编辑前单元 `none`；`members=0`、无工作单元与派发，**不构成自主派发证明、不作收益结论**（账本 judgment 10／root 19／checker k3 6／checker Go 1 usage unknown）；原生 `/exit` 已执行、pid 27206／27262／27322 实测消失。当前动作是只读调查 native 委派规则的生效分支，**尚未证实根因**。baseline 臂未启动。Q 外部副本验证已完成（固定 8 tests 8/8、冻结 6 probes 6/6，各一次 exit 0，评估记录 14:59:13Z），**不改 `members=0` 负例**。
+- 最小链资源后验：36 调用全 reported、call_id 唯一、checker 两账本 id 集与用量一致、reasoningTokens 子集未另加；billing／account 仍未知。该摘要文件的 `recorded_at_utc_machine_clock` 为手写估计、**时间未核实**（纠正记录 `/private/tmp/orbit-quality-decision-3-impl/install-preflight-timestamp-correction.json`），不重标原事件、不改账本；该轮同时是 native hint 采纳与成员结算的有限证明，旧负例（p26、`02a5eda7`、`1d977642` 等）原样保留。
+- **F09 的范围**：需要的是同等验收对照与报告，**不要求产品内新增对照编排模块**；缺该模块不算源码未实现。**A08／B12 同理**：不要求五阶段聚合组件或永久先验自更新框架，按用户可区分事实与既有函数输入说明核对即可。
 
 ## 2. 什么时候唤起 Orbit
 

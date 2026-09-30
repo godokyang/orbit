@@ -23,17 +23,18 @@
 
 ## 当前关键状态
 
-- 安装 0.7.21；HEAD 0.7.22 已提交未安装。工作区 0.7.23 **组合验证已全绿**（full／pack／validator／version／diff-check exit 0，证据 `/private/tmp/orbit-regression-0.7.23-gu0Ouq/`，Root 直接核验并逐文件复算 129 个 SHA 一致；S 跑完停票）：bootstrap 修复增量＋选型 decision-3 实现（实现者 Q；Root 只独立审核并于 2026-09-30T13:57:50Z 重签放行，17 真实样本逐字保留、samples SHA `5a30130a…` 不变，结构 load 通过、旧 -2 副本不匹配）。待本交付票本地提交＋安装。
+- **安装 0.7.23 生效**（commit `5d5a497`、dirty false、digest `919d5f87…`、2026-09-30T14:17:32Z 安装，`sh install.sh` exit 0，安装当时的 `git status` 为空；原件 `/private/tmp/orbit-release-0.7.23-delivery/`）。提交前组合验证全绿：full／pack／validator／version／diff-check exit 0、129 文件逐文件 SHA 一致（证据 `/private/tmp/orbit-regression-0.7.23-gu0Ouq/`；其中 `run.out` 是宿主 setsid 启动失败记录，不是测试失败）。含 bootstrap 修复＋选型 decision-3（实现者 Q；Root 2026-09-30T13:57:50Z 独立审核后重签，17 真实样本逐字保留、samples SHA `5a30130a…` 不变，结构 load 通过、旧 -2 副本不匹配）。上一版 installed 0.7.21／HEAD 0.7.22 只作历史。
 - 最小真实 Jev API HTTP 200。随后 installed21 明确交接任务 `26935a3e` 的实际成员实现、Root 固定测试、独立终检和停止确认已闭合。隔离单候选池、明确交接，**普通自主派发与资源收益仍未验收**。
-- 已定位实现前无单元及首次窗口指导缺失的启动接缝；修复待安装实测。普通 phone fixture 已由 Q 准备（`/private/tmp/orbit-ordinary-phone-1XOIXp`，seed `f59f7d0`，固定 9 测试，请求原文不提 Orbit，真实全池，**未启动**）。
-- 未知／不可比成本下最大质量概率优先的推强模型风险已按决策消除：过门后无可比资源证据时保留稳定池序（不称便宜／可靠），decision-3 放行已重签且组合验证通过；生效以本票安装与普通请求实测为准，池顺序不是费用证明。Q 的最小链资源后验（resource-post-audit.json）只汇总账本、不证明收益。
+- 启动接缝修复已在 installed 0.7.23 生效并有普通请求实测：任务 `01f4925b-84e2-4560-9a26-20cf1bb5294b`（fixture `/private/tmp/orbit-ordinary-phone-1XOIXp`，seed `f59f7d0b…`，请求原文不提 Orbit，真实全池）入口 `uncertain → start`（jev-1.13.0）、首个载荷带 bootstrap、首次编辑前单元 `none`、Root 自行实施、检查 3 次（1 次 Go 429 失败／2、3 由 k3 完成、findings 0）、外部 copy 固定 9 例 exit 0、`complete`＋`confirmed stop`。**成员=0：只证明入口与自行实施路径，不证明自主委派。**
+- 未知／不可比成本下最大质量概率优先的推强模型风险已按决策消除并随 installed 0.7.23 生效：过门后无可比资源证据时保留稳定池序（不称便宜／可靠），decision-3 放行已重签。普通任务 `01f4925b` **有匹配放行与真实付费判断**（2 次 `jev_checker_selection` `answered`，`judgment_model jev-1.13.0`），但**无候选过 0.6 门**（唯一有分候选 0.55），故降级池序；**“过门后稳定池序”的正向排序仍未被真实样本触发**。最小链资源后验（36 调用全 reported、billing／account unknown）只汇总账本、不证明收益。
+- **pair2 mixed 臂该轮已完成**（`w1Y:p26`，installed 0.7.23；任务 `d623e8b1` `created_at 14:35:19Z`、终态 `complete`＋`stop_confirmation.confirmed`，终态链 `finalization_notice`→`completed_via_finalized_stop`→`stopped`；原生 `/exit` 已执行，pid 27206／27262／27322 实测消失，pane 回 shell）。入口 delegation 0.83 支持 start、bootstrap `via: provider_payload` 已记录；但 `members=0`、无工作单元/派发，**不构成自主派发证明，也不作收益结论**（账本 judgment 10／root 19／checker k3 6／checker Go 1 unknown）。baseline 臂未启动、资源对照未做；Q 外部副本验证已完成（固定 8 tests 8/8、冻结 6 probes 6/6，各一次 exit 0，评估记录 14:59:13Z），**不改 `members=0` 负例**。
 - 0.7.20 配对 mixed members=0、Top 总量约 +30%，负例保留；不因源代码已修或新最小链成功改判。
 
 ## 下一动作
 
 1. 新 Root 核对交接、live diff／installed identity／Herdr；保留成功、失败及未完成证据。minchain21 当前 PID 已不存在，本轮未执行 kill（进程表不证明退出原因），无空闲自有测试进程需收尾。
-2. 0.7.23 组合验证已全绿；本交付票执行本地提交＋`sh install.sh`（证据 `/private/tmp/orbit-release-0.7.23-delivery/`），不升级 OMP；安装成功不称完整验收。
-3. 用普通业务请求验证实现前工作单元或有据的 Root 决定、Jev 判断、真实 native task 派发、登记、成员回传与 Root 集成。断链先定位具体原因，不追加外围测试来代替核心完成。
+2. 安装与组合验证已完成（installed 0.7.23，`sh install.sh` exit 0，证据 `/private/tmp/orbit-release-0.7.23-delivery/`）；不再重复安装、不重跑组合验证、不升级 OMP。安装成功不称完整验收。
+3. 自主委派仍是唯一未闭合核心：先做**只读调查 native 委派规则的生效分支**（有交接入口信号时 Root 为何选择直接实施），**尚未证实根因**；有效原因明确后再做针对性修复与重验，不启动 baseline、不重复同类大任务、不诱导派发。`01f4925b` 与 `d623e8b1` 均 `members=0`，只到自行实施＋检查＋complete＋confirmed stop。
 4. 完整闭合质量充分后分派、旗舰必要升级、路由成本／用量、错误控制、独立纠正、手动终检和实际停止；普通监督价值任务与其他主方案必要分支不丢弃。
 5. 核心通过后作冻结同质量 Top／混合对照，统计全部角色和实际未知量，按主方案 §11.3 调整负收益路径；逐项闭合 W1—W10 后才 complete。
 

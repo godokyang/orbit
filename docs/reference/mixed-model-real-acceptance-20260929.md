@@ -171,3 +171,46 @@ Controller 在六份已完成产物的副本上，额外重放同一组八个从
 ### 待办（下一步，不扩范围）
 
 0.7.21 已提交（`fffabf80`）并经 `sh install.sh` exit 0 安装；下一步用已备好的临时项目完成自动接管／真实成员交付与确认停止的实机验收（自动接管已一轮 complete＋confirmed stop，成员=0），以及不带强制派发的 paired 对照。W1—W10 依据证据仍未完整闭合，本追加不主张完整 Goal。
+
+> 该段为当日事实记录；后续版本进展见下面 0.7.23 追加段。
+
+## 2026-09-30 追加：0.7.23 安装构建与 installed 0.7.23 普通请求任务
+
+本追加延续同一口径：区分源码/静态、mock/脚本与 live 实机证据，不改任何原件，不把失败或未触发分支写成通过。
+
+### 构建与安装（installed `0.7.23`／commit `5d5a497`，`dirty:false`）
+
+- 身份：`orbit version --json` → 0.7.23、commit `5d5a497ad3565d89b3f7193258c738ede81d03f4`、digest `919d5f87588176f83ba4f387f69da371a72d1ba663c0d10a9b2344cb9051d62d`、installed_at `2026-09-30T14:17:32Z`；`sh install.sh` **exit 0**（`install.log`：`Installed orbit 0.7.23 (5d5a497…)`，OMP CLI 18.3.4 经版本门接受，reviewer bundle SDK 18.3.4，`release-record.json` 格式 `orbit-install-4`）；按实际字段：提交前 `before-git-head.txt` 为 `1893fd7`、提交后 `after-git-head.txt` 为 `5d5a497`，**安装的源码提交即 `5d5a497`**（`install.log` 原文）；`after-git-status.txt` 为空（**安装当时**的清洁状态，不代表本追加写作时的工作区——本追加写作时四文档为 dirty）。原件目录 `/private/tmp/orbit-release-0.7.23-delivery/`。
+- 提交前组合回归（`/private/tmp/orbit-regression-0.7.23-gu0Ouq/`）：`npm test` 单次 **exit 0**（PID 60360，日志末 `INSTALL_TEST_PASS shell_configuration`；同目录 `run.out` 是宿主 `setsid` 不可用导致首次 launch 未执行 npm 的原始记录，**不是测试失败**，`run-recovery.out` 才是本次 full）；`npm pack --dry-run --json` 83 files／426977 B；skill validator `Skill is valid!`；`check:version` → 0.7.23；`git diff --check` exit 0；**129 个源/测试/打包文件逐文件 SHA 比对无差异**，docs 状态前后一致（差别另列）。
+- 版本标签（源码/静态）：`orbit-quality-decision-3`、`orbit-member-selection-v2`、`orbit-checker-selection-v7`、checker signature `v8`；17 个真实校准样本逐字保留（samples SHA256 `5a30130a022abd2bc1b35a6ebe61c2ea4fe0e750cafbb0d23d6d51de973d03cc`），decision-3 放行由 Root 于 `2026-09-30T13:57:50Z` 独立审核后重签。
+
+### installed 0.7.23 普通请求任务 `01f4925b-84e2-4560-9a26-20cf1bb5294b`（live 实机）
+
+- fixture `/private/tmp/orbit-ordinary-phone-1XOIXp/product`（seed `f59f7d0bf5e9479d5aa08e848e97324b215e00be`、tree clean、请求原文不提 Orbit，sha256 `925ed6d4…`，真实全池 sha256 `4eafb0a4…`）；结构化后验 `controller/terminal-audit.json`（生成于 `2026-09-30T14:28:58Z`，hash／pid／时间取自原件）。
+- 入口：分类 `uncertain` → 判定 `start`（`orbit-entry-rules-3`／`orbit-entry-3`／`input-2`／`decision-2`），实际模型 `jev-1.13.0`、`answered`，原生消息 `d14d7f47`；任务 14:21:21Z 建立。
+- bootstrap：首个可扩展 provider 载荷记录 `via: provider_payload`、`work_unit_state: none`；首次明确 `edit` 前单元状态同为 `none`。SUT 选择自行实施（`work_units=0`、`members=0`、无 `members.json`）。
+- 检查 3 次：1 失败（`opencode-go/deepseek-v4.1-flash`，Go 429，用量 `unknown`）；2（自动）与 3（手动）为 `kimi-code/k3-256k`，均 `complete`、findings 0；14:25:57Z 完成后通知 1 次，Root 自行 stop，14:26:09Z `complete`＋`confirmed`（`active_tools_after 0`、`async_jobs_settled true`）。三次 `fingerprint_before == fingerprint_after`、只读、无禁用工具。
+- 选择：basis `pool_order_unreleased`——**任务在放行 profile 内且有真实付费判断**（2 次 `jev_checker_selection` `answered`、`judgment_model jev-1.13.0`、decision-3、`requirements_error: null`；`task review.selection` 记 `task_fit_scores["zenmux/deepseek/deepseek-v4.1-flash"]=0.55`），但**无候选过 0.6 门**，故降级池序——**本轮只证明降级与失败后的有界重选，未验证 decision-3 过门后的稳定池序正向排序；该任务不是域外任务**。
+- 资源（仅本任务）：judgment 8 次（input 14854／output 382）；`root/gpt-6-sol` 19 次（totalTokens 301050）；`checker/k3-256k` 5 次（totalTokens 54277）；`checker/deepseek-v4.1-flash` 1 次用量 unknown；**现金与账户归属仍未知**。
+- 独立评估：外部 copy 跑固定 9 例 `npm test` **exit 0（9 pass／0 fail）**；`README.md`／`package.json`／`test/phone.test.js` 与全局池 SHA 未变。
+- 元数据：`launch-current.json` 的 `seed_head` 手写誊抄有误（`…e974…`），实际 `f59f7d0b…e97324b215e00be`；纠正记录 `controller/launch-current-corrections.json`（保留原文件、不重跑、不改 SUT），另有 `instruction.txt` 与请求文件 sha256 并存的末尾换行差异（`equal_strip_final_newline: true`）与 prompt 回执 stalled 但任务确已创建（原生消息 `d14d7f47`）两条补充。
+- 边界：**`members=0` 只说明 Root 选择自行实施，不构成自主委派或收益证据**；launch pid 87232 与后续 87289／87405 经 Root 实测已不存在，未执行 kill。
+
+### 最小链资源后验（installed 0.7.21，任务 `26935a3e`，live 实机＋只读汇总）
+
+`/private/tmp/orbit-minimal-chain-PbtkHC/controller/resource-post-audit.json`（只读汇总原件；其 `recorded_at_utc_machine_clock` 是**手写估计、时间未核实**，纠正记录 `/private/tmp/orbit-quality-decision-3-impl/install-preflight-timestamp-correction.json`，不据此重标原事件、不改账本）：36 次调用全部 `reported`、call_id 唯一；`native-model-calls.json` 24 条（root 17＋member 7）与 `resource-calls` 1:1 命中，checker 4 条在 `resource-calls` 与 `checks/1/evidence.json` 两处 id 集与用量一致；三组 input+output+cacheRead 等于 provider 报告的 totalTokens、cacheWrite 为 provider 报告的 0；reasoningTokens 为单独报告子集、未另加总；judgment 服务只报 input/output；**billing／account 仍未知**。该轮同时是 **native hint 采纳与成员结算的有限证明**（accepted＋hint adoption＋complete＋confirmed stop）；**其旧负例（p26、`02a5eda7`、`1d977642` 等）原样保留、不改判**。本摘要只汇总该轮明确交接＋唯一池候选的账本，**不证明普通派发、池选型或任何收益**；原件逐项 SHA 见其 `sources_sha256`。
+
+### pair2 mixed 臂（普通自主交接核心验证；该轮 complete＋confirmed stop，自主委派仍为负例）
+
+- 启动记录 `controller-records/launch-current.json`（`2026-09-30T14:35:09Z`）：`herdr pane run` 于复用空闲 shell `w1Y:p26`（命名 `reconcile23core`，命令取自 `FREEZE.arms.mixed.command`），**pid 27206**（进程 args release `e06179ef…`＝0.7.23）；fixture `mixed/` head `e6085adf…`、固定四文件 SHA 与业务 prompt sha256 `dbd4569e…` 存档；session 目录 `root-sessions`（product 之外）。
+- 任务 `d623e8b1-9d51-4bef-ba7d-8359bd3f7341`，会话 `01a0f2bd-1f7c-740a-b7f7-ee3382f8e738`，`created_at 2026-09-30T14:35:19Z`；原生消息 `8eec046e`；入口 `uncertain → start`（`jev-1.13.0`、`execution_authorized 0.97`、`delegation_value 0.83 ≥ 0.65`、`supervision_value 0.51`）；`bootstrap_guidance` 事实为 `via: provider_payload`、`work_unit_state: none`；首次 `edit` 前 `unit_state_before_edit = none`。
+- **终态**：`complete`，`stop_confirmation.confirmed = true`（`status_after idle`、`active_tools_after 0`、`async_jobs_settled true`）；事件链 `automatic_check_complete_ignored` → `finalization_notice`（14:43:25Z，check 3，version `sha256:ebd6de83…`）→ `completion_stop_queued`（14:43:32Z）→ `completed_via_finalized_stop`（14:43:36Z）→ `stopped`（14:43:36Z）。终端后验 `controller-records/terminal-audit.json` 生成于 **14:44:49Z**。
+- 检查 3 次、快照前后不变：1 为 `opencode-go/deepseek-v4.1-flash` `check_failed`（用量 `unknown`，保留）；2（自动）与 3（手动）为 `kimi-code/k3-256k`，均 `complete`、findings 0。
+- 资源（仅本任务）：judgment `jev-1.13.0` 10 次（input 22762／output 492）；`root/gpt-6-sol` 19 次（totalTokens 388911）；`checker/k3-256k` 6 次（totalTokens 86974）；`checker/deepseek-v4.1-flash` 1 次用量 unknown；reasoningTokens 为子集、未另加总；**现金与账户归属仍未知**。
+- **自主委派负例（保留）**：`members=0`、无工作单元记录、无 native task 派发、无 `delegation_hint`；Root 首条明文自行依据：“这两个实现文件的契约由同一份 README 和验收测试约束，我会自行完成，避免拆分时重复协调”；advisory 的实际送达无法从持久原件独立复核（会话 jsonl 计数 0，该通道不留 fact record）。**该轮不作为自主交接通过或收益证据。**
+- 进程：原生 `/exit` 已执行（`exit-submit.json` exit-code=0、agent idle）；pid 27206／27262／27322 经 Root 复查 ps 均消失，Herdr agent list 已无 `reconcile23core`，pane 回到 shell 并保留。
+- Q 外部副本验证已完成：固定 8 tests **8/8**、冻结 6 probes **6/6**，各一次 **exit 0**（`controller-records/external-{evaluation.json,npm-test.log,probes.json}`；评估记录生成 **14:59:13Z**；harness SHA256 `6391e77c82dbec1d40d53bc945f4a947694960f17b21ab1be2de7d157997d3ac`、probe source SHA256 `e4358173adf65ba72e98bce71f71cd4ef50c510488773939ab73e836dd6ece39`）。**该 PASS 在外部副本执行、不改原件，也不改 `members=0` 的自主委派负例。** baseline 臂未启动、资源对照未做。下一步为只读调查 native 委派规则的生效分支，**尚未证实根因**，原因明确后再做针对性修复与重验。
+
+### 状态
+
+W1—W10 仍未整项勾选；普通全池自主委派与同质量资源对照未完成（pair2 mixed 该轮已 complete＋confirmed stop 且进程已退出，但 `members=0` 仍是自主委派负例；Q 外部副本固定 8 tests 8/8＋6 probes 6/6 各一次 exit 0 属有限 PASS，不改该负例；baseline 臂未启动、资源对照未做）；本追加不主张完整 Goal，不新增任何框架或验收门。
