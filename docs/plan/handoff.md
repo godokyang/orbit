@@ -14,8 +14,8 @@
 
 ## 精确版本与工作区
 
-- **安装 0.7.23（当前生效）**：`orbit version --json` 已复核，clean source `5d5a497ad3565d89b3f7193258c738ede81d03f4`（dirty false）；digest `919d5f87588176f83ba4f387f69da371a72d1ba663c0d10a9b2344cb9051d62d`，2026-09-30T14:17:32Z 安装（`sh install.sh` exit 0；**安装当时的 `git status` 为空**、安装时 HEAD 为 `5d5a497`，不表示当前工作区状态）。OMP／reviewer 18.3.4，未按 UI 提示升级。原件：`/private/tmp/orbit-release-0.7.23-delivery/`（`release-record.json`＝`orbit-install-4`、`install.exit`、`install.log`、before／after identity 与 git head／status）。
-- **上一版历史（不再生效）**：安装 0.7.21（`fffabf80`，digest `ae9ce431…`，11:21:07Z）；HEAD 0.7.22（`1893fd7d`，已提交未安装，唯一组合 full exit 0，证据 `/private/tmp/orbit-regression-0.7.22/report.json`）。0.7.21／0.7.22 的实测结论只在各自构建与场景内有效。
+- **安装 0.7.24（当前生效）**：`orbit version --json` 已复核，clean source `59eb7e777fd521e9db138e9953ff0adc277538e2`（dirty false）；digest `02067f5813489335dfe85a086bc9c791b0eff8b31c309ede950935a18bd1e994`，installed_at `2026-09-30T15:32:10Z`（安装窗口 `15:31:55Z → 15:32:12Z`，`install.exit`=0）。OMP／reviewer **18.3.4 未升级**。原件 `/private/tmp/orbit-release-0.7.24-delivery/`（`before.json`／`postcommit.json`／`after.json`、`install.exit`、`install.log`）；随包文件与源码逐字节匹配（host／contract／package／quality policy／calibration 均 true），`docs/` 与 `tests/` 不在 pack 清单内（该字段的旧 false 已由 `after.json.file_match_correction` 勘正：不存在≠失配）。提交前组合验证（同一次 run）：full／pack／validator／version／diff-check 全 exit 0、129 文件 pre/post/final **逐文件**一致（`/private/tmp/orbit-regression-0.7.24-fqtEee/report.json`）。本轮四文件＋版本改动已提交为 `59eb7e7`（“fix: allow controlled serial handoff at the native instruction layer”）。
+- **上一版历史（不再生效）**：安装 0.7.23（`5d5a497`，digest `919d5f87…`，14:17:32Z）；安装 0.7.21（`fffabf80`，digest `ae9ce431…`）；HEAD 0.7.22（`1893fd7d`，已提交未安装）。各版结论只在各自构建与场景内有效。
 - **0.7.23 组合验证（提交前，已通过）**：full／pack／validator／version／diff-check 全部 exit 0，129 个源／测试／打包文件逐文件 SHA 一致（非仅汇总断言）；证据 `/private/tmp/orbit-regression-0.7.23-gu0Ouq/`。该目录内 `run.out` 是宿主 `setsid` 不可用的**启动失败原始记录**（当时未执行 npm），不是测试失败；`run-recovery.out` 才是本次 full。**decision-3 放行重签**：Root 2026-09-30T13:57:50Z 独立审核（审核者 w1Y:p1A，实现者为 Q）；17 个真实样本逐字保留（samples SHA256 `5a30130a022abd2bc1b35a6ebe61c2ea4fe0e750cafbb0d23d6d51de973d03cc`，共享 call_id、非 17 次新调用、未新 API 校准）；结构 load 通过，旧 -2 副本明确不匹配。
 
 启动增量冻结 SHA256：
@@ -26,7 +26,14 @@
 | `contracts/task-runtime.md` | `cfb554d07a6ef0c95ec5c9a8114a84fe1012cf49bd67b4aa51448ed04718459d` |
 | `tests/omp_native_gate_test.mjs` | `b0c7ad25b7e008a26d16093198127bff6fbc95def22e9181843ffafbc9617a28` |
 
-该增量在首个可扩展 provider 请求中给受控 Root 工作单元引导（不依赖入口概率，显式与自动入口一致；未受控会话与成员不注入），合并注入、不可扩展保持待发、事实记录首次明确编辑前的单元状态；没有直接程序派发、扩大权限或更改质量排序。前轮独立审查的两项缺口（advisory 早退出吞掉同窗 bootstrap、system 与 payload 同句重复）已修复并复核；已知剩余边界：sent 集合仅进程内，OMP 重启后活动任务会重注入一次（幂等指引，接受）。gate 绿不等于组合回归或实机验收。上表为 bootstrap 三文件冻结值（合同行含选型句修改）；bootstrap 与 policy 均已冻结，不再写入。
+该增量在首个可扩展 provider 请求中给受控 Root 工作单元引导（不依赖入口概率，显式与自动入口一致；未受控会话与成员不注入），合并注入、不可扩展保持待发、事实记录首次明确编辑前的单元状态；没有直接程序派发、扩大权限或更改质量排序。前轮独立审查的两项缺口（advisory 早退出吞掉同窗 bootstrap、system 与 payload 同句重复）已修复并复核；已知剩余边界：sent 集合仅进程内；按 Q minor 更正，**不得泛称“所有重启都会重注入”**——非本进程 owned 的记录会被 `host.ownsTask` 拒绝，只有该活动任务被新进程实际重新 owned 时才可能再记一次首达事实（幂等指引，接受）。gate 绿不等于组合回归或实机验收。上表为 bootstrap 三文件冻结值（合同行含选型句修改）；bootstrap 与 policy 均已冻结，不再写入。
+
+## 受控串行交接合作政策（installed 0.7.24）
+
+- **原生指令冲突已确认（源码规则分支＋shape／config 探针证据，非 wire 证据）**：OMP 18.3.4 对 `revision >= 6` 的类规则给 `delegation-bias restrained`（`pi-catalog/src/compat/rules/classes/openai.kdl:42`）；`pi-coding-agent` 在该分支渲染 inline-first 系统文案（`system-prompt.ts:992` `inlineFirstDelegation = restrained && !eagerTasks`，本机无 `task.eager` 覆盖 ⇒ 生效；文案含「NEVER delegate one slice」「2+ independent slices」），与主方案 §5.2「有界单成员串行接力」冲突。只读调查与探针：`/private/tmp/omp-delegation-bias-investigation.json`（含 `.omp` 配置层更正与 `evaluate` 分支说明）。**实际 wire 请求体未落盘，因此不宣称服务器已收到该文案、也不宣称模型心理因果**；这是可执行源码冲突加两轮实测行为一致（phone `01f4925b`、pair2 `d623e8b1` 均 `members=0` 自行实施）。
+- **已交付修复（installed 0.7.24）**：受控 Main Root 在实际 owned＋活动＋runtime alive 的**每个可达 provider 请求**上，于与原生 system／developer **同层**处注入合作政策——可承载位置为 Responses／Codex `instructions`、Anthropic 顶层 `system`（string／blocks）、messages 中既有 `system`／`developer` 原生消息的文本末尾、Responses `input` 中既有 developer 块的原生文本之后；请求内按 marker 幂等；不可识别形状**静默跳过**（不落用户消息尾、不伪称已送达）；不 force 所有任务派发、不代替 Root 的 native `task`、不改用户要求／目标项目规则／工具权限。契约与理由：`contracts/task-runtime.md`、ADR-009 §6.3。首次成功只记一条**本进程内「任务＋政策版本＋渠道」**事实（渠道、版本、任务／会话／型号、文本指纹，`delivered_claim` 明示仅“extension 修改了该载荷”，不含 server 回执或遵循主张），不存请求体／凭据。
+- **独立复核**：Q 预部署审 `/private/tmp/orbit-policy-fix-review-q/review.json`（15:15:41Z，PASS_limited_scope_with_one_finding，四项冻结 SHA 复核、三入口 owned/liveness 边界、四分支不可变性与 SDK 形状来源逐项核对）；F-1（messages 承载 developer 角色原生 system 时漏口）已修，增量复核 `addendum-f1-fix.json`（15:20:53Z）**PASS 无新 finding**；`metadata-correction.json`（15:23:05Z）仅勘正 addendum 中一位 hex 誊写与把“== expected”并入值的记录问题，**原件不覆写**。gate 真实日志：`/private/tmp/orbit-policy-fix/gate.log`（首失败，属测试解析而非实现）／`gate2`／`gate3`／`gate4`（均 exit 0，互不覆盖）。
+- **边界**：政策不改变 Jev 题义／阈值／decision-3／17 个校准样本，不改 selector 标签；不得因本修复勾选 W1—W10 或宣称自主派发已通过。
 
 ## 最小链路的最新事实
 
@@ -66,9 +73,10 @@
 ## 自主派发真正缺口与资源风险
 
 - 只读调查 `/private/tmp/orbit-autonomous-dispatch-audit/autonomous-dispatch-evidence.json`：0.7.20 没有 entry advisory 实现；0.7.21 fresh 显式请求没有触发其概率前提。两次都在实现前没有工作单元，后一次推荐出现于实现后的 provenance 单元。**不能说 Root 忽略了已送达的派发指导，也不能说 Jev 服务一直不工作**。
-- 宿主 `before_agent_start` 发生在自动建任务之前，而首次 `before_provider_request` 建任务后原来只尝试概率条件下的 advisory。该启动接缝的修复已合入 **installed 0.7.23** 并在 phone 与 pair2 两轮的首个载荷留下 `via: provider_payload` 记录。**仍未闭合的是自主委派本身**：两轮都是 `members=0`，Root 依 bootstrap 的“自行实施依据”分支自行完成。**当前动作是只读调查 native 委派规则的生效分支**（有交接入口信号时 Root 为何选择直接实施）；**尚未证实根因**，先取有效原因，再做针对性修复与重验。
-- 质量正向过门后，可信可比成本分支按成本优先；成本未知／不可比分支决策语义已实现（实现者 Q）并随 installed 0.7.23 生效：过门候选保持调用方稳定输入（池）序，不称便宜或可靠，未知不免费。decision-3 放行由 Root 独立审核后重签（证据边界见上节）。普通 phone 任务 `01f4925b` **有匹配的放行与真实付费判断**（2 次 `jev_checker_selection` `answered`，`judgment_model jev-1.13.0`、decision-3、`requirements_error: null`），但**无候选过 0.6 门**（唯一有分 `zenmux/deepseek/deepseek-v4.1-flash` task-fit 0.55），故降级池序：**这只证明降级，不证明 decision-3 过门后的排序**。池顺序不等于便宜；升版本并审计放行绑定、不重标旧分数的约束保持。
-- 最小链资源后验（36 调用全 `reported`、call_id 唯一、checker 两账本一致、reasoningTokens 子集未另加；billing／account 全 unknown、未推费用）见上节与 `/private/tmp/orbit-minimal-chain-PbtkHC/controller/resource-post-audit.json`。该摘要只汇总账本，**不证明普通派发或任何收益**，不推翻下节负例。
+- 宿主 `before_agent_start` 发生在自动建任务之前，而首次 `before_provider_request` 建任务后原来只尝试概率条件下的 advisory。该启动接缝的修复已随 installed 0.7.23／0.7.24 生效，并在 phone、pair2 两轮的首个载荷留下 `via: provider_payload` 记录。**已确认原生指令存在冲突并已针对性修复**：源码可确认的是规则分支（`revision >= 6` → delegation-bias `restrained` ⇒ inline-first 文案）与主方案 §5.2 的串行交接冲突，以及对应 shape／config 的探针输出；**旧两轮 `members=0` 的因果不能由静态推定**，也不主张服务器已收到该文案或模型必然遵循（实际 wire 未落盘）。 0.7.24 已按同层政策修复（见上节）。**仍未闭合的是真实自主验收**：phone／pair2 两轮实测都是 `members=0`、Root 自行实施；pair3 见下条（截至本次读取 running／partial，尚无成功成员交付）。
+- 质量正向过门后，可信可比成本分支按成本优先；成本未知／不可比分支决策语义已实现（实现者 Q）并随 installed 0.7.23 生效：过门候选保持调用方稳定输入（池）序，不称便宜或可靠，未知不免费。decision-3 放行由 Root 独立审核后重签（证据边界见上节）。普通 phone 任务 `01f4925b` **有匹配的放行与真实付费判断**（2 次 `jev_checker_selection` `answered`，`judgment_model jev-1.13.0`、decision-3、`requirements_error: null`），但**无候选过 0.6 门**（唯一有分 `zenmux/deepseek/deepseek-v4.1-flash` task-fit 0.55），故当时降级池序：**那次只证明降级**。**phone／pair2 未触发该正向排序；pair3 本次 selection 已触发并直接核对**（state `member_selections[wu-56f0622023bf4fa6]`，released `orbit-quality-decision-3`、`member_task_fit` 门 0.65；候选 quality：index0 0.21、**index1 K3 0.66**、index2 0.15、index3 0.22、**index4 Zen 0.70**、index5 0.38；`positive_ids`=[K3(index1), Zen(index4)]，`first` 仍为 K3、backup Zen，`cost_comparison: unknown`、basis `released_task_fit`）。该结果与“稳定池序、不按最大质量”一致；**真实 hint 采纳与成功成员交付仍未证**。 池顺序不等于便宜；升版本并审计放行绑定、不重标旧分数的约束保持。
+- 最小链资源后验（36 调用全 `reported`、call_id 唯一、checker 两账本一致、reasoningTokens 子集未另加）见上节与 `/private/tmp/orbit-minimal-chain-PbtkHC/controller/resource-post-audit.json`。该摘要**只汇总账本**，**不证明普通派发或任何收益**，不推翻下节负例。**未知口径按该摘要原文范围**：现金／实际扣减桶未知（`cash []` 只表示未知，不是 0 成本）；账户归属与 OAuth 归属是否可得**以原件报告各任务范围为限**，本页不把它概括成“全部原生账户缺失”，精确归属待 Root 复核原件后确认。
+- **pair3 mixed 臂已启动（截至本次读取 2026-09-30T15:48:52Z，running／partial）**：`/private/tmp/orbit-reconcile-pair3-NXisvi`（controller／`FROZEN-SOURCE.json`；两臂六文件与 `b01a87c` 归档源逐字节一致、seed `beceae6b6c1b35d1003f48f62cb220eb0e7f6db8`；业务 prompt 逐字 `dbd4569e…`、无派发指令；冻结 8 tests＋6 probes 未改）。原件：`controller-records/launch-current.json`（15:42:07Z；`herdr pane run` 于 `w1Y:p26` 复用 shell，**pid 19954**，参数指向 release `c57f2888e80281027ffc166d`＝0.7.24，session 目录在 product 之外）与 `mixed/.orbit/tasks/b91fe4de-9927-4aaf-883a-e59423845e4c/`。该任务 15:42:28Z 建立、**现为 `running`、无 stop**（截至本次读取 checks 已出现 1 次，仍无已接受成员交付）；policy1 首层事实已记（`channel: instructions`、model `openai-codex/gpt-6-sol`、session `01a0f2fa-88e5-754f-8e66-afabd2e8ac31`、文本指纹 `9877cc7a…`）；15:44:12Z Root **自主声明** `wu-56f0622023bf4fa6`；首次 member selection 因 `Net::OpenTimeout` 得 `not_recommended`（无分、无 hint）；15:45:19Z Root 无 hint 自主首派、成员 `orbit-3696a6fb-6554-4878-96a7-c833a459442a` 注册并绑定，**provider 429（Go usage limit）真实失败**（实现前零改动）；同一窗口成员被真实结算为 `failed`（`member_settled`，`source: native_turn_error`，15:45:21Z 与 15:46:27Z 两次），工作单元 15:46:27Z `failed`、结算随后被判失效并按原样重结算为 `failed`——**不是长期未结算**；15:46:30Z 新一次真实 selection `recommended`（首选 `orbit-m-kimi-code-k3-256k-301bb915`、备选 zenmux，`handoff_fit 0.83／member_task_fit 0.71`），hint 已送达事件存在。**截至本次读取：checks 已出现 1 次（artifact／reviewer #1），仍无已接受成员交付、无停止；baseline 未授权未启动。**当前已在两个具体断点被直接核对（只读诊断 `controller-records/breakpoint-diagnosis-redispatch.json`，15:51:08Z／补充 15:52:21Z，**只评估未实现**）：**Seam B** —— 成员因 429 真实失败、unit 仍 `bound` 时，Root 的自主重派（15:46:03Z）被宿主前置门拒绝（“Work unit … is already bound/accepted … declare or finish the correct unit”），即真实原生错误结算后的同单元恢复顺序被 `bound` 挡住；**Seam A** —— `plugins/omp-host.mjs` 的 `matchedHint` 仍硬编码 `orbit-member-selection-v1`，而当前 selector 为 `v2`，故 0.7.23／24 的 v2 hint 绑定链在源码上不可达（pair3 未发生该 seam 的实机拒绝，属确定性推导）。**下一步只读诊断、再最小修复**，不盲重启 SUT。 身份或命令以 `FROZEN-SOURCE.json` 与该轮 launch／state 原件为准（旧 `FREEZE.json` 为历史副本）。
 - **pair2 mixed 臂已完成该轮**（任务 `d623e8b1` complete＋confirmed stop，原件见上节），但 `members=0`、无工作单元与派发，**不构成自主派发证明**；其资源账本可如实列（judgment 10、root 19、checker k3 6、checker Go 1 unknown），**不作收益结论**。baseline 臂未启动，资源对照与同质量 Top／混合对照均未做。Q 的外部副本验证已完成（固定 8 tests 8/8、6 probes 6/6，各一次 exit 0，评估记录 14:59:13Z），但**不改本轮自主委派负例**。
 
 ## 必须保留的负例
@@ -85,23 +93,23 @@
 | Pane | 角色与当前状态 |
 | --- | --- |
 | `w1Y:p1A` | 当前 Codex Root；新会话需明确接替编排，避免两个 Root 同时写／派发 |
-| `w1Y:p1S` | S，DeepSeek Flash；bootstrap 增量交付、0.7.23 组合 full／pack（gu0Ouq）与本次文档同步（本票写者）均由其执行，已停写，无 npm 测试残留，idle |
-| `w1Y:p1Q` | Q，GLM；bootstrap F1/F2 复核、选型排序审查、phone fixture 准备、policy decision-3 实现、最小链资源后验均已完成并停写；pair2 外部副本验证已完成（固定 8 tests 8/8、冻结 6 probes 6/6，各一次 exit 0，评估记录 `external-evaluation.json` 14:59:13Z），现进行 SDK 只读调查；不写产品源码，idle |
+| `w1Y:p1S` | S，DeepSeek Flash；policy 增量实现（含 F-1 修复）、0.7.24 patch＋唯一 full／pack／validator（fqtEee）与本次文档同步（本票写者）均由其执行，已停写，无 npm 测试残留，idle |
+| `w1Y:p1Q` | Q，GLM；policy 预部署审 PASS＋F-1 增量复核 PASS（`review.json`／`addendum-f1-fix.json`／`metadata-correction.json`）、外部副本 8/8＋6/6、SDK 委派偏置只读调查均已完成；现持有 pair3 mixed 臂的 Controller 票（启动／观察），不写产品源码 |
 | `w1Y:p1R` | R，当前 Grok；本轮报告工作区工具不可用，已明确停票（fixture 无文件产物，由 Q 接手），不再重试或写源码，idle；不能默认可用 |
 | `w1Y:p27` | `ordinaryphone23`（installed 0.7.23 普通请求 SUT，任务 `01f4925b` complete＋confirmed stop）：**已原生退出并关闭**，pid 87232 经 ps 实测不存在；其 cleanup 记录可由 Q 复用 |
-| `w1Y:p26` | `reconcile23core`（pair2 mixed 臂被测 Root，installed 0.7.23，pid 27206）：任务 `d623e8b1` 已 `complete`＋confirmed stop，原生 `/exit` 已执行，pid 27206／27262／27322 经 ps 复查均消失、Herdr agent list 已无该 agent；pane 回到 shell 并保留、不关闭 |
+| `w1Y:p26` | 复用 pane：pair2 `reconcile23core` 已退出（pid 27206／27262／27322 实测消失、pane 回 shell）。**pair3 mixed 臂已启动**：pid **19954**、release `c57f2888e80281027ffc166d`（0.7.24），依 `controller-records/launch-current.json` 读取；`state.json` 现为 `running`（依据 launch＋state 原件，非摘要） |
 
-各 fixture 都把 controller／request／session 保存在 product 之外。phone、旧 minchain21 与 pair2 mixed 的 Root 会话**均已退出**，相关 pid 经 ps 实测不存在，未执行 kill；当前无自有被测进程需要收尾。不要 kill 通用 OMP／Herdr，不批量删除临时目录；Q/R/S 是用户提供的执行者，不关闭它们；p26 保留为可用 shell。
+各 fixture 都把 controller／request／session 保存在 product 之外。phone、旧 minchain21 与 pair2 mixed 的 Root 会话**均已退出**，相关 pid 经 ps 实测不存在，未执行 kill。不要 kill 通用 OMP／Herdr，不批量删除临时目录；Q/R/S 是用户提供的执行者，不关闭它们。**Root 的检查范围**：installed identity（`orbit version --json`）、release-delivery 原件、policy gate／Q 审记录、pair3 `FROZEN-SOURCE.json` 与后续该轮的 launch／state／ledger 原件；不以本页摘要替代原件。
 
-pair2 状态：mixed 臂**已完成（任务 complete＋confirmed stop）但 `members=0`，不构成自主派发证明**；baseline 臂未启动，资源对照未做。下一步见「自主派发真正缺口」与「新 Root 的顺序」。
+pair2 状态：mixed 臂**已完成（complete＋confirmed stop）但 `members=0`，不构成自主派发证明**；其 baseline 未启动。pair3：mixed 启动由 Q 执行中，baseline 未授权，资源对照未做。
 
 ## 新 Root 的顺序
 
 1. 读取本页、主方案／代码审计／W1—W10、开发规则；核对 live 工作区与 installed identity，继承已有授权。
 2. 复用最小链成功、Jev API 证据与最小链资源后验；收好本轮原件（release-delivery、gu0Ouq、ordinary-phone、pair2 terminal-audit）。pair2 mixed 已结束：**进程已退出，pane 回 shell 并保留**；除按需后验外不要重启该轮、不要删其原件。不要重复提交此前业务 prompt。
-3. 安装已完成（0.7.23，`sh install.sh` exit 0；**“工作区干净”只指安装当时**，不由它推断当前状态——本次文档同步本身即让工作区处于 dirty）；不再重复安装或重跑组合验证。旧 22／21 的 full 不覆盖本轮增量，如遇本版新问题按具体事件另行取据。
-4. 自主委派仍未闭合（phone `01f4925b` 与 pair2 `d623e8b1` 均 `members=0`）：先完成**只读调查 native 委派规则的生效分支**，取到有效原因后再做针对性修复与重验——**不重复同类大任务、不诱导派发**。有效原因明确前不把任何猜测写成根因。
-5. 闭合质量充分后分派与旗舰升级、可信路由成本／实际用量归属、错误控制、finding 纠正、当前版本手动终检与实际停止；新版问题／决策校准绑定保持真实。决策-3 的“过门后稳定池序”正向排序尚未被真实样本触发（phone 有放行与真实付费判断、但无候选过 0.6 门），需另有候选过门的真实样本才算验证。
+3. 安装已完成（installed 0.7.24，`59eb7e7`；`sh install.sh` exit 0；release-delivery 原件）；不再重复安装、不重跑组合验证、不升级 OMP（18.3.4）。旧 0.7.23／0.7.22／0.7.21 的 full 不覆盖本轮增量。
+4. **当前优先闭合真实自主验收**（不因此缩掉其余 W 项）：pair3 mixed 臂已启动（见上节，running／partial），只报已读原件事实；**不得称成功成员交付，直到实际接受、checks 与停止证据出现**；baseline 未授权；不重复同类大任务、不诱导派发。判据仍是实际推荐→native task→登记→成员回传→Root 集成，而非本页或 policy 注入本身。
+5. 闭合质量充分后分派与旗舰升级、可信路由成本／实际用量归属、错误控制、finding 纠正、当前版本手动终检与实际停止；决策-3 的“过门后稳定池序”已由 pair3 本次 selection 真实触发（K3 0.66／Zen 0.70 过门、first 仍 K3），但**真实 hint 采纳与成功成员交付仍未证**，两个已核断点（Seam A／B）待只读诊断后最小修复；政策修复不替代这些验收，也不勾选 W 项。
 6. 核心路径通过后再完成冻结的同质量 Top／混合资源对照，报告全部角色和未知量，按主方案 §11.3 调整负收益路径。逐项闭合 W1—W10、文档、收尾和本地提交后才 complete。
 
 当前没有新的用户审批前置；不要把所有模型可靠性证明、外部发票或全型号认证另加成验收门。用户的 Goal 会话迁移不等于已完成或重新获得一份可以无限重复旧失败的资源额度。

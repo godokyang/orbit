@@ -6,7 +6,7 @@
 
 用户已认可主文档；形成本文时的授权是审视代码并新增附属文档。本文记录该次审视的现状和后续建议，不替代产品语义文件。后续文档整理只修正阅读入口与引用，不把这些建议写成已实施。后续用户补充明确完整目标一次交付、不设硬预算；实施步骤按依赖拆分，不将关键目标另推下一期，也不把“可以调整架构”解释为必须重写底层。
 
-**阅读口径**：A01—F10 各表的状态标签是 2026-09-29 在原审视基线（`0.7.10`／`323408b` 工作区）上的初审判定，属历史快照，保留原样、不按今天重写。判断现行行为以下方“当前实现对应表”（按 **installed `0.7.23`／`5d5a497`** 复核，2026-09-30）与[合同](../../contracts/task-runtime.md)、ADR-008/009 为准；例如 F01、F03、F04 的“未实现／新增”不代表今天没有成本数据流，W1—W10 也不能因某条接线完成就机械勾选。历史实机轮次（0.7.20／0.7.21 的负例与最小链）仍按各自构建解释，不因本版已安装而改判。
+**阅读口径**：A01—F10 各表的状态标签是 2026-09-29 在原审视基线（`0.7.10`／`323408b` 工作区）上的初审判定，属历史快照，保留原样、不按今天重写。判断现行行为以下方“当前实现对应表”（按 **installed `0.7.24`／`59eb7e7`** 复核，2026-09-30）与[合同](../../contracts/task-runtime.md)、ADR-008/009 为准；例如 F01、F03、F04 的“未实现／新增”不代表今天没有成本数据流，W1—W10 也不能因某条接线完成就机械勾选。历史实机轮次（0.7.20／0.7.21 的负例与最小链）仍按各自构建解释，不因本版已安装而改判。
 
 本次 Goal 已获实现授权。下表保留原审计基线；以下实施进度单列，不能把一处修复当整项验收通过。已采纳的替换语义见 [ADR-009 §6](../adr/009-user-selected-model-pool.md#6-已采纳的替换决定与实现接缝实施中)。
 
@@ -39,11 +39,11 @@ E04（§7、§11.2）覆盖接线随 `1ffec49`／0.7.11 与 `a1f9291`／0.7.12 �
 
 “删除”主要指删除旧选择规则、问题及其活跃消费者，不是删除所有包含时间的代码，也不是抹除旧判断记录。
 
-### 当前实现对应表（按 installed `0.7.23`／`5d5a497` 复核，2026-09-30）
+### 当前实现对应表（按 installed `0.7.24`／`59eb7e7` 复核，2026-09-30）
 
 本表只说明**源码接线现状**，不是完成条件已证明。原 2026-09-29 初审表与上表保留历史口径；未列出的验收仍以[当前计划](vision-completion-plan.md)为准，W1—W10 保持未勾选。
 
-| 审计项 | 快照状态（2026-09-29） | installed `0.7.23` 源码现状（2026-09-30 复核） | 源码证据 | 仍未闭合 |
+| 审计项 | 快照状态（2026-09-29） | installed `0.7.24` 源码现状（2026-09-30 复核） | 源码证据 | 仍未闭合 |
 | --- | --- | --- | --- | --- |
 | A02—A05、C05—C06 | 旧规则／部分实现 | 入口改为 `execution_authorized` ＋ `delegation_value`／`supervision_value` 两条收益路径，任一过门；引文、裸继续不猜目标；题义版本 `orbit-entry-3`，有限默认放行限声明的 Git／有界交付域 | [prestart.rb](../../lib/orbit/prestart.rb) 入口问题与判门（第 42 行起、332 行） | 域外泛化未证明；installed 0.7.23 普通请求任务 `01f4925b` 已走 `uncertain → start`（jev-1.13.0）并完成，但 `members=0`，不构成自主委派证据 |
 | B02 | 未实现／新增 | 成员链已消费目录先验（与检查者同一 overview 实例） | [member_model_selector.rb](../../lib/orbit/member_model_selector.rb)（`@overview`、`model_overview_prior`） | 真实采纳、交付归属与完整身份未验收 |
@@ -60,12 +60,14 @@ E04（§7、§11.2）覆盖接线随 `1ffec49`／0.7.11 与 `a1f9291`／0.7.12 �
 | F08 | 范围已明确 | 不新增硬预算或费用停止门（用户已明确不需要） | — | 保持 |
 | F09、F10 | 未实现／源码可确认 | installed 0.7.20 paired 对照已跑：冻结 8 项测试与 6 项探针两臂各 8/8、6/6 通过，质量无可检出差异；顶级模型总量约 +30%、用户介入两臂均 0；混合臂 members=0 | [当前计划](vision-completion-plan.md) 真实验收段 | 单任务对、未 exercise 成员替代路径，不证明节省；0.7.10 仍不得描述成已上线全部新行为 |
 
-**2026-09-30 复核补充（installed `0.7.23`／`5d5a497`，只补有限事实，不改上表历史口径）**
+**2026-09-30 复核补充（installed `0.7.23`→`0.7.24`，只补有限事实，不改上表历史口径）**
 
-- 安装身份：0.7.23，commit `5d5a497`、dirty false、digest `919d5f87…`、14:17:32Z 安装（原件 `/private/tmp/orbit-release-0.7.23-delivery/`）；提交前组合验证 full／pack／validator／version／diff-check 全 exit 0、129 文件逐文件 SHA 一致（`/private/tmp/orbit-regression-0.7.23-gu0Ouq/`）。
-- 版本标签：selection 决策 `orbit-quality-decision-3`、member `orbit-member-selection-v2`、checker `orbit-checker-selection-v7`、checker signature `v8`；旧 `-2`／`v1`／`v6` 记录按旧版本解释、不改写。
-- 普通请求实测：任务 `01f4925b` 走入口 `uncertain → start`、首个载荷带 bootstrap、首次编辑前单元 `none`、Root 自行实施、检查 3 次（1 次 provider 失败／2、3 完成、findings 0）、外部 copy 固定 9 例 exit 0、`complete`＋`confirmed stop`；`members=0`，**不证明自主委派**。选择 basis `pool_order_unreleased`：**任务在放行 profile 内且有真实付费判断**（2 次 `jev_checker_selection` `answered`，`judgment_model jev-1.13.0`、decision-3），但**无候选过 0.6 门**（唯一有分候选 0.55），故降级池序——**只证明降级，不证明 decision-3 过门后的排序；也不是域外任务**。
-- pair2 mixed 臂该轮已完成：`w1Y:p26`（pid 27206，installed 0.7.23），任务 `d623e8b1`，`created_at 2026-09-30T14:35:19Z`，终态 `complete`＋`stop_confirmation.confirmed`（`finalization_notice`→`completed_via_finalized_stop`→`stopped`）；原生消息 `8eec046e`、入口 delegation 0.83、bootstrap `via: provider_payload`、首次编辑前单元 `none`；`members=0`、无工作单元与派发，**不构成自主派发证明、不作收益结论**（账本 judgment 10／root 19／checker k3 6／checker Go 1 usage unknown）；原生 `/exit` 已执行、pid 27206／27262／27322 实测消失。当前动作是只读调查 native 委派规则的生效分支，**尚未证实根因**。baseline 臂未启动。Q 外部副本验证已完成（固定 8 tests 8/8、冻结 6 probes 6/6，各一次 exit 0，评估记录 14:59:13Z），**不改 `members=0` 负例**。
+- 安装身份：**当前 0.7.24**，commit `59eb7e777fd521e9db138e9953ff0adc277538e2`、dirty false、digest `02067f5813489335dfe85a086bc9c791b0eff8b31c309ede950935a18bd1e994`、installed_at `2026-09-30T15:32:10Z`（安装窗口 `15:31:55Z→15:32:12Z`、exit 0；原件 `/private/tmp/orbit-release-0.7.24-delivery/`）；提交前组合验证 full／pack／validator／version／diff-check 全 exit 0、129 文件 pre/post/final **逐文件**一致（`/private/tmp/orbit-regression-0.7.24-fqtEee/report.json`）。上一版 0.7.23（`5d5a497`、digest `919d5f87…`、14:17:32Z）作历史。
+- 受控串行交接合作政策（0.7.24 新接缝）：原生 restrained 系统文案（inline-first／「NEVER delegate one slice」）与主方案 §5.2 串行接力冲突**已确认**（源码规则分支＋shape／config 探针）（`pi-catalog` `classes/openai.kdl` `revision >= 6` → `restrained`；`system-prompt.ts` 该分支渲染 inline-first；实际 wire 未落盘，不宣称服务器收到或模型遵循）；程序在实际 owned＋活动＋runtime alive 的受控 Main 的**每个可达 provider 请求**于同层（`instructions`／Anthropic `system`／messages 既有 `system`、`developer` 文本末尾／Responses `input` developer 块之后）注入条件式政策，不可识别形状静默跳过、不落用户消息尾；不 force 派发、不代替 Root native `task`，不改 Jev 题义／阈值／decision-3／17 样本。Q 预部署审 PASS＋F-1（developer 角色 messages 渠道）增量复核 PASS，`metadata-correction.json` 仅勘正记录誊写。
+- 版本标签（未变）：selection 决策 `orbit-quality-decision-3`、member `orbit-member-selection-v2`、checker `orbit-checker-selection-v7`、checker signature `v8`；旧 `-2`／`v1`／`v6` 记录按旧版本解释、不改写。
+- **pair3 mixed 臂已启动（截至本次读取 2026-09-30T15:49:00Z，running／partial）**：`/private/tmp/orbit-reconcile-pair3-NXisvi`，`launch-current.json` 记 pid 19954／release `c57f2888e80281027ffc166d`（0.7.24）；任务 `b91fe4de-9927-4aaf-883a-e59423845e4c` 15:42:28Z 建立、现 `running`、checks=0、无 stop；policy1 `instructions` 首层事实已记，15:44:12Z Root 自主声明 `wu-56f0622023bf4fa6`，首次 selection 因 `Net::OpenTimeout` `not_recommended`，15:45:19Z 无 hint 自主首派注册后 provider 429 真实失败（工作单元 `failed`），15:46:30Z 新 selection `recommended`（K3 首选／Zen 备选）且 hint 已送达；**尚无已接受成员交付、无 checks、无停止；baseline 未授权。**
+- 普通请求实测：任务 `01f4925b` 走入口 `uncertain → start`、首个载荷带 bootstrap、首次编辑前单元 `none`、Root 自行实施、检查 3 次（1 次 provider 失败／2、3 完成、findings 0）、外部 copy 固定 9 例 exit 0、`complete`＋`confirmed stop`；`members=0`，**不证明自主委派**。选择 basis `pool_order_unreleased`：**任务在放行 profile 内且有真实付费判断**（2 次 `jev_checker_selection` `answered`，`judgment_model jev-1.13.0`、decision-3），但**无候选过 0.6 门**（唯一有分候选 0.55），故当时降级池序——**那次只证明降级；也不是域外任务**。**pair3 本次 selection 已触发该正向排序并直接核对**（state `member_selections[wu-56f0622023bf4fa6]`：released `orbit-quality-decision-3`、门 0.65；index1 K3 0.66 与 index4 Zen 0.70 过门，`first` 仍 K3／backup Zen，`cost_comparison: unknown`、basis `released_task_fit`）；**phone／pair2 未触发**；真实 hint 采纳与成员交付仍未证。
+- pair2 mixed 臂该轮已完成：`w1Y:p26`（pid 27206，installed 0.7.23），任务 `d623e8b1`，`created_at 2026-09-30T14:35:19Z`，终态 `complete`＋`stop_confirmation.confirmed`（`finalization_notice`→`completed_via_finalized_stop`→`stopped`）；原生消息 `8eec046e`、入口 delegation 0.83、bootstrap `via: provider_payload`、首次编辑前单元 `none`；`members=0`、无工作单元与派发，**不构成自主派发证明、不作收益结论**（账本 judgment 10／root 19／checker k3 6／checker Go 1 usage unknown）；原生 `/exit` 已执行、pid 27206／27262／27322 实测消失。已确认原生指令存在冲突（源码规则分支＋shape／config 探针，实际 wire 未落盘）并随 0.7.24 交付同层政策修复（见下复核补充）；**旧两轮 `members=0` 的因果不能由静态推定，真实自主验收仍待**。Q 外部副本验证已完成（固定 8 tests 8/8、冻结 6 probes 6/6，各一次 exit 0，评估记录 14:59:13Z），**不改 `members=0` 负例**。
 - 最小链资源后验：36 调用全 reported、call_id 唯一、checker 两账本 id 集与用量一致、reasoningTokens 子集未另加；billing／account 仍未知。该摘要文件的 `recorded_at_utc_machine_clock` 为手写估计、**时间未核实**（纠正记录 `/private/tmp/orbit-quality-decision-3-impl/install-preflight-timestamp-correction.json`），不重标原事件、不改账本；该轮同时是 native hint 采纳与成员结算的有限证明，旧负例（p26、`02a5eda7`、`1d977642` 等）原样保留。
 - **F09 的范围**：需要的是同等验收对照与报告，**不要求产品内新增对照编排模块**；缺该模块不算源码未实现。**A08／B12 同理**：不要求五阶段聚合组件或永久先验自更新框架，按用户可区分事实与既有函数输入说明核对即可。
 

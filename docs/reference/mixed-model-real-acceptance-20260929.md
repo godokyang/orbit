@@ -214,3 +214,44 @@ Controller 在六份已完成产物的副本上，额外重放同一组八个从
 ### 状态
 
 W1—W10 仍未整项勾选；普通全池自主委派与同质量资源对照未完成（pair2 mixed 该轮已 complete＋confirmed stop 且进程已退出，但 `members=0` 仍是自主委派负例；Q 外部副本固定 8 tests 8/8＋6 probes 6/6 各一次 exit 0 属有限 PASS，不改该负例；baseline 臂未启动、资源对照未做）；本追加不主张完整 Goal，不新增任何框架或验收门。
+
+## 2026-09-30 追加：0.7.24 受控串行交接合作政策（本地提交＋安装＋独立复核）
+
+本追加延续同一口径：源码/静态、mock/脚本、live 实机分开陈述，不改旧结论与负例。
+
+### 指令冲突（源码有效分支，非 wire 证据）
+
+- 已安装 OMP 18.3.4 的类规则对 `revision >= 6` 给 `delegation-bias restrained`（`pi-catalog/src/compat/rules/classes/openai.kdl`）；`pi-coding-agent/src/system-prompt.ts` 的 `inlineFirstDelegation = delegationBias === "restrained" && !eagerTasks` 在该分支渲染 inline-first 文案（`prompts/system/system-prompt.md` 的「NEVER delegate one slice」「2+ independent slices」，`eagerTasks` 默认 `default`⇒false）。这与主方案 §5.2「有界单成员串行接力」冲突；**这是源码规则分支与 shape／config 探针证据**，**不能由静态推定旧两轮 `members=0` 的因果**（phone `01f4925b`、pair2 `d623e8b1` 的实测行为一致只属对照事实）。
+- 只读调查与探针输出：`/private/tmp/omp-delegation-bias-investigation.json`（含 `.omp` 配置层更正：本机无 `task.eager` 覆盖、无 CLI 旗标）。**实际请求体未落盘**，故只主张 shape／config 与源码规则分支证据，不宣称服务器收到该文案、也不宣称模型心理因果。
+
+### 交付与安装（installed 0.7.24）
+
+- `npm version patch --no-git-tag-version` → 0.7.24；提交 `59eb7e777fd521e9db138e9953ff0adc277538e2`（“fix: allow controlled serial handoff at the native instruction layer”），提交后工作区 clean。
+- 组合验证（同一次 run）：`npm test` **exit 0**、`npm pack --dry-run` **exit 0**、skill validator **exit 0**、`npm run check:version` **exit 0**、`git diff --check` **exit 0**；129 文件 pre/post/final **逐文件**一致（`/private/tmp/orbit-regression-0.7.24-fqtEee/report.json`，含 `six-files-sha256.txt` 与 `hash-compare*.diff` 空）。
+- 安装：`install.exit`=0（窗口 `15:31:55Z→15:32:12Z`），installed 0.7.24／commit `59eb7e7`／digest `02067f58…`／installed_at `15:32:10Z`／dirty false；OMP 18.3.4 未升级；随包文件（host／contract／package／quality policy／calibration）与源码逐字节一致，`docs/`、`tests/` 不在 pack 清单（旧字段 false 已勘正：不存在≠失配）。原件 `/private/tmp/orbit-release-0.7.24-delivery/`。
+
+### 实现与边界（同层政策）
+
+每个可达 provider 请求、仅实际 owned＋活动＋runtime alive 的受控 Main 注入条件式政策（“若原生默认以仅 2+ 独立片段或不委派单一片段限制交接，则本受控任务适用有界交接规则”）：先声明工作单元供 Jev two-stage 真实适配判断，再依据真实 hint 或带局限的 Root 选择决定是否用 native `task` 派发；缺并行片段／共享接口／需等待依赖不单独构成拒派理由；短小低收益可有据自行实现。可承载位置：`instructions`、Anthropic 顶层 `system`、messages 既有 `system`／`developer` 消息文本末尾、Responses `input` 既有 developer 块之后；不可识别形状**静默跳过**（不落用户消息尾、不伪称送达）；请求内幂等；首次成功每“本进程／任务／版本／渠道”记一次事实（含文本指纹与 `delivered_claim`=仅 extension 修改该载荷），不存请求体／凭据。不改用户要求／目标项目规则／工具权限，不代替 Root 派发、不增加用户批准、不改 Jev 题义／阈值／decision-3／17 个校准样本。
+
+### 独立复核
+
+Q 预部署审 `review.json`（15:15:41Z，PASS_limited_scope_with_one_finding）＋ F-1 增量复核 `addendum-f1-fix.json`（15:20:53Z，PASS，无新 finding；F-1 = messages 承载 developer 角色原生 system 时漏口，已修并断言渠道 `developer_message`）；`metadata-correction.json`（15:23:05Z）仅勘正 addendum 中一位 hex 誊写与把判断词并入 hash 值的记录问题，**原件不覆写**；并限定其 minor note：`policyRecorded` 为进程内 Set，但非本进程记录会被 `host.ownsTask` 拒绝，只有该任务被新进程实际重新 owned 时才可能再记首达事实。gate 真实日志（互不覆盖）：`/private/tmp/orbit-policy-fix/gate.log`（首失败，属测试解析非实现）／`gate2`／`gate3`／`gate4`（均 exit 0）。
+
+### pair3 mixed 臂（已启动；详见下文独立小节）
+
+`/private/tmp/orbit-reconcile-pair3-NXisvi`：从 pair2 baseline 六文件复制生成两隔离 Git 臂（同 seed `beceae6`），逐字节等于 `b01a87c` 归档源（历史记录中 README／package.json 两处 hash 誊写误值按实际复算标注、旧记录不重写）；业务 prompt 逐字复用 `dbd4569e…`（不含派发／Orbit／型号／成员数提示）；P1–P6 探针源＋harness 逐字复制（`6391e77c…`／`e4358173…`），冻结 8 tests＋6 probes 原题、expectations 未改；`controller/FROZEN-SOURCE.json` 为准（旧 `FREEZE.json` 是历史副本，identity 不代表本臂）。**mixed 臂已启动（见下一小节，running／partial）；baseline 未授权、未启动；只报已读原件事实，未见实际接受与停止证据前不得称成功。**
+
+### pair3 mixed 臂（已启动；截至本次读取 2026-09-30T15:49:08Z 为 running／partial）
+
+- 启动原件 `controller-records/launch-current.json`（15:42:07Z）：`herdr pane run` 于复用的 `w1Y:p26` shell，**pid 19954**，参数指向 release `c57f2888e80281027ffc166d`（0.7.24），session 目录在 product 之外，`eager_override`: none；fixture seed `beceae6b6c1b35d1003f48f62cb220eb0e7f6db8`、六文件与 `FROZEN-SOURCE.json` 一致、prompt `dbd4569e…`。
+- 任务 `b91fe4de-9927-4aaf-883a-e59423845e4c`：15:42:28Z 建立，**现 `running`、checks=0、无 stop**（`state.json` 读取时）；会话 `01a0f2fa-88e5-754f-8e66-afabd2e8ac31`。
+- 已读原件的阶段事实：① policy1 首个成功事实 `channel: instructions`（model `openai-codex/gpt-6-sol`、文本指纹 `9877cc7a…`、`delivered_claim` 仅“extension 修改该载荷”）；② 15:44:12Z Root **自主声明** `wu-56f0622023bf4fa6`（非请求派发指令）；③ 15:44:15Z 首次 member selection `not_recommended`，原因 `TypeSafe assessment failed: Net::OpenTimeout`（`jev-1.13.0` requested、status unavailable、无分、无 hint）；④ 15:45:19Z Root **无 hint 自主首派**，成员 `orbit-3696a6fb-6554-4878-96a7-c833a459442a` 注册（basis `root_without_hint`、model null）并绑定工作单元；⑤ 该成员 **provider 429（Go usage limit）真实失败**（未产生任何实现改动），工作单元 15:46:27Z `failed`、`member_settlement_invalidated`（dispatch_changed）；⑥ 15:46:30Z 新一次真实 selection `recommended`：首选 `orbit-m-kimi-code-k3-256k-301bb915`、备选 `orbit-m-zenmux-deepseek-deepseek-v4-1-flash-0afa958f`，`handoff_fit 0.83／member_task_fit 0.71`（`jev-1.13.0`），`delegation_recommendation_delivered` 事件存在。
+- **decision-3 正向排序已触发**：latest selection（state `at` `2026-09-30T15:49:51Z`，signature `d4325c38…`）release `orbit-quality-decision-3`、门 0.65；候选 quality index0 0.21／**index1 K3 0.66**／index2 0.15／index3 0.22／**index4 Zen 0.70**／index5 0.38；`positive_ids`=[K3(index1), Zen(index4)]、`first` K3／backup Zen、`cost_comparison: unknown`、basis `released_task_fit`（首次该窗口推荐事件 15:46:30Z：handoff 0.83／member 0.71）。**phone／pair2 未触发；真实 hint 采纳与成功成员交付仍未证。**
+- **同窗成员结算**：`member_settled` 两次（15:45:21Z／15:46:27Z）均为 `status: failed`、`source: native_turn_error`，工作单元随之 `failed`；**不是长期未结算**。
+- **两个已核断点（只读诊断 `controller-records/breakpoint-diagnosis-redispatch.json`，只评估未实现）**：Seam B＝成员真实原生错误失败、unit 仍 `bound` 时自主重派被宿主前置门拒绝；Seam A＝host `matchedHint` 硬编码 `orbit-member-selection-v1` 而当前 selector `v2`（0.7.23／24 的 v2 hint 绑定链源码不可达，pair3 未发生该 seam 实机拒绝）。下一步只读诊断后最小修复，不盲重启。
+- **边界**：截至本次读取 checks 已出现 1 次（artifact／reviewer #1），仍无**已接受**成员交付、无停止；本追加不把该轮称为成功或失败终结，也不把 policy 注入当成员交付证据；baseline 臂未授权、未启动。后续状态以该任务目录原件为准。
+
+### 资源未知口径（窄范围，待 Root 复核）
+
+本轮**不做资源结论**。既有摘要的未知按各自报告范围理解：**现金与实际扣减桶未知**（`cash []` 只表示未知，不是 0 成本）；**账户／OAuth 归属是否可得以各任务原件报告范围为准**，不得概括为“全部原生账户缺失”，精确归属待 Root 复核原件后确认。旧负例（0.7.20 paired `members=0`、Top 约 +30%；p26；`02a5eda7`；`1d977642`）与 pair2 `members=0` 全部保留，本追加不改判。
