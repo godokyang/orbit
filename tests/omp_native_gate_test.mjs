@@ -242,6 +242,137 @@ try {
   await emit('tool_call', { toolName: 'bash', toolCallId: 'root-shell-1', input: { command: 'echo x > src/parse.js' } }, ctx);
   assert.equal((await collabEntries()).filter(e => e.kind === 'unit_state_before_edit').length, 1,
     'a shell command is never read as an artifact edit');
+  // 1d. Controlled-Root cooperation policy. A bounded single-member serial
+  //     handoff must be visible to the model at the SAME layer as the native
+  //     system/developer instruction — on the first controlled request and on
+  //     later ones (a policy, not a one-shot) — while shapes this release
+  //     cannot place there stay honestly undelivered, and unowned/terminal
+  //     records get nothing.
+  {
+    const policyCount = text => (String(text).match(/\[orbit-cooperation-policy\]/g) ?? []).length;
+    // The SDK hook's return value IS the raw request body (never a wrapper), so
+    // read the emitted value the same way the runtime does.
+    const bodyOf = (out, original) => out?.payload ?? out ?? original;
+    const codexShape = extra => ({ instructions: 'NATIVE SYSTEM PROMPT', input: [
+      { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'do the thing' }] }], ...extra });
+    const policyFacts = async () => (await waitFor(entries => entries.some(e => e.kind === 'cooperation_policy')))
+      .filter(e => e.kind === 'cooperation_policy');
+
+    // (a) bound + active: the policy joins the native system instruction layer
+    //     and neither the native text nor the user turn is rewritten.
+    const firstPayload = bodyOf(await emit('before_provider_request', { payload: codexShape() }, ctx), codexShape());
+    assert.ok(firstPayload.instructions.startsWith('NATIVE SYSTEM PROMPT'), 'the native system text stays first');
+    assert.equal(policyCount(firstPayload.instructions), 1, 'the policy reaches the system instruction layer');
+    assert.equal(firstPayload.input[0].content[0].text, 'do the thing', 'the user turn is never used as the policy channel');
+    const firstFacts = await policyFacts();
+    assert.equal(firstFacts.length, 1, 'the first successful delivery records exactly one policy fact');
+    assert.equal(firstFacts[0].channel, 'instructions', 'the recorded channel names the layer actually used');
+    assert.equal(firstFacts[0].policy_version, 'orbit-cooperation-policy-1');
+    assert.ok(firstFacts[0].instruction_sha256.startsWith('sha256:'), 'the fact keeps a text fingerprint');
+    assert.equal(Object.hasOwn(firstFacts[0], 'input'), false, 'no raw payload is persisted');
+    assert.equal(Object.hasOwn(firstFacts[0], 'payload'), false, 'no raw payload is persisted');
+
+    // (b) a later request still carries it, exactly once per request.
+    const secondShape = codexShape({ sequence_number: 7 });
+    const secondPayload = bodyOf(await emit('before_provider_request', { payload: secondShape }, ctx), secondShape);
+    assert.equal(policyCount(secondPayload.instructions), 1,
+      'the policy persists on later requests without duplicating itself');
+    assert.equal((await policyFacts()).length, 1, 'repeat delivery on the same channel is not re-recorded');
+
+    // (c) Codex responses-lite: the native instruction already sits in a
+    //     leading developer item, so the policy is appended AFTER that text in
+    //     the same block instead of being prepended ahead of it.
+    const lite = { input: [
+      { type: 'additional_tools', role: 'developer', tools: [] },
+      { type: 'message', role: 'developer', content: [{ type: 'input_text', text: 'NATIVE SYSTEM PROMPT' }] },
+      { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'do the thing' }] }] };
+    const liteOut = bodyOf(await emit('before_provider_request', { payload: lite }, ctx), lite);
+    const developerText = liteOut.input[1].content[0].text;
+    assert.ok(developerText.startsWith('NATIVE SYSTEM PROMPT') && policyCount(developerText) === 1,
+      'the developer layer keeps the native text first and carries the policy after it');
+    assert.equal(liteOut.instructions, undefined, 'the lite shape keeps no top-level instructions');
+
+    // (c2) chat-completions bodies may carry the native system text as a
+    //      developer-role message (the SDK uses role developer when the model
+    //      reasons and the profile supports it): same authoritative layer, and
+    //      it must be recorded under its own channel name.
+    const developerMessages = { messages: [
+      { role: 'developer', content: 'NATIVE SYSTEM PROMPT' },
+      { role: 'user', content: 'do the thing' }] };
+    const devOut = bodyOf(await emit('before_provider_request', { payload: developerMessages }, ctx), developerMessages);
+    assert.ok(devOut.messages[0].content.startsWith('NATIVE SYSTEM PROMPT') && policyCount(devOut.messages[0].content) === 1,
+      'a developer-role native message carries the policy after its own text');
+    assert.equal(devOut.messages[1].content, 'do the thing', 'the user message stays untouched');
+    const devFacts = (await policyFacts()).filter(entry => entry.channel === 'developer_message');
+    assert.equal(devFacts.length, 1, 'the developer-message channel is recorded distinctly from system_message');
+
+    // (d) Anthropic messages: the top-level system field is that provider's
+    //     system layer, so the policy appends there.
+    const anthropic = { system: 'NATIVE SYSTEM PROMPT', messages: [{ role: 'user', content: 'do the thing' }] };
+    const anthropicOut = bodyOf(await emit('before_provider_request', { payload: anthropic }, ctx), anthropic);
+    assert.equal(policyCount(anthropicOut.system), 1, 'an anthropic system field carries the policy');
+    assert.equal(anthropicOut.messages[0].content, 'do the thing', 'the user turn is untouched there too');
+
+    // (e) a messages payload with no system layer cannot host it: the request
+    //     stays unpolluted instead of falling back to the user message.
+    const bare = { messages: [{ role: 'user', content: 'no system layer here' }] };
+    const bareOut = await emit('before_provider_request', { payload: bare }, ctx);
+    assert.equal(policyCount(JSON.stringify(bareOut ?? {})), 0,
+      'an unrecognised payload shape stays undelivered and unmodified');
+
+    // (f) terminal records and uncontrolled sessions get nothing.
+    const savedRaw = await fs.readFile(path.join(started.task_directory, 'state.json'), 'utf8');
+    try {
+      const paused = JSON.parse(savedRaw); paused.status = 'paused';
+      await fs.writeFile(path.join(started.task_directory, 'state.json'), JSON.stringify(paused));
+      const pausedShape = codexShape();
+      const pausedOut = await emit('before_provider_request', { payload: pausedShape }, ctx);
+      assert.equal(policyCount(JSON.stringify(bodyOf(pausedOut, pausedShape))), 0, 'a terminal task is never given the policy');
+    } finally {
+      await fs.writeFile(path.join(started.task_directory, 'state.json'), savedRaw);
+    }
+    const policyStray = session('no-task-policy-session', []);
+    const strayPolicyOut = await emit('before_provider_request', { payload: codexShape() },
+      { ...ctx, sessionManager: policyStray.sessionManager });
+    assert.equal(policyCount(JSON.stringify(strayPolicyOut ?? {})), 0, 'an uncontrolled session is never given the policy');
+    assert.equal(policyCount(JSON.stringify(
+      await emit('before_provider_request', { payload: codexShape() }, memberCtx) ?? {})), 0,
+      'a member session is never given the controlled-Root policy');
+
+    // (g) a record controlled by ANOTHER process is not ours even while its
+    //     status says running: real ownership is re-verified, never inferred.
+    const unownedDir = path.join(project, '.orbit', 'tasks', 'policy-unowned-fixture');
+    try {
+      await fs.mkdir(unownedDir, { recursive: true });
+      const unownedState = JSON.parse(savedRaw);
+      unownedState.connection = { provider: 'omp', thread_id: 'policy-unowned', socket: '/tmp/not-our-socket.sock' };
+      unownedState.status = 'running';
+      await fs.writeFile(path.join(unownedDir, 'state.json'), JSON.stringify(unownedState));
+      const unownedSession = session('policy-unowned', []);
+      const unownedOut = await emit('before_provider_request', { payload: codexShape() },
+        { ...ctx, sessionManager: unownedSession.sessionManager });
+      assert.equal(policyCount(JSON.stringify(unownedOut ?? {})), 0,
+        'a record whose control socket is not ours gets no policy');
+    } finally {
+      await fs.rm(unownedDir, { recursive: true, force: true });
+    }
+
+    // (h) coexistence with the one-shot bootstrap: the policy repeats as a
+    //     policy while the bootstrap never does, and one request never carries
+    //     the same sentence twice.
+    const boundSystem = { messages: [{ role: 'system', content: 'NATIVE SYSTEM PROMPT' },
+      { role: 'user', content: 'window one' }] };
+    const firstWindow = bodyOf(await emit('before_provider_request', { payload: boundSystem }, ctx), boundSystem);
+    const secondWindowShape = { messages: [{ role: 'system', content: 'NATIVE SYSTEM PROMPT' },
+      { role: 'user', content: 'window two' }] };
+    const secondWindow = bodyOf(await emit('before_provider_request', { payload: secondWindowShape }, ctx), secondWindowShape);
+    const secondText = JSON.stringify(secondWindow ?? {});
+    assert.equal(policyCount(JSON.stringify(firstWindow)), 1, 'the policy lands on the system message of this shape');
+    assert.equal(policyCount(secondText), 1, 'the policy recurs on the next request');
+    assert.ok(!JSON.stringify(firstWindow).includes('[orbit-bootstrap]'),
+      'the bootstrap already sent for this task is not repeated by the policy');
+    assert.ok(!secondText.includes('[orbit-bootstrap]'), 'nor on the later request');
+  }
   assert.equal((await request('model_catalog')).agent_dir, agentRoot,
     'the catalog carries the host-resolved agent directory for isolated profile credentials');
   const declared = await tool({ action: 'work-unit', task: started.task_directory, operation: 'declare', work_unit: {
@@ -253,6 +384,20 @@ try {
   assert.equal(declared.unit.status, 'declared', 'Root can durably declare a handoff through the actual Orbit tool');
   const units = await tool({ action: 'work-unit', task: started.task_directory, operation: 'list' });
   assert.equal(units.units[0].id, declared.unit.id, 'the host/CLI unit API reads the same durable store');
+  // A declared work unit is exactly the state the cooperation policy must keep
+  // reaching: the native instruction layer still carries it on the next request
+  // (the one-shot bootstrap is gone by then), so the policy cannot silently
+  // disappear once a handoff candidate exists.
+  {
+    const afterDeclare = { instructions: 'NATIVE SYSTEM PROMPT', input: [
+      { type: 'message', role: 'user', content: [{ type: 'input_text', text: 'after declare' }] }] };
+    const afterDeclareOut = await emit('before_provider_request', { payload: afterDeclare }, ctx);
+    const afterDeclareBody = afterDeclareOut?.payload ?? afterDeclareOut ?? afterDeclare;
+    assert.equal(((String(afterDeclareBody?.instructions).match(/\[orbit-cooperation-policy\]/g)) ?? []).length, 1,
+      'the policy still reaches the request after a real work unit was declared');
+    assert.ok(!String(afterDeclareBody?.instructions).includes('[orbit-bootstrap]'),
+      'the one-shot bootstrap is not smuggled back in as the policy');
+  }
   const missingUnit = await emit('tool_call', { toolName: 'task', toolCallId: 'no-unit',
     fixture_no_unit: true, input: { agent: agentNameFor('glm/x'), task: 'No handoff' } }, ctx);
   assert.equal(missingUnit.block, true, 'controlled execution cannot bypass the durable handoff');
@@ -1450,17 +1595,36 @@ process.exit(run.status ?? 1);
     try {
       await emit('session_start', {}, autoCtx);
       const out = await emit('before_provider_request',
-        { payload: { messages: [{ role: 'user', content: 'Do the bounded thing.' }] } }, autoCtx);
-      const injected = (out?.payload ?? out)?.messages?.at(-1)?.content;
+        { payload: { instructions: 'NATIVE SYSTEM PROMPT',
+          messages: [{ role: 'user', content: 'Do the bounded thing.' }] } }, autoCtx);
+      const autoBody = out?.payload ?? out;
+      const injected = autoBody?.messages?.at(-1)?.content;
       assert.ok(typeof injected === 'string' && injected.includes('[orbit-entry-advisory]'),
         'the auto entry start injects the advisory into the CURRENT provider request payload');
       assert.ok(typeof injected === 'string' && injected.includes('[orbit-bootstrap]'),
         'the SAME auto request also carries the work-unit bootstrap — the advisory never returns ahead of it');
       assert.ok(injected.includes('0.85') && injected.includes('0.65'),
         'the auto-path advisory carries the measured fact');
+      // The auto-start FIRST window must also carry the cooperation policy at
+      // the native instruction layer — the same request, not a later one.
+      assert.equal(((String(autoBody?.instructions).match(/\[orbit-cooperation-policy\]/g)) ?? []).length, 1,
+        'the auto entry start carries the cooperation policy on the system instruction layer');
       const newDir = (await fs.readdir(tasksRoot)).find(dir => !beforeDirs.has(dir));
       assert.ok(newDir, 'the auto entry path created a real task record');
       const autoState = JSON.parse(await fs.readFile(path.join(tasksRoot, newDir, 'state.json'), 'utf8'));
+      const autoPolicyFacts = async () => {
+        for (let n = 0; n < 20; n++) {
+          const entries = (await fs.readFile(path.join(tasksRoot, newDir, 'collaboration.jsonl'), 'utf8').catch(() => ''))
+            .split('\n').filter(Boolean).map(line => JSON.parse(line));
+          const facts = entries.filter(entry => entry.kind === 'cooperation_policy');
+          if (facts.length) return facts;
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        return [];
+      };
+      const autoFacts = await autoPolicyFacts();
+      assert.equal(autoFacts.length, 1, 'the auto-start first success records exactly one policy fact');
+      assert.equal(autoFacts[0].channel, 'instructions', 'the recorded channel names the layer actually used');
       assert.equal(autoState.entry?.decision, 'start',
         'the auto-created task record carries the paid entry trace');
       for (let n = 0; n < 20 && !autoPid; n++) {

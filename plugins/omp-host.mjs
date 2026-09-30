@@ -1570,9 +1570,150 @@ export function installOmpExtension(pi, sdk) {
     if (bootstrap) bootstrapSent.add(taskDir);
     return { payload: injected, bootstrap: Boolean(bootstrap) };
   }
-  // One factual, bounded record: instruction digest and the real identities it
-  // was bound to. No credentials, no payload text, and no claim about what the
-  // model understood.
+  // ---- controlled-Root cooperation policy (system layer) -------------------
+  // The native system prompt of a "restrained" model tells Root to keep work
+  // inline ("NEVER delegate one slice"; fan out only for "2+ independent
+  // slices"). The product rule this extension implements is narrower and
+  // incompatible with that blanket default: a BOUNDED SINGLE-MEMBER SERIAL
+  // handoff may carry real implementation. The policy therefore travels in the
+  // SAME layer as the native system/developer instructions — never in the
+  // trailing user message, where it would sit below them. It is a policy, not
+  // a one-shot: it is re-applied on every reachable provider request and is
+  // idempotent within one request (marker check).
+  const POLICY_VERSION = 'orbit-cooperation-policy-1';
+  const POLICY_MARKER = '[orbit-cooperation-policy]';
+  const POLICY_LINE = `${POLICY_MARKER} 若本模型原生默认以“仅 2+ 独立片段才委派”或“不委派单一片段”限制交接，本受控任务适用以下有界交接规则：` +
+    '识别到可实质交接的实现、且 Root 能独自集成与核验时，先声明工作单元供 Jev two-stage 真实适配判断，' +
+    '再依据该判断返回的 hint，或带局限的 Root 选择，决定是否用原生 task 派发；' +
+    '单一成员、共享接口或需要等待依赖都不单独构成拒派理由。没有合适单元、短小低收益的任务仍可有据自行实现。' +
+    '用户要求、目标项目规则与工具权限照常不变；程序不代替 Root 派发、不增加用户批准、不强制每个任务派成员，也不提高适配分。' +
+    '质量与成本未知仍为未知；入口高 delegation 概率不是实际候选推荐。';
+  const policyRecorded = new Set(); // `${taskDir}:${version}:${channel}`
+
+  // Same-layer, shape-recognised append; returns the modified payload and the
+  // channel actually used, or null when this release cannot place the text at
+  // the system/developer layer. The caller must NOT fall back to the trailing
+  // user message: an unextendable request stays honestly undelivered.
+  function appendPolicyToSystemLayer(payload, text) {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null;
+    // OpenAI Responses / Codex: the native system block is the top-level
+    // `instructions` string (a Responses-Lite reshape later moves this same
+    // text into a leading developer message, still the authoritative layer).
+    if (typeof payload.instructions === 'string') {
+      if (!payload.instructions.trim()) return null;
+      if (payload.instructions.includes(POLICY_MARKER)) return { payload, channel: 'instructions', already: true };
+      return { payload: { ...payload, instructions: `${payload.instructions}\n\n${text}` }, channel: 'instructions' };
+    }
+    // Anthropic Messages: top-level `system` (string or text-block array).
+    if (typeof payload.system === 'string') {
+      if (!payload.system.trim()) return null;
+      if (payload.system.includes(POLICY_MARKER)) return { payload, channel: 'system', already: true };
+      return { payload: { ...payload, system: `${payload.system}\n\n${text}` }, channel: 'system' };
+    }
+    if (Array.isArray(payload.system)) {
+      const parts = payload.system;
+      if (parts.some(part => typeof part === 'string' && part.includes(POLICY_MARKER)) ||
+          parts.some(part => part && typeof part === 'object' && typeof part.text === 'string' && part.text.includes(POLICY_MARKER)))
+        return { payload, channel: 'system_blocks', already: true };
+      const last = parts[parts.length - 1];
+      if (last && typeof last === 'object' && !Array.isArray(last) && last.type === 'text' && typeof last.text === 'string')
+        return { payload: { ...payload, system: [...parts.slice(0, -1), { ...last, text: `${last.text}\n\n${text}` }] },
+          channel: 'system_blocks' };
+      if (parts.every(part => part && typeof part === 'object' && part.type === 'text'))
+        return { payload: { ...payload, system: [...parts, { type: 'text', text }] }, channel: 'system_blocks' };
+      return null;
+    }
+    // Responses bodies: the native instruction can already live in the input
+    // item list (Codex `responses-lite` moves the top-level instructions into a
+    // leading developer message). Append AFTER the native text INSIDE that same
+    // developer block — prepending our text ahead of a conflicting native block
+    // would not have covered it.
+    if (Array.isArray(payload.input)) {
+      for (let index = 0; index < payload.input.length; index++) {
+        const item = payload.input[index];
+        if (!item || typeof item !== 'object' || item.type !== 'message' || item.role !== 'developer' || !Array.isArray(item.content)) continue;
+        const texts = item.content.filter(part => part && typeof part === 'object' && part.type === 'input_text' && typeof part.text === 'string');
+        if (texts.some(part => part.text.includes(POLICY_MARKER))) return { payload, channel: 'developer', already: true };
+        if (!texts.length) continue; // keep looking for the native text block
+        const lastText = texts[texts.length - 1];
+        const content = item.content.map(part => part === lastText ? { ...part, text: `${part.text}\n\n${text}` } : part);
+        return { payload: { ...payload, input: [
+          ...payload.input.slice(0, index), { ...item, content }, ...payload.input.slice(index + 1)] }, channel: 'developer' };
+      }
+      return null;
+    }
+    // Chat-completions bodies: the native system text can be a `system` message
+    // OR a `developer` message — the SDK picks role developer when the model
+    // reasons and the compat profile supports it (openai-completions.ts
+    // `useDeveloperRole = model.reasoning && compat.supportsDeveloperRole`).
+    // Append into the LAST such native block so our text follows all native
+    // system/developer text; never invent a role, never touch user or tool
+    // messages.
+    if (Array.isArray(payload.messages)) {
+      let index = -1;
+      for (let cursor = payload.messages.length - 1; cursor >= 0; cursor--) {
+        const candidate = payload.messages[cursor];
+        if (candidate && typeof candidate === 'object' && (candidate.role === 'system' || candidate.role === 'developer')) { index = cursor; break; }
+      }
+      if (index < 0) return null;
+      const item = payload.messages[index];
+      const channel = item.role === 'developer' ? 'developer_message' : 'system_message';
+      const replace = content => ({ ...payload, messages: payload.messages.map((value, i) => i === index ? { ...item, content } : value) });
+      if (typeof item.content === 'string') {
+        if (item.content.includes(POLICY_MARKER)) return { payload, channel, already: true };
+        return { payload: replace(`${item.content}\n\n${text}`), channel };
+      }
+      if (Array.isArray(item.content) && item.content.length > 0) {
+        const texts = item.content.filter(part => part && typeof part === 'object' && typeof part.text === 'string');
+        if (texts.some(part => part.text.includes(POLICY_MARKER))) return { payload, channel, already: true };
+        const lastText = texts[texts.length - 1];
+        if (!lastText) return null;
+        return { payload: replace(item.content.map(part => part === lastText ? { ...part, text: `${part.text}\n\n${text}` } : part)),
+          channel };
+      }
+      return null;
+    }
+    return null;
+  }
+
+  // Ownership is re-verified against the real control socket on every request:
+  // a `running` record whose runtime is gone, or one created by another
+  // process, is NOT treated as ours. No cache — the owner boundary is a
+  // correctness fact, not a performance knob.
+  async function verifiedOwnership(sessionId, taskDir) {
+    try { return host ? await host.ownsTask(taskDir, sessionId) : false; } catch { return false; }
+  }
+
+  // One request's policy delivery. Controlled Main + ACTIVE state are required
+  // by the caller; this additionally re-verifies real ownership and runtime
+  // liveness, and refuses payload shapes it cannot place at the system layer.
+  async function applyCooperationPolicy(payload, sessionId, ctx, bound, { owned } = {}) {
+    if (!payload || !bound?.taskDir || !activeState(bound.state)) return null;
+    if (!(owned ?? await verifiedOwnership(sessionId, bound.taskDir))) return null;
+    if (runtimeAbandoned(bound.state)) return null;
+    const placed = appendPolicyToSystemLayer(payload, POLICY_LINE);
+    if (!placed) return null;
+    if (!placed.already) {
+      const key = `${bound.taskDir}:${POLICY_VERSION}:${placed.channel}`;
+      if (!policyRecorded.has(key)) {
+        policyRecorded.add(key);
+        // Minimal first-delivery fact: channel, version, real task/session/model
+        // and the injected text fingerprint. No raw payload, no credentials, and
+        // no claim that the server received it or that the model complied.
+        recordCollabFor(bound.taskDir, {
+          kind: 'cooperation_policy', at: Date.now(),
+          session_id: sessionId, agent_id: sdk.MAIN_AGENT_ID,
+          task_id: bound.state?.id ?? null,
+          model: ctx?.model ? `${ctx.model.provider}/${ctx.model.id}` : null,
+          channel: placed.channel, policy_version: POLICY_VERSION,
+          instruction_sha256: `sha256:${createHash('sha256').update(POLICY_LINE).digest('hex')}`,
+          delivered_claim: 'the extension modified this request payload at the system/developer layer; no server receipt and no model-compliance claim',
+        });
+      }
+    }
+    return { payload: placed.payload, channel: placed.channel };
+  }
+
   function bootstrapFacts(taskDir, state, ctx, kind, extra = {}) {
     let instructionDigest = null;
     try {
@@ -2698,7 +2839,17 @@ export function installOmpExtension(pi, sdk) {
       }
       if (pending.key === `${sessionId}:${latestUserId}`) {
         const bound = await resolveBoundTask(sessionId, ctx.cwd);
-        if (bound && activeState(bound.state)) { entryRecovery.delete(sessionId); return event.payload; }
+        if (bound && activeState(bound.state)) {
+          entryRecovery.delete(sessionId);
+          // This is also an owned+active reachable request: the cooperation
+          // policy applies here too, not only on the general bound path.
+          let recovered = event.payload;
+          try {
+            const policy = await applyCooperationPolicy(recovered, sessionId, ctx, bound);
+            if (policy) recovered = policy.payload;
+          } catch { /* policy is optional; the recovery path stays intact */ }
+          return recovered;
+        }
         const injected = appendInstructionToPayload(event.payload, pending.instruction);
         if (injected) return injected;
         pi.sendMessage({ customType: 'orbit-entry', content: pending.instruction, attribution: 'agent' },
@@ -2716,12 +2867,16 @@ export function installOmpExtension(pi, sdk) {
     try {
       const boundNow = await resolveBoundTask(sessionId, ctx.cwd);
       if (boundNow && activeState(boundNow.state)) {
-        const guidance = injectEntryGuidance(event.payload, boundNow.state, boundNow.taskDir);
+        let payload = event.payload;
+        const policy = await applyCooperationPolicy(payload, sessionId, ctx, boundNow);
+        if (policy) payload = policy.payload;
+        const guidance = injectEntryGuidance(payload, boundNow.state, boundNow.taskDir);
         if (guidance) {
           if (guidance.bootstrap) recordCollabFor(boundNow.taskDir, bootstrapFacts(boundNow.taskDir, boundNow.state, ctx,
             'bootstrap_guidance', { via: 'provider_payload' }));
           return guidance.payload;
         }
+        if (payload !== event.payload) return payload;
       }
     } catch { /* guidance only; never block the request path */ }
     let user = null;
@@ -2774,12 +2929,19 @@ export function installOmpExtension(pi, sdk) {
         // (before_agent_start on the next turn) instead of aborting anything.
         try {
           const state = JSON.parse(await fs.readFile(path.join(started.task_directory, 'state.json'), 'utf8'));
-          const guidance = injectEntryGuidance(event.payload, state, started.task_directory);
+          let payload = event.payload;
+          // The task was just created by THIS process, so ownership is real by
+          // construction; the runtime-liveness check still applies.
+          const policy = await applyCooperationPolicy(payload, sessionId, ctx,
+            { taskDir: started.task_directory, state }, { owned: true });
+          if (policy) payload = policy.payload;
+          const guidance = injectEntryGuidance(payload, state, started.task_directory);
           if (guidance) {
             if (guidance.bootstrap) recordCollabFor(started.task_directory, bootstrapFacts(started.task_directory, state, ctx,
               'bootstrap_guidance', { via: 'provider_payload' }));
             return guidance.payload;
           }
+          if (payload !== event.payload) return payload;
         } catch { /* guidance is optional; never block the start path */ }
       } else if (decision.decision === 'root_decides' && decision.prompt) {
         pi.sendMessage({ customType: 'orbit-entry', content: decision.prompt, attribution: 'agent' },
