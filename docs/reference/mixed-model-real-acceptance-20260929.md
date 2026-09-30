@@ -53,15 +53,19 @@ B 独立静态核对去时间的七个面并通过；B 独立复核验证回执�
 
 第二轮资源账本共 79 次已报告调用：Root 39 次，input 73719／output 8678／cacheRead 1015936；成员 23 次，input 32229／output 24059／cacheRead 526208；检查者 4 次，input 22487／output 9484／cacheRead 65280；Jev 13 次。检查者调用 ID 均可归属、无 usage gap。账本没有可核验 OMP 现金／额度结算源，本轮同样不能宣称预算内或节省旗舰资源。明确模块交接的机械闭环及正常结束通过；Root 面对允许自行实现的普通需求仍连续两次选择自行完成，自主派发策略是否达到用户期待尚未证实。
 
+第三轮 `99002331-d7e5-4225-857c-792272d64d44` 使用相同明确模块交接要求但只验收中断，在独立种子 `mixed-interrupt/`、Herdr `w1Y:p1N` 的 `orbit omp` 运行。Root PID 74262／session `01a0ee1f-d16b-76b4-ab95-8ef7405c5c42` 按 Jev hint 登记并绑定 Zenmux 成员 `orbit-d7a06d66-6c48-405b-b0aa-bcf12a4038d7`。当成员实际 `registry_status=running`、尚无 accepted_at 时，Controller 发送原生 Esc；程序把任务记为 `paused`，Root 与成员均有 `stop_confirmation.confirmed=true`、活动工具零、归属异步工作已结清。成员保留 `registered` 和中断前 `registry_status=running` 的历史观察，不能据此称已交付或仍在运行；停止以随后取得的原生确认回执为准。Controller 再以 `/exit` 结束原生界面，Root PID 74262 及 MCP PID 74293／74329 均消失，pane 关闭。账本记录 27 次调用，其中 3 次用量未知，符合中断未补造用量的原则。该轮只证明在途成员中断和停止，不证明交付、终检或独立后台 shell 作业取消；原始摘要在 `/private/tmp/orbit-mixed-live-c8n233cn/mixed-interrupt-proof.json`。
+
+重绑定准备轮 `7296e66b-6d72-4f39-a0a0-beba576d564f` 建了同一 Git 仓库的 `rebind-old/` 与 linked `rebind-target/`；目标 README 标题不同且有独立 AGENTS.md。但旧工作区的 Root 在 Controller 触发重绑定前已完成：第一次独立检查因检查者输出多余 `delivery.reason_extra` 被严格 schema 拒绝，程序有界换 K3 检查者；第二次无 finding、终检后 `complete` 且停止确认。没有执行 rebind，history 为空、两次检查均无 workspace stale；这轮**不能**计作重绑定验收。Root 保留原始八项并追加两项测试，Controller 在副本重新放入种子原始八项后 8/8，通过记录在 `/private/tmp/orbit-rebind-old-evaluation-JMIUT0/original-result.txt`。原始任务摘要在 `/private/tmp/orbit-mixed-live-c8n233cn/rebind-missed-proof.json`。后续执行环境收紧导致 Herdr 对 `w1Y:p1P` 的 read、`/exit` 和 close 返回 `Operation not permitted`；pane 仍空闲未关闭，这是 Controller 环境操作缺口，不是 Orbit 停止失败。
+
 ## 未闭合矩阵
 
 | 必需项 | 当前状态 |
 | --- | --- |
 | 当前版本能力事实→Jev hint→Root 自主原生派发→hub 回收→集成 | 0.7.12 第二轮在明确模块交接要求下完整通过，成员两次 yield 后 accepted，Root 集成并验收；普通需求的自主策略仍待证明 |
 | 独立 OMP 固定快照、逐要求覆盖、真实 finding 纠偏、手动终检 | 0.7.12 两轮可信 Root 测试回执、scope-2 覆盖、各一次无 finding 手动终检及完成停止通过；真实 finding 纠偏仍待验收 |
-| 在途旧根检查→显式 rebind→workspace stale→新根检查 | 未运行 |
-| 有成员与背景工作时的 native Esc 及正常退出／确认停止 | 0.7.11 有成员正常退出失败；0.7.12 第二轮成员完成／Root 停止均已确认，原生 /exit 后进程退出且状态不回退；在途成员／背景工作的 Esc 仍待重测 |
+| 在途旧根检查→显式 rebind→workspace stale→新根检查 | linked worktree 已准备；旧任务在重绑定前完成，history 为空、无 workspace stale，仍未验收 |
+| 有成员与背景工作时的 native Esc 及正常退出／确认停止 | 0.7.12 第二轮完成成员后 Root／成员正常停止及 /exit 进程退出通过；第三轮在途成员 native Esc→paused、Root／成员确认停止→/exit 进程退出通过；独立后台 shell 作业取消未单独实测 |
 | 同质量交付下旗舰资源、其他消耗、返工与用户介入比较 | 五份产物在副本重放同一冻结 8 项均通过；当前混合试跑旗舰消耗高于基线，不能宣称节省；完整独立同质评价待闭合 |
 | OpenRouter 正式基准认证抓取及实际消费者 | 匿名实测401，等待本机私有 key；公共页校准不是此接口成功证据 |
 
-本轮负例、旗舰对照、0.7.11 两轮混合及 0.7.12 两轮 Root 进程均已结束。用户要求整理界面后，开发 B/C/D/E、自有 F/G、空闲未接任务的 H/J 及已完成的 K/M pane 均已正常退出、核对进程后关闭；当前界面只保留主 pane。种子、原始会话、独立报告及证据目录保留至完整验收收尾；不推送或发布。Goal 保持 active。
+本轮负例、旗舰对照、0.7.11 两轮混合及 0.7.12 三轮 Root 进程均已结束。用户要求整理界面后，开发 B/C/D/E、自有 F/G、空闲未接任务的 H/J 及已完成的 K/M/N pane 均已正常退出、核对进程后关闭。重绑定准备轮 `w1Y:p1P` 的任务虽已程序确认停止，OMP pane 仍空闲；当前执行环境拒绝 Herdr 关闭命令，不能伪称已清理。种子、原始会话、独立报告及证据目录保留至完整验收收尾；不推送或发布。Goal 保持 active。
