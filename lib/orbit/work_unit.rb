@@ -130,6 +130,10 @@ module Orbit
           raise Error, "work unit #{id} has unaccepted dependencies: #{unfinished.join(', ')}"
         end
 
+        # Older v2 records keep only the latest outcome at unit level. Save
+        # that known outcome before resetting the active attempt; do not
+        # invent results for any earlier dispatches.
+        retain_dispatch_outcome(unit) if FINISH_STATUSES.include?(unit.fetch("status"))
         dispatch = { "member_id" => member, "tool_call_id" => call, "model" => model, "bound_at" => now }
         if hint_signature
           dispatch["hint_signature"] = hint_signature
@@ -181,12 +185,23 @@ module Orbit
         unit["result"] = result
         unit["verification"] = evidence
         unit["finished_at"] = now
+        retain_dispatch_outcome(unit)
         write_document(document)
         attach_event_error(copy(unit), emit("work_unit_finished", unit))
       end
     end
 
     private
+
+    # Attempt identities remain available for joining the unchanged resource
+    # ledger. Keep each result with that identity so retries and escalation
+    # handoffs cannot erase the evidence of previous failures.
+    def retain_dispatch_outcome(unit)
+      attempts = unit.fetch("dispatches")
+      raise Error, "finished work unit has no dispatch to retain its outcome" if attempts.empty?
+
+      attempts[-1] = attempts.last.merge(unit.slice("status", "result", "verification", "finished_at"))
+    end
 
     def task_id
       File.basename(@record.path)

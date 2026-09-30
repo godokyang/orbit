@@ -223,8 +223,12 @@ module MemberModelSelectorTest
                                           limits: limits),
                      entries: [entry("a/one"), entry("b/two")], advisor: advisor, overview: overview,
                      release: release_for)
-    result = built.assess(state: state, work_unit: work_unit(requirements: { "required_context_tokens" => 100_000,
-                                                                            "relevant_indices" => ["coding_index"] }))
+    unit = work_unit(requirements: { "required_context_tokens" => 100_000,
+                                    "relevant_indices" => ["coding_index"] })
+    unit["dispatches"] = [{ "member_id" => "previous-member", "tool_call_id" => "previous-call",
+                            "model" => "a/one", "status" => "rejected",
+                            "result" => "missing required validation", "verification" => "acceptance test failed" }]
+    result = built.assess(state: state, work_unit: unit)
     assert(advisor.calls == %w[delegation candidates] &&
            result["judgments"].map { |item| item["phase"] } == %w[delegation candidates] &&
            result["judgments"].map { |item| item["call_id"] } == %w[orbit-judgment-d1 orbit-judgment-c1] &&
@@ -249,6 +253,9 @@ module MemberModelSelectorTest
            handed_unit["escalation"] == "none" && handed_unit["artifact_root"] == "/tmp" &&
            handed_unit["context"] == { "note" => "scripted" } && handed_unit["dependencies"].nil?,
            "the real handoff fields reach the judgment input instead of being dropped")
+    assert(%w[delegation candidates].all? do |phase|
+      advisor.states[phase].dig("work_unit", "dispatches") == unit["dispatches"]
+    end, "both selection judgments must receive prior failures with their actual dispatch identities")
 
     handed = advisor.states["delegation"]["candidates"].find { |item| item["model"] == "one" }
     assert(handed["capability_facts"].is_a?(Hash) &&

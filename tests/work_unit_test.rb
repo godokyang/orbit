@@ -163,7 +163,30 @@ begin
   rebound = store.bind(unit["id"], member_id: "m2", tool_call_id: "c2", model: "x")
   assert(rebound["dispatches"].length == 2, "re-dispatch must append a new attempt")
   assert(rebound["member_id"] == "m2" && rebound["status"] == "bound", "re-dispatch identity missing")
-  store.finish(unit["id"], status: "accepted", result: "完成", verification: "测试通过")
+  prior = rebound["dispatches"].first
+  assert(prior.slice("member_id", "tool_call_id", "model") ==
+         { "member_id" => "m1", "tool_call_id" => "c1", "model" => "x" } &&
+         prior.slice("status", "result", "verification", "finished_at") ==
+         done.slice("status", "result", "verification", "finished_at"),
+         "a retry must hand over the previous rejection and evidence with its actual call identity")
+  assert(rebound["result"].nil? && rebound["verification"].nil? && rebound["finished_at"].nil?,
+         "a new active attempt must not masquerade as the prior finished result")
+  store.finish(unit["id"], status: "failed", result: "服务不可用", verification: "调用返回供应商错误")
+  # Reproduce a v2 record written before per-attempt outcomes were stored.
+  document = JSON.parse(File.read(File.join(record.path, "work-units.json")))
+  document["units"][unit["id"]]["dispatches"].last.delete_if do |key, _|
+    %w[status result verification finished_at].include?(key)
+  end
+  record.durable_write("work-units.json", JSON.pretty_generate(document))
+  store_for(record).bind(unit["id"], member_id: "m3", tool_call_id: "c3", model: "y")
+  completed = store_for(record).finish(unit["id"], status: "accepted", result: "完成", verification: "测试通过")
+  history = store_for(record).read(unit["id"])["dispatches"]
+  assert(history.map { |attempt| attempt["status"] } == %w[rejected failed accepted] &&
+         history[0] == prior && history[1]["result"] == "服务不可用" &&
+         history[1]["tool_call_id"] == "c2" &&
+         history.last.slice("status", "result", "verification", "finished_at") ==
+         completed.slice("status", "result", "verification", "finished_at"),
+         "reloading and switching models must preserve every known attempt outcome, including legacy latest outcomes")
   raises_error("re-bind accepted") { store.bind(unit["id"], member_id: "m3", tool_call_id: "c3", model: "x") }
   raises_error("double finish") { store.finish(unit["id"], status: "accepted", result: "r", verification: "v") }
 
