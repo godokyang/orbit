@@ -1077,6 +1077,47 @@ module CliTest
     worker&.kill if worker&.alive?
   end
 
+  def takeover_scope_declarations_are_queued_append_only
+    instruction = "按 docs/spec.md 实现 CSV 对账并完成验证"
+    source = { "kind" => "omp_user_message", "id" => "native-msg-2" }
+    record = Orbit::TaskRecord.create(
+      project_root: @project, instruction: instruction, source: source, connection: {}, review: {},
+      clock: -> { Time.utc(2026, 9, 30, 12, 0, 0) },
+      takeover: Orbit::TaskRecord.parse_takeover(JSON.generate("reason" => "take over"))
+    )
+    payload = File.join(@temp, "scope-declaration.json")
+    File.write(payload, JSON.generate("prior_scope" => "Root 早前已改 src/a.rb", "reason" => "后来补充"))
+    queued = JSON.parse(cli("takeover-scope", record.path, "--file", payload))
+    assert(queued["status"] == "queued" && queued["command_id"].is_a?(String),
+           "a later prior_scope declaration is queued with an id")
+    command = JSON.parse(File.read(commands(record).last))
+    assert(command["type"] == "takeover_scope" && command["prior_scope"] == "Root 早前已改 src/a.rb" &&
+           command.dig("source", "kind") == "submitter_declaration",
+           "the queue carries the submitter declaration with its source")
+    assert(!record.state["takeover"].key?("prior_scope_declarations"),
+           "the CLI only enqueues; the runtime remains the sole state writer")
+
+    # Explicit rejections: missing scope, wrong types, unknown keys (a caller
+    # cannot smuggle its own declared_at/snapshot), a non-takeover task and a
+    # terminal task.
+    File.write(payload, JSON.generate("reason" => "no scope"))
+    cli("takeover-scope", record.path, "--file", payload, success: false)
+    File.write(payload, JSON.generate("prior_scope" => 42))
+    cli("takeover-scope", record.path, "--file", payload, success: false)
+    File.write(payload, JSON.generate("prior_scope" => "x", "reason" => 7))
+    cli("takeover-scope", record.path, "--file", payload, success: false)
+    File.write(payload, JSON.generate("prior_scope" => "x", "declared_at" => "2026-09-30T13:00:00Z"))
+    cli("takeover-scope", record.path, "--file", payload, success: false)
+    plain = task("running")
+    File.write(payload, JSON.generate("prior_scope" => "x"))
+    cli("takeover-scope", plain.path, "--file", payload, success: false)
+    queued_before = commands(record).length
+    record.save(record.state.merge("status" => "paused"))
+    cli("takeover-scope", record.path, "--file", payload, success: false)
+    assert(commands(plain).empty? && commands(record).length == queued_before,
+           "refused declarations never reach the queue")
+  end
+
   def maintenance_requires_an_installed_cli
     %w[update uninstall].each { |command| cli(command, success: false) }
     assert(cli("start", "--help").include?("--provider"), "execution details are available in subcommand help")
@@ -1165,6 +1206,7 @@ module CliTest
        model_candidates_bridge_fails_closed_without_echoing_input
        model_candidates_bridge_applies_one_net_delta_atomically
        takeover_boundary_is_program_captured_and_scope_is_declared_or_unknown
+       takeover_scope_declarations_are_queued_append_only
        takeover_payload_is_refused_before_any_session_or_task_exists
        takeover_does_not_disturb_the_ordinary_start_path
        maintenance_requires_an_installed_cli

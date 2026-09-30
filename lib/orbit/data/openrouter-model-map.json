@@ -47,6 +47,21 @@
       "verified_by": "Orbit official-source review"
     },
     {
+      "provider": "opencode-go",
+      "model": "deepseek-v4.1-flash",
+      "reasoning": "unknown",
+      "billing_route": "subscription_quota",
+      "openrouter_id": "deepseek/deepseek-v4.1-flash",
+      "canonical_slug": "deepseek/deepseek-v4.1-flash-20260910",
+      "sources": [
+        "https://opencode.ai/v2/docs/console/go",
+        "https://www.deepseek.com/en/news/deepseek-v4-1-flash/",
+        "https://openrouter.ai/deepseek/deepseek-v4.1-flash"
+      ],
+      "verified_at": "2026-09-30T11:58:45Z",
+      "verified_by": "Orbit official-source review: same provider/model/OpenRouter identity as the existing unknown-route entry; the Go subscription endpoint https://opencode.ai/zen/go/v1/ is pinned by the first-party console docs and the 18.3.4 pi-catalog default (structural route proof). No route-specific quality sample exists for this variant — selection may only use the existing model-level prior and must show that limitation."
+    },
+    {
       "provider": "zenmux",
       "model": "deepseek/deepseek-v4.1-flash",
       "reasoning": "unknown",

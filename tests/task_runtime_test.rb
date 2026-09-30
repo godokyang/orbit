@@ -3229,4 +3229,66 @@ fixture do |root, record, host, checker, runtime|
          "a truly changed dispatch identity still invalidates the old settlement")
 end
 
+# Later prior_scope declarations: the runtime appends them beside the created
+# boundary (the original unknown is never rewritten), ignores identical retries
+# and rejects tasks without a takeover boundary; the checker projection exposes
+# the original and the declarations side by side.
+fixture do |root, record, _host, _checker, runtime|
+  now = Time.now.to_f
+  state = runtime.instance_variable_get(:@state)
+  state["takeover"] = {
+    "format" => "orbit-takeover-1", "requested_at" => "2026-09-30T12:00:00Z", "reason" => "fixture",
+    "prior_scope" => { "status" => "unknown", "text" => nil },
+    "requirement" => { "source_kind" => "omp_user_message", "native_message_id" => "m-1",
+                       "instruction_sha256" => "a" * 64, "instruction_bytes" => 10 },
+    "artifact" => { "root" => root, "digest" => "sha256:x", "snapshot_path" => "takeover-snapshot",
+                    "captured_at" => "2026-09-30T12:00:00Z", "git_head" => nil, "source" => "program_workspace_snapshot" },
+    "supervision" => { "starts_at" => "2026-09-30T12:00:00Z", "boundary" => "fixture" },
+    "prior_execution" => { "recognized_as_controlled" => false, "imported" => [], "note" => "fixture" }
+  }
+  record.save(state)
+  declaration = { "prior_scope" => "Root 早前改过 src/a.rb", "reason" => "后来补充",
+                  "source" => { "kind" => "omp_user_message" } }
+  record.submit("takeover_scope", declaration)
+  record.submit("takeover_scope", declaration)
+  runtime.tick(now: now)
+  takeover = record.state["takeover"]
+  declarations = takeover["prior_scope_declarations"]
+  assert(takeover.dig("prior_scope", "status") == "unknown" && takeover.dig("prior_scope", "text").nil?,
+         "the created prior_scope stays unknown; declarations never rewrite it")
+  assert(declarations.length == 1 && declarations.first["prior_scope"] == "Root 早前改过 src/a.rb" &&
+         declarations.first["declared_at"].is_a?(String) &&
+         declarations.first.dig("source", "kind") == "submitter_declaration",
+         "the declaration is appended once, stamped as the submitter's statement — a command cannot dress it up as a native user observation")
+  # A malformed payload is rejected explicitly instead of being silently dropped.
+  record.submit("takeover_scope", "prior_scope" => 42)
+  runtime.tick(now: now + 1)
+  assert(record.state["takeover"]["prior_scope_declarations"].length == 1 &&
+         events(record).any? { |event| event["type"] == "command_rejected" &&
+                                       event["command_type"] == "takeover_scope" },
+         "a malformed declaration is rejected explicitly")
+  # More declarations: the checker projection keeps the recent five and counts
+  # the omissions instead of dropping history silently.
+  6.times { |index| record.submit("takeover_scope", "prior_scope" => "later scope #{index}") }
+  runtime.tick(now: now + 2)
+  projection = runtime.send(:takeover_context_projection)
+  assert(record.state["takeover"]["prior_scope_declarations"].length == 7 &&
+         projection["prior_scope"]["status"] == "unknown" &&
+         projection["prior_scope_declarations"].length == 5 &&
+         projection["prior_scope_declarations_omitted"] == 2 &&
+         projection.dig("prior_execution", "recognized_as_controlled") == false,
+         "the checker projection keeps the original unknown, the recent five declarations and an omission count")
+
+  # A task without a takeover boundary rejects the declaration explicitly.
+  state = runtime.instance_variable_get(:@state)
+  state.delete("takeover")
+  record.save(state)
+  record.submit("takeover_scope", declaration)
+  runtime.tick(now: now + 3)
+  assert(record.state["takeover"].nil? &&
+         events(record).any? { |event| event["type"] == "command_rejected" &&
+                                       event["command_type"] == "takeover_scope" },
+         "a non-takeover task rejects the declaration instead of silently accepting it")
+end
+
 puts "TASK_RUNTIME_TEST_PASS (deterministic, not real-model acceptance)"

@@ -983,6 +983,7 @@ module Orbit
         required = case command["type"]
                    when "amend" then %w[text source]
                    when "rebind_workspace" then %w[path]
+                   when "takeover_scope" then %w[prior_scope]
                    when "dispute" then %w[reason]
                    when "review_model" then %w[model]
                    else []
@@ -1028,6 +1029,8 @@ module Orbit
           schedule_check(0, "用户请求的检查", trigger: "manual_check", manual: true)
         when "rebind_workspace"
           rebind_workspace(command)
+        when "takeover_scope"
+          apply_takeover_scope_declaration(command)
         when "model_evidence"
           apply_model_evidence(command, now: Time.now.to_f)
         when "review_model"
@@ -1053,6 +1056,76 @@ module Orbit
         deliver_native_amendment(member, text, source) if member["adapter"] == OMP_NATIVE_ADAPTER
       end
       schedule_check(0, "用户修改后重新核对", trigger: "amendment")
+    end
+
+    # Appends a later prior_scope declaration submitted for an existing
+    # takeover boundary. Append-only: the created prior_scope, snapshot,
+    # digest, native message and supervision start stay byte-identical, and
+    # the declaration is recorded as the submitter's statement — the source is
+    # stamped here, never copied from the command (so it can never be dressed
+    # up as a native user observation or a program observation). Same content
+    # retried is ignored; a task without a takeover boundary or a malformed
+    # payload is rejected explicitly.
+    def apply_takeover_scope_declaration(command)
+      takeover = @state["takeover"]
+      unless takeover.is_a?(Hash)
+        @record.event("command_rejected", "command_type" => "takeover_scope",
+                      "reason" => "task has no takeover boundary")
+        return
+      end
+      unknown = command.keys - %w[type prior_scope reason source]
+      scope = command["prior_scope"]
+      reason = command["reason"]
+      valid = unknown.empty? && scope.is_a?(String) && !scope.strip.empty? &&
+              (reason.nil? || reason.is_a?(String))
+      unless valid
+        @record.event("command_rejected", "command_type" => "takeover_scope",
+                      "reason" => "declaration payload is invalid")
+        return
+      end
+      reason_value = reason.nil? || reason.strip.empty? ? nil : reason
+      declarations = (takeover["prior_scope_declarations"] ||= [])
+      if declarations.any? do |entry|
+           entry.is_a?(Hash) && entry["prior_scope"] == scope && entry["reason"] == reason_value
+         end
+        @record.event("takeover_scope_duplicate_ignored",
+                      "prior_scope_sha256" => Digest::SHA256.hexdigest(scope))
+        return
+      end
+      declarations << {
+        "prior_scope" => scope, "reason" => reason_value,
+        "declared_at" => Time.now.utc.iso8601,
+        "source" => { "kind" => "submitter_declaration" }
+      }
+      @record.event("takeover_scope_declared",
+                    "prior_scope_sha256" => Digest::SHA256.hexdigest(scope),
+                    "declarations" => declarations.length)
+    end
+
+    # Bounded projection of the takeover boundary for the independent checker:
+    # the ORIGINAL prior_scope (possibly unknown) and the RECENT FIVE later
+    # submitted declarations side by side, plus the program-captured boundary
+    # facts. Never rewritten to make unknown look declared; declarations
+    # remain submitter statements (not observations), and no old checks or
+    # usage are imported. Omissions are counted (never silently dropped) and
+    # the existing 64KiB compression bounds the rest.
+    def takeover_context_projection
+      takeover = @state["takeover"]
+      return nil unless takeover.is_a?(Hash)
+
+      declarations = Array(takeover["prior_scope_declarations"])
+      projection = {
+        "prior_scope" => takeover["prior_scope"],
+        "prior_scope_declarations" => declarations.last(5),
+        "reason" => takeover["reason"],
+        "requested_at" => takeover["requested_at"],
+        "requirement" => takeover["requirement"],
+        "artifact" => takeover["artifact"],
+        "supervision" => takeover["supervision"],
+        "prior_execution" => takeover["prior_execution"]
+      }
+      projection["prior_scope_declarations_omitted"] = declarations.length - 5 if declarations.length > 5
+      projection
     end
 
     def omp_task?
@@ -2142,6 +2215,7 @@ module Orbit
           "task_git" => task_git, "findings" => @state.fetch("findings"),
           "recent_events" => recent_events, "check_history" => check_history_for(snapshot), "recheck" => clues,
           "execution_members" => @state["members"],
+          "takeover" => takeover_context_projection,
           "decisions" => @state.fetch("decisions"), "dispute" => @state["dispute"],
           "model_selection" => @state.dig("jev", "delegation"),
           "work_units" => work_units.list,

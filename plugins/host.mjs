@@ -40,7 +40,7 @@ export const toolArgs = z => ({
         review_model: z.string().optional().describe('Optional Root-selected provider/id from the current OMP model catalog.'),
         intent: z.enum(['complete', 'pause']).optional().describe('stop only: complete (default) requires the actual finalization gate; pause is an explicit interruption.'),
         operation: z.enum(['declare', 'read', 'list', 'finish']).optional().describe('work-unit operation; declare records a bounded handoff, finish records Root verification.'),
-        work_unit: z.record(z.string(), z.unknown()).optional().describe('declare payload: {spec:{objective,requirements,allowed_paths,allowed_tools,allowed_commands,acceptance,escalation}}. Paths/tools/commands are flat allowed_* fields inside spec, never nested scope. Optional spec fields: context,decisions,dependencies,model_requirements. read/finish use id; finish also needs status,result,verification.'),
+        work_unit: z.record(z.string(), z.unknown()).optional().describe('declare payload: {spec:{objective,requirements,allowed_paths,allowed_tools,allowed_commands,acceptance,escalation}}. Paths/tools/commands are flat allowed_* fields inside spec, never nested scope. allowed_paths is the member\'s entire accessible path set (read and write share it): read-only specs/tests/dependencies must be listed there too, or their necessary facts go into context; it grants no automatic read-only protection. allowed_commands must be complete commands, matched verbatim — never prefixes. Optional spec fields: context,decisions,dependencies,model_requirements. read/finish use id; finish also needs status,result,verification.'),
         takeover: z.object({ reason: z.string(), prior_scope: z.string().optional() }).optional()
           .describe('Take over an already-executed original requirement via start: say why (reason) and optionally declare the prior execution scope (prior_scope). The artifact digest and supervision start time are captured by the program, never supplied here.'),
         text: z.string().optional().describe('amend: the amendment text — a user-authorized requirement revision only; never a way to submit test results or completion evidence (verified execution enters checks through real Root tool receipts). stop: the reason text.'), check_in: z.number().int().positive().optional()
@@ -105,6 +105,20 @@ export function createOrbitHost({ provider, project, dispatch, bind, reset }) {
             if (!terminal.has(state.status)) {
               if (a.review_model && a.review_model.trim() !== state.review?.model)
                 throw new Error(`Task already active with checker ${state.review?.model || 'unknown'}; use action 'review-model' to change it`);
+              // A later prior_scope on an existing takeover task is enqueued
+              // through the small CLI queue entry; the runtime stays the only
+              // state writer and appends it without touching the created
+              // boundary. Presence is validated — a non-string or empty value
+              // is refused, never treated as absent — while an omitted key
+              // (undefined) keeps the previous idempotent result untouched.
+              const laterScope = a.takeover?.prior_scope;
+              if (laterScope !== undefined) {
+                if (typeof laterScope !== 'string' || !laterScope.trim())
+                  throw new Error('takeover prior_scope must be a non-empty string when present');
+                const queued = await run(['takeover-scope', previous.task_directory, '--file', '-'], project,
+                  JSON.stringify({ prior_scope: laterScope, reason: a.takeover.reason }));
+                return JSON.stringify({ ...previous, existing_task: true, takeover_scope_queued: queued });
+              }
               return JSON.stringify({ ...previous, existing_task: true });
             }
           }

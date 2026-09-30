@@ -297,6 +297,31 @@ try {
   assert.deepEqual(await request('member_model'),
     { provider: 'deepseek', id: 'deepseek-flash', billing_route: 'unknown' },
     'a custom DeepSeek endpoint stays unknown');
+  // OpenCode Go: the verified first-party Go endpoint is a subscription plan;
+  // the same provider on another path, another host, plain http or a
+  // gateway-forwarded transport stays unknown.
+  ctx.models.resolve = spec => spec === '@task'
+    ? { provider: 'opencode-go', id: 'deepseek-v4.1-flash', baseUrl: 'https://opencode.ai/zen/go/v1' }
+    : undefined;
+  assert.deepEqual(await request('member_model'),
+    { provider: 'opencode-go', id: 'deepseek-v4.1-flash', billing_route: 'subscription_quota' },
+    'the verified OpenCode Go endpoint is subscription_quota');
+  ctx.models.list = () => [{ provider: 'opencode-go', id: 'deepseek-v4.1-flash' }];
+  assert.equal((await request('model_catalog')).routes['opencode-go/deepseek-v4.1-flash'], 'subscription_quota',
+    'the Go plan route crosses the catalog bridge as subscription_quota');
+  for (const [label, refused] of [
+    ['the Zen non-Go path', { provider: 'opencode-go', id: 'deepseek-v4.1-flash', baseUrl: 'https://opencode.ai/zen/v1' }],
+    ['another host with the same path', { provider: 'opencode-go', id: 'deepseek-v4.1-flash', baseUrl: 'https://opencode.ai.example/zen/go/v1' }],
+    ['a plain-http Go endpoint', { provider: 'opencode-go', id: 'deepseek-v4.1-flash', baseUrl: 'http://opencode.ai/zen/go/v1' }],
+    ['a gateway-forwarded Go endpoint', { provider: 'opencode-go', id: 'deepseek-v4.1-flash',
+      baseUrl: 'https://opencode.ai/zen/go/v1', transport: 'pi-native' }]
+  ]) {
+    ctx.models.resolve = candidate => (candidate === '@task' ? refused : undefined);
+    assert.deepEqual(await request('member_model'),
+      { provider: 'opencode-go', id: 'deepseek-v4.1-flash', billing_route: 'unknown' },
+      `${label} stays unknown`);
+  }
+  ctx.models.list = () => [model];
   ctx.models.resolve = () => undefined;
   await assert.rejects(() => request('member_model'), /unresolved/);
   assert.equal(await request('model'), 'glm/x', 'a failed task-role lookup does not replace the Root model');
@@ -1449,6 +1474,28 @@ process.exit(run.status ?? 1);
       const thirdContent = (thirdOut?.payload ?? thirdOut)?.messages?.at(-1)?.content;
       assert.ok(!(typeof thirdContent === 'string' && thirdContent.includes('[orbit-entry-advisory]')),
         'the second task never repeats its advisory');
+      // A later takeover start on the ACTIVE task uses the real host early-return
+      // path: a valid prior_scope queues through the CLI without changing the
+      // task directory, an omitted key stays idempotent, and a bad value is
+      // refused rather than treated as absent.
+      const inboxDir = path.join(tasksRoot, newDir2, 'inbox');
+      const inboxBefore = (await fs.readdir(inboxDir).catch(() => [])).length;
+      const declared = await tool({ action: 'start', task: newDir2,
+        takeover: { reason: 'declare what the ordinary stage covered',
+                    prior_scope: 'ordinary execution only changed src/parse.js' } }, autoCtx2);
+      assert.equal(declared.task_directory, path.join(tasksRoot, newDir2), 'a later declaration keeps the same task directory');
+      assert.equal(declared.existing_task, true, 'the active task keeps its existing-task answer');
+      assert.equal(declared.takeover_scope_queued?.status, 'queued', 'the declaration is queued through the real CLI');
+      assert.equal(declared.takeover_scope_queued?.task_directory, path.join(tasksRoot, newDir2),
+        'the queued command names the same task');
+      assert.equal((await fs.readdir(inboxDir)).length, inboxBefore + 1, 'exactly one declaration command is queued');
+      const omitted = await tool({ action: 'start', task: newDir2, takeover: { reason: 'no scope stated' } }, autoCtx2);
+      assert.equal(omitted.takeover_scope_queued, undefined, 'an omitted prior_scope keeps the previous result');
+      assert.equal((await fs.readdir(inboxDir)).length, inboxBefore + 1, 'nothing is queued without a declaration');
+      await assert.rejects(() => tool({ action: 'start', task: newDir2,
+        takeover: { reason: 'bad scope type', prior_scope: 42 } }, autoCtx2), /prior_scope/,
+        'a non-string prior_scope is refused instead of treated as absent');
+      assert.equal((await fs.readdir(inboxDir)).length, inboxBefore + 1, 'a refused declaration queues nothing');
       for (let n = 0; n < 20 && !autoPid2; n++) {
         const autoState2 = JSON.parse(await fs.readFile(autoState2Path, 'utf8'));
         autoPid2 = autoState2.runtime_pid || null;

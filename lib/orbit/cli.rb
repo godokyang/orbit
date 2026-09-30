@@ -59,7 +59,7 @@ module Orbit
 
       OMP 用 orbit omp 启动受控会话，普通 omp 不加载 Orbit 扩展。
       具体参数：orbit <命令> --help（omp 用 orbit help omp）；状态的机器输出：orbit status --json。
-      Agent 执行接口：start / check / amend / dispute / rebind-workspace / work-unit / route-resources / model-evidence / model-candidates / model-status / review-model（各自 --help）。
+      Agent 执行接口：start / check / amend / dispute / rebind-workspace / takeover-scope / work-unit / route-resources / model-evidence / model-candidates / model-status / review-model（各自 --help）。
     TEXT
 
     COMMAND_HELP = {
@@ -78,6 +78,7 @@ module Orbit
       "amend" => "orbit amend TASK_DIRECTORY --file FILE|-",
       "dispute" => "orbit dispute TASK_DIRECTORY --reason TEXT",
       "rebind-workspace" => "orbit rebind-workspace TASK_DIRECTORY PATH [--reason TEXT]\n把产物目录改到同一 Git 仓库中的工作区。命令入队后由任务进程记录来源、原因和历史；amend / dispute 的文字不会切换路径。",
+      "takeover-scope" => "orbit takeover-scope TASK_DIRECTORY --file FILE|-\n对已有 takeover 任务补交后来声明的 prior_scope（JSON：prior_scope 必填非空文本，reason 可选）。命令只入队；runtime 作为唯一写入者 append-only 记录声明文本、理由、实际声明时间与提交者来源，创建时的 prior_scope 不覆写，不追认旧执行也不授予完成。非接管任务、已终态或坏载荷拒绝；同内容重试不重复追加。",
       "model-evidence" => <<~TEXT,
         orbit model-evidence [TASK_DIRECTORY] --file FILE|-
         提交 Root 从一手来源核实的任务相关模型质量事实（一个 JSON object 或 array），也可先写缓存。逐候选采用真实 provider、model、reasoning 与 billing_route；必须与实际 OMP 路由匹配，不得改成另一条路由取数。缺失身份或测量日期如实未知；省略 reasoning 表示 provider 默认档，与显式 unknown 不同。一个候选的事实不要求 Root 或全池同时补齐；提交事实不代表 Jev 已推荐或成员已派发。
@@ -101,6 +102,7 @@ module Orbit
         orbit work-unit TASK_DIRECTORY declare|read|list|finish --file FILE|-
         Root 持久记录可交接工作单元；read/list 只读，declare/finish 不修改原始用户要求。
         declare 输入 {"spec":{"objective":"目标","requirements":["有效要求引用"],"allowed_paths":["路径"],"allowed_tools":["工具名"],"allowed_commands":["完整命令"],"acceptance":"验收方式","escalation":"何时停止并报 Root"}}，可加 context、decisions、dependencies 和任务相关 model_requirements。
+        allowed_paths 是成员全部可访问路径（读写共用）：规格／测试／依赖需要访问时也必须列出，或把必要事实放入 context；它不提供自动只读保护。allowed_commands 必须是完整命令，逐字精确匹配，不是前缀。
         read 输入 {"id":"wu-…"}，list 输入 {}；finish 输入 {"id":"wu-…","status":"accepted|rejected|failed","result":"实际结果","verification":"实际核验证据"}。
         单元绑定当前要求版本和实际产物工作区；修订／重新绑定使旧单元不能继续派发或登记 accepted。本命令只记录单元，不派发或登记成员。实际派发须另经原生宿主绑定，Root 不能通过本命令伪造派发。accepted 是 Root 核验记录，不替代独立最终检查或停止确认。已结束任务仅可 read/list。
       TEXT
@@ -209,6 +211,8 @@ module Orbit
         status(argv)
       when "rebind-workspace"
         rebind_workspace(argv)
+      when "takeover-scope"
+        takeover_scope(argv)
       when "session-summary"
         session_summary(argv)
       when "model-evidence"
@@ -710,6 +714,50 @@ module Orbit
       current = WorkspaceBinding.bind(project_root: record.state.fetch("project_root")) unless current.is_a?(Hash)
       canonical = WorkspaceBinding.rebind(current, artifact_root: path).fetch("artifact_root")
       id = record.submit("rebind_workspace", "path" => canonical, "reason" => reason, "source" => source)
+      puts JSON.generate({ "task_directory" => record.path, "command_id" => id, "status" => "queued" })
+      0
+    end
+
+    # Later prior_scope declarations for an existing takeover boundary. This
+    # command only enqueues: the runtime is the sole state writer and appends
+    # the declaration to takeover.prior_scope_declarations without touching
+    # the created boundary. The declaration is the submitter's statement, not
+    # a program observation and not a new native user message.
+    def takeover_scope(argv)
+      options = { file: "-" }
+      OptionParser.new do |parser|
+        parser.on("--file FILE") { |value| options[:file] = value }
+      end.parse!(argv)
+      directory = argv.shift
+      raise ArgumentError, "usage: orbit takeover-scope TASK_DIRECTORY --file FILE|-" if directory.nil? || !argv.empty?
+
+      record = TaskRecord.new(File.realpath(directory))
+      if TaskRuntime::TERMINAL.include?(record.state["status"])
+        raise ArgumentError, "task process has ended; records are retained, no declaration will be queued"
+      end
+      unless record.state["takeover"].is_a?(Hash)
+        raise ArgumentError, "task is not a takeover task; there is no prior-execution boundary to declare toward"
+      end
+
+      payload = begin
+        JSON.parse(read_input(options[:file]))
+      rescue JSON::ParserError
+        raise ArgumentError, "the declaration must be one JSON object"
+      end
+      raise ArgumentError, "the declaration must be one JSON object" unless payload.is_a?(Hash)
+      unknown = payload.keys - %w[prior_scope reason]
+      unless unknown.empty?
+        raise ArgumentError, "the declaration only accepts prior_scope and reason; these cannot take effect: #{unknown.join(', ')}"
+      end
+      scope = payload["prior_scope"]
+      raise ArgumentError, "prior_scope must be a non-empty string" unless scope.is_a?(String) && !scope.strip.empty?
+      reason = payload["reason"]
+      raise ArgumentError, "reason must be text when present" unless reason.nil? || reason.is_a?(String)
+
+      source = { "kind" => "submitter_declaration", "via" => "cli", "command" => "takeover-scope" }
+      details = { "prior_scope" => scope, "source" => source }
+      details["reason"] = reason unless reason.nil? || reason.strip.empty?
+      id = record.submit("takeover_scope", details)
       puts JSON.generate({ "task_directory" => record.path, "command_id" => id, "status" => "queued" })
       0
     end

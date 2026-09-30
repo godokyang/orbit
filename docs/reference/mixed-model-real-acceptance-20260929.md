@@ -138,17 +138,27 @@ Controller 在六份已完成产物的副本上，额外重放同一组八个从
 
 本追加只记录事实并区分三类证据（**源码/静态**、**mock/脚本**、**live 实机**），不重开已结束阶段，也不改写任何原件或把失败结论改为通过。
 
-### 0.7.21 已提交并安装（`fffabf80`／digest `ae9ce431…`／2026-09-30T11:21:07Z；唯一组合 full run2 exit 0；实机验收进行中、尚无结论）
+### 0.7.21 已提交并安装（`fffabf80`／digest `ae9ce431…`／2026-09-30T11:21:07Z；唯一组合 full run2 exit 0；自动接管已实机一轮，见下文 fresh 任务）
 
 | 项目 | 事实 | 证据类别 |
 | --- | --- | --- |
 | 入口提示 + 自动/手工接管 | `plugins/omp-host.mjs` `83e62a1b…`、`lib/orbit/prestart.rb` `ec1e206c…`、`contracts/task-runtime.md` `498ded5e…`；R 的相关 run exit 0，Q 四文件独立审 PASS | 源码 + 静态审 |
 | 运行时结算／宿主（R） | `lib/orbit/task_runtime.rb` `97414ff1…`、宿主 `28e4cffa…`、测试 `28fee447…`；最终冻结源码的验证跑在 `run4-errorstruct.log` **exit 0**（“run4”是日志标签，不表示四次运行全部通过；更早的 fixture 失败以会话摘录保留，日志覆盖不冒称全部通过） | 源码 + 静态审 |
-| 自动接管关键测试（S） | `tests/omp_native_gate_test.mjs` `43a296c59de54f3d176c6f4ef632720517e58c75d6d06bae7ae8a3b17b2abe1c`；单次 `node` gate exit 0（含 stdin 修正与自有 runtime 退出清理） | mock/脚本（真实任务记录与真实 socket，无模型调用） |
+| 自动接管关键测试（S） | `tests/omp_native_gate_test.mjs` `9fedfd2b7db01fb99ac1242dd264ca59ebbabe79f9513e4347ae5b67110d1122`（含 stdin 修正、OpenCode Go route bridge 组与自有 runtime 退出清理）；单次 `node` gate exit 0；首次 fixture 泄漏失败日志保留 | mock/脚本（真实任务记录与真实 socket，无模型调用） |
 | 需求文本容量 300→1000 | `contracts/check-result.schema.json`、`runner check-result.ts`、`lib/orbit/check_runner.rb`、`lib/orbit/requirement_coverage.rb` 同界；真实被拒原件在本地校验可接纳；**缺证、重复、>1000 字符仍被拒**。`complete:false` 本身是合法的可解析结果（不是 JSON 拒收）；当前 delivery 未核验时不授 ready。不能把任何 false 或伪造的 complete 都说成“被 JSON 拒绝” | 源码 + 静态审 |
 | 验证回执压缩选择（S） | `lib/orbit/check_runner.rb` `c39968f3…`、`tests/check_runner_context_test.rb` `23254c9a…`；相关 suite exit 0（退化 caps 下交付给检查者的 JSON 保留当前执行回执、失败条与省略计数）；反向副本验证旧 `recent_tail` 会失败。Q 二次审 PASS（其 PASS 路径已发出） | 源码 + 静态审 |
 
-以上均为**源码或脚本证据**，没有用它们替代实机验收。**0.7.21 唯一组合回归已完成**：run2 `npm test` **exit 0**（日志 `/private/tmp/orbit-regression-0.7.21/npm-test-run2.log`，末尾 `INSTALL_TEST_PASS shell_configuration`；126 只是 PASS 标记行数、不是测试数量）；同次 `npm pack --dry-run` 83 files／422028 B、`check:version` 与 skill validator exit 0；**129 个源/测试/打包文件 run2 前后 SHA 相同**（`hash-compare.diff` 为空）。首次 full 的 `exit 1` 与中间 `judgment_usage_test` fixture 失败日志**全部保留**；修复**只改既有测试夹具到生产校准形状**（`tests/judgment_usage_test.rb` `78b744e2…`），**未放宽任何生产门**。该组合已由 Root 本地提交 `fffabf801b430b61aa11d58f86f99960bdd9c8aa` 并经 `sh install.sh` 真实 exit 0 安装（`orbit version --json`：0.7.21、dirty=false、digest `ae9ce431…`、11:21:07Z；原始身份记录 `/private/tmp/orbit-takeover-fixture-1D6DEl/controller-records/installed-version-0.7.21.json`）。**本版实机验收进行中、尚无结论**：新安装的 0.7.21 Root 已从可用 shell 启动，普通阶段已结束，仅修改解析模块且未建任务；请求 02 已提交，任务 `8e411be9` 于 11:27:42Z 保存接管边界，六文件与普通阶段结束时一致（Controller 记录 `takeover-boundary-observation.json`）。
+以上均为**源码或脚本证据**，没有用它们替代实机验收。**0.7.21 唯一组合回归已完成**：run2 `npm test` **exit 0**（日志 `/private/tmp/orbit-regression-0.7.21/npm-test-run2.log`，末尾 `INSTALL_TEST_PASS shell_configuration`；126 只是 PASS 标记行数、不是测试数量）；同次 `npm pack --dry-run` 83 files／422028 B、`check:version` 与 skill validator exit 0；**129 个源/测试/打包文件 run2 前后 SHA 相同**（`hash-compare.diff` 为空）。首次 full 的 `exit 1` 与中间 `judgment_usage_test` fixture 失败日志**全部保留**；修复**只改既有测试夹具到生产校准形状**（`tests/judgment_usage_test.rb` `78b744e2…`），**未放宽任何生产门**。该组合已由 Root 本地提交 `fffabf801b430b61aa11d58f86f99960bdd9c8aa` 并经 `sh install.sh` 真实 exit 0 安装（`orbit version --json`：0.7.21、dirty=false、digest `ae9ce431…`、11:21:07Z；原始身份记录 `/private/tmp/orbit-takeover-fixture-1D6DEl/controller-records/installed-version-0.7.21.json`）。**本版自动接管已完成 fresh 实机一轮**：普通阶段仅改解析模块且未建任务；请求 02 后任务 `8e411be9` 于 11:27:42Z 保存接管边界（`prior_scope unknown`、真实原生消息 `b4d56978`、私有快照六文件与普通阶段一致），**complete＋confirmed stop（11:44:53Z）**，成员=0；详见下节。
+
+### 2026-09-30 fresh 自动接管实机（任务 `8e411be9-9703-47c0-8898-f95348eb34b5`，installed 0.7.21）
+
+- 普通阶段：仅 `src/parse.js` 被改、未建任务，Root 用自己的原生冒烟命令验证（Controller 记录 `ordinary-stage-boundary.json`／`ordinary-stage-terminal.txt`）。
+- 自动接管（请求 02）：任务于 11:27:42Z 保存接管块——`prior_scope unknown`、真实原生消息 `b4d56978`、私有 `takeover-snapshot`（六文件哈希与普通阶段边界一致）、程序时间戳；Root 其后手工 `start` 带的 `takeover.scope` 被宿主**已激活任务的早返回忽略**（会话 11:28:08.507Z，结果 `{existing_task:true}`），**不是 CLI 拒绝**。
+- 六次真实 checks（同一 input `5ca00fc9…`／同一快照 `sha256:f8c2a0852b…`）：1—4 为 provider 失败（Go 429×2、K3 周配额 403、GLM-5.3-FlashX 403 无权限），5、6（zenmux）有效并 complete，11:44:33Z 终检通知；11:44:53Z **stopped 且 confirmed**（active_tools 0、async jobs settled）。`findings` 为空、无纠偏。
+- 账本（仅本任务）66 次：root 26／checker 24／judgment 16；**checker 14 次无完整用量**；`reasoningTokens/totalTokens` 为子集不相加；**现金与额度仍未知**。普通阶段的原生模型调用不在该账本内，未按时间归属。
+- `work-unit wu-8e8d3f0c…` 是**当前要求版本**的声明（input `5ca00fc9…`），不追认此前 parseLog 为受控；**成员=0**，不构成自主派发或节省证据。`prior_scope` 追加与 Go 映射接线（五文件）尚未安装。
+- 进程：已记录并实测缺失 → 63257／63315／63458／78421；六次检查各自 reviewer pid（87896／88073／88202／9751／10136／20653）亦实测缺失；按 fixture 路径与会话 id 扫描无引用。
+- 原件保护：`controller-records/originals-sha-{before,after}.sha`（118 项，diff 为空）；完整后验见 `controller-records/postmortem-8e411be9.json`，`summarize_task.rb` 只读输出存 `controller-records/summarize-task-8e411be9.json`。
 
 ### 0.7.20 真实成员运行（任务 `1d977642-e478-4553-9959-7bc1a7381c9b`）——保留为负例
 
@@ -160,4 +170,4 @@ Controller 在六份已完成产物的副本上，额外重放同一组八个从
 
 ### 待办（下一步，不扩范围）
 
-0.7.21 已提交（`fffabf80`）并经 `sh install.sh` exit 0 安装；下一步用已备好的临时项目完成自动接管／真实成员交付与确认停止的实机验收（接管边界已核对，完整交付仍在运行、尚无结论），以及不带强制派发的 paired 对照。W1—W10 依据证据仍未完整闭合，本追加不主张完整 Goal。
+0.7.21 已提交（`fffabf80`）并经 `sh install.sh` exit 0 安装；下一步用已备好的临时项目完成自动接管／真实成员交付与确认停止的实机验收（自动接管已一轮 complete＋confirmed stop，成员=0），以及不带强制派发的 paired 对照。W1—W10 依据证据仍未完整闭合，本追加不主张完整 Goal。

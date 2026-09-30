@@ -6,7 +6,7 @@
 
 用户已认可启动 prompt 并明确要求以 Goal 模式开始完整实现。Goal 已激活，目标是主方案全部必要行为与真实验收同次闭合，不设硬预算。Codex 总编排与审核，已复用同一 Herdr 布局中的四个 OMP 执行者；开发团队和被测 Orbit 原生团队分别记录。
 
-**当前支持安装 0.7.21**（clean commit `fffabf801b430b61aa11d58f86f99960bdd9c8aa`，content digest `ae9ce431ead61d3bb61eb04c5050a7408ef2faf0cdbd42d02e5127512cd7d4fd`，2026-09-30T11:21:07Z 安装，`orbit version --json` 复核一致；未发布；OMP 与 reviewer 18.3.4 未升级）。唯一组合回归 run2 `npm test` exit 0（`/private/tmp/orbit-regression-0.7.21/report.json`）。**源码已提交并安装，业务闭环尚未验收**：普通阶段已结束且未建任务；请求 02 已提交，任务 `8e411be9` 的接管快照已核对，完整交付仍在运行，接管验收进行中、尚无结论。 此前支持安装依次为 0.7.20（clean `1618b81`，digest `08472661…`，08:58:27Z）、0.7.19（`0faf1ce8…`）、0.7.18、0.7.17 与 0.7.12／`a1f9291`。0.7.20 组合交付：成员结算修订、history-gap 检查历史、root_without_hint 恢复、未知生效日成本存档；唯一组合 full npm exit 0（123 PASS，`/private/tmp/orbit-regression-0.7.20/npm-test.log`），pack dry-run 83 files。不因安装宣称完整目标已验收。
+**当前支持安装 0.7.21**（clean commit `fffabf801b430b61aa11d58f86f99960bdd9c8aa`，content digest `ae9ce431ead61d3bb61eb04c5050a7408ef2faf0cdbd42d02e5127512cd7d4fd`，2026-09-30T11:21:07Z 安装，`orbit version --json` 复核一致；未发布；OMP 与 reviewer 18.3.4 未升级）。唯一组合回归 run2 `npm test` exit 0（`/private/tmp/orbit-regression-0.7.21/report.json`）。**源码已提交并安装，业务闭环尚未验收**：普通阶段已结束且未建任务；请求 02 已提交；任务 `8e411be9` 的接管边界已核对，**自动接管已实机跑通一轮并 complete＋confirmed stop（11:44:53Z）**，但**成员=0、无对照或节省证据**，`prior_scope` 追加与 Go 映射接线（五文件）**未安装**；后验见 `controller-records/postmortem-8e411be9.json`。 此前支持安装依次为 0.7.20（clean `1618b81`，digest `08472661…`，08:58:27Z）、0.7.19（`0faf1ce8…`）、0.7.18、0.7.17 与 0.7.12／`a1f9291`。0.7.20 组合交付：成员结算修订、history-gap 检查历史、root_without_hint 恢复、未知生效日成本存档；唯一组合 full npm exit 0（123 PASS，`/private/tmp/orbit-regression-0.7.20/npm-test.log`），pack dry-run 83 files。不因安装宣称完整目标已验收。
 
 主方案 §1.3 和逐项审计是冻结范围。内部实现依赖不是分期发布；自主派发的真实失败、资源归属、独立完成与停止是验收必需项。0.7.11／0.7.12 检查点（`1ffec49`／`a1f9291`）及更早版本的提交、回归与真实运行流水见[本次验收](../reference/mixed-model-real-acceptance-20260929.md)与 Git，不再逐版复制。
 
@@ -17,8 +17,8 @@
 | 执行者 | 完整工作面 | 计划主要所有权 | 当前状态 |
 | --- | --- | --- | --- |
 | Q（`p1Q`） | 独立只读审查 | 只读源码和冻结证据；不改产品或 fixture | 已审接管、入口提示、覆盖容量与自动接管关键测试；执行结算与回执压缩修复经 Q 二次审 PASS，复用已有效结论 |
-| R（`p1R`） | 源码修复与组合回归 | runtime／host／合同；最终唯一 full owner | 0.7.20 已组合验证并安装；0.7.21 接管/入口提示/结算与资格修复已集成，**唯一组合 full run2 exit 0**（`/private/tmp/orbit-regression-0.7.21/report.json`，129 文件前后 SHA 相同）；已本地提交 `fffabf80` 并安装（`sh install.sh` exit 0，`orbit version --json` 0.7.21／digest `ae9ce431…`／11:21:07Z）；**业务闭环验收进行中、尚无结论**（请求 02 已提交、任务 `8e411be9` 的接管边界已核对） |
-| S（`p1S`） | 关键测试、运行后验与回执投影 | gate／check_runner 和各自相关测试；Controller 证据与 docs 按票独写 | 自动接管关键测试已通过（`43a296c5…`，含 stdin 修正）；0.7.20 成员负例后验已保存且原件未改；回执压缩选择修复已完成（相关 suite exit 0，Q 二次审 PASS） |
+| R（`p1R`） | 源码修复与组合回归 | runtime／host／合同；最终唯一 full owner | 0.7.20 已组合验证并安装；0.7.21 接管/入口提示/结算与资格修复已集成，**唯一组合 full run2 exit 0**（`/private/tmp/orbit-regression-0.7.21/report.json`，129 文件前后 SHA 相同）；已本地提交 `fffabf80` 并安装（`sh install.sh` exit 0，`orbit version --json` 0.7.21／digest `ae9ce431…`／11:21:07Z）；自动接管已实机跑通 fresh 任务 `8e411be9`（**complete＋confirmed stop 11:44:53Z，成员=0**）；`prior_scope` 追加与 Go 映射接线（五文件）**未安装**，成员路径与对照仍未验 |
+| S（`p1S`） | 关键测试、运行后验与回执投影 | gate／check_runner 和各自相关测试；Controller 证据与 docs 按票独写 | 自动接管关键测试已通过（`9fedfd2b…`，含 stdin 修正与 OpenCode Go route bridge 组）；fresh 接管 postmortem 已保存（`postmortem-8e411be9.json`，原件 SHA 前后一致）、0.7.20 成员负例后验保留；回执压缩选择修复已完成（相关 suite exit 0，Q 二次审 PASS） |
 | Codex | 编排、集成与审核 | 当前代码与文档 | 编排三个执行者并审核其回执；不声称接管全部体力代码实现 |
 
 已结束的 pane 不再占用界面；被测 Orbit 原生团队与开发执行者分别计证。无需人为占满四个席位，也不将他们替换为内部 Codex 子 Agent。
@@ -46,7 +46,7 @@
 
 ## 真实验收当前状态
 
-[本次验收](../reference/mixed-model-real-acceptance-20260929.md)及 JSON 记录入口、安装 digest、精确任务与原始用量。**当前支持安装 0.7.21**（clean `fffabf80`，digest `ae9ce431…`，2026-09-30T11:21:07Z；OMP 与 reviewer 18.3.4 未升级）；此前支持安装依次为 0.7.20（`1618b81`／`08472661…`）、0.7.19（`0faf1ce8…`／`80b33374…`）、0.7.18、0.7.17 与 0.7.12／`a1f9291`。本版实机验收进行中、尚无结论。普通 omp 旗舰对照和 orbit omp 负例分开，开发 B/C/D/E 不算被测成员。
+[本次验收](../reference/mixed-model-real-acceptance-20260929.md)及 JSON 记录入口、安装 digest、精确任务与原始用量。**当前支持安装 0.7.21**（clean `fffabf80`，digest `ae9ce431…`，2026-09-30T11:21:07Z；OMP 与 reviewer 18.3.4 未升级）；此前支持安装依次为 0.7.20（`1618b81`／`08472661…`）、0.7.19（`0faf1ce8…`／`80b33374…`）、0.7.18、0.7.17 与 0.7.12／`a1f9291`。本版自动接管已完成 fresh 实机一轮（任务 `8e411be9` complete＋confirmed stop；**成员=0**），**成员路径与对照仍未验**。普通 omp 旗舰对照和 orbit omp 负例分开，开发 B/C/D/E 不算被测成员。
 
 - **0.7.20 安装后已实测**：provider 错误分类与 reviewer 会话原件一致（真实 429／403 → `auth_or_quota`）；paired 对照（baseline plain OMP 18.3.4 vs installed 0.7.20，冻结 8 项测试与 6 项探针每臂只跑一次）两臂 **8/8 与 6/6 全通过**，冻结标准下质量无可检出差异；混合臂 **members=0**（未 exercise 成员替代路径）；顶级模型 GPT-6-sol 总量 mixed 376410 vs baseline 289685（**约 +30%**，root 单侧 +7.9%）；用户介入两臂均 0；自动检查 1—6 是**同一 observation** 上的有界失败重选（Go 429／K3 403／FlashX 403／Go 429／`invalid_result`），非重复观察，check5 的 126455 token 为真实消耗、零接受产出。证据 `paired-comparison.json`。
 - **成本事实（installed 0.7.20 已实 CLI 验证）**：隔离项目 `import` exit 0（显式未知生效日存档）、缺标记的缺生效日导入 exit 1、`list` 显示 `effective.unknown=true`、两份真实台账副本 `report` exit 0 且 `cash []`／`cost_complete=false`（107／111 次调用）；`cash` 为空只表示未知，不是 0 成本；账户与实际扣减桶仍未知。证据 `/private/tmp/orbit-resource-unknown-final-akE3Nz/controller-records/live-cli-verification.json`。
@@ -55,7 +55,11 @@
 
 ## 下一动作
 
-1. R 完成执行终结与新版本证据资格分离修复；S 的回执压缩选择修复**已完成**（相关 suite exit 0，**Q 二次审 PASS**）；其余冻结增量按既有有效审查复用。
-2. 完成 0.7.21 本地提交与支持安装（**唯一组合回归与打包已完成，run2 exit 0**），再用准备好的新临时项目验收自动接管及真实成员交付停止；旧任务原件与失败结论保持不变。
-3. 继续用同一冻结评价矩阵比较旗舰与混合资源与用户介入；成员路径必须有真正派发成员的任务样本（paired 的 members=0 不构成成员结论）。
-4. 逐项闭合 W1—W10；全部满足与必要收尾完成后才更新 Goal complete。**不推送、不发布。**
+当前优先级按 2026-09-30 只读取证纠正（证据 `/private/tmp/orbit-autonomous-dispatch-audit/autonomous-dispatch-evidence.json`）：
+
+1. **生产 Jev 一次最小调用**：先把真实 Jev API 与具体单元判断跑通一次（该能力此前成功过，与“自主派发未 ready”分开记录，不能互相替代）。
+2. **明确单元，再走真实 native 派发／回收**：要求“**实现开始前就有可派发单元**”，随后验证 hint→Root 原生 `task` 派发→成员注册→结果回收。
+3. **修实现前路由与关键事件**：普通入口与显式入口都要在实现前的可扩展请求窗口给出“先声明单元”的指引或事件；**0.7.20 没有 advisory 代码，0.7.21 fresh 的显式入口也没触发 advisory，且实现前没有 unit**——这是产品接缝缺口，**不能归因 Root 忽略**。
+4. **核心链通过后**才做更大任务与旗舰／混合资源对照（此前 paired 的 members=0 不构成成员结论）。
+
+事实边界：0.7.22 增量 full 已绿但**未提交、未安装**，当前安装仍为 **0.7.21**；`prior_scope` 追加与 Go 映射接线（五文件）仍属未安装增量，与本条优先级无关。逐项闭合 W1—W10 后才更新 Goal complete；**不推送、不发布。**

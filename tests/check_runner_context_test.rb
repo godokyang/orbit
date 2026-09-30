@@ -43,6 +43,41 @@ module CheckRunnerContextTest
   # was dropped when byte pressure halved list_limit down to 2. Selection must
   # keep current execution evidence, count the omission, and never promote an
   # old binding or hide a failure.
+  # The takeover boundary reaches the independent checker as program facts: the
+  # original (possibly unknown) scope and later submitter declarations side by
+  # side, never rewritten from unknown to declared, and long declarations keep
+  # the bounded prefix with the length/sha256 marker.
+  def check_takeover_projection_stays_side_by_side
+    declaration = { "prior_scope" => "Root 早前改过 src/a.rb", "reason" => "后来补充",
+                    "declared_at" => "2026-09-30T12:05:00Z", "source" => { "kind" => "submitter_declaration" } }
+    context = base_context.merge(
+      "takeover" => {
+        "prior_scope" => { "status" => "unknown", "text" => nil },
+        "prior_scope_declarations" => [declaration],
+        "reason" => "take over", "requested_at" => "2026-09-30T12:00:00Z",
+        "requirement" => { "native_message_id" => "m-1", "instruction_sha256" => "a" * 64 },
+        "artifact" => { "digest" => "sha256:x", "snapshot_path" => "takeover-snapshot" },
+        "supervision" => { "starts_at" => "2026-09-30T12:00:00Z" },
+        "prior_execution" => { "recognized_as_controlled" => false, "imported" => [] }
+      }
+    )
+    bounded = parsed(context)
+    check(bounded["takeover"]["prior_scope"]["status"] == "unknown" &&
+          bounded["takeover"]["prior_scope"]["text"].nil? &&
+          bounded["takeover"]["prior_scope_declarations"].first["prior_scope"].include?("src/a.rb"),
+          "unknown and declared scope stay side by side in the checker context")
+
+    long = "x" * 5000
+    context["takeover"]["prior_scope_declarations"] = [{ "prior_scope" => long }]
+    context["takeover"]["prior_scope_declarations_omitted"] = 2
+    bounded = parsed(context)
+    text = bounded["takeover"]["prior_scope_declarations"].first["prior_scope"]
+    check(text.length < long.length && text.include?("…[#{long.length}:"),
+          "a long declaration keeps a bounded prefix with its length/sha256 marker")
+    check(bounded["takeover"]["prior_scope_declarations_omitted"] == 2,
+          "the omission count survives the bounded checker context")
+  end
+
   def current_execution_receipts_survive_degraded_caps
     passed = { "at" => "2026-09-30T09:50:00.330Z", "at_ms" => 1790761800330, "tool" => "bash", "kind" => "root_verification",
                "status" => "completed", "command" => "node --test", "exit_code" => 0,
@@ -174,6 +209,7 @@ module CheckRunnerContextTest
     check_review_focus_is_bounded_and_traceable
     check_non_hash_context_is_bounded
     check_check_history_stays_bounded_and_traceable
+    check_takeover_projection_stays_side_by_side
     current_execution_receipts_survive_degraded_caps
     root_verifications_keep_order_when_they_fit
     puts "CHECK_RUNNER_CONTEXT_TEST_PASS (deterministic)"

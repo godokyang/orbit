@@ -2086,7 +2086,13 @@ export function installOmpExtension(pi, sdk) {
   const ROUTE_ENDPOINT_PROOFS = [
     { route: 'direct_api', provider: 'deepseek', host: 'api.deepseek.com' },
     { route: 'subscription_quota', provider: 'zhipu-coding-plan', host: 'open.bigmodel.cn', pathPrefix: '/api/coding/' },
-    { route: 'subscription_quota', provider: 'kimi-code', host: 'api.kimi.com', pathPrefix: '/coding/' }
+    { route: 'subscription_quota', provider: 'kimi-code', host: 'api.kimi.com', pathPrefix: '/coding/' },
+    // OpenCode Go subscription: first-party console docs pin the Go endpoint at
+    // https://opencode.ai/zen/go/v1/ (verified 2026-09-30) and the pinned
+    // pi-catalog 18.3.4 carries the same default. Matched only against the
+    // actually resolved base URL; account scope, prices and the real
+    // deduction bucket stay unknown.
+    { route: 'subscription_quota', provider: 'opencode-go', host: 'opencode.ai', pathPrefix: '/zen/go/' }
   ];
   function endpointParts(baseUrl) {
     if (typeof baseUrl !== 'string' || !baseUrl.trim()) return null;

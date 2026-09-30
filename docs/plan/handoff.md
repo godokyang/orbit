@@ -1,6 +1,6 @@
 # Orbit 当前交接
 
-最后核对：2026-09-30。**当前支持安装 0.7.21**（clean commit `fffabf801b430b61aa11d58f86f99960bdd9c8aa`，content digest `ae9ce431ead61d3bb61eb04c5050a7408ef2faf0cdbd42d02e5127512cd7d4fd`，2026-09-30T11:21:07Z 安装，`orbit version --json` 一致；未发布；OMP 与 reviewer 18.3.4 未升级）。唯一组合回归 run2 `npm test` exit 0（`/private/tmp/orbit-regression-0.7.21/report.json`）。**源码已提交并安装，业务闭环尚未验收**：普通阶段已结束，仅修改解析模块且未建任务；请求 02 已提交，任务 `8e411be9` 于 11:27:42Z 保存接管边界，六文件与普通阶段结束时一致（Controller 记录 `takeover-boundary-observation.json`），接管验收**进行中、尚无结论**。此前支持安装依次为 0.7.20（clean `1618b81`，digest `08472661…`，08:58:27Z）、0.7.19（`0faf1ce8…`）、0.7.18、0.7.17 与 0.7.12／`a1f9291`；原始身份记录见 `/private/tmp/orbit-takeover-fixture-1D6DEl/controller-records/installed-version-0.7.21.json`。
+最后核对：2026-09-30。**当前支持安装 0.7.21**（clean commit `fffabf801b430b61aa11d58f86f99960bdd9c8aa`，content digest `ae9ce431ead61d3bb61eb04c5050a7408ef2faf0cdbd42d02e5127512cd7d4fd`，2026-09-30T11:21:07Z 安装，`orbit version --json` 一致；未发布；OMP 与 reviewer 18.3.4 未升级）。唯一组合回归 run2 `npm test` exit 0（`/private/tmp/orbit-regression-0.7.21/report.json`）。**源码已提交并安装，业务闭环尚未验收**：普通阶段已结束，仅修改解析模块且未建任务；请求 02 已提交，任务 `8e411be9` 于 11:27:42Z 保存接管边界（`prior_scope unknown`、真实原生消息 `b4d56978`、私有快照六文件与普通阶段结束一致，Controller 记录 `takeover-boundary-observation.json`），**已实机 complete 并 confirmed stop（11:44:53Z，active_tools 0／background settled）**；普通阶段仅改 `src/parse.js` 并由 Root 真实原生冒烟验证。**成员=0：本运行不含自主成员派发，也不构成对照或节省证据**；`prior_scope` 追加与 Go 映射接线（五文件）**未安装**，与本次运行证据分开记录；后验见 `controller-records/postmortem-8e411be9.json`（原件 SHA 前后一致）。此前支持安装依次为 0.7.20（clean `1618b81`，digest `08472661…`，08:58:27Z）、0.7.19（`0faf1ce8…`）、0.7.18、0.7.17 与 0.7.12／`a1f9291`；原始身份记录见 `/private/tmp/orbit-takeover-fixture-1D6DEl/controller-records/installed-version-0.7.21.json`。
 
 ## 0.7.20 已交付（本版组合，未发布）
 
@@ -43,6 +43,8 @@
 - 实际 OMP 路由价格与额度规则、币种与单位、Root／成员／检查者可归属 token 用量；账户范围与实际扣减桶仍未知。
 - 新质量问题的代表性真实样本、失败与缺证样本，以及自动正向推荐的放行依据；旧 0.55／0.50 不能直接移用。
 - 接管（takeover）与 entry advisory 已合入工作区，仍需新版安装后的真实验收；串行交接、分层核验和必要旗舰升级的真实效果验收，同次闭合完整目标。
+
+**当前主 TODO（按只读取证纠正）**：生产 Jev 一次最小调用 → 明确单元并走真实 native 派发／回收 → 修普通与显式入口在实现前的路由／关键事件 → 核心链通过后才做更大任务与资源对照。取证结论：0.7.20 无 advisory 代码、0.7.21 fresh 显式入口未触发 advisory、两次运行在实现前都没有 unit，**不能归因 Root 忽略**；Jev API 与具体单元判断曾成功，须与“自主派发未 ready”分开记录。0.7.22 增量 full 已绿但未提交／未安装，安装仍 0.7.21。
 
 当前执行者：Q（`p1Q` 只读审查，含 takeover delta 局部 PASS）、R（`p1R` 源码／回归／安装）、S（`p1S` 事实／fixture／docs），Codex 负责编排与审核；p26 的 Controller 实机观察**已完成并保留负例**，被测 Root 自行执行任务。旧 B／C／D／E 已结束，其独有事实归入既有 reference 与 Git 历史。已结束的实施票不留在计划目录；旧正文通过 Git 查阅。[限制清单](debt-ledger.md)只保留现存缺口。
 
