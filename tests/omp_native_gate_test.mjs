@@ -398,6 +398,86 @@ try {
     assert.ok(!String(afterDeclareBody?.instructions).includes('[orbit-bootstrap]'),
       'the one-shot bootstrap is not smuggled back in as the policy');
   }
+  // 1e. Generation-matched hint binding. Only a hint whose non-empty version
+  // equals the persisted selection record for THIS unit rides the host gate.
+  // The negatives (old generation against the same v2 selection, or two
+  // missing versions) stay observations; the live-generation case then goes
+  // through the REAL registration gate so the Ruby WorkUnitStore.bind
+  // dispatch carries member, tool call, model, hint_signature and
+  // hint_message_id — proving the hint reached the actual unit dispatch.
+  {
+    const hintedUnit = await tool({ action: 'work-unit', task: started.task_directory, operation: 'declare', work_unit: {
+      spec: { objective: 'hint binding fixture', requirements: ['original request'],
+        allowed_paths: ['src'], allowed_tools: ['read', 'write'], allowed_commands: [],
+        acceptance: 'Fixture scope is honored', escalation: 'Report to Root' } } });
+    const unitId = hintedUnit.unit.id;
+    const statePath = path.join(started.task_directory, 'state.json');
+    const sig = 'gate-hint-sig-v2';
+    const writeHintState = async transform => {
+      const state = JSON.parse(await fs.readFile(statePath, 'utf8'));
+      state.member_selections = { [unitId]: { version: 'orbit-member-selection-v2', signature: sig, decision: 'recommended' } };
+      state.delegation_hint = {
+        version: 'orbit-member-selection-v2', signature: sig, message_id: 'gate-hint-msg',
+        work_unit_id: unitId, input_digest: hintedUnit.unit.input_digest,
+        artifact_root: hintedUnit.unit.artifact_root, dispatch_attempt: 1,
+        user_boundary: state.last_user_message_id, followed: false,
+        recommendation: { first: { model: 'glm/x', agent: agentNameFor('glm/x') }, backups: [] },
+      };
+      transform?.(state);
+      await fs.writeFile(statePath, JSON.stringify(state));
+    };
+    const dispatchOf = async callId => (await waitFor(
+      entries => entries.some(e => e.kind === 'task_dispatch' && e.tool_call_id === callId)))
+      .filter(e => e.kind === 'task_dispatch' && e.tool_call_id === callId);
+    // Negative first: an old-generation hint against the same v2 selection.
+    await writeHintState(state => { state.delegation_hint.version = 'orbit-member-selection-v1'; });
+    await emit('tool_call', { toolName: 'task', toolCallId: 'hint-bind-v1', fixture_no_unit: true,
+      input: { agent: agentNameFor('glm/x'), task: `Stale hint dispatch\norbit-unit: ${unitId}` } }, ctx);
+    const v1 = await dispatchOf('hint-bind-v1');
+    assert.equal(v1.length, 1);
+    assert.equal(v1[0].hint_signature, null, 'an old-generation hint against a v2 selection never binds');
+    // Negative: two missing versions never pass as a generation match.
+    await writeHintState(state => { delete state.delegation_hint.version; delete state.member_selections[unitId].version; });
+    await emit('tool_call', { toolName: 'task', toolCallId: 'hint-bind-none', fixture_no_unit: true,
+      input: { agent: agentNameFor('glm/x'), task: `Versionless dispatch\norbit-unit: ${unitId}` } }, ctx);
+    const none = await dispatchOf('hint-bind-none');
+    assert.equal(none.length, 1);
+    assert.equal(none[0].hint_signature, null, 'two missing versions never pass as a generation match');
+    // Positive LAST: the live v2 generation dispatches, then the REAL
+    // registry registration window binds the unit with the hint attached.
+    await writeHintState();
+    const dispatched = await emit('tool_call', { toolName: 'task', toolCallId: 'hint-bind-live', fixture_no_unit: true,
+      input: { agent: agentNameFor('glm/x'), task: `Hinted dispatch\norbit-unit: ${unitId}` } }, ctx);
+    assert.ok(dispatched?.input?.name?.startsWith('orbit-'),
+      `the hinted dispatch must assign the requested identity: ${JSON.stringify(dispatched)}`);
+    const live = await dispatchOf('hint-bind-live');
+    assert.equal(live.length, 1, 'the generation-matched dispatch is observed once');
+    assert.equal(live[0].hint_signature, sig, 'the live-generation hint rides the host gate');
+    const listeners = new Set();
+    const liveSession = { sessionId: 'member-hint-live', model, isStreaming: false,
+      sessionManager: memberSession.sessionManager,
+      hasPendingAsyncWork: () => false, getAsyncJobSnapshot: () => ({ running: [] }),
+      getAgentId: () => dispatched.input.name,
+      subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener); },
+      sendCustomMessage: async () => {}, abort: async () => {},
+      asyncJobManager: { cancelAll: () => {}, cancelAndReapOwnerJobs: async () => ({ settled: true }) } };
+    const liveRef = { id: dispatched.input.name, kind: 'sub', parentId: mainAgentId, status: 'running',
+      session: liveSession, sessionFile: '/tmp/hint-live.jsonl',
+      history: { outputPath: '/tmp/hint-live.md', resolvedModel: 'glm/x' }, activity: 'working' };
+    extraRefs.push(liveRef);
+    registryListener({ type: 'registered', ref: liveRef });
+    const boundUnits = await tool({ action: 'work-unit', task: started.task_directory, operation: 'list' });
+    const bound = boundUnits.units.find(item => item.id === unitId);
+    assert.equal(bound.status, 'bound', 'the real registration binds the hinted unit');
+    assert.equal(bound.member_id, liveRef.id);
+    assert.equal(bound.tool_call_id, 'hint-bind-live');
+    assert.equal(bound.model, 'glm/x', 'the registration binds the actually observed model');
+    assert.equal(bound.dispatches.length, 1);
+    assert.equal(bound.dispatches[0].hint_signature, sig,
+      'the hint signature reaches the actual Ruby work-unit dispatch record');
+    assert.equal(bound.dispatches[0].hint_message_id, 'gate-hint-msg',
+      'the bound dispatch carries the hint message id');
+  }
   const missingUnit = await emit('tool_call', { toolName: 'task', toolCallId: 'no-unit',
     fixture_no_unit: true, input: { agent: agentNameFor('glm/x'), task: 'No handoff' } }, ctx);
   assert.equal(missingUnit.block, true, 'controlled execution cannot bypass the durable handoff');
@@ -690,7 +770,7 @@ try {
     await fs.rm(corruptDir, { recursive: true, force: true });
   }
   const members = await membersFile();
-  assert.equal(members.length, 2); // drifted in-pool member plus this pool member
+  assert.equal(members.length, 3); // drifted in-pool member, this pool member, and the 1e hint-bound member
   const poolMember = members.find(m => m.thread_id === revised.input.name);
   assert.equal(poolMember['requested_name'], revised.input.name);
   assert.equal(poolMember.status, 'registered');

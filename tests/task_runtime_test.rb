@@ -3291,4 +3291,103 @@ fixture do |root, record, _host, _checker, runtime|
          "a non-takeover task rejects the declaration instead of silently accepting it")
 end
 
+# B (auto-release, positive): a real native turn error on the CURRENT bound
+# dispatch with provably idle evidence (actual non-streaming, actual zero
+# active tools, real empty owner-scoped async running list) records the
+# same-unit execution failure atomically; the unit then re-binds legally with
+# the failed attempt's error, source and time preserved in history.
+fixture do |root, record, host, _checker, runtime|
+  now = Time.now.to_f
+  settlement_member!(record, host, root, member_id: "orbit-m-auto", output: false,
+                     tool_call_id: "call-auto", model: "opencode-go/deepseek-v4.1-flash")
+  runtime.tick(now: now)
+  units = Orbit::WorkUnitStore.new(record)
+  unit = units.declare("objective" => "auto release", "acceptance" => "fixture checks",
+                       "escalation" => "ask root", "requirements" => ["original"],
+                       "allowed_paths" => ["src/"], "allowed_tools" => ["bash"])
+  units.bind(unit["id"], member_id: "orbit-m-auto", tool_call_id: "call-auto",
+             model: "opencode-go/deepseek-v4.1-flash")
+  state = runtime.instance_variable_get(:@state)
+  member = Array(state["members"]).find { |entry| entry["thread_id"] == "orbit-m-auto" }
+  member["work_unit_id"] = unit["id"]
+  record.save(state)
+  native_state = host.member_state("orbit-m-auto")
+  native_state["async_jobs"] = { "running" => [] }
+  native_state["last_turn_error"] = { "stop_reason" => "error", "at" => (Time.now.utc + 1).iso8601,
+                                      "error_status" => 429, "error_message" => "429 Go usage limit exceeded" }
+  runtime.tick(now: now + 1)
+  member = record.state["members"].find { |entry| entry["thread_id"] == "orbit-m-auto" }
+  assert(member["status"] == "failed" && member["result_delivery"] == "native_turn_error",
+         "the member still settles failed from the structured native error")
+  failed_unit = units.read(unit["id"])
+  assert(failed_unit["status"] == "failed" && failed_unit["result"].include?("429"),
+         "the same unit is auto-marked failed with the real error")
+  attempt = failed_unit["dispatches"].last
+  assert(attempt["failure_source"] == "native_turn_error" &&
+         attempt.dig("failure_error", "error_status") == 429 &&
+         attempt["status"] == "failed" && attempt["finished_at"],
+         "the attempt keeps the real error, its source and the program time")
+  assert(events(record).any? { |event| event["type"] == "work_unit_execution_failed" },
+         "the auto-release emits its audit event")
+  rebound = units.bind(unit["id"], member_id: "orbit-m-auto-2", tool_call_id: "call-auto-2",
+                       model: "kimi-code/k3-256k")
+  assert(rebound["status"] == "bound" && rebound["dispatches"].length == 2 &&
+         rebound["dispatches"].first.dig("failure_error", "error_status") == 429,
+         "the released unit re-binds legally with the failed attempt preserved")
+end
+
+# B (auto-release, unknown async): without a real owner-scoped async snapshot
+# the same error settles the member but NEVER releases the unit — Root keeps
+# the manual finish path.
+fixture do |root, record, host, _checker, runtime|
+  now = Time.now.to_f
+  settlement_member!(record, host, root, member_id: "orbit-m-noasync", output: false,
+                     tool_call_id: "call-noasync", model: "opencode-go/deepseek-v4.1-flash")
+  runtime.tick(now: now)
+  units = Orbit::WorkUnitStore.new(record)
+  unit = units.declare("objective" => "unknown async", "acceptance" => "fixture checks",
+                       "escalation" => "ask root", "requirements" => ["original"],
+                       "allowed_paths" => ["src/"], "allowed_tools" => ["bash"])
+  units.bind(unit["id"], member_id: "orbit-m-noasync", tool_call_id: "call-noasync",
+             model: "opencode-go/deepseek-v4.1-flash")
+  state = runtime.instance_variable_get(:@state)
+  member = Array(state["members"]).find { |entry| entry["thread_id"] == "orbit-m-noasync" }
+  member["work_unit_id"] = unit["id"]
+  record.save(state)
+  native_state = host.member_state("orbit-m-noasync")
+  native_state["last_turn_error"] = { "stop_reason" => "error", "at" => (Time.now.utc + 1).iso8601,
+                                      "error_status" => 429, "error_message" => "429 Go usage limit" }
+  runtime.tick(now: now + 1)
+  assert(units.read(unit["id"])["status"] == "bound",
+         "a missing async snapshot never unlocks the same-unit retry")
+end
+
+# B (auto-release, unknown active tools): the settlement helper tolerates an
+# absent active_tools count for history, but the auto-release demands the
+# actual zero — the unit stays bound.
+fixture do |root, record, host, _checker, runtime|
+  now = Time.now.to_f
+  settlement_member!(record, host, root, member_id: "orbit-m-notools", output: false,
+                     tool_call_id: "call-notools", model: "opencode-go/deepseek-v4.1-flash")
+  runtime.tick(now: now)
+  units = Orbit::WorkUnitStore.new(record)
+  unit = units.declare("objective" => "unknown tools", "acceptance" => "fixture checks",
+                       "escalation" => "ask root", "requirements" => ["original"],
+                       "allowed_paths" => ["src/"], "allowed_tools" => ["bash"])
+  units.bind(unit["id"], member_id: "orbit-m-notools", tool_call_id: "call-notools",
+             model: "opencode-go/deepseek-v4.1-flash")
+  state = runtime.instance_variable_get(:@state)
+  member = Array(state["members"]).find { |entry| entry["thread_id"] == "orbit-m-notools" }
+  member["work_unit_id"] = unit["id"]
+  record.save(state)
+  native_state = host.member_state("orbit-m-notools")
+  native_state.delete("active_tools")
+  native_state["async_jobs"] = { "running" => [] }
+  native_state["last_turn_error"] = { "stop_reason" => "error", "at" => (Time.now.utc + 1).iso8601,
+                                      "error_status" => 429, "error_message" => "429 Go usage limit" }
+  runtime.tick(now: now + 1)
+  assert(units.read(unit["id"])["status"] == "bound",
+         "an unknown active-tool count never unlocks the same-unit retry")
+end
+
 puts "TASK_RUNTIME_TEST_PASS (deterministic, not real-model acceptance)"

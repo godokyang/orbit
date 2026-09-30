@@ -2541,11 +2541,18 @@ export function installOmpExtension(pi, sdk) {
       const hint = bound.state.delegation_hint;
       const models = hint?.recommendation
         ? [hint.recommendation.first, ...(hint.recommendation.backups || [])].filter(Boolean).map(candidate => candidate.model) : [];
-      const matchedHint = hint?.version === 'orbit-member-selection-v1' && !hint.followed && !hint.invalid_reason &&
+      // The hint binds only when its version and the persisted selection record
+      // for THIS unit are the same generation: both must be non-empty versions
+      // that agree. An old-generation hint must never pair with a newer
+      // selection record, and two absences (undefined == undefined) never pass.
+      const selection = bound.state.member_selections?.[unitId];
+      const hintVersion = typeof hint?.version === 'string' && hint.version.trim() ? hint.version : null;
+      const selectionVersion = typeof selection?.version === 'string' && selection.version.trim() ? selection.version : null;
+      const matchedHint = hintVersion !== null && hintVersion === selectionVersion && !hint.followed && !hint.invalid_reason &&
         hint.work_unit_id === unitId && hint.input_digest === unit.input_digest && hint.artifact_root === unit.artifact_root &&
         hint.dispatch_attempt === unit.dispatches.length + 1 && hint.user_boundary === bound.state.last_user_message_id &&
         typeof hint.signature === 'string' && typeof hint.message_id === 'string' &&
-        bound.state.member_selections?.[unitId]?.signature === hint.signature && models.includes(expectedModel);
+        selection.signature === hint.signature && models.includes(expectedModel);
       const hintBinding = matchedHint ? { hint_signature: hint.signature, hint_message_id: hint.message_id } : null;
       const requested = `orbit-${randomUUID()}`;
       const rationale = explicitDispatchRationale(item);

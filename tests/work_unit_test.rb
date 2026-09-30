@@ -343,6 +343,48 @@ begin
   failure = raises_error("v1 format") { store.list }
   assert(failure.message.include?("orbit-work-units-1"), "v1 refusal must name the dead format: #{failure.message}")
 
+  # 18. program-observed execution failure: exact member+call on a bound unit
+  # marks it failed inside the lock, keeps the real error/source/time on the
+  # attempt, emits the audit event and leaves re-binding legal.
+  record = new_record
+  store = store_for(record)
+  unit = store.declare(SPEC)
+  store.bind(unit["id"], member_id: "m-fail", tool_call_id: "c-fail", model: "glm/x")
+  error = { "stop_reason" => "error", "at" => Time.now.utc.iso8601,
+            "error_status" => 429, "error_message" => "429 Go usage limit exceeded" }
+  failed = store.record_execution_failure(member_id: "m-fail", tool_call_id: "c-fail",
+                                          error: error, model: "glm/x")
+  assert(failed["status"] == "failed" && failed["result"].include?("429"),
+         "the exact bound attempt is failed with the real error")
+  attempt = failed["dispatches"].last
+  assert(attempt["failure_source"] == "native_turn_error" &&
+         attempt.dig("failure_error", "error_status") == 429 &&
+         attempt["failure_model"] == "glm/x" && attempt["finished_at"] &&
+         attempt["status"] == "failed",
+         "the attempt retains error, source, model and program time")
+  assert(File.read(File.join(record.path, "events.jsonl")).include?("work_unit_execution_failed"),
+         "the failure emits its audit event")
+  rebound = store.bind(unit["id"], member_id: "m-second", tool_call_id: "c-second", model: "glm/x")
+  assert(rebound["status"] == "bound" && rebound["dispatches"].length == 2 &&
+         rebound["dispatches"].first.dig("failure_error", "error_status") == 429,
+         "a failed unit re-binds legally with the failed attempt preserved")
+
+  # 19. ownership guards: a foreign or stale tool call never touches the unit,
+  # and a Root-verdict terminal unit is never overwritten.
+  record = new_record
+  store = store_for(record)
+  unit = store.declare(SPEC)
+  store.bind(unit["id"], member_id: "m-keep", tool_call_id: "c-keep", model: "glm/x")
+  assert(store.record_execution_failure(member_id: "m-keep", tool_call_id: "c-other",
+                                        error: { "stop_reason" => "error", "error_message" => "x" }).nil?,
+         "a non-latest tool call releases nothing")
+  assert(store.read(unit["id"])["status"] == "bound", "the unit stays bound for a foreign call")
+  store.finish(unit["id"], status: "accepted", result: "done", verification: "tests")
+  assert(store.record_execution_failure(member_id: "m-keep", tool_call_id: "c-keep",
+                                        error: { "stop_reason" => "error", "error_message" => "x" }).nil?,
+         "an accepted unit is never overwritten by a late program failure")
+  assert(store.read(unit["id"])["status"] == "accepted", "the Root verdict survives")
+
   puts "work_unit_test: all assertions passed"
 ensure
   FileUtils.remove_entry(@temp) if @temp && File.exist?(@temp)

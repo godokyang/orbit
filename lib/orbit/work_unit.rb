@@ -152,6 +152,57 @@ module Orbit
       end
     end
 
+    # Program-observed EXECUTION failure for one EXACT dispatch. The runtime
+    # calls this only after a real native turn error on the member's current
+    # attempt and only when the member is provably idle (non-streaming, zero
+    # active tools and a real empty owner-scoped async running list; any
+    # unknown keeps the manual Root finish path). The source is always the
+    # native turn error and the timestamp is program-generated: no caller may
+    # supply either. Atomicity and ownership rules, all checked inside the
+    # lock:
+    #   - only a unit that is CURRENTLY bound can be re-marked,
+    #   - its LATEST dispatch must match member id + tool call id exactly
+    # (both real values; the member's model is recorded, never inferred),
+    #   - nothing a Root verdict produced is overwritten (accepted/rejected/
+    #     failed units are skipped entirely).
+    # The attempt keeps the real native error, its source and finished time;
+    # history, prior attempts and the resource ledger are untouched. This is
+    # NOT a Root business verdict: no accepted_at, no verification of delivery.
+    def record_execution_failure(member_id:, tool_call_id:, error:, model: nil)
+      member = text(member_id, "member id", 256)
+      call = text(tool_call_id, "tool call id", 256)
+      raise Error, "execution failure needs the real native error fact" unless error.is_a?(Hash)
+      stamp = now
+      with_lock do
+        document = read_document
+        candidates = document.fetch("units").values.select do |unit|
+          unit.fetch("status") == "bound" &&
+            (last = unit.fetch("dispatches").last).is_a?(Hash) &&
+            last["member_id"] == member && last["tool_call_id"] == call
+        end
+        # Ambiguity is refused, never guessed: zero matches means the caller's
+        # identity is stale/foreign; more than one means the store cannot say
+        # which attempt failed.
+        return nil unless candidates.length == 1
+
+        unit = candidates.first
+        reason = ["native turn error"]
+        reason << "HTTP #{error['error_status']}" if error["error_status"].is_a?(Integer)
+        reason << error["error_message"].to_s
+        unit["status"] = "failed"
+        unit["result"] = reason.join(": ").strip[0, 8000]
+        unit["verification"] = "program-observed execution failure (native_turn_error); no Root business verdict was written"
+        unit["finished_at"] = stamp
+        retain_dispatch_outcome(unit)
+        failure = unit["dispatches"].last
+        failure["failure_source"] = "native_turn_error"
+        failure["failure_error"] = error
+        failure["failure_model"] = model if model.is_a?(String) && !model.empty?
+        write_document(document)
+        attach_event_error(copy(unit), emit("work_unit_execution_failed", unit))
+      end
+    end
+
     # Record the outcome of a bound unit. `accepted` marks the unit verified
     # against its acceptance criteria and is refused when the task input or
     # the workspace moved during execution: an old-version artifact can be

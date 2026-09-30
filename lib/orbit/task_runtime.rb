@@ -1844,6 +1844,51 @@ module Orbit
       true
     end
 
+    # Owner-scoped async jobs must be PROVABLY empty. The SDK snapshot shape is
+    # {running, recent, delivery}; a missing getter, a null snapshot (manager
+    # absent) or any unknown shape never proves "nothing in flight", so the
+    # caller keeps the manual path instead of unlocking a retry.
+    def async_jobs_settled?(observed)
+      jobs = observed.is_a?(Hash) ? observed["async_jobs"] : nil
+      return false unless jobs.is_a?(Hash)
+
+      running = jobs["running"]
+      running.is_a?(Array) && running.empty?
+    end
+
+    # The same-unit auto-release demands ACTUAL values, not tolerated
+    # unknowns: the settlement helper (member_execution_settled?) may accept a
+    # null streaming flag or an absent active_tools count for history reasons,
+    # but unlocking a retry never rests on an unknown. The registry status
+    # must be the KNOWN idle observation (SDK AgentStatus; null, parked or any
+    # other unknown keeps the manual Root finish), streaming must be
+    # literally false, active_tools must be literally 0, and the owner-scoped
+    # async snapshot must carry a real empty running list.
+    def provably_idle_for_auto_release?(member, observed)
+      return false unless member["registry_status"] == "idle"
+      return false unless observed.is_a?(Hash)
+      return false unless observed["streaming"] == false
+      return false unless observed["active_tools"] == 0
+
+      async_jobs_settled?(observed)
+    end
+
+    # Atomic exact-dispatch failure fact. All ownership checks (unit still
+    # bound, latest dispatch member+tool call exactly matching this member's
+    # current attempt, no Root verdict overwritten) live inside the store's
+    # lock; this method only supplies the identity and the real native error.
+    def record_program_execution_failure(member, identity, error)
+      call = identity["tool_call_id"].to_s
+      return nil if call.empty?
+
+      work_units.record_execution_failure(member_id: member["thread_id"], tool_call_id: call,
+                                          error: error, model: member["model"])
+    rescue WorkUnitStore::Error => failure
+      @record.event("work_unit_execution_failure_rejected", "thread_id" => member["thread_id"],
+                    "tool_call_id" => call, "reason" => failure.message.to_s[0, 200])
+      nil
+    end
+
     # A real native error fact for the member's current turn: the bridge's
     # structured last_turn_error whose turn is not older than the dispatch
     # binding (or the member registration when no dispatch exists).
@@ -1922,6 +1967,13 @@ module Orbit
                                        "settled_at" => Time.now.utc.iso8601, "error" => error }
         @record.event("member_settled", "thread_id" => member["thread_id"], "status" => "failed",
                       "source" => "native_turn_error", "tool_call_id" => identity["tool_call_id"])
+        # A program-observed EXECUTION failure may also release the SAME unit
+        # for a new attempt — but only with provably idle evidence: an actual
+        # non-streaming turn, an actual zero active-tool count, a non-running
+        # registry and a real owner-scoped async snapshot whose running list
+        # is empty. Any unknown keeps the unit bound and the manual Root
+        # finish path.
+        record_program_execution_failure(member, identity, error) if provably_idle_for_auto_release?(member, observed)
         return true
       end
 
