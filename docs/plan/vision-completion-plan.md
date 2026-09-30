@@ -56,7 +56,7 @@
 - 0.7.12 第三轮在 Zenmux 原生成员仍运行且未交付时，经 Herdr 发送原生 Esc；Orbit 记 paused、Root 和成员均确认实际停止、活动工具与归属异步作业为零。随后 /exit 后 Root／MCP 进程消失；27 次账本调用中 3 次用量未知，未编造中断后的值。该轮不证明交付终检，也未单独构造后台 shell 作业。
 - linked-worktree 重绑定准备轮在 Controller 抓取 `in_flight` 前已完成，没有真正 rebind 或 workspace stale，不计验收。旧根检查者一次 schema 错误后有界换 K3，第二次独立检查通过并 confirmed stop；原始 8 项在 Controller 副本重放 8/8。该轮只提供时间窗与降级事实，不推断重绑定通过。
 - 同质产品复测显示 0.7.12 自行完成／明确交接两轮 Root input 分别约为独立旗舰基线 3.05／2.96 倍，cacheRead 约为 3.49／3.63 倍；成员、检查者与 Jev 另有消耗，真实 OMP 现金／额度成本未知。这是当前 CSV 样本的负收益信号，不能把成员派出视为已证明节省；W9 尚需不同任务与完整比较。
-- 用户要求清理界面后，已结束的 B/C/D/E、自有 F/G、空闲未接任务的 H/J 及三轮验收 K/M/N 均正常退出、核对前台进程后关闭；保留证据目录。当前受限执行环境对重绑定准备轮 `w1Y:p1P` 的 Herdr read／`/exit`／close 均拒绝 `Operation not permitted`，该已完成任务的 pane 暂仍空闲未关闭；不能把程序 confirmed stop 当成界面清理。后续验收如需 pane 每次只开一个、结束即关闭。
+- 用户要求清理界面后，已结束的 B/C/D/E、自有 F/G、空闲未接任务的 H/J 及验收 K/M/N 均已关闭。重绑定准备轮 `w1Y:p1P` 的 Orbit 任务先前已 confirmed stop；随后 Herdr 允许向空闲 pane 输入，Controller 发送原生 `/exit`、待 OMP 返回 shell 后发送 `exit`，`herdr pane list` 确认该 pane 消失，界面只剩主 pane。当前执行环境仍拒绝 Herdr 的 `pane split`／`process-info`／`close`（`Operation not permitted`）；已准备新的独立 linked-worktree 夹具 `/private/tmp/orbit-rebind-live-pshm82xn/`，但尚不能启动新验收 pane，不能把夹具准备写成重绑定通过。
 
 OpenRouter 正式基准匿名请求实际 HTTP401；当前无 key，已异步请用户在本机私有 setup 配置，未获回复不假定可用。公开 models 460 项及公共页校准不是认证基准成功证据；不借用其他供应商凭据。真实目录覆盖、候选完整身份／冲突／未知测量日期资格及可信价格／计划来源仍需实际核验。
 
@@ -64,7 +64,7 @@ OpenRouter 正式基准匿名请求实际 HTTP401；当前无 key，已异步请
 
 1. 已完成精确复核、打包与文档检查，提交并支持安装 0.7.11／`1ffec49`，digest `7a9c57577866fb8e4308367330e53ec10c089b344e37cccffa05b3011101b07c`。
 2. 已完成 0.7.12 完整回归、打包、本地提交和支持安装；两轮实测分别验证可信回执／无成员停止及明确交接的原生成员、集成、终检和 Root／成员完成停止。普通需求的自主派发策略仍待验收；在途成员 Esc 已通过，失败旧样本保留，不重标通过。
-3. 在途成员原生 Esc 与完成成员的正常退出已实测；继续按冻结矩阵闭合真实 finding 纠偏、真正处于 in_flight 的 rebind stale 和独立后台作业边界，用冻结产品要求与统一评价比较旗舰及混合资源。恢复 Herdr 控制后先关 `w1Y:p1P`。
+3. 在途成员原生 Esc 与完成成员的正常退出已实测；继续按冻结矩阵闭合真实 finding 纠偏、真正处于 in_flight 的 rebind stale 和独立后台作业边界，用冻结产品要求与统一评价比较旗舰及混合资源。恢复 Herdr 的 pane 创建权限后，在已准备的 linked worktree 上运行新任务；旧 P pane 已清理。
 4. 吸收证据、同步状态、停止并清理自有资源；完整 W1—W10 和必要收尾都满足后才 complete。当前仍全部未勾选，不推送或发布。
 
 新增验证总量超过单一小改动的 10 项／300 行建议，原因是完整目标跨入口、选型、单元权限、路由资源、覆盖及停止；覆盖已复现身份失配、沙盒越界、跨账户混算、晚到回执和未核验误放行，不机械追求覆盖率，也不据此拆成后续发布。主方案及审计是冻结范围，旧 M4 和旧体验任务不重开。

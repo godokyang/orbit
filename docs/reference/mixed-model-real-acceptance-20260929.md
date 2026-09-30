@@ -55,7 +55,7 @@ B 独立静态核对去时间的七个面并通过；B 独立复核验证回执�
 
 第三轮 `99002331-d7e5-4225-857c-792272d64d44` 使用相同明确模块交接要求但只验收中断，在独立种子 `mixed-interrupt/`、Herdr `w1Y:p1N` 的 `orbit omp` 运行。Root PID 74262／session `01a0ee1f-d16b-76b4-ab95-8ef7405c5c42` 按 Jev hint 登记并绑定 Zenmux 成员 `orbit-d7a06d66-6c48-405b-b0aa-bcf12a4038d7`。当成员实际 `registry_status=running`、尚无 accepted_at 时，Controller 发送原生 Esc；程序把任务记为 `paused`，Root 与成员均有 `stop_confirmation.confirmed=true`、活动工具零、归属异步工作已结清。成员保留 `registered` 和中断前 `registry_status=running` 的历史观察，不能据此称已交付或仍在运行；停止以随后取得的原生确认回执为准。Controller 再以 `/exit` 结束原生界面，Root PID 74262 及 MCP PID 74293／74329 均消失，pane 关闭。账本记录 27 次调用，其中 3 次用量未知，符合中断未补造用量的原则。该轮只证明在途成员中断和停止，不证明交付、终检或独立后台 shell 作业取消；原始摘要在 `/private/tmp/orbit-mixed-live-c8n233cn/mixed-interrupt-proof.json`。
 
-重绑定准备轮 `7296e66b-6d72-4f39-a0a0-beba576d564f` 建了同一 Git 仓库的 `rebind-old/` 与 linked `rebind-target/`；目标 README 标题不同且有独立 AGENTS.md。但旧工作区的 Root 在 Controller 触发重绑定前已完成：第一次独立检查因检查者输出多余 `delivery.reason_extra` 被严格 schema 拒绝，程序有界换 K3 检查者；第二次无 finding、终检后 `complete` 且停止确认。没有执行 rebind，history 为空、两次检查均无 workspace stale；这轮**不能**计作重绑定验收。Root 保留原始八项并追加两项测试，Controller 在副本重新放入种子原始八项后 8/8，通过记录在 `/private/tmp/orbit-rebind-old-evaluation-JMIUT0/original-result.txt`。原始任务摘要在 `/private/tmp/orbit-mixed-live-c8n233cn/rebind-missed-proof.json`。后续执行环境收紧导致 Herdr 对 `w1Y:p1P` 的 read、`/exit` 和 close 返回 `Operation not permitted`；pane 仍空闲未关闭，这是 Controller 环境操作缺口，不是 Orbit 停止失败。
+重绑定准备轮 `7296e66b-6d72-4f39-a0a0-beba576d564f` 建了同一 Git 仓库的 `rebind-old/` 与 linked `rebind-target/`；目标 README 标题不同且有独立 AGENTS.md。但旧工作区的 Root 在 Controller 触发重绑定前已完成：第一次独立检查因检查者输出多余 `delivery.reason_extra` 被严格 schema 拒绝，程序有界换 K3 检查者；第二次无 finding、终检后 `complete` 且停止确认。没有执行 rebind，history 为空、两次检查均无 workspace stale；这轮**不能**计作重绑定验收。Root 保留原始八项并追加两项测试，Controller 在副本重新放入种子原始八项后 8/8，通过记录在 `/private/tmp/orbit-rebind-old-evaluation-JMIUT0/original-result.txt`。原始任务摘要在 `/private/tmp/orbit-mixed-live-c8n233cn/rebind-missed-proof.json`。执行环境一度拒绝 Herdr 控制；后来允许向空闲 `w1Y:p1P` 输入，Controller 发送原生 `/exit`，观察到返回 shell，再发送 `exit`，`herdr pane list` 确认 pane 消失。`process-info`／`close` 仍被拒绝，因此没有独立的 PID 复核；程序的既有 confirmed stop 与界面清理分别记载。新的 linked-worktree 夹具 `/private/tmp/orbit-rebind-live-pshm82xn/` 已准备，但 `pane split` 被拒绝，尚无新运行或 rebind 命令。
 
 ## 同一产品要求的质量与资源对照
 
@@ -74,6 +74,8 @@ Controller 在六份已完成产物的副本上，额外重放同一组八个从
 
 这组样本证明产品要求在已测范围内同质通过，也显示当前混合路径**没有减少旗舰用量**。实际 OMP 现金账单和订阅额度消耗仍未知，不能用 SDK／OpenRouter 目录价格换算总成本或宣称节省。按主方案 §11.3，当前不应把“派出成员”推广为默认收益；应先找出 Root 在交接后仍消耗大量上下文和检查调用的原因，再用不同任务、相同外部评价复测。原生停止、finding 纠偏与在途重绑定的未闭合项仍单列，不因这份质量对照视为完成。
 
+2026-09-30 核对 [OpenCode Go 官方用量说明](https://dev.opencode.ai/docs/go/)及[套餐页](https://dev.opencode.ai/go/)：公开资料按 Go／Go Plus 套餐列出 DeepSeek V4.1 Flash 的输入、输出、缓存读取单位报价及月度额度，并注明峰谷条件。官方还说明，若用户启用 `Use balance` 且用尽套餐额度，请求可转由 Zen 余额承担；因此**即使实际 SDK 端点匹配 Go，也不能仅凭端点断言每次请求都消耗订阅额度**。本轮账本中的 opencode-go 执行身份仍为 `billing_route=unknown`，实际账户套餐、余额回退设置与额度扣减未核实，公开页也未给本次调用可追溯的规则生效起点。这些资料是可复核的候选规则来源，尚不是本轮 OMP 调用可结算价格；没有把数字导入私有路由事实库，也没有按此计算成员成本。后续须核对实际 SDK 端点、账户／计划、余额回退及适用日期，再在原单位下比较。
+
 ## 未闭合矩阵
 
 | 必需项 | 当前状态 |
@@ -85,4 +87,4 @@ Controller 在六份已完成产物的副本上，额外重放同一组八个从
 | 同质量交付下旗舰资源、其他消耗、返工与用户介入比较 | 五份产物在副本重放同一冻结 8 项均通过；当前混合试跑旗舰消耗高于基线，不能宣称节省；完整独立同质评价待闭合 |
 | OpenRouter 正式基准认证抓取及实际消费者 | 匿名实测401，等待本机私有 key；公共页校准不是此接口成功证据 |
 
-本轮负例、旗舰对照、0.7.11 两轮混合及 0.7.12 三轮 Root 进程均已结束。用户要求整理界面后，开发 B/C/D/E、自有 F/G、空闲未接任务的 H/J 及已完成的 K/M/N pane 均已正常退出、核对进程后关闭。重绑定准备轮 `w1Y:p1P` 的任务虽已程序确认停止，OMP pane 仍空闲；当前执行环境拒绝 Herdr 关闭命令，不能伪称已清理。种子、原始会话、独立报告及证据目录保留至完整验收收尾；不推送或发布。Goal 保持 active。
+本轮负例、旗舰对照、0.7.11 两轮混合及 0.7.12 三轮 Root 进程均已结束。用户要求整理界面后，开发 B/C/D/E、自有 F/G、空闲未接任务的 H/J 及已完成的 K/M/N pane 均已正常退出、核对进程后关闭。重绑定准备轮 `w1Y:p1P` 也已通过原生 `/exit` 和 shell `exit` 从 Herdr 列表消失；该轮任务停止确认早已记录，最终 pane 退出未取得独立 PID 查询。当前只剩主 pane；新的 Herdr pane 创建仍被执行环境拒绝。种子、原始会话、独立报告及证据目录保留至完整验收收尾；不推送或发布。Goal 保持 active。
