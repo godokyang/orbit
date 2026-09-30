@@ -18,6 +18,7 @@ require_relative "prestart"
 require_relative "task_view"
 require_relative "session_summary"
 require_relative "workspace_binding"
+require_relative "workspace_snapshot"
 require_relative "model_evidence_cache"
 require_relative "model_candidate_pool"
 require_relative "checker_model_selection"
@@ -128,7 +129,7 @@ module Orbit
       TEXT
       "start" => <<~TEXT,
         orbit start [--provider omp] [--project DIR]
-                    [--review-model MODEL]
+                    [--review-model MODEL] [--takeover-file FILE|-]
                     [--thread ID] [--socket PATH] [--message-id ID | --prompt-file FILE|-] [--basis FILE]
                     [--check-in SECONDS] [--estimate-minutes N] [--estimate-tokens N]
                     [--deadline ISO8601] [--foreground]
@@ -138,6 +139,10 @@ module Orbit
         候选池有可运行型号时优先池内选模；池空或池内均不可运行时从 OMP 当前会话目录选。经真实任务校准并匹配实际输入／题义／Jev 型号的质量判断才可正向推荐；未放行时呈现事实并保留可运行候选。start 尚无工作单元上下文时不猜验收。model-evidence 可补充精确质量事实；无法取得如实记录 unavailable。Root 也可用 --review-model 指定 OMP 可用型号，不要求原生用户逐型号授权；所有选择均预检隔离检查者目录与凭据。
         --check-in 首次默认 300 秒，后续由检查者约定；预估不是硬上限。
         只有用户明确设置的 --deadline 才形成截止。--foreground 在当前终端运行任务进程。
+        --takeover-file - 传接管请求（JSON：reason 必填，prior_scope 可选声明），对已执行的原始要求申请接管；
+        必须复用其原生消息（--message-id 或最近的原生用户消息），不接收任何调用方自报的摘要／日期：
+        接管时把真实工作区快照存进该任务私有目录（记摘要与相对路径），摘要与监督开始时刻均由程序采集，
+        不接受调用方自报；旧执行不被追认为受控，其用量／成员／检查不迁入本任务。
       TEXT
       "entry" => <<~TEXT,
         orbit entry --provider omp --project DIR --thread ID --socket PATH --message-id ID
@@ -359,6 +364,7 @@ module Orbit
         opts.on("--deadline ISO8601") { |value| options[:deadline] = Time.iso8601(value).utc.iso8601 }
         opts.on("--foreground") { options[:foreground] = true }
         opts.on("--entry-file FILE") { |value| options[:entry_file] = value }
+        opts.on("--takeover-file FILE") { |value| options[:takeover_file] = value }
       end
       parser.parse!(argv)
       raise ArgumentError, "unexpected arguments: #{argv.join(' ')}" unless argv.empty?
@@ -366,6 +372,10 @@ module Orbit
       raise ArgumentError, "--socket is required" if options[:socket].to_s.empty?
       raise ArgumentError, "--check-in must be positive" unless options[:interval].positive?
       raise ArgumentError, "choose --message-id or --prompt-file" if options[:message_id] && options[:prompt_file]
+      takeover = options[:takeover_file] ? TaskRecord.parse_takeover(read_input(options[:takeover_file])) : nil
+      if takeover && options[:prompt_file]
+        raise ArgumentError, "takeover reuses the requirement's original native message; --prompt-file cannot take over"
+      end
       entry_document = entry_trace(options[:entry_file]) if options[:entry_file]
       if options[:estimate].values.compact.any? { |value| !value.positive? || !value.finite? }
         raise ArgumentError, "estimates must be positive finite numbers"
@@ -398,13 +408,23 @@ module Orbit
       end
       raise ArgumentError, "execution instruction is empty" if instruction.strip.empty?
 
-      record = TaskRecord.create(
-        project_root: options[:project], instruction: instruction, source: source,
-        connection: connection_record,
-        review: { "model" => options[:model], "interval_seconds" => options[:interval], "selection" => options[:selection] },
-        basis: options[:basis], estimate: options[:estimate]
-      )
+      # The takeover boundary is captured by the program (real preserved
+      # workspace snapshot, process clock) inside the new record's private
+      # directory, before its state is written: a boundary that cannot be
+      # captured removes the half-created record and no task claims supervision.
+      record =
+        begin
+          TaskRecord.create(
+            project_root: options[:project], instruction: instruction, source: source,
+            connection: connection_record,
+            review: { "model" => options[:model], "interval_seconds" => options[:interval], "selection" => options[:selection] },
+            basis: options[:basis], estimate: options[:estimate], takeover: takeover
+          )
+        rescue WorkspaceSnapshot::Error => error
+          raise ArgumentError, "the takeover boundary could not be captured (#{error.message}); no task was created"
+        end
       state = record.state
+      takeover_block = state["takeover"]
       state["hard_deadline"] = options[:deadline] if options[:deadline]
       # The pre-start entry decision that led here (orbit entry → extension
       # start): stored verbatim so the task record carries its own trace of
@@ -419,6 +439,19 @@ module Orbit
                    "review_model" => options[:model],
                    "selection_tier" => options[:selection]["selection_tier"] }
       response["notice"] = options[:selection]["notice"] if options[:selection]["notice"]
+      if takeover_block
+        response["takeover"] = {
+          "format" => takeover_block["format"], "supervision_started_at" => takeover_block.dig("supervision", "starts_at"),
+          "artifact_digest" => takeover_block.dig("artifact", "digest"), "artifact_root" => takeover_block.dig("artifact", "root"),
+          "artifact_snapshot" => takeover_block.dig("artifact", "snapshot_path"),
+          "native_message_id" => takeover_block.dig("requirement", "native_message_id"),
+          "prior_scope" => takeover_block.dig("prior_scope", "status")
+        }
+        response["takeover_notice"] = "supervision starts at this takeover (" \
+          "#{takeover_block.dig('supervision', 'starts_at')}); the earlier execution of this requirement was not controlled and its usage, " \
+          "members and checks are not imported. If that execution still has running work, resources or unregistered members, wind it " \
+          "down yourself: Orbit does not register or claim retroactive members, async work or usage."
+      end
       if options[:selection]["evidence_needed"]&.any?
         response["evidence_needed"] = options[:selection]["evidence_needed"]
         response["evidence_action"] = "可选：只有精确事实会改变当前任务的模型判断时，Root 才从一手来源核查并用 " \

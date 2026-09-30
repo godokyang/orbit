@@ -105,7 +105,8 @@
               "requirement": {
                 "type": "string",
                 "minLength": 1,
-                "maxLength": 300
+                "maxLength": 1000,
+                "description": "One enumerated requirement, kept verbatim. The bound is a representation bound (a long requirement sentence must survive unmodified), not a relaxation of acceptance: missing, duplicate or oversized items are still refused and nothing is truncated."
               },
               "status": {
                 "enum": [

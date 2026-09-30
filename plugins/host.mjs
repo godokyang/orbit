@@ -32,7 +32,7 @@ async function run(args, cwd, input = '') {
   });
 }
 
-export const toolDescription = 'Start Orbit for multi-step work or when the user requests it; do local one-file edits yourself. Orbit prefers runnable models in the OMP candidate pool; if none run, Root can use another OMP-accessible model. JEV task-fit ranks suitable checkers but low or missing scores do not block a runnable model. No per-model user authorization is required. After a failed check Orbit records the failure and tries an unused runnable OMP model; never treat a failed check as a pass. Root may choose review_model from the current OMP catalog. Independent checks and confirmed completion remain required.';
+export const toolDescription = 'Start Orbit for multi-step work or when the user requests it; do local one-file edits yourself. Use takeover only to bring an already-executed requirement under supervision, stating why; the earlier execution is never recognized as controlled. Orbit prefers runnable models in the OMP candidate pool; if none run, Root can use another OMP-accessible model. JEV task-fit ranks suitable checkers but low or missing scores do not block a runnable model. No per-model user authorization is required. After a failed check Orbit records the failure and tries an unused runnable OMP model; never treat a failed check as a pass. Root may choose review_model from the current OMP catalog. Independent checks and confirmed completion remain required.';
 export const toolArgs = z => ({
         action: z.enum(['context', 'start', 'status', 'check', 'amend', 'dispute', 'stop', 'review-model', 'work-unit']),
         task: z.string().optional().describe('Required for status/check/amend/dispute/stop/review-model: the exact task_directory returned by start.'),
@@ -41,7 +41,9 @@ export const toolArgs = z => ({
         intent: z.enum(['complete', 'pause']).optional().describe('stop only: complete (default) requires the actual finalization gate; pause is an explicit interruption.'),
         operation: z.enum(['declare', 'read', 'list', 'finish']).optional().describe('work-unit operation; declare records a bounded handoff, finish records Root verification.'),
         work_unit: z.record(z.string(), z.unknown()).optional().describe('declare payload: {spec:{objective,requirements,allowed_paths,allowed_tools,allowed_commands,acceptance,escalation}}. Paths/tools/commands are flat allowed_* fields inside spec, never nested scope. Optional spec fields: context,decisions,dependencies,model_requirements. read/finish use id; finish also needs status,result,verification.'),
-        text: z.string().optional(), check_in: z.number().int().positive().optional()
+        takeover: z.object({ reason: z.string(), prior_scope: z.string().optional() }).optional()
+          .describe('Take over an already-executed original requirement via start: say why (reason) and optionally declare the prior execution scope (prior_scope). The artifact digest and supervision start time are captured by the program, never supplied here.'),
+        text: z.string().optional().describe('amend: the amendment text — a user-authorized requirement revision only; never a way to submit test results or completion evidence (verified execution enters checks through real Root tool receipts). stop: the reason text.'), check_in: z.number().int().positive().optional()
       });
 
 // Shared transport and task operations for native plugin hosts. Each adapter
@@ -116,7 +118,14 @@ export function createOrbitHost({ provider, project, dispatch, bind, reset }) {
           if (a.entry_file) args.push('--entry-file', a.entry_file);
           if (a.check_in) args.push('--check-in', String(a.check_in));
           for (const file of a.basis || []) args.push('--basis', path.resolve(project, file));
-          const result = { ...await run(args, project), next_action: guidance };
+          let takeoverInput = '';
+          if (a.takeover) {
+            if (typeof a.takeover.reason !== 'string' || !a.takeover.reason.trim())
+              throw new Error('takeover needs a stated reason for taking over this requirement');
+            args.push('--takeover-file', '-');
+            takeoverInput = JSON.stringify({ reason: a.takeover.reason, prior_scope: a.takeover.prior_scope });
+          }
+          const result = { ...await run(args, project, takeoverInput), next_action: guidance };
           tasks.set(id, result);
           return JSON.stringify(result);
         }

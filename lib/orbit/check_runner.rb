@@ -337,7 +337,9 @@ module Orbit
     def build_compressed_context(context, caps, level)
       compressed = { "root" => compress_root(context["root"], caps) }
       if context["root_verifications"].is_a?(Array)
-        compressed["root_verifications"] = recent_tail(context["root_verifications"], [caps[:list_limit], 32].min).map do |receipt|
+        selected, omitted = select_root_verifications(context["root_verifications"], [caps[:list_limit], 32].min)
+        compressed["root_verifications_omitted"] = omitted if omitted.positive?
+        compressed["root_verifications"] = selected.map do |receipt|
           bounded = bound_value(receipt, caps)
           next bounded unless receipt.is_a?(Hash)
 
@@ -613,6 +615,37 @@ module Orbit
       "#{prefix}…[#{text.length}:#{Digest::SHA256.hexdigest(text)}]"
     end
 
+    # Current execution evidence survives compression. A pure newest-N tail
+    # let later control-URI file receipts spend every surviving slot and drop
+    # older receipts that are still CURRENT for this input and artifact - the
+    # program's own execution evidence (bash/eval with a real exit status,
+    # including failed or unknown outcomes). Selection keeps the original
+    # relative order inside each group, keeps at least the newest eligible
+    # execution receipt at tiny caps, never re-marks any binding, and reports
+    # how many receipts were left out.
+    def select_root_verifications(receipts, limit)
+      return [[], receipts.length] if limit < 1
+
+      indexed = receipts.each_with_index.to_a
+      eligible, rest = indexed.partition { |receipt, _index| current_execution_receipt?(receipt) }
+      kept = eligible.last(limit)
+      remaining = limit - kept.length
+      kept = (kept + rest.last(remaining)).sort_by { |_receipt, index| index } if remaining.positive?
+      [kept.map { |receipt, _index| receipt }, receipts.length - kept.length]
+    end
+
+    # A receipt is current execution evidence only when the runtime already
+    # marked both bindings true and the native tool actually executed
+    # something. The outcome (success, failure or unknown) is not filtered.
+    def current_execution_receipt?(receipt)
+      return false unless receipt.is_a?(Hash)
+      return false unless receipt["input_matches"] == true && receipt["artifact_matches"] == true
+      return false unless %w[bash eval].include?(receipt["tool"].to_s)
+
+      source = receipt["exit_code_source"].to_s
+      !source.empty? && source != "not_applicable"
+    end
+
     def recent_tail(value, limit)
       value.is_a?(Array) ? value.last(limit) : []
     end
@@ -743,7 +776,7 @@ module Orbit
     def requirement_coverage_note
       "## Requirement coverage\n\n" \
         "Return coverage with exactly complete (boolean) and items (1..64 entries). Each item has " \
-        "requirement (distinct non-empty text, at most 300 characters), scope (delivery or lifecycle), status (verified or unverified), " \
+        "requirement (distinct non-empty text, at most 1000 characters), scope (delivery or lifecycle), status (verified or unverified), " \
         "and evidence (at most 1000 characters; verified needs concrete non-empty evidence). Enumerate each " \
         "requirement from the original instruction, effective amendments and named basis, including referenced " \
         "specification files in the fixed snapshot. complete=true means you have enumerated them all; do not " \
@@ -939,8 +972,8 @@ module Orbit
           next
         end
         requirement, evidence = item.values_at("requirement", "evidence")
-        unless requirement.is_a?(String) && !requirement.strip.empty? && requirement.length <= 300
-          problems << "coverage.items[#{index}].requirement must be a non-empty string of at most 300 characters"
+        unless requirement.is_a?(String) && !requirement.strip.empty? && requirement.length <= 1000
+          problems << "coverage.items[#{index}].requirement must be a non-empty string of at most 1000 characters"
         end
         requirements << requirement
         problems << "coverage.items[#{index}].scope must be delivery or lifecycle" unless %w[delivery lifecycle].include?(item.fetch("scope", "delivery"))

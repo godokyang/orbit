@@ -6,7 +6,7 @@
 
 用户已认可主文档；形成本文时的授权是审视代码并新增附属文档。本文记录该次审视的现状和后续建议，不替代产品语义文件。后续文档整理只修正阅读入口与引用，不把这些建议写成已实施。后续用户补充明确完整目标一次交付、不设硬预算；实施步骤按依赖拆分，不将关键目标另推下一期，也不把“可以调整架构”解释为必须重写底层。
 
-**阅读口径**：A01—F10 各表的状态标签是 2026-09-29 在原审视基线（`0.7.10`／`323408b` 工作区）上的初审判定，属历史快照。判断现行行为请以下方“当前实现对应表”（按**安装** `0.7.19`／`0faf1ce` 源码逐项核对；源码 package 已升至 `0.7.20` 待安装，已集成但未安装的补丁在行内单独注明）与[合同](../../contracts/task-runtime.md)、ADR-008/009 为准；例如 F01、F03、F04 的“未实现／新增”不代表今天没有成本数据流，W1—W10 也不能因某条接线完成就机械勾选。
+**阅读口径**：A01—F10 各表的状态标签是 2026-09-29 在原审视基线（`0.7.10`／`323408b` 工作区）上的初审判定，属历史快照。判断现行行为请以下方“当前实现对应表”（按**安装** `0.7.20`／`1618b81` 源码逐项核对；未并入主仓的接管／entry advisory 属下一版）与[合同](../../contracts/task-runtime.md)、ADR-008/009 为准；例如 F01、F03、F04 的“未实现／新增”不代表今天没有成本数据流，W1—W10 也不能因某条接线完成就机械勾选。
 
 本次 Goal 已获实现授权。下表保留原审计基线；以下实施进度单列，不能把一处修复当整项验收通过。已采纳的替换语义见 [ADR-009 §6](../adr/009-user-selected-model-pool.md#6-已采纳的替换决定与实现接缝实施中)。
 
@@ -14,16 +14,12 @@
 | --- | --- | --- |
 | A02—A05、C05—C06（§2.4、§3.2—§3.4、§10） | 入口问题为 `orbit-entry-3`，执行授权且交接／监督任一价值过门；支持串行和审计交付，引文隔离、裸继续不猜目标。当前实际 `jev-1.13.0` 八例预标注／失败／holdout 经独立复核，源码默认有限放行绑定 Git 未截断 profile 与 decision-2；新安装 `orbit omp` 已在本轮 CSV 任务真实启动和完成。 | 前序要求接管、域外入口泛化及普通需求会自行选择有效交接仍未验收；有限校准不证明模型未来成功。 |
 | B02、B05—B11、C04—C07（§6、§8、§10） | overview-v3 分开模型与认证基准接口，保存 intelligence、ID、上下文、模态、参数及多个实际变体；agentic-only 无 coding 通用门。SDK limits 与精确证据／目录先验分别呈现，冲突／限制不满足交 Root。旧时间、粗费用和 local_samples 退出新路径；delegation-4／candidates-4／checker-task-fit-5 有限默认放行已装入源码。官方目录现部分行内嵌 `artificial_analysis` 指数（2026-09 实测），源码注释已纠正，抓取仍只消费专用基准端点。 | 正式基准匿名实测 401 的历史保留；本机 key 已提供，经源码双接口实测 HTTP 200、刷新 446 个非 alias 行（key-free 证据 /private/tmp/orbit-or-verify/verification.json）。checker 与 member 两侧 facts 消费各有实证（member 侧目录事实消费已有实证（后台任务 `0f4b306f-7fb5-4d48-be34-15b804b36a07` 成员选择阶段，4/6 候选随真实 Jev 输入送达；详情见验收报告与 JSON）；member 推荐采纳与成功交付、完整真实身份与覆盖仍待证）；实时覆盖、完整实际身份、冲突处理与自主派发仍需实机。K3 quota 结构映射不代表额度可用。 |
-| D01—D04、E01—E03（§5.2、§6.1、§10） | 工作单元耐久记录、Root 入口、原生 task 批量预检及实际模型 bind 已接；实际工具入口校验路径／身份，命令经 macOS 内核沙盒，越界与网络拒绝已有本机测试。推荐与实际 unit／member／tool call／model 和送达提示匹配才计采纳。检查验收可来自真实 instruction，scope-2 要求覆盖已在 0.7.12 新任务实测。 | 在途工作区重绑定、保留上下文的升级、普通需求自主交接及真实 finding 纠偏仍未验收；0.7.17 已实测真在途旧根切换与新根检查，但旧检查自行失败使 workspace-stale-on-completion 语义未验证；同版本后台任务问题已定位（Q）：后台任务三因已确认：① K3 成员的 `edit` 走 hashline `{i,input}` 方言，被 `work-unit-scope.mjs` 的键白名单投影拒绝（**0.7.18 源码已修（715e579），当前实机成员闭环待验收**）；② 首个成员收到 provider HTTP 429 `Go usage limit exceeded` 被判 rejected（provider 额度，非 Orbit 缺陷）；③ **hint 采纳归因根因已确认**：`task_runtime.rb` 的 `collect_amendments` 将本任务 `sent_message_ids` 中的内部提示推进 `last_user_message_id`，使自身提示的 `user_boundary` 失效（宿主门与 `current_delegation_hint` 都要求两者相等）；03:43:28Z 首次 hint 本可匹配（模型／单元／输入／产物均对）却未绑定；该缺陷已在 0.7.18 源码修复（715e579），当前实机成员闭环待验收；0.7.19 已修复该项的**错误分类**（Go 429 不再记为无效 JSON，401／403 归 auth，瞬态 429／500 归 unavailable，errored turn 即使合法 JSON 也不授结果），装入前 full npm test exit 0（`/private/tmp/orbit-reviewer-429-fix/npm-test.log`）、Q 逻辑 PASS（`review-q.json`，runner lock 一行同步、frozen 真实安装 exit 0）；**0.7.19 新 runtime 尚未实测**。work-unit dispatch bind 记录真实存在（不是未绑定派发）。0.7.18 任务 `35f925ba` 已实测 workspace-stale 语义 VERIFIED（旧检查 1 `stale_reasons=[workspace,artifact,input]`、findings 未迁移），但检查者历史证据可见性缺口使该 finding 多轮争议（最小修复已 parked）；0.7.18 positive 任务 `02a5eda7` 的成员／finalization 生命周期仍 partial（registered／idle、无 accepted_at、`pending_finalization` 未通知）；根因**已定位**（成员结算当前不由工作单元终裁驱动、`members_settled?` 阻断 pending 通知且无超时出口；停止时 bridge 读失败属次生）；修复方向为**多事实结算**（原生本派发结果／真实 error＋精确 work-unit 核验＋真实执行就绪，`acceptedAt` 不伪盖，缺证一次通知 Root），**不采**“终裁单独置 completed／failed”；修复未落地（R 实施、Q 审核）。确定性权限验证不等于全部真实成员边界通过。 |
+| D01—D04、E01—E03（§5.2、§6.1、§10） | 工作单元耐久记录、Root 入口、原生 task 批量预检及实际模型 bind 已接；实际工具入口校验路径／身份，命令经 macOS 内核沙盒，越界与网络拒绝已有本机测试。推荐与实际 unit／member／tool call／model 和送达提示匹配才计采纳。检查验收可来自真实 instruction，scope-2 要求覆盖已在 0.7.12 新任务实测。 | 在途工作区重绑定、保留上下文的升级、普通需求自主交接及真实 finding 纠偏仍未验收；0.7.17 已实测真在途旧根切换与新根检查，但旧检查自行失败使 workspace-stale-on-completion 语义未验证；同版本后台任务问题已定位（Q）：后台任务三因已确认：① K3 成员的 `edit` 走 hashline `{i,input}` 方言，被 `work-unit-scope.mjs` 的键白名单投影拒绝（**0.7.18 源码已修（715e579），当前实机成员闭环待验收**）；② 首个成员收到 provider HTTP 429 `Go usage limit exceeded` 被判 rejected（provider 额度，非 Orbit 缺陷）；③ **hint 采纳归因根因已确认**：`task_runtime.rb` 的 `collect_amendments` 将本任务 `sent_message_ids` 中的内部提示推进 `last_user_message_id`，使自身提示的 `user_boundary` 失效（宿主门与 `current_delegation_hint` 都要求两者相等）；03:43:28Z 首次 hint 本可匹配（模型／单元／输入／产物均对）却未绑定；该缺陷已在 0.7.18 源码修复（715e579），当前实机成员闭环待验收；0.7.19 已修复该项的**错误分类**（Go 429 不再记为无效 JSON，401／403 归 auth，瞬态 429／500 归 unavailable，errored turn 即使合法 JSON 也不授结果），装入前 full npm test exit 0（`/private/tmp/orbit-reviewer-429-fix/npm-test.log`）、Q 逻辑 PASS（`review-q.json`，runner lock 一行同步、frozen 真实安装 exit 0）；**0.7.19 新 runtime 尚未实测**。work-unit dispatch bind 记录真实存在（不是未绑定派发）。0.7.18 任务 `35f925ba` 已实测 workspace-stale 语义 VERIFIED（旧检查 1 `stale_reasons=[workspace,artifact,input]`、findings 未迁移），但检查者历史证据可见性缺口使该 finding 多轮争议（最小修复已 parked）；0.7.18 positive 任务 `02a5eda7` 的成员／finalization 生命周期仍 partial（registered／idle、无 accepted_at、`pending_finalization` 未通知）；根因**已定位**（成员结算当前不由工作单元终裁驱动、`members_settled?` 阻断 pending 通知且无超时出口；停止时 bridge 读失败属次生）；方向为**多事实结算**（原生本派发结果／真实 error＋精确 work-unit 核验＋真实执行就绪，`acceptedAt` 不伪盖，缺证一次通知 Root）；该修订已随 **0.7.20** 装入（合同“成员结算（2026-09-30 修订）”，自选成员 unit 归属接缝经 Q 独立复核 PASS），但**正常成员结算路径无实机验收**（p26 实机已完成并保留为负例：paused＋confirmed stop）。确定性权限验证不等于全部真实成员边界通过。 |
 | F01、F03、F05、F07（§9、§11.2） | 判断／检查及 Root／成员 SDK 回执接入私有账本，失败部分用量保留，重放不重复，pending 不封账，终态晚到 final 仍可见。实际 credential 精确归属、可信路由事实、当前单元／检查预测生产入口及两类选择成本消费者已接；原始价格快照与预测依据留证，未知保持未知，订阅不折算。同一 CSV 产品要求的部分分类资源对照已记录。 | 真实价格／计划来源、不同任务的完整效果比较仍未完成；脚本接线和 SDK 用量不证明实际结算或省旗舰额度。 |
 
-E04（§7、§11.2）覆盖接线在 `1ffec49`／0.7.11 安装后实测。两轮揭示测试事实缺口与未来停止要求的因果问题，0.7.12 源码增加 scope-2 交付／生命周期区分和真实 Root 原生工具回执；测试仍须真实证据、版本不重标，过程／裁定／过期不授交付资格。D04／E06（§5.2、§6、§7）实测 native yield 被拦和成员登记先移除造成 stop_unconfirmed，修复生命周期入口、合格终检等待实际接受及精确 retained session 停止屏障，未放宽完成门。F05—F07（§9、§11.2）检查者副本消息回执关联修复已交付；B02／B08（§8、§10）目录单候选错误不再清空整组检查要求。`a1f9291`／0.7.12 已完成完整回归、支持安装，并以新任务实测可信交付回执、明确交接的原生成员 accepted、独立终检、Root／成员完成停止及在途成员 Esc 停止。F09（§11.3—§11.4）同一 CSV 产品要求的六份产物（含独立旗舰基线）均通过原始八项及补充八项，但两轮 0.7.12 混合执行的 Root 用量均高于独立旗舰基线；实际 OMP 现金／额度未知，不能宣称节省。普通需求自主派发、真实 finding 纠偏、在途工作区重绑定、独立后台作业、认证 OpenRouter 基准及不同任务的效果仍未闭合。原始通过、失败与资源数据见[本次验收](../reference/mixed-model-real-acceptance-20260929.md)。
+E04（§7、§11.2）覆盖接线随 `1ffec49`／0.7.11 与 `a1f9291`／0.7.12 安装并实测：0.7.12 增加 scope-2 交付／生命周期区分与真实 Root 原生工具回执，并把 native yield 被拦、成员登记先移除造成的 `stop_unconfirmed` 修为生命周期入口、合格终检等待实际接受与精确 retained session 停止屏障（未放宽完成门）；检查者副本消息回执关联与目录单候选错误隔离同步修复。测试仍须真实证据，过程／裁定／过期不授交付资格，版本不重标。逐轮流水见[本次验收](../reference/mixed-model-real-acceptance-20260929.md)。
 
-0.7.13 源码针对 B05／C07／F09（§8.3、§10、§11.3—§11.4）的真实负担再修一处：已选可运行降级检查者时，不再把未用候选的缺证清单自动注入 Root 首轮用户输入；CLI 可选补证指引不再把 `subscription_quota` 硬写成 `unknown`。原始会话显示这一注入曾诱发与交付无关的一手来源检索。源码定向 CLI 测试通过，但当时沙盒阻止 TCP／Unix socket 测试与新 Herdr pane 创建（2026-09-30 已恢复，后续版本全量回归通过）；不能把 0.7.12 历史高消耗改写为已节省。
-
-0.7.14 源码针对 F03（主方案 §9）的无样本预测收紧：`declared_workload` 的条件性金额仍留给 Root 查看，但不参与自动费用排序；`similar_unit` 的分类构成必须等于已核对完成回执的逐类均值，拒绝真实引用配任意 token 数。仅有一个正向候选也不声称做了费用比较。相关定向测试通过；历史用量仍需实跑核查对新任务的适用性，不能据此宣称真实节省或完整成本归属。该源码未安装；当时完整回归待环境恢复（2026-09-30 已恢复，后续版本全量通过），真实验收仍待新安装构建。
-
-0.7.16 源码修正 F03／D09（§5.3、§9）：成本引用原先只查单元最终 accepted，换人成功会误放行前次已拒绝成员的调用。现要求样本实际成员及型号匹配接受结果；失败消费继续保留，成本未知不阻断派发。回归已复现旧行为并验证修复；执行环境权限恢复后完整 npm test exit 0（日志 /private/tmp/orbit-regression-0.7.16），尚未安装或真实验收。0.7.17 源码继续修正 F03 的表示一致性：原生 record_check 回执不携带 reasoning、账本存 nil，similar_unit 引用核验仅在比较处把缺失对齐类型化 unknown（不回写账本，具体已报告档位仍精确匹配）；另修 B08 相关 prior_sources 被 MAX_SOURCES=5 截断丢失 artificialanalysis.ai，基准实测站点与专用端点优先保留。复现旧失败并修复后完整 npm test exit 0（日志 /private/tmp/orbit-regression-0.7.17），Q 对两处源码及直接测试的独立复核已通过，未安装。
+0.7.13—0.7.20 的版本级修复均已装入**当前安装 0.7.20**：0.7.13 停止自动注入缺证清单并修正 CLI 路由文案；0.7.14 收紧无样本预测（`declared_workload` 不自动排序、`similar_unit` 构成须等于可归属回执均值）；0.7.15 工作单元每次 finish 的结果与核验绑定对应派发记录；0.7.16 成本引用须匹配实际被接受的成员与型号；0.7.17 对齐 `reasoning` 缺失的表示并优先保留基准站点；0.7.20 含成员结算修订、history-gap、`root_without_hint` 恢复、provider 错误分类与未知生效日成本存档。逐条说明、原始日志与失败样本见[本次验收](../reference/mixed-model-real-acceptance-20260929.md)、[交接](handoff.md)与本页“当前实现对应表”，此处不复制作业流水。
 
 ## 1. 审视结论与状态口径
 
@@ -43,11 +39,11 @@ E04（§7、§11.2）覆盖接线在 `1ffec49`／0.7.11 安装后实测。两轮
 
 “删除”主要指删除旧选择规则、问题及其活跃消费者，不是删除所有包含时间的代码，也不是抹除旧判断记录。
 
-### 当前实现对应表（按安装 `0.7.19`／`0faf1ce` 源码核对，2026-09-30）
+### 当前实现对应表（按安装 `0.7.20`／`1618b81` 源码核对，2026-09-30）
 
 本表只说明**源码接线现状**，不是完成条件已证明；未列出的验收（新安装真实闭环、同质量对照、成员结算收尾）仍以[当前计划](vision-completion-plan.md)为准，W1—W10 保持未勾选。
 
-| 审计项 | 快照状态（2026-09-29） | 安装 0.7.19 源码现状 | 源码证据 | 仍未闭合 |
+| 审计项 | 快照状态（2026-09-29） | 安装 0.7.20 源码现状 | 源码证据 | 仍未闭合 |
 | --- | --- | --- | --- | --- |
 | A02—A05、C05—C06 | 旧规则／部分实现 | 入口改为 `execution_authorized` ＋ `delegation_value`／`supervision_value` 两条收益路径，任一过门；引文、裸继续不猜目标；题义版本 `orbit-entry-3`，有限默认放行限声明的 Git／有界交付域 | [prestart.rb](../../lib/orbit/prestart.rb) 入口问题与判门（第 42 行起、332 行） | 域外泛化与新安装真实闭环未证明 |
 | B02 | 未实现／新增 | 成员链已消费目录先验（与检查者同一 overview 实例） | [member_model_selector.rb](../../lib/orbit/member_model_selector.rb)（`@overview`、`model_overview_prior`） | 真实采纳、交付归属与完整身份未验收 |
@@ -58,12 +54,11 @@ E04（§7、§11.2）覆盖接线在 `1ffec49`／0.7.11 安装后实测。两轮
 | C03 | 旧规则／删除 | 生产链未见无目录整组 fallback 的调用方 | `connection.rb`／`member_model_selector.rb` 检索无命中 | 宿主升级时复核 |
 | D02、D03 | 部分实现／旧规则 | 工作单元记录与串行交接进入选择输入；不再要求并行另一工作面 | [work_unit.rb](../../lib/orbit/work_unit.rb)、`model_quality_policy.rb` 的交接题义 | 真实失败升级未验收 |
 | E04 | 未实现／新增 | 覆盖门已接线：`coverage_required` 与逐项 requirement 状态参与终检资格 | [task_runtime.rb](../../lib/orbit/task_runtime.rb)（`requirement_coverage_status`）、[requirement_coverage.rb](../../lib/orbit/requirement_coverage.rb) | 真实任务的覆盖质量待验 |
-| E06 | 已实现／保留 | 完成门仍要求成员 settled；`members_settled?` 对 `02a5eda7`（两名成员 registered／idle、无 `accepted_at`）为 false，故该任务等待通知被阻断。**这是该样本的成员结算缺口，不是全局恒 false**：无成员任务 `1216aeef` 真实完成并有 confirmed stop | `task_runtime.rb` `members_settled?`／`completion_gate` | 多事实结算语义已写入合同（2026-09-30 修订）；实现已并入，自选成员 unit 归属接缝经 Q 独立复核 PASS，但**未安装、未实测**（无 0.7.20 安装） |
-| F01、F03、F07 | 未实现／新增 | 已接路由资源事实结构、预测生产者与消费者、诚实 unknown 与缺证记录；源码另集成显式未知生效日的 archive／list（未安装，不覆盖／不定价／不排序） | [route_resource_facts.rb](../../lib/orbit/route_resource_facts.rb)、[route_resource_store.rb](../../lib/orbit/route_resource_store.rb)、[route_cost_inputs.rb](../../lib/orbit/route_cost_inputs.rb)、`session_summary.rb` | 当前抓取的资料无发布生效日（另有账户范围、已核实路由各自未闭合）⇒ 0 条事实可落盘；schema 本身允许价格事实落盘，三项数据缺口任一未闭合即不可用；不得用“最后更新”顶替生效日 |
+| E06 | 已实现／保留 | 完成门仍要求成员 settled；`members_settled?` 对 `02a5eda7`（两名成员 registered／idle、无 `accepted_at`）为 false（**该样本缺口，非全局恒 false**；无成员任务 `1216aeef` 正常完成并有 confirmed stop） | `task_runtime.rb` `members_settled?`／`completion_gate` | 成员结算修订已随 0.7.20 装入，但**正常成员结算路径未获真实验收**（p26 实机已完成并保留为负例） |
+| F01、F03、F07 | 未实现／新增 | 路由资源事实结构、预测生产者与消费者、诚实 unknown 与缺证记录；**安装 0.7.20 已实测**显式未知生效日的 archive／list／report（隔离 CLI：import exit 0、缺标记 exit 1、report exit 0 且 `cash []`） | [route_resource_facts.rb](../../lib/orbit/route_resource_facts.rb)、[route_resource_store.rb](../../lib/orbit/route_resource_store.rb)、[route_cost_inputs.rb](../../lib/orbit/route_cost_inputs.rb) | 未知生效日的事实永不覆盖／定价／自动排序；账户范围与实际扣减桶仍未知，本路由现金成本仍不可判 |
 | F04、F05、F06 | 未实现／部分实现 | 逐调用账本已接，pending 不封账、失败与晚到用量尽量保留 | [resource_call_ledger.rb](../../lib/orbit/resource_call_ledger.rb)、`task_runtime.rb` 的 `accumulate_jev_usage` 与回执路径 | 真实失败链用量仍可能未知 |
 | F08 | 范围已明确 | 不新增硬预算或费用停止门（用户已明确不需要） | — | 保持 |
-| F09、F10 | 未实现／源码可确认 | 同质量对照仍未完成；reconcile baseline 臂真实 8/8 属 plain OMP 基线，mixed 臂未跑 | [当前计划](vision-completion-plan.md) 真实验收段 | 未证明节省；0.7.10 不得描述成已上线全部新行为 |
-
+| F09、F10 | 未实现／源码可确认 | installed 0.7.20 paired 对照已跑：冻结 8 项测试与 6 项探针两臂各 8/8、6/6 通过，质量无可检出差异；顶级模型总量约 +30%、用户介入两臂均 0；混合臂 members=0 | [当前计划](vision-completion-plan.md) 真实验收段 | 单任务对、未 exercise 成员替代路径，不证明节省；0.7.10 仍不得描述成已上线全部新行为 |
 
 ## 2. 什么时候唤起 Orbit
 

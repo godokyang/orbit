@@ -3171,4 +3171,62 @@ fixture do |root, record, host, _checker, runtime|
          "ambiguous or model-mismatched durable matches stay unresolved (no heuristic attribution)")
 end
 
+# Execution fact vs evidence eligibility (p26 amend regression): a member
+# settled failed by a real native turn error keeps that execution-terminated
+# fact when the input version later moves; the amend itself never revives it
+# as registered and never invents a new execution.
+fixture do |root, record, host, _checker, runtime|
+  now = Time.now.to_f
+  settlement_member!(record, host, root, member_id: "orbit-m-amend-fail", output: false)
+  runtime.tick(now: now)
+  bind_unit!(record, runtime, member_id: "orbit-m-amend-fail", call_id: "call-af", status: "rejected")
+  host.member_state("orbit-m-amend-fail")["last_turn_error"] =
+    { "stop_reason" => "error", "at" => Time.now.utc.iso8601,
+      "error_status" => 429, "error_message" => "429 Go usage limit exceeded" }
+  runtime.tick(now: now + 1)
+  assert(record.state["members"].first["status"] == "failed", "precondition: the 429 settles failed")
+  record.submit("amend", "text" => "A later correction", "source" => { "kind" => "explicit_text" })
+  runtime.tick(now: now + 2)
+  member = record.state["members"].first
+  assert(member["status"] == "failed" && member["result_delivery"] == "native_turn_error" &&
+         member.dig("settlement_basis", "source") == "native_turn_error",
+         "an amend alone never revives a failed execution fact (p26 regression)")
+  assert(Array(member["settlement_history"]).empty?,
+         "no invalidation is recorded for a version move without a new execution")
+end
+
+# An accepted real delivery keeps its physical execution fact across an amend,
+# but the OLD ready/coverage evidence earns no eligibility for the new input:
+# readiness invalidates and no notice appears; a real re-dispatch still
+# invalidates the settlement.
+fixture do |root, record, host, checker, runtime|
+  now = Time.now.to_f
+  settlement_member!(record, host, root, member_id: "orbit-m-amend-acc", output: true)
+  record.submit("check")
+  runtime.tick(now: now)
+  bind_unit!(record, runtime, member_id: "orbit-m-amend-acc", call_id: "call-aa", status: "accepted")
+  checker.result = answer("complete")
+  runtime.tick(now: now + 1)
+  member = record.state["members"].first
+  assert(member["status"] == "completed" && record.state["finalization_notices"].length == 1,
+         "precondition: an accepted delivery settles completed and the notice qualifies")
+  record.submit("amend", "text" => "A later correction", "source" => { "kind" => "explicit_text" })
+  runtime.tick(now: now + 2)
+  member = record.state["members"].first
+  assert(member["status"] == "completed" &&
+         member.dig("settlement_basis", "source") == "work_unit_acceptance",
+         "the finished execution fact survives the version move with its own source")
+  assert(record.state.dig("completion_readiness", "status") != "ready",
+         "the old ready evidence earns no eligibility for the new input")
+  # A real re-dispatch (new unfinished attempt, no new native acceptance)
+  # still invalidates the settlement: the old verdict must not lend itself to
+  # the new execution.
+  bind_unit!(record, runtime, member_id: "orbit-m-amend-acc", call_id: "call-aa2", status: nil)
+  runtime.tick(now: now + 3)
+  member = record.state["members"].first
+  assert(member["status"] == "registered" &&
+         Array(member["settlement_history"]).any? { |entry| entry["reasons"] == ["dispatch_changed"] },
+         "a truly changed dispatch identity still invalidates the old settlement")
+end
+
 puts "TASK_RUNTIME_TEST_PASS (deterministic, not real-model acceptance)"

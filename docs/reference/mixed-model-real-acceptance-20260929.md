@@ -133,3 +133,31 @@ Controller 在六份已完成产物的副本上，额外重放同一组八个从
 | OpenRouter 正式基准认证抓取及实际消费者 | 认证双接口实测 HTTP 200、刷新 446 个非 alias 行（key-free 证据 /private/tmp/orbit-or-verify/verification.json）；checker 与 member 两侧 facts 消费各有实证（checker＝logstat 混合臂检查者；member＝后台任务成员选择阶段）；member 推荐采纳与成功交付、完整身份与映射仍待证；基准语义测量日期单独一项仍 unknown（无逐模型测量日期，只有快照级 as_of）；第一方价格／计划事实已按其适用条件留证，账户凭据与实际扣减归属是另一项未知，两者不合并；新安装构建真实闭环与候选完整身份／冲突资格仍需实际核验；匿名 401 为历史记录、不重标 |
 
 本轮负例、旗舰对照、0.7.11 两轮混合及 0.7.12 三轮 Root 进程均已结束。用户要求整理界面后，开发 B/C/D/E、自有 F/G、空闲未接任务的 H/J 及已完成的 K/M/N pane 均已正常退出、核对进程后关闭。重绑定准备轮 `w1Y:p1P` 也已通过原生 `/exit` 和 shell `exit` 从 Herdr 列表消失；该轮任务停止确认早已记录，最终 pane 退出未取得独立 PID 查询。0.7.17 各轮已在新 pane（`w1Y:p1X`、`w1Y:p1Z`）与既有 pane 上成功创建并运行，此前 `pane split`／`process-info`／`close` 的 `Operation not permitted` 为历史记录（权限已恢复）。已结束的 SUT pane 均已关闭；开发 Q／R／S pane 保留；独立 SUT finding-repair 仍在运行。本轮早前“只剩主 pane”的表述只属当时那一轮（按当时日期归属），不是当前界面状态。种子、原始会话、独立报告及证据目录保留至完整验收收尾；不推送或发布。Goal 保持 active。
+
+## 2026-09-30 追加：0.7.21 源码验证集与 0.7.20 真实成员负例
+
+本追加只记录事实并区分三类证据（**源码/静态**、**mock/脚本**、**live 实机**），不重开已结束阶段，也不改写任何原件或把失败结论改为通过。
+
+### 0.7.21 工作区源码（dirty；唯一组合 full run2 exit 0；未提交／未安装）
+
+| 项目 | 事实 | 证据类别 |
+| --- | --- | --- |
+| 入口提示 + 自动/手工接管 | `plugins/omp-host.mjs` `83e62a1b…`、`lib/orbit/prestart.rb` `ec1e206c…`、`contracts/task-runtime.md` `498ded5e…`；R 的相关 run exit 0，Q 四文件独立审 PASS | 源码 + 静态审 |
+| 运行时结算／宿主（R） | `lib/orbit/task_runtime.rb` `97414ff1…`、宿主 `28e4cffa…`、测试 `28fee447…`；最终冻结源码的验证跑在 `run4-errorstruct.log` **exit 0**（“run4”是日志标签，不表示四次运行全部通过；更早的 fixture 失败以会话摘录保留，日志覆盖不冒称全部通过） | 源码 + 静态审 |
+| 自动接管关键测试（S） | `tests/omp_native_gate_test.mjs` `43a296c59de54f3d176c6f4ef632720517e58c75d6d06bae7ae8a3b17b2abe1c`；单次 `node` gate exit 0（含 stdin 修正与自有 runtime 退出清理） | mock/脚本（真实任务记录与真实 socket，无模型调用） |
+| 需求文本容量 300→1000 | `contracts/check-result.schema.json`、`runner check-result.ts`、`lib/orbit/check_runner.rb`、`lib/orbit/requirement_coverage.rb` 同界；真实被拒原件在本地校验可接纳；**缺证、重复、>1000 字符仍被拒**。`complete:false` 本身是合法的可解析结果（不是 JSON 拒收）；当前 delivery 未核验时不授 ready。不能把任何 false 或伪造的 complete 都说成“被 JSON 拒绝” | 源码 + 静态审 |
+| 验证回执压缩选择（S） | `lib/orbit/check_runner.rb` `c39968f3…`、`tests/check_runner_context_test.rb` `23254c9a…`；相关 suite exit 0（退化 caps 下交付给检查者的 JSON 保留当前执行回执、失败条与省略计数）；反向副本验证旧 `recent_tail` 会失败。Q 二次审 PASS（其 PASS 路径已发出） | 源码 + 静态审 |
+
+以上均为**源码或脚本证据**，没有用它们替代实机验收。**0.7.21 唯一组合回归已完成**：run2 `npm test` **exit 0**（日志 `/private/tmp/orbit-regression-0.7.21/npm-test-run2.log`，末尾 `INSTALL_TEST_PASS shell_configuration`；126 只是 PASS 标记行数、不是测试数量）；同次 `npm pack --dry-run` 83 files／422028 B、`check:version` 与 skill validator exit 0；**129 个源/测试/打包文件 run2 前后 SHA 相同**（`hash-compare.diff` 为空）。首次 full 的 `exit 1` 与中间 `judgment_usage_test` fixture 失败日志**全部保留**；修复**只改既有测试夹具到生产校准形状**（`tests/judgment_usage_test.rb` `78b744e2…`），**未放宽任何生产门**。该组合**尚未提交、尚未安装**（安装仍为 0.7.20）。
+
+### 0.7.20 真实成员运行（任务 `1d977642-e478-4553-9959-7bc1a7381c9b`）——保留为负例
+
+- 链路：`09:38` 声明单元 → `09:39:05` 成员 `orbit-f5624373…` 注册（`orbit_hint`）→ **`09:39:06.820` 该成员 `last_turn_error` = HTTP 429 `Go usage limit exceeded`** → 单元 rejected → `dispatch_changed` 使其结算失效 → `09:40` 替补成员 `orbit-a7732dde…`（`root_without_hint`）注册 → `09:48:54` **真实 native accepted** → `09:49:39` 单元 accepted（Root 集成）→ `09:50:00` Root 自有 `node --test` 回执 **exit 0，8 pass/0 fail**。
+- `10:00:33` 的 `amend` 输入修订**撤销了首派失败结算**：该成员最终停在 `registered`（未结算），`pending_finalization` 未送达 → 任务终态 **paused ＋ confirmed stop**，两成员 `disposed`、async jobs settled；**已记录并实测缺失**：Root `43508`、MCP `43564`/`43679`、runtime `45378`，且按 fixture 路径与会话 id 扫描无引用；**reviewer PID 未逐一记录，不能声称全部逐 PID 实测退出**。**paused 不是 complete**。
+- 手工终检补证的**绕行根因已定位**：检查收到的 `root_verifications` 在 64 KiB 压缩把 `list_limit` 降到 2 时被 `recent_tail` 只留最新两条 control-URI 写回执，程序自己的 `node --test` bash 回执（当时 `input_matches`/`artifact_matches` 均为真）被静默丢弃——是**程序选择缺口**，不是检查者撒谎；check12 输入已变更（digest `6bbf0011…`），旧回执本就不 current。原件未改、旧 check 未改为通过；调查见 `/private/tmp/orbit-member-settlement-live-6tGQlP/controller-records/{postmortem.json,receipt-gap-analysis.json}`。
+- 成本：账本 185 次调用（root 51／member 49／checker 41／judgment 40／arbiter 4），**29 次未上报用量**；按角色分类保留真实类别，`reasoningTokens/totalTokens` 不并入 output；**没有已核实路由价格覆盖本次运行，现金与额度成本保持 unknown**——未知不等于实现不了核算。
+- 边界：Controller 的 native `/exit` 是**负例记录**，不构成业务完成；本次为**明确 fixture 派发**，不当作普通自主派发或经济收益证据。
+
+### 待办（下一步，不扩范围）
+
+0.7.21 组合回归与打包已完成；下一步本地提交、支持安装，再用已备好的临时项目跑自动接管／真实成员交付与确认停止，以及不带强制派发的 paired 对照。W1—W10 依据证据仍未完整闭合，本追加不主张完整 Goal。

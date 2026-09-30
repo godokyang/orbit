@@ -39,7 +39,10 @@ module Orbit
     MAX_RECORDS = 256
     MAX_ITEMS = 64
     MAX_TEXT = 1000
-    MAX_REQUIREMENT = 300
+    # The item-text bound is a representation bound: a long requirement sentence
+    # must survive verbatim. It is not a relaxation of acceptance - missing,
+    # duplicate or oversized items are still refused and nothing is truncated.
+    MAX_REQUIREMENT = 1000
     MAX_LABEL = 128
 
     class Error < StandardError; end

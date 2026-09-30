@@ -1452,6 +1452,101 @@ export function installOmpExtension(pi, sdk) {
       '新用户消息不自动修改旧任务：明确修订时调用 Orbit amend；独立问题按独立请求处理，必要时先确认归属。',
     ].join('\n');
   }
+  // Root's first reachable request after an automatic entry start gets ONE
+  // non-coercive advisory when the already-paid pre-start entry judgment
+  // cleared its calibrated delegation threshold and no work unit exists yet.
+  // It surfaces the stored fact only — never a member recommendation, never a
+  // dispatch, no user confirmation, no cost/time comparison — and never
+  // repeats (per task, in this process). Unknown or older traces, amended
+  // inputs and already-declared units stay silent.
+  const entryAdvisorySent = new Set();
+  // The current production entry-calibration identity, mirroring the pins in
+  // lib/orbit/prestart.rb (rule/question/input/decision versions, the
+  // orbit-entry-calibration-v2 release schema and the supported observable
+  // profile). A trace qualifies only when it actually carries THIS
+  // calibration: a complete-but-old ruleset, an unknown calibration schema or
+  // a model-drifted trace stays silent. The calibrated model itself is
+  // verified through the trace's own facts (service-confirmed actual model
+  // equals the requested/calibrated one), so no second model list is kept.
+  const ENTRY_CURRENT = {
+    rule: 'orbit-entry-rules-3', input: 'orbit-entry-input-2',
+    decision: 'orbit-entry-decision-2', question_set: 'orbit-entry-3',
+    calibration_schema: 'orbit-entry-calibration-v2',
+    profile: 'git_untruncated_request_v1',
+  };
+  function entryDelegationAdvisory(state, taskDir) {
+    if (!state || !taskDir || entryAdvisorySent.has(taskDir)) return null;
+    const entry = state.entry;
+    const trace = entry && entry.trace;
+    if (!entry || !trace || entry.decision !== 'start') return null;
+    const calibration = trace.calibration;
+    if (trace.judgment_status !== 'answered' || !calibration || typeof calibration !== 'object') return null;
+    if (trace.rule_version !== ENTRY_CURRENT.rule || trace.input_version !== ENTRY_CURRENT.input ||
+        trace.decision_version !== ENTRY_CURRENT.decision ||
+        trace.question_set_version !== ENTRY_CURRENT.question_set) return null;
+    if (calibration.schema_version !== ENTRY_CURRENT.calibration_schema) return null;
+    if (calibration.profile !== ENTRY_CURRENT.profile) return null;
+    // The release binding must be the same current ruleset as the trace, and
+    // the pinned question digest must be present and identical on both sides.
+    if (typeof trace.question_digest !== 'string' || !trace.question_digest ||
+        calibration.question_digest !== trace.question_digest ||
+        calibration.rule_version !== trace.rule_version ||
+        calibration.input_version !== trace.input_version ||
+        calibration.decision_version !== trace.decision_version ||
+        calibration.question_set_version !== trace.question_set_version) return null;
+    // The calibrated model and thresholds recorded on the release must be the
+    // ones this trace actually ran and was scored with (no second model list,
+    // no caller-supplied value accepted).
+    if (typeof trace.requested_model !== 'string' || !trace.requested_model ||
+        trace.actual_model !== trace.requested_model ||
+        calibration.model !== trace.requested_model ||
+        calibration.thresholds?.delegation_value !== trace.thresholds?.delegation_value) return null;
+    if (trace.provider !== 'typesafe') return null;
+    const value = trace.probabilities?.delegation_value?.probability_true;
+    const threshold = trace.thresholds?.delegation_value;
+    if (typeof value !== 'number' || !Number.isFinite(value) ||
+        typeof threshold !== 'number' || !Number.isFinite(threshold)) return null;
+    if (!(value >= threshold)) return null;
+    if (Array.isArray(state.amendments) && state.amendments.length > 0) return null;
+    // Unknown unit state fails closed: without a readable work-units file the
+    // advisory stays silent instead of guessing whether work was handed off.
+    // A MISSING file is the fresh-task no-handoff state, not unknown.
+    try {
+      const units = JSON.parse(readFileSync(path.join(taskDir, 'work-units.json'), 'utf8'));
+      if (units?.units && Object.keys(units.units).length > 0) return null;
+    } catch (error) {
+      if (error?.code !== 'ENOENT') return null;
+    }
+    // Caller marks entryAdvisorySent only after a successful injection.
+    return `[orbit-entry-advisory] 入口判断显示本任务具备实质交接价值（delegation_value ${value.toFixed(2)} ≥ 校准阈值 ${threshold.toFixed(2)}）；` +
+      '若识别到有界子任务，可先用 Orbit work-unit declare 供两阶段评估再决定是否派发，' +
+      '也可说明选择自行实施的依据——是否分工由 Root 自主决定。';
+  }
+  // Inject the advisory into the CURRENT provider payload (the request being
+  // answered right now): the auto entry start happens inside this hook, so
+  // this is the first reachable window — before_agent_start runs before the
+  // task exists. A payload shape the injector cannot extend stays pending
+  // (no sent mark, no abort) and the next reachable window tries again.
+  function injectEntryAdvisory(payload, state, taskDir) {
+    if (!payload || entryAdvisorySent.has(taskDir)) return null;
+    const line = entryDelegationAdvisory(state, taskDir);
+    if (!line) return null;
+    const injected = appendInstructionToPayload(payload, line);
+    if (injected) entryAdvisorySent.add(taskDir);
+    return injected;
+  }
+  // Program-visible execution already present in this Root branch before the
+  // current native user message: an assistant message carrying at least one
+  // toolCall content item. Prose, quotes and replies are never execution.
+  function hasPriorToolCall(branch, beforeIndex) {
+    for (let index = 0; index < beforeIndex; index++) {
+      const item = branch[index];
+      if (item?.type !== 'message' || item.message?.role !== 'assistant') continue;
+      const content = item.message.content;
+      if (Array.isArray(content) && content.some(part => part?.type === 'toolCall')) return true;
+    }
+    return false;
+  }
   // A record that outlived the host connection that created it (OMP restart or
   // crash) is display-only. Every Orbit tool call on it is refused by the
   // ownership check, so the block must never imply control and must send the
@@ -2552,13 +2647,27 @@ export function installOmpExtension(pi, sdk) {
       }
       entryRecovery.delete(sessionId);
     }
+    // A manual tool start in the same turn can leave requests whose branch has
+    // no fresh native user message; before the user scan concludes there is
+    // nothing to do, an already-bound active task gets its one advisory
+    // window. Injection failure stays pending (no sent mark) for the next
+    // reachable request.
+    try {
+      const boundNow = await resolveBoundTask(sessionId, ctx.cwd);
+      if (boundNow && activeState(boundNow.state)) {
+        const injected = injectEntryAdvisory(event.payload, boundNow.state, boundNow.taskDir);
+        if (injected) return injected;
+      }
+    } catch { /* advisory only; never block the request path */ }
     let user = null;
+    let userIndex = -1;
     for (let index = branch.length - 1; index >= 0; index--) {
       const item = branch[index];
       if (item.type !== 'message') continue;
       if (item.message?.role === 'assistant') break;
       if (item.message?.role === 'user' && item.message.attribution !== 'agent') {
         user = item;
+        userIndex = index;
         break;
       }
     }
@@ -2573,8 +2682,18 @@ export function installOmpExtension(pi, sdk) {
       await connect(ctx);
       decision = await host.entry(user.id, ctx);
       if (decision.decision === 'start') {
-        const started = JSON.parse(await host.execute({ action: 'start', message_id: user.id,
-          entry_file: decision.entry_file }, ctx));
+        const startArgs = { action: 'start', message_id: user.id, entry_file: decision.entry_file };
+        if (userIndex >= 0 && hasPriorToolCall(branch, userIndex)) {
+          // The requirement's session already contains program-visible tool
+          // execution from before this message. Save a real boundary for the
+          // CURRENT task; prior_scope stays unknown and the earlier work is
+          // never recognized as controlled. A previous controlled task in the
+          // same session keeps its own record untouched.
+          startArgs.takeover = {
+            reason: '会话已有此前工具执行；关联范围未知，不追认为本任务已受控，历史任务按原记录解释',
+          };
+        }
+        const started = JSON.parse(await host.execute(startArgs, ctx));
         taskDirs.set(sessionId, started.task_directory);
         noteAssociation(sessionId, started.task_directory);
         noteModelIdentity({ taskDir: started.task_directory, role: 'root', agentId: sdk.MAIN_AGENT_ID, sessionId,
@@ -2584,6 +2703,15 @@ export function installOmpExtension(pi, sdk) {
         // remain in the response for deliberate lookup; injecting them into
         // the user's first turn made Root research unused models
         // before implementing the authorized task.
+        // The entry advisory is different: it is the already-paid entry fact
+        // for THIS task, and this request is the first reachable window. A
+        // payload the injector cannot extend stays pending for the fallback
+        // (before_agent_start on the next turn) instead of aborting anything.
+        try {
+          const state = JSON.parse(await fs.readFile(path.join(started.task_directory, 'state.json'), 'utf8'));
+          const injected = injectEntryAdvisory(event.payload, state, started.task_directory);
+          if (injected) return injected;
+        } catch { /* advisory is optional; never block the start path */ }
       } else if (decision.decision === 'root_decides' && decision.prompt) {
         pi.sendMessage({ customType: 'orbit-entry', content: decision.prompt, attribution: 'agent' },
           { deliverAs: 'aside' });
@@ -2889,7 +3017,10 @@ export function installOmpExtension(pi, sdk) {
       return { systemPrompt: withStatusBlock(event?.systemPrompt, block) };
     }
     if (!activeState(bound.state)) return;
-    return { systemPrompt: withStatusBlock(event?.systemPrompt, statusBlock(bound.state)) };
+    const block = statusBlock(bound.state);
+    const advisory = entryDelegationAdvisory(bound.state, bound.taskDir);
+    if (advisory) entryAdvisorySent.add(bound.taskDir);
+    return { systemPrompt: withStatusBlock(event?.systemPrompt, advisory ? `${block}\n${advisory}` : block) };
   });
   pi.on('session_start', (_event, ctx) => {
     // Re-bound child runtimes also fire session_start (OMP re-binds factories

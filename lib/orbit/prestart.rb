@@ -291,7 +291,16 @@ module Orbit
                      "actual_model" => actual_model,
                      "call_id" => call_id, "judgment_status" => judgment_status, "requested_model" => requested_model,
                      "thresholds" => calibration.fetch("thresholds"),
-                     "question_digest" => QUESTION_DIGEST, "calibration" => calibration["release"])
+                     "question_digest" => QUESTION_DIGEST,
+                     # The verified calibration release already carries its
+                     # schema and version binding; the calibrated model and its
+                     # thresholds are merged in so a trace consumer can check
+                     # identity from the record alone. All three values come
+                     # from EntryCalibration.load's validated document — never
+                     # from the caller's arbitrary input.
+                     "calibration" => calibration.fetch("release").merge(
+                       "model" => calibration.fetch("model"),
+                       "thresholds" => calibration.fetch("thresholds")))
         trace["probabilities"] = probabilities if probabilities
         trace["usage"] = usage if usage
       end

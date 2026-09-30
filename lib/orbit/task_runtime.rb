@@ -1022,7 +1022,7 @@ module Orbit
         when "amend"
           add_amendment(command.fetch("text"), command.fetch("source"))
           @state.delete("unassigned_user_message_id")
-          sent = @connection.send_message("Orbit: the user explicitly amended this task:\n\n" + command.fetch("text"))
+          sent = @connection.send_message("Orbit: the task input was explicitly amended:\n\n" + command.fetch("text"))
           @state["sent_message_ids"] << sent.fetch("id")
         when "check"
           schedule_check(0, "用户请求的检查", trigger: "manual_check", manual: true)
@@ -1209,7 +1209,7 @@ module Orbit
         record_native_amendment_failure(member, item, "send_member unreachable")
         return
       end
-      @connection.send_member(member["thread_id"], "The user amended the original task. Apply only changes relevant to your delegated scope:\n\n#{item['text']}")
+      @connection.send_member(member["thread_id"], "The task input was explicitly amended. Apply only changes relevant to your delegated scope:\n\n#{item['text']}")
       (@state["amendment_delivery_queue"] || []).delete(item)
       member["amendment_delivery"] = "sent"
       member.delete("amendment_error")
@@ -1639,13 +1639,21 @@ module Orbit
       error = current_native_turn_error(member)
       error_at = time_value(error.is_a?(Hash) ? error["at"] : nil)
       settled_epoch = time_value(settled_at)
-      if error_at && settled_epoch && error_at > settled_epoch
+      # Only a DIFFERENT native error is newer evidence. The same error this
+      # settlement already recorded must not look like a fresh one just
+      # because its stamp sits after the settlement moment — compared by the
+      # FULL native structure (message id, provider/model, stop reason,
+      # status, message), never by text+time alone.
+      same_settled_error = basis.is_a?(Hash) && basis["error"] == error
+      if error_at && settled_epoch && error_at > settled_epoch && !same_settled_error
         reasons << "newer_turn_error"
       end
       if basis.is_a?(Hash) && basis["tool_call_id"]
-        # A re-bound/attempt-changed unit — or a unit whose input version or
-        # artifact root moved on — can no longer vouch for the old verdict.
-        dispatch = current_member_dispatch(member)
+        # Invalidation compares the REAL dispatch identity only: an input or
+        # artifact-root version move is evidence-eligibility, not a new
+        # execution, so it never revokes a finished execution fact. A truly
+        # re-bound/changed attempt (different latest dispatch) still does.
+        dispatch = current_member_dispatch(member, require_current_binding: false)
         if dispatch.nil? || dispatch["tool_call_id"] != basis["tool_call_id"] ||
            dispatch["finished_at"] != basis["finished_at"]
           reasons << "dispatch_changed"
@@ -1686,21 +1694,25 @@ module Orbit
     # work-unit records when the member record never carried one: Root
     # self-selected dispatches are not hint-followed, so nothing ever syncs
     # `work_unit_id` (real 02a5eda7 Zenmux member). Exact identity only — the
-    # same actual member id AND tool call as the unit's LATEST dispatch, on
-    # the current input version and artifact root. A dispatch/member model
-    # mismatch inside that identity is drift, and an ambiguous match (more
-    # than one unit) stays unresolved; never attributed by similar model,
-    # time proximity or adjacent events.
-    def resolve_member_unit_id(member)
+    # same actual member id AND tool call as the unit's LATEST dispatch. A
+    # dispatch/member model mismatch inside that identity is drift, and an
+    # ambiguous match (more than one unit) stays unresolved; never attributed
+    # by similar model, time proximity or adjacent events. `require_current_binding`
+    # separates the real dispatch identity from current input/artifact
+    # eligibility: identity consumers pass false, evidence consumers keep the
+    # default.
+    def resolve_member_unit_id(member, require_current_binding: true)
       return nil if member["model_drift"]
       thread = member["thread_id"].to_s
       call = member["tool_call_id"].to_s
       return nil if thread.empty? || call.empty?
 
-      current_input = @record.input_digest(@state)
+      current_input = @record.input_digest(@state) if require_current_binding
       matches = work_units.list.select do |unit|
         next false unless unit.is_a?(Hash)
-        next false unless unit["input_digest"] == current_input && unit["artifact_root"] == artifact_root
+        if require_current_binding
+          next false unless unit["input_digest"] == current_input && unit["artifact_root"] == artifact_root
+        end
         latest = Array(unit["dispatches"]).last
         next false unless latest.is_a?(Hash) && latest["member_id"] == thread && latest["tool_call_id"] == call
         dispatch_model = latest["model"].to_s
@@ -1716,19 +1728,23 @@ module Orbit
 
     # The member's current dispatch attempt: the latest dispatch of its bound
     # work unit, matched by actual member id and tool call. An older attempt
-    # (re-bound unit) or another member's attempt is never current, and a
-    # unit declared against an older input version or a different artifact
-    # root can never settle the current attempt.
-    def current_member_dispatch(member)
+    # (re-bound unit) or another member's attempt is never current. With the
+    # default `require_current_binding` the unit must also still sit on the
+    # current input version and artifact root — that half is the CURRENT
+    # EVIDENCE ELIGIBILITY, not the execution identity; a version move alone
+    # never invents a new execution.
+    def current_member_dispatch(member, require_current_binding: true)
       unit_id = member["work_unit_id"].to_s
-      unit_id = resolve_member_unit_id(member).to_s if unit_id.empty?
+      unit_id = resolve_member_unit_id(member, require_current_binding: require_current_binding).to_s if unit_id.empty?
       call = member["tool_call_id"].to_s
       return nil if unit_id.empty? || call.empty?
 
       unit = work_units.read(unit_id)
       return nil unless unit.is_a?(Hash)
-      return nil unless unit["input_digest"] == @record.input_digest(@state)
-      return nil unless unit["artifact_root"] == artifact_root
+      if require_current_binding
+        return nil unless unit["input_digest"] == @record.input_digest(@state)
+        return nil unless unit["artifact_root"] == artifact_root
+      end
 
       latest = Array(unit["dispatches"]).last
       return nil unless latest.is_a?(Hash) && latest["member_id"] == member["thread_id"] &&
@@ -1798,20 +1814,28 @@ module Orbit
       { "output_path" => path, "output_mtime" => mtime }
     end
 
-    # Ranked settlement from current facts (contract 成员结算): a real native
-    # turn error settles failed without waiting for Root to phrase an error;
-    # a Root-accepted current dispatch with real native delivery settles
-    # completed; a Root-rejected/failed dispatch with real native output and
-    # no current native error settles rejected (business rejection, never a
-    # native failure). Anything unprovable stays registered.
+    # Ranked settlement (contract 成员结算), layered by evidence class.
+    # EXECUTION FACT: a real native turn error on the member's actual dispatch
+    # identity (actual member id + tool call + latest attempt) settles failed
+    # even when the input/artifact version later moved — the execution ended,
+    # and that fact keeps its own source. A real CURRENT native acceptance
+    # (SDK lifecycle acceptedAt) is likewise an execution-acceptance fact and
+    # settles through its own path in apply_native_member_observation!
+    # WITHOUT this binding requirement. EVIDENCE ELIGIBILITY: this method's
+    # business path (Root accepted/rejected for the first time from the
+    # dispatch fallback) settles only against the CURRENT input/artifact
+    # binding with real delivery; a version move alone never invents a new
+    # execution, and neither an old business verdict nor a bare acceptance
+    # grants current-version coverage or ready. Anything unprovable stays
+    # registered.
     def settle_member_from_current_dispatch(member, observed, result)
       return false unless member["status"] == "registered"
 
-      dispatch = current_member_dispatch(member)
-      return false unless dispatch.is_a?(Hash)
+      identity = current_member_dispatch(member, require_current_binding: false)
+      return false unless identity.is_a?(Hash)
       return false unless member_execution_settled?(member, observed)
 
-      error = current_native_turn_error(member, dispatch)
+      error = current_native_turn_error(member, identity)
       if error
         detail = ["native turn error"]
         detail << "HTTP #{error['error_status']}" if error["error_status"].is_a?(Integer)
@@ -1820,14 +1844,17 @@ module Orbit
         member["error"] = detail.join(": ").strip[0, 300]
         member["result_delivery"] = "native_turn_error"
         member["settlement_basis"] = { "source" => "native_turn_error",
-                                       "tool_call_id" => dispatch["tool_call_id"],
-                                       "finished_at" => dispatch["finished_at"],
+                                       "tool_call_id" => identity["tool_call_id"],
+                                       "finished_at" => identity["finished_at"],
                                        "settled_at" => Time.now.utc.iso8601, "error" => error }
         @record.event("member_settled", "thread_id" => member["thread_id"], "status" => "failed",
-                      "source" => "native_turn_error", "tool_call_id" => dispatch["tool_call_id"])
+                      "source" => "native_turn_error", "tool_call_id" => identity["tool_call_id"])
         return true
       end
 
+      # Business verdicts require the current evidence binding.
+      dispatch = current_member_dispatch(member)
+      return false unless dispatch.is_a?(Hash)
       return false unless WorkUnitStore::FINISH_STATUSES.include?(dispatch["status"])
 
       # A settlement invalidated by a real new turn must not be reborn from

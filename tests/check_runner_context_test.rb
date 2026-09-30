@@ -36,6 +36,72 @@ module CheckRunnerContextTest
     JSON.parse(context_json(context))
   end
 
+
+  # A real 0.7.20 check showed the loss: the independent check received only the
+  # two NEWEST receipts (both control-URI write receipts) while the program's
+  # own `node --test` bash receipt - still current for that input and artifact -
+  # was dropped when byte pressure halved list_limit down to 2. Selection must
+  # keep current execution evidence, count the omission, and never promote an
+  # old binding or hide a failure.
+  def current_execution_receipts_survive_degraded_caps
+    passed = { "at" => "2026-09-30T09:50:00.330Z", "at_ms" => 1790761800330, "tool" => "bash", "kind" => "root_verification",
+               "status" => "completed", "command" => "node --test", "exit_code" => 0,
+               "exit_code_source" => "sdk_terminal_success_contract", "output" => "tests 8, pass 8, fail 0",
+               "output_saved" => true, "input_matches" => true, "artifact_matches" => true,
+               "artifact_digest" => "sha256:#{'a' * 8}" }
+    failed = passed.merge("at" => "2026-09-30T09:49:27.851Z", "exit_code" => 1, "status" => "failed",
+                          "exit_code_source" => "reported", "command" => "node -e 'process.exit(1)'", "output" => "1 failing test")
+    old_binding = passed.merge("at" => "2026-09-30T09:10:00.000Z", "input_matches" => false)
+    control = ->(at, target) { { "at" => at, "at_ms" => 1790761819000, "tool" => "write", "kind" => "root_verification",
+                                "status" => "completed", "control_targets" => [target], "targets_status" => "control_uri",
+                                "exit_code" => nil, "exit_code_source" => "not_applicable", "output" => nil,
+                                "output_saved" => false, "input_matches" => true, "artifact_matches" => true } }
+    receipts = [old_binding, failed, passed, control.call("2026-09-30T09:50:19.196Z", "xd://report_issue"),
+                control.call("2026-09-30T09:50:29.274Z", "xd://orbit")]
+
+    # The real 0.7.20 check reached this degraded budget (list_limit 2) and the
+    # checker received only the two newest control-URI writes. Everything below
+    # reads the JSON the checker would actually get: build the bounded context
+    # with the production caps except the known degraded list budget, render it
+    # and parse it back.
+    caps = Orbit::CheckRunner::CONTEXT_CAPS.merge(list_limit: 2)
+    bounded = runner.send(:build_compressed_context, { "root_verifications" => receipts, "root" => {} }, caps, 4)
+    parsed = JSON.parse(runner.send(:render_context, bounded))
+    delivered = parsed["root_verifications"]
+    check(delivered.length == 2, "the degraded budget delivers exactly its two receipt slots")
+    check(parsed["root_verifications_omitted"] == 3,
+          "the delivered JSON states how many receipts were omitted")
+    check(delivered.map { |r| r["at"] } == [failed["at"], passed["at"]],
+          "the delivered receipts are the current execution evidence, in their original order")
+    check(delivered.all? { |r| r["tool"] == "bash" } &&
+          delivered.map { |r| r["exit_code"] } == [1, 0] &&
+          delivered.map { |r| r["exit_code_source"] } == %w[reported sdk_terminal_success_contract] &&
+          delivered.map { |r| r["status"] } == %w[failed completed],
+          "the delivered JSON keeps the real exit, exit source and status, including the failure")
+    original = receipts.to_h { |r| [r["at"], r] }
+    check(delivered.all? { |r| r["input_matches"] == original.fetch(r["at"])["input_matches"] &&
+                              r["artifact_matches"] == original.fetch(r["at"])["artifact_matches"] },
+          "the delivered JSON never rewrites a receipt binding")
+    check(delivered.none? { |r| r["input_matches"] == false },
+          "a receipt from an older input binding is not delivered as current evidence")
+    check(JSON.generate(parsed).bytesize <= Orbit::CheckRunner::CONTEXT_BYTE_LIMIT,
+          "the delivered JSON still fits the hard byte cap")
+  end
+
+  # Existing behaviour stays: with plenty of room nothing is omitted and the
+  # original order is preserved.
+  def root_verifications_keep_order_when_they_fit
+    receipts = (1..3).map do |i|
+      { "at" => "2026-09-30T09:5#{i}:00Z", "at_ms" => i, "tool" => "bash", "status" => "completed",
+        "command" => "node --test ##{i}", "exit_code" => 0, "exit_code_source" => "sdk_terminal_success_contract",
+        "output" => "ok", "input_matches" => true, "artifact_matches" => true }
+    end
+    compressed = compress({ "root_verifications" => receipts, "root" => {} })
+    check(compressed["root_verifications"].map { |r| r["at"] } == receipts.map { |r| r["at"] },
+          "receipts stay in their original order when they fit")
+    check(compressed["root_verifications_omitted"].nil?, "no omission is reported when nothing was dropped")
+  end
+
   def long_text(marker, size = 4_000)
     "#{marker}-start-" + ("x" * size) + "-#{marker}-tail"
   end
@@ -108,6 +174,8 @@ module CheckRunnerContextTest
     check_review_focus_is_bounded_and_traceable
     check_non_hash_context_is_bounded
     check_check_history_stays_bounded_and_traceable
+    current_execution_receipts_survive_degraded_caps
+    root_verifications_keep_order_when_they_fit
     puts "CHECK_RUNNER_CONTEXT_TEST_PASS (deterministic)"
   end
 

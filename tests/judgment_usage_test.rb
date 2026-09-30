@@ -2,6 +2,7 @@
 
 # Failed judgments must retain reported consumption without enabling an action.
 # Scripted responses exercise the provider boundary; no socket, key or model call.
+require "tmpdir"
 require_relative "../lib/orbit/jev_advisor"
 require_relative "../lib/orbit/prestart"
 
@@ -137,18 +138,25 @@ module JudgmentUsageTest
     response = judge(reported({}))
     provider = Object.new
     provider.define_singleton_method(:judge) { |_request| response }
-    classifier = Orbit::PrestartClassifier.new(
-      project_root: "/unused-scripted-fixture", provider_for: ->(_model) { provider },
-      calibration_loader: -> { { "model" => "jev-requested", "thresholds" =>
-        { "execution_authorized" => 0.8, "delegation_value" => 0.8, "supervision_value" => 0.8 } } }
-    )
-    decision = classifier.decide("Implement the requested feature and verify the deliverable.")
-    check(decision["decision"] == "root_decides" && !decision["trace"].key?("probabilities"),
-          "an unavailable entry judgment cannot start a task or expose partial probabilities")
-    check(decision.dig("trace", "actual_model") == "jev-actual" && decision.dig("trace", "usage") == response.usage,
-          "the entry ledger receives the real failed consumption without guessing the requested model")
-    check(decision.dig("trace", "call_id") == response.call_id && decision.dig("trace", "judgment_status") == "unavailable",
-          "entry consumption retains the invocation identity and failed outcome")
+    Dir.mktmpdir("orbit-judgment-entry") do |project|
+      check(system("git", "-C", project, "init", "-q", out: File::NULL, err: File::NULL),
+            "fixture project must be a real Git repository for the reviewed entry profile")
+      # The real validated calibration document (production shape: model,
+      # thresholds, release with the observable profile) — never an empty
+      # stand-in that would bypass the profile/binding normalization.
+      calibration = Orbit::EntryCalibration.load(project)
+      classifier = Orbit::PrestartClassifier.new(
+        project_root: project, provider_for: ->(_model) { provider },
+        calibration_loader: -> { calibration }
+      )
+      decision = classifier.decide("Implement the requested feature and verify the deliverable.")
+      check(decision["decision"] == "root_decides" && !decision["trace"].key?("probabilities"),
+            "an unavailable entry judgment cannot start a task or expose partial probabilities")
+      check(decision.dig("trace", "actual_model") == "jev-actual" && decision.dig("trace", "usage") == response.usage,
+            "the entry ledger receives the real failed consumption without guessing the requested model")
+      check(decision.dig("trace", "call_id") == response.call_id && decision.dig("trace", "judgment_status") == "unavailable",
+            "entry consumption retains the invocation identity and failed outcome")
+    end
   end
 
   def run

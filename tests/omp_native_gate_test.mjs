@@ -1039,6 +1039,115 @@ try {
     }
   }
 
+  // 12c. Entry-delegation advisory — qualification negatives and the existing
+  //      task fallback: the already-paid pre-start entry judgment reaches Root
+  //      exactly once when it cleared its calibrated delegation threshold and
+  //      no unit is declared. Complete-but-old rulesets, unknown calibration
+  //      schemas, model drift, below-threshold values, amended inputs and
+  //      already-declared units all stay silent. The real auto-start lifecycle
+  //      lives in 12d; this block covers only the fallback channel on a task
+  //      that already exists.
+  {
+    const advisoryState = async patch =>
+      fs.writeFile(path.join(started.task_directory, 'state.json'), JSON.stringify({ ...(await taskState()), ...patch }));
+    const advisoryTurn = async () => {
+      const out = await emit('before_agent_start', { prompt: 'next', systemPrompt: ['BASE'] }, ctx);
+      return out ? out.systemPrompt.join('\n') : '';
+    };
+    const advisoryLine = text => text.split('\n').find(line => line.includes('[orbit-entry-advisory]'));
+    const unitsPath = path.join(started.task_directory, 'work-units.json');
+    const savedUnits = await fs.readFile(unitsPath, 'utf8').catch(() => null);
+    const savedEntry = (await taskState()).entry || null;
+    const savedAmendments = (await taskState()).amendments || [];
+    // The production trace shape (measured against the live
+    // EntryCalibration.load release and a real 0.7.20 task record):
+    // top-level versions/provider/models/question_digest, and the validated
+    // release merged into `calibration` — schema + version binding + digest +
+    // the calibrated model and thresholds.
+    const calibrationOf = (overrides = {}) => ({
+      reason: 'fixture release', scope: 'fixture scope', profile: 'git_untruncated_request_v1',
+      reviewed_by: 'fixture', reviewed_at: '2026-09-29T14:33:28Z',
+      schema_version: 'orbit-entry-calibration-v2', rule_version: 'orbit-entry-rules-3',
+      question_set_version: 'orbit-entry-3', input_version: 'orbit-entry-input-2',
+      decision_version: 'orbit-entry-decision-2', question_digest: 'dg-current',
+      model: 'jev-1.13.0',
+      thresholds: { execution_authorized: 0.85, delegation_value: 0.65, supervision_value: 0.65 },
+      sample_count: 8, sample_digest: 'sd-current', ...overrides,
+    });
+    const entryDocument = (overrides = {}) => ({
+      decision: 'start', message_id: 'm1',
+      trace: {
+        rule_version: 'orbit-entry-rules-3', input_version: 'orbit-entry-input-2',
+        decision_version: 'orbit-entry-decision-2', question_set_version: 'orbit-entry-3',
+        judgment_status: 'answered', provider: 'typesafe',
+        actual_model: 'jev-1.13.0', requested_model: 'jev-1.13.0', question_digest: 'dg-current',
+        calibration: calibrationOf(),
+        thresholds: { execution_authorized: 0.85, delegation_value: 0.65, supervision_value: 0.65 },
+        probabilities: { execution_authorized: { probability_true: 0.9 },
+          delegation_value: { probability_true: 0.85 }, supervision_value: { probability_true: 0.51 } },
+        ...(overrides.trace || {}),
+      },
+      ...(overrides.entry || {}),
+    });
+    // (a) below threshold: no advisory.
+    await advisoryState({ entry: entryDocument({ trace: { thresholds: { execution_authorized: 0.85, delegation_value: 0.9, supervision_value: 0.65 } } }) });
+    assert.ok(!(await advisoryTurn()).includes('[orbit-entry-advisory]'),
+      'a below-threshold entry value never advises');
+    // (b) COMPLETE but older ruleset (every field populated, self-consistent,
+    //     not the current pinned versions): rejected on the version pin.
+    await advisoryState({ entry: entryDocument({ trace: {
+      rule_version: 'orbit-entry-rules-2', input_version: 'orbit-entry-input-1',
+      decision_version: 'orbit-entry-decision-1', question_set_version: 'orbit-entry-2',
+      question_digest: 'dg-old',
+      calibration: calibrationOf({ rule_version: 'orbit-entry-rules-2', input_version: 'orbit-entry-input-1',
+        decision_version: 'orbit-entry-decision-1', question_set_version: 'orbit-entry-2', question_digest: 'dg-old' }),
+    } }) });
+    assert.ok(!(await advisoryTurn()).includes('[orbit-entry-advisory]'),
+      'a complete older-ruleset trace is rejected by the current-version pin');
+    // (c) unknown calibration schema (current versions, stale release schema).
+    await advisoryState({ entry: entryDocument({ trace: { calibration: calibrationOf({ schema_version: 'orbit-entry-calibration-v1' }) } }) });
+    assert.ok(!(await advisoryTurn()).includes('[orbit-entry-advisory]'),
+      'an unknown calibration schema stays silent');
+    // (d) actual model drift away from the requested/calibrated model.
+    await advisoryState({ entry: entryDocument({ trace: { actual_model: 'zhipu/glm-5.3' } }) });
+    assert.ok(!(await advisoryTurn()).includes('[orbit-entry-advisory]'),
+      'a model-drifted attribution stays silent');
+    // (d2) an old projection without the calibrated model stays silent.
+    await advisoryState({ entry: entryDocument({ trace: { calibration: calibrationOf({ model: undefined }) } }) });
+    assert.ok(!(await advisoryTurn()).includes('[orbit-entry-advisory]'),
+      'a calibration without the calibrated model stays silent');
+    // (d3) profile must match exactly: a missing profile is not a pass.
+    await advisoryState({ entry: entryDocument({ trace: { calibration: calibrationOf({ profile: undefined }) } }) });
+    assert.ok(!(await advisoryTurn()).includes('[orbit-entry-advisory]'),
+      'a calibration without the observable profile stays silent');
+    // (e) amended input: the old score never rides along.
+    await advisoryState({ entry: entryDocument(), amendments: [{ path: 'amendments/1.txt' }] });
+    assert.ok(!(await advisoryTurn()).includes('[orbit-entry-advisory]'),
+      'an amended task never re-uses the old entry score');
+    // (f) a declared unit suppresses the advisory.
+    await fs.writeFile(unitsPath, JSON.stringify({ format: 'orbit-work-units-2', task_id: (await taskState()).id,
+      units: { 'wu-fixture': { id: 'wu-fixture', task_id: (await taskState()).id } } }));
+    await advisoryState({ entry: entryDocument(), amendments: [] });
+    assert.ok(!(await advisoryTurn()).includes('[orbit-entry-advisory]'),
+      'an already-declared unit suppresses the entry advisory');
+    // (g) fallback positive: an already-existing task with a qualified current
+    //     fact gets exactly one advisory on this channel; the valid empty unit
+    //     store is the no-handoff state. Restores the saved file afterwards.
+    await fs.writeFile(unitsPath, JSON.stringify({ format: 'orbit-work-units-2', task_id: (await taskState()).id, units: {} }));
+    const qualified = await advisoryTurn();
+    const line = advisoryLine(qualified);
+    assert.ok(line, 'a qualified entry fact advises on the existing-task fallback');
+    assert.ok(line.includes('0.85') && line.includes('0.65') && line.includes('Root 自主决定'),
+      'the advisory states the measured fact and leaves the decision to Root');
+    assert.ok(!/已选|节省|成本|预算|耗时/.test(line),
+      'the advisory never claims a member is selected or adds cost/time claims');
+    assert.ok(!(await advisoryTurn()).includes('[orbit-entry-advisory]'),
+      'the advisory never repeats in this process');
+    if (savedUnits === null) await fs.rm(unitsPath, { force: true });
+    else await fs.writeFile(unitsPath, savedUnits);
+    await advisoryState({ entry: savedEntry, amendments: savedAmendments });
+  }
+
   // 13. Root-tool stop intent: a completion intent (the default) carries
   //     --complete for the Ruby gate to adjudicate; an explicit pause never does.
   //     An exit-0 structured refusal passes through unchanged and changes no record.
@@ -1150,6 +1259,229 @@ process.stdout.write(JSON.stringify({ task_directory: dir, status: 'starting' })
     }
   }
 
+  // 12d. Entry-delegation advisory on the REAL auto-start lifecycle: an
+  //      unbound main session runs the entry hook inside
+  //      before_provider_request, which creates the task through the real
+  //      start path and injects the advisory into THAT request payload (the
+  //      first reachable window — before_agent_start runs before the task
+  //      exists). The next reachable request with another user message never
+  //      repeats it. No task is pre-seeded for this block.
+  {
+    const realRuby = process.env.ORBIT_RUBY || 'ruby';
+    const advDir = await fs.mkdtemp(path.join(os.tmpdir(), 'orbit-adv-'));
+    const traceShape = {
+      rule_version: 'orbit-entry-rules-3', input_version: 'orbit-entry-input-2',
+      decision_version: 'orbit-entry-decision-2', question_set_version: 'orbit-entry-3',
+      provider: 'typesafe', actual_model: 'jev-1.13.0', call_id: 'call-fixture',
+      judgment_status: 'answered', requested_model: 'jev-1.13.0',
+      thresholds: { execution_authorized: 0.85, delegation_value: 0.65, supervision_value: 0.65 },
+      question_digest: 'dg-current',
+      calibration: { reason: 'fixture', scope: 'fixture', profile: 'git_untruncated_request_v1',
+        reviewed_by: 'fixture', reviewed_at: '2026-09-29T14:33:28Z',
+        schema_version: 'orbit-entry-calibration-v2', rule_version: 'orbit-entry-rules-3',
+        question_set_version: 'orbit-entry-3', input_version: 'orbit-entry-input-2',
+        decision_version: 'orbit-entry-decision-2', question_digest: 'dg-current',
+        model: 'jev-1.13.0',
+        thresholds: { execution_authorized: 0.85, delegation_value: 0.65, supervision_value: 0.65 },
+        sample_count: 8, sample_digest: 'sd-current' },
+      probabilities: { execution_authorized: { probability_true: 0.9 },
+        delegation_value: { probability_true: 0.85 }, supervision_value: { probability_true: 0.51 } },
+      usage: { input_tokens: 1, output_tokens: 1 },
+    };
+    // The entry trace template follows the VALIDATED release shape (measured
+    // from the live EntryCalibration.load + PrestartClassifier projection).
+    const templatePath = path.join(advDir, 'entry-template.json');
+    await fs.writeFile(templatePath, JSON.stringify({ classification: 'uncertain', decision: 'start',
+      reason: 'fixture', message_id: 'adv-user-1',
+      source: { id: 'adv-user-1', kind: 'native_user_message' }, trace: traceShape }));
+    // Entry shim: answers the unpaid-shape `entry` call without any model or
+    // network (binding the trace to the actual message id), and delegates
+    // every other subcommand (start/status/...) to the real Ruby CLI, so the
+    // task record, entry trace and runtime are real.
+    const shim = path.join(advDir, 'orbit-shim.mjs');
+    await fs.writeFile(shim, `#!/usr/bin/env node
+import { spawnSync, } from 'node:child_process';
+import { readFileSync, writeFileSync } from 'node:fs';
+const args = process.argv.slice(2);
+if (args.includes('entry')) {
+  const mid = args[args.indexOf('--message-id') + 1] || 'unknown';
+  const doc = JSON.parse(readFileSync(process.env.ORBIT_ADV_TRACE_TEMPLATE, 'utf8'));
+  doc.message_id = mid;
+  if (doc.source) doc.source.id = mid;
+  const file = process.env.ORBIT_ADV_ENTRY_DIR + '/' + mid + '.json';
+  writeFileSync(file, JSON.stringify(doc));
+  process.stdout.write(JSON.stringify({ decision: 'start', entry_file: file, classification: 'uncertain' }));
+  process.exit(0);
+}
+// Forward stdin: start reads its optional takeover payload from stdin
+// (start --takeover-file -), so the shim must not swallow it while delegating.
+let forwardedInput;
+try { if (!process.stdin.isTTY) forwardedInput = readFileSync(0, 'utf8'); } catch { forwardedInput = undefined; }
+const run = spawnSync(process.env.ORBIT_ADV_REAL_RUBY, args, { encoding: 'utf8', input: forwardedInput });
+process.stdout.write(run.stdout || '');
+process.stderr.write(run.stderr || '');
+process.exit(run.status ?? 1);
+`);
+    await fs.chmod(shim, 0o755);
+    const autoBranch = [{ type: 'message', id: 'adv-user-1',
+      message: { role: 'user', content: 'Do the bounded thing.' } }];
+    const autoSession = session('auto-sess', autoBranch);
+    const savedRootSession = rootRef.session;
+    rootRef.session = autoSession;
+    const autoCtx = { ...ctx, sessionManager: autoSession.sessionManager };
+    const savedRubyEnv = process.env.ORBIT_RUBY;
+    const savedAgentDir = process.env.PI_CODING_AGENT_DIR;
+    const savedAgentRootEnv = process.env.ORBIT_SESSION_AGENT_ROOT;
+    const savedCliBinEnv = process.env.ORBIT_CLI_BIN;
+    // The earlier block removed the fixture agent root, so the real start path
+    // gets its own minimal runnable-checker environment (same shape as the
+    // top-level fixture; no model request or network is made).
+    const advAgentRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'orbit-adv-agent-'));
+    await fs.mkdir(path.join(advAgentRoot, 'agents'), { recursive: true });
+    await fs.writeFile(path.join(advAgentRoot, 'models.yml'), `providers:
+  glm:
+    baseUrl: https://example.invalid/v1
+    apiKey: fixture-key
+    api: openai-completions
+    models:
+      - id: x
+        name: Fixture GLM
+        input: [text]
+        contextWindow: 128000
+        maxTokens: 8192
+`);
+    const advPoolStub = path.join(advDir, 'pool.sh');
+    await fs.writeFile(advPoolStub, '#!/bin/sh\nprintf \'{"models":["glm/x"]}\n\'\n');
+    await fs.chmod(advPoolStub, 0o755);
+    process.env.PI_CODING_AGENT_DIR = advAgentRoot;
+    process.env.ORBIT_SESSION_AGENT_ROOT = advAgentRoot;
+    process.env.ORBIT_CLI_BIN = advPoolStub;
+    process.env.ORBIT_ADV_REAL_RUBY = realRuby;
+    process.env.ORBIT_ADV_TRACE_TEMPLATE = templatePath;
+    process.env.ORBIT_ADV_ENTRY_DIR = advDir;
+    process.env.ORBIT_RUBY = shim;
+    const tasksRoot = path.join(project, '.orbit', 'tasks');
+    const beforeDirs = new Set(await fs.readdir(tasksRoot).catch(() => []));
+    let autoPid = null;
+    let autoPid2 = null;
+    try {
+      await emit('session_start', {}, autoCtx);
+      const out = await emit('before_provider_request',
+        { payload: { messages: [{ role: 'user', content: 'Do the bounded thing.' }] } }, autoCtx);
+      const injected = (out?.payload ?? out)?.messages?.at(-1)?.content;
+      assert.ok(typeof injected === 'string' && injected.includes('[orbit-entry-advisory]'),
+        'the auto entry start injects the advisory into the CURRENT provider request payload');
+      assert.ok(injected.includes('0.85') && injected.includes('0.65'),
+        'the auto-path advisory carries the measured fact');
+      const newDir = (await fs.readdir(tasksRoot)).find(dir => !beforeDirs.has(dir));
+      assert.ok(newDir, 'the auto entry path created a real task record');
+      const autoState = JSON.parse(await fs.readFile(path.join(tasksRoot, newDir, 'state.json'), 'utf8'));
+      assert.equal(autoState.entry?.decision, 'start',
+        'the auto-created task record carries the paid entry trace');
+      for (let n = 0; n < 20 && !autoPid; n++) {
+        autoPid = autoState.runtime_pid || null;
+        if (!autoPid) await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      autoBranch.push({ type: 'message', id: 'adv-user-2',
+        message: { role: 'user', content: 'Follow-up request.' } });
+      const again = await emit('before_provider_request',
+        { payload: { messages: [{ role: 'user', content: 'Follow-up request.' }] } }, autoCtx);
+      const againContent = (again?.payload ?? again)?.messages?.at(-1)?.content;
+      assert.ok(!(typeof againContent === 'string' && againContent.includes('[orbit-entry-advisory]')),
+        'a later reachable request never repeats the advisory');
+
+      // A second auto start whose FIRST payload cannot be extended stays
+      // pending (no sent mark, no abort) and delivers on the next reachable
+      // request — including a tool-turn request whose branch has no fresh
+      // native user message (the manual same-turn window).
+      // A session that already shows program-visible tool execution before the
+      // current user message: the auto entry start must save a real takeover
+      // boundary for THIS task (prior scope unknown, earlier work never
+      // recognized as controlled). The prior items are the ordinary native
+      // branch shape (an assistant message whose content carries a toolCall);
+      // no product-internal simulation is used to fabricate history.
+      const autoBranch2 = [
+        { type: 'message', id: 'b-user-0', message: { role: 'user', content: 'Earlier ordinary request.' } },
+        { type: 'message', id: 'b-assistant-0',
+          message: { role: 'assistant', content: [{ type: 'toolCall', id: 'b-call-0', name: 'edit', arguments: { path: 'src/parse.js' } }] } },
+        { type: 'message', id: 'b-user-1', message: { role: 'user', content: 'Second bounded thing.' } },
+      ];
+      const autoSession2 = session('auto-sess-2', autoBranch2);
+      rootRef.session = autoSession2;
+      const autoCtx2 = { ...ctx, sessionManager: autoSession2.sessionManager };
+      const priorTaskStateBefore = await fs.readFile(path.join(started.task_directory, 'state.json'));
+      await emit('session_start', {}, autoCtx2);
+      const emptyOut = await emit('before_provider_request', { payload: { messages: [] } }, autoCtx2);
+      assert.ok(!JSON.stringify(emptyOut || {}).includes('[orbit-entry-advisory]'),
+        'an unextendable first payload stays pending instead of aborting');
+      const newDir2 = (await fs.readdir(tasksRoot)).find(dir => !beforeDirs.has(dir) && dir !== newDir);
+      assert.ok(newDir2, 'the second auto entry path created its own task record');
+      const autoState2Path = path.join(tasksRoot, newDir2, 'state.json');
+      const autoState2 = JSON.parse(await fs.readFile(autoState2Path, 'utf8'));
+      const takeover = autoState2.takeover;
+      assert.ok(takeover, 'a session with a prior assistant tool call records a takeover boundary');
+      assert.equal(takeover.requirement?.native_message_id, 'b-user-1',
+        'the takeover binds the CURRENT native user message as the requirement source');
+      assert.equal(takeover.prior_scope?.status, 'unknown',
+        'the prior scope stays unknown instead of being guessed from the branch');
+      assert.ok(takeover.artifact?.snapshot_path && takeover.artifact?.digest?.startsWith('sha256:') &&
+        (await fs.stat(path.join(tasksRoot, newDir2, takeover.artifact.snapshot_path)).catch(() => null))?.isDirectory(),
+        'the takeover preserved a real snapshot inside the task private directory');
+      assert.ok(takeover.supervision?.starts_at && takeover.artifact?.captured_at,
+        'the boundary carries program timestamps');
+      assert.equal(takeover.prior_execution?.recognized_as_controlled, false,
+        'the earlier work is not recognized as controlled');
+      assert.deepEqual(takeover.prior_execution?.imported, [],
+        'the new task imports no earlier usage, members or checks');
+      assert.ok((await fs.readFile(path.join(started.task_directory, 'state.json'))).equals(priorTaskStateBefore),
+        'the pre-existing task record is left untouched by the takeover');
+      assert.ok(!autoState.takeover || !Object.keys(autoState.takeover).length,
+        'the fresh auto start without prior tool calls keeps no takeover block');
+      autoBranch2.push({ type: 'message', id: 'b-assistant-1',
+        message: { role: 'assistant', content: 'working' } });
+      const retryOut = await emit('before_provider_request',
+        { payload: { messages: [{ role: 'user', content: 'retry window' }] } }, autoCtx2);
+      const retryContent = (retryOut?.payload ?? retryOut)?.messages?.at(-1)?.content;
+      assert.ok(typeof retryContent === 'string' && retryContent.includes('[orbit-entry-advisory]'),
+        'a no-user tool-turn request still gets the pending advisory (manual same-turn window)');
+      const thirdOut = await emit('before_provider_request',
+        { payload: { messages: [{ role: 'user', content: 'third window' }] } }, autoCtx2);
+      const thirdContent = (thirdOut?.payload ?? thirdOut)?.messages?.at(-1)?.content;
+      assert.ok(!(typeof thirdContent === 'string' && thirdContent.includes('[orbit-entry-advisory]')),
+        'the second task never repeats its advisory');
+      for (let n = 0; n < 20 && !autoPid2; n++) {
+        const autoState2 = JSON.parse(await fs.readFile(autoState2Path, 'utf8'));
+        autoPid2 = autoState2.runtime_pid || null;
+        if (!autoPid2) await new Promise(resolve => setTimeout(resolve, 100));
+      }
+    } finally {
+      if (savedRubyEnv === undefined) delete process.env.ORBIT_RUBY; else process.env.ORBIT_RUBY = savedRubyEnv;
+      delete process.env.ORBIT_ADV_REAL_RUBY;
+      delete process.env.ORBIT_ADV_TRACE_TEMPLATE;
+      delete process.env.ORBIT_ADV_ENTRY_DIR;
+      if (savedAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR; else process.env.PI_CODING_AGENT_DIR = savedAgentDir;
+      if (savedAgentRootEnv === undefined) delete process.env.ORBIT_SESSION_AGENT_ROOT; else process.env.ORBIT_SESSION_AGENT_ROOT = savedAgentRootEnv;
+      if (savedCliBinEnv === undefined) delete process.env.ORBIT_CLI_BIN; else process.env.ORBIT_CLI_BIN = savedCliBinEnv;
+      rootRef.session = savedRootSession;
+      // The auto-created runtimes are detached process-group leaders. Signal the
+      // group, then wait for the process to actually exit and force-kill what
+      // survives, so nothing keeps writing into the project after teardown.
+      const autoPids = [autoPid, autoPid2].filter(pid => pid);
+      for (const pid of autoPids) {
+        try { process.kill(-pid, 'SIGTERM'); } catch { try { process.kill(pid, 'SIGTERM'); } catch { /* already gone */ } }
+      }
+      for (const pid of autoPids) {
+        for (let n = 0; n < 20; n++) {
+          try { process.kill(pid, 0); } catch { break; }
+          await new Promise(resolve => setTimeout(resolve, 50));
+        }
+        try { process.kill(-pid, 'SIGKILL'); } catch { try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ } }
+      }
+      await fs.rm(advAgentRoot, { recursive: true, force: true });
+      await fs.rm(advDir, { recursive: true, force: true });
+    }
+  }
+
   console.log('omp_native_gate_test: PASS');
 } catch (error) {
   console.error(error);
@@ -1164,6 +1496,21 @@ process.stdout.write(JSON.stringify({ task_directory: dir, status: 'starting' })
     try { process.kill(-started.pid, 'SIGKILL'); } catch { /* already gone */ }
   }
   for (const native of sessions) native.dispose?.();
-  await fs.rm(project, { recursive: true, force: true });
+  // A straggler runtime (the auto-start fixtures spawn their own detached
+  // runtimes) can recreate its task directory after the first removal. Bound
+  // the teardown: kill only processes whose command line still references this
+  // fixture path, remove the project, and stop after a few attempts.
+  for (let attempt = 0; attempt < 5; attempt++) {
+    const stragglers = execSync('ps -eo pid=,command=', { encoding: 'utf8' }).split('\n')
+      .filter(line => line.includes(project) && !line.includes('omp_native_gate_test'))
+      .map(line => Number(line.trim().split(/\s+/)[0]))
+      .filter(pid => Number.isInteger(pid) && pid > 0 && pid !== process.pid);
+    if (!stragglers.length && !(await fs.stat(project).catch(() => null))) break;
+    for (const pid of stragglers) {
+      try { process.kill(-pid, 'SIGKILL'); } catch { try { process.kill(pid, 'SIGKILL'); } catch { /* already gone */ } }
+    }
+    await fs.rm(project, { recursive: true, force: true });
+    await new Promise(resolve => setTimeout(resolve, 100));
+  }
   await fs.rm(process.env.XDG_CONFIG_HOME, { recursive: true, force: true });
 }

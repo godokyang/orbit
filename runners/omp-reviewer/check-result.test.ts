@@ -66,3 +66,26 @@ test("coverage preserves unverified requirements and requires evidence for verif
 	(result.coverage as { items: { evidence: string }[] }).items[0].evidence = "";
 	assert.ok(validateCheckResult(result).some(p => p.includes("coverage evidence")), "a verified assertion needs evidence");
 });
+
+test("a long requirement is accepted at the representation bound while real refusals stay", () => {
+	const sentence = "The closing report must " + "enumerate each enumerated requirement with its exact wording and evidence ".repeat(5).trim() + ".";
+	assert.ok(sentence.length > 300 && sentence.length < 1000, `fixture sits between the old and new bound (${sentence.length})`);
+	const result = baseResult();
+	result.coverage = { complete: true, items: [{ requirement: sentence, status: "verified", evidence: "reviewer read the requirement list" }] };
+	assert.deepEqual(validateCheckResult(result), [], "a 348-character requirement sentence is not truncated or rejected");
+
+	const oversized = baseResult();
+	oversized.coverage = { complete: true, items: [{ requirement: "x".repeat(1001), status: "verified", evidence: "e" }] };
+	assert.ok(validateCheckResult(oversized).some(p => p.includes("at most 1000 characters")), "an oversized requirement is still refused");
+
+	const missingEvidence = baseResult();
+	missingEvidence.coverage = { complete: true, items: [{ requirement: sentence, status: "verified", evidence: "" }] };
+	assert.ok(validateCheckResult(missingEvidence).some(p => p.includes("coverage evidence")), "a verified item without evidence is still refused");
+
+	const duplicate = baseResult();
+	duplicate.coverage = { complete: true, items: [
+		{ requirement: sentence, status: "verified", evidence: "e1" },
+		{ requirement: sentence, status: "unverified", evidence: "e2" },
+	] };
+	assert.ok(validateCheckResult(duplicate).some(p => p.includes("duplicate")), "duplicate requirements are still refused");
+});

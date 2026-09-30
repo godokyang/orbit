@@ -71,8 +71,8 @@ export function validateCheckResult(value: unknown): string[] {
 					}
 					const requirement = item.requirement;
 					if (!["delivery", "lifecycle"].includes(item.scope === undefined ? "delivery" : item.scope)) problems.push("coverage scope must be delivery or lifecycle");
-					if (typeof requirement !== "string" || !requirement.trim() || requirement.length > 300) {
-						problems.push("coverage requirement must be a non-empty string of at most 300 characters");
+					if (typeof requirement !== "string" || !requirement.trim() || requirement.length > 1000) {
+						problems.push("coverage requirement must be a non-empty string of at most 1000 characters");
 					} else {
 						if (seen.has(requirement.trim())) problems.push("coverage contains duplicate requirements");
 						seen.add(requirement.trim());

@@ -159,7 +159,46 @@ module RequirementCoverageTest
     end
   end
 
+  # The item-text bound is a representation bound: a real 348-character
+  # requirement sentence (from the rejected 0.7.20 check 5 result) must be
+  # stored verbatim. Nothing is truncated and the other refusals still hold.
+  def long_requirement_text_is_stored_verbatim_but_still_bounded
+    with_coverage do |store|
+      sentence = "The closing report must " + ("enumerate each enumerated requirement with its exact wording and evidence " * 5).strip + "."
+      assert(sentence.length.between?(301, 1000), "fixture is between the old and new bound (#{sentence.length})")
+      report = coverage()
+      report["items"][0] = { "requirement" => sentence, "status" => "verified", "evidence" => "reviewer read the requirement list" }
+      store.record(check_id: "long-1", kind: "artifact", role: "reviewer", coverage: report, **binding)
+      state = store.status(**binding)
+      assert(state["ready"] && state["items"].first["requirement"] == sentence,
+             "a long requirement is stored verbatim, not truncated or rejected")
+
+      too_long = coverage()
+      too_long["items"][0] = { "requirement" => "x" * 1001, "status" => "verified", "evidence" => "e" }
+      refused = begin
+        store.record(check_id: "long-2", kind: "artifact", role: "reviewer", coverage: too_long, **binding)
+        false
+      rescue Orbit::RequirementCoverage::Error => error
+        error.message.include?("1000")
+      end
+      assert(refused, "an oversized requirement is still refused at the new bound")
+
+      duplicated = coverage()
+      duplicated["items"][1]["requirement"] = duplicated["items"][0]["requirement"]
+      duplicate_refused = begin
+        store.record(check_id: "long-3", kind: "artifact", role: "reviewer", coverage: duplicated, **binding)
+        false
+      rescue Orbit::RequirementCoverage::Error
+        true
+      end
+      assert(duplicate_refused, "duplicate requirements are still refused")
+      assert(File.binread(store.path).include?(sentence), "the stored history keeps the verbatim sentence for audit")
+    end
+  end
+
+
   def run
+    long_requirement_text_is_stored_verbatim_but_still_bounded
     complete_verified_coverage_releases_the_current_binding
     revisions_stale_records_and_process_checks_never_release
     missing_corrupt_and_invalid_never_count

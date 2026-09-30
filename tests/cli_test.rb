@@ -903,6 +903,180 @@ module CliTest
            "empty LIST values are an empty side, not a malformed id")
   end
 
+  # Mid-flight takeover (main proposal §3.4; audit A05/A07). These tests cover
+  # the program-captured boundary document and the CLI seams that must work
+  # without a live OMP session: the payload is refused before any connection,
+  # and a valid takeover request follows the ordinary start path. The record
+  # contents are built through the same public TaskRecord.create the CLI calls.
+  # NOT TESTED here: a successful CLI `start` that spawns the runtime — that
+  # needs a live isolated checker and is covered by source reading plus the CLI
+  # refusal paths below only; the native success path waits for an installed
+  # build and is not claimed.
+  def takeover_boundary_is_program_captured_and_scope_is_declared_or_unknown
+    File.write(File.join(@project, "spec.md"), "# requirement\n")
+    instruction = "按 docs/spec.md 实现 CSV 对账并完成验证"
+    source = { "kind" => "omp_user_message", "id" => "native-msg-1" }
+    fixed = Time.utc(2026, 9, 30, 12, 0, 0)
+    clock = -> { fixed }
+    original = File.binread(File.join(@project, "spec.md"))
+    before = Orbit::WorkspaceSnapshot.fingerprint(project_root: @project)
+    record = Orbit::TaskRecord.create(
+      project_root: @project, instruction: instruction, source: source, connection: {}, review: {}, clock: clock,
+      takeover: Orbit::TaskRecord.parse_takeover(
+        JSON.generate("reason" => "用户要求把这项已执行的要求纳入监督", "prior_scope" => "Root 已改 src/a.rb")
+      )
+    )
+    block = record.state["takeover"]
+    relative = block.dig("artifact", "snapshot_path")
+    snapshot = File.join(record.path, relative)
+    assert(block["format"] == Orbit::TaskRecord::TAKEOVER_FORMAT && block.dig("artifact", "digest") == before &&
+           block.dig("artifact", "digest").start_with?("sha256:") && block.dig("artifact", "source") == "program_workspace_snapshot",
+           "the artifact digest is the program's real workspace fingerprint, not a caller value")
+    assert(!relative.to_s.empty? && File.directory?(snapshot) &&
+           File.binread(File.join(snapshot, "spec.md")) == original &&
+           File.binread(File.join(record.path, "instruction.txt")).b == instruction.b,
+           "the takeover really preserves the artifact bytes and the requirement bytes in the task's private directory")
+    assert([block["requested_at"], block.dig("supervision", "starts_at"), block.dig("artifact", "captured_at")] == [fixed.iso8601] * 3,
+           "the supervision boundary timestamps come from the program clock")
+    assert(block.dig("requirement", "native_message_id") == "native-msg-1" &&
+           block.dig("requirement", "instruction_sha256") == Digest::SHA256.hexdigest(instruction.b) &&
+           block.dig("requirement", "instruction_bytes") == instruction.bytesize,
+           "the original native message id and the byte digest of the preserved requirement are stored")
+    assert(block.dig("prior_scope", "status") == "declared" && block.dig("prior_scope", "text").include?("src/a.rb"),
+           "a prior scope Root states is kept verbatim as a declaration")
+    assert(block.dig("prior_execution", "recognized_as_controlled") == false && block.dig("prior_execution", "imported") == [],
+           "the earlier execution is not recognized as controlled and nothing of it is imported")
+
+    File.write(File.join(@project, "spec.md"), "# changed after takeover\n")
+    assert(File.binread(File.join(snapshot, "spec.md")) == original &&
+           Orbit::WorkspaceSnapshot.fingerprint(project_root: @project) != before,
+           "editing the original after takeover does not move the preserved boundary snapshot")
+
+    unstated = Orbit::TaskRecord.create(project_root: @project, instruction: instruction, source: source,
+                                       connection: {}, review: {}, clock: clock,
+                                       takeover: Orbit::TaskRecord.parse_takeover('{"reason":"take over"}'))
+    assert(unstated.state.dig("takeover", "prior_scope", "status") == "unknown" &&
+           unstated.state.dig("takeover", "prior_scope", "text").nil?,
+           "an unstated prior scope stays unknown instead of being guessed from摘要 or Git")
+
+    # A real capture failure through the real create path: WorkspaceSnapshot
+    # cannot read a file it must snapshot (deterministic Errno::EACCES, the same
+    # rejection the snapshot module raises elsewhere). External symlinks are only
+    # flagged by that module, so they cannot drive this case. The half-created
+    # record must be removed by create itself, not by the test.
+    File.write(File.join(@project, "spec.md"), "# requirement\n")
+    before_tasks = Dir.glob(File.join(@project, ".orbit", "tasks", "*"))
+    unreadable = File.join(@project, "unreadable.txt")
+    File.write(unreadable, "secret\n")
+    File.chmod(0o000, unreadable)
+    refusal = begin
+      Orbit::TaskRecord.create(project_root: @project, instruction: instruction, source: source, connection: {},
+                               review: {}, clock: clock,
+                               takeover: Orbit::TaskRecord.parse_takeover('{"reason":"take over"}'))
+      nil
+    rescue StandardError => error
+      error
+    ensure
+      File.chmod(0o644, unreadable)
+      File.unlink(unreadable)
+    end
+    tasks = Dir.glob(File.join(@project, ".orbit", "tasks", "*"))
+    assert(refusal.is_a?(Errno::EACCES) && (tasks - before_tasks).empty? && tasks.length == before_tasks.length,
+           "create reaches the real capture, fails on the unreadable artifact and removes the half-created task " \
+           "instead of leaving a starting record claiming supervision (got #{refusal.inspect})")
+
+    %w[artifact_digest started_at supervision_started_at digest captured_at].each do |field|
+      refused = false
+      begin
+        Orbit::TaskRecord.parse_takeover(JSON.generate("reason" => "x", field => "2026-01-01T00:00:00Z"))
+      rescue ArgumentError => error
+        refused = error.message.include?(field)
+      end
+      assert(refused, "a payload may not state the program-captured #{field}")
+    end
+    [['{"prior_scope":"x"}', "reason"], ["not json", "JSON"], ['[]', "JSON object"]].each do |text, expected|
+      refused = false
+      begin
+        Orbit::TaskRecord.parse_takeover(text)
+      rescue ArgumentError => error
+        refused = error.message.include?(expected)
+      end
+      assert(refused, "an invalid takeover payload is refused (#{expected})")
+    end
+  end
+
+  def takeover_payload_is_refused_before_any_session_or_task_exists
+    File.write(File.join(@project, "AGENTS.md"), "# rules\n")
+    socket = File.join(@temp, "host.sock")
+    server = UNIXServer.new(socket)
+    handled = []
+    worker = Thread.new do
+      loop do
+        peer = server.accept
+        handled << JSON.parse(peer.gets)["method"]
+        peer.puts(JSON.generate("result" => { "cwd" => File.realpath(@project), "status" => "idle" }))
+        peer.close
+      end
+    rescue IOError
+      nil
+    end
+    worker.report_on_exception = false
+    base = ["start", "--provider", "omp", "--project", @project, "--thread", "root", "--socket", socket, "--message-id", "m1"]
+    failures = {
+      "takeover payload needs a stated reason" => ['{"prior_scope":"only scope"}', base],
+      "takeover payload may not state program-captured facts: artifact_digest" =>
+        [JSON.generate("reason" => "x", "artifact_digest" => "sha256:forged"), base],
+      "--prompt-file cannot take over" => ['{"reason":"x"}', base - ["--message-id", "m1"] + ["--prompt-file", "-"]]
+    }
+    failures.each do |expected, (payload, args)|
+      text = cli(*args, "--takeover-file", "-", stdin_data: payload, success: false)
+      assert(text.include?(expected), "a bad takeover request is refused: #{expected}")
+    end
+    assert(handled.empty?, "no session request is sent for a refused takeover request")
+    assert(!File.exist?(File.join(@project, ".orbit", "tasks")),
+           "a refused takeover creates no task and therefore claims no supervision")
+  ensure
+    server&.close unless server&.closed?
+    worker&.kill if worker&.alive?
+  end
+
+  def takeover_does_not_disturb_the_ordinary_start_path
+    socket = File.join(@temp, "host.sock")
+    server = UNIXServer.new(socket)
+    worker = Thread.new do
+      loop do
+        peer = server.accept
+        request = JSON.parse(peer.gets)
+        result = case request["method"]
+                 when "state" then { "cwd" => File.realpath(@project), "status" => "idle" }
+                 when "messages" then [{ "id" => "m1", "text" => "对账实现", "internal" => false }]
+                 when "model_catalog" then { "current" => "a/b", "available" => [], "families" => {}, "agents" => {},
+                                             "routes" => {}, "limits" => {}, "agent_dir" => nil }
+                 else { "ok" => true }
+                 end
+        peer.puts(JSON.generate("result" => result))
+        peer.close
+      end
+    rescue IOError
+      nil
+    end
+    worker.report_on_exception = false
+    base = ["start", "--provider", "omp", "--project", @project, "--thread", "root", "--socket", socket, "--message-id", "m1"]
+    takeover = cli(*base, "--takeover-file", "-", stdin_data: JSON.generate("reason" => "把这项已执行的要求纳入监督"),
+                   success: false)
+    ordinary = cli(*base, success: false)
+    head = ->(text) { text.split("selection trace:").first }
+    assert(head.call(takeover) == head.call(ordinary),
+           "a takeover request ends the same way as an ordinary start when no runnable checker exists")
+    assert(takeover.include?("no unused OMP model is available") && !takeover.include?("artifact_digest"),
+           "a valid takeover payload is not mistaken for a caller-supplied boundary")
+    assert(!File.exist?(File.join(@project, ".orbit", "tasks")),
+           "a start without a runnable checker leaves no task, takeover or not")
+  ensure
+    server&.close unless server&.closed?
+    worker&.kill if worker&.alive?
+  end
+
   def maintenance_requires_an_installed_cli
     %w[update uninstall].each { |command| cli(command, success: false) }
     assert(cli("start", "--help").include?("--provider"), "execution details are available in subcommand help")
@@ -990,6 +1164,9 @@ module CliTest
        model_candidates_bridge_round_trips_and_keeps_ids_with_slashes
        model_candidates_bridge_fails_closed_without_echoing_input
        model_candidates_bridge_applies_one_net_delta_atomically
+       takeover_boundary_is_program_captured_and_scope_is_declared_or_unknown
+       takeover_payload_is_refused_before_any_session_or_task_exists
+       takeover_does_not_disturb_the_ordinary_start_path
        maintenance_requires_an_installed_cli
        jev_setup_exports_key_in_new_shell].each do |test|
       Dir.mktmpdir("orbit-cli-test-") do |tmp|
