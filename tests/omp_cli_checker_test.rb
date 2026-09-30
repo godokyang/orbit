@@ -176,7 +176,8 @@ module OmpCliCheckerTest
       connection = fake_connection(File.realpath(project), "root/model")
       connection.define_singleton_method(:model_catalog) do
         { "current" => "root/model", "available" => ["pool/one"],
-          "families" => { "root/model" => "rf", "pool/one" => "of" } }
+          "families" => { "root/model" => "rf", "pool/one" => "of" },
+          "routes" => { "pool/one" => "subscription_quota" } }
       end
       output = StringIO.new
       original_stdout = $stdout
@@ -194,11 +195,13 @@ module OmpCliCheckerTest
              state.dig("review", "selection", "basis") == "pool_order_unreleased",
              "an unknown task fit uses a runnable pool model, not the outside default or user selection")
       assert(start_response["evidence_needed"] == [{ "model" => "pool/one", "reasoning" => "unknown",
-                                                      "billing_route" => "unknown", "status" => "absent" }] &&
+                                                      "billing_route" => "subscription_quota", "status" => "absent" }] &&
              start_response["evidence_action"].include?("orbit model-evidence --file -") &&
              start_response["evidence_action"].include?("不传任务目录") &&
-             start_response["evidence_action"].include?("显式提交 reasoning: unknown"),
-             "start requires the checker's exact unknown identity, not the provider default")
+             start_response["evidence_action"].include?("逐项保留 evidence_needed") &&
+             start_response["evidence_action"].include?("不以补齐其它候选为前置") &&
+             !start_response["evidence_action"].include?("billing_route: unknown"),
+             "start preserves the actual route and leaves unrelated checker evidence optional")
     end
   end
 

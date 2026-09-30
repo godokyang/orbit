@@ -421,10 +421,12 @@ module Orbit
       response["notice"] = options[:selection]["notice"] if options[:selection]["notice"]
       if options[:selection]["evidence_needed"]&.any?
         response["evidence_needed"] = options[:selection]["evidence_needed"]
-        response["evidence_action"] = "Root: 先核查上述可运行精确型号的一手资料，" \
-                                      "再用 orbit model-evidence --file - 提交真实事实（检查者补证不传任务目录；" \
-                                      "按 evidence_needed 的 model 拆成 provider/model，并显式提交 reasoning: unknown、billing_route: unknown）。" \
-                                      "省略 reasoning 会变成 default，不能匹配；无法取得时如实提交 status=unavailable，不编造证据或借近似型号／其它计费路由。"
+        response["evidence_action"] = "可选：只有精确事实会改变当前任务的模型判断时，Root 才从一手来源核查并用 " \
+                                      "orbit model-evidence --file - 提交（检查者补证不传任务目录）；" \
+                                      "逐项保留 evidence_needed 的真实 model、reasoning、billing_route，" \
+                                      "model 仅按首个 / 拆成 provider 与其余 model id。" \
+                                      "不得为命中缓存把订阅路由改成 unknown，无法核实就保持未知；" \
+                                      "已选可运行检查者与当前交付不以补齐其它候选为前置。"
       end
       if options[:foreground]
         puts JSON.generate(response)

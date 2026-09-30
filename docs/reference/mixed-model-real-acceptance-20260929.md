@@ -76,6 +76,8 @@ Controller 在六份已完成产物的副本上，额外重放同一组八个从
 
 2026-09-30 核对 [OpenCode Go 官方用量说明](https://dev.opencode.ai/docs/go/)及[套餐页](https://dev.opencode.ai/go/)：公开资料按 Go／Go Plus 套餐列出 DeepSeek V4.1 Flash 的输入、输出、缓存读取单位报价及月度额度，并注明峰谷条件。官方还说明，若用户启用 `Use balance` 且用尽套餐额度，请求可转由 Zen 余额承担；因此**即使实际 SDK 端点匹配 Go，也不能仅凭端点断言每次请求都消耗订阅额度**。本轮账本中的 opencode-go 执行身份仍为 `billing_route=unknown`，实际账户套餐、余额回退设置与额度扣减未核实，公开页也未给本次调用可追溯的规则生效起点。这些资料是可复核的候选规则来源，尚不是本轮 OMP 调用可结算价格；没有把数字导入私有路由事实库，也没有按此计算成员成本。后续须核对实际 SDK 端点、账户／计划、余额回退及适用日期，再在原单位下比较。
 
+两轮 0.7.12 Root 原生会话还提供了高用量的具体线索：独立旗舰基线为 18 次模型消息、7 次 `read`、无 `web_search`；自行完成轮为 37 次、18 次 `read`、4 次 `web_search`；明确交接轮为 39 次、14 次 `read`、6 次 `web_search`。自行完成轮即使没有成员，任务启动返回已选可运行降级检查者后，宿主仍把 `[orbit-model-evidence-needed]` 注入首轮请求，Root 随后研究了未被执行的 Kimi／GLM 候选。该提示的 `evidence_needed` 写真实 `billing_route=subscription_quota`，`evidence_action` 却硬写 `billing_route: unknown`；这是可能诱发错误身份补证的实际缺陷。0.7.13 源码已删除启动时的自动催补，并把 CLI 指引改为可选、逐候选保留真实四键。它尚未安装或实机复验，不能由旧会话工具次数直接计算修复后的节省；定向 CLI 测试通过，完整测试受当前沙盒 TCP／Unix socket `EPERM` 阻断。
+
 ## 未闭合矩阵
 
 | 必需项 | 当前状态 |

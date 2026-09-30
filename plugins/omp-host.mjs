@@ -521,16 +521,6 @@ function entryRecoveryInstruction(reason, messageId, explicit) {
   ].join('\n');
 }
 
-function checkerEvidenceInstruction(started) {
-  const missing = Array.isArray(started.evidence_needed) ? started.evidence_needed : [];
-  if (!missing.length) return null;
-  return [
-    '[orbit-model-evidence-needed] Orbit 程序提示（不是新的用户要求）：受控任务已启动，已选择可运行的池内检查者。',
-    `以下可运行池内型号缺少有效的精确身份资料：${missing.map(item => `${item.model} (${item.status})`).join('、')}。`,
-    started.evidence_action,
-  ].join('\n');
-}
-
 // Returns a NEW request payload with `text` appended to the trailing user
 // turn — merged into the last message when it already has the user role (so
 // strict-alternation providers such as Bedrock Converse never see two
@@ -2492,13 +2482,10 @@ export function installOmpExtension(pi, sdk) {
         noteModelIdentity({ taskDir: started.task_directory, role: 'root', agentId: sdk.MAIN_AGENT_ID, sessionId,
           model: ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : null });
         await refreshStatus(ctx, sessionId);
-        const evidenceInstruction = checkerEvidenceInstruction(started);
-        if (evidenceInstruction) {
-          const injected = appendInstructionToPayload(event.payload, evidenceInstruction);
-          if (injected) return injected;
-          pi.sendMessage({ customType: 'orbit-model-evidence', content: evidenceInstruction, attribution: 'agent' },
-            { deliverAs: 'aside' });
-        }
+        // start already selected a runnable checker. Missing candidate facts
+        // remain in the response for deliberate lookup; injecting them into
+        // the user's first turn made Root research unused models
+        // before implementing the authorized task.
       } else if (decision.decision === 'root_decides' && decision.prompt) {
         pi.sendMessage({ customType: 'orbit-entry', content: decision.prompt, attribution: 'agent' },
           { deliverAs: 'aside' });
