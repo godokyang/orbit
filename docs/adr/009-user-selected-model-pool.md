@@ -1,8 +1,8 @@
 # ADR-009：OMP 会话内的候选模型池与选型
 
-- 状态：已采纳，混合目标实施中，2026-09-29 核对。package 仍为 0.7.10，未冻结新安装构建；本文区分有效决定、实际接线与尚未验收范围。
+- 状态：已采纳（2026-09-29 决定；混合模型交付目标已按[完成记录](../reference/mixed-model-delivery-completion-20261001.md)收口）。本文区分有效决定、实际接线与未测范围。
 - 范围：单 OMP 宿主内的型号发现、候选池、执行成员建议和独立检查者选择。具体运行行为以[合同](../../contracts/task-runtime.md)为准，宿主与责任边界见 [ADR-008](008-omp-native-collaboration-base.md)。
-- 实施中决定：用户已授权完整实现[混合模型交付方案](../plan/mixed-model-delivery-proposal.md)。下方 §1—§5 汇总本次决定与已接线边界，§6 规定完整替换的语义和接缝；尚未闭合的接线、校准和验收不写成已上线。实现差距见[代码审计](../plan/mixed-model-delivery-code-audit.md)，进度见[当前计划](../plan/vision-completion-plan.md)。
+- 已采纳决定：[混合模型交付方案](../plan/mixed-model-delivery-proposal.md)的同次交付已结束。§1—§5 为有效决定与已接线边界，§6 规定替换语义和接缝；未测范围见[当前限制](../plan/debt-ledger.md)与[完成记录](../reference/mixed-model-delivery-completion-20261001.md)。
 
 ## 背景与理由
 
@@ -26,7 +26,7 @@ OMP `task` 接受 Agent 名称，Orbit 为当前可用候选生成会话隔离�
 
 ## 3. 成员推荐与证据
 
-新版成员 selector 已接 runtime（工作区，尚未作为新安装构建交付）：按当前输入／产物根和依赖取已声明的工作单元，候选为可用池内 Agent；真正空池只用一次实际原生 task 解析，不把池读取失败当空池，不要求 Root 或全池补证。保留工作单元上下文、决定、验收和实际失败／派发历史。
+成员 selector（已交付）：按当前输入／产物根和依赖取已声明的工作单元，候选为可用池内 Agent；真正空池只用一次实际原生 task 解析，不把池读取失败当空池，不要求 Root 或全池补证。保留工作单元上下文、决定、验收和实际失败／派发历史。
 
 派发历史逐尝试保留实际成员／调用／型号及 finish 的状态、结果、核验、结束时间。重派不擦除历史结果或累计用量；这些结果沿现有单元投影进入选择判断和原生成员交接。保留失败事实是为了区分服务、输入和能力问题，不从一次失败制造永久型号黑名单。
 
@@ -48,11 +48,11 @@ Root 可在无任务目录时提交用户级精确事实，也可提交匹配当
 
 用户可用 `orbit openrouter setup` 配置独立 key，凭据文件权限 0600。仅有 key 且项目未禁用外发时，选模准备阶段可请求官方 `/models` 元数据及 `/benchmarks?source=artificial-analysis`；不发送任务文本、代码或对话。无 key、移除 key 或项目禁用时不请求也不消费旧概述缓存。两个来源均成功才发布新私有快照，抓取有效期 72 小时，失败有界退避；`model-status` 只读，不触发刷新。
 
-映射 lookup 按 OMP 的 provider/model/reasoning/billing_route 精确匹配 OpenRouter canonical slug，目标消失、canonical 漂移或矛盾即时失效。[来源审计](../reference/openrouter-model-mapping-audit.md)核实了四条模型版本对应，不证明其完整 reasoning 或实际计费路由已核实；当前 K3 的 `billing_route=unknown` 若与真实 OMP 路由不同就不能冒改路由命中。
+映射 lookup 按 OMP 的 provider/model/reasoning/billing_route 精确匹配 OpenRouter canonical slug，目标消失、canonical 漂移或矛盾即时失效。[来源审计](../reference/openrouter-model-mapping-audit.md)现含六个精确身份变体（四个模型 identity）；`unknown` 不匹配真实 subscription 变体，路由命中不证明实际计费路由已核实。
 
-本次目录事实层已升 overview-v3，保存可得 coding／agentic／intelligence、ID、上下文、模态和参数；按明确任务选择指标，不再以非空 coding 阻断 agentic-only。成员和检查者都已接事实投影，精确记录与目录先验同时呈现。缓存 72 小时仅表示抓取有效，测量日期／方法未知如实记录；明确要求测量日期时不给未知先验，精确证据的测量资格正在补齐。实际覆盖、完整路由身份、代表性校准与真实效果仍待验证。0.7.10 旧 coding 门、仅检查者弱先验及旧阈值是历史基线，不迁为当前题义结论。
+本次目录事实层已升 overview-v3，保存可得 coding／agentic／intelligence、ID、上下文、模态和参数；按明确任务选择指标，不再以非空 coding 阻断 agentic-only。成员和检查者都已接事实投影，精确记录与目录先验同时呈现。缓存 72 小时仅表示抓取有效，测量日期／方法未知如实记录；明确要求测量日期时不给未知先验，精确证据按测量资格核对，未知保持未知。代表性校准与真实效果按[完成记录](../reference/mixed-model-delivery-completion-20261001.md)的有限范围成立；域外泛化未证（见[当前限制](../plan/debt-ledger.md)）。0.7.10 旧 coding 门、仅检查者弱先验及旧阈值是历史基线，不迁为当前题义结论。
 
-## 6. 已采纳的替换决定与实现接缝（实施中）
+## 6. 已采纳的替换决定与实现接缝（已交付）
 
 本节是本次实现依据，不是 0.7.10 能力声明。选择保留 OMP 原生 `task/hub`、先登记后执行、独立只读检查与当前版本停止门，在实际接缝上接通新选型与交接；没有证据表明必须先替换宿主。用户可见的自主派发继续由 Root 发出原生调用，不新增逐次用户批准或硬预算门。
 
@@ -101,7 +101,7 @@ Root 负责交接内容，程序在实际工具入口执行可计算范围限制
 
 ## 验证与历史
 
-- [2026-09-25 候选池验收](../reference/model-pool-acceptance-20260925.md)保留早期显式选择、模型漂移与当时质量硬门失败，不能移作现行降级正例。
-- [2026-09-27 会话审计](../reference/orbit-session-audit-20260927.md)保留池外默认拒绝、空池检查失败及独立降级闭环；各夹具、授权和版本分别解释。
-- [2026-09-28 体验验收](../reference/zeen-orbit-experience-acceptance-20260928.md)区分入口、原生成员运行、Jev 推荐落地及各冻结构建。
+- 2026-09-25 候选池验收（沿 Git 历史查阅）保留早期显式选择、模型漂移与当时质量硬门失败，不能移作现行降级正例。
+- [2026-09-27 会话审计]（沿 Git 历史查阅：`git show 3865b76:docs/reference/orbit-session-audit-20260927.md`）保留池外默认拒绝、空池检查失败及独立降级闭环；各夹具、授权和版本分别解释。
+- 2026-09-28 体验验收（沿 Git 历史查阅）区分入口、原生成员运行、Jev 推荐落地及各冻结构建。
 - 当前未完成项和安装边界只维护在[交接](../plan/handoff.md)与[限制清单](../plan/debt-ledger.md)，不将上述有限样本解释为全型号可靠或普遍省费用。

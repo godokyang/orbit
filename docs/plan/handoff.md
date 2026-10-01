@@ -1,40 +1,23 @@
 # Orbit 当前交接
 
-最后核对：2026-10-01（installed 0.7.37＝doc-only source commit `b705344b8ca24ce523922a2da78c988f67559bd8` / digest `49cf34bc27417cbcf699a08d8d2b82986b03dc43f43ac5029c36ecde9953640d` / release `5828b3c1e29432e8a00ba08a`；`4cc957e`＝full/真实验收冻结 baseline，full 197.31956s exit 0／83 pack 逐字一致）。交付与必要收尾已完成；Goal 实际状态以 Root 工具为准。
+最后核对：2026-10-01。**当前源码 0.8.0（commit `3865b76`，已推送）**；混合模型交付 Goal 已完成，无当前产品实现待办。
 
-## 目标与既有授权（不变）
+## 版本事实（区分记录）
 
-- 完整实现并真实验收[混合模型交付主方案](mixed-model-delivery-proposal.md)：原 54 项（A01–F10）＋W1–W10，逐项判定见[完成记录](../reference/mixed-model-delivery-completion-20261001.md)。
-- 有限顶级模型资源；不设硬预算；选型无时间信号；本地 commit／install 已授权，不推送／发布／tag／升级 SDK／购买额度；未知费用／用量／额度归属保持未知，不当免费。
-- Codex 编排审核＋Q（Herdr OMP）执行；源码／合同语义改动同步权威文件；失败证据不改判。
+- **源码**：0.8.0／`3865b76`——仅版本号提升（0.7.37→0.8.0），未新增实机验收；full 与 0.7.37 实机样本以 `4cc957e` 冻结（full 197.31956s exit 0／83 pack 逐字一致）；其他真实验收样本按完成记录各自构建身份（pair4＝0.7.25、033＝0.7.33 等）。
+- **本机安装**：0.7.37（doc-only source commit `b705344`／digest `49cf34bc…`／release `5828b3c1…`）。文档清理不构成升级安装；下次 `orbit update` 才落 0.8.0。
 
-## 当前状态（唯一生效安装）
+## 收口依据
 
-- **installed 0.7.37**：运行代码与 full/真实验收 baseline＝commit `4cc957e`（full 197.31956s exit 0；release `29fba720cde2c6cd01c5e019`）；**最终文档/本地交付身份**＝source commit `b705344b8ca24ce523922a2da78c988f67559bd8`／digest `49cf34bc27417cbcf699a08d8d2b82986b03dc43f43ac5029c36ecde9953640d`／release `5828b3c1e29432e8a00ba08a`／install exit 0——Root 已实际核对（83 pack source/release 一致，仅合同文档较 full baseline 改变）。旧历史身份不改标。
-- W10/C07/F10：最终文档与本地交付事实 **verified**（W10 已勾选）；最终状态文档不在 pack83，无需重复安装。
-- 历史各代版本流水、失败与中间状态**不在本页复制**：Git（`451bff2` 及以前）、[2026-09-29 验收记录](../reference/mixed-model-real-acceptance-20260929.md)、`/private/tmp/orbit-*` 原件。
+- 原混合模型交付目标（54 项＋W1–W10）逐项判定、证据与边界＝[完成记录](../reference/mixed-model-delivery-completion-20261001.md)；Root 最终审计＝`/private/tmp/orbit-stop-guard-037/ROOT-54-FINAL-COMPLETION-AUDIT.json`。
+- 运行代码基线的真实验收：pair4 自主成员完整链、033 强检查发现→纠正→resolved→停、35 失败原件（不改判）、regress37 过程换型＋合法阻断 confirmed stop、W9 同质量配对（旗舰 observed 0 vs 7）、单文件负例真实 entry 不启动。原件均在 `/private/tmp/orbit-*` 各目录。
 
-## 有效核心证据（原件绝对路径）
+## 当前有效限制
 
-| 事实 | 原件 |
-| --- | --- |
-| 自主成员真实完整链（hint→派发→注册→accepted→集成→manual 终检→confirmed stop）＋旗舰 +134.665% 负例（0.7.25 构建） | `/private/tmp/orbit-reconcile-pair4-iW4p7Z/` |
-| 强 checker 真实发现→Root 纠正→resolved→confirmed stop（0.7.33） | `/private/tmp/orbit-stuck-immutable-qldLdA/` |
-| 35 失败原件（fallback 丢 kind→36 修复成因；stop_unconfirmed→37 修复成因）——**失败不改判** | `/private/tmp/orbit-blocked-write-fixture-0M7g/` |
-| 过程 fallback 保通道＋非 stale 合法阻断 confirmed stop（0.7.36/37 live） | `/private/tmp/orbit-regress-fixture-BuEx/` |
-| W9 同质量配对（两臂 6/6＋20/20；旗舰 observed 0 vs 7；分类 unknown 保留） | `/private/tmp/orbit-w9-pair-LUKH/controller-records/`（`ROOT-W9-RESULT-REVIEW.json`） |
-| 单文件负例（真实普通 entry 不启动；entry 原件 819/63） | `/private/tmp/orbit-entry-negative-wvKE/controller-records/`（`ROOT-NEGATIVE-REVIEW.json`） |
-| Root 54 项逐项完成审计 | `/private/tmp/orbit-stop-guard-037/ROOT-54-CURRENT-COMPLETION-AUDIT.json`（同目录 CORE/D07/最终文档 diff 原件） |
+见[当前限制](debt-ledger.md)：未测自然分支（Root-stage switch live、非 stale process finding 恢复、stop marker 精确复现、failed-unit 释放）、平台未知（park/dispose、devin hooks）、现金/扣减 unknown——均非完工门，随未来普通运行自然累积。
 
-未测自然分支（Root-stage switch live、非 stale process finding 恢复、37 marker 精确复现、failed-unit 释放）清单见[完成记录](../reference/mixed-model-delivery-completion-20261001.md)与[当前限制](debt-ledger.md)——不是完工门，不新造证明。
+## 现场与操作约定
 
-## 现场资源
-
-- Q 可用、idle；S 额度不支持（不重试）；R 无工具已停。
-- `w1Y:p26` 仅剩 shell 33047；全部 SUT/checker/MCP 进程已退出。
-- `/private/tmp` 全部证据与原件保留、未覆盖；归属不清的历史 worktree 保留不删。
-
-## 剩余动作（唯一路径）
-
-1. 交付与必要收尾已完成；Goal 实际状态以 Root 工具为准。
-2. 不重开 W9／派发／负例等已完成项；自然未测分支随未来普通运行累积。
+- 开发沿 [AGENTS.md](../../AGENTS.md) 与[开发流程](../agents/development-workflow.md)；文档/合同语义改动须同步权威文件。
+- 本地 commit 可；推送/发布/tag/SDK 升级/购买额度按用户当次明确授权执行。
+- 历史版本流水、失败与中间状态不在本页复制：`git show 3865b76:PATH` 查阅。

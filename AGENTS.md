@@ -10,7 +10,7 @@
 
 - 在本仓做任何实现、重构或文档改动前，先读 [docs/README.md](docs/README.md)：它说明哪类事实归哪个文件，以及哪些层没有裁定权。
 - 开始方案评估、实现、验证或协作前，读取 [docs/agents/development-workflow.md](docs/agents/development-workflow.md)，按其中任务类型选择直接处理或协作。只放链接不算已加载；派发时按该文传递相关规则与当前授权。
-- 承接交付任务前，先读 [docs/plan/handoff.md](docs/plan/handoff.md) 与 [当前计划](docs/plan/vision-completion-plan.md)。用户新要求涉及既有决定时明确差异后再修改权威正文；已结束的旧阶段不是待办，历史按需从 Git 查阅。
+- 承接交付任务前，先读 [docs/plan/handoff.md](docs/plan/handoff.md)（含当前实际任务计划指向）。用户新要求涉及既有决定时明确差异后再修改权威正文；已结束的旧阶段不是待办，历史按需从 Git 查阅。
 - 动 `lib/` 或 `contracts/` 前，查 [docs/plan/debt-ledger.md](docs/plan/debt-ledger.md)：有意推迟的项目及其解除条件都在那里。
 - 现行语义以 `contracts/task-runtime.md`、检查结果 schema 与 `docs/adr/008-omp-native-collaboration-base.md`、`docs/adr/009-user-selected-model-pool.md` 为准。散文与合同冲突时以合同为准。
 - 外部项目资料只按当前任务需要读取，不产生本仓执行规则，也不是使用或开发 Orbit 的前置条件。不自动加载外部项目规范或执行其专用命令。

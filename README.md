@@ -8,7 +8,7 @@
 
 例如你让 Agent 实现登录功能，不用自己盯着它是否卡住、是否漏了错误提示，也不用在几个 Agent 之间转述要求；你只和原 Agent 对话，并查看最终检查和任务状态。
 
-卡住／偏航判断和分工建议需要[启用 Jev](docs/reference/usage-reference.md#jev-配置)。成员自主派发由 Root 经原生 task 发出，Jev 提供分派参考。本仓源码按任务质量与可信 OMP 路由 token 资源选型，不再按时间或粗费用档排序，成员与检查者都消费任务相关质量事实；0.7.20 已补成员结算与未知生效日的事实存档；成员结算的实机验收、新题义的域外泛化与完整真实闭环仍未闭合。安装身份以 `orbit version --json` 为准。现有有限样本不证明所有任务都省额度或可靠交付，详见[主方案与代码审计](docs/plan/mixed-model-delivery-code-audit.md)。
+卡住／偏航判断和分工建议需要[启用 Jev](docs/reference/usage-reference.md#jev-配置)。成员自主派发由 Root 经原生 task 发出，Jev 提供分派参考。选型按任务质量与可信 OMP 路由 token 资源进行，不按时间或粗费用档排序，成员与检查者都消费任务相关质量事实。诚实边界：有限样本不证明所有任务都省额度或可靠交付，个别自然分支未在实机出现（清单见[当前限制](docs/plan/debt-ledger.md)）；混合模型交付目标的逐项收口见[完成记录](docs/reference/mixed-model-delivery-completion-20261001.md)。详见[主方案](docs/plan/mixed-model-delivery-proposal.md)。
 
 ## 三步开始
 
@@ -40,7 +40,7 @@ cd 你的项目
 orbit omp
 ```
 
-Orbit 基于原版 [Oh My Pi（OMP）](https://github.com/can1357/oh-my-pi)；`orbit omp` 只为本次会话加载扩展，普通 `omp` 不会接入。本仓源码已含新入口、任务相关质量事实与去时间／去粗费用选型；混合模型交付仍在完整实现中：明确要求 Orbit 受控执行直接尝试启动，讨论、引文示例和明确拒绝不启动；其余请求使用新入口“执行授权且具备交接或监督价值”，串行交接及有成果要求的只读审计可适用。新题义的有限默认放行已随源码装入，范围限声明的 Git／有界交付域（记录见[有限校准](docs/reference/mixed-model-calibration-20260929.md)）；完整新实机与域外泛化尚未证明，超出该域仍由 Root 自行判断，不沿用旧 0.80 双门，也不要求用户逐次安排成员。**显式受控请求启动失败不能改作普通执行；非显式自动候选启动失败会告知原因，Root 可按原要求普通执行，但这次没有 Orbit 检查或停止确认。**接线、校准与真实闭环分别以[当前交接](docs/plan/handoff.md)为准，旧构建验收不能证明新入口已稳定。
+Orbit 基于原版 [Oh My Pi（OMP）](https://github.com/can1357/oh-my-pi)；`orbit omp` 只为本次会话加载扩展，普通 `omp` 不会接入。入口判定：明确要求 Orbit 受控执行直接尝试启动，讨论、引文示例和明确拒绝不启动；其余请求按“执行授权且具备交接或监督价值”判断，串行交接及有成果要求的只读审计可适用。有限默认放行范围限声明的 Git／有界交付域（有限校准记录沿 Git 历史查阅）；超出该域仍由 Root 自行判断，也不要求用户逐次安排成员。当前校准的运行数据见 [`lib/orbit/data/jev-entry-calibration.json`](lib/orbit/data/jev-entry-calibration.json)。**显式受控请求启动失败不能改作普通执行；非显式自动候选启动失败会告知原因，Root 可按原要求普通执行，但这次没有 Orbit 检查或停止确认。**当前状态与证据边界以[当前交接](docs/plan/handoff.md)与[完成记录](docs/reference/mixed-model-delivery-completion-20261001.md)为准。
 
 像平常一样提出需求，例如：“按 `docs/requirements.md` 实现功能，完成必要验证并交付结果。”如果必须由 Orbit 监督，可补充“这次请使用 Orbit”；产品名不是日常自动启动的前提。
 
@@ -75,7 +75,7 @@ Agent 验证并交付结果时应对当前任务调用 Orbit `check` 请求手�
 
 Root 和执行成员使用当前 OMP 会话可用的模型；候选池内可用 Agent 是受控成员的派发范围，Jev 的分工建议不自动派发。池内已有精确身份证据的候选分别评估，缺失／不可得者保持未评分，不拖住有据候选，也不能无证据推荐。Root 可以在补证待答时自行显式选择池内 Agent，记录为自己的决定；独立检查者可用池内型号即使缺证也可运行，但标记质量未经证实。
 
-例如 OMP 的 `modelRoles.task` 为池外 `zhipu-coding-plan/glm-5.2`，受控任务有可用池内 Agent 时调用通用 `agent="task"` **会被拒绝并列出可选 Agent**，不会静默派给 GLM5.2；池空或无可用 Agent 才继续使用可解析的 OMP 默认。Root 可用 `/orbit-models` 显式加入所需型号后派发。Jev 正向参考须匹配真实校准放行及具体工作单元，补证或分数不是派发事实。没有推荐时 Root 仍可自己完成或选池内成员；采纳需实际单元、成员、调用、型号和派发尝试匹配已送达提示。补证逐候选核对真实 reasoning／billing_route，未知如实 unknown；default 缓存和另一计费路由不能互换。当前工作区新行为的安装与真实验收进度见[当前计划](docs/plan/vision-completion-plan.md)。
+例如 OMP 的默认 task 型号在池外时，受控任务有可用池内 Agent 则调用通用 `agent="task"` **会被拒绝并列出可选 Agent**，不会静默派发；池空或无可用 Agent 才继续使用可解析的 OMP 默认。Root 可用 `/orbit-models` 显式加入所需型号后派发。Jev 正向参考须匹配真实校准放行及具体工作单元，补证或分数不是派发事实。没有推荐时 Root 仍可自己完成或选池内成员；采纳需实际单元、成员、调用、型号和派发尝试匹配已送达提示。补证逐候选核对真实 reasoning／billing_route，未知如实 unknown；default 缓存和另一计费路由不能互换。当前行为与证据边界见[完成记录](docs/reference/mixed-model-delivery-completion-20261001.md)与[当前限制](docs/plan/debt-ledger.md)。
 
 **多模型选择：**会话内 `/orbit-models` 从当前 OMP 可选列表维护跨会话候选池。检查者优先预检池内可用型号，池空或池内均不可运行时继续从 OMP 当前可用目录中选择；Root 可显式指定可运行型号，无须用户逐型号授权。缺精确事实时标记“检查质量未经证实”，不把型号可选或凭据预检说成实际请求成功。检查失败后 Orbit 在当前产物版本内有界尝试不同可运行型号；全失败则保留证据并阻塞完成，由 Root 检查 OMP 配置并重新选择。状态见[合同](contracts/task-runtime.md)、[ADR-009](docs/adr/009-user-selected-model-pool.md)及[交接](docs/plan/handoff.md)。
 
@@ -132,9 +132,9 @@ orbit model-candidates list       # 终端查看候选池
 
 ## 当前范围与文档
 
-当前源码版本以 `package.json` 为准；发布和用户安装状态另行核对 `orbit version --json`。当前实现、未完成项与真实验收边界见[交接](docs/plan/handoff.md)。安装或更新使用 `sh install.sh`，选项见使用参考。
+当前源码版本 **0.8.0**；发布和用户安装状态另行核对 `orbit version --json`（本机安装可能滞后于源码）。当前实现、未完成项与真实验收边界见[交接](docs/plan/handoff.md)。安装或更新使用 `sh install.sh`，选项见使用参考。
 
 - [进阶使用参考](docs/reference/usage-reference.md)：安装选项、Jev、OpenRouter、CLI 与维护。
 - [任务运行合同](contracts/task-runtime.md)、[ADR-008](docs/adr/008-omp-native-collaboration-base.md)和[ADR-009](docs/adr/009-user-selected-model-pool.md)：当前角色、选模、检查与停止语义。
-- [认可的混合模型交付方案](docs/plan/mixed-model-delivery-proposal.md)与[代码审计](docs/plan/mixed-model-delivery-code-audit.md)：目标及每项实现差距，不能当成当前已上线能力。
+- [认可的混合模型交付方案](docs/plan/mixed-model-delivery-proposal.md)：产品目标与设计理由（同次交付已结束，效果有范围）；逐项收口见[完成记录](docs/reference/mixed-model-delivery-completion-20261001.md)。
 - [当前限制](docs/plan/debt-ledger.md)与[文档索引](docs/README.md)：已知边界和有版本范围的历史证据。

@@ -1,10 +1,9 @@
 # 混合模型交付完成记录（2026-10-01）
 
-本文件是原 54 项审计（A01–F10）与 W1–W10 的**当前收口工程汇总**（产品运行语义以[任务运行合同](../../contracts/task-runtime.md)为准）。逐项判定沿 Root 的
-`/private/tmp/orbit-stop-guard-037/ROOT-54-CURRENT-COMPLETION-AUDIT.json`（2026-10-01T13:01Z，基于源 `451bff2`）；
-不重写 0.7.10 初审标签（原表保留于[代码审计](../plan/mixed-model-delivery-code-audit.md)与 Git 历史）。
-运行代码与真实验收冻结 baseline＝**0.7.37 / commit `4cc957e374300b9598f4e02bce5c3920f9bc97dc` / digest `9662512a…`**（最后安装事实见 C07/F10 行，不重标旧验收）；
-release `29fba720cde2c6cd01c5e019`**，full 197.31956s exit 0，83 pack 逐字 SHA 与安装一致。
+本文件是原 54 项审计（A01–F10）与 W1–W10 的**当前收口工程汇总**（产品运行语义以[任务运行合同](../../contracts/task-runtime.md)为准）。逐项判定沿 Root 最终审计
+`/private/tmp/orbit-stop-guard-037/ROOT-54-FINAL-COMPLETION-AUDIT.json`（早期过程审计同目录，不充当最终结论）；
+不重写 0.7.10 初审标签（原表沿 Git 历史查阅：`git show 3865b76:docs/plan/mixed-model-delivery-code-audit.md`）。
+源码 0.8.0 仅升版本未新增实机验收。full 与 0.7.37 实机样本的冻结 baseline＝0.7.37／commit `4cc957e`／digest `9662512a…`（full 197.31956s exit 0，83 pack 逐字一致）；其他真实验收样本按本表各行各自构建身份（pair4＝0.7.25、033＝0.7.33 等），不重标。最后安装事实见 C07/F10 行。
 
 ## 54 项逐项判定（沿 Root 审计 JSON `rows[]` 生成，原文要求见主方案对应条款；本记录是工程收口汇总，不取代[任务运行合同](../../contracts/task-runtime.md)的产品语义权威）
 
@@ -91,4 +90,4 @@ Root-stage switch live 触发；非 stale process finding→correction_sent→�
 
 ## 索引
 
-原始要求：主方案 §1–§12；原 54 表与 0.7.10 初审：代码审计＋Git；逐项判定 JSON：Root 审计文件；各 run 原件目录：`/private/tmp/orbit-*`（handoff 指向）。
+原始要求：[主方案](../plan/mixed-model-delivery-proposal.md) §1–§12；原 54 表与 0.7.10 初审沿 Git（`git show 3865b76:docs/plan/mixed-model-delivery-code-audit.md`）；逐项判定 JSON：Root 最终审计文件；各 run 原件目录：`/private/tmp/orbit-*`（[交接](../plan/handoff.md) 指向）。

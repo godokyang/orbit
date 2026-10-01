@@ -35,9 +35,9 @@ module Orbit
     # refused at launch. This section states only what is wired today; the
     # native task/hub team, registration
     # gate and independent OMP checker are implemented alongside it, with the
-    # historical migration acceptance recorded in
-    # docs/reference/omp-native-m4-acceptance-20260924.md. Current source
-    # validation boundaries are in docs/plan/handoff.md.
+    # historical migration acceptance consultable from Git history
+    # (git show 3865b76:docs/reference/omp-native-m4-acceptance-20260924.md).
+    # Current boundaries: docs/plan/handoff.md and the completion record.
     def omp_entry_check
       extension = File.join(File.realpath(ROOT), "plugins/omp.mjs")
       ready = File.file?(extension)
