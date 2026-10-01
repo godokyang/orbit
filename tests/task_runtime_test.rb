@@ -774,11 +774,13 @@ end
 # exactly the next check.
 class RuntimeSelectingChecker
   attr_reader :calls, :selected_models
-  attr_accessor :result, :failure_message
+  attr_accessor :result, :failure_message, :failure_kind, :failure_basis
 
   def initialize
     @calls = []
     @selected_models = []
+    @failure_kind = "auth_or_quota"
+    @failure_basis = "structured"
   end
 
   def start(**args)
@@ -792,8 +794,8 @@ class RuntimeSelectingChecker
   end
 
   def stop! = true
-  def failure_kind = @failure_message ? "auth_or_quota" : nil
-  def failure_basis = @failure_message ? "structured" : nil
+  def failure_kind = @failure_message ? @failure_kind : nil
+  def failure_basis = @failure_message ? @failure_basis : nil
 
   def select_model!(model)
     @selected_models << model
@@ -921,12 +923,109 @@ fixture do |root, record, _host, _checker, _runtime|
   runtime.tick(now: now + 6)
   assert(record.state.dig("review", "blocked", "type") == "selection_undecided" &&
          checker.calls.length == 3, "all failed candidates block without replaying the same model")
-  record.submit("review_model", "model" => "zhipu/glm-5", "reason" => "Root repaired credentials")
+  record.submit("review_model", "model" => "zhipu/glm-5", "reason" => "Root explicitly re-tries this model")
   checker.failure_message = nil
   runtime.tick(now: now + 7)
   assert(checker.calls.length == 4 && record.state.dig("review", "blocked").nil? &&
          record.state.dig("review", "model") == "zhipu/glm-5",
          "Root can choose an available model after repairing credentials without user authorization")
+end
+
+# Task-scoped structured auth_or_quota exclusion: a model that RETURNED a
+# structured auth/quota failure is not retried after the artifact changes
+# (033 checks #1 -> #8), while plain unavailable/invalid_result failures keep
+# their existing artifact-scoped retry semantics; Root's review-model is an
+# explicit retry authorization for exactly the named target and never wipes
+# other structured exclusions.
+fixture do |root, record, _host, _checker, _runtime|
+  host = RuntimeTeamHost.new(root)
+  selector = StubCheckerSelector.new("zhipu/glm-5")
+  checker = RuntimeSelectingChecker.new
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker,
+                                   candidate_pool: StubCandidatePool.new(["zhipu/glm-5"]),
+                                   checker_selector: selector)
+  now = Time.now.to_f
+  runtime.tick(now: now)
+  checker.failure_message = "OMP reviewer exited 1: 401 invalid api key"
+  runtime.tick(now: now + 1)
+  assert(record.state.dig("review", "auth_or_quota_models") == ["zhipu/glm-5"],
+         "a structured auth_or_quota failure records the model in the task-scoped set")
+  File.write(File.join(root, "artifact.txt"), "changed after credential failure")
+  checker.failure_message = nil
+  runtime.tick(now: now + 2)
+  assert(record.state.dig("review", "failed_models").nil? &&
+         selector.calls.last["excluded"] == ["zhipu/glm-5"] &&
+         checker.selected_models.last == "openai/gpt-6-astra",
+         "the artifact change clears artifact-scoped failures but the evidenced auth_or_quota model stays excluded")
+  checker.result = answer("complete")
+  runtime.tick(now: now + 3)
+  selector.model = "zhipu/glm-5"
+  record.submit("check")
+  host.finish("delivered final answer")
+  runtime.tick(now: now + 4)
+  runtime.tick(now: now + 5)
+  assert(checker.selected_models.last == "openai/gpt-6-astra" &&
+         selector.calls.last["excluded"].include?("zhipu/glm-5"),
+         "a new artifact never re-selects the task-scoped auth_or_quota model on its own")
+end
+
+fixture do |root, record, _host, _checker, _runtime|
+  host = RuntimeTeamHost.new(root)
+  selector = StubCheckerSelector.new("zhipu/glm-5")
+  checker = RuntimeSelectingChecker.new
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker,
+                                   candidate_pool: StubCandidatePool.new(["zhipu/glm-5"]),
+                                   checker_selector: selector)
+  now = Time.now.to_f
+  runtime.tick(now: now)
+  checker.failure_message = "OMP reviewer exited 1: model overloaded"
+  checker.failure_kind = "unavailable"
+  runtime.tick(now: now + 1)
+  assert(record.state.dig("review", "auth_or_quota_models").nil?,
+         "a plain unavailable failure never enters the task-scoped set")
+  File.write(File.join(root, "artifact.txt"), "changed after overload")
+  checker.failure_message = nil
+  runtime.tick(now: now + 2)
+  assert(selector.calls.last["excluded"] == [] &&
+         checker.selected_models.last == "zhipu/glm-5",
+         "an artifact change restores an unavailable model exactly as before")
+  checker.failure_message = "OMP reviewer produced an invalid result"
+  checker.failure_kind = "invalid_result"
+  runtime.tick(now: now + 3)
+  File.write(File.join(root, "artifact.txt"), "changed after invalid result")
+  checker.failure_message = nil
+  runtime.tick(now: now + 4)
+  assert(record.state.dig("review", "auth_or_quota_models").nil? &&
+         checker.selected_models.last == "zhipu/glm-5" &&
+         selector.calls.last["excluded"] == [],
+         "an invalid_result failure also stays out of the task-scoped set and the model is retried after the artifact change")
+end
+
+fixture do |root, record, _host, _checker, _runtime|
+  host = RuntimeTeamHost.new(root)
+  selector = StubCheckerSelector.new("zhipu/glm-5")
+  checker = RuntimeSelectingChecker.new
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker,
+                                   candidate_pool: StubCandidatePool.new(["zhipu/glm-5"]),
+                                   checker_selector: selector)
+  now = Time.now.to_f
+  runtime.tick(now: now)
+  checker.failure_message = "OMP reviewer exited 1: 401 invalid api key"
+  runtime.tick(now: now + 1)
+  runtime.tick(now: now + 2)
+  checker.failure_message = "OMP reviewer exited 1: 429 quota exceeded on replacement"
+  runtime.tick(now: now + 4)
+  runtime.tick(now: now + 5)
+  assert(record.state.dig("review", "auth_or_quota_models") == ["zhipu/glm-5", "openai/gpt-6-astra"] &&
+         record.state.dig("review", "blocked", "type") == "selection_undecided",
+         "two structured auth_or_quota failures block with both models recorded task-scoped")
+  record.submit("review_model", "model" => "zhipu/glm-5", "reason" => "Root explicitly re-tries this model")
+  checker.failure_message = nil
+  runtime.tick(now: now + 6)
+  runtime.tick(now: now + 7)
+  assert(checker.selected_models.last == "zhipu/glm-5" &&
+         record.state.dig("review", "auth_or_quota_models") == ["openai/gpt-6-astra"],
+         "review-model recovers only the named target; the other exclusion survives")
 end
 
 # ADR-009 model drift: OMP records `model_drift` on a registered member

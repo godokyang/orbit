@@ -80,9 +80,11 @@ module Orbit
     end
 
     # `excluded` contains models whose real check failed on this input and
-    # artifact version. An explicit Root choice is pinned only while the
-    # selection inputs are unchanged: a changed task state, facts set or
-    # calibration binding always re-runs the selection.
+    # artifact version, plus — merged by the caller — task-scoped structured
+    # auth_or_quota exclusions that persist across artifact/input versions
+    # (the selector treats both alike). An explicit Root choice is pinned
+    # only while the selection inputs are unchanged: a changed task state,
+    # facts set or calibration binding always re-runs the selection.
     #
     # `state` is the actual task record context (workspace/project/git,
     # work_unit with scope and acceptance, review_role for a checker) and is the

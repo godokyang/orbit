@@ -2348,7 +2348,13 @@ module Orbit
         state: checker_selection_state(role),
         previous: previous,
         selected_for: role,
-        excluded: Array(@state.dig("review", "failed_models", "models"))
+        # The artifact-scoped failed_models list is cleared when the artifact
+        # or input changes; the task-scoped structured auth_or_quota set is
+        # merged in separately and never cleared by that path (see
+        # handle_check_failure). review-model's own select call passes no
+        # exclusions, so an explicit Root choice is never blocked by it.
+        excluded: (Array(@state.dig("review", "failed_models", "models")) +
+                   Array(@state.dig("review", "auth_or_quota_models"))).uniq
       )
       # A fresh judgment can select the same model with the same facts. Its
       # invocation is still possible consumption; accounting uses the call id,
@@ -2424,6 +2430,26 @@ module Orbit
       failed["models"] << @state.dig("review", "model") unless failed["models"].include?(@state.dig("review", "model"))
       @record.event("check_failed", "number" => scope["number"], "model" => @state.dig("review", "model"),
                     "error" => error.message, "failure_kind" => kind, "failure_basis" => basis)
+      # A STRUCTURED auth_or_quota failure (structured basis only — never
+      # the text heuristic, unavailable or invalid_result) is evidence about
+      # what that model RETURNED, not a verified credential diagnosis: the
+      # recorded fact is only "this model failed this way", with no guess
+      # about the credential behind it. It survives artifact and input
+      # changes for the life of this task so the same evidenced failure is
+      # not retried on every Root edit (033 task 1d59231e: checks #1 and #8,
+      # opencode-go/deepseek-v4.1-flash twice across 78cb4e3e -> 3a1f5b57).
+      # Task-scoped: never crosses tasks, no TTL, no credential-change
+      # guessing. Root naming a target via review-model is an explicit
+      # retry authorization, not a verified recovery; a target that fails
+      # the same way again re-enters the set.
+      if kind == "auth_or_quota" && basis == "structured"
+        persistent = @state["review"]["auth_or_quota_models"] ||= []
+        model = @state.dig("review", "model")
+        unless persistent.include?(model)
+          persistent << model
+          @record.event("auth_or_quota_model_excluded_task_scoped", "model" => model, "check" => scope["number"])
+        end
+      end
       schedule_check(now, "检查失败后尝试其他 OMP 型号", trigger: "model_fallback", manual: scope["manual"])
       save
     end
@@ -2458,6 +2484,17 @@ module Orbit
       @state["review"]["explicit_model"] = model
       @state["review"]["model"] = model
       @state["review"].delete("failed_models")
+      # Only the model Root explicitly names leaves the task-scoped
+      # auth_or_quota set — an explicit retry authorization for that one
+      # target, not a claim that anything was repaired; every other
+      # structured exclusion survives an unrelated selection, unlike the
+      # artifact-scoped failed_models cleared above. A retried target that
+      # fails the same way again re-enters via handle_check_failure.
+      persistent = @state["review"]["auth_or_quota_models"]
+      if persistent&.include?(model)
+        persistent.delete(model)
+        @record.event("auth_or_quota_model_recovered_by_review_model", "model" => model)
+      end
       if @state.dig("review", "blocked")
         @state["review"].delete("blocked")
         @record.event("checker_model_block_cleared", "reason" => "Root selected an available OMP model")
