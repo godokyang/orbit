@@ -3628,7 +3628,7 @@ export function installOmpExtension(pi, sdk) {
         resolution_check_of_first_finding: resolvedForCurrent[0].resolution_check, tagged_check: options.taggedCheck,
         detecting_model: target,
         version_triple: { artifact_root: td.artifact_root, input_digest: td.input_digest, artifact_digest: td.artifact_digest } } })) };
-    if (outcome.ok === true) outcome.guidance = `程序来源提示（本条为程序追加，非用户新要求）：已核查的独立检查发现并确认修复的真实缺陷（${findingIds.join(',')}，逐项来源与回执见 root_integration_model_selected 记录）由 ${target} 发现——程序已在发送本终检提醒前选择该型号承担 integration 阶段（仅此一次，配置已选择；真实调用以本回合后的 native 回执为准）。请在手动终检前按当前原始要求与规格核对整个交付，按风险做必要可执行验证并修复（不限先前缺陷）；task_delivery 与 Root verifications 归属不变。`;
+    if (outcome.ok === true) outcome.guidance = `程序来源提示（本条为程序追加，非用户新要求）：已核查的独立检查发现并确认修复的真实缺陷（${findingIds.join(',')}，逐项来源与回执见 root_integration_model_selected 记录）由 ${target} 发现——程序已在发送本终检提醒前选择该型号承担 integration 阶段（仅此一次，配置已选择；真实调用以本回合后的 native 回执为准）。（核对职责已由本轮提醒正文承担。）task_delivery 与 Root verifications 归属不变。`;
     return finish(outcome);
   }
 

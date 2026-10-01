@@ -2803,8 +2803,15 @@ module Orbit
       # host re-verifies every durable fact itself and the tag alone grants no
       # selection authority. The reminder/message_id is recorded only AFTER the
       # real delivery ACK below — never pre-written.
+      # Every valid manual-ready reminder carries the same integration
+      # responsibility, decoupled from whether a model selection happens: the
+      # Root must first re-verify the delivery against the ORIGINAL
+      # requirement and spec, run risk-appropriate executable verification for
+      # missing evidence or real risks, and fix what it finds — only then
+      # request the independent manual final check.
       sent = @connection.send_message("Orbit 过程检查未发现当前交付缺口，但这不是手动终检，也不是任务完成。" \
-                                      "请当前助手调用 Orbit action=check, task=<当前任务目录>，结束本轮等待独立终检；" \
+                                      "请先主动按本任务的原始要求与规格核对当前交付，对照既有验证，对缺证或真实风险做必要可执行验证并修复；" \
+                                      "完成后再调用 Orbit action=check, task=<当前任务目录>，结束本轮等待独立终检；" \
                                       "收到有效通知后再申请停止。无需用户重复催办。",
                                       integration_check: scope["number"])
       @state["sent_message_ids"] << sent.fetch("id")
