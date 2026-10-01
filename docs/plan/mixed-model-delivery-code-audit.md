@@ -6,7 +6,7 @@
 
 用户已认可主文档；形成本文时的授权是审视代码并新增附属文档。本文记录该次审视的现状和后续建议，不替代产品语义文件。后续文档整理只修正阅读入口与引用，不把这些建议写成已实施。后续用户补充明确完整目标一次交付、不设硬预算；实施步骤按依赖拆分，不将关键目标另推下一期，也不把“可以调整架构”解释为必须重写底层。
 
-**阅读口径**：A01—F10 各表的状态标签是 2026-09-29 在原审视基线（`0.7.10`／`323408b` 工作区）上的初审判定，属历史快照，保留原样、不按今天重写。判断现行行为以[合同](../../contracts/task-runtime.md)、ADR-008/009 及当前安装（**0.7.32**；历史过程提示源码已实现待安装，见[交接](handoff.md)）为准。勘误：旧 Root-54 index 中 C02 的「family 偏好」为错误描述——源码核实 `families` 仅为目录事实传输与选择签名材料，决策文本无 family 词、无活跃 family 排序（见 031 ROOT-STAGE-REASSESSMENT C02 节）。下方「当前实现对应表」为 **0.7.24／`59eb7e7` 历史对应表**（2026-09-30 复核），其行不按今天重写；其后版本级摘要——0.7.27 隔离 checker 自动 SDK retry 关闭（真实失败保留为有界样本）；0.7.28 root-model 工具接线（确定性通过、live 未触发）；0.7.29 程序选型旧接缝（SDK 源码证明不可达）＋029 partial 未 exercise；历史 0.7.30＝tagged send＋单一同步 fresh state 机制（`20f3cb79`）；030-r2 机械链完整但选型 UNEXERCISED、C1 仍漏；**installed 0.7.31（`cfc18a44`）＝职责句解耦实现**；031 fresh：职责送达＋Root 真实核验发生，C1 仍 FAIL（第六代），选型仍 UNEXERCISED。54 项原始判定不重写、不宣称已完成；例如 F01、F03、F04 的“未实现／新增”不代表今天没有成本数据流，W1—W10 也不能因某条接线完成就机械勾选。历史实机轮次（0.7.20／0.7.21 的负例与最小链）仍按各自构建解释，不因本版已安装而改判。
+**阅读口径**：A01—F10 各表的状态标签是 2026-09-29 在原审视基线（`0.7.10`／`323408b` 工作区）上的初审判定，属历史快照，保留原样、不按今天重写。判断现行行为以[合同](../../contracts/task-runtime.md)、ADR-008/009 及当前安装（**0.7.37**，见[交接](handoff.md)）为准。勘误：旧 Root-54 index 中 C02 的「family 偏好」为错误描述——源码核实 `families` 仅为目录事实传输与选择签名材料，决策文本无 family 词、无活跃 family 排序（见 031 ROOT-STAGE-REASSESSMENT C02 节）。下方「当前实现对应表」为 **0.7.24／`59eb7e7` 历史对应表**（2026-09-30 复核），其行不按今天重写；其后版本级摘要——0.7.27 隔离 checker 自动 SDK retry 关闭（真实失败保留为有界样本）；0.7.28 root-model 工具接线（确定性通过、live 未触发）；0.7.29 程序选型旧接缝（SDK 源码证明不可达）＋029 partial 未 exercise；历史 0.7.30＝tagged send＋单一同步 fresh state 机制（`20f3cb79`）；030-r2 机械链完整但选型 UNEXERCISED、C1 仍漏；**installed 0.7.31（`cfc18a44`）＝职责句解耦实现**；031 fresh：职责送达＋Root 真实核验发生，C1 仍 FAIL（第六代），选型仍 UNEXERCISED。54 项原始判定不重写、不宣称已完成；例如 F01、F03、F04 的“未实现／新增”不代表今天没有成本数据流，W1—W10 也不能因某条接线完成就机械勾选。历史实机轮次（0.7.20／0.7.21 的负例与最小链）仍按各自构建解释，不因本版已安装而改判。
 
 本次 Goal 已获实现授权。下表保留原审计基线；以下实施进度单列，不能把一处修复当整项验收通过。已采纳的替换语义见 [ADR-009 §6](../adr/009-user-selected-model-pool.md#6-已采纳的替换决定与实现接缝实施中)。
 
@@ -28,6 +28,8 @@ E04（§7、§11.2）覆盖接线随 `1ffec49`／0.7.11 与 `a1f9291`／0.7.12 �
 2026-10-01 增量二（installed 0.7.35，commit 74ab31d，full 实测 exit 0——PID=PGID 68563，09:38:27.255Z→09:41:41.968Z，194.7s）：checker 结构化 auth_or_quota 失败按任务排除（033 #1→#8 成因），review-model 点名＝显式重试授权仅移除目标；unavailable/invalid_result 旧语义；局部 3 块 PASS。
 
 2026-10-01 增量三（installed 0.7.36，commit a3417b6，full 一次 195.497s exit 0）：35 live task `22b36fa0` 实测 process 检查 #1 额度失败后 model_fallback 丢 kind，#2–#6 降级 artifact；修复＝schedule_check 持久 next_check_kind（仅失败检查传原 kind，其余 nil 清除）＋finish_check 成功/过期 process 换型回常规 timer（防 model_fallback 去重豁免重开）＋first_change 只由 artifact 置位；排队 manual 优先不被自动换型污染。局部 2 例回归（非首跑，6 次布置失败留档）＋full exit 0。**边界**：36 fallback live 未复验；#7 process correct/host-stale→historical_notice confirmed→Root ask 无自主终态，Controller 收尾 stop_unconfirmed（已证事实，原因未裁定）；真实卡点/跑偏已见独立线索与 Root 上报，但非当前纠正/非 confirmed stop。
+
+2026-10-01 增量四（installed 0.7.37，commit 4cc957e，full 197.31956s exit 0，83 pack 逐字 SHA）：Root 停止排队消息复活修复（teardown guard＋owner 投递抑制＋任务耐久 marker 前后清＋pendingWake 判据；gate 11i 2 例）。regress37 合并实机：#1 Go process auth_or_quota 失败→#2 K3 process/model_fallback（**36 live 首证**）→needs_user（uchg 合法阻断）→stop confirmed（**37 当前 Ask 路径 live 首证**）；sent_message_ids=[] ⇒ owned queued marker 分支仅 gate 证据；合法阻断识别/自动 pause-stop 已证，不称业务 complete/off-track positive。
 
 0.7.15 源码修正 D02／D06／D09（§5.2—§5.3、§6、§9）：旧实现重派会清空上次结果，派发历史和事件又不保存结果正文，后续交接只能看到身份。现将每次状态／结果／核验保存在对应派发记录，重派和切换型号仍保留；选择的两次判断及原生成员交接沿现有字段接收该历史，调用 ID 继续用于资源归属。旧 v2 仅保留仍可核实的最近结果，不补造此前缺失历史。工作单元、选择输入和资源相关定向测试通过；失败分类、升级决策及真实自主派发仍未验收，未安装、未发布。
 

@@ -1,6 +1,6 @@
 # Orbit 当前执行计划
 
-最后核对：2026-10-01（installed 0.7.36＝process 换型通道修复，commit a3417b6、full exit 0；35 stop_unconfirmed 已证待因；36 fallback live 未复验）。方向以[主方案](mixed-model-delivery-proposal.md)为准，每项实现／调整／删除对应[代码审计](mixed-model-delivery-code-audit.md)。精确版本、当前 diff、执行者、原始证据和现场资源统一见[当前交接](handoff.md)，不在本页复制另一份状态快照。
+最后核对：2026-10-01（installed 0.7.37＝Root stop 排队消息复活修复；regress37 live：36 换型保通道＋37 stop 当前路径已证，owned queued marker 分支仅 gate 证据；35 stop 失败已按同版 SDK 源码解释修复，特定搁浅 marker 场景未实机复现）。方向以[主方案](mixed-model-delivery-proposal.md)为准，每项实现／调整／删除对应[代码审计](mixed-model-delivery-code-audit.md)。精确版本、当前 diff、执行者、原始证据和现场资源统一见[当前交接](handoff.md)，不在本页复制另一份状态快照。
 
 ## 同次完整交付
 
@@ -39,8 +39,8 @@
 ## 下一动作
 
 1. 新 Root 核对交接、live diff／installed identity／Herdr；保留成功、失败及未完成证据。minchain21 当前 PID 已不存在，本轮未执行 kill（进程表不证明退出原因），无空闲自有测试进程需收尾。
-2. 核对 0.7.36 已安装（commit `a3417b6`）及 35 原件（`/private/tmp/orbit-fallback-kind-036/`、blockedlog35 controller-records）。
-3. 只读定位 35 stop_unconfirmed 后 Root 重问的原因，按明确因果最小修复并合并一次真实复验（包含 36 fallback 通道），不先新开 fixture。
+2. 针对 54/W1-W10 真实剩余主体项核对（已完成项不重开：pair4 自主成员、33 finding 链已验证；现金/C1/全型号证书不做）。
+3. 37 owned queued marker 分支与完整复活复现留待自然出现（regress37 sent_message_ids=[] 无搁浅 hint，不追样本）。
 4. 完整闭合质量充分后分派、旗舰必要升级、路由成本／用量、错误控制、独立纠正、手动终检和实际停止；普通监督价值任务与其他主方案必要分支不丢弃。
 5. 核心通过后作冻结同质量 Top／混合对照，统计全部角色和实际未知量，按主方案 §11.3 调整负收益路径；逐项闭合 W1—W10 后才 complete。
 
