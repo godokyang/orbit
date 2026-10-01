@@ -1,6 +1,6 @@
 # Orbit 当前执行计划
 
-最后核对：2026-10-01（installed 0.7.34；0.7.35 候选待审＝checker auth_or_quota 任务作用域排除；lognorm34 healthy 实机已录；stuck/off_track live 正向仍未证）。方向以[主方案](mixed-model-delivery-proposal.md)为准，每项实现／调整／删除对应[代码审计](mixed-model-delivery-code-audit.md)。精确版本、当前 diff、执行者、原始证据和现场资源统一见[当前交接](handoff.md)，不在本页复制另一份状态快照。
+最后核对：2026-10-01（installed 0.7.35＝checker auth_or_quota 任务作用域排除，commit 74ab31d、full exit 0；lognorm34 healthy 实机已录；stuck/off_track live 正向仍未证）。方向以[主方案](mixed-model-delivery-proposal.md)为准，每项实现／调整／删除对应[代码审计](mixed-model-delivery-code-audit.md)。精确版本、当前 diff、执行者、原始证据和现场资源统一见[当前交接](handoff.md)，不在本页复制另一份状态快照。
 
 ## 同次完整交付
 
