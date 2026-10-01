@@ -1589,6 +1589,122 @@ try {
     }
   }
 
+  // 11h. Bounded recent-turn observation history: process observation must
+  // see consecutive failed turns within the SAME user turn, never evidence
+  // from before the nearest user message; the window keeps the NEWEST events
+  // (a long history omits the OLDEST with a real marker), and last-assistant
+  // semantics (turn ids, delivery attribution) stay unchanged.
+  {
+    const savedBranch = root.sessionManager.getBranch();
+    const mkAssistant = (id, stop) => ({ type: 'message', id,
+      message: { role: 'assistant', content: [{ type: 'text', text: `turn ${id}` }], stopReason: stop } });
+    const mkTool = (id, tool, isError) => ({ type: 'message', id: `t-${id}`,
+      message: { role: 'toolResult', toolName: tool, isError, content: [{ type: 'text', text: isError ? 'content is required' : 'ok' }] } });
+    const mkUser = id => ({ type: 'message', id, message: { role: 'user', content: `${id} text` } });
+    // Short case: 4 consecutive failed writes in the current turn.
+    const shortHistory = [
+      mkUser('old-user'), mkAssistant('a-old', 'toolUse'), mkTool('r0', 'write', true),
+      mkUser('cur-user'),
+      mkAssistant('a1', 'toolUse'), mkTool('r2', 'write', true), mkTool('r3', 'write', true),
+      mkAssistant('a2', 'toolUse'), mkTool('r4', 'write', true), mkTool('r5', 'write', true),
+      mkAssistant('a3', 'endTurn'),
+    ];
+    root.sessionManager.getBranch = () => shortHistory;
+    try {
+      const observed = await request('state');
+      const priorCommands = observed.observations.filter(o => o.kind === 'prior_command' && o.status === 'failed');
+      assert.equal(priorCommands.length, 4, `expected 4 prior failed writes in-window, got ${priorCommands.length}`);
+      assert.ok(!JSON.stringify(observed.observations).includes('old-user text'),
+        'pre-boundary user evidence must not enter the current task history');
+      assert.ok(!observed.observations.some(o => o.kind === 'prior_command' && o.message_id === 't-r0'),
+        'no pre-boundary tool results');
+      assert.equal(observed.last_turn_id, 'a3');
+      assert.equal(observed.last_turn_user_message_id, 'cur-user');
+      const priorMsgs = observed.observations.filter(o => o.kind === 'prior_agent_message');
+      assert.deepEqual(priorMsgs.map(m => m.turn_id), ['a1', 'a2']);
+      // prior_command entries carry their native message ids for traceability.
+      assert.ok(priorCommands.every(m => typeof m.message_id === 'string' && m.message_id.startsWith('t-r')),
+        'prior commands carry native message ids');
+    } finally {
+      root.sessionManager.getBranch = () => savedBranch;
+    }
+    // Long case: history exceeds the window — NEWEST consecutive failures stay
+    // visible, the OLDEST events are omitted with a real count, boundary
+    // material never enters, and the marker is actually reachable.
+    const longHistory = [mkUser('long-user')];
+    for (let n = 0; n < 30; n++) {
+      longHistory.push(mkAssistant(`la${n}`, 'toolUse'));
+      longHistory.push(mkTool(`lr${n}`, 'write', n >= 25)); // last 5 fail
+    }
+    longHistory.push(mkAssistant('la-final', 'endTurn'));
+    root.sessionManager.getBranch = () => longHistory;
+    try {
+      const observed = await request('state');
+      const failed = observed.observations.filter(o => o.kind === 'prior_command' && o.status === 'failed');
+      assert.equal(failed.length, 5, `the 5 NEWEST consecutive failures must all be visible, got ${failed.length}`);
+      const marker = observed.observations.find(o => o.kind === 'omitted_older_history');
+      assert.ok(marker && marker.count > 0, 'a real omission marker with a positive count must exist');
+      assert.ok(marker.count >= 40, `the marker must reflect many omitted older events, got ${marker.count}`);
+      assert.ok(!observed.observations.some(o => o.kind === 'prior_command' && o.message_id === 't-lr0'),
+        'the oldest tool results are actually omitted');
+      assert.equal(observed.last_turn_id, 'la-final');
+      assert.equal(observed.last_turn_user_message_id, 'long-user');
+    } finally {
+      root.sessionManager.getBranch = () => savedBranch;
+    }
+    // Custom-interleaved long case: dense non-observation branch entries
+    // (custom_message/model_change) sit BETWEEN the real observations — the
+    // window counts KEPT OBSERVATIONS, not branch slots, so the newest
+    // failures survive and the omission count stays truthful.
+    const noisyHistory = [mkUser('noisy-user')];
+    for (let n = 0; n < 30; n++) {
+      noisyHistory.push(mkAssistant(`na${n}`, 'toolUse'));
+      for (let k = 0; k < 3; k++) noisyHistory.push({ type: 'custom_message', id: `nc${n}-${k}`, message: { role: 'custom' } });
+      noisyHistory.push(mkTool(`nr${n}`, 'write', n >= 25)); // last 5 fail
+      noisyHistory.push({ type: 'model_change', id: `nm${n}` });
+    }
+    noisyHistory.push({ type: 'custom_message', id: 'nc-final', message: { role: 'custom' } });
+    noisyHistory.push(mkAssistant('na-final', 'endTurn'));
+    root.sessionManager.getBranch = () => noisyHistory;
+    try {
+      const observed = await request('state');
+      const failed = observed.observations.filter(o => o.kind === 'prior_command' && o.status === 'failed');
+      assert.equal(failed.length, 5, `noisy case: the 5 newest failures must survive dense custom entries, got ${failed.length}`);
+      const priorCommands = observed.observations.filter(o => o.kind === 'prior_command');
+      const priorMsgs = observed.observations.filter(o => o.kind === 'prior_agent_message');
+      assert.equal(priorCommands.length + priorMsgs.length, 18,
+        `the window keeps exactly RECENT_EVENT_WINDOW observations, got ${priorCommands.length + priorMsgs.length}`);
+      const marker = observed.observations.find(o => o.kind === 'omitted_older_history');
+      assert.ok(marker && marker.count === 60 - 18, `truthful omission count 42 expected, got ${marker && marker.count}`);
+      assert.ok(!observed.observations.some(o => o.kind === 'prior_command' && o.message_id === 't-nr0'),
+        'oldest noisy-case results are omitted');
+    } finally {
+      root.sessionManager.getBranch = () => savedBranch;
+    }
+    // Delivery honesty: the newest assistant has ONLY toolCalls (empty text)
+    // — the current agent_message.text is empty and no prior answer is
+    // borrowed as the delivery text.
+    root.sessionManager.getBranch = () => [
+      mkUser('cur-user'),
+      mkAssistant('toolless', 'endTurn'),
+      mkTool('tr1', 'bash', false),
+      { type: 'message', id: 'a-toolonly',
+        message: { role: 'assistant', content: [{ type: 'toolCall', name: 'write', id: 'tc1', arguments: {} }], stopReason: 'toolUse' } },
+      mkTool('tr2', 'write', true),
+    ];
+    try {
+      const observed = await request('state');
+      const current = observed.observations.find(o => o.kind === 'agent_message');
+      assert.ok(current, 'current agent_message exists');
+      assert.equal(current.text, '', 'a toolCall-only last assistant yields empty text, not a borrowed earlier answer');
+      const priorMsgs2 = observed.observations.filter(o => o.kind === 'prior_agent_message');
+      assert.deepEqual(priorMsgs2.map(m => m.turn_id), ['toolless'],
+        'the earlier answer stays in prior history, not as the delivery');
+    } finally {
+      root.sessionManager.getBranch = () => savedBranch;
+    }
+  }
+
   // 12. Per-turn bound-task status: an active bound task injects a short
   //     record-derived status; a terminal task only refreshes the status line,
   //     never an unowned or dead-runtime record shown as controlled.

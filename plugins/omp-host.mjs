@@ -1932,6 +1932,11 @@ export function installOmpExtension(pi, sdk) {
     const taskDir = taskDirs.get(sessionId);
     return taskDir ? readReceipts(taskDir) : [];
   }
+  // Bounded recent-history window for process observation (stuck/off_track):
+  // the NEWEST N observation EVENTS (assistant/toolResult entries) before the
+  // last assistant, enough to compare a consecutive-failure run; the whole
+  // branch is never copied. Older events get one truthful omission marker.
+  const RECENT_EVENT_WINDOW = 18;
   function state(entry) {
     const session = entry.session;
     const branch = session.sessionManager.getBranch();
@@ -1955,6 +1960,47 @@ export function installOmpExtension(pi, sdk) {
       if (item.type === 'message' && item.message.role === 'toolResult') {
         observations.push({ kind: 'command', tool: item.message.toolName,
           status: item.message.isError ? 'failed' : 'completed', aggregated_output: textOf(item.message.content).slice(0, 2000) });
+      }
+    }
+    // Bounded RECENT history: process observation (stuck/off_track) must see
+    // consecutive failed turns, not just the last one. We collect events
+    // between the nearest user boundary and the last assistant (the CURRENT
+    // user turn's real history only — an older task's or an unrelated user
+    // turn's evidence never enters), then keep only the NEWEST N observation
+    // events in native order. Older events are summarized by one truthful
+    // omission marker with a real count — never silently dropped. Without a
+    // trusted boundary we do not guess that older branch content belongs to
+    // the current task (empty history, not "everything").
+    // N counts observation EVENTS (assistant/toolResult entries), not whole
+    // rounds; it is large enough to compare a consecutive-failure run and
+    // bounded so the whole branch is never copied into memory.
+    if (lastUserBeforeLastAssistant !== null) {
+      const boundary = branch.findIndex(item => item.id === lastUserBeforeLastAssistant);
+      if (boundary >= 0) {
+        let total = 0;
+        for (let i = boundary + 1; i < lastIndex; i++) {
+          const role = branch[i]?.type === 'message' ? branch[i].message?.role : null;
+          if (role === 'assistant' || role === 'toolResult') total++;
+        }
+        let kept = 0;
+        for (let i = lastIndex - 1; i > boundary && kept < RECENT_EVENT_WINDOW; i--) {
+          const item = branch[i];
+          if (item?.type !== 'message') continue;
+          const role = item.message?.role;
+          if (role === 'assistant') {
+            observations.unshift({ kind: 'prior_agent_message', turn_id: item.id,
+              text: textOf(item.message.content).slice(0, 2000),
+              stop_reason: item.message.stopReason ?? null });
+            kept++;
+          } else if (role === 'toolResult') {
+            observations.unshift({ kind: 'prior_command', message_id: item.id,
+              tool: item.message.toolName,
+              status: item.message.isError ? 'failed' : 'completed',
+              aggregated_output: textOf(item.message.content).slice(0, 2000) });
+            kept++;
+          }
+        }
+        if (total > kept) observations.unshift({ kind: 'omitted_older_history', count: total - kept });
       }
     }
     // The nearest native user before the last assistant is the origin of
