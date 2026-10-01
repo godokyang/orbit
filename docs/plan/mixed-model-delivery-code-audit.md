@@ -27,6 +27,8 @@ E04（§7、§11.2）覆盖接线随 `1ffec49`／0.7.11 与 `a1f9291`／0.7.12 �
 
 2026-10-01 增量二（installed 0.7.35，commit 74ab31d，full 实测 exit 0——PID=PGID 68563，09:38:27.255Z→09:41:41.968Z，194.7s）：checker 结构化 auth_or_quota 失败按任务排除（033 #1→#8 成因），review-model 点名＝显式重试授权仅移除目标；unavailable/invalid_result 旧语义；局部 3 块 PASS。
 
+2026-10-01 增量三（installed 0.7.36，commit a3417b6，full 一次 195.497s exit 0）：35 live task `22b36fa0` 实测 process 检查 #1 额度失败后 model_fallback 丢 kind，#2–#6 降级 artifact；修复＝schedule_check 持久 next_check_kind（仅失败检查传原 kind，其余 nil 清除）＋finish_check 成功/过期 process 换型回常规 timer（防 model_fallback 去重豁免重开）＋first_change 只由 artifact 置位；排队 manual 优先不被自动换型污染。局部 2 例回归（非首跑，6 次布置失败留档）＋full exit 0。**边界**：36 fallback live 未复验；#7 process correct/host-stale→historical_notice confirmed→Root ask 无自主终态，Controller 收尾 stop_unconfirmed（已证事实，原因未裁定）；真实卡点/跑偏已见独立线索与 Root 上报，但非当前纠正/非 confirmed stop。
+
 0.7.15 源码修正 D02／D06／D09（§5.2—§5.3、§6、§9）：旧实现重派会清空上次结果，派发历史和事件又不保存结果正文，后续交接只能看到身份。现将每次状态／结果／核验保存在对应派发记录，重派和切换型号仍保留；选择的两次判断及原生成员交接沿现有字段接收该历史，调用 ID 继续用于资源归属。旧 v2 仅保留仍可核实的最近结果，不补造此前缺失历史。工作单元、选择输入和资源相关定向测试通过；失败分类、升级决策及真实自主派发仍未验收，未安装、未发布。
 
 现有实现已经提供受控任务的主要骨架：原始要求与修订留存、工作区绑定、原生成员登记和身份漂移处理、独立只读检查、纠正投递、当前版本完成门及实际停止核对。这些可以保留。

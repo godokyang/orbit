@@ -1,6 +1,6 @@
 # Orbit 当前执行计划
 
-最后核对：2026-10-01（installed 0.7.35＝checker auth_or_quota 任务作用域排除，commit 74ab31d、full exit 0；lognorm34 healthy 实机已录；stuck/off_track live 正向仍未证）。方向以[主方案](mixed-model-delivery-proposal.md)为准，每项实现／调整／删除对应[代码审计](mixed-model-delivery-code-audit.md)。精确版本、当前 diff、执行者、原始证据和现场资源统一见[当前交接](handoff.md)，不在本页复制另一份状态快照。
+最后核对：2026-10-01（installed 0.7.36＝process 换型通道修复，commit a3417b6、full exit 0；35 stop_unconfirmed 已证待因；36 fallback live 未复验）。方向以[主方案](mixed-model-delivery-proposal.md)为准，每项实现／调整／删除对应[代码审计](mixed-model-delivery-code-audit.md)。精确版本、当前 diff、执行者、原始证据和现场资源统一见[当前交接](handoff.md)，不在本页复制另一份状态快照。
 
 ## 同次完整交付
 
@@ -39,8 +39,8 @@
 ## 下一动作
 
 1. 新 Root 核对交接、live diff／installed identity／Herdr；保留成功、失败及未完成证据。minchain21 当前 PID 已不存在，本轮未执行 kill（进程表不证明退出原因），无空闲自有测试进程需收尾。
-2. 0.7.30 已提交安装（`20f3cb79`）；030 首轮 fresh 为 Controller 中断 partial（原件见交接），下一轮放行已证自纠窗口后重试真实 live 验证（程序选型需自然 resolved finding＋reminder 边界，不人为制造）。SDK 18.3.4 不升级。历史 0.7.26 的安装与组合验证原件保留在其目录。安装不称完整验收。
-旧 0.7.30 轮已终结（历史）；当前 1d59231e 已终态 complete＋confirmed stop；卡点/跑偏正向仍未证，不重复权限样本。
+2. 核对 0.7.36 已安装（commit `a3417b6`）及 35 原件（`/private/tmp/orbit-fallback-kind-036/`、blockedlog35 controller-records）。
+3. 只读定位 35 stop_unconfirmed 后 Root 重问的原因，按明确因果最小修复并合并一次真实复验（包含 36 fallback 通道），不先新开 fixture。
 4. 完整闭合质量充分后分派、旗舰必要升级、路由成本／用量、错误控制、独立纠正、手动终检和实际停止；普通监督价值任务与其他主方案必要分支不丢弃。
 5. 核心通过后作冻结同质量 Top／混合对照，统计全部角色和实际未知量，按主方案 §11.3 调整负收益路径；逐项闭合 W1—W10 后才 complete。
 
