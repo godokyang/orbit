@@ -2486,6 +2486,49 @@ module Orbit
       current.is_a?(String) && block["signature"].is_a?(String) && current != block["signature"]
     end
 
+      # One bounded historical hint for a host-only stale process check. See
+      # the caller for the full gate list; any failure is recorded as
+      # unconfirmed and never blocks the check outcome or retries itself.
+      def deliver_historical_process_notice(result, scope, stale_reasons, host, now)
+        return unless scope["kind"] == "process" && scope["role"] == "process_reviewer"
+        return unless stale_reasons == ["host"]
+        return unless %w[correct continue].include?(result.fetch("verdict"))
+        return if result.fetch("findings").empty?
+        return if host["interrupted"]
+        return unless task_turn_attributed?(host)
+        stored_check = @state["checks"].find { |check| check["number"] == scope["number"] }
+        return unless stored_check
+        return if stored_check["historical_process_notice"]
+        # Persist the attempt BEFORE sending so a crash after this point never
+        # produces a duplicate notice on restart.
+        stored_check["historical_process_notice"] = { "attempted_at" => Time.at(now).utc.iso8601, "confirmed" => false }
+        save
+        findings = result.fetch("findings")
+        shown = findings.first(3).map do |finding|
+          "- #{finding['id'].to_s[0, 80]}: #{finding['evidence'].to_s[0, 400]} #{finding['action'].to_s[0, 400]}"
+        end
+        shown << "（其余 #{findings.length - 3} 条线索已省略）" if findings.length > 3
+        lines = ["Orbit 历史过程检查线索（非当前纠正，不是用户新要求）：",
+                 "此前过程检查 ##{scope['number']} 的观察已经变化，以下是待核对线索，请按当前有效要求核对是否仍适用；已经恢复则继续当前工作。",
+                 *shown]
+        begin
+          sent = @connection.send_message(lines.join("\n"))
+          @state["sent_message_ids"] << sent.fetch("id")
+          stored_check["historical_process_notice"] =
+            { "attempted_at" => stored_check["historical_process_notice"]["attempted_at"],
+              "message_id" => sent.fetch("id"), "confirmed" => true,
+              "sent_at" => Time.at(now).utc.iso8601 }
+          @record.event("historical_process_notice", "check" => scope["number"],
+                        "message_id" => sent.fetch("id"), "confirmed" => true,
+                        "finding_ids" => findings.map { |f| f.fetch("id") })
+        rescue Connection::Error => error
+          stored_check["historical_process_notice"]["error_class"] = error.class.name
+          @record.event("historical_process_notice", "check" => scope["number"],
+                        "confirmed" => false, "error_class" => error.class.name)
+        end
+        save
+      end
+
     def host_digest(host)
       Digest::SHA256.hexdigest(JSON.generate(host.slice("last_turn_id", "last_turn_status", "observations")))
     end
@@ -2622,6 +2665,15 @@ module Orbit
           @record.event("recheck_pending", "check" => scope["number"], "count" => added.length,
                         "open_clues" => @state.dig("recheck", "findings").length)
         end
+        # Historical process notice: a stale process check whose ONLY staleness
+        # is host-side (the observation moved while the checker ran) still
+        # carries evidence the Root has not seen. Send ONE explicitly
+        # historical hint through the existing Root message channel so the
+        # Root can compare it against the current effective requirement; it
+        # does NOT count as a current correction, finding, stop or completion
+        # authorization, and the recheck clues above remain intact for the
+        # next applicable independent check.
+        deliver_historical_process_notice(result, scope, stale_reasons, host, now)
         # Only a workspace rebind rechecks immediately: the old snapshot cannot
         # answer for the new root. Any other stale line waits for the normal
         # timer, the next delivery or an explicit manual check.
@@ -2629,6 +2681,7 @@ module Orbit
         save
         return
       end
+
 
       # A clue survives until a reviewer that judges the artifact explicitly
       # reports it again (now a normal finding, delivered by the normal path)

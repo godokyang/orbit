@@ -1,6 +1,6 @@
 # Orbit 当前执行计划
 
-最后核对：2026-10-01（installed 0.7.30；030 首轮 fresh 验收为 Controller 中断 partial，live 证据待新轮）。方向以[主方案](mixed-model-delivery-proposal.md)为准，每项实现／调整／删除对应[代码审计](mixed-model-delivery-code-audit.md)。精确版本、当前 diff、执行者、原始证据和现场资源统一见[当前交接](handoff.md)，不在本页复制另一份状态快照。
+最后核对：2026-10-01（installed 0.7.32；历史过程提示源码 0.7.33 候选待审核；d77 healthy non-trigger）。方向以[主方案](mixed-model-delivery-proposal.md)为准，每项实现／调整／删除对应[代码审计](mixed-model-delivery-code-audit.md)。精确版本、当前 diff、执行者、原始证据和现场资源统一见[当前交接](handoff.md)，不在本页复制另一份状态快照。
 
 ## 同次完整交付
 

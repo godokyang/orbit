@@ -1419,6 +1419,136 @@ fixture do |_root, record, host, checker, runtime|
          "after the ACK the reminder references exactly this send's real id")
 end
 
+# A host-only stale process check sends ONE historical notice (not a current
+# correction) and persists the attempt for crash-recovery dedup.
+fixture do |_root, record, host, _checker, _runtime|
+  now = Time.now.to_f
+  start_host = { "status" => "active", "last_turn_id" => "turn-1", "last_turn_status" => "inProgress",
+                 "observations" => [{ "kind" => "command", "tool" => "write", "status" => "failed" }], "interrupted" => false }
+  changed_host = start_host.merge("last_turn_id" => "turn-2",
+    "observations" => start_host["observations"] + [{ "kind" => "command", "tool" => "write", "status" => "failed" }])
+  checker = RuntimeChecker.new
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker)
+  runtime.send(:start_check, start_host, now, kind: "process", trigger: "jev_process")
+  result = answer("correct", findings: [{ "id" => "stuck-1", "requirement" => "progress",
+    "evidence" => "3+ same-method retries", "action" => "try a different approach" }])
+  runtime.send(:finish_check, result, changed_host, now + 1)
+  check = record.state["checks"].last
+  assert(check["stale"] && check["stale_reasons"] == ["host"], "precondition: host-only stale process check")
+  assert(host.messages.one? { |m| m.include?("历史过程检查线索") }, "the historical notice reaches Root once")
+  assert(host.messages.one? { |m| m.include?("stuck-1") }, "finding evidence is included")
+  assert(!host.messages.any? { |m| m.include?("correction") || m.include?("纠正") && !m.include?("历史") },
+         "the notice is NOT a current correction")
+  assert(check["historical_process_notice"] && check["historical_process_notice"]["confirmed"] == true,
+         "the persisted attempt is confirmed")
+  assert(File.readlines(File.join(record.path, "events.jsonl")).any? { |l| l.include?("historical_process_notice") },
+         "the notice has its own auditable event")
+  assert(record.state.dig("recheck", "findings")&.any? { |f| f["id"] == "stuck-1" },
+         "recheck clues remain intact for the next applicable check")
+end
+
+# Dedup after restart + negative gates (interrupted / stale for non-host reasons /
+# unattributed turn) — a table fixture covering the remaining control branches.
+fixture do |root, record, host, _checker, _runtime|
+  now = Time.now.to_f
+  base_obs = [{ "kind" => "command", "tool" => "write", "status" => "failed" }]
+  start_host = { "status" => "active", "last_turn_id" => "t1", "last_turn_status" => "inProgress",
+                 "observations" => base_obs, "interrupted" => false }
+  changed_host = start_host.merge("last_turn_id" => "t2",
+    "observations" => base_obs + [{ "kind" => "command", "tool" => "write", "status" => "failed" }])
+
+  # (a) First run: the notice fires once; no current finding opened; task not stopped.
+  checker = RuntimeChecker.new
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker)
+  runtime.send(:start_check, start_host, now, kind: "process", trigger: "jev_process")
+  result = answer("correct", findings: [{ "id" => "stuck-1", "requirement" => "progress",
+    "evidence" => "repeated retries", "action" => "try different approach" }])
+  runtime.send(:finish_check, result, changed_host, now + 1)
+  assert(host.messages.count { |m| m.include?("历史过程检查线索") } == 1, "exactly one notice")
+  assert(!record.state["findings"].any? { |_id, f| f["status"] == "open" },
+         "no current finding is opened by the historical notice")
+  assert(!%w[complete paused failed].include?(record.state["status"]),
+         "the notice does not stop, complete or fail the task")
+
+  # (b) A NEW runtime from the same persisted record: normal tick does NOT re-send.
+  host.messages.clear
+  host.fail_send_message = nil
+  fresh = Orbit::TaskRuntime.new(record: record, connection: host, checker: RuntimeChecker.new)
+  fresh.tick(now: now + 10)
+  assert(host.messages.count { |m| m.include?("历史过程检查线索") } == 0,
+         "a restart does not re-send the historical notice")
+
+  # (c) Negative gate: artifact changed during the check → stale_reasons has
+  # "artifact" too → no historical notice.
+  neg_root = File.join(root, "neg")
+  FileUtils.mkdir_p(neg_root)
+  host2 = RuntimeHost.new(nil)
+  record2 = Orbit::TaskRecord.create(
+    project_root: neg_root,
+    instruction: "Negative gate test.
+", source: { "id" => "orig", "kind" => "native_user_message" },
+    connection: { "provider" => "omp" }, review: { "interval_seconds" => 300 }, estimate: {})
+  rt2 = Orbit::TaskRuntime.new(record: record2, connection: host2, checker: RuntimeChecker.new)
+  h2_start = { "status" => "active", "last_turn_id" => "a1", "last_turn_status" => "inProgress",
+               "observations" => base_obs, "interrupted" => false }
+  h2_changed = h2_start.merge("last_turn_id" => "a2")
+  rt2.send(:start_check, h2_start, now + 20, kind: "process", trigger: "jev_process")
+  File.write(File.join(neg_root, "artifact.txt"), "changed")
+  rt2.send(:finish_check, answer("correct", findings: [{ "id" => "ng1", "requirement" => "r", "evidence" => "e", "action" => "a" }]),
+           h2_changed, now + 21)
+  assert(record2.state["checks"].last["stale_reasons"].include?("artifact"),
+         "precondition: artifact is also stale")
+  assert(!host2.messages.any? { |m| m.include?("历史过程检查线索") },
+         "no historical notice when artifact also changed")
+  assert(!record2.state["checks"].last["historical_process_notice"], "no attempt persisted")
+
+  # (d) Interrupted Root → no notice (host genuinely changed AND interrupted).
+  int_root = File.join(root, "int")
+  FileUtils.mkdir_p(int_root)
+  host3 = RuntimeHost.new(nil)
+  record3 = Orbit::TaskRecord.create(
+    project_root: int_root,
+    instruction: "Interrupt gate test.
+", source: { "id" => "orig", "kind" => "native_user_message" },
+    connection: { "provider" => "omp" }, review: { "interval_seconds" => 300 }, estimate: {})
+  rt3 = Orbit::TaskRuntime.new(record: record3, connection: host3, checker: RuntimeChecker.new)
+  h3_start = { "status" => "active", "last_turn_id" => "i1", "last_turn_status" => "inProgress",
+               "observations" => base_obs, "interrupted" => false }
+  h3_changed = { "status" => "active", "last_turn_id" => "i2", "last_turn_status" => "inProgress",
+    "observations" => base_obs + [{ "kind" => "command", "tool" => "write", "status" => "failed" }], "interrupted" => true }
+  rt3.send(:start_check, h3_start, now + 30, kind: "process", trigger: "jev_process")
+  rt3.send(:finish_check, answer("correct", findings: [{ "id" => "ig1", "requirement" => "r", "evidence" => "e", "action" => "a" }]),
+           h3_changed, now + 31)
+  assert(!host3.messages.any? { |m| m.include?("历史过程检查线索") },
+         "an interrupted Root gets no historical notice")
+  assert(!record3.state["checks"].last["historical_process_notice"], "no attempt when gate rejects")
+end
+
+# A delivery failure records unconfirmed, does not fake success, and a
+# subsequent normal tick does not auto-retry.
+fixture do |_root, record, host, _checker, _runtime|
+  now = Time.now.to_f
+  start_host = { "status" => "active", "last_turn_id" => "t1", "last_turn_status" => "inProgress",
+                 "observations" => [{ "kind" => "command", "tool" => "write", "status" => "failed" }], "interrupted" => false }
+  changed_host = start_host.merge("last_turn_id" => "t2")
+  checker = RuntimeChecker.new
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker)
+  runtime.send(:start_check, start_host, now, kind: "process", trigger: "jev_process")
+  result = answer("correct", findings: [{ "id" => "p3", "requirement" => "r", "evidence" => "e", "action" => "a" }])
+  host.fail_send_message = "connection dropped"
+  runtime.send(:finish_check, result, changed_host, now + 1)
+  stored = record.state["checks"].last["historical_process_notice"]
+  assert(stored && stored["confirmed"] == false, "the attempt is persisted as unconfirmed")
+  assert(stored["error_class"], "the error class is recorded")
+  assert(!host.messages.any? { |m| m.include?("历史过程检查线索") }, "no notice text was delivered")
+  assert(record.state["status"] != "failed", "the send failure does not fail the task")
+  assert(!(record.state["sent_message_ids"] || []).include?("fake-id"), "no fake sent id recorded")
+  # Subsequent normal tick with delivery restored: no auto-retry
+  host.fail_send_message = nil
+  runtime.tick(now: now + 10)
+  assert(!host.messages.any? { |m| m.include?("历史过程检查线索") },
+         "a failed historical notice is not auto-retried")
+end
 
 # A manual final check queued during the Root's delivery turn must inspect
 # the actual completed reply, rather than spending a check on an in-progress,

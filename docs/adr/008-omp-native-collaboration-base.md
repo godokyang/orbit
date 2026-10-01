@@ -92,3 +92,7 @@ Orbit 不在任务结束后自动调模型作缺陷分析，不上传 `.orbit`�
 - 独立 OMP 检查会话：已闭合（冻结 #6 PASS）。reviewer 以独立只读进程读取固定快照；固定快照与来源边界、confinement 专项 17/17、活 TaskRuntime adjudicator 的机械/只读/路由回路均有真实样本。**准确边界**：该活样本夹具存在 W38/W39 规格矛盾，adjudicator 裁定内容正确性不据此夹具判定，另行验证。
 
 M4 已结束；后续版本若暴露关键接缝缺口，依据新证据处理，不把历史通过当作所有版本均支持。
+
+## 2026-10-01 补充：历史过程检查提示（已实现源码，待安装）
+
+当一个过程检查因 host 观察变化（唯一 stale 原因，其余 workspace/input/artifact/dispute 均未变）而变 stale，且 verdict correct/continue 有 findings、Root 未中断且 turn 归属本任务时，程序经既有 Root 消息通道发送一次明确历史性质的提示（非当前纠正），附有界 finding evidence/action 与检查号。attempt 先持久化（崩溃后不重发）；ACK 成功才记 sent_message_ids；失败记 unconfirmed 不自动重试。严格 host stale 判定、当前纠正路径、完成/停止门全部保留；recheck 线索资格不变。合成回放证实控制门逻辑（非实机 process 验收）。
