@@ -1703,6 +1703,102 @@ try {
     } finally {
       root.sessionManager.getBranch = () => savedBranch;
     }
+    // Tool-call metadata (bounded native summaries): a toolCall-only current
+    // assistant keeps EMPTY text but now carries truthful native metadata —
+    // id/name/declared_intent (a declaration, not executed fact) and the plain
+    // path target for read/write/edit. No raw arguments, bodies, patches,
+    // commands or eval code may leak into the observation.
+    root.sessionManager.getBranch = () => [
+      mkUser('cur-user'),
+      mkAssistant('prior-plain', 'endTurn'),
+      { type: 'message', id: 'a-toolonly-2',
+        message: { role: 'assistant', stopReason: 'toolUse', content: [
+          { type: 'toolCall', name: 'write', id: 'tc-write-1', intent: 'Writing reconcile core',
+            arguments: { path: 'src/reconcile.js', content: 'PRIVATE BODY MUST NOT LEAK' } },
+          { type: 'toolCall', name: 'eval', id: 'tc-eval-1', intent: 'Reporting write bug',
+            arguments: { code: 'process.env.SECRET /* eval code must not leak */' } }
+        ] } },
+      mkTool('tr3', 'write', true),
+    ];
+    try {
+      const observed = await request('state');
+      const current = observed.observations.find(o => o.kind === 'agent_message');
+      assert.ok(current.tool_calls, 'the toolCall-only current message carries tool_calls metadata');
+      assert.equal(current.text, '', 'text stays empty — metadata never becomes a delivery answer');
+      assert.deepEqual(current.tool_calls.map(c => c.name), ['write', 'eval'],
+        'native call order is preserved');
+      const writeCall = current.tool_calls[0];
+      assert.equal(writeCall.id, 'tc-write-1');
+      assert.equal(writeCall.declared_intent, 'Writing reconcile core');
+      assert.equal(writeCall.target, 'src/reconcile.js');
+      const evalCall = current.tool_calls[1];
+      assert.equal(evalCall.target, 'unknown', 'eval never gets a guessed embedded path');
+      const serialized = JSON.stringify(observed.observations);
+      assert.ok(!serialized.includes('PRIVATE BODY') && !serialized.includes('eval code must not leak'),
+        'raw arguments/content/code never enter the observation');
+      assert.ok(current.omitted_tool_calls === undefined, 'two calls, nothing omitted');
+    } finally {
+      root.sessionManager.getBranch = () => savedBranch;
+    }
+    // Prior assistant entries carry the same bounded metadata inside the
+    // recent window; the user boundary and window counting stay unchanged.
+    root.sessionManager.getBranch = () => [
+      mkUser('old-user'),
+      { type: 'message', id: 'a-old-tools',
+        message: { role: 'assistant', stopReason: 'toolUse', content: [
+          { type: 'toolCall', name: 'read', id: 'tc-old', intent: 'Old turn read', arguments: { path: 'OLD.md' } } ] } },
+      mkUser('cur-user'),
+      { type: 'message', id: 'a-prior-tools',
+        message: { role: 'assistant', stopReason: 'toolUse', content: [
+          { type: 'toolCall', name: 'edit', id: 'tc-prior', intent: 'Prior turn edit', arguments: { path: 'src/one.js' } } ] } },
+      mkTool('tr4', 'edit', false),
+      mkAssistant('a-final-plain', 'endTurn'),
+    ];
+    try {
+      const observed = await request('state');
+      const priorWithTools = observed.observations.find(o => o.kind === 'prior_agent_message' && o.turn_id === 'a-prior-tools');
+      assert.ok(priorWithTools?.tool_calls, 'prior toolCall-only entries carry metadata');
+      assert.equal(priorWithTools.tool_calls[0].target, 'src/one.js');
+      assert.ok(!observed.observations.some(o => o.turn_id === 'a-old-tools'),
+        'pre-boundary assistant evidence still never enters the current window');
+      assert.equal(observed.last_turn_user_message_id, 'cur-user', 'user boundary unchanged');
+      const current = observed.observations.find(o => o.kind === 'agent_message');
+      assert.ok(current && current.tool_calls === undefined,
+        'the plain no-call current assistant gets no tool_calls field');
+    } finally {
+      root.sessionManager.getBranch = () => savedBranch;
+    }
+    // Missing native values stay 'unknown'; more than 3 native calls keep the
+    // NEWEST 3 in native order with a truthful omission count; over-long
+    // fields are truncated and flagged.
+    root.sessionManager.getBranch = () => [
+      mkUser('cur-user'),
+      { type: 'message', id: 'a-many-tools',
+        message: { role: 'assistant', stopReason: 'toolUse', content: [
+          { type: 'toolCall', name: 'bash', id: 'tc-b1', intent: 'First older call', arguments: { command: 'echo one' } },
+          { type: 'toolCall', name: 'bash', id: 'tc-b2', arguments: { command: 'echo two' } },
+          { type: 'toolCall', name: 'write', id: 'tc-w3', intent: 'x'.repeat(500), arguments: { path: 'src/three.js' } },
+          { type: 'toolCall', name: 'read', id: 'tc-r4', arguments: { path: 'README.md' } }
+        ] } },
+      mkTool('tr5', 'bash', false),
+    ];
+    try {
+      const observed = await request('state');
+      const current = observed.observations.find(o => o.kind === 'agent_message');
+      assert.deepEqual(current.tool_calls.map(c => c.id), ['tc-b2', 'tc-w3', 'tc-r4'],
+        'only the NEWEST 3 native calls are kept, in native order');
+      assert.equal(current.omitted_tool_calls, 1, 'the older call is truthfully counted, not silently dropped');
+      assert.equal(current.tool_calls[0].declared_intent, 'unknown', 'a missing native intent stays unknown');
+      assert.equal(current.tool_calls[0].target, 'unknown', 'bash never gets a guessed target');
+      assert.equal(current.tool_calls[1].declared_intent.length, 401, 'over-long intent is bounded');
+      assert.deepEqual(current.tool_calls[1].truncated_fields, ['declared_intent'], 'truncation is flagged truthfully');
+      assert.equal(current.tool_calls[2].target, 'README.md');
+      const serialized = JSON.stringify(observed.observations);
+      assert.ok(!serialized.includes('echo one') && !serialized.includes('echo two'),
+        'bash command arguments never leak');
+    } finally {
+      root.sessionManager.getBranch = () => savedBranch;
+    }
   }
 
   // 12. Per-turn bound-task status: an active bound task injects a short

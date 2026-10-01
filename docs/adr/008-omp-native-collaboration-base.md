@@ -93,6 +93,10 @@ Orbit 不在任务结束后自动调模型作缺陷分析，不上传 `.orbit`�
 
 M4 已结束；后续版本若暴露关键接缝缺口，依据新证据处理，不把历史通过当作所有版本均支持。
 
-## 2026-10-01 补充：历史过程检查提示（已实现源码，待安装）
+## 2026-10-01 补充：纯工具调用回合的原生操作摘要（已实现 0.7.34 源码，未称安装）
+
+host `state()` 投影中，纯工具调用的 assistant 消息文本为空（交付诚实语义保留），但原生声明意图与文件目标此前在卡点/跑偏评估前被丢弃。现行语义（0.7.34 源码已实现）：当前 `agent_message` 与近期 `prior_agent_message` 条目内容含原生 toolCall 即附有界原生工具调用摘要——原生 tool_call id、name、declared intent（声明非执行事实）、read/write/edit 的真实 `arguments.path` 目标（其余 unknown，不猜 eval/命令内嵌路径）；最多最新 3 个按原生序，超出记真实省略数，字段有界并如实标注截断，缺值 unknown。原始参数/内容/补丁/命令/eval 代码不进入该摘要（排除仅限新增摘要，既有 toolResult 输出投影不变）；不新增观察事件，18 事件窗口、用户边界、省略标记与严格 stale 判定零变化。以 030-r2 真实 native 片段（report_issue 截点 c3b4f4a7，非 A-failure 截点；该窗口真实 write target 为 xd://orbit）做过无 API 机械回放（Function 提取当前源码 state 块 + stub lifecycle）：真实 id/name/declared_intent 现已可见（如 "Reporting write tool content-drop bug"）。这是历史观察诊断证据，非实机 process 验收。
+
+## 2026-10-01 补充：历史过程检查提示（已安装 0.7.33）
 
 当一个过程检查因 host 观察变化（唯一 stale 原因，其余 workspace/input/artifact/dispute 均未变）而变 stale，且 verdict correct/continue 有 findings、Root 未中断且 turn 归属本任务时，程序经既有 Root 消息通道发送一次明确历史性质的提示（非当前纠正），附有界 finding evidence/action 与检查号。attempt 先持久化（崩溃后不重发）；ACK 成功才记 sent_message_ids；失败记 unconfirmed 不自动重试。严格 host stale 判定、当前纠正路径、完成/停止门全部保留；recheck 线索资格不变。合成回放证实控制门逻辑（非实机 process 验收）。

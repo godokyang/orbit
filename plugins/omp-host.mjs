@@ -1937,6 +1937,50 @@ export function installOmpExtension(pi, sdk) {
   // last assistant, enough to compare a consecutive-failure run; the whole
   // branch is never copied. Older events get one truthful omission marker.
   const RECENT_EVENT_WINDOW = 18;
+  // Native tool-call metadata for assistant observation entries. A
+  // toolCall-only assistant message projects EMPTY text (delivery honesty is
+  // preserved — never a borrowed earlier answer), which otherwise discards
+  // the native declared intent and file target BEFORE stuck/off_track
+  // assessment. These summaries carry only truthful metadata: native
+  // tool_call id, native name, the native DECLARED intent (a declaration by
+  // the model, not proof any work executed) and the plain `arguments.path`
+  // target for read/write/edit only. Everything else — raw arguments, file
+  // bodies, patches, bash commands, eval code — never enters THIS SUMMARY
+  // (existing toolResult output projection is unchanged); embedded paths
+  // inside eval/bash are NOT guessed. At most the NEWEST 3 native toolCalls
+  // in native order; more calls yield a real omission count; missing native
+  // values stay 'unknown'; every field is character-bounded with a truthful
+  // truncation marker. An assistant with no toolCalls gets no extra field.
+  const TOOL_CALL_SUMMARY_MAX = 3;
+  const TOOL_CALL_FIELD_LIMITS = { id: 128, name: 64, declared_intent: 400, target: 400 };
+  const TOOL_CALL_TARGET_TOOLS = new Set(['read', 'write', 'edit']);
+  function toolCallSummaries(content) {
+    const calls = Array.isArray(content)
+      ? content.filter(part => part && typeof part === 'object' && part.type === 'toolCall') : [];
+    if (calls.length === 0) return null;
+    const bounded = (value, limit) => {
+      const text = typeof value === 'string' && value ? value : 'unknown';
+      return text.length > limit ? { value: `${text.slice(0, limit)}…`, truncated: true } : { value: text, truncated: false };
+    };
+    const summaries = calls.slice(-TOOL_CALL_SUMMARY_MAX).map(call => {
+      const args = call.arguments;
+      const rawTarget = TOOL_CALL_TARGET_TOOLS.has(call.name) && args && typeof args === 'object'
+        && typeof args.path === 'string' && args.path ? args.path : null;
+      const fields = {
+        id: bounded(call.id, TOOL_CALL_FIELD_LIMITS.id),
+        name: bounded(call.name, TOOL_CALL_FIELD_LIMITS.name),
+        declared_intent: bounded(call.intent, TOOL_CALL_FIELD_LIMITS.declared_intent),
+        target: bounded(rawTarget, TOOL_CALL_FIELD_LIMITS.target)
+      };
+      const truncated = Object.keys(fields).filter(key => fields[key].truncated);
+      return { id: fields.id.value, name: fields.name.value,
+        declared_intent: fields.declared_intent.value, target: fields.target.value,
+        ...(truncated.length ? { truncated_fields: truncated } : {}) };
+    });
+    return calls.length > TOOL_CALL_SUMMARY_MAX
+      ? { tool_calls: summaries, omitted_tool_calls: calls.length - TOOL_CALL_SUMMARY_MAX }
+      : { tool_calls: summaries };
+  }
   function state(entry) {
     const session = entry.session;
     const branch = session.sessionManager.getBranch();
@@ -1954,7 +1998,7 @@ export function installOmpExtension(pi, sdk) {
     const last = branch[lastIndex];
     const busy = session.isStreaming || session.isCompacting || session.isBashRunning || session.isEvalRunning || session.hasPendingAsyncWork() || entry.pending > 0;
     const message = last?.message;
-    const observations = last ? [{ kind: 'agent_message', text: textOf(message.content) }] : [];
+    const observations = last ? [{ kind: 'agent_message', text: textOf(message.content), ...toolCallSummaries(message.content) }] : [];
     for (let i = lastIndex + 1; i < branch.length && last; i++) {
       const item = branch[i];
       if (item.type === 'message' && item.message.role === 'toolResult') {
@@ -1990,7 +2034,7 @@ export function installOmpExtension(pi, sdk) {
           if (role === 'assistant') {
             observations.unshift({ kind: 'prior_agent_message', turn_id: item.id,
               text: textOf(item.message.content).slice(0, 2000),
-              stop_reason: item.message.stopReason ?? null });
+              stop_reason: item.message.stopReason ?? null, ...toolCallSummaries(item.message.content) });
             kept++;
           } else if (role === 'toolResult') {
             observations.unshift({ kind: 'prior_command', message_id: item.id,
