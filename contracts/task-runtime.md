@@ -139,7 +139,7 @@ Jev 的首个判断 provider 是 TypeSafe 的 `https://api.typesafe.ai/v1/system
 
 ## 停止与资源
 
-- 最小暂停单位是承载相关工作的 Agent 当前执行；保留会话和上下文，确认关联后台动作实际停止。不得把仅发送中断请求、注册表标签或 `hub cancel` 回执当成停止证据。
+- 最小暂停单位是承载相关工作的 Agent 当前执行；保留会话和上下文，确认关联后台动作实际停止。不得把仅发送中断请求、注册表标签或 `hub cancel` 回执当成停止证据。Root 停止在有界 teardown guard 内执行（SDK 公开 `runModeExitTeardown`，旧版缺失时沿用原路径不拒绝普通停止）：先按 owner 快照经公开 `acknowledgeDeliveries` 抑制本 owner 后台结果（含已完成未投递者）的投递（只抑制投递，不称已消费或核验）并清本会话已排队 async-result；归属读取失败或本任务 marker 可见而不可移除时，仍完成本 owner 取消／abort／reap 后如实失败，不假确认、不删未知归属消息；再取消／abort／reap；仅从 steer／follow-up 队列精确移除**当前任务耐久记录（sent_message_ids）中已归属 marker** 的 Orbit 消息（abort 前清已归属搁浅消息，abort／reap 后再清一次 requeue；用户、其他来源与其他任务的 Orbit marker 原序保留，归属不可得则不手术）；确认以 idle＋在途工具归零＋无未抑制 pending wake 为准。快照后新出现的 job id 不受抑制；无法安全抑制的真实 pending 仍如实 `stop_unconfirmed`，不假成功。
 - Orbit 控制明确绑定的 Root、本任务登记的全部成员与自有检查进程。原生界面中断 Root 时，程序负责停止其登记成员；中断请求持续有效，不被紧接着开始的活跃轮次掩盖，明确启动新任务时才重置；即使一个成员停止失败，仍尝试停止其余成员。
 - 成员停止确认按实际观测分级：会话存活时经 abort、按 owner 取消并等待异步任务底层工作结算，且以观测到的在途工具数归零为证；成员的注册表会话已释放（完成后的 idle/park 处置）时，OMP 18.2.8 对处置完成没有公开信号，后台与进程退出不可证实——桥返回结构化证据且 `confirmed:false`，任务保持 `stop_unconfirmed`，不得把"已完成"或注册表 idle 充当退出证据。OMP 进程整体退出时，以进程与实际子进程退出为证据。
 - 已退出的 failed／stop_unconfirmed 任务接受用户显式 stop 重试，从任务记录（含 `members.json` 重新发现的成员 ID）重连收尾，不重启执行；证据不足继续保持 stop_unconfirmed。

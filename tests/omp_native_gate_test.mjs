@@ -1801,6 +1801,94 @@ try {
     }
   }
 
+  // 11i. Guarded Root stop (35 task 22b36fa0 regression): a pending owned
+  // Orbit hint plus an owner background result must not resurrect the
+  // session after stop's abort — the suppression guard + source-side
+  // delivery acknowledgment + precise marker removal let stop confirm,
+  // while user input, foreign sources and future job ids stay untouched.
+  // An unsettled reap still fails honestly; a legacy session without the
+  // new public capabilities keeps the ordinary stop path.
+  {
+    const saved = { streaming: root.isStreaming, abort: root.abort, manager: root.asyncJobManager,
+      pending: root.hasPendingAsyncWork };
+    const calls = { acknowledge: [], yieldClear: [], guardDuring: [], aborts: 0, cancelAll: 0 };
+    let guardDepth = 0;
+    let pendingWake = true; // a queued owner bg result is a live wake until suppressed
+    const steeringQueue = [];
+    const followUpQueue = [];
+    root.agent = {
+      peekSteeringQueue: () => [...steeringQueue],
+      peekFollowUpQueue: () => [...followUpQueue],
+      replaceQueues: (steering, followUp) => { steeringQueue.length = 0; steeringQueue.push(...steering); followUpQueue.length = 0; followUpQueue.push(...followUp); }
+    };
+    root.runModeExitTeardown = async teardown => { guardDepth++; try { await teardown(); } finally { guardDepth--; } };
+    root.yieldQueue = { clear: kind => { calls.yieldClear.push(kind); if (kind === 'async-result') pendingWake = false; } };
+    root.isStreaming = true;
+    root.abort = async () => { calls.aborts++; root.isStreaming = false; };
+    root.hasPendingAsyncWork = () => pendingWake;
+    root.asyncJobManager = {
+      cancelAll: ({ ownerId }) => { calls.cancelAll++; if (ownerId !== 'root') throw new Error('cross-owner cancel'); },
+      cancelAndReapOwnerJobs: async ownerId => { assert.equal(ownerId, 'root'); return { settled: true }; },
+      getAllJobs: ({ ownerId }) => ownerId === 'root' ? [{ id: 'job-1' }, { id: 'job-2' }] : [],
+      acknowledgeDeliveries: ids => { calls.acknowledge.push([...ids]); calls.guardDuring.push(guardDepth > 0); }
+    };
+    let taskStatePath, savedTaskState;
+    try {
+      // A stranded Orbit hint (queued steer) from an earlier accepted send,
+      // plus a user message, a foreign custom message, and ANOTHER task's
+      // Orbit marker (a different durable sent set) ahead of it.
+      const sent = await request('send', { text: 'orbit hint that strands' });
+      taskStatePath = path.join(started.task_directory, 'state.json');
+      savedTaskState = await fs.readFile(taskStatePath, 'utf8');
+      const taskState = JSON.parse(savedTaskState);
+      taskState.sent_message_ids = [...(taskState.sent_message_ids || []), sent.id];
+      await fs.writeFile(taskStatePath, JSON.stringify(taskState));
+      steeringQueue.push(
+        { role: 'custom', customType: 'user-note', details: {}, content: 'user note first' },
+        { role: 'custom', customType: 'orbit', details: { orbitMessage: 'other-task-marker' }, content: 'prior binding hint' },
+        { role: 'custom', customType: 'orbit', details: { orbitMessage: sent.id }, content: 'orbit hint' },
+        { role: 'custom', customType: 'other-extension', details: {}, content: 'foreign aside' });
+      followUpQueue.push({ role: 'user', content: 'typed follow-up' });
+      const result = await request('stop');
+      assert.equal(result.confirmed, true, 'stop confirms despite the pending owned hint and bg result');
+      assert.deepEqual(calls.acknowledge, [['job-1', 'job-2']],
+        'owner job deliveries are suppressed from the source, exactly once with the snapshot ids');
+      assert.ok(calls.acknowledge.length > 0 && calls.guardDuring[0] === true,
+        'delivery suppression happens inside the teardown guard');
+      assert.deepEqual(calls.yieldClear, ['async-result'], 'queued async-result entries are cleared once');
+      assert.equal(calls.aborts, 1, 'the busy session is aborted exactly once');
+      assert.deepEqual(steeringQueue.map(m => m.details?.orbitMessage || m.customType),
+        ['user-note', 'other-task-marker', 'other-extension'],
+        'only THIS task\'s marker is removed; user, foreign and other-task Orbit input keep their order');
+      assert.deepEqual(followUpQueue.map(m => m.role), ['user'], 'the follow-up queue is untouched');
+      assert.equal(root.hasPendingAsyncWork(), false, 'no wake source remains after suppression');
+      // Unsettled reap still fails honestly.
+      root.asyncJobManager.cancelAndReapOwnerJobs = async () => ({ settled: false });
+      root.isStreaming = true;
+      steeringQueue.push({ role: 'custom', customType: 'orbit', details: { orbitMessage: sent.id }, content: 'requeued by abort' });
+      await assert.rejects(() => request('stop'), /did not settle/,
+        'an unsettled reap fails the stop instead of reporting success');
+    } finally {
+      await fs.writeFile(taskStatePath, savedTaskState);
+      delete root.agent; delete root.runModeExitTeardown; delete root.yieldQueue;
+      root.isStreaming = saved.streaming; root.abort = saved.abort;
+      root.asyncJobManager = saved.manager; root.hasPendingAsyncWork = saved.pending;
+    }
+    // Legacy session without the new public capabilities: ordinary stop path.
+    // The restored original fixture state legitimately lacks sent_message_ids
+    // (TaskRecord.create does not write it; TaskRuntime defaults it on start),
+    // which is exactly the absent-field lifecycle this stop must accept.
+    {
+      const savedAbort = root.abort;
+      root.abort = async () => { calls.aborts++; root.isStreaming = false; };
+      root.isStreaming = true;
+      try {
+        const legacy = await request('stop');
+        assert.equal(legacy.confirmed, true, 'a legacy session without the guard still stops');
+      } finally { root.abort = savedAbort; root.isStreaming = false; }
+    }
+  }
+
   // 12. Per-turn bound-task status: an active bound task injects a short
   //     record-derived status; a terminal task only refreshes the status line,
   //     never an unowned or dead-runtime record shown as controlled.

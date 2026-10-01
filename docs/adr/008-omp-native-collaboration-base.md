@@ -97,6 +97,10 @@ M4 已结束；后续版本若暴露关键接缝缺口，依据新证据处理�
 
 host `state()` 投影中，纯工具调用的 assistant 消息文本为空（交付诚实语义保留），但原生声明意图与文件目标此前在卡点/跑偏评估前被丢弃。现行语义（0.7.34 源码已实现）：当前 `agent_message` 与近期 `prior_agent_message` 条目内容含原生 toolCall 即附有界原生工具调用摘要——原生 tool_call id、name、declared intent（声明非执行事实）、read/write/edit 的真实 `arguments.path` 目标（其余 unknown，不猜 eval/命令内嵌路径）；最多最新 3 个按原生序，超出记真实省略数，字段有界并如实标注截断，缺值 unknown。原始参数/内容/补丁/命令/eval 代码不进入该摘要（排除仅限新增摘要，既有 toolResult 输出投影不变）；不新增观察事件，18 事件窗口、用户边界、省略标记与严格 stale 判定零变化。以 030-r2 真实 native 片段（report_issue 截点 c3b4f4a7，非 A-failure 截点；该窗口真实 write target 为 xd://orbit）做过无 API 机械回放（Function 提取当前源码 state 块 + stub lifecycle）：真实 id/name/declared_intent 现已可见（如 "Reporting write tool content-drop bug"）。这是历史观察诊断证据，非实机 process 验收。
 
+## 2026-10-01 补充三：Root 停止的复活断点修复（源码已实现，待交付）
+
+35 task `22b36fa0` 实测链（本地同版 SDK 源码与原生记录吻合；非运行 RPC 插桩因果证明）：搁浅 Orbit hint＋**已完成但投递被延后**的 owner 后台结果（bg_2）在中断后重新进入消息流，随后出现新模型调用（`826fd314`）与重问（`12dcf0ec`），且 stop 确认未通过（`stop_unconfirmed` 为已证事实）；原生记录不证明确认环与复活的先后次序。修复（全公开 SDK 面，18.2.8 floor 按能力探测）：`runModeExitTeardown` 有界包住整个 cancel/abort/reap/确认；`getAllJobs({ownerId})` 快照→`acknowledgeDeliveries`（仅抑制投递，不 consume/不虚报核验）→`yieldQueue.clear("async-result")`；归属＝当前任务耐久 `sent_message_ids`（非会话历史集合）；abort 前清已归属搁浅消息、abort/reap 后再清一次 requeue（用户/他源/他任务 Orbit marker 原序保留，不泛 `clearQueue({forInterrupt})`）；teardown 返回 void，确认由回调捕获后返回；确认环加 `hasPendingAsyncWork()` 为 false。不跨 owner、不抑制快照后新 job、reap 未结算仍如实失败；旧版无新 API 不拒绝普通停止。不称根治所有场景（guard 后残留非本任务消息照常 drain＝正确）。
+
 ## 2026-10-01 补充二：过程检查换型保留通道（0.7.36）
 
 真实任务 `22b36fa0` 实测：process 检查 #1 失败后，model_fallback 调度未持久原 kind，tick 默认 artifact，#2–#6 降级为产物检查（22b36fa0 events 序列）。修复：schedule_check 持久 next_check_kind（仅 handle_check_failure 传入失败检查自身 kind；其余调用方传 nil 清除回 artifact 默认）；tick 仅对真正 scheduled 起点重放保存的 kind，自发 delivery 检查恒 artifact；finish_check 对成功/过期的 process 换型结果安排常规 timer 终止换型链（避免 model_fallback 去重豁免导致反复重开）；排队 manual 优先 return 早于任何状态写入，不被自动换型污染种类；first_change_checked 只由 artifact 起点置位。两例回归：连续失败→换型成功不授完成且下一 tick 不重开，随后常规调度回 artifact；排队 manual 经真实 consume 入口保持 artifact 终检语义。

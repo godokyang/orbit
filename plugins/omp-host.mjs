@@ -2155,26 +2155,149 @@ export function installOmpExtension(pi, sdk) {
       entry.pending--;
     }
   }
+  // The CURRENT task's own accepted-send markers, read once from its durable
+  // state (state.json sent_message_ids — the ids send() ACKed for exactly
+  // this task). Only these may ever be removed from the session queues: a
+  // different task's Orbit markers (a rebound or prior binding) and every
+  // other source stay. No task dir or an unreadable record means NO surgery —
+  // attribution is never guessed and failure is never papered over.
+  // Returns { markers } for a bound task (its durable accepted-send ids),
+  // null when this session has no bound task dir (the ordinary stop path),
+  // or { error } when a bound task's attribution record exists but cannot be
+  // read/parsed — a failure that must SURFACE, never be swallowed into a
+  // confirmed stop, and never justify deleting messages of unknown ownership.
+  async function currentTaskSentIds(entry) {
+    const taskDir = taskDirs.get(entry.id);
+    if (!taskDir) return null;
+    let taskState;
+    try {
+      taskState = JSON.parse(await fs.readFile(path.join(taskDir, 'state.json'), 'utf8'));
+    } catch (error) {
+      return { error: `sent-id attribution unreadable for ${entry.id}: ${error.message}` };
+    }
+    // An ABSENT field is legitimate (TaskRecord does not initialize it; the
+    // runtime writes it on first save — a never-sent task has nothing of
+    // ours queued). A PRESENT field of the wrong shape is real corruption.
+    const ids = taskState.sent_message_ids;
+    if (ids === undefined || ids === null) return { markers: new Set() };
+    if (!Array.isArray(ids)) return { error: `sent-id attribution malformed for ${entry.id}` };
+    const markers = new Set(ids.filter(id => typeof id === 'string' && id));
+    return { markers };
+  }
+  // An own stranded marker that is OBSERVABLE in the queues but cannot be
+  // removed (no public replaceQueues) would resurrect the session after stop —
+  // that must fail honestly too, never confirm over an unremovable own wake.
+  function ownMarkerUnremovable(session, markers) {
+    const agent = session.agent;
+    if (!markers || !agent || typeof agent.peekSteeringQueue !== 'function' ||
+        typeof agent.peekFollowUpQueue !== 'function') return null;
+    if (typeof agent.replaceQueues === 'function') return null;
+    const isOwn = message => message && message.role === 'custom' && message.customType === 'orbit' &&
+      markers.has(message.details?.orbitMessage);
+    return [...agent.peekSteeringQueue(), ...agent.peekFollowUpQueue()].some(isOwn)
+      ? { error: `own stranded Orbit marker queued but replaceQueues is unavailable for ${session.sessionId}` }
+      : null;
+  }
+  // Precise removal of this task's stranded Orbit messages from the session's
+  // agent queues: public Agent.peek*/replaceQueues only, exact marker match
+  // (role custom + customType orbit + the id in the CURRENT task's durable
+  // sent set), order-preserving. Absent capability or unknown attribution = no
+  // surgery.
+  function removeQueuedOrbitMarkers(session, markers) {
+    const agent = session.agent;
+    if (!agent || typeof agent.peekSteeringQueue !== 'function' ||
+        typeof agent.peekFollowUpQueue !== 'function' ||
+        typeof agent.replaceQueues !== 'function' || !markers) return;
+    const isOwn = message => message && message.role === 'custom' && message.customType === 'orbit' &&
+      markers.has(message.details?.orbitMessage);
+    const steering = [...agent.peekSteeringQueue()];
+    const followUp = [...agent.peekFollowUpQueue()];
+    const keptSteering = steering.filter(message => !isOwn(message));
+    const keptFollowUp = followUp.filter(message => !isOwn(message));
+    if (keptSteering.length !== steering.length || keptFollowUp.length !== followUp.length)
+      agent.replaceQueues(keptSteering, keptFollowUp);
+  }
   async function stop(entry) {
     const session = entry.session;
     const manager = session.asyncJobManager, owner = session.getAgentId();
     if (!owner) throw new Error('OMP session has no native async-work owner');
-    if (manager) manager.cancelAll({ ownerId: owner });
-    if (state(entry).status !== 'idle' || entry.activeTools.size) await session.abort({ goalReason: 'internal' });
-    // Cancellation labels precede process exit. Reap actual native job promises.
-    if (manager && !(await manager.cancelAndReapOwnerJobs(owner, Date.now() + 5000)).settled)
-      throw new Error(`OMP background processes did not settle for ${entry.id}`);
-    for (let n = 0; n < 50; n++) {
-      const after = state(entry);
-      if (after.status === 'idle' && after.active_tools === 0) {
-        await flushNativeCalls(taskDirs.get(entry.id));
-        return { confirmed: true, thread_id: entry.id,
-        scope: 'Native session execution, attached shell processes and owner-scoped async jobs; no unmanaged detached work',
-        native_owner: owner, status_after: after.status, active_tools_after: 0, async_jobs_settled: true };
+    // runModeExitTeardown is the SDK's OWN bounded guard that keeps abort's
+    // stranded-queue drain from auto-resuming the session across a teardown's
+    // awaits (18.3.4 agent-session.ts:7621). When present it wraps the ENTIRE
+    // stop sequence so cancel/reap/confirmation observe real state, not a
+    // session resurrected by its own queued messages; an older SDK without it
+    // keeps the legacy sequence (no ordinary stop is refused just because the
+    // guard is unavailable).
+    const teardown = typeof session.runModeExitTeardown === 'function'
+      ? session.runModeExitTeardown.bind(session) : null;
+    let confirmation;
+    const work = async () => {
+      // Attribution read ONCE from the CURRENT task's durable record; both
+      // cleanup passes below use this exact set (no session-wide history).
+      // A READ/SHAPE FAILURE IS PRESERVED, not swallowed: the owner's
+      // cancel/abort/reap still run below, and the failure is thrown AFTER
+      // them — a bound task's stop never reports confirmed over unknown
+      // attribution, and no message of unknown ownership is ever removed.
+      const attribution = await currentTaskSentIds(entry);
+      const markers = attribution?.markers ?? null;
+      // Suppress THIS owner's async deliveries at the source first: a job
+      // that already finished with a DEFERRED delivery otherwise injects an
+      // async-result follow-up after abort and wakes a fresh turn (35 task
+      // 22b36fa0: bg_2's completed-but-deferred result landed after the
+      // interrupt and the model re-Asked at 10:19:42).
+      // acknowledgeDeliveries only suppresses delivery — it never marks
+      // results consumed or verified. Then drop this session's already
+      // queued async-result entries via the same public cleanup the SDK
+      // applies on its own owner-cancel path.
+      if (manager && typeof manager.getAllJobs === 'function' &&
+          typeof manager.acknowledgeDeliveries === 'function') {
+        const ownIds = manager.getAllJobs({ ownerId: owner }).map(job => job.id).filter(Boolean);
+        if (ownIds.length) manager.acknowledgeDeliveries(ownIds);
       }
-      await pause(100);
-    }
-    throw new Error(`OMP execution did not stop for ${entry.id}`);
+      if (session.yieldQueue && typeof session.yieldQueue.clear === 'function')
+        session.yieldQueue.clear('async-result');
+      if (manager) manager.cancelAll({ ownerId: owner });
+      // Remove the already-attributed stranded Orbit hint BEFORE abort, so
+      // the guard starts from a queue holding no own marker.
+      removeQueuedOrbitMarkers(session, markers);
+      if (state(entry).status !== 'idle' || entry.activeTools.size) await session.abort({ goalReason: 'internal' });
+      // Cancellation labels precede process exit. Reap actual native job promises.
+      if (manager && !(await manager.cancelAndReapOwnerJobs(owner, Date.now() + 5000)).settled)
+        throw new Error(`OMP background processes did not settle for ${entry.id}`);
+      // abort can requeue live-steered input, so the same precise cleanup
+      // runs again AFTER abort/reap, still inside the guard.
+      removeQueuedOrbitMarkers(session, markers);
+      // Attribution/unremovability failures surface only after the owner's
+      // cancel/abort/reap attempts completed (an own marker that is visible
+      // but not removable would resurrect the session after stop).
+      const unremovable = ownMarkerUnremovable(session, markers);
+      const failure = attribution?.error || unremovable?.error;
+      if (failure) throw new Error(failure);
+      for (let n = 0; n < 50; n++) {
+        const after = state(entry);
+        // A suppressed delivery never wakes the loop, but an unsuppressed
+        // pending wake (e.g. a job id created after the suppression
+        // snapshot) is real pending work: confirmation waits or fails
+        // honestly — never reports success over a live wake source.
+        const pendingWake = typeof session.hasPendingAsyncWork === 'function'
+          ? session.hasPendingAsyncWork() : false;
+        if (after.status === 'idle' && after.active_tools === 0 && !pendingWake) {
+          await flushNativeCalls(taskDirs.get(entry.id));
+          confirmation = { confirmed: true, thread_id: entry.id,
+          scope: 'Native session execution, attached shell processes and owner-scoped async jobs; no unmanaged detached work',
+          native_owner: owner, status_after: after.status, active_tools_after: 0, async_jobs_settled: true };
+          return;
+        }
+        await pause(100);
+      }
+      throw new Error(`OMP execution did not stop for ${entry.id}`);
+    };
+    // runModeExitTeardown returns void (the SDK only awaits the callback), so
+    // the confirmation is captured by the callback and returned after the
+    // guard closes; a legacy session runs the work directly.
+    if (teardown) await teardown(work);
+    else await work();
+    return confirmation;
   }
   // Member-scoped bridge: native task members have no `entries` record (no
   // Orbit-owned session id); they are addressed by their ACTUAL OMP agent id
