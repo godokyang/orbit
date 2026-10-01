@@ -439,7 +439,16 @@ module Orbit
         scheduled = now >= @next_check || (delivery_due && @state["next_check_manual"] == true)
         cause = scheduled ? (@state["next_check_trigger"] || "timer") : "delivery"
         manual = scheduled && @state["next_check_manual"] == true
-        @first_change_checked = true if start_check(host, now, trigger: cause, manual: manual)
+        # Only a genuinely SCHEDULED start replays the saved fallback kind
+        # (old state without the field, or cleared by any non-fallback
+        # schedule, defaults to artifact). A spontaneous delivery_due check
+        # is a fresh delivery review and always stays artifact — a stale
+        # fallback kind must not leak into it. first_change_checked marks
+        # the artifact change review, so a process-kind start (fallback or
+        # not) must not set it, exactly like the direct jev_process branch.
+        start_kind = scheduled ? (@state["next_check_kind"] || "artifact") : "artifact"
+        started = start_check(host, now, kind: start_kind, trigger: cause, manual: manual)
+        @first_change_checked = true if started && start_kind == "artifact"
         # A skipped duplicate delivery still consumes the turn: otherwise the
         # same delivery would be retried every tick.
         @last_delivery_checked = host["last_turn_id"] if delivery
@@ -963,15 +972,23 @@ module Orbit
       }
     end
 
-    def schedule_check(at, basis, trigger:, manual: false)
+    # `kind: nil` (the default for every non-fallback caller) restores the
+    # artifact default, so a stale fallback kind never leaks into ordinary
+    # timer/manual/amend/rebind scheduling. Only handle_check_failure passes
+    # the failed check's own kind, keeping a model-fallback retry on the same
+    # channel (a failed process check retries as process, not artifact).
+    def schedule_check(at, basis, trigger:, manual: false, kind: nil)
       # A user-requested check still queued is never replaced by an automatic
-      # interval; it runs as soon as the in-flight check finishes.
+      # interval; it runs as soon as the in-flight check finishes. The early
+      # return happens BEFORE any state write, so a rejected automatic
+      # schedule cannot pollute the queued check's kind either.
       return if !manual && @state["next_check_manual"] == true
 
       @next_check = at
       @state["next_check_basis"] = basis
       @state["next_check_trigger"] = trigger
       @state["next_check_manual"] = manual
+      @state["next_check_kind"] = kind
     end
 
     def consume_commands
@@ -2450,7 +2467,12 @@ module Orbit
           @record.event("auth_or_quota_model_excluded_task_scoped", "model" => model, "check" => scope["number"])
         end
       end
-      schedule_check(now, "检查失败后尝试其他 OMP 型号", trigger: "model_fallback", manual: scope["manual"])
+      # Preserve the failed check's own kind across the model fallback: a
+      # process check retries as process (role still derives from kind +
+      # dispute; process never gains completion eligibility). Any other
+      # scheduling path clears next_check_kind back to the artifact default.
+      schedule_check(now, "检查失败后尝试其他 OMP 型号", trigger: "model_fallback",
+                     manual: scope["manual"], kind: scope["kind"])
       save
     end
 
@@ -2682,6 +2704,16 @@ module Orbit
           schedule_check(now + [result.fetch("next_check_seconds"), @interval].max,
                          "Root 执行中，完整检查间隔以约定时间为下限", trigger: "checker_interval")
         end
+      end
+      # A process check's model-fallback chain ends here: without this, the
+      # expired model_fallback schedule (model_fallback is exempt from
+      # observation-key dedup) would re-open a process check every tick after
+      # a successful or stale fallback verdict. Return to the ordinary timer
+      # cadence; a queued manual request keeps its priority via the early
+      # return inside schedule_check. The initial jev_process scheduling
+      # semantics are untouched.
+      if scope["kind"] == "process" && scope["trigger_cause"] == "model_fallback"
+        schedule_check(now + @interval, "过程检查换型完成，回到常规观察", trigger: "timer")
       end
       if stale
         # A moving workspace cannot be approved or interrupted using an old

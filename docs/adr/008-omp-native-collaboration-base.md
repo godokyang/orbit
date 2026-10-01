@@ -97,6 +97,10 @@ M4 已结束；后续版本若暴露关键接缝缺口，依据新证据处理�
 
 host `state()` 投影中，纯工具调用的 assistant 消息文本为空（交付诚实语义保留），但原生声明意图与文件目标此前在卡点/跑偏评估前被丢弃。现行语义（0.7.34 源码已实现）：当前 `agent_message` 与近期 `prior_agent_message` 条目内容含原生 toolCall 即附有界原生工具调用摘要——原生 tool_call id、name、declared intent（声明非执行事实）、read/write/edit 的真实 `arguments.path` 目标（其余 unknown，不猜 eval/命令内嵌路径）；最多最新 3 个按原生序，超出记真实省略数，字段有界并如实标注截断，缺值 unknown。原始参数/内容/补丁/命令/eval 代码不进入该摘要（排除仅限新增摘要，既有 toolResult 输出投影不变）；不新增观察事件，18 事件窗口、用户边界、省略标记与严格 stale 判定零变化。以 030-r2 真实 native 片段（report_issue 截点 c3b4f4a7，非 A-failure 截点；该窗口真实 write target 为 xd://orbit）做过无 API 机械回放（Function 提取当前源码 state 块 + stub lifecycle）：真实 id/name/declared_intent 现已可见（如 "Reporting write tool content-drop bug"）。这是历史观察诊断证据，非实机 process 验收。
 
+## 2026-10-01 补充二：过程检查换型保留通道（0.7.36）
+
+真实任务 `22b36fa0` 实测：process 检查 #1 失败后，model_fallback 调度未持久原 kind，tick 默认 artifact，#2–#6 降级为产物检查（22b36fa0 events 序列）。修复：schedule_check 持久 next_check_kind（仅 handle_check_failure 传入失败检查自身 kind；其余调用方传 nil 清除回 artifact 默认）；tick 仅对真正 scheduled 起点重放保存的 kind，自发 delivery 检查恒 artifact；finish_check 对成功/过期的 process 换型结果安排常规 timer 终止换型链（避免 model_fallback 去重豁免导致反复重开）；排队 manual 优先 return 早于任何状态写入，不被自动换型污染种类；first_change_checked 只由 artifact 起点置位。两例回归：连续失败→换型成功不授完成且下一 tick 不重开，随后常规调度回 artifact；排队 manual 经真实 consume 入口保持 artifact 终检语义。
+
 ## 2026-10-01 补充：历史过程检查提示（已安装 0.7.33）
 
 当一个过程检查因 host 观察变化（唯一 stale 原因，其余 workspace/input/artifact/dispute 均未变）而变 stale，且 verdict correct/continue 有 findings、Root 未中断且 turn 归属本任务时，程序经既有 Root 消息通道发送一次明确历史性质的提示（非当前纠正），附有界 finding evidence/action 与检查号。attempt 先持久化（崩溃后不重发）；ACK 成功才记 sent_message_ids；失败记 unconfirmed 不自动重试。严格 host stale 判定、当前纠正路径、完成/停止门全部保留；recheck 线索资格不变。合成回放证实控制门逻辑（非实机 process 验收）。

@@ -1546,6 +1546,98 @@ fixture do |_root, record, host, _checker, _runtime|
          "recheck clues remain intact for the next applicable check")
 end
 
+# A failed PROCESS check's model fallback stays process (kind preserved
+# failure -> failure; a successful process verdict grants no completion),
+# and ordinary later scheduling returns to artifact. Case 2: a user's queued
+# manual check is never polluted by the automatic fallback kind.
+# (22b36fa0 regression: fallback checks #2-#6 silently became artifact after
+# process check #1 failed.) Driven only through real paths: RuntimeAdvisor
+# high stuck + host.working -> tick -> process check; failures and model
+# switches observed via checker.calls roles and recorded check kinds.
+fixture do |_root, record, host, _checker, _runtime|
+  now = Time.now.to_f
+  advisor = RuntimeAdvisor.new("stuck" => 0.95, "off_track" => 0.1, "artifact_ready" => 0.1)
+  selector = StubCheckerSelector.new("zhipu/glm-5")
+  checker = RuntimeSelectingChecker.new
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker,
+                                   candidate_pool: StubCandidatePool.new(["zhipu/glm-5"]),
+                                   checker_selector: selector, advisor: advisor)
+  host.working("repeated failing writes")
+  runtime.tick(now: now + 10)
+  assert(checker.calls.last&.fetch(:role) == "process_reviewer",
+         "precondition: the Jev stuck trigger started a process check")
+  checker.failure_message = "OMP reviewer exited 1: 401 invalid api key"
+  runtime.tick(now: now + 11)
+  assert(record.state.fetch("checks").last["kind"] == "process" &&
+         record.state["next_check_kind"] == "process",
+         "the failed process check persists its kind for the model fallback")
+  selector.model = "kimi-code/k3-256k"
+  checker.failure_message = "OMP reviewer exited 1: provider overloaded"
+  checker.failure_kind = "unavailable"
+  runtime.tick(now: now + 12)
+  runtime.tick(now: now + 13)
+  fallback = record.state.fetch("checks").last
+  assert(fallback["kind"] == "process" && fallback["role"] == "process_reviewer" &&
+         fallback["trigger_cause"] == "model_fallback" &&
+         checker.calls.last&.fetch(:role) == "process_reviewer",
+         "failure -> failure keeps the fallback on the process channel")
+  checker.failure_message = nil
+  checker.result = answer("complete")
+  runtime.tick(now: now + 14)
+  runtime.tick(now: now + 15)
+  assert(record.state.fetch("checks").last["kind"] == "process" &&
+         record.state.fetch("checks").last.dig("result", "verdict") == "complete",
+         "the process fallback itself completes with the third model")
+  assert(record.state.fetch("status") != "complete" &&
+         events(record).none? { |event| event["type"] == "finalization_notice" },
+         "a complete process verdict grants no completion eligibility")
+  calls_after_success = checker.calls.length
+  runtime.tick(now: now + 16)
+  assert(checker.calls.length == calls_after_success,
+         "a finished process fallback does not re-open a fallback check on the next tick")
+  host.finish("delivered after process recovery")
+  checker.result = answer("continue")
+  runtime.tick(now: now + 17)
+  runtime.tick(now: now + 18)
+  assert(record.state.fetch("checks").last["kind"] == "artifact" &&
+         record.state.fetch("checks").last["role"] == "reviewer",
+         "ordinary later scheduling returns to the artifact channel")
+end
+
+fixture do |_root, record, host, _checker, _runtime|
+  now = Time.now.to_f
+  advisor = RuntimeAdvisor.new("stuck" => 0.95, "off_track" => 0.1, "artifact_ready" => 0.1)
+  selector = StubCheckerSelector.new("zhipu/glm-5")
+  checker = RuntimeSelectingChecker.new
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker,
+                                   candidate_pool: StubCandidatePool.new(["zhipu/glm-5"]),
+                                   checker_selector: selector, advisor: advisor)
+  host.working("repeated failing writes")
+  runtime.tick(now: now + 10)
+  assert(checker.calls.last&.fetch(:role) == "process_reviewer", "precondition: process check in flight")
+  # The user requests a manual check while the process check is in flight:
+  # consume_commands queues it BEFORE the failure's automatic fallback
+  # schedule, which the queued-manual priority then rejects — so the manual
+  # request keeps the artifact default, never the fallback's process kind.
+  record.submit("check")
+  checker.failure_message = "OMP reviewer exited 1: 401 invalid api key"
+  runtime.tick(now: now + 11)
+  assert(record.state.fetch("next_check_manual") == true,
+         "precondition: the user's manual request is queued")
+  assert(record.state["next_check_kind"].nil?,
+         "the rejected automatic fallback does not pollute the queued manual kind")
+  host.finish("Root delivered the final answer")
+  checker.failure_message = nil
+  checker.result = answer("complete")
+  runtime.tick(now: now + 12)
+  runtime.tick(now: now + 13)
+  manual_check = record.state.fetch("checks").last
+  assert(manual_check["kind"] == "artifact" && manual_check["manual"] == true &&
+         manual_check["trigger_cause"] == "manual_check" &&
+         manual_check.dig("result", "verdict") == "complete",
+         "the queued manual final check runs as artifact with its completion verdict, not the fallback kind")
+end
+
 # Dedup after restart + negative gates (interrupted / stale for non-host reasons /
 # unattributed turn) — a table fixture covering the remaining control branches.
 fixture do |root, record, host, _checker, _runtime|
