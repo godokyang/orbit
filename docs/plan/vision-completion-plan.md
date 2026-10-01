@@ -1,6 +1,6 @@
 # Orbit 当前执行计划
 
-最后核对：2026-10-01（installed 0.7.32；历史过程提示源码 0.7.33 候选待审核；d77 healthy non-trigger）。方向以[主方案](mixed-model-delivery-proposal.md)为准，每项实现／调整／删除对应[代码审计](mixed-model-delivery-code-audit.md)。精确版本、当前 diff、执行者、原始证据和现场资源统一见[当前交接](handoff.md)，不在本页复制另一份状态快照。
+最后核对：2026-10-01（installed 0.7.33；1d59231e 已终态 complete＋confirmed stop；stuck/off_track 正向仍未证）。方向以[主方案](mixed-model-delivery-proposal.md)为准，每项实现／调整／删除对应[代码审计](mixed-model-delivery-code-audit.md)。精确版本、当前 diff、执行者、原始证据和现场资源统一见[当前交接](handoff.md)，不在本页复制另一份状态快照。
 
 ## 同次完整交付
 
@@ -23,7 +23,7 @@
 
 ## 当前关键状态
 
-- **installed 0.7.31 生效**（`cfc18a44`、digest `d8cec5dd…`、release `ee215c95`、83 pack 0 mismatch、full 278s exit 0）。**031 fresh 验收**：新职责提醒实际送达且 Root 作出真实简短核验（边界探针＋测试复跑），但 **C1 仍 FAIL（连续第六代 K3-root 漏 U+0085；prompt 存在≠质量）**；零 findings ⇒ 选型仍 UNEXERCISED；8 writes 全带 content（单样本不断言因果）。主体卡点/跑偏观察接缝已 source 0.7.32 修复（有界近期事件窗口，gate＋full exit 0，待安装 0.7.32）；完整 live 过程闭环仍缺——下一优先＝安装后非财务卡点/跑偏验收。
+- **installed 0.7.31（历史）**（`cfc18a44`、digest `d8cec5dd…`、release `ee215c95`、83 pack 0 mismatch、full 278s exit 0）。**031 fresh 验收**：新职责提醒实际送达且 Root 作出真实简短核验（边界探针＋测试复跑），但 **C1 仍 FAIL（连续第六代 K3-root 漏 U+0085；prompt 存在≠质量）**；零 findings ⇒ 选型仍 UNEXERCISED；8 writes 全带 content（单样本不断言因果）。观察窗口 0.7.32＋历史提示 0.7.33 已安装；**033 controlled-fault healthy self-recovery complete＋confirmed stop**（0 process/0 historical notice；GPT #7 发现真实缺陷＝强模型检查价值）——**stuck 正向链＋off_track 全链仍缺，下一核心＝自然场景真实触发＋必要阶段介入＋同质量收益＋54 W1-W10**。
 - **installed 0.7.30（历史）**（`20f3cb79`、digest `156f3faa…`、release `96a20bca`、83 pack 内容哈希核验 0 mismatch、install exit 0）。程序 integration 选型（tagged-send 接缝）**已安装、live 未测**：030-r1 在 prerequisites 满足前被 Controller Esc 中断（诊断边界：jsonl＝已解析记录非 wire；未发现 Orbit Main 工具桥删改 content；028/029 证明同模型 write 能力与 edit 自纠先例）。**030-r2 机械链完整通过一次（complete＋confirmed stop）——质量非全验收 PASS（C1 FAIL）**：9 次 no-content write（7 业务 artifact＋2 xd://orbit）未中断；核心/CLI 由 bash heredoc 落地、4 次 edit 3 成功为修正既有内容（不称 edit 初始实现证明）；零 findings ⇒ 程序选型 UNEXERCISED（tagged send 执行、选型分支正确 no-op）；外评 8/8＋6/6 matched＋C1 FAIL（连续第五代 K3-root 漏 U+0085）。**已实现（source 0.7.31，Root 已审）**：runtime 既有 manual-ready 提醒正文加入先 full-spec/risk 可执行验证再请求 manual final 的职责句，与换型成功解耦（无 finding/同型/失败职责不变）；host 仅成功来源句去重；selection 逻辑/guards/phase/trace 零变化。组合验证 full 278s exit 0、check/pack/skill 全 0（原件 `/private/tmp/orbit-integration-rider-031/`）——已提交安装（`cfc18a44`）；031 fresh 显示职责送达＋真实核验发生但 C1 未闭合，质量效果与选型触发仍待后续自然轮次。
 - **installed 0.7.29（历史）**（`b863b3fd`、digest `48e45af1…`、release `da41d4ab`、83 pack 字节一致、组合验证 exit 0——原件 `final-v029`）。0.7.27 隔离 checker 自动 SDK retry 关闭（`SDK.retry.enabled=false` 为实际 checker 路径设置，真实 provider 失败保留为有界样本）；0.7.28 root-model 工具确定性通过但 **live 未触发**（028 轮 24 root calls 全 K3/root_execution、selection=0）；028 质量负例中 **#6/#12/#13 旗舰 GPT checker 亦漏 C1**——程序 integration 选型动机成立而非低型号 checker 归因；**0.7.29 full/install 正确但其旧接缝（before_agent_start 自动 consider）经 SDK 源码证明不可达**，029 partial（paused＋native confirmed stop，非完整对照轮）未 exercise。**source 0.7.30（full 已过）＝tagged send（发送终检提醒之前）＋单一同步 fresh state authority**，局部 gate/runtime exit 0；组合验证原件 `final-v030`（full exit 0、03:30:36Z→03:35:16Z 280s，check:version/pack/skill/diff-check exit 0）——**source 0.7.30 已提交安装，待真实选型证明**。现场：S last UI=1311 套餐未开放 GLM5.3FlashX；R stopped 且 Tool not available（无原始回执，不泛称 provider 工具坏）；Q 可用。
 - **安装 0.7.26（历史）**（commit `b7401a2`、dirty false、digest `2314ec03…`、installed_at `19:59:55Z`、单次 exit 0；83 pack 对 release 字节全一致；installed loader accepted:6）。本版仅两处最小修复：Go subscription 映射 verified_by 短标签（修前 loader 5→6，四键未动）＋host.mjs work-unit 类型 help 文案（只描述，不改校验）；限定理由移存 mapping-audit。组合验证：full 前台 wrapper 权威 exit 0＋check:version/pack/validator/diff-check exit 0；178＋83 对 tested-pre（升版后冻结）逐文件一致，两段 freeze 边界如实（metadata-corrections 已记 pass_markers 227→127 等勘误）。**回归通过≠新真实验收或收益证明；.25 的 pair4 试验身份不写成 .26 跑的；新 Go 映射不是费用/专属 route 质量证明**。上一版 0.7.25（pair4 试验构建）为历史。
@@ -40,7 +40,7 @@
 
 1. 新 Root 核对交接、live diff／installed identity／Herdr；保留成功、失败及未完成证据。minchain21 当前 PID 已不存在，本轮未执行 kill（进程表不证明退出原因），无空闲自有测试进程需收尾。
 2. 0.7.30 已提交安装（`20f3cb79`）；030 首轮 fresh 为 Controller 中断 partial（原件见交接），下一轮放行已证自纠窗口后重试真实 live 验证（程序选型需自然 resolved finding＋reminder 边界，不人为制造）。SDK 18.3.4 不升级。历史 0.7.26 的安装与组合验证原件保留在其目录。安装不称完整验收。
-3. pair4 已终态：**核心机械链（推荐→派发→登记→回传→集成→终检→停止）在 0.7.25 全真实通过一次**；B 失败重派路径 unexercised、收益对照仅一轮且为负——**不称 Goal 完成**。§11.3 负收益路径调整＝程序发起的 Root integration 阶段选型：0.7.29 旧接缝（before_agent_start）经 SDK 源码证明不可达；当前 stage 改为发送终检提醒之前的窄 tagged send（save-before-send＋单一同步 fresh state），确定性验证与 0.7.30 组合验证已过、**已提交安装，待 live 轮次证明**（需自然 resolved finding＋reminder 边界，不人为制造）。Root 阶段二 54 项审计（A8/B13/C7/D10/E6/F10 unique 范围，索引 `/private/tmp/orbit-program-wake-seam-audit/ROOT-54-ITEM-REVIEW.md`）与 W1–W10 收尾按原目标进行，不新建全模型认证或新 fixture 矩阵。
+旧 0.7.30 轮已终结（历史）；当前 1d59231e 已终态 complete＋confirmed stop；卡点/跑偏正向仍未证，不重复权限样本。
 4. 完整闭合质量充分后分派、旗舰必要升级、路由成本／用量、错误控制、独立纠正、手动终检和实际停止；普通监督价值任务与其他主方案必要分支不丢弃。
 5. 核心通过后作冻结同质量 Top／混合对照，统计全部角色和实际未知量，按主方案 §11.3 调整负收益路径；逐项闭合 W1—W10 后才 complete。
 
