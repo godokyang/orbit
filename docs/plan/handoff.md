@@ -1,6 +1,6 @@
 # Orbit 当前交接
 
-最后核对：2026-10-01（installed 0.7.37 / commit `4cc957e374300b9598f4e02bce5c3920f9bc97dc` / digest `9662512a…` / full 197.31956s exit 0 / 83 pack 逐字一致）。
+最后核对：2026-10-01（installed 0.7.37＝doc-only source commit `b705344b8ca24ce523922a2da78c988f67559bd8` / digest `49cf34bc27417cbcf699a08d8d2b82986b03dc43f43ac5029c36ecde9953640d` / release `5828b3c1e29432e8a00ba08a`；`4cc957e`＝full/真实验收冻结 baseline，full 197.31956s exit 0／83 pack 逐字一致）。交付与必要收尾已完成；Goal 实际状态以 Root 工具为准。
 
 ## 目标与既有授权（不变）
 
@@ -10,8 +10,8 @@
 
 ## 当前状态（唯一生效安装）
 
-- **installed 0.7.37**＝commit `4cc957e`（release `29fba720cde2c6cd01c5e019`）；full 197.31956s exit 0；83 pack 与安装逐字一致。
-- **最终文档票 diff 已备**（完成记录＋合同/ADR/plan 状态同步），待 Root 复核后执行 W10 本地交付（doc-only commit＋安装核对）。
+- **installed 0.7.37**：运行代码与 full/真实验收 baseline＝commit `4cc957e`（full 197.31956s exit 0；release `29fba720cde2c6cd01c5e019`）；**最终文档/本地交付身份**＝source commit `b705344b8ca24ce523922a2da78c988f67559bd8`／digest `49cf34bc27417cbcf699a08d8d2b82986b03dc43f43ac5029c36ecde9953640d`／release `5828b3c1e29432e8a00ba08a`／install exit 0——Root 已实际核对（83 pack source/release 一致，仅合同文档较 full baseline 改变）。旧历史身份不改标。
+- W10/C07/F10：最终文档与本地交付事实 **verified**（W10 已勾选）；最终状态文档不在 pack83，无需重复安装。
 - 历史各代版本流水、失败与中间状态**不在本页复制**：Git（`451bff2` 及以前）、[2026-09-29 验收记录](../reference/mixed-model-real-acceptance-20260929.md)、`/private/tmp/orbit-*` 原件。
 
 ## 有效核心证据（原件绝对路径）
@@ -36,5 +36,5 @@
 
 ## 剩余动作（唯一路径）
 
-1. Root 复核最终文档 diff → 授权本地 commit（doc-only）＋安装核对 → W10 勾选、Goal 完成。
+1. 交付与必要收尾已完成；Goal 实际状态以 Root 工具为准。
 2. 不重开 W9／派发／负例等已完成项；自然未测分支随未来普通运行累积。

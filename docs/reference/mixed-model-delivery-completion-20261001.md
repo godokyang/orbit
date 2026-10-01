@@ -3,7 +3,7 @@
 本文件是原 54 项审计（A01–F10）与 W1–W10 的**当前收口工程汇总**（产品运行语义以[任务运行合同](../../contracts/task-runtime.md)为准）。逐项判定沿 Root 的
 `/private/tmp/orbit-stop-guard-037/ROOT-54-CURRENT-COMPLETION-AUDIT.json`（2026-10-01T13:01Z，基于源 `451bff2`）；
 不重写 0.7.10 初审标签（原表保留于[代码审计](../plan/mixed-model-delivery-code-audit.md)与 Git 历史）。
-构建身份：源码/安装 **0.7.37 / commit `4cc957e374300b9598f4e02bce5c3920f9bc97dc` / digest `9662512a…` /
+运行代码与真实验收冻结 baseline＝**0.7.37 / commit `4cc957e374300b9598f4e02bce5c3920f9bc97dc` / digest `9662512a…`**（最后安装事实见 C07/F10 行，不重标旧验收）；
 release `29fba720cde2c6cd01c5e019`**，full 197.31956s exit 0，83 pack 逐字 SHA 与安装一致。
 
 ## 54 项逐项判定（沿 Root 审计 JSON `rows[]` 生成，原文要求见主方案对应条款；本记录是工程收口汇总，不取代[任务运行合同](../../contracts/task-runtime.md)的产品语义权威）
@@ -37,7 +37,7 @@ release `29fba720cde2c6cd01c5e019`**，full 197.31956s exit 0，83 pack 逐字 S
 | C04 | policy projection/metric denylist/capability facts | projection/cache denylist去时间/本地样本/粗价；deadline/cooldown/stop诊断保留。 | verified（有限范围） |
 | C05 | entry and selection calibration documents | 8 entry与17标签/14 selection真实调用有限放行，绑定jev-1.13.0及问题/输入/决策，失败未知、holdout分列。 | verified（有限范围） |
 | C06 | policy versions and consumer signatures | entry3/input2/decision2与selection decision3/memberv2/checkerv7签名升级；旧分数不迁移。 | verified（有限范围） |
-| C07 | contract/ADR/usage/status/current consumer tests | 现行消费者已接线/full；当前计划/合同状态残留未交付和W9未完成句需同步，历史正文不改判。 | pending（最终文档/本地交付） |
+| C07 | contract/ADR/usage/status/current consumer tests | 合同/ADR/plan 陈旧状态句已同步并本地提交（doc-only commit `b705344`）；历史正文不改判。 | verified（有限范围） |
 | D01 | task record original instruction/basis/amendments/digests | 原始instruction/basis/amendment/source/input_digest持久，summary不成为新用户要求。 | verified（有限范围） |
 | D02 | `work_unit.rb`; actual native dispatch binding | work-units2 objective/requirements/context/decisions/scope/acceptance/deps/escalation与actual dispatch绑定；pair4同unit hint/receipt成立。 | verified（有限范围） |
 | D03 | handoff task-fit questions; conditional host policy; pair4 | 串行交接无需并行/用户逐次安排；pair4 native K3先交付后Root集成、验证、manual final、stop真实。 | verified（有限范围） |
@@ -63,7 +63,7 @@ release `29fba720cde2c6cd01c5e019`**，full 197.31956s exit 0，83 pack 逐字 S
 | F07 | ledger category groups/gaps; session summary/resource projection; task evidence export | summary/export按真实identity/role/phase/source/unit分组及reported/missing；未知跨model总数nil是诚实，非按conversation时间窗推账。 | verified（有限范围） |
 | F08 | no monetary hard-budget gate; ordinary runtime controls | 用户明确排除硬预算；无需新预算门，deadline/停止实际运行保持。 | verified（有限范围） |
 | F09 | paired frozen quality probes, baseline/native receipts, per-role ledger | Root本轮已独立写ROOT-W9-RESULT-REVIEW：同一冻结prompt/spec/6tests/20oracle，两臂同外评；K3 execution配置+existing checker pool mixed旗舰observed0 vs plainGPT7，其他用量更高，cash/quota unknown，单task效果；旧pair4旗舰+134.665%负例保留，调整后用普通监督路径有限比较，不推广派成员必省。 | verified（有限范围） |
-| F10 | full regression/pack freeze/install raw exits/installed identity; current docs | 代码4cc957e/installed0.7.37/digest9662512a，full197.31956s exit0/83pack冻结与install匹配，regress37与W9 real；最终docs/local checkpoint/必要doc-only install/cleanup待Root复核。 | pending（最终文档/本地交付） |
+| F10 | full regression/pack freeze/install raw exits/installed identity; current docs | 代码4cc957e/installed0.7.37（full baseline digest 9662512a，full 197.31956s exit 0）；最终 doc-only commit `b705344`＋一次本地安装 exit 0，Root FINAL-INSTALL-REVIEW 已核对 83 pack source/release 一致（仅合同文档较 full baseline 改变）；full 不重跑复用 baseline。 | verified（有限范围） |
 
 关键证据分列：
 
@@ -76,14 +76,14 @@ release `29fba720cde2c6cd01c5e019`**，full 197.31956s exit 0，83 pack 逐字 S
 | W9（0.7.37 冻结配对） | 同质量双臂 **6/6＋20/20 全过**、保护 scope 双过：旗舰 observed calls **0 vs 7**（baseline GPT-6-Sol total 79,296/reasoning 390）；mixed 其他角色开销更高（root K3 total 470,394 等）；缺字段按 unknown/null 分列 | 单小任务；配置为冻结条件非自动选择宣称；`ROOT-W9-RESULT-REVIEW.json` |
 | 单文件负例（0.7.37，`orbit-entry-negative-wvKE`） | **真实普通 entry 不启动**：付费 entry-3 execution 0.96 但两条价值路径 0.39/0.12<0.65→root_decides；无 task/hint/evidence/member/check；唯一拼写 byte 变化＋Root 真实验证回执；native exit | `ROOT-NEGATIVE-REVIEW.json`；launch PID 未留档已明示，退出依据 actual session_exit＋shell 现状 |
 
-**2 项 `pending_final_docs_delivery`**：C07（本文档与其消费方状态同步）、F10（最终文档 checkpoint＋本地交付核验）——本票即其闭合动作；W10 相应保留至 Root 核验本 diff 并授权既有本地交付流程后完成。
+**C07／F10：verified（最终文档与本地交付已闭合）**——完成记录＋合同/ADR/plan 状态同步已本地提交（doc-only commit `b705344`），一次本地安装 exit 0：0.7.37／source commit `b705344b8ca24ce523922a2da78c988f67559bd8`／digest `49cf34bc27417cbcf699a08d8d2b82986b03dc43f43ac5029c36ecde9953640d`／release `5828b3c1e29432e8a00ba08a`；Root 实际核对 83 pack source/release 一致（仅合同文档较 full baseline 改变，运行代码与 full/真实验收 baseline 仍 `4cc957e`，旧历史身份不改标）。W10 据此勾选；最终状态文档不在 pack83，无需重复安装。交付与必要收尾已完成；Goal 实际状态以 Root 工具为准。
 
 ## W1–W10
 
 - **W1–W6**：有限 source/校准范围 verified（W1 含上述 installed 单文件负例实机原件；各未知按原样保留，不冒称全供应商/全域）。
 - **W7–W8**：真实复合证据 pair4/033/35/37（各自运行身份分列）；**未测限制**＝非 stale process finding→correction→恢复组合、Root stage switch live（源码＋确定性过、自然分支未触发）。
 - **W9**：原冻结配对已完成（两臂同验收全过＋资源分类汇总，见上表）。
-- **W10**：本收口＋静态检查后待 Root 授权最终本地 commit/安装核验；不推送/发布。
+- **W10**：完成——最终文档＋本地交付已核对（见 C07/F10 行）；不推送/发布。
 
 ## 明确未测限制（非 passed、非完工门）
 
