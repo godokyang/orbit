@@ -1,6 +1,6 @@
 # Orbit 当前交接
 
-最后核对：2026-10-01（installed 0.7.33 / commit 861812af / digest 4d40e510 / full exit 0 / 原件 /private/tmp/orbit-hist-notice-033）。Goal **未完成**。Goal **未完成**；本页是当前交接入口，历史运行从既有 reference、Git 和下面原始目录查阅，不重开已经结束的票。
+最后核对：2026-10-01（installed 0.7.34 / commit c0001e9 / digest 15252eb1 / full exit 0 / 原件 /private/tmp/orbit-toolcall-034）。Goal **未完成**。Goal **未完成**；本页是当前交接入口，历史运行从既有 reference、Git 和下面原始目录查阅，不重开已经结束的票。
 
 ## 目标与用户决定
 
@@ -14,7 +14,7 @@
 
 ## 精确版本与工作区
 
-- **0.7.34 候选（已升版待审，未 commit/install）**：纯工具调用回合原生工具调用摘要（`plugins/omp-host.mjs` toolCallSummaries，最新 3 个原生调用 id/name/declared_intent/read·write·edit path，有界截断＋省略数；排除仅限摘要，toolResult 输出投影不变）；gate 3 case PASS（18.0s）；真实 030-r2 未修改原件无 API 机械回放（report_issue 截点 c3b4f4a7，67 项逐项等于 native jsonl）证实原生 intent 可见；contract §Jev/ADR008 已同步；**full npm test exit 0**（PID=PGID 4796，08:48:07.528Z→08:51:20.829Z，193.301s，raw log `/private/tmp/orbit-toolcall-034/npm-test-full.log`＋meta）；skill validator PASS；pack dry-run 83 files；冻结 hash `/private/tmp/orbit-toolcall-034/file-freeze.sha256`。
+- **安装 0.7.34（当前生效）**：commit `c0001e9a6f3891c874c5f7c65b2e849a1a4380ed`（dirty false）、content digest `15252eb1eee80a96b6f1288f03963d326bf7d23557350194b0feee9fc24ef37f`、release `5bdadd359afeae805c3c8fb8`、installed_at 2026-10-01T08:54:12Z、83/83 pack 文件与冻结一致（install exit 0，PID=PGID 15488，raw log `/private/tmp/orbit-toolcall-034/`）。纯工具调用回合原生摘要已安装；卡点/跑偏 live 正向仍未闭合。原文：纯工具调用回合原生工具调用摘要（`plugins/omp-host.mjs` toolCallSummaries，最新 3 个原生调用 id/name/declared_intent/read·write·edit path，有界截断＋省略数；排除仅限摘要，toolResult 输出投影不变）；gate 3 case PASS（18.0s）；真实 030-r2 未修改原件无 API 机械回放（report_issue 截点 c3b4f4a7，67 项逐项等于 native jsonl）证实原生 intent 可见；contract §Jev/ADR008 已同步；**full npm test exit 0**（PID=PGID 4796，08:48:07.528Z→08:51:20.829Z，193.301s，raw log `/private/tmp/orbit-toolcall-034/npm-test-full.log`＋meta）；skill validator PASS；pack dry-run 83 files；冻结 hash `/private/tmp/orbit-toolcall-034/file-freeze.sha256`。
 - **安装 0.7.33（当前生效）**：commit `861812af1ee9483031d2ddc59f3aed5ce4380ac6`（dirty false）、digest `4d40e5100fe32642c710d37a68707cbc88b983a0fd9f5f40168af160f057770b`、release `a8becb8a532097b154163492`、install exit 0、83 pack 0 mismatch。full exit 0（`/private/tmp/orbit-hist-notice-033/npm-test-v2-exit.txt`）。033 controlled-fault 验收：healthy self-recovery complete＋confirmed stop（stuck 正向/off_track 全链仍未证，不重复权限样本）。
 
 - **安装 0.7.32（历史，commit `6957dc25`）**；0.7.31（历史，commit `cfc18a44cb40d186ea8edbee4535a805809130fb`）：（dirty false）、digest `d8cec5dd5eb89ef274790b049e9aa0ba36da57486bab5fc0c7c8b47b927ed8de`、installed_at `2026-10-01T04:23:18Z`（release `ee215c95730ab81b20bc7a76`，install exit 0、83 pack 内容哈希 0 mismatch）。commit `cfc18a4` 恰 10 文件＝职责解耦实现（runtime 提醒正文＋host 去重句＋contract/ADR＋4 plan＋升版）；组合验证原件 `/private/tmp/orbit-integration-rider-031/`（full 278s exit 0）。
