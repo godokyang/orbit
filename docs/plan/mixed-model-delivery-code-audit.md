@@ -23,6 +23,9 @@ E04（§7、§11.2）覆盖接线随 `1ffec49`／0.7.11 与 `a1f9291`／0.7.12 �
 
 ## 1. 审视结论与状态口径
 
+> **当前阅读入口（2026-10-01）**：原 54 项（A01–F10）与 W1–W10 的当前判定、证据与边界以[完成记录](../reference/mixed-model-delivery-completion-20261001.md)为准（沿 Root 审计 JSON）；本页以下 A01—F10 表为 2026-09-29 初审快照，保留原样、不按今天重写。增量段（0.7.34–0.7.37）保留在本页下方。
+
+
 2026-10-01 增量一（installed 0.7.34，commit c0001e9，full exit 0）：纯工具调用回合的原生工具调用摘要已入 host `state()` 观察（最新 3 个原生调用 id/name/declared_intent/read·write·edit path，有界＋省略数；排除仅限摘要，toolResult 输出投影不变），补齐卡点/跑偏评估前的原生意图可见性；gate 3 case PASS＋真实 030-r2 未修改原件无 API 回放（report_issue 截点 c3b4f4a7）。lognorm34 实机 healthy：任务 `43443152` complete＋confirmed stop，native34 摘要在 checks/2/prompt.txt 实证可见。
 
 2026-10-01 增量二（installed 0.7.35，commit 74ab31d，full 实测 exit 0——PID=PGID 68563，09:38:27.255Z→09:41:41.968Z，194.7s）：checker 结构化 auth_or_quota 失败按任务排除（033 #1→#8 成因），review-model 点名＝显式重试授权仅移除目标；unavailable/invalid_result 旧语义；局部 3 块 PASS。

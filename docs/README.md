@@ -10,6 +10,7 @@
 | 当前任务、模型、检查、完成与停止语义 | [任务运行合同](../contracts/task-runtime.md)、[检查结果 schema](../contracts/check-result.schema.json)、[ADR-008](adr/008-omp-native-collaboration-base.md)、[ADR-009](adr/009-user-selected-model-pool.md) |
 | 开发纪律、范围与验证方式 | [AGENTS.md](../AGENTS.md)、[开发流程](agents/development-workflow.md)；这些文件不产生产品运行事实 |
 | 当前源码交付状态和证据边界 | [交接](plan/handoff.md)、[当前限制](plan/debt-ledger.md) |
+| 原混合模型交付目标（54 项＋W1–W10）当前收口 | [完成记录](reference/mixed-model-delivery-completion-20261001.md)；逐项判定沿 Root 审计，历史正文不重写 |
 | 有限顶级模型资源下的产品方向 | 用户认可的[混合模型交付主方案](plan/mixed-model-delivery-proposal.md)；其中目标不等于当前能力 |
 | 已实现、需要调整和需要删除的内容 | [逐项代码审计](plan/mixed-model-delivery-code-audit.md)；每项对应主方案条款 |
 | 推进顺序 | [当前计划](plan/vision-completion-plan.md)；引用主方案和审计，不再复制旧实施队列 |

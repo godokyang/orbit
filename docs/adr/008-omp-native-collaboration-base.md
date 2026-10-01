@@ -22,7 +22,7 @@ Orbit 自建的执行成员没有直接使用 OMP 的 `task/hub` 协作，成员
 
 未绑定任务的新原生用户消息仍在 `before_provider_request` 以原生消息 ID 一次判定，明确受控请求走既有前置校验，拒绝与概念讨论不建任务。直接规则先排除成对引文及代码块中的命令；实际审计交付不能因为只读被排除。新 `orbit-entry-3` 分别判断执行授权、实质交接价值和独立监督价值，按授权且两类价值任一过门组合，允许串行交接和只由 Root 执行的监督任务。不使用速度、耗时或必须并行作为入口价值。
 
-自动门只接受同规则、问题内容／版本、输入投影、决策版本和实际模型的放行证据；需有事先标注的真实正负、失败与缺证样本、实际回执、范围及复核理由。旧六条样本、旧 0.80 双门和只填样本数的配置不可迁用。当前源码内置有限 Git 入口放行，固定实际 `jev-1.13.0`，门值执行授权 0.85、交接／监督各 0.65。八个干净生产输入样本包含正负、缺证、真实 HTTP401 及两个阈值冻结后的 holdout，已独立复核。决策版本 `orbit-entry-decision-2` 按可观察 `git_untruncated_request_v1` 收窄：非 Git／截断 uncertain 请求保持 Root 自主决定且不付费，明确受控请求不被价值门否决。有限样本不证明领域泛化；新安装完整闭环尚未验收。裸“继续”没有可靠原要求时交 Root 查归属，已有活动绑定仍直接继续。阈值与别名不静默漂移，实际响应型号不匹配时保留消耗并拒绝自动启动。结构校验不能证明日志真实或普遍可靠，真实来源与效果还须本次 Goal 验证。
+自动门只接受同规则、问题内容／版本、输入投影、决策版本和实际模型的放行证据；需有事先标注的真实正负、失败与缺证样本、实际回执、范围及复核理由。旧六条样本、旧 0.80 双门和只填样本数的配置不可迁用。当前源码内置有限 Git 入口放行，固定实际 `jev-1.13.0`，门值执行授权 0.85、交接／监督各 0.65。八个干净生产输入样本包含正负、缺证、真实 HTTP401 及两个阈值冻结后的 holdout，已独立复核。决策版本 `orbit-entry-decision-2` 按可观察 `git_untruncated_request_v1` 收窄：非 Git／截断 uncertain 请求保持 Root 自主决定且不付费，明确受控请求不被价值门否决。有限样本不证明领域泛化；新安装完整闭环已有有限真实验收（单文件负例等，见[完成记录](../reference/mixed-model-delivery-completion-20261001.md)）。裸“继续”没有可靠原要求时交 Root 查归属，已有活动绑定仍直接继续。阈值与别名不静默漂移，实际响应型号不匹配时保留消耗并拒绝自动启动。结构校验不能证明日志真实或普遍可靠，真实来源与效果已有有限验收（见[完成记录](../reference/mixed-model-delivery-completion-20261001.md)），全域仍不作宣称。
 
 同一 `start` 入口亦支持对已执行要求的中途接管（语义见[合同](../../contracts/task-runtime.md)）：接管只记录 Root 的声明与程序真实采集的边界（原生消息来源、接管时存入任务私有目录的工作区快照与摘要、监督开始时刻），不追认旧执行为受控、不迁入其用量／成员／检查，失败即不建任务。
 
@@ -81,7 +81,8 @@ Orbit 不在任务结束后自动调模型作缺陷分析，不上传 `.orbit`�
 ## 2026-09-30 补充记录：成员结算语义已定（合同已写，未安装实测）
 
 - **成员结算不随工作单元终裁驱动**：0.7.18 真实任务 `02a5eda7` 显示，成员原生正常返回与真实 provider 错误（Go 429）都停在 `status=registered`／`registry_status=idle`、无 `accepted_at`；Root 对工作单元的 accept／reject 裁决不驱动 runtime 的成员结算，`members_settled?` 恒 false，故完成门要求的“成员已结算”无法满足、`pending_finalization` 通知被阻断且无超时出口。R 的只读根因报告（`/private/tmp/orbit-member-positive-N0ghF3bI/controller-records/finalization-gap-analysis.json`）中的 F1—F3 只是候选；Root 实施票不采用“终裁单独置 completed／failed”，决定采用**多事实结算**（原生本派发结果与真实 error、精确 work-unit 核验、真实执行就绪分别取证，`accepted_at` 不伪盖；缺证时一次通知 Root，不自动 `needs_user`／`stop_unconfirmed`／失败）。该语义**已写入[任务运行合同](../../contracts/task-runtime.md)的“成员结算（2026-09-30 修订）”**，不是待决候选。
-- 状态：语义已定、合同已写，实现已并入且自选成员 unit 归属接缝经 Q 独立复核 PASS，但**未安装、未实测**（当前无 0.7.20 安装）。本节只记录该决定与状态，不改变任何运行规则；语义冲突时以[合同](../../contracts/task-runtime.md)为准。
+- 状态（2026-09-30 快照，原文保留）：语义已定、合同已写，实现已并入且自选成员 unit 归属接缝经 Q 独立复核 PASS，但**未安装、未实测**（当前无 0.7.20 安装）。
+- 后续当前状态（2026-10-01 记）：该语义已随 0.7.2x 系列安装交付，现行为 installed 0.7.37（见[完成记录](../reference/mixed-model-delivery-completion-20261001.md)）。本节只记录该决定与状态，不改变任何运行规则；语义冲突时以[合同](../../contracts/task-runtime.md)为准。
 
 ## 迁移阶段的事实缺口关闭记录（历史证据）
 
@@ -95,9 +96,9 @@ M4 已结束；后续版本若暴露关键接缝缺口，依据新证据处理�
 
 ## 2026-10-01 补充：纯工具调用回合的原生操作摘要（已实现 0.7.34 源码，未称安装）
 
-host `state()` 投影中，纯工具调用的 assistant 消息文本为空（交付诚实语义保留），但原生声明意图与文件目标此前在卡点/跑偏评估前被丢弃。现行语义（0.7.34 源码已实现）：当前 `agent_message` 与近期 `prior_agent_message` 条目内容含原生 toolCall 即附有界原生工具调用摘要——原生 tool_call id、name、declared intent（声明非执行事实）、read/write/edit 的真实 `arguments.path` 目标（其余 unknown，不猜 eval/命令内嵌路径）；最多最新 3 个按原生序，超出记真实省略数，字段有界并如实标注截断，缺值 unknown。原始参数/内容/补丁/命令/eval 代码不进入该摘要（排除仅限新增摘要，既有 toolResult 输出投影不变）；不新增观察事件，18 事件窗口、用户边界、省略标记与严格 stale 判定零变化。以 030-r2 真实 native 片段（report_issue 截点 c3b4f4a7，非 A-failure 截点；该窗口真实 write target 为 xd://orbit）做过无 API 机械回放（Function 提取当前源码 state 块 + stub lifecycle）：真实 id/name/declared_intent 现已可见（如 "Reporting write tool content-drop bug"）。这是历史观察诊断证据，非实机 process 验收。
+host `state()` 投影中，纯工具调用的 assistant 消息文本为空（交付诚实语义保留），但原生声明意图与文件目标此前在卡点/跑偏评估前被丢弃。现行语义（已安装 0.7.34 起）：当前 `agent_message` 与近期 `prior_agent_message` 条目内容含原生 toolCall 即附有界原生工具调用摘要——原生 tool_call id、name、declared intent（声明非执行事实）、read/write/edit 的真实 `arguments.path` 目标（其余 unknown，不猜 eval/命令内嵌路径）；最多最新 3 个按原生序，超出记真实省略数，字段有界并如实标注截断，缺值 unknown。原始参数/内容/补丁/命令/eval 代码不进入该摘要（排除仅限新增摘要，既有 toolResult 输出投影不变）；不新增观察事件，18 事件窗口、用户边界、省略标记与严格 stale 判定零变化。以 030-r2 真实 native 片段（report_issue 截点 c3b4f4a7，非 A-failure 截点；该窗口真实 write target 为 xd://orbit）做过无 API 机械回放（Function 提取当前源码 state 块 + stub lifecycle）：真实 id/name/declared_intent 现已可见（如 "Reporting write tool content-drop bug"）。这是历史观察诊断证据，非实机 process 验收。
 
-## 2026-10-01 补充三：Root 停止的复活断点修复（源码已实现，待交付）
+## 2026-10-01 补充三：Root 停止的复活断点修复（已安装 0.7.37）
 
 35 task `22b36fa0` 实测链（本地同版 SDK 源码与原生记录吻合；非运行 RPC 插桩因果证明）：搁浅 Orbit hint＋**已完成但投递被延后**的 owner 后台结果（bg_2）在中断后重新进入消息流，随后出现新模型调用（`826fd314`）与重问（`12dcf0ec`），且 stop 确认未通过（`stop_unconfirmed` 为已证事实）；原生记录不证明确认环与复活的先后次序。修复（全公开 SDK 面，18.2.8 floor 按能力探测）：`runModeExitTeardown` 有界包住整个 cancel/abort/reap/确认；`getAllJobs({ownerId})` 快照→`acknowledgeDeliveries`（仅抑制投递，不 consume/不虚报核验）→`yieldQueue.clear("async-result")`；归属＝当前任务耐久 `sent_message_ids`（非会话历史集合）；abort 前清已归属搁浅消息、abort/reap 后再清一次 requeue（用户/他源/他任务 Orbit marker 原序保留，不泛 `clearQueue({forInterrupt})`）；teardown 返回 void，确认由回调捕获后返回；确认环加 `hasPendingAsyncWork()` 为 false。不跨 owner、不抑制快照后新 job、reap 未结算仍如实失败；旧版无新 API 不拒绝普通停止。不称根治所有场景（guard 后残留非本任务消息照常 drain＝正确）。
 
