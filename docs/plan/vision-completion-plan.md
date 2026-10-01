@@ -1,6 +1,6 @@
 # Orbit 当前执行计划
 
-最后核对：2026-09-30（0.7.26 已提交安装、pair4 两臂终态入档）。方向以[主方案](mixed-model-delivery-proposal.md)为准，每项实现／调整／删除对应[代码审计](mixed-model-delivery-code-audit.md)。精确版本、当前 diff、执行者、原始证据和现场资源统一见[当前交接](handoff.md)，不在本页复制另一份状态快照。
+最后核对：2026-10-01（installed 0.7.29；源码 0.7.30 full 已过、待 commit/install/live；028/029 live 轮次入档）。方向以[主方案](mixed-model-delivery-proposal.md)为准，每项实现／调整／删除对应[代码审计](mixed-model-delivery-code-audit.md)。精确版本、当前 diff、执行者、原始证据和现场资源统一见[当前交接](handoff.md)，不在本页复制另一份状态快照。
 
 ## 同次完整交付
 
@@ -23,7 +23,8 @@
 
 ## 当前关键状态
 
-- **安装 0.7.26 生效**（commit `b7401a2`、dirty false、digest `2314ec03…`、installed_at `19:59:55Z`、单次 exit 0；83 pack 对 release 字节全一致；installed loader accepted:6）。本版仅两处最小修复：Go subscription 映射 verified_by 短标签（修前 loader 5→6，四键未动）＋host.mjs work-unit 类型 help 文案（只描述，不改校验）；限定理由移存 mapping-audit。组合验证：full 前台 wrapper 权威 exit 0＋check:version/pack/validator/diff-check exit 0；178＋83 对 tested-pre（升版后冻结）逐文件一致，两段 freeze 边界如实（metadata-corrections 已记 pass_markers 227→127 等勘误）。**回归通过≠新真实验收或收益证明；.25 的 pair4 试验身份不写成 .26 跑的；新 Go 映射不是费用/专属 route 质量证明**。上一版 0.7.25（pair4 试验构建）为历史。
+- **installed 0.7.29 生效**（`b863b3fd`、digest `48e45af1…`、release `da41d4ab`、83 pack 字节一致、组合验证 exit 0——原件 `final-v029`）。0.7.27 隔离 checker 自动 SDK retry 关闭（`SDK.retry.enabled=false` 为实际 checker 路径设置，真实 provider 失败保留为有界样本）；0.7.28 root-model 工具确定性通过但 **live 未触发**（028 轮 24 root calls 全 K3/root_execution、selection=0）；028 质量负例中 **#6/#12/#13 旗舰 GPT checker 亦漏 C1**——程序 integration 选型动机成立而非低型号 checker 归因；**0.7.29 full/install 正确但其旧接缝（before_agent_start 自动 consider）经 SDK 源码证明不可达**，029 partial（paused＋native confirmed stop，非完整对照轮）未 exercise。**当前 source 0.7.30（full 已过）＝tagged send（发送终检提醒之前）＋单一同步 fresh state authority**，局部 gate/runtime exit 0；组合验证原件 `final-v030`（full exit 0、03:30:36Z→03:35:16Z 280s，check:version/pack/skill/diff-check exit 0），**待 commit/install/live**。现场：S last UI=1311 套餐未开放 GLM5.3FlashX；R stopped 且 Tool not available（无原始回执，不泛称 provider 工具坏）；Q 可用。
+- **安装 0.7.26（历史）**（commit `b7401a2`、dirty false、digest `2314ec03…`、installed_at `19:59:55Z`、单次 exit 0；83 pack 对 release 字节全一致；installed loader accepted:6）。本版仅两处最小修复：Go subscription 映射 verified_by 短标签（修前 loader 5→6，四键未动）＋host.mjs work-unit 类型 help 文案（只描述，不改校验）；限定理由移存 mapping-audit。组合验证：full 前台 wrapper 权威 exit 0＋check:version/pack/validator/diff-check exit 0；178＋83 对 tested-pre（升版后冻结）逐文件一致，两段 freeze 边界如实（metadata-corrections 已记 pass_markers 227→127 等勘误）。**回归通过≠新真实验收或收益证明；.25 的 pair4 试验身份不写成 .26 跑的；新 Go 映射不是费用/专属 route 质量证明**。上一版 0.7.25（pair4 试验构建）为历史。
 - **原生指令冲突已确认（源码规则分支与 shape／config 探针证据，非 wire 证据）**：OMP 18.3.4 对 `revision >= 6` 给 `delegation-bias restrained`，`system-prompt.ts` 据此渲染 inline-first（「NEVER delegate one slice」「2+ independent slices」），与主方案 §5.2 的串行接力冲突，并已按同层政策修复（见下）；**这是源码规则分支与 shape／config 探针证据**（`/private/tmp/omp-delegation-bias-investigation.json`），实际请求体未落盘，既不能据此推定旧两轮 `members=0` 的因果，也不宣称服务器收到或模型遵循。
 - 最小真实 Jev API HTTP 200。随后 installed21 明确交接任务 `26935a3e` 的实际成员实现、Root 固定测试、独立终检和停止确认已闭合。隔离单候选池、明确交接，**普通自主派发与资源收益仍未验收**。
 - 启动接缝修复已在 installed 0.7.23 生效并有普通请求实测：任务 `01f4925b-84e2-4560-9a26-20cf1bb5294b`（fixture `/private/tmp/orbit-ordinary-phone-1XOIXp`，seed `f59f7d0b…`，请求原文不提 Orbit，真实全池）入口 `uncertain → start`（jev-1.13.0）、首个载荷带 bootstrap、首次编辑前单元 `none`、Root 自行实施、检查 3 次（1 次 Go 429 失败／2、3 由 k3 完成、findings 0）、外部 copy 固定 9 例 exit 0、`complete`＋`confirmed stop`。**成员=0：只证明入口与自行实施路径，不证明自主委派。**
@@ -36,8 +37,8 @@
 ## 下一动作
 
 1. 新 Root 核对交接、live diff／installed identity／Herdr；保留成功、失败及未完成证据。minchain21 当前 PID 已不存在，本轮未执行 kill（进程表不证明退出原因），无空闲自有测试进程需收尾。
-2. 安装与组合验证已完成（installed 0.7.26，release-delivery 与 regression-0.7.26 原件）；不再重复安装、不重跑组合验证、不升级 OMP。安装不称完整验收。
-3. pair4 已终态：**核心机械链（推荐→派发→登记→回传→集成→终检→停止）在 0.7.25 全真实通过一次**；B 失败重派路径 unexercised、收益对照仅一轮且为负——**不称 Goal 完成**。下一优先＝Root 主导的最终逐项审计（阶段二 audit）与负收益路径决策闭合（主方案 §11.3），必要时按证据决定成员路径调整，不再盲跑大任务。
+2. 0.7.30 组合验证已过（full exit 0 及各检查原件 `final-v030`）：待 Root 授权本地 commit＋install；随后以安装构建做新一轮 fresh live 验证（程序选型需自然 resolved finding＋reminder 边界，不人为制造）。SDK 18.3.4 不升级。历史 0.7.26 的安装与组合验证原件保留在其目录。安装不称完整验收。
+3. pair4 已终态：**核心机械链（推荐→派发→登记→回传→集成→终检→停止）在 0.7.25 全真实通过一次**；B 失败重派路径 unexercised、收益对照仅一轮且为负——**不称 Goal 完成**。§11.3 负收益路径调整＝程序发起的 Root integration 阶段选型：0.7.29 旧接缝（before_agent_start）经 SDK 源码证明不可达；当前 stage 改为发送终检提醒之前的窄 tagged send（save-before-send＋单一同步 fresh state），确定性验证与 0.7.30 组合验证已过、**待 commit/install 与真实 live 轮次证明**（需自然 resolved finding＋reminder 边界，不人为制造）。Root 阶段二 54 项审计（A8/B13/C7/D10/E6/F10 unique 范围，索引 `/private/tmp/orbit-program-wake-seam-audit/ROOT-54-ITEM-REVIEW.md`）与 W1–W10 收尾按原目标进行，不新建全模型认证或新 fixture 矩阵。
 4. 完整闭合质量充分后分派、旗舰必要升级、路由成本／用量、错误控制、独立纠正、手动终检和实际停止；普通监督价值任务与其他主方案必要分支不丢弃。
 5. 核心通过后作冻结同质量 Top／混合对照，统计全部角色和实际未知量，按主方案 §11.3 调整负收益路径；逐项闭合 W1—W10 后才 complete。
 

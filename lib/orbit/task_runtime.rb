@@ -2795,9 +2795,18 @@ module Orbit
       @state["manual_check_reminders"] ||= {}
       return if @state["manual_check_reminders"][key]
 
+      # Persist the clean check, resolved findings and matching delivery BEFORE
+      # the wake send so the host can verify durable provenance at send time
+      # (the outer save happens after this method returns — too late).
+      save
+      # The integration_check tag marks this single program-purpose send; the
+      # host re-verifies every durable fact itself and the tag alone grants no
+      # selection authority. The reminder/message_id is recorded only AFTER the
+      # real delivery ACK below — never pre-written.
       sent = @connection.send_message("Orbit 过程检查未发现当前交付缺口，但这不是手动终检，也不是任务完成。" \
                                       "请当前助手调用 Orbit action=check, task=<当前任务目录>，结束本轮等待独立终检；" \
-                                      "收到有效通知后再申请停止。无需用户重复催办。")
+                                      "收到有效通知后再申请停止。无需用户重复催办。",
+                                      integration_check: scope["number"])
       @state["sent_message_ids"] << sent.fetch("id")
       @state["manual_check_reminders"][key] = { "check" => scope["number"], "message_id" => sent.fetch("id"),
                                                 "at" => Time.at(now).utc.iso8601 }

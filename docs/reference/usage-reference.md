@@ -188,7 +188,7 @@ orbit 工具调用: { action: "root-model", task: TASK_DIRECTORY,
 目标必须同时在候选池与当前 OMP 目录中并精确解析；`from`／`to` 按切换前后的真实身份记录。**配置选择回执本身不证明实际调用身份**——实际身份由切换后后续 native assistant 调用回执（`resource-calls.json` 中的 `actual_identity.provider`／`actual_identity.model`；`actual_model` 只是中间 receipt 字段）证明，该阶段归属适用于切换后的后续调用，不局限仅一次。在途独立检查、排队的手动终检或完成停止窗口内拒绝切换。同型号同阶段重复请求被拒；原生 `/model` 切换后可重新选择。这不是给检查者重选型号的入口（那用 `orbit review-model`）。
 
 
-除 Root 手动调用外，程序自身也可在满足合同的全部边界时（真实缺陷已被独立检查确认修复、手动终检提醒已送达且尚未排队、来源检查与账本回执可精确交叉核验等）为该任务选择**一次** integration 阶段型号（目标＝实际发现该缺陷的检查调用型号）。**该程序来源不是 Root 工具调用**：记录使用独立 kind（`tool_call_id=null`、origin=program），不冒充 Root 动作；配置选择回执同样不证明实际调用身份，仍以下一 native assistant 回执为准。程序保守识别已有显式选择并优先；之后用户与 Root 仍可自行改型（原生 `/model`、`root-model`），程序不自动回滚、不重试失败，并发场景的最后写者限制以合同为准。
+除 Root 手动调用外，程序自身也可在满足合同的全部边界时（真实缺陷已被独立检查确认修复、手动终检提醒**发送之前**的窄程序标记、来源检查与账本回执可精确交叉核验等）为该任务选择**一次** integration 阶段型号（目标＝实际发现该缺陷的检查调用型号）。**该程序来源不是 Root 工具调用**：记录使用独立 kind（`tool_call_id=null`、origin=program），不冒充 Root 动作；配置选择回执同样不证明实际调用身份，仍以下一 native assistant 回执为准。程序保守识别已有显式选择并优先；之后用户与 Root 仍可自行改型（原生 `/model`、`root-model`），程序不自动回滚、不重试失败，并发场景的最后写者限制以合同为准。
 
 ### 模型证据提交（model-evidence）
 

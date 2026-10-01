@@ -481,12 +481,13 @@ try {
       'the bound dispatch carries the hint message id');
   }
   // 1f-pre. Program-initiated Root integration selection (contract: 程序发起的
-  // Root integration 阶段选择). Runs on the FIRST task BEFORE its first
-  // root-model tool selection so no real tool history can illegitimately
-  // block the path. Version triples are REAL digests from
-  // scripts/orbit-root-binding (an intentional workspace marker change makes
-  // each new version); the program path fresh-syncs the pool itself. All
-  // fixture state/ledger/collab/pool/model changes are save/restored.
+  // Root integration 阶段选择) driven through the REAL owned send RPC with the
+  // narrow integration_check tag — the same entry the Ruby runtime's
+  // remind_manual_final_check uses, not a synthetic hook emission. Runs on the
+  // FIRST task BEFORE its first root-model tool selection. Version triples are
+  // REAL digests from scripts/orbit-root-binding (a workspace marker change
+  // makes each new version). Fixture state/ledger/collab/pool/model and the
+  // sendCustomMessage spy are save/restored.
   {
     const gpt = { provider: 'openai-codex', id: 'gpt-6-sol' };
     const originalSetModel = pi.setModel;
@@ -502,6 +503,7 @@ try {
     const savedCollab = await fs.readFile(collabPath, 'utf8').catch(() => '');
     const setModelCalls = [];
     let falseSdkCalls = 0;
+    const originalSendCustom = root.sendCustomMessage;
     const markerFile = path.join(project, 'prog-version-marker.tmp');
     const bindingOf = async () => {
       const run = spawnSync(process.env.ORBIT_RUBY, ['--disable-gems',
@@ -533,12 +535,14 @@ try {
           result: { verdict: 'complete', findings: [], resolved_ids: ['money-bug'], delivery: { ready: true } },
           usage: { calls: [] } },
       ];
+      // Pre-send semantics: manual_check_reminders is NOT written (the Ruby
+      // runtime records it only after the real delivery ACK). Extra overrides
+      // may add it to simulate an already-reminded duplicate send.
       return fs.writeFile(statePath, JSON.stringify({ ...savedState, status: 'running',
         task_delivery: td, checks,
         findings: { 'money-bug': { id: 'money-bug', status: 'resolved', check: 1, resolution_check: 2,
           observed_input: td.input_digest, observed_root: td.artifact_root, observed_version: buggy.artifact_digest,
           resolution_input: td.input_digest, resolution_root: td.artifact_root, resolution_version: td.artifact_digest } },
-        manual_check_reminders: { [reminderKey]: { check: 2, message_id: 'm1', at: '2026-10-01T00:00:00Z' } },
         members: [], recheck: null, next_check_manual: false, ...extra }));
     };
     const writeLedger = suffix => fs.writeFile(ledgerPath, JSON.stringify({
@@ -552,18 +556,35 @@ try {
       ctx.models.list = () => [model, gpt];
       ctx.models.resolve = spec => spec === 'openai-codex/gpt-6-sol' ? gpt
         : spec === 'glm/x' ? model : undefined;
-      pi.setModel = async m => { setModelCalls.push(`${m.provider}/${m.id}`); root.model = m; return true; };
-      // (a) Positive: real resolved finding + real reminder -> ONE program
-      // switch (the program path fresh-syncs the pool itself), separate
-      // record kind, no fake tool call id, full provenance, guidance rides.
+      const orderLog = [];
+      root.sendCustomMessage = async (message, options) => {
+        orderLog.push(`send:${String(message.content).slice(0, 24)}`);
+        return originalSendCustom.call(root, message, options);
+      };
+      pi.setModel = async m => { orderLog.push(`setModel:${m.provider}/${m.id}`); setModelCalls.push(`${m.provider}/${m.id}`); root.model = m; return true; };
+      const REMINDER = 'Orbit 过程检查未发现当前交付缺口，但这不是手动终检。请当前助手调用 Orbit action=check 结束本轮等待独立终检。';
+      const lastDeliveredText = () => {
+        const customs = root.sessionManager.getBranch().filter(e => e.type === 'custom_message');
+        return customs[customs.length - 1]?.content ?? '';
+      };
+      // (a) Positive via the REAL owned send RPC with the narrow tag: ONE
+      // program switch BEFORE sendCustomMessage (order proven), guidance rides
+      // the SAME reminder message, separate record kind, no fake tool id.
       const buggy = await bumpVersion('buggy');
       const fixed = await bumpVersion('fixed');
       await writeProgState(buggy, fixed, 1);
       await writeLedger(1);
-      const turn1 = await emit('before_agent_start', { prompt: 'integration turn', systemPrompt: ['BASE'] }, ctx);
+      const sent1 = await request('send', { text: REMINDER, integration_check: 2 });
+      assert.ok(sent1.id && sent1.delivery === 'accepted', 'the reminder is really delivered');
       assert.equal(setModelCalls.length, 1, `one program switch expected, got ${JSON.stringify(setModelCalls)}`);
       assert.equal(setModelCalls[0], 'openai-codex/gpt-6-sol');
       assert.equal(root.model, gpt, 'the fixture root model actually switched');
+      assert.ok(orderLog.indexOf('setModel:openai-codex/gpt-6-sol') < orderLog.findIndex(x => x.startsWith('send:')),
+        'the public setModel precedes the wake sendCustomMessage');
+      const delivered1 = lastDeliveredText();
+      assert.ok(delivered1.includes('action=check'), 'the reminder text itself is delivered');
+      assert.match(delivered1, /integration 阶段/, 'guidance rides the SAME reminder message');
+      assert.match(delivered1, /程序来源提示/, 'the guidance is marked as program-source');
       const progRecord = (await fs.readFile(collabPath, 'utf8')).split('\n').filter(Boolean)
         .map(l => JSON.parse(l)).find(e => e.kind === 'root_integration_model_selected');
       assert.ok(progRecord, 'a program-origin record exists');
@@ -574,23 +595,56 @@ try {
       assert.deepEqual(progRecord.finding_ids, ['money-bug']);
       assert.deepEqual(progRecord.detecting_call_ids, ['call-find-a-1', 'call-find-b-1']);
       assert.equal(progRecord.version_triple.artifact_digest, fixed.artifact_digest);
-      assert.match(turn1.systemPrompt.join(''), /integration 阶段/, 'guidance rides the status prompt');
-      // (b) Prepare-loop rerun: no second switch; a queued manual final
-      // suppresses the cached guidance (idempotency and guidance differ).
-      const turn2 = await emit('before_agent_start', { prompt: 'rerun', systemPrompt: ['BASE'] }, ctx);
-      assert.equal(setModelCalls.length, 1, 'the rerun never switches twice');
-      assert.match(turn2.systemPrompt.join(''), /integration 阶段/, 'guidance persists on the rerun');
-      await writeProgState(buggy, fixed, 1, { next_check_manual: true });
-      const turn3 = await emit('before_agent_start', { prompt: 'manual window', systemPrompt: ['BASE'] }, ctx);
-      assert.equal(setModelCalls.length, 1, 'no new switch while the manual window is queued');
-      assert.ok(!turn3.systemPrompt.join('').includes('integration 阶段'),
-        'the guidance stops asking for work once the manual final has queued');
-      // (c) Ledger mismatch on a fresh REAL version: no attempt at all.
+      assert.equal(progRecord.tagged_check, 2);
+      // (b) Duplicate tagged send for the SAME triple: no second switch, the
+      // plain reminder still goes out; an already-reminded triple selects
+      // nothing at all.
+      const branchBefore = root.sessionManager.getBranch().length;
+      const sent2 = await request('send', { text: REMINDER, integration_check: 2 });
+      assert.ok(sent2.delivery === 'accepted');
+      assert.equal(setModelCalls.length, 1, 'a duplicate same-triple send never switches twice');
+      const td1 = { artifact_root: fixed.artifact_root, input_digest: fixed.input_digest, artifact_digest: fixed.artifact_digest };
+      const rk1 = createHash('sha256').update(JSON.stringify([td1.artifact_root, td1.input_digest, td1.artifact_digest])).digest('hex');
+      await writeProgState(buggy, fixed, 1, { manual_check_reminders: { [rk1]: { check: 2, message_id: 'acked-m1', at: '2026-10-01T00:00:00Z' } } });
+      await request('send', { text: REMINDER, integration_check: 2 });
+      assert.equal(setModelCalls.length, 1, 'an already-reminded triple (ACK recorded) selects nothing');
+      // (b2) Manual window queued: no switch AND no guidance on the message.
+      const v1b = await bumpVersion('v1b');
+      await writeProgState(buggy, v1b, 5, { next_check_manual: true });
+      await writeLedger(5);
+      const beforeManual = setModelCalls.length;
+      await request('send', { text: REMINDER, integration_check: 2 });
+      assert.equal(setModelCalls.length, beforeManual, 'no switch while the manual window is queued');
+      assert.ok(!lastDeliveredText().includes('integration 阶段'), 'no guidance while the manual window is queued');
+      // (c) Ledger mismatch on a fresh REAL version: no attempt at all, the
+      // plain reminder still goes out unchanged.
       const v2 = await bumpVersion('v2');
       await writeProgState(buggy, v2, 2);
       await fs.writeFile(ledgerPath, JSON.stringify({ schema_version: 'orbit-resource-calls-v1', task_id: savedState.id, calls: {} }));
-      await emit('before_agent_start', { prompt: 'ledger mismatch', systemPrompt: ['BASE'] }, ctx);
+      await request('send', { text: REMINDER, integration_check: 2 });
       assert.equal(setModelCalls.length, 1, 'a missing ledger row refuses without an attempt');
+      assert.ok(lastDeliveredText().includes('action=check') && !lastDeliveredText().includes('integration 阶段'),
+        'the ordinary reminder is delivered without selection');
+      // (c2) Missing tag on a FRESH triple where every OTHER precondition is
+      // valid (full ledger, clean check, reminder window open): the tag alone
+      // separates selection from an ordinary reminder send. Restore the
+      // current model to a non-target first so the skips below prove TAG
+      // protection, not a same-model early exit.
+      root.model = originalRootModel;
+      const v2b = await bumpVersion('v2b');
+      await writeProgState(buggy, v2b, 6);
+      await writeLedger(6);
+      const beforePlain = setModelCalls.length;
+      await request('send', { text: REMINDER });
+      assert.equal(setModelCalls.length, beforePlain, 'an untagged send never selects');
+      // (c3) Invalid tag (check not found) on the SAME otherwise-valid triple.
+      await request('send', { text: REMINDER, integration_check: 99 });
+      assert.equal(setModelCalls.length, beforePlain, 'an invalid tag selects nothing');
+      // (c4) A tagged send on this valid triple DOES select (proves the two
+      // skips above were caused by the tag, not by a broken precondition).
+      await request('send', { text: REMINDER, integration_check: 2 });
+      assert.equal(setModelCalls.length, beforePlain + 1,
+        'a properly tagged send on an otherwise-valid triple selects exactly once');
       // (d) SDK false on a fresh REAL version with the current model restored
       // to a non-target: one classified attempt (own false-call counter),
       // never retried, no phase granted.
@@ -598,10 +652,11 @@ try {
       const v3 = await bumpVersion('v3');
       await writeProgState(buggy, v3, 3);
       await writeLedger(3);
-      pi.setModel = async () => { falseSdkCalls += 1; return false; };
-      await emit('before_agent_start', { prompt: 'sdk false', systemPrompt: ['BASE'] }, ctx);
-      await emit('before_agent_start', { prompt: 'sdk false retry', systemPrompt: ['BASE'] }, ctx);
+      pi.setModel = async () => { falseSdkCalls += 1; orderLog.push('setModel:false'); return false; };
+      await request('send', { text: REMINDER, integration_check: 2 });
+      await request('send', { text: REMINDER, integration_check: 2 });
       assert.equal(falseSdkCalls, 1, 'the unconfirmed switch is attempted once and never retried');
+      assert.ok(lastDeliveredText().includes('action=check'), 'selection failure still delivers the ordinary reminder');
       const falseRecord = (await fs.readFile(collabPath, 'utf8')).split('\n').filter(Boolean)
         .map(l => JSON.parse(l)).filter(e => e.kind === 'root_integration_model_selected' && e.ok === false).pop();
       assert.ok(falseRecord && falseRecord.error.includes('without confirming'),
@@ -618,11 +673,12 @@ try {
       const v4 = await bumpVersion('v4');
       await writeProgState(buggy, v4, 4);
       await writeLedger(4);
-      await emit('before_agent_start', { prompt: 'after tool selection', systemPrompt: ['BASE'] }, ctx);
+      await request('send', { text: REMINDER, integration_check: 2 });
       assert.equal(setModelCalls.length, beforeTool + 1,
         'a confirmed Root tool selection conservatively blocks later program attempts');
     } finally {
       pi.setModel = originalSetModel;
+      root.sendCustomMessage = originalSendCustom;
       ctx.models.list = originalList;
       if (originalResolve) ctx.models.resolve = originalResolve; else delete ctx.models.resolve;
       root.model = originalRootModel;

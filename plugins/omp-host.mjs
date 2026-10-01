@@ -2410,7 +2410,27 @@ export function installOmpExtension(pi, sdk) {
                  available: available.map(m => `${m.provider}/${m.id}`), families, agents, routes, limits,
                  agent_dir: typeof sdk.getAgentDir === 'function' ? sdk.getAgentDir() : null };
       }
-      case 'send': return send(entry, request.text);
+      case 'send': {
+        // Ordinary sends behave exactly as before. An integration_check tag is
+        // a narrow program-purpose marker from remind_manual_final_check only;
+        // the tag alone grants nothing — the tagged branch re-verifies every
+        // durable fact and performs any eligible public pi.setModel selection
+        // BEFORE the same custom-message wake, so the woken turn (which the
+        // SDK never routes through before_agent_start) still lands on the
+        // selected model. Selection failure never blocks the reminder.
+        let text = request.text;
+        if (Number.isInteger(request.integration_check) && request.integration_check > 0) {
+          try {
+            const outcome = await considerProgramIntegrationSwitch(entry, currentContext,
+              await resolveBoundTask(entry.id, currentContext?.cwd), entry.id,
+              { taggedCheck: request.integration_check });
+            // The program-source guidance rides the SAME reminder message —
+            // only when a selection actually succeeded for the current target.
+            if (outcome && typeof outcome.guidance === 'string') text = `${request.text}\n\n${outcome.guidance}`;
+          } catch { /* classified trace only; the reminder below still goes out */ }
+        }
+        return send(entry, text);
+      }
       case 'stop': return stop(entry);
       // Simple readable interface for TaskRuntime wiring (M1.x): the native
       // member roster and recent native hub traffic.
@@ -3144,9 +3164,8 @@ export function installOmpExtension(pi, sdk) {
   const rootPhaseByTask = new Map();
   // Program-initiated Root integration selection (contract: 程序发起的 Root
   // integration 阶段选择). One attempt per (taskDir,input,artifactRoot,
-  // artifactDigest); the value records the classified outcome so a repeat hook
-  // fire (SDK prepare-loop rerun) never switches twice and the guidance can
-  // keep riding the status block until the manual final queues.
+  // artifactDigest); the value records the classified outcome so a duplicate
+  // same-triple tagged send never switches twice.
   const rootIntegrationAttempts = new Map();
   // User/Root selection priority: durable model_change baseline per session
   // (captured at first observation, AFTER the launch entry exists), our own
@@ -3306,44 +3325,77 @@ export function installOmpExtension(pi, sdk) {
   }
 
   // Program-initiated Root integration selection (contract: 程序发起的 Root
-  // integration 阶段选择, 已采纳待接线). All gates reuse existing read-side
+  // integration 阶段选择). Entry point is the TAGGED pre-send position in the
+  // owned `send` RPC only (remind_manual_final_check persists durable facts,
+  // then sends with integration_check). All gates reuse existing read-side
   // state and wait discipline; cheap screens run before the fingerprint probe.
-  // Returns the classified outcome (also cached in rootIntegrationAttempts so
-  // the SDK prepare-loop rerun never switches twice) plus guidance text when a
-  // switch succeeded for the current version triple.
-  async function considerProgramIntegrationSwitch(entry, ctx, bound, sessionId) {
-    const state = bound.state;
+  // Returns the classified outcome (cached in rootIntegrationAttempts so a
+  // duplicate same-triple send never switches twice) plus guidance text that
+  // rides the SAME reminder message when the switch succeeded.
+  async function considerProgramIntegrationSwitch(entry, ctx, bound, sessionId, options = {}) {
+    // The ONLY entry is the tagged pre-send position in the owned send RPC.
+    // A missing/invalid tag selects nothing (and never blocks the reminder).
+    if (!Number.isInteger(options.taggedCheck) || options.taggedCheck <= 0)
+      return { attempted: false, reason: 'tag_missing_or_invalid' };
+    // Main-session identity and a live entry: the RPC's session must be the
+    // registry main, the entry's own session, AND the ctx that will resolve
+    // models must be the SAME session's context — otherwise selection would
+    // use another context's catalog for the current entry. Registry identity
+    // is checked against the LIVE ref (ref.session === entry.session); any
+    // unknown shape is a skip, never a guess.
+    let ctxSessionId = null;
+    try { ctxSessionId = ctx?.sessionManager?.getSessionId?.() ?? null; } catch { ctxSessionId = null; }
+    let liveRef = null;
+    try { liveRef = sdk.AgentRegistry.global().list().find(r => r.id === sdk.MAIN_AGENT_ID && r.kind === 'main') ?? null; }
+    catch { liveRef = null; }
+    if (!isMainSession(sessionId) || !entry || entry.session?.sessionId !== sessionId
+        || ctxSessionId !== sessionId || !liveRef || liveRef.session !== entry.session
+        || !activeState(bound.state) || runtimeAbandoned(bound.state))
+      return { attempted: false, reason: 'main_session_or_task_not_live' };
+    // Real control ownership — resolveBoundTask is display-grade. After the
+    // awaits, re-read the CURRENT state synchronously (one read, no polling)
+    // and make it the SINGLE authority for every gate below: read failure,
+    // or a connection that no longer matches the just-confirmed owned
+    // binding, is a skip. Cached and first attempts therefore share exactly
+    // the same fresh authority — no duplicated gate block.
+    let controlOwned = false;
+    try { controlOwned = await host.ownsTask(bound.taskDir, sessionId) === true; } catch { controlOwned = false; }
+    if (!controlOwned) return { attempted: false, reason: 'task_not_owned_by_current_host' };
+    let state = null;
+    try { state = JSON.parse(readFileSync(path.join(bound.taskDir, 'state.json'), 'utf8')); } catch { state = null; }
+    if (!state || state.connection?.provider !== 'omp'
+        || state.connection?.thread_id !== sessionId
+        || state.connection?.socket !== bound.state.connection?.socket
+        || !activeState(state) || runtimeAbandoned(state))
+      return { attempted: false, reason: 'current_state_unavailable_or_rebound' };
     const td = state.task_delivery;
     if (!td || typeof td !== 'object'
         || typeof td.artifact_root !== 'string' || typeof td.input_digest !== 'string' || typeof td.artifact_digest !== 'string')
       return { attempted: false, reason: 'no_current_task_delivery' };
+    // Full tagged-clean authority, evaluated BEFORE any cached outcome so a
+    // bad tag or an already-ACKed reminder can never serve stale guidance:
+    // verdict complete/continue, delivery.ready, an EMPTY findings array (not
+    // merely a missing key), and the exact current triple.
+    const taggedCheck = (state.checks || [])[options.taggedCheck - 1];
+    const reminderKey = createHash('sha256')
+      .update(JSON.stringify([td.artifact_root, td.input_digest, td.artifact_digest])).digest('hex');
+    // Full tagged-clean authority as one local predicate, reused verbatim by
+    // the final post-await re-check so validity can never be inferred from a
+    // record read before the awaits.
+    const taggedClean = (check, triple) => !!check && Number.isInteger(options.taggedCheck)
+      && check.number === options.taggedCheck
+      && !check.stale && !check.manual && check.role === 'reviewer'
+      && check.kind === 'artifact'
+      && ['complete', 'continue'].includes(check?.result?.verdict)
+      && check?.result?.delivery?.ready === true
+      && Array.isArray(check?.result?.findings) && check.result.findings.length === 0
+      && check.input_digest === triple.input_digest && check.artifact_root === triple.artifact_root
+      && check.artifact_digest === triple.artifact_digest;
+    const taggedAuthorityOk = taggedClean(taggedCheck, td);
+    if (!taggedAuthorityOk) return { attempted: false, reason: 'tagged_check_scope_mismatch' };
+    if ((state.manual_check_reminders || {})[reminderKey])
+      return { attempted: false, reason: 'reminder_already_sent_for_triple' };
     const attemptKey = JSON.stringify([bound.taskDir, td.input_digest, td.artifact_root, td.artifact_digest]);
-    const prior = rootIntegrationAttempts.get(attemptKey);
-    if (prior) {
-      // Idempotency (never re-attempt) and guidance (only while the CURRENT
-      // turn is still a valid integration turn) are separate. The cached
-      // outcome only suppresses a REPEATED API attempt; the guidance is
-      // re-derived from the CURRENT wait gates, the live session model and
-      // declared phase, a fresh binding fingerprint, and any later Root tool
-      // or external selection — a stale target is never presented as "selected
-      // for this turn" and no work is demanded during a wait window.
-      const obs = state.check_observations;
-      const waitOrBusy = state.pending_finalization || state.completion_stop_pending
-        || state.next_check_manual === true || state.recheck
-        || (obs && typeof obs === 'object'
-            && Object.values(obs).some(o => o && typeof o === 'object' && o.status === 'in_flight'))
-        || Object.values(state.findings || {}).some(f => f && f.status === 'open');
-      const liveModel = entry.session?.model ? `${entry.session.model.provider}/${entry.session.model.id}` : null;
-      const targetStillLive = prior.ok === true && prior.to === liveModel
-        && rootPhaseByTask.get(bound.taskDir) === 'integration';
-      const bindingNow = readRootBinding(bound.taskDir);
-      const tripleStillCurrent = !!bindingNow && bindingNow.fingerprint_status === 'ok'
-        && bindingNow.artifact_root === td.artifact_root && bindingNow.input_digest === td.input_digest
-        && bindingNow.artifact_digest === td.artifact_digest;
-      if (waitOrBusy || !targetStillLive || !tripleStillCurrent || externalModelChange.get(sessionId))
-        return { ...prior, guidance: undefined };
-      return prior;
-    }
     // Idempotency slot is consumed ONLY by an actual switch attempt (success
     // or classified failure): precondition screens below can mature later
     // (reminder arrival, member settle, busy clear) and must stay re-checkable.
@@ -3361,21 +3413,13 @@ export function installOmpExtension(pi, sdk) {
     if (state.recheck) return finish({ attempted: false, reason: 'recheck_scheduled' });
     const findings = Object.values(state.findings || {});
     if (findings.some(f => f && f.status === 'open')) return finish({ attempted: false, reason: 'open_finding' });
-    // The reminder must be the REAL record for exactly the current triple.
-    const reminderKey = createHash('sha256')
-      .update(JSON.stringify([td.artifact_root, td.input_digest, td.artifact_digest])).digest('hex');
-    const reminder = (state.manual_check_reminders || {})[reminderKey];
-    if (!reminder || typeof reminder.check !== 'number') return finish({ attempted: false, reason: 'no_matching_manual_check_reminder' });
-    const reminderCheck = (state.checks || [])[reminder.check - 1];
-    if (!reminderCheck || reminderCheck.stale || reminderCheck.manual || reminderCheck.role !== 'reviewer'
-        || reminderCheck.kind !== 'artifact' || !['complete', 'continue'].includes(reminderCheck?.result?.verdict)
-        || reminderCheck?.result?.delivery?.ready !== true
-        || reminderCheck.input_digest !== td.input_digest || reminderCheck.artifact_root !== td.artifact_root
-        || reminderCheck.artifact_digest !== td.artifact_digest)
-      return finish({ attempted: false, reason: 'reminder_check_scope_mismatch' });
+    // Tagged authority and the pre-send reminder window were verified above,
+    // BEFORE the cached outcome; the busy screens follow.
     // Root must actually be at rest: live tools, native streaming, and
-    // owner-scoped async jobs. The turn this hook prepares is NOT counted as
-    // old-turn work — activeTools only holds started-and-unfinished tools.
+    // owner-scoped async jobs. At this PRE-SEND RPC position no direct prompt
+    // is preparing (#promptInFlightCount is 0), so the public isStreaming
+    // getter is a valid busy screen here — unlike inside before_agent_start
+    // preparation, where it is always true.
     if (entry.activeTools.size > 0) return finish({ attempted: false, reason: 'root_tools_in_flight' });
     if (entry.session?.isStreaming === true) return finish({ attempted: false, reason: 'root_streaming' });
     let asyncSnapshot = null;
@@ -3407,6 +3451,22 @@ export function installOmpExtension(pi, sdk) {
     if (branchChanges < baseline) return finish({ attempted: false, reason: 'model_change_history_rewound' });
     if (branchChanges - baseline - (ownModelSwitches.get(sessionId) || 0) > 0)
       return finish({ attempted: false, reason: 'external_model_change_recorded' });
+    // Cached outcome: every generic gate above (fresh durable wait/members/
+    // delivery, live busy screens, external selection) has already run. The
+    // cache only decides TARGET/PHASE liveness and fingerprint validity — a
+    // stale target is never presented as "selected for this turn".
+    const prior = rootIntegrationAttempts.get(attemptKey);
+    if (prior) {
+      const liveModel = entry.session?.model ? `${entry.session.model.provider}/${entry.session.model.id}` : null;
+      const targetStillLive = prior.ok === true && prior.to === liveModel
+        && rootPhaseByTask.get(bound.taskDir) === 'integration';
+      const bindingNow = readRootBinding(bound.taskDir);
+      const tripleStillCurrent = !!bindingNow && bindingNow.fingerprint_status === 'ok'
+        && bindingNow.artifact_root === td.artifact_root && bindingNow.input_digest === td.input_digest
+        && bindingNow.artifact_digest === td.artifact_digest;
+      if (!targetStillLive || !tripleStillCurrent) return { ...prior, guidance: undefined };
+      return prior;
+    }
     // Provenance: only the checks that ACTUALLY found a resolved finding for
     // the current triple. No state.review.model, no ranking, no time-based
     // inference; ledger cross-check by exact call_id.
@@ -3500,18 +3560,64 @@ export function installOmpExtension(pi, sdk) {
     const rebind = await resolveBoundTask(sessionId, ctx?.cwd).catch(() => null);
     let stillOwned = false;
     try { stillOwned = !!rebind && rebind.taskDir === bound.taskDir && await host.ownsTask(rebind.taskDir, sessionId) === true; } catch { stillOwned = false; }
-    const rs = stillOwned ? rebind.state : null;
+    // Final bounded verification: re-read the CURRENT state synchronously
+    // (never the pre-await rebind.state), re-check the owned connection and
+    // that the ctx/session/live Main identity still correspond. Read failure
+    // or a changed ownership is a skip — no new RPC, no claim of eliminating
+    // every cross-process or concurrent-UI race (the documented last-writer
+    // limitation stands).
+    // Synchronous fingerprint FIRST: readRootBinding shells out to Ruby, and a
+    // check state written by another process during that window must not be
+    // ignored by an rs read that started earlier. Only after the fingerprint
+    // returns is the CURRENT state read synchronously.
     const bindingFinal = readRootBinding(bound.taskDir);
     const tripleAuthoritative = !!bindingFinal && bindingFinal.fingerprint_status === 'ok'
       && bindingFinal.artifact_root === td.artifact_root && bindingFinal.input_digest === td.input_digest
       && bindingFinal.artifact_digest === td.artifact_digest;
+    let rs = null;
+    try { rs = JSON.parse(readFileSync(path.join(bound.taskDir, 'state.json'), 'utf8')); } catch { rs = null; }
+    let ctxSessionIdFinal = null;
+    try { ctxSessionIdFinal = ctx?.sessionManager?.getSessionId?.() ?? null; } catch { ctxSessionIdFinal = null; }
+    if (!stillOwned || !rs || rs.connection?.provider !== 'omp'
+        || rs.connection?.thread_id !== sessionId
+        || rs.connection?.socket !== bound.state.connection?.socket
+        || ctxSessionIdFinal !== sessionId
+        || !isMainSession(sessionId) || entry.session?.sessionId !== sessionId)
+      rs = null;
+    const rtd = rs?.task_delivery;
+    // The fresh tagged check must bind to the SAME triple the selection was
+    // derived from: explicit field-by-field equality with the original td,
+    // beyond taggedClean's internal scope match against rtd itself.
+    const taggedStillCurrent = !!rtd
+      && rtd.artifact_root === td.artifact_root && rtd.input_digest === td.input_digest
+      && rtd.artifact_digest === td.artifact_digest
+      && taggedClean((rs.checks || [])[options.taggedCheck - 1], rtd)
+      && !(rs.manual_check_reminders || {})[reminderKey];
+    // Live Root busy screens re-checked AFTER every await: work that started
+    // during the ledger/pool/rebind/ownsTask awaits must not be overridden.
+    let jobsNow = null;
+    try { jobsNow = typeof entry.session?.getAsyncJobSnapshot === 'function' ? entry.session.getAsyncJobSnapshot() : null; }
+    catch { jobsNow = null; }
+    let branchChangesNow = null;
+    try {
+      branchChangesNow = entry.session?.sessionManager?.getBranch?.().filter(e => e && e.type === 'model_change').length ?? null;
+    } catch { branchChangesNow = null; }
     if (!rs || !activeState(rs) || runtimeAbandoned(rs)
         || (rs.check_observations && typeof rs.check_observations === 'object'
             && Object.values(rs.check_observations).some(o => o && typeof o === 'object' && o.status === 'in_flight'))
         || rs.pending_finalization || rs.completion_stop_pending || rs.next_check_manual === true
         || rs.recheck || Object.values(rs.findings || {}).some(f => f && f.status === 'open')
-        || !tripleAuthoritative
-        || rootToolSelectedByTask.has(bound.taskDir) || externalModelChange.get(sessionId))
+        || !Array.isArray(rs.members) || !rs.members.every(m => m && ['completed', 'failed', 'refused', 'rejected'].includes(m.status))
+        || (Array.isArray(rs.amendment_delivery_queue) && rs.amendment_delivery_queue.length)
+        || !tripleAuthoritative || !taggedStillCurrent
+        || entry.activeTools.size > 0 || entry.session?.isStreaming === true
+        || !jobsNow || !Array.isArray(jobsNow.running) || jobsNow.running.length > 0
+        || rootToolSelectedByTask.has(bound.taskDir) || externalModelChange.get(sessionId)
+        || branchChangesNow === null)
+      return finish({ attempted: false, reason: 'state_changed_during_evaluation' });
+    const finalBaseline = modelChangeBaseline.get(sessionId);
+    if (typeof finalBaseline !== 'number' || finalBaseline < 0 || branchChangesNow < finalBaseline
+        || branchChangesNow - finalBaseline - (ownModelSwitches.get(sessionId) || 0) > 0)
       return finish({ attempted: false, reason: 'state_changed_during_evaluation' });
     const outcome = { attempted: true, ...(await performRootModelSwitch({ entry, ctx, boundDir: bound.taskDir, target,
       phase: 'integration',
@@ -3519,10 +3625,10 @@ export function installOmpExtension(pi, sdk) {
       origin: 'program',
       provenance: { finding_ids: findingIds, detecting_call_ids: callIds,
         raising_check_of_first_finding: resolvedForCurrent[0].check,
-        resolution_check_of_first_finding: resolvedForCurrent[0].resolution_check, reminder_check: reminder.check,
+        resolution_check_of_first_finding: resolvedForCurrent[0].resolution_check, tagged_check: options.taggedCheck,
         detecting_model: target,
         version_triple: { artifact_root: td.artifact_root, input_digest: td.input_digest, artifact_digest: td.artifact_digest } } })) };
-    if (outcome.ok === true) outcome.guidance = `程序来源提示：本任务已有手动终检提醒（已核查的独立检查来源），且已核查的独立检查发现并确认修复的真实缺陷（${findingIds.join(',')}，逐项来源与回执见 root_integration_model_selected 记录）由 ${target} 发现——程序已为本回合选择该型号承担 integration 阶段（仅此一次，配置已选择；真实调用以下一回执为准）。请在手动终检前按当前原始要求与规格核对整个交付，按风险做必要可执行验证并修复（不限先前缺陷）；task_delivery 与 Root verifications 归属不变。`;
+    if (outcome.ok === true) outcome.guidance = `程序来源提示（本条为程序追加，非用户新要求）：已核查的独立检查发现并确认修复的真实缺陷（${findingIds.join(',')}，逐项来源与回执见 root_integration_model_selected 记录）由 ${target} 发现——程序已在发送本终检提醒前选择该型号承担 integration 阶段（仅此一次，配置已选择；真实调用以本回合后的 native 回执为准）。请在手动终检前按当前原始要求与规格核对整个交付，按风险做必要可执行验证并修复（不限先前缺陷）；task_delivery 与 Root verifications 归属不变。`;
     return finish(outcome);
   }
 
@@ -3720,31 +3826,20 @@ export function installOmpExtension(pi, sdk) {
       return { systemPrompt: withStatusBlock(event?.systemPrompt, block) };
     }
     if (!activeState(bound.state)) return;
-    // Program-initiated integration selection (contract: 程序发起的 Root
-    // integration 阶段选择). Runs AFTER the owned/live determination, BEFORE
-    // status guidance assembly. The switch itself goes through the same
-    // performRootModelSwitch core; the SDK's overrideIsCurrent re-runs the
-    // prepare loop after a setModel refreshed the base, so this handler still
-    // returns the regular status shape below and the next handler invocation
-    // sees the rebuilt prompt. The attempt map makes the rerun a no-op.
-    let integrationGuidance = null;
-    try {
-      const entry = entries.get(sessionId);
-      if (entry) {
-        const outcome = await considerProgramIntegrationSwitch(entry, ctx, bound, sessionId);
-        if (outcome && typeof outcome.guidance === 'string') integrationGuidance = outcome.guidance;
-      }
-    } catch { /* classified outcomes only; never block the turn */ }
     const block = statusBlock(bound.state);
     const advisory = entryDelegationAdvisory(bound.state, bound.taskDir);
     if (advisory) entryAdvisorySent.add(bound.taskDir);
     // Only the regular status guidance (and the advisory, deduplicated by its
     // own sent set) rides the system prompt. The work-unit bootstrap is NOT
     // carried here: it belongs to the extensible provider payload path alone,
-    // so one request never sees the same sentence twice.
+    // so one request never sees the same sentence twice. The program-initiated
+    // integration selection does NOT ride this hook anymore: the SDK's idle
+    // custom-message wake (deliverCustomMessage) never runs before_agent_start,
+    // and the direct path is self-locked by isStreaming during preparation.
+    // Selection happens in the owned `send` RPC branch (see the
+    // integration_check tag handling there).
     const parts = [block];
     if (advisory) parts.push(advisory);
-    if (integrationGuidance) parts.push(integrationGuidance);
     return { systemPrompt: withStatusBlock(event?.systemPrompt, parts.join('\n')) };
   });
   pi.on('session_start', (_event, ctx) => {

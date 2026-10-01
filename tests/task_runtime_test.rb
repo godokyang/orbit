@@ -41,15 +41,18 @@ class RuntimeHost
   def events = []
   def user_messages(after_id:) = []
 
-  def send_message(text)
+  def send_message(text, integration_check: nil)
     raise Orbit::Connection::Error, @fail_send_message if @fail_send_message.is_a?(String)
 
+    @on_send&.call(text, integration_check)
     @messages << text
+    (@integration_tags ||= []) << integration_check
     @state["status"] = "active"
     { "id" => "sent-#{@messages.length}" }
   end
 
-  attr_accessor :fail_send_message
+  attr_accessor :fail_send_message, :on_send
+  def integration_tags = (@integration_tags ||= [])
 
   def stop!
     @stop_calls += 1
@@ -1358,6 +1361,62 @@ fixture do |_root, record, host, checker, runtime|
   assert(record.state["finalization_notices"].length == 1 &&
          host.messages.count { |message| message.include?("action=check") } == 1,
          "the manual reviewer, not the automatic pass, wakes finalization without repeating the reminder")
+
+
+end
+
+# The manual-final reminder send carries the narrow integration_check tag, and
+# the durable facts the host must verify are already ON DISK when send_message
+# is CALLED (captured inside the host before the ACK returns): the clean
+# resolution check, the resolved finding and the matching delivery; the
+# reminder record and the sent id are written only AFTER the real ACK.
+fixture do |_root, record, host, checker, runtime|
+  now = Time.now.to_f
+  host.finish("delivered")
+  runtime.tick(now: now)
+  checker.result = answer("correct", findings: [{ "id" => "money-bug", "requirement" => "integer cents",
+    "evidence" => "README:24", "action" => "reject lossy conversion" }])
+  runtime.tick(now: now + 0.5)
+  assert(record.state.dig("findings", "money-bug", "status") == "open", "the finding opens first")
+  host.finish("fixed")
+  runtime.tick(now: now + 0.8)
+  checker.result = answer("complete", resolved: ["money-bug"])
+  sent_count_before = host.messages.length
+  at_send = nil
+  host.on_send = lambda do |_text, tag|
+    # Durable state at the moment the send is issued — BEFORE the host returns
+    # an id, so the assertions prove save-before-send (removing the new save
+    # would fail them under the old write order). The EXPECTED id of this very
+    # send is derived from the pre-send message count; it must not be in the
+    # durable sent list yet.
+    expected_id = "sent-#{sent_count_before + 1}"
+    at_send = { "tag" => tag, "expected_id" => expected_id,
+                "state" => JSON.parse(File.read(File.join(record.path, "state.json"))) }
+  end
+  runtime.tick(now: now + 1)
+  assert(host.messages.one? { |message| message.include?("action=check") },
+         "the clean resolution check sends the manual-final reminder")
+  assert(at_send, "the send hook captured the send-time disk state")
+  clean = at_send["state"]["checks"].last
+  assert(at_send["tag"] == clean["number"] && clean["result"]["verdict"] == "complete" &&
+         clean["result"]["delivery"]["ready"] == true && clean["result"]["findings"] == [],
+         "the tagged clean check (empty findings) is durable BEFORE the send")
+  assert(at_send["state"].dig("findings", "money-bug", "status") == "resolved" &&
+         at_send["state"].dig("findings", "money-bug", "resolution_check") == clean["number"],
+         "the resolved finding is durable BEFORE the send")
+  assert(at_send["state"].dig("task_delivery", "artifact_digest") == clean["artifact_digest"],
+         "the matching delivery triple is durable BEFORE the send")
+  key = Digest::SHA256.hexdigest(JSON.generate([clean["artifact_root"], clean["input_digest"], clean["artifact_digest"]]))
+  assert(at_send["state"]["manual_check_reminders"].nil? ||
+         !at_send["state"]["manual_check_reminders"].key?(key),
+         "the reminder record does NOT exist at send time (written only after the ACK)")
+  assert((at_send["state"]["sent_message_ids"] || []).include?(at_send["expected_id"]) == false,
+         "this send's own id is NOT durable at send time (it exists only after the ACK)")
+  reminder = record.state["manual_check_reminders"][key]
+  assert(reminder && reminder["check"] == clean["number"] &&
+         reminder["message_id"] == at_send["expected_id"] &&
+         (record.state["sent_message_ids"] || []).include?(reminder["message_id"]),
+         "after the ACK the reminder references exactly this send's real id")
 end
 
 
