@@ -348,6 +348,21 @@ module OrbitInstall
 
     installed = read_json(package)["version"]
     declared = read_json(File.join(runner, "package.json")).dig("dependencies", "@oh-my-pi/pi-coding-agent")
+    if installed == "18.4.9"
+      # This SDK ships both the TypeScript module and a JavaScript injection
+      # script at ratchet/prelude. Bun resolves its extensionless SDK import
+      # to the script, which has no createRatchetPrelude export. Pin only this
+      # evidenced import in our staged reviewer bundle; the host is untouched.
+      sdk_source = File.join(File.dirname(package), "src", "sdk.ts")
+      source = File.binread(sdk_source)
+      ambiguous = 'import { createRatchetPrelude } from "./ratchet/prelude";'
+      explicit = 'import { createRatchetPrelude } from "./ratchet/prelude.ts";'
+      unless source.include?(explicit)
+        raise "OMP 18.4.9 reviewer import differs from the verified source" unless source.scan(ambiguous).length == 1
+
+        File.binwrite(sdk_source, source.sub(ambiguous, explicit))
+      end
+    end
     return version if installed == version && declared == version
 
     raise "reviewer SDK version #{installed.inspect} (declared #{declared.inspect}) does not match host OMP #{version}"

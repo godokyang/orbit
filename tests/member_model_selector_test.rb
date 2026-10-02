@@ -315,15 +315,31 @@ module MemberModelSelectorTest
            "a task profile with no reviewed release scope is downgraded before any judgment is paid")
   end
 
-  def insufficient_delegation_signal_stops_before_the_candidate_judgment
+  def generalized_member_fit_does_not_skip_concrete_candidates
     advisor = FakeAdvisor.new(delegation: { "handoff_fit" => 0.9, "member_task_fit" => 0.05 },
                               candidates: { "0" => 0.99 })
     built = selector(pool: ["a/one"], catalog: catalog_for(["a/one"], agents: { "a/one" => "orbit-agent-a" }),
                      entries: [entry("a/one")], advisor: advisor, release: release_for)
     result = built.assess(state: state, work_unit: work_unit)
-    assert(advisor.calls == ["delegation"] && result["decision"] == "not_recommended" &&
-           result["judgments"].length == 1 && result["recommendation"]["first"].nil?,
-           "the second paid judgment happens only when the delegation receipt clears both gates")
+    assert(advisor.calls == %w[delegation candidates] && result["decision"] == "recommended" &&
+           result.dig("recommendation", "first") == "orbit-agent-a" &&
+           result["limitations"].any? { |item| item.include?("member_task_fit 0.05") } &&
+           result["limitations"].any? { |item| item.include?("do not prove this combination") } &&
+           result.dig("order", "version") == "orbit-quality-decision-4",
+           "a low generalized member_task_fit is a limitation and does not skip per-candidate task fit")
+
+    structural = FakeAdvisor.new(delegation: { "handoff_fit" => 0.05, "member_task_fit" => 0.99 },
+                                 candidates: { "0" => 0.99 })
+    blocked = selector(pool: ["a/one"], catalog: catalog_for(["a/one"], agents: { "a/one" => "orbit-agent-a" }),
+                       entries: [entry("a/one")], advisor: structural, release: release_for)
+             .assess(state: state, work_unit: work_unit)
+    assert(structural.calls == ["delegation"] && blocked["decision"] == "not_recommended" &&
+           blocked["reason"].include?("handoff_fit") && blocked["judgments"].length == 1,
+           "handoff structure still stops the paid per-candidate judgment")
+    negative_selector = selector(pool: ["a/one"], catalog: catalog_for(["a/one"], agents: { "a/one" => "orbit-agent-a" }),
+                                 entries: [entry("a/one")], advisor: structural, release: release_for)
+    reused = negative_selector.assess(state: state.merge("artifact_digest" => "unrelated-change"), work_unit: work_unit, previous: blocked)
+    assert(reused["reused"] && structural.calls == ["delegation"], "unchanged negative decisions reuse without paid questions")
   end
 
   def a_failed_judgment_keeps_its_real_receipt_and_never_fabricates_success
@@ -348,6 +364,11 @@ module MemberModelSelectorTest
     assert(again["reused"] == true && again["signature"] == first["signature"] && advisor.calls.length == 2,
            "an unchanged input/unit/facts/release assessment is returned as reused without another call")
 
+    noisy = built.assess(state: state.merge("artifact_digest" => "sha256:unrelated-tree", "user_message_id" => "m-9"),
+                         work_unit: work_unit, previous: again)
+    assert(noisy["reused"] == true && noisy["signature"] == first["signature"] && advisor.calls.length == 2,
+           "an unrelated artifact digest does not pay again for the same work-unit judgment")
+
     changed = built.assess(state: state(input_digest: "sha256:two"),
                            work_unit: work_unit(input_digest: "sha256:two"), previous: first)
     assert(changed["reused"] == false && changed["signature"] != first["signature"] && advisor.calls.length == 4,
@@ -359,8 +380,23 @@ module MemberModelSelectorTest
 
     priced = built.assess(state: state, work_unit: work_unit, previous: first.merge("signature" => "stale"),
                           route_costs: { "a/one" => nil })
-    assert(priced["reused"] == false && priced["order"]["cost_comparison"] == "unknown",
+    assert(priced["reused"] == false && priced["order"]["cost_comparison"] == "unknown" &&
+           priced["limitations"].any? { |item| item.include?("unknown") },
            "route costs are part of the signature, and unknown cost never rejects a candidate")
+
+    edited = work_unit
+    edited["context"] = { "note" => "edited" }
+    context_changed = built.assess(state: state, work_unit: edited, previous: first)
+    assert(context_changed["reused"] == false && context_changed["signature"] != first["signature"] &&
+           advisor.calls.length == 10,
+           "related work-unit context invalidates the cached judgment")
+    dependent = work_unit.merge("dependencies" => ["prior"])
+    dependency = { "id" => "prior", "status" => "accepted", "result" => "same prefix", "result_sha256" => "a" * 64 }
+    with_dependency = state.merge("dependency_context" => [dependency])
+    prior = built.assess(state: with_dependency, work_unit: dependent)
+    updated = built.assess(state: with_dependency.merge("dependency_context" => [dependency.merge("result_sha256" => "b" * 64)]),
+                           work_unit: dependent, previous: prior)
+    assert(!updated["reused"] && updated["signature"] != prior["signature"], "dependency tail changes invalidate even with identical prefixes")
   end
 
   def a_stale_work_unit_and_a_broken_catalog_never_pass_as_verified
@@ -416,14 +452,56 @@ module MemberModelSelectorTest
            "the decision retains the exact price snapshot and forecast basis for later audit")
   end
 
+  def root_self_execute_leaves_the_queue_and_pending_units_are_reached
+    declared = lambda do |id, execution = nil|
+      unit = work_unit(id: id)
+      unit["status"] = "declared"
+      unit["execution"] = execution if execution
+      unit
+    end
+    root = declared.call("root-unit", "root")
+    first = declared.call("pending-a", "delegate")
+    second = declared.call("pending-b")
+    blocked = declared.call("pending-c", "delegate")
+    blocked["dependencies"] = ["not-accepted"]
+    plan = Orbit::MemberModelSelector.recommendation_plan(
+      units: [root, first, second, blocked], assessments: {},
+      input_digest: "sha256:one", artifact_root: "/tmp", workspace_git: true
+    )
+    assert(plan["next_id"] == "pending-a" && plan["queue"] == %w[pending-a pending-b] &&
+           plan["skipped"].map { |item| item["id"] } == ["root-unit"] &&
+           plan["roles"]["pending-b"] == "unspecified" && plan["roles"]["root-unit"] == "root_self_execute",
+           "Root self-execute is outside the queue and unspecified pending units stay reachable")
+
+    basis = Orbit::MemberModelSelector.unit_basis(first, "sha256:one", workspace_git: true)
+    assessed = Orbit::MemberModelSelector.recommendation_plan(
+      units: [root, first, second],
+      assessments: { "pending-a" => { "signature" => "sig", "unit_basis" => basis, "at" => "2026-10-02T00:00:00Z" } },
+      input_digest: "sha256:one", artifact_root: "/tmp", workspace_git: true
+    )
+    assert(assessed["next_id"] == "pending-b" && assessed["refresh_id"] == "pending-a",
+           "an unassessed pending unit is taken before a settled one")
+
+    advisor = FakeAdvisor.new(delegation: { "handoff_fit" => 0.9, "member_task_fit" => 0.9 },
+                              candidates: { "0" => 0.9 })
+    built = selector(pool: ["a/one"], catalog: catalog_for(["a/one"], agents: { "a/one" => "orbit-agent-a" }),
+                     entries: [entry("a/one")], advisor: advisor, release: release_for)
+    skipped = built.assess(state: state, work_unit: root)
+    reused = built.assess(state: state, work_unit: root, previous: skipped)
+    assert(skipped["decision"] == "root_self_execute" && skipped["judgments"] == [] &&
+           reused["reused"] == true && advisor.calls.empty?,
+           "a Root self-execute unit is not a paid member judgment")
+  end
+
   def main
     %w[candidates_need_host_agents_and_an_empty_pool_uses_one_real_native_resolution
        a_matching_release_pays_two_judgments_and_orders_the_candidates
-       insufficient_delegation_signal_stops_before_the_candidate_judgment
+       generalized_member_fit_does_not_skip_concrete_candidates
        a_failed_judgment_keeps_its_real_receipt_and_never_fabricates_success
        an_unchanged_assessment_is_reused_and_a_real_change_is_not
        a_stale_work_unit_and_a_broken_catalog_never_pass_as_verified
-       provider_model_forecasts_price_the_actual_native_agent].each do |test|
+       provider_model_forecasts_price_the_actual_native_agent
+       root_self_execute_leaves_the_queue_and_pending_units_are_reached].each do |test|
       send(test)
       puts "MEMBER_MODEL_SELECTOR_TEST_PASS #{test}"
     end

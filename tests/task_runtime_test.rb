@@ -534,6 +534,20 @@ class RuntimeMemberSelector
                           "quality_basis" => "exact_model_evidence", "recommendation_hold" => false }],
       "recommendation" => { "first" => @decision == "recommended" ? "orbit-m-deepseek" : nil, "backups" => [] } }
   end
+
+  # Mirrors the OMP1 scheduling interface: the single fixture unit that is
+  # still dispatchable (execution, status, dependencies, current input and
+  # workspace) is next_id.
+  def recommendation_plan(units:, assessments:, input_digest:, artifact_root:, workspace_git: nil)
+    next_unit = units.find do |unit|
+      unit["execution"] != "root" && %w[declared rejected failed].include?(unit["status"]) &&
+        unit["input_digest"] == input_digest && unit["artifact_root"] == artifact_root &&
+        Array(unit["dependencies"]).all? { |id| units.any? { |dep| dep["id"] == id && dep["status"] == "accepted" } }
+    end
+    { "skipped" => units.select { |unit| unit["execution"] == "root" }.map { |unit| unit["id"] },
+      "queue" => units.filter_map { |unit| unit["id"] if unit["execution"] != "root" },
+      "next_id" => next_unit&.dig("id"), "refresh_id" => nil }
+  end
 end
 
 def declared_unit(record, dependencies: [])
@@ -691,6 +705,17 @@ fixture(interval: 300) do |root, record, _host, checker, _runtime|
   advisor = RuntimeAdvisor.new("stuck" => 0.1, "off_track" => 0.1, "artifact_ready" => 0.1)
   selector = Orbit::MemberModelSelector.new(connection: host, project_root: root,
     pool: StubCandidatePool.new(["opencode-go/deepseek-v4.1-flash"]), evidence_cache: evidence_cache(root), advisor: advisor, release: nil)
+  # The real selector owns the assessment; the OMP1 scheduling seam
+  # (recommendation_plan) is staged by a minimal fixture adapter so this
+  # fixture keeps testing the real facts-only assess behavior.
+  def selector.recommendation_plan(units:, assessments:, input_digest:, artifact_root:, workspace_git: nil)
+    next_unit = units.find do |unit|
+      unit["execution"] != "root" && %w[declared rejected failed].include?(unit["status"]) &&
+        unit["input_digest"] == input_digest && unit["artifact_root"] == artifact_root &&
+        Array(unit["dependencies"]).all? { |id| units.any? { |dep| dep["id"] == id && dep["status"] == "accepted" } }
+    end
+    { "skipped" => [], "queue" => [], "next_id" => next_unit&.dig("id"), "refresh_id" => nil }
+  end
   runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker, advisor: advisor, member_selector: selector)
   runtime.tick(now: Time.now.to_f + 6)
   assert(record.state.dig("jev", "delegation", "decision") == "facts_only" && advisor.delegation_calls.empty? &&
@@ -3162,7 +3187,7 @@ def bind_unit!(record, runtime, member_id:, call_id:, status:, result: "delivere
   units = Orbit::WorkUnitStore.new(record)
   unit = units.declare("objective" => "implement behavior", "acceptance" => "fixture checks",
                        "escalation" => "ask root", "requirements" => ["original"],
-                       "allowed_paths" => ["src/"], "allowed_tools" => ["bash"])
+                       "allowed_paths" => ["src/"], "allowed_tools" => ["bash"], "allowed_commands" => ["node --test"])
   units.bind(unit["id"], member_id: member_id, tool_call_id: call_id,
              model: "zenmux/deepseek/deepseek-v4.1-flash")
   units.finish(unit["id"], status: status, result: result,
@@ -3506,7 +3531,7 @@ fixture do |root, record, host, _checker, runtime|
   units = Orbit::WorkUnitStore.new(record)
   unit = units.declare("objective" => "parse.js", "acceptance" => "node smoke",
                        "escalation" => "ask root", "requirements" => ["original"],
-                       "allowed_paths" => ["src/"], "allowed_tools" => ["bash"])
+                       "allowed_paths" => ["src/"], "allowed_tools" => ["bash"], "allowed_commands" => ["node --test"])
   units.bind(unit["id"], member_id: "orbit-m-self", tool_call_id: call_id,
              model: "zenmux/deepseek/deepseek-v4.1-flash")
   units.finish(unit["id"], status: "accepted", result: "src/parse.js delivered",
@@ -3534,14 +3559,14 @@ fixture do |root, record, host, _checker, runtime|
   2.times do |i|
     unit = units.declare("objective" => "duplicate #{i}", "acceptance" => "fixture",
                          "escalation" => "ask root", "requirements" => ["original"],
-                         "allowed_paths" => ["src/"], "allowed_tools" => ["bash"])
+                         "allowed_paths" => ["src/"], "allowed_tools" => ["bash"], "allowed_commands" => ["node --test"])
     units.bind(unit["id"], member_id: "orbit-m-amb", tool_call_id: call_a,
                model: "zenmux/deepseek/deepseek-v4.1-flash")
     units.finish(unit["id"], status: "accepted", result: "duplicate", verification: "fixture evidence")
   end
   unit = units.declare("objective" => "model mismatch", "acceptance" => "fixture",
                        "escalation" => "ask root", "requirements" => ["original"],
-                       "allowed_paths" => ["src/"], "allowed_tools" => ["bash"])
+                       "allowed_paths" => ["src/"], "allowed_tools" => ["bash"], "allowed_commands" => ["node --test"])
   units.bind(unit["id"], member_id: "orbit-m-mm", tool_call_id: "call-mm",
              model: "opencode-go/deepseek-v4.1-flash")
   units.finish(unit["id"], status: "accepted", result: "mismatch", verification: "fixture evidence")
@@ -3684,7 +3709,7 @@ fixture do |root, record, host, _checker, runtime|
   units = Orbit::WorkUnitStore.new(record)
   unit = units.declare("objective" => "auto release", "acceptance" => "fixture checks",
                        "escalation" => "ask root", "requirements" => ["original"],
-                       "allowed_paths" => ["src/"], "allowed_tools" => ["bash"])
+                       "allowed_paths" => ["src/"], "allowed_tools" => ["bash"], "allowed_commands" => ["node --test"])
   units.bind(unit["id"], member_id: "orbit-m-auto", tool_call_id: "call-auto",
              model: "opencode-go/deepseek-v4.1-flash")
   state = runtime.instance_variable_get(:@state)
@@ -3709,11 +3734,27 @@ fixture do |root, record, host, _checker, runtime|
          "the attempt keeps the real error, its source and the program time")
   assert(events(record).any? { |event| event["type"] == "work_unit_execution_failed" },
          "the auto-release emits its audit event")
+  runtime.tick(now: now + 2)
+  member = record.state["members"].find { |entry| entry["thread_id"] == "orbit-m-auto" }
+  assert(member["status"] == "failed" && Array(member["settlement_history"]).empty?,
+         "recording the failure finish time does not revoke its native settlement")
   rebound = units.bind(unit["id"], member_id: "orbit-m-auto-2", tool_call_id: "call-auto-2",
                        model: "kimi-code/k3-256k")
   assert(rebound["status"] == "bound" && rebound["dispatches"].length == 2 &&
          rebound["dispatches"].first.dig("failure_error", "error_status") == 429,
          "the released unit re-binds legally with the failed attempt preserved")
+  runtime.tick(now: now + 3)
+  member = record.state["members"].find { |entry| entry["thread_id"] == "orbit-m-auto" }
+  assert(member["status"] == "failed" && Array(member["settlement_history"]).empty?,
+         "a backup member does not revive the first failed member (positive2 live regression)")
+  units.finish(unit["id"], status: "rejected", result: "backup rejected", verification: "fixture")
+  units.bind(unit["id"], member_id: "orbit-m-auto", tool_call_id: "call-auto-3",
+             model: "opencode-go/deepseek-v4.1-flash")
+  runtime.tick(now: now + 4)
+  member = record.state["members"].find { |entry| entry["thread_id"] == "orbit-m-auto" }
+  assert(member["status"] == "registered" &&
+         Array(member["settlement_history"]).any? { |entry| entry["reasons"] == ["dispatch_changed"] },
+         "a new attempt by the same member cannot borrow the old failure settlement")
 end
 
 # B (auto-release, unknown async): without a real owner-scoped async snapshot
@@ -3727,7 +3768,7 @@ fixture do |root, record, host, _checker, runtime|
   units = Orbit::WorkUnitStore.new(record)
   unit = units.declare("objective" => "unknown async", "acceptance" => "fixture checks",
                        "escalation" => "ask root", "requirements" => ["original"],
-                       "allowed_paths" => ["src/"], "allowed_tools" => ["bash"])
+                       "allowed_paths" => ["src/"], "allowed_tools" => ["bash"], "allowed_commands" => ["node --test"])
   units.bind(unit["id"], member_id: "orbit-m-noasync", tool_call_id: "call-noasync",
              model: "opencode-go/deepseek-v4.1-flash")
   state = runtime.instance_variable_get(:@state)
@@ -3753,7 +3794,7 @@ fixture do |root, record, host, _checker, runtime|
   units = Orbit::WorkUnitStore.new(record)
   unit = units.declare("objective" => "unknown tools", "acceptance" => "fixture checks",
                        "escalation" => "ask root", "requirements" => ["original"],
-                       "allowed_paths" => ["src/"], "allowed_tools" => ["bash"])
+                       "allowed_paths" => ["src/"], "allowed_tools" => ["bash"], "allowed_commands" => ["node --test"])
   units.bind(unit["id"], member_id: "orbit-m-notools", tool_call_id: "call-notools",
              model: "opencode-go/deepseek-v4.1-flash")
   state = runtime.instance_variable_get(:@state)
@@ -3768,6 +3809,74 @@ fixture do |root, record, host, _checker, runtime|
   runtime.tick(now: now + 1)
   assert(units.read(unit["id"])["status"] == "bound",
          "an unknown active-tool count never unlocks the same-unit retry")
+end
+
+# The Root CLI select seam, kept to the two high-value paths: (1) a real
+# select consumes the command and answers with the persisted selection plus
+# candidate objects — or a specific immediate refusal, never a silent 120s
+# wait; (2) member blocks that hit the same wall across re-declared units
+# aggregate with dispatch identity intact, stall exactly once into one
+# bounded process check, and never pay again for the same observation.
+fixture(interval: 300) do |_root, record, host, _checker, _runtime|
+  host.working("progress")
+  unit = declared_unit(record)
+  selector = RuntimeMemberSelector.new
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: RuntimeChecker.new,
+                                   member_selector: selector)
+  request_id = "12345678-1234-4321-8765-abcdefabcdef"
+  record.submit("member_selection", "request_id" => request_id, "work_unit_id" => unit["id"])
+  runtime.send(:consume_commands)
+  response = JSON.parse(File.read(File.join(record.path, "member-selection-responses", "#{request_id}.json")))
+  assert(response["ok"] == true &&
+         response["selection"]["signature"] == record.state.dig("member_selections", unit["id"], "signature") &&
+         response["selection"]["recommendation_objects"]["first"]["agent"] == "orbit-m-deepseek",
+         "select consumes the command and returns the persisted selection with candidate objects")
+  record.submit("member_selection", "request_id" => "33333333-3333-4333-8333-cccccccccccc", "work_unit_id" => "wu-missing")
+  runtime.send(:consume_commands)
+  refused = JSON.parse(File.read(File.join(
+    record.path, "member-selection-responses", "33333333-3333-4333-8333-cccccccccccc.json")))
+  assert(refused["ok"] == false && refused["reason"].to_s.include?("work_unit_not_found"),
+         "an unknown unit is refused immediately with a specific reason")
+end
+
+fixture(interval: 300, host_class: RuntimeAskHost) do |_root, record, host, checker, _runtime|
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker)
+  runtime.instance_variable_set(:@initial_digest, runtime.send(:fingerprint_artifact)) # actual run startup baseline
+  host.finish("turn-1")
+  host.working("progress")
+  blocked = ->(seq, agent, unit_id, call_id) do
+    { "id" => "collab-#{seq}", "seq" => seq, "kind" => "work_unit_tool_blocked",
+      "agent_id" => agent, "work_unit_id" => unit_id, "tool_call_id" => call_id,
+      "tool" => "read", "reason" => "Orbit work-unit scope: path escapes the artifact root",
+      "at" => Time.now.utc.iso8601 }
+  end
+  seq = 0
+  batch = ->(*triples) do
+    payload = triples.map do |agent, unit_id, call_id|
+      seq += 1
+      blocked.call(seq, agent, unit_id, call_id)
+    end
+    { "events" => payload, "dropped_oldest" => 0, "next_seq" => seq + 1, "buffer_cap" => 500 }
+  end
+  host.ask_events = batch.call(%w[orbit-a wu-1 call-1], %w[orbit-b wu-2 call-2])
+  runtime.tick(now: Time.now.to_f)
+  assert(record.state.dig("member_blocks", "classes", 0, "count") == 2 && record.state["member_block_stall"].nil?,
+         "two members on one wall aggregate but do not stall before the Root turn advances")
+  host.finish("turn-2")
+  host.working("progress")
+  host.ask_events = batch.call(%w[orbit-c wu-3 call-3])
+  runtime.tick(now: Time.now.to_f + 1)
+  assert(record.state["member_block_stall"].is_a?(Hash) && checker.calls.last&.fetch(:role) == "process_reviewer",
+         "a re-dispatch after a Root turn advance stalls once into one process check")
+  context = checker.calls.last&.fetch(:context)&.dig("member_blocks")
+  assert(context["classes"].first["dispatches"].map { |dispatch| dispatch["tool_call_id"] } == %w[call-1 call-2 call-3] &&
+         context["classes"].first["units"] == %w[wu-1 wu-2 wu-3],
+         "the check context keeps member/unit/dispatch identity across re-declared units")
+  runtime.send(:finish_check, answer("continue"), host.state, Time.now.to_f + 2)
+  host.ask_events = batch.call(%w[orbit-c wu-3 call-4], %w[orbit-a wu-4 call-5])
+  runtime.tick(now: Time.now.to_f + 70)
+  assert(checker.calls.length == 1 && events(record).any? { |event| event["type"] == "check_duplicate_skipped" },
+         "repeated hits on the same wall class never pay for another check")
 end
 
 puts "TASK_RUNTIME_TEST_PASS (deterministic, not real-model acceptance)"

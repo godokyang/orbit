@@ -14,6 +14,7 @@
 | 当前交接与现场 | [交接](plan/handoff.md) |
 | 当前仍生效的限制与未测范围 | [当前限制](plan/debt-ledger.md) |
 | 产品方向与设计理由 | [混合模型交付主方案](plan/mixed-model-delivery-proposal.md)（同次交付已结束，效果有范围） |
+| 普通任务推荐、权限与监督修复的真实验收 | [验收记录](reference/ordinary-task-repair-acceptance-20261002.md)（0.8.1，有界范围） |
 | 混合模型交付逐项收口（54 项＋W1–W10） | [完成记录](reference/mixed-model-delivery-completion-20261001.md) |
 | OpenRouter 映射来源与理由 | [映射来源审计](reference/openrouter-model-mapping-audit.md) |
 | 工程经验 | [工程教训](reference/engineering-lessons.md) |

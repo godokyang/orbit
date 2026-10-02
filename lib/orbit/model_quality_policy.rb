@@ -29,7 +29,26 @@ module Orbit
   #   Route cost inputs retain the audited fact and usage composition.
   module ModelQualityPolicy
     INPUT_VERSION = "jev-selection-input-2"
-    DECISION_VERSION = "orbit-quality-decision-3"
+    # orbit-quality-decision-4 records a two-stage responsibility change only.
+    # Question text, question-set versions, input version and threshold keys
+    # stay as they were under orbit-quality-decision-3. Delegation asks both
+    # calibrated questions, but only handoff_fit gates whether per-candidate
+    # task fit is asked. member_task_fit remains a diagnostic score and is
+    # not a veto of every concrete candidate. Each candidate is then gated by
+    # its own released candidate_task_fit. Per-question samples in an older
+    # raw release do not prove this combination. A positive rank still needs
+    # a release whose decision_version is this value; the shipped raw file is
+    # left unchanged and therefore does not activate.
+    DECISION_VERSION = "orbit-quality-decision-4"
+    DECISION_RECORD = {
+      "version" => DECISION_VERSION,
+      "supersedes" => "orbit-quality-decision-3",
+      "unchanged" => %w[question_text question_set_versions input_version threshold_keys].freeze,
+      "delegation_gate" => "handoff_fit",
+      "diagnostic_questions" => ["member_task_fit"].freeze,
+      "candidate_gate" => "candidate_task_fit",
+      "combination_proven_by_prior_per_question_releases" => false
+    }.freeze
     OBSERVATION_QUESTION_SET = "jev-observation-2"
     DELEGATION_QUESTION_SET = "jev-delegation-4"
     CANDIDATE_QUESTION_SET = "jev-candidates-4"
@@ -220,6 +239,11 @@ module Orbit
     def validate(data)
       return "selection calibration must be a JSON object" unless data.is_a?(Hash)
       unless binding.all? { |key, value| data[key] == value }
+        if data["decision_version"] != DECISION_VERSION &&
+           binding.reject { |key, _| key == "decision_version" }.all? { |key, value| data[key] == value }
+          return "selection calibration is bound to #{data['decision_version']} and does not authorize " \
+                 "#{DECISION_VERSION}; per-question samples do not prove the two-stage combination"
+        end
         return "selection calibration does not match the current questions, input and decision"
       end
 
@@ -442,6 +466,16 @@ module Orbit
       { "id" => item["id"].to_s, "index" => index, "quality" => score,
         "question" => item["question"].to_s, "positive" => false,
         "recommendation_hold" => item["recommendation_hold"] == true, "identity" => item["identity"] }
+    end
+
+    # Structural gate for the delegation stage under DECISION_RECORD.
+    # member_task_fit is intentionally not consulted and its threshold is not lowered.
+    def delegation_structure_released?(release:, judgment:, state:)
+      active = activated_release(release: release, judgment: judgment, state: state)
+      return false unless active
+      return false unless judgment["question_set_version"] == GATING_QUESTION_SETS["handoff_fit"]
+
+      released_score?({ "quality" => judgment.dig("scores", "handoff_fit"), "question" => "handoff_fit" }, active)
     end
 
     def released_score?(item, release)

@@ -24,6 +24,12 @@ module Orbit
   # only reports facts, leaving the native choice to Root. Unknown cost never
   # rejects a candidate, and there is no budget, time, brand or local-success
   # gate here.
+  #
+  # The paid delegation call still asks the calibrated handoff_fit and
+  # member_task_fit questions. Only handoff_fit gates per-candidate task fit.
+  # member_task_fit is a generalized quality signal and is reported as a
+  # limitation; it does not drop concrete candidates. Question text, versions
+  # and release thresholds are unchanged.
   class MemberModelSelector
     VERSION = "orbit-member-selection-v2"
     # Distinguishes "no release injected" (production: read the reviewed file)
@@ -65,6 +71,93 @@ module Orbit
       assessment(prepared)
     end
 
+    # Work-unit evidence that may invalidate a cached selection: requirements,
+    # context, decisions, acceptance, scope, dependencies, prior dispatch
+    # outcomes and the task input digest. Whole-project artifact digests,
+    # user-message ids and workspace history are not part of this basis.
+    BASIS_KEYS = %w[id status objective requirements context decisions escalation acceptance
+                    artifact_root scope model_requirements input_digest dependencies dispatches
+                    result verification execution input_materials].freeze
+
+    def self.selection_unit_material(unit)
+      return {} unless unit.is_a?(Hash)
+
+      scope = unit["scope"]
+      BASIS_KEYS.to_h { |key| [key, unit.key?(key) ? unit[key] : nil] }.merge(
+        "scope" => scope.is_a?(Hash) ? scope : {}
+      )
+    end
+
+    def self.unit_basis(unit, input_digest, workspace_git: nil)
+      Digest::SHA256.hexdigest(JSON.generate(
+        ObservationKey.normalize(
+          "input_digest" => input_digest,
+          "workspace_git" => workspace_git,
+          "unit" => selection_unit_material(unit)
+        )
+      ))
+    end
+
+    # Fair member-recommendation schedule. Root self-execute units are listed
+    # in skipped and never become next_id. Unassessed units, then units whose
+    # stored unit_basis no longer matches, come before a settled refresh.
+    #
+    # Runtime wiring (task_runtime#stage_delegation, not this class):
+    #   plan = recommendation_plan(units:, assessments: state["member_selections"],
+    #     input_digest:, artifact_root:, workspace_git: workspace.dig("project", "git"))
+    #   id = plan["next_id"] || plan["refresh_id"]
+    #   assess that one unit. Persist unit_basis with the selection.
+    #   On reuse, still advance that unit's "at" so refresh_id rotates; do not
+    #   record a new judgment or usage. Do not replace another unit's delivered
+    #   hint. Host dispatch reads the hint stored for the orbit-unit being
+    #   dispatched and must not rewrite Root's chosen agent.
+    def self.recommendation_plan(units:, assessments: {}, input_digest:, artifact_root:, workspace_git: nil)
+      list = Array(units).select { |unit| unit.is_a?(Hash) }
+      stored = assessments.is_a?(Hash) ? assessments : {}
+      skipped = []
+      pending = []
+      list.each do |unit|
+        next unless recommendation_eligible?(unit, list, input_digest: input_digest, artifact_root: artifact_root)
+
+        if WorkUnitStore.execution_role(unit) == "root_self_execute"
+          skipped << { "id" => unit["id"], "role" => "root_self_execute",
+                       "reason" => "Root self-execute unit is outside the member recommendation queue" }
+        else
+          pending << unit
+        end
+      end
+      ranked = pending.each_with_index.map do |unit, index|
+        previous = stored[unit["id"]]
+        basis = unit_basis(unit, input_digest, workspace_git: workspace_git)
+        assessed = previous.is_a?(Hash) && previous["signature"].is_a?(String)
+        stale_basis = !assessed || previous["unit_basis"] != basis
+        { "unit" => unit, "index" => index, "assessed" => assessed, "stale_basis" => stale_basis,
+          "at" => previous.is_a?(Hash) ? previous["at"].to_s : "" }
+      end
+      needing = ranked.select { |item| !item["assessed"] || item["stale_basis"] }
+                      .sort_by { |item| [item["assessed"] ? 1 : 0, item["index"]] }
+      settled = ranked.select { |item| item["assessed"] && !item["stale_basis"] }
+                      .sort_by { |item| [item["at"], item["index"]] }
+      {
+        "skipped" => skipped,
+        "queue" => needing.map { |item| item["unit"]["id"] } + settled.map { |item| item["unit"]["id"] },
+        "next_id" => needing.empty? ? nil : needing.first["unit"]["id"],
+        "refresh_id" => settled.empty? ? nil : settled.first["unit"]["id"],
+        "roles" => list.filter_map { |unit| [unit["id"], WorkUnitStore.execution_role(unit)] if unit["id"].is_a?(String) }.to_h
+      }
+    end
+
+    def self.recommendation_eligible?(unit, units, input_digest:, artifact_root:)
+      return false unless unit.is_a?(Hash)
+      return false unless %w[declared rejected failed].include?(unit["status"])
+      return false unless input_digest.is_a?(String) && unit["input_digest"] == input_digest
+      return false unless artifact_root.is_a?(String) && unit["artifact_root"] == artifact_root
+
+      Array(unit["dependencies"]).all? do |id|
+        units.any? { |dep| dep.is_a?(Hash) && dep["id"] == id && dep["status"] == "accepted" }
+      end
+    end
+
     private
 
     def reusable_assessment(previous, prepared)
@@ -86,12 +179,15 @@ module Orbit
       candidates, selection_note = candidate_list(pool: pool, pool_note: pool_note, catalog: catalog,
                                                    excluded: earlier, unit: unit)
       release, release_note = current_release
+      workspace_git = state.is_a?(Hash) ? state.dig("workspace", "project", "git") : nil
       {
         "catalog" => catalog, "catalog_error" => catalog_error, "pool" => pool, "pool_note" => pool_note,
         "excluded" => earlier,
         "unit" => unit, "state" => state.is_a?(Hash) ? state : {}, "input_digest" => state_digest,
         "stale" => stale, "candidates" => candidates, "selection_note" => selection_note,
-        "release" => release, "release_note" => release_note, "route_costs" => route_costs
+        "release" => release, "release_note" => release_note, "route_costs" => route_costs,
+        "execution_role" => WorkUnitStore.execution_role(unit),
+        "unit_basis" => self.class.unit_basis(unit, state_digest, workspace_git: workspace_git)
       }.tap { |prepared| prepared["signature"] = signature(prepared) }
     end
 
@@ -246,7 +342,9 @@ module Orbit
         "tool_call_id" => unit_field(unit, "tool_call_id"),
         "model" => unit_field(unit, "model"),
         "result" => unit_field(unit, "result"),
-        "verification" => unit_field(unit, "verification")
+        "verification" => unit_field(unit, "verification"),
+        "execution" => unit_field(unit, "execution"),
+        "input_materials" => unit_field(unit, "input_materials")
       }
     end
 
@@ -309,17 +407,21 @@ module Orbit
       release.is_a?(Hash) ? ObservationKey.normalize(release) : nil
     end
 
-    # Canonical material: the policy binding, the whole release binding, the task
-    # input/unit, the per-candidate facts, the excluded set and the route costs.
-    # A change in any of them must re-assess; an unchanged one spends nothing.
+    # Cache identity is the work-unit basis plus candidate capability facts,
+    # the effective policy/release and route-cost inputs. An unrelated
+    # artifact digest or user-message id is not material.
     def signature(prepared)
       Digest::SHA256.hexdigest(JSON.generate(
         ObservationKey.normalize(
           "version" => VERSION,
           "policy" => ModelQualityPolicy.binding,
           "release" => release_binding(prepared["release"]),
-          "input_digest" => prepared["input_digest"], "unit" => prepared["unit"],
-          "state" => ModelQualityPolicy.project_selection_state(judgment_body(prepared, [])),
+          "unit_basis" => prepared["unit_basis"],
+          "dependency_context" => Array(prepared["state"]["dependency_context"]).filter_map do |dependency|
+            next unless dependency.is_a?(Hash) && Array(prepared["unit"]["dependencies"]).include?(dependency["id"])
+
+            dependency.slice("id", "status", "result_sha256", "verification_sha256")
+          end,
           "candidates" => prepared["candidates"].map { |item| item.slice("agent", "model", "identity", "facts") },
           "excluded" => prepared["excluded"], "route_costs" => prepared["route_costs"]
         )
@@ -347,7 +449,12 @@ module Orbit
     def assessment(prepared)
       result = base_result(prepared)
       return result.merge("decision" => "stale", "reason" => "the work unit belongs to another input version") if prepared["stale"]
+      if prepared["execution_role"] == "root_self_execute"
+        return result.merge("decision" => "root_self_execute",
+                            "reason" => "Root self-execute unit is outside the member recommendation queue")
+      end
       return result.merge("decision" => "facts_only", "reason" => prepared["selection_note"] || "no candidate") if prepared["candidates"].empty?
+      return result.merge("decision" => "facts_only", "reason" => "Jev advisor is unavailable; no quality judgment is paid and Root chooses") unless @advisor
 
       release = prepared["release"]
       if release.nil?
@@ -387,8 +494,11 @@ module Orbit
       { "version" => VERSION, "signature" => prepared["signature"], "reused" => false,
         "candidates" => prepared["candidates"].map { |item| candidate_view(item, nil) },
         "requirements_error" => requirements_error(prepared),
-        "recommendation" => { "first" => nil, "backups" => [] }, "judgments" => [],
+        "recommendation" => { "first" => nil, "backups" => [] },
+        "recommendation_objects" => { "first" => nil, "backups" => [] },
+        "limitations" => [], "judgments" => [],
         "judgment_state" => nil, "input_digest" => prepared["input_digest"], "stale" => prepared["stale"],
+        "unit_basis" => prepared["unit_basis"], "execution_role" => prepared["execution_role"],
         "dependencies" => prepared["unit"]["dependencies"],
         "route_cost_inputs" => prepared["route_costs"],
         "release" => release_binding(prepared["release"]), "decision" => "facts_only", "reason" => nil }
@@ -406,19 +516,26 @@ module Orbit
       prepared["candidates"].filter_map { |item| item["projection_error"] }.first
     end
 
-    # A release is required before any paid judgment: it supplies the reviewed
-    # bar, and the receipt itself must match the task profile and the actual
-    # service model. Two real calls: handoff/member fit first, then per-candidate
-    # task fit only when that receipt clears both delegation gates.
+    # A release is required before any paid judgment. The delegation call still
+    # asks both calibrated questions. handoff_fit is the structural gate.
+    # member_task_fit stays on the receipt and, when below its own released
+    # threshold, becomes a limitation — it does not skip candidate_task_fit.
     def judge(prepared, result, release)
       body = judgment_body(prepared, prepared["candidates"])
       projection = projection_for(prepared)
       delegation = judge_call(phase: "delegation") { @advisor.assess_delegation(state: body) }
       result["judgments"] << delegation["receipt"]
       result["judgment_state"] = body
-      unless delegation["ok"] && delegation_released?(release, delegation["receipt"], projection)
-        return result.merge("decision" => "not_recommended",
-                            "reason" => delegation["receipt"]["error"] || "the delegation gates did not clear for this release")
+      receipt = delegation["receipt"]
+      unless delegation["ok"]
+        return close_judgment(result, prepared, release, receipt, nil,
+                              decision: "not_recommended",
+                              reason: receipt["error"] || "the delegation judgment failed")
+      end
+      unless handoff_released?(release, receipt, projection)
+        return close_judgment(result, prepared, release, receipt, nil,
+                              decision: "not_recommended",
+                              reason: "handoff_fit did not clear the released structural bar; per-candidate task fit was not asked")
       end
 
       candidates_call = judge_call(phase: "candidates") do
@@ -426,8 +543,9 @@ module Orbit
       end
       result["judgments"] << candidates_call["receipt"]
       unless candidates_call["ok"]
-        return result.merge("decision" => "not_recommended",
-                            "reason" => candidates_call["receipt"]["error"] || "the per-candidate judgment failed")
+        return close_judgment(result, prepared, release, receipt, nil,
+                              decision: "not_recommended",
+                              reason: candidates_call["receipt"]["error"] || "the per-candidate judgment failed")
       end
 
       costs = prepared["route_costs"]
@@ -445,22 +563,54 @@ module Orbit
       result["candidates"] = prepared["candidates"].map do |item|
         candidate_view(item, first == item["agent"] ? "recommended" : "not_recommended")
       end
-      result.merge(
-        "decision" => first ? "recommended" : "not_recommended",
-        "reason" => first ? order["reason"] : "no candidate cleared the released task-fit bar for this profile",
-        "recommendation" => { "first" => first, "backups" => first ? Array(order["positive_ids"]) - [first] : [] },
-        "order" => order
-      )
+      reason = if first
+                 order["reason"]
+               else
+                 held = prepared["candidates"].select { |item| item["recommendation_hold"] }
+                 base = "no candidate cleared the released task-fit bar for this profile"
+                 held.empty? ? base : "#{base}; held: #{held.map { |item| "#{item['agent']} (#{item['hold_reason']})" }.join('; ')}"
+               end
+      close_judgment(result, prepared, release, receipt, order,
+                     decision: first ? "recommended" : "not_recommended", reason: reason,
+                     first: first, backups: first ? Array(order["positive_ids"]) - [first] : [])
     end
 
-    def delegation_released?(release, receipt, state)
-      return false unless ModelQualityPolicy.activated_release(release: release, judgment: receipt, state: state)
+    def close_judgment(result, prepared, release, receipt, order, decision:, reason:, first: nil, backups: [])
+      objects = result["candidates"].to_h { |item| [item["agent"], item] }
+      result.merge(
+        "decision" => decision, "reason" => reason, "order" => order,
+        "recommendation" => { "first" => first, "backups" => backups },
+        "recommendation_objects" => { "first" => first && objects[first], "backups" => backups.map { |id| objects[id] } },
+        "limitations" => fit_limitations(release, receipt, order, prepared)
+      ).tap { |out| out.delete("order") if order.nil? }
+    end
 
-      %w[handoff_fit member_task_fit].all? do |question|
-        ModelQualityPolicy::GATING_QUESTION_SETS[question] == receipt["question_set_version"] &&
-          ModelQualityPolicy.released_score?({ "quality" => receipt.dig("scores", question), "question" => question },
-                                             release)
+    # Structural handoff only. The calibrated member_task_fit threshold is not
+    # applied here and is not lowered.
+    def handoff_released?(release, receipt, state)
+      ModelQualityPolicy.delegation_structure_released?(release: release, judgment: receipt, state: state)
+    end
+
+    def fit_limitations(release, receipt, order, prepared)
+      limits = [
+        "decision #{ModelQualityPolicy::DECISION_VERSION} gates the candidate call on handoff_fit only and keeps " \
+        "member_task_fit diagnostic; earlier per-question releases do not prove this combination, and a positive " \
+        "rank is authorized only by a release bound to this decision version"
+      ]
+      score = receipt.is_a?(Hash) ? receipt.dig("scores", "member_task_fit") : nil
+      threshold = release.is_a?(Hash) ? release.dig("thresholds", "member_task_fit") : nil
+      if score.is_a?(Numeric) && threshold.is_a?(Numeric) && score < threshold
+        limits << "member_task_fit #{score} is below the released threshold #{threshold}; " \
+                  "it is a generalized member-quality signal, not the handoff-structure gate, " \
+                  "and does not replace per-candidate task fit"
       end
+      Array(prepared["candidates"]).each do |item|
+        limits << "#{item['agent']}: #{item['hold_reason']}" if item["recommendation_hold"] && item["hold_reason"]
+      end
+      if order.is_a?(Hash) && %w[unknown incomparable].include?(order["cost_comparison"])
+        limits << "route cost comparison is #{order['cost_comparison']}; unknown price, quota or billing route stays unknown and is not treated as free"
+      end
+      limits
     end
 
     def signals(prepared, receipt)

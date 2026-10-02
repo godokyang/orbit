@@ -39,6 +39,167 @@ async function scopedPath(value, root, allowed, base = root) {
   return real;
 }
 
+
+// ---------------------------------------------------------------------------
+// Native read/grep/glob path grammar, mirrored line-by-line from the pinned
+// host SDK (@oh-my-pi/pi-coding-agent 18.3.4 src/tools/read.ts, grep.ts,
+// glob.ts, tools/path-utils.ts; @oh-my-pi/pi-tui src/tools/read.ts and
+// tools/line-ranges.ts). Selector and search grammars were cross-checked
+// against the installed live OMP 18.4.9 binary (identical selector error
+// strings and splitPathAndSelPreferringLiteral entry points). The gate must
+// parse exactly what the native tools parse: line selectors (`:N`, `:N-M`,
+// `:N+K`, `:N-`, `:-N`, comma lists, `:raw`/`:conflicts`/`:img`, compound
+// `:raw:50-100`), `;`-delimited multi-paths with literal-path preference, and
+// glob-carrying search entries. Reimplemented here because the SDK ships
+// type-stripped-unimportable TS sources; every rule names its native origin.
+
+// pi-tui tools/line-ranges.ts LINE_RANGE_CHUNK_SOURCE + read.ts RANGE_SELECTOR_CHUNK lookbehind.
+const RANGE_CHUNK = String.raw`L?(?:\d+)(?:(?:\.\.|[-+])L?(?:\d+)?)?(?<=[\d.-])`;
+const RANGE_LIST_RE = new RegExp(`^${RANGE_CHUNK}(?:,${RANGE_CHUNK})*$`, 'i');
+const TAIL_RE = /^-\d+$/;
+// pi-tui tools/read.ts FILE_LINE_RANGE_RE / FILE_LINE_RANGE_ONLY_RE / FILE_RAW_ONLY_RE.
+const FILE_LINE_RANGE_RE = new RegExp(`^(?:${RANGE_CHUNK}(?:,${RANGE_CHUNK})*|-\\d+|raw|conflicts|img)$`, 'i');
+const FILE_LINE_RANGE_ONLY_RE = new RegExp(`^(?:${RANGE_CHUNK}(?:,${RANGE_CHUNK})*|-\\d+)$`, 'i');
+const FILE_RAW_ONLY_RE = /^raw$/i;
+// pi-coding-agent tools/path-utils.ts GLOB_PATH_CHARS.
+const hasGlobPathChars = value => ['*', '?', '[', '{'].some(char => value.includes(char));
+
+// pi-tui tools/read.ts splitPathAndSel: peel a trailing selector, including the
+// two-chunk `raw`+range compound in either order.
+function splitPathAndSel(rawPath) {
+  const colon = rawPath.lastIndexOf(':');
+  if (colon <= 0) return { path: rawPath };
+  const candidate = rawPath.slice(colon + 1);
+  if (!FILE_LINE_RANGE_RE.test(candidate)) return { path: rawPath };
+  let basePath = rawPath.slice(0, colon);
+  let sel = candidate;
+  const innerColon = basePath.lastIndexOf(':');
+  if (innerColon > 0) {
+    const inner = basePath.slice(innerColon + 1);
+    if ((FILE_RAW_ONLY_RE.test(inner) && FILE_LINE_RANGE_ONLY_RE.test(candidate)) ||
+        (FILE_LINE_RANGE_ONLY_RE.test(inner) && FILE_RAW_ONLY_RE.test(candidate))) {
+      sel = `${inner}:${candidate}`;
+      basePath = basePath.slice(0, innerColon);
+    }
+  }
+  return { path: basePath, sel };
+}
+
+// path-utils.ts probeLiteralPathExists: lstat three-way probe (POSIX: an
+// inconclusive probe keeps the literal interpretation).
+async function probeLiteral(filePath, base) {
+  try { await fs.lstat(path.resolve(base, filePath)); return 'exists'; }
+  catch (error) {
+    if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR' || error?.code === 'ENAMETOOLONG') return 'missing';
+    return 'unknown';
+  }
+}
+
+// path-utils.ts splitPathAndSelPreferringLiteral: a real file named `a:1-2`
+// always outranks the `:1-2` selector reading (native issue #4618).
+async function splitPreferringLiteral(rawPath, base) {
+  const strict = splitPathAndSel(rawPath);
+  if (strict.sel === undefined) return strict;
+  return (await probeLiteral(rawPath, base)) !== 'missing' ? { path: rawPath } : strict;
+}
+
+// path-utils.ts parseSearchPath: split at the first glob segment.
+function parseSearchPath(filePath) {
+  const normalized = filePath.replace(/\\/g, '/');
+  const segments = normalized.split('/');
+  const index = segments.findIndex(hasGlobPathChars);
+  if (index === -1) return { basePath: normalized };
+  if (index <= 0) return { basePath: '.', glob: normalized };
+  return { basePath: segments.slice(0, index).join('/'), glob: segments.slice(index).join('/') };
+}
+
+// path-utils.ts parseFindPattern (glob tool: the pattern is embedded in path).
+function parseFindPattern(pattern) {
+  const normalized = pattern.replace(/\\/g, '/');
+  const segments = normalized.split('/');
+  const index = segments.findIndex(hasGlobPathChars);
+  if (index === -1) return { basePath: normalized, globPattern: '**/*', hasGlob: false };
+  if (index === 0)
+    return { basePath: '.', globPattern: normalized.startsWith('**/') ? normalized : `**/${normalized}`, hasGlob: true };
+  return { basePath: segments.slice(0, index).join('/'), globPattern: segments.slice(index).join('/'), hasGlob: true };
+}
+
+// path-utils.ts normalizePathLikeInput (trim + strip outer double quotes).
+const normalizeEntry = value => {
+  const trimmed = value.trim();
+  return trimmed.startsWith('"') && trimmed.endsWith('"') && trimmed.length > 1 ? trimmed.slice(1, -1) : trimmed;
+};
+
+// path-utils.ts hasTopLevelPathDelimiter / splitTopLevelDelimitedPath:
+// `,` `;` and whitespace delimit only outside `{}` groups; `\` escapes.
+function splitTopLevel(entry, mode) {
+  const parts = [];
+  let depth = 0, start = 0;
+  for (let index = 0; index < entry.length; index++) {
+    const char = entry[index];
+    if (char === '\\' && index + 1 < entry.length) { index++; continue; }
+    if (char === '{') { depth++; continue; }
+    if (char === '}') { if (depth > 0) depth--; continue; }
+    if (depth !== 0) continue;
+    const delimits = mode === 'semicolon' ? char === ';'
+      : mode === 'comma' ? char === ','
+      : mode === 'whitespace' ? /\s/.test(char)
+      : char === ',' || char === ';' || /\s/.test(char);
+    if (delimits) { parts.push(entry.slice(start, index)); start = index + 1; }
+  }
+  parts.push(entry.slice(start));
+  return parts;
+}
+
+// path-utils.ts delimitedPathPartResolves (existence of the entry's search base).
+async function partResolves(entry, base, splitter) {
+  const { basePath } = splitter(splitPathAndSel(entry).path);
+  try { await fs.stat(path.resolve(base, basePath)); return true; }
+  catch (error) {
+    if (error?.code === 'ENOENT' || error?.code === 'ENAMETOOLONG') return false;
+    throw error;
+  }
+}
+
+// path-utils.ts splitDelimitedPathEntry, minus internal-URL handling (member
+// scope rejects URLs outright): existing literal paths win over delimiter
+// recovery; `;` splits unconditionally, `,` needs one resolving part,
+// whitespace/mixed need every part to resolve.
+async function splitDelimited(entry, base, splitter) {
+  const normalized = normalizeEntry(entry);
+  const mixedParts = splitTopLevel(normalized, 'mixed');
+  if (mixedParts.length < 2) return null;
+  if (await probeLiteral(normalized, base) !== 'missing') return null;
+  const selectorSplit = splitPathAndSel(normalized);
+  if (selectorSplit.sel !== undefined && await probeLiteral(selectorSplit.path, base) !== 'missing') return null;
+  if (!hasGlobPathChars(selectorSplit.path) && await partResolves(normalized, base, splitter)) return null;
+  const trySplit = async (mode, requirement) => {
+    const rawParts = splitTopLevel(normalized, mode);
+    if (rawParts.length < 2) return null;
+    const parts = rawParts.map(normalizeEntry).filter(part => part.length > 0);
+    if (parts.length === 0) return null;
+    if (parts.length < 2 && rawParts.length === parts.length) return null;
+    if (requirement !== 'none') {
+      const resolved = await Promise.all(parts.map(part => partResolves(part, base, splitter)));
+      if (requirement === 'all' ? !resolved.every(Boolean) : !resolved.some(Boolean)) return null;
+    }
+    return parts;
+  };
+  return await trySplit('semicolon', 'none') ?? await trySplit('comma', 'some') ??
+    await trySplit('whitespace', 'all') ?? await trySplit('mixed', 'all');
+}
+
+// pi-tui render/render-utils.ts toPathList: a JSON string array is a path list.
+function toPathList(value) {
+  const trimmed = value.trim();
+  if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+    try {
+      const parsed = JSON.parse(trimmed);
+      if (Array.isArray(parsed) && parsed.every(entry => typeof entry === 'string')) return parsed;
+    } catch { /* not an encoded list */ }
+  }
+  return [value];
+}
 // Loads the public pi-natives editInspect the native edit tool projects with,
 // anchored at the release's own bundled SDK dependency tree
 // (runners/omp-reviewer, pinned @oh-my-pi/pi-coding-agent 18.3.4 with the
@@ -91,8 +252,34 @@ export function createEditProjection(sdk, model, loadInspect = loadEditInspect) 
   };
 }
 
+// Resolve the unit's artifact root and declared allowed paths to canonical
+// real paths. Shared by the per-call gate and the pre-dispatch preflight.
+async function resolveUnitScope(unit) {
+  const root = await fs.realpath(unit.artifact_root);
+  const allowed = [];
+  for (const declared of unit.scope?.allowed_paths || []) {
+    if (typeof declared !== 'string' || declared.startsWith('~') || declared.includes('\0') ||
+        declared.split(/[\\/]/).includes('..') || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(declared))
+      throw new Error('invalid work-unit scope path');
+    const lexical = path.resolve(root, declared), real = await canonical(lexical);
+    if (!within(root, lexical) || !within(root, real) || protectedPath(lexical) || protectedPath(real))
+      throw new Error('work-unit scope escapes the actual artifact root');
+    allowed.push(real);
+  }
+  return { root, allowed };
+}
+
 async function safeSearchBase(base) {
-  if (!(await fs.stat(base)).isDirectory()) return;
+  let stat;
+  try { stat = await fs.stat(base); }
+  catch (error) {
+    // A missing base searches nothing; the native tool reports the miss (and
+    // tolerates missing entries in a multi-path call), so there is no tree to
+    // verify here.
+    if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') return;
+    throw error;
+  }
+  if (!stat.isDirectory()) return;
   const pending = [base];
   let visited = 0;
   while (pending.length) {
@@ -104,6 +291,80 @@ async function safeSearchBase(base) {
       if (entry.isDirectory()) pending.push(path.join(directory, entry.name));
     }
   }
+}
+
+// read: `path` may carry line selectors and `;`-delimited multi-targets
+// (read.ts #tryReadDelimitedPaths). Every resolved target is scope-checked;
+// the validated absolute path is reassembled with its selector so the native
+// tool applies the identical grammar to the pinned path.
+async function scopedReadTarget(value, root, allowed) {
+  if (typeof value !== 'string' || !value) throw new Error('invalid native read path');
+  const parts = await splitDelimited(value, root, parseSearchPath) ?? [value];
+  const rewritten = [];
+  for (const part of parts) {
+    const split = await splitPreferringLiteral(part, root);
+    const base = await scopedPath(split.path, root, allowed);
+    rewritten.push(split.sel === undefined ? base : `${base}:${split.sel}`);
+  }
+  return rewritten.join(';');
+}
+
+// grep: `path` entries may be `;`-delimited, carry line-range-only selectors,
+// or embed a glob whose base directory is the searched scope (grep.ts
+// parsePathSpecs/resolveToolSearchScope). A missing entry searches nothing.
+async function scopedGrepTarget(value, root, allowed, cwd) {
+  const entries = [];
+  for (const raw of value === undefined ? ['.'] : toPathList(value)) {
+    if (typeof raw !== 'string') throw new Error('invalid native search path');
+    entries.push(...await splitDelimited(raw, root, parseSearchPath) ?? [raw]);
+  }
+  const rewritten = [], bases = [];
+  for (const entry of entries) {
+    const split = await splitPreferringLiteral(entry, root);
+    if (split.sel !== undefined && !RANGE_LIST_RE.test(split.sel))
+      throw new Error(`path entry "${entry}" — only line-range selectors like ":50-100" are supported (no ":raw"/":conflicts")`);
+    if (hasGlobPathChars(split.path) && await probeLiteral(split.path, root) === 'missing') {
+      if (split.sel !== undefined) throw new Error(`Line-range selector requires a single file, not a glob: ${entry}`);
+      const { basePath, glob } = parseSearchPath(split.path);
+      if (glob !== undefined && glob.split('/').includes('..')) throw new Error('search pattern escapes its scoped base');
+      const base = await scopedPath(basePath, root, allowed);
+      bases.push(base);
+      // SDK 18.4.9 makes a bare glob recursive. Absolute rewriting loses
+      // that native flag, so retain this spelling only at the verified cwd.
+      if (!split.path.includes('/') && !split.path.includes('\\')) {
+        if (!cwd || await canonical(cwd) !== root)
+          throw new Error('bare grep glob requires the member cwd to match the artifact root');
+        rewritten.push(split.path);
+      } else rewritten.push(glob === undefined ? base : `${base}/${glob}`);
+      continue;
+    }
+    const real = await scopedPath(split.path, root, allowed);
+    bases.push(real);
+    rewritten.push(split.sel === undefined ? real : `${real}:${split.sel}`);
+  }
+  return { path: rewritten.join(';'), bases };
+}
+
+// glob: the find pattern is embedded in `path` itself (glob.ts +
+// parseFindPattern); `;`-delimited entries fan out per pattern.
+async function scopedFindTarget(value, root, allowed) {
+  const entries = [];
+  for (const raw of value === undefined ? ['.'] : toPathList(value)) {
+    if (typeof raw !== 'string') throw new Error('invalid native find path');
+    entries.push(...await splitDelimited(raw, root, parseFindPattern) ?? [raw]);
+  }
+  const rewritten = [], bases = [];
+  for (const entry of entries) {
+    const pattern = normalizeEntry(entry).replace(/\\/g, '/');
+    if (/^\/+$/.test(pattern)) throw new Error("searching from root directory '/' is not allowed");
+    if (!pattern.length) throw new Error('`path` must contain non-empty globs or paths');
+    const parsed = parseFindPattern(pattern);
+    if (parsed.globPattern.split('/').includes('..')) throw new Error('search pattern escapes its scoped base');
+    const base = await scopedPath(parsed.basePath, root, allowed);
+    bases.push(base);
+    rewritten.push(parsed.hasGlob ? `${base}/${parsed.globPattern}` : base);
+  }
+  return { path: rewritten.join(';'), bases };
 }
 
 function sandboxProfile(root, allowed) {
@@ -165,16 +426,7 @@ export async function validateMemberTool(unit, { toolName, input, rootAgentId, e
     }
     if (!supported.has(toolName) || !unit.scope?.allowed_tools?.includes(toolName))
       throw new Error(`tool ${toolName} has no allowed work-unit entrance`);
-    const root = await fs.realpath(unit.artifact_root);
-    const allowed = [];
-    for (const declared of unit.scope.allowed_paths || []) {
-      if (typeof declared !== 'string' || declared.startsWith('~') || declared.includes('\0') ||
-          declared.split(/[\\/]/).includes('..') || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(declared))
-        throw new Error('invalid work-unit scope path');
-      const lexical = path.resolve(root, declared), real = await canonical(lexical);
-      if (!within(root, lexical) || !within(root, real) || protectedPath(real)) throw new Error('work-unit scope escapes the actual artifact root');
-      allowed.push(real);
-    }
+    const { root, allowed } = await resolveUnitScope(unit);
     if (!allowed.length) throw new Error('work unit allows no filesystem path');
     if (toolName === 'bash') {
       if (typeof input.command !== 'string' || !unit.scope.allowed_commands?.includes(input.command))
@@ -218,14 +470,67 @@ export async function validateMemberTool(unit, { toolName, input, rootAgentId, e
           return { ...edit, ...(edit.rename === undefined ? {} : { rename: await scopedPath(edit.rename, root, allowed) }) };
         }));
       }
-    } else {
+    } else if (toolName === 'read') {
+      result.path = await scopedReadTarget(input.path, root, allowed);
+    } else if (toolName === 'grep' || toolName === 'glob') {
+      // Non-schema keys keep the conservative escape guard; the native glob
+      // tool takes no `pattern`/`glob` parameter (the find pattern is embedded
+      // in `path`), so these only fire on off-schema input.
       if ((toolName === 'glob' && typeof input.pattern === 'string' &&
           (path.isAbsolute(input.pattern) || input.pattern.split(/[\\/]/).includes('..') || input.pattern.startsWith('~'))) ||
           (typeof input.glob === 'string' && (path.isAbsolute(input.glob) || input.glob.split(/[\\/]/).includes('..'))))
         throw new Error('search pattern escapes its scoped base');
+      const scoped = toolName === 'grep'
+        ? await scopedGrepTarget(input.path, root, allowed, cwd)
+        : await scopedFindTarget(input.path, root, allowed);
+      result.path = scoped.path;
+      for (const base of scoped.bases) await safeSearchBase(base);
+    } else {
       result.path = await scopedPath(input.path || '.', root, allowed);
-      if (toolName === 'grep' || toolName === 'glob') await safeSearchBase(result.path);
     }
     return { input: result };
   } catch (error) { return { block: true, reason: `Orbit work-unit scope: ${error.message}` }; }
+}
+
+// Pre-dispatch executability check for a declared work unit, run by the host
+// before any member session or candidate-model spend. Returns { ok: true,
+// root, allowed } when the unit can actually exercise its declared entrances,
+// or { block: true, reason } with the concrete repair Root must apply.
+// options.materials: task input material paths the Root plans to hand the
+// member; each must already exist inside the artifact root, outside
+// .git/.orbit, and inside the member's allowed paths (members read nothing
+// else — Root must place materials under an allowed path first). options.cwd
+// is the caller-verified workspace, used only when unit.artifact_root is absent.
+export async function validateWorkUnitPreflight(unit, { materials = unit?.input_materials ?? [], cwd } = {}) {
+  try {
+    const { root, allowed } = await resolveUnitScope({ ...unit, artifact_root: unit?.artifact_root ?? cwd });
+    const tools = unit.scope?.allowed_tools ?? [];
+    const commands = unit.scope?.allowed_commands ?? [];
+    if (!tools.length && !commands.length)
+      throw new Error('the unit declares no tool or command entrance; declare allowed_tools or allowed_commands before dispatch');
+    const unknown = tools.filter(name => !supported.has(name) && name !== 'hub' && name !== 'yield');
+    if (unknown.length)
+      throw new Error(`declared tools have no member entrance: ${unknown.join(', ')}; the member gate exposes read/write/edit/grep/glob/bash plus the native hub/yield lifecycle`);
+    if (!allowed.length)
+      throw new Error('the unit declares no allowed_paths; the member gate refuses every tool and command call without at least one allowed path');
+    if (commands.length && !tools.includes('bash'))
+      throw new Error('allowed_commands are declared without the bash tool entrance; add bash to allowed_tools or drop the commands');
+    if (tools.includes('bash') && !commands.length)
+      throw new Error('bash has no allowed_commands and cannot execute; declare complete commands or remove bash before dispatch');
+    if (!Array.isArray(materials)) throw new Error('invalid materials list');
+    for (const material of materials) {
+      if (typeof material !== 'string' || !material || material.startsWith('~') || material.includes('\0') ||
+          material.split(/[\\/]/).includes('..') || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(material))
+        throw new Error(`material ${JSON.stringify(material)} is not a bounded workspace path`);
+      const lexical = path.resolve(root, material);
+      let real;
+      try { real = await fs.realpath(lexical); }
+      catch { throw new Error(`material ${material} does not exist; prepare it in the project before dispatch instead of re-dispatching`); }
+      if (!within(root, lexical) || !within(root, real) || protectedPath(lexical) || protectedPath(real))
+        throw new Error(`material ${material} is outside the artifact root or under a protected path`);
+      if (!allowed.some(entry => within(entry, lexical) && within(entry, real)))
+        throw new Error(`material ${material} is outside the member's allowed paths; place it under an allowed path or extend allowed_paths before dispatch`);
+    }
+    return { ok: true, root, allowed };
+  } catch (error) { return { block: true, reason: `Orbit work-unit preflight: ${error.message}` }; }
 }

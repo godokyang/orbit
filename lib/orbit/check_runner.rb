@@ -690,6 +690,15 @@ module Orbit
           "correction only when supported by current evidence. Do not resolve prior artifact findings or " \
           "declare the task complete; return continue when no actionable issue is established. Pause only " \
           "for an authorization boundary or a concrete adjudicated correction that stays unimplemented. " \
+          "When the context carries member_blocks, it is recorded member tool-block evidence and each " \
+          "entry keeps its own member, work-unit and dispatch identity. Judge whether the SAME block " \
+          "class keeps recurring across different members or re-declared work units while the Root is " \
+          "still busy: recurrence across re-dispatches is precisely the pattern to correct. Name the " \
+          "blocking rule (scope, path, tool or permission) and state the concrete recovery — a corrected " \
+          "work-unit scope, a different approach, or material the Root must provide first. Judge " \
+          "progress from concrete evidence only: activity, elapsed time or a new member alone never " \
+          "proves progress, and if the record shows the blocks stopped or were resolved, report that " \
+          "instead of repeating an old concern. " \
           "A pending model_evidence_request in the context is part of the authorized workflow: research " \
           "responsive to it is relevant work, not off-track solely because the original user instruction " \
           "did not mention it. Still judge concrete task progress. delivery.ready only states whether " \

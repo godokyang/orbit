@@ -81,6 +81,14 @@ begin
   events = File.read(File.join(record.path, "events.jsonl"))
   assert(events.include?("work_unit_declared"), "declare audit event missing")
   assert(unit["model_requirements"] == {}, "absent model_requirements must default to {}")
+  assert(Orbit::WorkUnitStore.execution_role(unit) == "unspecified", "absent execution stays an unspecified pending unit")
+  root_unit = store.declare(SPEC.merge("execution" => "root"))
+  delegate_unit = store.declare(SPEC.merge("execution" => "delegate"))
+  assert(root_unit["execution"] == "root" && Orbit::WorkUnitStore.execution_role(root_unit) == "root_self_execute",
+         "root execution must be stored and classified")
+  assert(delegate_unit["execution"] == "delegate" &&
+         Orbit::WorkUnitStore.execution_role(delegate_unit) == "pending_dispatch",
+         "delegate execution must be stored and classified")
 
   # 2. declare validation: objective/requirements/acceptance/escalation, scope, dependencies.
   record = new_record
@@ -94,7 +102,13 @@ begin
   end
   raises_error("unknown dependency") { store.declare(SPEC.merge("dependencies" => ["wu-0000000000000000"])) }
   raises_error("unknown field") { store.declare(SPEC.merge("owner" => "root")) }
+  raises_error("bad execution") { store.declare(SPEC.merge("execution" => "self")) }
   raises_error("non tool name") { store.declare(SPEC.merge("allowed_tools" => ["rm -rf"])) }
+  raises_error("empty member entrance") { store.declare(SPEC.merge("allowed_tools" => [], "allowed_commands" => [])) }
+  raises_error("protected path") { store.declare(SPEC.merge("allowed_paths" => [".orbit"])) }
+  raises_error("escaping path") { store.declare(SPEC.merge("allowed_paths" => ["../outside"])) }
+  raises_error("bash without commands") { store.declare(SPEC.merge("allowed_commands" => [])) }
+  raises_error("missing input material") { store.declare(SPEC.merge("input_materials" => ["lib/orbit/missing.md"])) }
   assert(store.list.empty?, "failed declares must not persist anything")
 
   # 3. unknown units: read is nil, bind/finish refuse.

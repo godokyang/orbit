@@ -32,10 +32,25 @@ module Orbit
     FORMAT = "orbit-work-units-2"
     STATUSES = %w[declared bound accepted rejected failed].freeze
     FINISH_STATUSES = %w[accepted rejected failed].freeze
+    # Explicit handoff role. Absent stays unspecified so an older unit is not
+    # silently dropped from the recommendation queue; "root" is Root's own
+    # work and must not occupy that queue.
+    EXECUTIONS = %w[root delegate].freeze
     MAX_UNITS = 128
     MAX_UNIT_BYTES = 32 * 1024
 
     class Error < StandardError; end
+
+    # root_self_execute is outside the member recommendation queue.
+    # pending_dispatch is an explicit member handoff. unspecified keeps the
+    # historical records eligible so a missing field cannot hide a real unit.
+    def self.execution_role(unit)
+      case unit.is_a?(Hash) ? unit["execution"] : nil
+      when "root" then "root_self_execute"
+      when "delegate" then "pending_dispatch"
+      else "unspecified"
+      end
+    end
 
     # record is an Orbit::TaskRecord (path, input_digest, durable_write,
     # event). The store never writes state.json.
@@ -57,6 +72,7 @@ module Orbit
       input_digest = @record.input_digest
       artifact_root = current_artifact_root
       raise Error, "task workspace source is missing; a work unit cannot be declared without the real artifact_root" if artifact_root.nil?
+      validate_dispatch_entrances(fields, artifact_root) unless fields["execution"] == "root"
 
       with_lock do
         document = read_document
@@ -277,7 +293,7 @@ module Orbit
 
       spec = spec.each_with_object({}) { |(key, value), out| out[key.to_s] = value }
       unknown = spec.keys - %w[objective requirements context decisions allowed_paths allowed_tools
-                               allowed_commands acceptance dependencies escalation model_requirements]
+                               allowed_commands acceptance dependencies escalation model_requirements execution input_materials]
       raise Error, "unknown work unit fields: #{unknown.join(', ')}" unless unknown.empty?
 
       {
@@ -285,6 +301,7 @@ module Orbit
         "requirements" => string_list(spec["requirements"], "requirements", 64, 1000, min: 1),
         "context" => spec["context"].nil? ? nil : text(spec["context"], "context", 8000),
         "decisions" => string_list(spec["decisions"] || [], "decisions", 64, 1000),
+        "input_materials" => string_list(spec["input_materials"] || [], "input_materials", 128, 500),
         "scope" => {
           "allowed_paths" => string_list(spec["allowed_paths"] || [], "allowed_paths", 128, 500),
           "allowed_tools" => tool_list(spec["allowed_tools"] || []),
@@ -295,6 +312,7 @@ module Orbit
         "escalation" => text(spec["escalation"], "escalation", 2000),
         "model_requirements" => model_requirements(spec["model_requirements"])
       }.tap do |fields|
+        fields["execution"] = execution_field(spec["execution"]) if spec.key?("execution")
         scope = fields.fetch("scope")
         if scope.values.all?(&:empty?)
           raise Error, "work unit scope is empty: declare at least one of allowed_paths, allowed_tools, allowed_commands"
@@ -303,6 +321,64 @@ module Orbit
     end
 
     INDICES = %w[coding_index agentic_index intelligence_index].freeze
+
+    # The CLI declaration path must reject unusable entrances before it can
+    # join the paid recommendation queue. The host repeats this against live
+    # filesystem state before dispatch and gates every actual tool access.
+    def validate_dispatch_entrances(fields, root)
+      scope = fields.fetch("scope")
+      tools, commands = scope.values_at("allowed_tools", "allowed_commands")
+      raise Error, "delegate has no tool entrance; declare allowed_tools before dispatch" if tools.empty?
+      unknown = tools - %w[read write edit grep glob bash hub yield]
+      raise Error, "no member entrance for #{unknown.join(', ')}; prepare needed facts in context or project materials" unless unknown.empty?
+      raise Error, "delegate has no allowed_paths; declare bounded member paths" if scope["allowed_paths"].empty?
+      if tools.include?("bash") && commands.empty?
+        raise Error, "bash cannot execute without allowed_commands; declare complete commands or remove bash"
+      end
+      if !commands.empty? && !tools.include?("bash")
+        raise Error, "allowed_commands require bash in allowed_tools"
+      end
+      actual_root = File.realpath(root)
+      allowed = scope["allowed_paths"].map { |value| checked_workspace_path(value, actual_root) }
+      fields.fetch("input_materials").each do |value|
+        real = checked_workspace_path(value, actual_root)
+        lexical = File.expand_path(value, actual_root)
+        raise Error, "input material #{value} does not exist; prepare it in the project before declaration" unless File.exist?(lexical)
+        unless allowed.any? { |entry| path_within?(entry, real) && path_within?(entry, lexical) }
+          raise Error, "input material #{value} is outside allowed_paths; prepare it under an allowed path or extend the scope"
+        end
+      end
+    rescue SystemCallError => error
+      raise Error, "work-unit preflight failed: #{error.message}; repair the project paths before declaration"
+    end
+
+    def path_within?(root, target)
+      target == root || target.start_with?("#{root}/")
+    end
+
+    def checked_workspace_path(value, root)
+      if value.start_with?("~") || value.include?("\0") || value.split(/[\\\/]/).include?("..") || value.match?(/\A[A-Za-z][A-Za-z0-9+.-]*:/)
+        raise Error, "invalid bounded workspace path: #{value.inspect}"
+      end
+      lexical = File.expand_path(value, root)
+      ancestor, tail = lexical, []
+      until File.exist?(ancestor) || File.symlink?(ancestor)
+        tail.unshift(File.basename(ancestor))
+        ancestor = File.dirname(ancestor)
+      end
+      real = File.join(File.realpath(ancestor), *tail)
+      if !path_within?(root, lexical) || !path_within?(root, real) ||
+         [lexical, real].any? { |target| target.split('/').any? { |part| %w[.git .orbit].include?(part) } }
+        raise Error, "scope path #{value.inspect} is protected or escapes the artifact root; choose a bounded project path"
+      end
+      real
+    end
+
+    def execution_field(value)
+      return value if EXECUTIONS.include?(value)
+
+      raise Error, "work unit execution must be \"root\" or \"delegate\""
+    end
 
     # §6 task-side model requirements: declared facts the dispatcher needs
     # (which quality indices matter for this unit, context size, modalities,

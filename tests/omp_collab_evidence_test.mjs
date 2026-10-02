@@ -115,6 +115,51 @@ const startTask = async (context, messageId, reviewModel) => {
   return started.task_directory;
 };
 
+// Fixture stand-in for the stopped TaskRuntime at the real select seam: the
+// Root CLI (declare receipt / native dispatch gate) submits a member_selection
+// inbox command and waits up to 120s for
+// member-selection-responses/<request_id>.json — the runtime is its sole
+// writer. This watcher mirrors the runtime consumption (unlink after read)
+// and answers with an explicitly facts_only-marked fixture response. It is
+// NOT a JEV judgment or live evidence and never reaches production state;
+// the native dispatch gate still enforces its persisted-selection receipt
+// (a string signature) and would block without it.
+const serveFixtureSelections = taskDir => {
+  const inbox = path.join(taskDir, 'inbox');
+  const responses = path.join(taskDir, 'member-selection-responses');
+  const served = new Set();
+  const timer = setInterval(() => {
+    (async () => {
+      let files = [];
+      try { files = await fs.readdir(inbox); } catch { return; }
+      for (const file of files) {
+        if (!file.endsWith('.json') || served.has(file)) continue;
+        served.add(file);
+        let command;
+        try { command = JSON.parse(await fs.readFile(path.join(inbox, file), 'utf8')); } catch { continue; }
+        if (command?.type !== 'member_selection' || typeof command.request_id !== 'string' ||
+            typeof command.work_unit_id !== 'string') continue;
+        const response = {
+          ok: true, request_id: command.request_id, work_unit_id: command.work_unit_id,
+          responded_at: new Date().toISOString(),
+          selection: {
+            version: 'fixture', signature: `fixture-selection-${command.request_id}`,
+            decision: 'facts_only', fixture: true,
+            reason: 'fixture facts_only response; not a JEV judgment or live evidence',
+            candidates: [], recommendation: {}
+          }
+        };
+        await fs.mkdir(responses, { recursive: true, mode: 0o700 });
+        await fs.writeFile(path.join(responses, `${command.request_id}.json`), JSON.stringify(response, null, 2),
+          { mode: 0o600 });
+        await fs.rm(path.join(inbox, file), { force: true });
+      }
+    })().catch(() => {});
+  }, 50);
+  timer.unref?.();
+  return timer;
+};
+
 try {
   installOmpExtension(pi, sdk);
 
@@ -125,6 +170,7 @@ try {
   await emit('tool_result', { toolName: 'hub', toolCallId: 'early-1', isError: false, content: [{ type: 'text', text: 'early ack' }] }, ctx);
 
   const taskDir = await startTask(ctx, 'original');
+  serveFixtureSelections(taskDir);
   await waitFor(async () => (await collabLines(taskDir)).length >= 2, 'association gap + root identity');
   const poolStub = path.join(agentRoot, 'pool.sh');
   await fs.writeFile(poolStub, '#!/bin/sh\nprintf \'{"models":["glm/x"]}\\n\'\n');
@@ -265,6 +311,7 @@ try {
   // Second task, second session: attribution must not leak across tasks.
   rootRef.session = root2;
   const taskDir2 = await startTask(ctxFor(root2), 'original2');
+  serveFixtureSelections(taskDir2);
   await emit('tool_call', { toolName: 'hub', toolCallId: 'other-task', input: { op: 'send', to: 'nobody', message: 'other task traffic' } }, ctxFor(root2));
   await waitFor(async () => (await collabLines(taskDir2)).some(l => l.tool_call_id === 'other-task'), 'task2 durable line');
   const noReason = await emit('tool_call', { toolName: 'task', toolCallId: 'no-reason',

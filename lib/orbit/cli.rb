@@ -99,9 +99,9 @@ module Orbit
       TEXT
       "review-model" => "orbit review-model TASK_DIRECTORY --model provider/id [--reason TEXT]\nRoot 可从当前 OMP 可用目录指定检查模型；任务进程在下一次检查前再次核对隔离目录与凭据。已结束任务不接受；在途检查不切换。池外选择记录来源，不要求用户逐型号授权。",
       "work-unit" => <<~TEXT,
-        orbit work-unit TASK_DIRECTORY declare|read|list|finish --file FILE|-
+        orbit work-unit TASK_DIRECTORY declare|read|list|finish|select --file FILE|-
         Root 持久记录可交接工作单元；read/list 只读，declare/finish 不修改原始用户要求。
-        declare 输入 {"spec":{"objective":"目标","requirements":["有效要求引用"],"allowed_paths":["路径"],"allowed_tools":["工具名"],"allowed_commands":["完整命令"],"acceptance":"验收方式","escalation":"何时停止并报 Root"}}，可加 context、decisions、dependencies 和任务相关 model_requirements。
+        declare 输入 {"spec":{"objective":"目标","requirements":["有效要求引用"],"allowed_paths":["路径"],"allowed_tools":["工具名"],"allowed_commands":["完整命令"],"acceptance":"验收方式","escalation":"何时停止并报 Root"}}，可加 context、decisions、dependencies、execution（root|delegate，默认 delegate）和任务相关 model_requirements。select 输入 {"id":"wu-..."}，返回运行时缓存或当前依据的成员推荐；declare 的原生工具回执在派发前自动返回选型。
         allowed_paths 是成员全部可访问路径（读写共用）：规格／测试／依赖需要访问时也必须列出，或把必要事实放入 context；它不提供自动只读保护。allowed_commands 必须是完整命令，逐字精确匹配，不是前缀。
         read 输入 {"id":"wu-…"}，list 输入 {}；finish 输入 {"id":"wu-…","status":"accepted|rejected|failed","result":"实际结果","verification":"实际核验证据"}。
         单元绑定当前要求版本和实际产物工作区；修订／重新绑定使旧单元不能继续派发或登记 accepted。本命令只记录单元，不派发或登记成员。实际派发须另经原生宿主绑定，Root 不能通过本命令伪造派发。accepted 是 Root 核验记录，不替代独立最终检查或停止确认。已结束任务仅可 read/list。
@@ -573,11 +573,11 @@ module Orbit
       options = { file: "-" }
       OptionParser.new { |parser| parser.on("--file FILE") { |value| options[:file] = value } }.parse!(argv)
       directory, operation = argv
-      unless argv.length == 2 && %w[declare read list finish].include?(operation)
-        raise ArgumentError, "usage: orbit work-unit TASK_DIRECTORY declare|read|list|finish --file FILE|-"
+      unless argv.length == 2 && %w[declare read list finish select].include?(operation)
+        raise ArgumentError, "usage: orbit work-unit TASK_DIRECTORY declare|read|list|finish|select --file FILE|-"
       end
       record = TaskRecord.new(File.realpath(directory))
-      if %w[declare finish].include?(operation) && TaskRuntime::TERMINAL.include?(record.state["status"])
+      if %w[declare finish select].include?(operation) && TaskRuntime::TERMINAL.include?(record.state["status"])
         raise ArgumentError, "task process has ended; work units are retained read-only"
       end
       payload = JSON.parse(read_input(options[:file]))
@@ -591,9 +591,44 @@ module Orbit
                when "finish"
                  { "unit" => store.finish(payload["id"], status: payload["status"], result: payload["result"],
                                            verification: payload["verification"]) }
+               when "select" then select_work_unit(record, store, payload)
                end
       puts JSON.generate(result.merge("ok" => true, "task_directory" => record.path))
       0
+    end
+
+    # Runtime remains the sole selection/state writer. The native tool awaits
+    # this bounded response before the Root can issue its member model call.
+    def select_work_unit(record, store, payload)
+      unit = store.read(payload["id"])
+      raise ArgumentError, "unknown work unit; declare a bounded unit before selecting" unless unit
+
+      pid = record.state["runtime_pid"]
+      raise ArgumentError, "task runtime is not running; selection cannot precede dispatch" unless pid.is_a?(Integer) && pid.positive?
+      begin
+        Process.kill(0, pid)
+      rescue Errno::ESRCH
+        raise ArgumentError, "task runtime has exited; selection cannot precede dispatch"
+      end
+      request_id = SecureRandom.uuid
+      response_path = File.join(record.path, "member-selection-responses", "#{request_id}.json")
+      record.submit("member_selection", "request_id" => request_id, "work_unit_id" => unit.fetch("id"))
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 120
+      loop do
+        if File.file?(response_path)
+          response = JSON.parse(File.read(response_path))
+          raise ArgumentError, response["reason"] || "member selection failed" unless response["ok"] == true
+
+          return { "selection" => response.fetch("selection"), "request_id" => request_id }
+        end
+        if TaskRuntime::TERMINAL.include?(record.state["status"])
+          raise ArgumentError, "task stopped before member selection returned (request #{request_id})"
+        end
+        if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+          raise ArgumentError, "member selection is still pending (request #{request_id}); inspect the existing request before retrying"
+        end
+        sleep 0.1
+      end
     end
 
     def route_resources(argv)

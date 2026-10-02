@@ -1,13 +1,14 @@
 # Orbit 当前限制
 
-最后核对：2026-10-01（源码 0.8.0 `3865b76`；本机安装 0.7.37——见[交接](handoff.md)）。本页只列**当前仍影响用户的限制与未测范围**；已修复项、旧版本流水与已结束票据不在本页保留（`git show 3865b76:docs/plan/debt-ledger.md` 查阅历史）。逐项收口与证据＝[完成记录](../reference/mixed-model-delivery-completion-20261001.md)；现行行为以[合同](../../contracts/task-runtime.md)及 ADR-008/009 为准。
+最后核对：2026-10-02（源码 0.8.1；用户安装 0.8.0——见[交接](handoff.md)）。本页只列**当前仍影响用户的限制与未测范围**；已修复项、旧版本流水与已结束票据不在本页保留（`git show 3865b76:docs/plan/debt-ledger.md` 查阅历史）。逐项收口与证据＝[完成记录](../reference/mixed-model-delivery-completion-20261001.md)；现行行为以[合同](../../contracts/task-runtime.md)及 ADR-008/009 为准。
 
 | 限制 | 当前影响 | 解除条件 |
 | --- | --- | --- |
 | 程序 integration 选型 live 未触发 | 实现已装并经确定性验证；真实运行从未进入其前提（manual-ready 窗口＋真实 resolved finding）。注意区分：Root 的 `root-model` 工具选模不受该前提约束，其 live 未触发只因为没有运行需要换型 | 真实路径出现后核验；不人为制造，非完工门 |
 | 非 stale process finding→纠正→恢复组合未实测 | 共用送达路径源码完整且 artifact 孪生已 live（033）；组合自然分支未出现 | 真实路径出现后核验；不加证明门 |
 | Root 停止自有 queued marker 分支仅确定性证据 | 0.7.37 修复经 gate 验证；真实搁浅 marker 现场未再出现 | 真实路径出现后核验 |
-| failed-unit 自动释放无 live 样本 | 现有实机样本（含真实 Go 429 首派失败）未验证自动释放分支，只有确定性证据 | 真实路径出现后核验 |
+| 工作单 finish 回执未列出有效状态 | review-dedup 的 Root 盲试 completed/verified/passed 等值，现有效值是 accepted/rejected/failed；源码与 CLI 会拒绝无效值，但工具说明/错误恢复不足 | 取得此新增问题的修复授权后补充说明；本次不扩改接口或状态语义 |
+| 检查者 SDK 18.4.9 暂存源码修正 | 官方包 sdk.ts 的 ratchet/prelude 导入被 Bun 解析成同名 .js 注入脚本；安装器仅对实际 18.4.9 的已核实一行显式指明 .ts，用户宿主不变，差异已由 OMP2 独立核实 | 上游修复且实际目标版本验证通过后删除此版本限定修正，不扩展 SDK fork |
 | park/dispose 后退出不可证实 | 已完成成员 park 后失去 session；不能把 idle、cancel 回执当退出，保留 `stop_unconfirmed` | 上游提供 dispose 完成信号并验证 |
 | 上游 provider/控制钩子缺口 | `devin-agent` 类不触发 `before_provider_request`；部分异常不能可靠 fail-close；单成员编程 kill、已 park 工作与保留名碰撞受上游接口限制 | 实证最小缺失接口后按 ADR-008 跟进，不预维护 Fork |
 | 自动入口失败时未知请求体 | 已核对的 OMP messages / Responses 可传恢复提示；不能安全识别的请求体仍中止 | 取得实际请求体与返回契约并隔离验证 |

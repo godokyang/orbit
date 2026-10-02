@@ -127,7 +127,7 @@ module RouteCostInputsTest
       units = Orbit::WorkUnitStore.new(record)
       unit = units.declare("objective" => "build it", "acceptance" => "tests pass",
                            "escalation" => "stop and report", "requirements" => ["instruction"],
-                           "allowed_paths" => ["lib/"])
+                           "allowed_paths" => ["lib/"], "allowed_tools" => %w[read write])
       assert(inputs.build(scope: "review").empty?, "no file means cost unknown")
 
       inputs.record_inputs(scope: "member", work_unit_id: unit.fetch("id"),
@@ -165,7 +165,7 @@ module RouteCostInputsTest
       units = Orbit::WorkUnitStore.new(record)
       unit = units.declare("objective" => "build it", "acceptance" => "tests pass",
                            "escalation" => "stop and report", "requirements" => ["instruction"],
-                           "allowed_paths" => ["lib/"])
+                           "allowed_paths" => ["lib/"], "allowed_tools" => %w[read write])
       ledger = Orbit::ResourceCallLedger.new(task_path: record.path, task_id: File.basename(record.path),
                                              clock: -> { NOW })
       ledger.record(call_id: "real-1", role: "member", phase: "exec", status: "failed",
@@ -211,7 +211,7 @@ module RouteCostInputsTest
       store.import(fact_document("glm-5.2x", 0.2))
       other = units.declare("objective" => "build another bounded part", "acceptance" => "tests pass",
                             "escalation" => "stop and report", "requirements" => ["instruction"],
-                            "allowed_paths" => ["lib/"])
+                            "allowed_paths" => ["lib/"], "allowed_tools" => %w[read write])
       units.bind(other.fetch("id"), member_id: "orbit-m2", tool_call_id: "tc-2", model: "zhipu/glm-5.2x")
       units.finish(other.fetch("id"), status: "accepted", result: "done", verification: "tests pass")
       ledger.record(call_id: "real-3", role: "member", phase: "exec", status: "completed",
@@ -230,7 +230,7 @@ module RouteCostInputsTest
 
       retry_unit = units.declare("objective" => "complete the retried part", "acceptance" => "tests pass",
                                  "escalation" => "stop and report", "requirements" => ["instruction"],
-                                 "allowed_paths" => ["lib/"])
+                                 "allowed_paths" => ["lib/"], "allowed_tools" => %w[read write])
       units.bind(retry_unit.fetch("id"), member_id: "orbit-rejected", tool_call_id: "tc-rejected", model: "zhipu/glm-5.2")
       ledger.record(call_id: "rejected-result", role: "member", phase: "exec", status: "completed",
                     provider: "zhipu", actual_model: "glm-5.2", reasoning: "unknown",
@@ -269,7 +269,7 @@ module RouteCostInputsTest
       units = Orbit::WorkUnitStore.new(record)
       unit = units.declare("objective" => "build it", "acceptance" => "tests pass",
                            "escalation" => "stop and report", "requirements" => ["instruction"],
-                           "allowed_paths" => ["lib/"])
+                           "allowed_paths" => ["lib/"], "allowed_tools" => %w[read write])
       units.bind(unit.fetch("id"), member_id: "orbit-m1", tool_call_id: "tc-1", model: "zhipu/glm-5.2")
       units.finish(unit.fetch("id"), status: "accepted", result: "done", verification: "tests pass")
       ledger = Orbit::ResourceCallLedger.new(task_path: record.path, task_id: File.basename(record.path),

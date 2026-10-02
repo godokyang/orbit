@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import fs from 'node:fs/promises';
+import * as fixtureFs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
@@ -106,6 +107,32 @@ const sdk = { MAIN_AGENT_ID: mainAgentId,
 
 const tool = async (args, context = ctx) => JSON.parse((await definition.execute('call', args, null, null, context)).content[0].text);
 const taskState = async () => JSON.parse(await fs.readFile(path.join(started.task_directory, 'state.json'), 'utf8'));
+// This suite deliberately replaces the runtime with this Node PID. Supply
+// that fixture's new selection protocol too; these facts-only responses are
+// transport fixtures, never model judgments or live acceptance evidence.
+const selectionFixture = setInterval(() => {
+  const dir = started?.task_directory;
+  if (!dir) return;
+  try {
+    const statePath = path.join(dir, 'state.json');
+    const state = JSON.parse(fixtureFs.readFileSync(statePath, 'utf8'));
+    if (state.runtime_pid !== process.pid) return;
+    for (const file of fixtureFs.readdirSync(path.join(dir, 'inbox'))) {
+      const requestPath = path.join(dir, 'inbox', file);
+      const command = JSON.parse(fixtureFs.readFileSync(requestPath, 'utf8'));
+      if (command.type !== 'member_selection') continue;
+      const selection = state.member_selections?.[command.work_unit_id] || {
+        version: 'orbit-member-selection-v2', signature: `fixture-${command.work_unit_id}`, decision: 'facts_only',
+        candidates: [], recommendation: { first: null, backups: [] }, judgments: [] };
+      (state.member_selections ||= {})[command.work_unit_id] = selection;
+      fixtureFs.writeFileSync(statePath, JSON.stringify(state));
+      const responseDir = path.join(dir, 'member-selection-responses');
+      fixtureFs.mkdirSync(responseDir, { recursive: true });
+      fixtureFs.writeFileSync(path.join(responseDir, `${command.request_id}.json`), JSON.stringify({ ok: true, selection }));
+      fixtureFs.unlinkSync(requestPath);
+    }
+  } catch { /* Fixture task is absent, being replaced or deliberately corrupt. */ }
+}, 10);
 const membersFile = async () => JSON.parse(await fs.readFile(path.join(started.task_directory, 'members.json'), 'utf8'));
 const request = async (method, extra = {}) => {
   const { connection } = await taskState();
@@ -976,6 +1003,15 @@ try {
     const escaped = await emit('tool_call', { toolName: 'write', toolCallId: 'outside-write',
       input: { path: '../outside.txt', content: 'bad' } }, actualMemberCtx);
     assert.equal(escaped.block, true, 'the real extension entrance rejects a path outside the member scope');
+    const memberHooks = {};
+    installOmpExtension({ zod: z, registerTool() {}, registerCommand() {},
+      on(name, handler) { (memberHooks[name] ||= []).push(handler); } }, sdk);
+    for (const handler of memberHooks.tool_call || [])
+      await handler({ toolName: 'read', toolCallId: 'child-scope-block', input: { path: '.orbit/private' } }, actualMemberCtx);
+    const blockedFact = (await request('hub_events')).events.find(event => event.tool_call_id === 'child-scope-block');
+    assert.equal(blockedFact?.kind, 'work_unit_tool_blocked', 'Root sees scope blocks from a distinct member extension factory');
+    assert.equal(blockedFact.agent_id, liveRef.id);
+    assert.equal(blockedFact.work_unit_id, unit.id);
     // Model-shaped SDK events are scripted here; they verify the real host
     // subscriptions and durable accounting path, not model-backed acceptance.
     await root.emitNative({ type: 'message_start', message: { role: 'assistant', provider: 'glm', model: 'x' } });
@@ -2484,6 +2520,7 @@ process.exit(run.status ?? 1);
   console.error(error);
   process.exitCode = 1;
 } finally {
+  clearInterval(selectionFixture);
   if (started?.pid) {
     try { process.kill(-started.pid, 'SIGTERM'); } catch { /* already gone */ }
     for (let n = 0; n < 40; n++) {

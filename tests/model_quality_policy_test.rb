@@ -169,6 +169,18 @@ module ModelQualityPolicyTest
            policy.question_digest == Digest::SHA256.hexdigest(JSON.generate(templates)) &&
            policy.question_digest != texts_only,
            "the question digest covers criteria and versions, not only the four bodies")
+    record = policy::DECISION_RECORD
+    raw = JSON.parse(File.read(policy::DEFAULT_PATH))
+    raw["decision_version"] = "orbit-quality-decision-3"
+    loaded = policy.validate(raw)
+    assert(policy::DECISION_VERSION == "orbit-quality-decision-4" && record["supersedes"] == "orbit-quality-decision-3" &&
+           record["delegation_gate"] == "handoff_fit" && record["diagnostic_questions"] == ["member_task_fit"] &&
+           record["candidate_gate"] == "candidate_task_fit" &&
+           record["combination_proven_by_prior_per_question_releases"] == false &&
+           raw["decision_version"] == "orbit-quality-decision-3" && loaded.is_a?(String) &&
+           loaded.include?("do not prove the two-stage combination") &&
+           policy::DELEGATION_QUESTION_SET == "jev-delegation-4" && policy::CANDIDATE_QUESTION_SET == "jev-candidates-4",
+           "decision 4 records the combination change and leaves the decision-3 raw release inactive")
   end
 
   def unreleased_scores_and_cheap_cost_keep_input_order

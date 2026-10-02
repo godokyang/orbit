@@ -156,11 +156,17 @@ orbit model-status --project DIR  # 只读精确身份的证据诊断；无会�
 
 候选池保存在用户级配置，跨会话共用，只保存型号，不保存凭据。检查者优先从池与当前 OMP 会话可用目录的交集中预检；池中无可运行型号或池空时，从 OMP 当前会话可用型号中继续筛选，Root 也可显式指定可用检查者。**受控任务的成员**有可用池内 Agent 时，通用 `agent="task"` 若解析为池外 OMP 默认型号会被拒绝并列出可用 Agent；Root 可直接派池内 Agent，即使 Jev 尚待补证。池空或当前无可用池内 Agent 才放行可解析的 OMP 默认。Root 想派默认型号可通过 `/orbit-models` 把它加入池；无需额外用户逐型号授权。非受控 OMP 会话不受此门约束，成员实际型号漂移仍被拒绝。Jev 只给建议，Root 自选不冒充推荐。
 
-新版成员选择针对 Root 声明的有界工作单元，保留目标、要求引用、上下文／决定、范围、验收、依赖和升级条件。单元绑定当前输入与实际产物根；未满足依赖不派发建议，修订或工作区重绑定后不能采纳旧结果。Root 可通过 Orbit 工具或 `orbit work-unit` 声明与核验；工作区已接真实宿主 bind 和逐工具范围校验。Root 的原生 task 文本须以独立行引用 `orbit-unit: wu-...`；未知／过期单元或真实模型失配拒绝派发或工具执行。macOS 声明命令还经系统沙盒；没有已验证沙盒的平台由 Root 执行必要核验，不能默许成员无约束运行。实际自主闭环仍待新安装构建验收。
+新版成员选择针对 Root 声明的有界工作单元，保留目标、要求引用、上下文／决定、范围、验收、依赖和升级条件。单元绑定当前输入与实际产物根；未满足依赖不派发建议，修订或工作区重绑定后不能采纳旧结果。Root 可通过 Orbit 工具或 `orbit work-unit` 声明与核验；工作区已接真实宿主 bind 和逐工具范围校验。Root 的原生 task 文本须以独立行引用 `orbit-unit: wu-...`；未知／过期单元或真实模型失配拒绝派发或工具执行。macOS 声明命令还经系统沙盒；没有已验证沙盒的平台由 Root 执行必要核验，不能默许成员无约束运行。当前修复的真实闭环证据与剩余限制见[验收记录](ordinary-task-repair-acceptance-20261002.md)。
+
+工作单元可设 `execution=root|delegate`（缺省 delegate），Root 的集成单设 root，不占选型队列。declare 回执携带运行时选型；可用 `work-unit select` 刷新具体单元，native task 在派发前再次预检、复用和版本核对。Root 保留候选池内自选裁量。成员需要的项目文件可列入 `input_materials`，必须已存在且在 allowed_paths 内；外部技能/MCP 不自动开放。bash 必须声明完整 allowed_commands；无可执行入口或无权限材料会在成员启动前返回修复步骤。
+
+read 的原生行号选择器、多路径及 grep/glob 的内嵌通配符按真实目标校验。grep 裸通配符保留原生递归语义，要求成员实际 cwd 与产物根一致。当前目录搜索仍采用保守边界：搜索子树出现 `.git`、`.orbit`、符号链接，或遍历超过 10000 项时拒绝；Root 应给出较窄的项目目录或具体文件入口。
 
 成员与检查者同时取得精确证据和目录先验，相关 coding／agentic／intelligence 明确来自任务需求，不默认猜编码。目录能力与实际 SDK 路由 limits 分开；上下文／模态／工具要求未知或不满足、同指标潜在冲突以及明确测量日期要求未满足时，候选暂停自动正向建议，交 Root 复核。任务质量指数不与 Jev 分数相加；不是模型可靠性证书。
 
-问题采用 delegation-4／candidates-4／checker-task-fit-5、selection-input-2／quality-decision-2。真正校准放行、实际 task profile、provider／型号／input／qset 匹配后才作正向建议；未放行只显示事实并保留可运行选项，不因未知费用阻断 Root。新分派不使用速度、时间、关键路径缩短或粗费用档，运行超时／TTL／停止计时保留。旧 delegatable／0.55／0.50 按历史版本解释。
+问题采用 delegation-4／candidates-4／checker-task-fit-5、selection-input-2／quality-decision-4。真正校准放行、实际 task profile、provider／型号／input／qset 匹配后才作正向建议；未放行只显示事实并保留可运行选项，不因未知费用阻断 Root。新分派不使用速度、时间、关键路径缩短或粗费用档，运行超时／TTL／停止计时保留。旧 delegatable／0.55／0.50 按历史版本解释。
+
+decision-4 保留原问题和质量阈值，handoff_fit 判结构可交接，member_task_fit 是泛化限制，逐候选 task fit 决定具体适配；返回首选、备选和未知费用等限制。无关文件变化不重新支付同单元选型，要求、相关上下文、依赖与候选事实变化会失效。
 
 `member_selection_assessed` 是保存的判断；`delegation_recommendation_delivered` 和持久 delegation_hint 才表示已经送达。Root 自主经原生 task 使用候选，串行交接也合法。只有实际工作单元、成员、调用、型号及目标派发尝试，连同实际 bind 留存的已送达提示签名／message ID，都匹配才记为采纳；旧失败调用、同型号或相邻时间不能领取下一轮建议归因。Root 自选记为 root_without_hint。
 

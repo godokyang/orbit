@@ -6,7 +6,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createOrbitHost, toolArgs, toolDescription } from './host.mjs';
 import { captureStart, buildReceipt, appendReceipt, readReceipts, CAPTURED_TOOLS } from './root-verifications.mjs';
-import { validateMemberTool, createEditProjection } from './work-unit-scope.mjs';
+import { validateMemberTool, validateWorkUnitPreflight, createEditProjection } from './work-unit-scope.mjs';
 import { observeNativeCalls, flushNativeCalls } from './native-call-recorder.mjs';
 
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
@@ -163,9 +163,9 @@ function rememberAskArgs(event) {
 }
 
 // --- Durable task-local collaboration evidence (collaboration.jsonl) -------
-// The per-session collab buffer is bounded (COLLAB_CAP) and lives only as
-// long as the OMP process, so evidence observed before a TaskRuntime poll —
-// or beyond the buffer cap — was silently lost. Every ATTRIBUTED observation
+// The cross-instance collab buffer is bounded (COLLAB_CAP, module scope
+// below) and lives only as long as the OMP process, so evidence observed
+// before a TaskRuntime poll — or beyond the buffer cap — was silently lost. Every ATTRIBUTED observation
 // is therefore also appended, at observation time, to
 // <task_dir>/collaboration.jsonl (mode 0600, same discipline as
 // TaskRecord's events.jsonl but a separate file: TaskRuntime appends to
@@ -208,6 +208,20 @@ const UNATTRIBUTED_SESSION_CAP = 512;
 // request. Actual resolved identity stays authoritative in members.json and
 // the runtime; these are observations only.
 const modelIdentitySeen = new Map();
+
+// The observation buffer the TaskRuntime polls via `hub_events`, its per-task
+// gap-free sequence and the drop counters are MODULE scope: OMP re-binds the
+// extension factory per child session, so factory-scope closures would give
+// every member session its own invisible buffer. Root and member instances
+// observe into ONE shared buffer, so a member's work_unit_tool_blocked (and
+// every other attributed observation) becomes visible to the Root-side
+// bridge poll without depending on the durable file read path. The durable
+// per-task sequence in collaboration.jsonl (collabWriters above) was already
+// shared for the same reason.
+const COLLAB_CAP = 500;
+const collabEvents = [];               // native hub traffic + native task results + member blocks (bounded, readable via dispatch)
+const collabSeqByTask = new Map();     // task_dir -> last assigned seq (per-task, gap-free)
+const collabDroppedByTask = new Map(); // task_dir -> count of dropped oldest events
 
 function collabWriterFor(taskDir) {
   let writer = collabWriters.get(taskDir);
@@ -661,11 +675,7 @@ export function installOmpExtension(pi, sdk) {
   const stoppedMembers = new Set(); // member ids whose stop was CONFIRMED via the live-session path
   const taskDirs = new Map();       // root session id -> task directory (bound via orbit start/context)
   const statusBoundTasks = new Map(); // root session id -> task directory recovered from durable records (status display only)
-  const collabEvents = [];          // native hub traffic + native task results (bounded, readable via dispatch)
   const rootAgentWrites = new Set(); // in-flight OMP `write agent://...` calls awaiting their result
-  const COLLAB_CAP = 500;
-  const collabSeqByTask = new Map();    // task_dir -> last assigned seq (per-task, gap-free)
-  const collabDroppedByTask = new Map(); // task_dir -> count of dropped oldest events
   let lastKnownPool = null; // last successful pool read (status display only; never a second pool state)
   let host, currentContext, registryHookInstalled;
 
@@ -2791,6 +2801,8 @@ export function installOmpExtension(pi, sdk) {
       const unitId = dispatchUnitId(item, input.context);
       const unit = units.find(candidate => candidate.id === unitId);
       if (!unit) return { block: true, reason: 'Declare an Orbit work-unit, then put a standalone orbit-unit: wu-... line in each native task text' };
+      if (unit.execution === 'root')
+        return { block: true, reason: `Work unit ${unitId} is explicitly owned by Root; declare a delegate unit for native member dispatch` };
       if (selectedUnits.has(unitId)) return { block: true, reason: `Work unit ${unitId} cannot be dispatched twice in one call` };
       if (!['declared', 'rejected', 'failed'].includes(unit.status) ||
           unit.input_digest !== unitReport.task_input_digest || unit.artifact_root !== unitReport.artifact_root)
@@ -2809,6 +2821,41 @@ export function installOmpExtension(pi, sdk) {
       const artifactRoot = await fs.realpath(unit.artifact_root).catch(() => null);
       if (!artifactRoot)
         return { block: true, reason: `Work unit ${unitId} artifact_root is not a real workspace; rebind the workspace or declare a valid unit before dispatch` };
+      const preflight = await validateWorkUnitPreflight(unit, { cwd: artifactRoot });
+      if (preflight?.block) {
+        observeCollab({ kind: 'work_unit_dispatch_blocked', task_dir: taskDir, at: Date.now(),
+          agent_id: caller, session_id: sessionId, work_unit_id: unitId,
+          tool_call_id: event.toolCallId, reason: preflight.reason });
+        return preflight;
+      }
+      let evaluated;
+      try {
+        evaluated = JSON.parse(await host.execute({ action: 'work-unit', task: taskDir,
+          operation: 'select', work_unit: { id: unitId } }, ctx));
+      } catch (error) {
+        return { block: true, reason: `Work unit ${unitId} could not be assessed before dispatch: ${error.message}` };
+      }
+      // The runtime may consume an amendment/rebind while selection awaits
+      // model evidence. Revalidate ownership and versions before staging names.
+      const current = await boundTask(sessionId);
+      const currentUnit = runWorkUnit(taskDir, 'read', { id: unitId });
+      if (!current.ok || current.taskDir !== taskDir || !currentUnit.ok ||
+          currentUnit.task_input_digest !== unit.input_digest || currentUnit.artifact_root !== unit.artifact_root ||
+          !['declared', 'rejected', 'failed'].includes(currentUnit.unit?.status))
+        return { block: true, reason: `Work unit ${unitId} changed during selection; review current requirements and declare or select the current unit` };
+      const assessed = evaluated.selection;
+      if (!assessed || typeof assessed.signature !== 'string')
+        return { block: true, reason: `Work unit ${unitId} has no current selection receipt; inspect the runtime response before dispatch` };
+      const prior = bound.state.member_selections?.[unitId];
+      // A direct CLI declaration or newly changed evidence may first be
+      // assessed at this gate. Present that new recommendation before letting
+      // the Root commit its model choice; the next attempt reuses the result.
+      if (assessed.decision === 'recommended' && prior?.signature !== assessed.signature) {
+        const first = assessed.candidates?.find(candidate => candidate.agent === assessed.recommendation?.first);
+        return { block: true, reason: `Work unit ${unitId} has a new pre-dispatch recommendation: ${first?.agent} (${first?.model}). ` +
+          `Review orbit work-unit select for the reasons, backups and limitations, then choose this or another pool agent. Root keeps dispatch authority.` };
+      }
+      bound.state = current.state;
       selectedUnits.add(unitId);
       const hint = bound.state.delegation_hint;
       const models = hint?.recommendation
@@ -2840,11 +2887,23 @@ export function installOmpExtension(pi, sdk) {
         rationale,
         rationale_source: rationale ? 'dispatch_input' : 'unrecorded',
         requested_name: requested, work_unit_id: unitId,
+        selection_signature: assessed.signature, selection_version: assessed.version,
+        selection_decision: assessed.decision,
         hint_signature: hintBinding?.hint_signature ?? null, hint_message_id: hintBinding?.hint_message_id ?? null });
       staged.push({ item, requested, expectedModel, unit, hint: hintBinding });
     }
     // Stage the whole batch first: rejection cannot leave partial requested
     // names or rewritten items that a later unrelated registration could use.
+    const finalBound = await boundTask(sessionId);
+    const finalReport = runWorkUnit(taskDir, 'list');
+    if (!finalBound.ok || finalBound.taskDir !== taskDir || !finalReport.ok ||
+        staged.some(({ unit }) => {
+          const latest = finalReport.units?.find(candidate => candidate.id === unit.id);
+          return !latest || !['declared', 'rejected', 'failed'].includes(latest.status) ||
+            finalReport.task_input_digest !== unit.input_digest || finalReport.artifact_root !== unit.artifact_root ||
+            !latest.dependencies?.every(id => finalReport.units.some(dependency => dependency.id === id && dependency.status === 'accepted'));
+        }))
+      return { block: true, reason: 'The work-unit batch changed while selection was running; review current requirements and dispatch the current units' };
     for (const { item, requested, expectedModel, unit, hint } of staged) {
       item.name = requested;
       // Native task.tools mounts named eval tools; it is NOT a restriction
@@ -3849,6 +3908,19 @@ export function installOmpExtension(pi, sdk) {
     async execute(_id, args, _signal, _update, ctx) {
       const entry = await connect(ctx);
       let text;
+      if (args?.action === 'work-unit' && (!args.operation || args.operation === 'declare') &&
+          args.work_unit?.spec?.execution !== 'root') {
+        const bound = await boundTask(entry.id);
+        if (bound.ok && bound.taskDir === args.task) {
+          const spec = args.work_unit?.spec || {};
+          const prospective = { artifact_root: bound.state.workspace?.artifact_root,
+            input_materials: spec.input_materials,
+            scope: { allowed_paths: spec.allowed_paths, allowed_tools: spec.allowed_tools,
+              allowed_commands: spec.allowed_commands } };
+          const preflight = await validateWorkUnitPreflight(prospective, { cwd: prospective.artifact_root });
+          if (preflight?.block) throw new Error(preflight.reason);
+        }
+      }
       if (args?.action === 'root-model') {
         // The shared host already verified task ownership; this branch owns
         // the pool∩catalog check, the public pi.setModel call, and the small

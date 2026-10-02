@@ -40,6 +40,40 @@ module CliTest
     Dir.glob(File.join(record.path, "inbox/*.json"))
   end
 
+  def work_unit_selection_returns_the_runtime_response_without_writing_state
+    record = task(runtime_pid: Process.pid)
+    unit = Orbit::WorkUnitStore.new(record).declare(
+      "objective" => "Implement the bounded module", "requirements" => ["original requirement"],
+      "allowed_paths" => ["src"], "allowed_tools" => ["read", "write"], "allowed_commands" => [],
+      "acceptance" => "Root verifies the module", "escalation" => "Report blockers to Root"
+    )
+    before = File.binread(File.join(record.path, "state.json"))
+    consumer = Thread.new do
+      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 5
+      loop do
+        request = commands(record).filter_map { |file| JSON.parse(File.read(file)) }
+                                  .find { |command| command["type"] == "member_selection" }
+        if request
+          assert(request["work_unit_id"] == unit["id"], "selection targets the requested work unit")
+          record.write("member-selection-responses/#{request.fetch('request_id')}.json", JSON.generate(
+            "ok" => true, "selection" => { "decision" => "facts_only", "signature" => "runtime-receipt" }
+          ))
+          break
+        end
+        raise "selection request was not queued" if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+        sleep 0.01
+      end
+    end
+    response = JSON.parse(cli("work-unit", record.path, "select", "--file", "-",
+                              stdin_data: JSON.generate("id" => unit["id"])))
+    consumer.value
+    assert(response.dig("selection", "signature") == "runtime-receipt" &&
+           File.binread(File.join(record.path, "state.json")) == before,
+           "the client returns the runtime's assessment and never manufactures task state")
+  ensure
+    consumer&.join
+  end
+
   def route_forecast_is_scoped_and_never_consumption
     record = task
     payload = { "scope" => "review", "candidates" => {
@@ -1181,7 +1215,8 @@ module CliTest
   end
 
   def main
-    %i[single_task_from_project_subdirectory multiple_tasks_require_explicit_selection completed_and_absent_tasks
+    %i[work_unit_selection_returns_the_runtime_response_without_writing_state
+       single_task_from_project_subdirectory multiple_tasks_require_explicit_selection completed_and_absent_tasks
        status_separates_check_activity_from_task_completion
        terminal_status_never_prompts_recheck_of_stopped_tasks
        status_usage_sums_known_roles_and_excludes_root_cumulative

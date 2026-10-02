@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import net from 'node:net';
 import { spawn } from 'node:child_process';
-import { validateMemberTool, createEditProjection } from '../plugins/work-unit-scope.mjs';
+import { validateMemberTool, createEditProjection, validateWorkUnitPreflight } from '../plugins/work-unit-scope.mjs';
 
 const project = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "orbit-scope-'quote-")));
 const outside = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'orbit-scope-outside-')));
@@ -76,6 +76,62 @@ try {
   assert.equal((await gate('task', { tasks: [{ agent: 'task', task: 'x', solutionSpace: 'y' }] })).block, true);
   assert.equal((await gate('eval', { code: 'process.env' })).block, true);
   console.log('WORK_UNIT_SCOPE_TEST_PASS native_tools_and_paths');
+
+  // Native read/grep/glob syntax: selectors, multi-paths and embedded globs
+  // reach their real targets; escapes stay blocked. Directory searches use
+  // src/clean because src deliberately contains the `escape` symlink.
+  await fs.mkdir(path.join(project, 'src', 'clean'));
+  await fs.writeFile(path.join(project, 'src', 'clean', 'a.ts'), 'a\nb\n');
+  await fs.writeFile(path.join(project, 'src', 'clean', 'b.ts'), 'c\n');
+  await fs.writeFile(path.join(project, 'src', 'literal:1-2'), 'colon\n');
+  for (const selector of ['src/clean/a.ts:1', 'src/clean/a.ts:1-2', 'src/clean/a.ts:1+1', 'src/clean/a.ts:2-',
+      'src/clean/a.ts:-1', 'src/clean/a.ts:1,2', 'src/clean/a.ts:raw', 'src/clean/a.ts:raw:1-2', 'src/clean/a.ts:1-2:raw'])
+    assert.equal((await gate('read', { path: selector })).block, undefined, selector);
+  assert.equal((await gate('read', { path: 'src/clean/a.ts:1-2' })).input.path, `${project}/src/clean/a.ts:1-2`,
+    'the selector survives with the pinned absolute path');
+  assert.equal((await gate('read', { path: 'src/literal:1-2' })).input.path, path.join(project, 'src', 'literal:1-2'),
+    'an existing colon-named file stays a literal path (native issue #4618)');
+  assert.equal((await gate('read', { path: 'src/clean/a.ts;src/clean/b.ts' })).block, undefined, 'delimited multi-read');
+  for (const escape of ['../outside.ts:1-5', 'src/clean/a.ts:1-2;.orbit/state.json', 'src/clean/a.ts;../outside/secret.txt',
+      'src/escape/secret.txt:-1', 'src/clean/a.ts;https://example.com'])
+    assert.equal((await gate('read', { path: escape })).block, true, escape);
+  assert.equal((await gate('grep', { path: 'src/clean/a.ts:1-2', pattern: 'a' })).block, undefined, 'grep line range');
+  assert.equal((await gate('grep', { path: 'src/clean/a.ts:raw', pattern: 'a' })).block, true, 'grep rejects display selectors');
+  assert.equal((await gate('grep', { path: 'src/clean/*.ts', pattern: 'a' })).block, undefined, 'grep glob entry');
+  const bareSearch = cwd => validateMemberTool({ artifact_root: path.join(project, 'src/clean'),
+    scope: { allowed_paths: ['.'], allowed_tools: ['grep'] } },
+  { toolName: 'grep', input: { path: '*.ts', pattern: 'a' }, cwd });
+  assert.equal((await bareSearch(path.join(project, 'src/clean'))).input.path, '*.ts',
+    'native bare glob keeps recursive search semantics at the verified member cwd');
+  assert.equal((await bareSearch(project)).block, true, 'bare glob cannot search a different cwd');
+  assert.equal((await gate('grep', { path: 'src/clean/*.ts:1-2', pattern: 'a' })).block, true, 'range on a glob');
+  assert.equal((await gate('grep', { path: 'src/clean;src/clean/a.ts', pattern: 'a' })).block, undefined, 'multi-path search');
+  assert.equal((await gate('grep', { path: 'src/clean;../outside', pattern: 'a' })).block, true, 'one escaping entry blocks');
+  assert.equal((await gate('grep', { path: 'src', pattern: 'a' })).block, true, 'the escape symlink still blocks searching src');
+  assert.equal((await gate('glob', { path: 'src/clean/*.ts' })).block, undefined, 'embedded find glob');
+  assert.equal((await gate('glob', { path: 'src/clean' })).block, undefined, 'plain directory find');
+  assert.equal((await gate('glob', { path: 'src/clean/*.ts;../*' })).block, true, 'escaping find entry');
+  assert.equal((await gate('glob', { path: 'src/clean/*-missing' })).block, undefined,
+    'a missing glob target is the native tool\'s answer, not a scope block');
+  console.log('WORK_UNIT_SCOPE_TEST_PASS native_selector_multipath_glob');
+
+  // Pre-dispatch preflight: executable unit passes; protected paths, empty or
+  // mismatched entrances and unreadable materials block with a repair reason.
+  const preflight = (over, materials) => validateWorkUnitPreflight(
+    { artifact_root: project, scope: { allowed_paths: ['src'], allowed_tools: ['read', 'write'], allowed_commands: [], ...over } },
+    materials === undefined ? {} : { materials });
+  assert.equal((await preflight({})).ok, true);
+  assert.match((await preflight({ allowed_tools: [] })).reason, /no tool or command entrance/, 'empty entrances');
+  assert.match((await preflight({ allowed_paths: ['.orbit'] })).reason, /escapes the actual artifact root|protected/, 'protected declared path');
+  assert.match((await preflight({ allowed_paths: ['../x'] })).reason, /invalid work-unit scope path/, 'escaping declared path');
+  assert.match((await preflight({ allowed_tools: ['read', 'fetch'] })).reason, /no member entrance: fetch/, 'unknown tool');
+  assert.match((await preflight({ allowed_commands: ['ls'] })).reason, /without the bash tool entrance/, 'commands without bash');
+  assert.match((await preflight({ allowed_paths: [] })).reason, /no allowed_paths/, 'tools without paths');
+  await fs.writeFile(path.join(project, 'note.md'), 'material\n');
+  assert.match((await preflight({}, ['note.md'])).reason, /outside the member's allowed paths/, 'unreadable material');
+  assert.match((await preflight({}, ['missing.md'])).reason, /does not exist/, 'missing material');
+  assert.equal((await preflight({}, ['src/clean/a.ts'])).ok, true, 'material under an allowed path');
+  console.log('WORK_UNIT_SCOPE_TEST_PASS work_unit_preflight');
 
   const write = 'printf allowed > src/allowed.txt'; unit.scope.allowed_commands.push(write);
   const wrapped = await gate('bash', { command: write });

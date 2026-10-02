@@ -190,7 +190,7 @@ module Orbit
       end
     end
 
-    def self.observation(inputs:, host:, members:, project_root:, artifact_digest:, elapsed_seconds:, member_options: nil)
+    def self.observation(inputs:, host:, members:, project_root:, artifact_digest:, elapsed_seconds:, member_options: nil, member_blocks: nil)
       amendments, omitted = bounded_amendments(inputs.fetch("amendments", []))
       basis, basis_omitted = bounded_basis(inputs.fetch("basis", []))
       {
@@ -200,6 +200,7 @@ module Orbit
         "amendments" => amendments,
         "amendments_omitted" => omitted,
         "member_options" => member_options,
+        "member_blocks" => member_blocks_projection(member_blocks),
         "host" => host.slice("status", "turn_id", "last_turn_id", "last_turn_status", "active_tools"),
         "recent_observations" => observation_tail(host["observations"]),
         "members" => members.last(5).map do |member|
@@ -215,6 +216,17 @@ module Orbit
     def self.limit(value, size)
       text = value.to_s
       text.length > size ? "#{text[0, size]}…[truncated]" : text
+    end
+
+    def self.member_blocks_projection(blocks)
+      return nil unless blocks.is_a?(Hash)
+
+      classes = Array(blocks["classes"])
+      { "scope" => blocks["scope"], "total" => blocks["total"], "stall" => blocks["stall"],
+        "evicted_classes" => blocks["evicted_classes"], "omitted_classes" => [classes.length - 8, 0].max,
+        "classes" => classes.last(8).map do |entry|
+          entry.slice("tool", "reason", "count", "agents", "units", "dispatches", "dispatches_omitted", "first_at", "last_at", "stalled")
+        end }
     end
 
     # Newest effective amendments are kept under a character budget. When

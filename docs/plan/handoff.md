@@ -1,23 +1,20 @@
 # Orbit 当前交接
 
-最后核对：2026-10-01。**当前源码 0.8.0（commit `3865b76`，已推送）**；混合模型交付 Goal 已完成，无当前产品实现待办。
+最后核对：2026-10-02。**源码0.8.1；普通真实任务修复已完成代码、独立核查与有界真实验收**。本次收口、八项原要求逐项证据和限制见[验收记录](../reference/ordinary-task-repair-acceptance-20261002.md)。当前无待实施交付票；Goal和本地提交实际状态以工具记录与 `git log` 为准。
 
-## 版本事实（区分记录）
+## 版本事实
 
-- **源码**：0.8.0／`3865b76`——仅版本号提升（0.7.37→0.8.0），未新增实机验收；full 与 0.7.37 实机样本以 `4cc957e` 冻结（full 197.31956s exit 0／83 pack 逐字一致）；其他真实验收样本按完成记录各自构建身份（pair4＝0.7.25、033＝0.7.33 等）。
-- **本机安装**：0.7.37（doc-only source commit `b705344`／digest `49cf34bc…`／release `5828b3c1…`）。文档清理不构成升级安装；下次 `orbit update` 才落 0.8.0。
+- **源码**：0.8.1，基线 `a0fe2f1`；本次推荐、权限、阻断监督及证实成员收尾修复随本地提交交付。
+- **用户安装**：0.8.0／a0fe2f1／digest `92aa2e6dbd8344c805d97a11818959e41064108e79b8f02fec2565b02bf1bea3`，本次未更新。
+- **隔离被测安装**：0.8.1 build3／a0fe2f1 dirty／digest `bcd9cbfda5782084f22c97a95d34a608d5bd19afbbab143aa16c7a680f2d45fc`，`2026-10-02T02:31:50Z`。最终源码pack摘要相同，交接文档不改运行包；实际独立检查 OMP SDK18.4.9。
+- **真实结果**：positive3两单均派前评估，建议实际影响native派发，402失败后备选交付，Root集成/7项测试/独立K3终检/complete confirmed stop；review-dedup三项真实finding送达、成员修正、复核resolved；稳定前台观察不重复付费，原生Esc及正常退出均有真实记录。
 
-## 收口依据
+## 当前有效边界
 
-- 原混合模型交付目标（54 项＋W1–W10）逐项判定、证据与边界＝[完成记录](../reference/mixed-model-delivery-completion-20261001.md)；Root 最终审计＝`/private/tmp/orbit-stop-guard-037/ROOT-54-FINAL-COMPLETION-AUDIT.json`。
-- 运行代码基线的真实验收：pair4 自主成员完整链、033 强检查发现→纠正→resolved→停、35 失败原件（不改判）、regress37 过程换型＋合法阻断 confirmed stop、W9 同质量配对（旗舰 observed 0 vs 7）、单文件负例真实 entry 不启动。原件均在 `/private/tmp/orbit-*` 各目录。
+见[当前限制](debt-ledger.md)。本次只在有界普通任务范围成立，不宣称全模型、全自然分支或普遍成本收益；旧阶段未测组合没有因此变成本次新增证明门。原混合模型54项及W1–W10沿[原完成记录](../reference/mixed-model-delivery-completion-20261001.md)查阅，不改历史构建和失败标签。
 
-## 当前有效限制
+## 资源与授权
 
-见[当前限制](debt-ledger.md)：未测自然分支（Root-stage switch live、非 stale process finding 恢复、stop marker 精确复现、failed-unit 释放）、平台未知（park/dispose、devin hooks）、现金/扣减 unknown——均非完工门，随未来普通运行自然累积。
-
-## 现场与操作约定
-
-- 开发沿 [AGENTS.md](../../AGENTS.md) 与[开发流程](../agents/development-workflow.md)；文档/合同语义改动须同步权威文件。
-- 本地 commit 可；推送/发布/tag/SDK 升级/购买额度按用户当次明确授权执行。
-- 历史版本流水、失败与中间状态不在本页复制：`git show 3865b76:PATH` 查阅。
+- 测试pane w22:p5/p6/p7/p8/p9/pA均已关闭；六个测试任务均confirmed stop且runtime_pid=null。证据保留 `/private/tmp/orbit-ordinary-repair-1d_06gw_`，供复核。
+- 用户指定三个OMP和zeen保留原状态，zeen始终只读；未推送、发布、打tag、升级宿主SDK或更改用户全局安装。
+- 开发规则沿[AGENTS.md](../../AGENTS.md)及[开发流程](../agents/development-workflow.md)；后续安装更新、推送、发布按明确授权执行。

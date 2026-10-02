@@ -42,8 +42,8 @@ export const toolArgs = z => ({
         phase: z.enum(['execution', 'integration', 'diagnosis']).optional().describe('root-model only: which stage the selected model is for. An intent declaration, not a capability measurement.'),
 
         intent: z.enum(['complete', 'pause']).optional().describe('stop only: complete (default) requires the actual finalization gate; pause is an explicit interruption.'),
-        operation: z.enum(['declare', 'read', 'list', 'finish']).optional().describe('work-unit operation; declare records a bounded handoff, finish records Root verification.'),
-        work_unit: z.record(z.string(), z.unknown()).optional().describe('declare payload types: {spec:{objective:non-empty string, requirements:non-empty string[], allowed_paths/allowed_tools/allowed_commands:string[] (at least one non-empty), acceptance:non-empty string, escalation:non-empty string, optional context:string, decisions:string[], dependencies:string[] of existing unit ids}}. Paths/tools/commands are flat allowed_* fields inside spec, never nested scope. allowed_paths is the member\'s entire accessible path set (read and write share it): read-only specs/tests/dependencies must be listed there too, or their necessary facts go into context; it grants no automatic read-only protection. allowed_commands must be complete commands, matched verbatim — never prefixes. Remaining optional spec field: model_requirements (object). read/finish use id; finish also needs status,result,verification.'),
+        operation: z.enum(['declare', 'read', 'list', 'finish', 'select']).optional().describe('work-unit operation; declare records a bounded handoff and returns member selection before dispatch; select refreshes relevant facts using the existing assessment cache; finish records Root verification.'),
+        work_unit: z.record(z.string(), z.unknown()).optional().describe('declare payload types: {spec:{objective:non-empty string, requirements:non-empty string[], allowed_paths/allowed_tools/allowed_commands:string[] (at least one non-empty), acceptance:non-empty string, escalation:non-empty string, optional context:string, decisions:string[], input_materials:string[] of existing project files accessible through allowed_paths, dependencies:string[] of existing unit ids}}. Paths/tools/commands are flat allowed_* fields inside spec, never nested scope. allowed_paths is the member\'s entire accessible path set (read and write share it): read-only specs/tests/dependencies must be listed there too, or their necessary facts go into context; it grants no automatic read-only protection. allowed_commands must be complete commands, matched verbatim — never prefixes. bash requires explicit allowed_commands. Skills, MCP or external files are not automatic member entrances; prepare needed facts in context or project input_materials before declaring. Delegate units need actual tool entrances and bounded paths; invalid declarations return a concrete repair before selection or dispatch. Remaining optional spec fields: execution (root|delegate, default delegate; declare Root integration work as root so it never occupies member selection), model_requirements (object). read/finish use id; finish also needs status,result,verification.'),
         takeover: z.object({ reason: z.string(), prior_scope: z.string().optional() }).optional()
           .describe('Take over an already-executed original requirement via start: say why (reason) and optionally declare the prior execution scope (prior_scope). The artifact digest and supervision start time are captured by the program, never supplied here.'),
         text: z.string().optional().describe('amend: the amendment text — a user-authorized requirement revision only; never a way to submit test results or completion evidence (verified execution enters checks through real Root tool receipts). stop: the reason text.'), check_in: z.number().int().positive().optional()
@@ -157,8 +157,19 @@ export function createOrbitHost({ provider, project, dispatch, bind, reset }) {
         }
         await ownedTask(a.task, id);
         if (a.action === 'work-unit') {
-          return JSON.stringify(await run(['work-unit', a.task, a.operation || 'declare', '--file', '-'], project,
-            JSON.stringify(a.work_unit || {})));
+          const operation = a.operation || 'declare';
+          const result = await run(['work-unit', a.task, operation, '--file', '-'], project,
+            JSON.stringify(a.work_unit || {}));
+          if (operation === 'declare') {
+            // Return the actual assessment in the same native tool result.
+            // The Root sees it before composing its task dispatch, including
+            // an explicit facts-only/declined result; no steer wake is needed.
+            const selected = await run(['work-unit', a.task, 'select', '--file', '-'], project,
+              JSON.stringify({ id: result.unit.id }));
+            result.selection = selected.selection;
+            result.selection_request_id = selected.request_id;
+          }
+          return JSON.stringify(result);
         }
         const args = [a.action, a.task];
         if (['status', 'stop'].includes(a.action)) args.push('--json');

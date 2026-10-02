@@ -3,6 +3,7 @@
 require "digest"
 require "json"
 require "time"
+require "fileutils"
 require "shellwords"
 require_relative "task_record"
 require_relative "workspace_snapshot"
@@ -727,9 +728,14 @@ module Orbit
     end
 
     def assess_jev(host, artifact_digest, now)
+      # Stable supervision fingerprint: the block CLASS identity set with
+      # stall facts. Repeated hits inside a class never change it; a new
+      # class or a stall transition does.
+      blocks_fingerprint = Array(@state.dig("member_blocks", "classes")).any? ? member_block_stall_digest : nil
       signature = Digest::SHA256.hexdigest(JSON.generate([
         host.slice("status", "turn_id", "last_turn_id", "last_turn_status", "active_tools"),
-        artifact_digest, @record.input_digest(@state), @state["members"].map { |member| member.slice("thread_id", "status") }
+        artifact_digest, @record.input_digest(@state), @state["members"].map { |member| member.slice("thread_id", "status") },
+        blocks_fingerprint
       ]))
       # Time and noisy progress counters do not constitute a new observation.
       # Preserve the cooldown for actual changes, but never pay twice for an
@@ -739,7 +745,7 @@ module Orbit
         inputs: @record.inputs(@state), host: host, members: @state["members"],
         project_root: artifact_root, artifact_digest: artifact_digest,
         elapsed_seconds: now - Time.parse(@state.fetch("created_at")).to_f,
-        member_options: delegation_options
+        member_options: delegation_options, member_blocks: member_block_summary
       )
       result = @advisor.assess(state: observation)
       @jev_unavailable = false
@@ -994,6 +1000,13 @@ module Orbit
     def consume_commands
       @record.commands do |command|
         if TERMINAL.include?(@state["status"])
+          if command["type"] == "member_selection"
+            path = member_selection_response_path(command["request_id"].to_s)
+            if path && !File.file?(path)
+              member_selection_write_response(path, false, "task is terminal: #{@state['status']}",
+                                              command["request_id"].to_s, command["work_unit_id"].to_s)
+            end
+          end
           @record.event("command_rejected", "command_type" => command["type"], "reason" => "Task execution has stopped")
           next
         end
@@ -1006,6 +1019,7 @@ module Orbit
                    when "takeover_scope" then %w[prior_scope]
                    when "dispute" then %w[reason]
                    when "review_model" then %w[model]
+                   when "member_selection" then %w[request_id work_unit_id]
                    else []
                    end
         missing = required.reject { |key| command.key?(key) && !command[key].nil? }
@@ -1055,6 +1069,8 @@ module Orbit
           apply_model_evidence(command, now: Time.now.to_f)
         when "review_model"
           apply_review_model(command, Time.now.to_f)
+        when "member_selection"
+          handle_member_selection(command)
         when "dispute"
           @state["dispute"] = command.fetch("reason")
           schedule_check(0, "用户请求的裁定", trigger: "manual_dispute", manual: true)
@@ -1408,38 +1424,81 @@ module Orbit
       WorkUnitStore.new(@record)
     end
 
-    def ready_work_unit
-      units = work_units.list
-      input = @record.input_digest(@state)
-      units.find do |unit|
-        %w[declared rejected failed].include?(unit["status"]) &&
-          unit["input_digest"] == input && unit["artifact_root"] == artifact_root &&
-          Array(unit["dependencies"]).all? { |id| units.any? { |dep| dep["id"] == id && dep["status"] == "accepted" } }
-      end
-    end
-
-    def member_selection_state(artifact_digest, host)
-      @record.inputs(@state).merge(
+    def member_selection_state(artifact_digest, host, unit: nil)
+      state = @record.inputs(@state).merge(
         "workspace" => @state["workspace"], "input_digest" => @record.input_digest(@state),
         "artifact_digest" => artifact_digest,
         "user_boundary" => @state["last_user_message_id"],
         "user_message_id" => host["last_turn_user_message_id"] || @state["last_user_message_id"]
       )
+      state["dependency_context"] = dependency_context(unit) if unit
+      state
+    end
+
+    # Per-unit dependency facts (id/status/result/verification, bounded) so the
+    # selection signature reflects exactly the dependencies of THIS unit, not a
+    # whole-project digest. The member selector consumes this key (OMP1 slice).
+    def dependency_context(unit)
+      return [] if unit.nil?
+
+      ids = Array(unit["dependencies"])
+      return [] if ids.empty?
+
+      units = work_units.list
+      ids.filter_map do |id|
+        dep = units.find { |candidate| candidate["id"] == id }
+        next unless dep
+
+        result = dep["result"].to_s
+        verification = dep["verification"].to_s
+        # Bounded prefix for size plus the full-content digest, so a change
+        # beyond the prefix still invalidates the basis (OMP1 consumes both).
+        { "id" => dep["id"], "status" => dep["status"],
+          "result" => result[0, 500], "result_sha256" => Digest::SHA256.hexdigest(result),
+          "verification" => verification[0, 500],
+          "verification_sha256" => Digest::SHA256.hexdigest(verification) }
+      end
     end
 
     def stage_delegation(artifact_digest, now, host:)
       return if @state["members"].any? { |member| member["model_drift"] }
 
-      unit = ready_work_unit
+      unit = planned_delegation_unit
       return unless unit
 
+      selection = assess_and_store_selection(unit, artifact_digest, now, host: host)
+      @pending_hint = build_delegation_hint(selection, unit, host)
+    rescue WorkUnitStore::Error, ModelCandidatePool::Error => error
+      @record.event("member_selection_unavailable", "reason" => error.message)
+    end
+
+    # OMP1 scheduling interface (class method, current shard): the selector —
+    # not a first-find — decides which unit is assessed next (never assessed
+    # or basis-changed) or which settled unit to refresh, so a Root
+    # self-execution unit can never occupy the recommendation queue and every
+    # dispatchable unit gets its turn.
+    def planned_delegation_unit
+      plan = MemberModelSelector.recommendation_plan(
+        units: work_units.list, assessments: @state["member_selections"],
+        input_digest: @record.input_digest(@state), artifact_root: artifact_root,
+        workspace_git: @state.dig("workspace", "project", "git")
+      )
+      id = plan.is_a?(Hash) ? (plan["next_id"] || plan["refresh_id"]) : nil
+      return nil unless id
+
+      work_units.read(id)
+    end
+
+    # Shared by the automatic advisory path and the explicit member_selection
+    # command: assess exactly this unit (the selector reuses its cached result
+    # via `previous`), account usage and persist the selection once.
+    def assess_and_store_selection(unit, artifact_digest, now, host:)
       id = unit.fetch("id")
       selection = member_selector.assess(
-        state: member_selection_state(artifact_digest, host), work_unit: unit,
+        state: member_selection_state(artifact_digest, host, unit: unit), work_unit: unit,
         previous: @state["member_selections"][id]
       )
-      signature = selection.fetch("signature")
-      unless selection["reused"] == true
+      if selection["reused"] != true
         Array(selection["judgments"]).each do |receipt|
           accumulate_jev_usage("jev_member_#{receipt['phase']}", receipt["usage"], receipt: receipt)
         end
@@ -1450,13 +1509,38 @@ module Orbit
           "user_message_id" => host["last_turn_user_message_id"] || @state["last_user_message_id"]
         )
         @state["member_selections"][id] = selection
-        @state["delegation_assessments"][signature] = selection
+        @state["delegation_assessments"][selection.fetch("signature")] = selection
         @state["jev"] = (@state["jev"] || {}).merge("delegation" => selection)
         @record.event("member_selection_assessed", selection.slice(
           "version", "signature", "work_unit_id", "decision", "reason", "recommendation", "judgments"
         ))
         save
+      elsif @state["member_selections"][id].is_a?(Hash)
+        # OMP1 scheduling: a reused assessment refreshes its stamp so the
+        # refresh_id rotation can visit settled units in turn — no new
+        # judgment, no usage.
+        selection = @state["member_selections"][id]
+        selection["at"] = Time.at(now).utc.iso8601
+        save
       end
+      selection
+    end
+
+    # Recommendation projection with the actual candidate objects for the
+    # first choice and backups, so a dispatch log can bind
+    # selection_signature/selection_version without a second lookup.
+    def member_selection_payload(selection)
+      candidates = Array(selection["candidates"])
+      first = candidates.find { |candidate| candidate["agent"] == selection.dig("recommendation", "first") }
+      backups = candidates.select { |candidate| Array(selection.dig("recommendation", "backups")).include?(candidate["agent"]) }
+      selection.merge(
+        "selection_version" => selection["version"], "selection_signature" => selection["signature"],
+        "recommendation_objects" => { "first" => first, "backups" => backups }
+      )
+    end
+
+    def build_delegation_hint(selection, unit, host)
+      signature = selection.fetch("signature")
       return unless selection["decision"] == "recommended" && selection.dig("recommendation", "first")
       return if @state.dig("delegation_hints", signature)
 
@@ -1464,8 +1548,8 @@ module Orbit
       return unless first && first["recommendation_hold"] != true
 
       backups = selection["candidates"].select { |candidate| Array(selection.dig("recommendation", "backups")).include?(candidate["agent"]) }
-      @pending_hint = selection.slice("version", "signature", "work_unit_id", "input_digest", "artifact_root", "at",
-                                      "user_boundary", "user_message_id").merge(
+      selection.slice("version", "signature", "work_unit_id", "input_digest", "artifact_root", "at",
+                      "user_boundary", "user_message_id").merge(
         "decision_version" => ModelQualityPolicy::DECISION_VERSION,
         "input_version" => ModelQualityPolicy::INPUT_VERSION,
         "dispatch_attempt" => Array(unit["dispatches"]).length + 1,
@@ -1473,8 +1557,112 @@ module Orbit
         "work_unit" => unit.slice("id", "objective", "scope", "acceptance", "escalation"),
         "judgments" => selection["judgments"], "order" => selection["order"]
       )
-    rescue WorkUnitStore::Error, ModelCandidatePool::Error => error
-      @record.event("member_selection_unavailable", "reason" => error.message)
+    end
+
+    # CLI `work-unit --operation select` (Root slice) enqueues this command and
+    # waits for member-selection-responses/<request_id>.json. This handler is
+    # the ONLY writer of that response. It answers from the exact target unit:
+    # preconditions first (no payment for an inadmissible unit), then the
+    # selector's cached assessment. No Root steer and no synchronous hint send
+    # happens here — a deliverable recommendation is staged as @pending_hint
+    # and delivered by the existing safe-window path.
+    def handle_member_selection(command)
+      request_id = command["request_id"].to_s
+      unit_id = command["work_unit_id"].to_s
+      path = member_selection_response_path(request_id)
+      unless path
+        @record.event("member_selection_rejected", "request_id" => request_id[0, 32], "reason" => "invalid request_id")
+        return
+      end
+      if File.file?(path)
+        @record.event("member_selection_response_kept", "request_id" => request_id[0, 32],
+                      "reason" => "response already present; the request is not re-run")
+        return
+      end
+      unit = member_selection_unit(unit_id)
+      if unit.is_a?(String)
+        member_selection_write_response(path, false, unit, request_id, unit_id)
+        return
+      end
+      if WorkUnitStore.execution_role(unit) == "root_self_execute"
+        # Frozen field (Root, 2026-10-02): a root self-execution unit is
+        # marked directly and pays for no member selection. The decision name
+        # matches the selector's vocabulary (OMP1 slice).
+        member_selection_write_response(path, true,
+                                        { "decision" => "root_self_execute", "work_unit_id" => unit_id,
+                                          "root_self_execute" => true,
+                                          "reason" => "spec.execution=root; Root self-executes this unit" },
+                                        request_id, unit_id)
+        return
+      end
+      begin
+        selection = assess_and_store_selection(unit, fingerprint_artifact, Time.now.to_f, host: @connection.state)
+      rescue WorkUnitStore::Error, ModelCandidatePool::Error => error
+        member_selection_write_response(path, false, "selection_unavailable: #{error.message}", request_id, unit_id)
+        return
+      rescue StandardError => error
+        # Never leave the CLI waiting out its 120s window: an unexpected
+        # failure still gets an immediate, specific refusal.
+        member_selection_write_response(path, false, "selection_failed: #{error.class}: #{error.message[0, 200]}",
+                                        request_id, unit_id)
+        return
+      end
+      unless @state["members"].any? { |member| member["model_drift"] }
+        hint = build_delegation_hint(selection, unit, @connection.state)
+        @pending_hint = hint if hint
+      end
+      member_selection_write_response(path, true, member_selection_payload(selection), request_id, unit_id)
+    end
+
+    # Frozen field (Root, 2026-10-02): spec.execution is root|delegate,
+    # default delegate. A root unit never pays for a member selection: the
+    # response carries decision=root_execution and the auto ready queue
+    # already excludes it.
+    def member_selection_unit(unit_id)
+      unit = begin
+        work_units.read(unit_id)
+      rescue WorkUnitStore::Error
+        return "work_unit_not_found: #{unit_id[0, 64]}"
+      end
+      # A well-formed but unknown id reads back nil, not an error.
+      return "work_unit_not_found: #{unit_id[0, 64]}" unless unit.is_a?(Hash)
+      return "work_unit_not_dispatchable: status #{unit['status']}" unless %w[declared rejected failed].include?(unit["status"])
+      return "input_version_changed: work unit does not match the current task input" unless unit["input_digest"] == @record.input_digest(@state)
+      return "workspace_moved: work unit artifact_root is not the current artifact root" unless unit["artifact_root"] == artifact_root
+
+      units = work_units.list
+      unmet = Array(unit["dependencies"]).reject { |id| units.any? { |dep| dep["id"] == id && dep["status"] == "accepted" } }
+      return "dependencies_unmet: #{unmet.join(', ')[0, 200]}" unless unmet.empty?
+
+      unit
+    end
+
+    def member_selection_response_path(request_id)
+      return nil unless request_id.match?(/\A[0-9a-fA-F-]{16,64}\z/)
+
+      File.join(@record.path, "member-selection-responses", "#{request_id}.json")
+    end
+
+    def member_selection_write_response(path, ok, payload, request_id, unit_id)
+      body = if ok
+               { "ok" => true, "request_id" => request_id, "work_unit_id" => unit_id,
+                 "selection" => payload, "responded_at" => Time.now.utc.iso8601 }
+             else
+               { "ok" => false, "request_id" => request_id, "work_unit_id" => unit_id,
+                 "reason" => payload, "responded_at" => Time.now.utc.iso8601 }
+             end
+      FileUtils.mkdir_p(File.dirname(path), mode: 0o700)
+      temporary = "#{path}.tmp-#{Process.pid}"
+      File.write(temporary, JSON.pretty_generate(body))
+      File.chmod(0o600, temporary)
+      File.rename(temporary, path)
+      @record.event(ok ? "member_selection_responded" : "member_selection_refused",
+                    { "request_id" => request_id[0, 32], "work_unit_id" => unit_id[0, 64],
+                      "ok" => ok }.merge(ok ? { "decision" => payload["decision"],
+                                               "signature" => payload["signature"] } : { "reason" => payload }))
+    rescue SystemCallError => error
+      File.delete(temporary) rescue nil
+      @record.event("member_selection_response_failed", "request_id" => request_id[0, 32], "error" => error.message)
     end
 
     # Supplementary model evidence is optional and keyed by its own exact
@@ -1745,10 +1933,12 @@ module Orbit
         # Invalidation compares the REAL dispatch identity only: an input or
         # artifact-root version move is evidence-eligibility, not a new
         # execution, so it never revokes a finished execution fact. A truly
-        # re-bound/changed attempt (different latest dispatch) still does.
+        # re-bound attempt for THIS member still does. A backup member does
+        # not revive this execution. Program failure recording adds its
+        # finished_at after settlement; that metadata is not a new turn.
         dispatch = current_member_dispatch(member, require_current_binding: false)
         if dispatch.nil? || dispatch["tool_call_id"] != basis["tool_call_id"] ||
-           dispatch["finished_at"] != basis["finished_at"]
+           (basis["source"] != "native_turn_error" && dispatch["finished_at"] != basis["finished_at"])
           reasons << "dispatch_changed"
         end
       end
@@ -1787,7 +1977,7 @@ module Orbit
     # work-unit records when the member record never carried one: Root
     # self-selected dispatches are not hint-followed, so nothing ever syncs
     # `work_unit_id` (real 02a5eda7 Zenmux member). Exact identity only — the
-    # same actual member id AND tool call as the unit's LATEST dispatch. A
+    # same actual member id AND tool call as the latest applicable dispatch. A
     # dispatch/member model mismatch inside that identity is drift, and an
     # ambiguous match (more than one unit) stays unresolved; never attributed
     # by similar model, time proximity or adjacent events. `require_current_binding`
@@ -1806,7 +1996,7 @@ module Orbit
         if require_current_binding
           next false unless unit["input_digest"] == current_input && unit["artifact_root"] == artifact_root
         end
-        latest = Array(unit["dispatches"]).last
+        latest = member_dispatch_attempt(unit, member, require_current_binding: require_current_binding)
         next false unless latest.is_a?(Hash) && latest["member_id"] == thread && latest["tool_call_id"] == call
         dispatch_model = latest["model"].to_s
         member_model = member["model"].to_s
@@ -1819,9 +2009,9 @@ module Orbit
       nil
     end
 
-    # The member's current dispatch attempt: the latest dispatch of its bound
-    # work unit, matched by actual member id and tool call. An older attempt
-    # (re-bound unit) or another member's attempt is never current. With the
+    # Execution identity follows this member's latest attempt, even when the
+    # unit is subsequently assigned to a different member. Evidence eligibility
+    # still requires the unit's latest attempt. With the
     # default `require_current_binding` the unit must also still sit on the
     # current input version and artifact root — that half is the CURRENT
     # EVIDENCE ELIGIBILITY, not the execution identity; a version move alone
@@ -1839,13 +2029,20 @@ module Orbit
         return nil unless unit["artifact_root"] == artifact_root
       end
 
-      latest = Array(unit["dispatches"]).last
+      latest = member_dispatch_attempt(unit, member, require_current_binding: require_current_binding)
       return nil unless latest.is_a?(Hash) && latest["member_id"] == member["thread_id"] &&
                         latest["tool_call_id"] == call
 
       latest
     rescue WorkUnitStore::Error
       nil
+    end
+
+    def member_dispatch_attempt(unit, member, require_current_binding:)
+      dispatches = Array(unit["dispatches"])
+      return dispatches.last if require_current_binding
+
+      dispatches.reverse.find { |dispatch| dispatch.is_a?(Hash) && dispatch["member_id"] == member["thread_id"] }
     end
 
     # Execution-settled means no real work in flight: not running, not
@@ -2034,6 +2231,7 @@ module Orbit
 
       seen = @state["hub_seen_ids"] ||= []
       changed = false
+      root_turn = nil
       events.each do |event|
         next unless event.is_a?(Hash)
         id = event["id"].to_s
@@ -2046,6 +2244,24 @@ module Orbit
           changed = true if record_ask_interrupt(event)
         when "ask_resolved"
           changed = true if resolve_ask_interrupts(event)
+        when "work_unit_tool_blocked"
+          # A member hit the work-unit scope gate: keep member, work unit,
+          # dispatch/tool identity, tool, reason and time in the summary.
+          root_turn ||= begin
+            @connection.state["last_turn_id"]
+          rescue StandardError
+            nil
+          end
+          summary = {
+            "id" => event["id"], "seq" => event["seq"], "kind" => event["kind"],
+            "agent_id" => event["agent_id"], "session_id" => event["session_id"],
+            "work_unit_id" => event["work_unit_id"], "tool_call_id" => event["tool_call_id"],
+            "tool" => event["tool"], "reason" => event["reason"].to_s[0, 300], "at" => event["at"]
+          }
+          (@state["native_collaboration"] ||= []) << summary
+          @state["native_collaboration"] = @state["native_collaboration"].last(50)
+          @record.event("native_collaboration", summary)
+          changed = true if record_member_block(event, root_turn)
         else
           summary = {
             "id" => event["id"], "seq" => event["seq"], "kind" => event["kind"], "op" => event["op"],
@@ -2091,6 +2307,142 @@ module Orbit
       return nil unless newer && newer > last + 1
 
       { "status" => "confirmed_gap", "last_seq" => last, "first_new_seq" => newer, "next_seq" => next_seq }
+    end
+
+    MEMBER_BLOCK_CLASS_CAP = 12
+    MEMBER_BLOCK_AGENTS_CAP = 8
+    MEMBER_BLOCK_DISPATCHES_CAP = 8
+
+    # Bounded aggregation of repeated member blocks by (tool, reason class)
+    # under the CURRENT input + artifact root version scope: Root may
+    # re-declare a fresh work unit per retry, so the same wall under new unit
+    # ids is still the same class. Per-event identity (work unit, member,
+    # member tool call) is preserved inside each class for the check
+    # projection; growth inside a class never schedules anything by itself.
+    def record_member_block(event, root_turn)
+      happened = event["at"].is_a?(String) ? event["at"] : Time.now.utc.iso8601
+      scope = [@record.input_digest(@state), artifact_root]
+      blocks = @state["member_blocks"] ||= { "scope" => scope, "classes" => [], "total" => 0 }
+      if blocks["scope"] != scope
+        @record.event("member_block_scope_reset", "prior_total" => blocks["total"],
+                      "input_digest_changed" => blocks.dig("scope", 0) != scope[0],
+                      "artifact_root_changed" => blocks.dig("scope", 1) != scope[1])
+        blocks["scope"] = scope
+        blocks["classes"] = []
+        blocks["total"] = 0
+      end
+      classes = blocks["classes"]
+      reason_class = event["reason"].to_s[0, 200]
+      entry = classes.find { |candidate| candidate["tool"] == event["tool"] && candidate["reason"] == reason_class }
+      unless entry
+        entry = { "tool" => event["tool"], "reason" => reason_class, "count" => 0, "agents" => [],
+                  "units" => [], "dispatches" => [], "dispatches_omitted" => 0,
+                  "first_at" => happened, "first_root_turn_id" => root_turn,
+                  "last_root_turn_id" => root_turn, "stalled" => false }
+        classes << entry
+        if classes.length > MEMBER_BLOCK_CLASS_CAP
+          evicted = classes.shift
+          blocks["evicted_classes"] = blocks.fetch("evicted_classes", 0) + 1
+          @record.event("member_block_summary_evicted", "tool" => evicted["tool"], "count" => evicted["count"])
+        end
+      end
+      entry["count"] += 1
+      entry["last_at"] = happened
+      entry["last_root_turn_id"] = root_turn
+      if event["agent_id"].is_a?(String) && !entry["agents"].include?(event["agent_id"])
+        entry["agents"] << event["agent_id"]
+        entry["agents"].shift while entry["agents"].length > MEMBER_BLOCK_AGENTS_CAP
+      end
+      if event["work_unit_id"].is_a?(String) && !entry["units"].include?(event["work_unit_id"])
+        entry["units"] << event["work_unit_id"]
+        entry["units"].shift while entry["units"].length > MEMBER_BLOCK_AGENTS_CAP
+      end
+      # The blocked tool_call_id belongs to the member's own blocked call; the
+      # actual dispatch identity is the member's bound unit dispatch
+      # tool_call_id — different calls, both kept.
+      unit_dispatch = begin
+        Array(work_units.read(event["work_unit_id"].to_s)["dispatches"]).reverse
+             .find { |dispatch| dispatch["member_id"] == event["agent_id"] }
+      rescue WorkUnitStore::Error
+        nil
+      end
+      dispatch = { "work_unit_id" => event["work_unit_id"], "agent_id" => event["agent_id"],
+                   "tool_call_id" => event["tool_call_id"],
+                   "dispatch_tool_call_id" => unit_dispatch.is_a?(Hash) ? unit_dispatch["tool_call_id"] : nil,
+                   "at" => happened }
+      if entry["dispatches"].length >= MEMBER_BLOCK_DISPATCHES_CAP
+        entry["dispatches"].shift
+        entry["dispatches_omitted"] = entry.fetch("dispatches_omitted", 0) + 1
+      end
+      entry["dispatches"] << dispatch
+      entry["agent_count"] = entry["agents"].length
+      blocks["total"] += 1
+      detect_member_block_stall(entry, happened)
+      true
+    end
+
+    # A class is a stall when the same wall is hit again after a re-dispatch
+    # (a NEW member — possibly under a re-declared work unit — hit it) while
+    # Root also advanced turns between the first and latest block. Turn
+    # advancement is a recorded FACT, not the stall criterion by itself; the
+    # cross-member repetition is. One bounded process check per NEW stall
+    # digest; the observation key is class-identity based, so repeated hits
+    # never pay per tool call.
+    def detect_member_block_stall(entry, happened)
+      return if entry["stalled"]
+
+      stalled = entry["agent_count"] >= 2 && entry["first_root_turn_id"].is_a?(String) &&
+                entry["last_root_turn_id"].is_a?(String) && entry["first_root_turn_id"] != entry["last_root_turn_id"]
+      entry["stalled"] = stalled
+      return unless stalled
+
+      digest = member_block_stall_digest
+      return if @state.dig("member_block_stall", "digest") == digest
+
+      stalled_classes = stall_classes_projection
+      @state["member_block_stall"] = {
+        "digest" => digest, "detected_at" => happened, "root_turn_advanced" => true,
+        "classes" => stalled_classes
+      }
+      @record.event("member_block_stall_detected", @state["member_block_stall"].except("digest"))
+      schedule_check(Time.now.to_f, "成员同阻断反复重派且Root活动无进展", trigger: "member_block_stall", kind: "process")
+    end
+
+    # Stall digest over class IDENTITIES and the stall fact only — counts,
+    # timestamps and dispatch identity churn must never mint a fresh check
+    # key for the same evidence.
+    def member_block_stall_digest
+      identities = Array(@state.dig("member_blocks", "classes")).map do |entry|
+        [entry["tool"], entry["reason"], entry["stalled"] == true]
+      end.sort
+      Digest::SHA256.hexdigest(JSON.generate({ "scope" => @state.dig("member_blocks", "scope"),
+                                               "classes" => identities }))
+    end
+
+    def stall_classes_projection
+      Array(@state.dig("member_blocks", "classes")).select { |entry| entry["stalled"] }.last(4).map do |entry|
+        entry.slice("tool", "reason", "count", "first_at", "last_at", "agent_count", "units",
+                    "dispatches", "dispatches_omitted")
+      end
+    end
+
+    # Bounded projection for Jev and the independent process check. Full
+    # identity survives: per-class agents, work units, member tool-call ids
+    # and dispatch times, plus the stall facts; only volume is capped with
+    # explicit omission counts.
+    def member_block_summary
+      blocks = @state["member_blocks"]
+      return nil unless blocks.is_a?(Hash) && Array(blocks["classes"]).any?
+
+      summary = { "scope" => { "input_digest" => blocks.dig("scope", 0), "artifact_root" => blocks.dig("scope", 1) },
+                  "total" => blocks["total"], "evicted_classes" => blocks["evicted_classes"],
+                  "classes" => Array(blocks["classes"]).map do |entry|
+                    entry.slice("tool", "reason", "count", "agents", "units", "dispatches",
+                                "dispatches_omitted", "first_at", "last_at", "stalled")
+                  end.last(8) }
+      stall = @state["member_block_stall"]
+      summary["stall"] = stall.slice("detected_at", "root_turn_advanced", "classes") if stall.is_a?(Hash)
+      summary
     end
 
     def collect_member_results
@@ -2196,6 +2548,31 @@ module Orbit
         "last_turn_status" => observed["last_turn_status"], "observations" => observed["observations"] }
     end
 
+    # Process checks supervise collaboration progress, not tool-call churn.
+    # The observation key keeps Root facts that are relevant supervision
+    # evidence (status, turn outcome) plus the stable dimensions: member
+    # states and the block CLASS identity set with stall facts. Per-turn ids,
+    # counts, timestamps and dispatch identity churn must not mint a fresh
+    # key — and a fresh paid check — for the same evidence. A new wall class,
+    # a stall transition, a changed member state, an open-finding change or a
+    # turn-outcome change still yields a new key; ordinary process
+    # supervision keeps its necessary new evidence.
+    def process_observation_host(host)
+      stalled = Array(@state.dig("member_blocks", "classes")).any? { |entry| entry["stalled"] }
+      member_material = Array(@state["members"]).map do |member|
+        stalled ? member.slice("status", "model_drift") : member.slice("thread_id", "status", "work_unit_id", "model_drift")
+      end
+      members_digest = Digest::SHA256.hexdigest(JSON.generate(
+        stalled ? member_material.uniq.sort_by { |entry| JSON.generate(entry) } : member_material
+      ))
+      blocks_digest = Array(@state.dig("member_blocks", "classes")).any? ? member_block_stall_digest : nil
+      answer = Array(host["observations"]).reverse.find { |entry| entry.is_a?(Hash) && entry["kind"] == "agent_message" }
+      { "status" => host["status"], "last_turn_status" => host["last_turn_status"],
+        "observations" => [{ "kind" => "member_states", "digest" => members_digest },
+                           { "kind" => "member_block_classes", "digest" => blocks_digest },
+                           { "kind" => "root_answer", "digest" => !stalled && answer ? Digest::SHA256.hexdigest(answer["text"].to_s) : nil }] }
+    end
+
     def task_delivery_for(snapshot, input_digest)
       delivery = @state["task_delivery"]
       return nil unless delivery.is_a?(Hash) && delivery["input_digest"] == input_digest &&
@@ -2230,7 +2607,7 @@ module Orbit
       end
       key = ObservationKey.build(
         input_digest: input_digest, artifact_root: artifact_root, artifact_digest: digest,
-        host: kind == "artifact" ? task_observation_host(host, input_digest) : host,
+        host: kind == "artifact" ? task_observation_host(host, input_digest) : process_observation_host(host),
         findings: @state.fetch("findings"), dispute: @state["dispute"],
         trigger: { "kind" => kind, "role" => role }
       )
@@ -2287,6 +2664,7 @@ module Orbit
           "task_git" => task_git, "findings" => @state.fetch("findings"),
           "recent_events" => recent_events, "check_history" => check_history_for(snapshot), "recheck" => clues,
           "execution_members" => @state["members"],
+          "member_blocks" => member_block_summary,
           "takeover" => takeover_context_projection,
           "decisions" => @state.fetch("decisions"), "dispute" => @state["dispute"],
           "model_selection" => @state.dig("jev", "delegation"),
