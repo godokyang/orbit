@@ -1,6 +1,6 @@
 # Orbit 当前限制
 
-最后核对：2026-10-02（源码 0.8.1；用户安装 0.8.0——见[交接](handoff.md)）。本页只列**当前仍影响用户的限制与未测范围**；已修复项、旧版本流水与已结束票据不在本页保留（`git show 3865b76:docs/plan/debt-ledger.md` 查阅历史）。逐项收口与证据＝[完成记录](../reference/mixed-model-delivery-completion-20261001.md)；现行行为以[合同](../../contracts/task-runtime.md)及 ADR-008/009 为准。
+最后核对：2026-10-02（源码 0.8.2；用户安装 0.8.0——见[交接](handoff.md)）。本页只列**当前仍影响用户的限制与未测范围**；已修复项、旧版本流水与已结束票据不在本页保留（`git show 3865b76:docs/plan/debt-ledger.md` 查阅历史）。逐项收口与证据＝[完成记录](../reference/mixed-model-delivery-completion-20261001.md)；现行行为以[合同](../../contracts/task-runtime.md)及 ADR-008/009 为准。
 
 | 限制 | 当前影响 | 解除条件 |
 | --- | --- | --- |
