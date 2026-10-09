@@ -1,0 +1,61 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="440" viewBox="0 0 1280 440" role="img" aria-labelledby="title desc">
+  <title id="title">Orbit — 协作实现，独立核验</title>
+  <desc id="desc">主 Agent 位于轨道中心，执行成员和独立检查者分别承担实现与核验。下方展示目标、分工、核验、交付。</desc>
+  <defs>
+    <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#0b1426"/><stop offset="1" stop-color="#18243b"/></linearGradient>
+    <radialGradient id="glow"><stop stop-color="#587eff" stop-opacity=".25"/><stop offset="1" stop-color="#587eff" stop-opacity="0"/></radialGradient>
+    <linearGradient id="core" x2="1" y2="1"><stop stop-color="#a9b9ff"/><stop offset="1" stop-color="#6786ff"/></linearGradient>
+    <marker id="arrow" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="m0 0 7 3.5-7 3.5" fill="#7190e1"/></marker>
+    <style>
+      text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif}
+      .label{font-size:15px;fill:#97aac8;letter-spacing:2px}.body{font-size:19px;fill:#c1cde1}.node{font-size:18px;font-weight:600;fill:#edf2ff}
+    </style>
+  </defs>
+  <rect width="1280" height="440" rx="22" fill="url(#bg)"/>
+  <circle cx="956" cy="195" r="235" fill="url(#glow)"/>
+  <path d="M48 320H1232" stroke="#2b3951"/>
+  <text x="54" y="66" class="label">OMP · TASK COLLABORATION · INDEPENDENT REVIEW</text>
+  <text x="51" y="151" font-size="74" font-weight="750" fill="#f5f7ff" letter-spacing="-3">Orbit</text>
+  <text x="54" y="205" font-size="29" font-weight="600" fill="#f5f7ff">把任务交给 Agent，把交付核验接回来。</text>
+  <text x="54" y="250" class="body">你提需求；主 Agent 分工与集成；独立 Agent 检查成果。</text>
+  <rect x="54" y="273" width="106" height="26" rx="13" fill="#24344f"/>
+  <text x="107" y="291" text-anchor="middle" font-size="13" fill="#bdcaff">原生 task/hub</text>
+  <rect x="172" y="273" width="106" height="26" rx="13" fill="#24344f"/>
+  <text x="225" y="291" text-anchor="middle" font-size="13" fill="#bdcaff">独立只读检查</text>
+  <rect x="290" y="273" width="106" height="26" rx="13" fill="#24344f"/>
+  <text x="343" y="291" text-anchor="middle" font-size="13" fill="#bdcaff">实际停止确认</text>
+  <ellipse cx="965" cy="176" rx="211" ry="126" fill="none" stroke="#334764"/>
+  <ellipse cx="965" cy="176" rx="153" ry="91" fill="none" stroke="#354668" stroke-dasharray="4 9"/>
+  <path d="M989 132 Q1054 77 1102 115" fill="none" stroke="#7190e1" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M1088 172 Q1072 249 1000 242" fill="none" stroke="#7190e1" stroke-width="2" marker-end="url(#arrow)"/>
+  <path d="M869 224 Q850 155 919 135" fill="none" stroke="#7190e1" stroke-width="2" marker-end="url(#arrow)"/>
+  <circle cx="959" cy="162" r="52" fill="url(#core)"/>
+  <circle cx="959" cy="162" r="66" fill="none" stroke="#7f9dff" stroke-opacity=".35"/>
+  <text x="959" y="156" text-anchor="middle" font-size="15" font-weight="600" fill="#172849">ROOT</text>
+  <text x="959" y="180" text-anchor="middle" font-size="20" font-weight="700" fill="#10213f">主 Agent</text>
+  <rect x="1051" y="106" width="164" height="66" rx="13" fill="#1d3447" stroke="#4baeb3"/>
+  <circle cx="1074" cy="130" r="4" fill="#72dcce"/>
+  <text x="1087" y="136" class="node">执行成员</text>
+  <text x="1072" y="156" font-size="13" fill="#91c9ce">有边界地承接实现</text>
+  <rect x="797" y="223" width="185" height="66" rx="13" fill="#342a3f" stroke="#c494be"/>
+  <circle cx="820" cy="248" r="4" fill="#eab6d4"/>
+  <text x="833" y="254" class="node">独立检查者</text>
+  <text x="818" y="274" font-size="13" fill="#d0acc7">核验成果 · 反馈问题</text>
+  <circle cx="789" cy="108" r="5" fill="#7d9afa"/><circle cx="1173" cy="225" r="4" fill="#83cfcc"/>
+  <g transform="translate(54 351)">
+    <circle cx="19" cy="20" r="19" fill="#263b61"/><text x="19" y="26" text-anchor="middle" font-size="17" font-weight="600" fill="#b3c5ff">1</text>
+    <text x="53" y="18" font-size="20" font-weight="600" fill="#eff4ff">记住目标</text><text x="53" y="43" font-size="15" fill="#97aac8">原要求与纠正可追溯</text>
+  </g>
+  <g transform="translate(354 351)">
+    <circle cx="19" cy="20" r="19" fill="#244547"/><text x="19" y="26" text-anchor="middle" font-size="17" font-weight="600" fill="#8de3d6">2</text>
+    <text x="53" y="18" font-size="20" font-weight="600" fill="#eff4ff">分工实现</text><text x="53" y="43" font-size="15" fill="#97aac8">主 Agent 负责整体集成</text>
+  </g>
+  <g transform="translate(654 351)">
+    <circle cx="19" cy="20" r="19" fill="#4b3549"/><text x="19" y="26" text-anchor="middle" font-size="17" font-weight="600" fill="#edbddb">3</text>
+    <text x="53" y="18" font-size="20" font-weight="600" fill="#eff4ff">独立核验</text><text x="53" y="43" font-size="15" fill="#97aac8">有问题就回原会话修正</text>
+  </g>
+  <g transform="translate(954 351)">
+    <circle cx="19" cy="20" r="19" fill="#493e2c"/><text x="19" y="26" text-anchor="middle" font-size="17" font-weight="600" fill="#edcd93">4</text>
+    <text x="53" y="18" font-size="20" font-weight="600" fill="#eff4ff">确认交付</text><text x="53" y="43" font-size="15" fill="#97aac8">有效终检与实际停止</text>
+  </g>
+</svg>

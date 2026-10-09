@@ -1,0 +1,58 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="640" viewBox="0 0 1280 640" role="img" aria-labelledby="title desc">
+  <title id="title">Orbit 会话与状态效果示意</title>
+  <desc id="desc">用户提出待办CLI需求；主Agent交接存储模块、集成验证，独立检查核验后完成。右侧列出交付、检查与停止状态。本图不是实测截图。</desc>
+  <defs>
+    <linearGradient id="bg" x2="1" y2="1"><stop stop-color="#edf0f8"/><stop offset="1" stop-color="#e4e9f4"/></linearGradient>
+    <style>
+      text{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI','PingFang SC','Microsoft YaHei',sans-serif}
+      .mono{font-family:'SFMono-Regular',Consolas,'Liberation Mono',monospace}.small{font-size:15px}.body{font-size:18px;fill:#d8e0ee}.muted{fill:#8f9eb8}
+    </style>
+  </defs>
+  <rect width="1280" height="640" rx="22" fill="url(#bg)"/>
+  <text x="40" y="46" font-size="20" font-weight="650" fill="#22324e">一次需求，协作实现，独立核验。</text>
+  <rect x="1137" y="24" width="103" height="29" rx="14.5" fill="#d4dced"/>
+  <text x="1188.5" y="44" text-anchor="middle" font-size="14" fill="#4b5e7c">界面示意</text>
+  <rect x="32" y="74" width="1216" height="522" rx="15" fill="#111b2c"/>
+  <path d="M47 74H1233Q1248 74 1248 89V124H32V89Q32 74 47 74Z" fill="#1e2b40"/>
+  <circle cx="58" cy="99" r="6" fill="#ff827b"/><circle cx="80" cy="99" r="6" fill="#edc47c"/><circle cx="102" cy="99" r="6" fill="#79caa4"/>
+  <text x="146" y="105" class="mono small" fill="#cbd7e9">orbit omp</text>
+  <text x="360" y="105" class="small muted">todo-cli / 当前会话</text>
+  <rect x="1089" y="86" width="135" height="26" rx="13" fill="#25473f"/>
+  <circle cx="1107" cy="99" r="4" fill="#88e0b7"/>
+  <text x="1119" y="105" font-size="13" fill="#a6ebc9">Orbit 任务已完成</text>
+  <path d="M836 125V540" stroke="#2d3a50"/>
+  <text x="60" y="161" font-size="14" font-weight="600" fill="#aabcf9">你 · 提出需求</text>
+  <text x="60" y="191" class="body">实现待办 CLI：添加、列出和完成任务。</text>
+  <text x="60" y="218" class="body">数据保存到本地，补齐测试和 README。</text>
+  <path d="M60 240H806" stroke="#26334b"/>
+  <text x="60" y="275" font-size="14" font-weight="600" fill="#94b1ff">主 Agent · 明确分工</text>
+  <text x="60" y="305" class="body">我先固定 CLI 接口，把存储模块交给实现成员。</text>
+  <text x="60" y="332" class="body">回报后由我集成、验证，并请求独立终检。</text>
+  <rect x="60" y="356" width="746" height="48" rx="8" fill="#18332f" stroke="#29574b"/>
+  <circle cx="82" cy="380" r="9" fill="#79cfaa"/><path d="m78 380 3 3 5-6" stroke="#163c2e" stroke-width="2" fill="none"/>
+  <text x="102" y="386" font-size="16" fill="#b8e5d2">执行成员：存储模块已返回，主 Agent 已集成并验证。</text>
+  <rect x="60" y="417" width="746" height="48" rx="8" fill="#292a42" stroke="#4a496c"/>
+  <circle cx="82" cy="441" r="9" fill="#bfb2e9"/><path d="m78 441 3 3 5-6" stroke="#352855" stroke-width="2" fill="none"/>
+  <text x="102" y="447" font-size="16" fill="#d6cee9">独立终检：当前快照的交付范围已核验。</text>
+  <text x="60" y="505" font-size="14" font-weight="600" fill="#87d6b0">主 Agent · 交付结果</text>
+  <text x="60" y="535" class="body">实现、测试与文档已交付，相关执行已确认停止。</text>
+  <text x="865" y="161" font-size="14" font-weight="650" fill="#aabcf9">任务概览</text>
+  <text x="865" y="196" font-size="23" font-weight="650" fill="#f1f5fb">待办 CLI</text>
+  <text x="865" y="226" class="small muted">原需求与修订 · 当前有效版本</text>
+  <rect x="862" y="250" width="354" height="74" rx="10" fill="#1d2e37"/>
+  <text x="881" y="277" class="small" fill="#9fbeb5">交付</text>
+  <text x="881" y="307" font-size="21" font-weight="650" fill="#a7e8c8">complete</text>
+  <text x="1027" y="306" class="small" fill="#c5dbd1">当前成果已核验</text>
+  <rect x="862" y="335" width="354" height="74" rx="10" fill="#232a42"/>
+  <text x="881" y="362" class="small" fill="#aaaed1">检查</text>
+  <text x="881" y="392" font-size="20" font-weight="650" fill="#d0c9f0">独立终检有效</text>
+  <text x="1050" y="391" class="small" fill="#b9bed8">固定快照 · 只读</text>
+  <rect x="862" y="420" width="354" height="74" rx="10" fill="#1c2c3f"/>
+  <text x="881" y="447" class="small" fill="#9aaeca">执行收尾</text>
+  <text x="881" y="477" font-size="20" font-weight="650" fill="#c2dbf4">停止已确认</text>
+  <text x="1040" y="476" class="small" fill="#b2c3d6">Root · 成员 · 后台</text>
+  <path d="M32 558H1248" stroke="#2d3a50"/>
+  <circle cx="57" cy="577" r="4" fill="#80d3ad"/>
+  <text x="71" y="583" class="small" fill="#b8e3cc">Orbit · complete · 当前交付已核验，相关执行已确认停止。</text>
+  <text x="40" y="623" font-size="13" fill="#718099">说明协作过程的示意图；实际终端提示、布局与任务状态以运行程序为准。</text>
+</svg>
