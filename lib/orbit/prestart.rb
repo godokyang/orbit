@@ -458,7 +458,7 @@ module Orbit
     def task_for(message_id)
       Dir.glob(File.join(@orbit_directory, "tasks/*/state.json")).filter_map do |path|
         state = JSON.parse(File.read(path))
-        [File.dirname(path), state] if state.dig("instruction_source", "id") == message_id
+        [File.dirname(path), state] if state.dig("instruction_source", "id") == message_id || state.dig("continuation", "source", "id") == message_id
       rescue JSON::ParserError, SystemCallError
         nil
       end.max_by { |_directory, state| state["created_at"].to_s }&.first

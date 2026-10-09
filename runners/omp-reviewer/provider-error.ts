@@ -31,7 +31,11 @@ export function providerErrorFact(message: unknown): ProviderErrorFact | undefin
 	// (pi-ai error/auth-classify.ts). Everything else stays unavailable —
 	// transient 429s, 5xx and unknown errors are never reported as auth/quota.
 	const auth = status === 401 || status === 403;
-	const kind = auth || isUsageLimitOutcome(status, text) ? "auth_or_quota" : "unavailable";
+	// Zenmux's evidenced 402 balance gate is not in the SDK usage-limit
+	// vocabulary. Preserve its account-level refusal across artifact changes;
+	// do not turn every informative 402 or a transient rate limit into quota.
+	const balanceGate = status === 402 && /\bbalance (?:greater than|above|>)\s*0\b/i.test(text ?? "");
+	const kind = auth || balanceGate || isUsageLimitOutcome(status, text) ? "auth_or_quota" : "unavailable";
 	const detail = `${status !== undefined ? `HTTP ${status}: ` : ""}${text?.trim() ?? "provider reported an error without detail"}`
 		.replace(/\s+/g, " ").trim().slice(0, 200);
 	return { kind, detail };

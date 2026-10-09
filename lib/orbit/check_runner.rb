@@ -21,6 +21,9 @@ module Orbit
   # bounded (see CONTEXT_BYTE_LIMIT): history facts that can still change a
   # verdict are kept, unbounded accumulation is not. The original instruction,
   # amendments and named basis are separate prompt sections and stay verbatim.
+  # Work-unit authorization and requirement declarations are verdict facts too:
+  # they are delivered whole and an unavoidable cut is marked in band, so a
+  # trimmed list is never presented as the complete declaration.
   class CheckRunner
     ROLES = %w[reviewer process_reviewer adjudicator].freeze
     VERDICTS = %w[continue correct pause complete needs_user].freeze
@@ -60,6 +63,9 @@ module Orbit
       decision_finding_limit: 30,
       member_limit: 25,
       member_result_list_limit: 10,
+      # Work-unit records and their declared authorization/requirement lists.
+      work_unit_limit: 40,
+      declared_list_limit: 64,
       omitted_id_limit: 50
     }.freeze
     # Ordered budget pressure at the hard byte cap: each level is cumulative
@@ -73,9 +79,14 @@ module Orbit
       "decision findings dropped"
     ].freeze
     CONTEXT_KEYS = %w[
-      root root_verifications task_delivery task_git review_focus findings recent_events check_history recheck execution_members decisions dispute
+      root root_verifications task_delivery task_git review_focus findings recent_events check_history recheck execution_members work_units decisions dispute
       estimate hard_deadline elapsed_seconds project_rules uncopied_entries
     ].freeze
+    # Declared authorization and requirement lists inside a work unit. A silent
+    # tail cut would turn a complete declaration into an apparently narrower
+    # one, so these lists are never tail-trimmed.
+    CONTEXT_DECLARED_LIST_FIELDS = %w[allowed_paths allowed_tools allowed_commands].freeze
+    CONTEXT_WORK_UNIT_DECLARED_FIELDS = %w[requirements].freeze
     CONTEXT_FINDING_FIELDS = %w[id requirement evidence action status check].freeze
     # review_focus is a current-input clue from the fixed snapshot diff, not
     # history: the bounded added/modified/deleted path lists the runtime
@@ -190,6 +201,13 @@ module Orbit
       unless amendments.empty?
         parts << "## Amendments (latest valid input, apply in order)\n\n#{render_items(amendments, 'Amendment')}"
       end
+      if inputs["continuation"]
+        parts << "## Native continuation message (verbatim)\n\n" \
+                 "A new supervised task follows a confirmed stopped task. The original delivery above remains the goal; " \
+                 "this genuine newer message authorizes the current continuation and resolves older pause intent when it asks to proceed. " \
+                 "It does not retroactively supervise the gap or make answering status the whole delivery.\n\n" \
+                 "#{inputs.fetch('continuation').fetch('text')}"
+      end
       unless basis.empty?
         parts << "## Named basis (verbatim)\n\n#{render_items(basis, 'Basis')}"
       end
@@ -206,9 +224,20 @@ module Orbit
       parts << "## Current execution context (program record)\n\n" \
                "This record is deterministic and bounded: long strings keep a prefix plus " \
                "`…[original length:sha256]`, growing lists keep their newest entries, and " \
-               "context_compression, findings_omitted, recheck_omitted, review_focus_omitted and " \
+               "context_compression, findings_omitted, recheck_omitted, review_focus_omitted, " \
+               "work_units_omitted and " \
                "check_history.recent_omitted record what was trimmed. The original instruction, amendments " \
                "and named basis above are complete and are not compressed.\n\n" \
+               "`work_units` is the authorization record. Each unit's declared scope lists " \
+               "(allowed_paths, allowed_tools, allowed_commands) and its declared requirements keep their " \
+               "declaration order and are never tail-trimmed. Two in-band marks mean a declaration is not " \
+               "complete: a list cut at its own cap ends with an `{\"incomplete\": true, …}` entry carrying its " \
+               "declared and omitted counts, and an over-long single entry keeps a bounded prefix followed by " \
+               "`…[declared length:sha256]`. A unit named in work_units_omitted is not delivered at all, and " \
+               "if context_compression reports that the program context was omitted, the authorization record " \
+               "is missing entirely. None of these is a complete declaration: never conclude that a member " \
+               "exceeded its authorization, and never treat a path, tool or permission boundary as proven, " \
+               "from a prefixed entry or from an incomplete, omitted or degraded permission record.\n\n" \
                "`check_history` lists program-computed facts about earlier checks on this task: the anchor is " \
                "the EARLIEST valid artifact review of the CURRENT input on the real artifact root — it keeps its own " \
                "historical artifact_digest (any edit changes the current digest, so an edited artifact never evicts " \
@@ -282,7 +311,8 @@ module Orbit
         compressed = bound_value(context, CONTEXT_CAPS.merge(string_cap: 500, list_limit: 20))
         return compressed if context_bytes(compressed) <= CONTEXT_BYTE_LIMIT
 
-        { "context_compression" => "context array exceeded #{CONTEXT_BYTE_LIMIT} bytes" }
+        { "context_compression" => "context array exceeded #{CONTEXT_BYTE_LIMIT} bytes; " \
+                                   "any work-unit permission facts in it are not delivered" }
       when String
         bound_raw_context(context)
       else
@@ -306,8 +336,12 @@ module Orbit
         break if reduce_caps(caps) == caps
       end
 
-      # Last resort: still a valid JSON object, never a partial document.
-      { "context_compression" => "program context omitted: it did not fit in #{CONTEXT_BYTE_LIMIT} bytes" }
+      # Last resort: still a valid JSON object, never a partial document. It
+      # names the missing authorization record, so no verdict can rest on a
+      # permission fact this record never carried.
+      { "context_compression" => "program context omitted: it did not fit in #{CONTEXT_BYTE_LIMIT} bytes; " \
+                                 "the work-unit authorization record is NOT delivered, so no permission " \
+                                 "boundary or overreach can be judged from it" }
     end
 
     # Bounded check-history projection. The current-input anchor and a bounded
@@ -370,6 +404,11 @@ module Orbit
       compressed["recheck"] = recheck
       compressed["recheck_omitted"] = recheck_omitted if recheck_omitted
       compressed["execution_members"] = compress_members(context["execution_members"], caps, level.zero?)
+      if context.key?("work_units")
+        units, units_omitted = compress_work_units(context["work_units"], caps)
+        compressed["work_units"] = units
+        compressed["work_units_omitted"] = units_omitted if units_omitted
+      end
       compressed["decisions"] = recent_tail(context["decisions"], caps[:decision_limit]).map do |decision|
         compress_decision(decision, caps, level < 4)
       end
@@ -513,6 +552,70 @@ module Orbit
         end
         compressed
       end
+    end
+
+    # Work units are the authorization record the checker verifies against the
+    # original declaration. The declared scope lists and requirement
+    # references are kept whole at every degradation level; whole units are
+    # selected within a bounded count, and dropped units are counted and
+    # identified instead of disappearing.
+    def compress_work_units(units, caps)
+      return [bound_value(units, caps), nil] unless units.is_a?(Array)
+
+      limit = caps[:work_unit_limit]
+      kept = units.last(limit)
+      [kept.map { |unit| compress_work_unit(unit, caps) },
+       omission_record(units[0...(units.length - kept.length)].map { |unit| unit_identifier(unit) }, caps)]
+    end
+
+    def unit_identifier(unit)
+      return unit.to_s unless unit.is_a?(Hash)
+
+      (unit["id"] || unit["work_unit_id"] || unit["objective"]).to_s
+    end
+
+    def compress_work_unit(unit, caps)
+      return bound_value(unit, caps) unless unit.is_a?(Hash)
+
+      unit.each_with_object({}) do |(key, value), fields|
+        name = key.to_s
+        fields[name] =
+          if name == "scope" && value.is_a?(Hash)
+            compress_declared_lists(value, caps, CONTEXT_DECLARED_LIST_FIELDS)
+          elsif CONTEXT_WORK_UNIT_DECLARED_FIELDS.include?(name) && value.is_a?(Array)
+            compress_declared_list(value, name, caps)
+          else
+            bound_value(value, caps)
+          end
+      end
+    end
+
+    def compress_declared_lists(declared, caps, fields)
+      declared.each_with_object({}) do |(key, value), bounded|
+        name = key.to_s
+        bounded[name] = if fields.include?(name) && value.is_a?(Array)
+                          compress_declared_list(value, name, caps)
+                        else
+                          bound_value(value, caps)
+                        end
+      end
+    end
+
+    # A declared list keeps its declaration order and every entry; only a
+    # single oversized entry keeps a bounded prefix plus `…[length:sha256]`.
+    # A list cut at its own cap is marked in band (declared vs delivered count
+    # and a digest over the omitted entries), so a partial list can never be
+    # read as the complete declaration and no overreach verdict can rest on an
+    # omission.
+    def compress_declared_list(list, field, caps)
+      bounded = list.map { |entry| bound_value(entry, caps) }
+      limit = caps[:declared_list_limit]
+      return bounded if bounded.length <= limit
+
+      kept = bounded.first(limit)
+      kept + [{ "incomplete" => true, "field" => field, "declared_count" => list.length,
+                "omitted_count" => list.length - kept.length,
+                "omitted_sha256" => Digest::SHA256.hexdigest(JSON.generate(bounded.drop(kept.length))) }]
     end
 
     def compress_decision(decision, caps, keep_findings)
@@ -797,7 +900,13 @@ module Orbit
         "Only delivery items must be verified before that sequence can start. Test execution is never lifecycle. " \
         "Empty findings, Root claims and Jev calibration are not coverage. Identify " \
         "the file facts you actually read and distinguish them from attributed verification receipts: your " \
-        "read-only session cannot run tests. The program's root_verifications, when present, are actual native " \
+        "read-only session cannot run tests. A visual or UI requirement is verified only by an image you " \
+        "actually read: reading an image file in the fixed snapshot returns the picture itself and states the " \
+        "snapshot path, byte count and sha256 that were read. A screenshot name, path or description written " \
+        "by the Root, a member or a report is not independent visual evidence, and neither is a promise to " \
+        "provide one. If the read did not deliver the picture (the tool reports that, or you never read the " \
+        "image), that requirement stays unverified and you must not report complete or a ready delivery for " \
+        "it. The program's root_verifications, when present, are actual native " \
         "tool receipts: retain their original identities and bindings, inspect artifact_matches and input_matches, " \
         "and assess whether the command and reported exit/output support this requirement. Missing, failed, " \
         "truncated or artifact-mismatched receipts cannot prove an executed successful test. An input mismatch " \

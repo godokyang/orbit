@@ -23,7 +23,8 @@ module Orbit
         summarize(dir, TaskView.current_state(TaskRecord.new(dir)))
       end.sort_by { |task| [task.fetch("created_at"), task.fetch("id")] }
       counts = %w[checks stale_checks manual_checks process_checks failed_checks jev_assessments
-                  correction_sent findings members model_evidence_requests].to_h do |key|
+                  correction_sent findings members model_evidence_requests observation_skips jev_failures
+                  continuation_sent continuation_work_observed].to_h do |key|
         [key, tasks.any? { |task| task[key].nil? } ? nil : tasks.sum { |task| task.fetch(key) }]
       end
       known = tasks.sum { |task| task["checker_tokens_observed"] }
@@ -57,6 +58,10 @@ module Orbit
         "process_checks" => checks.count { |check| check["kind"] == "process" },
         "failed_checks" => events_complete ? event_counts["check_failed"] : nil,
         "jev_assessments" => events_complete ? event_counts["jev_assessed"] : nil,
+        "jev_failures" => events_complete ? event_counts["jev_unavailable"] : nil,
+        "observation_skips" => events_complete ? event_counts["check_duplicate_skipped"] : nil,
+        "continuation_sent" => events_complete ? event_counts["unfinished_task_continuation_sent"] : nil,
+        "continuation_work_observed" => events_complete ? event_counts["unfinished_task_continuation_work_observed"] : nil,
         "correction_sent" => events_complete ? event_counts["correction_sent"] : nil,
         "model_evidence_requests" => events_complete ? event_counts["model_evidence_needed"] : nil,
         "findings" => checks.flat_map { |check| Array(check.dig("result", "findings")) }

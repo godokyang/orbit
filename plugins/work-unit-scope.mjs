@@ -501,7 +501,7 @@ export async function validateMemberTool(unit, { toolName, input, rootAgentId, e
 // .git/.orbit, and inside the member's allowed paths (members read nothing
 // else — Root must place materials under an allowed path first). options.cwd
 // is the caller-verified workspace, used only when unit.artifact_root is absent.
-export async function validateWorkUnitPreflight(unit, { materials = unit?.input_materials ?? [], cwd } = {}) {
+export async function validateWorkUnitPreflight(unit, { materials = unit?.input_materials ?? [], cwd, availableTools } = {}) {
   try {
     const { root, allowed } = await resolveUnitScope({ ...unit, artifact_root: unit?.artifact_root ?? cwd });
     const tools = unit.scope?.allowed_tools ?? [];
@@ -517,6 +517,12 @@ export async function validateWorkUnitPreflight(unit, { materials = unit?.input_
       throw new Error('allowed_commands are declared without the bash tool entrance; add bash to allowed_tools or drop the commands');
     if (tools.includes('bash') && !commands.length)
       throw new Error('bash has no allowed_commands and cannot execute; declare complete commands or remove bash before dispatch');
+    if (tools.includes('bash') && !availableSandbox())
+      throw new Error('the bounded command sandbox is unavailable; Root must run commands instead of dispatching an unexecutable unit');
+    if (Array.isArray(availableTools)) {
+      const missing = tools.filter(name => !['hub', 'yield'].includes(name) && !availableTools.includes(name));
+      if (missing.length) throw new Error(`required native tools are unavailable: ${missing.join(', ')}; Root must provide the capability or take over`);
+    }
     if (!Array.isArray(materials)) throw new Error('invalid materials list');
     for (const material of materials) {
       if (typeof material !== 'string' || !material || material.startsWith('~') || material.includes('\0') ||

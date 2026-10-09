@@ -106,7 +106,7 @@ module Orbit
       if initial_selection.is_a?(Hash) && initial_selection["judgment_provider"]
         @state["usage"]["jev_checker_selection"] ||= initial_selection["usage"]
       end
-      @state["last_user_message_id"] ||= @state.dig("instruction_source", "id")
+      @state["last_user_message_id"] ||= @state.dig("continuation", "source", "id") || @state.dig("instruction_source", "id")
       @interval = @state.fetch("review").fetch("interval_seconds", 300)
       @next_check = Time.now.to_f + @interval
       @state["next_check_basis"] ||= "约定检查间隔"
@@ -167,12 +167,14 @@ module Orbit
             stop("Orbit runtime failed: #{@state['error']}", status: "failed")
           else
             @state["status"] = "failed"
+            synchronize_terminal_readiness("failed")
             save
           end
         end
       rescue StandardError => error
         @state["status"] = "failed"
         @state["error"] = "#{error.class}: #{error.message}"
+        synchronize_terminal_readiness("failed")
         @record.event("runtime_error", "error" => @state["error"])
         save
       ensure
@@ -369,6 +371,7 @@ module Orbit
         @state["usage"]["root_session_cumulative"] = event.dig("params", "tokenUsage", "total")
       end
       return unless collect_amendments
+      observe_continuation_progress(host)
       refresh_completion_readiness!(now)
       if @running_check
         begin
@@ -1082,6 +1085,9 @@ module Orbit
     end
 
     def add_amendment(text, source)
+      return if source["kind"] == "native_user_message" && @state.fetch("amendments").any? do |item|
+        item["source"] == source && File.read(File.join(@record.path, item["path"])) == text
+      end
       relative = "amendments/#{@state.fetch('amendments').length + 1}.txt"
       @record.write(relative, text)
       @state["amendments"] << { "path" => relative, "source" => source, "at" => Time.now.utc.iso8601 }
@@ -1383,6 +1389,11 @@ module Orbit
         return { "thread_id" => id, "error" => "stop_member unconfirmed", "confirmation" => result, "registration_status" => member["status"] }
       end
       member["stop_confirmation"] = result
+      member["execution_status"] = "stopped"
+      if result["registry_status"]
+        member["registry_status_before_stop"] = member["registry_status"]
+        member["registry_status"] = result["registry_status"]
+      end
       { "thread_id" => id, "confirmation" => result }
     end
 
@@ -2488,6 +2499,10 @@ module Orbit
         # skipped again, so no separate scan cursor is needed.
         internal = message["internal"] || @state["sent_message_ids"].include?(message.fetch("id"))
         next if internal
+        if @state.fetch("amendments").any? { |item| item.dig("source", "id") == message.fetch("id") }
+          @state["last_user_message_id"] = message.fetch("id")
+          next
+        end
         # A new question is not an amendment. Only the explicit amend
         # command changes the checked input; leave the native message in
         # the Root session for it to assign to this task or handle separately.
@@ -2509,6 +2524,7 @@ module Orbit
       return false if id.nil?
 
       id == @state.dig("instruction_source", "id") ||
+        id == @state.dig("continuation", "source", "id") ||
         @state.fetch("sent_message_ids").include?(id) ||
         @state.fetch("amendments").any? { |amendment| amendment.dig("source", "id") == id }
     end
@@ -2869,6 +2885,11 @@ module Orbit
     # replaces a blocked model; an in-flight checker is never switched.
     def apply_review_model(command, now)
       model = command.fetch("model").to_s.strip
+      recovery = command["recovery_evidence"].to_s.strip
+      if Array(@state.dig("review", "auth_or_quota_models")).include?(model) && recovery.empty?
+        @record.event("review_model_rejected", "model" => model, "reason" => "account/quota refusal has no recovery evidence")
+        return
+      end
       unless model.match?(%r{\A[^\s/]+/[^\s]+\z})
         @record.event("review_model_rejected", "reason" => "model must be provider/id")
         return
@@ -2893,7 +2914,8 @@ module Orbit
       persistent = @state["review"]["auth_or_quota_models"]
       if persistent&.include?(model)
         persistent.delete(model)
-        @record.event("auth_or_quota_model_recovered_by_review_model", "model" => model)
+        @record.event("auth_or_quota_model_retry_authorized", "model" => model,
+                      "recovery_evidence" => recovery, "source" => "Root_declaration", "recovery_verified_by_program" => false)
       end
       if @state.dig("review", "blocked")
         @state["review"].delete("blocked")
@@ -3244,8 +3266,59 @@ module Orbit
         stop(result.fetch("reason"), status: "needs_user")
       when "continue"
         send_correction(result.merge("findings" => accepted_findings), scope: scope, current_digest: current_digest) if host["status"] == "idle" && !accepted_findings.empty?
+        continue_unfinished_task(scope, result, current_digest, now) if accepted_findings.empty?
       end
       save
+    end
+
+    # A clean review is not a reason to leave authorized work idle. Wake only
+    # a provably idle, task-attributed Root, once for the reviewed version.
+    # Acceptance of the message and subsequent native work are separate facts.
+    def continue_unfinished_task(scope, result, current_digest, now)
+      return unless scope["role"] == "reviewer" && scope["kind"] == "artifact" && !scope["manual"]
+      return if result.fetch("delivery").fetch("ready") || !result.fetch("findings").empty?
+      return unless %w[starting running].include?(@state["status"]) && @state["recheck"].nil? &&
+                    @state["findings"].values.none? { |finding| finding["status"] == "open" }
+      return if @state["next_check_manual"] || @state["pending_finalization"] || @state["completion_stop_pending"]
+      host = @connection.state
+      return unless host["status"] == "idle" && host["last_turn_status"] == "completed" &&
+                    host["active_tools"] == 0 && async_jobs_settled?(host) && !host["interrupted"] &&
+                    task_turn_attributed?(host) && members_settled?
+      return unless scope["input_digest"] == @record.input_digest(@state) &&
+                    scope["artifact_root"] == artifact_root && current_digest == fingerprint_artifact
+      key = Digest::SHA256.hexdigest(JSON.generate([artifact_root, scope["input_digest"], current_digest]))
+      attempts = (@state["continuation_notices"] ||= {})
+      return if attempts[key]
+
+      attempt = { "check" => scope["number"], "at" => Time.at(now).utc.iso8601,
+                  "status" => "attempted", "input_digest" => scope["input_digest"],
+                  "tool_calls_before" => Array(host["root_verifications"]).filter_map { |r| r["tool_call_id"] } }
+      attempts[key] = attempt
+      save
+      sent = @connection.send_message("Orbit 检查没有发现新问题，但原任务还未交付：#{result.dig('delivery', 'reason')}。" \
+        "请沿原始要求和有效修订执行下一步；缺必要输入就向用户问清具体缺口。先简短说明结果和下一步，然后实际执行，不要只回复会继续、轮询检查或等待已停止成员。")
+      attempt.merge!("status" => "accepted", "message_id" => sent.fetch("id"))
+      @state["sent_message_ids"] << sent.fetch("id")
+      @record.event("unfinished_task_continuation_sent", attempt.slice("check", "message_id", "input_digest"))
+    rescue StandardError => error
+      attempt&.merge!("status" => "unconfirmed", "error" => error.message)
+      @record.event("unfinished_task_continuation_unconfirmed", "error" => error.message)
+      save
+    end
+
+    def observe_continuation_progress(host)
+      (@state["continuation_notices"] || {}).each_value do |attempt|
+        next unless attempt["status"] == "accepted" && attempt["input_digest"] == @record.input_digest(@state)
+        receipt = Array(host["root_verifications"]).find do |r|
+          r.is_a?(Hash) && r["tool_call_id"] && !attempt["tool_calls_before"].include?(r["tool_call_id"]) &&
+            r["task_directory"] == @record.path && r["input_digest"] == attempt["input_digest"]
+        end
+        next unless receipt
+
+        attempt.merge!("status" => "work_observed", "tool_call_id" => receipt["tool_call_id"])
+        @record.event("unfinished_task_continuation_work_observed", attempt.slice("check", "message_id", "tool_call_id"))
+        save
+      end
     end
 
     # The current fixed artifact can disprove an older manual not_ready
@@ -3375,6 +3448,8 @@ module Orbit
       @state.delete("pending_finalization")
       unless @state["finalization_notices"][key]
         text = "Orbit 最终检查通知（不是用户的新要求）：这次检查没有发现待解决的问题，但任务尚未完成。" \
+               "先整理本任务的原生 TODO：仅将已核验的交付和终检标为完成，移除已失效的 queued/blocked 等待项。" \
+               "不要把异步停止确认留成会触发自动续执行的 TODO；实际停止由 Orbit 状态行确认，尚未验收的内容不得勾完。" \
                "如果实现和本地验证已经完成，当前助手请调用本会话的 Orbit 工具 action=stop, intent=complete, task=<当前任务目录>，再正常结束本轮回复。" \
                "不要运行 shell/CLI 的 orbit stop：它只会暂停任务，已暂停任务不能再申请完成。" \
                "Orbit 会在回复结束后核对当前文件、要求和协作成员，确认停止后才记录完成；" \
@@ -3743,6 +3818,7 @@ module Orbit
         end
         @state["status"] = final_status
         @state["stop_reason"] = reason
+        synchronize_terminal_readiness(final_status)
         # A confirmed stop leaves no stale failure diagnostics behind; the
         # invalidation path above keeps its frame (final_status is
         # stop_unconfirmed there).
@@ -3768,6 +3844,7 @@ module Orbit
         finalize_unconfirmed_stop_diagnostics(diagnostics, detail)
         @state["status"] = "stop_unconfirmed"
         @state["stop_reason"] = reason
+        synchronize_terminal_readiness("stop_unconfirmed")
         @state["error"] = detail
         @record.event("stop_unconfirmed", "reason" => reason, "error" => detail)
         mark_terminal_ask_interrupts!
@@ -3778,6 +3855,17 @@ module Orbit
     def record_cleanup_error(error)
       @state["cleanup_error"] = error.message
       @state["unconfirmed_check_run"] = "checks/#{@running_check.fetch('number')}/run.json" if @running_check
+    end
+
+    def synchronize_terminal_readiness(status)
+      previous = @state["completion_readiness"] || {}
+      @state["completion_readiness"] = previous.merge(
+        "status" => status == "complete" ? "complete" : status == "stop_unconfirmed" ? "stop_unconfirmed" : "stopped",
+        "prior_status" => previous["status"],
+        "reason" => status == "complete" ? "独立终检及停止确认通过" : @state["stop_reason"])
+      %w[completion_stop_pending pending_finalization next_check_at next_check_basis next_check_trigger next_check_kind next_check_manual].each do |key|
+        @state.delete(key)
+      end
     end
 
     def verify_prior_check_exit

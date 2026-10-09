@@ -137,6 +137,103 @@ module CheckRunnerContextTest
     check(compressed["root_verifications_omitted"].nil?, "no omission is reported when nothing was dropped")
   end
 
+  # The live 2026-10-08 case: a unit declared six allowed paths and five tools,
+  # but the checker received only the last two of each because the generic array
+  # bound tail-trimmed the permission lists once byte pressure halved
+  # list_limit; rounds then read the docs-only residue as the whole declaration.
+  def zeen_work_unit
+    {
+      "id" => "wu-fdd4ca1e7a005a28", "status" => "bound",
+      "objective" => "第四批个人资料与多卡创建编辑分享既有完整旅程 UI 优化",
+      "requirements" => ["动态方括号路由遇作用域拒绝时准备新鲜 patch 给 Root。",
+                         "只编辑分配页面和对应既有行为测试。"],
+      "scope" => {
+        "allowed_paths" => ["apps/mobile", "docs/research/mobile.md", "docs/design",
+                            "docs/design/redesign-proposal.md", "docs/product/v1-spec.md", "docs/agents"],
+        "allowed_tools" => %w[read grep glob edit write],
+        "allowed_commands" => []
+      },
+      "acceptance" => "现有完整用户行为迁移到已确认布局，报告修改与未验状态。",
+      "artifact_root" => "/tmp/zeen"
+    }
+  end
+
+  def check_work_unit_declarations_survive_degraded_caps
+    unit = zeen_work_unit
+    caps = Orbit::CheckRunner::CONTEXT_CAPS.merge(list_limit: 2)
+    bounded = runner.send(:build_compressed_context, { "work_units" => [unit], "root" => {} }, caps, 4)
+    delivered = JSON.parse(runner.send(:render_context, bounded))["work_units"].first
+    scope = delivered["scope"]
+    check(scope["allowed_paths"] == unit["scope"]["allowed_paths"],
+          "the declared allowed paths survive a degraded list budget without tail trimming")
+    check(scope["allowed_tools"] == unit["scope"]["allowed_tools"],
+          "the declared allowed tools survive a degraded list budget without tail trimming")
+    check(delivered["requirements"] == unit["requirements"],
+          "the declared requirement references survive a degraded list budget")
+    check((scope["allowed_paths"] + scope["allowed_tools"]).none? { |entry| entry.is_a?(Hash) },
+          "a declaration delivered whole carries no incomplete marker")
+    prompt = runner.send(:build_prompt, snapshot: "/unused", inputs: { "instruction" => "do it" },
+                         context: { "work_units" => [unit], "root" => {} }, role: "adjudicator")
+    check(prompt.include?("never conclude that a member exceeded its authorization"),
+          "the adjudicator prompt rules out an overreach verdict from an incomplete permission record")
+
+    long = "a/#{'p' * 5_000}.rb"
+    long_unit = zeen_work_unit
+    long_unit["scope"]["allowed_paths"] = [long]
+    delivered_long = JSON.parse(runner.send(:render_context, runner.send(
+      :build_compressed_context, { "work_units" => [long_unit], "root" => {} }, caps, 4
+    )))
+    entry = delivered_long["work_units"].first["scope"]["allowed_paths"].first
+    check(entry.start_with?(long[0, Orbit::CheckRunner::CONTEXT_STRING_CAP]) &&
+          entry.include?("…[#{long.length}:"),
+          "an over-long declared entry keeps a bounded prefix and an explicit length/sha256 marker")
+    check(entry != long && entry.length < long.length,
+          "a prefixed declared entry is not delivered as the complete declared value")
+  end
+
+  def check_dropped_declarations_are_explicit
+    unit = zeen_work_unit
+    caps = Orbit::CheckRunner::CONTEXT_CAPS.merge(declared_list_limit: 3, work_unit_limit: 1)
+    context = { "work_units" => [unit.merge("id" => "wu-old"), unit], "root" => {} }
+    delivered = JSON.parse(runner.send(:render_context,
+                                       runner.send(:build_compressed_context, context, caps, 4)))
+    marker = delivered["work_units"].last["scope"]["allowed_paths"].last
+    check(marker.is_a?(Hash) && marker["incomplete"] == true && marker["field"] == "allowed_paths" &&
+          marker["declared_count"] == 6 && marker["omitted_count"] == 3 && marker["omitted_sha256"].length == 64,
+          "a declaration cut at its own cap is marked incomplete with counts and digest")
+    omitted = delivered["work_units_omitted"]
+    check(omitted["count"] == 1 && omitted["ids"] == ["wu-old"] && omitted["ids_sha256"].length == 64,
+          "a dropped work unit is counted and identified instead of disappearing")
+    check(JSON.generate(delivered).bytesize <= Orbit::CheckRunner::CONTEXT_BYTE_LIMIT,
+          "the marked declaration still fits the hard byte cap")
+
+    base = Orbit::CheckRunner::CONTEXT_CAPS
+    reduced = runner.send(:reduce_caps, base)
+    check(reduced[:work_unit_limit] == 20 && reduced[:declared_list_limit] == 32,
+          "the new declaration caps take part in every degradation step")
+    floor = base.keys.to_h { |key| [key, key == :omitted_id_limit ? base[key] : 1] }
+    check(runner.send(:reduce_caps, floor) == floor,
+          "the degradation ladder converges at its floor instead of halving forever")
+
+    flood = (1..60).map do |i|
+      unit = zeen_work_unit.merge("id" => format("wu-%03d", i), "objective" => "unit #{i}")
+      unit["scope"] = unit["scope"].merge(
+        "allowed_paths" => (1..20).map { |j| format("src/long/path-%03d-%03d-%s.rb", i, j, "x" * 200) }
+      )
+      unit
+    end
+    record = JSON.parse(context_json({ "work_units" => flood, "root" => {} }))
+    check(JSON.generate(record).bytesize <= Orbit::CheckRunner::CONTEXT_BYTE_LIMIT,
+          "an oversized authorization record still renders inside the hard byte cap")
+    if record["work_units"].nil?
+      check(record["context_compression"].to_s.include?("authorization record is NOT delivered"),
+            "a context that cannot carry the authorization record states that explicitly")
+    else
+      check(record["work_units"].last["scope"]["allowed_paths"].is_a?(Array),
+            "delivered work units keep their declared permission lists")
+    end
+  end
+
   def long_text(marker, size = 4_000)
     "#{marker}-start-" + ("x" * size) + "-#{marker}-tail"
   end
@@ -210,6 +307,8 @@ module CheckRunnerContextTest
     check_non_hash_context_is_bounded
     check_check_history_stays_bounded_and_traceable
     check_takeover_projection_stays_side_by_side
+    check_work_unit_declarations_survive_degraded_caps
+    check_dropped_declarations_are_explicit
     current_execution_receipts_survive_degraded_caps
     root_verifications_keep_order_when_they_fit
     puts "CHECK_RUNNER_CONTEXT_TEST_PASS (deterministic)"

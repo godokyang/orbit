@@ -948,7 +948,7 @@ fixture do |root, record, _host, _checker, _runtime|
   runtime.tick(now: now + 6)
   assert(record.state.dig("review", "blocked", "type") == "selection_undecided" &&
          checker.calls.length == 3, "all failed candidates block without replaying the same model")
-  record.submit("review_model", "model" => "zhipu/glm-5", "reason" => "Root explicitly re-tries this model")
+  record.submit("review_model", "model" => "zhipu/glm-5", "reason" => "Root explicitly re-tries this model", "recovery_evidence" => "Same-route call succeeded after account repair; receipt local/recovery-1")
   checker.failure_message = nil
   runtime.tick(now: now + 7)
   assert(checker.calls.length == 4 && record.state.dig("review", "blocked").nil? &&
@@ -1044,7 +1044,10 @@ fixture do |root, record, _host, _checker, _runtime|
   assert(record.state.dig("review", "auth_or_quota_models") == ["zhipu/glm-5", "openai/gpt-6-astra"] &&
          record.state.dig("review", "blocked", "type") == "selection_undecided",
          "two structured auth_or_quota failures block with both models recorded task-scoped")
-  record.submit("review_model", "model" => "zhipu/glm-5", "reason" => "Root explicitly re-tries this model")
+  record.submit("review_model", "model" => "zhipu/glm-5", "reason" => "Retry without recovery")
+  runtime.tick(now: now + 5.5)
+  assert(record.state.dig("review", "auth_or_quota_models").include?("zhipu/glm-5"), "naming a model alone never clears its account refusal")
+  record.submit("review_model", "model" => "zhipu/glm-5", "reason" => "Root explicitly re-tries this model", "recovery_evidence" => "Same-route call succeeded after account repair; receipt local/recovery-1")
   checker.failure_message = nil
   runtime.tick(now: now + 6)
   runtime.tick(now: now + 7)
@@ -1460,6 +1463,68 @@ fixture do |_root, record, host, checker, runtime|
          "Root's explicit stop after the notice records completion")
   assert(File.read(File.join(record.path, "events.jsonl")).include?("completed_via_finalized_stop"),
          "completion still goes through the finalized stop path")
+end
+
+# Native corrections retain the original goal and attribute the subsequent
+# reply to the amended version; unrelated questions cannot replace delivery.
+fixture(host_class: RuntimeBoundaryHost) do |_root, record, host, checker, runtime|
+  now = Time.now.to_f
+  correction = host.post_user_message("Change second behavior")
+  record.submit("amend", "text" => correction["text"], "source" => { "kind" => "native_user_message", "id" => correction["id"] })
+  runtime.tick(now: now)
+  host.finish("corrected-delivery")
+  host.instance_variable_get(:@state).merge!("last_turn_user_message_id" => correction["id"],
+    "observations" => [{ "kind" => "agent_message", "text" => "Both behaviors delivered with the correction" }])
+  checker.result = answer("continue")
+  runtime.tick(now: now + 1)
+  runtime.tick(now: now + 2)
+  assert(record.inputs["instruction"].include?("first and second"), "the original goal survives correction")
+  assert(record.inputs["amendments"].last["text"] == correction["text"] &&
+    record.state.dig("task_delivery", "turn_id") == "corrected-delivery", "native corrected delivery belongs to the valid version")
+  unrelated = host.post_user_message("What is UTC?")
+  host.finish("independent-answer")
+  host.instance_variable_get(:@state)["last_turn_user_message_id"] = unrelated["id"]
+  runtime.tick(now: now + 3)
+  assert(record.state.dig("task_delivery", "turn_id") == "corrected-delivery" && record.state["amendments"].length == 1,
+    "independent questions do not amend or replace task delivery")
+end
+
+# A clean unfinished review wakes an idle Root once, and only native work
+# counts as progress. Busy tools, pauses and independent questions cannot wake.
+fixture do |_root, record, host, checker, runtime|
+  now = Time.now.to_f
+  observed = host.instance_variable_get(:@state)
+  observed.merge!("active_tools" => 0, "async_jobs" => { "running" => [] },
+                  "last_turn_user_message_id" => "original", "root_verifications" => [])
+  runtime.tick(now: now)
+  checker.result = answer("continue", delivery_ready: false, delivery_reason: "Second behavior still needs implementation")
+  runtime.tick(now: now + 1)
+  assert(events(record).any? { |e| e["type"] == "unfinished_task_continuation_sent" }, "unfinished review wakes the idle Root")
+  assert(!events(record).any? { |e| e["type"] == "unfinished_task_continuation_work_observed" }, "send acceptance is not execution")
+  observed["root_verifications"] = [{ "tool_call_id" => "next-edit", "task_directory" => record.path,
+                                     "input_digest" => record.input_digest }]
+  runtime.tick(now: now + 2)
+  assert(events(record).any? { |e| e["type"] == "unfinished_task_continuation_work_observed" }, "native work is observed separately")
+  host.finish("followup-answer")
+  observed = host.instance_variable_get(:@state)
+  observed.merge!("active_tools" => 0, "async_jobs" => { "running" => [] }, "last_turn_user_message_id" => "original")
+  record.submit("check")
+  runtime.tick(now: now + 3)
+  checker.result = answer("continue", delivery_ready: false)
+  runtime.tick(now: now + 4)
+  assert(events(record).count { |e| e["type"] == "unfinished_task_continuation_sent" } == 1, "manual not-ready does not repeat automatic wake")
+end
+
+fixture do |_root, record, host, checker, runtime|
+  now = Time.now.to_f
+  host.instance_variable_get(:@state).merge!("active_tools" => 1, "async_jobs" => { "running" => [] })
+  runtime.tick(now: now)
+  checker.result = answer("continue", delivery_ready: false)
+  runtime.tick(now: now + 1)
+  assert(!events(record).any? { |e| e["type"] == "unfinished_task_continuation_sent" }, "in-flight tools are never woken twice")
+  host.interrupt
+  runtime.tick(now: now + 2)
+  assert(record.state["status"] == "paused" && record.state.dig("completion_readiness", "status") == "stopped", "pause retires queued readiness")
 end
 
 # A delivered answer that receives a clean automatic artifact check still

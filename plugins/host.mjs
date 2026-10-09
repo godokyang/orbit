@@ -36,17 +36,19 @@ export const toolDescription = 'Start Orbit for multi-step work or when the user
 export const toolArgs = z => ({
         action: z.enum(['context', 'start', 'status', 'check', 'amend', 'dispute', 'stop', 'review-model', 'work-unit', 'root-model']),
         task: z.string().optional().describe('Required for status/check/amend/dispute/stop/work-unit/review-model/root-model: the exact task_directory returned by start.'),
-        basis: z.array(z.string()).optional(), message_id: z.string().optional().describe('Native user message id selecting the original instruction for start.'),
+        basis: z.array(z.string()).optional(), message_id: z.string().optional().describe('start: native user message id selecting the original instruction; amend: the exact native user correction id, required explicitly. A progress question is a continuation source, never an amendment.'),
         review_model: z.string().optional().describe('Optional Root-selected provider/id from the current OMP model catalog.'),
+        recovery_evidence: z.string().optional().describe('review-model only: for a model with a recorded account/quota refusal, cite an actual account recovery or successful same-route call before retry. A new artifact or model name alone is not recovery.'),
+        resume_from: z.string().optional().describe('start only: exact stopped task_directory for continuing the SAME delivery after answering the user. Uses the preserved original instruction and amendments, creates a new supervised boundary, and never revives stopped members. Explicit pause/discussion/cancel wins; unrelated questions never resume.'),
         root_model: z.string().optional().describe('root-model only: exact provider/id from the CURRENT user pool ∩ OMP catalog for this session. The action can be called without it to list the exact IDs now available.'),
         phase: z.enum(['execution', 'integration', 'diagnosis']).optional().describe('root-model only: which stage the selected model is for. An intent declaration, not a capability measurement.'),
 
         intent: z.enum(['complete', 'pause']).optional().describe('stop only: complete (default) requires the actual finalization gate; pause is an explicit interruption.'),
         operation: z.enum(['declare', 'read', 'list', 'finish', 'select']).optional().describe('work-unit operation; declare records a bounded handoff and returns member selection before dispatch; select refreshes relevant facts using the existing assessment cache; finish records Root verification.'),
-        work_unit: z.record(z.string(), z.unknown()).optional().describe('declare payload types: {spec:{objective:non-empty string, requirements:non-empty string[], allowed_paths/allowed_tools/allowed_commands:string[] (at least one non-empty), acceptance:non-empty string, escalation:non-empty string, optional context:string, decisions:string[], input_materials:string[] of existing project files accessible through allowed_paths, dependencies:string[] of existing unit ids}}. Paths/tools/commands are flat allowed_* fields inside spec, never nested scope. allowed_paths is the member\'s entire accessible path set (read and write share it): read-only specs/tests/dependencies must be listed there too, or their necessary facts go into context; it grants no automatic read-only protection. allowed_commands must be complete commands, matched verbatim — never prefixes. bash requires explicit allowed_commands. Skills, MCP or external files are not automatic member entrances; prepare needed facts in context or project input_materials before declaring. Delegate units need actual tool entrances and bounded paths; invalid declarations return a concrete repair before selection or dispatch. Remaining optional spec fields: execution (root|delegate, default delegate; declare Root integration work as root so it never occupies member selection), model_requirements (object). read/finish use id; finish also needs status,result,verification.'),
+        work_unit: z.record(z.string(), z.unknown()).optional().describe('declare payload types: {spec:{objective:non-empty string, requirements:non-empty string[], allowed_paths/allowed_tools/allowed_commands:string[] (at least one non-empty), acceptance:non-empty string, escalation:non-empty string, optional context:string, decisions:string[], input_materials:string[] of existing project files accessible through allowed_paths, dependencies:string[] of existing unit ids}}. Paths/tools/commands are flat allowed_* fields inside spec, never nested scope. allowed_paths is the member\'s entire accessible path set (read and write share it): read-only specs/tests/dependencies must be listed there too, or their necessary facts go into context; it grants no automatic read-only protection. allowed_commands must be complete commands, matched verbatim — never prefixes. bash requires explicit allowed_commands. Skills, MCP or external files are not automatic member entrances; prepare needed facts in context or project input_materials before declaring. Delegate units need actual tool entrances and bounded paths; invalid declarations return a concrete repair before selection or dispatch. Remaining optional spec fields: execution (root|delegate, default delegate; declare Root integration work as root so it never occupies member selection), model_requirements ({relevant_indices: [coding_index|agentic_index|intelligence_index], required_input_modalities: [text|image], required_parameters: [tools], ...}; declare only task-relevant indices, leave unclassified tasks unknown). fresh without prior may mean missing relevant_indices; facts_only is not a recommendation. Explain task-related reasons for accepting a hint or selecting a model yourself and honor explicit user model preferences. read/finish use id; finish needs {id, status:accepted|rejected|failed, result:non-empty string, verification:non-empty string}. Root units may finish without member binding; accepted records Root verification, not independent final acceptance.'),
         takeover: z.object({ reason: z.string(), prior_scope: z.string().optional() }).optional()
           .describe('Take over an already-executed original requirement via start: say why (reason) and optionally declare the prior execution scope (prior_scope). The artifact digest and supervision start time are captured by the program, never supplied here.'),
-        text: z.string().optional().describe('amend: the amendment text — a user-authorized requirement revision only; never a way to submit test results or completion evidence (verified execution enters checks through real Root tool receipts). stop: the reason text.'), check_in: z.number().int().positive().optional()
+        text: z.string().optional().describe('amend: exact native user correction text, or omit it to fetch the original; user-authorized requirement revisions only, never progress or independent questions; never a way to submit test results or completion evidence (verified execution enters checks through real Root tool receipts). stop: the reason text.'), check_in: z.number().int().positive().optional()
       });
 
 // Shared transport and task operations for native plugin hosts. Each adapter
@@ -100,7 +102,12 @@ export function createOrbitHost({ provider, project, dispatch, bind, reset }) {
         if (closing) throw new Error('Agent host is closing');
         const id = await bind(context);
         await listen();
-        if (a.action === 'context') return JSON.stringify({ ready: true, provider, project, thread_id: id, task_directory: tasks.get(id)?.task_directory || null });
+        if (a.action === 'context') {
+          const latest = (await dispatch({ method: 'messages', session: id })).filter(m => !m.internal).at(-1);
+          return JSON.stringify({ ready: true, provider, project, thread_id: id,
+            task_directory: tasks.get(id)?.task_directory || null,
+            native_user_message_id: latest?.id || latest?.item_id || null });
+        }
         if (a.action === 'start') {
           const previous = tasks.get(id);
           if (previous) {
@@ -131,6 +138,15 @@ export function createOrbitHost({ provider, project, dispatch, bind, reset }) {
           if (!original) throw new Error('No original native user message found');
           const chosen = a.review_model?.trim();
           const args = ['start', '--provider', provider, '--project', project, '--thread', id, '--socket', socket, '--message-id', original.id];
+          if (a.resume_from) {
+            const old = JSON.parse(await fs.readFile(path.join(await fs.realpath(a.resume_from), 'state.json'), 'utf8'));
+            if (old.connection?.provider !== provider || old.connection?.thread_id !== id ||
+                await fs.realpath(old.project_root) !== await fs.realpath(project))
+              throw new Error('Continuation must belong to this native Root session and project');
+            if (old.status !== 'paused' || old.stop_confirmation?.confirmed !== true)
+              throw new Error('Continuation needs a confirmed stopped task; clean up unconfirmed work first');
+            args.push('--resume-from', await fs.realpath(a.resume_from));
+          }
           if (chosen) args.push('--review-model', chosen);
           if (a.entry_file) args.push('--entry-file', a.entry_file);
           if (a.check_in) args.push('--check-in', String(a.check_in));
@@ -181,10 +197,19 @@ export function createOrbitHost({ provider, project, dispatch, bind, reset }) {
         if (a.action === 'stop' && a.intent !== 'pause') args.push('--complete');
         if (a.action === 'review-model') {
           args.push('--model', a.review_model.trim());
+          if (a.recovery_evidence) args.push('--recovery-evidence', a.recovery_evidence);
         }
         if (a.action === 'amend') {
+          if (!a.message_id) throw new Error('Provide the native user correction message_id explicitly; action=context reports the latest native user id. Only amend an actual requirement correction, never a progress question.');
+          const users = (await dispatch({ method: 'messages', session: id })).filter(m => !m.internal);
+          const revision = users.find(m => m.id === a.message_id || m.item_id === a.message_id);
+          if (!revision) throw new Error('No native user amendment found');
+          if (a.text !== undefined && a.text !== revision.text)
+            throw new Error('Use the original native user correction verbatim; do not replace it with a Root summary');
+          a = { ...a, text: revision.text };
           if (!a.text?.trim()) throw new Error('Provide the original amendment');
           args.push('--file', '-');
+          args.push('--message-id', revision.id);
         } else if (a.text) args.push('--reason', a.text);
         const result = await run(args, project, a.text);
         if (a.action === 'status' && !terminal.has(result.status)) result.next_action = guidance;

@@ -1,13 +1,12 @@
 # Orbit 当前限制
 
-最后核对：2026-10-02（源码 0.8.2；用户安装 0.8.0——见[交接](handoff.md)）。本页只列**当前仍影响用户的限制与未测范围**；已修复项、旧版本流水与已结束票据不在本页保留（`git show 3865b76:docs/plan/debt-ledger.md` 查阅历史）。逐项收口与证据＝[完成记录](../reference/mixed-model-delivery-completion-20261001.md)；现行行为以[合同](../../contracts/task-runtime.md)及 ADR-008/009 为准。
+最后核对：2026-10-09（源码 0.8.3；实际安装身份见[交接](handoff.md)，本轮不更新用户全局安装）。本页只列**当前仍影响用户的限制与未测范围**；已修复项、旧版本流水与已结束票据不在本页保留（`git show 3865b76:docs/plan/debt-ledger.md` 查阅历史）。逐项收口与证据＝[完成记录](../reference/mixed-model-delivery-completion-20261001.md)；现行行为以[合同](../../contracts/task-runtime.md)及 ADR-008/009 为准。
 
 | 限制 | 当前影响 | 解除条件 |
 | --- | --- | --- |
 | 程序 integration 选型 live 未触发 | 实现已装并经确定性验证；真实运行从未进入其前提（manual-ready 窗口＋真实 resolved finding）。注意区分：Root 的 `root-model` 工具选模不受该前提约束，其 live 未触发只因为没有运行需要换型 | 真实路径出现后核验；不人为制造，非完工门 |
 | 非 stale process finding→纠正→恢复组合未实测 | 共用送达路径源码完整且 artifact 孪生已 live（033）；组合自然分支未出现 | 真实路径出现后核验；不加证明门 |
 | Root 停止自有 queued marker 分支仅确定性证据 | 0.7.37 修复经 gate 验证；真实搁浅 marker 现场未再出现 | 真实路径出现后核验 |
-| 工作单 finish 回执未列出有效状态 | review-dedup 的 Root 盲试 completed/verified/passed 等值，现有效值是 accepted/rejected/failed；源码与 CLI 会拒绝无效值，但工具说明/错误恢复不足 | 取得此新增问题的修复授权后补充说明；本次不扩改接口或状态语义 |
 | 检查者 SDK 18.4.9 暂存源码修正 | 官方包 sdk.ts 的 ratchet/prelude 导入被 Bun 解析成同名 .js 注入脚本；安装器仅对实际 18.4.9 的已核实一行显式指明 .ts，用户宿主不变，差异已由 OMP2 独立核实 | 上游修复且实际目标版本验证通过后删除此版本限定修正，不扩展 SDK fork |
 | park/dispose 后退出不可证实 | 已完成成员 park 后失去 session；不能把 idle、cancel 回执当退出，保留 `stop_unconfirmed` | 上游提供 dispose 完成信号并验证 |
 | 上游 provider/控制钩子缺口 | `devin-agent` 类不触发 `before_provider_request`；部分异常不能可靠 fail-close；单成员编程 kill、已 park 工作与保留名碰撞受上游接口限制 | 实证最小缺失接口后按 ADR-008 跟进，不预维护 Fork |
@@ -17,7 +16,7 @@
 | 整次任务费用与现金归属 unknown | 失败检查 usage、Root/成员归属、实际路由价格、订阅消耗与**现金/实际扣减**仍可能未知；交叉单价不能判总成本；`cash []` 只表示未知不是 0 成本；账户／OAuth 归属可得性按各任务原件报告范围区分 | 不新增结论；有第一方可信来源时按合同口径核实 |
 | 选型/收益效果的有限范围 | W9 单任务配对：旗舰 observed 0 vs 7、其他角色开销更高（unknown 分列）——单任务范围；更早 pair4 对照为负（+134.665%）保留不改判；域外泛化未证 | 真实任务自然累积；不宣称普遍节省 |
 | 独立检查投入较高 | 历史样本数万至数十万 input token；同质两臂质量无差异但经济收益未证明 | 同条件比较整体交付/返工/核验/人工投入后按需压缩 |
-| OpenRouter 映射覆盖不全 | shipped 6 条映射 loader 实测 6/6；GLM、Go V4 等池身份未映射；测量日期/方法多数 unknown；映射命中不是费用或路由质量证明 | 补第一方来源映射并核实测量日期；无全型号认证门 |
+| OpenRouter 映射覆盖不全 | 已审计映射及同具体型号／有标记基础降级已接线并有界实测；歧义、冲突和未匹配身份仍 unknown；测量日期/方法多数 unknown，映射命中不是费用或路由质量证明 | 补第一方来源映射并核实测量日期；无全型号认证门 |
 | 工作区冲突不自动暂停检查 | 程序不检测 Root 声明产物位置与绑定冲突 | 单独明确检测与暂停语义并取得真实路径证据 |
 | 语义同义 finding 不自动合并 | 依赖检查者复用已有 id，不猜不同 id 语义相同 | 有实际重复误报证据后再定显式对照方案 |
 

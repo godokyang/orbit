@@ -64,7 +64,7 @@ module Orbit
 
     COMMAND_HELP = {
       "omp" => "orbit omp [OMP 原生参数]\n启动原版 OMP 并用 -e 显式加载 Orbit 扩展；模型、profile、工具、权限、恢复与消息参数原样交给 OMP，其他扩展照常加载，退出码照常返回。普通 omp 不加载 Orbit。",
-      "status" => "orbit status [TASK] [--json]\n省略 TASK 时查当前项目；多任务列出 ID。没有待处理任务时显示最近结束记录。",
+      "status" => "orbit status [TASK] [--json|--details]\n默认简述结果和下一步；--details 显示诊断。省略 TASK 时查当前项目；多任务列出 ID。没有待处理任务时显示最近结束记录。",
       "session-summary" => "orbit session-summary --thread ID [--project DIR]\n只读汇总该项目同一原生 OMP 会话下的任务与检查/纠偏/Jev 次数；JSON 输出。缺失事件日志或用量保持 unknown/null，不读或导出原生会话正文，不调用模型、不修改任务。",
       "stop" => "orbit stop [TASK] [--reason TEXT] [--json]\n只定位唯一待处理任务；多任务先用 orbit status 查看，再传 ID。请求入队不代表停止已确认。",
       "doctor" => "orbit doctor [TASK] [--json]\n只读检查环境、安装和已有任务记录；通过所选已有任务或当前会话验证连接，不调用模型，不验证登录或额度。",
@@ -244,7 +244,11 @@ module Orbit
 
     def status(argv)
       json = false
-      OptionParser.new { |parser| parser.on("--json") { json = true } }.parse!(argv)
+      details = false
+      OptionParser.new do |parser|
+        parser.on("--json") { json = true }
+        parser.on("--details") { details = true }
+      end.parse!(argv)
       raise ArgumentError, "usage: orbit status [TASK] [--json]" if argv.length > 1
       records = TaskView.select(argv.first, settled: true)
       if json
@@ -253,7 +257,7 @@ module Orbit
       elsif records.empty?
         puts "当前项目还没有 Orbit 任务。进入项目，向 Agent 提出执行要求即可。"
       elsif records.length == 1
-        puts TaskView.format(records.first)
+        puts(details ? TaskView.format(records.first) : TaskView.brief(records.first))
       else
         puts "当前项目有多个待处理任务：\n#{TaskView.list(records)}\n查看或停止一个任务：orbit status ID / orbit stop ID（ID 可用唯一前缀）。"
       end
@@ -369,6 +373,7 @@ module Orbit
         opts.on("--foreground") { options[:foreground] = true }
         opts.on("--entry-file FILE") { |value| options[:entry_file] = value }
         opts.on("--takeover-file FILE") { |value| options[:takeover_file] = value }
+        opts.on("--resume-from TASK_DIRECTORY") { |value| options[:resume_from] = value }
       end
       parser.parse!(argv)
       raise ArgumentError, "unexpected arguments: #{argv.join(' ')}" unless argv.empty?
@@ -381,6 +386,19 @@ module Orbit
         raise ArgumentError, "takeover reuses the requirement's original native message; --prompt-file cannot take over"
       end
       entry_document = entry_trace(options[:entry_file]) if options[:entry_file]
+      resumed = nil
+      if options[:resume_from]
+        raise ArgumentError, "continuation needs a native initiating message and its own boundary" if options[:prompt_file] || takeover || entry_document
+        old = TaskRecord.new(File.realpath(options[:resume_from]))
+        old_state = old.state
+        unless old_state["project_root"] == File.realpath(options[:project]) &&
+               old_state["connection"].slice("provider", "thread_id") == { "provider" => options[:provider], "thread_id" => options[:thread] } &&
+               old_state["status"] == "paused" && old_state.dig("stop_confirmation", "confirmed") == true
+          raise ArgumentError, "continuation requires this Root's confirmed stopped task in the same project"
+        end
+        resumed = { record: old, state: old_state, inputs: old.inputs(old_state) }
+        takeover = { "reason" => "用户在停止后续接原任务；旧任务终态保留，不追认监督空档或迁入旧成员、检查、用量" }
+      end
       if options[:estimate].values.compact.any? { |value| !value.positive? || !value.finite? }
         raise ArgumentError, "estimates must be positive finite numbers"
       end
@@ -406,7 +424,15 @@ module Orbit
           previous = PrestartLedger.new(File.realpath(options[:project])).task_for(message.fetch("id"))
           raise ArgumentError, "this native message already has an Orbit task: #{previous}" if previous
         end
-        options[:model], options[:selection] = select_checker_model(options[:model], connection, options[:project], instruction)
+        if resumed
+          continuation_source = source
+          continuation_text = instruction
+          instruction = resumed[:inputs].fetch("instruction")
+          source = resumed[:state].fetch("instruction_source")
+          options[:basis] = resumed[:state].fetch("basis").map { |item| File.join(resumed[:record].path, item.fetch("path")) }
+        end
+        selection_instruction = resumed ? ([instruction] + resumed[:inputs].fetch("amendments").map { |item| item.fetch("text") }).join("\n\n--- amendment ---\n\n") : instruction
+        options[:model], options[:selection] = select_checker_model(options[:model], connection, options[:project], selection_instruction)
       ensure
         connection.close
       end
@@ -422,12 +448,34 @@ module Orbit
             project_root: options[:project], instruction: instruction, source: source,
             connection: connection_record,
             review: { "model" => options[:model], "interval_seconds" => options[:interval], "selection" => options[:selection] },
-            basis: options[:basis], estimate: options[:estimate], takeover: takeover
+            basis: options[:basis], estimate: options[:estimate], takeover: takeover,
+            artifact_root: resumed && (resumed[:state].dig("workspace", "artifact_root") || resumed[:state].fetch("project_root"))
           )
         rescue WorkspaceSnapshot::Error => error
           raise ArgumentError, "the takeover boundary could not be captured (#{error.message}); no task was created"
         end
       state = record.state
+      if resumed
+        boundary = state.delete("takeover")
+        record.write("continuation-message.txt", continuation_text)
+        state["continuation"] = { "previous_task" => resumed[:state].fetch("id"), "source" => continuation_source,
+                                  "reason" => boundary.fetch("reason"),
+                                  "message_path" => "continuation-message.txt",
+                                  "starts_at" => boundary.fetch("supervision").fetch("starts_at"),
+                                  "artifact" => boundary.fetch("artifact"),
+                                  "supervision_gap_recognized_as_controlled" => false,
+                                  "imported_members_checks_usage" => false }
+        state["basis"] = state["basis"].map.with_index do |item, index|
+          item.merge("source" => resumed[:state].fetch("basis")[index].fetch("source"),
+                     "inherited_from_task" => resumed[:state].fetch("id"))
+        end
+        state["amendments"] = resumed[:state].fetch("amendments").map.with_index do |item, index|
+          relative = "amendments/#{index + 1}.txt"
+          record.write(relative, resumed[:inputs].fetch("amendments")[index].fetch("text"))
+          item.merge("path" => relative, "inherited_from_task" => resumed[:state].fetch("id"))
+        end
+        record.event("task_continuation_started", state["continuation"])
+      end
       takeover_block = state["takeover"]
       state["hard_deadline"] = options[:deadline] if options[:deadline]
       # The pre-start entry decision that led here (orbit entry → extension
@@ -674,6 +722,7 @@ module Orbit
       OptionParser.new do |parser|
         parser.on("--model MODEL") { |value| options["model"] = value }
         parser.on("--reason TEXT") { |value| options["reason"] = value }
+        parser.on("--recovery-evidence TEXT") { |value| options["recovery_evidence"] = value }
       end.parse!(argv)
       directory = argv.shift
       raise ArgumentError, "usage: orbit review-model TASK_DIRECTORY --model provider/id" if directory.nil? || !argv.empty?
@@ -683,6 +732,9 @@ module Orbit
       record = TaskRecord.new(directory)
       state = record.state
       raise ArgumentError, "task process has ended; records are retained" if TaskRuntime::TERMINAL.include?(state["status"])
+      if Array(state.dig("review", "auth_or_quota_models")).include?(model) && options["recovery_evidence"].to_s.strip.empty?
+        raise ArgumentError, "this model has a recorded account/quota refusal; provide --recovery-evidence describing an actual recovery before retry"
+      end
 
       connection = Connection.open(state.fetch("connection"))
       begin
@@ -697,7 +749,8 @@ module Orbit
       end
       reason = options["reason"].to_s.strip
       reason = "Root selected another OMP checker model" if reason.empty?
-      id = record.submit("review_model", "model" => model, "reason" => reason)
+      id = record.submit("review_model", "model" => model, "reason" => reason,
+                         "recovery_evidence" => options["recovery_evidence"])
       puts JSON.generate({ "task_directory" => record.path, "command_id" => id, "status" => "queued", "model" => model })
       0
     end
@@ -938,6 +991,7 @@ module Orbit
       OptionParser.new do |parser|
         parser.on("--reason TEXT") { |value| options["reason"] = value }
         parser.on("--file FILE") { |value| options["file"] = value }
+        parser.on("--message-id ID") { |value| options["message_id"] = value } if command == "amend"
         parser.on("--json") { options["json"] = true } if command == "stop"
         # Internal: the Orbit Root tool marks a deliberate post-finalization
         # completion hand-off. Plain CLI stops never set it.
@@ -992,7 +1046,20 @@ module Orbit
       end
       if command == "amend"
         file = options.fetch("file") { raise ArgumentError, "--file is required" }
-        options = { "text" => read_input(file), "source" => { "kind" => "explicit_text", "file" => file } }
+        text = read_input(file)
+        source = { "kind" => "explicit_text", "file" => file }
+        if (message_id = options["message_id"])
+          connection = Connection.open(record.state.fetch("connection"))
+          begin
+            connection.connect!
+            message = connection.user_message(id: message_id)
+            raise ArgumentError, "amendment must match the original native user message" unless message.fetch("text") == text
+            source = { "kind" => "native_user_message", "id" => message.fetch("id") }
+          ensure
+            connection.close
+          end
+        end
+        options = { "text" => text, "source" => source }
         raise ArgumentError, "instruction is empty" if options["text"].strip.empty?
       elsif command == "dispute" && options["reason"].to_s.strip.empty?
         raise ArgumentError, "--reason is required"

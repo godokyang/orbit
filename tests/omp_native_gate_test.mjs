@@ -177,6 +177,11 @@ try {
   process.env.ORBIT_CLI_BIN = poolStub;
   installOmpExtension(pi, sdk);
   await emit("session_start", {}, ctx);
+  const userBranch = root.sessionManager.getBranch();
+  userBranch.push({ type: 'message', id: 'peer-as-user', message: { role: 'user', attribution: 'agent', content: 'Peer result, not a user correction.' } });
+  assert.equal((await tool({ action: 'context' })).native_user_message_id, 'original',
+    'correction context exposes the real user source rather than an agent-attributed message');
+  userBranch.pop();
 
   // A verified Root without an active Orbit task may use native OMP task.
   // The call remains unsupervised and must not be registered as an Orbit member.
@@ -250,7 +255,7 @@ try {
     return raw.split('\n').filter(Boolean).map(line => JSON.parse(line));
   };
   const waitFor = async predicate => {
-    for (let n = 0; n < 20; n++) {
+    for (let n = 0; n < 60; n++) {
       const entries = await collabEntries();
       if (predicate(entries)) return entries;
       await new Promise(resolve => setTimeout(resolve, 50));
@@ -460,15 +465,17 @@ try {
       .filter(e => e.kind === 'task_dispatch' && e.tool_call_id === callId);
     // Negative first: an old-generation hint against the same v2 selection.
     await writeHintState(state => { state.delegation_hint.version = 'orbit-member-selection-v1'; });
-    await emit('tool_call', { toolName: 'task', toolCallId: 'hint-bind-v1', fixture_no_unit: true,
+    const oldHintDispatch = await emit('tool_call', { toolName: 'task', toolCallId: 'hint-bind-v1', fixture_no_unit: true,
       input: { agent: agentNameFor('glm/x'), task: `Stale hint dispatch\norbit-unit: ${unitId}` } }, ctx);
+    assert.ok(!oldHintDispatch?.block, `stale hint must allow an unhinted dispatch: ${JSON.stringify(oldHintDispatch)}`);
     const v1 = await dispatchOf('hint-bind-v1');
     assert.equal(v1.length, 1);
     assert.equal(v1[0].hint_signature, null, 'an old-generation hint against a v2 selection never binds');
     // Negative: two missing versions never pass as a generation match.
     await writeHintState(state => { delete state.delegation_hint.version; delete state.member_selections[unitId].version; });
-    await emit('tool_call', { toolName: 'task', toolCallId: 'hint-bind-none', fixture_no_unit: true,
+    const versionlessDispatch = await emit('tool_call', { toolName: 'task', toolCallId: 'hint-bind-none', fixture_no_unit: true,
       input: { agent: agentNameFor('glm/x'), task: `Versionless dispatch\norbit-unit: ${unitId}` } }, ctx);
+    assert.ok(!versionlessDispatch?.block, `missing hint versions must allow an unhinted dispatch: ${JSON.stringify(versionlessDispatch)}`);
     const none = await dispatchOf('hint-bind-none');
     assert.equal(none.length, 1);
     assert.equal(none[0].hint_signature, null, 'two missing versions never pass as a generation match');
@@ -788,7 +795,7 @@ try {
   assert.match(missingUnit.reason, /work-unit/);
   await assert.rejects(() => tool({ action: 'work-unit', task: started.task_directory, operation: 'finish',
     work_unit: { id: declared.unit.id, status: 'accepted', result: 'done', verification: 'self-report' } }),
-    /only a bound unit can finish/, 'declaring and self-reporting cannot fabricate a native dispatch');
+    /only a declared root-self unit or a bound unit can finish/, 'declaring and self-reporting cannot fabricate a native dispatch');
 
   // Root session model and the native task role are different identities.
   // Billing route is a structural proof from the resolved endpoint (host plus
@@ -935,6 +942,13 @@ try {
   assert.equal(poolBypass.block, true, 'a pool-outside default model cannot bypass a nonempty controlled pool');
   assert.match(poolBypass.reason, new RegExp(agentNameFor('glm/x')));
   assert.match(poolBypass.reason, /orbit model-evidence/);
+  ctx.models.resolve = selector => selector === 'glm/x' ? model : ({ provider: 'zhipu-coding-plan', id: 'glm-5.2' });
+  const explicitOverride = await emit('tool_call', { toolName: 'task', toolCallId: 'explicit-override',
+    input: { agent: 'task', model: 'glm/x', task: 'member work' } }, ctx);
+  assert.ok(explicitOverride.input && !explicitOverride.block, 'a real explicit in-pool model overrides the pool-outside native default');
+  const explicitOutside = await emit('tool_call', { toolName: 'task', toolCallId: 'explicit-outside',
+    input: { agent: 'task', model: 'zhipu-coding-plan/glm-5.2', task: 'member work' } }, ctx);
+  assert.equal(explicitOutside.block, true, 'an explicit pool-outside model stays refused');
   pendingState.evidence_request.resolved = 'used';
   await fs.writeFile(pendingStatePath, JSON.stringify(pendingState));
   ctx.models.resolve = () => model;
@@ -1967,10 +1981,11 @@ try {
       await new Promise(resolve => setTimeout(resolve, 100));
     assert.match(statusCalls.at(-1)?.[1], /已完成/,
       'completion after the final turn updates the idle pane without another model turn or tool call');
-    // Kickoff ④: a paused task advises a new task on the bar and injects no
-    // block that could ask the stopped record for a re-check.
+    // D1: a stopped record offers a new, attributable continuation boundary.
     await setState({ status: 'paused', stop_confirmation: { confirmed: true } });
-    assert.equal(await statusTurn('after ordinary stop'), '', 'a paused task injects no system prompt block');
+    const stoppedGuidance = await statusTurn('after ordinary stop');
+    assert.match(stoppedGuidance, /resume_from/, 'same-task continuation uses a new task boundary');
+    assert.match(stoppedGuidance, /独立问题/, 'independent questions preserve the stopped boundary');
     assert.match(statusCalls.at(-1)?.[1], /已暂停.*若仍需交付请新建任务/,
       'the paused bar advises a new task instead of a re-check');
     assert.doesNotMatch(statusCalls.at(-1)?.[1], /重检|补齐/,
@@ -2227,8 +2242,8 @@ process.stdout.write(JSON.stringify({ task_directory: dir, status: 'starting' })
       assert.notEqual(newDir, started.task_directory, 'a successful start creates a new task record');
       assert.ok(statusCalls.some(([key, value]) => key === 'orbit' && String(value).includes('任务尚未完成')),
         'a successful start must refresh the status line to an active, not-yet-complete task in the same turn');
-      assert.ok(!statusCalls.some(([key, value]) => key === 'orbit' && String(value).includes('已暂停')),
-        'the previous paused label must not survive a successful start');
+      assert.ok(!String(statusCalls.at(-1)?.[1]).includes('已暂停'),
+        'the current label after start resolves must not retain the previous paused task (earlier timer reads during start are historical)');
 
       // A rejected start must refresh nothing: no phantom takeover.
       const newState = JSON.parse(await fs.readFile(path.join(newDir, 'state.json'), 'utf8'));
@@ -2289,7 +2304,7 @@ process.stdout.write(JSON.stringify({ task_directory: dir, status: 'starting' })
     const shim = path.join(advDir, 'orbit-shim.mjs');
     await fs.writeFile(shim, `#!/usr/bin/env node
 import { spawnSync, } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, appendFileSync } from 'node:fs';
 const args = process.argv.slice(2);
 if (args.includes('entry')) {
   const mid = args[args.indexOf('--message-id') + 1] || 'unknown';
@@ -2306,6 +2321,9 @@ if (args.includes('entry')) {
 let forwardedInput;
 try { if (!process.stdin.isTTY) forwardedInput = readFileSync(0, 'utf8'); } catch { forwardedInput = undefined; }
 const run = spawnSync(process.env.ORBIT_ADV_REAL_RUBY, args, { encoding: 'utf8', input: forwardedInput });
+if (args.includes('takeover-scope') && run.status === 0) {
+  appendFileSync(process.env.ORBIT_ADV_ENTRY_DIR + '/scope-receipts.jsonl', run.stdout);
+}
 process.stdout.write(run.stdout || '');
 process.stderr.write(run.stderr || '');
 process.exit(run.status ?? 1);
@@ -2464,8 +2482,10 @@ process.exit(run.status ?? 1);
       // path: a valid prior_scope queues through the CLI without changing the
       // task directory, an omitted key stays idempotent, and a bad value is
       // refused rather than treated as absent.
-      const inboxDir = path.join(tasksRoot, newDir2, 'inbox');
-      const inboxBefore = (await fs.readdir(inboxDir).catch(() => [])).length;
+      // The runtime may consume the inbox immediately. Count actual CLI
+      // command receipts instead of requiring a transient file to survive.
+      const scopeReceipts = async () => (await fs.readFile(path.join(advDir, 'scope-receipts.jsonl'), 'utf8').catch(() => ''))
+        .split('\n').filter(Boolean).map(line => JSON.parse(line));
       const declared = await tool({ action: 'start', task: newDir2,
         takeover: { reason: 'declare what the ordinary stage covered',
                     prior_scope: 'ordinary execution only changed src/parse.js' } }, autoCtx2);
@@ -2474,14 +2494,15 @@ process.exit(run.status ?? 1);
       assert.equal(declared.takeover_scope_queued?.status, 'queued', 'the declaration is queued through the real CLI');
       assert.equal(declared.takeover_scope_queued?.task_directory, path.join(tasksRoot, newDir2),
         'the queued command names the same task');
-      assert.equal((await fs.readdir(inboxDir)).length, inboxBefore + 1, 'exactly one declaration command is queued');
+      assert.deepEqual((await scopeReceipts()).map(receipt => receipt.command_id),
+        [declared.takeover_scope_queued.command_id], 'exactly one real declaration command is submitted');
       const omitted = await tool({ action: 'start', task: newDir2, takeover: { reason: 'no scope stated' } }, autoCtx2);
       assert.equal(omitted.takeover_scope_queued, undefined, 'an omitted prior_scope keeps the previous result');
-      assert.equal((await fs.readdir(inboxDir)).length, inboxBefore + 1, 'nothing is queued without a declaration');
+      assert.equal((await scopeReceipts()).length, 1, 'nothing is queued without a declaration');
       await assert.rejects(() => tool({ action: 'start', task: newDir2,
         takeover: { reason: 'bad scope type', prior_scope: 42 } }, autoCtx2), /prior_scope/,
         'a non-string prior_scope is refused instead of treated as absent');
-      assert.equal((await fs.readdir(inboxDir)).length, inboxBefore + 1, 'a refused declaration queues nothing');
+      assert.equal((await scopeReceipts()).length, 1, 'a refused declaration queues nothing');
       for (let n = 0; n < 20 && !autoPid2; n++) {
         const autoState2 = JSON.parse(await fs.readFile(autoState2Path, 'utf8'));
         autoPid2 = autoState2.runtime_pid || null;

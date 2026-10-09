@@ -70,7 +70,7 @@ const registry = {
   setStatus: () => true,
 };
 const ctxFor = s => ({ cwd: project, sessionManager: s.sessionManager,
-  models: { list: () => [model], resolve: spec => spec === '@task' ? model : undefined },
+  models: { list: () => [model], resolve: spec => spec === '@task' || spec === 'glm/x' ? model : undefined },
   hasUI: true, ui: { notify: () => {} } });
 const ctx = ctxFor(root);
 const pi = { zod: z, registerTool: tool => { definition = tool; }, registerCommand: () => {},

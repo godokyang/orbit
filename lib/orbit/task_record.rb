@@ -14,9 +14,9 @@ module Orbit
   class TaskRecord
     attr_reader :path
 
-    def self.create(project_root:, instruction:, source:, connection:, review:, basis: [], estimate: {}, takeover: nil, clock: nil)
+    def self.create(project_root:, instruction:, source:, connection:, review:, basis: [], estimate: {}, takeover: nil, clock: nil, artifact_root: nil)
       root = File.realpath(project_root)
-      workspace = WorkspaceBinding.bind(project_root: root).merge("history" => [])
+      workspace = WorkspaceBinding.bind(project_root: root, artifact_root: artifact_root).merge("history" => [])
       path = File.join(root, ".orbit", "tasks", SecureRandom.uuid)
       FileUtils.mkdir_p(File.join(path, "inbox"), mode: 0o700)
       record = new(path)
@@ -27,7 +27,7 @@ module Orbit
       takeover_block = nil
       if takeover
         begin
-          takeover_block = takeover_boundary(project_root: root, source: source, instruction: instruction,
+          takeover_block = takeover_boundary(project_root: workspace.fetch("artifact_root"), source: source, instruction: instruction,
                                              payload: takeover, destination: File.join(path, "takeover-snapshot"),
                                              clock: clock)
         rescue StandardError
@@ -352,7 +352,7 @@ module Orbit
     end
 
     def inputs(current_state = state)
-      {
+      result = {
         "instruction" => File.read(File.join(path, "instruction.txt")),
         "amendments" => current_state.fetch("amendments").map do |item|
           item.merge("text" => File.read(File.join(path, item.fetch("path"))))
@@ -361,6 +361,12 @@ module Orbit
           item.merge("text" => File.read(File.join(path, item.fetch("path"))))
         end
       }
+      continuation = current_state["continuation"]
+      if continuation
+        result["continuation"] = { "source" => continuation.fetch("source"),
+                                   "text" => File.read(File.join(path, continuation.fetch("message_path"))) }
+      end
+      result
     end
 
     def input_digest(current_state = state)

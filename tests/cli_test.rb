@@ -100,7 +100,7 @@ module CliTest
     record = task
     child = File.join(@project, "src/deep")
     FileUtils.mkdir_p(child)
-    text = cli("status", cwd: child)
+    text = cli("status", "--details", cwd: child)
     assert(text.include?("实现用户要求") && text.include?("running"), "readable requirement and status")
     assert(JSON.parse(cli("status", "--json", cwd: child)) == record.state, "machine output preserves raw state")
     text = cli("stop", "--reason", "用户停止", cwd: child)
@@ -135,7 +135,9 @@ module CliTest
 
   def status_separates_check_activity_from_task_completion
     record = task("running")
-    text = cli("status", record.path)
+    brief = cli("status", record.path)
+    assert(brief.lines.length <= 2 && brief.include?("助手") && !brief.include?("action="), "default status says result and next step without Root protocol")
+    text = cli("status", "--details", record.path)
     assert(text.include?("检查状态：尚无检查结果") && text.include?("下一动作：等待当前助手（Root）继续执行"),
            "a running task with no check facts is idle and still with Root")
     assert(text.include?("裁定记录：0 条"), "status keeps adjudication history separate from open work")
@@ -145,7 +147,7 @@ module CliTest
     record.save(record.state.merge(
       "checks" => [{ "role" => "reviewer", "stale" => false, "result" => { "verdict" => "complete", "reason" => "检查通过" } }]
     ))
-    text = cli("status", record.path)
+    text = cli("status", "--details", record.path)
     assert(text.include?("检查状态：最近检查结论 complete（检查结论，不是任务完成）"),
            "a complete verdict stays a check result")
     assert(text.include?("状态：执行中，尚未完成验收（running）"), "the task status stays running")
@@ -154,18 +156,18 @@ module CliTest
       "check_observations" => { "obs-1" => { "status" => "in_flight" } },
       "next_check_at" => "2026-09-22T00:00:00Z", "next_check_trigger" => "manual_check", "next_check_manual" => true
     ))
-    text = cli("status", record.path)
+    text = cli("status", "--details", record.path)
     assert(text.include?("检查状态：独立检查进行中（等待结果即可，无需重复请求检查）") &&
            !text.include?("检查状态：最近检查结论"),
            "an in-flight check is running and is not the task verdict")
 
     record.save(record.state.merge("check_observations" => { "obs-1" => { "status" => "finished" } }))
-    text = cli("status", record.path)
+    text = cli("status", "--details", record.path)
     assert(text.include?("检查状态：手动终检已排队（不是任务完成）") && text.include?("下一动作：手动检查已排队"),
            "a manual next check is queued, not a completed task")
 
     record.save(record.state.merge("next_check_trigger" => "rebind", "next_check_basis" => "工作区重新绑定", "next_check_manual" => false))
-    text = cli("status", record.path)
+    text = cli("status", "--details", record.path)
     assert(text.include?("下一动作：重新绑定工作区"),
            "a workspace rebind outranks a manual queue")
 
@@ -173,7 +175,7 @@ module CliTest
       "status" => "needs_user", "stop_reason" => "请确认绑定",
       "checks" => [{ "stale" => true, "stale_reasons" => ["workspace"], "result" => { "verdict" => "complete", "reason" => "旧检查" } }]
     ))
-    text = cli("status", record.path)
+    text = cli("status", "--details", record.path)
     assert(text.include?("检查状态：最近检查已过期（未采纳）") && text.include?("下一动作：需要用户处理"),
            "needs_user outranks rebind, and a stale verdict is not task completion")
     assert(!text.include?("检查状态：最近检查结论"),
@@ -185,14 +187,14 @@ module CliTest
       "checks" => [{ "role" => "reviewer", "stale" => false, "result" => { "verdict" => "continue", "reason" => "继续" } }],
       "findings" => {}
     ))
-    text = cli("status", record.path)
+    text = cli("status", "--details", record.path)
     assert(text.include?("下一动作：检查已安排"),
            "a scheduled check stays arranged, not a completed task")
 
     record.save(record.state.merge("next_check_at" => nil, "next_check_trigger" => nil, "next_check_basis" => nil,
                                    "checks" => [{ "role" => "reviewer", "stale" => true, "stale_reasons" => ["workspace"],
                                                   "result" => { "verdict" => "correct", "reason" => "旧工作区" } }]))
-    text = cli("status", record.path)
+    text = cli("status", "--details", record.path)
     assert(text.include?("检查状态：最近检查已过期（未采纳）") && text.include?("下一动作：重新绑定工作区"),
            "a workspace-stale check asks for rebind without calling the task complete")
 
@@ -200,7 +202,7 @@ module CliTest
       "checks" => [{ "role" => "reviewer", "stale" => true, "result" => { "verdict" => "correct", "reason" => "过期" } }],
       "findings" => { "gap" => { "status" => "open" } }
     ))
-    text = cli("status", record.path)
+    text = cli("status", "--details", record.path)
     assert(text.include?("检查状态：最近检查已过期（未采纳）") && text.include?("待处理问题：开放问题 1 条"),
            "a stale check retains its still-open finding")
     assert(!text.include?("下一动作：重新绑定工作区"), "a stale check without a workspace reason is not a rebind")
@@ -216,7 +218,7 @@ module CliTest
                   decisions: [{ "id" => "d1", "outcome" => "root", "decided_at" => "2026-09-28T12:54:57Z" }],
                   checks: [{ "role" => "adjudicator", "stale" => false,
                              "result" => { "verdict" => "complete", "reason" => "Root 胜" } }])
-    text = cli("status", record.path)
+    text = cli("status", "--details", record.path)
     assert(text.include?("已暂停并确认停止（paused）"), "the task is still reported as paused")
     assert(text.lines.any? { |line| line.start_with?("下一动作：") && line.include?("新任务") },
            "a paused task directs new work to a new task")
@@ -233,7 +235,7 @@ module CliTest
                  stop_confirmation: { "confirmed" => true },
                  completion_readiness: { "status" => "not_ready", "reason" => "尚无交付" },
                  findings: { "gap" => { "status" => "open" } })
-    text = cli("status", plain.path)
+    text = cli("status", "--details", plain.path)
     assert(text.lines.any? { |line| line.start_with?("下一动作：") && line.include?("新任务") },
            "an ordinary stop also directs new work to a new task")
     assert(!text.include?("先处理检查问题") && !text.include?("补齐实际交付"),
@@ -241,7 +243,7 @@ module CliTest
 
     done = task("complete", stop_confirmation: { "confirmed" => true },
                             completion_readiness: { "status" => "not_ready", "reason" => "旧理由" })
-    text = cli("status", done.path)
+    text = cli("status", "--details", done.path)
     assert(text.include?("下一动作：无") && text.include?("无需用户操作"),
            "a complete task stays terminal with nothing to do")
   end
@@ -266,7 +268,7 @@ module CliTest
         "jev_stage2" => { "input_tokens" => 20, "output_tokens" => 6 }
       }
     )
-    text = cli("status", record.path)
+    text = cli("status", "--details", record.path)
     assert(text.include?("独立检查 reviewer：输入 140，输出 15，合计 155"), "reviewer calls sum; cached input is not added")
     assert(text.include?("独立检查 process_reviewer：输入 7，输出 1，合计 8"), "process reviewer is separate")
     assert(text.include?("独立检查 adjudicator：输入 3，输出 2，合计 5"), "adjudicator is separate")
@@ -299,7 +301,7 @@ module CliTest
         "jev_stage2" => { "input_tokens" => 5, "output_tokens" => 1, "incomplete" => true }
       }
     )
-    text = cli("status", record.path)
+    text = cli("status", "--details", record.path)
     assert(text.include?("独立检查 reviewer：未知"), "output omitted from a reviewer call is unknown")
     assert(text.include?("独立检查 process_reviewer：未知"), "a recorded check without usage is unknown")
     assert(text.include?("独立检查 adjudicator：输入 3，输出 2，合计 5"), "a complete role still displays its own sum")
@@ -326,7 +328,7 @@ module CliTest
     assert(visible["status"] == "complete" && visible.dig("stop_confirmation", "confirmed") == true,
            "a late receipt does not reopen execution or revoke confirmed stop")
     assert(visible.dig("usage", "resource_calls", "call_count") == 1, "the display reads the final ledger instead of cached zero calls")
-    text = cli("status", record.path)
+    text = cli("status", "--details", record.path)
     assert(text.include?("input 41 token") && text.include?("output 7 token"), "final reported categories are visible without being summed")
     summary = JSON.parse(cli("session-summary", "--thread", "root"))
     assert(summary["tasks"].first.dig("resource_calls", "call_count") == 1, "session summary includes the same finalized task ledger")
@@ -342,26 +344,26 @@ module CliTest
     pending = JSON.parse(cli("status", record.path, "--json"))
     assert(pending.dig("usage", "native_call_observations", "pending_calls") == 1,
            "an observed pending invocation remains unknown after task stop")
-    assert(cli("status", record.path).include?("原生调用尚无最终用量：1"), "pending usage is never displayed as zero consumption")
+    assert(cli("status", "--details", record.path).include?("原生调用尚无最终用量：1"), "pending usage is never displayed as zero consumption")
     original = File.binread(File.join(record.path, "state.json"))
     File.write(File.join(record.path, "resource-calls.json"), "{corrupt")
     broken = JSON.parse(cli("status", record.path, "--json"))
     assert(broken.dig("usage", "resource_calls", "coverage") == "unreadable" &&
            broken.dig("usage", "resource_calls", "call_count").nil?, "a corrupt ledger has no asserted count")
-    assert(cli("status", record.path).include?("已记录调用：未知"), "read failures are visible without stale totals")
+    assert(cli("status", "--details", record.path).include?("已记录调用：未知"), "read failures are visible without stale totals")
     assert(File.binread(File.join(record.path, "state.json")) == original, "the display never repairs or overwrites accounting evidence")
   end
 
   def stale_result_and_user_action
     record = task("needs_user", stop_reason: "请确认需求文档中的支付规则", next_check_at: "2026-01-01T00:00:00Z",
                   checks: [{ "stale" => true, "result" => { "verdict" => "complete", "reason" => "旧版检查" } }])
-    text = cli("status")
+    text = cli("status", "--details")
     assert(text.include?("已过期，未采纳") && text.include?("请确认需求文档中的支付规则"), "stale result and required user action remain distinct")
     assert(!text.include?("2026-01-01"), "settled task has no upcoming check")
     cli("stop", record.path, success: false)
     assert(commands(record).empty?, "settled task cannot be stopped again")
     record.save(record.state.merge("status" => "stop_unconfirmed", "stop_reason" => "用户停止", "error" => "成员仍在执行"))
-    assert(cli("status").include?("成员仍在执行"), "show the actual stop failure, not only the stop request reason")
+    assert(cli("status", "--details").include?("成员仍在执行"), "show the actual stop failure, not only the stop request reason")
     record.save(record.state.merge(
       "status" => "complete", "stop_reason" => nil, "error" => nil, "next_check_at" => nil,
       "next_check_basis" => "等待 Root 根据有效终检收尾",
@@ -369,7 +371,7 @@ module CliTest
       "checks" => [{ "role" => "reviewer", "stale" => false, "manual" => true,
                      "result" => { "verdict" => "complete", "reason" => "已通过" } }]
     ))
-    text = cli("status", record.path)
+    text = cli("status", "--details", record.path)
     assert(text.include?("下一动作：无") && text.include?("下次检查：未安排") &&
            !text.include?("等待 Root 根据有效终检收尾"),
            "completed work must not retain a next-check reason instructing Root to finish again")
@@ -379,13 +381,13 @@ module CliTest
   # from a failure whose stop result still needs verification.
   def failed_stop_confirmation_is_reported
     record = task("failed", error: "读取角色规则库失败")
-    text = cli("status")
+    text = cli("status", "--details")
     assert(text.include?("运行失败，停止情况需核实") && text.include?("读取角色规则库失败"),
            "a missing stop confirmation keeps the verification prompt")
     record.save(record.state.merge("stop_confirmation" => { "confirmed" => false, "scope" => "原会话" }))
-    assert(cli("status").include?("运行失败，停止情况需核实"), "an explicit unconfirmed stop still needs verification")
+    assert(cli("status", "--details").include?("运行失败，停止情况需核实"), "an explicit unconfirmed stop still needs verification")
     record.save(record.state.merge("stop_confirmation" => { "confirmed" => true, "thread_id" => "root", "status_after" => "idle" }))
-    text = cli("status")
+    text = cli("status", "--details")
     assert(text.include?("运行失败，停止已确认") && text.include?("请查看下方运行错误") && !text.include?("停止情况需核实"),
            "a confirmed stop is reported as such instead of an unverified stop")
   end
@@ -592,7 +594,7 @@ module CliTest
   def rebind_workspace_queues_and_legacy_status_reads_project_root
     record = task
     canonical = File.realpath(@project)
-    text = cli("status", record.path)
+    text = cli("status", "--details", record.path)
     assert(text.include?("产物目录：#{canonical}") && text.include?("绑定时间：#{record.state.dig('workspace', 'bound_at')}") &&
            text.include?("最近重新绑定：无"), "status shows the artifact root and binding time")
     assert(cli("rebind-workspace", "--help").include?("amend / dispute"), "rebind help keeps text from switching paths")
@@ -612,7 +614,7 @@ module CliTest
     state = record.state
     state.delete("workspace")
     record.save(state)
-    legacy = cli("status", record.path)
+    legacy = cli("status", "--details", record.path)
     assert(legacy.include?("产物目录：#{canonical}") && legacy.include?("未单独记录") && legacy.include?("最近重新绑定：无"),
            "an old record shows the project root without a migration")
     cli("stop", record.path, "--reason", "用户停止")
@@ -777,7 +779,7 @@ module CliTest
     assert(check["status"] == "rejected" && check["reason"] == "checker_model_blocked" &&
            check["next_action"].include?("Root can inspect OMP availability") && commands(blocked).empty?,
            "an unavailable checker rejects repeated manual checks before queueing work")
-    text = cli("status", blocked.path)
+    text = cli("status", "--details", blocked.path)
     assert(text.include?("检查模型：zenmux/x-ai/grok-4.7"), "status shows the model actually used for checks")
     assert(text.include?("检查阻塞：模型 zenmux/x-ai/grok-4.7（auth_or_quota）") &&
            text.include?("provider returned 401") && text.include?("orbit review-model"),
@@ -813,7 +815,7 @@ module CliTest
     declined = task("running",
                     "jev" => jev_state(decision: "declined"),
                     "members" => [{ "thread_id" => "member-1", "status" => "working" }])
-    declined_text = cli("status", declined.path)
+    declined_text = cli("status", "--details", declined.path)
     declined_jev = jev_line(declined_text)
     candidate = declined_jev[/第一阶段候选分[^；]*/].to_s
     assert(candidate.include?("delegatable 0.91") && candidate.include?("不是委派建议"),
@@ -830,7 +832,7 @@ module CliTest
                        "jev" => jev_state(decision: "recommended", quality: 0.80),
                        "delegation_hint" => { "followed" => true, "quality" => 0.80 },
                        "members" => [{ "thread_id" => "member-2", "status" => "working" }])
-    recommended_text = cli("status", recommended.path)
+    recommended_text = cli("status", "--details", recommended.path)
     recommended_jev = jev_line(recommended_text)
     assert(recommended_jev.include?("最终建议委派") && recommended_jev.include?("任务质量判断 0.80") &&
            !recommended_jev.include?("parallel_gain") && !recommended_jev.include?("最终不建议委派") &&
@@ -841,7 +843,7 @@ module CliTest
            "a followed hint is the recorded member source")
 
     pending_hint = task("running", "jev" => jev_state(decision: "recommended", quality: 0.80))
-    pending_jev = jev_line(cli("status", pending_hint.path))
+    pending_jev = jev_line(cli("status", "--details", pending_hint.path))
     assert(pending_jev.include?("delegation_hint 尚未持久化") &&
            pending_jev.include?("不能视为可执行建议") && !pending_jev.include?("最终建议委派"),
            "a recommended score is not actionable before the final hint is persisted")
@@ -852,7 +854,7 @@ module CliTest
       "scores" => { "member_fit" => 0.80, "parallel_gain" => 0.70 }
     }
     legacy = task("running", "jev" => legacy_jev_state)
-    legacy_text = cli("status", legacy.path)
+    legacy_text = cli("status", "--details", legacy.path)
     legacy_jev = jev_line(legacy_text)
     assert(legacy_jev.include?("delegatable 0.91") && legacy_jev.include?("不是委派建议") &&
            legacy_jev.include?("历史委派判断（jev-delegation-1）") && legacy_jev.include?("不用于新版自动推荐") &&

@@ -32,7 +32,7 @@ import {
 	type AuthStorage,
 } from "@oh-my-pi/pi-coding-agent";
 import { getBaseConfigRoot, getModelDbPath, getProfileRootDir, resolveProfileEnv } from "@oh-my-pi/pi-utils";
-import { createConfinedTools } from "./confined-tools.ts";
+import { createConfinedTools, type SnapshotImageRead } from "./confined-tools.ts";
 import {
 	createCallBoundaryBinder,
 	matchAccountIdentity,
@@ -291,6 +291,8 @@ const requestedAttemptId = request.attempt_id;
 if (requestedAttemptId !== undefined && !/^[\x20-\x7e]{1,200}$/.test(requestedAttemptId)) {
 	throw new Error("attempt_id must be 1-200 printable characters");
 }
+const snapshotImageReads: SnapshotImageRead[] = [];
+
 const evidence: Record<string, unknown> = {
 	attempt_id: requestedAttemptId ?? `orbit-check-${randomUUID()}`,
 	ok: false,
@@ -300,6 +302,11 @@ const evidence: Record<string, unknown> = {
 	model: null,
 	usage: null,
 	usage_gaps: [],
+	// Tool-level facts: the snapshot image files this reviewer process actually
+	// read, each with the bytes and digest it consumed. A fact here is not by
+	// itself proof that the model rendered the picture; the read result states
+	// when the selected model declares no image input.
+	snapshot_image_reads: snapshotImageReads,
 };
 let exitCode = 1;
 let openAuthStorage: AuthStorage | undefined;
@@ -404,7 +411,8 @@ try {
 			toolNames: REVIEW_TOOLS,
 			restrictToolNames: true,
 			allowRestrictedCustomTools: true,
-			customTools: createConfinedTools(snapshot),
+			customTools: createConfinedTools(snapshot, { onImageRead: fact => snapshotImageReads.push(fact),
+				inputModalities: () => session.model?.input }),
 			enableMCP: false,
 			enableIrc: false,
 			enableLsp: false,

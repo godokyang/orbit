@@ -121,6 +121,10 @@ try {
     { artifact_root: project, scope: { allowed_paths: ['src'], allowed_tools: ['read', 'write'], allowed_commands: [], ...over } },
     materials === undefined ? {} : { materials });
   assert.equal((await preflight({})).ok, true);
+  assert.match((await validateWorkUnitPreflight({ artifact_root: project,
+    scope: { allowed_paths: ['src'], allowed_tools: ['read', 'write'], allowed_commands: [] } },
+    { availableTools: ['read'] })).reason, /required native tools are unavailable: write/,
+    'a missing actual host tool blocks before member dispatch');
   assert.match((await preflight({ allowed_tools: [] })).reason, /no tool or command entrance/, 'empty entrances');
   assert.match((await preflight({ allowed_paths: ['.orbit'] })).reason, /escapes the actual artifact root|protected/, 'protected declared path');
   assert.match((await preflight({ allowed_paths: ['../x'] })).reason, /invalid work-unit scope path/, 'escaping declared path');

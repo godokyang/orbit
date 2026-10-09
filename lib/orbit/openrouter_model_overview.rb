@@ -57,8 +57,23 @@ module Orbit
   # is "unmapped", while an unverified variant only yields a prior
   # explicitly labeled as such.
   #
+  # Cross-channel reuse. An identity with no audited entry at all is first
+  # matched to the current fixed catalogue row of the SAME concrete model, with
+  # the provider prefix removed and no model suffix stripped; only when no such
+  # row exists does the labeled base-model downgrade apply, and it drops just a
+  # release date, a context-size token and the confirmed `fast` tier. Both
+  # matches are labeled in facts.mapping (match="concrete"/"base_model",
+  # audited=false, normalized_base_model, matched catalogue row) and carry no
+  # audited source, billing route or route limit — those stay the real calling
+  # channel's — and neither projects the catalogue's context window, modalities
+  # or supported parameters into the prior. Different generations and different
+  # base models are never conflated, several distinct canonical rows stay
+  # ambiguous and unresolved, and an identity that does have audited entries
+  # keeps the conservative variant/route rules above.
+  #
   # #lookup is pure local read-only: no HTTP, no writes, no locking. It
-  # returns bounded catalog facts after exact identity matching. A quality
+  # returns bounded catalog facts after exact identity matching, or after the
+  # labeled limited base-model match described above. A quality
   # prior is projected only when the caller names relevant benchmark indices;
   # an unclassified task receives facts without guessing that it is coding.
   class OpenRouterModelOverview
@@ -112,7 +127,30 @@ module Orbit
     PRIOR_KEYS = %w[id canonical_slug context_length architecture supported_parameters fetched_at sources
                     reasoning_note mapping_identity measurement_date measurement_date_status measurement_note
                     method_version relevant_indices capability_scope benchmark_variants
-                    benchmark_display_name benchmark_as_of].freeze
+                    benchmark_display_name benchmark_as_of mapping].freeze
+    # Limited cross-channel resolution, in this order: (1) the audited exact
+    # identity; (2) the catalogue row for the same CONCRETE model, matched with
+    # the provider prefix removed and no model suffix stripped (`zenmux` +
+    # `deepseek/x` and the catalogue row `deepseek/x` are the same concrete
+    # model); (3) only when no concrete row exists, a labeled base-model
+    # downgrade that drops a release date, a context-size token and the
+    # confirmed `fast` delivery tier. `flash`, `flashx`, `mini`, `sol`, `pro`
+    # and every other name stay part of the concrete model: without evidence
+    # they can name a different one (`glm-5.3-flash` is not `glm-5.3-flashx`),
+    # and `grok-4` is never `grok-4.7`. The key is never a general normalizer
+    # and is never used to rewrite an audited identity.
+    BASE_DOWNGRADE_SUFFIXES = %w[fast].freeze
+    CONTEXT_SIZE_TOKEN = /\A\d+(?:k|m|t)\z/
+    RELEASE_DATE_TOKEN = /\A(?:19|20)\d{6}\z/
+    MAX_MATCH_CANDIDATES = 5
+    # Catalogue route-shaped facts: model-level catalogue values that an
+    # unaudited (cross-channel) prior must never present as the calling
+    # channel's actual capability. They stay in `facts` under capability_scope.
+    UNAUDITED_PRIOR_EXCLUDED_KEYS = %w[context_length architecture supported_parameters].freeze
+    CONCRETE_MATCH_NOTE = "目录同型号具体行匹配：只去掉渠道前缀，未审计该渠道身份；这是模型级能力事实，不携带该条目的计费／额度／实际上下文，" \
+                          "prior 也不投影目录 context_length／模态／支持参数".freeze
+    BASE_MODEL_MATCH_NOTE = "基础型号降级：目录没有同名具体型号行，只忽略 fast 档位、发布日与上下文量；这是模型级能力事实，" \
+                            "不携带该条目的计费／额度／实际上下文，prior 也不投影目录 context_length／模态／支持参数".freeze
 
     STATUS_FRESH = "fresh"
     STATUS_STALE = "stale"
@@ -226,15 +264,17 @@ module Orbit
       return { "status" => STATUS_STALE, "prior" => nil } unless snapshot_current?(document)
       return { "status" => STATUS_UNMAPPED, "prior" => nil } unless model.to_s.match?(MODEL_PATTERN)
 
-      provider, model_id = model.to_s.split("/", 2)
-      entry = mapping_for(provider: provider, model: model_id,
-                          reasoning: normalize_reasoning(reasoning), billing_route: billing_route)
-      return { "status" => STATUS_UNMAPPED, "prior" => nil } unless entry
+      resolved = resolve_catalog_target(model: model.to_s, reasoning: reasoning, billing_route: billing_route,
+                                        document: document)
+      return { "status" => STATUS_UNAVAILABLE, "prior" => nil } if resolved.fetch("outcome") == "unavailable"
+      unless %w[exact concrete base_model].include?(resolved.fetch("outcome"))
+        return { "status" => STATUS_UNMAPPED, "prior" => nil, "mapping" => resolved.fetch("mapping") }
+      end
 
-      record = document.fetch("models")[entry.fetch("openrouter_id")]
-      return { "status" => STATUS_UNAVAILABLE, "prior" => nil } unless record.is_a?(Hash)
-      return { "status" => STATUS_UNAVAILABLE, "prior" => nil } unless record["canonical_slug"] == entry.fetch("canonical_slug")
-      return { "status" => STATUS_UNAVAILABLE, "prior" => nil } unless record["id"] == entry.fetch("openrouter_id")
+      entry = resolved["entry"]
+      record = resolved.fetch("record")
+      mapping = resolved.fetch("mapping")
+      normalized_reasoning = resolved.fetch("reasoning")
 
       variants = benchmark_variants(document, record)
       available = BENCHMARK_KEYS.select { |key| variants.any? { |variant| valid_index?(variant[key]) } }
@@ -253,12 +293,18 @@ module Orbit
         "supported_parameters" => parameter_list(record["supported_parameters"]),
         "capability_scope" => "model_catalog",
         "fetched_at" => document.fetch("fetched_at"), "sources" => prior_sources(entry),
-        "reasoning_note" => reasoning_note(requested: normalize_reasoning(reasoning), entry: entry),
-        "mapping_identity" => entry.slice("provider", "model", "reasoning", "billing_route"),
+        "reasoning_note" => reasoning_note(requested: normalized_reasoning, entry: entry || { "reasoning" => "unknown" }),
+        "mapping_identity" => entry&.slice("provider", "model", "reasoning", "billing_route"),
+        "mapping" => mapping,
         "measurement_date" => nil, "measurement_date_status" => "unknown", "method_version" => nil,
         "measurement_note" => "抓取 72 小时有效期不代表基准测量日期；测量日期与方法版本未获可核验来源"
       )
       prior = selected.empty? ? nil : facts.slice(*PRIOR_KEYS, *selected).merge("relevant_indices" => selected)
+      # An identity that is not the audited one keeps its route-shaped catalogue
+      # values in `facts` only: the prior never presents another channel's
+      # context window, modalities or supported parameters as this channel's
+      # actual capability.
+      prior = prior.reject { |key, _| UNAUDITED_PRIOR_EXCLUDED_KEYS.include?(key) } if prior && resolved["outcome"] != "exact"
       status = available.empty? || (indices.any? && selected.empty?) ? STATUS_NO_BENCHMARK : STATUS_FRESH
       if prior && require_measurement_date
         prior = nil
@@ -278,14 +324,25 @@ module Orbit
       return nil if @api_key.empty?
       return nil unless model.to_s.match?(MODEL_PATTERN)
 
-      provider, model_id = model.to_s.split("/", 2)
-      entry = mapping_for(provider: provider, model: model_id,
-                          reasoning: normalize_reasoning(reasoning), billing_route: billing_route)
-      return nil unless entry
+      document = read_document
+      return nil unless snapshot_current?(document)
 
-      { "mapping_identity" => entry.slice("provider", "model", "reasoning", "billing_route"),
-        "verified_at" => entry.fetch("verified_at"), "verified_by" => entry.fetch("verified_by"),
-        "sources" => entry.fetch("sources") }
+      resolved = resolve_catalog_target(model: model.to_s, reasoning: reasoning, billing_route: billing_route,
+                                        document: document)
+      case resolved.fetch("outcome")
+      when "exact"
+        entry = resolved.fetch("entry")
+        { "mapping_identity" => entry.slice("provider", "model", "reasoning", "billing_route"),
+          "match" => "exact", "audited" => true,
+          "verified_at" => entry.fetch("verified_at"), "verified_by" => entry.fetch("verified_by"),
+          "sources" => entry.fetch("sources") }
+      when "concrete", "base_model"
+        record = resolved.fetch("record")
+        { "mapping_identity" => nil, "match" => resolved.fetch("outcome"), "audited" => false,
+          "matched_catalog_id" => record["id"], "matched_canonical_slug" => record["canonical_slug"],
+          "verified_at" => nil, "verified_by" => nil, "sources" => [MODELS_URL],
+          "note" => resolved.dig("mapping", "note") }
+      end
     end
 
     # Read-only diagnostics for `orbit model-status`: never contacts the
@@ -703,6 +760,131 @@ module Orbit
       matching.find { |entry| entry["reasoning"] == "unknown" } || matching.first
     end
 
+    # One resolution shared by #lookup and #mapping_provenance, in the order the
+    # mapping decision fixes: the audited exact identity, then the catalogue row
+    # of the same concrete model, and only then the labeled base-model
+    # downgrade. An identity that does have audited entries keeps its existing
+    # conservative results (a conflicting concrete reasoning or billing route
+    # stays unresolved): those rules protect a measured variant's score, not a
+    # naming variant.
+    #
+    # Returns "outcome" of "exact" | "concrete" | "base_model" | "unmapped" |
+    # "unavailable", the resolved "record"/"entry"/"mapping" label, and the
+    # normalized "reasoning" the callers must report.
+    def resolve_catalog_target(model:, reasoning:, billing_route:, document:)
+      provider, model_id = model.to_s.split("/", 2)
+      reasoning = normalize_reasoning(reasoning)
+      route = billing_route.to_s.strip
+      route = "unknown" if route.empty?
+      label = { provider: provider, model: model_id, reasoning: reasoning, billing_route: route,
+                base: base_model_key(model_id) }
+
+      entry = mapping_for(provider: provider, model: model_id, reasoning: reasoning, billing_route: route)
+      if entry
+        record = document.fetch("models")[entry.fetch("openrouter_id")]
+        drifted = !record.is_a?(Hash) || record["id"] != entry.fetch("openrouter_id") ||
+                  record["canonical_slug"] != entry.fetch("canonical_slug")
+        return { "outcome" => "unavailable", "record" => nil, "entry" => entry, "mapping" => nil, "reasoning" => reasoning } if drifted
+
+        return { "outcome" => "exact", "record" => record, "entry" => entry,
+                 "mapping" => mapping_label("exact", entry: entry, **label), "reasoning" => reasoning }
+      end
+
+      unless BILLING_ROUTES.include?(route)
+        return { "outcome" => "unmapped", "record" => nil, "entry" => nil, "reasoning" => reasoning,
+                 "mapping" => mapping_label("none", reason: "unsupported_billing_route", **label) }
+      end
+      if audited_identity?(provider: provider, model: model_id)
+        return { "outcome" => "unmapped", "record" => nil, "entry" => nil, "reasoning" => reasoning,
+                 "mapping" => mapping_label("none", reason: "audited_variant_or_route_conflict", **label) }
+      end
+
+      requested_concrete = concrete_model_key(model_id)
+      concrete = catalog_rows(document) { |row| concrete_model_key(row["id"]) == requested_concrete ||
+                                                 concrete_model_key(row["canonical_slug"]) == requested_concrete }
+      if concrete.length == 1
+        return { "outcome" => "concrete", "record" => concrete.first, "entry" => nil,
+                 "mapping" => mapping_label("concrete", record: concrete.first, **label), "reasoning" => reasoning }
+      end
+      return ambiguous_outcome(concrete, label, reasoning, "ambiguous_concrete_rows") if concrete.length > 1
+
+      base = catalog_rows(document) { |row| base_model_key(row["id"]) == label[:base] || base_model_key(row["canonical_slug"]) == label[:base] }
+      if base.length == 1
+        return { "outcome" => "base_model", "record" => base.first, "entry" => nil,
+                 "mapping" => mapping_label("base_model", record: base.first, **label), "reasoning" => reasoning }
+      end
+      return ambiguous_outcome(base, label, reasoning, "ambiguous_catalog_rows") if base.length > 1
+
+      { "outcome" => "unmapped", "record" => nil, "entry" => nil, "reasoning" => reasoning,
+        "mapping" => mapping_label("none", reason: "no_catalog_row_for_base_model", **label) }
+    end
+
+    def ambiguous_outcome(candidates, label, reasoning, reason)
+      { "outcome" => "unmapped", "record" => nil, "entry" => nil, "reasoning" => reasoning,
+        "mapping" => mapping_label("none", reason: reason, candidates: candidates.map { |row| row["id"] }, **label) }
+    end
+
+    def audited_identity?(provider:, model:)
+      load_mappings.any? { |entry| entry["provider"] == provider && entry["model"] == model }
+    end
+
+    # Catalogue rows behind one base key. Tilde alias rows are already excluded
+    # when the snapshot is stored, and rows sharing one canonical slug are one
+    # model; several distinct canonical slugs stay ambiguous and are never
+    # guessed.
+    def catalog_rows(document)
+      models = document.is_a?(Hash) && document["models"].is_a?(Hash) ? document["models"].values : []
+      models.select { |row| row.is_a?(Hash) && row["canonical_slug"].is_a?(String) && yield(row) }
+            .uniq { |row| row["canonical_slug"] }
+    end
+
+    # The concrete model name: the provider prefix inside an id is not identity
+    # (`zenmux` + `deepseek/x` is the catalogue row `deepseek/x`), and nothing
+    # else is removed here.
+    def concrete_model_key(model)
+      name = model.to_s.strip.downcase
+      name.include?("/") ? name.rpartition("/").last : name
+    end
+
+    # How one request resolved: the audited exact identity, the concrete
+    # catalogue row, the labeled base-model downgrade, or why nothing resolved.
+    # Route and billing facts are only ever named as the requested ones; a match
+    # without an audited identity carries nothing route-specific.
+    def mapping_label(match, provider:, model:, reasoning:, billing_route:, base:, entry: nil, record: nil, reason: nil, candidates: [])
+      label = { "match" => match,
+                "requested_identity" => { "provider" => provider, "model" => model,
+                                          "reasoning" => reasoning, "billing_route" => billing_route },
+                "normalized_base_model" => base }
+      if entry
+        label["audited"] = true
+        label["matched_mapping_identity"] = entry.slice("provider", "model", "reasoning", "billing_route")
+      elsif record
+        label["audited"] = false
+        label["matched_catalog_id"] = record["id"]
+        label["matched_canonical_slug"] = record["canonical_slug"]
+        label["note"] = match == "concrete" ? CONCRETE_MATCH_NOTE : BASE_MODEL_MATCH_NOTE
+      end
+      label["reason"] = reason if reason
+      label["candidates"] = candidates.first(MAX_MATCH_CANDIDATES) unless candidates.empty?
+      label
+    end
+
+    # The base-model downgrade key: only a release date, a context-size token
+    # and the confirmed delivery tier. Never applied to an audited identity and
+    # never used to rewrite one.
+    def base_model_key(model)
+      name = concrete_model_key(model)
+      name = name.sub(/@(?:19|20)\d{6}\z/, "").sub(/-(?:19|20)\d{2}-\d{2}-\d{2}\z/, "")
+      loop do
+        head, separator, tail = name.rpartition("-")
+        break if separator.empty?
+        break unless BASE_DOWNGRADE_SUFFIXES.include?(tail) || tail.match?(CONTEXT_SIZE_TOKEN) || tail.match?(RELEASE_DATE_TOKEN)
+
+        name = head
+      end
+      name
+    end
+
     def normalize_reasoning(value)
       text = value.to_s.strip
       text.empty? ? "unknown" : text
@@ -711,9 +893,10 @@ module Orbit
     def prior_sources(entry)
       # Benchmark provenance is guaranteed first: truncation must never drop
       # the measured site or the dedicated endpoint a carried index came from.
-      # The audited mapping sources and then the catalogue endpoint fill the
-      # remaining bound; the cap itself is unchanged.
-      ([BENCHMARK_SOURCE, BENCHMARKS_URL] + entry.fetch("sources") + [MODELS_URL]).uniq.first(MAX_SOURCES)
+      # Audited mapping sources (only for an exact identity) and then the
+      # catalogue endpoint fill the remaining bound; the cap itself is
+      # unchanged. A base-model match carries no audited source at all.
+      ([BENCHMARK_SOURCE, BENCHMARKS_URL] + (entry ? entry.fetch("sources") : []) + [MODELS_URL]).uniq.first(MAX_SOURCES)
     end
 
     def reasoning_note(requested:, entry:)

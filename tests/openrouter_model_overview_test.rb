@@ -32,6 +32,8 @@ module OpenRouterModelOverviewTest
       test_pagination_completeness(tmp)
       test_status_diagnostics_are_read_only(tmp)
       test_mapping_provenance(tmp)
+      test_base_model_match_reuses_capability_across_channels(tmp)
+      test_base_model_match_stays_bounded_and_keeps_audited_rules(tmp)
       test_prior_sources_keep_benchmark_provenance_under_the_cap(tmp)
     end
     puts("OPENROUTER_MODEL_OVERVIEW_TEST_PASS assertions=#{@assertions}")
@@ -493,6 +495,60 @@ module OpenRouterModelOverviewTest
            "the benchmark source and dedicated endpoint survive the source cap")
     assert(sources.include?("https://vendor.example/source-1"),
            "audited mapping sources still fill the remaining bound")
+  end
+
+  # A concrete same-model catalogue row wins over any downgrade, and the
+  # downgrade itself is labeled and never carries route-shaped facts.
+  def test_base_model_match_reuses_capability_across_channels(tmp)
+    project = tmp
+    rows = [row("x-ai/grok-4.7-fast"), row("x-ai/grok-4.7"), row("x-ai/grok-4.8")]
+    http = FakeHttp.new([[200, models_body(rows)], [200, benchmarks_body([variant("x-ai/grok-4.7-fast", coding: 61.5),
+                                                                          variant("x-ai/grok-4.7", coding: 70.0),
+                                                                          variant("x-ai/grok-4.8", coding: 55.0)])]])
+    instance = overview(tmp, "base-match", http: http)
+    write_map(instance.map_path, [mapping])
+    instance.refresh(project_root: project)
+
+    concrete = instance.lookup(model: "cursor/grok-4.7-fast", billing_route: "subscription_quota", project_root: project, indices: ["coding_index"])
+    assert_equal(61.5, concrete.dig("prior", "coding_index"), "the concrete same-model row is matched before any downgrade")
+    assert_equal("concrete", concrete.dig("facts", "mapping", "match"), "the concrete match is labeled")
+    assert_equal(false, concrete.dig("facts", "mapping", "audited"), "a concrete row is not an audited identity")
+    assert_equal("x-ai/grok-4.7-fast", concrete.dig("facts", "mapping", "matched_catalog_id"), "the matched row is named")
+    assert_equal({ "provider" => "cursor", "model" => "grok-4.7-fast", "reasoning" => "unknown", "billing_route" => "subscription_quota" }, concrete.dig("facts", "mapping", "requested_identity"), "the requested identity and real route are kept")
+    assert_equal(8192, concrete.dig("facts", "context_length"), "catalogue facts stay visible for the reader")
+    assert_equal(nil, concrete.dig("prior", "context_length"), "the prior never presents another channel's context window")
+    assert_equal(nil, concrete.dig("prior", "supported_parameters"), "the prior never presents another channel's parameters")
+    assert_equal(nil, concrete.dig("facts", "mapping_identity"), "no audited identity is claimed")
+    assert(!concrete.fetch("prior").fetch("sources").include?("https://vendor.example/deepseek-v4.1-flash"), "no audited source rides along")
+
+    downgraded = instance.lookup(model: "cursor/grok-4.8-fast", project_root: project, indices: ["coding_index"])
+    assert_equal("base_model", downgraded.dig("facts", "mapping", "match"), "without a concrete row the labeled downgrade applies")
+    assert_equal("grok-4.8", downgraded.dig("facts", "mapping", "normalized_base_model"), "the base model is traceable")
+    assert_equal(55.0, downgraded.dig("prior", "coding_index"), "the base model's index is usable")
+    assert_equal("base_model", instance.mapping_provenance(model: "cursor/grok-4.8-fast", project_root: project).fetch("match"), "provenance resolves exactly like lookup")
+    assert_equal(nil, instance.mapping_provenance(model: "opencode-go/deepseek-v4.1-flash", project_root: project), "an audited identity whose catalogue row is absent resolves unavailable in both paths")
+    assert_equal("unmapped", instance.lookup(model: "cursor/grok-4", project_root: project).fetch("status"), "a different generation never borrows grok-4.7")
+    assert_equal("no_catalog_row_for_base_model", instance.lookup(model: "cursor/stranger", project_root: project).dig("mapping", "reason"), "an unknown base model states why nothing resolved")
+  end
+
+  # Named suffixes stay concrete, ambiguity stays unresolved, and the audited
+  # variant and route rules are unchanged.
+  def test_base_model_match_stays_bounded_and_keeps_audited_rules(tmp)
+    project = tmp
+    rows = [row("zhipu/glm-5.3-flashx"), row("other/glm-5.3-flashx"), row("x-ai/grok-4.7", slug: "x-ai/grok-4.7-20260101"),
+            row("x-ai/grok-4.7-preview", slug: "x-ai/grok-4.7-20260202")]
+    entry = mapping("provider" => "kimi-code", "model" => "k3-256k", "reasoning" => "high", "openrouter_id" => "moonshotai/kimi-k3", "canonical_slug" => "moonshotai/kimi-k3-20260715")
+    instance = overview(tmp, "base-guards", http: FakeHttp.new([[200, models_body(rows)], [200, benchmarks_body([variant("zhipu/glm-5.3-flashx", coding: 70.0)])]]))
+    write_map(instance.map_path, [entry])
+    instance.refresh(project_root: project)
+
+    assert_equal("unmapped", instance.lookup(model: "zhipu-coding-plan/glm-5.3-flash", project_root: project).fetch("status"), "flash stays part of the concrete name and never becomes flashx")
+    assert_equal("ambiguous_concrete_rows", instance.lookup(model: "somechannel/glm-5.3-flashx", project_root: project).dig("mapping", "reason"), "two concrete rows of one name are stated, not guessed")
+    assert_equal("unmapped", instance.lookup(model: "opencode-go/deepseek-v4-flash", project_root: project).fetch("status"), "a different base model is never guessed from another row")
+    assert_equal("ambiguous_catalog_rows", instance.lookup(model: "cursor/grok-4.7-500k-fast", project_root: project).dig("mapping", "reason"), "two distinct canonical rows for one base stay unresolved")
+    assert_equal("unmapped", instance.lookup(model: "kimi-code/k3-256k", reasoning: "low", project_root: project).fetch("status"), "an audited identity with a conflicting concrete variant keeps its result")
+    assert_equal("unsupported_billing_route", instance.lookup(model: "somechannel/glm-5.3-flashx", billing_route: "made_up", project_root: project).dig("mapping", "reason"), "an unsupported route value never reaches a match")
+    assert_equal(nil, instance.mapping_provenance(model: "somechannel/glm-5.3-flashx", billing_route: "made_up", project_root: project), "provenance applies the same route validation")
   end
 
   def overview(tmp, name, env: {}, clock: nil, http: nil)

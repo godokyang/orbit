@@ -399,6 +399,32 @@ begin
          "an accepted unit is never overwritten by a late program failure")
   assert(store.read(unit["id"])["status"] == "accepted", "the Root verdict survives")
 
+  # 20. root self-execute units finish from declared without a member handoff,
+  # while the evidence, current-version and dependency gates still hold.
+  record = new_record
+  store = store_for(record)
+  prereq = store.declare(SPEC)
+  root_unit = store.declare(SPEC.merge("execution" => "root", "dependencies" => [prereq["id"]]))
+  raises_error("root accepted before dependency") do
+    store.finish(root_unit["id"], status: "accepted", result: "r", verification: "tests passed")
+  end
+  raises_error("delegate finish before bind") do
+    store.finish(store.declare(SPEC.merge("execution" => "delegate"))["id"],
+                 status: "accepted", result: "r", verification: "v")
+  end
+  store.bind(prereq["id"], member_id: "m1", tool_call_id: "c1", model: "x")
+  store.finish(prereq["id"], status: "accepted", result: "完成", verification: "tests/work_unit_test.rb 通过")
+  done = store.finish(root_unit["id"], status: "accepted", result: "自执行完成",
+                      verification: "局部回归通过：work_unit_test")
+  assert(done["status"] == "accepted" && done["result"] == "自执行完成" && done["verification"].include?("回归"),
+         "a root self-execute unit records its real result and evidence")
+  assert(done["dispatches"].empty? && done["member_id"].nil? && done["tool_call_id"].nil?,
+         "a root self-execute finish fabricates no member binding")
+  failed = store.finish(store.declare(SPEC.merge("execution" => "root"))["id"],
+                        status: "failed", result: "验证失败", verification: "调用返回供应商错误")
+  assert(failed["status"] == "failed" && failed["result"] == "验证失败",
+         "a root self-execute failure leaves a legal result without member binding")
+
   puts "work_unit_test: all assertions passed"
 ensure
   FileUtils.remove_entry(@temp) if @temp && File.exist?(@temp)

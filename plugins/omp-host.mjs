@@ -11,6 +11,20 @@ import { observeNativeCalls, flushNativeCalls } from './native-call-recorder.mjs
 
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const textOf = content => typeof content === 'string' ? content : (content || []).filter(p => p.type === 'text').map(p => p.text).join('\n');
+
+// Keep the full protocol in the model-visible message and expanded transcript.
+// The default renderer shows the result and who takes the next step.
+export function notificationSummary(text) {
+  if (text.startsWith('Orbit 最终检查通知'))
+    return '独立终检通过，正在等待助手收尾。停止确认后才算完成。';
+  if (text.startsWith('Orbit 过程检查未发现当前交付缺口'))
+    return '这轮检查未发现交付缺口。助手会核对原要求，再进行独立终检。';
+  if (text.startsWith('Orbit 检查没有发现新问题'))
+    return `${text.split('。')[0]}。助手继续原任务，缺必要输入时会问清。`;
+  if (text.startsWith('Orbit 逐要求覆盖尚未确认') || text.startsWith('Orbit 独立检查尚未确认可交付'))
+    return `${text.split('。')[0]}。助手补齐交付和证据后重新检查。`;
+  return text; // Unclassified errors stay visible, never summarized into a pass.
+}
 // Internal synchronous registration entry (TaskRecord-backed, atomic+durable).
 // Overridable in tests; production resolves next to this file.
 const registerMemberBin = process.env.ORBIT_REGISTER_MEMBER_BIN
@@ -664,6 +678,10 @@ function appendToMessagesPayload(payload, text) {
 
 // The SDK is supplied by OMP itself, including in its standalone binary.
 export function installOmpExtension(pi, sdk) {
+  if (typeof pi.registerMessageRenderer === 'function' && typeof sdk.Text === 'function') {
+    pi.registerMessageRenderer('orbit', (message, options) => new sdk.Text(
+      options.expanded ? textOf(message.content) : message.details?.userSummary || textOf(message.content), 0, 0));
+  }
   const entries = new Map();
   // Requested spawn name -> { taskDir, toolCallId, expectedModel }. The
   // registry gate matches registered ids against this map: exact match is the
@@ -1416,7 +1434,7 @@ export function installOmpExtension(pi, sdk) {
     if (state.pending_finalization) return '当前版本的最终检查已就绪，等待通知；结束本轮，不要轮询。';
     if (checkInFlight(state)) return '独立检查进行中；直接结束本轮，通知会唤醒当前助手。不要调用 wait、轮询状态、查询 CLI 帮助或重复请求检查，也不要称任务已完成。';
     const current = readiness(state);
-    if (current.status === 'ready') return '当前终检已就绪但任务尚未完成。当前助手现在调用 Orbit 工具 action=stop, intent=complete, task=<当前任务目录>，再正常结束本轮；普通 CLI orbit stop 仅暂停。被拒绝时按原因处理，不假称完成。';
+    if (current.status === 'ready') return '当前终检已就绪但任务尚未完成。先整理本任务 TODO：仅勾完已核验交付/终检，移除失效 queued/blocked 等待项；异步停止确认交给 Orbit 状态行，不作为自动续执行 TODO，未验收内容不得勾完。当前助手现在调用 Orbit 工具 action=stop, intent=complete, task=<当前任务目录>，再正常结束本轮；普通 CLI orbit stop 仅暂停。被拒绝时按原因处理，不假称完成。';
     if (current.status === 'invalidated') return `检查通知已失效：${current.reason}。先在当前产物与要求上重新请求手动终检；旧通知不能用于完成申请，自动检查通过也不能替代。`;
     if (current.status === 'review_needed') return '裁定或后续独立检查已确认旧不可交付理由不成立；当前助手须在当前版本请求新的有效手动终检，自动检查和裁定均不发完成通知。';
     if (current.status === 'not_ready') return `独立检查未确认可交付：${current.reason}。先产生可核验的实际答复或产物，再请求新的有效手动终检。`;
@@ -1481,11 +1499,27 @@ export function installOmpExtension(pi, sdk) {
       phaseDirective(state),
       ...(activeState(state) ? [
         '原生 task 派发前，用 Orbit work-unit declare 保存本次目标、有效要求、范围、验收及升级条件；在每个 task 文本中单独写一行 orbit-unit: <返回的wu-id>。',
-        '工具仅限单元允许范围；成员不能改 Orbit／Git 内部记录、访问外部工具或二次派发。通过 hub 向 Root 回报；Root 核验实际结果后 finish accepted/rejected/failed。失败历史保留，依赖只在 accepted 后继续；无需用户逐次安排。',
+        '派发前核对必要工具、路径和环境能力；超时先核查实际登记、成员状态和已有结果，不盲目重发。权限不足由有权执行者接管；只问不可替代的前置。工具仅限单元允许范围；成员不能改 Orbit／Git 内部记录、访问外部工具或二次派发。通过 hub 向 Root 回报；Root 核验实际结果后 finish accepted/rejected/failed。失败历史保留，依赖只在 accepted 后继续；无需用户逐次安排。',
+        '选型必须声明与任务有关的 model_requirements.relevant_indices（coding_index/intelligence_index 等真实适用维度，勿替未分类任务硬套 coding）；fresh 但 prior 为空时先核对维度而非编造分数。具体型号优先、基础降级须保留来源；渠道计费、额度、上下文仍按实际渠道。采纳建议或自主选择均给任务相关理由；用户偏好 GPT-6.1 时纳入取舍，不自动禁用 GPT-6。facts_only 不是推荐成功。',
         '识别到有界交接即可先 declare 工作单元供 Jev 评估并开始派发，无需 Root 先补证或全池校准完成；是否派发仍由 Root 自主决定。',
       ] : []),
-      '新用户消息不自动修改旧任务：明确修订时调用 Orbit amend；独立问题按独立请求处理，必要时先确认归属。',
+      '上下文中的简短同意或继续沿真实原要求及已授权方案理解；启动任务用原始需求的原生 message_id，不能把短答复或状态提问替换原目标。不得从 Git 改动猜用户目标。用户纠正必须先调用 Orbit amend（原生 message_id，原文或省略 text），把纠正写入有效要求，再按修订执行并传递给活动成员；用户明确指令高于技能默认流程。独立问题只回答，不吞成修订；任务进度追问仅作续接来源，不调用 amend，及时回答后继续原目标，不用回答状态代替交付。只有归属真正不明才问。',
+      '按用户指定工具推进；空设备列表等可恢复现象先做有界核实。配置只读取必要的非敏感字段，不打印完整环境变量、凭据或原始敏感日志。通知用户用一至两句说清结果、谁继续做及下一步；内部协议仍准确处理，未确认停止前不能说已停止。',
     ].join('\n');
+  }
+
+  function continuationBlock(bound, ctx) {
+    const current = ctx?.sessionManager?.getBranch?.().filter(item => item.type === 'message' &&
+      item.message?.role === 'user' && item.message.attribution !== 'agent').at(-1);
+    return `Orbit 程序来源：原任务已暂停，停止确认已通过。旧任务保留终态，已停止成员不会继续工作。\n` +
+      (current ? `本轮真实用户消息 ${current.id}：${textOf(current.message.content).slice(0, 2000)}\n` : '') +
+      '旧 Esc 的停止事实不等于本轮仍要求暂停；本轮任务相关追问或做法纠正已经授权续接，不要求用户再说一遍继续。仅本轮明确暂停/讨论/取消或仍有效的明确暂停约束阻止执行。\n' +
+      `原任务记录：${bound.taskDir}（instruction.txt 为原要求，amendments/ 为有效修订）。\n` +
+      '用户尚未再次发言时不要重启。收到同一任务进度追问或做法纠正时，先简短回答，再读取原要求和修订，' +
+      `调用 Orbit start, resume_from="${bound.taskDir}"（message_id 取这次真实用户消息），建立新监督边界后沿原目标执行。` +
+      '仅状态追问不调用 amend；若这次含有效纠正，建新边界后立即 amend 原生纠正（message_id 加原文或省略 text），再执行。明确暂停、先讨论、取消优先，独立问题只回答；独立的新交付按正常 start，不能 resume 原任务；' +
+      '之前明确暂停后仅问状态不撤销暂停，明确继续才续接。真正无法确定归属时才问。' +
+      '不要把最新追问当整项交付，不追认监督空档，不等待或唤醒旧成员；新成员须按新任务登记。';
   }
   // Root's first reachable request after an automatic entry start gets ONE
   // non-coercive advisory when the already-paid pre-start entry judgment
@@ -1569,6 +1603,8 @@ export function installOmpExtension(pi, sdk) {
   const bootstrapSent = new Set();
   const BOOTSTRAP_LINE = '[orbit-bootstrap] 本任务已受控但尚无工作单元：开始实现前先用 Orbit work-unit declare ' +
     '保存目标、有效要求、范围、验收与升级条件（并在原生 task 文本中写一行 orbit-unit: <wu-id>），' +
+    '成员选型时在 spec.model_requirements.relevant_indices 声明真实适用的 coding_index、agentic_index 或 intelligence_index；' +
+    '未分类任务保持未知；fresh 无 prior 先核对该维度，facts_only 不是推荐。采纳建议或自选均说明任务相关理由，落实用户模型偏好。' +
     '或说明自行实施的依据——是否派发由 Root 自主决定。';
 
   // declared / none / unknown, read from the task's own durable store only.
@@ -1918,7 +1954,7 @@ export function installOmpExtension(pi, sdk) {
   }
   function messages(entry) {
     return entry.session.sessionManager.getBranch().flatMap(item => {
-      if (item.type === 'message' && item.message.role === 'user')
+      if (item.type === 'message' && item.message.role === 'user' && item.message.attribution !== 'agent')
         return [{ id: item.id, item_id: item.id, text: textOf(item.message.content), internal: false }];
       if (item.type === 'custom_message' && item.customType === 'orbit')
         return [{ id: item.details?.orbitMessage || item.id, item_id: item.id, text: textOf(item.content), internal: true }];
@@ -2106,7 +2142,8 @@ export function installOmpExtension(pi, sdk) {
   //   are recorded via onLateError, never swallowed.
   async function deliverCustomMessage(session, text, onLateError) {
     const marker = randomUUID();
-    const payload = { customType: 'orbit', content: text, display: true, details: { orbitMessage: marker } };
+    const payload = { customType: 'orbit', content: text, display: true,
+      details: { orbitMessage: marker, userSummary: notificationSummary(text) } };
     let submitted;
     try {
       submitted = session.sendCustomMessage(payload, { triggerTurn: true, deliverAs: 'steer' });
@@ -2771,7 +2808,20 @@ export function installOmpExtension(pi, sdk) {
       // @task role instead; the registration gate still catches later drift.
       const itemAgent = typeof item.agent === 'string' ? item.agent.trim() : '';
       let expectedModel;
-      if (itemAgent.startsWith(AGENT_NAME_PREFIX)) {
+      if (item.model !== undefined) {
+        const selector = Array.isArray(item.model) && item.model.length === 1 ? item.model[0] : item.model;
+        if (typeof selector !== 'string' || !selector.trim())
+          return { block: true, reason: 'Controlled dispatch needs one explicit resolvable model; a fallback list cannot pin the actual member identity' };
+        let resolved;
+        try { resolved = ctx.models?.resolve?.(selector.trim()); } catch { /* refused below */ }
+        if (!resolved?.provider || !resolved?.id)
+          return { block: true, reason: `Explicit member model ${selector} cannot be resolved before dispatch` };
+        expectedModel = `${resolved.provider}/${resolved.id}`;
+        if (sync.agents.length && !sync.agents.some(candidate => candidate.model === expectedModel))
+          return { block: true, reason: `Explicit member model ${expectedModel} is outside the available Orbit candidate pool` };
+        if (itemAgent && itemAgent !== 'task' && !sessionAgents.has(itemAgent))
+          return { block: true, reason: 'An explicit model override needs @task or a live Orbit candidate agent with verified tool entrances' };
+      } else if (itemAgent.startsWith(AGENT_NAME_PREFIX)) {
         expectedModel = sessionAgents.get(itemAgent);
         if (!expectedModel)
           return { block: true, reason: `${itemAgent} is not a live session candidate agent (pool changed?); re-run /orbit-models and dispatch again` };
@@ -2821,7 +2871,8 @@ export function installOmpExtension(pi, sdk) {
       const artifactRoot = await fs.realpath(unit.artifact_root).catch(() => null);
       if (!artifactRoot)
         return { block: true, reason: `Work unit ${unitId} artifact_root is not a real workspace; rebind the workspace or declare a valid unit before dispatch` };
-      const preflight = await validateWorkUnitPreflight(unit, { cwd: artifactRoot });
+      const preflight = await validateWorkUnitPreflight(unit, { cwd: artifactRoot,
+        availableTools: typeof pi.getAllTools === 'function' ? pi.getAllTools().map(tool => tool.name) : undefined });
       if (preflight?.block) {
         observeCollab({ kind: 'work_unit_dispatch_blocked', task_dir: taskDir, at: Date.now(),
           agent_id: caller, session_id: sessionId, work_unit_id: unitId,
@@ -3215,6 +3266,15 @@ export function installOmpExtension(pi, sdk) {
           return guidance.payload;
         }
         if (payload !== event.payload) return payload;
+      }
+      const priorSources = boundNow ? [boundNow.state.instruction_source?.id, boundNow.state.continuation?.source?.id,
+        ...(boundNow.state.amendments || []).map(a => a.source?.id)].filter(Boolean) : [];
+      if (boundNow?.state.status === 'paused' && boundNow.state.stop_confirmation?.confirmed === true &&
+          branch.some(item => priorSources.includes(item.id))) {
+        // Leave the semantic relationship to Root, who can read the original
+        // goal and conversation. Do not auto-start a new task on a status query.
+        const injected = appendInstructionToPayload(event.payload, continuationBlock(boundNow, ctx));
+        return injected || event.payload;
       }
     } catch { /* guidance only; never block the request path */ }
     let user = null;
@@ -3917,7 +3977,8 @@ export function installOmpExtension(pi, sdk) {
             input_materials: spec.input_materials,
             scope: { allowed_paths: spec.allowed_paths, allowed_tools: spec.allowed_tools,
               allowed_commands: spec.allowed_commands } };
-          const preflight = await validateWorkUnitPreflight(prospective, { cwd: prospective.artifact_root });
+          const preflight = await validateWorkUnitPreflight(prospective, { cwd: prospective.artifact_root,
+            availableTools: typeof pi.getAllTools === 'function' ? pi.getAllTools().map(tool => tool.name) : undefined });
           if (preflight?.block) throw new Error(preflight.reason);
         }
       }
@@ -4110,7 +4171,11 @@ export function installOmpExtension(pi, sdk) {
         : unownedBlock(bound.state, bound.taskDir);
       return { systemPrompt: withStatusBlock(event?.systemPrompt, block) };
     }
-    if (!activeState(bound.state)) return;
+    if (!activeState(bound.state)) {
+      if (bound.state.status === 'paused' && bound.state.stop_confirmation?.confirmed === true)
+        return { systemPrompt: withStatusBlock(event?.systemPrompt, continuationBlock(bound, ctx)) };
+      return;
+    }
     const block = statusBlock(bound.state);
     const advisory = entryDelegationAdvisory(bound.state, bound.taskDir);
     if (advisory) entryAdvisorySent.add(bound.taskDir);

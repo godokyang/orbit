@@ -770,7 +770,7 @@ module Orbit
     end
 
     def attention_reason(state)
-      reason = [state["stop_reason"], state["error"]].find { |value| value.is_a?(String) && !value.strip.empty? }
+      reason = [state["error"], state["stop_reason"]].find { |value| value.is_a?(String) && !value.strip.empty? }
       reason || "记录未写明具体原因，请查看任务记录"
     end
 
@@ -855,6 +855,19 @@ module Orbit
       lines << "观察说明：#{state.dig('observation_pending', 'reason')}" if state["observation_pending"]
       lines << "任务 ID：#{state.fetch('id')}"
       lines.join("\n")
+    end
+
+    def brief(record)
+      state = current_state(record)
+      text = "#{summary(record)}：#{user_attention(state)}"
+      if state["completion_invalidation"]
+        text += "\n#{completion_invalidation_line(state)}"
+      elsif (blocked = state.dig("review", "blocked")) && %w[starting running].include?(state["status"])
+        text += "\n独立检查受阻：#{blocked['reason'] || state['error'] || '尚无可运行检查者'}。助手核实恢复条件后继续。"
+      elsif state["status"] == "failed" && state["error"]
+        text += "\n#{state['error']}"
+      end
+      text
     end
   end
 end

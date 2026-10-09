@@ -219,17 +219,22 @@ module Orbit
       end
     end
 
-    # Record the outcome of a bound unit. `accepted` marks the unit verified
-    # against its acceptance criteria and is refused when the task input or
-    # the workspace moved during execution: an old-version artifact can be
-    # recorded as `rejected`/`failed` (kept as evidence for the next attempt
-    # or escalation) but must never masquerade as accepted under the new
-    # version. verification is the concrete evidence gathered (what was
-    # checked and where) and must be non-empty — "done" without evidence is
-    # not an accepted result.
+    # Record the outcome of a bound unit, or of a declared `execution=root`
+    # unit that the Root executed without any member handoff. `accepted`
+    # marks the unit verified against its acceptance criteria and is refused
+    # when the task input or the workspace moved during execution: an
+    # old-version artifact can be recorded as `rejected`/`failed` (kept as
+    # evidence for the next attempt or escalation) but must never masquerade
+    # as accepted under the new version. A root-self `accepted` also requires
+    # every dependency to be accepted, mirroring the bind gate, so it cannot
+    # advance the dependency chain ahead of its prerequisites. verification
+    # is the concrete evidence gathered (what was checked and where) and must
+    # be non-empty — "done" without evidence is not an accepted result.
+    # Member binding is never fabricated: an unbound root-self unit finishes
+    # with empty dispatches and no member identity.
     def finish(id, status:, result:, verification:)
       outcome = status.to_s
-      raise Error, "invalid finish status: #{outcome}" unless FINISH_STATUSES.include?(outcome)
+      raise Error, "invalid finish status: #{outcome}; use accepted, rejected, or failed" unless FINISH_STATUSES.include?(outcome)
 
       result = text(result, "result", 8000)
       evidence = text(verification, "verification", 2000)
@@ -237,8 +242,9 @@ module Orbit
         document = read_document
         unit = document.fetch("units")[validate_id(id)]
         raise Error, "unknown work unit: #{id}" unless unit
-        unless unit.fetch("status") == "bound"
-          raise Error, "work unit #{id} is #{unit.fetch('status')}; only a bound unit can finish"
+        root_self = WorkUnitStore.execution_role(unit) == "root_self_execute"
+        unless unit.fetch("status") == "bound" || (root_self && unit.fetch("status") == "declared")
+          raise Error, "work unit #{id} is #{unit.fetch('status')}; only a declared root-self unit or a bound unit can finish"
         end
         if outcome == "accepted" && unit.fetch("input_digest") != @record.input_digest
           raise Error, "work unit #{id} ran against an older task input; record the outcome as rejected/failed and declare a new unit"
@@ -247,12 +253,20 @@ module Orbit
         if outcome == "accepted" && (current_root.nil? || unit.fetch("artifact_root") != current_root)
           raise Error, "work unit #{id} ran against a different workspace; record the outcome as rejected/failed and declare a new unit"
         end
+        if outcome == "accepted" && root_self
+          unfinished = unit.fetch("dependencies").reject do |dep|
+            document.fetch("units").dig(dep, "status") == "accepted"
+          end
+          unless unfinished.empty?
+            raise Error, "work unit #{id} has unaccepted dependencies: #{unfinished.join(', ')}"
+          end
+        end
 
         unit["status"] = outcome
         unit["result"] = result
         unit["verification"] = evidence
         unit["finished_at"] = now
-        retain_dispatch_outcome(unit)
+        retain_dispatch_outcome(unit) unless root_self && unit.fetch("dispatches").empty?
         write_document(document)
         attach_event_error(copy(unit), emit("work_unit_finished", unit))
       end
