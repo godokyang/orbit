@@ -1,6 +1,6 @@
 # Orbit
 
-**给 OMP 加上任务协作与独立检查。**
+**给 [Oh My Pi（OMP）](https://github.com/can1357/oh-my-pi) 加上任务协作与独立检查。**
 
 你只和当前 Agent 对话。Orbit 保存目标和纠正，辅助模型分工，让独立 Agent 核对实际成果，再把问题送回原会话修正。
 
@@ -12,7 +12,8 @@
   <a href="#快速开始">快速开始</a> ·
   <a href="#使用效果">使用效果</a> ·
   <a href="#配置与模型">配置与模型</a> ·
-  <a href="docs/reference/usage-reference.md">进阶使用</a>
+  <a href="docs/reference/usage-reference.md">进阶使用</a> ·
+  <a href="#引用">引用</a>
 </p>
 
 ## Orbit 能帮你做什么？
@@ -165,3 +166,9 @@ orbit status
 | 实现与真实验收证据 | [长任务优化验收](docs/reference/long-task-optimization-acceptance-20261009.md) |
 | 权限、角色、检查与停止规则 | [任务运行合同](contracts/task-runtime.md) · [ADR-008](docs/adr/008-omp-native-collaboration-base.md) · [ADR-009](docs/adr/009-user-selected-model-pool.md) |
 | 产品方向与其他文档 | [混合模型交付方案](docs/plan/mixed-model-delivery-proposal.md) · [文档索引](docs/README.md) |
+
+## 引用
+
+| 项目 | 与 Orbit 的关系 |
+| --- | --- |
+| [**Oh My Pi（OMP）**](https://github.com/can1357/oh-my-pi) | 终端 AI 编程 Agent，也是 Orbit 的运行宿主。Orbit 在其会话中加载扩展，使用原生工具和 `task/hub` 成员协作能力。 |
