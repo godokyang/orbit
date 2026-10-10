@@ -1,0 +1,50 @@
+{
+  "foreground_process_group_id": 9066,
+  "foreground_processes": [
+    {
+      "argv": [
+        "node",
+        "/Users/yangke/.npm/_npx/3951ab07c1e658c9/node_modules/.bin/mcp-server-mobile"
+      ],
+      "argv0": "node",
+      "cmdline": "node /Users/yangke/.npm/_npx/3951ab07c1e658c9/node_modules/.bin/mcp-server-mobile",
+      "cwd": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive",
+      "name": "node",
+      "pid": 9172
+    },
+    {
+      "argv0": "mobile-mcp@1.0.2",
+      "cwd": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive",
+      "name": "node",
+      "pid": 9096
+    },
+    {
+      "argv": [
+        "omp",
+        "-e",
+        "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-session-agents-20261010-9066-mqdtbi",
+        "-e",
+        "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/runtime/releases/56e8ad75620f474bf83e8ca6/plugins/omp.mjs",
+        "--cwd",
+        "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive",
+        "--model",
+        "zhipu-coding-plan/glm-5.3-flash",
+        "--thinking",
+        "medium",
+        "--no-extensions",
+        "--no-skills",
+        "--no-lsp",
+        "--no-title",
+        "--session-dir",
+        "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/sessions-positive"
+      ],
+      "argv0": "omp",
+      "cmdline": "omp -e /var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-session-agents-20261010-9066-mqdtbi -e /private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/runtime/releases/56e8ad75620f474bf83e8ca6/plugins/omp.mjs --cwd /var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive --model zhipu-coding-plan/glm-5.3-flash --thinking medium --no-extensions --no-skills --no-lsp --no-title --session-dir /var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/sessions-positive",
+      "cwd": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive",
+      "name": "omp",
+      "pid": 9066
+    }
+  ],
+  "pane_id": "w23:pY",
+  "shell_pid": 8771
+}

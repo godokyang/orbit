@@ -13,6 +13,8 @@ test("a real 429 usage-limit turn classifies as auth_or_quota", () => {
 		errorId: 659456,
 	});
 	expect(fact?.kind).toBe("auth_or_quota");
+	expect(fact?.status).toBe(429);
+	expect(fact?.error_id).toBe(659456);
 	expect(fact?.detail).toContain("Go usage limit exceeded");
 	expect(providerErrorFact({ stopReason: "error", errorStatus: 402,
 		errorMessage: "402 Access denied: this model is only available to accounts with a balance greater than 0. This is an anti-abuse measure, not a usage charge." })?.kind).toBe("auth_or_quota");
@@ -47,6 +49,8 @@ test("a server error carries status and text as unavailable", () => {
 	expect(fact?.detail).toBe("HTTP 500: Internal server error");
 	const bare = providerErrorFact({ stopReason: "error" });
 	expect(bare?.kind).toBe("unavailable");
+	expect(bare?.status).toBeNull();
+	expect(bare?.error_id).toBeNull();
 	expect(bare?.detail).toBe("provider reported an error without detail");
 });
 

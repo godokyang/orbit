@@ -1,0 +1,87 @@
+
+> @godokyang/orbit@0.8.3 test
+> npm run check:version && sh -n install.sh && sh -n uninstall.sh && ruby --disable-gems tests/workspace_snapshot_test.rb && ruby --disable-gems tests/workspace_binding_test.rb && ruby --disable-gems tests/jev_advisor_test.rb && ruby --disable-gems tests/judgment_usage_test.rb && ruby --disable-gems tests/resource_call_ledger_test.rb && ruby --disable-gems tests/route_resource_facts_test.rb && ruby --disable-gems tests/route_resource_store_test.rb && ruby --disable-gems tests/route_cost_inputs_test.rb && ruby --disable-gems tests/model_quality_policy_test.rb && ruby --disable-gems tests/member_model_selector_test.rb && ruby --disable-gems tests/model_capability_facts_test.rb && ruby --disable-gems tests/work_unit_test.rb && ruby --disable-gems tests/requirement_coverage_test.rb && ruby --disable-gems tests/judgment_test.rb && ruby --disable-gems tests/prestart_test.rb && ruby --disable-gems tests/model_evidence_cache_test.rb && ruby --disable-gems tests/model_candidate_pool_test.rb && ruby --disable-gems tests/openrouter_model_overview_test.rb && ruby --disable-gems tests/checker_model_selection_test.rb && ruby --disable-gems tests/checker_model_selector_test.rb && ruby --disable-gems tests/plugin_connection_test.rb && ruby --disable-gems tests/observation_key_test.rb && ruby --disable-gems tests/check_runner_context_test.rb && ruby --disable-gems tests/task_runtime_test.rb && node tests/root_verifications_test.mjs && node tests/root_verifications_file_tools_test.mjs && node tests/model_call_receipts_test.mjs && node tests/work_unit_scope_test.mjs && node tests/omp_native_gate_test.mjs && node tests/omp_entry_recovery_test.mjs && node tests/omp_collab_evidence_test.mjs && node tests/omp_session_agents_test.mjs && node tests/omp_model_picker_test.mjs && bun test runners/omp-reviewer/usage-receipt.test.ts runners/omp-reviewer/provider-error.test.ts runners/omp-reviewer/check-result.test.ts runners/omp-reviewer/json-recovery.test.ts runners/omp-reviewer/model-probe.test.ts runners/omp-reviewer/confined-tools.test.ts && ruby --disable-gems tests/omp_entry_test.rb && ruby --disable-gems tests/member_registration_test.rb && ruby --disable-gems tests/inbox_command_test.rb && ruby --disable-gems tests/omp_native_member_test.rb && ruby --disable-gems tests/git_remote_evidence_test.rb && ruby --disable-gems tests/omp_check_runner_test.rb && ruby --disable-gems tests/omp_cli_checker_test.rb && ruby --disable-gems tests/task_evidence_export_test.rb && ruby --disable-gems tests/cli_test.rb && ruby --disable-gems tests/install_test.rb
+
+
+> @godokyang/orbit@0.8.3 check:version
+> ruby --disable-gems scripts/check-version.rb
+
+Version and lockfile consistent: 0.8.3
+WORKSPACE_SNAPSHOT_TEST_PASS assertions=54
+WORKSPACE_BINDING_TEST_PASS assertions=47
+JEV_ADVISOR_TEST_PASS (deterministic, local fixture only)
+JUDGMENT_USAGE_TEST_PASS (scripted responses; no model call)
+PASS resource call ledger
+PASS route resource facts
+ROUTE_RESOURCE_STORE_TEST_PASS assertions=103
+ROUTE_COST_INPUTS_TEST_PASS
+MODEL_QUALITY_POLICY_TEST_PASS
+MEMBER_MODEL_SELECTOR_TEST_PASS candidates_need_host_agents_and_an_empty_pool_uses_one_real_native_resolution
+MEMBER_MODEL_SELECTOR_TEST_PASS a_matching_release_pays_two_judgments_and_orders_the_candidates
+MEMBER_MODEL_SELECTOR_TEST_PASS generalized_member_fit_does_not_skip_concrete_candidates
+MEMBER_MODEL_SELECTOR_TEST_PASS a_failed_judgment_keeps_its_real_receipt_and_never_fabricates_success
+MEMBER_MODEL_SELECTOR_TEST_PASS an_unchanged_assessment_is_reused_and_a_real_change_is_not
+MEMBER_MODEL_SELECTOR_TEST_PASS a_stale_work_unit_and_a_broken_catalog_never_pass_as_verified
+MEMBER_MODEL_SELECTOR_TEST_PASS provider_model_forecasts_price_the_actual_native_agent
+MEMBER_MODEL_SELECTOR_TEST_PASS root_self_execute_leaves_the_queue_and_pending_units_are_reached
+MODEL_CAPABILITY_FACTS_TEST_PASS assertions=115
+work_unit_test: all assertions passed
+REQUIREMENT_COVERAGE_TEST_PASS
+JUDGMENT_TEST_PASS (deterministic, local fixture only)
+PRESTART_TEST_PASS (deterministic, local fixture only)
+MODEL_EVIDENCE_CACHE_TEST_PASS assertions=113
+MODEL_CANDIDATE_POOL_TEST_PASS assertions=26
+OPENROUTER_MODEL_OVERVIEW_TEST_PASS assertions=127
+CHECKER_MODEL_SELECTION_TEST_PASS
+CHECKER_MODEL_SELECTOR_TEST_PASS root_selected_model_is_probed_and_jev_ranked_without_user_grant
+CHECKER_MODEL_SELECTOR_TEST_PASS root_selected_model_must_be_omp_available_and_checker_resolvable
+CHECKER_MODEL_SELECTOR_TEST_PASS empty_pool_uses_omp_catalog_and_checks_availability
+CHECKER_MODEL_SELECTOR_TEST_PASS profile_agent_directory_is_used_by_preflight_and_recorded_for_the_check
+CHECKER_MODEL_SELECTOR_TEST_PASS unchanged_input_reuses_the_recorded_decision
+CHECKER_MODEL_SELECTOR_TEST_PASS changed_pool_reselects_before_the_next_check
+CHECKER_MODEL_SELECTOR_TEST_PASS unreleased_task_fit_never_orders_candidates
+CHECKER_MODEL_SELECTOR_TEST_PASS catalog_billing_route_forms_the_exact_identity
+CHECKER_MODEL_SELECTOR_TEST_PASS task_requirements_come_from_the_task_record
+CHECKER_MODEL_SELECTOR_TEST_PASS reviewed_release_orders_only_with_a_matching_task_profile
+CHECKER_MODEL_SELECTOR_TEST_PASS conflicting_catalog_and_exact_facts_hold_the_candidate
+CHECKER_MODEL_SELECTOR_TEST_PASS actual_execution_limits_hold_an_explicit_requirement_the_route_cannot_meet
+CHECKER_MODEL_SELECTOR_TEST_PASS an_explicit_choice_is_not_reused_after_the_task_state_changes
+CHECKER_MODEL_SELECTOR_TEST_PASS no_valid_evidence_still_selects_a_runnable_pool_model
+CHECKER_MODEL_SELECTOR_TEST_PASS mapped_catalog_prior_orders_only_under_a_reviewed_release
+CHECKER_MODEL_SELECTOR_TEST_PASS exact_checker_facts_and_catalog_prior_are_both_presented
+CHECKER_MODEL_SELECTOR_TEST_PASS checker_rejects_default_reasoning_and_another_billing_route
+CHECKER_MODEL_SELECTOR_TEST_PASS near_variant_evidence_does_not_fabricate_a_score
+CHECKER_MODEL_SELECTOR_TEST_PASS low_score_selects_without_claiming_verified_quality
+CHECKER_MODEL_SELECTOR_TEST_PASS unavailable_task_fit_judgment_uses_pool_order
+CHECKER_MODEL_SELECTOR_TEST_PASS submitted_checker_evidence_rejudges_before_the_next_check
+CHECKER_MODEL_SELECTOR_TEST_PASS root_unavailable_evidence_answer_closes_the_request_without_a_fake_score
+CHECKER_MODEL_SELECTOR_TEST_PASS only_runnable_candidates_with_missing_or_expired_facts_request_root_research
+CHECKER_MODEL_SELECTOR_TEST_PASS unresolvable_preferred_model_falls_through_to_a_runnable_pool_model
+CHECKER_MODEL_SELECTOR_TEST_PASS no_runnable_pool_model_records_the_failed_judgment
+CHECKER_MODEL_SELECTOR_TEST_PASS unusable_pool_falls_back_to_omp_and_keeps_jev_ranking
+CHECKER_MODEL_SELECTOR_TEST_PASS failed_model_is_excluded_from_the_next_check
+CHECKER_MODEL_SELECTOR_TEST_PASS unclassified_overview_facts_do_not_auto_score
+CHECKER_MODEL_SELECTOR_TEST_PASS candidate_statuses_are_read_only_and_precise
+PLUGIN_CONNECTION_TEST_PASS
+OBSERVATION_KEY_TEST_PASS (deterministic)
+CHECK_RUNNER_CONTEXT_TEST_PASS (deterministic)
+TASK_RUNTIME_TEST_PASS (deterministic, not real-model acceptance)
+ROOT_VERIFICATIONS_TEST_PASS
+ROOT_VERIFICATIONS_FILE_TOOLS_TEST_PASS
+model_call_receipts_test.mjs: all shared-receipt checks passed
+WORK_UNIT_SCOPE_TEST_PASS native_tools_and_paths
+WORK_UNIT_SCOPE_TEST_PASS native_selector_multipath_glob
+WORK_UNIT_SCOPE_TEST_PASS work_unit_preflight
+WORK_UNIT_SCOPE_TEST_PASS command_read_set
+WORK_UNIT_SCOPE_TEST_PASS actual_kernel_write_scope
+WORK_UNIT_SCOPE_TEST_PASS actual_kernel_network_denial
+Orbit: member orbit-79f9cb3f-e4e8-45b1-a720-da2c9c011e5a model drift at registration (glm/x -> zenmux/x-ai/grok-4.6); drift record: ok; abort confirmed: true
+Orbit orbit-call-b17f166b-58b7-43e0-9e2c-b6e85b68baa5: native receipt persistence failed: Expected property name or '}' in JSON at position 1 (line 1 column 2)
+Orbit orbit-call-b17f166b-58b7-43e0-9e2c-b6e85b68baa5: native receipt persistence failed: Expected property name or '}' in JSON at position 1 (line 1 column 2)
+Error: orbit: No such file or directory @ rb_file_s_rename - (/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-gate-tSQULL/.orbit/tasks/f8992f54-f8d2-4b9b-8b7d-91a39422d752/inbox/20261010041032961970-5c398542093f.json.d282b5b6e91e5cd1.tmp, /private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-gate-tSQULL/.orbit/tasks/f8992f54-f8d2-4b9b-8b7d-91a39422d752/inbox/20261010041032961970-5c398542093f.json)
+
+    at ChildProcess.<anonymous> (file:///Users/yangke/Personal/omen/orbit/plugins/host.mjs:27:37)
+    at Object.onceWrapper (node:events:631:26)
+    at ChildProcess.emit (node:events:509:28)
+    at maybeClose (node:internal/child_process:1141:16)
+    at ChildProcess._handle.onexit (node:internal/child_process:306:5)

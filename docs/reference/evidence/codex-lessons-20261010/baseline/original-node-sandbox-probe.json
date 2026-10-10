@@ -1,0 +1,8 @@
+{
+  "purpose": "Controller read-only feasibility probe: executable binary vs script-data access, not product member acceptance",
+  "node_version_command_exit": 0,
+  "stdout": "v24.19.0\n",
+  "stderr": "",
+  "node_path": "/Users/yangke/.nvm/versions/node/v24.19.0/bin/node",
+  "nvm_read_grant": false
+}

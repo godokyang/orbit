@@ -1,0 +1,22 @@
+ M contracts/task-runtime.md
+ M docs/README.md
+ M docs/plan/debt-ledger.md
+ M docs/plan/handoff.md
+ M lib/orbit/check_runner.rb
+ M lib/orbit/task_runtime.rb
+ M plugins/omp-host.mjs
+ M plugins/root-verifications.mjs
+ M runners/omp-reviewer/provider-error.test.ts
+ M runners/omp-reviewer/provider-error.ts
+ M runners/omp-reviewer/reviewer.ts
+ M tests/check_runner_context_test.rb
+ M tests/omp_collab_evidence_test.mjs
+ M tests/root_verifications_test.mjs
+ M tests/task_runtime_test.rb
+?? docs/plan/codex-lessons-implementation.md
+?? docs/plan/context-compression-proposal.md
+?? docs/reference/codex-decisions-reevaluation-20261010.md
+?? docs/reference/codex-lessons-acceptance-20261009.md
+?? docs/reference/codex-source-lessons-20261009.md
+?? docs/reference/codex-workflow-alignment-20261009.md
+?? docs/reference/evidence/

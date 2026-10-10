@@ -1,0 +1,147 @@
+{
+  "at": "2026-10-10T04:47:50.475381+00:00",
+  "root_foreground_pids_exited": [
+    45633,
+    45561,
+    45527
+  ],
+  "tasks": [
+    {
+      "task_id": "d87c80b3-8b77-4d25-91ed-3a74e7202d54",
+      "status": "paused",
+      "runtime_pid": null,
+      "runtime_alive": null,
+      "stop_confirmation": {
+        "confirmed": true,
+        "thread_id": "01a12418-9547-7324-bb9d-8f5da6fb682a",
+        "scope": "Native session execution, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+        "native_owner": "Main",
+        "status_after": "idle",
+        "active_tools_after": 0,
+        "async_jobs_settled": true,
+        "collaboration_persistence": {
+          "task_dir": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/lifecycle/.orbit/tasks/d87c80b3-8b77-4d25-91ed-3a74e7202d54",
+          "scope": "current process observations through cutoff; append completion, not fsync",
+          "observed_through": 11,
+          "written_seq": 11,
+          "failed_observations": 0,
+          "recorded_gaps": 0,
+          "pending_gap": null,
+          "last_error": null,
+          "status": "written"
+        },
+        "members": [
+          {
+            "thread_id": "orbit-dd9f1302-6ae9-4cf9-a4b9-c781bcd7c7b6",
+            "confirmation": {
+              "confirmed": true,
+              "id": "orbit-dd9f1302-6ae9-4cf9-a4b9-c781bcd7c7b6",
+              "scope": "Member turn, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+              "registry_status": "idle",
+              "status_after": "idle",
+              "active_tools_after": 0,
+              "async_jobs_settled": true
+            }
+          }
+        ]
+      },
+      "members": [
+        {
+          "kind": "omp",
+          "adapter": "omp_native_task",
+          "thread_id": "orbit-dd9f1302-6ae9-4cf9-a4b9-c781bcd7c7b6",
+          "requested_name": "orbit-dd9f1302-6ae9-4cf9-a4b9-c781bcd7c7b6",
+          "status": "registered",
+          "registered_at": "2026-10-10T04:37:51Z",
+          "tool_call_id": "call_ea437136d2b44eb99b0ee8dd",
+          "delegation_basis": "orbit_hint",
+          "model": "kimi-code/k3-256k",
+          "registry_status": "idle",
+          "session_file": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/sessions-lifecycle/2026-10-10T04-35-53-287Z_01a12418-9547-7324-bb9d-8f5da6fb682a/orbit-dd9f1302-6ae9-4cf9-a4b9-c781bcd7c7b6.jsonl",
+          "last_turn_error": null,
+          "work_unit_id": "wu-5ecaf6985345edb9",
+          "stop_confirmation": {
+            "confirmed": true,
+            "id": "orbit-dd9f1302-6ae9-4cf9-a4b9-c781bcd7c7b6",
+            "scope": "Member turn, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+            "registry_status": "idle",
+            "status_after": "idle",
+            "active_tools_after": 0,
+            "async_jobs_settled": true
+          },
+          "execution_status": "stopped",
+          "registry_status_before_stop": "running"
+        }
+      ]
+    },
+    {
+      "task_id": "03f9bed6-4a4d-40b8-8d40-3288e4277e04",
+      "status": "paused",
+      "runtime_pid": null,
+      "runtime_alive": null,
+      "stop_confirmation": {
+        "confirmed": true,
+        "thread_id": "01a12418-9547-7324-bb9d-8f5da6fb682a",
+        "scope": "Native session execution, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+        "native_owner": "Main",
+        "status_after": "idle",
+        "active_tools_after": 0,
+        "async_jobs_settled": true,
+        "collaboration_persistence": {
+          "task_dir": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/lifecycle/.orbit/tasks/03f9bed6-4a4d-40b8-8d40-3288e4277e04",
+          "scope": "current process observations through cutoff; append completion, not fsync",
+          "observed_through": 10,
+          "written_seq": 10,
+          "failed_observations": 0,
+          "recorded_gaps": 0,
+          "pending_gap": null,
+          "last_error": null,
+          "status": "written"
+        },
+        "members": [
+          {
+            "thread_id": "orbit-4792af1e-bd13-4b7c-871e-8f74c438a329",
+            "confirmation": {
+              "confirmed": true,
+              "id": "orbit-4792af1e-bd13-4b7c-871e-8f74c438a329",
+              "scope": "Member turn, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+              "registry_status": "idle",
+              "status_after": "idle",
+              "active_tools_after": 0,
+              "async_jobs_settled": true
+            }
+          }
+        ]
+      },
+      "members": [
+        {
+          "kind": "omp",
+          "adapter": "omp_native_task",
+          "thread_id": "orbit-4792af1e-bd13-4b7c-871e-8f74c438a329",
+          "requested_name": "orbit-4792af1e-bd13-4b7c-871e-8f74c438a329",
+          "status": "registered",
+          "registered_at": "2026-10-10T04:46:31Z",
+          "tool_call_id": "call_a6b5191dfce74f19aa02792d",
+          "delegation_basis": "orbit_hint",
+          "model": "kimi-code/k3-256k",
+          "registry_status": "idle",
+          "session_file": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/sessions-lifecycle/2026-10-10T04-35-53-287Z_01a12418-9547-7324-bb9d-8f5da6fb682a/orbit-4792af1e-bd13-4b7c-871e-8f74c438a329.jsonl",
+          "last_turn_error": null,
+          "work_unit_id": "wu-cc3930ab5ea18a15",
+          "stop_confirmation": {
+            "confirmed": true,
+            "id": "orbit-4792af1e-bd13-4b7c-871e-8f74c438a329",
+            "scope": "Member turn, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+            "registry_status": "idle",
+            "status_after": "idle",
+            "active_tools_after": 0,
+            "async_jobs_settled": true
+          },
+          "execution_status": "stopped",
+          "registry_status_before_stop": "running"
+        }
+      ]
+    }
+  ],
+  "scope": "Esc ended actual Root/member turns and owner jobs while first host stayed alive; both normal host exits verified. No assertion of team-wide atomic closure or detached unknown processes."
+}

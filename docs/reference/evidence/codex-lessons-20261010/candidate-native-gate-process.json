@@ -1,0 +1,10 @@
+{
+  "pid": 54788,
+  "role": "candidate-native-gate",
+  "at": "2026-10-10T04:51:37.014359+00:00",
+  "argv": [
+    "node",
+    "tests/omp_native_gate_test.mjs"
+  ],
+  "lifecycle": "running"
+}

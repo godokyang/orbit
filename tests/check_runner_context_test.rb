@@ -137,6 +137,84 @@ module CheckRunnerContextTest
     check(compressed["root_verifications_omitted"].nil?, "no omission is reported when nothing was dropped")
   end
 
+  # C01: a receipt output already trimmed head+tail at capture (in-band
+  # marker + structured output_omitted) is re-trimmed by this layer without
+  # losing either end, this layer's own facts, or the upstream omission facts.
+  def receipt_output_second_trim_keeps_both_ends_and_upstream_facts
+    upstream_marker = "…[omitted 2200 of 4400 UTF-16 code units / 4400 UTF-8 bytes sha256:#{'a' * 64}]"
+    js_visible = "HEAD-" + ("h" * 1_940) + upstream_marker + ("t" * 1_940) + "-TAIL"
+    output_omitted = { "omitted_utf16_units" => 2_200, "visible_utf16_units" => 4_400,
+                       "visible_utf8_bytes" => 4_400, "sha256" => "a" * 64 }
+    context = base_context
+    context["root_verifications"] = [{ "tool_call_id" => "long-run", "tool" => "bash", "command" => "npm test",
+      "exit_code" => 1, "exit_code_source" => "reported",
+      "input_matches" => true, "artifact_matches" => true,
+      "output" => js_visible, "output_truncated" => true, "output_omitted" => output_omitted }]
+    receipt = parsed(context).fetch("root_verifications").first
+    out = receipt["output"]
+    check(out.start_with?("HEAD-") && out.end_with?("-TAIL"),
+          "the second-layer trim still keeps both ends of the log")
+    check(out.include?("of #{js_visible.length} Unicode chars / #{js_visible.bytesize} UTF-8 bytes " \
+                       "sha256:#{Digest::SHA256.hexdigest(js_visible)}"),
+          "this layer's marker names its own visible length with explicit units and SHA-256")
+    check(!out.include?("UTF-16 code units"),
+          "the second trim never nests two generations of markers in the kept text")
+    check(receipt["output_omitted"] == output_omitted,
+          "capture-layer omission facts survive as structured metadata")
+    check(receipt["output_truncated"] == true && receipt["exit_code"] == 1 &&
+          receipt["tool_call_id"] == "long-run" && receipt["command"] == "npm test",
+          "identity, execution result and truncation facts survive the second trim")
+    check(out.length <= Orbit::CheckRunner::CONTEXT_STRING_CAP,
+          "the re-trimmed log stays within the string budget")
+  end
+
+  # C01: under byte-pressure degradation the selected logs still keep both
+  # ends, their execution results and the marker, inside the hard byte cap.
+  # The real installed run degraded ordinary strings to 125 characters,
+  # smaller than its omission marker; it previously delivered only a marker.
+  def degraded_caps_keep_selected_log_ends_within_byte_limit
+    output = "RUN-START " + ("x" * 6_000) + "FAIL-SUMMARY"
+    receipts = (1..6).map do |i|
+      { "at" => "2026-10-09T10:0#{i}:00Z", "tool" => "bash", "kind" => "root_verification",
+        "status" => i.even? ? "failed" : "completed", "command" => "node --test ##{i}",
+        "exit_code" => i.even? ? 1 : 0, "exit_code_source" => "reported",
+        "output" => output, "output_truncated" => false,
+        "input_matches" => true, "artifact_matches" => true }
+    end
+    caps = Orbit::CheckRunner::CONTEXT_CAPS.merge(string_cap: 125)
+    bounded = runner.send(:build_compressed_context, { "root_verifications" => receipts, "root" => {} }, caps, 3)
+    record = JSON.parse(runner.send(:render_context, bounded))
+    check(JSON.generate(record).bytesize <= Orbit::CheckRunner::CONTEXT_BYTE_LIMIT,
+          "degraded logs still fit the hard byte cap")
+    kept = record["root_verifications"]
+    check(kept.length == 6, "all six receipts are delivered at the degraded string cap")
+    kept.each do |receipt|
+      check(receipt["output"].start_with?("RUN-START ") && receipt["output"].end_with?("FAIL-SUMMARY") &&
+            receipt["output"].include?("…[omitted ") && receipt["output"].length <= 500,
+            "every delivered log keeps both ends and the marker at a degraded cap")
+    end
+    check(kept.map { |r| r["exit_code"] } == [0, 1, 0, 1, 0, 1] &&
+          kept.map { |r| r["status"] } == %w[completed failed completed failed completed failed],
+          "execution results survive degradation unchanged")
+  end
+
+  # C01: multibyte logs keep valid UTF-8 and explicit units; receipts outside
+  # bash/eval keep the generic prefix-only strategy.
+  def log_policy_is_limited_to_bash_eval_output
+    text = "日志开始" + ("汉" * 3_000) + "日志结尾"
+    bound = runner.send(:bound_log_string, text, 2_000)
+    check(bound.valid_encoding?, "a multibyte log stays valid UTF-8 after the head+tail trim")
+    check(bound.start_with?("日志开始") && bound.end_with?("日志结尾"),
+          "both ends of a multibyte log are kept")
+    check(bound.include?("of #{text.length} Unicode chars / #{text.bytesize} UTF-8 bytes " \
+                         "sha256:#{Digest::SHA256.hexdigest(text)}"),
+          "the marker distinguishes Unicode characters from UTF-8 bytes")
+    other = { "tool_call_id" => "obs", "tool" => "read", "output" => long_text("log", 4_000) }
+    record = parsed(base_context.merge("root_verifications" => [other])).fetch("root_verifications").first
+    check(record["output"] == bound_at(other["output"], Orbit::CheckRunner::CONTEXT_STRING_CAP),
+          "a non-bash/eval receipt keeps the generic prefix-only strategy")
+  end
+
   # The live 2026-10-08 case: a unit declared six allowed paths and five tools,
   # but the checker received only the last two of each because the generic array
   # bound tail-trimmed the permission lists once byte pressure halved
@@ -300,6 +378,7 @@ module CheckRunnerContextTest
     check_hard_byte_limit_and_valid_json
     check_prompt_keeps_inputs_and_decision_memory
     check_delivery_prompt_contract_and_validation
+    check_shared_schema_derived_structure
     check_verification_truncation_is_explicit
     check_delivered_answer_gets_wider_verbatim_prefix
     check_review_focus_is_explicit_and_deterministic
@@ -311,6 +390,9 @@ module CheckRunnerContextTest
     check_dropped_declarations_are_explicit
     current_execution_receipts_survive_degraded_caps
     root_verifications_keep_order_when_they_fit
+    receipt_output_second_trim_keeps_both_ends_and_upstream_facts
+    degraded_caps_keep_selected_log_ends_within_byte_limit
+    log_policy_is_limited_to_bash_eval_output
     puts "CHECK_RUNNER_CONTEXT_TEST_PASS (deterministic)"
   end
 
@@ -595,9 +677,63 @@ module CheckRunnerContextTest
     check(error.message.include?(expected), "the contract rejects: #{expected}")
   end
 
+  # One shared-structure scenario: the samples file is accepted/rejected
+  # identically on both sides, and the validator's fields, enum and
+  # closed-object rules track the schema document instead of hardcoded
+  # literals. Fixtures only assist here; the schema stays the source.
+  def check_shared_schema_derived_structure
+    samples = JSON.parse(File.read(File.expand_path("fixtures/check-result-samples.json", __dir__)))["samples"]
+    check(samples.length >= 4, "the shared sample set is not silently emptied")
+    samples.each do |sample|
+      accepted = begin
+        runner.send(:validate_result, Marshal.load(Marshal.dump(sample["result"]))) == sample["result"]
+      rescue Orbit::CheckRunner::Error
+        false
+      end
+      check(accepted == sample["accept"], "shared sample '#{sample['name']}' agrees between TS and Ruby")
+    end
+
+    schema = Marshal.load(Marshal.dump(Orbit::CheckRunner.check_result_schema))
+    schema["properties"]["verdict"]["enum"] -= ["pause"]
+    schema.delete("additionalProperties")
+    rules = Orbit::CheckRunner.derive_result_structure(schema)
+    paused = { "verdict" => "pause", "reason" => "r", "findings" => [], "resolved_ids" => [],
+               "next_check_seconds" => 1, "delivery" => { "ready" => false, "reason" => "x" } }
+    problems = runner.send(:result_problems, rules, Marshal.load(Marshal.dump(paused)))
+    check(problems.any? { |problem| problem.include?("verdict must be one of:") && !problem.include?("pause") },
+          "a removed verdict enum value is enforced from the schema")
+    problems = runner.send(:result_problems, rules, Marshal.load(Marshal.dump(paused)).merge("extra" => 1))
+    check(problems.none? { |problem| problem.include?("unexpected keys") },
+          "an open schema object accepts extra keys instead of a hardcoded rule")
+
+    # maxLength counts Unicode code points and Ruby String#length agrees with
+    # it: a 1000-code-point requirement of mostly non-BMP characters (1600
+    # UTF-16 units) stays valid on both sides, 1001 code points are refused.
+    emoji_heavy = "🎯" * 600 + "x" * 400
+    check(emoji_heavy.length == 1000, "String#length counts code points like JSON Schema maxLength")
+    unit_result = { "verdict" => "correct", "reason" => "r", "findings" => [], "resolved_ids" => [],
+                    "next_check_seconds" => 1, "delivery" => { "ready" => false, "reason" => "x" },
+                    "coverage" => { "complete" => true,
+                                    "items" => [{ "requirement" => emoji_heavy, "status" => "unverified", "evidence" => "" }] } }
+    check(runner.send(:validate_result, Marshal.load(Marshal.dump(unit_result))) == unit_result,
+          "a 1000-code-point requirement stays valid despite 1600 UTF-16 units")
+    oversize = Marshal.load(Marshal.dump(unit_result))
+    oversize["coverage"]["items"][0]["requirement"] = "🎯" * 600 + "x" * 401
+    rejects(oversize, "at most 1000 characters")
+
+    foreign = Marshal.load(Marshal.dump(Orbit::CheckRunner.check_result_schema))
+    foreign["$id"] = "https://elsewhere/check-result.json"
+    begin
+      Orbit::CheckRunner.derive_result_structure(foreign)
+      raise "ASSERTION FAILED: foreign schema must fail closed"
+    rescue Orbit::CheckRunner::Error => error
+      check(error.message.include?("identity mismatch"), "a foreign schema file fails closed")
+    end
+  end
+
   def check_verification_truncation_is_explicit
     context = base_context
-    context["root_verifications"] = [{ "tool_call_id" => "actual-tests", "command" => "npm test",
+    context["root_verifications"] = [{ "tool_call_id" => "actual-tests", "tool" => "bash", "command" => "npm test",
       "exit_code" => 0, "artifact_matches" => true, "input_matches" => false,
       "output" => long_text("tests", 4_000), "output_truncated" => false }]
     receipt = parsed(context).fetch("root_verifications").first

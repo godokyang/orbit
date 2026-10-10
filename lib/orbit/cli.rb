@@ -630,6 +630,12 @@ module Orbit
       end
       payload = JSON.parse(read_input(options[:file]))
       raise ArgumentError, "work-unit input must be one JSON object" unless payload.is_a?(Hash)
+      if operation == "declare"
+        misplaced = payload.keys & %w[model_requirements execution]
+        unless misplaced.empty?
+          raise ArgumentError, "#{misplaced.join(', ')} belongs inside work_unit.spec, not beside spec; repair the declaration before selection"
+        end
+      end
 
       store = WorkUnitStore.new(record)
       result = case operation

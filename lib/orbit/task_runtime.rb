@@ -3295,8 +3295,15 @@ module Orbit
                   "tool_calls_before" => Array(host["root_verifications"]).filter_map { |r| r["tool_call_id"] } }
       attempts[key] = attempt
       save
+      # The per-request host context hook projects the complete durable goal.
+      # Keep the wake as a versioned next-action notice rather than sending a
+      # second full original/amendment copy in the same model request.
       sent = @connection.send_message("Orbit 检查没有发现新问题，但原任务还未交付：#{result.dig('delivery', 'reason')}。" \
-        "请沿原始要求和有效修订执行下一步；缺必要输入就向用户问清具体缺口。先简短说明结果和下一步，然后实际执行，不要只回复会继续、轮询检查或等待已停止成员。")
+        "当前目标来源为任务原要求与有效修订，input_digest #{scope["input_digest"]}；请求上下文另行完整投影。" \
+        "请区分有价值进展（改变真实状态或交付、得到改变下一动作的证据）、真实在途等待（轮询此刻确认存活的具体进程/会话/任务句柄；" \
+        "对话、意图或状态文件本身不算）与无进展（重述状态、未执行的计划、工具/消息/TODO 数量都不算）。" \
+        "无进展或同一真实阻断重复时说明具体阻断并采取下一个安全动作；缺必要输入就向用户问清具体缺口。" \
+        "请沿原始要求和有效修订执行下一步。先简短说明结果和下一步，然后实际执行，不要只回复会继续、轮询检查或等待已停止成员。")
       attempt.merge!("status" => "accepted", "message_id" => sent.fetch("id"))
       @state["sent_message_ids"] << sent.fetch("id")
       @record.event("unfinished_task_continuation_sent", attempt.slice("check", "message_id", "input_digest"))
@@ -3761,6 +3768,19 @@ module Orbit
         @state["stop_confirmation"] = confirmation
         capture_native_calls
         final_status = status
+        # Every stop must re-read the authoritative roster after teardown, not
+        # only completion hand-offs. A late registration was never stopped.
+        unaccounted = members_unaccounted_after_teardown
+        roster_code = if unaccounted.nil?
+                        "members_unreadable"
+                      elsif !unaccounted.empty?
+                        "members_registered_during_stop"
+                      end
+        roster_detail = if unaccounted.nil?
+                          "the member roster could not be re-read after teardown"
+                        elsif roster_code
+                          "members registered while the task stopped were never stopped: #{unaccounted.join(', ')}"
+                        end
         if notice
           # Teardown can outlive the hand-off check above (member stops wait for
           # in-flight work), so version and roster are checked once more. This
@@ -3773,18 +3793,10 @@ module Orbit
           # an explicit reason -- never as completion, and never as if the task
           # were still running.
           key, code, detail = completion_gate
-          unaccounted = nil
-          if key
-            unaccounted = members_unaccounted_after_teardown
-            if unaccounted.nil?
-              key = nil
-              code = "members_unreadable"
-              detail = "the member roster could not be re-read after teardown"
-            elsif !unaccounted.empty?
-              key = nil
-              code = "members_registered_during_stop"
-              detail = "members registered while the task stopped were never stopped: #{unaccounted.join(', ')}"
-            end
+          if roster_code
+            key = nil
+            code = roster_code
+            detail = roster_detail
           end
           if key
             @state.delete("completion_invalidation")
@@ -3792,29 +3804,29 @@ module Orbit
             @state["delivery_digest"] = fingerprint_artifact
             @record.event("completed_via_finalized_stop", "check" => @state.dig("finalization_notices", key, "check"))
           else
-            # An unaccounted member was never stopped, so the stop itself is not
-            # confirmed: that records an unconfirmed stop, not a confirmed pause.
-            if %w[members_unreadable members_registered_during_stop].include?(code)
-              final_status = "stop_unconfirmed"
-              # Overall confirmation must not stay true while a member is
-              # unaccounted for; keep the verified parts (Root plus the members
-              # the stop actually covered) as the execution-scope evidence.
-              partial = @state["stop_confirmation"] || {}
-              @state["execution_stop_confirmation"] = partial
-              @state["stop_confirmation"] = partial.merge("confirmed" => false, "reason" => code,
-                                                          "unaccounted_members" => Array(unaccounted))
-              # The stop attempt itself succeeded; the unconfirmed verdict comes
-              # from the post-teardown roster check. Keep that distinction in
-              # the diagnostics (root ok, stop not confirmed overall).
-              diagnostics["confirmed"] = false
-              diagnostics["reason_code"] = code
-              diagnostics["unaccounted_members"] = Array(unaccounted)
-              @state["stop_diagnostics"] = diagnostics
-            end
             @state["completion_invalidation"] = { "reason" => code, "detail" => detail,
                                                   "at" => Time.now.utc.iso8601 }
             @record.event("completion_invalidated_after_stop", "reason" => code, "detail" => detail)
           end
+        end
+        # An unaccounted member was never stopped, so the stop itself is not
+        # confirmed: that records an unconfirmed stop, not a confirmed pause.
+        if roster_code
+          final_status = "stop_unconfirmed"
+          # Overall confirmation must not stay true while a member is
+          # unaccounted for; keep the verified parts (Root plus the members
+          # the stop actually covered) as the execution-scope evidence.
+          partial = @state["stop_confirmation"] || {}
+          @state["execution_stop_confirmation"] = partial
+          @state["stop_confirmation"] = partial.merge("confirmed" => false, "reason" => roster_code,
+                                                      "unaccounted_members" => Array(unaccounted))
+          # The stop attempt itself succeeded; the unconfirmed verdict comes
+          # from the post-teardown roster check. Keep that distinction in
+          # the diagnostics (root ok, stop not confirmed overall).
+          diagnostics["confirmed"] = false
+          diagnostics["reason_code"] = roster_code
+          diagnostics["unaccounted_members"] = Array(unaccounted)
+          @state["stop_diagnostics"] = diagnostics
         end
         @state["status"] = final_status
         @state["stop_reason"] = reason
@@ -3824,12 +3836,12 @@ module Orbit
         # stop_unconfirmed there).
         @state.delete("stop_diagnostics") unless final_status == "stop_unconfirmed"
         mark_terminal_ask_interrupts!
-        if final_status == "stop_unconfirmed" && @state["completion_invalidation"]
+        if final_status == "stop_unconfirmed"
           # The Root turn itself was verified, but the stop as a whole is not:
           # the event must not carry a false overall confirmation.
           @record.event("stop_unconfirmed", "reason" => reason,
-                        "error" => @state.dig("completion_invalidation", "reason"),
-                        "detail" => @state.dig("completion_invalidation", "detail"),
+                        "error" => roster_code,
+                        "detail" => roster_detail,
                         "unaccounted_members" => Array(@state.dig("stop_confirmation", "unaccounted_members")),
                         "verified_root_confirmation" => @state["execution_stop_confirmation"])
         else

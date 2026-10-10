@@ -1,0 +1,313 @@
+{
+  "format": "orbit-work-units-2",
+  "task_id": "5dd5b889-7685-4cb9-8c2a-ed0269d3948d",
+  "units": {
+    "wu-a0c651154ca32070": {
+      "id": "wu-a0c651154ca32070",
+      "task_id": "5dd5b889-7685-4cb9-8c2a-ed0269d3948d",
+      "status": "declared",
+      "input_digest": "a78e5ec802ece3bc0e03cec79f850ce01eaadb2b156ddbb6a46ce79e0b46c802",
+      "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v7",
+      "declared_at": "2026-10-10T05:37:38Z",
+      "dispatches": [],
+      "member_id": null,
+      "tool_call_id": null,
+      "model": null,
+      "result": null,
+      "verification": null,
+      "finished_at": null,
+      "objective": "Implement importExpenses(text) pure function in src/importer.mjs of the CSV expense-importer project per SPEC.md and tests/acceptance.mjs, then verify by running the project's npm test with the provided project-local Node/npm runtime.",
+      "requirements": [
+        "Parse input: required header line exactly 'category,amount' (after stripping one leading BOM); LF or CRLF; ignore blank lines but keep 1-based line numbering including blanks",
+        "Unquoted CSV: each nonblank data line exactly two columns; trim both fields; category nonempty; amount matches nonnegative decimal with exactly two fractional digits, no sign/exponent",
+        "Compute integer cents exactly; reject any value or per-category/overall sum exceeding Number.MAX_SAFE_INTEGER",
+        "Preserve first-seen category order; return {groups:[{category,totalCents,count}],totalCents,count}",
+        "Throw Error whose message contains the original one-based line number on invalid data, including header (line 1)",
+        "Run the full test suite using project-provided runtime: PATH with .runtime/bin and npm via .runtime/lib/node_modules/npm/bin/npm-cli.js, TMPDIR set to project .test-tmp",
+        "Report actual results, full test command, exit code and limitations to Main via the native hub/peer message interface before returning results",
+        "No git commit/push, no dependency downloads, no network services"
+      ],
+      "context": "Project root: the working directory containing SPEC.md, package.json, tests/acceptance.mjs, src/importer.mjs (currently a stub), .runtime/ (full Node/npm copy; bin/npm points only into the project), .test-tmp/ (writable TMPDIR for os.tmpdir() CLI temp files). NPM cache may live in .test-tmp/npm-cache. No network. README.md is Root-owned; do not write it.",
+      "decisions": [
+        "Exact cents via string parsing into integer cents, no floats in accumulation",
+        "Throw plain Error with one-based line number in message"
+      ],
+      "input_materials": [
+        "SPEC.md",
+        "tests/acceptance.mjs",
+        "package.json",
+        "src/importer.mjs",
+        ".runtime/",
+        ".test-tmp/"
+      ],
+      "scope": {
+        "allowed_paths": [
+          "src/importer.mjs",
+          "SPEC.md",
+          "tests/acceptance.mjs",
+          "package.json",
+          ".runtime/",
+          ".test-tmp/",
+          "README.md"
+        ],
+        "allowed_tools": [
+          "read",
+          "write",
+          "edit",
+          "bash",
+          "grep",
+          "glob"
+        ],
+        "allowed_commands": [
+          "PATH=\"$PWD/.runtime/bin:$PATH\" TMPDIR=\"$PWD/.test-tmp\" .runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test",
+          "PATH=\"$PWD/.runtime/bin:$PATH\" TMPDIR=\"$PWD/.test-tmp\" .runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js run test",
+          "PATH=\"$PWD/.runtime/bin:$PATH\" .runtime/bin/node tests/acceptance.mjs",
+          "PATH=\"$PWD/.runtime/bin:$PATH\" TMPDIR=\"$PWD/.test-tmp\" .runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test --cache \"$PWD/.test-tmp/npm-cache\""
+        ]
+      },
+      "acceptance": "npm test using the project-local runtime exits 0 with all acceptance cases passing; src/importer.mjs exports importExpenses matching SPEC; no changes to tests/acceptance.mjs or SPEC.md",
+      "escalation": "Report environment or interface failures with actual diagnostics via hub to Main instead of guessing or working outside allowed paths; do not modify tests or spec",
+      "model_requirements": {},
+      "dependencies": []
+    },
+    "wu-ba0fe8204e726eb9": {
+      "id": "wu-ba0fe8204e726eb9",
+      "task_id": "5dd5b889-7685-4cb9-8c2a-ed0269d3948d",
+      "status": "accepted",
+      "input_digest": "a78e5ec802ece3bc0e03cec79f850ce01eaadb2b156ddbb6a46ce79e0b46c802",
+      "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v7",
+      "declared_at": "2026-10-10T05:37:55Z",
+      "dispatches": [
+        {
+          "member_id": "orbit-e57a2ba3-7dd6-4f1d-ab54-b8dd56b28c94",
+          "tool_call_id": "call_48a95b400fac45de84db8694",
+          "model": "kimi-code/k3-256k",
+          "bound_at": "2026-10-10T05:38:53Z",
+          "hint_signature": "db13db9b0e84d8b4e5a6a9d78c80138dbbefebe400300146768ec0ea078289cb",
+          "hint_message_id": "33afec03-a13b-441d-9b3b-058a95eb28a5",
+          "status": "accepted",
+          "result": "Member implemented src/importer.mjs importExpenses per SPEC (BOM strip, LF/CRLF, 1-based line numbering incl. blanks, exact 2-column unquoted CSV, trimmed fields, nonempty category, amount ^[0-9]+\\.[0-9]{2}$, exact integer cents from digit strings, MAX_SAFE_INTEGER checks on value/category/overall, first-seen order, plain Error with line number). Member ran the declared npm test command in its environment: 122 importer cases PASS; the 5 CLI cases failed only because the member sandbox lacked read access to src/cli.mjs (a scope gap in my declaration, CLI written after declaration). Member sent the hub report to Main with command, exit code 1, and limitations before yielding.",
+          "verification": "Root independently ran PATH=\"$PWD/.runtime/bin:$PATH\" TMPDIR=\"$PWD/.test-tmp\" .runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test from the project root: exit 0, EXPENSE_VALIDATION_SUMMARY: 127 cases passed, including CLI success and all CLI failure cases. Root confirmed the hub message from the member was actually received (agent message orbit-e57a2ba3... delivered with command/exit code/limitations), not just self-reported. Importer accepted; residual member-path CLI-read verification assigned to follow-up unit.",
+          "finished_at": "2026-10-10T05:42:25Z"
+        }
+      ],
+      "member_id": "orbit-e57a2ba3-7dd6-4f1d-ab54-b8dd56b28c94",
+      "tool_call_id": "call_48a95b400fac45de84db8694",
+      "model": "kimi-code/k3-256k",
+      "result": "Member implemented src/importer.mjs importExpenses per SPEC (BOM strip, LF/CRLF, 1-based line numbering incl. blanks, exact 2-column unquoted CSV, trimmed fields, nonempty category, amount ^[0-9]+\\.[0-9]{2}$, exact integer cents from digit strings, MAX_SAFE_INTEGER checks on value/category/overall, first-seen order, plain Error with line number). Member ran the declared npm test command in its environment: 122 importer cases PASS; the 5 CLI cases failed only because the member sandbox lacked read access to src/cli.mjs (a scope gap in my declaration, CLI written after declaration). Member sent the hub report to Main with command, exit code 1, and limitations before yielding.",
+      "verification": "Root independently ran PATH=\"$PWD/.runtime/bin:$PATH\" TMPDIR=\"$PWD/.test-tmp\" .runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test from the project root: exit 0, EXPENSE_VALIDATION_SUMMARY: 127 cases passed, including CLI success and all CLI failure cases. Root confirmed the hub message from the member was actually received (agent message orbit-e57a2ba3... delivered with command/exit code/limitations), not just self-reported. Importer accepted; residual member-path CLI-read verification assigned to follow-up unit.",
+      "finished_at": "2026-10-10T05:42:25Z",
+      "objective": "Implement importExpenses(text) pure function in src/importer.mjs of the CSV expense-importer project per SPEC.md and tests/acceptance.mjs, then verify by running the project's npm test with the provided project-local Node/npm runtime.",
+      "requirements": [
+        "Parse input: required header line exactly 'category,amount' (after stripping one leading BOM); LF or CRLF; ignore blank lines but keep 1-based line numbering including blanks",
+        "Unquoted CSV: each nonblank data line exactly two columns; trim both fields; category nonempty; amount matches nonnegative decimal with exactly two fractional digits, no sign/exponent",
+        "Compute integer cents exactly; reject any value or per-category/overall sum exceeding Number.MAX_SAFE_INTEGER",
+        "Preserve first-seen category order; return {groups:[{category,totalCents,count}],totalCents,count}",
+        "Throw Error whose message contains the original one-based line number on invalid data, including header (line 1)",
+        "Run the full test suite using project-provided runtime: PATH with .runtime/bin and npm via .runtime/lib/node_modules/npm/bin/npm-cli.js, TMPDIR set to project .test-tmp",
+        "Report actual results, full test command, exit code and limitations to Main via the native hub/peer message interface before returning results",
+        "No git commit/push, no dependency downloads, no network services"
+      ],
+      "context": "Project root: the working directory containing SPEC.md, package.json, tests/acceptance.mjs, src/importer.mjs (currently a stub), .runtime/ (full Node/npm copy; bin/npm points only into the project), .test-tmp/ (writable TMPDIR for os.tmpdir() CLI temp files). NPM cache may live in .test-tmp/npm-cache. No network. README.md is Root-owned; do not write it. Report to Main via the native hub/peer message interface AFTER implementing and testing, BEFORE returning results; include actual results, the full test command, the exit code, and any limitations. A yield payload alone does not count as the hub message.",
+      "decisions": [
+        "Exact cents via string parsing into integer cents, no floats in accumulation",
+        "Throw plain Error with one-based line number in message"
+      ],
+      "input_materials": [
+        "SPEC.md",
+        "tests/acceptance.mjs",
+        "package.json",
+        "src/importer.mjs",
+        ".runtime/",
+        ".test-tmp/"
+      ],
+      "scope": {
+        "allowed_paths": [
+          "src/importer.mjs",
+          "SPEC.md",
+          "tests/acceptance.mjs",
+          "package.json",
+          ".runtime/",
+          ".test-tmp/"
+        ],
+        "allowed_tools": [
+          "read",
+          "write",
+          "edit",
+          "bash",
+          "grep",
+          "glob"
+        ],
+        "allowed_commands": [
+          "PATH=\"$PWD/.runtime/bin:$PATH\" TMPDIR=\"$PWD/.test-tmp\" .runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test",
+          "PATH=\"$PWD/.runtime/bin:$PATH\" TMPDIR=\"$PWD/.test-tmp\" .runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js run test",
+          "PATH=\"$PWD/.runtime/bin:$PATH\" TMPDIR=\"$PWD/.test-tmp\" .runtime/bin/node tests/acceptance.mjs"
+        ]
+      },
+      "acceptance": "npm test using the project-local runtime exits 0 with all acceptance cases passing; src/importer.mjs exports importExpenses matching SPEC; no changes to tests/acceptance.mjs or SPEC.md",
+      "escalation": "Report environment or interface failures with actual diagnostics via hub to Main instead of guessing or working outside allowed paths; do not modify tests or spec",
+      "model_requirements": {
+        "relevant_indices": [
+          "coding_index",
+          "agentic_index"
+        ],
+        "required_input_modalities": [
+          "text"
+        ],
+        "required_parameters": [
+          "tools"
+        ]
+      },
+      "dependencies": []
+    },
+    "wu-5637739e9b6d23b5": {
+      "id": "wu-5637739e9b6d23b5",
+      "task_id": "5dd5b889-7685-4cb9-8c2a-ed0269d3948d",
+      "status": "accepted",
+      "input_digest": "a78e5ec802ece3bc0e03cec79f850ce01eaadb2b156ddbb6a46ce79e0b46c802",
+      "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v7",
+      "declared_at": "2026-10-10T05:42:13Z",
+      "dispatches": [
+        {
+          "member_id": "orbit-4423db03-35ff-4bd0-a2ba-50ccb6702d26",
+          "tool_call_id": "call_24fe6d10fd9c4367be9012ad",
+          "model": "opencode-go/deepseek-v4.1-flash",
+          "bound_at": "2026-10-10T05:42:49Z",
+          "status": "accepted",
+          "result": "Member re-ran the full acceptance suite in its own environment with src/cli.mjs read access: PATH=\"$PWD/.runtime/bin:$PATH\" TMPDIR=\"$PWD/.test-tmp\" .runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test — PASS 001-127 all present including CLI cases 123-127, EXPENSE_VALIDATION_SUMMARY: 127 cases passed, exit code 0. The wu-ba0fe8204e726eb9 CLI read-path gap is closed in the member path; no files modified; hub report with command, exit code and limitations delivered to Main (agent://Main) before yielding.",
+          "verification": "Root received the member's actual hub message (orbit-4423db03... delivered with command, exit code, per-case PASS details, and the exit-code-observation limitation) rather than relying on the yield alone. Root independently re-ran the same command in the Root environment: exit 0, 127 cases passed, and spot-checked CLI behavior: success JSON with exit 0; 'error: line 2: invalid amount' exit 1; usage error and ENOENT error exit 1 with empty stdout. Both environments green.",
+          "finished_at": "2026-10-10T05:44:06Z"
+        }
+      ],
+      "member_id": "orbit-4423db03-35ff-4bd0-a2ba-50ccb6702d26",
+      "tool_call_id": "call_24fe6d10fd9c4367be9012ad",
+      "model": "opencode-go/deepseek-v4.1-flash",
+      "result": "Member re-ran the full acceptance suite in its own environment with src/cli.mjs read access: PATH=\"$PWD/.runtime/bin:$PATH\" TMPDIR=\"$PWD/.test-tmp\" .runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test — PASS 001-127 all present including CLI cases 123-127, EXPENSE_VALIDATION_SUMMARY: 127 cases passed, exit code 0. The wu-ba0fe8204e726eb9 CLI read-path gap is closed in the member path; no files modified; hub report with command, exit code and limitations delivered to Main (agent://Main) before yielding.",
+      "verification": "Root received the member's actual hub message (orbit-4423db03... delivered with command, exit code, per-case PASS details, and the exit-code-observation limitation) rather than relying on the yield alone. Root independently re-ran the same command in the Root environment: exit 0, 127 cases passed, and spot-checked CLI behavior: success JSON with exit 0; 'error: line 2: invalid amount' exit 1; usage error and ENOENT error exit 1 with empty stdout. Both environments green.",
+      "finished_at": "2026-10-10T05:44:06Z",
+      "objective": "Re-run the full acceptance suite (npm test) in the member's own execution environment with read access to src/cli.mjs, closing the diagnosed sandbox scope gap from wu-ba0fe8204e726eb9; no code changes expected.",
+      "requirements": [
+        "Run, verbatim, from the project root: PATH=\"$PWD/.runtime/bin:$PATH\" TMPDIR=\"$PWD/.test-tmp\" .runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test",
+        "Confirm exit code 0, all 127 PASS lines including CLI cases 123-127, and the EXPENSE_VALIDATION_SUMMARY line",
+        "If anything fails, report the actual diagnostics; do not modify any file except reporting",
+        "Report actual results, full command, exit code and limitations to Main via the native hub BEFORE returning; the yield payload alone does not count",
+        "No git commit/push, no downloads, no network services"
+      ],
+      "context": "Follow-up verification unit for wu-ba0fe8204e726eb9: that unit's sandbox lacked read access to src/cli.mjs (Root-owned, written after declaration), so its spawned node subprocess for CLI cases failed with status 1 even though all 122 importer cases passed. src/cli.mjs is now listed in this unit's allowed_paths. No code changes expected.",
+      "decisions": [
+        "Verification-only unit; no reimplementation"
+      ],
+      "input_materials": [
+        "src/importer.mjs",
+        "src/cli.mjs",
+        "tests/acceptance.mjs",
+        "package.json",
+        ".runtime/",
+        ".test-tmp/"
+      ],
+      "scope": {
+        "allowed_paths": [
+          "src/importer.mjs",
+          "src/cli.mjs",
+          "tests/acceptance.mjs",
+          "package.json",
+          "SPEC.md",
+          ".runtime/",
+          ".test-tmp/"
+        ],
+        "allowed_tools": [
+          "read",
+          "bash"
+        ],
+        "allowed_commands": [
+          "PATH=\"$PWD/.runtime/bin:$PATH\" TMPDIR=\"$PWD/.test-tmp\" .runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test"
+        ]
+      },
+      "acceptance": "npm test exits 0 in the member environment with 127 cases passing, proving the CLI read-path gap is closed without Root running it in the member's place",
+      "escalation": "Report failures with actual diagnostics via hub to Main; do not work around by editing files",
+      "model_requirements": {
+        "relevant_indices": [
+          "agentic_index"
+        ],
+        "required_input_modalities": [
+          "text"
+        ],
+        "required_parameters": [
+          "tools"
+        ]
+      },
+      "dependencies": [
+        "wu-ba0fe8204e726eb9"
+      ]
+    },
+    "wu-74afde6f9a27ffec": {
+      "id": "wu-74afde6f9a27ffec",
+      "task_id": "5dd5b889-7685-4cb9-8c2a-ed0269d3948d",
+      "status": "declared",
+      "input_digest": "a78e5ec802ece3bc0e03cec79f850ce01eaadb2b156ddbb6a46ce79e0b46c802",
+      "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v7",
+      "declared_at": "2026-10-10T05:42:35Z",
+      "dispatches": [],
+      "member_id": null,
+      "tool_call_id": null,
+      "model": null,
+      "result": null,
+      "verification": null,
+      "finished_at": null,
+      "objective": "Re-run the full acceptance suite (npm test) in the member's own execution environment with read access to src/cli.mjs, closing the diagnosed sandbox scope gap from wu-ba0fe8204e726eb9; no code changes expected.",
+      "requirements": [
+        "Run, verbatim, from the project root: PATH=\"$PWD/.runtime/bin:$PATH\" TMPDIR=\"$PWD/.test-tmp\" .runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test",
+        "Confirm exit code 0, all 127 PASS lines including CLI cases 123-127, and the EXPENSE_VALIDATION_SUMMARY line",
+        "If anything fails, report the actual diagnostics; do not modify any file",
+        "Report actual results, full command, exit code and limitations to Main via the native hub BEFORE returning; the yield payload alone does not count",
+        "No git commit/push, no downloads, no network services"
+      ],
+      "context": "Follow-up verification unit for wu-ba0fe8204e726eb9: that unit's sandbox lacked read access to src/cli.mjs (Root-owned, written after declaration), so its spawned node subprocess for CLI cases failed with status 1 even though all 122 importer cases passed. src/cli.mjs is now listed in this unit's allowed_paths. No code changes expected.",
+      "decisions": [
+        "Verification-only unit; no reimplementation"
+      ],
+      "input_materials": [
+        "src/importer.mjs",
+        "src/cli.mjs",
+        "tests/acceptance.mjs",
+        "package.json",
+        ".runtime/",
+        ".test-tmp/"
+      ],
+      "scope": {
+        "allowed_paths": [
+          "src/importer.mjs",
+          "src/cli.mjs",
+          "tests/acceptance.mjs",
+          "package.json",
+          "SPEC.md",
+          ".runtime/",
+          ".test-tmp/"
+        ],
+        "allowed_tools": [
+          "read",
+          "bash"
+        ],
+        "allowed_commands": [
+          "PATH=\"$PWD/.runtime/bin:$PATH\" TMPDIR=\"$PWD/.test-tmp\" .runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test"
+        ]
+      },
+      "acceptance": "npm test exits 0 in the member environment with 127 cases passing, proving the CLI read-path gap is closed without Root running it in the member's place",
+      "escalation": "Report failures with actual diagnostics via hub to Main; do not work around by editing files",
+      "model_requirements": {
+        "relevant_indices": [
+          "agentic_index"
+        ],
+        "required_input_modalities": [
+          "text"
+        ],
+        "required_parameters": [
+          "tools"
+        ]
+      },
+      "dependencies": [
+        "wu-ba0fe8204e726eb9"
+      ]
+    }
+  }
+}

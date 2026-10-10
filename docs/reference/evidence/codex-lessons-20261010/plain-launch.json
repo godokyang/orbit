@@ -1,0 +1,5 @@
+{
+  "pane": "w23:pV",
+  "command": "omp --cwd /var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/negative --model zhipu-coding-plan/glm-5.3-flash --thinking medium --no-extensions --no-skills --no-lsp --no-title --session-dir /var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/sessions-plain",
+  "role": "Plain OMP passivity probe; no model prompt or fixture implementation"
+}

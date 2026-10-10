@@ -1,0 +1,9 @@
+{
+  "reason": "179 tool-start records in one adapter round; queued corrective instructions not consumed before round completion; narrow C06 work replaces broad audit",
+  "process_pid_preserved": 12883,
+  "native_session": "/Users/yangke/.omp/agent/sessions/-Personal-omen-orbit/2026-10-10T03-25-09-916Z_01a123d7-d59c-7713-861e-030fae6c1283.jsonl",
+  "action": "Native Esc current read-only turn, process remains",
+  "provider": "cursor",
+  "model": "grok-4.7-500k-fast",
+  "resource_limit": "adapter aborted receipt tokens=0 is not proof of no consumption"
+}

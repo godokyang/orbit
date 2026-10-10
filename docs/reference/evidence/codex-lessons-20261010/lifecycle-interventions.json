@@ -1,0 +1,50 @@
+[
+  {
+    "at": "2026-10-10T04:36:03.125327+00:00",
+    "action": "initial user requirement",
+    "pane": "w23:p0"
+  },
+  {
+    "at": "2026-10-10T04:36:23.484460+00:00",
+    "action": "actual user amendment",
+    "pane": "w23:p0",
+    "requirement": "requirements/lifecycle-amend.txt"
+  },
+  {
+    "at": "2026-10-10T04:38:06.911970+00:00",
+    "action": "native Esc during live registered member",
+    "pane": "w23:p0",
+    "task_id": "d87c80b3-8b77-4d25-91ed-3a74e7202d54"
+  },
+  {
+    "at": "2026-10-10T04:38:41.474636+00:00",
+    "action": "explicit pause and discuss only user request",
+    "pane": "w23:p0"
+  },
+  {
+    "at": "2026-10-10T04:40:28.473392+00:00",
+    "action": "native /compact while paused",
+    "pane": "w23:p0"
+  },
+  {
+    "at": "2026-10-10T04:40:28.473581+00:00",
+    "action": "postcompact explicit discussion only",
+    "pane": "w23:p0"
+  },
+  {
+    "at": "2026-10-10T04:44:13.318343+00:00",
+    "action": "same compacted session resumed; discussion only actual request",
+    "pane": "w23:p0"
+  },
+  {
+    "at": "2026-10-10T04:45:21.550244+00:00",
+    "action": "explicit continuation after native compaction and resume",
+    "pane": "w23:p0"
+  },
+  {
+    "at": "2026-10-10T04:46:46.958727+00:00",
+    "action": "native normal exit while Root and registered member active",
+    "pane": "w23:p0",
+    "task_id": "03f9bed6-4a4d-40b8-8d40-3288e4277e04"
+  }
+]

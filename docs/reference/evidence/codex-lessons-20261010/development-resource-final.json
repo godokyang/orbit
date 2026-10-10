@@ -1,0 +1,5312 @@
+[
+  {
+    "role": "development pH",
+    "session_original": "/Users/yangke/.omp/agent/sessions/-Personal-omen-orbit/2026-10-10T03-25-09-608Z_01a123d7-d468-701f-b1d3-682e5e561dfa.jsonl",
+    "session_sha256": "6655ff8bc1f7b071ce63d97e7d9872a5c430fca07701f8146d5bb5aaa7bea5eb",
+    "models": [
+      {
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "receipts": 151
+      }
+    ],
+    "receipt_count": 151,
+    "reported_token_sums": {
+      "input": 323650,
+      "output": 79751,
+      "cacheRead": 18322176,
+      "cacheWrite": 0,
+      "totalTokens": 18725577
+    },
+    "zero_or_missing_aborted_usage_unknown": 0,
+    "reasoning_reported_receipts": 0,
+    "reasoning_sum_output_subset_only": null,
+    "reasoning_unknown_receipts": 151,
+    "receipts": [
+      {
+        "time": 1791602810413,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 7810,
+          "output": 252,
+          "cacheRead": 5376,
+          "cacheWrite": 0,
+          "totalTokens": 13438
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791602819782,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 7583,
+          "output": 107,
+          "cacheRead": 13056,
+          "cacheWrite": 0,
+          "totalTokens": 20746
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791602824921,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 7849,
+          "output": 153,
+          "cacheRead": 20480,
+          "cacheWrite": 0,
+          "totalTokens": 28482
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791602834989,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 8670,
+          "output": 104,
+          "cacheRead": 28160,
+          "cacheWrite": 0,
+          "totalTokens": 36934
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791602842019,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 9633,
+          "output": 139,
+          "cacheRead": 36608,
+          "cacheWrite": 0,
+          "totalTokens": 46380
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791602849423,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 10849,
+          "output": 202,
+          "cacheRead": 46080,
+          "cacheWrite": 0,
+          "totalTokens": 57131
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791602858424,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 4859,
+          "output": 133,
+          "cacheRead": 56832,
+          "cacheWrite": 0,
+          "totalTokens": 61824
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791602866741,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 6337,
+          "output": 585,
+          "cacheRead": 61440,
+          "cacheWrite": 0,
+          "totalTokens": 68362
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791602885257,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1995,
+          "output": 264,
+          "cacheRead": 67584,
+          "cacheWrite": 0,
+          "totalTokens": 69843
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791602896612,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1835,
+          "output": 197,
+          "cacheRead": 69376,
+          "cacheWrite": 0,
+          "totalTokens": 71408
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791602906380,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 3416,
+          "output": 149,
+          "cacheRead": 71168,
+          "cacheWrite": 0,
+          "totalTokens": 74733
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791602915734,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2734,
+          "output": 310,
+          "cacheRead": 74496,
+          "cacheWrite": 0,
+          "totalTokens": 77540
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791602927998,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2607,
+          "output": 314,
+          "cacheRead": 77056,
+          "cacheWrite": 0,
+          "totalTokens": 79977
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791602938392,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 4345,
+          "output": 207,
+          "cacheRead": 79616,
+          "cacheWrite": 0,
+          "totalTokens": 84168
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603112560,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2260,
+          "output": 282,
+          "cacheRead": 83712,
+          "cacheWrite": 0,
+          "totalTokens": 86254
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603125033,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 4452,
+          "output": 318,
+          "cacheRead": 85760,
+          "cacheWrite": 0,
+          "totalTokens": 90530
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603138019,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 647,
+          "output": 211,
+          "cacheRead": 90112,
+          "cacheWrite": 0,
+          "totalTokens": 90970
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603146947,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 908,
+          "output": 360,
+          "cacheRead": 90624,
+          "cacheWrite": 0,
+          "totalTokens": 91892
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603160265,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2497,
+          "output": 322,
+          "cacheRead": 91392,
+          "cacheWrite": 0,
+          "totalTokens": 94211
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603173699,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1692,
+          "output": 273,
+          "cacheRead": 93696,
+          "cacheWrite": 0,
+          "totalTokens": 95661
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603185113,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1180,
+          "output": 81,
+          "cacheRead": 95232,
+          "cacheWrite": 0,
+          "totalTokens": 96493
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603191544,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 4265,
+          "output": 202,
+          "cacheRead": 96256,
+          "cacheWrite": 0,
+          "totalTokens": 100723
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603199860,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 4802,
+          "output": 300,
+          "cacheRead": 100352,
+          "cacheWrite": 0,
+          "totalTokens": 105454
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603211220,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 3441,
+          "output": 2904,
+          "cacheRead": 104960,
+          "cacheWrite": 0,
+          "totalTokens": 111305
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603311676,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 3339,
+          "output": 2049,
+          "cacheRead": 108288,
+          "cacheWrite": 0,
+          "totalTokens": 113676
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603384662,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2425,
+          "output": 177,
+          "cacheRead": 111616,
+          "cacheWrite": 0,
+          "totalTokens": 114218
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603393429,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 548,
+          "output": 134,
+          "cacheRead": 113920,
+          "cacheWrite": 0,
+          "totalTokens": 114602
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603400571,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 3326,
+          "output": 326,
+          "cacheRead": 114432,
+          "cacheWrite": 0,
+          "totalTokens": 118084
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603413556,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 4529,
+          "output": 371,
+          "cacheRead": 117760,
+          "cacheWrite": 0,
+          "totalTokens": 122660
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603427874,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 637,
+          "output": 79,
+          "cacheRead": 122112,
+          "cacheWrite": 0,
+          "totalTokens": 122828
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603433144,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1942,
+          "output": 386,
+          "cacheRead": 122624,
+          "cacheWrite": 0,
+          "totalTokens": 124952
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603449144,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 672,
+          "output": 80,
+          "cacheRead": 124416,
+          "cacheWrite": 0,
+          "totalTokens": 125168
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603454119,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 4045,
+          "output": 159,
+          "cacheRead": 124928,
+          "cacheWrite": 0,
+          "totalTokens": 129132
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603461405,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 651,
+          "output": 79,
+          "cacheRead": 128768,
+          "cacheWrite": 0,
+          "totalTokens": 129498
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603466682,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 711,
+          "output": 2852,
+          "cacheRead": 129280,
+          "cacheWrite": 0,
+          "totalTokens": 132843
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603566684,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 3343,
+          "output": 191,
+          "cacheRead": 129792,
+          "cacheWrite": 0,
+          "totalTokens": 133326
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603575831,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1790,
+          "output": 153,
+          "cacheRead": 133120,
+          "cacheWrite": 0,
+          "totalTokens": 135063
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603583427,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 4075,
+          "output": 171,
+          "cacheRead": 134912,
+          "cacheWrite": 0,
+          "totalTokens": 139158
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603591448,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2721,
+          "output": 6255,
+          "cacheRead": 138752,
+          "cacheWrite": 0,
+          "totalTokens": 147728
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603769327,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 9229,
+          "output": 1496,
+          "cacheRead": 141312,
+          "cacheWrite": 0,
+          "totalTokens": 152037
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603814488,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 3128,
+          "output": 1467,
+          "cacheRead": 150528,
+          "cacheWrite": 0,
+          "totalTokens": 155123
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603860238,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1868,
+          "output": 1313,
+          "cacheRead": 153600,
+          "cacheWrite": 0,
+          "totalTokens": 156781
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603891815,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1579,
+          "output": 123,
+          "cacheRead": 155392,
+          "cacheWrite": 0,
+          "totalTokens": 157094
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603899257,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2162,
+          "output": 620,
+          "cacheRead": 156928,
+          "cacheWrite": 0,
+          "totalTokens": 159710
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603915292,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1420,
+          "output": 506,
+          "cacheRead": 158976,
+          "cacheWrite": 0,
+          "totalTokens": 160902
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603929572,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 984,
+          "output": 159,
+          "cacheRead": 160256,
+          "cacheWrite": 0,
+          "totalTokens": 161399
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603940962,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 702,
+          "output": 1592,
+          "cacheRead": 161024,
+          "cacheWrite": 0,
+          "totalTokens": 163318
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603988788,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 4067,
+          "output": 493,
+          "cacheRead": 161536,
+          "cacheWrite": 0,
+          "totalTokens": 166096
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604005945,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 911,
+          "output": 130,
+          "cacheRead": 165376,
+          "cacheWrite": 0,
+          "totalTokens": 166417
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604011796,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2206,
+          "output": 2406,
+          "cacheRead": 166144,
+          "cacheWrite": 0,
+          "totalTokens": 170756
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604063568,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 3648,
+          "output": 225,
+          "cacheRead": 168192,
+          "cacheWrite": 0,
+          "totalTokens": 172065
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604072654,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 490,
+          "output": 130,
+          "cacheRead": 171776,
+          "cacheWrite": 0,
+          "totalTokens": 172396
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604079522,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 527,
+          "output": 2344,
+          "cacheRead": 172032,
+          "cacheWrite": 0,
+          "totalTokens": 174903
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604137766,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2690,
+          "output": 119,
+          "cacheRead": 172544,
+          "cacheWrite": 0,
+          "totalTokens": 175353
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604143874,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 971,
+          "output": 354,
+          "cacheRead": 175104,
+          "cacheWrite": 0,
+          "totalTokens": 176429
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604157065,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2074,
+          "output": 1610,
+          "cacheRead": 175872,
+          "cacheWrite": 0,
+          "totalTokens": 179556
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604202503,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2079,
+          "output": 1396,
+          "cacheRead": 177920,
+          "cacheWrite": 0,
+          "totalTokens": 181395
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604236197,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1870,
+          "output": 1247,
+          "cacheRead": 179968,
+          "cacheWrite": 0,
+          "totalTokens": 183085
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604266395,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1503,
+          "output": 662,
+          "cacheRead": 181760,
+          "cacheWrite": 0,
+          "totalTokens": 183925
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604288635,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 989,
+          "output": 161,
+          "cacheRead": 183040,
+          "cacheWrite": 0,
+          "totalTokens": 184190
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604296232,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 617,
+          "output": 117,
+          "cacheRead": 183808,
+          "cacheWrite": 0,
+          "totalTokens": 184542
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604346356,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 618,
+          "output": 119,
+          "cacheRead": 184320,
+          "cacheWrite": 0,
+          "totalTokens": 185057
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604384571,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 272,
+          "output": 239,
+          "cacheRead": 184832,
+          "cacheWrite": 0,
+          "totalTokens": 185343
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604412688,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "stop",
+        "usage": {
+          "input": 391,
+          "output": 2186,
+          "cacheRead": 185088,
+          "cacheWrite": 0,
+          "totalTokens": 187665
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604472034,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2596,
+          "output": 473,
+          "cacheRead": 185344,
+          "cacheWrite": 0,
+          "totalTokens": 188413
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604486448,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 655,
+          "output": 177,
+          "cacheRead": 187904,
+          "cacheWrite": 0,
+          "totalTokens": 188736
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604494136,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1071,
+          "output": 191,
+          "cacheRead": 188416,
+          "cacheWrite": 0,
+          "totalTokens": 189678
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604501987,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1095,
+          "output": 319,
+          "cacheRead": 189440,
+          "cacheWrite": 0,
+          "totalTokens": 190854
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604513983,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 651,
+          "output": 163,
+          "cacheRead": 190464,
+          "cacheWrite": 0,
+          "totalTokens": 191278
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604521316,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 998,
+          "output": 1370,
+          "cacheRead": 190976,
+          "cacheWrite": 0,
+          "totalTokens": 193344
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604566280,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1650,
+          "output": 186,
+          "cacheRead": 191744,
+          "cacheWrite": 0,
+          "totalTokens": 193580
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604574821,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 569,
+          "output": 167,
+          "cacheRead": 193280,
+          "cacheWrite": 0,
+          "totalTokens": 194016
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604582867,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 413,
+          "output": 164,
+          "cacheRead": 193792,
+          "cacheWrite": 0,
+          "totalTokens": 194369
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604590614,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 555,
+          "output": 220,
+          "cacheRead": 194048,
+          "cacheWrite": 0,
+          "totalTokens": 194823
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604599056,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 650,
+          "output": 185,
+          "cacheRead": 194560,
+          "cacheWrite": 0,
+          "totalTokens": 195395
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604606780,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1694,
+          "output": 148,
+          "cacheRead": 195072,
+          "cacheWrite": 0,
+          "totalTokens": 196914
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604613159,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 896,
+          "output": 2021,
+          "cacheRead": 196608,
+          "cacheWrite": 0,
+          "totalTokens": 199525
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604673764,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2707,
+          "output": 219,
+          "cacheRead": 197376,
+          "cacheWrite": 0,
+          "totalTokens": 200302
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604682634,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 561,
+          "output": 212,
+          "cacheRead": 199936,
+          "cacheWrite": 0,
+          "totalTokens": 200709
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604691713,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1450,
+          "output": 1726,
+          "cacheRead": 200448,
+          "cacheWrite": 0,
+          "totalTokens": 203624
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604737341,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2785,
+          "output": 80,
+          "cacheRead": 201728,
+          "cacheWrite": 0,
+          "totalTokens": 204593
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604743876,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1072,
+          "output": 496,
+          "cacheRead": 204288,
+          "cacheWrite": 0,
+          "totalTokens": 205856
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604757932,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 792,
+          "output": 101,
+          "cacheRead": 205312,
+          "cacheWrite": 0,
+          "totalTokens": 206205
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604764777,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2649,
+          "output": 350,
+          "cacheRead": 206080,
+          "cacheWrite": 0,
+          "totalTokens": 209079
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604776508,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 528,
+          "output": 116,
+          "cacheRead": 208640,
+          "cacheWrite": 0,
+          "totalTokens": 209284
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604783370,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 214,
+          "output": 80,
+          "cacheRead": 209152,
+          "cacheWrite": 0,
+          "totalTokens": 209446
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604788752,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 999,
+          "output": 471,
+          "cacheRead": 209152,
+          "cacheWrite": 0,
+          "totalTokens": 210622
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604803646,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 961,
+          "output": 100,
+          "cacheRead": 209920,
+          "cacheWrite": 0,
+          "totalTokens": 210981
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604809838,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1127,
+          "output": 129,
+          "cacheRead": 210688,
+          "cacheWrite": 0,
+          "totalTokens": 211944
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604818429,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 465,
+          "output": 185,
+          "cacheRead": 211712,
+          "cacheWrite": 0,
+          "totalTokens": 212362
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604827221,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 519,
+          "output": 81,
+          "cacheRead": 211968,
+          "cacheWrite": 0,
+          "totalTokens": 212568
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604833553,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 836,
+          "output": 652,
+          "cacheRead": 212480,
+          "cacheWrite": 0,
+          "totalTokens": 213968
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604850569,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 892,
+          "output": 551,
+          "cacheRead": 213248,
+          "cacheWrite": 0,
+          "totalTokens": 214691
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604867885,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 943,
+          "output": 1226,
+          "cacheRead": 214016,
+          "cacheWrite": 0,
+          "totalTokens": 216185
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604897281,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2368,
+          "output": 81,
+          "cacheRead": 214784,
+          "cacheWrite": 0,
+          "totalTokens": 217233
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604903243,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 774,
+          "output": 1234,
+          "cacheRead": 217088,
+          "cacheWrite": 0,
+          "totalTokens": 219096
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604929370,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2152,
+          "output": 1063,
+          "cacheRead": 217856,
+          "cacheWrite": 0,
+          "totalTokens": 221071
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604960723,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2270,
+          "output": 743,
+          "cacheRead": 219904,
+          "cacheWrite": 0,
+          "totalTokens": 222917
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604983610,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 33455,
+          "output": 127,
+          "cacheRead": 12544,
+          "cacheWrite": 0,
+          "totalTokens": 46126
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604993262,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 462,
+          "output": 80,
+          "cacheRead": 45824,
+          "cacheWrite": 0,
+          "totalTokens": 46366
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604997384,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 703,
+          "output": 171,
+          "cacheRead": 46080,
+          "cacheWrite": 0,
+          "totalTokens": 46954
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605005039,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 567,
+          "output": 446,
+          "cacheRead": 46592,
+          "cacheWrite": 0,
+          "totalTokens": 47605
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605018945,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 729,
+          "output": 337,
+          "cacheRead": 47104,
+          "cacheWrite": 0,
+          "totalTokens": 48170
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605030269,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 729,
+          "output": 122,
+          "cacheRead": 47616,
+          "cacheWrite": 0,
+          "totalTokens": 48467
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605035428,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 494,
+          "output": 155,
+          "cacheRead": 48128,
+          "cacheWrite": 0,
+          "totalTokens": 48777
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605041696,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 552,
+          "output": 179,
+          "cacheRead": 48384,
+          "cacheWrite": 0,
+          "totalTokens": 49115
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605048605,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 452,
+          "output": 360,
+          "cacheRead": 48896,
+          "cacheWrite": 0,
+          "totalTokens": 49708
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605061613,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 808,
+          "output": 320,
+          "cacheRead": 49152,
+          "cacheWrite": 0,
+          "totalTokens": 50280
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605071920,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 845,
+          "output": 368,
+          "cacheRead": 49920,
+          "cacheWrite": 0,
+          "totalTokens": 51133
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605085044,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 589,
+          "output": 104,
+          "cacheRead": 50688,
+          "cacheWrite": 0,
+          "totalTokens": 51381
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605089355,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 218,
+          "output": 80,
+          "cacheRead": 51200,
+          "cacheWrite": 0,
+          "totalTokens": 51498
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605093489,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 527,
+          "output": 89,
+          "cacheRead": 51200,
+          "cacheWrite": 0,
+          "totalTokens": 51816
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605098569,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 332,
+          "output": 97,
+          "cacheRead": 51712,
+          "cacheWrite": 0,
+          "totalTokens": 52141
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605134438,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 220,
+          "output": 124,
+          "cacheRead": 51968,
+          "cacheWrite": 0,
+          "totalTokens": 52312
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605164268,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 617,
+          "output": 128,
+          "cacheRead": 51968,
+          "cacheWrite": 0,
+          "totalTokens": 52713
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605210953,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "stop",
+        "usage": {
+          "input": 936,
+          "output": 799,
+          "cacheRead": 52480,
+          "cacheWrite": 0,
+          "totalTokens": 54215
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605233687,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "stop",
+        "usage": {
+          "input": 1076,
+          "output": 357,
+          "cacheRead": 53248,
+          "cacheWrite": 0,
+          "totalTokens": 54681
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605280692,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 678,
+          "output": 331,
+          "cacheRead": 54272,
+          "cacheWrite": 0,
+          "totalTokens": 55281
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605291756,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 5625,
+          "output": 272,
+          "cacheRead": 54784,
+          "cacheWrite": 0,
+          "totalTokens": 60681
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605300555,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1548,
+          "output": 136,
+          "cacheRead": 60160,
+          "cacheWrite": 0,
+          "totalTokens": 61844
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605306515,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 4877,
+          "output": 406,
+          "cacheRead": 61696,
+          "cacheWrite": 0,
+          "totalTokens": 66979
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605318704,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1871,
+          "output": 350,
+          "cacheRead": 66560,
+          "cacheWrite": 0,
+          "totalTokens": 68781
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605329401,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1682,
+          "output": 156,
+          "cacheRead": 68352,
+          "cacheWrite": 0,
+          "totalTokens": 70190
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605335171,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 831,
+          "output": 172,
+          "cacheRead": 69888,
+          "cacheWrite": 0,
+          "totalTokens": 70891
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605341650,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2926,
+          "output": 1954,
+          "cacheRead": 70656,
+          "cacheWrite": 0,
+          "totalTokens": 75536
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605403402,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 3361,
+          "output": 331,
+          "cacheRead": 73472,
+          "cacheWrite": 0,
+          "totalTokens": 77164
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605413709,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 502,
+          "output": 79,
+          "cacheRead": 76800,
+          "cacheWrite": 0,
+          "totalTokens": 77381
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605418072,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1195,
+          "output": 615,
+          "cacheRead": 77056,
+          "cacheWrite": 0,
+          "totalTokens": 78866
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605438350,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 815,
+          "output": 253,
+          "cacheRead": 78080,
+          "cacheWrite": 0,
+          "totalTokens": 79148
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605446354,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 399,
+          "output": 206,
+          "cacheRead": 78848,
+          "cacheWrite": 0,
+          "totalTokens": 79453
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605454040,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "stop",
+        "usage": {
+          "input": 635,
+          "output": 1642,
+          "cacheRead": 79104,
+          "cacheWrite": 0,
+          "totalTokens": 81381
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791606012534,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 397,
+          "output": 185,
+          "cacheRead": 81152,
+          "cacheWrite": 0,
+          "totalTokens": 81734
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791606021205,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1792,
+          "output": 115,
+          "cacheRead": 81408,
+          "cacheWrite": 0,
+          "totalTokens": 83315
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791606026372,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1387,
+          "output": 441,
+          "cacheRead": 83200,
+          "cacheWrite": 0,
+          "totalTokens": 85028
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791606039030,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 687,
+          "output": 103,
+          "cacheRead": 84480,
+          "cacheWrite": 0,
+          "totalTokens": 85270
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791606056908,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1159,
+          "output": 272,
+          "cacheRead": 84992,
+          "cacheWrite": 0,
+          "totalTokens": 86423
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791606066317,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "stop",
+        "usage": {
+          "input": 749,
+          "output": 471,
+          "cacheRead": 86016,
+          "cacheWrite": 0,
+          "totalTokens": 87236
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791607213512,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 434,
+          "output": 148,
+          "cacheRead": 87040,
+          "cacheWrite": 0,
+          "totalTokens": 87622
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791607220680,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 793,
+          "output": 327,
+          "cacheRead": 87296,
+          "cacheWrite": 0,
+          "totalTokens": 88416
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791607231496,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 3487,
+          "output": 88,
+          "cacheRead": 88064,
+          "cacheWrite": 0,
+          "totalTokens": 91639
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791607236719,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 345,
+          "output": 107,
+          "cacheRead": 91392,
+          "cacheWrite": 0,
+          "totalTokens": 91844
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791607243020,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 973,
+          "output": 366,
+          "cacheRead": 91648,
+          "cacheWrite": 0,
+          "totalTokens": 92987
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791607258757,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "stop",
+        "usage": {
+          "input": 1646,
+          "output": 2285,
+          "cacheRead": 92416,
+          "cacheWrite": 0,
+          "totalTokens": 96347
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791607862628,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 277,
+          "output": 146,
+          "cacheRead": 96256,
+          "cacheWrite": 0,
+          "totalTokens": 96679
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791607869244,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1619,
+          "output": 779,
+          "cacheRead": 96512,
+          "cacheWrite": 0,
+          "totalTokens": 98910
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791607892244,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 978,
+          "output": 348,
+          "cacheRead": 98048,
+          "cacheWrite": 0,
+          "totalTokens": 99374
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791607904801,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1629,
+          "output": 854,
+          "cacheRead": 98816,
+          "cacheWrite": 0,
+          "totalTokens": 101299
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791607930620,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "stop",
+        "usage": {
+          "input": 2023,
+          "output": 826,
+          "cacheRead": 100352,
+          "cacheWrite": 0,
+          "totalTokens": 103201
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791609012521,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 216,
+          "output": 135,
+          "cacheRead": 103168,
+          "cacheWrite": 0,
+          "totalTokens": 103519
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791609018509,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 484,
+          "output": 221,
+          "cacheRead": 103168,
+          "cacheWrite": 0,
+          "totalTokens": 103873
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791609026041,
+        "provider": "kimi-code",
+        "model": "k3-256k",
+        "stop_reason": "stop",
+        "usage": {
+          "input": 2347,
+          "output": 1463,
+          "cacheRead": 103424,
+          "cacheWrite": 0,
+          "totalTokens": 107234
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      }
+    ],
+    "contextTokens": "SDK context metric; not summed as consumption",
+    "cash_and_quota": "unknown"
+  },
+  {
+    "role": "development pJ",
+    "session_original": "/Users/yangke/.omp/agent/sessions/-Personal-omen-orbit/2026-10-10T03-25-09-916Z_01a123d7-d59c-7713-861e-030fae6c1283.jsonl",
+    "session_sha256": "781e1ca85b4be9ad6f2cd6ac82eae0429e27585face097a05efc111890dfee55",
+    "models": [
+      {
+        "provider": "cursor",
+        "model": "grok-4.7-500k-fast",
+        "receipts": 7
+      }
+    ],
+    "receipt_count": 7,
+    "reported_token_sums": {
+      "input": 128611,
+      "output": 254609,
+      "cacheRead": 6272384,
+      "cacheWrite": 0,
+      "totalTokens": 6655604
+    },
+    "zero_or_missing_aborted_usage_unknown": 1,
+    "reasoning_reported_receipts": 3,
+    "reasoning_sum_output_subset_only": 30824,
+    "reasoning_unknown_receipts": 4,
+    "receipts": [
+      {
+        "time": 1791602811031,
+        "provider": "cursor",
+        "model": "grok-4.7-500k-fast",
+        "stop_reason": "aborted",
+        "usage": {
+          "input": 0,
+          "output": 154987,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "totalTokens": 154987,
+          "contextTokens": 231509
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603729961,
+        "provider": "cursor",
+        "model": "grok-4.7-500k-fast",
+        "stop_reason": "aborted",
+        "usage": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "totalTokens": 0
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603767452,
+        "provider": "cursor",
+        "model": "grok-4.7-500k-fast",
+        "stop_reason": "stop",
+        "usage": {
+          "input": 53981,
+          "output": 21863,
+          "cacheRead": 2535808,
+          "cacheWrite": 0,
+          "totalTokens": 2611652,
+          "contextTokens": 250196,
+          "reasoningTokens": 16365
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604151800,
+        "provider": "cursor",
+        "model": "grok-4.7-500k-fast",
+        "stop_reason": "stop",
+        "usage": {
+          "input": 16953,
+          "output": 9162,
+          "cacheRead": 3360512,
+          "cacheWrite": 0,
+          "totalTokens": 3386627,
+          "contextTokens": 3386627,
+          "reasoningTokens": 6315
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604260072,
+        "provider": "cursor",
+        "model": "grok-4.7-500k-fast",
+        "stop_reason": "aborted",
+        "usage": {
+          "input": 0,
+          "output": 13444,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "totalTokens": 13444,
+          "contextTokens": 42441
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604849744,
+        "provider": "cursor",
+        "model": "grok-4.7-500k-fast",
+        "stop_reason": "aborted",
+        "usage": {
+          "input": 0,
+          "output": 45813,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "totalTokens": 45813,
+          "contextTokens": 100746
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605451451,
+        "provider": "cursor",
+        "model": "grok-4.7-500k-fast",
+        "stop_reason": "stop",
+        "usage": {
+          "input": 57677,
+          "output": 9340,
+          "cacheRead": 376064,
+          "cacheWrite": 0,
+          "totalTokens": 443081,
+          "contextTokens": 97566,
+          "reasoningTokens": 8144
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      }
+    ],
+    "contextTokens": "SDK context metric; not summed as consumption",
+    "cash_and_quota": "unknown"
+  },
+  {
+    "role": "development pK",
+    "session_original": "/Users/yangke/.omp/agent/sessions/-Personal-omen-orbit/2026-10-10T03-25-10-220Z_01a123d7-d6cc-750d-aa75-4eb4611fcfee.jsonl",
+    "session_sha256": "3d1fce86fd6ee5f9a280cf5a3d1791355e942864259eb8a0997be03121068806",
+    "models": [
+      {
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "receipts": 207
+      }
+    ],
+    "receipt_count": 207,
+    "reported_token_sums": {
+      "input": 487920,
+      "output": 121526,
+      "cacheRead": 29282432,
+      "cacheWrite": 0,
+      "totalTokens": 29891878
+    },
+    "zero_or_missing_aborted_usage_unknown": 0,
+    "reasoning_reported_receipts": 107,
+    "reasoning_sum_output_subset_only": 69991,
+    "reasoning_unknown_receipts": 100,
+    "receipts": [
+      {
+        "time": 1791602810722,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 9945,
+          "output": 663,
+          "cacheRead": 3584,
+          "cacheWrite": 0,
+          "totalTokens": 14192,
+          "reasoningTokens": 410
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791602829656,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 9521,
+          "output": 282,
+          "cacheRead": 5760,
+          "cacheWrite": 0,
+          "totalTokens": 15563,
+          "reasoningTokens": 17
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791602837961,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 3232,
+          "output": 73,
+          "cacheRead": 15232,
+          "cacheWrite": 0,
+          "totalTokens": 18537
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791602842694,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 3668,
+          "output": 103,
+          "cacheRead": 18432,
+          "cacheWrite": 0,
+          "totalTokens": 22203
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791602848085,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 249,
+          "output": 46,
+          "cacheRead": 22080,
+          "cacheWrite": 0,
+          "totalTokens": 22375
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791602852502,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1536,
+          "output": 212,
+          "cacheRead": 22272,
+          "cacheWrite": 0,
+          "totalTokens": 24020,
+          "reasoningTokens": 154
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791602859442,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 893,
+          "output": 53,
+          "cacheRead": 23808,
+          "cacheWrite": 0,
+          "totalTokens": 24754
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791602863913,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1956,
+          "output": 189,
+          "cacheRead": 24640,
+          "cacheWrite": 0,
+          "totalTokens": 26785,
+          "reasoningTokens": 61
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791602871006,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2707,
+          "output": 75,
+          "cacheRead": 26560,
+          "cacheWrite": 0,
+          "totalTokens": 29342
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791602875865,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1790,
+          "output": 52,
+          "cacheRead": 29248,
+          "cacheWrite": 0,
+          "totalTokens": 31090,
+          "reasoningTokens": 15
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791602880810,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 987,
+          "output": 39,
+          "cacheRead": 30976,
+          "cacheWrite": 0,
+          "totalTokens": 32002
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791602885296,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 383,
+          "output": 79,
+          "cacheRead": 31936,
+          "cacheWrite": 0,
+          "totalTokens": 32398
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791602888534,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 579,
+          "output": 43,
+          "cacheRead": 32256,
+          "cacheWrite": 0,
+          "totalTokens": 32878
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791602892989,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1425,
+          "output": 1472,
+          "cacheRead": 32832,
+          "cacheWrite": 0,
+          "totalTokens": 35729,
+          "reasoningTokens": 1366
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791602931024,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1632,
+          "output": 102,
+          "cacheRead": 34240,
+          "cacheWrite": 0,
+          "totalTokens": 35974
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791602936387,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 371,
+          "output": 125,
+          "cacheRead": 35840,
+          "cacheWrite": 0,
+          "totalTokens": 36336,
+          "reasoningTokens": 39
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791602939950,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1301,
+          "output": 216,
+          "cacheRead": 36160,
+          "cacheWrite": 0,
+          "totalTokens": 37677,
+          "reasoningTokens": 129
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791602948167,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 381,
+          "output": 123,
+          "cacheRead": 37440,
+          "cacheWrite": 0,
+          "totalTokens": 37944
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791602951227,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 410,
+          "output": 282,
+          "cacheRead": 37760,
+          "cacheWrite": 0,
+          "totalTokens": 38452,
+          "reasoningTokens": 208
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791602962449,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1886,
+          "output": 212,
+          "cacheRead": 38144,
+          "cacheWrite": 0,
+          "totalTokens": 40242,
+          "reasoningTokens": 88
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791602968165,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 601,
+          "output": 270,
+          "cacheRead": 40000,
+          "cacheWrite": 0,
+          "totalTokens": 40871,
+          "reasoningTokens": 97
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791602976350,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1447,
+          "output": 107,
+          "cacheRead": 40576,
+          "cacheWrite": 0,
+          "totalTokens": 42130
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791602978672,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 3335,
+          "output": 200,
+          "cacheRead": 41984,
+          "cacheWrite": 0,
+          "totalTokens": 45519,
+          "reasoningTokens": 91
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791602985668,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 688,
+          "output": 265,
+          "cacheRead": 45312,
+          "cacheWrite": 0,
+          "totalTokens": 46265
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791602992630,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1515,
+          "output": 3144,
+          "cacheRead": 45952,
+          "cacheWrite": 0,
+          "totalTokens": 50611,
+          "reasoningTokens": 2902
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603073414,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 4707,
+          "output": 179,
+          "cacheRead": 47424,
+          "cacheWrite": 0,
+          "totalTokens": 52310,
+          "reasoningTokens": 32
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603077711,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 644,
+          "output": 160,
+          "cacheRead": 52096,
+          "cacheWrite": 0,
+          "totalTokens": 52900
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603084112,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1009,
+          "output": 43,
+          "cacheRead": 52736,
+          "cacheWrite": 0,
+          "totalTokens": 53788
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603087110,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1296,
+          "output": 216,
+          "cacheRead": 53696,
+          "cacheWrite": 0,
+          "totalTokens": 55208,
+          "reasoningTokens": 87
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603095633,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2142,
+          "output": 325,
+          "cacheRead": 54976,
+          "cacheWrite": 0,
+          "totalTokens": 57443,
+          "reasoningTokens": 208
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603106610,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1066,
+          "output": 2835,
+          "cacheRead": 57088,
+          "cacheWrite": 0,
+          "totalTokens": 60989,
+          "reasoningTokens": 2631
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603174251,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 3131,
+          "output": 4620,
+          "cacheRead": 58112,
+          "cacheWrite": 0,
+          "totalTokens": 65863,
+          "reasoningTokens": 4472
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603275567,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 5054,
+          "output": 128,
+          "cacheRead": 61184,
+          "cacheWrite": 0,
+          "totalTokens": 66366
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603280985,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 229,
+          "output": 43,
+          "cacheRead": 66176,
+          "cacheWrite": 0,
+          "totalTokens": 66448
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603285560,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 386,
+          "output": 8129,
+          "cacheRead": 66368,
+          "cacheWrite": 0,
+          "totalTokens": 74883,
+          "reasoningTokens": 7759
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603427918,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 8282,
+          "output": 652,
+          "cacheRead": 66752,
+          "cacheWrite": 0,
+          "totalTokens": 75686,
+          "reasoningTokens": 52
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603439714,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 805,
+          "output": 2521,
+          "cacheRead": 75008,
+          "cacheWrite": 0,
+          "totalTokens": 78334
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603469330,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 3947,
+          "output": 287,
+          "cacheRead": 75776,
+          "cacheWrite": 0,
+          "totalTokens": 80010
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603476520,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 694,
+          "output": 3513,
+          "cacheRead": 79680,
+          "cacheWrite": 0,
+          "totalTokens": 83887,
+          "reasoningTokens": 3206
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603543908,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 4101,
+          "output": 704,
+          "cacheRead": 80320,
+          "cacheWrite": 0,
+          "totalTokens": 85125,
+          "reasoningTokens": 595
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603566613,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 727,
+          "output": 142,
+          "cacheRead": 84416,
+          "cacheWrite": 0,
+          "totalTokens": 85285,
+          "reasoningTokens": 65
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603570343,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 218,
+          "output": 1074,
+          "cacheRead": 85120,
+          "cacheWrite": 0,
+          "totalTokens": 86412,
+          "reasoningTokens": 414
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603586417,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1352,
+          "output": 243,
+          "cacheRead": 85312,
+          "cacheWrite": 0,
+          "totalTokens": 86907
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603593918,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 588,
+          "output": 53,
+          "cacheRead": 86656,
+          "cacheWrite": 0,
+          "totalTokens": 87297
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603598878,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 105,
+          "output": 42,
+          "cacheRead": 87232,
+          "cacheWrite": 0,
+          "totalTokens": 87379
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603603586,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 251,
+          "output": 47,
+          "cacheRead": 87296,
+          "cacheWrite": 0,
+          "totalTokens": 87594
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603608527,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 541,
+          "output": 240,
+          "cacheRead": 87488,
+          "cacheWrite": 0,
+          "totalTokens": 88269,
+          "reasoningTokens": 60
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603616020,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 431,
+          "output": 140,
+          "cacheRead": 88000,
+          "cacheWrite": 0,
+          "totalTokens": 88571
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603621090,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 215,
+          "output": 2217,
+          "cacheRead": 88384,
+          "cacheWrite": 0,
+          "totalTokens": 90816,
+          "reasoningTokens": 23
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603647870,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2782,
+          "output": 274,
+          "cacheRead": 88576,
+          "cacheWrite": 0,
+          "totalTokens": 91632,
+          "reasoningTokens": 181
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603654956,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 357,
+          "output": 987,
+          "cacheRead": 91328,
+          "cacheWrite": 0,
+          "totalTokens": 92672,
+          "reasoningTokens": 181
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603672880,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1238,
+          "output": 3740,
+          "cacheRead": 91648,
+          "cacheWrite": 0,
+          "totalTokens": 96626,
+          "reasoningTokens": 3596
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603747745,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 3967,
+          "output": 1132,
+          "cacheRead": 92864,
+          "cacheWrite": 0,
+          "totalTokens": 97963,
+          "reasoningTokens": 25
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603762550,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1778,
+          "output": 1008,
+          "cacheRead": 96768,
+          "cacheWrite": 0,
+          "totalTokens": 99554
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603774301,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1398,
+          "output": 1767,
+          "cacheRead": 98496,
+          "cacheWrite": 0,
+          "totalTokens": 101661
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603796046,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2509,
+          "output": 53,
+          "cacheRead": 99840,
+          "cacheWrite": 0,
+          "totalTokens": 102402
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603800423,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 94,
+          "output": 2588,
+          "cacheRead": 102336,
+          "cacheWrite": 0,
+          "totalTokens": 105018,
+          "reasoningTokens": 19
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603829115,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2637,
+          "output": 699,
+          "cacheRead": 102400,
+          "cacheWrite": 0,
+          "totalTokens": 105736,
+          "reasoningTokens": 209
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603842687,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 914,
+          "output": 881,
+          "cacheRead": 105024,
+          "cacheWrite": 0,
+          "totalTokens": 106819
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603853904,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1337,
+          "output": 50,
+          "cacheRead": 105920,
+          "cacheWrite": 0,
+          "totalTokens": 107307
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603858867,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 144,
+          "output": 1696,
+          "cacheRead": 107200,
+          "cacheWrite": 0,
+          "totalTokens": 109040,
+          "reasoningTokens": 1412
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603889557,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1882,
+          "output": 453,
+          "cacheRead": 107328,
+          "cacheWrite": 0,
+          "totalTokens": 109663
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603898541,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 516,
+          "output": 51,
+          "cacheRead": 109184,
+          "cacheWrite": 0,
+          "totalTokens": 109751
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603903635,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 257,
+          "output": 248,
+          "cacheRead": 109696,
+          "cacheWrite": 0,
+          "totalTokens": 110201,
+          "reasoningTokens": 78
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603910766,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 369,
+          "output": 48,
+          "cacheRead": 109952,
+          "cacheWrite": 0,
+          "totalTokens": 110369
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603913386,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 134,
+          "output": 92,
+          "cacheRead": 110272,
+          "cacheWrite": 0,
+          "totalTokens": 110498
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603916398,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 182,
+          "output": 684,
+          "cacheRead": 110400,
+          "cacheWrite": 0,
+          "totalTokens": 111266
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603928056,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 871,
+          "output": 84,
+          "cacheRead": 110528,
+          "cacheWrite": 0,
+          "totalTokens": 111483
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603930552,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 250,
+          "output": 167,
+          "cacheRead": 111360,
+          "cacheWrite": 0,
+          "totalTokens": 111777,
+          "reasoningTokens": 54
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603937143,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 354,
+          "output": 83,
+          "cacheRead": 111552,
+          "cacheWrite": 0,
+          "totalTokens": 111989
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603942233,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 169,
+          "output": 445,
+          "cacheRead": 111872,
+          "cacheWrite": 0,
+          "totalTokens": 112486,
+          "reasoningTokens": 256
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603956054,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 773,
+          "output": 688,
+          "cacheRead": 112000,
+          "cacheWrite": 0,
+          "totalTokens": 113461,
+          "reasoningTokens": 393
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603980079,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 865,
+          "output": 218,
+          "cacheRead": 112768,
+          "cacheWrite": 0,
+          "totalTokens": 113851,
+          "reasoningTokens": 140
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791603988874,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 347,
+          "output": 1833,
+          "cacheRead": 113600,
+          "cacheWrite": 0,
+          "totalTokens": 115780,
+          "reasoningTokens": 1707
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604032558,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2149,
+          "output": 2191,
+          "cacheRead": 113920,
+          "cacheWrite": 0,
+          "totalTokens": 118260,
+          "reasoningTokens": 1867
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604080547,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2715,
+          "output": 309,
+          "cacheRead": 116032,
+          "cacheWrite": 0,
+          "totalTokens": 119056,
+          "reasoningTokens": 86
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604090097,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 485,
+          "output": 115,
+          "cacheRead": 118720,
+          "cacheWrite": 0,
+          "totalTokens": 119320
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604094256,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 362,
+          "output": 480,
+          "cacheRead": 119168,
+          "cacheWrite": 0,
+          "totalTokens": 120010,
+          "reasoningTokens": 144
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604104034,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 841,
+          "output": 182,
+          "cacheRead": 119488,
+          "cacheWrite": 0,
+          "totalTokens": 120511
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604108223,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 384,
+          "output": 474,
+          "cacheRead": 120320,
+          "cacheWrite": 0,
+          "totalTokens": 121178
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604118147,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1243,
+          "output": 607,
+          "cacheRead": 120704,
+          "cacheWrite": 0,
+          "totalTokens": 122554,
+          "reasoningTokens": 208
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604126887,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 762,
+          "output": 517,
+          "cacheRead": 121920,
+          "cacheWrite": 0,
+          "totalTokens": 123199
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604134030,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 740,
+          "output": 123,
+          "cacheRead": 122624,
+          "cacheWrite": 0,
+          "totalTokens": 123487
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604142038,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 218,
+          "output": 575,
+          "cacheRead": 123328,
+          "cacheWrite": 0,
+          "totalTokens": 124121,
+          "reasoningTokens": 477
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604156938,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "stop",
+        "usage": {
+          "input": 835,
+          "output": 1246,
+          "cacheRead": 123520,
+          "cacheWrite": 0,
+          "totalTokens": 125601
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604225672,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1570,
+          "output": 902,
+          "cacheRead": 124352,
+          "cacheWrite": 0,
+          "totalTokens": 126824,
+          "reasoningTokens": 624
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604247923,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1543,
+          "output": 215,
+          "cacheRead": 125888,
+          "cacheWrite": 0,
+          "totalTokens": 127646,
+          "reasoningTokens": 93
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604253983,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1007,
+          "output": 44,
+          "cacheRead": 127424,
+          "cacheWrite": 0,
+          "totalTokens": 128475
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604256373,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2099,
+          "output": 135,
+          "cacheRead": 128384,
+          "cacheWrite": 0,
+          "totalTokens": 130618,
+          "reasoningTokens": 65
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604262709,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 504,
+          "output": 41,
+          "cacheRead": 130432,
+          "cacheWrite": 0,
+          "totalTokens": 130977
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604265024,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1496,
+          "output": 264,
+          "cacheRead": 130880,
+          "cacheWrite": 0,
+          "totalTokens": 132640,
+          "reasoningTokens": 176
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604274812,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1885,
+          "output": 51,
+          "cacheRead": 132352,
+          "cacheWrite": 0,
+          "totalTokens": 134288
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604278049,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2281,
+          "output": 1907,
+          "cacheRead": 134208,
+          "cacheWrite": 0,
+          "totalTokens": 138396,
+          "reasoningTokens": 1691
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604324464,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2323,
+          "output": 88,
+          "cacheRead": 136448,
+          "cacheWrite": 0,
+          "totalTokens": 138859
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604327372,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1498,
+          "output": 303,
+          "cacheRead": 138752,
+          "cacheWrite": 0,
+          "totalTokens": 140553,
+          "reasoningTokens": 122
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604334584,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 775,
+          "output": 136,
+          "cacheRead": 140224,
+          "cacheWrite": 0,
+          "totalTokens": 141135
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604340866,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 198,
+          "output": 107,
+          "cacheRead": 140992,
+          "cacheWrite": 0,
+          "totalTokens": 141297
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604344745,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 240,
+          "output": 227,
+          "cacheRead": 141184,
+          "cacheWrite": 0,
+          "totalTokens": 141651,
+          "reasoningTokens": 135
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604351206,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 369,
+          "output": 103,
+          "cacheRead": 141376,
+          "cacheWrite": 0,
+          "totalTokens": 141848
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604357113,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 730,
+          "output": 262,
+          "cacheRead": 141696,
+          "cacheWrite": 0,
+          "totalTokens": 142688,
+          "reasoningTokens": 155
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604364970,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 385,
+          "output": 110,
+          "cacheRead": 142400,
+          "cacheWrite": 0,
+          "totalTokens": 142895
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604368762,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 453,
+          "output": 546,
+          "cacheRead": 142784,
+          "cacheWrite": 0,
+          "totalTokens": 143783,
+          "reasoningTokens": 417
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604383999,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 599,
+          "output": 94,
+          "cacheRead": 143232,
+          "cacheWrite": 0,
+          "totalTokens": 143925
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604390038,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 138,
+          "output": 51,
+          "cacheRead": 143808,
+          "cacheWrite": 0,
+          "totalTokens": 143997
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604399033,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 341,
+          "output": 142,
+          "cacheRead": 143936,
+          "cacheWrite": 0,
+          "totalTokens": 144419
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604409191,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1054,
+          "output": 258,
+          "cacheRead": 144256,
+          "cacheWrite": 0,
+          "totalTokens": 145568,
+          "reasoningTokens": 88
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604415269,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 911,
+          "output": 179,
+          "cacheRead": 145280,
+          "cacheWrite": 0,
+          "totalTokens": 146370
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604419872,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 209,
+          "output": 175,
+          "cacheRead": 146176,
+          "cacheWrite": 0,
+          "totalTokens": 146560
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604426923,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 721,
+          "output": 246,
+          "cacheRead": 146368,
+          "cacheWrite": 0,
+          "totalTokens": 147335,
+          "reasoningTokens": 152
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604434483,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1047,
+          "output": 1420,
+          "cacheRead": 147072,
+          "cacheWrite": 0,
+          "totalTokens": 149539,
+          "reasoningTokens": 1266
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604471804,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1704,
+          "output": 906,
+          "cacheRead": 148096,
+          "cacheWrite": 0,
+          "totalTokens": 150706,
+          "reasoningTokens": 679
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604490387,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1788,
+          "output": 618,
+          "cacheRead": 149760,
+          "cacheWrite": 0,
+          "totalTokens": 152166,
+          "reasoningTokens": 534
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604504600,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 830,
+          "output": 119,
+          "cacheRead": 151488,
+          "cacheWrite": 0,
+          "totalTokens": 152437
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604510842,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 298,
+          "output": 47,
+          "cacheRead": 152256,
+          "cacheWrite": 0,
+          "totalTokens": 152601
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604513635,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1439,
+          "output": 629,
+          "cacheRead": 152512,
+          "cacheWrite": 0,
+          "totalTokens": 154580,
+          "reasoningTokens": 428
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604528082,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1420,
+          "output": 1480,
+          "cacheRead": 153920,
+          "cacheWrite": 0,
+          "totalTokens": 156820,
+          "reasoningTokens": 1227
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604563191,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2151,
+          "output": 916,
+          "cacheRead": 155328,
+          "cacheWrite": 0,
+          "totalTokens": 158395,
+          "reasoningTokens": 757
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604589090,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1263,
+          "output": 331,
+          "cacheRead": 157440,
+          "cacheWrite": 0,
+          "totalTokens": 159034,
+          "reasoningTokens": 157
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604599606,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1004,
+          "output": 63,
+          "cacheRead": 158656,
+          "cacheWrite": 0,
+          "totalTokens": 159723
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604602328,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 528,
+          "output": 138,
+          "cacheRead": 159616,
+          "cacheWrite": 0,
+          "totalTokens": 160282,
+          "reasoningTokens": 72
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604606504,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1366,
+          "output": 147,
+          "cacheRead": 160128,
+          "cacheWrite": 0,
+          "totalTokens": 161641,
+          "reasoningTokens": 78
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604610816,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1156,
+          "output": 136,
+          "cacheRead": 161472,
+          "cacheWrite": 0,
+          "totalTokens": 162764
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604615738,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 760,
+          "output": 1407,
+          "cacheRead": 162624,
+          "cacheWrite": 0,
+          "totalTokens": 164791,
+          "reasoningTokens": 1262
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604656200,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1547,
+          "output": 48,
+          "cacheRead": 163328,
+          "cacheWrite": 0,
+          "totalTokens": 164923
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604661308,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 296,
+          "output": 1670,
+          "cacheRead": 164864,
+          "cacheWrite": 0,
+          "totalTokens": 166830,
+          "reasoningTokens": 1475
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604698942,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "stop",
+        "usage": {
+          "input": 1888,
+          "output": 1506,
+          "cacheRead": 165120,
+          "cacheWrite": 0,
+          "totalTokens": 168514
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604869257,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1797,
+          "output": 688,
+          "cacheRead": 166976,
+          "cacheWrite": 0,
+          "totalTokens": 169461,
+          "reasoningTokens": 408
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604886017,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2990,
+          "output": 166,
+          "cacheRead": 168768,
+          "cacheWrite": 0,
+          "totalTokens": 171924
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604892751,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 424,
+          "output": 103,
+          "cacheRead": 171712,
+          "cacheWrite": 0,
+          "totalTokens": 172239
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604895689,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 624,
+          "output": 169,
+          "cacheRead": 172096,
+          "cacheWrite": 0,
+          "totalTokens": 172889
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604899813,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 313,
+          "output": 145,
+          "cacheRead": 172672,
+          "cacheWrite": 0,
+          "totalTokens": 173130
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604903616,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1211,
+          "output": 171,
+          "cacheRead": 172928,
+          "cacheWrite": 0,
+          "totalTokens": 174310
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604909012,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 512,
+          "output": 108,
+          "cacheRead": 174080,
+          "cacheWrite": 0,
+          "totalTokens": 174700
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604914728,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 571,
+          "output": 120,
+          "cacheRead": 174592,
+          "cacheWrite": 0,
+          "totalTokens": 175283
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604918335,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1053,
+          "output": 680,
+          "cacheRead": 175104,
+          "cacheWrite": 0,
+          "totalTokens": 176837,
+          "reasoningTokens": 333
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604935925,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1488,
+          "output": 122,
+          "cacheRead": 176128,
+          "cacheWrite": 0,
+          "totalTokens": 177738
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604938913,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 961,
+          "output": 253,
+          "cacheRead": 177600,
+          "cacheWrite": 0,
+          "totalTokens": 178814,
+          "reasoningTokens": 129
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604946011,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 408,
+          "output": 132,
+          "cacheRead": 178560,
+          "cacheWrite": 0,
+          "totalTokens": 179100,
+          "reasoningTokens": 87
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604951546,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2155,
+          "output": 230,
+          "cacheRead": 178944,
+          "cacheWrite": 0,
+          "totalTokens": 181329,
+          "reasoningTokens": 183
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791604960029,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2077,
+          "output": 2080,
+          "cacheRead": 181056,
+          "cacheWrite": 0,
+          "totalTokens": 185213,
+          "reasoningTokens": 1936
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605004511,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2236,
+          "output": 91,
+          "cacheRead": 183104,
+          "cacheWrite": 0,
+          "totalTokens": 185431
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605008422,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1674,
+          "output": 2013,
+          "cacheRead": 185280,
+          "cacheWrite": 0,
+          "totalTokens": 188967,
+          "reasoningTokens": 1857
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605052179,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2159,
+          "output": 80,
+          "cacheRead": 186944,
+          "cacheWrite": 0,
+          "totalTokens": 189183
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605057741,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 463,
+          "output": 1057,
+          "cacheRead": 189056,
+          "cacheWrite": 0,
+          "totalTokens": 190576,
+          "reasoningTokens": 859
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605083857,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1630,
+          "output": 50,
+          "cacheRead": 189504,
+          "cacheWrite": 0,
+          "totalTokens": 191184
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605086520,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 681,
+          "output": 405,
+          "cacheRead": 191104,
+          "cacheWrite": 0,
+          "totalTokens": 192190,
+          "reasoningTokens": 319
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605097921,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 813,
+          "output": 925,
+          "cacheRead": 191744,
+          "cacheWrite": 0,
+          "totalTokens": 193482,
+          "reasoningTokens": 757
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605121645,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1157,
+          "output": 87,
+          "cacheRead": 192512,
+          "cacheWrite": 0,
+          "totalTokens": 193756
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605127185,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 505,
+          "output": 363,
+          "cacheRead": 193664,
+          "cacheWrite": 0,
+          "totalTokens": 194532,
+          "reasoningTokens": 266
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605138438,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 655,
+          "output": 327,
+          "cacheRead": 194112,
+          "cacheWrite": 0,
+          "totalTokens": 195094,
+          "reasoningTokens": 216
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605149274,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1019,
+          "output": 48,
+          "cacheRead": 194752,
+          "cacheWrite": 0,
+          "totalTokens": 195819
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605152123,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 733,
+          "output": 726,
+          "cacheRead": 195712,
+          "cacheWrite": 0,
+          "totalTokens": 197171,
+          "reasoningTokens": 527
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605167398,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 968,
+          "output": 622,
+          "cacheRead": 196416,
+          "cacheWrite": 0,
+          "totalTokens": 198006,
+          "reasoningTokens": 463
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605181873,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1094,
+          "output": 97,
+          "cacheRead": 197376,
+          "cacheWrite": 0,
+          "totalTokens": 198567
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605187707,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 370,
+          "output": 424,
+          "cacheRead": 198464,
+          "cacheWrite": 0,
+          "totalTokens": 199258,
+          "reasoningTokens": 253
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605200286,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1529,
+          "output": 104,
+          "cacheRead": 198784,
+          "cacheWrite": 0,
+          "totalTokens": 200417
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605203676,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 713,
+          "output": 914,
+          "cacheRead": 200256,
+          "cacheWrite": 0,
+          "totalTokens": 201883,
+          "reasoningTokens": 734
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605227994,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 984,
+          "output": 53,
+          "cacheRead": 200960,
+          "cacheWrite": 0,
+          "totalTokens": 201997
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605230887,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 446,
+          "output": 473,
+          "cacheRead": 201920,
+          "cacheWrite": 0,
+          "totalTokens": 202839,
+          "reasoningTokens": 305
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605242779,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 836,
+          "output": 101,
+          "cacheRead": 202304,
+          "cacheWrite": 0,
+          "totalTokens": 203241
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605246434,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 140,
+          "output": 140,
+          "cacheRead": 203136,
+          "cacheWrite": 0,
+          "totalTokens": 203416
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605250809,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 486,
+          "output": 111,
+          "cacheRead": 203264,
+          "cacheWrite": 0,
+          "totalTokens": 203861
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605254330,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1208,
+          "output": 112,
+          "cacheRead": 203712,
+          "cacheWrite": 0,
+          "totalTokens": 205032
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605258015,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 527,
+          "output": 128,
+          "cacheRead": 204864,
+          "cacheWrite": 0,
+          "totalTokens": 205519
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605262808,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 372,
+          "output": 119,
+          "cacheRead": 205376,
+          "cacheWrite": 0,
+          "totalTokens": 205867
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605266712,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 287,
+          "output": 125,
+          "cacheRead": 205696,
+          "cacheWrite": 0,
+          "totalTokens": 206108
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605273360,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 638,
+          "output": 76,
+          "cacheRead": 205952,
+          "cacheWrite": 0,
+          "totalTokens": 206666
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605277487,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 706,
+          "output": 1745,
+          "cacheRead": 206528,
+          "cacheWrite": 0,
+          "totalTokens": 208979,
+          "reasoningTokens": 1580
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605317830,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2016,
+          "output": 53,
+          "cacheRead": 207232,
+          "cacheWrite": 0,
+          "totalTokens": 209301
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605320393,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1246,
+          "output": 422,
+          "cacheRead": 209216,
+          "cacheWrite": 0,
+          "totalTokens": 210884,
+          "reasoningTokens": 329
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605331166,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 697,
+          "output": 477,
+          "cacheRead": 210432,
+          "cacheWrite": 0,
+          "totalTokens": 211606,
+          "reasoningTokens": 342
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605342900,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 987,
+          "output": 47,
+          "cacheRead": 211072,
+          "cacheWrite": 0,
+          "totalTokens": 212106
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605346059,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1556,
+          "output": 621,
+          "cacheRead": 212032,
+          "cacheWrite": 0,
+          "totalTokens": 214209,
+          "reasoningTokens": 467
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605359729,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 782,
+          "output": 225,
+          "cacheRead": 213568,
+          "cacheWrite": 0,
+          "totalTokens": 214575,
+          "reasoningTokens": 123
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605366499,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 294,
+          "output": 47,
+          "cacheRead": 214336,
+          "cacheWrite": 0,
+          "totalTokens": 214677
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605369403,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 586,
+          "output": 248,
+          "cacheRead": 214592,
+          "cacheWrite": 0,
+          "totalTokens": 215426,
+          "reasoningTokens": 153
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791605377895,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "stop",
+        "usage": {
+          "input": 661,
+          "output": 1698,
+          "cacheRead": 215168,
+          "cacheWrite": 0,
+          "totalTokens": 217527
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791611318609,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 218075,
+          "output": 818,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "totalTokens": 218893,
+          "reasoningTokens": 539
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791611341017,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1624,
+          "output": 494,
+          "cacheRead": 218048,
+          "cacheWrite": 0,
+          "totalTokens": 220166,
+          "reasoningTokens": 294
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791611358503,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2854,
+          "output": 768,
+          "cacheRead": 219648,
+          "cacheWrite": 0,
+          "totalTokens": 223270,
+          "reasoningTokens": 483
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791611371173,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2149,
+          "output": 1035,
+          "cacheRead": 222464,
+          "cacheWrite": 0,
+          "totalTokens": 225648,
+          "reasoningTokens": 550
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791611391832,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2270,
+          "output": 1132,
+          "cacheRead": 224576,
+          "cacheWrite": 0,
+          "totalTokens": 227978,
+          "reasoningTokens": 851
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791611413175,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 6160,
+          "output": 929,
+          "cacheRead": 226816,
+          "cacheWrite": 0,
+          "totalTokens": 233905,
+          "reasoningTokens": 624
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791611431442,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1019,
+          "output": 157,
+          "cacheRead": 232960,
+          "cacheWrite": 0,
+          "totalTokens": 234136
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791611435989,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 254,
+          "output": 217,
+          "cacheRead": 233920,
+          "cacheWrite": 0,
+          "totalTokens": 234391
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791611441117,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 396,
+          "output": 232,
+          "cacheRead": 234112,
+          "cacheWrite": 0,
+          "totalTokens": 234740
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791611446048,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1038,
+          "output": 149,
+          "cacheRead": 234496,
+          "cacheWrite": 0,
+          "totalTokens": 235683
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791611452756,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 509,
+          "output": 223,
+          "cacheRead": 235520,
+          "cacheWrite": 0,
+          "totalTokens": 236252
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791611460498,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2605,
+          "output": 778,
+          "cacheRead": 235968,
+          "cacheWrite": 0,
+          "totalTokens": 239351,
+          "reasoningTokens": 476
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791611476319,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1765,
+          "output": 1469,
+          "cacheRead": 238528,
+          "cacheWrite": 0,
+          "totalTokens": 241762,
+          "reasoningTokens": 1292
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791611505389,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1844,
+          "output": 179,
+          "cacheRead": 240256,
+          "cacheWrite": 0,
+          "totalTokens": 242279
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791611510856,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1365,
+          "output": 364,
+          "cacheRead": 242048,
+          "cacheWrite": 0,
+          "totalTokens": 243777,
+          "reasoningTokens": 129
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791611518782,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 656,
+          "output": 460,
+          "cacheRead": 243392,
+          "cacheWrite": 0,
+          "totalTokens": 244508,
+          "reasoningTokens": 264
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791611529492,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1641,
+          "output": 437,
+          "cacheRead": 244032,
+          "cacheWrite": 0,
+          "totalTokens": 246110
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791611538905,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 957,
+          "output": 569,
+          "cacheRead": 245632,
+          "cacheWrite": 0,
+          "totalTokens": 247158,
+          "reasoningTokens": 310
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791611551544,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 768,
+          "output": 405,
+          "cacheRead": 246528,
+          "cacheWrite": 0,
+          "totalTokens": 247701,
+          "reasoningTokens": 111
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791611562151,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 477,
+          "output": 239,
+          "cacheRead": 247296,
+          "cacheWrite": 0,
+          "totalTokens": 248012
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791611571649,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1307,
+          "output": 653,
+          "cacheRead": 247744,
+          "cacheWrite": 0,
+          "totalTokens": 249704,
+          "reasoningTokens": 423
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791611585758,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 3404,
+          "output": 1335,
+          "cacheRead": 249024,
+          "cacheWrite": 0,
+          "totalTokens": 253763,
+          "reasoningTokens": 800
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791611614938,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1497,
+          "output": 317,
+          "cacheRead": 252416,
+          "cacheWrite": 0,
+          "totalTokens": 254230
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791611623627,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 595,
+          "output": 918,
+          "cacheRead": 253888,
+          "cacheWrite": 0,
+          "totalTokens": 255401,
+          "reasoningTokens": 574
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791611644457,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 1339,
+          "output": 275,
+          "cacheRead": 254464,
+          "cacheWrite": 0,
+          "totalTokens": 256078
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791611651385,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 560,
+          "output": 316,
+          "cacheRead": 255744,
+          "cacheWrite": 0,
+          "totalTokens": 256620
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791611657771,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 698,
+          "output": 478,
+          "cacheRead": 256256,
+          "cacheWrite": 0,
+          "totalTokens": 257432,
+          "reasoningTokens": 249
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791611668198,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 2141,
+          "output": 608,
+          "cacheRead": 256896,
+          "cacheWrite": 0,
+          "totalTokens": 259645,
+          "reasoningTokens": 260
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791611682538,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "toolUse",
+        "usage": {
+          "input": 948,
+          "output": 1376,
+          "cacheRead": 259008,
+          "cacheWrite": 0,
+          "totalTokens": 261332,
+          "reasoningTokens": 1269
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      },
+      {
+        "time": 1791611715491,
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "stop_reason": "stop",
+        "usage": {
+          "input": 1536,
+          "output": 1740,
+          "cacheRead": 259904,
+          "cacheWrite": 0,
+          "totalTokens": 263180
+        },
+        "cost": "SDK estimate excluded from cash/plan claims"
+      }
+    ],
+    "contextTokens": "SDK context metric; not summed as consumption",
+    "cash_and_quota": "unknown"
+  }
+]

@@ -1,0 +1,4344 @@
+{
+  "format": "orbit-task-1",
+  "id": "e50f56a8-ffb2-4cf3-b513-e73428e0f400",
+  "project_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive",
+  "workspace": {
+    "project_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive",
+    "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive",
+    "project": {
+      "path": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive",
+      "git": true,
+      "common_dir": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive/.git",
+      "worktree": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive",
+      "head": "9888a8a8b0f62a03b1f2d41ff213b6332dec9eb0"
+    },
+    "artifact": {
+      "path": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive",
+      "git": true,
+      "common_dir": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive/.git",
+      "worktree": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive",
+      "head": "9888a8a8b0f62a03b1f2d41ff213b6332dec9eb0"
+    },
+    "bound_at": "2026-10-10T04:13:20Z",
+    "history": []
+  },
+  "created_at": "2026-10-10T04:13:20Z",
+  "status": "complete",
+  "instruction_source": {
+    "kind": "omp_user_message",
+    "id": "0fa9ee79"
+  },
+  "basis": [],
+  "amendments": [],
+  "connection": {
+    "provider": "omp",
+    "socket": "/tmp/orbit-omp-aGhgTv/control.sock",
+    "thread_id": "01a12403-23e4-720b-82ff-360b16ea4d62"
+  },
+  "review": {
+    "model": "opencode-go/deepseek-v4.1-flash",
+    "interval_seconds": 300,
+    "selection": {
+      "model": "opencode-go/deepseek-v4.1-flash",
+      "basis": "pool_order_unreleased",
+      "candidates": [
+        "opencode-go/deepseek-v4.1-flash",
+        "kimi-code/k3-256k",
+        "zenmux/deepseek/deepseek-v4.1-flash",
+        "zhipu-coding-plan/glm-5.3-flash",
+        "cursor/grok-4.7-fast",
+        "cursor/grok-4.7",
+        "openai-codex/gpt-6.1-sol",
+        "openai-codex/gpt-6-luna"
+      ],
+      "selection_tier": "fallback",
+      "notice": "候选池降级选择：独立检查模型质量未经证实",
+      "version": "orbit-checker-selection-v7",
+      "cost_comparison": "not_applied",
+      "reason": "a reviewed release covers this task profile but the judgment is unanswered or from another provider, model, input version or question set",
+      "source": "candidate_pool",
+      "model_identity": {
+        "provider": "opencode-go",
+        "model": "deepseek-v4.1-flash",
+        "reasoning": "unknown",
+        "billing_route": "subscription_quota"
+      },
+      "quality_score": null,
+      "source_agent_dir": "/Users/yangke/.omp/agent",
+      "quality_basis": "unknown",
+      "quality_sources": [],
+      "quality_evidence_valid_until": null,
+      "recommendation_hold": false,
+      "hold_reason": null,
+      "model_overview_status": "fresh",
+      "model_overview_prior": null,
+      "model_overview_refresh": {
+        "status": "fresh",
+        "fetched_at": "2026-10-07T17:58:43Z",
+        "model_count": 447,
+        "benchmark_count": 345
+      },
+      "eligibility": {
+        "context": {
+          "status": "not_required",
+          "requirement": null,
+          "catalog_value": 1048576
+        },
+        "input_modalities": {
+          "status": "not_required",
+          "requirement": [],
+          "catalog_value": [
+            "text",
+            "image"
+          ]
+        },
+        "output_modalities": {
+          "status": "not_required",
+          "requirement": [],
+          "catalog_value": [
+            "text"
+          ]
+        },
+        "parameters": {
+          "status": "not_required",
+          "requirement": [],
+          "catalog_value": [
+            "frequency_penalty",
+            "include_reasoning",
+            "logit_bias",
+            "logprobs",
+            "max_tokens",
+            "min_p",
+            "presence_penalty",
+            "reasoning",
+            "reasoning_effort",
+            "repetition_penalty",
+            "response_format",
+            "seed",
+            "stop",
+            "structured_outputs",
+            "temperature",
+            "tool_choice",
+            "tools",
+            "top_k",
+            "top_logprobs",
+            "top_p"
+          ]
+        }
+      },
+      "execution_eligibility": {
+        "context": {
+          "status": "not_required",
+          "requirement": null,
+          "configured_limit": 1000000,
+          "source": "omp_model_registry"
+        },
+        "input_modalities": {
+          "status": "not_required",
+          "requirement": [],
+          "configured_values": [
+            "text",
+            "image"
+          ]
+        },
+        "output_modalities": {
+          "status": "not_required",
+          "requirement": [],
+          "configured_values": [
+            "text"
+          ]
+        },
+        "parameters": {
+          "status": "not_required",
+          "requirement": [],
+          "note": "模型工具支持不代替成员实际工具授权"
+        }
+      },
+      "judgment_provider": null,
+      "judgment_model": null,
+      "judgment_call_id": null,
+      "judgment_status": null,
+      "judgment_requested_model": null,
+      "question_set_version": null,
+      "judgment_error": null,
+      "release": {
+        "model": "jev-1.13.0",
+        "provider": "typesafe",
+        "thresholds": {
+          "handoff_fit": 0.7,
+          "member_task_fit": 0.65,
+          "candidate_task_fit": 0.65,
+          "checker_task_fit": 0.6
+        },
+        "scope": "bounded_git_delivery_v1",
+        "question_set_versions": {
+          "observation": "jev-observation-2",
+          "delegation": "jev-delegation-4",
+          "candidates": "jev-candidates-4",
+          "checker_quality": "jev-checker-task-fit-5"
+        },
+        "question_digest": "0fc3d712f60167edb572d039a2c9d5b35b0e9295a4a38bf9db597e3682ac7ca8",
+        "input_version": "jev-selection-input-2",
+        "decision_version": "orbit-quality-decision-4",
+        "structural_validation": "passed",
+        "proves_samples_real": false,
+        "allows_positive_ranking": true,
+        "release": {
+          "reason": "Decision-4 independent review: unchanged question bodies, input profile, model and thresholds. handoff_fit gates bounded handoff structure; member_task_fit is a preserved diagnostic limitation; each candidate must independently clear its existing candidate_task_fit release and capability holds. Unknown price/quota/routes remain unknown; Root retains pool selection authority. The original 17 labels / 14 calls are preserved verbatim as per-question evidence, including negative, missing evidence, failure and holdout; they were not rerun and do not prove the newly composed production path. Completion additionally requires a fresh installed orbit omp ordinary-task recommendation/dispatch/integration/check/stop run.; independent OMP 2 approves bounded_git_delivery_v1 activation for isolated live acceptance; ordinary native recommendation/dispatch/integration/check/confirmed-stop remains the completion gate. Per-question historical calls are unchanged and do not prove the new combination live.",
+          "scope": "bounded_git_delivery_v1",
+          "reviewed_by": "OMP 2 (kimi-code/k3-256k, w22:p3) 独立原件复核",
+          "reviewed_at": "2026-10-01T19:02:16Z",
+          "sample_count": 17,
+          "sample_digest": "5a30130a022abd2bc1b35a6ebe61c2ea4fe0e750cafbb0d23d6d51de973d03cc"
+        }
+      },
+      "route_cost_inputs": {},
+      "calibration_note": null,
+      "requirements_error": null,
+      "task_fit_scores": {},
+      "unscored_candidates": [
+        "opencode-go/deepseek-v4.1-flash",
+        "kimi-code/k3-256k",
+        "zenmux/deepseek/deepseek-v4.1-flash",
+        "zhipu-coding-plan/glm-5.3-flash",
+        "cursor/grok-4.7-fast",
+        "cursor/grok-4.7",
+        "openai-codex/gpt-6.1-sol",
+        "openai-codex/gpt-6-luna"
+      ],
+      "evidence_needed": [
+        {
+          "model": "opencode-go/deepseek-v4.1-flash",
+          "reasoning": "unknown",
+          "billing_route": "subscription_quota",
+          "status": "absent"
+        },
+        {
+          "model": "kimi-code/k3-256k",
+          "reasoning": "unknown",
+          "billing_route": "subscription_quota",
+          "status": "absent"
+        },
+        {
+          "model": "zenmux/deepseek/deepseek-v4.1-flash",
+          "reasoning": "unknown",
+          "billing_route": "unknown",
+          "status": "expired"
+        },
+        {
+          "model": "zhipu-coding-plan/glm-5.3-flash",
+          "reasoning": "unknown",
+          "billing_route": "subscription_quota",
+          "status": "expired"
+        },
+        {
+          "model": "cursor/grok-4.7-fast",
+          "reasoning": "unknown",
+          "billing_route": "unknown",
+          "status": "absent"
+        },
+        {
+          "model": "cursor/grok-4.7",
+          "reasoning": "unknown",
+          "billing_route": "unknown",
+          "status": "absent"
+        },
+        {
+          "model": "openai-codex/gpt-6.1-sol",
+          "reasoning": "unknown",
+          "billing_route": "unknown",
+          "status": "absent"
+        },
+        {
+          "model": "openai-codex/gpt-6-luna",
+          "reasoning": "unknown",
+          "billing_route": "unknown",
+          "status": "absent"
+        }
+      ],
+      "judgment_state": null,
+      "usage": null,
+      "selected_for": "reviewer",
+      "selected_at": "2026-10-10T04:22:40Z",
+      "signature": "a7f8ad668c10f74db11e7222bb9dcce91163b8625dc9ca3bf8da2b1a3d90e0d6"
+    }
+  },
+  "estimate": {
+    "seconds": null,
+    "tokens": null
+  },
+  "checks": [
+    {
+      "number": 1,
+      "role": "reviewer",
+      "kind": "artifact",
+      "started_at": "2026-10-10T04:15:49Z",
+      "observation_key": "4bacf9dc2a27272f98a379578ef0c11feb0cad771558d2eba71e1cceff30d49d",
+      "trigger_cause": "manual_check",
+      "manual": true,
+      "result": {
+        "verdict": "complete",
+        "reason": "Deliverables present and correct in the fixed snapshot. src/importer.mjs:58 implements importExpenses as a pure function: one leading BOM stripped (line 24), /\r?\n/ split (25), blank-line skip with 1-based original numbering including blanks (32-35), exactly-two-column split (36-39), field trim + nonempty category (40-43), amount grammar /^(0|[1-9]\\d*)\\.\\d{2}$/ rejecting sign/exponent/extra decimals (6-8), exact integer cents (9-14), and three-tier MAX_SAFE_INTEGER rejection for the value (11), category sum (47) and overall sum (53); Map preserves first-seen order and the return shape {groups:[{category,totalCents,count}],totalCents,count} is exact (57). src/cli.mjs:22 reads exactly one path as UTF-8, prints only result JSON on stdout/exit 0, and emits a concise stderr message with empty stdout and exit 1 for arg/read/validation failures with no stack trace. README.md documents invocation, input grammar, output shape, ordering, precision and error/overflow boundaries. tests/acceptance.mjs is unchanged (not in review_focus modified or task_git changed_paths). Program receipt `.runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test` shows exit 0, artifact_matches true and input_matches true against the current artifact digest, 127 PASS. CLI success/ENOENT/no-arg receipts confirm exit codes and stdout/stderr split. task_git changed_paths empty (no commits), package.json has no dependencies, git_remote remote null. No defects found; the schema rejects leading-zero amounts such as 01.00 although SPEC's 'decimal digits' wording does not explicitly forbid them, but SPEC's enumerated rejections (sign, exponent, extra decimals) do not cover this and the named basis tests do not require it, so it is noted as a non-blocking ambiguity rather than a finding.",
+        "findings": [],
+        "resolved_ids": [],
+        "next_check_seconds": 3600,
+        "delivery": {
+          "ready": true,
+          "reason": "Fixed snapshot contains the three required deliverables: src/importer.mjs (pure importExpenses per SPEC), src/cli.mjs (single-path UTF-8 CLI with JSON stdout/exit 0 and concise stderr/exit 1 on failures), and README.md documenting usage, input format, ordering, precision and error/overflow boundaries; tests/acceptance.mjs unchanged and the project-Node/npm `npm test` receipt (artifact_matches true, input_matches true, exit 0, 127 PASS) plus CLI success/error receipts confirm the delivered behavior."
+        },
+        "coverage": {
+          "complete": true,
+          "items": [
+            {
+              "requirement": "Deliver src/importer.mjs exporting a pure importExpenses(text) behind the SPEC interface.",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "src/importer.mjs:23-58 exports importExpenses(text); no I/O or mutable external state; deterministic single Map + counters."
+            },
+            {
+              "requirement": "Strip exactly one leading BOM; accept LF or CRLF; ignore blank lines.",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "src/importer.mjs:24 strips one U+FEFF; line 25 splits on /\\r?\\n/; lines 34-35 skip trimmed-empty lines."
+            },
+            {
+              "requirement": "Each nonblank data line must have exactly two columns; trim both fields; category nonempty.",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "src/importer.mjs:36-38 rejects cols.length !== 2; 40-43 trims category and rejects empty; parseCents line 5 trims amount."
+            },
+            {
+              "requirement": "Amount must be nonnegative decimal digits with exactly two fractional digits; reject sign, exponent and extra decimals.",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "src/importer.mjs:6 regex /^(0|[1-9]\\d*)\\.\\d{2}$/ rejects -1.00, 1, 1.0, 1.001, 1e2; confirmed by tests/acceptance.mjs:12 invalid-amount cases. Leading-zero inputs (01.00) are rejected though SPEC does not explicitly forbid them — non-blocking ambiguity."
+            },
+            {
+              "requirement": "Compute integer cents exactly and reject values or per-category/overall sums outside Number.MAX_SAFE_INTEGER.",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "src/importer.mjs:9-14 exact int*100+frac with Number.isSafeInteger guard; checkSafe (17-21) applied to category sum line 47 and overall sum line 53. Accepted values have intPart<2^53/100 so conversion is exact."
+            },
+            {
+              "requirement": "Preserve first-seen category order and return {groups:[{category,totalCents,count}],totalCents,count}.",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "src/importer.mjs:29,45-52 Map insertion order; line 57 returns groups array with {category,totalCents,count}, totalCents, count."
+            },
+            {
+              "requirement": "Report invalid data with the original one-based line number in the message, including blank lines.",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "src/importer.mjs:33 lineNo=i+1 over the full split array so blank lines advance numbering; messages include `line ${n}` (7,12,19,27,38,42)."
+            },
+            {
+              "requirement": "CLI src/cli.mjs reads exactly one path argument as UTF-8 and prints only result JSON to stdout on success (exit 0).",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "src/cli.mjs:5-6 reject arg count != 1; line 12 readFileSync(path,'utf8'); line 18 console.log(JSON.stringify(result)); receipt of `node src/cli.mjs /tmp/ex.csv` printed the groups JSON with exit=0."
+            },
+            {
+              "requirement": "CLI on argument/read/validation failure: concise stderr, empty stdout, exit 1, no stack trace.",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "src/cli.mjs:7,14,20 write concise messages and process.exit(1); receipts show `usage: node src/cli.mjs <input.csv>` and `error: cannot read /tmp/nope.csv: ENOENT` with exit=1 and no stdout."
+            },
+            {
+              "requirement": "README documents invocation and input/error/ordering/precision behavior.",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "README.md:5-9 usage, 13-20 input grammar, 22-32 output/ordering/precision, 34-38 errors and MAX_SAFE_INTEGER overflow boundary."
+            },
+            {
+              "requirement": "Keep tests/acceptance.mjs unchanged.",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "tests/acceptance.mjs not in review_focus modified/added or deleted lists; task_git changed_paths empty; file content read matches the provided acceptance suite."
+            },
+            {
+              "requirement": "Actually run npm test using the project Node/npm and verify CLI success/error output.",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "Program receipt command `.runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test` exit 0 with EXPENSE_VALIDATION_SUMMARY 127 cases passed, artifact_matches true and input_matches true for the current artifact digest; separate CLI receipts show success JSON/exit 0 and ENOENT/no-arg errors with exit 1."
+            },
+            {
+              "requirement": "No dependencies, commits, pushing or network.",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "package.json has no dependencies/devDependencies; task_git changed_paths empty (baseline head equals snapshot head); git_remote.remote null and remote_contacted false."
+            },
+            {
+              "requirement": "Hand off the bounded importer work to a suitable work unit/model when available.",
+              "scope": "delivery",
+              "status": "unverified",
+              "evidence": "Conditional/optional per original wording ('有合适的工作单元和模型时可按当前建议交接'); Root reports dispatch failed with 'cannot be resolved before dispatch' for pool models and implemented directly. No work_units recorded in the program record; not a hard deliverable."
+            },
+            {
+              "requirement": "Request and complete an independent manual final check (this check), correct any finding and then confirm stop.",
+              "scope": "lifecycle",
+              "status": "unverified",
+              "evidence": "This independent check session is running; the subsequent finalization notice, corrected recheck and stop have not yet occurred and cannot be claimed as done."
+            },
+            {
+              "requirement": "Produce the final closing report to the user.",
+              "scope": "lifecycle",
+              "status": "unverified",
+              "evidence": "Future closing turn not yet observed; runtime verifies the closing turn and actual stop separately."
+            }
+          ]
+        }
+      },
+      "stale": false,
+      "stale_reasons": [],
+      "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive",
+      "artifact_digest": "sha256:462f329cf68d16b3b5da82bd06a698c1bd076a1230c6aeb5692f4aacd7451a48",
+      "input_digest": "9968985866cf48cd1d0b6aacbc33474dcb7a276c6a4206cb3d09e3a93ad2e341",
+      "finished_at": "2026-10-10T04:17:13Z",
+      "usage": {
+        "usage_status": "reported",
+        "incomplete": false,
+        "calls": [
+          {
+            "call_id": "orbit-call-037400e7-4125-4757-a1f6-5f45ec5293f2",
+            "origin": "local_provider_invocation",
+            "usage_status": "reported",
+            "provider_response_id": "f649ebb96ed1ba84fe6ae45db78217bf",
+            "provider": "opencode-go",
+            "model": "deepseek-v4.1-flash",
+            "requested_model": "opencode-go/deepseek-v4.1-flash",
+            "stop_reason": "toolUse",
+            "completed_at": "2026-10-10T04:15:59.835Z",
+            "input": 15204,
+            "output": 300,
+            "cacheRead": 2048,
+            "cacheWrite": 0,
+            "reasoningTokens": 8,
+            "totalTokens": 17552
+          },
+          {
+            "call_id": "orbit-call-84bf7284-5aa3-4631-ba7a-576bec960ba0",
+            "origin": "local_provider_invocation",
+            "usage_status": "reported",
+            "provider_response_id": "0fbc13fe56b2ae6a31161b267ce31be0",
+            "provider": "opencode-go",
+            "model": "deepseek-v4.1-flash",
+            "requested_model": "opencode-go/deepseek-v4.1-flash",
+            "stop_reason": "toolUse",
+            "completed_at": "2026-10-10T04:16:52.362Z",
+            "input": 3063,
+            "output": 6754,
+            "cacheRead": 17152,
+            "cacheWrite": 0,
+            "reasoningTokens": 6603,
+            "totalTokens": 26969
+          },
+          {
+            "call_id": "orbit-call-ea31bdfd-d888-488f-b1d0-cefe18bb870c",
+            "origin": "local_provider_invocation",
+            "usage_status": "reported",
+            "provider_response_id": "a071f6cd4e5807558fd1ab87cd736912",
+            "provider": "opencode-go",
+            "model": "deepseek-v4.1-flash",
+            "requested_model": "opencode-go/deepseek-v4.1-flash",
+            "stop_reason": "stop",
+            "completed_at": "2026-10-10T04:17:12.372Z",
+            "input": 7029,
+            "output": 2749,
+            "cacheRead": 20096,
+            "cacheWrite": 0,
+            "reasoningTokens": 682,
+            "totalTokens": 29874
+          }
+        ],
+        "coverage": {
+          "input": {
+            "reported_sum": 25296,
+            "reported_calls": 3,
+            "missing_calls": 0
+          },
+          "output": {
+            "reported_sum": 9803,
+            "reported_calls": 3,
+            "missing_calls": 0
+          },
+          "cacheRead": {
+            "reported_sum": 39296,
+            "reported_calls": 3,
+            "missing_calls": 0
+          },
+          "cacheWrite": {
+            "reported_sum": 0,
+            "reported_calls": 3,
+            "missing_calls": 0
+          },
+          "reasoningTokens": {
+            "reported_sum": 7293,
+            "reported_calls": 3,
+            "missing_calls": 0
+          },
+          "totalTokens": {
+            "reported_sum": 74395,
+            "reported_calls": 3,
+            "missing_calls": 0
+          }
+        },
+        "derived_usage_fields": [
+          "input_tokens",
+          "output_tokens",
+          "total_tokens"
+        ],
+        "derived_note": "legacy reference totals from reported SDK buckets; original call fields and coverage govern resource accounting",
+        "input": 25296,
+        "output": 9803,
+        "cacheRead": 39296,
+        "cacheWrite": 0,
+        "reasoningTokens": 7293,
+        "totalTokens": 74395,
+        "input_tokens": 64592,
+        "output_tokens": 9803,
+        "total_tokens": 74395,
+        "gaps": []
+      }
+    },
+    {
+      "number": 2,
+      "role": "reviewer",
+      "kind": "artifact",
+      "started_at": "2026-10-10T04:22:01Z",
+      "observation_key": "df8bf8c15cb35a41af9776fe70d82ecd4a4a6bbb6395cfd31310cc2d1d9fab6f",
+      "trigger_cause": "manual_check",
+      "manual": true,
+      "result": {
+        "verdict": "complete",
+        "reason": "Read the fixed snapshot files directly: src/importer.mjs (58 lines), src/cli.mjs (22 lines), README.md (38 lines), tests/acceptance.mjs (24 lines), SPEC.md (3 lines), package.json. Every explicit rule in SPEC.md is enforced by the code: one leading BOM stripped once (line 24), LF/CRLF via /\\r?\\n/ (25), blank lines skipped while still counted in 1-based numbering (33-35), header check with line 1 (26-28), exactly two columns (37-39), both fields trimmed and nonempty category (40-43), amount regex /^(0|[1-9]\\d*)\\.\\d{2}$/ with string-integer cents and Number.isSafeInteger (4-14), per-category and overall MAX_SAFE_INTEGER rejection (17-21,47,53), first-seen Map order and {groups:[{category,totalCents,count}],totalCents,count} (29,45-57). CLI: exactly one arg, UTF-8 read, JSON-only stdout exit 0, concise stderr/no stack/exit 1 on arg/read/validation failure (5-22). README documents usage, input format, output shape, ordering/precision and error/overflow boundaries. Instruction constraints honored: tests/acceptance.mjs and SPEC.md untouched (review_focus modifies only src/cli.mjs, src/importer.mjs; README added), no dependencies in package.json, task_git changed_paths empty, git_remote has no remote/upstream. Program receipts root_verifications (artifact_matches/input_matches true) show `.runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test` exit 0 with 127 cases passed, plus CLI success JSON exit 0 and ENOENT/no-arg errors exit 1 with empty stdout. I manually traced all 127 acceptance cases (110 grouping, BOM/CRLF/blank/whitespace, 6 invalid amounts incl. 90071992547409.92, sum/category overflow, extra column, empty category, invalid header, 5 CLI cases) against the code; all match, and the overflow arithmetic cannot false-accept because 2^53 > MAX_SAFE_INTEGER. No missing, wrong or extra work found; no unresolved findings.",
+        "findings": [],
+        "resolved_ids": [],
+        "next_check_seconds": 3600,
+        "delivery": {
+          "ready": true,
+          "reason": "Deliverable visible in the fixed snapshot and satisfying what the instruction requires: src/importer.mjs exports the pure importExpenses function implementing all SPEC rules; src/cli.mjs is a runnable one-arg CLI with the specified exit/stdout/stderr contract; README.md documents invocation, input format, output shape and error/overflow boundaries. tests/acceptance.mjs is unchanged and package.json declares no dependencies. Program-native receipts confirm npm test ran via the project Node/npm (exit 0, 127 cases) and CLI success/error outputs, with artifact_digest and input_digest matching the current check input; root is idle with last turn completed and attributed to this task."
+        },
+        "coverage": {
+          "complete": true,
+          "items": [
+            {
+              "requirement": "Deliver src/importer.mjs exporting the pure importExpenses(text) function",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "Read src/importer.mjs (1881 bytes, 58 lines): `export function importExpenses(text)` at line 23, no imports/IO/dependencies, pure over input text."
+            },
+            {
+              "requirement": "Strip one leading BOM and accept LF or CRLF",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "src/importer.mjs line 24 `if (text.startsWith('\\ufeff')) text = text.slice(1);` (exactly one) and line 25 `text.split(/\\r?\\n/)`. Acceptance case 111 ('BOM CRLF blanks whitespace') matches this handling."
+            },
+            {
+              "requirement": "Ignore blank lines but keep them in 1-based line numbering",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "src/importer.mjs lines 32-35: loop index i over split lines, lineNo=i+1, `if (line.trim()==='') continue;` without altering numbering; error messages use lineNo. Tests 12-14 assert /3/ on inputs with a blank second line."
+            },
+            {
+              "requirement": "Require header category,amount and fail with line number 1",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "src/importer.mjs lines 26-28 throw 'line 1: expected header \"category,amount\"'; acceptance 'invalid header' (test 122) asserts /1/."
+            },
+            {
+              "requirement": "Unquoted CSV: each nonblank data line exactly two columns, both fields trimmed",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "src/importer.mjs lines 36-40: `line.split(',')`, `cols.length !== 2` throws with the data line number, category = cols[0].trim(). Acceptance tests 15 (extra column, /2/), 16 (empty category, /2/), 11 (trim of ' Food '/' 1.20 '). README line 18 documents unquoted CSV semantics."
+            },
+            {
+              "requirement": "Amount must be nonnegative decimal digits with exactly two fractional digits; no sign/exponent/extra decimals",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "src/importer.mjs line 6 regex /^(0|[1-9]\\d*)\\.\\d{2}$/ rejects '-1.00','1','1.0','1.001','1e2'; acceptance tests 112-117 cover these six rejected amounts."
+            },
+            {
+              "requirement": "Compute integer cents exactly (no floating-point accumulation)",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "src/importer.mjs lines 9-14 split on '.' and use Number(intPart)*100+Number(fracPart) with Number.isSafeInteger guard; totals accumulate integer cents (lines 48,54). Acceptance tests 1-110 assert exact totals i*100+3 / i*100+102."
+            },
+            {
+              "requirement": "Reject a single amount, a per-category sum and the overall sum outside Number.MAX_SAFE_INTEGER",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "src/importer.mjs line 11 Number.isSafeInteger(cents); lines 17-21 checkSafe(value>MAX_SAFE) invoked for category sum (line 47) and overall (line 53). Acceptance tests 118 (single 90071992547409.92), 119 (sum), 120 (category) assert throws. Arithmetic cannot false-accept because any true sum above 2^53-1 rounds to a double > 2^53-1."
+            },
+            {
+              "requirement": "Preserve first-seen category order and return {groups:[{category,totalCents,count}],totalCents,count}",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "src/importer.mjs lines 29 (Map insertion order), 45-57; return at line 57 matches shape. Acceptance tests 1-110 assert exact object equality incl. group order Food then Travel."
+            },
+            {
+              "requirement": "Deliver runnable CLI src/cli.mjs taking exactly one UTF-8 path argument",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "Read src/cli.mjs: lines 5-9 reject arg count != 1 with usage exit 1; lines 10-16 fs.readFileSync(args[0],'utf8'). Receipt shows `node src/cli.mjs /tmp/ex.csv` printing JSON with exit=0 and no-arg printing usage exit=1."
+            },
+            {
+              "requirement": "CLI prints only result JSON to stdout on success with exit 0",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "src/cli.mjs lines 17-18 JSON.stringify to console.log only. Root verification receipt: stdout {\"groups\":[{\"category\":\"Food\",\"totalCents\":122,\"count\":2},{\"category\":\"Travel\",\"totalCents\":99,\"count\":1}],\"totalCents\":221,\"count\":3} exit=0."
+            },
+            {
+              "requirement": "CLI argument/read/validation failures: concise stderr, empty stdout, exit 1, no stack trace",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "src/cli.mjs lines 7,14,20 use console.error with a message and process.exit(1) only, never printing a stack. Receipt: `error: cannot read /tmp/nope.csv: ENOENT` exit=1; acceptance test 127 asserts empty stdout and /2/ on validation failure."
+            },
+            {
+              "requirement": "Deliver README documenting invocation and input/error/ordering/precision behavior",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "Read README.md (38 lines): Usage (node src/cli.mjs input.csv), Input format, Output JSON example and group ordering/precision, Errors and limits incl. MAX_SAFE_INTEGER and line numbers."
+            },
+            {
+              "requirement": "Keep tests/acceptance.mjs and SPEC.md unchanged",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "Read tests/acceptance.mjs (24 lines) and SPEC.md (3 lines) in the fixed snapshot; review_focus.modified lists only src/cli.mjs and src/importer.mjs, review_focus.added only README.md; task_git.changed_paths is empty."
+            },
+            {
+              "requirement": "Actually run npm test with the provided project Node/npm after completion",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "Program receipt root_verifications (kind root_verification, artifact_matches true, input_matches true): command `.runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test`, exit_code 0, output 'EXPENSE_VALIDATION_SUMMARY: 127 cases passed; integer precision and CLI verified'. My read-only session did not re-run it."
+            },
+            {
+              "requirement": "Check CLI success and error output (exit codes, stdout/stderr separation)",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "Program receipt for `printf ... > /tmp/ex.csv && node src/cli.mjs /tmp/ex.csv; ... /tmp/nope.csv; ... cli.mjs`: success JSON exit=0; 'error: cannot read /tmp/nope.csv: ENOENT' exit=1; 'usage: node src/cli.mjs <input.csv>' exit=1, consistent with src/cli.mjs lines 5-21."
+            },
+            {
+              "requirement": "No dependencies, commits, pushing, downloads or network services",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "package.json declares no dependencies and test script 'node tests/acceptance.mjs'; task_git.changed_paths is empty with baseline_head == snapshot_head (9888a8a...); git_remote has remote null, upstream null, remote_contacted false since no upstream exists."
+            },
+            {
+              "requirement": "When members need project Node/npm, declare the project path and full command in the work unit; do not use unregistered eval subprocesses",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "work_units[wu-0afecd43d6162d33].scope.allowed_commands declares the absolute project paths for `.runtime/bin/node --check src/importer.mjs` and `.runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test`; member_blocks shows the attempted eval class blocked with reason 'tool eval has no allowed work-unit entrance', i.e. not used."
+            },
+            {
+              "requirement": "Independent manual final check is requested and any found problems are fixed and rechecked before confirmed stop",
+              "scope": "lifecycle",
+              "status": "unverified",
+              "evidence": "This Orbit check session is that independent review and is in progress; the subsequent fix/recheck-if-needed, confirmed stop and closing report have not happened yet in the record (root idle, delivery job not delivering)."
+            },
+            {
+              "requirement": "Subsequent completion/confirmed stop and closing report after the final check",
+              "scope": "lifecycle",
+              "status": "unverified",
+              "evidence": "Future lifecycle events: no finalization notice, confirmed stop or closing report is present in the program record; these are runtime-verified after this check."
+            }
+          ]
+        }
+      },
+      "stale": false,
+      "stale_reasons": [],
+      "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive",
+      "artifact_digest": "sha256:462f329cf68d16b3b5da82bd06a698c1bd076a1230c6aeb5692f4aacd7451a48",
+      "input_digest": "9968985866cf48cd1d0b6aacbc33474dcb7a276c6a4206cb3d09e3a93ad2e341",
+      "finished_at": "2026-10-10T04:24:53Z",
+      "usage": {
+        "usage_status": "reported",
+        "incomplete": false,
+        "calls": [
+          {
+            "call_id": "orbit-call-46b66185-91e4-4807-9de5-6c46309fc764",
+            "origin": "local_provider_invocation",
+            "usage_status": "reported",
+            "provider_response_id": "chatcmpl-9a25e0f4c5944a028689c16b84afc509",
+            "provider": "opencode-go",
+            "model": "deepseek-v4.1-flash",
+            "requested_model": "opencode-go/deepseek-v4.1-flash",
+            "stop_reason": "toolUse",
+            "completed_at": "2026-10-10T04:24:05.233Z",
+            "input": 21505,
+            "output": 132,
+            "cacheRead": 2432,
+            "cacheWrite": 0,
+            "reasoningTokens": 33,
+            "totalTokens": 24069
+          },
+          {
+            "call_id": "orbit-call-4297a4e1-bb56-44a5-86c2-9512722df359",
+            "origin": "local_provider_invocation",
+            "usage_status": "reported",
+            "provider_response_id": "chatcmpl-463fcec946124ff9ad8da81fa9229b4c",
+            "provider": "opencode-go",
+            "model": "deepseek-v4.1-flash",
+            "requested_model": "opencode-go/deepseek-v4.1-flash",
+            "stop_reason": "toolUse",
+            "completed_at": "2026-10-10T04:24:08.030Z",
+            "input": 341,
+            "output": 275,
+            "cacheRead": 24064,
+            "cacheWrite": 0,
+            "reasoningTokens": 75,
+            "totalTokens": 24680
+          },
+          {
+            "call_id": "orbit-call-d962a529-bb3f-4491-9c7a-a1296e2d7bf0",
+            "origin": "local_provider_invocation",
+            "usage_status": "reported",
+            "provider_response_id": "chatcmpl-b6ee7c2bd499489f88e5abc474c036ba",
+            "provider": "opencode-go",
+            "model": "deepseek-v4.1-flash",
+            "requested_model": "opencode-go/deepseek-v4.1-flash",
+            "stop_reason": "toolUse",
+            "completed_at": "2026-10-10T04:24:11.559Z",
+            "input": 1579,
+            "output": 411,
+            "cacheRead": 24576,
+            "cacheWrite": 0,
+            "reasoningTokens": 351,
+            "totalTokens": 26566
+          },
+          {
+            "call_id": "orbit-call-0942e919-25ee-4c77-ab1a-40de75be373a",
+            "origin": "local_provider_invocation",
+            "usage_status": "reported",
+            "provider_response_id": "chatcmpl-0677e27be1fb400cba5f9557a6d41b2c",
+            "provider": "opencode-go",
+            "model": "deepseek-v4.1-flash",
+            "requested_model": "opencode-go/deepseek-v4.1-flash",
+            "stop_reason": "toolUse",
+            "completed_at": "2026-10-10T04:24:23.828Z",
+            "input": 1016,
+            "output": 2339,
+            "cacheRead": 26496,
+            "cacheWrite": 0,
+            "reasoningTokens": 2188,
+            "totalTokens": 29851
+          },
+          {
+            "call_id": "orbit-call-3a91065d-afca-4d54-bd5a-6fc91c1eb3d6",
+            "origin": "local_provider_invocation",
+            "usage_status": "reported",
+            "provider_response_id": "chatcmpl-98873b90ba5347fbb775ebe52ef3a1f4",
+            "provider": "opencode-go",
+            "model": "deepseek-v4.1-flash",
+            "requested_model": "opencode-go/deepseek-v4.1-flash",
+            "stop_reason": "stop",
+            "completed_at": "2026-10-10T04:24:53.232Z",
+            "input": 197,
+            "output": 6414,
+            "cacheRead": 29696,
+            "cacheWrite": 0,
+            "reasoningTokens": 3770,
+            "totalTokens": 36307
+          }
+        ],
+        "coverage": {
+          "input": {
+            "reported_sum": 24638,
+            "reported_calls": 5,
+            "missing_calls": 0
+          },
+          "output": {
+            "reported_sum": 9571,
+            "reported_calls": 5,
+            "missing_calls": 0
+          },
+          "cacheRead": {
+            "reported_sum": 107264,
+            "reported_calls": 5,
+            "missing_calls": 0
+          },
+          "cacheWrite": {
+            "reported_sum": 0,
+            "reported_calls": 5,
+            "missing_calls": 0
+          },
+          "reasoningTokens": {
+            "reported_sum": 6417,
+            "reported_calls": 5,
+            "missing_calls": 0
+          },
+          "totalTokens": {
+            "reported_sum": 141473,
+            "reported_calls": 5,
+            "missing_calls": 0
+          }
+        },
+        "derived_usage_fields": [
+          "input_tokens",
+          "output_tokens",
+          "total_tokens"
+        ],
+        "derived_note": "legacy reference totals from reported SDK buckets; original call fields and coverage govern resource accounting",
+        "input": 24638,
+        "output": 9571,
+        "cacheRead": 107264,
+        "cacheWrite": 0,
+        "reasoningTokens": 6417,
+        "totalTokens": 141473,
+        "input_tokens": 131902,
+        "output_tokens": 9571,
+        "total_tokens": 141473,
+        "gaps": []
+      }
+    }
+  ],
+  "decisions": [],
+  "coverage_required": true,
+  "usage": {
+    "tokens": null,
+    "jev_entry": null,
+    "resource_call_gaps": {
+      "native_execution": ""
+    },
+    "resource_calls": {
+      "schema_version": "orbit-resource-calls-v1",
+      "coverage": "recorded_calls_only",
+      "call_count": 74,
+      "status_counts": {
+        "completed": 71,
+        "failed": 3,
+        "unknown": 0
+      },
+      "unknown_usage_calls": 3,
+      "partial_usage_calls": 0,
+      "usage_status_counts": {
+        "reported": 71,
+        "partial": 0,
+        "unknown": 3
+      },
+      "noted_usage_calls": 0,
+      "unknown_actual_model_calls": 3,
+      "attempt_count": 4,
+      "calls_without_attempt": 9,
+      "call_id_origins": {
+        "local_provider_invocation": 74
+      },
+      "calls_without_call_id_origin": 0,
+      "unknown_upstream_model_calls": 74,
+      "calls_with_credential_id": 65,
+      "unknown_account_identity_calls": 74,
+      "groups": [
+        {
+          "role": "judgment",
+          "phase": "jev_stage1",
+          "actual_identity": {
+            "provider": "typesafe",
+            "model": "jev-1.13.0",
+            "reasoning": null,
+            "billing_route": "unknown",
+            "scope": "judgment_service"
+          },
+          "usage_source": "provider_response",
+          "call_count": 6,
+          "status_counts": {
+            "completed": 6,
+            "failed": 0,
+            "unknown": 0
+          },
+          "usage_fields": {
+            "input_tokens": {
+              "reported_sum": 22730,
+              "unit": "token",
+              "reported_calls": 6,
+              "missing_calls": 0
+            },
+            "output_tokens": {
+              "reported_sum": 330,
+              "unit": "token",
+              "reported_calls": 6,
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "root",
+          "phase": "root_execution",
+          "actual_identity": {
+            "provider": "zhipu-coding-plan",
+            "model": "glm-5.3-flash",
+            "reasoning": null,
+            "billing_route": "subscription_quota",
+            "scope": "omp_route"
+          },
+          "usage_source": "native_message",
+          "call_count": 7,
+          "status_counts": {
+            "completed": 7,
+            "failed": 0,
+            "unknown": 0
+          },
+          "usage_fields": {
+            "cacheRead": {
+              "reported_sum": 142080,
+              "unit": "token",
+              "reported_calls": 7,
+              "missing_calls": 0
+            },
+            "cacheWrite": {
+              "reported_sum": 0,
+              "unit": "token",
+              "reported_calls": 7,
+              "missing_calls": 0
+            },
+            "input": {
+              "reported_sum": 76756,
+              "unit": "token",
+              "reported_calls": 7,
+              "missing_calls": 0
+            },
+            "output": {
+              "reported_sum": 1305,
+              "unit": "token",
+              "reported_calls": 7,
+              "missing_calls": 0
+            },
+            "totalTokens": {
+              "reported_sum": 220141,
+              "unit": "token",
+              "reported_calls": 7,
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "root",
+          "phase": "root_execution",
+          "actual_identity": {
+            "provider": "zhipu-coding-plan",
+            "model": "glm-5.3-flash",
+            "reasoning": null,
+            "billing_route": "subscription_quota",
+            "scope": "omp_route"
+          },
+          "usage_source": "native_message",
+          "call_count": 21,
+          "status_counts": {
+            "completed": 21,
+            "failed": 0,
+            "unknown": 0
+          },
+          "usage_fields": {
+            "cacheRead": {
+              "reported_sum": 429568,
+              "unit": "token",
+              "reported_calls": 21,
+              "missing_calls": 0
+            },
+            "cacheWrite": {
+              "reported_sum": 0,
+              "unit": "token",
+              "reported_calls": 21,
+              "missing_calls": 0
+            },
+            "input": {
+              "reported_sum": 169206,
+              "unit": "token",
+              "reported_calls": 21,
+              "missing_calls": 0
+            },
+            "output": {
+              "reported_sum": 10361,
+              "unit": "token",
+              "reported_calls": 21,
+              "missing_calls": 0
+            },
+            "reasoningTokens": {
+              "reported_sum": 1924,
+              "unit": "token",
+              "reported_calls": 21,
+              "missing_calls": 0
+            },
+            "totalTokens": {
+              "reported_sum": 609135,
+              "unit": "token",
+              "reported_calls": 21,
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "checker",
+          "phase": "reviewer",
+          "actual_identity": {
+            "provider": "opencode-go",
+            "model": "deepseek-v4.1-flash",
+            "reasoning": null,
+            "billing_route": "unknown",
+            "scope": "omp_route"
+          },
+          "usage_source": "native_message",
+          "call_count": 8,
+          "status_counts": {
+            "completed": 8,
+            "failed": 0,
+            "unknown": 0
+          },
+          "usage_fields": {
+            "cacheRead": {
+              "reported_sum": 146560,
+              "unit": "token",
+              "reported_calls": 8,
+              "missing_calls": 0
+            },
+            "cacheWrite": {
+              "reported_sum": 0,
+              "unit": "token",
+              "reported_calls": 8,
+              "missing_calls": 0
+            },
+            "input": {
+              "reported_sum": 49934,
+              "unit": "token",
+              "reported_calls": 8,
+              "missing_calls": 0
+            },
+            "output": {
+              "reported_sum": 19374,
+              "unit": "token",
+              "reported_calls": 8,
+              "missing_calls": 0
+            },
+            "reasoningTokens": {
+              "reported_sum": 13710,
+              "unit": "token",
+              "reported_calls": 8,
+              "missing_calls": 0
+            },
+            "totalTokens": {
+              "reported_sum": 215868,
+              "unit": "token",
+              "reported_calls": 8,
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "member",
+          "phase": "member_execution",
+          "actual_identity": {
+            "provider": "opencode-go",
+            "model": "deepseek-v4.1-flash",
+            "reasoning": null,
+            "billing_route": "subscription_quota",
+            "scope": "omp_route"
+          },
+          "usage_source": "native_message",
+          "call_count": 1,
+          "status_counts": {
+            "completed": 1,
+            "failed": 0,
+            "unknown": 0
+          },
+          "usage_fields": {
+            "cacheRead": {
+              "reported_sum": 384,
+              "unit": "token",
+              "reported_calls": 1,
+              "missing_calls": 0
+            },
+            "cacheWrite": {
+              "reported_sum": 0,
+              "unit": "token",
+              "reported_calls": 1,
+              "missing_calls": 0
+            },
+            "input": {
+              "reported_sum": 11469,
+              "unit": "token",
+              "reported_calls": 1,
+              "missing_calls": 0
+            },
+            "output": {
+              "reported_sum": 169,
+              "unit": "token",
+              "reported_calls": 1,
+              "missing_calls": 0
+            },
+            "totalTokens": {
+              "reported_sum": 12022,
+              "unit": "token",
+              "reported_calls": 1,
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "member",
+          "phase": "member_execution",
+          "actual_identity": {
+            "provider": "opencode-go",
+            "model": "deepseek-v4.1-flash",
+            "reasoning": null,
+            "billing_route": "subscription_quota",
+            "scope": "omp_route"
+          },
+          "usage_source": "native_message",
+          "call_count": 28,
+          "status_counts": {
+            "completed": 28,
+            "failed": 0,
+            "unknown": 0
+          },
+          "usage_fields": {
+            "cacheRead": {
+              "reported_sum": 1215360,
+              "unit": "token",
+              "reported_calls": 28,
+              "missing_calls": 0
+            },
+            "cacheWrite": {
+              "reported_sum": 0,
+              "unit": "token",
+              "reported_calls": 28,
+              "missing_calls": 0
+            },
+            "input": {
+              "reported_sum": 49158,
+              "unit": "token",
+              "reported_calls": 28,
+              "missing_calls": 0
+            },
+            "output": {
+              "reported_sum": 29038,
+              "unit": "token",
+              "reported_calls": 28,
+              "missing_calls": 0
+            },
+            "reasoningTokens": {
+              "reported_sum": 17797,
+              "unit": "token",
+              "reported_calls": 28,
+              "missing_calls": 0
+            },
+            "totalTokens": {
+              "reported_sum": 1293556,
+              "unit": "token",
+              "reported_calls": 28,
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "judgment",
+          "phase": "jev_stage1",
+          "actual_identity": {
+            "provider": "typesafe",
+            "model": null,
+            "reasoning": null,
+            "billing_route": "unknown",
+            "scope": "judgment_service"
+          },
+          "usage_source": "provider_response",
+          "call_count": 3,
+          "status_counts": {
+            "completed": 0,
+            "failed": 3,
+            "unknown": 0
+          },
+          "usage_fields": {}
+        }
+      ],
+      "cost": null,
+      "quota_consumption": null,
+      "note": "reported fields are never summed across categories; cost and quota stay unknown here"
+    },
+    "jev_stage1": {
+      "input_tokens": 22730,
+      "output_tokens": 330,
+      "incomplete": true
+    },
+    "check_tokens": 215868,
+    "check_tokens_reported_subtotal": 215868,
+    "check_usage_missing_attempts": 0
+  },
+  "entry": {
+    "schema_version": 2,
+    "classification": "explicit_orbit",
+    "decision": "start",
+    "reason": "the user explicitly requested Orbit-controlled execution",
+    "trace": {
+      "rule_version": "orbit-entry-rules-3",
+      "input_version": "orbit-entry-input-2",
+      "decision_version": "orbit-entry-decision-2"
+    },
+    "message_id": "0fa9ee79",
+    "at": "2026-10-10T04:13:13Z",
+    "prompt_excerpt": "请用 Orbit 完成这个 CSV 费用导入项目，具体验收以 SPEC.md 和 tests/acceptance.mjs 为准。\n\n交付 src/importer.mjs 的纯函数、src/cli.mjs 的可运行命令行以及 README。导入逻辑和命令行集成是两项实质责任；你负责整体接口、集成及核验，有合适的工作单元和模型时可按当前建议交接。保留整数分、CSV 引号/BOM/行号、分组合计顺序及溢出等要求，不改测试或规范。不得提交、推送、下载依赖或建立网络服务。\n\n环境已提供项目内 .runtime/bin/node 和 .runtime/lib/node_modules/npm/bin/…[truncated]"
+  },
+  "findings": {},
+  "sent_message_ids": [
+    "f485cdd6-1b89-436f-abd5-a361dd61eddd",
+    "301fbb58-5075-4b1f-92f4-52ff56580f4c"
+  ],
+  "delegation_hints": {},
+  "delegation_assessments": {
+    "11f436c6e0fc401dff726e5d7b7c0b59e07a9ff3b94ccfd0f7a0e09bbfeee4bb": {
+      "version": "orbit-member-selection-v2",
+      "signature": "11f436c6e0fc401dff726e5d7b7c0b59e07a9ff3b94ccfd0f7a0e09bbfeee4bb",
+      "reused": false,
+      "candidates": [
+        {
+          "agent": "orbit-m-opencode-go-deepseek-v4-1-flash-79717e5d",
+          "model": "opencode-go/deepseek-v4.1-flash",
+          "identity": {
+            "provider": "opencode-go",
+            "model": "deepseek-v4.1-flash",
+            "reasoning": "unknown",
+            "billing_route": "subscription_quota"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "unknown",
+          "quality_sources": [],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 1048576
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "frequency_penalty",
+                "include_reasoning",
+                "logit_bias",
+                "logprobs",
+                "max_tokens",
+                "min_p",
+                "presence_penalty",
+                "reasoning",
+                "reasoning_effort",
+                "repetition_penalty",
+                "response_format",
+                "seed",
+                "stop",
+                "structured_outputs",
+                "temperature",
+                "tool_choice",
+                "tools",
+                "top_k",
+                "top_logprobs",
+                "top_p"
+              ]
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 1000000,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": null
+        },
+        {
+          "agent": "orbit-m-kimi-code-k3-256k-301bb915",
+          "model": "kimi-code/k3-256k",
+          "identity": {
+            "provider": "kimi-code",
+            "model": "k3-256k",
+            "reasoning": "unknown",
+            "billing_route": "subscription_quota"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "unknown",
+          "quality_sources": [],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 1048576
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text",
+                "image",
+                "video"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "frequency_penalty",
+                "include_reasoning",
+                "logit_bias",
+                "logprobs",
+                "max_tokens",
+                "min_p",
+                "presence_penalty",
+                "reasoning",
+                "reasoning_effort",
+                "repetition_penalty",
+                "response_format",
+                "seed",
+                "stop",
+                "structured_outputs",
+                "temperature",
+                "tool_choice",
+                "tools",
+                "top_k",
+                "top_logprobs",
+                "top_p"
+              ]
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 262144,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": null
+        },
+        {
+          "agent": "orbit-m-zenmux-deepseek-deepseek-v4-1-flash-0afa958f",
+          "model": "zenmux/deepseek/deepseek-v4.1-flash",
+          "identity": {
+            "provider": "zenmux",
+            "model": "deepseek/deepseek-v4.1-flash",
+            "reasoning": "unknown",
+            "billing_route": "unknown"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "unknown",
+          "quality_sources": [],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 1048576
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "frequency_penalty",
+                "include_reasoning",
+                "logit_bias",
+                "logprobs",
+                "max_tokens",
+                "min_p",
+                "presence_penalty",
+                "reasoning",
+                "reasoning_effort",
+                "repetition_penalty",
+                "response_format",
+                "seed",
+                "stop",
+                "structured_outputs",
+                "temperature",
+                "tool_choice",
+                "tools",
+                "top_k",
+                "top_logprobs",
+                "top_p"
+              ]
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 1000000,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": null
+        },
+        {
+          "agent": "orbit-m-zhipu-coding-plan-glm-5-3-flash-71b48ce8",
+          "model": "zhipu-coding-plan/glm-5.3-flash",
+          "identity": {
+            "provider": "zhipu-coding-plan",
+            "model": "glm-5.3-flash",
+            "reasoning": "unknown",
+            "billing_route": "subscription_quota"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "unknown",
+          "quality_sources": [],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 1048576
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text",
+                "image",
+                "video"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "frequency_penalty",
+                "include_reasoning",
+                "logit_bias",
+                "logprobs",
+                "max_tokens",
+                "min_p",
+                "parallel_tool_calls",
+                "presence_penalty",
+                "reasoning",
+                "reasoning_effort",
+                "repetition_penalty",
+                "response_format",
+                "seed",
+                "stop",
+                "structured_outputs",
+                "temperature",
+                "tool_choice",
+                "tools",
+                "top_k",
+                "top_logprobs",
+                "top_p"
+              ]
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 1000000,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": null
+        },
+        {
+          "agent": "orbit-m-cursor-grok-4-7-fast-aa556a9e",
+          "model": "cursor/grok-4.7-fast",
+          "identity": {
+            "provider": "cursor",
+            "model": "grok-4.7-fast",
+            "reasoning": "unknown",
+            "billing_route": "unknown"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "unknown",
+          "quality_sources": [],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 500000
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text",
+                "image",
+                "file"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "include_reasoning",
+                "logprobs",
+                "max_tokens",
+                "reasoning",
+                "reasoning_effort",
+                "response_format",
+                "seed",
+                "structured_outputs",
+                "temperature",
+                "tool_choice",
+                "tools",
+                "top_logprobs",
+                "top_p"
+              ]
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 256000,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": null
+        },
+        {
+          "agent": "orbit-m-cursor-grok-4-7-56f2c60a",
+          "model": "cursor/grok-4.7",
+          "identity": {
+            "provider": "cursor",
+            "model": "grok-4.7",
+            "reasoning": "unknown",
+            "billing_route": "unknown"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "unknown",
+          "quality_sources": [],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 500000
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text",
+                "image",
+                "file"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "include_reasoning",
+                "logprobs",
+                "max_tokens",
+                "reasoning",
+                "reasoning_effort",
+                "response_format",
+                "seed",
+                "structured_outputs",
+                "temperature",
+                "tool_choice",
+                "tools",
+                "top_logprobs",
+                "top_p"
+              ]
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 256000,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": null
+        },
+        {
+          "agent": "orbit-m-openai-codex-gpt-6-1-sol-3026c530",
+          "model": "openai-codex/gpt-6.1-sol",
+          "identity": {
+            "provider": "openai-codex",
+            "model": "gpt-6.1-sol",
+            "reasoning": "unknown",
+            "billing_route": "unknown"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "unknown",
+          "quality_sources": [],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 1050000
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "file",
+                "image",
+                "text"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "include_reasoning",
+                "max_completion_tokens",
+                "max_tokens",
+                "reasoning",
+                "reasoning_effort",
+                "response_format",
+                "seed",
+                "structured_outputs",
+                "tool_choice",
+                "tools",
+                "verbosity"
+              ]
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 272000,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": null
+        },
+        {
+          "agent": "orbit-m-openai-codex-gpt-6-luna-bae41d6b",
+          "model": "openai-codex/gpt-6-luna",
+          "identity": {
+            "provider": "openai-codex",
+            "model": "gpt-6-luna",
+            "reasoning": "unknown",
+            "billing_route": "unknown"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "unknown",
+          "quality_sources": [],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 1050000
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "file",
+                "image",
+                "text"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "include_reasoning",
+                "max_completion_tokens",
+                "max_tokens",
+                "reasoning",
+                "reasoning_effort",
+                "response_format",
+                "seed",
+                "structured_outputs",
+                "tool_choice",
+                "tools",
+                "verbosity"
+              ]
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 272000,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": null
+        }
+      ],
+      "requirements_error": null,
+      "recommendation": {
+        "first": null,
+        "backups": []
+      },
+      "recommendation_objects": {
+        "first": null,
+        "backups": []
+      },
+      "limitations": [],
+      "judgments": [],
+      "judgment_state": null,
+      "input_digest": "9968985866cf48cd1d0b6aacbc33474dcb7a276c6a4206cb3d09e3a93ad2e341",
+      "stale": false,
+      "unit_basis": "4665c90f15048cf7a4e87a8897aad28843fe7501ab082d4572a9b12540871ece",
+      "execution_role": "unspecified",
+      "dependencies": [],
+      "route_cost_inputs": {},
+      "release": {
+        "allows_positive_ranking": true,
+        "decision_version": "orbit-quality-decision-4",
+        "input_version": "jev-selection-input-2",
+        "model": "jev-1.13.0",
+        "proves_samples_real": false,
+        "provider": "typesafe",
+        "question_digest": "0fc3d712f60167edb572d039a2c9d5b35b0e9295a4a38bf9db597e3682ac7ca8",
+        "question_set_versions": {
+          "candidates": "jev-candidates-4",
+          "checker_quality": "jev-checker-task-fit-5",
+          "delegation": "jev-delegation-4",
+          "observation": "jev-observation-2"
+        },
+        "release": {
+          "reason": "Decision-4 independent review: unchanged question bodies, input profile, model and thresholds. handoff_fit gates bounded handoff structure; member_task_fit is a preserved diagnostic limitation; each candidate must independently clear its existing candidate_task_fit release and capability holds. Unknown price/quota/routes remain unknown; Root retains pool selection authority. The original 17 labels / 14 calls are preserved verbatim as per-question evidence, including negative, missing evidence, failure and holdout; they were not rerun and do not prove the newly composed production path. Completion additionally requires a fresh installed orbit omp ordinary-task recommendation/dispatch/integration/check/stop run.; independent OMP 2 approves bounded_git_delivery_v1 activation for isolated live acceptance; ordinary native recommendation/dispatch/integration/check/confirmed-stop remains the completion gate. Per-question historical calls are unchanged and do not prove the new combination live.",
+          "reviewed_at": "2026-10-01T19:02:16Z",
+          "reviewed_by": "OMP 2 (kimi-code/k3-256k, w22:p3) 独立原件复核",
+          "sample_count": 17,
+          "sample_digest": "5a30130a022abd2bc1b35a6ebe61c2ea4fe0e750cafbb0d23d6d51de973d03cc",
+          "scope": "bounded_git_delivery_v1"
+        },
+        "scope": "bounded_git_delivery_v1",
+        "structural_validation": "passed",
+        "thresholds": {
+          "candidate_task_fit": 0.65,
+          "checker_task_fit": 0.6,
+          "handoff_fit": 0.7,
+          "member_task_fit": 0.65
+        }
+      },
+      "decision": "facts_only",
+      "reason": "no candidate carries usable sourced facts or a catalog prior; no judgment is paid",
+      "work_unit_id": "wu-0afecd43d6162d33",
+      "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive",
+      "at": "2026-10-10T04:18:05Z",
+      "user_boundary": "0fa9ee79",
+      "user_message_id": "0fa9ee79"
+    }
+  },
+  "member_selections": {
+    "wu-0afecd43d6162d33": {
+      "version": "orbit-member-selection-v2",
+      "signature": "11f436c6e0fc401dff726e5d7b7c0b59e07a9ff3b94ccfd0f7a0e09bbfeee4bb",
+      "reused": false,
+      "candidates": [
+        {
+          "agent": "orbit-m-opencode-go-deepseek-v4-1-flash-79717e5d",
+          "model": "opencode-go/deepseek-v4.1-flash",
+          "identity": {
+            "provider": "opencode-go",
+            "model": "deepseek-v4.1-flash",
+            "reasoning": "unknown",
+            "billing_route": "subscription_quota"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "unknown",
+          "quality_sources": [],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 1048576
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "frequency_penalty",
+                "include_reasoning",
+                "logit_bias",
+                "logprobs",
+                "max_tokens",
+                "min_p",
+                "presence_penalty",
+                "reasoning",
+                "reasoning_effort",
+                "repetition_penalty",
+                "response_format",
+                "seed",
+                "stop",
+                "structured_outputs",
+                "temperature",
+                "tool_choice",
+                "tools",
+                "top_k",
+                "top_logprobs",
+                "top_p"
+              ]
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 1000000,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": null
+        },
+        {
+          "agent": "orbit-m-kimi-code-k3-256k-301bb915",
+          "model": "kimi-code/k3-256k",
+          "identity": {
+            "provider": "kimi-code",
+            "model": "k3-256k",
+            "reasoning": "unknown",
+            "billing_route": "subscription_quota"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "unknown",
+          "quality_sources": [],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 1048576
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text",
+                "image",
+                "video"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "frequency_penalty",
+                "include_reasoning",
+                "logit_bias",
+                "logprobs",
+                "max_tokens",
+                "min_p",
+                "presence_penalty",
+                "reasoning",
+                "reasoning_effort",
+                "repetition_penalty",
+                "response_format",
+                "seed",
+                "stop",
+                "structured_outputs",
+                "temperature",
+                "tool_choice",
+                "tools",
+                "top_k",
+                "top_logprobs",
+                "top_p"
+              ]
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 262144,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": null
+        },
+        {
+          "agent": "orbit-m-zenmux-deepseek-deepseek-v4-1-flash-0afa958f",
+          "model": "zenmux/deepseek/deepseek-v4.1-flash",
+          "identity": {
+            "provider": "zenmux",
+            "model": "deepseek/deepseek-v4.1-flash",
+            "reasoning": "unknown",
+            "billing_route": "unknown"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "unknown",
+          "quality_sources": [],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 1048576
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "frequency_penalty",
+                "include_reasoning",
+                "logit_bias",
+                "logprobs",
+                "max_tokens",
+                "min_p",
+                "presence_penalty",
+                "reasoning",
+                "reasoning_effort",
+                "repetition_penalty",
+                "response_format",
+                "seed",
+                "stop",
+                "structured_outputs",
+                "temperature",
+                "tool_choice",
+                "tools",
+                "top_k",
+                "top_logprobs",
+                "top_p"
+              ]
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 1000000,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": null
+        },
+        {
+          "agent": "orbit-m-zhipu-coding-plan-glm-5-3-flash-71b48ce8",
+          "model": "zhipu-coding-plan/glm-5.3-flash",
+          "identity": {
+            "provider": "zhipu-coding-plan",
+            "model": "glm-5.3-flash",
+            "reasoning": "unknown",
+            "billing_route": "subscription_quota"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "unknown",
+          "quality_sources": [],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 1048576
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text",
+                "image",
+                "video"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "frequency_penalty",
+                "include_reasoning",
+                "logit_bias",
+                "logprobs",
+                "max_tokens",
+                "min_p",
+                "parallel_tool_calls",
+                "presence_penalty",
+                "reasoning",
+                "reasoning_effort",
+                "repetition_penalty",
+                "response_format",
+                "seed",
+                "stop",
+                "structured_outputs",
+                "temperature",
+                "tool_choice",
+                "tools",
+                "top_k",
+                "top_logprobs",
+                "top_p"
+              ]
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 1000000,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": null
+        },
+        {
+          "agent": "orbit-m-cursor-grok-4-7-fast-aa556a9e",
+          "model": "cursor/grok-4.7-fast",
+          "identity": {
+            "provider": "cursor",
+            "model": "grok-4.7-fast",
+            "reasoning": "unknown",
+            "billing_route": "unknown"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "unknown",
+          "quality_sources": [],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 500000
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text",
+                "image",
+                "file"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "include_reasoning",
+                "logprobs",
+                "max_tokens",
+                "reasoning",
+                "reasoning_effort",
+                "response_format",
+                "seed",
+                "structured_outputs",
+                "temperature",
+                "tool_choice",
+                "tools",
+                "top_logprobs",
+                "top_p"
+              ]
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 256000,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": null
+        },
+        {
+          "agent": "orbit-m-cursor-grok-4-7-56f2c60a",
+          "model": "cursor/grok-4.7",
+          "identity": {
+            "provider": "cursor",
+            "model": "grok-4.7",
+            "reasoning": "unknown",
+            "billing_route": "unknown"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "unknown",
+          "quality_sources": [],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 500000
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text",
+                "image",
+                "file"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "include_reasoning",
+                "logprobs",
+                "max_tokens",
+                "reasoning",
+                "reasoning_effort",
+                "response_format",
+                "seed",
+                "structured_outputs",
+                "temperature",
+                "tool_choice",
+                "tools",
+                "top_logprobs",
+                "top_p"
+              ]
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 256000,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": null
+        },
+        {
+          "agent": "orbit-m-openai-codex-gpt-6-1-sol-3026c530",
+          "model": "openai-codex/gpt-6.1-sol",
+          "identity": {
+            "provider": "openai-codex",
+            "model": "gpt-6.1-sol",
+            "reasoning": "unknown",
+            "billing_route": "unknown"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "unknown",
+          "quality_sources": [],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 1050000
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "file",
+                "image",
+                "text"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "include_reasoning",
+                "max_completion_tokens",
+                "max_tokens",
+                "reasoning",
+                "reasoning_effort",
+                "response_format",
+                "seed",
+                "structured_outputs",
+                "tool_choice",
+                "tools",
+                "verbosity"
+              ]
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 272000,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": null
+        },
+        {
+          "agent": "orbit-m-openai-codex-gpt-6-luna-bae41d6b",
+          "model": "openai-codex/gpt-6-luna",
+          "identity": {
+            "provider": "openai-codex",
+            "model": "gpt-6-luna",
+            "reasoning": "unknown",
+            "billing_route": "unknown"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "unknown",
+          "quality_sources": [],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 1050000
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "file",
+                "image",
+                "text"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "include_reasoning",
+                "max_completion_tokens",
+                "max_tokens",
+                "reasoning",
+                "reasoning_effort",
+                "response_format",
+                "seed",
+                "structured_outputs",
+                "tool_choice",
+                "tools",
+                "verbosity"
+              ]
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 272000,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": null
+        }
+      ],
+      "requirements_error": null,
+      "recommendation": {
+        "first": null,
+        "backups": []
+      },
+      "recommendation_objects": {
+        "first": null,
+        "backups": []
+      },
+      "limitations": [],
+      "judgments": [],
+      "judgment_state": null,
+      "input_digest": "9968985866cf48cd1d0b6aacbc33474dcb7a276c6a4206cb3d09e3a93ad2e341",
+      "stale": false,
+      "unit_basis": "4665c90f15048cf7a4e87a8897aad28843fe7501ab082d4572a9b12540871ece",
+      "execution_role": "unspecified",
+      "dependencies": [],
+      "route_cost_inputs": {},
+      "release": {
+        "allows_positive_ranking": true,
+        "decision_version": "orbit-quality-decision-4",
+        "input_version": "jev-selection-input-2",
+        "model": "jev-1.13.0",
+        "proves_samples_real": false,
+        "provider": "typesafe",
+        "question_digest": "0fc3d712f60167edb572d039a2c9d5b35b0e9295a4a38bf9db597e3682ac7ca8",
+        "question_set_versions": {
+          "candidates": "jev-candidates-4",
+          "checker_quality": "jev-checker-task-fit-5",
+          "delegation": "jev-delegation-4",
+          "observation": "jev-observation-2"
+        },
+        "release": {
+          "reason": "Decision-4 independent review: unchanged question bodies, input profile, model and thresholds. handoff_fit gates bounded handoff structure; member_task_fit is a preserved diagnostic limitation; each candidate must independently clear its existing candidate_task_fit release and capability holds. Unknown price/quota/routes remain unknown; Root retains pool selection authority. The original 17 labels / 14 calls are preserved verbatim as per-question evidence, including negative, missing evidence, failure and holdout; they were not rerun and do not prove the newly composed production path. Completion additionally requires a fresh installed orbit omp ordinary-task recommendation/dispatch/integration/check/stop run.; independent OMP 2 approves bounded_git_delivery_v1 activation for isolated live acceptance; ordinary native recommendation/dispatch/integration/check/confirmed-stop remains the completion gate. Per-question historical calls are unchanged and do not prove the new combination live.",
+          "reviewed_at": "2026-10-01T19:02:16Z",
+          "reviewed_by": "OMP 2 (kimi-code/k3-256k, w22:p3) 独立原件复核",
+          "sample_count": 17,
+          "sample_digest": "5a30130a022abd2bc1b35a6ebe61c2ea4fe0e750cafbb0d23d6d51de973d03cc",
+          "scope": "bounded_git_delivery_v1"
+        },
+        "scope": "bounded_git_delivery_v1",
+        "structural_validation": "passed",
+        "thresholds": {
+          "candidate_task_fit": 0.65,
+          "checker_task_fit": 0.6,
+          "handoff_fit": 0.7,
+          "member_task_fit": 0.65
+        }
+      },
+      "decision": "facts_only",
+      "reason": "no candidate carries usable sourced facts or a catalog prior; no judgment is paid",
+      "work_unit_id": "wu-0afecd43d6162d33",
+      "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive",
+      "at": "2026-10-10T04:18:05Z",
+      "user_boundary": "0fa9ee79",
+      "user_message_id": "0fa9ee79"
+    }
+  },
+  "evidence_requests": {},
+  "evidence_gaps": {},
+  "members": [
+    {
+      "kind": "omp",
+      "adapter": "omp_native_task",
+      "thread_id": "orbit-ff845f84-ca47-4256-9ae6-7bee105db16f",
+      "requested_name": "orbit-ff845f84-ca47-4256-9ae6-7bee105db16f",
+      "status": "completed",
+      "registered_at": "2026-10-10T04:18:06Z",
+      "tool_call_id": "call_55a68d16505642e982d24100",
+      "delegation_basis": "root_without_hint",
+      "model": "opencode-go/deepseek-v4.1-flash",
+      "registry_status": "idle",
+      "session_file": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/sessions-positive/2026-10-10T04-12-28-004Z_01a12403-23e4-720b-82ff-360b16ea4d62/orbit-ff845f84-ca47-4256-9ae6-7bee105db16f.jsonl",
+      "last_turn_error": null,
+      "accepted_at": 1791606061605,
+      "result": "{\n  \"work_unit\": \"wu-0afecd43d6162d33\",\n  \"file\": \"src/importer.mjs\",\n  \"changed\": false,\n  \"summary\": \"No modification required: src/importer.mjs already satisfies SPEC.md and every expectation encoded in tests/acceptance.mjs.\",\n  \"modification_points\": [],\n  \"verification\": {\n    \"syntax_check\": \".runtime/bin/node --check src/importer.mjs -> exit 0, no output (PASS)\",\n    \"npm_test\": \"NOT RUNNABLE by this member: scope guard rejects the wrapper form for the npm command, and the enforced member sandbox grants read access only to src/importer.mjs, SPEC.md, tests/acceptance.mjs. node therefore cannot read .runtime/lib/node_modules/npm/bin/npm-cli.js (EPERM), and src/cli.mjs is also unreadable => the CLI portion of tests/acceptance.mjs could not execute here. Per the work-unit context, npm test is Root's unified integration step.\",\n    \"static_acceptance_review\": \"Manually traced every frozen case against the code; all match:\"\n  },\n  \"case_trace\": {\n    \"grouping_samples_1..110\": {\n      \"input\": \"category,amount\\\\nFood,<i>.01\\\\nTravel,0.99\\\\nFood,0.02\\\\n\",\n      \"result\": \"groups Food totalCents=i*100+3 count=2, Travel 99 count=1; totalCents=i*100+102; count=3 -> MATCH (integer cents, no float accumulation)\"\n    },\n    \"BOM_CRLF_blanks_whitespace\": {\n      \"input\": \"\\\\ufeffcategory,amount\\\\r\\\\n\\\\r\\\\n Food , 1.20 \\\\r\\\\n\",\n      \"result\": \"single leading BOM stripped, \\\\r?\\\\n split, blank line skipped, fields trimmed => {Food,120,1},120,1 -> MATCH\"\n    },\n    \"invalid_amounts_minus1_00_1_1_0_1_001_1e2_90071992547409_92\": {\n      \"result\": \"regex ^(0|[1-9]\\\\d*)\\\\.\\\\d{2}$ rejects sign/'1'/'1.0'/'1.001'/'1e2'; 90071992547409.92 -> cents 9007199254740992 fails Number.isSafeInteger => Error 'line 3: ...' matches /3/ -> MATCH\"\n    },\n    \"sum_overflow\": {\n      \"result\": \"A .91 = 9007199254740991 ok; adding B 0.01 gives 9007199254740992 > MAX_SAFE_INTEGER -> Error line 3 -> MATCH\"\n    },\n    \"category_overflow\": {\n      \"result\": \"A .90 = 9007199254740990; A .02 -> category ",
+      "output_path": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/sessions-positive/2026-10-10T04-12-28-004Z_01a12403-23e4-720b-82ff-360b16ea4d62/orbit-ff845f84-ca47-4256-9ae6-7bee105db16f.md",
+      "result_delivery": "native_task",
+      "stop_confirmation": {
+        "confirmed": true,
+        "id": "orbit-ff845f84-ca47-4256-9ae6-7bee105db16f",
+        "scope": "Member turn, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+        "registry_status": "idle",
+        "status_after": "idle",
+        "active_tools_after": 0,
+        "async_jobs_settled": true
+      },
+      "execution_status": "stopped",
+      "registry_status_before_stop": "idle"
+    }
+  ],
+  "unknown_candidates": {},
+  "check_observations": {
+    "4bacf9dc2a27272f98a379578ef0c11feb0cad771558d2eba71e1cceff30d49d": {
+      "status": "finished",
+      "check": 1,
+      "stale": false,
+      "trigger_cause": "manual_check",
+      "manual": true,
+      "started_at": "2026-10-10T04:15:49Z",
+      "finished_at": "2026-10-10T04:17:13Z"
+    },
+    "df8bf8c15cb35a41af9776fe70d82ecd4a4a6bbb6395cfd31310cc2d1d9fab6f": {
+      "status": "finished",
+      "check": 2,
+      "stale": false,
+      "trigger_cause": "manual_check",
+      "manual": true,
+      "started_at": "2026-10-10T04:22:01Z",
+      "finished_at": "2026-10-10T04:24:53Z"
+    }
+  },
+  "finalization_notices": {
+    "5a83fec147899e15e19615059b58ed5a7231f718b6e179249482d46c9dc36d63": {
+      "check": 2,
+      "message_id": "301fbb58-5075-4b1f-92f4-52ff56580f4c",
+      "at": "2026-10-10T04:24:53Z"
+    }
+  },
+  "completion_readiness": {
+    "status": "complete",
+    "reason": "独立终检及停止确认通过",
+    "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive",
+    "artifact_digest": "sha256:462f329cf68d16b3b5da82bd06a698c1bd076a1230c6aeb5692f4aacd7451a48",
+    "input_digest": "9968985866cf48cd1d0b6aacbc33474dcb7a276c6a4206cb3d09e3a93ad2e341",
+    "notice_key": "5a83fec147899e15e19615059b58ed5a7231f718b6e179249482d46c9dc36d63",
+    "prior_status": "queued"
+  },
+  "last_user_message_id": "0fa9ee79",
+  "root_session_file": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/sessions-positive/2026-10-10T04-12-28-004Z_01a12403-23e4-720b-82ff-360b16ea4d62.jsonl",
+  "hub_seen_ids": [
+    "collab-1",
+    "collab-2",
+    "collab-3",
+    "collab-4",
+    "collab-5",
+    "collab-6",
+    "collab-7",
+    "collab-8",
+    "collab-9",
+    "collab-10",
+    "collab-11",
+    "collab-12",
+    "collab-13",
+    "collab-14",
+    "collab-15",
+    "collab-16",
+    "collab-17",
+    "collab-18",
+    "collab-19",
+    "collab-20"
+  ],
+  "native_collaboration": [
+    {
+      "id": "collab-1",
+      "seq": 1,
+      "kind": "model_identity",
+      "op": null,
+      "from": null,
+      "to": null,
+      "agent_id": "Main",
+      "session_id": "01a12403-23e4-720b-82ff-360b16ea4d62",
+      "await_reply": null,
+      "message": null,
+      "text": null,
+      "ok": null
+    },
+    {
+      "id": "collab-2",
+      "seq": 2,
+      "kind": "cooperation_policy",
+      "op": null,
+      "from": null,
+      "to": null,
+      "agent_id": "Main",
+      "session_id": "01a12403-23e4-720b-82ff-360b16ea4d62",
+      "await_reply": null,
+      "message": null,
+      "text": null,
+      "ok": null
+    },
+    {
+      "id": "collab-3",
+      "seq": 3,
+      "kind": "bootstrap_guidance",
+      "op": null,
+      "from": null,
+      "to": null,
+      "agent_id": null,
+      "session_id": "01a12403-23e4-720b-82ff-360b16ea4d62",
+      "await_reply": null,
+      "message": null,
+      "text": null,
+      "ok": null
+    },
+    {
+      "id": "collab-4",
+      "seq": 4,
+      "kind": "goal_projection",
+      "op": null,
+      "from": null,
+      "to": null,
+      "agent_id": "Main",
+      "session_id": "01a12403-23e4-720b-82ff-360b16ea4d62",
+      "await_reply": null,
+      "message": null,
+      "text": null,
+      "ok": null
+    },
+    {
+      "id": "collab-5",
+      "seq": 5,
+      "kind": "unit_state_before_edit",
+      "op": null,
+      "from": null,
+      "to": null,
+      "agent_id": null,
+      "session_id": "01a12403-23e4-720b-82ff-360b16ea4d62",
+      "await_reply": null,
+      "message": null,
+      "text": null,
+      "ok": null
+    },
+    {
+      "id": "collab-6",
+      "seq": 6,
+      "kind": "task_dispatch",
+      "op": null,
+      "from": null,
+      "to": null,
+      "agent_id": "Main",
+      "session_id": "01a12403-23e4-720b-82ff-360b16ea4d62",
+      "await_reply": null,
+      "message": null,
+      "text": null,
+      "ok": null
+    },
+    {
+      "id": "collab-7",
+      "seq": 7,
+      "kind": "task_result",
+      "op": null,
+      "from": null,
+      "to": null,
+      "agent_id": "Main",
+      "session_id": "01a12403-23e4-720b-82ff-360b16ea4d62",
+      "await_reply": null,
+      "message": null,
+      "text": "Spawned agent `orbit-ff845f84-ca47-4256-9ae6-7bee105db16f` (job `orbit-ff845f84-ca47-4256-9ae6-7bee105db16f`).\n\nResults auto-deliver; NEVER poll. Completely blocked? Call `wait` to receive the first settled job you started.\nCoordinate while peers run via `write agent://<id>` (or `agent://all` to broadcast).\n\n`read proc://` lists jobs/services; `read proc://<id>` inspects status/output without consuming delivery. `write proc://<id>/kill` cancels/stops; omit `content`.\n\nJob IDs are process-local; delivered results expire shortly (~30s), unconsumed results within ~5min. Agent output/transcripts remain readable at `agent://<id>` / `history://<id>`. `write agent://<id>` messages a live agent.\n\n`completed`: subagent yielded successfully; claimed artifacts unverified.",
+      "ok": true
+    },
+    {
+      "id": "collab-8",
+      "seq": 8,
+      "kind": "work_unit_binding_pending",
+      "op": null,
+      "from": null,
+      "to": null,
+      "agent_id": "orbit-ff845f84-ca47-4256-9ae6-7bee105db16f",
+      "session_id": null,
+      "await_reply": null,
+      "message": null,
+      "text": null,
+      "ok": null
+    },
+    {
+      "id": "collab-9",
+      "seq": 9,
+      "kind": "work_unit_workspace_applied",
+      "op": null,
+      "from": null,
+      "to": null,
+      "agent_id": "orbit-ff845f84-ca47-4256-9ae6-7bee105db16f",
+      "session_id": null,
+      "await_reply": null,
+      "message": null,
+      "text": null,
+      "ok": null
+    },
+    {
+      "id": "collab-10",
+      "seq": 10,
+      "kind": "model_identity",
+      "op": null,
+      "from": null,
+      "to": null,
+      "agent_id": "orbit-ff845f84-ca47-4256-9ae6-7bee105db16f",
+      "session_id": "01a12408-4e6e-7281-9cb4-313c889421ca",
+      "await_reply": null,
+      "message": null,
+      "text": null,
+      "ok": null
+    },
+    {
+      "id": "collab-11",
+      "seq": 11,
+      "kind": "work_unit_tool_blocked",
+      "agent_id": "orbit-ff845f84-ca47-4256-9ae6-7bee105db16f",
+      "session_id": "01a12408-4e6e-7281-9cb4-313c889421ca",
+      "work_unit_id": "wu-0afecd43d6162d33",
+      "tool_call_id": "call_00_dPw9xJQr29Bs57Qs9jCj0769",
+      "tool": "bash",
+      "reason": "Orbit work-unit scope: command is absent from the declared work-unit commands",
+      "at": 1791605899356
+    },
+    {
+      "id": "collab-12",
+      "seq": 12,
+      "kind": "work_unit_tool_blocked",
+      "agent_id": "orbit-ff845f84-ca47-4256-9ae6-7bee105db16f",
+      "session_id": "01a12408-4e6e-7281-9cb4-313c889421ca",
+      "work_unit_id": "wu-0afecd43d6162d33",
+      "tool_call_id": "call_00_KeN8mkBhTcLQBeM9lsdA8021",
+      "tool": "read",
+      "reason": "Orbit work-unit scope: path is outside the allowed work-unit paths",
+      "at": 1791605901692
+    },
+    {
+      "id": "collab-13",
+      "seq": 13,
+      "kind": "work_unit_tool_blocked",
+      "agent_id": "orbit-ff845f84-ca47-4256-9ae6-7bee105db16f",
+      "session_id": "01a12408-4e6e-7281-9cb4-313c889421ca",
+      "work_unit_id": "wu-0afecd43d6162d33",
+      "tool_call_id": "call_01_ehBn7EBYtABA7rfQSQHi3334",
+      "tool": "read",
+      "reason": "Orbit work-unit scope: path is outside the allowed work-unit paths",
+      "at": 1791605901719
+    },
+    {
+      "id": "collab-14",
+      "seq": 14,
+      "kind": "work_unit_tool_blocked",
+      "agent_id": "orbit-ff845f84-ca47-4256-9ae6-7bee105db16f",
+      "session_id": "01a12408-4e6e-7281-9cb4-313c889421ca",
+      "work_unit_id": "wu-0afecd43d6162d33",
+      "tool_call_id": "call_00_44RQetz6bwl9qyi5bsxf9877",
+      "tool": "bash",
+      "reason": "Orbit work-unit scope: command is absent from the declared work-unit commands",
+      "at": 1791605908624
+    },
+    {
+      "id": "collab-15",
+      "seq": 15,
+      "kind": "work_unit_tool_blocked",
+      "agent_id": "orbit-ff845f84-ca47-4256-9ae6-7bee105db16f",
+      "session_id": "01a12408-4e6e-7281-9cb4-313c889421ca",
+      "work_unit_id": "wu-0afecd43d6162d33",
+      "tool_call_id": "call_00_3CLInSx3II53WP31aelP3715",
+      "tool": "bash",
+      "reason": "Orbit work-unit scope: command is absent from the declared work-unit commands",
+      "at": 1791605916798
+    },
+    {
+      "id": "collab-16",
+      "seq": 16,
+      "kind": "work_unit_tool_blocked",
+      "agent_id": "orbit-ff845f84-ca47-4256-9ae6-7bee105db16f",
+      "session_id": "01a12408-4e6e-7281-9cb4-313c889421ca",
+      "work_unit_id": "wu-0afecd43d6162d33",
+      "tool_call_id": "call_00_nGCHmGT76iRBeeew1OK57236",
+      "tool": "bash",
+      "reason": "Orbit work-unit scope: command is absent from the declared work-unit commands",
+      "at": 1791605943068
+    },
+    {
+      "id": "collab-17",
+      "seq": 17,
+      "kind": "work_unit_tool_blocked",
+      "agent_id": "orbit-ff845f84-ca47-4256-9ae6-7bee105db16f",
+      "session_id": "01a12408-4e6e-7281-9cb4-313c889421ca",
+      "work_unit_id": "wu-0afecd43d6162d33",
+      "tool_call_id": "call_00_ExWW7iVK2vSBXRJyAxaS2555",
+      "tool": "bash",
+      "reason": "Orbit work-unit scope: command is absent from the declared work-unit commands",
+      "at": 1791605958657
+    },
+    {
+      "id": "collab-18",
+      "seq": 18,
+      "kind": "work_unit_tool_blocked",
+      "agent_id": "orbit-ff845f84-ca47-4256-9ae6-7bee105db16f",
+      "session_id": "01a12408-4e6e-7281-9cb4-313c889421ca",
+      "work_unit_id": "wu-0afecd43d6162d33",
+      "tool_call_id": "call_00_QsfitQK0K0vbtR6ipVbC6715",
+      "tool": "eval",
+      "reason": "Orbit work-unit scope: tool eval has no allowed work-unit entrance",
+      "at": 1791605970890
+    },
+    {
+      "id": "collab-19",
+      "seq": 19,
+      "kind": "work_unit_tool_blocked",
+      "agent_id": "orbit-ff845f84-ca47-4256-9ae6-7bee105db16f",
+      "session_id": "01a12408-4e6e-7281-9cb4-313c889421ca",
+      "work_unit_id": "wu-0afecd43d6162d33",
+      "tool_call_id": "call_00_ES1KdrRshc2YzAA1fecd0772",
+      "tool": "bash",
+      "reason": "Orbit work-unit scope: command is absent from the declared work-unit commands",
+      "at": 1791606006458
+    },
+    {
+      "id": "collab-20",
+      "seq": 20,
+      "kind": "work_unit_tool_blocked",
+      "agent_id": "orbit-ff845f84-ca47-4256-9ae6-7bee105db16f",
+      "session_id": "01a12408-4e6e-7281-9cb4-313c889421ca",
+      "work_unit_id": "wu-0afecd43d6162d33",
+      "tool_call_id": "call_00_CrMOUYhiL93OlQi0d4lH8641",
+      "tool": "bash",
+      "reason": "Orbit work-unit scope: command is absent from the declared work-unit commands",
+      "at": 1791606048359
+    }
+  ],
+  "hub_last_seq": 20,
+  "jev": {
+    "provider": "typesafe",
+    "model": null,
+    "question_set_version": "jev-observation-2",
+    "usage": null,
+    "call_id": "orbit-judgment-0608182e-5314-4ff3-a036-c8158321e748",
+    "requested_model": "jev-1.13.0",
+    "status": "unavailable",
+    "scores": {
+      "stuck": 0.32,
+      "off_track": 0.44,
+      "artifact_ready": 0.46
+    },
+    "assessed_at": "2026-10-10T04:20:17Z",
+    "delegation": {
+      "version": "orbit-member-selection-v2",
+      "signature": "11f436c6e0fc401dff726e5d7b7c0b59e07a9ff3b94ccfd0f7a0e09bbfeee4bb",
+      "reused": false,
+      "candidates": [
+        {
+          "agent": "orbit-m-opencode-go-deepseek-v4-1-flash-79717e5d",
+          "model": "opencode-go/deepseek-v4.1-flash",
+          "identity": {
+            "provider": "opencode-go",
+            "model": "deepseek-v4.1-flash",
+            "reasoning": "unknown",
+            "billing_route": "subscription_quota"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "unknown",
+          "quality_sources": [],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 1048576
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "frequency_penalty",
+                "include_reasoning",
+                "logit_bias",
+                "logprobs",
+                "max_tokens",
+                "min_p",
+                "presence_penalty",
+                "reasoning",
+                "reasoning_effort",
+                "repetition_penalty",
+                "response_format",
+                "seed",
+                "stop",
+                "structured_outputs",
+                "temperature",
+                "tool_choice",
+                "tools",
+                "top_k",
+                "top_logprobs",
+                "top_p"
+              ]
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 1000000,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": null
+        },
+        {
+          "agent": "orbit-m-kimi-code-k3-256k-301bb915",
+          "model": "kimi-code/k3-256k",
+          "identity": {
+            "provider": "kimi-code",
+            "model": "k3-256k",
+            "reasoning": "unknown",
+            "billing_route": "subscription_quota"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "unknown",
+          "quality_sources": [],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 1048576
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text",
+                "image",
+                "video"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "frequency_penalty",
+                "include_reasoning",
+                "logit_bias",
+                "logprobs",
+                "max_tokens",
+                "min_p",
+                "presence_penalty",
+                "reasoning",
+                "reasoning_effort",
+                "repetition_penalty",
+                "response_format",
+                "seed",
+                "stop",
+                "structured_outputs",
+                "temperature",
+                "tool_choice",
+                "tools",
+                "top_k",
+                "top_logprobs",
+                "top_p"
+              ]
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 262144,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": null
+        },
+        {
+          "agent": "orbit-m-zenmux-deepseek-deepseek-v4-1-flash-0afa958f",
+          "model": "zenmux/deepseek/deepseek-v4.1-flash",
+          "identity": {
+            "provider": "zenmux",
+            "model": "deepseek/deepseek-v4.1-flash",
+            "reasoning": "unknown",
+            "billing_route": "unknown"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "unknown",
+          "quality_sources": [],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 1048576
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "frequency_penalty",
+                "include_reasoning",
+                "logit_bias",
+                "logprobs",
+                "max_tokens",
+                "min_p",
+                "presence_penalty",
+                "reasoning",
+                "reasoning_effort",
+                "repetition_penalty",
+                "response_format",
+                "seed",
+                "stop",
+                "structured_outputs",
+                "temperature",
+                "tool_choice",
+                "tools",
+                "top_k",
+                "top_logprobs",
+                "top_p"
+              ]
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 1000000,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": null
+        },
+        {
+          "agent": "orbit-m-zhipu-coding-plan-glm-5-3-flash-71b48ce8",
+          "model": "zhipu-coding-plan/glm-5.3-flash",
+          "identity": {
+            "provider": "zhipu-coding-plan",
+            "model": "glm-5.3-flash",
+            "reasoning": "unknown",
+            "billing_route": "subscription_quota"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "unknown",
+          "quality_sources": [],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 1048576
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text",
+                "image",
+                "video"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "frequency_penalty",
+                "include_reasoning",
+                "logit_bias",
+                "logprobs",
+                "max_tokens",
+                "min_p",
+                "parallel_tool_calls",
+                "presence_penalty",
+                "reasoning",
+                "reasoning_effort",
+                "repetition_penalty",
+                "response_format",
+                "seed",
+                "stop",
+                "structured_outputs",
+                "temperature",
+                "tool_choice",
+                "tools",
+                "top_k",
+                "top_logprobs",
+                "top_p"
+              ]
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 1000000,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": null
+        },
+        {
+          "agent": "orbit-m-cursor-grok-4-7-fast-aa556a9e",
+          "model": "cursor/grok-4.7-fast",
+          "identity": {
+            "provider": "cursor",
+            "model": "grok-4.7-fast",
+            "reasoning": "unknown",
+            "billing_route": "unknown"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "unknown",
+          "quality_sources": [],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 500000
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text",
+                "image",
+                "file"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "include_reasoning",
+                "logprobs",
+                "max_tokens",
+                "reasoning",
+                "reasoning_effort",
+                "response_format",
+                "seed",
+                "structured_outputs",
+                "temperature",
+                "tool_choice",
+                "tools",
+                "top_logprobs",
+                "top_p"
+              ]
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 256000,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": null
+        },
+        {
+          "agent": "orbit-m-cursor-grok-4-7-56f2c60a",
+          "model": "cursor/grok-4.7",
+          "identity": {
+            "provider": "cursor",
+            "model": "grok-4.7",
+            "reasoning": "unknown",
+            "billing_route": "unknown"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "unknown",
+          "quality_sources": [],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 500000
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text",
+                "image",
+                "file"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "include_reasoning",
+                "logprobs",
+                "max_tokens",
+                "reasoning",
+                "reasoning_effort",
+                "response_format",
+                "seed",
+                "structured_outputs",
+                "temperature",
+                "tool_choice",
+                "tools",
+                "top_logprobs",
+                "top_p"
+              ]
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 256000,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": null
+        },
+        {
+          "agent": "orbit-m-openai-codex-gpt-6-1-sol-3026c530",
+          "model": "openai-codex/gpt-6.1-sol",
+          "identity": {
+            "provider": "openai-codex",
+            "model": "gpt-6.1-sol",
+            "reasoning": "unknown",
+            "billing_route": "unknown"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "unknown",
+          "quality_sources": [],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 1050000
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "file",
+                "image",
+                "text"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "include_reasoning",
+                "max_completion_tokens",
+                "max_tokens",
+                "reasoning",
+                "reasoning_effort",
+                "response_format",
+                "seed",
+                "structured_outputs",
+                "tool_choice",
+                "tools",
+                "verbosity"
+              ]
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 272000,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": null
+        },
+        {
+          "agent": "orbit-m-openai-codex-gpt-6-luna-bae41d6b",
+          "model": "openai-codex/gpt-6-luna",
+          "identity": {
+            "provider": "openai-codex",
+            "model": "gpt-6-luna",
+            "reasoning": "unknown",
+            "billing_route": "unknown"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "unknown",
+          "quality_sources": [],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 1050000
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "file",
+                "image",
+                "text"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "include_reasoning",
+                "max_completion_tokens",
+                "max_tokens",
+                "reasoning",
+                "reasoning_effort",
+                "response_format",
+                "seed",
+                "structured_outputs",
+                "tool_choice",
+                "tools",
+                "verbosity"
+              ]
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 272000,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": null
+        }
+      ],
+      "requirements_error": null,
+      "recommendation": {
+        "first": null,
+        "backups": []
+      },
+      "recommendation_objects": {
+        "first": null,
+        "backups": []
+      },
+      "limitations": [],
+      "judgments": [],
+      "judgment_state": null,
+      "input_digest": "9968985866cf48cd1d0b6aacbc33474dcb7a276c6a4206cb3d09e3a93ad2e341",
+      "stale": false,
+      "unit_basis": "4665c90f15048cf7a4e87a8897aad28843fe7501ab082d4572a9b12540871ece",
+      "execution_role": "unspecified",
+      "dependencies": [],
+      "route_cost_inputs": {},
+      "release": {
+        "allows_positive_ranking": true,
+        "decision_version": "orbit-quality-decision-4",
+        "input_version": "jev-selection-input-2",
+        "model": "jev-1.13.0",
+        "proves_samples_real": false,
+        "provider": "typesafe",
+        "question_digest": "0fc3d712f60167edb572d039a2c9d5b35b0e9295a4a38bf9db597e3682ac7ca8",
+        "question_set_versions": {
+          "candidates": "jev-candidates-4",
+          "checker_quality": "jev-checker-task-fit-5",
+          "delegation": "jev-delegation-4",
+          "observation": "jev-observation-2"
+        },
+        "release": {
+          "reason": "Decision-4 independent review: unchanged question bodies, input profile, model and thresholds. handoff_fit gates bounded handoff structure; member_task_fit is a preserved diagnostic limitation; each candidate must independently clear its existing candidate_task_fit release and capability holds. Unknown price/quota/routes remain unknown; Root retains pool selection authority. The original 17 labels / 14 calls are preserved verbatim as per-question evidence, including negative, missing evidence, failure and holdout; they were not rerun and do not prove the newly composed production path. Completion additionally requires a fresh installed orbit omp ordinary-task recommendation/dispatch/integration/check/stop run.; independent OMP 2 approves bounded_git_delivery_v1 activation for isolated live acceptance; ordinary native recommendation/dispatch/integration/check/confirmed-stop remains the completion gate. Per-question historical calls are unchanged and do not prove the new combination live.",
+          "reviewed_at": "2026-10-01T19:02:16Z",
+          "reviewed_by": "OMP 2 (kimi-code/k3-256k, w22:p3) 独立原件复核",
+          "sample_count": 17,
+          "sample_digest": "5a30130a022abd2bc1b35a6ebe61c2ea4fe0e750cafbb0d23d6d51de973d03cc",
+          "scope": "bounded_git_delivery_v1"
+        },
+        "scope": "bounded_git_delivery_v1",
+        "structural_validation": "passed",
+        "thresholds": {
+          "candidate_task_fit": 0.65,
+          "checker_task_fit": 0.6,
+          "handoff_fit": 0.7,
+          "member_task_fit": 0.65
+        }
+      },
+      "decision": "facts_only",
+      "reason": "no candidate carries usable sourced facts or a catalog prior; no judgment is paid",
+      "work_unit_id": "wu-0afecd43d6162d33",
+      "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive",
+      "at": "2026-10-10T04:18:05Z",
+      "user_boundary": "0fa9ee79",
+      "user_message_id": "0fa9ee79"
+    },
+    "error": "TypeSafe assessment failed: Net::OpenTimeout",
+    "unavailable": "TypeSafe assessment failed: Net::OpenTimeout",
+    "at": "2026-10-10T04:24:55Z"
+  },
+  "task_delivery": {
+    "turn_id": "26efa9a0",
+    "input_digest": "9968985866cf48cd1d0b6aacbc33474dcb7a276c6a4206cb3d09e3a93ad2e341",
+    "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive",
+    "artifact_digest": "sha256:462f329cf68d16b3b5da82bd06a698c1bd076a1230c6aeb5692f4aacd7451a48",
+    "observation": {
+      "status": "idle",
+      "last_turn_id": "26efa9a0",
+      "last_turn_status": "completed",
+      "observations": [
+        "6af1ef4b9a7875a5a1a9ad2af5817a53f0b6240b8ef1177c834b075f10256d15",
+        "e4087e2cc0d38e968de1d5747772c047f651c9705686801f0a85c2549c622204",
+        "77f80322fe2a5b07ae6cf84c6c8065e5f2a489bf62fefe3e73c3c35307f07d02",
+        "4c180f452ffdb602763ae96356f41a4694c53866084428d6c54a32d848b7dd28",
+        "a3564438b31f12182f24d8ee0425396b8ae3d4be52f1e6d5a0e9c6ddeffc9023",
+        "b8492a66be2361e3029c467d91bcd117e2b49acea024a9155c857d0f7ece3b7b",
+        "c49f8d61542e9a2597bc70febcbf5fbb336e8b07f17f3b958e0622464a720dcb",
+        "c7a600a4e1ae05c224020b1a9780b19d356d22d4910ce74c27630f125a799af4",
+        "701ff7853532985a84c33aba5fc8673b44de98b1713e7327027eb33b2d760086",
+        "09ae7d7d2872ddea149fab413a4807802453982107814222beca6a4333f636fe"
+      ]
+    },
+    "prior_turns": [
+      {
+        "turn_id": "3d34d1ba",
+        "text": "终检已排队（command 20261010041541466861-5fe6512c61e7），等待 finalization_notice 或纠正。\n\n交付状态：\n- `src/importer.mjs`：`importExpenses(text)` 纯函数 — 去 BOM、LF/CRLF、空行计入行号、两列 trim、金额 `/^(0|[1-9]\\d*)\\.\\d{2}$/`、字符串整数分、单值/分组/总合计三级 `MAX_SAFE_INTEGER` 溢出拒绝、首现顺序分组。\n- `src/cli.mjs`：单参数 UTF-8 读取；成功仅 stdout JSON exit 0；参数/读取/校验失败 stderr 简洁消息（无堆栈）、stdout 空、exit 1。\n- `README.md`：用法 `node src/cli.mjs input.csv`、输入格式、输出 JSON 结构、错误与溢出边界。\n- 核验：项目内 `.runtime` Node/npm 跑 `npm test` 127/127 通过；CLI 实测成功输出与 ENOENT/无参错误均符合 exit 码与 stdout/stderr 约束。未改测试/规范，无提交/推送/网络。\n\n委派限制说明：实现阶段的池内模型派发因 \"cannot be resolved before dispatch\"（openai-codex、cursor、sonic 均不可 pre-dispatch 解析）未成功，importer 与 CLI 由 Root 直接实现；终检已交由 Orbit 独立检查者。"
+      }
+    ],
+    "text": "终检已重新排队（command 20261010042155465265-9b26fcec8fbc）。补齐内容摘要：\n\n- 工作单元 `wu-0afecd43d6162d33` 已声明并真实派发（成员 opencode-go/deepseek-v4.1-flash，dispatch 记录在单元 `dispatches[0]`，`bound_at` 2026-10-10T04:18:07Z），覆盖此前\"importer 交接\"未确认项。\n- 成员按冻结规格独立核对 `src/importer.mjs`：无需修改，逐例追踪全部 MATCH；其沙箱按授权范围不可读 `.runtime` 与 `src/cli.mjs`，npm test 按工作单元约定由 Root 集成执行。\n- 单元已 `finish: accepted`，Root 核验 receipt：`.runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test` exit 0、127 cases passed；CLI 成功 JSON exit=0，ENOENT/无参错误 stderr 简洁 exit=1、stdout 空。工件摘要未变。\n\n等待 finalization_notice 或纠正。"
+  },
+  "requirement_coverage": {
+    "current": true,
+    "complete": true,
+    "kind": "artifact",
+    "role": "reviewer",
+    "check_id": "2",
+    "recorded_at": "2026-10-10T04:24:53Z",
+    "verified": 18,
+    "unverified": 0,
+    "items": [
+      {
+        "requirement": "Deliver src/importer.mjs exporting the pure importExpenses(text) function",
+        "scope": "delivery",
+        "status": "verified",
+        "evidence": "Read src/importer.mjs (1881 bytes, 58 lines): `export function importExpenses(text)` at line 23, no imports/IO/dependencies, pure over input text."
+      },
+      {
+        "requirement": "Strip one leading BOM and accept LF or CRLF",
+        "scope": "delivery",
+        "status": "verified",
+        "evidence": "src/importer.mjs line 24 `if (text.startsWith('\\ufeff')) text = text.slice(1);` (exactly one) and line 25 `text.split(/\\r?\\n/)`. Acceptance case 111 ('BOM CRLF blanks whitespace') matches this handling."
+      },
+      {
+        "requirement": "Ignore blank lines but keep them in 1-based line numbering",
+        "scope": "delivery",
+        "status": "verified",
+        "evidence": "src/importer.mjs lines 32-35: loop index i over split lines, lineNo=i+1, `if (line.trim()==='') continue;` without altering numbering; error messages use lineNo. Tests 12-14 assert /3/ on inputs with a blank second line."
+      },
+      {
+        "requirement": "Require header category,amount and fail with line number 1",
+        "scope": "delivery",
+        "status": "verified",
+        "evidence": "src/importer.mjs lines 26-28 throw 'line 1: expected header \"category,amount\"'; acceptance 'invalid header' (test 122) asserts /1/."
+      },
+      {
+        "requirement": "Unquoted CSV: each nonblank data line exactly two columns, both fields trimmed",
+        "scope": "delivery",
+        "status": "verified",
+        "evidence": "src/importer.mjs lines 36-40: `line.split(',')`, `cols.length !== 2` throws with the data line number, category = cols[0].trim(). Acceptance tests 15 (extra column, /2/), 16 (empty category, /2/), 11 (trim of ' Food '/' 1.20 '). README line 18 documents unquoted CSV semantics."
+      },
+      {
+        "requirement": "Amount must be nonnegative decimal digits with exactly two fractional digits; no sign/exponent/extra decimals",
+        "scope": "delivery",
+        "status": "verified",
+        "evidence": "src/importer.mjs line 6 regex /^(0|[1-9]\\d*)\\.\\d{2}$/ rejects '-1.00','1','1.0','1.001','1e2'; acceptance tests 112-117 cover these six rejected amounts."
+      },
+      {
+        "requirement": "Compute integer cents exactly (no floating-point accumulation)",
+        "scope": "delivery",
+        "status": "verified",
+        "evidence": "src/importer.mjs lines 9-14 split on '.' and use Number(intPart)*100+Number(fracPart) with Number.isSafeInteger guard; totals accumulate integer cents (lines 48,54). Acceptance tests 1-110 assert exact totals i*100+3 / i*100+102."
+      },
+      {
+        "requirement": "Reject a single amount, a per-category sum and the overall sum outside Number.MAX_SAFE_INTEGER",
+        "scope": "delivery",
+        "status": "verified",
+        "evidence": "src/importer.mjs line 11 Number.isSafeInteger(cents); lines 17-21 checkSafe(value>MAX_SAFE) invoked for category sum (line 47) and overall (line 53). Acceptance tests 118 (single 90071992547409.92), 119 (sum), 120 (category) assert throws. Arithmetic cannot false-accept because any true sum above 2^53-1 rounds to a double > 2^53-1."
+      },
+      {
+        "requirement": "Preserve first-seen category order and return {groups:[{category,totalCents,count}],totalCents,count}",
+        "scope": "delivery",
+        "status": "verified",
+        "evidence": "src/importer.mjs lines 29 (Map insertion order), 45-57; return at line 57 matches shape. Acceptance tests 1-110 assert exact object equality incl. group order Food then Travel."
+      },
+      {
+        "requirement": "Deliver runnable CLI src/cli.mjs taking exactly one UTF-8 path argument",
+        "scope": "delivery",
+        "status": "verified",
+        "evidence": "Read src/cli.mjs: lines 5-9 reject arg count != 1 with usage exit 1; lines 10-16 fs.readFileSync(args[0],'utf8'). Receipt shows `node src/cli.mjs /tmp/ex.csv` printing JSON with exit=0 and no-arg printing usage exit=1."
+      },
+      {
+        "requirement": "CLI prints only result JSON to stdout on success with exit 0",
+        "scope": "delivery",
+        "status": "verified",
+        "evidence": "src/cli.mjs lines 17-18 JSON.stringify to console.log only. Root verification receipt: stdout {\"groups\":[{\"category\":\"Food\",\"totalCents\":122,\"count\":2},{\"category\":\"Travel\",\"totalCents\":99,\"count\":1}],\"totalCents\":221,\"count\":3} exit=0."
+      },
+      {
+        "requirement": "CLI argument/read/validation failures: concise stderr, empty stdout, exit 1, no stack trace",
+        "scope": "delivery",
+        "status": "verified",
+        "evidence": "src/cli.mjs lines 7,14,20 use console.error with a message and process.exit(1) only, never printing a stack. Receipt: `error: cannot read /tmp/nope.csv: ENOENT` exit=1; acceptance test 127 asserts empty stdout and /2/ on validation failure."
+      },
+      {
+        "requirement": "Deliver README documenting invocation and input/error/ordering/precision behavior",
+        "scope": "delivery",
+        "status": "verified",
+        "evidence": "Read README.md (38 lines): Usage (node src/cli.mjs input.csv), Input format, Output JSON example and group ordering/precision, Errors and limits incl. MAX_SAFE_INTEGER and line numbers."
+      },
+      {
+        "requirement": "Keep tests/acceptance.mjs and SPEC.md unchanged",
+        "scope": "delivery",
+        "status": "verified",
+        "evidence": "Read tests/acceptance.mjs (24 lines) and SPEC.md (3 lines) in the fixed snapshot; review_focus.modified lists only src/cli.mjs and src/importer.mjs, review_focus.added only README.md; task_git.changed_paths is empty."
+      },
+      {
+        "requirement": "Actually run npm test with the provided project Node/npm after completion",
+        "scope": "delivery",
+        "status": "verified",
+        "evidence": "Program receipt root_verifications (kind root_verification, artifact_matches true, input_matches true): command `.runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test`, exit_code 0, output 'EXPENSE_VALIDATION_SUMMARY: 127 cases passed; integer precision and CLI verified'. My read-only session did not re-run it."
+      },
+      {
+        "requirement": "Check CLI success and error output (exit codes, stdout/stderr separation)",
+        "scope": "delivery",
+        "status": "verified",
+        "evidence": "Program receipt for `printf ... > /tmp/ex.csv && node src/cli.mjs /tmp/ex.csv; ... /tmp/nope.csv; ... cli.mjs`: success JSON exit=0; 'error: cannot read /tmp/nope.csv: ENOENT' exit=1; 'usage: node src/cli.mjs <input.csv>' exit=1, consistent with src/cli.mjs lines 5-21."
+      },
+      {
+        "requirement": "No dependencies, commits, pushing, downloads or network services",
+        "scope": "delivery",
+        "status": "verified",
+        "evidence": "package.json declares no dependencies and test script 'node tests/acceptance.mjs'; task_git.changed_paths is empty with baseline_head == snapshot_head (9888a8a...); git_remote has remote null, upstream null, remote_contacted false since no upstream exists."
+      },
+      {
+        "requirement": "When members need project Node/npm, declare the project path and full command in the work unit; do not use unregistered eval subprocesses",
+        "scope": "delivery",
+        "status": "verified",
+        "evidence": "work_units[wu-0afecd43d6162d33].scope.allowed_commands declares the absolute project paths for `.runtime/bin/node --check src/importer.mjs` and `.runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test`; member_blocks shows the attempted eval class blocked with reason 'tool eval has no allowed work-unit entrance', i.e. not used."
+      },
+      {
+        "requirement": "Independent manual final check is requested and any found problems are fixed and rechecked before confirmed stop",
+        "scope": "lifecycle",
+        "status": "unverified",
+        "evidence": "This Orbit check session is that independent review and is in progress; the subsequent fix/recheck-if-needed, confirmed stop and closing report have not happened yet in the record (root idle, delivery job not delivering)."
+      },
+      {
+        "requirement": "Subsequent completion/confirmed stop and closing report after the final check",
+        "scope": "lifecycle",
+        "status": "unverified",
+        "evidence": "Future lifecycle events: no finalization notice, confirmed stop or closing report is present in the program record; these are runtime-verified after this check."
+      }
+    ],
+    "lifecycle_items": 2,
+    "ready": true,
+    "gap": null
+  },
+  "member_blocks": {
+    "scope": [
+      "9968985866cf48cd1d0b6aacbc33474dcb7a276c6a4206cb3d09e3a93ad2e341",
+      "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive"
+    ],
+    "classes": [
+      {
+        "tool": "bash",
+        "reason": "Orbit work-unit scope: command is absent from the declared work-unit commands",
+        "count": 7,
+        "agents": [
+          "orbit-ff845f84-ca47-4256-9ae6-7bee105db16f"
+        ],
+        "units": [
+          "wu-0afecd43d6162d33"
+        ],
+        "dispatches": [
+          {
+            "work_unit_id": "wu-0afecd43d6162d33",
+            "agent_id": "orbit-ff845f84-ca47-4256-9ae6-7bee105db16f",
+            "tool_call_id": "call_00_dPw9xJQr29Bs57Qs9jCj0769",
+            "dispatch_tool_call_id": "call_55a68d16505642e982d24100",
+            "at": "2026-10-10T04:18:19Z"
+          },
+          {
+            "work_unit_id": "wu-0afecd43d6162d33",
+            "agent_id": "orbit-ff845f84-ca47-4256-9ae6-7bee105db16f",
+            "tool_call_id": "call_00_44RQetz6bwl9qyi5bsxf9877",
+            "dispatch_tool_call_id": "call_55a68d16505642e982d24100",
+            "at": "2026-10-10T04:18:28Z"
+          },
+          {
+            "work_unit_id": "wu-0afecd43d6162d33",
+            "agent_id": "orbit-ff845f84-ca47-4256-9ae6-7bee105db16f",
+            "tool_call_id": "call_00_3CLInSx3II53WP31aelP3715",
+            "dispatch_tool_call_id": "call_55a68d16505642e982d24100",
+            "at": "2026-10-10T04:18:37Z"
+          },
+          {
+            "work_unit_id": "wu-0afecd43d6162d33",
+            "agent_id": "orbit-ff845f84-ca47-4256-9ae6-7bee105db16f",
+            "tool_call_id": "call_00_nGCHmGT76iRBeeew1OK57236",
+            "dispatch_tool_call_id": "call_55a68d16505642e982d24100",
+            "at": "2026-10-10T04:19:03Z"
+          },
+          {
+            "work_unit_id": "wu-0afecd43d6162d33",
+            "agent_id": "orbit-ff845f84-ca47-4256-9ae6-7bee105db16f",
+            "tool_call_id": "call_00_ExWW7iVK2vSBXRJyAxaS2555",
+            "dispatch_tool_call_id": "call_55a68d16505642e982d24100",
+            "at": "2026-10-10T04:19:20Z"
+          },
+          {
+            "work_unit_id": "wu-0afecd43d6162d33",
+            "agent_id": "orbit-ff845f84-ca47-4256-9ae6-7bee105db16f",
+            "tool_call_id": "call_00_ES1KdrRshc2YzAA1fecd0772",
+            "dispatch_tool_call_id": "call_55a68d16505642e982d24100",
+            "at": "2026-10-10T04:20:06Z"
+          },
+          {
+            "work_unit_id": "wu-0afecd43d6162d33",
+            "agent_id": "orbit-ff845f84-ca47-4256-9ae6-7bee105db16f",
+            "tool_call_id": "call_00_CrMOUYhiL93OlQi0d4lH8641",
+            "dispatch_tool_call_id": "call_55a68d16505642e982d24100",
+            "at": "2026-10-10T04:20:49Z"
+          }
+        ],
+        "dispatches_omitted": 0,
+        "first_at": "2026-10-10T04:18:19Z",
+        "first_root_turn_id": "81f81328",
+        "last_root_turn_id": "81f81328",
+        "stalled": false,
+        "last_at": "2026-10-10T04:20:49Z",
+        "agent_count": 1
+      },
+      {
+        "tool": "read",
+        "reason": "Orbit work-unit scope: path is outside the allowed work-unit paths",
+        "count": 2,
+        "agents": [
+          "orbit-ff845f84-ca47-4256-9ae6-7bee105db16f"
+        ],
+        "units": [
+          "wu-0afecd43d6162d33"
+        ],
+        "dispatches": [
+          {
+            "work_unit_id": "wu-0afecd43d6162d33",
+            "agent_id": "orbit-ff845f84-ca47-4256-9ae6-7bee105db16f",
+            "tool_call_id": "call_00_KeN8mkBhTcLQBeM9lsdA8021",
+            "dispatch_tool_call_id": "call_55a68d16505642e982d24100",
+            "at": "2026-10-10T04:18:22Z"
+          },
+          {
+            "work_unit_id": "wu-0afecd43d6162d33",
+            "agent_id": "orbit-ff845f84-ca47-4256-9ae6-7bee105db16f",
+            "tool_call_id": "call_01_ehBn7EBYtABA7rfQSQHi3334",
+            "dispatch_tool_call_id": "call_55a68d16505642e982d24100",
+            "at": "2026-10-10T04:18:22Z"
+          }
+        ],
+        "dispatches_omitted": 0,
+        "first_at": "2026-10-10T04:18:22Z",
+        "first_root_turn_id": "81f81328",
+        "last_root_turn_id": "81f81328",
+        "stalled": false,
+        "last_at": "2026-10-10T04:18:22Z",
+        "agent_count": 1
+      },
+      {
+        "tool": "eval",
+        "reason": "Orbit work-unit scope: tool eval has no allowed work-unit entrance",
+        "count": 1,
+        "agents": [
+          "orbit-ff845f84-ca47-4256-9ae6-7bee105db16f"
+        ],
+        "units": [
+          "wu-0afecd43d6162d33"
+        ],
+        "dispatches": [
+          {
+            "work_unit_id": "wu-0afecd43d6162d33",
+            "agent_id": "orbit-ff845f84-ca47-4256-9ae6-7bee105db16f",
+            "tool_call_id": "call_00_QsfitQK0K0vbtR6ipVbC6715",
+            "dispatch_tool_call_id": "call_55a68d16505642e982d24100",
+            "at": "2026-10-10T04:19:30Z"
+          }
+        ],
+        "dispatches_omitted": 0,
+        "first_at": "2026-10-10T04:19:30Z",
+        "first_root_turn_id": "81f81328",
+        "last_root_turn_id": "81f81328",
+        "stalled": false,
+        "last_at": "2026-10-10T04:19:30Z",
+        "agent_count": 1
+      }
+    ],
+    "total": 10
+  },
+  "member_stop_results": [
+    {
+      "thread_id": "orbit-ff845f84-ca47-4256-9ae6-7bee105db16f",
+      "confirmation": {
+        "confirmed": true,
+        "id": "orbit-ff845f84-ca47-4256-9ae6-7bee105db16f",
+        "scope": "Member turn, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+        "registry_status": "idle",
+        "status_after": "idle",
+        "active_tools_after": 0,
+        "async_jobs_settled": true
+      }
+    }
+  ],
+  "stop_confirmation": {
+    "confirmed": true,
+    "thread_id": "01a12403-23e4-720b-82ff-360b16ea4d62",
+    "scope": "Native session execution, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+    "native_owner": "Main",
+    "status_after": "idle",
+    "active_tools_after": 0,
+    "async_jobs_settled": true,
+    "collaboration_persistence": {
+      "task_dir": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive/.orbit/tasks/e50f56a8-ffb2-4cf3-b513-e73428e0f400",
+      "scope": "current process observations through cutoff; append completion, not fsync",
+      "observed_through": 20,
+      "written_seq": 20,
+      "failed_observations": 0,
+      "recorded_gaps": 0,
+      "pending_gap": null,
+      "last_error": null,
+      "status": "written"
+    },
+    "members": [
+      {
+        "thread_id": "orbit-ff845f84-ca47-4256-9ae6-7bee105db16f",
+        "confirmation": {
+          "confirmed": true,
+          "id": "orbit-ff845f84-ca47-4256-9ae6-7bee105db16f",
+          "scope": "Member turn, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+          "registry_status": "idle",
+          "status_after": "idle",
+          "active_tools_after": 0,
+          "async_jobs_settled": true
+        }
+      }
+    ]
+  },
+  "delivery_digest": "sha256:462f329cf68d16b3b5da82bd06a698c1bd076a1230c6aeb5692f4aacd7451a48",
+  "stop_reason": "User requested stop",
+  "next_check_at": "2026-10-10T04:29:53Z",
+  "finished_at": "2026-10-10T04:25:59Z",
+  "elapsed_seconds": 759.079298,
+  "comparison": {
+    "time_variance_seconds": null,
+    "task_token_variance": null,
+    "stale_checks": 0,
+    "correction_messages": 2,
+    "note": "Check usage is measured separately. Root session totals can include earlier work; task-wide tokens remain unknown without a baseline."
+  }
+}

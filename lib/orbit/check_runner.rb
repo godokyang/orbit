@@ -26,24 +26,32 @@ module Orbit
   # trimmed list is never presented as the complete declaration.
   class CheckRunner
     ROLES = %w[reviewer process_reviewer adjudicator].freeze
-    VERDICTS = %w[continue correct pause complete needs_user].freeze
-    FINDING_KEYS = %w[id requirement evidence action].freeze
-    RESULT_KEYS = %w[verdict reason findings resolved_ids next_check_seconds delivery].freeze
-    OPTIONAL_RESULT_KEYS = %w[coverage].freeze
-    DELIVERY_KEYS = %w[ready reason].freeze
+    # contracts/check-result.schema.json is the single structural source for
+    # check results: every key list, enum and bound used by validate_result is
+    # derived from it (result_structure), so the contract file the reviewer is
+    # handed cannot drift from what validation enforces. JSON Schema cannot
+    # express the semantic gates — non-empty strings, positive integer,
+    # trimmed and unique coverage requirements, verified⇒evidence, the
+    # delivery-only scope default — so those stay explicit in the validators.
+    CHECK_RESULT_SCHEMA_PATH = File.expand_path("../../contracts/check-result.schema.json", __dir__)
+    CHECK_RESULT_SCHEMA_ID = "https://orbit.local/contracts/check-result.schema.json"
     DEFAULT_STOP_GRACE_SECONDS = 5
 
     # Program-context compression. An independent check judges the current
     # artifact and the facts that can still change a verdict, not an unbounded
     # history. Long strings keep a bounded prefix plus `…[original
     # length:sha256]` (never a silent tail cut), growing lists keep a bounded
-    # newest tail, and the rendered JSON is hard-capped. Instruction,
-    # amendments and named basis are never compressed.
+    # newest tail, and the rendered JSON is hard-capped. bash/eval tool-output
+    # logs are the one exception: they keep BOTH ends (see bound_log_string).
+    # Instruction, amendments and named basis are never compressed.
     CONTEXT_BYTE_LIMIT = 65_536
     # Bounded check-history window kept in the program context (the anchor is
     # always kept in addition, even when it is older than this window).
     CHECK_HISTORY_RECENT_CAP = 6
     CONTEXT_STRING_CAP = 2_000
+    # A receipt log needs room for its omission facts AND useful text at both
+    # ends even after ordinary fields degrade. The outer 64 KiB cap still wins.
+    CONTEXT_LOG_MIN_CAP = 500
     # The Root's actually delivered final answer (root observations entry with
     # kind agent_message) is the checker's primary delivery evidence for
     # text-only tasks, so it gets a wider verbatim prefix than ordinary
@@ -99,6 +107,80 @@ module Orbit
     CONTEXT_OPEN = "open"
 
     class Error < StandardError; end
+
+    class << self
+      # Structural facts shared by prompt assembly and validate_result,
+      # derived once from the contract schema. A missing, unparseable or
+      # foreign schema file fails closed: a check never runs against a silent
+      # guess of its own contract.
+      def result_structure
+        @result_structure ||= derive_result_structure(check_result_schema)
+      end
+
+      def check_result_schema
+        @check_result_schema ||= begin
+          JSON.parse(File.read(CHECK_RESULT_SCHEMA_PATH))
+        rescue Errno::ENOENT
+          raise Error, "check-result schema not found: #{CHECK_RESULT_SCHEMA_PATH}"
+        rescue JSON::ParserError => error
+          raise Error, "check-result schema is not valid JSON: #{error.message}"
+        end
+      end
+
+      # Pure derivation from any schema document, so tests can prove the
+      # validators track the schema instead of hardcoded literals. Allowed
+      # keys come from properties, the mandatory subset from required, and a
+      # closed object from additionalProperties == false — never from each
+      # other.
+      def derive_result_structure(schema)
+        unless schema.is_a?(Hash) && schema["$id"] == CHECK_RESULT_SCHEMA_ID
+          raise Error, "check-result schema identity mismatch: #{schema.is_a?(Hash) ? schema["$id"].inspect : schema.class.to_s}"
+        end
+
+        properties = schema["properties"] || {}
+        findings_item = properties.dig("findings", "items") || {}
+        delivery = properties["delivery"] || {}
+        coverage = properties["coverage"] || {}
+        coverage_properties = coverage["properties"] || {}
+        items_spec = coverage_properties["items"] || {}
+        coverage_item = items_spec["items"] || {}
+        item_properties = coverage_item["properties"] || {}
+        item_required = coverage_item["required"] || []
+        required = schema["required"]
+        structure = {
+          verdicts: properties.dig("verdict", "enum"),
+          result_properties: properties.keys,
+          result_required: required,
+          result_closed: schema["additionalProperties"] == false,
+          finding_properties: findings_item["properties"]&.keys || [],
+          finding_required: findings_item["required"] || [],
+          finding_closed: findings_item["additionalProperties"] == false,
+          delivery_properties: delivery["properties"]&.keys || [],
+          delivery_required: delivery["required"] || [],
+          delivery_closed: delivery["additionalProperties"] == false,
+          boolean_properties: [
+            ["delivery.ready", delivery.dig("properties", "ready")],
+            ["coverage.complete", coverage_properties["complete"]]
+          ].filter_map { |name, node| name if node.is_a?(Hash) && node["type"] == "boolean" },
+          coverage_properties: coverage_properties.keys,
+          coverage_required: coverage["required"] || [],
+          coverage_closed: coverage["additionalProperties"] == false,
+          coverage_item_properties: item_properties.keys,
+          coverage_item_required: item_required.sort,
+          coverage_item_closed: coverage_item["additionalProperties"] == false,
+          coverage_items_min: items_spec["minItems"],
+          coverage_items_max: items_spec["maxItems"],
+          coverage_requirement_max: item_properties.dig("requirement", "maxLength"),
+          coverage_evidence_max: item_properties.dig("evidence", "maxLength"),
+          coverage_statuses: item_properties.dig("status", "enum"),
+          coverage_scopes: item_properties.dig("scope", "enum")
+        }
+        missing = structure.filter_map { |key, value| key if value.nil? }
+        raise Error, "check-result schema is missing structural facts: #{missing.join(', ')}" unless missing.empty?
+
+        structure.freeze
+      end
+    end
 
     Run = Struct.new(:pid, :pgid, :directory, :output_dir, :role, :model, :schema_path,
                      :prompt_path, :events_path, :stderr_path, :last_message_path,
@@ -165,7 +247,7 @@ module Orbit
     end
 
     def default_schema_path
-      File.expand_path("../../contracts/check-result.schema.json", __dir__)
+      CHECK_RESULT_SCHEMA_PATH
     end
 
     def validate_snapshot!(directory)
@@ -223,7 +305,12 @@ module Orbit
       end
       parts << "## Current execution context (program record)\n\n" \
                "This record is deterministic and bounded: long strings keep a prefix plus " \
-               "`…[original length:sha256]`, growing lists keep their newest entries, and " \
+               "`…[original length:sha256]`, except bash/eval receipt output, which keeps BOTH the " \
+               "beginning and the end of the log around an `…[omitted N of M Unicode chars / B UTF-8 " \
+               "bytes sha256:…]` marker naming this layer's visible length; an `output_omitted` object " \
+               "then repeats the capture layer's own omission facts (its counts are UTF-16 code units) " \
+               "when that layer already trimmed the log. Growing lists keep " \
+               "their newest entries, and " \
                "context_compression, findings_omitted, recheck_omitted, review_focus_omitted, " \
                "work_units_omitted and " \
                "check_history.recent_omitted record what was trimmed. The original instruction, amendments " \
@@ -255,7 +342,8 @@ module Orbit
       parts << requirement_coverage_note
       parts << "## Output\n\n" \
                "Return exactly one JSON object matching the attached output schema: verdict, reason, findings, " \
-               "resolved_ids, next_check_seconds, delivery, coverage. verdict is one of: #{VERDICTS.join(', ')}. findings is a list " \
+               "resolved_ids, next_check_seconds, delivery, coverage. verdict is one of: " \
+               "#{self.class.result_structure[:verdicts].join(', ')}. findings is a list " \
                "of objects with id, requirement, evidence, action. resolved_ids is a list of strings. " \
                "next_check_seconds is a positive integer. delivery is an object with ready (boolean) and reason " \
                "(non-empty string). No markdown, no code fences, no extra text."
@@ -377,8 +465,16 @@ module Orbit
           bounded = bound_value(receipt, caps)
           next bounded unless receipt.is_a?(Hash)
 
-          %w[command script output].each do |field|
+          %w[command script].each do |field|
             bounded["#{field}_truncated"] = true if receipt[field].is_a?(String) && bounded[field] != receipt[field]
+          end
+          # The head+tail log policy applies ONLY to bash/eval execution
+          # output; command/script keep the generic prefix strategy above and
+          # file-tool receipts carry no body at all.
+          if %w[bash eval].include?(receipt["tool"].to_s) && receipt["output"].is_a?(String)
+            log = bound_log_string(receipt["output"], [caps[:string_cap], CONTEXT_LOG_MIN_CAP].max)
+            bounded["output_truncated"] = true if log != receipt["output"]
+            bounded["output"] = log
           end
           bounded
         end
@@ -709,6 +805,42 @@ module Orbit
       "#{text[0, cap]}…[#{text.length}:#{Digest::SHA256.hexdigest(text)}]"
     end
 
+    # bash/eval receipt output keeps BOTH ends (ticket C01): the head carries
+    # the run context and the tail the failure summary. The in-band marker
+    # states THIS layer's visible length with explicit units (Unicode
+    # characters and UTF-8 bytes) plus its SHA-256. The capture layer's own
+    # omission facts ride in the structured output_omitted field, so a second
+    # trim never nests two generations of markers: at a degraded cap the head
+    # and tail keep the full remaining budget. Ruby slices by characters, so
+    # the kept text stays valid Unicode. When even the marker exceeds the
+    # cap, it cannot retain text. Production receipt projection reserves
+    # CONTEXT_LOG_MIN_CAP to avoid that case while the outer byte-cap loop
+    # continues degrading other fields or explicitly omits the whole context.
+    def bound_log_string(value, cap)
+      text = value.to_s
+      return text if text.length <= cap
+
+      digest = Digest::SHA256.hexdigest(text)
+      omitted = text.length
+      # The marker's own digit count feeds the body budget. Within one digit
+      # count the computation is constant, so a round landing in the same
+      # class converges; otherwise the digit count strictly shrinks. No
+      # surrogate adjustments exist at this layer, so convergence within a
+      # handful of rounds is provable and non-convergence is a bug, never a
+      # reason to emit a lossy cut.
+      8.times do
+        marker = "…[omitted #{omitted} of #{text.length} Unicode chars / #{text.bytesize} UTF-8 bytes sha256:#{digest}]"
+        keep = [cap - marker.length, 0].max
+        head_len = keep / 2
+        tail_len = keep - head_len
+        next_omitted = text.length - head_len - tail_len
+        return "#{text[0, head_len]}#{marker}#{tail_len.positive? ? text[-tail_len, tail_len] : ''}" if next_omitted == omitted
+
+        omitted = next_omitted
+      end
+      raise Error, "log bounding did not converge: marker budget invariant violated"
+    end
+
     # Raw (non-JSON) contexts are byte-bounded too, with the same prefix plus
     # original length and SHA-256.
     def bound_raw_context(text)
@@ -1012,44 +1144,52 @@ module Orbit
     end
 
     def validate_result(value)
-      problems = []
-      unless value.is_a?(Hash)
-        raise Error, "check result must be a JSON object, got #{value.class}"
-      end
+      raise Error, "check result must be a JSON object, got #{value.class}" unless value.is_a?(Hash)
 
-      extra = value.keys - RESULT_KEYS - OPTIONAL_RESULT_KEYS
-      missing = RESULT_KEYS - value.keys
+      problems = result_problems(self.class.result_structure, value)
+      return value if problems.empty?
+
+      raise Error, "check result does not match contracts/check-result.schema.json: #{problems.join('; ')}"
+    end
+
+    # Structure (key lists, enums, bounds, closed-object rules) comes from the
+    # passed-in structure derived from contracts/check-result.schema.json;
+    # what remains here are semantic gates not encoded in the current schema.
+    def result_problems(rules, value)
+      problems = []
+      extra = rules[:result_closed] ? value.keys - rules[:result_properties] : []
+      missing = rules[:result_required] - value.keys
       problems << "unexpected keys: #{extra.join(', ')}" unless extra.empty?
       problems << "missing keys: #{missing.join(', ')}" unless missing.empty?
-      problems << "verdict must be one of: #{VERDICTS.join(', ')}" unless VERDICTS.include?(value["verdict"])
+      problems << "verdict must be one of: #{rules[:verdicts].join(', ')}" unless rules[:verdicts].include?(value["verdict"])
       unless value["reason"].is_a?(String) && !value["reason"].empty?
         problems << "reason must be a non-empty string"
       end
-      problems.concat(validate_findings(value["findings"]))
-      problems.concat(validate_delivery(value["delivery"]))
-      problems.concat(validate_coverage(value["coverage"])) if value.key?("coverage")
+      problems.concat(findings_problems(rules, value["findings"]))
+      problems.concat(delivery_problems(rules, value["delivery"]))
+      problems.concat(coverage_problems(rules, value["coverage"])) if value.key?("coverage")
       unless value["resolved_ids"].is_a?(Array) && value["resolved_ids"].all? { |id| id.is_a?(String) && !id.empty? }
         problems << "resolved_ids must be an array of non-empty strings"
       end
       unless value["next_check_seconds"].is_a?(Integer) && value["next_check_seconds"].positive?
         problems << "next_check_seconds must be a positive integer"
       end
-      return value if problems.empty?
-
-      raise Error, "check result does not match contracts/check-result.schema.json: #{problems.join('; ')}"
+      problems
     end
 
-    def validate_findings(findings)
+    def findings_problems(rules, findings)
       unless findings.is_a?(Array)
         return ["findings must be an array"]
       end
 
       findings.each_with_index.flat_map do |finding, index|
-        unless finding.is_a?(Hash) && finding.keys.sort == FINDING_KEYS.sort
-          next ["findings[#{index}] must be an object with exactly: #{FINDING_KEYS.join(', ')}"]
+        extra = finding.is_a?(Hash) && rules[:finding_closed] ? finding.keys - rules[:finding_properties] : []
+        missing = finding.is_a?(Hash) ? rules[:finding_required] - finding.keys : []
+        unless finding.is_a?(Hash) && extra.empty? && missing.empty?
+          next ["findings[#{index}] must be an object with exactly: #{rules[:finding_properties].join(', ')}"]
         end
 
-        FINDING_KEYS.filter_map do |key|
+        rules[:finding_required].filter_map do |key|
           value = finding[key]
           unless value.is_a?(String) && !value.empty?
             "findings[#{index}].#{key} must be a non-empty string"
@@ -1059,48 +1199,82 @@ module Orbit
     end
 
     # delivery is the structured readiness judgment the completion gate reads
-    # (result["delivery"]["ready"/"reason"]): exactly those two keys, a real
-    # boolean, and a non-empty reason. A missing or malformed delivery is a
-    # contract failure, never an implicit ready.
-    def validate_delivery(delivery)
-      return ["delivery must be an object with exactly: #{DELIVERY_KEYS.join(', ')}"] unless delivery.is_a?(Hash)
+    # (result["delivery"]["ready"/"reason"]): the schema's required keys, the
+    # derived ready boolean, and a non-empty reason. A missing or malformed
+    # delivery is a contract failure, never an implicit ready.
+    def delivery_problems(rules, delivery)
+      return ["delivery must be an object with exactly: #{rules[:delivery_required].join(', ')}"] unless delivery.is_a?(Hash)
 
       problems = []
-      extra = delivery.keys - DELIVERY_KEYS
-      missing = DELIVERY_KEYS - delivery.keys
-      problems << "delivery has unexpected keys: #{extra.join(', ')}" unless extra.empty?
+      if rules[:delivery_closed]
+        extra = delivery.keys - rules[:delivery_properties]
+        problems << "delivery has unexpected keys: #{extra.join(', ')}" unless extra.empty?
+      end
+      missing = rules[:delivery_required] - delivery.keys
       problems << "delivery is missing keys: #{missing.join(', ')}" unless missing.empty?
-      problems << "delivery.ready must be a boolean" unless delivery["ready"] == true || delivery["ready"] == false
+      if rules[:boolean_properties].include?("delivery.ready") && !(delivery["ready"] == true || delivery["ready"] == false)
+        problems << "delivery.ready must be a boolean"
+      end
       unless delivery["reason"].is_a?(String) && !delivery["reason"].empty?
         problems << "delivery.reason must be a non-empty string"
       end
       problems
     end
 
-    def validate_coverage(value)
-      return ["coverage must contain exactly complete and items"] unless value.is_a?(Hash) && value.keys.sort == %w[complete items]
+    # Match the TS validator's ECMAScript trim on coverage text, including
+    # NBSP/full-width spaces. Ruby strip otherwise accepts blank evidence and
+    # misses duplicate requirements produced with those ordinary characters.
+    def trim_coverage_text(value)
+      value.gsub(/\A[\u0009-\u000D\u0020\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF]+|[\u0009-\u000D\u0020\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF]+\z/, "")
+    end
+
+    def coverage_problems(rules, value)
+      unless value.is_a?(Hash)
+        return ["coverage must contain exactly #{rules[:coverage_required].join(' and ')}"]
+      end
       problems = []
-      problems << "coverage.complete must be a boolean" unless [true, false].include?(value["complete"])
+      if rules[:coverage_closed]
+        extra = value.keys - rules[:coverage_properties]
+        missing = rules[:coverage_required] - value.keys
+        unless extra.empty? && missing.empty?
+          return ["coverage must contain exactly #{rules[:coverage_required].join(' and ')}"]
+        end
+      else
+        missing = rules[:coverage_required] - value.keys
+        problems << "coverage is missing keys: #{missing.join(', ')}" unless missing.empty?
+      end
+      if rules[:boolean_properties].include?("coverage.complete") && ![true, false].include?(value["complete"])
+        problems << "coverage.complete must be a boolean"
+      end
       items = value["items"]
-      return problems + ["coverage.items must contain 1..64 entries"] unless items.is_a?(Array) && items.length.between?(1, 64)
+      unless items.is_a?(Array) && items.length.between?(rules[:coverage_items_min], rules[:coverage_items_max])
+        return problems + ["coverage.items must contain #{rules[:coverage_items_min]}..#{rules[:coverage_items_max]} entries"]
+      end
       requirements = []
       items.each_with_index do |item, index|
-        unless item.is_a?(Hash) && [ %w[evidence requirement status], %w[evidence requirement scope status] ].include?(item.keys.sort)
+        extra = item.is_a?(Hash) && rules[:coverage_item_closed] ? item.keys - rules[:coverage_item_properties] : []
+        missing = item.is_a?(Hash) ? rules[:coverage_item_required] - item.keys : []
+        unless item.is_a?(Hash) && extra.empty? && missing.empty?
           problems << "coverage.items[#{index}] must contain requirement, status, evidence and optional scope"
           next
         end
         requirement, evidence = item.values_at("requirement", "evidence")
-        unless requirement.is_a?(String) && !requirement.strip.empty? && requirement.length <= 1000
-          problems << "coverage.items[#{index}].requirement must be a non-empty string of at most 1000 characters"
+        # String#length counts Unicode code points, the same unit JSON Schema
+        # maxLength uses — the TS side needs an explicit codePointLength for
+        # this; UTF-16 units would reject non-BMP requirement text alone.
+        unless requirement.is_a?(String) && !trim_coverage_text(requirement).empty? && requirement.length <= rules[:coverage_requirement_max]
+          problems << "coverage.items[#{index}].requirement must be a non-empty string of at most #{rules[:coverage_requirement_max]} characters"
         end
         requirements << requirement
-        problems << "coverage.items[#{index}].scope must be delivery or lifecycle" unless %w[delivery lifecycle].include?(item.fetch("scope", "delivery"))
-        problems << "coverage.items[#{index}].status must be verified or unverified" unless %w[verified unverified].include?(item["status"])
-        unless evidence.is_a?(String) && evidence.length <= 1000 && (item["status"] != "verified" || !evidence.strip.empty?)
-          problems << "coverage.items[#{index}].evidence must fit its status and the 1000-character bound"
+        # A missing scope keeps the delivery-only interpretation: that default
+        # is a semantic decision, not part of the derived structure.
+        problems << "coverage.items[#{index}].scope must be #{rules[:coverage_scopes].join(' or ')}" unless rules[:coverage_scopes].include?(item.fetch("scope", "delivery"))
+        problems << "coverage.items[#{index}].status must be #{rules[:coverage_statuses].join(' or ')}" unless rules[:coverage_statuses].include?(item["status"])
+        unless evidence.is_a?(String) && evidence.length <= rules[:coverage_evidence_max] && (item["status"] != "verified" || !trim_coverage_text(evidence).empty?)
+          problems << "coverage.items[#{index}].evidence must fit its status and the #{rules[:coverage_evidence_max]}-character bound"
         end
       end
-      problems << "coverage contains duplicate requirements" unless requirements.map { |item| item.to_s.strip }.uniq.length == requirements.length
+      problems << "coverage contains duplicate requirements" unless requirements.map { |item| trim_coverage_text(item.to_s) }.uniq.length == requirements.length
       problems
     end
 

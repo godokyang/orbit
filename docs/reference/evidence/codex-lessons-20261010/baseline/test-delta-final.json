@@ -1,0 +1,118 @@
+{
+  "initial_numstat": "4\t4\tcontracts/task-runtime.md\n7\t0\tdocs/README.md\n7\t3\tdocs/plan/debt-ledger.md\n8\t0\tdocs/plan/handoff.md\n57\t4\tlib/orbit/check_runner.rb\n39\t34\tlib/orbit/task_runtime.rb\n33\t2\tplugins/omp-host.mjs\n49\t1\tplugins/root-verifications.mjs\n4\t0\trunners/omp-reviewer/provider-error.test.ts\n8\t1\trunners/omp-reviewer/provider-error.ts\n1\t1\trunners/omp-reviewer/reviewer.ts\n82\t1\ttests/check_runner_context_test.rb\n21\t0\ttests/omp_collab_evidence_test.mjs\n60\t1\ttests/root_verifications_test.mjs\n35\t0\ttests/task_runtime_test.rb\n",
+  "current_numstat": "11\t6\tcontracts/task-runtime.md\n8\t0\tdocs/README.md\n7\t3\tdocs/plan/debt-ledger.md\n10\t0\tdocs/plan/handoff.md\n223\t49\tlib/orbit/check_runner.rb\n6\t0\tlib/orbit/cli.rb\n2\t1\tlib/orbit/omp_check_runner.rb\n47\t35\tlib/orbit/task_runtime.rb\n3\t1\tplugins/host.mjs\n210\t17\tplugins/omp-host.mjs\n49\t1\tplugins/root-verifications.mjs\n99\t3\tplugins/work-unit-scope.mjs\n43\t5\trunners/omp-reviewer/check-result.test.ts\n187\t53\trunners/omp-reviewer/check-result.ts\n4\t0\trunners/omp-reviewer/provider-error.test.ts\n8\t1\trunners/omp-reviewer/provider-error.ts\n1\t1\trunners/omp-reviewer/reviewer.ts\n137\t1\ttests/check_runner_context_test.rb\n4\t0\ttests/cli_test.rb\n21\t0\ttests/omp_collab_evidence_test.mjs\n15\t3\ttests/omp_entry_recovery_test.mjs\n114\t1\ttests/omp_native_gate_test.mjs\n60\t1\ttests/root_verifications_test.mjs\n38\t0\ttests/task_runtime_test.rb\n77\t0\ttests/work_unit_scope_test.mjs\n",
+  "test_delta": {
+    "runners/omp-reviewer/check-result.test.ts": {
+      "initial": [
+        0,
+        0
+      ],
+      "current": [
+        43,
+        5
+      ],
+      "additional_insertions": 43
+    },
+    "runners/omp-reviewer/provider-error.test.ts": {
+      "initial": [
+        4,
+        0
+      ],
+      "current": [
+        4,
+        0
+      ],
+      "additional_insertions": 0
+    },
+    "tests/check_runner_context_test.rb": {
+      "initial": [
+        82,
+        1
+      ],
+      "current": [
+        137,
+        1
+      ],
+      "additional_insertions": 55
+    },
+    "tests/cli_test.rb": {
+      "initial": [
+        0,
+        0
+      ],
+      "current": [
+        4,
+        0
+      ],
+      "additional_insertions": 4
+    },
+    "tests/omp_collab_evidence_test.mjs": {
+      "initial": [
+        21,
+        0
+      ],
+      "current": [
+        21,
+        0
+      ],
+      "additional_insertions": 0
+    },
+    "tests/omp_entry_recovery_test.mjs": {
+      "initial": [
+        0,
+        0
+      ],
+      "current": [
+        15,
+        3
+      ],
+      "additional_insertions": 15
+    },
+    "tests/omp_native_gate_test.mjs": {
+      "initial": [
+        0,
+        0
+      ],
+      "current": [
+        114,
+        1
+      ],
+      "additional_insertions": 114
+    },
+    "tests/root_verifications_test.mjs": {
+      "initial": [
+        60,
+        1
+      ],
+      "current": [
+        60,
+        1
+      ],
+      "additional_insertions": 0
+    },
+    "tests/task_runtime_test.rb": {
+      "initial": [
+        35,
+        0
+      ],
+      "current": [
+        38,
+        0
+      ],
+      "additional_insertions": 3
+    },
+    "tests/work_unit_scope_test.mjs": {
+      "initial": [
+        0,
+        0
+      ],
+      "current": [
+        77,
+        0
+      ],
+      "additional_insertions": 77
+    }
+  },
+  "new_test_insertions_vs_initial_dirty": 311,
+  "reason": "Small regression groups for four mandatory capabilities; additional actual field-layer/npm-env/cwd/Unicode bugs justify the ~300-line recommendation. Old completed test edits are not new."
+}

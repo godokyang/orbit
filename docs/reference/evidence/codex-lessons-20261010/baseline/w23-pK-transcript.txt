@@ -1,0 +1,200 @@
+│ S=/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-reevaluation.b1z7pZZXgv/codex-agent-source/src │
+│ /codex-rs; sed -n '794,860p' $S/core/src/session/turn_input.rs                                                │
+├─── Output ────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ … (61 earlier lines, showing 6 of 67) ⟦⌃O: Expand⟧                                                            │
+│         }                                                                                                     │
+│                                                                                                               │
+│         let input = match input {                                                                             │
+│             SubmittedTurnInput::UserInput { content, client_id } => {                                         │
+│                 active_task                                                                                   │
+│                     .turn_context                                                                             │
+│ ⟦Wall: 0.00s | Timeout: 300s⟧                                                                                 │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+ C03 fully verified: Session::steer_input (session/turn_input.rs:794-833): under active-turn lock, checks
+ expected_turn_id vs active sub_id → ExpectedTurnMismatch rejection; Review/Compact turns not steerable; empty
+ input rejected; output schema mismatch rejected. This matches old research but now with exact line anchors in
+ THIS commit.
+
+ I now have all major anchors. Quick final anchors for C04 (child_config/completion) and C06 (orchestrator
+ sandbox application), then write the doc. Let me grab those two quickly.
+
+╭───────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ $                                                                                                             │
+│ S=/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-reevaluation.b1z7pZZXgv/codex-agent-source/src │
+│ /codex-rs; grep -n "fn \|struct " $S/core/src/agent/child_config.rs | head -10; grep -n "struct \|fn          │
+│ \|thread_id\|parent" $S/core/src/agent/control/completion.rs | head -12; echo ---C06---; grep -n              │
+│ "sandbox\|permission\|fn run\|approve" $S/core/src/tools/orchestrator.rs | head -14; grep -n "pub enum        │
+│ SandboxPolicy\|fn " $S/core/src/tools/sandboxing.rs | head -8                                                 │
+├─── Output ────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ … (39 earlier lines, showing 6 of 45) ⟦⌃O: Expand⟧                                                            │
+│ 72:pub(crate) async fn with_cached_approval<K, F, Fut>(                                                       │
+│ 135:    pub(crate) fn bash(command: String, description: Option<String>) -> Self {                            │
+│ 176:    pub fn proposed_execpolicy_amendment(&self) -> Option<&ExecPolicyAmendment> {                         │
+│ 196:pub(crate) fn default_exec_approval_requirement(                                                          │
+│ 234:pub(crate) fn ensure_native_sandbox(                                                                      │
+│ 249:pub(crate) fn sandbox_override_for_first_attempt(                                                         │
+│ ⟦Wall: 0.00s | Timeout: 300s⟧                                                                                 │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+ All anchors gathered. Now write the document. Let me also make sure I capture what the OLD research MISSED or
+ overstated. Old research (docs/reference/codex-source-lessons-20261009.md) covered:
+
+ 1. §1 RolloutRecorder write confirmation — verified present in this commit (recorder.rs:131-141 oneshot acks).
+    Old research linked recorder.rs#L1048.
+ 2. §2 App Server protocol types/schema export — verified (export.rs, precomputed_exports.rs).
+ 3. §3 shutdown admission/cleanup — verified (runtime.rs admit_start :276-296 double-check fence; spawn_guard.rs
+    PendingSpawn).
+ 4. §4 steer expectedTurnId — verified (turn.rs:329; session/turn_input.rs:809-816).
+ 5. §5 ToolOrchestrator — verified (orchestrator.rs:4-6 "approvals + sandbox selection + retry semantics...
+    escalated sandbox strategy on denial").
+ 6. §6 HeadTailBuffer — verified (head_tail_buffer.rs:11-19 HEAD_BUDGET=MAX/2, omitted_bytes,
+    to_bytes_with_omission_marker). Old research said "保留固定前缀、最新后缀及真实省略字节数" ✓.
+ 7. §7 CodexErr RetryAfter — verified (error.rs:79,449-461; UsageLimitReached :150,691; CodexErrorInfo mapping
+    :478-480).
+ 8. §8 subagent dispatch — child_config.rs, spawn.rs, spawn_guard.rs, completion.rs — verified present.
+
+ What the old research MISSED (main counter-evidence for the re-evaluation):
+ - ext/goal crate entirely — the Goal mechanism (persistent goal, admission via model tools + host API, idle
+   continuation = real auto-advance, no-progress classification prompt, blocked audit ≥3 turns, budget
+   accounting, status machine, persistence in state DB, resume restore, fork inheritance). Old research's
+   "工作机制研究" used Goal only as an Orbit-side example; it never identified Codex's actual goal runtime.
+ - state crate (persistence of threads/goals/rollouts in sqlite with filesystem fallback — recorder.rs
+   list_threads_with_db_fallback).
+ - user_goal.rs — compaction-boundary preservation of host-annotated goal fragments, 700-byte whole-omission
+   rule (protocol cap 4000 chars).
+ - InternalContextSource fragments (goal steering items are internal-context user fragments — a mechanism for
+   injecting non-user-authored content with provenance).
+ - start_turn_if_idle / inject_if_running — admission primitives for idle continuation vs active steering.
+ - Old research's C02 conclusion ("对照现有状态注入、amend、唤醒及检查路径核对；详见工作机制研究") didn't
+   surface the goal runtime's auto-advance loop.
+
+ Overstated/inaccurate in old research to check:
+ - Old research said Codex "turn/steer 必须提供 expectedTurnId；runtime 在持有 active-turn
+   锁时核对目标，不匹配则拒绝" — verified exact. But old research didn't mention that steer only accepts user
+   input, Review/Compact turns not steerable, schema mismatch rejection (turn_input.rs:818-832) — additional
+   conditions worth noting.
+ - Old research C01 note "该文件的写入路径调用 flush()，不能据此声称所有数据经 fsync 持久到磁盘" — verified:
+   recorder uses Flush command with ack; need to check whether flush() calls fsync — I didn't verify; keep as
+   unknown/unchanged claim? The old research's caution stands; I verified the command/ack split only.
+ - Old research §6 "工具输出有保留固定前缀、最新后缀" — head budget is exactly MAX/2, not "fixed prefix"; minor
+   wording. The omission marker includes omitted byte count ✓.
+
+ For the mapping to Orbit C01-C10, the ticket wants per-item:
+ 核心保证/非保证、移植需什么接口、旧结论遗漏/值得反对. Also emphasize:
+ "区分Goal已有任务通知与持久目标/准入/无进展/续跑/原文投影，明确Codex能力也不是绝对质量保证":
+ - 已有任务通知: ThreadGoalUpdatedEvent notification = status broadcast only.
+ - 持久目标: ThreadGoal in state DB (objective ≤4000 chars, status enum, token_budget, tokens_used, time_used,
+   created/updated) — survives restart.
+ - 准入: model tools create/update goal (execution_allowed, budget clamp), host API set/clear with
+   prepare_external_goal_mutation permit; user_goal fragment only from host annotation, never tool
+   output/automatic continuation.
+ - 无进展: continuation prompt's no-progress check + blocked audit (3 consecutive goal turns) + program-side
+   EmptyResponse/ExecutionUnavailable stop reasons. NOT a programmatic progress proof — model-classified;
+   arbitrary tool calls not treated as progress by the runtime (accounting counts tokens/items only).
+ - 续跑: on_thread_idle → continue_if_idle → start_turn_if_idle(turn_trigger "goal") + deferral flag (pause) +
+   restore_after_resume.
+ - 原文投影: continuation prompt embeds escaped objective as user-provided data (anti-injection framing);
+   user_goal 700-byte whole omission at compaction; protocol 4000-char cap.
+ - 非绝对质量保证: audits are prompt obligations (model-classified progress), not program-verified;
+   EmptyResponse stop only catches empty outputs; blocked threshold is model-invoked (update_goal blocked) — a
+   model can still misjudge; budget limits stop the goal but don't prove progress.
+
+ Also Root's counter-evidence framing: Orbit already has continue_unfinished_task (task_runtime.rb:3277,
+ automatic artifact review wake, once per input/artifact) and observe_continuation_progress (any new tool
+ receipt = work_observed, not proven progress). So the mapping section should position Codex's goal runtime
+ against these without claiming Orbit lacks auto-resume, and highlight that Codex equally does NOT
+ programmatically verify substantive progress — its no-progress handling is prompt-level classification with
+ program-side stop backstops.
+
+ Now write docs/reference/codex-decisions-reevaluation-20261010.md. Required content:
+ - Header: 评估中、尚非产品决定; scope (fixed commit, read-only audit); method (tarball at commit, targeted call
+   chains); what was read vs not.
+ - Goal section (deep).
+ - C01-C10 per item: 源码文件/函数/行号固定URL (raw.githubusercontent.com/openai/codex/36ae1561.../path#Lnn or
+   just path+line), 核心保证/非保证, 移植需什么接口, 旧结论遗漏/反对.
+ - 结论 about old research over-broad/missed.
+ - 未读边界.
+
+ Fixed URL format:
+ https://raw.githubusercontent.com/openai/codex/36ae1561b9324c93d5638b45eb19fe2cc070a581/codex-rs/core/src/...
+
+ Let me write the document now. It should be thorough but not bloated. I'll write it in Chinese matching repo
+ doc style.
+
+ 已收集所有锚点。正在编写评估文档。
+
+╭─── ✎ Write: 📝 ~/Personal/omen/orbit/docs/reference/codex-decisions-reevaluation-20261010.md · 117 lines ─────╮
+│   1 # Codex 借鉴决定再评估（固定 commit 源码审计）                                                            │
+│   2                                                                                                           │
+│   3 状态：**评估中，尚非产品决定**。本文是 2026-10-10 授权的一次只读源码再评估，供 Root                       │
+│ 集成裁决；不修改运行代码、合同、ADR 或总清单，不构成实施授权。                                                │
+│   4 对象：`openai/codex` 固定 commit `36ae1561b9324c93d5638b45eb19fe2cc070a581` 全量源码（codeload tarball    │
+│ 解包核对，非浮动 main）。                                                                                     │
+│   5 方法：批量获取后只追关键调用链；每个条目给出本 commit 的文件/函数/行号固定                                │
+│ URL。旧研究（[源码研究](codex-source-lessons-20261009.md)、[工作机制研究](codex-workflow-alignment-20261009.m │
+│ d)）仅作映射对照，不作为证据来源。                                                                            │
+│   6 基线锚点：所有 URL 形如                                                                                   │
+│ `https://github.com/openai/codex/blob/36ae1561b9324c93d5638b45eb19fe2cc070a581/<path>`（下文省略前缀，记作    │
+│ `[commit]/<path>`）。                                                                                         │
+│ … 111 more lines ⟦⌃O: Expand⟧                                                                                 │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+ The document is written. Now the final report per the ticket:
+ 完成回报文件和主要反证、实际读过源码及未读边界；不要求ACK.
+
+ Summary:
+ - File: docs/reference/codex-decisions-reevaluation-20261010.md (18KB, marked 评估中/尚非产品决定)
+ - Main counter-evidence: ext/goal runtime entirely missed by old research; Goal auto-advance is a real control
+   loop (persisted state + idle-triggered start_turn_if_idle + program-side stop backstops + prompt audits), not
+   prompt fields; C02/C10 old conclusions had gaps; C01 wording fix; C03/C05/C06/C07/C08/C09 confirmed.
+ - Orbit framing respected: no "Orbit lacks auto-resume" claim (noted continue_unfinished_task as existing); no
+   "tool calls = progress" claim (Codex likewise doesn't programmatically verify progress).
+ - Source read / unread boundary stated in doc §4.
+ - Resources: source extracted in the tmp dir as required; no repo code changes except the one allowed new doc;
+   no commit/push.
+
+ C01—C10 再评估完成回报
+
+ 产物
+
+ docs/reference/codex-decisions-reevaluation-20261010.md（18KB）——已标注评估中、尚非产品决定，仅此一个文件，未触
+ 运行代码/合同/TODO/交接，未提交/推送/派发。源码 tarball 解包于指定 tmp 目录，逐条目附固定 commit URL＋行号。
+
+ 主要反证（对旧研究/旧决定）
+
+ 1. 最大遗漏：ext/goal 扩展整体。Goal 完整自动推进是真实控制循环，不是提示字段：目标持久化于 state DB（状态机
+    Active/Blocked/UsageLimited/BudgetLimited…＋token 预算核算）→ on_thread_idle → continue_if_idle() 持 permit
+    读库 → start_turn_if_idle(turn_trigger:"goal")（runtime.rs:425-523）→ 重启后 restore_after_resume
+    恢复续跑资格。程序侧硬兜底：重复空输出/执行不可用/回合错误 → Blocked，注释明言防续跑死循环烧
+    token（extension.rs:404-410）。
+ 2. 但 Codex 也不把工具调用当进展：无进展/阻塞（≥3 连续目标回合）判定全是提示义务＋模型自报
+    update_goal，程序只计 token；与 Orbit observe_continuation_progress 同为“记录不证明”。报告未写“Orbit
+    无自动续跑”，已对照 continue_unfinished_task（:3277 单次唤醒）定位差异：Codex 是持久目标×每次空闲重入，Orbit
+    是单次检查驱动。
+ 3. 准入与原文投影：模型经 create/update_goal 工具（预算钳制）、宿主经 API＋互斥
+    permit；投影只接受宿主编注（user_goal.rs:16"Never construct from tool output or an automatic
+    continuation"），objective 作 escaped user-data 注入，压缩边界 >700B 整条省略。
+ 4. 旧结论修正：C01“固定前缀”实为对半预算；C02 论证缺口（未评估目标驱动续跑维度）；C10 遗漏“预算与实际
+    model_info 同源每回合动态核算”（compact.rs:276/history.rs:495）——路由限制不可核实的现状下 C10
+    条件未成立不变。
+ 5. 维持不改判：C03（steer_input 锁内 expected_turn_id 校验＋仅 user input/Review/Compact 不可 steer/schema
+    比对，turn_input.rs:794-833）、C05（admit_start 双重检查栅栏 runtime.rs:276-296）、C06（orchestrator
+    集中审批/沙盒/升级序列，升级重试不移植）、C07（recorder oneshot ack 命令集
+    recorder.rs:131-141）、C08/C09——逐行成立。
+
+ 已读/未读边界
+
+ 已读：goal 全链（runtime/extension/tool/steering/模板/state store/protocol 段）、user_goal、steer
+ 全链、head_tail_buffer、agent control 三文件关键函数、child_config 签名、orchestrator/sandboxing 结构、recorder
+ 命令集、export/turn 协议段。未读：未构建运行；tools 各 runtime 实现、TUI/sdk/docs、state 非 goals
+ 部分；accounting.rs 空输出计数阈值只确认签名未核常量。获取失败：无。
+
+ Root 随后可追加 Orbit 对照与建议；本票结束。
+
+ ※ recap: 已核对 C08–C10 采用条件、C05/C06/C07/C01 独立核查与 Codex 固定 commit 再评估（产物
+ docs/reference/codex-decisions-reevaluation-20261010.md）。下一步：Root 集成再评估报告并裁决
+ Goal/旧研究修订项。
+
+╭── π > ◒ GLM-5.3-Flash > 📁 ~/Personal/omen/orbit > ⑂ main *15 ?7 ▶─21%─┃1M─◀ Verify C08–C10 adoption condi… ──╮
+╰─                                                                                                             ─╯

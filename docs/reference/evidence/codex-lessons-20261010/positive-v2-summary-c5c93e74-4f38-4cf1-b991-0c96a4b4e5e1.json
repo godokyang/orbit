@@ -1,0 +1,2925 @@
+{
+  "task_dir": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v2/.orbit/tasks/c5c93e74-4f38-4cf1-b991-0c96a4b4e5e1",
+  "id": "c5c93e74-4f38-4cf1-b991-0c96a4b4e5e1",
+  "status": "complete",
+  "created_at": "2026-10-10T04:35:36Z",
+  "workspace": {
+    "project_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v2",
+    "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v2",
+    "project": {
+      "path": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v2",
+      "git": true,
+      "common_dir": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v2/.git",
+      "worktree": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v2",
+      "head": "d8e7119b4ee34350675b5d052185fc48608c8fe8"
+    },
+    "artifact": {
+      "path": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v2",
+      "git": true,
+      "common_dir": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v2/.git",
+      "worktree": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v2",
+      "head": "d8e7119b4ee34350675b5d052185fc48608c8fe8"
+    },
+    "bound_at": "2026-10-10T04:35:36Z",
+    "history": []
+  },
+  "jev": {
+    "provider": "typesafe",
+    "model": "jev-1.13.0",
+    "question_set_version": "jev-observation-2",
+    "usage": {
+      "input_tokens": 5784,
+      "output_tokens": 55
+    },
+    "call_id": "orbit-judgment-760aa9c4-d7fd-455d-b397-9744de3ef314",
+    "requested_model": "jev-1.13.0",
+    "status": "assessed",
+    "scores": {
+      "stuck": 0.18,
+      "off_track": 0.1,
+      "artifact_ready": 0.65
+    },
+    "assessed_at": "2026-10-10T04:41:14Z",
+    "delegation": {
+      "version": "orbit-member-selection-v2",
+      "signature": "c5c638e923cfee380234c6f25aae1b65cc8af4bc60ebc910ead1940b4cdd9ef8",
+      "reused": false,
+      "candidates": [
+        {
+          "agent": "orbit-m-opencode-go-deepseek-v4-1-flash-79717e5d",
+          "model": "opencode-go/deepseek-v4.1-flash",
+          "identity": {
+            "provider": "opencode-go",
+            "model": "deepseek-v4.1-flash",
+            "reasoning": "unknown",
+            "billing_route": "subscription_quota"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "unknown",
+          "quality_sources": [],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 1048576
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "frequency_penalty",
+                "include_reasoning",
+                "logit_bias",
+                "logprobs",
+                "max_tokens",
+                "min_p",
+                "presence_penalty",
+                "reasoning",
+                "reasoning_effort",
+                "repetition_penalty",
+                "response_format",
+                "seed",
+                "stop",
+                "structured_outputs",
+                "temperature",
+                "tool_choice",
+                "tools",
+                "top_k",
+                "top_logprobs",
+                "top_p"
+              ]
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 1000000,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": null
+        },
+        {
+          "agent": "orbit-m-kimi-code-k3-256k-301bb915",
+          "model": "kimi-code/k3-256k",
+          "identity": {
+            "provider": "kimi-code",
+            "model": "k3-256k",
+            "reasoning": "unknown",
+            "billing_route": "subscription_quota"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "unknown",
+          "quality_sources": [],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 1048576
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text",
+                "image",
+                "video"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "frequency_penalty",
+                "include_reasoning",
+                "logit_bias",
+                "logprobs",
+                "max_tokens",
+                "min_p",
+                "presence_penalty",
+                "reasoning",
+                "reasoning_effort",
+                "repetition_penalty",
+                "response_format",
+                "seed",
+                "stop",
+                "structured_outputs",
+                "temperature",
+                "tool_choice",
+                "tools",
+                "top_k",
+                "top_logprobs",
+                "top_p"
+              ]
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 262144,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": null
+        },
+        {
+          "agent": "orbit-m-zenmux-deepseek-deepseek-v4-1-flash-0afa958f",
+          "model": "zenmux/deepseek/deepseek-v4.1-flash",
+          "identity": {
+            "provider": "zenmux",
+            "model": "deepseek/deepseek-v4.1-flash",
+            "reasoning": "unknown",
+            "billing_route": "unknown"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "unknown",
+          "quality_sources": [],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 1048576
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "frequency_penalty",
+                "include_reasoning",
+                "logit_bias",
+                "logprobs",
+                "max_tokens",
+                "min_p",
+                "presence_penalty",
+                "reasoning",
+                "reasoning_effort",
+                "repetition_penalty",
+                "response_format",
+                "seed",
+                "stop",
+                "structured_outputs",
+                "temperature",
+                "tool_choice",
+                "tools",
+                "top_k",
+                "top_logprobs",
+                "top_p"
+              ]
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 1000000,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": null
+        },
+        {
+          "agent": "orbit-m-zhipu-coding-plan-glm-5-3-flash-71b48ce8",
+          "model": "zhipu-coding-plan/glm-5.3-flash",
+          "identity": {
+            "provider": "zhipu-coding-plan",
+            "model": "glm-5.3-flash",
+            "reasoning": "unknown",
+            "billing_route": "subscription_quota"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "unknown",
+          "quality_sources": [],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 1048576
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text",
+                "image",
+                "video"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "frequency_penalty",
+                "include_reasoning",
+                "logit_bias",
+                "logprobs",
+                "max_tokens",
+                "min_p",
+                "parallel_tool_calls",
+                "presence_penalty",
+                "reasoning",
+                "reasoning_effort",
+                "repetition_penalty",
+                "response_format",
+                "seed",
+                "stop",
+                "structured_outputs",
+                "temperature",
+                "tool_choice",
+                "tools",
+                "top_k",
+                "top_logprobs",
+                "top_p"
+              ]
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 1000000,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": null
+        },
+        {
+          "agent": "orbit-m-cursor-grok-4-7-fast-aa556a9e",
+          "model": "cursor/grok-4.7-fast",
+          "identity": {
+            "provider": "cursor",
+            "model": "grok-4.7-fast",
+            "reasoning": "unknown",
+            "billing_route": "unknown"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "unknown",
+          "quality_sources": [],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 500000
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text",
+                "image",
+                "file"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "include_reasoning",
+                "logprobs",
+                "max_tokens",
+                "reasoning",
+                "reasoning_effort",
+                "response_format",
+                "seed",
+                "structured_outputs",
+                "temperature",
+                "tool_choice",
+                "tools",
+                "top_logprobs",
+                "top_p"
+              ]
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 256000,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": null
+        },
+        {
+          "agent": "orbit-m-cursor-grok-4-7-56f2c60a",
+          "model": "cursor/grok-4.7",
+          "identity": {
+            "provider": "cursor",
+            "model": "grok-4.7",
+            "reasoning": "unknown",
+            "billing_route": "unknown"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "unknown",
+          "quality_sources": [],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 500000
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text",
+                "image",
+                "file"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "include_reasoning",
+                "logprobs",
+                "max_tokens",
+                "reasoning",
+                "reasoning_effort",
+                "response_format",
+                "seed",
+                "structured_outputs",
+                "temperature",
+                "tool_choice",
+                "tools",
+                "top_logprobs",
+                "top_p"
+              ]
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 256000,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": null
+        },
+        {
+          "agent": "orbit-m-openai-codex-gpt-6-1-sol-3026c530",
+          "model": "openai-codex/gpt-6.1-sol",
+          "identity": {
+            "provider": "openai-codex",
+            "model": "gpt-6.1-sol",
+            "reasoning": "unknown",
+            "billing_route": "unknown"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "unknown",
+          "quality_sources": [],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 1050000
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "file",
+                "image",
+                "text"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "include_reasoning",
+                "max_completion_tokens",
+                "max_tokens",
+                "reasoning",
+                "reasoning_effort",
+                "response_format",
+                "seed",
+                "structured_outputs",
+                "tool_choice",
+                "tools",
+                "verbosity"
+              ]
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 272000,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": null
+        },
+        {
+          "agent": "orbit-m-openai-codex-gpt-6-luna-bae41d6b",
+          "model": "openai-codex/gpt-6-luna",
+          "identity": {
+            "provider": "openai-codex",
+            "model": "gpt-6-luna",
+            "reasoning": "unknown",
+            "billing_route": "unknown"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "unknown",
+          "quality_sources": [],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 1050000
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "file",
+                "image",
+                "text"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "include_reasoning",
+                "max_completion_tokens",
+                "max_tokens",
+                "reasoning",
+                "reasoning_effort",
+                "response_format",
+                "seed",
+                "structured_outputs",
+                "tool_choice",
+                "tools",
+                "verbosity"
+              ]
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 272000,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": null
+        }
+      ],
+      "requirements_error": null,
+      "recommendation": {
+        "first": null,
+        "backups": []
+      },
+      "recommendation_objects": {
+        "first": null,
+        "backups": []
+      },
+      "limitations": [],
+      "judgments": [],
+      "judgment_state": null,
+      "input_digest": "842de2c7b7fb840bc7b98ba644a295cfc516742a6b43ed7313257aead3accae4",
+      "stale": false,
+      "unit_basis": "0ffc45cb39e05a8be6698e6b7f65ccc078f2149847de7d5c7cb8cf1dc794d2ae",
+      "execution_role": "unspecified",
+      "dependencies": [],
+      "route_cost_inputs": {},
+      "release": {
+        "allows_positive_ranking": true,
+        "decision_version": "orbit-quality-decision-4",
+        "input_version": "jev-selection-input-2",
+        "model": "jev-1.13.0",
+        "proves_samples_real": false,
+        "provider": "typesafe",
+        "question_digest": "0fc3d712f60167edb572d039a2c9d5b35b0e9295a4a38bf9db597e3682ac7ca8",
+        "question_set_versions": {
+          "candidates": "jev-candidates-4",
+          "checker_quality": "jev-checker-task-fit-5",
+          "delegation": "jev-delegation-4",
+          "observation": "jev-observation-2"
+        },
+        "release": {
+          "reason": "Decision-4 independent review: unchanged question bodies, input profile, model and thresholds. handoff_fit gates bounded handoff structure; member_task_fit is a preserved diagnostic limitation; each candidate must independently clear its existing candidate_task_fit release and capability holds. Unknown price/quota/routes remain unknown; Root retains pool selection authority. The original 17 labels / 14 calls are preserved verbatim as per-question evidence, including negative, missing evidence, failure and holdout; they were not rerun and do not prove the newly composed production path. Completion additionally requires a fresh installed orbit omp ordinary-task recommendation/dispatch/integration/check/stop run.; independent OMP 2 approves bounded_git_delivery_v1 activation for isolated live acceptance; ordinary native recommendation/dispatch/integration/check/confirmed-stop remains the completion gate. Per-question historical calls are unchanged and do not prove the new combination live.",
+          "reviewed_at": "2026-10-01T19:02:16Z",
+          "reviewed_by": "OMP 2 (kimi-code/k3-256k, w22:p3) 独立原件复核",
+          "sample_count": 17,
+          "sample_digest": "5a30130a022abd2bc1b35a6ebe61c2ea4fe0e750cafbb0d23d6d51de973d03cc",
+          "scope": "bounded_git_delivery_v1"
+        },
+        "scope": "bounded_git_delivery_v1",
+        "structural_validation": "passed",
+        "thresholds": {
+          "candidate_task_fit": 0.65,
+          "checker_task_fit": 0.6,
+          "handoff_fit": 0.7,
+          "member_task_fit": 0.65
+        }
+      },
+      "decision": "facts_only",
+      "reason": "no candidate carries usable sourced facts or a catalog prior; no judgment is paid",
+      "work_unit_id": "wu-184b3bcd3d512f62",
+      "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v2",
+      "at": "2026-10-10T04:37:22Z",
+      "user_boundary": "014cd236",
+      "user_message_id": "014cd236"
+    }
+  },
+  "member_selections": {
+    "wu-184b3bcd3d512f62": {
+      "version": "orbit-member-selection-v2",
+      "signature": "c5c638e923cfee380234c6f25aae1b65cc8af4bc60ebc910ead1940b4cdd9ef8",
+      "reused": false,
+      "candidates": [
+        {
+          "agent": "orbit-m-opencode-go-deepseek-v4-1-flash-79717e5d",
+          "model": "opencode-go/deepseek-v4.1-flash",
+          "identity": {
+            "provider": "opencode-go",
+            "model": "deepseek-v4.1-flash",
+            "reasoning": "unknown",
+            "billing_route": "subscription_quota"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "unknown",
+          "quality_sources": [],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 1048576
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "frequency_penalty",
+                "include_reasoning",
+                "logit_bias",
+                "logprobs",
+                "max_tokens",
+                "min_p",
+                "presence_penalty",
+                "reasoning",
+                "reasoning_effort",
+                "repetition_penalty",
+                "response_format",
+                "seed",
+                "stop",
+                "structured_outputs",
+                "temperature",
+                "tool_choice",
+                "tools",
+                "top_k",
+                "top_logprobs",
+                "top_p"
+              ]
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 1000000,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": null
+        },
+        {
+          "agent": "orbit-m-kimi-code-k3-256k-301bb915",
+          "model": "kimi-code/k3-256k",
+          "identity": {
+            "provider": "kimi-code",
+            "model": "k3-256k",
+            "reasoning": "unknown",
+            "billing_route": "subscription_quota"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "unknown",
+          "quality_sources": [],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 1048576
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text",
+                "image",
+                "video"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "frequency_penalty",
+                "include_reasoning",
+                "logit_bias",
+                "logprobs",
+                "max_tokens",
+                "min_p",
+                "presence_penalty",
+                "reasoning",
+                "reasoning_effort",
+                "repetition_penalty",
+                "response_format",
+                "seed",
+                "stop",
+                "structured_outputs",
+                "temperature",
+                "tool_choice",
+                "tools",
+                "top_k",
+                "top_logprobs",
+                "top_p"
+              ]
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 262144,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": null
+        },
+        {
+          "agent": "orbit-m-zenmux-deepseek-deepseek-v4-1-flash-0afa958f",
+          "model": "zenmux/deepseek/deepseek-v4.1-flash",
+          "identity": {
+            "provider": "zenmux",
+            "model": "deepseek/deepseek-v4.1-flash",
+            "reasoning": "unknown",
+            "billing_route": "unknown"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "unknown",
+          "quality_sources": [],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 1048576
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "frequency_penalty",
+                "include_reasoning",
+                "logit_bias",
+                "logprobs",
+                "max_tokens",
+                "min_p",
+                "presence_penalty",
+                "reasoning",
+                "reasoning_effort",
+                "repetition_penalty",
+                "response_format",
+                "seed",
+                "stop",
+                "structured_outputs",
+                "temperature",
+                "tool_choice",
+                "tools",
+                "top_k",
+                "top_logprobs",
+                "top_p"
+              ]
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 1000000,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": null
+        },
+        {
+          "agent": "orbit-m-zhipu-coding-plan-glm-5-3-flash-71b48ce8",
+          "model": "zhipu-coding-plan/glm-5.3-flash",
+          "identity": {
+            "provider": "zhipu-coding-plan",
+            "model": "glm-5.3-flash",
+            "reasoning": "unknown",
+            "billing_route": "subscription_quota"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "unknown",
+          "quality_sources": [],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 1048576
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text",
+                "image",
+                "video"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "frequency_penalty",
+                "include_reasoning",
+                "logit_bias",
+                "logprobs",
+                "max_tokens",
+                "min_p",
+                "parallel_tool_calls",
+                "presence_penalty",
+                "reasoning",
+                "reasoning_effort",
+                "repetition_penalty",
+                "response_format",
+                "seed",
+                "stop",
+                "structured_outputs",
+                "temperature",
+                "tool_choice",
+                "tools",
+                "top_k",
+                "top_logprobs",
+                "top_p"
+              ]
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 1000000,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": null
+        },
+        {
+          "agent": "orbit-m-cursor-grok-4-7-fast-aa556a9e",
+          "model": "cursor/grok-4.7-fast",
+          "identity": {
+            "provider": "cursor",
+            "model": "grok-4.7-fast",
+            "reasoning": "unknown",
+            "billing_route": "unknown"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "unknown",
+          "quality_sources": [],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 500000
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text",
+                "image",
+                "file"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "include_reasoning",
+                "logprobs",
+                "max_tokens",
+                "reasoning",
+                "reasoning_effort",
+                "response_format",
+                "seed",
+                "structured_outputs",
+                "temperature",
+                "tool_choice",
+                "tools",
+                "top_logprobs",
+                "top_p"
+              ]
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 256000,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": null
+        },
+        {
+          "agent": "orbit-m-cursor-grok-4-7-56f2c60a",
+          "model": "cursor/grok-4.7",
+          "identity": {
+            "provider": "cursor",
+            "model": "grok-4.7",
+            "reasoning": "unknown",
+            "billing_route": "unknown"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "unknown",
+          "quality_sources": [],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 500000
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text",
+                "image",
+                "file"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "include_reasoning",
+                "logprobs",
+                "max_tokens",
+                "reasoning",
+                "reasoning_effort",
+                "response_format",
+                "seed",
+                "structured_outputs",
+                "temperature",
+                "tool_choice",
+                "tools",
+                "top_logprobs",
+                "top_p"
+              ]
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 256000,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": null
+        },
+        {
+          "agent": "orbit-m-openai-codex-gpt-6-1-sol-3026c530",
+          "model": "openai-codex/gpt-6.1-sol",
+          "identity": {
+            "provider": "openai-codex",
+            "model": "gpt-6.1-sol",
+            "reasoning": "unknown",
+            "billing_route": "unknown"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "unknown",
+          "quality_sources": [],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 1050000
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "file",
+                "image",
+                "text"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "include_reasoning",
+                "max_completion_tokens",
+                "max_tokens",
+                "reasoning",
+                "reasoning_effort",
+                "response_format",
+                "seed",
+                "structured_outputs",
+                "tool_choice",
+                "tools",
+                "verbosity"
+              ]
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 272000,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": null
+        },
+        {
+          "agent": "orbit-m-openai-codex-gpt-6-luna-bae41d6b",
+          "model": "openai-codex/gpt-6-luna",
+          "identity": {
+            "provider": "openai-codex",
+            "model": "gpt-6-luna",
+            "reasoning": "unknown",
+            "billing_route": "unknown"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "unknown",
+          "quality_sources": [],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 1050000
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "file",
+                "image",
+                "text"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "include_reasoning",
+                "max_completion_tokens",
+                "max_tokens",
+                "reasoning",
+                "reasoning_effort",
+                "response_format",
+                "seed",
+                "structured_outputs",
+                "tool_choice",
+                "tools",
+                "verbosity"
+              ]
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 272000,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "not_required",
+              "requirement": [],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": null
+        }
+      ],
+      "requirements_error": null,
+      "recommendation": {
+        "first": null,
+        "backups": []
+      },
+      "recommendation_objects": {
+        "first": null,
+        "backups": []
+      },
+      "limitations": [],
+      "judgments": [],
+      "judgment_state": null,
+      "input_digest": "842de2c7b7fb840bc7b98ba644a295cfc516742a6b43ed7313257aead3accae4",
+      "stale": false,
+      "unit_basis": "0ffc45cb39e05a8be6698e6b7f65ccc078f2149847de7d5c7cb8cf1dc794d2ae",
+      "execution_role": "unspecified",
+      "dependencies": [],
+      "route_cost_inputs": {},
+      "release": {
+        "allows_positive_ranking": true,
+        "decision_version": "orbit-quality-decision-4",
+        "input_version": "jev-selection-input-2",
+        "model": "jev-1.13.0",
+        "proves_samples_real": false,
+        "provider": "typesafe",
+        "question_digest": "0fc3d712f60167edb572d039a2c9d5b35b0e9295a4a38bf9db597e3682ac7ca8",
+        "question_set_versions": {
+          "candidates": "jev-candidates-4",
+          "checker_quality": "jev-checker-task-fit-5",
+          "delegation": "jev-delegation-4",
+          "observation": "jev-observation-2"
+        },
+        "release": {
+          "reason": "Decision-4 independent review: unchanged question bodies, input profile, model and thresholds. handoff_fit gates bounded handoff structure; member_task_fit is a preserved diagnostic limitation; each candidate must independently clear its existing candidate_task_fit release and capability holds. Unknown price/quota/routes remain unknown; Root retains pool selection authority. The original 17 labels / 14 calls are preserved verbatim as per-question evidence, including negative, missing evidence, failure and holdout; they were not rerun and do not prove the newly composed production path. Completion additionally requires a fresh installed orbit omp ordinary-task recommendation/dispatch/integration/check/stop run.; independent OMP 2 approves bounded_git_delivery_v1 activation for isolated live acceptance; ordinary native recommendation/dispatch/integration/check/confirmed-stop remains the completion gate. Per-question historical calls are unchanged and do not prove the new combination live.",
+          "reviewed_at": "2026-10-01T19:02:16Z",
+          "reviewed_by": "OMP 2 (kimi-code/k3-256k, w22:p3) 独立原件复核",
+          "sample_count": 17,
+          "sample_digest": "5a30130a022abd2bc1b35a6ebe61c2ea4fe0e750cafbb0d23d6d51de973d03cc",
+          "scope": "bounded_git_delivery_v1"
+        },
+        "scope": "bounded_git_delivery_v1",
+        "structural_validation": "passed",
+        "thresholds": {
+          "candidate_task_fit": 0.65,
+          "checker_task_fit": 0.6,
+          "handoff_fit": 0.7,
+          "member_task_fit": 0.65
+        }
+      },
+      "decision": "facts_only",
+      "reason": "no candidate carries usable sourced facts or a catalog prior; no judgment is paid",
+      "work_unit_id": "wu-184b3bcd3d512f62",
+      "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v2",
+      "at": "2026-10-10T04:37:22Z",
+      "user_boundary": "014cd236",
+      "user_message_id": "014cd236"
+    }
+  },
+  "delegation_hint": null,
+  "checker_selection": {
+    "model": "opencode-go/deepseek-v4.1-flash",
+    "basis": "pool_order_unreleased",
+    "candidates": [
+      "opencode-go/deepseek-v4.1-flash",
+      "kimi-code/k3-256k",
+      "zenmux/deepseek/deepseek-v4.1-flash",
+      "zhipu-coding-plan/glm-5.3-flash",
+      "cursor/grok-4.7-fast",
+      "cursor/grok-4.7",
+      "openai-codex/gpt-6.1-sol",
+      "openai-codex/gpt-6-luna"
+    ],
+    "selection_tier": "fallback",
+    "notice": "候选池降级选择：独立检查模型质量未经证实",
+    "version": "orbit-checker-selection-v7",
+    "cost_comparison": "not_applied",
+    "reason": "a reviewed release covers this task profile but the judgment is unanswered or from another provider, model, input version or question set",
+    "source": "candidate_pool",
+    "model_identity": {
+      "provider": "opencode-go",
+      "model": "deepseek-v4.1-flash",
+      "reasoning": "unknown",
+      "billing_route": "subscription_quota"
+    },
+    "quality_score": null,
+    "source_agent_dir": "/Users/yangke/.omp/agent",
+    "quality_basis": "unknown",
+    "quality_sources": [],
+    "quality_evidence_valid_until": null,
+    "recommendation_hold": false,
+    "hold_reason": null,
+    "model_overview_status": "fresh",
+    "model_overview_prior": null,
+    "model_overview_refresh": {
+      "status": "fresh",
+      "fetched_at": "2026-10-07T17:58:43Z",
+      "model_count": 447,
+      "benchmark_count": 345
+    },
+    "eligibility": {
+      "context": {
+        "status": "not_required",
+        "requirement": null,
+        "catalog_value": 1048576
+      },
+      "input_modalities": {
+        "status": "not_required",
+        "requirement": [],
+        "catalog_value": [
+          "text",
+          "image"
+        ]
+      },
+      "output_modalities": {
+        "status": "not_required",
+        "requirement": [],
+        "catalog_value": [
+          "text"
+        ]
+      },
+      "parameters": {
+        "status": "not_required",
+        "requirement": [],
+        "catalog_value": [
+          "frequency_penalty",
+          "include_reasoning",
+          "logit_bias",
+          "logprobs",
+          "max_tokens",
+          "min_p",
+          "presence_penalty",
+          "reasoning",
+          "reasoning_effort",
+          "repetition_penalty",
+          "response_format",
+          "seed",
+          "stop",
+          "structured_outputs",
+          "temperature",
+          "tool_choice",
+          "tools",
+          "top_k",
+          "top_logprobs",
+          "top_p"
+        ]
+      }
+    },
+    "execution_eligibility": {
+      "context": {
+        "status": "not_required",
+        "requirement": null,
+        "configured_limit": 1000000,
+        "source": "omp_model_registry"
+      },
+      "input_modalities": {
+        "status": "not_required",
+        "requirement": [],
+        "configured_values": [
+          "text",
+          "image"
+        ]
+      },
+      "output_modalities": {
+        "status": "not_required",
+        "requirement": [],
+        "configured_values": [
+          "text"
+        ]
+      },
+      "parameters": {
+        "status": "not_required",
+        "requirement": [],
+        "note": "模型工具支持不代替成员实际工具授权"
+      }
+    },
+    "judgment_provider": null,
+    "judgment_model": null,
+    "judgment_call_id": null,
+    "judgment_status": null,
+    "judgment_requested_model": null,
+    "question_set_version": null,
+    "judgment_error": null,
+    "release": {
+      "model": "jev-1.13.0",
+      "provider": "typesafe",
+      "thresholds": {
+        "handoff_fit": 0.7,
+        "member_task_fit": 0.65,
+        "candidate_task_fit": 0.65,
+        "checker_task_fit": 0.6
+      },
+      "scope": "bounded_git_delivery_v1",
+      "question_set_versions": {
+        "observation": "jev-observation-2",
+        "delegation": "jev-delegation-4",
+        "candidates": "jev-candidates-4",
+        "checker_quality": "jev-checker-task-fit-5"
+      },
+      "question_digest": "0fc3d712f60167edb572d039a2c9d5b35b0e9295a4a38bf9db597e3682ac7ca8",
+      "input_version": "jev-selection-input-2",
+      "decision_version": "orbit-quality-decision-4",
+      "structural_validation": "passed",
+      "proves_samples_real": false,
+      "allows_positive_ranking": true,
+      "release": {
+        "reason": "Decision-4 independent review: unchanged question bodies, input profile, model and thresholds. handoff_fit gates bounded handoff structure; member_task_fit is a preserved diagnostic limitation; each candidate must independently clear its existing candidate_task_fit release and capability holds. Unknown price/quota/routes remain unknown; Root retains pool selection authority. The original 17 labels / 14 calls are preserved verbatim as per-question evidence, including negative, missing evidence, failure and holdout; they were not rerun and do not prove the newly composed production path. Completion additionally requires a fresh installed orbit omp ordinary-task recommendation/dispatch/integration/check/stop run.; independent OMP 2 approves bounded_git_delivery_v1 activation for isolated live acceptance; ordinary native recommendation/dispatch/integration/check/confirmed-stop remains the completion gate. Per-question historical calls are unchanged and do not prove the new combination live.",
+        "scope": "bounded_git_delivery_v1",
+        "reviewed_by": "OMP 2 (kimi-code/k3-256k, w22:p3) 独立原件复核",
+        "reviewed_at": "2026-10-01T19:02:16Z",
+        "sample_count": 17,
+        "sample_digest": "5a30130a022abd2bc1b35a6ebe61c2ea4fe0e750cafbb0d23d6d51de973d03cc"
+      }
+    },
+    "route_cost_inputs": {},
+    "calibration_note": null,
+    "requirements_error": null,
+    "task_fit_scores": {},
+    "unscored_candidates": [
+      "opencode-go/deepseek-v4.1-flash",
+      "kimi-code/k3-256k",
+      "zenmux/deepseek/deepseek-v4.1-flash",
+      "zhipu-coding-plan/glm-5.3-flash",
+      "cursor/grok-4.7-fast",
+      "cursor/grok-4.7",
+      "openai-codex/gpt-6.1-sol",
+      "openai-codex/gpt-6-luna"
+    ],
+    "evidence_needed": [
+      {
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "reasoning": "unknown",
+        "billing_route": "subscription_quota",
+        "status": "absent"
+      },
+      {
+        "model": "kimi-code/k3-256k",
+        "reasoning": "unknown",
+        "billing_route": "subscription_quota",
+        "status": "absent"
+      },
+      {
+        "model": "zenmux/deepseek/deepseek-v4.1-flash",
+        "reasoning": "unknown",
+        "billing_route": "unknown",
+        "status": "expired"
+      },
+      {
+        "model": "zhipu-coding-plan/glm-5.3-flash",
+        "reasoning": "unknown",
+        "billing_route": "subscription_quota",
+        "status": "expired"
+      },
+      {
+        "model": "cursor/grok-4.7-fast",
+        "reasoning": "unknown",
+        "billing_route": "unknown",
+        "status": "absent"
+      },
+      {
+        "model": "cursor/grok-4.7",
+        "reasoning": "unknown",
+        "billing_route": "unknown",
+        "status": "absent"
+      },
+      {
+        "model": "openai-codex/gpt-6.1-sol",
+        "reasoning": "unknown",
+        "billing_route": "unknown",
+        "status": "absent"
+      },
+      {
+        "model": "openai-codex/gpt-6-luna",
+        "reasoning": "unknown",
+        "billing_route": "unknown",
+        "status": "absent"
+      }
+    ],
+    "judgment_state": null,
+    "usage": null,
+    "selected_for": "reviewer",
+    "selected_at": "2026-10-10T04:40:30Z",
+    "signature": "37c07b3306c3a3b3ecadf6152e39bb09eeaa8fa36314cf23200c3c75ca0582a1"
+  },
+  "usage": {
+    "tokens": null,
+    "jev_entry": null,
+    "resource_call_gaps": {
+      "native_execution": ""
+    },
+    "resource_calls": {
+      "schema_version": "orbit-resource-calls-v1",
+      "coverage": "recorded_calls_only",
+      "call_count": 43,
+      "status_counts": {
+        "completed": 43,
+        "failed": 0,
+        "unknown": 0
+      },
+      "unknown_usage_calls": 0,
+      "partial_usage_calls": 0,
+      "usage_status_counts": {
+        "reported": 43,
+        "partial": 0,
+        "unknown": 0
+      },
+      "noted_usage_calls": 0,
+      "unknown_actual_model_calls": 0,
+      "attempt_count": 3,
+      "calls_without_attempt": 6,
+      "call_id_origins": {
+        "local_provider_invocation": 43
+      },
+      "calls_without_call_id_origin": 0,
+      "unknown_upstream_model_calls": 43,
+      "calls_with_credential_id": 37,
+      "unknown_account_identity_calls": 43,
+      "groups": [
+        {
+          "role": "root",
+          "phase": "root_execution",
+          "actual_identity": {
+            "provider": "zhipu-coding-plan",
+            "model": "glm-5.3-flash",
+            "reasoning": null,
+            "billing_route": "subscription_quota",
+            "scope": "omp_route"
+          },
+          "usage_source": "native_message",
+          "call_count": 18,
+          "status_counts": {
+            "completed": 18,
+            "failed": 0,
+            "unknown": 0
+          },
+          "usage_fields": {
+            "cacheRead": {
+              "reported_sum": 351232,
+              "unit": "token",
+              "reported_calls": 18,
+              "missing_calls": 0
+            },
+            "cacheWrite": {
+              "reported_sum": 0,
+              "unit": "token",
+              "reported_calls": 18,
+              "missing_calls": 0
+            },
+            "input": {
+              "reported_sum": 112911,
+              "unit": "token",
+              "reported_calls": 18,
+              "missing_calls": 0
+            },
+            "output": {
+              "reported_sum": 8287,
+              "unit": "token",
+              "reported_calls": 18,
+              "missing_calls": 0
+            },
+            "reasoningTokens": {
+              "reported_sum": 1324,
+              "unit": "token",
+              "reported_calls": 18,
+              "missing_calls": 0
+            },
+            "totalTokens": {
+              "reported_sum": 472430,
+              "unit": "token",
+              "reported_calls": 18,
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "root",
+          "phase": "root_execution",
+          "actual_identity": {
+            "provider": "zhipu-coding-plan",
+            "model": "glm-5.3-flash",
+            "reasoning": null,
+            "billing_route": "subscription_quota",
+            "scope": "omp_route"
+          },
+          "usage_source": "native_message",
+          "call_count": 1,
+          "status_counts": {
+            "completed": 1,
+            "failed": 0,
+            "unknown": 0
+          },
+          "usage_fields": {
+            "cacheRead": {
+              "reported_sum": 11264,
+              "unit": "token",
+              "reported_calls": 1,
+              "missing_calls": 0
+            },
+            "cacheWrite": {
+              "reported_sum": 0,
+              "unit": "token",
+              "reported_calls": 1,
+              "missing_calls": 0
+            },
+            "input": {
+              "reported_sum": 1807,
+              "unit": "token",
+              "reported_calls": 1,
+              "missing_calls": 0
+            },
+            "output": {
+              "reported_sum": 46,
+              "unit": "token",
+              "reported_calls": 1,
+              "missing_calls": 0
+            },
+            "totalTokens": {
+              "reported_sum": 13117,
+              "unit": "token",
+              "reported_calls": 1,
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "judgment",
+          "phase": "jev_stage1",
+          "actual_identity": {
+            "provider": "typesafe",
+            "model": "jev-1.13.0",
+            "reasoning": null,
+            "billing_route": "unknown",
+            "scope": "judgment_service"
+          },
+          "usage_source": "provider_response",
+          "call_count": 6,
+          "status_counts": {
+            "completed": 6,
+            "failed": 0,
+            "unknown": 0
+          },
+          "usage_fields": {
+            "input_tokens": {
+              "reported_sum": 24202,
+              "unit": "token",
+              "reported_calls": 6,
+              "missing_calls": 0
+            },
+            "output_tokens": {
+              "reported_sum": 330,
+              "unit": "token",
+              "reported_calls": 6,
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "member",
+          "phase": "member_execution",
+          "actual_identity": {
+            "provider": "opencode-go",
+            "model": "deepseek-v4.1-flash",
+            "reasoning": null,
+            "billing_route": "subscription_quota",
+            "scope": "omp_route"
+          },
+          "usage_source": "native_message",
+          "call_count": 1,
+          "status_counts": {
+            "completed": 1,
+            "failed": 0,
+            "unknown": 0
+          },
+          "usage_fields": {
+            "cacheRead": {
+              "reported_sum": 0,
+              "unit": "token",
+              "reported_calls": 1,
+              "missing_calls": 0
+            },
+            "cacheWrite": {
+              "reported_sum": 0,
+              "unit": "token",
+              "reported_calls": 1,
+              "missing_calls": 0
+            },
+            "input": {
+              "reported_sum": 11269,
+              "unit": "token",
+              "reported_calls": 1,
+              "missing_calls": 0
+            },
+            "output": {
+              "reported_sum": 216,
+              "unit": "token",
+              "reported_calls": 1,
+              "missing_calls": 0
+            },
+            "totalTokens": {
+              "reported_sum": 11485,
+              "unit": "token",
+              "reported_calls": 1,
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "member",
+          "phase": "member_execution",
+          "actual_identity": {
+            "provider": "opencode-go",
+            "model": "deepseek-v4.1-flash",
+            "reasoning": null,
+            "billing_route": "subscription_quota",
+            "scope": "omp_route"
+          },
+          "usage_source": "native_message",
+          "call_count": 15,
+          "status_counts": {
+            "completed": 15,
+            "failed": 0,
+            "unknown": 0
+          },
+          "usage_fields": {
+            "cacheRead": {
+              "reported_sum": 504576,
+              "unit": "token",
+              "reported_calls": 15,
+              "missing_calls": 0
+            },
+            "cacheWrite": {
+              "reported_sum": 0,
+              "unit": "token",
+              "reported_calls": 15,
+              "missing_calls": 0
+            },
+            "input": {
+              "reported_sum": 53312,
+              "unit": "token",
+              "reported_calls": 15,
+              "missing_calls": 0
+            },
+            "output": {
+              "reported_sum": 17788,
+              "unit": "token",
+              "reported_calls": 15,
+              "missing_calls": 0
+            },
+            "reasoningTokens": {
+              "reported_sum": 8781,
+              "unit": "token",
+              "reported_calls": 15,
+              "missing_calls": 0
+            },
+            "totalTokens": {
+              "reported_sum": 575676,
+              "unit": "token",
+              "reported_calls": 15,
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "checker",
+          "phase": "reviewer",
+          "actual_identity": {
+            "provider": "opencode-go",
+            "model": "deepseek-v4.1-flash",
+            "reasoning": null,
+            "billing_route": "unknown",
+            "scope": "omp_route"
+          },
+          "usage_source": "native_message",
+          "call_count": 2,
+          "status_counts": {
+            "completed": 2,
+            "failed": 0,
+            "unknown": 0
+          },
+          "usage_fields": {
+            "cacheRead": {
+              "reported_sum": 26880,
+              "unit": "token",
+              "reported_calls": 2,
+              "missing_calls": 0
+            },
+            "cacheWrite": {
+              "reported_sum": 0,
+              "unit": "token",
+              "reported_calls": 2,
+              "missing_calls": 0
+            },
+            "input": {
+              "reported_sum": 25127,
+              "unit": "token",
+              "reported_calls": 2,
+              "missing_calls": 0
+            },
+            "output": {
+              "reported_sum": 8770,
+              "unit": "token",
+              "reported_calls": 2,
+              "missing_calls": 0
+            },
+            "reasoningTokens": {
+              "reported_sum": 6542,
+              "unit": "token",
+              "reported_calls": 2,
+              "missing_calls": 0
+            },
+            "totalTokens": {
+              "reported_sum": 60777,
+              "unit": "token",
+              "reported_calls": 2,
+              "missing_calls": 0
+            }
+          }
+        }
+      ],
+      "cost": null,
+      "quota_consumption": null,
+      "note": "reported fields are never summed across categories; cost and quota stay unknown here"
+    },
+    "jev_stage1": {
+      "input_tokens": 24202,
+      "output_tokens": 330,
+      "incomplete": false
+    },
+    "check_tokens": 60777,
+    "check_tokens_reported_subtotal": 60777,
+    "check_usage_missing_attempts": 0
+  },
+  "members": [
+    {
+      "kind": "omp",
+      "adapter": "omp_native_task",
+      "thread_id": "orbit-943f9eed-13f6-495e-b211-e98daa710872",
+      "model": "opencode-go/deepseek-v4.1-flash",
+      "status": "completed",
+      "stop_confirmation": {
+        "confirmed": true,
+        "id": "orbit-943f9eed-13f6-495e-b211-e98daa710872",
+        "scope": "Member turn, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+        "registry_status": "idle",
+        "status_after": "idle",
+        "active_tools_after": 0,
+        "async_jobs_settled": true
+      }
+    }
+  ],
+  "checks": [
+    {
+      "number": 1,
+      "role": "reviewer",
+      "kind": "artifact",
+      "started_at": "2026-10-10T04:40:25Z",
+      "finished_at": "2026-10-10T04:41:13Z",
+      "trigger_cause": "manual_check",
+      "manual": true,
+      "stale": false,
+      "stale_reasons": [],
+      "usage": {
+        "usage_status": "reported",
+        "incomplete": false,
+        "calls": [
+          {
+            "call_id": "orbit-call-b9effb4b-01b7-417c-92b9-51f5e23c5775",
+            "origin": "local_provider_invocation",
+            "usage_status": "reported",
+            "provider_response_id": "chatcmpl-1cf59b1ca4df47138977d8e61a09389f",
+            "provider": "opencode-go",
+            "model": "deepseek-v4.1-flash",
+            "requested_model": "opencode-go/deepseek-v4.1-flash",
+            "stop_reason": "toolUse",
+            "completed_at": "2026-10-10T04:40:36.110Z",
+            "input": 21772,
+            "output": 332,
+            "cacheRead": 2432,
+            "cacheWrite": 0,
+            "reasoningTokens": 37,
+            "totalTokens": 24536
+          },
+          {
+            "call_id": "orbit-call-3835da02-98a9-48d7-854c-95fea4673963",
+            "origin": "local_provider_invocation",
+            "usage_status": "reported",
+            "provider_response_id": "chatcmpl-162b584663d743a18c0a8afb9242aa52",
+            "provider": "opencode-go",
+            "model": "deepseek-v4.1-flash",
+            "requested_model": "opencode-go/deepseek-v4.1-flash",
+            "stop_reason": "stop",
+            "completed_at": "2026-10-10T04:41:13.082Z",
+            "input": 3355,
+            "output": 8438,
+            "cacheRead": 24448,
+            "cacheWrite": 0,
+            "reasoningTokens": 6505,
+            "totalTokens": 36241
+          }
+        ],
+        "coverage": {
+          "input": {
+            "reported_sum": 25127,
+            "reported_calls": 2,
+            "missing_calls": 0
+          },
+          "output": {
+            "reported_sum": 8770,
+            "reported_calls": 2,
+            "missing_calls": 0
+          },
+          "cacheRead": {
+            "reported_sum": 26880,
+            "reported_calls": 2,
+            "missing_calls": 0
+          },
+          "cacheWrite": {
+            "reported_sum": 0,
+            "reported_calls": 2,
+            "missing_calls": 0
+          },
+          "reasoningTokens": {
+            "reported_sum": 6542,
+            "reported_calls": 2,
+            "missing_calls": 0
+          },
+          "totalTokens": {
+            "reported_sum": 60777,
+            "reported_calls": 2,
+            "missing_calls": 0
+          }
+        },
+        "derived_usage_fields": [
+          "input_tokens",
+          "output_tokens",
+          "total_tokens"
+        ],
+        "derived_note": "legacy reference totals from reported SDK buckets; original call fields and coverage govern resource accounting",
+        "input": 25127,
+        "output": 8770,
+        "cacheRead": 26880,
+        "cacheWrite": 0,
+        "reasoningTokens": 6542,
+        "totalTokens": 60777,
+        "input_tokens": 52007,
+        "output_tokens": 8770,
+        "total_tokens": 60777,
+        "gaps": []
+      },
+      "verdict": "complete",
+      "finding_ids": [],
+      "resolved_ids": []
+    }
+  ],
+  "findings": {},
+  "stop_confirmation": {
+    "confirmed": true,
+    "thread_id": "01a12414-59cb-76bb-b75f-a6fd5f09d8b0",
+    "scope": "Native session execution, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+    "native_owner": "Main",
+    "status_after": "idle",
+    "active_tools_after": 0,
+    "async_jobs_settled": true,
+    "collaboration_persistence": {
+      "task_dir": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v2/.orbit/tasks/c5c93e74-4f38-4cf1-b991-0c96a4b4e5e1",
+      "scope": "current process observations through cutoff; append completion, not fsync",
+      "observed_through": 15,
+      "written_seq": 15,
+      "failed_observations": 0,
+      "recorded_gaps": 0,
+      "pending_gap": null,
+      "last_error": null,
+      "status": "written"
+    },
+    "members": [
+      {
+        "thread_id": "orbit-943f9eed-13f6-495e-b211-e98daa710872",
+        "confirmation": {
+          "confirmed": true,
+          "id": "orbit-943f9eed-13f6-495e-b211-e98daa710872",
+          "scope": "Member turn, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+          "registry_status": "idle",
+          "status_after": "idle",
+          "active_tools_after": 0,
+          "async_jobs_settled": true
+        }
+      }
+    ]
+  },
+  "event_counts": {
+    "checker_model_selected": 2,
+    "attached": 1,
+    "native_collaboration": 15,
+    "jev_assessed": 6,
+    "work_unit_declared": 1,
+    "member_selection_assessed": 1,
+    "member_selection_responded": 3,
+    "member_registered": 1,
+    "work_unit_bound": 1,
+    "native_member_reconciled": 1,
+    "member_result_recorded": 1,
+    "work_unit_finished": 1,
+    "check_started": 1,
+    "check_finished": 1,
+    "finalization_notice": 1,
+    "completion_stop_queued": 1,
+    "completed_via_finalized_stop": 1,
+    "stopped": 1
+  },
+  "timeline": [
+    {
+      "at": "2026-10-10T04:35:36Z",
+      "type": "checker_model_selected",
+      "selection": {
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "basis": "pool_order_unreleased",
+        "candidates": [
+          "opencode-go/deepseek-v4.1-flash",
+          "kimi-code/k3-256k",
+          "zenmux/deepseek/deepseek-v4.1-flash",
+          "zhipu-coding-plan/glm-5.3-flash",
+          "cursor/grok-4.7-fast",
+          "cursor/grok-4.7",
+          "openai-codex/gpt-6.1-sol",
+          "openai-codex/gpt-6-luna"
+        ],
+        "selection_tier": "fallback",
+        "notice": "候选池降级选择：独立检查模型质量未经证实",
+        "version": "orbit-checker-selection-v7",
+        "cost_comparison": "not_applied",
+        "reason": "a reviewed release exists but this task is outside its released profile; scores and route cost are not a positive ranking",
+        "source": "candidate_pool",
+        "model_identity": {
+          "provider": "opencode-go",
+          "model": "deepseek-v4.1-flash",
+          "reasoning": "unknown",
+          "billing_route": "subscription_quota"
+        },
+        "quality_score": null,
+        "source_agent_dir": "/Users/yangke/.omp/agent",
+        "quality_basis": "unknown",
+        "quality_sources": [],
+        "quality_evidence_valid_until": null,
+        "recommendation_hold": false,
+        "hold_reason": null,
+        "model_overview_status": "fresh",
+        "model_overview_prior": null,
+        "model_overview_refresh": {
+          "status": "fresh",
+          "fetched_at": "2026-10-07T17:58:43Z",
+          "model_count": 447,
+          "benchmark_count": 345
+        },
+        "eligibility": {
+          "context": {
+            "status": "not_required",
+            "requirement": null,
+            "catalog_value": 1048576
+          },
+          "input_modalities": {
+            "status": "not_required",
+            "requirement": [],
+            "catalog_value": [
+              "text",
+              "image"
+            ]
+          },
+          "output_modalities": {
+            "status": "not_required",
+            "requirement": [],
+            "catalog_value": [
+              "text"
+            ]
+          },
+          "parameters": {
+            "status": "not_required",
+            "requirement": [],
+            "catalog_value": [
+              "frequency_penalty",
+              "include_reasoning",
+              "logit_bias",
+              "logprobs",
+              "max_tokens",
+              "min_p",
+              "presence_penalty",
+              "reasoning",
+              "reasoning_effort",
+              "repetition_penalty",
+              "response_format",
+              "seed",
+              "stop",
+              "structured_outputs",
+              "temperature",
+              "tool_choice",
+              "tools",
+              "top_k",
+              "top_logprobs",
+              "top_p"
+            ]
+          }
+        },
+        "execution_eligibility": {
+          "context": {
+            "status": "not_required",
+            "requirement": null,
+            "configured_limit": 1000000,
+            "source": "omp_model_registry"
+          },
+          "input_modalities": {
+            "status": "not_required",
+            "requirement": [],
+            "configured_values": [
+              "text",
+              "image"
+            ]
+          },
+          "output_modalities": {
+            "status": "not_required",
+            "requirement": [],
+            "configured_values": [
+              "text"
+            ]
+          },
+          "parameters": {
+            "status": "not_required",
+            "requirement": [],
+            "note": "模型工具支持不代替成员实际工具授权"
+          }
+        },
+        "judgment_provider": null,
+        "judgment_model": null,
+        "judgment_call_id": null,
+        "judgment_status": null,
+        "judgment_requested_model": null,
+        "question_set_version": null,
+        "judgment_error": null,
+        "release": {
+          "model": "jev-1.13.0",
+          "provider": "typesafe",
+          "thresholds": {
+            "handoff_fit": 0.7,
+            "member_task_fit": 0.65,
+            "candidate_task_fit": 0.65,
+            "checker_task_fit": 0.6
+          },
+          "scope": "bounded_git_delivery_v1",
+          "question_set_versions": {
+            "observation": "jev-observation-2",
+            "delegation": "jev-delegation-4",
+            "candidates": "jev-candidates-4",
+            "checker_quality": "jev-checker-task-fit-5"
+          },
+          "question_digest": "0fc3d712f60167edb572d039a2c9d5b35b0e9295a4a38bf9db597e3682ac7ca8",
+          "input_version": "jev-selection-input-2",
+          "decision_version": "orbit-quality-decision-4",
+          "structural_validation": "passed",
+          "proves_samples_real": false,
+          "allows_positive_ranking": true,
+          "release": {
+            "reason": "Decision-4 independent review: unchanged question bodies, input profile, model and thresholds. handoff_fit gates bounded handoff structure; member_task_fit is a preserved diagnostic limitation; each candidate must independently clear its existing candidate_task_fit release and capability holds. Unknown price/quota/routes remain unknown; Root retains pool selection authority. The original 17 labels / 14 calls are preserved verbatim as per-question evidence, including negative, missing evidence, failure and holdout; they were not rerun and do not prove the newly composed production path. Completion additionally requires a fresh installed orbit omp ordinary-task recommendation/dispatch/integration/check/stop run.; independent OMP 2 approves bounded_git_delivery_v1 activation for isolated live acceptance; ordinary native recommendation/dispatch/integration/check/confirmed-stop remains the completion gate. Per-question historical calls are unchanged and do not prove the new combination live.",
+            "scope": "bounded_git_delivery_v1",
+            "reviewed_by": "OMP 2 (kimi-code/k3-256k, w22:p3) 独立原件复核",
+            "reviewed_at": "2026-10-01T19:02:16Z",
+            "sample_count": 17,
+            "sample_digest": "5a30130a022abd2bc1b35a6ebe61c2ea4fe0e750cafbb0d23d6d51de973d03cc"
+          }
+        },
+        "route_cost_inputs": null,
+        "calibration_note": null,
+        "requirements_error": null,
+        "task_fit_scores": {},
+        "unscored_candidates": [
+          "opencode-go/deepseek-v4.1-flash",
+          "kimi-code/k3-256k",
+          "zenmux/deepseek/deepseek-v4.1-flash",
+          "zhipu-coding-plan/glm-5.3-flash",
+          "cursor/grok-4.7-fast",
+          "cursor/grok-4.7",
+          "openai-codex/gpt-6.1-sol",
+          "openai-codex/gpt-6-luna"
+        ],
+        "evidence_needed": [
+          {
+            "model": "opencode-go/deepseek-v4.1-flash",
+            "reasoning": "unknown",
+            "billing_route": "subscription_quota",
+            "status": "absent"
+          },
+          {
+            "model": "kimi-code/k3-256k",
+            "reasoning": "unknown",
+            "billing_route": "subscription_quota",
+            "status": "absent"
+          },
+          {
+            "model": "zenmux/deepseek/deepseek-v4.1-flash",
+            "reasoning": "unknown",
+            "billing_route": "unknown",
+            "status": "expired"
+          },
+          {
+            "model": "zhipu-coding-plan/glm-5.3-flash",
+            "reasoning": "unknown",
+            "billing_route": "subscription_quota",
+            "status": "expired"
+          },
+          {
+            "model": "cursor/grok-4.7-fast",
+            "reasoning": "unknown",
+            "billing_route": "unknown",
+            "status": "absent"
+          },
+          {
+            "model": "cursor/grok-4.7",
+            "reasoning": "unknown",
+            "billing_route": "unknown",
+            "status": "absent"
+          },
+          {
+            "model": "openai-codex/gpt-6.1-sol",
+            "reasoning": "unknown",
+            "billing_route": "unknown",
+            "status": "absent"
+          },
+          {
+            "model": "openai-codex/gpt-6-luna",
+            "reasoning": "unknown",
+            "billing_route": "unknown",
+            "status": "absent"
+          }
+        ],
+        "judgment_state": null,
+        "usage": null,
+        "selected_for": "start",
+        "selected_at": "2026-10-10T04:35:36Z",
+        "signature": "36da6093865b9ad1827ba118f5fa607277f5f4e67500b9b285cd8679faa4828f"
+      }
+    },
+    {
+      "at": "2026-10-10T04:35:42Z",
+      "type": "jev_assessed",
+      "status": "answered"
+    },
+    {
+      "at": "2026-10-10T04:36:19Z",
+      "type": "member_selection_assessed",
+      "work_unit_id": "wu-184b3bcd3d512f62",
+      "reason": "no candidate carries usable sourced facts or a catalog prior; no judgment is paid"
+    },
+    {
+      "at": "2026-10-10T04:36:44Z",
+      "type": "jev_assessed",
+      "status": "answered"
+    },
+    {
+      "at": "2026-10-10T04:37:44Z",
+      "type": "jev_assessed",
+      "status": "answered"
+    },
+    {
+      "at": "2026-10-10T04:38:45Z",
+      "type": "jev_assessed",
+      "status": "answered"
+    },
+    {
+      "at": "2026-10-10T04:39:55Z",
+      "type": "jev_assessed",
+      "status": "answered"
+    },
+    {
+      "at": "2026-10-10T04:40:30Z",
+      "type": "checker_model_selected",
+      "selection": {
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "basis": "pool_order_unreleased",
+        "candidates": [
+          "opencode-go/deepseek-v4.1-flash",
+          "kimi-code/k3-256k",
+          "zenmux/deepseek/deepseek-v4.1-flash",
+          "zhipu-coding-plan/glm-5.3-flash",
+          "cursor/grok-4.7-fast",
+          "cursor/grok-4.7",
+          "openai-codex/gpt-6.1-sol",
+          "openai-codex/gpt-6-luna"
+        ],
+        "selection_tier": "fallback",
+        "notice": "候选池降级选择：独立检查模型质量未经证实",
+        "version": "orbit-checker-selection-v7",
+        "cost_comparison": "not_applied",
+        "reason": "a reviewed release covers this task profile but the judgment is unanswered or from another provider, model, input version or question set",
+        "source": "candidate_pool",
+        "model_identity": {
+          "provider": "opencode-go",
+          "model": "deepseek-v4.1-flash",
+          "reasoning": "unknown",
+          "billing_route": "subscription_quota"
+        },
+        "quality_score": null,
+        "source_agent_dir": "/Users/yangke/.omp/agent",
+        "quality_basis": "unknown",
+        "quality_sources": [],
+        "quality_evidence_valid_until": null,
+        "recommendation_hold": false,
+        "hold_reason": null,
+        "model_overview_status": "fresh",
+        "model_overview_prior": null,
+        "model_overview_refresh": {
+          "status": "fresh",
+          "fetched_at": "2026-10-07T17:58:43Z",
+          "model_count": 447,
+          "benchmark_count": 345
+        },
+        "eligibility": {
+          "context": {
+            "status": "not_required",
+            "requirement": null,
+            "catalog_value": 1048576
+          },
+          "input_modalities": {
+            "status": "not_required",
+            "requirement": [],
+            "catalog_value": [
+              "text",
+              "image"
+            ]
+          },
+          "output_modalities": {
+            "status": "not_required",
+            "requirement": [],
+            "catalog_value": [
+              "text"
+            ]
+          },
+          "parameters": {
+            "status": "not_required",
+            "requirement": [],
+            "catalog_value": [
+              "frequency_penalty",
+              "include_reasoning",
+              "logit_bias",
+              "logprobs",
+              "max_tokens",
+              "min_p",
+              "presence_penalty",
+              "reasoning",
+              "reasoning_effort",
+              "repetition_penalty",
+              "response_format",
+              "seed",
+              "stop",
+              "structured_outputs",
+              "temperature",
+              "tool_choice",
+              "tools",
+              "top_k",
+              "top_logprobs",
+              "top_p"
+            ]
+          }
+        },
+        "execution_eligibility": {
+          "context": {
+            "status": "not_required",
+            "requirement": null,
+            "configured_limit": 1000000,
+            "source": "omp_model_registry"
+          },
+          "input_modalities": {
+            "status": "not_required",
+            "requirement": [],
+            "configured_values": [
+              "text",
+              "image"
+            ]
+          },
+          "output_modalities": {
+            "status": "not_required",
+            "requirement": [],
+            "configured_values": [
+              "text"
+            ]
+          },
+          "parameters": {
+            "status": "not_required",
+            "requirement": [],
+            "note": "模型工具支持不代替成员实际工具授权"
+          }
+        },
+        "judgment_provider": null,
+        "judgment_model": null,
+        "judgment_call_id": null,
+        "judgment_status": null,
+        "judgment_requested_model": null,
+        "question_set_version": null,
+        "judgment_error": null,
+        "release": {
+          "model": "jev-1.13.0",
+          "provider": "typesafe",
+          "thresholds": {
+            "handoff_fit": 0.7,
+            "member_task_fit": 0.65,
+            "candidate_task_fit": 0.65,
+            "checker_task_fit": 0.6
+          },
+          "scope": "bounded_git_delivery_v1",
+          "question_set_versions": {
+            "observation": "jev-observation-2",
+            "delegation": "jev-delegation-4",
+            "candidates": "jev-candidates-4",
+            "checker_quality": "jev-checker-task-fit-5"
+          },
+          "question_digest": "0fc3d712f60167edb572d039a2c9d5b35b0e9295a4a38bf9db597e3682ac7ca8",
+          "input_version": "jev-selection-input-2",
+          "decision_version": "orbit-quality-decision-4",
+          "structural_validation": "passed",
+          "proves_samples_real": false,
+          "allows_positive_ranking": true,
+          "release": {
+            "reason": "Decision-4 independent review: unchanged question bodies, input profile, model and thresholds. handoff_fit gates bounded handoff structure; member_task_fit is a preserved diagnostic limitation; each candidate must independently clear its existing candidate_task_fit release and capability holds. Unknown price/quota/routes remain unknown; Root retains pool selection authority. The original 17 labels / 14 calls are preserved verbatim as per-question evidence, including negative, missing evidence, failure and holdout; they were not rerun and do not prove the newly composed production path. Completion additionally requires a fresh installed orbit omp ordinary-task recommendation/dispatch/integration/check/stop run.; independent OMP 2 approves bounded_git_delivery_v1 activation for isolated live acceptance; ordinary native recommendation/dispatch/integration/check/confirmed-stop remains the completion gate. Per-question historical calls are unchanged and do not prove the new combination live.",
+            "scope": "bounded_git_delivery_v1",
+            "reviewed_by": "OMP 2 (kimi-code/k3-256k, w22:p3) 独立原件复核",
+            "reviewed_at": "2026-10-01T19:02:16Z",
+            "sample_count": 17,
+            "sample_digest": "5a30130a022abd2bc1b35a6ebe61c2ea4fe0e750cafbb0d23d6d51de973d03cc"
+          }
+        },
+        "route_cost_inputs": {},
+        "calibration_note": null,
+        "requirements_error": null,
+        "task_fit_scores": {},
+        "unscored_candidates": [
+          "opencode-go/deepseek-v4.1-flash",
+          "kimi-code/k3-256k",
+          "zenmux/deepseek/deepseek-v4.1-flash",
+          "zhipu-coding-plan/glm-5.3-flash",
+          "cursor/grok-4.7-fast",
+          "cursor/grok-4.7",
+          "openai-codex/gpt-6.1-sol",
+          "openai-codex/gpt-6-luna"
+        ],
+        "evidence_needed": [
+          {
+            "model": "opencode-go/deepseek-v4.1-flash",
+            "reasoning": "unknown",
+            "billing_route": "subscription_quota",
+            "status": "absent"
+          },
+          {
+            "model": "kimi-code/k3-256k",
+            "reasoning": "unknown",
+            "billing_route": "subscription_quota",
+            "status": "absent"
+          },
+          {
+            "model": "zenmux/deepseek/deepseek-v4.1-flash",
+            "reasoning": "unknown",
+            "billing_route": "unknown",
+            "status": "expired"
+          },
+          {
+            "model": "zhipu-coding-plan/glm-5.3-flash",
+            "reasoning": "unknown",
+            "billing_route": "subscription_quota",
+            "status": "expired"
+          },
+          {
+            "model": "cursor/grok-4.7-fast",
+            "reasoning": "unknown",
+            "billing_route": "unknown",
+            "status": "absent"
+          },
+          {
+            "model": "cursor/grok-4.7",
+            "reasoning": "unknown",
+            "billing_route": "unknown",
+            "status": "absent"
+          },
+          {
+            "model": "openai-codex/gpt-6.1-sol",
+            "reasoning": "unknown",
+            "billing_route": "unknown",
+            "status": "absent"
+          },
+          {
+            "model": "openai-codex/gpt-6-luna",
+            "reasoning": "unknown",
+            "billing_route": "unknown",
+            "status": "absent"
+          }
+        ],
+        "judgment_state": null,
+        "usage": null,
+        "selected_for": "reviewer",
+        "selected_at": "2026-10-10T04:40:30Z",
+        "signature": "37c07b3306c3a3b3ecadf6152e39bb09eeaa8fa36314cf23200c3c75ca0582a1"
+      }
+    },
+    {
+      "at": "2026-10-10T04:40:30Z",
+      "type": "check_started",
+      "number": 1
+    },
+    {
+      "at": "2026-10-10T04:41:13Z",
+      "type": "check_finished",
+      "number": 1,
+      "stale": false,
+      "stale_reasons": [],
+      "reason": "Deliverable visible in fixed snapshot and matches SPEC.md/tests/acceptance.mjs. src/importer.mjs (84 lines) exports importExpenses with BOM strip, LF/CRLF, blank-line skipping with one-based provenance, exact-two-column split, trim, nonempty category, ^\\d+\\.\\d{2}$ amount, exact integer cents, and Number.isSafeInteger guards on value/category/overall sums; first-seen order via Map; returns {groups:[{category,totalCents,count}],totalCents,count}. src/cli.mjs (28 lines) enforces exactly one arg, UTF-8 read, JSON-only stdout/exit 0, single-line stderr/empty stdout/exit 1 without stack traces for arg/read/validation failures. README.md documents invocation, input/error/ordering/precision. tests/acceptance.mjs and SPEC.md are not in review_focus modified/added, and task_git changed_paths is empty with snapshot_head==baseline_head, so no test/spec edits and no commit. Zero deps in package.json. Root receipt at 04:39:59 has artifact_matches=true, input_matches=true, command '.runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test', exit 0, EXPENSE_VALIDATION_SUMMARY: 127 cases passed; CLI smoke receipt at 04:40:04 shows JSON stdout/exit 0 and one-line stderr/exit 1 for missing file, wrong arg count, invalid amount with line number. No missing, wrong or extra work identified."
+    },
+    {
+      "at": "2026-10-10T04:41:13Z",
+      "type": "finalization_notice",
+      "check": 1
+    },
+    {
+      "at": "2026-10-10T04:41:16Z",
+      "type": "jev_assessed",
+      "status": "answered"
+    },
+    {
+      "at": "2026-10-10T04:41:24Z",
+      "type": "stopped",
+      "reason": "User requested stop"
+    }
+  ]
+}

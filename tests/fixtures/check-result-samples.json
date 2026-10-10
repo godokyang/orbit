@@ -1,0 +1,207 @@
+{
+  "description": "Shared check-result protocol samples: both validators (runners/omp-reviewer/check-result.ts and lib/orbit/check_runner.rb) must agree on accept/reject for every entry. Structural facts derive from contracts/check-result.schema.json; these samples only assist verification and never replace the schema as the source.",
+  "samples": [
+    {
+      "name": "valid result with delivery and coverage",
+      "accept": true,
+      "result": {
+        "verdict": "continue",
+        "reason": "work in progress",
+        "findings": [
+          {
+            "id": "f-1",
+            "requirement": "aggregate exact cents",
+            "evidence": "output shows 0.1+0.2",
+            "action": "use integer cents"
+          }
+        ],
+        "resolved_ids": [
+          "f-0"
+        ],
+        "next_check_seconds": 300,
+        "delivery": {
+          "ready": false,
+          "reason": "final answer not visible in the program record"
+        },
+        "coverage": {
+          "complete": false,
+          "items": [
+            {
+              "requirement": "aggregate exact cents",
+              "status": "verified",
+              "evidence": "src uses integer cents"
+            },
+            {
+              "requirement": "reject partial output",
+              "status": "unverified",
+              "evidence": "",
+              "scope": "lifecycle"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "extra top-level key is refused",
+      "accept": false,
+      "result": {
+        "verdict": "pause",
+        "reason": "blocked on environment",
+        "findings": [],
+        "resolved_ids": [],
+        "next_check_seconds": 60,
+        "delivery": {
+          "ready": false,
+          "reason": "no deliverable yet"
+        },
+        "severity": "high"
+      }
+    },
+    {
+      "name": "unknown verdict is refused",
+      "accept": false,
+      "result": {
+        "verdict": "done",
+        "reason": "looks finished",
+        "findings": [],
+        "resolved_ids": [],
+        "next_check_seconds": 60,
+        "delivery": {
+          "ready": true,
+          "reason": "answer visible in root observations"
+        }
+      }
+    },
+    {
+      "name": "coverage item with unknown key is refused",
+      "accept": false,
+      "result": {
+        "verdict": "correct",
+        "reason": "delivery verified",
+        "findings": [],
+        "resolved_ids": [],
+        "next_check_seconds": 600,
+        "delivery": {
+          "ready": true,
+          "reason": "answer visible in root observations"
+        },
+        "coverage": {
+          "complete": true,
+          "items": [
+            {
+              "requirement": "aggregate exact cents",
+              "status": "verified",
+              "evidence": "integer cents",
+              "note": "extra"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "verified coverage without evidence is refused",
+      "accept": false,
+      "result": {
+        "verdict": "correct",
+        "reason": "delivery verified",
+        "findings": [],
+        "resolved_ids": [],
+        "next_check_seconds": 600,
+        "delivery": {
+          "ready": true,
+          "reason": "answer visible in root observations"
+        },
+        "coverage": {
+          "complete": true,
+          "items": [
+            {
+              "requirement": "aggregate exact cents",
+              "status": "verified",
+              "evidence": "  "
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "verified coverage with Unicode blank evidence is refused",
+      "accept": false,
+      "result": {
+        "verdict": "continue",
+        "reason": "work in progress",
+        "findings": [
+          {
+            "id": "f-1",
+            "requirement": "aggregate exact cents",
+            "evidence": "output shows 0.1+0.2",
+            "action": "use integer cents"
+          }
+        ],
+        "resolved_ids": [
+          "f-0"
+        ],
+        "next_check_seconds": 300,
+        "delivery": {
+          "ready": false,
+          "reason": "final answer not visible in the program record"
+        },
+        "coverage": {
+          "complete": false,
+          "items": [
+            {
+              "requirement": "aggregate exact cents",
+              "status": "verified",
+              "evidence": " 　"
+            },
+            {
+              "requirement": "reject partial output",
+              "status": "unverified",
+              "evidence": "",
+              "scope": "lifecycle"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "coverage requirements differing only by Unicode edge spaces are duplicates",
+      "accept": false,
+      "result": {
+        "verdict": "continue",
+        "reason": "work in progress",
+        "findings": [
+          {
+            "id": "f-1",
+            "requirement": "aggregate exact cents",
+            "evidence": "output shows 0.1+0.2",
+            "action": "use integer cents"
+          }
+        ],
+        "resolved_ids": [
+          "f-0"
+        ],
+        "next_check_seconds": 300,
+        "delivery": {
+          "ready": false,
+          "reason": "final answer not visible in the program record"
+        },
+        "coverage": {
+          "complete": false,
+          "items": [
+            {
+              "requirement": "aggregate exact cents",
+              "status": "verified",
+              "evidence": "src uses integer cents"
+            },
+            {
+              "requirement": "　aggregate exact cents ",
+              "status": "unverified",
+              "evidence": "",
+              "scope": "lifecycle"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

@@ -278,7 +278,8 @@ module Orbit
                "Judge the snapshot files, not a model plan or summary."
       parts << "## Output\n\n" \
                "Return JSON matching these fields and nothing else: verdict, reason, findings, " \
-               "resolved_ids, next_check_seconds, delivery, coverage. verdict is one of: #{VERDICTS.join(', ')}. " \
+               "resolved_ids, next_check_seconds, delivery, coverage. verdict is one of: " \
+               "#{self.class.result_structure[:verdicts].join(', ')}. " \
                "Each findings object has exactly id, requirement, evidence and action — no severity or extra keys. " \
                "resolved_ids is a list of strings. next_check_seconds is a positive integer. " \
                "delivery is an object with ready (boolean) and reason (non-empty string). " \

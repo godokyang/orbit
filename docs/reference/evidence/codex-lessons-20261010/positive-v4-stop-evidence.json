@@ -1,0 +1,46 @@
+{
+  "pane": "w23:p12",
+  "task_status": "complete",
+  "stop_confirmation": {
+    "confirmed": true,
+    "thread_id": "01a12428-c8c2-7152-a1e3-5ccb2f6fe56d",
+    "scope": "Native session execution, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+    "native_owner": "Main",
+    "status_after": "idle",
+    "active_tools_after": 0,
+    "async_jobs_settled": true,
+    "collaboration_persistence": {
+      "task_dir": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc",
+      "scope": "current process observations through cutoff; append completion, not fsync",
+      "observed_through": 14,
+      "written_seq": 14,
+      "failed_observations": 0,
+      "recorded_gaps": 0,
+      "pending_gap": null,
+      "last_error": null,
+      "status": "written"
+    },
+    "members": [
+      {
+        "thread_id": "orbit-f4e84132-6b7a-4efd-abe8-ba042278f0f8",
+        "confirmation": {
+          "confirmed": true,
+          "id": "orbit-f4e84132-6b7a-4efd-abe8-ba042278f0f8",
+          "scope": "Member turn, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+          "registry_status": "idle",
+          "status_after": "idle",
+          "active_tools_after": 0,
+          "async_jobs_settled": true
+        }
+      }
+    ]
+  },
+  "foreground_pids_exited": {
+    "56613": true,
+    "56670": true,
+    "56709": true,
+    "56228": true
+  },
+  "pane_closed": true,
+  "qualification": "artifact complete and stop confirmed do not prove original work-unit accepted"
+}

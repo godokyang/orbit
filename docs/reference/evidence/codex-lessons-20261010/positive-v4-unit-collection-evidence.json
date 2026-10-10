@@ -1,0 +1,152 @@
+[
+  {
+    "path": "work-units.json",
+    "record": {
+      "format": "orbit-work-units-2",
+      "task_id": "3ae66eb1-eaff-4a7e-a528-9947914c06bc",
+      "units": {
+        "wu-829bc0242b480b93": {
+          "id": "wu-829bc0242b480b93",
+          "task_id": "3ae66eb1-eaff-4a7e-a528-9947914c06bc",
+          "status": "bound",
+          "input_digest": "14d764a38b71399d2ea68e24a088cde8958a8c4744621d3e38aabed3659dadaf",
+          "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4",
+          "declared_at": "2026-10-10T04:57:49Z",
+          "dispatches": [
+            {
+              "member_id": "orbit-f4e84132-6b7a-4efd-abe8-ba042278f0f8",
+              "tool_call_id": "tool_W1pBMqUshbnaXWTtgITeC82g",
+              "model": "kimi-code/k3-256k",
+              "bound_at": "2026-10-10T04:58:57Z",
+              "hint_signature": "e416733fadf8f65d7af44cc2d625db705dbe192a67b996222b2198ad00390c05",
+              "hint_message_id": "846d8946-6b69-4f17-b8b9-5cb256419a5e"
+            }
+          ],
+          "member_id": "orbit-f4e84132-6b7a-4efd-abe8-ba042278f0f8",
+          "tool_call_id": "tool_W1pBMqUshbnaXWTtgITeC82g",
+          "model": "kimi-code/k3-256k",
+          "result": null,
+          "verification": null,
+          "finished_at": null,
+          "objective": "Implement importExpenses(text) in src/importer.mjs per SPEC.md: an unquoted-CSV expense importer returning exact integer-cent grouped totals, then actually run the project test suite with the project-provided runtime and report real results.",
+          "requirements": [
+            "Parse text: strip at most one leading U+FEFF BOM; split lines accepting LF or CRLF; ignore blank lines for processing but count them in one-based line numbers used in error messages.",
+            "First nonblank line must be exactly the header category,amount; otherwise throw Error whose message contains line number 1.",
+            "Each nonblank data line must have exactly two columns split on comma (no quoting); trim both fields; category must be nonempty after trim.",
+            "Amount must match nonnegative decimal digits with exactly two fractional digits (e.g. 1.20); reject signs, exponents, missing/extra decimals, or fewer/more fraction digits.",
+            "Compute integer cents exactly via string/integer arithmetic, never binary floating point.",
+            "Reject any single amount, per-category sum, or overall sum exceeding Number.MAX_SAFE_INTEGER cents; error message must contain the offending one-based line number (blank lines included in numbering).",
+            "Group by category preserving first-seen order; return {groups:[{category,totalCents,count}],totalCents,count}.",
+            "Throw plain Error (message includes line number), never process.exit or print.",
+            "Do not modify tests/acceptance.mjs, SPEC.md, package.json, or src/cli.mjs; do not add dependencies; do not commit, push, install from network, or start services.",
+            "Run all commands with cwd set to the project root. After implementing, actually run the npm test command from allowed_commands verbatim and report the real exit code and full summary output.",
+            "Report results to Root (agent Main) through the native hub before finishing: exact command run, exit code, the EXPENSE_VALIDATION_SUMMARY line, and any environment limitations encountered."
+          ],
+          "context": "Project root (run all commands here): /private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4 . The file src/importer.mjs currently contains only a stub: export function importExpenses(text) { throw new Error(\"not implemented\"); }. Keep that export name/signature. src/cli.mjs is owned by Root and is being implemented in parallel; the acceptance suite spawns it for CLI cases, so a full npm test also validates integration. Line-number expectations from tests/acceptance.mjs: invalid amount on a data line after a blank line reports line 3; extra column and empty category report line 2; bad header reports line 1; overflow cases report the line where the offending amount appears. Overflow check ordering: validate the amount value itself first, then the sums; the message must contain the data line's number. The project .runtime directory is a real copy of a Node/npm install: use .runtime/bin/node and .runtime/lib/node_modules/npm/bin/npm-cli.js exactly as given in allowed_commands (relative paths work because cwd is the project root); npm lifecycle scripts resolve node from the runtime. TMPDIR must point at the project .test-tmp directory because tests write CLI temp input under os.tmpdir(); allowed_commands already set it.",
+          "decisions": [
+            "Cents are derived by splitting the validated amount string into integer and two-digit fraction parts and combining with integer multiplication/addition; no parseFloat/Number conversion of the amount.",
+            "Blank lines are skipped for output but included when computing one-based line numbers for errors.",
+            "Category grouping uses a Map keyed by trimmed category name so first-seen order is preserved."
+          ],
+          "input_materials": [
+            "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/SPEC.md",
+            "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/tests/acceptance.mjs",
+            "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/package.json",
+            "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/src/importer.mjs"
+          ],
+          "scope": {
+            "allowed_paths": [
+              "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/src/importer.mjs",
+              "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/src/cli.mjs",
+              "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/SPEC.md",
+              "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/tests/acceptance.mjs",
+              "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/package.json",
+              "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.test-tmp",
+              "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.runtime"
+            ],
+            "allowed_tools": [
+              "read",
+              "write",
+              "edit",
+              "bash"
+            ],
+            "allowed_commands": [
+              "TMPDIR=/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.test-tmp .runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test",
+              "TMPDIR=/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.test-tmp npm_config_cache=/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.test-tmp .runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test",
+              "TMPDIR=/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.test-tmp .runtime/bin/node tests/acceptance.mjs"
+            ]
+          },
+          "acceptance": "src/importer.mjs exports a working importExpenses meeting every SPEC.md rule; the verbatim npm test command (project .runtime node + npm-cli.js, TMPDIR=.test-tmp) exits 0 and prints EXPENSE_VALIDATION_SUMMARY with all 127 cases passed, including the CLI cases; member reports the real command, exit code, and output via the native hub to Main.",
+          "escalation": "If the runtime command fails for environment reasons (missing binary, PATH, npm spawn), diagnose the actual error output, retry only with the declared verbatim commands, and if still blocked report the exact failure to Root (Main) via the native hub instead of working around outside allowed paths or claiming success.",
+          "model_requirements": {
+            "relevant_indices": [
+              "coding_index",
+              "agentic_index"
+            ],
+            "required_parameters": [
+              "tools"
+            ]
+          },
+          "execution": "delegate",
+          "dependencies": []
+        },
+        "wu-7c3f25126bf3f618": {
+          "id": "wu-7c3f25126bf3f618",
+          "task_id": "3ae66eb1-eaff-4a7e-a528-9947914c06bc",
+          "status": "declared",
+          "input_digest": "14d764a38b71399d2ea68e24a088cde8958a8c4744621d3e38aabed3659dadaf",
+          "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4",
+          "declared_at": "2026-10-10T05:06:39Z",
+          "dispatches": [],
+          "member_id": null,
+          "tool_call_id": null,
+          "model": null,
+          "result": null,
+          "verification": null,
+          "finished_at": null,
+          "objective": "Implement importExpenses(text) in src/importer.mjs per SPEC.md: an unquoted-CSV expense importer returning exact integer-cent grouped totals, then actually run the project test suite with the project-provided runtime and report real results.",
+          "requirements": [
+            "Parse text: strip at most one leading U+FEFF BOM; split lines accepting LF or CRLF; ignore blank lines for processing but count them in one-based line numbers used in error messages.",
+            "First nonblank line must be exactly the header category,amount; otherwise throw Error whose message contains line number 1.",
+            "Each nonblank data line must have exactly two columns split on comma (no quoting); trim both fields; category must be nonempty after trim.",
+            "Amount must match nonnegative decimal digits with exactly two fractional digits; reject signs, exponents, missing/extra decimals.",
+            "Compute integer cents exactly via string/integer arithmetic, never binary floating point.",
+            "Reject any single amount, per-category sum, or overall sum exceeding Number.MAX_SAFE_INTEGER cents; error message must contain the offending one-based line number (blank lines included in numbering).",
+            "Group by category preserving first-seen order; return {groups:[{category,totalCents,count}],totalCents,count}.",
+            "Throw plain Error (message includes line number), never process.exit or print.",
+            "Do not modify tests/acceptance.mjs, SPEC.md, package.json, or src/cli.mjs; do not add dependencies; do not commit, push, install from network, or start services.",
+            "Run all commands with cwd set to the project root; run the npm test command from allowed_commands verbatim and report the real exit code and full summary output to Root (Main) via the native hub."
+          ],
+          "context": null,
+          "decisions": [],
+          "input_materials": [],
+          "scope": {
+            "allowed_paths": [
+              "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/src/importer.mjs",
+              "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/src/cli.mjs",
+              "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/SPEC.md",
+              "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/tests/acceptance.mjs",
+              "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/package.json",
+              "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.test-tmp",
+              "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.runtime"
+            ],
+            "allowed_tools": [
+              "read",
+              "write",
+              "edit",
+              "bash"
+            ],
+            "allowed_commands": [
+              "TMPDIR=/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.test-tmp .runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test",
+              "TMPDIR=/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.test-tmp .runtime/bin/node tests/acceptance.mjs"
+            ]
+          },
+          "acceptance": "src/importer.mjs exports a working importExpenses meeting every SPEC.md rule; the verbatim npm test command exits 0 and prints EXPENSE_VALIDATION_SUMMARY with all 127 cases passed, including the CLI cases; member reports the real command, exit code, and output via the native hub to Main.",
+          "escalation": "If the runtime command fails for environment reasons, diagnose the actual error output, retry only with the declared verbatim commands, and if still blocked report the exact failure to Root (Main) via the native hub instead of working around outside allowed paths or claiming success.",
+          "model_requirements": {},
+          "dependencies": []
+        }
+      }
+    }
+  }
+]

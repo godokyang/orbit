@@ -1,0 +1,51 @@
+{
+  "archives": [
+    {
+      "file": "lifecycle.tar.gz",
+      "sha256": "98a7b67d1d080a61996a892e2f00642b484be0539f24309d648db6820c6290a2",
+      "bytes": 267220
+    },
+    {
+      "file": "negative.tar.gz",
+      "sha256": "3ae09aec6bf2c27c1ee4a05d6bb75fbcb7ffb1a61d6af7c4ec1bebb667a2c0cd",
+      "bytes": 65875
+    },
+    {
+      "file": "positive-v2.tar.gz",
+      "sha256": "81cf3b8a2a6ab69a86d5d34f1a3ca205efc346092d6c491912f28c2be4dcf74c",
+      "bytes": 156634
+    },
+    {
+      "file": "positive-v3.tar.gz",
+      "sha256": "67390ef698c0a23905529beaa471cdb42aaec43e818852c9602cc6c474671fd2",
+      "bytes": 95871
+    },
+    {
+      "file": "positive-v4.tar.gz",
+      "sha256": "fd777d17cc97ca13c3bfe322233e763a1bf233e7c72f5796d646a8659cfd4b73",
+      "bytes": 446253
+    },
+    {
+      "file": "positive-v5.tar.gz",
+      "sha256": "d20f1fd92e759f6b27fd55147d317f6db8be623e5706c94c775f28b87f558495",
+      "bytes": 31940
+    },
+    {
+      "file": "positive-v6.tar.gz",
+      "sha256": "7b2a5db1e4ea6a66847e9c605e05a9e6cae179e2f7aff86ffe062729686d130e",
+      "bytes": 226126
+    },
+    {
+      "file": "positive-v7.tar.gz",
+      "sha256": "59ddd6cd171a75f120e8772d11f3eecfa9a3c2997789deb11e3d5bc379d6b248",
+      "bytes": 465678
+    },
+    {
+      "file": "positive.tar.gz",
+      "sha256": "04a3dd484cbaf5b0662087cbe4ffb981ff0a0d6a11e733dcb4637f3fc1199c05",
+      "bytes": 239996
+    }
+  ],
+  "filter": "No auth profiles, SDK binary copies, global credentials or private thinking blocks. Original root/member/reviewer session SHA256 and complete visible/tool/usage evidence retained.",
+  "boundary": "check profile directories excluded; filtered reviewer sessions copied separately; root Controller session only metadata/token counters retained"
+}

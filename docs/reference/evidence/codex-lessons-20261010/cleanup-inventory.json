@@ -1,0 +1,351 @@
+{
+  "time": "2026-10-10T06:01:03.697288+00:00",
+  "temporary_root": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne",
+  "exact_owned_overlays": [
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-session-agents-20261010-36090-10n6s4",
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-session-agents-20261010-40435-4qag74",
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-session-agents-20261010-45527-p9uw4m",
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-session-agents-20261010-50025-tq24af",
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-session-agents-20261010-56613-fswef9",
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-session-agents-20261010-73034-hu7alc",
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-session-agents-20261010-79921-fpged5",
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-session-agents-20261010-83781-hlhlj6"
+  ],
+  "exact_owned_control_socket_dirs": [
+    "/tmp/orbit-omp-2KYAV4",
+    "/tmp/orbit-omp-EFSRtK",
+    "/tmp/orbit-omp-GVZM62",
+    "/tmp/orbit-omp-POnfRG",
+    "/tmp/orbit-omp-UjdHVU",
+    "/tmp/orbit-omp-YHlmiP",
+    "/tmp/orbit-omp-aGhgTv",
+    "/tmp/orbit-omp-kRjcbL",
+    "/tmp/orbit-omp-kwVdDL",
+    "/tmp/orbit-omp-pNWa4P"
+  ],
+  "test_process_probes": [
+    {
+      "pid": 36196,
+      "role_file": "positive-v2-process.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 36120,
+      "role_file": "positive-v2-process.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 36090,
+      "role_file": "positive-v2-process.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 73418,
+      "role_file": "positive-v5-process.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 73185,
+      "role_file": "positive-v5-process.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 73034,
+      "role_file": "positive-v5-process.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 56709,
+      "role_file": "positive-v4-process.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 56670,
+      "role_file": "positive-v4-process.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 56613,
+      "role_file": "positive-v4-process.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 50112,
+      "role_file": "positive-v3-process.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 50057,
+      "role_file": "positive-v3-process.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 50025,
+      "role_file": "positive-v3-process.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 45633,
+      "role_file": "lifecycle-resumed-process.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 45561,
+      "role_file": "lifecycle-resumed-process.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 45527,
+      "role_file": "lifecycle-resumed-process.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 71301,
+      "role_file": "plain-process.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 71254,
+      "role_file": "plain-process.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 71227,
+      "role_file": "plain-process.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 40513,
+      "role_file": "lifecycle-before-esc-process.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 40474,
+      "role_file": "lifecycle-before-esc-process.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 40435,
+      "role_file": "lifecycle-before-esc-process.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 40513,
+      "role_file": "lifecycle-process.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 40474,
+      "role_file": "lifecycle-process.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 40435,
+      "role_file": "lifecycle-process.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 79991,
+      "role_file": "positive-v6-process.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 79952,
+      "role_file": "positive-v6-process.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 79921,
+      "role_file": "positive-v6-process.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 83850,
+      "role_file": "positive-v7-process.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 83811,
+      "role_file": "positive-v7-process.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 83781,
+      "role_file": "positive-v7-process.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 45633,
+      "role_file": "lifecycle-before-live-normal-exit-process.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 45561,
+      "role_file": "lifecycle-before-live-normal-exit-process.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 45527,
+      "role_file": "lifecycle-before-live-normal-exit-process.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 11785,
+      "role_file": "fixtures/positive/.orbit/tasks/e50f56a8-ffb2-4cf3-b513-e73428e0f400/checks/1/run.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 23527,
+      "role_file": "fixtures/positive/.orbit/tasks/e50f56a8-ffb2-4cf3-b513-e73428e0f400/checks/2/run.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 9420,
+      "role_file": "fixtures/negative/.orbit/tasks/741e8b83-0639-4341-ab6c-f21b09ca0d85/checks/1/run.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 10236,
+      "role_file": "fixtures/negative/.orbit/tasks/741e8b83-0639-4341-ab6c-f21b09ca0d85/checks/2/run.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 41344,
+      "role_file": "fixtures/lifecycle/.orbit/tasks/d87c80b3-8b77-4d25-91ed-3a74e7202d54/checks/1/run.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 82822,
+      "role_file": "fixtures/positive-v6/.orbit/tasks/a08ab32d-45a3-4171-8c34-e1c801c301df/checks/1/run.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 86341,
+      "role_file": "fixtures/positive-v7/.orbit/tasks/5dd5b889-7685-4cb9-8c2a-ed0269d3948d/checks/1/run.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 86922,
+      "role_file": "fixtures/positive-v7/.orbit/tasks/5dd5b889-7685-4cb9-8c2a-ed0269d3948d/checks/3/run.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 86637,
+      "role_file": "fixtures/positive-v7/.orbit/tasks/5dd5b889-7685-4cb9-8c2a-ed0269d3948d/checks/2/run.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 43521,
+      "role_file": "fixtures/positive-v2/.orbit/tasks/c5c93e74-4f38-4cf1-b991-0c96a4b4e5e1/checks/1/run.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 68215,
+      "role_file": "fixtures/positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc/checks/1/run.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 70408,
+      "role_file": "fixtures/positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc/checks/4/run.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 69880,
+      "role_file": "fixtures/positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc/checks/3/run.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 68843,
+      "role_file": "fixtures/positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc/checks/2/run.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 70816,
+      "role_file": "fixtures/positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc/checks/5/run.json",
+      "currently_exists": false
+    },
+    {
+      "pid": 2989,
+      "role_file": "integration installer",
+      "currently_exists": false
+    },
+    {
+      "pid": 3039,
+      "role_file": "full regression suite",
+      "currently_exists": false
+    },
+    {
+      "pid": 17295,
+      "role_file": "full suite retry",
+      "currently_exists": false
+    },
+    {
+      "pid": 20972,
+      "role_file": "latest native gate targeted recheck",
+      "currently_exists": false
+    },
+    {
+      "pid": 46014,
+      "role_file": "full-test-final",
+      "currently_exists": false
+    },
+    {
+      "pid": 46015,
+      "role_file": "final-install",
+      "currently_exists": false
+    },
+    {
+      "pid": 54788,
+      "role_file": "candidate-native-gate",
+      "currently_exists": false
+    },
+    {
+      "pid": 54789,
+      "role_file": "candidate-install",
+      "currently_exists": false
+    },
+    {
+      "pid": 69256,
+      "role_file": "operation-native-gate",
+      "currently_exists": false
+    },
+    {
+      "pid": 69257,
+      "role_file": "operation-install",
+      "currently_exists": false
+    },
+    {
+      "pid": 73025,
+      "role_file": "operation guard final full regression",
+      "currently_exists": false
+    }
+  ],
+  "fixed_pids_excluded": [
+    2144,
+    2145,
+    11899,
+    12208,
+    12485,
+    12801,
+    12828,
+    12863,
+    12883,
+    12914,
+    12950,
+    12966,
+    12993,
+    13028,
+    37403,
+    38007,
+    38008
+  ],
+  "excluded_fixed_observation_files": [
+    {
+      "file": "c06-takeover-before-process.json",
+      "pane": "w23:pJ",
+      "reason": "fixed developer pane or not recorded current test pane"
+    }
+  ],
+  "extra_owned_sdk_directory": "/tmp/orbit-c02-sdk-188",
+  "policy": "no process-name batch kill; only current launch pane identities/task connection; initial broad inventory included fixed C06 developer observation and was refused before mutation"
+}

@@ -1,0 +1,41 @@
+[
+  {
+    "session": "/Users/yangke/.omp/agent/sessions/-Personal-omen-orbit/2026-10-10T03-25-10-220Z_01a123d7-d6cc-750d-aa75-4eb4611fcfee.jsonl",
+    "provider": "zhipu-coding-plan",
+    "model": "glm-5.3-flash",
+    "usage": {
+      "input": 9945,
+      "output": 663,
+      "cacheRead": 3584,
+      "cacheWrite": 0,
+      "totalTokens": 14192,
+      "reasoningTokens": 410,
+      "cost": {
+        "input": 0,
+        "output": 0,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "total": 0
+      }
+    }
+  },
+  {
+    "session": "/Users/yangke/.omp/agent/sessions/-Personal-omen-orbit/2026-10-10T03-25-09-608Z_01a123d7-d468-701f-b1d3-682e5e561dfa.jsonl",
+    "provider": "kimi-code",
+    "model": "k3-256k",
+    "usage": {
+      "input": 7810,
+      "output": 252,
+      "cacheRead": 5376,
+      "cacheWrite": 0,
+      "totalTokens": 13438,
+      "cost": {
+        "input": 0.02343,
+        "output": 0.00378,
+        "cacheRead": 0.0016128,
+        "cacheWrite": 0,
+        "total": 0.0288228
+      }
+    }
+  }
+]

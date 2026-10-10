@@ -1,0 +1,13 @@
+{
+  "role": "Root verification of C08 implementation",
+  "command": [
+    "ruby",
+    "--disable-gems",
+    "tests/check_runner_context_test.rb"
+  ],
+  "pid": 79940,
+  "started_at": 1791604275.6091268,
+  "exit_code": 0,
+  "ended_at": 1791604275.670163,
+  "process_exited": true
+}

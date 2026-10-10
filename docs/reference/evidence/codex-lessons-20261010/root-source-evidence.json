@@ -1,0 +1,35 @@
+{
+  "commit": "36ae1561b9324c93d5638b45eb19fe2cc070a581",
+  "files": [
+    {
+      "path": "codex-rs/core/src/agent/child_config.rs",
+      "sha256": "33d4dd6f70e6640af1059398272c48b88e16e0005105fbd1ef13e30456d39a39",
+      "reading": "targeted functions; no Codex build or live run"
+    },
+    {
+      "path": "codex-rs/core/src/agent/control/spawn_guard.rs",
+      "sha256": "610524d0bd240affd8c1f72a31cce20ddfcc328d022a6f7f488f6b232500c1cc",
+      "reading": "targeted functions; no Codex build or live run"
+    },
+    {
+      "path": "codex-rs/core/src/agent/control/completion.rs",
+      "sha256": "1f7a82036f5da1460af1a75c6a139278439bccac0421c0084ba92dd4c830b198",
+      "reading": "targeted functions; no Codex build or live run"
+    },
+    {
+      "path": "codex-rs/core/src/unified_exec/head_tail_buffer.rs",
+      "sha256": "d57aa4118842bee24a896e85af05f01e4ef44760ea2804bc015c8efd7ae89ad5",
+      "reading": "targeted functions; no Codex build or live run"
+    },
+    {
+      "path": "codex-rs/rollout/src/recorder.rs",
+      "sha256": "42a973710d6eb7e6731b3774cdf30dba89f56fd7685cdeac2857825c08b83612",
+      "reading": "targeted functions; no Codex build or live run"
+    },
+    {
+      "path": "codex-rs/protocol/src/error.rs",
+      "sha256": "6e3f1eedd6d70450ecf84b2654707c1107dac0c06b4ed65631bd3251bc59373c",
+      "reading": "targeted functions; no Codex build or live run"
+    }
+  ]
+}

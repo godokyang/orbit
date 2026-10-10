@@ -1,0 +1,27 @@
+{
+  "commit": "36ae1561b9324c93d5638b45eb19fe2cc070a581",
+  "reader": "Root",
+  "at": "2026-10-10T04:46:47.067120+00:00",
+  "files": [
+    {
+      "path": "codex-rs/core/src/session/turn_input.rs",
+      "sha256": "752f93f3a4b9292fe8bd1b3a9a69a52a5f9ab9d39cf0fa1455af41c258f6e9e2",
+      "ranges": [
+        [
+          770,
+          835
+        ]
+      ]
+    },
+    {
+      "path": "codex-rs/core/src/agent/control/runtime.rs",
+      "sha256": "8d12feff4a87c8b593dd878096be82c980f18e6a0d78f60c9ab96777684bd3c4",
+      "ranges": [
+        [
+          250,
+          337
+        ]
+      ]
+    }
+  ]
+}

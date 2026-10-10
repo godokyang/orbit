@@ -577,7 +577,7 @@ try {
 				// receipts/gaps are still recorded as-is below.
 				const providerError = providerErrorFact(last);
 				if (providerError) {
-					evidence.error = { kind: providerError.kind, detail: providerError.detail };
+					evidence.error = { ...providerError };
 					problems.push(`provider error: ${providerError.detail}`);
 				}
 				let result: unknown;

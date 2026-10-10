@@ -1,0 +1,50 @@
+{
+  "reader": "Root",
+  "commit": "36ae1561b9324c93d5638b45eb19fe2cc070a581",
+  "readAt": "2026-10-10T04:02:59.292394+00:00",
+  "files": [
+    {
+      "path": "codex-rs/core/src/tools/orchestrator.rs",
+      "sha256": "2867fc8655b0a1c59e61f9b99c1e316c1759316a353d7bea0e5d84e8faa7a629",
+      "ranges": [
+        [
+          20,
+          85
+        ],
+        [
+          175,
+          265
+        ],
+        [
+          355,
+          405
+        ]
+      ]
+    },
+    {
+      "path": "codex-rs/core/src/tools/sandboxing.rs",
+      "sha256": "1ab6c27e34a93fe3857281e11e388eb3ae4b786819fbe15883ad7e1fb8b5473f",
+      "ranges": [
+        [
+          1,
+          90
+        ],
+        [
+          110,
+          195
+        ]
+      ]
+    },
+    {
+      "path": "codex-rs/core/tests/suite/exec_policy.rs",
+      "sha256": "12c7c3deb9b6b33fd4395b43d44d1d910a09aaf8a0487a94977081318345e5d5",
+      "ranges": [
+        [
+          512,
+          601
+        ]
+      ]
+    }
+  ],
+  "boundary": "Direct source/test reference only; Codex tests not executed, Orbit static first-hop diagnosis is not equivalent to Codex policy/sandbox orchestration."
+}

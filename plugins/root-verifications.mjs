@@ -27,6 +27,7 @@
 // Interrupt replay distinguishes calls that never ran (dropped) from calls
 // already started (kept as interrupted, with unknown exit status).
 
+import { createHash } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -55,6 +56,50 @@ function boundedText(value) {
   return value.length > TEXT_CAP
     ? { text: value.slice(0, TEXT_CAP), truncated: true }
     : { text: value, truncated: false };
+}
+
+// bash/eval OUTPUT uses a dedicated head+tail policy (ticket C01): the head
+// of a log carries the run context and the tail carries the failure summary,
+// so a prefix-only cut loses exactly the evidence an independent check
+// needs. The in-band marker states this layer's visible length with explicit
+// units (UTF-16 code units = JS string length, plus UTF-8 bytes) and the
+// SHA-256 of that visible text; the same facts ride as structured
+// `output_omitted` metadata so a later compression layer never has to parse
+// or re-wrap this marker. Cut points never split a surrogate pair, so the
+// kept text stays valid Unicode. command/script and every other string keep
+// the prefix-only boundedText policy above.
+function boundedLogText(value) {
+  const untrimmed = { text: typeof value === 'string' ? value : null, truncated: false, omitted: null };
+  if (typeof value !== 'string') return untrimmed;
+  if (value.length <= TEXT_CAP) return untrimmed;
+  const sha256 = createHash('sha256').update(value, 'utf8').digest('hex');
+  const bytes = Buffer.byteLength(value, 'utf8');
+  let omitted = value.length;
+  // The marker's own digit count feeds the body budget. Within one digit
+  // count the computation is a constant function, so a round that lands in
+  // the same digit class converges on the spot; between rounds the digit
+  // count strictly shrinks (a surrogate adjustment can bounce it up by one
+  // class exactly once at a power-of-ten boundary, which the next round
+  // settles). Twelve rounds therefore cover every reachable input; anything
+  // else is an invariant violation, never a reason to emit a lossy cut.
+  for (let round = 0; round < 12; round += 1) {
+    const marker = `…[omitted ${omitted} of ${value.length} UTF-16 code units / ${bytes} UTF-8 bytes sha256:${sha256}]`;
+    let head = Math.ceil((TEXT_CAP - marker.length) / 2);
+    let tail = TEXT_CAP - marker.length - head;
+    // Never split a surrogate pair at a cut point.
+    const lastHead = value.charCodeAt(head - 1);
+    if (lastHead >= 0xd800 && lastHead <= 0xdbff) head -= 1;
+    const firstTail = value.charCodeAt(value.length - tail);
+    if (firstTail >= 0xdc00 && firstTail <= 0xdfff) tail -= 1;
+    const next = value.length - head - tail;
+    if (next === omitted) {
+      return { text: value.slice(0, head) + marker + value.slice(value.length - tail), truncated: true,
+               omitted: { omitted_utf16_units: next, visible_utf16_units: value.length,
+                          visible_utf8_bytes: bytes, sha256 } };
+    }
+    omitted = next;
+  }
+  throw new Error('boundedLogText did not converge: marker budget invariant violated');
 }
 
 function resultText(result) {
@@ -173,7 +218,7 @@ export function buildReceipt({ event, start, endBinding, taskDirectory = null, r
   }
   // File tools record NO result body: an edit result can carry the applied
   // patch and a write result its content, so the receipt keeps metadata only.
-  const output = isFileTool ? { text: null, truncated: false } : boundedText(resultText(event.result));
+  const output = isFileTool ? { text: null, truncated: false, omitted: null } : boundedLogText(resultText(event.result));
   const input = boundedText(start?.text ?? null);
   const now = Date.now();
   const receipt = {
@@ -202,6 +247,9 @@ export function buildReceipt({ event, start, endBinding, taskDirectory = null, r
     artifact_digest: endBinding?.artifact_digest ?? null,
     fingerprint_status: endBinding?.fingerprint_status ?? 'unknown',
   };
+  // Capture-layer omission facts travel as structured metadata, so the
+  // check-input compression layer never has to parse or re-wrap the marker.
+  if (output.omitted) receipt.output_omitted = output.omitted;
   if (tool === 'bash') {
     receipt.command = input.text;
     receipt.command_truncated = input.truncated;

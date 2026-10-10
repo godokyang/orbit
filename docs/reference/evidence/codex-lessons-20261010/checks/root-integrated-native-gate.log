@@ -1,0 +1,9 @@
+Orbit: member orbit-7ffc37aa-335a-4f67-9f10-39626b98fca4 model drift at registration (glm/x -> zenmux/x-ai/grok-4.6); drift record: ok; abort confirmed: true
+Orbit orbit-call-90f26e5f-5f18-470f-a018-4076b2b58293: native receipt persistence failed: Expected property name or '}' in JSON at position 1 (line 1 column 2)
+Orbit orbit-call-90f26e5f-5f18-470f-a018-4076b2b58293: native receipt persistence failed: Expected property name or '}' in JSON at position 1 (line 1 column 2)
+Orbit: member orbit-031b2baf-ab00-4988-baaf-c9b9f30be3c4 workspace binding failed: member session cwd could not be set: cwd locked; abort confirmed: true
+Orbit: member orbit-ac493e8b-7650-4da6-a0fc-0de4418eb4f7 model drift at registration (glm/x -> zhipu/other); drift record: ok; abort confirmed: true
+Orbit: member orbit-7f1b421a-654c-4d4d-9ff1-096406c23444 model drift (glm/x -> zhipu/other); drift record: ok; member abort attempted
+Orbit: member orbit-76de266b-896c-4263-b9a5-da4958029a37 refused (registration_failed: exit 1) but refusal record failed: exit 1
+Orbit: member orbit-39e3ea3e-998c-41d6-a1c2-c5e3b267059c workspace binding failed: this OMP runtime cannot set the member session cwd; abort confirmed: true
+omp_native_gate_test: PASS

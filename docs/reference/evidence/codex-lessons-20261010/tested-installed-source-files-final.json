@@ -1,0 +1,595 @@
+{
+  "content_digest": "8906c1877f8ce2c4ec3465e38999d245fe867093f1cc860482ea2f62dfc06c15",
+  "files": [
+    {
+      "file": "README.md",
+      "source_sha256": "3148f9c46e62af553ed44b83569ab779def8ac065094d6a3d6e7d78db63cb147",
+      "installed_sha256": "3148f9c46e62af553ed44b83569ab779def8ac065094d6a3d6e7d78db63cb147",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "contracts/check-result.schema.json",
+      "source_sha256": "f6ebeeab425217be964ee730f8605d23c96cf5acb5c229f4a21423246c5889a2",
+      "installed_sha256": "f6ebeeab425217be964ee730f8605d23c96cf5acb5c229f4a21423246c5889a2",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "contracts/task-runtime.md",
+      "source_sha256": "66741089f75f198ab83b4adc5a7ccb37096dcb79bce660963c5f62a6cb4f3945",
+      "installed_sha256": "66741089f75f198ab83b4adc5a7ccb37096dcb79bce660963c5f62a6cb4f3945",
+      "equal": true,
+      "difference": null,
+      "current_source_sha256": "f98356c3af6d4dac1039361884d39a667cda47b84293fb4d9297b4713c55ff12",
+      "post_test_difference": "documentation only: explicit existing operation field placement and rejection; production modules unchanged"
+    },
+    {
+      "file": "install.sh",
+      "source_sha256": "5dba29935a43ddd6a2ab20ae1b5a3859354f3f054967e09714dacb50b2a8e27d",
+      "installed_sha256": "5dba29935a43ddd6a2ab20ae1b5a3859354f3f054967e09714dacb50b2a8e27d",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/check_runner.rb",
+      "source_sha256": "c8ab253acc15d8387a7a7904c2a24c2a6ab01618b147297192a19093cb76a291",
+      "installed_sha256": "c8ab253acc15d8387a7a7904c2a24c2a6ab01618b147297192a19093cb76a291",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/checker_model_selection.rb",
+      "source_sha256": "c631970c705a965cc68b020bb03ea2327e3a4cad6a8615a9def67260d9e95211",
+      "installed_sha256": "c631970c705a965cc68b020bb03ea2327e3a4cad6a8615a9def67260d9e95211",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/checker_model_selector.rb",
+      "source_sha256": "eec61dfdfc2bd4a219cf8d46f1671cfb04aac770dfb59d57f99a8c489d1e319c",
+      "installed_sha256": "eec61dfdfc2bd4a219cf8d46f1671cfb04aac770dfb59d57f99a8c489d1e319c",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/cli.rb",
+      "source_sha256": "83ecac7a28d815d780569c3b265fc95511e9c8d3552a23da03639c759b6025d2",
+      "installed_sha256": "83ecac7a28d815d780569c3b265fc95511e9c8d3552a23da03639c759b6025d2",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/connection.rb",
+      "source_sha256": "98720f7e8d33660091e1ebada8716682d233c6cc3fea412cb41eb292da0e13ca",
+      "installed_sha256": "98720f7e8d33660091e1ebada8716682d233c6cc3fea412cb41eb292da0e13ca",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/data/jev-entry-calibration.json",
+      "source_sha256": "d2f81ebab8c747024759ed20a4948e32595b653c174ead98f23dc3b5f063e632",
+      "installed_sha256": "d2f81ebab8c747024759ed20a4948e32595b653c174ead98f23dc3b5f063e632",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/data/jev-selection-calibration.json",
+      "source_sha256": "1d1ffdbe8e2679ac946cab52f6a01247f2f9bc2969721dd3aefede389f2bce6c",
+      "installed_sha256": "1d1ffdbe8e2679ac946cab52f6a01247f2f9bc2969721dd3aefede389f2bce6c",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/data/openrouter-model-map.json",
+      "source_sha256": "50d0fac49eb0726f54ce8cf971e06acc4ac958c1c780056788770240d5ec52f0",
+      "installed_sha256": "50d0fac49eb0726f54ce8cf971e06acc4ac958c1c780056788770240d5ec52f0",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/diagnostics.rb",
+      "source_sha256": "09f34fd31f27de3a79b07b7224e30bcb997e0a4263cf3c1b870d0c8273055616",
+      "installed_sha256": "09f34fd31f27de3a79b07b7224e30bcb997e0a4263cf3c1b870d0c8273055616",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/git_remote_evidence.rb",
+      "source_sha256": "746381166c25973b8d7e266bd2dcf48e24562a4352b2086d866699723bbf9dd9",
+      "installed_sha256": "746381166c25973b8d7e266bd2dcf48e24562a4352b2086d866699723bbf9dd9",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/jev_advisor.rb",
+      "source_sha256": "1a404f258c8c89cf2f0bd490b67982904eef9b27e67d9bb5b879fef549c38a6c",
+      "installed_sha256": "1a404f258c8c89cf2f0bd490b67982904eef9b27e67d9bb5b879fef549c38a6c",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/jev_setup.rb",
+      "source_sha256": "3b7953b2944733d4fe19909f16f62f43dc430ef28b6cd76ac13b9a3dd86e2277",
+      "installed_sha256": "3b7953b2944733d4fe19909f16f62f43dc430ef28b6cd76ac13b9a3dd86e2277",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/judgment.rb",
+      "source_sha256": "bafc6f8582d6f2d2152dfaff399b5084b12d1c630ea8427ff556f9d85d3f626f",
+      "installed_sha256": "bafc6f8582d6f2d2152dfaff399b5084b12d1c630ea8427ff556f9d85d3f626f",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/member_model_selector.rb",
+      "source_sha256": "f8bb49d9fd8aac9ed2db537c6df3a217134d53de2b83553f7ea6cf7de7443133",
+      "installed_sha256": "f8bb49d9fd8aac9ed2db537c6df3a217134d53de2b83553f7ea6cf7de7443133",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/model_candidate_pool.rb",
+      "source_sha256": "d2b6cf82dc0b3c1efb2b9fd23816ee203d114a1dcd9e9a27ef1fdcbd6b20b70c",
+      "installed_sha256": "d2b6cf82dc0b3c1efb2b9fd23816ee203d114a1dcd9e9a27ef1fdcbd6b20b70c",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/model_capability_facts.rb",
+      "source_sha256": "6b713c016b18f8470caa92c16ce324b3219666a46f98b8785ac817a0df33fcfa",
+      "installed_sha256": "6b713c016b18f8470caa92c16ce324b3219666a46f98b8785ac817a0df33fcfa",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/model_evidence_cache.rb",
+      "source_sha256": "3a17029d5cfa4ebdaa240b24b4ada9616c6bf01adc16b289e9426c302bf15379",
+      "installed_sha256": "3a17029d5cfa4ebdaa240b24b4ada9616c6bf01adc16b289e9426c302bf15379",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/model_quality_policy.rb",
+      "source_sha256": "174d3ac37d6e38684df2e93186302209fd0873421fa4795b6d4bbf4a19945807",
+      "installed_sha256": "174d3ac37d6e38684df2e93186302209fd0873421fa4795b6d4bbf4a19945807",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/observation_key.rb",
+      "source_sha256": "6fe604445dfabd0f3aa6139f6b0ea28b364edeb16593d2b52625660bf5d52b5e",
+      "installed_sha256": "6fe604445dfabd0f3aa6139f6b0ea28b364edeb16593d2b52625660bf5d52b5e",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/omp_check_runner.rb",
+      "source_sha256": "8d05714bbb569ab90e7a81f5c7b7366f13fa2ddfc185692bb72e6499a5f26170",
+      "installed_sha256": "8d05714bbb569ab90e7a81f5c7b7366f13fa2ddfc185692bb72e6499a5f26170",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/omp_entry.rb",
+      "source_sha256": "012418ac5a8025cff238109e51bc6329349c35437cb0409bed340afabd50a881",
+      "installed_sha256": "012418ac5a8025cff238109e51bc6329349c35437cb0409bed340afabd50a881",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/openrouter_model_overview.rb",
+      "source_sha256": "f042fc4f15e6d36714a8ea8f96c26c701d5b5fa0b5a492e8e4e407fd65bb25dd",
+      "installed_sha256": "f042fc4f15e6d36714a8ea8f96c26c701d5b5fa0b5a492e8e4e407fd65bb25dd",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/openrouter_setup.rb",
+      "source_sha256": "72c9ec31b563a9bb37dcb6c96581dd12e863784cfc03683459e27705ba87435f",
+      "installed_sha256": "72c9ec31b563a9bb37dcb6c96581dd12e863784cfc03683459e27705ba87435f",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/plugin_connection.rb",
+      "source_sha256": "86cc01a5ea2113ec9ec30700c102aed464a0fdb3f6f3191d7ad57e8886f5a752",
+      "installed_sha256": "86cc01a5ea2113ec9ec30700c102aed464a0fdb3f6f3191d7ad57e8886f5a752",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/prestart.rb",
+      "source_sha256": "610e25f3232b80bbc58c97fe422eeb8c976df4f1944591818c24338d733e24ff",
+      "installed_sha256": "610e25f3232b80bbc58c97fe422eeb8c976df4f1944591818c24338d733e24ff",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/release_lease.rb",
+      "source_sha256": "0b1f85d454cf55029aed22585e38e63be41743321c7c485c138847609986d9d3",
+      "installed_sha256": "0b1f85d454cf55029aed22585e38e63be41743321c7c485c138847609986d9d3",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/requirement_coverage.rb",
+      "source_sha256": "edbf00df7b453b5af762a6b832ce068769f384761f006971d72a63c61d65a5f8",
+      "installed_sha256": "edbf00df7b453b5af762a6b832ce068769f384761f006971d72a63c61d65a5f8",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/resource_call_ledger.rb",
+      "source_sha256": "af301aac47563611e835efd2d91c149936bfd90abdb259019b5dd61176a8e790",
+      "installed_sha256": "af301aac47563611e835efd2d91c149936bfd90abdb259019b5dd61176a8e790",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/route_cost_inputs.rb",
+      "source_sha256": "9192c5d0d90b2b5cdecd76ea10d5931fc78710e072789be591697578cdeb4e4d",
+      "installed_sha256": "9192c5d0d90b2b5cdecd76ea10d5931fc78710e072789be591697578cdeb4e4d",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/route_resource_facts.rb",
+      "source_sha256": "feb34a3dc6f68706ff985a8a207f89ca112403f183b21474f966bf07a0f77c0f",
+      "installed_sha256": "feb34a3dc6f68706ff985a8a207f89ca112403f183b21474f966bf07a0f77c0f",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/route_resource_store.rb",
+      "source_sha256": "7ab27203e75ca48dc913e8d931525bc98c5ec1f1e8cae48ded57f4dedee996fb",
+      "installed_sha256": "7ab27203e75ca48dc913e8d931525bc98c5ec1f1e8cae48ded57f4dedee996fb",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/session_summary.rb",
+      "source_sha256": "43800d1def614eee8d1bbb75440c626d74fa3b1be861f9a4a9c8f970f6b3668a",
+      "installed_sha256": "43800d1def614eee8d1bbb75440c626d74fa3b1be861f9a4a9c8f970f6b3668a",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/task_evidence.rb",
+      "source_sha256": "b8a6a4bd78e866a2200230e21ea0dc7a2b30bb7726d388cf7272a9546da434b1",
+      "installed_sha256": "b8a6a4bd78e866a2200230e21ea0dc7a2b30bb7726d388cf7272a9546da434b1",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/task_git_evidence.rb",
+      "source_sha256": "f5861e5f4eaa56dea94ef0d65d181c3a7234d074ef938b45a2f752e75ec6aea3",
+      "installed_sha256": "f5861e5f4eaa56dea94ef0d65d181c3a7234d074ef938b45a2f752e75ec6aea3",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/task_record.rb",
+      "source_sha256": "16dde54a9ebf7054a9ddf9e937b385a902b054c5ec04774489d281850a811438",
+      "installed_sha256": "16dde54a9ebf7054a9ddf9e937b385a902b054c5ec04774489d281850a811438",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/task_runtime.rb",
+      "source_sha256": "bb89c7be8867e2872e81f31aa3da2043e5e71baa67a991e45c357115c66e101b",
+      "installed_sha256": "bb89c7be8867e2872e81f31aa3da2043e5e71baa67a991e45c357115c66e101b",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/task_view.rb",
+      "source_sha256": "c86ec69bb50a1412a6946f3fdd9672834e3fa707b70fa624c7216e5ac7bb1059",
+      "installed_sha256": "c86ec69bb50a1412a6946f3fdd9672834e3fa707b70fa624c7216e5ac7bb1059",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/type_safe_judgment.rb",
+      "source_sha256": "ed8a11b708c309b6d18b73203f137f57b83b359709fc8b2f8d3ddd0a9a1c2dc3",
+      "installed_sha256": "ed8a11b708c309b6d18b73203f137f57b83b359709fc8b2f8d3ddd0a9a1c2dc3",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/version.rb",
+      "source_sha256": "166b3544214b5aac0f36de7f0246d48bbdee9906579a0c9410a19c8909bb97df",
+      "installed_sha256": "166b3544214b5aac0f36de7f0246d48bbdee9906579a0c9410a19c8909bb97df",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/work_unit.rb",
+      "source_sha256": "ad50849b3b6683f59c3d0433c5a719fe6d85e4c6221d096dbf03265f1a87d00f",
+      "installed_sha256": "ad50849b3b6683f59c3d0433c5a719fe6d85e4c6221d096dbf03265f1a87d00f",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/workspace_binding.rb",
+      "source_sha256": "067f323bb6c2c771dfb22477dd36ae7654d236226ea33a2091c7b84bf11370da",
+      "installed_sha256": "067f323bb6c2c771dfb22477dd36ae7654d236226ea33a2091c7b84bf11370da",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "lib/orbit/workspace_snapshot.rb",
+      "source_sha256": "d35463136f1bde90a4e65df817451dc1b7fef9aa16cc9cb72f015ab7cf89e2fc",
+      "installed_sha256": "d35463136f1bde90a4e65df817451dc1b7fef9aa16cc9cb72f015ab7cf89e2fc",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "npm-shrinkwrap.json",
+      "source_sha256": "95116f06e45edd2f24b4c4cafa4c3562b12e475bff5a5a37fdaa82ffeaf293fb",
+      "installed_sha256": "95116f06e45edd2f24b4c4cafa4c3562b12e475bff5a5a37fdaa82ffeaf293fb",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "package.json",
+      "source_sha256": "e5bf580a28b46a1a5c3900f80acb9c1d323a0f0fe63bb49198e4d17a7b12d847",
+      "installed_sha256": "e5bf580a28b46a1a5c3900f80acb9c1d323a0f0fe63bb49198e4d17a7b12d847",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "plugins/host.mjs",
+      "source_sha256": "180db3dec88a6811a4f8f79183bfa57b067bcbfce141895fa0c9dfa1a2901a1c",
+      "installed_sha256": "180db3dec88a6811a4f8f79183bfa57b067bcbfce141895fa0c9dfa1a2901a1c",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "plugins/lease.mjs",
+      "source_sha256": "d141cfe84ebf99c7585f6d5a3b8db3d5b390980f6f96f85ffffbf3232e60a1ff",
+      "installed_sha256": "d141cfe84ebf99c7585f6d5a3b8db3d5b390980f6f96f85ffffbf3232e60a1ff",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "plugins/model-call-receipts.d.mts",
+      "source_sha256": "cd1b7f1f84561b39cbeb496b675fb873c4ff5468b29feaccfa2e76e417a11b48",
+      "installed_sha256": "cd1b7f1f84561b39cbeb496b675fb873c4ff5468b29feaccfa2e76e417a11b48",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "plugins/model-call-receipts.mjs",
+      "source_sha256": "63ee862715e9149d2b19a08b9a48f27f0504564e492c9a2b568803723323f4d7",
+      "installed_sha256": "63ee862715e9149d2b19a08b9a48f27f0504564e492c9a2b568803723323f4d7",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "plugins/native-call-recorder.mjs",
+      "source_sha256": "47f2e3f2ff46b6f9e0e7ff7201f277bdad5b83a89f380b96fb8968a737349541",
+      "installed_sha256": "47f2e3f2ff46b6f9e0e7ff7201f277bdad5b83a89f380b96fb8968a737349541",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "plugins/native-task-preflight.mjs",
+      "source_sha256": "46790094e41896d74efa05c1bd4aef736474b2996eaac2c554a3af41a8b5855e",
+      "installed_sha256": "46790094e41896d74efa05c1bd4aef736474b2996eaac2c554a3af41a8b5855e",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "plugins/omp-host.mjs",
+      "source_sha256": "d27afbe87ff1b782d6af75b0b23632380db92391f3e41849416add9c4bb067e3",
+      "installed_sha256": "d27afbe87ff1b782d6af75b0b23632380db92391f3e41849416add9c4bb067e3",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "plugins/omp-idle-parking.yml",
+      "source_sha256": "09c0d9c45702088cb0e8b6d7c51a2a9de212112c0ad6400e7a52b6bf3282a62a",
+      "installed_sha256": "09c0d9c45702088cb0e8b6d7c51a2a9de212112c0ad6400e7a52b6bf3282a62a",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "plugins/omp.mjs",
+      "source_sha256": "0085d84d03b84b24dd567d9f785d778b018f237c3025c600f5116de36d61aad0",
+      "installed_sha256": "0085d84d03b84b24dd567d9f785d778b018f237c3025c600f5116de36d61aad0",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "plugins/root-verifications.mjs",
+      "source_sha256": "09943686911e13d1e7be5de211a801c23032adc1a01a25b060e7f5de1717b1f1",
+      "installed_sha256": "09943686911e13d1e7be5de211a801c23032adc1a01a25b060e7f5de1717b1f1",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "plugins/work-unit-scope.mjs",
+      "source_sha256": "873bc801f1c7a8946cb2abae1c49b16d371d76c9925df5748a126ddf87fecfb1",
+      "installed_sha256": "873bc801f1c7a8946cb2abae1c49b16d371d76c9925df5748a126ddf87fecfb1",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "runners/omp-reviewer/bun.lock",
+      "source_sha256": "fdabc4b1c63e452787e2b3c3a64c5dec0e94a2c963cc07e3a8aa9bbd01911592",
+      "installed_sha256": "f835fe595911f17fa0ba5fe58c0a8662e3ca7fe50548b763491a610c8b697ec2",
+      "equal": false,
+      "difference": "supported installer SDK package/lock transform"
+    },
+    {
+      "file": "runners/omp-reviewer/check-result.test.ts",
+      "source_sha256": "bf387ed2cdf032a5ec5d31f4a0db0dbc17943a2f8b6545dc403c61559bee4e9c",
+      "installed_sha256": "bf387ed2cdf032a5ec5d31f4a0db0dbc17943a2f8b6545dc403c61559bee4e9c",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "runners/omp-reviewer/check-result.ts",
+      "source_sha256": "b6a09c1031e14ecc57c10494e0588c5a5814975b15f18e5aff5bcaedfe70d0bb",
+      "installed_sha256": "b6a09c1031e14ecc57c10494e0588c5a5814975b15f18e5aff5bcaedfe70d0bb",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "runners/omp-reviewer/confine-escape-test.ts",
+      "source_sha256": "b9330bb543e1493f4230bd73835f8cd0bb863a29ff7f649d7b157d20b82c3eee",
+      "installed_sha256": "b9330bb543e1493f4230bd73835f8cd0bb863a29ff7f649d7b157d20b82c3eee",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "runners/omp-reviewer/confined-tools.test.ts",
+      "source_sha256": "67b36aad95a9289fef4c2542804cd9bdf80a82471d2b77afb5c5fe874682ff57",
+      "installed_sha256": "67b36aad95a9289fef4c2542804cd9bdf80a82471d2b77afb5c5fe874682ff57",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "runners/omp-reviewer/confined-tools.ts",
+      "source_sha256": "2bfd9725200a2e76bbf95c80d4767bc0b990659b2763f78498e5788c62297345",
+      "installed_sha256": "2bfd9725200a2e76bbf95c80d4767bc0b990659b2763f78498e5788c62297345",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "runners/omp-reviewer/json-recovery.test.ts",
+      "source_sha256": "0b07f808edc4e40728c9c16536eac75a2f693ddc7ef33feb44c1f72211a339b5",
+      "installed_sha256": "0b07f808edc4e40728c9c16536eac75a2f693ddc7ef33feb44c1f72211a339b5",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "runners/omp-reviewer/json-recovery.ts",
+      "source_sha256": "2a532379e1220626cd2b9311e7a3c7f916a817d369f3d485ea16e591221a1dcb",
+      "installed_sha256": "2a532379e1220626cd2b9311e7a3c7f916a817d369f3d485ea16e591221a1dcb",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "runners/omp-reviewer/model-probe.test.ts",
+      "source_sha256": "875c98cb721169fa7045a122067825eea0fc5f5d8212bf12afad2d0a29bf4a63",
+      "installed_sha256": "875c98cb721169fa7045a122067825eea0fc5f5d8212bf12afad2d0a29bf4a63",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "runners/omp-reviewer/model-probe.ts",
+      "source_sha256": "abfc353b06aa655e63fb314d7f9609f807e31240379a8c1412514646f1851358",
+      "installed_sha256": "abfc353b06aa655e63fb314d7f9609f807e31240379a8c1412514646f1851358",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "runners/omp-reviewer/package.json",
+      "source_sha256": "8bb71ad3ea11fd22e928bb750d8dbfe7cb0cbdb79f43091db8e8202cc9cf5b3e",
+      "installed_sha256": "098d5e142608183e456889ba290d48635283d27f63b4ba5c7ee99db0e8fac6ad",
+      "equal": false,
+      "difference": "supported installer SDK package/lock transform"
+    },
+    {
+      "file": "runners/omp-reviewer/provider-error.test.ts",
+      "source_sha256": "730b88b5ec5a5208411c8d5e4b7887fc6e61dfba1310efd4fcff95d72297a36e",
+      "installed_sha256": "730b88b5ec5a5208411c8d5e4b7887fc6e61dfba1310efd4fcff95d72297a36e",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "runners/omp-reviewer/provider-error.ts",
+      "source_sha256": "5b171363ff17023f799e3ef61b82b44d18da76a7dfb86ba1cade1c1d8fb37727",
+      "installed_sha256": "5b171363ff17023f799e3ef61b82b44d18da76a7dfb86ba1cade1c1d8fb37727",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "runners/omp-reviewer/reviewer-session-escape-test.ts",
+      "source_sha256": "ca0939236f3462f0504e8a48da3d05fa9e0c45636321be0637b9e5b36e76875f",
+      "installed_sha256": "ca0939236f3462f0504e8a48da3d05fa9e0c45636321be0637b9e5b36e76875f",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "runners/omp-reviewer/reviewer.ts",
+      "source_sha256": "c784d890a03c1d0a035835eda8e8df7f9d10955530aa4a7933a10c15f2fdec44",
+      "installed_sha256": "c784d890a03c1d0a035835eda8e8df7f9d10955530aa4a7933a10c15f2fdec44",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "runners/omp-reviewer/usage-receipt.test.ts",
+      "source_sha256": "37c60f93713a1837682d927498f9059e775e47adda76d45c7ee6a7f3a8950171",
+      "installed_sha256": "37c60f93713a1837682d927498f9059e775e47adda76d45c7ee6a7f3a8950171",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "runners/omp-reviewer/usage-receipt.ts",
+      "source_sha256": "04e92d4a2e189d153f0ce218d8733edde06ae3858720d5dbb2739267d1f85b2f",
+      "installed_sha256": "04e92d4a2e189d153f0ce218d8733edde06ae3858720d5dbb2739267d1f85b2f",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "scripts/check-version.rb",
+      "source_sha256": "7c70b25c38cbe6ce998cce4dfb04f9403098b7cbc46384c19e29c35c2e405804",
+      "installed_sha256": "7c70b25c38cbe6ce998cce4dfb04f9403098b7cbc46384c19e29c35c2e405804",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "scripts/manage-install.rb",
+      "source_sha256": "e42124bcf43cbf47931906a8623ca7a45798c439d35993216284510143489d3b",
+      "installed_sha256": "e42124bcf43cbf47931906a8623ca7a45798c439d35993216284510143489d3b",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "scripts/orbit",
+      "source_sha256": "4dbadd9f67849955275d9c558418628051279691c813f5f22eb1e832505c2a47",
+      "installed_sha256": "4dbadd9f67849955275d9c558418628051279691c813f5f22eb1e832505c2a47",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "scripts/orbit-register-member",
+      "source_sha256": "e04ba85ce91eb9798f23e149274ee231cfa35c744b3f559b09f67b37c796faa3",
+      "installed_sha256": "e04ba85ce91eb9798f23e149274ee231cfa35c744b3f559b09f67b37c796faa3",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "scripts/orbit-root-binding",
+      "source_sha256": "cdb3695dbe1d205c32b44862991964706ac9973edca9f71ce06cae9c741f292a",
+      "installed_sha256": "cdb3695dbe1d205c32b44862991964706ac9973edca9f71ce06cae9c741f292a",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "scripts/orbit-route-resources",
+      "source_sha256": "aef93a10c2245fcfb8e21f9b615734a6663c4774ac3b5d29594177caf5075add",
+      "installed_sha256": "aef93a10c2245fcfb8e21f9b615734a6663c4774ac3b5d29594177caf5075add",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "scripts/orbit-work-unit",
+      "source_sha256": "9f95c056860b6886a6a3f0d2d857f85e0111b5b09ec7bf6afb13bcc710c7a1e7",
+      "installed_sha256": "9f95c056860b6886a6a3f0d2d857f85e0111b5b09ec7bf6afb13bcc710c7a1e7",
+      "equal": true,
+      "difference": null
+    },
+    {
+      "file": "uninstall.sh",
+      "source_sha256": "d7dbf36c2a82997b58184ee43590c8f7a39310592f43e05a5435455cde38af08",
+      "installed_sha256": "d7dbf36c2a82997b58184ee43590c8f7a39310592f43e05a5435455cde38af08",
+      "equal": true,
+      "difference": null
+    }
+  ]
+}

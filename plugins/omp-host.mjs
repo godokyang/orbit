@@ -8,6 +8,7 @@ import { createOrbitHost, toolArgs, toolDescription } from './host.mjs';
 import { captureStart, buildReceipt, appendReceipt, readReceipts, CAPTURED_TOOLS } from './root-verifications.mjs';
 import { validateMemberTool, validateWorkUnitPreflight, createEditProjection } from './work-unit-scope.mjs';
 import { observeNativeCalls, flushNativeCalls } from './native-call-recorder.mjs';
+import { validateNativeTaskTools, workUnitOperationError } from './native-task-preflight.mjs';
 
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
 const textOf = content => typeof content === 'string' ? content : (content || []).filter(p => p.type === 'text').map(p => p.text).join('\n');
@@ -240,7 +241,7 @@ const collabDroppedByTask = new Map(); // task_dir -> count of dropped oldest ev
 function collabWriterFor(taskDir) {
   let writer = collabWriters.get(taskDir);
   if (!writer) {
-    writer = { handle: null, queue: Promise.resolve(), seq: 0, lost: null, prepared: false };
+    writer = { handle: null, queue: Promise.resolve(), seq: 0, lost: null, prepared: false, observed: 0, failed: 0, gaps: 0, lastError: null };
     collabWriters.set(taskDir, writer);
   }
   return writer;
@@ -324,6 +325,7 @@ async function drainCollab(writer, taskDir, line, onGap) {
       const gapSeq = writer.seq + 1;
       await collabWriteLine(writer, taskDir, collabGapLine(writer.lost, taskDir, Date.now(), gapSeq));
       writer.seq = gapSeq;
+      writer.gaps += 1;
       writer.lost = null;
     }
     line.seq = writer.seq + 1;
@@ -331,6 +333,8 @@ async function drainCollab(writer, taskDir, line, onGap) {
     writer.seq = line.seq;
   } catch (error) {
     const reason = `collaboration.jsonl append failed: ${String(error?.message || error).slice(0, 200)}`;
+    writer.failed += 1;
+    writer.lastError = reason;
     if (writer.lost) {
       writer.lost.count += 1;
       writer.lost.last_at = Date.now();
@@ -345,7 +349,34 @@ async function drainCollab(writer, taskDir, line, onGap) {
 // Fire-and-forget durable append.
 function persistCollabLine(taskDir, line, onGap) {
   const writer = collabWriterFor(taskDir);
-  writer.queue = writer.queue.then(() => drainCollab(writer, taskDir, line, onGap));
+  const cutoff = ++writer.observed;
+  writer.queue = writer.queue.then(async () => {
+    await drainCollab(writer, taskDir, line, onGap);
+    return { task_dir: taskDir, scope: 'current process observations through cutoff; append completion, not fsync',
+      observed_through: cutoff, written_seq: writer.seq, failed_observations: writer.failed,
+      recorded_gaps: writer.gaps, pending_gap: writer.lost ? { ...writer.lost } : null,
+      last_error: writer.lastError,
+      status: writer.failed || writer.gaps || writer.lost ? 'written_with_gaps' : 'written' };
+  });
+}
+
+// Capture the queue itself, not a moving "all events" promise. Later events
+// belong to a later cutoff. Cancellation already happened before this read;
+// a slow or broken evidence sink must never decide execution stop success.
+async function collabCheckpoint(taskDir) {
+  const writer = taskDir && collabWriters.get(taskDir);
+  if (!writer) return { task_dir: taskDir ?? null, status: 'unobserved', observed_through: null, written_seq: null };
+  const queue = writer.queue, cutoff = writer.observed;
+  let timer;
+  try {
+    return await Promise.race([queue, new Promise(resolve => {
+      timer = setTimeout(() => resolve({ task_dir: taskDir, status: 'unconfirmed', observed_through: cutoff,
+        written_seq: null, reason: 'append checkpoint did not settle; later observations are outside this cutoff' }), 1000);
+    })]);
+  } catch (error) {
+    return { task_dir: taskDir, status: 'unconfirmed', observed_through: cutoff, written_seq: null,
+      reason: String(error?.message || error).slice(0, 200) };
+  } finally { clearTimeout(timer); }
 }
 
 // Process-level shutdown only (never on child dispose or session switch):
@@ -657,8 +688,13 @@ function appendToMessagesPayload(payload, text) {
     return content.some(part => part && typeof part === 'object' && typeof part.type === 'string')
       ? { type: 'text', text } : null;
   };
-  let message;
+  // A user tail merges in place; any other tail (assistant text, OpenAI tool
+  // results, bedrock blocks) keeps EVERY existing message and appends a new
+  // user message — replacing the tail would drop tool results and break the
+  // provider's tool-call pairing. The assistant tool_use gate above stays
+  // fail-closed: that tail still waits for its own results.
   if (last.role === 'user') {
+    let message;
     if (typeof last.content === 'string') {
       message = { ...last, content: last.content ? `${last.content}\n\n${text}` : text };
     } else if (Array.isArray(last.content) && last.content.length > 0) {
@@ -666,14 +702,15 @@ function appendToMessagesPayload(payload, text) {
       if (!block) return null;
       message = { ...last, content: [...last.content, block] };
     } else return null;
-  } else if (typeof last.content === 'string') {
-    message = { role: 'user', content: text };
-  } else if (Array.isArray(last.content) && last.content.length > 0) {
+    return { ...payload, messages: [...messages.slice(0, -1), message] };
+  }
+  if (typeof last.content === 'string') return { ...payload, messages: [...messages, { role: 'user', content: text }] };
+  if (Array.isArray(last.content) && last.content.length > 0) {
     const block = blockFor(last.content);
     if (!block) return null;
-    message = { role: 'user', content: [block] };
-  } else return null;
-  return { ...payload, messages: [...messages.slice(0, -1), message] };
+    return { ...payload, messages: [...messages, { role: 'user', content: [block] }] };
+  }
+  return null;
 }
 
 // The SDK is supplied by OMP itself, including in its standalone binary.
@@ -1641,6 +1678,105 @@ export function installOmpExtension(pi, sdk) {
     if (bootstrap) bootstrapSent.add(taskDir);
     return { payload: injected, bootstrap: Boolean(bootstrap) };
   }
+  // ---- controlled-task goal projection (provider payload) -----------------
+  // The durable record's CURRENT goal — original requirement plus every valid
+  // amendment — must reach the model in the request it actually answers:
+  // ordinary turns, amend turns, custom-message wakes (deliverCustomMessage
+  // never runs before_agent_start), post-compaction and resumed sessions. The
+  // system-prompt status block cannot cover those windows, so the projection
+  // rides the extensible provider payload and is re-derived from the durable
+  // record on EVERY request (never the session's possibly-compacted memory).
+  // Full text, not a prefix: a truncated goal would silently narrow the
+  // authorization. An unreadable original is an explicit omission with the
+  // recovery action — never passed off as the complete goal.
+  const GOAL_MARKER = '[orbit-goal]';
+  const goalProjectionRecorded = new Set(); // `${taskDir}:${projectionSha256}:${model}`
+  // Every projection component (instruction / amendments / basis documents /
+  // the continuation source) is read in FULL from the durable record. A
+  // component that cannot be read is an explicit omission: it stays a valid
+  // authorization fact, the header stops claiming completeness, and the block
+  // names the recovery action instead of letting Root continue on fragments.
+  async function goalProjectionText(bound) {
+    const taskDir = bound.taskDir;
+    const state = bound.state ?? {};
+    const hash = buffer => createHash('sha256').update(buffer).digest('hex');
+    const readPart = async (rel, label, source) => {
+      try {
+        if (typeof rel !== 'string' || !rel) throw new Error('missing path');
+        const content = await fs.readFile(path.join(taskDir, rel));
+        return { line: `${label}（来源 ${source}，sha256:${hash(content)}，${content.length} 字节，完整原文）：\n${content.toString('utf8')}` };
+      } catch (error) {
+        return { failed: true,
+          line: `${label}（来源 ${source}）：无法读取 ${rel ?? 'unknown'}（${String(error?.message || error)}）——` +
+            '该部分仍是有效授权事实，未完整投影前不能按缺失片段继续；先恢复原件可读并核对当前约束。' };
+      }
+    };
+    const sourceLabel = source => typeof source === 'string' && source ? source : `${source?.kind ?? 'unknown'}/${source?.id ?? 'unknown'}`;
+    const failures = [];
+    const lines = [`${GOAL_MARKER} 当前受控任务目标（程序来源，取自任务记录 ${taskDir}）：`];
+    const instruction = await readPart('instruction.txt', '原要求', sourceLabel(state.instruction_source));
+    if (instruction.failed) failures.push('原要求');
+    lines.push(instruction.line);
+    const amendments = Array.isArray(state.amendments) ? state.amendments : [];
+    if (amendments.length) {
+      lines.push(`有效修订 ${amendments.length} 条（检查与通知以最新版本为准）：`);
+      for (const [index, amendment] of amendments.entries()) {
+        const part = await readPart(amendment?.path, `修订${index + 1}`, sourceLabel(amendment?.source));
+        if (part.failed) failures.push(`修订${index + 1}`);
+        lines.push(part.line);
+      }
+    } else lines.push('当前无有效修订。');
+    const basis = Array.isArray(state.basis) ? state.basis : [];
+    if (basis.length) {
+      lines.push(`指定依据 ${basis.length} 条（承载用户约束时同样必须完整遵守）：`);
+      for (const [index, item] of basis.entries()) {
+        const part = await readPart(item?.path, `依据${index + 1}`, sourceLabel(item?.source ?? item));
+        if (part.failed) failures.push(`依据${index + 1}`);
+        lines.push(part.line);
+      }
+    }
+    const continuation = state.continuation && typeof state.continuation === 'object' ? state.continuation : null;
+    if (continuation) {
+      const part = await readPart(continuation.message_path, '续接来源消息', sourceLabel(continuation.source));
+      if (part.failed) failures.push('续接来源消息');
+      lines.push(part.line);
+    }
+    if (failures.length)
+      lines.splice(1, 0, `目标投影不完整：${failures.join('、')} 无法读取；缺失部分仍是有效授权事实，` +
+        '未完整投影前不能按缺失片段缩小或继续，先恢复原件可读并核对当前约束。');
+    else
+      lines.splice(1, 0, '以下为完整原文与全部有效修订/依据，不是摘要或前缀。');
+    lines.push('授权边界：用户明确暂停、先讨论或取消优先于本目标；独立问题只回答。交付完成必须经当前版本的独立终检与真实停止门；' +
+      '口头继续、状态重述、工具/消息/TODO 数量都不是有价值进展或交付；真实在途等待须指向此刻确认存活的具体句柄。');
+    return { text: lines.join('\n') };
+  }
+  // Record the first append of each projection version under each ACTUAL
+  // model and channel (a resume or model switch with the same goal records
+  // again). The fact names source, the real input_digest (from the read-only
+  // orbit-root-binding helper, never a JS re-implementation), projection
+  // bytes and hash — never the raw payload. Later requests re-derive the
+  // projection from the durable record and are not individually recorded.
+  function recordGoalProjection(bound, sessionId, ctx, text, channel) {
+    const sha = createHash('sha256').update(text).digest('hex');
+    const model = ctx?.model ? `${ctx.model.provider}/${ctx.model.id}` : null;
+    const key = `${bound.taskDir}:${sha}:${model}:${channel}`;
+    if (goalProjectionRecorded.has(key)) return;
+    goalProjectionRecorded.add(key);
+    const binding = readRootBinding(bound.taskDir, { fingerprint: false });
+    recordCollabFor(bound.taskDir, {
+      kind: 'goal_projection', at: Date.now(),
+      session_id: sessionId, agent_id: sdk.MAIN_AGENT_ID,
+      task_id: bound.state?.id ?? null,
+      model, channel,
+      instruction_source: bound.state?.instruction_source ?? null,
+      input_digest: binding?.input_digest ?? null,
+      input_digest_status: binding?.input_digest ? 'ok' : 'unknown',
+      projection_bytes: Buffer.byteLength(text), projection_sha256: `sha256:${sha}`,
+      delivered_claim: 'first append of this projection version under this actual model and channel in this process; ' +
+        'every request re-derives the projection from the durable record (later appends are not individually recorded); ' +
+        'no server receipt and no model-compliance claim',
+    });
+  }
   // ---- controlled-Root cooperation policy (system layer) -------------------
   // The native system prompt of a "restrained" model tells Root to keep work
   // inline ("NEVER delegate one slice"; fan out only for "2+ independent
@@ -2042,7 +2178,7 @@ export function installOmpExtension(pi, sdk) {
       }
     }
     const last = branch[lastIndex];
-    const busy = session.isStreaming || session.isCompacting || session.isBashRunning || session.isEvalRunning || session.hasPendingAsyncWork() || entry.pending > 0;
+    const busy = session.hasAdmittedSubmission === true || session.isStreaming || session.isCompacting || session.isBashRunning || session.isEvalRunning || session.hasPendingAsyncWork() || entry.pending > 0;
     const message = last?.message;
     const observations = last ? [{ kind: 'agent_message', text: textOf(message.content), ...toolCallSummaries(message.content) }] : [];
     for (let i = lastIndex + 1; i < branch.length && last; i++) {
@@ -2344,6 +2480,7 @@ export function installOmpExtension(pi, sdk) {
     // guard closes; a legacy session runs the work directly.
     if (teardown) await teardown(work);
     else await work();
+    confirmation.collaboration_persistence = await collabCheckpoint(taskDirs.get(entry.id));
     return confirmation;
   }
   // Member-scoped bridge: native task members have no `entries` record (no
@@ -2463,7 +2600,7 @@ export function installOmpExtension(pi, sdk) {
           let retainedError = null;
           if (retained) {
             try {
-              const busyFlags = s => s.isStreaming || s.isCompacting || s.isBashRunning || s.isEvalRunning || s.hasPendingAsyncWork?.();
+              const busyFlags = s => s.hasAdmittedSubmission === true || s.isStreaming || s.isCompacting || s.isBashRunning || s.isEvalRunning || s.hasPendingAsyncWork?.();
               if (busyFlags(retained)) await retained.abort({ goalReason: 'internal' }).catch(() => {});
               const manager = retained.asyncJobManager;
               const owner = retained.getAgentId ? retained.getAgentId() : ref.id;
@@ -2504,10 +2641,10 @@ export function installOmpExtension(pi, sdk) {
               process.stderr.write(`Orbit: retained-session stop for ${ref.id} could not confirm: ${error.message}\n`);
             }
           }
-          // The member's session is gone. In 18.2.8, park()/release() detach
-          // the session and set status first, then dispose asynchronously
-          // (registry/agent-lifecycle.ts:310-319, :474-489) with no public
-          // completion signal — so a parked/disposed ref cannot prove its
+          // The member's session is gone. Current SDK 18.8.0 park()/release()
+          // detach and set registry status before awaiting dispose; cleanup
+          // errors are swallowed, and there is no retained per-member result
+          // after every session reference is lost. A tombstone cannot prove its
           // background work or child processes have exited. Report structured
           // evidence and let the runtime keep stop_unconfirmed; never convert
           // "completed"/registry idle into a stop confirmation.
@@ -2516,7 +2653,7 @@ export function installOmpExtension(pi, sdk) {
           return { confirmed: false, id: ref.id,
             registry_status: ref.status,
             reason: completed
-              ? `member result was accepted, but its session is disposed (status ${ref.status}) and OMP 18.2.8 disposes parked/released sessions asynchronously with no public completion signal; background/process exit is unverifiable from the registry`
+              ? `member result was accepted, but its session is disposed (status ${ref.status}) and current OMP lifecycle status is set before disposal settles, while disposal errors can be swallowed; background/process exit is unverifiable from the registry alone`
               : `member has no live session (status ${ref.status}); stop cannot be confirmed without a session or a dispose-completion signal`,
             evidence: { registry_status: ref.status, lifecycle,
                         output_path: ref.history?.outputPath ?? null, session_file: ref.sessionFile,
@@ -2525,7 +2662,7 @@ export function installOmpExtension(pi, sdk) {
         }
         const manager = session.asyncJobManager, owner = session.getAgentId ? session.getAgentId() : ref.id;
         if (!owner) throw new Error(`OMP member session has no native async-work owner: ${ref.id}`);
-        const busyFlags = s => s.isStreaming || s.isCompacting || s.isBashRunning || s.isEvalRunning || s.hasPendingAsyncWork?.();
+        const busyFlags = s => s.hasAdmittedSubmission === true || s.isStreaming || s.isCompacting || s.isBashRunning || s.isEvalRunning || s.hasPendingAsyncWork?.();
         const busy = busyFlags(session);
         // Tool-state tracking started only now cannot account for execution
         // that began earlier; never confirm a stop on such a partial view.
@@ -2780,6 +2917,13 @@ export function installOmpExtension(pi, sdk) {
     if (!subscribeRegistryGate())
       return { block: true, reason: 'Orbit member registration gate is unavailable in this OMP session; refusing task dispatch' };
     const taskDir = bound.taskDir;
+    const nativePreflight = validateNativeTaskTools(input);
+    if (nativePreflight.block) {
+      recordCollabFor(taskDir, { kind: 'native_task_preflight_failed', at: Date.now(),
+        session_id: sessionId, agent_id: caller, tool_call_id: event.toolCallId ?? null,
+        reason: nativePreflight.reason, dispatched: false });
+      return nativePreflight;
+    }
     const items = Array.isArray(input.tasks) && input.tasks.length ? input.tasks : [input];
     // A controlled dispatch must observe the current pool, even for the
     // generic @task role. Otherwise OMP's default role silently wins over a
@@ -2812,6 +2956,15 @@ export function installOmpExtension(pi, sdk) {
         const selector = Array.isArray(item.model) && item.model.length === 1 ? item.model[0] : item.model;
         if (typeof selector !== 'string' || !selector.trim())
           return { block: true, reason: 'Controlled dispatch needs one explicit resolvable model; a fallback list cannot pin the actual member identity' };
+        if (sessionAgents.has(selector.trim())) {
+          const reason = `Explicit member model ${selector} is an Orbit agent name, not a model selector. ` +
+            `Put agent: ${JSON.stringify(selector.trim())} in the native task item and omit model, or use model: ${JSON.stringify(sessionAgents.get(selector.trim()))} with agent: "task". ` +
+            'First declare the durable Orbit work-unit and include its actual orbit-unit: id in task text; then retry this corrected native call. Another agent alias in model will fail the same way; do not treat these aliases as unavailable model routes.';
+          recordCollabFor(taskDir, { kind: 'native_task_preflight_failed', at: Date.now(),
+            session_id: sessionId, agent_id: caller, tool_call_id: event.toolCallId ?? null,
+            reason, dispatched: false });
+          return { block: true, reason };
+        }
         let resolved;
         try { resolved = ctx.models?.resolve?.(selector.trim()); } catch { /* refused below */ }
         if (!resolved?.provider || !resolved?.id)
@@ -3373,6 +3526,46 @@ export function installOmpExtension(pi, sdk) {
     }
     return event.payload;
   });
+  // ---- goal projection via the host-level context hook ---------------------
+  // Provider payload shapes differ — Cursor assembles a protobuf/blob
+  // runRequest with no messages/input (pi-ai providers/cursor.ts), so the
+  // payload hook cannot carry the goal everywhere. The SDK's per-request
+  // `context` hook runs on the AgentMessage list BEFORE convertToLlm for
+  // every provider (agent-loop prepareProviderCall re-derives from
+  // context.messages each call — the projection never accumulates and never
+  // enters session history). This is the one channel that covers ordinary
+  // turns, amend turns, custom-message wakes, post-compaction and Cursor
+  // alike; the payload hook keeps entry/policy/identity work on the shapes it
+  // recognizes, so no request carries the goal twice.
+  pi.on('context', async (event, ctx) => {
+    let sessionId = null;
+    try { sessionId = ctx?.sessionManager?.getSessionId?.() ?? null; } catch { /* unowned */ }
+    if (!sessionId || !isMainSession(sessionId) || !Array.isArray(event?.messages)) return;
+    try {
+      const bound = await resolveBoundTask(sessionId, ctx.cwd);
+      if (!bound) return;
+      if (activeState(bound.state)) {
+        if (!(await verifiedOwnership(sessionId, bound.taskDir)) || runtimeAbandoned(bound.state)) return;
+      } else {
+        // A paused task projects its goal only on a branch that references a
+        // prior input source — the same condition as the continuation block,
+        // so an unrelated question never inherits the old goal.
+        if (!(bound.state.status === 'paused' && bound.state.stop_confirmation?.confirmed === true)) return;
+        const priorSources = [bound.state.instruction_source?.id, bound.state.continuation?.source?.id,
+          ...(bound.state.amendments || []).map(a => a.source?.id)].filter(Boolean);
+        const branch = ctx.sessionManager?.getBranch?.() ?? [];
+        if (!branch.some(item => priorSources.includes(item.id))) return;
+      }
+      const projection = await goalProjectionText(bound);
+      if (!projection) return;
+      const prefix = bound.state.status === 'paused'
+        ? '本任务当前为已确认停止的暂停状态；以下目标投影只供判断本轮消息与原任务的关系，不构成恢复执行或续跑授权：\n' : '';
+      const text = prefix + projection.text;
+      recordGoalProjection(bound, sessionId, ctx, text, 'context_hook');
+      return { messages: [...event.messages, { role: 'user', content: text, timestamp: Date.now() }] };
+    } catch { /* projection is best-effort; never block the request */ }
+  });
+
 
   // Child extension factories share the actual unit map. Every native tool
   // passes this entrance: the handoff declaration is never treated as a
@@ -3967,6 +4160,8 @@ export function installOmpExtension(pi, sdk) {
   pi.registerTool({ name: 'orbit', label: 'Orbit', description: toolDescription, parameters: pi.zod.object(toolArgs(pi.zod)),
     async execute(_id, args, _signal, _update, ctx) {
       const entry = await connect(ctx);
+      const operationError = workUnitOperationError(args);
+      if (operationError) throw new Error(operationError);
       let text;
       if (args?.action === 'work-unit' && (!args.operation || args.operation === 'declare') &&
           args.work_unit?.spec?.execution !== 'root') {

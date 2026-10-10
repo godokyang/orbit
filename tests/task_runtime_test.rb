@@ -1501,6 +1501,9 @@ fixture do |_root, record, host, checker, runtime|
   runtime.tick(now: now + 1)
   assert(events(record).any? { |e| e["type"] == "unfinished_task_continuation_sent" }, "unfinished review wakes the idle Root")
   assert(!events(record).any? { |e| e["type"] == "unfinished_task_continuation_work_observed" }, "send acceptance is not execution")
+  wake = host.messages.last
+  assert(wake.include?(record.input_digest) && wake.include?("真实在途等待") && wake.include?("无进展"),
+         "the continuation wake identifies the current goal version and distinguishes work from waiting or no progress")
   observed["root_verifications"] = [{ "tool_call_id" => "next-edit", "task_directory" => record.path,
                                      "input_digest" => record.input_digest }]
   runtime.tick(now: now + 2)
@@ -2022,6 +2025,41 @@ fixture do |_root, record, host, checker, runtime|
                                        event["unaccounted_members"] == ["orbit-m-during-stop"] } &&
          events(record).none? { |event| event["type"] == "stopped" },
          "the event log records the unconfirmed stop instead of a confirmed one")
+end
+
+# Ordinary and failure stops need the same durable roster check as completion.
+# Root's own confirmed exit cannot confirm a member registered during teardown.
+%w[paused failed].each do |requested_status|
+  fixture do |_root, record, host, _checker, runtime|
+    original_stop = host.method(:stop!)
+    host.define_singleton_method(:stop!) do
+      record.register_member("orbit-m-late-ordinary", requested_name: "orbit-m-late-ordinary")
+      original_stop.call
+    end
+    runtime.send(:stop, "stop while registration is in flight", status: requested_status)
+    assert(record.state["status"] == "stop_unconfirmed" &&
+           record.state.dig("stop_confirmation", "confirmed") == false &&
+           record.state.dig("execution_stop_confirmation", "confirmed") == true &&
+           record.state.dig("stop_confirmation", "unaccounted_members") == ["orbit-m-late-ordinary"],
+           "#{requested_status} stop preserves verified Root scope without confirming a late member")
+    assert(events(record).any? { |event| event["type"] == "stop_unconfirmed" &&
+                                          event["unaccounted_members"] == ["orbit-m-late-ordinary"] } &&
+           events(record).none? { |event| event["type"] == "stopped" },
+           "#{requested_status} stop records the uncovered member rather than a confirmed stop")
+  end
+end
+
+fixture do |_root, record, host, _checker, runtime|
+  original_stop = host.method(:stop!)
+  host.define_singleton_method(:stop!) do
+    File.write(File.join(record.path, "members.json"), "not a roster")
+    original_stop.call
+  end
+  runtime.send(:stop, "ordinary stop with unreadable final roster")
+  assert(record.state["status"] == "stop_unconfirmed" &&
+         record.state.dig("stop_confirmation", "reason") == "members_unreadable" &&
+         record.state.dig("execution_stop_confirmation", "confirmed") == true,
+         "ordinary stop cannot confirm an unreadable post-teardown roster")
 end
 
 # The post-teardown recheck must not ask the stopped Root's bridge: a transient

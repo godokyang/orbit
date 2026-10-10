@@ -1,0 +1,100 @@
+{
+  "format": "orbit-work-units-2",
+  "task_id": "a08ab32d-45a3-4171-8c34-e1c801c301df",
+  "units": {
+    "wu-08767c0859b9e8f4": {
+      "id": "wu-08767c0859b9e8f4",
+      "task_id": "a08ab32d-45a3-4171-8c34-e1c801c301df",
+      "status": "accepted",
+      "input_digest": "14d764a38b71399d2ea68e24a088cde8958a8c4744621d3e38aabed3659dadaf",
+      "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v6",
+      "declared_at": "2026-10-10T05:28:44Z",
+      "dispatches": [
+        {
+          "member_id": "orbit-33401849-4882-4006-88c0-2435fcd736bd",
+          "tool_call_id": "call_3c82b98a04994ad08cfafcc4",
+          "model": "kimi-code/k3-256k",
+          "bound_at": "2026-10-10T05:29:33Z",
+          "hint_signature": "f0decfe4674a78fe67eb66882bcfd3e4573b3315121b13d0a8f5ff5b39ccda7e",
+          "hint_message_id": "1c178bf3-f1ce-4f43-bf15-476b17a958ec",
+          "status": "accepted",
+          "result": "Member orbit-m-kimi-code-k3-256k-301bb915 implemented src/importer.mjs only (tests/SPEC/package.json/cli.mjs untouched, confirmed). Member ran TMPDIR=.test-tmp .runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test in the project-provided runtime: exit 0, 127 cases passed. Root independently collected the result, re-read the delivered code, and re-ran the same npm test command itself: exit 0, EXPENSE_VALIDATION_SUMMARY 127 cases passed. Root also exercised the CLI directly: success case prints result JSON only, exit 0; missing file, wrong arg count, invalid amount (line number in message), and overflow all print a concise single-line stderr error with empty stdout, exit 1, no stack trace.",
+          "verification": "Root re-ran TMPDIR=.test-tmp .runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test → exit 0, 127/127 PASS including all importer and CLI cases; manual CLI probes: valid CSV → {\"groups\":[{\"category\":\"Food\",\"totalCents\":120,\"count\":1},{\"category\":\"Travel\",\"totalCents\":99,\"count\":1}],\"totalCents\":219,\"count\":2} exit 0; missing.csv → 'error: cannot read missing.csv: ENOENT' exit 1; no args → usage, exit 1; 'Food,bad' → 'error: line 3: invalid amount...' exit 1; overall overflow at line 3 → error with line number, exit 1. All within spec; no commits, no network.",
+          "finished_at": "2026-10-10T05:33:40Z"
+        }
+      ],
+      "member_id": "orbit-33401849-4882-4006-88c0-2435fcd736bd",
+      "tool_call_id": "call_3c82b98a04994ad08cfafcc4",
+      "model": "kimi-code/k3-256k",
+      "result": "Member orbit-m-kimi-code-k3-256k-301bb915 implemented src/importer.mjs only (tests/SPEC/package.json/cli.mjs untouched, confirmed). Member ran TMPDIR=.test-tmp .runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test in the project-provided runtime: exit 0, 127 cases passed. Root independently collected the result, re-read the delivered code, and re-ran the same npm test command itself: exit 0, EXPENSE_VALIDATION_SUMMARY 127 cases passed. Root also exercised the CLI directly: success case prints result JSON only, exit 0; missing file, wrong arg count, invalid amount (line number in message), and overflow all print a concise single-line stderr error with empty stdout, exit 1, no stack trace.",
+      "verification": "Root re-ran TMPDIR=.test-tmp .runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test → exit 0, 127/127 PASS including all importer and CLI cases; manual CLI probes: valid CSV → {\"groups\":[{\"category\":\"Food\",\"totalCents\":120,\"count\":1},{\"category\":\"Travel\",\"totalCents\":99,\"count\":1}],\"totalCents\":219,\"count\":2} exit 0; missing.csv → 'error: cannot read missing.csv: ENOENT' exit 1; no args → usage, exit 1; 'Food,bad' → 'error: line 3: invalid amount...' exit 1; overall overflow at line 3 → error with line number, exit 1. All within spec; no commits, no network.",
+      "finished_at": "2026-10-10T05:33:40Z",
+      "objective": "Implement importExpenses(text) in src/importer.mjs of the expense importer project so all cases in tests/acceptance.mjs pass, verified by actually running the project test suite in the project-provided Node runtime.",
+      "requirements": [
+        "Implement the pure function importExpenses(text) exactly per SPEC.md: input lines are category,amount with required header line 'category,amount'; strip one leading BOM; accept LF and CRLF; ignore blank lines but keep counting them for one-based line numbers; unquoted CSV with exactly two columns per nonblank data line; trim both fields; category nonempty; amount must match nonnegative decimal digits with exactly two fractional digits (no sign, exponent, extra decimals); compute integer cents exactly with BigInt or equivalent integer arithmetic; reject single values, per-category sums, or overall sums outside Number.MAX_SAFE_INTEGER; preserve first-seen category order; return {groups:[{category,totalCents,count}],totalCents,count}.",
+        "On invalid data throw Error whose message contains the original one-based line number (blank lines count in numbering; header invalid → line 1).",
+        "Must not modify tests/acceptance.mjs, SPEC.md, package.json, or src/cli.mjs (Root owns CLI).",
+        "Actually run the test suite with the project-provided runtime: from the project root run TMPDIR=<project>/.test-tmp <project>/.runtime/bin/node <project>/.runtime/lib/node_modules/npm/bin/npm-cli.js test, and report the real exit code and full stdout/stderr to Root via the native hub.",
+        "No commits, pushes, dependency downloads, or network services; no writes outside the project directory."
+      ],
+      "context": "Project root: /var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v6. src/cli.mjs and README are Root's responsibility; only src/importer.mjs is yours. tests/acceptance.mjs is the acceptance source of truth; SPEC.md is the spec. The test suite spawns src/cli.mjs which is currently a stub, so CLI cases may fail through no fault of your importer — Root integrates CLI after your delivery; run the suite, report actual results including any CLI-case failures, and ensure all importer unit cases (grouping samples, BOM/CRLF, amount validation, overflow, header) pass. TMPDIR must point at the project .test-tmp directory; do not write outside the project.",
+      "decisions": [
+        "Use exact integer arithmetic (e.g. parse cents via string split, accumulate with BigInt, convert to Number with safety check) — choice left to member as long as acceptance passes.",
+        "Exact npm invocation may be adapted to actual CLI surface if the declared command errors, reporting the corrected call."
+      ],
+      "input_materials": [
+        "SPEC.md",
+        "tests/acceptance.mjs",
+        "package.json",
+        "src/importer.mjs",
+        "src/cli.mjs",
+        ".runtime/bin/node",
+        ".runtime/lib/node_modules/npm/bin/npm-cli.js"
+      ],
+      "scope": {
+        "allowed_paths": [
+          "src/importer.mjs",
+          "tests/acceptance.mjs",
+          "SPEC.md",
+          "package.json",
+          "src/cli.mjs",
+          ".runtime",
+          ".test-tmp"
+        ],
+        "allowed_tools": [
+          "read",
+          "write",
+          "edit",
+          "bash",
+          "glob",
+          "grep"
+        ],
+        "allowed_commands": [
+          "bash -lc 'TMPDIR=.test-tmp .runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test'",
+          ".runtime/bin/node tests/acceptance.mjs",
+          "TMPDIR=.test-tmp .runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test",
+          ".runtime/bin/node --version",
+          "cat SPEC.md",
+          "cat tests/acceptance.mjs",
+          "ls -la"
+        ]
+      },
+      "acceptance": "TMPDIR=.test-tmp .runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test exits 0 with EXPENSE_VALIDATION_SUMMARY passing all cases; importer handles BOM/CRLF/blank-line numbering/trim/strict amount format/overflow/first-seen order per SPEC.",
+      "escalation": "If the runtime fails to start or npm exits nonzero for environment reasons, report the exact command, exit code, and stderr to Root via the native hub instead of substituting another runtime; if the spec/test expectations conflict, report back rather than changing tests.",
+      "model_requirements": {
+        "relevant_indices": [
+          "coding_index",
+          "agentic_index"
+        ],
+        "required_input_modalities": [
+          "text"
+        ],
+        "required_parameters": [
+          "tools"
+        ]
+      },
+      "execution": "delegate",
+      "dependencies": []
+    }
+  }
+}

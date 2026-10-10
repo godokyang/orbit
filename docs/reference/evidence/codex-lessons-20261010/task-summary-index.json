@@ -1,0 +1,50 @@
+[
+  {
+    "role": "negative",
+    "task_id": "741e8b83-0639-4341-ab6c-f21b09ca0d85",
+    "summary_exit": 0,
+    "file": "negative-summary-741e8b83-0639-4341-ab6c-f21b09ca0d85.json"
+  },
+  {
+    "role": "positive",
+    "task_id": "e50f56a8-ffb2-4cf3-b513-e73428e0f400",
+    "summary_exit": 0,
+    "file": "positive-summary-e50f56a8-ffb2-4cf3-b513-e73428e0f400.json"
+  },
+  {
+    "role": "positive-v2",
+    "task_id": "c5c93e74-4f38-4cf1-b991-0c96a4b4e5e1",
+    "summary_exit": 0,
+    "file": "positive-v2-summary-c5c93e74-4f38-4cf1-b991-0c96a4b4e5e1.json"
+  },
+  {
+    "role": "positive-v3",
+    "task_id": "e2a3eddc-25d7-4d35-9a92-6a92333ac7f7",
+    "summary_exit": 0,
+    "file": "positive-v3-summary-e2a3eddc-25d7-4d35-9a92-6a92333ac7f7.json"
+  },
+  {
+    "role": "lifecycle",
+    "task_id": "d87c80b3-8b77-4d25-91ed-3a74e7202d54",
+    "summary_exit": 0,
+    "file": "lifecycle-summary-d87c80b3-8b77-4d25-91ed-3a74e7202d54.json"
+  },
+  {
+    "role": "lifecycle",
+    "task_id": "03f9bed6-4a4d-40b8-8d40-3288e4277e04",
+    "summary_exit": 0,
+    "file": "lifecycle-summary-03f9bed6-4a4d-40b8-8d40-3288e4277e04.json"
+  },
+  {
+    "role": "positive-v4",
+    "task_id": "3ae66eb1-eaff-4a7e-a528-9947914c06bc",
+    "summary_exit": 0,
+    "file": "positive-v4-summary-3ae66eb1-eaff-4a7e-a528-9947914c06bc.json"
+  },
+  {
+    "role": "positive-v5",
+    "task_id": "ae45292f-1df7-4237-acfd-613e7d6310c3",
+    "summary_exit": 0,
+    "file": "positive-v5-summary-ae45292f-1df7-4237-acfd-613e7d6310c3.json"
+  }
+]

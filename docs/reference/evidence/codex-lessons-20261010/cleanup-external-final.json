@@ -1,0 +1,195 @@
+{
+  "time": "2026-10-10T06:03:31.747144+00:00",
+  "temporary_supported_uninstall_exit": 0,
+  "removed_exact_owned_external_directories": [
+    "/tmp/orbit-c02-sdk-188"
+  ],
+  "already_removed_by_host": [
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-session-agents-20261010-36090-10n6s4",
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-session-agents-20261010-40435-4qag74",
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-session-agents-20261010-45527-p9uw4m",
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-session-agents-20261010-50025-tq24af",
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-session-agents-20261010-56613-fswef9",
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-session-agents-20261010-73034-hu7alc",
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-session-agents-20261010-79921-fpged5",
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-session-agents-20261010-83781-hlhlj6",
+    "/tmp/orbit-omp-2KYAV4",
+    "/tmp/orbit-omp-EFSRtK",
+    "/tmp/orbit-omp-GVZM62",
+    "/tmp/orbit-omp-POnfRG",
+    "/tmp/orbit-omp-UjdHVU",
+    "/tmp/orbit-omp-YHlmiP",
+    "/tmp/orbit-omp-aGhgTv",
+    "/tmp/orbit-omp-kRjcbL",
+    "/tmp/orbit-omp-kwVdDL",
+    "/tmp/orbit-omp-pNWa4P"
+  ],
+  "retained_unknown_paths": [],
+  "extra_sdk_ownership_evidence": [
+    {
+      "entry_id": "a8e3bba5",
+      "tool": "bash",
+      "time": 1791604368762,
+      "argument_sha256": "85276a73cbf4cd9bc7c0855e52bbd4b82488c86881fb5e80020d2a9f1b208e68"
+    },
+    {
+      "entry_id": "d7d58475",
+      "tool": "bash",
+      "time": 1791604383999,
+      "argument_sha256": "215e252fab77a3e7c2351883aaaf6aa31b7623a572421f95391065b4bc0f6663"
+    },
+    {
+      "entry_id": "f1134cb2",
+      "tool": "bash",
+      "time": 1791604390038,
+      "argument_sha256": "f91424ce466034dc42baa67cfef59e5906d5d6edc519d83a4e229eaae2184674"
+    },
+    {
+      "entry_id": "cf510c17",
+      "tool": "bash",
+      "time": 1791604399033,
+      "argument_sha256": "dab210ee84fcb70c7103ae2bb1e098b35b8e29eda2d98875f69058ac196c34d2"
+    },
+    {
+      "entry_id": "830edeed",
+      "tool": "bash",
+      "time": 1791604409191,
+      "argument_sha256": "d09999b6aae6e3983b70d3dba53f7c394e44a226ea5f8bd52cbf42b305c25768"
+    },
+    {
+      "entry_id": "fa4ae552",
+      "tool": "bash",
+      "time": 1791604415269,
+      "argument_sha256": "a042169948cd52d7c05d5b8f723bea03a42f88e7e3f168df71b0a5717f3b5994"
+    },
+    {
+      "entry_id": "bc57276c",
+      "tool": "bash",
+      "time": 1791604419872,
+      "argument_sha256": "bc15c62993fcfcb59dbbb80b141f0fbe5aa8124d35e7a691a24a51512cf823f1"
+    },
+    {
+      "entry_id": "e2d7b4f5",
+      "tool": "bash",
+      "time": 1791604490387,
+      "argument_sha256": "a4d4575bdbfe0f5a6e5a035ed63942eef2eb668654182395cc2579d8c2dcc794"
+    },
+    {
+      "entry_id": "7d5825e8",
+      "tool": "bash",
+      "time": 1791604504600,
+      "argument_sha256": "eeda88b282b944489eba3cd0a801ee02fa1e01b6c54a45bbeffcf427867b1aa9"
+    },
+    {
+      "entry_id": "f64dd2b9",
+      "tool": "bash",
+      "time": 1791604510842,
+      "argument_sha256": "8931250e672ea6159c9d1c914bec224931fd41456f496b91fa41211b65794bb0"
+    },
+    {
+      "entry_id": "71533738",
+      "tool": "bash",
+      "time": 1791604513635,
+      "argument_sha256": "c1cef6750833dbe36e86a36b6dffcdf111b21d6fc981a5a861b20076f1f2fce2"
+    },
+    {
+      "entry_id": "46c146e6",
+      "tool": "bash",
+      "time": 1791604528082,
+      "argument_sha256": "3f10b2f594e27f19f1f56bab798cd2a5390bee7f4d8243e09c06025f17f9b7be"
+    },
+    {
+      "entry_id": "3df311c0",
+      "tool": "bash",
+      "time": 1791604563191,
+      "argument_sha256": "e31c0833b327fc07dacfd61a63ddb0113e0c2b0c5c36f0f685f5a6655a6a4218"
+    },
+    {
+      "entry_id": "a1b9396e",
+      "tool": "bash",
+      "time": 1791604615738,
+      "argument_sha256": "583caa10e21ec8acdf36a9a3573056bc71e58e4c5c2818669c8f304eee58b89e"
+    },
+    {
+      "entry_id": "358ccb7d",
+      "tool": "bash",
+      "time": 1791604656200,
+      "argument_sha256": "ad9fd4bce9689e459c965d6eaad535daf3cf624cf6ab6eded7d8a16b6a01302e"
+    },
+    {
+      "entry_id": "bca87e72",
+      "tool": "bash",
+      "time": 1791605008422,
+      "argument_sha256": "f84e958db21ec544b76af4056833d634c3e71a1f3a9ea1b2315977507cf98758"
+    },
+    {
+      "entry_id": "1fa41dba",
+      "tool": "bash",
+      "time": 1791605052179,
+      "argument_sha256": "859192684863bb424ab1c256c2c51864258646e238e0b7642b14ff7817d3ecb9"
+    },
+    {
+      "entry_id": "60c25447",
+      "tool": "bash",
+      "time": 1791605057741,
+      "argument_sha256": "ee38aee673ddc39486b04b282240eb19098f1b4217ade3c6ad3bb4e7d134f665"
+    },
+    {
+      "entry_id": "28298135",
+      "tool": "bash",
+      "time": 1791605083857,
+      "argument_sha256": "41bc59ccba805f0f8d7a41a15147749b7b7d5471778b11a7b222c532fa654c19"
+    },
+    {
+      "entry_id": "bd9bd389",
+      "tool": "bash",
+      "time": 1791605127185,
+      "argument_sha256": "4ad01117558e044a81bb020794b77d17593de12787acaf246fe3f89862125533"
+    },
+    {
+      "entry_id": "50908db6",
+      "tool": "bash",
+      "time": 1791605167398,
+      "argument_sha256": "8b92a406346001dfeedfff48856ae2dcf3036a22292949845fdb831d45192882"
+    },
+    {
+      "entry_id": "42841af8",
+      "tool": "bash",
+      "time": 1791605181873,
+      "argument_sha256": "362401615d283581453c1cac8204e7528267d580b718499a2756835eb0c80aa5"
+    },
+    {
+      "entry_id": "f3c9d2b2",
+      "tool": "bash",
+      "time": 1791605203676,
+      "argument_sha256": "e1049b0da047f41ec809c0e3429df89e8869727b84e1e57817d85e2e77a80ebf"
+    },
+    {
+      "entry_id": "7ac27e1f",
+      "tool": "bash",
+      "time": 1791605227994,
+      "argument_sha256": "c6e8ff6502b1deb1f3de00739eaffd9689c51f9a85c367240459daf5bf2fea4b"
+    },
+    {
+      "entry_id": "81912bcf",
+      "tool": "bash",
+      "time": 1791605230887,
+      "argument_sha256": "21ad49e4288ace6e8657ac5e27b5e55c4d3d58c3fd363bb4a1728b33e12814f9"
+    }
+  ],
+  "test_process_probe_all_gone": true,
+  "panes_closed": [
+    "w23:pV",
+    "w23:pW",
+    "w23:pX",
+    "w23:pY",
+    "w23:pZ",
+    "w23:p0",
+    "w23:p11",
+    "w23:p12",
+    "w23:p13",
+    "w23:p14",
+    "w23:p15"
+  ],
+  "root_temporary_directory_pending_removal": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne"
+}

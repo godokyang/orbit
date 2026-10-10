@@ -1,0 +1,38 @@
+{
+  "session_meta": {
+    "id": "01a123d6-9986-7d12-b447-f6ebcffb40e9",
+    "timestamp": "2026-10-10T03:23:49.034Z",
+    "cwd": "/Users/yangke/Personal/omen/orbit",
+    "originator": "codex-tui",
+    "cli_version": "0.162.1",
+    "source": "vscode",
+    "model_provider": "openai",
+    "forked_from_id": null
+  },
+  "models_observed": [
+    "gpt-6.1-sol"
+  ],
+  "last_token_count": {
+    "timestamp": "2026-10-10T05:39:13.562Z",
+    "info": {
+      "total_token_usage": {
+        "input_tokens": 47174721,
+        "cached_input_tokens": 46019968,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 249481,
+        "reasoning_output_tokens": 124175,
+        "total_tokens": 47424202
+      },
+      "last_token_usage": {
+        "input_tokens": 156575,
+        "cached_input_tokens": 153344,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 736,
+        "reasoning_output_tokens": 516,
+        "total_tokens": 157311
+      },
+      "model_context_window": 258400
+    }
+  },
+  "boundary": "original Codex client counter if present; separate from Goal counter and OMP/Jev ledgers; cash/plan unknown; do not interpret reasoning as additive to output"
+}

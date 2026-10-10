@@ -10,12 +10,15 @@ import { isUsageLimitOutcome } from "@oh-my-pi/pi-ai/error";
 export interface ProviderErrorFact {
 	kind: "auth_or_quota" | "unavailable";
 	detail: string;
+	status: number | null;
+	error_id: number | null;
 }
 
 export function providerErrorFact(message: unknown): ProviderErrorFact | undefined {
 	const turn = message as {
 		stopReason?: unknown;
 		errorStatus?: unknown;
+		errorId?: unknown;
 		errorMessage?: unknown;
 		errorClassificationMessage?: unknown;
 	} | undefined;
@@ -38,5 +41,9 @@ export function providerErrorFact(message: unknown): ProviderErrorFact | undefin
 	const kind = auth || balanceGate || isUsageLimitOutcome(status, text) ? "auth_or_quota" : "unavailable";
 	const detail = `${status !== undefined ? `HTTP ${status}: ` : ""}${text?.trim() ?? "provider reported an error without detail"}`
 		.replace(/\s+/g, " ").trim().slice(0, 200);
-	return { kind, detail };
+	// Preserve only SDK-public numeric diagnostics. No headers, request body,
+	// credential text or reconstructed retry advice enters this projection.
+	return { kind, detail,
+		status: typeof status === "number" && Number.isInteger(status) && status >= 100 && status <= 599 ? status : null,
+		error_id: typeof turn.errorId === "number" && Number.isSafeInteger(turn.errorId) && turn.errorId >= 0 ? turn.errorId : null };
 }

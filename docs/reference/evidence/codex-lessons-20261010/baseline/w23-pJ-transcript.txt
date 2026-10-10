@@ -1,0 +1,200 @@
+ recordCollab 先占 seq，再把 append 串进队列；reject 被 catch 吃掉，所以 await writer.chain
+ 成功只表示队列走完，不表示写入成功。失败文本只在 writer.failures，满 20 条就丢掉最旧的。closeCollabWriters
+ 把所有任务的队列排空，返回值是空的。导出只读文件，能看见序号洞，看不见错误文本，也不知道停止返回时队列是否还在
+ 写。
+
+ Root stop 在 cancel、abort、reap 之后返回 confirmation，TaskRuntime 保存这份原始对象。因此在返回前对当前任务的
+ writer 取 cutoff 并排空，把回执放进 confirmation
+ 的独立字段，是唯一能让错误文本和排空结果跟着停止记录留下来的现成位置。日志失败不能改
+ confirmed、stop_unconfirmed 或其他裁决字段，也不表示 fsync 或崩溃后仍完整。
+
+ 工作树里的 collabCheckpoint 位置是对的，但“不在失败名单里的 seq 都算已写”不成立：失败名单被截断后，被丢掉的 seq
+ 会显示成已写。用本方案替换这段推断，不要并列再加一个回执。
+
+ 回执要能成立，还得补上这几个已有代码里的切点：
+
+ - 已写 seq 必须来自 append 成功，不能靠“链完成且不在失败名单”反推。 现有 writer
+   只记失败、不记成功，又会丢掉旧失败。排空前至少要保留 cutoff 以内的全部失败
+   seq；错误文本可以只留最近的，但被截掉的数量要单独报为 lost。lost 不是文件里的 gap，也不是新的 I/O 错误。
+ - 超时不能算失败，也不能继续等。 无界等待会卡住 stop 的返回，从而推迟 TaskRuntime 保存
+   confirmation。队列在时限内没排完就报未排空，涉及的 seq 既不是已写，也不是 lost。之后 shutdown
+   即使把它们写完，也不回写这份回执。回执只描述返回前的队列。
+ - cutoff 取在本任务最后一条 recordCollab 之后，并且回执本身不要再写进同一队列。 只排空这个 task id 的
+   writer，不排空 closeCollabWriters 的全部任务。取消过程中已经占 seq 的事件算在 cutoff 内；返回前再产生的 seq
+   不算已覆盖。
+ - gap 由这个队列计算：失败 seq，以及超时未完成的 seq。 不去读
+   collaboration.jsonl，导出继续独自报告文件里的序号洞和缺尾。两边不要共用一个“已落盘”结论。
+
+
+ Root已实施C07窄增量（plugins/omp-host.mjs当前diff）：stop成功后取得已取消的任务writer队列cutoff，1秒诊断等待界
+ 限（非资源预算），追加completion/seq/gap/failure范围；日志失败不改confirmed；已有collab测试通过，回归待补。你保
+ 持只读，尽快完成候选报告；随后将作为未参与写入者核查C07/C01，不要自行开始实施。
+
+
+ 正在基于 plugins/omp-host.mjs 的当前 diff 快速生成候选报告。保持只读，不自行实施。
+
+ 严格依据当前 diff 逐项核对，不依赖记忆。候选报告完成后，将作为未参与写入者核查 C07/C01，不会自行实施。
+
+ 现有 collab 测试已通过，但回归测试尚未补全。候选报告将评估实现是否符合既定的窄增量方案，并明确剩余缺口。
+
+ 只读当前 diff，核对 C07 窄增量是否落在已取消任务的队列 cutoff、1 秒诊断等待和停止裁决之外。C07
+ 可以按这个窄增量收口，但本轮没能重新打开 plugins/omp-host.mjs 的 diff，所以下面不把任何新行号当成已核对。本
+ pane 是 Grok 4.7，用量没有回执。只读，不开始写 C07 或 C01。
+
+ 候选收口
+
+ - C02 不采用。 阶段、未决问题、下一动作和暂停后续跑已经由 before_agent_start 注入。压缩后是否丢掉原要求仍未知。
+ - C03 不采用。 18.8.0 的 sendCustomMessage 没有 expected turn。版本门和 input_digest 已在。
+ - C04 不采用。 校验后才登记，失败即拒绝；aborted 已能中止。
+ - C05 仍单独采用窄复核。 普通停止不能在 teardown 期间新登记的成员未停时确认成功。没有
+   session、也没有保留引用时继续 confirmed:false。与日志回执无关。
+ - C06 不改解析器。 分隔规则已与 18.8.0 同形。editInspect 仍可能锚在顶层 natives
+   18.3.4，行为差未知；空投影继续拒绝。
+ - C07 采用 Root 陈述的这份增量。 停止成功、取消已经完成后，只取当前任务 writer 的 cutoff；1
+   秒是诊断等待，不是资源预算；回执只追加完成情况、seq、gap 和失败范围；日志失败不改
+   confirmed。不改导出只读，不表示 fsync 或崩溃后仍完整。
+
+ 这份回执仍有价值，也有两处不能靠现有测试盖住
+
+ 价值还在。recordCollab 先占 seq，append 失败只留在内存里的失败名单，名单还会截断；session_shutdown
+ 只排空队列、不把结果交给 TaskRuntime。停止返回前的回执是这些事实能跟着原始 confirmation 留下的位置。
+
+ 现有 collab 测试通过，只说明旧的写入和导出行为还在。Root
+ 已说明回归未补。独立核查前，至少要看到这些断言，而不能从“测试通过”推出实现已经满足：
+
+ - append 拒绝后 confirmed 仍为 true；失败 seq 落在 gap 或失败范围里，不能因为不在被截断的失败名单里就报成已写。
+ - 1 秒内队列没排完时，停止仍返回；未完成的 seq 既不算已写，也不算 I/O 失败。之后 shutdown
+   写完了，也不回写这份回执。
+ - 回执本身不再向同一队列追加一条协作日志。cutoff 含本次停止里已经 recordCollab 的 seq，只排空这个 task id。
+ - 失败范围要能看出被截掉的数量。截掉的是 lost，不是文件里的 gap，也不是新的 I/O 错误。
+
+ 失败返回路径没有这份回执。若那条路径在返回前已经写过协作日志，那些 seq 的 I/O 错误不会进入保存下来的
+ confirmation。这是相对“成功或失败都取回执”的范围收窄，不是另一项机制。
+
+
+ 请现在收束只读核对并提交结论，停止继续扩大源码检索。C05
+ Root正在独立核实普通stop的名单复核；请报告确切路径行号与最小修复，不擅自写代码。C06版本错配事实与实际语法漂移必
+ 须分开：未证明漂移不自动满足采用条件。C02–C07每项一句结论和证据即可，含不确定边界。
+
+
+ 已停止扩大源码检索。将立即收束只读核对并提交结论。
+
+ 正在整理此前已核实的精确路径与行号，准备逐项提交结论。C05将报告确切路径、行号及最小修复；C06将分离版本错配事实
+ 与语法漂移，说明未证明漂移不自动满足采用条件；C02–C07每项一句结论加证据，含不确定边界。不再扩大检索范围。
+
+ C05已锁定确切路径与行号：
+
+ - confirmed_stop 位于 lib/orbit/task_runtime.rb 3886–3933，入口时即停止成员并终止 Root。
+ - members_unaccounted_after_teardown 仅在完成交接的 if notice 分支（3776–3812）设置 stop_unconfirmed。
+ - 任务状态被标记为终端，必须等待 confirmed_stop 返回后（3819 行）才执行。
+ - 插件 boundTask 在启动/运行阶段（omp-host.mjs 1345–1367 及 2811–2998）才接受新任务。
+ - 测试仅覆盖完成路径（tests/task_runtime_test.rb 2002–2024）。
+
+ 正在精确回溯此前已读取的源码偏移量，以确认 C05
+ 最小修复所需的精确路径与行号。若无法确定具体行号，将如实声明不确定，避免虚构数据。
+
+ 已确认 task_runtime.rb 未被 git diff 标记为修改，其行号应保持稳定。omp-host.mjs 虽有变更，但 C05
+ 的最小修复路径仍基于此前已读取的精确位置。
+
+ 最小修复方案已明确：普通 stop 直接复用 members_unaccounted_after_teardown
+ 的未计入名单检查；若存在未计入成员，则保留 stop_unconfirmed，不再引入新的 stop 状态。
+
+ 补充两个边界场景：新派发拒绝可前置到 teardown，使 boundTask 感知 stopping
+ 状态；会话丢失且无保留引用时，confirmed 应保持 false。
+
+ C06 采用条件已明确：仅当实际发现语法漂移或作用域绕过时，才允许修改解析器。
+
+ C06 已精确拆分事实与假设。editInspect 锚定顶层 pi-natives 18.3.4，而嵌套 coding-agent 使用
+ 18.8.0，这是版本错配事实。语法漂移未被证实：splitDelimited 匹配 18.8.0 的
+ splitDelimitedPathEntry，且无观察到的绕过行为。因此未证明漂移不满足采用条件，不应修改解析器。
+
+ 此前读取的偏移范围是真实记录，但用户要求精确行号。正在权衡是否对已定位的已知范围做一次精确确认读取，以满足“确切
+ 路径行号”的要求，同时避免扩大检索范围。用户已明确要求立即收束并提交结论。
+
+ 不再重新读取文件，直接采用本次会话中已核实的偏移范围作为结论依据。若无法确定单行调用点，将使用已读取的整段范围
+ ，绝不虚构更精确的行号。C05 最小修复结论即将提交。
+
+ 最小修复严格限定在 confirmed_stop
+ 返回后、状态持久化前的单次检查。插件准入调整属于第二道可选收紧，非确认诚实的必要条件。会话丢失且无保留引用时，c
+ onfirmed 应保持 false。
+
+ 普通 stop 与完成路径的竞态窗口已明确：confirmed_stop 入口时读取 @state["members"]，而任务状态在 3819
+ 行才转为终端，teardown 完成后可能有新成员注册。完成路径在交接后重读名单，普通 stop
+ 却缺少这一步。最小修复需在此返回后、持久化前补上同样的未计入检查。
+
+ 插件准入收紧仅作为竞态窗口的辅助证据，最小修复仍限定为 Ruby 端的后置名单重检。C06
+ 的版本错配与语法漂移将彻底分离。每项结论仅一句，含不确定边界，不展开模型或未知用法细节。
+
+ C07 采用条件已明确：候选方案由 Root 实施，但本次会话因工具故障未能重新读取
+ diff，故无法对当前实现做逐行独立验证。结论将如实声明该方案已按 Root 所述采用，但当前 diff
+ 的精确实现细节未完成核查。
+
+ 结论将直接陈述事实，避免“不是X，而是Y”等对比句式。C05与C06的详细路径与行号会优先列出，其余各项再各占一句。行号
+ 引用将严格使用此前已读取的范围，若无法确定单行则如实声明不确定，绝不虚构。
+
+ C02 已定位具体证据：omp-host.mjs 中 before_agent_start 的 statusBlock/continuationBlock（1488–1541 与
+ 4185–4224）以及测试文件 omp_native_gate_test.mjs（1955、1984–1988）。
+
+ C03 已定位：sendCustomMessage 选项（agent-session.d.ts 738–743）、deliver 路径（omp-host.mjs
+
+ C05 的最小修复只在普通 stop 落确认状态之前复用完成交接已有的名单复核。C06
+ 的安装版本错配没有证明语法漂移，采用条件不成立。本 pane 是 Grok 4.7，用量没有回执。
+
+ C05
+
+ 普通 stop 在 lib/orbit/task_runtime.rb 的 confirmed_stop（3886–3933）里只停止进入函数时已在 @state["members"]
+ 的成员，随后停止 Root。任务要等它返回后才写成终态（3819）。完成交接在 if notice（3776–3812）里调用
+ members_unaccounted_after_teardown，未覆盖成员保持 stop_unconfirmed；tests/task_runtime_test.rb 2002–2024
+ 只覆盖这条路径。插件在 starting/running 时仍接受新的 task（plugins/omp-host.mjs 1345–1367，登记在 2811–2998）。
+
+ 最小修复：普通 stop 在 3819 写入已确认终态之前调用同一个 members_unaccounted_after_teardown；结果非空就沿用
+ stop_unconfirmed 和现有未覆盖载荷。不新增状态，不把 paused 提前写成已确认，也不改插件准入。没有
+ session、也没有保留引用时，plugins/omp-host.mjs 2538–2555 继续返回 confirmed: false。
+
+ C06
+
+ 版本错配是安装事实：plugins/work-unit-scope.mjs 204–218 的 editInspect 锚到审查器顶层 pi-natives@18.3.4，同树
+ pi-coding-agent@18.8.0 嵌套的是 pi-natives@18.8.0。语法漂移没有被观察到：splitDelimited（168–189）与 18.8.0
+ src/tools/path-utils.ts 的
+ splitDelimitedPathEntry（690–726）同形，空投影仍拒绝（444–462），tests/work_unit_scope_test.mjs
+ 覆盖的是这套规则。两套 natives 的实际解析差未跑，保持未知；未证明的漂移不满足更换解析器的采用条件。
+
+ 逐项
+
+ - C02 不采用。 before_agent_start 已注入阶段、未决问题、下一动作和暂停后续跑（plugins/omp-host.mjs
+   1488–1541、4185–4224；tests/omp_native_gate_test.mjs 1955、1984–1988）。18.8.0 有压缩钩子，Orbit
+   未订阅，摘要是否丢掉原要求未知。
+ - C03 不采用。 dist/types/session/agent-session.d.ts 738–743 的 sendCustomMessage 没有 expected turn；版本门在
+   plugins/omp-host.mjs 2952–2956，lib/orbit/work_unit.rb 249–250 拒绝旧输入收口。投递前读状态不是原子接收。
+ - C04 不采用。 整批校验后才写 requestedNames（2977–2998），失败即 refuseMember（1233–1300），模型在 bind
+   时解析（1188–1200、2842–2846）。18.8.0 src/task/executor.ts 4416–4423 对已登记的 aborted 调用 requestAbort。
+ - C05 采用上面这一处复核。 证据和边界见前。它不补失去 session 且无保留引用时的确认。
+ - C06 不更换解析器。 版本错配与语法漂移分开；后者未证明，采用条件不成立。
+ - C07 采用 Root 已写的 Root 回执。 既有 writer 吞掉 append 拒绝，session_shutdown 只排空队列，TaskRuntime
+   保存原始 confirmation；回执应只追加完成情况、seq、gap 和失败范围，不改变 confirmed。本轮没有重读当前
+   diff，失败返回路径是否也带这份回执、回归是否补上，都未在这里核实。
+
+
+ 核对结论已收到，任务完成，请结束当前工作并保持固定会话空闲，不再检索或另做C07审查。Root采用了你发现的C05普通停
+ 止缺口，已实现并由GLM独立验证。你的C07描述是旧writer快照，当前diff不使用failures名单推定written，已由GLM对最新
+ 代码和真实I/O回归审查通过。记录C06具体版本错配但行为未知，本轮不改解析器。无需新增操作或复读证明。
+
+
+ 用户要求结束当前工作并保持固定会话空闲。
+
+ 已确认：根已采用C05普通停止缺口并由GLM独立验证；C07描述为旧writer快照，当前diff不使用failures名单推定written，G
+ LM对最新代码与真实I/O回归审查通过；记录C06具体版本错配但行为未知，本轮不改解析器。无需新增操作或复读证明。
+
+ 核对已收束，当前工作结束，固定会话保持空闲。
+
+ C05 的普通停止缺口已由 Root 采用、实现并由 GLM 独立验证。C07 以最新代码和真实 I/O 回归为准，不以旧 writer
+ 快照描述为准。C06 只记录具体版本错配：editInspect 锚在顶层 pi-natives@18.3.4，同树 pi-coding-agent@18.8.0
+ 嵌套的是 pi-natives@18.8.0；解析行为差未知，本轮不改解析器。
+
+─────────────────────────────────────── 📷 snap-compacted · 26K→45K · ⌃O ────────────────────────────────────────
+
+ ※ recap: The C02–C07 host-seam audit is finished and this session is idle. Wait for a new Root assignment
+ before doing anything else.
+
+╭── π > ◒ Grok 4.7 500k Fast > 📁 ~/Personal/omen/orbit > ⑂ main *15 ?5 > S10.55 ▶─18%─┃256K─◀ Audit C02-C07… ──╮
+╰─                                                                                                             ─╯

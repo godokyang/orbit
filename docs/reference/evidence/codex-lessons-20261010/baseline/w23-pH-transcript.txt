@@ -1,0 +1,200 @@
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+╭───────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ $ node tests/root_verifications_test.mjs && node tests/root_verifications_file_tools_test.mjs                 │
+├─── Output ────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ ROOT_VERIFICATIONS_TEST_PASS                                                                                  │
+│ ROOT_VERIFICATIONS_FILE_TOOLS_TEST_PASS                                                                       │
+│ ⟦Wall: 0.09s | Timeout: 300s⟧                                                                                 │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+ JS green. Now Ruby tests. Add three methods and register in run. Insert methods before run or after; register
+ calls in run list after root_verifications_keep_order_when_they_fit.
+
+ JS green. Adding the Ruby-layer regressions.
+
+╭─── ✎ Edit: 💎 ~/Personal/omen/orbit/tests/check_runner_context_test.rb ⟦+79⟧ ─────────────────────────────────╮
+│ 128│  def root_verifications_keep_order_when_they_fit                                                         │
+│…                                                                                                              │
+│ 138│  end                                                                                                     │
+│ 139│                                                                                                          │
+│+140│··# C01: a receipt output already trimmed head+tail at capture (in-band                                   │
+│+141│··# marker + structured output_omitted) is re-trimmed by this layer without                               │
+│+142│··# losing either end, this layer's own facts, or the upstream omission facts.                            │
+│+143│··def receipt_output_second_trim_keeps_both_ends_and_upstream_facts                                       │
+│+144│····upstream_marker = "…[omitted 2200 of 4400 UTF-16 code units / 4400 UTF-8 bytes sha256:#{'a' * 64}]"   │
+│+145│····js_visible = "HEAD-" + ("h" * 1_940) + upstream_marker + ("t" * 1_940) + "-TAIL"                      │
+│+146│····output_omitted = { "omitted_utf16_units" => 2_200, "visible_utf16_units" => 4_400,                    │
+│+147│·······················"visible_utf8_bytes" => 4_400, "sha256" => "a" * 64 }                              │
+│+148│····context = base_context                                                                                │
+│+149│····context["root_verifications"] = [{ "tool_call_id" => "long-run", "tool" => "bash", "command" => "npm  │
+│    │test",                                                                                                    │
+│+150│······"exit_code" => 1, "exit_code_source" => "reported",                                                 │
+│+151│······"input_matches" => true, "artifact_matches" => true,                                                │
+│+152│······"output" => js_visible, "output_truncated" => true, "output_omitted" => output_omitted }]           │
+│+153│····receipt = parsed(context).fetch("root_verifications").first                                           │
+│+154│····out = receipt["output"]                                                                               │
+│+155│····check(out.start_with?("HEAD-") && out.end_with?("-TAIL"),                                             │
+│+156│··········"the second-layer trim still keeps both ends of the log")                                       │
+│+157│····check(out.include?("of #{js_visible.length} Unicode chars / #{js_visible.bytesize} UTF-8 bytes " \    │
+│+158│·······················"sha256:#{Digest::SHA256.hexdigest(js_visible)}"),                                 │
+│+159│··········"this layer's marker names its own visible length with explicit units and SHA-256")             │
+│+160│····check(!out.include?("UTF-16 code units"),                                                             │
+│+161│··········"the second trim never nests two generations of markers in the kept text")                      │
+│+162│····check(receipt["output_omitted"] == output_omitted,                                                    │
+│+163│··········"capture-layer omission facts survive as structured metadata")                                  │
+│+164│····check(receipt["output_truncated"] == true && receipt["exit_code"] == 1 &&                             │
+│+165│··········receipt["tool_call_id"] == "long-run" && receipt["command"] == "npm test",                      │
+│+166│··········"identity, execution result and truncation facts survive the second trim")                      │
+│+167│····check(out.length <= Orbit::CheckRunner::CONTEXT_STRING_CAP,                                           │
+│+168│··········"the re-trimmed log stays within the string budget")                                            │
+│+169│··end                                                                                                     │
+│+170│                                                                                                          │
+│+171│··# C01: under byte-pressure degradation the selected logs still keep both                                │
+│+172│··# ends, their execution results and the marker, inside the hard byte cap.                               │
+│+173│··def degraded_caps_keep_selected_log_ends_within_byte_limit                                              │
+│+174│····output = "RUN-START " + ("x" * 6_000) + "FAIL-SUMMARY"                                                │
+│… (1 more hunks, 54 more lines) ⟦⌃O: Expand⟧                                                                   │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+ Warning: "Auto-prefixed bare body row(s) with +." — line     check(kept.length == 6, ...) in my body started
+ with spaces but I wrote it without the + prefix? Looking at my edit body: the line     check(kept.length == 6,
+ "all six receipts are delivered at the degraded string cap") — I omitted the leading +. It was auto-prefixed.
+ Verify the result is correct by running the test.
+
+╭───────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ $ ruby --disable-gems tests/check_runner_context_test.rb                                                      │
+├─── Output ────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ CHECK_RUNNER_CONTEXT_TEST_PASS (deterministic)                                                                │
+│ ⟦Wall: 0.10s | Timeout: 300s⟧                                                                                 │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+ ● Read tests/check_runner_context_test.rb:170-200
+
+ All correct. Now smoke-run the full relevant path beyond unit tests: the instruction says run related tests.
+ Also should I run the broader test suite subset that touches these files? Ticket:
+ "先跑相关已有测试，再实现，再补少量高价值回归" — done. Per workflow §6, related tests suffice; full suite is
+ Root's integration step. But a quick smoke of the whole chain: simulate a receipt hash through compress_context
+ end-to-end was covered by the Ruby tests using parsed/context_json (full render). JS appendReceipt/readReceipts
+ durable path covered by existing tests.
+
+ Let me do one extra end-to-end smoke verifying the chain: JS receipt with long output → append → readReceipts →
+ feed into Ruby compress_context → check final JSON ≤ 65536 and both ends present. That crosses languages; quick
+ throwaway script. Worth it as smoke proof of the two-layer handoff.
+
+ Also confirm the full final program context ≤ 65536 bytes with realistic base context — covered in degraded
+ test with minimal context; the smoke with base_context via parsed() covers it (context_json asserts nothing
+ about size though). The smoke script can assert bytesize.
+
+ Let me write a throwaway: node generates receipt JSON; ruby reads it, merges into base-like context,
+ compresses, asserts. Or simpler: just run a one-liner ruby with a synthetic receipt containing JS-style marker
+ — already covered by test 1. The real handoff format compatibility (JS output_omitted keys snake_case ✓ matches
+ Ruby test). JSON serialization of receipt: output_omitted included ✓ (asserted via deepEqual on receipt object
+ pre-serialization; JSON round trip trivial).
+
+ I think a minimal cross-language smoke adds real value: verify that an actual JS-produced receipt JSON parses
+ through Ruby's compress_context. Do it with a temp script, then delete.
+
+ All green. One cross-language smoke: an actual JS-produced receipt fed through the real Ruby compression entry.
+
+╭───────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ … 20 earlier lines ⟦⌃O: Expand⟧                                                                               │
+│ raise "marker lost" unless out["output"].include?("…[omitted ")                                               │
+│ raise "upstream facts lost" unless out["output_omitted"].is_a?(Hash) &&                                       │
+│ out["output_omitted"]["visible_utf16_units"] == 9011 + 10 + 1 - 1 ||                                          │
+│ out["output_omitted"]["visible_utf16_units"] > 9000                                                           │
+│ raise "truncation flag lost" unless out["output_truncated"] == true                                           │
+│ raise "exit lost" unless out["exit_code"] == 1                                                                │
+│ puts "C01_SMOKE_PASS bytes=#{json.bytesize} output_len=#{out["output"].length}"' && rm                        │
+│ /tmp/c01-smoke-receipt.json                                                                                   │
+├─── Output ────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Backgrounded early to handle an incoming message; the command keeps running.                                  │
+│ ⟦Backgrounded: bg_1 | Timeout: 300s⟧                                                                          │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+
+ 请完成C01三个相关已有入口与新增回归后收束，回报即停止改动。全仓npm
+ test与安装/真实验收由Root统一运行，不要重复跑全套。报告改动、测试数量行数、两层单位/省略/上游资格边界即可。
+
+
+ Root asks to wrap up: finish the three existing entry tests + new regressions, then report and stop. Don't run
+ full suite. The smoke job is running in background — wait for its result before reporting (it's already
+ launched; its result is part of my verification evidence).
+
+ Let me wait for bg_1 result.
+
+ • Background job completed [bash] bg_1 (73ms)
+
+ Smoke passed. Note: visible_utf16_units 9035 (my ruby check had a sloppy condition but passed since >9000).
+ Cross-language handoff verified: JS receipt (long output → head+tail + marker + output_omitted) → Ruby
+ compress_context → final JSON 3498 bytes ≤ 65536, both ends, marker, structured upstream facts, exit code,
+ truncation flag.
+
+ Wrap up: report diff summary, test counts/lines, unit/omission/upstream boundaries. Don't run full suite.
+
+ Quick diff stat for the report.
+
+ 冒烟通过。收束，汇总改动。
+
+╭───────────────────────────────────────────────────────────────────────────────────────────────────────────────╮
+│ $ git diff --stat -- plugins/root-verifications.mjs lib/orbit/check_runner.rb                                 │
+│ tests/root_verifications_test.mjs tests/root_verifications_file_tools_test.mjs                                │
+│ tests/check_runner_context_test.rb                                                                            │
+├─── Output ────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│  lib/orbit/check_runner.rb          | 59 +++++++++++++++++++++++++--                                          │
+│  plugins/root-verifications.mjs     | 50 ++++++++++++++++++++++-                                              │
+│  tests/check_runner_context_test.rb | 81 +++++++++++++++++++++++++++++++++++++-                               │
+│  tests/root_verifications_test.mjs  | 61 +++++++++++++++++++++++++++-                                         │
+│  4 files changed, 244 insertions(+), 7 deletions(-)                                                           │
+│ ⟦Wall: 0.06s | Timeout: 300s⟧                                                                                 │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+ C01 已完成并收束，停止改动。
+
+ 改动（4 文件，+244/-7）
+
+ plugins/root-verifications.mjs（+50）
+ - 新增 boundedLogText：仅 bash/eval output 使用首尾均分保留；内嵌标记 …[omitted N of M UTF-16 code units / B
+   UTF-8 bytes sha256:…]；同时产出结构化 output_omitted={omitted_utf16_units, visible_utf16_units,
+   visible_utf8_bytes, sha256} 供下游免解析。切割点避让代理对，UTF-16 单位已按 Root
+   要求明示。标记自身位数参与预算的不动点迭代 12 轮内可证收敛；不收敛即抛错，无任何静默降级 fallback。
+ - buildReceipt：非文件工具 output 走新策略并挂 output_omitted；command/script 仍走 boundedText
+   纯前缀，文件工具仍不存正文，output_truncated 对上游 meta.truncation 的 OR 逻辑不变。
+
+ lib/orbit/check_runner.rb（+59）
+ - 新增 bound_log_string：本层标记 …[omitted N of M Unicode chars / B UTF-8 bytes sha256:…]（Ruby 字符与 UTF-8
+   字节分别明示）；退化 cap（标记超
+   cap）时只返回有界标记本身——注释明确该情形不保证首尾与字段限额，由外层字节循环继续降级或整体省略。同样 8
+   轮可证收敛，不收敛 raise。
+ - 接线显式限于 tool ∈ {bash, eval} 且有字符串 output 的回执；command/script 的 _truncated
+   标记逻辑与其他字符串通用前缀策略不变；output_omitted 经 bound_value 自然透传，二次裁剪不内嵌两代标记。
+ - 类注释与检查者 prompt 的压缩描述同步更新（首尾例外、单位、output_omitted 语义）。
+
+ 测试（新增 5 个场景，+142 行，在 ≤6/≤200 约束内）
+
+ - root_verifications_test.mjs（+61，3 块）：长输出首尾＋标记单位/SHA256/结构化元数据＋退出码来源不变；长
+   command 仍为纯前缀无标记、短输出原文；🔥 跨切割点 UTF-8 往返一致。
+ - check_runner_context_test.rb（+81，3 方法）：二次裁剪保留两端＋本层单位/SHA256＋output_omitted
+   上游事实直达且文本内无二代标记嵌套；string_cap=500 降级下 6 条日志全保留首尾与退出事实且 ≤64 KiB；多字节
+   UTF-8 合法＋非 bash/eval 回执保持通用前缀策略。1 处既有夹具补 "tool" => "bash" 真实身份。
+
+ 验证（全部实跑通过）
+
+ - 三个既有入口：ROOT_VERIFICATIONS_TEST_PASS、ROOT_VERIFICATIONS_FILE_TOOLS_TEST_PASS、CHECK_RUNNER_CONTEXT_TES
+   T_PASS (deterministic)（实现前后各一轮）。
+ - 跨语言冒烟：JS 真实产出的 9035-unit 长输出回执 → Ruby compress_context → 最终 JSON 3498 bytes ≤
+   65536，首尾、本层标记、output_omitted、output_truncated、exit_code=1 俱在。
+
+ 边界与剩余
+
+ - 两层单位语义不同且各自明示：JS=UTF-16 code units，Ruby=Unicode chars，SHA-256 均对该层可见输入的 UTF-8 字节。
+ - 上游截断资格不变：SDK meta.truncation 仍只抬
+   output_truncated；尾部文字不构成成功/当前版本证据；旧版本回执绑定语义未动。
+ - 未做：全仓 npm test、合同/文档同步、真实验收——按分工留 Root。模型身份：kimi-code/k3-256k:high。
+
+ ※ recap: C01
+ JS回执首尾保留＋Ruby二次裁剪已实现并验证完毕，三个既有测试入口与5个新增回归全绿，跨语言冒烟通过，改动已回报并停
+ 止。下一步等Root统一跑全仓npm test并同步合同文档。
+
+╭── π > ◒ K3-256k > 📁 ~/Personal/omen/orbit > ⑂ main *15 ?5 > S1.91 ▶──37%┃262K─◀ Implement C01 receipt cap… ──╮
+╰─                                                                                                             ─╯

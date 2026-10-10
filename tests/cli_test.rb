@@ -42,6 +42,10 @@ module CliTest
 
   def work_unit_selection_returns_the_runtime_response_without_writing_state
     record = task(runtime_pid: Process.pid)
+    malformed = cli("work-unit", record.path, "declare", "--file", "-", success: false,
+                    stdin_data: JSON.generate("spec" => {}, "model_requirements" => { "relevant_indices" => ["coding_index"] }))
+    assert(malformed.include?("belongs inside work_unit.spec"), "misplaced selection requirements must get a repair, not disappear")
+    assert(!File.exist?(File.join(record.path, "work-units.json")), "invalid wrapper cannot create a unit or select a member")
     unit = Orbit::WorkUnitStore.new(record).declare(
       "objective" => "Implement the bounded module", "requirements" => ["original requirement"],
       "allowed_paths" => ["src"], "allowed_tools" => ["read", "write"], "allowed_commands" => [],

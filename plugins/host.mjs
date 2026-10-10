@@ -5,6 +5,7 @@ import fs from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { holdReleaseLease } from './lease.mjs';
+import { workUnitOperationError } from './native-task-preflight.mjs';
 
 holdReleaseLease();
 
@@ -32,7 +33,7 @@ async function run(args, cwd, input = '') {
   });
 }
 
-export const toolDescription = 'Start Orbit for multi-step work or when the user requests it; do local one-file edits yourself. Use takeover only to bring an already-executed requirement under supervision, stating why; the earlier execution is never recognized as controlled. Orbit prefers runnable models in the OMP candidate pool; if none run, Root can use another OMP-accessible model. JEV task-fit ranks suitable checkers but low or missing scores do not block a runnable model. No per-model user authorization is required. After a failed check Orbit records the failure and tries an unused runnable OMP model; never treat a failed check as a pass. Root may choose review_model from the current OMP catalog. For necessary integration or diagnosis after bounded delivery, Root may also select a stronger stage model via action root-model (pool∩catalog exact provider/id, phase, reason) — optional, never required per task. Independent checks and confirmed completion remain required.';
+export const toolDescription = 'Start Orbit for multi-step work or when the user requests it; do local one-file edits yourself. Use takeover only to bring an already-executed requirement under supervision, stating why; the earlier execution is never recognized as controlled. Orbit prefers runnable models in the OMP candidate pool; if none run, Root can use another OMP-accessible model. JEV task-fit ranks suitable checkers but low or missing scores do not block a runnable model. No per-model user authorization is required. After a failed check Orbit records the failure and tries an unused runnable OMP model; never treat a failed check as a pass. Root may choose review_model from the current OMP catalog. For necessary integration or diagnosis after bounded delivery, Root may also select a stronger stage model via action root-model (pool∩catalog exact provider/id, phase, reason) — optional, never required per task. Controlled delegation first declares an Orbit work-unit and puts its actual orbit-unit: id in task text. In native task items, agent is the generated Orbit candidate name; model is an exact provider/model selector, never an agent name. Use native task/hub with that durable work unit. Native task.tools mounts eval-defined tools; omit it for native read/write/edit/bash, whose permissions are enforced by the work unit. Repair the actual failed native call rather than switching to an unregistered eval agent. Independent checks and confirmed completion remain required.';
 export const toolArgs = z => ({
         action: z.enum(['context', 'start', 'status', 'check', 'amend', 'dispute', 'stop', 'review-model', 'work-unit', 'root-model']),
         task: z.string().optional().describe('Required for status/check/amend/dispute/stop/work-unit/review-model/root-model: the exact task_directory returned by start.'),
@@ -99,6 +100,8 @@ export function createOrbitHost({ provider, project, dispatch, bind, reset }) {
   }
   return {
       async execute(a, context) {
+        const operationError = workUnitOperationError(a);
+        if (operationError) throw new Error(operationError);
         if (closing) throw new Error('Agent host is closing');
         const id = await bind(context);
         await listen();
@@ -184,6 +187,8 @@ export function createOrbitHost({ provider, project, dispatch, bind, reset }) {
               JSON.stringify({ id: result.unit.id }));
             result.selection = selected.selection;
             result.selection_request_id = selected.request_id;
+            if (result.selection?.decision === 'facts_only' && !result.unit.model_requirements?.relevant_indices?.length)
+              result.notice = '本单元未声明任务相关指标，当前没有适配推荐。若本单元是编码工作，在新声明的 spec.model_requirements.relevant_indices 中填写 coding_index 等真实相关指标；明确未分类的任务可保持未知并说明自选依据。不要把 facts_only 当推荐。';
           }
           return JSON.stringify(result);
         }

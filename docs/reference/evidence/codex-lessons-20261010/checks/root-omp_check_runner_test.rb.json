@@ -1,0 +1,13 @@
+{
+  "role": "Root verification of C08 implementation",
+  "command": [
+    "ruby",
+    "--disable-gems",
+    "tests/omp_check_runner_test.rb"
+  ],
+  "pid": 79968,
+  "started_at": 1791604275.672301,
+  "exit_code": 0,
+  "ended_at": 1791604277.308445,
+  "process_exited": true
+}

@@ -1,0 +1,112 @@
+{
+  "pane": "w23:p15",
+  "task_id": "5dd5b889-7685-4cb9-8c2a-ed0269d3948d",
+  "status": "complete",
+  "stop_confirmation": {
+    "confirmed": true,
+    "thread_id": "01a12450-19cf-7066-b4f1-910dda959d87",
+    "scope": "Native session execution, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+    "native_owner": "Main",
+    "status_after": "idle",
+    "active_tools_after": 0,
+    "async_jobs_settled": true,
+    "collaboration_persistence": {
+      "task_dir": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v7/.orbit/tasks/5dd5b889-7685-4cb9-8c2a-ed0269d3948d",
+      "scope": "current process observations through cutoff; append completion, not fsync",
+      "observed_through": 34,
+      "written_seq": 34,
+      "failed_observations": 0,
+      "recorded_gaps": 0,
+      "pending_gap": null,
+      "last_error": null,
+      "status": "written"
+    },
+    "members": [
+      {
+        "thread_id": "orbit-e57a2ba3-7dd6-4f1d-ab54-b8dd56b28c94",
+        "confirmation": {
+          "confirmed": true,
+          "id": "orbit-e57a2ba3-7dd6-4f1d-ab54-b8dd56b28c94",
+          "scope": "Member turn, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+          "registry_status": "idle",
+          "status_after": "idle",
+          "active_tools_after": 0,
+          "async_jobs_settled": true
+        }
+      },
+      {
+        "thread_id": "orbit-4423db03-35ff-4bd0-a2ba-50ccb6702d26",
+        "confirmation": {
+          "confirmed": true,
+          "id": "orbit-4423db03-35ff-4bd0-a2ba-50ccb6702d26",
+          "scope": "Member turn, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+          "registry_status": "idle",
+          "status_after": "idle",
+          "active_tools_after": 0,
+          "async_jobs_settled": true
+        }
+      }
+    ]
+  },
+  "foreground_process_baseline": {
+    "foreground_process_group_id": 83781,
+    "foreground_processes": [
+      {
+        "argv": [
+          "node",
+          "/Users/yangke/.npm/_npx/3951ab07c1e658c9/node_modules/.bin/mcp-server-mobile"
+        ],
+        "argv0": "node",
+        "cmdline": "node /Users/yangke/.npm/_npx/3951ab07c1e658c9/node_modules/.bin/mcp-server-mobile",
+        "cwd": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v7",
+        "name": "node",
+        "pid": 83850
+      },
+      {
+        "argv0": "mobile-mcp@1.0.2",
+        "cwd": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v7",
+        "name": "node",
+        "pid": 83811
+      },
+      {
+        "argv": [
+          "omp",
+          "-e",
+          "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-session-agents-20261010-83781-hlhlj6",
+          "-e",
+          "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/runtime/releases/b716ce82403c9daeb8a867eb/plugins/omp.mjs",
+          "--cwd",
+          "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v7",
+          "--model",
+          "zhipu-coding-plan/glm-5.3-flash",
+          "--thinking",
+          "medium",
+          "--no-extensions",
+          "--no-skills",
+          "--no-lsp",
+          "--no-title",
+          "--session-dir",
+          "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/sessions-positive-v7"
+        ],
+        "argv0": "omp",
+        "cmdline": "omp -e /var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-session-agents-20261010-83781-hlhlj6 -e /private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/runtime/releases/b716ce82403c9daeb8a867eb/plugins/omp.mjs --cwd /var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v7 --model zhipu-coding-plan/glm-5.3-flash --thinking medium --no-extensions --no-skills --no-lsp --no-title --session-dir /var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/sessions-positive-v7",
+        "cwd": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v7",
+        "name": "omp",
+        "pid": 83781
+      }
+    ],
+    "pane_id": "w23:p15",
+    "shell_pid": 83383
+  },
+  "foreground_pids_exited": {
+    "83850": true,
+    "83811": true,
+    "83781": true
+  },
+  "independent_check_pids_exited": {
+    "86341": true,
+    "86922": true,
+    "86637": true
+  },
+  "pane_closed": true
+}

@@ -137,6 +137,83 @@ try {
   assert.equal((await preflight({}, ['src/clean/a.ts'])).ok, true, 'material under an allowed path');
   console.log('WORK_UNIT_SCOPE_TEST_PASS work_unit_preflight');
 
+  // Static first hop only: an outside npm realpath is refused before any
+  // spawn; the same name inside .runtime is accepted; shell syntax is not parsed.
+  const runtimeBin = path.join(project, '.runtime', 'bin');
+  const outsideBin = path.join(outside, 'bin');
+  await fs.mkdir(runtimeBin, { recursive: true });
+  await fs.mkdir(outsideBin, { recursive: true });
+  const outsideCli = path.join(outside, 'npm-cli.js');
+  await fs.writeFile(outsideCli, '#!/bin/sh\ntouch src/npm-ran\n');
+  await fs.chmod(outsideCli, 0o755);
+  await fs.symlink(outsideCli, path.join(outsideBin, 'npm'));
+  const insideCli = path.join(project, '.runtime', 'npm-cli.js');
+  await fs.writeFile(insideCli, '#!/bin/sh\ntouch src/npm-ran\n');
+  await fs.chmod(insideCli, 0o755);
+  await fs.symlink(insideCli, path.join(runtimeBin, 'npm'));
+  const savedPath = process.env.PATH;
+  try {
+    process.env.PATH = `${outsideBin}${path.delimiter}${savedPath || ''}`;
+    const blocked = await validateWorkUnitPreflight({ artifact_root: project, scope: {
+      allowed_paths: ['src'], allowed_tools: ['bash'], allowed_commands: ['npm test'] } });
+    if (blocked.reason?.includes('sandbox is unavailable')) {
+      console.log('WORK_UNIT_SCOPE_TEST_SKIP command_read_set sandbox unavailable');
+    } else {
+      assert.equal(blocked.block, true);
+      assert.match(blocked.reason, /npm-cli\.js/);
+      assert.match(blocked.reason, /\.runtime/);
+      const member = { artifact_root: project, scope: { allowed_paths: ['src'],
+        allowed_tools: ['bash'], allowed_commands: ['npm test'] } };
+      assert.equal((await validateMemberTool(member, { toolName: 'bash', input: { command: 'npm test' }, rootAgentId: 'Main' })).block, true);
+      process.env.PATH = `${runtimeBin}${path.delimiter}/usr/bin:/bin`;
+      const ready = await validateWorkUnitPreflight({ artifact_root: project, scope: {
+        allowed_paths: ['.runtime', 'src'], allowed_tools: ['bash'], allowed_commands: ['npm test'] } });
+      assert.equal(ready.ok, true, ready.reason);
+      // A native binary outside the data-read set remains executable; static
+      // feasibility must not turn the npm script failure into a binary ban.
+      const outsideNode = path.join(outsideBin, 'node');
+      await fs.copyFile(process.execPath, outsideNode);
+      await fs.chmod(outsideNode, 0o755);
+      process.env.PATH = `${outsideBin}${path.delimiter}/usr/bin:/bin`;
+      const binaryUnit = { artifact_root: project, scope: { allowed_paths: ['src'],
+        allowed_tools: ['bash'], allowed_commands: ['node --version'] } };
+      assert.equal((await validateWorkUnitPreflight(binaryUnit)).ok, true);
+      const binaryCall = await validateMemberTool(binaryUnit, { toolName: 'bash',
+        input: { command: 'node --version' }, rootAgentId: 'Main' });
+      assert.equal(binaryCall.block, undefined, binaryCall.reason);
+      assert.equal((await execute(binaryCall.input)).code, 0, 'kernel permits this binary without broader data-read rights');
+      const npmEntry = path.join(project, '.runtime/lib/node_modules/npm/bin/npm-cli.js');
+      await fs.mkdir(path.dirname(npmEntry), { recursive: true });
+      await fs.writeFile(npmEntry, 'require("../lib/cli.js");');
+      const npmCommand = `TMPDIR=.test-tmp ${outsideNode} .runtime/lib/node_modules/npm/bin/npm-cli.js test`;
+      const npmUnit = { artifact_root: project, scope: { allowed_paths: ['src', npmEntry],
+        allowed_tools: ['bash'], allowed_commands: [npmCommand] } };
+      const npmCall = () => validateMemberTool(npmUnit, { toolName: 'bash', input: { command: npmCommand }, rootAgentId: 'Main' });
+      assert.match((await npmCall()).reason, /including package.json, lib and node_modules/);
+      npmUnit.scope.allowed_paths = ['src', '.runtime'];
+      assert.equal((await npmCall()).block, undefined, 'the complete in-project npm package repairs the known dependency scope');
+      const relativeScript = path.join(project, 'src', 'relative.sh');
+      await fs.writeFile(relativeScript, '#!/bin/sh\nprintf relative');
+      await fs.chmod(relativeScript, 0o755);
+      const relativeUnit = { artifact_root: project, scope: { allowed_paths: ['src'],
+        allowed_tools: ['bash'], allowed_commands: ['./relative.sh'] } };
+      assert.equal((await validateWorkUnitPreflight(relativeUnit)).ok, true,
+        'the future relative command cwd is unknown at declaration');
+      const relativeCall = await validateMemberTool(relativeUnit, { toolName: 'bash',
+        input: { command: './relative.sh', cwd: 'src' }, rootAgentId: 'Main' });
+      assert.equal(relativeCall.block, undefined, relativeCall.reason);
+      assert.equal((await execute(relativeCall.input)).code, 0, 'actual cwd resolves the legitimate relative script');
+      const skipped = await validateWorkUnitPreflight({ artifact_root: project, scope: {
+        allowed_paths: ['src'], allowed_tools: ['bash'],
+        allowed_commands: ['printf allowed > src/allowed.txt'] } });
+      assert.equal(skipped.ok, true, skipped.reason);
+      await assert.rejects(fs.stat(path.join(project, 'src/npm-ran')));
+      console.log('WORK_UNIT_SCOPE_TEST_PASS command_read_set');
+    }
+  } finally {
+    process.env.PATH = savedPath;
+  }
+
   const write = 'printf allowed > src/allowed.txt'; unit.scope.allowed_commands.push(write);
   const wrapped = await gate('bash', { command: write });
   if (wrapped.block) {

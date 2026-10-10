@@ -1,0 +1,605 @@
+{
+  "task_id": "3ae66eb1-eaff-4a7e-a528-9947914c06bc",
+  "input_source": {
+    "kind": "omp_user_message",
+    "id": "588d72d4"
+  },
+  "delegation_hint": {
+    "version": "orbit-member-selection-v2",
+    "signature": "e416733fadf8f65d7af44cc2d625db705dbe192a67b996222b2198ad00390c05",
+    "work_unit_id": "wu-829bc0242b480b93",
+    "input_digest": "14d764a38b71399d2ea68e24a088cde8958a8c4744621d3e38aabed3659dadaf",
+    "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4",
+    "at": "2026-10-10T04:57:52Z",
+    "user_boundary": "588d72d4",
+    "user_message_id": "588d72d4",
+    "decision_version": "orbit-quality-decision-4",
+    "input_version": "jev-selection-input-2",
+    "dispatch_attempt": 1,
+    "recommendation": {
+      "first": {
+        "agent": "orbit-m-kimi-code-k3-256k-301bb915",
+        "model": "kimi-code/k3-256k",
+        "identity": {
+          "provider": "kimi-code",
+          "model": "k3-256k",
+          "reasoning": "unknown",
+          "billing_route": "subscription_quota"
+        },
+        "in_pool": true,
+        "native": false,
+        "quality_basis": "model_overview_prior",
+        "quality_sources": [
+          "https://artificialanalysis.ai",
+          "https://openrouter.ai/api/v1/benchmarks?source=artificial-analysis",
+          "https://www.kimi.com/code/docs/en/kimi-code/models.html"
+        ],
+        "quality_evidence_valid_until": null,
+        "model_overview_status": "fresh",
+        "recommendation_hold": false,
+        "hold_reason": null,
+        "eligibility": {
+          "context": {
+            "status": "not_required",
+            "requirement": null,
+            "catalog_value": 1048576
+          },
+          "input_modalities": {
+            "status": "not_required",
+            "requirement": [],
+            "catalog_value": [
+              "text",
+              "image",
+              "video"
+            ]
+          },
+          "output_modalities": {
+            "status": "not_required",
+            "requirement": [],
+            "catalog_value": [
+              "text"
+            ]
+          },
+          "parameters": {
+            "requirement": [
+              "tools"
+            ],
+            "catalog_value": [
+              "frequency_penalty",
+              "include_reasoning",
+              "logit_bias",
+              "logprobs",
+              "max_tokens",
+              "min_p",
+              "presence_penalty",
+              "reasoning",
+              "reasoning_effort",
+              "repetition_penalty",
+              "response_format",
+              "seed",
+              "stop",
+              "structured_outputs",
+              "temperature",
+              "tool_choice",
+              "tools",
+              "top_k",
+              "top_logprobs",
+              "top_p"
+            ],
+            "status": "met_by_catalog",
+            "note": "目录支持参数是模型级事实，不等于宿主在运行时授予对应工具；须在工具入口核对"
+          }
+        },
+        "execution_eligibility": {
+          "context": {
+            "status": "not_required",
+            "requirement": null,
+            "configured_limit": 262144,
+            "source": "omp_model_registry"
+          },
+          "input_modalities": {
+            "status": "not_required",
+            "requirement": [],
+            "configured_values": [
+              "text",
+              "image"
+            ]
+          },
+          "output_modalities": {
+            "status": "not_required",
+            "requirement": [],
+            "configured_values": [
+              "text"
+            ]
+          },
+          "parameters": {
+            "status": "met",
+            "requirement": [
+              "tools"
+            ],
+            "note": "模型工具支持不代替成员实际工具授权"
+          }
+        },
+        "projection_error": null,
+        "verdict": "recommended"
+      },
+      "backups": [
+        {
+          "agent": "orbit-m-zhipu-coding-plan-glm-5-3-flash-71b48ce8",
+          "model": "zhipu-coding-plan/glm-5.3-flash",
+          "identity": {
+            "provider": "zhipu-coding-plan",
+            "model": "glm-5.3-flash",
+            "reasoning": "unknown",
+            "billing_route": "subscription_quota"
+          },
+          "in_pool": true,
+          "native": false,
+          "quality_basis": "model_overview_prior",
+          "quality_sources": [
+            "https://artificialanalysis.ai",
+            "https://openrouter.ai/api/v1/benchmarks?source=artificial-analysis",
+            "https://openrouter.ai/api/v1/models"
+          ],
+          "quality_evidence_valid_until": null,
+          "model_overview_status": "fresh",
+          "recommendation_hold": false,
+          "hold_reason": null,
+          "eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "catalog_value": 1048576
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text",
+                "image",
+                "video"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "catalog_value": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "requirement": [
+                "tools"
+              ],
+              "catalog_value": [
+                "frequency_penalty",
+                "include_reasoning",
+                "logit_bias",
+                "logprobs",
+                "max_tokens",
+                "min_p",
+                "parallel_tool_calls",
+                "presence_penalty",
+                "reasoning",
+                "reasoning_effort",
+                "repetition_penalty",
+                "response_format",
+                "seed",
+                "stop",
+                "structured_outputs",
+                "temperature",
+                "tool_choice",
+                "tools",
+                "top_k",
+                "top_logprobs",
+                "top_p"
+              ],
+              "status": "met_by_catalog",
+              "note": "目录支持参数是模型级事实，不等于宿主在运行时授予对应工具；须在工具入口核对"
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "status": "not_required",
+              "requirement": null,
+              "configured_limit": 1000000,
+              "source": "omp_model_registry"
+            },
+            "input_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text",
+                "image"
+              ]
+            },
+            "output_modalities": {
+              "status": "not_required",
+              "requirement": [],
+              "configured_values": [
+                "text"
+              ]
+            },
+            "parameters": {
+              "status": "met",
+              "requirement": [
+                "tools"
+              ],
+              "note": "模型工具支持不代替成员实际工具授权"
+            }
+          },
+          "projection_error": null,
+          "verdict": "not_recommended"
+        }
+      ]
+    },
+    "work_unit": {
+      "id": "wu-829bc0242b480b93",
+      "objective": "Implement importExpenses(text) in src/importer.mjs per SPEC.md: an unquoted-CSV expense importer returning exact integer-cent grouped totals, then actually run the project test suite with the project-provided runtime and report real results.",
+      "scope": {
+        "allowed_paths": [
+          "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/src/importer.mjs",
+          "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/src/cli.mjs",
+          "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/SPEC.md",
+          "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/tests/acceptance.mjs",
+          "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/package.json",
+          "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.test-tmp",
+          "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.runtime"
+        ],
+        "allowed_tools": [
+          "read",
+          "write",
+          "edit",
+          "bash"
+        ],
+        "allowed_commands": [
+          "TMPDIR=/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.test-tmp .runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test",
+          "TMPDIR=/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.test-tmp npm_config_cache=/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.test-tmp .runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test",
+          "TMPDIR=/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.test-tmp .runtime/bin/node tests/acceptance.mjs"
+        ]
+      },
+      "acceptance": "src/importer.mjs exports a working importExpenses meeting every SPEC.md rule; the verbatim npm test command (project .runtime node + npm-cli.js, TMPDIR=.test-tmp) exits 0 and prints EXPENSE_VALIDATION_SUMMARY with all 127 cases passed, including the CLI cases; member reports the real command, exit code, and output via the native hub to Main.",
+      "escalation": "If the runtime command fails for environment reasons (missing binary, PATH, npm spawn), diagnose the actual error output, retry only with the declared verbatim commands, and if still blocked report the exact failure to Root (Main) via the native hub instead of working around outside allowed paths or claiming success."
+    },
+    "judgments": [
+      {
+        "provider": "typesafe",
+        "model": "jev-1.13.0",
+        "question_set_version": "jev-delegation-4",
+        "scores": {
+          "handoff_fit": 0.91,
+          "member_task_fit": 0.81
+        },
+        "call_id": "orbit-judgment-06e1aa2b-88e1-4cb9-a6d7-c5b54eb97a47",
+        "requested_model": "jev-1.13.0",
+        "status": "answered",
+        "input_version": "jev-selection-input-2",
+        "phase": "delegation",
+        "usage": {
+          "input_tokens": 24486,
+          "output_tokens": 40
+        }
+      },
+      {
+        "provider": "typesafe",
+        "model": "jev-1.13.0",
+        "question_set_version": "jev-candidates-4",
+        "scores": {
+          "0": {
+            "quality": 0.59
+          },
+          "1": {
+            "quality": 0.79
+          },
+          "2": {
+            "quality": 0.53
+          },
+          "3": {
+            "quality": 0.69
+          },
+          "4": {
+            "quality": 0.47
+          },
+          "5": {
+            "quality": 0.49
+          },
+          "6": {
+            "quality": 0.56
+          },
+          "7": {
+            "quality": 0.43
+          }
+        },
+        "call_id": "orbit-judgment-8af879c3-cfff-4aec-99e0-a8f5fa65cacf",
+        "requested_model": "jev-1.13.0",
+        "status": "answered",
+        "input_version": "jev-selection-input-2",
+        "phase": "candidates",
+        "usage": {
+          "input_tokens": 26299,
+          "output_tokens": 164
+        }
+      }
+    ],
+    "order": {
+      "version": "orbit-quality-decision-4",
+      "positive": true,
+      "basis": "released_task_fit",
+      "ordered_ids": [
+        "orbit-m-kimi-code-k3-256k-301bb915",
+        "orbit-m-zhipu-coding-plan-glm-5-3-flash-71b48ce8",
+        "orbit-m-opencode-go-deepseek-v4-1-flash-79717e5d",
+        "orbit-m-zenmux-deepseek-deepseek-v4-1-flash-0afa958f",
+        "orbit-m-cursor-grok-4-7-fast-aa556a9e",
+        "orbit-m-cursor-grok-4-7-56f2c60a",
+        "orbit-m-openai-codex-gpt-6-1-sol-3026c530",
+        "orbit-m-openai-codex-gpt-6-luna-bae41d6b"
+      ],
+      "positive_ids": [
+        "orbit-m-kimi-code-k3-256k-301bb915",
+        "orbit-m-zhipu-coding-plan-glm-5-3-flash-71b48ce8"
+      ],
+      "cost_comparison": "unknown",
+      "cost_notes": [
+        "orbit-m-kimi-code-k3-256k-301bb915: cost unknown",
+        "orbit-m-zhipu-coding-plan-glm-5-3-flash-71b48ce8: cost unknown"
+      ],
+      "cost_estimates": {},
+      "reason": "released task-fit signal; route costs are not comparable, so gated candidates keep the caller's stable input pool order — a preference, not a quality or cost advantage, and unknown cost is not free",
+      "proves_samples_real": false,
+      "cost_is_capability_measurement": false
+    },
+    "message_id": "846d8946-6b69-4f17-b8b9-5cb256419a5e",
+    "followed": true,
+    "followed_member_id": "orbit-f4e84132-6b7a-4efd-abe8-ba042278f0f8",
+    "followed_tool_call_id": "tool_W1pBMqUshbnaXWTtgITeC82g"
+  },
+  "members": [
+    {
+      "kind": "omp",
+      "adapter": "omp_native_task",
+      "thread_id": "orbit-f4e84132-6b7a-4efd-abe8-ba042278f0f8",
+      "requested_name": "orbit-f4e84132-6b7a-4efd-abe8-ba042278f0f8",
+      "status": "completed",
+      "registered_at": "2026-10-10T04:58:57Z",
+      "tool_call_id": "tool_W1pBMqUshbnaXWTtgITeC82g",
+      "delegation_basis": "orbit_hint",
+      "model": "kimi-code/k3-256k",
+      "registry_status": "idle",
+      "session_file": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/sessions-positive-v4/2026-10-10T04-53-35-042Z_01a12428-c8c2-7152-a1e3-5ccb2f6fe56d/orbit-f4e84132-6b7a-4efd-abe8-ba042278f0f8.jsonl",
+      "last_turn_error": null,
+      "work_unit_id": "wu-829bc0242b480b93",
+      "accepted_at": 1791608684107,
+      "result": "{\n  \"unit\": \"wu-829bc0242b480b93\",\n  \"status\": \"complete\",\n  \"command\": \"TMPDIR=/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.test-tmp .runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test\",\n  \"cwd\": \"/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4\",\n  \"exit_code\": 0,\n  \"summary_line\": \"EXPENSE_VALIDATION_SUMMARY: 127 cases passed; integer precision and CLI verified\",\n  \"details\": \"Implemented importExpenses(text) in src/importer.mjs (the only file modified). Verbatim command 1 succeeded on the first attempt — no fallback to commands 2/3 needed. All 127 cases passed: 110 grouping samples, BOM+CRLF+blank+whitespace handling, 6 invalid-amount rejections with line-3 provenance (incl. 90071992547409.92 single-amount overflow), sum overflow (line 3), category overflow (line 3), extra column (line 2), empty category (line 2), invalid header (line 1), and all 5 CLI integration cases against Root's src/cli.mjs. Implementation: strips at most one leading U+FEFF; splits on /\\\\r?\\\\n/; blank lines ignored for output but counted in one-based error line numbers; header must be exactly \\\"category,amount\\\"; exactly two unquoted comma columns, both trimmed, category nonempty; amount matched with /^(\\\\d+)\\\\.(\\\\d{2})$/ and converted to integer cents by integer-part/fraction-part arithmetic only (never parseFloat/Number); single amount, per-category sum, and overall sum checked against Number.MAX_SAFE_INTEGER with the offending data line number in the message; grouping via Map preserves first-seen order; returns {groups:[{category,totalCents,count}],totalCents,count}; throws plain Error, never prints or exits. No environment limitations encountered.\",\n  \"reported_to\": \"Main\"\n}",
+      "output_path": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/sessions-positive-v4/2026-10-10T04-53-35-042Z_01a12428-c8c2-7152-a1e3-5ccb2f6fe56d/orbit-f4e84132-6b7a-4efd-abe8-ba042278f0f8.md",
+      "result_delivery": "native_task",
+      "stop_confirmation": {
+        "confirmed": true,
+        "id": "orbit-f4e84132-6b7a-4efd-abe8-ba042278f0f8",
+        "scope": "Member turn, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+        "registry_status": "idle",
+        "status_after": "idle",
+        "active_tools_after": 0,
+        "async_jobs_settled": true
+      },
+      "execution_status": "stopped",
+      "registry_status_before_stop": "idle"
+    }
+  ],
+  "collaboration": [
+    {
+      "at": "2026-10-10T04:54:36.835Z",
+      "at_ms": 1791608076835,
+      "kind": "goal_projection",
+      "session_id": "01a12428-c8c2-7152-a1e3-5ccb2f6fe56d",
+      "agent_id": "Main",
+      "task_id": "3ae66eb1-eaff-4a7e-a528-9947914c06bc",
+      "model": "kimi-code/k3-256k",
+      "channel": "context_hook",
+      "instruction_source": {
+        "kind": "omp_user_message",
+        "id": "588d72d4"
+      },
+      "input_digest": "14d764a38b71399d2ea68e24a088cde8958a8c4744621d3e38aabed3659dadaf",
+      "input_digest_status": "ok",
+      "projection_bytes": 3604,
+      "projection_sha256": "sha256:9849109ab73886978b8efc1583cf942c3d2465de087ccf78f1f099b95a58a482",
+      "delivered_claim": "first append of this projection version under this actual model and channel in this process; every request re-derives the projection from the durable record (later appends are not individually recorded); no server receipt and no model-compliance claim",
+      "task_dir": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc",
+      "seq": 4
+    },
+    {
+      "at": "2026-10-10T05:04:29.360Z",
+      "at_ms": 1791608669360,
+      "kind": "hub_call",
+      "session_id": "01a1242d-b4df-74ee-b59c-e8ac46600253",
+      "agent_id": "orbit-f4e84132-6b7a-4efd-abe8-ba042278f0f8",
+      "tool_call_id": "tool_KAhoxWRR3PQBV9B8sv4fDB25",
+      "op": "send",
+      "to": "Main",
+      "from": null,
+      "reply_to": null,
+      "await_reply": false,
+      "message": "orbit-unit wu-829bc0242b480b93 COMPLETE — importExpenses implemented in src/importer.mjs.\n\nCommand run (cwd = project root, verbatim command 1 from shared context, via the Orbit sandbox wrapper):\nTMPDIR=/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.test-tmp .runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test\n\nExit code: 0 (observed — command completed successfully, npm ran tests/acceptance.mjs to completion; only one command was needed, no fallback to commands 2/3).\n\nSummary line (verbatim from output):\nEXPENSE_VALIDATION_SUMMARY: 127 cases passed; integer precision and CLI verified\n\nAll 127 PASS lines observed, including: 110 grouping samples, BOM/CRLF/blank/whitespace handling, 6 invalid-amount cases (line 3 provenance), sum overflow (line 3), category overflow (line 3), extra column (line 2), empty category (line 2), invalid header (line 1), and all 5 CLI integration cases (success + 4 failure modes) against Root's src/cli.mjs.\n\nImplementation notes: pure function, no deps; strips one leading U+FEFF; splits /\\r?\\n/; blank lines skipped but counted in one-based line numbers; header must be exactly \"category,amount\"; amounts validated with /^(\\d+)\\.(\\d{2})$/ and converted to cents via integer-part/fraction-part integer arithmetic only (no parseFloat/Number on the amount); single-amount, per-category, and overall overflow vs Number.MAX_SAFE_INTEGER rejected with the offending line number; grouping via Map preserves first-seen order; returns {groups,totalCents,count}; throws plain Error only.\n\nNo files other than src/importer.mjs were modified. No environment limitations encountered.",
+      "task_dir": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc",
+      "seq": 13
+    },
+    {
+      "at": "2026-10-10T05:04:29.361Z",
+      "at_ms": 1791608669361,
+      "kind": "hub_result",
+      "session_id": "01a1242d-b4df-74ee-b59c-e8ac46600253",
+      "agent_id": "orbit-f4e84132-6b7a-4efd-abe8-ba042278f0f8",
+      "tool_call_id": "tool_KAhoxWRR3PQBV9B8sv4fDB25",
+      "ok": true,
+      "text": "Delivered to Main.",
+      "task_dir": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc",
+      "seq": 14
+    }
+  ],
+  "checks": [
+    {
+      "number": 1,
+      "started_at": "2026-10-10T05:08:31Z",
+      "finished_at": "2026-10-10T05:10:03Z",
+      "input_digest": "14d764a38b71399d2ea68e24a088cde8958a8c4744621d3e38aabed3659dadaf",
+      "artifact_digest": "sha256:a1cbec3825627993ab14430aa5e537828fb5a14c7920e02f315de428d23108de",
+      "result": {
+        "verdict": "check_failed",
+        "error": "check run failed (exit 1)\nstderr:\n/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc/checks/1/evidence.json\n\nevents: /private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc/checks/1/evidence.json\noutput_dir: /private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc/checks/1\nevidence problems: final message is not valid JSON: JSON Parse error: Unexpected identifier \"All\"",
+        "failure_kind": "invalid_result",
+        "failure_basis": "structural"
+      },
+      "failed": true,
+      "stale": false
+    },
+    {
+      "number": 2,
+      "started_at": "2026-10-10T05:10:04Z",
+      "finished_at": "2026-10-10T05:11:23Z",
+      "input_digest": "14d764a38b71399d2ea68e24a088cde8958a8c4744621d3e38aabed3659dadaf",
+      "artifact_digest": "sha256:a1cbec3825627993ab14430aa5e537828fb5a14c7920e02f315de428d23108de",
+      "result": {
+        "verdict": "check_failed",
+        "error": "check run failed (exit 1)\nstderr:\n/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc/checks/2/evidence.json\n\nevents: /private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc/checks/2/evidence.json\noutput_dir: /private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc/checks/2\nevidence problems: delivery has unexpected keys: evidences",
+        "failure_kind": "invalid_result",
+        "failure_basis": "structural"
+      },
+      "failed": true,
+      "stale": false
+    },
+    {
+      "number": 3,
+      "started_at": "2026-10-10T05:11:24Z",
+      "finished_at": "2026-10-10T05:12:31Z",
+      "input_digest": "14d764a38b71399d2ea68e24a088cde8958a8c4744621d3e38aabed3659dadaf",
+      "artifact_digest": "sha256:a1cbec3825627993ab14430aa5e537828fb5a14c7920e02f315de428d23108de",
+      "result": {
+        "verdict": "check_failed",
+        "error": "check run failed (exit 1)\nstderr:\n/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc/checks/3/evidence.json\n\nevents: /private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc/checks/3/evidence.json\noutput_dir: /private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc/checks/3\nevidence problems: findings must be an array",
+        "failure_kind": "invalid_result",
+        "failure_basis": "structural"
+      },
+      "failed": true,
+      "stale": false
+    },
+    {
+      "number": 4,
+      "started_at": "2026-10-10T05:12:32Z",
+      "finished_at": "2026-10-10T05:13:32Z",
+      "input_digest": "14d764a38b71399d2ea68e24a088cde8958a8c4744621d3e38aabed3659dadaf",
+      "artifact_digest": "sha256:a1cbec3825627993ab14430aa5e537828fb5a14c7920e02f315de428d23108de",
+      "result": {
+        "verdict": "check_failed",
+        "error": "check run failed (exit 1)\nstderr:\n/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc/checks/4/evidence.json\n\nevents: /private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc/checks/4/evidence.json\noutput_dir: /private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc/checks/4\nevidence problems: final message is not valid JSON: JSON Parse error: Expected '}'",
+        "failure_kind": "invalid_result",
+        "failure_basis": "structural"
+      },
+      "failed": true,
+      "stale": false
+    },
+    {
+      "number": 5,
+      "started_at": "2026-10-10T05:13:33Z",
+      "finished_at": "2026-10-10T05:16:32Z",
+      "input_digest": "14d764a38b71399d2ea68e24a088cde8958a8c4744621d3e38aabed3659dadaf",
+      "artifact_digest": "sha256:a1cbec3825627993ab14430aa5e537828fb5a14c7920e02f315de428d23108de",
+      "result": {
+        "verdict": "complete",
+        "reason": "src/importer.mjs, src/cli.mjs, and README.md match SPEC.md and tests/acceptance.mjs: one BOM, LF/CRLF, blank-aware 1-based line numbers, exact header, two trimmed columns, nonempty category, ^(\\d+)\\.(\\d{2})$ amounts, integer cents, single/category/overall MAX_SAFE_INTEGER rejection with the offending line, Map first-seen groups, CLI one-path UTF-8 JSON stdout exit 0 and concise stderr exit 1 with no stack. Attested root npm test on this artifact digest exited 0 with 127 passes. Tests and package.json were not changed; nothing was committed or pushed.",
+        "findings": [],
+        "resolved_ids": [],
+        "next_check_seconds": 60,
+        "delivery": {
+          "ready": true,
+          "reason": "Root is idle and the last attributed turn completed. The fixed snapshot contains src/importer.mjs (importExpenses), src/cli.mjs (one path, UTF-8, JSON stdout / error: stderr), and README.md (usage, input, errors, order, precision). Those are the named deliverables and they match SPEC.md and tests/acceptance.mjs."
+        },
+        "coverage": {
+          "complete": true,
+          "items": [
+            {
+              "requirement": "src/importer.mjs exports importExpenses(text) as a pure function: one leading U+FEFF, LF or CRLF, blank lines skipped but included in 1-based error line numbers, first nonblank line exactly category,amount.",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "src/importer.mjs lines 6-26 and 71-73: startsWith BOM then slice(1), split(/\\r?\\n/), trim-empty continue, raw !== 'category,amount' throws Error with line ${lineNo}; missing header throws line 1."
+            },
+            {
+              "requirement": "Unquoted CSV: exactly two columns, trim both fields, category nonempty after trim.",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "src/importer.mjs lines 28-36 split on comma, reject cols.length !== 2, trim both, reject empty category. tests/acceptance.mjs lines 15-16 expect throws matching /2/ for extra column and blank category."
+            },
+            {
+              "requirement": "Amount is nonnegative digits with exactly two fractional digits; reject sign, exponent, missing or extra decimals.",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "src/importer.mjs AMOUNT_RE /^(\\d+)\\.(\\d{2})$/ after trim. tests/acceptance.mjs line 12 rejects -1.00, 1, 1.0, 1.001, 1e2, and 90071992547409.92 with /3/."
+            },
+            {
+              "requirement": "Integer cents only; reject a single amount, per-category sum, or overall sum above Number.MAX_SAFE_INTEGER cents, and include the offending 1-based line number.",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "src/importer.mjs lines 42-67: digit split, parseInt of the integer and two-digit fraction, cents = intPart*100+fracPart, compares to MAX_SAFE before add. acceptance.mjs lines 13-14 sum and category overflow expect /3/."
+            },
+            {
+              "requirement": "Group by trimmed category in first-seen order and return {groups:[{category,totalCents,count}],totalCents,count}.",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "src/importer.mjs Map insertion then [...groups.values()] with totalCents and count. acceptance.mjs line 10 expects Food then Travel for 110 samples."
+            },
+            {
+              "requirement": "Importer throws a plain Error and does not print or process.exit.",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "src/importer.mjs only throw new Error(...); no process.exit or console. CLI catches err and prints err.message."
+            },
+            {
+              "requirement": "src/cli.mjs: exactly one path, UTF-8 read; success is only result JSON on stdout and exit 0; argument, read, or validation failure is a concise stderr error, empty stdout, exit 1, no stack.",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "src/cli.mjs lines 5-23. acceptance.mjs lines 18-22: success status 0, empty stderr, JSON deep-equal; 0/1/2 args and invalid data status 1, empty stdout, stderr without 'at file:'. Root receipt tool_pVkp1DV6bdfH0MgypmGX6S3P (artifact_matches and input_matches) shows the success JSON and error: lines with exit 1."
+            },
+            {
+              "requirement": "README documents invocation and input, error, ordering, and precision boundaries.",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "README.md sections Usage, Input format, Errors, Ordering and precision, Library API."
+            },
+            {
+              "requirement": "Do not change tests/acceptance.mjs or SPEC.md; no new dependencies, commits, pushes, or network service.",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "review_focus lists only README.md added and src/cli.mjs and src/importer.mjs modified. package.json test script is node tests/acceptance.mjs with no dependencies. task_git baseline_head equals snapshot_head 9fbcb881 and changed_paths is empty. Instruction forbids push; git_remote was not required to be verified."
+            },
+            {
+              "requirement": "Run npm test with the project Node/npm and TMPDIR under the project, covering the 127 acceptance cases including CLI.",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "Root receipt tool_0zOB6iRTC98VrZDdfRfiST9m: artifact_matches true, input_matches true, command TMPDIR=$PWD/.test-tmp .runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test, exit 0, output EXPENSE_VALIDATION_SUMMARY: 127 cases passed. This check did not re-run the suite."
+            },
+            {
+              "requirement": "Importer is a bounded member implementation, integrated by Root, not a read-only review of a stub.",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "execution_members entry orbit-f4e84132 completed for work unit wu-829bc0242b480b93. src/importer.mjs is a full importExpenses implementation. Root CLI receipt and npm-test receipt are on the same artifact digest sha256:a1cbec3825627993ab14430aa5e537828fb5a14c7920e02f315de428d23108de."
+            },
+            {
+              "requirement": "Independent manual final review of the fixed snapshot.",
+              "scope": "lifecycle",
+              "status": "verified",
+              "evidence": "This check read SPEC.md, tests/acceptance.mjs, src/importer.mjs, src/cli.mjs, README.md, and package.json and compared them to the named rules and the attested root receipts."
+            },
+            {
+              "requirement": "After a valid finalization notice, confirm stop and produce the closing report.",
+              "scope": "lifecycle",
+              "status": "unverified",
+              "evidence": "Root is idle and waiting on finalization_notice. The runtime records the notice, closing turn, and stop; they have not happened in this check."
+            }
+          ]
+        }
+      },
+      "failed": null,
+      "stale": false
+    }
+  ]
+}

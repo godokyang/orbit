@@ -1,0 +1,46 @@
+{
+  "commit": "codex-36ae1561b9324c93d5638b45eb19fe2cc070a581",
+  "files": [
+    {
+      "path": "codex-rs/core/src/session/context_window.rs",
+      "sha256": "9692f442771c63308cfc36954810cb2490d84c28b681972ea13b93afbd30050a",
+      "read_ranges": [
+        [
+          1,
+          120
+        ]
+      ]
+    },
+    {
+      "path": "codex-rs/core/src/session/turn.rs",
+      "sha256": "ebdb6e85952f40f23b1932c5acaa564c95079fa1a7dddca6e5cdbacf1f5cfc9b",
+      "read_ranges": [
+        [
+          1360,
+          1410
+        ]
+      ]
+    },
+    {
+      "path": "codex-rs/core/src/session/tests.rs",
+      "sha256": "d4fa7db4d4ef39d16e5bedd6b66142bc3fbcda890b5188e06b4e04bd9012de95",
+      "read_ranges": [
+        [
+          3488,
+          3518
+        ]
+      ]
+    },
+    {
+      "path": "codex-rs/core/src/guardian/request_budget.rs",
+      "sha256": "0d59aed69be9a0e78ab17b9f2f49b944ed2449a585bc5f1b8aed27e4ef83c5b2",
+      "read_ranges": [
+        [
+          30,
+          112
+        ]
+      ]
+    }
+  ],
+  "boundary": "Targeted source/test read only; no Codex build or runtime validation"
+}

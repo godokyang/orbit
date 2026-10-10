@@ -1,0 +1,15 @@
+{
+  "pid": 54789,
+  "role": "candidate-install",
+  "at": "2026-10-10T04:51:37.017074+00:00",
+  "argv": [
+    "sh",
+    "install.sh",
+    "--runtime-dir",
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/runtime",
+    "--bin-dir",
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/bin",
+    "--no-modify-path"
+  ],
+  "lifecycle": "running"
+}

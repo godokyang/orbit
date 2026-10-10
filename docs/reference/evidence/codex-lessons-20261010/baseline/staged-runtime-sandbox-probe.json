@@ -1,0 +1,14 @@
+{
+  "purpose": "Controller runtime material preparation probe only, not member success or product acceptance",
+  "command": [
+    "sandbox-exec",
+    "-p",
+    "scoped profile",
+    "project .runtime/bin/node",
+    "project .runtime/bin/npm",
+    "--version"
+  ],
+  "exit_code": 7,
+  "stdout": "",
+  "stderr": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive/.runtime/lib/node_modules/npm/lib/cli/validate-engines.js:25\n    throw err\n    ^\n\nError: EPERM: process.cwd failed with error operation not permitted, uv_cwd\n    at process.wrappedCwd (node:internal/bootstrap/switches/does_own_process_state:142:28)\n    at process.cwd (/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive/.runtime/lib/node_modules/npm/node_modules/graceful-fs/polyfills.js:10:19)\n    at new Config (/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive/.runtime/lib/node_modules/npm/node_modules/@npmcli/config/lib/index.js:80:19)\n    at new Npm (/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive/.runtime/lib/node_modules/npm/lib/npm.js:62:19)\n    at module.exports (/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive/.runtime/lib/node_modules/npm/lib/cli/entry.js:13:15)\n    at module.exports (/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive/.runtime/lib/node_modules/npm/lib/cli/validate-engines.js:33:10)\n    at module.exports (/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive/.runtime/lib/node_modules/npm/lib/cli.js:12:31)\n    at Object.<anonymous> (/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive/.runtime/lib/node_modules/npm/bin/npm-cli.js:2:25)\n    at Module._compile (node:internal/modules/cjs/loader:1872:14)\n    at Object..js (node:internal/modules/cjs/loader:2003:10) {\n  errno: -1,\n  code: 'EPERM',\n  syscall: 'uv_cwd'\n}\n\nNode.js v24.19.0\n"
+}

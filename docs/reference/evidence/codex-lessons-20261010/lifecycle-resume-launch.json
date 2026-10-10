@@ -1,0 +1,27 @@
+{
+  "pane": "w23:p0",
+  "argv": [
+    "env",
+    "XDG_CONFIG_HOME=/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/config",
+    "XDG_CACHE_HOME=/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/cache",
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/bin/orbit",
+    "omp",
+    "--cwd",
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/lifecycle",
+    "--model",
+    "zhipu-coding-plan/glm-5.3-flash",
+    "--thinking",
+    "medium",
+    "--no-extensions",
+    "--no-skills",
+    "--no-lsp",
+    "--no-title",
+    "--session-dir",
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/sessions-lifecycle",
+    "--session",
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/sessions-lifecycle/2026-10-10T04-35-53-287Z_01a12418-9547-7324-bb9d-8f5da6fb682a.jsonl"
+  ],
+  "session": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/sessions-lifecycle/2026-10-10T04-35-53-287Z_01a12418-9547-7324-bb9d-8f5da6fb682a.jsonl",
+  "at": "2026-10-10T04:42:04.842995+00:00",
+  "lifecycle": "running; same compacted native session before next actual request"
+}

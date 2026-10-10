@@ -1,0 +1,1 @@
+请把 format.mjs 中 label 的输入去掉前后空格，保留 item: 前缀。只修改这个文件，运行 node test.mjs 验证，然后简短报告结果。

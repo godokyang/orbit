@@ -337,6 +337,17 @@ try {
   await emit('tool_call', { toolName: 'hub', toolCallId: 'gap-2', input: { op: 'send', to: 'nobody', message: 'lost two' } }, ctx3);
   await waitFor(async () => (await request(taskDir3, 'hub_events', { session: 'root3' }))
     .events.some(e => e.kind === 'persistence_gap'), 'bridge persistence_gap mirror');
+  // A real append failure is diagnostic evidence, never a failed execution
+  // stop: the checkpoint names its cutoff and unrecorded gap explicitly.
+  const failedCheckpoint = await request(taskDir3, 'stop', { session: 'root3' });
+  assert.equal(failedCheckpoint.confirmed, true, 'a broken log sink cannot prevent cancellation');
+  const failedPersistence = failedCheckpoint.collaboration_persistence;
+  assert.equal(failedPersistence.status, 'written_with_gaps');
+  assert.equal(failedPersistence.observed_through, 2);
+  assert.equal(failedPersistence.written_seq, 0);
+  assert.equal(failedPersistence.failed_observations, 2);
+  assert.equal(failedPersistence.pending_gap.count, 2);
+  assert.match(failedPersistence.last_error, /append failed/);
   await fs.chmod(taskDir3, 0o755);
   await emit('tool_call', { toolName: 'hub', toolCallId: 'gap-3', input: { op: 'send', to: 'nobody', message: 'recovered' } }, ctx3);
   const lines3 = await waitFor(async () => {
@@ -350,6 +361,16 @@ try {
   assert.deepEqual(lines3.map(l => l.seq), [1, 2], 'sequence numbers stay contiguous across the loss');
   assert.equal(lines3.at(-1).tool_call_id, 'gap-3');
   assert.equal((await fs.stat(path.join(taskDir3, 'collaboration.jsonl'))).mode & 0o777, 0o600, 'recovered file is 0600');
+  const recoveredCheckpoint = await request(taskDir3, 'stop', { session: 'root3' });
+  assert.equal(recoveredCheckpoint.confirmed, true);
+  const recoveredPersistence = recoveredCheckpoint.collaboration_persistence;
+  assert.equal(recoveredPersistence.observed_through, 3);
+  assert.equal(recoveredPersistence.written_seq, lines3.at(-1).seq);
+  assert.equal(recoveredPersistence.pending_gap, null);
+  assert.equal(recoveredPersistence.failed_observations, 2, 'recovery does not erase the failed observations');
+  assert.equal(recoveredPersistence.recorded_gaps, 1);
+  assert.equal(recoveredPersistence.status, 'written_with_gaps');
+
 
   // Restart/resume: a task whose evidence file already exists (written by a
   // previous OMP process) with a valid last line and a crash-left PARTIAL

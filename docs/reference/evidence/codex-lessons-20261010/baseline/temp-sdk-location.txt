@@ -1,0 +1,1 @@
+/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/runtime/releases/22801754baf19b2a142efd53/runners/omp-reviewer/node_modules/@oh-my-pi/pi-coding-agent

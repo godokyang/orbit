@@ -1,0 +1,170 @@
+[
+  {
+    "scenario": "positive",
+    "file": "SPEC.md",
+    "original_git_hash": "e43c501260e1ee6e45c636377373adbeff38674b65965c997242cd9bf935cf68",
+    "current_hash": "e43c501260e1ee6e45c636377373adbeff38674b65965c997242cd9bf935cf68",
+    "same_as_pristine": true
+  },
+  {
+    "scenario": "positive",
+    "file": "tests/acceptance.mjs",
+    "original_git_hash": "4b05253b935211135ce6dc0df480121892d0f6a06d19182f1afc01aa4108db31",
+    "current_hash": "4b05253b935211135ce6dc0df480121892d0f6a06d19182f1afc01aa4108db31",
+    "same_as_pristine": true
+  },
+  {
+    "scenario": "positive",
+    "file": "package.json",
+    "original_git_hash": "e45b57c542fe3de5e6bce8be95a8af3427824c0839fd614bf0b50b1062c2dc2e",
+    "current_hash": "e45b57c542fe3de5e6bce8be95a8af3427824c0839fd614bf0b50b1062c2dc2e",
+    "same_as_pristine": true
+  },
+  {
+    "scenario": "positive-v2",
+    "file": "SPEC.md",
+    "original_git_hash": "e43c501260e1ee6e45c636377373adbeff38674b65965c997242cd9bf935cf68",
+    "current_hash": "e43c501260e1ee6e45c636377373adbeff38674b65965c997242cd9bf935cf68",
+    "same_as_pristine": true
+  },
+  {
+    "scenario": "positive-v2",
+    "file": "tests/acceptance.mjs",
+    "original_git_hash": "4b05253b935211135ce6dc0df480121892d0f6a06d19182f1afc01aa4108db31",
+    "current_hash": "4b05253b935211135ce6dc0df480121892d0f6a06d19182f1afc01aa4108db31",
+    "same_as_pristine": true
+  },
+  {
+    "scenario": "positive-v2",
+    "file": "package.json",
+    "original_git_hash": "e45b57c542fe3de5e6bce8be95a8af3427824c0839fd614bf0b50b1062c2dc2e",
+    "current_hash": "e45b57c542fe3de5e6bce8be95a8af3427824c0839fd614bf0b50b1062c2dc2e",
+    "same_as_pristine": true
+  },
+  {
+    "scenario": "positive-v3",
+    "file": "SPEC.md",
+    "original_git_hash": "e43c501260e1ee6e45c636377373adbeff38674b65965c997242cd9bf935cf68",
+    "current_hash": "e43c501260e1ee6e45c636377373adbeff38674b65965c997242cd9bf935cf68",
+    "same_as_pristine": true
+  },
+  {
+    "scenario": "positive-v3",
+    "file": "tests/acceptance.mjs",
+    "original_git_hash": "4b05253b935211135ce6dc0df480121892d0f6a06d19182f1afc01aa4108db31",
+    "current_hash": "4b05253b935211135ce6dc0df480121892d0f6a06d19182f1afc01aa4108db31",
+    "same_as_pristine": true
+  },
+  {
+    "scenario": "positive-v3",
+    "file": "package.json",
+    "original_git_hash": "e45b57c542fe3de5e6bce8be95a8af3427824c0839fd614bf0b50b1062c2dc2e",
+    "current_hash": "e45b57c542fe3de5e6bce8be95a8af3427824c0839fd614bf0b50b1062c2dc2e",
+    "same_as_pristine": true
+  },
+  {
+    "scenario": "positive-v4",
+    "file": "SPEC.md",
+    "original_git_hash": "e43c501260e1ee6e45c636377373adbeff38674b65965c997242cd9bf935cf68",
+    "current_hash": "e43c501260e1ee6e45c636377373adbeff38674b65965c997242cd9bf935cf68",
+    "same_as_pristine": true
+  },
+  {
+    "scenario": "positive-v4",
+    "file": "tests/acceptance.mjs",
+    "original_git_hash": "4b05253b935211135ce6dc0df480121892d0f6a06d19182f1afc01aa4108db31",
+    "current_hash": "4b05253b935211135ce6dc0df480121892d0f6a06d19182f1afc01aa4108db31",
+    "same_as_pristine": true
+  },
+  {
+    "scenario": "positive-v4",
+    "file": "package.json",
+    "original_git_hash": "e45b57c542fe3de5e6bce8be95a8af3427824c0839fd614bf0b50b1062c2dc2e",
+    "current_hash": "e45b57c542fe3de5e6bce8be95a8af3427824c0839fd614bf0b50b1062c2dc2e",
+    "same_as_pristine": true
+  },
+  {
+    "scenario": "positive-v5",
+    "file": "SPEC.md",
+    "original_git_hash": "e43c501260e1ee6e45c636377373adbeff38674b65965c997242cd9bf935cf68",
+    "current_hash": "e43c501260e1ee6e45c636377373adbeff38674b65965c997242cd9bf935cf68",
+    "same_as_pristine": true
+  },
+  {
+    "scenario": "positive-v5",
+    "file": "tests/acceptance.mjs",
+    "original_git_hash": "4b05253b935211135ce6dc0df480121892d0f6a06d19182f1afc01aa4108db31",
+    "current_hash": "4b05253b935211135ce6dc0df480121892d0f6a06d19182f1afc01aa4108db31",
+    "same_as_pristine": true
+  },
+  {
+    "scenario": "positive-v5",
+    "file": "package.json",
+    "original_git_hash": "e45b57c542fe3de5e6bce8be95a8af3427824c0839fd614bf0b50b1062c2dc2e",
+    "current_hash": "e45b57c542fe3de5e6bce8be95a8af3427824c0839fd614bf0b50b1062c2dc2e",
+    "same_as_pristine": true
+  },
+  {
+    "scenario": "positive-v6",
+    "file": "SPEC.md",
+    "original_git_hash": "e43c501260e1ee6e45c636377373adbeff38674b65965c997242cd9bf935cf68",
+    "current_hash": "e43c501260e1ee6e45c636377373adbeff38674b65965c997242cd9bf935cf68",
+    "same_as_pristine": true
+  },
+  {
+    "scenario": "positive-v6",
+    "file": "tests/acceptance.mjs",
+    "original_git_hash": "4b05253b935211135ce6dc0df480121892d0f6a06d19182f1afc01aa4108db31",
+    "current_hash": "4b05253b935211135ce6dc0df480121892d0f6a06d19182f1afc01aa4108db31",
+    "same_as_pristine": true
+  },
+  {
+    "scenario": "positive-v6",
+    "file": "package.json",
+    "original_git_hash": "e45b57c542fe3de5e6bce8be95a8af3427824c0839fd614bf0b50b1062c2dc2e",
+    "current_hash": "e45b57c542fe3de5e6bce8be95a8af3427824c0839fd614bf0b50b1062c2dc2e",
+    "same_as_pristine": true
+  },
+  {
+    "scenario": "positive-v7",
+    "file": "SPEC.md",
+    "original_git_hash": "e43c501260e1ee6e45c636377373adbeff38674b65965c997242cd9bf935cf68",
+    "current_hash": "e43c501260e1ee6e45c636377373adbeff38674b65965c997242cd9bf935cf68",
+    "same_as_pristine": true
+  },
+  {
+    "scenario": "positive-v7",
+    "file": "tests/acceptance.mjs",
+    "original_git_hash": "4b05253b935211135ce6dc0df480121892d0f6a06d19182f1afc01aa4108db31",
+    "current_hash": "4b05253b935211135ce6dc0df480121892d0f6a06d19182f1afc01aa4108db31",
+    "same_as_pristine": true
+  },
+  {
+    "scenario": "positive-v7",
+    "file": "package.json",
+    "original_git_hash": "e45b57c542fe3de5e6bce8be95a8af3427824c0839fd614bf0b50b1062c2dc2e",
+    "current_hash": "e45b57c542fe3de5e6bce8be95a8af3427824c0839fd614bf0b50b1062c2dc2e",
+    "same_as_pristine": true
+  },
+  {
+    "scenario": "lifecycle",
+    "file": "SPEC.md",
+    "original_git_hash": "e43c501260e1ee6e45c636377373adbeff38674b65965c997242cd9bf935cf68",
+    "current_hash": "e43c501260e1ee6e45c636377373adbeff38674b65965c997242cd9bf935cf68",
+    "same_as_pristine": true
+  },
+  {
+    "scenario": "lifecycle",
+    "file": "tests/acceptance.mjs",
+    "original_git_hash": "4b05253b935211135ce6dc0df480121892d0f6a06d19182f1afc01aa4108db31",
+    "current_hash": "4b05253b935211135ce6dc0df480121892d0f6a06d19182f1afc01aa4108db31",
+    "same_as_pristine": true
+  },
+  {
+    "scenario": "lifecycle",
+    "file": "package.json",
+    "original_git_hash": "e45b57c542fe3de5e6bce8be95a8af3427824c0839fd614bf0b50b1062c2dc2e",
+    "current_hash": "e45b57c542fe3de5e6bce8be95a8af3427824c0839fd614bf0b50b1062c2dc2e",
+    "same_as_pristine": true
+  }
+]

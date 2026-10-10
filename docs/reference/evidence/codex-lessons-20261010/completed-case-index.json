@@ -1,0 +1,1715 @@
+[
+  {
+    "scenario": "negative",
+    "task_id": "741e8b83-0639-4341-ab6c-f21b09ca0d85",
+    "status": "complete",
+    "stop_confirmation": {
+      "confirmed": true,
+      "thread_id": "01a12402-3635-730c-ba6f-151e3dd3cbd4",
+      "scope": "Native session execution, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+      "native_owner": "Main",
+      "status_after": "idle",
+      "active_tools_after": 0,
+      "async_jobs_settled": true,
+      "collaboration_persistence": {
+        "task_dir": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/negative/.orbit/tasks/741e8b83-0639-4341-ab6c-f21b09ca0d85",
+        "scope": "current process observations through cutoff; append completion, not fsync",
+        "observed_through": 5,
+        "written_seq": 5,
+        "failed_observations": 0,
+        "recorded_gaps": 0,
+        "pending_gap": null,
+        "last_error": null,
+        "status": "written"
+      }
+    },
+    "connection": {
+      "provider": "omp",
+      "socket": "/tmp/orbit-omp-UjdHVU/control.sock",
+      "thread_id": "01a12402-3635-730c-ba6f-151e3dd3cbd4"
+    },
+    "members": [],
+    "work_units": {},
+    "checks": [
+      {
+        "number": 1,
+        "started_at": "2026-10-10T04:12:41Z",
+        "finished_at": "2026-10-10T04:13:00Z",
+        "input_digest": "56cd6b9a40e4c30944831e020ba500e532d1b72dea03b53ebfd6ee019d4c0cc3",
+        "artifact_digest": "sha256:9a8b696366bc9cd25bfb17fc82e10443ed3075e8387ba66bb847b6f0ee0c4be7",
+        "result": {
+          "verdict": "complete",
+          "reason": "format.mjs:1 is `export const label = value => `item:${value.trim()}`;` — input trimmed, `item:` prefix preserved, no other change (54 bytes, single line, LF). Snapshot contains only format.mjs and test.mjs, and review_focus lists only format.mjs as modified, so the 'only modify this file' constraint holds. The program's native bash receipt for `node test.mjs` has artifact_matches=true, input_matches=true, exit_code=0 and output `PASS label trim`, proving the requested verification ran successfully. Root's closing message reports the change and test result concisely, matching the instruction's requested brief report.",
+          "findings": [],
+          "resolved_ids": [],
+          "next_check_seconds": 3600,
+          "delivery": {
+            "ready": true,
+            "reason": "Deliverable visible: fixed snapshot format.mjs:1 shows `item:${value.trim()}` (trim applied, prefix kept), the sole modified path; and the attributed root_verification receipt records `node test.mjs` exit 0 with output `PASS label trim`. Root's attributed task_delivery (turn 94f0459e) briefly reports the edit and test result, satisfying the report requirement."
+          },
+          "coverage": {
+            "complete": true,
+            "items": [
+              {
+                "requirement": "Trim leading/trailing whitespace from label's input in format.mjs",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "format.mjs:1 `export const label = value => `item:${value.trim()}`;` — value.trim() applied."
+              },
+              {
+                "requirement": "Keep the `item:` prefix",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "format.mjs:1 template still begins with literal `item:` before the trimmed value."
+              },
+              {
+                "requirement": "Modify only format.mjs",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "Snapshot contains only format.mjs and test.mjs; review_focus.modified = [format.mjs], added/deleted empty. test.mjs unchanged (imports label, asserts label(\" book \") === \"item:book\")."
+              },
+              {
+                "requirement": "Run `node test.mjs` to verify",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "root_verification bash receipt: command `node test.mjs`, artifact_matches=true, input_matches=true, exit_code=0, output `PASS label trim`."
+              },
+              {
+                "requirement": "Briefly report the result",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "task_delivery turn 94f0459e: `完成。format.mjs:1 改为 ... 仅此一处修改。node test.mjs 输出 PASS label trim，验证通过。`"
+              },
+              {
+                "requirement": "Final review, completion/confirmed stop and closing report for this check task",
+                "scope": "lifecycle",
+                "status": "unverified",
+                "evidence": "Future lifecycle events; runtime verifies them separately."
+              }
+            ]
+          }
+        },
+        "failed": null,
+        "stale": false
+      },
+      {
+        "number": 2,
+        "started_at": "2026-10-10T04:13:28Z",
+        "finished_at": "2026-10-10T04:13:47Z",
+        "input_digest": "56cd6b9a40e4c30944831e020ba500e532d1b72dea03b53ebfd6ee019d4c0cc3",
+        "artifact_digest": "sha256:9a8b696366bc9cd25bfb17fc82e10443ed3075e8387ba66bb847b6f0ee0c4be7",
+        "result": {
+          "verdict": "complete",
+          "reason": "format.mjs (54 bytes, 1 line) is `export const label = value => `item:${value.trim()}`;` — surrounding whitespace removed via trim(), `item:` prefix retained. Snapshot root contains only format.mjs and test.mjs; review_focus shows only format.mjs modified, so the single-file constraint holds. test.mjs unchanged asserts label(\" book \") === \"item:book\". root_verifications contains a bash receipt for `node test.mjs` with artifact_matches/input_matches true, exit 0, output `PASS label trim`. task_delivery text reports the edit and pass result. No findings.",
+          "findings": [],
+          "resolved_ids": [],
+          "next_check_seconds": 300,
+          "delivery": {
+            "ready": true,
+            "reason": "Deliverable visible: format.mjs in fixed snapshot trims label input while keeping item: prefix, only that file is modified, and the program record's native bash receipt shows `node test.mjs` exiting 0 with `PASS label trim` (artifact/input matches true). A task-related answer reporting the change and test result is delivered (root idle, last_turn_status completed, task-attributed)."
+          },
+          "coverage": {
+            "complete": true,
+            "items": [
+              {
+                "requirement": "format.mjs: label input leading/trailing whitespace removed, item: prefix preserved",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "read format.mjs: 1 line, `export const label = value => `item:${value.trim()}`;` — trim() on value, `item:` prefix literal retained."
+              },
+              {
+                "requirement": "Only format.mjs may be modified",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "Snapshot root lists only format.mjs and test.mjs; review_focus.modified = [\"format.mjs\"], added/deleted empty. test.mjs content still the original single-line assertion."
+              },
+              {
+                "requirement": "Run node test.mjs to verify",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "root_verifications bash receipt for `node test.mjs`, exit_code 0, output `PASS label trim`, artifact_matches=true, input_matches=true."
+              },
+              {
+                "requirement": "Report the result briefly",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "task_delivery.text: '核对完成，交付与原要求一致：format.mjs 仅一处修改（item:${value.trim()}），node test.mjs 输出 PASS label trim …'; turn attributed (root.last_turn_task_attributed=true)."
+              },
+              {
+                "requirement": "Independent final check of the fixed artifact",
+                "scope": "lifecycle",
+                "status": "unverified",
+                "evidence": "This review session is the check itself; outcome recorded only when submitted."
+              },
+              {
+                "requirement": "Completion / confirmed stop after the check",
+                "scope": "lifecycle",
+                "status": "unverified",
+                "evidence": "Future event; root.status idle and no stop confirmation yet."
+              },
+              {
+                "requirement": "Closing report after confirmed completion",
+                "scope": "lifecycle",
+                "status": "unverified",
+                "evidence": "Not yet produced."
+              }
+            ]
+          }
+        },
+        "failed": null,
+        "stale": false
+      }
+    ],
+    "runtime_metadata": null
+  },
+  {
+    "scenario": "positive",
+    "task_id": "e50f56a8-ffb2-4cf3-b513-e73428e0f400",
+    "status": "complete",
+    "stop_confirmation": {
+      "confirmed": true,
+      "thread_id": "01a12403-23e4-720b-82ff-360b16ea4d62",
+      "scope": "Native session execution, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+      "native_owner": "Main",
+      "status_after": "idle",
+      "active_tools_after": 0,
+      "async_jobs_settled": true,
+      "collaboration_persistence": {
+        "task_dir": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive/.orbit/tasks/e50f56a8-ffb2-4cf3-b513-e73428e0f400",
+        "scope": "current process observations through cutoff; append completion, not fsync",
+        "observed_through": 20,
+        "written_seq": 20,
+        "failed_observations": 0,
+        "recorded_gaps": 0,
+        "pending_gap": null,
+        "last_error": null,
+        "status": "written"
+      },
+      "members": [
+        {
+          "thread_id": "orbit-ff845f84-ca47-4256-9ae6-7bee105db16f",
+          "confirmation": {
+            "confirmed": true,
+            "id": "orbit-ff845f84-ca47-4256-9ae6-7bee105db16f",
+            "scope": "Member turn, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+            "registry_status": "idle",
+            "status_after": "idle",
+            "active_tools_after": 0,
+            "async_jobs_settled": true
+          }
+        }
+      ]
+    },
+    "connection": {
+      "provider": "omp",
+      "socket": "/tmp/orbit-omp-aGhgTv/control.sock",
+      "thread_id": "01a12403-23e4-720b-82ff-360b16ea4d62"
+    },
+    "members": [
+      {
+        "thread_id": "orbit-ff845f84-ca47-4256-9ae6-7bee105db16f",
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "registered_at": "2026-10-10T04:18:06Z",
+        "status": "completed",
+        "registry_status": "idle",
+        "work_unit_id": null,
+        "result_delivery": "native_task",
+        "tool_call_id": "call_55a68d16505642e982d24100"
+      }
+    ],
+    "work_units": {
+      "wu-0afecd43d6162d33": "accepted"
+    },
+    "checks": [
+      {
+        "number": 1,
+        "started_at": "2026-10-10T04:15:49Z",
+        "finished_at": "2026-10-10T04:17:13Z",
+        "input_digest": "9968985866cf48cd1d0b6aacbc33474dcb7a276c6a4206cb3d09e3a93ad2e341",
+        "artifact_digest": "sha256:462f329cf68d16b3b5da82bd06a698c1bd076a1230c6aeb5692f4aacd7451a48",
+        "result": {
+          "verdict": "complete",
+          "reason": "Deliverables present and correct in the fixed snapshot. src/importer.mjs:58 implements importExpenses as a pure function: one leading BOM stripped (line 24), /\r?\n/ split (25), blank-line skip with 1-based original numbering including blanks (32-35), exactly-two-column split (36-39), field trim + nonempty category (40-43), amount grammar /^(0|[1-9]\\d*)\\.\\d{2}$/ rejecting sign/exponent/extra decimals (6-8), exact integer cents (9-14), and three-tier MAX_SAFE_INTEGER rejection for the value (11), category sum (47) and overall sum (53); Map preserves first-seen order and the return shape {groups:[{category,totalCents,count}],totalCents,count} is exact (57). src/cli.mjs:22 reads exactly one path as UTF-8, prints only result JSON on stdout/exit 0, and emits a concise stderr message with empty stdout and exit 1 for arg/read/validation failures with no stack trace. README.md documents invocation, input grammar, output shape, ordering, precision and error/overflow boundaries. tests/acceptance.mjs is unchanged (not in review_focus modified or task_git changed_paths). Program receipt `.runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test` shows exit 0, artifact_matches true and input_matches true against the current artifact digest, 127 PASS. CLI success/ENOENT/no-arg receipts confirm exit codes and stdout/stderr split. task_git changed_paths empty (no commits), package.json has no dependencies, git_remote remote null. No defects found; the schema rejects leading-zero amounts such as 01.00 although SPEC's 'decimal digits' wording does not explicitly forbid them, but SPEC's enumerated rejections (sign, exponent, extra decimals) do not cover this and the named basis tests do not require it, so it is noted as a non-blocking ambiguity rather than a finding.",
+          "findings": [],
+          "resolved_ids": [],
+          "next_check_seconds": 3600,
+          "delivery": {
+            "ready": true,
+            "reason": "Fixed snapshot contains the three required deliverables: src/importer.mjs (pure importExpenses per SPEC), src/cli.mjs (single-path UTF-8 CLI with JSON stdout/exit 0 and concise stderr/exit 1 on failures), and README.md documenting usage, input format, ordering, precision and error/overflow boundaries; tests/acceptance.mjs unchanged and the project-Node/npm `npm test` receipt (artifact_matches true, input_matches true, exit 0, 127 PASS) plus CLI success/error receipts confirm the delivered behavior."
+          },
+          "coverage": {
+            "complete": true,
+            "items": [
+              {
+                "requirement": "Deliver src/importer.mjs exporting a pure importExpenses(text) behind the SPEC interface.",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/importer.mjs:23-58 exports importExpenses(text); no I/O or mutable external state; deterministic single Map + counters."
+              },
+              {
+                "requirement": "Strip exactly one leading BOM; accept LF or CRLF; ignore blank lines.",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/importer.mjs:24 strips one U+FEFF; line 25 splits on /\\r?\\n/; lines 34-35 skip trimmed-empty lines."
+              },
+              {
+                "requirement": "Each nonblank data line must have exactly two columns; trim both fields; category nonempty.",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/importer.mjs:36-38 rejects cols.length !== 2; 40-43 trims category and rejects empty; parseCents line 5 trims amount."
+              },
+              {
+                "requirement": "Amount must be nonnegative decimal digits with exactly two fractional digits; reject sign, exponent and extra decimals.",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/importer.mjs:6 regex /^(0|[1-9]\\d*)\\.\\d{2}$/ rejects -1.00, 1, 1.0, 1.001, 1e2; confirmed by tests/acceptance.mjs:12 invalid-amount cases. Leading-zero inputs (01.00) are rejected though SPEC does not explicitly forbid them — non-blocking ambiguity."
+              },
+              {
+                "requirement": "Compute integer cents exactly and reject values or per-category/overall sums outside Number.MAX_SAFE_INTEGER.",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/importer.mjs:9-14 exact int*100+frac with Number.isSafeInteger guard; checkSafe (17-21) applied to category sum line 47 and overall sum line 53. Accepted values have intPart<2^53/100 so conversion is exact."
+              },
+              {
+                "requirement": "Preserve first-seen category order and return {groups:[{category,totalCents,count}],totalCents,count}.",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/importer.mjs:29,45-52 Map insertion order; line 57 returns groups array with {category,totalCents,count}, totalCents, count."
+              },
+              {
+                "requirement": "Report invalid data with the original one-based line number in the message, including blank lines.",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/importer.mjs:33 lineNo=i+1 over the full split array so blank lines advance numbering; messages include `line ${n}` (7,12,19,27,38,42)."
+              },
+              {
+                "requirement": "CLI src/cli.mjs reads exactly one path argument as UTF-8 and prints only result JSON to stdout on success (exit 0).",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/cli.mjs:5-6 reject arg count != 1; line 12 readFileSync(path,'utf8'); line 18 console.log(JSON.stringify(result)); receipt of `node src/cli.mjs /tmp/ex.csv` printed the groups JSON with exit=0."
+              },
+              {
+                "requirement": "CLI on argument/read/validation failure: concise stderr, empty stdout, exit 1, no stack trace.",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/cli.mjs:7,14,20 write concise messages and process.exit(1); receipts show `usage: node src/cli.mjs <input.csv>` and `error: cannot read /tmp/nope.csv: ENOENT` with exit=1 and no stdout."
+              },
+              {
+                "requirement": "README documents invocation and input/error/ordering/precision behavior.",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "README.md:5-9 usage, 13-20 input grammar, 22-32 output/ordering/precision, 34-38 errors and MAX_SAFE_INTEGER overflow boundary."
+              },
+              {
+                "requirement": "Keep tests/acceptance.mjs unchanged.",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "tests/acceptance.mjs not in review_focus modified/added or deleted lists; task_git changed_paths empty; file content read matches the provided acceptance suite."
+              },
+              {
+                "requirement": "Actually run npm test using the project Node/npm and verify CLI success/error output.",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "Program receipt command `.runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test` exit 0 with EXPENSE_VALIDATION_SUMMARY 127 cases passed, artifact_matches true and input_matches true for the current artifact digest; separate CLI receipts show success JSON/exit 0 and ENOENT/no-arg errors with exit 1."
+              },
+              {
+                "requirement": "No dependencies, commits, pushing or network.",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "package.json has no dependencies/devDependencies; task_git changed_paths empty (baseline head equals snapshot head); git_remote.remote null and remote_contacted false."
+              },
+              {
+                "requirement": "Hand off the bounded importer work to a suitable work unit/model when available.",
+                "scope": "delivery",
+                "status": "unverified",
+                "evidence": "Conditional/optional per original wording ('有合适的工作单元和模型时可按当前建议交接'); Root reports dispatch failed with 'cannot be resolved before dispatch' for pool models and implemented directly. No work_units recorded in the program record; not a hard deliverable."
+              },
+              {
+                "requirement": "Request and complete an independent manual final check (this check), correct any finding and then confirm stop.",
+                "scope": "lifecycle",
+                "status": "unverified",
+                "evidence": "This independent check session is running; the subsequent finalization notice, corrected recheck and stop have not yet occurred and cannot be claimed as done."
+              },
+              {
+                "requirement": "Produce the final closing report to the user.",
+                "scope": "lifecycle",
+                "status": "unverified",
+                "evidence": "Future closing turn not yet observed; runtime verifies the closing turn and actual stop separately."
+              }
+            ]
+          }
+        },
+        "failed": null,
+        "stale": false
+      },
+      {
+        "number": 2,
+        "started_at": "2026-10-10T04:22:01Z",
+        "finished_at": "2026-10-10T04:24:53Z",
+        "input_digest": "9968985866cf48cd1d0b6aacbc33474dcb7a276c6a4206cb3d09e3a93ad2e341",
+        "artifact_digest": "sha256:462f329cf68d16b3b5da82bd06a698c1bd076a1230c6aeb5692f4aacd7451a48",
+        "result": {
+          "verdict": "complete",
+          "reason": "Read the fixed snapshot files directly: src/importer.mjs (58 lines), src/cli.mjs (22 lines), README.md (38 lines), tests/acceptance.mjs (24 lines), SPEC.md (3 lines), package.json. Every explicit rule in SPEC.md is enforced by the code: one leading BOM stripped once (line 24), LF/CRLF via /\\r?\\n/ (25), blank lines skipped while still counted in 1-based numbering (33-35), header check with line 1 (26-28), exactly two columns (37-39), both fields trimmed and nonempty category (40-43), amount regex /^(0|[1-9]\\d*)\\.\\d{2}$/ with string-integer cents and Number.isSafeInteger (4-14), per-category and overall MAX_SAFE_INTEGER rejection (17-21,47,53), first-seen Map order and {groups:[{category,totalCents,count}],totalCents,count} (29,45-57). CLI: exactly one arg, UTF-8 read, JSON-only stdout exit 0, concise stderr/no stack/exit 1 on arg/read/validation failure (5-22). README documents usage, input format, output shape, ordering/precision and error/overflow boundaries. Instruction constraints honored: tests/acceptance.mjs and SPEC.md untouched (review_focus modifies only src/cli.mjs, src/importer.mjs; README added), no dependencies in package.json, task_git changed_paths empty, git_remote has no remote/upstream. Program receipts root_verifications (artifact_matches/input_matches true) show `.runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test` exit 0 with 127 cases passed, plus CLI success JSON exit 0 and ENOENT/no-arg errors exit 1 with empty stdout. I manually traced all 127 acceptance cases (110 grouping, BOM/CRLF/blank/whitespace, 6 invalid amounts incl. 90071992547409.92, sum/category overflow, extra column, empty category, invalid header, 5 CLI cases) against the code; all match, and the overflow arithmetic cannot false-accept because 2^53 > MAX_SAFE_INTEGER. No missing, wrong or extra work found; no unresolved findings.",
+          "findings": [],
+          "resolved_ids": [],
+          "next_check_seconds": 3600,
+          "delivery": {
+            "ready": true,
+            "reason": "Deliverable visible in the fixed snapshot and satisfying what the instruction requires: src/importer.mjs exports the pure importExpenses function implementing all SPEC rules; src/cli.mjs is a runnable one-arg CLI with the specified exit/stdout/stderr contract; README.md documents invocation, input format, output shape and error/overflow boundaries. tests/acceptance.mjs is unchanged and package.json declares no dependencies. Program-native receipts confirm npm test ran via the project Node/npm (exit 0, 127 cases) and CLI success/error outputs, with artifact_digest and input_digest matching the current check input; root is idle with last turn completed and attributed to this task."
+          },
+          "coverage": {
+            "complete": true,
+            "items": [
+              {
+                "requirement": "Deliver src/importer.mjs exporting the pure importExpenses(text) function",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "Read src/importer.mjs (1881 bytes, 58 lines): `export function importExpenses(text)` at line 23, no imports/IO/dependencies, pure over input text."
+              },
+              {
+                "requirement": "Strip one leading BOM and accept LF or CRLF",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/importer.mjs line 24 `if (text.startsWith('\\ufeff')) text = text.slice(1);` (exactly one) and line 25 `text.split(/\\r?\\n/)`. Acceptance case 111 ('BOM CRLF blanks whitespace') matches this handling."
+              },
+              {
+                "requirement": "Ignore blank lines but keep them in 1-based line numbering",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/importer.mjs lines 32-35: loop index i over split lines, lineNo=i+1, `if (line.trim()==='') continue;` without altering numbering; error messages use lineNo. Tests 12-14 assert /3/ on inputs with a blank second line."
+              },
+              {
+                "requirement": "Require header category,amount and fail with line number 1",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/importer.mjs lines 26-28 throw 'line 1: expected header \"category,amount\"'; acceptance 'invalid header' (test 122) asserts /1/."
+              },
+              {
+                "requirement": "Unquoted CSV: each nonblank data line exactly two columns, both fields trimmed",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/importer.mjs lines 36-40: `line.split(',')`, `cols.length !== 2` throws with the data line number, category = cols[0].trim(). Acceptance tests 15 (extra column, /2/), 16 (empty category, /2/), 11 (trim of ' Food '/' 1.20 '). README line 18 documents unquoted CSV semantics."
+              },
+              {
+                "requirement": "Amount must be nonnegative decimal digits with exactly two fractional digits; no sign/exponent/extra decimals",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/importer.mjs line 6 regex /^(0|[1-9]\\d*)\\.\\d{2}$/ rejects '-1.00','1','1.0','1.001','1e2'; acceptance tests 112-117 cover these six rejected amounts."
+              },
+              {
+                "requirement": "Compute integer cents exactly (no floating-point accumulation)",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/importer.mjs lines 9-14 split on '.' and use Number(intPart)*100+Number(fracPart) with Number.isSafeInteger guard; totals accumulate integer cents (lines 48,54). Acceptance tests 1-110 assert exact totals i*100+3 / i*100+102."
+              },
+              {
+                "requirement": "Reject a single amount, a per-category sum and the overall sum outside Number.MAX_SAFE_INTEGER",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/importer.mjs line 11 Number.isSafeInteger(cents); lines 17-21 checkSafe(value>MAX_SAFE) invoked for category sum (line 47) and overall (line 53). Acceptance tests 118 (single 90071992547409.92), 119 (sum), 120 (category) assert throws. Arithmetic cannot false-accept because any true sum above 2^53-1 rounds to a double > 2^53-1."
+              },
+              {
+                "requirement": "Preserve first-seen category order and return {groups:[{category,totalCents,count}],totalCents,count}",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/importer.mjs lines 29 (Map insertion order), 45-57; return at line 57 matches shape. Acceptance tests 1-110 assert exact object equality incl. group order Food then Travel."
+              },
+              {
+                "requirement": "Deliver runnable CLI src/cli.mjs taking exactly one UTF-8 path argument",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "Read src/cli.mjs: lines 5-9 reject arg count != 1 with usage exit 1; lines 10-16 fs.readFileSync(args[0],'utf8'). Receipt shows `node src/cli.mjs /tmp/ex.csv` printing JSON with exit=0 and no-arg printing usage exit=1."
+              },
+              {
+                "requirement": "CLI prints only result JSON to stdout on success with exit 0",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/cli.mjs lines 17-18 JSON.stringify to console.log only. Root verification receipt: stdout {\"groups\":[{\"category\":\"Food\",\"totalCents\":122,\"count\":2},{\"category\":\"Travel\",\"totalCents\":99,\"count\":1}],\"totalCents\":221,\"count\":3} exit=0."
+              },
+              {
+                "requirement": "CLI argument/read/validation failures: concise stderr, empty stdout, exit 1, no stack trace",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/cli.mjs lines 7,14,20 use console.error with a message and process.exit(1) only, never printing a stack. Receipt: `error: cannot read /tmp/nope.csv: ENOENT` exit=1; acceptance test 127 asserts empty stdout and /2/ on validation failure."
+              },
+              {
+                "requirement": "Deliver README documenting invocation and input/error/ordering/precision behavior",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "Read README.md (38 lines): Usage (node src/cli.mjs input.csv), Input format, Output JSON example and group ordering/precision, Errors and limits incl. MAX_SAFE_INTEGER and line numbers."
+              },
+              {
+                "requirement": "Keep tests/acceptance.mjs and SPEC.md unchanged",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "Read tests/acceptance.mjs (24 lines) and SPEC.md (3 lines) in the fixed snapshot; review_focus.modified lists only src/cli.mjs and src/importer.mjs, review_focus.added only README.md; task_git.changed_paths is empty."
+              },
+              {
+                "requirement": "Actually run npm test with the provided project Node/npm after completion",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "Program receipt root_verifications (kind root_verification, artifact_matches true, input_matches true): command `.runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test`, exit_code 0, output 'EXPENSE_VALIDATION_SUMMARY: 127 cases passed; integer precision and CLI verified'. My read-only session did not re-run it."
+              },
+              {
+                "requirement": "Check CLI success and error output (exit codes, stdout/stderr separation)",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "Program receipt for `printf ... > /tmp/ex.csv && node src/cli.mjs /tmp/ex.csv; ... /tmp/nope.csv; ... cli.mjs`: success JSON exit=0; 'error: cannot read /tmp/nope.csv: ENOENT' exit=1; 'usage: node src/cli.mjs <input.csv>' exit=1, consistent with src/cli.mjs lines 5-21."
+              },
+              {
+                "requirement": "No dependencies, commits, pushing, downloads or network services",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "package.json declares no dependencies and test script 'node tests/acceptance.mjs'; task_git.changed_paths is empty with baseline_head == snapshot_head (9888a8a...); git_remote has remote null, upstream null, remote_contacted false since no upstream exists."
+              },
+              {
+                "requirement": "When members need project Node/npm, declare the project path and full command in the work unit; do not use unregistered eval subprocesses",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "work_units[wu-0afecd43d6162d33].scope.allowed_commands declares the absolute project paths for `.runtime/bin/node --check src/importer.mjs` and `.runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test`; member_blocks shows the attempted eval class blocked with reason 'tool eval has no allowed work-unit entrance', i.e. not used."
+              },
+              {
+                "requirement": "Independent manual final check is requested and any found problems are fixed and rechecked before confirmed stop",
+                "scope": "lifecycle",
+                "status": "unverified",
+                "evidence": "This Orbit check session is that independent review and is in progress; the subsequent fix/recheck-if-needed, confirmed stop and closing report have not happened yet in the record (root idle, delivery job not delivering)."
+              },
+              {
+                "requirement": "Subsequent completion/confirmed stop and closing report after the final check",
+                "scope": "lifecycle",
+                "status": "unverified",
+                "evidence": "Future lifecycle events: no finalization notice, confirmed stop or closing report is present in the program record; these are runtime-verified after this check."
+              }
+            ]
+          }
+        },
+        "failed": null,
+        "stale": false
+      }
+    ],
+    "runtime_metadata": null
+  },
+  {
+    "scenario": "positive-v2",
+    "task_id": "c5c93e74-4f38-4cf1-b991-0c96a4b4e5e1",
+    "status": "complete",
+    "stop_confirmation": {
+      "confirmed": true,
+      "thread_id": "01a12414-59cb-76bb-b75f-a6fd5f09d8b0",
+      "scope": "Native session execution, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+      "native_owner": "Main",
+      "status_after": "idle",
+      "active_tools_after": 0,
+      "async_jobs_settled": true,
+      "collaboration_persistence": {
+        "task_dir": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v2/.orbit/tasks/c5c93e74-4f38-4cf1-b991-0c96a4b4e5e1",
+        "scope": "current process observations through cutoff; append completion, not fsync",
+        "observed_through": 15,
+        "written_seq": 15,
+        "failed_observations": 0,
+        "recorded_gaps": 0,
+        "pending_gap": null,
+        "last_error": null,
+        "status": "written"
+      },
+      "members": [
+        {
+          "thread_id": "orbit-943f9eed-13f6-495e-b211-e98daa710872",
+          "confirmation": {
+            "confirmed": true,
+            "id": "orbit-943f9eed-13f6-495e-b211-e98daa710872",
+            "scope": "Member turn, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+            "registry_status": "idle",
+            "status_after": "idle",
+            "active_tools_after": 0,
+            "async_jobs_settled": true
+          }
+        }
+      ]
+    },
+    "connection": {
+      "provider": "omp",
+      "socket": "/tmp/orbit-omp-kRjcbL/control.sock",
+      "thread_id": "01a12414-59cb-76bb-b75f-a6fd5f09d8b0"
+    },
+    "members": [
+      {
+        "thread_id": "orbit-943f9eed-13f6-495e-b211-e98daa710872",
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "registered_at": "2026-10-10T04:37:24Z",
+        "status": "completed",
+        "registry_status": "idle",
+        "work_unit_id": null,
+        "result_delivery": "native_task",
+        "tool_call_id": "call_7ca76d5f5e3f4fbcb7824630"
+      }
+    ],
+    "work_units": {
+      "wu-184b3bcd3d512f62": "accepted"
+    },
+    "checks": [
+      {
+        "number": 1,
+        "started_at": "2026-10-10T04:40:25Z",
+        "finished_at": "2026-10-10T04:41:13Z",
+        "input_digest": "842de2c7b7fb840bc7b98ba644a295cfc516742a6b43ed7313257aead3accae4",
+        "artifact_digest": "sha256:13c9e5fd2dcd4ccc28018617b5d1a50e1d429b9331afccb87803e233cca86045",
+        "result": {
+          "verdict": "complete",
+          "reason": "Deliverable visible in fixed snapshot and matches SPEC.md/tests/acceptance.mjs. src/importer.mjs (84 lines) exports importExpenses with BOM strip, LF/CRLF, blank-line skipping with one-based provenance, exact-two-column split, trim, nonempty category, ^\\d+\\.\\d{2}$ amount, exact integer cents, and Number.isSafeInteger guards on value/category/overall sums; first-seen order via Map; returns {groups:[{category,totalCents,count}],totalCents,count}. src/cli.mjs (28 lines) enforces exactly one arg, UTF-8 read, JSON-only stdout/exit 0, single-line stderr/empty stdout/exit 1 without stack traces for arg/read/validation failures. README.md documents invocation, input/error/ordering/precision. tests/acceptance.mjs and SPEC.md are not in review_focus modified/added, and task_git changed_paths is empty with snapshot_head==baseline_head, so no test/spec edits and no commit. Zero deps in package.json. Root receipt at 04:39:59 has artifact_matches=true, input_matches=true, command '.runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test', exit 0, EXPENSE_VALIDATION_SUMMARY: 127 cases passed; CLI smoke receipt at 04:40:04 shows JSON stdout/exit 0 and one-line stderr/exit 1 for missing file, wrong arg count, invalid amount with line number. No missing, wrong or extra work identified.",
+          "findings": [],
+          "resolved_ids": [],
+          "next_check_seconds": 3600,
+          "delivery": {
+            "ready": true,
+            "reason": "Fixed snapshot contains the three required deliverables read directly: src/importer.mjs (pure importExpenses, 84 lines), src/cli.mjs (runnable CLI, 28 lines), README.md (usage/input/error/ordering/precision, 64 lines). Whole-task integration is program-attested by the artifact-matching root_verification receipt (artifact_digest 13c9e5fd2dcd4ccc28018617b5d1a50e1d429b9331afccb87803e233cca86045, artifact_matches=true, input_matches=true, exit 0, 127 cases passed) plus the CLI success/failure smoke receipt; SPEC.md and tests/acceptance.mjs are unchanged relative to HEAD."
+          },
+          "coverage": {
+            "complete": true,
+            "items": [
+              {
+                "requirement": "Deliver pure function importExpenses(text) in src/importer.mjs",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/importer.mjs lines 33-84 export function importExpenses returning {groups,totalCents,count}; no imports/dependencies."
+              },
+              {
+                "requirement": "SPEC: required header `category,amount` as first line, else error at line 1",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/importer.mjs:37-39 checks lines[0].trim() !== HEADER and throws 'Invalid header at line 1'; tests line 17 expects /1/."
+              },
+              {
+                "requirement": "SPEC: strip one leading BOM, accept LF and CRLF, ignore blank lines while counting them for one-based provenance",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/importer.mjs:34 slices charCodeAt(0)===0xfeff; :35 split /\\r\\n|\\n|\\r/; :46 line=i+1; :48 blank trim skip; tests line 11 BOM+CRLF+blank case."
+              },
+              {
+                "requirement": "SPEC: unquoted CSV, each nonblank data line exactly two columns, both fields trimmed",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/importer.mjs:50-53 raw.split(',') with columns.length!==2 throw; :55/:60 trim; tests lines 15-16."
+              },
+              {
+                "requirement": "SPEC: category nonempty after trim; amount nonnegative digits with exactly two fractional digits (no sign/exponent/extra decimals)",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/importer.mjs:5 AMOUNT_RE=/^\\d+\\.\\d{2}$/, :56-58 empty category throw; tests line 12 rejects -1.00,1,1.0,1.001,1e2."
+              },
+              {
+                "requirement": "SPEC: exact integer cents, no float math",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/importer.mjs:20-30 splits on '.', Number(intPart)*100+Number(fracPart), MAX_INT_DIGITS=14 keeps Number() exact (<2^53); tests line 10 expects exact i*100+3 cents."
+              },
+              {
+                "requirement": "SPEC: reject values or per-category/overall sums outside Number.MAX_SAFE_INTEGER",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/importer.mjs:27,64,69 Number.isSafeInteger on value, groupTotal, nextTotal; tests lines 12-14 with /3/."
+              },
+              {
+                "requirement": "SPEC: preserve first-seen category order; return {groups:[{category,totalCents,count}],totalCents,count}",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/importer.mjs:41 Map insertion order, :83 [...byCategory.values()]; tests line 10 deepEqual asserts Food then Travel."
+              },
+              {
+                "requirement": "SPEC: on invalid data throw Error whose message contains the original one-based line number including blank lines",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/importer.mjs:16-18,52,57,65,70 include line; line=i+1 counts blanks; tests lines 12-17 match /2/ and /3/."
+              },
+              {
+                "requirement": "Deliver runnable CLI src/cli.mjs: exactly one path argument, UTF-8, JSON-only stdout exit 0, concise stderr with empty stdout exit 1 and no stack trace on arg/read/validation failure",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/cli.mjs:10-12 one-arg check, :16 readFileSync utf8, :28 console.log(JSON.stringify); read receipt 04:40:04 shows JSON stdout/exit 0 and one-line stderr/exit 1 for missing/wrong-arg/invalid."
+              },
+              {
+                "requirement": "README documents invocation and input/error/ordering/precision behavior",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "README.md lines 6-17 usage, 19-31 input format, 33-40 errors, 42-46 ordering/precision, 48-58 library use."
+              },
+              {
+                "requirement": "Actually run npm test using the project-provided Node/npm after integration",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "root_verification receipt at 04:39:59: command '.runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test', exit_code 0, artifact_matches true, output ends 'EXPENSE_VALIDATION_SUMMARY: 127 cases passed; integer precision and CLI verified'."
+              },
+              {
+                "requirement": "Do not modify tests or spec",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "review_focus modified=[src/cli.mjs,src/importer.mjs], added=[README.md]; tests/acceptance.mjs and SPEC.md absent; task_git changed_paths empty, snapshot_head==baseline_head."
+              },
+              {
+                "requirement": "No commits, pushes, network services or dependency downloads",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "task_git.changed_paths empty and baseline_head==snapshot_head (d8e7119...); package.json has no dependencies; git_remote.remote_contacted=false."
+              },
+              {
+                "requirement": "Implement importer via a bounded work unit dispatched to an available native execution member, not read-only review",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "work_units[0] wu-184b3bcd3d512f62 status accepted, dispatch bound to member orbit-943f9eed-13f6-495e-b211-e98daa710872 (adapter omp_native_task) implementing src/importer.mjs; member result reports 122/122 pure-function cases."
+              },
+              {
+                "requirement": "Request an independent manual final check",
+                "scope": "lifecycle",
+                "status": "verified",
+                "evidence": "root observation agent_message '实现与核验已收口，请求独立手动终检。' with write to xd://orbit; check command id 20261010044019753642-3824db279452 queued."
+              },
+              {
+                "requirement": "After the check, correct any found problems, re-check, and confirm stop once completion criteria are met",
+                "scope": "lifecycle",
+                "status": "unverified",
+                "evidence": "No finding requires correction in this snapshot; the subsequent completion/confirmed stop has not happened yet at inspection time (root.status idle, this check is the review itself)."
+              }
+            ]
+          }
+        },
+        "failed": null,
+        "stale": false
+      }
+    ],
+    "runtime_metadata": null
+  },
+  {
+    "scenario": "positive-v3",
+    "task_id": "e2a3eddc-25d7-4d35-9a92-6a92333ac7f7",
+    "status": "paused",
+    "stop_confirmation": {
+      "confirmed": true,
+      "thread_id": "01a12421-9789-7774-aa4b-0a04a845d85d",
+      "scope": "Native session execution, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+      "native_owner": "Main",
+      "status_after": "idle",
+      "active_tools_after": 0,
+      "async_jobs_settled": true,
+      "collaboration_persistence": {
+        "task_dir": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v3/.orbit/tasks/e2a3eddc-25d7-4d35-9a92-6a92333ac7f7",
+        "scope": "current process observations through cutoff; append completion, not fsync",
+        "observed_through": 24,
+        "written_seq": 24,
+        "failed_observations": 0,
+        "recorded_gaps": 0,
+        "pending_gap": null,
+        "last_error": null,
+        "status": "written"
+      },
+      "members": [
+        {
+          "thread_id": "orbit-08159f70-d599-41ce-9ff6-0fee56f1a386",
+          "confirmation": {
+            "confirmed": true,
+            "id": "orbit-08159f70-d599-41ce-9ff6-0fee56f1a386",
+            "scope": "Member turn, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+            "registry_status": "idle",
+            "status_after": "idle",
+            "active_tools_after": 0,
+            "async_jobs_settled": true
+          }
+        }
+      ]
+    },
+    "connection": {
+      "provider": "omp",
+      "socket": "/tmp/orbit-omp-2KYAV4/control.sock",
+      "thread_id": "01a12421-9789-7774-aa4b-0a04a845d85d"
+    },
+    "members": [
+      {
+        "thread_id": "orbit-08159f70-d599-41ce-9ff6-0fee56f1a386",
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "registered_at": "2026-10-10T04:48:11Z",
+        "status": "registered",
+        "registry_status": "idle",
+        "work_unit_id": null,
+        "result_delivery": null,
+        "tool_call_id": "call_bbfc5ce0fde9418985787e8f"
+      }
+    ],
+    "work_units": {
+      "wu-8dc407a5add86e93": "bound"
+    },
+    "checks": [],
+    "runtime_metadata": null
+  },
+  {
+    "scenario": "positive-v4",
+    "task_id": "3ae66eb1-eaff-4a7e-a528-9947914c06bc",
+    "status": "complete",
+    "stop_confirmation": {
+      "confirmed": true,
+      "thread_id": "01a12428-c8c2-7152-a1e3-5ccb2f6fe56d",
+      "scope": "Native session execution, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+      "native_owner": "Main",
+      "status_after": "idle",
+      "active_tools_after": 0,
+      "async_jobs_settled": true,
+      "collaboration_persistence": {
+        "task_dir": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc",
+        "scope": "current process observations through cutoff; append completion, not fsync",
+        "observed_through": 14,
+        "written_seq": 14,
+        "failed_observations": 0,
+        "recorded_gaps": 0,
+        "pending_gap": null,
+        "last_error": null,
+        "status": "written"
+      },
+      "members": [
+        {
+          "thread_id": "orbit-f4e84132-6b7a-4efd-abe8-ba042278f0f8",
+          "confirmation": {
+            "confirmed": true,
+            "id": "orbit-f4e84132-6b7a-4efd-abe8-ba042278f0f8",
+            "scope": "Member turn, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+            "registry_status": "idle",
+            "status_after": "idle",
+            "active_tools_after": 0,
+            "async_jobs_settled": true
+          }
+        }
+      ]
+    },
+    "connection": {
+      "provider": "omp",
+      "socket": "/tmp/orbit-omp-YHlmiP/control.sock",
+      "thread_id": "01a12428-c8c2-7152-a1e3-5ccb2f6fe56d"
+    },
+    "members": [
+      {
+        "thread_id": "orbit-f4e84132-6b7a-4efd-abe8-ba042278f0f8",
+        "model": "kimi-code/k3-256k",
+        "registered_at": "2026-10-10T04:58:57Z",
+        "status": "completed",
+        "registry_status": "idle",
+        "work_unit_id": "wu-829bc0242b480b93",
+        "result_delivery": "native_task",
+        "tool_call_id": "tool_W1pBMqUshbnaXWTtgITeC82g"
+      }
+    ],
+    "work_units": {
+      "wu-829bc0242b480b93": "bound",
+      "wu-7c3f25126bf3f618": "declared"
+    },
+    "checks": [
+      {
+        "number": 1,
+        "started_at": "2026-10-10T05:08:31Z",
+        "finished_at": "2026-10-10T05:10:03Z",
+        "input_digest": "14d764a38b71399d2ea68e24a088cde8958a8c4744621d3e38aabed3659dadaf",
+        "artifact_digest": "sha256:a1cbec3825627993ab14430aa5e537828fb5a14c7920e02f315de428d23108de",
+        "result": {
+          "verdict": "check_failed",
+          "error": "check run failed (exit 1)\nstderr:\n/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc/checks/1/evidence.json\n\nevents: /private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc/checks/1/evidence.json\noutput_dir: /private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc/checks/1\nevidence problems: final message is not valid JSON: JSON Parse error: Unexpected identifier \"All\"",
+          "failure_kind": "invalid_result",
+          "failure_basis": "structural"
+        },
+        "failed": true,
+        "stale": false
+      },
+      {
+        "number": 2,
+        "started_at": "2026-10-10T05:10:04Z",
+        "finished_at": "2026-10-10T05:11:23Z",
+        "input_digest": "14d764a38b71399d2ea68e24a088cde8958a8c4744621d3e38aabed3659dadaf",
+        "artifact_digest": "sha256:a1cbec3825627993ab14430aa5e537828fb5a14c7920e02f315de428d23108de",
+        "result": {
+          "verdict": "check_failed",
+          "error": "check run failed (exit 1)\nstderr:\n/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc/checks/2/evidence.json\n\nevents: /private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc/checks/2/evidence.json\noutput_dir: /private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc/checks/2\nevidence problems: delivery has unexpected keys: evidences",
+          "failure_kind": "invalid_result",
+          "failure_basis": "structural"
+        },
+        "failed": true,
+        "stale": false
+      },
+      {
+        "number": 3,
+        "started_at": "2026-10-10T05:11:24Z",
+        "finished_at": "2026-10-10T05:12:31Z",
+        "input_digest": "14d764a38b71399d2ea68e24a088cde8958a8c4744621d3e38aabed3659dadaf",
+        "artifact_digest": "sha256:a1cbec3825627993ab14430aa5e537828fb5a14c7920e02f315de428d23108de",
+        "result": {
+          "verdict": "check_failed",
+          "error": "check run failed (exit 1)\nstderr:\n/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc/checks/3/evidence.json\n\nevents: /private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc/checks/3/evidence.json\noutput_dir: /private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc/checks/3\nevidence problems: findings must be an array",
+          "failure_kind": "invalid_result",
+          "failure_basis": "structural"
+        },
+        "failed": true,
+        "stale": false
+      },
+      {
+        "number": 4,
+        "started_at": "2026-10-10T05:12:32Z",
+        "finished_at": "2026-10-10T05:13:32Z",
+        "input_digest": "14d764a38b71399d2ea68e24a088cde8958a8c4744621d3e38aabed3659dadaf",
+        "artifact_digest": "sha256:a1cbec3825627993ab14430aa5e537828fb5a14c7920e02f315de428d23108de",
+        "result": {
+          "verdict": "check_failed",
+          "error": "check run failed (exit 1)\nstderr:\n/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc/checks/4/evidence.json\n\nevents: /private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc/checks/4/evidence.json\noutput_dir: /private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc/checks/4\nevidence problems: final message is not valid JSON: JSON Parse error: Expected '}'",
+          "failure_kind": "invalid_result",
+          "failure_basis": "structural"
+        },
+        "failed": true,
+        "stale": false
+      },
+      {
+        "number": 5,
+        "started_at": "2026-10-10T05:13:33Z",
+        "finished_at": "2026-10-10T05:16:32Z",
+        "input_digest": "14d764a38b71399d2ea68e24a088cde8958a8c4744621d3e38aabed3659dadaf",
+        "artifact_digest": "sha256:a1cbec3825627993ab14430aa5e537828fb5a14c7920e02f315de428d23108de",
+        "result": {
+          "verdict": "complete",
+          "reason": "src/importer.mjs, src/cli.mjs, and README.md match SPEC.md and tests/acceptance.mjs: one BOM, LF/CRLF, blank-aware 1-based line numbers, exact header, two trimmed columns, nonempty category, ^(\\d+)\\.(\\d{2})$ amounts, integer cents, single/category/overall MAX_SAFE_INTEGER rejection with the offending line, Map first-seen groups, CLI one-path UTF-8 JSON stdout exit 0 and concise stderr exit 1 with no stack. Attested root npm test on this artifact digest exited 0 with 127 passes. Tests and package.json were not changed; nothing was committed or pushed.",
+          "findings": [],
+          "resolved_ids": [],
+          "next_check_seconds": 60,
+          "delivery": {
+            "ready": true,
+            "reason": "Root is idle and the last attributed turn completed. The fixed snapshot contains src/importer.mjs (importExpenses), src/cli.mjs (one path, UTF-8, JSON stdout / error: stderr), and README.md (usage, input, errors, order, precision). Those are the named deliverables and they match SPEC.md and tests/acceptance.mjs."
+          },
+          "coverage": {
+            "complete": true,
+            "items": [
+              {
+                "requirement": "src/importer.mjs exports importExpenses(text) as a pure function: one leading U+FEFF, LF or CRLF, blank lines skipped but included in 1-based error line numbers, first nonblank line exactly category,amount.",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/importer.mjs lines 6-26 and 71-73: startsWith BOM then slice(1), split(/\\r?\\n/), trim-empty continue, raw !== 'category,amount' throws Error with line ${lineNo}; missing header throws line 1."
+              },
+              {
+                "requirement": "Unquoted CSV: exactly two columns, trim both fields, category nonempty after trim.",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/importer.mjs lines 28-36 split on comma, reject cols.length !== 2, trim both, reject empty category. tests/acceptance.mjs lines 15-16 expect throws matching /2/ for extra column and blank category."
+              },
+              {
+                "requirement": "Amount is nonnegative digits with exactly two fractional digits; reject sign, exponent, missing or extra decimals.",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/importer.mjs AMOUNT_RE /^(\\d+)\\.(\\d{2})$/ after trim. tests/acceptance.mjs line 12 rejects -1.00, 1, 1.0, 1.001, 1e2, and 90071992547409.92 with /3/."
+              },
+              {
+                "requirement": "Integer cents only; reject a single amount, per-category sum, or overall sum above Number.MAX_SAFE_INTEGER cents, and include the offending 1-based line number.",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/importer.mjs lines 42-67: digit split, parseInt of the integer and two-digit fraction, cents = intPart*100+fracPart, compares to MAX_SAFE before add. acceptance.mjs lines 13-14 sum and category overflow expect /3/."
+              },
+              {
+                "requirement": "Group by trimmed category in first-seen order and return {groups:[{category,totalCents,count}],totalCents,count}.",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/importer.mjs Map insertion then [...groups.values()] with totalCents and count. acceptance.mjs line 10 expects Food then Travel for 110 samples."
+              },
+              {
+                "requirement": "Importer throws a plain Error and does not print or process.exit.",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/importer.mjs only throw new Error(...); no process.exit or console. CLI catches err and prints err.message."
+              },
+              {
+                "requirement": "src/cli.mjs: exactly one path, UTF-8 read; success is only result JSON on stdout and exit 0; argument, read, or validation failure is a concise stderr error, empty stdout, exit 1, no stack.",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/cli.mjs lines 5-23. acceptance.mjs lines 18-22: success status 0, empty stderr, JSON deep-equal; 0/1/2 args and invalid data status 1, empty stdout, stderr without 'at file:'. Root receipt tool_pVkp1DV6bdfH0MgypmGX6S3P (artifact_matches and input_matches) shows the success JSON and error: lines with exit 1."
+              },
+              {
+                "requirement": "README documents invocation and input, error, ordering, and precision boundaries.",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "README.md sections Usage, Input format, Errors, Ordering and precision, Library API."
+              },
+              {
+                "requirement": "Do not change tests/acceptance.mjs or SPEC.md; no new dependencies, commits, pushes, or network service.",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "review_focus lists only README.md added and src/cli.mjs and src/importer.mjs modified. package.json test script is node tests/acceptance.mjs with no dependencies. task_git baseline_head equals snapshot_head 9fbcb881 and changed_paths is empty. Instruction forbids push; git_remote was not required to be verified."
+              },
+              {
+                "requirement": "Run npm test with the project Node/npm and TMPDIR under the project, covering the 127 acceptance cases including CLI.",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "Root receipt tool_0zOB6iRTC98VrZDdfRfiST9m: artifact_matches true, input_matches true, command TMPDIR=$PWD/.test-tmp .runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test, exit 0, output EXPENSE_VALIDATION_SUMMARY: 127 cases passed. This check did not re-run the suite."
+              },
+              {
+                "requirement": "Importer is a bounded member implementation, integrated by Root, not a read-only review of a stub.",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "execution_members entry orbit-f4e84132 completed for work unit wu-829bc0242b480b93. src/importer.mjs is a full importExpenses implementation. Root CLI receipt and npm-test receipt are on the same artifact digest sha256:a1cbec3825627993ab14430aa5e537828fb5a14c7920e02f315de428d23108de."
+              },
+              {
+                "requirement": "Independent manual final review of the fixed snapshot.",
+                "scope": "lifecycle",
+                "status": "verified",
+                "evidence": "This check read SPEC.md, tests/acceptance.mjs, src/importer.mjs, src/cli.mjs, README.md, and package.json and compared them to the named rules and the attested root receipts."
+              },
+              {
+                "requirement": "After a valid finalization notice, confirm stop and produce the closing report.",
+                "scope": "lifecycle",
+                "status": "unverified",
+                "evidence": "Root is idle and waiting on finalization_notice. The runtime records the notice, closing turn, and stop; they have not happened in this check."
+              }
+            ]
+          }
+        },
+        "failed": null,
+        "stale": false
+      }
+    ],
+    "runtime_metadata": null
+  },
+  {
+    "scenario": "positive-v5",
+    "task_id": "ae45292f-1df7-4237-acfd-613e7d6310c3",
+    "status": "paused",
+    "stop_confirmation": {
+      "confirmed": true,
+      "thread_id": "01a12443-511b-74a6-b4cc-c90f6e7a116a",
+      "scope": "Native session execution, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+      "native_owner": "Main",
+      "status_after": "idle",
+      "active_tools_after": 0,
+      "async_jobs_settled": true,
+      "collaboration_persistence": {
+        "task_dir": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v5/.orbit/tasks/ae45292f-1df7-4237-acfd-613e7d6310c3",
+        "scope": "current process observations through cutoff; append completion, not fsync",
+        "observed_through": 5,
+        "written_seq": 5,
+        "failed_observations": 0,
+        "recorded_gaps": 0,
+        "pending_gap": null,
+        "last_error": null,
+        "status": "written"
+      }
+    },
+    "connection": {
+      "provider": "omp",
+      "socket": "/tmp/orbit-omp-pNWa4P/control.sock",
+      "thread_id": "01a12443-511b-74a6-b4cc-c90f6e7a116a"
+    },
+    "members": [],
+    "work_units": {},
+    "checks": [],
+    "runtime_metadata": null
+  },
+  {
+    "scenario": "positive-v6",
+    "task_id": "a08ab32d-45a3-4171-8c34-e1c801c301df",
+    "status": "complete",
+    "stop_confirmation": {
+      "confirmed": true,
+      "thread_id": "01a12448-2303-7705-8238-93cf8e29f2bf",
+      "scope": "Native session execution, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+      "native_owner": "Main",
+      "status_after": "idle",
+      "active_tools_after": 0,
+      "async_jobs_settled": true,
+      "collaboration_persistence": {
+        "task_dir": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v6/.orbit/tasks/a08ab32d-45a3-4171-8c34-e1c801c301df",
+        "scope": "current process observations through cutoff; append completion, not fsync",
+        "observed_through": 15,
+        "written_seq": 15,
+        "failed_observations": 0,
+        "recorded_gaps": 0,
+        "pending_gap": null,
+        "last_error": null,
+        "status": "written"
+      },
+      "members": [
+        {
+          "thread_id": "orbit-33401849-4882-4006-88c0-2435fcd736bd",
+          "confirmation": {
+            "confirmed": true,
+            "id": "orbit-33401849-4882-4006-88c0-2435fcd736bd",
+            "scope": "Member turn, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+            "registry_status": "idle",
+            "status_after": "idle",
+            "active_tools_after": 0,
+            "async_jobs_settled": true
+          }
+        }
+      ]
+    },
+    "connection": {
+      "provider": "omp",
+      "socket": "/tmp/orbit-omp-EFSRtK/control.sock",
+      "thread_id": "01a12448-2303-7705-8238-93cf8e29f2bf"
+    },
+    "members": [
+      {
+        "thread_id": "orbit-33401849-4882-4006-88c0-2435fcd736bd",
+        "model": "kimi-code/k3-256k",
+        "registered_at": "2026-10-10T05:29:33Z",
+        "status": "completed",
+        "registry_status": "idle",
+        "work_unit_id": "wu-08767c0859b9e8f4",
+        "result_delivery": "native_task",
+        "tool_call_id": "call_3c82b98a04994ad08cfafcc4"
+      }
+    ],
+    "work_units": {
+      "wu-08767c0859b9e8f4": "accepted"
+    },
+    "checks": [
+      {
+        "number": 1,
+        "started_at": "2026-10-10T05:33:54Z",
+        "finished_at": "2026-10-10T05:34:46Z",
+        "input_digest": "14d764a38b71399d2ea68e24a088cde8958a8c4744621d3e38aabed3659dadaf",
+        "artifact_digest": "sha256:685d503323e85a382c9adcb65f16658c15caf7a81137daea4b4fa83a2dc93c26",
+        "result": {
+          "verdict": "complete",
+          "reason": "Fixed snapshot satisfies SPEC.md and the instruction: src/importer.mjs implements every spec rule (header, BOM, CRLF, blank-line line numbering, two-column trim, nonempty category, strict amount pattern, BigInt exact cents, single/group/overall overflow rejection, first-seen order); src/cli.mjs meets CLI contract (one path arg, stdout-only JSON exit 0, single-line stderr exit 1, no stack trace); README documents usage/format/precision/errors/ordering/library/tests. Root verification receipts with artifact_matches=true show npm test exit 0 (127 cases) and CLI success/error outputs. Delegation requirements met: bounded work unit wu-08767c0859b9e8f4 dispatched to native member, member ran npm test in project runtime with TMPDIR=.test-tmp, Root re-ran and verified independently.",
+          "findings": [],
+          "resolved_ids": [],
+          "next_check_seconds": 3600,
+          "delivery": {
+            "ready": true,
+            "reason": "File deliverables inspected in the fixed snapshot: src/importer.mjs (75 lines, all spec rules enforced), src/cli.mjs (contract-conformant), README.md (full documentation). Test execution proven by program root_verifications receipts with artifact_matches/input_matches=true: npm test exit 0, EXPENSE_VALIDATION_SUMMARY 127 cases passed, CLI success/error/overflow outputs observed. Root idle, last turn completed, task_delivery matches the delivered state."
+          },
+          "coverage": {
+            "complete": true,
+            "items": [
+              {
+                "requirement": "Deliver pure function importExpenses(text) in src/importer.mjs per SPEC.md",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/importer.mjs read: exports importExpenses, no I/O, implements header/BOM/CRLF/blank-line/columns/trim/amount-pattern/overflow/order rules exactly as SPEC.md line 2 requires."
+              },
+              {
+                "requirement": "Deliver runnable CLI src/cli.mjs per SPEC.md CLI contract",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/cli.mjs read: one-arg usage error, UTF-8 readFileSync, JSON-only stdout exit 0, single-line stderr exit 1, no stack trace. Root verification receipt observed matching behavior (exit 0 JSON; exit 1 for missing file/args/invalid amount/overflow)."
+              },
+              {
+                "requirement": "Deliver README documenting invocation and input/error/ordering/precision behavior",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "README.md read (49 lines): usage, input format, precision, errors, ordering, library API, test command."
+              },
+              {
+                "requirement": "Importer implemented by a native execution member via a bounded work unit; Root owns CLI/README/integration",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "Program record: wu-08767c0859b9e8f4 dispatched to native member orbit-33401849 (kimi-code/k3-256k), status accepted; member result states it implemented only src/importer.mjs; review_focus shows cli.mjs/README as Root-side changes."
+              },
+              {
+                "requirement": "Member actually ran npm test with project runtime and TMPDIR=.test-tmp, reporting results via native hub",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "Work-unit dispatch verification and member result record member-run TMPDIR=.test-tmp .runtime/bin/node .runtime/lib/node_modules/npm/bin/npm-cli.js test exit 0 reported via hub; member_blocks show scope enforcement during member run."
+              },
+              {
+                "requirement": "Root independently re-ran npm test and verified",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "root_verifications receipt: same command, exit_code 0, artifact_matches=true, input_matches=true, output shows 127 cases passed."
+              },
+              {
+                "requirement": "No modification of tests/SPEC/package files; no commits, pushes, dependencies, network services",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "review_focus lists only README.md (added), src/cli.mjs and src/importer.mjs (modified); task_git baseline_head == snapshot_head (no commits); git_remote status unknown with no push requirement triggered (instruction forbids pushing)."
+              },
+              {
+                "requirement": "Independent manual final review requested; fix and recheck if issues found; confirm stop when completion conditions met",
+                "scope": "lifecycle",
+                "status": "verified",
+                "evidence": "This independent check session is the requested final review; no issues found requiring correction. Subsequent confirmed-stop remains the runtime's responsibility."
+              }
+            ]
+          }
+        },
+        "failed": null,
+        "stale": false
+      }
+    ],
+    "runtime_metadata": null
+  },
+  {
+    "scenario": "lifecycle",
+    "task_id": "d87c80b3-8b77-4d25-91ed-3a74e7202d54",
+    "status": "paused",
+    "stop_confirmation": {
+      "confirmed": true,
+      "thread_id": "01a12418-9547-7324-bb9d-8f5da6fb682a",
+      "scope": "Native session execution, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+      "native_owner": "Main",
+      "status_after": "idle",
+      "active_tools_after": 0,
+      "async_jobs_settled": true,
+      "collaboration_persistence": {
+        "task_dir": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/lifecycle/.orbit/tasks/d87c80b3-8b77-4d25-91ed-3a74e7202d54",
+        "scope": "current process observations through cutoff; append completion, not fsync",
+        "observed_through": 11,
+        "written_seq": 11,
+        "failed_observations": 0,
+        "recorded_gaps": 0,
+        "pending_gap": null,
+        "last_error": null,
+        "status": "written"
+      },
+      "members": [
+        {
+          "thread_id": "orbit-dd9f1302-6ae9-4cf9-a4b9-c781bcd7c7b6",
+          "confirmation": {
+            "confirmed": true,
+            "id": "orbit-dd9f1302-6ae9-4cf9-a4b9-c781bcd7c7b6",
+            "scope": "Member turn, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+            "registry_status": "idle",
+            "status_after": "idle",
+            "active_tools_after": 0,
+            "async_jobs_settled": true
+          }
+        }
+      ]
+    },
+    "connection": {
+      "provider": "omp",
+      "socket": "/tmp/orbit-omp-GVZM62/control.sock",
+      "thread_id": "01a12418-9547-7324-bb9d-8f5da6fb682a"
+    },
+    "members": [
+      {
+        "thread_id": "orbit-dd9f1302-6ae9-4cf9-a4b9-c781bcd7c7b6",
+        "model": "kimi-code/k3-256k",
+        "registered_at": "2026-10-10T04:37:51Z",
+        "status": "registered",
+        "registry_status": "idle",
+        "work_unit_id": "wu-5ecaf6985345edb9",
+        "result_delivery": null,
+        "tool_call_id": "call_ea437136d2b44eb99b0ee8dd"
+      }
+    ],
+    "work_units": {
+      "wu-5ecaf6985345edb9": "bound"
+    },
+    "checks": [
+      {
+        "number": 1,
+        "started_at": "2026-10-10T04:36:44Z",
+        "finished_at": "2026-10-10T04:37:11Z",
+        "input_digest": "ecb404b1b3cc6effacb3839ab02442e0bea180a6752471fa25816739f8a0a93d",
+        "artifact_digest": "sha256:9bb7507757dc945771f7dc54a567dfb5b5e2763f1286ef3f18ad3233a254f80b",
+        "result": {
+          "verdict": "correct",
+          "reason": "Snapshot at HEAD a58f00c2 is still the untouched scaffold: src/importer.mjs is a one-line stub (export function importExpenses(text) { throw new Error(\"not implemented\"); }), src/cli.mjs contains only a comment, and there is no README.md in the snapshot root (entries: .gitignore, SPEC.md, package.json, src/, tests/). Root is still executing (root.status=active, last_turn_status=inProgress, latest turn call_12c7ce7 did not change any bytes), so no deliverable exists yet and no completion is possible. Findings name concrete, actionable gaps; continuing is worthwhile because the instruction and SPEC fully define the target behavior.",
+          "findings": [
+            {
+              "id": "f1",
+              "requirement": "Implement importExpenses(text) in src/importer.mjs per SPEC.md (header category,amount; BOM/CRLF/blank handling; exactly two columns; trimmed; nonempty category; nonnegative decimal with exactly two fraction digits; exact integer cents; MAX_SAFE_INTEGER rejection for value and per-category/overall sums; first-seen category order; return {groups:[{category,totalCents,count}],totalCents,count}; throw Error carrying the original one-based line number including blank lines).",
+              "evidence": "src/importer.mjs is 77 bytes, 1 line: `export function importExpenses(text) { throw new Error(\"not implemented\"); }`. No parsing, validation, cents math, ordering or line-number logic exists. tests/acceptance.mjs lines 10-17 exercise exactly these rules and currently cannot pass.",
+              "action": "Actually implement src/importer.mjs to satisfy every rule in SPEC.md line 2, verified by running tests/acceptance.mjs (or at minimum the importer cases) with the project .runtime node."
+            },
+            {
+              "id": "f2",
+              "requirement": "CLI src/cli.mjs: reads exactly one path argument as UTF-8, prints only result JSON to stdout on success (exit 0), and a concise error on stderr with empty stdout and exit 1 on argument/read/validation failures, no stack trace.",
+              "evidence": "src/cli.mjs is 46 bytes, 1 line, containing only `// Implement the SPEC command-line interface.`. No argument parsing, file read, stdout/stderr writes or exit codes are implemented.",
+              "action": "Implement src/cli.mjs per SPEC.md line 3 and verify with tests/acceptance.mjs lines 20-22 (success exit 0/empty stderr; missing, extra-arg and validation failures exit 1 with empty stdout and non-stack error)."
+            },
+            {
+              "id": "f3",
+              "requirement": "Deliver README documenting invocation and input/error/ordering/precision behavior (SPEC.md line 3).",
+              "evidence": "Snapshot root listing shows no README.md among .gitignore, SPEC.md, package.json, src/, tests/; no documentation file exists anywhere in the snapshot.",
+              "action": "Write README.md covering invocation, input format, error behavior, category ordering and integer-cents precision."
+            },
+            {
+              "id": "f4",
+              "requirement": "Amendment 1: README must also document the output and error exit code for an empty CSV.",
+              "evidence": "No README exists at all, so the empty-CSV output/error-exit-code documentation required by amendments/1.txt is absent. Note the SPEC defines no explicit empty-input rule, so the behavior must be defined in the implementation/README consistently.",
+              "action": "After implementing the importer/CLI, state in README the exact stdout/exit code for an empty CSV and make the implementation match that documented behavior."
+            },
+            {
+              "id": "f5",
+              "requirement": "Delegate the unimplemented importer to a bounded native task execution member that actually does the coding, and use the project .runtime Node/npm to actually test.",
+              "evidence": "Program record execution_members is empty and no member task/output is present; root_verifications show Root only probing the environment. Additionally .runtime/bin/npm fails: `.runtime/bin/node -v && .runtime/bin/npm -v` exited 1 with `ReferenceError: require is not defined in ES module scope` at .runtime/bin/npm:2, and package.json test script uses bare `node tests/acceptance.mjs` rather than a .runtime-pinned interpreter.",
+              "action": "Dispatch the bounded importer task to a native execution member, and define/pin the .runtime Node path in the material/verification instructions; account for .runtime/bin/npm being unusable under package.json type=module (use .runtime/bin/node directly) so the stated verification command actually runs."
+            },
+            {
+              "id": "f6",
+              "requirement": "State in-project Node/npm material, tools, paths and the complete verification commands.",
+              "evidence": "Only package.json (scripts.test = `node tests/acceptance.mjs`) documents a command; there is no README, no pinned .runtime path in any documented command, and no stated materials/tools list in the snapshot.",
+              "action": "Document the exact .runtime node path, the acceptance command(s) and any integration commands in README, and ensure they execute as written."
+            }
+          ],
+          "resolved_ids": [],
+          "next_check_seconds": 300,
+          "delivery": {
+            "ready": false,
+            "reason": "No deliverable is visible. src/importer.mjs is still the `not implemented` stub, src/cli.mjs is a one-line comment, and no README.md exists in the fixed snapshot. Root is still executing (root.status=active, last_turn_status=inProgress) and no task_delivery or attributed completed answer exists (task_delivery=null), so delivery cannot be ready."
+          },
+          "coverage": {
+            "complete": true,
+            "items": [
+              {
+                "requirement": "Implement importExpenses(text) in src/importer.mjs per SPEC.md (format, header, two columns, trimming, amount grammar, exact cents, MAX_SAFE_INTEGER rejection, category order, return shape, one-based line-number errors).",
+                "scope": "delivery",
+                "status": "unverified",
+                "evidence": "src/importer.mjs read directly: single line `export function importExpenses(text) { throw new Error(\"not implemented\"); }`, 77 bytes. No behavior implemented."
+              },
+              {
+                "requirement": "CLI src/cli.mjs: exactly one path argument, UTF-8 read, JSON-only stdout on success exit 0, concise stderr/empty stdout/exit 1 on argument/read/validation failure, no stack trace.",
+                "scope": "delivery",
+                "status": "unverified",
+                "evidence": "src/cli.mjs read directly: only `// Implement the SPEC command-line interface.` (46 bytes, 1 line)."
+              },
+              {
+                "requirement": "README.md documenting invocation and input/error/ordering/precision behavior.",
+                "scope": "delivery",
+                "status": "unverified",
+                "evidence": "Snapshot root contains .gitignore, SPEC.md, package.json, src/, tests/ only — no README file exists."
+              },
+              {
+                "requirement": "Amendment 1: README documents empty-CSV output and error exit code.",
+                "scope": "delivery",
+                "status": "unverified",
+                "evidence": "No README present; no empty-CSV documentation anywhere in the snapshot."
+              },
+              {
+                "requirement": "Keep tests/acceptance.mjs unchanged; do not modify tests or SPEC.",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "tests/acceptance.mjs read in full (2701 bytes, 24 lines, matches the given acceptance source) and SPEC.md read in full (1258 bytes, 3 lines); task_git.changed_paths is empty and snapshot HEAD equals baseline HEAD a58f00c2, so no committed modification exists."
+              },
+              {
+                "requirement": "Delegate the unimplemented importer to a bounded native task execution member that performs the actual coding.",
+                "scope": "delivery",
+                "status": "unverified",
+                "evidence": "execution_members is empty in the program record; no member task, dispatch or member-authored importer exists."
+              },
+              {
+                "requirement": "Use the project .runtime Node/npm to actually run the tests.",
+                "scope": "delivery",
+                "status": "unverified",
+                "evidence": "No test run exists in root_verifications; the only .runtime/npm probe (call_0ff9225d) exited 1 with `ReferenceError: require is not defined in ES module scope` at .runtime/bin/npm:2. .runtime/bin/node reported v24.19.0. No acceptance.mjs execution evidence."
+              },
+              {
+                "requirement": "State the project's Node/npm material, tools, paths and the complete verification command.",
+                "scope": "delivery",
+                "status": "unverified",
+                "evidence": "Only package.json scripts.test = `node tests/acceptance.mjs` (bare node, not .runtime-pinned); no README or other document declaring materials, paths or full verification commands."
+              },
+              {
+                "requirement": "No dependency downloads, no network access, no commits or pushing; no dependencies.",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "package.json has no dependencies field and no node_modules in the snapshot; task_git changed_paths is empty (baseline HEAD == snapshot HEAD a58f00c2), so no commits; git_remote.status=unknown with remote=null and remote_contacted=false, consistent with no push requirement."
+              },
+              {
+                "requirement": "Integrate the member result and perform integration verification (end-to-end CLI + importer against the acceptance tests).",
+                "scope": "delivery",
+                "status": "unverified",
+                "evidence": "No member result exists to integrate; no integration run recorded in root_verifications or execution context."
+              },
+              {
+                "requirement": "Request an independent manual final review, fix findings, re-check, and confirm stop.",
+                "scope": "lifecycle",
+                "status": "unverified",
+                "evidence": "Program record shows findings={} and no check_history entries (total_checks=0); no prior final review or confirmed stop has occurred."
+              },
+              {
+                "requirement": "The runtime's own manual finalization notice, closing turn and actual stop.",
+                "scope": "lifecycle",
+                "status": "unverified",
+                "evidence": "root.status=active and last_turn_status=inProgress; the finalization sequence has not started."
+              }
+            ]
+          }
+        },
+        "failed": null,
+        "stale": false
+      }
+    ],
+    "runtime_metadata": null
+  },
+  {
+    "scenario": "lifecycle",
+    "task_id": "03f9bed6-4a4d-40b8-8d40-3288e4277e04",
+    "status": "paused",
+    "stop_confirmation": {
+      "confirmed": true,
+      "thread_id": "01a12418-9547-7324-bb9d-8f5da6fb682a",
+      "scope": "Native session execution, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+      "native_owner": "Main",
+      "status_after": "idle",
+      "active_tools_after": 0,
+      "async_jobs_settled": true,
+      "collaboration_persistence": {
+        "task_dir": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/lifecycle/.orbit/tasks/03f9bed6-4a4d-40b8-8d40-3288e4277e04",
+        "scope": "current process observations through cutoff; append completion, not fsync",
+        "observed_through": 10,
+        "written_seq": 10,
+        "failed_observations": 0,
+        "recorded_gaps": 0,
+        "pending_gap": null,
+        "last_error": null,
+        "status": "written"
+      },
+      "members": [
+        {
+          "thread_id": "orbit-4792af1e-bd13-4b7c-871e-8f74c438a329",
+          "confirmation": {
+            "confirmed": true,
+            "id": "orbit-4792af1e-bd13-4b7c-871e-8f74c438a329",
+            "scope": "Member turn, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+            "registry_status": "idle",
+            "status_after": "idle",
+            "active_tools_after": 0,
+            "async_jobs_settled": true
+          }
+        }
+      ]
+    },
+    "connection": {
+      "provider": "omp",
+      "socket": "/tmp/orbit-omp-kwVdDL/control.sock",
+      "thread_id": "01a12418-9547-7324-bb9d-8f5da6fb682a"
+    },
+    "members": [
+      {
+        "thread_id": "orbit-4792af1e-bd13-4b7c-871e-8f74c438a329",
+        "model": "kimi-code/k3-256k",
+        "registered_at": "2026-10-10T04:46:31Z",
+        "status": "registered",
+        "registry_status": "idle",
+        "work_unit_id": "wu-cc3930ab5ea18a15",
+        "result_delivery": null,
+        "tool_call_id": "call_a6b5191dfce74f19aa02792d"
+      }
+    ],
+    "work_units": {
+      "wu-cc3930ab5ea18a15": "bound"
+    },
+    "checks": [],
+    "runtime_metadata": null
+  },
+  {
+    "scenario": "positive-v7",
+    "task_id": "5dd5b889-7685-4cb9-8c2a-ed0269d3948d",
+    "status": "complete",
+    "stop_confirmation": {
+      "confirmed": true,
+      "thread_id": "01a12450-19cf-7066-b4f1-910dda959d87",
+      "scope": "Native session execution, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+      "native_owner": "Main",
+      "status_after": "idle",
+      "active_tools_after": 0,
+      "async_jobs_settled": true,
+      "collaboration_persistence": {
+        "task_dir": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v7/.orbit/tasks/5dd5b889-7685-4cb9-8c2a-ed0269d3948d",
+        "scope": "current process observations through cutoff; append completion, not fsync",
+        "observed_through": 34,
+        "written_seq": 34,
+        "failed_observations": 0,
+        "recorded_gaps": 0,
+        "pending_gap": null,
+        "last_error": null,
+        "status": "written"
+      },
+      "members": [
+        {
+          "thread_id": "orbit-e57a2ba3-7dd6-4f1d-ab54-b8dd56b28c94",
+          "confirmation": {
+            "confirmed": true,
+            "id": "orbit-e57a2ba3-7dd6-4f1d-ab54-b8dd56b28c94",
+            "scope": "Member turn, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+            "registry_status": "idle",
+            "status_after": "idle",
+            "active_tools_after": 0,
+            "async_jobs_settled": true
+          }
+        },
+        {
+          "thread_id": "orbit-4423db03-35ff-4bd0-a2ba-50ccb6702d26",
+          "confirmation": {
+            "confirmed": true,
+            "id": "orbit-4423db03-35ff-4bd0-a2ba-50ccb6702d26",
+            "scope": "Member turn, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+            "registry_status": "idle",
+            "status_after": "idle",
+            "active_tools_after": 0,
+            "async_jobs_settled": true
+          }
+        }
+      ]
+    },
+    "work_units": {
+      "wu-a0c651154ca32070": "declared",
+      "wu-ba0fe8204e726eb9": "accepted",
+      "wu-5637739e9b6d23b5": "accepted",
+      "wu-74afde6f9a27ffec": "declared"
+    },
+    "members": [
+      {
+        "thread_id": "orbit-e57a2ba3-7dd6-4f1d-ab54-b8dd56b28c94",
+        "model": "kimi-code/k3-256k",
+        "registered_at": "2026-10-10T05:38:53Z",
+        "status": "completed",
+        "registry_status": "idle",
+        "work_unit_id": "wu-ba0fe8204e726eb9",
+        "result_delivery": "native_task",
+        "tool_call_id": "call_48a95b400fac45de84db8694"
+      },
+      {
+        "thread_id": "orbit-4423db03-35ff-4bd0-a2ba-50ccb6702d26",
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "registered_at": "2026-10-10T05:42:49Z",
+        "status": "completed",
+        "registry_status": "idle",
+        "work_unit_id": null,
+        "result_delivery": "native_task",
+        "tool_call_id": "call_24fe6d10fd9c4367be9012ad"
+      }
+    ],
+    "checks": [
+      {
+        "number": 1,
+        "manual": false,
+        "trigger_cause": "member_block_stall",
+        "started_at": "2026-10-10T05:42:57Z",
+        "finished_at": "2026-10-10T05:44:03Z",
+        "result": {
+          "verdict": "continue",
+          "reason": "Root is actively waiting on re-verification member orbit-4423db03 (wu-5637739e9b6d23b5, bound 05:42:49Z). The bash 'command absent from declared work-unit commands' block recurred across wu-ba0fe8204e726eb9 (member orbit-e57a2ba3, 05:40:11Z) and wu-5637739e9b6d23b5 (member orbit-4423db03, 05:42:55Z), but the re-declared unit wu-5637739e9b6d23b5 already contains the exact npm test command in allowed_commands, so the Root's corrective action (re-declare scope, re-dispatch) is in flight; only one block exists under the corrected unit, seconds before inspection, and root_turn_advanced=true. No evidence the corrected dispatch has failed. Prior gap (member lacked read access to src/cli.mjs) was addressed by adding src/cli.mjs to allowed_paths. Snapshot shows real deliverables: src/importer.mjs (77 lines, full BOM/line-number/overflow/grouping logic), src/cli.mjs present, README.md (48 lines, usage/boundaries). Root ran npm test itself with exit 0 and 127 PASS (receipt artifact_matches=true, input_matches=true). Member-environment npm test per instruction is still pending — that is exactly what the running member is for, so no correction is warranted yet.",
+          "findings": [],
+          "resolved_ids": [],
+          "next_check_seconds": 120,
+          "delivery": {
+            "ready": false,
+            "reason": "Root status is active with last_turn_status inProgress; a member re-verification task (orbit-4423db03) is still running and no final task answer has been delivered. File deliverables exist in the snapshot (src/importer.mjs, src/cli.mjs, README.md), but the instruction requires member-environment npm test confirmation and a closing report, neither yet visible."
+          },
+          "coverage": {
+            "complete": false,
+            "items": [
+              {
+                "requirement": "交付 src/importer.mjs 纯函数（整数分、BOM、1-based 行号含空行、CRLF、分组首现顺序、溢出拒绝）",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "Read src/importer.mjs (2700 bytes, 77 lines): importExpenses strips \\ufeff BOM (l.23), splits LF and tolerates CRLF (l.38), 1-based line numbers counting blanks (l.37-39), integer cents via digit strings (l.6-20), first-seen group order (l.60), overflow checks against MAX_SAFE_INTEGER for amount/group/total (l.16,63,67)."
+              },
+              {
+                "requirement": "交付 src/cli.mjs 可运行命令行",
+                "scope": "delivery",
+                "status": "unverified",
+                "evidence": "src/cli.mjs exists in snapshot but I did not read its content; CLI behavior (exit codes, stderr-only errors) not independently confirmed by my read-only session."
+              },
+              {
+                "requirement": "交付 README（用法和边界）",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "Read README.md (1679 bytes, 48 lines): usage command, stdout/exit-code contract, error contract, input format incl. BOM/CRLF/blank-line numbering, integer-cents precision, overflow boundary, group ordering, npm test."
+              },
+              {
+                "requirement": "importer 由原生执行成员作为有界编码工作单元实际实现（非只读审查替代）",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "wu-ba0fe8204e726eb9 result (dependency_context): member implemented src/importer.mjs per SPEC; status accepted with Root verification."
+              },
+              {
+                "requirement": "成员使用项目 .runtime Node/npm 实际运行 npm test（TMPDIR 指向 .test-tmp，工作单元声明完整命令与材料范围）",
+                "scope": "delivery",
+                "status": "unverified",
+                "evidence": "First member unit (wu-ba0fe8204e726eb9) hit scope blocks (glob path, peer write, bash command absent); follow-up unit wu-5637739e9b6d23b5 is bound to member orbit-4423db03 but result is null — member-environment test run not yet confirmed."
+              },
+              {
+                "requirement": "成员先经原生 hub 向 Main 报告实际结果/退出码/限制再返回；Root 核对实际消息而非自述",
+                "scope": "delivery",
+                "status": "unverified",
+                "evidence": "Hub-report requirement preserved in wu-5637739e9b6d23b5 requirements; no member result or hub receipt yet (member still running)."
+              },
+              {
+                "requirement": "Root 完成后实际运行 npm test 并核对 CLI 成功/错误输出",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "root_verifications receipt call_055bb7f58e46406d9ae85e1f: npm test via .runtime with TMPDIR=.test-tmp, exit_code 0, output shows PASS lines through case 127 incl. CLI success/invalid-input cases and EXPENSE_VALIDATION_SUMMARY; artifact_matches=true, input_matches=true."
+              },
+              {
+                "requirement": "不改测试或规范；不提交、推送、下载依赖或建立网络服务",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "review_focus lists only README.md added and src/cli.mjs/src/importer.mjs modified; SPEC.md and tests/acceptance.mjs untouched. git_remote shows no upstream configured; no push evidence."
+              },
+              {
+                "requirement": "请求独立手动终检、修正并确认停止后收口报告",
+                "scope": "lifecycle",
+                "status": "unverified",
+                "evidence": "Final review sequence has not started; Root still active awaiting member re-verification."
+              }
+            ]
+          }
+        },
+        "failed": null,
+        "stale": true,
+        "input_digest": "a78e5ec802ece3bc0e03cec79f850ce01eaadb2b156ddbb6a46ce79e0b46c802",
+        "artifact_digest": "sha256:fa9609ae2a2d1169c22e1179a2e7a77cc3b44a3b35eff3879728743b5259db83"
+      },
+      {
+        "number": 2,
+        "manual": false,
+        "trigger_cause": "member_block_stall",
+        "started_at": "2026-10-10T05:44:04Z",
+        "finished_at": "2026-10-10T05:45:10Z",
+        "result": {
+          "verdict": "check_failed",
+          "error": "check run failed (exit 1)\nstderr:\n/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v7/.orbit/tasks/5dd5b889-7685-4cb9-8c2a-ed0269d3948d/checks/2/evidence.json\n\nevents: /private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v7/.orbit/tasks/5dd5b889-7685-4cb9-8c2a-ed0269d3948d/checks/2/evidence.json\noutput_dir: /private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v7/.orbit/tasks/5dd5b889-7685-4cb9-8c2a-ed0269d3948d/checks/2\nevidence problems: final message is not valid JSON: JSON Parse error: Expected '}'",
+          "failure_kind": "invalid_result",
+          "failure_basis": "structural"
+        },
+        "failed": true,
+        "stale": false,
+        "input_digest": "a78e5ec802ece3bc0e03cec79f850ce01eaadb2b156ddbb6a46ce79e0b46c802",
+        "artifact_digest": "sha256:fa9609ae2a2d1169c22e1179a2e7a77cc3b44a3b35eff3879728743b5259db83"
+      },
+      {
+        "number": 3,
+        "manual": true,
+        "trigger_cause": "manual_check",
+        "started_at": "2026-10-10T05:45:12Z",
+        "finished_at": "2026-10-10T05:46:45Z",
+        "result": {
+          "verdict": "complete",
+          "reason": "Read the fixed snapshot: SPEC.md, tests/acceptance.mjs, src/importer.mjs, src/cli.mjs, README.md, package.json. Every SPEC rule is actually enforced by the code read: BOM strip (importer.mjs:23), header exact match incl. CR strip (26-29), 1-based numbering over all lines incl. blanks (36-39), split(',') with cols.length!==2 rejection (41-44), trim both fields (45-46), nonempty category (47-49), AMOUNT_RE /^[0-9]+\\.[0-9]{2}$/ rejects sign/exponent/extra decimals (1,50-52), exact integer-cent arithmetic with intPart length guard and cents>MAX check (6-19), per-category and overall sum guards (62-69), first-seen order via Map+push (56-61), return {groups,totalCents,count} (76). Boundary arithmetic is exact: values at MAX=9007199254740991 and MAX+1=2^53 are both representable, so no overflow is masked. CLI reads exactly one arg UTF-8, prints only JSON+newline on stdout/exit 0, and writes a one-line message to stderr with process.exit(1) and no stack for usage/read/validation errors (cli.mjs:10-23). README documents invocation, input, precision/overflow, error/line-number and ordering. review_focus shows tests/acceptance.mjs and SPEC.md unmodified; package.json has no deps. Program record shows the importer was implemented by native member orbit-e57a2ba3 (accepted work unit) and the suite re-run by member orbit-4423db03 with the project .runtime and TMPDIR, plus two root_verifications receipts (npm test exit 0, 127 PASS incl. CLI cases; CLI success/3 error cases). No missing, wrong or extra work found. Root is idle and last turn completed; verdict complete.",
+          "findings": [],
+          "resolved_ids": [],
+          "next_check_seconds": 3600,
+          "delivery": {
+            "ready": true,
+            "reason": "File deliverable is present and satisfies the instruction in the fixed snapshot: src/importer.mjs (pure importExpenses enforcing every SPEC rule), src/cli.mjs (runnable CLI with exit 0 JSON / exit 1 concise stderr, no stack), and README.md (usage, input, precision, error/line-number, ordering). tests/acceptance.mjs unchanged, no dependencies. The version-matched task_delivery text is only an interim 'final check queued' message, but the task deliverable is code+README, so readiness is judged on the visible, inspected files."
+          },
+          "coverage": {
+            "complete": true,
+            "items": [
+              {
+                "requirement": "Deliver pure function importExpenses(text) in src/importer.mjs per SPEC",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/importer.mjs:22-77 exports importExpenses with the SPEC return shape."
+              },
+              {
+                "requirement": "Deliver runnable CLI in src/cli.mjs",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/cli.mjs:9-23; read-only inspection plus root_verification receipt showing CLI run exit=0 and error cases exit=1."
+              },
+              {
+                "requirement": "Deliver README documenting invocation and input/error/ordering/precision behavior",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "README.md:5-40 documents usage, input format, precision/overflow, error+line numbers, ordering."
+              },
+              {
+                "requirement": "Exact integer cents arithmetic, no float accumulation in results",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/importer.mjs:6-19 parseCents uses Number(intPart)*100+Number(fracPart) with exact-representable bounds; sums accumulated as integers 62-72."
+              },
+              {
+                "requirement": "Reject individual amounts, per-category totals and overall totals outside Number.MAX_SAFE_INTEGER",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/importer.mjs:12-18 (amount), 63-65 (category total), 66-69 (overall total); boundaries MAX and 2^53 both exactly representable so no masked overflow."
+              },
+              {
+                "requirement": "CSV rules: required header category,amount; two columns per nonblank data line; trim both fields; nonempty category; amount = nonnegative digits with exactly two decimals",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/importer.mjs:1 (regex), 26-29 (header), 41-44 (column count), 45-52 (trim/category/amount)."
+              },
+              {
+                "requirement": "BOM strip (single leading), LF/CRLF acceptance, blank lines ignored but counted in 1-based line numbering",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/importer.mjs:23 (BOM), 24/26/38 (CR strip), 36-39 (lineNo=i+1 and blank skip)."
+              },
+              {
+                "requirement": "Errors carry original 1-based line number including blank lines",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/importer.mjs:13,17,28,43,48,51,64,68 embed lineNo; numbering derived as above."
+              },
+              {
+                "requirement": "Preserve first-seen category order for groups",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/importer.mjs:32,56-61 Map + ordered groups push."
+              },
+              {
+                "requirement": "CLI: exactly one path arg, UTF-8 read, only result JSON on stdout with exit 0; concise stderr with empty stdout and exit 1 on argument/read/validation failure; no stack trace",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "src/cli.mjs:10-23; root_verification receipt shows JSON output exit=0 and 'error: line 2: invalid amount', usage, ENOENT cases with exit=1."
+              },
+              {
+                "requirement": "Keep tests/acceptance.mjs unchanged; do not modify tests or spec",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "review_focus modified only src/cli.mjs, src/importer.mjs; added README.md; tests/acceptance.mjs and SPEC.md untouched."
+              },
+              {
+                "requirement": "No dependencies, commits, pushes or network services",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "package.json has no dependencies; task_git.changed_paths empty; no remote configured (git_remote status unknown, push not required)."
+              },
+              {
+                "requirement": "Actually run npm test using the project-provided Node/npm and TMPDIR=.test-tmp, verify exit code and PASS/summary",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "root_verifications receipt: PATH=\".runtime/bin:$PATH\" TMPDIR=\".test-tmp\" node npm-cli.js test -> 'EXPENSE_VALIDATION_SUMMARY: 127 cases passed', exit=0, artifact/input digests matched; member dispatch orbit-4423db03 accepted re-run in its own environment."
+              },
+              {
+                "requirement": "Hand the unimplemented importer to an available native execution member as a bounded coding work unit, not read-only review of finished code",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "Program record work unit wu-ba0fe8204e726eb9 dispatched to native member orbit-e57a2ba3, result accepted: 'Member implemented src/importer.mjs importExpenses per SPEC'."
+              },
+              {
+                "requirement": "Work unit declares required materials/paths/tools/complete command, including .runtime npm package dir and CLI test read path, and member runs npm test in its own environment",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "wu-5637739e9b6d23b5 scope: input_materials .runtime/ and .test-tmp/, allowed_tools read+bash, allowed_commands the exact npm test command; dispatch accepted with member environment re-run."
+              },
+              {
+                "requirement": "Member reports actual results, full command, exit code and limitations to Main via the native hub before returning; Root verifies the actual message",
+                "scope": "delivery",
+                "status": "verified",
+                "evidence": "Program record dispatch verification for wu-5637739e9b6d23b5: Root received the member's actual hub message (orbit-4423db03...) with command, exit code and per-case PASS details; requirement text preserved in the work-unit requirements list."
+              },
+              {
+                "requirement": "Request an independent manual final check",
+                "scope": "lifecycle",
+                "status": "verified",
+                "evidence": "This check session (#3) is that independent review of the fixed snapshots."
+              },
+              {
+                "requirement": "Fix any found problems and re-check, then confirm stop once completion conditions are met",
+                "scope": "lifecycle",
+                "status": "unverified",
+                "evidence": "Future lifecycle step; not yet observed."
+              },
+              {
+                "requirement": "Closing report / finalization",
+                "scope": "lifecycle",
+                "status": "unverified",
+                "evidence": "Future lifecycle step; not yet observed."
+              }
+            ]
+          }
+        },
+        "failed": null,
+        "stale": false,
+        "input_digest": "a78e5ec802ece3bc0e03cec79f850ce01eaadb2b156ddbb6a46ce79e0b46c802",
+        "artifact_digest": "sha256:fa9609ae2a2d1169c22e1179a2e7a77cc3b44a3b35eff3879728743b5259db83"
+      }
+    ]
+  }
+]

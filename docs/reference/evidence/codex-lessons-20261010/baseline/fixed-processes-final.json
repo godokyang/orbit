@@ -1,0 +1,156 @@
+{
+  "time": "2026-10-10T06:03:31.873486+00:00",
+  "fixed_alive": {
+    "2144": true,
+    "2145": true,
+    "37403": true,
+    "38007": true,
+    "38008": true,
+    "12801": true,
+    "11899": true,
+    "12828": true,
+    "12863": true,
+    "12883": true,
+    "12208": true,
+    "12914": true,
+    "12950": true,
+    "12966": true,
+    "12485": true,
+    "12993": true,
+    "13028": true
+  },
+  "panes": {
+    "p1": {
+      "foreground_process_group_id": 38007,
+      "foreground_processes": [
+        {
+          "argv": [
+            "/Users/yangke/.nvm/versions/node/v24.19.0/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex",
+            "--dangerously-bypass-approvals-and-sandbox"
+          ],
+          "argv0": "codex",
+          "cmdline": "/Users/yangke/.nvm/versions/node/v24.19.0/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex --dangerously-bypass-approvals-and-sandbox",
+          "cwd": "/Users/yangke/Personal/omen/orbit",
+          "name": "codex",
+          "pid": 38008
+        },
+        {
+          "argv": [
+            "node",
+            "/Users/yangke/.nvm/versions/node/v24.19.0/bin/codex",
+            "--dangerously-bypass-approvals-and-sandbox"
+          ],
+          "argv0": "node",
+          "cmdline": "node /Users/yangke/.nvm/versions/node/v24.19.0/bin/codex --dangerously-bypass-approvals-and-sandbox",
+          "cwd": "/Users/yangke/Personal/omen/orbit",
+          "name": "node",
+          "pid": 38007
+        }
+      ],
+      "pane_id": "w23:p1",
+      "shell_pid": 37403
+    },
+    "pH": {
+      "foreground_process_group_id": 12801,
+      "foreground_processes": [
+        {
+          "argv": [
+            "node",
+            "/Users/yangke/.npm/_npx/3951ab07c1e658c9/node_modules/.bin/mcp-server-mobile"
+          ],
+          "argv0": "node",
+          "cmdline": "node /Users/yangke/.npm/_npx/3951ab07c1e658c9/node_modules/.bin/mcp-server-mobile",
+          "cwd": "/Users/yangke/Personal/omen/orbit",
+          "name": "node",
+          "pid": 12863
+        },
+        {
+          "argv0": "mobile-mcp@1.0.2",
+          "cwd": "/Users/yangke/Personal/omen/orbit",
+          "name": "node",
+          "pid": 12828
+        },
+        {
+          "argv": [
+            "omp"
+          ],
+          "argv0": "omp",
+          "cmdline": "omp",
+          "cwd": "/Users/yangke/Personal/omen/orbit",
+          "name": "omp",
+          "pid": 12801
+        }
+      ],
+      "pane_id": "w23:pH",
+      "shell_pid": 11899
+    },
+    "pJ": {
+      "foreground_process_group_id": 12883,
+      "foreground_processes": [
+        {
+          "argv": [
+            "node",
+            "/Users/yangke/.npm/_npx/3951ab07c1e658c9/node_modules/.bin/mcp-server-mobile"
+          ],
+          "argv0": "node",
+          "cmdline": "node /Users/yangke/.npm/_npx/3951ab07c1e658c9/node_modules/.bin/mcp-server-mobile",
+          "cwd": "/Users/yangke/Personal/omen/orbit",
+          "name": "node",
+          "pid": 12950
+        },
+        {
+          "argv0": "mobile-mcp@1.0.2",
+          "cwd": "/Users/yangke/Personal/omen/orbit",
+          "name": "node",
+          "pid": 12914
+        },
+        {
+          "argv": [
+            "omp"
+          ],
+          "argv0": "omp",
+          "cmdline": "omp",
+          "cwd": "/Users/yangke/Personal/omen/orbit",
+          "name": "omp",
+          "pid": 12883
+        }
+      ],
+      "pane_id": "w23:pJ",
+      "shell_pid": 12208
+    },
+    "pK": {
+      "foreground_process_group_id": 12966,
+      "foreground_processes": [
+        {
+          "argv": [
+            "node",
+            "/Users/yangke/.npm/_npx/3951ab07c1e658c9/node_modules/.bin/mcp-server-mobile"
+          ],
+          "argv0": "node",
+          "cmdline": "node /Users/yangke/.npm/_npx/3951ab07c1e658c9/node_modules/.bin/mcp-server-mobile",
+          "cwd": "/Users/yangke/Personal/omen/orbit",
+          "name": "node",
+          "pid": 13028
+        },
+        {
+          "argv0": "mobile-mcp@1.0.2",
+          "cwd": "/Users/yangke/Personal/omen/orbit",
+          "name": "node",
+          "pid": 12993
+        },
+        {
+          "argv": [
+            "omp"
+          ],
+          "argv0": "omp",
+          "cmdline": "omp",
+          "cwd": "/Users/yangke/Personal/omen/orbit",
+          "name": "omp",
+          "pid": 12966
+        }
+      ],
+      "pane_id": "w23:pK",
+      "shell_pid": 12485
+    }
+  }
+}

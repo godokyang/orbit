@@ -1,0 +1,35 @@
+{
+  "time": "2026-10-10T06:07:13.480192+00:00",
+  "fixed_alive": {
+    "2144": true,
+    "2145": true,
+    "37403": true,
+    "38007": true,
+    "38008": true,
+    "12801": true,
+    "11899": true,
+    "12828": true,
+    "12863": true,
+    "12883": true,
+    "12208": true,
+    "12914": true,
+    "12950": true,
+    "12966": true,
+    "12485": true,
+    "12993": true,
+    "13028": true
+  },
+  "daily_install_unchanged": true,
+  "daily_install": {
+    "version": "0.8.3",
+    "source": {
+      "kind": "local",
+      "path": "/Users/yangke/Personal/omen/orbit",
+      "commit": "d947af6983c341429d597e9a494b4f4ef5880452",
+      "dirty": false
+    },
+    "content_digest": "5993d7fbde77cf3b466aa925df31844d30a977f2456acb6354ac539c84e3c493",
+    "installed_at": "2026-10-09T08:16:15Z"
+  },
+  "only_current_owned_test_resources_removed": true
+}

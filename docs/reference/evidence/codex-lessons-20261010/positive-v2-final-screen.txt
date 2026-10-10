@@ -1,0 +1,80 @@
+ gn/T/or…"
+ ⟦⌃O: Expand⟧
+
+
+ Goal restated. Next: request independent check via
+ orbit action=check, then end turn and wait for manual
+ finalization notice.
+
+ 实现与核验已收口，请求独立手动终检。
+
+
+ • Orbit
+  └─ action="check", task="/private/var/folders/fc/…"
+ └ • task_directory:
+ "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000
+ gn/T/or…"
+   • command_id: "20261010044019753642-3824db279452"
+   • status: "queued"
+   • next_action: "排队后直接结束当前轮次，检查者的
+ finalization_notice 或纠正…"
+ ⟦⌃O: Expand⟧
+
+
+ Goal restated; check queued, must end turn and wait
+ for finalization_notice.
+
+ 终检已排队（command_id
+ 20261010044019753642-3824db279452）。当前交付状态：
+
+ - src/importer.mjs：成员（opencode-go/deepseek-v4.1-f
+   lash，工作单元
+   wu-184b3bcd3d512f62）实现，仅改此文件；其沙箱内
+   122/122 纯函数用例通过（/tmp 写入与 npm
+   路径受限，已按诊断如实报告）。
+ - src/cli.mjs、README.md：Root
+   实现；直接冒烟确认成功路径输出 JSON、exit
+   0，参数缺失/文件不存在/金额非法各输出一行
+   stderr、stdout 空、exit 1，非法输入错误含一行号。
+ - 集成核验：.runtime/bin/node
+   .runtime/lib/node_modules/npm/bin/npm-cli.js test
+   全量 127 用例 PASS，EXPENSE_VALIDATION_SUMMARY: 127
+   cases passed; integer precision and CLI
+   verified，exit
+   0。测试与规范未改动，无提交/推送/网络。
+
+ 按流程结束本轮，等待
+ finalization_notice；收到后若无需修正即确认停止。
+
+独立终检通过，正在等待助手收尾。停止确认后才算完成。
+
+ Check passed; call orbit stop intent=complete, then
+ end. No TODO cleanup needed (no active todos).
+
+
+ • Orbit
+  └─ action="stop", intent="complete", task="/priva…"
+ └ • task_directory:
+ "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000
+ gn/T/or…"
+   • command_id: "20261010044119699165-384b54fe1cf9"
+   • status: "queued"
+ ⟦⌃O: Expand⟧
+
+
+ Stop gate queued. End turn normally; Orbit confirms
+ stop after reply.
+
+ 停止门已提交（command_id
+ 20261010044119699165-384b54fe1cf9，intent=complete）
+ 。无遗留 TODO
+ 或在途等待项；检查后未再做任何改动。交付内容：成员实
+ 现的 src/importer.mjs、Root 实现的 src/cli.mjs 与
+ README.md；项目运行时 npm test 127/127 通过（exit
+ 0），CLI 成功/错误路径均已直接核对，SPEC
+ 与测试未改动。等待 Orbit 核对后记录完成。
+
+
+╭── π > ◔ GLM-5.3-Flash > 🗑 …ve-v2 ▶─4%────────┃─1M───╮
+╰─                                                   ─╯
+Orbit：已完成（独立检查与停止确认；用户无需操作）

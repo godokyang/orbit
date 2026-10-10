@@ -1,0 +1,118 @@
+{
+  "commit": "9f5e66db681ac312d12f2f1f1c70cc804bcaad38",
+  "version": "0.8.3",
+  "dirty": true,
+  "files": [
+    {
+      "file": "contracts/task-runtime.md",
+      "sha256": "f98356c3af6d4dac1039361884d39a667cda47b84293fb4d9297b4713c55ff12"
+    },
+    {
+      "file": "docs/README.md",
+      "sha256": "6ae0212071196aa2c1ba42310a2d40a87bdc824575e590042fcb2dbd8c3a46f8"
+    },
+    {
+      "file": "docs/plan/debt-ledger.md",
+      "sha256": "549533f2e44c6f75db86e1712429aa6a38e6adf37bc8a23e557037fdd2b6973e"
+    },
+    {
+      "file": "docs/plan/handoff.md",
+      "sha256": "27f131305f91f2670bbcb50a15e8aaa907f06b78e99326ddac0467d0697f07eb"
+    },
+    {
+      "file": "lib/orbit/check_runner.rb",
+      "sha256": "c8ab253acc15d8387a7a7904c2a24c2a6ab01618b147297192a19093cb76a291"
+    },
+    {
+      "file": "lib/orbit/cli.rb",
+      "sha256": "83ecac7a28d815d780569c3b265fc95511e9c8d3552a23da03639c759b6025d2"
+    },
+    {
+      "file": "lib/orbit/omp_check_runner.rb",
+      "sha256": "8d05714bbb569ab90e7a81f5c7b7366f13fa2ddfc185692bb72e6499a5f26170"
+    },
+    {
+      "file": "lib/orbit/task_runtime.rb",
+      "sha256": "bb89c7be8867e2872e81f31aa3da2043e5e71baa67a991e45c357115c66e101b"
+    },
+    {
+      "file": "plugins/host.mjs",
+      "sha256": "180db3dec88a6811a4f8f79183bfa57b067bcbfce141895fa0c9dfa1a2901a1c"
+    },
+    {
+      "file": "plugins/omp-host.mjs",
+      "sha256": "d27afbe87ff1b782d6af75b0b23632380db92391f3e41849416add9c4bb067e3"
+    },
+    {
+      "file": "plugins/root-verifications.mjs",
+      "sha256": "09943686911e13d1e7be5de211a801c23032adc1a01a25b060e7f5de1717b1f1"
+    },
+    {
+      "file": "plugins/work-unit-scope.mjs",
+      "sha256": "873bc801f1c7a8946cb2abae1c49b16d371d76c9925df5748a126ddf87fecfb1"
+    },
+    {
+      "file": "runners/omp-reviewer/check-result.test.ts",
+      "sha256": "bf387ed2cdf032a5ec5d31f4a0db0dbc17943a2f8b6545dc403c61559bee4e9c"
+    },
+    {
+      "file": "runners/omp-reviewer/check-result.ts",
+      "sha256": "b6a09c1031e14ecc57c10494e0588c5a5814975b15f18e5aff5bcaedfe70d0bb"
+    },
+    {
+      "file": "runners/omp-reviewer/provider-error.test.ts",
+      "sha256": "730b88b5ec5a5208411c8d5e4b7887fc6e61dfba1310efd4fcff95d72297a36e"
+    },
+    {
+      "file": "runners/omp-reviewer/provider-error.ts",
+      "sha256": "5b171363ff17023f799e3ef61b82b44d18da76a7dfb86ba1cade1c1d8fb37727"
+    },
+    {
+      "file": "runners/omp-reviewer/reviewer.ts",
+      "sha256": "c784d890a03c1d0a035835eda8e8df7f9d10955530aa4a7933a10c15f2fdec44"
+    },
+    {
+      "file": "tests/check_runner_context_test.rb",
+      "sha256": "af108e0009f0334d4b50ab05925eb66d30a082ca9206b26fa57b15c5676f77e3"
+    },
+    {
+      "file": "tests/cli_test.rb",
+      "sha256": "862fa72c620f951a943219f11604ce40d633a45beb107c1775a10a51c07a6e5a"
+    },
+    {
+      "file": "tests/omp_collab_evidence_test.mjs",
+      "sha256": "bad1b5ab1bc4399469d53436bcb15a0579259ee83e7dd2d7fb0fe17d8a550cee"
+    },
+    {
+      "file": "tests/omp_entry_recovery_test.mjs",
+      "sha256": "fe4ade3e90d4289e98aec150b4460e122af9739eb2e8fb2f9fc442088da400b7"
+    },
+    {
+      "file": "tests/omp_native_gate_test.mjs",
+      "sha256": "8dc131d14213a23eee50d679ace788c6d6937f8219d5a46c1c23b2f6585158d4"
+    },
+    {
+      "file": "tests/root_verifications_test.mjs",
+      "sha256": "6b92f5280174238aa06a6c14b2f083617f508ca77978571dd37016e89ea8cc24"
+    },
+    {
+      "file": "tests/task_runtime_test.rb",
+      "sha256": "befb770daa14679386d68aaf11fcbba53b1373302fdac7483fca366a4d1e095b"
+    },
+    {
+      "file": "tests/work_unit_scope_test.mjs",
+      "sha256": "3cac0a0672c0a36fc57df0a61f50c8c23ccf052eeb5ebf8b6bb70025b77c9a6a"
+    },
+    {
+      "file": "plugins/native-task-preflight.mjs",
+      "sha256": "46790094e41896d74efa05c1bd4aef736474b2996eaac2c554a3af41a8b5855e"
+    },
+    {
+      "file": "tests/fixtures/check-result-samples.json",
+      "sha256": "cfaa924fcbf395ac15d23d10bf29c2950a5c360084432c5768ab28e61a00d62f"
+    }
+  ],
+  "all_prior_dirty_and_untracked_preserved": true,
+  "basis": "baseline preserved before changes; final current files remain reviewable, no commit/push/global update",
+  "documentation_after_goal_status_sync": true
+}

@@ -1,0 +1,31 @@
+
+added 1 package in 2s
+npm notice
+npm notice New major version of npm available! 11.17.0 -> 12.2.0
+npm notice Changelog: https://github.com/npm/cli/releases/tag/v12.2.0
+npm notice To update run: npm install -g npm@12.2.0
+npm notice
+Version and lockfile consistent: 0.8.3
+bun add v1.3.14 (0d9b296a)
+Resolving dependencies
+Resolved, downloaded and extracted [97]
+Saved lockfile
+
++ @oh-my-pi/pi-ai@18.3.4 (v18.8.7 available)
+
+installed @oh-my-pi/pi-coding-agent@18.8.0 with binaries:
+ - omp
+installed @oh-my-pi/pi-utils@18.8.0
+
+119 packages installed [19.84s]
+Installed orbit 0.8.3 (9f5e66db681ac312d12f2f1f1c70cc804bcaad38)
+CLI: /var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/bin/orbit
+Controlled OMP entry: orbit omp (plain omp loads no Orbit extension).
+Independent reviewer bundle: runners/omp-reviewer (SDK 18.3.4).
+Kept release in use: /var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/runtime/releases/06c54ae2385842b55bfa6b01
+OMP CLI: 18.8.0 (accepted by the version gate; newer runtime paths are not separately verified).
+运行 orbit doctor 查看依赖和安装状态；模型登录及额度需在实际会话中验证。
+Details: orbit version --json
+Update: orbit update.
+Uninstall: orbit uninstall
+PATH: unchanged (--no-modify-path).

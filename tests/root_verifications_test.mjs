@@ -6,7 +6,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { captureStart, buildReceipt, appendReceipt, readReceipts, VERIFY_FILENAME } from '../plugins/root-verifications.mjs';
+import { createHash } from 'node:crypto';
+import { captureStart, buildReceipt, appendReceipt, readReceipts, VERIFY_FILENAME, TEXT_CAP } from '../plugins/root-verifications.mjs';
 
 const taskA = await fs.mkdtemp(path.join(os.tmpdir(), 'orbit-root-verify-a-'));
 const taskB = await fs.mkdtemp(path.join(os.tmpdir(), 'orbit-root-verify-b-'));
@@ -114,6 +115,64 @@ assert.deepEqual(later.map(r => r.tool_call_id), ['call-npm-test', 'c2']);
 assert.equal(later[0].output, 'tests 8/8 pass');
 assert.equal(readReceipts(taskB).length, 0);
 assert.equal(((await fs.stat(path.join(taskA, VERIFY_FILENAME))).mode & 0o777).toString(8), '600');
+
+// C01: a long bash/eval output keeps BOTH ends. The head carries the run
+// context and the tail the failure summary; the in-band marker names the
+// capture layer's visible length in explicit UTF-16 code units and UTF-8
+// bytes plus its SHA-256, and the same facts ride as structured metadata.
+const head = 'RUN-START '.repeat(20);
+const tail = 'FAIL-SUMMARY '.repeat(20);
+const longOutput = head + 'x'.repeat(6000) + tail;
+const longStart = captureStart(
+  { type: 'tool_execution_start', toolCallId: 'call-long', toolName: 'bash', args: { command: 'npm test' } },
+  { sessionCwd: taskA });
+const longReceipt = buildReceipt({
+  event: { type: 'tool_execution_end', toolCallId: 'call-long', toolName: 'bash', isError: true,
+    result: { content: [{ type: 'text', text: longOutput }], details: { exitCode: 1 } } },
+  start: longStart, endBinding: null });
+assert.equal(longReceipt.output_truncated, true);
+assert.ok(longReceipt.output.length <= TEXT_CAP, 'the trimmed log stays within the receipt text budget');
+assert.ok(longReceipt.output.startsWith(head.slice(0, 60)), 'the run-context head survives');
+assert.ok(longReceipt.output.endsWith(tail.slice(-60)), 'the failure-summary tail survives');
+const mark = longReceipt.output.match(/…\[omitted (\d+) of (\d+) UTF-16 code units \/ (\d+) UTF-8 bytes sha256:([0-9a-f]{64})\]/);
+assert.ok(mark, 'the omission marker names explicit units and a SHA-256');
+assert.equal(Number(mark[2]), longOutput.length);
+assert.equal(Number(mark[3]), Buffer.byteLength(longOutput, 'utf8'));
+assert.equal(mark[4], createHash('sha256').update(longOutput, 'utf8').digest('hex'));
+assert.deepEqual(longReceipt.output_omitted, {
+  omitted_utf16_units: Number(mark[1]), visible_utf16_units: longOutput.length,
+  visible_utf8_bytes: Buffer.byteLength(longOutput, 'utf8'),
+  sha256: createHash('sha256').update(longOutput, 'utf8').digest('hex') });
+assert.equal(longReceipt.exit_code, 1); // execution result facts are unchanged
+assert.equal(longReceipt.exit_code_source, 'reported');
+
+// C01: the command/script strategy is untouched - a long command keeps the
+// plain bounded prefix, no head+tail marker.
+const longCommand = 'c'.repeat(5000);
+const commandStart = captureStart(
+  { type: 'tool_execution_start', toolCallId: 'call-longcmd', toolName: 'bash', args: { command: longCommand } },
+  { sessionCwd: taskA });
+const commandReceipt = buildReceipt({
+  event: { type: 'tool_execution_end', toolCallId: 'call-longcmd', toolName: 'bash', isError: false,
+    result: { content: [{ type: 'text', text: 'ok' }], details: {} } },
+  start: commandStart, endBinding: null });
+assert.equal(commandReceipt.command, longCommand.slice(0, TEXT_CAP));
+assert.equal(commandReceipt.command_truncated, true);
+assert.equal(commandReceipt.command.includes('…['), false);
+assert.equal(commandReceipt.output, 'ok'); // short output stays verbatim, no marker
+assert.equal(commandReceipt.output_omitted, undefined);
+
+// C01: Unicode cut points never split a surrogate pair - the trimmed log
+// re-encodes as identical UTF-8.
+const unicodeOutput = 'HEAD ' + '🔥'.repeat(3000) + ' TAIL';
+const unicodeReceipt = buildReceipt({
+  event: { type: 'tool_execution_end', toolCallId: 'call-unicode', toolName: 'bash', isError: true,
+    result: { content: [{ type: 'text', text: unicodeOutput }], details: { exitCode: 1 } } },
+  start: longStart, endBinding: null });
+assert.equal(unicodeReceipt.output_truncated, true);
+assert.equal(Buffer.from(unicodeReceipt.output, 'utf8').toString('utf8'), unicodeReceipt.output,
+  'no lone surrogates: the trimmed log round-trips through UTF-8 unchanged');
+assert.ok(unicodeReceipt.output.startsWith('HEAD ') && unicodeReceipt.output.endsWith(' TAIL'));
 
 await fs.rm(taskA, { recursive: true, force: true });
 await fs.rm(taskB, { recursive: true, force: true });

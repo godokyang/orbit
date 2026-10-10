@@ -200,13 +200,25 @@ try {
 
     const assistantTail = { messages: [{ role: 'user', content: [{ text: 'hi' }] }, { role: 'assistant', content: 'done' }] };
     out = appendInstructionToPayload(assistantTail, 'X');
-    assert.equal(out.messages.length, 2);
+    assert.equal(out.messages.length, 3, 'an assistant tail is preserved, never replaced');
     assert.deepEqual(out.messages.at(-1), { role: 'user', content: 'X' }, 'new string user turn after assistant');
 
     const assistantToolText = { messages: [{ role: 'assistant', content: [{ type: 'text', text: 'done' }] }] };
     out = appendInstructionToPayload(assistantToolText, 'X');
-    assert.equal(out.messages.length, 1);
-    assert.deepEqual(out.messages[0].content.at(-1), { type: 'text', text: 'X' }, 'typed block after assistant text');
+    assert.equal(out.messages.length, 2, 'the assistant message stays and a user turn is appended');
+    assert.deepEqual(out.messages[0].content.at(-1), { type: 'text', text: 'done' }, 'assistant content is untouched');
+    assert.deepEqual(out.messages.at(-1), { role: 'user', content: [{ type: 'text', text: 'X' }] }, 'typed block in the appended user turn');
+
+    // Tool-loop tail: an assistant tool call answered by its tool result must
+    // keep the result and its pairing when a projection appends after it.
+    const toolLoop = { messages: [
+      { role: 'assistant', content: null, tool_calls: [{ id: 'call_1', type: 'function', function: { name: 'bash', arguments: '{}' } }] },
+      { role: 'tool', tool_call_id: 'call_1', content: 'exit 0' }] };
+    out = appendInstructionToPayload(toolLoop, 'X');
+    assert.equal(out.messages.length, 3, 'the tool result is never dropped');
+    assert.deepEqual(out.messages[1], { role: 'tool', tool_call_id: 'call_1', content: 'exit 0' },
+      'the tool result keeps its call pairing');
+    assert.deepEqual(out.messages[2], { role: 'user', content: 'X' }, 'the projection lands after the tool result');
 
     assert.equal(appendInstructionToPayload(
       { messages: [{ role: 'assistant', content: [{ type: 'tool_use', id: 't', name: 'n' }] }] }, 'X'), null,

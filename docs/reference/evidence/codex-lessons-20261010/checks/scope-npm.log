@@ -1,0 +1,18 @@
+WORK_UNIT_SCOPE_TEST_PASS native_tools_and_paths
+WORK_UNIT_SCOPE_TEST_PASS native_selector_multipath_glob
+WORK_UNIT_SCOPE_TEST_PASS work_unit_preflight
+node:internal/modules/run_main:107
+    triggerUncaughtException(
+    ^
+
+AssertionError [ERR_ASSERTION]: The "string" argument must be of type string. Received type undefined (undefined)
+    at file:///Users/yangke/Personal/omen/orbit/tests/work_unit_scope_test.mjs:191:14 {
+  generatedMessage: true,
+  code: 'ERR_ASSERTION',
+  actual: undefined,
+  expected: /including package.json, lib and node_modules/,
+  operator: 'match',
+  diff: 'simple'
+}
+
+Node.js v24.19.0

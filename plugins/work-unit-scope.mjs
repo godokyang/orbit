@@ -1,6 +1,7 @@
 // Actual native member tool entrance. Declarations do not enforce permissions;
 // the host calls this for each bound member and keeps Root's tools separate.
 import fs from 'node:fs/promises';
+import { constants as fileConstants } from 'node:fs';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
@@ -369,7 +370,7 @@ async function scopedFindTarget(value, root, allowed) {
 
 function sandboxProfile(root, allowed) {
   const string = value => JSON.stringify(value);
-  const libraries = ['/usr', '/System', '/Library', '/bin', '/sbin', '/opt'];
+  const libraries = SANDBOX_READ_ROOTS;
   if (root.includes('\\')) throw new Error('this command sandbox cannot safely express a backslash in the workspace path');
   const escapedRoot = root.replace(/[.*+?^${}()|[\]]/g, character =>
     character === '[' ? '[[]' : character === ']' ? '[]]' : `[${character}]`);
@@ -405,6 +406,96 @@ function availableSandbox() {
   return (sandboxReady = probe.status === 0);
 }
 
+const SANDBOX_READ_ROOTS = ['/usr', '/System', '/Library', '/bin', '/sbin', '/opt'];
+const SANDBOX_READ_FILES = new Set(['/dev/null', '/dev/urandom', '/dev/random']);
+// Bare words and two literal npm test-directory assignments only. PATH,
+// expansions, quotes and other shell syntax remain unknown to this probe.
+const SHELL_SYNTAX = /[|&;<>`$(){}\\!#*?'"=\n[\]]/;
+const RUNTIME_TOOLS = new Set(['node', 'npm', 'npx']);
+
+function bareCommandWords(command) {
+  if (typeof command !== 'string') return undefined;
+  const words = command.trim().split(/[ \t]+/);
+  while (/^(TMPDIR|NPM_CONFIG_CACHE)=[A-Za-z0-9_./:-]+$/.test(words[0])) words.shift();
+  return SHELL_SYNTAX.test(words.join(' ')) ? undefined : words;
+}
+function bareCommandExecutable(command) {
+  const token = bareCommandWords(command)?.[0];
+  if (!token || token.startsWith('-') || token.includes('\0') || token.includes('..')) return undefined;
+  return token;
+}
+
+function sandboxCanRead(realPath, allowed) {
+  return SANDBOX_READ_FILES.has(realPath) ||
+    [...allowed, ...SANDBOX_READ_ROOTS].some(base => within(base, realPath));
+}
+
+function commandRecovery(root, command, token, detail) {
+  const remedy = RUNTIME_TOOLS.has(path.basename(token))
+    ? `Copy the current Node binary and npm package into ${root}/.runtime (a real copy, no credentials, user cache, or symlink back outside), add .runtime to allowed_paths, and declare PATH=${root}/.runtime/bin:$PATH npm test.`
+    : 'Repair the executable path or declare the required script within allowed_paths; permission expansion needs the user decision.';
+  return `command ${JSON.stringify(command)} ${detail}. ${remedy} Correct the work unit before redispatch; a Root-only rerun is not a member result.`;
+}
+
+// Static first hop only; no declared command is executed. Executable binaries
+// are not subject to the script data-read test: process* permits their loading.
+// Shell syntax, arbitrary interpreter arguments, package scripts and caches
+// remain unproved. The known node -> npm-cli entry also needs the npm package
+// read set, not merely its entry file; no command is run to inspect it.
+async function assertCommandReadable(command, root, allowed, execCwd) {
+  const token = bareCommandExecutable(command);
+  if (!token) return;
+  const pathEnv = process.env.PATH || '/usr/bin:/bin';
+  // Dispatch has not received an actual bash cwd yet. A relative executable
+  // or PATH entry is unknown there; inspect it at the actual member call.
+  if (!execCwd && ((token.includes('/') && !path.isAbsolute(token)) ||
+      pathEnv.split(path.delimiter).some(dir => dir && !path.isAbsolute(dir)))) return;
+  const base = execCwd ?? root;
+  const candidates = token.includes('/')
+    ? [path.resolve(base, token)]
+    : pathEnv.split(path.delimiter).filter(Boolean).map(dir => path.resolve(base, dir, token));
+  for (const candidate of candidates) {
+    let stat;
+    try { stat = await fs.stat(candidate); }
+    catch (error) {
+      if (error?.code === 'EACCES') throw new Error(commandRecovery(root, command, token, `cannot inspect ${candidate}`));
+      if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') continue;
+      throw error;
+    }
+    if (!stat.isFile()) continue;
+    try { await fs.access(candidate, fileConstants.X_OK); }
+    catch { continue; }
+    const real = await fs.realpath(candidate);
+    let handle;
+    try {
+      handle = await fs.open(real, 'r');
+      const header = Buffer.alloc(2);
+      const { bytesRead } = await handle.read(header, 0, 2, 0);
+      if (bytesRead === 2 && header.toString() === '#!' && !sandboxCanRead(real, allowed))
+        throw new Error(commandRecovery(root, command, token, `resolves to script ${real}, outside the member sandbox data-read set`));
+    } catch (error) {
+      if (error?.code !== 'EACCES') throw error;
+      if (RUNTIME_TOOLS.has(path.basename(token)))
+        throw new Error(commandRecovery(root, command, token, `cannot inspect runtime entry ${real}`));
+      // Unreadable executable format is unknown; kernel enforcement remains.
+    } finally { await handle?.close(); }
+    const words = bareCommandWords(command);
+    let npmEntry = real;
+    if (path.basename(token) === 'node' && words[1]?.endsWith('/npm/bin/npm-cli.js')) {
+      if (!execCwd && !path.isAbsolute(words[1])) return;
+      npmEntry = await fs.realpath(path.resolve(base, words[1]));
+    }
+    if (npmEntry.endsWith('/npm/bin/npm-cli.js')) {
+      const packageRoot = path.dirname(path.dirname(npmEntry));
+      if (!sandboxCanRead(packageRoot, allowed))
+        throw new Error(commandRecovery(root, command, token,
+          `needs npm package ${packageRoot}, including package.json, lib and node_modules; allowing only npm-cli.js is insufficient`));
+    }
+    return;
+  }
+  throw new Error(commandRecovery(root, command, token, `has no executable ${token} on the member PATH`));
+}
+
 export async function validateMemberTool(unit, { toolName, input, rootAgentId, editTargets, cwd }) {
   try {
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('invalid native tool input');
@@ -434,6 +525,7 @@ export async function validateMemberTool(unit, { toolName, input, rootAgentId, e
       if (input.pty || input.env || input.name || input.ready) throw new Error('PTY, injected environment and services have no bounded command entrance');
       const cwd = input.cwd === undefined ? root : await scopedPath(input.cwd, root, [root]);
       if (!availableSandbox()) throw new Error('no verified system command sandbox is available; Root must run the required verification');
+      await assertCommandReadable(input.command, root, allowed, cwd);
       // The outer native shell sees only quoted constants. All user command
       // syntax runs inside the kernel sandbox; inherited provider credentials
       // are removed from the command environment. No network rule is allowed.
@@ -494,8 +586,9 @@ export async function validateMemberTool(unit, { toolName, input, rootAgentId, e
 
 // Pre-dispatch executability check for a declared work unit, run by the host
 // before any member session or candidate-model spend. Returns { ok: true,
-// root, allowed } when the unit can actually exercise its declared entrances,
-// or { block: true, reason } with the concrete repair Root must apply.
+// root, allowed } when the inspected declaration is consistent and no known
+// first-hop blocker was found; it is not proof of complete command/dependency
+// feasibility. Otherwise returns { block: true, reason } for Root to repair.
 // options.materials: task input material paths the Root plans to hand the
 // member; each must already exist inside the artifact root, outside
 // .git/.orbit, and inside the member's allowed paths (members read nothing
@@ -519,6 +612,9 @@ export async function validateWorkUnitPreflight(unit, { materials = unit?.input_
       throw new Error('bash has no allowed_commands and cannot execute; declare complete commands or remove bash before dispatch');
     if (tools.includes('bash') && !availableSandbox())
       throw new Error('the bounded command sandbox is unavailable; Root must run commands instead of dispatching an unexecutable unit');
+    if (tools.includes('bash')) {
+      for (const command of commands) await assertCommandReadable(command, root, allowed);
+    }
     if (Array.isArray(availableTools)) {
       const missing = tools.filter(name => !['hub', 'yield'].includes(name) && !availableTools.includes(name));
       if (missing.length) throw new Error(`required native tools are unavailable: ${missing.join(', ')}; Root must provide the capability or take over`);

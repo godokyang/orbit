@@ -1,0 +1,1370 @@
+{
+  "scope": "persisted per-task ledgers, all calibration/failed/repeated runs; native unregistered child reported separately; missing unknown; SDK buckets not added to totalTokens; not billing",
+  "runs": [
+    {
+      "archive": "docs/reference/evidence/codex-lessons-20261009/interrupt-calibration.tar.gz",
+      "task_id": "9e5927f6-a8af-4342-81a7-39e5b03969de",
+      "roles": [
+        {
+          "role": "judgment",
+          "phase": "jev_stage1",
+          "provider": "typesafe",
+          "model": "jev-1.13.0",
+          "calls": 3,
+          "statuses": {
+            "completed": 3
+          },
+          "usage_fields": {
+            "input_tokens": {
+              "reported_sum": 6036,
+              "reported_calls": 3,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "output_tokens": {
+              "reported_sum": 165,
+              "reported_calls": 3,
+              "unit": "token",
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "root",
+          "phase": "root_execution",
+          "provider": "kimi-code",
+          "model": "k3-256k",
+          "calls": 8,
+          "statuses": {
+            "completed": 7,
+            "failed": 1
+          },
+          "usage_fields": {
+            "input": {
+              "reported_sum": 41346,
+              "reported_calls": 8,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "output": {
+              "reported_sum": 3807,
+              "reported_calls": 7,
+              "unit": "token",
+              "missing_calls": 1
+            },
+            "cacheRead": {
+              "reported_sum": 100864,
+              "reported_calls": 7,
+              "unit": "token",
+              "missing_calls": 1
+            },
+            "cacheWrite": {
+              "reported_sum": 0,
+              "reported_calls": 7,
+              "unit": "token",
+              "missing_calls": 1
+            },
+            "totalTokens": {
+              "reported_sum": 146017,
+              "reported_calls": 8,
+              "unit": "token",
+              "missing_calls": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "archive": "docs/reference/evidence/codex-lessons-20261009/negative.tar.gz",
+      "task_id": "92ad84c5-9a0e-4307-9d58-d643622548f2",
+      "roles": [
+        {
+          "role": "root",
+          "phase": "root_execution",
+          "provider": "zhipu-coding-plan",
+          "model": "glm-5.3-flash",
+          "calls": 12,
+          "statuses": {
+            "completed": 12
+          },
+          "usage_fields": {
+            "input": {
+              "reported_sum": 26766,
+              "reported_calls": 12,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "output": {
+              "reported_sum": 1153,
+              "reported_calls": 12,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "cacheRead": {
+              "reported_sum": 131200,
+              "reported_calls": 12,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "cacheWrite": {
+              "reported_sum": 0,
+              "reported_calls": 12,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "totalTokens": {
+              "reported_sum": 159119,
+              "reported_calls": 12,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "reasoningTokens": {
+              "reported_sum": 153,
+              "reported_calls": 5,
+              "unit": "token",
+              "missing_calls": 7
+            }
+          }
+        },
+        {
+          "role": "judgment",
+          "phase": "jev_stage1",
+          "provider": "typesafe",
+          "model": "jev-1.13.0",
+          "calls": 2,
+          "statuses": {
+            "completed": 2
+          },
+          "usage_fields": {
+            "input_tokens": {
+              "reported_sum": 3742,
+              "reported_calls": 2,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "output_tokens": {
+              "reported_sum": 110,
+              "reported_calls": 2,
+              "unit": "token",
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "checker",
+          "phase": "reviewer",
+          "provider": "opencode-go",
+          "model": "deepseek-v4.1-flash",
+          "calls": 6,
+          "statuses": {
+            "completed": 6
+          },
+          "usage_fields": {
+            "input": {
+              "reported_sum": 23950,
+              "reported_calls": 6,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "output": {
+              "reported_sum": 3702,
+              "reported_calls": 6,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "cacheRead": {
+              "reported_sum": 50688,
+              "reported_calls": 6,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "cacheWrite": {
+              "reported_sum": 0,
+              "reported_calls": 6,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "reasoningTokens": {
+              "reported_sum": 1437,
+              "reported_calls": 6,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "totalTokens": {
+              "reported_sum": 78340,
+              "reported_calls": 6,
+              "unit": "token",
+              "missing_calls": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "archive": "docs/reference/evidence/codex-lessons-20261009/normal-exit.tar.gz",
+      "task_id": "e937aa5e-3b70-4a49-b017-73953b833504",
+      "roles": [
+        {
+          "role": "root",
+          "phase": "root_execution",
+          "provider": "zhipu-coding-plan",
+          "model": "glm-5.3-flash",
+          "calls": 9,
+          "statuses": {
+            "completed": 9
+          },
+          "usage_fields": {
+            "input": {
+              "reported_sum": 27277,
+              "reported_calls": 9,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "output": {
+              "reported_sum": 613,
+              "reported_calls": 9,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "cacheRead": {
+              "reported_sum": 91968,
+              "reported_calls": 9,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "cacheWrite": {
+              "reported_sum": 0,
+              "reported_calls": 9,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "reasoningTokens": {
+              "reported_sum": 16,
+              "reported_calls": 2,
+              "unit": "token",
+              "missing_calls": 7
+            },
+            "totalTokens": {
+              "reported_sum": 119858,
+              "reported_calls": 9,
+              "unit": "token",
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "judgment",
+          "phase": "jev_stage1",
+          "provider": "typesafe",
+          "model": "jev-1.13.0",
+          "calls": 1,
+          "statuses": {
+            "completed": 1
+          },
+          "usage_fields": {
+            "input_tokens": {
+              "reported_sum": 1310,
+              "reported_calls": 1,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "output_tokens": {
+              "reported_sum": 55,
+              "reported_calls": 1,
+              "unit": "token",
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "checker",
+          "phase": "reviewer",
+          "provider": "opencode-go",
+          "model": "deepseek-v4.1-flash",
+          "calls": 2,
+          "statuses": {
+            "completed": 2
+          },
+          "usage_fields": {
+            "input": {
+              "reported_sum": 10875,
+              "reported_calls": 2,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "output": {
+              "reported_sum": 1098,
+              "reported_calls": 2,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "cacheRead": {
+              "reported_sum": 10624,
+              "reported_calls": 2,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "cacheWrite": {
+              "reported_sum": 0,
+              "reported_calls": 2,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "reasoningTokens": {
+              "reported_sum": 199,
+              "reported_calls": 2,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "totalTokens": {
+              "reported_sum": 22597,
+              "reported_calls": 2,
+              "unit": "token",
+              "missing_calls": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "archive": "docs/reference/evidence/codex-lessons-20261009/positive-fixed.tar.gz",
+      "task_id": "9f47f925-5f84-4ff5-97ce-85fbbad616c2",
+      "roles": [
+        {
+          "role": "root",
+          "phase": "root_execution",
+          "provider": "zhipu-coding-plan",
+          "model": "glm-5.3-flash",
+          "calls": 45,
+          "statuses": {
+            "completed": 45
+          },
+          "usage_fields": {
+            "input": {
+              "reported_sum": 96348,
+              "reported_calls": 45,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "output": {
+              "reported_sum": 11771,
+              "reported_calls": 45,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "cacheRead": {
+              "reported_sum": 1386496,
+              "reported_calls": 45,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "cacheWrite": {
+              "reported_sum": 0,
+              "reported_calls": 45,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "reasoningTokens": {
+              "reported_sum": 1777,
+              "reported_calls": 20,
+              "unit": "token",
+              "missing_calls": 25
+            },
+            "totalTokens": {
+              "reported_sum": 1494615,
+              "reported_calls": 45,
+              "unit": "token",
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "judgment",
+          "phase": "jev_stage1",
+          "provider": "typesafe",
+          "model": "jev-1.13.0",
+          "calls": 7,
+          "statuses": {
+            "completed": 7
+          },
+          "usage_fields": {
+            "input_tokens": {
+              "reported_sum": 24968,
+              "reported_calls": 7,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "output_tokens": {
+              "reported_sum": 385,
+              "reported_calls": 7,
+              "unit": "token",
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "judgment",
+          "phase": "jev_checker_selection",
+          "provider": "typesafe",
+          "model": "jev-1.13.0",
+          "calls": 2,
+          "statuses": {
+            "completed": 2
+          },
+          "usage_fields": {
+            "input_tokens": {
+              "reported_sum": 21699,
+              "reported_calls": 2,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "output_tokens": {
+              "reported_sum": 116,
+              "reported_calls": 2,
+              "unit": "token",
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "checker",
+          "phase": "process_reviewer",
+          "provider": "opencode-go",
+          "model": "deepseek-v4.1-flash",
+          "calls": 3,
+          "statuses": {
+            "completed": 3
+          },
+          "usage_fields": {
+            "input": {
+              "reported_sum": 10899,
+              "reported_calls": 3,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "output": {
+              "reported_sum": 3235,
+              "reported_calls": 3,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "cacheRead": {
+              "reported_sum": 25984,
+              "reported_calls": 3,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "cacheWrite": {
+              "reported_sum": 0,
+              "reported_calls": 3,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "reasoningTokens": {
+              "reported_sum": 1689,
+              "reported_calls": 3,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "totalTokens": {
+              "reported_sum": 40118,
+              "reported_calls": 3,
+              "unit": "token",
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "judgment",
+          "phase": "jev_member_delegation",
+          "provider": "typesafe",
+          "model": "jev-1.13.0",
+          "calls": 1,
+          "statuses": {
+            "completed": 1
+          },
+          "usage_fields": {
+            "input_tokens": {
+              "reported_sum": 21151,
+              "reported_calls": 1,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "output_tokens": {
+              "reported_sum": 40,
+              "reported_calls": 1,
+              "unit": "token",
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "judgment",
+          "phase": "jev_member_candidates",
+          "provider": "typesafe",
+          "model": "jev-1.13.0",
+          "calls": 1,
+          "statuses": {
+            "completed": 1
+          },
+          "usage_fields": {
+            "input_tokens": {
+              "reported_sum": 22964,
+              "reported_calls": 1,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "output_tokens": {
+              "reported_sum": 164,
+              "reported_calls": 1,
+              "unit": "token",
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "member",
+          "phase": "member_execution",
+          "provider": "opencode-go",
+          "model": "deepseek-v4.1-flash",
+          "calls": 4,
+          "statuses": {
+            "completed": 4
+          },
+          "usage_fields": {
+            "input": {
+              "reported_sum": 8390,
+              "reported_calls": 4,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "output": {
+              "reported_sum": 3560,
+              "reported_calls": 4,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "cacheRead": {
+              "reported_sum": 47360,
+              "reported_calls": 4,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "cacheWrite": {
+              "reported_sum": 0,
+              "reported_calls": 4,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "totalTokens": {
+              "reported_sum": 59310,
+              "reported_calls": 4,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "reasoningTokens": {
+              "reported_sum": 1855,
+              "reported_calls": 3,
+              "unit": "token",
+              "missing_calls": 1
+            }
+          }
+        },
+        {
+          "role": "checker",
+          "phase": "reviewer",
+          "provider": "opencode-go",
+          "model": "deepseek-v4.1-flash",
+          "calls": 5,
+          "statuses": {
+            "completed": 5
+          },
+          "usage_fields": {
+            "input": {
+              "reported_sum": 27108,
+              "reported_calls": 5,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "output": {
+              "reported_sum": 8412,
+              "reported_calls": 5,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "cacheRead": {
+              "reported_sum": 93184,
+              "reported_calls": 5,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "cacheWrite": {
+              "reported_sum": 0,
+              "reported_calls": 5,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "reasoningTokens": {
+              "reported_sum": 5817,
+              "reported_calls": 5,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "totalTokens": {
+              "reported_sum": 128704,
+              "reported_calls": 5,
+              "unit": "token",
+              "missing_calls": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "archive": "docs/reference/evidence/codex-lessons-20261009/positive-glm-corrected.tar.gz",
+      "task_id": "1a683e0d-33a5-4d75-bb27-e1ba90aa0325",
+      "roles": [
+        {
+          "role": "root",
+          "phase": "root_execution",
+          "provider": "zhipu-coding-plan",
+          "model": "glm-5.3-flash",
+          "calls": 33,
+          "statuses": {
+            "completed": 33
+          },
+          "usage_fields": {
+            "input": {
+              "reported_sum": 99771,
+              "reported_calls": 33,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "output": {
+              "reported_sum": 12270,
+              "reported_calls": 33,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "cacheRead": {
+              "reported_sum": 1072576,
+              "reported_calls": 33,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "cacheWrite": {
+              "reported_sum": 0,
+              "reported_calls": 33,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "totalTokens": {
+              "reported_sum": 1184617,
+              "reported_calls": 33,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "reasoningTokens": {
+              "reported_sum": 1994,
+              "reported_calls": 17,
+              "unit": "token",
+              "missing_calls": 16
+            }
+          }
+        },
+        {
+          "role": "judgment",
+          "phase": "jev_stage1",
+          "provider": "typesafe",
+          "model": "jev-1.13.0",
+          "calls": 10,
+          "statuses": {
+            "completed": 10
+          },
+          "usage_fields": {
+            "input_tokens": {
+              "reported_sum": 51625,
+              "reported_calls": 10,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "output_tokens": {
+              "reported_sum": 550,
+              "reported_calls": 10,
+              "unit": "token",
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "judgment",
+          "phase": "jev_member_delegation",
+          "provider": "typesafe",
+          "model": "jev-1.13.0",
+          "calls": 1,
+          "statuses": {
+            "completed": 1
+          },
+          "usage_fields": {
+            "input_tokens": {
+              "reported_sum": 20883,
+              "reported_calls": 1,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "output_tokens": {
+              "reported_sum": 40,
+              "reported_calls": 1,
+              "unit": "token",
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "judgment",
+          "phase": "jev_member_candidates",
+          "provider": "typesafe",
+          "model": "jev-1.13.0",
+          "calls": 1,
+          "statuses": {
+            "completed": 1
+          },
+          "usage_fields": {
+            "input_tokens": {
+              "reported_sum": 22696,
+              "reported_calls": 1,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "output_tokens": {
+              "reported_sum": 164,
+              "reported_calls": 1,
+              "unit": "token",
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "member",
+          "phase": "member_execution",
+          "provider": "opencode-go",
+          "model": "deepseek-v4.1-flash",
+          "calls": 40,
+          "statuses": {
+            "completed": 40
+          },
+          "usage_fields": {
+            "input": {
+              "reported_sum": 95064,
+              "reported_calls": 40,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "output": {
+              "reported_sum": 70108,
+              "reported_calls": 40,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "cacheRead": {
+              "reported_sum": 1634560,
+              "reported_calls": 40,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "cacheWrite": {
+              "reported_sum": 0,
+              "reported_calls": 40,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "totalTokens": {
+              "reported_sum": 1799732,
+              "reported_calls": 40,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "reasoningTokens": {
+              "reported_sum": 45203,
+              "reported_calls": 39,
+              "unit": "token",
+              "missing_calls": 1
+            }
+          }
+        },
+        {
+          "role": "judgment",
+          "phase": "jev_checker_selection",
+          "provider": "typesafe",
+          "model": "jev-1.13.0",
+          "calls": 1,
+          "statuses": {
+            "completed": 1
+          },
+          "usage_fields": {
+            "input_tokens": {
+              "reported_sum": 11085,
+              "reported_calls": 1,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "output_tokens": {
+              "reported_sum": 58,
+              "reported_calls": 1,
+              "unit": "token",
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "checker",
+          "phase": "reviewer",
+          "provider": "opencode-go",
+          "model": "deepseek-v4.1-flash",
+          "calls": 8,
+          "statuses": {
+            "completed": 8
+          },
+          "usage_fields": {
+            "input": {
+              "reported_sum": 58009,
+              "reported_calls": 8,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "output": {
+              "reported_sum": 29044,
+              "reported_calls": 8,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "cacheRead": {
+              "reported_sum": 131328,
+              "reported_calls": 8,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "cacheWrite": {
+              "reported_sum": 0,
+              "reported_calls": 8,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "reasoningTokens": {
+              "reported_sum": 24878,
+              "reported_calls": 7,
+              "unit": "token",
+              "missing_calls": 1
+            },
+            "totalTokens": {
+              "reported_sum": 218381,
+              "reported_calls": 8,
+              "unit": "token",
+              "missing_calls": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "archive": "docs/reference/evidence/codex-lessons-20261009/positive-k3-fallback.tar.gz",
+      "task_id": "06484dc7-7cb6-44bf-9d6c-4d08488e7dc0",
+      "roles": [
+        {
+          "role": "judgment",
+          "phase": "jev_stage1",
+          "provider": "typesafe",
+          "model": "jev-1.13.0",
+          "calls": 8,
+          "statuses": {
+            "completed": 8
+          },
+          "usage_fields": {
+            "input_tokens": {
+              "reported_sum": 24340,
+              "reported_calls": 8,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "output_tokens": {
+              "reported_sum": 440,
+              "reported_calls": 8,
+              "unit": "token",
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "root",
+          "phase": "root_execution",
+          "provider": "kimi-code",
+          "model": "k3-256k",
+          "calls": 30,
+          "statuses": {
+            "completed": 30
+          },
+          "usage_fields": {
+            "input": {
+              "reported_sum": 42615,
+              "reported_calls": 30,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "output": {
+              "reported_sum": 14915,
+              "reported_calls": 30,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "cacheRead": {
+              "reported_sum": 984064,
+              "reported_calls": 30,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "cacheWrite": {
+              "reported_sum": 0,
+              "reported_calls": 30,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "totalTokens": {
+              "reported_sum": 1041594,
+              "reported_calls": 30,
+              "unit": "token",
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "checker",
+          "phase": "process_reviewer",
+          "provider": "opencode-go",
+          "model": "deepseek-v4.1-flash",
+          "calls": 8,
+          "statuses": {
+            "completed": 8
+          },
+          "usage_fields": {
+            "input": {
+              "reported_sum": 55125,
+              "reported_calls": 8,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "output": {
+              "reported_sum": 7415,
+              "reported_calls": 8,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "cacheRead": {
+              "reported_sum": 91904,
+              "reported_calls": 8,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "cacheWrite": {
+              "reported_sum": 0,
+              "reported_calls": 8,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "reasoningTokens": {
+              "reported_sum": 3049,
+              "reported_calls": 8,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "totalTokens": {
+              "reported_sum": 154444,
+              "reported_calls": 8,
+              "unit": "token",
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "checker",
+          "phase": "reviewer",
+          "provider": "opencode-go",
+          "model": "deepseek-v4.1-flash",
+          "calls": 6,
+          "statuses": {
+            "completed": 6
+          },
+          "usage_fields": {
+            "input": {
+              "reported_sum": 39050,
+              "reported_calls": 6,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "output": {
+              "reported_sum": 18117,
+              "reported_calls": 6,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "cacheRead": {
+              "reported_sum": 139520,
+              "reported_calls": 6,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "cacheWrite": {
+              "reported_sum": 0,
+              "reported_calls": 6,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "reasoningTokens": {
+              "reported_sum": 14886,
+              "reported_calls": 5,
+              "unit": "token",
+              "missing_calls": 1
+            },
+            "totalTokens": {
+              "reported_sum": 196687,
+              "reported_calls": 6,
+              "unit": "token",
+              "missing_calls": 0
+            }
+          }
+        }
+      ]
+    },
+    {
+      "archive": "docs/reference/evidence/codex-lessons-20261009/positive-raw-failed.tar.gz",
+      "task_id": "8436644f-c330-463c-8783-982fde48808a",
+      "roles": [
+        {
+          "role": "root",
+          "phase": "root_execution",
+          "provider": "zhipu-coding-plan",
+          "model": "glm-5.3-flash",
+          "calls": 25,
+          "statuses": {
+            "completed": 25
+          },
+          "usage_fields": {
+            "input": {
+              "reported_sum": 46801,
+              "reported_calls": 25,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "output": {
+              "reported_sum": 9262,
+              "reported_calls": 25,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "cacheRead": {
+              "reported_sum": 628736,
+              "reported_calls": 25,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "cacheWrite": {
+              "reported_sum": 0,
+              "reported_calls": 25,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "reasoningTokens": {
+              "reported_sum": 1396,
+              "reported_calls": 15,
+              "unit": "token",
+              "missing_calls": 10
+            },
+            "totalTokens": {
+              "reported_sum": 684799,
+              "reported_calls": 25,
+              "unit": "token",
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "judgment",
+          "phase": "jev_stage1",
+          "provider": "typesafe",
+          "model": "jev-1.13.0",
+          "calls": 4,
+          "statuses": {
+            "completed": 4
+          },
+          "usage_fields": {
+            "input_tokens": {
+              "reported_sum": 12567,
+              "reported_calls": 4,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "output_tokens": {
+              "reported_sum": 220,
+              "reported_calls": 4,
+              "unit": "token",
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "judgment",
+          "phase": "jev_member_delegation",
+          "provider": "typesafe",
+          "model": "jev-1.13.0",
+          "calls": 1,
+          "statuses": {
+            "completed": 1
+          },
+          "usage_fields": {
+            "input_tokens": {
+              "reported_sum": 25364,
+              "reported_calls": 1,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "output_tokens": {
+              "reported_sum": 40,
+              "reported_calls": 1,
+              "unit": "token",
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "judgment",
+          "phase": "jev_member_candidates",
+          "provider": "typesafe",
+          "model": "jev-1.13.0",
+          "calls": 1,
+          "statuses": {
+            "completed": 1
+          },
+          "usage_fields": {
+            "input_tokens": {
+              "reported_sum": 27177,
+              "reported_calls": 1,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "output_tokens": {
+              "reported_sum": 164,
+              "reported_calls": 1,
+              "unit": "token",
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "member",
+          "phase": "member_execution",
+          "provider": "opencode-go",
+          "model": "deepseek-v4.1-flash",
+          "calls": 3,
+          "statuses": {
+            "completed": 3
+          },
+          "usage_fields": {
+            "input": {
+              "reported_sum": 15219,
+              "reported_calls": 3,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "output": {
+              "reported_sum": 3148,
+              "reported_calls": 3,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "cacheRead": {
+              "reported_sum": 25728,
+              "reported_calls": 3,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "cacheWrite": {
+              "reported_sum": 0,
+              "reported_calls": 3,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "reasoningTokens": {
+              "reported_sum": 828,
+              "reported_calls": 3,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "totalTokens": {
+              "reported_sum": 44095,
+              "reported_calls": 3,
+              "unit": "token",
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "judgment",
+          "phase": "jev_checker_selection",
+          "provider": "typesafe",
+          "model": "jev-1.13.0",
+          "calls": 1,
+          "statuses": {
+            "completed": 1
+          },
+          "usage_fields": {
+            "input_tokens": {
+              "reported_sum": 17506,
+              "reported_calls": 1,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "output_tokens": {
+              "reported_sum": 76,
+              "reported_calls": 1,
+              "unit": "token",
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "checker",
+          "phase": "reviewer",
+          "provider": "opencode-go",
+          "model": "deepseek-v4.1-flash",
+          "calls": 3,
+          "statuses": {
+            "completed": 3
+          },
+          "usage_fields": {
+            "input": {
+              "reported_sum": 48628,
+              "reported_calls": 3,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "output": {
+              "reported_sum": 9481,
+              "reported_calls": 3,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "cacheRead": {
+              "reported_sum": 21376,
+              "reported_calls": 3,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "cacheWrite": {
+              "reported_sum": 0,
+              "reported_calls": 3,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "reasoningTokens": {
+              "reported_sum": 7282,
+              "reported_calls": 3,
+              "unit": "token",
+              "missing_calls": 0
+            },
+            "totalTokens": {
+              "reported_sum": 79485,
+              "reported_calls": 3,
+              "unit": "token",
+              "missing_calls": 0
+            }
+          }
+        }
+      ]
+    }
+  ],
+  "unregistered_native_child": {
+    "scope": "SDK session assistant usage; not registered Orbit execution member, not an accepted controlled handoff; SDK estimated cost omitted, actual cash/quota unknown",
+    "archive": "docs/reference/evidence/codex-lessons-20261009/positive-fixed.tar.gz",
+    "role": "unregistered_eval_member",
+    "provider": "opencode-go",
+    "model": "deepseek-v4.1-flash",
+    "calls": 3,
+    "usage_fields": {
+      "input": {
+        "reported_sum": 16035,
+        "reported_calls": 3,
+        "missing_calls": 0,
+        "unit": "token"
+      },
+      "output": {
+        "reported_sum": 6461,
+        "reported_calls": 3,
+        "missing_calls": 0,
+        "unit": "token"
+      },
+      "cacheRead": {
+        "reported_sum": 20608,
+        "reported_calls": 3,
+        "missing_calls": 0,
+        "unit": "token"
+      },
+      "cacheWrite": {
+        "reported_sum": 0,
+        "reported_calls": 3,
+        "missing_calls": 0,
+        "unit": "token"
+      },
+      "totalTokens": {
+        "reported_sum": 43104,
+        "reported_calls": 3,
+        "missing_calls": 0,
+        "unit": "token"
+      },
+      "reasoningTokens": {
+        "reported_sum": 4757,
+        "reported_calls": 2,
+        "missing_calls": 1,
+        "unit": "token"
+      }
+    },
+    "records": [
+      {
+        "timestamp": "2026-10-09T15:58:57.978Z",
+        "provider": "opencode-go",
+        "model": "deepseek-v4.1-flash",
+        "usage": {
+          "input": 9712,
+          "output": 166,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "totalTokens": 9878
+        }
+      },
+      {
+        "timestamp": "2026-10-09T15:59:30.642Z",
+        "provider": "opencode-go",
+        "model": "deepseek-v4.1-flash",
+        "usage": {
+          "input": 1472,
+          "output": 4764,
+          "cacheRead": 9600,
+          "cacheWrite": 0,
+          "totalTokens": 15836,
+          "reasoningTokens": 4018
+        }
+      },
+      {
+        "timestamp": "2026-10-09T15:59:43.524Z",
+        "provider": "opencode-go",
+        "model": "deepseek-v4.1-flash",
+        "usage": {
+          "input": 4851,
+          "output": 1531,
+          "cacheRead": 11008,
+          "cacheWrite": 0,
+          "totalTokens": 17390,
+          "reasoningTokens": 739
+        }
+      }
+    ]
+  }
+}

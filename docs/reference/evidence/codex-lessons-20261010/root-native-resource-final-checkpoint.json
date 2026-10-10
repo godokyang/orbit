@@ -1,0 +1,38 @@
+{
+  "session_meta": {
+    "id": "01a123d6-9986-7d12-b447-f6ebcffb40e9",
+    "timestamp": "2026-10-10T03:23:49.034Z",
+    "cwd": "/Users/yangke/Personal/omen/orbit",
+    "originator": "codex-tui",
+    "cli_version": "0.162.1",
+    "source": "vscode",
+    "model_provider": "openai",
+    "forked_from_id": null
+  },
+  "models_observed": [
+    "gpt-6.1-sol"
+  ],
+  "last_token_count": {
+    "timestamp": "2026-10-10T06:07:13.485Z",
+    "info": {
+      "total_token_usage": {
+        "input_tokens": 52676796,
+        "cached_input_tokens": 51445632,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 301269,
+        "reasoning_output_tokens": 158379,
+        "total_tokens": 52978065
+      },
+      "last_token_usage": {
+        "input_tokens": 227872,
+        "cached_input_tokens": 226688,
+        "cache_write_input_tokens": 0,
+        "output_tokens": 2115,
+        "reasoning_output_tokens": 1552,
+        "total_tokens": 229987
+      },
+      "model_context_window": 258400
+    }
+  },
+  "boundary": "latest available client checkpoint before final Goal/report; cached input is input subset and reasoning output is output subset; separate from Goal and OMP/Jev; cash/quota unknown"
+}

@@ -1,0 +1,8 @@
+{
+  "head": "9f5e66db681ac312d12f2f1f1c70cc804bcaad38",
+  "dirty": true,
+  "scope": "Interim source, not acceptance build; full source install later",
+  "fixed_sdk": "18.8.0",
+  "current_goal": "active",
+  "initial_preserved_dirty": " M contracts/task-runtime.md\n M docs/README.md\n M docs/plan/debt-ledger.md\n M docs/plan/handoff.md\n M lib/orbit/check_runner.rb\n M lib/orbit/task_runtime.rb\n M plugins/omp-host.mjs\n M plugins/root-verifications.mjs\n M runners/omp-reviewer/provider-error.test.ts\n M runners/omp-reviewer/provider-error.ts\n M runners/omp-reviewer/reviewer.ts\n M tests/check_runner_context_test.rb\n M tests/omp_collab_evidence_test.mjs\n M tests/root_verifications_test.mjs\n M tests/task_runtime_test.rb\n?? docs/plan/codex-lessons-implementation.md\n?? docs/plan/context-compression-proposal.md\n?? docs/reference/codex-decisions-reevaluation-20261010.md\n?? docs/reference/codex-lessons-acceptance-20261009.md\n?? docs/reference/codex-source-lessons-20261009.md\n?? docs/reference/codex-workflow-alignment-20261009.md\n?? docs/reference/evidence/\n"
+}

@@ -1,0 +1,11 @@
+{
+  "reviewer": "w23:pJ cursor/grok-4.7-500k-fast",
+  "finding": "Ruby String#strip and TS String.trim disagree on Unicode whitespace used for coverage nonempty and duplicate validation",
+  "correctionOwner": "Root",
+  "correction": "Ruby coverage trim matches ECMAScript Unicode whitespace, TS code-point comment corrected; added shared blank-evidence and edge-space duplicate examples",
+  "verification": {
+    "TS": "bun test check-result.test.ts: 7 pass, 0 fail, exit0",
+    "Ruby": "check_runner_context_test.rb: PASS exit0"
+  },
+  "boundary": "No installed live check yet; review of corrected version pending."
+}

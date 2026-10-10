@@ -1,0 +1,37 @@
+{
+  "role": "positive",
+  "pane": "w23:pY",
+  "directory": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive",
+  "launch_argv": [
+    "env",
+    "XDG_CONFIG_HOME=/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/config",
+    "XDG_CACHE_HOME=/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/cache",
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/bin/orbit",
+    "omp",
+    "--cwd",
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive",
+    "--model",
+    "zhipu-coding-plan/glm-5.3-flash",
+    "--thinking",
+    "medium",
+    "--no-extensions",
+    "--no-skills",
+    "--no-lsp",
+    "--no-title",
+    "--session-dir",
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/sessions-positive"
+  ],
+  "launch_at": "2026-10-10T04:12:26.925871+00:00",
+  "build": {
+    "source": {
+      "kind": "local",
+      "path": "/Users/yangke/Personal/omen/orbit",
+      "commit": "9f5e66db681ac312d12f2f1f1c70cc804bcaad38",
+      "dirty": true
+    },
+    "content_digest": "123f8e83876d5970a52374c4ac5200d915adc58b58c3f2b10cad904bcc4e0e16",
+    "installed_at": "2026-10-10T04:10:03Z",
+    "version": "0.8.3"
+  },
+  "lifecycle": "running; fresh startup before initial requirement"
+}

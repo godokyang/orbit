@@ -1,0 +1,19 @@
+bun test v1.3.14 (0d9b296a)
+
+runners/omp-reviewer/json-recovery.test.ts:
+(pass) recovers the trailing contract-valid object after a prose prefix (earlier objects are prose) [1.09ms]
+(pass) ignores brace examples in prose and accepts the trailing contract-valid object [0.35ms]
+(pass) rejects anything that is not a contract-valid trailing object [0.06ms]
+
+runners/omp-reviewer/check-result.test.ts:
+(pass) accepts a result carrying the structured delivery judgment [0.04ms]
+(pass) rejects a result without delivery [0.08ms]
+(pass) rejects a non-boolean ready, an empty reason and extra delivery keys [0.04ms]
+(pass) delivery is never implicit: a bare legacy result fails the contract [0.02ms]
+(pass) coverage preserves unverified requirements and requires evidence for verified ones [0.28ms]
+(pass) a long requirement is accepted at the representation bound while real refusals stay [0.59ms]
+(pass) check-result structure is shared and schema-derived, not hardcoded [2.61ms]
+
+ 10 pass
+ 0 fail
+Ran 10 tests across 2 files. [128.00ms]

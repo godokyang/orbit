@@ -9,6 +9,7 @@ import net from 'node:net';
 import { z } from 'zod';
 import { installOmpExtension, agentNameFor } from '../plugins/omp-host.mjs';
 import { observeNativeCalls, flushNativeCalls } from '../plugins/native-call-recorder.mjs';
+import { validateNativeTaskTools } from '../plugins/native-task-preflight.mjs';
 import { execSync, spawnSync } from 'node:child_process';
 
 // The installer pins the verified Ruby via ORBIT_RUBY; exercise that branch so
@@ -24,6 +25,11 @@ const project = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'orbit
 let events = {}; const sessions = [];
 const model = { provider: 'glm', id: 'x' };
 const mainAgentId = 'Main';
+// The observed task.tools mistake must produce a repair before a child starts;
+// a corrected native call remains eligible under the existing scope gate.
+assert.match(validateNativeTaskTools({ task: 'implement', tools: ['read', 'write'] }).reason, /Remove tools/);
+assert.match(validateNativeTaskTools({ context: 'contract', tasks: [{ task: 'implement', tools: ['edit'] }] }).reason, /unregistered eval agent/);
+assert.equal(validateNativeTaskTools({ task: 'implement' }).ok, true);
 const aborted = [], setStatuses = [], warnings = [];
 let registryListener, definition, started;
 // The extension registers several handlers per event name (task gate + hub
@@ -117,7 +123,8 @@ const selectionFixture = setInterval(() => {
     const statePath = path.join(dir, 'state.json');
     const state = JSON.parse(fixtureFs.readFileSync(statePath, 'utf8'));
     if (state.runtime_pid !== process.pid) return;
-    for (const file of fixtureFs.readdirSync(path.join(dir, 'inbox'))) {
+    // Match the runtime consumer: ignore atomic-writer staging .tmp files.
+    for (const file of fixtureFs.readdirSync(path.join(dir, 'inbox')).filter(file => file.endsWith('.json'))) {
       const requestPath = path.join(dir, 'inbox', file);
       const command = JSON.parse(fixtureFs.readFileSync(requestPath, 'utf8'));
       if (command.type !== 'member_selection') continue;
@@ -407,8 +414,90 @@ try {
       'the bootstrap already sent for this task is not repeated by the policy');
     assert.ok(!secondText.includes('[orbit-bootstrap]'), 'nor on the later request');
   }
+  // 1e. C02 goal projection: the CURRENT durable goal (original requirement +
+  //     valid amendments) rides the SDK per-request `context` hook — the one
+  //     channel before convertToLlm that covers ordinary turns, custom-message
+  //     wakes, compaction and protobuf/blob providers (Cursor) alike. The
+  //     payload hook keeps entry/policy work on shapes it recognizes, so no
+  //     request carries the goal twice. Full text with traceable source/sha;
+  {
+    const ctxEvent = text => ({ type: 'context', messages: [{ role: 'user', content: text, timestamp: 1 }] });
+    const goalTextOf = out => out?.messages?.at(-1)?.content ?? JSON.stringify(out ?? {});
+    const goalFacts = count => waitFor(entries => entries.filter(e => e.kind === 'goal_projection').length >= count)
+      .then(entries => entries.filter(e => e.kind === 'goal_projection'));
+
+    // (a) ordinary request: full original requirement + standing boundary,
+    //     once; the first-append fact pins the real input digest and hash.
+    const ordinary = await emit('context', ctxEvent('ordinary follow-up'), ctx);
+    const ordinaryText = goalTextOf(ordinary);
+    assert.equal((String(ordinaryText).match(/\[orbit-goal\]/g) ?? []).length, 1,
+      'the current goal rides the per-request context');
+    assert.ok(ordinaryText.includes('Original requirement.'), 'the projection carries the full original requirement');
+    assert.ok(ordinaryText.includes('以下为完整原文') && ordinaryText.includes('授权边界'),
+      'completeness is claimed only together with the standing authorization boundary');
+    assert.equal(await emit('context', ctxEvent('stray turn'),
+      { ...ctx, sessionManager: session('no-task-ctx', []).sessionManager }), undefined,
+      'an uncontrolled session gets no goal projection');
+    const factsA = await goalFacts(1);
+    assert.equal(factsA[0].channel, 'context_hook');
+    assert.equal(factsA[0].input_digest_status, 'ok', 'the fact pins the real input digest');
+    assert.ok(factsA[0].projection_bytes > 0 && factsA[0].projection_sha256.startsWith('sha256:'),
+      'the fact keeps projection size and hash');
+    assert.equal(Object.hasOwn(factsA[0], 'payload'), false, 'the raw payload is never persisted');
+    const payloadOnly = await emit('before_provider_request',
+      { payload: { messages: [{ role: 'user', content: 'payload window' }] } }, ctx);
+    assert.ok(!JSON.stringify(payloadOnly ?? {}).includes('[orbit-goal]'),
+      'the payload hook never duplicates the goal (Cursor-class shapes rely on the context hook)');
+
+    // (b) a valid amendment (persisted the way the runtime writes it) joins the
+    //     NEXT request's goal in full, with its traceable source.
+    await fs.mkdir(path.join(started.task_directory, 'amendments'), { recursive: true });
+    await fs.writeFile(path.join(started.task_directory, 'amendments', 'amend-1.txt'), 'Also verify the login redirect.');
+    {
+      const statePath = path.join(started.task_directory, 'state.json');
+      const current = JSON.parse(await fs.readFile(statePath, 'utf8'));
+      current.amendments = [{ path: 'amendments/amend-1.txt',
+        source: { kind: 'native_user_message', id: 'amend-msg-1' } }];
+      await fs.writeFile(statePath, JSON.stringify(current));
+    }
+    await fs.writeFile(path.join(started.task_directory, 'basis-note.txt'), 'Keep the existing authorization boundary.');
+    const goalStatePath = path.join(started.task_directory, 'state.json');
+    const goalState = JSON.parse(await fs.readFile(goalStatePath, 'utf8'));
+    goalState.basis = [{ source: 'SPEC.md', path: 'basis-note.txt' }];
+    await fs.writeFile(goalStatePath, JSON.stringify(goalState));
+    const amendedText = goalTextOf(await emit('context', ctxEvent('after amend'), ctx));
+    assert.ok(amendedText.includes('有效修订 1 条') && amendedText.includes('Also verify the login redirect.'),
+      'the next request projects the valid amendment in full');
+    assert.ok(amendedText.includes('native_user_message/amend-msg-1'), 'the amendment keeps its traceable source');
+    assert.equal((await goalFacts(2)).length, 2, 'a changed projection version records a new first-append fact');
+    assert.ok(amendedText.includes('来源 SPEC.md'), 'the actual string basis source survives projection');
+
+    await fs.writeFile(goalStatePath, JSON.stringify({ ...goalState, status: 'paused', stop_confirmation: { confirmed: true } }));
+    const pausedGoal = goalTextOf(await emit('context', ctxEvent('status question'), ctx));
+    assert.ok(pausedGoal.includes('已确认停止的暂停状态') && pausedGoal.includes('不构成恢复执行'),
+      'projecting a paused goal cannot authorize execution');
+    await fs.writeFile(goalStatePath, JSON.stringify(goalState));
+
+    // (c) an unreadable original is an explicit omission, never a narrowed
+    //     prefix: no completeness claim, recovery action named.
+    const instructionPath = path.join(started.task_directory, 'instruction.txt');
+    await fs.chmod(instructionPath, 0o000);
+    try {
+      const degradedText = goalTextOf(await emit('context', ctxEvent('degraded window'), ctx));
+      assert.ok(degradedText.includes('目标投影不完整') && degradedText.includes('不能按缺失片段继续'),
+        'an unreadable original states the omission and the recovery action');
+      assert.ok(!degradedText.includes('以下为完整原文'), 'a partial projection never claims the complete goal');
+    } finally {
+      await fs.chmod(instructionPath, 0o600);
+    }
+  }
   assert.equal((await request('model_catalog')).agent_dir, agentRoot,
     'the catalog carries the host-resolved agent directory for isolated profile credentials');
+  await assert.rejects(tool({ action: 'work-unit', task: started.task_directory,
+    work_unit: { operation: 'finish', id: 'wu-existing', status: 'accepted', result: 'verified', verification: 'test pass' } }),
+    /operation belongs at the top level/, 'a finish cannot silently become another declare');
+  await assert.rejects(tool({ action: 'work-unit', task: started.task_directory, work_unit: { id: 'wu-existing' } }),
+    /operation belongs at the top level/, 'a missing read operation gets the same concrete repair before preflight');
   const declared = await tool({ action: 'work-unit', task: started.task_directory, operation: 'declare', work_unit: {
     spec: { objective: 'Deliver a bounded module', requirements: ['original request'],
       allowed_paths: ['src'], allowed_tools: ['read', 'write'], allowed_commands: [],
@@ -789,6 +878,17 @@ try {
       await fs.writeFile(poolStub, originalPool);
     }
   }
+  const mistakenTools = await emit('tool_call', { toolName: 'task', toolCallId: 'native-tools-as-eval',
+    fixture_no_unit: true, input: { task: 'Implement module', tools: ['read', 'write'] } }, ctx);
+  assert.equal(mistakenTools.block, true);
+  assert.match(mistakenTools.reason, /task.tools mounts named eval-kernel tools/,
+    'the observed interface failure gives a usable correction before child creation');
+  const agentAsModel = await emit('tool_call', { toolName: 'task', toolCallId: 'agent-name-as-model',
+    fixture_no_unit: true, input: { task: 'Implement module', model: agentNameFor('glm/x') } }, ctx);
+  assert.equal(agentAsModel.block, true);
+  assert.match(agentAsModel.reason, /Put agent:.*omit model/);
+  assert.ok(agentAsModel.reason.includes('glm/x') && agentAsModel.reason.includes('First declare'),
+    'the real model/agent mix-up explains a runnable correction and the missing declaration');
   const missingUnit = await emit('tool_call', { toolName: 'task', toolCallId: 'no-unit',
     fixture_no_unit: true, input: { agent: agentNameFor('glm/x'), task: 'No handoff' } }, ctx);
   assert.equal(missingUnit.block, true, 'controlled execution cannot bypass the durable handoff');
@@ -1923,6 +2023,24 @@ try {
       delete root.agent; delete root.runModeExitTeardown; delete root.yieldQueue;
       root.isStreaming = saved.streaming; root.abort = saved.abort;
       root.asyncJobManager = saved.manager; root.hasPendingAsyncWork = saved.pending;
+    }
+    // A submission in preparation is busy even before streaming starts.
+    // The actual SDK admitted flag must cause abort, not false idle confirmation.
+    {
+      const savedAbort = root.abort;
+      const savedAdmitted = root.hasAdmittedSubmission;
+      let aborted = false;
+      root.hasAdmittedSubmission = true;
+      root.isStreaming = false;
+      root.abort = async () => { aborted = true; root.hasAdmittedSubmission = false; };
+      try {
+        assert.equal((await request('stop')).confirmed, true);
+        assert.equal(aborted, true, 'admitted setup is cancelled before confirming stop');
+      } finally {
+        root.abort = savedAbort;
+        if (savedAdmitted === undefined) delete root.hasAdmittedSubmission;
+        else root.hasAdmittedSubmission = savedAdmitted;
+      }
     }
     // Legacy session without the new public capabilities: ordinary stop path.
     // The restored original fixture state legitimately lacks sent_message_ids

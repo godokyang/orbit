@@ -1,11 +1,12 @@
+import { readFileSync } from "node:fs";
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { validateCheckResult } from "./check-result";
+import { checkResultProblems, deriveCheckResultStructure, loadCheckResultSchema, validateCheckResult } from "./check-result";
 
-// Mirrors contracts/check-result.schema.json: delivery is a required,
-// structured readiness judgment separate from verdict and findings —
-// exactly ready (boolean) + reason (non-empty string), additionalProperties
-// false everywhere.
+// Structure (keys, enums, bounds, closed-object rules) is derived from
+// contracts/check-result.schema.json; these tests keep the semantic gates
+// (delivery judgment, non-empty strings, coverage bounds) honest and prove the
+// validators follow the schema instead of hardcoded literals.
 
 function baseResult(): Record<string, unknown> {
 	return {
@@ -88,4 +89,41 @@ test("a long requirement is accepted at the representation bound while real refu
 		{ requirement: sentence, status: "unverified", evidence: "e2" },
 	] };
 	assert.ok(validateCheckResult(duplicate).some(p => p.includes("duplicate")), "duplicate requirements are still refused");
+});
+
+test("check-result structure is shared and schema-derived, not hardcoded", () => {
+	const fixture = JSON.parse(readFileSync(new URL("../../tests/fixtures/check-result-samples.json", import.meta.url), "utf8")) as
+		{ samples: { name: string; accept: boolean; result: unknown }[] };
+	assert.ok(fixture.samples.length >= 4, "the shared sample set is not silently emptied");
+	for (const sample of fixture.samples) {
+		const accepted = validateCheckResult(structuredClone(sample.result)).length === 0;
+		assert.equal(accepted, sample.accept, `${sample.name}: ${JSON.stringify(validateCheckResult(sample.result))}`);
+	}
+
+	const schema = structuredClone(loadCheckResultSchema());
+	schema.properties.verdict.enum = (schema.properties.verdict.enum as string[]).filter(verdict => verdict !== "pause");
+	delete schema.additionalProperties;
+	const tampered = deriveCheckResultStructure(schema);
+	const paused = { verdict: "pause", reason: "r", findings: [], resolved_ids: [], next_check_seconds: 1, delivery: { ready: false, reason: "x" } };
+	const enumProblems = checkResultProblems(tampered, paused);
+	assert.ok(enumProblems.some(p => p.startsWith("verdict must be one of:") && !p.includes("pause")), "a removed verdict enum value is enforced from the schema");
+	const openProblems = checkResultProblems(tampered, { ...paused, extra: 1 });
+	assert.ok(!openProblems.some(p => p.includes("unexpected keys")), "an open schema object accepts extra keys instead of a hardcoded rule");
+
+	// maxLength counts code points, not UTF-16 units: a 1000-code-point
+	// requirement of mostly non-BMP characters (1600 UTF-16 units) stays valid
+	// on both sides, 1001 code points are refused.
+	const emojiHeavy = "🎯".repeat(600) + "x".repeat(400);
+	assert.ok(emojiHeavy.length === 1600 && [...emojiHeavy].length === 1000, "the boundary text really mixes the two units");
+	const unitResult = { verdict: "correct", reason: "r", findings: [], resolved_ids: [], next_check_seconds: 1,
+		delivery: { ready: false, reason: "x" },
+		coverage: { complete: true, items: [{ requirement: emojiHeavy, status: "unverified", evidence: "" }] } };
+	assert.deepEqual(validateCheckResult(unitResult), [], "1000 code points stay valid despite 1600 UTF-16 units");
+	const oversize = structuredClone(unitResult);
+	oversize.coverage.items[0].requirement = "🎯".repeat(600) + "x".repeat(401);
+	assert.ok(validateCheckResult(oversize).some(p => p.includes("at most 1000")), "1001 code points are still refused");
+
+	const foreign = structuredClone(loadCheckResultSchema());
+	foreign.$id = "https://elsewhere/check-result.json";
+	assert.throws(() => deriveCheckResultStructure(foreign), /identity mismatch/, "a foreign schema file fails closed");
 });

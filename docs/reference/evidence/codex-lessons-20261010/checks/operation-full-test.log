@@ -1,0 +1,223 @@
+
+> @godokyang/orbit@0.8.3 test
+> npm run check:version && sh -n install.sh && sh -n uninstall.sh && ruby --disable-gems tests/workspace_snapshot_test.rb && ruby --disable-gems tests/workspace_binding_test.rb && ruby --disable-gems tests/jev_advisor_test.rb && ruby --disable-gems tests/judgment_usage_test.rb && ruby --disable-gems tests/resource_call_ledger_test.rb && ruby --disable-gems tests/route_resource_facts_test.rb && ruby --disable-gems tests/route_resource_store_test.rb && ruby --disable-gems tests/route_cost_inputs_test.rb && ruby --disable-gems tests/model_quality_policy_test.rb && ruby --disable-gems tests/member_model_selector_test.rb && ruby --disable-gems tests/model_capability_facts_test.rb && ruby --disable-gems tests/work_unit_test.rb && ruby --disable-gems tests/requirement_coverage_test.rb && ruby --disable-gems tests/judgment_test.rb && ruby --disable-gems tests/prestart_test.rb && ruby --disable-gems tests/model_evidence_cache_test.rb && ruby --disable-gems tests/model_candidate_pool_test.rb && ruby --disable-gems tests/openrouter_model_overview_test.rb && ruby --disable-gems tests/checker_model_selection_test.rb && ruby --disable-gems tests/checker_model_selector_test.rb && ruby --disable-gems tests/plugin_connection_test.rb && ruby --disable-gems tests/observation_key_test.rb && ruby --disable-gems tests/check_runner_context_test.rb && ruby --disable-gems tests/task_runtime_test.rb && node tests/root_verifications_test.mjs && node tests/root_verifications_file_tools_test.mjs && node tests/model_call_receipts_test.mjs && node tests/work_unit_scope_test.mjs && node tests/omp_native_gate_test.mjs && node tests/omp_entry_recovery_test.mjs && node tests/omp_collab_evidence_test.mjs && node tests/omp_session_agents_test.mjs && node tests/omp_model_picker_test.mjs && bun test runners/omp-reviewer/usage-receipt.test.ts runners/omp-reviewer/provider-error.test.ts runners/omp-reviewer/check-result.test.ts runners/omp-reviewer/json-recovery.test.ts runners/omp-reviewer/model-probe.test.ts runners/omp-reviewer/confined-tools.test.ts && ruby --disable-gems tests/omp_entry_test.rb && ruby --disable-gems tests/member_registration_test.rb && ruby --disable-gems tests/inbox_command_test.rb && ruby --disable-gems tests/omp_native_member_test.rb && ruby --disable-gems tests/git_remote_evidence_test.rb && ruby --disable-gems tests/omp_check_runner_test.rb && ruby --disable-gems tests/omp_cli_checker_test.rb && ruby --disable-gems tests/task_evidence_export_test.rb && ruby --disable-gems tests/cli_test.rb && ruby --disable-gems tests/install_test.rb
+
+
+> @godokyang/orbit@0.8.3 check:version
+> ruby --disable-gems scripts/check-version.rb
+
+Version and lockfile consistent: 0.8.3
+WORKSPACE_SNAPSHOT_TEST_PASS assertions=54
+WORKSPACE_BINDING_TEST_PASS assertions=47
+JEV_ADVISOR_TEST_PASS (deterministic, local fixture only)
+JUDGMENT_USAGE_TEST_PASS (scripted responses; no model call)
+PASS resource call ledger
+PASS route resource facts
+ROUTE_RESOURCE_STORE_TEST_PASS assertions=103
+ROUTE_COST_INPUTS_TEST_PASS
+MODEL_QUALITY_POLICY_TEST_PASS
+MEMBER_MODEL_SELECTOR_TEST_PASS candidates_need_host_agents_and_an_empty_pool_uses_one_real_native_resolution
+MEMBER_MODEL_SELECTOR_TEST_PASS a_matching_release_pays_two_judgments_and_orders_the_candidates
+MEMBER_MODEL_SELECTOR_TEST_PASS generalized_member_fit_does_not_skip_concrete_candidates
+MEMBER_MODEL_SELECTOR_TEST_PASS a_failed_judgment_keeps_its_real_receipt_and_never_fabricates_success
+MEMBER_MODEL_SELECTOR_TEST_PASS an_unchanged_assessment_is_reused_and_a_real_change_is_not
+MEMBER_MODEL_SELECTOR_TEST_PASS a_stale_work_unit_and_a_broken_catalog_never_pass_as_verified
+MEMBER_MODEL_SELECTOR_TEST_PASS provider_model_forecasts_price_the_actual_native_agent
+MEMBER_MODEL_SELECTOR_TEST_PASS root_self_execute_leaves_the_queue_and_pending_units_are_reached
+MODEL_CAPABILITY_FACTS_TEST_PASS assertions=115
+work_unit_test: all assertions passed
+REQUIREMENT_COVERAGE_TEST_PASS
+JUDGMENT_TEST_PASS (deterministic, local fixture only)
+PRESTART_TEST_PASS (deterministic, local fixture only)
+MODEL_EVIDENCE_CACHE_TEST_PASS assertions=113
+MODEL_CANDIDATE_POOL_TEST_PASS assertions=26
+OPENROUTER_MODEL_OVERVIEW_TEST_PASS assertions=127
+CHECKER_MODEL_SELECTION_TEST_PASS
+CHECKER_MODEL_SELECTOR_TEST_PASS root_selected_model_is_probed_and_jev_ranked_without_user_grant
+CHECKER_MODEL_SELECTOR_TEST_PASS root_selected_model_must_be_omp_available_and_checker_resolvable
+CHECKER_MODEL_SELECTOR_TEST_PASS empty_pool_uses_omp_catalog_and_checks_availability
+CHECKER_MODEL_SELECTOR_TEST_PASS profile_agent_directory_is_used_by_preflight_and_recorded_for_the_check
+CHECKER_MODEL_SELECTOR_TEST_PASS unchanged_input_reuses_the_recorded_decision
+CHECKER_MODEL_SELECTOR_TEST_PASS changed_pool_reselects_before_the_next_check
+CHECKER_MODEL_SELECTOR_TEST_PASS unreleased_task_fit_never_orders_candidates
+CHECKER_MODEL_SELECTOR_TEST_PASS catalog_billing_route_forms_the_exact_identity
+CHECKER_MODEL_SELECTOR_TEST_PASS task_requirements_come_from_the_task_record
+CHECKER_MODEL_SELECTOR_TEST_PASS reviewed_release_orders_only_with_a_matching_task_profile
+CHECKER_MODEL_SELECTOR_TEST_PASS conflicting_catalog_and_exact_facts_hold_the_candidate
+CHECKER_MODEL_SELECTOR_TEST_PASS actual_execution_limits_hold_an_explicit_requirement_the_route_cannot_meet
+CHECKER_MODEL_SELECTOR_TEST_PASS an_explicit_choice_is_not_reused_after_the_task_state_changes
+CHECKER_MODEL_SELECTOR_TEST_PASS no_valid_evidence_still_selects_a_runnable_pool_model
+CHECKER_MODEL_SELECTOR_TEST_PASS mapped_catalog_prior_orders_only_under_a_reviewed_release
+CHECKER_MODEL_SELECTOR_TEST_PASS exact_checker_facts_and_catalog_prior_are_both_presented
+CHECKER_MODEL_SELECTOR_TEST_PASS checker_rejects_default_reasoning_and_another_billing_route
+CHECKER_MODEL_SELECTOR_TEST_PASS near_variant_evidence_does_not_fabricate_a_score
+CHECKER_MODEL_SELECTOR_TEST_PASS low_score_selects_without_claiming_verified_quality
+CHECKER_MODEL_SELECTOR_TEST_PASS unavailable_task_fit_judgment_uses_pool_order
+CHECKER_MODEL_SELECTOR_TEST_PASS submitted_checker_evidence_rejudges_before_the_next_check
+CHECKER_MODEL_SELECTOR_TEST_PASS root_unavailable_evidence_answer_closes_the_request_without_a_fake_score
+CHECKER_MODEL_SELECTOR_TEST_PASS only_runnable_candidates_with_missing_or_expired_facts_request_root_research
+CHECKER_MODEL_SELECTOR_TEST_PASS unresolvable_preferred_model_falls_through_to_a_runnable_pool_model
+CHECKER_MODEL_SELECTOR_TEST_PASS no_runnable_pool_model_records_the_failed_judgment
+CHECKER_MODEL_SELECTOR_TEST_PASS unusable_pool_falls_back_to_omp_and_keeps_jev_ranking
+CHECKER_MODEL_SELECTOR_TEST_PASS failed_model_is_excluded_from_the_next_check
+CHECKER_MODEL_SELECTOR_TEST_PASS unclassified_overview_facts_do_not_auto_score
+CHECKER_MODEL_SELECTOR_TEST_PASS candidate_statuses_are_read_only_and_precise
+PLUGIN_CONNECTION_TEST_PASS
+OBSERVATION_KEY_TEST_PASS (deterministic)
+CHECK_RUNNER_CONTEXT_TEST_PASS (deterministic)
+TASK_RUNTIME_TEST_PASS (deterministic, not real-model acceptance)
+ROOT_VERIFICATIONS_TEST_PASS
+ROOT_VERIFICATIONS_FILE_TOOLS_TEST_PASS
+model_call_receipts_test.mjs: all shared-receipt checks passed
+WORK_UNIT_SCOPE_TEST_PASS native_tools_and_paths
+WORK_UNIT_SCOPE_TEST_PASS native_selector_multipath_glob
+WORK_UNIT_SCOPE_TEST_PASS work_unit_preflight
+WORK_UNIT_SCOPE_TEST_PASS command_read_set
+WORK_UNIT_SCOPE_TEST_PASS actual_kernel_write_scope
+WORK_UNIT_SCOPE_TEST_PASS actual_kernel_network_denial
+Orbit: member orbit-087199f0-1a53-4d51-a77f-ff60060f8417 model drift at registration (glm/x -> zenmux/x-ai/grok-4.6); drift record: ok; abort confirmed: true
+Orbit orbit-call-b33b5b0a-63b9-46c0-af95-7b1258b1609d: native receipt persistence failed: Expected property name or '}' in JSON at position 1 (line 1 column 2)
+Orbit orbit-call-b33b5b0a-63b9-46c0-af95-7b1258b1609d: native receipt persistence failed: Expected property name or '}' in JSON at position 1 (line 1 column 2)
+Orbit: member orbit-c444967c-dbd9-4a5d-a990-e3b51ba83cc5 workspace binding failed: member session cwd could not be set: cwd locked; abort confirmed: true
+Orbit: member orbit-43c07092-e043-4bc2-98eb-7c822d1eab90 model drift at registration (glm/x -> zhipu/other); drift record: ok; abort confirmed: true
+Orbit: member orbit-5fae74e6-39b7-46d7-ab65-2a50dc308973 model drift (glm/x -> zhipu/other); drift record: ok; member abort attempted
+Orbit: member orbit-e539e43d-426d-4426-8fd3-d0a6eee5499d refused (registration_failed: exit 1) but refusal record failed: exit 1
+Orbit: member orbit-eb7a6220-8580-4b3e-9f85-6dee77ead9b1 workspace binding failed: this OMP runtime cannot set the member session cwd; abort confirmed: true
+omp_native_gate_test: PASS
+omp_entry_recovery_test: all assertions passed
+Orbit shutdown: kill ESRCH
+Orbit shutdown: kill ESRCH
+Orbit shutdown: kill ESRCH
+omp collab evidence: PASS
+omp_session_agents_test: PASS
+picker component flows: PASS
+orbit model picker + ask observation: PASS
+bun test v1.3.14 (0d9b296a)
+
+runners/omp-reviewer/confined-tools.test.ts:
+(pass) a final LF is not an extra empty line in reviewer read or grep [4.66ms]
+(pass) a snapshot image is returned as pixels with traceable read facts [1.67ms]
+
+runners/omp-reviewer/provider-error.test.ts:
+(pass) a real 429 usage-limit turn classifies as auth_or_quota [1.35ms]
+(pass) a transient 429 rate limit is not quota [0.03ms]
+(pass) a server error carries status and text as unavailable [0.19ms]
+(pass) a completed turn is never reclassified [0.02ms]
+
+runners/omp-reviewer/model-probe.test.ts:
+(pass) parseProbeModels splits, trims and drops blanks [0.05ms]
+(pass) probeModelAvailability resolves each model through OMP's own per-model resolver [0.19ms]
+(pass) probeModelAvailability propagates a resolver crash instead of dropping the model [0.14ms]
+
+runners/omp-reviewer/json-recovery.test.ts:
+(pass) recovers the trailing contract-valid object after a prose prefix (earlier objects are prose) [0.16ms]
+(pass) ignores brace examples in prose and accepts the trailing contract-valid object [0.12ms]
+(pass) rejects anything that is not a contract-valid trailing object [0.04ms]
+
+runners/omp-reviewer/usage-receipt.test.ts:
+(pass) a boundary receipt keeps identity only and stays pending [0.27ms]
+(pass) a boundary without a turn model falls back to the session identity [0.02ms]
+(pass) the finished report updates the same call id in place [0.18ms]
+(pass) a boundary that never produced a result keeps its pending entry and a gap [0.02ms]
+(pass) a completed turn keeps the local invocation id, provider id, models and categories [0.04ms]
+(pass) a service that reports no response id still yields an attributable call [0.04ms]
+(pass) an unobserved boundary is a gap but the measured usage is still kept [0.03ms]
+(pass) the requested model is never presented as the upstream model [0.02ms]
+(pass) a failed call without usable usage keeps its identity and an unknown status [0.02ms]
+(pass) a partially reported call keeps its trustworthy fields and reports the missing ones [0.04ms]
+(pass) an errored turn's initialized-zero counters are not a report of zero consumption [0.04ms]
+(pass) no assistant turn at all is a gap and no call
+(pass) absent categories stay absent and reasoning is never folded into output [0.02ms]
+(pass) an end carrying a replaced message object still binds its call boundary [0.10ms]
+(pass) repeated sync over the same turns stays idempotent [0.12ms]
+
+runners/omp-reviewer/check-result.test.ts:
+(pass) accepts a result carrying the structured delivery judgment [0.04ms]
+(pass) rejects a result without delivery [0.03ms]
+(pass) rejects a non-boolean ready, an empty reason and extra delivery keys [0.04ms]
+(pass) delivery is never implicit: a bare legacy result fails the contract [0.02ms]
+(pass) coverage preserves unverified requirements and requires evidence for verified ones [0.14ms]
+(pass) a long requirement is accepted at the representation bound while real refusals stay [0.08ms]
+(pass) check-result structure is shared and schema-derived, not hardcoded [0.85ms]
+
+ 34 pass
+ 0 fail
+ 81 expect() calls
+Ran 34 tests across 6 files. [497.00ms]
+OMP_ENTRY_TEST_PASS explicit -e extension, native argv passthrough and exit code
+member_registration_test: PASS
+inbox_command_test: PASS
+PASS omp native member reconciliation
+PASS git remote evidence
+PASS omp check runner
+{"task_directory":"/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-omp-cli-20261010-77642-pwavnb/project/.orbit/tasks/9de85ec2-e429-40a2-904a-c9423d73109f","status":"starting","review_model":"zhipu-coding-plan/glm-5.2","selection_tier":"fallback","notice":"候选池降级选择：独立检查模型质量未经证实","evidence_needed":[{"model":"zhipu-coding-plan/glm-5.2","reasoning":"unknown","billing_route":"unknown","status":"absent"}],"evidence_action":"可选：只有精确事实会改变当前任务的模型判断时，Root 才从一手来源核查并用 orbit model-evidence --file - 提交（检查者补证不传任务目录）；逐项保留 evidence_needed 的真实 model、reasoning、billing_route，model 仅按首个 / 拆成 provider 与其余 model id。不得为命中缓存把订阅路由改成 unknown，无法核实就保持未知；已选可运行检查者与当前交付不以补齐其它候选为前置。"}
+{"task_directory":"/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-omp-cli-20261010-77642-pwavnb/project/.orbit/tasks/9de85ec2-e429-40a2-904a-c9423d73109f","status":"paused"}
+{"task_directory":"/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-omp-cli-20261010-77642-soqmy4/project/.orbit/tasks/69c5120a-dbea-4135-b412-4c9e5d28da00","status":"starting","review_model":"zhipu-coding-plan/glm-5.2","selection_tier":"fallback","notice":"候选池降级选择：独立检查模型质量未经证实","evidence_needed":[{"model":"zhipu-coding-plan/glm-5.2","reasoning":"unknown","billing_route":"unknown","status":"absent"}],"evidence_action":"可选：只有精确事实会改变当前任务的模型判断时，Root 才从一手来源核查并用 orbit model-evidence --file - 提交（检查者补证不传任务目录）；逐项保留 evidence_needed 的真实 model、reasoning、billing_route，model 仅按首个 / 拆成 provider 与其余 model id。不得为命中缓存把订阅路由改成 unknown，无法核实就保持未知；已选可运行检查者与当前交付不以补齐其它候选为前置。"}
+orbit: no unused runnable OMP checker model (pool_models_unresolvable_in_checker); (openai-codex/gpt-6-sol: not resolvable in the isolated checker profile (model not in isolated catalog)); check OMP model availability and isolated checker credentials; Root may select any resolvable OMP model; selection trace: /var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-omp-cli-20261010-77642-ed9rut/project/.orbit/checker-selection-failures.jsonl
+{"task_directory":"/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-omp-cli-20261010-77642-soqmy4/project/.orbit/tasks/69c5120a-dbea-4135-b412-4c9e5d28da00","status":"paused"}
+{"task_directory":"/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-root-selection-20261010-77642-v8kaaf/project/.orbit/tasks/6eb3707b-3eb8-4fd5-9e05-c552b5a47459","status":"starting","review_model":"zhipu-coding-plan/glm-5.2","selection_tier":"fallback","notice":"候选池降级选择：独立检查模型质量未经证实","evidence_needed":[{"model":"zhipu-coding-plan/glm-5.2","reasoning":"unknown","billing_route":"unknown","status":"absent"}],"evidence_action":"可选：只有精确事实会改变当前任务的模型判断时，Root 才从一手来源核查并用 orbit model-evidence --file - 提交（检查者补证不传任务目录）；逐项保留 evidence_needed 的真实 model、reasoning、billing_route，model 仅按首个 / 拆成 provider 与其余 model id。不得为命中缓存把订阅路由改成 unknown，无法核实就保持未知；已选可运行检查者与当前交付不以补齐其它候选为前置。"}
+{"task_directory":"/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-root-selection-20261010-77642-v8kaaf/project/.orbit/tasks/6eb3707b-3eb8-4fd5-9e05-c552b5a47459","status":"paused"}
+{"task_directory":"/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-omp-cli-20261010-77642-4o8o9m/project/.orbit/tasks/b19cf4ea-acdc-4137-95e8-65d23ac4faf5","status":"starting","review_model":"pool/one","selection_tier":"fallback","notice":"候选池降级选择：独立检查模型质量未经证实"}
+orbit: no unused OMP model is available in this session; check OMP model availability and isolated checker credentials; Root may select any resolvable OMP model; selection trace: /var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-omp-cli-20261010-77642-u1hses/project/.orbit/checker-selection-failures.jsonl
+{"task_directory":"/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-omp-cli-20261010-77642-4o8o9m/project/.orbit/tasks/b19cf4ea-acdc-4137-95e8-65d23ac4faf5","status":"paused"}
+PASS omp cli checker selection
+TASK_EVIDENCE_EXPORT_TEST_PASS export_running_task_packs_evidence_and_marks_in_flight
+TASK_EVIDENCE_EXPORT_TEST_PASS export_joins_collaboration_and_marks_gaps
+TASK_EVIDENCE_EXPORT_TEST_PASS export_marks_absent_and_invalid_evidence
+TASK_EVIDENCE_EXPORT_TEST_PASS export_copies_verified_task_scoped_native_sessions
+TASK_EVIDENCE_EXPORT_TEST_PASS export_aborts_when_packaged_files_change_size
+TASK_EVIDENCE_EXPORT_TEST_PASS export_refuses_unsafe_destinations_and_non_tasks
+CLI_TEST_PASS work_unit_selection_returns_the_runtime_response_without_writing_state
+CLI_TEST_PASS single_task_from_project_subdirectory
+CLI_TEST_PASS multiple_tasks_require_explicit_selection
+CLI_TEST_PASS completed_and_absent_tasks
+CLI_TEST_PASS status_separates_check_activity_from_task_completion
+CLI_TEST_PASS terminal_status_never_prompts_recheck_of_stopped_tasks
+CLI_TEST_PASS status_usage_sums_known_roles_and_excludes_root_cumulative
+CLI_TEST_PASS status_usage_is_unknown_when_any_component_is_missing
+CLI_TEST_PASS status_reads_late_final_receipts_without_changing_terminal_state
+CLI_TEST_PASS status_exposes_pending_and_corrupt_accounting_as_unknown
+CLI_TEST_PASS route_forecast_is_scoped_and_never_consumption
+CLI_TEST_PASS stale_result_and_user_action
+CLI_TEST_PASS failed_stop_confirmation_is_reported
+CLI_TEST_PASS doctor_without_connection_or_dependencies
+CLI_TEST_PASS doctor_reads_existing_native_connection
+CLI_TEST_PASS stop_retries_when_recorded_runtime_is_gone
+CLI_TEST_PASS stop_retries_when_runtime_exited_without_terminal_status
+CLI_TEST_PASS completion_stop_requires_a_current_notice
+CLI_TEST_PASS doctor_states_single_host_entry_and_omp_checker
+CLI_TEST_PASS rebind_workspace_queues_and_legacy_status_reads_project_root
+CLI_TEST_PASS model_evidence_caches_object_and_queues_dedicated_command
+CLI_TEST_PASS model_evidence_accepts_array_and_rejects_invalid_or_terminal
+CLI_TEST_PASS model_evidence_taskless_submission_writes_cache_without_a_task
+CLI_TEST_PASS review_model_checks_omp_catalog_and_status_shows_the_block
+CLI_TEST_PASS session_summary_separates_check_facts_from_missing_evidence
+CLI_TEST_PASS status_separates_delegatable_score_from_final_decision
+CLI_TEST_PASS model_candidates_bridge_round_trips_and_keeps_ids_with_slashes
+CLI_TEST_PASS model_candidates_bridge_fails_closed_without_echoing_input
+CLI_TEST_PASS model_candidates_bridge_applies_one_net_delta_atomically
+CLI_TEST_PASS takeover_boundary_is_program_captured_and_scope_is_declared_or_unknown
+CLI_TEST_PASS takeover_scope_declarations_are_queued_append_only
+CLI_TEST_PASS takeover_payload_is_refused_before_any_session_or_task_exists
+CLI_TEST_PASS takeover_does_not_disturb_the_ordinary_start_path
+CLI_TEST_PASS maintenance_requires_an_installed_cli
+CLI_TEST_PASS jev_setup_exports_key_in_new_shell
+INSTALL_TEST_PASS missing_prerequisites
+INSTALL_TEST_PASS first_install
+INSTALL_TEST_PASS successful_update
+INSTALL_TEST_PASS old_wrapper_update
+INSTALL_TEST_PASS update_keeps_referenced_release
+INSTALL_TEST_PASS failed_update
+INSTALL_TEST_PASS reviewer_tracks_host_version
+INSTALL_TEST_PASS reviewer_sdk_version_mismatch_keeps_old_release
+INSTALL_TEST_PASS reviewer_install_failure_keeps_old_release
+INSTALL_TEST_PASS failed_legacy_cleanup_keeps_old_version
+INSTALL_TEST_PASS upgrade_keeps_unowned_orbit_entry_and_reports_uncertainty
+INSTALL_TEST_PASS uninstall_preserves_user_files
+PATH saved in: /var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-install-test-20261010-78201-r07csx/.bashrc, /var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-install-test-20261010-78201-r07csx/.bash_profile
+Open a new terminal, then run: orbit --version
+Or enable it in this terminal now: export PATH=/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-install-test-20261010-78201-r07csx/bin\ with\ spaces\ \'\ \$\(\)\ \[x\]:"$PATH"
+PATH saved in: /var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-install-test-20261010-78201-r07csx/.bashrc, /var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-install-test-20261010-78201-r07csx/.bash_profile
+Open a new terminal, then run: orbit --version
+Or enable it in this terminal now: export PATH=/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-install-test-20261010-78201-r07csx/bin\ with\ spaces\ \'\ \$\(\)\ \[x\]:"$PATH"
+INSTALL_TEST_PASS shell_configuration

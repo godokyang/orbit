@@ -1,0 +1,12 @@
+[
+  {
+    "file": ".runtime/bin/node",
+    "sha256": "27db838bb204ef7c21df2931f5656e4c8fb32e6e947f363a402b49714d32b5b1",
+    "bytes": 121306800
+  },
+  {
+    "file": ".runtime/lib/node_modules/npm/package.json",
+    "sha256": "a4f04ad50219f82e0e8f262d3e1acbdbd678040198ea36fca10fe7bbb38da726",
+    "bytes": 6597
+  }
+]

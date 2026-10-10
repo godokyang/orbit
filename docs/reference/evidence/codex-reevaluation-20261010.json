@@ -1,0 +1,726 @@
+{
+  "owner": "Root Codex decision re-evaluation",
+  "created_at": "2026-10-10T01:46:53.990959+00:00",
+  "temporary_root": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-reevaluation.b1z7pZZXgv",
+  "fixed_panes": [
+    "w23:p1",
+    "w23:pH",
+    "w23:pJ",
+    "w23:pK"
+  ],
+  "reused_member": {
+    "pane": "w23:pK",
+    "pid": 12966,
+    "provider": "zhipu-coding-plan",
+    "model": "glm-5.3-flash",
+    "cwd": "/Users/yangke/Personal/omen/orbit",
+    "mode": "source audit; assessment document only"
+  },
+  "new_panes": [],
+  "new_background_agents": [],
+  "new_live_product_tests": [],
+  "evidence_captured_at": "2026-10-10T02:00:12.832542+00:00",
+  "scope": "assessment only; no new Goal/product execution/code/contract/permission/global-install change",
+  "source_url": "https://codeload.github.com/openai/codex/tar.gz/36ae1561b9324c93d5638b45eb19fe2cc070a581",
+  "source_manifest": [
+    {
+      "path": "codex-rs/app-server-protocol/src/export.rs",
+      "bytes": 111737,
+      "sha256": "6fd0a64c31fb68f48fcdf4608f2bf3f1bb32df060defe04d99ad51c00f2999aa"
+    },
+    {
+      "path": "codex-rs/app-server-protocol/src/precomputed_exports.rs",
+      "bytes": 6874,
+      "sha256": "661397f6329f7fac05e9d7ccfc7bceead266389d0975da7d1ef57544ee5aaa0c"
+    },
+    {
+      "path": "codex-rs/app-server-protocol/src/protocol/v2/turn.rs",
+      "bytes": 22775,
+      "sha256": "eb1a99cc72a65af84f933073881bfc0440288fb629de7ec92b7c1b50d3530779"
+    },
+    {
+      "path": "codex-rs/core/src/agent/child_config.rs",
+      "bytes": 13496,
+      "sha256": "33d4dd6f70e6640af1059398272c48b88e16e0005105fbd1ef13e30456d39a39"
+    },
+    {
+      "path": "codex-rs/core/src/agent/control/completion.rs",
+      "bytes": 6050,
+      "sha256": "1f7a82036f5da1460af1a75c6a139278439bccac0421c0084ba92dd4c830b198"
+    },
+    {
+      "path": "codex-rs/core/src/agent/control/runtime.rs",
+      "bytes": 11738,
+      "sha256": "8d12feff4a87c8b593dd878096be82c980f18e6a0d78f60c9ab96777684bd3c4"
+    },
+    {
+      "path": "codex-rs/core/src/agent/control/spawn_guard.rs",
+      "bytes": 3931,
+      "sha256": "610524d0bd240affd8c1f72a31cce20ddfcc328d022a6f7f488f6b232500c1cc"
+    },
+    {
+      "path": "codex-rs/core/src/compact.rs",
+      "bytes": 30756,
+      "sha256": "8f05bb7d0bd2456ecc635cf90ed39c0088ff472e618c35ced7859a1f6ee3b2e8"
+    },
+    {
+      "path": "codex-rs/core/src/context/user_goal.rs",
+      "bytes": 4162,
+      "sha256": "5a9b97a38949e548499c2730e2a5f5fb24f5bb360c708da7ea90ba99017f18b3"
+    },
+    {
+      "path": "codex-rs/core/src/context_manager/history.rs",
+      "bytes": 58683,
+      "sha256": "b73d135d54ef0d746cc6925576ed60ba5018640534060438fd0987e91049bc74"
+    },
+    {
+      "path": "codex-rs/core/src/session/turn_input.rs",
+      "bytes": 34959,
+      "sha256": "752f93f3a4b9292fe8bd1b3a9a69a52a5f9ab9d39cf0fa1455af41c258f6e9e2"
+    },
+    {
+      "path": "codex-rs/core/src/tools/orchestrator.rs",
+      "bytes": 27682,
+      "sha256": "2867fc8655b0a1c59e61f9b99c1e316c1759316a353d7bea0e5d84e8faa7a629"
+    },
+    {
+      "path": "codex-rs/core/src/tools/sandboxing.rs",
+      "bytes": 20432,
+      "sha256": "1ab6c27e34a93fe3857281e11e388eb3ae4b786819fbe15883ad7e1fb8b5473f"
+    },
+    {
+      "path": "codex-rs/core/src/unified_exec/head_tail_buffer.rs",
+      "bytes": 5961,
+      "sha256": "d57aa4118842bee24a896e85af05f01e4ef44760ea2804bc015c8efd7ae89ad5"
+    },
+    {
+      "path": "codex-rs/ext/goal/src/extension.rs",
+      "bytes": 22951,
+      "sha256": "47fe789555dc082a7b9f1b9d67e2f084bde9fcce34aad1d61257a71c03a67055"
+    },
+    {
+      "path": "codex-rs/ext/goal/src/runtime.rs",
+      "bytes": 24252,
+      "sha256": "e5db4c95e5e1c6d5196998817c7c8507aa3f3ac52a4435ccbc6d13781742a902"
+    },
+    {
+      "path": "codex-rs/ext/goal/src/steering.rs",
+      "bytes": 5004,
+      "sha256": "a12b72543511e3a2a5bbaac46afc5538bda6ef3a67009d9d3dddf201a8404049"
+    },
+    {
+      "path": "codex-rs/ext/goal/src/tool.rs",
+      "bytes": 18870,
+      "sha256": "a8326dd629406c35b87d96feeb5ef2229203e43e813371d928d90f12420ace51"
+    },
+    {
+      "path": "codex-rs/ext/goal/templates/goals/continuation.md",
+      "bytes": 6451,
+      "sha256": "764b9c26b36013a21b687d74597e303be9bbf13776c359ec1fb185dbc0e7eac7"
+    },
+    {
+      "path": "codex-rs/protocol/src/error.rs",
+      "bytes": 33722,
+      "sha256": "6e3f1eedd6d70450ecf84b2654707c1107dac0c06b4ed65631bd3251bc59373c"
+    },
+    {
+      "path": "codex-rs/rollout/src/recorder.rs",
+      "bytes": 77131,
+      "sha256": "42a973710d6eb7e6731b3774cdf30dba89f56fd7685cdeac2857825c08b83612"
+    },
+    {
+      "path": "codex-rs/state/src/model/thread_goal.rs",
+      "bytes": 3387,
+      "sha256": "f94048f33d94e8489fe28bf81a81d98a71327ce8bfe5178e0c539d6bcaf67a9e"
+    },
+    {
+      "path": "codex-rs/state/src/runtime/goals.rs",
+      "bytes": 55533,
+      "sha256": "11640e2a48cbd3d109f22d31695dba2ddb11f9aff9543d774d34f261fd1f48f4"
+    }
+  ],
+  "archive_recheck": {
+    "positive-glm-corrected": {
+      "archive": "positive-glm-corrected.tar.gz",
+      "events_path": "fixture/.orbit/tasks/1a683e0d-33a5-4d75-bb27-e1ba90aa0325/events.jsonl",
+      "task_id": "1a683e0d-33a5-4d75-bb27-e1ba90aa0325",
+      "status": "complete",
+      "event_counts": {
+        "work_unit_declared": 1,
+        "member_selection_assessed": 2,
+        "member_selection_responded": 3,
+        "member_registered": 1,
+        "work_unit_bound": 1,
+        "native_member_reconciled": 1,
+        "delegation_hint_followed": 1,
+        "member_result_recorded": 1,
+        "work_unit_finished": 1,
+        "check_finished": 2,
+        "correction_sent": 1,
+        "completion_stop_queued": 1,
+        "completed_via_finalized_stop": 1,
+        "stopped": 1
+      },
+      "continuation_notices": null,
+      "registered_members_in_state": 1
+    },
+    "positive-fixed": {
+      "archive": "positive-fixed.tar.gz",
+      "events_path": "fixtures/positive-fixed/.orbit/tasks/9f47f925-5f84-4ff5-97ce-85fbbad616c2/events.jsonl",
+      "task_id": "9f47f925-5f84-4ff5-97ce-85fbbad616c2",
+      "status": "complete",
+      "event_counts": {
+        "check_finished": 2,
+        "work_unit_declared": 1,
+        "member_selection_assessed": 1,
+        "member_selection_responded": 3,
+        "member_registered": 1,
+        "work_unit_bound": 1,
+        "native_member_reconciled": 1,
+        "member_result_recorded": 1,
+        "work_unit_finished": 1,
+        "completion_stop_queued": 1,
+        "completed_via_finalized_stop": 1,
+        "stopped": 1
+      },
+      "continuation_notices": null,
+      "registered_members_in_state": 1
+    },
+    "positive-k3-fallback": {
+      "archive": "positive-k3-fallback.tar.gz",
+      "events_path": "fixture/.orbit/tasks/06484dc7-7cb6-44bf-9d6c-4d08488e7dc0/events.jsonl",
+      "task_id": "06484dc7-7cb6-44bf-9d6c-4d08488e7dc0",
+      "status": "complete",
+      "event_counts": {
+        "work_unit_declared": 4,
+        "member_selection_assessed": 2,
+        "member_selection_responded": 4,
+        "check_finished": 3,
+        "work_unit_finished": 2,
+        "completion_stop_queued": 1,
+        "completed_via_finalized_stop": 1,
+        "stopped": 1
+      },
+      "continuation_notices": null,
+      "registered_members_in_state": 0
+    }
+  },
+  "development_usage": {
+    "role": "primary source researcher",
+    "provider": "zhipu-coding-plan",
+    "model": "glm-5.3-flash",
+    "scope": "reused native session assistant receipts after created_at through research completion; not provider invoice",
+    "unit": "token",
+    "receipts": [
+      {
+        "timestamp": "2026-10-10T01:47:41.929Z",
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "usage": {
+          "input": 172016,
+          "output": 1558,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "totalTokens": 173574,
+          "reasoningTokens": 1359
+        }
+      },
+      {
+        "timestamp": "2026-10-10T01:48:00.234Z",
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "usage": {
+          "input": 1813,
+          "output": 409,
+          "cacheRead": 171968,
+          "cacheWrite": 0,
+          "totalTokens": 174190,
+          "reasoningTokens": 270
+        }
+      },
+      {
+        "timestamp": "2026-10-10T01:48:13.136Z",
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "usage": {
+          "input": 1881,
+          "output": 384,
+          "cacheRead": 173760,
+          "cacheWrite": 0,
+          "totalTokens": 176025,
+          "reasoningTokens": 241
+        }
+      },
+      {
+        "timestamp": "2026-10-10T01:48:18.772Z",
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "usage": {
+          "input": 686,
+          "output": 79,
+          "cacheRead": 175616,
+          "cacheWrite": 0,
+          "totalTokens": 176381
+        }
+      },
+      {
+        "timestamp": "2026-10-10T01:48:27.836Z",
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "usage": {
+          "input": 585,
+          "output": 269,
+          "cacheRead": 176256,
+          "cacheWrite": 0,
+          "totalTokens": 177110,
+          "reasoningTokens": 119
+        }
+      },
+      {
+        "timestamp": "2026-10-10T01:48:42.863Z",
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "usage": {
+          "input": 1419,
+          "output": 444,
+          "cacheRead": 176832,
+          "cacheWrite": 0,
+          "totalTokens": 178695,
+          "reasoningTokens": 226
+        }
+      },
+      {
+        "timestamp": "2026-10-10T01:48:50.818Z",
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "usage": {
+          "input": 2500,
+          "output": 234,
+          "cacheRead": 178240,
+          "cacheWrite": 0,
+          "totalTokens": 180974,
+          "reasoningTokens": 80
+        }
+      },
+      {
+        "timestamp": "2026-10-10T01:49:12.734Z",
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "usage": {
+          "input": 1393,
+          "output": 580,
+          "cacheRead": 180736,
+          "cacheWrite": 0,
+          "totalTokens": 182709,
+          "reasoningTokens": 394
+        }
+      },
+      {
+        "timestamp": "2026-10-10T01:49:26.970Z",
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "usage": {
+          "input": 1903,
+          "output": 455,
+          "cacheRead": 182080,
+          "cacheWrite": 0,
+          "totalTokens": 184438,
+          "reasoningTokens": 355
+        }
+      },
+      {
+        "timestamp": "2026-10-10T01:49:32.561Z",
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "usage": {
+          "input": 517,
+          "output": 134,
+          "cacheRead": 183936,
+          "cacheWrite": 0,
+          "totalTokens": 184587
+        }
+      },
+      {
+        "timestamp": "2026-10-10T01:49:42.704Z",
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "usage": {
+          "input": 728,
+          "output": 303,
+          "cacheRead": 184448,
+          "cacheWrite": 0,
+          "totalTokens": 185479,
+          "reasoningTokens": 171
+        }
+      },
+      {
+        "timestamp": "2026-10-10T01:49:53.159Z",
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "usage": {
+          "input": 397,
+          "output": 272,
+          "cacheRead": 185152,
+          "cacheWrite": 0,
+          "totalTokens": 185821,
+          "reasoningTokens": 124
+        }
+      },
+      {
+        "timestamp": "2026-10-10T01:49:59.661Z",
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "usage": {
+          "input": 666,
+          "output": 246,
+          "cacheRead": 185536,
+          "cacheWrite": 0,
+          "totalTokens": 186448,
+          "reasoningTokens": 84
+        }
+      },
+      {
+        "timestamp": "2026-10-10T01:50:10.954Z",
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "usage": {
+          "input": 666,
+          "output": 211,
+          "cacheRead": 186176,
+          "cacheWrite": 0,
+          "totalTokens": 187053,
+          "reasoningTokens": 66
+        }
+      },
+      {
+        "timestamp": "2026-10-10T01:50:21.492Z",
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "usage": {
+          "input": 756,
+          "output": 242,
+          "cacheRead": 186816,
+          "cacheWrite": 0,
+          "totalTokens": 187814,
+          "reasoningTokens": 155
+        }
+      },
+      {
+        "timestamp": "2026-10-10T01:50:44.090Z",
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "usage": {
+          "input": 2195,
+          "output": 654,
+          "cacheRead": 187520,
+          "cacheWrite": 0,
+          "totalTokens": 190369,
+          "reasoningTokens": 467
+        }
+      },
+      {
+        "timestamp": "2026-10-10T01:50:51.581Z",
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "usage": {
+          "input": 1866,
+          "output": 198,
+          "cacheRead": 189696,
+          "cacheWrite": 0,
+          "totalTokens": 191760,
+          "reasoningTokens": 113
+        }
+      },
+      {
+        "timestamp": "2026-10-10T01:51:25.762Z",
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "usage": {
+          "input": 2119,
+          "output": 949,
+          "cacheRead": 191552,
+          "cacheWrite": 0,
+          "totalTokens": 194620,
+          "reasoningTokens": 794
+        }
+      },
+      {
+        "timestamp": "2026-10-10T01:51:47.636Z",
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "usage": {
+          "input": 1222,
+          "output": 612,
+          "cacheRead": 193664,
+          "cacheWrite": 0,
+          "totalTokens": 195498,
+          "reasoningTokens": 401
+        }
+      },
+      {
+        "timestamp": "2026-10-10T01:52:19.120Z",
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "usage": {
+          "input": 2739,
+          "output": 855,
+          "cacheRead": 194880,
+          "cacheWrite": 0,
+          "totalTokens": 198474,
+          "reasoningTokens": 642
+        }
+      },
+      {
+        "timestamp": "2026-10-10T01:52:27.500Z",
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "usage": {
+          "input": 1060,
+          "output": 136,
+          "cacheRead": 197568,
+          "cacheWrite": 0,
+          "totalTokens": 198764
+        }
+      },
+      {
+        "timestamp": "2026-10-10T01:52:33.394Z",
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "usage": {
+          "input": 1013,
+          "output": 143,
+          "cacheRead": 198592,
+          "cacheWrite": 0,
+          "totalTokens": 199748
+        }
+      },
+      {
+        "timestamp": "2026-10-10T01:52:48.810Z",
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "usage": {
+          "input": 837,
+          "output": 428,
+          "cacheRead": 199552,
+          "cacheWrite": 0,
+          "totalTokens": 200817,
+          "reasoningTokens": 200
+        }
+      },
+      {
+        "timestamp": "2026-10-10T01:52:56.627Z",
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "usage": {
+          "input": 967,
+          "output": 159,
+          "cacheRead": 200384,
+          "cacheWrite": 0,
+          "totalTokens": 201510
+        }
+      },
+      {
+        "timestamp": "2026-10-10T01:53:02.113Z",
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "usage": {
+          "input": 898,
+          "output": 175,
+          "cacheRead": 201344,
+          "cacheWrite": 0,
+          "totalTokens": 202417
+        }
+      },
+      {
+        "timestamp": "2026-10-10T01:53:10.769Z",
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "usage": {
+          "input": 475,
+          "output": 211,
+          "cacheRead": 202240,
+          "cacheWrite": 0,
+          "totalTokens": 202926,
+          "reasoningTokens": 115
+        }
+      },
+      {
+        "timestamp": "2026-10-10T01:53:16.860Z",
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "usage": {
+          "input": 616,
+          "output": 98,
+          "cacheRead": 202688,
+          "cacheWrite": 0,
+          "totalTokens": 203402
+        }
+      },
+      {
+        "timestamp": "2026-10-10T01:53:27.022Z",
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "usage": {
+          "input": 706,
+          "output": 312,
+          "cacheRead": 203264,
+          "cacheWrite": 0,
+          "totalTokens": 204282,
+          "reasoningTokens": 118
+        }
+      },
+      {
+        "timestamp": "2026-10-10T01:56:38.496Z",
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "usage": {
+          "input": 989,
+          "output": 6394,
+          "cacheRead": 203968,
+          "cacheWrite": 0,
+          "totalTokens": 211351,
+          "reasoningTokens": 1494
+        }
+      },
+      {
+        "timestamp": "2026-10-10T01:57:07.840Z",
+        "provider": "zhipu-coding-plan",
+        "model": "glm-5.3-flash",
+        "usage": {
+          "input": 6451,
+          "output": 1036,
+          "cacheRead": 204928,
+          "cacheWrite": 0,
+          "totalTokens": 212415,
+          "reasoningTokens": 235
+        }
+      }
+    ],
+    "summary": {
+      "input": {
+        "reported_sum": 212079,
+        "reported_calls": 30,
+        "missing_calls": 0
+      },
+      "output": {
+        "reported_sum": 18180,
+        "reported_calls": 30,
+        "missing_calls": 0
+      },
+      "cacheRead": {
+        "reported_sum": 5499392,
+        "reported_calls": 30,
+        "missing_calls": 0
+      },
+      "cacheWrite": {
+        "reported_sum": 0,
+        "reported_calls": 30,
+        "missing_calls": 0
+      },
+      "totalTokens": {
+        "reported_sum": 5729651,
+        "reported_calls": 30,
+        "missing_calls": 0
+      },
+      "reasoningTokens": {
+        "reported_sum": 8223,
+        "reported_calls": 23,
+        "missing_calls": 7
+      }
+    },
+    "cash": null,
+    "subscription_debit": null,
+    "root_provider_usage": null,
+    "root_new_goal": false
+  },
+  "review_corrections": [
+    "old workflow research did cover ext/goal",
+    "AddItems has no ack; Persist/Flush/Shutdown do",
+    "700 bytes applies to serialized user goal mutation evidence, not durable objective",
+    "max configured budget is validated/rejected, not clamped"
+  ],
+  "fixed_processes_confirmed": [
+    {
+      "pid": 38007,
+      "ps": "38007 37403 node"
+    },
+    {
+      "pid": 38008,
+      "ps": "38008 38007 /Users/yangke/.nvm/versions/node/v24.19.0/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex"
+    },
+    {
+      "pid": 12801,
+      "ps": "12801 11899 omp"
+    },
+    {
+      "pid": 12828,
+      "ps": "12828 12801 npm exec @mobilenext/mobile-mcp@1.0.2"
+    },
+    {
+      "pid": 12863,
+      "ps": "12863 12828 node"
+    },
+    {
+      "pid": 12883,
+      "ps": "12883 12208 omp"
+    },
+    {
+      "pid": 12914,
+      "ps": "12914 12883 npm exec @mobilenext/mobile-mcp@1.0.2"
+    },
+    {
+      "pid": 12950,
+      "ps": "12950 12914 node"
+    },
+    {
+      "pid": 12966,
+      "ps": "12966 12485 omp"
+    },
+    {
+      "pid": 12993,
+      "ps": "12993 12966 npm exec @mobilenext/mobile-mcp@1.0.2"
+    },
+    {
+      "pid": 13028,
+      "ps": "13028 12993 node"
+    },
+    {
+      "pid": 2145,
+      "ps": "2145  2144 /Users/yangke/.local/bin/herdr"
+    },
+    {
+      "pid": 2144,
+      "ps": "2144  1716 herdr"
+    },
+    {
+      "pid": 37403,
+      "ps": "37403  2145 -zsh"
+    },
+    {
+      "pid": 11899,
+      "ps": "11899  2145 -zsh"
+    },
+    {
+      "pid": 12208,
+      "ps": "12208  2145 -zsh"
+    },
+    {
+      "pid": 12485,
+      "ps": "12485  2145 -zsh"
+    }
+  ],
+  "fixed_panes_final": [
+    "w23:p1",
+    "w23:pH",
+    "w23:pJ",
+    "w23:pK"
+  ],
+  "reused_member_foreground_pids_final": [
+    12966,
+    12993,
+    13028
+  ],
+  "reused_member_task_complete": true,
+  "temporary_root_removed": true,
+  "cleanup_confirmed_at": "2026-10-10T02:00:50.256796+00:00"
+}

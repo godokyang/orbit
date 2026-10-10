@@ -1,0 +1,813 @@
+diff --git a/contracts/task-runtime.md b/contracts/task-runtime.md
+index 6a2606e..bb21382 100644
+--- a/contracts/task-runtime.md
++++ b/contracts/task-runtime.md
+@@ -106,9 +106,9 @@ Jev 的首个判断 provider 是 TypeSafe 的 `https://api.typesafe.ai/v1/system
+ 明显的卡住／偏题信号可触发过程检查；产物就绪信号可触发完整产物检查。过程检查只判断是否有需要 Root 纠正的具体问题，不能完成任务。过程检查的**换模型重试保持 process 通道**（失败检查沿 model_fallback 持久并重放原 kind；role 仍按当前 dispute／kind 推导，不作绝对保留承诺，不降级为产物检查）；该换型链在成功或过期后回到常规 timer 观察，不因 model_fallback 豁免去重而反复重开；已排队的手动请求优先于自动换型调度，且不被其种类污染；过程检查结果仍不取得完成资格。周期 Jev 仅在可辨认的任务状态、输入、成员或产物变化时调用模型，不因时间流逝且没有新事实反复判断；Root 工作中不因纯定时重复完整检查。自动检查按 observation key 去重；旧进程遗留的同 key `in_flight` 记 `check_abandoned_recovered` 并以新检查号重试一次。用户手动请求可绕过去重但不能与在途检查并发。**无 finding 不等于交付就绪**：独立检查须结构化标记当前交付是否就绪及未就绪理由，只有有效的手动终检明确就绪、无当前 finding／待核对线索、成员已结束且 Root 已完成一轮时，按输入与产物版本发送一次 `finalization_notice`。纯文字交付要先形成可供检查的实际答复；不能用尚待未来交付的承诺领取终检通过。Root 未完成一轮时偏好等其 turn 结束再通知，但**按版本绑定的 pending 通知即使 Root 仍在 active/等待，也必须在有界 60 秒内送达**。送达 pending 通知**不自动完成任务**；Root 的显式完成意图仍须等待其 turn 收尾，并在停止时核对当前产物、输入与成员状态。等待期间不采用检查者给出的短间隔持续复检。`check` 的机器响应要求：没有用户预先明确、且不依赖检查结果的后续状态变更时，Root 结束当前 turn 并等待 Orbit 唤醒，不应仅为等待检查结论而 sleep、轮询或查询状态。检查者只能核验终检当下可见的答复／产物；完成申请后的最终措辞仍受版本门与 Root 的交付责任约束。
+ 当前版本的自动产物检查若确认已实际交付、无 finding／待核对线索且成员结束，只能按版本**至多提醒 Root 一次**主动请求手动终检；不发 `finalization_notice`，不把自动检查提升为手动检查，也不代 Root 申请停止。真实用户消息、输入或产物改变后沿原版本门重新核验。
+ 
+-检查模型在隔离目录不可用、认证、额度或结果校验失败时先保存失败证据；检查结束后在当前 OMP 会话可选且隔离环境已核对的剩余型号中按池优先、Jev 适配顺序有界重试，同一输入和产物版本不重复尝试失败型号，不在途切换。其中**结构化判定的认证／额度失败**（failure_kind=auth_or_quota 且 basis=structured；不含文本启发、不可用或结果校验失败）额外按任务保存排除：该集合跨产物与输入版本持续生效，不因产物或输入变化自动清除，也不跨任务、无 TTL、不推测凭据变更——它是已实测失败记录，不是模型能力永久判断。Root 可用既有 `review-model` 点名重试该目标——这是显式重试授权，不构成已验证的额度或凭据恢复（仅移除点名的型号，其余结构化排除保留）；重试后再次同因失败会重新进入排除。其余失败种类（不可用、结果校验、启发式判定）维持原产物作用域语义。没有剩余可运行型号才阻塞；**失败阻塞的同一模型不允许用重复手动 `check` 绕过阻塞**，CLI 和运行时均拒绝。候选池、目录、凭据或有效证据等选择输入改变时可重新评估；Root 也可通过 `review-model` 选择 OMP 可用型号并触发新检查，无须新用户型号授权。手动检查绕过去重不绕过失败门；没有有效独立终检时不得假称任务已完成，可按用户明确要求普通暂停并核对停止确认。
++检查模型在隔离目录不可用、认证、额度或结果校验失败时先保存失败证据；SDK 在错误 assistant 回合实际给出的数值 errorStatus/errorId另以 evidence.error.status/error_id 保留为诊断原值，缺失或无效保持 null；不解析自由文本重试建议，不从 error_id新增自动恢复分类。检查结束后在当前 OMP 会话可选且隔离环境已核对的剩余型号中按池优先、Jev 适配顺序有界重试，同一输入和产物版本不重复尝试失败型号，不在途切换。其中**结构化判定的认证／额度失败**（failure_kind=auth_or_quota 且 basis=structured；不含文本启发、不可用或结果校验失败）额外按任务保存排除：该集合跨产物与输入版本持续生效，不因产物或输入变化自动清除，也不跨任务、无 TTL、不推测凭据变更——它是已实测失败记录，不是模型能力永久判断。Root 可用既有 `review-model` 点名重试该目标——这是显式重试授权，不构成已验证的额度或凭据恢复（仅移除点名的型号，其余结构化排除保留）；重试后再次同因失败会重新进入排除。其余失败种类（不可用、结果校验、启发式判定）维持原产物作用域语义。没有剩余可运行型号才阻塞；**失败阻塞的同一模型不允许用重复手动 `check` 绕过阻塞**，CLI 和运行时均拒绝。候选池、目录、凭据或有效证据等选择输入改变时可重新评估；Root 也可通过 `review-model` 选择 OMP 可用型号并触发新检查，无须新用户型号授权。手动检查绕过去重不绕过失败门；没有有效独立终检时不得假称任务已完成，可按用户明确要求普通暂停并核对停止确认。
+ 
+-交给检查者与裁定者的程序上下文有 64KiB 上限。原文、修改和指定依据不压缩；其余长文本保留有界前缀并附原文长度与 sha256；历史列表按限额保留较新的一段，省略范围显式标出。程序另按现有 `state.checks` 计算一个有界 `check_history`：**当前 input 与真实产物根**对应的**最早有效 artifact reviewer 检查**为锚点（role=reviewer／kind=artifact、非 failed 非 stale、其自身 `artifact_digest` 作为历史保留；修复或任何编辑都会改变产物摘要，故锚点不按当前摘要匹配，也不授予当前完成资格），其后是限额内的较新窗口，每条只含检查身份（number／role／kind／产物根／输入与产物摘要／开始与结束时间／终态／stale 原因／failure_kind），省略项以计数与编号显式列出，重要锚点不被单纯尾部窗口淘汰后谎称不存在；它只是历史事实，不授予当前完成资格，也不把旧版本 finding 导入待核对线索。
++交给检查者与裁定者的程序上下文有 64KiB 上限。原文、修改和指定依据不压缩；其余长文本保留有界前缀并附原文长度与 sha256；bash/eval 执行回执的 output 使用输出专用首尾保留，在各层既有限额内为省略标记留空间，记录该层可见输入的长度（JS UTF-16 code units／Ruby Unicode 字符）与 SHA-256，并保留上游截断／省略事实。Ruby 日志在通用字段降级时保留最低 500 字符的标记与首尾空间，字段最高仍为 2,000 字符；完整程序上下文仍以 64 KiB 为硬上限，不能适配时明确省略整份记录；command/script 与其他字符串仍沿原策略。短输出不改，历史前缀回执不补造尾部，日志文字不提升失败／unknown／后台启动／旧版本的证据资格；历史列表按限额保留较新的一段，省略范围显式标出。程序另按现有 `state.checks` 计算一个有界 `check_history`：**当前 input 与真实产物根**对应的**最早有效 artifact reviewer 检查**为锚点（role=reviewer／kind=artifact、非 failed 非 stale、其自身 `artifact_digest` 作为历史保留；修复或任何编辑都会改变产物摘要，故锚点不按当前摘要匹配，也不授予当前完成资格），其后是限额内的较新窗口，每条只含检查身份（number／role／kind／产物根／输入与产物摘要／开始与结束时间／终态／stale 原因／failure_kind），省略项以计数与编号显式列出，重要锚点不被单纯尾部窗口淘汰后谎称不存在；它只是历史事实，不授予当前完成资格，也不把旧版本 finding 导入待核对线索。
+ 
+ ## 原生协作观察（hub 与成员状态）
+ 
+@@ -156,7 +156,7 @@ Jev 的首个判断 provider 是 TypeSafe 的 `https://api.typesafe.ai/v1/system
+ ### 当前停止与资源规则
+ 
+ - 最小暂停单位是承载相关工作的 Agent 当前执行；保留会话和上下文，确认关联后台动作实际停止。不得把仅发送中断请求、注册表标签或 `hub cancel` 回执当成停止证据。Root 停止在有界 teardown guard 内执行（SDK 公开 `runModeExitTeardown`，旧版缺失时沿用原路径不拒绝普通停止）：先按 owner 快照经公开 `acknowledgeDeliveries` 抑制本 owner 后台结果（含已完成未投递者）的投递（只抑制投递，不称已消费或核验）并清本会话已排队 async-result；归属读取失败或本任务 marker 可见而不可移除时，仍完成本 owner 取消／abort／reap 后如实失败，不假确认、不删未知归属消息；再取消／abort／reap；仅从 steer／follow-up 队列精确移除**当前任务耐久记录（sent_message_ids）中已归属 marker** 的 Orbit 消息（abort 前清已归属搁浅消息，abort／reap 后再清一次 requeue；用户、其他来源与其他任务的 Orbit marker 原序保留，归属不可得则不手术）；确认以 idle＋在途工具归零＋无未抑制 pending wake 为准。快照后新出现的 job id 不受抑制；无法安全抑制的真实 pending 仍如实 `stop_unconfirmed`，不假成功。
+-- Orbit 控制明确绑定的 Root、本任务登记的全部成员与自有检查进程。原生界面中断 Root 时，程序负责停止其登记成员；中断请求持续有效，不被紧接着开始的活跃轮次掩盖，明确启动新任务时才重置；即使一个成员停止失败，仍尝试停止其余成员。
++- Orbit 控制明确绑定的 Root、本任务登记的全部成员与自有检查进程。普通／失败停止和完成交接均在 teardown 后重读耐久成员名单；晚登记而未处理的成员或不可读名单使整体停止保持 `stop_unconfirmed`，已验证的执行范围单独保留。原生界面中断 Root 时，程序负责停止其登记成员；中断请求持续有效，不被紧接着开始的活跃轮次掩盖，明确启动新任务时才重置；即使一个成员停止失败，仍尝试停止其余成员。
+ - 成员停止确认按实际观测分级：会话存活时经 abort、按 owner 取消并等待异步任务底层工作结算，且以观测到的在途工具数归零为证；成员的注册表会话已释放（完成后的 idle/park 处置）时，OMP 18.2.8 对处置完成没有公开信号，后台与进程退出不可证实——桥返回结构化证据且 `confirmed:false`，任务保持 `stop_unconfirmed`，不得把"已完成"或注册表 idle 充当退出证据。OMP 进程整体退出时，以进程与实际子进程退出为证据。
+ - 已退出的 failed／stop_unconfirmed 任务接受用户显式 stop 重试，从任务记录（含 `members.json` 重新发现的成员 ID）重连收尾，不重启执行；证据不足继续保持 stop_unconfirmed。
+ - `stop_unconfirmed` 保存结构化 `stop_diagnostics`（Root、成员、检查清理及未覆盖名单／失败阶段的可得结果）；显式普通 `stop` 重试前重新读取任务与原生会话状态，已停的 Root 不重复打断，未停则按既有授权请求并等待真实确认。桥接不可用或证据不足时继续保留未确认状态，运行进程退出不等于宿主已停止。
+@@ -195,7 +195,7 @@ Jev 的首个判断 provider 是 TypeSafe 的 `https://api.typesafe.ai/v1/system
+ 已启动任务在 `.orbit/tasks/<id>/` 持续保留运行程序的 `events.jsonl`、权威成员记录及检查证据；原生 OMP 协作由扩展按任务持久记录在 `collaboration.jsonl`，不只依赖有界进程缓冲。记录实际可观测的派发输入、时间、模型身份及来源、成员通信、检查触发及结果、finding、纠偏投递与停止。Root 自主派发不以补写理由为门槛；明确理由若不可得则记未记录，Jev 的建议及实际派发分别记录，不能从相邻时间推断建议即动机。证据丢失、截断或无法归属必须显式标注，旧任务和异常退出不能伪装完整。
+ `orbit session-summary --thread ID [--project DIR]` 从本机当前项目中具有相同原生 OMP 会话 ID 的任务文件生成只读汇总，不跨项目或写入任务。区分检查总数、过期／失败／手动检查、Jev 调用、成员、纠偏和 finding；旧任务缺失 `collaboration.jsonl`／`events.jsonl` 显式列为缺失，不补造事件。仅对可归属的检查者 token 汇总已知值，存在未知时总用量与金额仍为未知；不把订阅额度折算成价格。
+ 
+-`orbit export TASK --output FILE` 由用户主动生成本地单任务证据包：原始任务记录、事实时间线、相关检查快照与可安全归属的原生会话材料；不可取得的部分进入缺失清单。运行中的导出标明截取时间和在途状态，不影响任务或完成门。导出不上传、不调用模型、不判定任务或 Orbit 的产品缺陷；开发者收到用户自愿交付的材料后才另行分析。现行独立检查者仍只检查固定产物快照，不读取 `.orbit` 来替代交付终检。
++`orbit export TASK --output FILE` 由用户主动生成本地单任务证据包：原始任务记录、事实时间线、相关检查快照与可安全归属的原生会话材料；不可取得的部分进入缺失清单。运行中的导出标明截取时间和在途状态，不影响任务或完成门。真实 Root stop 在取消、abort、reap 与执行确认后，为当前任务采集本进程协作 writer 截至已捕获队列切点的 append 结果，保存于 stop_confirmation.collaboration_persistence：观察截止计数、实际已写 seq、当前进程失败观察与已记／待记 gap、最近真实 I/O 错误；等待未结算则明确 unconfirmed。后来事件不在该切点范围内，恢复不抹去失败。该诊断不改变停止 confirmed、不让日志失败阻塞取消，也不承诺 fsync、断电持久化或跨进程完整性；export 继续只读截取，不主动排空宿主。导出不上传、不调用模型、不判定任务或 Orbit 的产品缺陷；开发者收到用户自愿交付的材料后才另行分析。现行独立检查者仍只检查固定产物快照，不读取 `.orbit` 来替代交付终检。
+ 
+ ## 2026-10-09 长任务修复接缝
+ 
+diff --git a/docs/README.md b/docs/README.md
+index 39001fc..99ca568 100644
+--- a/docs/README.md
++++ b/docs/README.md
+@@ -21,7 +21,14 @@
+ | 混合模型交付逐项收口（54 项＋W1–W10） | [完成记录](reference/mixed-model-delivery-completion-20261001.md) |
+ | OpenRouter 映射来源与理由 | [映射来源审计](reference/openrouter-model-mapping-audit.md) |
+ | 工程经验 | [工程教训](reference/engineering-lessons.md) |
++| 按 Orbit 核心诉求筛选 Codex 借鉴项 | [源码研究](reference/codex-source-lessons-20261009.md)（有限顶级资源、可靠交付与减少人工介入；固定提交研究，不是实施排期或验收） |
++| 上下文压缩局部方向与验收范围 | [上下文方案](plan/context-compression-proposal.md)（已确认先落文档；区分三条上下文路径，日志首尾保留本轮已实现并有界实测，完整请求容量调整未采用） |
++| Codex 工作机制与 Orbit 交付、防偏航对照 | [工作流程研究](reference/codex-workflow-alignment-20261009.md)（目标、阶段、修订、推进、分工、独立核验与监督开销；研究事实保留，逐项实施状态沿总清单） |
++| Codex 借鉴决定的最新充分性判断 | [全部决定重评](reference/codex-decisions-reevaluation-20261010.md)（固定源码、Orbit 接线与失败原件；修正 C02/C04/C06/C08 旧结论，区分建议、实际实现与有界验证） |
++| Codex 借鉴项的实施依据与新对话 Goal 入口 | [总实施清单](plan/codex-lessons-implementation.md)（C01—C10、采用条件、宿主依赖、验收、三个 OMP 协作边界及启动指令；本轮授权交付已收口，实际Goal与采用项状态沿清单） |
+ 
+ ## 历史查阅
+ 
+ 历史报告、各代验收与旧版本文档不再保留在当前树：用 `git show 3865b76:PATH` 查阅基线，或沿 Git 历史检索。旧报告不描述当前能力。
++
++本轮实际验证：[Codex借鉴验收](reference/codex-lessons-acceptance-20261009.md)（已完成有界交付，保留构建差异／失败／未测和资源收口事实）。
+diff --git a/docs/plan/debt-ledger.md b/docs/plan/debt-ledger.md
+index 5105f68..3033939 100644
+--- a/docs/plan/debt-ledger.md
++++ b/docs/plan/debt-ledger.md
+@@ -1,23 +1,27 @@
+ # Orbit 当前限制
+ 
+-最后核对：2026-10-09（源码 0.8.3；实际安装身份见[交接](handoff.md)，本轮不更新用户全局安装）。本页只列**当前仍影响用户的限制与未测范围**；已修复项、旧版本流水与已结束票据不在本页保留（`git show 3865b76:docs/plan/debt-ledger.md` 查阅历史）。逐项收口与证据＝[完成记录](../reference/mixed-model-delivery-completion-20261001.md)；现行行为以[合同](../../contracts/task-runtime.md)及 ADR-008/009 为准。
++最后核对：2026-10-10（本次仅补充决定重评；源码 0.8.3，实际安装身份见[交接](handoff.md)，不更新用户全局安装）。本页只列**当前仍影响用户的限制与未测范围**；已修复项、旧版本流水与已结束票据不在本页保留（`git show 3865b76:docs/plan/debt-ledger.md` 查阅历史）。逐项收口与证据＝[完成记录](../reference/mixed-model-delivery-completion-20261001.md)；现行行为以[合同](../../contracts/task-runtime.md)及 ADR-008/009 为准。
+ 
+ | 限制 | 当前影响 | 解除条件 |
+ | --- | --- | --- |
++| 活动任务续跑的有效推进证据有范围 | continue_unfinished_task 已存在，但依赖自动 artifact review、每个输入／产物版本一次；work_observed 只表示新工具回执。本次重读三个正例没有该分支事件，不能把状态提示或确定性通过外推为无需催办的完整反馈 | 沿[重评](../reference/codex-decisions-reevaluation-20261010.md)定位真实投影／等待／无进展／终检链路，再按具体缺口处理；不重新打开所有历史未测分支 |
++| 成员派发失败恢复仍依赖纠正／接管 | 前轮 K3 反复派发失败后 Root 回退；修复正例先错误工具列表、再未登记 eval 子作业，Controller 纠正后才恢复原生路径。原生登记、型号与结果绑定有界通过不能证明失败恢复充分 | 优先核对实际宿主工具形状、工作单元材料和失败后下一次实际调用；不以支持全部 eval 子会话或维护 Fork 为默认方案 |
+ | 程序 integration 选型 live 未触发 | 实现已装并经确定性验证；真实运行从未进入其前提（manual-ready 窗口＋真实 resolved finding）。注意区分：Root 的 `root-model` 工具选模不受该前提约束，其 live 未触发只因为没有运行需要换型 | 真实路径出现后核验；不人为制造，非完工门 |
+ | 非 stale process finding→纠正→恢复组合未实测 | 共用送达路径源码完整且 artifact 孪生已 live（033）；组合自然分支未出现 | 真实路径出现后核验；不加证明门 |
+ | Root 停止自有 queued marker 分支仅确定性证据 | 0.7.37 修复经 gate 验证；真实搁浅 marker 现场未再出现 | 真实路径出现后核验 |
+ | 检查者 SDK 18.4.9 暂存源码修正 | 官方包 sdk.ts 的 ratchet/prelude 导入被 Bun 解析成同名 .js 注入脚本；安装器仅对实际 18.4.9 的已核实一行显式指明 .ts，用户宿主不变，差异已由 OMP2 独立核实 | 上游修复且实际目标版本验证通过后删除此版本限定修正，不扩展 SDK fork |
+-| park/dispose 后退出不可证实 | 已完成成员 park 后失去 session；不能把 idle、cancel 回执当退出，保留 `stop_unconfirmed` | 上游提供 dispose 完成信号并验证 |
++| park/dispose 后退出不可证实 | 已完成成员 park 后失去 session；不能把 idle、cancel 回执当退出，保留 `stop_unconfirmed`。本轮C05仅补普通／失败停止后的耐久名单复核，不解除失去session或宿主原子准入限制 | 上游提供 dispose 完成信号并验证 |
+ | 上游 provider/控制钩子缺口 | `devin-agent` 类不触发 `before_provider_request`；部分异常不能可靠 fail-close；单成员编程 kill、已 park 工作与保留名碰撞受上游接口限制 | 实证最小缺失接口后按 ADR-008 跟进，不预维护 Fork |
+ | 自动入口失败时未知请求体 | 已核对的 OMP messages / Responses 可传恢复提示；不能安全识别的请求体仍中止 | 取得实际请求体与返回契约并隔离验证 |
+ | 历史读取有前置条件 | 需已加载且具备历史读取能力的持久会话；ephemeral／未物化会话不支持 | 原生接口具备能力且有明确需求后适配 |
+-| 异常退出时协作日志仍可能缺失 | 可归属事件已另写 `collaboration.jsonl`；异步写入未完成、写入失败和旧任务可能不完整，导出必须显示缺口 | 可恢复事件流或同步确认边界＋真实异常退出验证 |
++| 异常退出时协作日志仍可能缺失 | 可归属事件已另写 `collaboration.jsonl`；本轮C07在Root停止后增加当前进程writer队列切点append诊断，仍不保证硬崩溃、后续事件或旧任务完整；异步写入未完成／失败仍可能丢失，导出继续按实际截取显示缺口 | 可恢复事件流或同步确认边界＋真实异常退出验证 |
+ | 整次任务费用与现金归属 unknown | 失败检查 usage、Root/成员归属、实际路由价格、订阅消耗与**现金/实际扣减**仍可能未知；交叉单价不能判总成本；`cash []` 只表示未知不是 0 成本；账户／OAuth 归属可得性按各任务原件报告范围区分 | 不新增结论；有第一方可信来源时按合同口径核实 |
+ | 选型/收益效果的有限范围 | W9 单任务配对：旗舰 observed 0 vs 7、其他角色开销更高（unknown 分列）——单任务范围；更早 pair4 对照为负（+134.665%）保留不改判；域外泛化未证 | 真实任务自然累积；不宣称普遍节省 |
+ | 独立检查投入较高 | 历史样本数万至数十万 input token；同质两臂质量无差异但经济收益未证明 | 同条件比较整体交付/返工/核验/人工投入后按需压缩 |
+ | OpenRouter 映射覆盖不全 | 已审计映射及同具体型号／有标记基础降级已接线并有界实测；歧义、冲突和未匹配身份仍 unknown；测量日期/方法多数 unknown，映射命中不是费用或路由质量证明 | 补第一方来源映射并核实测量日期；无全型号认证门 |
+ | 工作区冲突不自动暂停检查 | 程序不检测 Root 声明产物位置与绑定冲突 | 单独明确检测与暂停语义并取得真实路径证据 |
+ | 语义同义 finding 不自动合并 | 依赖检查者复用已有 id，不猜不同 id 语义相同 | 有实际重复误报证据后再定显式对照方案 |
++| 用户NVM运行时不在成员读例外 | C06真实npm进入Seatbelt后读取~/.nvm npm-cli.js被拒；本轮保持边界，由Root运行验证 | 用户决定具体新增读范围后，验证运行与越界拒绝 |
++| eval agent不属于已接线受控成员入口 | C04真实正例的eval agent未登记，不计Orbit成员；改走既有原生task/hub后完成。收尾证据只含该子会话已yield、Root owner-scoped jobs settled及进程退出 | 如决定支持该入口，先核实宿主注册／范围门／用量与停止接缝；当前不扩产品接口 |
+ 
+ Root 故障只记录，不自动替换或恢复模型执行。新供应商、全局调度和复杂统计平台不因列入限制而获得实施授权。
+diff --git a/docs/plan/handoff.md b/docs/plan/handoff.md
+index 236b41f..9091301 100644
+--- a/docs/plan/handoff.md
++++ b/docs/plan/handoff.md
+@@ -1,5 +1,13 @@
+ # Orbit 当前交接
+ 
++同日用户补充要求先记 C08：下一轮局部采用方向为现有 schema 单一结构定义，减少 TS/Ruby 重复，必要语义校验与共享协议样例保留，尚未实施。[重评补充](../reference/codex-decisions-reevaluation-20261010.md)同时说明 C01/C05/C07/C09 参考源码后按 Orbit/OMP 接缝另行实现，成熟度不能继承：C01/C09 在局部范围可保留，C07 限当前 append 诊断，C05 完整准入关闭／清理确认仍有宿主缺口。本次只更新文档，无新代码、安装或产品验收；下方前轮事实保留。
++
++2026-10-10 用户要求重新评估所有 Codex 借鉴决定。最新[重评记录](../reference/codex-decisions-reevaluation-20261010.md)直接对照固定提交源码、当前 Orbit 接线和归档实际任务：保留 C01/C05/C07/C09 的局部实现；撤回 C02/C04/C06“已有能力充分满足”，优先建议补足活动目标推进、可用成员交接与失败恢复；C08 先定位局部 schema 共享和重复校验，后续采用方向见上方补充；C03/C10 暂不扩大实现。建议尚未实施，本次只更新评估与索引，不改产品代码／合同／权限／安装或创建新 Goal。下方前轮 Goal、受测构建与资源收口事实保留，不再将旧候选标签当作最新充分性判断。后续实施仍沿唯一总清单，T01—T13 历史边界不重开。
++
++2026-10-09 UTC（上海2026-10-10）Codex借鉴整轮交付已完成，实际 Goal complete，无硬预算。唯一[总实施清单](codex-lessons-implementation.md)全勾；采用C01/C05/C07/C09，其余逐项复用或有据不采用。C01两层日志首尾保留真实125字符降级失败后补最低500字符空间，新安装3ea4a306…复验JS4000→Ruby500／51465bytes／独立有效终检／Root和登记成员confirmed stop通过。C05普通／失败停止名单复核、C07停止writer切点确认、C09结构化故障诊断均已实现／回归／GLM独立核查；全仓测试、pack／安装摘要、skill与差异检查通过。各构建实测负例／中断／正常退出、推荐原生task／显式hub／纠正／只读检查范围、失败及用量沿[验收记录](../reference/codex-lessons-acceptance-20261009.md)。七个测试pane、归属进程／后台工作及临时安装／目录已清理，必要证据留仓；固定Root、三个OMP／MCP和Herdr保留，日常安装未变。没有普遍节省或消除监督的证明；NVM读边界、非受控eval agent入口、C05失去session等限制保留。源码仍0.8.3，未升版、提交、推送、发布或升级全局安装，T01—T13历史完成／未测边界不改。
++
++原有三个OMP固定pane w23:pH/pJ/pK已核对在本仓可接任务，分别K3-256k／Cursor Grok 4.7 Fast／GLM-5.3-Flash，18.8.0；开发回报不计产品运行证据。本轮只在隔离Git夹具与临时安装验收。用户日常安装实际核对为0.8.3／d947af6／digest5993d7fb…（2026-10-09T08:16:15Z），本轮不改该安装；下方旧轮次安装保留各自事实。
++
+ 最后核对：2026-10-09。**源码0.8.3；T01—T13 已获正式实施授权并按三批实现，修复、约定验证及资源收尾全部完成，实际 Goal complete（无 token 预算）。** 原冻结条件、依赖及分批结果沿[现有方案](orbit-long-task-optimization.md)，逐项确定性／真实通过／失败／限制见[验收记录](../reference/long-task-optimization-acceptance-20261009.md)。D1 已确认，原要求与原生修订、新监督边界及实际停止已接线并有界实测。保留已有修改和未跟踪文档；三个用户预先OMP保留，开发回报不冒充产品验收。真实验收仅在隔离安装／临时Git项目，未知现金收益不宣称。用户随后明确授权本轮升版、提交和推送；未全局升级或发布，Beacon/Zeen保持原状。最终测试安装摘要 `7f262f91…`、Root/独立coding-agent SDK18.8.0；全套测试／打包／skill校验／差异检查通过。11个自开测试pane关闭，9个程序任务confirmed stop且runtime_pid=null，隔离安装卸载，所属进程审计为空；必要脱敏事实索引随验收记录留存。
+ 
+ 本轮版本按 patch 从0.8.2升至0.8.3，package.json与npm-shrinkwrap.json同步；提交／origin/main推送以Git记录为准。真实验收安装仍为0.8.2及其原摘要，不改标为0.8.3实测；升版只改变版本元数据及交接说明，产品代码保持已验收内容。版本一致性、CLI版本输出及打包验证按本次升版核对，不新增真实模型验收。未打tag或更新日常安装。
+diff --git a/lib/orbit/check_runner.rb b/lib/orbit/check_runner.rb
+index 838953a..9257ba7 100644
+--- a/lib/orbit/check_runner.rb
++++ b/lib/orbit/check_runner.rb
+@@ -37,13 +37,17 @@ module Orbit
+     # artifact and the facts that can still change a verdict, not an unbounded
+     # history. Long strings keep a bounded prefix plus `…[original
+     # length:sha256]` (never a silent tail cut), growing lists keep a bounded
+-    # newest tail, and the rendered JSON is hard-capped. Instruction,
+-    # amendments and named basis are never compressed.
++    # newest tail, and the rendered JSON is hard-capped. bash/eval tool-output
++    # logs are the one exception: they keep BOTH ends (see bound_log_string).
++    # Instruction, amendments and named basis are never compressed.
+     CONTEXT_BYTE_LIMIT = 65_536
+     # Bounded check-history window kept in the program context (the anchor is
+     # always kept in addition, even when it is older than this window).
+     CHECK_HISTORY_RECENT_CAP = 6
+     CONTEXT_STRING_CAP = 2_000
++    # A receipt log needs room for its omission facts AND useful text at both
++    # ends even after ordinary fields degrade. The outer 64 KiB cap still wins.
++    CONTEXT_LOG_MIN_CAP = 500
+     # The Root's actually delivered final answer (root observations entry with
+     # kind agent_message) is the checker's primary delivery evidence for
+     # text-only tasks, so it gets a wider verbatim prefix than ordinary
+@@ -223,7 +227,12 @@ module Orbit
+       end
+       parts << "## Current execution context (program record)\n\n" \
+                "This record is deterministic and bounded: long strings keep a prefix plus " \
+-               "`…[original length:sha256]`, growing lists keep their newest entries, and " \
++               "`…[original length:sha256]`, except bash/eval receipt output, which keeps BOTH the " \
++               "beginning and the end of the log around an `…[omitted N of M Unicode chars / B UTF-8 " \
++               "bytes sha256:…]` marker naming this layer's visible length; an `output_omitted` object " \
++               "then repeats the capture layer's own omission facts (its counts are UTF-16 code units) " \
++               "when that layer already trimmed the log. Growing lists keep " \
++               "their newest entries, and " \
+                "context_compression, findings_omitted, recheck_omitted, review_focus_omitted, " \
+                "work_units_omitted and " \
+                "check_history.recent_omitted record what was trimmed. The original instruction, amendments " \
+@@ -377,9 +386,17 @@ module Orbit
+           bounded = bound_value(receipt, caps)
+           next bounded unless receipt.is_a?(Hash)
+ 
+-          %w[command script output].each do |field|
++          %w[command script].each do |field|
+             bounded["#{field}_truncated"] = true if receipt[field].is_a?(String) && bounded[field] != receipt[field]
+           end
++          # The head+tail log policy applies ONLY to bash/eval execution
++          # output; command/script keep the generic prefix strategy above and
++          # file-tool receipts carry no body at all.
++          if %w[bash eval].include?(receipt["tool"].to_s) && receipt["output"].is_a?(String)
++            log = bound_log_string(receipt["output"], [caps[:string_cap], CONTEXT_LOG_MIN_CAP].max)
++            bounded["output_truncated"] = true if log != receipt["output"]
++            bounded["output"] = log
++          end
+           bounded
+         end
+       end
+@@ -709,6 +726,42 @@ module Orbit
+       "#{text[0, cap]}…[#{text.length}:#{Digest::SHA256.hexdigest(text)}]"
+     end
+ 
++    # bash/eval receipt output keeps BOTH ends (ticket C01): the head carries
++    # the run context and the tail the failure summary. The in-band marker
++    # states THIS layer's visible length with explicit units (Unicode
++    # characters and UTF-8 bytes) plus its SHA-256. The capture layer's own
++    # omission facts ride in the structured output_omitted field, so a second
++    # trim never nests two generations of markers: at a degraded cap the head
++    # and tail keep the full remaining budget. Ruby slices by characters, so
++    # the kept text stays valid Unicode. When even the marker exceeds the
++    # cap, it cannot retain text. Production receipt projection reserves
++    # CONTEXT_LOG_MIN_CAP to avoid that case while the outer byte-cap loop
++    # continues degrading other fields or explicitly omits the whole context.
++    def bound_log_string(value, cap)
++      text = value.to_s
++      return text if text.length <= cap
++
++      digest = Digest::SHA256.hexdigest(text)
++      omitted = text.length
++      # The marker's own digit count feeds the body budget. Within one digit
++      # count the computation is constant, so a round landing in the same
++      # class converges; otherwise the digit count strictly shrinks. No
++      # surrogate adjustments exist at this layer, so convergence within a
++      # handful of rounds is provable and non-convergence is a bug, never a
++      # reason to emit a lossy cut.
++      8.times do
++        marker = "…[omitted #{omitted} of #{text.length} Unicode chars / #{text.bytesize} UTF-8 bytes sha256:#{digest}]"
++        keep = [cap - marker.length, 0].max
++        head_len = keep / 2
++        tail_len = keep - head_len
++        next_omitted = text.length - head_len - tail_len
++        return "#{text[0, head_len]}#{marker}#{tail_len.positive? ? text[-tail_len, tail_len] : ''}" if next_omitted == omitted
++
++        omitted = next_omitted
++      end
++      raise Error, "log bounding did not converge: marker budget invariant violated"
++    end
++
+     # Raw (non-JSON) contexts are byte-bounded too, with the same prefix plus
+     # original length and SHA-256.
+     def bound_raw_context(text)
+diff --git a/lib/orbit/task_runtime.rb b/lib/orbit/task_runtime.rb
+index d2958f6..d17f865 100644
+--- a/lib/orbit/task_runtime.rb
++++ b/lib/orbit/task_runtime.rb
+@@ -3761,6 +3761,19 @@ module Orbit
+         @state["stop_confirmation"] = confirmation
+         capture_native_calls
+         final_status = status
++        # Every stop must re-read the authoritative roster after teardown, not
++        # only completion hand-offs. A late registration was never stopped.
++        unaccounted = members_unaccounted_after_teardown
++        roster_code = if unaccounted.nil?
++                        "members_unreadable"
++                      elsif !unaccounted.empty?
++                        "members_registered_during_stop"
++                      end
++        roster_detail = if unaccounted.nil?
++                          "the member roster could not be re-read after teardown"
++                        elsif roster_code
++                          "members registered while the task stopped were never stopped: #{unaccounted.join(', ')}"
++                        end
+         if notice
+           # Teardown can outlive the hand-off check above (member stops wait for
+           # in-flight work), so version and roster are checked once more. This
+@@ -3773,18 +3786,10 @@ module Orbit
+           # an explicit reason -- never as completion, and never as if the task
+           # were still running.
+           key, code, detail = completion_gate
+-          unaccounted = nil
+-          if key
+-            unaccounted = members_unaccounted_after_teardown
+-            if unaccounted.nil?
+-              key = nil
+-              code = "members_unreadable"
+-              detail = "the member roster could not be re-read after teardown"
+-            elsif !unaccounted.empty?
+-              key = nil
+-              code = "members_registered_during_stop"
+-              detail = "members registered while the task stopped were never stopped: #{unaccounted.join(', ')}"
+-            end
++          if roster_code
++            key = nil
++            code = roster_code
++            detail = roster_detail
+           end
+           if key
+             @state.delete("completion_invalidation")
+@@ -3792,30 +3797,30 @@ module Orbit
+             @state["delivery_digest"] = fingerprint_artifact
+             @record.event("completed_via_finalized_stop", "check" => @state.dig("finalization_notices", key, "check"))
+           else
+-            # An unaccounted member was never stopped, so the stop itself is not
+-            # confirmed: that records an unconfirmed stop, not a confirmed pause.
+-            if %w[members_unreadable members_registered_during_stop].include?(code)
+-              final_status = "stop_unconfirmed"
+-              # Overall confirmation must not stay true while a member is
+-              # unaccounted for; keep the verified parts (Root plus the members
+-              # the stop actually covered) as the execution-scope evidence.
+-              partial = @state["stop_confirmation"] || {}
+-              @state["execution_stop_confirmation"] = partial
+-              @state["stop_confirmation"] = partial.merge("confirmed" => false, "reason" => code,
+-                                                          "unaccounted_members" => Array(unaccounted))
+-              # The stop attempt itself succeeded; the unconfirmed verdict comes
+-              # from the post-teardown roster check. Keep that distinction in
+-              # the diagnostics (root ok, stop not confirmed overall).
+-              diagnostics["confirmed"] = false
+-              diagnostics["reason_code"] = code
+-              diagnostics["unaccounted_members"] = Array(unaccounted)
+-              @state["stop_diagnostics"] = diagnostics
+-            end
+             @state["completion_invalidation"] = { "reason" => code, "detail" => detail,
+                                                   "at" => Time.now.utc.iso8601 }
+             @record.event("completion_invalidated_after_stop", "reason" => code, "detail" => detail)
+           end
+         end
++        # An unaccounted member was never stopped, so the stop itself is not
++        # confirmed: that records an unconfirmed stop, not a confirmed pause.
++        if roster_code
++          final_status = "stop_unconfirmed"
++          # Overall confirmation must not stay true while a member is
++          # unaccounted for; keep the verified parts (Root plus the members
++          # the stop actually covered) as the execution-scope evidence.
++          partial = @state["stop_confirmation"] || {}
++          @state["execution_stop_confirmation"] = partial
++          @state["stop_confirmation"] = partial.merge("confirmed" => false, "reason" => roster_code,
++                                                      "unaccounted_members" => Array(unaccounted))
++          # The stop attempt itself succeeded; the unconfirmed verdict comes
++          # from the post-teardown roster check. Keep that distinction in
++          # the diagnostics (root ok, stop not confirmed overall).
++          diagnostics["confirmed"] = false
++          diagnostics["reason_code"] = roster_code
++          diagnostics["unaccounted_members"] = Array(unaccounted)
++          @state["stop_diagnostics"] = diagnostics
++        end
+         @state["status"] = final_status
+         @state["stop_reason"] = reason
+         synchronize_terminal_readiness(final_status)
+@@ -3824,12 +3829,12 @@ module Orbit
+         # stop_unconfirmed there).
+         @state.delete("stop_diagnostics") unless final_status == "stop_unconfirmed"
+         mark_terminal_ask_interrupts!
+-        if final_status == "stop_unconfirmed" && @state["completion_invalidation"]
++        if final_status == "stop_unconfirmed"
+           # The Root turn itself was verified, but the stop as a whole is not:
+           # the event must not carry a false overall confirmation.
+           @record.event("stop_unconfirmed", "reason" => reason,
+-                        "error" => @state.dig("completion_invalidation", "reason"),
+-                        "detail" => @state.dig("completion_invalidation", "detail"),
++                        "error" => roster_code,
++                        "detail" => roster_detail,
+                         "unaccounted_members" => Array(@state.dig("stop_confirmation", "unaccounted_members")),
+                         "verified_root_confirmation" => @state["execution_stop_confirmation"])
+         else
+diff --git a/plugins/omp-host.mjs b/plugins/omp-host.mjs
+index 73a7b82..9e5a5b5 100644
+--- a/plugins/omp-host.mjs
++++ b/plugins/omp-host.mjs
+@@ -240,7 +240,7 @@ const collabDroppedByTask = new Map(); // task_dir -> count of dropped oldest ev
+ function collabWriterFor(taskDir) {
+   let writer = collabWriters.get(taskDir);
+   if (!writer) {
+-    writer = { handle: null, queue: Promise.resolve(), seq: 0, lost: null, prepared: false };
++    writer = { handle: null, queue: Promise.resolve(), seq: 0, lost: null, prepared: false, observed: 0, failed: 0, gaps: 0, lastError: null };
+     collabWriters.set(taskDir, writer);
+   }
+   return writer;
+@@ -324,6 +324,7 @@ async function drainCollab(writer, taskDir, line, onGap) {
+       const gapSeq = writer.seq + 1;
+       await collabWriteLine(writer, taskDir, collabGapLine(writer.lost, taskDir, Date.now(), gapSeq));
+       writer.seq = gapSeq;
++      writer.gaps += 1;
+       writer.lost = null;
+     }
+     line.seq = writer.seq + 1;
+@@ -331,6 +332,8 @@ async function drainCollab(writer, taskDir, line, onGap) {
+     writer.seq = line.seq;
+   } catch (error) {
+     const reason = `collaboration.jsonl append failed: ${String(error?.message || error).slice(0, 200)}`;
++    writer.failed += 1;
++    writer.lastError = reason;
+     if (writer.lost) {
+       writer.lost.count += 1;
+       writer.lost.last_at = Date.now();
+@@ -345,7 +348,34 @@ async function drainCollab(writer, taskDir, line, onGap) {
+ // Fire-and-forget durable append.
+ function persistCollabLine(taskDir, line, onGap) {
+   const writer = collabWriterFor(taskDir);
+-  writer.queue = writer.queue.then(() => drainCollab(writer, taskDir, line, onGap));
++  const cutoff = ++writer.observed;
++  writer.queue = writer.queue.then(async () => {
++    await drainCollab(writer, taskDir, line, onGap);
++    return { task_dir: taskDir, scope: 'current process observations through cutoff; append completion, not fsync',
++      observed_through: cutoff, written_seq: writer.seq, failed_observations: writer.failed,
++      recorded_gaps: writer.gaps, pending_gap: writer.lost ? { ...writer.lost } : null,
++      last_error: writer.lastError,
++      status: writer.failed || writer.gaps || writer.lost ? 'written_with_gaps' : 'written' };
++  });
++}
++
++// Capture the queue itself, not a moving "all events" promise. Later events
++// belong to a later cutoff. Cancellation already happened before this read;
++// a slow or broken evidence sink must never decide execution stop success.
++async function collabCheckpoint(taskDir) {
++  const writer = taskDir && collabWriters.get(taskDir);
++  if (!writer) return { task_dir: taskDir ?? null, status: 'unobserved', observed_through: null, written_seq: null };
++  const queue = writer.queue, cutoff = writer.observed;
++  let timer;
++  try {
++    return await Promise.race([queue, new Promise(resolve => {
++      timer = setTimeout(() => resolve({ task_dir: taskDir, status: 'unconfirmed', observed_through: cutoff,
++        written_seq: null, reason: 'append checkpoint did not settle; later observations are outside this cutoff' }), 1000);
++    })]);
++  } catch (error) {
++    return { task_dir: taskDir, status: 'unconfirmed', observed_through: cutoff, written_seq: null,
++      reason: String(error?.message || error).slice(0, 200) };
++  } finally { clearTimeout(timer); }
+ }
+ 
+ // Process-level shutdown only (never on child dispose or session switch):
+@@ -2344,6 +2374,7 @@ export function installOmpExtension(pi, sdk) {
+     // guard closes; a legacy session runs the work directly.
+     if (teardown) await teardown(work);
+     else await work();
++    confirmation.collaboration_persistence = await collabCheckpoint(taskDirs.get(entry.id));
+     return confirmation;
+   }
+   // Member-scoped bridge: native task members have no `entries` record (no
+diff --git a/plugins/root-verifications.mjs b/plugins/root-verifications.mjs
+index 92e69bb..14e6ccd 100644
+--- a/plugins/root-verifications.mjs
++++ b/plugins/root-verifications.mjs
+@@ -27,6 +27,7 @@
+ // Interrupt replay distinguishes calls that never ran (dropped) from calls
+ // already started (kept as interrupted, with unknown exit status).
+ 
++import { createHash } from 'node:crypto';
+ import fs from 'node:fs';
+ import path from 'node:path';
+ import os from 'node:os';
+@@ -57,6 +58,50 @@ function boundedText(value) {
+     : { text: value, truncated: false };
+ }
+ 
++// bash/eval OUTPUT uses a dedicated head+tail policy (ticket C01): the head
++// of a log carries the run context and the tail carries the failure summary,
++// so a prefix-only cut loses exactly the evidence an independent check
++// needs. The in-band marker states this layer's visible length with explicit
++// units (UTF-16 code units = JS string length, plus UTF-8 bytes) and the
++// SHA-256 of that visible text; the same facts ride as structured
++// `output_omitted` metadata so a later compression layer never has to parse
++// or re-wrap this marker. Cut points never split a surrogate pair, so the
++// kept text stays valid Unicode. command/script and every other string keep
++// the prefix-only boundedText policy above.
++function boundedLogText(value) {
++  const untrimmed = { text: typeof value === 'string' ? value : null, truncated: false, omitted: null };
++  if (typeof value !== 'string') return untrimmed;
++  if (value.length <= TEXT_CAP) return untrimmed;
++  const sha256 = createHash('sha256').update(value, 'utf8').digest('hex');
++  const bytes = Buffer.byteLength(value, 'utf8');
++  let omitted = value.length;
++  // The marker's own digit count feeds the body budget. Within one digit
++  // count the computation is a constant function, so a round that lands in
++  // the same digit class converges on the spot; between rounds the digit
++  // count strictly shrinks (a surrogate adjustment can bounce it up by one
++  // class exactly once at a power-of-ten boundary, which the next round
++  // settles). Twelve rounds therefore cover every reachable input; anything
++  // else is an invariant violation, never a reason to emit a lossy cut.
++  for (let round = 0; round < 12; round += 1) {
++    const marker = `…[omitted ${omitted} of ${value.length} UTF-16 code units / ${bytes} UTF-8 bytes sha256:${sha256}]`;
++    let head = Math.ceil((TEXT_CAP - marker.length) / 2);
++    let tail = TEXT_CAP - marker.length - head;
++    // Never split a surrogate pair at a cut point.
++    const lastHead = value.charCodeAt(head - 1);
++    if (lastHead >= 0xd800 && lastHead <= 0xdbff) head -= 1;
++    const firstTail = value.charCodeAt(value.length - tail);
++    if (firstTail >= 0xdc00 && firstTail <= 0xdfff) tail -= 1;
++    const next = value.length - head - tail;
++    if (next === omitted) {
++      return { text: value.slice(0, head) + marker + value.slice(value.length - tail), truncated: true,
++               omitted: { omitted_utf16_units: next, visible_utf16_units: value.length,
++                          visible_utf8_bytes: bytes, sha256 } };
++    }
++    omitted = next;
++  }
++  throw new Error('boundedLogText did not converge: marker budget invariant violated');
++}
++
+ function resultText(result) {
+   if (typeof result === 'string') return result;
+   if (Array.isArray(result?.content)) {
+@@ -173,7 +218,7 @@ export function buildReceipt({ event, start, endBinding, taskDirectory = null, r
+   }
+   // File tools record NO result body: an edit result can carry the applied
+   // patch and a write result its content, so the receipt keeps metadata only.
+-  const output = isFileTool ? { text: null, truncated: false } : boundedText(resultText(event.result));
++  const output = isFileTool ? { text: null, truncated: false, omitted: null } : boundedLogText(resultText(event.result));
+   const input = boundedText(start?.text ?? null);
+   const now = Date.now();
+   const receipt = {
+@@ -202,6 +247,9 @@ export function buildReceipt({ event, start, endBinding, taskDirectory = null, r
+     artifact_digest: endBinding?.artifact_digest ?? null,
+     fingerprint_status: endBinding?.fingerprint_status ?? 'unknown',
+   };
++  // Capture-layer omission facts travel as structured metadata, so the
++  // check-input compression layer never has to parse or re-wrap the marker.
++  if (output.omitted) receipt.output_omitted = output.omitted;
+   if (tool === 'bash') {
+     receipt.command = input.text;
+     receipt.command_truncated = input.truncated;
+diff --git a/runners/omp-reviewer/provider-error.test.ts b/runners/omp-reviewer/provider-error.test.ts
+index 97addca..695a330 100644
+--- a/runners/omp-reviewer/provider-error.test.ts
++++ b/runners/omp-reviewer/provider-error.test.ts
+@@ -13,6 +13,8 @@ test("a real 429 usage-limit turn classifies as auth_or_quota", () => {
+ 		errorId: 659456,
+ 	});
+ 	expect(fact?.kind).toBe("auth_or_quota");
++	expect(fact?.status).toBe(429);
++	expect(fact?.error_id).toBe(659456);
+ 	expect(fact?.detail).toContain("Go usage limit exceeded");
+ 	expect(providerErrorFact({ stopReason: "error", errorStatus: 402,
+ 		errorMessage: "402 Access denied: this model is only available to accounts with a balance greater than 0. This is an anti-abuse measure, not a usage charge." })?.kind).toBe("auth_or_quota");
+@@ -47,6 +49,8 @@ test("a server error carries status and text as unavailable", () => {
+ 	expect(fact?.detail).toBe("HTTP 500: Internal server error");
+ 	const bare = providerErrorFact({ stopReason: "error" });
+ 	expect(bare?.kind).toBe("unavailable");
++	expect(bare?.status).toBeNull();
++	expect(bare?.error_id).toBeNull();
+ 	expect(bare?.detail).toBe("provider reported an error without detail");
+ });
+ 
+diff --git a/runners/omp-reviewer/provider-error.ts b/runners/omp-reviewer/provider-error.ts
+index c6e85e4..a8c0a72 100644
+--- a/runners/omp-reviewer/provider-error.ts
++++ b/runners/omp-reviewer/provider-error.ts
+@@ -10,12 +10,15 @@ import { isUsageLimitOutcome } from "@oh-my-pi/pi-ai/error";
+ export interface ProviderErrorFact {
+ 	kind: "auth_or_quota" | "unavailable";
+ 	detail: string;
++	status: number | null;
++	error_id: number | null;
+ }
+ 
+ export function providerErrorFact(message: unknown): ProviderErrorFact | undefined {
+ 	const turn = message as {
+ 		stopReason?: unknown;
+ 		errorStatus?: unknown;
++		errorId?: unknown;
+ 		errorMessage?: unknown;
+ 		errorClassificationMessage?: unknown;
+ 	} | undefined;
+@@ -38,5 +41,9 @@ export function providerErrorFact(message: unknown): ProviderErrorFact | undefin
+ 	const kind = auth || balanceGate || isUsageLimitOutcome(status, text) ? "auth_or_quota" : "unavailable";
+ 	const detail = `${status !== undefined ? `HTTP ${status}: ` : ""}${text?.trim() ?? "provider reported an error without detail"}`
+ 		.replace(/\s+/g, " ").trim().slice(0, 200);
+-	return { kind, detail };
++	// Preserve only SDK-public numeric diagnostics. No headers, request body,
++	// credential text or reconstructed retry advice enters this projection.
++	return { kind, detail,
++		status: typeof status === "number" && Number.isInteger(status) && status >= 100 && status <= 599 ? status : null,
++		error_id: typeof turn.errorId === "number" && Number.isSafeInteger(turn.errorId) && turn.errorId >= 0 ? turn.errorId : null };
+ }
+diff --git a/runners/omp-reviewer/reviewer.ts b/runners/omp-reviewer/reviewer.ts
+index e02e8f9..ba9f6a9 100644
+--- a/runners/omp-reviewer/reviewer.ts
++++ b/runners/omp-reviewer/reviewer.ts
+@@ -577,7 +577,7 @@ try {
+ 				// receipts/gaps are still recorded as-is below.
+ 				const providerError = providerErrorFact(last);
+ 				if (providerError) {
+-					evidence.error = { kind: providerError.kind, detail: providerError.detail };
++					evidence.error = { ...providerError };
+ 					problems.push(`provider error: ${providerError.detail}`);
+ 				}
+ 				let result: unknown;
+diff --git a/tests/check_runner_context_test.rb b/tests/check_runner_context_test.rb
+index 0c43bbe..d42c0c4 100644
+--- a/tests/check_runner_context_test.rb
++++ b/tests/check_runner_context_test.rb
+@@ -137,6 +137,84 @@ module CheckRunnerContextTest
+     check(compressed["root_verifications_omitted"].nil?, "no omission is reported when nothing was dropped")
+   end
+ 
++  # C01: a receipt output already trimmed head+tail at capture (in-band
++  # marker + structured output_omitted) is re-trimmed by this layer without
++  # losing either end, this layer's own facts, or the upstream omission facts.
++  def receipt_output_second_trim_keeps_both_ends_and_upstream_facts
++    upstream_marker = "…[omitted 2200 of 4400 UTF-16 code units / 4400 UTF-8 bytes sha256:#{'a' * 64}]"
++    js_visible = "HEAD-" + ("h" * 1_940) + upstream_marker + ("t" * 1_940) + "-TAIL"
++    output_omitted = { "omitted_utf16_units" => 2_200, "visible_utf16_units" => 4_400,
++                       "visible_utf8_bytes" => 4_400, "sha256" => "a" * 64 }
++    context = base_context
++    context["root_verifications"] = [{ "tool_call_id" => "long-run", "tool" => "bash", "command" => "npm test",
++      "exit_code" => 1, "exit_code_source" => "reported",
++      "input_matches" => true, "artifact_matches" => true,
++      "output" => js_visible, "output_truncated" => true, "output_omitted" => output_omitted }]
++    receipt = parsed(context).fetch("root_verifications").first
++    out = receipt["output"]
++    check(out.start_with?("HEAD-") && out.end_with?("-TAIL"),
++          "the second-layer trim still keeps both ends of the log")
++    check(out.include?("of #{js_visible.length} Unicode chars / #{js_visible.bytesize} UTF-8 bytes " \
++                       "sha256:#{Digest::SHA256.hexdigest(js_visible)}"),
++          "this layer's marker names its own visible length with explicit units and SHA-256")
++    check(!out.include?("UTF-16 code units"),
++          "the second trim never nests two generations of markers in the kept text")
++    check(receipt["output_omitted"] == output_omitted,
++          "capture-layer omission facts survive as structured metadata")
++    check(receipt["output_truncated"] == true && receipt["exit_code"] == 1 &&
++          receipt["tool_call_id"] == "long-run" && receipt["command"] == "npm test",
++          "identity, execution result and truncation facts survive the second trim")
++    check(out.length <= Orbit::CheckRunner::CONTEXT_STRING_CAP,
++          "the re-trimmed log stays within the string budget")
++  end
++
++  # C01: under byte-pressure degradation the selected logs still keep both
++  # ends, their execution results and the marker, inside the hard byte cap.
++  # The real installed run degraded ordinary strings to 125 characters,
++  # smaller than its omission marker; it previously delivered only a marker.
++  def degraded_caps_keep_selected_log_ends_within_byte_limit
++    output = "RUN-START " + ("x" * 6_000) + "FAIL-SUMMARY"
++    receipts = (1..6).map do |i|
++      { "at" => "2026-10-09T10:0#{i}:00Z", "tool" => "bash", "kind" => "root_verification",
++        "status" => i.even? ? "failed" : "completed", "command" => "node --test ##{i}",
++        "exit_code" => i.even? ? 1 : 0, "exit_code_source" => "reported",
++        "output" => output, "output_truncated" => false,
++        "input_matches" => true, "artifact_matches" => true }
++    end
++    caps = Orbit::CheckRunner::CONTEXT_CAPS.merge(string_cap: 125)
++    bounded = runner.send(:build_compressed_context, { "root_verifications" => receipts, "root" => {} }, caps, 3)
++    record = JSON.parse(runner.send(:render_context, bounded))
++    check(JSON.generate(record).bytesize <= Orbit::CheckRunner::CONTEXT_BYTE_LIMIT,
++          "degraded logs still fit the hard byte cap")
++    kept = record["root_verifications"]
++    check(kept.length == 6, "all six receipts are delivered at the degraded string cap")
++    kept.each do |receipt|
++      check(receipt["output"].start_with?("RUN-START ") && receipt["output"].end_with?("FAIL-SUMMARY") &&
++            receipt["output"].include?("…[omitted ") && receipt["output"].length <= 500,
++            "every delivered log keeps both ends and the marker at a degraded cap")
++    end
++    check(kept.map { |r| r["exit_code"] } == [0, 1, 0, 1, 0, 1] &&
++          kept.map { |r| r["status"] } == %w[completed failed completed failed completed failed],
++          "execution results survive degradation unchanged")
++  end
++
++  # C01: multibyte logs keep valid UTF-8 and explicit units; receipts outside
++  # bash/eval keep the generic prefix-only strategy.
++  def log_policy_is_limited_to_bash_eval_output
++    text = "日志开始" + ("汉" * 3_000) + "日志结尾"
++    bound = runner.send(:bound_log_string, text, 2_000)
++    check(bound.valid_encoding?, "a multibyte log stays valid UTF-8 after the head+tail trim")
++    check(bound.start_with?("日志开始") && bound.end_with?("日志结尾"),
++          "both ends of a multibyte log are kept")
++    check(bound.include?("of #{text.length} Unicode chars / #{text.bytesize} UTF-8 bytes " \
++                         "sha256:#{Digest::SHA256.hexdigest(text)}"),
++          "the marker distinguishes Unicode characters from UTF-8 bytes")
++    other = { "tool_call_id" => "obs", "tool" => "read", "output" => long_text("log", 4_000) }
++    record = parsed(base_context.merge("root_verifications" => [other])).fetch("root_verifications").first
++    check(record["output"] == bound_at(other["output"], Orbit::CheckRunner::CONTEXT_STRING_CAP),
++          "a non-bash/eval receipt keeps the generic prefix-only strategy")
++  end
++
+   # The live 2026-10-08 case: a unit declared six allowed paths and five tools,
+   # but the checker received only the last two of each because the generic array
+   # bound tail-trimmed the permission lists once byte pressure halved
+@@ -311,6 +389,9 @@ module CheckRunnerContextTest
+     check_dropped_declarations_are_explicit
+     current_execution_receipts_survive_degraded_caps
+     root_verifications_keep_order_when_they_fit
++    receipt_output_second_trim_keeps_both_ends_and_upstream_facts
++    degraded_caps_keep_selected_log_ends_within_byte_limit
++    log_policy_is_limited_to_bash_eval_output
+     puts "CHECK_RUNNER_CONTEXT_TEST_PASS (deterministic)"
+   end
+ 
+@@ -597,7 +678,7 @@ module CheckRunnerContextTest
+ 
+   def check_verification_truncation_is_explicit
+     context = base_context
+-    context["root_verifications"] = [{ "tool_call_id" => "actual-tests", "command" => "npm test",
++    context["root_verifications"] = [{ "tool_call_id" => "actual-tests", "tool" => "bash", "command" => "npm test",
+       "exit_code" => 0, "artifact_matches" => true, "input_matches" => false,
+       "output" => long_text("tests", 4_000), "output_truncated" => false }]
+     receipt = parsed(context).fetch("root_verifications").first
+diff --git a/tests/omp_collab_evidence_test.mjs b/tests/omp_collab_evidence_test.mjs
+index 73bc784..0180f77 100644
+--- a/tests/omp_collab_evidence_test.mjs
++++ b/tests/omp_collab_evidence_test.mjs
+@@ -337,6 +337,17 @@ try {
+   await emit('tool_call', { toolName: 'hub', toolCallId: 'gap-2', input: { op: 'send', to: 'nobody', message: 'lost two' } }, ctx3);
+   await waitFor(async () => (await request(taskDir3, 'hub_events', { session: 'root3' }))
+     .events.some(e => e.kind === 'persistence_gap'), 'bridge persistence_gap mirror');
++  // A real append failure is diagnostic evidence, never a failed execution
++  // stop: the checkpoint names its cutoff and unrecorded gap explicitly.
++  const failedCheckpoint = await request(taskDir3, 'stop', { session: 'root3' });
++  assert.equal(failedCheckpoint.confirmed, true, 'a broken log sink cannot prevent cancellation');
++  const failedPersistence = failedCheckpoint.collaboration_persistence;
++  assert.equal(failedPersistence.status, 'written_with_gaps');
++  assert.equal(failedPersistence.observed_through, 2);
++  assert.equal(failedPersistence.written_seq, 0);
++  assert.equal(failedPersistence.failed_observations, 2);
++  assert.equal(failedPersistence.pending_gap.count, 2);
++  assert.match(failedPersistence.last_error, /append failed/);
+   await fs.chmod(taskDir3, 0o755);
+   await emit('tool_call', { toolName: 'hub', toolCallId: 'gap-3', input: { op: 'send', to: 'nobody', message: 'recovered' } }, ctx3);
+   const lines3 = await waitFor(async () => {
+@@ -350,6 +361,16 @@ try {
+   assert.deepEqual(lines3.map(l => l.seq), [1, 2], 'sequence numbers stay contiguous across the loss');
+   assert.equal(lines3.at(-1).tool_call_id, 'gap-3');
+   assert.equal((await fs.stat(path.join(taskDir3, 'collaboration.jsonl'))).mode & 0o777, 0o600, 'recovered file is 0600');
++  const recoveredCheckpoint = await request(taskDir3, 'stop', { session: 'root3' });
++  assert.equal(recoveredCheckpoint.confirmed, true);
++  const recoveredPersistence = recoveredCheckpoint.collaboration_persistence;
++  assert.equal(recoveredPersistence.observed_through, 3);
++  assert.equal(recoveredPersistence.written_seq, lines3.at(-1).seq);
++  assert.equal(recoveredPersistence.pending_gap, null);
++  assert.equal(recoveredPersistence.failed_observations, 2, 'recovery does not erase the failed observations');
++  assert.equal(recoveredPersistence.recorded_gaps, 1);
++  assert.equal(recoveredPersistence.status, 'written_with_gaps');
++
+ 
+   // Restart/resume: a task whose evidence file already exists (written by a
+   // previous OMP process) with a valid last line and a crash-left PARTIAL
+diff --git a/tests/root_verifications_test.mjs b/tests/root_verifications_test.mjs
+index 31cc13e..c53a8a3 100644
+--- a/tests/root_verifications_test.mjs
++++ b/tests/root_verifications_test.mjs
+@@ -6,7 +6,8 @@ import assert from 'node:assert/strict';
+ import fs from 'node:fs/promises';
+ import os from 'node:os';
+ import path from 'node:path';
+-import { captureStart, buildReceipt, appendReceipt, readReceipts, VERIFY_FILENAME } from '../plugins/root-verifications.mjs';
++import { createHash } from 'node:crypto';
++import { captureStart, buildReceipt, appendReceipt, readReceipts, VERIFY_FILENAME, TEXT_CAP } from '../plugins/root-verifications.mjs';
+ 
+ const taskA = await fs.mkdtemp(path.join(os.tmpdir(), 'orbit-root-verify-a-'));
+ const taskB = await fs.mkdtemp(path.join(os.tmpdir(), 'orbit-root-verify-b-'));
+@@ -115,6 +116,64 @@ assert.equal(later[0].output, 'tests 8/8 pass');
+ assert.equal(readReceipts(taskB).length, 0);
+ assert.equal(((await fs.stat(path.join(taskA, VERIFY_FILENAME))).mode & 0o777).toString(8), '600');
+ 
++// C01: a long bash/eval output keeps BOTH ends. The head carries the run
++// context and the tail the failure summary; the in-band marker names the
++// capture layer's visible length in explicit UTF-16 code units and UTF-8
++// bytes plus its SHA-256, and the same facts ride as structured metadata.
++const head = 'RUN-START '.repeat(20);
++const tail = 'FAIL-SUMMARY '.repeat(20);
++const longOutput = head + 'x'.repeat(6000) + tail;
++const longStart = captureStart(
++  { type: 'tool_execution_start', toolCallId: 'call-long', toolName: 'bash', args: { command: 'npm test' } },
++  { sessionCwd: taskA });
++const longReceipt = buildReceipt({
++  event: { type: 'tool_execution_end', toolCallId: 'call-long', toolName: 'bash', isError: true,
++    result: { content: [{ type: 'text', text: longOutput }], details: { exitCode: 1 } } },
++  start: longStart, endBinding: null });
++assert.equal(longReceipt.output_truncated, true);
++assert.ok(longReceipt.output.length <= TEXT_CAP, 'the trimmed log stays within the receipt text budget');
++assert.ok(longReceipt.output.startsWith(head.slice(0, 60)), 'the run-context head survives');
++assert.ok(longReceipt.output.endsWith(tail.slice(-60)), 'the failure-summary tail survives');
++const mark = longReceipt.output.match(/…\[omitted (\d+) of (\d+) UTF-16 code units \/ (\d+) UTF-8 bytes sha256:([0-9a-f]{64})\]/);
++assert.ok(mark, 'the omission marker names explicit units and a SHA-256');
++assert.equal(Number(mark[2]), longOutput.length);
++assert.equal(Number(mark[3]), Buffer.byteLength(longOutput, 'utf8'));
++assert.equal(mark[4], createHash('sha256').update(longOutput, 'utf8').digest('hex'));
++assert.deepEqual(longReceipt.output_omitted, {
++  omitted_utf16_units: Number(mark[1]), visible_utf16_units: longOutput.length,
++  visible_utf8_bytes: Buffer.byteLength(longOutput, 'utf8'),
++  sha256: createHash('sha256').update(longOutput, 'utf8').digest('hex') });
++assert.equal(longReceipt.exit_code, 1); // execution result facts are unchanged
++assert.equal(longReceipt.exit_code_source, 'reported');
++
++// C01: the command/script strategy is untouched - a long command keeps the
++// plain bounded prefix, no head+tail marker.
++const longCommand = 'c'.repeat(5000);
++const commandStart = captureStart(
++  { type: 'tool_execution_start', toolCallId: 'call-longcmd', toolName: 'bash', args: { command: longCommand } },
++  { sessionCwd: taskA });
++const commandReceipt = buildReceipt({
++  event: { type: 'tool_execution_end', toolCallId: 'call-longcmd', toolName: 'bash', isError: false,
++    result: { content: [{ type: 'text', text: 'ok' }], details: {} } },
++  start: commandStart, endBinding: null });
++assert.equal(commandReceipt.command, longCommand.slice(0, TEXT_CAP));
++assert.equal(commandReceipt.command_truncated, true);
++assert.equal(commandReceipt.command.includes('…['), false);
++assert.equal(commandReceipt.output, 'ok'); // short output stays verbatim, no marker
++assert.equal(commandReceipt.output_omitted, undefined);
++
++// C01: Unicode cut points never split a surrogate pair - the trimmed log
++// re-encodes as identical UTF-8.
++const unicodeOutput = 'HEAD ' + '🔥'.repeat(3000) + ' TAIL';
++const unicodeReceipt = buildReceipt({
++  event: { type: 'tool_execution_end', toolCallId: 'call-unicode', toolName: 'bash', isError: true,
++    result: { content: [{ type: 'text', text: unicodeOutput }], details: { exitCode: 1 } } },
++  start: longStart, endBinding: null });
++assert.equal(unicodeReceipt.output_truncated, true);
++assert.equal(Buffer.from(unicodeReceipt.output, 'utf8').toString('utf8'), unicodeReceipt.output,
++  'no lone surrogates: the trimmed log round-trips through UTF-8 unchanged');
++assert.ok(unicodeReceipt.output.startsWith('HEAD ') && unicodeReceipt.output.endsWith(' TAIL'));
++
+ await fs.rm(taskA, { recursive: true, force: true });
+ await fs.rm(taskB, { recursive: true, force: true });
+ console.log('ROOT_VERIFICATIONS_TEST_PASS');
+diff --git a/tests/task_runtime_test.rb b/tests/task_runtime_test.rb
+index cc011b9..1dfde0e 100644
+--- a/tests/task_runtime_test.rb
++++ b/tests/task_runtime_test.rb
+@@ -2024,6 +2024,41 @@ fixture do |_root, record, host, checker, runtime|
+          "the event log records the unconfirmed stop instead of a confirmed one")
+ end
+ 
++# Ordinary and failure stops need the same durable roster check as completion.
++# Root's own confirmed exit cannot confirm a member registered during teardown.
++%w[paused failed].each do |requested_status|
++  fixture do |_root, record, host, _checker, runtime|
++    original_stop = host.method(:stop!)
++    host.define_singleton_method(:stop!) do
++      record.register_member("orbit-m-late-ordinary", requested_name: "orbit-m-late-ordinary")
++      original_stop.call
++    end
++    runtime.send(:stop, "stop while registration is in flight", status: requested_status)
++    assert(record.state["status"] == "stop_unconfirmed" &&
++           record.state.dig("stop_confirmation", "confirmed") == false &&
++           record.state.dig("execution_stop_confirmation", "confirmed") == true &&
++           record.state.dig("stop_confirmation", "unaccounted_members") == ["orbit-m-late-ordinary"],
++           "#{requested_status} stop preserves verified Root scope without confirming a late member")
++    assert(events(record).any? { |event| event["type"] == "stop_unconfirmed" &&
++                                          event["unaccounted_members"] == ["orbit-m-late-ordinary"] } &&
++           events(record).none? { |event| event["type"] == "stopped" },
++           "#{requested_status} stop records the uncovered member rather than a confirmed stop")
++  end
++end
++
++fixture do |_root, record, host, _checker, runtime|
++  original_stop = host.method(:stop!)
++  host.define_singleton_method(:stop!) do
++    File.write(File.join(record.path, "members.json"), "not a roster")
++    original_stop.call
++  end
++  runtime.send(:stop, "ordinary stop with unreadable final roster")
++  assert(record.state["status"] == "stop_unconfirmed" &&
++         record.state.dig("stop_confirmation", "reason") == "members_unreadable" &&
++         record.state.dig("execution_stop_confirmation", "confirmed") == true,
++         "ordinary stop cannot confirm an unreadable post-teardown roster")
++end
++
+ # The post-teardown recheck must not ask the stopped Root's bridge: a transient
+ # failure there would turn a valid completion into a pause. Once the resources
+ # are stopped, only durable state can invalidate the hand-off.

@@ -1,0 +1,74 @@
+[
+  {
+    "original_path": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/negative/.orbit/tasks/741e8b83-0639-4341-ab6c-f21b09ca0d85/checks/1/profile/sessions/2026-10-10T04-12-48-370Z_01a12403-7372-7000-b9b4-3ddbc418d31e.jsonl",
+    "original_sha256": "7c7524538ed5699d040b4e3de3ac4c87de368928c2d56e63a8a1d8e173220084",
+    "archived_path": "negative/.orbit/tasks/741e8b83-0639-4341-ab6c-f21b09ca0d85/checks/1/native-reviewer-sessions/2026-10-10T04-12-48-370Z_01a12403-7372-7000-b9b4-3ddbc418d31e.jsonl",
+    "omitted": "thinking content only; full tool calls/results/visible assistant/usage retained"
+  },
+  {
+    "original_path": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/negative/.orbit/tasks/741e8b83-0639-4341-ab6c-f21b09ca0d85/checks/2/profile/sessions/2026-10-10T04-13-37-263Z_01a12404-326e-7000-a8f8-78fad1fddbc7.jsonl",
+    "original_sha256": "53cf3671f6e845d0ed252aa394ce14d0f830aaa0f4d429622b1fda3b95b556ef",
+    "archived_path": "negative/.orbit/tasks/741e8b83-0639-4341-ab6c-f21b09ca0d85/checks/2/native-reviewer-sessions/2026-10-10T04-13-37-263Z_01a12404-326e-7000-a8f8-78fad1fddbc7.jsonl",
+    "omitted": "thinking content only; full tool calls/results/visible assistant/usage retained"
+  },
+  {
+    "original_path": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive/.orbit/tasks/e50f56a8-ffb2-4cf3-b513-e73428e0f400/checks/1/profile/sessions/2026-10-10T04-15-55-849Z_01a12406-4fc8-7000-9086-4d3205e38911.jsonl",
+    "original_sha256": "242e4b1d5a0ccd002280b7f79a421dc82d743ca10ad736e59bf97a2f39d34062",
+    "archived_path": "positive/.orbit/tasks/e50f56a8-ffb2-4cf3-b513-e73428e0f400/checks/1/native-reviewer-sessions/2026-10-10T04-15-55-849Z_01a12406-4fc8-7000-9086-4d3205e38911.jsonl",
+    "omitted": "thinking content only; full tool calls/results/visible assistant/usage retained"
+  },
+  {
+    "original_path": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive/.orbit/tasks/e50f56a8-ffb2-4cf3-b513-e73428e0f400/checks/2/profile/sessions/2026-10-10T04-22-48-133Z_01a1240c-9a45-7000-b27f-605b687422de.jsonl",
+    "original_sha256": "50a5fb70e76c1191fd0ef30688ce6bcad2b19227e052bbbe34a1ce630503eb6c",
+    "archived_path": "positive/.orbit/tasks/e50f56a8-ffb2-4cf3-b513-e73428e0f400/checks/2/native-reviewer-sessions/2026-10-10T04-22-48-133Z_01a1240c-9a45-7000-b27f-605b687422de.jsonl",
+    "omitted": "thinking content only; full tool calls/results/visible assistant/usage retained"
+  },
+  {
+    "original_path": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v2/.orbit/tasks/c5c93e74-4f38-4cf1-b991-0c96a4b4e5e1/checks/1/profile/sessions/2026-10-10T04-40-32-050Z_01a1241c-d632-7000-8a3a-e4dfad93aaf7.jsonl",
+    "original_sha256": "db8934bcd4cfe9d5b5dcb2e6bae3617084d22e7fed70b8ebb5776d796790484e",
+    "archived_path": "positive-v2/.orbit/tasks/c5c93e74-4f38-4cf1-b991-0c96a4b4e5e1/checks/1/native-reviewer-sessions/2026-10-10T04-40-32-050Z_01a1241c-d632-7000-8a3a-e4dfad93aaf7.jsonl",
+    "omitted": "thinking content only; full tool calls/results/visible assistant/usage retained"
+  },
+  {
+    "original_path": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/lifecycle/.orbit/tasks/d87c80b3-8b77-4d25-91ed-3a74e7202d54/checks/1/profile/sessions/2026-10-10T04-36-52-128Z_01a12419-7b1f-7000-89d5-861574ce00f6.jsonl",
+    "original_sha256": "b5239823f63737d5c98115bb1e54ec1083788bf5d9379e039f4c606f93e2a9c4",
+    "archived_path": "lifecycle/.orbit/tasks/d87c80b3-8b77-4d25-91ed-3a74e7202d54/checks/1/native-reviewer-sessions/2026-10-10T04-36-52-128Z_01a12419-7b1f-7000-89d5-861574ce00f6.jsonl",
+    "omitted": "thinking content only; full tool calls/results/visible assistant/usage retained"
+  },
+  {
+    "original_path": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/sessions-positive-v4/2026-10-10T04-53-35-042Z_01a12428-c8c2-7152-a1e3-5ccb2f6fe56d.jsonl",
+    "original_sha256": "2cfc3a9cf4843ad79d406e85fe452cb16908caabf0ff564ecedf1da09e5c72b6",
+    "archived_path": "positive-v4/native-sessions/2026-10-10T04-53-35-042Z_01a12428-c8c2-7152-a1e3-5ccb2f6fe56d.jsonl",
+    "omitted": "thinking content only; full tool calls/results/visible assistant/usage retained"
+  },
+  {
+    "original_path": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc/checks/1/profile/sessions/2026-10-10T05-08-41-229Z_01a12436-9c8d-7000-a1a7-9aef7a4edd24.jsonl",
+    "original_sha256": "8e10f4b56c5aa133d144e16c0b65b24959ad0bac769321cdac02226f0d1992c1",
+    "archived_path": "positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc/checks/1/native-reviewer-sessions/2026-10-10T05-08-41-229Z_01a12436-9c8d-7000-a1a7-9aef7a4edd24.jsonl",
+    "omitted": "thinking content only; full tool calls/results/visible assistant/usage retained"
+  },
+  {
+    "original_path": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc/checks/4/profile/sessions/2026-10-10T05-12-40-432Z_01a1243a-42f0-7000-987d-57f2c8c4a534.jsonl",
+    "original_sha256": "fb582342252635e1c5be935824f1eff779ca3d2f828df244e78399eb8fd003bf",
+    "archived_path": "positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc/checks/4/native-reviewer-sessions/2026-10-10T05-12-40-432Z_01a1243a-42f0-7000-987d-57f2c8c4a534.jsonl",
+    "omitted": "thinking content only; full tool calls/results/visible assistant/usage retained"
+  },
+  {
+    "original_path": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc/checks/3/profile/sessions/2026-10-10T05-11-32-458Z_01a12439-396a-7000-98f4-3617dab3478f.jsonl",
+    "original_sha256": "eb3da896299e2b7e590a2db215357449bc45d5ea0bc8ecd46d6d78015c42b6bf",
+    "archived_path": "positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc/checks/3/native-reviewer-sessions/2026-10-10T05-11-32-458Z_01a12439-396a-7000-98f4-3617dab3478f.jsonl",
+    "omitted": "thinking content only; full tool calls/results/visible assistant/usage retained"
+  },
+  {
+    "original_path": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc/checks/2/profile/sessions/2026-10-10T05-10-12-533Z_01a12438-0135-7000-8933-54e9137dd530.jsonl",
+    "original_sha256": "7e2a7955dfd9b2ec9eb19d38ce0dae3b90d85417d41fd56226c4e53ed80654d7",
+    "archived_path": "positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc/checks/2/native-reviewer-sessions/2026-10-10T05-10-12-533Z_01a12438-0135-7000-8933-54e9137dd530.jsonl",
+    "omitted": "thinking content only; full tool calls/results/visible assistant/usage retained"
+  },
+  {
+    "original_path": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc/checks/5/profile/sessions/2026-10-10T05-13-41-607Z_01a1243b-31e7-7000-9161-be3e4f7479d9.jsonl",
+    "original_sha256": "03ff0ad3ec778bf6b542795175d5d2c64aa7f48e8b9e47aa511651090707dc35",
+    "archived_path": "positive-v4/.orbit/tasks/3ae66eb1-eaff-4a7e-a528-9947914c06bc/checks/5/native-reviewer-sessions/2026-10-10T05-13-41-607Z_01a1243b-31e7-7000-9161-be3e4f7479d9.jsonl",
+    "omitted": "thinking content only; full tool calls/results/visible assistant/usage retained"
+  }
+]

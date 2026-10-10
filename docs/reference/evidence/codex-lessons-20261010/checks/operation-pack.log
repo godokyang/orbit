@@ -1,0 +1,436 @@
+[
+  {
+    "id": "@godokyang/orbit@0.8.3",
+    "name": "@godokyang/orbit",
+    "version": "0.8.3",
+    "size": 507229,
+    "unpackedSize": 1893133,
+    "shasum": "0533498979b4ba300952675b7c8541461f21cec9",
+    "integrity": "sha512-LWMLp0P5WHPty0P1wwQwI2O00zWSG9k/4W6ROoUTqTJAj+XqA2eUcOp3Gzm09+QcbZN6Bs2giulTfoiJV4VjBw==",
+    "filename": "godokyang-orbit-0.8.3.tgz",
+    "files": [
+      {
+        "path": "README.md",
+        "size": 9177,
+        "mode": 420
+      },
+      {
+        "path": "contracts/check-result.schema.json",
+        "size": 4071,
+        "mode": 420
+      },
+      {
+        "path": "contracts/task-runtime.md",
+        "size": 98235,
+        "mode": 420
+      },
+      {
+        "path": "install.sh",
+        "size": 3086,
+        "mode": 493
+      },
+      {
+        "path": "lib/orbit/check_runner.rb",
+        "size": 68162,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/checker_model_selection.rb",
+        "size": 7766,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/checker_model_selector.rb",
+        "size": 37586,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/cli.rb",
+        "size": 69168,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/connection.rb",
+        "size": 414,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/data/jev-entry-calibration.json",
+        "size": 31799,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/data/jev-selection-calibration.json",
+        "size": 197038,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/data/openrouter-model-map.json",
+        "size": 3442,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/diagnostics.rb",
+        "size": 13695,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/git_remote_evidence.rb",
+        "size": 14115,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/jev_advisor.rb",
+        "size": 15621,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/jev_setup.rb",
+        "size": 2314,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/judgment.rb",
+        "size": 6491,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/member_model_selector.rb",
+        "size": 33154,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/model_candidate_pool.rb",
+        "size": 10003,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/model_capability_facts.rb",
+        "size": 29163,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/model_evidence_cache.rb",
+        "size": 23091,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/model_quality_policy.rb",
+        "size": 35804,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/observation_key.rb",
+        "size": 6081,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/omp_check_runner.rb",
+        "size": 29068,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/omp_entry.rb",
+        "size": 7467,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/openrouter_model_overview.rb",
+        "size": 48308,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/openrouter_setup.rb",
+        "size": 2841,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/plugin_connection.rb",
+        "size": 7417,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/prestart.rb",
+        "size": 27820,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/release_lease.rb",
+        "size": 1624,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/requirement_coverage.rb",
+        "size": 10900,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/resource_call_ledger.rb",
+        "size": 25261,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/route_cost_inputs.rb",
+        "size": 14458,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/route_resource_facts.rb",
+        "size": 21374,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/route_resource_store.rb",
+        "size": 18987,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/session_summary.rb",
+        "size": 4485,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/task_evidence.rb",
+        "size": 39405,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/task_git_evidence.rb",
+        "size": 2093,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/task_record.rb",
+        "size": 17352,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/task_runtime.rb",
+        "size": 218356,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/task_view.rb",
+        "size": 41727,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/type_safe_judgment.rb",
+        "size": 4603,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/version.rb",
+        "size": 1159,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/work_unit.rb",
+        "size": 25798,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/workspace_binding.rb",
+        "size": 6394,
+        "mode": 420
+      },
+      {
+        "path": "lib/orbit/workspace_snapshot.rb",
+        "size": 12678,
+        "mode": 420
+      },
+      {
+        "path": "npm-shrinkwrap.json",
+        "size": 711,
+        "mode": 420
+      },
+      {
+        "path": "package.json",
+        "size": 3520,
+        "mode": 420
+      },
+      {
+        "path": "plugins/host.mjs",
+        "size": 21715,
+        "mode": 420
+      },
+      {
+        "path": "plugins/lease.mjs",
+        "size": 894,
+        "mode": 420
+      },
+      {
+        "path": "plugins/model-call-receipts.d.mts",
+        "size": 3639,
+        "mode": 420
+      },
+      {
+        "path": "plugins/model-call-receipts.mjs",
+        "size": 16956,
+        "mode": 420
+      },
+      {
+        "path": "plugins/native-call-recorder.mjs",
+        "size": 8087,
+        "mode": 420
+      },
+      {
+        "path": "plugins/native-task-preflight.mjs",
+        "size": 1957,
+        "mode": 420
+      },
+      {
+        "path": "plugins/omp-host.mjs",
+        "size": 279274,
+        "mode": 420
+      },
+      {
+        "path": "plugins/omp-idle-parking.yml",
+        "size": 642,
+        "mode": 420
+      },
+      {
+        "path": "plugins/omp.mjs",
+        "size": 420,
+        "mode": 420
+      },
+      {
+        "path": "plugins/root-verifications.mjs",
+        "size": 15206,
+        "mode": 420
+      },
+      {
+        "path": "plugins/work-unit-scope.mjs",
+        "size": 35612,
+        "mode": 420
+      },
+      {
+        "path": "runners/omp-reviewer/bun.lock",
+        "size": 48807,
+        "mode": 420
+      },
+      {
+        "path": "runners/omp-reviewer/check-result.test.ts",
+        "size": 7387,
+        "mode": 420
+      },
+      {
+        "path": "runners/omp-reviewer/check-result.ts",
+        "size": 11870,
+        "mode": 420
+      },
+      {
+        "path": "runners/omp-reviewer/confine-escape-test.ts",
+        "size": 4329,
+        "mode": 420
+      },
+      {
+        "path": "runners/omp-reviewer/confined-tools.test.ts",
+        "size": 3348,
+        "mode": 420
+      },
+      {
+        "path": "runners/omp-reviewer/confined-tools.ts",
+        "size": 9952,
+        "mode": 420
+      },
+      {
+        "path": "runners/omp-reviewer/json-recovery.test.ts",
+        "size": 2748,
+        "mode": 420
+      },
+      {
+        "path": "runners/omp-reviewer/json-recovery.ts",
+        "size": 1689,
+        "mode": 420
+      },
+      {
+        "path": "runners/omp-reviewer/model-probe.test.ts",
+        "size": 2521,
+        "mode": 420
+      },
+      {
+        "path": "runners/omp-reviewer/model-probe.ts",
+        "size": 2429,
+        "mode": 420
+      },
+      {
+        "path": "runners/omp-reviewer/package.json",
+        "size": 391,
+        "mode": 420
+      },
+      {
+        "path": "runners/omp-reviewer/provider-error.test.ts",
+        "size": 3188,
+        "mode": 420
+      },
+      {
+        "path": "runners/omp-reviewer/provider-error.ts",
+        "size": 2908,
+        "mode": 420
+      },
+      {
+        "path": "runners/omp-reviewer/reviewer-session-escape-test.ts",
+        "size": 3858,
+        "mode": 420
+      },
+      {
+        "path": "runners/omp-reviewer/reviewer.ts",
+        "size": 30249,
+        "mode": 420
+      },
+      {
+        "path": "runners/omp-reviewer/usage-receipt.test.ts",
+        "size": 13832,
+        "mode": 420
+      },
+      {
+        "path": "runners/omp-reviewer/usage-receipt.ts",
+        "size": 1906,
+        "mode": 420
+      },
+      {
+        "path": "scripts/check-version.rb",
+        "size": 677,
+        "mode": 420
+      },
+      {
+        "path": "scripts/manage-install.rb",
+        "size": 29192,
+        "mode": 420
+      },
+      {
+        "path": "scripts/orbit",
+        "size": 132,
+        "mode": 493
+      },
+      {
+        "path": "scripts/orbit-register-member",
+        "size": 3396,
+        "mode": 493
+      },
+      {
+        "path": "scripts/orbit-root-binding",
+        "size": 2118,
+        "mode": 493
+      },
+      {
+        "path": "scripts/orbit-route-resources",
+        "size": 4907,
+        "mode": 493
+      },
+      {
+        "path": "scripts/orbit-work-unit",
+        "size": 3450,
+        "mode": 493
+      },
+      {
+        "path": "uninstall.sh",
+        "size": 165,
+        "mode": 493
+      }
+    ],
+    "entryCount": 84,
+    "bundled": []
+  }
+]

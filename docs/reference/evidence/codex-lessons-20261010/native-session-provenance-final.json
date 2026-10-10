@@ -1,0 +1,98 @@
+[
+  {
+    "original_path": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/sessions-negative/2026-10-10T04-11-27-157Z_01a12402-3635-730c-ba6f-151e3dd3cbd4.jsonl",
+    "original_sha256": "9c2a65b3694f9db698b9ab7ee5e92bb4b530bbac74898d7902929b629d6da1b6",
+    "archived_path": "negative/native-sessions/2026-10-10T04-11-27-157Z_01a12402-3635-730c-ba6f-151e3dd3cbd4.jsonl",
+    "omitted": "thinking content only"
+  },
+  {
+    "original_path": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/sessions-positive/2026-10-10T04-12-28-004Z_01a12403-23e4-720b-82ff-360b16ea4d62.jsonl",
+    "original_sha256": "538772e09dd46cf9ae92cd13cc1c25ab44cf78afa7db5a46b564f2a347861517",
+    "archived_path": "positive/native-sessions/2026-10-10T04-12-28-004Z_01a12403-23e4-720b-82ff-360b16ea4d62.jsonl",
+    "omitted": "thinking content only"
+  },
+  {
+    "original_path": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/sessions-positive/2026-10-10T04-12-28-004Z_01a12403-23e4-720b-82ff-360b16ea4d62/orbit-ff845f84-ca47-4256-9ae6-7bee105db16f.jsonl",
+    "original_sha256": "20df969551a5b904af6a5d496072af790175e4438653a068ffe8d762e3f2df56",
+    "archived_path": "positive/native-sessions/2026-10-10T04-12-28-004Z_01a12403-23e4-720b-82ff-360b16ea4d62/orbit-ff845f84-ca47-4256-9ae6-7bee105db16f.jsonl",
+    "omitted": "thinking content only"
+  },
+  {
+    "original_path": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/sessions-positive-v2/2026-10-10T04-31-15-915Z_01a12414-59cb-76bb-b75f-a6fd5f09d8b0.jsonl",
+    "original_sha256": "3512be118b34c4a77f1eac2d83daf5347bdedc5bc576211918735510a55fc387",
+    "archived_path": "positive-v2/native-sessions/2026-10-10T04-31-15-915Z_01a12414-59cb-76bb-b75f-a6fd5f09d8b0.jsonl",
+    "omitted": "thinking content only"
+  },
+  {
+    "original_path": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/sessions-positive-v2/2026-10-10T04-31-15-915Z_01a12414-59cb-76bb-b75f-a6fd5f09d8b0/orbit-943f9eed-13f6-495e-b211-e98daa710872.jsonl",
+    "original_sha256": "6673d6d993f35b3e90cd6093d2030b6e0cfc892070855d6a3cf5f2c320591552",
+    "archived_path": "positive-v2/native-sessions/2026-10-10T04-31-15-915Z_01a12414-59cb-76bb-b75f-a6fd5f09d8b0/orbit-943f9eed-13f6-495e-b211-e98daa710872.jsonl",
+    "omitted": "thinking content only"
+  },
+  {
+    "original_path": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/sessions-positive-v3/2026-10-10T04-45-43-689Z_01a12421-9789-7774-aa4b-0a04a845d85d.jsonl",
+    "original_sha256": "50ac693ad8f3762f7fffc6b40dbf9654c5f5d3dfea4942fe13d2010e5827b8ef",
+    "archived_path": "positive-v3/native-sessions/2026-10-10T04-45-43-689Z_01a12421-9789-7774-aa4b-0a04a845d85d.jsonl",
+    "omitted": "thinking content only"
+  },
+  {
+    "original_path": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/sessions-positive-v3/2026-10-10T04-45-43-689Z_01a12421-9789-7774-aa4b-0a04a845d85d/orbit-08159f70-d599-41ce-9ff6-0fee56f1a386.jsonl",
+    "original_sha256": "fd694d071f853fbff8b5f0a19019c459b9165b1cab64275fbefc89332219d8c4",
+    "archived_path": "positive-v3/native-sessions/2026-10-10T04-45-43-689Z_01a12421-9789-7774-aa4b-0a04a845d85d/orbit-08159f70-d599-41ce-9ff6-0fee56f1a386.jsonl",
+    "omitted": "thinking content only"
+  },
+  {
+    "original_path": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/sessions-positive-v4/2026-10-10T04-53-35-042Z_01a12428-c8c2-7152-a1e3-5ccb2f6fe56d.jsonl",
+    "original_sha256": "2cfc3a9cf4843ad79d406e85fe452cb16908caabf0ff564ecedf1da09e5c72b6",
+    "archived_path": "positive-v4/native-sessions/2026-10-10T04-53-35-042Z_01a12428-c8c2-7152-a1e3-5ccb2f6fe56d.jsonl",
+    "omitted": "thinking content only"
+  },
+  {
+    "original_path": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/sessions-positive-v4/2026-10-10T04-53-35-042Z_01a12428-c8c2-7152-a1e3-5ccb2f6fe56d/orbit-f4e84132-6b7a-4efd-abe8-ba042278f0f8.jsonl",
+    "original_sha256": "efeb7b733c21e1248ca0b54e5becf30ddee5ee70932e39a0210798a485bbf7cb",
+    "archived_path": "positive-v4/native-sessions/2026-10-10T04-53-35-042Z_01a12428-c8c2-7152-a1e3-5ccb2f6fe56d/orbit-f4e84132-6b7a-4efd-abe8-ba042278f0f8.jsonl",
+    "omitted": "thinking content only"
+  },
+  {
+    "original_path": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/sessions-positive-v5/2026-10-10T05-22-33-883Z_01a12443-511b-74a6-b4cc-c90f6e7a116a.jsonl",
+    "original_sha256": "1bd9c3170bd551f9c17a2e25c63aed63d5bce9258fe6fbdfa573a1320e5c39b2",
+    "archived_path": "positive-v5/native-sessions/2026-10-10T05-22-33-883Z_01a12443-511b-74a6-b4cc-c90f6e7a116a.jsonl",
+    "omitted": "thinking content only"
+  },
+  {
+    "original_path": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive-v6/.orbit/tasks/a08ab32d-45a3-4171-8c34-e1c801c301df/checks/1/profile/sessions/2026-10-10T05-34-03-615Z_01a1244d-d75f-7000-90c5-c19555936fe4.jsonl",
+    "original_sha256": "c7cb6bc12cca6fc0615c271d07b6fa30f1a86f732da9cb08e645fd7aa4a62637",
+    "archived_path": "positive-v6/.orbit/tasks/a08ab32d-45a3-4171-8c34-e1c801c301df/checks/1/native-reviewer-sessions/2026-10-10T05-34-03-615Z_01a1244d-d75f-7000-90c5-c19555936fe4.jsonl",
+    "omitted": "thinking content only"
+  },
+  {
+    "original_path": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/sessions-positive-v6/2026-10-10T05-27-49-763Z_01a12448-2303-7705-8238-93cf8e29f2bf.jsonl",
+    "original_sha256": "1f8411afb1efcc8e63030f1c5dfeca653b34f9b2ff29ebac8183356c95f814c5",
+    "archived_path": "positive-v6/native-sessions/2026-10-10T05-27-49-763Z_01a12448-2303-7705-8238-93cf8e29f2bf.jsonl",
+    "omitted": "thinking content only"
+  },
+  {
+    "original_path": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/sessions-positive-v6/2026-10-10T05-27-49-763Z_01a12448-2303-7705-8238-93cf8e29f2bf/orbit-33401849-4882-4006-88c0-2435fcd736bd.jsonl",
+    "original_sha256": "df3cc0e27e6120442baabab7feffa68a727689fa512d6855b18b00f1dfd50898",
+    "archived_path": "positive-v6/native-sessions/2026-10-10T05-27-49-763Z_01a12448-2303-7705-8238-93cf8e29f2bf/orbit-33401849-4882-4006-88c0-2435fcd736bd.jsonl",
+    "omitted": "thinking content only"
+  },
+  {
+    "original_path": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/sessions-lifecycle/2026-10-10T04-35-53-287Z_01a12418-9547-7324-bb9d-8f5da6fb682a.jsonl",
+    "original_sha256": "c4d6e9e3ef586e3086883d1ee1fc26720e19247b72f9cb6076c895ffb33b56ac",
+    "archived_path": "lifecycle/native-sessions/2026-10-10T04-35-53-287Z_01a12418-9547-7324-bb9d-8f5da6fb682a.jsonl",
+    "omitted": "thinking content only"
+  },
+  {
+    "original_path": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/sessions-lifecycle/2026-10-10T04-35-53-287Z_01a12418-9547-7324-bb9d-8f5da6fb682a/orbit-4792af1e-bd13-4b7c-871e-8f74c438a329.jsonl",
+    "original_sha256": "025d87b58f327bc1ea8c6438952963117a86197f061ee5b6f108417ce253afb7",
+    "archived_path": "lifecycle/native-sessions/2026-10-10T04-35-53-287Z_01a12418-9547-7324-bb9d-8f5da6fb682a/orbit-4792af1e-bd13-4b7c-871e-8f74c438a329.jsonl",
+    "omitted": "thinking content only"
+  },
+  {
+    "original_path": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/sessions-lifecycle/2026-10-10T04-35-53-287Z_01a12418-9547-7324-bb9d-8f5da6fb682a/orbit-dd9f1302-6ae9-4cf9-a4b9-c781bcd7c7b6.jsonl",
+    "original_sha256": "76837aa11eb213830a3a6df8c24e59a73062bc7570f3c1bd64116fd186dd8a2f",
+    "archived_path": "lifecycle/native-sessions/2026-10-10T04-35-53-287Z_01a12418-9547-7324-bb9d-8f5da6fb682a/orbit-dd9f1302-6ae9-4cf9-a4b9-c781bcd7c7b6.jsonl",
+    "omitted": "thinking content only"
+  }
+]

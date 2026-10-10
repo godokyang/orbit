@@ -1,0 +1,8 @@
+{
+  "purpose": "Current existing runtime staged into declared project material; no network or broader member read grant",
+  "node_source": "/Users/yangke/.nvm/versions/node/v24.19.0/bin/node",
+  "npm_source": "/Users/yangke/.nvm/versions/node/v24.19.0/lib/node_modules/npm/bin/npm-cli.js",
+  "destination": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-codex-delivery-uaq8dxne/fixtures/positive/.runtime",
+  "node_version": "v24.19.0",
+  "npm_version": "11.17.0"
+}

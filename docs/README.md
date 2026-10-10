@@ -21,7 +21,15 @@
 | 混合模型交付逐项收口（54 项＋W1–W10） | [完成记录](reference/mixed-model-delivery-completion-20261001.md) |
 | OpenRouter 映射来源与理由 | [映射来源审计](reference/openrouter-model-mapping-audit.md) |
 | 工程经验 | [工程教训](reference/engineering-lessons.md) |
+| 按 Orbit 核心诉求筛选 Codex 借鉴项 | [源码研究](reference/codex-source-lessons-20261009.md)（有限顶级资源、可靠交付与减少人工介入；固定提交研究，不是实施排期或验收） |
+| 上下文压缩局部方向与验收范围 | [上下文方案](plan/context-compression-proposal.md)（已确认先落文档；区分三条上下文路径，日志首尾保留本轮已实现并有界实测，完整请求容量调整未采用） |
+| Codex 工作机制与 Orbit 交付、防偏航对照 | [工作流程研究](reference/codex-workflow-alignment-20261009.md)（目标、阶段、修订、推进、分工、独立核验与监督开销；研究事实保留，逐项实施状态沿总清单） |
+| Codex 借鉴决定的最新充分性判断 | [全部决定重评](reference/codex-decisions-reevaluation-20261010.md)（固定源码、Orbit 接线与失败原件；修正 C02/C04/C06/C08 旧结论，区分建议、实际实现与有界验证） |
+| Codex 借鉴项的实施依据与新对话 Goal 入口 | [总实施清单](plan/codex-lessons-implementation.md)（C01—C10、采用条件、宿主依赖、验收、三个 OMP 协作边界及启动指令；前轮有界交付已收口；2026-10-10 剩余能力实际 Goal complete（限定冻结验收范围），实际当前状态沿 §9） |
+| 剩余 Codex 借鉴问题的实际验证 | [2026-10-10验收](reference/codex-lessons-acceptance-20261010.md)（各受测构建、失败/干预、协议与生命周期、真实资源与当前Goal；不覆盖旧轮次） |
 
 ## 历史查阅
 
 历史报告、各代验收与旧版本文档不再保留在当前树：用 `git show 3865b76:PATH` 查阅基线，或沿 Git 历史检索。旧报告不描述当前能力。
+
+前轮实际验证：[Codex借鉴验收](reference/codex-lessons-acceptance-20261009.md)（已完成有界交付，保留构建差异／失败／未测和资源收口事实）。
