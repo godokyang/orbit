@@ -65,6 +65,64 @@
 
 **建议：改范围后做。** 做 `revision`＋`updated_at`（能力 `status_revision`，价值最大、风险最小）和粗粒度 `attention`（只含 `phase` 与 `needs_user`，能力 `status_attention`，用上面的谓词映射，码表冻结且调用方对未知码按“未知”）。**暂不做** `reason_code`/`next_action_code`（无稳定码源）和 `latest_check`（`checks`、`requirement_coverage` 已在 `status` 中，Loom 可自行推导；有实际缺口再加，属可加性改动）。实现前先在一个真实任务上确认“无变化的 tick 不递增”和排除清单是否完整，并在合同中明写 `revision` 不覆盖现算字段。
 
+**用户决定（2026-10-11，Loom 侧转述）**：提案 B 的范围为 `revision`＋`updated_at`（`status_revision`）、粗粒度 `attention`（`status_attention`），**并追加**“最近检查记录”的只读暴露（`status_latest_check`）：暴露 `checks` 里已有的记录，不新增计算，至少含检查完成时间、检查者实际角色/模型、对应输入摘要与产物摘要、是否已过期；其余仍不做（`reason_code`/`next_action_code`）。原评估未含此项：实现前需先补评估（哪些字段已稳定、哪些含敏感内容不应外露、旧任务缺字段时的表现）。**同时追加评估**“按外部引用查任务”（如 `status`/`list` 按 `--external-ref` 返回任务；现有合同没有按标记查询的命令，集成方在崩溃或重复请求后找不到已启动的任务）：通用能力、可加性改动，评估其改动面、与多任务/旧任务的关系。尚未开始实现，等用户另行通知。
+
+**用户决定（2026-10-11，Loom 侧转述）追加两项通用能力的评估范围（G9，只评估，未实现）**：
+
+1. **外部集成会话模式**：会话启动时由集成方声明（启动参数或环境变量）；启用后该会话**不做自动入口判定**——不自己建任务、不向 Root 注入入口提示（同时省掉判定的模型调用）；任务只由集成方显式 `orbit start` 建立；建立之后监督、检查、停止与普通任务一致。依据（Loom 侧在合同分支 `ac7705b` 干净副本、OMP 18.8.9、`orbit omp --mode rpc` 下实测）：首条用户消息明确写“请用 Orbit 受控执行…”时入口判定为 `start`，扩展自己立即建任务且 `external_refs` 为空，集成方随后的 `start` 因“该消息已有任务”被拒；首条为普通问题时判定 `root_decides`，只注入提示、不建任务。现有代码无关闭该判定的开关。
+2. **会话发现**：外部集成会话模式下，控制通道在会话启动时就建好，并在项目内写一条会话登记（至少含 provider、会话编号、通道路径、进程号、启动时间；退出时删除，启动时清理进程已不在的旧登记）；`orbit start/status/stop` 可只凭会话编号解析通道。依据：通道目前在第一条用户消息时才建、没有官方查询方式，集成方只能比对 `/tmp/orbit-omp-*` 新增目录；会话退出后可能留下无进程占用的死 socket；并发时比对会认错。
+
+请评估：改动面与风险、是否可加性（不改变现有交互用法）、测试预算、与 B 其余项的实现顺序、是否有更小的做法。Loom 侧倾向先做这两项（依据最扎实、后续都依赖）。
+
+### G7–G9 评估结果（2026-10-11，只评估，未实现、未改代码）
+
+依据源码：`plugins/omp-host.mjs`（预启动入口钩子 `host.entry` 唯一调用点、`connect`/`close`/`session_start`/`session_shutdown`）、`plugins/host.mjs`（`createOrbitHost.listen` 懒建通道、`close` 删通道目录）、`lib/orbit/cli.rb`（`start`/`entry`/`status`，只有 `start`、`entry`、`model-status` 使用通道）、`lib/orbit/task_view.rb`（`records`/`select`/`current_state`）、`lib/orbit/task_runtime.rb`（`finish_check`/`projected_check`）、`lib/orbit/prestart.rb`。
+
+| 项 | 可加性 | 改动面 | 建议测试 | 备注 |
+| --- | --- | --- | --- | --- |
+| G9a 外部集成会话模式 | 是：默认关闭，不设开关时行为不变 | 约 5 行早退 + 合同/说明 | 1 个函数 | 开关用环境变量；**必须与 G9b 同时交付**（见下） |
+| G9b 会话发现 | 是：默认关闭，`--socket` 旧用法不变 | 首选“调用方指定通道路径”约 15 行；登记方案约 80–100 行 | 1–2 个函数 | 有更小做法，见下 |
+| G8 按外部引用查任务 | 是：只加 `status` 的一个选项 | 约 25 行（含 `--project`） | 1 个函数 | 纯读，不碰状态 |
+| G7 最近检查记录 | 是：只加一个字段 | 约 40 行 + 一处只读抽取 | 1 个函数 | 数据已在 `checks` 中，不新增计算 |
+
+**G9a 外部集成会话模式**
+- 入口判定只有一个调用点（`omp-host.mjs` 预启动钩子里 `await connect(ctx); host.entry(...)`）。在它之前对“外部集成模式”早退即可：不连接、不调 `orbit entry`、不写入口判定记录、不注入入口提示。显式 `start` 本来就不依赖入口判定（契约测试已覆盖），所以“监督、检查、停止与普通任务一致”无需额外改动；已绑定任务的注入（接续提示、协作策略）不走这条路径，保持不变。
+- **G9a 不能单独交付，必须与 G9b 同时。** 通道是懒建的，只有 `entry`/`execute` 会触发；早退跳过了 `connect`/`host.entry`，外部集成模式下就没有任何东西会建通道，集成方将无 socket 可用，连显式 `start` 都做不了。因此外部集成模式必须在 `session_start` 主动建通道（G9b 本就要做），两者是一个整体。
+- 开关建议用**环境变量**（如 `ORBIT_EXTERNAL_INTEGRATION=1`）而不是启动参数：`orbit omp` 对原生参数零改动是既有约定（`omp_entry.rb` 注释），新增自有参数要在启动器里剥离；扩展读环境变量已有先例（`ORBIT_RUBY`、`ORBIT_SESSION_AGENT_ROOT` 等）。能力名 `external_session_mode`，声明开关名与“关闭自动入口”。
+- **与 Loom 描述的两处出入**：①入口判定是确定性规则（`orbit-entry-rules-3`），只有存在 `.orbit/jev-entry.json` 校准且命中“不确定”分支才会调用模型；未校准时不确定分支直接 `root_decides`、不调模型。所以“省掉判定的模型调用”只在已校准的项目里成立，通常省的是一次 `orbit entry` 子进程与判定记录写入。②模式只关闭**自动**入口：Root 自己仍可调用 `orbit` 工具的 `start`。若 Loom 要求“只能由集成方建任务”，需另行决定隐藏或拒绝 Root 的 `start`；建议先不做（改动面大，且影响 Root 的接续与恢复）。
+- 风险：低。验证需要真实 OMP（`--mode rpc`）：首条写“请用 Orbit 受控执行…”的消息不建任务，随后显式 `start` 成功且 `external_refs` 已存。契约测试的替身会话不经过这个钩子；`tests/omp_*_test.mjs` 是否能驱动该钩子需实现时核对，不能就以真实验证并记入限制。
+
+**G9b 会话发现**
+- 现状核实：通道在首次 `bind/execute/entry` 时才建（`listen()` 懒建，路径 `/tmp/orbit-omp-<随机>/control.sock`），`session_start` 只做主会话绑定与代理同步；`thread_id` 就是 OMP 的会话编号。Loom 描述的缺口成立。
+- **更正**：`orbit status` 与 `orbit stop` 不使用通道（`status` 读盘，`stop` 往任务的 inbox 入队），本来就只凭任务 id/目录；只有 `start` 需要通道。所以“`start/status/stop` 凭会话编号解析通道”实际只涉及 `start`。若还需要“按会话找任务”，任务记录里已有 `connection.thread_id`，可作为 G8 同类的只读过滤（`status --session ID`），属可选项，不默认做。
+- **更小的做法（首选）：调用方指定通道路径。** 集成方启动 `orbit omp` 时通过环境变量给出自己选定的 socket 路径（如 `ORBIT_CONTROL_SOCKET`），扩展在 `session_start` 立即在该路径监听（`listen` 本来就能监听任意路径），集成方因此始终知道通道，无需发现、登记、清理，并发时也不会认错。代价与要点：⓪**`--thread` 仍需会话编号**：`orbit start` 要 `--thread`（OMP 会话编号），而 socket 协议的每个请求都要带 `session`（`dispatch` 先 `owned(request.session)`），没有“不带会话编号就问这条通道是哪个会话”的方法，所以会话编号只能来自 OMP 一侧——Loom 须确认 rpc 模式的 `get_state` 会返回它（Orbit 不能代为验证 OMP 的 rpc 行为）。若不能，则本做法不完整，需退到登记方案，或加一个很小的无参 `state`（每个主机进程只有一个主会话，约 5 行），并让 `start` 在省略 `--thread` 时向通道取；①调用方传给 OMP 与传给 `orbit start --socket` 的路径必须是**同一个字符串**：任务记录用 `File.expand_path` 保存、扩展侧用精确字符串比对归属（`ownedTask`），不做 `realpath`，macOS 上把 `/tmp/x` 写成 `/private/tmp/x` 会被判为不属于当前会话，合同须写明；②调用方负责路径长度（macOS 限 104 字节）和目录权限（需 0700）；③**现有 `close()` 会 `rm -rf` 通道所在目录**，对调用方指定的目录必须改为只删 socket 文件，否则会误删调用方目录；④会话切换/分支时 `close()` 会关通道，扩展须在随后的 `session_start` 重新监听同一路径；⑤调用方进程崩溃后遗留的死 socket 由调用方自己的目录管理，Orbit 重新监听前先删除同路径旧 socket。需要让 `createOrbitHost` 公开提前建通道的入口（目前 `listen` 是内部函数）。
+- **备选（Loom 原方案）：会话登记。** 项目内 `.orbit/sessions/<provider>-<会话编号>.json`（0600、原子写，含 provider、会话编号、通道路径、进程号、启动时间、项目），`orbit start --session ID` 作为 `--socket` 的替代，`--thread` 缺省取登记值。建议登记只由扩展写/删（`session_start` 写，`close()`/`session_shutdown` 删），读取方（Ruby）负责校验与惰性清理：进程已不存在**且**通道连不上才算死登记；不做“启动时全量清理”，避免误删活会话（进程号可复用，单看 pid 不可靠）。登记含通道路径，属访问凭据，文件与通道目录同为私有权限。适用场景：集成方需要重新发现不是自己启动的 OMP 会话；若集成方自己启动并记录路径，首选做法已足够。
+- 两种做法都默认关闭（只在外部集成模式或设置了环境变量时生效），不改变现有交互用法。风险：①`session_start` 在 rpc/无界面模式下的触发时机需真实验证；②提前建通道对没有任务的 `close(true)` 无副作用（`tasks` 为空），但切换会话后的重建要验证；③登记方案多出“写入与进程退出之间的崩溃窗口”，只能靠读时校验兜底。
+
+**G8 按外部引用查任务**
+- 现状：没有 `list` 命令；`orbit status`（无参数）只返回未结束的任务（没有则最近一个已结束的），带参数只认任务 ID 前缀或目录；`external_refs` 已在 `state.json`，`TaskView.records` 已按项目扫描全部任务。
+- 建议：`orbit status --external-ref REF --json`，**恒返回** `{"tasks":[…]}`（0 个、1 个或多个，创建时间新→旧，含已结束任务），元素与现有 `status --json` 同形。不新增 `list` 命令；注意现有 `status` 恰好 1 个任务时返回裸对象、多个时返回数组，这个选项必须固定数组形状，否则调用方会因匹配数量不同而解析不同。无匹配退出码 0 且数组为空（崩溃恢复需要区分“没有”和“出错”）；精确全等匹配（不做前缀/大小写折叠）；REF 校验与 `start --external-ref` 同规则；与位置参数 `TASK` 互斥。能力名 `status_by_external_ref`。
+- 与既有行为：`ref` 不要求唯一，同一 `ref` 可对应多个任务（重复 `start`、`--resume-from` 后重传），Orbit 全部返回由调用方选择；不做按 `ref` 的 `start` 去重（那会改变既有行为，若要做需另议）。无 `external_refs` 的旧任务与自动入口建的任务不会匹配；`--resume-from` 的新任务不继承 `ref`，按旧 `ref` 只能查到旧任务，调用方用 `continuation.previous_task` 或重传。
+- 成本与风险：全部任务 `state.json` 读取解析，O(任务数)；**项目定位取决于当前目录**：`TaskView.project` 从 `Dir.pwd` 向上找，现有 `status` 没有 `--project`（`status 任务目录` 才可在任意目录运行），所以按引用查询要么只能在项目内执行，要么新增 `--project DIR`——建议新增（`start`/`entry` 已有同名选项，语义一致），合同注明；只对命中的任务调用 `current_state`（含工作区指纹，较重）。`TaskView.records` 遇到不属于本项目或格式不支持的记录会整体报错，一条坏记录会使查找失败；建议保持（报错优于静默漏查），合同注明。纯读，不影响任何状态，也不影响 `revision`。
+
+**G7 最近检查记录（`status_latest_check`）**
+- 数据已存在：`state.checks[]` 每条已有 `number`、`role`、`kind`、`started_at`、`finished_at`、`input_digest`、`artifact_digest`、`stale`、`stale_reasons`、`result`、`usage`，`status --json` 现已整份输出，只是不在合同字段内。所以 G7 是把已有字段的一个投影冻结进合同，不是新增计算。`TaskRuntime#projected_check` 已是这样一个投影（含旧记录读 `checks/<n>/scope.json` 回退），但它是运行时私有的；对外需要把它抽成只读函数，`check_history` 的输出保持不变。
+- **可暴露（稳定）**：`number`、`role`、`kind`、`finished_at`、`input_digest`、`artifact_digest`、`stale`、`stale_reasons`（取值 `workspace/artifact/input/host/dispute`）、结果 `terminal`（检查 schema 的 `verdict` 取值，或 `failed`/`stale`）、`failure_kind`（枚举）。
+- **检查者模型**：没有“每条检查的模型”单字段，只有 `usage.calls[].model`/`requested_model`（实际调用回执）；失败发生在调用之前或旧记录时 `usage` 为空。建议给 `models`（去重的 `provider/model` 数组，可为空），不伪造单值；`role` 是检查种类（如 `reviewer`/`process_reviewer`），不是模型角色，需在合同里这样写。
+- **不应外露**：`result.reason`、`result.findings` 文本、`result.error`/`failure_basis`（错误文本可能含路径和供应商响应）、`observation_key`、`artifact_root`（检查者工作区路径）、`usage` 的令牌/成本明细与 `provider_response_id`。要求项证据本来就在 `requirement_coverage.items[].evidence` 中，不重复。
+- **“是否已过期”有两层含义**：①落盘时已判定的 `stale`（检查结束时快照/输入/宿主/争议与启动时不一致）——已记录，可直接给；②“相对当前是否仍是最新”需要把 `input_digest`/`artifact_digest` 与当前输入摘要、现算的工作区指纹比较，后者是读时现算（与 `requirement_coverage.current` 同类，较重，也不进 `revision`）。建议 `latest_check` 只给①，并给只比较输入摘要的 `input_current`（纯 `state` 内、便宜）；产物是否仍对应当前工作区继续读 `requirement_coverage.current`，不重复实现。
+- “最近”的定义：`checks` 的最后一条已完成记录（含失败、陈旧），**不含进行中的检查**（运行中的检查尚未写入 `checks`，进行中由 `attention.phase=检查中` 表达）；它不等于“最近一次可采纳的检查”。无检查时该字段缺省（“有则出现”）。旧任务缺 `artifact_digest` 等字段时按 `scope.json` 回退，仍缺则为 `null`，不合成。
+- 因 `checks` 登记已计入 B 的 `revision` 投影，G7 不增加 `revision` 的口径；与 `attention` 共用同一个“对外只读投影”模块较省。
+
+**建议实现顺序与合同版本**
+1. 先做 G9（G9a＋G9b 作为一个整体，首选做法）与 G8，一起升合同 1.2（均为可加、默认关闭或纯读；G9 依据最扎实且后续依赖它，G8 最小且与 G9 互相独立，可并行）。每项各自出现在 `capabilities`（`external_session_mode`、`control_socket_env`、`status_by_external_ref`），实现并有测试后才声明。
+2. 再做 B 的 `revision`＋粗粒度 `attention` 与 G7，合并升 1.3（提案 B 标题原写“次版本 1.2”，G9/G8 先发则顺延为 1.3；版本号以实际发布顺序为准）（共用 `status` 的投影，`revision` 是唯一触及 `save` 路径的改动，风险最高，放最后并用真实任务确认“无变化的 tick 不递增”）。
+3. 每步先在干净副本上跑 `npm test`，G9 另需一次真实 OMP rpc 会话验证；做不到的部分写入[当前限制](debt-ledger.md)，不宣称已验证。
+
+**测试预算**：G9a 1、G9b 1（登记方案 2）、G8 1、G7 1，均为契约测试内的函数或现有 `.mjs` 测试内的用例；合计新增 4–5 个，每个约 30–40 行，共约 120–180 行；加上 B 的 ≤3 个/约 120 行，B＋G7–G9 总计 7–8 个、约 240–300 行，个数在 AGENTS.md 建议的 ≤10 内，行数贴近 ≤300 的上沿；若实际超出，在实现时说明必要性，不拆票。
+
+**需要用户或 Loom 决定的问题**：①G9b 采用“调用方指定通道路径”（推荐）还是会话登记；②外部集成模式下是否还要隐藏 Root 的 `start`（建议先不做）；③G8 的无匹配语义（建议退出码 0＋空数组）及是否之后要 `start` 按 `ref` 去重（建议不做）；④G7 的 `models` 形式与 `input_current` 是否保留；⑤是否需要 `status --session ID`；⑥Loom 确认 OMP rpc 模式能否在启动后取得会话编号（决定 G9b 首选做法是否成立）。
+
 ### 提案 C：对外有序事件流（仅在触发条件成立后评估）
 
 触发条件：集成方在真实运行中出现关键过程丢失，且无法用 `export` 的原件补回。设计要点（若触发）：以 B 的 `revision` 为序号基础；对外是**精选投影**而不是暴露 `events.jsonl`；只追加、可按序号拉取（如 `--since`）；保留期限与压缩策略先定；事件类型只加不改。在触发前不做，避免过早冻结事件种类。
