@@ -1,57 +1,18 @@
 # Orbit 当前交接
 
-2026-10-11 经协作会话转交的用户授权，已实现 Loom 集成合同四项（[计划](loom-integration-contract.md)、[ADR-010](../adr/010-integration-contract.md)、[合同](../../contracts/integration.md)）：独立合同版本 1.0；`orbit capabilities --json`；覆盖项可选 `ref` 与 `start --external-ref`（`state.external_refs`，status/export 原样输出）；契约测试 `tests/integration_contract_test.rb`（替身 OMP 会话与检查模型，已入 `npm test`）。核对：48 个测试步骤逐步运行，含新契约测试与安装测试在内 42 项通过；其余 6 项（`prestart_test`、四个 `.mjs`、bun 套件）在本工作区因未安装 `node_modules`（缺 `zod`）失败，同样在未改动的 HEAD 副本上复现，在装好依赖的副本中全部通过。仍是未提交的工作区改动：未升版、提交、推送、发布或更新日常安装；`needs_user` 续接、自动入口外部引用、真实会话验收列入[限制](debt-ledger.md)。
+最后核对：2026-10-11。源码版本以 `package.json` 为准（当前 0.8.5）；用户安装版本、commit 与内容摘要须以 `orbit version --json` 核对，本页不记录。
 
-2026-10-11 用户随后明确授权升版、提交和推送：源码按 patch 从 **0.8.4 → 0.8.5**，`package.json` 与 `npm-shrinkwrap.json` 同步。本次提交包含本地 OMP 宿主复用、检查历史去重归档、相关回归与文档/真实验收原件；提交及 `origin/main` 推送结果以 Git 记录为准。此前真实受测构建仍为0.8.4／25f0104 dirty／digest c70f5b60…，不重标为0.8.5实测；本次仅追加版本元数据与交接说明，沿用已完成的工程和真实验收。Goal保持complete，已说明的选模/导出限制保留。不打tag、不发布、不更新日常安装，不处理Zeen。
+## 当前进展
 
-本次升版核对：版本与锁文件一致、源码CLI返回0.8.5、npm pack --dry-run通过（85 files／压缩501,685 bytes，不含私有SDK）、328份已索引验收原件摘要一致。暂存源码/合同/说明文档的diff检查通过；原始证据中的baseline diff空格与两份stderr末尾空行保留原字节，不为样式改写证据。只改版本和交接元数据，不重复启动模型验收或新Goal。
+- **集成合同（Loom 等集成方）**：已实现并提交在本地分支 `feat/integration-contract`——`b38f0d0`（合同 1.0：`orbit capabilities --json`、覆盖项可选 `ref`、`start --external-ref`、契约测试 `tests/integration_contract_test.rb`）与 `92a00dd`（合同 1.1：空串/纯空白 `ref` 视为未提供）。**未推送、未升软件版本、未发布、未更新日常安装。** 合同见 [integration.md](../../contracts/integration.md)，决定与理由见 [ADR-010](../adr/010-integration-contract.md)，计划、真实检查者 `ref` 小样本试验（1 个模型、7 次）与提案 B 评估（O3）见 [loom-integration-contract.md](loom-integration-contract.md)。提案 B（对外状态补充）已评估、建议缩小范围，等用户决定；提案 C（事件流）未评估；`needs_user` 终态接续未做，均见[当前限制](debt-ledger.md)。
+- **文档整理**（2026-10-11，用户要求）：历史方案、阶段计划、验收记录、证据原件与研究报告已从当前树移除，只保留现行有效文件；历史在 Git 中查阅，恢复基线提交 `aa089bb`（用法见 [docs/README.md](../README.md)）。该整理在工作区、未提交，需用户审阅后另行提交。
+- **最近一次真实验收的构建**：0.8.4（`25f0104` dirty，临时安装 digest `c70f5b60…`），内容为本地 OMP 宿主复用与检查历史内容去重归档；之后 0.8.5 只改版本元数据，不重标为实测。其真实验收范围与已知缺口列在[当前限制](debt-ledger.md)；Zeen 存量数据迁移/清理仍暂缓。
 
-2026-10-11 两项已批准修复已集成，冻结验收、独立核查、合同文档与资源收口完成，实际Goal已由工具complete（07:43:39Z；1,226,664 tokens／6,397秒，非账单，无硬预算）。唯一[总TODO与冻结验收](local-host-snapshot-repair.md)：本地OMP18.8.0可信factory复用宿主SDK、移除私有依赖；项目内SHA-256内容归档、在途独立完整快照、三门回收、独立恢复与自包含export。受测0.8.4／25f0104 dirty、临时release3468fbcc…／digestc70f5b60…；五组基线后全量测试、无模型与17项权限/图片探针、真实必要负例/推荐native task-hub/纠正终检/失败取消/重复小改动/历史恢复和导出已完成，固定H/J/K独立核查原件。重复存储增量0、小改动新增102逻辑bytes/4KiB，临时release8,040,804逻辑bytes；归档异常两workspace产品保留，官方export留证后才清测试夹具。显式start选模后续覆盖与部分协作/native transcript导出缺口如实记录、未扩修。三个测试pane、临时安装和模型进程已收口，临时根已删除且所属进程为空，九份官方导出及必要原件留仓；日常安装、固定进程及原dirty/untracked保留。完整结果与限制沿[本轮验收](../reference/local-host-snapshot-repair-acceptance-20261011.md)，旧历史不重标。无升版、提交、推送、发布或Zeen改动。
+## 环境提示
 
-2026-10-11 最新用户要求进入上述两项修复并使用 Goal 模式，同时询问是否新开对话及启动 prompt。建议新对话承接：安装前检查并提示缺少本地 OMP、实际验证宿主复用后移除检查器私有 SDK；修正 Orbit 新检查快照的重复存储与结束后归档/回收，保留恢复、自包含导出和旧格式读取。Zeen 存量迁移/预览/清理仍暂缓。本对话只准备启动交接，未实施或启动新 Goal；旧优化 Goal 经实际工具核对仍为 complete。新会话应以这条最新授权为准，实际启动新 Goal 后报告状态，再冻结本轮验收；下段“只调研、待审核”是此前阶段事实。保留当前三个修改文档及两个未跟踪研究报告，不从只含 HEAD 的工作区开始。
-
-2026-10-11 用户随后要求先调研两项问题并分别给方案审核：独立检查器仍保留私有 OMP SDK、兄弟 Zeen 项目历史检查副本占用 30.80 GB。当前阶段只形成[宿主接口研究](../reference/omp-local-reviewer-host-research-20261011.md)与[快照存储研究](../reference/orbit-snapshot-storage-research-20261011.md)，不是实施授权。最新补充：方案一安装前检查本地 OMP，缺失时明确提示；方案二先核查 Orbit 写入代码，暂不处理 Zeen 自身日志清理。源码确认安装器目前只在安装成功后提示缺 OMP，检查 workspace 每次完整复制、未按内容去重、结束后也未回收；已查状态/回执覆盖写入及事件单条追加路径未发现同类整份重复问题。推荐评估可信扩展复用本地宿主，以及项目内新增检查历史内容去重＋仅在途保留完整工作区、恢复与自包含导出。Zeen 309 份工作区占29.22 GB，旧清单声明去重约303 MB，代表校验181摘要不符和1缺失，成因未裁定；这些是诊断事实，不承诺自动释放旧数据。Zeen 存量迁移、预览和清理全部暂缓，不作为本项验收前置。未变更产品代码、安装、合同、版本、提交或推送；未启动新 Goal。审批后再冻结实施与真实验收，不将此前安装优化 Goal 的 complete 扩展成这两项完成。
-
-2026-10-11 优化 Goal 完成后，用户明确要求先提交代码：本次本地提交包含两阶段安装体积修复、回归测试及必要文档／验收原件，版本保持0.8.4。提交结果以Git记录为准；此前受测源码的dirty状态、digest和失败边界不改标为提交后重新验收。本次不推送、发布或更新日常安装。
-
-2026-10-11 用户批准第二阶段可选依赖精简并要求实际 Goal，工具已实际 complete（2026-10-11T04:50:53Z，计数415,228／2,182秒，非账单）。当前[冻结实施清单](orbit-install-footprint-optimization.md)只处理安装体积：省略 private reviewer 的 optional／peer／dev，按 Bun 平台显式保留同版本 native，在切换前验证 SDK 可加载；检查器显式关闭 memory/STT。最终临时 release `df8ab704…`／digest `22fb7d27…`，0.8.4／`5e781e4` dirty／SDK18.8.0，冷安装446.9MiB，相对日常 release下降53.4%。全仓与安装测试、版本/pack/skill、真实负例修正、推荐→原生task/hub→双方npm127→独立后备终检→confirmed stop通过；正例v2无Controller催办／代写。首选JSON失败、SSL错误、旧正例PATH失败、空闲Root Esc未触发均保留。6个测试pane已关闭，两个临时安装已正常卸载，归属临时根和会话扩展根已清；另19个归属不明空根按边界保留。20个固定PID与日常安装身份不变；原始回执费用/配额未知。完整事实、独立核查和未测边界沿[体积记录第二阶段](../reference/orbit-install-footprint-20261011.md#第二阶段用户批准的可选依赖优化)。本轮不升版、提交、推送、发布、更新日常安装或宿主；日常目录仍959.5MiB，不能冒充已应用447MiB优化。
-
-2026-10-11 安装体积问题已修复并更新本机安装：三个直接 SDK 包一同随宿主对齐，hoisted 安装，准备完成即删除下载缓存。`~/.local/share/orbit` 从约 3.4 GiB 降至约 960 MiB（`du` 统计，约降低 72.4%）；原生大模块从八份降至一份。源码仍 0.8.4／`5e781e4` dirty，本机 release `e8c29c03…`／digest `82ba262f…`／2026-10-11T04:00:49Z。全仓测试、真实 reviewer 检查、16 项只读探测及 Herdr 固定 K 成员独立核查通过；原有 OMP 保留，宿主未升级。完整 SDK 的 ONNX 等依赖仍占空间，未裁剪内部文件。事实与验证边界沿[安装体积记录](../reference/orbit-install-footprint-20261011.md)。这是后续独立安装修复，未修改此前 Goal 与真实验收；本次未升版、提交、推送或发布，远程 main 尚未包含修复。
-
-2026-10-10 用户随后授权升版、提交和推送：源码按 patch 从 **0.8.3 → 0.8.4**，`package.json` 与 `npm-shrinkwrap.json` 同步。本次提交包含两轮 Codex 借鉴交付的既有改动、研究与验收证据；提交及 `origin/main` 推送结果以 Git 记录为准。真实产品验收仍是 0.8.3／`8906c187…` 等原受测构建，不重标为 0.8.4 实测。升版仅改变版本元数据和此交接说明；本轮全仓检查结论保留，并核对版本一致性、CLI 版本及打包。未打 tag、发布或更新日常安装。
-
-2026-10-10 最终交付核对：本轮采用C02/C04/C06/C08已实施集成，C05可用busy/停止观察已接且保留SDK原子准入/丢引用缺口；全部C01—C10五维处置、冻结矩阵/独立原件复核/全仓检查已通过，11个自开测试pane、归属进程/owner后台、临时安装/目录已清，17个固定身份/4pane及日常5993d7fb…安装不变。Root npm一次+后续CLI抽查的实际边界、两次Controller取消、v6未走hub、便捷成员关联空字段等保留。实际Goal已由工具complete（06:10:16Z，计数1538326/9977秒，非费用）；唯一总TODO §9全勾，旧历史不覆写。
-**本轮中段过程记录（已结束）**：当时实际 Goal active，无硬预算；唯一[总清单 §9](codex-lessons-implementation.md#9-剩余问题交付2026-10-10当前执行)保留本轮冻结验收和 TODO。C02/C04/C06/C08 已实施并独立核查，C08两语言结构/Unicode及真实独立检查通过；C02普通/amend/custom wake/compact/resume/暂停约束有本轮实证，活动成员Esc与正常退出confirmed且PID退出。负例通过；正例v1/v2自主检查收口有效，但推荐／成员npm边界失败，v3重复环境失败被Controller取消，不计自主成功。5627dd25… 新构建正例v4正在临时Git项目复验推荐、实质原生交接、成员npm及hub回报。完整测试两次修复后exit0，最新小补修相关测试/独立复核通过，未以旧结果掩盖新构建。详情与失败沿[本轮验收](../reference/codex-lessons-acceptance-20261010.md)。固定Root/pH/pJ/pK、MCP及主Herdr保持；既有dirty/untracked全保留；测试资源尚待最终收口。下方未实施/无新Goal/已完成是旧阶段历史。未提交、推送、发布、升版或升级日常安装。
-
-同日用户补充要求先记 C08：下一轮局部采用方向为现有 schema 单一结构定义，减少 TS/Ruby 重复，必要语义校验与共享协议样例保留，尚未实施。[重评补充](../reference/codex-decisions-reevaluation-20261010.md)同时说明 C01/C05/C07/C09 参考源码后按 Orbit/OMP 接缝另行实现，成熟度不能继承：C01/C09 在局部范围可保留，C07 限当前 append 诊断，C05 完整准入关闭／清理确认仍有宿主缺口。本次只更新文档，无新代码、安装或产品验收；下方前轮事实保留。
-
-2026-10-10 用户要求重新评估所有 Codex 借鉴决定。最新[重评记录](../reference/codex-decisions-reevaluation-20261010.md)直接对照固定提交源码、当前 Orbit 接线和归档实际任务：保留 C01/C05/C07/C09 的局部实现；撤回 C02/C04/C06“已有能力充分满足”，优先建议补足活动目标推进、可用成员交接与失败恢复；C08 先定位局部 schema 共享和重复校验，后续采用方向见上方补充；C03/C10 暂不扩大实现。建议尚未实施，本次只更新评估与索引，不改产品代码／合同／权限／安装或创建新 Goal。下方前轮 Goal、受测构建与资源收口事实保留，不再将旧候选标签当作最新充分性判断。后续实施仍沿唯一总清单，T01—T13 历史边界不重开。
-
-2026-10-09 UTC（上海2026-10-10）Codex借鉴整轮交付已完成，实际 Goal complete，无硬预算。唯一[总实施清单](codex-lessons-implementation.md)全勾；采用C01/C05/C07/C09，其余逐项复用或有据不采用。C01两层日志首尾保留真实125字符降级失败后补最低500字符空间，新安装3ea4a306…复验JS4000→Ruby500／51465bytes／独立有效终检／Root和登记成员confirmed stop通过。C05普通／失败停止名单复核、C07停止writer切点确认、C09结构化故障诊断均已实现／回归／GLM独立核查；全仓测试、pack／安装摘要、skill与差异检查通过。各构建实测负例／中断／正常退出、推荐原生task／显式hub／纠正／只读检查范围、失败及用量沿[验收记录](../reference/codex-lessons-acceptance-20261009.md)。七个测试pane、归属进程／后台工作及临时安装／目录已清理，必要证据留仓；固定Root、三个OMP／MCP和Herdr保留，日常安装未变。没有普遍节省或消除监督的证明；NVM读边界、非受控eval agent入口、C05失去session等限制保留。源码仍0.8.3，未升版、提交、推送、发布或升级全局安装，T01—T13历史完成／未测边界不改。
-
-原有三个OMP固定pane w23:pH/pJ/pK已核对在本仓可接任务，分别K3-256k／Cursor Grok 4.7 Fast／GLM-5.3-Flash，18.8.0；开发回报不计产品运行证据。本轮只在隔离Git夹具与临时安装验收。用户日常安装实际核对为0.8.3／d947af6／digest5993d7fb…（2026-10-09T08:16:15Z），本轮不改该安装；下方旧轮次安装保留各自事实。
-
-最后核对：2026-10-09。**源码0.8.3；T01—T13 已获正式实施授权并按三批实现，修复、约定验证及资源收尾全部完成，实际 Goal complete（无 token 预算）。** 原冻结条件、依赖及分批结果沿[现有方案](orbit-long-task-optimization.md)，逐项确定性／真实通过／失败／限制见[验收记录](../reference/long-task-optimization-acceptance-20261009.md)。D1 已确认，原要求与原生修订、新监督边界及实际停止已接线并有界实测。保留已有修改和未跟踪文档；三个用户预先OMP保留，开发回报不冒充产品验收。真实验收仅在隔离安装／临时Git项目，未知现金收益不宣称。用户随后明确授权本轮升版、提交和推送；未全局升级或发布，Beacon/Zeen保持原状。最终测试安装摘要 `7f262f91…`、Root/独立coding-agent SDK18.8.0；全套测试／打包／skill校验／差异检查通过。11个自开测试pane关闭，9个程序任务confirmed stop且runtime_pid=null，隔离安装卸载，所属进程审计为空；必要脱敏事实索引随验收记录留存。
-
-本轮版本按 patch 从0.8.2升至0.8.3，package.json与npm-shrinkwrap.json同步；提交／origin/main推送以Git记录为准。真实验收安装仍为0.8.2及其原摘要，不改标为0.8.3实测；升版只改变版本元数据及交接说明，产品代码保持已验收内容。版本一致性、CLI版本输出及打包验证按本次升版核对，不新增真实模型验收。未打tag或更新日常安装。
-
-2026-10-02 的普通真实任务修复已完成代码、独立核查与有界真实验收；修复收口、八项原要求逐项证据和限制见[验收记录](../reference/ordinary-task-repair-acceptance-20261002.md)。以下版本、资源与授权为该轮历史事实，不把旧执行授权延伸为当前实现／推送授权。Goal和提交、推送实际状态以工具记录与 Git 为准。
-
-## 2026-10-02 版本事实
-
-- **源码**：0.8.2；推荐、权限、阻断监督及证实成员收尾修复已提交 `9c7d033`（基线 `a0fe2f1`）。0.8.2仅同步版本号与当前交接文档，按用户授权提交并推送。
-- **用户安装**：0.8.0／a0fe2f1／digest `92aa2e6dbd8344c805d97a11818959e41064108e79b8f02fec2565b02bf1bea3`，本次未更新。
-- **隔离被测安装**：0.8.1 build3／a0fe2f1 dirty／digest `bcd9cbfda5782084f22c97a95d34a608d5bd19afbbab143aa16c7a680f2d45fc`，`2026-10-02T02:31:50Z`。0.8.1修复提交的源码pack摘要相同；0.8.2升版不重标历史被测构建。实际独立检查 OMP SDK18.4.9。
-- **真实结果**：positive3两单均派前评估，建议实际影响native派发，402失败后备选交付，Root集成/7项测试/独立K3终检/complete confirmed stop；review-dedup三项真实finding送达、成员修正、复核resolved；稳定前台观察不重复付费，原生Esc及正常退出均有真实记录。
-
-2026-10-09 Zeen 观察实际加载的是 0.8.2（`dbd93aa`、dirty=false），不能据上面的旧“用户安装0.8.0”推断当前安装。该旧安装原件见现场观察；本轮修复已在独立临时安装重新验收，不改标旧现场。
+- 全仓 `npm test` 需要 `node_modules`：本工作区未安装依赖时，`prestart_test.rb`、四个 `.mjs` 测试和 bun 套件因缺 `zod` 失败，在未改动的 HEAD 副本上同样复现；`npm ci` 后通过。需要时在临时副本里安装，不要把依赖装进仓库。
+- 提交、推送、发布、打标签、更新日常安装各自需要用户明确授权；升版默认只加 patch。
 
 ## 当前有效边界
 
-见[当前限制](debt-ledger.md)。2026-10-02 的结论只在有界普通任务范围成立，不宣称全模型、全自然分支或普遍成本收益；旧阶段未测组合没有因此变成当前新增证明门。原混合模型54项及W1–W10沿[原完成记录](../reference/mixed-model-delivery-completion-20261001.md)查阅，不改历史构建和失败标签。新增长任务问题按优化实施单独核对构建和验证，不沿用旧通过标签。
-
-## 2026-10-02 资源与授权
-
-- 测试pane w22:p5/p6/p7/p8/p9/pA均已关闭；六个测试任务均confirmed stop且runtime_pid=null。证据保留 `/private/tmp/orbit-ordinary-repair-1d_06gw_`，供复核。
-- 用户指定三个OMP和zeen保留原状态，zeen始终只读；本次提交与推送已获用户授权，未发布、打tag、升级宿主SDK或更改用户全局安装。
-- 开发规则沿[AGENTS.md](../../AGENTS.md)及[开发流程](../agents/development-workflow.md)；后续安装更新、发布按明确授权执行。
+产品语义以[任务运行合同](../../contracts/task-runtime.md)、[检查结果 schema](../../contracts/check-result.schema.json) 和 ADR-008/009/010 为准；有界真实验收不推广为全模型、全分支或普遍成本收益。开发规则沿 [AGENTS.md](../../AGENTS.md) 与[开发流程](../agents/development-workflow.md)。
