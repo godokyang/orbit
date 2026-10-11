@@ -219,11 +219,12 @@ function coverageProblems(structure: CheckResultStructure, coverage: unknown): s
 		if (!structure.coverageStatuses.includes(entry.status)) problems.push(`coverage status must be ${structure.coverageStatuses.join(" or ")}`);
 		if (typeof entry.evidence !== "string" || codePointLength(entry.evidence) > structure.coverageEvidenceMax ||
 			(entry.status === "verified" && !entry.evidence.trim())) problems.push("coverage evidence must fit its status and bound");
-		// ref is optional and opaque: bounded, non-blank, free of control
-		// characters. It is never required to be unique or to match anything.
+		// ref is optional and opaque: a blank string means "omitted"; any other
+		// value is bounded and free of control characters. It is never required
+		// to be unique or to match anything.
 		if ("ref" in entry && (typeof entry.ref !== "string" || codePointLength(entry.ref) > structure.coverageRefMax ||
-			!entry.ref.trim() || /\p{Cc}/u.test(entry.ref))) {
-			problems.push(`coverage ref must be a non-blank string of at most ${structure.coverageRefMax} characters without control characters`);
+			(entry.ref.trim() && /\p{Cc}/u.test(entry.ref)))) {
+			problems.push(`coverage ref must be a string of at most ${structure.coverageRefMax} characters without control characters (empty or whitespace-only counts as omitted)`);
 		}
 	}
 	return problems;

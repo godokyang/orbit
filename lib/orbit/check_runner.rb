@@ -1025,7 +1025,7 @@ module Orbit
         "and evidence (at most 1000 characters; verified needs concrete non-empty evidence), plus an optional " \
         "ref (at most 200 characters). Set ref only when the instruction, amendments or named basis already " \
         "label that requirement with an identifier (for example a standard number the requester assigned): copy " \
-        "it exactly as written and never invent, normalize or infer one; omit ref when there is no such label. Enumerate each " \
+        "it exactly as written and never invent, normalize or infer one; omit the ref key when there is no such label (never write an empty string). Enumerate each " \
         "requirement from the original instruction, effective amendments and named basis, including referenced " \
         "specification files in the fixed snapshot. complete=true means you have enumerated them all; do not " \
         "silently omit requirements. Mark unread, untested or otherwise unsupported requirements unverified " \
@@ -1151,7 +1151,7 @@ module Orbit
       raise Error, "check result must be a JSON object, got #{value.class}" unless value.is_a?(Hash)
 
       problems = result_problems(self.class.result_structure, value)
-      return value if problems.empty?
+      return without_blank_refs(value) if problems.empty?
 
       raise Error, "check result does not match contracts/check-result.schema.json: #{problems.join('; ')}"
     end
@@ -1232,6 +1232,20 @@ module Orbit
       value.gsub(/\A[\u0009-\u000D\u0020\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF]+|[\u0009-\u000D\u0020\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF]+\z/, "")
     end
 
+    def blank_coverage_ref?(ref)
+      trim_coverage_text(ref).empty?
+    end
+
+    # A blank ref is "omitted": drop the key so nothing downstream stores or
+    # returns an empty reference.
+    def without_blank_refs(result)
+      items = result.dig("coverage", "items")
+      return result unless items.is_a?(Array) && items.any? { |item| item.is_a?(Hash) && item["ref"].is_a?(String) && blank_coverage_ref?(item["ref"]) }
+
+      cleaned = items.map { |item| item.is_a?(Hash) && item["ref"].is_a?(String) && blank_coverage_ref?(item["ref"]) ? item.reject { |key, _| key == "ref" } : item }
+      result.merge("coverage" => result["coverage"].merge("items" => cleaned))
+    end
+
     def coverage_problems(rules, value)
       unless value.is_a?(Hash)
         return ["coverage must contain exactly #{rules[:coverage_required].join(' and ')}"]
@@ -1277,12 +1291,14 @@ module Orbit
         unless evidence.is_a?(String) && evidence.length <= rules[:coverage_evidence_max] && (item["status"] != "verified" || !trim_coverage_text(evidence).empty?)
           problems << "coverage.items[#{index}].evidence must fit its status and the #{rules[:coverage_evidence_max]}-character bound"
         end
-        # ref is optional and opaque: bounded, non-blank, free of control
-        # characters. It is never required to be unique or to match anything.
+        # ref is optional and opaque: a blank string means "omitted" (models
+        # often write "" instead of leaving the key out); any other value is
+        # bounded and free of control characters. It is never required to be
+        # unique or to match anything.
         if item.key?("ref")
           ref = item["ref"]
-          unless ref.is_a?(String) && ref.length <= rules[:coverage_ref_max] && !trim_coverage_text(ref).empty? && !ref.match?(/\p{Cc}/)
-            problems << "coverage.items[#{index}].ref must be a non-blank string of at most #{rules[:coverage_ref_max]} characters without control characters"
+          unless ref.is_a?(String) && ref.length <= rules[:coverage_ref_max] && (blank_coverage_ref?(ref) || !ref.match?(/\p{Cc}/))
+            problems << "coverage.items[#{index}].ref must be a string of at most #{rules[:coverage_ref_max]} characters without control characters (empty or whitespace-only counts as omitted)"
           end
         end
       end

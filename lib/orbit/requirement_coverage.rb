@@ -45,6 +45,8 @@ module Orbit
     MAX_REQUIREMENT = 1000
     # Optional opaque external reference of one item (check-result schema `ref`).
     MAX_REF = 200
+    # Same blank set as the checker's trim (JavaScript trim parity).
+    BLANK_REF = /\A[\u0009-\u000D\u0020\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF]*\z/
     MAX_LABEL = 128
 
     class Error < StandardError; end
@@ -160,11 +162,11 @@ module Orbit
         cleaned_item = { "requirement" => requirement, "scope" => scope, "status" => status, "evidence" => evidence }
         if item.key?("ref")
           ref = item["ref"]
-          unless ref.is_a?(String) && ref.length <= MAX_REF && !ref.strip.empty? && !ref.match?(/\p{Cc}/)
-            raise Error, "ref must be a non-blank string of at most #{MAX_REF} characters without control characters"
+          unless ref.is_a?(String) && ref.length <= MAX_REF && (BLANK_REF.match?(ref) || !ref.match?(/\p{Cc}/))
+            raise Error, "ref must be a string of at most #{MAX_REF} characters without control characters (empty or whitespace-only counts as omitted)"
           end
 
-          cleaned_item["ref"] = ref
+          cleaned_item["ref"] = ref unless BLANK_REF.match?(ref)
         end
         cleaned_item
       end

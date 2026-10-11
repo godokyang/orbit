@@ -246,8 +246,8 @@
       }
     },
     {
-      "name": "coverage item with a blank ref is refused",
-      "accept": false,
+      "name": "coverage item with an empty or whitespace-only ref is accepted as omitted",
+      "accept": true,
       "result": {
         "verdict": "continue",
         "reason": "work in progress",
@@ -280,7 +280,8 @@
               "requirement": "reject partial output",
               "status": "unverified",
               "evidence": "",
-              "scope": "lifecycle"
+              "scope": "lifecycle",
+              "ref": ""
             }
           ]
         }

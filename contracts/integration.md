@@ -1,6 +1,6 @@
 # Orbit 集成合同
 
-合同版本：1.0
+合同版本：1.1
 
 面向把 Orbit 当作外部执行与检查服务的集成方（例如 Loom）。本合同只冻结下面列出的命令、返回字段与结果 schema；这些之外的一切（包括 `status --json` 里的其他字段）都是 Orbit 内部实现，随时可变。产品语义以 [任务运行合同](task-runtime.md) 和 [检查结果 schema](check-result.schema.json) 为准，本文件与它们冲突时以它们为准并修正本文件。机器可读形式见 [integration.json](integration.json)，`orbit capabilities --json` 与契约测试都读取它，决定理由见 [ADR-010](../docs/adr/010-integration-contract.md)。
 
@@ -16,12 +16,12 @@
 `orbit capabilities --json` 只读、不连接会话、不调用模型、不读任务，返回：
 
 ```json
-{ "integration_contract": { "name": "orbit-integration", "version": "1.0", "major": 1 },
+{ "integration_contract": { "name": "orbit-integration", "version": "1.1", "major": 1 },
   "orbit": { "version": "<软件版本，仅供显示>" },
   "capabilities": { "<能力名>": { "since": "<引入该能力的合同版本>", "...": "该能力的限制" } } }
 ```
 
-集成方在启动与每次运行前检查自己需要的能力名及其限制；不满足就按自己的规则阻断，不猜测。能力只在 Orbit 已实际接线时才出现。1.0 的能力：
+集成方在启动与每次运行前检查自己需要的能力名及其限制；不满足就按自己的规则阻断，不猜测。能力只在 Orbit 已实际接线时才出现。1.0 起的能力（后续次版本只在能力下增加字段）：
 
 | 能力 | 含义与限制 |
 | --- | --- |
@@ -29,7 +29,7 @@
 | `export` | `orbit export TASK --output FILE` 返回 §3 的字段；归档内 `task/state.json` 带有同一份冻结字段 |
 | `stop_receipt` | 停止回执：`stop --json` 只表示入队，已确认停止只看 `stop_confirmation.confirmed` |
 | `start_external_refs` | `start` 可带 `--external-ref`；`max_refs`、`max_length` 为强制上限；`inherited_on_resume=false` |
-| `check_coverage_ref` | 检查结果的每个覆盖项可带 `ref`；`max_length` 为 schema 上限 |
+| `check_coverage_ref` | 检查结果的每个覆盖项可带 `ref`；`max_length` 为 schema 上限；`blank_is_omitted=true`（1.1 起）表示空串或纯空白按未提供处理 |
 | `resume_from` | `start --resume-from`；`from_status` 列出可接续的旧任务终态（当前仅 `paused`）；`requires=native_user_message` |
 
 ## 3. 命令与返回
@@ -60,7 +60,7 @@
 
 ## 5. 引用字段（不透明，通用）
 
-**检查项引用 `ref`**：检查结果 schema 的每个覆盖项可带可选 `ref`（1–200 字符，去掉首尾空白后非空，不含控制字符）。检查者只在原要求、修订或依据本来就给该要求标了编号时逐字抄录，不得自编、规范化或推断；没有就省略。Orbit 原样保存并在 `requirement_coverage.items[].ref` 返回，不解释、不要求唯一、不要求与任何东西匹配（同一编号可对应多个覆盖项，也可没有）。格式不合规（超长、空白、含控制字符、非字符串）与其他字段一样属于结果契约违规，检查结果被拒绝并走既有的检查失败路径；因此检查者不确定时应省略而不是猜写。
+**检查项引用 `ref`**：检查结果 schema 的每个覆盖项可带可选 `ref`（最多 200 字符，不含控制字符；空串或纯空白按未提供处理，不保存，`status` 中该项没有 `ref`）。检查者只在原要求、修订或依据本来就给该要求标了编号时逐字抄录，不得自编、规范化或推断；没有就省略。Orbit 原样保存并在 `requirement_coverage.items[].ref` 返回，不解释、不要求唯一、不要求与任何东西匹配（同一编号可对应多个覆盖项，也可没有）。其余不合规（超长、含控制字符、非字符串）与其他字段一样属于结果契约违规，检查结果被拒绝并走既有的检查失败路径；因此检查者不确定时应省略而不是猜写。
 
 **任务外部引用 `external_refs`**：`orbit start` 可重复带 `--external-ref REF`（扩展的 `orbit` 工具 `start` 动作对应参数 `external_refs`）。每个为 1–256 字符、非空白、无控制字符、互不相同的字符串，最多 16 个；非法值在建立任何会话或任务前被拒绝。Orbit 原样保存为 `external_refs`（保持顺序），在 `status --json`、详细状态与 `export` 中原样输出；不解析前缀、不据此授权、不改变任何行为。`--resume-from` 建立的新任务**不继承**旧任务的引用，需要时重新传入；旧任务可经 `continuation.previous_task` 反查。自动入口（未经显式 `start` 参数）建立的任务没有外部引用。
 
@@ -81,3 +81,4 @@
 ## 9. 变更记录
 
 - 1.0（本合同首版）：命令与冻结字段、能力清单、覆盖项 `ref`、任务 `external_refs`、`resume_from` 范围声明。
+- 1.1：覆盖项 `ref` 的空串或纯空白按未提供处理（原先整次检查被拒绝）；`check_coverage_ref` 增加 `blank_is_omitted`。只放宽检查者输出，不改变任何已有返回字段；依据是对真实检查者的试验中 7 次有 1 次写了 `"ref": ""`。

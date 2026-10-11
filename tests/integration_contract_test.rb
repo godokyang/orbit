@@ -175,9 +175,11 @@ module IntegrationContractTest
                  "coverage" => { "complete" => true, "items" => [
                    checked("S12 exact cents", "verified", "artifact.txt read", ref: "S12"),
                    checked("S13 reject empty", "unverified", "", ref: "S13"),
-                   checked("closing report", "unverified", "", scope: "lifecycle")
+                   checked("closing report", "unverified", "", scope: "lifecycle", ref: "  ")
                  ] } }
-      Orbit::CheckRunner.new(model: CHOSEN, executable: "unused").send(:validate_result, result)
+      normalized = Orbit::CheckRunner.new(model: CHOSEN, executable: "unused").send(:validate_result, result)
+      assert(normalized.dig("coverage", "items").map { |item| item["ref"] } == ["S12", "S13", nil] &&
+             !normalized.dig("coverage", "items").last.key?("ref"), "a blank ref is accepted as omitted and dropped; others are kept")
       now = Time.now.to_f
       runtime.tick(now: now)
       checker.result = result

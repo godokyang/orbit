@@ -1,6 +1,6 @@
 {
   "contract": "orbit-integration",
-  "version": "1.0",
+  "version": "1.1",
   "major": 1,
   "description": "Machine-readable form of contracts/integration.md. Versioned independently of the software version. Within one major version entries are only added, never changed or removed; a breaking change raises the major version and is named in the release notes. `orbit capabilities --json` serves `capabilities` from this file and the contract test reads `commands` and `status_fields` from it.",
   "status_values": [
@@ -89,7 +89,8 @@
     },
     "check_coverage_ref": {
       "since": "1.0",
-      "max_length": 200
+      "max_length": 200,
+      "blank_is_omitted": true
     },
     "resume_from": {
       "since": "1.0",

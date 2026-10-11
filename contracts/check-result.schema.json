@@ -127,9 +127,8 @@
               },
               "ref": {
                 "type": "string",
-                "minLength": 1,
                 "maxLength": 200,
-                "description": "Optional external reference copied verbatim from the instruction, amendments or basis for this requirement (for example a number the requester assigned to the standard). The checker never invents one; omit it when the requirement text carries none. Orbit stores and returns it unchanged without interpreting it, and does not require it to be unique or to match anything. Must be non-empty after trimming and contain no control characters; an invalid value is a contract violation like any other field."
+                "description": "Optional external reference copied verbatim from the instruction, amendments or basis for this requirement (for example a number the requester assigned to the standard). The checker never invents one; omit it when the requirement text carries none. An empty or whitespace-only value is treated as omitted and is not stored. Orbit stores and returns any other value unchanged without interpreting it, and does not require it to be unique or to match anything. A non-blank value must contain no control characters and fit the length bound; an invalid value is a contract violation like any other field."
               }
             }
           }
