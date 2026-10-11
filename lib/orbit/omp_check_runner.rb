@@ -2,6 +2,8 @@
 
 require "json"
 require "tmpdir"
+require "open3"
+require "pathname"
 require_relative "check_runner"
 
 module Orbit
@@ -9,12 +11,14 @@ module Orbit
   #
   # TaskRuntime calls start/poll/stop!/close/usage. Prompt text and result
   # validation stay in CheckRunner. This class never builds a `codex exec`
-  # command; it spawns runners/omp-reviewer/reviewer.ts in its own process group.
+  # command; it loads the trusted reviewer factory in local OMP in its own process group.
   class OmpCheckRunner < CheckRunner
     REVIEWER = File.expand_path("../../runners/omp-reviewer/reviewer.ts", __dir__)
 
     def self.default_command
-      ["bun", REVIEWER]
+      ["omp", "--mode", "rpc", "--no-ui", "--no-session", "--no-tools", "--no-pty",
+       "--no-extensions", "--no-skills", "--no-rules", "--no-lsp",
+       "--trusted-extension", REVIEWER, "--config", File.join(File.dirname(REVIEWER), "isolation.yml")]
     end
 
     # A model identifier is a provider plus a non-empty id. The id may itself
@@ -51,6 +55,7 @@ module Orbit
     # same source the host session uses instead of a second login.
     def self.source_session_fields
       fields = {
+        "source_pi_config_dir" => ENV["PI_CONFIG_DIR"],
         "source_pi_coding_agent_dir" => ENV["PI_CODING_AGENT_DIR"],
         "source_omp_profile" => ENV["OMP_PROFILE"],
         "source_pi_profile" => ENV["PI_PROFILE"]
@@ -64,20 +69,73 @@ module Orbit
       fields
     end
 
-    # The reviewer SDK version this runner tree declares (the pin the
-    # installer verifies against), so the child fails closed on drift between
-    # the launched runner and its installed SDK without hardcoding a version
-    # here. Falls back to the install-time pin, then to omitting the field
-    # (the child then checks against its own package.json declaration).
-    def self.reviewer_sdk_version
-      package = File.expand_path("../../runners/omp-reviewer/package.json", __dir__)
-      declared = JSON.parse(File.read(package))["dependencies"]&.fetch("@oh-my-pi/pi-coding-agent", nil)
-      return declared if declared.is_a?(String) && !declared.empty?
+    # Historical metadata key retained; this is the actual local host version.
+    def self.reviewer_sdk_version(omp = "omp")
+      output = nil
+      Open3.popen3(omp, "--version", pgroup: true) do |input, stdout, stderr, child|
+        input.close
+        readers = [Thread.new { stdout.read }, Thread.new { stderr.read }]
+        unless child.join(10)
+          signal_probe(child.pid, "KILL")
+          child.join(2)
+          raise Error, "local OMP version check timed out"
+        end
+        unless readers.all? { |reader| reader.join(1) }
+          signal_probe(child.pid, "KILL")
+          raise Error, "local OMP version output did not close"
+        end
+        output = readers.map(&:value).join("\n")
+        raise Error, "cannot execute local OMP: #{output.strip}" unless child.value.success?
+      ensure
+        readers&.each { |reader| reader.kill if reader.alive? }
+      end
+      version = output[/\b\d+\.\d+\.\d+\b/]
+      raise Error, "local OMP did not report a version" unless version
+      version
+    rescue SystemCallError => error
+      raise Error, "cannot execute local OMP: #{error.message}"
+    end
 
-      require_relative "omp_entry"
-      Orbit::OmpEntry::PINNED_SDK_VERSION
-    rescue StandardError
-      nil
+    def self.host_command?(launcher)
+      launcher.include?("--trusted-extension")
+    end
+
+    def self.confined_env(profile, root, request)
+      env = ENV.to_h
+      %w[OMP_PROFILE PI_PROFILE PI_CONFIG_FILES].each { |key| env[key] = nil }
+      env["PI_CODING_AGENT_DIR"] = profile
+      env["PI_CONFIG_DIR"] = Pathname.new(File.join(root, "config-root")).relative_path_from(Pathname.new(Dir.home)).to_s
+      %w[CONFIG CACHE DATA STATE].each { |kind| env["XDG_#{kind}_HOME"] = File.join(root, "xdg-#{kind.downcase}") }
+      env["ORBIT_REVIEW_REQUEST"] = request
+      env
+    end
+
+    def self.probe_host(omp: "omp", timeout: PROBE_TIMEOUT_SECONDS)
+      version = reviewer_sdk_version(omp)
+      command = default_command.dup
+      command[0] = omp
+      Dir.mktmpdir("orbit-host-capability-") do |root|
+        profile = File.join(root, "profile")
+        FileUtils.mkdir_p(profile, mode: 0o700)
+        request_path = File.join(root, "request.json")
+        output = File.join(root, "evidence.json")
+        errors = File.join(root, "stderr.log")
+        File.write(request_path, JSON.generate("profile" => profile, "out" => output,
+                                              "host_probe" => true, "sdk_version" => version))
+        status = run_probe(command, request_path, profile, root, errors, timeout)
+        facts = parse_probe_evidence(output)
+        unless completed_host?(status, facts) && facts["ok"] && facts["session_created"] && facts["session_disposed"] && facts["host_version"] == version
+          raise Error, "local OMP capability probe failed: #{probe_failure_text(status, facts, errors)}"
+        end
+        facts.slice("ok", "host_version", "host_version_source", "host_runtime_executable", "session_created", "session_disposed", "signal_cleanup",
+                    "active_tools", "forbidden_tools_present", "read_tool_is_confined", "private_registry", "global_registry")
+      end
+    end
+
+    def self.completed_host?(status, evidence)
+      status && (status.success? || (status.exitstatus == 143 && evidence.is_a?(Hash) &&
+        evidence["host_completion"] == "complete" && evidence["session_disposed"] == true &&
+        evidence["signal_cleanup"] == "sigterm"))
     end
 
     # Local-only availability probe for the independent checker. For each
@@ -111,13 +169,13 @@ module Orbit
                      .merge(source_session_fields)
         request["source_agent_dir"] = source_agent_dir if source_agent_dir
         request["source_project_dir"] = source_project_dir if source_project_dir
-        sdk = reviewer_sdk_version
+        sdk = reviewer_sdk_version(launcher.first) if host_command?(launcher)
         request["sdk_version"] = sdk if sdk
         File.write(config_path, JSON.generate(request))
 
         status = run_probe(launcher, config_path, profile, root, stderr_path, timeout)
         evidence = parse_probe_evidence(out)
-        unless status.success? && evidence.is_a?(Hash) && evidence["ok"] == true
+        unless completed_host?(status, evidence) && evidence.is_a?(Hash) && evidence["ok"] == true
           raise Error, "model probe failed: #{probe_failure_text(status, evidence, stderr_path)}"
         end
 
@@ -126,15 +184,13 @@ module Orbit
     end
 
     def self.run_probe(launcher, config_path, profile, cwd, stderr_path, timeout)
-      env = ENV.to_h
-      env["OMP_PROFILE"] = nil
-      env["PI_PROFILE"] = nil
-      env["PI_CODING_AGENT_DIR"] = profile
+      env = confined_env(profile, cwd, config_path)
       errors = File.open(stderr_path, "wb")
-      pid = Process.spawn(env, *launcher, "--config", config_path,
+      args = host_command?(launcher) ? launcher : launcher + ["--config", config_path]
+      pid = Process.spawn(env, *args,
                           in: File::NULL, out: errors, err: [:child, :out],
                           pgroup: true, chdir: cwd, close_others: true)
-      wait_probe(pid, timeout)
+      wait_probe(pid, timeout, output: File.join(cwd, "evidence.json"), host: host_command?(launcher))
     rescue SystemCallError => error
       raise Error, "cannot start model probe: #{error.class}: #{error.message}"
     ensure
@@ -142,11 +198,31 @@ module Orbit
     end
     private_class_method :run_probe
 
-    def self.wait_probe(pid, timeout)
+    def self.wait_probe(pid, timeout, output: nil, host: false)
       deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + timeout.to_f
+      needs_completion = host
+      completion_signaled = false
       loop do
         result = Process.waitpid2(pid, Process::WNOHANG)
-        return result.last if result
+        if result
+          deadline_group = Process.clock_gettime(Process::CLOCK_MONOTONIC) + 2
+          loop do
+            begin
+              Process.kill(0, -pid)
+            rescue Errno::ESRCH
+              raise Error, "host exited without parent completion signal" if needs_completion && !completion_signaled
+              return result.last
+            end
+            signal_probe(pid, "KILL")
+            raise Error, "probe process group exit unconfirmed" if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline_group
+            sleep 0.05
+          end
+        end
+        if host && parse_probe_evidence(output)&.fetch("host_completion", nil) == "complete"
+          signal_probe(pid, "TERM")
+          completion_signaled = true
+          host = false
+        end
         if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
           kill_probe(pid)
           raise Error, "model probe timed out after #{timeout} seconds"
@@ -160,18 +236,28 @@ module Orbit
     private_class_method :wait_probe
 
     def self.kill_probe(pid, grace: 2)
-      signal_probe(pid, "TERM")
-      deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + grace
-      loop do
-        return if Process.waitpid2(pid, Process::WNOHANG)
-        break if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
-
-        sleep 0.05
+      reaped = false
+      %w[TERM KILL].each do |signal|
+        signal_probe(pid, signal)
+        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + grace
+        loop do
+          unless reaped
+            begin
+              reaped = !!Process.waitpid2(pid, Process::WNOHANG)
+            rescue Errno::ECHILD
+              reaped = true
+            end
+          end
+          begin
+            Process.kill(0, -pid)
+          rescue Errno::ESRCH
+            return if reaped
+          end
+          break if Process.clock_gettime(Process::CLOCK_MONOTONIC) >= deadline
+          sleep 0.05
+        end
       end
-      signal_probe(pid, "KILL")
-      Process.waitpid2(pid)
-    rescue Errno::ECHILD
-      nil
+      raise Error, "probe process group #{pid} exit unconfirmed"
     end
     private_class_method :kill_probe
 
@@ -327,6 +413,7 @@ module Orbit
       config_path = File.join(out, "request.json")
       profile = File.join(out, "profile")
       FileUtils.mkdir_p(profile)
+      File.chmod(0o700, profile)
       write_file(prompt_path, prompt)
       FileUtils.cp(@schema, schema_copy)
       File.unlink(evidence_path) if File.exist?(evidence_path)
@@ -339,7 +426,7 @@ module Orbit
       }.merge(self.class.source_session_fields)
       request["source_agent_dir"] = @source_agent_dir if @source_agent_dir
       request["source_project_dir"] = @source_project_dir if @source_project_dir
-      sdk = self.class.reviewer_sdk_version
+      sdk = self.class.reviewer_sdk_version(@command.first) if self.class.host_command?(@command)
       request["sdk_version"] = sdk if sdk
       write_file(config_path, JSON.generate(request))
 
@@ -366,6 +453,13 @@ module Orbit
       raise @failure if @failure
       raise Error, "check run was stopped; no result is available" if @stopped
 
+      if self.class.host_command?(@command) && !@completion_signaled
+        current = read_evidence
+        if current.is_a?(Hash) && current["host_completion"] == "complete"
+          @completion_signaled = true
+          signal_group("TERM")
+        end
+      end
       status = wait_nonblock
       if status.nil?
         raise Error, "check process was reaped outside this runner" if @reaped
@@ -375,12 +469,14 @@ module Orbit
       stop! if group_alive?
       parsed = read_evidence
       @evidence = parsed if parsed.is_a?(Hash)
+      @receipt_read_failure = "reviewer evidence is absent or invalid after exit" unless parsed.is_a?(Hash)
       # A failed or contract-invalid run can still carry the model that ran and
       # whatever usage the provider metered. Retain both before any raise so a
       # measured failure is recorded as measured, never as zero, and an
       # unmeasured one stays unknown.
       retain_receipt_facts
-      unless status.success? && @evidence.is_a?(Hash) && @evidence["ok"] == true
+      write_lifecycle
+      unless (!self.class.host_command?(@command) || @completion_signaled) && self.class.completed_host?(status, @evidence) && @evidence.is_a?(Hash) && @evidence["ok"] == true
         @failure = Error.new(failure_text(status, @evidence))
         @failure_kind, @failure_basis = classify_failure(@evidence)
         raise @failure
@@ -411,7 +507,7 @@ module Orbit
     # In-flight snapshots can replace a pending receipt with the same call id.
     # Only a confirmed process-group exit seals that snapshot for accounting.
     def receipts_finalized?
-      !!(@run && @reaped && !group_alive?)
+      !!(@run && @reap_evidence == "waitpid" && !group_alive?)
     end
 
     # A stopped reviewer may have persisted call receipts before its final
@@ -426,7 +522,10 @@ module Orbit
           @evidence = parsed
           @usage = normalized_check_usage
           retain_receipt_facts
+        else
+          @receipt_read_failure = "reviewer evidence is absent or invalid after stop"
         end
+        write_lifecycle if @run
       rescue SystemCallError => error
         @receipt_read_failure = "stopped reviewer receipts could not be read (#{error.class})"
       end
@@ -446,7 +545,40 @@ module Orbit
       (@evidence.is_a?(Hash) ? receipt_gaps : []) + Array(@receipt_read_failure)
     end
 
+    def check_lifecycle(number)
+      return nil unless @run
+      write_lifecycle
+      @lifecycle if @lifecycle && @lifecycle["number"] == number
+    end
+
     private
+
+    def wait_nonblock
+      return nil if @reaped
+      result = Process.waitpid2(@run.pid, Process::WNOHANG)
+      return nil unless result
+      @reaped = true
+      @reap_evidence = "waitpid"
+      @wait_status = result.last
+    rescue Errno::ECHILD
+      @reaped = true
+      @reap_evidence = "echild"
+      nil
+    end
+
+    def write_lifecycle
+      return unless @run && @reaped && !group_alive?
+      @lifecycle = {
+        "number" => File.basename(@run.output_dir).to_i,
+        "pid" => @run.pid, "pgid" => @run.pgid,
+        "reaped" => @reap_evidence == "waitpid", "group_probe" => "esrch",
+        "receipts" => @receipt_read_failure ? "failed" : "collected"
+      }
+      path = File.join(@run.output_dir, "lifecycle.json")
+      temporary = "#{path}.#{Process.pid}.tmp"
+      File.write(temporary, JSON.pretty_generate(@lifecycle))
+      File.rename(temporary, path)
+    end
 
     def retain_receipt_facts
       return unless @evidence.is_a?(Hash)
@@ -481,6 +613,7 @@ module Orbit
       @failure_kind = @failure_basis = nil
       @receipt_read_failure = nil
       @reaped = @stopped = false
+      @completion_signaled = @reap_evidence = @wait_status = @lifecycle = nil
     end
 
     # A check process is in flight until it has produced a result, been stopped,
@@ -502,14 +635,12 @@ module Orbit
     end
 
     def spawn_reviewer(config_path, profile, out, stderr_path)
-      env = ENV.to_h
-      env["OMP_PROFILE"] = nil
-      env["PI_PROFILE"] = nil
-      env["PI_CODING_AGENT_DIR"] = profile
+      env = self.class.confined_env(profile, out, config_path)
       errors = nil
       begin
         errors = File.open(stderr_path, "wb")
-        Process.spawn(env, *@command, "--config", config_path,
+        args = self.class.host_command?(@command) ? @command : @command + ["--config", config_path]
+        Process.spawn(env, *args,
                       in: File::NULL, out: errors, err: [:child, :out],
                       pgroup: true, chdir: out, close_others: true)
       rescue SystemCallError => error

@@ -1,0 +1,14 @@
+{
+  "schema_version": "orbit-check-workspace-reclaim-v1",
+  "number": 2,
+  "at": "2026-10-11T07:14:02Z",
+  "status": "reclaimed",
+  "reasons": [],
+  "gates": {
+    "reaped": true,
+    "group_probe": true,
+    "receipts": true,
+    "run": true,
+    "archive": true
+  }
+}

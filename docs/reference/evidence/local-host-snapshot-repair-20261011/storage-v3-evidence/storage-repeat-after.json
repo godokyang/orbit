@@ -1,0 +1,13 @@
+{
+  "at": "2026-10-11T07:14:53.653149+00:00",
+  "objects": {
+    "files": 4,
+    "logical_bytes": 3520329,
+    "allocated_bytes": 3534848
+  },
+  "delta_from_A": {
+    "files": 0,
+    "logical_bytes": 0,
+    "allocated_bytes": 0
+  }
+}

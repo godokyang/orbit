@@ -1,0 +1,150 @@
+ "不要把异步停止确认留成会触发自动续执行
+ 的 TODO". So leave todos as-is (all
+ done, none open).
+
+ Then: call orbit action=stop,
+ intent=complete, task=<task_directory>
+ via write to xd://orbit. Then end the
+ reply normally with the final report.
+
+ The report: fix verified, checks
+ passed, stop requested. Note: per
+ instruction, don't declare the task
+ complete on my own authority — Orbit
+ confirms the stop after my reply ends.
+ So phrase: final report of state + stop
+ gate submitted; completion recorded by
+ Orbit upon confirmation.
+
+ One nuance:
+ "若检查后又有改动，先重新检查" — after
+ the re-check (queued at 07:16), the
+ checker issued this finalization
+ notice, meaning the check ran and
+ passed on the current file state. Since
+ then I changed nothing (only this
+ turn's actions are todo/stop calls). So
+ no re-check needed.
+
+ Call stop now.
+
+ 终检通过且无遗留问题；检查后代码零改动
+ ，无需重新检查。原生 TODO
+ 已全部为已完成状态（6/6），无失效的
+ queued/blocked
+ 等待项需要移除，也不新增停止确认类
+ TODO。现在提交 Orbit 真实停止门。
+
+
+ • Orbit
+  └─ action="s…", intent="c…", task="…"
+ └ • task_directory:
+ "/private/var/folders/fc/zfb6fxjn0h9dz1
+ j1r0mpkcbw0000gn/T/or…"
+   • command_id:
+ "20261011071818621222-f19e2badc45f"
+   • status: "queued"
+ ⟦⌃O: Expand⟧
+
+
+ Program-injected goal reminder. The
+ stop gate was queued (command_id
+ 20261011071818621222-f19e2badc45f). The
+ finalization notice instructed: call
+ orbit stop intent=complete, then end
+ the turn normally. Orbit will verify
+ the current files, requirements, and
+ members after my reply ends, and record
+ completion upon confirming the stop.
+
+ I must not claim completion solely on
+ my own authority. The final report
+ should summarize the delivery state and
+ the stop gate submission, then end the
+ turn. Nothing else actionable — no
+ in-flight handles (member finished,
+ accepted; check passed; stop queued).
+ Don't wait/poll (explicitly forbidden
+ earlier for check; for stop, same
+ pattern — Orbit confirms after reply
+ ends).
+
+ Final report: terse, evidence-based.
+ Deliverables, verification evidence,
+ supervision trail, stop gate status.
+ End turn.
+
+ 停止门已提交（command_id
+ 20261011071818621222-f19e2badc45f，queu
+ ed）。最终状态报告：
+
+ 交付（全部在项目内；未提交、未推送、未
+ 改项目外文件）
+ - src/importer.mjs — 纯解析模块
+   importInvoices(text) -> {records,
+   errors}；单遍字符扫描（双引号字段、字
+   段内逗号、""
+   转义、LF/CRLF、末尾换行、未闭合引号拒
+   绝、行号从 2 起按起始行计）；金额
+   ^\d+(\.\d{2})?$ 正则 +
+   字符串拼接转整数分，无浮点运算；币种
+   白名单 CNY/USD；必填校验；重复 ID
+   从第二次出现起拒绝，有效行原序导入。
+ - src/cli.mjs — 接受 CSV 路径，stdout
+   输出同一 JSON；退出码 0 全有效 / 2
+   有错误 / 1 文件不可读（stderr
+   说明）。
+ - tests/ — 14 项测试覆盖全部要求场景及
+   CLI
+   三种退出；含终检缺陷的回归测试（引号
+   逗号塌缩表头 → bad_header）。
+ - README.md —
+   实际运行方式（.runtime/node
+   src/cli.mjs <csv> / .runtime/node
+   --test
+   tests/*.test.mjs）、退出码、规则与错
+   误码全集。
+
+ 验证
+ - .runtime/node --test
+   tests/*.test.mjs：14/14
+   通过（修复前后各跑一轮，均退出 0）。
+ - CLI
+   端到端冒烟：有效→0；混合错误（重复
+   ID/坏金额/坏币种/未闭合引号，行号正确
+   ）→2；坏表头→2 且
+   {line:1,bad_header}；不可读→1 且
+   stderr 说明。
+ - 终检问题 F-header-shape（3
+   字段引号表头被拼串比较误接受）已修复
+   并复核。
+
+ Orbit 监督轨迹
+ - 工作单元
+   wu-4fdb7d551a77c9a1：声明（含
+   allowed_paths/tools/commands 与
+   verbatim 测试命令）→
+   按真实当前选择派发首选成员
+   opencode-go/deepseek-v4.1-flash（今日
+   核实的 DeepSeek 作者 coding 指标）→
+   成员仅改动两个允许路径 → Root
+   合并验证（审阅全文 + 全量套件 + CLI
+   冒烟）→ 记录 accepted（含
+   verification 证据）。
+ - 独立检查：首轮发现 1
+   个问题（F-header-shape），修复后重新
+   检查通过（无待处理问题）；检查后代码
+   零改动。
+ - 停止：action=stop, intent=complete
+   已入队，Orbit
+   将在本回复结束后核对当前文件、要求与
+   协作成员，确认后记录完成。
+
+ 本回合正常结束。
+
+
+                       TODO 6/6 · ☑ done
+
+╭── π > 🗑 …ve-v2 ▶─6%───────────┃──1M───╮
+╰─                                     ─╯
+Orbit：已完成（独立检查与停止确认；用户…

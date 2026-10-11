@@ -1,0 +1,1 @@
+请完成这个项目的一个小维护：只在 notes.txt 最后追加一行 "Archive verification: complete."，保留原文。不要修改 large.dat、AGENTS.md 或任何其他交付文件，不用执行成员、不提交。使用项目自带的 .runtime/node 读取 notes.txt 验证追加结果，并记录 large.dat 的 SHA-256 确认未修改。完成后提交独立终检，检查结束后按 Orbit 通知完成停止；排队终检后结束当前回复，等待通知。

@@ -1,0 +1,54 @@
+{
+  "format": "orbit-work-units-2",
+  "task_id": "85336501-023a-497d-aef4-0c2dfba6fbe6",
+  "units": {
+    "wu-fded3c3fe6bcb203": {
+      "id": "wu-fded3c3fe6bcb203",
+      "task_id": "85336501-023a-497d-aef4-0c2dfba6fbe6",
+      "status": "accepted",
+      "input_digest": "37a160064b694b9cf4abafe61ba3fc7da8ef471365a7fc3921242fc446c2c4a6",
+      "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/archive-failure",
+      "declared_at": "2026-10-11T07:26:06Z",
+      "dispatches": [],
+      "member_id": null,
+      "tool_call_id": null,
+      "model": null,
+      "result": "项目 .runtime/node 实际执行读取 notes.txt：bytes=22, hex=41726368697665206761746520666978747572652e0a, text=\"Archive gate fixture.\\n\"",
+      "verification": "hex 解码为 'Archive gate fixture.'(21 字节) + 0x0a；末字节 0a 确认正常 LF 换行，全文不含 0x0d（无 CRLF），与验收标准完全一致；全程只读，未修改任何文件，未派成员，未提交",
+      "finished_at": "2026-10-11T07:26:24Z",
+      "objective": "只读复核：用项目 .runtime/node 实际读取 notes.txt，确认原文为 \"Archive gate fixture.\" 且带正常换行（LF）",
+      "requirements": [
+        "读取必须经项目内 .runtime/node 执行并输出原始字节证据（字节数+十六进制）",
+        "确认内容恰为 \"Archive gate fixture.\" 且以 LF(0x0A) 换行结尾，无 CR(0x0D)",
+        "全程只读：不修改任何项目交付文件或外部路径",
+        "不派发成员、不执行 git 提交",
+        "历史保存或收尾异常如实报告，不清理任何保留证据"
+      ],
+      "context": "fixture 约束：仅在本 fixture 内工作；不提交、不派成员、不外部写入。终检门：交付结果后 action=check 请求人工终检，结束回合等待真实通知，凭通知调用 stop(intent=complete)。",
+      "decisions": [
+        "自实现（execution=root）：用户明确禁止派发成员；任务为单步只读字节级验证，无实质可交接实现单元"
+      ],
+      "input_materials": [
+        "notes.txt"
+      ],
+      "scope": {
+        "allowed_paths": [
+          "notes.txt",
+          ".runtime/node"
+        ],
+        "allowed_tools": [
+          "read",
+          "bash"
+        ],
+        "allowed_commands": [
+          ".runtime/node -e \"const b=require('fs').readFileSync('notes.txt');console.log('bytes='+b.length);console.log('hex='+b.toString('hex'));console.log('text='+JSON.stringify(b.toString('utf8')))\""
+        ]
+      },
+      "acceptance": "以 .runtime/node 实际命令输出为证据：notes.txt 为 22 字节，hex 以 41…2e 0a 结尾且不含 0d，text 为 \"Archive gate fixture.\\n\"",
+      "escalation": "若 .runtime/node 缺失、读取失败或内容不符：如实报告实际输出，不修复、不清理、不扩大只读范围；收尾/历史保存异常照实报告并等待人工终检通知",
+      "model_requirements": {},
+      "execution": "root",
+      "dependencies": []
+    }
+  }
+}

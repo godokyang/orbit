@@ -1,0 +1,22 @@
+{
+  "provider": "opencode-go",
+  "model": "deepseek-v4.1-flash",
+  "reasoning": "unknown",
+  "billing_route": "subscription_quota",
+  "status": "evidence",
+  "retrieved_at": "2026-10-11T07:05:49Z",
+  "valid_until": "2026-10-12T07:05:49Z",
+  "sources": [
+    "https://api-docs.deepseek.com/news/news260910/",
+    "https://api-docs.deepseek.com/img/v4.1_260910_benchmark_table_en.png",
+    "https://opencode.ai/go"
+  ],
+  "method_version": "DeepSWE v1.1 vendor report published 2026-09-10; benchmark measurement date unknown",
+  "metrics": {
+    "deepSWE_v1_1": {
+      "value": 74.2,
+      "unit": "percent",
+      "basis": "Freshly verified DeepSeek author table: V4.1-Flash DeepSWE v1.1=74.2. Model-level vendor benchmark; OpenCode Go lists this model, but OMP serving/reasoning variant has not independently run the benchmark. No exact-route success guarantee."
+    }
+  }
+}

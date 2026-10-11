@@ -1,0 +1,220 @@
+ workspace已通过；清临时项目前保留export") — find export artifacts.
+
+ Let me wait for bg_32 and meanwhile locate erratum + export evidence.
+
+╭──────────────────────────────────────────────────────────────────────────────────╮
+│ $                                                                                │
+│ R=/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-o │
+│ gwxn983; find "$R" -maxdepth 2 -iname "*erratum*" 2>/dev/null; echo ---; find    │
+│ "$R" -maxdepth 3 -name "*export*" -not -path "*/node_modules/*" 2>/dev/null |    │
+│ head; echo ---; cat "$R/final-frozen-source-comparison.json"                     │
+│ "$R/installation-final-size.json" 2>/dev/null                                    │
+├─── Output ───────────────────────────────────────────────────────────────────────┤
+│ … (28 earlier lines, showing 6 of 34) ⟦⌃O: Expand⟧                               │
+│   "head": "25f0104b70d68c7c47b43473f1b75d928d2222db"                             │
+│ }{                                                                               │
+│   "files": 956,                                                                  │
+│   "logical_bytes": 8040804,                                                      │
+│   "allocated_bytes": 10645504                                                    │
+│ }                                                                                │
+│ ⟦Wall: 0.01s | Timeout: 300s⟧                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────╯
+
+╭──────────────────────────────────────────────────────────────────────────────────╮
+│ $                                                                                │
+│ R=/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-o │
+│ gwxn983; cat "$R/process-failure-evidence/controller-receipt-erratum.json";      │
+│ echo; echo "== archive-failure export.log:"; tail -20                            │
+│ "$R/archive-failure-evidence/export.log"; echo "== archive-failure evidence      │
+│ dir:"; ls "$R/archive-failure-evidence"                                          │
+├─── Output ───────────────────────────────────────────────────────────────────────┤
+│ … (38 earlier lines, showing 6 of 44) ⟦⌃O: Expand⟧                               │
+│ restored-historical                                                              │
+│ restored-validation.json                                                         │
+│ root-verifications.jsonl                                                         │
+│ state.json                                                                       │
+│ task.tar.gz                                                                      │
+│ work-units.json                                                                  │
+│ ⟦Wall: 0.00s | Timeout: 300s⟧                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────╯
+
+ Erratum confirmed ✔. archive-failure export: missing=0 ✔, task.tar.gz exists.
+ restore.log + restored-validation.json exist — verify restore passed.
+
+╭──────────────────────────────────────────────────────────────────────────────────╮
+│ $                                                                                │
+│ R=/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-o │
+│ gwxn983; tail -5 "$R/archive-failure-evidence/restore.log"; echo "==             │
+│ validation:"; cat "$R/archive-failure-evidence/restore-validation.json"          │
+│ 2>/dev/null || cat "$R/archive-failure-evidence/restored-validation.json"; echo; │
+│ ls "$R/archive-failure-evidence/restored-historical" | head                      │
+├─── Output ───────────────────────────────────────────────────────────────────────┤
+│ … (6 earlier lines, showing 6 of 12) ⟦⌃O: Expand⟧                                │
+│   "notes": "Archive gate fixture.\n",                                            │
+│   "outside_target_entries": 0,                                                   │
+│   "original_workspace_exists": true                                              │
+│ }                                                                                │
+│ AGENTS.md                                                                        │
+│ notes.txt                                                                        │
+│ ⟦Wall: 0.00s | Timeout: 300s⟧                                                    │
+╰──────────────────────────────────────────────────────────────────────────────────╯
+
+ restore.log: restore from source "workspace" (retained workspace branch — archive
+ missing), digest recorded ✔. restored-validation: outside_target_entries=0
+ (external symlink target still empty — no escape write ✔),
+ original_workspace_exists=true ✔. Restored tree has AGENTS.md/notes.txt.
+
+ Now waiting on bg_32 (frozen hash + git status). It may have finished already or
+ be stuck. It was backgrounded at start. Its result will auto-deliver. I have
+ everything else. Should I wait? The final conclusion needs "复核冻结源代码". I
+ already verified frozen hashes in my earlier delta round (14c8fc1c / 2b000c1e
+ match), and Root's final-frozen-source-comparison.json says mismatches=[]
+ packaged_code_unchanged=true. But my own independent re-hash was bg_32. Rather
+ than duplicate, wait for bg_32 briefly.
+
+ Actually I can just wait — nothing else to do. Use wait tool.
+
+⚠ 1 job settled 1 failed
+└─ ✘ ⟦bash⟧ bg_32 R=/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-ho… · 5m
+     [Command timed out after 300 seconds] error: read: interrupted error: interrup…
+
+ bg_32 timed out — the process-substitution while loop likely hung (probably shasum
+ on some file blocked? Or the < <(python3...) with while read in non-interactive
+ shell had an issue). Never mind — re-run simply with python directly, fast and
+ deterministic.
+
+ bg_32 的 shell 进程替换挂起超时，换 Python 直接重算：
+
+╭──────────────────────────────────────────────────────────────────────────────────╮
+│ … 6 earlier lines ⟦⌃O: Expand⟧                                                   │
+│     a=hashlib.sha256(open(f,'rb').read()).hexdigest()                            │
+│     if a!=h: bad.append((f,a,h))                                                 │
+│ print("checked",len(frozen),"files; mismatches:",bad if bad else "NONE")         │
+│ EOF                                                                              │
+│ git status --short | head -15                                                    │
+├─── Output ───────────────────────────────────────────────────────────────────────┤
+│ … (10 earlier lines, showing 6 of 16) ⟦⌃O: Expand⟧                               │
+│  M lib/orbit/diagnostics.rb                                                      │
+│  M lib/orbit/omp_check_runner.rb                                                 │
+│  M lib/orbit/omp_entry.rb                                                        │
+│  M lib/orbit/task_evidence.rb                                                    │
+│  M lib/orbit/task_runtime.rb                                                     │
+│  M lib/orbit/version.rb                                                          │
+│ ⟦Wall: 0.08s | Timeout: 60s⟧                                                     │
+╰──────────────────────────────────────────────────────────────────────────────────╯
+
+ All 11 frozen files match (working tree). git status shows dirty files — expected
+ this round (docs + code changes authorized; the frozen manifest files themselves
+ match their frozen hashes, meaning working-tree lib files = frozen bytes).
+
+ All verification items done. Compose final conclusion:
+
+ 通过项:
+ 1. 冻结源码： 11/11 working-tree files match frozen-source-sha256.json
+    (independent Python recompute after shell attempt hung). Root's
+    final-frozen-source-comparison.json also mismatches=[] (tested build unchanged,
+    not re-read per instruction).
+ 2. storage-v3 三任务： A 96dadc27 / repeat 92f92422 / C 15740391, each 1 check;
+    all lifecycle reaped/esrch/collected + reclaim 5 gates true, workspaces
+    reclaimed, status=complete runtime_pid None. Store: 5 objects, logical
+    3,520,431 = +102, allocated 3,538,944 = +4,096 (4KiB) vs previous
+    4/3,520,329/3,534,848 ✔ exact delta as claimed.
+ 3. process-failure task 1730d605: check1 verdict=check_failed, error "exit signal
+    9", failure_kind=unavailable, usage usage_status=unknown/incomplete with 1
+    pending call receipt; erratum file exists correcting Controller field name
+    (program originals untouched ✔). Reclaim: reclaimed, all gates true. check2:
+    GLM fallback (different provider zhipu-coding-plan/glm-5.3-flash), interrupted
+    by Ctrl+D; NOT in state.checks (list len 1); recorded only in
+    usage.interrupted_checks["2"] (status interrupted, attempt_id, note) + checks/2
+    dir scope/run/evidence/lifecycle/reclaim originals; no normal check_result
+    (result None) ✔ per Root's framing — not claimed as fallback pass, not provider
+    rejection. Task status=paused, runtime_pid None.
+ 4. archive-failure task 85336501: snapshot-objects is symlink → external target
+    archive-failure-outside exists and EMPTY (outside_target_entries=0) — seal
+    refused (archive missing), not deletion. checks 1/2: no snapshot-archive.json,
+    workspace dirs retained full (3 files each), reclaim status=retained reason
+    "archive_unverified: archive is missing", gates archive:false others true.
+    Evidence ok=true, verdicts correct/complete — checks themselves succeeded; only
+    archive failed. Task status=complete, runtime_pid None,
+    stop_confirmation.confirmed=True ✔. Export: task.tar.gz 697,277 bytes, 215
+    files, missing=0 ✔. Restore: source="workspace" branch used (archive absent),
+    digest recorded, restored tree materialized, validation
+    outside_target_entries=0 + original workspace exists ✔.
+ 5. Metadata retained: tested-build-v2.json, final-frozen-source-comparison.json,
+    installation-final-size.json (956 files / 8,040,804 logical / 10,645,504
+    allocated ≈ 10.2 MB installed — actually ~10.4MB allocated). Erratum preserved.
+
+ 限制/如实说明:
+ - 我没有重读已卸载 release（遵指示）；打包一致性以 working-tree 冻结 hash 复核 +
+   Root 的 final-frozen-source-comparison.json 为准。
+ - failure-v4：fixture task 存在但无 checks，evidence 目录有 state/events；Zenmux
+   路径无结论，如实记录（Root 已说明）。
+ - storage-v3 fixture 129M 总量主要是 .git 等非 .orbit 内容；未逐一审计。
+ - bg_32 shell 管道超时（工具使用问题，非产品问题），Python 重算补位。
+ - 取消2的 check_observations 仍 in_flight/stale null（恢复时重跑语义）— noted
+   earlier.
+
+ 资源归属: 我创建的资源：orbit-host-probe-20261011-gupQ9v（已删确认）、bg_32/bg_34
+ 两个后台 job（均已结束，无残留进程）。未创建其他文件/目录/进程；固定进程未触碰。
+
+ Report now, concise.
+
+ 最终独立只读核查结论
+
+ 1. 冻结源码 ✔ 通过
+ 工作区 11/11 文件 sha256 与 frozen-source-sha256.json 逐一相符（Python
+ 独立重算；此前 shell 管道调用超时为工具使用问题，已换法补位）。未重读已卸载
+ release；打包一致性另由 Root 的
+ final-frozen-source-comparison.json(mismatches=[]、packaged_code_unchanged=true、0
+ .8.4@25f0104）佐证。
+
+ 2. storage-v3 三任务 ✔ 通过
+ A(96dadc27)/repeat(92f92422)/C(15740391）各 1 次检查：lifecycle
+ reaped/esrch/collected 齐、reclaim 五门全 true、workspace
+ 均已回收、status=complete、runtime_pid=None。对象库实测 5 个对象 / logical
+ 3,520,431 / allocated 3,538,944，相对 repeat 后基线（4/3,520,329/3,534,848）恰为
+ +102 logical / +4,096 allocated，与声明的 102 bytes/4KiB 增量逐字节一致。
+
+ 3. process-failure(1730d605)✔ 通过（按更正口径）
+ - check1:state 记 verdict=check_failed、error="check run failed (exit signal
+   9)"、failure_kind=unavailable;usage usage_status=unknown, incomplete=true,1 条
+   pending 调用回执（token/cost 未知）。erratum 原件
+   controller-receipt-erratum.json 在案，更正 actual_reported_calls_before_fault
+   字段名，程序原件未改 ✔。reclaim 五门 true、已回收。
+ - check2：未完成 GLM fallback(zhipu-coding-plan/glm-5.3-flash),Ctrl+D 取消；不在
+   state.checks(len=1)，仅归属 usage.interrupted_checks["2"](status=interrupted）及
+   checks/2 的 scope/run/evidence/lifecycle/reclaim 原件；无正常
+   check_result(result=None)。不声称 fallback 通过，也不称 provider
+   拒绝——证据与此口径一致 ✔。
+ - 任务 status=paused、runtime_pid=None。
+
+ 4. archive-failure(85336501)✔ 通过
+ - 成因实证：.orbit/snapshot-objects 为启动前已存在的 symlink → 外部目标
+   archive-failure-outside，目标存在且仍为空(validation
+   outside_target_entries=0)——是 seal 拒绝写入（fail-closed)，非删除 archive。
+ - checks/1、2：均无 snapshot-archive.json;workspace 完整保留（各 3 文件）;reclaim
+   status=retained、reason archive_unverified: archive is missing、archive 门 false
+   其余 true。检查本身 ok=true(verdict
+   correct/complete)——归档失败与检查判定正确分离。
+ - 停止：status=complete、runtime_pid=None、stop_confirmation.confirmed=true(async_
+   jobs_settled、协作持久化无 gap)。
+ - export/restore:task.tar.gz 697,277B/215 文件/missing=0;restore 走
+   source=workspace 分支（归档缺席的正确路径），digest 记录、复原树落盘、原
+   workspace 仍在 ✔。
+
+ 5. 限制与如实项
+ - failure-v4:task 3d2b220f 有 state/events，无 checks;Zenmux
+   错误路径无结论，不延伸判断。
+ - 未审计 storage-v3 夹具 129M 中 .git 等非 .orbit 部分；未复跑任何测试/模型/CLI。
+ - 取消2的 check_observations 仍记
+   in_flight/stale=null——恢复重跑语义下的预期态，非缺陷。
+
+ 6. 我的资源归属
+ 创建过的仅：临时目录 orbit-host-probe-20261011-gupQ9v（早前已删并确认 gone）及后台
+ job
+ bg_32（超时已终止）/bg_34（已完成退出），均无残留进程。本轮未新建任何文件/目录/进
+ 程，未触碰固定 H/J/K、OMP、Herdr 及任何 Root 资产。核查全程只读。
+
+
+╭── π > ◒ K3-256k > 📁 ~/Personal/omen/orbit > ⑂ main *30 ?7 > S6.14 ▶──31%┃262K───╮
+╰─                                                                                ─╯

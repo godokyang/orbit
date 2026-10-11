@@ -1,0 +1,33 @@
+{
+  "pid": 49819,
+  "exit": 143,
+  "group_exit_confirmed": true,
+  "ok": true,
+  "problems": [],
+  "image_sha256": "c414cd0e204de974f73753c7e28d7638e7b3691bb8b1a2bab6b25bb7fed7ce77",
+  "read_facts": [
+    {
+      "path": "screen.png",
+      "bytes": 70,
+      "sha256": "c414cd0e204de974f73753c7e28d7638e7b3691bb8b1a2bab6b25bb7fed7ce77",
+      "mime_type": "image/png",
+      "model_image_input": true
+    },
+    {
+      "path": "screen.png",
+      "bytes": 70,
+      "sha256": "c414cd0e204de974f73753c7e28d7638e7b3691bb8b1a2bab6b25bb7fed7ce77",
+      "mime_type": "image/png",
+      "model_image_input": true
+    },
+    {
+      "path": "screen.png",
+      "bytes": 70,
+      "sha256": "c414cd0e204de974f73753c7e28d7638e7b3691bb8b1a2bab6b25bb7fed7ce77",
+      "mime_type": "image/png",
+      "model_image_input": true
+    }
+  ],
+  "case_count": 17,
+  "failed_cases": []
+}

@@ -1,0 +1,299 @@
+{
+  "recorded_calls": 326,
+  "groups": [
+    {
+      "role": "judgment",
+      "provider": "typesafe",
+      "model": "jev-1.13.0",
+      "calls": 73,
+      "status": {
+        "completed": 73
+      },
+      "usage_status": {
+        "reported": 73
+      },
+      "fields": {
+        "input_tokens": {
+          "reported_sum": 272235,
+          "reported_calls": 73
+        },
+        "output_tokens": {
+          "reported_sum": 3937,
+          "reported_calls": 73
+        }
+      }
+    },
+    {
+      "role": "root",
+      "provider": "kimi-code",
+      "model": "k3-256k",
+      "calls": 18,
+      "status": {
+        "completed": 17,
+        "failed": 1
+      },
+      "usage_status": {
+        "reported": 17,
+        "unknown": 1
+      },
+      "fields": {
+        "input": {
+          "reported_sum": 105506,
+          "reported_calls": 17
+        },
+        "output": {
+          "reported_sum": 33758,
+          "reported_calls": 17
+        },
+        "cacheRead": {
+          "reported_sum": 547584,
+          "reported_calls": 17
+        },
+        "cacheWrite": {
+          "reported_sum": 0,
+          "reported_calls": 17
+        },
+        "totalTokens": {
+          "reported_sum": 686848,
+          "reported_calls": 17
+        }
+      }
+    },
+    {
+      "role": "member",
+      "provider": "kimi-code",
+      "model": "k3-256k",
+      "calls": 16,
+      "status": {
+        "completed": 14,
+        "failed": 2
+      },
+      "usage_status": {
+        "reported": 14,
+        "partial": 1,
+        "unknown": 1
+      },
+      "fields": {
+        "input": {
+          "reported_sum": 67843,
+          "reported_calls": 15
+        },
+        "output": {
+          "reported_sum": 20016,
+          "reported_calls": 14
+        },
+        "cacheRead": {
+          "reported_sum": 243968,
+          "reported_calls": 14
+        },
+        "cacheWrite": {
+          "reported_sum": 0,
+          "reported_calls": 14
+        },
+        "totalTokens": {
+          "reported_sum": 331827,
+          "reported_calls": 15
+        }
+      }
+    },
+    {
+      "role": "root",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "calls": 150,
+      "status": {
+        "completed": 149,
+        "failed": 1
+      },
+      "usage_status": {
+        "reported": 149,
+        "unknown": 1
+      },
+      "fields": {
+        "input": {
+          "reported_sum": 838602,
+          "reported_calls": 149
+        },
+        "output": {
+          "reported_sum": 126399,
+          "reported_calls": 149
+        },
+        "cacheRead": {
+          "reported_sum": 3741568,
+          "reported_calls": 149
+        },
+        "cacheWrite": {
+          "reported_sum": 0,
+          "reported_calls": 149
+        },
+        "reasoningTokens": {
+          "reported_sum": 88943,
+          "reported_calls": 147
+        },
+        "totalTokens": {
+          "reported_sum": 4706569,
+          "reported_calls": 149
+        }
+      }
+    },
+    {
+      "role": "checker",
+      "provider": "zenmux",
+      "model": "deepseek/deepseek-v4.1-flash",
+      "calls": 3,
+      "status": {
+        "completed": 3
+      },
+      "usage_status": {
+        "reported": 3
+      },
+      "fields": {
+        "input": {
+          "reported_sum": 15460,
+          "reported_calls": 3
+        },
+        "output": {
+          "reported_sum": 2897,
+          "reported_calls": 3
+        },
+        "cacheRead": {
+          "reported_sum": 36736,
+          "reported_calls": 3
+        },
+        "cacheWrite": {
+          "reported_sum": 0,
+          "reported_calls": 3
+        },
+        "reasoningTokens": {
+          "reported_sum": 1293,
+          "reported_calls": 3
+        },
+        "totalTokens": {
+          "reported_sum": 55093,
+          "reported_calls": 3
+        }
+      }
+    },
+    {
+      "role": "checker",
+      "provider": "opencode-go",
+      "model": "deepseek-v4.1-flash",
+      "calls": 57,
+      "status": {
+        "completed": 55,
+        "failed": 2
+      },
+      "usage_status": {
+        "reported": 55,
+        "unknown": 2
+      },
+      "fields": {
+        "input": {
+          "reported_sum": 208010,
+          "reported_calls": 55
+        },
+        "output": {
+          "reported_sum": 69760,
+          "reported_calls": 55
+        },
+        "cacheRead": {
+          "reported_sum": 761472,
+          "reported_calls": 55
+        },
+        "cacheWrite": {
+          "reported_sum": 0,
+          "reported_calls": 55
+        },
+        "reasoningTokens": {
+          "reported_sum": 47164,
+          "reported_calls": 55
+        },
+        "totalTokens": {
+          "reported_sum": 1039242,
+          "reported_calls": 55
+        }
+      }
+    },
+    {
+      "role": "root",
+      "provider": "cursor",
+      "model": "grok-4.7-fast",
+      "calls": 1,
+      "status": {
+        "failed": 1
+      },
+      "usage_status": {
+        "partial": 1
+      },
+      "fields": {
+        "output": {
+          "reported_sum": 10992,
+          "reported_calls": 1
+        },
+        "totalTokens": {
+          "reported_sum": 10992,
+          "reported_calls": 1
+        }
+      }
+    },
+    {
+      "role": "checker",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "calls": 1,
+      "status": {
+        "failed": 1
+      },
+      "usage_status": {
+        "unknown": 1
+      },
+      "fields": {}
+    },
+    {
+      "role": "member",
+      "provider": "opencode-go",
+      "model": "deepseek-v4.1-flash",
+      "calls": 7,
+      "status": {
+        "completed": 7
+      },
+      "usage_status": {
+        "reported": 7
+      },
+      "fields": {
+        "input": {
+          "reported_sum": 16330,
+          "reported_calls": 7
+        },
+        "output": {
+          "reported_sum": 14640,
+          "reported_calls": 7
+        },
+        "cacheRead": {
+          "reported_sum": 103936,
+          "reported_calls": 7
+        },
+        "cacheWrite": {
+          "reported_sum": 0,
+          "reported_calls": 7
+        },
+        "totalTokens": {
+          "reported_sum": 134906,
+          "reported_calls": 7
+        },
+        "reasoningTokens": {
+          "reported_sum": 9865,
+          "reported_calls": 6
+        }
+      }
+    }
+  ],
+  "category_relationships": "not_inferred",
+  "cash_cost": null,
+  "actual_quota_consumption": null,
+  "fixed_development_members_usage": "unknown; provider UI estimates not invoices",
+  "missing_ledgers": [
+    "failure calibration before any actual product task",
+    "failure-v2 non-Orbit Python judge calibration not in product resource ledger"
+  ]
+}

@@ -6,6 +6,7 @@ require "json"
 require "tmpdir"
 
 require_relative "../lib/orbit/workspace_snapshot"
+require_relative "../lib/orbit/check_snapshot_archive"
 require_relative "../lib/orbit/task_git_evidence"
 
 module WorkspaceSnapshotTest
@@ -20,6 +21,7 @@ module WorkspaceSnapshotTest
       test_non_git_project_by_content(tmp)
       test_destination_boundaries(tmp)
       test_committed_paths_between_bound_and_fixed_snapshots(tmp)
+      test_archive_restore_and_reclaim_gates(tmp)
     end
     puts("WORKSPACE_SNAPSHOT_TEST_PASS assertions=#{@assertions}")
   end
@@ -195,6 +197,109 @@ module WorkspaceSnapshotTest
     orbit_dest = File.join(root, ".orbit", "snapshots", "s1")
     snapshot = Orbit::WorkspaceSnapshot.capture(project_root: root, destination: orbit_dest)
     assert_equal(snapshot["digest"], fingerprint(root), "snapshot under .orbit is excluded from the fingerprint")
+  end
+
+  # Same bytes land once; restore and reclaim never share inodes or rewrite scope.
+  def test_archive_restore_and_reclaim_gates(tmp)
+    root = project(tmp, "archive")
+    init_git(root)
+    write(root, "a.txt", "same")
+    File.chmod(0o755, File.join(root, "a.txt"))
+    write(root, "b.txt", "gone")
+    commit(root, "init")
+    File.delete(File.join(root, "b.txt"))
+    File.symlink("a.txt", File.join(root, "link"))
+    File.symlink(File.join(root, "a.txt"), File.join(root, "absolute-link"))
+    store = Orbit::CheckSnapshotArchive.new(root)
+    task = File.join(root, ".orbit", "tasks", "t")
+    dest1 = File.join(task, "checks", "1", "workspace")
+    first = Orbit::WorkspaceSnapshot.capture(project_root: root, destination: dest1, content_store: store)
+    archive = first.delete("archive")
+    object = object_path(root, "same")
+    assert(archive["snapshot_digest"] == first["digest"], "archive seals the captured digest")
+    assert_equal(0o755, File.stat(File.join(dest1, "a.txt")).mode & 0o777, "workspace keeps the captured mode")
+    assert_equal(0o444, File.stat(object).mode & 0o777, "content object is read-only")
+    assert_independent(File.join(root, "a.txt"), File.join(dest1, "a.txt"), object)
+    dest2 = File.join(task, "checks", "2", "workspace")
+    second = Orbit::WorkspaceSnapshot.capture(project_root: root, destination: dest2, content_store: store)
+    second.delete("archive")
+    assert_equal(1, Dir.glob(File.join(root, ".orbit/snapshot-objects/**/*")).count { |path| File.file?(path) }, "unchanged bytes are stored once")
+    assert_independent(File.join(dest1, "a.txt"), File.join(dest2, "a.txt"), object)
+    write(root, "a.txt", "changed")
+    File.chmod(0o755, File.join(root, "a.txt"))
+    third = Orbit::WorkspaceSnapshot.capture(project_root: root, destination: File.join(task, "checks", "3", "workspace"),
+                                             content_store: Orbit::CheckSnapshotArchive.new(root))
+    assert(third["digest"] != first["digest"] && File.read(object) == "same", "a small edit stores new bytes and leaves the old object")
+    assert_equal(2, Dir.glob(File.join(root, ".orbit/snapshot-objects/**/*")).count { |path| File.file?(path) }, "only the new content is added")
+    File.write(File.join(dest1, "a.txt"), "mutated-copy")
+    assert_equal("same", File.read(object), "editing one workspace does not change stored history")
+    scope_path = File.join(task, "checks", "1", "scope.json")
+    File.write(scope_path, JSON.pretty_generate("number" => 1, "snapshot" => first))
+    File.write(File.join(task, "checks", "1", "snapshot-archive.json"), JSON.pretty_generate(archive))
+    File.write(File.join(task, "checks", "2", "scope.json"), JSON.pretty_generate("number" => 2, "snapshot" => second))
+    scope_bytes = File.binread(scope_path)
+    restored = Orbit::CheckSnapshotArchive.restore(task_path: task, project_root: root, number: 1, destination: File.join(tmp, "restored"))
+    assert_equal(first["digest"], restored["digest"], "archive restore matches the original scope digest")
+    assert_equal("same", File.read(File.join(tmp, "restored", "a.txt")), "restore returns the archived bytes")
+    assert_equal(0o755, File.stat(File.join(tmp, "restored", "a.txt")).mode & 0o777, "restore keeps mode")
+    assert(File.symlink?(File.join(tmp, "restored", "link")) && !File.exist?(File.join(tmp, "restored", "b.txt")), "link is restored and the deletion stays absent")
+    assert(File.readlink(File.join(tmp, "restored", "absolute-link")) == "a.txt", "absolute internal links restore as historical relative links")
+    assert_independent(File.join(tmp, "restored", "a.txt"), object, File.join(dest2, "a.txt"))
+    legacy = Orbit::CheckSnapshotArchive.restore(task_path: task, project_root: root, number: 2, destination: File.join(tmp, "legacy"))
+    assert_equal("workspace", legacy["source"], "a complete directory still restores without an archive")
+    assert(File.readlink(File.join(tmp, "legacy", "absolute-link")) == "a.txt", "legacy absolute internal links restore without live source")
+    assert_independent(File.join(tmp, "legacy", "a.txt"), File.join(dest2, "a.txt"))
+    assert(File.binread(scope_path) == scope_bytes, "restore does not rewrite scope")
+    run = { "pid" => 9, "pgid" => 9 }
+    absent = lifecycle(1, "reaped" => false, "group_probe" => "pid_absent", "receipts" => "pending")
+    kept = Orbit::CheckSnapshotArchive.reclaim(task_path: task, project_root: root, number: 1, lifecycle: absent, run_record: run)
+    assert(kept["status"] == "retained" && File.directory?(dest1), "pid absence does not remove the workspace")
+    pending = lifecycle(1, "receipts" => "pending")
+    kept = Orbit::CheckSnapshotArchive.reclaim(task_path: task, project_root: root, number: 1, lifecycle: pending, run_record: run)
+    assert(kept["reasons"].include?("lifecycle_receipts") && File.directory?(dest1), "uncollected receipts keep the workspace")
+    kept = Orbit::CheckSnapshotArchive.reclaim(task_path: task, project_root: root, number: 1, lifecycle: lifecycle(1), run_record: run, in_flight: true)
+    assert(kept["reasons"].include?("in_flight") && File.directory?(dest1), "an in-flight check is not removed")
+    kept = Orbit::CheckSnapshotArchive.reclaim(task_path: task, project_root: root, number: 1, lifecycle: lifecycle(1), run_record: run, stop_unconfirmed: true)
+    assert(kept["reasons"].include?("stop_unconfirmed") && File.directory?(dest1), "stop_unconfirmed keeps the workspace")
+    polluted = Orbit::CheckSnapshotArchive.reclaim(task_path: task, project_root: root, number: 1, lifecycle: lifecycle(1), run_record: run)
+    assert(polluted["status"] == "retained" && File.read(File.join(dest1, "a.txt")) == "mutated-copy", "abnormal copy survives even valid archive and exit")
+    File.binwrite(File.join(dest1, "a.txt"), "same")
+    removed = Orbit::CheckSnapshotArchive.reclaim(task_path: task, project_root: root, number: 1, lifecycle: lifecycle(1), run_record: run)
+    assert(removed["status"] == "reclaimed" && !File.exist?(dest1) && File.file?(File.join(task, "checks", "1", "snapshot-archive.json")),
+           "verified archive, group exit and receipts remove only the workspace")
+    assert(File.binread(scope_path) == scope_bytes && File.read(object) == "same", "reclaim leaves scope and content objects")
+    broken = Orbit::CheckSnapshotArchive.new(root)
+    def broken.store_file(*)
+      @failures << "injected store failure"
+      nil
+    end
+    failed = Orbit::WorkspaceSnapshot.capture(project_root: root, destination: File.join(task, "checks", "4", "workspace"), content_store: broken)
+    assert(failed["archive_error"] && File.read(File.join(task, "checks", "4", "workspace", "a.txt")) == "changed",
+           "a store failure still publishes the independent workspace")
+    escaped_root = project(tmp, "escaped-store")
+    init_git(escaped_root)
+    write(escaped_root, "a.txt", "owned")
+    outside = File.join(tmp, "foreign-store")
+    FileUtils.mkdir_p(outside)
+    File.symlink(outside, File.join(escaped_root, ".orbit"))
+    escaped = Orbit::WorkspaceSnapshot.capture(project_root: escaped_root, destination: File.join(tmp, "escaped-copy"), content_store: Orbit::CheckSnapshotArchive.new(escaped_root))
+    assert(escaped["archive_error"] && Dir.empty?(outside), "symlinked object parents cannot write outside project")
+  end
+
+  def object_path(root, content)
+    hex = Digest::SHA256.hexdigest(content)
+    File.join(root, ".orbit", "snapshot-objects", "sha256", hex[0, 2], hex)
+  end
+
+  def lifecycle(number, overrides = {})
+    { "number" => number, "pid" => 9, "pgid" => 9, "reaped" => true,
+      "group_probe" => "esrch", "receipts" => "collected" }.merge(overrides)
+  end
+
+  def assert_independent(*paths)
+    paths.map { |path| File.stat(path) }.combination(2) do |left, right|
+      assert(left.dev != right.dev || left.ino != right.ino, "copies share an inode")
+    end
   end
 
   def project(tmp, name)

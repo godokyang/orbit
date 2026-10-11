@@ -7,6 +7,7 @@ require "fileutils"
 require "shellwords"
 require_relative "task_record"
 require_relative "workspace_snapshot"
+require_relative "check_snapshot_archive"
 require_relative "workspace_binding"
 require_relative "connection"
 require_relative "jev_advisor"
@@ -154,6 +155,7 @@ module Orbit
             @state["last_user_message_id"] = sent.fetch("id")
           end
           save
+          settle_retained_check_workspaces
           until TERMINAL.include?(@state["status"])
             tick
             sleep 1 unless TERMINAL.include?(@state["status"])
@@ -178,12 +180,15 @@ module Orbit
         @record.event("runtime_error", "error" => @state["error"])
         save
       ensure
+        ended_check = @running_check
         begin
-          @checker.stop! if @running_check
+          @checker.stop! if ended_check
         rescue StandardError => error
           record_cleanup_error(error)
         ensure
-          capture_interrupted_check(@running_check) if @running_check
+          capture_interrupted_check(ended_check) if ended_check
+          @running_check = nil
+          record_workspace_reclaim(ended_check, outcome: @state["status"] == "stop_unconfirmed" ? "stop_unconfirmed" : "cancelled") if ended_check
           @connection.close
         end
         @state["finished_at"] = Time.now.utc.iso8601
@@ -292,6 +297,7 @@ module Orbit
           refresh_stop_retry_probe
           verify_prior_check_exit
           stop(reason)
+          settle_retained_check_workspaces
         ensure
           @connection.close
         end
@@ -2655,8 +2661,22 @@ module Orbit
       number = used_numbers.max.to_i + 1
       directory = File.join(@record.path, "checks", number.to_s)
       snapshot = WorkspaceSnapshot.capture(
-        project_root: artifact_root, destination: File.join(directory, "workspace")
+        project_root: artifact_root, destination: File.join(directory, "workspace"),
+        content_store: CheckSnapshotArchive.new(@state.fetch("project_root"))
       )
+      archive_document = snapshot.delete("archive")
+      archive_error = snapshot.delete("archive_error")
+      if archive_document && archive_document["snapshot_digest"] != snapshot["digest"]
+        archive_error = "archive digest does not match the captured snapshot"
+        archive_document = nil
+      end
+      snapshot_archive = if archive_document
+                           @record.write("checks/#{number}/snapshot-archive.json", JSON.pretty_generate(archive_document) + "\n")
+                           { "status" => "verified", "file" => "snapshot-archive.json", "snapshot_digest" => snapshot["digest"] }
+                         elsif archive_error
+                           @record.event("check_snapshot_archive_failed", "number" => number, "error" => archive_error)
+                           { "status" => "failed", "error" => archive_error }
+                         end
       clues = role == "reviewer" ? @state["recheck"] : nil
       task_git = kind == "artifact" ? TaskGitEvidence.capture(
         workspace: artifact_root, baseline_head: @state.dig("workspace", "artifact", "head"),
@@ -2669,6 +2689,7 @@ module Orbit
         "dispute" => @state["dispute"],
         "started_at" => Time.at(now).utc.iso8601
       }
+      scope["snapshot_archive"] = snapshot_archive if snapshot_archive
       @record.write("checks/#{number}/scope.json", JSON.pretty_generate(scope))
       @checker.start(
         directory: snapshot.fetch("snapshot_path"), inputs: @record.inputs(@state),
@@ -2834,6 +2855,7 @@ module Orbit
         observation["status"] = "failed"
         observation["finished_at"] = Time.at(now).utc.iso8601
       end
+      record_workspace_reclaim(scope, outcome: "failed")
       failed = @state["review"]["failed_models"] ||= {
         "input_digest" => scope.fetch("input_digest"),
         "artifact_digest" => scope.dig("snapshot", "digest"), "models" => []
@@ -3088,6 +3110,7 @@ module Orbit
         observation["check"] = scope["number"]
         observation["finished_at"] = Time.at(now).utc.iso8601
       end
+      record_workspace_reclaim(scope, outcome: "finished")
       @record.event("check_finished", "number" => scope["number"], "stale" => stale,
                     "stale_reasons" => stale_reasons, "verdict" => result.fetch("verdict"),
                     "reason" => result.fetch("reason"), "finding_ids" => result.fetch("findings").map { |finding| finding.fetch("id") },
@@ -3743,13 +3766,14 @@ module Orbit
       end
 
       checker_error = @state["cleanup_error"]
+      ended_check = @running_check
       begin
-        @checker.stop! if @running_check
+        @checker.stop! if ended_check
       rescue StandardError => error
         checker_error = error.message
         record_cleanup_error(error)
       ensure
-        capture_interrupted_check(@running_check) if @running_check
+        capture_interrupted_check(ended_check) if ended_check
       end
       @running_check = nil
       # Structured stop diagnostics: every phase records what it actually
@@ -3861,12 +3885,135 @@ module Orbit
         @record.event("stop_unconfirmed", "reason" => reason, "error" => detail)
         mark_terminal_ask_interrupts!
         save
+      ensure
+        if ended_check
+          outcome = @state["status"] == "stop_unconfirmed" ? "stop_unconfirmed" : "cancelled"
+          record_workspace_reclaim(ended_check, outcome: outcome)
+        end
       end
     end
 
     def record_cleanup_error(error)
       @state["cleanup_error"] = error.message
       @state["unconfirmed_check_run"] = "checks/#{@running_check.fetch('number')}/run.json" if @running_check
+    end
+
+    # Archive first, then require runner lifecycle facts. PID absence is not a gate.
+    def settle_retained_check_workspaces
+      Array(@state["checks"]).each do |check|
+        outcome = @state["status"] == "stop_unconfirmed" ? "stop_unconfirmed" : "restart"
+        record_workspace_reclaim(check, outcome: outcome)
+      end
+      report_unrecorded_workspaces
+    rescue StandardError => error
+      @record.event("check_workspace_retained", "outcome" => "restart",
+                    "reasons" => ["reclaim_error: #{error.class}: #{error.message}"])
+    end
+
+    def report_unrecorded_workspaces
+      checks_dir = File.join(@record.path, "checks")
+      return unless File.directory?(checks_dir)
+
+      known = Array(@state["checks"]).filter_map { |check| check["number"] }
+      known << @running_check["number"] if @running_check.is_a?(Hash)
+      inflight = @state.fetch("check_observations", {}).each_value.filter_map do |entry|
+        entry["check"] if entry.is_a?(Hash) && entry["status"] == "in_flight"
+      end
+      Dir.children(checks_dir).each do |name|
+        next unless name.match?(/\A\d+\z/)
+
+        number = name.to_i
+        next if known.include?(number)
+
+        workspace = File.join(checks_dir, name, "workspace")
+        next unless File.symlink?(workspace) || File.exist?(workspace)
+
+        marker = File.join(checks_dir, name, "workspace-reclaim.json")
+        next if File.file?(marker)
+
+        reason = inflight.include?(number) ? "in_flight" : "orphan_workspace"
+        CheckSnapshotArchive.write_json(marker, {
+          "schema_version" => CheckSnapshotArchive::RECLAIM_SCHEMA, "number" => number,
+          "at" => Time.now.utc.iso8601, "status" => "retained", "reasons" => [reason]
+        })
+        @record.event("check_workspace_retained", "number" => number, "outcome" => "restart", "reasons" => [reason])
+      end
+    end
+
+    def record_workspace_reclaim(scope, outcome:)
+      return unless scope.is_a?(Hash) && scope["number"].is_a?(Integer)
+
+      number = scope["number"]
+      workspace = File.join(@record.path, "checks", number.to_s, "workspace")
+      present = File.symlink?(workspace) || File.exist?(workspace)
+      decision = CheckSnapshotArchive.reclaim(
+        task_path: @record.path, project_root: @state.fetch("project_root"), number: number,
+        lifecycle: check_lifecycle_facts(number), run_record: run_record_for(number),
+        cleanup_error: cleanup_blocks?(number) ? @state["cleanup_error"] : nil,
+        in_flight: reclaim_in_flight?(scope, outcome),
+        stop_unconfirmed: outcome == "stop_unconfirmed" || @state["status"] == "stop_unconfirmed"
+      )
+      return if decision["unchanged"]
+      return if !present && decision["status"] != "reclaimed"
+
+      stored = Array(@state["checks"]).find { |check| check["number"] == number }
+      stored["workspace_reclaim"] = decision.reject { |key, _| key == "unchanged" } if stored
+      @record.event(decision["status"] == "reclaimed" ? "check_workspace_reclaimed" : "check_workspace_retained",
+                    "number" => number, "outcome" => outcome,
+                    "reasons" => decision["reasons"], "gates" => decision["gates"])
+    rescue StandardError => error
+      @record.event("check_workspace_retained", "number" => scope["number"], "outcome" => outcome,
+                    "reasons" => ["reclaim_error: #{error.class}: #{error.message}"])
+    end
+
+    def reclaim_in_flight?(scope, outcome)
+      return false if %w[finished failed cancelled].include?(outcome)
+      return true if @running_check.is_a?(Hash) && @running_check["number"] == scope["number"]
+
+      observation = @state.dig("check_observations", scope["observation_key"])
+      observation.is_a?(Hash) && observation["status"] == "in_flight" && observation["check"] == scope["number"]
+    end
+
+    def cleanup_blocks?(number)
+      return false if @state["cleanup_error"].to_s.empty?
+
+      run = @state["unconfirmed_check_run"].to_s
+      run.empty? || run == "checks/#{number}/run.json"
+    end
+
+    def check_lifecycle_facts(number)
+      live = @checker.respond_to?(:check_lifecycle) ? @checker.check_lifecycle(number) : nil
+      live = nil unless live.is_a?(Hash)
+      stored = read_lifecycle_file(number)
+      if live && stored && !lifecycle_compatible?(live, stored)
+        return { "schema_version" => CheckSnapshotArchive::LIFECYCLE_SCHEMA, "number" => number, "conflict" => true }
+      end
+
+      live || stored
+    rescue JSON::ParserError, SystemCallError
+      { "schema_version" => CheckSnapshotArchive::LIFECYCLE_SCHEMA, "number" => number, "unreadable" => true }
+    end
+
+    def read_lifecycle_file(number)
+      path = File.join(@record.path, "checks", number.to_s, "lifecycle.json")
+      return nil unless File.file?(path)
+
+      parsed = JSON.parse(File.read(path))
+      parsed.is_a?(Hash) ? parsed : nil
+    end
+
+    def lifecycle_compatible?(live, stored)
+      CheckSnapshotArchive::LIFECYCLE_FIELDS.all? { |key| live[key] == stored[key] }
+    end
+
+    def run_record_for(number)
+      path = File.join(@record.path, "checks", number.to_s, "run.json")
+      return nil unless File.file?(path)
+
+      parsed = JSON.parse(File.read(path))
+      parsed.is_a?(Hash) ? parsed : nil
+    rescue JSON::ParserError
+      nil
     end
 
     def synchronize_terminal_readiness(status)

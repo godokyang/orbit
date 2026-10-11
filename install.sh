@@ -11,6 +11,7 @@ require "tmpdir"
 require "fileutils"
 require "uri"
 require "rbconfig"
+require "open3"
 abort "orbit install: Ruby >= 3.2 is required" if (RUBY_VERSION.split('.').map(&:to_i) <=> [3, 2]) < 0
 local = ARGV.shift
 if ARGV.include?("--help") || ARGV.include?("-h")
@@ -20,6 +21,37 @@ if ARGV.include?("--help") || ARGV.include?("-h")
   puts "Owned global Orbit entries from an orbit-install-3 installation are cleaned up on switch."
   puts "Saves PATH for zsh/bash after installation. --no-modify-path disables this; --modify-path enables it again."
   exit
+end
+# This bootstrap also runs without a checkout. Check the local host before
+# fetching source; the release manager repeats the gate before preparation.
+omp_paths = ENV.fetch("PATH", "").split(File::PATH_SEPARATOR).map { |dir| File.join(dir.empty? ? "." : dir, "omp") }
+omp = omp_paths.find { |path| File.executable?(path) && !File.directory?(path) }
+unless omp
+  if omp_paths.any? { |path| File.exist?(path) || File.symlink?(path) }
+    abort "orbit install: 找到了 OMP，但无法执行。请检查执行权限和 PATH，再重新运行 Orbit 安装命令；旧安装保持不变。"
+  end
+  abort "orbit install: 未找到 OMP（Oh My Pi）。Orbit 需要复用本地 OMP，请先安装并加入 PATH，再重新运行 Orbit 安装命令；旧安装保持不变。"
+end
+begin
+  version_output = nil
+  Open3.popen3(omp, "--version", pgroup: true) do |input, output, error, child|
+    input.close
+    readers = [Thread.new { output.read }, Thread.new { error.read }]
+    unless child.join(10)
+      Process.kill("KILL", -child.pid) rescue nil
+      child.join
+      abort "orbit install: OMP 无法执行（版本检查超时）。请修复本地 OMP 后重新运行 Orbit 安装命令；旧安装保持不变。"
+    end
+    values = readers.map(&:value)
+    abort "orbit install: OMP 无法执行（版本检查退出 #{child.value.exitstatus}）。请修复本地 OMP 后重新运行 Orbit 安装命令；旧安装保持不变。" unless child.value.success?
+    version_output = values.first
+  end
+  version = version_output[/\d+\.\d+\.\d+/]
+  unless version && (version.split('.').map(&:to_i) <=> [18, 2, 8]) >= 0
+    abort "orbit install: OMP 版本不支持（#{version || '无法解析'}），需要至少 18.2.8 且支持可信检查器扩展。请自行安装兼容 OMP 后重试；旧安装保持不变。"
+  end
+rescue SystemCallError => error
+  abort "orbit install: OMP 无法执行（#{error.message}）。请修复本地 OMP 后重新运行 Orbit 安装命令；旧安装保持不变。"
 end
 ref_index = ARGV.index("--ref")
 ref = ref_index ? ARGV[ref_index + 1] : ENV.fetch("ORBIT_REF", "main")

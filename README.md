@@ -59,7 +59,9 @@ flowchart LR
 
 ### 1. 安装
 
-准备 **Ruby 3.2+、Node.js 18+、npm、Bun 1.3.14+**，以及已配置可用模型的 [OMP](https://github.com/can1357/oh-my-pi) **18.2.8+**。远程安装需要 `curl` 和 `tar`。
+准备 **Ruby 3.2+、Node.js 18+、npm**，以及已配置可用模型的本地 [OMP](https://github.com/can1357/oh-my-pi) **18.2.8+**。还需通过安装时的可信检查器扩展能力探针；版本达标不代表接口兼容。远程安装需要 `curl` 和 `tar`。
+
+安装器在下载源码前检查 OMP 是否可执行，并在切换前验证实际宿主能力。缺失、无法执行或不支持时给出中文提示和下一步，保留旧安装；请自行安装兼容 OMP、加入 PATH 后重试。Orbit 复用本地 OMP，不自动安装/升级它，也不下载私有检查器 SDK 兜底。`--help` 与卸载无需 OMP。
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/godokyang/orbit/main/install.sh | sh

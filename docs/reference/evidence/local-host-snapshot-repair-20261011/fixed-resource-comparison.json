@@ -1,0 +1,55 @@
+{
+  "fixed": [
+    {
+      "pane": "w23:pH",
+      "pids_before": [
+        12801,
+        12828,
+        12863
+      ],
+      "pids_after": [
+        12801,
+        12828,
+        12863
+      ],
+      "same_pid_set": true,
+      "same_shell_pid": true,
+      "cwd": "/Users/yangke/Personal/omen/orbit"
+    },
+    {
+      "pane": "w23:pJ",
+      "pids_before": [
+        12883,
+        12914,
+        12950
+      ],
+      "pids_after": [
+        12883,
+        12914,
+        12950
+      ],
+      "same_pid_set": true,
+      "same_shell_pid": true,
+      "cwd": "/Users/yangke/Personal/omen/orbit"
+    },
+    {
+      "pane": "w23:pK",
+      "pids_before": [
+        12966,
+        12993,
+        13028
+      ],
+      "pids_after": [
+        12966,
+        12993,
+        13028
+      ],
+      "same_pid_set": true,
+      "same_shell_pid": true,
+      "cwd": "/Users/yangke/Personal/omen/orbit"
+    }
+  ],
+  "main_herdr_baseline": [],
+  "fixed_preserved": true,
+  "unknown_resources": "preserved"
+}

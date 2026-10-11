@@ -1,0 +1,193 @@
+{
+  "attempt_id": "orbit-check-17c186a5-6c7a-4862-b2c4-fb051fabd080",
+  "ok": true,
+  "review_ran": true,
+  "probe_ran": false,
+  "result": {
+    "verdict": "complete",
+    "reason": "Delivery is visible and correct. Fixed snapshot notes.txt (79 bytes, final_newline=LF, actual_lines=2) is exactly line 1 'A fixed historical snapshot must be preserved.' (byte count reconciles: 46+1+31+1=79) and line 2 'Archive verification: complete.' — that phrase appears exactly once in the file, so the last line holds the single required occurrence. The required project `.runtime/node` read was executed: root_verifications receipt for command `.runtime/node -e '...'` shows exit_code 0, artifact_matches true, input_matches true, outputting target_line_number 1, target_total_count 1, last_line_equals_phrase true, last_line_phrase_count 1, phrase_total_count_in_file 1. large.dat SHA-256 was reported as 8d2c9ee9fb12e2b3150d1e7995ed25636d6ac0f87693627aedcde1d87397cc7f and cross-checked by `shasum -a 256` with identical output (same receipt digest). Read-only held: task_git changed_paths empty, HEAD equals baseline c0ad981, git log shows no new commit, execution_members empty, and no receipt shows Root writing any file; ` M notes.txt` is a pre-existing working-tree delta (baseline commit contains only line 1), not a task-scoped write. The manual final check was requested via the Orbit session tool (write to xd://orbit, command_id 20261011071304324231-70d22c1d66d8, status queued). Root is idle with last_turn_status completed and an attributed, version-matched task_delivery containing the full answer. `.runtime/node` and large.dat raw bytes are not reproducible from this read-only snapshot (.runtime is gitignored/excluded; large.dat too large to read), so the size/hash facts rest on the matched native receipts rather than independent re-computation — that is a snapshot limitation, not a defect.",
+    "findings": [],
+    "resolved_ids": [],
+    "next_check_seconds": 3600,
+    "delivery": {
+      "ready": true,
+      "reason": "Version-matched task_delivery (turn 8713c405) is present with root idle, last_turn_status completed and last_turn_task_attributed true; its text reports the notes.txt line/末行 verification via .runtime/node, the large.dat SHA-256 8d2c9ee9fb12e2b3150d1e7995ed25636d6ac0f87693627aedcde1d87397cc7f, and the queued manual final check, consistent with the fixed snapshot (notes.txt line 1 target line, line 2 sole 'Archive verification: complete.') and the matched root_verifications receipts."
+    },
+    "coverage": {
+      "complete": true,
+      "items": [
+        {
+          "requirement": "Confirm notes.txt original line is still 'A fixed historical snapshot must be preserved.'",
+          "scope": "delivery",
+          "status": "verified",
+          "evidence": "Fixed snapshot read: notes.txt bytes=79, final_newline=LF, actual_lines=2, line 1 = 'A fixed historical snapshot must be preserved.' Receipt `.runtime/node` run: target_line_present true, target_line_number 1, target_total_count 1."
+        },
+        {
+          "requirement": "Confirm the last line contains 'Archive verification: complete.' exactly once",
+          "scope": "delivery",
+          "status": "verified",
+          "evidence": "notes.txt line 2 = 'Archive verification: complete.' with final LF; only two actual lines, so it is the last line. Receipt: last_line_equals_phrase true, last_line_phrase_count 1, phrase_total_count_in_file 1."
+        },
+        {
+          "requirement": "Perform the verification by actually reading the file with the project's .runtime/node",
+          "scope": "delivery",
+          "status": "verified",
+          "evidence": "root_verifications bash receipt command is `.runtime/node -e '<readFileSync + crypto script>'`, exit_code 0, artifact_matches true, input_matches true, output is the JSON verification result. Snapshot cannot re-run (.runtime/ is gitignored and absent from the copy), so this rests on the matched native receipt."
+        },
+        {
+          "requirement": "Report large.dat SHA-256",
+          "scope": "delivery",
+          "status": "verified",
+          "evidence": "Delivered answer states 8d2c9ee9fb12e2b3150d1e7995ed25636d6ac0f87693627aedcde1d87397cc7f (3,520,000 bytes); matching receipts: `.runtime/node` crypto.digest hex and `shasum -a 256 large.dat` both output the same value."
+        },
+        {
+          "requirement": "Do not modify delivery files, do not dispatch members, do not commit",
+          "scope": "delivery",
+          "status": "verified",
+          "evidence": "task_git changed_paths [] with baseline_head = snapshot_head = c0ad981; git log -1 shows only c0ad981; execution_members empty; no receipt shows a file write to the workspace. review_focus ` M notes.txt` is a pre-existing uncommitted delta (baseline commit holds only line 1) with no task-scoped write evidence."
+        },
+        {
+          "requirement": "After delivering the answer, request one independent manual final check via the Orbit session tool",
+          "scope": "delivery",
+          "status": "verified",
+          "evidence": "root_verifications write to xd://orbit (call_1278f0b48f79457fab63eb0b) completed; response command_id 20261011071304324231-70d22c1d66d8, status queued, next_action instructs to end the turn and wait."
+        },
+        {
+          "requirement": "End the turn after queuing and wait for the finalization notification, then stop per the real conclusion",
+          "scope": "lifecycle",
+          "status": "unverified",
+          "evidence": "Future obligation: Root ended the turn awaiting the notice, but the manual finalization notice, closing turn and actual stop have not yet occurred in the record (runtime verifies them separately)."
+        },
+        {
+          "requirement": "Deliver a closing report of the review conclusion",
+          "scope": "lifecycle",
+          "status": "unverified",
+          "evidence": "Future obligation: not yet produced at inspection time."
+        }
+      ]
+    }
+  },
+  "model": "opencode-go/deepseek-v4.1-flash",
+  "usage": [
+    {
+      "call_id": "orbit-call-d7378f42-b7c8-4883-877d-570d2897e93e",
+      "origin": "local_provider_invocation",
+      "usage_status": "reported",
+      "credential_id": 4,
+      "provider_response_id": "chatcmpl-70ad85c6",
+      "provider": "opencode-go",
+      "model": "deepseek-v4.1-flash",
+      "requested_model": "opencode-go/deepseek-v4.1-flash",
+      "stop_reason": "toolUse",
+      "completed_at": "2026-10-11T07:13:24.005Z",
+      "input": 13135,
+      "output": 136,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "reasoningTokens": 33,
+      "totalTokens": 13271
+    },
+    {
+      "call_id": "orbit-call-590552d1-7492-4190-a407-b45e8b0ce79f",
+      "origin": "local_provider_invocation",
+      "usage_status": "reported",
+      "credential_id": 4,
+      "provider_response_id": "chatcmpl-3a9e4950",
+      "provider": "opencode-go",
+      "model": "deepseek-v4.1-flash",
+      "requested_model": "opencode-go/deepseek-v4.1-flash",
+      "stop_reason": "toolUse",
+      "completed_at": "2026-10-11T07:13:26.195Z",
+      "input": 149,
+      "output": 165,
+      "cacheRead": 13184,
+      "cacheWrite": 0,
+      "reasoningTokens": 58,
+      "totalTokens": 13498
+    },
+    {
+      "call_id": "orbit-call-d5a15210-4f41-4069-bff9-8ef92abeef28",
+      "origin": "local_provider_invocation",
+      "usage_status": "reported",
+      "credential_id": 4,
+      "provider_response_id": "chatcmpl-7d9fbb98",
+      "provider": "opencode-go",
+      "model": "deepseek-v4.1-flash",
+      "requested_model": "opencode-go/deepseek-v4.1-flash",
+      "stop_reason": "toolUse",
+      "completed_at": "2026-10-11T07:13:29.980Z",
+      "input": 104,
+      "output": 210,
+      "cacheRead": 13440,
+      "cacheWrite": 0,
+      "reasoningTokens": 100,
+      "totalTokens": 13754
+    },
+    {
+      "call_id": "orbit-call-43c1ef70-610c-4672-a4f5-ccc39dd10a03",
+      "origin": "local_provider_invocation",
+      "usage_status": "reported",
+      "credential_id": 4,
+      "provider_response_id": "chatcmpl-aa40e675",
+      "provider": "opencode-go",
+      "model": "deepseek-v4.1-flash",
+      "requested_model": "opencode-go/deepseek-v4.1-flash",
+      "stop_reason": "toolUse",
+      "completed_at": "2026-10-11T07:13:41.393Z",
+      "input": 90,
+      "output": 1451,
+      "cacheRead": 13696,
+      "cacheWrite": 0,
+      "reasoningTokens": 1327,
+      "totalTokens": 15237
+    },
+    {
+      "call_id": "orbit-call-5cbc4cdd-824b-4acd-8fc1-9c4660678879",
+      "origin": "local_provider_invocation",
+      "usage_status": "reported",
+      "credential_id": 4,
+      "provider_response_id": "chatcmpl-d03690f3",
+      "provider": "opencode-go",
+      "model": "deepseek-v4.1-flash",
+      "requested_model": "opencode-go/deepseek-v4.1-flash",
+      "stop_reason": "stop",
+      "completed_at": "2026-10-11T07:13:53.571Z",
+      "input": 223,
+      "output": 1888,
+      "cacheRead": 15104,
+      "cacheWrite": 0,
+      "reasoningTokens": 552,
+      "totalTokens": 17215
+    }
+  ],
+  "usage_gaps": [],
+  "snapshot_image_reads": [],
+  "snapshot": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/storage-v3/.orbit/tasks/92f92422-fa45-44b4-aae3-e1de4b66cfc5/checks/1/workspace",
+  "profile": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/storage-v3/.orbit/tasks/92f92422-fa45-44b4-aae3-e1de4b66cfc5/checks/1/profile",
+  "out": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/storage-v3/.orbit/tasks/92f92422-fa45-44b4-aae3-e1de4b66cfc5/checks/1/evidence.json",
+  "sdk_version": "18.8.0",
+  "host_version": "18.8.0",
+  "host_version_source": "launcher_omp_version",
+  "host_runtime_executable": "/Users/yangke/.local/bin/omp",
+  "fingerprint_before": "sha256:ba245fecde86fb9c36033edc229d8eeebf3668620c70e0e33921ccf646a12650",
+  "source_agent_dir": "/Users/yangke/.omp/agent",
+  "session_created": true,
+  "active_tools": [
+    "glob",
+    "grep",
+    "read"
+  ],
+  "forbidden_tools_present": [],
+  "read_tool_is_confined": true,
+  "private_registry": [
+    "OrbitReviewer"
+  ],
+  "global_registry": [],
+  "raw_text": "{\"verdict\":\"complete\",\"reason\":\"Delivery is visible and correct. Fixed snapshot notes.txt (79 bytes, final_newline=LF, actual_lines=2) is exactly line 1 'A fixed historical snapshot must be preserved.' (byte count reconciles: 46+1+31+1=79) and line 2 'Archive verification: complete.' — that phrase appears exactly once in the file, so the last line holds the single required occurrence. The required project `.runtime/node` read was executed: root_verifications receipt for command `.runtime/node -e '...'` shows exit_code 0, artifact_matches true, input_matches true, outputting target_line_number 1, target_total_count 1, last_line_equals_phrase true, last_line_phrase_count 1, phrase_total_count_in_file 1. large.dat SHA-256 was reported as 8d2c9ee9fb12e2b3150d1e7995ed25636d6ac0f87693627aedcde1d87397cc7f and cross-checked by `shasum -a 256` with identical output (same receipt digest). Read-only held: task_git changed_paths empty, HEAD equals baseline c0ad981, git log shows no new commit, execution_members empty, and no receipt shows Root writing any file; ` M notes.txt` is a pre-existing working-tree delta (baseline commit contains only line 1), not a task-scoped write. The manual final check was requested via the Orbit session tool (write to xd://orbit, command_id 20261011071304324231-70d22c1d66d8, status queued). Root is idle with last_turn_status completed and an attributed, version-matched task_delivery containing the full answer. `.runtime/node` and large.dat raw bytes are not reproducible from this read-only snapshot (.runtime is gitignored/excluded; large.dat too large to read), so the size/hash facts rest on the matched native receipts rather than independent re-computation — that is a snapshot limitation, not a defect.\",\"findings\":[],\"resolved_ids\":[],\"next_check_seconds\":3600,\"delivery\":{\"ready\":true,\"reason\":\"Version-matched task_delivery (turn 8713c405) is present with root idle, last_turn_status completed and last_turn_task_attributed true; its text reports the notes.txt line/末行 verification via .runtime/node, the large.dat SHA-256 8d2c9ee9fb12e2b3150d1e7995ed25636d6ac0f87693627aedcde1d87397cc7f, and the queued manual final check, consistent with the fixed snapshot (notes.txt line 1 target line, line 2 sole 'Archive verification: complete.') and the matched root_verifications receipts.\"},\"coverage\":{\"complete\":true,\"items\":[{\"requirement\":\"Confirm notes.txt original line is still 'A fixed historical snapshot must be preserved.'\",\"scope\":\"delivery\",\"status\":\"verified\",\"evidence\":\"Fixed snapshot read: notes.txt bytes=79, final_newline=LF, actual_lines=2, line 1 = 'A fixed historical snapshot must be preserved.' Receipt `.runtime/node` run: target_line_present true, target_line_number 1, target_total_count 1.\"},{\"requirement\":\"Confirm the last line contains 'Archive verification: complete.' exactly once\",\"scope\":\"delivery\",\"status\":\"verified\",\"evidence\":\"notes.txt line 2 = 'Archive verification: complete.' with final LF; only two actual lines, so it is the last line. Receipt: last_line_equals_phrase true, last_line_phrase_count 1, phrase_total_count_in_file 1.\"},{\"requirement\":\"Perform the verification by actually reading the file with the project's .runtime/node\",\"scope\":\"delivery\",\"status\":\"verified\",\"evidence\":\"root_verifications bash receipt command is `.runtime/node -e '<readFileSync + crypto script>'`, exit_code 0, artifact_matches true, input_matches true, output is the JSON verification result. Snapshot cannot re-run (.runtime/ is gitignored and absent from the copy), so this rests on the matched native receipt.\"},{\"requirement\":\"Report large.dat SHA-256\",\"scope\":\"delivery\",\"status\":\"verified\",\"evidence\":\"Delivered answer states 8d2c9ee9fb12e2b3150d1e7995ed25636d6ac0f87693627aedcde1d87397cc7f (3,520,000 bytes); matching receipts: `.runtime/node` crypto.digest hex and `shasum -a 256 large.dat` both output the same value.\"},{\"requirement\":\"Do not modify delivery files, do not dispatch members, do not commit\",\"scope\":\"delivery\",\"status\":\"verified\",\"evidence\":\"task_git changed_paths [] with baseline_head = snapshot_head = c0ad981; git log -1 shows only c0ad981; execution_members empty; no receipt shows a file write to the workspace. review_focus ` M notes.txt` is a pre-existing uncommitted delta (baseline commit holds only line 1) with no task-scoped write evidence.\"},{\"requirement\":\"After delivering the answer, request one independent manual final check via the Orbit session tool\",\"scope\":\"delivery\",\"status\":\"verified\",\"evidence\":\"root_verifications write to xd://orbit (call_1278f0b48f79457fab63eb0b) completed; response command_id 20261011071304324231-70d22c1d66d8, status queued, next_action instructs to end the turn and wait.\"},{\"requirement\":\"End the turn after queuing and wait for the finalization notification, then stop per the real conclusion\",\"scope\":\"lifecycle\",\"status\":\"unverified\",\"evidence\":\"Future obligation: Root ended the turn awaiting the notice, but the manual finalization notice, closing turn and actual stop have not yet occurred in the record (runtime verifies them separately).\"},{\"requirement\":\"Deliver a closing report of the review conclusion\",\"scope\":\"lifecycle\",\"status\":\"unverified\",\"evidence\":\"Future obligation: not yet produced at inspection time.\"}]}}",
+  "contract_problems": [],
+  "session_disposed": true,
+  "fingerprint_after": "sha256:ba245fecde86fb9c36033edc229d8eeebf3668620c70e0e33921ccf646a12650",
+  "problems": [],
+  "host_completion": "complete",
+  "signal_cleanup": "sigterm"
+}

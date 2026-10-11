@@ -10,6 +10,7 @@ require "zlib"
 require_relative "version"
 require_relative "task_record"
 require_relative "task_runtime"
+require_relative "check_snapshot_archive"
 
 module Orbit
   # User-invoked, local-only task evidence export.
@@ -53,6 +54,8 @@ module Orbit
       timeline, sources, missing, collaboration = observe(task_path, state.fetch("id"))
       sessions = native_sessions(state, exported_at, task_path, agent_dir: agent_dir)
       missing.concat(sessions.filter_map { |session| session.delete("missing_entry") })
+      archived_workspace = CheckSnapshotArchive.export_members(task_path: task_path, project_root: state["project_root"])
+      missing.concat(archived_workspace[:missing])
 
       inventory = []
       manifest = nil
@@ -79,6 +82,18 @@ module Orbit
               end
             end
             walk[:symlinks].each do |link|
+              writer.write_symlink("task/#{link.fetch('path')}", link.fetch("target"))
+              inventory << { "path" => link.fetch("path"), "kind" => "symlink", "target" => link.fetch("target") }
+            end
+            archived_workspace[:files].each do |file|
+              sha256, bytes, mode = writer.write_file("task/#{file.fetch('path')}", file.fetch("object_path"), mode: file["mode"])
+              if sha256 != file["sha256"] || bytes != file["bytes"]
+                raise Error, "归档工作区在导出时变化：#{file.fetch('path')}"
+              end
+              inventory << { "path" => file.fetch("path"), "kind" => "file", "bytes" => bytes,
+                             "sha256" => sha256, "mode" => format("%04o", mode) }
+            end
+            archived_workspace[:symlinks].each do |link|
               writer.write_symlink("task/#{link.fetch('path')}", link.fetch("target"))
               inventory << { "path" => link.fetch("path"), "kind" => "symlink", "target" => link.fetch("target") }
             end
@@ -728,9 +743,10 @@ module Orbit
         @io = io
       end
 
-      def write_file(name, path)
+      def write_file(name, path, mode: nil)
         stat = File.lstat(path)
-        write_header(name: name, size: stat.size, mode: stat.mode & 0o777,
+        file_mode = mode.nil? ? stat.mode & 0o777 : mode
+        write_header(name: name, size: stat.size, mode: file_mode,
                      mtime: stat.mtime.to_i, typeflag: "0")
         digest = Digest::SHA256.new
         remaining = stat.size
@@ -744,7 +760,7 @@ module Orbit
           raise Error, "#{path} grew while being read for export" if file.read(1)
         end
         pad(stat.size)
-        [digest.hexdigest, stat.size, stat.mode & 0o777]
+        [digest.hexdigest, stat.size, file_mode]
       end
 
       def write_content(name, content)

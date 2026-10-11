@@ -1,0 +1,1375 @@
+{
+  "format": "orbit-task-1",
+  "id": "96dadc27-abb4-41bc-b9d8-4b069b74a049",
+  "project_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/storage-v3",
+  "workspace": {
+    "project_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/storage-v3",
+    "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/storage-v3",
+    "project": {
+      "path": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/storage-v3",
+      "git": true,
+      "common_dir": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/storage-v3/.git",
+      "worktree": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/storage-v3",
+      "head": "c0ad981e8eb060072da6fb316f0a755995131e73"
+    },
+    "artifact": {
+      "path": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/storage-v3",
+      "git": true,
+      "common_dir": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/storage-v3/.git",
+      "worktree": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/storage-v3",
+      "head": "c0ad981e8eb060072da6fb316f0a755995131e73"
+    },
+    "bound_at": "2026-10-11T07:06:20Z",
+    "history": []
+  },
+  "created_at": "2026-10-11T07:06:20Z",
+  "status": "complete",
+  "instruction_source": {
+    "kind": "omp_user_message",
+    "id": "231fc551"
+  },
+  "basis": [],
+  "amendments": [],
+  "connection": {
+    "provider": "omp",
+    "socket": "/tmp/orbit-omp-khbvip/control.sock",
+    "thread_id": "01a129c6-e8bf-702e-ae83-2c79fe2ad326"
+  },
+  "review": {
+    "model": "opencode-go/deepseek-v4.1-flash",
+    "interval_seconds": 300,
+    "selection": {
+      "model": "opencode-go/deepseek-v4.1-flash",
+      "basis": "released_task_fit",
+      "candidates": [
+        "opencode-go/deepseek-v4.1-flash"
+      ],
+      "selection_tier": "preferred",
+      "version": "orbit-checker-selection-v7",
+      "cost_comparison": "unknown",
+      "reason": "released_task_fit: released task-fit signal; route costs are not comparable, so gated candidates keep the caller's stable input pool order — a preference, not a quality or cost advantage, and unknown cost is not free.",
+      "source": "candidate_pool",
+      "model_identity": {
+        "provider": "opencode-go",
+        "model": "deepseek-v4.1-flash",
+        "reasoning": "unknown",
+        "billing_route": "subscription_quota"
+      },
+      "quality_score": 0.64,
+      "source_agent_dir": "/Users/yangke/.omp/agent",
+      "quality_basis": "exact_model_evidence",
+      "quality_sources": [
+        "https://api-docs.deepseek.com/news/news260910/",
+        "https://api-docs.deepseek.com/img/v4.1_260910_benchmark_table_en.png",
+        "https://opencode.ai/go"
+      ],
+      "quality_evidence_valid_until": "2026-10-12T07:05:49Z",
+      "recommendation_hold": false,
+      "hold_reason": null,
+      "model_overview_status": "fresh",
+      "model_overview_prior": null,
+      "model_overview_refresh": {
+        "status": "fresh",
+        "fetched_at": "2026-10-11T03:54:28Z",
+        "model_count": 440,
+        "benchmark_count": 346
+      },
+      "eligibility": {
+        "context": {
+          "status": "not_required",
+          "requirement": null,
+          "catalog_value": 1048576
+        },
+        "input_modalities": {
+          "status": "not_required",
+          "requirement": [],
+          "catalog_value": [
+            "text",
+            "image"
+          ]
+        },
+        "output_modalities": {
+          "status": "not_required",
+          "requirement": [],
+          "catalog_value": [
+            "text"
+          ]
+        },
+        "parameters": {
+          "status": "not_required",
+          "requirement": [],
+          "catalog_value": [
+            "frequency_penalty",
+            "include_reasoning",
+            "logit_bias",
+            "logprobs",
+            "max_tokens",
+            "min_p",
+            "presence_penalty",
+            "reasoning",
+            "reasoning_effort",
+            "repetition_penalty",
+            "response_format",
+            "seed",
+            "stop",
+            "structured_outputs",
+            "temperature",
+            "tool_choice",
+            "tools",
+            "top_k",
+            "top_logprobs",
+            "top_p"
+          ]
+        }
+      },
+      "execution_eligibility": {
+        "context": {
+          "status": "not_required",
+          "requirement": null,
+          "configured_limit": 1000000,
+          "source": "omp_model_registry"
+        },
+        "input_modalities": {
+          "status": "not_required",
+          "requirement": [],
+          "configured_values": [
+            "text",
+            "image"
+          ]
+        },
+        "output_modalities": {
+          "status": "not_required",
+          "requirement": [],
+          "configured_values": [
+            "text"
+          ]
+        },
+        "parameters": {
+          "status": "not_required",
+          "requirement": [],
+          "note": "模型工具支持不代替成员实际工具授权"
+        }
+      },
+      "judgment_provider": "typesafe",
+      "judgment_model": "jev-1.13.0",
+      "judgment_call_id": "orbit-judgment-a7e44413-dd7d-4c07-829e-6418e7c55aa1",
+      "judgment_status": "answered",
+      "judgment_requested_model": "jev-1.13.0",
+      "question_set_version": "jev-checker-task-fit-5",
+      "judgment_error": null,
+      "release": {
+        "model": "jev-1.13.0",
+        "provider": "typesafe",
+        "thresholds": {
+          "handoff_fit": 0.7,
+          "member_task_fit": 0.65,
+          "candidate_task_fit": 0.65,
+          "checker_task_fit": 0.6
+        },
+        "scope": "bounded_git_delivery_v1",
+        "question_set_versions": {
+          "observation": "jev-observation-2",
+          "delegation": "jev-delegation-4",
+          "candidates": "jev-candidates-4",
+          "checker_quality": "jev-checker-task-fit-5"
+        },
+        "question_digest": "0fc3d712f60167edb572d039a2c9d5b35b0e9295a4a38bf9db597e3682ac7ca8",
+        "input_version": "jev-selection-input-2",
+        "decision_version": "orbit-quality-decision-4",
+        "structural_validation": "passed",
+        "proves_samples_real": false,
+        "allows_positive_ranking": true,
+        "release": {
+          "reason": "Decision-4 independent review: unchanged question bodies, input profile, model and thresholds. handoff_fit gates bounded handoff structure; member_task_fit is a preserved diagnostic limitation; each candidate must independently clear its existing candidate_task_fit release and capability holds. Unknown price/quota/routes remain unknown; Root retains pool selection authority. The original 17 labels / 14 calls are preserved verbatim as per-question evidence, including negative, missing evidence, failure and holdout; they were not rerun and do not prove the newly composed production path. Completion additionally requires a fresh installed orbit omp ordinary-task recommendation/dispatch/integration/check/stop run.; independent OMP 2 approves bounded_git_delivery_v1 activation for isolated live acceptance; ordinary native recommendation/dispatch/integration/check/confirmed-stop remains the completion gate. Per-question historical calls are unchanged and do not prove the new combination live.",
+          "scope": "bounded_git_delivery_v1",
+          "reviewed_by": "OMP 2 (kimi-code/k3-256k, w22:p3) 独立原件复核",
+          "reviewed_at": "2026-10-01T19:02:16Z",
+          "sample_count": 17,
+          "sample_digest": "5a30130a022abd2bc1b35a6ebe61c2ea4fe0e750cafbb0d23d6d51de973d03cc"
+        }
+      },
+      "route_cost_inputs": {},
+      "calibration_note": null,
+      "requirements_error": null,
+      "task_fit_scores": {
+        "opencode-go/deepseek-v4.1-flash": {
+          "quality": 0.64
+        }
+      },
+      "unscored_candidates": [
+        "kimi-code/k3-256k",
+        "zenmux/deepseek/deepseek-v4.1-flash",
+        "zhipu-coding-plan/glm-5.3-flash",
+        "cursor/grok-4.7-fast",
+        "cursor/grok-4.7",
+        "openai-codex/gpt-6.1-sol",
+        "openai-codex/gpt-6-luna"
+      ],
+      "evidence_needed": [
+        {
+          "model": "kimi-code/k3-256k",
+          "reasoning": "unknown",
+          "billing_route": "subscription_quota",
+          "status": "absent"
+        },
+        {
+          "model": "zenmux/deepseek/deepseek-v4.1-flash",
+          "reasoning": "unknown",
+          "billing_route": "unknown",
+          "status": "expired"
+        },
+        {
+          "model": "zhipu-coding-plan/glm-5.3-flash",
+          "reasoning": "unknown",
+          "billing_route": "subscription_quota",
+          "status": "expired"
+        },
+        {
+          "model": "cursor/grok-4.7-fast",
+          "reasoning": "unknown",
+          "billing_route": "unknown",
+          "status": "absent"
+        },
+        {
+          "model": "cursor/grok-4.7",
+          "reasoning": "unknown",
+          "billing_route": "unknown",
+          "status": "absent"
+        },
+        {
+          "model": "openai-codex/gpt-6.1-sol",
+          "reasoning": "unknown",
+          "billing_route": "unknown",
+          "status": "absent"
+        },
+        {
+          "model": "openai-codex/gpt-6-luna",
+          "reasoning": "unknown",
+          "billing_route": "unknown",
+          "status": "absent"
+        }
+      ],
+      "judgment_state": {
+        "instruction": "请完成这个项目的一个小维护：只在 notes.txt 最后追加一行 \"Archive verification: complete.\"，保留原文。不要修改 large.dat、AGENTS.md 或任何其他交付文件，不用执行成员、不提交。使用项目自带的 .runtime/node 读取 notes.txt 验证追加结果，并记录 large.dat 的 SHA-256 确认未修改。完成后提交独立终检，检查结束后按 Orbit 通知完成停止；排队终检后结束当前回复，等待通知。",
+        "amendments": [],
+        "basis": [],
+        "workspace": {
+          "project_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/storage-v3",
+          "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/storage-v3",
+          "project": {
+            "path": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/storage-v3",
+            "git": true,
+            "common_dir": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/storage-v3/.git",
+            "worktree": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/storage-v3",
+            "head": "c0ad981e8eb060072da6fb316f0a755995131e73"
+          },
+          "artifact": {
+            "path": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/storage-v3",
+            "git": true,
+            "common_dir": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/storage-v3/.git",
+            "worktree": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/storage-v3",
+            "head": "c0ad981e8eb060072da6fb316f0a755995131e73"
+          },
+          "bound_at": "2026-10-11T07:06:20Z",
+          "history": []
+        },
+        "review_role": "reviewer",
+        "acceptance": "请完成这个项目的一个小维护：只在 notes.txt 最后追加一行 \"Archive verification: complete.\"，保留原文。不要修改 large.dat、AGENTS.md 或任何其他交付文件，不用执行成员、不提交。使用项目自带的 .runtime/node 读取 notes.txt 验证追加结果，并记录 large.dat 的 SHA-256 确认未修改。完成后提交独立终检，检查结束后按 Orbit 通知完成停止；排队终检后结束当前回复，等待通知。",
+        "acceptance_source": "task_instruction",
+        "model_requirements": {},
+        "work_units": [],
+        "candidates": [
+          {
+            "model": "opencode-go/deepseek-v4.1-flash",
+            "identity": {
+              "provider": "opencode-go",
+              "model": "deepseek-v4.1-flash",
+              "reasoning": "unknown",
+              "billing_route": "subscription_quota"
+            },
+            "capability_facts": {
+              "identity": {
+                "provider": "opencode-go",
+                "model": "deepseek-v4.1-flash",
+                "reasoning": "unknown",
+                "billing_route": "subscription_quota"
+              },
+              "task": {
+                "relevant_indices": [],
+                "required_context_tokens": null,
+                "required_input_modalities": [],
+                "required_output_modalities": [],
+                "required_parameters": [],
+                "require_measurement_date": false
+              },
+              "catalog": {
+                "status": "fresh",
+                "question": "模型级第三方基准指数与目录能力；无测量日期与方法版本，不代表本执行路由的限制、价格或耗时",
+                "facts": {
+                  "id": "deepseek/deepseek-v4.1-flash",
+                  "canonical_slug": "deepseek/deepseek-v4.1-flash-20260910",
+                  "intelligence_index": 39.5,
+                  "benchmark_variants": [
+                    {
+                      "coding_index": null,
+                      "agentic_index": null,
+                      "intelligence_index": 39.5,
+                      "permaslug": "deepseek/deepseek-v4.1-flash-20260910",
+                      "display_name": "DeepSeek V4.1 Flash (Max)"
+                    }
+                  ],
+                  "benchmark_display_name": "DeepSeek V4.1 Flash (Max)",
+                  "benchmark_as_of": "2026-10-09T00:00:23.510Z",
+                  "context_length": 1048576,
+                  "architecture": {
+                    "input_modalities": [
+                      "text",
+                      "image"
+                    ],
+                    "output_modalities": [
+                      "text"
+                    ],
+                    "tokenizer": "DeepSeek"
+                  },
+                  "supported_parameters": [
+                    "frequency_penalty",
+                    "include_reasoning",
+                    "logit_bias",
+                    "logprobs",
+                    "max_tokens",
+                    "min_p",
+                    "presence_penalty",
+                    "reasoning",
+                    "reasoning_effort",
+                    "repetition_penalty",
+                    "response_format",
+                    "seed",
+                    "stop",
+                    "structured_outputs",
+                    "temperature",
+                    "tool_choice",
+                    "tools",
+                    "top_k",
+                    "top_logprobs",
+                    "top_p"
+                  ],
+                  "capability_scope": "model_catalog",
+                  "fetched_at": "2026-10-11T03:54:28Z",
+                  "sources": [
+                    "https://artificialanalysis.ai",
+                    "https://openrouter.ai/api/v1/benchmarks?source=artificial-analysis",
+                    "https://opencode.ai/v2/docs/console/go",
+                    "https://www.deepseek.com/en/news/deepseek-v4-1-flash/",
+                    "https://openrouter.ai/deepseek/deepseek-v4.1-flash"
+                  ],
+                  "reasoning_note": "推理变体未核实（reasoning=unknown）；仅作弱先验，不等于推理档位匹配；基准为 OpenRouter 目录中的 Artificial Analysis 指数，无测量日期，不代表本路由价格或端到端耗时。",
+                  "mapping_identity": {
+                    "provider": "opencode-go",
+                    "model": "deepseek-v4.1-flash",
+                    "reasoning": "unknown",
+                    "billing_route": "subscription_quota"
+                  },
+                  "mapping": {
+                    "match": "exact",
+                    "requested_identity": {
+                      "provider": "opencode-go",
+                      "model": "deepseek-v4.1-flash",
+                      "reasoning": "unknown",
+                      "billing_route": "subscription_quota"
+                    },
+                    "normalized_base_model": "deepseek-v4.1-flash",
+                    "audited": true,
+                    "matched_mapping_identity": {
+                      "provider": "opencode-go",
+                      "model": "deepseek-v4.1-flash",
+                      "reasoning": "unknown",
+                      "billing_route": "subscription_quota"
+                    }
+                  },
+                  "measurement_date": null,
+                  "measurement_date_status": "unknown",
+                  "method_version": null,
+                  "measurement_note": "抓取 72 小时有效期不代表基准测量日期；测量日期与方法版本未获可核验来源"
+                },
+                "prior": null,
+                "provenance": {
+                  "mapping_identity": {
+                    "provider": "opencode-go",
+                    "model": "deepseek-v4.1-flash",
+                    "reasoning": "unknown",
+                    "billing_route": "subscription_quota"
+                  },
+                  "match": "exact",
+                  "audited": true,
+                  "verified_at": "2026-09-30T11:58:45Z",
+                  "verified_by": "Orbit official-source review + Go endpoint audit",
+                  "sources": [
+                    "https://opencode.ai/v2/docs/console/go",
+                    "https://www.deepseek.com/en/news/deepseek-v4-1-flash/",
+                    "https://openrouter.ai/deepseek/deepseek-v4.1-flash"
+                  ]
+                }
+              },
+              "precise_evidence": {
+                "status": "evidence",
+                "question": "该精确身份（provider/model/reasoning/billing_route）的可得事实或记录的不可用状态；提交者检索，含检索日期与有效期",
+                "entry": {
+                  "identity": {
+                    "provider": "opencode-go",
+                    "model": "deepseek-v4.1-flash",
+                    "reasoning": "unknown",
+                    "billing_route": "subscription_quota"
+                  },
+                  "status": "evidence",
+                  "sources": [
+                    "https://api-docs.deepseek.com/news/news260910/",
+                    "https://api-docs.deepseek.com/img/v4.1_260910_benchmark_table_en.png",
+                    "https://opencode.ai/go"
+                  ],
+                  "retrieved_at": "2026-10-11T07:05:49Z",
+                  "valid_until": "2026-10-12T07:05:49Z",
+                  "evidence_scope": "exact_identity",
+                  "measurement_date": null,
+                  "measurement_date_status": "unknown",
+                  "method_version": "DeepSWE v1.1 vendor report published 2026-09-10; benchmark measurement date unknown",
+                  "metrics": {
+                    "deepSWE_v1_1": {
+                      "value": 74.2,
+                      "unit": "percent",
+                      "basis": "Freshly verified DeepSeek author table: V4.1-Flash DeepSWE v1.1=74.2. Model-level vendor benchmark; OpenCode Go lists this model, but OMP serving/reasoning variant has not independently run the benchmark. No exact-route success guarantee."
+                    }
+                  }
+                }
+              },
+              "eligibility": {
+                "context": {
+                  "status": "not_required",
+                  "requirement": null,
+                  "catalog_value": 1048576
+                },
+                "input_modalities": {
+                  "status": "not_required",
+                  "requirement": [],
+                  "catalog_value": [
+                    "text",
+                    "image"
+                  ]
+                },
+                "output_modalities": {
+                  "status": "not_required",
+                  "requirement": [],
+                  "catalog_value": [
+                    "text"
+                  ]
+                },
+                "parameters": {
+                  "status": "not_required",
+                  "requirement": [],
+                  "catalog_value": [
+                    "frequency_penalty",
+                    "include_reasoning",
+                    "logit_bias",
+                    "logprobs",
+                    "max_tokens",
+                    "min_p",
+                    "presence_penalty",
+                    "reasoning",
+                    "reasoning_effort",
+                    "repetition_penalty",
+                    "response_format",
+                    "seed",
+                    "stop",
+                    "structured_outputs",
+                    "temperature",
+                    "tool_choice",
+                    "tools",
+                    "top_k",
+                    "top_logprobs",
+                    "top_p"
+                  ]
+                }
+              },
+              "execution_eligibility": {
+                "context": {
+                  "status": "not_required",
+                  "requirement": null,
+                  "configured_limit": 1000000,
+                  "source": "omp_model_registry"
+                },
+                "input_modalities": {
+                  "status": "not_required",
+                  "requirement": [],
+                  "configured_values": [
+                    "text",
+                    "image"
+                  ]
+                },
+                "output_modalities": {
+                  "status": "not_required",
+                  "requirement": [],
+                  "configured_values": [
+                    "text"
+                  ]
+                },
+                "parameters": {
+                  "status": "not_required",
+                  "requirement": [],
+                  "note": "模型工具支持不代替成员实际工具授权"
+                }
+              },
+              "measurement_date": {
+                "requirement": false,
+                "status": "not_required",
+                "catalog_status": "fresh",
+                "exact_evidence_status": "evidence",
+                "exact_evidence_measured_at": null
+              },
+              "conflicts": [],
+              "contrasts": [],
+              "recommendation_hold": false,
+              "hold_reason": null
+            },
+            "evidence": {
+              "identity": {
+                "provider": "opencode-go",
+                "model": "deepseek-v4.1-flash",
+                "reasoning": "unknown",
+                "billing_route": "subscription_quota"
+              },
+              "status": "evidence",
+              "sources": [
+                "https://api-docs.deepseek.com/news/news260910/",
+                "https://api-docs.deepseek.com/img/v4.1_260910_benchmark_table_en.png",
+                "https://opencode.ai/go"
+              ],
+              "retrieved_at": "2026-10-11T07:05:49Z",
+              "valid_until": "2026-10-12T07:05:49Z",
+              "evidence_scope": "exact_identity",
+              "measurement_date": null,
+              "measurement_date_status": "unknown",
+              "method_version": "DeepSWE v1.1 vendor report published 2026-09-10; benchmark measurement date unknown",
+              "metrics": {
+                "deepSWE_v1_1": {
+                  "value": 74.2,
+                  "unit": "percent",
+                  "basis": "Freshly verified DeepSeek author table: V4.1-Flash DeepSWE v1.1=74.2. Model-level vendor benchmark; OpenCode Go lists this model, but OMP serving/reasoning variant has not independently run the benchmark. No exact-route success guarantee."
+                }
+              }
+            }
+          }
+        ]
+      },
+      "usage": {
+        "input_tokens": 4296,
+        "output_tokens": 22
+      },
+      "selected_for": "reviewer",
+      "selected_at": "2026-10-11T07:07:14Z",
+      "signature": "69ea5117e9a59a11328080b1d287d444c4ddd136cf96f83b1eeffe81b3947f20"
+    }
+  },
+  "estimate": {
+    "seconds": null,
+    "tokens": null
+  },
+  "checks": [
+    {
+      "number": 1,
+      "role": "reviewer",
+      "kind": "artifact",
+      "started_at": "2026-10-11T07:07:01Z",
+      "observation_key": "5ed5e8903d9a16420a6c6204d48a237b01b30fa8aa46954a461b9eb001eec234",
+      "trigger_cause": "manual_check",
+      "manual": true,
+      "result": {
+        "verdict": "complete",
+        "reason": "Fixed snapshot checked directly. notes.txt (read: 79 bytes, final_newline=LF, actual_lines=2) contains the original line 'A fixed historical snapshot must be preserved.' unchanged followed by exactly the appended line 'Archive verification: complete.' + LF, matching the byte total (47+32=79). review_focus.modified lists only notes.txt; AGENTS.md (232 bytes, 1 line, unchanged text) and large.dat are not modified, and task_git shows snapshot HEAD == baseline HEAD c0ad981e with zero changed_paths, so nothing was committed and large.dat's working-tree bytes are untouched. execution_members is empty (no member dispatched). Independent final check was queued as write to xd://orbit (receipt: status queued, command 20261011070634865123-6bdc229dc419) and Root ended the turn; the completion stop and closing report remain with the runtime's own sequence. The .runtime/node invocation and the exact SHA-256 value (8d2c9ee9fb12e2b3150d1e7995ed25636d6ac0f87693627aedcde1d87397cc7f) have no program receipt I can inspect and .runtime/ is git-ignored/absent from this snapshot, so I confirmed their required outcome independently instead: the append/verification result by direct byte read, and 'large.dat unmodified' by the clean working-tree state. No missing, wrong or extra work found.",
+        "findings": [],
+        "resolved_ids": [],
+        "next_check_seconds": 900,
+        "delivery": {
+          "ready": true,
+          "reason": "File deliverable visible in the fixed snapshot: notes.txt at the project root is 79 bytes with LF final newline and 2 lines — original line 'A fixed historical snapshot must be preserved.' preserved, then appended line 'Archive verification: complete.'; no other file modified (review_focus modified only notes.txt; AGENTS.md and large.dat byte-state unchanged; HEAD == baseline, no commit). The version-matched task_delivery (turn 3dc10f22) records the SHA-256 of large.dat and the verification outcome, consistent with the snapshot facts I inspected."
+        },
+        "coverage": {
+          "complete": true,
+          "items": [
+            {
+              "requirement": "Append exactly one line 'Archive verification: complete.' at the end of notes.txt",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "read notes.txt => [bytes=79; final_newline=LF; actual_lines=2], line 2 = 'Archive verification: complete.'"
+            },
+            {
+              "requirement": "Preserve all original content of notes.txt",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "read notes.txt line 1 = 'A fixed historical snapshot must be preserved.' unchanged; total 79 bytes = 47 (line1+LF) + 32 (line2+LF)"
+            },
+            {
+              "requirement": "Do not modify large.dat",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "large.dat absent from review_focus.modified (only notes.txt listed); task_git snapshot HEAD == baseline HEAD c0ad981e with changed_paths []; worker tree shows no change to large.dat"
+            },
+            {
+              "requirement": "Do not modify AGENTS.md or any other delivery file",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "read AGENTS.md => 232 bytes, 1 line, unchanged project-rule text; review_focus modified lists only notes.txt, added/deleted empty"
+            },
+            {
+              "requirement": "Do not execute any member",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "execution_members = [] and work_units = [] in program record; no member block present"
+            },
+            {
+              "requirement": "Do not commit or push",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "task_git.baseline_head == snapshot_head == c0ad981e8eb060072da6fb316f0a755995131e73, changed_paths [] (no commits between baseline and snapshot HEAD)"
+            },
+            {
+              "requirement": "Use the project's bundled .runtime/node to read notes.txt and verify the append",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "Invocation receipt not inspectable (.runtime/ is git-ignored and absent from this snapshot), but the verification outcome it was to establish is independently confirmed: direct byte read of notes.txt shows the exact appended line, 79 bytes, LF-terminated; .runtime/node version/tool receipt is a gap in attestation, not in result"
+            },
+            {
+              "requirement": "Record large.dat SHA-256 to confirm it was not modified",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "task_delivery (turn 3dc10f22) records SHA-256 8d2c9ee9fb12e2b3150d1e7995ed25636d6ac0f87693627aedcde1d87397cc7f; I cannot recompute it (large.dat too large for read), but unmodified state is corroborated by review_focus (not listed as modified) and empty task_git changed_paths"
+            },
+            {
+              "requirement": "Submit the independent final check after finishing the append",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "root_verifications receipt: write to xd://orbit, tool_call_id call_00fb7487fa6b48c89d1e3710, status completed with output {\"command_id\":\"20261011070634865123-6bdc229dc419\",\"status\":\"queued\"}"
+            },
+            {
+              "requirement": "After queuing the check, end the current reply and wait for the notification",
+              "scope": "delivery",
+              "status": "verified",
+              "evidence": "Root turn 3dc10f22 ended after the queue call with the delivery message; root.status idle, last_turn_status completed, last_turn_task_attributed true, no polling/wait calls in record"
+            },
+            {
+              "requirement": "Independent final review of the fixed artifact (this check)",
+              "scope": "lifecycle",
+              "status": "verified",
+              "evidence": "This check session read the fixed snapshot files notes.txt, AGENTS.md, .gitignore, listed the root and grepped for runtime references; verdict recorded above"
+            },
+            {
+              "requirement": "Subsequent completion via stop intent per the finalization notice",
+              "scope": "lifecycle",
+              "status": "unverified",
+              "evidence": "Not yet performed; runtime verifies the manual finalization notice and actual stop independently. Root is idle awaiting the notice."
+            },
+            {
+              "requirement": "Subsequent closing report after confirmed stop",
+              "scope": "lifecycle",
+              "status": "unverified",
+              "evidence": "Future event; not observable at this check time."
+            }
+          ]
+        }
+      },
+      "stale": false,
+      "stale_reasons": [],
+      "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/storage-v3",
+      "artifact_digest": "sha256:ba245fecde86fb9c36033edc229d8eeebf3668620c70e0e33921ccf646a12650",
+      "input_digest": "86d6c770e47c64608771c7371d781f63c5334a9a574367e750e43c207cca0aa6",
+      "finished_at": "2026-10-11T07:08:10Z",
+      "usage": {
+        "usage_status": "reported",
+        "incomplete": false,
+        "calls": [
+          {
+            "call_id": "orbit-call-2db91b51-123d-490e-a92b-a3cdfca72883",
+            "origin": "local_provider_invocation",
+            "usage_status": "reported",
+            "provider_response_id": "02179170243774222877b9ff06629ca98d99f0267ba452b45cb19",
+            "provider": "opencode-go",
+            "model": "deepseek-v4.1-flash",
+            "requested_model": "opencode-go/deepseek-v4.1-flash",
+            "stop_reason": "toolUse",
+            "completed_at": "2026-10-11T07:07:19.615Z",
+            "input": 7445,
+            "output": 173,
+            "cacheRead": 2048,
+            "cacheWrite": 0,
+            "reasoningTokens": 73,
+            "totalTokens": 9666
+          },
+          {
+            "call_id": "orbit-call-f8d54362-730f-400e-a55e-1ee6699ea66a",
+            "origin": "local_provider_invocation",
+            "usage_status": "reported",
+            "provider_response_id": "021791702440389c8c5a5589555159fe1f6a4222aeb4c2bb413ea",
+            "provider": "opencode-go",
+            "model": "deepseek-v4.1-flash",
+            "requested_model": "opencode-go/deepseek-v4.1-flash",
+            "stop_reason": "toolUse",
+            "completed_at": "2026-10-11T07:07:25.088Z",
+            "input": 257,
+            "output": 780,
+            "cacheRead": 9472,
+            "cacheWrite": 0,
+            "reasoningTokens": 674,
+            "totalTokens": 10509
+          },
+          {
+            "call_id": "orbit-call-36b29d50-b2a4-4c12-8735-46c5dbd89ebb",
+            "origin": "local_provider_invocation",
+            "usage_status": "reported",
+            "provider_response_id": "0217917024455434498c7002523dcce63b4e4e02dd9ae9cdc7280",
+            "provider": "opencode-go",
+            "model": "deepseek-v4.1-flash",
+            "requested_model": "opencode-go/deepseek-v4.1-flash",
+            "stop_reason": "toolUse",
+            "completed_at": "2026-10-11T07:07:28.364Z",
+            "input": 876,
+            "output": 339,
+            "cacheRead": 9728,
+            "cacheWrite": 0,
+            "reasoningTokens": 233,
+            "totalTokens": 10943
+          },
+          {
+            "call_id": "orbit-call-4df0d070-b6da-4b97-8498-8a9d00c9d9b7",
+            "origin": "local_provider_invocation",
+            "usage_status": "reported",
+            "provider_response_id": "0217917024489812e03d1d5cb4d12864ab68947fc6ea207b6dbd4",
+            "provider": "opencode-go",
+            "model": "deepseek-v4.1-flash",
+            "requested_model": "opencode-go/deepseek-v4.1-flash",
+            "stop_reason": "toolUse",
+            "completed_at": "2026-10-11T07:07:42.745Z",
+            "input": 500,
+            "output": 1584,
+            "cacheRead": 10496,
+            "cacheWrite": 0,
+            "reasoningTokens": 1505,
+            "totalTokens": 12580
+          },
+          {
+            "call_id": "orbit-call-af0252cf-780f-4df3-9917-13662ddb4e21",
+            "origin": "local_provider_invocation",
+            "usage_status": "reported",
+            "provider_response_id": "021791702463288e0570d30189b68d5608c0b11774ff85bf87b04",
+            "provider": "opencode-go",
+            "model": "deepseek-v4.1-flash",
+            "requested_model": "opencode-go/deepseek-v4.1-flash",
+            "stop_reason": "toolUse",
+            "completed_at": "2026-10-11T07:07:44.820Z",
+            "input": 1743,
+            "output": 130,
+            "cacheRead": 10880,
+            "cacheWrite": 0,
+            "reasoningTokens": 28,
+            "totalTokens": 12753
+          },
+          {
+            "call_id": "orbit-call-b38cf3ee-93a2-4605-a2bc-3b7078c53634",
+            "origin": "local_provider_invocation",
+            "usage_status": "reported",
+            "provider_response_id": "021791702465276978acb49f7cce3ba6727b8cdf360fb7ed2d152",
+            "provider": "opencode-go",
+            "model": "deepseek-v4.1-flash",
+            "requested_model": "opencode-go/deepseek-v4.1-flash",
+            "stop_reason": "stop",
+            "completed_at": "2026-10-11T07:08:08.893Z",
+            "input": 246,
+            "output": 3211,
+            "cacheRead": 12544,
+            "cacheWrite": 0,
+            "reasoningTokens": 1819,
+            "totalTokens": 16001
+          }
+        ],
+        "coverage": {
+          "input": {
+            "reported_sum": 11067,
+            "reported_calls": 6,
+            "missing_calls": 0
+          },
+          "output": {
+            "reported_sum": 6217,
+            "reported_calls": 6,
+            "missing_calls": 0
+          },
+          "cacheRead": {
+            "reported_sum": 55168,
+            "reported_calls": 6,
+            "missing_calls": 0
+          },
+          "cacheWrite": {
+            "reported_sum": 0,
+            "reported_calls": 6,
+            "missing_calls": 0
+          },
+          "reasoningTokens": {
+            "reported_sum": 4332,
+            "reported_calls": 6,
+            "missing_calls": 0
+          },
+          "totalTokens": {
+            "reported_sum": 72452,
+            "reported_calls": 6,
+            "missing_calls": 0
+          }
+        },
+        "derived_usage_fields": [
+          "input_tokens",
+          "output_tokens",
+          "total_tokens"
+        ],
+        "derived_note": "legacy reference totals from reported SDK buckets; original call fields and coverage govern resource accounting",
+        "input": 11067,
+        "output": 6217,
+        "cacheRead": 55168,
+        "cacheWrite": 0,
+        "reasoningTokens": 4332,
+        "totalTokens": 72452,
+        "input_tokens": 66235,
+        "output_tokens": 6217,
+        "total_tokens": 72452,
+        "gaps": []
+      },
+      "workspace_reclaim": {
+        "schema_version": "orbit-check-workspace-reclaim-v1",
+        "number": 1,
+        "at": "2026-10-11T07:08:10Z",
+        "status": "reclaimed",
+        "reasons": [],
+        "gates": {
+          "reaped": true,
+          "group_probe": true,
+          "receipts": true,
+          "run": true,
+          "archive": true
+        }
+      }
+    }
+  ],
+  "decisions": [],
+  "coverage_required": true,
+  "usage": {
+    "tokens": null,
+    "resource_call_gaps": {
+      "native_execution": ""
+    },
+    "resource_calls": {
+      "schema_version": "orbit-resource-calls-v1",
+      "coverage": "recorded_calls_only",
+      "call_count": 15,
+      "status_counts": {
+        "completed": 15,
+        "failed": 0,
+        "unknown": 0
+      },
+      "unknown_usage_calls": 0,
+      "partial_usage_calls": 0,
+      "usage_status_counts": {
+        "reported": 15,
+        "partial": 0,
+        "unknown": 0
+      },
+      "noted_usage_calls": 0,
+      "unknown_actual_model_calls": 0,
+      "attempt_count": 2,
+      "calls_without_attempt": 3,
+      "call_id_origins": {
+        "local_provider_invocation": 15
+      },
+      "calls_without_call_id_origin": 0,
+      "unknown_upstream_model_calls": 15,
+      "calls_with_credential_id": 12,
+      "unknown_account_identity_calls": 15,
+      "groups": [
+        {
+          "role": "judgment",
+          "phase": "jev_stage1",
+          "actual_identity": {
+            "provider": "typesafe",
+            "model": "jev-1.13.0",
+            "reasoning": null,
+            "billing_route": "unknown",
+            "scope": "judgment_service"
+          },
+          "usage_source": "provider_response",
+          "call_count": 2,
+          "status_counts": {
+            "completed": 2,
+            "failed": 0,
+            "unknown": 0
+          },
+          "usage_fields": {
+            "input_tokens": {
+              "reported_sum": 6208,
+              "unit": "token",
+              "reported_calls": 2,
+              "missing_calls": 0
+            },
+            "output_tokens": {
+              "reported_sum": 110,
+              "unit": "token",
+              "reported_calls": 2,
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "root",
+          "phase": "root_execution",
+          "actual_identity": {
+            "provider": "zhipu-coding-plan",
+            "model": "glm-5.3-flash",
+            "reasoning": null,
+            "billing_route": "subscription_quota",
+            "scope": "omp_route"
+          },
+          "usage_source": "native_message",
+          "call_count": 6,
+          "status_counts": {
+            "completed": 6,
+            "failed": 0,
+            "unknown": 0
+          },
+          "usage_fields": {
+            "cacheRead": {
+              "reported_sum": 84480,
+              "unit": "token",
+              "reported_calls": 6,
+              "missing_calls": 0
+            },
+            "cacheWrite": {
+              "reported_sum": 0,
+              "unit": "token",
+              "reported_calls": 6,
+              "missing_calls": 0
+            },
+            "input": {
+              "reported_sum": 47091,
+              "unit": "token",
+              "reported_calls": 6,
+              "missing_calls": 0
+            },
+            "output": {
+              "reported_sum": 3432,
+              "unit": "token",
+              "reported_calls": 6,
+              "missing_calls": 0
+            },
+            "reasoningTokens": {
+              "reported_sum": 2584,
+              "unit": "token",
+              "reported_calls": 6,
+              "missing_calls": 0
+            },
+            "totalTokens": {
+              "reported_sum": 135003,
+              "unit": "token",
+              "reported_calls": 6,
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "judgment",
+          "phase": "jev_checker_selection",
+          "actual_identity": {
+            "provider": "typesafe",
+            "model": "jev-1.13.0",
+            "reasoning": null,
+            "billing_route": "unknown",
+            "scope": "judgment_service"
+          },
+          "usage_source": "provider_response",
+          "call_count": 1,
+          "status_counts": {
+            "completed": 1,
+            "failed": 0,
+            "unknown": 0
+          },
+          "usage_fields": {
+            "input_tokens": {
+              "reported_sum": 4296,
+              "unit": "token",
+              "reported_calls": 1,
+              "missing_calls": 0
+            },
+            "output_tokens": {
+              "reported_sum": 22,
+              "unit": "token",
+              "reported_calls": 1,
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "checker",
+          "phase": "reviewer",
+          "actual_identity": {
+            "provider": "opencode-go",
+            "model": "deepseek-v4.1-flash",
+            "reasoning": null,
+            "billing_route": "unknown",
+            "scope": "omp_route"
+          },
+          "usage_source": "native_message",
+          "call_count": 6,
+          "status_counts": {
+            "completed": 6,
+            "failed": 0,
+            "unknown": 0
+          },
+          "usage_fields": {
+            "cacheRead": {
+              "reported_sum": 55168,
+              "unit": "token",
+              "reported_calls": 6,
+              "missing_calls": 0
+            },
+            "cacheWrite": {
+              "reported_sum": 0,
+              "unit": "token",
+              "reported_calls": 6,
+              "missing_calls": 0
+            },
+            "input": {
+              "reported_sum": 11067,
+              "unit": "token",
+              "reported_calls": 6,
+              "missing_calls": 0
+            },
+            "output": {
+              "reported_sum": 6217,
+              "unit": "token",
+              "reported_calls": 6,
+              "missing_calls": 0
+            },
+            "reasoningTokens": {
+              "reported_sum": 4332,
+              "unit": "token",
+              "reported_calls": 6,
+              "missing_calls": 0
+            },
+            "totalTokens": {
+              "reported_sum": 72452,
+              "unit": "token",
+              "reported_calls": 6,
+              "missing_calls": 0
+            }
+          }
+        }
+      ],
+      "cost": null,
+      "quota_consumption": null,
+      "note": "reported fields are never summed across categories; cost and quota stay unknown here"
+    },
+    "jev_stage1": {
+      "input_tokens": 6208,
+      "output_tokens": 110,
+      "incomplete": false
+    },
+    "jev_checker_selection": {
+      "input_tokens": 4296,
+      "output_tokens": 22,
+      "incomplete": false
+    },
+    "check_tokens": 72452,
+    "check_tokens_reported_subtotal": 72452,
+    "check_usage_missing_attempts": 0
+  },
+  "findings": {},
+  "sent_message_ids": [
+    "77e8ad64-2587-4c34-9bdf-a8fd559238ed"
+  ],
+  "delegation_hints": {},
+  "delegation_assessments": {},
+  "member_selections": {},
+  "evidence_requests": {},
+  "evidence_gaps": {},
+  "members": [],
+  "unknown_candidates": {},
+  "check_observations": {
+    "5ed5e8903d9a16420a6c6204d48a237b01b30fa8aa46954a461b9eb001eec234": {
+      "status": "finished",
+      "check": 1,
+      "stale": false,
+      "trigger_cause": "manual_check",
+      "manual": true,
+      "started_at": "2026-10-11T07:07:01Z",
+      "finished_at": "2026-10-11T07:08:10Z"
+    }
+  },
+  "finalization_notices": {
+    "ad6937a8a8ae56fa8bfd1deaa180dc9946905413acc6c9792c15eb24dad2aaa9": {
+      "check": 1,
+      "message_id": "77e8ad64-2587-4c34-9bdf-a8fd559238ed",
+      "at": "2026-10-11T07:08:10Z"
+    }
+  },
+  "completion_readiness": {
+    "status": "complete",
+    "reason": "独立终检及停止确认通过",
+    "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/storage-v3",
+    "artifact_digest": "sha256:ba245fecde86fb9c36033edc229d8eeebf3668620c70e0e33921ccf646a12650",
+    "input_digest": "86d6c770e47c64608771c7371d781f63c5334a9a574367e750e43c207cca0aa6",
+    "notice_key": "ad6937a8a8ae56fa8bfd1deaa180dc9946905413acc6c9792c15eb24dad2aaa9",
+    "prior_status": "queued"
+  },
+  "last_user_message_id": "231fc551",
+  "root_session_file": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/root-sessions/storage-v3-a/2026-10-11T07-04-23-999Z_01a129c6-e8bf-702e-ae83-2c79fe2ad326.jsonl",
+  "hub_seen_ids": [
+    "collab-1",
+    "collab-2",
+    "collab-3",
+    "collab-4",
+    "collab-5"
+  ],
+  "native_collaboration": [
+    {
+      "id": "collab-1",
+      "seq": 1,
+      "kind": "model_identity",
+      "op": null,
+      "from": null,
+      "to": null,
+      "agent_id": "Main",
+      "session_id": "01a129c6-e8bf-702e-ae83-2c79fe2ad326",
+      "await_reply": null,
+      "message": null,
+      "text": null,
+      "ok": null
+    },
+    {
+      "id": "collab-2",
+      "seq": 2,
+      "kind": "goal_projection",
+      "op": null,
+      "from": null,
+      "to": null,
+      "agent_id": "Main",
+      "session_id": "01a129c6-e8bf-702e-ae83-2c79fe2ad326",
+      "await_reply": null,
+      "message": null,
+      "text": null,
+      "ok": null
+    },
+    {
+      "id": "collab-3",
+      "seq": 3,
+      "kind": "cooperation_policy",
+      "op": null,
+      "from": null,
+      "to": null,
+      "agent_id": "Main",
+      "session_id": "01a129c6-e8bf-702e-ae83-2c79fe2ad326",
+      "await_reply": null,
+      "message": null,
+      "text": null,
+      "ok": null
+    },
+    {
+      "id": "collab-4",
+      "seq": 4,
+      "kind": "bootstrap_guidance",
+      "op": null,
+      "from": null,
+      "to": null,
+      "agent_id": null,
+      "session_id": "01a129c6-e8bf-702e-ae83-2c79fe2ad326",
+      "await_reply": null,
+      "message": null,
+      "text": null,
+      "ok": null
+    },
+    {
+      "id": "collab-5",
+      "seq": 5,
+      "kind": "unit_state_before_edit",
+      "op": null,
+      "from": null,
+      "to": null,
+      "agent_id": null,
+      "session_id": "01a129c6-e8bf-702e-ae83-2c79fe2ad326",
+      "await_reply": null,
+      "message": null,
+      "text": null,
+      "ok": null
+    }
+  ],
+  "hub_last_seq": 5,
+  "jev": {
+    "provider": "typesafe",
+    "model": "jev-1.13.0",
+    "question_set_version": "jev-observation-2",
+    "usage": {
+      "input_tokens": 3301,
+      "output_tokens": 55
+    },
+    "call_id": "orbit-judgment-1ea67672-5f7b-4e20-b5c7-c21fd09817d6",
+    "requested_model": "jev-1.13.0",
+    "status": "assessed",
+    "scores": {
+      "stuck": 0.15,
+      "off_track": 0.09,
+      "artifact_ready": 0.64
+    },
+    "assessed_at": "2026-10-11T07:08:11Z"
+  },
+  "task_delivery": {
+    "turn_id": "3dc10f22",
+    "input_digest": "86d6c770e47c64608771c7371d781f63c5334a9a574367e750e43c207cca0aa6",
+    "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/storage-v3",
+    "artifact_digest": "sha256:ba245fecde86fb9c36033edc229d8eeebf3668620c70e0e33921ccf646a12650",
+    "observation": {
+      "status": "idle",
+      "last_turn_id": "3dc10f22",
+      "last_turn_status": "completed",
+      "observations": [
+        "bff4cfb9d21e798d405e80972c63d2559b570ad64bbe84005fd989f36ada155e",
+        "9cf6af0b04f3fe66a288bc9150d332e398b07565209e7230ba0db391d0c60095",
+        "ddaebfc862c053a9848757f6abf9d8096e5f5b32fe9757e77fee67b183fdc0ff",
+        "54ba2c1ff5c1d9f51858cfa13ef99fa642464aede3365e39c55922c99a79ca07",
+        "8cca14d4b4349240c68aa5f9d3f461291f83276d22b92dfe7d636e2fc3f03d0d",
+        "3cf13734c3002802b82b9628637307db9e8dcf8e55da9c0bd75a79a2b9677285",
+        "e709808745c792fa5f9db6f6f522299383fa328a7d7361b2bf0d59d1693ea15c",
+        "78831812d1120365329f337842e36824a429d52ce8760b82030e25fb628becb2",
+        "c094a21a6dadf6396c6d0ecf9d7f2498018f320af4fb9616225ae9b795063a01",
+        "38a098cf3bee602784f515253862e582bbb04573908cadc09a3a07b76452ac4e"
+      ]
+    },
+    "prior_turns": [],
+    "text": "交付结果（终检已排队，本轮结束，等待 finalization_notice）：\n\n- **notes.txt**：末尾追加 1 行 `Archive verification: complete.`，原行 `A fixed historical snapshot must be preserved.` 保留。用项目自带 `.runtime/node`（v24.19.0）逐字节校验全文 = `\"A fixed historical snapshot must be preserved.\\nArchive verification: complete.\\n\"`，`notes_ok=true`。\n- **large.dat**：SHA-256 修改前后一致 `8d2c9ee9fb12e2b3150d1e7995ed25636d6ac0f87693627aedcde1d87397cc7f`，未修改。\n- **AGENTS.md 及其他文件**：未触碰；未派发成员；未提交。\n- **Orbit**：监督任务 `96dadc27-abb4-41bc-b9d8-4b069b74a049`，独立终检已排队（`20261011070634865123-6bdc229dc419`）。收到有效 finalization_notice 后按通知调用 `stop intent=complete`；若收到纠正则先处理。"
+  },
+  "requirement_coverage": {
+    "current": true,
+    "complete": true,
+    "kind": "artifact",
+    "role": "reviewer",
+    "check_id": "1",
+    "recorded_at": "2026-10-11T07:08:10Z",
+    "verified": 10,
+    "unverified": 0,
+    "items": [
+      {
+        "requirement": "Append exactly one line 'Archive verification: complete.' at the end of notes.txt",
+        "scope": "delivery",
+        "status": "verified",
+        "evidence": "read notes.txt => [bytes=79; final_newline=LF; actual_lines=2], line 2 = 'Archive verification: complete.'"
+      },
+      {
+        "requirement": "Preserve all original content of notes.txt",
+        "scope": "delivery",
+        "status": "verified",
+        "evidence": "read notes.txt line 1 = 'A fixed historical snapshot must be preserved.' unchanged; total 79 bytes = 47 (line1+LF) + 32 (line2+LF)"
+      },
+      {
+        "requirement": "Do not modify large.dat",
+        "scope": "delivery",
+        "status": "verified",
+        "evidence": "large.dat absent from review_focus.modified (only notes.txt listed); task_git snapshot HEAD == baseline HEAD c0ad981e with changed_paths []; worker tree shows no change to large.dat"
+      },
+      {
+        "requirement": "Do not modify AGENTS.md or any other delivery file",
+        "scope": "delivery",
+        "status": "verified",
+        "evidence": "read AGENTS.md => 232 bytes, 1 line, unchanged project-rule text; review_focus modified lists only notes.txt, added/deleted empty"
+      },
+      {
+        "requirement": "Do not execute any member",
+        "scope": "delivery",
+        "status": "verified",
+        "evidence": "execution_members = [] and work_units = [] in program record; no member block present"
+      },
+      {
+        "requirement": "Do not commit or push",
+        "scope": "delivery",
+        "status": "verified",
+        "evidence": "task_git.baseline_head == snapshot_head == c0ad981e8eb060072da6fb316f0a755995131e73, changed_paths [] (no commits between baseline and snapshot HEAD)"
+      },
+      {
+        "requirement": "Use the project's bundled .runtime/node to read notes.txt and verify the append",
+        "scope": "delivery",
+        "status": "verified",
+        "evidence": "Invocation receipt not inspectable (.runtime/ is git-ignored and absent from this snapshot), but the verification outcome it was to establish is independently confirmed: direct byte read of notes.txt shows the exact appended line, 79 bytes, LF-terminated; .runtime/node version/tool receipt is a gap in attestation, not in result"
+      },
+      {
+        "requirement": "Record large.dat SHA-256 to confirm it was not modified",
+        "scope": "delivery",
+        "status": "verified",
+        "evidence": "task_delivery (turn 3dc10f22) records SHA-256 8d2c9ee9fb12e2b3150d1e7995ed25636d6ac0f87693627aedcde1d87397cc7f; I cannot recompute it (large.dat too large for read), but unmodified state is corroborated by review_focus (not listed as modified) and empty task_git changed_paths"
+      },
+      {
+        "requirement": "Submit the independent final check after finishing the append",
+        "scope": "delivery",
+        "status": "verified",
+        "evidence": "root_verifications receipt: write to xd://orbit, tool_call_id call_00fb7487fa6b48c89d1e3710, status completed with output {\"command_id\":\"20261011070634865123-6bdc229dc419\",\"status\":\"queued\"}"
+      },
+      {
+        "requirement": "After queuing the check, end the current reply and wait for the notification",
+        "scope": "delivery",
+        "status": "verified",
+        "evidence": "Root turn 3dc10f22 ended after the queue call with the delivery message; root.status idle, last_turn_status completed, last_turn_task_attributed true, no polling/wait calls in record"
+      },
+      {
+        "requirement": "Independent final review of the fixed artifact (this check)",
+        "scope": "lifecycle",
+        "status": "verified",
+        "evidence": "This check session read the fixed snapshot files notes.txt, AGENTS.md, .gitignore, listed the root and grepped for runtime references; verdict recorded above"
+      },
+      {
+        "requirement": "Subsequent completion via stop intent per the finalization notice",
+        "scope": "lifecycle",
+        "status": "unverified",
+        "evidence": "Not yet performed; runtime verifies the manual finalization notice and actual stop independently. Root is idle awaiting the notice."
+      },
+      {
+        "requirement": "Subsequent closing report after confirmed stop",
+        "scope": "lifecycle",
+        "status": "unverified",
+        "evidence": "Future event; not observable at this check time."
+      }
+    ],
+    "lifecycle_items": 3,
+    "ready": true,
+    "gap": null
+  },
+  "member_stop_results": [],
+  "stop_confirmation": {
+    "confirmed": true,
+    "thread_id": "01a129c6-e8bf-702e-ae83-2c79fe2ad326",
+    "scope": "Native session execution, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+    "native_owner": "Main",
+    "status_after": "idle",
+    "active_tools_after": 0,
+    "async_jobs_settled": true,
+    "collaboration_persistence": {
+      "task_dir": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/storage-v3/.orbit/tasks/96dadc27-abb4-41bc-b9d8-4b069b74a049",
+      "scope": "current process observations through cutoff; append completion, not fsync",
+      "observed_through": 5,
+      "written_seq": 5,
+      "failed_observations": 0,
+      "recorded_gaps": 0,
+      "pending_gap": null,
+      "last_error": null,
+      "status": "written"
+    }
+  },
+  "delivery_digest": "sha256:ba245fecde86fb9c36033edc229d8eeebf3668620c70e0e33921ccf646a12650",
+  "stop_reason": "User requested stop",
+  "next_check_at": "2026-10-11T07:13:10Z",
+  "finished_at": "2026-10-11T07:08:48Z",
+  "elapsed_seconds": 148.459733,
+  "comparison": {
+    "time_variance_seconds": null,
+    "task_token_variance": null,
+    "stale_checks": 0,
+    "correction_messages": 1,
+    "note": "Check usage is measured separately. Root session totals can include earlier work; task-wide tokens remain unknown without a baseline."
+  }
+}

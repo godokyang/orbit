@@ -1,0 +1,47 @@
+[
+  {
+    "path": "docs/reference/evidence/local-host-snapshot-repair-20261011/positive-v2-evidence/task.tar.gz",
+    "sha256": "b75f2fef7ae95fadc44d3b814d51ef1e92d6c988ecc033da1695035eb6edad39",
+    "matches_original": true
+  },
+  {
+    "path": "docs/reference/evidence/local-host-snapshot-repair-20261011/in-flight-cancel-evidence/task.tar.gz",
+    "sha256": "4f6fe30d75fe4ebc97bd1e73639e7837224ea05a256e108a8ead176c52ec05a3",
+    "matches_original": true
+  },
+  {
+    "path": "docs/reference/evidence/local-host-snapshot-repair-20261011/process-failure-evidence/task.tar.gz",
+    "sha256": "c5c50f55da64cc16b44804e96ce906b84d22b361d6eaef86ee81851e34161ef9",
+    "matches_original": true
+  },
+  {
+    "path": "docs/reference/evidence/local-host-snapshot-repair-20261011/archive-failure-evidence/task.tar.gz",
+    "sha256": "f79a091c719964055d3186d8a7ad88e0938cb9f554844e1cc551610f445a260c",
+    "matches_original": true
+  },
+  {
+    "path": "docs/reference/evidence/local-host-snapshot-repair-20261011/negative-evidence/legacy-export.tar.gz",
+    "sha256": "611c0a30ebebfe7d54f878fd1155670e406b899d95386a218c31637a2a118bd6",
+    "matches_original": true
+  },
+  {
+    "path": "docs/reference/evidence/local-host-snapshot-repair-20261011/negative-evidence/task.tar.gz",
+    "sha256": "7bce8291d98dbd3e115eaddf907c9e612d27ab6dbeac7eadbfb97ade1bc4f020",
+    "matches_original": true
+  },
+  {
+    "path": "docs/reference/evidence/local-host-snapshot-repair-20261011/storage-v3-evidence/A-task.tar.gz",
+    "sha256": "3dd7f2d1abf328cfbbf06143bed1b304d067abd6ed946f45372c71794e3c5f88",
+    "matches_original": true
+  },
+  {
+    "path": "docs/reference/evidence/local-host-snapshot-repair-20261011/storage-v3-evidence/C-task.tar.gz",
+    "sha256": "8f99c109c0b8797e895bea9dd03db78206122650f7b7085f2a097b617de822f4",
+    "matches_original": true
+  },
+  {
+    "path": "docs/reference/evidence/local-host-snapshot-repair-20261011/storage-v3-evidence/repeat-task.tar.gz",
+    "sha256": "bf2367f9662d5c41f5a5fcd78edb4a4ea1128cb8da3d152d684fb9793a1828b4",
+    "matches_original": true
+  }
+]

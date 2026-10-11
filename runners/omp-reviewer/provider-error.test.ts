@@ -1,5 +1,9 @@
 import { expect, test } from "bun:test";
-import { providerErrorFact } from "./provider-error";
+import { providerErrorFact as projectFailure } from "./provider-error";
+// Supply the host classifier outcome at this boundary; these tests verify
+// Orbit's projection, without downloading/testing a private SDK.
+const providerErrorFact = (message: unknown) => projectFailure(message,
+    (_status, text) => text?.includes("Go usage limit exceeded") ?? false);
 
 // The real opencode-go quota-exhaustion turn (frozen evidence:
 // deepseek-reviewer-429-rootcause.json — six identical reviewer failures

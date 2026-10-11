@@ -1,0 +1,36 @@
+{
+  "schema_version": "orbit-check-snapshot-archive-v1",
+  "snapshot_digest": "sha256:8e5ae9b4a68c0c6e205c96309e80dbfe920eddedbd969e1f0206d612b355abd5",
+  "source_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/failure-v3",
+  "objects_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/failure-v3/.orbit/snapshot-objects",
+  "verified_at": "2026-10-11T07:13:50Z",
+  "entries": [
+    {
+      "path": ".gitignore",
+      "status": "tracked",
+      "kind": "file",
+      "content_digest": "sha256:f21872cf24c382dd4844007a84237553c2e4d612ae4e0af2958e2709a6fbe0e3",
+      "size": 18,
+      "mode": 420,
+      "object": "sha256/f2/f21872cf24c382dd4844007a84237553c2e4d612ae4e0af2958e2709a6fbe0e3"
+    },
+    {
+      "path": "AGENTS.md",
+      "status": "tracked",
+      "kind": "file",
+      "content_digest": "sha256:861d5880a5053b40cb67ae82e2fc1ae1095a64d8e808988269533760205f2bf5",
+      "size": 103,
+      "mode": 420,
+      "object": "sha256/86/861d5880a5053b40cb67ae82e2fc1ae1095a64d8e808988269533760205f2bf5"
+    },
+    {
+      "path": "note.txt",
+      "status": "modified",
+      "kind": "file",
+      "content_digest": "sha256:7c1b72bd847f1909211022c90a5be7d4d490c7b41894fb3ed82ccf00220250da",
+      "size": 40,
+      "mode": 420,
+      "object": "sha256/7c/7c1b72bd847f1909211022c90a5be7d4d490c7b41894fb3ed82ccf00220250da"
+    }
+  ]
+}

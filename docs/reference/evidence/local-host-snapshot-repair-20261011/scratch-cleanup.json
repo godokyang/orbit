@@ -1,0 +1,10 @@
+{
+  "removed_owned_files": [
+    "/tmp/orbit-real-catalog-probe.json",
+    "/tmp/orbit-real-catalog-probe.stderr",
+    "/tmp/orbit-host-storage-pack-dry.json",
+    "/tmp/orbit-host-storage-active-path",
+    "/tmp/orbit-permission-probe.py",
+    "/tmp/orbit-new-storage-runtime-tests.log"
+  ]
+}

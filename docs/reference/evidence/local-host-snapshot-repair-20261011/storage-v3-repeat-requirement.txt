@@ -1,0 +1,1 @@
+请用 Orbit 监督进行一次只读复核：确认 notes.txt 原文行仍为 "A fixed historical snapshot must be preserved."，末行只有一次 "Archive verification: complete."，并用项目 .runtime/node 实际读取文件验证，同时报告 large.dat 的 SHA-256。不要修改任何交付文件，不派发成员，不提交。完成复核并交付答复后，通过 Orbit 会话工具请求一次独立手动终检；排队后结束回合等待通知，按真实结论完成停止。

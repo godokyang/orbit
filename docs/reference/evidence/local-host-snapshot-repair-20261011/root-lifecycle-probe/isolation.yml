@@ -1,0 +1,5 @@
+telemetry:
+  otlpExportEnabled: false
+  enabled: false
+memory:
+  enabled: false

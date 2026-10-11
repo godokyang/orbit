@@ -1,7 +1,7 @@
 // Production entry for one independent OMP reviewer/adjudicator session.
 //
-//   bun reviewer.ts --config request.json
-//   bun reviewer.ts --snapshot DIR --profile DIR --out FILE [--prompt FILE] [--model provider/id]
+//   ORBIT_REVIEW_REQUEST=request.json omp --trusted-extension /absolute/reviewer.ts
+// The Ruby supervisor supplies the full confined native flags and owns exit.
 //
 // The profile must be a fresh directory and PI_CODING_AGENT_DIR must equal it;
 // OMP_PROFILE/PI_PROFILE must be unset. Session state stays confined to that
@@ -15,23 +15,15 @@
 import { execFileSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
-import { lstatSync, readFileSync, realpathSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { lstatSync, readFileSync, realpathSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { recoverTrailingJsonObject } from "./json-recovery";
+import type { ExtensionAPI, AuthStorage } from "@oh-my-pi/pi-coding-agent";
+import { isUsageLimitOutcome } from "@oh-my-pi/pi-ai/error";
 import { providerErrorFact } from "./provider-error.ts";
 import { parseProbeModels, probeModelAvailability, type CredentialAvailability } from "./model-probe";
 import { validateCheckResult } from "./check-result";
-import {
-	AgentRegistry,
-	createAgentSession,
-	discoverAuthStorage,
-	isAuthenticated,
-	ModelRegistry,
-	SessionManager,
-	Settings,
-	type AuthStorage,
-} from "@oh-my-pi/pi-coding-agent";
-import { getBaseConfigRoot, getModelDbPath, getProfileRootDir, resolveProfileEnv } from "@oh-my-pi/pi-utils";
+import { getBaseConfigRoot, getModelDbPath, getProfileRootDir, resolveProfileEnv, postmortem } from "@oh-my-pi/pi-utils";
 import { createConfinedTools, type SnapshotImageRead } from "./confined-tools.ts";
 import {
 	createCallBoundaryBinder,
@@ -66,21 +58,27 @@ type Request = {
 	// this process. Plain paths and profile names only — never credentials.
 	source_agent_dir?: string;
 	source_pi_coding_agent_dir?: string;
+	source_pi_config_dir?: string;
+	host_probe?: boolean;
 	source_omp_profile?: string;
 	source_pi_profile?: string;
 	source_project_dir?: string;
-	// Reviewer SDK version the install verified; falls back to this runner's
-	// own package.json dependency when absent (manual runs).
+	// Actual local host version supplied by the supervisor.
 	sdk_version?: string;
 };
 
+// A trusted factory deliberately stays pending. Only its owning parent ends
+// the host, using its real process-group signal after collecting completion.
+export default async function reviewerFactory(api: ExtensionAPI): Promise<never> {
+const { AgentRegistry, createAgentSession, discoverAuthStorage, isAuthenticated,
+    ModelRegistry, SessionManager, Settings } = api.pi;
 function arg(name: string): string | undefined {
 	const index = process.argv.indexOf(`--${name}`);
 	return index === -1 ? undefined : process.argv[index + 1];
 }
 
 function loadRequest(): Request {
-	const configPath = arg("config");
+	const configPath = process.env.ORBIT_REVIEW_REQUEST;
 	const fromFile = configPath ? (JSON.parse(readFileSync(configPath, "utf8")) as Request) : {};
 	if (typeof fromFile !== "object" || fromFile === null || Array.isArray(fromFile)) {
 		throw new Error("--config must be a JSON object");
@@ -110,23 +108,6 @@ function loadRequest(): Request {
 		...fromFile,
 		...Object.fromEntries(Object.entries(cli).filter(([, value]) => value !== undefined)),
 	};
-}
-
-function sdkVersion(): string {
-	// import.meta.resolve() in this module returns a repeated "file:file:..." string
-	// (observed length 4244) and readFileSync then throws ENAMETOOLONG. Read the
-	// package that actually satisfied the import, next to this file.
-	const pkg = path.join(path.dirname(fileURLToPath(import.meta.url)), "node_modules", "@oh-my-pi", "pi-coding-agent", "package.json");
-	return JSON.parse(readFileSync(pkg, "utf8")).version;
-}
-
-function expectedSdkVersion(request: Request): string {
-	const fromRequest = request.sdk_version?.trim();
-	if (fromRequest) return fromRequest;
-	const pkg = path.join(path.dirname(fileURLToPath(import.meta.url)), "package.json");
-	const declared = JSON.parse(readFileSync(pkg, "utf8"))?.dependencies?.["@oh-my-pi/pi-coding-agent"];
-	if (typeof declared !== "string" || !declared.trim()) throw new Error("cannot determine the expected reviewer SDK version");
-	return declared.trim();
 }
 
 function fingerprint(root: string): string {
@@ -227,6 +208,10 @@ function sourceProfileName(request: Request): string | undefined {
 }
 
 function resolveSourceAgentDir(request: Request): string {
+	const confined = process.env.PI_CONFIG_DIR;
+	if (request.source_pi_config_dir === undefined) delete process.env.PI_CONFIG_DIR;
+	else process.env.PI_CONFIG_DIR = request.source_pi_config_dir;
+	try {
 	if (request.source_agent_dir?.trim()) return path.resolve(request.source_agent_dir);
 	const profile = sourceProfileName(request);
 	if (profile) return path.join(getProfileRootDir(profile), "agent");
@@ -240,6 +225,10 @@ function resolveSourceAgentDir(request: Request): string {
 	const override = request.source_pi_coding_agent_dir?.trim();
 	if (override && path.resolve(override) !== profileDerived) return path.resolve(override);
 	return path.join(getBaseConfigRoot(), "agent");
+	} finally {
+		if (confined === undefined) delete process.env.PI_CONFIG_DIR;
+		else process.env.PI_CONFIG_DIR = confined;
+	}
 }
 
 // Build the catalog and credential store from the parent OMP session's agent
@@ -308,14 +297,29 @@ const evidence: Record<string, unknown> = {
 	// when the selected model declares no image input.
 	snapshot_image_reads: snapshotImageReads,
 };
-let exitCode = 1;
 let openAuthStorage: AuthStorage | undefined;
+let privateSession: Awaited<ReturnType<typeof createAgentSession>>["session"] | undefined;
+let syncInterruptedUsage: (() => void) | undefined;
+let disposal: Promise<void> | undefined;
+function disposePrivate(): Promise<void> {
+    return disposal ??= (async () => {
+        await privateSession?.dispose();
+        openAuthStorage?.close();
+        evidence.session_disposed = true;
+    })();
+}
+postmortem.register("orbit-independent-reviewer", async (reason: string) => {
+    syncInterruptedUsage?.();
+    try { await disposePrivate(); } catch (error) { evidence.cleanup_error = String(error); }
+    evidence.signal_cleanup = reason;
+    persistEvidence();
+});
 
 try {
 	const probeSpecs = parseProbeModels(request.probe_models);
 	const probeMode = request.probe_models !== undefined;
 	if (!request.profile || !request.out) throw new Error("profile and out are required");
-	if (!request.snapshot && !probeMode) throw new Error("a snapshot is required for a check");
+	if (!request.snapshot && !probeMode && !request.host_probe) throw new Error("a snapshot is required for a check");
 	const snapshot = request.snapshot ? path.resolve(request.snapshot) : undefined;
 	const profile = path.resolve(request.profile);
 	const out = path.resolve(request.out);
@@ -326,11 +330,13 @@ try {
 		throw new Error("run with PI_CODING_AGENT_DIR=<profile> and without OMP_PROFILE/PI_PROFILE");
 	}
 	if (snapshot && (within(snapshot, out) || within(snapshot, profile))) throw new Error("profile and out must stay outside the snapshot");
-	const version = sdkVersion();
+	const version = request.sdk_version;
+	if (!version) throw new Error("launcher must supply actual host version");
 	evidence.sdk_version = version;
-	const expectedSdk = expectedSdkVersion(request);
-	if (version !== expectedSdk) throw new Error(`SDK ${version} does not match the expected reviewer SDK ${expectedSdk}`);
-	const modeCount = [request.model, request.probe_outside, probeMode].filter(Boolean).length;
+	evidence.host_version = version;
+	evidence.host_version_source = "launcher_omp_version";
+	evidence.host_runtime_executable = realpathSync(process.execPath);
+	const modeCount = [request.model, request.probe_outside, probeMode, request.host_probe].filter(Boolean).length;
 	if (modeCount === 0) throw new Error("pass --model for a check, a confinement probe, or --probe-models; none is a pass by itself");
 	if (modeCount > 1) throw new Error("use exactly one of --model, --probe-outside, or --probe-models");
 	if (probeMode && probeSpecs.length === 0) throw new Error("--probe-models requires at least one provider/id");
@@ -385,10 +391,12 @@ try {
 			(provider, id) => modelRegistry.find(provider, id) !== undefined,
 			credentialResolver(modelRegistry),
 		);
-	} else if (snapshot !== undefined) {
+	} else if (snapshot !== undefined || request.host_probe) {
+		const sessionRoot = snapshot ?? path.join(profile, "probe-workspace");
+		mkdirSync(sessionRoot, { recursive: true });
 		const agentRegistry = new AgentRegistry();
 		const { session } = await createAgentSession({
-			cwd: snapshot,
+			cwd: sessionRoot,
 			agentDir: profile,
 			authStorage,
 			modelRegistry,
@@ -412,11 +420,11 @@ try {
 				// checker/adjudicator sessions only.
 				"retry.enabled": false,
 			}),
-			sessionManager: SessionManager.create(snapshot, path.join(profile, "sessions")),
+			sessionManager: SessionManager.create(sessionRoot, path.join(profile, "sessions")),
 			toolNames: REVIEW_TOOLS,
 			restrictToolNames: true,
 			allowRestrictedCustomTools: true,
-			customTools: createConfinedTools(snapshot, { onImageRead: fact => snapshotImageReads.push(fact),
+			customTools: createConfinedTools(sessionRoot, { onImageRead: fact => snapshotImageReads.push(fact),
 				inputModalities: () => session.model?.input }),
 			enableMCP: false,
 			enableIrc: false,
@@ -424,7 +432,7 @@ try {
 			disableExtensionDiscovery: true,
 			skills: [],
 			rules: [],
-			contextFiles: agentsFile(snapshot),
+			contextFiles: snapshot ? agentsFile(snapshot) : [],
 			promptTemplates: [],
 			slashCommands: [],
 			agentRegistry,
@@ -434,6 +442,8 @@ try {
 			skipPythonPreflight: true,
 		});
 
+		privateSession = session;
+		evidence.session_created = true;
 		let syncReviewUsage: (() => void) | undefined;
 		try {
 			const active = session.getActiveToolNames().sort();
@@ -542,6 +552,7 @@ try {
 					evidence.usage_gaps = report.gaps;
 				};
 				syncReviewUsage = syncUsage;
+				syncInterruptedUsage = syncUsage;
 				// The agent loop turns the first provider `start` of every response
 				// into `message_start`, so that is the real call boundary: mint the
 				// local invocation id there, persist its in-flight receipt, and reuse
@@ -580,7 +591,7 @@ try {
 				// even a trailing contract-valid JSON in such a turn is leftover
 				// content, never a verdict. raw_text, result and the usage
 				// receipts/gaps are still recorded as-is below.
-				const providerError = providerErrorFact(last);
+				const providerError = providerErrorFact(last, isUsageLimitOutcome);
 				if (providerError) {
 					evidence.error = { ...providerError };
 					problems.push(`provider error: ${providerError.detail}`);
@@ -622,7 +633,7 @@ try {
 			// call the provider did not identify or meter is named in usage_gaps
 			// instead of being invented.
 			syncReviewUsage?.();
-			await session.dispose();
+			await disposePrivate();
 		}
 	}
 
@@ -640,17 +651,11 @@ try {
 	if (stack) console.error(stack);
 }
 
-try {
-	openAuthStorage?.close();
-} catch {
-	// Closing OMP's own store is best-effort; the process exits right after.
-}
-
+try { await disposePrivate(); } catch (error) { problems.push(`cleanup failed: ${String(error)}`); }
 evidence.problems = problems;
 evidence.ok = problems.length === 0;
-if (request.out && (!request.snapshot || !within(path.resolve(request.snapshot), path.resolve(request.out)))) {
-	writeFileSync(request.out, JSON.stringify(evidence, null, 2));
+evidence.host_completion = "complete";
+if (!writeEvidenceAtomically(request.out!, evidence)) throw new Error("cannot persist final reviewer evidence");
+setInterval(() => {}, 1000);
+return await new Promise<never>(() => {});
 }
-if (evidence.ok) exitCode = 0;
-console.log(request.out ?? "");
-process.exit(exitCode);

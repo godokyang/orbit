@@ -593,7 +593,52 @@ module OmpCheckRunnerTest
     end
   end
 
+  def trusted_host_completion_and_cancel_collect_lifecycle
+    root, snapshot, output = fixture
+    host = File.join(root, "host.rb")
+    File.write(host, <<~'RUBY')
+      require "json"
+      if ARGV.include?("--version")
+        puts "18.8.0"
+        exit
+      end
+      config = JSON.parse(File.read(ENV.fetch("ORBIT_REVIEW_REQUEST")))
+      facts = { "ok" => true, "fingerprint_before" => "fixed", "fingerprint_after" => "fixed",
+        "model" => config["model"], "usage" => nil, "usage_gaps" => ["no measured usage"],
+        "result" => { "verdict" => "continue", "reason" => "done", "findings" => [], "resolved_ids" => [],
+          "next_check_seconds" => 60, "delivery" => { "ready" => true, "reason" => "done" }, "coverage" => { "complete" => true, "items" => [{ "requirement" => "Return a valid result", "status" => "verified", "evidence" => "fixture" }] } } }
+      save = -> { File.write(config["out"], JSON.generate(facts)) }
+      trap("TERM") { facts["session_disposed"] = true; facts["signal_cleanup"] = "sigterm"; save.call; exit 143 }
+      facts["host_completion"] = "complete" unless ENV["ORBIT_FAKE_HOST_PENDING"]
+      facts["session_disposed"] = true unless ENV["ORBIT_FAKE_HOST_PENDING"]
+      save.call
+      sleep 30
+    RUBY
+    # The shim presents the same native --version and trusted-extension argv.
+    executable = File.join(root, "omp")
+    File.write(executable, "#!/bin/sh\nexec #{RbConfig.ruby} #{host} \"$@\"\n")
+    File.chmod(0o700, executable)
+    check = Orbit::OmpCheckRunner.new(model: "test/model", command: [executable, "--trusted-extension", "fixture"], stop_grace_seconds: 2)
+    begin
+      check.start(directory: snapshot, inputs: inputs, context: {}, output_dir: File.join(root, "checks", "1"))
+      assert(wait_result(check)["verdict"] == "continue", "parent completion TERM preserves valid result")
+      facts = check.check_lifecycle(1)
+      assert(facts.values_at("reaped", "group_probe", "receipts") == [true, "esrch", "collected"], "collection follows owner waitpid and ESRCH")
+      ENV["ORBIT_FAKE_HOST_PENDING"] = "1"
+      check.start(directory: snapshot, inputs: inputs, context: {}, output_dir: File.join(root, "checks", "2"))
+      sleep 0.1
+      check.stop!
+      assert(check.evidence["signal_cleanup"] == "sigterm", "cancel retains cleanup receipt")
+      assert(check.check_lifecycle(2)["reaped"] && check.usage.nil?, "cancel exit is observed; missing usage stays unknown")
+    ensure
+      ENV.delete("ORBIT_FAKE_HOST_PENDING")
+      check.close
+      FileUtils.remove_entry(root)
+    end
+  end
+
   def run
+    trusted_host_completion_and_cancel_collect_lifecycle
     passes_prompt_result_usage_and_does_not_call_codex
     reviewer_prompt_uses_the_same_independent_session_facts
     rejects_invalid_result_and_changed_fingerprint

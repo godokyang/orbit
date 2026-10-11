@@ -1,0 +1,13 @@
+708134 |         if (Fe instanceof Hd) {
+708135 |           iUi(Fe);
+708136 |         }
+708137 |         throw Fe;
+708138 |       }
+708139 |         throw new Error(`Trusted extension failed to load: ${N.errors.map((Fe) => Fe.error).join("; ")}`);
+                       ^
+error: Trusted extension failed to load: Failed to load extension: Module called process.exit(0) during guarded extension/hook loading; OMP extension/hook modules must not terminate the host process.
+      at AK (/$bunfs/root/omp-darwin-arm64:708139:15)
+      at async run (/$bunfs/root/omp-darwin-arm64:708473:16)
+      at async T9i (/$bunfs/root/omp-darwin-arm64:2772:16)
+      at async iWo (/$bunfs/root/omp-darwin-arm64:711663:12)
+

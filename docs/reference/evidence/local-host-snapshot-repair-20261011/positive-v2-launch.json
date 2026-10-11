@@ -1,0 +1,41 @@
+{
+  "pane": "w23:p1F",
+  "fixture": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/positive-v2",
+  "command": "cd /var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/positive-v2 && env XDG_CONFIG_HOME=/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/acceptance-config XDG_CACHE_HOME=/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/acceptance-cache ORBIT_RUBY=/opt/homebrew/Cellar/ruby/4.0.6_1/bin/ruby /var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/installation/bin/orbit omp --model zhipu-coding-plan/glm-5.3-flash --no-pty --session-dir /var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/root-sessions/positive-v2",
+  "build": {
+    "source": {
+      "kind": "local",
+      "path": "/Users/yangke/Personal/omen/orbit",
+      "commit": "25f0104b70d68c7c47b43473f1b75d928d2222db",
+      "dirty": true
+    },
+    "content_digest": "c70f5b6028bf58a96ee35a0e1a1ff163a38d7860d144e90b00779c4983911ffc",
+    "installed_at": "2026-10-11T06:36:29Z",
+    "reviewer_host": {
+      "path": "/Users/yangke/.local/bin/omp",
+      "version": "18.8.0",
+      "capability_probe": {
+        "ok": true,
+        "host_version": "18.8.0",
+        "host_version_source": "launcher_omp_version",
+        "host_runtime_executable": "/Users/yangke/.local/bin/omp",
+        "session_created": true,
+        "session_disposed": true,
+        "signal_cleanup": "sigterm",
+        "active_tools": [
+          "glob",
+          "grep",
+          "read"
+        ],
+        "forbidden_tools_present": [],
+        "read_tool_is_confined": true,
+        "private_registry": [
+          "OrbitReviewer"
+        ],
+        "global_registry": []
+      }
+    },
+    "version": "0.8.4"
+  },
+  "start": "2026-10-11T07:06:07.528257+00:00"
+}

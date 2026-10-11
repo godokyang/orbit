@@ -1,0 +1,17 @@
+{
+  "note": "offline legacy shape fixture copied from actual self-contained task export; original runtime state/evidence unchanged",
+  "results": [
+    {
+      "action": "restore-check",
+      "exit": 0,
+      "stdout": "{\"destination\":\"/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/negative-evidence/legacy-restored\",\"digest\":\"sha256:7a1588ce7dde294636ed5eb4898b771bd87968b6773fb35ca8e6258ca5f8db63\",\"source\":\"workspace\",\"check\":1}\n",
+      "stderr": ""
+    },
+    {
+      "action": "export",
+      "exit": 0,
+      "stdout": "{\"task_directory\":\"/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/negative-evidence/legacy-copy\",\"task_id\":\"85ac5da9-9211-42d7-9ad6-8ba22815df74\",\"status\":\"complete\",\"in_flight\":false,\"output\":\"/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/negative-evidence/legacy-export.tar.gz\",\"bytes\":662697,\"files\":217,\"missing\":0}\n",
+      "stderr": ""
+    }
+  ]
+}

@@ -1,4 +1,4 @@
-// No-model restricted-session escape negative. Spawns reviewer.ts; no model request.
+// No-model restricted-session escape negative. Loads the trusted factory through local OMP; no model request.
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -36,11 +36,19 @@ writeFileSync(config, JSON.stringify({
 let status = 0;
 let stderr = "";
 try {
-	execFileSync("bun", [path.join(here, "reviewer.ts"), "--config", config], {
-		encoding: "utf8",
-		env: { ...process.env, PI_CODING_AGENT_DIR: profile, OMP_PROFILE: undefined },
-		stdio: ["ignore", "pipe", "pipe"],
-	});
+	const lib = path.resolve(here, "../../lib/orbit/omp_check_runner.rb");
+    const code = [
+        `require ${JSON.stringify(lib)}`,
+        'request = JSON.parse(File.read(ARGV[0]))',
+        'request["sdk_version"] = Orbit::OmpCheckRunner.reviewer_sdk_version',
+        'File.write(ARGV[0], JSON.generate(request))',
+        'status = Orbit::OmpCheckRunner.send(:run_probe, Orbit::OmpCheckRunner.default_command, ARGV[0], ARGV[1], ARGV[2], File.join(ARGV[2], "stderr.log"), 60)',
+        'evidence = JSON.parse(File.read(request.fetch("out")))',
+        'abort "host completion failed" unless Orbit::OmpCheckRunner.completed_host?(status, evidence)',
+    ].join("\n");
+    execFileSync(process.env.ORBIT_RUBY || "ruby", ["--disable-gems", "-e", code, config, profile, work], {
+        encoding: "utf8", stdio: ["ignore", "pipe", "pipe"],
+    });
 } catch (error) {
 	const failed = error as { status?: number; stderr?: string; stdout?: string };
 	status = failed.status ?? 1;

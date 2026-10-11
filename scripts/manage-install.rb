@@ -21,13 +21,10 @@ module OrbitInstall
   FORMAT = "orbit-install-4"
   LEGACY_FORMATS = ["orbit-install-3"].freeze
   SUPPORTED_FORMATS = [FORMAT, *LEGACY_FORMATS].freeze
-  # Directories this installer creates and later removes with the release. The
-  # reviewer bundle keeps its own SDK installation nested under its directory.
-  OWNED_DIRECTORIES = %w[node_modules .npm-cache .bun-cache runners/omp-reviewer/node_modules].freeze
-  # Releases prepared before the reviewer bundle shipped.
-  LEGACY_OWNED_DIRECTORIES = %w[node_modules .npm-cache].freeze
-  REVIEWER_PACKAGES = %w[@oh-my-pi/pi-ai @oh-my-pi/pi-coding-agent @oh-my-pi/pi-utils].freeze
-  NATIVE_PLATFORMS = %w[darwin-arm64 darwin-x64 linux-arm64 linux-x64 win32-arm64 win32-x64].freeze
+  # New releases carry only Orbit dependencies; old recorded dependency trees
+  # remain recognized for ownership-safe retirement and uninstall.
+  OWNED_DIRECTORIES = %w[node_modules .npm-cache].freeze
+  LEGACY_OWNED_DIRECTORIES = %w[node_modules .npm-cache .bun-cache runners/omp-reviewer/node_modules].freeze
   MARKER = ".orbit-install.json"
   RELEASE = ".orbit-release.json"
   module_function
@@ -231,6 +228,11 @@ module OrbitInstall
   def prerequisites!
     raise "Ruby >= 3.2 is required" if (RUBY_VERSION.split('.').map(&:to_i) <=> [3, 2]) < 0
     missing = []
+    begin
+      local_omp!
+    rescue StandardError => error
+      missing << error.message
+    end
     node = executable("node")
     if node
       begin
@@ -243,20 +245,38 @@ module OrbitInstall
       missing << "Node.js 18+：未在 PATH 中找到，请先安装"
     end
     missing << "npm：未在 PATH 中找到，请安装 Node.js 附带的 npm" unless executable("npm")
-    bun = executable("bun")
-    if bun
-      begin
-        version = capture(bun, "--version").strip
-        unless version_at_least?(version, "1.3.14")
-          missing << "bun >= 1.3.14：当前为 #{version}，请升级并加入 PATH（独立检查组件安装需要）"
-        end
-      rescue StandardError => error
-        missing << "bun >= 1.3.14：无法运行（#{error.message}），请检查安装和 PATH"
-      end
-    else
-      missing << "bun >= 1.3.14：未在 PATH 中找到（独立检查组件安装需要）"
-    end
     raise "缺少安装前置条件：\n- #{missing.join("\n- ")}\n安装后重新运行 Orbit 安装命令。" unless missing.empty?
+  end
+
+  def local_omp!
+    paths = ENV.fetch("PATH", "").split(File::PATH_SEPARATOR).map { |dir| File.join(dir.empty? ? "." : dir, "omp") }
+    omp = paths.find { |path| File.executable?(path) && !File.directory?(path) }
+    unless omp
+      reason = paths.any? { |path| present?(path) } ? "找到了 OMP，但无法执行；请检查执行权限和 PATH" : "未找到 OMP（Oh My Pi）；请先安装并加入 PATH"
+      raise "#{reason}，再重新运行 Orbit 安装命令；旧安装保持不变。"
+    end
+    begin
+      output = nil
+      Open3.popen3(omp, "--version", pgroup: true) do |input, out, err, child|
+        input.close
+        readers = [Thread.new { out.read }, Thread.new { err.read }]
+        unless child.join(10)
+          Process.kill("KILL", -child.pid) rescue nil
+          child.join
+          raise "OMP 无法执行（版本检查超时）"
+        end
+        values = readers.map(&:value)
+        raise "OMP 无法执行（版本检查退出 #{child.value.exitstatus}）" unless child.value.success?
+        output = values.first
+      end
+      version = output[/\d+\.\d+\.\d+/]
+      unless version && Orbit::OmpEntry.supported_version?(version)
+        raise "OMP 版本不支持（#{version || '无法解析'}），需要至少 #{Orbit::OmpEntry::MINIMUM_OMP_VERSION} 且支持可信检查器扩展"
+      end
+      [File.realpath(omp), version]
+    rescue SystemCallError => error
+      raise "OMP 无法执行（#{error.message}）；请修复本地 OMP 后重新运行 Orbit 安装命令；旧安装保持不变。"
+    end
   end
 
   def version_at_least?(version, minimum)
@@ -295,13 +315,13 @@ module OrbitInstall
     run("node", "--check", "plugins/omp.mjs", chdir: stage)
     run("node", "--input-type=module", "-e", "import('./plugins/omp-host.mjs')", chdir: stage)
     verify_member_registration_entry!(stage)
-    reviewer_sdk_version = install_reviewer_bundle!(stage)
-    # These caches are only used while preparing the release. Runtime modules
-    # are installed separately; retaining downloads doubles the SDK footprint.
+    reviewer_host = verify_reviewer_host!(stage)
+    # Download caches belong to preparation; runtime uses the installed modules.
     %w[.npm-cache .bun-cache].each { |name| FileUtils.rm_rf(File.join(stage, name)) }
     record = { "format" => FORMAT, "version" => package.fetch("version"), "source" => source_record,
                "content_digest" => digest.hexdigest, "installed_at" => Time.now.utc.iso8601,
-               "reviewer_sdk_version" => reviewer_sdk_version,
+               "reviewer_sdk_version" => reviewer_host.fetch("version"),
+               "reviewer_host" => reviewer_host,
                "files" => paths, "owned_directories" => OWNED_DIRECTORIES }
     atomic_write(File.join(stage, RELEASE), JSON.pretty_generate(record) + "\n")
     record
@@ -326,76 +346,23 @@ module OrbitInstall
     raise "member registration entry is not runnable: #{err.to_s.strip}"
   end
 
-  # The checker must use the host's OMP SDK to see the same bundled model
-  # catalog. A host installed after Orbit can use the locked source version
-  # until the next update; an existing host is aligned in the staged release.
-  # Any failure aborts preparation without switching the active release.
-  def install_reviewer_bundle!(stage)
-    runner = File.join(stage, "runners", "omp-reviewer")
-    required = %w[package.json bun.lock reviewer.ts].map { |name| File.join(runner, name) }
-    missing = required.reject { |path| File.file?(path) }
-    raise "reviewer bundle is incomplete: #{missing.join(', ')}" unless missing.empty?
-
-    omp = executable("omp")
-    version = omp ? Orbit::OmpEntry.detected_version(omp) : Orbit::OmpEntry::PINNED_SDK_VERSION
-    raise "OMP #{version} is older than #{Orbit::OmpEntry::MINIMUM_OMP_VERSION}" unless Orbit::OmpEntry.supported_version?(version)
-
-    dependencies = read_json(File.join(runner, "package.json")).fetch("dependencies")
-    # Match the Bun process that will load the addon, including Rosetta; Ruby's
-    # host architecture may differ. Native leaf packages are optional upstream
-    # but required here; local inference and speech packages remain omitted.
-    platform = JSON.parse(capture("bun", "-e", "process.stdout.write(JSON.stringify([process.platform, process.arch]))"))
-    tag = platform.join("-")
-    raise "unsupported reviewer Bun platform: #{tag}" unless NATIVE_PLATFORMS.include?(tag)
-
-    native = "@oh-my-pi/pi-natives-#{tag}"
-    # --production also freezes Bun's lockfile, which would prevent the staged
-    # host/platform adaptation. --omit dev omits development packages alone.
-    # mnemopi's optional peer dependencies also include ONNX. Required runtime
-    # dependencies remain explicit SDK dependencies; avoid auto-installing peers.
-    install_flags = ["--omit", "optional", "--omit", "peer", "--omit", "dev", "--linker", "hoisted"]
-    env = { "BUN_INSTALL_CACHE_DIR" => File.join(stage, ".bun-cache") }
-    if REVIEWER_PACKAGES.all? { |name| dependencies.fetch(name) == version }
-      run("bun", "install", "--frozen-lockfile", *install_flags, chdir: runner, env: env)
-      run("bun", "add", "--exact", "#{native}@#{version}", *install_flags, chdir: runner, env: env)
-    else
-      # pi-ai also owns native/SDK dependencies. Leaving it on the source
-      # version creates a second SDK tree and repeated large native binaries.
-      run("bun", "add", "--exact", *[*REVIEWER_PACKAGES, native].map { |name| "#{name}@#{version}" }, *install_flags,
-          chdir: runner, env: env)
-    end
-    package = File.join(runner, "node_modules", "@oh-my-pi", "pi-coding-agent", "package.json")
-    raise "reviewer SDK was not installed: #{package}" unless File.file?(package)
-
-    declared = read_json(File.join(runner, "package.json")).fetch("dependencies")
-    [*REVIEWER_PACKAGES, native].each do |name|
-      manifest = File.join(runner, "node_modules", name, "package.json")
-      raise "reviewer required runtime package is missing: #{name}" unless File.file?(manifest)
-
-      installed = read_json(manifest)["version"]
-      unless installed == version && declared[name] == version
-        raise "reviewer SDK #{name} version #{installed.inspect} (declared #{declared[name].inspect}) does not match host OMP #{version}"
+  # Execute the staged adapter in a separate Ruby process. An update launched
+  # by an older release must not verify the old adapter against the new files.
+  # No SDK packages are downloaded, installed, patched or used as fallback.
+  def verify_reviewer_host!(stage)
+    omp, version = local_omp!
+    entry = File.join(stage, "lib/orbit/omp_check_runner.rb")
+    raise "检查器入口缺失；旧安装保持不变" unless File.file?(entry)
+    script = 'require "json"; puts JSON.generate(Orbit::OmpCheckRunner.probe_host(omp: ARGV.fetch(0)))'
+    begin
+      facts = JSON.parse(capture(RbConfig.ruby, "--disable-gems", "-r", entry, "-e", script, omp, chdir: stage))
+      unless facts.is_a?(Hash) && facts["ok"] == true && facts["host_version"] == version
+        raise "可信检查器能力探针未通过或宿主版本不匹配"
       end
+      { "path" => omp, "version" => version, "capability_probe" => facts }
+    rescue StandardError => error
+      raise "OMP 能力不支持或检查器无法加载（#{error.message}）。请自行安装兼容 OMP 后重新运行 Orbit 安装命令；旧安装保持不变。"
     end
-    if version == "18.4.9"
-      # This SDK ships both the TypeScript module and a JavaScript injection
-      # script at ratchet/prelude. Bun resolves its extensionless SDK import
-      # to the script, which has no createRatchetPrelude export. Pin only this
-      # evidenced import in our staged reviewer bundle; the host is untouched.
-      sdk_source = File.join(File.dirname(package), "src", "sdk.ts")
-      source = File.binread(sdk_source)
-      ambiguous = 'import { createRatchetPrelude } from "./ratchet/prelude";'
-      explicit = 'import { createRatchetPrelude } from "./ratchet/prelude.ts";'
-      unless source.include?(explicit)
-        raise "OMP 18.4.9 reviewer import differs from the verified source" unless source.scan(ambiguous).length == 1
-
-        File.binwrite(sdk_source, source.sub(ambiguous, explicit))
-      end
-    end
-    # A successful package-manager receipt does not prove the omitted optional
-    # tree left a loadable SDK. Verify it before switching away from the old release.
-    capture("bun", "-e", 'await import("@oh-my-pi/pi-natives"); await import("@oh-my-pi/pi-coding-agent");', chdir: runner)
-    version
   end
 
   def current_release(runtime)
@@ -567,23 +534,8 @@ module OrbitInstall
         puts "Controlled OMP entry: orbit omp."
         warn "普通 omp 是否仍加载 Orbit 未确认：保留了不是本安装创建的入口 #{legacy_conflicts.join('、')}；orbit doctor 会显示该状态。"
       end
-      puts "Independent reviewer bundle: runners/omp-reviewer (SDK #{record.fetch('reviewer_sdk_version')})."
-      if executable("omp")
-        begin
-          detected = Orbit::OmpEntry.detected_version
-          if !Orbit::OmpEntry.supported_version?(detected)
-            warn "OMP CLI #{detected} is below the minimum #{Orbit::OmpEntry::MINIMUM_OMP_VERSION}; orbit omp will refuse to start."
-          elsif detected == Orbit::OmpEntry::MINIMUM_OMP_VERSION
-            puts "OMP CLI: #{detected} (minimum verified release)."
-          else
-            puts "OMP CLI: #{detected} (accepted by the version gate; newer runtime paths are not separately verified)."
-          end
-        rescue StandardError => error
-          warn "OMP CLI version could not be verified: #{error.message}"
-        end
-      else
-        puts "OMP was not found on PATH; install Oh My Pi #{Orbit::OmpEntry::PINNED_OMP_VERSION} before using orbit omp."
-      end
+      puts "Independent reviewer host: #{record.dig('reviewer_host', 'path')} (OMP #{record.fetch('reviewer_sdk_version')}; no private SDK)."
+      puts "OMP 已通过当前构建的无模型能力探针；模型登录、额度及真实检查以实际会话核实。"
       puts "运行 orbit doctor 查看依赖和安装状态；模型登录及额度需在实际会话中验证。"
       puts "Details: orbit version --json"
       puts "Update: orbit update."

@@ -1,0 +1,15 @@
+654645 | import * as eR from "fs/promises";
+654646 | import * as jv from "path";
+654647 | async function _di(e, t) {
+654648 |   const s = await eF(e);
+654649 |   const o = t ?? dd(s);
+654650 |   await eR.mkdir(n, { recursive: true, mode: 448 });
+                         ^
+EPERM: operation not permitted, mkdir '/Users/yangke/.omp/run/daemons/acdfa4766734c9c4'
+    path: "/Users/yangke/.omp/run/daemons/acdfa4766734c9c4",
+ syscall: "mkdir",
+   errno: -1,
+    code: "EPERM"
+
+      at async _di (/$bunfs/root/omp-darwin-arm64:654650:17)
+

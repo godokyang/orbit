@@ -1,0 +1,23 @@
+{
+  "run": {
+    "format": "orbit-check-run-1",
+    "model": "opencode-go/deepseek-v4.1-flash",
+    "role": "reviewer",
+    "pid": 63615,
+    "pgid": 63615,
+    "started_at": "2026-10-11T06:38:49Z",
+    "snapshot": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/negative/.orbit/tasks/85ac5da9-9211-42d7-9ad6-8ba22815df74/checks/1/workspace",
+    "output_dir": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/negative/.orbit/tasks/85ac5da9-9211-42d7-9ad6-8ba22815df74/checks/1",
+    "schema": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/negative/.orbit/tasks/85ac5da9-9211-42d7-9ad6-8ba22815df74/checks/1/check-result.schema.json",
+    "executable": "omp"
+  },
+  "observed_at": "2026-10-11T06:39:02.747919+00:00",
+  "ps": "63615 62395 63615 omp --mode rpc --no-ui --no-session --no-tools --no-pty --no-extensions --no-skills --no-rules --no-lsp --trusted-extension /private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/installation/runtime/releases/3468fbcc398178aab350d9ec/runners/omp-reviewer/reviewer.ts --config /private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/installation/runtime/releases/3468fbcc398178aab350d9ec/runners/omp-reviewer/isolation.yml\n",
+  "workspace_files": [
+    ".gitignore",
+    "package.json",
+    "slug.js",
+    "AGENTS.md",
+    "slug.test.js"
+  ]
+}

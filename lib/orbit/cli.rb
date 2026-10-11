@@ -19,6 +19,7 @@ require_relative "task_view"
 require_relative "session_summary"
 require_relative "workspace_binding"
 require_relative "workspace_snapshot"
+require_relative "check_snapshot_archive"
 require_relative "model_evidence_cache"
 require_relative "model_candidate_pool"
 require_relative "checker_model_selection"
@@ -50,6 +51,7 @@ module Orbit
         orbit session-summary --thread ID [--project DIR]  本地只读汇总同一原生 OMP 会话的任务事实
         orbit stop [TASK]         停止当前项目任务；多任务须指定 TASK
         orbit export TASK --output FILE  打包任务证据为本地自足归档（不上传）
+        orbit restore-check TASK CHECK --output DIR  把检查历史恢复到新的独立目录
         orbit doctor [TASK]       检查环境与已有会话连接
         orbit jev setup           输入 TypeSafe key，配置新终端环境
         orbit openrouter setup  输入 OpenRouter API key，配置新终端环境（可选）
@@ -72,7 +74,8 @@ module Orbit
       "openrouter" => "orbit openrouter setup\n交互输入 OpenRouter API key（无回显），写入 ${XDG_CONFIG_HOME:-$HOME/.config}/openrouter/env（0600，仅当前用户可读），并为 zsh／bash 新终端加入受环境变量优先级保护的加载语句；已有 OPENROUTER_API_KEY 的终端优先沿用。仅保存凭据：不验证 API、不代表任一模型已有基准覆盖；不读取项目 .env，不借用 TYPESAFE_API_KEY，不打印密钥。",
       "update" => "orbit update [--ref REF]\n更新当前安装，默认沿用远程 ref 或本地源码目录；--ref 显式从 GitHub 选择版本。新版本登记的运行任务与宿主引用的旧 release 会保留，待其退出后的下一次安装清理。",
       "uninstall" => "orbit uninstall\n先结束使用本安装的任务和 Coding Agent 会话；仍有存活 lease 时拒绝卸载且保留原安装。卸载会清掉本安装拥有的旧全局入口，保留项目资料。",
-      "export" => "orbit export TASK --output FILE\n把一个任务的本地证据打包成单个 tar.gz：导出时的 state、事实时间线（events.jsonl 与协作记录 collaboration.jsonl 按时间合并并标注来源、行号与缺口）、检查快照与产物、basis/amendments、含 sha256 的文件清单与缺失清单。只读导出：不上传、不调用模型、不改变任务状态或完成门；运行中任务按导出时刻截取并标注在途与未定检查。TASK 为任务目录或唯一 ID 前缀；--output 不能位于任务目录内部。归档内 manifest.json 说明全部内容与未包含项。",
+      "export" => "orbit export TASK --output FILE\n把一个任务的本地证据打包成单个 tar.gz：导出时的 state、事实时间线（events.jsonl 与协作记录 collaboration.jsonl 按时间合并并标注来源、行号与缺口）、检查快照与产物、basis/amendments、含 sha256 的文件清单与缺失清单。只读导出：不上传、不调用模型、不改变任务状态或完成门；运行中任务按导出时刻截取并标注在途与未定检查。TASK 为任务目录或唯一 ID 前缀；--output 不能位于任务目录内部。归档内 manifest.json 说明全部内容与未包含项。已回收的检查工作区从项目内内容归档带入字节，不留下外部对象引用。",
+      "restore-check" => "orbit restore-check TASK CHECK --output DIR\n按该检查的清单把历史快照恢复到一个新目录，并核对内容摘要、权限、删除与内部链接。不修改原 scope，不与内容对象或旧工作区共享 inode。CHECK 是检查序号。已有归档时从归档恢复；没有归档时从仍保留的完整工作区读取。外部链接不物化。",
       "version" => "orbit version [--json]",
       "check" => "orbit check TASK_DIRECTORY",
       "amend" => "orbit amend TASK_DIRECTORY --file FILE|-",
@@ -231,13 +234,16 @@ module Orbit
         submit(command, argv)
       when "export"
         export(argv)
+      when "restore-check"
+        restore_check(argv)
       else
         raise ArgumentError, "unknown command #{command.inspect}; run orbit --help"
       end
     rescue ArgumentError, OptionParser::ParseError, SystemCallError, Connection::Error, CheckRunner::Error,
            WorkspaceBinding::Error, ModelEvidenceCache::Error, ModelCandidatePool::Error, JSON::ParserError,
            PrestartClassifier::Error, PrestartLedger::Error, JevAdvisor::Error, TaskEvidence::Error, WorkUnitStore::Error,
-           RouteResourceStore::Error, RouteResourceFacts::Error, ResourceCallLedger::Error, RouteCostInputs::Error => error
+           RouteResourceStore::Error, RouteResourceFacts::Error, ResourceCallLedger::Error, RouteCostInputs::Error,
+           CheckSnapshotArchive::Error => error
       warn "orbit: #{error.message}"
       1
     end
@@ -1111,6 +1117,31 @@ module Orbit
       end
 
       puts JSON.generate(TaskEvidence.export(record: matches.first, output: output))
+      0
+    end
+
+    # Read-only check history restore. Does not rewrite scope, migrate old
+    # workspaces, or share inodes with the object store.
+    def restore_check(argv)
+      output = nil
+      OptionParser.new { |parser| parser.on("--output DIR") { |value| output = value } }.parse!(argv)
+      argument = argv.shift
+      number = argv.shift
+      if argument.nil? || number.nil? || !argv.empty? || output.to_s.strip.empty? || !number.match?(/\A[1-9]\d*\z/)
+        raise ArgumentError, "usage: orbit restore-check TASK CHECK --output DIR"
+      end
+
+      matches = TaskView.select(argument)
+      raise ArgumentError, "找不到任务 #{argument}；在项目中运行 orbit status 查看任务。" if matches.empty?
+      if matches.length > 1
+        raise ArgumentError, "存在多个任务，请指定任务 ID 或目录：\n#{TaskView.list(matches)}"
+      end
+
+      record = matches.first
+      puts JSON.generate(CheckSnapshotArchive.restore(
+        task_path: record.path, project_root: record.state.fetch("project_root"),
+        number: number.to_i, destination: output
+      ))
       0
     end
 

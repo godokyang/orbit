@@ -1,10 +1,13 @@
 # Orbit 当前限制
 
-最后核对：2026-10-11（安装体积修复；源码 0.8.4，实际安装身份见[交接](handoff.md)；前轮剩余能力交付的实际 Goal 已 complete）。本页只列**当前仍影响用户的限制与未测范围**；已修复项、旧版本流水与已结束票据不在本页保留（`git show 3865b76:docs/plan/debt-ledger.md` 查阅历史）。逐项收口与证据＝[完成记录](../reference/mixed-model-delivery-completion-20261001.md)；现行行为以[合同](../../contracts/task-runtime.md)及 ADR-008/009 为准。
+最后核对：2026-10-11（本地检查宿主与历史内容归档修复；源码0.8.5，实际安装与Goal状态见[交接](handoff.md)）。本页只列**当前仍影响用户的限制与未测范围**；已修复项、旧版本流水与已结束票据不在本页保留（`git show 3865b76:docs/plan/debt-ledger.md` 查阅历史）。逐项收口与证据＝[完成记录](../reference/mixed-model-delivery-completion-20261001.md)；现行行为以[合同](../../contracts/task-runtime.md)及 ADR-008/009 为准。
 
 | 限制 | 当前影响 | 解除条件 |
 | --- | --- | --- |
-| 独立检查器仍需私有 SDK，体积与验证有范围 | 去重和缓存已修复；新临时冷安装省略本地推理／语音 optional 与 optional peer，macOS arm64／OMP 18.8.0 为 446.9 MiB。日常安装仍 959.5 MiB，尚未应用第二阶段；SDK 本体及原生 addon 保留。不保证跨平台同体积或所有模型无下载 | 实际构建／模型／平台升级时核对依赖与加载；源码 pin 18.3.4只读探测通过，18.2.8 仅源码证据，18.4.9 分支未重跑。SDK 注册 local-inference，MLX 可独立下载；当前远程受限检查路径无下载不等于任意 SDK 模型保证，事实沿[体积记录](../reference/orbit-install-footprint-20261011.md) |
+| 本地 OMP 复用的实测范围有限 | 临时安装不含私有SDK，macOS/18.8.0可信factory、受限工具/图片字节、真实检查、失败/取消及停止已通过；日常安装未更新，其他宿主/平台未认证 | 其他宿主版本先跑实际能力探针，再验证相关真实路径，不继承18.8.0结果 |
+| Zeen旧数据暂缓，旧摘要异常成因未确认 | 新检查重复增量0、小改动102bytes/4KiB、三门回收/异常保留、历史恢复、自包含导出及旧完整目录兼容已实测。Zeen既有309份工作区/29.22GB和181摘要不符/1缺失保留原诊断，成因未裁定 | Zeen存量迁移/预览/清理未授权，不作为本轮验收条件；单独确认成因及方案后处理 |
+| 显式start选模未持续绑定后续reviewer选择 | 本轮failure-v4 start记录显式Zenmux，实际check重新从池选DeepSeek；runner严格使用当次请求型号，process-failure后自动fallback也未受Root“不换型”文字要求约束 | 单独修正CLI记录/selector显式绑定与失效规则，并明确程序fallback与用户指定的优先关系；本轮未扩修选择层 |
+| 原生会话材料导出仍有缺口 | 本轮正例export missing2：一条不可安全归属协作行、一个成员native transcript身份无法核验；失败/取消各有一条协作子集缺口。历史workspace已自包含，manifest保留实际缺失 | 单独核对native session/成员身份接缝与协作截取；不因完整历史快照而宣称所有会话材料完整 |
 | 空闲 Root 的 Esc 不等同任务暂停 | 本轮在 private checker in_flight、Root 已空闲时按 Esc 未触发 native interruption，检查随后正常完成；活动 Root／登记成员 Esc 确认暂停另有实证。不能把按键发送回执当停止成功 | 需要支持该 UI 场景时另定正确用户入口和宿主接缝；本轮仅记录真实边界，不改暂停语义 |
 | 活动任务续跑的有效推进证据有范围 | C02已沿SDK每请求context派生完整授权目标；普通/amend/custom wake/compact/resume及暂停分离有界实测。continue_unfinished_task仍依赖自动artifact review且每版本一次，不能把工具次数当进展；该具体空闲续跑分支本轮未自然触发 | 真实分支出现后按现行版本核对，不重新打开历史理论组合；SDK hook超时/异常和最终请求容量仍是宿主边界 |
 | 成员派发失败恢复仍有范围 | C04已补实际tools挂载、agent/model和spec/operation层级诊断，当前真实Missing context/声明失败后改调用、成员缺content/命令不匹配后修正并通过npm。v5重复8次缺content仍需Controller取消；v6只有yield却自述hub成功，不能据有界恢复断言通用闭环充分 | 以最新真实完整矩阵验证采用范围；新实际失败再定点处理，不支持全部eval或维护Fork，不把Root自述和接管当委派成功 |
@@ -12,7 +15,6 @@
 | 程序 integration 选型 live 未触发 | 实现已装并经确定性验证；真实运行从未进入其前提（manual-ready 窗口＋真实 resolved finding）。注意区分：Root 的 `root-model` 工具选模不受该前提约束，其 live 未触发只因为没有运行需要换型 | 真实路径出现后核验；不人为制造，非完工门 |
 | 非 stale process finding→纠正→恢复组合未实测 | 共用送达路径源码完整且 artifact 孪生已 live（033）；组合自然分支未出现 | 真实路径出现后核验；不加证明门 |
 | Root 停止自有 queued marker 分支仅确定性证据 | 0.7.37 修复经 gate 验证；真实搁浅 marker 现场未再出现 | 真实路径出现后核验 |
-| 检查者 SDK 18.4.9 暂存源码修正 | 官方包 sdk.ts 的 ratchet/prelude 导入被 Bun 解析成同名 .js 注入脚本；安装器仅对实际 18.4.9 的已核实一行显式指明 .ts，用户宿主不变，差异已由 OMP2 独立核实 | 上游修复且实际目标版本验证通过后删除此版本限定修正，不扩展 SDK fork |
 | park/dispose 后退出不可证实 | 已完成成员 park 后失去 session；不能把 idle、cancel 回执当退出，保留 `stop_unconfirmed`。前轮名单复核保留，本轮接入实际hasAdmittedSubmission忙态并实测活动成员Esc/正常退出；仍不解除失去全部session或宿主原子准入限制 | 上游提供 dispose 完成信号并验证 |
 | 上游 provider/控制钩子缺口 | `devin-agent` 类不触发 `before_provider_request`；部分异常不能可靠 fail-close；单成员编程 kill、已 park 工作与保留名碰撞受上游接口限制 | 实证最小缺失接口后按 ADR-008 跟进，不预维护 Fork |
 | 自动入口失败时未知请求体 | 已核对的 OMP messages / Responses 可传恢复提示；不能安全识别的请求体仍中止 | 取得实际请求体与返回契约并隔离验证 |

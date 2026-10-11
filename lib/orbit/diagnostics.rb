@@ -165,11 +165,11 @@ module Orbit
       end
       checks << { "name" => "Node.js", "ready" => node_ready, "detail" => detail }
       checks.last["next_step"] = "安装 Node.js 18 或更新版本，并加入 PATH。" unless node_ready
-      %w[npm bun].each do |name|
+      %w[npm].each do |name|
         path = executable(name)
         item = { "name" => name, "ready" => !path.nil?, "detail" => path || "PATH 中未找到" }
         unless path
-          item["next_step"] = name == "bun" ? "安装 bun >= 1.3.14（独立检查组件需要），并加入 PATH。" : "安装 npm（随 Node.js 安装），并加入 PATH。"
+          item["next_step"] = "安装 npm（随 Node.js 安装），并加入 PATH。"
         end
         checks << item
       end

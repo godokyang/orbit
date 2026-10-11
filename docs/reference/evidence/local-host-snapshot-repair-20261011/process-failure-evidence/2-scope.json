@@ -1,0 +1,54 @@
+{
+  "number": 2,
+  "role": "reviewer",
+  "kind": "artifact",
+  "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/process-failure",
+  "observation_key": "8bb989fd134800be65e78c5c4313bdb584e2412452599c67f8f4beddc770e85f",
+  "trigger_cause": "model_fallback",
+  "manual": true,
+  "snapshot": {
+    "schema_version": "orbit-workspace-snapshot-v1",
+    "source_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/process-failure",
+    "snapshot_path": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/process-failure/.orbit/tasks/1730d605-738f-44be-ade1-a80468585262/checks/2/workspace",
+    "git_head": "fb02ba54fa7cedc84c4376843fe8d60353e2d28b",
+    "digest": "sha256:57bf12e4c1cf6baad03f60a018f3e6d45a32c4e6144ad97bfeadfa546841e499",
+    "project_rules": [
+      "AGENTS.md"
+    ],
+    "manifest": [
+      {
+        "path": ".gitignore",
+        "status": "tracked",
+        "kind": "file",
+        "content_digest": "sha256:f21872cf24c382dd4844007a84237553c2e4d612ae4e0af2958e2709a6fbe0e3",
+        "size": 18,
+        "mode": 420
+      },
+      {
+        "path": "AGENTS.md",
+        "status": "tracked",
+        "kind": "file",
+        "content_digest": "sha256:9524dac1f0dd21db1762a73ab5c32425c7369db1246b9454254606ce5ec47c12",
+        "size": 65,
+        "mode": 420
+      },
+      {
+        "path": "notes.txt",
+        "status": "tracked",
+        "kind": "file",
+        "content_digest": "sha256:ff4aa733b5cd76defa02a141cda2e02ec761f0e8e551d6a527d21d70c6c02e5a",
+        "size": 25,
+        "mode": 420
+      }
+    ]
+  },
+  "input_digest": "3f1acd51452eab97f36fa15a7ae517bf2f284837a360088fded5856737b5138d",
+  "host_digest": "553099c7f19d0d5890c3a2b54bd471efa91c578cb3496000b62d62f54ca84944",
+  "dispute": null,
+  "started_at": "2026-10-11T07:28:26Z",
+  "snapshot_archive": {
+    "status": "verified",
+    "file": "snapshot-archive.json",
+    "snapshot_digest": "sha256:57bf12e4c1cf6baad03f60a018f3e6d45a32c4e6144ad97bfeadfa546841e499"
+  }
+}

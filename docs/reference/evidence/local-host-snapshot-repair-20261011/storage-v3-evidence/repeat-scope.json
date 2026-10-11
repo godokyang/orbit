@@ -1,0 +1,62 @@
+{
+  "number": 1,
+  "role": "reviewer",
+  "kind": "artifact",
+  "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/storage-v3",
+  "observation_key": "6b2a871986abd36b8c9f134ca0b1776097127178fd0d14bd257ae7b75d2a8fe5",
+  "trigger_cause": "manual_check",
+  "manual": true,
+  "snapshot": {
+    "schema_version": "orbit-workspace-snapshot-v1",
+    "source_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/storage-v3",
+    "snapshot_path": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/storage-v3/.orbit/tasks/92f92422-fa45-44b4-aae3-e1de4b66cfc5/checks/1/workspace",
+    "git_head": "c0ad981e8eb060072da6fb316f0a755995131e73",
+    "digest": "sha256:ba245fecde86fb9c36033edc229d8eeebf3668620c70e0e33921ccf646a12650",
+    "project_rules": [
+      "AGENTS.md"
+    ],
+    "manifest": [
+      {
+        "path": ".gitignore",
+        "status": "tracked",
+        "kind": "file",
+        "content_digest": "sha256:f21872cf24c382dd4844007a84237553c2e4d612ae4e0af2958e2709a6fbe0e3",
+        "size": 18,
+        "mode": 420
+      },
+      {
+        "path": "AGENTS.md",
+        "status": "tracked",
+        "kind": "file",
+        "content_digest": "sha256:971d1733ab1e6f87c269b480dc16861db7536b1f9581914faa3362bcbbedaf4d",
+        "size": 232,
+        "mode": 420
+      },
+      {
+        "path": "large.dat",
+        "status": "tracked",
+        "kind": "file",
+        "content_digest": "sha256:8d2c9ee9fb12e2b3150d1e7995ed25636d6ac0f87693627aedcde1d87397cc7f",
+        "size": 3520000,
+        "mode": 420
+      },
+      {
+        "path": "notes.txt",
+        "status": "modified",
+        "kind": "file",
+        "content_digest": "sha256:2fca6842563ddf00ec541a848e0309bb97fb4ab4dbba5f6ba639755b958bcc0e",
+        "size": 79,
+        "mode": 420
+      }
+    ]
+  },
+  "input_digest": "72d788b7934ac851b5f245279bf53e272ba053d08726e1d4d6c36f1a6c3fba78",
+  "host_digest": "4ce4068dff14019f4401071614e1c27eee35b92b1124697c111772e1be832030",
+  "dispute": null,
+  "started_at": "2026-10-11T07:13:10Z",
+  "snapshot_archive": {
+    "status": "verified",
+    "file": "snapshot-archive.json",
+    "snapshot_digest": "sha256:ba245fecde86fb9c36033edc229d8eeebf3668620c70e0e33921ccf646a12650"
+  }
+}

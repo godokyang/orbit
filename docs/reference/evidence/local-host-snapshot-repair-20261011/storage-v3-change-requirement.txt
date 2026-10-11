@@ -1,0 +1,1 @@
+请用 Orbit 监督完成一个小维护：只在 notes.txt 最后追加一行 "Small change verified."，保留已经存在的全部原文。不修改 large.dat、AGENTS.md 或其他交付文件，不派发成员，不提交。使用项目 .runtime/node 实际读取并逐字节验证 notes.txt，同时报告 large.dat SHA-256 确认保持原值。完成编辑、验证和交付答复后，通过 Orbit 会话工具请求一次独立手动终检；排队后结束回合等待通知，根据真实检查修正必要问题，按通知完成停止。

@@ -1,0 +1,37 @@
+{
+  "cmd": [
+    "/usr/bin/sandbox-exec",
+    "-p",
+    "(version 1) (allow default) (deny network*)",
+    "/Users/yangke/.local/bin/omp",
+    "--mode",
+    "rpc",
+    "--no-ui",
+    "--no-session",
+    "--no-tools",
+    "--no-pty",
+    "--no-extensions",
+    "--no-skills",
+    "--no-rules",
+    "--no-lsp",
+    "--trusted-extension",
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/root-lifecycle-probe-v2/probe.ts",
+    "--config",
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/root-lifecycle-probe-v2/isolation.yml"
+  ],
+  "network": "OS denied",
+  "HOME_changed": false,
+  "pid": 31238,
+  "before_term": {
+    "ok": true,
+    "factory_reached": true,
+    "model_requests": 0,
+    "pid": 31238,
+    "session_created": true,
+    "session_disposed": true,
+    "signal_cleanup": false
+  },
+  "term_sent": true,
+  "exit_code": 143,
+  "remaining_owned_processes": []
+}

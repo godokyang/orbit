@@ -48,8 +48,8 @@ module Orbit
     MINIMUM_OMP_VERSION = "18.2.8"
     # Keep the old constant for callers that already read the version floor.
     PINNED_OMP_VERSION = MINIMUM_OMP_VERSION
-    # Source bundle's locked SDK. The installer aligns the staged reviewer
-    # with the detected host OMP version when OMP is already installed.
+    # Historical public constant for older callers; no SDK is installed or
+    # selected from this value. Actual reviewer_host facts name the local OMP.
     PINNED_SDK_VERSION = "18.3.4"
 
     # The exact command line handed to the OS, kept separate from exec so the

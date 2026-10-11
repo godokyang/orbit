@@ -5,7 +5,6 @@
 // translates that public outcome. stopReason "error" alone never implies
 // quota — the content gate decides, and a non-error stop is never a provider
 // failure here (that path stays the model-compliance invalid_result one).
-import { isUsageLimitOutcome } from "@oh-my-pi/pi-ai/error";
 
 export interface ProviderErrorFact {
 	kind: "auth_or_quota" | "unavailable";
@@ -14,7 +13,7 @@ export interface ProviderErrorFact {
 	error_id: number | null;
 }
 
-export function providerErrorFact(message: unknown): ProviderErrorFact | undefined {
+export function providerErrorFact(message: unknown, isUsageLimitOutcome: (status?: number, text?: string) => boolean): ProviderErrorFact | undefined {
 	const turn = message as {
 		stopReason?: unknown;
 		errorStatus?: unknown;

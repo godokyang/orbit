@@ -303,7 +303,8 @@ module TaskEvidenceExportTest
        export_marks_absent_and_invalid_evidence
        export_copies_verified_task_scoped_native_sessions
        export_aborts_when_packaged_files_change_size
-       export_refuses_unsafe_destinations_and_non_tasks].each do |test|
+       export_refuses_unsafe_destinations_and_non_tasks
+       export_archived_workspace_is_self_contained_and_legacy_directory_exports].each do |test|
       Dir.mktmpdir("orbit-export-test-") do |tmp|
         @temp = tmp
         @project = File.join(tmp, "project")
@@ -312,6 +313,40 @@ module TaskEvidenceExportTest
       end
       puts "TASK_EVIDENCE_EXPORT_TEST_PASS #{test}"
     end
+  end
+
+  # A reclaimed check's bytes travel inside the archive. An old full directory
+  # still exports, and neither path rewrites scope.
+  def export_archived_workspace_is_self_contained_and_legacy_directory_exports
+    record = task("paused")
+    root = record.state.fetch("project_root")
+    File.write(File.join(root, "keep.txt"), "kept-bytes")
+    legacy = File.join(record.path, "checks", "1", "workspace")
+    FileUtils.mkdir_p(legacy)
+    File.write(File.join(legacy, "old.txt"), "legacy-bytes")
+    File.write(File.join(record.path, "checks", "1", "scope.json"), "{}\n")
+    store = Orbit::CheckSnapshotArchive.new(root)
+    dest = File.join(record.path, "checks", "2", "workspace")
+    snapshot = Orbit::WorkspaceSnapshot.capture(project_root: root, destination: dest, content_store: store)
+    archive = snapshot.delete("archive")
+    File.write(File.join(record.path, "checks", "2", "snapshot-archive.json"), JSON.pretty_generate(archive))
+    scope_path = File.join(record.path, "checks", "2", "scope.json")
+    File.write(scope_path, JSON.pretty_generate("number" => 2, "snapshot" => snapshot))
+    scope_bytes = File.binread(scope_path)
+    FileUtils.rm_rf(dest)
+    _summary, packed, unpack, _manifest = export_and_unpack(record)
+    assert(File.read(File.join(unpack, "task/checks/2/workspace/keep.txt")) == "kept-bytes", "export embeds archived bytes")
+    assert(File.read(File.join(unpack, "task/checks/1/workspace/old.txt")) == "legacy-bytes", "an old workspace directory still exports")
+    assert(names(packed).none? { |name| name.include?("snapshot-objects") }, "the package does not point at the object store")
+    assert(File.binread(scope_path) == scope_bytes, "export does not rewrite scope")
+    restored = File.join(@temp, "restored-check")
+    cli("restore-check", record.path, "2", "--output", restored)
+    restored_file = File.join(restored, "keep.txt")
+    hex = Digest::SHA256.hexdigest("kept-bytes")
+    object = File.join(root, ".orbit", "snapshot-objects", "sha256", hex[0, 2], hex)
+    assert(File.read(restored_file) == "kept-bytes", "restore-check rebuilds the archived file")
+    assert(File.stat(restored_file).ino != File.stat(object).ino, "the restored file does not share the object inode")
+    assert(File.binread(scope_path) == scope_bytes, "restore-check does not rewrite scope")
   end
 
   def assert_raises(expected)

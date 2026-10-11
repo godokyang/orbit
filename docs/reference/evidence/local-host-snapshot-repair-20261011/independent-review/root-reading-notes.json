@@ -1,0 +1,6 @@
+{
+  "stale_item": "H final report retained the earlier failure-v4-no-checks statement; authoritative fixture/evidence shows two completed checks, already recorded in the final acceptance. That stale development statement is not used as product evidence or a passing provider failure.",
+  "authoritative_failure_v4": "failure-v4-evidence/state.json and events.jsonl",
+  "cancel_observation": "in_flight labels alone do not establish liveness; interrupted_checks/lifecycle/reclaim/confirmed stop govern cancellation facts, existing task-runtime contract describes abandoned recovery",
+  "source_build": "Independent H recalculated 11 frozen source file hashes; Root had independently compared all packaged files to the release before uninstall. Current later edits affect docs only; the explanatory storage-protocol note was placed in unpackaged usage-reference, keeping frozen packaged contract bytes unchanged."
+}

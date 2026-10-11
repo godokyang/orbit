@@ -9,7 +9,7 @@ module Orbit
   def self.version_info
     record = File.join(ROOT, ".orbit-release.json")
     info = File.file?(record) ? JSON.parse(File.read(record)) : { "source" => { "kind" => "checkout" } }
-    info.slice("source", "content_digest", "installed_at").merge("version" => VERSION)
+    info.slice("source", "content_digest", "installed_at", "reviewer_host").merge("version" => VERSION)
   end
 
   def self.installed_runtime

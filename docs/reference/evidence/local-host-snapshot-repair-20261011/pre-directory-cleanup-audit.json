@@ -1,0 +1,213 @@
+{
+  "at": "2026-10-11T07:36:59.594973+00:00",
+  "owned_processes_remaining": [],
+  "fixed_resources": [
+    {
+      "pane": "w23:p1",
+      "returncode": 0,
+      "stdout": "{\"id\":\"cli:pane:process_info\",\"result\":{\"process_info\":{\"foreground_process_group_id\":38007,\"foreground_processes\":[{\"argv\":[\"/Users/yangke/.nvm/versions/node/v24.19.0/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex\",\"--dangerously-bypass-approvals-and-sandbox\"],\"argv0\":\"codex\",\"cmdline\":\"/Users/yangke/.nvm/versions/node/v24.19.0/lib/node_modules/@openai/codex/node_modules/@openai/codex-darwin-arm64/vendor/aarch64-apple-darwin/bin/codex --dangerously-bypass-approvals-and-sandbox\",\"cwd\":\"/Users/yangke/Personal/omen/orbit\",\"name\":\"codex\",\"pid\":38008},{\"argv\":[\"node\",\"/Users/yangke/.nvm/versions/node/v24.19.0/bin/codex\",\"--dangerously-bypass-approvals-and-sandbox\"],\"argv0\":\"node\",\"cmdline\":\"node /Users/yangke/.nvm/versions/node/v24.19.0/bin/codex --dangerously-bypass-approvals-and-sandbox\",\"cwd\":\"/Users/yangke/Personal/omen/orbit\",\"name\":\"node\",\"pid\":38007}],\"pane_id\":\"w23:p1\",\"shell_pid\":37403},\"type\":\"pane_process_info\"}}\n",
+      "stderr": ""
+    },
+    {
+      "pane": "w23:pH",
+      "returncode": 0,
+      "stdout": "{\"id\":\"cli:pane:process_info\",\"result\":{\"process_info\":{\"foreground_process_group_id\":12801,\"foreground_processes\":[{\"argv\":[\"node\",\"/Users/yangke/.npm/_npx/3951ab07c1e658c9/node_modules/.bin/mcp-server-mobile\"],\"argv0\":\"node\",\"cmdline\":\"node /Users/yangke/.npm/_npx/3951ab07c1e658c9/node_modules/.bin/mcp-server-mobile\",\"cwd\":\"/Users/yangke/Personal/omen/orbit\",\"name\":\"node\",\"pid\":12863},{\"argv0\":\"mobile-mcp@1.0.2\",\"cwd\":\"/Users/yangke/Personal/omen/orbit\",\"name\":\"node\",\"pid\":12828},{\"argv\":[\"omp\"],\"argv0\":\"omp\",\"cmdline\":\"omp\",\"cwd\":\"/Users/yangke/Personal/omen/orbit\",\"name\":\"omp\",\"pid\":12801}],\"pane_id\":\"w23:pH\",\"shell_pid\":11899},\"type\":\"pane_process_info\"}}\n",
+      "stderr": ""
+    },
+    {
+      "pane": "w23:pJ",
+      "returncode": 0,
+      "stdout": "{\"id\":\"cli:pane:process_info\",\"result\":{\"process_info\":{\"foreground_process_group_id\":12883,\"foreground_processes\":[{\"argv\":[\"node\",\"/Users/yangke/.npm/_npx/3951ab07c1e658c9/node_modules/.bin/mcp-server-mobile\"],\"argv0\":\"node\",\"cmdline\":\"node /Users/yangke/.npm/_npx/3951ab07c1e658c9/node_modules/.bin/mcp-server-mobile\",\"cwd\":\"/Users/yangke/Personal/omen/orbit\",\"name\":\"node\",\"pid\":12950},{\"argv0\":\"mobile-mcp@1.0.2\",\"cwd\":\"/Users/yangke/Personal/omen/orbit\",\"name\":\"node\",\"pid\":12914},{\"argv\":[\"omp\"],\"argv0\":\"omp\",\"cmdline\":\"omp\",\"cwd\":\"/Users/yangke/Personal/omen/orbit\",\"name\":\"omp\",\"pid\":12883}],\"pane_id\":\"w23:pJ\",\"shell_pid\":12208},\"type\":\"pane_process_info\"}}\n",
+      "stderr": ""
+    },
+    {
+      "pane": "w23:pK",
+      "returncode": 0,
+      "stdout": "{\"id\":\"cli:pane:process_info\",\"result\":{\"process_info\":{\"foreground_process_group_id\":12966,\"foreground_processes\":[{\"argv\":[\"node\",\"/Users/yangke/.npm/_npx/3951ab07c1e658c9/node_modules/.bin/mcp-server-mobile\"],\"argv0\":\"node\",\"cmdline\":\"node /Users/yangke/.npm/_npx/3951ab07c1e658c9/node_modules/.bin/mcp-server-mobile\",\"cwd\":\"/Users/yangke/Personal/omen/orbit\",\"name\":\"node\",\"pid\":13028},{\"argv0\":\"mobile-mcp@1.0.2\",\"cwd\":\"/Users/yangke/Personal/omen/orbit\",\"name\":\"node\",\"pid\":12993},{\"argv\":[\"omp\"],\"argv0\":\"omp\",\"cmdline\":\"omp\",\"cwd\":\"/Users/yangke/Personal/omen/orbit\",\"name\":\"omp\",\"pid\":12966}],\"pane_id\":\"w23:pK\",\"shell_pid\":12485},\"type\":\"pane_process_info\"}}\n",
+      "stderr": ""
+    },
+    {
+      "pane": "w23:p16",
+      "returncode": 0,
+      "stdout": "{\"id\":\"cli:pane:process_info\",\"result\":{\"process_info\":{\"foreground_process_group_id\":4211,\"foreground_processes\":[{\"argv\":[\"-zsh\"],\"argv0\":\"zsh\",\"cmdline\":\"-zsh\",\"cwd\":\"/Users/yangke/Personal/omen/orbit\",\"name\":\"zsh\",\"pid\":4211}],\"pane_id\":\"w23:p16\",\"shell_pid\":4211},\"type\":\"pane_process_info\"}}\n",
+      "stderr": ""
+    }
+  ],
+  "daily_installation_metadata_unchanged": true,
+  "daily_release": "/Users/yangke/.local/share/orbit/orbit/releases/e8c29c03c7eb0777acd84a9c",
+  "daily_size": {
+    "files": 25825,
+    "logical_bytes": 916611544,
+    "allocated_bytes": 1004711936
+  },
+  "test_tasks": [
+    {
+      "fixture": "positive",
+      "task": "af2990c5-3a75-4898-a29a-5d4fe4a44acd",
+      "socket_directory": "/tmp/orbit-omp-oOGok8",
+      "exists": false,
+      "status": "paused",
+      "stop_confirmed": true,
+      "runtime_pid": null
+    },
+    {
+      "fixture": "failure-v5",
+      "task": "35ca2471-ec1c-4f0f-812d-f65a931e3bf3",
+      "socket_directory": "/tmp/orbit-omp-NtrtRB",
+      "exists": false,
+      "status": "complete",
+      "stop_confirmed": true,
+      "runtime_pid": null
+    },
+    {
+      "fixture": "failure-v4",
+      "task": "3d2b220f-2079-4121-8936-86b55793ba0f",
+      "socket_directory": "/tmp/orbit-omp-UufJOH",
+      "exists": false,
+      "status": "complete",
+      "stop_confirmed": true,
+      "runtime_pid": null
+    },
+    {
+      "fixture": "failure-v3",
+      "task": "b04bc927-ac24-455b-bb81-ba5cbd898de1",
+      "socket_directory": "/tmp/orbit-omp-QOLIkB",
+      "exists": false,
+      "status": "paused",
+      "stop_confirmed": true,
+      "runtime_pid": null
+    },
+    {
+      "fixture": "negative",
+      "task": "85ac5da9-9211-42d7-9ad6-8ba22815df74",
+      "socket_directory": "/tmp/orbit-omp-9FdFX1",
+      "exists": false,
+      "status": "complete",
+      "stop_confirmed": true,
+      "runtime_pid": null
+    },
+    {
+      "fixture": "storage-v3",
+      "task": "15740391-dfb0-42d7-a17e-6398bad75485",
+      "socket_directory": "/tmp/orbit-omp-5lSwMW",
+      "exists": false,
+      "status": "complete",
+      "stop_confirmed": true,
+      "runtime_pid": null
+    },
+    {
+      "fixture": "storage-v3",
+      "task": "92f92422-fa45-44b4-aae3-e1de4b66cfc5",
+      "socket_directory": "/tmp/orbit-omp-M6m2GQ",
+      "exists": false,
+      "status": "complete",
+      "stop_confirmed": true,
+      "runtime_pid": null
+    },
+    {
+      "fixture": "storage-v3",
+      "task": "96dadc27-abb4-41bc-b9d8-4b069b74a049",
+      "socket_directory": "/tmp/orbit-omp-khbvip",
+      "exists": false,
+      "status": "complete",
+      "stop_confirmed": true,
+      "runtime_pid": null
+    },
+    {
+      "fixture": "storage-v2",
+      "task": "910aaf27-0d25-478a-b3dc-17109b1536b6",
+      "socket_directory": "/tmp/orbit-omp-rUjQlS",
+      "exists": false,
+      "status": "paused",
+      "stop_confirmed": true,
+      "runtime_pid": null
+    },
+    {
+      "fixture": "storage",
+      "task": "705429f4-91c1-4688-90f6-a56a1193e3fa",
+      "socket_directory": "/tmp/orbit-omp-LSHM3V",
+      "exists": false,
+      "status": "paused",
+      "stop_confirmed": true,
+      "runtime_pid": null
+    },
+    {
+      "fixture": "failure",
+      "task": "8330d992-a0d7-4a98-b299-0dbd58f42d29",
+      "socket_directory": "/tmp/orbit-omp-1Eg7b4",
+      "exists": false,
+      "status": "paused",
+      "stop_confirmed": true,
+      "runtime_pid": null
+    },
+    {
+      "fixture": "archive-failure",
+      "task": "85336501-023a-497d-aef4-0c2dfba6fbe6",
+      "socket_directory": "/tmp/orbit-omp-RPDnah",
+      "exists": false,
+      "status": "complete",
+      "stop_confirmed": true,
+      "runtime_pid": null
+    },
+    {
+      "fixture": "process-failure",
+      "task": "1730d605-738f-44be-ade1-a80468585262",
+      "socket_directory": "/tmp/orbit-omp-0Fepxk",
+      "exists": false,
+      "status": "paused",
+      "stop_confirmed": true,
+      "runtime_pid": null
+    },
+    {
+      "fixture": "positive-v2",
+      "task": "9aea0d98-c704-47c7-861e-f93c3379360c",
+      "socket_directory": "/tmp/orbit-omp-0EOCbj",
+      "exists": false,
+      "status": "complete",
+      "stop_confirmed": true,
+      "runtime_pid": null
+    }
+  ],
+  "known_probe_daemon_scopes": [
+    {
+      "cwd": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/root-export-probe/cwd",
+      "key": "45ce018d94600d7c",
+      "path": "/Users/yangke/.omp/run/daemons/45ce018d94600d7c",
+      "exists": true,
+      "files": [],
+      "exists_now": false
+    },
+    {
+      "cwd": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/root-lifecycle-probe/cwd",
+      "key": "ac77a7b9d9381de4",
+      "path": "/Users/yangke/.omp/run/daemons/ac77a7b9d9381de4",
+      "exists": true,
+      "files": [
+        "clients/31062-540344ad-439a-4e94-aa27-e7d40df623a7.json"
+      ],
+      "exists_now": false
+    },
+    {
+      "cwd": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/root-lifecycle-probe-v2/cwd",
+      "key": "6b0259dbd131e197",
+      "path": "/Users/yangke/.omp/run/daemons/6b0259dbd131e197",
+      "exists": true,
+      "files": [],
+      "exists_now": false
+    }
+  ],
+  "browser_space_13_finished": true,
+  "temporary_install_uninstalled": true,
+  "owned_test_panes_closed": [
+    "w23:p1D",
+    "w23:p1E",
+    "w23:p1F"
+  ],
+  "daily_comparison_fields": [
+    "source",
+    "content_digest",
+    "installed_at",
+    "version"
+  ],
+  "comparison_note": "Baseline captured identity fields only, not the full release record. Identity comparison uses those captured fields; full-record comparison would incorrectly report extra manifest keys as a change."
+}

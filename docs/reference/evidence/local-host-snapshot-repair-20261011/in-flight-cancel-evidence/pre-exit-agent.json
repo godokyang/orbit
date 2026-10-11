@@ -1,0 +1,16 @@
+{
+  "agent": "omp",
+  "agent_status": "idle",
+  "cwd": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/failure-v3",
+  "focused": false,
+  "foreground_cwd": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/failure-v3",
+  "name": "orbit-failure-v3-1011",
+  "pane_id": "w23:p1E",
+  "revision": 20413,
+  "state_change_seq": 842,
+  "tab_id": "w23:t1",
+  "terminal_id": "term_65d8ad916211b41",
+  "terminal_title": "\u03c0 > \ud83d\udcdd NOTE: Orbit\u76d1\u7763\u8ffd\u52a0note.txt\u9a8c\u8bc1\u884c",
+  "terminal_title_stripped": "\u03c0 > \ud83d\udcdd NOTE: Orbit\u76d1\u7763\u8ffd\u52a0note.txt\u9a8c\u8bc1\u884c",
+  "workspace_id": "w23"
+}

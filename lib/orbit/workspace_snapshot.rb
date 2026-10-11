@@ -25,7 +25,7 @@ module Orbit
     SCHEMA_VERSION = "orbit-workspace-snapshot-v1"
     EXCLUDED_COMPONENTS = %w[.git .orbit].freeze
     NON_GIT_DEPENDENCY_DIRS = %w[node_modules .venv __pycache__].freeze
-    PUBLIC_KEYS = %w[path status kind content_digest size mode target external materialized].freeze
+    PUBLIC_KEYS = %w[path status kind content_digest size mode target external materialized snapshot_target].freeze
 
     class Error < StandardError
       attr_reader :paths
@@ -42,32 +42,43 @@ module Orbit
 
     module_function
 
-    def capture(project_root:, destination:)
+    def capture(project_root:, destination:, content_store: nil)
       root = validate_root!(project_root)
       dest = validate_destination!(root, destination)
 
       staging = "#{dest}.staging-#{Process.pid}-#{rand(1_000_000)}"
       FileUtils.mkdir_p(staging)
       begin
-        collected = collect(root, copy_root: staging)
+        collected = collect(root, copy_root: staging, content_store: content_store)
         verify_stable!(root, collected)
         digest = manifest_digest(collected[:entries])
+        archive = nil
+        archive_error = nil
+        if content_store
+          begin
+            archive = content_store.seal(snapshot_digest: digest, source_root: root, entries: collected[:entries])
+          rescue StandardError => error
+            archive_error = "#{error.class}: #{error.message}"
+          end
+        end
         FileUtils.rm_rf(dest) if File.exist?(dest)
         File.rename(staging, dest)
+        result = {
+          "schema_version" => SCHEMA_VERSION,
+          "source_root" => root,
+          "snapshot_path" => dest,
+          "git_head" => collected[:git_head],
+          "digest" => digest,
+          "project_rules" => project_rules(collected[:entries]),
+          "manifest" => collected[:entries].map { |entry| public_entry(entry) }
+        }
+        result["archive"] = archive if archive
+        result["archive_error"] = archive_error if archive_error
+        result
       rescue StandardError
         FileUtils.rm_rf(staging)
         raise
       end
-
-      {
-        "schema_version" => SCHEMA_VERSION,
-        "source_root" => root,
-        "snapshot_path" => dest,
-        "git_head" => collected[:git_head],
-        "digest" => digest,
-        "project_rules" => project_rules(collected[:entries]),
-        "manifest" => collected[:entries].map { |entry| public_entry(entry) }
-      }
     end
 
     def fingerprint(project_root:)
@@ -106,9 +117,9 @@ module Orbit
       raise DestinationError, "snapshot destination must be outside the workspace or under .orbit: #{dest}"
     end
 
-    def collect(root, copy_root: nil)
+    def collect(root, copy_root: nil, content_store: nil)
       git_head, skeletons = enumerate(root)
-      entries = skeletons.map { |skeleton| hydrate(root, skeleton, copy_root: copy_root) }
+      entries = skeletons.map { |skeleton| hydrate(root, skeleton, copy_root: copy_root, content_store: content_store) }
       { git_head: git_head, entries: entries }
     end
 
@@ -198,7 +209,7 @@ module Orbit
       end
     end
 
-    def hydrate(root, skeleton, copy_root: nil)
+    def hydrate(root, skeleton, copy_root: nil, content_store: nil)
       path = skeleton["path"]
       absolute = File.join(root, path)
       stat = safe_lstat(absolute)
@@ -215,8 +226,12 @@ module Orbit
         else
           { "path" => path, "status" => status, "kind" => "other", "stat_key" => stat_key(stat) }
         end
+      if copy_root && content_store && entry["kind"] == "file" && entry["status"] != "deleted" && entry["bytes"]
+        content_store.store_file(entry["content_digest"], entry["bytes"])
+      end
       materialize(copy_root, entry) if copy_root
       entry.delete("bytes")
+      entry["snapshot_target"] = entry["copy_target"] if copy_root && content_store && entry["copy_target"]
       entry.delete("copy_target")
       entry
     end

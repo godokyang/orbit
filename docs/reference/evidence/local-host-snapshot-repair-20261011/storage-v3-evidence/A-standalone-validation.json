@@ -1,0 +1,8 @@
+{
+  "large_sha256": "8d2c9ee9fb12e2b3150d1e7995ed25636d6ac0f87693627aedcde1d87397cc7f",
+  "large_bytes": 3520000,
+  "historical_notes_bytes": 79,
+  "current_notes_bytes": 102,
+  "standalone_reconstructed_without_reading_original_object_store": true,
+  "historical_snapshot_preserved_after_current_change": true
+}

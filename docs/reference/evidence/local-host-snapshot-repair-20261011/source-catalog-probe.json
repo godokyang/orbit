@@ -1,0 +1,8 @@
+{
+  "resolvable": [
+    "zhipu-coding-plan/glm-5.3-flash",
+    "kimi-code/k3-256k",
+    "cursor/grok-4.7-fast"
+  ],
+  "unresolvable": []
+}

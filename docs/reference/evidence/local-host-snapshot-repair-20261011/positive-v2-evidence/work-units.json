@@ -1,0 +1,76 @@
+{
+  "format": "orbit-work-units-2",
+  "task_id": "9aea0d98-c704-47c7-861e-f93c3379360c",
+  "units": {
+    "wu-4fdb7d551a77c9a1": {
+      "id": "wu-4fdb7d551a77c9a1",
+      "task_id": "9aea0d98-c704-47c7-861e-f93c3379360c",
+      "status": "accepted",
+      "input_digest": "5454e3bfb52014e8ac7a35d92d09300197a184c4f0ffe11dd45ff46b70e073b1",
+      "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/positive-v2",
+      "declared_at": "2026-10-11T07:08:43Z",
+      "dispatches": [
+        {
+          "member_id": "orbit-1c8de33f-74d7-49d3-89fc-90d33075ba9e",
+          "tool_call_id": "call_03dc1fc33bc4401191f6acfb",
+          "model": "opencode-go/deepseek-v4.1-flash",
+          "bound_at": "2026-10-11T07:10:10Z",
+          "hint_signature": "652a12a31f4327a51e5621b37e87ad5a887d85caeed4c2f652e7aae91b83f6de",
+          "hint_message_id": "a12fad4a-93e1-4547-8e22-a3665d00c934",
+          "status": "accepted",
+          "result": "成员 orbit-m-opencode-go-deepseek-v4-1-flash-79717e5d（opencode-go/deepseek-v4.1-flash）交付 src/importer.mjs 与 tests/importer.test.mjs（10 个解析测试），仅改动两个允许路径。实现为单遍字符扫描：双引号字段、\"\" 转义、LF/CRLF、多行字段按起始行计数、未闭合引号检测；金额经 ^\\d+(\\.\\d{2})?$ 正则后字符串拼接转整数分（toCents），无浮点运算；币种白名单 CNY/USD；重复 ID 只对已接受行生效（成员在结果中声明的合同沉默点决策）。Root 审阅全部 209 行实现后接受。",
+          "verification": "Root 实际合并验证：.runtime/node --test tests/*.test.mjs 全量 13/13 通过（10 解析 + 3 CLI），退出码 0；CLI 端到端冒烟：全有效文件退出 0 且 records 含整数分（1234/10000）；混合文件（CRLF、重复 ID、一位小数、多行引号字段+EUR）退出 2，errors 为 [{line:3,duplicate_id},{line:4,bad_amount},{line:5,bad_amount},{line:5,bad_currency}]，有效行按原序保留；未闭合引号文件退出 2 且 {line:2,unclosed_quote}；不可读文件路径已在 cli.test.mjs 中验证退出 1 且 stderr 说明。临时冒烟夹具已删除，项目树仅含预期文件，无项目外改动，未提交未推送。",
+          "finished_at": "2026-10-11T07:13:00Z"
+        }
+      ],
+      "member_id": "orbit-1c8de33f-74d7-49d3-89fc-90d33075ba9e",
+      "tool_call_id": "call_03dc1fc33bc4401191f6acfb",
+      "model": "opencode-go/deepseek-v4.1-flash",
+      "result": "成员 orbit-m-opencode-go-deepseek-v4-1-flash-79717e5d（opencode-go/deepseek-v4.1-flash）交付 src/importer.mjs 与 tests/importer.test.mjs（10 个解析测试），仅改动两个允许路径。实现为单遍字符扫描：双引号字段、\"\" 转义、LF/CRLF、多行字段按起始行计数、未闭合引号检测；金额经 ^\\d+(\\.\\d{2})?$ 正则后字符串拼接转整数分（toCents），无浮点运算；币种白名单 CNY/USD；重复 ID 只对已接受行生效（成员在结果中声明的合同沉默点决策）。Root 审阅全部 209 行实现后接受。",
+      "verification": "Root 实际合并验证：.runtime/node --test tests/*.test.mjs 全量 13/13 通过（10 解析 + 3 CLI），退出码 0；CLI 端到端冒烟：全有效文件退出 0 且 records 含整数分（1234/10000）；混合文件（CRLF、重复 ID、一位小数、多行引号字段+EUR）退出 2，errors 为 [{line:3,duplicate_id},{line:4,bad_amount},{line:5,bad_amount},{line:5,bad_currency}]，有效行按原序保留；未闭合引号文件退出 2 且 {line:2,unclosed_quote}；不可读文件路径已在 cli.test.mjs 中验证退出 1 且 stderr 说明。临时冒烟夹具已删除，项目树仅含预期文件，无项目外改动，未提交未推送。",
+      "finished_at": "2026-10-11T07:13:00Z",
+      "objective": "实现纯解析模块 src/importer.mjs：导出 importInvoices(text) -> {records, errors}，按发票 CSV 合同解析（双引号字段、字段内逗号、双双引号转义、LF/CRLF、行号从2起、重复ID第二次起拒绝、金额字符串转整数分、币种白名单），并编写其解析测试。",
+      "requirements": [
+        "导出命名函数 importInvoices(text)：输入整个 CSV 文本字符串，返回 {records, errors}；records 每项 {invoice_id, customer, amount_cents, currency}（amount_cents 为整数），errors 每项 {line, code}",
+        "表头（第1行）必须恰好为 invoice_id,customer,amount,currency，否则错误 {line:1, code:'bad_header'}；允许文件末尾换行",
+        "支持双引号字段：字段内逗号按字面处理，字段内 \"\" 转义为 \"；支持 LF 与 CRLF 行结束；未闭合引号 → 该记录错误 code 'unclosed_quote'，line 为该记录起始行号",
+        "行号从2开始计（表头为1）；带引号的多行字段按起始行计",
+        "金额字段必须为非负十进制数字符串，允许整数或恰好两位小数（如 '12'、'12.34'）；负数、无/多余小数位（如 '12.3'、'12.345'）、非数字 → 'bad_amount'；用字符串处理转整数分（'12.34'→1234，'12'→1200），全程禁止浮点运算与舍入",
+        "币种仅接受 CNY 或 USD → 否则 'bad_currency'；invoice_id 或 customer 为空 → 'missing_field'",
+        "一行字段数不等于 4 → 'bad_field_count'",
+        "重复 invoice_id 从第二次出现起拒绝 → 'duplicate_id'；有效行仍按原顺序进入 records，被拒行不进入 records",
+        "一行可产生多个错误时逐项列入 errors；错误行号使用原输入行号"
+      ],
+      "context": "项目规则（AGENTS.md 要点）：工作只限本项目；不提交、不推送；不修改项目外文件。运行验证只能用项目内 .runtime/node（v24.19.0 已验证可用），禁止依赖用户 NVM。错误码使用固定 snake_case 字符串：bad_header/unclosed_quote/bad_amount/bad_currency/missing_field/bad_field_count/duplicate_id。src/cli.mjs、README.md、tests/cli.test.mjs 由 Root 负责集成与合并验证，成员不写。package.json 为 ESM（type:module），模块为纯函数、无 IO。",
+      "decisions": [],
+      "input_materials": [],
+      "scope": {
+        "allowed_paths": [
+          "src/importer.mjs",
+          "tests/importer.test.mjs"
+        ],
+        "allowed_tools": [
+          "read",
+          "write",
+          "edit",
+          "glob",
+          "grep",
+          "bash"
+        ],
+        "allowed_commands": [
+          ".runtime/node --test tests/importer.test.mjs",
+          ".runtime/node --test tests/*.test.mjs"
+        ]
+      },
+      "acceptance": "在项目根目录运行 .runtime/node --test tests/importer.test.mjs 全部通过；tests/importer.test.mjs 至少覆盖：引号内逗号与双双引号转义、CRLF 行结束与末尾换行、精确金额转整数分、负数/错误小数位拒绝、重复ID第二次起拒绝、坏表头、未闭合引号；错误项均含从2起的原行号与固定 code。",
+      "escalation": "合同歧义、测试与合同冲突、或 .runtime/node 无法运行时，停止实现并在结果中报告具体阻塞点；不得修改合同语义、不得改动 src/cli.mjs、README.md、tests/cli.test.mjs 或项目外文件。",
+      "model_requirements": {
+        "relevant_indices": [
+          "coding_index"
+        ]
+      },
+      "execution": "delegate",
+      "dependencies": []
+    }
+  }
+}

@@ -1,0 +1,52 @@
+{
+  "at": "2026-10-11T07:08:41.004934+00:00",
+  "objects": {
+    "files": 4,
+    "logical_bytes": 3520329,
+    "allocated_bytes": 3534848
+  },
+  "checks": {
+    "files": 107,
+    "logical_bytes": 1479140,
+    "allocated_bytes": 1712128
+  },
+  "workspace_exists": false,
+  "entries": [
+    {
+      "path": ".gitignore",
+      "status": "tracked",
+      "kind": "file",
+      "content_digest": "sha256:f21872cf24c382dd4844007a84237553c2e4d612ae4e0af2958e2709a6fbe0e3",
+      "size": 18,
+      "mode": 420,
+      "object": "sha256/f2/f21872cf24c382dd4844007a84237553c2e4d612ae4e0af2958e2709a6fbe0e3"
+    },
+    {
+      "path": "AGENTS.md",
+      "status": "tracked",
+      "kind": "file",
+      "content_digest": "sha256:971d1733ab1e6f87c269b480dc16861db7536b1f9581914faa3362bcbbedaf4d",
+      "size": 232,
+      "mode": 420,
+      "object": "sha256/97/971d1733ab1e6f87c269b480dc16861db7536b1f9581914faa3362bcbbedaf4d"
+    },
+    {
+      "path": "large.dat",
+      "status": "tracked",
+      "kind": "file",
+      "content_digest": "sha256:8d2c9ee9fb12e2b3150d1e7995ed25636d6ac0f87693627aedcde1d87397cc7f",
+      "size": 3520000,
+      "mode": 420,
+      "object": "sha256/8d/8d2c9ee9fb12e2b3150d1e7995ed25636d6ac0f87693627aedcde1d87397cc7f"
+    },
+    {
+      "path": "notes.txt",
+      "status": "modified",
+      "kind": "file",
+      "content_digest": "sha256:2fca6842563ddf00ec541a848e0309bb97fb4ab4dbba5f6ba639755b958bcc0e",
+      "size": 79,
+      "mode": 420,
+      "object": "sha256/2f/2fca6842563ddf00ec541a848e0309bb97fb4ab4dbba5f6ba639755b958bcc0e"
+    }
+  ]
+}

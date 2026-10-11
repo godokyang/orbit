@@ -32,67 +32,57 @@ module InstallTest
       _out, err, status = Open3.capture3({ "PATH" => tmp }, RbConfig.ruby, "--disable-gems", "-r",
                                          File.join(ROOT, "scripts/manage-install.rb"), "-e", script)
       assert(status.exitstatus == 2 && err.include?("Node.js 18+") && err.include?("npm") &&
-             err.include?("bun >= 1.3.14") && !err.include?("Codex CLI") && err.include?("重新运行 Orbit 安装命令"),
+             err.include?("未找到 OMP") && !err.include?("Codex CLI") && err.include?("重新运行 Orbit 安装命令"),
              "single-host prerequisites are listed with a next step before installation")
     end
   end
 
-  # The fixture installs a declared SDK version without network access. When
-  # the host version differs from the source lock, it mirrors bun add's staged
-  # manifest update and records the exact host SDK version.
-  def write_fixture_bun(directory)
+  def omp_preflight_before_download
+    Dir.mktmpdir("orbit-omp-preflight-") do |tmp|
+      %w[ruby dirname].each do |name|
+        path = name == "ruby" ? RbConfig.ruby : "/usr/bin/dirname"
+        File.symlink(path, File.join(tmp, name))
+      end
+      sentinel = File.join(tmp, "downloaded")
+      File.write(File.join(tmp, "curl"), "#!/bin/sh\n/usr/bin/touch #{sentinel}\n")
+      File.chmod(0o755, File.join(tmp, "curl"))
+      omp = File.join(tmp, "omp")
+      [[nil, nil, "未找到 OMP"], ["#!/bin/sh\nexit 0\n", 0o600, "无法执行"],
+       ["#!/bin/sh\nexit 3\n", 0o755, "无法执行"],
+       ["#!/bin/sh\necho omp/18.2.7\n", 0o755, "版本不支持"]].each do |content, mode, expected|
+        File.unlink(omp) if File.exist?(omp)
+        File.write(omp, content) && File.chmod(mode, omp) if content
+        env = { "PATH" => tmp, "ORBIT_REF" => nil }
+        [["/bin/sh", File.join(ROOT, "install.sh")],
+         ["/bin/sh", File.join(ROOT, "install.sh"), "--ref", "main"],
+         [RbConfig.ruby, "--disable-gems", File.join(ROOT, "scripts/manage-install.rb"), "install", "--source", ROOT]].each do |cmd|
+          _out, err, status = Open3.capture3(env, *cmd, "--runtime-dir", File.join(tmp, "runtime"), "--no-modify-path")
+          assert(!status.success? && err.include?(expected), "preflight diagnostic: #{expected}: #{err}")
+          assert(!File.exist?(sentinel) && !File.exist?(File.join(tmp, "runtime")), "no download or release preparation")
+        end
+        out, _err, status = Open3.capture3(env, "/bin/sh", File.join(ROOT, "install.sh"), "--help")
+        assert(status.success? && out.include?("Install/update"), "help bypasses OMP gate")
+      end
+    end
+  end
+
+  # Installation tests simulate the external host capability boundary. The
+  # actual compiled host/factory lifecycle is exercised separately in live probes.
+  def write_fixture_omp(directory)
     FileUtils.mkdir_p(directory)
-    bun = File.join(directory, "bun")
-    File.write(bun, <<~SH)
-      #!/bin/sh
-      if [ "$1" = "--version" ]; then
-        printf '%s\\n' "${ORBIT_FIXTURE_BUN_VERSION:-1.3.14}"
-        exit 0
-      fi
-      if [ "$1" = -e ]; then
-        case "$2" in
-          *process.platform*) printf '["darwin","arm64"]'; exit 0 ;;
-          *) [ -z "$ORBIT_FIXTURE_NATIVE_LOAD_FAIL" ]; exit $? ;;
-        esac
-      fi
-      for group in optional peer dev; do
-        case " $* " in
-          *" --omit $group "*) ;;
-          *) echo "fixture bun: $group dependencies must be omitted" >&2; exit 2 ;;
-        esac
-      done
-      if [ "$1" = install ] && [ "$2" = --frozen-lockfile ]; then
-        version=#{Orbit::OmpEntry::PINNED_SDK_VERSION}
-      elif [ "$1" = add ] && [ "$2" = --exact ]; then
-        version="${3##*@}"
-        node -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync("package.json")); for(const spec of process.argv.slice(1).filter(s=>s.startsWith("@oh-my-pi/"))) { const i=spec.lastIndexOf("@"); p.dependencies[spec.slice(0,i)]=spec.slice(i+1); } fs.writeFileSync("package.json",JSON.stringify(p))' "$@"
-      else
-        echo "fixture bun: unexpected arguments: $*" >&2
-        exit 2
-      fi
-      if [ -n "$ORBIT_FIXTURE_BUN_FAIL" ]; then
-        echo "fixture bun: dependency install failed" >&2
-        exit 3
-      fi
-      mkdir -p node_modules/@oh-my-pi/pi-coding-agent || exit 1
-      printf '{"name":"@oh-my-pi/pi-coding-agent","version":"%s"}\\n' "${ORBIT_FIXTURE_SDK_VERSION:-$version}" > node_modules/@oh-my-pi/pi-coding-agent/package.json
-      for name in pi-ai pi-utils; do
-        mkdir -p "node_modules/@oh-my-pi/$name" || exit 1
-        printf '{"version":"%s"}\\n' "$version" > "node_modules/@oh-my-pi/$name/package.json"
-      done
-      if [ -z "$ORBIT_FIXTURE_NATIVE_MISSING" ]; then
-        mkdir -p node_modules/@oh-my-pi/pi-natives-darwin-arm64 || exit 1
-        printf '{"version":"%s"}\\n' "$version" > node_modules/@oh-my-pi/pi-natives-darwin-arm64/package.json
-      fi
-      mkdir -p "$BUN_INSTALL_CACHE_DIR" || exit 1
-      printf 'installation cache\\n' > "$BUN_INSTALL_CACHE_DIR/fixture-download"
-      exit 0
-    SH
-    File.chmod(0o755, bun)
     omp = File.join(directory, "omp")
     File.write(omp, <<~SH)
       #!/bin/sh
-      printf 'omp/%s\\n' "${ORBIT_FIXTURE_OMP_VERSION:-#{Orbit::OmpEntry::PINNED_SDK_VERSION}}"
+      if [ "$1" = --version ]; then
+        printf 'omp/%s\\n' "${ORBIT_FIXTURE_OMP_VERSION:-18.8.0}"
+        exit 0
+      fi
+      [ "$1" = --orbit-test-host-probe ] || exit 2
+      if [ -n "$ORBIT_FIXTURE_HOST_FAIL" ]; then
+        echo 'trusted extension capability unavailable' >&2
+        exit 3
+      fi
+      printf '{"ok":true,"host_version":"%s","session_disposed":true}\\n' "${ORBIT_FIXTURE_PROBE_VERSION:-${ORBIT_FIXTURE_OMP_VERSION:-18.8.0}}"
     SH
     File.chmod(0o755, omp)
   end
@@ -108,7 +98,7 @@ module InstallTest
       @omp = File.join(tmp, "omp agent")
       @shell_config = File.join(tmp, "shell config")
       @fixture_bin = File.join(tmp, "fixture-bin")
-      write_fixture_bun(@fixture_bin)
+      write_fixture_omp(@fixture_bin)
       @env = { "SHELL" => "/bin/zsh", "ZDOTDIR" => @shell_config, "PATH" => @fixture_bin + File::PATH_SEPARATOR + ENV.fetch("PATH", ""),
                "ORBIT_REF" => nil, "ORBIT_RUNTIME_DIR" => nil, "ORBIT_INSTALL_DIR" => nil, "ORBIT_SKILL_DIR" => @skills, "OPENCODE_CONFIG_DIR" => @opencode, "PI_CODING_AGENT_DIR" => @omp,
                "GIT_CONFIG_COUNT" => "2", "GIT_CONFIG_KEY_0" => "maintenance.auto", "GIT_CONFIG_VALUE_0" => "false",
@@ -118,6 +108,20 @@ module InstallTest
         dest = File.join(@source, file.fetch("path"))
         FileUtils.mkdir_p(File.dirname(dest))
         FileUtils.cp(File.join(ROOT, file.fetch("path")), dest, preserve: true)
+      end
+      File.open(File.join(@source, "lib/orbit/omp_check_runner.rb"), "a") do |file|
+        file.write(<<~RUBY)
+          require "open3"
+          module Orbit
+            class OmpCheckRunner
+              def self.probe_host(omp:, **_options)
+                out, err, status = Open3.capture3(omp, "--orbit-test-host-probe")
+                raise Error, err unless status.success?
+                JSON.parse(out)
+              end
+            end
+          end
+        RUBY
       end
       run("git", "init", "-q", @source)
       run("git", "add", ".", cwd: @source)
@@ -153,8 +157,7 @@ module InstallTest
       cat "#{archive}"
     SCRIPT
     File.chmod(0o755, File.join(transport, "curl"))
-    transport_env = { "PATH" => @fixture_bin + File::PATH_SEPARATOR + transport + File::PATH_SEPARATOR + ENV.fetch("PATH"),
-                      "ORBIT_FIXTURE_BUN_VERSION" => Orbit::OmpEntry::PINNED_SDK_VERSION[/\d+\.\d+\.\d+/] }
+    transport_env = { "PATH" => @fixture_bin + File::PATH_SEPARATOR + transport + File::PATH_SEPARATOR + ENV.fetch("PATH") }
 
     install(env: { "PATH" => @fixture_bin + File::PATH_SEPARATOR + ENV.fetch("PATH") })
     wrapper_path = File.join(@bin, "orbit")
@@ -292,7 +295,7 @@ module InstallTest
     transport_env = { "PATH" => @fixture_bin + File::PATH_SEPARATOR + transport + File::PATH_SEPARATOR + ENV.fetch("PATH"),
                       "ORBIT_FIXTURE_CURL_LOG" => log, "ORBIT_FIXTURE_ARCHIVE" => archive }
     install_out = install("--modify-path", "--ref", "branch/stable", env: transport_env)
-    assert(install_out.include?("Independent reviewer bundle"), "install reports the reviewer bundle")
+    assert(install_out.include?("Independent reviewer host"), "install reports the local reviewer host")
     shell_before = File.read(File.join(@shell_config, ".zshrc"))
     assert(run("zsh", "-ic", "command -v orbit").strip == File.join(@bin, "orbit"), "fresh zsh discovers installed CLI")
     info = version
@@ -304,10 +307,8 @@ module InstallTest
     assert(!File.exist?(File.join(active, "lib/orbit/v2")), "no retired runtime in installation")
     assert(!File.exist?(File.join(@omp, "extensions/orbit.js")) && !File.exist?(File.join(@opencode, "plugins/orbit.js")),
            "the single-host install creates no global Orbit entry")
-    sdk = File.join(active, "runners/omp-reviewer/node_modules/@oh-my-pi/pi-coding-agent/package.json")
-    assert(File.file?(sdk) && JSON.parse(File.read(sdk)).fetch("version") == Orbit::OmpEntry::PINNED_SDK_VERSION,
-           "the release carries the pinned reviewer SDK")
-    assert(File.file?(File.join(active, "runners/omp-reviewer/bun.lock")), "the release carries the reviewer lockfile")
+    assert(!File.exist?(File.join(active, "runners/omp-reviewer/node_modules")), "the release carries no private SDK")
+    assert(info.dig("reviewer_host", "path") == File.realpath(File.join(@fixture_bin, "omp")), "the verified host path is recorded")
     assert(%w[.npm-cache .bun-cache].none? { |name| File.exist?(File.join(active, name)) },
            "the installed release retains runtime modules but not installation caches")
     installed_omp_entry
@@ -464,54 +465,51 @@ module InstallTest
 
   def reviewer_tracks_host_version
     install(env: { "ORBIT_FIXTURE_OMP_VERSION" => Orbit::OmpEntry::MINIMUM_OMP_VERSION })
-    release = active
-    sdk = json(File.join(release, "runners/omp-reviewer/node_modules/@oh-my-pi/pi-coding-agent/package.json"))
-    declared = json(File.join(release, "runners/omp-reviewer/package.json"))
-    record = json(File.join(release, OrbitInstall::RELEASE))
-    expected = Orbit::OmpEntry::MINIMUM_OMP_VERSION
-    assert(sdk["version"] == expected && declared.dig("dependencies", "@oh-my-pi/pi-coding-agent") == expected &&
-           declared.dig("dependencies", "@oh-my-pi/pi-utils") == expected &&
-           declared.dig("dependencies", "@oh-my-pi/pi-ai") == expected && record["reviewer_sdk_version"] == expected,
-           "the staged reviewer matches the installed host rather than the source SDK lock")
+    record = json(File.join(active, OrbitInstall::RELEASE))
+    assert(record["reviewer_sdk_version"] == Orbit::OmpEntry::MINIMUM_OMP_VERSION &&
+           record.dig("reviewer_host", "version") == Orbit::OmpEntry::MINIMUM_OMP_VERSION &&
+           !File.exist?(File.join(active, "runners/omp-reviewer/node_modules")),
+           "reviewer uses the verified local host without installing its SDK")
   end
 
-  # A reviewer SDK mismatch aborts preparation without changing the release.
   def reviewer_sdk_version_mismatch_keeps_old_release
     install
     before = version
     old = active
     bump
-    _out, err, status = Open3.capture3(@env.merge("ORBIT_FIXTURE_SDK_VERSION" => "18.3.0"),
+    _out, err, status = Open3.capture3(@env.merge("ORBIT_FIXTURE_PROBE_VERSION" => "18.3.0"),
                                        File.join(@bin, "orbit"), "update", chdir: "/")
-    assert(!status.success? && err.include?("does not match host OMP"),
-           "a drifted reviewer SDK aborts the update (#{err})")
-    assert(version == before && active == old, "the previous release stays active with the pinned SDK")
-    sdk = File.join(old, "runners/omp-reviewer/node_modules/@oh-my-pi/pi-coding-agent/package.json")
-    assert(JSON.parse(File.read(sdk)).fetch("version") == Orbit::OmpEntry::PINNED_SDK_VERSION,
-           "the active release keeps the pinned SDK")
+    assert(!status.success? && err.include?("宿主版本不匹配"), "mismatched host capability receipt refuses switch: #{err}")
+    assert(version == before && active == old, "the previous release remains usable")
   end
 
-  # A failing bundle install aborts the update before the switch.
   def reviewer_install_failure_keeps_old_release
     install
     before = version
     old = active
     bump
-    _out, err, status = Open3.capture3(@env.merge("ORBIT_FIXTURE_BUN_FAIL" => "1"),
+    _out, err, status = Open3.capture3(@env.merge("ORBIT_FIXTURE_HOST_FAIL" => "1"),
                                        File.join(@bin, "orbit"), "update", chdir: "/")
-    assert(!status.success? && err.include?("bun failed"), "a failing bun install aborts the update (#{err})")
-    assert(version == before && active == old, "the previous release stays active after a failed reviewer install")
+    assert(!status.success? && err.include?("OMP 能力不支持"), "unloadable local host refuses switch: #{err}")
+    assert(version == before && active == old, "capability failure retains the previous release")
   end
 
   def reviewer_native_failure_keeps_old_release
     install
     before = version
     old = active
-    %w[ORBIT_FIXTURE_NATIVE_MISSING ORBIT_FIXTURE_NATIVE_LOAD_FAIL].each do |failure|
-      _out, err, status = Open3.capture3(@env.merge(failure => "1"), File.join(@bin, "orbit"), "update", chdir: "/")
-      assert(!status.success?, "missing or unloadable native runtime aborts preparation (#{err})")
-      assert(version == before && active == old, "native runtime failure retains the previous release")
+    File.unlink(File.join(@fixture_bin, "omp"))
+    missing_path = File.join(@temp, "no-host-bin")
+    FileUtils.mkdir_p(missing_path)
+    %w[ruby dirname node npm].each do |name|
+      path = OrbitInstall.executable(name)
+      File.symlink(path, File.join(missing_path, name)) if path
     end
+    _out, err, status = Open3.capture3(@env.merge("PATH" => missing_path),
+                                    "/bin/sh", File.join(@source, "install.sh"),
+                                    "--runtime-dir", @runtime, "--bin-dir", @bin, "--no-modify-path")
+    assert(!status.success? && err.include?("未找到 OMP"), "missing host diagnosed before preparing: #{err}")
+    assert(version == before && active == old, "missing host preserves current and installed CLI")
   end
 
   def uninstall_preserves_user_files
@@ -662,6 +660,8 @@ module InstallTest
   end
 
   def main
+    omp_preflight_before_download
+    puts "INSTALL_TEST_PASS omp_preflight_before_download"
     missing_prerequisites
     puts "INSTALL_TEST_PASS missing_prerequisites"
     %i[first_install successful_update old_wrapper_update update_keeps_referenced_release failed_update

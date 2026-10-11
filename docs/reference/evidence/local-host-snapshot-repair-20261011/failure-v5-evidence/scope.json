@@ -1,0 +1,54 @@
+{
+  "number": 1,
+  "role": "reviewer",
+  "kind": "artifact",
+  "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/failure-v5",
+  "observation_key": "432b9b6b139f3ed18557f22bbb16a695c6a90a31f7fddc9b8d1d66c520b882c9",
+  "trigger_cause": "manual_check",
+  "manual": true,
+  "snapshot": {
+    "schema_version": "orbit-workspace-snapshot-v1",
+    "source_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/failure-v5",
+    "snapshot_path": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/failure-v5/.orbit/tasks/35ca2471-ec1c-4f0f-812d-f65a931e3bf3/checks/1/workspace",
+    "git_head": "fa49c073235d4f1d5758e3c6b37f23bb18f946e3",
+    "digest": "sha256:8e5ae9b4a68c0c6e205c96309e80dbfe920eddedbd969e1f0206d612b355abd5",
+    "project_rules": [
+      "AGENTS.md"
+    ],
+    "manifest": [
+      {
+        "path": ".gitignore",
+        "status": "tracked",
+        "kind": "file",
+        "content_digest": "sha256:f21872cf24c382dd4844007a84237553c2e4d612ae4e0af2958e2709a6fbe0e3",
+        "size": 18,
+        "mode": 420
+      },
+      {
+        "path": "AGENTS.md",
+        "status": "tracked",
+        "kind": "file",
+        "content_digest": "sha256:861d5880a5053b40cb67ae82e2fc1ae1095a64d8e808988269533760205f2bf5",
+        "size": 103,
+        "mode": 420
+      },
+      {
+        "path": "note.txt",
+        "status": "modified",
+        "kind": "file",
+        "content_digest": "sha256:7c1b72bd847f1909211022c90a5be7d4d490c7b41894fb3ed82ccf00220250da",
+        "size": 40,
+        "mode": 420
+      }
+    ]
+  },
+  "input_digest": "3fd84d33c4a86b8a877d733bb4c91a70bfecdd92a743f644c7ab41f2ce6fb714",
+  "host_digest": "9ea4e63f9ea224ba9b340112eafee5ec8069bdf4abd0f4ce65bf28ef83d982b4",
+  "dispute": null,
+  "started_at": "2026-10-11T07:23:43Z",
+  "snapshot_archive": {
+    "status": "verified",
+    "file": "snapshot-archive.json",
+    "snapshot_digest": "sha256:8e5ae9b4a68c0c6e205c96309e80dbfe920eddedbd969e1f0206d612b355abd5"
+  }
+}

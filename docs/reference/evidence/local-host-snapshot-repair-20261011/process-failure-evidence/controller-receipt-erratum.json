@@ -1,0 +1,5 @@
+{
+  "field": "process-failure-evidence/intervention.json.actual_reported_calls_before_fault",
+  "correction": "field name was imprecise in the Controller: it counted observed invocation receipts, including pending, not measured/returned model usage. One actual provider invocation receipt existed, usage_status=pending, no assistant turn completed, provider tokens/cost unknown. Original intervention receipt is preserved unchanged.",
+  "program_state_untouched": true
+}

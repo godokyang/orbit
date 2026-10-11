@@ -1,0 +1,20 @@
+[
+  {
+    "pane": "w23:p1D",
+    "exit_code": 0,
+    "stdout": "{\"id\":\"cli:pane:close\",\"result\":{\"type\":\"ok\"}}\n",
+    "stderr": ""
+  },
+  {
+    "pane": "w23:p1E",
+    "exit_code": 0,
+    "stdout": "{\"id\":\"cli:pane:close\",\"result\":{\"type\":\"ok\"}}\n",
+    "stderr": ""
+  },
+  {
+    "pane": "w23:p1F",
+    "exit_code": 0,
+    "stdout": "{\"id\":\"cli:pane:close\",\"result\":{\"type\":\"ok\"}}\n",
+    "stderr": ""
+  }
+]

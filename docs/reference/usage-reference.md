@@ -17,6 +17,8 @@
 
 安装器只安装 Orbit 程序与 `orbit omp` 受控入口，不再向 OMP 目录写入全局扩展；普通 `omp` 不会获得 Orbit。
 
+本地/远程 bootstrap 与管理器直接入口都先检查 PATH 中的 OMP；缺失时停止，不继续获取源码或依赖。无法执行、版本不足或可信扩展能力不支持分开说明，切换前无模型探针失败保留旧安装。检查者复用本地 OMP 内部 SDK，release 不含私有 SDK 或 Bun 依赖树；help/卸载不受 OMP 前置门影响。实际宿主路径、版本和能力探针事实随 `orbit version --json` 的 reviewer_host 保存。
+
 更新沿用安装记录中的目录；改变目录时先卸载再安装。环境变量和显式目录也要与原安装保持一致。
 
 已有未知命令包装、同名自定义扩展或无归属的安装目录时，安装器拒绝覆盖。先确认原入口由谁管理，通过对应工具卸载，或改用独立目录；不要直接覆盖自定义资料。
@@ -270,3 +272,16 @@ npm version patch --no-git-tag-version
 ## 逐项要求覆盖
 
 独立检查报告逐项 requirement／scope／status／evidence 并声明是否完整枚举。程序把证据绑定实际检查、输入、固定产物和真实目录；只有当前产物 reviewer 完整且至少一项 delivery、全部 delivery verified 才可进入手动终检就绪。lifecycle 只列本次最终检查、后续停止与收尾回复，由程序另外核实；测试执行始终属于 delivery。旧缺 scope 项按 delivery 解释，不追认旧未核验为通过。原生 Root 工具回执保留 start 输入／任务及 end 产物绑定、实际执行目录、退出状态与截断标记；自写日志不冒充程序回执。未核验、缺报告、损坏或写失败保持未知，普通停止仍可收尾。`status` 与会话汇总显示当前覆盖；历史任务缺字段不追认通过。私有近期投影可压缩，原始检查结果和绑定仍在任务 checks，导出继续保留。程序校验结构与版本，枚举完整性仍是独立检查者的判断。当前安装构建及真实验收以[交接](../plan/handoff.md)为准。
+
+## 检查历史恢复与归档
+
+新检查仍运行于独立完整 workspace；项目内 `.orbit/snapshot-objects/` 保存按 SHA-256 去重的历史文件字节。逐检查保留原始 scope 和 `snapshot-archive.json`。归档保存且核验、检查进程组退出确认、回执收集三门成立才回收完整副本，失败/取消/恢复后也遵守该门；异常保留并在 `workspace-reclaim.json` 与事件中说明，不按任务终态或 PID 缺失盲删。
+
+这些存储旁证不改变 `check-result.schema.json` 的结果协议。`snapshot-archive.json` 绑定内容对象与原 scope；`lifecycle.json` 的检查号、PID/PGID、父进程实际 reap、整组 ESRCH、回执收集状态须与 `run.json` 一致，缺失/冲突不能补成通过。`workspace-reclaim.json` 记录 `reclaimed` / `retained`、逐门事实及原因。取消按 `usage.interrupted_checks` 和对应检查目录收口，不伪造正常结果；遗留 `in_flight` 观察不是进程存活证明，恢复沿既有 abandoned 规则处理。
+
+```sh
+orbit restore-check TASK 1 --output /path/to/new-history-directory
+orbit export TASK --output /path/to/evidence.tar.gz
+```
+
+恢复只写新的独立目录，验证字节、mode、删除和内部链接，不改原 scope 或复用共享可写 inode。导出把归档内容带入 `task/checks/<n>/workspace/`，保持单包自包含；旧完整目录格式仍可恢复/导出，不自动迁移。此轮不处理 Zeen 存量、预览或日志清理，不改变旧任务状态或证据。

@@ -1,0 +1,12 @@
+{
+  "at": "2026-10-11T07:28:25.583021+00:00",
+  "action": "SIGKILL owned independent checker process group",
+  "pid": 1532,
+  "pgid": 1532,
+  "precondition": "real compiled trusted factory path + owned output_dir + full workspace + session_created + at least one actual usage receipt + no host completion/lifecycle",
+  "actual_reported_calls_before_fault": 1,
+  "task": "1730d605-738f-44be-ade1-a80468585262",
+  "check": "1",
+  "source_modified": false,
+  "provider_refusal_claim": false
+}

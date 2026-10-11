@@ -3982,4 +3982,60 @@ fixture(interval: 300, host_class: RuntimeAskHost) do |_root, record, host, chec
          "repeated hits on the same wall class never pay for another check")
 end
 
+class LifecycleChecker < RuntimeChecker
+  attr_accessor :lifecycle
+
+  def check_lifecycle(number)
+    facts = @lifecycle
+    facts = facts.call(number) if facts.respond_to?(:call)
+    return nil unless facts.is_a?(Hash)
+
+    facts.merge("number" => number)
+  end
+end
+
+def confirmed_lifecycle(number, pgid: 4242)
+  { "number" => number, "pid" => pgid, "pgid" => pgid, "reaped" => true,
+    "group_probe" => "esrch", "receipts" => "collected" }
+end
+
+def write_check_lifecycle(dir, number, facts)
+  File.write(File.join(dir, "run.json"), JSON.generate("pid" => facts["pid"], "pgid" => facts["pgid"]))
+  File.write(File.join(dir, "lifecycle.json"), JSON.generate(facts))
+end
+
+# Finish/failure/cancel/restart keep the workspace unless archive, group exit
+# and collected receipts all hold. PID absence and in-flight checks do not.
+fixture do |_root, record, host, _checker, _runtime|
+  checker = LifecycleChecker.new
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker)
+  now = Time.now.to_f
+  host_state = { "status" => "idle", "last_turn_id" => "t", "last_turn_status" => "completed", "observations" => [] }
+  runtime.send(:start_check, host_state, now, kind: "artifact", trigger: "manual", manual: true)
+  dir = File.join(record.path, "checks", "1")
+  scope_bytes = File.binread(File.join(dir, "scope.json"))
+  runtime.send(:finish_check, answer("continue"), host_state, now + 1)
+  assert(File.directory?(File.join(dir, "workspace")), "finish without runner lifecycle keeps the workspace")
+  write_check_lifecycle(dir, 1, confirmed_lifecycle(1))
+  runtime.send(:settle_retained_check_workspaces)
+  assert(!File.exist?(File.join(dir, "workspace")) && File.file?(File.join(dir, "snapshot-archive.json")),
+         "restart settles a finished check only after confirmed lifecycle")
+  assert(File.binread(File.join(dir, "scope.json")) == scope_bytes, "settling does not rewrite scope")
+  runtime.send(:start_check, host_state, now + 2, kind: "artifact", trigger: "manual", manual: true)
+  dir2 = File.join(record.path, "checks", "2")
+  write_check_lifecycle(dir2, 2, confirmed_lifecycle(2))
+  Orbit::TaskRuntime.new(record: record, connection: host, checker: RuntimeChecker.new).send(:settle_retained_check_workspaces)
+  assert(File.directory?(File.join(dir2, "workspace")), "an in-flight check survives restart even with a lifecycle file")
+  absent = confirmed_lifecycle(2).merge("reaped" => false, "group_probe" => "pid_absent", "receipts" => "pending")
+  checker.lifecycle = absent
+  write_check_lifecycle(dir2, 2, absent)
+  runtime.send(:handle_check_failure, Orbit::CheckRunner::Error.new("boom"), now + 3)
+  assert(File.directory?(File.join(dir2, "workspace")), "a failed check is kept when the runner only knows the pid is gone")
+  runtime.send(:start_check, host_state, now + 4, kind: "artifact", trigger: "manual", manual: true)
+  checker.lifecycle = nil
+  runtime.send(:stop, "cancel")
+  assert(File.directory?(File.join(record.path, "checks", "3", "workspace")), "cancel without confirmed exit keeps the workspace")
+  assert(%w[paused stop_unconfirmed].include?(record.state["status"]), "cancel still records a stop outcome")
+end
+
 puts "TASK_RUNTIME_TEST_PASS (deterministic, not real-model acceptance)"

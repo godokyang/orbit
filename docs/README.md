@@ -9,6 +9,9 @@
 | 安装和使用 | [README](../README.md)、[进阶使用参考](reference/usage-reference.md)；只说明已接线行为 |
 | 安装体积、依赖去重与缓存收口 | [安装体积修复](reference/orbit-install-footprint-20261011.md)与[可选依赖优化清单](plan/orbit-install-footprint-optimization.md)（macOS arm64／OMP 18.8.0 实测，区分日常安装与临时新构建、依赖／缓存／物理磁盘统计） |
 | 当前任务、模型、检查、完成与停止语义 | [任务运行合同](../contracts/task-runtime.md)、[检查结果 schema](../contracts/check-result.schema.json) |
+| 复用本地 OMP、检查历史去重的实施与验收 | [唯一总 TODO](plan/local-host-snapshot-repair.md)、[本轮验收](reference/local-host-snapshot-repair-acceptance-20261011.md)（冻结验收与资源收口完成，实际 Goal complete；受测0.8.4，后续源码0.8.5升版不重标实测） |
+| 本地 OMP 接口研究依据 | [宿主接口研究](reference/omp-local-reviewer-host-research-20261011.md)（旧研究候选与源码依据；最新实现与实测状态沿总 TODO） |
+| Orbit 检查快照写入问题与研究依据 | [快照存储研究](reference/orbit-snapshot-storage-research-20261011.md)（Zeen 30.80 GB 为定位依据；源码确认完整检查副本不去重、不回收；内容去重／可恢复历史，Zeen 存量清理暂缓） |
 | OMP 单宿主协作决定 | [ADR-008](adr/008-omp-native-collaboration-base.md) |
 | 用户自选模型池决定 | [ADR-009](adr/009-user-selected-model-pool.md) |
 | 开发纪律、范围与验证方式 | [AGENTS.md](../AGENTS.md)、[开发流程](agents/development-workflow.md)；这些文件不产生产品运行事实 |

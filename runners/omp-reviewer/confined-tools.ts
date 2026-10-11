@@ -5,7 +5,7 @@
 import { createHash } from "node:crypto";
 import { lstatSync, readdirSync, readFileSync, realpathSync, statSync } from "node:fs";
 import path from "node:path";
-import { z } from "@oh-my-pi/pi-coding-agent";
+import { z } from "zod";
 
 const MAX_READ_LINES = 2000;
 const MAX_FILE_BYTES = 1_000_000;

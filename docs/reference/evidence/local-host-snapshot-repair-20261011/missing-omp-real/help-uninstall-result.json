@@ -1,0 +1,26 @@
+{
+  "omp_in_path": false,
+  "first_attempt_fixture_error": "PATH omitted sh needed by the wrapper shebang, exit127; fixed fixture by adding existing /bin/sh, no product change",
+  "operations": [
+    {
+      "argv": [
+        "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/installation/bin/orbit",
+        "--help"
+      ],
+      "exit_code": 0,
+      "stdout": "Orbit \u2014 \u6267\u884c\u671f\u95f4\u7684\u72ec\u7acb\u68c0\u67e5\u4e0e\u7ea0\u504f\n\n\u65e5\u5e38\u4f7f\u7528\uff1a\n  orbit omp [\u539f\u751f\u53c2\u6570]       \u542f\u52a8\u539f\u7248 OMP \u5e76\u52a0\u8f7d Orbit \u6269\u5c55\uff1b\u666e\u901a omp \u4e0d\u63a5\u5165\n  orbit status [TASK]       \u67e5\u770b\u5f53\u524d\u9879\u76ee\u4efb\u52a1\uff0cTASK \u53ef\u7528 ID \u524d\u7f00\u6216\u76ee\u5f55\n  orbit session-summary --thread ID [--project DIR]  \u672c\u5730\u53ea\u8bfb\u6c47\u603b\u540c\u4e00\u539f\u751f OMP \u4f1a\u8bdd\u7684\u4efb\u52a1\u4e8b\u5b9e\n  orbit stop [TASK]         \u505c\u6b62\u5f53\u524d\u9879\u76ee\u4efb\u52a1\uff1b\u591a\u4efb\u52a1\u987b\u6307\u5b9a TASK\n  orbit export TASK --output FILE  \u6253\u5305\u4efb\u52a1\u8bc1\u636e\u4e3a\u672c\u5730\u81ea\u8db3\u5f52\u6863\uff08\u4e0d\u4e0a\u4f20\uff09\n  orbit restore-check TASK CHECK --output DIR  \u628a\u68c0\u67e5\u5386\u53f2\u6062\u590d\u5230\u65b0\u7684\u72ec\u7acb\u76ee\u5f55\n  orbit doctor [TASK]       \u68c0\u67e5\u73af\u5883\u4e0e\u5df2\u6709\u4f1a\u8bdd\u8fde\u63a5\n  orbit jev setup           \u8f93\u5165 TypeSafe key\uff0c\u914d\u7f6e\u65b0\u7ec8\u7aef\u73af\u5883\n  orbit openrouter setup  \u8f93\u5165 OpenRouter API key\uff0c\u914d\u7f6e\u65b0\u7ec8\u7aef\u73af\u5883\uff08\u53ef\u9009\uff09\n  orbit update [--ref REF]  \u66f4\u65b0\u5f53\u524d\u5b89\u88c5\uff0c\u6cbf\u7528\u6765\u6e90\u4e0e\u5b89\u88c5\u76ee\u5f55\n  orbit uninstall           \u5378\u8f7d\u5f53\u524d\u8fd0\u884c\u7a0b\u5e8f\n  orbit version [--json]    \u67e5\u770b\u7248\u672c\u4e0e\u5b89\u88c5\u6765\u6e90\n\nOMP \u7528 orbit omp \u542f\u52a8\u53d7\u63a7\u4f1a\u8bdd\uff0c\u666e\u901a omp \u4e0d\u52a0\u8f7d Orbit \u6269\u5c55\u3002\n\u5177\u4f53\u53c2\u6570\uff1aorbit <\u547d\u4ee4> --help\uff08omp \u7528 orbit help omp\uff09\uff1b\u72b6\u6001\u7684\u673a\u5668\u8f93\u51fa\uff1aorbit status --json\u3002\nAgent \u6267\u884c\u63a5\u53e3\uff1astart / check / amend / dispute / rebind-workspace / takeover-scope / work-unit / route-resources / model-evidence / model-candidates / model-status / review-model\uff08\u5404\u81ea --help\uff09\u3002\n",
+      "stderr": ""
+    },
+    {
+      "argv": [
+        "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/installation/bin/orbit",
+        "uninstall"
+      ],
+      "exit_code": 0,
+      "stdout": "Uninstalled Orbit; any unowned files were retained. Project .orbit data was not touched.\n",
+      "stderr": ""
+    }
+  ],
+  "wrapper_exists_after": false,
+  "runtime_exists_after": false
+}

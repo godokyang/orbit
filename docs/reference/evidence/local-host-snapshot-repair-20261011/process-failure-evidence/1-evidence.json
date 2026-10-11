@@ -1,0 +1,45 @@
+{
+  "attempt_id": "orbit-check-96a51ab7-c7e7-4aa1-91fe-f702c32a757d",
+  "ok": false,
+  "review_ran": true,
+  "probe_ran": false,
+  "result": null,
+  "model": "opencode-go/deepseek-v4.1-flash",
+  "usage": [
+    {
+      "call_id": "orbit-call-c5f51f3e-2a79-498a-8e87-4568944e167f",
+      "origin": "local_provider_invocation",
+      "usage_status": "pending",
+      "credential_id": 4,
+      "provider": "opencode-go",
+      "model": "deepseek-v4.1-flash",
+      "requested_model": "opencode-go/deepseek-v4.1-flash"
+    }
+  ],
+  "usage_gaps": [
+    "no assistant turn completed for this check attempt, so no provider usage was reported",
+    "orbit-call-c5f51f3e-2a79-498a-8e87-4568944e167f: the provider call started but no result was observed; usage is pending, not measured"
+  ],
+  "snapshot_image_reads": [],
+  "snapshot": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/process-failure/.orbit/tasks/1730d605-738f-44be-ade1-a80468585262/checks/1/workspace",
+  "profile": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/process-failure/.orbit/tasks/1730d605-738f-44be-ade1-a80468585262/checks/1/profile",
+  "out": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-host-storage-20261011-ogwxn983/fixtures/process-failure/.orbit/tasks/1730d605-738f-44be-ade1-a80468585262/checks/1/evidence.json",
+  "sdk_version": "18.8.0",
+  "host_version": "18.8.0",
+  "host_version_source": "launcher_omp_version",
+  "host_runtime_executable": "/Users/yangke/.local/bin/omp",
+  "fingerprint_before": "sha256:57bf12e4c1cf6baad03f60a018f3e6d45a32c4e6144ad97bfeadfa546841e499",
+  "source_agent_dir": "/Users/yangke/.omp/agent",
+  "session_created": true,
+  "active_tools": [
+    "glob",
+    "grep",
+    "read"
+  ],
+  "forbidden_tools_present": [],
+  "read_tool_is_confined": true,
+  "private_registry": [
+    "OrbitReviewer"
+  ],
+  "global_registry": []
+}

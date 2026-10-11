@@ -1,0 +1,9 @@
+{
+  "source_version": "0.8.4",
+  "lock_version": "0.8.4",
+  "head": "25f0104b70d68c7c47b43473f1b75d928d2222db",
+  "check_result_schema_sha256": "f6ebeeab425217be964ee730f8605d23c96cf5acb5c229f4a21423246c5889a2",
+  "check_result_schema_unchanged": true,
+  "adr009_unchanged": true,
+  "git_diff_check_exit": 0
+}

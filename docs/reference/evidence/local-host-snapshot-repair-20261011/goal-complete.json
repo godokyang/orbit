@@ -1,0 +1,13 @@
+{
+  "goal": {
+    "threadId": "01a12989-0f2f-7813-a875-51be195be2cd",
+    "objective": "完成已授权的两项修复：复用本地 OMP 宿主 SDK 并移除独立检查器私有依赖；实现检查快照按内容去重归档、安全回收、恢复及自包含导出。完成冻结验收、独立核查、真实产品验收、合同文档同步和测试资源收口；不升版、不提交、不更新日常安装。",
+    "status": "complete",
+    "tokensUsed": 1226664,
+    "timeUsedSeconds": 6397,
+    "createdAt": 1791698221,
+    "updatedAt": 1791704619
+  },
+  "remainingTokens": null,
+  "completionBudgetReport": "Goal achieved. Report final usage from this tool result's structured goal fields. If `goal.tokenBudget` is present, include token usage from `goal.tokensUsed` and `goal.tokenBudget`. If `goal.timeUsedSeconds` is greater than 0, summarize elapsed time in a concise, human-friendly form appropriate to the response language."
+}
