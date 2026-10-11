@@ -68,7 +68,7 @@ module Orbit
 
     COMMAND_HELP = {
       "omp" => "orbit omp [OMP 原生参数]\n启动原版 OMP 并用 -e 显式加载 Orbit 扩展；模型、profile、工具、权限、恢复与消息参数原样交给 OMP，其他扩展照常加载，退出码照常返回。普通 omp 不加载 Orbit。",
-      "status" => "orbit status [TASK] [--json|--details]\n默认简述结果和下一步；--details 显示诊断。省略 TASK 时查当前项目；多任务列出 ID。没有待处理任务时显示最近结束记录。",
+      "status" => "orbit status [TASK] [--json|--details]\n默认简述结果和下一步；--details 显示诊断。省略 TASK 时查当前项目；多任务列出 ID。没有待处理任务时显示最近结束记录。\norbit status --external-ref REF [--project DIR] [--json]\n按外部引用精确查找任务（含已结束，新到旧，一个引用可命中多个任务），恒返回 {\"tasks\":[...]}；无匹配退出 0 返回空数组；与位置参数 TASK 互斥。",
       "session-summary" => "orbit session-summary --thread ID [--project DIR]\n只读汇总该项目同一原生 OMP 会话下的任务与检查/纠偏/Jev 次数；JSON 输出。缺失事件日志或用量保持 unknown/null，不读或导出原生会话正文，不调用模型、不修改任务。",
       "stop" => "orbit stop [TASK] [--reason TEXT] [--json]\n只定位唯一待处理任务；多任务先用 orbit status 查看，再传 ID。请求入队不代表停止已确认。",
       "doctor" => "orbit doctor [TASK] [--json]\n只读检查环境、安装和已有任务记录；通过所选已有任务或当前会话验证连接，不调用模型，不验证登录或额度。",
@@ -274,10 +274,21 @@ module Orbit
     def status(argv)
       json = false
       details = false
+      external_ref = nil
+      project_dir = nil
       OptionParser.new do |parser|
         parser.on("--json") { json = true }
         parser.on("--details") { details = true }
+        parser.on("--external-ref REF") { |value| external_ref = value }
+        parser.on("--project DIR") { |value| project_dir = value }
       end.parse!(argv)
+      if external_ref || project_dir
+        raise ArgumentError, "usage: orbit status --external-ref REF [--project DIR] [--json]" unless external_ref && argv.empty?
+        ref = TaskRecord.parse_external_refs([external_ref]).first
+        matches = TaskView.by_external_ref(ref, project_root: project_dir)
+        puts JSON.pretty_generate("tasks" => matches.map { |record| TaskView.current_state(record) })
+        return 0
+      end
       raise ArgumentError, "usage: orbit status [TASK] [--json]" if argv.length > 1
       records = TaskView.select(argv.first, settled: true)
       if json

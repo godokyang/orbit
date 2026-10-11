@@ -1,6 +1,6 @@
 # Orbit 集成合同
 
-合同版本：1.1
+合同版本：1.2
 
 面向把 Orbit 当作外部执行与检查服务的集成方（例如 Loom）。本合同只冻结下面列出的命令、返回字段与结果 schema；这些之外的一切（包括 `status --json` 里的其他字段）都是 Orbit 内部实现，随时可变。产品语义以 [任务运行合同](task-runtime.md) 和 [检查结果 schema](check-result.schema.json) 为准，本文件与它们冲突时以它们为准并修正本文件。机器可读形式见 [integration.json](integration.json)，`orbit capabilities --json` 与契约测试都读取它，决定理由见 [ADR-010](../docs/adr/010-integration-contract.md)。
 
@@ -16,7 +16,7 @@
 `orbit capabilities --json` 只读、不连接会话、不调用模型、不读任务，返回：
 
 ```json
-{ "integration_contract": { "name": "orbit-integration", "version": "1.1", "major": 1 },
+{ "integration_contract": { "name": "orbit-integration", "version": "1.2", "major": 1 },
   "orbit": { "version": "<软件版本，仅供显示>" },
   "capabilities": { "<能力名>": { "since": "<引入该能力的合同版本>", "...": "该能力的限制" } } }
 ```
@@ -32,6 +32,10 @@
 | `check_coverage_ref` | 检查结果的每个覆盖项可带 `ref`；`max_length` 为 schema 上限；`blank_is_omitted=true`（1.1 起）表示空串或纯空白按未提供处理 |
 | `resume_from` | `start --resume-from`；`from_status` 列出可接续的旧任务终态（当前仅 `paused`）；`requires=native_user_message` |
 
+| `external_session_mode` | 1.2 起：`ORBIT_EXTERNAL_INTEGRATION=1` 关闭自动入口，Root 显式 start 保留 |
+| `control_socket_env` | 1.2 起：指定私有父目录中的绝对路径，session_start 提前监听，关闭只释放自有 socket |
+| `status_by_external_ref` | 1.2 起：精确引用查询，包括终态；成功总是 tasks 数组，无匹配退出 0 |
+
 ## 3. 命令与返回
 
 调用方只通过这些命令和 stdout JSON 与 Orbit 交互，不读写 `.orbit` 内部文件，不猜 socket。命令清单与返回字段以 integration.json 的 `commands` 为准。
@@ -39,6 +43,12 @@
 - `orbit start ...`：返回 `task_directory`、`status`。`status=starting` 只表示任务记录已建立；调用方需要真实宿主会话（`--thread`、`--socket`），Orbit 不创建 Root 会话。
 - `orbit check TASK_DIRECTORY`、`orbit stop TASK --json`：返回 `task_directory`、`command_id`、`status`。`queued` 只是请求入队，不是检查结果，也不是已停止。`check` 也可返回 `rejected` 及原因。
 - `orbit status TASK --json`、`orbit export TASK --output FILE`、`orbit doctor --json`、`orbit version --json`、`orbit capabilities --json`：见 integration.json。
+
+### 按外部引用查询（1.2）
+
+`orbit status --external-ref REF [--project DIR] --json` 与位置参数 `TASK` 互斥。REF 校验沿用 `start --external-ref`，逐字精确全等匹配，不按前缀/大小写折叠；包括终态与重复引用的全部任务，按创建时间（同时间按 id）新到旧返回。成功**恒为** `{ "tasks": [...] }`，元素与单任务 status 同形；无匹配退出码 0 且 `{ "tasks": [] }`。无 `external_refs` 的旧记录不匹配；start 不按引用去重。
+
+省略 `--project` 时从当前目录定位项目；提供时使用该项目根，可在项目外查询。扫描/读取/解析或参数校验失败仍是非零退出码与原有错误语义，不把失败伪装为空数组。一条本项目坏记录也可使查询失败，调用方不能把它判成“任务不存在”。查询只读、不连接会话、不改变任务。
 
 ## 4. `status --json` 冻结字段
 
@@ -78,7 +88,21 @@
 
 `tests/integration_contract_test.rb` 用一个只使用上述公开命令和字段的假调用方，对真实 CLI、任务记录、命令队列、运行时 tick、覆盖存储、停止与导出路径依次跑：能力清单、启动（带外部引用）、检查、覆盖回传（带 `ref`）、状态、停止回执、接回、导出。OMP Root 会话与检查模型是边界上的两个替身，所以它证明合同面与字段形状，**不证明**模型行为或真实宿主会话。它由 `npm test` 运行，发布前必须通过；真实会话下的验收另按任务运行合同与验收记录进行。合同字段清单读取 integration.json，不在测试里另写一份。
 
-## 9. 变更记录
+## 9. 外部集成会话与调用方控制通道（1.2）
+
+启动 `orbit omp` 时可选择以下进程环境变量；未设时保持普通交互入口与懒建通道行为。它们不写全局设置、不登记会话，不改变任务建立后的检查、监督或停止。
+
+- `ORBIT_EXTERNAL_INTEGRATION=1`：关闭该会话的自动入口判定；不因用户首条“请用 Orbit 受控执行…”自动连接/调用 `entry`、建立任务、写入口判定或注入入口提示。Root 的显式 `start` 工具仍可用，集成方节点必须核对任务的 `external_refs`，不能把开启此模式解释为只有集成方能建任务。
+- `ORBIT_CONTROL_SOCKET=/absolute/private-dir/control.sock`：调用方指定路径，扩展在主会话 `session_start` 就监听，首条消息之前即可用于 `start --socket`。此变量可单独使用；仅启用外部模式但未指定路径时也提前建立默认私有通道，但本能力不提供默认路径发现接口。
+- 指定路径须是已经规范的绝对路径（没有 `.`、`..` 或多余分隔符），OMP 环境变量与 `start --socket` 使用**逐字相同**字符串；不做 `realpath`，不要将 `/tmp/...` 改写为 `/private/tmp/...`。Unix 路径长度包括结尾 NUL：macOS 路径本身最多 103 字节，Linux 最多 107 字节。
+- 调用方先建立同一 uid 所有、无组/其他用户权限的私有父目录（建议 0700）；Orbit 不更改父目录权限、不删除该目录或其其他文件。非法路径/权限、非 socket 文件、其他 uid 的 socket、活监听或无法确认已死的通道均拒绝，不覆盖。只有私有目录中的同 uid 死 socket，且探测后身份未换，才可清理重用；退出仅释放本进程绑定的自有 socket。
+- 为避免 Node 关闭监听时删除调用方替换文件，Orbit 在自有私有临时目录监听，以硬链接暴露指定路径；调用方目录须与私有临时目录同文件系统且支持 Unix socket 硬链接，失败时拒绝启动通道，不覆盖调用方文件。
+- 会话切换/分支/树切换关闭原通道；随后的 `session_start` 在同一指定字符串路径重新监听。进程崩溃的遗留由调用方管理，不扫描其他目录。
+- `start` 仍要 `--thread`；会话 id 来自 OMP 自身的 RPC `get_state.sessionId`。首条消息前可得性只按 OMP 18.9.0 的本次实测成立（见[验收记录](../docs/reference/loom-integration-acceptance-20261011.md)），不承诺所有版本，也不新增 `status --session` 或会话登记。
+
+## 10. 变更记录
 
 - 1.0（本合同首版）：命令与冻结字段、能力清单、覆盖项 `ref`、任务 `external_refs`、`resume_from` 范围声明。
 - 1.1：覆盖项 `ref` 的空串或纯空白按未提供处理（原先整次检查被拒绝）；`check_coverage_ref` 增加 `blank_is_omitted`。只放宽检查者输出，不改变任何已有返回字段；依据是对真实检查者的试验中 7 次有 1 次写了 `"ref": ""`。
+
+- 1.2：外部会话模式、调用方指定控制通道与按外部引用查询；均为默认关闭的可选启动模式或只读新增命令面。

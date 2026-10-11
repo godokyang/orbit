@@ -79,9 +79,10 @@ module Orbit
       end
     end
 
-    def records
-      root = project
+    def records(project_root = nil)
+      root = project_root ? File.realpath(project_root) : project
       return [] unless root
+      raise ArgumentError, "项目路径不是目录：#{root}" unless File.directory?(root)
       Dir.glob(File.join(root, ".orbit/tasks/*/state.json")).map do |path|
         record = TaskRecord.new(File.dirname(path))
         state = record.state
@@ -90,6 +91,14 @@ module Orbit
         end
         record
       end.sort_by { |record| [record.state.fetch("created_at"), record.state.fetch("id")] }.reverse
+    end
+
+    # Exact external-reference lookup, newest first, terminal states included.
+    # Records without references simply never match; the caller validates REF
+    # with TaskRecord.parse_external_refs before reaching here, and only
+    # matched records pay for the heavier current_state projection.
+    def by_external_ref(ref, project_root: nil)
+      records(project_root).select { |record| Array(record.state["external_refs"]).include?(ref) }
     end
 
     def select(argument = nil, settled: false)

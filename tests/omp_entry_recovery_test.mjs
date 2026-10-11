@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
+import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
 import { z } from 'zod';
-import { execSync, spawnSync } from 'node:child_process';
+import { execSync, spawn, spawnSync } from 'node:child_process';
 import { installOmpExtension, appendInstructionToPayload } from '../plugins/omp-host.mjs';
 
 // The installer pins the verified Ruby via ORBIT_RUBY; extension children
@@ -31,6 +33,11 @@ const cli = path.join(repo, 'scripts', 'orbit');
 
 let events = {}; let definition;
 const aborts = [], asides = [], notifications = [];
+let extProject = null;
+// G9 block resources, recovered in finally even when an assertion fails
+// mid-block: caller-owned directories, live servers/child processes and any
+// harness whose extension got as far as listening.
+const g9Paths = [], g9Closers = [], g9Harnesses = [];
 
 function session(id, branch = []) {
   const listeners = new Set();
@@ -256,11 +263,149 @@ try {
     assert.equal(appendInstructionToPayload({ messages: [] }, 'X'), null);
   }
 
+  // 7. External integration mode (G9a) + caller-specified control socket
+  //    (G9b): the automatic entry does not classify, record or prompt; the
+  //    channel listens at session_start before the first user message; a
+  //    session switch re-listens; close removes only our own socket — a file
+  //    the caller placed at the path survives — and the caller directory is
+  //    never touched. Unsafe specified paths (live socket, non-private
+  //    parent) are refused; a proven-dead socket is replaced.
+  extProject = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'orbit-ext-rec-')));
+  // Unix socket paths are short (macOS < 104 bytes): the caller directories
+  // must live under the same short /tmp strategy the production listen uses,
+  // or os.tmpdir()-long prefixes push control.sock past the limit.
+  const tmpBase = process.platform === 'darwin' ? '/tmp' : os.tmpdir();
+  const trackPath = dir => (g9Paths.push(dir), dir);
+  const probeConnect = target => new Promise((resolve, reject) => {
+    const probe = net.connect(target);
+    const timer = setTimeout(() => { probe.destroy(); reject(new Error(`no listener at ${target}`)); }, 3000);
+    probe.on('connect', () => { clearTimeout(timer); probe.destroy(); resolve(); });
+    probe.on('error', error => { clearTimeout(timer); reject(error); });
+  });
+  const freshHarness = branch => {
+    const local = { events: {}, asides: [], notifications: [], aborts: [] };
+    const pi = { zod: z, registerTool: () => {}, registerCommand: () => {},
+      on: (name, handler) => { (local.events[name] ||= []).push(handler); },
+      sendMessage: (message, options) => { local.asides.push({ message, options }) } };
+    local.pi = pi;
+    local.emit = async (name, event, context) => {
+      let result;
+      for (const handler of local.events[name] || []) {
+        const value = await handler(event, context);
+        if (value !== undefined) { result = value; if (event && typeof event === 'object' && 'payload' in event) event.payload = value; }
+      }
+      return result;
+    };
+    const root = session('root', branch);
+    const ref = { id: mainAgentId, kind: 'main', parentId: null, status: 'running', session: root, sessionFile: '/tmp/root-ext.jsonl', history: {}, activity: null };
+    const registry = { list: () => [ref], get: id => (id === mainAgentId ? ref : undefined) };
+    local.sdk = { MAIN_AGENT_ID: mainAgentId, AgentRegistry: { global: () => registry }, isUserInterruptAbort: () => false };
+    local.ctx = { cwd: extProject, sessionManager: root.sessionManager, models: { list: () => [model] }, hasUI: true,
+      ui: { notify: (text, level) => local.notifications.push({ text, level }) }, abort: () => { local.aborts.push('root'); } };
+    return local;
+  };
+
+  const callerDir = trackPath(await fs.mkdtemp(path.join(tmpBase, 'orbit-caller-')));
+  await fs.chmod(callerDir, 0o700);
+  await fs.writeFile(path.join(callerDir, 'sentinel.txt'), 'caller-owned');
+  const controlSocket = path.join(callerDir, 'control.sock');
+  process.env.ORBIT_EXTERNAL_INTEGRATION = '1';
+  process.env.ORBIT_CONTROL_SOCKET = controlSocket;
+  const ext = freshHarness([{ type: 'message', id: 'ext1', message: { role: 'user', content: '请用 Orbit 受控执行：外部集成首条消息。' } }]);
+  installOmpExtension(ext.pi, ext.sdk);
+  g9Harnesses.push(ext);
+  await ext.emit('session_start', {}, ext.ctx);
+  assert.ok(fsSync.existsSync(controlSocket), 'G9b: the channel listens at session_start, before the first user message');
+  await probeConnect(controlSocket);
+
+  const extPayload = requestPayload();
+  const passed = await ext.emit('before_provider_request', { payload: extPayload }, ext.ctx);
+  assert.equal(passed, extPayload, 'G9a: the first controlled message passes through untouched');
+  assert.equal(ext.asides.length, 0, 'G9a: no entry prompt aside');
+  assert.equal(ext.aborts.length, 0, 'G9a: no fail-closed abort');
+  assert.deepEqual(await fs.readdir(path.join(extProject, '.orbit', 'tasks')).catch(() => []), [], 'G9a: no automatic task is created');
+  const extLedger = JSON.parse(await fs.readFile(path.join(extProject, '.orbit', 'prestart-decisions.json'), 'utf8').catch(() => '{}'));
+  assert.ok(!('ext1' in extLedger), 'G9a: no durable entry classification record');
+
+  const switched = await ext.emit('session_before_switch', {}, ext.ctx);
+  assert.notEqual(switched?.cancel, true, `switch close must succeed: ${ext.notifications.at(-1)?.text || ''}`);
+  assert.ok(!fsSync.existsSync(controlSocket), 'close removes our own socket file');
+  assert.equal(await fs.readFile(path.join(callerDir, 'sentinel.txt'), 'utf8'), 'caller-owned', 'the caller directory survives close');
+  await ext.emit('session_start', {}, ext.ctx);
+  assert.ok(fsSync.existsSync(controlSocket), 'session switch re-runs session_start, which re-listens');
+
+  await fs.unlink(controlSocket);
+  await fs.writeFile(controlSocket, 'caller replaced the alias');
+  await ext.emit('session_shutdown', {}, ext.ctx);
+  assert.equal(await fs.readFile(controlSocket, 'utf8'), 'caller replaced the alias', 'a caller file that replaced our socket survives shutdown');
+  assert.equal(await fs.readFile(path.join(callerDir, 'sentinel.txt'), 'utf8'), 'caller-owned', 'the caller directory survives shutdown');
+  await fs.rm(callerDir, { recursive: true, force: true });
+
+  const liveDir = trackPath(await fs.mkdtemp(path.join(tmpBase, 'orbit-live-')));
+  await fs.chmod(liveDir, 0o700);
+  const liveSocket = path.join(liveDir, 'control.sock');
+  const liveServer = net.createServer(() => {});
+  g9Closers.push(() => liveServer.close());
+  await new Promise((resolve, reject) => { liveServer.once('error', reject); liveServer.listen(liveSocket, resolve); });
+  process.env.ORBIT_CONTROL_SOCKET = liveSocket;
+  const live = freshHarness([]);
+  installOmpExtension(live.pi, live.sdk);
+  g9Harnesses.push(live);
+  await live.emit('session_start', {}, live.ctx);
+  assert.match(live.notifications.at(-1)?.text || '', /occupied/, 'a live socket at the caller path is refused, not replaced');
+  await probeConnect(liveSocket);
+  liveServer.close();
+  await fs.rm(liveDir, { recursive: true, force: true });
+
+  const openDir = trackPath(await fs.mkdtemp(path.join(tmpBase, 'orbit-open-')));
+  await fs.chmod(openDir, 0o755);
+  process.env.ORBIT_CONTROL_SOCKET = path.join(openDir, 'control.sock');
+  const open = freshHarness([]);
+  installOmpExtension(open.pi, open.sdk);
+  g9Harnesses.push(open);
+  await open.emit('session_start', {}, open.ctx);
+  assert.match(open.notifications.at(-1)?.text || '', /private/, 'a non-private parent directory is refused');
+  assert.ok(!fsSync.existsSync(path.join(openDir, 'control.sock')), 'a refused path leaves no socket behind');
+  await fs.rm(openDir, { recursive: true, force: true });
+
+  const deadDir = trackPath(await fs.mkdtemp(path.join(tmpBase, 'orbit-dead-')));
+  await fs.chmod(deadDir, 0o700);
+  const deadSocket = path.join(deadDir, 'control.sock');
+  const owner = spawn(process.execPath, ['-e', `require('node:net').createServer().listen(${JSON.stringify(deadSocket)})`]);
+  g9Closers.push(() => { owner.kill('SIGKILL'); });
+  for (let n = 0; n < 100 && !fsSync.existsSync(deadSocket); n++) await new Promise(resolve => setTimeout(resolve, 20));
+  owner.kill('SIGKILL');
+  await new Promise(resolve => owner.once('exit', resolve));
+  assert.ok(fsSync.existsSync(deadSocket), 'a killed owner leaves a dead socket file behind');
+  process.env.ORBIT_CONTROL_SOCKET = deadSocket;
+  const dead = freshHarness([]);
+  installOmpExtension(dead.pi, dead.sdk);
+  g9Harnesses.push(dead);
+  await dead.emit('session_start', {}, dead.ctx);
+  await probeConnect(deadSocket);
+  assert.equal(dead.notifications.length, 0, 'a proven-dead socket is replaced without an error');
+  await dead.emit('session_shutdown', {}, dead.ctx);
+  assert.ok(!fsSync.existsSync(deadSocket), 'shutdown removes the replaced socket');
+  await fs.rm(deadDir, { recursive: true, force: true });
+
   console.log('omp_entry_recovery_test: all assertions passed');
 } catch (error) {
   console.error(error);
   process.exitCode = 1;
 } finally {
+  delete process.env.ORBIT_EXTERNAL_INTEGRATION;
+  delete process.env.ORBIT_CONTROL_SOCKET;
+  // G9 block recovery, best effort and idempotent: stop live servers and child
+  // processes, shut down any harness extension that reached a listening host
+  // (session_shutdown closes the channel and recycles its own directory), then
+  // remove the caller-owned directories. Individual mid-block rms above make
+  // most entries no-ops; failed assertions must not leak any of them.
+  for (const closer of g9Closers.splice(0)) { try { await closer(); } catch { /* best effort */ } }
+  for (const harness of g9Harnesses.splice(0).reverse()) {
+    try { await harness.emit('session_shutdown', {}, harness.ctx); } catch { /* best effort */ }
+  }
+  for (const dir of g9Paths.splice(0)) await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+  await fs.rm(extProject, { recursive: true, force: true }).catch(() => {});
   await fs.rm(project, { recursive: true, force: true });
   await fs.rm(process.env.XDG_CONFIG_HOME, { recursive: true, force: true });
   await fs.rm(process.env.XDG_CACHE_HOME, { recursive: true, force: true });

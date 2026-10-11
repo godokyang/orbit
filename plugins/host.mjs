@@ -12,6 +12,63 @@ holdReleaseLease();
 const cli = fileURLToPath(new URL('../scripts/orbit', import.meta.url));
 const terminal = new Set(['complete', 'paused', 'needs_user', 'failed', 'stop_unconfirmed']);
 const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+// G9b: probe result for a pre-existing socket file at a caller-specified
+// control path. Only 'refused' (ECONNREFUSED) can mean a dead owner; anything
+// connected, timed out or failing otherwise stays occupied/unknown and is
+// never removed.
+function probeSocketState(target) {
+  return new Promise(resolve => {
+    const attempt = net.connect(target);
+    let settled = false;
+    const timer = setTimeout(() => finish('timeout'), 2000);
+    const finish = state => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      attempt.destroy();
+      resolve(state);
+    };
+    attempt.on('connect', () => finish('connected'));
+    attempt.on('error', error => finish(error?.code === 'ECONNREFUSED' ? 'refused' : `error:${error?.code || 'unknown'}`));
+  });
+}
+
+// G9b caller-specified control socket (ORBIT_CONTROL_SOCKET). Security
+// invariants: the string is used VERBATIM (the Ruby side stores
+// File.expand_path(socket) and ownership compares exact strings, so any
+// realpath/normalization here would break ownership, e.g. /tmp vs
+// /private/tmp on macOS); path.resolve is a validation check only. The caller
+// owns the parent directory: it must exist with the same uid and private
+// permissions, and we never chmod it or delete it. An existing socket file is
+// replaced only when it is provably dead (ECONNREFUSED) and its inode has not
+// changed since we lstat'ed it.
+async function validateSpecifiedSocket(target) {
+  if (path.resolve(target) !== target)
+    throw new Error('ORBIT_CONTROL_SOCKET must be a normalized absolute path; the string is used verbatim (no realpath), so it must be spelled exactly as passed to orbit start --socket');
+  const limit = (process.platform === 'darwin' ? 104 : 108) - 1; // trailing NUL
+  if (Buffer.byteLength(target) > limit)
+    throw new Error(`ORBIT_CONTROL_SOCKET path exceeds the ${limit}-byte unix socket limit on ${process.platform}`);
+  const parent = path.dirname(target);
+  let parentStat;
+  try { parentStat = await fs.lstat(parent); }
+  catch (error) { throw new Error(`ORBIT_CONTROL_SOCKET parent directory is not accessible: ${error.message}`); }
+  if (!parentStat.isDirectory()) throw new Error('ORBIT_CONTROL_SOCKET parent exists but is not a directory');
+  if (parentStat.uid !== process.getuid())
+    throw new Error('ORBIT_CONTROL_SOCKET parent directory must be owned by the current user');
+  if (parentStat.mode & 0o077)
+    throw new Error('ORBIT_CONTROL_SOCKET parent directory must be private (no group/other access); create it 0700');
+  const existing = await fs.lstat(target).catch(error => (error?.code === 'ENOENT' ? null : Promise.reject(error)));
+  if (!existing) return;
+  if (!existing.isSocket() || existing.uid !== process.getuid())
+    throw new Error('ORBIT_CONTROL_SOCKET exists and is not a socket owned by the current user');
+  const probe = await probeSocketState(target);
+  if (probe !== 'refused')
+    throw new Error(`ORBIT_CONTROL_SOCKET is occupied: ${probe === 'connected' ? 'a live process accepts connections' : `the probe did not prove it dead (${probe})`}`);
+  const now = await fs.lstat(target);
+  if (now.dev !== existing.dev || now.ino !== existing.ino)
+    throw new Error('ORBIT_CONTROL_SOCKET changed while being probed; refusing to remove it');
+  await fs.unlink(target);
+}
 const guidance = 'Continue the authorized implementation; do simple local edits yourself. Once the artifact is verified, call Orbit action=check with task: the task_directory returned by start to request the manual final check. Give the actual delivery result in your visible reply and END YOUR TURN. Orbit waits for that completed reply before starting the manual final check; automatic checks never issue a finalization_notice. Wait for that notice or corrections without sleeping or polling. On a valid notice call stop with intent=complete, then finish your reply; do not stop merely to deliver unless the user explicitly asked to interrupt. Member results return automatically. Later status/check/amend/dispute/stop/work-unit calls must pass the task_directory as task; never write .orbit/inbox manually.';
 
 async function run(args, cwd, input = '') {
@@ -57,14 +114,21 @@ export const toolArgs = z => ({
 // supplies only its real session operations and native invocation identity.
 export function createOrbitHost({ provider, project, dispatch, bind, reset }) {
   const tasks = new Map();
-  let host, socket, setup, closing = false;
+  let host, socket, setup, ownFolder = null, socketIdentity = null, closing = false;
   async function listen() {
     if (setup) return setup;
     setup = (async () => {
+      // A caller-specified channel (ORBIT_CONTROL_SOCKET) wins over the
+      // self-created default; default keeps the lazy behavior unchanged.
+      const specified = typeof process.env.ORBIT_CONTROL_SOCKET === 'string' && process.env.ORBIT_CONTROL_SOCKET
+        ? process.env.ORBIT_CONTROL_SOCKET : null;
+      // Validate the caller path BEFORE creating anything, so a refusal
+      // leaves no server and no directory behind.
+      if (specified) await validateSpecifiedSocket(specified);
       // macOS Unix socket paths are short: os.tmpdir() can exceed the limit.
-      const folder = await fs.mkdtemp(path.join(process.platform === 'darwin' ? '/tmp' : os.tmpdir(), `orbit-${provider}-`));
-      await fs.chmod(folder, 0o700);
-      socket = path.join(folder, 'control.sock');
+      ownFolder = await fs.mkdtemp(path.join(process.platform === 'darwin' ? '/tmp' : os.tmpdir(), `orbit-${provider}-`));
+      await fs.chmod(ownFolder, 0o700);
+      const internalSocket = path.join(ownFolder, 'control.sock');
       host = net.createServer(peer => {
         let data = '';
         peer.setEncoding('utf8');
@@ -78,8 +142,30 @@ export function createOrbitHost({ provider, project, dispatch, bind, reset }) {
           catch (error) { peer.end(JSON.stringify({ error: error.message }) + '\n'); }
         });
       });
-      await new Promise((resolve, reject) => { host.once('error', reject); host.listen(socket, resolve); });
-      await fs.chmod(socket, 0o600);
+      await new Promise((resolve, reject) => { host.once('error', reject); host.listen(internalSocket, resolve); });
+      await fs.chmod(internalSocket, 0o600);
+      if (specified) {
+        // Node's net.Server.close() unlinks the path it listened on, so the
+        // server must NEVER listen directly inside the caller's directory: a
+        // caller file replacing our socket would be deleted on close. The
+        // caller-visible path is instead a HARD LINK to our internal socket
+        // (connecting via either path works); `socket` keeps the verbatim
+        // caller string for record ownership and --socket. The link refuses
+        // EEXIST rather than overwriting a racing live path. Our identity is
+        // captured from the INTERNAL socket BEFORE the link: lstat'ing the
+        // caller alias afterwards is racy — the caller may already have
+        // replaced it with a live socket, and close() would then unlink a
+        // file we never created.
+        socketIdentity = await fs.lstat(internalSocket);
+        try {
+          await fs.link(internalSocket, specified);
+        } catch (error) {
+          host.close();
+          await fs.rm(ownFolder, { recursive: true, force: true });
+          throw new Error(`ORBIT_CONTROL_SOCKET could not be linked into place: ${error.message}`);
+        }
+      }
+      socket = specified || internalSocket;
       host.unref();
     })();
     return setup;
@@ -100,6 +186,10 @@ export function createOrbitHost({ provider, project, dispatch, bind, reset }) {
       '--socket', socket, '--message-id', messageId], project);
   }
   return {
+    // G9b: session_start pre-listens the control channel so an external
+    // integration caller can drive explicit start/status/stop from session
+    // start on. Idempotent; the default launch path keeps lazy listen.
+    listen,
       async execute(a, context) {
         const operationError = workUnitOperationError(a);
         if (operationError) throw new Error(operationError);
@@ -259,8 +349,18 @@ export function createOrbitHost({ provider, project, dispatch, bind, reset }) {
         throw new Error(`Orbit could not confirm stop: ${failures.join('; ')}`);
       }
       if (host) {
+        // Node's net.Server.close() unlinks the INTERNAL listen path itself,
+        // so only our own holding directory is recycled here. The caller-
+        // visible hard-link alias is removed separately, and only while it
+        // still IS our socket (same dev/ino): a caller file that replaced it
+        // survives — we never delete what is not ours.
         host.close();
-        await fs.rm(path.dirname(socket), { recursive: true, force: true });
+        if (socketIdentity) {
+          const current = await fs.lstat(socket).catch(() => null);
+          if (current && current.isSocket() && current.dev === socketIdentity.dev && current.ino === socketIdentity.ino)
+            await fs.unlink(socket).catch(() => {});
+        }
+        if (ownFolder) await fs.rm(ownFolder, { recursive: true, force: true });
       }
     }
   };

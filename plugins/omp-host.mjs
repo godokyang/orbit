@@ -3351,6 +3351,12 @@ export function installOmpExtension(pi, sdk) {
   // Root's recovery. Non-explicit failures get one current-request warning
   // and then proceed without Orbit supervision.
   const entryRecovery = new Map();
+  // G9a: external integration mode — the integration caller creates tasks
+  // through explicit `orbit start`, so the automatic first-message entry
+  // classification, its durable record and its prompt are all skipped. Root's
+  // own tool start stays available (not hidden); only the UNBOUND automatic
+  // entry path early-exits, never task supervision on an existing task.
+  const externalIntegration = () => process.env.ORBIT_EXTERNAL_INTEGRATION === '1';
   pi.on('before_provider_request', async (event, ctx) => {
     let sessionId = null;
     try { sessionId = ctx.sessionManager?.getSessionId?.() ?? null; } catch { /* unowned */ }
@@ -3445,6 +3451,9 @@ export function installOmpExtension(pi, sdk) {
     if (!user?.id || !textOf(user.message.content).trim()) return event.payload;
     const key = `${sessionId}:${user.id}`;
     if (prestartSeen.has(key)) return event.payload;
+    // G9a: external integration mode — no orbit entry subprocess, no durable
+    // classification record, no root_decides prompt for this message.
+    if (externalIntegration()) return event.payload;
     prestartSeen.add(key);
     let decision = null;
     try {
@@ -4387,7 +4396,7 @@ export function installOmpExtension(pi, sdk) {
     if (advisory) parts.push(advisory);
     return { systemPrompt: withStatusBlock(event?.systemPrompt, parts.join('\n')) };
   });
-  pi.on('session_start', (_event, ctx) => {
+  pi.on('session_start', async (_event, ctx) => {
     // Re-bound child runtimes also fire session_start (OMP re-binds factories
     // per subagent). Only the process main agent may bind Orbit; member
     // sessions skip binding — their hooks (drift guard) are installed at
@@ -4401,6 +4410,23 @@ export function installOmpExtension(pi, sdk) {
     // Best-effort: materialize pool ∩ session into the private agent root so
     // generated agents are dispatchable immediately after startup.
     syncSessionAgents(ctx).catch(() => {});
+    // G9b: with a caller-specified control socket (or in external integration
+    // mode, where the automatic entry path no longer lazily creates the
+    // channel), listen BEFORE the first user message so the integration
+    // caller can drive explicit start/status/stop from session start on —
+    // including after a session switch, where close() released the channel
+    // and this session_start re-listens. A validation failure is reported
+    // loudly but must not disable the extension.
+    if (process.env.ORBIT_CONTROL_SOCKET || externalIntegration()) {
+      try {
+        await connect(ctx);
+        await host.listen();
+      } catch (error) {
+        const reason = String(error?.message || error);
+        try { ctx.ui?.notify?.(`Orbit 控制通道预监听失败：${reason}`, 'error'); }
+        catch { process.stderr.write(`Orbit control socket pre-listen failed: ${reason}\n`); }
+      }
+    }
   });
   pi.on('session_shutdown', async (_event, ctx) => {
     // Fires PER SESSION. Re-bound CHILD runtimes dispose independently; they

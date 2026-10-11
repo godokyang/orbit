@@ -86,7 +86,7 @@ module IntegrationContractTest
       project = File.join(tmp, "project")
       FileUtils.mkdir_p(project)
       File.write(File.join(project, "artifact.txt"), "delivered")
-      messages = { "m1" => "实现并验证 S12、S13", "m2" => "用户答复：继续" }
+      messages = { "m1" => "实现并验证 S12、S13", "m2" => "用户答复：继续", "m3" => "第三个独立要求", "m4" => "第四个独立要求" }
       connection = session(File.realpath(project), messages)
       env = %w[XDG_CONFIG_HOME XDG_CACHE_HOME].to_h { |key| [key, ENV[key]] }
       ENV["XDG_CONFIG_HOME"] = File.join(tmp, "xdg-config")
@@ -213,6 +213,45 @@ module IntegrationContractTest
     end
   end
 
+  # Contract (G8): status --external-ref always answers {"tasks":[...]} —
+  # exact match including terminal states, newest first, exit 0 with an empty
+  # array on no match, validation and scan errors stay non-zero errors (never
+  # disguised as an empty array), and the option is mutually exclusive with a
+  # positional TASK.
+  def status_by_external_ref_returns_a_fixed_tasks_array
+    with_world do |tmp, project|
+      older = start(project, "m1", "--external-ref", "loom:p1/d2/run-3", "--external-ref", "tracker#9")
+      newer = start(project, "m3", "--external-ref", "loom:p1/d2/run-3")
+      plain = start(project, "m4")
+      older_id = Orbit::TaskRecord.new(older.fetch("task_directory")).state.fetch("id")
+      newer_id = Orbit::TaskRecord.new(newer.fetch("task_directory")).state.fetch("id")
+      record = Orbit::TaskRecord.new(older.fetch("task_directory"))
+      record.save(record.state.merge("created_at" => "2026-01-01T00:00:00Z", "status" => "paused",
+                                     "stop_confirmation" => { "confirmed" => true }))
+
+      matched = Dir.chdir(tmp) { orbit_json("status", "--external-ref", "loom:p1/d2/run-3", "--project", project) }
+      tasks = matched.fetch("tasks")
+      assert(tasks.map { |task| task.fetch("id") } == [newer_id, older_id] &&
+             tasks.last.fetch("status") == "paused", "exact match returns all tasks with the ref, newest first, terminal states included")
+      alone = Dir.chdir(project) { orbit_json("status", "--external-ref", "tracker#9", "--json") }
+      assert(alone.fetch("tasks").map { |task| task.fetch("id") } == [older_id], "the second ref matches only its own task; cwd project discovery works")
+      code, out, = orbit("status", "--external-ref", "loom:p1", "--project", project)
+      assert(code == 0 && JSON.parse(out) == { "tasks" => [] }, "a prefix is not an exact match; no match is exit 0 with an empty array")
+
+      code, out, err = orbit("status", "--external-ref", " ", "--project", project)
+      assert(code == 1 && err.include?("external") && !out.include?("tasks"), "an invalid ref is refused, not an empty result")
+      code, _out, err = orbit("status", "whatever", "--external-ref", "loom:p1/d2/run-3", "--project", project)
+      assert(code == 1 && err.include?("usage"), "--external-ref is mutually exclusive with a positional TASK")
+      code, out, err = orbit("status", "--external-ref", "tracker#9", "--project", File.join(project, "artifact.txt"))
+      assert(code == 1 && !err.empty? && !out.include?("tasks"), "a file is not a project directory; validation failure is not an empty result")
+
+      File.write(File.join(plain.fetch("task_directory"), "state.json"), "{corrupted")
+      code, out, err = orbit("status", "--external-ref", "loom:p1/d2/run-3", "--project", project)
+      assert(code == 1 && !err.empty? && !out.include?("tasks"),
+             "a scan error over the project's records stays a non-zero error, never an empty tasks array")
+    end
+  end
+
   # Contract: resume_from.from_status is the truth, and a bad reference never creates a task.
   def declared_limits_hold_at_the_boundary
     with_world do |_tmp, project|
@@ -242,5 +281,6 @@ end
 
 IntegrationContractTest.capabilities_declare_what_orbit_enforces
 IntegrationContractTest.fake_caller_runs_the_whole_lifecycle
+IntegrationContractTest.status_by_external_ref_returns_a_fixed_tasks_array
 IntegrationContractTest.declared_limits_hold_at_the_boundary
 puts "INTEGRATION_CONTRACT_TEST_PASS (fake caller and fake OMP host against the real CLI, runtime and stores)"

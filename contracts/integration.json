@@ -1,6 +1,6 @@
 {
   "contract": "orbit-integration",
-  "version": "1.1",
+  "version": "1.2",
   "major": 1,
   "description": "Machine-readable form of contracts/integration.md. Versioned independently of the software version. Within one major version entries are only added, never changed or removed; a breaking change raises the major version and is named in the release notes. `orbit capabilities --json` serves `capabilities` from this file and the contract test reads `commands` and `status_fields` from it.",
   "status_values": [
@@ -20,6 +20,13 @@
     "stop_unconfirmed"
   ],
   "commands": {
+    "status_by_external_ref": {
+      "invocation": "orbit status --external-ref REF [--project DIR] --json",
+      "stdout_fields": [
+        "tasks"
+      ],
+      "note": "Exact opaque-string match, all matching tasks including terminal tasks, newest first. Success always returns a tasks array. No match exits 0 with an empty array. TASK is mutually exclusive. Validation and scan/read failures retain non-zero exit and error semantics."
+    },
     "version": {
       "invocation": "orbit version --json",
       "stdout_fields": ["version"]
@@ -96,6 +103,9 @@
       "since": "1.0",
       "from_status": ["paused"],
       "requires": "native_user_message"
-    }
+    },
+    "external_session_mode": {"since": "1.2", "environment_variable": "ORBIT_EXTERNAL_INTEGRATION", "enabled_value": "1", "automatic_entry": false, "root_start_available": true},
+    "control_socket_env": {"since": "1.2", "environment_variable": "ORBIT_CONTROL_SOCKET", "listen_at": "session_start", "absolute_path_required": true, "realpath": false, "caller_directory_retained": true, "normalized_absolute_path_required": true, "caller_private_directory_required": true, "path_limit_includes_nul": true, "same_filesystem_as_private_tmp_required": true},
+    "status_by_external_ref": {"since": "1.2", "exact_match": true, "includes_terminal_tasks": true, "stdout_container": "tasks", "no_match_exit_code": 0, "max_length": 256, "start_deduplicated": false}
   }
 }
