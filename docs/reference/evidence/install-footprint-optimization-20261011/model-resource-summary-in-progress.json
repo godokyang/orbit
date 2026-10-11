@@ -1,0 +1,229 @@
+{
+  "source": "durable resource-calls.json; no duplicate native ledger added",
+  "status": "in_progress",
+  "groups": [
+    {
+      "role": "root",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "calls": 62,
+      "units": "token",
+      "original_fields": {
+        "cacheRead": {
+          "reported_sum": 756864,
+          "reported_calls": 60,
+          "missing_calls": 2
+        },
+        "cacheWrite": {
+          "reported_sum": 0,
+          "reported_calls": 60,
+          "missing_calls": 2
+        },
+        "input": {
+          "reported_sum": 263892,
+          "reported_calls": 60,
+          "missing_calls": 2
+        },
+        "output": {
+          "reported_sum": 15710,
+          "reported_calls": 60,
+          "missing_calls": 2
+        },
+        "reasoningTokens": {
+          "reported_sum": 2952,
+          "reported_calls": 42,
+          "missing_calls": 20
+        },
+        "totalTokens": {
+          "reported_sum": 1036466,
+          "reported_calls": 60,
+          "missing_calls": 2
+        }
+      },
+      "cash_cost": null,
+      "quota_used": null,
+      "quota_remaining": null
+    },
+    {
+      "role": "judgment",
+      "provider": "typesafe",
+      "model": "jev-1.13.0",
+      "calls": 24,
+      "units": "token",
+      "original_fields": {
+        "input_tokens": {
+          "reported_sum": 155914,
+          "reported_calls": 24,
+          "missing_calls": 0
+        },
+        "output_tokens": {
+          "reported_sum": 1540,
+          "reported_calls": 24,
+          "missing_calls": 0
+        }
+      },
+      "cash_cost": null,
+      "quota_used": null,
+      "quota_remaining": null
+    },
+    {
+      "role": "member",
+      "provider": "kimi-code",
+      "model": "k3-256k",
+      "calls": 27,
+      "units": "token",
+      "original_fields": {
+        "cacheRead": {
+          "reported_sum": 579840,
+          "reported_calls": 25,
+          "missing_calls": 2
+        },
+        "cacheWrite": {
+          "reported_sum": 0,
+          "reported_calls": 25,
+          "missing_calls": 2
+        },
+        "input": {
+          "reported_sum": 119943,
+          "reported_calls": 26,
+          "missing_calls": 1
+        },
+        "output": {
+          "reported_sum": 38107,
+          "reported_calls": 25,
+          "missing_calls": 2
+        },
+        "totalTokens": {
+          "reported_sum": 737890,
+          "reported_calls": 26,
+          "missing_calls": 1
+        }
+      },
+      "cash_cost": null,
+      "quota_used": null,
+      "quota_remaining": null
+    },
+    {
+      "role": "member",
+      "provider": "opencode-go",
+      "model": "deepseek-v4.1-flash",
+      "calls": 6,
+      "units": "token",
+      "original_fields": {
+        "cacheRead": {
+          "reported_sum": 28544,
+          "reported_calls": 4,
+          "missing_calls": 2
+        },
+        "cacheWrite": {
+          "reported_sum": 0,
+          "reported_calls": 4,
+          "missing_calls": 2
+        },
+        "input": {
+          "reported_sum": 11942,
+          "reported_calls": 4,
+          "missing_calls": 2
+        },
+        "output": {
+          "reported_sum": 1503,
+          "reported_calls": 4,
+          "missing_calls": 2
+        },
+        "reasoningTokens": {
+          "reported_sum": 893,
+          "reported_calls": 4,
+          "missing_calls": 2
+        },
+        "totalTokens": {
+          "reported_sum": 41989,
+          "reported_calls": 4,
+          "missing_calls": 2
+        }
+      },
+      "cash_cost": null,
+      "quota_used": null,
+      "quota_remaining": null
+    },
+    {
+      "role": "checker",
+      "provider": "opencode-go",
+      "model": "deepseek-v4.1-flash",
+      "calls": 10,
+      "units": "token",
+      "original_fields": {
+        "cacheRead": {
+          "reported_sum": 66304,
+          "reported_calls": 10,
+          "missing_calls": 0
+        },
+        "cacheWrite": {
+          "reported_sum": 0,
+          "reported_calls": 10,
+          "missing_calls": 0
+        },
+        "input": {
+          "reported_sum": 31400,
+          "reported_calls": 10,
+          "missing_calls": 0
+        },
+        "output": {
+          "reported_sum": 10130,
+          "reported_calls": 10,
+          "missing_calls": 0
+        },
+        "reasoningTokens": {
+          "reported_sum": 5185,
+          "reported_calls": 8,
+          "missing_calls": 2
+        },
+        "totalTokens": {
+          "reported_sum": 107834,
+          "reported_calls": 10,
+          "missing_calls": 0
+        }
+      },
+      "cash_cost": null,
+      "quota_used": null,
+      "quota_remaining": null
+    },
+    {
+      "role": "checker",
+      "provider": "kimi-code",
+      "model": "k3-256k",
+      "calls": 2,
+      "units": "token",
+      "original_fields": {
+        "cacheRead": {
+          "reported_sum": 8448,
+          "reported_calls": 2,
+          "missing_calls": 0
+        },
+        "cacheWrite": {
+          "reported_sum": 0,
+          "reported_calls": 2,
+          "missing_calls": 0
+        },
+        "input": {
+          "reported_sum": 9049,
+          "reported_calls": 2,
+          "missing_calls": 0
+        },
+        "output": {
+          "reported_sum": 797,
+          "reported_calls": 2,
+          "missing_calls": 0
+        },
+        "totalTokens": {
+          "reported_sum": 18294,
+          "reported_calls": 2,
+          "missing_calls": 0
+        }
+      },
+      "cash_cost": null,
+      "quota_used": null,
+      "quota_remaining": null
+    }
+  ],
+  "note": "SDK fields preserved separately; input/cache/output/total relationships not re-inferred; missing costs and quota unknown. Controller Codex goal tool counter is separate."
+}

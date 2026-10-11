@@ -1,0 +1,5 @@
+
+[Uncaught Exception] Error: check-result schema is unreadable: Error: ENOENT: no such file or directory, open '/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/compat-project/contracts/check-result.schema.json'
+    at loadCheckResultSchema (/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/compat-project/runners/omp-reviewer/check-result.ts:18:13)
+    at /private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/compat-project/runners/omp-reviewer/check-result.ts:101:46
+    at processTicksAndRejections (native:7:39)

@@ -1,0 +1,93 @@
+{
+  "schema_version": "orbit-requirement-coverage-2",
+  "records": [
+    {
+      "check_id": "2",
+      "kind": "artifact",
+      "role": "reviewer",
+      "recorded_at": "2026-10-11T04:43:20Z",
+      "input_digest": "2f1772663fc6f1b82f6f131b6e849b01282e67e6dd9f063815e2c488e053cadc",
+      "artifact_digest": "sha256:1ddd8ecdf2f8cb61627a23ff397deb97eba3df7d714033abcf9d88951c35ed12",
+      "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/positive-v2",
+      "stale": false,
+      "coverage": {
+        "complete": true,
+        "items": [
+          {
+            "requirement": "交付 src/importer.mjs 的纯函数 importExpenses(text)",
+            "scope": "delivery",
+            "status": "verified",
+            "evidence": "src/importer.mjs:8 exports pure function; BigInt arithmetic, no I/O; returns {groups,totalCents,count}"
+          },
+          {
+            "requirement": "交付 src/cli.mjs 的可运行命令行",
+            "scope": "delivery",
+            "status": "verified",
+            "evidence": "src/cli.mjs reads one arg, stdout JSON on success exit 0, stderr+exit1 on failure; root_verification receipt observed all modes"
+          },
+          {
+            "requirement": "交付 README 用法与边界",
+            "scope": "delivery",
+            "status": "verified",
+            "evidence": "README.md covers invocation, input format, precision/overflow, ordering, error behavior, API"
+          },
+          {
+            "requirement": "SPEC: BOM/CRLF/空行行号/表头/两列/trim/类别非空/金额格式",
+            "scope": "delivery",
+            "status": "verified",
+            "evidence": "importer.mjs:14-23,30-51 enforce each rule; lineNo=i+1 includes blank lines"
+          },
+          {
+            "requirement": "SPEC: 整数分精确计算与 amount/分组/总计溢出拒绝",
+            "scope": "delivery",
+            "status": "verified",
+            "evidence": "importer.mjs:5,55,57-76 BigInt cents with three MAX_SAFE_INTEGER checks"
+          },
+          {
+            "requirement": "SPEC: 分组合计保持首次出现顺序",
+            "scope": "delivery",
+            "status": "verified",
+            "evidence": "importer.mjs:61-66 Map preserves first-seen insertion order into groups array"
+          },
+          {
+            "requirement": "不改 tests/acceptance.mjs 或 SPEC.md",
+            "scope": "delivery",
+            "status": "verified",
+            "evidence": "review_focus modified list is only README.md, src/cli.mjs, src/importer.mjs; tests file read intact with original 127-case structure"
+          },
+          {
+            "requirement": "不提交、不推送、不下载依赖、不建网络服务",
+            "scope": "delivery",
+            "status": "verified",
+            "evidence": "task_git baseline_head==snapshot_head (3fdcf7b), no commits; cli/importer use only node:fs; no network code"
+          },
+          {
+            "requirement": "importer 作为有界编码工作单元交给原生执行成员实现，含环境材料、路径、完整命令",
+            "scope": "delivery",
+            "status": "verified",
+            "evidence": "work_units wu-2e3411410400ee15: objective bounded to src/importer.mjs, allowed_paths includes .runtime/.test-tmp, allowed_commands holds the full mandated npm test command verbatim; member orbit-5e9e2865 completed"
+          },
+          {
+            "requirement": "成员用项目 .runtime Node/npm 以完整命令实际运行 npm test 并经 hub 向 Main 报告后由 Root 独立核验",
+            "scope": "delivery",
+            "status": "verified",
+            "evidence": "dispatch result records hub report to Main with exit code 0; root_verification receipt shows Root independently ran the same full command, exit 0, 127 cases passed, artifact_matches/input_matches true"
+          },
+          {
+            "requirement": "完成后实际运行 npm test 并核对 CLI 成功/错误输出",
+            "scope": "delivery",
+            "status": "verified",
+            "evidence": "root_verifications: npm-cli.js test exit 0 EXPENSE_VALIDATION_SUMMARY 127 passed; second receipt shows CLI JSON success exit 0, usage/missing-file/invalid-amount failures exit 1 with stderr and empty stdout"
+          },
+          {
+            "requirement": "请求独立手动终检，若有问题修正并再检查，符合完成条件后确认停止",
+            "scope": "lifecycle",
+            "status": "unverified",
+            "evidence": "Root queued finalization (task_delivery command_id 20261011044107660672); this check is the review; final stop is a future event"
+          }
+        ]
+      }
+    }
+  ],
+  "history_compacted": false
+}

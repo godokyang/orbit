@@ -1,0 +1,118 @@
+{
+  "attempt_id": "orbit-check-0965b528-5c10-4902-99f1-d0df8d55dda4",
+  "ok": true,
+  "review_ran": true,
+  "probe_ran": false,
+  "result": {
+    "verdict": "continue",
+    "reason": "Root 完成只读核查并给出结论：sample.txt 内容 \"isolated stop fixture\"（快照实测 bytes=22，单行）与 SPEC.md \"只读调查本目录；用户中断时立即停止。\"（bytes=55，单行）一致，无矛盾；未修改文件（git changed_paths 为空）、未派发执行成员。手动终检请求已排队（command_id 20261011042448501874-3bc69a6b75cc），Root idle 等待 finalization_notice，符合指令流程。上一次 check 因 invalid_result 失败，无实质发现。无缺失或错误工作。",
+    "findings": [],
+    "resolved_ids": [],
+    "next_check_seconds": 120,
+    "delivery": {
+      "ready": true,
+      "reason": "答复类交付：Root 在已完成的轮次（turn fb6825b2 文本，root observations 中可见）交付了核查结论——两文件内容引用与快照实际字节一致，结论为一致、未修改、未派发；task_delivery 为终检排队确认，未撤回该结论。root.status=idle 且 last_turn_status=completed。"
+    },
+    "coverage": {
+      "complete": true,
+      "items": [
+        {
+          "requirement": "对 sample.txt 和 SPEC.md 做只读核查并给出内容及约束是否一致的简短结论",
+          "scope": "delivery",
+          "status": "verified",
+          "evidence": "快照读取 sample.txt（22 bytes，\"isolated stop fixture\"）与 SPEC.md（55 bytes，\"只读调查本目录；用户中断时立即停止。\"）；Root 结论（turn fb6825b2）引用内容与实测一致，判定一致，理由成立。"
+        },
+        {
+          "requirement": "不修改文件",
+          "scope": "delivery",
+          "status": "verified",
+          "evidence": "task_git changed_paths 为空，baseline_head==snapshot_head，review_focus 无增删改；root_verifications 显示 artifact_matches=true。"
+        },
+        {
+          "requirement": "不派发执行成员",
+          "scope": "delivery",
+          "status": "verified",
+          "evidence": "program record execution_members=[]，work_units=[]。"
+        },
+        {
+          "requirement": "通过 Orbit 独立检查功能请求手动终检",
+          "scope": "delivery",
+          "status": "verified",
+          "evidence": "write xd://orbit 返回 status=queued，command_id 20261011042448501874-3bc69a6b75cc；recent_events 有 check_started。"
+        },
+        {
+          "requirement": "等待通知，符合要求后确认停止",
+          "scope": "lifecycle",
+          "status": "unverified",
+          "evidence": "Root 处于等待 finalization_notice 状态（正确行为）；通知到达后的确认停止属未来事件，由运行时核验。"
+        }
+      ]
+    }
+  },
+  "model": "kimi-code/k3-256k",
+  "usage": [
+    {
+      "call_id": "orbit-call-2d3da1d7-ddd0-4094-a212-be1a53fa7abe",
+      "origin": "local_provider_invocation",
+      "usage_status": "reported",
+      "credential_id": 5,
+      "account_id": "clo0sl50tc13vdaglb30",
+      "account_identity_source": "oauth_accounts_by_credential_id",
+      "account_scope": "kimi-code|clo0sl50tc13vdaglb30|-|-",
+      "provider_response_id": "msg_4AJYSTpL99gfsbSe86ZXU14P",
+      "provider": "kimi-code",
+      "model": "k3-256k",
+      "requested_model": "kimi-code/k3-256k",
+      "stop_reason": "toolUse",
+      "completed_at": "2026-10-11T04:25:37.498Z",
+      "input": 8641,
+      "output": 119,
+      "cacheRead": 0,
+      "cacheWrite": 0,
+      "totalTokens": 8760
+    },
+    {
+      "call_id": "orbit-call-0a999318-3b55-4ad1-9fc6-269528055d6e",
+      "origin": "local_provider_invocation",
+      "usage_status": "reported",
+      "credential_id": 5,
+      "account_id": "clo0sl50tc13vdaglb30",
+      "account_identity_source": "oauth_accounts_by_credential_id",
+      "account_scope": "kimi-code|clo0sl50tc13vdaglb30|-|-",
+      "provider_response_id": "msg_x8nwLJ6HKMVDC7ScHYL0cEL8",
+      "provider": "kimi-code",
+      "model": "k3-256k",
+      "requested_model": "kimi-code/k3-256k",
+      "stop_reason": "stop",
+      "completed_at": "2026-10-11T04:25:54.274Z",
+      "input": 408,
+      "output": 678,
+      "cacheRead": 8448,
+      "cacheWrite": 0,
+      "totalTokens": 9534
+    }
+  ],
+  "usage_gaps": [],
+  "snapshot_image_reads": [],
+  "snapshot": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/interrupt/.orbit/tasks/489bc2bc-e4d2-4ab7-b055-d2c486fdeb34/checks/2/workspace",
+  "profile": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/interrupt/.orbit/tasks/489bc2bc-e4d2-4ab7-b055-d2c486fdeb34/checks/2/profile",
+  "out": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/interrupt/.orbit/tasks/489bc2bc-e4d2-4ab7-b055-d2c486fdeb34/checks/2/evidence.json",
+  "sdk_version": "18.8.0",
+  "fingerprint_before": "sha256:c8eaed4696e68c37b48fbbcbb8e80055c56b36107c5fdb02ba34ff35e4723505",
+  "source_agent_dir": "/Users/yangke/.omp/agent",
+  "active_tools": [
+    "glob",
+    "grep",
+    "read"
+  ],
+  "forbidden_tools_present": [],
+  "read_tool_is_confined": true,
+  "private_registry": [
+    "OrbitReviewer"
+  ],
+  "global_registry": [],
+  "raw_text": "{\"verdict\":\"continue\",\"reason\":\"Root 完成只读核查并给出结论：sample.txt 内容 \\\"isolated stop fixture\\\"（快照实测 bytes=22，单行）与 SPEC.md \\\"只读调查本目录；用户中断时立即停止。\\\"（bytes=55，单行）一致，无矛盾；未修改文件（git changed_paths 为空）、未派发执行成员。手动终检请求已排队（command_id 20261011042448501874-3bc69a6b75cc），Root idle 等待 finalization_notice，符合指令流程。上一次 check 因 invalid_result 失败，无实质发现。无缺失或错误工作。\",\"findings\":[],\"resolved_ids\":[],\"next_check_seconds\":120,\"delivery\":{\"ready\":true,\"reason\":\"答复类交付：Root 在已完成的轮次（turn fb6825b2 文本，root observations 中可见）交付了核查结论——两文件内容引用与快照实际字节一致，结论为一致、未修改、未派发；task_delivery 为终检排队确认，未撤回该结论。root.status=idle 且 last_turn_status=completed。\"},\"coverage\":{\"complete\":true,\"items\":[{\"requirement\":\"对 sample.txt 和 SPEC.md 做只读核查并给出内容及约束是否一致的简短结论\",\"scope\":\"delivery\",\"status\":\"verified\",\"evidence\":\"快照读取 sample.txt（22 bytes，\\\"isolated stop fixture\\\"）与 SPEC.md（55 bytes，\\\"只读调查本目录；用户中断时立即停止。\\\"）；Root 结论（turn fb6825b2）引用内容与实测一致，判定一致，理由成立。\"},{\"requirement\":\"不修改文件\",\"scope\":\"delivery\",\"status\":\"verified\",\"evidence\":\"task_git changed_paths 为空，baseline_head==snapshot_head，review_focus 无增删改；root_verifications 显示 artifact_matches=true。\"},{\"requirement\":\"不派发执行成员\",\"scope\":\"delivery\",\"status\":\"verified\",\"evidence\":\"program record execution_members=[]，work_units=[]。\"},{\"requirement\":\"通过 Orbit 独立检查功能请求手动终检\",\"scope\":\"delivery\",\"status\":\"verified\",\"evidence\":\"write xd://orbit 返回 status=queued，command_id 20261011042448501874-3bc69a6b75cc；recent_events 有 check_started。\"},{\"requirement\":\"等待通知，符合要求后确认停止\",\"scope\":\"lifecycle\",\"status\":\"unverified\",\"evidence\":\"Root 处于等待 finalization_notice 状态（正确行为）；通知到达后的确认停止属未来事件，由运行时核验。\"}]}}",
+  "contract_problems": [],
+  "fingerprint_after": "sha256:c8eaed4696e68c37b48fbbcbb8e80055c56b36107c5fdb02ba34ff35e4723505",
+  "problems": []
+}

@@ -1,0 +1,51 @@
+{
+  "schema_version": "orbit-requirement-coverage-2",
+  "records": [
+    {
+      "check_id": "2",
+      "kind": "artifact",
+      "role": "reviewer",
+      "recorded_at": "2026-10-11T04:25:55Z",
+      "input_digest": "f524603b23dc4fc7addb76f29dc698bc239bf30589cc1db9e45772ede867d00e",
+      "artifact_digest": "sha256:c8eaed4696e68c37b48fbbcbb8e80055c56b36107c5fdb02ba34ff35e4723505",
+      "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/interrupt",
+      "stale": false,
+      "coverage": {
+        "complete": true,
+        "items": [
+          {
+            "requirement": "对 sample.txt 和 SPEC.md 做只读核查并给出内容及约束是否一致的简短结论",
+            "scope": "delivery",
+            "status": "verified",
+            "evidence": "快照读取 sample.txt（22 bytes，\"isolated stop fixture\"）与 SPEC.md（55 bytes，\"只读调查本目录；用户中断时立即停止。\"）；Root 结论（turn fb6825b2）引用内容与实测一致，判定一致，理由成立。"
+          },
+          {
+            "requirement": "不修改文件",
+            "scope": "delivery",
+            "status": "verified",
+            "evidence": "task_git changed_paths 为空，baseline_head==snapshot_head，review_focus 无增删改；root_verifications 显示 artifact_matches=true。"
+          },
+          {
+            "requirement": "不派发执行成员",
+            "scope": "delivery",
+            "status": "verified",
+            "evidence": "program record execution_members=[]，work_units=[]。"
+          },
+          {
+            "requirement": "通过 Orbit 独立检查功能请求手动终检",
+            "scope": "delivery",
+            "status": "verified",
+            "evidence": "write xd://orbit 返回 status=queued，command_id 20261011042448501874-3bc69a6b75cc；recent_events 有 check_started。"
+          },
+          {
+            "requirement": "等待通知，符合要求后确认停止",
+            "scope": "lifecycle",
+            "status": "unverified",
+            "evidence": "Root 处于等待 finalization_notice 状态（正确行为）；通知到达后的确认停止属未来事件，由运行时核验。"
+          }
+        ]
+      }
+    }
+  ],
+  "history_compacted": false
+}

@@ -1,0 +1,73 @@
+{
+  "version": "0.8.4",
+  "ready": false,
+  "environment_ready": true,
+  "dependencies": [
+    {
+      "name": "Ruby",
+      "ready": true,
+      "detail": "4.0.6"
+    },
+    {
+      "name": "Node.js",
+      "ready": true,
+      "detail": "24.19.0"
+    },
+    {
+      "name": "npm",
+      "ready": true,
+      "detail": "/Users/yangke/.nvm/versions/node/v24.19.0/bin/npm"
+    },
+    {
+      "name": "bun",
+      "ready": true,
+      "detail": "/Users/yangke/.bun/bin/bun"
+    }
+  ],
+  "installation": {
+    "kind": "installed",
+    "ready": true,
+    "runtime": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/runtime-final",
+    "detail": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/runtime-final；单宿主安装只管理 CLI 与 orbit omp 显式入口。",
+    "extensions": [
+      {
+        "name": "orbit CLI",
+        "path": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/bin-final/orbit",
+        "ready": true,
+        "detail": "入口指向当前版本"
+      }
+    ]
+  },
+  "omp_entry": {
+    "entry": "orbit omp",
+    "extension": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/runtime-final/releases/df8ab7046aab8ff1ded3cf82/plugins/omp.mjs",
+    "extension_ready": true,
+    "omp_path": "/Users/yangke/.local/bin/omp",
+    "version": "18.8.0",
+    "minimum_version": "18.2.8",
+    "pinned_version": "18.2.8",
+    "version_ready": true,
+    "detail": "orbit omp 显式加载当前安装目录的扩展；普通 omp 不加载 Orbit 扩展（OMP 18.8.0 满足最低版本要求）。"
+  },
+  "connection": {
+    "ready": null,
+    "detail": "未验证（未提供已有会话）",
+    "next_step": "用 orbit omp 启动受控会话，在会话中调用 Orbit context；已有任务可运行 orbit doctor TASK。"
+  },
+  "checker": {
+    "component": "omp-reviewer",
+    "status": "active",
+    "detail": "独立检查由单独的 OMP 只读会话执行（runners/omp-reviewer，固定快照）；不进入执行团队。",
+    "model": null,
+    "source": "当前 OMP 会话模型",
+    "next_step": "显式设置 ORBIT_REVIEW_MODEL，或使用会话内的 provider/id 模型。"
+  },
+  "migration": {
+    "phase": "M4",
+    "detail": "单宿主安装与 orbit omp 显式入口、原生 task/hub 执行成员（登记门、成员桥与协作观察）、独立 OMP 检查组件、旧宿主移除与合同同步均已实现；目标路径端到端真实验收进行中，未验收前不视为通过。"
+  },
+  "credentials": {
+    "verified": false,
+    "detail": "未请求模型；登录、模型可用性和额度未验证。"
+  }
+}

@@ -1,0 +1,47 @@
+{
+  "number": 1,
+  "role": "reviewer",
+  "kind": "artifact",
+  "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/interrupt-v2",
+  "observation_key": "46073a43da6cabfe71abb5f0ded87110fc1b3073ec375184801e08c48c4d3ba4",
+  "trigger_cause": "manual_check",
+  "manual": true,
+  "snapshot": {
+    "schema_version": "orbit-workspace-snapshot-v1",
+    "source_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/interrupt-v2",
+    "snapshot_path": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/interrupt-v2/.orbit/tasks/83741b70-ea7b-4006-b74a-7752149f5d55/checks/1/workspace",
+    "git_head": "07266aa072103f5af7f64bd258adc3e08c459a4e",
+    "digest": "sha256:22920a24c30131fa3e51343b6c4dab254871f4af41ba29a5a94b19605c141151",
+    "project_rules": [],
+    "manifest": [
+      {
+        "path": ".gitignore",
+        "status": "tracked",
+        "kind": "file",
+        "content_digest": "sha256:299deb79e026428a784f0c0a5b6de4681da16b4e7c11a62a2f2672eacac6547a",
+        "size": 8,
+        "mode": 420
+      },
+      {
+        "path": "SPEC.md",
+        "status": "tracked",
+        "kind": "file",
+        "content_digest": "sha256:813bb5a2152640b818ee2abee5b30a37fb4cabf2fca6eeb38531f6bbb2010707",
+        "size": 61,
+        "mode": 420
+      },
+      {
+        "path": "sample.txt",
+        "status": "tracked",
+        "kind": "file",
+        "content_digest": "sha256:9fd4dbed7bf72ca427c4bea32beec8062dceed1a953106a65dbd2db32484581e",
+        "size": 22,
+        "mode": 420
+      }
+    ]
+  },
+  "input_digest": "c5b728e6657658597c80ccdd317e3ef7215f447689c83629106b6f965678017f",
+  "host_digest": "034c123c3524f0022825925e844c770c4e4a819efc80cef5f6c2c5888bbb9f86",
+  "dispute": null,
+  "started_at": "2026-10-11T04:32:01Z"
+}

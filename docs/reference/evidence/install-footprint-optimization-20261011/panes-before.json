@@ -1,0 +1,102 @@
+{
+  "id": "cli:pane:list",
+  "result": {
+    "panes": [
+      {
+        "agent": "codex",
+        "agent_status": "working",
+        "cwd": "/Users/yangke/Personal/omen/orbit",
+        "focused": false,
+        "foreground_cwd": "/Users/yangke/Personal/omen/orbit",
+        "pane_id": "w23:p1",
+        "revision": 285,
+        "scroll": {
+          "max_offset_from_bottom": 0,
+          "offset_from_bottom": 0,
+          "viewport_rows": 47
+        },
+        "tab_id": "w23:t1",
+        "terminal_id": "term_65d61bd7e76e4b",
+        "terminal_title": "\u283c \u542f\u52a8 Goal \u5b8c\u6210\u4ea4\u4ed8 | orbit",
+        "terminal_title_stripped": "\u542f\u52a8 Goal \u5b8c\u6210\u4ea4\u4ed8 | orbit",
+        "workspace_id": "w23"
+      },
+      {
+        "agent": "omp",
+        "agent_status": "idle",
+        "cwd": "/Users/yangke/Personal/omen/orbit",
+        "focused": false,
+        "foreground_cwd": "/Users/yangke/Personal/omen/orbit",
+        "pane_id": "w23:pJ",
+        "revision": 51736,
+        "scroll": {
+          "max_offset_from_bottom": 1791,
+          "offset_from_bottom": 0,
+          "viewport_rows": 23
+        },
+        "tab_id": "w23:t1",
+        "terminal_id": "term_65d6908b7292b21",
+        "terminal_title": "\u03c0 > \ud83d\udd0d AUDIT: Audit C04 C06 C05 interfaces",
+        "terminal_title_stripped": "\u03c0 > \ud83d\udd0d AUDIT: Audit C04 C06 C05 interfaces",
+        "workspace_id": "w23"
+      },
+      {
+        "agent": "omp",
+        "agent_status": "idle",
+        "cwd": "/Users/yangke/Personal/omen/orbit",
+        "focused": false,
+        "foreground_cwd": "/Users/yangke/Personal/omen/orbit",
+        "pane_id": "w23:pH",
+        "revision": 52904,
+        "scroll": {
+          "max_offset_from_bottom": 1492,
+          "offset_from_bottom": 0,
+          "viewport_rows": 22
+        },
+        "tab_id": "w23:t1",
+        "terminal_id": "term_65d690899b51820",
+        "terminal_title": "\u03c0 > \ud83c\udfaf GOAL: Wire active goal into model requests",
+        "terminal_title_stripped": "\u03c0 > \ud83c\udfaf GOAL: Wire active goal into model requests",
+        "workspace_id": "w23"
+      },
+      {
+        "agent": "omp",
+        "agent_status": "idle",
+        "cwd": "/Users/yangke/Personal/omen/orbit",
+        "focused": false,
+        "foreground_cwd": "/Users/yangke/Personal/omen/orbit",
+        "pane_id": "w23:pK",
+        "revision": 67093,
+        "scroll": {
+          "max_offset_from_bottom": 8028,
+          "offset_from_bottom": 0,
+          "viewport_rows": 22
+        },
+        "tab_id": "w23:t1",
+        "terminal_id": "term_65d6908d0d5c322",
+        "terminal_title": "\u03c0 > \ud83e\uddec SCHEMA: \u5ba1\u8ba1 orbit \u9879\u76ee\u53d8\u66f4\u4e0e\u9a8c\u6536\u6d41\u7a0b",
+        "terminal_title_stripped": "\u03c0 > \ud83e\uddec SCHEMA: \u5ba1\u8ba1 orbit \u9879\u76ee\u53d8\u66f4\u4e0e\u9a8c\u6536\u6d41\u7a0b",
+        "workspace_id": "w23"
+      },
+      {
+        "agent_status": "unknown",
+        "cwd": "/Users/yangke/Personal/omen/orbit",
+        "focused": false,
+        "foreground_cwd": "/Users/yangke/Personal/omen/orbit",
+        "pane_id": "w23:p16",
+        "revision": 3,
+        "scroll": {
+          "max_offset_from_bottom": 0,
+          "offset_from_bottom": 0,
+          "viewport_rows": 49
+        },
+        "tab_id": "w23:t2",
+        "terminal_id": "term_65d76fa73b27336",
+        "terminal_title": "yangke@MacBook-Pro:~/Personal/omen/orbit",
+        "terminal_title_stripped": "yangke@MacBook-Pro:~/Personal/omen/orbit",
+        "workspace_id": "w23"
+      }
+    ],
+    "type": "pane_list"
+  }
+}

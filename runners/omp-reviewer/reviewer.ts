@@ -395,6 +395,11 @@ try {
 			model,
 			thinkingLevel: request.model ? "low" : undefined,
 			settings: Settings.isolated({
+				// This headless read-only session has no local inference or speech
+				// dependencies. Keep memory startup off even if SDK defaults change.
+				"memory.backend": "off",
+				"memories.enabled": false,
+				"stt.enabled": false,
 				"fetch.enabled": false,
 				"web_search.enabled": false,
 				"github.enabled": false,

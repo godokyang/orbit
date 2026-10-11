@@ -26,6 +26,8 @@ module OrbitInstall
   OWNED_DIRECTORIES = %w[node_modules .npm-cache .bun-cache runners/omp-reviewer/node_modules].freeze
   # Releases prepared before the reviewer bundle shipped.
   LEGACY_OWNED_DIRECTORIES = %w[node_modules .npm-cache].freeze
+  REVIEWER_PACKAGES = %w[@oh-my-pi/pi-ai @oh-my-pi/pi-coding-agent @oh-my-pi/pi-utils].freeze
+  NATIVE_PLATFORMS = %w[darwin-arm64 darwin-x64 linux-arm64 linux-x64 win32-arm64 win32-x64].freeze
   MARKER = ".orbit-install.json"
   RELEASE = ".orbit-release.json"
   module_function
@@ -294,6 +296,9 @@ module OrbitInstall
     run("node", "--input-type=module", "-e", "import('./plugins/omp-host.mjs')", chdir: stage)
     verify_member_registration_entry!(stage)
     reviewer_sdk_version = install_reviewer_bundle!(stage)
+    # These caches are only used while preparing the release. Runtime modules
+    # are installed separately; retaining downloads doubles the SDK footprint.
+    %w[.npm-cache .bun-cache].each { |name| FileUtils.rm_rf(File.join(stage, name)) }
     record = { "format" => FORMAT, "version" => package.fetch("version"), "source" => source_record,
                "content_digest" => digest.hexdigest, "installed_at" => Time.now.utc.iso8601,
                "reviewer_sdk_version" => reviewer_sdk_version,
@@ -336,19 +341,43 @@ module OrbitInstall
     raise "OMP #{version} is older than #{Orbit::OmpEntry::MINIMUM_OMP_VERSION}" unless Orbit::OmpEntry.supported_version?(version)
 
     dependencies = read_json(File.join(runner, "package.json")).fetch("dependencies")
+    # Match the Bun process that will load the addon, including Rosetta; Ruby's
+    # host architecture may differ. Native leaf packages are optional upstream
+    # but required here; local inference and speech packages remain omitted.
+    platform = JSON.parse(capture("bun", "-e", "process.stdout.write(JSON.stringify([process.platform, process.arch]))"))
+    tag = platform.join("-")
+    raise "unsupported reviewer Bun platform: #{tag}" unless NATIVE_PLATFORMS.include?(tag)
+
+    native = "@oh-my-pi/pi-natives-#{tag}"
+    # --production also freezes Bun's lockfile, which would prevent the staged
+    # host/platform adaptation. --omit dev omits development packages alone.
+    # mnemopi's optional peer dependencies also include ONNX. Required runtime
+    # dependencies remain explicit SDK dependencies; avoid auto-installing peers.
+    install_flags = ["--omit", "optional", "--omit", "peer", "--omit", "dev", "--linker", "hoisted"]
     env = { "BUN_INSTALL_CACHE_DIR" => File.join(stage, ".bun-cache") }
-    if dependencies.fetch("@oh-my-pi/pi-coding-agent") == version && dependencies.fetch("@oh-my-pi/pi-utils") == version
-      run("bun", "install", "--frozen-lockfile", chdir: runner, env: env)
+    if REVIEWER_PACKAGES.all? { |name| dependencies.fetch(name) == version }
+      run("bun", "install", "--frozen-lockfile", *install_flags, chdir: runner, env: env)
+      run("bun", "add", "--exact", "#{native}@#{version}", *install_flags, chdir: runner, env: env)
     else
-      run("bun", "add", "--exact", "@oh-my-pi/pi-coding-agent@#{version}", "@oh-my-pi/pi-utils@#{version}",
+      # pi-ai also owns native/SDK dependencies. Leaving it on the source
+      # version creates a second SDK tree and repeated large native binaries.
+      run("bun", "add", "--exact", *[*REVIEWER_PACKAGES, native].map { |name| "#{name}@#{version}" }, *install_flags,
           chdir: runner, env: env)
     end
     package = File.join(runner, "node_modules", "@oh-my-pi", "pi-coding-agent", "package.json")
     raise "reviewer SDK was not installed: #{package}" unless File.file?(package)
 
-    installed = read_json(package)["version"]
-    declared = read_json(File.join(runner, "package.json")).dig("dependencies", "@oh-my-pi/pi-coding-agent")
-    if installed == "18.4.9"
+    declared = read_json(File.join(runner, "package.json")).fetch("dependencies")
+    [*REVIEWER_PACKAGES, native].each do |name|
+      manifest = File.join(runner, "node_modules", name, "package.json")
+      raise "reviewer required runtime package is missing: #{name}" unless File.file?(manifest)
+
+      installed = read_json(manifest)["version"]
+      unless installed == version && declared[name] == version
+        raise "reviewer SDK #{name} version #{installed.inspect} (declared #{declared[name].inspect}) does not match host OMP #{version}"
+      end
+    end
+    if version == "18.4.9"
       # This SDK ships both the TypeScript module and a JavaScript injection
       # script at ratchet/prelude. Bun resolves its extensionless SDK import
       # to the script, which has no createRatchetPrelude export. Pin only this
@@ -363,9 +392,10 @@ module OrbitInstall
         File.binwrite(sdk_source, source.sub(ambiguous, explicit))
       end
     end
-    return version if installed == version && declared == version
-
-    raise "reviewer SDK version #{installed.inspect} (declared #{declared.inspect}) does not match host OMP #{version}"
+    # A successful package-manager receipt does not prove the omitted optional
+    # tree left a loadable SDK. Verify it before switching away from the old release.
+    capture("bun", "-e", 'await import("@oh-my-pi/pi-natives"); await import("@oh-my-pi/pi-coding-agent");', chdir: runner)
+    version
   end
 
   def current_release(runtime)
@@ -537,7 +567,7 @@ module OrbitInstall
         puts "Controlled OMP entry: orbit omp."
         warn "普通 omp 是否仍加载 Orbit 未确认：保留了不是本安装创建的入口 #{legacy_conflicts.join('、')}；orbit doctor 会显示该状态。"
       end
-      puts "Independent reviewer bundle: runners/omp-reviewer (SDK #{Orbit::OmpEntry::PINNED_SDK_VERSION})."
+      puts "Independent reviewer bundle: runners/omp-reviewer (SDK #{record.fetch('reviewer_sdk_version')})."
       if executable("omp")
         begin
           detected = Orbit::OmpEntry.detected_version

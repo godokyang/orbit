@@ -1,0 +1,93 @@
+{
+  "format": "orbit-work-units-2",
+  "task_id": "64807db8-040c-46c6-ae41-9c94c46b5267",
+  "units": {
+    "wu-335bbe7c12748259": {
+      "id": "wu-335bbe7c12748259",
+      "task_id": "64807db8-040c-46c6-ae41-9c94c46b5267",
+      "status": "bound",
+      "input_digest": "a78e5ec802ece3bc0e03cec79f850ce01eaadb2b156ddbb6a46ce79e0b46c802",
+      "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/positive",
+      "declared_at": "2026-10-11T04:23:34Z",
+      "dispatches": [
+        {
+          "member_id": "orbit-878981e9-56bf-437b-84a9-929e3b5fa70a",
+          "tool_call_id": "call_a60937f1c93147e5bd3028ec",
+          "model": "kimi-code/k3-256k",
+          "bound_at": "2026-10-11T04:24:03Z",
+          "hint_signature": "ec9a74ca2cf7d01e70b89d55ee0d232a09f62b148426a8751be91ad85c1b7b89",
+          "hint_message_id": "33474a89-2eb3-4a11-aa51-8bcae366242d"
+        }
+      ],
+      "member_id": "orbit-878981e9-56bf-437b-84a9-929e3b5fa70a",
+      "tool_call_id": "call_a60937f1c93147e5bd3028ec",
+      "model": "kimi-code/k3-256k",
+      "result": null,
+      "verification": null,
+      "finished_at": null,
+      "objective": "Implement importExpenses(text) in src/importer.mjs as a pure function per SPEC.md, then run the project acceptance suite with the project-provided runtime and report results natively.",
+      "requirements": [
+        "Implement src/importer.mjs exporting importExpenses(text) exactly per SPEC.md",
+        "Strip one leading BOM; accept LF and CRLF; ignore blank lines but keep counting them for 1-based line numbers in error messages",
+        "Require exact header 'category,amount'; throw Error mentioning line 1 otherwise",
+        "Each nonblank data line must have exactly two columns; trim both; category nonempty",
+        "Amount must match ^\\d+\\.\\d{2}$ (nonnegative, exactly two fractional digits, no sign/exponent)",
+        "Compute integer cents exactly; reject any value, per-category sum, or overall sum outside Number.MAX_SAFE_INTEGER",
+        "Preserve first-seen category order; return {groups:[{category,totalCents,count}],totalCents,count}",
+        "On invalid data throw Error whose message includes the original one-based line number",
+        "Do NOT modify tests/acceptance.mjs, SPEC.md, package.json, or any file other than src/importer.mjs; no commits, no pushes, no dependency downloads, no network services",
+        "After implementing, actually run npm test via the project runtime and report the full command, exit code, and output"
+      ],
+      "context": "Project root: /private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/positive. The project ships a complete .runtime copy of the existing Node/npm (bin/npm points into the project's own npm package entry). Tests write CLI temp inputs under os.tmpdir(), so TMPDIR must be set to the project's .test-tmp/ directory; no writes outside the project. Report before returning: send the actual results, full test command, exit code, and limitations via the native hub/peer message interface to Root (Main) and obtain a successful acknowledgment, then return results; the yield payload alone does not count as the hub message.",
+      "decisions": [
+        "Regex-based amount validation ^\\d+\\.\\d{2}$ with integer-cents arithmetic via string splitting, not floating-point",
+        "Single pass over split lines with a Map keyed by category to preserve first-seen order",
+        "Overflow checked after each line per category and on the running grand total"
+      ],
+      "input_materials": [
+        "SPEC.md",
+        "tests/acceptance.mjs",
+        "package.json"
+      ],
+      "scope": {
+        "allowed_paths": [
+          "src/importer.mjs",
+          "src/cli.mjs",
+          "SPEC.md",
+          "tests/acceptance.mjs",
+          "package.json",
+          "README.md",
+          ".runtime",
+          ".test-tmp"
+        ],
+        "allowed_tools": [
+          "read",
+          "write",
+          "edit",
+          "bash",
+          "glob",
+          "grep"
+        ],
+        "allowed_commands": [
+          "TMPDIR=$PWD/.test-tmp PATH=$PWD/.runtime/bin npm_config_cache=$PWD/.test-tmp/npm-cache node .runtime/lib/node_modules/npm/bin/npm-cli.js test"
+        ]
+      },
+      "acceptance": "TMPDIR=$PWD/.test-tmp PATH=$PWD/.runtime/bin npm_config_cache=$PWD/.test-tmp/npm-cache node .runtime/lib/node_modules/npm/bin/npm-cli.js test exits 0 with 'EXPENSE_VALIDATION_SUMMARY: 121 cases passed' (all 121 tests pass), and src/importer.mjs exports a pure importExpenses matching SPEC.md",
+      "escalation": "If the runtime node/npm fails (ENOENT, permission, module resolution), diagnose the actual invocation, report the concrete error via the native hub, and attempt a corrected allowed command; do not switch runtimes, install anything, or run unregistered eval subprocesses; if truly blocked, report the exact blocker",
+      "model_requirements": {
+        "relevant_indices": [
+          "coding_index",
+          "agentic_index"
+        ],
+        "required_input_modalities": [
+          "text"
+        ],
+        "required_parameters": [
+          "tools"
+        ]
+      },
+      "execution": "delegate",
+      "dependencies": []
+    }
+  }
+}

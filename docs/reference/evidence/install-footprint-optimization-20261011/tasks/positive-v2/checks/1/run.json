@@ -1,0 +1,12 @@
+{
+  "format": "orbit-check-run-1",
+  "model": "opencode-go/deepseek-v4.1-flash",
+  "role": "reviewer",
+  "pid": 83157,
+  "pgid": 83157,
+  "started_at": "2026-10-11T04:41:18Z",
+  "snapshot": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/positive-v2/.orbit/tasks/40911d14-3d71-484a-ba29-5a2d9b403d33/checks/1/workspace",
+  "output_dir": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/positive-v2/.orbit/tasks/40911d14-3d71-484a-ba29-5a2d9b403d33/checks/1",
+  "schema": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/positive-v2/.orbit/tasks/40911d14-3d71-484a-ba29-5a2d9b403d33/checks/1/check-result.schema.json",
+  "executable": "bun"
+}

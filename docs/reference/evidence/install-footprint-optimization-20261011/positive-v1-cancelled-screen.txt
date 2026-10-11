@@ -1,0 +1,60 @@
+│ Tests write CLI temp inputs under os.tmpdir(); TMPDIR above keeps them in the project's .test-tmp/. No writes │
+│ outside the project. No commits, pushes, dependency downloads, or network services.                           │
+│                                                                                                               │
+│ Acceptance                                                                                                    │
+│                                                                                                               │
+│ The exact command above exits 0 and prints EXPENSE_VALIDATION_SUMMARY: 121 cases passed.                      │
+│                                                                                                               │
+│ Reporting constraint (mandatory, from the original user instruction)                                          │
+│                                                                                                               │
+│ After actually implementing and testing, first send your ACTUAL results — full test command, npm exit code,   │
+│ output tail, limitations — through the native hub/peer message interface to Root (Main) and obtain a          │
+│ successful acknowledgment, THEN return your result. The yield payload alone does not count as the hub         │
+│ message.                                                                                                      │
+├───────────────────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ • orbit-878981e9-56bf-437b-84a9-929e3b5fa70a ⟦orbit-m-kimi-code-k3-256k-301bb915⟧ orbit-unit: wu-335bbe7c1274 │
+│   └ bash: Running acceptance suite with shell on …                                                            │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+ Member dispatched, running. Meanwhile I own CLI and README — that's my Root work. I can write src/cli.mjs and
+ README now while waiting.
+
+ CLI: read exactly one arg; read file UTF-8; call importExpenses; print JSON to stdout; on any error print
+ concise message to stderr, exit 1, no stack.
+
+ 当成员实现 importer 时，我负责 CLI 和 README。我现在正在编写它们。
+
+╭─── ✎ Write: 🟨 src/cli.mjs · 31 lines · made executable! ─────────────────────────────────────────────────────╮
+│   1 #!/usr/bin/env node                                                                                       │
+│   2 import fs from 'node:fs';                                                                                 │
+│   3 import { importExpenses } from './importer.mjs';                                                          │
+│   4                                                                                                           │
+│   5 const usage = 'usage: node src/cli.mjs <input.csv>';                                                      │
+│   6                                                                                                           │
+│ … 25 more lines ⟦⌃O: Expand⟧                                                                                  │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+ CLI stub is done. While waiting for member, write README (my responsibility).
+
+╭─── ✎ Write: 📝 README.md · 44 lines ──────────────────────────────────────────────────────────────────────────╮
+│   1 # Expense Importer                                                                                        │
+│   2                                                                                                           │
+│   3 CSV expense importer: pure `importExpenses(text)` in `src/importer.mjs` and a CLI in `src/cli.mjs`. No    │
+│ dependencies.                                                                                                 │
+│   4                                                                                                           │
+│   5 ## CLI                                                                                                    │
+│   6                                                                                                           │
+│ … 38 more lines ⟦⌃O: Expand⟧                                                                                  │
+╰───────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
+
+ Member still running. I have CLI+README done. Blocked on member result — wait.
+
+⚠ Wait
+⚠ Operation aborted
+
+
+  F5 to retry
+
+╭── π > ◔ GLM-5.3-Flash > 🗑 orbit-slim-82nka8ra/fixtures/positive > ⑂ main *3 > $0.00 (+0.97) ▶─3%───────┃─1M───╮
+╰─                                                                                                             ─╯
+Orbit：已暂停（已确认停止；若仍需交付请新建任务）

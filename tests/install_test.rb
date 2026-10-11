@@ -49,11 +49,23 @@ module InstallTest
         printf '%s\\n' "${ORBIT_FIXTURE_BUN_VERSION:-1.3.14}"
         exit 0
       fi
+      if [ "$1" = -e ]; then
+        case "$2" in
+          *process.platform*) printf '["darwin","arm64"]'; exit 0 ;;
+          *) [ -z "$ORBIT_FIXTURE_NATIVE_LOAD_FAIL" ]; exit $? ;;
+        esac
+      fi
+      for group in optional peer dev; do
+        case " $* " in
+          *" --omit $group "*) ;;
+          *) echo "fixture bun: $group dependencies must be omitted" >&2; exit 2 ;;
+        esac
+      done
       if [ "$1" = install ] && [ "$2" = --frozen-lockfile ]; then
         version=#{Orbit::OmpEntry::PINNED_SDK_VERSION}
       elif [ "$1" = add ] && [ "$2" = --exact ]; then
         version="${3##*@}"
-        node -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync("package.json")); p.dependencies["@oh-my-pi/pi-coding-agent"]=process.argv[1]; p.dependencies["@oh-my-pi/pi-utils"]=process.argv[1]; fs.writeFileSync("package.json",JSON.stringify(p))' "$version"
+        node -e 'const fs=require("fs"); const p=JSON.parse(fs.readFileSync("package.json")); for(const spec of process.argv.slice(1).filter(s=>s.startsWith("@oh-my-pi/"))) { const i=spec.lastIndexOf("@"); p.dependencies[spec.slice(0,i)]=spec.slice(i+1); } fs.writeFileSync("package.json",JSON.stringify(p))' "$@"
       else
         echo "fixture bun: unexpected arguments: $*" >&2
         exit 2
@@ -64,6 +76,16 @@ module InstallTest
       fi
       mkdir -p node_modules/@oh-my-pi/pi-coding-agent || exit 1
       printf '{"name":"@oh-my-pi/pi-coding-agent","version":"%s"}\\n' "${ORBIT_FIXTURE_SDK_VERSION:-$version}" > node_modules/@oh-my-pi/pi-coding-agent/package.json
+      for name in pi-ai pi-utils; do
+        mkdir -p "node_modules/@oh-my-pi/$name" || exit 1
+        printf '{"version":"%s"}\\n' "$version" > "node_modules/@oh-my-pi/$name/package.json"
+      done
+      if [ -z "$ORBIT_FIXTURE_NATIVE_MISSING" ]; then
+        mkdir -p node_modules/@oh-my-pi/pi-natives-darwin-arm64 || exit 1
+        printf '{"version":"%s"}\\n' "$version" > node_modules/@oh-my-pi/pi-natives-darwin-arm64/package.json
+      fi
+      mkdir -p "$BUN_INSTALL_CACHE_DIR" || exit 1
+      printf 'installation cache\\n' > "$BUN_INSTALL_CACHE_DIR/fixture-download"
       exit 0
     SH
     File.chmod(0o755, bun)
@@ -286,6 +308,8 @@ module InstallTest
     assert(File.file?(sdk) && JSON.parse(File.read(sdk)).fetch("version") == Orbit::OmpEntry::PINNED_SDK_VERSION,
            "the release carries the pinned reviewer SDK")
     assert(File.file?(File.join(active, "runners/omp-reviewer/bun.lock")), "the release carries the reviewer lockfile")
+    assert(%w[.npm-cache .bun-cache].none? { |name| File.exist?(File.join(active, name)) },
+           "the installed release retains runtime modules but not installation caches")
     installed_omp_entry
     diagnosis = JSON.parse(run(File.join(@bin, "orbit"), "doctor", "--json", cwd: "/"))
     assert(diagnosis.dig("installation", "ready") && diagnosis.dig("connection", "ready").nil?, "installed CLI does not prove a connected session")
@@ -446,7 +470,8 @@ module InstallTest
     record = json(File.join(release, OrbitInstall::RELEASE))
     expected = Orbit::OmpEntry::MINIMUM_OMP_VERSION
     assert(sdk["version"] == expected && declared.dig("dependencies", "@oh-my-pi/pi-coding-agent") == expected &&
-           declared.dig("dependencies", "@oh-my-pi/pi-utils") == expected && record["reviewer_sdk_version"] == expected,
+           declared.dig("dependencies", "@oh-my-pi/pi-utils") == expected &&
+           declared.dig("dependencies", "@oh-my-pi/pi-ai") == expected && record["reviewer_sdk_version"] == expected,
            "the staged reviewer matches the installed host rather than the source SDK lock")
   end
 
@@ -476,6 +501,17 @@ module InstallTest
                                        File.join(@bin, "orbit"), "update", chdir: "/")
     assert(!status.success? && err.include?("bun failed"), "a failing bun install aborts the update (#{err})")
     assert(version == before && active == old, "the previous release stays active after a failed reviewer install")
+  end
+
+  def reviewer_native_failure_keeps_old_release
+    install
+    before = version
+    old = active
+    %w[ORBIT_FIXTURE_NATIVE_MISSING ORBIT_FIXTURE_NATIVE_LOAD_FAIL].each do |failure|
+      _out, err, status = Open3.capture3(@env.merge(failure => "1"), File.join(@bin, "orbit"), "update", chdir: "/")
+      assert(!status.success?, "missing or unloadable native runtime aborts preparation (#{err})")
+      assert(version == before && active == old, "native runtime failure retains the previous release")
+    end
   end
 
   def uninstall_preserves_user_files
@@ -630,6 +666,7 @@ module InstallTest
     puts "INSTALL_TEST_PASS missing_prerequisites"
     %i[first_install successful_update old_wrapper_update update_keeps_referenced_release failed_update
        reviewer_tracks_host_version reviewer_sdk_version_mismatch_keeps_old_release reviewer_install_failure_keeps_old_release
+       reviewer_native_failure_keeps_old_release
        failed_legacy_cleanup_keeps_old_version upgrade_keeps_unowned_orbit_entry_and_reports_uncertainty
        uninstall_preserves_user_files shell_configuration].each do |test|
       fixture { send(test) }

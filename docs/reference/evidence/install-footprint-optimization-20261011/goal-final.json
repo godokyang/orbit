@@ -1,0 +1,13 @@
+{
+  "goal": {
+    "threadId": "01a123d6-9986-7d12-b447-f6ebcffb40e9",
+    "objective": "在 /Users/yangke/Personal/omen/orbit 完成用户批准的安装体积优化：省略独立 OMP 检查器不用的本地模型/语音可选依赖，显式保留匹配 SDK 的当前平台原生组件，防止检查器触发相关自动下载；保留 SDK 对齐、只读检查、安装切换/失败保留/旧版本生命周期；完成隔离冷安装、实际已安装 Orbit 模型检查及权限/取消清理验证，记录体积和边界，同步文档并清理本轮临时资源。保留全部已有工作，不替换 CLI/RPC、不共享全局 SDK、不维护 Fork；本轮不升版、提交、推送或更改用户全局安装。",
+    "status": "complete",
+    "tokensUsed": 415228,
+    "timeUsedSeconds": 2182,
+    "createdAt": 1791692071,
+    "updatedAt": 1791694253
+  },
+  "remainingTokens": null,
+  "completionBudgetReport": "Goal achieved. Report final usage from this tool result's structured goal fields. If `goal.tokenBudget` is present, include token usage from `goal.tokensUsed` and `goal.tokenBudget`. If `goal.timeUsedSeconds` is greater than 0, summarize elapsed time in a concise, human-friendly form appropriate to the response language."
+}

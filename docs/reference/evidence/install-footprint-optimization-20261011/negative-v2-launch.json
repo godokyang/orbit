@@ -1,0 +1,58 @@
+{
+  "role": "negative-v2",
+  "pane": "w23:p1A",
+  "fixture": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/negative-v2",
+  "launch_argv": [
+    "env",
+    "XDG_CONFIG_HOME=/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/config",
+    "XDG_CACHE_HOME=/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/cache",
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/bin-final/orbit",
+    "omp",
+    "--cwd",
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/negative-v2",
+    "--model",
+    "zhipu-coding-plan/glm-5.3-flash",
+    "--thinking",
+    "medium",
+    "--no-extensions",
+    "--no-skills",
+    "--no-lsp",
+    "--no-title",
+    "--session-dir",
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/sessions-negative-v2"
+  ],
+  "launch_at": "2026-10-11T04:24:47.574137+00:00",
+  "build": {
+    "source": {
+      "kind": "local",
+      "path": "/Users/yangke/Personal/omen/orbit",
+      "commit": "5e781e44f0c35bbdea0c6fae91ca6a73aac3a983",
+      "dirty": true
+    },
+    "content_digest": "22fb7d27074c4a06ca743787b3ade4a9a5040c8260b50e5551ea245e6040cb65",
+    "installed_at": "2026-10-11T04:20:19Z",
+    "version": "0.8.4"
+  },
+  "creation": {
+    "id": "cli:pane:split",
+    "result": {
+      "pane": {
+        "agent_status": "unknown",
+        "cwd": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/negative-v2",
+        "focused": false,
+        "foreground_cwd": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/negative-v2",
+        "pane_id": "w23:p1A",
+        "revision": 0,
+        "scroll": {
+          "max_offset_from_bottom": 0,
+          "offset_from_bottom": 0,
+          "viewport_rows": 49
+        },
+        "tab_id": "w23:t1",
+        "terminal_id": "term_65d88f63080cc3c",
+        "workspace_id": "w23"
+      },
+      "type": "pane_info"
+    }
+  }
+}

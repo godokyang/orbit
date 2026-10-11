@@ -1,0 +1,11 @@
+{
+  "command": [
+    "bun",
+    "-e",
+    "const {Settings}=await import(\"@oh-my-pi/pi-coding-agent\"); const s=await Settings.isolated({\"memory.backend\":\"off\",\"memories.enabled\":false,\"stt.enabled\":false}); await import(\"@oh-my-pi/pi-natives\"); console.log(JSON.stringify({sdk:\"18.3.4\",settingsCreated:s!=null,settingsType:s.constructor.name}));"
+  ],
+  "exit": 0,
+  "stdout": "{\"sdk\":\"18.3.4\",\"settingsCreated\":true,\"settingsType\":\"Settings\"}\n",
+  "stderr": "",
+  "prior_probe_error": "Test tried s.get which is absent on this SDK; production reviewer does not call it."
+}

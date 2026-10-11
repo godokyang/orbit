@@ -1,0 +1,19 @@
+{
+  "attempt_id": "orbit-check-aa8eefe2-91b3-4b6d-b815-ba4c437c51d1",
+  "ok": false,
+  "review_ran": false,
+  "probe_ran": false,
+  "result": null,
+  "model": null,
+  "usage": null,
+  "usage_gaps": [],
+  "snapshot_image_reads": [],
+  "snapshot": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/probe-snapshot",
+  "profile": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/compat-probe-profile-v3",
+  "out": "/Users/yangke/Personal/omen/orbit/docs/reference/evidence/install-footprint-optimization-20261011/source-pin-probe-v3.json",
+  "sdk_version": "18.3.4",
+  "diagnostic_stack": "Error: Command failed: ruby --disable-gems -e require \"/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/compat-project/lib/orbit/workspace_snapshot.rb\"\nputs Orbit::WorkspaceSnapshot.fingerprint(project_root: ARGV[0]) /var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/probe-snapshot\n-e:1:in 'Kernel#require': cannot load such file -- /private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/compat-project/lib/orbit/workspace_snapshot.rb (LoadError)\n\tfrom -e:1:in '<main>'\n\n    at genericNodeError (node:child_process:998:22)\n    at checkExecSyncError (node:child_process:458:27)\n    at execFileSync (node:child_process:269:31)\n    at fingerprint (/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/compat-project/runners/omp-reviewer/reviewer.ts:138:9)\n    at /private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/compat-project/runners/omp-reviewer/reviewer.ts:338:46\n    at processTicksAndRejections (native:7:39)",
+  "problems": [
+    "Command failed: ruby --disable-gems -e require \"/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/compat-project/lib/orbit/workspace_snapshot.rb\"\nputs Orbit::WorkspaceSnapshot.fingerprint(project_root: ARGV[0]) /var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/probe-snapshot\n-e:1:in 'Kernel#require': cannot load such file -- /private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/compat-project/lib/orbit/workspace_snapshot.rb (LoadError)\n\tfrom -e:1:in '<main>'\n"
+  ]
+}

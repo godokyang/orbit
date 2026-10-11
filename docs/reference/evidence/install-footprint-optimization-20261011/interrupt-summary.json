@@ -1,0 +1,1609 @@
+{
+  "task_dir": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/interrupt/.orbit/tasks/489bc2bc-e4d2-4ab7-b055-d2c486fdeb34",
+  "id": "489bc2bc-e4d2-4ab7-b055-d2c486fdeb34",
+  "status": "complete",
+  "created_at": "2026-10-11T04:24:22Z",
+  "workspace": {
+    "project_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/interrupt",
+    "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/interrupt",
+    "project": {
+      "path": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/interrupt",
+      "git": true,
+      "common_dir": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/interrupt/.git",
+      "worktree": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/interrupt",
+      "head": "a49a154f9829ca22205a6665cd702fd2895a87a1"
+    },
+    "artifact": {
+      "path": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/interrupt",
+      "git": true,
+      "common_dir": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/interrupt/.git",
+      "worktree": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/interrupt",
+      "head": "a49a154f9829ca22205a6665cd702fd2895a87a1"
+    },
+    "bound_at": "2026-10-11T04:24:22Z",
+    "history": []
+  },
+  "jev": {
+    "provider": "typesafe",
+    "model": "jev-1.13.0",
+    "question_set_version": "jev-observation-2",
+    "usage": {
+      "input_tokens": 2299,
+      "output_tokens": 55
+    },
+    "call_id": "orbit-judgment-8b8ac9b3-9824-4746-822f-edb5fd15453e",
+    "requested_model": "jev-1.13.0",
+    "status": "assessed",
+    "scores": {
+      "stuck": 0.18,
+      "off_track": 0.13,
+      "artifact_ready": 0.52
+    },
+    "assessed_at": "2026-10-11T04:25:56Z"
+  },
+  "member_selections": {},
+  "delegation_hint": null,
+  "checker_selection": {
+    "model": "kimi-code/k3-256k",
+    "basis": "pool_order_unreleased",
+    "candidates": [
+      "kimi-code/k3-256k",
+      "zenmux/deepseek/deepseek-v4.1-flash",
+      "zhipu-coding-plan/glm-5.3-flash",
+      "cursor/grok-4.7-fast",
+      "cursor/grok-4.7",
+      "openai-codex/gpt-6.1-sol",
+      "openai-codex/gpt-6-luna"
+    ],
+    "selection_tier": "fallback",
+    "notice": "候选池降级选择：独立检查模型质量未经证实",
+    "version": "orbit-checker-selection-v7",
+    "cost_comparison": "not_applied",
+    "reason": "a reviewed release covers this task profile but the judgment is unanswered or from another provider, model, input version or question set",
+    "source": "candidate_pool",
+    "model_identity": {
+      "provider": "kimi-code",
+      "model": "k3-256k",
+      "reasoning": "unknown",
+      "billing_route": "subscription_quota"
+    },
+    "quality_score": null,
+    "source_agent_dir": "/Users/yangke/.omp/agent",
+    "quality_basis": "unknown",
+    "quality_sources": [],
+    "quality_evidence_valid_until": null,
+    "recommendation_hold": false,
+    "hold_reason": null,
+    "model_overview_status": "fresh",
+    "model_overview_prior": null,
+    "model_overview_refresh": {
+      "status": "fresh",
+      "fetched_at": "2026-10-11T04:22:20Z",
+      "model_count": 440,
+      "benchmark_count": 346
+    },
+    "eligibility": {
+      "context": {
+        "status": "not_required",
+        "requirement": null,
+        "catalog_value": 1048576
+      },
+      "input_modalities": {
+        "status": "not_required",
+        "requirement": [],
+        "catalog_value": [
+          "text",
+          "image",
+          "video"
+        ]
+      },
+      "output_modalities": {
+        "status": "not_required",
+        "requirement": [],
+        "catalog_value": [
+          "text"
+        ]
+      },
+      "parameters": {
+        "status": "not_required",
+        "requirement": [],
+        "catalog_value": [
+          "frequency_penalty",
+          "include_reasoning",
+          "logit_bias",
+          "logprobs",
+          "max_tokens",
+          "min_p",
+          "presence_penalty",
+          "reasoning",
+          "reasoning_effort",
+          "repetition_penalty",
+          "response_format",
+          "seed",
+          "stop",
+          "structured_outputs",
+          "temperature",
+          "tool_choice",
+          "tools",
+          "top_k",
+          "top_logprobs",
+          "top_p"
+        ]
+      }
+    },
+    "execution_eligibility": {
+      "context": {
+        "status": "not_required",
+        "requirement": null,
+        "configured_limit": 262144,
+        "source": "omp_model_registry"
+      },
+      "input_modalities": {
+        "status": "not_required",
+        "requirement": [],
+        "configured_values": [
+          "text",
+          "image"
+        ]
+      },
+      "output_modalities": {
+        "status": "not_required",
+        "requirement": [],
+        "configured_values": [
+          "text"
+        ]
+      },
+      "parameters": {
+        "status": "not_required",
+        "requirement": [],
+        "note": "模型工具支持不代替成员实际工具授权"
+      }
+    },
+    "judgment_provider": null,
+    "judgment_model": null,
+    "judgment_call_id": null,
+    "judgment_status": null,
+    "judgment_requested_model": null,
+    "question_set_version": null,
+    "judgment_error": null,
+    "release": {
+      "model": "jev-1.13.0",
+      "provider": "typesafe",
+      "thresholds": {
+        "handoff_fit": 0.7,
+        "member_task_fit": 0.65,
+        "candidate_task_fit": 0.65,
+        "checker_task_fit": 0.6
+      },
+      "scope": "bounded_git_delivery_v1",
+      "question_set_versions": {
+        "observation": "jev-observation-2",
+        "delegation": "jev-delegation-4",
+        "candidates": "jev-candidates-4",
+        "checker_quality": "jev-checker-task-fit-5"
+      },
+      "question_digest": "0fc3d712f60167edb572d039a2c9d5b35b0e9295a4a38bf9db597e3682ac7ca8",
+      "input_version": "jev-selection-input-2",
+      "decision_version": "orbit-quality-decision-4",
+      "structural_validation": "passed",
+      "proves_samples_real": false,
+      "allows_positive_ranking": true,
+      "release": {
+        "reason": "Decision-4 independent review: unchanged question bodies, input profile, model and thresholds. handoff_fit gates bounded handoff structure; member_task_fit is a preserved diagnostic limitation; each candidate must independently clear its existing candidate_task_fit release and capability holds. Unknown price/quota/routes remain unknown; Root retains pool selection authority. The original 17 labels / 14 calls are preserved verbatim as per-question evidence, including negative, missing evidence, failure and holdout; they were not rerun and do not prove the newly composed production path. Completion additionally requires a fresh installed orbit omp ordinary-task recommendation/dispatch/integration/check/stop run.; independent OMP 2 approves bounded_git_delivery_v1 activation for isolated live acceptance; ordinary native recommendation/dispatch/integration/check/confirmed-stop remains the completion gate. Per-question historical calls are unchanged and do not prove the new combination live.",
+        "scope": "bounded_git_delivery_v1",
+        "reviewed_by": "OMP 2 (kimi-code/k3-256k, w22:p3) 独立原件复核",
+        "reviewed_at": "2026-10-01T19:02:16Z",
+        "sample_count": 17,
+        "sample_digest": "5a30130a022abd2bc1b35a6ebe61c2ea4fe0e750cafbb0d23d6d51de973d03cc"
+      }
+    },
+    "route_cost_inputs": {},
+    "calibration_note": null,
+    "requirements_error": null,
+    "task_fit_scores": {},
+    "unscored_candidates": [
+      "kimi-code/k3-256k",
+      "zenmux/deepseek/deepseek-v4.1-flash",
+      "zhipu-coding-plan/glm-5.3-flash",
+      "cursor/grok-4.7-fast",
+      "cursor/grok-4.7",
+      "openai-codex/gpt-6.1-sol",
+      "openai-codex/gpt-6-luna"
+    ],
+    "evidence_needed": [
+      {
+        "model": "kimi-code/k3-256k",
+        "reasoning": "unknown",
+        "billing_route": "subscription_quota",
+        "status": "absent"
+      },
+      {
+        "model": "zenmux/deepseek/deepseek-v4.1-flash",
+        "reasoning": "unknown",
+        "billing_route": "unknown",
+        "status": "absent"
+      },
+      {
+        "model": "zhipu-coding-plan/glm-5.3-flash",
+        "reasoning": "unknown",
+        "billing_route": "subscription_quota",
+        "status": "absent"
+      },
+      {
+        "model": "cursor/grok-4.7-fast",
+        "reasoning": "unknown",
+        "billing_route": "unknown",
+        "status": "absent"
+      },
+      {
+        "model": "cursor/grok-4.7",
+        "reasoning": "unknown",
+        "billing_route": "unknown",
+        "status": "absent"
+      },
+      {
+        "model": "openai-codex/gpt-6.1-sol",
+        "reasoning": "unknown",
+        "billing_route": "unknown",
+        "status": "absent"
+      },
+      {
+        "model": "openai-codex/gpt-6-luna",
+        "reasoning": "unknown",
+        "billing_route": "unknown",
+        "status": "absent"
+      }
+    ],
+    "judgment_state": null,
+    "usage": null,
+    "selected_for": "reviewer",
+    "selected_at": "2026-10-11T04:25:31Z",
+    "signature": "7247a7c77eb579e858be93091568e8b25ec9de3da9c8b5cbe75495591da2556a"
+  },
+  "usage": {
+    "tokens": null,
+    "jev_entry": {
+      "input_tokens": 845,
+      "output_tokens": 63
+    },
+    "resource_calls": {
+      "schema_version": "orbit-resource-calls-v1",
+      "coverage": "recorded_calls_only",
+      "call_count": 16,
+      "status_counts": {
+        "completed": 16,
+        "failed": 0,
+        "unknown": 0
+      },
+      "unknown_usage_calls": 0,
+      "partial_usage_calls": 0,
+      "usage_status_counts": {
+        "reported": 16,
+        "partial": 0,
+        "unknown": 0
+      },
+      "noted_usage_calls": 0,
+      "unknown_actual_model_calls": 0,
+      "attempt_count": 3,
+      "calls_without_attempt": 3,
+      "call_id_origins": {
+        "local_provider_invocation": 16
+      },
+      "calls_without_call_id_origin": 0,
+      "unknown_upstream_model_calls": 16,
+      "calls_with_credential_id": 13,
+      "unknown_account_identity_calls": 14,
+      "groups": [
+        {
+          "role": "judgment",
+          "phase": "jev_entry",
+          "actual_identity": {
+            "provider": "typesafe",
+            "model": "jev-1.13.0",
+            "reasoning": null,
+            "billing_route": "unknown",
+            "scope": "judgment_service"
+          },
+          "usage_source": "provider_response",
+          "call_count": 1,
+          "status_counts": {
+            "completed": 1,
+            "failed": 0,
+            "unknown": 0
+          },
+          "usage_fields": {
+            "input_tokens": {
+              "reported_sum": 845,
+              "unit": "token",
+              "reported_calls": 1,
+              "missing_calls": 0
+            },
+            "output_tokens": {
+              "reported_sum": 63,
+              "unit": "token",
+              "reported_calls": 1,
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "root",
+          "phase": "root_execution",
+          "actual_identity": {
+            "provider": "zhipu-coding-plan",
+            "model": "glm-5.3-flash",
+            "reasoning": null,
+            "billing_route": "subscription_quota",
+            "scope": "omp_route"
+          },
+          "usage_source": "native_message",
+          "call_count": 2,
+          "status_counts": {
+            "completed": 2,
+            "failed": 0,
+            "unknown": 0
+          },
+          "usage_fields": {
+            "cacheRead": {
+              "reported_sum": 24768,
+              "unit": "token",
+              "reported_calls": 2,
+              "missing_calls": 0
+            },
+            "cacheWrite": {
+              "reported_sum": 0,
+              "unit": "token",
+              "reported_calls": 2,
+              "missing_calls": 0
+            },
+            "input": {
+              "reported_sum": 1197,
+              "unit": "token",
+              "reported_calls": 2,
+              "missing_calls": 0
+            },
+            "output": {
+              "reported_sum": 129,
+              "unit": "token",
+              "reported_calls": 2,
+              "missing_calls": 0
+            },
+            "totalTokens": {
+              "reported_sum": 26094,
+              "unit": "token",
+              "reported_calls": 2,
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "root",
+          "phase": "root_execution",
+          "actual_identity": {
+            "provider": "zhipu-coding-plan",
+            "model": "glm-5.3-flash",
+            "reasoning": null,
+            "billing_route": "subscription_quota",
+            "scope": "omp_route"
+          },
+          "usage_source": "native_message",
+          "call_count": 6,
+          "status_counts": {
+            "completed": 6,
+            "failed": 0,
+            "unknown": 0
+          },
+          "usage_fields": {
+            "cacheRead": {
+              "reported_sum": 72768,
+              "unit": "token",
+              "reported_calls": 6,
+              "missing_calls": 0
+            },
+            "cacheWrite": {
+              "reported_sum": 0,
+              "unit": "token",
+              "reported_calls": 6,
+              "missing_calls": 0
+            },
+            "input": {
+              "reported_sum": 17189,
+              "unit": "token",
+              "reported_calls": 6,
+              "missing_calls": 0
+            },
+            "output": {
+              "reported_sum": 1116,
+              "unit": "token",
+              "reported_calls": 6,
+              "missing_calls": 0
+            },
+            "reasoningTokens": {
+              "reported_sum": 304,
+              "unit": "token",
+              "reported_calls": 6,
+              "missing_calls": 0
+            },
+            "totalTokens": {
+              "reported_sum": 91073,
+              "unit": "token",
+              "reported_calls": 6,
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "judgment",
+          "phase": "jev_stage1",
+          "actual_identity": {
+            "provider": "typesafe",
+            "model": "jev-1.13.0",
+            "reasoning": null,
+            "billing_route": "unknown",
+            "scope": "judgment_service"
+          },
+          "usage_source": "provider_response",
+          "call_count": 2,
+          "status_counts": {
+            "completed": 2,
+            "failed": 0,
+            "unknown": 0
+          },
+          "usage_fields": {
+            "input_tokens": {
+              "reported_sum": 3318,
+              "unit": "token",
+              "reported_calls": 2,
+              "missing_calls": 0
+            },
+            "output_tokens": {
+              "reported_sum": 110,
+              "unit": "token",
+              "reported_calls": 2,
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "checker",
+          "phase": "reviewer",
+          "actual_identity": {
+            "provider": "opencode-go",
+            "model": "deepseek-v4.1-flash",
+            "reasoning": null,
+            "billing_route": "unknown",
+            "scope": "omp_route"
+          },
+          "usage_source": "native_message",
+          "call_count": 2,
+          "status_counts": {
+            "completed": 2,
+            "failed": 0,
+            "unknown": 0
+          },
+          "usage_fields": {
+            "cacheRead": {
+              "reported_sum": 11008,
+              "unit": "token",
+              "reported_calls": 2,
+              "missing_calls": 0
+            },
+            "cacheWrite": {
+              "reported_sum": 0,
+              "unit": "token",
+              "reported_calls": 2,
+              "missing_calls": 0
+            },
+            "input": {
+              "reported_sum": 7048,
+              "unit": "token",
+              "reported_calls": 2,
+              "missing_calls": 0
+            },
+            "output": {
+              "reported_sum": 3600,
+              "unit": "token",
+              "reported_calls": 2,
+              "missing_calls": 0
+            },
+            "reasoningTokens": {
+              "reported_sum": 2457,
+              "unit": "token",
+              "reported_calls": 2,
+              "missing_calls": 0
+            },
+            "totalTokens": {
+              "reported_sum": 21656,
+              "unit": "token",
+              "reported_calls": 2,
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "checker",
+          "phase": "reviewer",
+          "actual_identity": {
+            "provider": "opencode-go",
+            "model": "deepseek-v4.1-flash",
+            "reasoning": null,
+            "billing_route": "unknown",
+            "scope": "omp_route"
+          },
+          "usage_source": "native_message",
+          "call_count": 1,
+          "status_counts": {
+            "completed": 1,
+            "failed": 0,
+            "unknown": 0
+          },
+          "usage_fields": {
+            "cacheRead": {
+              "reported_sum": 8704,
+              "unit": "token",
+              "reported_calls": 1,
+              "missing_calls": 0
+            },
+            "cacheWrite": {
+              "reported_sum": 0,
+              "unit": "token",
+              "reported_calls": 1,
+              "missing_calls": 0
+            },
+            "input": {
+              "reported_sum": 267,
+              "unit": "token",
+              "reported_calls": 1,
+              "missing_calls": 0
+            },
+            "output": {
+              "reported_sum": 149,
+              "unit": "token",
+              "reported_calls": 1,
+              "missing_calls": 0
+            },
+            "totalTokens": {
+              "reported_sum": 9120,
+              "unit": "token",
+              "reported_calls": 1,
+              "missing_calls": 0
+            }
+          }
+        },
+        {
+          "role": "checker",
+          "phase": "reviewer",
+          "actual_identity": {
+            "provider": "kimi-code",
+            "model": "k3-256k",
+            "reasoning": null,
+            "billing_route": "unknown",
+            "scope": "omp_route"
+          },
+          "usage_source": "native_message",
+          "call_count": 2,
+          "status_counts": {
+            "completed": 2,
+            "failed": 0,
+            "unknown": 0
+          },
+          "usage_fields": {
+            "cacheRead": {
+              "reported_sum": 8448,
+              "unit": "token",
+              "reported_calls": 2,
+              "missing_calls": 0
+            },
+            "cacheWrite": {
+              "reported_sum": 0,
+              "unit": "token",
+              "reported_calls": 2,
+              "missing_calls": 0
+            },
+            "input": {
+              "reported_sum": 9049,
+              "unit": "token",
+              "reported_calls": 2,
+              "missing_calls": 0
+            },
+            "output": {
+              "reported_sum": 797,
+              "unit": "token",
+              "reported_calls": 2,
+              "missing_calls": 0
+            },
+            "totalTokens": {
+              "reported_sum": 18294,
+              "unit": "token",
+              "reported_calls": 2,
+              "missing_calls": 0
+            }
+          }
+        }
+      ],
+      "cost": null,
+      "quota_consumption": null,
+      "note": "reported fields are never summed across categories; cost and quota stay unknown here"
+    },
+    "resource_call_gaps": {
+      "native_execution": ""
+    },
+    "jev_stage1": {
+      "input_tokens": 3318,
+      "output_tokens": 110,
+      "incomplete": false
+    },
+    "check_tokens": 49070,
+    "check_tokens_reported_subtotal": 49070,
+    "check_usage_missing_attempts": 0
+  },
+  "members": [],
+  "checks": [
+    {
+      "number": 1,
+      "role": "reviewer",
+      "kind": "artifact",
+      "started_at": "2026-10-11T04:24:51Z",
+      "finished_at": "2026-10-11T04:25:26Z",
+      "trigger_cause": "manual_check",
+      "manual": true,
+      "stale": false,
+      "usage": {
+        "usage_status": "reported",
+        "incomplete": false,
+        "calls": [
+          {
+            "call_id": "orbit-call-fff54d2e-ad10-4339-beae-4f5c43160627",
+            "origin": "local_provider_invocation",
+            "usage_status": "reported",
+            "provider_response_id": "021791692699318d82d61e1341a38f1d55b18f5893f198b16445a",
+            "provider": "opencode-go",
+            "model": "deepseek-v4.1-flash",
+            "requested_model": "opencode-go/deepseek-v4.1-flash",
+            "stop_reason": "toolUse",
+            "completed_at": "2026-10-11T04:25:00.759Z",
+            "input": 6779,
+            "output": 108,
+            "cacheRead": 2048,
+            "cacheWrite": 0,
+            "reasoningTokens": 7,
+            "totalTokens": 8935
+          },
+          {
+            "call_id": "orbit-call-5ed9cc5d-4d4b-4591-bc75-563d0d60fd06",
+            "origin": "local_provider_invocation",
+            "usage_status": "reported",
+            "provider_response_id": "02179169270141435b29c922ac7ba22cc26b6e12169d213d53462",
+            "provider": "opencode-go",
+            "model": "deepseek-v4.1-flash",
+            "requested_model": "opencode-go/deepseek-v4.1-flash",
+            "stop_reason": "toolUse",
+            "completed_at": "2026-10-11T04:25:02.932Z",
+            "input": 267,
+            "output": 149,
+            "cacheRead": 8704,
+            "cacheWrite": 0,
+            "totalTokens": 9120
+          },
+          {
+            "call_id": "orbit-call-8aba8bd7-57d9-40ad-bcff-aff5d5316ceb",
+            "origin": "local_provider_invocation",
+            "usage_status": "reported",
+            "provider_response_id": "021791692703409a25d9fd8bbdfc574a90b55d3ae211a62f93c1d",
+            "provider": "opencode-go",
+            "model": "deepseek-v4.1-flash",
+            "requested_model": "opencode-go/deepseek-v4.1-flash",
+            "stop_reason": "stop",
+            "completed_at": "2026-10-11T04:25:25.595Z",
+            "input": 269,
+            "output": 3492,
+            "cacheRead": 8960,
+            "cacheWrite": 0,
+            "reasoningTokens": 2450,
+            "totalTokens": 12721
+          }
+        ],
+        "coverage": {
+          "input": {
+            "reported_sum": 7315,
+            "reported_calls": 3,
+            "missing_calls": 0
+          },
+          "output": {
+            "reported_sum": 3749,
+            "reported_calls": 3,
+            "missing_calls": 0
+          },
+          "cacheRead": {
+            "reported_sum": 19712,
+            "reported_calls": 3,
+            "missing_calls": 0
+          },
+          "cacheWrite": {
+            "reported_sum": 0,
+            "reported_calls": 3,
+            "missing_calls": 0
+          },
+          "reasoningTokens": {
+            "reported_sum": 2457,
+            "reported_calls": 2,
+            "missing_calls": 1
+          },
+          "totalTokens": {
+            "reported_sum": 30776,
+            "reported_calls": 3,
+            "missing_calls": 0
+          }
+        },
+        "derived_usage_fields": [
+          "input_tokens",
+          "output_tokens",
+          "total_tokens"
+        ],
+        "derived_note": "legacy reference totals from reported SDK buckets; original call fields and coverage govern resource accounting",
+        "input": 7315,
+        "output": 3749,
+        "cacheRead": 19712,
+        "cacheWrite": 0,
+        "totalTokens": 30776,
+        "input_tokens": 27027,
+        "output_tokens": 3749,
+        "total_tokens": 30776,
+        "gaps": []
+      },
+      "verdict": "check_failed",
+      "finding_ids": null,
+      "resolved_ids": null
+    },
+    {
+      "number": 2,
+      "role": "reviewer",
+      "kind": "artifact",
+      "started_at": "2026-10-11T04:25:27Z",
+      "finished_at": "2026-10-11T04:25:55Z",
+      "trigger_cause": "model_fallback",
+      "manual": true,
+      "stale": false,
+      "stale_reasons": [],
+      "usage": {
+        "usage_status": "reported",
+        "incomplete": false,
+        "calls": [
+          {
+            "call_id": "orbit-call-2d3da1d7-ddd0-4094-a212-be1a53fa7abe",
+            "origin": "local_provider_invocation",
+            "usage_status": "reported",
+            "provider_response_id": "msg_4AJYSTpL99gfsbSe86ZXU14P",
+            "provider": "kimi-code",
+            "model": "k3-256k",
+            "requested_model": "kimi-code/k3-256k",
+            "stop_reason": "toolUse",
+            "completed_at": "2026-10-11T04:25:37.498Z",
+            "input": 8641,
+            "output": 119,
+            "cacheRead": 0,
+            "cacheWrite": 0,
+            "totalTokens": 8760
+          },
+          {
+            "call_id": "orbit-call-0a999318-3b55-4ad1-9fc6-269528055d6e",
+            "origin": "local_provider_invocation",
+            "usage_status": "reported",
+            "provider_response_id": "msg_x8nwLJ6HKMVDC7ScHYL0cEL8",
+            "provider": "kimi-code",
+            "model": "k3-256k",
+            "requested_model": "kimi-code/k3-256k",
+            "stop_reason": "stop",
+            "completed_at": "2026-10-11T04:25:54.274Z",
+            "input": 408,
+            "output": 678,
+            "cacheRead": 8448,
+            "cacheWrite": 0,
+            "totalTokens": 9534
+          }
+        ],
+        "coverage": {
+          "input": {
+            "reported_sum": 9049,
+            "reported_calls": 2,
+            "missing_calls": 0
+          },
+          "output": {
+            "reported_sum": 797,
+            "reported_calls": 2,
+            "missing_calls": 0
+          },
+          "cacheRead": {
+            "reported_sum": 8448,
+            "reported_calls": 2,
+            "missing_calls": 0
+          },
+          "cacheWrite": {
+            "reported_sum": 0,
+            "reported_calls": 2,
+            "missing_calls": 0
+          },
+          "reasoningTokens": {
+            "reported_sum": null,
+            "reported_calls": 0,
+            "missing_calls": 2
+          },
+          "totalTokens": {
+            "reported_sum": 18294,
+            "reported_calls": 2,
+            "missing_calls": 0
+          }
+        },
+        "derived_usage_fields": [
+          "input_tokens",
+          "output_tokens",
+          "total_tokens"
+        ],
+        "derived_note": "legacy reference totals from reported SDK buckets; original call fields and coverage govern resource accounting",
+        "input": 9049,
+        "output": 797,
+        "cacheRead": 8448,
+        "cacheWrite": 0,
+        "totalTokens": 18294,
+        "input_tokens": 17497,
+        "output_tokens": 797,
+        "total_tokens": 18294,
+        "gaps": []
+      },
+      "verdict": "continue",
+      "finding_ids": [],
+      "resolved_ids": []
+    }
+  ],
+  "findings": {},
+  "stop_confirmation": {
+    "confirmed": true,
+    "thread_id": "01a12933-e207-7378-ad76-0f1e6884b3e0",
+    "scope": "Native session execution, attached shell processes and owner-scoped async jobs; no unmanaged detached work",
+    "native_owner": "Main",
+    "status_after": "idle",
+    "active_tools_after": 0,
+    "async_jobs_settled": true,
+    "collaboration_persistence": {
+      "task_dir": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/interrupt/.orbit/tasks/489bc2bc-e4d2-4ab7-b055-d2c486fdeb34",
+      "scope": "current process observations through cutoff; append completion, not fsync",
+      "observed_through": 5,
+      "written_seq": 5,
+      "failed_observations": 0,
+      "recorded_gaps": 0,
+      "pending_gap": null,
+      "last_error": null,
+      "status": "written"
+    }
+  },
+  "event_counts": {
+    "checker_model_selected": 3,
+    "attached": 1,
+    "native_collaboration": 5,
+    "jev_assessed": 2,
+    "check_started": 2,
+    "check_failed": 1,
+    "check_finished": 1,
+    "finalization_notice": 1,
+    "completion_stop_queued": 1,
+    "completed_via_finalized_stop": 1,
+    "stopped": 1
+  },
+  "timeline": [
+    {
+      "at": "2026-10-11T04:24:22Z",
+      "type": "checker_model_selected",
+      "selection": {
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "basis": "pool_order_unreleased",
+        "candidates": [
+          "opencode-go/deepseek-v4.1-flash",
+          "kimi-code/k3-256k",
+          "zenmux/deepseek/deepseek-v4.1-flash",
+          "zhipu-coding-plan/glm-5.3-flash",
+          "cursor/grok-4.7-fast",
+          "cursor/grok-4.7",
+          "openai-codex/gpt-6.1-sol",
+          "openai-codex/gpt-6-luna"
+        ],
+        "selection_tier": "fallback",
+        "notice": "候选池降级选择：独立检查模型质量未经证实",
+        "version": "orbit-checker-selection-v7",
+        "cost_comparison": "not_applied",
+        "reason": "a reviewed release exists but this task is outside its released profile; scores and route cost are not a positive ranking",
+        "source": "candidate_pool",
+        "model_identity": {
+          "provider": "opencode-go",
+          "model": "deepseek-v4.1-flash",
+          "reasoning": "unknown",
+          "billing_route": "subscription_quota"
+        },
+        "quality_score": null,
+        "source_agent_dir": "/Users/yangke/.omp/agent",
+        "quality_basis": "unknown",
+        "quality_sources": [],
+        "quality_evidence_valid_until": null,
+        "recommendation_hold": false,
+        "hold_reason": null,
+        "model_overview_status": "fresh",
+        "model_overview_prior": null,
+        "model_overview_refresh": {
+          "status": "fresh",
+          "fetched_at": "2026-10-11T04:22:20Z",
+          "model_count": 440,
+          "benchmark_count": 346
+        },
+        "eligibility": {
+          "context": {
+            "status": "not_required",
+            "requirement": null,
+            "catalog_value": 1048576
+          },
+          "input_modalities": {
+            "status": "not_required",
+            "requirement": [],
+            "catalog_value": [
+              "text",
+              "image"
+            ]
+          },
+          "output_modalities": {
+            "status": "not_required",
+            "requirement": [],
+            "catalog_value": [
+              "text"
+            ]
+          },
+          "parameters": {
+            "status": "not_required",
+            "requirement": [],
+            "catalog_value": [
+              "frequency_penalty",
+              "include_reasoning",
+              "logit_bias",
+              "logprobs",
+              "max_tokens",
+              "min_p",
+              "presence_penalty",
+              "reasoning",
+              "reasoning_effort",
+              "repetition_penalty",
+              "response_format",
+              "seed",
+              "stop",
+              "structured_outputs",
+              "temperature",
+              "tool_choice",
+              "tools",
+              "top_k",
+              "top_logprobs",
+              "top_p"
+            ]
+          }
+        },
+        "execution_eligibility": {
+          "context": {
+            "status": "not_required",
+            "requirement": null,
+            "configured_limit": 1000000,
+            "source": "omp_model_registry"
+          },
+          "input_modalities": {
+            "status": "not_required",
+            "requirement": [],
+            "configured_values": [
+              "text",
+              "image"
+            ]
+          },
+          "output_modalities": {
+            "status": "not_required",
+            "requirement": [],
+            "configured_values": [
+              "text"
+            ]
+          },
+          "parameters": {
+            "status": "not_required",
+            "requirement": [],
+            "note": "模型工具支持不代替成员实际工具授权"
+          }
+        },
+        "judgment_provider": null,
+        "judgment_model": null,
+        "judgment_call_id": null,
+        "judgment_status": null,
+        "judgment_requested_model": null,
+        "question_set_version": null,
+        "judgment_error": null,
+        "release": {
+          "model": "jev-1.13.0",
+          "provider": "typesafe",
+          "thresholds": {
+            "handoff_fit": 0.7,
+            "member_task_fit": 0.65,
+            "candidate_task_fit": 0.65,
+            "checker_task_fit": 0.6
+          },
+          "scope": "bounded_git_delivery_v1",
+          "question_set_versions": {
+            "observation": "jev-observation-2",
+            "delegation": "jev-delegation-4",
+            "candidates": "jev-candidates-4",
+            "checker_quality": "jev-checker-task-fit-5"
+          },
+          "question_digest": "0fc3d712f60167edb572d039a2c9d5b35b0e9295a4a38bf9db597e3682ac7ca8",
+          "input_version": "jev-selection-input-2",
+          "decision_version": "orbit-quality-decision-4",
+          "structural_validation": "passed",
+          "proves_samples_real": false,
+          "allows_positive_ranking": true,
+          "release": {
+            "reason": "Decision-4 independent review: unchanged question bodies, input profile, model and thresholds. handoff_fit gates bounded handoff structure; member_task_fit is a preserved diagnostic limitation; each candidate must independently clear its existing candidate_task_fit release and capability holds. Unknown price/quota/routes remain unknown; Root retains pool selection authority. The original 17 labels / 14 calls are preserved verbatim as per-question evidence, including negative, missing evidence, failure and holdout; they were not rerun and do not prove the newly composed production path. Completion additionally requires a fresh installed orbit omp ordinary-task recommendation/dispatch/integration/check/stop run.; independent OMP 2 approves bounded_git_delivery_v1 activation for isolated live acceptance; ordinary native recommendation/dispatch/integration/check/confirmed-stop remains the completion gate. Per-question historical calls are unchanged and do not prove the new combination live.",
+            "scope": "bounded_git_delivery_v1",
+            "reviewed_by": "OMP 2 (kimi-code/k3-256k, w22:p3) 独立原件复核",
+            "reviewed_at": "2026-10-01T19:02:16Z",
+            "sample_count": 17,
+            "sample_digest": "5a30130a022abd2bc1b35a6ebe61c2ea4fe0e750cafbb0d23d6d51de973d03cc"
+          }
+        },
+        "route_cost_inputs": null,
+        "calibration_note": null,
+        "requirements_error": null,
+        "task_fit_scores": {},
+        "unscored_candidates": [
+          "opencode-go/deepseek-v4.1-flash",
+          "kimi-code/k3-256k",
+          "zenmux/deepseek/deepseek-v4.1-flash",
+          "zhipu-coding-plan/glm-5.3-flash",
+          "cursor/grok-4.7-fast",
+          "cursor/grok-4.7",
+          "openai-codex/gpt-6.1-sol",
+          "openai-codex/gpt-6-luna"
+        ],
+        "evidence_needed": [
+          {
+            "model": "opencode-go/deepseek-v4.1-flash",
+            "reasoning": "unknown",
+            "billing_route": "subscription_quota",
+            "status": "absent"
+          },
+          {
+            "model": "kimi-code/k3-256k",
+            "reasoning": "unknown",
+            "billing_route": "subscription_quota",
+            "status": "absent"
+          },
+          {
+            "model": "zenmux/deepseek/deepseek-v4.1-flash",
+            "reasoning": "unknown",
+            "billing_route": "unknown",
+            "status": "absent"
+          },
+          {
+            "model": "zhipu-coding-plan/glm-5.3-flash",
+            "reasoning": "unknown",
+            "billing_route": "subscription_quota",
+            "status": "absent"
+          },
+          {
+            "model": "cursor/grok-4.7-fast",
+            "reasoning": "unknown",
+            "billing_route": "unknown",
+            "status": "absent"
+          },
+          {
+            "model": "cursor/grok-4.7",
+            "reasoning": "unknown",
+            "billing_route": "unknown",
+            "status": "absent"
+          },
+          {
+            "model": "openai-codex/gpt-6.1-sol",
+            "reasoning": "unknown",
+            "billing_route": "unknown",
+            "status": "absent"
+          },
+          {
+            "model": "openai-codex/gpt-6-luna",
+            "reasoning": "unknown",
+            "billing_route": "unknown",
+            "status": "absent"
+          }
+        ],
+        "judgment_state": null,
+        "usage": null,
+        "selected_for": "start",
+        "selected_at": "2026-10-11T04:24:22Z",
+        "signature": "5fab57369949eab0be6c04039e6a61d89914a31edb59b1282931d680d9b7b486"
+      }
+    },
+    {
+      "at": "2026-10-11T04:24:28Z",
+      "type": "jev_assessed",
+      "status": "answered"
+    },
+    {
+      "at": "2026-10-11T04:24:56Z",
+      "type": "checker_model_selected",
+      "selection": {
+        "model": "opencode-go/deepseek-v4.1-flash",
+        "basis": "pool_order_unreleased",
+        "candidates": [
+          "opencode-go/deepseek-v4.1-flash",
+          "kimi-code/k3-256k",
+          "zenmux/deepseek/deepseek-v4.1-flash",
+          "zhipu-coding-plan/glm-5.3-flash",
+          "cursor/grok-4.7-fast",
+          "cursor/grok-4.7",
+          "openai-codex/gpt-6.1-sol",
+          "openai-codex/gpt-6-luna"
+        ],
+        "selection_tier": "fallback",
+        "notice": "候选池降级选择：独立检查模型质量未经证实",
+        "version": "orbit-checker-selection-v7",
+        "cost_comparison": "not_applied",
+        "reason": "a reviewed release covers this task profile but the judgment is unanswered or from another provider, model, input version or question set",
+        "source": "candidate_pool",
+        "model_identity": {
+          "provider": "opencode-go",
+          "model": "deepseek-v4.1-flash",
+          "reasoning": "unknown",
+          "billing_route": "subscription_quota"
+        },
+        "quality_score": null,
+        "source_agent_dir": "/Users/yangke/.omp/agent",
+        "quality_basis": "unknown",
+        "quality_sources": [],
+        "quality_evidence_valid_until": null,
+        "recommendation_hold": false,
+        "hold_reason": null,
+        "model_overview_status": "fresh",
+        "model_overview_prior": null,
+        "model_overview_refresh": {
+          "status": "fresh",
+          "fetched_at": "2026-10-11T04:22:20Z",
+          "model_count": 440,
+          "benchmark_count": 346
+        },
+        "eligibility": {
+          "context": {
+            "status": "not_required",
+            "requirement": null,
+            "catalog_value": 1048576
+          },
+          "input_modalities": {
+            "status": "not_required",
+            "requirement": [],
+            "catalog_value": [
+              "text",
+              "image"
+            ]
+          },
+          "output_modalities": {
+            "status": "not_required",
+            "requirement": [],
+            "catalog_value": [
+              "text"
+            ]
+          },
+          "parameters": {
+            "status": "not_required",
+            "requirement": [],
+            "catalog_value": [
+              "frequency_penalty",
+              "include_reasoning",
+              "logit_bias",
+              "logprobs",
+              "max_tokens",
+              "min_p",
+              "presence_penalty",
+              "reasoning",
+              "reasoning_effort",
+              "repetition_penalty",
+              "response_format",
+              "seed",
+              "stop",
+              "structured_outputs",
+              "temperature",
+              "tool_choice",
+              "tools",
+              "top_k",
+              "top_logprobs",
+              "top_p"
+            ]
+          }
+        },
+        "execution_eligibility": {
+          "context": {
+            "status": "not_required",
+            "requirement": null,
+            "configured_limit": 1000000,
+            "source": "omp_model_registry"
+          },
+          "input_modalities": {
+            "status": "not_required",
+            "requirement": [],
+            "configured_values": [
+              "text",
+              "image"
+            ]
+          },
+          "output_modalities": {
+            "status": "not_required",
+            "requirement": [],
+            "configured_values": [
+              "text"
+            ]
+          },
+          "parameters": {
+            "status": "not_required",
+            "requirement": [],
+            "note": "模型工具支持不代替成员实际工具授权"
+          }
+        },
+        "judgment_provider": null,
+        "judgment_model": null,
+        "judgment_call_id": null,
+        "judgment_status": null,
+        "judgment_requested_model": null,
+        "question_set_version": null,
+        "judgment_error": null,
+        "release": {
+          "model": "jev-1.13.0",
+          "provider": "typesafe",
+          "thresholds": {
+            "handoff_fit": 0.7,
+            "member_task_fit": 0.65,
+            "candidate_task_fit": 0.65,
+            "checker_task_fit": 0.6
+          },
+          "scope": "bounded_git_delivery_v1",
+          "question_set_versions": {
+            "observation": "jev-observation-2",
+            "delegation": "jev-delegation-4",
+            "candidates": "jev-candidates-4",
+            "checker_quality": "jev-checker-task-fit-5"
+          },
+          "question_digest": "0fc3d712f60167edb572d039a2c9d5b35b0e9295a4a38bf9db597e3682ac7ca8",
+          "input_version": "jev-selection-input-2",
+          "decision_version": "orbit-quality-decision-4",
+          "structural_validation": "passed",
+          "proves_samples_real": false,
+          "allows_positive_ranking": true,
+          "release": {
+            "reason": "Decision-4 independent review: unchanged question bodies, input profile, model and thresholds. handoff_fit gates bounded handoff structure; member_task_fit is a preserved diagnostic limitation; each candidate must independently clear its existing candidate_task_fit release and capability holds. Unknown price/quota/routes remain unknown; Root retains pool selection authority. The original 17 labels / 14 calls are preserved verbatim as per-question evidence, including negative, missing evidence, failure and holdout; they were not rerun and do not prove the newly composed production path. Completion additionally requires a fresh installed orbit omp ordinary-task recommendation/dispatch/integration/check/stop run.; independent OMP 2 approves bounded_git_delivery_v1 activation for isolated live acceptance; ordinary native recommendation/dispatch/integration/check/confirmed-stop remains the completion gate. Per-question historical calls are unchanged and do not prove the new combination live.",
+            "scope": "bounded_git_delivery_v1",
+            "reviewed_by": "OMP 2 (kimi-code/k3-256k, w22:p3) 独立原件复核",
+            "reviewed_at": "2026-10-01T19:02:16Z",
+            "sample_count": 17,
+            "sample_digest": "5a30130a022abd2bc1b35a6ebe61c2ea4fe0e750cafbb0d23d6d51de973d03cc"
+          }
+        },
+        "route_cost_inputs": {},
+        "calibration_note": null,
+        "requirements_error": null,
+        "task_fit_scores": {},
+        "unscored_candidates": [
+          "opencode-go/deepseek-v4.1-flash",
+          "kimi-code/k3-256k",
+          "zenmux/deepseek/deepseek-v4.1-flash",
+          "zhipu-coding-plan/glm-5.3-flash",
+          "cursor/grok-4.7-fast",
+          "cursor/grok-4.7",
+          "openai-codex/gpt-6.1-sol",
+          "openai-codex/gpt-6-luna"
+        ],
+        "evidence_needed": [
+          {
+            "model": "opencode-go/deepseek-v4.1-flash",
+            "reasoning": "unknown",
+            "billing_route": "subscription_quota",
+            "status": "absent"
+          },
+          {
+            "model": "kimi-code/k3-256k",
+            "reasoning": "unknown",
+            "billing_route": "subscription_quota",
+            "status": "absent"
+          },
+          {
+            "model": "zenmux/deepseek/deepseek-v4.1-flash",
+            "reasoning": "unknown",
+            "billing_route": "unknown",
+            "status": "absent"
+          },
+          {
+            "model": "zhipu-coding-plan/glm-5.3-flash",
+            "reasoning": "unknown",
+            "billing_route": "subscription_quota",
+            "status": "absent"
+          },
+          {
+            "model": "cursor/grok-4.7-fast",
+            "reasoning": "unknown",
+            "billing_route": "unknown",
+            "status": "absent"
+          },
+          {
+            "model": "cursor/grok-4.7",
+            "reasoning": "unknown",
+            "billing_route": "unknown",
+            "status": "absent"
+          },
+          {
+            "model": "openai-codex/gpt-6.1-sol",
+            "reasoning": "unknown",
+            "billing_route": "unknown",
+            "status": "absent"
+          },
+          {
+            "model": "openai-codex/gpt-6-luna",
+            "reasoning": "unknown",
+            "billing_route": "unknown",
+            "status": "absent"
+          }
+        ],
+        "judgment_state": null,
+        "usage": null,
+        "selected_for": "reviewer",
+        "selected_at": "2026-10-11T04:24:56Z",
+        "signature": "381b4c93aa7b9ae76e5b7383fd283a3954e9faaeaea77fe95f90785ad51afc3c"
+      }
+    },
+    {
+      "at": "2026-10-11T04:24:57Z",
+      "type": "check_started",
+      "number": 1
+    },
+    {
+      "at": "2026-10-11T04:25:31Z",
+      "type": "checker_model_selected",
+      "selection": {
+        "model": "kimi-code/k3-256k",
+        "basis": "pool_order_unreleased",
+        "candidates": [
+          "kimi-code/k3-256k",
+          "zenmux/deepseek/deepseek-v4.1-flash",
+          "zhipu-coding-plan/glm-5.3-flash",
+          "cursor/grok-4.7-fast",
+          "cursor/grok-4.7",
+          "openai-codex/gpt-6.1-sol",
+          "openai-codex/gpt-6-luna"
+        ],
+        "selection_tier": "fallback",
+        "notice": "候选池降级选择：独立检查模型质量未经证实",
+        "version": "orbit-checker-selection-v7",
+        "cost_comparison": "not_applied",
+        "reason": "a reviewed release covers this task profile but the judgment is unanswered or from another provider, model, input version or question set",
+        "source": "candidate_pool",
+        "model_identity": {
+          "provider": "kimi-code",
+          "model": "k3-256k",
+          "reasoning": "unknown",
+          "billing_route": "subscription_quota"
+        },
+        "quality_score": null,
+        "source_agent_dir": "/Users/yangke/.omp/agent",
+        "quality_basis": "unknown",
+        "quality_sources": [],
+        "quality_evidence_valid_until": null,
+        "recommendation_hold": false,
+        "hold_reason": null,
+        "model_overview_status": "fresh",
+        "model_overview_prior": null,
+        "model_overview_refresh": {
+          "status": "fresh",
+          "fetched_at": "2026-10-11T04:22:20Z",
+          "model_count": 440,
+          "benchmark_count": 346
+        },
+        "eligibility": {
+          "context": {
+            "status": "not_required",
+            "requirement": null,
+            "catalog_value": 1048576
+          },
+          "input_modalities": {
+            "status": "not_required",
+            "requirement": [],
+            "catalog_value": [
+              "text",
+              "image",
+              "video"
+            ]
+          },
+          "output_modalities": {
+            "status": "not_required",
+            "requirement": [],
+            "catalog_value": [
+              "text"
+            ]
+          },
+          "parameters": {
+            "status": "not_required",
+            "requirement": [],
+            "catalog_value": [
+              "frequency_penalty",
+              "include_reasoning",
+              "logit_bias",
+              "logprobs",
+              "max_tokens",
+              "min_p",
+              "presence_penalty",
+              "reasoning",
+              "reasoning_effort",
+              "repetition_penalty",
+              "response_format",
+              "seed",
+              "stop",
+              "structured_outputs",
+              "temperature",
+              "tool_choice",
+              "tools",
+              "top_k",
+              "top_logprobs",
+              "top_p"
+            ]
+          }
+        },
+        "execution_eligibility": {
+          "context": {
+            "status": "not_required",
+            "requirement": null,
+            "configured_limit": 262144,
+            "source": "omp_model_registry"
+          },
+          "input_modalities": {
+            "status": "not_required",
+            "requirement": [],
+            "configured_values": [
+              "text",
+              "image"
+            ]
+          },
+          "output_modalities": {
+            "status": "not_required",
+            "requirement": [],
+            "configured_values": [
+              "text"
+            ]
+          },
+          "parameters": {
+            "status": "not_required",
+            "requirement": [],
+            "note": "模型工具支持不代替成员实际工具授权"
+          }
+        },
+        "judgment_provider": null,
+        "judgment_model": null,
+        "judgment_call_id": null,
+        "judgment_status": null,
+        "judgment_requested_model": null,
+        "question_set_version": null,
+        "judgment_error": null,
+        "release": {
+          "model": "jev-1.13.0",
+          "provider": "typesafe",
+          "thresholds": {
+            "handoff_fit": 0.7,
+            "member_task_fit": 0.65,
+            "candidate_task_fit": 0.65,
+            "checker_task_fit": 0.6
+          },
+          "scope": "bounded_git_delivery_v1",
+          "question_set_versions": {
+            "observation": "jev-observation-2",
+            "delegation": "jev-delegation-4",
+            "candidates": "jev-candidates-4",
+            "checker_quality": "jev-checker-task-fit-5"
+          },
+          "question_digest": "0fc3d712f60167edb572d039a2c9d5b35b0e9295a4a38bf9db597e3682ac7ca8",
+          "input_version": "jev-selection-input-2",
+          "decision_version": "orbit-quality-decision-4",
+          "structural_validation": "passed",
+          "proves_samples_real": false,
+          "allows_positive_ranking": true,
+          "release": {
+            "reason": "Decision-4 independent review: unchanged question bodies, input profile, model and thresholds. handoff_fit gates bounded handoff structure; member_task_fit is a preserved diagnostic limitation; each candidate must independently clear its existing candidate_task_fit release and capability holds. Unknown price/quota/routes remain unknown; Root retains pool selection authority. The original 17 labels / 14 calls are preserved verbatim as per-question evidence, including negative, missing evidence, failure and holdout; they were not rerun and do not prove the newly composed production path. Completion additionally requires a fresh installed orbit omp ordinary-task recommendation/dispatch/integration/check/stop run.; independent OMP 2 approves bounded_git_delivery_v1 activation for isolated live acceptance; ordinary native recommendation/dispatch/integration/check/confirmed-stop remains the completion gate. Per-question historical calls are unchanged and do not prove the new combination live.",
+            "scope": "bounded_git_delivery_v1",
+            "reviewed_by": "OMP 2 (kimi-code/k3-256k, w22:p3) 独立原件复核",
+            "reviewed_at": "2026-10-01T19:02:16Z",
+            "sample_count": 17,
+            "sample_digest": "5a30130a022abd2bc1b35a6ebe61c2ea4fe0e750cafbb0d23d6d51de973d03cc"
+          }
+        },
+        "route_cost_inputs": {},
+        "calibration_note": null,
+        "requirements_error": null,
+        "task_fit_scores": {},
+        "unscored_candidates": [
+          "kimi-code/k3-256k",
+          "zenmux/deepseek/deepseek-v4.1-flash",
+          "zhipu-coding-plan/glm-5.3-flash",
+          "cursor/grok-4.7-fast",
+          "cursor/grok-4.7",
+          "openai-codex/gpt-6.1-sol",
+          "openai-codex/gpt-6-luna"
+        ],
+        "evidence_needed": [
+          {
+            "model": "kimi-code/k3-256k",
+            "reasoning": "unknown",
+            "billing_route": "subscription_quota",
+            "status": "absent"
+          },
+          {
+            "model": "zenmux/deepseek/deepseek-v4.1-flash",
+            "reasoning": "unknown",
+            "billing_route": "unknown",
+            "status": "absent"
+          },
+          {
+            "model": "zhipu-coding-plan/glm-5.3-flash",
+            "reasoning": "unknown",
+            "billing_route": "subscription_quota",
+            "status": "absent"
+          },
+          {
+            "model": "cursor/grok-4.7-fast",
+            "reasoning": "unknown",
+            "billing_route": "unknown",
+            "status": "absent"
+          },
+          {
+            "model": "cursor/grok-4.7",
+            "reasoning": "unknown",
+            "billing_route": "unknown",
+            "status": "absent"
+          },
+          {
+            "model": "openai-codex/gpt-6.1-sol",
+            "reasoning": "unknown",
+            "billing_route": "unknown",
+            "status": "absent"
+          },
+          {
+            "model": "openai-codex/gpt-6-luna",
+            "reasoning": "unknown",
+            "billing_route": "unknown",
+            "status": "absent"
+          }
+        ],
+        "judgment_state": null,
+        "usage": null,
+        "selected_for": "reviewer",
+        "selected_at": "2026-10-11T04:25:31Z",
+        "signature": "7247a7c77eb579e858be93091568e8b25ec9de3da9c8b5cbe75495591da2556a"
+      }
+    },
+    {
+      "at": "2026-10-11T04:25:32Z",
+      "type": "check_started",
+      "number": 2
+    },
+    {
+      "at": "2026-10-11T04:25:55Z",
+      "type": "check_finished",
+      "number": 2,
+      "stale": false,
+      "stale_reasons": [],
+      "reason": "Root 完成只读核查并给出结论：sample.txt 内容 \"isolated stop fixture\"（快照实测 bytes=22，单行）与 SPEC.md \"只读调查本目录；用户中断时立即停止。\"（bytes=55，单行）一致，无矛盾；未修改文件（git changed_paths 为空）、未派发执行成员。手动终检请求已排队（command_id 20261011042448501874-3bc69a6b75cc），Root idle 等待 finalization_notice，符合指令流程。上一次 check 因 invalid_result 失败，无实质发现。无缺失或错误工作。"
+    },
+    {
+      "at": "2026-10-11T04:25:55Z",
+      "type": "finalization_notice",
+      "check": 2
+    },
+    {
+      "at": "2026-10-11T04:25:57Z",
+      "type": "jev_assessed",
+      "status": "answered"
+    },
+    {
+      "at": "2026-10-11T04:26:14Z",
+      "type": "stopped",
+      "reason": "只读核查完成：sample.txt 与 SPEC.md 一致；终检通过且检查后无任何文件改动；未派发成员。确认停止。"
+    }
+  ]
+}

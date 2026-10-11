@@ -1,0 +1,1 @@
+import assert from 'node:assert/strict'; import {normalize} from './normalize.mjs'; assert.equal(normalize('  item  '),'item'); assert.equal(normalize(''),''); console.log('normalize acceptance passed');

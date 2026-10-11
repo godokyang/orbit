@@ -1,9 +1,11 @@
 # Orbit 当前限制
 
-最后核对：2026-10-10（当前剩余能力交付已收口，实际 Goal complete；源码 0.8.3，实际安装身份见[交接](handoff.md)，不更新用户全局安装）。本页只列**当前仍影响用户的限制与未测范围**；已修复项、旧版本流水与已结束票据不在本页保留（`git show 3865b76:docs/plan/debt-ledger.md` 查阅历史）。逐项收口与证据＝[完成记录](../reference/mixed-model-delivery-completion-20261001.md)；现行行为以[合同](../../contracts/task-runtime.md)及 ADR-008/009 为准。
+最后核对：2026-10-11（安装体积修复；源码 0.8.4，实际安装身份见[交接](handoff.md)；前轮剩余能力交付的实际 Goal 已 complete）。本页只列**当前仍影响用户的限制与未测范围**；已修复项、旧版本流水与已结束票据不在本页保留（`git show 3865b76:docs/plan/debt-ledger.md` 查阅历史）。逐项收口与证据＝[完成记录](../reference/mixed-model-delivery-completion-20261001.md)；现行行为以[合同](../../contracts/task-runtime.md)及 ADR-008/009 为准。
 
 | 限制 | 当前影响 | 解除条件 |
 | --- | --- | --- |
+| 独立检查器仍需私有 SDK，体积与验证有范围 | 去重和缓存已修复；新临时冷安装省略本地推理／语音 optional 与 optional peer，macOS arm64／OMP 18.8.0 为 446.9 MiB。日常安装仍 959.5 MiB，尚未应用第二阶段；SDK 本体及原生 addon 保留。不保证跨平台同体积或所有模型无下载 | 实际构建／模型／平台升级时核对依赖与加载；源码 pin 18.3.4只读探测通过，18.2.8 仅源码证据，18.4.9 分支未重跑。SDK 注册 local-inference，MLX 可独立下载；当前远程受限检查路径无下载不等于任意 SDK 模型保证，事实沿[体积记录](../reference/orbit-install-footprint-20261011.md) |
+| 空闲 Root 的 Esc 不等同任务暂停 | 本轮在 private checker in_flight、Root 已空闲时按 Esc 未触发 native interruption，检查随后正常完成；活动 Root／登记成员 Esc 确认暂停另有实证。不能把按键发送回执当停止成功 | 需要支持该 UI 场景时另定正确用户入口和宿主接缝；本轮仅记录真实边界，不改暂停语义 |
 | 活动任务续跑的有效推进证据有范围 | C02已沿SDK每请求context派生完整授权目标；普通/amend/custom wake/compact/resume及暂停分离有界实测。continue_unfinished_task仍依赖自动artifact review且每版本一次，不能把工具次数当进展；该具体空闲续跑分支本轮未自然触发 | 真实分支出现后按现行版本核对，不重新打开历史理论组合；SDK hook超时/异常和最终请求容量仍是宿主边界 |
 | 成员派发失败恢复仍有范围 | C04已补实际tools挂载、agent/model和spec/operation层级诊断，当前真实Missing context/声明失败后改调用、成员缺content/命令不匹配后修正并通过npm。v5重复8次缺content仍需Controller取消；v6只有yield却自述hub成功，不能据有界恢复断言通用闭环充分 | 以最新真实完整矩阵验证采用范围；新实际失败再定点处理，不支持全部eval或维护Fork，不把Root自述和接管当委派成功 |
 | 成员便捷记录的单位关联字段有空值 | 本轮v7第二成员state.work_unit_id为null，durable work-unit的member_id/dispatch call_id及实际scope/结果完整；只读members行的消费者会缺少便捷关联，不能填造unknown | 单独同步已验证的durable绑定到便捷成员记录并定点验证；当前真实归属沿权威单位记录，不扩成新协议框架 |

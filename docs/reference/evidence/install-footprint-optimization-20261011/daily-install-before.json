@@ -1,0 +1,11 @@
+{
+  "source": {
+    "kind": "local",
+    "path": "/Users/yangke/Personal/omen/orbit",
+    "commit": "5e781e44f0c35bbdea0c6fae91ca6a73aac3a983",
+    "dirty": true
+  },
+  "content_digest": "82ba262fc7ebaf350fd01e18361c516075b42aaaeee7acd2528960474dda38f0",
+  "installed_at": "2026-10-11T04:00:49Z",
+  "version": "0.8.4"
+}

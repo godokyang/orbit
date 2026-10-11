@@ -1,0 +1,17 @@
+{
+  "release_path": "/Users/yangke/.local/share/orbit/orbit/releases/11dc101724b09fd70979e967",
+  "version": "0.8.4",
+  "installed_at": "2026-10-10T06:58:03Z",
+  "content_digest": "1ebbd903ea3b02c2e6fa924d9924229b9d517f0d549c5152cd2f013fab578ef6",
+  "source": {
+    "kind": "local",
+    "path": "/Users/yangke/Personal/omen/orbit",
+    "commit": "5e781e44f0c35bbdea0c6fae91ca6a73aac3a983",
+    "dirty": false
+  },
+  "du_kib": 3555480,
+  "cache_du_kib": 1154568,
+  "reviewer_modules_du_kib": 2389592,
+  "leases": [],
+  "process_path_references": []
+}

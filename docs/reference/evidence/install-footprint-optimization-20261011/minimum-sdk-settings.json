@@ -1,0 +1,202 @@
+{
+  "sdk_version": "18.2.8",
+  "matches": {
+    "memory.backend": [
+      {
+        "path": "package/src/config/settings-schema.ts",
+        "lines": [
+          "2928: // Hidden from UI \u2014 users should use `memory.backend` instead.",
+          "2968: \"memory.backend\": {"
+        ]
+      },
+      {
+        "path": "package/src/config/settings-ui.ts",
+        "lines": [
+          "38: return Settings.instance.get(\"memory.backend\") === \"hindsight\";",
+          "45: return Settings.instance.get(\"memory.backend\") === \"mnemopi\";"
+        ]
+      },
+      {
+        "path": "package/src/config/settings.ts",
+        "lines": [
+          "2398: // Map legacy `memories.enabled` boolean to the explicit `memory.backend`",
+          "2400: // migrations are no-ops once memory.backend is materialised.",
+          "2412: // - `memory.backend: \"mnemosyne\"` now selects the renamed backend."
+        ]
+      },
+      {
+        "path": "package/src/hindsight/backend.ts",
+        "lines": [
+          "79: logger.warn(\"Hindsight: memory.backend=hindsight but hindsight.apiUrl is unset; backend inert.\");",
+          "239: if (session.settings.get(\"memory.backend\") === \"mnemopi\" && !session.getMnemopiSessionState()) {",
+          "342: const selected = settings.get(\"memory.backend\") === \"hindsight\" && isHindsightConfigured(config);",
+          "344: // The selection itself moved \u2014 a project layer switched `memory.backend`,"
+        ]
+      },
+      {
+        "path": "package/src/internal-urls/memory-protocol.ts",
+        "lines": [
+          "25: \"Hindsight memories are not addressable via memory://. Recall results are final \u2014 use `recall` to search or `reflect` to synthesize. `read memory://<id>` is only available with memory.backend=mnemopi.\";",
+          "250: const backend = Reflect.apply(get, context.settings, [\"memory.backend\"]);",
+          "299: if (session) return { session, backend: session.settings.get(\"memory.backend\"), legacy: false };",
+          "320: `Unknown memory namespace: ${namespace}. Supported: ${MEMORY_NAMESPACE} (file-backed memory summary), or a mnemopi memory id when memory.backend=mnemopi is active.`,"
+        ]
+      },
+      {
+        "path": "package/src/main.ts",
+        "lines": [
+          "211: \"memory.backend\","
+        ]
+      },
+      {
+        "path": "package/src/memories/index.ts",
+        "lines": [
+          "340: return !options.signal.aborted && !options.session.isDisposed && options.settings.get(\"memory.backend\") === \"local\";",
+          "1271: enabled: settings.get(\"memory.backend\") === \"local\",",
+          "1347: * tool when `memory.backend` is `local`."
+        ]
+      },
+      {
+        "path": "package/src/memory-backend/off-backend.ts",
+        "lines": [
+          "6: * Selected when `memory.backend` is `\"off\"`."
+        ]
+      },
+      {
+        "path": "package/src/memory-backend/resolve.ts",
+        "lines": [
+          "11: *   - `memory.backend === \"hindsight\"`  \u2192 Hindsight remote memory",
+          "12: *   - `memory.backend === \"mnemopi\"`  \u2192 local Mnemopi SQLite memory",
+          "13: *   - `memory.backend === \"sharpshooter\"` \u2192 friction-gated project decision memory",
+          "14: *   - `memory.backend === \"local\"`      \u2192 local rollout summary pipeline"
+        ]
+      },
+      {
+        "path": "package/src/mnemopi/backend.ts",
+        "lines": [
+          "183: if (!session?.sessionId || previous?.aliasOf || session.settings.get(\"memory.backend\") !== \"mnemopi\") return;"
+        ]
+      },
+      {
+        "path": "package/src/modes/controllers/selector-controller.ts",
+        "lines": [
+          "648: case \"memory.backend\":"
+        ]
+      },
+      {
+        "path": "package/src/session/session-memory.ts",
+        "lines": [
+          "84: if (this.#host.settings.get(\"memory.backend\") !== \"hindsight\") return;",
+          "91: if (this.#host.settings.get(\"memory.backend\") !== \"mnemopi\") return;",
+          "99: if (this.#host.settings.get(\"memory.backend\") !== \"hindsight\") return false;",
+          "111: if (this.#host.settings.get(\"memory.backend\") !== \"mnemopi\") return false;"
+        ]
+      },
+      {
+        "path": "package/src/tools/index.ts",
+        "lines": [
+          "642: if ([\"hindsight\", \"mnemopi\"].includes(session.settings.get(\"memory.backend\") ?? \"\")) {",
+          "647: if (session.settings.get(\"memory.backend\") === \"mnemopi\" && !requestedTools.includes(\"memory_edit\")) {",
+          "662: [\"hindsight\", \"mnemopi\", \"local\"].includes(session.settings.get(\"memory.backend\") ?? \"\") &&",
+          "708: return [\"hindsight\", \"mnemopi\"].includes(session.settings.get(\"memory.backend\") ?? \"\");"
+        ]
+      },
+      {
+        "path": "package/src/tools/learn.ts",
+        "lines": [
+          "33: (args as Partial<LearnParams>).skill || this.session.settings.get(\"memory.backend\") === \"local\"",
+          "47: const backend = session.settings.get(\"memory.backend\");",
+          "55: const backend = this.session.settings.get(\"memory.backend\");"
+        ]
+      },
+      {
+        "path": "package/src/tools/memory-edit.ts",
+        "lines": [
+          "29: const backend = session.settings.get(\"memory.backend\");"
+        ]
+      },
+      {
+        "path": "package/src/tools/memory-recall.ts",
+        "lines": [
+          "28: const backend = session.settings.get(\"memory.backend\");",
+          "36: const backend = this.session.settings.get(\"memory.backend\");"
+        ]
+      },
+      {
+        "path": "package/src/tools/memory-reflect.ts",
+        "lines": [
+          "29: const backend = session.settings.get(\"memory.backend\");",
+          "37: const backend = this.session.settings.get(\"memory.backend\");"
+        ]
+      },
+      {
+        "path": "package/src/tools/memory-retain.ts",
+        "lines": [
+          "32: const backend = session.settings.get(\"memory.backend\");",
+          "39: const backend = this.session.settings.get(\"memory.backend\");"
+        ]
+      },
+      {
+        "path": "package/src/tools/read.ts",
+        "lines": [
+          "833: if (this.session.settings.get(\"memory.backend\") === \"off\") {"
+        ]
+      }
+    ],
+    "memories.enabled": [
+      {
+        "path": "package/src/config/settings-schema.ts",
+        "lines": [
+          "2929: \"memories.enabled\": {",
+          "2967: // `memories.enabled` flag is migration input only; see config/settings.ts."
+        ]
+      },
+      {
+        "path": "package/src/config/settings.ts",
+        "lines": [
+          "2398: // Map legacy `memories.enabled` boolean to the explicit `memory.backend`"
+        ]
+      },
+      {
+        "path": "package/src/main.ts",
+        "lines": [
+          "212: \"memories.enabled\","
+        ]
+      },
+      {
+        "path": "package/src/memory-backend/resolve.ts",
+        "lines": [
+          "17: * `memories.enabled` remains accepted only as a legacy migration input. Once"
+        ]
+      }
+    ],
+    "stt.enabled": [
+      {
+        "path": "package/src/cli/setup-cli.ts",
+        "lines": [
+          "300: \"Enable speech-to-text via stt.enabled, then hold Space to talk (or bind app.stt.toggle); enable the speech-generation tool via speechgen.enabled; speak replies aloud via speech.enabled.\","
+        ]
+      },
+      {
+        "path": "package/src/config/settings-schema.ts",
+        "lines": [
+          "2440: \"stt.enabled\": {"
+        ]
+      },
+      {
+        "path": "package/src/modes/controllers/input-controller.ts",
+        "lines": [
+          "656: // the spam back out, and toggles STT on hold start / release. Gated on `stt.enabled` so a",
+          "658: this.ctx.editor.sttHoldEnabled = () => settings.get(\"stt.enabled\");"
+        ]
+      },
+      {
+        "path": "package/src/modes/interactive-mode.ts",
+        "lines": [
+          "6367: if (!settings.get(\"stt.enabled\")) {",
+          "6368: this.showWarning(\"Speech-to-text is disabled. Enable it in settings: stt.enabled\");"
+        ]
+      }
+    ]
+  }
+}

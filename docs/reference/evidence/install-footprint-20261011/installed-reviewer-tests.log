@@ -1,0 +1,50 @@
+bun test v1.3.14 (0d9b296a)
+
+../../../.local/share/orbit/orbit/releases/e8c29c03c7eb0777acd84a9c/runners/omp-reviewer/provider-error.test.ts:
+(pass) a real 429 usage-limit turn classifies as auth_or_quota [0.58ms]
+(pass) a transient 429 rate limit is not quota [0.02ms]
+(pass) a server error carries status and text as unavailable [0.03ms]
+(pass) a completed turn is never reclassified [0.01ms]
+
+../../../.local/share/orbit/orbit/releases/e8c29c03c7eb0777acd84a9c/runners/omp-reviewer/check-result.test.ts:
+(pass) accepts a result carrying the structured delivery judgment [0.14ms]
+(pass) rejects a result without delivery [0.08ms]
+(pass) rejects a non-boolean ready, an empty reason and extra delivery keys [0.06ms]
+(pass) delivery is never implicit: a bare legacy result fails the contract [0.02ms]
+(pass) coverage preserves unverified requirements and requires evidence for verified ones [0.17ms]
+(pass) a long requirement is accepted at the representation bound while real refusals stay [0.08ms]
+90 | 	] };
+91 | 	assert.ok(validateCheckResult(duplicate).some(p => p.includes("duplicate")), "duplicate requirements are still refused");
+92 | });
+93 | 
+94 | test("check-result structure is shared and schema-derived, not hardcoded", () => {
+95 | 	const fixture = JSON.parse(readFileSync(new URL("../../tests/fixtures/check-result-samples.json", import.meta.url), "utf8")) as
+                                 ^
+error: ENOENT: no such file or directory, open '/Users/yangke/.local/share/orbit/orbit/releases/e8c29c03c7eb0777acd84a9c/tests/fixtures/check-result-samples.json'
+      at <anonymous> (/Users/yangke/.local/share/orbit/orbit/releases/e8c29c03c7eb0777acd84a9c/runners/omp-reviewer/check-result.test.ts:95:29)
+(fail) check-result structure is shared and schema-derived, not hardcoded [0.20ms]
+
+../../../.local/share/orbit/orbit/releases/e8c29c03c7eb0777acd84a9c/runners/omp-reviewer/usage-receipt.test.ts:
+(pass) a boundary receipt keeps identity only and stays pending [0.07ms]
+(pass) a boundary without a turn model falls back to the session identity [0.02ms]
+(pass) the finished report updates the same call id in place [0.17ms]
+(pass) a boundary that never produced a result keeps its pending entry and a gap [0.02ms]
+(pass) a completed turn keeps the local invocation id, provider id, models and categories [0.03ms]
+(pass) a service that reports no response id still yields an attributable call [0.02ms]
+(pass) an unobserved boundary is a gap but the measured usage is still kept [0.02ms]
+(pass) the requested model is never presented as the upstream model [0.02ms]
+(pass) a failed call without usable usage keeps its identity and an unknown status [0.02ms]
+(pass) a partially reported call keeps its trustworthy fields and reports the missing ones [0.02ms]
+(pass) an errored turn's initialized-zero counters are not a report of zero consumption [0.04ms]
+(pass) no assistant turn at all is a gap and no call
+(pass) absent categories stay absent and reasoning is never folded into output [0.02ms]
+(pass) an end carrying a replaced message object still binds its call boundary [0.10ms]
+(pass) repeated sync over the same turns stays idempotent [0.10ms]
+
+1 tests failed:
+(fail) check-result structure is shared and schema-derived, not hardcoded [0.20ms]
+
+ 25 pass
+ 1 fail
+ 81 expect() calls
+Ran 26 tests across 3 files. [52.00ms]

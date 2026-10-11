@@ -1,0 +1,26 @@
+{
+  "args": [
+    "bun",
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/compat-project/runners/omp-reviewer/reviewer.ts",
+    "--snapshot",
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/probe-snapshot",
+    "--profile",
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/compat-probe-profile-v3",
+    "--out",
+    "/Users/yangke/Personal/omen/orbit/docs/reference/evidence/install-footprint-optimization-20261011/source-pin-probe-v3.json",
+    "--source-agent-dir",
+    "/Users/yangke/.omp/agent",
+    "--probe-outside",
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/outside.txt",
+    "--probe-inside",
+    "release.txt",
+    "--probe-inside-link",
+    "inside-link.txt",
+    "--probe-symlink-file",
+    "escape.txt",
+    "--probe-secret",
+    "ORBIT_SLIM_OUTSIDE_SECRET"
+  ],
+  "exit": 1,
+  "stdout": "/Users/yangke/Personal/omen/orbit/docs/reference/evidence/install-footprint-optimization-20261011/source-pin-probe-v3.json\n"
+}

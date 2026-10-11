@@ -1,0 +1,1950 @@
+{
+  "source": "/Users/yangke/.omp/agent/sessions/-Personal-omen-orbit/2026-10-11T04-18-29-291Z_01a1292f-032b-76ea-8752-7685272faea3.jsonl",
+  "pane": "w23:pK",
+  "pid": 12966,
+  "calls": [
+    {
+      "id": "f2273532",
+      "at": "2026-10-11T04:19:26.788Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 13434,
+        "output": 390,
+        "cacheRead": 0,
+        "cacheWrite": 0,
+        "totalTokens": 13824,
+        "reasoningTokens": 339,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "be4a0c5f",
+      "at": "2026-10-11T04:19:32.854Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 4645,
+        "output": 73,
+        "cacheRead": 12864,
+        "cacheWrite": 0,
+        "totalTokens": 17582,
+        "reasoningTokens": 10,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "b77966f3",
+      "at": "2026-10-11T04:19:46.733Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 2376,
+        "output": 615,
+        "cacheRead": 17472,
+        "cacheWrite": 0,
+        "totalTokens": 20463,
+        "reasoningTokens": 512,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "97cec9c0",
+      "at": "2026-10-11T04:19:51.240Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 902,
+        "output": 55,
+        "cacheRead": 19840,
+        "cacheWrite": 0,
+        "totalTokens": 20797,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "3c9c78a8",
+      "at": "2026-10-11T04:19:56.944Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 1319,
+        "output": 75,
+        "cacheRead": 20736,
+        "cacheWrite": 0,
+        "totalTokens": 22130,
+        "reasoningTokens": 41,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "e8cafec3",
+      "at": "2026-10-11T04:20:17.745Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 3262,
+        "output": 1014,
+        "cacheRead": 22016,
+        "cacheWrite": 0,
+        "totalTokens": 26292,
+        "reasoningTokens": 797,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "688bee6e",
+      "at": "2026-10-11T04:20:54.630Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 1591,
+        "output": 1802,
+        "cacheRead": 25216,
+        "cacheWrite": 0,
+        "totalTokens": 28609,
+        "reasoningTokens": 1516,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "51fc1223",
+      "at": "2026-10-11T04:21:01.213Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 2340,
+        "output": 152,
+        "cacheRead": 26752,
+        "cacheWrite": 0,
+        "totalTokens": 29244,
+        "reasoningTokens": 44,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "b3ac0a3b",
+      "at": "2026-10-11T04:21:14.946Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 1418,
+        "output": 525,
+        "cacheRead": 29056,
+        "cacheWrite": 0,
+        "totalTokens": 30999,
+        "reasoningTokens": 281,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "b64f3047",
+      "at": "2026-10-11T04:21:33.663Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 783,
+        "output": 1062,
+        "cacheRead": 30464,
+        "cacheWrite": 0,
+        "totalTokens": 32309,
+        "reasoningTokens": 503,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "904201a8",
+      "at": "2026-10-11T04:21:59.521Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 1363,
+        "output": 1121,
+        "cacheRead": 31232,
+        "cacheWrite": 0,
+        "totalTokens": 33716,
+        "reasoningTokens": 585,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "a4f9c46e",
+      "at": "2026-10-11T04:22:20.372Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 1677,
+        "output": 818,
+        "cacheRead": 32576,
+        "cacheWrite": 0,
+        "totalTokens": 35071,
+        "reasoningTokens": 624,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "1c3cfb39",
+      "at": "2026-10-11T04:22:25.093Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 971,
+        "output": 239,
+        "cacheRead": 34240,
+        "cacheWrite": 0,
+        "totalTokens": 35450,
+        "reasoningTokens": 133,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "2b0311e4",
+      "at": "2026-10-11T04:22:37.416Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 519,
+        "output": 596,
+        "cacheRead": 35200,
+        "cacheWrite": 0,
+        "totalTokens": 36315,
+        "reasoningTokens": 319,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "78461e75",
+      "at": "2026-10-11T04:22:57.019Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 675,
+        "output": 722,
+        "cacheRead": 35712,
+        "cacheWrite": 0,
+        "totalTokens": 37109,
+        "reasoningTokens": 503,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "be13ff8f",
+      "at": "2026-10-11T04:23:18.695Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 1810,
+        "output": 934,
+        "cacheRead": 36352,
+        "cacheWrite": 0,
+        "totalTokens": 39096,
+        "reasoningTokens": 630,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "73248220",
+      "at": "2026-10-11T04:23:28.478Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 998,
+        "output": 488,
+        "cacheRead": 38144,
+        "cacheWrite": 0,
+        "totalTokens": 39630,
+        "reasoningTokens": 199,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "57f16aaa",
+      "at": "2026-10-11T04:23:36.051Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 1744,
+        "output": 240,
+        "cacheRead": 39104,
+        "cacheWrite": 0,
+        "totalTokens": 41088,
+        "reasoningTokens": 92,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "027cac7a",
+      "at": "2026-10-11T04:23:41.416Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 568,
+        "output": 152,
+        "cacheRead": 40832,
+        "cacheWrite": 0,
+        "totalTokens": 41552,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "1e956053",
+      "at": "2026-10-11T04:23:43.906Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 855,
+        "output": 84,
+        "cacheRead": 41344,
+        "cacheWrite": 0,
+        "totalTokens": 42283,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "7af933e8",
+      "at": "2026-10-11T04:23:47.713Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 1420,
+        "output": 197,
+        "cacheRead": 42176,
+        "cacheWrite": 0,
+        "totalTokens": 43793,
+        "reasoningTokens": 64,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "e448cd66",
+      "at": "2026-10-11T04:23:49.450Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 497,
+        "output": 84,
+        "cacheRead": 43584,
+        "cacheWrite": 0,
+        "totalTokens": 44165,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "8e94d112",
+      "at": "2026-10-11T04:23:54.263Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 636,
+        "output": 89,
+        "cacheRead": 44032,
+        "cacheWrite": 0,
+        "totalTokens": 44757,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "d883e480",
+      "at": "2026-10-11T04:24:10.657Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 1191,
+        "output": 685,
+        "cacheRead": 44608,
+        "cacheWrite": 0,
+        "totalTokens": 46484,
+        "reasoningTokens": 554,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "61be18ce",
+      "at": "2026-10-11T04:24:15.416Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 805,
+        "output": 85,
+        "cacheRead": 45760,
+        "cacheWrite": 0,
+        "totalTokens": 46650,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "f61b755c",
+      "at": "2026-10-11T04:24:32.980Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 1136,
+        "output": 641,
+        "cacheRead": 46528,
+        "cacheWrite": 0,
+        "totalTokens": 48305,
+        "reasoningTokens": 498,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "cd006163",
+      "at": "2026-10-11T04:24:41.196Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 1490,
+        "output": 429,
+        "cacheRead": 47616,
+        "cacheWrite": 0,
+        "totalTokens": 49535,
+        "reasoningTokens": 265,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "e67696d1",
+      "at": "2026-10-11T04:24:48.238Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 1393,
+        "output": 415,
+        "cacheRead": 49088,
+        "cacheWrite": 0,
+        "totalTokens": 50896,
+        "reasoningTokens": 193,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "e8c97e39",
+      "at": "2026-10-11T04:24:59.901Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 1263,
+        "output": 426,
+        "cacheRead": 50432,
+        "cacheWrite": 0,
+        "totalTokens": 52121,
+        "reasoningTokens": 231,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "05fb81e2",
+      "at": "2026-10-11T04:25:01.865Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 959,
+        "output": 76,
+        "cacheRead": 51648,
+        "cacheWrite": 0,
+        "totalTokens": 52683,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "105a83a2",
+      "at": "2026-10-11T04:25:22.782Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 1618,
+        "output": 901,
+        "cacheRead": 52544,
+        "cacheWrite": 0,
+        "totalTokens": 55063,
+        "reasoningTokens": 613,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "b03f1fb8",
+      "at": "2026-10-11T04:25:50.393Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 1296,
+        "output": 1237,
+        "cacheRead": 54144,
+        "cacheWrite": 0,
+        "totalTokens": 56677,
+        "reasoningTokens": 930,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "864cb0b4",
+      "at": "2026-10-11T04:26:15.204Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 2724,
+        "output": 1118,
+        "cacheRead": 55424,
+        "cacheWrite": 0,
+        "totalTokens": 59266,
+        "reasoningTokens": 551,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "079aa925",
+      "at": "2026-10-11T04:26:32.121Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 1629,
+        "output": 931,
+        "cacheRead": 58112,
+        "cacheWrite": 0,
+        "totalTokens": 60672,
+        "reasoningTokens": 518,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "5afddeb1",
+      "at": "2026-10-11T04:27:16.220Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 1846,
+        "output": 2054,
+        "cacheRead": 59712,
+        "cacheWrite": 0,
+        "totalTokens": 63612,
+        "reasoningTokens": 1647,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "4f35620c",
+      "at": "2026-10-11T04:27:36.804Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 2911,
+        "output": 888,
+        "cacheRead": 61504,
+        "cacheWrite": 0,
+        "totalTokens": 65303,
+        "reasoningTokens": 653,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "ac84f3d1",
+      "at": "2026-10-11T04:27:45.379Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 1148,
+        "output": 337,
+        "cacheRead": 64384,
+        "cacheWrite": 0,
+        "totalTokens": 65869,
+        "reasoningTokens": 296,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "5baee84e",
+      "at": "2026-10-11T04:28:11.598Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 1615,
+        "output": 1041,
+        "cacheRead": 65472,
+        "cacheWrite": 0,
+        "totalTokens": 68128,
+        "reasoningTokens": 896,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "e6f5eaf2",
+      "at": "2026-10-11T04:28:52.207Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 1638,
+        "output": 2056,
+        "cacheRead": 67072,
+        "cacheWrite": 0,
+        "totalTokens": 70766,
+        "reasoningTokens": 1905,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "32922be8",
+      "at": "2026-10-11T04:29:55.409Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 2344,
+        "output": 3447,
+        "cacheRead": 68672,
+        "cacheWrite": 0,
+        "totalTokens": 74463,
+        "reasoningTokens": 326,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "328f2a9c",
+      "at": "2026-10-11T04:30:08.071Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 3518,
+        "output": 704,
+        "cacheRead": 70976,
+        "cacheWrite": 0,
+        "totalTokens": 75198,
+        "reasoningTokens": 38,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "stop"
+    },
+    {
+      "id": "e0bf73db",
+      "at": "2026-10-11T04:31:55.792Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 938,
+        "output": 1089,
+        "cacheRead": 74432,
+        "cacheWrite": 0,
+        "totalTokens": 76459,
+        "reasoningTokens": 946,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "1514da30",
+      "at": "2026-10-11T04:32:16.970Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 1492,
+        "output": 822,
+        "cacheRead": 75328,
+        "cacheWrite": 0,
+        "totalTokens": 77642,
+        "reasoningTokens": 636,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "e6171a99",
+      "at": "2026-10-11T04:32:21.709Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 1263,
+        "output": 85,
+        "cacheRead": 76800,
+        "cacheWrite": 0,
+        "totalTokens": 78148,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "9e41aca9",
+      "at": "2026-10-11T04:32:44.768Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 602,
+        "output": 812,
+        "cacheRead": 78016,
+        "cacheWrite": 0,
+        "totalTokens": 79430,
+        "reasoningTokens": 629,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "f467ce26",
+      "at": "2026-10-11T04:33:08.224Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 2348,
+        "output": 1036,
+        "cacheRead": 78592,
+        "cacheWrite": 0,
+        "totalTokens": 81976,
+        "reasoningTokens": 854,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "43dbc947",
+      "at": "2026-10-11T04:33:16.805Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 2144,
+        "output": 334,
+        "cacheRead": 80896,
+        "cacheWrite": 0,
+        "totalTokens": 83374,
+        "reasoningTokens": 244,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "7f19f512",
+      "at": "2026-10-11T04:33:39.810Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 1703,
+        "output": 1116,
+        "cacheRead": 83008,
+        "cacheWrite": 0,
+        "totalTokens": 85827,
+        "reasoningTokens": 945,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "4d846f3e",
+      "at": "2026-10-11T04:33:46.762Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 1398,
+        "output": 276,
+        "cacheRead": 84672,
+        "cacheWrite": 0,
+        "totalTokens": 86346,
+        "reasoningTokens": 225,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "b894c681",
+      "at": "2026-10-11T04:34:19.767Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 1027,
+        "output": 1797,
+        "cacheRead": 86016,
+        "cacheWrite": 0,
+        "totalTokens": 88840,
+        "reasoningTokens": 1051,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "a14c6f7c",
+      "at": "2026-10-11T04:34:38.064Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 2417,
+        "output": 1095,
+        "cacheRead": 87040,
+        "cacheWrite": 0,
+        "totalTokens": 90552,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "16ad4f94",
+      "at": "2026-10-11T04:34:46.984Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 2024,
+        "output": 426,
+        "cacheRead": 89408,
+        "cacheWrite": 0,
+        "totalTokens": 91858,
+        "reasoningTokens": 56,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "7526507a",
+      "at": "2026-10-11T04:34:53.882Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 1176,
+        "output": 414,
+        "cacheRead": 91392,
+        "cacheWrite": 0,
+        "totalTokens": 92982,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "56c1a068",
+      "at": "2026-10-11T04:35:01.624Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 835,
+        "output": 190,
+        "cacheRead": 92544,
+        "cacheWrite": 0,
+        "totalTokens": 93569,
+        "reasoningTokens": 109,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "eab387ea",
+      "at": "2026-10-11T04:35:16.275Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 952,
+        "output": 701,
+        "cacheRead": 93376,
+        "cacheWrite": 0,
+        "totalTokens": 95029,
+        "reasoningTokens": 101,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "stop"
+    },
+    {
+      "id": "6d7f9825",
+      "at": "2026-10-11T04:36:06.626Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 924,
+        "output": 781,
+        "cacheRead": 94272,
+        "cacheWrite": 0,
+        "totalTokens": 95977,
+        "reasoningTokens": 671,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "5029d4b3",
+      "at": "2026-10-11T04:36:25.064Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 2437,
+        "output": 1017,
+        "cacheRead": 95168,
+        "cacheWrite": 0,
+        "totalTokens": 98622,
+        "reasoningTokens": 821,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "c5e53aa4",
+      "at": "2026-10-11T04:36:32.822Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 1188,
+        "output": 216,
+        "cacheRead": 97600,
+        "cacheWrite": 0,
+        "totalTokens": 99004,
+        "reasoningTokens": 132,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "b57d77c9",
+      "at": "2026-10-11T04:36:46.317Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 767,
+        "output": 707,
+        "cacheRead": 98752,
+        "cacheWrite": 0,
+        "totalTokens": 100226,
+        "reasoningTokens": 279,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "c6229d01",
+      "at": "2026-10-11T04:36:55.596Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 1482,
+        "output": 729,
+        "cacheRead": 99456,
+        "cacheWrite": 0,
+        "totalTokens": 101667,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "8db4d699",
+      "at": "2026-10-11T04:37:09.524Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 2060,
+        "output": 846,
+        "cacheRead": 100928,
+        "cacheWrite": 0,
+        "totalTokens": 103834,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "f0a30662",
+      "at": "2026-10-11T04:37:15.813Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 1645,
+        "output": 128,
+        "cacheRead": 102976,
+        "cacheWrite": 0,
+        "totalTokens": 104749,
+        "reasoningTokens": 51,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "70ab1859",
+      "at": "2026-10-11T04:37:24.562Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 752,
+        "output": 373,
+        "cacheRead": 104576,
+        "cacheWrite": 0,
+        "totalTokens": 105701,
+        "reasoningTokens": 111,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "fcb5667a",
+      "at": "2026-10-11T04:37:34.241Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 702,
+        "output": 433,
+        "cacheRead": 105280,
+        "cacheWrite": 0,
+        "totalTokens": 106415,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "stop"
+    },
+    {
+      "id": "d23bb98b",
+      "at": "2026-10-11T04:42:33.003Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 770,
+        "output": 408,
+        "cacheRead": 105920,
+        "cacheWrite": 0,
+        "totalTokens": 107098,
+        "reasoningTokens": 291,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "d1b97fd1",
+      "at": "2026-10-11T04:42:40.088Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 3859,
+        "output": 383,
+        "cacheRead": 106688,
+        "cacheWrite": 0,
+        "totalTokens": 110930,
+        "reasoningTokens": 93,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "cba5e311",
+      "at": "2026-10-11T04:42:50.509Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 705,
+        "output": 405,
+        "cacheRead": 110528,
+        "cacheWrite": 0,
+        "totalTokens": 111638,
+        "reasoningTokens": 177,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "774788a5",
+      "at": "2026-10-11T04:42:54.359Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 879,
+        "output": 196,
+        "cacheRead": 111232,
+        "cacheWrite": 0,
+        "totalTokens": 112307,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "ad00d915",
+      "at": "2026-10-11T04:43:06.561Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 1744,
+        "output": 543,
+        "cacheRead": 112064,
+        "cacheWrite": 0,
+        "totalTokens": 114351,
+        "reasoningTokens": 210,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "381a7123",
+      "at": "2026-10-11T04:43:11.275Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 1042,
+        "output": 227,
+        "cacheRead": 113792,
+        "cacheWrite": 0,
+        "totalTokens": 115061,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "9f0be95a",
+      "at": "2026-10-11T04:43:21.628Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 1228,
+        "output": 483,
+        "cacheRead": 114816,
+        "cacheWrite": 0,
+        "totalTokens": 116527,
+        "reasoningTokens": 159,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "27c8b25b",
+      "at": "2026-10-11T04:43:28.195Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 1817,
+        "output": 349,
+        "cacheRead": 116032,
+        "cacheWrite": 0,
+        "totalTokens": 118198,
+        "reasoningTokens": 89,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "142cecb0",
+      "at": "2026-10-11T04:43:41.054Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 787,
+        "output": 563,
+        "cacheRead": 117824,
+        "cacheWrite": 0,
+        "totalTokens": 119174,
+        "reasoningTokens": 200,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "7dbaddc9",
+      "at": "2026-10-11T04:43:45.884Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 741,
+        "output": 208,
+        "cacheRead": 118592,
+        "cacheWrite": 0,
+        "totalTokens": 119541,
+        "reasoningTokens": 80,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "a38ef26d",
+      "at": "2026-10-11T04:43:52.694Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 954,
+        "output": 229,
+        "cacheRead": 119296,
+        "cacheWrite": 0,
+        "totalTokens": 120479,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "b9197c39",
+      "at": "2026-10-11T04:44:15.648Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 1847,
+        "output": 964,
+        "cacheRead": 120192,
+        "cacheWrite": 0,
+        "totalTokens": 123003,
+        "reasoningTokens": 658,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "1c9b9267",
+      "at": "2026-10-11T04:44:30.774Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 1278,
+        "output": 584,
+        "cacheRead": 121984,
+        "cacheWrite": 0,
+        "totalTokens": 123846,
+        "reasoningTokens": 368,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "2d3d1eeb",
+      "at": "2026-10-11T04:44:58.895Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 1560,
+        "output": 1258,
+        "cacheRead": 123200,
+        "cacheWrite": 0,
+        "totalTokens": 126018,
+        "reasoningTokens": 904,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "9adc229f",
+      "at": "2026-10-11T04:45:10.146Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 1814,
+        "output": 592,
+        "cacheRead": 124736,
+        "cacheWrite": 0,
+        "totalTokens": 127142,
+        "reasoningTokens": 216,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "fd6edab1",
+      "at": "2026-10-11T04:45:19.193Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 821,
+        "output": 353,
+        "cacheRead": 126528,
+        "cacheWrite": 0,
+        "totalTokens": 127702,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "319471dd",
+      "at": "2026-10-11T04:45:32.299Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 690,
+        "output": 460,
+        "cacheRead": 127296,
+        "cacheWrite": 0,
+        "totalTokens": 128446,
+        "reasoningTokens": 214,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "3d9da485",
+      "at": "2026-10-11T04:45:55.735Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 954,
+        "output": 919,
+        "cacheRead": 127936,
+        "cacheWrite": 0,
+        "totalTokens": 129809,
+        "reasoningTokens": 634,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "dbca648d",
+      "at": "2026-10-11T04:46:16.568Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 2293,
+        "output": 831,
+        "cacheRead": 128832,
+        "cacheWrite": 0,
+        "totalTokens": 131956,
+        "reasoningTokens": 596,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "b19463d5",
+      "at": "2026-10-11T04:46:18.961Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 1226,
+        "output": 85,
+        "cacheRead": 131072,
+        "cacheWrite": 0,
+        "totalTokens": 132383,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "4ead59de",
+      "at": "2026-10-11T04:46:25.912Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 767,
+        "output": 347,
+        "cacheRead": 132288,
+        "cacheWrite": 0,
+        "totalTokens": 133402,
+        "reasoningTokens": 108,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "93dcb203",
+      "at": "2026-10-11T04:46:37.037Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 1395,
+        "output": 500,
+        "cacheRead": 132992,
+        "cacheWrite": 0,
+        "totalTokens": 134887,
+        "reasoningTokens": 384,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "31824e89",
+      "at": "2026-10-11T04:47:02.080Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 775,
+        "output": 1193,
+        "cacheRead": 134336,
+        "cacheWrite": 0,
+        "totalTokens": 136304,
+        "reasoningTokens": 759,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "83749e64",
+      "at": "2026-10-11T04:48:04.125Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 1308,
+        "output": 3425,
+        "cacheRead": 135104,
+        "cacheWrite": 0,
+        "totalTokens": 139837,
+        "reasoningTokens": 1247,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "toolUse"
+    },
+    {
+      "id": "9bdae773",
+      "at": "2026-10-11T04:48:18.621Z",
+      "provider": "zhipu-coding-plan",
+      "model": "glm-5.3-flash",
+      "usage": {
+        "input": 3485,
+        "output": 638,
+        "cacheRead": 136384,
+        "cacheWrite": 0,
+        "totalTokens": 140507,
+        "reasoningTokens": 49,
+        "cost": {
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "total": 0
+        }
+      },
+      "stop_reason": "stop"
+    }
+  ],
+  "cash_cost": "unknown",
+  "quota_remaining": "unknown",
+  "cost_field": "SDK estimate if present, not invoice"
+}

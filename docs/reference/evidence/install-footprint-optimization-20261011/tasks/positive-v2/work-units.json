@@ -1,0 +1,91 @@
+{
+  "format": "orbit-work-units-2",
+  "task_id": "40911d14-3d71-484a-ba29-5a2d9b403d33",
+  "units": {
+    "wu-2e3411410400ee15": {
+      "id": "wu-2e3411410400ee15",
+      "task_id": "40911d14-3d71-484a-ba29-5a2d9b403d33",
+      "status": "accepted",
+      "input_digest": "2f1772663fc6f1b82f6f131b6e849b01282e67e6dd9f063815e2c488e053cadc",
+      "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/positive-v2",
+      "declared_at": "2026-10-11T04:38:06Z",
+      "dispatches": [
+        {
+          "member_id": "orbit-5e9e2865-f177-4c1d-81c3-f389f6aa60d2",
+          "tool_call_id": "call_ac28e20883c4443da108b4ad",
+          "model": "kimi-code/k3-256k",
+          "bound_at": "2026-10-11T04:38:25Z",
+          "hint_signature": "0d531f5426395d8dc77ce4238baac9863c6ae506a07b3582303c302f39cb818f",
+          "hint_message_id": "bd31a670-b6ef-42a7-b403-746dc19d71eb",
+          "status": "accepted",
+          "result": "成员（orbit-m-kimi-code-k3-256k-301bb915）实现 src/importer.mjs 的 importExpenses(text)，通过原生 hub 向 Main 发送完成报告（完整命令、退出码 0、127 用例摘要、无限制），Root 已发送成功回执。仅改动 src/importer.mjs，未触碰 tests/SPEC/package.json/cli.mjs/README，未提交、未联网。",
+          "verification": "Root 独立运行 TMPDIR=$PWD/.test-tmp PATH=$PWD/.runtime/bin:/usr/bin:/bin npm_config_cache=$PWD/.test-tmp/npm-cache node .runtime/lib/node_modules/npm/bin/npm-cli.js test（cwd=项目根），退出码 0，输出 EXPENSE_VALIDATION_SUMMARY: 127 cases passed。另核对 CLI：正常输入输出 JSON 且 exit=0；0/1/2 参数与无法读取文件、无效金额（报行 2）均 stderr 简明错误、stdout 空、exit=1、无堆栈。",
+          "finished_at": "2026-10-11T04:41:02Z"
+        }
+      ],
+      "member_id": "orbit-5e9e2865-f177-4c1d-81c3-f389f6aa60d2",
+      "tool_call_id": "call_ac28e20883c4443da108b4ad",
+      "model": "kimi-code/k3-256k",
+      "result": "成员（orbit-m-kimi-code-k3-256k-301bb915）实现 src/importer.mjs 的 importExpenses(text)，通过原生 hub 向 Main 发送完成报告（完整命令、退出码 0、127 用例摘要、无限制），Root 已发送成功回执。仅改动 src/importer.mjs，未触碰 tests/SPEC/package.json/cli.mjs/README，未提交、未联网。",
+      "verification": "Root 独立运行 TMPDIR=$PWD/.test-tmp PATH=$PWD/.runtime/bin:/usr/bin:/bin npm_config_cache=$PWD/.test-tmp/npm-cache node .runtime/lib/node_modules/npm/bin/npm-cli.js test（cwd=项目根），退出码 0，输出 EXPENSE_VALIDATION_SUMMARY: 127 cases passed。另核对 CLI：正常输入输出 JSON 且 exit=0；0/1/2 参数与无法读取文件、无效金额（报行 2）均 stderr 简明错误、stdout 空、exit=1、无堆栈。",
+      "finished_at": "2026-10-11T04:41:02Z",
+      "objective": "实现 src/importer.mjs 中 export function importExpenses(text) 纯函数，满足 SPEC.md 与 tests/acceptance.mjs 全部验收，并在项目提供的 .runtime Node/npm 环境实际运行完整测试命令通过。",
+      "requirements": [
+        "必需表头 category,amount（第一行，无效时报行号 1）",
+        "去除开头一个 BOM；接受 LF/CRLF；空行忽略但计入 1-based 行号",
+        "非引号 CSV；非空数据行必须恰好两列；两字段 trim；类别非空",
+        "金额必须为非负十进制、恰好两位小数（无符号、无指数、无更多小数位）",
+        "精确计算整数分；单个值、每类合计、总和任一超过 Number.MAX_SAFE_INTEGER 则抛错",
+        "保持类别首次出现顺序；返回 {groups:[{category,totalCents,count}],totalCents,count}",
+        "数据无效时 throw Error，消息含原始 1-based 行号",
+        "只修改 src/importer.mjs，不改 tests/、SPEC.md、package.json、cli.mjs、README.md",
+        "不提交、不推送、不下载依赖、不建立网络服务",
+        "测试后先通过原生 hub/peer 消息接口向 Main 报告实际结果、完整命令、退出码与限制，取得成功回执后再返回结果"
+      ],
+      "context": "项目根为 /var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/positive-v2。.runtime 是现有 Node/npm 的真副本；npm 需要 /bin/sh，故 PATH 不能只含 .runtime/bin。测试经 os.tmpdir() 写 CLI 临时输入，必须把 TMPDIR 设为项目内 .test-tmp，不得放开项目外写入。allowed_paths 同时是成员可读写全集（只读文件不自动受保护）。Root=Main 负责 CLI/README/集成核验，成员不承担。",
+      "decisions": [],
+      "input_materials": [
+        "SPEC.md",
+        "tests/acceptance.mjs",
+        "package.json",
+        "src/cli.mjs"
+      ],
+      "scope": {
+        "allowed_paths": [
+          "src/importer.mjs",
+          "SPEC.md",
+          "tests/acceptance.mjs",
+          "package.json",
+          "src/cli.mjs",
+          "README.md",
+          ".runtime/",
+          ".test-tmp/"
+        ],
+        "allowed_tools": [
+          "read",
+          "edit",
+          "write",
+          "bash"
+        ],
+        "allowed_commands": [
+          "TMPDIR=$PWD/.test-tmp PATH=$PWD/.runtime/bin:/usr/bin:/bin npm_config_cache=$PWD/.test-tmp/npm-cache node .runtime/lib/node_modules/npm/bin/npm-cli.js test"
+        ]
+      },
+      "acceptance": "在项目根以 allowed_commands 中的完整命令原样运行 npm test，退出码 0，输出含 EXPENSE_VALIDATION_SUMMARY（全部用例通过）。",
+      "escalation": "命令被安全层拒绝时不反复改写同一命令，通过原生 hub 向 Main 报告实际失败，等待 Root 修改正式范围或授权接管；接管不算成员路径成功。",
+      "model_requirements": {
+        "relevant_indices": [
+          "coding_index",
+          "agentic_index"
+        ],
+        "required_input_modalities": [
+          "text"
+        ],
+        "required_parameters": [
+          "tools"
+        ]
+      },
+      "dependencies": []
+    }
+  }
+}

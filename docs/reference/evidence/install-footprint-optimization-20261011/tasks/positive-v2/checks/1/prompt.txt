@@ -1,0 +1,1368 @@
+You are an independent Orbit check session, separate from the Root session that produced the artifact. Work strictly read-only: never modify the snapshot or the shared project. Judge the fixed artifact against the original instruction, amendments and named basis: find work that is missing, wrong or extra; judge whether continuing the current work is worthwhile from the instruction and concrete evidence. Do not require or run the full test suite, and do not treat test counts or elapsed time as failure; name specific gaps that need isolated verification instead. Verify every explicit input shape, field-count, validation or rejection rule against the code that enforces it: a rule the implementation does not actually enforce, including accepting the wrong shape or count or input that must be rejected, is a finding even when the provided tests pass. Do not change requirements, do not invent acceptance criteria, and do not turn an engineering preference into a blocker. Read the relevant AGENTS.md files inside the fixed snapshot; project rules apply to your judgment too. Only reuse a history finding id when it is the same real problem. The program record is your decision memory: it carries prior decisions and settled findings. Reuse the existing finding id for the same problem, and do not re-raise a point that a decision, a resolution or an earlier withdrawal already settled unless the fixed artifact, the check input or concrete new evidence differs from what that decision saw; the same point on unchanged artifact, input and evidence is not a new finding. If a finding or a previously withdrawn conclusion no longer applies, list its id in resolved_ids and explain in reason; a finding withdrawn by an independent adjudication is not an unresolved problem. Delivery rules: delivery.ready is a separate judgment from verdict and findings, and states only whether the task's actual deliverable is visible to you and satisfies what the instruction says must be delivered. Never derive it from verdict: continue with no findings is not delivery readiness, and a Root claim, plan or promise inside the record is not a delivered answer. A recent Root turn may answer an unrelated user message: when root.last_turn_task_attributed is false, its agent_message is NOT this task's delivery. For an answer-only task, use a version-matched task_delivery when supplied. Its prior_turns are earlier completed task replies for the same instruction and artifact, oldest first; a later check-queue acknowledgement alone does not withdraw an earlier delivered answer. A later substantive correction may supersede it. If no task_delivery is available, use the latest completed task-related agent_message only if the Root turn is attributed to this task. Judge answer delivery only while root.status is idle and root.last_turn_status is completed. While Root executes, the newest message is partial output, not a delivered answer, and ready must be false. For file tasks, task_git, when available, lists bounded committed-path clues between the task baseline and snapshot HEAD; it can include unrelated commits and proves no ownership. Check the committed snapshot files and the full instruction, not just review_focus, which contains only current working-tree changes. Verdict rules: complete only when the instruction is actually satisfied and known problems are resolved. While Root is still executing, never declare complete; use correct when an actionable current finding needs attention, otherwise continue. Choose pause only for an authorization boundary or a concrete adjudicated correction that stays unimplemented, never for estimate overruns, test counts or preference; choose needs_user only when the next step needs a decision only the user can make. The program record's review_focus lists the fixed snapshot's Git working-tree paths by their current status against the index/HEAD; added also includes untracked files that may predate this Orbit task. It is NOT a diff against task start and does not prove Root created, modified or deleted a listed path during this task. Check the paths and their direct dependencies first, then all original requirements, amendments and named basis. Attribute an extra change to this task only with task-scoped action or baseline evidence; do not demand removal of a pre-existing untracked file based on review_focus alone.
+
+## Check rules
+
+Judge on two axes. For each original requirement, say whether the fixed snapshot did it, did it only partly, did not do it, or did extra work. Extra work is a finding too. A change that fails no real requirement is not a missing-instruction finding. Evidence must be verifiable: location plus what you saw. Do not invent a trigger or a consequence. An opinion without that evidence is not a finding. An issue already decided by an adjudication does not reopen unless the artifact, the input, or concrete evidence changed. Pause or stop only for a real authorization gap, or a real dispute that blocks the disputed part. A model plan or summary is not the artifact.
+
+## Original instruction (verbatim)
+
+请用 Orbit 完成这个 CSV 费用导入项目，具体验收以 SPEC.md 和 tests/acceptance.mjs 为准。
+
+交付 src/importer.mjs 的纯函数、src/cli.mjs 的可运行命令行以及 README。导入逻辑和命令行集成是两项实质责任：请把尚未实现的 importer 作为有界编码工作单元，按当前候选建议交给可用的原生执行成员实际实现；你负责 CLI、README、整体接口、集成和核验。工作单元明确本任务所需的编码和工具能力；不要用只读审查既成代码替代实现交接。成员须使用项目提供的运行环境实际运行 npm test（在其任务范围中声明需要的材料、路径、工具和完整命令）；你收到结果后集成并再核验。保留整数分、SPEC 中的 CSV 格式/BOM/行号、分组合计顺序及溢出等要求，不改测试或规范。不得提交、推送、下载依赖或建立网络服务。
+
+环境已提供项目内 .runtime/bin/node 和 .runtime/lib/node_modules/npm/bin/npm-cli.js（当前现有 Node/npm 的材料副本），不需要读取用户 NVM 目录。需要成员使用它时在工作单元中明确声明项目路径和完整命令；安全或接口失败须据实际诊断纠正实际调用，有理由接管时说明限制。不要用未登记的 eval 子进程代替原生协作。
+
+完成后实际运行 npm test（使用项目提供的 Node/npm亦可），核对CLI成功/错误输出，给出README中的用法和边界。请求独立手动终检；若发现问题修正并再检查，符合完成条件后确认停止。实现、验证和必要收口请自主推进，不要求我逐步催办。
+
+测试会在 os.tmpdir() 写 CLI 临时输入。项目提供 .test-tmp/：成员执行 npm test 时须设置 TMPDIR 到该项目目录，并将必要临时写入路径和 CLI 读取路径纳入工作单元；不得放开项目外写入。项目内完整 .runtime 是现有 Node/npm 包的真副本，bin/npm 只指向项目内包入口；PATH 可指向 .runtime/bin、npm cache 可放 .test-tmp。请依据当前实际工具说明正确声明选型要求和调用参数，出现缺口根据具体诊断修正实际调用；只读审查或 Root 绕行不算成员实现/环境测试成功。
+
+这是有界编码交接：按现行工作单元字段层级声明与编码有关的能力指标，不将未知选型冒充推荐。成员实际执行所需的 npm 包目录和 CLI 测试读取必须获单元材料范围，不只是 npm 入口文件。请成员通过原生 hub 向所属 Root（Main）报告实际结果、npm 退出码/输出与限制，然后返回结果；Root实际收集并核验，而不是重复成员自述。环境缺口须根据具体诊断修正并在成员路径验证；仅Root测试不能代替成员环境恢复。
+
+请在派发给成员的任务文本中保留原要求中的报告约束：成员在实际实现和测试后，先通过宿主当前可用的原生 hub/peer 消息接口向 Main 发送实际结果、完整测试命令、退出码和限制，取得成功回执，再返回结果。yield 数据返回本身不能称为 hub 消息已发送；Root须核对实际消息和结果，不能只按成员自述或推测宣称 hub 成功。不要将这一约束遗漏为只交接导入规格。
+
+
+本项目使用以下完整命令验证（保留系统 shell 路径，项目 Node 优先）：TMPDIR=$PWD/.test-tmp PATH=$PWD/.runtime/bin:/usr/bin:/bin npm_config_cache=$PWD/.test-tmp/npm-cache node .runtime/lib/node_modules/npm/bin/npm-cli.js test
+成员工作单元 allowed_commands 声明这条完整命令；成员实际调用原样使用，不追加 echo 或手工 sandbox-exec 包装。工具回执已提供退出码。项目内 npm 需要 /bin/sh，不能把 PATH 设成仅 .runtime/bin。若命令被拒绝不要不断改写同一命令：用原生 hub 说明实际失败，由 Root 修改正式任务范围或有理由接管；接管不算成员路径成功。禁止无依据扩大权限。
+
+## Current execution context (program record)
+
+This record is deterministic and bounded. The original instruction, amendments and named basis above are complete and are not compressed.
+
+```json
+{
+  "root": {
+    "thread_id": "01a1293f-c3d2-71ef-a548-195b3b6cb933",
+    "cwd": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/positive-v2",
+    "status": "idle",
+    "interrupted": false,
+    "turn_id": null,
+    "last_turn_id": "d3981893",
+    "last_turn_user_message_id": "efc7b0ae",
+    "last_turn_status": "completed",
+    "observations": [
+      {
+        "kind": "agent_message",
+        "text": "终检已排队（command_id 20261011044107660672-550159a68599）。当前轮次结束，等待检查者结论；收到 finalization_notice 后若通过即确认停止，若有问题则修正后再检。\n\n**当前状态摘要**\n- `src/importer.mjs`：成员（wu-2e3411410400ee15，kimi-code/k3-256k）实现，已通过 hub 向 Main 报告并取得回执；Root 已独立核验。\n- `src/cli.mjs` / `README.md`：Root 实现并核对成功/错误输出。\n- Root 复跑完整命令退出码 0，`EXPENSE_VALIDATION_SUMMARY: 127 cases passed`。"
+      }
+    ],
+    "active_tools": 0,
+    "async_jobs": {
+      "delivery": {
+        "delivering": false,
+        "pendingJobIds": [],
+        "queued": 0
+      },
+      "recent": [
+        {
+          "agentId": "orbit-5e9e2865-f177-4c1d-81c3-f389f6aa60d2",
+          "endTime": 1791693656710,
+          "id": "orbit-5e9e2865-f177-4c1d-81c3-f389f6aa60d2",
+          "label": "orbit-5e9e2865-f177-4c1d-81c3-f389f6aa60d2",
+          "startTime": 1791693504786,
+          "status": "completed",
+          "type": "task"
+        }
+      ],
+      "running": []
+    },
+    "session_file": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/sessions-positive-v2/2026-10-11T04-36-47-186Z_01a1293f-c…[157:5cd4dea70c431538241c990d03c39ac3589e741d753fbf14742d910bae701f2e]",
+    "last_turn_task_attributed": true
+  },
+  "root_verifications_omitted": 8,
+  "root_verifications": [
+    {
+      "artifact_digest": "sha256:1ddd8ecdf2f8cb61627a23ff397deb97eba3df7d714033abcf9d88951c35ed12",
+      "artifact_matches": true,
+      "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/positive-v2",
+      "artifact_root_at_completion": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/positive-v2",
+      "async": false,
+      "at": "2026-10-11T04:40:51.257Z",
+      "at_ms": 1791693651257,
+      "command": "TMPDIR=$PWD/.test-tmp PATH=$PWD/.runtime/bin:/usr/bin:/bin npm_config_cache=$PWD/.test-tmp/npm-cache node .runtime/lib/node_m…[155:89b2b5300b377915956d1106d076ad4563f843a21002cf7d0c008079a2319337]",
+      "command_truncated": true,
+      "execution_cwd": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/positive-v2",
+      "exit_code": 0,
+      "exit_code_source": "sdk_terminal_success_contract",
+      "fingerprint_status": "ok",
+      "input_digest": "2f1772663fc6f1b82f6f131b6e849b01282e67e6dd9f063815e2c488e053cadc",
+      "input_matches": true,
+      "is_error": false,
+      "kind": "root_verification",
+      "output": "\n> test\n> node tests/acceptance.mjs\n\nEXPENSE_VALIDATION_START: integer precision, line provenance, groups and CLI\nPASS 001: grouping sample 1 | exact cents and source line verified\nPASS …[omitted 3628 of 4000 Unicode chars / 4002 UTF-8 bytes sha256:eb5709899283266527a55b374ed57d726b8170da3b456a7f4185a27fd5a1355b]ine verified\nPASS 127: CLI invalid input | exact cents and source line verified\nEXPENSE_VALIDATION_SUMMARY: 127 cases passed; integer precision and CLI verified\n\n\nWall time: 0.27 seconds",
+      "output_omitted": {
+        "omitted_utf16_units": 4985,
+        "sha256": "d5e4b96df97eac2a89a4f78320d1f6a7c9d2ceb931d8abef3bcafe4266bd01ea",
+        "visible_utf16_units": 8853,
+        "visible_utf8_bytes": 8853
+      },
+      "output_truncated": true,
+      "root_session_id": "01a1293f-c3d2-71ef-a548-195b3b6cb933",
+      "source": "omp_native_tool_result",
+      "start_observed_at": "2026-10-11T04:40:50.872Z",
+      "start_observed_at_ms": 1791693650872,
+      "start_observed_at_source": "program_local_event_observation",
+      "status": "completed",
+      "task_directory": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/positive-v2/.orbit/tasks/40911d14-3d71-…[147:711f4e2aac122f835641f2a6917d09684db90a418cd1d583d339643b06ac9059]",
+      "tool": "bash",
+      "tool_call_id": "call_d637c30ac61747d59feef08c"
+    },
+    {
+      "artifact_digest": "sha256:1ddd8ecdf2f8cb61627a23ff397deb97eba3df7d714033abcf9d88951c35ed12",
+      "artifact_matches": true,
+      "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/positive-v2",
+      "artifact_root_at_completion": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/positive-v2",
+      "async": false,
+      "at": "2026-10-11T04:40:55.568Z",
+      "at_ms": 1791693655568,
+      "command": "printf 'category,amount\\nFood,1.20\\nTravel,0.99\\nFood,0.02\\n' > .test-tmp/demo.csv && .runtime/bin/node src/cli.mjs .test-tmp…[388:c1469e5cede3a73eec086a9191da27772671d525be5d3e2c342709552f95b93a]",
+      "command_truncated": true,
+      "execution_cwd": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/positive-v2",
+      "exit_code": 0,
+      "exit_code_source": "sdk_terminal_success_contract",
+      "fingerprint_status": "ok",
+      "input_digest": "2f1772663fc6f1b82f6f131b6e849b01282e67e6dd9f063815e2c488e053cadc",
+      "input_matches": true,
+      "is_error": false,
+      "kind": "root_verification",
+      "output": "{\"groups\":[{\"category\":\"Food\",\"totalCents\":122,\"count\":2},{\"category\":\"Travel\",\"totalCents\":99,\"count\":1}],\"totalCents\":221,\"count\":3}\nexit=0\nusage: node src/cli.mjs <input.csv>\nexit=1\nerror: cannot read .test-tmp/nope.csv: ENOENT: no such file or directory, open '.test-tmp/nope.csv'\nexit=1\nerror: line 2: invalid amount \"bad\" (need nonnegative decimal with exactly two fractional digits)\nexit=1\n\n\nWall time: 0.18 seconds",
+      "output_truncated": false,
+      "root_session_id": "01a1293f-c3d2-71ef-a548-195b3b6cb933",
+      "source": "omp_native_tool_result",
+      "start_observed_at": "2026-10-11T04:40:55.277Z",
+      "start_observed_at_ms": 1791693655277,
+      "start_observed_at_source": "program_local_event_observation",
+      "status": "completed",
+      "task_directory": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/positive-v2/.orbit/tasks/40911d14-3d71-…[147:711f4e2aac122f835641f2a6917d09684db90a418cd1d583d339643b06ac9059]",
+      "tool": "bash",
+      "tool_call_id": "call_9e3eb8909b6b417ab2b39423"
+    }
+  ],
+  "task_delivery": {
+    "artifact_digest": "sha256:1ddd8ecdf2f8cb61627a23ff397deb97eba3df7d714033abcf9d88951c35ed12",
+    "input_digest": "2f1772663fc6f1b82f6f131b6e849b01282e67e6dd9f063815e2c488e053cadc",
+    "prior_turns": [],
+    "text": "终检已排队（command_id 20261011044107660672-550159a68599）。当前轮次结束，等待检查者结论；收到 finalization_notice 后若通过即确认停止，若有问题则修正后再检。\n\n**当前状态摘要**\n- `src/importer.mjs`：成员（wu-2e3411410400ee15，kimi-code/k3-256k）实现，已通过 hub 向 Main 报告并取得回执；Root 已独立核验。\n- `src/cli.mjs` / `README.md`：Root 实现并核对成功/错误输出。\n- Root 复跑完整命令退出码 0，`EXPENSE_VALIDATION_SUMMARY: 127 cases passed`。",
+    "turn_id": "d3981893"
+  },
+  "task_git": {
+    "baseline_head": "3fdcf7b0c834c25c7032a51f01ee520cf195d4c6",
+    "note": "Committed paths between these HEADs are review clues, not proof of task ownership. Inspect the fixed snapshot against the ori…[143:6c564e2f0d6f0bfed6efeba66c5a9b5b2ebbb73dc595b8a68300c4bc9a8f923d]",
+    "snapshot_head": "3fdcf7b0c834c25c7032a51f01ee520cf195d4c6",
+    "status": "available",
+    "truncated": false,
+    "changed_paths": []
+  },
+  "review_focus": {
+    "added": [],
+    "modified": [
+      "README.md",
+      "src/cli.mjs",
+      "src/importer.mjs"
+    ],
+    "deleted": []
+  },
+  "findings": {},
+  "recent_events": [],
+  "check_history": {
+    "eligibility": "history facts only; not current completion eligibility",
+    "current_input_digest": "2f1772663fc6f1b82f6f131b6e849b01282e67e6dd9f063815e2c488e053cadc",
+    "current_artifact_digest": "sha256:1ddd8ecdf2f8cb61627a23ff397deb97eba3df7d714033abcf9d88951c35ed12",
+    "total_checks": 0,
+    "anchor": null,
+    "recent": [],
+    "omitted_count": 0,
+    "omitted_numbers": [],
+    "amendments": []
+  },
+  "recheck": null,
+  "execution_members": [
+    {
+      "kind": "omp",
+      "adapter": "omp_native_task",
+      "model": "kimi-code/k3-256k",
+      "thread_id": "orbit-5e9e2865-f177-4c1d-81c3-f389f6aa60d2",
+      "status": "completed",
+      "registered_at": "2026-10-11T04:38:25Z",
+      "delegation_basis": "orbit_hint"
+    }
+  ],
+  "work_units": [
+    {
+      "id": "wu-2e3411410400ee15",
+      "task_id": "40911d14-3d71-484a-ba29-5a2d9b403d33",
+      "status": "accepted",
+      "input_digest": "2f1772663fc6f1b82f6f131b6e849b01282e67e6dd9f063815e2c488e053cadc",
+      "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/positive-v2",
+      "declared_at": "2026-10-11T04:38:06Z",
+      "dispatches": [
+        {
+          "bound_at": "2026-10-11T04:38:25Z",
+          "finished_at": "2026-10-11T04:41:02Z",
+          "hint_message_id": "bd31a670-b6ef-42a7-b403-746dc19d71eb",
+          "hint_signature": "0d531f5426395d8dc77ce4238baac9863c6ae506a07b3582303c302f39cb818f",
+          "member_id": "orbit-5e9e2865-f177-4c1d-81c3-f389f6aa60d2",
+          "model": "kimi-code/k3-256k",
+          "result": "成员（orbit-m-kimi-code-k3-256k-301bb915）实现 src/importer.mjs 的 importExpenses(text)，通过原生 hub 向 Main 发送完成报告（完整命令、退出码 0、127 用例摘要、无…[214:66135cad38c5132116341d6385e7d79591ec4b1081936a413a8861f0b17ca1d3]",
+          "status": "accepted",
+          "tool_call_id": "call_ac28e20883c4443da108b4ad",
+          "verification": "Root 独立运行 TMPDIR=$PWD/.test-tmp PATH=$PWD/.runtime/bin:/usr/bin:/bin npm_config_cache=$PWD/.test-tmp/npm-cache node .runtime/…[318:084d46a43f7c9f849c07adaf209ddb821e4e603b59f617447ba969e323921fe8]"
+        }
+      ],
+      "member_id": "orbit-5e9e2865-f177-4c1d-81c3-f389f6aa60d2",
+      "tool_call_id": "call_ac28e20883c4443da108b4ad",
+      "model": "kimi-code/k3-256k",
+      "result": "成员（orbit-m-kimi-code-k3-256k-301bb915）实现 src/importer.mjs 的 importExpenses(text)，通过原生 hub 向 Main 发送完成报告（完整命令、退出码 0、127 用例摘要、无…[214:66135cad38c5132116341d6385e7d79591ec4b1081936a413a8861f0b17ca1d3]",
+      "verification": "Root 独立运行 TMPDIR=$PWD/.test-tmp PATH=$PWD/.runtime/bin:/usr/bin:/bin npm_config_cache=$PWD/.test-tmp/npm-cache node .runtime/…[318:084d46a43f7c9f849c07adaf209ddb821e4e603b59f617447ba969e323921fe8]",
+      "finished_at": "2026-10-11T04:41:02Z",
+      "objective": "实现 src/importer.mjs 中 export function importExpenses(text) 纯函数，满足 SPEC.md 与 tests/acceptance.mjs 全部验收，并在项目提供的 .runtime Node/n…[143:60680d9c1e3036abd743e6251f8d642de87dec386be629a52e5c5aaeec66057d]",
+      "requirements": [
+        "必需表头 category,amount（第一行，无效时报行号 1）",
+        "去除开头一个 BOM；接受 LF/CRLF；空行忽略但计入 1-based 行号",
+        "非引号 CSV；非空数据行必须恰好两列；两字段 trim；类别非空",
+        "金额必须为非负十进制、恰好两位小数（无符号、无指数、无更多小数位）",
+        {
+          "incomplete": true,
+          "field": "requirements",
+          "declared_count": 10,
+          "omitted_count": 6,
+          "omitted_sha256": "9104ff4152a485d7d5875d6edbfe36f8418b91784666bdf596d245e597aa30cc"
+        }
+      ],
+      "context": "项目根为 /var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/positive-v2。.runtime 是现有 Node/npm 的真副本；npm…[298:c222e7bc740adcdb0d57b25db133aaca28990c288e389a7ed1b07ed6810a5a82]",
+      "decisions": [],
+      "input_materials": [
+        "package.json",
+        "src/cli.mjs"
+      ],
+      "scope": {
+        "allowed_paths": [
+          "src/importer.mjs",
+          "SPEC.md",
+          "tests/acceptance.mjs",
+          "package.json",
+          {
+            "incomplete": true,
+            "field": "allowed_paths",
+            "declared_count": 8,
+            "omitted_count": 4,
+            "omitted_sha256": "29bdc6c60aac01f9fa78f7e31e5f904ed93b9031cdcde8ef0cbbb3defc4fe05c"
+          }
+        ],
+        "allowed_tools": [
+          "read",
+          "edit",
+          "write",
+          "bash"
+        ],
+        "allowed_commands": [
+          "TMPDIR=$PWD/.test-tmp PATH=$PWD/.runtime/bin:/usr/bin:/bin npm_config_cache=$PWD/.test-tmp/npm-cache node .runtime/lib/node_m…[155:89b2b5300b377915956d1106d076ad4563f843a21002cf7d0c008079a2319337]"
+        ]
+      },
+      "acceptance": "在项目根以 allowed_commands 中的完整命令原样运行 npm test，退出码 0，输出含 EXPENSE_VALIDATION_SUMMARY（全部用例通过）。",
+      "escalation": "命令被安全层拒绝时不反复改写同一命令，通过原生 hub 向 Main 报告实际失败，等待 Root 修改正式范围或授权接管；接管不算成员路径成功。",
+      "model_requirements": {
+        "relevant_indices": [
+          "coding_index",
+          "agentic_index"
+        ],
+        "required_input_modalities": [
+          "text"
+        ],
+        "required_parameters": [
+          "tools"
+        ]
+      },
+      "dependencies": []
+    }
+  ],
+  "decisions": [],
+  "dispute": null,
+  "estimate": {
+    "seconds": null,
+    "tokens": null
+  },
+  "hard_deadline": null,
+  "elapsed_seconds": 253.42267894744873,
+  "project_rules": [],
+  "uncopied_entries": [],
+  "member_blocks": {
+    "classes": [
+      {
+        "agents": [
+          "orbit-5e9e2865-f177-4c1d-81c3-f389f6aa60d2"
+        ],
+        "count": 1,
+        "dispatches": [
+          {
+            "agent_id": "orbit-5e9e2865-f177-4c1d-81c3-f389f6aa60d2",
+            "at": "2026-10-11T04:40:02Z",
+            "dispatch_tool_call_id": "call_ac28e20883c4443da108b4ad",
+            "tool_call_id": "tool_e9sj33MgRK9JHDdGx4VAXmIQ",
+            "work_unit_id": "wu-2e3411410400ee15"
+          }
+        ],
+        "dispatches_omitted": 0,
+        "first_at": "2026-10-11T04:40:02Z",
+        "last_at": "2026-10-11T04:40:02Z",
+        "reason": "Orbit work-unit scope: command is absent from the declared work-unit commands",
+        "stalled": false,
+        "tool": "bash",
+        "units": [
+          "wu-2e3411410400ee15"
+        ]
+      },
+      {
+        "agents": [
+          "orbit-5e9e2865-f177-4c1d-81c3-f389f6aa60d2"
+        ],
+        "count": 1,
+        "dispatches": [
+          {
+            "agent_id": "orbit-5e9e2865-f177-4c1d-81c3-f389f6aa60d2",
+            "at": "2026-10-11T04:40:41Z",
+            "dispatch_tool_call_id": "call_ac28e20883c4443da108b4ad",
+            "tool_call_id": "tool_ZHyjOhLbeCTGboTeCxLPCsd7",
+            "work_unit_id": "wu-2e3411410400ee15"
+          }
+        ],
+        "dispatches_omitted": 0,
+        "first_at": "2026-10-11T04:40:41Z",
+        "last_at": "2026-10-11T04:40:41Z",
+        "reason": "Orbit work-unit scope: tool wait has no allowed work-unit entrance",
+        "stalled": false,
+        "tool": "wait",
+        "units": [
+          "wu-2e3411410400ee15"
+        ]
+      }
+    ],
+    "evicted_classes": null,
+    "scope": {
+      "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/positive-v2",
+      "input_digest": "2f1772663fc6f1b82f6f131b6e849b01282e67e6dd9f063815e2c488e053cadc"
+    },
+    "total": 2
+  },
+  "takeover": null,
+  "model_selection": {
+    "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/positive-v2",
+    "at": "2026-10-11T04:38:24Z",
+    "candidates": [
+      {
+        "agent": "orbit-m-openai-codex-gpt-6-1-sol-3026c530",
+        "eligibility": {
+          "context": {
+            "catalog_value": 1050000,
+            "requirement": null,
+            "status": "not_required"
+          },
+          "input_modalities": {
+            "catalog_value": [
+              "image",
+              "text"
+            ],
+            "note": "目录模态是模型级事实，不覆盖实际路由可能的模态缩减（如仅图像输入的变体）；须运行时核对",
+            "requirement": [
+              "text"
+            ],
+            "status": "met_by_catalog"
+          },
+          "output_modalities": {
+            "catalog_value": [
+              "text"
+            ],
+            "requirement": [],
+            "status": "not_required"
+          },
+          "parameters": {
+            "catalog_value": [
+              "tools",
+              "verbosity"
+            ],
+            "note": "目录支持参数是模型级事实，不等于宿主在运行时授予对应工具；须在工具入口核对",
+            "requirement": [
+              "tools"
+            ],
+            "status": "met_by_catalog"
+          }
+        },
+        "execution_eligibility": {
+          "context": {
+            "configured_limit": 272000,
+            "requirement": null,
+            "source": "omp_model_registry",
+            "status": "not_required"
+          },
+          "input_modalities": {
+            "configured_values": [
+              "text",
+              "image"
+            ],
+            "requirement": [
+              "text"
+            ],
+            "status": "met"
+          },
+          "output_modalities": {
+            "configured_values": [
+              "text"
+            ],
+            "requirement": [],
+            "status": "not_required"
+          },
+          "parameters": {
+            "note": "模型工具支持不代替成员实际工具授权",
+            "requirement": [
+              "tools"
+            ],
+            "status": "met"
+          }
+        },
+        "hold_reason": null,
+        "identity": {
+          "billing_route": "unknown",
+          "model": "gpt-6.1-sol",
+          "provider": "openai-codex",
+          "reasoning": "unknown"
+        },
+        "in_pool": true,
+        "model": "openai-codex/gpt-6.1-sol",
+        "model_overview_status": "no_benchmark",
+        "native": false,
+        "projection_error": null,
+        "quality_basis": "unknown",
+        "quality_evidence_valid_until": null,
+        "quality_sources": [],
+        "recommendation_hold": false,
+        "verdict": "not_recommended"
+      },
+      {
+        "agent": "orbit-m-openai-codex-gpt-6-luna-bae41d6b",
+        "eligibility": {
+          "context": {
+            "catalog_value": 1050000,
+            "requirement": null,
+            "status": "not_required"
+          },
+          "input_modalities": {
+            "catalog_value": [
+              "image",
+              "text"
+            ],
+            "note": "目录模态是模型级事实，不覆盖实际路由可能的模态缩减（如仅图像输入的变体）；须运行时核对",
+            "requirement": [
+              "text"
+            ],
+            "status": "met_by_catalog"
+          },
+          "output_modalities": {
+            "catalog_value": [
+              "text"
+            ],
+            "requirement": [],
+            "status": "not_required"
+          },
+          "parameters": {
+            "catalog_value": [
+              "tools",
+              "verbosity"
+            ],
+            "note": "目录支持参数是模型级事实，不等于宿主在运行时授予对应工具；须在工具入口核对",
+            "requirement": [
+              "tools"
+            ],
+            "status": "met_by_catalog"
+          }
+        },
+        "execution_eligibility": {
+          "context": {
+            "configured_limit": 272000,
+            "requirement": null,
+            "source": "omp_model_registry",
+            "status": "not_required"
+          },
+          "input_modalities": {
+            "configured_values": [
+              "text",
+              "image"
+            ],
+            "requirement": [
+              "text"
+            ],
+            "status": "met"
+          },
+          "output_modalities": {
+            "configured_values": [
+              "text"
+            ],
+            "requirement": [],
+            "status": "not_required"
+          },
+          "parameters": {
+            "note": "模型工具支持不代替成员实际工具授权",
+            "requirement": [
+              "tools"
+            ],
+            "status": "met"
+          }
+        },
+        "hold_reason": null,
+        "identity": {
+          "billing_route": "unknown",
+          "model": "gpt-6-luna",
+          "provider": "openai-codex",
+          "reasoning": "unknown"
+        },
+        "in_pool": true,
+        "model": "openai-codex/gpt-6-luna",
+        "model_overview_status": "no_benchmark",
+        "native": false,
+        "projection_error": null,
+        "quality_basis": "unknown",
+        "quality_evidence_valid_until": null,
+        "quality_sources": [],
+        "recommendation_hold": false,
+        "verdict": "not_recommended"
+      }
+    ],
+    "decision": "recommended",
+    "dependencies": [],
+    "execution_role": "unspecified",
+    "input_digest": "2f1772663fc6f1b82f6f131b6e849b01282e67e6dd9f063815e2c488e053cadc",
+    "judgment_state": {
+      "amendments": [],
+      "artifact_digest": "sha256:f11c7f488988492dec0fa7fa4f82887f661d3cbbd4fab9f6451a10df1ac7ebe9",
+      "basis": [],
+      "candidates": [
+        {
+          "agent": "orbit-m-openai-codex-gpt-6-1-sol-3026c530",
+          "capability_facts": {
+            "catalog": {
+              "facts": {
+                "architecture": {
+                  "input_modalities": [
+                    "image",
+                    "text"
+                  ],
+                  "output_modalities": [
+                    "text"
+                  ],
+                  "tokenizer": "GPT"
+                },
+                "benchmark_as_of": "2026-10-09T00:00:23.510Z",
+                "benchmark_display_name": "GPT-6.1 Sol (Max)",
+                "benchmark_variants": [
+                  {
+                    "agentic_index": null,
+                    "coding_index": null,
+                    "display_name": "GPT-6.1 Sol (Max)",
+                    "intelligence_index": 51.8,
+                    "permaslug": "openai/gpt-6.1-sol-20260929"
+                  }
+                ],
+                "canonical_slug": "openai/gpt-6.1-sol-20260929",
+                "capability_scope": "model_catalog",
+                "context_length": 1050000,
+                "fetched_at": "2026-10-11T04:22:20Z",
+                "id": "openai/gpt-6.1-sol",
+                "intelligence_index": 51.8,
+                "mapping": {
+                  "audited": false,
+                  "match": "concrete",
+                  "matched_canonical_slug": "openai/gpt-6.1-sol-20260929",
+                  "matched_catalog_id": "openai/gpt-6.1-sol",
+                  "normalized_base_model": "gpt-6.1-sol",
+                  "note": "目录同型号具体行匹配：只去掉渠道前缀，未审计该渠道身份；这是模型级能力事实，不携带该条目的计费／额度／实际上下文，prior 也不投影目录 context_length／模态／支持参数",
+                  "requested_identity": {
+                    "billing_route": "unknown",
+                    "model": "gpt-6.1-sol",
+                    "provider": "openai-codex",
+                    "reasoning": "unknown"
+                  }
+                },
+                "mapping_identity": null,
+                "measurement_date": null,
+                "measurement_date_status": "unknown",
+                "measurement_note": "抓取 72 小时有效期不代表基准测量日期；测量日期与方法版本未获可核验来源",
+                "method_version": null,
+                "reasoning_note": "推理变体未核实（reasoning=unknown）；仅作弱先验，不等于推理档位匹配；基准为 OpenRouter 目录中的 Artificial Analysis 指数，无测量日期，不代表本路由价格或端到端耗时。",
+                "sources": [
+                  "https://openrouter.ai/api/v1/benchmarks?source=artificial-analysis",
+                  "https://openrouter.ai/api/v1/models"
+                ],
+                "supported_parameters": [
+                  "tools",
+                  "verbosity"
+                ]
+              },
+              "prior": null,
+              "provenance": {
+                "audited": false,
+                "mapping_identity": null,
+                "match": "concrete",
+                "matched_canonical_slug": "openai/gpt-6.1-sol-20260929",
+                "matched_catalog_id": "openai/gpt-6.1-sol",
+                "note": "目录同型号具体行匹配：只去掉渠道前缀，未审计该渠道身份；这是模型级能力事实，不携带该条目的计费／额度／实际上下文，prior 也不投影目录 context_length／模态／支持参数",
+                "sources": [
+                  "https://openrouter.ai/api/v1/models"
+                ],
+                "verified_at": null,
+                "verified_by": null
+              },
+              "question": "模型级第三方基准指数与目录能力；无测量日期与方法版本，不代表本执行路由的限制、价格或耗时",
+              "status": "no_benchmark"
+            },
+            "conflicts": [],
+            "contrasts": [],
+            "eligibility": {
+              "context": {
+                "catalog_value": 1050000,
+                "requirement": null,
+                "status": "not_required"
+              },
+              "input_modalities": {
+                "catalog_value": [
+                  "image",
+                  "text"
+                ],
+                "note": "目录模态是模型级事实，不覆盖实际路由可能的模态缩减（如仅图像输入的变体）；须运行时核对",
+                "requirement": [
+                  "text"
+                ],
+                "status": "met_by_catalog"
+              },
+              "output_modalities": {
+                "catalog_value": [
+                  "text"
+                ],
+                "requirement": [],
+                "status": "not_required"
+              },
+              "parameters": {
+                "catalog_value": [
+                  "tools",
+                  "verbosity"
+                ],
+                "note": "目录支持参数是模型级事实，不等于宿主在运行时授予对应工具；须在工具入口核对",
+                "requirement": [
+                  "tools"
+                ],
+                "status": "met_by_catalog"
+              }
+            },
+            "execution_eligibility": {
+              "context": {
+                "configured_limit": 272000,
+                "requirement": null,
+                "source": "omp_model_registry",
+                "status": "not_required"
+              },
+              "input_modalities": {
+                "configured_values": [
+                  "text",
+                  "image"
+                ],
+                "requirement": [
+                  "text"
+                ],
+                "status": "met"
+              },
+              "output_modalities": {
+                "configured_values": [
+                  "text"
+                ],
+                "requirement": [],
+                "status": "not_required"
+              },
+              "parameters": {
+                "note": "模型工具支持不代替成员实际工具授权",
+                "requirement": [
+                  "tools"
+                ],
+                "status": "met"
+              }
+            },
+            "hold_reason": null,
+            "identity": {
+              "billing_route": "unknown",
+              "model": "gpt-6.1-sol",
+              "provider": "openai-codex",
+              "reasoning": "unknown"
+            },
+            "measurement_date": {
+              "catalog_status": "no_benchmark",
+              "exact_evidence_measured_at": null,
+              "exact_evidence_status": "none",
+              "requirement": false,
+              "status": "not_required"
+            },
+            "precise_evidence": {
+              "entry": null,
+              "question": "该精确身份（provider/model/reasoning/billing_route）的可得事实或记录的不可用状态；提交者检索，含检索日期与有效期",
+              "status": "none"
+            },
+            "recommendation_hold": false,
+            "task": {
+              "relevant_indices": [
+                "coding_index",
+                "agentic_index"
+              ],
+              "require_measurement_date": false,
+              "required_context_tokens": null,
+              "required_input_modalities": [
+                "text"
+              ],
+              "required_output_modalities": [],
+              "required_parameters": [
+                "tools"
+              ]
+            }
+          },
+          "identity": {
+            "billing_route": "unknown",
+            "model": "gpt-6.1-sol",
+            "provider": "openai-codex",
+            "reasoning": "unknown"
+          },
+          "model": "gpt-6.1-sol",
+          "provider": "openai-codex"
+        },
+        {
+          "agent": "orbit-m-openai-codex-gpt-6-luna-bae41d6b",
+          "capability_facts": {
+            "catalog": {
+              "facts": {
+                "architecture": {
+                  "input_modalities": [
+                    "image",
+                    "text"
+                  ],
+                  "output_modalities": [
+                    "text"
+                  ],
+                  "tokenizer": "GPT"
+                },
+                "benchmark_as_of": "2026-10-09T00:00:23.510Z",
+                "benchmark_display_name": "GPT-6 Luna (Max)",
+                "benchmark_variants": [
+                  {
+                    "agentic_index": null,
+                    "coding_index": null,
+                    "display_name": "GPT-6 Luna (Max)",
+                    "intelligence_index": 38.1,
+                    "permaslug": "openai/gpt-6-luna-20260922"
+                  }
+                ],
+                "canonical_slug": "openai/gpt-6-luna-20260922",
+                "capability_scope": "model_catalog",
+                "context_length": 1050000,
+                "fetched_at": "2026-10-11T04:22:20Z",
+                "id": "openai/gpt-6-luna",
+                "intelligence_index": 38.1,
+                "mapping": {
+                  "audited": false,
+                  "match": "concrete",
+                  "matched_canonical_slug": "openai/gpt-6-luna-20260922",
+                  "matched_catalog_id": "openai/gpt-6-luna",
+                  "normalized_base_model": "gpt-6-luna",
+                  "note": "目录同型号具体行匹配：只去掉渠道前缀，未审计该渠道身份；这是模型级能力事实，不携带该条目的计费／额度／实际上下文，prior 也不投影目录 context_length／模态／支持参数",
+                  "requested_identity": {
+                    "billing_route": "unknown",
+                    "model": "gpt-6-luna",
+                    "provider": "openai-codex",
+                    "reasoning": "unknown"
+                  }
+                },
+                "mapping_identity": null,
+                "measurement_date": null,
+                "measurement_date_status": "unknown",
+                "measurement_note": "抓取 72 小时有效期不代表基准测量日期；测量日期与方法版本未获可核验来源",
+                "method_version": null,
+                "reasoning_note": "推理变体未核实（reasoning=unknown）；仅作弱先验，不等于推理档位匹配；基准为 OpenRouter 目录中的 Artificial Analysis 指数，无测量日期，不代表本路由价格或端到端耗时。",
+                "sources": [
+                  "https://openrouter.ai/api/v1/benchmarks?source=artificial-analysis",
+                  "https://openrouter.ai/api/v1/models"
+                ],
+                "supported_parameters": [
+                  "tools",
+                  "verbosity"
+                ]
+              },
+              "prior": null,
+              "provenance": {
+                "audited": false,
+                "mapping_identity": null,
+                "match": "concrete",
+                "matched_canonical_slug": "openai/gpt-6-luna-20260922",
+                "matched_catalog_id": "openai/gpt-6-luna",
+                "note": "目录同型号具体行匹配：只去掉渠道前缀，未审计该渠道身份；这是模型级能力事实，不携带该条目的计费／额度／实际上下文，prior 也不投影目录 context_length／模态／支持参数",
+                "sources": [
+                  "https://openrouter.ai/api/v1/models"
+                ],
+                "verified_at": null,
+                "verified_by": null
+              },
+              "question": "模型级第三方基准指数与目录能力；无测量日期与方法版本，不代表本执行路由的限制、价格或耗时",
+              "status": "no_benchmark"
+            },
+            "conflicts": [],
+            "contrasts": [],
+            "eligibility": {
+              "context": {
+                "catalog_value": 1050000,
+                "requirement": null,
+                "status": "not_required"
+              },
+              "input_modalities": {
+                "catalog_value": [
+                  "image",
+                  "text"
+                ],
+                "note": "目录模态是模型级事实，不覆盖实际路由可能的模态缩减（如仅图像输入的变体）；须运行时核对",
+                "requirement": [
+                  "text"
+                ],
+                "status": "met_by_catalog"
+              },
+              "output_modalities": {
+                "catalog_value": [
+                  "text"
+                ],
+                "requirement": [],
+                "status": "not_required"
+              },
+              "parameters": {
+                "catalog_value": [
+                  "tools",
+                  "verbosity"
+                ],
+                "note": "目录支持参数是模型级事实，不等于宿主在运行时授予对应工具；须在工具入口核对",
+                "requirement": [
+                  "tools"
+                ],
+                "status": "met_by_catalog"
+              }
+            },
+            "execution_eligibility": {
+              "context": {
+                "configured_limit": 272000,
+                "requirement": null,
+                "source": "omp_model_registry",
+                "status": "not_required"
+              },
+              "input_modalities": {
+                "configured_values": [
+                  "text",
+                  "image"
+                ],
+                "requirement": [
+                  "text"
+                ],
+                "status": "met"
+              },
+              "output_modalities": {
+                "configured_values": [
+                  "text"
+                ],
+                "requirement": [],
+                "status": "not_required"
+              },
+              "parameters": {
+                "note": "模型工具支持不代替成员实际工具授权",
+                "requirement": [
+                  "tools"
+                ],
+                "status": "met"
+              }
+            },
+            "hold_reason": null,
+            "identity": {
+              "billing_route": "unknown",
+              "model": "gpt-6-luna",
+              "provider": "openai-codex",
+              "reasoning": "unknown"
+            },
+            "measurement_date": {
+              "catalog_status": "no_benchmark",
+              "exact_evidence_measured_at": null,
+              "exact_evidence_status": "none",
+              "requirement": false,
+              "status": "not_required"
+            },
+            "precise_evidence": {
+              "entry": null,
+              "question": "该精确身份（provider/model/reasoning/billing_route）的可得事实或记录的不可用状态；提交者检索，含检索日期与有效期",
+              "status": "none"
+            },
+            "recommendation_hold": false,
+            "task": {
+              "relevant_indices": [
+                "coding_index",
+                "agentic_index"
+              ],
+              "require_measurement_date": false,
+              "required_context_tokens": null,
+              "required_input_modalities": [
+                "text"
+              ],
+              "required_output_modalities": [],
+              "required_parameters": [
+                "tools"
+              ]
+            }
+          },
+          "identity": {
+            "billing_route": "unknown",
+            "model": "gpt-6-luna",
+            "provider": "openai-codex",
+            "reasoning": "unknown"
+          },
+          "model": "gpt-6-luna",
+          "provider": "openai-codex"
+        }
+      ],
+      "dependency_context": [],
+      "input_digest": "2f1772663fc6f1b82f6f131b6e849b01282e67e6dd9f063815e2c488e053cadc",
+      "instruction": "请用 Orbit 完成这个 CSV 费用导入项目，具体验收以 SPEC.md 和 tests/acceptance.mjs 为准。\n\n交付 src/importer.mjs 的纯函数、src/cli.mjs 的可运行命令行以及 README。导入逻辑…[1795:fbe720839117e6fb4684ceb41ba34efe3e9b7691000568a98829c66b7324a5e0]",
+      "user_boundary": "efc7b0ae",
+      "user_message_id": "efc7b0ae",
+      "work_unit": {
+        "acceptance": "在项目根以 allowed_commands 中的完整命令原样运行 npm test，退出码 0，输出含 EXPENSE_VALIDATION_SUMMARY（全部用例通过）。",
+        "allowed_paths": [
+          ".runtime/",
+          ".test-tmp/"
+        ],
+        "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/positive-v2",
+        "context": "项目根为 /var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/positive-v2。.runtime 是现有 Node/npm 的真副本；npm…[298:c222e7bc740adcdb0d57b25db133aaca28990c288e389a7ed1b07ed6810a5a82]",
+        "decisions": [],
+        "dependencies": [],
+        "dispatches": [],
+        "escalation": "命令被安全层拒绝时不反复改写同一命令，通过原生 hub 向 Main 报告实际失败，等待 Root 修改正式范围或授权接管；接管不算成员路径成功。",
+        "execution": null,
+        "id": "wu-2e3411410400ee15",
+        "input_digest": "2f1772663fc6f1b82f6f131b6e849b01282e67e6dd9f063815e2c488e053cadc",
+        "input_materials": [
+          "package.json",
+          "src/cli.mjs"
+        ],
+        "member_id": null,
+        "model": null,
+        "model_requirements": {
+          "relevant_indices": [
+            "coding_index",
+            "agentic_index"
+          ],
+          "required_input_modalities": [
+            "text"
+          ],
+          "required_parameters": [
+            "tools"
+          ]
+        },
+        "objective": "实现 src/importer.mjs 中 export function importExpenses(text) 纯函数，满足 SPEC.md 与 tests/acceptance.mjs 全部验收，并在项目提供的 .runtime Node/n…[143:60680d9c1e3036abd743e6251f8d642de87dec386be629a52e5c5aaeec66057d]",
+        "requirements": [
+          "不提交、不推送、不下载依赖、不建立网络服务",
+          "测试后先通过原生 hub/peer 消息接口向 Main 报告实际结果、完整命令、退出码与限制，取得成功回执后再返回结果"
+        ],
+        "result": null,
+        "scope": {
+          "allowed_commands": [
+            "TMPDIR=$PWD/.test-tmp PATH=$PWD/.runtime/bin:/usr/bin:/bin npm_config_cache=$PWD/.test-tmp/npm-cache node .runtime/lib/node_m…[155:89b2b5300b377915956d1106d076ad4563f843a21002cf7d0c008079a2319337]"
+          ],
+          "allowed_paths": [
+            ".runtime/",
+            ".test-tmp/"
+          ],
+          "allowed_tools": [
+            "write",
+            "bash"
+          ]
+        },
+        "status": "declared",
+        "tool_call_id": null,
+        "verification": null
+      },
+      "workspace": {
+        "artifact": {
+          "common_dir": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/positive-v2/.git",
+          "git": true,
+          "head": "3fdcf7b0c834c25c7032a51f01ee520cf195d4c6",
+          "path": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/positive-v2",
+          "worktree": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/positive-v2"
+        },
+        "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/positive-v2",
+        "bound_at": "2026-10-11T04:36:59Z",
+        "history": [],
+        "project": {
+          "common_dir": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/positive-v2/.git",
+          "git": true,
+          "head": "3fdcf7b0c834c25c7032a51f01ee520cf195d4c6",
+          "path": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/positive-v2",
+          "worktree": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/positive-v2"
+        },
+        "project_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/positive-v2"
+      }
+    },
+    "judgments": [
+      {
+        "call_id": "orbit-judgment-d638b528-afd7-4581-9210-8bb8aa7805aa",
+        "input_version": "jev-selection-input-2",
+        "model": "jev-1.13.0",
+        "phase": "delegation",
+        "provider": "typesafe",
+        "question_set_version": "jev-delegation-4",
+        "requested_model": "jev-1.13.0",
+        "scores": {
+          "handoff_fit": 0.91,
+          "member_task_fit": 0.83
+        },
+        "status": "answered",
+        "usage": {
+          "input_tokens": 23878,
+          "output_tokens": 40
+        }
+      },
+      {
+        "call_id": "orbit-judgment-59346f9b-49ee-4017-9eaa-9e07102aceb1",
+        "input_version": "jev-selection-input-2",
+        "model": "jev-1.13.0",
+        "phase": "candidates",
+        "provider": "typesafe",
+        "question_set_version": "jev-candidates-4",
+        "requested_model": "jev-1.13.0",
+        "scores": {
+          "0": {
+            "quality": 0.59
+          },
+          "1": {
+            "quality": 0.81
+          },
+          "2": {
+            "quality": 0.57
+          },
+          "3": {
+            "quality": 0.7
+          },
+          "4": {
+            "quality": 0.45
+          },
+          "5": {
+            "quality": 0.44
+          },
+          "6": {
+            "quality": 0.5
+          },
+          "7": {
+            "quality": 0.4
+          }
+        },
+        "status": "answered",
+        "usage": {
+          "input_tokens": 25691,
+          "output_tokens": 164
+        }
+      }
+    ],
+    "limitations": [
+      "decision orbit-quality-decision-4 gates the candidate call on handoff_fit only and keeps member_task_fit diagnostic; earlier …[260:5d693e9949ca185d21bf0fc5ced297c472f7d7569142ae3612f4f235346b879a]",
+      "route cost comparison is unknown; unknown price, quota or billing route stays unknown and is not treated as free"
+    ],
+    "order": {
+      "basis": "released_task_fit",
+      "cost_comparison": "unknown",
+      "cost_estimates": {},
+      "cost_is_capability_measurement": false,
+      "cost_notes": [
+        "orbit-m-kimi-code-k3-256k-301bb915: cost unknown",
+        "orbit-m-zhipu-coding-plan-glm-5-3-flash-71b48ce8: cost unknown"
+      ],
+      "ordered_ids": [
+        "orbit-m-openai-codex-gpt-6-1-sol-3026c530",
+        "orbit-m-openai-codex-gpt-6-luna-bae41d6b"
+      ],
+      "positive": true,
+      "positive_ids": [
+        "orbit-m-kimi-code-k3-256k-301bb915",
+        "orbit-m-zhipu-coding-plan-glm-5-3-flash-71b48ce8"
+      ],
+      "proves_samples_real": false,
+      "reason": "released task-fit signal; route costs are not comparable, so gated candidates keep the caller's stable input pool order — a p…[197:351ed19a3632f3d3c2dcbc8876fbb73d35b5e008c29a0aa9cbc05420d8d6bcb1]",
+      "version": "orbit-quality-decision-4"
+    },
+    "reason": "released task-fit signal; route costs are not comparable, so gated candidates keep the caller's stable input pool order — a p…[197:351ed19a3632f3d3c2dcbc8876fbb73d35b5e008c29a0aa9cbc05420d8d6bcb1]",
+    "recommendation": {
+      "backups": [
+        "orbit-m-zhipu-coding-plan-glm-5-3-flash-71b48ce8"
+      ],
+      "first": "orbit-m-kimi-code-k3-256k-301bb915"
+    },
+    "recommendation_objects": {
+      "backups": [
+        {
+          "agent": "orbit-m-zhipu-coding-plan-glm-5-3-flash-71b48ce8",
+          "eligibility": {
+            "context": {
+              "catalog_value": 1048576,
+              "requirement": null,
+              "status": "not_required"
+            },
+            "input_modalities": {
+              "catalog_value": [
+                "image",
+                "video"
+              ],
+              "note": "目录模态是模型级事实，不覆盖实际路由可能的模态缩减（如仅图像输入的变体）；须运行时核对",
+              "requirement": [
+                "text"
+              ],
+              "status": "met_by_catalog"
+            },
+            "output_modalities": {
+              "catalog_value": [
+                "text"
+              ],
+              "requirement": [],
+              "status": "not_required"
+            },
+            "parameters": {
+              "catalog_value": [
+                "top_logprobs",
+                "top_p"
+              ],
+              "note": "目录支持参数是模型级事实，不等于宿主在运行时授予对应工具；须在工具入口核对",
+              "requirement": [
+                "tools"
+              ],
+              "status": "met_by_catalog"
+            }
+          },
+          "execution_eligibility": {
+            "context": {
+              "configured_limit": 1000000,
+              "requirement": null,
+              "source": "omp_model_registry",
+              "status": "not_required"
+            },
+            "input_modalities": {
+              "configured_values": [
+                "text",
+                "image"
+              ],
+              "requirement": [
+                "text"
+              ],
+              "status": "met"
+            },
+            "output_modalities": {
+              "configured_values": [
+                "text"
+              ],
+              "requirement": [],
+              "status": "not_required"
+            },
+            "parameters": {
+              "note": "模型工具支持不代替成员实际工具授权",
+              "requirement": [
+                "tools"
+              ],
+              "status": "met"
+            }
+          },
+          "hold_reason": null,
+          "identity": {
+            "billing_route": "subscription_quota",
+            "model": "glm-5.3-flash",
+            "provider": "zhipu-coding-plan",
+            "reasoning": "unknown"
+          },
+          "in_pool": true,
+          "model": "zhipu-coding-plan/glm-5.3-flash",
+          "model_overview_status": "fresh",
+          "native": false,
+          "projection_error": null,
+          "quality_basis": "model_overview_prior",
+          "quality_evidence_valid_until": null,
+          "quality_sources": [
+            "https://openrouter.ai/api/v1/benchmarks?source=artificial-analysis",
+            "https://openrouter.ai/api/v1/models"
+          ],
+          "recommendation_hold": false,
+          "verdict": "not_recommended"
+        }
+      ],
+      "first": {
+        "agent": "orbit-m-kimi-code-k3-256k-301bb915",
+        "eligibility": {
+          "context": {
+            "catalog_value": 1048576,
+            "requirement": null,
+            "status": "not_required"
+          },
+          "input_modalities": {
+            "catalog_value": [
+              "image",
+              "video"
+            ],
+            "note": "目录模态是模型级事实，不覆盖实际路由可能的模态缩减（如仅图像输入的变体）；须运行时核对",
+            "requirement": [
+              "text"
+            ],
+            "status": "met_by_catalog"
+          },
+          "output_modalities": {
+            "catalog_value": [
+              "text"
+            ],
+            "requirement": [],
+            "status": "not_required"
+          },
+          "parameters": {
+            "catalog_value": [
+              "top_logprobs",
+              "top_p"
+            ],
+            "note": "目录支持参数是模型级事实，不等于宿主在运行时授予对应工具；须在工具入口核对",
+            "requirement": [
+              "tools"
+            ],
+            "status": "met_by_catalog"
+          }
+        },
+        "execution_eligibility": {
+          "context": {
+            "configured_limit": 262144,
+            "requirement": null,
+            "source": "omp_model_registry",
+            "status": "not_required"
+          },
+          "input_modalities": {
+            "configured_values": [
+              "text",
+              "image"
+            ],
+            "requirement": [
+              "text"
+            ],
+            "status": "met"
+          },
+          "output_modalities": {
+            "configured_values": [
+              "text"
+            ],
+            "requirement": [],
+            "status": "not_required"
+          },
+          "parameters": {
+            "note": "模型工具支持不代替成员实际工具授权",
+            "requirement": [
+              "tools"
+            ],
+            "status": "met"
+          }
+        },
+        "hold_reason": null,
+        "identity": {
+          "billing_route": "subscription_quota",
+          "model": "k3-256k",
+          "provider": "kimi-code",
+          "reasoning": "unknown"
+        },
+        "in_pool": true,
+        "model": "kimi-code/k3-256k",
+        "model_overview_status": "fresh",
+        "native": false,
+        "projection_error": null,
+        "quality_basis": "model_overview_prior",
+        "quality_evidence_valid_until": null,
+        "quality_sources": [
+          "https://openrouter.ai/api/v1/benchmarks?source=artificial-analysis",
+          "https://www.kimi.com/code/docs/en/kimi-code/models.html"
+        ],
+        "recommendation_hold": false,
+        "verdict": "recommended"
+      }
+    },
+    "release": {
+      "allows_positive_ranking": true,
+      "decision_version": "orbit-quality-decision-4",
+      "input_version": "jev-selection-input-2",
+      "model": "jev-1.13.0",
+      "proves_samples_real": false,
+      "provider": "typesafe",
+      "question_digest": "0fc3d712f60167edb572d039a2c9d5b35b0e9295a4a38bf9db597e3682ac7ca8",
+      "question_set_versions": {
+        "candidates": "jev-candidates-4",
+        "checker_quality": "jev-checker-task-fit-5",
+        "delegation": "jev-delegation-4",
+        "observation": "jev-observation-2"
+      },
+      "release": {
+        "reason": "Decision-4 independent review: unchanged question bodies, input profile, model and thresholds. handoff_fit gates bounded hand…[1001:c9def1b239ec11bc50b2f46595717473a2b7b88d55a84e11913bcac74dc2becc]",
+        "reviewed_at": "2026-10-01T19:02:16Z",
+        "reviewed_by": "OMP 2 (kimi-code/k3-256k, w22:p3) 独立原件复核",
+        "sample_count": 17,
+        "sample_digest": "5a30130a022abd2bc1b35a6ebe61c2ea4fe0e750cafbb0d23d6d51de973d03cc",
+        "scope": "bounded_git_delivery_v1"
+      },
+      "scope": "bounded_git_delivery_v1",
+      "structural_validation": "passed",
+      "thresholds": {
+        "candidate_task_fit": 0.65,
+        "checker_task_fit": 0.6,
+        "handoff_fit": 0.7,
+        "member_task_fit": 0.65
+      }
+    },
+    "requirements_error": null,
+    "reused": false,
+    "route_cost_inputs": {},
+    "signature": "0d531f5426395d8dc77ce4238baac9863c6ae506a07b3582303c302f39cb818f",
+    "stale": false,
+    "unit_basis": "34919d6bc1c2be66563ac5f4ed88fb7c24f26a8b85b924b32d32ae89804e81b9",
+    "user_boundary": "efc7b0ae",
+    "user_message_id": "efc7b0ae",
+    "version": "orbit-member-selection-v2",
+    "work_unit_id": "wu-2e3411410400ee15"
+  },
+  "git_remote": {
+    "branch": "main",
+    "checked_at": "2026-10-11T04:41:17Z",
+    "elapsed_seconds": 0.229,
+    "head": "3fdcf7b0c834c25c7032a51f01ee520cf195d4c6",
+    "reason": "no upstream tracking branch for main: git exited 128: fatal: no upstream configured for branch 'main'",
+    "remote": null,
+    "remote_contacted": false,
+    "remote_head": null,
+    "remote_ref": null,
+    "remote_url": null,
+    "status": "unknown",
+    "target_source": null,
+    "upstream": null
+  },
+  "context_compression": {
+    "string_cap": 125,
+    "degraded": [
+      "uncopied entries dropped",
+      "member results dropped",
+      "recent events dropped",
+      "decision findings dropped"
+    ]
+  }
+}
+```
+
+## Delivery readiness
+
+You must also return delivery: an object with ready (boolean) and reason (non-empty string). delivery.ready states whether the task's actual deliverable is visible to you at inspection time and satisfies what the instruction says must be delivered; it is separate from verdict and findings. ready=true always names the concrete evidence you inspected: the delivered artifact in the fixed snapshot for file deliverables, or an actually delivered task-related Root answer visible in the program record for answer deliverables. Never set ready=true from a Root claim, plan or promise, and never from verdict alone: continue with no findings does not mean the deliverable exists. For an answer deliverable, judge the version-matched task_delivery when present; prior_turns are earlier completed replies for this exact instruction and artifact. A later check-queue acknowledgement alone does not withdraw an earlier delivered answer; a substantive correction may supersede it. Otherwise use the latest agent_message in root observations ONLY when root.last_turn_task_attributed is true. An answer to an unassigned user message is not this task's delivery. Judge readiness only when root.status is idle and root.last_turn_status is completed; a bounded prefix (…[length:sha256]) is verbatim evidence of what was delivered, but unseen text cannot be confirmed. If the deliverable is not visible — Root still executing, no task-related answer, or only an interim message — ready must be false and reason must state exactly what is missing. For a requirement that work be pushed to a remote, the program record's git_remote facts are captured read-only by the program: status verified means the local HEAD equals the remote reference, mismatch means the remote reference differs, unknown means it could not be verified (network, configuration, or the instruction does not require remote delivery). Those are the only remote facts you may use: a Root report of a push is never verification. With such a requirement, ready requires git_remote.status to be verified; on mismatch or unknown, ready must be false and reason must cite the actual status.
+
+## Requirement coverage
+
+Return coverage with exactly complete (boolean) and items (1..64 entries). Each item has requirement (distinct non-empty text, at most 1000 characters), scope (delivery or lifecycle), status (verified or unverified), and evidence (at most 1000 characters; verified needs concrete non-empty evidence). Enumerate each requirement from the original instruction, effective amendments and named basis, including referenced specification files in the fixed snapshot. complete=true means you have enumerated them all; do not silently omit requirements. Mark unread, untested or otherwise unsupported requirements unverified and explain the gap. delivery covers artifacts, integration, requested test execution and answer content. lifecycle covers only this final review, the subsequent completion/confirmed stop and the subsequent closing report; keep those obligations listed, but do not claim future events already happened. The runtime separately verifies its manual finalization notice, closing turn and actual stop. Only delivery items must be verified before that sequence can start. Test execution is never lifecycle. Empty findings, Root claims and Jev calibration are not coverage. Identify the file facts you actually read and distinguish them from attributed verification receipts: your read-only session cannot run tests. A visual or UI requirement is verified only by an image you actually read: reading an image file in the fixed snapshot returns the picture itself and states the snapshot path, byte count and sha256 that were read. A screenshot name, path or description written by the Root, a member or a report is not independent visual evidence, and neither is a promise to provide one. If the read did not deliver the picture (the tool reports that, or you never read the image), that requirement stays unverified and you must not report complete or a ready delivery for it. The program's root_verifications, when present, are actual native tool receipts: retain their original identities and bindings, inspect artifact_matches and input_matches, and assess whether the command and reported exit/output support this requirement. Missing, failed, truncated or artifact-mismatched receipts cannot prove an executed successful test. An input mismatch is historical evidence: compare the changed requirements, never relabel it as a current-input run. Do not trust a Root-written log or basis statement as program-attested execution. Local unit evidence does not replace whole-task integration. Process checks and adjudication may report their limited scope but cannot grant delivery coverage. If the scope cannot be completely enumerated within the output bound, complete=false. Missing or incomplete coverage cannot grant final completion.
+
+## Fixed artifact snapshot
+
+You are a separate OMP process, not a member of the execution team. Use the SDK read/grep/glob tools on the fixed snapshot. Confined read reports exact file bytes, final_newline and actual_lines; grep only matches actual lines. For exact content or newline requirements, use those file facts rather than interpreting a rendered terminal blank line or trusting the Root's summary. The original workspace is not your working directory and is not writable from this session. Judge the snapshot files, not a model plan or summary.
+
+## Output
+
+Return JSON matching these fields and nothing else: verdict, reason, findings, resolved_ids, next_check_seconds, delivery, coverage. verdict is one of: continue, correct, pause, complete, needs_user. Each findings object has exactly id, requirement, evidence and action — no severity or extra keys. resolved_ids is a list of strings. next_check_seconds is a positive integer. delivery is an object with ready (boolean) and reason (non-empty string). No markdown and no code fences.

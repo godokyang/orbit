@@ -1,0 +1,62 @@
+{
+  "at": "2026-10-11T04:45:24.059911+00:00",
+  "baseline_pids": [
+    2145,
+    2144,
+    37403,
+    38007,
+    38008,
+    11899,
+    12801,
+    12828,
+    12863,
+    12208,
+    12883,
+    12914,
+    12950,
+    12485,
+    12966,
+    12993,
+    13028,
+    32133,
+    32717,
+    32718
+  ],
+  "missing": [],
+  "changed_identity": [],
+  "daily_install_equal": true,
+  "test_panes": [
+    {
+      "role": "negative",
+      "pane": "w23:p17"
+    },
+    {
+      "role": "positive",
+      "pane": "w23:p18"
+    },
+    {
+      "role": "interrupt",
+      "pane": "w23:p19"
+    },
+    {
+      "role": "negative-v2",
+      "pane": "w23:p1A"
+    },
+    {
+      "role": "interrupt-v2",
+      "pane": "w23:p1B"
+    },
+    {
+      "role": "positive-v2",
+      "pane": "w23:p1C"
+    }
+  ],
+  "cleanup_records": [
+    "interrupt-cleanup.json",
+    "interrupt-v2-cleanup.json",
+    "positive-v2-cleanup.json",
+    "negative-v1-cleanup.json",
+    "positive-v1-cleanup.json",
+    "negative-v2-cleanup.json"
+  ]
+}

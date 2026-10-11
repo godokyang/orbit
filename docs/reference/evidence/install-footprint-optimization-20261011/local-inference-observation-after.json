@@ -1,0 +1,30 @@
+{
+  "observed_at": "2026-10-11T04:42:22.418490+00:00",
+  "scope": "owned release/check profiles and isolated XDG caches; no arbitrary SDK model guarantee",
+  "release_kib": 457628,
+  "paths": {
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/cache": [],
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/config": [],
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/probe-profile-0": [],
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/probe-profile-1": [],
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/compat-probe-profile-v2": [],
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/compat-probe-profile-v4": [],
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/compat-probe-profile-v3": [],
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/interrupt/.orbit/tasks/489bc2bc-e4d2-4ab7-b055-d2c486fdeb34/checks/1/profile": [],
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/interrupt/.orbit/tasks/489bc2bc-e4d2-4ab7-b055-d2c486fdeb34/checks/2/profile": [],
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/interrupt-v2/.orbit/tasks/83741b70-ea7b-4006-b74a-7752149f5d55/checks/1/profile": [],
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/negative-v2/.orbit/tasks/a079fb15-9bec-4589-a8d2-e18776db0361/checks/1/profile": [],
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/negative-v2/.orbit/tasks/a079fb15-9bec-4589-a8d2-e18776db0361/checks/2/profile": [],
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/positive-v2/.orbit/tasks/40911d14-3d71-484a-ba29-5a2d9b403d33/checks/1/profile": [],
+    "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/positive-v2/.orbit/tasks/40911d14-3d71-484a-ba29-5a2d9b403d33/checks/2/profile": []
+  },
+  "omitted_presence": {
+    "@huggingface/transformers": false,
+    "onnxruntime-node": false,
+    "sherpa-onnx-node": false,
+    "sharp": false
+  },
+  "cold_release_kib": 457580,
+  "observed_growth_kib": 48,
+  "growth_source": "12 .leases/*.json records (46\u201350 bytes each); no package/model regrowth; normal installer prunes stale leases"
+}

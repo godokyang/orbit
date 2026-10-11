@@ -7,6 +7,7 @@
 | 需要了解什么 | 权威入口与边界 |
 | --- | --- |
 | 安装和使用 | [README](../README.md)、[进阶使用参考](reference/usage-reference.md)；只说明已接线行为 |
+| 安装体积、依赖去重与缓存收口 | [安装体积修复](reference/orbit-install-footprint-20261011.md)与[可选依赖优化清单](plan/orbit-install-footprint-optimization.md)（macOS arm64／OMP 18.8.0 实测，区分日常安装与临时新构建、依赖／缓存／物理磁盘统计） |
 | 当前任务、模型、检查、完成与停止语义 | [任务运行合同](../contracts/task-runtime.md)、[检查结果 schema](../contracts/check-result.schema.json) |
 | OMP 单宿主协作决定 | [ADR-008](adr/008-omp-native-collaboration-base.md) |
 | 用户自选模型池决定 | [ADR-009](adr/009-user-selected-model-pool.md) |

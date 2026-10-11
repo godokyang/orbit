@@ -1,0 +1,55 @@
+{
+  "number": 1,
+  "role": "reviewer",
+  "kind": "artifact",
+  "artifact_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/negative-v2",
+  "observation_key": "b640b14adc268822484685c0cb3da1d0aa2713e4afd077d2ad36f0ba866266c2",
+  "trigger_cause": "manual_check",
+  "manual": true,
+  "snapshot": {
+    "schema_version": "orbit-workspace-snapshot-v1",
+    "source_root": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/negative-v2",
+    "snapshot_path": "/private/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-slim-82nka8ra/fixtures/negative-v2/.orbit/tasks/a079fb15-9bec-4589-a8d2-e18776db0361/checks/1/workspace",
+    "git_head": "1fd7a942606c580877ff6fac2075d364e062d8d8",
+    "digest": "sha256:ad941d3e6be3319b796e3b713c35def8e3e98c784ed1659a80e8247d474841ea",
+    "project_rules": [],
+    "manifest": [
+      {
+        "path": ".gitignore",
+        "status": "tracked",
+        "kind": "file",
+        "content_digest": "sha256:299deb79e026428a784f0c0a5b6de4681da16b4e7c11a62a2f2672eacac6547a",
+        "size": 8,
+        "mode": 420
+      },
+      {
+        "path": "SPEC.md",
+        "status": "tracked",
+        "kind": "file",
+        "content_digest": "sha256:54f3eb66a715a4d976ee4940972771f7a4ce2c31157fc9322b8d2e63620ef32d",
+        "size": 148,
+        "mode": 420
+      },
+      {
+        "path": "normalize.mjs",
+        "status": "tracked",
+        "kind": "file",
+        "content_digest": "sha256:abc7d39f7069c838ed1a5c485c04f98d2412f4d2ac02bfb84679e2f0842d14bc",
+        "size": 63,
+        "mode": 420
+      },
+      {
+        "path": "test.mjs",
+        "status": "tracked",
+        "kind": "file",
+        "content_digest": "sha256:2220c53584d851b8b952f9df4d37235531e819e56fc577f566cafb383cc28394",
+        "size": 204,
+        "mode": 420
+      }
+    ]
+  },
+  "input_digest": "596e25b1148ab478cc2b8dab71314eda5a76b9aef28ddc7faf7147c6369cae06",
+  "host_digest": "9a94e412a26e41a669ad68398bd89f27459e84c91fe5c295daa40f2fb9f436cf",
+  "dispute": null,
+  "started_at": "2026-10-11T04:25:34Z"
+}
