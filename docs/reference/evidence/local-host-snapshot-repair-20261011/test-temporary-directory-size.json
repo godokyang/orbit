@@ -1,7 +1,0 @@
-{
-  "at": "2026-10-11T07:37:46.410290+00:00",
-  "files": 4706,
-  "logical_bytes": 1804207807,
-  "allocated_bytes": 1815461888,
-  "scope": "owned test root after temporary installation uninstall, includes test .runtime/node copies, probe/venv and all test evidence; not peak measurement"
-}

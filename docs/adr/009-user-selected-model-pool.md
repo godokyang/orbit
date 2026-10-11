@@ -1,8 +1,8 @@
 # ADR-009：OMP 会话内的候选模型池与选型
 
-- 状态：已采纳（2026-09-29 决定；混合模型交付目标已按[完成记录](../reference/mixed-model-delivery-completion-20261001.md)收口）。本文区分有效决定、实际接线与未测范围。
+- 状态：已采纳（2026-09-29 决定；混合模型交付目标已按完成记录（Git 历史：`aa089bb:docs/reference/mixed-model-delivery-completion-20261001.md`）收口）。本文区分有效决定、实际接线与未测范围。
 - 范围：单 OMP 宿主内的型号发现、候选池、执行成员建议和独立检查者选择。具体运行行为以[合同](../../contracts/task-runtime.md)为准，宿主与责任边界见 [ADR-008](008-omp-native-collaboration-base.md)。
-- 已采纳决定：[混合模型交付方案](../plan/mixed-model-delivery-proposal.md)的同次交付已结束。§1—§5 为有效决定与已接线边界，§6 规定替换语义和接缝；未测范围见[当前限制](../plan/debt-ledger.md)与[完成记录](../reference/mixed-model-delivery-completion-20261001.md)。
+- 已采纳决定：混合模型交付方案（Git 历史：`aa089bb:docs/plan/mixed-model-delivery-proposal.md`）的同次交付已结束。§1—§5 为有效决定与已接线边界，§6 规定替换语义和接缝；未测范围见[当前限制](../plan/debt-ledger.md)与完成记录（Git 历史：`aa089bb:docs/reference/mixed-model-delivery-completion-20261001.md`）。
 
 ## 背景与理由
 
@@ -50,7 +50,7 @@ Root 可在无任务目录时提交用户级精确事实，也可提交匹配当
 
 映射 lookup 按 OMP 的 provider/model/reasoning/billing_route 精确匹配 OpenRouter canonical slug，目标消失、canonical 漂移或矛盾即时失效。[来源审计](../reference/openrouter-model-mapping-audit.md)现含六个精确身份变体（四个模型 identity）；`unknown` 不匹配真实 subscription 变体，路由命中不证明实际计费路由已核实。
 
-本次目录事实层已升 overview-v3，保存可得 coding／agentic／intelligence、ID、上下文、模态和参数；按明确任务选择指标，不再以非空 coding 阻断 agentic-only。成员和检查者都已接事实投影，精确记录与目录先验同时呈现。缓存 72 小时仅表示抓取有效，测量日期／方法未知如实记录；明确要求测量日期时不给未知先验，精确证据按测量资格核对，未知保持未知。代表性校准与真实效果按[完成记录](../reference/mixed-model-delivery-completion-20261001.md)的有限范围成立；域外泛化未证（见[当前限制](../plan/debt-ledger.md)）。0.7.10 旧 coding 门、仅检查者弱先验及旧阈值是历史基线，不迁为当前题义结论。
+本次目录事实层已升 overview-v3，保存可得 coding／agentic／intelligence、ID、上下文、模态和参数；按明确任务选择指标，不再以非空 coding 阻断 agentic-only。成员和检查者都已接事实投影，精确记录与目录先验同时呈现。缓存 72 小时仅表示抓取有效，测量日期／方法未知如实记录；明确要求测量日期时不给未知先验，精确证据按测量资格核对，未知保持未知。代表性校准与真实效果按完成记录（Git 历史：`aa089bb:docs/reference/mixed-model-delivery-completion-20261001.md`）的有限范围成立；域外泛化未证（见[当前限制](../plan/debt-ledger.md)）。0.7.10 旧 coding 门、仅检查者弱先验及旧阈值是历史基线，不迁为当前题义结论。
 
 ## 6. 已采纳的替换决定与实现接缝（已交付）
 
@@ -110,4 +110,4 @@ Root 负责交接内容，程序在实际工具入口执行可计算范围限制
 
 用户确认同型号跨渠道合理复用模型级评测：精确有据映射优先，其次当前目录具体型号，再允许可解释的日期/fast等档位后缀回退基础型号；命中及降级来源可追溯，歧义不猜，不能混用不同代际或把目录价格/额度/上下文移植成实际路由事实。原因是现场已有目录型号因机械身份阻断未获先验；另有 fresh 但缺任务相关指标的事实-only 路径，必须保留真实缺口并在声明工作单元时明确相关指标。Root 自选需任务相关理由，落实 GPT-6.1 偏好但不自动禁用 GPT-6。Jev 题义、阈值、校准和实际完成门保持，真实推荐与自选分开验收。
 
-实现、推荐影响原生派发及实际调用的有界证据见[长任务验收](../reference/long-task-optimization-acceptance-20261009.md)。已观测的账户余额／额度失败跨产物更新保持排除；对该目标显式 review-model 还须提供 recovery_evidence，引用实际账户恢复或同路由成功调用。记录注明这是 Root 声明，程序没有独立证明账户已恢复；不因此解禁其他失败目标。
+实现、推荐影响原生派发及实际调用的有界证据见长任务验收（Git 历史：`aa089bb:docs/reference/long-task-optimization-acceptance-20261009.md`）。已观测的账户余额／额度失败跨产物更新保持排除；对该目标显式 review-model 还须提供 recovery_evidence，引用实际账户恢复或同路由成功调用。记录注明这是 Root 声明，程序没有独立证明账户已恢复；不因此解禁其他失败目标。

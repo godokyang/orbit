@@ -157,7 +157,7 @@ orbit status
 | 已打开的普通 OMP 能直接接入吗？ | 退出后用 `orbit omp --resume SESSION_ID` 恢复，扩展在启动时加载。 |
 | Agent 没有建立 Orbit 任务？ | 先确认用 `orbit omp` 启动，再查看入口提示和 `orbit doctor`。需要受控执行时明确说“请使用 Orbit”。 |
 | 没发现问题就算完成吗？ | 仍需当前版本的有效终检和实际停止确认；以最终 `complete` 状态为准。 |
-| 能保证所有任务都可靠、都省额度吗？ | 本项目已有有界真实验收；效果与未测范围见[验收记录](docs/reference/long-task-optimization-acceptance-20261009.md)和[当前限制](docs/plan/debt-ledger.md)。 |
+| 能保证所有任务都可靠、都省额度吗？ | 本项目已有有界真实验收；效果与未测范围见验收记录（Git 历史：`aa089bb:docs/reference/long-task-optimization-acceptance-20261009.md`）和[当前限制](docs/plan/debt-ledger.md)。 |
 
 ## 深入了解
 
@@ -165,9 +165,9 @@ orbit status
 | --- | --- |
 | 安装选项、配置与完整 CLI | [进阶使用参考](docs/reference/usage-reference.md) |
 | 当前源码、交付与安装事实 | [交接](docs/plan/handoff.md) · [源码版本](package.json) |
-| 实现与真实验收证据 | [长任务优化验收](docs/reference/long-task-optimization-acceptance-20261009.md) |
+| 实现与真实验收证据 | 长任务优化验收（Git 历史：`aa089bb:docs/reference/long-task-optimization-acceptance-20261009.md`） |
 | 权限、角色、检查与停止规则 | [任务运行合同](contracts/task-runtime.md) · [ADR-008](docs/adr/008-omp-native-collaboration-base.md) · [ADR-009](docs/adr/009-user-selected-model-pool.md) |
-| 产品方向与其他文档 | [混合模型交付方案](docs/plan/mixed-model-delivery-proposal.md) · [文档索引](docs/README.md) |
+| 产品方向与其他文档 | 混合模型交付方案（Git 历史：`aa089bb:docs/plan/mixed-model-delivery-proposal.md`） · [文档索引](docs/README.md) |
 
 ## 引用
 

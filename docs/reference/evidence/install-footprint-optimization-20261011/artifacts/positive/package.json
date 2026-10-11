@@ -1,8 +1,0 @@
-{
-  "name": "expense-importer-acceptance",
-  "private": true,
-  "type": "module",
-  "scripts": {
-    "test": "node tests/acceptance.mjs"
-  }
-}

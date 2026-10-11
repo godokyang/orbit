@@ -1,6 +1,0 @@
-{
-  "at": "2026-10-11T04:32:06.653720+00:00",
-  "stdout": "{\"id\":\"cli:agent:send-keys\",\"result\":{\"type\":\"ok\"}}\n",
-  "stderr": "",
-  "exit": 0
-}

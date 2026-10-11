@@ -160,7 +160,7 @@ orbit model-status --project DIR  # 只读精确身份的证据诊断；无会�
 
 候选池保存在用户级配置，跨会话共用，只保存型号，不保存凭据。检查者优先从池与当前 OMP 会话可用目录的交集中预检；池中无可运行型号或池空时，从 OMP 当前会话可用型号中继续筛选，Root 也可显式指定可用检查者。**受控任务的成员**有可用池内 Agent 时，通用 `agent="task"` 若解析为池外 OMP 默认型号会被拒绝并列出可用 Agent；Root 可直接派池内 Agent，即使 Jev 尚待补证。池空或当前无可用池内 Agent 才放行可解析的 OMP 默认。Root 想派默认型号可通过 `/orbit-models` 把它加入池；无需额外用户逐型号授权。非受控 OMP 会话不受此门约束，成员实际型号漂移仍被拒绝。Jev 只给建议，Root 自选不冒充推荐。
 
-新版成员选择针对 Root 声明的有界工作单元，保留目标、要求引用、上下文／决定、范围、验收、依赖和升级条件。单元绑定当前输入与实际产物根；未满足依赖不派发建议，修订或工作区重绑定后不能采纳旧结果。Root 可通过 Orbit 工具或 `orbit work-unit` 声明与核验；工作区已接真实宿主 bind 和逐工具范围校验。Root 的原生 task 文本须以独立行引用 `orbit-unit: wu-...`；未知／过期单元或真实模型失配拒绝派发或工具执行。macOS 声明命令还经系统沙盒；没有已验证沙盒的平台由 Root 执行必要核验，不能默许成员无约束运行。当前修复的真实闭环证据与剩余限制见[验收记录](ordinary-task-repair-acceptance-20261002.md)。
+新版成员选择针对 Root 声明的有界工作单元，保留目标、要求引用、上下文／决定、范围、验收、依赖和升级条件。单元绑定当前输入与实际产物根；未满足依赖不派发建议，修订或工作区重绑定后不能采纳旧结果。Root 可通过 Orbit 工具或 `orbit work-unit` 声明与核验；工作区已接真实宿主 bind 和逐工具范围校验。Root 的原生 task 文本须以独立行引用 `orbit-unit: wu-...`；未知／过期单元或真实模型失配拒绝派发或工具执行。macOS 声明命令还经系统沙盒；没有已验证沙盒的平台由 Root 执行必要核验，不能默许成员无约束运行。当前修复的真实闭环证据与剩余限制见验收记录（Git 历史：`aa089bb:docs/reference/ordinary-task-repair-acceptance-20261002.md`）。
 
 工作单元可设 `execution=root|delegate`（缺省 delegate），Root 的集成单设 root，不占选型队列。declare 回执携带运行时选型；可用 `work-unit select` 刷新具体单元，native task 在派发前再次预检、复用和版本核对。Root 保留候选池内自选裁量。成员需要的项目文件可列入 `input_materials`，必须已存在且在 allowed_paths 内；外部技能/MCP 不自动开放。bash 必须声明完整 allowed_commands；无可执行入口或无权限材料会在成员启动前返回修复步骤。
 

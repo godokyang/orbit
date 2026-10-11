@@ -1,6 +1,0 @@
-{
-  "at": "2026-10-11T06:54:19.274039+00:00",
-  "reason": "intermediate check sequenced fixture produced repeated native goal/todo wait/status loop, no actual check_started/scopes after nine minutes; not a product storage pass",
-  "action": "native Esc during active Root",
-  "source_changed": false
-}

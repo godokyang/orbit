@@ -1,9 +1,0 @@
-{
-  "owned_temp_root": "/var/folders/fc/zfb6fxjn0h9dz1j1r0mpkcbw0000gn/T/orbit-footprint-j7pb7809",
-  "temporary_install_uninstall_exit": 0,
-  "temporary_process_path_references": [],
-  "temp_root_removed": true,
-  "new_test_panes": 0,
-  "preserved_local_install": "/Users/yangke/.local/share/orbit/orbit/releases/e8c29c03c7eb0777acd84a9c",
-  "notes": "All installer, standalone reviewer and test command handles exited; only the owned temporary root was removed. Fixed developer OMP panes and unrelated retired directories retained."
-}

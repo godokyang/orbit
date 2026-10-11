@@ -1,4 +1,0 @@
-{
-  "at": "2026-10-11T07:01:57.367344+00:00",
-  "reason": "facts_only selection and Root declared only bash/test commands; native member attempts read/write forbidden repeatedly. Preserve failed calibration, native interrupt active Root/member; no source or artifact controller changes."
-}

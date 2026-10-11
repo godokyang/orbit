@@ -1,9 +1,0 @@
-{
-  "at": "2026-10-11T04:35:14.838607+00:00",
-  "pane": "w23:p1B",
-  "root_group": 73312,
-  "remaining_group_processes": [],
-  "confirmed_stop": true,
-  "pane_close_exit": 0,
-  "esc_during_idle_root": "did not trigger native interruption; not accepted as cancellation pass"
-}

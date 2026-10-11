@@ -1,9 +1,0 @@
-{
-  "at": "2026-10-11T04:28:47.014943+00:00",
-  "pane": "w23:p17",
-  "root_group": 59886,
-  "remaining_group_processes": [],
-  "confirmed_stop": true,
-  "pane_close_exit": 0,
-  "pane_close_stdout": "{\"id\":\"cli:pane:close\",\"result\":{\"type\":\"ok\"}}\n"
-}

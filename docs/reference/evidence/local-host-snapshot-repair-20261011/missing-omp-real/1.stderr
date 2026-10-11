@@ -1,1 +1,0 @@
-orbit install: 未找到 OMP（Oh My Pi）。Orbit 需要复用本地 OMP，请先安装并加入 PATH，再重新运行 Orbit 安装命令；旧安装保持不变。

@@ -1,40 +1,22 @@
 # Orbit 文档入口
 
-文档分清两件事：当前产品行为（以[任务运行合同](../contracts/task-runtime.md)为权威）与设计决定/证据边界。源码版本从 `package.json` 读取；用户安装版须核对 `orbit version --json`，不能由源码或旧验收报告推断。
+文档分清两件事：当前产品行为（以[任务运行合同](../contracts/task-runtime.md)为权威）与设计决定。源码版本从 `package.json` 读取；用户安装版须核对 `orbit version --json`，不能由源码或旧报告推断。
 
-## 当前阅读入口
+## 当前文档
 
 | 需要了解什么 | 权威入口与边界 |
 | --- | --- |
 | 安装和使用 | [README](../README.md)、[进阶使用参考](reference/usage-reference.md)；只说明已接线行为 |
-| 安装体积、依赖去重与缓存收口 | [安装体积修复](reference/orbit-install-footprint-20261011.md)与[可选依赖优化清单](plan/orbit-install-footprint-optimization.md)（macOS arm64／OMP 18.8.0 实测，区分日常安装与临时新构建、依赖／缓存／物理磁盘统计） |
-| 当前任务、模型、检查、完成与停止语义 | [任务运行合同](../contracts/task-runtime.md)、[检查结果 schema](../contracts/check-result.schema.json) |
-| 复用本地 OMP、检查历史去重的实施与验收 | [唯一总 TODO](plan/local-host-snapshot-repair.md)、[本轮验收](reference/local-host-snapshot-repair-acceptance-20261011.md)（冻结验收与资源收口完成，实际 Goal complete；受测0.8.4，后续源码0.8.5升版不重标实测） |
-| 本地 OMP 接口研究依据 | [宿主接口研究](reference/omp-local-reviewer-host-research-20261011.md)（旧研究候选与源码依据；最新实现与实测状态沿总 TODO） |
-| Orbit 检查快照写入问题与研究依据 | [快照存储研究](reference/orbit-snapshot-storage-research-20261011.md)（Zeen 30.80 GB 为定位依据；源码确认完整检查副本不去重、不回收；内容去重／可恢复历史，Zeen 存量清理暂缓） |
-| 面向集成方（如 Loom）的命令、字段、能力与合同版本 | [集成合同](../contracts/integration.md)、[ADR-010](adr/010-integration-contract.md)、[实施计划](plan/loom-integration-contract.md)（合同版本与软件版本独立；契约测试用替身宿主与检查模型） |
+| 任务、模型、检查、完成与停止语义 | [任务运行合同](../contracts/task-runtime.md)、[检查结果 schema](../contracts/check-result.schema.json) |
+| 面向集成方（如 Loom）的命令、字段、能力与合同版本 | [集成合同](../contracts/integration.md)（机器可读版 `contracts/integration.json`）、[ADR-010](adr/010-integration-contract.md)、[实施计划与提案评估](plan/loom-integration-contract.md)；合同版本与软件版本独立 |
 | OMP 单宿主协作决定 | [ADR-008](adr/008-omp-native-collaboration-base.md) |
 | 用户自选模型池决定 | [ADR-009](adr/009-user-selected-model-pool.md) |
 | 开发纪律、范围与验证方式 | [AGENTS.md](../AGENTS.md)、[开发流程](agents/development-workflow.md)；这些文件不产生产品运行事实 |
 | 当前交接与现场 | [交接](plan/handoff.md) |
 | 当前仍生效的限制与未测范围 | [当前限制](plan/debt-ledger.md) |
-| 产品方向与设计理由 | [混合模型交付主方案](plan/mixed-model-delivery-proposal.md)（同次交付已结束，效果有范围） |
-| 普通任务推荐、权限与监督修复的真实验收 | [验收记录](reference/ordinary-task-repair-acceptance-20261002.md)（0.8.1，有界范围） |
-| Beacon／Zeen 长任务使用中的问题与原件证据 | [现场观察](reference/beacon-orbit-observation-20261008.md)（含 2026-10-09 Zeen 补录；问题记录，不是成功验收） |
-| 长任务问题的优化顺序、责任与验收条件 | [优化实施](plan/orbit-long-task-optimization.md)（T01—T13，授权、冻结条件及分批结果） |
-| 长任务优化的确定性与真实验收 | [验收记录](reference/long-task-optimization-acceptance-20261009.md)（构建、逐项范围、失败和收尾） |
-| 混合模型交付逐项收口（54 项＋W1–W10） | [完成记录](reference/mixed-model-delivery-completion-20261001.md) |
-| OpenRouter 映射来源与理由 | [映射来源审计](reference/openrouter-model-mapping-audit.md) |
 | 工程经验 | [工程教训](reference/engineering-lessons.md) |
-| 按 Orbit 核心诉求筛选 Codex 借鉴项 | [源码研究](reference/codex-source-lessons-20261009.md)（有限顶级资源、可靠交付与减少人工介入；固定提交研究，不是实施排期或验收） |
-| 上下文压缩局部方向与验收范围 | [上下文方案](plan/context-compression-proposal.md)（已确认先落文档；区分三条上下文路径，日志首尾保留本轮已实现并有界实测，完整请求容量调整未采用） |
-| Codex 工作机制与 Orbit 交付、防偏航对照 | [工作流程研究](reference/codex-workflow-alignment-20261009.md)（目标、阶段、修订、推进、分工、独立核验与监督开销；研究事实保留，逐项实施状态沿总清单） |
-| Codex 借鉴决定的最新充分性判断 | [全部决定重评](reference/codex-decisions-reevaluation-20261010.md)（固定源码、Orbit 接线与失败原件；修正 C02/C04/C06/C08 旧结论，区分建议、实际实现与有界验证） |
-| Codex 借鉴项的实施依据与新对话 Goal 入口 | [总实施清单](plan/codex-lessons-implementation.md)（C01—C10、采用条件、宿主依赖、验收、三个 OMP 协作边界及启动指令；前轮有界交付已收口；2026-10-10 剩余能力实际 Goal complete（限定冻结验收范围），实际当前状态沿 §9） |
-| 剩余 Codex 借鉴问题的实际验证 | [2026-10-10验收](reference/codex-lessons-acceptance-20261010.md)（各受测构建、失败/干预、协议与生命周期、真实资源与当前Goal；不覆盖旧轮次） |
+| OpenRouter 映射来源与理由 | [映射来源审计](reference/openrouter-model-mapping-audit.md)（随包映射数据在 `lib/orbit/data/openrouter-model-map.json`） |
 
 ## 历史查阅
 
-历史报告、各代验收与旧版本文档不再保留在当前树：用 `git show 3865b76:PATH` 查阅基线，或沿 Git 历史检索。旧报告不描述当前能力。
-
-前轮实际验证：[Codex借鉴验收](reference/codex-lessons-acceptance-20261009.md)（已完成有界交付，保留构建差异／失败／未测和资源收口事实）。
+历史方案、各阶段计划、验收记录、证据原件和研究报告不再保留在当前树，以免干扰后续开发。需要时用 `git show aa089bb:<原路径>` 查阅（`aa089bb` 是整理前的基线提交，位于 `main`），例如 `git show aa089bb:docs/reference/mixed-model-delivery-completion-20261001.md`；`git ls-tree -r --name-only aa089bb docs` 列出当时的全部文档，也可用 `git log --diff-filter=D -- docs` 沿历史检索。更早的历史基线是 `3865b76`。旧报告不描述当前能力；当前行为以合同与 ADR 为准，未测范围以[当前限制](plan/debt-ledger.md)为准。
