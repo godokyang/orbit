@@ -1,6 +1,6 @@
 # ADR-010：面向集成方的合同、能力协商与通用引用
 
-- 状态：已采纳（2026-10-11，用户经协作会话转交并授权；实现与有界验证见下，1.2 真实 RPC 有界验收已做，1.3 尚待实施）。
+- 状态：已采纳（2026-10-11，用户经协作会话转交并授权；实现与有界验证见下，1.2 真实 RPC 有界验收已做，1.3 已实现，字段有界真实核验与独立审核完成；真实检查为失败记录，未证明成功覆盖）。
 - 范围：Orbit 与外部调用方（首个是官方推荐搭配的 Loom）之间的接口承诺。具体命令、字段与取值以[集成合同](../../contracts/integration.md)和 `contracts/integration.json` 为准；任务运行语义仍以[任务运行合同](../../contracts/task-runtime.md)与 ADR-008/009 为准。
 
 ## 决定
@@ -30,6 +30,16 @@ Loom 只想依赖声明过的接口，不读 `.orbit`，不 fork Orbit，也不�
 控制路径与 start --socket 逐字一致，不 realpath；父目录同 uid 且私有，拒绝活/未知通道，仅回收可证实的同 uid 死 socket。Node 关闭直接监听的 Unix 路径会删除调用方在该路径放置的替换文件，因此采用私有内部监听路径＋指定路径硬链接，关闭仅回收身份相符的公开 socket。代价是两目录必须同文件系统且支持 socket 硬链接；不兼容时明确拒绝。该方案已实测连通与替换文件保留。
 
 OMP 18.9.0 实际 RPC 首消息前 get_state 返回 sessionId、通道已监听；首条受控请求无自动任务，显式 start 与引用回读、确认暂停与进程退出均通过。自动测试覆盖默认入口、切换重监听、活/死 socket、私有目录及查询失败。详细范围和快照身份见[验收记录](../reference/loom-integration-acceptance-20261011.md)。这不认证所有 OMP 版本或其他平台。
+
+## 合同 1.3：持久变更与只读摘要
+
+用户确认 revision/updated_at、phase/needs_user，以及最近已完成检查（models 与 input_current 保留）。只冻结字段，不增加 reason_code/next_action_code、有序事件流或 needs_user 接续。
+
+revision/updated_at 沿用唯一状态写者与既有原子 write，从已落盘语义投影比较，旧计数为权威；用量（包括检查/判断回执）、next_check_at 与读时覆盖 current/ready/gap 排除，其余持久状态计入。不另存 revision digest，避免调用方旧元数据与 JSON 键顺序影响计数；读/解析/权限/写入失败不能重置计数或覆盖坏状态。旧任务无字段读时未知，实际保存才初始化。排队、检查触发及检查完成登记属于语义变化；不能笼统排除时间戳/调度键漏掉它们。
+
+attention 码表及优先级在集成合同冻结，以现有状态与检查/返工谓词映射；needs_user 只指已停止终态。latest_check 共享原检查身份回退，选择最后完成记录含失败/陈旧，白名单排除私有文本与路径，models 仅来自该检查回执，input_current 不代表产物有效。两个摘要只在 status 投影，不改变原始状态或 export 材料。
+
+实现者未参与的 OMP 独立只读核查 save；真实活动 tick、进程重启和模型回执另由 Codex 核验，记录见[验收记录](../reference/loom-integration-acceptance-20261011.md)，冻结字段门槛已由原始回执交叉核验闭合；驱动自身错误与真实检查失败保留，不标为全部脚本或模型检查通过。
 
 ## 未覆盖
 

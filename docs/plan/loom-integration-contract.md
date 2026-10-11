@@ -15,10 +15,12 @@
 | 阶段/票 | 状态与证据 |
 | --- | --- |
 | A-G9 | w23:pH 完成生产接线与相关测试，Root 已核对 diff；Node close 删除调用方替换文件的实际缺陷用内部监听＋硬链接修正，真实 RPC 与测试均通过。测试失败资源回收已核；独立审核发现 alias 认领竞态，Root 实际复现后由原作者修复并定点通过；原 w23:pJ 已停止且无产物/资源 |
-| A-G8 | 实现回执已收，Codex 已审核 diff/测试覆盖；1 个新增函数，含精确/多任务/终态/无匹配/互斥/坏记录错误。真实回读已通过，待组合 npm test |
-| A 组合测试/真实 rpc/审核/提交 | 真实 RPC（OMP 18.9.0、指定 MiniMax）通过；最终生产四文件与重跑的实测快照 SHA256 一致；指定模型两次 Root 回复（首次验证＋修正后复核），无自动检查调用。首轮与最后快照 npm test 均退出 0；最后真实 RPC 亦退出 0，暂停已确认/进程与 socket 已释放/目录保留。w23:pK 独立只读审核已收，唯一已确认缺陷经 Root 定点复核关闭；Codex A 审核通过，准备授权内本地提交。证据见[验收记录](../reference/loom-integration-acceptance-20261011.md) |
-| B 实现/独立审核/真实验证/提交 | 等 A 门槛；OMP w23:pK 保留作独立核查 |
+| A-G8 | 实现回执已收，Codex 已审核 diff/测试覆盖；1 个新增函数，含精确/多任务/终态/无匹配/互斥/坏记录错误。真实回读与组合 npm test 均通过 |
+| A 组合测试/真实 rpc/审核/提交 | 真实 RPC（OMP 18.9.0、指定 MiniMax）通过；最终生产四文件与重跑的实测快照 SHA256 一致；指定模型两次 Root 回复（首次验证＋修正后复核），无自动检查调用。首轮与最后快照 npm test 均退出 0；最后真实 RPC 亦退出 0，暂停已确认/进程与 socket 已释放/目录保留。w23:pK 独立只读审核已收，唯一已确认缺陷经 Root 定点复核关闭；Codex A 审核通过，已完成 main 本地提交 `86d09af`（杨科，无 AI 署名）。证据见[验收记录](../reference/loom-integration-acceptance-20261011.md) |
+| B 实现/独立审核/真实验证/提交 | A 门槛已闭合；w23:pH 主要接线后撤回所有写权，Root 有界修正；w23:pK 独立只读 save 核查通过，未参与 B 实现。隔离快照全套 npm test 通过，真实状态/无变化 tick/同任务重启与失败检查回执已交叉核验；原驱动超时/KeyError 保留，成功检查未证明。Codex 审核通过，B 随本轮 main 本地提交交付，见验收记录 |
 
+
+B 的 phase 冻结：`starting`、`implementing`、`checking`、`reworking`、`stopping`、`stopped`、`needs_user`、`failed`、`unknown`。优先级：needs_user/failed/stop_unconfirmed/complete或paused/starting 等状态优先；运行中 completion_stop_pending→stopping；in-flight 或 manual queued→checking；现有 rebind/open finding/recheck 线索→reworking；其余 implementing；未知 status→unknown。needs_user 布尔只在 needs_user 终态为 true。普通未来定时检查不把整个执行期标成 checking。
 
 ## 目标
 
@@ -158,7 +160,7 @@
 | O1 | 合同 1.0：capabilities、外部引用、覆盖项 `ref`、契约测试 | 已完成（main 含 `b38f0d0`） |
 | O2 | 合同 1.1：空串/纯空白 `ref` 视为未提供 | 已完成（main 含 `92a00dd`） |
 | O3 | 评估提案 B（回答上面 5 个问题，给出书面评估） | 已完成（见上“O3 评估结果”），用户已确认范围并授权阶段 A/B |
-| O4 | 实现提案 B（A 合同 1.2、B 合同 1.3、ADR-010、测试与真实验证） | 已授权；按开头门槛顺序执行 |
+| O4 | 实现提案 B（A 合同 1.2、B 合同 1.3、ADR-010、测试与真实验证） | A 已提交 `86d09af`；B 实现及冻结字段门槛审核完成，随本轮 main 本地提交交付 |
 | O5 | 推送/升版/发布本分支 | 等用户决定 G2 |
 | O6 | 评估提案 C | 触发条件成立后 |
 | O7 | `tests/prestart_test.rb` 等因缺 `node_modules` 失败的环境问题 | Orbit 自有事项，与集成无关，未开始 |

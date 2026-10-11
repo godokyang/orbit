@@ -106,7 +106,8 @@ module CliTest
     FileUtils.mkdir_p(child)
     text = cli("status", "--details", cwd: child)
     assert(text.include?("实现用户要求") && text.include?("running"), "readable requirement and status")
-    assert(JSON.parse(cli("status", "--json", cwd: child)) == record.state, "machine output preserves raw state")
+    result = JSON.parse(cli("status", "--json", cwd: child))
+    assert(record.state.all? { |key, value| result[key] == value } && result["attention"].is_a?(Hash), "machine output preserves raw fields and adds the attention projection")
     text = cli("stop", "--reason", "用户停止", cwd: child)
     assert(text.include?("尚未确认停止"), "queued is not reported as stopped")
     command = JSON.parse(File.read(commands(record).fetch(0)))
@@ -866,8 +867,10 @@ module CliTest
            !legacy_jev.include?("最终建议委派") && !legacy_jev.include?("最终不建议委派"),
            "an old record without decision does not promote scores into a recommendation")
     assert(!legacy_text.include?("最近事件"), "no member source is invented when there are no members")
+    before = File.binread(File.join(legacy.path, "state.json"))
     raw = JSON.parse(cli("status", "--json", legacy.path))
-    assert(raw.dig("jev", "delegation").key?("decision") == false && raw == legacy.state,
+    assert(raw.dig("jev", "delegation").key?("decision") == false && legacy.state.all? { |key, value| raw[key] == value } &&
+           File.binread(File.join(legacy.path, "state.json")) == before,
            "status does not rewrite an old record")
   end
 

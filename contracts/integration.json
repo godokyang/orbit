@@ -1,6 +1,6 @@
 {
   "contract": "orbit-integration",
-  "version": "1.2",
+  "version": "1.3",
   "major": 1,
   "description": "Machine-readable form of contracts/integration.md. Versioned independently of the software version. Within one major version entries are only added, never changed or removed; a breaking change raises the major version and is named in the release notes. `orbit capabilities --json` serves `capabilities` from this file and the contract test reads `commands` and `status_fields` from it.",
   "status_values": [
@@ -79,7 +79,23 @@
     { "path": "requirement_coverage.items[].scope", "present": "after_check" },
     { "path": "requirement_coverage.items[].ref", "present": "when_reported" },
     { "path": "external_refs", "present": "when_provided" },
-    { "path": "continuation.previous_task", "present": "when_resumed" }
+    { "path": "continuation.previous_task", "present": "when_resumed" },
+    {"path": "revision", "present": "when_recorded"},
+    {"path": "updated_at", "present": "when_recorded"},
+    {"path": "attention.phase", "present": "status_projection"},
+    {"path": "attention.needs_user", "present": "status_projection"},
+    {"path": "latest_check.number", "present": "after_completed_check"},
+    {"path": "latest_check.role", "present": "after_completed_check"},
+    {"path": "latest_check.kind", "present": "after_completed_check"},
+    {"path": "latest_check.finished_at", "present": "after_completed_check"},
+    {"path": "latest_check.input_digest", "present": "after_completed_check"},
+    {"path": "latest_check.artifact_digest", "present": "after_completed_check"},
+    {"path": "latest_check.stale", "present": "after_completed_check"},
+    {"path": "latest_check.stale_reasons", "present": "after_completed_check"},
+    {"path": "latest_check.terminal", "present": "after_completed_check"},
+    {"path": "latest_check.failure_kind", "present": "after_completed_check"},
+    {"path": "latest_check.models", "present": "after_completed_check"},
+    {"path": "latest_check.input_current", "present": "after_completed_check"}
   ],
   "capabilities": {
     "status_json": { "since": "1.0" },
@@ -106,6 +122,9 @@
     },
     "external_session_mode": {"since": "1.2", "environment_variable": "ORBIT_EXTERNAL_INTEGRATION", "enabled_value": "1", "automatic_entry": false, "root_start_available": true},
     "control_socket_env": {"since": "1.2", "environment_variable": "ORBIT_CONTROL_SOCKET", "listen_at": "session_start", "absolute_path_required": true, "realpath": false, "caller_directory_retained": true, "normalized_absolute_path_required": true, "caller_private_directory_required": true, "path_limit_includes_nul": true, "same_filesystem_as_private_tmp_required": true},
-    "status_by_external_ref": {"since": "1.2", "exact_match": true, "includes_terminal_tasks": true, "stdout_container": "tasks", "no_match_exit_code": 0, "max_length": 256, "start_deduplicated": false}
+    "status_by_external_ref": {"since": "1.2", "exact_match": true, "includes_terminal_tasks": true, "stdout_container": "tasks", "no_match_exit_code": 0, "max_length": 256, "start_deduplicated": false},
+    "status_revision": {"since": "1.3", "key": ["id", "revision"], "initial_revision": 1, "atomic_with_state": true, "read_changes_revision": false, "unchanged_tick_changes_revision": false, "legacy_missing": "unknown", "excludes": ["usage_at_any_depth", "next_check_at", "requirement_coverage.current", "requirement_coverage.ready", "requirement_coverage.gap"], "updated_at_format": "ISO-8601 UTC"},
+    "status_attention": {"since": "1.3", "fields": ["phase", "needs_user"], "phases": ["starting", "implementing", "checking", "reworking", "stopping", "stopped", "needs_user", "failed", "unknown"], "needs_user_status": "needs_user", "needs_user_is_stopped_terminal": true, "unknown_phase": "unknown"},
+    "status_latest_check": {"since": "1.3", "selection": "last_completed_in_checks_order", "includes_failed": true, "includes_stale": true, "models": "deduplicated_receipt_provider/model_array", "input_current": "input_digest_only", "no_completed_check": "omitted", "legacy_missing_identity": "scope.json_then_null", "stale_reasons": ["workspace", "artifact", "input", "host", "dispute"], "failure_kinds": ["auth_or_quota", "unavailable", "invalid_result"], "terminal_values": ["continue", "correct", "pause", "complete", "needs_user", "failed", "stale"]}
   }
 }

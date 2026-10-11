@@ -1,6 +1,6 @@
 # Orbit 集成合同
 
-合同版本：1.2
+合同版本：1.3
 
 面向把 Orbit 当作外部执行与检查服务的集成方（例如 Loom）。本合同只冻结下面列出的命令、返回字段与结果 schema；这些之外的一切（包括 `status --json` 里的其他字段）都是 Orbit 内部实现，随时可变。产品语义以 [任务运行合同](task-runtime.md) 和 [检查结果 schema](check-result.schema.json) 为准，本文件与它们冲突时以它们为准并修正本文件。机器可读形式见 [integration.json](integration.json)，`orbit capabilities --json` 与契约测试都读取它，决定理由见 [ADR-010](../docs/adr/010-integration-contract.md)。
 
@@ -16,7 +16,7 @@
 `orbit capabilities --json` 只读、不连接会话、不调用模型、不读任务，返回：
 
 ```json
-{ "integration_contract": { "name": "orbit-integration", "version": "1.2", "major": 1 },
+{ "integration_contract": { "name": "orbit-integration", "version": "1.3", "major": 1 },
   "orbit": { "version": "<软件版本，仅供显示>" },
   "capabilities": { "<能力名>": { "since": "<引入该能力的合同版本>", "...": "该能力的限制" } } }
 ```
@@ -26,7 +26,7 @@
 | 能力 | 含义与限制 |
 | --- | --- |
 | `status_json` | `orbit status TASK --json` 返回 §4 的冻结字段 |
-| `export` | `orbit export TASK --output FILE` 返回 §3 的字段；归档内 `task/state.json` 带有同一份冻结字段 |
+| `export` | `orbit export TASK --output FILE` 返回 §3 的字段；归档内 `task/state.json` 带有 1.0 的持久冻结字段与已记录的 revision/updated_at；1.3 的 attention/latest_check 为 status 只读投影 |
 | `stop_receipt` | 停止回执：`stop --json` 只表示入队，已确认停止只看 `stop_confirmation.confirmed` |
 | `start_external_refs` | `start` 可带 `--external-ref`；`max_refs`、`max_length` 为强制上限；`inherited_on_resume=false` |
 | `check_coverage_ref` | 检查结果的每个覆盖项可带 `ref`；`max_length` 为 schema 上限；`blank_is_omitted=true`（1.1 起）表示空串或纯空白按未提供处理 |
@@ -35,6 +35,10 @@
 | `external_session_mode` | 1.2 起：`ORBIT_EXTERNAL_INTEGRATION=1` 关闭自动入口，Root 显式 start 保留 |
 | `control_socket_env` | 1.2 起：指定私有父目录中的绝对路径，session_start 提前监听，关闭只释放自有 socket |
 | `status_by_external_ref` | 1.2 起：精确引用查询，包括终态；成功总是 tasks 数组，无匹配退出 0 |
+
+| `status_revision` | 1.3 起：revision/updated_at 与持久状态原子写入，读/无变化 tick 不递增；读时覆盖与用量不计 |
+| `status_attention` | 1.3 起：粗粒度 phase＋needs_user，码表冻结；needs_user 为已停止终态 |
+| `status_latest_check` | 1.3 起：最后完成检查，含失败/陈旧；白名单字段、模型回执去重数组与输入一致性 |
 
 ## 3. 命令与返回
 
@@ -67,6 +71,40 @@
 `status` 取值：`starting`、`running`、`complete`、`paused`、`needs_user`、`failed`、`stop_unconfirmed`；终态为除前两项外的其余五个。`complete` 的含义见任务运行合同（独立检查与实际收尾均通过），不等于集成方自己的业务完成。已确认停止只看 `stop_confirmation.confirmed == true`；`stop_unconfirmed` 与 `failed` 不保证资源已停止，调用方不得据此放行第二写者。
 
 `requirement_coverage.items` 是检查者逐要求的枚举与证据，`ready=false` 时 `gap` 说明原因；缺失、重复或对不上的项由调用方按自己的规则判未验证，Orbit 不替调用方匹配。
+
+### 持久变更标记（1.3）
+
+`revision` 为从 1 起的任务内整数，`updated_at` 为 UTC ISO-8601 最后一次持久语义变化时间；同一秒的变化可有相同时间戳。以 `(id, revision)` 作为键，新任务（含接续任务）重新起算。二者与 state 同一次原子写入，读命令/无变化保存或 tick 不改变；重启继续使用已落盘计数，调用方携带的旧元数据不具有裁定权。
+
+计数比较已落盘状态的语义投影，排除 revision/updated_at 自身、各层 usage（含检查/判断回执）、纯时间调度 next_check_at 与 requirement_coverage.current/ready/gap；状态、检查登记、finding 开闭、覆盖登记、停止确认/诊断、外部引用及人工排队/检查触发等持久变化计入。它不标识整份 status JSON：覆盖的现算 current/ready/gap、用量和只读投影可能变化而计数不变。无字段的旧任务读取保持未知，不合成；第一次实际保存才初始化。读或写失败原样失败，不覆盖坏旧状态重新起算。
+
+### 关注状态（1.3）
+
+`attention` 只含 phase（字符串）与 needs_user（布尔）；仅 status 返回（单任务或 tasks 元素），不持久化，不新增 reason_code/next_action_code。遇未知 phase 按未知处理；needs_user=true 仅表示 status=needs_user 的已停止终态，不表示等待原生答复，也不承诺答复后恢复。
+
+| phase | 现有谓词与优先级 |
+| --- | --- |
+| needs_user | needs_user 终态，布尔 true |
+| failed | failed，无论停止是否确认，仍需读 stop_confirmation |
+| stopping | stop_unconfirmed，或运行中 completion_stop_pending |
+| stopped | complete/paused；不能只凭此码替代停止回执 |
+| starting | starting |
+| checking | 运行中检查 in-flight 或人工终检已排队 |
+| reworking | 运行中既有 rebind、开放 finding 或 recheck 线索 |
+| implementing | 运行中其余情况；普通未来定时检查不算 checking |
+| unknown | 未识别 status |
+
+状态分支优先，运行中依次 stopping→checking→reworking→implementing。人工 stop 仅存在 inbox 尚未落盘时，不据此伪造 stopping。
+
+### 最近完成检查（1.3）
+
+`latest_check` 为 checks 中最后一条 finished_at 非空的已完成记录，含失败/陈旧，不取“最后可采纳结果”，不含进行中记录；无完成检查时省略。它仅是 status 只读投影，export 保留原始状态/检查材料。
+
+冻结字段：number、role、kind、finished_at、input_digest、artifact_digest、stale、stale_reasons、terminal、failure_kind、models、input_current。身份缺失从该检查 scope.json 回退，仍缺为 null，不编造。stale_reasons 为已记录的 workspace/artifact/input/host/dispute 数组，缺记录为空；stale 保留旧记录 null。terminal 优先 failed→stale→原 verdict（continue/correct/pause/complete/needs_user），旧缺结果为 null；failure_kind 为已记录 auth_or_quota/unavailable/invalid_result，缺时 null。role 是 reviewer/process_reviewer/adjudicator 等实际检查种类，不是模型身份，旧缺字段 null。
+
+models 从该检查 usage.calls 的 model（缺时仅用该回执 requested_model）及 provider 得到完整 provider/model，去重保序数组，可空；不借任务选择补造模型。input_current 只比较检查输入摘要与当前输入摘要，缺任一摘要为 null；不说明产物有效性，当前成果是否仍对应检查应读 requirement_coverage.current。
+
+该投影不包含结论/错误/finding 文本、工作区路径、供应商响应或用量明细；已有 status 的内部字段仍不在本合同冻结范围内。
 
 ## 5. 引用字段（不透明，通用）
 
@@ -106,3 +144,5 @@
 - 1.1：覆盖项 `ref` 的空串或纯空白按未提供处理（原先整次检查被拒绝）；`check_coverage_ref` 增加 `blank_is_omitted`。只放宽检查者输出，不改变任何已有返回字段；依据是对真实检查者的试验中 7 次有 1 次写了 `"ref": ""`。
 
 - 1.2：外部会话模式、调用方指定控制通道与按外部引用查询；均为默认关闭的可选启动模式或只读新增命令面。
+
+- 1.3：持久 revision/updated_at、粗粒度 attention 与最近完成检查 latest_check；旧字段及 status 取值不变。

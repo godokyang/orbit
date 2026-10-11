@@ -6,6 +6,7 @@ require "time"
 require "fileutils"
 require "shellwords"
 require_relative "task_record"
+require_relative "status_projection"
 require_relative "workspace_snapshot"
 require_relative "check_snapshot_archive"
 require_relative "workspace_binding"
@@ -700,12 +701,14 @@ module Orbit
     end
 
     # One check's durable identity, falling back to its own checks/<n>/scope.json
-    # when it was recorded before the identity slice existed.
+    # when it was recorded before the identity slice existed. Shared with the
+    # read-only latest_check projection so both always agree.
     def check_identity(entry)
-      identity = entry.slice("artifact_root", "input_digest", "artifact_digest")
-      return identity if identity.values_at("artifact_root", "input_digest", "artifact_digest").none?(&:nil?)
+      StatusProjection.check_identity(@record, entry)
+    end
 
-      check_scope_identity(entry["number"]).merge(identity) { |_key, fallback, value| value || fallback }
+    def check_scope_identity(number)
+      StatusProjection.check_scope_identity(@record, number)
     end
 
     # One check's identity/outcome facts. Failed checks recorded before the
@@ -721,19 +724,6 @@ module Orbit
         "terminal" => entry["failed"] ? "failed" : entry["stale"] ? "stale" : entry.dig("result", "verdict"),
         "failure_kind" => entry.dig("result", "failure_kind")
       }
-    end
-
-    def check_scope_identity(number)
-      return {} if number.nil?
-
-      path = File.join(@record.path, "checks", number.to_s, "scope.json")
-      return {} unless File.file?(path)
-
-      scope = JSON.parse(File.read(path))
-      { "artifact_root" => scope["artifact_root"], "input_digest" => scope["input_digest"],
-        "artifact_digest" => scope.dig("snapshot", "digest") }
-    rescue JSON::ParserError, SystemCallError
-      {}
     end
 
     def assess_jev(host, artifact_digest, now)

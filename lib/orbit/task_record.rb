@@ -163,8 +163,73 @@ module Orbit
       JSON.parse(File.read(File.join(path, "state.json")))
     end
 
+    # Top-level keys that never constitute an integration-visible change:
+    # usage (refreshed from the call ledger at read time), pure scheduling
+    # time (next_check_at), and the revision fields themselves. Inside
+    # requirement_coverage only the read-time-computed current/ready/gap are
+    # excluded; manual queueing and check triggers are visible semantics and
+    # stay in the projection, as do finished_at-style timestamps inside
+    # checks[] and other registered entries.
+    REVISION_EXCLUDED_KEYS = %w[revision updated_at usage next_check_at].freeze
+    REVISION_EXCLUDED_COVERAGE_KEYS = %w[current ready gap].freeze
+
+    # The runtime is the single writer and callers hold the existing runtime
+    # lock, so this stays a plain atomic write. The persisted state is the
+    # authority: the previous on-disk revision wins (never a caller-supplied
+    # copy), revision/updated_at ride the same temp-file+rename write, and
+    # Ruby Hash equality compares the semantic projections independent of key
+    # order. A save bumps the counter only when the visible projection
+    # actually changed, so repeated saves, reads and unchanged ticks are free
+    # and a restart continues from the persisted counter — never backwards.
+    # Records saved before these fields existed are not synthesized at read
+    # time; their first save initializes the counter. Only a missing old file
+    # (a brand-new record) is treated as initialization: a corrupt or
+    # unreadable old state fails the save instead of being overwritten, and a
+    # non-object old state is a hard error, never a reset.
     def save(value)
+      old = begin
+        JSON.parse(File.read(File.join(path, "state.json")))
+      rescue Errno::ENOENT
+        {}
+      end
+      raise ArgumentError, "existing task state is not a JSON object: #{path}" unless old.is_a?(Hash)
+
+      revision = old["revision"]
+      revision = nil unless revision.is_a?(Integer)
+      if revision.nil? || revision_projection(old) != revision_projection(value)
+        value["revision"] = (revision || 0) + 1
+        value["updated_at"] = Time.now.utc.iso8601
+      else
+        value["revision"] = revision
+        # Same semantic version as the persisted record: copy its updated_at,
+        # never a caller-supplied stale or forged timestamp.
+        if old["updated_at"].is_a?(String)
+          value["updated_at"] = old["updated_at"]
+        else
+          value.delete("updated_at")
+        end
+      end
       write("state.json", JSON.pretty_generate(value) + "\n")
+    end
+
+    def revision_projection(state)
+      projection = without_revision_usage(state.reject { |key, _| REVISION_EXCLUDED_KEYS.include?(key) })
+      coverage = projection["requirement_coverage"]
+      return projection unless coverage.is_a?(Hash)
+
+      projection.merge("requirement_coverage" => coverage.reject { |key, _| REVISION_EXCLUDED_COVERAGE_KEYS.include?(key) })
+    end
+
+    # Check and judgment receipts also contain usage; those refreshes have
+    # the same exclusion as the top-level totals.
+    def without_revision_usage(value)
+      case value
+      when Hash
+        value.reject { |key, _| key == "usage" }.transform_values { |item| without_revision_usage(item) }
+      when Array
+        value.map { |item| without_revision_usage(item) }
+      else value
+      end
     end
 
     # Task-owned authoritative member list, written only by the OMP extension's

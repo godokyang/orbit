@@ -30,7 +30,8 @@
 | eval agent不属于已接线受控成员入口 | C04真实正例的eval agent未登记，不计Orbit成员；改走既有原生task/hub后完成。收尾证据只含该子会话已yield、Root owner-scoped jobs settled及进程退出 | 如决定支持该入口，先核实宿主注册／范围门／用量与停止接缝；当前不扩产品接口 |
 | `needs_user` 终态不可接续 | `resume_from` 只接受已确认停止的 `paused`；Loom 的“手机答复后继续”无合法接续路径。接续还要求一条真实的原生用户消息，外部答复须先以原生用户消息进入同一 Root 会话 | 用户决定是否放宽到 `needs_user`（改 ADR-008 与任务运行合同，并做真实验证）；放宽后在集成合同 `resume_from.from_status` 增补取值（次版本） |
 | 集成合同真实验证范围有限 | 假调用方对真实 CLI／运行时／存储，但 OMP Root 会话与检查模型是替身。`ref` 已做一次小样本真实检查（1 个模型、7 次：带编号 12 项只有 1 项填了 `ref`，无自编；1 次写空串，已在合同 1.1 放宽）；合同 1.2 已有 OMP 18.9.0/macOS 单模型真实 RPC 证明首消息前通道/显式启动与引用回读/停止退出；多模型/更多次数、外部引用经自动入口建任务均未实测；Loom 的持续集成尚未对最新版运行 | 更多模型/次数的真实验收；确定自动入口是否需要入队式追加外部引用 |
-| 对外状态补充（提案 B）实施中 | 用户已授权合同 1.3 revision/attention/latest_check；A 合同 1.2 真实 RPC 通过，尚待全量测试与提交，B 不提前启动 | 按[冻结计划](loom-integration-contract.md)完成 A 门槛，再实现并独立审核/真实验证 B |
+| 合同 1.3 真实分支范围有限 | revision/attention/latest_check 已实现，npm 与独立 save 审核通过；真实任务变化、稳定读、实际 tick、重启不回退与失败检查摘要已核验。成功检查、complete/needs_user/stop_unconfirmed/reworking/unknown、stale/旧 scope 回退未真实认证；原驱动错误保留 | 真实场景出现后按[验收记录](../reference/loom-integration-acceptance-20261011.md)核对对应分支，不从确定性覆盖推导模型表现 |
+| CLI 冷启动任务与原生宿主绑定有缺口 | 本轮隔离 OMP 18.9.0 外部模式下 CLI --prompt-file start 建立记录后运行时因 hub_events requires a bound task session 失败并确认停止；Root 原生 Orbit start 路径可执行，但不等于修复外部 CLI 全流程 | 单独核对 CLI start 后任务登记/宿主绑定接缝；本轮只交付合同状态字段，未扩大修改产品启动协议 |
 | 指定控制通道的跨平台/文件系统范围有限 | 内部 Unix socket 通过硬链接暴露调用方路径，需两目录同文件系统且支持 socket 硬链接；macOS 已实测，Linux/其他 OMP 版本未认证，失败拒绝而不覆盖 | 有调用方真实需求时在对应平台/文件系统按[合同](../../contracts/integration.md)验证，不由单平台推断 |
 | 对外有序事件流（提案 C）未做 | 内部 `events.jsonl` 无序号、类型多且不稳定，不对外承诺 | 集成方真实运行中关键过程丢失且无法用 `export` 补回，再评估 |
 | 外部引用不随 `resume_from` 继承 | 接回的新任务需调用方重新传入 `external_refs` | 调用方明确需要继承时再定，属可加性改动 |

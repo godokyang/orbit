@@ -252,6 +252,102 @@ module IntegrationContractTest
     end
   end
 
+  def revision_advances_only_on_visible_change
+    with_world do |_tmp, project|
+      dir = start(project, "m1").fetch("task_directory")
+      record = Orbit::TaskRecord.new(dir)
+      first = orbit_json("status", dir, "--json")
+      assert(first["revision"] == 1 && first["updated_at"].is_a?(String), "creation initializes revision=1 with updated_at")
+
+      record.save(record.state.merge("revision" => 0, "updated_at" => "forged"))
+      again = record.state
+      assert(again["revision"] == 1 && again["updated_at"] == first["updated_at"], "unchanged saves preserve authoritative metadata")
+
+      noisy = again.merge("usage" => { "tokens" => 42 }, "next_check_at" => "2030-01-01T00:00:00Z")
+      record.save(noisy)
+      assert(record.state["revision"] == 1, "usage and pure scheduling time do not count")
+
+      record.save(record.state.merge("status" => "paused", "stop_confirmation" => { "confirmed" => true }))
+      bumped = record.state
+      assert(bumped["revision"] == 2 && bumped["updated_at"].is_a?(String), "a visible change bumps revision and refreshes updated_at")
+      reloaded = Orbit::TaskRecord.new(dir)
+      reloaded.save(reloaded.state)
+      assert(reloaded.state["revision"] == 2, "a restart continues from the persisted counter, never backwards")
+
+      legacy = reloaded.state.reject { |key, _| %w[revision updated_at].include?(key) }
+      File.write(File.join(dir, "state.json"), JSON.pretty_generate(legacy) + "\n")
+      assert(!orbit_json("status", dir, "--json").key?("revision"), "a pre-1.3 record reports no revision instead of synthesizing one")
+      record.save(record.state)
+      assert(record.state["revision"] == 1, "the first save of a legacy record initializes the counter")
+      record.save(record.state.merge("requirement_coverage" => { "complete" => true, "current" => true, "ready" => true }))
+      before = record.state
+      record.save(before.merge("requirement_coverage" => before["requirement_coverage"].merge("current" => false, "ready" => false, "gap" => "read-time")))
+      assert(record.state["revision"] == before["revision"], "read-time coverage fields do not count")
+      record.save(record.state.merge("checks" => [{ "number" => 1, "usage" => { "tokens" => 1 } }]))
+      before = record.state
+      record.save(before.merge("checks" => [{ "number" => 1, "usage" => { "tokens" => 2 } }]))
+      assert(record.state["revision"] == before["revision"], "check receipt usage-only refreshes do not count")
+      File.write(File.join(dir, "state.json"), "null")
+      begin; record.save(legacy); raise "accepted invalid old state"; rescue ArgumentError; end
+      assert(File.read(File.join(dir, "state.json")) == "null", "invalid old state is not overwritten or reset")
+    end
+  end
+
+  def attention_maps_the_frozen_phase_enum
+    cases = [
+      [{ "status" => "starting" }, "starting", false],
+      [{ "status" => "running" }, "implementing", false],
+      [{ "status" => "running", "completion_stop_pending" => { "at" => "t" } }, "stopping", false],
+      [{ "status" => "running", "check_observations" => { "k" => { "status" => "in_flight" } } }, "checking", false],
+      [{ "status" => "running", "next_check_manual" => true }, "checking", false],
+      [{ "status" => "running", "findings" => { "f1" => { "status" => "open" } } }, "reworking", false],
+      [{ "status" => "running", "recheck" => { "findings" => [{ "id" => "f1" }] } }, "reworking", false],
+      [{ "status" => "running", "next_check_at" => "2030-01-01T00:00:00Z" }, "implementing", false],
+      [{ "status" => "needs_user" }, "needs_user", true],
+      [{ "status" => "failed" }, "failed", false],
+      [{ "status" => "paused" }, "stopped", false],
+      [{ "status" => "stop_unconfirmed" }, "stopping", false],
+      [{ "status" => "bogus" }, "unknown", false]
+    ]
+    cases.each do |state, phase, needs_user|
+      assert(Orbit::StatusProjection.attention(state) == { "phase" => phase, "needs_user" => needs_user },
+             "attention for #{state} is #{phase}/#{needs_user}")
+    end
+  end
+
+  def latest_check_projects_the_last_finished_record
+    with_world do |_tmp, project|
+      dir = start(project, "m1").fetch("task_directory")
+      record = Orbit::TaskRecord.new(dir)
+      state = record.state
+      assert(!orbit_json("status", dir, "--json").key?("latest_check"), "no completed check means no projection")
+      digest = record.input_digest(state)
+      good = { "number" => 1, "role" => "reviewer", "kind" => "artifact", "finished_at" => "2026-01-01T00:00:00Z",
+               "input_digest" => digest, "artifact_digest" => "artifact-v1", "stale" => true, "stale_reasons" => ["input"],
+               "result" => { "verdict" => "continue", "reason" => "private text" }, "usage" => { "calls" => [
+                 { "provider" => "zenmux", "model" => "x-ai/grok-4.7" }, { "provider" => "zenmux", "model" => "zenmux/x-ai/grok-4.7" },
+                 { "requested_model" => "req/fallback" }, { "provider" => "missing" } ] } }
+      record.save(state.merge("checks" => [good]))
+      latest = orbit_json("status", dir, "--json").fetch("latest_check")
+      assert(latest["terminal"] == "stale" && latest["stale_reasons"] == ["input"] && latest["input_current"] == true &&
+             latest["models"] == ["zenmux/x-ai/grok-4.7", "req/fallback"], "stale completion and normalized deduplicated receipt identities are retained")
+      scope = File.join(dir, "checks", "2", "scope.json")
+      FileUtils.mkdir_p(File.dirname(scope))
+      File.write(scope, JSON.generate("input_digest" => digest, "snapshot" => { "digest" => "artifact-v2" }, "artifact_root" => project))
+      failed = { "number" => 2, "role" => "process_reviewer", "finished_at" => "2026-01-02T00:00:00Z", "failed" => true,
+                 "result" => { "failure_kind" => "invalid_result", "error" => "private error" } }
+      record.save(record.state.merge("checks" => [good, failed, { "number" => 3 }]))
+      latest = orbit_json("status", dir, "--json").fetch("latest_check")
+      assert(latest["number"] == 2 && latest["terminal"] == "failed" && latest["failure_kind"] == "invalid_result" &&
+             latest["artifact_digest"] == "artifact-v2" && latest["input_current"] == true && latest["models"] == [] && latest["stale"].nil?,
+             "last finished failure wins over adoptable history and unfinished entries; legacy identity falls back, missing facts stay unknown")
+      assert((latest.keys & %w[artifact_root result usage reason error provider_response_id]).empty?, "private text, paths and usage are outside the projection")
+      record.write("amendments/new.txt", "changed input")
+      state = record.state; state["amendments"] << { "path" => "amendments/new.txt" }; record.save(state)
+      assert(orbit_json("status", dir, "--json").dig("latest_check", "input_current") == false, "input changes invalidate input consistency")
+    end
+  end
+
   # Contract: resume_from.from_status is the truth, and a bad reference never creates a task.
   def declared_limits_hold_at_the_boundary
     with_world do |_tmp, project|
@@ -282,5 +378,8 @@ end
 IntegrationContractTest.capabilities_declare_what_orbit_enforces
 IntegrationContractTest.fake_caller_runs_the_whole_lifecycle
 IntegrationContractTest.status_by_external_ref_returns_a_fixed_tasks_array
+IntegrationContractTest.revision_advances_only_on_visible_change
+IntegrationContractTest.attention_maps_the_frozen_phase_enum
+IntegrationContractTest.latest_check_projects_the_last_finished_record
 IntegrationContractTest.declared_limits_hold_at_the_boundary
 puts "INTEGRATION_CONTRACT_TEST_PASS (fake caller and fake OMP host against the real CLI, runtime and stores)"

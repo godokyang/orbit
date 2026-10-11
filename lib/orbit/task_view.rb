@@ -4,6 +4,7 @@ require_relative "task_record"
 require_relative "resource_call_ledger"
 require_relative "requirement_coverage"
 require_relative "workspace_snapshot"
+require_relative "status_projection"
 
 module Orbit
   # Read-only project selection and presentation; the runtime remains the writer.
@@ -38,6 +39,14 @@ module Orbit
           { "ready" => false, "current" => false, "gap" => error.message }
         end
       end
+      # Read-only outward projections (integration contract 1.3): computed on
+      # every status read, never persisted — export keeps the raw state.
+      # revision/updated_at need no handling here: they are persisted fields
+      # that simply pass through when present, and old records without them
+      # are reported as unknown instead of being synthesized.
+      state["attention"] = StatusProjection.attention(state)
+      latest = StatusProjection.latest_check(record, state)
+      state["latest_check"] = latest if latest
       ledger = ResourceCallLedger.new(task_path: record.path, task_id: state.fetch("id"))
       native_files = %w[native-model-calls.json native-model-call-gaps.jsonl].any? do |name|
         File.file?(File.join(record.path, name))
