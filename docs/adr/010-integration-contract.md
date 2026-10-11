@@ -31,6 +31,8 @@ Loom 只想依赖声明过的接口，不读 `.orbit`，不 fork Orbit，也不�
 
 OMP 18.9.0 实际 RPC 首消息前 get_state 返回 sessionId、通道已监听；首条受控请求无自动任务，显式 start 与引用回读、确认暂停与进程退出均通过。自动测试覆盖默认入口、切换重监听、活/死 socket、私有目录及查询失败。详细范围和快照身份见[验收记录](../reference/loom-integration-acceptance-20261011.md)。这不认证所有 OMP 版本或其他平台。
 
+2026-10-12 修复外部 CLI 冷启动接缝：运行时通过现有私有通道登记精确任务，与原生工具使用同一宿主绑定；接纳前不投递指令或取得停止权。内部桥接不增加对外能力或合同版本，start 返回 starting 的异步含义不变。相关归属拒绝与真实冷启动证据见[验收记录](../reference/loom-integration-acceptance-20261011.md)。
+
 ## 合同 1.3：持久变更与只读摘要
 
 用户确认 revision/updated_at、phase/needs_user，以及最近已完成检查（models 与 input_current 保留）。只冻结字段，不增加 reason_code/next_action_code、有序事件流或 needs_user 接续。

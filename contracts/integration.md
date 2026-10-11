@@ -44,7 +44,7 @@
 
 调用方只通过这些命令和 stdout JSON 与 Orbit 交互，不读写 `.orbit` 内部文件，不猜 socket。命令清单与返回字段以 integration.json 的 `commands` 为准。
 
-- `orbit start ...`：返回 `task_directory`、`status`。`status=starting` 只表示任务记录已建立；调用方需要真实宿主会话（`--thread`、`--socket`），Orbit 不创建 Root 会话。
+- `orbit start ...`：返回 `task_directory`、`status`。`status=starting` 只表示任务记录已建立；调用方需要真实宿主会话（`--thread`、`--socket`），Orbit 不创建 Root 会话。 运行时完成宿主归属校验与任务绑定后才进入 `running`；调用方应回读状态确认，绑定拒绝沿既有 `failed` 错误路径记录，不把启动返回当作已经执行。
 - `orbit check TASK_DIRECTORY`、`orbit stop TASK --json`：返回 `task_directory`、`command_id`、`status`。`queued` 只是请求入队，不是检查结果，也不是已停止。`check` 也可返回 `rejected` 及原因。
 - `orbit status TASK --json`、`orbit export TASK --output FILE`、`orbit doctor --json`、`orbit version --json`、`orbit capabilities --json`：见 integration.json。
 

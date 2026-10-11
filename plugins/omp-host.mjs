@@ -2750,6 +2750,15 @@ export function installOmpExtension(pi, sdk) {
     if (typeof request.method === 'string' && MEMBER_METHODS.has(request.method)) return memberDispatch(request);
     const entry = owned(request.session);
     switch (request.method) {
+      case 'bind_task': {
+        const result = await host.bindTask(request.task_directory, entry.id);
+        taskDirs.set(entry.id, result.task_directory);
+        entryRecovery.delete(entry.id);
+        noteAssociation(entry.id, result.task_directory);
+        noteModelIdentity({ taskDir: result.task_directory, role: 'root', agentId: sdk.MAIN_AGENT_ID,
+          sessionId: entry.id, model: `${entry.session.model.provider}/${entry.session.model.id}` });
+        return result;
+      }
       case 'state': return state(entry);
       case 'messages': return messages(entry);
       case 'model': return `${entry.session.model.provider}/${entry.session.model.id}`;

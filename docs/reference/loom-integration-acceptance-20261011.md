@@ -31,3 +31,17 @@
 资源纪律另有偏差：B 执行席用 `rm -f /tmp/b-*.log` 清理，回执称仅匹配四个自建日志；Root 撤回该席全部写权与资源权，有界接管。无法独立证明 glob 只命中自有文件，不能声称全程无越界。
 
 原始证据保留于本次 Codex 自建临时目录的 evidence：快照 manifest/diff、npm 日志、独立审核回执、RPC 原件、实际 tick 与 `b-acceptance-reconciled.json`。重建/交叉核验脚本及原生会话材料一并保留；已确认自有进程/组均退出、无自有监听 socket，调用方目录保留验证后只清理本任务明确自建者。既有执行席、用户目录、日常安装与未知临时目录不清理。最终保留位置见本次中文交付报告。
+
+
+## 2026-10-12：外部 CLI 冷启动绑定修复
+
+用户追加授权并以新的 Goal 执行，基线 `75b786ff1a95756ae37b0b3c05f6501d346b87d4`。本轮只修 Orbit，不操作 Loom：运行时在既有任务/Root 锁内先保存自身 PID，再向宿主登记精确任务目录。宿主复用原归属校验并验证项目、活动状态和运行时 PID，拒绝覆盖其他活动任务，同时更新原生工具与协作事件使用的映射。接纳前不投递指令或取得停止权；原对外字段、capabilities、合同 1.3 和软件 0.8.5 不变。
+
+- 隔离文件快照 SHA-256 `68ad925aa04716643c8705b4caabcc9f2cc8557327e792a606f6183e7dddafe3`，包含待交付改动；仅在快照按锁文件准备依赖，全量 npm test 退出 0，最终生产及测试文件与快照逐字节一致。文档随后补实测事实。
+- 回归覆盖：宿主拒绝异会话/终态/另一个活动任务；接纳后 hub_events 和原生 context 看到同一任务。运行时绑定被拒时不投递初始指令、不停止 Root，记录 failed 并清除自身 PID。两处高价值测试约 50 行。独立既有 OMP w23:pK 只读核查通过、无新增已确认缺陷；不计假想同用户篡改或原有 PID 复用风险为本次新增缺陷，未模拟磁盘/进程的全部故障。
+- 实际宿主 OMP 18.9.0，Root `minimax-code-cn/MiniMax-M3.1-Flash-Preview`。无首条原生 prompt，get_state 取得真实 sessionId 后由外部 CLI `start --prompt-file ... --external-ref loom:cold-binding/fix` 冷启动；任务 `98bdbbb1-da69-4090-89c5-8f5d507cb05c` 从 starting/revision3 进入 running/revision5，私有 hub_events 成功返回事件容器，没有原来的未绑定错误。Root 接到原始指令并用 write 实际创建内容精确为 ready 的 marker.txt；未依赖 Root 自己调用 start。
+- 真实 runtime tick 证明 revision5→5、updated_at 与原始状态不变；引用查询只回同一任务。公开 stop 后 paused/revision10、attention stopped/false、stop_confirmation.confirmed=true，三次 status 的 revision/updated_at 相同。RPC 退出码 0，运行时退出，自有 socket 释放，调用方目录/sentinel 保留。
+- Root 完成一次交付回合；自动检查刚进入 in-flight 即由外部验证方主动暂停，因此检查记录为空，**本轮不证明成功终检或 complete**。原合同 B 的失败检查证据仍按上文保留。其他模型/宿主/平台、真实成员派发和 Loom 侧 CI 未在本轮补测，不把此次有界通信验证称为全平台端到端联调。
+- 收尾发现快照 model-probe 的自有 OMP worker 残留（PID18255，命令指向本次独有快照，cwd=本次模型探针目录）。核对精确来源后 SIGTERM，该进程及打开文件均退出，再删除其精确自建目录；未扫描删除未知目录。该探针资源释放边界本轮只记录并收尾，不扩大改选模或 probe 实现。其余自有进程/组与监听 socket 已核对释放；保留原始测试日志、独立审核、RPC/tick、状态及复核脚本作为证据，临时快照/依赖/项目/缓存和已验证自建调用方目录回收。既有执行席与其他任务资源保留。
+
+原始证据目录：本次自建 `orbit-cold-binding-tytjwt76/evidence`，绝对路径见中文交付报告；新缺陷已修复且经过真实冷启动核验，早期失败记录仍保留以说明边界，不代表最新版仍有该绑定缺口。

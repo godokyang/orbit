@@ -284,7 +284,7 @@ try {
   });
   const freshHarness = branch => {
     const local = { events: {}, asides: [], notifications: [], aborts: [] };
-    const pi = { zod: z, registerTool: () => {}, registerCommand: () => {},
+    const pi = { zod: z, registerTool: tool => { local.definition = tool; }, registerCommand: () => {},
       on: (name, handler) => { (local.events[name] ||= []).push(handler); },
       sendMessage: (message, options) => { local.asides.push({ message, options }) } };
     local.pi = pi;
@@ -326,6 +326,39 @@ try {
   assert.deepEqual(await fs.readdir(path.join(extProject, '.orbit', 'tasks')).catch(() => []), [], 'G9a: no automatic task is created');
   const extLedger = JSON.parse(await fs.readFile(path.join(extProject, '.orbit', 'prestart-decisions.json'), 'utf8').catch(() => '{}'));
   assert.ok(!('ext1' in extLedger), 'G9a: no durable entry classification record');
+
+  // External runtime attachment uses the exact durable task, never a guessed
+  // scan result. Both native tool context and hub reads see the same binding.
+  const bridge = payload => new Promise((resolve, reject) => {
+    const peer = net.connect(controlSocket); let data = '';
+    peer.on('connect', () => peer.write(JSON.stringify({ session: 'root', ...payload }) + '\n'));
+    peer.on('data', part => { data += part; if (data.includes('\n')) {
+      peer.destroy(); try { resolve(JSON.parse(data)); } catch (e) { reject(e); }
+    } });
+    peer.on('error', reject);
+  });
+  const bindDir = path.join(extProject, '.orbit', 'tasks', 'external');
+  await fs.mkdir(bindDir, { recursive: true });
+  const bindState = { format: 'orbit-task-1', id: 'external', project_root: extProject,
+    status: 'starting', runtime_pid: process.pid, review: { model: 'glm/x' },
+    connection: { provider: 'omp', socket: controlSocket, thread_id: 'root' } };
+  const writeBindState = value => fs.writeFile(path.join(bindDir, 'state.json'), JSON.stringify(value));
+  await writeBindState({ ...bindState, connection: { ...bindState.connection, thread_id: 'foreign' } });
+  assert.match((await bridge({ method: 'bind_task', task_directory: bindDir })).error, /does not belong/);
+  assert.match((await bridge({ method: 'hub_events' })).error, /requires a bound/);
+  await writeBindState({ ...bindState, status: 'paused' });
+  assert.match((await bridge({ method: 'bind_task', task_directory: bindDir })).error, /active runtime/);
+  await writeBindState(bindState);
+  const bound = await bridge({ method: 'bind_task', task_directory: bindDir });
+  assert.equal(bound.result.task_directory, bindDir);
+  assert.ok(Array.isArray((await bridge({ method: 'hub_events' })).result.events));
+  const context = JSON.parse((await ext.definition.execute('context', { action: 'context' }, null, null, ext.ctx)).content[0].text);
+  assert.equal(context.task_directory, bindDir, 'native context adopts external runtime binding');
+  const otherDir = path.join(extProject, '.orbit', 'tasks', 'other');
+  await fs.mkdir(otherDir);
+  await fs.writeFile(path.join(otherDir, 'state.json'), JSON.stringify({ ...bindState, id: 'other' }));
+  assert.match((await bridge({ method: 'bind_task', task_directory: otherDir })).error, /another active/);
+  await writeBindState({ ...bindState, status: 'paused' }); // this fixture owns no runtime process
 
   const switched = await ext.emit('session_before_switch', {}, ext.ctx);
   assert.notEqual(switched?.cancel, true, `switch close must succeed: ${ext.notifications.at(-1)?.text || ''}`);

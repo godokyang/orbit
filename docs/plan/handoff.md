@@ -1,8 +1,11 @@
 # Orbit 当前交接
 
-最后核对：2026-10-11。源码版本以 `package.json` 为准（当前 0.8.5）；用户安装版本、commit 与内容摘要须以 `orbit version --json` 核对，本页不记录。
+最后核对：2026-10-12。源码版本以 `package.json` 为准（当前 0.8.5）；用户安装版本、commit 与内容摘要须以 `orbit version --json` 核对，本页不记录。
 
 ## 当前进展
+
+- **外部 CLI 冷启动绑定修复**：用户追加 Goal 授权，Root 已补运行时精确绑定与接纳前权限边界；隔离快照 npm test、真实 OMP 18.9.0/MiniMax 的外部 CLI 启动→running/hub事件→Root写入→引用回读→确认暂停，以及独立 OMP 只读审核通过。随本轮 main 本地提交交付，已移除原冷启动缺口；成功终检、Loom CI 和其他平台仍未据此认证。原始证据与探针残留资源收尾见[验收记录](../reference/loom-integration-acceptance-20261011.md)。
+
 
 - **Loom 集成合同提案 B**：用户已授权在 `main` 依次交付阶段 A（合同 1.2：外部会话模式、调用方指定控制通道、按外部引用查询）和阶段 B（合同 1.3：revision/updated_at、attention、最近完成检查记录）。基线 `52bb3848` 干净，已有合同 1.0/1.1 提交 `b38f0d0`、`92a00dd` 已在 main。A 已实现并通过含待交付改动的隔离快照全套 npm test、OMP 18.9.0 真实 rpc 验证及独立只读审核/修正与 Codex 收口；已完成本地提交 `86d09af`（用户署名，无 AI 署名）；B 已实现，隔离快照全套 npm test 与独立 OMP save 核查通过；真实任务证明 revision 变化/三次读稳定/实际无变化 tick/运行时重启不回退，最近失败检查与真实模型回执一致。B 随本轮 main 本地提交交付（提交标识见 Git 历史）；成功模型检查及未触发分支不据此认证。验收与驱动错误见[记录](../reference/loom-integration-acceptance-20261011.md)。冻结范围、文件所有权与门槛见[总 TODO](loom-integration-contract.md)。本次每阶段本地提交已授权；不推送、不升软件版本、不发布、不更新日常安装。
 - **最近一次真实验收的构建**：0.8.4（`25f0104` dirty，临时安装 digest `c70f5b60…`），内容为本地 OMP 宿主复用与检查历史内容去重归档；之后 0.8.5 只改版本元数据，不重标为实测。其真实验收范围与已知缺口列在[当前限制](debt-ledger.md)；Zeen 存量数据迁移/清理仍暂缓。

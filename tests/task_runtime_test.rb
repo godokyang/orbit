@@ -25,6 +25,7 @@ class RuntimeHost
 
   def state = @state.dup
   def connect! = self
+  def bind_task(_task_directory) = true
   def close = true
   def configured_model = "opencode-go/deepseek-v4.1-flash"
   def default_member_model = configured_model
@@ -2260,6 +2261,20 @@ fixture do |root, record, _host, checker, _runtime|
   result = retry_runtime.retry_stop("User retried stop")
   assert(result["status"] == "paused", "explicit cleanup works after runtime exit")
   assert(checker.calls.empty?, "cleanup does not restart a checker")
+end
+
+# A rejected host binding must not deliver a prompt or stop the unbound Root.
+fixture do |root, record, _host, checker, _runtime|
+  state = record.state
+  state["needs_initial_delivery"] = true
+  state["connection"]["thread_id"] = "existing-root"
+  record.save(state)
+  host = RuntimeHost.new(root)
+  def host.bind_task(_path) = raise(Orbit::Connection::Error, "binding rejected")
+  result = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker).run
+  assert(result["status"] == "failed" && result["error"].end_with?("binding rejected"), "binding fails closed")
+  assert(host.messages.empty? && host.stop_calls.zero? && checker.calls.empty?, "rejected binding grants no execution authority")
+  assert(!record.state.key?("runtime_pid"), "rejected runtime clears its PID")
 end
 
 # Rejecting attachment must not stop a session outside the target project.

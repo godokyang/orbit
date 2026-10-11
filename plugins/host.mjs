@@ -190,6 +190,23 @@ export function createOrbitHost({ provider, project, dispatch, bind, reset }) {
     // integration caller can drive explicit start/status/stop from session
     // start on. Idempotent; the default launch path keeps lazy listen.
     listen,
+    async bindTask(taskDirectory, id) {
+      if (closing) throw new Error('Agent host is closing');
+      const real = await fs.realpath(taskDirectory);
+      const value = await ownedTask(real, id);
+      if (value.format !== 'orbit-task-1' || value.project_root !== project ||
+          !['starting', 'running'].includes(value.status) ||
+          !Number.isSafeInteger(value.runtime_pid) || value.runtime_pid <= 0)
+        throw new Error('Task binding requires this project\'s active runtime');
+      const previous = tasks.get(id);
+      if (previous && previous.task_directory !== real &&
+          !terminal.has((await ownedTask(previous.task_directory, id)).status))
+        throw new Error('Root session already has another active Orbit task');
+      const result = { task_directory: real, pid: value.runtime_pid,
+        status: value.status, review_model: value.review?.model };
+      tasks.set(id, result);
+      return result;
+    },
       async execute(a, context) {
         const operationError = workUnitOperationError(a);
         if (operationError) throw new Error(operationError);

@@ -141,6 +141,12 @@ module Orbit
           unless File.realpath(host.fetch("cwd")) == @state.fetch("project_root")
             raise ArgumentError, "Root session belongs to a different project"
           end
+          # External CLI starts do not pass through the native Orbit tool.
+          # Publish our PID under the existing locks, then establish the exact
+          # host binding before delivering instructions or acquiring stop authority.
+          @state["runtime_pid"] = Process.pid
+          save
+          @connection.bind_task(@record.path)
           @attached = true
           @initial_digest = fingerprint_artifact
           @artifact_digest = @initial_digest

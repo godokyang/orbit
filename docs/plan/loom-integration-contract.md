@@ -2,6 +2,14 @@
 
 状态：2026-10-11 用户已授权在 `main` 完成提案 B 的阶段 A（合同 1.2）与阶段 B（合同 1.3）。基线 `52bb3848a706013fbbb8ddc7d6613e6564e093a9`，开工工作区干净；合同 1.0/1.1 提交 `b38f0d0`、`92a00dd` 已在 main，无需从旧分支纳入。Codex 是唯一编排者与审核者，通过当前 Herdr workspace 的既有 OMP 执行席交付；不新建分支/worktree，不用内部子 Agent。用户授权每阶段审核通过后各一次 main 本地提交；最新明确指令：只用用户当前 Git 署名（杨科 / godokyang@qq.com），不加 AI 协作者署名；不推送、升软件版本、tag、发布或更新日常安装。
 
+## 2026-10-12 外部 CLI 冷启动修复（Goal）
+
+用户明确要求修复并使用 Goal。范围只补外部 start 与 OMP 宿主任务绑定：运行时在原始指令投递、协作事件读取和 running 状态前登记真实任务；宿主校验项目/路径、provider/socket/thread、活动状态与自有运行时 PID，拒绝覆盖其他活动绑定。既有状态字段和通信语义保持现行合同，不修改 Loom、needs_user 接续或模型选择。
+
+验收冻结：相关回归测试；隔离快照全套 npm test；指定 MiniMax 的真实外部 CLI --prompt-file 冷启动进入 running、真实无变化 tick/协作事件读取、指令实际执行、公开状态/引用回读及确认停止；独立 OMP 只读审核；自有资源收尾。成功检查覆盖另记实际结果，不用其他供应商替代。Root 唯一写者，复用既有只读核查席，不开新席/分支/worktree、不推送/升版/发布/更新日常安装；提交用用户署名。
+
+当前状态：修复完成并通过隔离快照全套 npm test、独立 OMP 只读核查和指定 MiniMax 的真实外部 CLI 冷启动/协作事件/Root 写入/确认停止。新增两处回归约50行；实际 tick 和重复状态读取亦通过。宿主不扫描猜任务；运行时持既有锁登记精确目录，接纳后才获得监督与停止权限。自有资源已核对收尾，保留证据；随本轮 main 本地提交交付，成功终检与 Loom CI 不在已证明范围。
+
 ## 本次冻结验收与执行
 
 - 阶段 A：G9a `ORBIT_EXTERNAL_INTEGRATION=1` 关闭自动入口；G9b `ORBIT_CONTROL_SOCKET` 在 session_start 提前监听、调用方目录不删除、会话切换重监听、路径逐字一致且不 realpath、私有目录/路径长度/死 socket 归属安全；G8 `status --external-ref REF [--project DIR] --json` 固定 tasks 数组、精确匹配、无匹配退出 0、失败非零，与 TASK 互斥。有效验证后声明三项能力。

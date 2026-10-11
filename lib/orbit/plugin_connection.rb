@@ -144,6 +144,7 @@ module Orbit
     def stop_member(id) = request("stop_member", "id" => id)
     def native_member_roster = request("members")
     def hub_events = request("hub_events")
+    def bind_task(task_directory) = request("bind_task", "task_directory" => task_directory)
 
     def user_message(id: nil)
       messages = request("messages")
