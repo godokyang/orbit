@@ -124,6 +124,12 @@
                   "lifecycle"
                 ],
                 "description": "Delivery requirements, including actual tests, must be verified; future final-check, closing-report and confirmed-stop obligations remain listed and are verified by runtime lifecycle gates. Missing scope keeps the earlier delivery-only interpretation."
+              },
+              "ref": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 200,
+                "description": "Optional external reference copied verbatim from the instruction, amendments or basis for this requirement (for example a number the requester assigned to the standard). The checker never invents one; omit it when the requirement text carries none. Orbit stores and returns it unchanged without interpreting it, and does not require it to be unique or to match anything. Must be non-empty after trimming and contain no control characters; an invalid value is a contract violation like any other field."
               }
             }
           }

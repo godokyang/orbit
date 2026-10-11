@@ -26,6 +26,7 @@ require_relative "checker_model_selection"
 require_relative "checker_model_selector"
 require_relative "diagnostics"
 require_relative "release_lease"
+require_relative "integration_contract"
 require_relative "work_unit"
 require_relative "route_resource_store"
 require_relative "route_cost_inputs"
@@ -58,6 +59,7 @@ module Orbit
         orbit update [--ref REF]  更新当前安装，沿用来源与安装目录
         orbit uninstall           卸载当前运行程序
         orbit version [--json]    查看版本与安装来源
+        orbit capabilities [--json]  列出本版本对集成方声明的合同版本与能力（只读，不连会话、不调用模型）
 
       OMP 用 orbit omp 启动受控会话，普通 omp 不加载 Orbit 扩展。
       具体参数：orbit <命令> --help（omp 用 orbit help omp）；状态的机器输出：orbit status --json。
@@ -77,6 +79,7 @@ module Orbit
       "export" => "orbit export TASK --output FILE\n把一个任务的本地证据打包成单个 tar.gz：导出时的 state、事实时间线（events.jsonl 与协作记录 collaboration.jsonl 按时间合并并标注来源、行号与缺口）、检查快照与产物、basis/amendments、含 sha256 的文件清单与缺失清单。只读导出：不上传、不调用模型、不改变任务状态或完成门；运行中任务按导出时刻截取并标注在途与未定检查。TASK 为任务目录或唯一 ID 前缀；--output 不能位于任务目录内部。归档内 manifest.json 说明全部内容与未包含项。已回收的检查工作区从项目内内容归档带入字节，不留下外部对象引用。",
       "restore-check" => "orbit restore-check TASK CHECK --output DIR\n按该检查的清单把历史快照恢复到一个新目录，并核对内容摘要、权限、删除与内部链接。不修改原 scope，不与内容对象或旧工作区共享 inode。CHECK 是检查序号。已有归档时从归档恢复；没有归档时从仍保留的完整工作区读取。外部链接不物化。",
       "version" => "orbit version [--json]",
+      "capabilities" => "orbit capabilities [--json]\n只读输出集成合同版本（与软件版本独立）与当前实际支持的能力清单，来源 contracts/integration.json。集成方按能力判断可用，不比较软件版本号。不连接会话、不调用模型、不读任务。",
       "check" => "orbit check TASK_DIRECTORY",
       "amend" => "orbit amend TASK_DIRECTORY --file FILE|-",
       "dispute" => "orbit dispute TASK_DIRECTORY --reason TEXT",
@@ -137,13 +140,16 @@ module Orbit
                     [--review-model MODEL] [--takeover-file FILE|-]
                     [--thread ID] [--socket PATH] [--message-id ID | --prompt-file FILE|-] [--basis FILE]
                     [--check-in SECONDS] [--estimate-minutes N] [--estimate-tokens N]
-                    [--deadline ISO8601] [--foreground]
+                    [--deadline ISO8601] [--foreground] [--external-ref REF]...
         仅绑定已有可控 OMP 会话，不创建或替换主执行 Agent。
         project 默认为当前目录；thread 与 socket 来自当前受控 OMP 会话。
         原文来自指定或最近的原生用户消息；--basis 可重复，--prompt-file - 从 stdin 读取。
         候选池有可运行型号时优先池内选模；池空或池内均不可运行时从 OMP 当前会话目录选。经真实任务校准并匹配实际输入／题义／Jev 型号的质量判断才可正向推荐；未放行时呈现事实并保留可运行候选。start 尚无工作单元上下文时不猜验收。model-evidence 可补充精确质量事实；无法取得如实记录 unavailable。Root 也可用 --review-model 指定 OMP 可用型号，不要求原生用户逐型号授权；所有选择均预检隔离检查者目录与凭据。
         --check-in 首次默认 300 秒，后续由检查者约定；预估不是硬上限。
         只有用户明确设置的 --deadline 才形成截止。--foreground 在当前终端运行任务进程。
+        --external-ref 可重复（最多 16 个，每个 ≤256 字符、无控制字符、互不相同）：调用方给本任务附的不透明外部引用，
+        原样保存为 state.external_refs 并在 status --json / export 中原样输出；Orbit 不解析、不据此授权或改变行为。
+        resume_from 的新任务不继承旧任务的引用，需要时重新传入。
         --takeover-file - 传接管请求（JSON：reason 必填，prior_scope 可选声明），对已执行的原始要求申请接管；
         必须复用其原生消息（--message-id 或最近的原生用户消息），不接收任何调用方自报的摘要／日期：
         接管时把真实工作区快照存进该任务私有目录（记摘要与相对路径），摘要与监督开始时刻均由程序采集，
@@ -178,6 +184,8 @@ module Orbit
         return 0
       end
       case command
+      when "capabilities"
+        capabilities(argv)
       when "version", "--version", "-v"
         raise ArgumentError, "usage: orbit version [--json]" unless argv.empty? || argv == ["--json"]
 
@@ -243,9 +251,24 @@ module Orbit
            WorkspaceBinding::Error, ModelEvidenceCache::Error, ModelCandidatePool::Error, JSON::ParserError,
            PrestartClassifier::Error, PrestartLedger::Error, JevAdvisor::Error, TaskEvidence::Error, WorkUnitStore::Error,
            RouteResourceStore::Error, RouteResourceFacts::Error, ResourceCallLedger::Error, RouteCostInputs::Error,
-           CheckSnapshotArchive::Error => error
+           CheckSnapshotArchive::Error, IntegrationContract::Error => error
       warn "orbit: #{error.message}"
       1
+    end
+
+    def capabilities(argv)
+      json = false
+      OptionParser.new { |parser| parser.on("--json") { json = true } }.parse!(argv)
+      raise ArgumentError, "usage: orbit capabilities [--json]" unless argv.empty?
+
+      report = IntegrationContract.report
+      if json
+        puts JSON.pretty_generate(report)
+      else
+        puts "集成合同 #{report.dig('integration_contract', 'version')}（软件 #{report.dig('orbit', 'version')}）"
+        report.fetch("capabilities").each_key { |name| puts "  #{name}" }
+      end
+      0
     end
 
     def status(argv)
@@ -380,6 +403,7 @@ module Orbit
         opts.on("--entry-file FILE") { |value| options[:entry_file] = value }
         opts.on("--takeover-file FILE") { |value| options[:takeover_file] = value }
         opts.on("--resume-from TASK_DIRECTORY") { |value| options[:resume_from] = value }
+        opts.on("--external-ref REF") { |value| (options[:external_refs] ||= []) << value }
       end
       parser.parse!(argv)
       raise ArgumentError, "unexpected arguments: #{argv.join(' ')}" unless argv.empty?
@@ -387,6 +411,7 @@ module Orbit
       raise ArgumentError, "--socket is required" if options[:socket].to_s.empty?
       raise ArgumentError, "--check-in must be positive" unless options[:interval].positive?
       raise ArgumentError, "choose --message-id or --prompt-file" if options[:message_id] && options[:prompt_file]
+      external_refs = TaskRecord.parse_external_refs(options[:external_refs])
       takeover = options[:takeover_file] ? TaskRecord.parse_takeover(read_input(options[:takeover_file])) : nil
       if takeover && options[:prompt_file]
         raise ArgumentError, "takeover reuses the requirement's original native message; --prompt-file cannot take over"
@@ -455,7 +480,8 @@ module Orbit
             connection: connection_record,
             review: { "model" => options[:model], "interval_seconds" => options[:interval], "selection" => options[:selection] },
             basis: options[:basis], estimate: options[:estimate], takeover: takeover,
-            artifact_root: resumed && (resumed[:state].dig("workspace", "artifact_root") || resumed[:state].fetch("project_root"))
+            artifact_root: resumed && (resumed[:state].dig("workspace", "artifact_root") || resumed[:state].fetch("project_root")),
+            external_refs: external_refs
           )
         rescue WorkspaceSnapshot::Error => error
           raise ArgumentError, "the takeover boundary could not be captured (#{error.message}); no task was created"

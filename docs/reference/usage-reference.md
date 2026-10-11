@@ -94,6 +94,8 @@ orbit uninstall
 
 status 默认显示一至两行结果和下一步；`--details` 展开协作、检查及用量诊断，`--json` 返回单项原始 state，多个／没有候选时返回 `{ "tasks": [...] }`。终态的 `--details` 文本「下次检查：未安排」不再附上停止前遗留的待收尾／待重检依据，即使 `--json` 仍保留原始审计字段。stop 默认说明入队和后续查询方式，`--json` 返回机器结果，供扩展桥与自动化集成使用。
 
+`orbit capabilities [--json]` 只读列出集成合同版本（与软件版本独立）和当前支持的能力，外部集成方按能力而不是版本号判断可用；命令、冻结字段与引用规则见[集成合同](../../contracts/integration.md)。`orbit start` 可重复带 `--external-ref REF` 给任务附不透明的外部引用，原样出现在 `status --json` 与 `export`；检查结果的覆盖项可带检查者逐字抄录的 `ref`。
+
 `orbit export TASK --output FILE` 在用户指定的位置生成单任务本地证据包（可在运行中或结束后执行）；TASK 为任务目录或当前项目唯一 ID 前缀。包内包括按时间排列的事实记录、成员与检查证据、可安全归属的原生会话材料以及无法取得的证据清单；运行中包仅代表导出时刻。不会上传、调用模型或改变任务状态；请检查包内任务指令、项目快照和会话内容后再自愿分享。`orbit status` 和现有终检仍是任务完成的权威依据，复盘文件不作缺陷判定。
 
 `orbit session-summary --thread NATIVE_OMP_SESSION_ID [--project DIR]` 只读汇总同一项目、同一原生会话的 Orbit 任务，输出 JSON：任务数、检查／过期／失败／手动次数、Jev 调用、finding、成员及可得的 token。旧任务缺失原生协作日志或事件时列出缺失，相关数值可能为 `null`；Root 用量和总金额无可归属证据时保持 `null`，不推算订阅费用。不会发起检查、创建任务或跨项目扫描。

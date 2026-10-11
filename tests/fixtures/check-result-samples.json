@@ -202,6 +202,212 @@
           ]
         }
       }
+    },
+    {
+      "name": "coverage item with an optional external ref is accepted, shared refs included",
+      "accept": true,
+      "result": {
+        "verdict": "continue",
+        "reason": "work in progress",
+        "findings": [
+          {
+            "id": "f-1",
+            "requirement": "aggregate exact cents",
+            "evidence": "output shows 0.1+0.2",
+            "action": "use integer cents"
+          }
+        ],
+        "resolved_ids": [
+          "f-0"
+        ],
+        "next_check_seconds": 300,
+        "delivery": {
+          "ready": false,
+          "reason": "final answer not visible in the program record"
+        },
+        "coverage": {
+          "complete": false,
+          "items": [
+            {
+              "requirement": "aggregate exact cents",
+              "status": "verified",
+              "evidence": "src uses integer cents",
+              "ref": "S12"
+            },
+            {
+              "requirement": "reject partial output",
+              "status": "unverified",
+              "evidence": "",
+              "scope": "lifecycle",
+              "ref": "S12"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "coverage item with a blank ref is refused",
+      "accept": false,
+      "result": {
+        "verdict": "continue",
+        "reason": "work in progress",
+        "findings": [
+          {
+            "id": "f-1",
+            "requirement": "aggregate exact cents",
+            "evidence": "output shows 0.1+0.2",
+            "action": "use integer cents"
+          }
+        ],
+        "resolved_ids": [
+          "f-0"
+        ],
+        "next_check_seconds": 300,
+        "delivery": {
+          "ready": false,
+          "reason": "final answer not visible in the program record"
+        },
+        "coverage": {
+          "complete": false,
+          "items": [
+            {
+              "requirement": "aggregate exact cents",
+              "status": "verified",
+              "evidence": "src uses integer cents",
+              "ref": "　 "
+            },
+            {
+              "requirement": "reject partial output",
+              "status": "unverified",
+              "evidence": "",
+              "scope": "lifecycle"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "coverage item with a control character in ref is refused",
+      "accept": false,
+      "result": {
+        "verdict": "continue",
+        "reason": "work in progress",
+        "findings": [
+          {
+            "id": "f-1",
+            "requirement": "aggregate exact cents",
+            "evidence": "output shows 0.1+0.2",
+            "action": "use integer cents"
+          }
+        ],
+        "resolved_ids": [
+          "f-0"
+        ],
+        "next_check_seconds": 300,
+        "delivery": {
+          "ready": false,
+          "reason": "final answer not visible in the program record"
+        },
+        "coverage": {
+          "complete": false,
+          "items": [
+            {
+              "requirement": "aggregate exact cents",
+              "status": "verified",
+              "evidence": "src uses integer cents",
+              "ref": "S1\n2"
+            },
+            {
+              "requirement": "reject partial output",
+              "status": "unverified",
+              "evidence": "",
+              "scope": "lifecycle"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "coverage item with an oversized or non-string ref is refused",
+      "accept": false,
+      "result": {
+        "verdict": "continue",
+        "reason": "work in progress",
+        "findings": [
+          {
+            "id": "f-1",
+            "requirement": "aggregate exact cents",
+            "evidence": "output shows 0.1+0.2",
+            "action": "use integer cents"
+          }
+        ],
+        "resolved_ids": [
+          "f-0"
+        ],
+        "next_check_seconds": 300,
+        "delivery": {
+          "ready": false,
+          "reason": "final answer not visible in the program record"
+        },
+        "coverage": {
+          "complete": false,
+          "items": [
+            {
+              "requirement": "aggregate exact cents",
+              "status": "verified",
+              "evidence": "src uses integer cents",
+              "ref": "SSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSSS"
+            },
+            {
+              "requirement": "reject partial output",
+              "status": "unverified",
+              "evidence": "",
+              "scope": "lifecycle"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "name": "coverage item with a numeric ref is refused",
+      "accept": false,
+      "result": {
+        "verdict": "continue",
+        "reason": "work in progress",
+        "findings": [
+          {
+            "id": "f-1",
+            "requirement": "aggregate exact cents",
+            "evidence": "output shows 0.1+0.2",
+            "action": "use integer cents"
+          }
+        ],
+        "resolved_ids": [
+          "f-0"
+        ],
+        "next_check_seconds": 300,
+        "delivery": {
+          "ready": false,
+          "reason": "final answer not visible in the program record"
+        },
+        "coverage": {
+          "complete": false,
+          "items": [
+            {
+              "requirement": "aggregate exact cents",
+              "status": "verified",
+              "evidence": "src uses integer cents",
+              "ref": 12
+            },
+            {
+              "requirement": "reject partial output",
+              "status": "unverified",
+              "evidence": "",
+              "scope": "lifecycle"
+            }
+          ]
+        }
+      }
     }
   ]
 }

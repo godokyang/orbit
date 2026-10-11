@@ -41,6 +41,7 @@ export const toolArgs = z => ({
         review_model: z.string().optional().describe('Optional Root-selected provider/id from the current OMP model catalog.'),
         recovery_evidence: z.string().optional().describe('review-model only: for a model with a recorded account/quota refusal, cite an actual account recovery or successful same-route call before retry. A new artifact or model name alone is not recovery.'),
         resume_from: z.string().optional().describe('start only: exact stopped task_directory for continuing the SAME delivery after answering the user. Uses the preserved original instruction and amendments, creates a new supervised boundary, and never revives stopped members. Explicit pause/discussion/cancel wins; unrelated questions never resume.'),
+        external_refs: z.array(z.string()).optional().describe('start only: opaque references the caller attaches to this task (for example an external tracker id); at most 16, each non-blank, at most 256 characters, distinct. Stored verbatim and returned by status/export; never interpreted. A continuation does not inherit them.'),
         root_model: z.string().optional().describe('root-model only: exact provider/id from the CURRENT user pool ∩ OMP catalog for this session. The action can be called without it to list the exact IDs now available.'),
         phase: z.enum(['execution', 'integration', 'diagnosis']).optional().describe('root-model only: which stage the selected model is for. An intent declaration, not a capability measurement.'),
 
@@ -151,6 +152,7 @@ export function createOrbitHost({ provider, project, dispatch, bind, reset }) {
             args.push('--resume-from', await fs.realpath(a.resume_from));
           }
           if (chosen) args.push('--review-model', chosen);
+          for (const ref of a.external_refs || []) args.push('--external-ref', ref);
           if (a.entry_file) args.push('--entry-file', a.entry_file);
           if (a.check_in) args.push('--check-in', String(a.check_in));
           for (const file of a.basis || []) args.push('--basis', path.resolve(project, file));

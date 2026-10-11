@@ -312,6 +312,9 @@ module InstallTest
     assert(%w[.npm-cache .bun-cache].none? { |name| File.exist?(File.join(active, name)) },
            "the installed release retains runtime modules but not installation caches")
     installed_omp_entry
+    contract = JSON.parse(run(File.join(@bin, "orbit"), "capabilities", "--json", cwd: "/"))
+    assert(contract.dig("integration_contract", "major").is_a?(Integer) && contract.fetch("capabilities").key?("resume_from") &&
+           File.file?(File.join(active, "contracts/integration.md")), "the packed release serves its integration contract")
     diagnosis = JSON.parse(run(File.join(@bin, "orbit"), "doctor", "--json", cwd: "/"))
     assert(diagnosis.dig("installation", "ready") && diagnosis.dig("connection", "ready").nil?, "installed CLI does not prove a connected session")
 

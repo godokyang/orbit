@@ -1,0 +1,100 @@
+{
+  "contract": "orbit-integration",
+  "version": "1.0",
+  "major": 1,
+  "description": "Machine-readable form of contracts/integration.md. Versioned independently of the software version. Within one major version entries are only added, never changed or removed; a breaking change raises the major version and is named in the release notes. `orbit capabilities --json` serves `capabilities` from this file and the contract test reads `commands` and `status_fields` from it.",
+  "status_values": [
+    "starting",
+    "running",
+    "complete",
+    "paused",
+    "needs_user",
+    "failed",
+    "stop_unconfirmed"
+  ],
+  "terminal_status_values": [
+    "complete",
+    "paused",
+    "needs_user",
+    "failed",
+    "stop_unconfirmed"
+  ],
+  "commands": {
+    "version": {
+      "invocation": "orbit version --json",
+      "stdout_fields": ["version"]
+    },
+    "capabilities": {
+      "invocation": "orbit capabilities --json",
+      "stdout_fields": ["integration_contract.version", "integration_contract.major", "orbit.version", "capabilities"]
+    },
+    "start": {
+      "invocation": "orbit start --provider omp --project DIR --thread ID --socket PATH (--message-id ID | --prompt-file FILE|-) [--review-model MODEL] [--basis FILE]... [--external-ref REF]... [--resume-from TASK_DIRECTORY]",
+      "stdout_fields": ["task_directory", "status"]
+    },
+    "status": {
+      "invocation": "orbit status TASK --json",
+      "stdout_fields": ["see status_fields"]
+    },
+    "check": {
+      "invocation": "orbit check TASK_DIRECTORY",
+      "stdout_fields": ["task_directory", "command_id", "status"],
+      "note": "status is queued, or rejected with a reason. A queued check is not a result: read requirement_coverage from status."
+    },
+    "stop": {
+      "invocation": "orbit stop TASK --json",
+      "stdout_fields": ["task_directory", "command_id", "status"],
+      "note": "status queued means only that the request was enqueued. Stopped is established solely by status.stop_confirmation.confirmed."
+    },
+    "export": {
+      "invocation": "orbit export TASK --output FILE",
+      "stdout_fields": ["task_directory", "task_id", "status", "in_flight", "output", "files", "missing"]
+    },
+    "doctor": {
+      "invocation": "orbit doctor [TASK] --json",
+      "stdout_fields": ["environment_ready"]
+    }
+  },
+  "status_fields": [
+    { "path": "id", "present": "always" },
+    { "path": "status", "present": "always" },
+    { "path": "project_root", "present": "always" },
+    { "path": "created_at", "present": "always" },
+    { "path": "stop_reason", "present": "after_stop" },
+    { "path": "stop_confirmation.confirmed", "present": "after_stop" },
+    { "path": "requirement_coverage.current", "present": "after_check" },
+    { "path": "requirement_coverage.complete", "present": "after_check" },
+    { "path": "requirement_coverage.ready", "present": "after_check" },
+    { "path": "requirement_coverage.gap", "present": "after_check" },
+    { "path": "requirement_coverage.items[].requirement", "present": "after_check" },
+    { "path": "requirement_coverage.items[].status", "present": "after_check" },
+    { "path": "requirement_coverage.items[].evidence", "present": "after_check" },
+    { "path": "requirement_coverage.items[].scope", "present": "after_check" },
+    { "path": "requirement_coverage.items[].ref", "present": "when_reported" },
+    { "path": "external_refs", "present": "when_provided" },
+    { "path": "continuation.previous_task", "present": "when_resumed" }
+  ],
+  "capabilities": {
+    "status_json": { "since": "1.0" },
+    "export": { "since": "1.0" },
+    "stop_receipt": {
+      "since": "1.0",
+      "confirmation_field": "stop_confirmation.confirmed"
+    },
+    "start_external_refs": {
+      "since": "1.0",
+      "max_refs": 16,
+      "max_length": 256,
+      "inherited_on_resume": false
+    },
+    "check_coverage_ref": {
+      "since": "1.0",
+      "max_length": 200
+    },
+    "resume_from": {
+      "since": "1.0",
+      "from_status": ["paused"],
+      "requires": "native_user_message"
+    }
+  }
+}

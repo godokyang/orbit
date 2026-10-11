@@ -1,5 +1,7 @@
 # Orbit 当前交接
 
+2026-10-11 经协作会话转交的用户授权，已实现 Loom 集成合同四项（[计划](loom-integration-contract.md)、[ADR-010](../adr/010-integration-contract.md)、[合同](../../contracts/integration.md)）：独立合同版本 1.0；`orbit capabilities --json`；覆盖项可选 `ref` 与 `start --external-ref`（`state.external_refs`，status/export 原样输出）；契约测试 `tests/integration_contract_test.rb`（替身 OMP 会话与检查模型，已入 `npm test`）。核对：48 个测试步骤逐步运行，含新契约测试与安装测试在内 42 项通过；其余 6 项（`prestart_test`、四个 `.mjs`、bun 套件）在本工作区因未安装 `node_modules`（缺 `zod`）失败，同样在未改动的 HEAD 副本上复现，在装好依赖的副本中全部通过。仍是未提交的工作区改动：未升版、提交、推送、发布或更新日常安装；`needs_user` 续接、自动入口外部引用、真实会话验收列入[限制](debt-ledger.md)。
+
 2026-10-11 用户随后明确授权升版、提交和推送：源码按 patch 从 **0.8.4 → 0.8.5**，`package.json` 与 `npm-shrinkwrap.json` 同步。本次提交包含本地 OMP 宿主复用、检查历史去重归档、相关回归与文档/真实验收原件；提交及 `origin/main` 推送结果以 Git 记录为准。此前真实受测构建仍为0.8.4／25f0104 dirty／digest c70f5b60…，不重标为0.8.5实测；本次仅追加版本元数据与交接说明，沿用已完成的工程和真实验收。Goal保持complete，已说明的选模/导出限制保留。不打tag、不发布、不更新日常安装，不处理Zeen。
 
 本次升版核对：版本与锁文件一致、源码CLI返回0.8.5、npm pack --dry-run通过（85 files／压缩501,685 bytes，不含私有SDK）、328份已索引验收原件摘要一致。暂存源码/合同/说明文档的diff检查通过；原始证据中的baseline diff空格与两份stderr末尾空行保留原字节，不为样式改写证据。只改版本和交接元数据，不重复启动模型验收或新Goal。

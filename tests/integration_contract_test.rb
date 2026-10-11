@@ -1,0 +1,244 @@
+# frozen_string_literal: true
+
+require "json"
+require "stringio"
+require "tmpdir"
+require "fileutils"
+require "open3"
+require_relative "../lib/orbit/cli"
+
+# Integration contract (contracts/integration.md + integration.json): a fake
+# external caller, which only uses Orbit's public commands and the declared
+# fields, drives the real CLI, task record, command queue, TaskRuntime tick,
+# coverage store, stop path, status and export. The OMP Root session and the
+# checker model are the two stand-ins at the boundary, so this proves the
+# contract surface and its field shapes, not model behaviour or a real session.
+module IntegrationContractTest
+  ROOT = File.expand_path("..", __dir__)
+  CONTRACT = JSON.parse(File.read(File.join(ROOT, "contracts/integration.json")))
+  CHOSEN = "zhipu-coding-plan/glm-5.2"
+  module_function
+
+  def assert(value, message)
+    raise "ASSERTION FAILED: #{message}" unless value
+  end
+
+  # The only door the fake caller has: the CLI, stdout JSON in, exit code out.
+  def orbit(*argv)
+    out, err = StringIO.new, StringIO.new
+    previous = [$stdout, $stderr]
+    $stdout, $stderr = out, err
+    code = Orbit::CLI.run(argv.dup)
+    [code, out.string, err.string]
+  ensure
+    $stdout, $stderr = previous
+  end
+
+  def orbit_json(*argv)
+    code, out, err = orbit(*argv)
+    raise "orbit #{argv.first} failed (#{code}): #{err}" unless code == 0
+
+    out.lstrip.start_with?("{\n") ? JSON.parse(out) : JSON.parse(out.lines.first)
+  end
+
+  # Stand-in for the OMP Root session: native messages and a model catalog.
+  def session(cwd, messages)
+    connection = Object.new
+    connection.define_singleton_method(:connect!) { self }
+    connection.define_singleton_method(:close) { nil }
+    connection.define_singleton_method(:state) { { "cwd" => cwd, "status" => "idle" } }
+    connection.define_singleton_method(:configured_model) { "other/model" }
+    connection.define_singleton_method(:model_catalog) { { "current" => "other/model", "available" => ["other/model", CHOSEN], "families" => {} } }
+    connection.define_singleton_method(:instruction_source_kind) { "omp_user_message" }
+    connection.define_singleton_method(:user_message) { |id: nil| messages[id] && { "id" => id, "text" => messages[id], "internal" => false } }
+    connection
+  end
+
+  class Host
+    def initialize(root)
+      @state = { "thread_id" => "root-session", "cwd" => root, "status" => "idle", "last_turn_id" => "t1",
+                 "last_turn_status" => "completed", "observations" => ["t1"] }
+    end
+
+    def state = @state.dup
+    def connect! = self
+    def close = true
+    def configured_model = "other/model"
+    def default_member_model = configured_model
+    def default_member_route = "direct_api"
+    def events = []
+    def user_messages(after_id:) = []
+    def send_message(_text, **) = { "id" => "sent-1" }
+    def stop! = { "confirmed" => true, "scope" => "contract test host" }
+    def stop_member(_id) = { "confirmed" => true, "active_tools_after" => 0, "async_jobs_settled" => true }
+  end
+
+  class Checker
+    attr_accessor :result
+
+    def start(**) = (@result = nil)
+    def poll = @result
+    def stop! = true
+  end
+
+  def with_world
+    Dir.mktmpdir("orbit-integration-contract-") do |tmp|
+      project = File.join(tmp, "project")
+      FileUtils.mkdir_p(project)
+      File.write(File.join(project, "artifact.txt"), "delivered")
+      messages = { "m1" => "实现并验证 S12、S13", "m2" => "用户答复：继续" }
+      connection = session(File.realpath(project), messages)
+      env = %w[XDG_CONFIG_HOME XDG_CACHE_HOME].to_h { |key| [key, ENV[key]] }
+      ENV["XDG_CONFIG_HOME"] = File.join(tmp, "xdg-config")
+      ENV["XDG_CACHE_HOME"] = File.join(tmp, "xdg-cache")
+      original_open = Orbit::Connection.method(:open)
+      original_probe = Orbit::OmpCheckRunner.method(:probe_models)
+      Orbit::Connection.define_singleton_method(:open) { |_record| connection }
+      Orbit::OmpCheckRunner.define_singleton_method(:probe_models) { |models:, **_| { "resolvable" => models, "unresolvable" => [] } }
+      stub = Module.new { define_method(:run) { { "status" => "paused" } } } # start --foreground must not loop
+      Orbit::TaskRuntime.prepend(stub)
+      yield tmp, project
+    ensure
+      env&.each { |key, value| value ? ENV[key] = value : ENV.delete(key) }
+      Orbit::Connection.define_singleton_method(:open, original_open) if original_open
+      Orbit::OmpCheckRunner.define_singleton_method(:probe_models, original_probe) if original_probe
+    end
+  end
+
+  def start(project, message, *extra)
+    orbit_json("start", "--provider", "omp", "--project", project, "--thread", "root-session",
+               "--socket", File.join(project, "unused.sock"), "--message-id", message,
+               "--review-model", CHOSEN, "--foreground", *extra)
+  end
+
+  def runtime_for(dir, project, checker)
+    Orbit::TaskRuntime.new(record: Orbit::TaskRecord.new(dir), connection: Host.new(File.realpath(project)), checker: checker)
+  end
+
+  def dig_all(value, path)
+    path.split(".").reduce([value]) do |nodes, key|
+      list = key.end_with?("[]")
+      name = key.delete_suffix("[]")
+      nodes.flat_map { |node| node.is_a?(Hash) && node.key?(name) ? (list ? Array(node[name]) : [node[name]]) : [] }
+    end
+  end
+
+  # Every declared status field of the given presence classes must be there.
+  def assert_declared_fields(status, *presences)
+    CONTRACT.fetch("status_fields").select { |field| presences.include?(field["present"]) }.each do |field|
+      assert(!dig_all(status, field["path"]).empty?, "declared status field #{field['path']} (#{field['present']}) is present")
+    end
+  end
+
+  def checked(requirement, status, evidence, **extra)
+    { "requirement" => requirement, "status" => status, "evidence" => evidence }.merge(extra.transform_keys(&:to_s))
+  end
+
+  # Contract: capabilities are served from integration.json; the contract
+  # version is its own; declared limits equal what Orbit enforces.
+  def capabilities_declare_what_orbit_enforces
+    report = orbit_json("capabilities", "--json")
+    capabilities = report.fetch("capabilities")
+    assert(capabilities == CONTRACT.fetch("capabilities") && report.dig("integration_contract", "version") == CONTRACT.fetch("version") &&
+           report.dig("integration_contract", "major") == CONTRACT.fetch("major"), "capabilities come from integration.json")
+    assert(report.dig("orbit", "version") == Orbit::VERSION && CONTRACT.fetch("version") != Orbit::VERSION,
+           "the contract version is independent of the software version")
+    assert(File.read(File.join(ROOT, "contracts/integration.md")).include?("合同版本：#{CONTRACT.fetch('version')}"),
+           "the prose contract states the same version as the machine-readable one")
+    schema = JSON.parse(File.read(File.join(ROOT, "contracts/check-result.schema.json")))
+    ref = schema.dig("properties", "coverage", "properties", "items", "items", "properties", "ref")
+    assert(capabilities.dig("check_coverage_ref", "max_length") == ref.fetch("maxLength"), "declared ref bound is the schema bound")
+    assert(capabilities.dig("start_external_refs", "max_length") == Orbit::TaskRecord::EXTERNAL_REF_MAX &&
+           capabilities.dig("start_external_refs", "max_refs") == Orbit::TaskRecord::EXTERNAL_REFS_MAX, "declared external ref limits are enforced limits")
+    assert(CONTRACT.fetch("status_values").sort == %w[complete failed needs_user paused running starting stop_unconfirmed],
+           "declared status vocabulary")
+    assert(Orbit::TaskRuntime::TERMINAL.sort == CONTRACT.fetch("terminal_status_values").sort, "declared terminal statuses are the runtime's")
+  end
+
+  # Contract: start → check → coverage with refs → status → stop receipt →
+  # resume_from → export, through public commands only.
+  def fake_caller_runs_the_whole_lifecycle
+    with_world do |tmp, project|
+      started = start(project, "m1", "--external-ref", "loom:p1/d2/run-3", "--external-ref", "tracker#9")
+      dir = started.fetch("task_directory")
+      assert(started["status"] == "starting", "start reports starting")
+      status = orbit_json("status", dir, "--json")
+      assert_declared_fields(status, "always", "when_provided")
+      assert(status["external_refs"] == ["loom:p1/d2/run-3", "tracker#9"], "external references are returned verbatim, in order")
+
+      checker = Checker.new
+      runtime = runtime_for(dir, project, checker)
+      queued = orbit_json("check", dir)
+      assert(queued["status"] == "queued" && queued["command_id"], "check is queued, not answered")
+      result = { "verdict" => "continue", "reason" => "fixture", "findings" => [], "resolved_ids" => [], "next_check_seconds" => 60,
+                 "delivery" => { "ready" => true, "reason" => "delivered answer is visible" },
+                 "coverage" => { "complete" => true, "items" => [
+                   checked("S12 exact cents", "verified", "artifact.txt read", ref: "S12"),
+                   checked("S13 reject empty", "unverified", "", ref: "S13"),
+                   checked("closing report", "unverified", "", scope: "lifecycle")
+                 ] } }
+      Orbit::CheckRunner.new(model: CHOSEN, executable: "unused").send(:validate_result, result)
+      now = Time.now.to_f
+      runtime.tick(now: now)
+      checker.result = result
+      runtime.tick(now: now + 1)
+      status = orbit_json("status", dir, "--json")
+      assert_declared_fields(status, "always", "when_provided", "after_check", "when_reported")
+      refs = status.dig("requirement_coverage", "items").to_h { |item| [item["requirement"], item["ref"]] }
+      assert(refs == { "S12 exact cents" => "S12", "S13 reject empty" => "S13", "closing report" => nil },
+             "each reported ref is returned on its own coverage item and an unlabelled item has none")
+      assert(status.dig("requirement_coverage", "ready") == false, "an unverified delivery item keeps the delivery unready")
+
+      receipt = orbit_json("stop", dir, "--json")
+      assert(receipt["status"] == "queued" && !receipt.key?("stop_confirmation"), "stop --json is only a queued receipt")
+      assert(orbit_json("status", dir, "--json")["status"] != "paused", "queued is not stopped")
+      runtime.tick(now: now + 2)
+      status = orbit_json("status", dir, "--json")
+      assert(status["status"] == "paused" && status.dig("stop_confirmation", "confirmed") == true, "stopped is established by stop_confirmation.confirmed")
+      assert_declared_fields(status, "always", "after_stop")
+
+      resumed = start(project, "m2", "--resume-from", dir, "--external-ref", "loom:p1/d2/run-4")
+      resumed_status = orbit_json("status", resumed.fetch("task_directory"), "--json")
+      assert_declared_fields(resumed_status, "always", "when_provided", "when_resumed")
+      assert(resumed_status.dig("continuation", "previous_task") == status["id"] && resumed_status["external_refs"] == ["loom:p1/d2/run-4"],
+             "resume links the stopped task and carries only the references passed again")
+
+      archive = File.join(tmp, "evidence.tar.gz")
+      exported = orbit_json("export", dir, "--output", archive)
+      CONTRACT.dig("commands", "export", "stdout_fields").each { |field| assert(exported.key?(field), "export reports #{field}") }
+      packed, error, wait = Open3.capture3("tar", "-xzOf", archive, "task/state.json")
+      assert(wait.success? && JSON.parse(packed)["external_refs"] == ["loom:p1/d2/run-3", "tracker#9"], "export carries the references unchanged: #{error}")
+    end
+  end
+
+  # Contract: resume_from.from_status is the truth, and a bad reference never creates a task.
+  def declared_limits_hold_at_the_boundary
+    with_world do |_tmp, project|
+      stopped = start(project, "m1")
+      record = Orbit::TaskRecord.new(stopped.fetch("task_directory"))
+      state = record.state
+      state.merge!("status" => "needs_user", "stop_confirmation" => { "confirmed" => true })
+      record.save(state)
+      code, _out, err = orbit("start", "--provider", "omp", "--project", project, "--thread", "root-session",
+                              "--socket", File.join(project, "unused.sock"), "--message-id", "m2", "--review-model", CHOSEN,
+                              "--resume-from", record.path, "--foreground")
+      assert(code == 1 && err.include?("confirmed stopped task"), "a needs_user task is not resumable while the declared from_status is only paused")
+      assert(CONTRACT.dig("capabilities", "resume_from", "from_status") == ["paused"], "the declaration says so")
+
+      before = Dir.glob(File.join(project, ".orbit/tasks/*")).length
+      too_many = (1..17).flat_map { |index| ["--external-ref", "r#{index}"] }
+      [["--external-ref", " "], ["--external-ref", "a\nb"], ["--external-ref", "x" * 257],
+       ["--external-ref", "dup", "--external-ref", "dup"], too_many].each do |args|
+        code, _out, err = orbit("start", "--provider", "omp", "--project", project, "--thread", "root-session",
+                                "--socket", File.join(project, "unused.sock"), "--message-id", "m1x", "--review-model", CHOSEN, *args)
+        assert(code == 1 && err.include?("external"), "invalid external references are refused: #{args.first(2)}")
+      end
+      assert(Dir.glob(File.join(project, ".orbit/tasks/*")).length == before, "a refused reference creates no task")
+    end
+  end
+end
+
+IntegrationContractTest.capabilities_declare_what_orbit_enforces
+IntegrationContractTest.fake_caller_runs_the_whole_lifecycle
+IntegrationContractTest.declared_limits_hold_at_the_boundary
+puts "INTEGRATION_CONTRACT_TEST_PASS (fake caller and fake OMP host against the real CLI, runtime and stores)"

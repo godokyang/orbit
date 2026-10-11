@@ -803,6 +803,7 @@ module Orbit
                *([completion_invalidation_line(state)].compact),
                "用户处理：#{user_attention(state)}",
                "产物目录：#{artifact_root(state)}",
+               *(["外部引用：#{state['external_refs'].join('、')}"] if state["external_refs"].is_a?(Array) && !state["external_refs"].empty?),
                "绑定时间：#{state.dig('workspace', 'bound_at') || '未单独记录'}",
                "最近重新绑定：#{latest_rebind(state)}",
                "执行协作：#{execution_status(state)}",

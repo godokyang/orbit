@@ -14,7 +14,29 @@ module Orbit
   class TaskRecord
     attr_reader :path
 
-    def self.create(project_root:, instruction:, source:, connection:, review:, basis: [], estimate: {}, takeover: nil, clock: nil, artifact_root: nil)
+    # Opaque caller-supplied references to the thing this task belongs to (for
+    # example an external tracker's id). Stored and returned verbatim; Orbit
+    # never interprets, resolves or authorizes anything from them.
+    EXTERNAL_REF_MAX = 256
+    EXTERNAL_REFS_MAX = 16
+
+    def self.parse_external_refs(refs)
+      list = Array(refs)
+      return [] if list.empty?
+
+      raise ArgumentError, "at most #{EXTERNAL_REFS_MAX} external references are allowed" if list.length > EXTERNAL_REFS_MAX
+
+      list.each do |ref|
+        unless ref.is_a?(String) && ref.length <= EXTERNAL_REF_MAX && !ref.strip.empty? && !ref.match?(/\p{Cc}/)
+          raise ArgumentError, "an external reference must be a non-blank string of at most #{EXTERNAL_REF_MAX} characters without control characters"
+        end
+      end
+      raise ArgumentError, "external references must be distinct" unless list.uniq.length == list.length
+
+      list.map(&:dup)
+    end
+
+    def self.create(project_root:, instruction:, source:, connection:, review:, basis: [], estimate: {}, takeover: nil, clock: nil, artifact_root: nil, external_refs: [])
       root = File.realpath(project_root)
       workspace = WorkspaceBinding.bind(project_root: root, artifact_root: artifact_root).merge("history" => [])
       path = File.join(root, ".orbit", "tasks", SecureRandom.uuid)
@@ -47,6 +69,7 @@ module Orbit
       record.save({
         "format" => "orbit-task-1", "id" => File.basename(path), "project_root" => root,
         **({ "takeover" => takeover_block } if takeover_block),
+        **({ "external_refs" => parse_external_refs(external_refs) } unless Array(external_refs).empty?),
         "workspace" => workspace,
         "created_at" => Time.now.utc.iso8601, "status" => "starting",
         "instruction_source" => source, "basis" => documents, "amendments" => [],

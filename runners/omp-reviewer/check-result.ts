@@ -49,6 +49,7 @@ export interface CheckResultStructure {
 	coverageItemsMax: number;
 	coverageRequirementMax: number;
 	coverageEvidenceMax: number;
+	coverageRefMax: number;
 	coverageStatuses: string[];
 	coverageScopes: string[];
 }
@@ -90,6 +91,7 @@ export function deriveCheckResultStructure(schema: Record<string, any>): CheckRe
 		coverageItemsMax: itemsSpec.maxItems,
 		coverageRequirementMax: itemProperties.requirement?.maxLength,
 		coverageEvidenceMax: itemProperties.evidence?.maxLength,
+		coverageRefMax: itemProperties.ref?.maxLength,
 		coverageStatuses: itemProperties.status?.enum,
 		coverageScopes: itemProperties.scope?.enum,
 	};
@@ -198,7 +200,7 @@ function coverageProblems(structure: CheckResultStructure, coverage: unknown): s
 		const itemExtra = structure.coverageItemClosed ? itemKeys.filter(key => !structure.coverageItemProperties.includes(key)) : [];
 		const itemMissing = structure.coverageItemRequired.filter(key => !itemKeys.includes(key));
 		if (!isObject || itemExtra.length || itemMissing.length) {
-			problems.push("each coverage item must contain requirement, status, evidence and optional scope");
+			problems.push("each coverage item must contain requirement, status, evidence and optional scope and ref");
 			continue;
 		}
 		const entry = item as Record<string, unknown>;
@@ -217,6 +219,12 @@ function coverageProblems(structure: CheckResultStructure, coverage: unknown): s
 		if (!structure.coverageStatuses.includes(entry.status)) problems.push(`coverage status must be ${structure.coverageStatuses.join(" or ")}`);
 		if (typeof entry.evidence !== "string" || codePointLength(entry.evidence) > structure.coverageEvidenceMax ||
 			(entry.status === "verified" && !entry.evidence.trim())) problems.push("coverage evidence must fit its status and bound");
+		// ref is optional and opaque: bounded, non-blank, free of control
+		// characters. It is never required to be unique or to match anything.
+		if ("ref" in entry && (typeof entry.ref !== "string" || codePointLength(entry.ref) > structure.coverageRefMax ||
+			!entry.ref.trim() || /\p{Cc}/u.test(entry.ref))) {
+			problems.push(`coverage ref must be a non-blank string of at most ${structure.coverageRefMax} characters without control characters`);
+		}
 	}
 	return problems;
 }

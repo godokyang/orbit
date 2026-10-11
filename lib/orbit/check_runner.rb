@@ -172,6 +172,7 @@ module Orbit
           coverage_items_max: items_spec["maxItems"],
           coverage_requirement_max: item_properties.dig("requirement", "maxLength"),
           coverage_evidence_max: item_properties.dig("evidence", "maxLength"),
+          coverage_ref_max: item_properties.dig("ref", "maxLength"),
           coverage_statuses: item_properties.dig("status", "enum"),
           coverage_scopes: item_properties.dig("scope", "enum")
         }
@@ -1021,7 +1022,10 @@ module Orbit
       "## Requirement coverage\n\n" \
         "Return coverage with exactly complete (boolean) and items (1..64 entries). Each item has " \
         "requirement (distinct non-empty text, at most 1000 characters), scope (delivery or lifecycle), status (verified or unverified), " \
-        "and evidence (at most 1000 characters; verified needs concrete non-empty evidence). Enumerate each " \
+        "and evidence (at most 1000 characters; verified needs concrete non-empty evidence), plus an optional " \
+        "ref (at most 200 characters). Set ref only when the instruction, amendments or named basis already " \
+        "label that requirement with an identifier (for example a standard number the requester assigned): copy " \
+        "it exactly as written and never invent, normalize or infer one; omit ref when there is no such label. Enumerate each " \
         "requirement from the original instruction, effective amendments and named basis, including referenced " \
         "specification files in the fixed snapshot. complete=true means you have enumerated them all; do not " \
         "silently omit requirements. Mark unread, untested or otherwise unsupported requirements unverified " \
@@ -1255,7 +1259,7 @@ module Orbit
         extra = item.is_a?(Hash) && rules[:coverage_item_closed] ? item.keys - rules[:coverage_item_properties] : []
         missing = item.is_a?(Hash) ? rules[:coverage_item_required] - item.keys : []
         unless item.is_a?(Hash) && extra.empty? && missing.empty?
-          problems << "coverage.items[#{index}] must contain requirement, status, evidence and optional scope"
+          problems << "coverage.items[#{index}] must contain requirement, status, evidence and optional scope and ref"
           next
         end
         requirement, evidence = item.values_at("requirement", "evidence")
@@ -1272,6 +1276,14 @@ module Orbit
         problems << "coverage.items[#{index}].status must be #{rules[:coverage_statuses].join(' or ')}" unless rules[:coverage_statuses].include?(item["status"])
         unless evidence.is_a?(String) && evidence.length <= rules[:coverage_evidence_max] && (item["status"] != "verified" || !trim_coverage_text(evidence).empty?)
           problems << "coverage.items[#{index}].evidence must fit its status and the #{rules[:coverage_evidence_max]}-character bound"
+        end
+        # ref is optional and opaque: bounded, non-blank, free of control
+        # characters. It is never required to be unique or to match anything.
+        if item.key?("ref")
+          ref = item["ref"]
+          unless ref.is_a?(String) && ref.length <= rules[:coverage_ref_max] && !trim_coverage_text(ref).empty? && !ref.match?(/\p{Cc}/)
+            problems << "coverage.items[#{index}].ref must be a non-blank string of at most #{rules[:coverage_ref_max]} characters without control characters"
+          end
         end
       end
       problems << "coverage contains duplicate requirements" unless requirements.map { |item| trim_coverage_text(item.to_s) }.uniq.length == requirements.length

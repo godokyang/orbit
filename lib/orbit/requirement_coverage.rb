@@ -43,6 +43,8 @@ module Orbit
     # must survive verbatim. It is not a relaxation of acceptance - missing,
     # duplicate or oversized items are still refused and nothing is truncated.
     MAX_REQUIREMENT = 1000
+    # Optional opaque external reference of one item (check-result schema `ref`).
+    MAX_REF = 200
     MAX_LABEL = 128
 
     class Error < StandardError; end
@@ -134,8 +136,8 @@ module Orbit
       seen = {}
       cleaned = items.map do |item|
         raise Error, "each coverage item must be an object" unless item.is_a?(Hash)
-        unless [ %w[evidence requirement status], %w[evidence requirement scope status] ].include?(item.keys.sort)
-          raise Error, "each item must contain requirement, status, evidence and optional scope"
+        unless (%w[evidence requirement status] - item.keys).empty? && (item.keys - %w[evidence requirement status ref scope]).empty?
+          raise Error, "each item must contain requirement, status, evidence and optional scope and ref"
         end
         scope = item.fetch("scope", "delivery")
         raise Error, "item scope must be delivery or lifecycle" unless ITEM_SCOPES.include?(scope)
@@ -155,7 +157,16 @@ module Orbit
         raise Error, "evidence must be at most #{MAX_TEXT} characters" if evidence.length > MAX_TEXT
         raise Error, "a verified item needs its evidence" if status == "verified" && evidence.strip.empty?
 
-        { "requirement" => requirement, "scope" => scope, "status" => status, "evidence" => evidence }
+        cleaned_item = { "requirement" => requirement, "scope" => scope, "status" => status, "evidence" => evidence }
+        if item.key?("ref")
+          ref = item["ref"]
+          unless ref.is_a?(String) && ref.length <= MAX_REF && !ref.strip.empty? && !ref.match?(/\p{Cc}/)
+            raise Error, "ref must be a non-blank string of at most #{MAX_REF} characters without control characters"
+          end
+
+          cleaned_item["ref"] = ref
+        end
+        cleaned_item
       end
       { "complete" => coverage["complete"], "items" => cleaned }
     end
