@@ -414,6 +414,7 @@ module Orbit
         opts.on("--entry-file FILE") { |value| options[:entry_file] = value }
         opts.on("--takeover-file FILE") { |value| options[:takeover_file] = value }
         opts.on("--resume-from TASK_DIRECTORY") { |value| options[:resume_from] = value }
+        opts.on("--allowed-model MODEL") { |value| (options[:allowed_models] ||= []) << value }
         opts.on("--external-ref REF") { |value| (options[:external_refs] ||= []) << value }
       end
       parser.parse!(argv)
@@ -422,6 +423,7 @@ module Orbit
       raise ArgumentError, "--socket is required" if options[:socket].to_s.empty?
       raise ArgumentError, "--check-in must be positive" unless options[:interval].positive?
       raise ArgumentError, "choose --message-id or --prompt-file" if options[:message_id] && options[:prompt_file]
+      allowed_models = ModelAuthorization.parse(options[:allowed_models])
       external_refs = TaskRecord.parse_external_refs(options[:external_refs])
       takeover = options[:takeover_file] ? TaskRecord.parse_takeover(read_input(options[:takeover_file])) : nil
       if takeover && options[:prompt_file]
@@ -438,6 +440,7 @@ module Orbit
                old_state["status"] == "paused" && old_state.dig("stop_confirmation", "confirmed") == true
           raise ArgumentError, "continuation requires this Root's confirmed stopped task in the same project"
         end
+        allowed_models = ModelAuthorization.restrict(allowed_models, old_state.dig("model_authorization", "allowed_models"))
         resumed = { record: old, state: old_state, inputs: old.inputs(old_state) }
         takeover = { "reason" => "用户在停止后续接原任务；旧任务终态保留，不追认监督空档或迁入旧成员、检查、用量" }
       end
@@ -474,7 +477,13 @@ module Orbit
           options[:basis] = resumed[:state].fetch("basis").map { |item| File.join(resumed[:record].path, item.fetch("path")) }
         end
         selection_instruction = resumed ? ([instruction] + resumed[:inputs].fetch("amendments").map { |item| item.fetch("text") }).join("\n\n--- amendment ---\n\n") : instruction
-        options[:model], options[:selection] = select_checker_model(options[:model], connection, options[:project], selection_instruction)
+        catalog = connection.model_catalog
+        allowed_models = ModelAuthorization.restrict(allowed_models, catalog["allowed_models"])
+        if allowed_models
+          raise ArgumentError, "OMP authorization guard is unavailable" unless catalog["authorization_guard"] == true
+          ModelAuthorization.check!(connection.configured_model, allowed_models)
+        end
+        options[:model], options[:selection] = select_checker_model(options[:model], connection, options[:project], selection_instruction, allowed_models: allowed_models)
       ensure
         connection.close
       end
@@ -498,6 +507,7 @@ module Orbit
           raise ArgumentError, "the takeover boundary could not be captured (#{error.message}); no task was created"
         end
       state = record.state
+      state["model_authorization"] = { "allowed_models" => allowed_models, "auxiliary_judgments" => "disabled" } if allowed_models
       if resumed
         boundary = state.delete("takeover")
         record.write("continuation-message.txt", continuation_text)
@@ -619,6 +629,11 @@ module Orbit
           return 0
         end
 
+        if connection.model_catalog["allowed_models"]
+          puts JSON.generate("schema_version" => 1, "message_id" => message_id, "decision" => "root_decides",
+                             "reason" => "strict model authorization requires explicit start; automatic auxiliary judgment is disabled")
+          return 0
+        end
         classifier = PrestartClassifier.new(project_root: project)
         decision = classifier.decide(message.fetch("text"))
         document = decision.merge(
@@ -652,8 +667,8 @@ module Orbit
     # every later check apply exactly the same rules (pool ∩ session catalog,
     # reviewed task-fit judgment and actual model facts, then isolated resolvability
     # order). See CheckerModelSelector for the full contract.
-    def select_checker_model(explicit, connection, project, instruction)
-      CheckerModelSelector.new(connection: connection, project_root: project)
+    def select_checker_model(explicit, connection, project, instruction, allowed_models: nil)
+      CheckerModelSelector.new(connection: connection, project_root: project, allowed_models: allowed_models)
                           .select(explicit: explicit, instruction: instruction, selected_for: "start")
     end
 
@@ -790,7 +805,8 @@ module Orbit
         connection.connect!
         raise ArgumentError, "Root session belongs to a different project" unless
           File.realpath(connection.state.fetch("cwd")) == state.fetch("project_root")
-        CheckerModelSelector.new(connection: connection, project_root: state.fetch("project_root"))
+        CheckerModelSelector.new(connection: connection, project_root: state.fetch("project_root"),
+                                 allowed_models: state.dig("model_authorization", "allowed_models"))
                             .select(explicit: model, instruction: record.inputs(state).fetch("instruction"),
                                     selected_for: "review_model")
       ensure
@@ -811,7 +827,8 @@ module Orbit
       raise ArgumentError, "OMP review model must be provider/id" unless model.match?(CHECKER_MODEL_PATTERN)
 
       OmpCheckRunner.new(model: model, source_agent_dir: state.dig("review", "selection", "source_agent_dir"),
-                         source_project_dir: state.fetch("project_root"))
+                         source_project_dir: state.fetch("project_root"),
+                         allowed_models: state.dig("model_authorization", "allowed_models"))
     end
 
     def run_task(record)
@@ -821,7 +838,7 @@ module Orbit
       state = record.state
       connection = Connection.open(state.fetch("connection"))
       checker = build_checker(state)
-      advisor = JevAdvisor.for_project(state.fetch("project_root"))
+      advisor = state["model_authorization"] ? nil : JevAdvisor.for_project(state.fetch("project_root"))
       runtime = TaskRuntime.new(record: record, connection: connection, checker: checker, advisor: advisor,
                                 evidence_cache: ModelEvidenceCache.new)
       %w[INT TERM].each { |signal| Signal.trap(signal) { runtime.request_stop } }

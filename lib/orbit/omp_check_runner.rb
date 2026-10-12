@@ -5,6 +5,7 @@ require "tmpdir"
 require "open3"
 require "pathname"
 require_relative "check_runner"
+require_relative "model_authorization"
 
 module Orbit
   # Drop-in check process for an independent OMP reviewer/adjudicator session.
@@ -308,11 +309,13 @@ module Orbit
     private_class_method :normalize_probe
 
     def initialize(model:, command: nil, schema: nil, stop_grace_seconds: DEFAULT_STOP_GRACE_SECONDS,
-                   source_agent_dir: nil, source_project_dir: nil)
+                   source_agent_dir: nil, source_project_dir: nil, allowed_models: nil)
       launcher = command || self.class.default_command
       raise Error, "omp reviewer command is required" if launcher.empty? || launcher.first.to_s.empty?
 
       super(model: model, executable: launcher.first.to_s, schema: schema, stop_grace_seconds: stop_grace_seconds)
+      @allowed_models = ModelAuthorization.parse(allowed_models)
+      ModelAuthorization.check!(model, @allowed_models)
       @command = launcher.map(&:to_s)
       @source_agent_dir = source_agent_dir
       @source_project_dir = source_project_dir
@@ -386,10 +389,12 @@ module Orbit
       raise Error, "checker model must be provider/id (the id may contain slashes)" unless model.match?(MODEL_ID)
       raise Error, "cannot change the check model while a check is in flight" if in_flight?
 
+      ModelAuthorization.check!(model, @allowed_models)
       @model = model
     end
 
     def start(directory:, inputs:, context:, output_dir:, role: "reviewer")
+      ModelAuthorization.check!(@model, @allowed_models)
       raise Error, "runner is closed" if @closed
       if @run
         raise Error, "this runner already has an active check" unless @result || @stopped || @failure
@@ -422,7 +427,8 @@ module Orbit
         "profile" => profile,
         "out" => evidence_path,
         "prompt" => prompt_path,
-        "model" => @model
+        "model" => @model,
+        "allowed_models" => @allowed_models
       }.merge(self.class.source_session_fields)
       request["source_agent_dir"] = @source_agent_dir if @source_agent_dir
       request["source_project_dir"] = @source_project_dir if @source_project_dir

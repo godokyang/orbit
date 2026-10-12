@@ -3,6 +3,8 @@
 require "fileutils"
 require "open3"
 require "tmpdir"
+require "json"
+require_relative "model_authorization"
 require_relative "release_lease"
 
 module Orbit
@@ -44,6 +46,7 @@ module Orbit
     # process-scoped; OMP appends every explicit user --config after
     # environment overlays, so a user config file keeps precedence.
     IDLE_PARKING_OVERLAY = File.expand_path("../../plugins/omp-idle-parking.yml", __dir__)
+    MODEL_AUTHORIZATION_OVERLAY = File.expand_path("../../plugins/omp-model-authorization.yml", __dir__)
 
     MINIMUM_OMP_VERSION = "18.2.8"
     # Keep the old constant for callers that already read the version floor.
@@ -125,6 +128,10 @@ module Orbit
         raise ArgumentError, "Orbit OMP idle-parking overlay is missing: #{IDLE_PARKING_OVERLAY}"
       end
 
+      if ENV.key?("ORBIT_ALLOWED_MODELS")
+        allowed = ModelAuthorization.parse(JSON.parse(ENV.fetch("ORBIT_ALLOWED_MODELS")))
+        raise ArgumentError, "ORBIT_ALLOWED_MODELS must be a nonempty JSON array" unless allowed
+      end
       version = detected_version
       unless supported_version?(version)
         raise ArgumentError,
@@ -137,7 +144,8 @@ module Orbit
       ReleaseLease.hold!
       session_agents = prepare_session_agent_root
       env = launch_env.merge("ORBIT_SESSION_AGENT_ROOT" => session_agents)
-      exec(env, *command(argv, session_agents: session_agents))
+      strict = ENV.key?("ORBIT_ALLOWED_MODELS") ? ["--config", MODEL_AUTHORIZATION_OVERLAY] : []
+      exec(env, *command([*argv, *strict], session_agents: session_agents))
     rescue Errno::ENOENT
       raise ArgumentError, "omp was not found on PATH; install Oh My Pi first"
     end

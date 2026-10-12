@@ -1,6 +1,6 @@
 # Orbit 集成合同
 
-合同版本：1.3
+合同版本：1.4
 
 面向把 Orbit 当作外部执行与检查服务的集成方（例如 Loom）。本合同只冻结下面列出的命令、返回字段与结果 schema；这些之外的一切（包括 `status --json` 里的其他字段）都是 Orbit 内部实现，随时可变。产品语义以 [任务运行合同](task-runtime.md) 和 [检查结果 schema](check-result.schema.json) 为准，本文件与它们冲突时以它们为准并修正本文件。机器可读形式见 [integration.json](integration.json)，`orbit capabilities --json` 与契约测试都读取它，决定理由见 [ADR-010](../docs/adr/010-integration-contract.md)。
 
@@ -16,7 +16,7 @@
 `orbit capabilities --json` 只读、不连接会话、不调用模型、不读任务，返回：
 
 ```json
-{ "integration_contract": { "name": "orbit-integration", "version": "1.3", "major": 1 },
+{ "integration_contract": { "name": "orbit-integration", "version": "1.4", "major": 1 },
   "orbit": { "version": "<软件版本，仅供显示>" },
   "capabilities": { "<能力名>": { "since": "<引入该能力的合同版本>", "...": "该能力的限制" } } }
 ```
@@ -38,6 +38,7 @@
 
 | `status_revision` | 1.3 起：revision/updated_at 与持久状态原子写入，读/无变化 tick 不递增；读时覆盖与用量不计 |
 | `status_attention` | 1.3 起：粗粒度 phase＋needs_user，码表冻结；needs_user 为已停止终态 |
+| `model_authorization` | 1.4 起：精确型号硬名单，任务内冻结、接续继承；调用前校验，池耗尽阻断，可选辅助判断关闭 |
 | `status_latest_check` | 1.3 起：最后完成检查，含失败/陈旧；白名单字段、模型回执去重数组与输入一致性 |
 
 ## 3. 命令与返回
@@ -138,7 +139,19 @@ models 从该检查 usage.calls 的 model（缺时仅用该回执 requested_mode
 - 会话切换/分支/树切换关闭原通道；随后的 `session_start` 在同一指定字符串路径重新监听。进程崩溃的遗留由调用方管理，不扫描其他目录。
 - `start` 仍要 `--thread`；会话 id 来自 OMP 自身的 RPC `get_state.sessionId`。首条消息前可得性只按 OMP 18.9.0 的本次实测成立（见[验收记录](../docs/reference/loom-integration-acceptance-20261011.md)），不承诺所有版本，也不新增 `status --session` 或会话登记。
 
-## 10. 变更记录
+## 10. 严格模型授权（1.4）
+
+普通任务继续使用候选池偏好与池外可运行回退。需要硬授权时，显式 `start` 可重复传 `--allowed-model provider/model`（原生工具对应 `allowed_models` 数组）；只接受 1–64 个互不重复、无空白的完整精确身份，不支持别名/通配符/供应商前缀。名单不是候选池，不修改用户全局池、模型配置或凭据。未指定时普通任务不增加限制。
+
+调用方还可在该次 `orbit omp` 启动时设置 `ORBIT_ALLOWED_MODELS='["provider/model"]'`，作为会话的授权上限（该进程启动时关闭可选 memory/advisor/autolearn/STT AI 服务，保持调用前约束）：首条消息及建任务之前的原生请求也受限，显式 start 默认把它冻结进新任务；任务参数只能取其子集。严格会话跳过自动入口判定，使用显式 start。**需要限制首条消息或任务绑定之前的调用，必须设置此环境变量**；仅 CLI 参数不追认建任务前的调用。空/坏 JSON、未知型号身份或缺必要宿主接口拒绝，不默默降级。RPC 的 get_available_models 仍是可用性目录，不能替代授权名单。
+
+`status --json`/按引用查询/导出保留 `model_authorization.allowed_models`（数组）与 `.auxiliary_judgments="disabled"`。任务名单创建后不可由 review-model、root-model、输入/产物变化或失败回退扩大；接续 paused 时默认继承，可显式缩小，不能扩大。新的独立普通任务不继承旧任务名单；只有已确认停止后才释放旧任务对宿主请求的限制，未知停止仍保持边界。会话环境上限持续至该 OMP 进程结束，其他普通会话不受影响。
+
+Root 原生调用、原生成员派发/实际请求、检查者/复核者在调用前校验精确型号；所有重选与失败回退只在名单内，全部不可用或已排除时沿现有检查阻断状态报告，不更换供应商、不把失败作通过。Root 当前型号或显式检查型号不在名单内时 start 拒绝。严格模式下原生型号循环选择拒绝，使用精确授权型号选模；普通会话循环保持。可选 JEV 入口/选型/过程与成员适配判断在严格任务关闭，不调用其独立模型；成员保留事实与 Root 决策，检查/完成/停止硬门保持。
+
+宿主须提供公开 `Agent.streamFn` 与 `ModelRegistry.resolver/getApiKey` 接缝；安装前核验，缺失时严格任务拒绝。守卫在原生 stream 与凭据 resolver（含已缓存 resolver 的实际解析）之前执行，不靠 prompt、检查后拒收或扩展钩子抛错。授权是对配置的 provider/model 精确身份的限制，不是上游实际路由型号认证；实际身份与未知字段继续按回执记录。真实停止/恢复仍使用 §6/§7，名单不授予释放 writer 或伪造确认的权限。
+
+## 11. 变更记录
 
 - 1.0（本合同首版）：命令与冻结字段、能力清单、覆盖项 `ref`、任务 `external_refs`、`resume_from` 范围声明。
 - 1.1：覆盖项 `ref` 的空串或纯空白按未提供处理（原先整次检查被拒绝）；`check_coverage_ref` 增加 `blank_is_omitted`。只放宽检查者输出，不改变任何已有返回字段；依据是对真实检查者的试验中 7 次有 1 次写了 `"ref": ""`。
@@ -146,3 +159,5 @@ models 从该检查 usage.calls 的 model（缺时仅用该回执 requested_mode
 - 1.2：外部会话模式、调用方指定控制通道与按外部引用查询；均为默认关闭的可选启动模式或只读新增命令面。
 
 - 1.3：持久 revision/updated_at、粗粒度 attention 与最近完成检查 latest_check；旧字段及 status 取值不变。
+
+- 1.4：可选严格模型名单、会话调用前授权上限与冻结任务字段；普通偏好池及既有 status 取值不变。

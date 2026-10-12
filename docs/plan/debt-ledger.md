@@ -1,12 +1,12 @@
 # Orbit 当前限制
 
-最后核对：2026-10-12（本地检查宿主与历史内容归档修复；源码0.8.6，实际安装与Goal状态见[交接](handoff.md)）。本页只列**当前仍影响用户的限制与未测范围**；已修复项、旧版本流水与已结束票据不在本页保留（`git show 3865b76:docs/plan/debt-ledger.md` 查阅历史）。逐项收口与证据＝完成记录（Git 历史：`aa089bb:docs/reference/mixed-model-delivery-completion-20261001.md`）；现行行为以[合同](../../contracts/task-runtime.md)及 ADR-008/009 为准。
+最后核对：2026-10-12（本地检查宿主与历史内容归档修复；源码0.8.7，实际安装与Goal状态见[交接](handoff.md)）。本页只列**当前仍影响用户的限制与未测范围**；已修复项、旧版本流水与已结束票据不在本页保留（`git show 3865b76:docs/plan/debt-ledger.md` 查阅历史）。逐项收口与证据＝完成记录（Git 历史：`aa089bb:docs/reference/mixed-model-delivery-completion-20261001.md`）；现行行为以[合同](../../contracts/task-runtime.md)及 ADR-008/009 为准。
 
 | 限制 | 当前影响 | 解除条件 |
 | --- | --- | --- |
-| 本地 OMP 复用的实测范围有限 | 临时安装不含私有SDK，macOS/18.8.0可信factory、受限工具/图片字节、真实检查、失败/取消及停止已通过；日常安装未更新，其他宿主/平台未认证 | 其他宿主版本先跑实际能力探针，再验证相关真实路径，不继承18.8.0结果 |
+| 本地 OMP 复用的实测范围有限 | 临时安装不含私有SDK，macOS/18.8.0可信factory、受限工具/图片字节、真实检查、失败/取消及停止已通过；日常安装以公开 version 核对，既有实测不自动推广至新构建；其他宿主/平台未认证 | 其他宿主版本先跑实际能力探针，再验证相关真实路径，不继承18.8.0结果 |
 | Zeen旧数据暂缓，旧摘要异常成因未确认 | 新检查重复增量0、小改动102bytes/4KiB、三门回收/异常保留、历史恢复、自包含导出及旧完整目录兼容已实测。Zeen既有309份工作区/29.22GB和181摘要不符/1缺失保留原诊断，成因未裁定 | Zeen存量迁移/预览/清理未授权，不作为本轮验收条件；单独确认成因及方案后处理 |
-| 显式start选模未持续绑定后续reviewer选择 | 本轮failure-v4 start记录显式Zenmux，实际check重新从池选DeepSeek；runner严格使用当次请求型号，process-failure后自动fallback也未受Root“不换型”文字要求约束 | 单独修正CLI记录/selector显式绑定与失效规则，并明确程序fallback与用户指定的优先关系；本轮未扩修选择层 |
+| 严格模型授权的真实采用范围有限 | 合同1.4新增通用硬名单；普通 review-model 仍为选择而非授权。零模型重选/耗尽/调用前拦截及 MiniMax Root/独立检查/确认暂停通过；Loom 固定旧版本原任务停止仍未知，严格原生成员/真实故障回退/接续组合未全量实测 | Loom 检查新能力，启动时传严格会话上限并核对任务名单；由其 Root 完成新代码复验，不倒填原任务 confirmed 或放行第二 writer |
 | 原生会话材料导出仍有缺口 | 本轮正例export missing2：一条不可安全归属协作行、一个成员native transcript身份无法核验；失败/取消各有一条协作子集缺口。历史workspace已自包含，manifest保留实际缺失 | 单独核对native session/成员身份接缝与协作截取；不因完整历史快照而宣称所有会话材料完整 |
 | 空闲 Root 的 Esc 不等同任务暂停 | 本轮在 private checker in_flight、Root 已空闲时按 Esc 未触发 native interruption，检查随后正常完成；活动 Root／登记成员 Esc 确认暂停另有实证。不能把按键发送回执当停止成功 | 需要支持该 UI 场景时另定正确用户入口和宿主接缝；本轮仅记录真实边界，不改暂停语义 |
 | 活动任务续跑的有效推进证据有范围 | C02已沿SDK每请求context派生完整授权目标；普通/amend/custom wake/compact/resume及暂停分离有界实测。continue_unfinished_task仍依赖自动artifact review且每版本一次，不能把工具次数当进展；该具体空闲续跑分支本轮未自然触发 | 真实分支出现后按现行版本核对，不重新打开历史理论组合；SDK hook超时/异常和最终请求容量仍是宿主边界 |

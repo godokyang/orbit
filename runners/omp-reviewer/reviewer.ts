@@ -1,3 +1,4 @@
+import { installModelAuthorization, parseAllowedModels, requireAllowedModel } from "../../plugins/model-authorization.mjs";
 // Production entry for one independent OMP reviewer/adjudicator session.
 //
 //   ORBIT_REVIEW_REQUEST=request.json omp --trusted-extension /absolute/reviewer.ts
@@ -44,6 +45,7 @@ type Request = {
 	out?: string;
 	prompt?: string;
 	model?: string;
+	allowed_models?: string[];
 	// Launcher-supplied check-attempt id. It names this reviewer process, not
 	// the model calls inside it; without one this process mints its own.
 	attempt_id?: string;
@@ -272,6 +274,8 @@ function credentialResolver(modelRegistry: ModelRegistry): (provider: string, id
 }
 
 const request = loadRequest();
+const allowedModels = parseAllowedModels(request.allowed_models);
+requireAllowedModel(request.model, allowedModels);
 const problems: string[] = [];
 // One id per reviewer process. It identifies this check attempt only: the model
 // calls inside it carry their own provider-reported ids, and this attempt id
@@ -442,6 +446,7 @@ try {
 			skipPythonPreflight: true,
 		});
 
+		installModelAuthorization(session, () => allowedModels, { main: true });
 		privateSession = session;
 		evidence.session_created = true;
 		let syncReviewUsage: (() => void) | undefined;

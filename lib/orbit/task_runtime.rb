@@ -90,6 +90,9 @@ module Orbit
       @checker_selector = checker_selector
       @member_selector = member_selector
       @state = record.state
+      @allowed_models = ModelAuthorization.parse(@state.dig("model_authorization", "allowed_models"))
+      @advisor = nil if @allowed_models
+      raise ArgumentError, "task model authorization is malformed" if @state["model_authorization"] && !@allowed_models
       @state["findings"] ||= {}
       @state["sent_message_ids"] ||= []
       @state["delegation_hints"] ||= {}
@@ -1411,7 +1414,7 @@ module Orbit
       @member_selector ||= MemberModelSelector.new(
         connection: @connection, project_root: @state.fetch("project_root"),
         pool: candidate_pool, evidence_cache: evidence_cache, advisor: @advisor,
-        route_cost_inputs: route_cost_inputs
+        route_cost_inputs: route_cost_inputs, allowed_models: @allowed_models
       )
     end
 
@@ -2737,7 +2740,7 @@ module Orbit
       @checker_selector ||= CheckerModelSelector.new(
         connection: @connection, project_root: @state.fetch("project_root"),
         pool: candidate_pool, evidence_cache: evidence_cache, advisor: @advisor,
-        route_cost_inputs: route_cost_inputs
+        route_cost_inputs: route_cost_inputs, allowed_models: @allowed_models
       )
     end
 
@@ -2803,6 +2806,7 @@ module Orbit
                                receipt: checker_judgment_receipt(selection))
         end
       end
+      ModelAuthorization.check!(model, @allowed_models)
       @checker.select_model!(model) if model && !model.to_s.empty?
       save
       true

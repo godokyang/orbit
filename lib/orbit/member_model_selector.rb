@@ -40,12 +40,13 @@ module Orbit
     MAX_TEXT = 300
 
     def initialize(connection:, project_root:, pool:, evidence_cache:, advisor:,
-                   overview: nil, release: UNSET, route_cost_inputs: nil)
+                   overview: nil, release: UNSET, route_cost_inputs: nil, allowed_models: nil)
+      @allowed_models = allowed_models
       @connection = connection
       @project_root = project_root
       @pool = pool
       @evidence_cache = evidence_cache
-      @advisor = advisor
+      @advisor = @allowed_models ? nil : advisor
       @overview = overview || OpenRouterModelOverview.new
       @facts = ModelCapabilityFacts.new(overview: @overview, evidence_cache: @evidence_cache)
       @release_injected = !release.equal?(UNSET)
@@ -223,7 +224,7 @@ module Orbit
         return [[], "the session model catalog is unavailable; Root selects a native agent"]
       end
 
-      models = pool.select { |model| available.include?(model) && agents.key?(model) && !excluded.include?(model) }
+      models = pool.select { |model| available.include?(model) && agents.key?(model) && !excluded.include?(model) && (!@allowed_models || @allowed_models.include?(model)) }
       if models.empty?
         return [[], "no pooled model is both available and mapped to a session agent; Root selects a native agent"]
       end
@@ -235,7 +236,7 @@ module Orbit
       provider = resolution["provider"].to_s
       id = resolution["id"].to_s
       model = "#{provider}/#{id}"
-      return [] if provider.empty? || id.empty? || excluded.include?(model)
+      return [] if provider.empty? || id.empty? || excluded.include?(model) || (@allowed_models && !@allowed_models.include?(model))
 
       identity = identity_for(catalog, model, resolution)
       [candidate(agent: NATIVE_AGENT, model: model, identity: identity, unit: unit, catalog: catalog, native: true)]

@@ -4,6 +4,7 @@ require "json"
 require "socket"
 require "timeout"
 require_relative "connection"
+require_relative "model_authorization"
 
 module Orbit
   # The official Native plugin supplies the native client and owns this
@@ -92,6 +93,8 @@ module Orbit
         end
       end
       {
+        "allowed_models" => ModelAuthorization.parse(raw["allowed_models"]),
+        "authorization_guard" => raw["authorization_guard"] == true,
         "current" => catalog_identifier(raw["current"]),
         "available" => Array(raw["available"]).filter_map { |model| catalog_identifier(model) }.uniq,
         "families" => families,

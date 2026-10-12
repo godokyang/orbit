@@ -95,6 +95,7 @@ export const toolArgs = z => ({
         action: z.enum(['context', 'start', 'status', 'check', 'amend', 'dispute', 'stop', 'review-model', 'work-unit', 'root-model']),
         task: z.string().optional().describe('Required for status/check/amend/dispute/stop/work-unit/review-model/root-model: the exact task_directory returned by start.'),
         basis: z.array(z.string()).optional(), message_id: z.string().optional().describe('start: native user message id selecting the original instruction; amend: the exact native user correction id, required explicitly. A progress question is a continuation source, never an amendment.'),
+        allowed_models: z.array(z.string()).min(1).max(64).optional().describe("Optional exact task model authorization; cannot exceed the session authorization."),
         review_model: z.string().optional().describe('Optional Root-selected provider/id from the current OMP model catalog.'),
         recovery_evidence: z.string().optional().describe('review-model only: for a model with a recorded account/quota refusal, cite an actual account recovery or successful same-route call before retry. A new artifact or model name alone is not recovery.'),
         resume_from: z.string().optional().describe('start only: exact stopped task_directory for continuing the SAME delivery after answering the user. Uses the preserved original instruction and amendments, creates a new supervised boundary, and never revives stopped members. Explicit pause/discussion/cancel wins; unrelated questions never resume.'),
@@ -112,7 +113,7 @@ export const toolArgs = z => ({
 
 // Shared transport and task operations for native plugin hosts. Each adapter
 // supplies only its real session operations and native invocation identity.
-export function createOrbitHost({ provider, project, dispatch, bind, reset }) {
+export function createOrbitHost({ provider, project, dispatch, bind, reset, authorizeTask }) {
   const tasks = new Map();
   let host, socket, setup, ownFolder = null, socketIdentity = null, closing = false;
   async function listen() {
@@ -202,6 +203,7 @@ export function createOrbitHost({ provider, project, dispatch, bind, reset }) {
       if (previous && previous.task_directory !== real &&
           !terminal.has((await ownedTask(previous.task_directory, id)).status))
         throw new Error('Root session already has another active Orbit task');
+      if (authorizeTask) await authorizeTask(value, id);
       const result = { task_directory: real, pid: value.runtime_pid,
         status: value.status, review_model: value.review?.model };
       tasks.set(id, result);
@@ -258,6 +260,7 @@ export function createOrbitHost({ provider, project, dispatch, bind, reset }) {
               throw new Error('Continuation needs a confirmed stopped task; clean up unconfirmed work first');
             args.push('--resume-from', await fs.realpath(a.resume_from));
           }
+          for (const model of a.allowed_models || []) args.push("--allowed-model", model);
           if (chosen) args.push('--review-model', chosen);
           for (const ref of a.external_refs || []) args.push('--external-ref', ref);
           if (a.entry_file) args.push('--entry-file', a.entry_file);

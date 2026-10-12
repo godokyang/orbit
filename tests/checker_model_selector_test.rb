@@ -166,11 +166,11 @@ module CheckerModelSelectorTest
   end
 
   def selector(pool:, catalog:, entries:, advisor:, probe:, default_model: "session/default", project_root: "/tmp",
-               overview: FakeOverview.new, release: nil)
+               overview: FakeOverview.new, release: nil, allowed_models: nil)
     Orbit::CheckerModelSelector.new(
       connection: FakeConnection.new(catalog, default_model), project_root: project_root,
       pool: FakePool.new(pool), evidence_cache: FakeEvidence.new(entries),
-      advisor: advisor, probe: probe, clock: -> { Time.utc(2026, 9, 25) }, overview: overview, release: release
+      advisor: advisor, probe: probe, clock: -> { Time.utc(2026, 9, 25) }, overview: overview, release: release, allowed_models: allowed_models
     )
   end
 
@@ -795,8 +795,37 @@ module CheckerModelSelectorTest
            "read-only diagnostics retain catalog facts for Root's own decision")
   end
 
+  def strict_authorization_survives_input_changes_and_exhaustion
+    authorized, other = "minimax/model", "other/model"
+    Dir.mktmpdir("orbit-authorization-selection-") do |root|
+      advisor = FakeAdvisor.new({ authorized => { "quality" => 0.9 } })
+      probe = FakeProbe.new([authorized, other])
+      built = selector(pool: [other], catalog: catalog_for([other, authorized]), entries: [entry(authorized)],
+                       advisor: advisor, probe: probe, release: release_for, project_root: root,
+                       allowed_models: [authorized])
+      first, selection = built.select(explicit: authorized, instruction: "first", state: task_state)
+      second, = built.select(explicit: nil, instruction: "changed", previous: selection, state: task_state)
+      assert(first == authorized && second == authorized && probe.models == [authorized], "changed input stays inside authorization")
+      assert(advisor.calls == 0, "strict selection makes no auxiliary judgment call")
+      assert_raises { built.select(explicit: other, instruction: "changed") }
+      count = probe.calls
+      error = assert_raises { built.select(explicit: nil, instruction: "changed", excluded: [authorized]) }
+      assert(probe.calls == count && error.message.include?("no unused"), "exhaustion blocks before probing outside authorization")
+      unavailable = FakeProbe.new([other])
+      blocked = selector(pool: [authorized], catalog: catalog_for([authorized, other]), entries: [],
+                         advisor: advisor, probe: unavailable, project_root: root, allowed_models: [authorized])
+      assert_raises { blocked.select(explicit: nil, instruction: "start") }
+      assert(unavailable.calls == 1 && unavailable.models == [authorized], "unavailable authorization never probes a foreign fallback")
+      ordinary, = selector(pool: [authorized], catalog: catalog_for([authorized, other]), entries: [],
+                          advisor: advisor, probe: FakeProbe.new([other]), project_root: root)
+                    .select(explicit: nil, instruction: "ordinary")
+      assert(ordinary == other, "ordinary tasks keep preference fallback")
+    end
+  end
+
   def main
-    %w[root_selected_model_is_probed_and_jev_ranked_without_user_grant
+    %w[strict_authorization_survives_input_changes_and_exhaustion
+       root_selected_model_is_probed_and_jev_ranked_without_user_grant
        root_selected_model_must_be_omp_available_and_checker_resolvable
        empty_pool_uses_omp_catalog_and_checks_availability
        profile_agent_directory_is_used_by_preflight_and_recorded_for_the_check

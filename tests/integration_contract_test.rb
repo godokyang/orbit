@@ -97,7 +97,7 @@ module IntegrationContractTest
       Orbit::OmpCheckRunner.define_singleton_method(:probe_models) { |models:, **_| { "resolvable" => models, "unresolvable" => [] } }
       stub = Module.new { define_method(:run) { { "status" => "paused" } } } # start --foreground must not loop
       Orbit::TaskRuntime.prepend(stub)
-      yield tmp, project
+      yield tmp, project, connection
     ensure
       env&.each { |key, value| value ? ENV[key] = value : ENV.delete(key) }
       Orbit::Connection.define_singleton_method(:open, original_open) if original_open
@@ -136,6 +136,31 @@ module IntegrationContractTest
 
   # Contract: capabilities are served from integration.json; the contract
   # version is its own; declared limits equal what Orbit enforces.
+  def strict_task_authorization_is_public_and_cannot_expand_on_resume
+    with_world do |_tmp, project, connection|
+      connection.define_singleton_method(:configured_model) { CHOSEN }
+      connection.define_singleton_method(:model_catalog) do
+        { "current" => CHOSEN, "available" => [CHOSEN, "other/model"], "families" => {},
+          "allowed_models" => [CHOSEN], "authorization_guard" => true }
+      end
+      created = start(project, "m1", "--allowed-model", CHOSEN)
+      record = Orbit::TaskRecord.new(created.fetch("task_directory"))
+      status = orbit_json("status", record.path, "--json")
+      assert(status.dig("model_authorization", "allowed_models") == [CHOSEN], "public status reports the frozen authorization")
+      assert(status.dig("model_authorization", "auxiliary_judgments") == "disabled", "strict tasks do not call auxiliary models")
+      state = record.state
+      state["status"] = "paused"
+      state["stop_confirmation"] = { "confirmed" => true }
+      record.save(state)
+      resumed = start(project, "m2", "--resume-from", record.path)
+      assert(orbit_json("status", resumed.fetch("task_directory"), "--json").dig("model_authorization", "allowed_models") == [CHOSEN],
+             "resume inherits the hard boundary without requiring a repeated flag")
+      code, _, error = orbit("start", "--project", project, "--thread", "root-session", "--socket", "unused.sock",
+                            "--message-id", "m3", "--allowed-model", "other/model", "--resume-from", record.path)
+      assert(code != 0 && error.include?("exceed"), "resume refuses expanded authorization before starting")
+    end
+  end
+
   def capabilities_declare_what_orbit_enforces
     report = orbit_json("capabilities", "--json")
     capabilities = report.fetch("capabilities")
@@ -383,3 +408,5 @@ IntegrationContractTest.attention_maps_the_frozen_phase_enum
 IntegrationContractTest.latest_check_projects_the_last_finished_record
 IntegrationContractTest.declared_limits_hold_at_the_boundary
 puts "INTEGRATION_CONTRACT_TEST_PASS (fake caller and fake OMP host against the real CLI, runtime and stores)"
+
+IntegrationContractTest.strict_task_authorization_is_public_and_cannot_expand_on_resume

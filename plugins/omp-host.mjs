@@ -4,6 +4,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { installModelAuthorization, parseAllowedModels, sessionAllowedModels, requireAllowedModel } from './model-authorization.mjs';
 import { createOrbitHost, toolArgs, toolDescription } from './host.mjs';
 import { captureStart, buildReceipt, appendReceipt, readReceipts, CAPTURED_TOOLS } from './root-verifications.mjs';
 import { validateMemberTool, validateWorkUnitPreflight, createEditProjection } from './work-unit-scope.mjs';
@@ -720,6 +721,22 @@ export function installOmpExtension(pi, sdk) {
       options.expanded ? textOf(message.content) : message.details?.userSummary || textOf(message.content), 0, 0));
   }
   const entries = new Map();
+  const authorizationGuards = new Set();
+  function taskAllowedModels(taskDir) {
+    const ceiling = sessionAllowedModels();
+    if (!taskDir) return ceiling;
+    const state = JSON.parse(readFileSync(path.join(taskDir, 'state.json'), 'utf8'));
+    const allowed = parseAllowedModels(state.model_authorization?.allowed_models);
+    if (state.model_authorization && !allowed) throw new Error('task model authorization is malformed');
+    if (state.stop_confirmation?.confirmed === true && !['starting', 'running'].includes(state.status)) return ceiling;
+    if (allowed && ceiling && allowed.some(model => !ceiling.includes(model)))
+      throw new Error('task authorization exceeds the session authorization');
+    return allowed ?? ceiling;
+  }
+  function guardSession(session, taskDirectory, main = false) {
+    const getAllowed = () => taskAllowedModels(taskDirectory());
+    if (installModelAuthorization(session, getAllowed, { main })) authorizationGuards.add(session.sessionId);
+  }
   // Requested spawn name -> { taskDir, toolCallId, expectedModel }. The
   // registry gate matches registered ids against this map: exact match is the
   // expected identity, a suffixed match (`<name>-2`) is allocator drift and
@@ -780,9 +797,12 @@ export function installOmpExtension(pi, sdk) {
     if (!pool.ok) return { ok: false, reason: `model pool unreadable: ${pool.reason}` };
     let available = [];
     try { available = (ctx.models?.list?.() ?? []).map(m => `${m.provider}/${m.id}`); } catch { available = []; }
-    const availableSet = new Set(available);
+    let sessionId = null;
+    try { sessionId = ctx.sessionManager?.getSessionId?.(); } catch { /* bootstrap */ }
+    const authorized = taskAllowedModels(taskDirs.get(sessionId));
+    const availableSet = new Set(authorized ? available.filter(model => authorized.includes(model)) : available);
     const desired = new Map();
-    for (const model of pool.models) {
+    for (const model of (authorized ?? pool.models)) {
       if (!availableSet.has(model)) continue; // session intersection only (ADR-009)
       desired.set(agentNameFor(model), model);
     }
@@ -1021,6 +1041,7 @@ export function installOmpExtension(pi, sdk) {
   }
 
   function trackMemberTools(id, session) {
+    guardSession(session, () => memberTasks.get(id) ?? memberWorkUnits.get(id)?.taskDir);
     if (memberActiveTools.has(id) || typeof session?.subscribe !== 'function') return;
     const active = new Set();
     memberActiveTools.set(id, active);
@@ -1065,6 +1086,7 @@ export function installOmpExtension(pi, sdk) {
 
   function remember(session) {
     const id = session.sessionId;
+    guardSession(session, () => taskDirs.get(id), true);
     if (entries.has(id)) return entries.get(id);
     const entry = { id, session, activeTools: new Set(), pending: 0, interrupted: false };
     entry.unsubscribe = session.subscribe(event => {
@@ -2814,6 +2836,7 @@ export function installOmpExtension(pi, sdk) {
         const current = currentContext.models.current?.() ?? null;
         return { current: current ? `${current.provider}/${current.id}` : null,
                  available: available.map(m => `${m.provider}/${m.id}`), families, agents, routes, limits,
+                 allowed_models: taskAllowedModels(taskDirs.get(entry.id)), authorization_guard: authorizationGuards.has(entry.id),
                  agent_dir: typeof sdk.getAgentDir === 'function' ? sdk.getAgentDir() : null };
       }
       case 'send': {
@@ -2862,7 +2885,19 @@ export function installOmpExtension(pi, sdk) {
   async function connect(ctx) {
     const entry = rootFor(ctx);
     if (!host) host = createOrbitHost({ provider: 'omp', project: await fs.realpath(ctx.cwd), dispatch,
-      bind: context => rootFor(context).id, reset: id => { owned(id).interrupted = false; } });
+      bind: context => rootFor(context).id,
+      authorizeTask: (value, id) => {
+        const allowed = parseAllowedModels(value.model_authorization?.allowed_models);
+        const ceiling = sessionAllowedModels();
+        if (allowed && ceiling && allowed.some(model => !ceiling.includes(model)))
+          throw new Error('task authorization exceeds the session authorization');
+        const session = owned(id).session;
+        if (allowed) {
+          if (!authorizationGuards.has(id)) throw new Error('OMP authorization guard is unavailable');
+          requireAllowedModel(session.model, allowed);
+          requireAllowedModel(value.review?.model, allowed);
+        }
+      }, reset: id => { owned(id).interrupted = false; } });
     return entry;
   }
   async function close(requireConfirmation = false) {
@@ -3010,6 +3045,8 @@ export function installOmpExtension(pi, sdk) {
       } else {
         return { block: true, reason: `Native agent ${itemAgent} has no verifiable pre-dispatch model; use a live Orbit candidate or @task` };
       }
+      try { requireAllowedModel(expectedModel, taskAllowedModels(taskDir)); }
+      catch (error) { return { block: true, reason: error.message }; }
       const unitId = dispatchUnitId(item, input.context);
       const unit = units.find(candidate => candidate.id === unitId);
       if (!unit) return { block: true, reason: 'Declare an Orbit work-unit, then put a standalone orbit-unit: wu-... line in each native task text' };
@@ -3218,6 +3255,10 @@ export function installOmpExtension(pi, sdk) {
       // Keep the independent provider/tool barriers for later continuations.
       return undefined;
     };
+    try {
+      const session = sdk.AgentRegistry.global().get(agentId)?.session;
+      guardSession(session, () => memberTasks.get(agentId) ?? memberWorkUnits.get(agentId)?.taskDir);
+    } catch (error) { return refuse(error.message); }
     // A registration without a session does not mean there is no session at
     // prompt time: attachSession emits no event, but the executor attaches
     // before session.prompt. Use the actually attached session NOW to bind
@@ -3365,7 +3406,7 @@ export function installOmpExtension(pi, sdk) {
   // classification, its durable record and its prompt are all skipped. Root's
   // own tool start stays available (not hidden); only the UNBOUND automatic
   // entry path early-exits, never task supervision on an existing task.
-  const externalIntegration = () => process.env.ORBIT_EXTERNAL_INTEGRATION === '1';
+  const externalIntegration = () => process.env.ORBIT_EXTERNAL_INTEGRATION === '1' || process.env.ORBIT_ALLOWED_MODELS !== undefined;
   pi.on('before_provider_request', async (event, ctx) => {
     let sessionId = null;
     try { sessionId = ctx.sessionManager?.getSessionId?.() ?? null; } catch { /* unowned */ }
@@ -3776,7 +3817,8 @@ export function installOmpExtension(pi, sdk) {
     // program-initiated integration selection.
     const sync = await syncSessionAgents(ctx);
     if (!sync.ok) return reject(`model catalog is stale: pool re-sync failed (${sync.reason})`);
-    const exact = [...new Set(sessionAgents.values())];
+    const authorized = taskAllowedModels(boundDir);
+    const exact = [...new Set(sessionAgents.values())].filter(model => !authorized || authorized.includes(model));
     if (!args.root_model || !args.root_model.trim())
       return { ok: true, listing_only: true, available: exact, note: 'pass root_model with one of these exact provider/id values plus phase and text' };
     const target = args.root_model.trim();
@@ -3816,7 +3858,8 @@ export function installOmpExtension(pi, sdk) {
     // The intersection is the synced session-agent set (pool ∩ session
     // catalog), NOT ctx.models.list() (which is the full session catalog and
     // would allow out-of-pool targets). Same set for listing and selection.
-    const exact = [...new Set(sessionAgents.values())];
+    const authorized = taskAllowedModels(boundDir);
+    const exact = [...new Set(sessionAgents.values())].filter(model => !authorized || authorized.includes(model));
     if (!target || !exact.includes(target))
       return rejectSwitch(`target ${target} is not in the current pool ∩ OMP catalog`, { available: exact });
     if (rootModelInFlight.has(sessionId)) return rejectSwitch('another root-model selection is already in progress for this session');
@@ -4414,7 +4457,14 @@ export function installOmpExtension(pi, sdk) {
     let sessionId = null;
     try { sessionId = ctx.sessionManager?.getSessionId?.() ?? null; } catch { /* unowned */ }
     if (!isMainSession(sessionId)) return;
-    rootFor(ctx);
+    try { rootFor(ctx); }
+    catch (error) {
+      if (process.env.ORBIT_ALLOWED_MODELS !== undefined) {
+        process.stderr.write(`Orbit model authorization startup refused: ${error.message}\n`);
+        process.exit(1);
+      }
+      throw error;
+    }
     subscribeRegistryGate();
     // Best-effort: materialize pool ∩ session into the private agent root so
     // generated agents are dispatchable immediately after startup.

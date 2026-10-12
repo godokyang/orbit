@@ -1,8 +1,10 @@
 # Orbit 当前交接
 
-最后核对：2026-10-12。源码版本以 `package.json` 为准（当前 0.8.6）；用户安装版本、commit 与内容摘要须以 `orbit version --json` 核对，本页不记录。
+最后核对：2026-10-12。源码版本以 `package.json` 为准（当前 0.8.7）；用户安装版本、commit 与内容摘要须以 `orbit version --json` 核对，本页不记录。
 
 ## 当前进展
+
+- **Loom 联动：严格模型授权票**：2026-10-12 用户授权 Orbit 定位/实现并向 Loom Root（w22:p1）回报，不另建 Goal。源码新增合同 1.4 `model_authorization`：`start --allowed-model` 与可选 `ORBIT_ALLOWED_MODELS` 启动上限，冻结任务名单、接续继承/缩小、调用前守卫与池耗尽阻断；普通任务保留偏好池。可选 JEV 关闭，宿主公开 stream/resolver/getApiKey 与选模接缝受限。实现与实测基线 `4a529aa`（0.8.6）；用户随后明确授权升至 0.8.7、提交/推送 main 并执行本机 orbit update，交付身份见 Git 历史与公开 version。发布与 tag 未授权。零模型边界、隔离全套 npm test、MiniMax 实际 Root/独立检查/确认暂停与独立只读核查均有记录；最终定点复核与资源收尾见[本票记录](../reference/loom-model-authorization-20261012.md)。Loom 原 `0595af38` 的未知停止来自宿主 socket 拒绝连接，不能确认 Root/工具退出；保持 unknown/writer，不修改其状态。Loom 端适配与复验由 Loom Root 负责，原生严格成员/实际故障回退/硬名单的真实接续组合未据此认证。
 
 - **版本与推送**：用户于 2026-10-12 追加授权更新版本号、提交并推送 `main`；软件 patch 升至 0.8.6，包含已完成的 Loom 集成 A/B 与冷启动绑定修复。此轮仅改版本元数据与交接，不重标既有真实验收构建；发布、tag 和日常安装不在本次范围。
 
@@ -15,7 +17,7 @@
 ## 环境提示
 
 - 全仓 `npm test` 需要 `node_modules`：本工作区未安装依赖时，`prestart_test.rb`、四个 `.mjs` 测试和 bun 套件因缺 `zod` 失败，在未改动的 HEAD 副本上同样复现；`npm ci` 后通过。需要时在临时副本里安装，不要把依赖装进仓库。
-- 本次 A/B 与冷启动修复的 main 本地提交已有用户明确授权；2026-10-12 追加授权软件 patch 升版、提交与推送。发布、tag 和更新日常安装未授权。
+- 本次 A/B 与冷启动修复的 main 本地提交已有用户明确授权；2026-10-12 追加授权本票软件 patch 升至 0.8.7、提交/推送与本机 orbit update。发布、tag 未授权。
 
 ## 当前有效边界
 

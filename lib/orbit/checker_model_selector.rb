@@ -5,6 +5,7 @@ require "fileutils"
 require "json"
 require "time"
 require_relative "checker_model_selection"
+require_relative "model_authorization"
 require_relative "jev_advisor"
 require_relative "model_candidate_pool"
 require_relative "model_capability_facts"
@@ -56,7 +57,8 @@ module Orbit
 
     def initialize(connection:, project_root:, pool: ModelCandidatePool.new,
                    evidence_cache: ModelEvidenceCache.new, advisor: nil, probe: nil,
-                   clock: nil, overview: nil, release: UNSET, facts: nil, route_cost_inputs: nil)
+                   clock: nil, overview: nil, release: UNSET, facts: nil, route_cost_inputs: nil, allowed_models: nil)
+      @allowed_models = ModelAuthorization.parse(allowed_models)
       @connection = connection
       @project_root = project_root
       @pool = pool
@@ -96,9 +98,12 @@ module Orbit
                route_costs: nil)
       # The only network opportunity is before the selection/Jev path. A
       # failed optional refresh never prevents a runnable checker from starting.
-      @overview_refresh = refresh_overview
+      @overview_refresh = @allowed_models ? nil : refresh_overview
       excluded = Array(excluded).map(&:to_s).uniq
       text = explicit.to_s.strip
+      if @allowed_models && !text.empty? && !@allowed_models.include?(text)
+        raise Error, "model #{text} is outside the task authorization"
+      end
       prepared = prepare(instruction, excluded: excluded, state: state, route_costs: route_costs)
       if !text.empty? && !excluded.include?(text)
         return [previous["model"], previous] if same_explicit?(previous, text, prepared)
@@ -203,6 +208,7 @@ module Orbit
       available = Array(catalog&.[]("available")).select { |model| model.is_a?(String) &&
         model.match?(OmpCheckRunner::MODEL_ID) }.uniq
       current = catalog&.[]("current")
+      available &= @allowed_models if @allowed_models
       available = [current, *available.reject { |model| model == current }] if available.include?(current)
       preferred = pool.select { |model| available.include?(model) && !excluded.include?(model) }
       models = preferred.empty? ? available.reject { |model| excluded.include?(model) } : preferred
@@ -270,7 +276,7 @@ module Orbit
           "version" => SIGNATURE_VERSION,
           "policy" => ModelQualityPolicy.binding,
           "release" => release_binding(prepared["release"]),
-          "pool" => prepared["pool"],
+          "allowed_models" => @allowed_models, "pool" => prepared["pool"],
           "catalog" => catalog_view(prepared["catalog"]),
           "identities" => prepared["identities"],
           "facts" => prepared["facts"],
@@ -528,7 +534,7 @@ module Orbit
       projected_state = nil
       judgment_error = nil
       gate_note = nil
-      if judged.any?
+      if judged.any? && !@allowed_models
         advisor = resolved_advisor
         if advisor
           judgment_state = quality_body(prepared, judged)
