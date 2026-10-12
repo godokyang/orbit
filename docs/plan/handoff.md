@@ -1,8 +1,10 @@
 # Orbit 当前交接
 
-最后核对：2026-10-12。源码版本以 `package.json` 为准（当前 0.8.7）；用户安装版本、commit 与内容摘要须以 `orbit version --json` 核对，本页不记录。
+最后核对：2026-10-12。源码版本以 `package.json` 为准（当前 0.8.8）；用户安装版本、commit 与内容摘要须以 `orbit version --json` 核对，本页不记录。
 
 ## 当前进展
+
+- **ORBIT-CHECKER-STARTUP-02**：0.8.7 基线的 GLM 检查实际已进入 provider 流，OMP 外层 startup watchdog 因 trusted factory 保持 pending 而误报模块阶段。仅补内部阶段证据和日志，真实零模型宿主复现与相关既有测试通过。原 check 最终因多余 `}` 被正确拒收为 invalid_result；长等待/模型格式问题未宣称修复。用户要求收束、不新增模型，原运行停止归 Loom Root。用户追加本票提交、推送与本机更新授权，patch 升至 0.8.8；具体提交与安装身份以 Git 和公开 version 回读为准，详见[诊断记录](../reference/checker-startup-20261012.md)。
 
 - **Loom 联动：严格模型授权票**：2026-10-12 用户授权 Orbit 定位/实现并向 Loom Root（w22:p1）回报，不另建 Goal。源码新增合同 1.4 `model_authorization`：`start --allowed-model` 与可选 `ORBIT_ALLOWED_MODELS` 启动上限，冻结任务名单、接续继承/缩小、调用前守卫与池耗尽阻断；普通任务保留偏好池。可选 JEV 关闭，宿主公开 stream/resolver/getApiKey 与选模接缝受限。实现与实测基线 `4a529aa`（0.8.6）；用户随后明确授权升至 0.8.7、提交/推送 main 并执行本机 orbit update，交付身份见 Git 历史与公开 version。发布与 tag 未授权。零模型边界、隔离全套 npm test、MiniMax 实际 Root/独立检查/确认暂停与独立只读核查均有记录；最终定点复核与资源收尾见[本票记录](../reference/loom-model-authorization-20261012.md)。Loom 原 `0595af38` 的未知停止来自宿主 socket 拒绝连接，不能确认 Root/工具退出；保持 unknown/writer，不修改其状态。Loom 端适配与复验由 Loom Root 负责，原生严格成员/实际故障回退/硬名单的真实接续组合未据此认证。
 

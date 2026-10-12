@@ -301,6 +301,15 @@ const evidence: Record<string, unknown> = {
 	// when the selected model declares no image input.
 	snapshot_image_reads: snapshotImageReads,
 };
+// The enclosing trusted factory stays pending, so OMP's outer startup
+// watchdog cannot describe this private session. Record only phase facts,
+// never prompts, stream content, credentials, or an inferred check verdict.
+function recordPhase(phase: string): void {
+	evidence.reviewer_phase = phase;
+	evidence.reviewer_phase_at = new Date().toISOString();
+	persistEvidence();
+	console.error(`[orbit-reviewer] phase: ${phase}`);
+}
 let openAuthStorage: AuthStorage | undefined;
 let privateSession: Awaited<ReturnType<typeof createAgentSession>>["session"] | undefined;
 let syncInterruptedUsage: (() => void) | undefined;
@@ -346,6 +355,7 @@ try {
 	if (probeMode && probeSpecs.length === 0) throw new Error("--probe-models requires at least one provider/id");
 
 	if (snapshot) evidence.fingerprint_before = fingerprint(snapshot);
+	recordPhase("catalog_loading");
 	const usesSourceCatalog = Boolean(request.model) || probeMode;
 	let authStorage: AuthStorage;
 	let modelRegistry: ModelRegistry;
@@ -381,6 +391,7 @@ try {
 		// runtime uses, resolved through OMP's own store. The key is discarded;
 		// the session below resolves its own fresh credential per request.
 		try {
+			recordPhase("credential_resolution");
 			const key = await modelRegistry.getApiKey(model);
 			if (!isAuthenticated(key)) throw new ReviewerFailure(`no credential for ${provider}`, "auth_or_quota");
 		} catch (error) {
@@ -396,6 +407,7 @@ try {
 			credentialResolver(modelRegistry),
 		);
 	} else if (snapshot !== undefined || request.host_probe) {
+		recordPhase("session_creating");
 		const sessionRoot = snapshot ?? path.join(profile, "probe-workspace");
 		mkdirSync(sessionRoot, { recursive: true });
 		const agentRegistry = new AgentRegistry();
@@ -449,6 +461,7 @@ try {
 		installModelAuthorization(session, () => allowedModels, { main: true });
 		privateSession = session;
 		evidence.session_created = true;
+		recordPhase("session_ready");
 		let syncReviewUsage: (() => void) | undefined;
 		try {
 			const active = session.getActiveToolNames().sort();
@@ -579,14 +592,15 @@ try {
 						receipts.push(pendingCallReceipt({ call_id: callId, message, requested_model: request.model,
 							session_model: sessionLabel, account: accountIdentityFor(message) }));
 						syncUsage();
-						persistEvidence();
+						recordPhase("provider_stream_started");
 						return;
 					}
 					turns.push({ call_id: boundaryBinder.bindEnd(), message });
 					syncUsage();
-					persistEvidence();
+					recordPhase("provider_turn_ended");
 				});
 				const prompt = readFileSync(request.prompt!, "utf8");
+				recordPhase("prompt_running");
 				await session.prompt(prompt);
 				const last = [...session.messages].reverse().find(message => message.role === "assistant");
 				const text = (last?.content ?? []).filter((part: { type: string }) => part.type === "text").map((part: { text: string }) => part.text).join("");
@@ -638,6 +652,7 @@ try {
 			// call the provider did not identify or meter is named in usage_gaps
 			// instead of being invented.
 			syncReviewUsage?.();
+			recordPhase("session_disposing");
 			await disposePrivate();
 		}
 	}
@@ -660,6 +675,7 @@ try { await disposePrivate(); } catch (error) { problems.push(`cleanup failed: $
 evidence.problems = problems;
 evidence.ok = problems.length === 0;
 evidence.host_completion = "complete";
+recordPhase("complete");
 if (!writeEvidenceAtomically(request.out!, evidence)) throw new Error("cannot persist final reviewer evidence");
 setInterval(() => {}, 1000);
 return await new Promise<never>(() => {});
