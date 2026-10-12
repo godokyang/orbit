@@ -14,6 +14,15 @@ const MAX_FILE_BYTES = 1_000_000;
 const MAX_IMAGE_BYTES = 4_000_000;
 const MAX_RESULTS = 300;
 
+// OMP accepts JSON Schema parameters, not live Zod objects. Keep the same
+// definitions for wire declarations and execution-time validation. Zod's
+// default object parsing strips harness metadata such as the intent field i.
+const readParams = z.object({ path: z.string(), offset: z.number().optional(), limit: z.number().optional() });
+const globParams = z.object({ pattern: z.string(), path: z.string().optional() });
+const grepParams = z.object({
+	pattern: z.string(), path: z.string().optional(), glob: z.string().optional(), ignore_case: z.boolean().optional(),
+});
+
 export class OutsideSnapshotError extends Error {}
 
 /** Traceable fact about one snapshot image this reviewer process actually read. */
@@ -118,17 +127,14 @@ export function createConfinedTools(snapshotRoot: string, options: {
 		label: "Read (snapshot)",
 		description:
 			"Read a text file, or list a directory, inside the fixed review snapshot. File results report exact byte length, final line ending and actual text lines; a terminal LF does not create an extra empty line. An image file (sniffed from its bytes, not its name) returns the picture itself together with its snapshot path, byte count and sha256. Paths are relative to the snapshot root; URLs, internal URIs and paths outside the snapshot are rejected.",
-		parameters: z.object({
-			path: z.string(),
-			offset: z.number().optional(),
-			limit: z.number().optional(),
-		}),
+		parameters: z.toJSONSchema(readParams),
 		async execute(
 			_id: string,
 			params: { path: string; offset?: number; limit?: number },
 			_onUpdate?: unknown,
 			ctx?: { model?: { input?: readonly string[] } },
 		) {
+			params = readParams.parse(params);
 			const target = resolveInside(params.path);
 			const stat = statSync(target);
 			if (stat.isDirectory()) {
@@ -177,8 +183,9 @@ export function createConfinedTools(snapshotRoot: string, options: {
 		name: "glob",
 		label: "Glob (snapshot)",
 		description: "List snapshot files whose snapshot-relative path matches a glob pattern such as `**/*.js`.",
-		parameters: z.object({ pattern: z.string(), path: z.string().optional() }),
+		parameters: z.toJSONSchema(globParams),
 		async execute(_id: string, params: { pattern: string; path?: string }) {
+			params = globParams.parse(params);
 			checkPattern(params.pattern);
 			const base = resolveInside(params.path);
 			const matcher = new Bun.Glob(params.pattern);
@@ -195,13 +202,9 @@ export function createConfinedTools(snapshotRoot: string, options: {
 		name: "grep",
 		label: "Grep (snapshot)",
 		description: "Search snapshot files for a regular expression; prints `path:line: text`.",
-		parameters: z.object({
-			pattern: z.string(),
-			path: z.string().optional(),
-			glob: z.string().optional(),
-			ignore_case: z.boolean().optional(),
-		}),
+		parameters: z.toJSONSchema(grepParams),
 		async execute(_id: string, params: { pattern: string; path?: string; glob?: string; ignore_case?: boolean }) {
+			params = grepParams.parse(params);
 			if (params.glob) checkPattern(params.glob);
 			const base = resolveInside(params.path);
 			const regex = new RegExp(params.pattern, params.ignore_case ? "i" : "");

@@ -21,6 +21,7 @@ import path from "node:path";
 import { recoverCheckResultJson } from "./json-recovery";
 import type { ExtensionAPI, AuthStorage } from "@oh-my-pi/pi-coding-agent";
 import { isUsageLimitOutcome } from "@oh-my-pi/pi-ai/error";
+import { toolWireSchema, validateToolArguments } from "@oh-my-pi/pi-ai";
 import { providerErrorFact } from "./provider-error.ts";
 import { parseProbeModels, probeModelAvailability, type CredentialAvailability } from "./model-probe";
 import { validateCheckResult } from "./check-result";
@@ -476,6 +477,37 @@ try {
 			if (forbidden.length) toolProblems.push(`forbidden tools present: ${forbidden.join(", ")}`);
 			if (evidence.read_tool_is_confined !== true) toolProblems.push("read is not the confined replacement");
 			if ((evidence.global_registry as string[]).length) toolProblems.push("reviewer registered on the global agent registry");
+			if (request.host_probe) {
+				// Exercise the installed SDK boundary, not just direct execute calls.
+				// OMP strips its intent field before validating the tool's own args.
+				const schemas: Record<string, unknown> = {};
+				for (const name of REVIEW_TOOLS) {
+					const tool = session.getToolByName(name);
+					if (!tool) continue;
+					const schema = toolWireSchema(tool);
+					const required = name === "read" ? "path" : "pattern";
+					const args = name === "read" ? { path: ".", offset: 1, limit: 2 }
+						: name === "grep" ? { pattern: "probe", path: ".", glob: "*", ignore_case: true }
+							: { pattern: "*", path: "." };
+					try {
+						const properties = schema.properties as Record<string, unknown> | undefined;
+						if (!Object.keys(args).every(key => properties && key in properties) ||
+							!Array.isArray(schema.required) || !schema.required.includes(required)) {
+							throw new Error("wire schema lost declared parameters");
+						}
+						const parsed = validateToolArguments(tool, { type: "toolCall", id: "schema-probe", name, arguments: args });
+						if (!Object.entries(args).every(([key, value]) => parsed[key] === value)) throw new Error("valid parameters changed");
+						let rejected = false;
+						try { validateToolArguments(tool, { type: "toolCall", id: "missing-probe", name, arguments: {} }); }
+						catch { rejected = true; }
+						if (!rejected) throw new Error("missing required parameter accepted");
+						schemas[name] = { properties: Object.keys(properties!), required: schema.required, missing_required_rejected: true };
+					} catch (error) {
+						toolProblems.push(`${name} schema probe: ${error instanceof Error ? error.message : String(error)}`);
+					}
+				}
+				evidence.tool_schemas = schemas;
+			}
 			problems.push(...toolProblems);
 
 			if (request.probe_outside && toolProblems.length === 0) {

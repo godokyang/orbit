@@ -1,8 +1,10 @@
 # Orbit 当前交接
 
-最后核对：2026-10-12。源码版本以 `package.json` 为准（当前 0.8.9）；用户安装版本、commit 与内容摘要须以 `orbit version --json` 核对，本页不记录。
+最后核对：2026-10-12。源码版本以 `package.json` 为准（当前 0.8.10）；用户安装版本、commit 与内容摘要须以 `orbit version --json` 核对，本页不记录。
 
 ## 当前进展
+
+- **ORBIT-REVIEWER-TOOLS-08**：修复私有 read/grep/glob 将 Zod 实例误作 SDK JSON Schema 的接线；声明显式转换，执行前复用原定义拒绝缺必填，合法 intent 不误拒。OMP 18.9.0 真实零模型宿主已验证三工具 schema 与参数 validator，既有权限测试通过。Root 已复核并触发持续发布授权，patch 升至 0.8.10；提交与本机安装身份以 Git 和公开 version 回读为准，详见[实现记录](../reference/reviewer-tool-schema-20261012.md)。
 
 - **ORBIT-STRUCTURED-RESULT-05**：Root 授权单一完整 json 围栏格式恢复，已实现并按复核修正 JSON 字符串含反引号时的兼容边界。原文保留，内部严格校验不变；18项相关测试及三份原件零模型重放通过预期，GLM两类非法输出仍拒收。Root 已独立复核通过并触发已有持续发布授权，patch 升至 0.8.9；提交与本机安装身份以 Git 和公开 version 回读为准，详见[实现记录](../reference/structured-result-recovery-20261012.md)。
 

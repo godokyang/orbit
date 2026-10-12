@@ -6,6 +6,33 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { createConfinedTools } from "./confined-tools";
 
+test("reviewer tools expose required parameters and reject missing ones while accepting intent", async () => {
+	const snapshot = mkdtempSync(path.join(tmpdir(), "orbit-check-parameters-"));
+	try {
+		writeFileSync(path.join(snapshot, "artifact.txt"), "verified\n");
+		const cases = [
+			{ name: "read", required: "path", args: { path: "artifact.txt" }, fields: ["path", "offset", "limit"], match: /1\|verified/ },
+			{ name: "grep", required: "pattern", args: { pattern: "verified", path: "artifact.txt" }, fields: ["pattern", "path", "glob", "ignore_case"], match: /artifact.txt:1: verified/ },
+			{ name: "glob", required: "pattern", args: { pattern: "*.txt" }, fields: ["pattern", "path"], match: /^artifact.txt$/ },
+		];
+		const tools = createConfinedTools(snapshot);
+		for (const entry of cases) {
+			const tool = tools.find(tool => tool.name === entry.name)!;
+			const schema = JSON.parse(JSON.stringify(tool.parameters));
+			assert.deepEqual(Object.keys(schema.properties).sort(), entry.fields.sort());
+			assert.deepEqual(schema.required, [entry.required]);
+			for (const missing of [{}, { i: "Read the artifact" }]) {
+				await assert.rejects(tool.execute("missing", missing as never), error =>
+					error instanceof Error && error.message.includes(`"${entry.required}"`));
+			}
+			const result = await tool.execute("with-intent", { ...entry.args, i: "Verify artifact" } as never);
+			assert.match(result.content[0].text!, entry.match);
+		}
+	} finally {
+		rmSync(snapshot, { recursive: true, force: true });
+	}
+});
+
 test("a final LF is not an extra empty line in reviewer read or grep", async () => {
 	const snapshot = mkdtempSync(path.join(tmpdir(), "orbit-check-lines-"));
 	try {
