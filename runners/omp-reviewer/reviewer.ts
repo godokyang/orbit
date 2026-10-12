@@ -18,7 +18,7 @@ import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { lstatSync, readFileSync, realpathSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { recoverTrailingJsonObject } from "./json-recovery";
+import { recoverCheckResultJson } from "./json-recovery";
 import type { ExtensionAPI, AuthStorage } from "@oh-my-pi/pi-coding-agent";
 import { isUsageLimitOutcome } from "@oh-my-pi/pi-ai/error";
 import { providerErrorFact } from "./provider-error.ts";
@@ -623,16 +623,13 @@ try {
 					parseError = error instanceof Error ? error.message : String(error);
 				}
 				if (result === undefined) {
-					// Fail-closed recovery: only the complete JSON object at the
-					// very end of the message is accepted, and only when it
-					// validates; earlier balanced objects are prose. The prose
-					// prefix stays visible in raw_text and is recorded as recovery
-					// metadata — never as a problem, because evidence.ok must
-					// reflect a usable verdict.
-					const recovered = recoverTrailingJsonObject(text);
-					if (recovered !== undefined && validateCheckResult(recovered).length === 0) {
-						result = recovered;
-						evidence.json_recovery = "trailing contract-valid JSON object; earlier objects are prose";
+					// Recover only the supported envelope, then apply the same
+					// strict result contract. raw_text below always keeps the
+					// original message, including its fence or prose prefix.
+					const recovered = recoverCheckResultJson(text);
+					if (recovered !== undefined && validateCheckResult(recovered.value).length === 0) {
+						result = recovered.value;
+						evidence.json_recovery = recovered.description;
 					}
 				}
 				const contractProblems = result === undefined

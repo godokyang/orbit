@@ -1,15 +1,15 @@
 import { test } from "bun:test";
 import assert from "node:assert/strict";
-import { recoverTrailingJsonObject } from "./json-recovery";
+import { recoverCheckResultJson } from "./json-recovery";
 import { validateCheckResult } from "./check-result";
 
 // Exact key set of contracts/check-result.schema.json (additionalProperties: false).
 const RESULT = '{"verdict":"continue","reason":"all requirements verified","findings":[],"resolved_ids":[],"next_check_seconds":300,"delivery":{"ready":true,"reason":"delivered answer is visible in the program record"}}';
 
 function recoverAndValidate(text: string): unknown {
-	const recovered = recoverTrailingJsonObject(text);
+	const recovered = recoverCheckResultJson(text);
 	if (recovered === undefined) return undefined;
-	return validateCheckResult(recovered).length === 0 ? recovered : undefined;
+	return validateCheckResult(recovered.value).length === 0 ? recovered.value : undefined;
 }
 
 test("recovers the trailing contract-valid object after a prose prefix (earlier objects are prose)", () => {
@@ -44,4 +44,39 @@ test("rejects anything that is not a contract-valid trailing object", () => {
 	// A trailing object with the wrong shape must not fall back to an earlier object.
 	const badRole = '{"role":"reviewer","verdict":"continue","reason":"x","findings":[],"resolved_ids":[],"next_check_seconds":300,"delivery":{"ready":true,"reason":"r"}}';
 	assert.equal(recoverAndValidate(`prose {"a":1}\n${badRole}`), undefined, "an invalid trailing object fails the result contract");
+});
+
+test("recovers a single whole-message json fence and identifies its envelope", () => {
+	for (const text of [`\`\`\`json\n${RESULT}\n\`\`\``, ` \n\`\`\`json\r\n${RESULT}\r\n\`\`\`\n `]) {
+		assert.deepEqual(recoverAndValidate(text), JSON.parse(RESULT));
+		assert.equal(recoverCheckResultJson(text)?.description, "single whole-message json fence; contract-valid JSON object");
+	}
+});
+
+test("fences do not repair bad JSON, extra fields, or select a nested valid result", () => {
+	const extra = { ...JSON.parse(RESULT), reasoning_compressed: "unexpected field" };
+	for (const body of [JSON.stringify(extra), `${RESULT}}`, `invalid prefix ${RESULT}`, JSON.stringify({ result: JSON.parse(RESULT) })]) {
+		assert.equal(recoverAndValidate(`\`\`\`json\n${body}\n\`\`\``), undefined);
+	}
+});
+
+test("rejects external prose, multiple fences, and incomplete envelopes without fallback", () => {
+	const fenced = `\`\`\`json\n${RESULT}\n\`\`\``;
+	for (const text of [
+		`Explanation\n${fenced}`, `${fenced}\nExplanation`, `${fenced}\n${fenced}`,
+		`\`\`\`json\n${RESULT}`, `${RESULT}\n\`\`\``,
+		`\`\`\`json\ninvalid\n\`\`\`\n${RESULT}`, `prefix \`\`\`json\n${RESULT}`,
+		`\`\`\`javascript\n${RESULT}\n\`\`\``,
+	]) assert.equal(recoverAndValidate(text), undefined);
+});
+
+test("ordinary JSON and the existing prose recovery retain their original result and metadata", () => {
+	assert.deepEqual(validateCheckResult(JSON.parse(RESULT)), []);
+	const text = `Summary with example {"a":1}.\n${RESULT}`;
+	assert.deepEqual(recoverAndValidate(text), JSON.parse(RESULT));
+	assert.equal(recoverCheckResultJson(text)?.description, "trailing contract-valid JSON object; earlier objects are prose");
+	const literal = { ...JSON.parse(RESULT), reason: 'Preserve "quoted" text and the literal ``` marker.' };
+	const prefixed = `Summary.\n${JSON.stringify(literal)}`;
+	assert.deepEqual(recoverAndValidate(prefixed), literal);
+	assert.equal(recoverCheckResultJson(prefixed)?.description, "trailing contract-valid JSON object; earlier objects are prose");
 });

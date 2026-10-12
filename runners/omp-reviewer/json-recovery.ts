@@ -1,3 +1,45 @@
+// Recover only a whole-message json fence or the existing prose-prefix form.
+// A message containing fence markers owns the fence branch: a malformed or
+// ambiguous envelope must never fall through to selecting an inner object.
+// The caller still validates the candidate against the unchanged result schema.
+export function recoverCheckResultJson(text: string): { value: unknown; description: string } | undefined {
+	if (hasFenceOutsideJsonStrings(text)) {
+		const match = /^```json\r?\n([\s\S]*)\r?\n```$/.exec(text.trim());
+		if (!match || /^[ \t]*```/m.test(match[1])) return undefined;
+		try {
+			return { value: JSON.parse(match[1]), description: "single whole-message json fence; contract-valid JSON object" };
+		} catch {
+			return undefined;
+		}
+	}
+	const value = recoverTrailingJsonObject(text);
+	return value === undefined ? undefined : {
+		value, description: "trailing contract-valid JSON object; earlier objects are prose",
+	};
+}
+
+// Only distinguish JSON string contents from envelope markers. This is not
+// Markdown parsing: the strict whole-message match above owns fence syntax.
+function hasFenceOutsideJsonStrings(text: string): boolean {
+	let depth = 0;
+	let inString = false;
+	let escaped = false;
+	for (let i = 0; i < text.length; i++) {
+		const ch = text[i];
+		if (inString) {
+			if (escaped) escaped = false;
+			else if (ch === "\\") escaped = true;
+			else if (ch === '"') inString = false;
+			continue;
+		}
+		if (text.startsWith("```", i)) return true;
+		if (ch === "{" || ch === "[") depth++;
+		else if (ch === "}" || ch === "]") depth = Math.max(0, depth - 1);
+		else if (ch === '"' && depth > 0) inString = true;
+	}
+	return false;
+}
+
 // Recovery for checker final messages that prepend prose to the JSON result.
 // Deliberately conservative: the WHOLE message must parse as JSON first; only
 // when that fails do we accept the complete JSON object that ends at the very

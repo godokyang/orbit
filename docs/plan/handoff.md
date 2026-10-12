@@ -1,8 +1,10 @@
 # Orbit 当前交接
 
-最后核对：2026-10-12。源码版本以 `package.json` 为准（当前 0.8.8）；用户安装版本、commit 与内容摘要须以 `orbit version --json` 核对，本页不记录。
+最后核对：2026-10-12。源码版本以 `package.json` 为准（当前 0.8.9）；用户安装版本、commit 与内容摘要须以 `orbit version --json` 核对，本页不记录。
 
 ## 当前进展
+
+- **ORBIT-STRUCTURED-RESULT-05**：Root 授权单一完整 json 围栏格式恢复，已实现并按复核修正 JSON 字符串含反引号时的兼容边界。原文保留，内部严格校验不变；18项相关测试及三份原件零模型重放通过预期，GLM两类非法输出仍拒收。Root 已独立复核通过并触发已有持续发布授权，patch 升至 0.8.9；提交与本机安装身份以 Git 和公开 version 回读为准，详见[实现记录](../reference/structured-result-recovery-20261012.md)。
 
 - **ORBIT-CHECKER-STARTUP-02**：0.8.7 基线的 GLM 检查实际已进入 provider 流，OMP 外层 startup watchdog 因 trusted factory 保持 pending 而误报模块阶段。仅补内部阶段证据和日志，真实零模型宿主复现与相关既有测试通过。原 check 最终因多余 `}` 被正确拒收为 invalid_result；长等待/模型格式问题未宣称修复。用户要求收束、不新增模型，原运行停止归 Loom Root。用户追加本票提交、推送与本机更新授权，patch 升至 0.8.8；具体提交与安装身份以 Git 和公开 version 回读为准，详见[诊断记录](../reference/checker-startup-20261012.md)。
 
