@@ -209,7 +209,7 @@ module OmpCheckRunnerTest
     assert(!prompt.include?("--cd") && !prompt.include?("attached output schema") && !prompt.include?("skills/orbit"),
            "old Codex mechanism words do not appear in the OMP prompt")
     assert(prompt.include?("Use the SDK read/grep/glob tools on the fixed snapshot") &&
-           prompt.include?("Return JSON matching these fields"),
+           prompt.include?("Call yield with data containing these fields"),
            "the prompt states the SDK tools and the JSON fields")
     assert(prompt.include?("did it only partly") && prompt.include?("verifiable") &&
            prompt.include?("does not reopen") && prompt.include?("not the artifact"),

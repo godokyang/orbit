@@ -18,13 +18,12 @@ import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { lstatSync, readFileSync, realpathSync, mkdirSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { recoverCheckResultJson } from "./json-recovery";
+import { finalizeReview, reviewOutputSchema, reviewSubmissionProblems, type ReviewYieldEvent } from "./review-submission";
 import type { ExtensionAPI, AuthStorage } from "@oh-my-pi/pi-coding-agent";
 import { isUsageLimitOutcome } from "@oh-my-pi/pi-ai/error";
 import { toolWireSchema, validateToolArguments } from "@oh-my-pi/pi-ai";
 import { providerErrorFact } from "./provider-error.ts";
 import { parseProbeModels, probeModelAvailability, type CredentialAvailability } from "./model-probe";
-import { validateCheckResult } from "./check-result";
 import { getBaseConfigRoot, getModelDbPath, getProfileRootDir, resolveProfileEnv, postmortem } from "@oh-my-pi/pi-utils";
 import { createConfinedTools, type SnapshotImageRead } from "./confined-tools.ts";
 import {
@@ -37,7 +36,8 @@ import {
 	type ModelCallTurn,
 } from "./usage-receipt.ts";
 
-const REVIEW_TOOLS = ["read", "grep", "glob"];
+const READ_TOOLS = ["read", "grep", "glob"];
+const REVIEW_TOOLS = [...READ_TOOLS, "yield"];
 const FORBIDDEN_TOOLS = ["write", "edit", "bash", "eval", "task", "hub", "todo", "ask", "web_search", "browser", "lsp", "ast_edit", "notebook", "checkpoint", "rewind", "goal", "manage_skill", "learn"];
 
 type Request = {
@@ -74,7 +74,7 @@ type Request = {
 // the host, using its real process-group signal after collecting completion.
 export default async function reviewerFactory(api: ExtensionAPI): Promise<never> {
 const { AgentRegistry, createAgentSession, discoverAuthStorage, isAuthenticated,
-    ModelRegistry, SessionManager, Settings } = api.pi;
+    ModelRegistry, SessionManager, Settings, finalizeSubprocessOutput } = api.pi;
 function arg(name: string): string | undefined {
 	const index = process.argv.indexOf(`--${name}`);
 	return index === -1 ? undefined : process.argv[index + 1];
@@ -439,6 +439,9 @@ try {
 			}),
 			sessionManager: SessionManager.create(sessionRoot, path.join(profile, "sessions")),
 			toolNames: REVIEW_TOOLS,
+			outputSchema: reviewOutputSchema(),
+			outputSchemaMode: "strict",
+			requireYieldTool: true,
 			restrictToolNames: true,
 			allowRestrictedCustomTools: true,
 			customTools: createConfinedTools(sessionRoot, { onImageRead: fact => snapshotImageReads.push(fact),
@@ -462,6 +465,29 @@ try {
 		installModelAuthorization(session, () => allowedModels, { main: true });
 		privateSession = session;
 		evidence.session_created = true;
+		if (typeof finalizeSubprocessOutput !== "function" || !session.getToolByName("yield")) {
+			throw new Error("native yield and strict output finalizer are required");
+		}
+		const beforeToolCall = session.agent.beforeToolCall;
+		session.agent.beforeToolCall = async (ctx, signal) => {
+			if (ctx.tool.name === "yield") {
+				const errors = reviewSubmissionProblems(finalizeSubprocessOutput, ctx.toolCall.arguments);
+				if (errors.length) return { block: true, reason: `${errors.join("; ")}. Yield the complete corrected report in data.` };
+			}
+			return beforeToolCall?.(ctx, signal);
+		};
+		const yieldEvents: ReviewYieldEvent[] = [];
+		const yieldInputs: unknown[] = [];
+		session.subscribe(event => {
+			if (event.type === "tool_execution_end" && event.toolName === "yield") {
+				yieldEvents.push({ toolCallId: event.toolCallId, isError: event.isError, result: structuredClone(event.result) as ReviewYieldEvent["result"] });
+			}
+			if (event.type === "message_end" && event.message.role === "assistant") {
+				for (const part of event.message.content) {
+					if (part.type === "toolCall" && part.name === "yield") yieldInputs.push(structuredClone(part));
+				}
+			}
+		});
 		recordPhase("session_ready");
 		let syncReviewUsage: (() => void) | undefined;
 		try {
@@ -473,7 +499,7 @@ try {
 			evidence.private_registry = agentRegistry.list().map(ref => ref.id);
 			evidence.global_registry = AgentRegistry.global().list().map(ref => ref.id);
 			const toolProblems: string[] = [];
-			if (active.join() !== [...REVIEW_TOOLS].sort().join()) toolProblems.push(`active tools must be only read/grep/glob, got ${active.join(", ") || "(none)"}`);
+			if (active.join() !== [...REVIEW_TOOLS].sort().join()) toolProblems.push(`active tools must be only read/grep/glob/yield, got ${active.join(", ") || "(none)"}`);
 			if (forbidden.length) toolProblems.push(`forbidden tools present: ${forbidden.join(", ")}`);
 			if (evidence.read_tool_is_confined !== true) toolProblems.push("read is not the confined replacement");
 			if ((evidence.global_registry as string[]).length) toolProblems.push("reviewer registered on the global agent registry");
@@ -481,7 +507,7 @@ try {
 				// Exercise the installed SDK boundary, not just direct execute calls.
 				// OMP strips its intent field before validating the tool's own args.
 				const schemas: Record<string, unknown> = {};
-				for (const name of REVIEW_TOOLS) {
+				for (const name of READ_TOOLS) {
 					const tool = session.getToolByName(name);
 					if (!tool) continue;
 					const schema = toolWireSchema(tool);
@@ -638,39 +664,22 @@ try {
 				const text = (last?.content ?? []).filter((part: { type: string }) => part.type === "text").map((part: { text: string }) => part.text).join("");
 				// A mid-session provider failure arrives as an assistant turn with
 				// stopReason "error" and the provider's own error fields (pi-ai
-				// public surface). It fails the check before any contract parsing:
-				// even a trailing contract-valid JSON in such a turn is leftover
-				// content, never a verdict. raw_text, result and the usage
-				// receipts/gaps are still recorded as-is below.
+				// public surface). It fails the check even if a prior tool submission
+				// was valid. Text, submission and usage evidence are still retained.
 				const providerError = providerErrorFact(last, isUsageLimitOutcome);
 				if (providerError) {
 					evidence.error = { ...providerError };
 					problems.push(`provider error: ${providerError.detail}`);
 				}
-				let result: unknown;
-				let parseError: string | undefined;
-				try {
-					result = JSON.parse(text.trim());
-				} catch (error) {
-					parseError = error instanceof Error ? error.message : String(error);
-				}
-				if (result === undefined) {
-					// Recover only the supported envelope, then apply the same
-					// strict result contract. raw_text below always keeps the
-					// original message, including its fence or prose prefix.
-					const recovered = recoverCheckResultJson(text);
-					if (recovered !== undefined && validateCheckResult(recovered.value).length === 0) {
-						result = recovered.value;
-						evidence.json_recovery = recovered.description;
-					}
-				}
-				const contractProblems = result === undefined
-					? [`final message is not valid JSON${parseError ? `: ${parseError}` : ""}`]
-					: validateCheckResult(result);
-				problems.push(...contractProblems);
+				// Final prose is evidence only. A successful, strictly validated tool
+				// submission is mandatory, even if the text happens to be valid JSON.
+				const submitted = finalizeReview(finalizeSubprocessOutput, yieldEvents);
+				problems.push(...submitted.problems);
 				evidence.raw_text = text;
-				evidence.result = contractProblems.length === 0 ? result : null;
-				evidence.contract_problems = contractProblems;
+				evidence.result = submitted.result;
+				evidence.structured_submission = { tool: "yield", inputs: yieldInputs, events: yieldEvents,
+					finalized: submitted.finalized };
+				evidence.contract_problems = submitted.problems;
 				if (!evidence.model) problems.push("session did not report an actual provider/model");
 				else if (evidence.model !== request.model) problems.push(`model drift: requested ${request.model}, session resolved ${evidence.model}`);
 			}

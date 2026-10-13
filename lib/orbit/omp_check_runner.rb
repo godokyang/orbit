@@ -366,13 +366,15 @@ module Orbit
                "The original workspace is not your working directory and is not writable from this session. " \
                "Judge the snapshot files, not a model plan or summary."
       parts << "## Output\n\n" \
-               "Return JSON matching these fields and nothing else: verdict, reason, findings, " \
+               "Call yield with data containing these fields and nothing else: verdict, reason, findings, " \
                "resolved_ids, next_check_seconds, delivery, coverage. verdict is one of: " \
                "#{self.class.result_structure[:verdicts].join(', ')}. " \
-               "Each findings object has exactly id, requirement, evidence and action — no severity or extra keys. " \
+               "findings is an array (use [] when empty); each findings object has exactly id, requirement, evidence and action — no severity or extra keys. " \
                "resolved_ids is a list of strings. next_check_seconds is a positive integer. " \
                "delivery is an object with ready (boolean) and reason (non-empty string). " \
-               "No markdown and no code fences."
+               "Submit the complete report as tool arguments, not a JSON string or final text. " \
+               "If the tool rejects it, correct the errors and resubmit the complete report. " \
+               "After the tool accepts the report, end the review. Final text cannot substitute for submission."
       parts.join("\n\n")
     end
 

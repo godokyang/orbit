@@ -65,7 +65,7 @@ if (evidence.ok !== true) failures.push(`ok is not true: ${JSON.stringify(eviden
 if (evidence.review_ran !== false || evidence.result !== null) failures.push("no-model run forged a check result");
 if (evidence.model !== undefined && evidence.model !== null) failures.push(`model was contacted or recorded: ${evidence.model}`);
 if (JSON.stringify(evidence).includes(secret)) failures.push("evidence contains outside secret");
-if (evidence.active_tools?.join() !== "glob,grep,read") failures.push(`active tools: ${evidence.active_tools}`);
+if (evidence.active_tools?.join() !== "glob,grep,read,yield") failures.push(`active tools: ${evidence.active_tools}`);
 if (evidence.forbidden_tools_present?.length) failures.push(`forbidden tools: ${evidence.forbidden_tools_present}`);
 if (evidence.read_tool_is_confined !== true) failures.push("session read tool is not the confined replacement");
 if (evidence.global_registry?.length) failures.push(`global registry: ${evidence.global_registry}`);
