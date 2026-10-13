@@ -122,3 +122,19 @@
 优先完成需求主线；测试只能作为辅助验证手段，不能阻塞核心功能实现。
 
 > 遇到"为了覆盖用例连主线任务都不管"的情况，本质是优先级排序错误，不是测试能力不足。
+
+## TeamAI 共享规范与技能
+
+共享源为 [team-rules](https://github.com/zeen-chat/team-rules)。默认只选 `core`：8 个 global、21 个 project 技能；不选可选技能组和 MCP。项目事实、已有规范与当前用户授权继续生效。
+
+新电脑先按 [首次安装](https://github.com/zeen-chat/team-rules/blob/main/docs/agent-integration.md#新电脑首次安装)准备环境，再在本仓根目录运行：
+
+```bash
+teamai init https://github.com/zeen-chat/team-rules.git --scope project --role core
+```
+
+选择实际使用的工具；OMP、OpenCode、Kimi 按共享指南用 `--agent` 指定。已有安装用 `teamai pull` 同步，检查 `teamai doctor` 和 `.teamai/native-skills-result.json`；报告须为 `complete` 且指向当前项目，再新开会话。
+
+按任务读取项目根目录 `.teamai/docs/README.md` 所列正文；同步和网页链接不代表模型已读取。技能由 npx skills 管理，TeamAI 按组调用安装；安装目录、缓存、链接和本机凭据不提交。项目自定义技能继续在 `.agents/skills/orbit-real-acceptance/` 维护。
+
+使用 OpenCode 时，先读取项目根目录 `.opencode/rules/engineering.md`、`.opencode/rules/testing.md`、`.opencode/rules/workflow.md`。共享文件缺失时先 `teamai pull`；仍不可读则报告具体缺失。

@@ -10,3 +10,15 @@ test_apps/
 node_modules/
 .env
 /docs/reference/zeen-orbit-handoff-20260913/
+
+# TeamAI / npx skills 本机安装产物；项目自定义技能继续跟踪。
+/.teamai/
+/.agents/skills/*
+!/.agents/skills/orbit-real-acceptance/
+/.codex/
+/.omp/
+/.pi/
+/.cursor/
+/.opencode/
+/.kimi/
+/skills-lock.json
