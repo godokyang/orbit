@@ -4,6 +4,10 @@
 
 ## 当前进展
 
+- **Loom 旧派发结算修复（2026-10-14，未更新全局安装）**：要求修订后，已被 Root `failed/rejected` 的旧派发因不再匹配当前输入而永久 `registered`。运行时现对精确身份及真实输出作核对，再经实际 `stop_member` 屏障记停止后拒收；旧 `accepted`、未知停止、新派发与当前终检门均不放宽，原失败记录不改。`task_runtime_test.rb` 全部通过，新增三项覆盖正常收尾、异步未收完拒绝收尾及旧接受不提升。Loom 同一活动 Goal `ff1ef948-416d-434c-9ae4-987fc863493d` 的观察进程经源码入口重新附着，四个真实成员均为 `rejected`／`execution_status=stopped`，实际停止确认、工具零与异步结算均为真，`accepted_at` 仍为空；原第34次手动终检恢复为当前可申请完成。未手工改写任务记录或加载新 OMP 宿主插件，未改全局安装；随后公开完成申请已确认，Goal 的独立检查与实际停止均通过。
+
+- **Loom Root 交付归属修复（2026-10-14，源码未安装）**：独立用户问题之后，宿主忽略真实 Orbit `custom_message`，导致后续任务报告仍归到旧用户消息。`omp-host.mjs` 已按实际 native 分支采用 Orbit 的耐久标记并截断近期观察，运行时继续按本任务发送集合验证，未放宽独立问答或完成门。回归在旧实现以 `independent-user != task-wake-marker` 失败；修复后 `omp_collab_evidence_test.mjs`、`omp_native_gate_test.mjs` 与 `task_runtime_test.rb` 通过。当时 Loom Root 的公开只读接口证明：已送达的本任务 Orbit 标记存在，但旧宿主仍返回 iOS 独立问题 `c3275471`。该 OMP 宿主未热改或全局更新，不能把源码测试称作宿主已恢复。用户随后授权本轮提交与推送，发布与全局安装不在此授权内。
+
 - **ORBIT-REVIEW-OUTPUT-10**：私有检查者已接 OMP 原生 `outputSchema` / `requireYieldTool` / `yield`；完整报告必须通过原参数严格校验及成功提交门，末尾文本仅留证，不再解析为报告。相关零模型测试与官方 18.9 源码定点验证通过，四类旧错误原件仍拒收。Root 已复核并触发持续发布授权，patch 升至 0.8.11；补齐含 yield 的会话工具断言，真实 OMP 18.9.0 零模型逃逸检查通过并释放。未调用模型或复测弹窗；提交与安装身份以 Git、公开 version 及 release 回执为准。接口、SDK 局部适配和未验证范围见[实现记录](../reference/reviewer-structured-output-20261013.md)。
 
 - **ORBIT-REVIEWER-TOOLS-08**：修复私有 read/grep/glob 将 Zod 实例误作 SDK JSON Schema 的接线；声明显式转换，执行前复用原定义拒绝缺必填，合法 intent 不误拒。OMP 18.9.0 真实零模型宿主已验证三工具 schema 与参数 validator，既有权限测试通过。Root 已复核并触发持续发布授权，patch 升至 0.8.10；提交与本机安装身份以 Git 和公开 version 回读为准，详见[实现记录](../reference/reviewer-tool-schema-20261012.md)。

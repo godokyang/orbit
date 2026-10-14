@@ -245,6 +245,33 @@ try {
   const withTurn = await request(taskDir, 'state', { session: 'root' });
   assert.equal(withTurn.last_turn_user_message_id, 'original', 'the last assistant turn names the native user message it answers');
 
+  // A task wake after an independent question must restore the task origin.
+  // The durable Orbit marker differs from the native branch entry id.
+  const branch = root.sessionManager.getBranch();
+  branch.push(
+    { type: 'message', id: 'independent-user', message: { role: 'user', content: 'Close the simulator.' } },
+    { type: 'message', id: 'independent-answer', message: { role: 'assistant', content: 'Simulator closed.' } }
+  );
+  assert.equal((await request(taskDir, 'state', { session: 'root' })).last_turn_user_message_id, 'independent-user');
+  branch.push(
+    { type: 'custom_message', id: 'native-wake', customType: 'orbit',
+      details: { orbitMessage: 'task-wake-marker' }, content: 'Continue the original task.' },
+    { type: 'message', id: 'resumed-work', message: { role: 'assistant', content: 'Checking the task result.' } },
+    { type: 'message', id: 'resumed-delivery', message: { role: 'assistant', content: 'Task result delivered.' } }
+  );
+  const resumed = await request(taskDir, 'state', { session: 'root' });
+  assert.equal(resumed.last_turn_user_message_id, 'task-wake-marker');
+  assert.deepEqual(resumed.observations.filter(o => o.kind === 'prior_agent_message').map(o => o.turn_id), ['resumed-work'],
+    'the resumed task history excludes the unrelated question and answer');
+  branch.push(
+    { type: 'message', id: 'next-question', message: { role: 'user', content: 'An independent question.' } },
+    { type: 'custom_message', id: 'other-extension', customType: 'not-orbit',
+      details: { orbitMessage: 'task-wake-marker' }, content: 'Not an Orbit wake.' },
+    { type: 'message', id: 'next-answer', message: { role: 'assistant', content: 'Independent answer.' } }
+  );
+  assert.equal((await request(taskDir, 'state', { session: 'root' })).last_turn_user_message_id, 'next-question',
+    'a later user question supersedes the wake; another extension cannot supply its marker');
+
   // Rollover: more attributed observations than the 500-entry buffer cap.
   for (let n = 0; n < 520; n++)
     await emit('tool_result', { toolName: 'hub', toolCallId: `roll-${n}`, isError: false,

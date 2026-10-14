@@ -2210,21 +2210,37 @@ module Orbit
         return true
       end
 
-      # Business verdicts require the current evidence binding.
       dispatch = current_member_dispatch(member)
+      stopped_rejection = false
+      # A version change must not strand an explicitly rejected execution.
+      # This closes only that exact old attempt, through the real stop barrier;
+      # it grants neither current delivery acceptance nor native acceptedAt.
+      if dispatch.nil? && %w[rejected failed].include?(identity["status"])
+        return false unless identity["model"].is_a?(String) && !identity["model"].empty? &&
+                            identity["model"] == member["model"]
+        return false unless provably_idle_for_auto_release?(member, observed)
+
+        delivery = current_dispatch_delivery(result, identity)
+        return false unless delivery
+        stopped = stop_omp_native_member(member, [])
+        return false if stopped["error"]
+
+        dispatch = identity
+        stopped_rejection = true
+      end
       return false unless dispatch.is_a?(Hash)
       return false unless WorkUnitStore::FINISH_STATUSES.include?(dispatch["status"])
 
       # A settlement invalidated by a real new turn must not be reborn from
       # the same finished dispatch: without a NEW Root finish or a new native
       # acceptance, the old verdict cannot settle the member's current turn.
-      return false if Array(member["settlement_history"]).any? do |entry|
+      return false if !stopped_rejection && Array(member["settlement_history"]).any? do |entry|
         entry.is_a?(Hash) && entry["tool_call_id"] == dispatch["tool_call_id"] &&
           entry["finished_at"] == dispatch["finished_at"] &&
           Array(entry["reasons"]).include?("new_turn_observed")
       end
 
-      delivery = current_dispatch_delivery(result, dispatch)
+      delivery ||= current_dispatch_delivery(result, dispatch)
       return false unless delivery
 
       member["status"] = dispatch["status"] == "accepted" ? "completed" : "rejected"
@@ -2233,6 +2249,7 @@ module Orbit
                                      "tool_call_id" => dispatch["tool_call_id"],
                                      "finished_at" => dispatch["finished_at"],
                                      "settled_at" => Time.now.utc.iso8601, "delivery" => delivery }
+      member["settlement_basis"]["stopped_after_rejection"] = true if stopped_rejection
       @record.event("member_settled", "thread_id" => member["thread_id"], "status" => member["status"],
                     "source" => member["result_delivery"], "tool_call_id" => dispatch["tool_call_id"])
       true

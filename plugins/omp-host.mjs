@@ -2189,13 +2189,20 @@ export function installOmpExtension(pi, sdk) {
     const session = entry.session;
     const branch = session.sessionManager.getBranch();
     let lastIndex = -1;
-    let lastUserBeforeLastAssistant = null;
+    let lastTurnOrigin = null;
+    let lastOriginIndex = -1;
     for (let i = branch.length - 1; i >= 0; i--) {
       const item = branch[i];
       if (lastIndex < 0) {
         if (item.type === 'message' && item.message.role === 'assistant') lastIndex = i;
       } else if (item.type === 'message' && item.message.role === 'user') {
-        lastUserBeforeLastAssistant = item.id;
+        lastTurnOrigin = item.id;
+        lastOriginIndex = i;
+        break;
+      } else if (item.type === 'custom_message' && item.customType === 'orbit'
+        && typeof item.details?.orbitMessage === 'string' && item.details.orbitMessage.length > 0) {
+        lastTurnOrigin = item.details.orbitMessage;
+        lastOriginIndex = i;
         break;
       }
     }
@@ -2212,8 +2219,8 @@ export function installOmpExtension(pi, sdk) {
     }
     // Bounded RECENT history: process observation (stuck/off_track) must see
     // consecutive failed turns, not just the last one. We collect events
-    // between the nearest user boundary and the last assistant (the CURRENT
-    // user turn's real history only — an older task's or an unrelated user
+    // between the nearest user/Orbit wake boundary and the last assistant
+    // (the CURRENT turn's real history only — an older task's or unrelated
     // turn's evidence never enters), then keep only the NEWEST N observation
     // events in native order. Older events are summarized by one truthful
     // omission marker with a real count — never silently dropped. Without a
@@ -2222,8 +2229,8 @@ export function installOmpExtension(pi, sdk) {
     // N counts observation EVENTS (assistant/toolResult entries), not whole
     // rounds; it is large enough to compare a consecutive-failure run and
     // bounded so the whole branch is never copied into memory.
-    if (lastUserBeforeLastAssistant !== null) {
-      const boundary = branch.findIndex(item => item.id === lastUserBeforeLastAssistant);
+    if (lastTurnOrigin !== null) {
+      const boundary = lastOriginIndex;
       if (boundary >= 0) {
         let total = 0;
         for (let i = boundary + 1; i < lastIndex; i++) {
@@ -2251,11 +2258,12 @@ export function installOmpExtension(pi, sdk) {
         if (total > kept) observations.unshift({ kind: 'omitted_older_history', count: total - kept });
       }
     }
-    // The nearest native user before the last assistant is the origin of
-    // last_turn_id once that turn completes. Orbit injections are not users.
+    // A wake uses its durable marker, not its native entry id. The runtime
+    // checks that marker against this task's sent IDs; foreign wakes cannot
+    // attribute a reply to this task and never become user amendments.
     return { thread_id: entry.id, cwd: session.sessionManager.getCwd(), status: busy ? 'active' : 'idle', interrupted: entry.interrupted,
       turn_id: busy ? last?.id : null, last_turn_id: last?.id || (entry.error ? 'delivery-error' : null),
-      last_turn_user_message_id: lastUserBeforeLastAssistant,
+      last_turn_user_message_id: lastTurnOrigin,
       last_turn_status: entry.interrupted ? 'interrupted' : busy ? 'inProgress' : entry.error || ['error', 'aborted'].includes(message?.stopReason) ? 'failed' : last ? 'completed' : null,
       observations: entry.error ? [...observations, { kind: 'error', text: entry.error }] : observations,
       active_tools: entry.activeTools.size, async_jobs: session.getAsyncJobSnapshot(), session_file: sessionFileFor(entry.id),

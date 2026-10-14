@@ -3373,6 +3373,92 @@ fixture do |root, record, host, checker, runtime|
   assert(runtime.send(:members_settled?), "a rejected member counts as settled")
 end
 
+# A Root-failed old-input attempt must not strand a later valid final check.
+# It is rejected only after the actual stop barrier, never accepted or rewritten.
+fixture do |root, record, host, checker, runtime|
+  now = Time.now.to_f
+  id = "orbit-m-obsolete"
+  host.define_singleton_method(:send_member) { |_member_id, _text| { "id" => "amendment-delivered" } }
+  settlement_member!(record, host, root, member_id: id, output: true,
+                     model: "zenmux/deepseek/deepseek-v4.1-flash")
+  runtime.tick(now: now)
+  unit = bind_unit!(record, runtime, member_id: id, call_id: "call-obsolete", status: nil)
+  record.submit("amend", "text" => "Use the corrected scope", "source" => { "kind" => "explicit_text" })
+  runtime.tick(now: now + 1)
+  units = Orbit::WorkUnitStore.new(record)
+  units.finish(unit["id"], status: "failed", result: "Superseded by correction",
+               verification: "Root preserved the partial result")
+  failed = units.read(unit["id"])
+  host.member_state(id)["async_jobs"] = { "running" => [] }
+  host.finish("corrected-delivery")
+  record.submit("check")
+  runtime.tick(now: now + 2)
+  member = record.state["members"].first
+  assert(member["status"] == "rejected" && member["accepted_at"].nil? && member["error"].nil? &&
+         member["execution_status"] == "stopped" && member.dig("stop_confirmation", "confirmed") == true,
+         "old failed work closes as physically stopped rejection, not acceptance or provider failure")
+  assert(units.read(unit["id"]) == failed, "the original failure and dispatch history remain unchanged")
+  checker.result = answer("complete")
+  runtime.tick(now: now + 3)
+  runtime.tick(now: now + 4)
+  checker.result = answer("complete")
+  runtime.tick(now: now + 5)
+  assert(host.member_stops == [id] && record.state["finalization_notices"].length == 1,
+         "confirmed closure releases the current manual check after the earlier stale check, without repeated stops")
+  bind_unit!(record, runtime, member_id: id, call_id: "call-new-attempt", status: nil)
+  runtime.tick(now: now + 6)
+  assert(record.state["members"].first["status"] == "registered",
+         "a later actual dispatch cannot borrow the old stop-backed rejection")
+end
+
+fixture do |root, record, host, checker, runtime|
+  now = Time.now.to_f
+  id = "orbit-m-unreaped"
+  host.define_singleton_method(:send_member) { |_member_id, _text| { "id" => "amendment-delivered" } }
+  settlement_member!(record, host, root, member_id: id, output: true,
+                     model: "zenmux/deepseek/deepseek-v4.1-flash")
+  runtime.tick(now: now)
+  unit = bind_unit!(record, runtime, member_id: id, call_id: "call-unreaped", status: nil)
+  record.submit("amend", "text" => "Corrected scope", "source" => { "kind" => "explicit_text" })
+  runtime.tick(now: now + 1)
+  Orbit::WorkUnitStore.new(record).finish(unit["id"], status: "rejected", result: "Obsolete attempt",
+                                         verification: "Root rejected obsolete work")
+  host.member_state(id)["async_jobs"] = { "running" => [] }
+  host.define_singleton_method(:stop_member) do |_id|
+    { "confirmed" => true, "active_tools_after" => 0, "async_jobs_settled" => false }
+  end
+  host.finish("corrected-delivery")
+  record.submit("check")
+  runtime.tick(now: now + 2)
+  checker.result = answer("complete")
+  runtime.tick(now: now + 3)
+  runtime.tick(now: now + 4)
+  checker.result = answer("complete")
+  runtime.tick(now: now + 5)
+  member = record.state["members"].first
+  assert(member["status"] == "registered" && member["execution_status"].nil? &&
+         record.state["finalization_notices"].empty? && record.state["pending_finalization"],
+         "unreaped background work keeps the old rejection and CURRENT completion gate unsettled")
+end
+
+fixture do |root, record, host, _checker, runtime|
+  now = Time.now.to_f
+  id = "orbit-m-stale-acceptance"
+  host.define_singleton_method(:send_member) { |_member_id, _text| { "id" => "amendment-delivered" } }
+  settlement_member!(record, host, root, member_id: id, output: true,
+                     model: "zenmux/deepseek/deepseek-v4.1-flash")
+  runtime.tick(now: now)
+  bind_unit!(record, runtime, member_id: id, call_id: "call-stale-acceptance", status: "accepted")
+  host.member_state(id)["streaming"] = true
+  record.submit("amend", "text" => "Different acceptance scope", "source" => { "kind" => "explicit_text" })
+  runtime.tick(now: now + 1)
+  host.member_state(id)["streaming"] = false
+  host.member_state(id)["async_jobs"] = { "running" => [] }
+  runtime.tick(now: now + 2)
+  assert(record.state["members"].first["status"] == "registered" && Array(host.member_stops).empty?,
+         "an old accepted verdict neither triggers rejection cleanup nor becomes current acceptance")
+end
+
 # No provable delivery, no settlement: an accepted verdict without a fresh
 # native output keeps the member registered and the finalization queued.
 fixture do |root, record, host, checker, runtime|
