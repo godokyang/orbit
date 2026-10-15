@@ -3286,6 +3286,7 @@ module Orbit
         # A checker verdict is not completion. Process and automatic checks
         # are ignored. A qualified manual artifact review only wakes Root;
         # complete is recorded later, after Root's explicit stop turn finishes.
+        send_correction(result.merge("findings" => accepted_findings), scope: scope, current_digest: current_digest) unless accepted_findings.empty?
         if scope["kind"] == "process"
           @record.event("process_check_complete_ignored", "number" => scope["number"])
         elsif scope["manual"] != true

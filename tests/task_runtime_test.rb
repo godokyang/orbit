@@ -355,8 +355,8 @@ fixture do |root, record, host, checker, _runtime|
          "tests from an earlier artifact stay historical; their binding is never retagged")
 end
 
-# A changed artifact invalidates an old pass. A current finding is corrected;
-# a later false positive can be independently overturned without a vote.
+# A changed artifact invalidates an old pass. A current finding is corrected
+# even with a complete verdict; a later false positive can be overturned.
 fixture do |root, record, host, checker, runtime|
   now = Time.now.to_f
   runtime.tick(now: now)
@@ -371,7 +371,7 @@ fixture do |root, record, host, checker, runtime|
   runtime.tick(now: now + 2.5)
   assert(checker.calls.length == 2, "a stale result does not self-restart; the explicit manual check reviews the current version")
   missing = { "id" => "missing", "requirement" => "second behavior", "evidence" => "absent in artifact", "action" => "implement second behavior" }
-  checker.result = answer("correct", findings: [missing])
+  checker.result = answer("complete", findings: [missing])
   runtime.tick(now: now + 3)
   assert(host.messages.length == 1, "current correction must reach existing Root")
 

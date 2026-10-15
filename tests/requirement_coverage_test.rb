@@ -66,6 +66,17 @@ module RequirementCoverageTest
       assert(status["ready"] == false && status["gap"].include?("complete"),
              "a checker that did not enumerate everything is not delivery coverage")
     end
+
+    # Isolated integration workspaces routinely exceed short label bounds.
+    with_coverage do |coverage|
+      root = "/Users/member/project/.loom/runtime/work/#{"a" * 64}/#{"b" * 36}/project"
+      coverage.record(check_id: "long-path", kind: "artifact", role: "reviewer",
+                      coverage: coverage(), **binding(root: root))
+      assert(coverage.status(**binding(root: root))["ready"] == true,
+             "long artifact paths survive persistence and exact binding readback")
+      assert(coverage.status(**binding(root: "#{root}-other"))["current"] == false,
+             "accepting a long path never grants coverage to a different root")
+    end
   end
 
   # Any input/artifact/root revision or a stale record revokes currency.

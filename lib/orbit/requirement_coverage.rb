@@ -48,6 +48,7 @@ module Orbit
     # Same blank set as the checker's trim (JavaScript trim parity).
     BLANK_REF = /\A[\u0009-\u000D\u0020\u00A0\u1680\u2000-\u200A\u2028\u2029\u202F\u205F\u3000\uFEFF]*\z/
     MAX_LABEL = 128
+    MAX_PATH = 4096
 
     class Error < StandardError; end
 
@@ -72,7 +73,7 @@ module Orbit
         "recorded_at" => Time.now.utc.iso8601,
         "input_digest" => label(input_digest, "input_digest"),
         "artifact_digest" => label(artifact_digest, "artifact_digest"),
-        "artifact_root" => label(artifact_root, "artifact_root"),
+        "artifact_root" => label(artifact_root, "artifact_root", max: MAX_PATH),
         "stale" => stale == true,
         "coverage" => validate_coverage(coverage)
       }
@@ -173,9 +174,9 @@ module Orbit
       { "complete" => coverage["complete"], "items" => cleaned }
     end
 
-    def label(value, name)
+    def label(value, name, max: MAX_LABEL)
       text = value.to_s
-      raise Error, "#{name} must be 1..#{MAX_LABEL} characters" if text.empty? || text.length > MAX_LABEL
+      raise Error, "#{name} must be 1..#{max} characters" if text.empty? || text.length > max
 
       text
     end
@@ -196,7 +197,7 @@ module Orbit
           KINDS.include?(entry["kind"]) && [true, false].include?(entry["stale"])
         %w[check_id role recorded_at input_digest artifact_digest artifact_root].each do |key|
           raise Error, "coverage history has an invalid #{key}" unless entry[key].is_a?(String)
-          label(entry[key], key)
+          label(entry[key], key, max: key == "artifact_root" ? MAX_PATH : MAX_LABEL)
         end
         validate_coverage(entry["coverage"])
       end
