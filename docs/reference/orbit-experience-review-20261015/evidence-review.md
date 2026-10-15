@@ -63,6 +63,8 @@ runners/omp-reviewer/node_modules/@oh-my-pi/pi-natives/native/index.js
 
 源码入口：[编辑解析加载与权限门](../../../plugins/work-unit-scope.mjs)、[宿主调用接缝](../../../plugins/omp-host.mjs)、[安装管理](../../../scripts/manage-install.rb)。日志入口：任务 `collaboration.jsonl` 的 `work_unit_tool_blocked`、`state.json.member_blocks`、`work-units.json`。
 
+2026-10-16 独立审核后的补充确认：编辑加载回归可先独立修复，不必等待取消名单的整体改造；这补充了此前“替代仅修复依赖”的实施顺序，不撤回成员自主选择文件的决定。最新修改定位见[补充方案](agreed-change-plan.md#独立审核后补充确认2026-10-16)。
+
 <a id="exp-02"></a>
 ### EXP-02：裁定证据在压缩后失真
 
