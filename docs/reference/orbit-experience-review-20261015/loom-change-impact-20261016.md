@@ -2,7 +2,7 @@
 
 日期：2026-10-16。用户要求优先判断 Loom 的实际影响。本文是源码与存量日志核对后的建议，不新增已确认规则。返回[讨论入口](README.md)；已确认内容见[改动方案](agreed-change-plan.md)，外部资料见[研究记录](decision-followup-research-20261016.md)。
 
-后续确认：用户已接受本轮影响判断，要求先完成 Orbit，再做 Loom 协同。EXP-13 修复和续接联动纳入[执行计划](../../plan/agent-autonomy-implementation.md)；以下保留分析时的证据与建议表述，不表示已经实现。
+后续确认：用户已接受本轮影响判断，要求本次 Goal 只完成 Orbit，Loom 协同等用户另行通知。EXP-13 修复和续接联动纳入[执行计划](../../plan/agent-autonomy-implementation.md)；以下保留分析时的证据与建议表述，不表示已经实现。
 
 ## 结论
 
