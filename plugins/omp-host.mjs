@@ -445,7 +445,7 @@ function pickerRow(entry) {
   };
 }
 
-export function createModelPicker({ roles, role = null, commit, done, listRows = PICKER_LIST_ROWS }) {
+export function createModelPicker({ roles, role = null, commit, done, listRows = PICKER_LIST_ROWS, theme = null }) {
   const views = new Map();
   // One independent view per role. `configured=false` is "never configured": the
   // rows come from the inherited legacy candidates and the role keeps its
@@ -464,7 +464,7 @@ export function createModelPicker({ roles, role = null, commit, done, listRows =
       configured: definition.configured === true, roleScoped: definition.roleScoped !== false,
       statusNote: definition.statusNote || null,
       rowFor: new Map(), current: [], selected: new Set(), base: new Set(),
-      query: '', cursor: 0, scroll: 0,
+      query: '', cursor: 0, scroll: 0, category: 'all', focus: 'models',
     };
     loadView(state, definition);
     views.set(state.role, state);
@@ -483,7 +483,22 @@ export function createModelPicker({ roles, role = null, commit, done, listRows =
   let closed = false;
   const finish = result => { if (!closed) { closed = true; done(result); } };
   const current = () => views.get(active);
-  const filtered = () => { const state = current(); return state.query ? state.current.filter(entry => pickerQueryMatches(entry.id, state.query)) : state.current; };
+  const providerOf = id => id.split('/')[0];
+  const categories = state => [
+    { id: 'all', label: '全部模型', count: state.current.length },
+    { id: 'selected', label: '已选模型', count: state.selected.size },
+    ...[...new Set(state.current.map(entry => providerOf(entry.id)))].sort().map(provider => ({
+      id: `provider:${provider}`, label: provider,
+      count: state.current.filter(entry => providerOf(entry.id) === provider).length,
+    })),
+  ];
+  const filtered = () => {
+    const state = current();
+    return state.current.filter(entry =>
+      (state.category === 'all' || (state.category === 'selected'
+        ? state.selected.has(entry.id) : state.category === `provider:${providerOf(entry.id)}`)) &&
+      (!state.query || pickerQueryMatches(entry.id, state.query)));
+  };
   const deltaOf = state => pickerNetDelta(state.current, state.base, state.selected);
   const pending = state => { const delta = deltaOf(state); return delta.add.length > 0 || delta.remove.length > 0; };
   const clampCursor = () => {
@@ -524,7 +539,17 @@ export function createModelPicker({ roles, role = null, commit, done, listRows =
   };
 
   function render(width) {
-    const clip = lines => lines.map(line => line.length > width ? line.slice(0, width - 1) + '…' : line);
+    // Like OMP's HubFrame: measure terminal cells, not JS string length.
+    const cells = text => typeof Bun !== 'undefined' ? Bun.stringWidth(text) : [...text].reduce((n, ch) =>
+      n + (/\p{Mark}/u.test(ch) ? 0 : /[\u1100-\u115f\u2329-\u232a\u2e80-\ua4cf\uac00-\ud7a3\uf900-\ufaff\ufe10-\ufe6f\uff01-\uff60\uffe0-\uffe6]|\p{Extended_Pictographic}/u.test(ch) ? 2 : 1), 0);
+    const fit = (text, limit) => {
+      if (cells(text) <= limit) return text;
+      let out = '';
+      for (const ch of text) { if (cells(out + ch) > limit - 1) break; out += ch; }
+      return out + '…';
+    };
+    const paint = (color, text) => typeof theme?.fg === 'function' ? theme.fg(color, text) : text;
+    const clip = lines => lines.map(line => fit(line, width));
     const state = current();
     // Step 1: pick the role that this invocation edits (skipped when --role
     // already named it). Each row carries its own pool state so an unconfigured
@@ -568,7 +593,7 @@ export function createModelPicker({ roles, role = null, commit, done, listRows =
       for (let index = start; index < stop; index++) {
         const entry = rows[index];
         const mark = state.selected.has(entry.id) ? '[x]' : '[ ]';
-        const pointer = index === state.cursor ? '>' : ' ';
+        const pointer = index === state.cursor ? (state.focus === 'models' ? '>' : '•') : ' ';
         const tag = entry.available ? '' : '  · 当前不可选，仅可移出';
         const evidence = entry.evidenceStatus ? `  · 证据 ${entry.evidenceStatus}` : '';
         const overview = entry.overviewStatus ? `  · 概述 ${entry.overviewStatus}` : '';
@@ -580,13 +605,66 @@ export function createModelPicker({ roles, role = null, commit, done, listRows =
       body.push(state.query ? '（无匹配模型；Backspace 删词后重试）' : '（当前会话没有可选模型）');
     }
     const footer = [
-      '↑/↓ 移动 · Space 勾选/取消 · Backspace 删搜索 · Tab 换角色（先保存）· Enter 保存本角色 · Esc 取消',
+      ...(state.focus === 'models' ? ['Space 勾选/取消 · Enter 保存本角色 · Esc 取消'] : []),
+      '输入即搜索 · Backspace 删搜索 · Tab 换角色（先保存）',
       'Root 模型由 OMP 原生 --model 选择；本候选池不切换当前 Root。',
       '缺证据：orbit model-evidence --file FILE|-；质量与隔离环境尚未探测。',
       ...(state.statusNote ? [`本角色诊断：${state.statusNote}`] : []),
       ...statusLines(),
     ];
-    return clip([...head, ...body, ...footer]);
+    const scopes = categories(state);
+    const scopeIndex = Math.max(0, scopes.findIndex(item => item.id === state.category));
+    const scope = scopes[scopeIndex];
+    const selected = [...state.selected];
+    const selectionRows = [
+      `已选清单 · ${state.label} · ${selected.length}`,
+      ...(selected.length ? selected.slice(0, listRows).map(id =>
+        `[x] ${id}${state.rowFor.get(id)?.available ? '' : ' · 当前不可选'}`) : ['（尚未选择模型）']),
+      ...(selected.length > listRows ? [`还有 ${selected.length - listRows} 项，切到“已选模型”查看`] : []),
+    ];
+    const scopeStart = Math.max(0, Math.min(scopeIndex - listRows + 1, scopes.length - listRows));
+    const sidebar = [state.focus === 'categories' ? '分类 · ↑/↓ 选择' : '分类 · ← 进入', ...scopes.slice(scopeStart, scopeStart + listRows).map(item =>
+      `${item.id === state.category ? (state.focus === 'categories' ? '>' : '•') : ' '} ${item.label}  ${item.count}`),
+      ...(scopeStart ? ['↑ 上方还有分类'] : []),
+      ...(scopeStart + listRows < scopes.length ? ['↓ 下方还有分类'] : [])];
+    const columns = (left, right, leftWidth, totalWidth) => Array.from({ length: Math.max(left.length, right.length) }, (_, i) => {
+      const label = fit(left[i] || '', leftWidth);
+      return label + ' '.repeat(Math.max(0, leftWidth - cells(label))) + ' │ ' + fit(right[i] || '', totalWidth - leftWidth - 3);
+    });
+    const browser = [`${scope.label} · ${rows.length} 项`, head.at(-1), '', ...body];
+    let panels;
+    if (width >= 150) {
+      const summaryWidth = Math.min(48, Math.floor(width * 0.3));
+      const browserWidth = width - summaryWidth - 3;
+      panels = columns(columns(sidebar, browser, 27, browserWidth), selectionRows, browserWidth, width);
+    } else if (width >= 80) {
+      panels = [...columns(sidebar, browser, 25, width), '', ...selectionRows];
+    } else {
+      panels = [`分类：${scope.label} · ← 分类 / → 模型`, ...browser, '', ...selectionRows];
+    }
+    // Long identity: the focused model is also shown separately, without
+    // sharing a column with badges; selected identities wrap below on narrow screens.
+    const detail = rows[state.cursor];
+    const wrap = text => {
+      const lines = []; let line = '';
+      for (const ch of text) {
+        if (cells(line + ch) > width) { lines.push(line); line = ''; }
+        line += ch;
+      }
+      if (line) lines.push(line);
+      return lines;
+    };
+    const details = detail ? wrap(`当前：${detail.id}` +
+      (detail.available ? '' : ' · 当前不可选，仅可移出') +
+      (detail.evidenceStatus ? ` · 证据 ${detail.evidenceStatus}` : '') +
+      (detail.overviewStatus ? ` · 概述 ${detail.overviewStatus}` : '')) : [];
+    if (width < 150) {
+      const start = panels.length - selectionRows.length;
+      panels.splice(start, selectionRows.length, ...selectionRows.flatMap(wrap));
+    }
+    return [...clip(head.slice(0, -1)).map((line, i) => i === 0 ? paint('accent', line) : line),
+      ...clip(panels).map(line => line.startsWith('>') || line.includes('│ >') ? paint('accent', line) : line), ...details,
+      ...clip([state.focus === 'categories' ? '↑/↓ 分类 · → / Enter 进入模型 · Esc 取消' : '↑/↓ 模型 · ← 分类 · Ctrl+↑/↓ 快速切分类', ...footer])];
   }
 
   // A refused commit keeps the user's selection and replaces the snapshot the
@@ -600,6 +678,7 @@ export function createModelPicker({ roles, role = null, commit, done, listRows =
     }
     if (Array.isArray(result.snapshot)) state.base = new Set(result.snapshot);
     if (typeof result.configured === 'boolean') state.configured = result.configured;
+    if (!categories(state).some(item => item.id === state.category)) state.category = 'all';
   }
 
   async function submit() {
@@ -650,8 +729,12 @@ export function createModelPicker({ roles, role = null, commit, done, listRows =
       return;
     }
     if (key === 'escape') return finish({ status: 'cancelled' });
-    if (key === 'enter') { void submit(); return; }
     const state = current();
+    if (key === 'categories') { state.focus = 'categories'; return; }
+    if (key === 'models' || (key === 'enter' && state.focus === 'categories')) {
+      state.focus = 'models'; return;
+    }
+    if (key === 'enter') { void submit(); return; }
     if (key === 'roleNext' || key === 'rolePrev') {
       // Switching pools never carries uncommitted edits: save or Esc first.
       if (pending(state)) { notice = `先保存或 Esc 取消 ${state.label}池的改动，再切换角色`; return; }
@@ -661,11 +744,19 @@ export function createModelPicker({ roles, role = null, commit, done, listRows =
       notice = null;
       return;
     }
-    if (key === 'backspace') { state.query = state.query.slice(0, -1); error = null; notice = null; clampCursor(); return; }
-    if (key.startsWith('text:')) {
-      if (state.query.length < PICKER_MAX_QUERY) { state.query += key.slice(5); error = null; notice = null; clampCursor(); }
+    if (key === 'categoryNext' || key === 'categoryPrev' || (state.focus === 'categories' && (key === 'up' || key === 'down'))) {
+      const scopes = categories(state);
+      const index = Math.max(0, scopes.findIndex(item => item.id === state.category));
+      state.category = scopes[(index + (key === 'categoryNext' || key === 'down' ? 1 : -1) + scopes.length) % scopes.length].id;
+      state.cursor = 0; state.scroll = 0; notice = null; error = null;
       return;
     }
+    if (key === 'backspace') { state.query = state.query.slice(0, -1); error = null; notice = null; clampCursor(); return; }
+    if (key.startsWith('text:')) {
+      if (state.query.length < PICKER_MAX_QUERY) { state.focus = 'models'; state.query += key.slice(5); error = null; notice = null; clampCursor(); }
+      return;
+    }
+    if (state.focus === 'categories') return;
     const rows = filtered();
     if (!rows.length) return;
     if (key === 'up' || key === 'down') {
@@ -699,8 +790,10 @@ export function decodePickerKey(data) {
     case '\x1b': case '\x03': return 'escape'; // bare Esc; ctrl+c cancels like Esc
     case '\x1b[A': case '\x1bOA': return 'up';
     case '\x1b[B': case '\x1bOB': return 'down';
-    case '\x1b[D': case '\x1bOD': return 'rolePrev';
-    case '\x1b[C': case '\x1bOC': return 'roleNext';
+    case '\x1b[D': case '\x1bOD': return 'categories';
+    case '\x1b[C': case '\x1bOC': return 'models';
+    case '\x1b[1;5A': return 'categoryPrev';
+    case '\x1b[1;5B': return 'categoryNext';
     case '\x1b[5~': return 'pageUp';
     case '\x1b[6~': return 'pageDown';
     default: break;
@@ -4207,7 +4300,7 @@ export function installOmpExtension(pi, sdk) {
           // `roleArg` skips the chooser; otherwise the role is chosen inside the
           // same overlay (one role per invocation = one atomic delta).
           outcome = await ctx.ui.custom((_tui, _theme, _keybindings, done) =>
-            createModelPicker({ roles: views.filter(view => view.ok), role: roleArg, done, commit: commitRoleDelta }));
+            createModelPicker({ roles: views.filter(view => view.ok), role: roleArg, done, commit: commitRoleDelta, theme: _theme }));
         } catch (error) {
           notify(`picker unavailable (${error?.message || error}); falling back to the text list`, 'warning');
         }

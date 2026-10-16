@@ -17,7 +17,10 @@ import { z } from 'zod';
 
 process.env.ORBIT_RUBY = process.env.ORBIT_RUBY || execSync('which ruby').toString().trim();
 delete process.env.TYPESAFE_API_KEY;
+const pickerTempDirs = [];
+process.on('exit', () => { for (const dir of pickerTempDirs) fsSync.rmSync(dir, { recursive: true, force: true }); });
 process.env.XDG_CONFIG_HOME = await fs.mkdtemp(path.join(os.tmpdir(), 'orbit-picker-xdg-'));
+pickerTempDirs.push(process.env.XDG_CONFIG_HOME);
 const CLI_ARGS = ['--disable-gems', path.resolve('scripts/orbit'), 'model-candidates'];
 const runCli = (...args) => JSON.parse(execFileSync(process.env.ORBIT_RUBY, [...CLI_ARGS, ...args], { encoding: 'utf8' }));
 const rolePool = role => runCli('list', '--role', role);
@@ -40,8 +43,8 @@ assert.equal(decodePickerKey('\r'), 'enter');
 assert.equal(decodePickerKey(' '), 'space');
 assert.equal(decodePickerKey('\t'), 'roleNext', 'tab switches the edited role');
 assert.equal(decodePickerKey('\x1b[Z'), 'rolePrev', 'shift+tab switches back');
-assert.equal(decodePickerKey('\x1b[C'), 'roleNext');
-assert.equal(decodePickerKey('\x1b[D'), 'rolePrev');
+assert.equal(decodePickerKey('\x1b[C'), 'models');
+assert.equal(decodePickerKey('\x1b[D'), 'categories');
 assert.equal(decodePickerKey('\x7f'), 'backspace');
 assert.equal(decodePickerKey('\x1b'), 'escape');
 assert.equal(decodePickerKey('\x03'), 'escape', 'ctrl+c cancels like Esc');
@@ -253,11 +256,58 @@ assert.equal(decodePickerKey(''), null);
   assert.deepEqual(commits, [{ role: 'checker', add: ['kimi-code/k3-256k'], remove: [], base: [] }]);
   assert.equal(outcome.role, 'checker');
 }
+// Categories restrict browsing, never the selected set or the role-scoped delta.
+{
+  const entries = [
+    { id: 'alpha/first', available: true },
+    { id: 'beta/second', available: true },
+    { id: 'retired/old', available: false },
+  ];
+  const commits = [];
+  const picker = createModelPicker({ roles: [roleView({ entries, snapshot: ['beta/second', 'retired/old'] })],
+    role: 'executor', commit: async delta => { commits.push(delta); return { ok: true }; }, done() {} });
+  const screen = () => picker.render(160).join('\n');
+  assert.match(screen(), /已选清单.*执行者.*2/);
+  assert.match(screen(), /alpha\s+1/);
+  picker.handleInput('\x1b[D'); // category focus
+  picker.handleInput('\x1b[B'); // selected scope
+  assert.doesNotMatch(screen(), /\[ \] alpha\/first/);
+  picker.handleInput('\x1b[B'); // alpha scope
+  picker.handleInput('\r'); // enter models, never commit
+  assert.equal(commits.length, 0);
+  assert.match(screen(), /> \[ \] alpha\/first/);
+  assert.match(screen(), /\[x\] beta\/second/, 'other-provider selection remains visible in its own panel');
+  assert.match(screen(), /retired\/old.*当前不可选/);
+  picker.handleInput(' ');
+  picker.handleInput('z');
+  assert.match(screen(), /无匹配模型/);
+  assert.match(screen(), /\[x\] alpha\/first/, 'filtering never hides the selected summary');
+  picker.handleInput('\r');
+  await tick();
+  assert.deepEqual(commits[0], { role: 'executor', add: ['alpha/first'], remove: [], base: ['beta/second', 'retired/old'] });
+}
+
+// A long pool remains inspectable via the selected scope; narrow views retain full identities.
+{
+  const entries = Array.from({ length: 24 }, (_, i) => ({ id: `provider-${i}/model-with-a-long-name-${i}`, available: true }));
+  const picker = createModelPicker({ roles: [roleView({ entries, snapshot: entries.map(e => e.id) })],
+    role: 'executor', commit: async () => ({ ok: true }), done() {}, listRows: 5 });
+  assert.match(picker.render(160).join('\n'), /还有 19 项，切到“已选模型”查看/);
+  picker.handleInput('\x1b[1;5B');
+  for (let i = 0; i < 23; i++) picker.handleInput('\x1b[B');
+  assert.match(picker.render(160).join('\n'), /> \[x\] provider-23\/model-with-a-long-name-23/);
+  const narrow = picker.render(40).join('\n');
+  assert.match(narrow, /分类：已选模型/);
+  assert.ok(narrow.replaceAll('\n', '').includes(entries[0].id), 'summary wraps identities instead of truncating them');
+  assert.ok(picker.render(40).every(line => [...line].length <= 40));
+}
+
 console.log('picker component flows: PASS');
 
 // --- Command bridge against the real CLI ----------------------------------
 const project = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), 'orbit-picker-cmd-')));
 const agentRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'orbit-picker-agents-'));
+pickerTempDirs.push(project, agentRoot);
 await fs.mkdir(path.join(agentRoot, 'agents'), { recursive: true });
 process.env.PI_CODING_AGENT_DIR = agentRoot;
 await fs.writeFile(path.join(agentRoot, 'models.yml'), `providers:
