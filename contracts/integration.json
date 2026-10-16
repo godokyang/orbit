@@ -1,6 +1,6 @@
 {
   "contract": "orbit-integration",
-  "version": "1.4",
+  "version": "1.5",
   "major": 1,
   "description": "Machine-readable form of contracts/integration.md. Versioned independently of the software version. Within one major version entries are only added, never changed or removed; a breaking change raises the major version and is named in the release notes. `orbit capabilities --json` serves `capabilities` from this file and the contract test reads `commands` and `status_fields` from it.",
   "status_values": [
@@ -36,7 +36,7 @@
       "stdout_fields": ["integration_contract.version", "integration_contract.major", "orbit.version", "capabilities"]
     },
     "start": {
-      "invocation": "orbit start --provider omp --project DIR --thread ID --socket PATH (--message-id ID | --prompt-file FILE|-) [--review-model MODEL] [--basis FILE]... [--external-ref REF]... [--resume-from TASK_DIRECTORY] [--allowed-model MODEL]...",
+      "invocation": "orbit start --provider omp --project DIR --thread ID --socket PATH (--message-id ID | --prompt-file FILE|-) [--review-model MODEL] [--basis FILE]... [--external-ref REF]... [--resume-from TASK_DIRECTORY] [--resume-wake] [--allowed-model MODEL]...",
       "stdout_fields": ["task_directory", "status"]
     },
     "status": {
@@ -80,6 +80,8 @@
     { "path": "requirement_coverage.items[].ref", "present": "when_reported" },
     { "path": "external_refs", "present": "when_provided" },
     { "path": "continuation.previous_task", "present": "when_resumed" },
+    {"path": "continuation.wake.status", "present": "when_wake_requested"},
+    {"path": "continuation.wake.message_id", "present": "when_wake_requested"},
     {"path": "revision", "present": "when_recorded"},
     {"path": "updated_at", "present": "when_recorded"},
     {"path": "attention.phase", "present": "status_projection"},
@@ -97,7 +99,12 @@
     {"path": "latest_check.models", "present": "after_completed_check"},
     {"path": "latest_check.input_current", "present": "after_completed_check"},
     {"path": "model_authorization.allowed_models", "present": "when_authorized_models"},
-    {"path": "model_authorization.auxiliary_judgments", "present": "when_authorized_models"}
+    {"path": "model_authorization.auxiliary_judgments", "present": "when_authorized_models"},
+    {"path": "session_binding.provider", "present": "always"},
+    {"path": "session_binding.session_id", "present": "always"},
+    {"path": "session_binding.session_file", "present": "always"},
+    {"path": "session_binding.launch_message_id", "present": "always"},
+    {"path": "session_binding.launch_message_source", "present": "always"}
   ],
   "capabilities": {
     "status_json": { "since": "1.0" },
@@ -128,6 +135,8 @@
     "status_revision": {"since": "1.3", "key": ["id", "revision"], "initial_revision": 1, "atomic_with_state": true, "read_changes_revision": false, "unchanged_tick_changes_revision": false, "legacy_missing": "unknown", "excludes": ["usage_at_any_depth", "next_check_at", "requirement_coverage.current", "requirement_coverage.ready", "requirement_coverage.gap"], "updated_at_format": "ISO-8601 UTC"},
     "status_attention": {"since": "1.3", "fields": ["phase", "needs_user"], "phases": ["starting", "implementing", "checking", "reworking", "stopping", "stopped", "needs_user", "failed", "unknown"], "needs_user_status": "needs_user", "needs_user_is_stopped_terminal": true, "unknown_phase": "unknown"},
     "status_latest_check": {"since": "1.3", "selection": "last_completed_in_checks_order", "includes_failed": true, "includes_stale": true, "models": "deduplicated_receipt_provider/model_array", "input_current": "input_digest_only", "no_completed_check": "omitted", "legacy_missing_identity": "scope.json_then_null", "stale_reasons": ["workspace", "artifact", "input", "host", "dispute"], "failure_kinds": ["auth_or_quota", "unavailable", "invalid_result"], "terminal_values": ["continue", "correct", "pause", "complete", "needs_user", "failed", "stale"]},
-    "model_authorization": {"since": "1.4", "start_argument": "--allowed-model", "session_environment_variable": "ORBIT_ALLOWED_MODELS", "environment_format": "nonempty_json_array", "identity": "exact_provider/model", "max_models": 64, "task_immutable": true, "resume_inherits": true, "resume_may_narrow": true, "fallback": "authorized_models_only", "exhausted": "blocked", "auxiliary_judgments": "disabled", "requires": "Agent.streamFn_and_ModelRegistry.resolver_and_getApiKey", "pre_task_calls": "requires_session_environment", "global_configuration_changed": false}
+    "model_authorization": {"since": "1.4", "start_argument": "--allowed-model", "session_environment_variable": "ORBIT_ALLOWED_MODELS", "environment_format": "nonempty_json_array", "identity": "exact_provider/model", "max_models": 64, "task_immutable": true, "resume_inherits": true, "resume_may_narrow": true, "fallback": "authorized_models_only", "exhausted": "blocked", "auxiliary_judgments": "disabled", "requires": "Agent.streamFn_and_ModelRegistry.resolver_and_getApiKey", "pre_task_calls": "requires_session_environment", "global_configuration_changed": false},
+    "session_binding": {"since": "1.5", "object": "session_binding", "fields": ["provider", "session_id", "session_file", "launch_message_id", "launch_message_source"], "launch_sources": ["native_user_message", "orbit_instruction"], "unknown_value": "null", "session_file": "host_reported_path_only", "launch_boundary_stable": true, "legacy_prompt_file_launch": "null", "status_projection_only": true, "export": "excluded"},
+    "resume_wake": {"since": "1.5", "start_argument": "--resume-wake", "requires": "resume_from", "default": false, "channel": "native_send_message_custom", "program_origin_only": true, "statuses": ["requested", "sent", "unconfirmed"], "status_field": "continuation.wake.status", "message_id_field": "continuation.wake.message_id", "sent_means": "native_ack_only", "attempt_persisted_before_send": true, "automatic_retry": false, "launch_boundary_unchanged": true}
   }
 }

@@ -11,7 +11,7 @@
 | 面向集成方的命令、字段、能力与合同版本 | [集成合同](../contracts/integration.md)、机器可读版 `contracts/integration.json`、[ADR-010](adr/010-integration-contract.md) |
 | OMP 单宿主协作决定 | [ADR-008](adr/008-omp-native-collaboration-base.md) |
 | 用户自选模型池决定 | [ADR-009](adr/009-user-selected-model-pool.md) |
-| Agent 自主判断与程序职责 | [ADR-011](adr/011-agent-autonomy-and-runtime-responsibility.md)；阶段一已实施，Loom 协同待用户通知 |
+| Agent 自主判断与程序职责 | [ADR-011](adr/011-agent-autonomy-and-runtime-responsibility.md)；阶段一与 Loom 协同的当前验证边界见交接 |
 | 当前阶段与待办 | [唯一总待办](plan/agent-autonomy-implementation.md) |
 | 当前交接 | [交接](plan/handoff.md) |
 | 当前限制与未测范围 | [未完成事项](plan/debt-ledger.md) |

@@ -416,6 +416,7 @@ module Orbit
         opts.on("--entry-file FILE") { |value| options[:entry_file] = value }
         opts.on("--takeover-file FILE") { |value| options[:takeover_file] = value }
         opts.on("--resume-from TASK_DIRECTORY") { |value| options[:resume_from] = value }
+        opts.on("--resume-wake") { options[:resume_wake] = true }
         opts.on("--allowed-model MODEL") { |value| (options[:allowed_models] ||= []) << value }
         opts.on("--external-ref REF") { |value| (options[:external_refs] ||= []) << value }
       end
@@ -425,6 +426,7 @@ module Orbit
       raise ArgumentError, "--socket is required" if options[:socket].to_s.empty?
       raise ArgumentError, "--check-in must be positive" unless options[:interval].positive?
       raise ArgumentError, "choose --message-id or --prompt-file" if options[:message_id] && options[:prompt_file]
+      raise ArgumentError, "--resume-wake requires --resume-from" if options[:resume_wake] && !options[:resume_from]
       allowed_models = ModelAuthorization.parse(options[:allowed_models])
       external_refs = TaskRecord.parse_external_refs(options[:external_refs])
       takeover = options[:takeover_file] ? TaskRecord.parse_takeover(read_input(options[:takeover_file])) : nil
@@ -485,6 +487,7 @@ module Orbit
           raise ArgumentError, "OMP authorization guard is unavailable" unless catalog["authorization_guard"] == true
           ModelAuthorization.check!(connection.configured_model, allowed_models)
         end
+        explicit_review_model = options[:model]
         options[:model], options[:selection], options[:jev_trace] = select_checker_model(
           options[:model], connection, options[:project], selection_instruction, allowed_models: allowed_models
         )
@@ -502,7 +505,9 @@ module Orbit
           TaskRecord.create(
             project_root: options[:project], instruction: instruction, source: source,
             connection: connection_record,
-            review: { "model" => options[:model], "interval_seconds" => options[:interval], "selection" => options[:selection] },
+            review: { "model" => options[:model], "interval_seconds" => options[:interval], "selection" => options[:selection] }.merge(
+              explicit_review_model ? { "explicit_model" => options[:model] } : {}
+            ),
             basis: options[:basis], estimate: options[:estimate], takeover: takeover,
             artifact_root: resumed && (resumed[:state].dig("workspace", "artifact_root") || resumed[:state].fetch("project_root")),
             external_refs: external_refs
@@ -526,6 +531,7 @@ module Orbit
                                   "artifact" => boundary.fetch("artifact"),
                                   "supervision_gap_recognized_as_controlled" => false,
                                   "imported_members_checks_usage" => false }
+        state["continuation"]["wake"] = { "status" => "requested", "message_id" => nil } if options[:resume_wake]
         state["basis"] = state["basis"].map.with_index do |item, index|
           item.merge("source" => resumed[:state].fetch("basis")[index].fetch("source"),
                      "inherited_from_task" => resumed[:state].fetch("id"))

@@ -190,6 +190,10 @@ module IntegrationContractTest
       status = orbit_json("status", dir, "--json")
       assert_declared_fields(status, "always", "when_provided")
       assert(status["external_refs"] == ["loom:p1/d2/run-3", "tracker#9"], "external references are returned verbatim, in order")
+      assert(status.dig("session_binding", "launch_message_id") == "m1" &&
+             status.dig("session_binding", "launch_message_source") == "native_user_message" &&
+             status.dig("session_binding", "session_file").nil?,
+             "a started task already names its own instruction message as the launch boundary")
 
       checker = Checker.new
       runtime = runtime_for(dir, project, checker)
@@ -229,6 +233,9 @@ module IntegrationContractTest
       assert_declared_fields(resumed_status, "always", "when_provided", "when_resumed")
       assert(resumed_status.dig("continuation", "previous_task") == status["id"] && resumed_status["external_refs"] == ["loom:p1/d2/run-4"],
              "resume links the stopped task and carries only the references passed again")
+      assert(resumed_status.dig("session_binding", "launch_message_id") == "m2" &&
+             resumed_status.dig("session_binding", "launch_message_source") == "native_user_message",
+             "a resumed task's launch boundary is its own native continuation message")
 
       archive = File.join(tmp, "evidence.tar.gz")
       exported = orbit_json("export", dir, "--output", archive)
@@ -373,6 +380,46 @@ module IntegrationContractTest
     end
   end
 
+  # Contract (1.5): session_binding exposes the real session identity, the
+  # host-reported transcript path and a stable launch boundary. Later
+  # corrections and the moving internal boundary never rewrite the launch,
+  # and a legacy prompt-file record reports unknown instead of borrowing its
+  # internal mirrors.
+  def session_binding_projects_identity_path_and_stable_launch
+    with_world do |_tmp, project|
+      dir = start(project, "m1").fetch("task_directory")
+      bound = orbit_json("status", dir, "--json").fetch("session_binding")
+      assert(bound == { "provider" => "omp", "session_id" => "root-session", "session_file" => nil,
+                        "launch_message_id" => "m1", "launch_message_source" => "native_user_message" },
+             "a native start binds the real session identity and its own instruction message")
+      assert(Orbit::StatusProjection::LAUNCH_SOURCES.include?(bound.fetch("launch_message_source")),
+             "the launch source is from the frozen vocabulary")
+
+      record = Orbit::TaskRecord.new(dir)
+      record.save(record.state.merge("sent_message_ids" => ["sent-1"], "last_user_message_id" => "sent-1"))
+      still = orbit_json("status", dir, "--json").fetch("session_binding")
+      assert(still["launch_message_id"] == "m1" && still["launch_message_source"] == "native_user_message",
+             "a later correction message never becomes the launch boundary")
+
+      session_file = File.join(project, ".omp", "sessions", "root-session.jsonl")
+      host = Host.new(File.realpath(project))
+      host.instance_variable_get(:@state)["session_file"] = session_file
+      Orbit::TaskRuntime.new(record: record, connection: host, checker: Checker.new).tick(now: Time.now.to_f)
+      backfilled = orbit_json("status", dir, "--json").fetch("session_binding")
+      assert(backfilled["session_file"] == session_file && backfilled["launch_message_id"] == "m1",
+             "the transcript path is only what the host reported; the tick backfills it verbatim")
+
+      legacy = record.state
+      legacy["instruction_source"] = { "kind" => "explicit_text", "file" => "prompt.md" }
+      legacy.delete("initial_delivery")
+      record.save(legacy)
+      unknown = orbit_json("status", dir, "--json").fetch("session_binding")
+      assert(unknown["launch_message_id"].nil? && unknown["launch_message_source"].nil? &&
+             unknown["session_file"] == session_file,
+             "a legacy prompt-file record reports no fabricated launch and keeps the observed path")
+    end
+  end
+
   # Contract: resume_from.from_status is the truth, and a bad reference never creates a task.
   def declared_limits_hold_at_the_boundary
     with_world do |_tmp, project|
@@ -385,8 +432,19 @@ module IntegrationContractTest
       resumed_state = Orbit::TaskRecord.new(resumed.fetch("task_directory")).state
       assert(resumed_state.dig("continuation", "previous_task") == state["id"],
              "a legacy needs_user record is resumed through a new task boundary")
+      assert(!resumed_state.fetch("continuation").key?("wake"), "ordinary resume does not request a wake")
       assert(CONTRACT.dig("capabilities", "resume_from", "from_status").include?("needs_user"),
              "the capability declares the additive legacy needs_user source")
+      code, _out, error = orbit("start", "--project", project, "--thread", "root-session",
+                                "--socket", File.join(project, "unused.sock"), "--resume-wake")
+      assert(code != 0 && error.include?("resume-from"), "wake without a continuation is refused")
+      wake = start(project, "m3", "--resume-from", record.path, "--resume-wake")
+      wake_status = orbit_json("status", wake.fetch("task_directory"), "--json")
+      assert(wake_status.dig("continuation", "wake") == { "status" => "requested", "message_id" => nil },
+             "requested wake has no fabricated native receipt")
+      assert(wake_status.dig("session_binding", "launch_message_id") == "m3",
+             "a requested program wake does not replace the native user boundary")
+      assert_declared_fields(wake_status, "when_wake_requested")
 
       before = Dir.glob(File.join(project, ".orbit/tasks/*")).length
       too_many = (1..17).flat_map { |index| ["--external-ref", "r#{index}"] }
@@ -407,6 +465,7 @@ IntegrationContractTest.status_by_external_ref_returns_a_fixed_tasks_array
 IntegrationContractTest.revision_advances_only_on_visible_change
 IntegrationContractTest.attention_maps_the_frozen_phase_enum
 IntegrationContractTest.latest_check_projects_the_last_finished_record
+IntegrationContractTest.session_binding_projects_identity_path_and_stable_launch
 IntegrationContractTest.declared_limits_hold_at_the_boundary
 puts "INTEGRATION_CONTRACT_TEST_PASS (fake caller and fake OMP host against the real CLI, runtime and stores)"
 

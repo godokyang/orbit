@@ -162,7 +162,9 @@ module Orbit
             sent = @connection.send_message("Orbit task: execute the following user-provided original instruction.\n\n" + @record.inputs(@state).fetch("instruction"))
             @state["sent_message_ids"] << sent.fetch("id")
             @state["last_user_message_id"] = sent.fetch("id")
+            @state["initial_delivery"] = { "id" => sent.fetch("id"), "at" => Time.now.utc.iso8601 }
           end
+          deliver_continuation_wake
           save
           settle_retained_check_workspaces
           until TERMINAL.include?(@state["status"])
@@ -225,6 +227,30 @@ module Orbit
         save
       end
       @state
+    end
+
+    # Persist the attempt before sending: an unknown receipt is never replayed.
+    # This program message does not replace the native user launch boundary.
+    def deliver_continuation_wake
+      wake = @state.dig("continuation", "wake")
+      return unless wake.is_a?(Hash) && wake["status"] == "requested"
+
+      wake["status"] = "unconfirmed"
+      save
+      begin
+        sent = @connection.send_message(
+          "Orbit task: external resume is in effect and new supervision is now established for this task. " \
+          "Continue the original approved requirement and its valid amendments. " \
+          "This is a program-origin Orbit notice, not a user message; it grants no new scope, model or stop authorization."
+        )
+        message_id = sent.fetch("id")
+      rescue StandardError => error
+        @record.event("continuation_wake_unconfirmed", "error" => error.message)
+        return
+      end
+      wake.merge!("status" => "sent", "message_id" => message_id)
+      @state["sent_message_ids"] << message_id
+      @record.event("continuation_wake_sent", "message_id" => message_id)
     end
 
     def request_stop

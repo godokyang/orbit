@@ -47,6 +47,7 @@ module Orbit
       state["attention"] = StatusProjection.attention(state)
       latest = StatusProjection.latest_check(record, state)
       state["latest_check"] = latest if latest
+      state["session_binding"] = StatusProjection.session_binding(state)
       ledger = ResourceCallLedger.new(task_path: record.path, task_id: state.fetch("id"))
       native_files = %w[native-model-calls.json native-model-call-gaps.jsonl].any? do |name|
         File.file?(File.join(record.path, name))

@@ -2574,6 +2574,80 @@ fixture do |root, record, _host, checker, _runtime|
   assert(!record.state.key?("runtime_pid"), "rejected runtime clears its PID")
 end
 
+# A program-delivered launch stays bound after subsequent user corrections.
+fixture do |root, record, host, checker, _runtime|
+  state = record.state
+  state["instruction_source"] = { "kind" => "explicit_text", "file" => "prompt.md" }
+  state["needs_initial_delivery"] = true
+  state["connection"]["thread_id"] = "existing-root"
+  record.save(state)
+  host.instance_variable_get(:@state)["session_file"] = File.join(root, "session.jsonl")
+  runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker)
+  worker = Thread.new { runtime.run }
+  begin
+    deadline = Time.now + 10
+    sleep 0.05 while record.state.dig("initial_delivery", "id").nil? && Time.now < deadline
+    assert(record.state.dig("initial_delivery", "id") == "sent-1",
+           "the delivered instruction has a durable launch identity")
+    projected = Orbit::TaskView.current_state(record).fetch("session_binding")
+    assert(projected == { "provider" => "omp", "session_id" => "existing-root",
+                          "session_file" => File.join(root, "session.jsonl"),
+                          "launch_message_id" => "sent-1", "launch_message_source" => "orbit_instruction" },
+           "public binding reports the actual host and instruction")
+  ensure
+    runtime.request_stop
+    worker.join
+  end
+  after = record.state
+  after["sent_message_ids"] << "sent-9"
+  after["last_user_message_id"] = "user-later"
+  record.save(after)
+  assert(Orbit::TaskView.current_state(record).dig("session_binding", "launch_message_id") == "sent-1",
+         "corrections never replace the launch boundary")
+end
+
+# Real runtime binding precedes a wake; unknown delivery is durable and not replayed.
+%w[ack failed already_attempted].each do |outcome|
+  fixture do |root, record, host, checker, _runtime|
+    state = record.state
+    state["connection"]["thread_id"] = "existing-root"
+    state["continuation"] = {
+      "previous_task" => "old-stopped",
+      "source" => { "kind" => "omp_user_message", "id" => "original" },
+      "wake" => { "status" => outcome == "already_attempted" ? "unconfirmed" : "requested", "message_id" => nil }
+    }
+    record.save(state)
+    bound = false
+    host.define_singleton_method(:bind_task) { |_path| bound = true }
+    host.working("restored session")
+    host.on_send = lambda do |_text|
+      assert(bound, "wake requires actual host binding")
+      assert(record.state.dig("continuation", "wake", "status") == "unconfirmed",
+             "delivery attempt is durable before native send")
+    end
+    host.fail_send_message = "receipt unavailable" if outcome == "failed"
+    runtime = Orbit::TaskRuntime.new(record: record, connection: host, checker: checker)
+    worker = Thread.new { runtime.run }
+    begin
+      deadline = Time.now + 10
+      sleep 0.05 while (!bound || record.state.dig("continuation", "wake", "status") == "requested") && Time.now < deadline
+    ensure
+      runtime.request_stop
+      worker.join
+    end
+    receipt = record.state.dig("continuation", "wake")
+    if outcome == "ack"
+      assert(receipt == { "status" => "sent", "message_id" => "sent-1" } && host.messages.length == 1,
+             "one accepted native message produces its exact receipt")
+    else
+      assert(receipt == { "status" => "unconfirmed", "message_id" => nil } && host.messages.empty?,
+             "unknown delivery is not fabricated or replayed")
+    end
+    assert(Orbit::TaskView.current_state(record).dig("session_binding", "launch_message_id") == "original",
+           "program wake preserves the real continuation user boundary")
+  end
+end
+
 # Rejecting attachment must not stop a session outside the target project.
 fixture do |_root, record, _host, checker, _runtime|
   state = record.state

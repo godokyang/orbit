@@ -1,6 +1,6 @@
 # Orbit 集成合同
 
-合同版本：1.4
+合同版本：1.5
 
 面向把 Orbit 当作外部执行与检查服务的集成方（例如 Loom）。本合同只冻结下面列出的命令、返回字段与结果 schema；这些之外的一切（包括 `status --json` 里的其他字段）都是 Orbit 内部实现，随时可变。产品语义以 [任务运行合同](task-runtime.md) 和 [检查结果 schema](check-result.schema.json) 为准，本文件与它们冲突时以它们为准并修正本文件。机器可读形式见 [integration.json](integration.json)，`orbit capabilities --json` 与契约测试都读取它，决定理由见 [ADR-010](../docs/adr/010-integration-contract.md)。
 
@@ -16,7 +16,7 @@
 `orbit capabilities --json` 只读、不连接会话、不调用模型、不读任务，返回：
 
 ```json
-{ "integration_contract": { "name": "orbit-integration", "version": "1.4", "major": 1 },
+{ "integration_contract": { "name": "orbit-integration", "version": "1.5", "major": 1 },
   "orbit": { "version": "<软件版本，仅供显示>" },
   "capabilities": { "<能力名>": { "since": "<引入该能力的合同版本>", "...": "该能力的限制" } } }
 ```
@@ -40,6 +40,8 @@
 | `status_attention` | 1.3 起：粗粒度 phase＋needs_user，码表冻结；needs_user 为已停止终态 |
 | `model_authorization` | 1.4 起：精确型号硬名单，任务内冻结、接续继承；调用前校验，池耗尽阻断，可选辅助判断关闭 |
 | `status_latest_check` | 1.3 起：最后完成检查，含失败/陈旧；白名单字段、模型回执去重数组与输入一致性 |
+| `session_binding` | 1.5 起：status 只读投影 `session_binding`——provider 会话身份、宿主报告的会话文件路径与稳定启动消息边界；未知为 null，不猜路径、不臆造旧记录启动边界（见 §4） |
+| `resume_wake` | 1.5 起：可选 `start --resume-wake`，须与 `--resume-from` 同用；绑定后投递程序来源的原生续接消息，回执见 §4 |
 
 ## 3. 命令与返回
 
@@ -57,7 +59,8 @@
 
 ## 4. `status --json` 冻结字段
 
-出现条件：`always` 总是存在；`when_provided` 仅在启动时提供过；`after_check` 在首个有效检查记录覆盖后出现；`when_reported` 仅当检查者为该项给出；`after_stop` 在停止流程开始并产生记录后出现；`when_resumed` 仅由 `--resume-from` 建立的任务。
+出现条件：`always` 总是存在（值本身可为 null 的字段在正文说明）；`when_provided` 仅在启动时提供过；`after_check` 在首个有效检查记录覆盖后出现；`when_reported` 仅当检查者为该项给出；`after_stop` 在停止流程开始并产生记录后出现；`when_resumed` 仅由 `--resume-from` 建立的任务。
+`when_wake_requested` 表示仅在接续启动时显式提供 `--resume-wake`。
 
 | 字段 | 出现 |
 | --- | --- |
@@ -68,6 +71,8 @@
 | `requirement_coverage.items[].ref` | when_reported |
 | `external_refs` | when_provided |
 | `continuation.previous_task` | when_resumed |
+| `continuation.wake.status`、`continuation.wake.message_id` | when_wake_requested |
+| `session_binding.provider`、`.session_id`、`.session_file`、`.launch_message_id`、`.launch_message_source` | always（未知值为 null，见下） |
 
 `status` 取值：`starting`、`running`、`complete`、`paused`、`needs_user`、`failed`、`stop_unconfirmed`；终态为除前两项外的其余五个。`complete` 的含义见任务运行合同（独立检查与实际收尾均通过），不等于集成方自己的业务完成。已确认停止只看 `stop_confirmation.confirmed == true`；`stop_unconfirmed` 与 `failed` 不保证资源已停止，调用方不得据此放行第二写者。
 
@@ -107,6 +112,23 @@ models 从该检查 usage.calls 的 model（缺时仅用该回执 requested_mode
 
 该投影不包含结论/错误/finding 文本、工作区路径、供应商响应或用量明细；已有 status 的内部字段仍不在本合同冻结范围内。
 
+### 会话绑定投影（1.5）
+
+`session_binding` 是 status 只读投影（单任务或 `tasks` 元素），不持久化；export 保留原始状态，不含该对象。五个键总是存在，未知值明确为 `null`，不猜路径、不臆造启动证据。
+
+- `provider`、`session_id`：任务建立时冻结的连接记录（`session_id` 是真实 OMP 会话 id，见 §9）；记录缺失时为 `null`。
+- `session_file`：宿主实际报告的 Root 会话转录文件路径——attach 时记录、之后 tick 补取，会话文件变化时更新为最新观测值；宿主未报告或旧记录缺失时为 `null`。Orbit 不定位、不猜测路径。
+- `launch_message_id` 与 `launch_message_source`：本任务监督起点的**稳定启动边界**，不随后续纠正、提醒或新的用户消息推进。取值优先级：程序投递的初始指令（`--prompt-file` 启动，attach 投递成功时由运行程序持久记录，来源 `orbit_instruction`）；接续任务的真实原生接续消息（§7）；否则创建时记录的原生启动消息；后两者来源为 `native_user_message`。全部缺失时二者为 `null`。旧版 `--prompt-file` 记录没有持久投递标记，launch 保持 `null`，不借 `sent_message_ids[0]` 等内部字段回填；旧版原生/接续任务按创建时记录的来源回读。
+- `launch_message_source` 只有 `native_user_message`（宿主会话中的真实原生用户消息）与 `orbit_instruction`（运行程序投递的初始指令消息）两个取值；未知为 `null`。
+- 内部字段 `last_user_message_id`（随后续真实用户消息推进）、`sent_message_ids`、`root_session_file` 含义不变；调用方需要稳定启动边界时必须使用 `launch_message_id`，不得用 `sent_message_ids[0]`（原生消息启动的任务上它是第一条纠正消息）或 `last_user_message_id`（它不是启动边界）。
+
+### 接续唤醒回执（1.5）
+
+`continuation.wake` 是可选 `--resume-wake` 的持久回执，export 原样保留；默认接续没有该键。`status` 为 `requested`（意图已记录，尚未尝试）、`unconfirmed`（投递已尝试，结果未知）或 `sent`（实际原生 custom message ACK）；`message_id` 仅在取得 ACK 后记录，否则为 `null`。
+
+运行时完成精确宿主绑定后，经既有 send_message 通道投递一次明确程序来源的续接消息，不冒充用户、不新增范围或型号授权。尝试先于发送持久化；状态离开 `requested` 后不自动重发。`sent` 不证明执行、采用或完成；失败不改变既有停止门。启动边界仍是 `session_binding` 中的真实原生接续用户消息，不是唤醒消息。
+
+
 ## 5. 引用字段（不透明，通用）
 
 **检查项引用 `ref`**：检查结果 schema 的每个覆盖项可带可选 `ref`（最多 200 字符，不含控制字符；空串或纯空白按未提供处理，不保存，`status` 中该项没有 `ref`）。检查者只在原要求、修订或依据本来就给该要求标了编号时逐字抄录，不得自编、规范化或推断；没有就省略。Orbit 原样保存并在 `requirement_coverage.items[].ref` 返回，不解释、不要求唯一、不要求与任何东西匹配（同一编号可对应多个覆盖项，也可没有）。其余不合规（超长、含控制字符、非字符串）与其他字段一样属于结果契约违规，检查结果被拒绝并走既有的检查失败路径；因此检查者不确定时应省略而不是猜写。
@@ -122,6 +144,7 @@ models 从该检查 usage.calls 的 model（缺时仅用该回执 requested_mode
 - 只接续同一 Root 会话、同一项目、已确认停止的 `paused` 或 `needs_user` 任务；两者的旧终态含义保持不变，由 `from_status` 明确声明。
 - 需要一条**真实的原生用户消息**（`--message-id`），来源于同一 Root 会话；调用方无法用外部文本伪造。外部系统收到的用户答复要接续，必须先以原生用户消息进入同一 Root 会话。
 - 复制原要求与有效修订，建立新的监督边界；旧任务终态、成员、检查与用量不迁入，监督空档不被追认。
+- 可选 `--resume-wake` 在新任务绑定后投递程序唤醒，默认关闭；不改变上述续接前提，回执见 §4。
 
 ## 8. 契约测试
 
@@ -162,3 +185,5 @@ Root 原生调用、原生成员派发/实际请求、检查者/复核者在调�
 
 - 1.4：可选严格模型名单、会话调用前授权上限与冻结任务字段；普通偏好池及既有 status 取值不变。
 - 1.4（追加能力）：`resume_from.from_status` 增加已确认停止的 `needs_user`；旧记录仍是已停止终态，续接建立新任务边界且不恢复旧成员、检查或用量。
+- 1.5：只读 `session_binding` 投影（provider/session_id/session_file/launch_message_id/launch_message_source）：稳定启动边界与宿主报告的会话文件路径，缺失为 null；prompt-file 启动的投递边界由运行程序在 attach 投递成功时持久记录，旧记录不借内部字段回填；既有内部字段含义与 status 取值不变。
+- 1.5（追加）：可选 `resume_wake` 与 `continuation.wake` 回执，绑定后投递一次程序来源续接消息；默认行为、启动边界及既有状态取值不变。

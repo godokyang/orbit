@@ -4,16 +4,20 @@ require "json"
 
 module Orbit
   # Read-only outward projections shared by the status surface and the
-  # runtime: attention (a frozen phase enum) and latest_check (the last
-  # FINISHED check record, failures and stale records included). The runtime's
-  # check identity fallback (checks/<n>/scope.json) lives here as well so
-  # check_history and latest_check always agree. Nothing in this module writes
-  # task state; the runtime remains the sole writer and these fields are never
-  # persisted (export keeps the raw state without them).
+  # runtime: attention (a frozen phase enum), latest_check (the last FINISHED
+  # check record, failures and stale records included) and session_binding
+  # (the public session/launch boundary). The runtime's check identity
+  # fallback (checks/<n>/scope.json) lives here as well so check_history and
+  # latest_check always agree. Nothing in this module writes task state; the
+  # runtime remains the sole writer and these fields are never persisted
+  # (export keeps the raw state without them).
   module StatusProjection
     # Frozen for the integration contract; callers treat anything outside
     # this list as unknown.
     ATTENTION_PHASES = %w[starting implementing checking reworking stopping stopped needs_user failed unknown].freeze
+    # Frozen launch-source vocabulary for the integration contract; callers
+    # treat anything outside this list as unknown.
+    LAUNCH_SOURCES = %w[native_user_message orbit_instruction].freeze
 
     module_function
 
@@ -45,6 +49,48 @@ module Orbit
               else "unknown"
               end
       { "phase" => phase, "needs_user" => status == "needs_user" }
+    end
+
+    # Read-only public session binding (integration contract 1.5): the real
+    # provider session identity, the host-reported transcript path and the
+    # stable launch message boundary — the one message that started this
+    # task's supervision, never advanced by later corrections, reminders or
+    # newer user messages. Unknown facts are null, never guessed: the
+    # transcript path is only what the host actually reported (attach records
+    # it, tick backfills it), and a legacy prompt-file record has no durable
+    # delivery marker, so its launch stays unknown instead of borrowing
+    # sent_message_ids[0] or the internal moving boundary.
+    def session_binding(state)
+      connection = state["connection"].is_a?(Hash) ? state["connection"] : {}
+      launch =
+        if nonempty_string?(state.dig("initial_delivery", "id"))
+          [state.dig("initial_delivery", "id"), "orbit_instruction"]
+        elsif user_message_source?(state.dig("continuation", "source"))
+          [state.dig("continuation", "source", "id"), "native_user_message"]
+        elsif user_message_source?(state["instruction_source"])
+          [state["instruction_source"]["id"], "native_user_message"]
+        end
+      {
+        "provider" => nonempty_string?(connection["provider"]) ? connection["provider"] : nil,
+        "session_id" => nonempty_string?(connection["thread_id"]) ? connection["thread_id"] : nil,
+        "session_file" => nonempty_string?(state["root_session_file"]) ? state["root_session_file"] : nil,
+        "launch_message_id" => launch&.first,
+        "launch_message_source" => launch&.last
+      }
+    end
+
+    # A durable creation-time source naming a real native user message in the
+    # host session ("omp_user_message" today; the runtime tests' generic
+    # "native_user_message" shape shares the suffix). An explicit_text source
+    # carries a file, not a message id — its boundary is only the program's
+    # recorded delivery, never an internal mirror field.
+    def user_message_source?(source)
+      source.is_a?(Hash) && nonempty_string?(source["id"]) &&
+        source["kind"].is_a?(String) && source["kind"].end_with?("_user_message")
+    end
+
+    def nonempty_string?(value)
+      value.is_a?(String) && !value.empty?
     end
 
     # The last checks[] entry that actually finished (failed and stale
