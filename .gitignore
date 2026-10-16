@@ -22,3 +22,6 @@ node_modules/
 /.opencode/
 /.kimi/
 /skills-lock.json
+
+# 本机临时评审副本，不随产品源码提交。
+/review-evidence/
